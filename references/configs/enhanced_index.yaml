@@ -1,0 +1,70 @@
+# Enhanced index construction 실행 설정입니다.
+# 역할: BM + alpha raw target recipe와 feasible portfolio 구현 method를 관리합니다.
+# 주의: single-name cap의 단일 출처는 configs/constraints.yaml입니다.
+# ETF/cash buffer와 legacy sleeve 값은 method별 config가 소유합니다.
+#
+# raw_target.alpha_multiplier(mu)는 PRD-5 ETF-frame에서 combined alpha가 direct stock과
+# financing ETF에 미치는 scale입니다. Buffer band/physical bound는 같은 mu로 canonical
+# cash-frame spec에서 유도해 두 frame이 같은 net_exposure 사건에 같은 비율로 반응합니다.
+
+raw_target:
+  recipe: benchmark_plus_scaled_alpha
+  # ETF base 30%에서 canonical net_exposure [-1, 1]을 physical [20%, 40%] 안에
+  # 담는 production scale입니다. Band 밖에서는 side-specific exponential kernel이
+  # 원인이 된 side만 줄이므로 이 값이 hard linear clamp로 동작하지 않습니다.
+  alpha_multiplier: 0.1
+
+methods:
+  active:
+    # 첫 번째 = default (select_default_enhanced_index_method). Flexible alpha budget을
+    # gross renormalize하지 않고 ETF financing + feasibility residual로 보존합니다.
+    - etf_residual_intent_preserving
+    # --- 아래 method는 comparison/regression 전용입니다. Production alpha_multiplier=0.10을
+    # --- 공유하므로 gross-normalized alpha transfer 실험에서 쓰려면 실험이 scale을 명시해야 합니다.
+    - long_only_normalized_alpha
+    # --- 아래 4개 method는 현재 production 경로(etf_residual_intent_preserving)와 무관합니다.
+    # --- PRD-4 comparison/regression 전용으로만 유지되며(AGENTS.md 삭제 금지 원칙), 이번
+    # --- buffer_budget calibration 논의의 대상이 아닙니다. 나중에 한꺼번에 정리 예정.
+    - fixed_etf_cash_active_stock
+    # self-financing(Σa≈0) 요구 버전. cash-financing 도입 전 구현이며 비교용으로 유지합니다.
+    - fixed_etf_active_stock
+    # 아래 둘은 REPLACEMENT_TARGET interim 구현이며 비교/regression 용도로만 유지합니다.
+    - dynamic_passive_direct_stock
+    - fixed_passive_budget
+
+  long_only_normalized_alpha:
+    # PRD-5가 금지하는 downstream gross 복원/stock redistribution과의 비교 전용입니다.
+    # Production default로 선택하지 않습니다.
+    target_alpha_gross: 1.0
+
+  etf_residual_intent_preserving:
+    buffer_budget:
+      # base만 여기서 정합니다 - frame 고유 선택(alpha와 무관하게 평소 ETF 비중)이라
+      # canonical(cash frame)과 별개입니다.
+      #
+      # band_lower/band_upper/physical_lower/physical_upper/lower_softening_scale/
+      # upper_softening_scale은 여기 적지 않습니다 - configs/ensemble.yaml
+      # cash_frame.buffer_budget(canonical, mu=1.0 정의)에서 raw_target.alpha_multiplier를
+      # 곱해 코드가 유도합니다(§7.4.2 공식,
+      # `portfolio/buffer_budget.py`의 `derive_buffer_budget_spec`,
+      # `EtfResidualIntentPreservingMethod.from_config`가 호출). 여기 band/physical 숫자를
+      # 다시 적으면 canonical spec과 조용히 어긋날 수 있어 스키마에서 아예 막았습니다
+      # (`read_buffer_budget_base`가 `base` 외 key를 거부합니다).
+      base: 0.30
+
+  # --- 아래 3개 method 전체가 PRD-4 comparison/regression 전용입니다(AGENTS.md 삭제 금지 원칙).
+  # --- 현재 buffer_budget calibration 논의와 무관하며, 값도 이번 재계산에 포함하지 않았습니다.
+  fixed_etf_cash_active_stock:
+    etf_sleeve_weight: 0.20
+    cash_sleeve_weight: 0.10
+
+  fixed_etf_active_stock:
+    etf_sleeve_weight: 0.20
+
+  dynamic_passive_direct_stock:
+    base_single_name_cap: 0.10
+    passive_sleeve_cap: 1.0
+
+  fixed_passive_budget:
+    passive_sleeve_weight: 0.50
+    base_single_name_cap: 0.10

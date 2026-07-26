@@ -1,0 +1,25 @@
+# Enhanced index constraint 설정입니다.
+# 역할: direct stock single-name cap과 turnover constraint를 관리합니다.
+# 소비처: kwam_enhanced_index.portfolio.limits
+# ETF/cash buffer와 legacy sleeve 값은 configs/enhanced_index.yaml로 이동했습니다.
+# turnover는 아직 loop 밖 batch solve가 이전 보유를 모르므로 diagnostic 전용이며
+# closed-loop EnhancedIndexOptimizer 통합 전까지는 코드에서 소비하지 않습니다
+# (docs/vibe/enhanced-index-research.md 참고).
+
+single_name:
+  # 책임: direct stock NAV 기준 동일종목 편입비중 상한을 켜고 끕니다.
+  enabled: true
+  # mode 후보:
+  #   max_of_base_and_benchmark : cap_i = max(base_limit, BM weight)
+  #   benchmark_multiple        : cap_i = benchmark_multiple * BM weight
+  #   max_of_base_and_multiple  : cap_i = max(base_limit, benchmark_multiple * BM weight)
+  mode: max_of_base_and_benchmark
+  base_limit: 0.10
+  benchmark_multiple: 2.0
+
+turnover:
+  # 책임: 리밸런싱별 회전율 제한을 켜고 끕니다. 현재는 diagnostic 전용이며 미소비.
+  enabled: false
+  limit:
+
+

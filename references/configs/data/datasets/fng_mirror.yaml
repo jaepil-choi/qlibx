@@ -1,0 +1,374 @@
+datasets:
+  # data/DW/dw_fng_mirror의 local parquet source를 영문 logical schema로 노출한다.
+  # mirror parquet은 Oracle 원형을 보존하기 위해 string schema로 저장되므로, 여기서
+  # date/numeric dtype을 명시적으로 변환한다. 원천 key는 mirror job과 metadata cache의
+  # NOT NULL column 계약을 따른다.
+
+  fng_daily_consensus:
+    kind: table
+    sources: [fng_daily_consensus]
+    query: |
+      select
+        strptime(trim("일자"), '%Y%m%d')::date as date,
+        -- 보고서구분은 local mirror에서 B/D가 관측되지만 현재 metadata cache와
+        -- repo에는 codebook이 없다. 아래 settlement_type의 B/D convention과도 다른
+        -- column이므로 의미를 옮겨 붙이지 않고 raw code를 그대로 노출한다.
+        trim("보고서구분") as report_type,
+        trim("기업코드") as ticker,
+        strptime(trim("결산년월"), '%Y%m')::date as fiscal_period,
+        -- FNG 재무제표에서 검증된 결산구분 convention은 1~4=분기 standalone,
+        -- A~D=Q1/H1/Q1~Q3/FY 누적이다. 이 consensus mirror에는 1~4/D가 관측되지만
+        -- table별 codebook은 없으므로 WHERE를 두지 않고 raw code를 모두 보존한다.
+        trim("결산구분") as settlement_type,
+        cast(nullif(replace(trim("매출액"), ',', ''), '') as double) as sales,
+        cast(nullif(replace(trim("영업이익"), ',', ''), '') as double) as operating_income,
+        cast(nullif(replace(trim("조정영업이익"), ',', ''), '') as double) as adjusted_operating_income,
+        cast(nullif(replace(trim("순부채"), ',', ''), '') as double) as net_debt,
+        cast(nullif(replace(trim("순이익"), ',', ''), '') as double) as net_income,
+        cast(nullif(replace(trim("지배주주순이익"), ',', ''), '') as double) as controlling_net_income
+      from fng_daily_consensus
+
+  fng_valuation:
+    kind: table
+    sources: [fng_valuation]
+    query: |
+      select
+        strptime(trim("일자"), '%Y%m%d')::date as date,
+        trim("종목약코드") as ticker,
+        cast(nullif(replace(trim("베타"), ',', ''), '') as double) as beta,
+        -- FY1/FY2는 첫 번째/두 번째 추정 회계연도, 12MFWD는 12개월 forward다.
+        -- IF suffix의 정확한 산식/대상은 codebook에서 확인되지 않아 raw suffix를
+        -- dataset 이름에 남기며, non-IF field의 대체값으로 사용하지 않는다.
+        cast(nullif(replace(trim("FORWARD_EPS"), ',', ''), '') as double) as forward_eps,
+        cast(nullif(replace(trim("FORWARD_PER"), ',', ''), '') as double) as forward_per,
+        cast(nullif(replace(trim("FORWARD_PERIF"), ',', ''), '') as double) as forward_per_if,
+        cast(nullif(replace(trim("BPS"), ',', ''), '') as double) as bps,
+        cast(nullif(replace(trim("PBR"), ',', ''), '') as double) as pbr,
+        cast(nullif(replace(trim("추정BPS"), ',', ''), '') as double) as estimated_bps,
+        cast(nullif(replace(trim("추정PBR"), ',', ''), '') as double) as estimated_pbr,
+        cast(nullif(replace(trim("배당수익율"), ',', ''), '') as double) as dividend_yield_pct,
+        cast(nullif(replace(trim("EV_EBITDA"), ',', ''), '') as double) as ev_ebitda,
+        cast(nullif(replace(trim("순이익FY1"), ',', ''), '') as double) as net_income_fy1,
+        cast(nullif(replace(trim("순이익FY1IF"), ',', ''), '') as double) as net_income_fy1_if,
+        cast(nullif(replace(trim("순이익FY2"), ',', ''), '') as double) as net_income_fy2,
+        cast(nullif(replace(trim("순이익FY2IF"), ',', ''), '') as double) as net_income_fy2_if,
+        cast(nullif(replace(trim("순이익12MFWD"), ',', ''), '') as double) as net_income_12m_forward,
+        cast(nullif(replace(trim("순이익12MFWDIF"), ',', ''), '') as double) as net_income_12m_forward_if
+      from fng_valuation
+
+  fng_free_float_ratio:
+    kind: table
+    sources: [fng_free_float_ratio]
+    query: |
+      select
+        strptime(trim("적용일자"), '%Y%m%d')::date as effective_date,
+        trim("종목약코드") as ticker,
+        case
+          -- source의 string sentinel None은 결측으로, YYYYMM은 해당 월 1일로
+          -- 정규화한다. 그 외 값은 metadata 계약인 YYYYMMDD로 해석한다.
+          when trim("기준일자") = 'None' then null
+          when regexp_full_match(trim("기준일자"), '[0-9]{6}')
+            then strptime(trim("기준일자"), '%Y%m')::date
+          else strptime(trim("기준일자"), '%Y%m%d')::date
+        end as reference_date,
+        cast(nullif(replace(trim("비유동주식수"), ',', ''), '') as double) as non_free_float_shares,
+        cast(nullif(replace(trim("보통주식지분"), ',', ''), '') as double) as common_share_ratio_pct
+      from fng_free_float_ratio
+
+  # 개인정보가 있는 성명 column은 logical dataset에서 제외한다. 원천 relation key는
+  # ticker, report_month, sequence이며 비율/주식수와 관계 category만 노출한다.
+  # 주주구분 10/20/30/40/50/90의 codebook은 확인되지 않았다. 따라서 shareholder_type은
+  # raw code로 유지하고, 사람이 읽을 수 있는 relationship을 함께 노출한다.
+  fng_major_shareholder_snapshot:
+    kind: table
+    sources: [fng_major_shareholders]
+    query: |
+      select
+        trim("기업코드") as ticker,
+        strptime(trim("회계년월"), '%Y%m')::date as report_month,
+        cast(trim("SEQ") as integer) as sequence,
+        nullif(trim("주주구분"), '') as shareholder_type,
+        nullif(trim("관계"), '') as relationship,
+        cast(nullif(replace(trim("보통주식수"), ',', ''), '') as double) as common_shares,
+        cast(nullif(replace(trim("보통주식비율"), ',', ''), '') as double) as common_share_pct,
+        cast(nullif(replace(trim("우선주식수"), ',', ''), '') as double) as preferred_shares,
+        cast(nullif(replace(trim("우선주식비율"), ',', ''), '') as double) as preferred_share_pct
+      from fng_major_shareholders
+
+  # 성명, 생년월일, 학력, 경력 text는 직접 식별 정보이므로 logical dataset에서 제외한다.
+  # 구분 10/20과 직명코드의 codebook은 확인되지 않았다. executive_type/title_code는
+  # raw code로 유지하고, 해석 가능한 source 직명 text를 title로 함께 노출한다.
+  fng_executive_snapshot:
+    kind: table
+    sources: [fng_executive_info]
+    query: |
+      select
+        trim("기업코드") as ticker,
+        strptime(trim("회계년월"), '%Y%m')::date as report_month,
+        cast(trim("SEQ") as integer) as sequence,
+        nullif(trim("구분"), '') as executive_type,
+        nullif(trim("직명코드"), '') as title_code,
+        nullif(trim("직명"), '') as title,
+        cast(nullif(replace(trim("소유보통주수"), ',', ''), '') as double) as owned_common_shares,
+        cast(nullif(replace(trim("소유우선주수"), ',', ''), '') as double) as owned_preferred_shares
+      from fng_executive_info
+
+  fng_calendar:
+    kind: table
+    sources: [fng_calendar]
+    query: |
+      select
+        strptime(trim("일자"), '%Y%m%d')::date as date,
+        strptime(nullif(trim("전영업일"), ''), '%Y%m%d')::date as previous_business_date,
+        -- 요일구분 codebook은 확인되지 않아 raw code를 유지한다.
+        nullif(trim("요일구분"), '') as weekday_code,
+        -- 각 개장구분은 source code 1만 개장일 true로 변환한다(0은 false).
+        trim("주식개장구분") = '1' as is_stock_market_open,
+        trim("채권개장구분") = '1' as is_bond_market_open,
+        trim("미국개장구분") = '1' as is_us_market_open,
+        cast(nullif(trim("총일차"), '') as integer) as cumulative_day_number,
+        cast(nullif(trim("총주차"), '') as integer) as cumulative_week_number,
+        -- source의 Y/N flag에서 Y만 true로 변환한다.
+        trim("휴일여부") = 'Y' as is_holiday,
+        trim("월말여부") = 'Y' as is_month_end
+      from fng_calendar
+
+  # DW_FNG_벨류에이션은 date/ticker unique key이므로 모든 scalar field를 subscription
+  # strategy가 바로 사용할 수 있는 sparse-free daily matrix로 함께 노출한다.
+  # 아래 query에는 WHERE가 없으므로 종목/기간/value 부호를 임의로 필터하지 않는다.
+  fng_valuation_beta:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("베타"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_forward_eps:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("FORWARD_EPS"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_forward_per:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("FORWARD_PER"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_forward_per_if:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("FORWARD_PERIF"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_bps:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("BPS"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_pbr:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("PBR"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_estimated_bps:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("추정BPS"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_estimated_pbr:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("추정PBR"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_dividend_yield_pct:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("배당수익율"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_ev_ebitda:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("EV_EBITDA"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_net_income_fy1:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("순이익FY1"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_net_income_fy1_if:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("순이익FY1IF"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_net_income_fy2:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("순이익FY2"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_net_income_fy2_if:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("순이익FY2IF"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_net_income_12m_forward:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("순이익12MFWD"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_valuation_net_income_12m_forward_if:
+    kind: matrix
+    sources: [fng_valuation]
+    query: |
+      select strptime(trim("일자"), '%Y%m%d')::date as date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("순이익12MFWDIF"), ',', ''), '') as double) as value
+      from fng_valuation
+    index: date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  # 적용일자 event matrix다. daily 사용 시 DataFeed에서 latest available row를 명시적으로
+  # 구독해야 하며, 보통주식지분의 source semantic은 전략 승격 전 별도 검증한다.
+  # 아래 query에는 WHERE가 없으므로 event와 값의 부호/크기를 임의로 필터하지 않는다.
+  fng_non_free_float_shares:
+    kind: matrix
+    sources: [fng_free_float_ratio]
+    query: |
+      select strptime(trim("적용일자"), '%Y%m%d')::date as effective_date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("비유동주식수"), ',', ''), '') as double) as value
+      from fng_free_float_ratio
+    index: effective_date
+    columns: ticker
+    values: value
+    dtype: float64
+
+  fng_common_share_ratio_pct:
+    kind: matrix
+    sources: [fng_free_float_ratio]
+    query: |
+      select strptime(trim("적용일자"), '%Y%m%d')::date as effective_date,
+             trim("종목약코드") as ticker,
+             cast(nullif(replace(trim("보통주식지분"), ',', ''), '') as double) as value
+      from fng_free_float_ratio
+    index: effective_date
+    columns: ticker
+    values: value
+    dtype: float64

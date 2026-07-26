@@ -1,0 +1,26 @@
+# 1단계 파라미터 탐색 설정의 자리입니다.
+# 역할: 노트북 또는 실행 스크립트에서 반복 실험할 후보군을 한곳에 모읍니다.
+
+peer_group_levels:
+  - industry_code
+
+weighting_methods:
+  - ew
+  - vw
+
+signal_lags:
+  - 1
+  - 2
+  - 5
+
+lambda_values:
+  - 0.02
+  - 0.05
+  - 0.10
+
+long_weight_sums:
+  - 1.0
+  - 2.0
+
+short_weight_sums:
+  - 1.0

@@ -1,0 +1,301 @@
+datasets:
+  base_universe_inputs:
+    kind: table
+    sources:
+      - adjusted_prices
+      - k200_members
+    query: |
+      select
+        k.date,
+        k.ticker,
+        k.is_k200_member,
+        p.adj_close,
+        p.market_cap,
+        p.trade_volume,
+        p.tx_amount,
+        p.is_trading_halt,
+        p.is_admin_issue
+      from k200_members k
+      inner join adjusted_prices p
+        on k.date = p.date
+       and k.ticker = p.ticker
+
+  adjusted_close:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, adj_close
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: adj_close
+    dtype: float64
+
+  execution_base_price:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, "기준가" as execution_base_price
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: execution_base_price
+    dtype: float64
+
+  execution_close_price:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, "종가" as execution_close_price
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: execution_close_price
+    dtype: float64
+
+  quantity_adjustment_factor:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, "수정계수" as quantity_adjustment_factor
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: quantity_adjustment_factor
+    dtype: float64
+
+  adjusted_open:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, adj_open
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: adj_open
+    dtype: float64
+
+  adjusted_high:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, adj_high
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: adj_high
+    dtype: float64
+
+  adjusted_low:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, adj_low
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: adj_low
+    dtype: float64
+
+  returns:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select
+        date,
+        ticker,
+        adj_close / lag(adj_close) over (
+          partition by ticker
+          order by date
+        ) - 1.0 as returns
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: returns
+    dtype: float64
+
+  # overnight gap return: (t open - (t-1) close) / (t-1) close. 장 시작 전 발생한
+  # news(shock)에 대한 종목의 반응 크기로 쓴다 (processing/news_shock_clustering.py).
+
+  open_close_gap_return:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select
+        date,
+        ticker,
+        adj_open / lag(adj_close) over (
+          partition by ticker
+          order by date
+        ) - 1.0 as gap_return
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: gap_return
+    dtype: float64
+
+  market_cap:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, market_cap
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: market_cap
+    dtype: float64
+
+  tx_amount:
+    kind: matrix
+    sources:
+      - adjusted_prices
+    query: |
+      select date, ticker, tx_amount
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: tx_amount
+    dtype: float64
+
+  index_weight:
+    kind: matrix
+    sources:
+      - k200_members
+    query: |
+      select date, ticker, index_weight
+      from k200_members
+    index: date
+    columns: ticker
+    values: index_weight
+    dtype: float64
+
+  ticker_names:
+    kind: table
+    sources:
+      - k200_members
+    query: |
+      select
+        ticker,
+        trim(regexp_replace(trim(ticker_name), '보통주$', '')) as ticker_name
+      from (
+        select
+          ticker,
+          ticker_name,
+          row_number() over (partition by ticker order by date desc) as rn
+        from k200_members
+      )
+      where rn = 1
+
+  industry_code:
+    kind: matrix
+    sources:
+      - k200_members
+      - sector_classification
+    query: |
+      select
+        k.date,
+        k.ticker,
+        coalesce(latest.industry_code, earliest.industry_code) as industry_code
+      from k200_members k
+      left join lateral (
+        select s.industry_code
+        from sector_classification s
+        where s.ticker = k.ticker
+          and s.date <= k.date
+          and s.industry_code is not null
+        order by s.date desc
+        limit 1
+      ) latest on true
+      left join lateral (
+        select s.industry_code
+        from sector_classification s
+        where s.ticker = k.ticker
+          and s.industry_code is not null
+        order by s.date asc
+        limit 1
+      ) earliest on true
+    index: date
+    columns: ticker
+    values: industry_code
+    dtype: Int64
+
+  # correlation clustering 기반 peer group. processing/processor.py가 raw
+  # clustering 결과를 processing/cluster_confidence.py로 후처리(min member 수,
+  # biggest cluster 제외, silhouette z-score threshold)한 confident cluster
+  # 배정만 data/preprocessed/corr_clusters.parquet에 저장하며, 여기서는 그 결과를
+  # 그대로 date x ticker matrix로 노출한다. industry_code와 마찬가지로 날짜별로
+  # label 없는(NaN) 종목이 존재할 수 있다.
+
+  cluster_label:
+    kind: matrix
+    sources:
+      - corr_clusters
+    query: |
+      select date, ticker, cluster_label
+      from corr_clusters
+    index: date
+    columns: ticker
+    values: cluster_label
+    dtype: Int64
+
+  # fundamental factor strategy(size/value/momentum/quality/asset-growth)의 alpha-only
+  # closed-loop backtest 결과다. scripts/save_factor_returns.py가 각 factor sleeve의
+  # dollar-neutral long-short factor return을 date/factor_name/factor_return long tidy
+  # panel로 data/preprocessed/factor_returns.parquet에 저장하며, 여기서는 그 결과를
+  # date x factor_name matrix로 노출해 다른 전략이 그대로 구독할 수 있게 한다.
+
+  factor_returns:
+    kind: matrix
+    sources:
+      - factor_returns
+    query: |
+      select date, factor_name, factor_return
+      from factor_returns
+    index: date
+    columns: factor_name
+    values: factor_return
+    dtype: float64
+
+  industry_mapping:
+    kind: table
+    sources:
+      - industry_mapping
+    query: |
+      select
+        industry_code,
+        sector_code,
+        industry_group_code,
+        sector_name,
+        industry_group_name,
+        industry_name
+      from industry_mapping
+
+  # Financial datasets intentionally apply a hard-coded 3 months fiscal
+  # availability lag to avoid look-ahead bias. Annual reports are due within
+  # 90 days and quarterly reports within 45 days, so this lag is conservative
+  # enough for strategy decision dates.
+  # 아래 financial raw item matrix는 FNG 재무제표 source account를 의미 이름으로 노출한다.
+  # 연결(consolidated)은 400..., 별도(separate)는 100... account code를 사용한다.
+  # - total_assets: 자산(*) = 4001110000 / 1001110000
+  # - total_liabilities: 부채(*) = 4001140000 / 1001140000
+  # - total_equity: 자본(*) = 4001160000 / 1001160000
+  # - controlling_equity_candidate: 연결 지배주주지분 자본총계 후보 = 4001160050
+  #   삼성전자 BPS probe에서 4001160000 - 4001167500과 일치했지만 MP reference와
+  #   주당 20.93원 차이가 남아 확정 feature가 아니라 candidate로 둔다.
+  # - eps_net_income: EPS 산출용 *당기순이익 = 4001167200 / 1001167200
+  # - sales: 매출액(*) = 4001210000 / 1001210000
+  # - operating_income: 영업이익(손실) = 4001230000 / 1001230000
+  # - interest_expense: 이자비용 = 4001250100 / 1001250100
+  # - net_income: 연결 당기순이익(순손실) = 4001290200
+  # - current_assets: 유동자산(*) = 4001110100 / 1001110100
+  # - current_liabilities: 유동부채(*) = 4001140100 / 1001140100

@@ -1,0 +1,27 @@
+paths:
+  raw_dataguide: data/Dataguide
+  raw_dw: data/DW
+  preprocessed: data/preprocessed
+  outputs: outputs
+  logs: outputs/logs
+
+dataguide:
+  k200_etfs: 데이터가이드K200ETF들_20200101-20260430.csv
+  fgsc_monthly: 데이터가이드FGSC_20200101-20260430_월간.csv
+
+dw:
+  k200_members: fng_k200_members.csv
+  stock_prices: fng_stock_daily_prices.csv
+  fgsc_members: DW_FNG_FGSC종목_20200101-20260430.csv
+  fng_consolidated_financial_statement_items: fng_consolidated_financial_statement_items.csv
+  fng_separate_financial_statement_items: fng_separate_financial_statement_items.csv
+  fng_annual_indicator_share_counts: fng_annual_indicator_share_counts.csv
+  fng_daily_indicator_share_counts: fng_daily_indicator_share_counts.csv
+  fng_dividend_items: fng_dividend_items.csv
+
+encoding: utf-8-sig
+
+sector_classification:
+  source: dataguide
+  # DataGuide 월간 source의 첫 snapshot(2019-12-30) 이전만 DW 일별 FGSC로 보강한다.
+  historical_dw: dw_fng_mirror/dw_fng_fgsc_members.parquet

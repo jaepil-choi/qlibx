@@ -1,0 +1,458 @@
+datasets:
+  # 아래 fng_statement_items query의 공통 WHERE 계약:
+  # - statement_scope='consolidated'/'separate'는 각각 연결/별도 원천 table row를 고른다.
+  # - settlement_type='D'는 FY 누적 row만 고른다(1~4는 분기 standalone,
+  #   A/B/C는 Q1/H1/Q1~Q3 누적이며 scope 구분 code가 아니다).
+  # - account_code는 dataset 이름에 대응하는 exact FNG 원천 계정만 고른다.
+  # 즉 아래 matrix는 최신 TTM이나 분기값이 아니라 FY 누적값에 3개월 lag를 붙인 계약이다.
+
+  financial_c_total_assets:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as total_assets
+      from fng_statement_items
+      -- 연결 FY 누적 자산총계 계정만 선택한다.
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001110000'
+    index: available_date
+    columns: ticker
+    values: total_assets
+    dtype: float64
+
+  financial_c_total_liabilities:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as total_liabilities
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001140000'
+    index: available_date
+    columns: ticker
+    values: total_liabilities
+    dtype: float64
+
+  financial_c_total_equity:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as total_equity
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001160000'
+    index: available_date
+    columns: ticker
+    values: total_equity
+    dtype: float64
+
+  financial_c_controlling_equity_candidate:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as controlling_equity_candidate
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001160050'
+    index: available_date
+    columns: ticker
+    values: controlling_equity_candidate
+    dtype: float64
+
+  financial_c_eps_net_income:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as eps_net_income
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001167200'
+    index: available_date
+    columns: ticker
+    values: eps_net_income
+    dtype: float64
+
+  financial_c_sales:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as sales
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001210000'
+    index: available_date
+    columns: ticker
+    values: sales
+    dtype: float64
+
+  financial_c_operating_income:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as operating_income
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001230000'
+    index: available_date
+    columns: ticker
+    values: operating_income
+    dtype: float64
+
+  financial_c_interest_expense:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as interest_expense
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001250100'
+    index: available_date
+    columns: ticker
+    values: interest_expense
+    dtype: float64
+
+  financial_c_net_income:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as net_income
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001290200'
+    index: available_date
+    columns: ticker
+    values: net_income
+    dtype: float64
+
+  financial_c_current_assets:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as current_assets
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001110100'
+    index: available_date
+    columns: ticker
+    values: current_assets
+    dtype: float64
+
+  financial_c_current_liabilities:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as current_liabilities
+      from fng_statement_items
+      where statement_scope = 'consolidated'
+        and settlement_type = 'D'
+        and account_code = '4001140100'
+    index: available_date
+    columns: ticker
+    values: current_liabilities
+    dtype: float64
+
+  financial_s_total_assets:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as total_assets
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001110000'
+    index: available_date
+    columns: ticker
+    values: total_assets
+    dtype: float64
+
+  financial_s_total_liabilities:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as total_liabilities
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001140000'
+    index: available_date
+    columns: ticker
+    values: total_liabilities
+    dtype: float64
+
+  financial_s_total_equity:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as total_equity
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001160000'
+    index: available_date
+    columns: ticker
+    values: total_equity
+    dtype: float64
+
+  financial_s_eps_net_income:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as eps_net_income
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001167200'
+    index: available_date
+    columns: ticker
+    values: eps_net_income
+    dtype: float64
+
+  financial_s_sales:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as sales
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001210000'
+    index: available_date
+    columns: ticker
+    values: sales
+    dtype: float64
+
+  financial_s_operating_income:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as operating_income
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001230000'
+    index: available_date
+    columns: ticker
+    values: operating_income
+    dtype: float64
+
+  financial_s_interest_expense:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as interest_expense
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001250100'
+    index: available_date
+    columns: ticker
+    values: interest_expense
+    dtype: float64
+
+  financial_s_current_assets:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as current_assets
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001110100'
+    index: available_date
+    columns: ticker
+    values: current_assets
+    dtype: float64
+
+  financial_s_current_liabilities:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      select last_day(fiscal_period) + interval '3 months' as available_date,
+             ticker,
+             numeric_value as current_liabilities
+      from fng_statement_items
+      where statement_scope = 'separate'
+        and settlement_type = 'D'
+        and account_code = '1001140100'
+    index: available_date
+    columns: ticker
+    values: current_liabilities
+    dtype: float64
+
+  # EPS 산식:
+  #   EPS = 재무제표의 *당기순이익 * 1000 / 연별지표계산의 주식수평균
+  # FNG 재무데이타는 천원 단위이고, EPS는 원 단위이므로 numerator에 1000을 곱한다.
+  # 분모는 보통주주식수평균 + 우선주주식수평균을 이미 합산한 average_total_shares다.
+  # 연결 EPS numerator는 4001167200, 별도 EPS numerator는 1001167200이다.
+
+  financial_annual_average_common_shares:
+    kind: matrix
+    sources: [fng_annual_share_counts]
+    query: |
+      select
+        last_day(base_date) + interval '3 months' as available_date,
+        ticker,
+        average_common_shares
+      from fng_annual_share_counts
+    index: available_date
+    columns: ticker
+    values: average_common_shares
+    dtype: float64
+
+  financial_annual_average_preferred_shares:
+    kind: matrix
+    sources: [fng_annual_share_counts]
+    query: |
+      select
+        last_day(base_date) + interval '3 months' as available_date,
+        ticker,
+        average_preferred_shares
+      from fng_annual_share_counts
+    index: available_date
+    columns: ticker
+    values: average_preferred_shares
+    dtype: float64
+
+  financial_annual_average_total_shares:
+    kind: matrix
+    sources: [fng_annual_share_counts]
+    query: |
+      select
+        last_day(base_date) + interval '3 months' as available_date,
+        ticker,
+        average_total_shares
+      from fng_annual_share_counts
+    index: available_date
+    columns: ticker
+    values: average_total_shares
+    dtype: float64
+
+  financial_daily_ending_common_shares:
+    kind: matrix
+    sources: [fng_daily_share_counts]
+    query: |
+      select date, ticker, ending_common_shares
+      from fng_daily_share_counts
+    index: date
+    columns: ticker
+    values: ending_common_shares
+    dtype: float64
+
+  financial_daily_ending_preferred_shares:
+    kind: matrix
+    sources: [fng_daily_share_counts]
+    query: |
+      select date, ticker, ending_preferred_shares
+      from fng_daily_share_counts
+    index: date
+    columns: ticker
+    values: ending_preferred_shares
+    dtype: float64
+
+  financial_daily_treasury_common_shares:
+    kind: matrix
+    sources: [fng_daily_share_counts]
+    query: |
+      select date, ticker, treasury_common_shares
+      from fng_daily_share_counts
+    index: date
+    columns: ticker
+    values: treasury_common_shares
+    dtype: float64
+
+  financial_daily_treasury_preferred_shares:
+    kind: matrix
+    sources: [fng_daily_share_counts]
+    query: |
+      select date, ticker, treasury_preferred_shares
+      from fng_daily_share_counts
+    index: date
+    columns: ticker
+    values: treasury_preferred_shares
+    dtype: float64
+
+  # Dividend datasets:
+  # - dividend_type_1='10' and dividend_type_2='20' is the ordinary-share row
+  #   confirmed by FNG dividend source discovery for Samsung Electronics.
+  # - dividend_yield is daily because price changes daily. It uses the latest
+  #   fiscal DPS available at or before each price date.
+
+  financial_dividend_cash_dps:
+    kind: matrix
+    sources: [fng_dividend_items]
+    query: |
+      select
+        last_day(fiscal_period) + interval '3 months' as available_date,
+        ticker,
+        minority_cash_dps
+      from fng_dividend_items
+      where dividend_type_1 = '10'
+        and dividend_type_2 = '20'
+    index: available_date
+    columns: ticker
+    values: minority_cash_dps
+    dtype: float64
+
+  financial_dividend_total_amount:
+    kind: matrix
+    sources: [fng_dividend_items]
+    query: |
+      select
+        last_day(fiscal_period) + interval '3 months' as available_date,
+        ticker,
+        total_dividend_amount
+      from fng_dividend_items
+      where dividend_type_1 = '10'
+        and dividend_type_2 = '20'
+    index: available_date
+    columns: ticker
+    values: total_dividend_amount
+    dtype: float64

@@ -1,0 +1,327 @@
+datasets:
+  # fng_statement_items를 사용하는 WHERE의 공통 code 의미:
+  # - statement_scope는 연결(consolidated)/별도(separate) 원천 row를 선택한다.
+  # - settlement_type='D'는 FY 누적 row를 선택한다. settlement_type의 B는 H1
+  #   누적이며 D와 같은 연결/별도 구분자가 아니다.
+  # - account_code/account_code IN은 산식에 필요한 exact 원천 계정만 선택한다.
+
+  financial_c_eps:
+    kind: matrix
+    sources:
+      - fng_statement_items
+      - fng_annual_share_counts
+    query: |
+      select
+        last_day(i.fiscal_period) + interval '3 months' as available_date,
+        i.ticker,
+        i.numeric_value * 1000.0 / nullif(a.average_total_shares, 0) as eps
+      from fng_statement_items i
+      inner join fng_annual_share_counts a
+        on i.ticker = a.ticker
+       and last_day(i.fiscal_period) = a.base_date
+      -- 연결 FY 누적 *당기순이익 계정만 EPS numerator로 선택한다.
+      where i.statement_scope = 'consolidated'
+        and i.settlement_type = 'D'
+        and i.account_code = '4001167200'
+    index: available_date
+    columns: ticker
+    values: eps
+    dtype: float64
+
+  financial_s_eps:
+    kind: matrix
+    sources:
+      - fng_statement_items
+      - fng_annual_share_counts
+    query: |
+      select
+        last_day(i.fiscal_period) + interval '3 months' as available_date,
+        i.ticker,
+        i.numeric_value * 1000.0 / nullif(a.average_total_shares, 0) as eps
+      from fng_statement_items i
+      inner join fng_annual_share_counts a
+        on i.ticker = a.ticker
+       and last_day(i.fiscal_period) = a.base_date
+      -- 별도 FY 누적 *당기순이익 계정만 EPS numerator로 선택한다.
+      where i.statement_scope = 'separate'
+        and i.settlement_type = 'D'
+        and i.account_code = '1001167200'
+    index: available_date
+    columns: ticker
+    values: eps
+    dtype: float64
+
+  # 유동비율 산식:
+  #   current_ratio = 유동자산 / 유동부채 * 100
+  # 연결은 4001110100 / 4001140100, 별도는 1001110100 / 1001140100을 사용한다.
+
+  financial_c_current_ratio:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      with ratio_inputs as (
+        select
+          ticker,
+          fiscal_period,
+          max(numeric_value) filter (where account_code = '4001110100') as current_assets,
+          max(numeric_value) filter (where account_code = '4001140100') as current_liabilities
+        from fng_statement_items
+        where statement_scope = 'consolidated'
+          and settlement_type = 'D'
+          and account_code in ('4001110100', '4001140100')
+        group by ticker, fiscal_period
+      )
+      select
+        last_day(fiscal_period) + interval '3 months' as available_date,
+        ticker,
+        current_assets / nullif(current_liabilities, 0) * 100.0 as current_ratio
+      from ratio_inputs
+    index: available_date
+    columns: ticker
+    values: current_ratio
+    dtype: float64
+
+  financial_s_current_ratio:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      with ratio_inputs as (
+        select
+          ticker,
+          fiscal_period,
+          max(numeric_value) filter (where account_code = '1001110100') as current_assets,
+          max(numeric_value) filter (where account_code = '1001140100') as current_liabilities
+        from fng_statement_items
+        where statement_scope = 'separate'
+          and settlement_type = 'D'
+          and account_code in ('1001110100', '1001140100')
+        group by ticker, fiscal_period
+      )
+      select
+        last_day(fiscal_period) + interval '3 months' as available_date,
+        ticker,
+        current_assets / nullif(current_liabilities, 0) * 100.0 as current_ratio
+      from ratio_inputs
+    index: available_date
+    columns: ticker
+    values: current_ratio
+    dtype: float64
+
+  # 이자보상배율 산식:
+  #   interest_coverage = 영업이익 / 이자비용
+  # 연결은 4001230000 / 4001250100, 별도는 1001230000 / 1001250100을 사용한다.
+
+  financial_c_interest_coverage:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      with ratio_inputs as (
+        select
+          ticker,
+          fiscal_period,
+          max(numeric_value) filter (where account_code = '4001230000') as operating_income,
+          max(numeric_value) filter (where account_code = '4001250100') as interest_expense
+        from fng_statement_items
+        where statement_scope = 'consolidated'
+          and settlement_type = 'D'
+          and account_code in ('4001230000', '4001250100')
+        group by ticker, fiscal_period
+      )
+      select
+        last_day(fiscal_period) + interval '3 months' as available_date,
+        ticker,
+        operating_income / nullif(interest_expense, 0) as interest_coverage
+      from ratio_inputs
+    index: available_date
+    columns: ticker
+    values: interest_coverage
+    dtype: float64
+
+  financial_s_interest_coverage:
+    kind: matrix
+    sources: [fng_statement_items]
+    query: |
+      with ratio_inputs as (
+        select
+          ticker,
+          fiscal_period,
+          max(numeric_value) filter (where account_code = '1001230000') as operating_income,
+          max(numeric_value) filter (where account_code = '1001250100') as interest_expense
+        from fng_statement_items
+        where statement_scope = 'separate'
+          and settlement_type = 'D'
+          and account_code in ('1001230000', '1001250100')
+        group by ticker, fiscal_period
+      )
+      select
+        last_day(fiscal_period) + interval '3 months' as available_date,
+        ticker,
+        operating_income / nullif(interest_expense, 0) as interest_coverage
+      from ratio_inputs
+    index: available_date
+    columns: ticker
+    values: interest_coverage
+    dtype: float64
+
+  # BPS candidate 산식:
+  #   bps_candidate = 자본 numerator * 1000 / denominator
+  #   denominator = 기말보통주식수 + 기말우선주식수
+  #                 - 기말보통주자기주식수 - 기말우선주자기주식수
+  # denominator는 EPS의 연간 평균주식수가 아니라 일별지표계산의 최근 기말 주식수다.
+  # 연결 numerator 4001160050은 (지배주주지분) 자본총계 후보로 유력하지만
+  # MP reference와 주당 20.93원 차이가 남아 exact match가 닫히지 않았다.
+  # 별도 numerator는 현재 1001160000 자본(*) 후보를 쓰며, 역시 exact match가 아니다.
+  # 따라서 downstream에서는 이 dataset을 production 확정 feature가 아니라 검증용
+  # candidate로만 취급해야 한다.
+
+  financial_c_bps_candidate:
+    kind: matrix
+    sources:
+      - fng_statement_items
+      - fng_daily_share_counts
+    query: |
+      select
+        last_day(i.fiscal_period) + interval '3 months' as available_date,
+        i.ticker,
+        i.numeric_value * 1000.0 / nullif(
+          coalesce(d.ending_common_shares, 0)
+          + coalesce(d.ending_preferred_shares, 0)
+          - coalesce(d.treasury_common_shares, 0)
+          - coalesce(d.treasury_preferred_shares, 0),
+          0
+        ) as bps_candidate
+      from fng_statement_items i
+      left join lateral (
+        select d.*
+        from fng_daily_share_counts d
+        -- 같은 종목에서 결산일 이전의 최신 share-count row 하나를 선택한다.
+        where d.ticker = i.ticker
+          and d.date <= last_day(i.fiscal_period)
+        order by d.date desc
+        limit 1
+      ) d on true
+      where i.statement_scope = 'consolidated'
+        and i.settlement_type = 'D'
+        and i.account_code = '4001160050'
+    index: available_date
+    columns: ticker
+    values: bps_candidate
+    dtype: float64
+
+  financial_s_bps_candidate:
+    kind: matrix
+    sources:
+      - fng_statement_items
+      - fng_daily_share_counts
+    query: |
+      select
+        last_day(i.fiscal_period) + interval '3 months' as available_date,
+        i.ticker,
+        i.numeric_value * 1000.0 / nullif(
+          coalesce(d.ending_common_shares, 0)
+          + coalesce(d.ending_preferred_shares, 0)
+          - coalesce(d.treasury_common_shares, 0)
+          - coalesce(d.treasury_preferred_shares, 0),
+          0
+        ) as bps_candidate
+      from fng_statement_items i
+      left join lateral (
+        select d.*
+        from fng_daily_share_counts d
+        -- 같은 종목에서 결산일 이전의 최신 share-count row 하나를 선택한다.
+        where d.ticker = i.ticker
+          and d.date <= last_day(i.fiscal_period)
+        order by d.date desc
+        limit 1
+      ) d on true
+      where i.statement_scope = 'separate'
+        and i.settlement_type = 'D'
+        and i.account_code = '1001160000'
+    index: available_date
+    columns: ticker
+    values: bps_candidate
+    dtype: float64
+
+  # Share-count matrix:
+  # - annual_average_*_shares는 EPS denominator 후보이며 기준일자에 3개월 lag를 붙여
+  #   available_date index로 노출한다.
+  # - daily_ending_*_shares와 daily_treasury_*_shares는 BPS denominator 후보이며
+  #   원천 거래일자 date index를 유지한다.
+
+  dividend_yield:
+    kind: matrix
+    sources:
+      - adjusted_prices
+      - fng_dividend_items
+    query: |
+      with ordinary_dividend as (
+        select
+          last_day(fiscal_period) + interval '3 months' as available_date,
+          ticker,
+          minority_cash_dps
+        from fng_dividend_items
+        where dividend_type_1 = '10'
+          and dividend_type_2 = '20'
+      )
+      select
+        p.date,
+        p.ticker,
+        d.minority_cash_dps / nullif(p.adj_close, 0) as dividend_yield
+      from adjusted_prices p
+      left join lateral (
+        select d.*
+        from ordinary_dividend d
+        -- 가격일에 이미 available한 같은 종목의 최신 FY 배당만 as-of join한다.
+        where d.ticker = p.ticker
+          and d.available_date <= p.date
+        order by d.available_date desc
+        limit 1
+      ) d on true
+      -- 아직 available한 FY 배당이 없는 가격 row는 output에서 제외한다.
+      where d.minority_cash_dps is not null
+    index: date
+    columns: ticker
+    values: dividend_yield
+    dtype: float64
+
+  # Value factor 분자다. dividend_yield와 동일한 as-of join 패턴으로, 연결 재무제표
+  # 자기자본(3개월 fiscal lag)을 daily market_cap으로 나눈 daily matrix를 만든다.
+  # 음수 자기자본(distress) 종목도 필터링하지 않고 그대로 노출한다 - 값 판단은
+  # strategy/factor construction 단계에서 명시적으로 한다.
+
+  book_to_market:
+    kind: matrix
+    sources:
+      - adjusted_prices
+      - fng_statement_items
+    query: |
+      with total_equity as (
+        select
+          last_day(fiscal_period) + interval '3 months' as available_date,
+          ticker,
+          numeric_value as total_equity
+        from fng_statement_items
+        where statement_scope = 'consolidated'
+          and settlement_type = 'D'
+          and account_code = '4001160000'
+      )
+      select
+        p.date,
+        p.ticker,
+        e.total_equity / nullif(p.market_cap, 0) as book_to_market
+      from adjusted_prices p
+      left join lateral (
+        select e.*
+        from total_equity e
+        -- 가격일에 이미 available한 같은 종목의 최신 연결 FY 자본만 as-of join한다.
+        where e.ticker = p.ticker
+          and e.available_date <= p.date
+        order by e.available_date desc
+        limit 1
+      ) e on true
+      -- 아직 available한 FY 자본이 없는 가격 row는 output에서 제외한다.
+      where e.total_equity is not null
+    index: date
+    columns: ticker
+    values: book_to_market
+    dtype: float64

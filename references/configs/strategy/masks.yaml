@@ -1,0 +1,5 @@
+# Strategy config는 실행 목록이 아니라 code default에 대한 production override만 기록합니다.
+
+composite_k_worst_exclusion_mask:
+  # Strategy default(k=20) 대신 production negative-screening 기준 10개를 제외합니다.
+  k: 10

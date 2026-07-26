@@ -1,0 +1,45 @@
+parquet_sources:
+  adjusted_prices:
+    path: adjusted_prices.parquet
+  k200_members:
+    path: k200_members.parquet
+  sector_classification:
+    path: sector_classification.parquet
+  industry_mapping:
+    path: industry_mapping.parquet
+  fng_statement_items:
+    path: fng_statement_items.parquet
+  fng_annual_share_counts:
+    path: fng_annual_share_counts.parquet
+  fng_daily_share_counts:
+    path: fng_daily_share_counts.parquet
+  fng_dividend_items:
+    path: fng_dividend_items.parquet
+  fng_statement_facts:
+    path: fng_statement_facts
+  dataguide_statement_mapping:
+    path: dataguide_statement_mapping.parquet
+  dataguide_statement_items:
+    path: dataguide_statement_items.parquet
+  corr_clusters:
+    path: corr_clusters.parquet
+  factor_returns:
+    path: factor_returns.parquet
+  fng_daily_consensus:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_daily_consensus.parquet
+  fng_valuation:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_valuation.parquet
+  fng_free_float_ratio:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_free_float_ratio.parquet
+  fng_major_shareholders:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_major_shareholders.parquet
+  fng_executive_info:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_executive_info.parquet
+  fng_calendar:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_calendar.parquet

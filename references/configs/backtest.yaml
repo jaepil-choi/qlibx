@@ -1,0 +1,39 @@
+# 1단계 백테스트 설정의 자리입니다.
+# 역할: 시그널, 비중, 실현수익률의 시점 정렬과 성과 계산 조건을 관리합니다.
+
+calendar:
+  # 책임: 전체 데이터 기간을 쓰는 경우 비워 두고, 실험 구간을 제한할 때 날짜를 넣습니다.
+  start_date:
+  end_date:
+
+rebalance:
+  # 책임: 목표 비중을 갱신할 주기를 관리합니다.
+  # 책임: 일간, 주간, 월간 후보를 문자열로 적습니다.
+  frequency: daily
+
+datasets:
+  # 책임: backtest runner가 strategy 외부에서 필요로 하는 logical dataset 역할을 지정합니다.
+  realized_return: returns
+  execution_base_price: execution_base_price
+  execution_close_price: execution_close_price
+  quantity_adjustment_factor: quantity_adjustment_factor
+  benchmark_weight: index_weight
+  panel_group: industry_code
+
+benchmark:
+  # 책임: 기준지수 수익률 계산에 사용할 비중 컬럼을 지정합니다.
+  weight_column: index_weight
+
+costs:
+  # 책임: backtest 수익률 계산에서 매수/매도 수수료, 매도세, 슬리피지를 반영합니다.
+  # 단위: 모든 비용 값은 bp 기준입니다. 예: 10.0 = 10bp = 0.10%.
+  enabled: true
+  buy_fee_bp: 3.0
+  sell_fee_bp: 3.0
+  sell_tax_bp: 20.0
+  slippage_bp: 0.0
+  # 책임: sleeve cost_policy별로 위 기본값 중 일부 field만 override합니다.
+  # ETF는 장내 매도 시 증권거래세가 면제되므로 sell_tax_bp를 0으로 둡니다.
+  policy_overrides:
+    etf:
+      sell_tax_bp: 0.0

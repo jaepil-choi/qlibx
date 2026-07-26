@@ -1,0 +1,257 @@
+# PRD-5 alpha ensemble 실행 설정입니다.
+# Strategy parameter는 strategy.yaml, index-frame(ETF) buffer는 enhanced_index.yaml이 소유합니다.
+#
+# cash_frame.buffer_budget은 "canonical"(alpha_multiplier=1.0) 정의입니다. enhanced_index.yaml의
+# etf_residual_intent_preserving.buffer_budget은 이 숫자를 그 frame의 alpha_multiplier만큼 scale해서
+# 유도한 값입니다 - 두 frame은 서로 다른 buffer가 아니라 e(t) = base - mu*net_exposure(t)라는 같은
+# 수식을 다른 mu로 계산한 것입니다. 유도 규칙과 근거는 docs/vibe/prd-5.md §7.4.2를 참고하세요.
+
+active: peer_rebound_equal_weight
+
+definitions:
+  market_microstructure_crossing_budgeted:
+    name: market_microstructure_crossing_budgeted_ensemble
+    variant_name: equal_10_largest_gap_budget
+    capital_allocation:
+      type: fixed
+      baseline: equal_weight
+    execution:
+      type: crossing_turnover_budget
+      # 2020-01-03~2023-12-29 독립 member drift-aware turnover 650.144038x의 9%를
+      # 고정한 값이다. 이후 날짜의 turnover를 보아 다시 맞추지 않는다.
+      annual_turnover_budget: 58.512963
+      trading_days_per_year: 252
+      side_cap: 1.0
+    members:
+      - name: overnight_intraday_spread
+        strategy_key: market_microstructure.overnight_intraday_spread
+      - name: adaptive_serial_dependence
+        strategy_key: market_microstructure.adaptive_serial_dependence
+      - name: closing_reversal_low_turnover
+        strategy_key: market_microstructure.closing_reversal.low_turnover
+      - name: closing_reversal_low_dispersion
+        strategy_key: market_microstructure.closing_reversal.low_dispersion
+      - name: closing_reversal_small_cap
+        strategy_key: market_microstructure.closing_reversal.small_cap
+      - name: closing_reversal_up_market
+        strategy_key: market_microstructure.closing_reversal.up_market
+      - name: gap_fill_low_turnover
+        strategy_key: market_microstructure.gap_fill.low_turnover
+      - name: closing_reversal_five_day_decay
+        strategy_key: market_microstructure.closing_reversal.five_day_decay
+      - name: closing_reversal_down_market
+        strategy_key: market_microstructure.closing_reversal.down_market
+      - name: negative_serial_dependence
+        strategy_key: market_microstructure.negative_serial_dependence
+    cash_frame:
+      alpha_multiplier: 1.0
+      buffer_budget:
+        base: 0.0
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35
+
+  peer_rebound_equal_weight:
+    name: peer_rebound_equal_weight_ensemble
+    variant_name: equal_weight
+    capital_allocation:
+      type: fixed
+      baseline: equal_weight
+    members:
+      - name: peer_momentum
+        strategy_key: peer_momentum.ew_decay.top_kpct
+      - name: open_close_rebound
+        strategy_key: open_close_absorb_conviction.rebound
+    cash_frame:
+      # net_exposure(t)를 감쇠 없이(1:1) 그대로 현금으로 흡수합니다.
+      alpha_multiplier: 1.0
+      buffer_budget:
+        # base=0, physical=[-1,1]: canonical alpha weight budget(long<=1, short<=1)이 만드는
+        # net_exposure(t)의 자기 범위([-1,1])와 정확히 일치시켜, cash frame이 alpha가 표현할 수
+        # 있는 어떤 net_exposure도 구조적 clip 없이 담도록 만든 값입니다.
+        base: 0.0
+        # 2026-07-16 fixture, 실측 net_exposure(t) 분포의 약 90%를 담는 폭입니다
+        # (experiments/analyze_buffer_budget_net_exposure.py, order 35).
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        # band-physical capacity((band-physical)/mu)와 같은, 가장 공격적인(허용되는 최솟값)
+        # softening입니다. net_exposure 고유 단위라 mu와 무관하게 모든 frame이 같은 값을 씁니다.
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35
+
+  # 아래 definition은 price-alpha research에서 고정한 4개 member와 allocation
+  # comparison 후보입니다. Production `active`는 기존 2-member fixed를 유지합니다.
+  price_alpha_equal_weight:
+    name: price_alpha_ensemble
+    variant_name: equal_weight
+    capital_allocation:
+      type: fixed
+      baseline: equal_weight
+    members:
+      - name: peer_momentum
+        strategy_key: peer_momentum.ew_decay.top_kpct_long_biased
+      - name: open_close_rebound
+        strategy_key: sector_adjusted_open_close_absorb_conviction.rebound_top1pct_long_biased
+      - name: gap_exhaustion
+        strategy_key: sector_adjusted_gap_exhaustion.fade
+      - name: ranked_information_drift
+        strategy_key: information_momentum.ranked_one_week_drift
+    cash_frame:
+      alpha_multiplier: 1.0
+      buffer_budget:
+        base: 0.0
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35
+
+  price_alpha_trailing_return_momentum:
+    name: price_alpha_ensemble
+    variant_name: trailing_return_momentum
+    capital_allocation:
+      type: trailing_return_momentum
+      baseline: equal_weight
+      lookback: 20
+      sensitivity: 100.0
+      score_diff_cap: 10.0
+    members:
+      - name: peer_momentum
+        strategy_key: peer_momentum.ew_decay.top_kpct_long_biased
+      - name: open_close_rebound
+        strategy_key: sector_adjusted_open_close_absorb_conviction.rebound_top1pct_long_biased
+      - name: gap_exhaustion
+        strategy_key: sector_adjusted_gap_exhaustion.fade
+      - name: ranked_information_drift
+        strategy_key: information_momentum.ranked_one_week_drift
+    cash_frame:
+      alpha_multiplier: 1.0
+      buffer_budget:
+        base: 0.0
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35
+
+  price_alpha_risk_adjusted_return_momentum:
+    name: price_alpha_ensemble
+    variant_name: risk_adjusted_return_momentum
+    capital_allocation:
+      type: risk_adjusted_return_momentum
+      baseline: equal_weight
+      return_lookback: 20
+      risk_lookback: 60
+      weight_cap: 0.55
+      score_clip: 3.0
+    members:
+      - name: peer_momentum
+        strategy_key: peer_momentum.ew_decay.top_kpct_long_biased
+      - name: open_close_rebound
+        strategy_key: sector_adjusted_open_close_absorb_conviction.rebound_top1pct_long_biased
+      - name: gap_exhaustion
+        strategy_key: sector_adjusted_gap_exhaustion.fade
+      - name: ranked_information_drift
+        strategy_key: information_momentum.ranked_one_week_drift
+    cash_frame:
+      alpha_multiplier: 1.0
+      buffer_budget:
+        base: 0.0
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35
+
+  price_alpha_downside_adjusted_return_momentum:
+    name: price_alpha_ensemble
+    variant_name: downside_adjusted_return_momentum
+    capital_allocation:
+      type: downside_adjusted_return_momentum
+      baseline: equal_weight
+      return_lookback: 20
+      downside_lookback: 60
+      weight_cap: 0.55
+      score_clip: 3.0
+    members:
+      - name: peer_momentum
+        strategy_key: peer_momentum.ew_decay.top_kpct_long_biased
+      - name: open_close_rebound
+        strategy_key: sector_adjusted_open_close_absorb_conviction.rebound_top1pct_long_biased
+      - name: gap_exhaustion
+        strategy_key: sector_adjusted_gap_exhaustion.fade
+      - name: ranked_information_drift
+        strategy_key: information_momentum.ranked_one_week_drift
+    cash_frame:
+      alpha_multiplier: 1.0
+      buffer_budget:
+        base: 0.0
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35
+
+  price_alpha_trailing_return_rank:
+    name: price_alpha_ensemble
+    variant_name: trailing_return_rank
+    capital_allocation:
+      type: trailing_return_rank
+      baseline: equal_weight
+      lookback: 20
+    members:
+      - name: peer_momentum
+        strategy_key: peer_momentum.ew_decay.top_kpct_long_biased
+      - name: open_close_rebound
+        strategy_key: sector_adjusted_open_close_absorb_conviction.rebound_top1pct_long_biased
+      - name: gap_exhaustion
+        strategy_key: sector_adjusted_gap_exhaustion.fade
+      - name: ranked_information_drift
+        strategy_key: information_momentum.ranked_one_week_drift
+    cash_frame:
+      alpha_multiplier: 1.0
+      buffer_budget:
+        base: 0.0
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35
+
+  price_alpha_dual_horizon_rank_momentum:
+    name: price_alpha_ensemble
+    variant_name: dual_horizon_rank_momentum
+    capital_allocation:
+      type: dual_horizon_rank_momentum
+      baseline: equal_weight
+      short_lookback: 20
+      long_lookback: 126
+    members:
+      - name: peer_momentum
+        strategy_key: peer_momentum.ew_decay.top_kpct_long_biased
+      - name: open_close_rebound
+        strategy_key: sector_adjusted_open_close_absorb_conviction.rebound_top1pct_long_biased
+      - name: gap_exhaustion
+        strategy_key: sector_adjusted_gap_exhaustion.fade
+      - name: ranked_information_drift
+        strategy_key: information_momentum.ranked_one_week_drift
+    cash_frame:
+      alpha_multiplier: 1.0
+      buffer_budget:
+        base: 0.0
+        band_lower: -0.65
+        band_upper: 0.65
+        physical_lower: -1.0
+        physical_upper: 1.0
+        lower_softening_scale: 0.35
+        upper_softening_scale: 0.35

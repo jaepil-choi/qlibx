@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+/data/
+outputs/
+experiments/outputs/
+showcases/outputs/

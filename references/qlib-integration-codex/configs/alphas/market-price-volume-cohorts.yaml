@@ -1,0 +1,44 @@
+schema_version: 1
+key: market.price_volume.calendar_cohorts
+family: market
+track: trusted
+hypothesis: >-
+  Short-horizon reversal, residual reversal, low-risk and price-volume divergence
+  signals provide diversified market/industry-neutral alpha when members sharing
+  an exact order calendar are crossed before asymmetric trade cost is charged.
+inputs:
+  market: market_panel
+  returns: adjusted_return
+  prices: adjusted_close
+  volume: trade_volume
+  transaction_amount: transaction_amount
+  membership: k200_membership
+  benchmark_weight: benchmark_weight
+  industry: industry_code
+signal:
+  implementation: frozen_price_volume_selected_cohorts
+  source_manifest: research/price/selected_candidates.json
+  historical_prior_informed: true
+execution:
+  order_calendar_key: multiple_exact_cohorts
+  lag_days: 1
+  rebalance_days: 21
+  max_holding_days: 21
+neutralization:
+  methods:
+    - market_demean
+    - industry_demean
+    - market_beta_projection
+    - industry_beta_projection
+  transform: member_native
+  exact_zero_net: true
+search:
+  frozen: true
+  eligible_cohorts:
+    - k200_axis_start_2018-01-02_every_1_trading_days
+    - k200_axis_start_2018-01-02_every_21_trading_days
+  excluded_cohorts: [mixed_frequency_research_only]
+governance:
+  selection_classification: historical_prior_informed
+  family_cost_after_calendar_crossing: true
+  true_forward_oos: false

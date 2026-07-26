@@ -1,0 +1,35 @@
+schema_version: 1
+key: consensus.revision.expanded_20260724_v3.family.calendar_cohort_equal_weight_3
+family: consensus
+track: trusted
+hypothesis: >-
+  EPS and FY1 revisions combine with the FY1-FY2 curve to diversify consensus
+  information across exact order calendars before family-level cost is charged.
+inputs:
+  consensus: consensus_k200_valuation
+  market: market_panel
+  returns: adjusted_return
+  industry: industry_code
+signal:
+  implementation: frozen_expanded_consensus_calendar_cohorts
+  source_manifest: research/diagnostics/outputs/consensus_subset_search/winner_manifest.json
+  members:
+    - current_eps_revision_core
+    - current_fy1_confirmation_core
+    - fy1_fy2_curve_21d
+execution:
+  order_calendar_key: consensus_multiple_exact_cohorts_daily_applied_v1
+  lag_days: 1
+  rebalance_days: 1
+  max_holding_days: 63
+neutralization:
+  methods: [industry_demean]
+  transform: member_native
+  exact_zero_net: true
+search:
+  frozen: true
+  selection_metric: minimum_development_validation_net_sharpe
+  holdout_used_for_selection: false
+governance:
+  family_cost_after_calendar_crossing: true
+  true_forward_oos: false

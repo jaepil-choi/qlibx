@@ -1,0 +1,22 @@
+parquet_sources:
+  adjusted_prices:
+    root: preprocessed
+    path: adjusted_prices.parquet
+  k200_members:
+    root: preprocessed
+    path: k200_members.parquet
+  sector_classification:
+    root: preprocessed
+    path: sector_classification.parquet
+  fng_statement_items:
+    root: preprocessed
+    path: fng_statement_items.parquet
+  fng_dividend_items:
+    root: preprocessed
+    path: fng_dividend_items.parquet
+  fng_valuation:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_valuation.parquet
+  fng_daily_consensus:
+    root: raw_dw
+    path: dw_fng_mirror/dw_fng_daily_consensus.parquet

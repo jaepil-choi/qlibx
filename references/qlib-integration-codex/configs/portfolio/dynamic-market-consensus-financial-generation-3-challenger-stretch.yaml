@@ -1,0 +1,32 @@
+schema_version: 1
+key: portfolio.dynamic_market_consensus_financial_generation_3_challenger_v3.physical
+track: financial_shadow
+base_config: configs/portfolio/dynamic-market-consensus-financial-generation-3-challenger.yaml
+promoted_allocations:
+  - equal_weight
+  - rank_momentum
+risk_budget:
+  rebalance_days: 63
+  lookback_days: 252
+  minimum_history_days: 126
+  base_multiplier: 0.30
+  minimum_multiplier: 0.15
+  maximum_multiplier: 0.50
+  annual_tracking_error_target: 0.04
+  annual_trade_cost_budget: 0.013468511359148201
+  policies:
+    - tracking_error_target
+    - historical_cost_budget
+    - family_breadth_conviction
+    - tracking_error_and_cost_budget
+    - tracking_error_drawdown_brake
+selection:
+  minimum_historical_annual_excess: 0.01
+  minimum_cumulative_excess: 0.07
+  stretch_cumulative_excess: 0.10
+governance:
+  family_weight_grid: false
+  multiplier_grid: false
+  promotion_basis: generation_3_challenger_walk_forward_stability
+  cost_application: once_after_cross_family_physical_netting
+  financial_pit_verified: false

@@ -1,0 +1,62 @@
+schema_version: 1
+key: financial.statement_and_dividend.quarterly_shadow
+family: financial
+track: financial_shadow
+hypothesis: >-
+  Value, profitability, investment and capital-intensity measures retain a
+  cross-sectional premium when refreshed at least quarterly and neutralized
+  against market or contemporaneous industry groups.
+inputs:
+  statement_items: financial_statement_items
+  dividend_items: financial_dividend_items
+  market_cap: market_cap
+  returns: adjusted_return
+  membership: k200_membership
+  industry: industry_code
+signal:
+  implementation: financial_statement_factor_grid
+  availability:
+    method: fiscal_period_end_plus_calendar_months
+    months: 3
+    exact_point_in_time: false
+  features:
+    - book_to_market
+    - earnings_yield
+    - operating_yield
+    - sales_yield
+    - dividend_yield
+    - operating_profitability
+    - gross_profitability
+    - cfo_to_assets
+    - low_accruals
+    - low_leverage
+    - current_ratio
+    - low_asset_growth
+    - low_lease_intensity
+    - low_depreciation_intensity
+    - low_inventory_intensity
+    - asset_turnover
+    - low_sga_intensity
+    - value_composite
+    - profitability_composite
+    - quality_composite
+    - capital_light_composite
+    - value_quality_composite
+execution:
+  order_calendar_key: k200_common_2018-01-03_applied_every_63_trading_days_v1
+  lag_days: 1
+  rebalance_days: 63
+  max_holding_days: 63
+neutralization:
+  methods: [market_demean, industry_demean]
+  transform: cross_sectional_rank_or_winsorized_zscore
+  exact_zero_net: true
+search:
+  fixed_before_run: true
+  transform: [rank, zscore]
+  clip: [null, 3.0]
+  rebalance_days: [63]
+governance:
+  eligible_for_trusted_leaderboard: false
+  reason: exact filing and restatement timestamps are unavailable
+

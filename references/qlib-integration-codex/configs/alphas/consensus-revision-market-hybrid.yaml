@@ -1,0 +1,52 @@
+schema_version: 1
+key: consensus.revision_market_event_drift
+family: consensus
+track: trusted
+hypothesis: >-
+  Analyst earnings revisions diffuse more reliably when conditioned on strictly
+  pre-event price response and abnormal transaction amount; upgrades not yet
+  priced may drift, while aligned price response or volume may confirm information.
+inputs:
+  consensus: consensus_k200_valuation
+  market: market_panel
+  returns: adjusted_return
+  transaction_amount: transaction_amount
+  industry: industry_code
+signal:
+  implementation: consensus_revision_market_event_grid
+  consensus_sources: [eps_revision_20d, fy1_confirmation_10d_40d]
+  market_features:
+    - pre_event_momentum_5d
+    - pre_event_momentum_21d
+    - abnormal_transaction_amount_5d_63d
+  hybrids:
+    - revision_only
+    - underreaction_21d
+    - price_confirmation_21d
+    - short_drift_confirmation_5d
+    - abnormal_volume_confirmation
+  market_information_cutoff: previous_trading_day
+execution:
+  order_calendar_key: consensus_revision_market_daily_v1
+  lag_days: 1
+  rebalance_days: 63
+  max_holding_days: 63
+neutralization:
+  methods: [industry_demean]
+  transform: within_industry_rank
+  exact_zero_net: true
+search:
+  fixed_before_run: true
+  holding_days: [21, 63]
+  market_weight: [0.5]
+  consensus_sources: [eps_revision_20d, fy1_confirmation_10d_40d]
+  hybrids:
+    - revision_only
+    - underreaction_21d
+    - price_confirmation_21d
+    - short_drift_confirmation_5d
+    - abnormal_volume_confirmation
+governance:
+  selection_metric: diagnostic_net_excess_annual_return
+  atomic_cost_is_diagnostic_only: true
+  true_forward_oos: false

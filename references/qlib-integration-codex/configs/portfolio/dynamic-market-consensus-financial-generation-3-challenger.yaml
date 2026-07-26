@@ -1,0 +1,43 @@
+schema_version: 1
+key: portfolio.dynamic_market_consensus_financial_generation_3_challenger_v3.physical
+track: financial_shadow
+inputs:
+  returns: adjusted_return
+  benchmark_weight: benchmark_weight
+members:
+  market_alpha_key: market.price_volume.expanded_20260724_v3.family.calendar_cohort_equal_weight_3
+  consensus_alpha_key: consensus.revision.expanded_20260724_v3.family.calendar_cohort_equal_weight_3
+  financial_alpha_key: >-
+    financial.statement_and_dividend.dynamic_quarterly_shadow.family.equal_weight
+physical:
+  etf_ticker: A069500
+  realized_etf_sleeve: 0.50
+  direct_stock_cap_floor: 0.10
+  unwind_horizon_days: 63
+  member_target_transform: benchmark_scaled_active_weight
+  normalized_active_gross: 2.0
+  alpha_multiplier: 0.30
+allocation:
+  rebalance_days: 63
+  lookback_days: 252
+  minimum_history_days: 126
+  ideas:
+    - equal_weight
+    - inverse_volatility
+    - rank_momentum
+    - diversification
+    - minimum_variance_turnover
+selection:
+  minimum_historical_annual_excess: 0.01
+  minimum_cumulative_excess: 0.07
+  stretch_cumulative_excess: 0.10
+  objective: walk_forward_stability_then_cumulative_excess
+governance:
+  family_weight_grid: false
+  cost_application: once_after_cross_family_physical_netting
+  buy_cost_bps: 3
+  sell_cost_bps: 23
+  holdout_used_for_family_selection: false
+  true_forward_oos: false
+  financial_pit_verified: false
+  eligible_for_trusted_leaderboard: false

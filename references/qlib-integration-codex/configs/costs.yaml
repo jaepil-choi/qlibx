@@ -1,0 +1,15 @@
+schema_version: 1
+
+stock:
+  buy_bps: 3.0
+  sell_bps: 23.0
+
+etf:
+  buy_bps: 3.0
+  sell_bps: 3.0
+
+application:
+  atomic_stage: diagnostic_only
+  family_stage: after_calendar_crossing
+  portfolio_stage: once_after_cross_family_netting
+  include_expected_financing_unwind: true

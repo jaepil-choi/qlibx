@@ -1,0 +1,108 @@
+datasets:
+  market_panel:
+    kind: table
+    sources: [adjusted_prices, k200_members]
+    query: |
+      select
+        p.date,
+        p.ticker,
+        p.return,
+        p.adj_close,
+        p.market_cap,
+        p.trade_volume,
+        p.tx_amount,
+        p.is_trading_halt,
+        p.is_admin_issue,
+        coalesce(k.is_k200_member, false) as is_k200_member,
+        k.index_weight
+      from adjusted_prices p
+      left join k200_members k
+        on p.date = k.date
+       and p.ticker = k.ticker
+
+  adjusted_return:
+    kind: matrix
+    sources: [adjusted_prices]
+    query: |
+      select date, ticker, return
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: return
+    dtype: float64
+
+  adjusted_close:
+    kind: matrix
+    sources: [adjusted_prices]
+    query: |
+      select date, ticker, adj_close
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: adj_close
+    dtype: float64
+
+  market_cap:
+    kind: matrix
+    sources: [adjusted_prices]
+    query: |
+      select date, ticker, market_cap
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: market_cap
+    dtype: float64
+
+  trade_volume:
+    kind: matrix
+    sources: [adjusted_prices]
+    query: |
+      select date, ticker, trade_volume
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: trade_volume
+    dtype: float64
+
+  transaction_amount:
+    kind: matrix
+    sources: [adjusted_prices]
+    query: |
+      select date, ticker, tx_amount
+      from adjusted_prices
+    index: date
+    columns: ticker
+    values: tx_amount
+    dtype: float64
+
+  k200_membership:
+    kind: matrix
+    sources: [k200_members]
+    query: |
+      select date, ticker, is_k200_member
+      from k200_members
+    index: date
+    columns: ticker
+    values: is_k200_member
+    dtype: bool
+
+  benchmark_weight:
+    kind: matrix
+    sources: [k200_members]
+    query: |
+      select date, ticker, index_weight
+      from k200_members
+    index: date
+    columns: ticker
+    values: index_weight
+    dtype: float64
+
+  industry_code:
+    kind: matrix
+    sources: [sector_classification]
+    query: |
+      select date, ticker, industry_code
+      from sector_classification
+    index: date
+    columns: ticker
+    values: industry_code

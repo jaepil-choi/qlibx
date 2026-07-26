@@ -1,0 +1,40 @@
+schema_version: 1
+key: market.price_volume.expanded_20260724_v3.family.calendar_cohort_equal_weight_3
+family: market
+track: trusted
+hypothesis: >-
+  Low residual skewness, low beta and low maximum residual return capture
+  distinct price-volume anomalies whose exact-calendar target crossing improves
+  the post-cost market family.
+inputs:
+  market: market_panel
+  returns: adjusted_return
+  prices: adjusted_close
+  volume: trade_volume
+  transaction_amount: transaction_amount
+  membership: k200_membership
+  benchmark_weight: benchmark_weight
+  industry: industry_code
+signal:
+  implementation: frozen_expanded_price_volume_calendar_cohorts
+  source_manifest: research/diagnostics/outputs/price_subset_search/winner_manifest.json
+  members:
+    - low_residual_skewness_126
+    - low_beta_252
+    - low_maximum_residual_return_63
+execution:
+  order_calendar_key: market_multiple_exact_cohorts_daily_applied_v1
+  lag_days: 1
+  rebalance_days: 1
+  max_holding_days: 21
+neutralization:
+  methods: [market_beta_projection]
+  transform: member_native
+  exact_zero_net: true
+search:
+  frozen: true
+  selection_metric: minimum_development_validation_net_sharpe
+  holdout_used_for_selection: false
+governance:
+  family_cost_after_calendar_crossing: true
+  true_forward_oos: false

@@ -1,0 +1,34 @@
+schema_version: 1
+key: financial.statement.annual_252d_deprecated
+family: financial
+track: legacy
+hypothesis: >-
+  Annual refresh financial factors may have low turnover, but a 252-trading-day
+  order interval discards quarterly information and is not eligible research.
+inputs:
+  statement_items: financial_statement_items
+  market_cap: market_cap
+  returns: adjusted_return
+  membership: k200_membership
+  industry: industry_code
+signal:
+  implementation: financial_statement_factor_grid
+  frozen_historical_members:
+    - low_depreciation_intensity_market_rank_252d
+    - capital_light_composite_market_rank_252d
+execution:
+  order_calendar_key: k200_common_2018-01-03_applied_every_252_trading_days_v1
+  lag_days: 1
+  rebalance_days: 252
+  max_holding_days: 252
+neutralization:
+  methods: [market_demean]
+  transform: cross_sectional_rank
+  exact_zero_net: true
+search:
+  frozen: true
+  rebalance_days: [252]
+deprecation:
+  status: historical_only
+  reason: maximum rebalance interval exceeds the 63-trading-day research policy
+  replacement: financial.statement_and_dividend.quarterly_shadow

@@ -1,0 +1,56 @@
+datasets:
+  consensus_k200_valuation:
+    kind: table
+    sources: [fng_valuation, k200_members]
+    query: |
+      with ever_k200 as (
+        select distinct ticker
+        from k200_members
+        where is_k200_member
+      )
+      select
+        strptime(trim(v."일자"), '%Y%m%d')::date as date,
+        trim(v."종목약코드") as ticker,
+        try_cast(nullif(replace(trim(v."FORWARD_EPS"), ',', ''), '') as double)
+          as forward_eps,
+        try_cast(nullif(replace(trim(v."순이익FY1"), ',', ''), '') as double)
+          as net_income_fy1
+      from fng_valuation v
+      inner join ever_k200 k
+        on trim(v."종목약코드") = k.ticker
+
+  consensus_valuation:
+    kind: table
+    sources: [fng_valuation]
+    query: |
+      select
+        strptime(trim("일자"), '%Y%m%d')::date as date,
+        trim("종목약코드") as ticker,
+        try_cast(nullif(replace(trim("FORWARD_EPS"), ',', ''), '') as double) as forward_eps,
+        try_cast(nullif(replace(trim("추정BPS"), ',', ''), '') as double) as estimated_bps,
+        try_cast(nullif(replace(trim("순이익FY1"), ',', ''), '') as double) as net_income_fy1,
+        try_cast(nullif(replace(trim("순이익FY1IF"), ',', ''), '') as double) as net_income_fy1_if,
+        try_cast(nullif(replace(trim("순이익FY2"), ',', ''), '') as double) as net_income_fy2,
+        try_cast(nullif(replace(trim("순이익FY2IF"), ',', ''), '') as double) as net_income_fy2_if,
+        try_cast(nullif(replace(trim("순이익12MFWD"), ',', ''), '') as double)
+          as net_income_12m_forward,
+        try_cast(nullif(replace(trim("순이익12MFWDIF"), ',', ''), '') as double)
+          as net_income_12m_forward_if
+      from fng_valuation
+
+  consensus_daily_raw:
+    kind: table
+    sources: [fng_daily_consensus]
+    query: |
+      select
+        strptime(trim("일자"), '%Y%m%d')::date as date,
+        trim("기업코드") as ticker,
+        nullif(trim("보고서구분"), '') as report_type,
+        strptime(trim("결산년월"), '%Y%m')::date as fiscal_period,
+        nullif(trim("결산구분"), '') as settlement_type,
+        try_cast(nullif(replace(trim("매출액"), ',', ''), '') as double) as sales,
+        try_cast(nullif(replace(trim("영업이익"), ',', ''), '') as double) as operating_income,
+        try_cast(nullif(replace(trim("순이익"), ',', ''), '') as double) as net_income,
+        try_cast(nullif(replace(trim("지배주주순이익"), ',', ''), '') as double)
+          as controlling_net_income
+      from fng_daily_consensus

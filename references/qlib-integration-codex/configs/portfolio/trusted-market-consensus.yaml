@@ -1,0 +1,38 @@
+schema_version: 1
+key: portfolio.trusted_market_consensus.physical
+track: trusted
+inputs:
+  returns: adjusted_return
+  benchmark_weight: benchmark_weight
+members:
+  market_alpha_key: market.price_volume.calendar_cohorts.price_frequency_21d_equal_weight
+  consensus_alpha_key: consensus.revision_market_event_drift.calendar_cohort.core_revision_equal
+  require_complete: true
+  require_trusted: true
+physical:
+  etf_ticker: A069500
+  minimum_realized_etf: 0.10
+  direct_stock_cap_floor: 0.10
+  unwind_horizon_days: 63
+search:
+  retry_generation: 1
+  family_allocations:
+    - {market: 1.00, consensus: 0.00, control_only: true}
+    - {market: 0.75, consensus: 0.25, control_only: false}
+    - {market: 0.50, consensus: 0.50, control_only: false}
+    - {market: 0.25, consensus: 0.75, control_only: false}
+    - {market: 0.00, consensus: 1.00, control_only: true}
+  etf_sleeves: [0.30, 0.40, 0.50]
+  alpha_multipliers: [0.05, 0.10, 0.20]
+  financing_budgets: [0.00, 0.10, 0.20]
+selection:
+  require_market_and_consensus: true
+  minimum_positive_fraction: 0.50
+  minimum_historical_annual_excess: 0.01
+  minimum_cumulative_excess: 0.07
+  worst_weight: 0.70
+  mean_weight: 0.30
+governance:
+  cost_application: once_after_cross_family_physical_netting
+  true_forward_oos: false
+  freeze_after_selection: true

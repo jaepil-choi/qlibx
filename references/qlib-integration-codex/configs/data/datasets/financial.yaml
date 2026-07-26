@@ -1,0 +1,41 @@
+datasets:
+  financial_statement_items:
+    kind: table
+    sources: [fng_statement_items]
+    query: |
+      select
+        statement_scope,
+        ticker,
+        fiscal_period,
+        settlement_type,
+        account_code,
+        numeric_value
+      from fng_statement_items
+
+  financial_quarterly_items:
+    kind: table
+    sources: [fng_statement_items]
+    query: |
+      select
+        statement_scope,
+        ticker,
+        fiscal_period,
+        settlement_type,
+        account_code,
+        numeric_value
+      from fng_statement_items
+      where settlement_type in ('1', '2', '3', '4', 'A', 'B', 'C', 'D')
+
+  financial_dividend_items:
+    kind: table
+    sources: [fng_dividend_items]
+    query: |
+      select
+        ticker,
+        fiscal_period,
+        dividend_type_1,
+        dividend_type_2,
+        total_dividend_amount
+      from fng_dividend_items
+      where dividend_type_1 = '10'
+        and dividend_type_2 = '20'

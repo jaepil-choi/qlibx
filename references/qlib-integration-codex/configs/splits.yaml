@@ -1,0 +1,24 @@
+schema_version: 1
+
+historical_research:
+  start: 2018-01-02
+  end: 2026-07-20
+  method: expanding_walk_forward
+  validation_unit: calendar_year
+  first_validation_year: 2021
+  minimum_train_years: 3
+  purge_days: 63
+  embargo_days: 63
+  true_oos: false
+
+selection:
+  worst_weight: 0.70
+  mean_weight: 0.30
+  minimum_positive_fraction: 0.50
+
+forward_policy:
+  requires_frozen_definition: true
+  requires_frozen_data_config: true
+  requires_frozen_family_membership: true
+  requires_frozen_sizing: true
+  label: forward_oos

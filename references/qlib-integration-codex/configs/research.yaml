@@ -1,0 +1,19 @@
+schema_version: 1
+
+catalog:
+  path: research/alpha_pool.duckdb
+  artifact_root: research/artifacts
+
+publication:
+  worker_writes_catalog: false
+  publish_manifest: manifest.json
+  rebuild_from_manifests: true
+
+eligibility:
+  maximum_rebalance_days: 63
+  trusted_families: [market, consensus]
+  excluded_tracks: [financial_shadow, legacy]
+
+leaderboards:
+  eligible: research/leaderboard/eligible
+  historical: research/leaderboard/historical

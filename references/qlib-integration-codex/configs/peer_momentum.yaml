@@ -1,0 +1,17 @@
+# Qlib peer-momentum twin 실행 설정입니다.
+# 이 파일은 production configs가 아니라 qlib-integration-codex가 소유합니다.
+
+peer_momentum:
+  strategy_id: peer_momentum.ew_decay.top_kpct
+  cash_frame_definition: peer_rebound_equal_weight
+  peer_group_dataset: industry_code
+  decay_window: 5
+  decay_dense: false
+  top_fraction: 0.05
+  physical_etf_ticker: A069500
+  account: 1000000000.0
+  risk_degree: 0.999
+  max_volume_participation: 0.10
+  lot_size:
+    stock: 1
+    etf: 1

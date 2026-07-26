@@ -1,0 +1,14 @@
+schema_version: 1
+
+paths:
+  project: .
+  repository: ..
+  preprocessed: ../data/preprocessed
+  raw_dw: ../data/DW
+
+catalog:
+  source_file: sources.yaml
+  dataset_files:
+    - datasets/market.yaml
+    - datasets/consensus.yaml
+    - datasets/financial.yaml

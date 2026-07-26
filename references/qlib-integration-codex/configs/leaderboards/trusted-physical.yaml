@@ -1,0 +1,17 @@
+schema_version: 1
+eligible:
+  portfolio_key: portfolio.trusted_market_consensus.physical
+  selection_generation: 3
+  maximum_rebalance_days: 63
+  minimum_positive_fraction: 0.50
+  minimum_annual_net_excess: 0.01
+  minimum_cumulative_relative_wealth_excess: 0.07
+  required_families: [market, consensus]
+  leaderboard_size: 3
+  ranking:
+    worst_fold_weight: 0.70
+    mean_fold_weight: 0.30
+historical:
+  source_manifest: research/leaderboard_manifest.json
+  status: deprecated_historical_prior_informed
+

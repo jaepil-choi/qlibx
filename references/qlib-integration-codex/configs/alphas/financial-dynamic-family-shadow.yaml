@@ -1,0 +1,80 @@
+schema_version: 1
+key: financial.statement_and_dividend.dynamic_quarterly_shadow
+family: financial
+track: financial_shadow
+hypothesis: >-
+  Value and capital-efficiency signals with different accounting mechanisms
+  should diversify when their family weights are updated causally once per
+  quarter using only lagged realized alpha returns.
+inputs:
+  statement_items: financial_statement_items
+  dividend_items: financial_dividend_items
+  market_cap: market_cap
+  returns: adjusted_return
+  membership: k200_membership
+  industry: industry_code
+signal:
+  implementation: dynamic_financial_family_allocation
+  source_script: research/financial/run_dynamic_family_research.py
+availability:
+  method: fiscal_period_end_plus_calendar_months
+  months: 3
+  exact_point_in_time: false
+execution:
+  order_calendar_key: financial_dynamic_63d_v1
+  lag_days: 1
+  rebalance_days: 63
+  max_holding_days: 63
+neutralization:
+  methods: [market_demean, industry_demean]
+  transform: cross_sectional_rank
+  exact_zero_net: true
+candidate_pool:
+  # Generation 1 contained 42 common 63d baseline attempts. This smaller
+  # Generation 2 pool was frozen using 2018-2023 results and actual 3/23bp
+  # standalone cost proxies; 2024+ holdout was not inspected for the rule.
+  - {feature: capital_light_composite, neutralization: market}
+  - {feature: low_depreciation_intensity, neutralization: market}
+  - {feature: low_lease_intensity, neutralization: market}
+  - {feature: low_sga_intensity, neutralization: market}
+  - {feature: sales_yield, neutralization: market}
+  - {feature: book_to_market, neutralization: market}
+  - {feature: value_composite, neutralization: market}
+  - {feature: dividend_yield, neutralization: market}
+  - {feature: value_composite, neutralization: industry}
+  - {feature: dividend_yield, neutralization: industry}
+  - {feature: sales_yield, neutralization: industry}
+  - {feature: operating_yield, neutralization: industry}
+member_selection:
+  require_positive_development_net_return: true
+  require_positive_validation_net_return: true
+  maximum_development_return_correlation: 0.85
+  maximum_members: 8
+  objective: maximize_worst_development_validation_net_sharpe
+allocation:
+  rebalance_days: 63
+  lookback_days: 252
+  minimum_history_days: 126
+  rules:
+    - equal_weight
+    - inverse_volatility
+    - momentum
+    - momentum_risk
+    - minimum_variance_turnover
+    - diversification
+    - drawdown_adjusted_momentum
+    - return_to_turnover
+selection:
+  objective: maximize_worst_development_validation_net_sharpe_after_crossing_cost
+  holdout_not_used: true
+search:
+  frozen: true
+  generation_1_attempts: 42
+  generation_2_candidate_count: 12
+  allocation_idea_count: 8
+governance:
+  eligible_for_trusted_leaderboard: false
+  reason: exact filing and restatement timestamps are unavailable
+  cost_application: once_after_same_calendar_member_crossing
+  buy_cost_bps: 3
+  sell_cost_bps: 23

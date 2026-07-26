@@ -1,0 +1,19 @@
+# Python and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Build products
+build/
+*.egg-info/
+
+# Generated prototype output trees
+outputs/
+results/
+/research/
+
+# Superseded review notes and retired prototype drafts
+claude-code-review.md
+critical-review.md
+weight-strategy-twin/old/

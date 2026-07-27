@@ -1,0 +1,26 @@
+schema_version: 1
+
+loop:
+  max_milestones_per_session: 12
+  repeated_failure_limit: 3
+  require_strategy_change_after_failure: 2
+  require_state_checkpoint_before_compaction: true
+
+planning:
+  exec_plan_required_when:
+    estimated_minutes_over: 30
+    affected_responsibilities_over: 2
+    uncertain_requirements: true
+    resumable_work_required: true
+
+approval:
+  git_stage: user
+  git_commit: user
+  git_push: user
+  database_query: per-query
+  external_publish: user
+
+completion:
+  require_acceptance_check: true
+  require_validation_evidence: true
+  reject_unresolved_implicit_approval: true

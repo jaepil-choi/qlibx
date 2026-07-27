@@ -1,0 +1,32 @@
+schema_version: 1
+
+project:
+  name: qlibx
+  kind: python-package
+
+canonical_documents:
+  product_requirements: docs/qlibx-prd.md
+
+non_authoritative_directories:
+  - references
+
+commands:
+  environment_manager: uv
+  install: uv sync
+  test: uv run pytest
+  test_unit: uv run pytest tests/unit
+  lint: uv run ruff check .
+  format_check: uv run ruff format --check .
+  build: uv build
+
+workflow:
+  experiment_root: experiments
+  showcase_root: showcases
+  implementation_log_root: docs/implementations
+  active_plan_root: .agent/plans/active
+  completed_plan_root: .agent/plans/completed
+  run_state_root: .agent/runs
+
+environment:
+  corporate_profile: auto
+  explicit_profile_variable: AGENT_CORPORATE_PROFILE

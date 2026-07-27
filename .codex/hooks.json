@@ -1,0 +1,59 @@
+{
+  "description": "Project-local guardrails and resumability reminders for the agent harness.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -File \"$(git rev-parse --show-toplevel)/.codex/hooks/session-start.ps1\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path (git rev-parse --show-toplevel) '.codex\\hooks\\session-start.ps1')\"",
+            "timeout": 15,
+            "statusMessage": "Loading project harness"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -File \"$(git rev-parse --show-toplevel)/.codex/hooks/pre-tool-policy.ps1\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path (git rev-parse --show-toplevel) '.codex\\hooks\\pre-tool-policy.ps1')\"",
+            "timeout": 10,
+            "statusMessage": "Checking repository policy"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -File \"$(git rev-parse --show-toplevel)/.codex/hooks/pre-compact.ps1\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path (git rev-parse --show-toplevel) '.codex\\hooks\\pre-compact.ps1')\"",
+            "timeout": 10,
+            "statusMessage": "Checking durable task state"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -File \"$(git rev-parse --show-toplevel)/.codex/hooks/stop-check.ps1\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path (git rev-parse --show-toplevel) '.codex\\hooks\\stop-check.ps1')\"",
+            "timeout": 10,
+            "statusMessage": "Checking completion state"
+          }
+        ]
+      }
+    ]
+  }
+}

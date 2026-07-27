@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dependency Change"
+  short_description: "Change uv dependencies and locks with evidence"
+  default_prompt: "Use $dependency-change to make a controlled dependency or lockfile change."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Compatibility Matrix"
+  short_description: "Verify Python versions with staged evidence"
+  default_prompt: "Use $python-compatibility-matrix to verify this package across its declared Python versions."

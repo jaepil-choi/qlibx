@@ -1,0 +1,4 @@
+interface:
+  display_name: "Package Release"
+  short_description: "Build and verify Python release artifacts"
+  default_prompt: "Use $package-release to prepare and verify a Python package release without publishing until approved."

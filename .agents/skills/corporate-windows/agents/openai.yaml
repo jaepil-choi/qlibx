@@ -1,0 +1,4 @@
+interface:
+  display_name: "Corporate Windows"
+  short_description: "Diagnose corporate Windows environment failures"
+  default_prompt: "Use $corporate-windows to diagnose this Windows, certificate, uv, path, or enterprise access failure safely."

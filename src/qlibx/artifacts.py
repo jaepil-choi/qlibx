@@ -14,10 +14,12 @@ from typing import Any, Literal
 import pandas as pd
 
 from qlibx.project import Project
-from qlibx.serialization import canonical_bytes as _canonical
-from qlibx.serialization import digest_bytes as _digest
-from qlibx.serialization import digest_file as _file_digest
-from qlibx.serialization import validate_name
+from qlibx.serialization import (
+    canonical_bytes,
+    digest_document,
+    digest_file,
+    validate_name,
+)
 from qlibx.strategy import DecisionResult
 
 ArtifactStatus = Literal["complete", "incomplete", "invalid"]
@@ -93,7 +95,7 @@ class ArtifactStore:
         staging.mkdir(parents=True, exist_ok=False)
         try:
             payload_format, payload = _write_payload(staging, value)
-            payload_digest = _file_digest(payload)
+            payload_digest = digest_file(payload)
             identity = {
                 "schema_version": 1,
                 "artifact_type": artifact_type,
@@ -108,7 +110,7 @@ class ArtifactStore:
                 "data_semantics": data_semantics,
                 "status": status,
             }
-            artifact_id = _digest(_canonical(identity))
+            artifact_id = digest_document(identity)
             final = self.root / run_id / artifact_id
             envelope = ArtifactEnvelope(
                 artifact_type=artifact_type,
@@ -136,7 +138,7 @@ class ArtifactStore:
                 diagnostics=dict(diagnostics or {}),
                 status=status,
             )
-            (staging / "envelope.json").write_bytes(_canonical(_envelope_json(envelope)))
+            (staging / "envelope.json").write_bytes(canonical_bytes(_envelope_json(envelope)))
             final.parent.mkdir(parents=True, exist_ok=True)
             if final.exists():
                 existing = self.load(artifact_id, run_id=run_id)
@@ -163,7 +165,7 @@ class ArtifactStore:
         for key in ("parent_artifact_ids", "input_artifact_ids", "time_range", "warnings"):
             raw[key] = tuple(raw[key])
         envelope = ArtifactEnvelope(payload_path=payload, **raw)
-        if _file_digest(payload) != envelope.payload_digest:
+        if digest_file(payload) != envelope.payload_digest:
             raise ValueError(f"artifact payload is corrupt: {artifact_id}")
         return envelope
 
@@ -188,13 +190,13 @@ class ArtifactStore:
             payload = artifact_dir / envelope.payload_path.name
             shutil.copy2(envelope.payload_path, payload)
             envelope_path = artifact_dir / "envelope.json"
-            envelope_path.write_bytes(_canonical(_envelope_json(envelope)))
+            envelope_path.write_bytes(canonical_bytes(_envelope_json(envelope)))
             entries.append(
                 {
                     "artifact_id": artifact_id,
                     "run_id": envelope.run_id,
                     "payload_digest": envelope.payload_digest,
-                    "envelope_digest": _file_digest(envelope_path),
+                    "envelope_digest": digest_file(envelope_path),
                 }
             )
         manifest = {
@@ -202,7 +204,7 @@ class ArtifactStore:
             "portable_formats": ["json", "parquet"],
             "artifacts": entries,
         }
-        (destination / "bundle.json").write_bytes(_canonical(manifest))
+        (destination / "bundle.json").write_bytes(canonical_bytes(manifest))
         return destination
 
     def import_bundle(self, bundle: str | Path) -> tuple[ArtifactEnvelope, ...]:
@@ -214,11 +216,11 @@ class ArtifactStore:
         for item in manifest["artifacts"]:
             directory = source / item["artifact_id"]
             envelope_path = directory / "envelope.json"
-            if _file_digest(envelope_path) != item["envelope_digest"]:
+            if digest_file(envelope_path) != item["envelope_digest"]:
                 raise ValueError(f"corrupt artifact envelope: {item['artifact_id']}")
             raw = json.loads(envelope_path.read_text(encoding="utf-8"))
             payload = directory / raw["payload_file"]
-            if _file_digest(payload) != item["payload_digest"]:
+            if digest_file(payload) != item["payload_digest"]:
                 raise ValueError(f"corrupt artifact payload: {item['artifact_id']}")
             final = self.root / item["run_id"] / item["artifact_id"]
             final.parent.mkdir(parents=True, exist_ok=True)
@@ -267,7 +269,7 @@ def _write_payload(directory: Path, value: Any) -> tuple[Literal["parquet", "jso
         value.to_parquet(path, index=True)
         return "parquet", path
     path = directory / "payload.json"
-    path.write_bytes(_canonical(value))
+    path.write_bytes(canonical_bytes(value))
     return "json", path
 
 

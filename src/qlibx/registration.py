@@ -16,7 +16,7 @@ import pyarrow.parquet as pq
 from qlibx.config import read_yaml, require_mapping, require_string, require_strings
 from qlibx.errors import QlibxError
 from qlibx.project import Project
-from qlibx.serialization import digest_file as _digest
+from qlibx.serialization import digest_file
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +135,7 @@ def plan_registration(project: Project, dataset_id: str) -> RegistrationPlan:
         dataset_id=dataset_id,
         source=str(spec.source),
         output=str(spec.output),
-        source_sha256=_digest(spec.source),
+        source_sha256=digest_file(spec.source),
         source_rows=parquet.metadata.num_rows,
         source_columns=required,
         canonical_columns=("available_at", "ticker", *spec.information),
@@ -187,7 +187,7 @@ def register_dataset(project: Project, dataset_id: str) -> RegistrationResult:
     staging = spec.output.with_name(f".{spec.output.name}.{uuid4().hex}.staging")
     try:
         pq.write_table(canonical, staging, compression="zstd")
-        if _digest(spec.source) != plan.source_sha256:
+        if digest_file(spec.source) != plan.source_sha256:
             raise QlibxError(
                 "QLIBX_SOURCE_CHANGED_DURING_REGISTRATION",
                 "Source changed during registration",
@@ -209,7 +209,7 @@ def register_dataset(project: Project, dataset_id: str) -> RegistrationResult:
             "output": str(spec.output),
         },
         "source_sha256": plan.source_sha256,
-        "output_sha256": _digest(spec.output),
+        "output_sha256": digest_file(spec.output),
         "rows": canonical.num_rows,
         "columns": names,
         "coverage_start": str(coverage_start) if coverage_start else None,

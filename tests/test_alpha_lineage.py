@@ -18,6 +18,7 @@ from qlibx.alpha import (
     register_operation,
     top_bottom,
 )
+from qlibx.errors import QlibxError
 
 
 def test_builtin_operation_has_versioned_deterministic_lineage() -> None:
@@ -127,8 +128,10 @@ def test_registered_operations_compose_into_one_lineage_chain() -> None:
 
 def test_unknown_operation_and_parameter_fail_explicitly() -> None:
     values = pd.DataFrame([[1.0, 2.0]], columns=["A", "B"])
-    with pytest.raises(ValueError, match="unknown alpha operation"):
+    with pytest.raises(QlibxError) as unknown:
         apply_transform("not_an_operation", values)
+    assert unknown.value.code == "QLIBX_ALPHA_OPERATION_UNKNOWN"
+    assert "cross_sectional_rank" in unknown.value.context["available"]
     with pytest.raises(ValueError, match="does not accept parameters"):
         apply_transform("linear_decay", values, windwo=2)
     with pytest.raises(ValueError, match="requires parameters"):
@@ -197,5 +200,7 @@ def test_budget_policies_are_registered_and_report_leftover() -> None:
     finally:
         BUDGET_POLICIES.unregister("test_half")
 
-    with pytest.raises(ValueError, match="unknown budget policy"):
+    with pytest.raises(QlibxError) as unknown:
         apply_budget(weights, policy="not_a_policy")
+    assert unknown.value.code == "QLIBX_BUDGET_POLICY_UNKNOWN"
+    assert unknown.value.context["available"] == ["fixed", "flexible"]

@@ -13,6 +13,7 @@ import pandas as pd
 
 from qlibx.alpha import OperationSpec
 from qlibx.artifacts import ArtifactEnvelope
+from qlibx.errors import unknown_name
 from qlibx.project import Project
 
 
@@ -113,7 +114,9 @@ CONTRACTS: Mapping[str, ExtensionContract] = {
 
 def extension_contract(name: str) -> ExtensionContract:
     if name not in CONTRACTS:
-        raise ValueError(f"unknown extension contract: {name}")
+        raise unknown_name(
+            "QLIBX_EXTENSION_CONTRACT_UNKNOWN", "extension contract", name, CONTRACTS
+        )
     return CONTRACTS[name]
 
 

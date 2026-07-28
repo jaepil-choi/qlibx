@@ -6,7 +6,7 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -18,9 +18,12 @@ import pandas as pd
 
 from qlibx.orthogonality import AlphaDescriptor, OrthogonalityResult, compare_alpha
 from qlibx.project import Project
-from qlibx.serialization import canonical_bytes as _canonical
-from qlibx.serialization import digest_bytes as _digest
-from qlibx.serialization import validate_name
+from qlibx.serialization import (
+    canonical_bytes,
+    digest_bytes,
+    digest_document,
+    validate_name,
+)
 
 RunStatus = Literal["successful", "failed", "invalid", "abandoned"]
 DecisionKind = Literal["promote", "reject", "retain_diagnostic", "supersede"]
@@ -124,6 +127,41 @@ class ResearchContext:
     research_gaps: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _EventProjection:
+    """Everything the append-only event log answers, folded in a single pass.
+
+    The log only grows, so each question asked of it costs a full scan. Reading it once
+    per public operation keeps a catalog query linear in the log rather than linear per
+    question, without caching across calls -- a parallel agent may have appended since.
+    """
+
+    committed_record_ids: frozenset[str]
+    committed_attempt_ids: frozenset[str]
+    started_attempts: Mapping[str, Mapping[str, Any]]
+    latest_decisions: Mapping[str, Mapping[str, Any]]
+
+    @classmethod
+    def build(cls, events: Sequence[Mapping[str, Any]]) -> _EventProjection:
+        records: set[str] = set()
+        attempts: set[str] = set()
+        started: dict[str, Mapping[str, Any]] = {}
+        decisions: dict[str, Mapping[str, Any]] = {}
+        for event in events:
+            payload = event.get("payload", {})
+            event_type = event.get("event_type")
+            if event_type == "attempt_started":
+                started[str(payload["attempt_id"])] = payload
+            elif event_type == "publish_commit":
+                records.add(str(payload["record_id"]))
+                attempts.add(str(payload["attempt_id"]))
+            elif event_type == "research_decision":
+                target_id = str(payload["target_id"])
+                if int(payload["version"]) >= int(decisions.get(target_id, {}).get("version", -1)):
+                    decisions[target_id] = payload
+        return cls(frozenset(records), frozenset(attempts), started, decisions)
+
+
 class ResearchCatalog:
     """File authority with append-only events and a rebuildable DuckDB projection."""
 
@@ -169,7 +207,7 @@ class ResearchCatalog:
             payload = path.read_bytes()
             configs[name] = {
                 "source_path": str(path),
-                "sha256": _digest(payload),
+                "sha256": digest_bytes(payload),
                 "content": payload.decode("utf-8"),
             }
         body = {
@@ -180,9 +218,9 @@ class ResearchCatalog:
             "component_versions": dict(component_versions),
             "seed": seed,
         }
-        bundle_id = _digest(_canonical(body))
+        bundle_id = digest_document(body)
         path = self.frozen / f"{bundle_id}.json"
-        _write_once(path, _canonical({**body, "bundle_id": bundle_id}))
+        _write_once(path, canonical_bytes({**body, "bundle_id": bundle_id}))
         return FrozenRunBundle(
             bundle_id,
             session_id,
@@ -199,7 +237,7 @@ class ResearchCatalog:
             raise ValueError(f"unknown frozen run bundle: {bundle_id}")
         body = json.loads(path.read_text(encoding="utf-8"))
         expected = body.pop("bundle_id")
-        if expected != bundle_id or _digest(_canonical(body)) != bundle_id:
+        if expected != bundle_id or digest_document(body) != bundle_id:
             raise ValueError(f"corrupt frozen run bundle: {bundle_id}")
         return {**body, "bundle_id": bundle_id}
 
@@ -218,9 +256,9 @@ class ResearchCatalog:
             "agent_id": agent_id,
             "proposal": asdict(proposal),
         }
-        proposal_id = _digest(_canonical(body))
+        proposal_id = digest_document(body)
         payload = {**body, "proposal_id": proposal_id, "version": 0, "status": "active"}
-        _write_once(self.proposals / f"{proposal_id}.json", _canonical(payload))
+        _write_once(self.proposals / f"{proposal_id}.json", canonical_bytes(payload))
         self._append_event("proposal_created", payload)
         return ProposalRecord(proposal_id, session_id, agent_id, proposal, 0, "active")
 
@@ -264,9 +302,9 @@ class ResearchCatalog:
         kind: str,
         result_key: str | None = None,
     ) -> StagedAttempt:
-        invocation_snapshot = json.loads(_canonical(invocation))
-        invocation_id = _digest(_canonical(invocation_snapshot))
-        key = result_key or _digest(_canonical({"kind": kind, "invocation": invocation_id}))
+        invocation_snapshot = json.loads(canonical_bytes(invocation))
+        invocation_id = digest_document(invocation_snapshot)
+        key = result_key or digest_document({"kind": kind, "invocation": invocation_id})
         attempt_id = f"attempt-{uuid.uuid4().hex}"
         directory = self.staging / session_id / attempt_id
         directory.mkdir(parents=True, exist_ok=False)
@@ -278,7 +316,7 @@ class ResearchCatalog:
             "kind": kind,
             "invocation": invocation_snapshot,
         }
-        (directory / "attempt.json").write_bytes(_canonical(descriptor))
+        (directory / "attempt.json").write_bytes(canonical_bytes(descriptor))
         self._append_event("attempt_started", descriptor)
         return StagedAttempt(session_id, invocation_id, attempt_id, key, kind, directory)
 
@@ -291,7 +329,7 @@ class ResearchCatalog:
     def stage_json(self, attempt: StagedAttempt, name: str, value: Any) -> Path:
         validate_name(name)
         path = attempt.directory / f"{name}.json"
-        path.write_bytes(_canonical(value))
+        path.write_bytes(canonical_bytes(value))
         return path
 
     def prepare_publication(
@@ -316,7 +354,7 @@ class ResearchCatalog:
         artifacts = tuple(self._describe(path) for path in staged_files)
         manifest = {
             "schema_version": 1,
-            "record_id": _digest(_canonical({"result_key": attempt.result_key})),
+            "record_id": digest_document({"result_key": attempt.result_key}),
             "result_key": attempt.result_key,
             "invocation_id": attempt.invocation_id,
             "attempt_id": attempt.attempt_id,
@@ -324,7 +362,7 @@ class ResearchCatalog:
             "kind": attempt.kind,
             "status": status,
             "parents": list(parents),
-            "metadata": json.loads(_canonical(metadata)),
+            "metadata": json.loads(canonical_bytes(metadata)),
             "artifacts": [asdict(artifact) for artifact in artifacts],
         }
         body = {
@@ -332,7 +370,7 @@ class ResearchCatalog:
             "staged_files": [str(path.resolve()) for path in staged_files],
         }
         plan_path = self.prepared / f"{attempt.attempt_id}.json"
-        _write_once(plan_path, _canonical(body))
+        _write_once(plan_path, canonical_bytes(body))
         self._append_event(
             "publish_intent",
             {"record_id": manifest["record_id"], "attempt_id": attempt.attempt_id},
@@ -341,11 +379,11 @@ class ResearchCatalog:
 
     def install_publication(self, plan: PublicationPlan) -> None:
         for path, artifact in zip(plan.staged_files, plan.artifacts, strict=True):
-            if not path.exists() or _digest(path.read_bytes()) != artifact.blob_digest:
+            if not path.exists() or digest_bytes(path.read_bytes()) != artifact.blob_digest:
                 raise ValueError(f"staged artifact changed: {path}")
             destination = self.blobs / artifact.blob_digest
             if destination.exists():
-                if _digest(destination.read_bytes()) != artifact.blob_digest:
+                if digest_bytes(destination.read_bytes()) != artifact.blob_digest:
                     raise ValueError(f"corrupt existing blob: {artifact.blob_digest}")
             else:
                 _write_once(destination, path.read_bytes())
@@ -357,7 +395,7 @@ class ResearchCatalog:
                     f"concurrent result identity conflict: {plan.manifest['result_key']}"
                 )
         else:
-            _write_once(record_path, _canonical(plan.manifest))
+            _write_once(record_path, canonical_bytes(plan.manifest))
 
     def commit_publication(
         self, plan: PublicationPlan, *, recovered: bool = False
@@ -405,7 +443,8 @@ class ResearchCatalog:
 
     def recover_publications(self) -> tuple[Mapping[str, Any], ...]:
         outcomes: list[Mapping[str, Any]] = []
-        committed = self._committed_record_ids()
+        # Local mutable copy: each recovery commits one more record within this loop.
+        committed = set(self._committed_record_ids())
         for path in sorted(self.prepared.glob("*.json")):
             plan = self._load_publication_plan(path)
             record_id = str(plan.manifest["record_id"])
@@ -432,12 +471,13 @@ class ResearchCatalog:
         research_gaps: Sequence[str] = (),
         limit: int = 10,
     ) -> ResearchContext:
-        results = self.list_results()
+        projection = self._project()
+        results = self.list_results(projection=projection)
         proposals = tuple(
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(self.proposals.glob("*.json"))
         )
-        decisions = self._latest_decisions()
+        decisions = projection.latest_decisions
         active = tuple(
             item
             for item in proposals
@@ -457,7 +497,7 @@ class ResearchCatalog:
         )
         return ResearchContext(
             prior_results=results[-limit:],
-            incomplete_attempts=self.list_incomplete_attempts(),
+            incomplete_attempts=self.list_incomplete_attempts(projection=projection),
             searched_parameter_ranges=searched[-limit:],
             active_proposals=active[-limit:],
             nearest_neighbors=nearest,
@@ -466,28 +506,18 @@ class ResearchCatalog:
             research_gaps=tuple(research_gaps),
         )
 
-    def list_incomplete_attempts(self) -> tuple[Mapping[str, Any], ...]:
-        started: dict[str, Mapping[str, Any]] = {}
-        committed_attempts: set[str] = set()
-        for event in self._read_events():
-            payload = event.get("payload", {})
-            if event.get("event_type") == "attempt_started":
-                started[str(payload["attempt_id"])] = payload
-            if event.get("event_type") == "publish_commit":
-                committed_attempts.add(str(payload["attempt_id"]))
+    def list_incomplete_attempts(
+        self, *, projection: _EventProjection | None = None
+    ) -> tuple[Mapping[str, Any], ...]:
+        resolved = self._project() if projection is None else projection
         return tuple(
             {**value, "status": "incomplete"}
-            for key, value in sorted(started.items())
-            if key not in committed_attempts
+            for key, value in sorted(resolved.started_attempts.items())
+            if key not in resolved.committed_attempt_ids
         )
 
     def rebuild_projection(self) -> Path:
-        committed = self._committed_record_ids()
-        rows = [
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in self.records.glob("*.json")
-            if path.stem in committed and self._installed_manifest_valid_path(path)
-        ]
+        rows = list(self._verified_records())
         with duckdb.connect(str(self.projection)) as connection:
             connection.execute("drop table if exists records")
             connection.execute(
@@ -515,25 +545,36 @@ class ResearchCatalog:
                 )
         return self.projection
 
-    def list_results(self, *, status: RunStatus | None = None) -> tuple[Mapping[str, Any], ...]:
-        committed = self._committed_record_ids()
-        records = tuple(
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in sorted(self.records.glob("*.json"))
-            if path.stem in committed and self._installed_manifest_valid_path(path)
-        )
+    def list_results(
+        self,
+        *,
+        status: RunStatus | None = None,
+        projection: _EventProjection | None = None,
+    ) -> tuple[Mapping[str, Any], ...]:
+        records = tuple(self._verified_records(projection=projection))
         if status is None:
             return records
         return tuple(record for record in records if record["status"] == status)
+
+    def _verified_records(
+        self, *, projection: _EventProjection | None = None
+    ) -> Iterator[Mapping[str, Any]]:
+        """Yield each committed record whose installed artifacts still verify."""
+        committed = (self._project() if projection is None else projection).committed_record_ids
+        for path in sorted(self.records.glob("*.json")):
+            if path.stem not in committed:
+                continue
+            manifest = _read_manifest(path)
+            if manifest is not None and self._installed_manifest_valid(manifest):
+                yield manifest
 
     def load_artifact(self, record_id: str, name: str) -> pd.DataFrame | Any:
         """Load one hash-verified artifact from a committed complete record."""
         if record_id not in self._committed_record_ids():
             raise ValueError(f"record is not committed: {record_id}")
-        path = self.records / f"{record_id}.json"
-        if not self._installed_manifest_valid_path(path):
+        manifest = _read_manifest(self.records / f"{record_id}.json")
+        if manifest is None or not self._installed_manifest_valid(manifest):
             raise ValueError(f"record artifacts are incomplete or corrupt: {record_id}")
-        manifest = json.loads(path.read_text(encoding="utf-8"))
         matches = [artifact for artifact in manifest["artifacts"] if artifact["name"] == name]
         if len(matches) != 1:
             raise ValueError(f"record {record_id} has no unique artifact named {name}")
@@ -552,13 +593,6 @@ class ResearchCatalog:
         artifacts = tuple(ArtifactRecord(**item) for item in manifest["artifacts"])
         return PublicationPlan(path, manifest, files, artifacts)
 
-    def _installed_manifest_valid_path(self, path: Path) -> bool:
-        try:
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return False
-        return self._installed_manifest_valid(manifest)
-
     def _installed_manifest_valid(self, manifest: Mapping[str, Any]) -> bool:
         record_path = self.records / f"{manifest['record_id']}.json"
         if not record_path.exists():
@@ -567,18 +601,18 @@ class ResearchCatalog:
             stored = json.loads(record_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return False
-        if not self._same_result(_canonical(stored), manifest):
+        if not self._same_result(canonical_bytes(stored), manifest):
             return False
         for artifact in manifest["artifacts"]:
             path = self.blobs / artifact["blob_digest"]
-            if not path.exists() or _digest(path.read_bytes()) != artifact["blob_digest"]:
+            if not path.exists() or digest_bytes(path.read_bytes()) != artifact["blob_digest"]:
                 return False
         return True
 
     def _describe(self, path: Path) -> ArtifactRecord:
         payload = path.read_bytes()
         media_type = "application/x-parquet" if path.suffix == ".parquet" else "application/json"
-        return ArtifactRecord(path.stem, media_type, _digest(payload), len(payload))
+        return ArtifactRecord(path.stem, media_type, digest_bytes(payload), len(payload))
 
     def _append_event(self, event_type: str, payload: Mapping[str, Any]) -> None:
         event = {
@@ -587,7 +621,7 @@ class ResearchCatalog:
             "occurred_at": datetime.now(timezone.utc).isoformat(),
             "payload": payload,
         }
-        line = _canonical(event) + b"\n"
+        line = canonical_bytes(event) + b"\n"
         with self._lock("events"):
             descriptor = os.open(self.events, os.O_CREAT | os.O_APPEND | os.O_WRONLY)
             try:
@@ -607,32 +641,15 @@ class ResearchCatalog:
                 continue
         return tuple(events)
 
-    def _committed_record_ids(self) -> set[str]:
-        return {
-            str(event["payload"]["record_id"])
-            for event in self._read_events()
-            if event.get("event_type") == "publish_commit"
-        }
+    def _project(self) -> _EventProjection:
+        return _EventProjection.build(self._read_events())
+
+    def _committed_record_ids(self) -> frozenset[str]:
+        return self._project().committed_record_ids
 
     def _decision_version(self, target_id: str) -> int:
-        versions = [
-            int(event["payload"]["version"])
-            for event in self._read_events()
-            if event.get("event_type") == "research_decision"
-            and event.get("payload", {}).get("target_id") == target_id
-        ]
-        return max(versions, default=0)
-
-    def _latest_decisions(self) -> dict[str, Mapping[str, Any]]:
-        output: dict[str, Mapping[str, Any]] = {}
-        for event in self._read_events():
-            if event.get("event_type") != "research_decision":
-                continue
-            payload = event["payload"]
-            target_id = str(payload["target_id"])
-            if int(payload["version"]) >= int(output.get(target_id, {}).get("version", -1)):
-                output[target_id] = payload
-        return output
+        decision = self._project().latest_decisions.get(target_id)
+        return 0 if decision is None else int(decision["version"])
 
     def _nearest(
         self,
@@ -706,6 +723,14 @@ def _semantic_terms(value: Mapping[str, Any]) -> set[str]:
         else:
             output.add(f"{key}:{item}")
     return output
+
+
+def _read_manifest(path: Path) -> Mapping[str, Any] | None:
+    """Read one stored manifest, treating an unreadable file as absent rather than fatal."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _write_once(path: Path, payload: bytes) -> None:

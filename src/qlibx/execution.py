@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -42,6 +41,82 @@ from .strategy import (
 def open_run_catalog(path: str | Path) -> RunCatalog:
     """Open a verified, immutable-artifact run catalog."""
     return RunCatalog.open(path)
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionScenario:
+    """The market inputs the Qlib backend reads, declared in exactly one place.
+
+    The backend consumes this by attribute. Naming the fields here turns an implicit
+    duck-typed boundary into a checked one: a renamed or forgotten field fails at
+    construction instead of surfacing as a missing attribute deep inside a backtest.
+    """
+
+    execution_price: pd.DataFrame
+    valuation_price: pd.DataFrame
+    universe: pd.DataFrame
+    booksize: float
+    active_booksize: float
+    position_unit_factor: pd.DataFrame
+    volume: pd.DataFrame
+    buyable: pd.DataFrame
+    sellable: pd.DataFrame
+    asset_class: pd.Series
+    lot_size: pd.Series
+    cost_policy: Mapping[str, Mapping[str, float]] | None
+    max_volume_participation: float
+    suspended: pd.DataFrame | None = None
+    upper_price_limit: pd.DataFrame | None = None
+    lower_price_limit: pd.DataFrame | None = None
+
+
+def _build_scenario(
+    *,
+    execution_price: pd.DataFrame,
+    valuation_price: pd.DataFrame,
+    universe: pd.DataFrame,
+    volume: pd.DataFrame,
+    initial_cash: float,
+    active_booksize: float | None,
+    position_unit_factor: pd.DataFrame | None,
+    tradable: pd.DataFrame | None,
+    instrument_type: pd.Series | None,
+    lot_size: pd.Series | None,
+    cost_policy: Mapping[str, Mapping[str, float]] | None,
+    max_volume_participation: float,
+) -> ExecutionScenario:
+    """Apply the documented defaults for every optional market input."""
+    instruments = execution_price.columns
+    available = (
+        pd.DataFrame(True, index=execution_price.index, columns=instruments)
+        if tradable is None
+        else tradable
+    )
+    return ExecutionScenario(
+        execution_price=execution_price,
+        valuation_price=valuation_price,
+        universe=universe,
+        booksize=float(initial_cash),
+        active_booksize=float(initial_cash if active_booksize is None else active_booksize),
+        position_unit_factor=(
+            pd.DataFrame(1.0, index=execution_price.index, columns=instruments)
+            if position_unit_factor is None
+            else position_unit_factor
+        ),
+        volume=volume,
+        buyable=available,
+        sellable=available,
+        asset_class=(
+            pd.Series("stock", index=instruments)
+            if instrument_type is None
+            else instrument_type.reindex(instruments)
+        ),
+        lot_size=(
+            pd.Series(1, index=instruments) if lot_size is None else lot_size.reindex(instruments)
+        ),
+        cost_policy=cost_policy,
+        max_volume_participation=max_volume_participation,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,39 +199,19 @@ def run_strategy_execution(
     if definition.output_kind != "weight":
         raise ValueError("Qlib strategy execution requires a declared weight output")
     instruments = execution_price.columns
-    factors = (
-        pd.DataFrame(1.0, index=execution_price.index, columns=instruments)
-        if position_unit_factor is None
-        else position_unit_factor
-    )
-    available_to_trade = (
-        pd.DataFrame(True, index=execution_price.index, columns=instruments)
-        if tradable is None
-        else tradable
-    )
-    scenario = SimpleNamespace(
+    scenario = _build_scenario(
         execution_price=execution_price,
         valuation_price=valuation_price,
         universe=universe,
-        booksize=float(initial_cash),
-        active_booksize=(float(initial_cash) if signed is None else float(signed.active_booksize)),
-        position_unit_factor=factors,
         volume=volume,
-        buyable=available_to_trade,
-        sellable=available_to_trade,
-        asset_class=(
-            pd.Series("stock", index=instruments)
-            if instrument_type is None
-            else instrument_type.reindex(instruments)
-        ),
-        lot_size=(
-            pd.Series(1, index=instruments) if lot_size is None else lot_size.reindex(instruments)
-        ),
+        initial_cash=initial_cash,
+        active_booksize=None if signed is None else signed.active_booksize,
+        position_unit_factor=position_unit_factor,
+        tradable=tradable,
+        instrument_type=instrument_type,
+        lot_size=lot_size,
         cost_policy=cost_policy,
         max_volume_participation=max_volume_participation,
-        suspended=None,
-        upper_price_limit=None,
-        lower_price_limit=None,
     )
     memory: Mapping[str, Any] = {} if checkpoint is None else dict(checkpoint.memory)
     feedback_history = [] if checkpoint is None else list(checkpoint.feedback_history)
@@ -326,34 +381,19 @@ def run_signed_execution(
 ) -> SignedExecutionResult:
     """Execute signed intent through real Qlib orders using matched capitalization."""
     instruments = execution_price.columns
-    factors = (
-        pd.DataFrame(1.0, index=execution_price.index, columns=instruments)
-        if position_unit_factor is None
-        else position_unit_factor
-    )
-    types = (
-        pd.Series("stock", index=instruments)
-        if instrument_type is None
-        else instrument_type.reindex(instruments)
-    )
-    lots = pd.Series(1, index=instruments) if lot_size is None else lot_size.reindex(instruments)
-    scenario = SimpleNamespace(
+    scenario = _build_scenario(
         execution_price=execution_price,
         valuation_price=valuation_price,
         universe=universe,
-        booksize=float(initial_cash),
-        active_booksize=float(active_booksize),
-        position_unit_factor=factors,
         volume=volume,
-        buyable=tradable,
-        sellable=tradable,
-        asset_class=types,
-        lot_size=lots,
+        initial_cash=initial_cash,
+        active_booksize=active_booksize,
+        position_unit_factor=position_unit_factor,
+        tradable=tradable,
+        instrument_type=instrument_type,
+        lot_size=lot_size,
         cost_policy=cost_policy,
         max_volume_participation=max_volume_participation,
-        suspended=None,
-        upper_price_limit=None,
-        lower_price_limit=None,
     )
     matched = MatchedCapitalizationInputs(
         signed_weights=signed_weights,

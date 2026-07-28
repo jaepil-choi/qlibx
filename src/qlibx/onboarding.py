@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from qlibx.errors import QlibxError
 from qlibx.project import Project
-from qlibx.serialization import digest_text as _text_digest
+from qlibx.serialization import digest_text
 
 START = "<!-- qlibx:managed:start -->"
 END = "<!-- qlibx:managed:end -->"
@@ -46,13 +46,13 @@ def plan_instruction(project: Project, target: str | Path) -> InstructionPlan:
         separator = "" if not before else ("" if before.endswith("\n\n") else "\n\n")
         after = before + separator + block + "\n"
         action = "create" if not path.exists() else "append"
-    return InstructionPlan(path, action, before, after, existed, _text_digest(before))
+    return InstructionPlan(path, action, before, after, existed, digest_text(before))
 
 
 def apply_instruction(plan: InstructionPlan) -> Path:
     exists = plan.path.exists()
     current = plan.path.read_text(encoding="utf-8") if exists else ""
-    if exists != plan.existed or _text_digest(current) != plan.before_digest:
+    if exists != plan.existed or digest_text(current) != plan.before_digest:
         raise QlibxError(
             "QLIBX_INSTRUCTION_STALE_PLAN",
             f"Instruction file changed after planning: {plan.path}",
@@ -73,11 +73,11 @@ def remove_instruction(project: Project, target: str | Path) -> InstructionPlan:
     existed = path.exists()
     before = path.read_text(encoding="utf-8") if existed else ""
     if START not in before or END not in before:
-        return InstructionPlan(path, "unchanged", before, before, existed, _text_digest(before))
+        return InstructionPlan(path, "unchanged", before, before, existed, digest_text(before))
     start = before.index(START)
     end = before.index(END, start) + len(END)
     after = (before[:start] + before[end:]).replace("\n\n\n", "\n\n")
-    return InstructionPlan(path, "remove", before, after, existed, _text_digest(before))
+    return InstructionPlan(path, "remove", before, after, existed, digest_text(before))
 
 
 def detect_instruction_targets(project: Project) -> tuple[dict[str, object], ...]:

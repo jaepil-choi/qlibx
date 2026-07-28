@@ -3,13 +3,14 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import pathlib
 
 import pytest
 
 from qlibx import alpha, ensemble, execution, reporting
 from qlibx.agent import error_guidance, public_example, public_schema, task_guide
 from qlibx.cli import dispatch, parser
-from qlibx.documentation import EXAMPLES
+from qlibx.documentation import ERROR_GUIDANCE, EXAMPLES
 from qlibx.errors import QlibxError
 
 
@@ -146,3 +147,43 @@ def test_every_registered_operation_is_documented_for_agents() -> None:
     for operation in alpha.list_operations():
         assert required <= set(operation), operation["name"]
         assert operation["summary"], operation["name"]
+
+
+def _raised_error_codes() -> set[str]:
+    """Collect every QlibxError code the package can raise, without importing behavior."""
+    codes: set[str] = set()
+    for path in pathlib.Path(alpha.__file__).parent.rglob("*.py"):
+        if "_vendor" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            is_error = isinstance(node, ast.Call) and getattr(node.func, "id", "") in {
+                "QlibxError",
+                "unknown_name",
+            }
+            if is_error and node.args and isinstance(node.args[0], ast.Constant):
+                codes.add(node.args[0].value)
+    return codes
+
+
+def test_every_raised_error_code_has_installed_recovery_guidance() -> None:
+    """`qlibx errors <code>` must answer for any code an agent can actually hit."""
+    raised = _raised_error_codes()
+    assert raised, "error-code scan found nothing; the AST walk is broken"
+    assert not raised - set(ERROR_GUIDANCE), "raised but undocumented"
+    assert not set(ERROR_GUIDANCE) - raised, "documented but unreachable"
+
+
+def test_unknown_name_lookups_share_one_structured_shape(capsys) -> None:
+    """A failed named lookup answers the same way whatever registry it came from."""
+    lookups = [
+        (["alpha", "operation", "nope"], "QLIBX_ALPHA_OPERATION_UNKNOWN"),
+        (["extension", "contract", "nope"], "QLIBX_EXTENSION_CONTRACT_UNKNOWN"),
+        (["docs", "nope"], "QLIBX_DOCUMENTATION_TOPIC_UNKNOWN"),
+    ]
+    for argv, code in lookups:
+        with pytest.raises(QlibxError) as failure:
+            dispatch(parser().parse_args(argv))
+        assert failure.value.code == code
+        assert set(failure.value.to_dict()) == {"code", "message", "action", "context"}
+        assert failure.value.context["available"], code
+        assert failure.value.context["requested"] == "nope"

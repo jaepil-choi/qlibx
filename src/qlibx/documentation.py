@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from qlibx.errors import QlibxError
+from qlibx.errors import QlibxError, unknown_name
 
 TOPICS: Mapping[str, str] = {
     "project": (
@@ -225,6 +225,23 @@ ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
     "QLIBX_DOCUMENTATION_TOPIC_UNKNOWN": {
         "recovery": (
             "Choose a topic, schema, example, or error code from the returned available list."
+        ),
+    },
+    "QLIBX_ALPHA_OPERATION_UNKNOWN": {
+        "recovery": (
+            "Run qlibx alpha operations and choose an installed name, or register your own "
+            "OperationSpec instead of editing the package."
+        ),
+    },
+    "QLIBX_BUDGET_POLICY_UNKNOWN": {
+        "recovery": (
+            "Run qlibx alpha budgets and choose an installed policy, or register your own "
+            "BudgetPolicySpec."
+        ),
+    },
+    "QLIBX_EXTENSION_CONTRACT_UNKNOWN": {
+        "recovery": (
+            "Run qlibx extension contracts and choose a contract the installed version offers."
         ),
     },
 }
@@ -827,9 +844,4 @@ def error_guidance(code: str) -> Mapping[str, Any]:
 
 
 def _unknown(kind: str, name: str, available: Mapping[str, Any]) -> QlibxError:
-    return QlibxError(
-        "QLIBX_DOCUMENTATION_TOPIC_UNKNOWN",
-        f"Unknown {kind}: {name!r}",
-        action=f"Choose one of {sorted(available)}.",
-        context={"kind": kind, "requested": name, "available": sorted(available)},
-    )
+    return unknown_name("QLIBX_DOCUMENTATION_TOPIC_UNKNOWN", kind, name, available)

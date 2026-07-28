@@ -16,6 +16,8 @@ from typing import Any
 
 import pandas as pd
 
+from qlibx.errors import unknown_name
+
 
 @dataclass(frozen=True, slots=True)
 class ExposureSummary:
@@ -176,8 +178,8 @@ class OperationRegistry:
         try:
             return self._specs[name]
         except KeyError as error:
-            raise ValueError(
-                f"unknown alpha operation: {name}; available: {sorted(self._specs)}"
+            raise unknown_name(
+                "QLIBX_ALPHA_OPERATION_UNKNOWN", "alpha operation", name, self._specs
             ) from error
 
     def names(self) -> tuple[str, ...]:
@@ -731,8 +733,8 @@ class BudgetPolicyRegistry:
         try:
             return self._policies[name]
         except KeyError as error:
-            raise ValueError(
-                f"unknown budget policy: {name}; available: {sorted(self._policies)}"
+            raise unknown_name(
+                "QLIBX_BUDGET_POLICY_UNKNOWN", "budget policy", name, self._policies
             ) from error
 
     def names(self) -> tuple[str, ...]:

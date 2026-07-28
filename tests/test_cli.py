@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -107,3 +108,26 @@ def test_agent_instruction_detection_lists_supported_targets(tmp_path: Path, cap
     assert "AGENTS.md" in output
     assert "CLAUDE.md" in output
     assert '"read_only": true' in output
+
+
+def test_every_leaf_command_binds_a_handler() -> None:
+    """No command may fall through to another command's behavior."""
+
+    def leaves(parser_obj, path=()):
+        subparsers = [
+            action
+            for action in parser_obj._actions
+            if isinstance(action, argparse._SubParsersAction)
+        ]
+        if not subparsers:
+            yield path, parser_obj
+            return
+        for action in subparsers:
+            for name, child in action.choices.items():
+                yield from leaves(child, (*path, name))
+
+    found = list(leaves(parser()))
+    assert len(found) >= 15
+    for path, leaf in found:
+        handler = leaf.get_default("handler")
+        assert callable(handler), f"command {' '.join(path)} has no handler"

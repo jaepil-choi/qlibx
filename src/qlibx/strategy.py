@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from typing import Any, Literal
 
 import pandas as pd
+
+from qlibx.serialization import digest_dataset as _digest
 
 OutputKind = Literal["signal", "weight", "order", "payload"]
 
@@ -476,56 +476,3 @@ def _frames_equal_with_nan(left: pd.DataFrame, right: pd.DataFrame) -> bool:
     except AssertionError:
         return False
     return True
-
-
-def _digest(value: Any) -> str:
-    normalized = _normalize(value)
-    payload = json.dumps(
-        normalized,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _normalize(value: Any) -> Any:
-    if isinstance(value, pd.DataFrame):
-        return {
-            "type": "dataframe",
-            "columns": [_normalize(item) for item in value.columns.tolist()],
-            "index": [_normalize(item) for item in value.index.tolist()],
-            "dtypes": [str(item) for item in value.dtypes.tolist()],
-            "values": [
-                [_normalize(item) for item in row]
-                for row in value.astype(object).where(value.notna(), None).values.tolist()
-            ],
-        }
-    if isinstance(value, pd.Series):
-        return {
-            "type": "series",
-            "name": _normalize(value.name),
-            "index": [_normalize(item) for item in value.index.tolist()],
-            "dtype": str(value.dtype),
-            "values": [
-                _normalize(item) for item in value.astype(object).where(value.notna(), None)
-            ],
-        }
-    if isinstance(value, Mapping):
-        return {str(key): _normalize(item) for key, item in sorted(value.items(), key=str)}
-    if isinstance(value, (tuple, list)):
-        return [_normalize(item) for item in value]
-    if hasattr(value, "__dataclass_fields__"):
-        return {name: _normalize(getattr(value, name)) for name in value.__dataclass_fields__}
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if hasattr(value, "item") and callable(value.item):
-        try:
-            return value.item()
-        except ValueError:
-            pass
-    if isinstance(value, float) and pd.isna(value):
-        return None
-    if value is pd.NA:
-        return None
-    return value

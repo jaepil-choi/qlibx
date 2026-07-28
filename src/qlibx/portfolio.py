@@ -102,49 +102,22 @@ def construct_enhanced_index(
     prices = price.astype("float64")
     if prices.index.has_duplicates or prices.isna().any() or prices.le(0).any():
         raise ValueError("price must uniquely cover every positive-price physical instrument")
-    types = (
-        pd.Series("stock", index=physical_instruments, dtype="string")
-        if instrument_type is None
-        else instrument_type.reindex(physical_instruments).astype("string")
-    )
+    aligned = _AxisAligner(physical_instruments)
+    types = aligned.series(instrument_type, default="stock", dtype="string")
     if types.isna().any() or not types.isin(["stock", "etf"]).all():
         raise ValueError("instrument_type must explicitly be stock or etf")
-    lots = (
-        pd.Series(1, index=physical_instruments, dtype="int64")
-        if lot_size is None
-        else lot_size.reindex(physical_instruments).astype("int64")
-    )
+    lots = aligned.series(lot_size, default=1, dtype="int64")
     if lots.isna().any() or lots.le(0).any():
         raise ValueError("lot_size must be present and positive for every physical instrument")
-    available = (
-        pd.Series(True, index=physical_instruments)
-        if tradable is None
-        else tradable.reindex(physical_instruments).fillna(False).astype(bool)
-    )
-    lower = (
-        pd.Series(0.0, index=physical_instruments)
-        if lower_bounds is None
-        else lower_bounds.reindex(physical_instruments).astype("float64")
-    )
-    upper = (
-        pd.Series(1.0, index=physical_instruments)
-        if upper_bounds is None
-        else upper_bounds.reindex(physical_instruments).astype("float64")
-    )
+    available = aligned.series(tradable, default=True, dtype=bool, fill=False)
+    lower = aligned.series(lower_bounds, default=0.0, dtype="float64")
+    upper = aligned.series(upper_bounds, default=1.0, dtype="float64")
     if lower.isna().any() or upper.isna().any() or lower.lt(0).any() or lower.gt(upper).any():
         raise ValueError("physical lower/upper bounds are incomplete or incompatible")
-    costs = (
-        pd.Series(0.0, index=physical_instruments)
-        if transaction_cost is None
-        else transaction_cost.reindex(physical_instruments).astype("float64")
-    )
+    costs = aligned.series(transaction_cost, default=0.0, dtype="float64")
     if costs.isna().any() or costs.lt(0).any():
         raise ValueError("transaction_cost must be finite and non-negative")
-    current = (
-        pd.Series(0, index=physical_instruments, dtype="int64")
-        if current_quantity is None
-        else current_quantity.reindex(physical_instruments).fillna(0).astype("int64")
-    )
+    current = aligned.series(current_quantity, default=0, dtype="int64", fill=0)
     current_weight = current.mul(prices).div(portfolio_value)
     current_cash_weight = (
         max(0.0, 1.0 - float(current_weight.sum()))
@@ -265,6 +238,36 @@ def construct_enhanced_index(
         validation_passed=hard_valid,
         reason=reason,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _AxisAligner:
+    """Bring optional per-instrument inputs onto one physical axis.
+
+    Every optional input follows the same shape: absent means a constant default,
+    present means reindex onto the physical axis and cast. Naming that once keeps the
+    caller reading as a list of declared defaults instead of seven near-identical
+    conditional expressions.
+    """
+
+    index: pd.Index
+
+    def series(
+        self,
+        value: pd.Series | None,
+        *,
+        default: object,
+        dtype: object,
+        fill: object | None = None,
+    ) -> pd.Series:
+        if value is None:
+            return pd.Series(default, index=self.index, dtype=dtype)
+        aligned = value.reindex(self.index)
+        # `fill` marks inputs whose absence is a documented value (untradable, no
+        # holding) rather than an error the caller must still be told about.
+        if fill is not None:
+            aligned = aligned.fillna(fill)
+        return aligned.astype(dtype)
 
 
 def _exposure_matrix(

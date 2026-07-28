@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import time
@@ -19,23 +18,12 @@ import pandas as pd
 
 from qlibx.orthogonality import AlphaDescriptor, OrthogonalityResult, compare_alpha
 from qlibx.project import Project
+from qlibx.serialization import canonical_bytes as _canonical
+from qlibx.serialization import digest_bytes as _digest
+from qlibx.serialization import validate_name
 
 RunStatus = Literal["successful", "failed", "invalid", "abandoned"]
 DecisionKind = Literal["promote", "reject", "retain_diagnostic", "supersede"]
-
-
-def _canonical(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-
-
-def _digest(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,13 +283,13 @@ class ResearchCatalog:
         return StagedAttempt(session_id, invocation_id, attempt_id, key, kind, directory)
 
     def stage_frame(self, attempt: StagedAttempt, name: str, frame: pd.DataFrame) -> Path:
-        self._validate_name(name)
+        validate_name(name)
         path = attempt.directory / f"{name}.parquet"
         frame.to_parquet(path, index=True)
         return path
 
     def stage_json(self, attempt: StagedAttempt, name: str, value: Any) -> Path:
-        self._validate_name(name)
+        validate_name(name)
         path = attempt.directory / f"{name}.json"
         path.write_bytes(_canonical(value))
         return path
@@ -677,20 +665,21 @@ class ResearchCatalog:
     def _lock(self, name: str):
         path = self.locks / f"{name}.lock"
         descriptor = os.open(path, os.O_CREAT | os.O_RDWR)
-        _ensure_lock_byte(descriptor)
         try:
+            _ensure_lock_byte(descriptor)
+            # Acquire outside the release scope: unlocking a region that was never locked
+            # raises OSError on Windows and would mask the original acquisition failure.
             _acquire_file_lock(descriptor, name)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        try:
             yield
         finally:
-            _release_file_lock(descriptor)
-            os.close(descriptor)
-
-    @staticmethod
-    def _validate_name(name: str) -> None:
-        if not name or any(
-            character not in "abcdefghijklmnopqrstuvwxyz0123456789_" for character in name
-        ):
-            raise ValueError(f"invalid artifact name: {name}")
+            try:
+                _release_file_lock(descriptor)
+            finally:
+                os.close(descriptor)
 
     @staticmethod
     def _same_result(existing: bytes, candidate: Mapping[str, Any]) -> bool:

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
+from qlibx.alpha import list_budget_policies, list_operations
 from qlibx.documentation import public_example
 from qlibx.errors import QlibxError
+from qlibx.serialization import digest_bytes
 
 SkillTarget = Literal["codex", "claude", "generic"]
 
@@ -52,7 +53,7 @@ def plan_agent_skill(
         path = root / relative
         existed = path.is_file()
         before = path.read_bytes() if existed else None
-        digest = sha256(before).hexdigest() if before is not None else None
+        digest = digest_bytes(before) if before is not None else None
         if not existed:
             action = "create"
         elif before == payload.encode("utf-8"):
@@ -68,7 +69,7 @@ def apply_agent_skill(plan: SkillPlan, *, force: bool = False) -> Path:
     for file in plan.files:
         exists = file.path.is_file()
         before = file.path.read_bytes() if exists else None
-        digest = sha256(before).hexdigest() if before is not None else None
+        digest = digest_bytes(before) if before is not None else None
         if exists != file.existed or digest != file.before_digest:
             raise QlibxError(
                 "QLIBX_SKILL_STALE_PLAN",
@@ -105,6 +106,9 @@ def _skill_files(target: SkillTarget) -> dict[str, str]:
         "examples/project-api.py": _project_example(),
         "examples/data-registration.yaml": _registration_example(),
         "examples/logical-dataset.yaml": _logical_dataset_example(),
+        "references/alpha-operations.md": _alpha_operations_markdown(),
+        "examples/alpha-pipeline.py": _public_example("alpha_pipeline"),
+        "examples/custom-alpha-operation.py": _public_example("custom_alpha_operation"),
         "examples/research-workflow.py": _public_example("research_workflow"),
         "examples/stored-ensemble.py": _public_example("stored_ensemble"),
         "examples/signed-execution.py": _public_example("signed_execution"),
@@ -150,6 +154,18 @@ research, and extension roots.
    may index it directly. Declare a separate `time_field` only when the user explicitly chose to
    preserve and use an optional event/observation field; use `examples/logical-dataset.yaml`.
 
+## Signal operations and weight scaling
+
+Before writing any transform helper, run `qlibx alpha operations` and read
+`references/alpha-operations.md`. Apply one built-in with `apply_transform` or compose several
+with `apply_pipeline`; each step records its own operation ID, version and parameters in the
+result lineage. Scale weights with a registered budget policy through `apply_budget`: `fixed`
+scales each side to its full budget, `flexible` treats the budget as a maximum and reports the
+unused side budget as leftover. If nothing matches, register your own `OperationSpec` or
+`BudgetPolicySpec`, or promote a `signal_transform` extension with `signal_transform_operation` --
+never edit the installed package. Start from `examples/alpha-pipeline.py` and
+`examples/custom-alpha-operation.py`.
+
 ## Research and execution
 
 Before proposing a trial, query prior proposals, successful/failed/invalid attempts, searched
@@ -183,6 +199,66 @@ Keep analysis sections, report composition and rendering separate. Reporting mus
 canonical research result or invoke the original strategy. Start from
 `examples/artifact-reporting.py`.
 """
+
+
+def _alpha_operations_markdown() -> str:
+    """Render the installed operation and budget registries into the skill package."""
+    lines = [
+        "# qlibx built-in signal operations",
+        "",
+        "Generated from the installed registries. Run `qlibx alpha operations`,",
+        "`qlibx alpha operation <name>`, and `qlibx alpha budgets` for the live contract.",
+        "",
+        "Check this list before writing a helper. Apply one operation with",
+        "`qlibx.alpha.apply_transform`, or compose several with `qlibx.alpha.apply_pipeline`;",
+        "each step contributes its own versioned `OperationContract` to the result lineage.",
+        "",
+        "## Operations",
+        "",
+    ]
+    for operation in list_operations():
+        required = ", ".join(operation["required_parameters"]) or "none"
+        declared = ", ".join(sorted(operation["parameters"])) or "none"
+        lines.extend(
+            [
+                f"### {operation['name']} (`{operation['operation_id']}` v{operation['version']})",
+                "",
+                f"- {operation['summary']}",
+                f"- Axis: {operation['axis']}; dtype: {operation['dtype']}",
+                f"- NaN behavior: {operation['nan_behavior']}",
+                f"- Tie behavior: {operation['tie_behavior']}",
+                f"- Group-missing behavior: {operation['group_missing_behavior']}",
+                f"- Selection behavior: {operation['selection_behavior']}",
+                f"- Minimum observations: {operation['minimum_observations']}",
+                f"- Parameters: {declared}; required: {required}",
+                f"- Requires explicit groups: {operation['requires_groups']}",
+                "",
+            ]
+        )
+    lines.extend(["## Budget policies", ""])
+    for policy in list_budget_policies():
+        lines.extend(
+            [
+                f"### {policy['name']} (`{policy['policy_id']}` v{policy['version']})",
+                "",
+                f"- {policy['summary']}",
+                f"- Unused budget: {policy['unused_budget_behavior']}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Adding an operation",
+            "",
+            "Register a `qlibx.alpha.OperationSpec` with `qlibx.alpha.register_operation`, or",
+            "promote a validated `signal_transform` extension with",
+            "`qlibx.extensions.signal_transform_operation`. Register a weight-scaling rule with",
+            "`qlibx.alpha.register_budget_policy`. Never edit the installed package to add one.",
+            "See `examples/custom-alpha-operation.py`.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _contracts_markdown() -> str:

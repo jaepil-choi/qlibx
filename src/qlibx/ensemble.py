@@ -80,11 +80,14 @@ def combine_signed_weights(
         for name, value in contribution_mass.items()
     }
     combined_mass = float(combined.abs().sum().sum())
+    # A member that is missing at a cell contributed nothing there, so leave-one-out must
+    # subtract 0 rather than propagate NaN; propagating would drop the cell from the norm
+    # entirely and credit every member for exposure it did not supply.
     marginal = {
         name: (
             0.0
             if combined_mass == 0
-            else float(combined.abs().sum().sum() - combined.sub(frame).abs().sum().sum())
+            else (combined_mass - float(combined.sub(frame.fillna(0.0)).abs().sum().sum()))
             / combined_mass
         )
         for name, frame in contributions.items()

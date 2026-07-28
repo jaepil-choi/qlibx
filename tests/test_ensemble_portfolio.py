@@ -45,3 +45,14 @@ def test_negative_physical_target_is_explicitly_infeasible() -> None:
     )
     assert result.status == "hard_infeasible"
     assert result.reason is not None
+
+
+def test_marginal_contribution_ignores_cells_a_member_did_not_supply() -> None:
+    date = pd.DatetimeIndex(["2025-01-01"])
+    partial = pd.DataFrame([[1.0, pd.NA]], index=date, columns=["a", "b"], dtype="Float64")
+    complete = pd.DataFrame([[1.0, 1.0]], index=date, columns=["a", "b"], dtype="Float64")
+    result = combine_signed_weights({"partial": partial, "complete": complete})
+    # Combined gross mass is 3.0; partial supplied 1.0 of it and complete supplied 2.0.
+    # A missing cell must count as a zero contribution, not drop out of the norm.
+    assert result.marginal_contribution["partial"] == pytest.approx(1 / 3)
+    assert result.marginal_contribution["complete"] == pytest.approx(2 / 3)

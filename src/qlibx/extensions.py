@@ -11,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 
+from qlibx.alpha import OperationSpec
 from qlibx.artifacts import ArtifactEnvelope
 from qlibx.project import Project
 
@@ -185,6 +186,47 @@ def invoke_signal_transform(
     if invalid.any().any():
         raise ValueError("signal_transform output must be numeric or missing")
     return result
+
+
+def signal_transform_operation(
+    reference: ExtensionRef,
+    implementation: Callable[..., Any],
+    *,
+    summary: str = "Project-local signal_transform extension.",
+    parameters: Mapping[str, str] | None = None,
+    required_parameters: tuple[str, ...] = (),
+    version: str = "1",
+) -> OperationSpec:
+    """Adapt a validated project-local ``signal_transform`` into an alpha operation.
+
+    The returned spec can be passed to ``qlibx.alpha.register_operation``, after which
+    the extension composes with built-ins through ``apply_pipeline`` and contributes the
+    same lineage, including its source digest. Every call still goes through
+    ``invoke_signal_transform``, so the contract is validated on each application.
+    """
+    if reference.contract != "signal_transform" or reference.contract_version != version:
+        raise ValueError(f"extension is not compatible with signal_transform version {version}")
+
+    def apply(values: pd.DataFrame, **call_parameters: Any) -> pd.DataFrame:
+        return invoke_signal_transform(reference, implementation, values, **call_parameters)
+
+    return OperationSpec(
+        name=reference.extension_id,
+        operation_id=f"project.{reference.extension_id}",
+        version=version,
+        axis="date_by_ticker",
+        tie_behavior="extension_defined",
+        nan_behavior="preserved_unless_the_extension_documents_otherwise",
+        minimum_observations=None,
+        group_missing_behavior="not_applicable",
+        dtype="float64",
+        summary=summary,
+        apply=apply,
+        parameters=dict(parameters or {}),
+        required_parameters=required_parameters,
+        implementation=f"extension:{reference.contract}/{reference.contract_version}",
+        implementation_digest=reference.source_digest,
+    )
 
 
 def invoke_exposure_analyzer(

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
 from qlibx.errors import QlibxError
 from qlibx.project import Project
+from qlibx.serialization import digest_text as _text_digest
 
 START = "<!-- qlibx:managed:start -->"
 END = "<!-- qlibx:managed:end -->"
@@ -95,7 +95,3 @@ def detect_instruction_targets(project: Project) -> tuple[dict[str, object], ...
         }
         for name in ("AGENTS.md", "CLAUDE.md")
     )
-
-
-def _text_digest(value: str) -> str:
-    return sha256(value.encode("utf-8")).hexdigest()

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import ast
+import inspect
 import json
 
 import pytest
 
+from qlibx import alpha, ensemble, execution, reporting
 from qlibx.agent import error_guidance, public_example, public_schema, task_guide
 from qlibx.cli import dispatch, parser
+from qlibx.documentation import EXAMPLES
 from qlibx.errors import QlibxError
 
 
@@ -64,6 +68,7 @@ def test_installed_error_recovery_is_code_specific_and_machine_readable(capsys) 
 
 def test_agent_journey_guides_link_public_executable_examples() -> None:
     expected = {
+        "alpha": "alpha_pipeline",
         "research": "research_workflow",
         "ensemble": "stored_ensemble",
         "execution": "signed_execution",
@@ -73,3 +78,71 @@ def test_agent_journey_guides_link_public_executable_examples() -> None:
         assert example in task_guide(topic)["examples"]
         content = public_example(example)["content"]
         compile(content, f"<{example}>", "exec")
+
+
+def _documented_calls(content: str) -> list[ast.Call]:
+    return [node for node in ast.walk(ast.parse(content)) if isinstance(node, ast.Call)]
+
+
+def test_documented_examples_bind_against_real_public_signatures() -> None:
+    """Compiling an example is not enough: its keywords must match the real signature."""
+    public = {
+        "run_strategy_execution": execution.run_strategy_execution,
+        "run_signed_execution": execution.run_signed_execution,
+        "combine_stored_weights": ensemble.combine_stored_weights,
+        "apply_pipeline": alpha.apply_pipeline,
+        "apply_budget": alpha.apply_budget,
+        "register_operation": alpha.register_operation,
+        "analyze_stored_run": reporting.analyze_stored_run,
+        "render_report": reporting.render_report,
+    }
+    checked = 0
+    for name, example in EXAMPLES.items():
+        if example["format"] != "python":
+            continue
+        for call in _documented_calls(example["content"]):
+            target = getattr(call.func, "id", None) or getattr(call.func, "attr", None)
+            if target not in public:
+                continue
+            parameters = inspect.signature(public[target]).parameters
+            variadic = any(
+                item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values()
+            )
+            for keyword in call.keywords:
+                assert keyword.arg is None or variadic or keyword.arg in parameters, (
+                    f"example {name!r} passes unknown keyword {keyword.arg!r} to {target}()"
+                )
+            required = {
+                item.name
+                for item in parameters.values()
+                if item.default is inspect.Parameter.empty
+                and item.kind is inspect.Parameter.KEYWORD_ONLY
+            }
+            supplied = {keyword.arg for keyword in call.keywords}
+            assert not required - supplied, (
+                f"example {name!r} omits required keywords "
+                f"{sorted(required - supplied)} for {target}()"
+            )
+            checked += 1
+    assert checked >= 4
+
+
+def test_installed_alpha_operations_are_discoverable_from_public_cli(capsys) -> None:
+    assert dispatch(parser().parse_args(["alpha", "operations"])) == 0
+    listed = json.loads(capsys.readouterr().out)
+    names = {item["name"] for item in listed["operations"]}
+    assert {"cross_sectional_rank", "linear_decay", "hump", "top_bottom"} <= names
+    assert dispatch(parser().parse_args(["alpha", "operation", "linear_decay"])) == 0
+    contract = json.loads(capsys.readouterr().out)["linear_decay"]
+    assert contract["operation_id"] == "qlibx.alpha.linear_decay"
+    assert contract["required_parameters"] == ["window"]
+    assert dispatch(parser().parse_args(["alpha", "budgets"])) == 0
+    policies = {item["name"] for item in json.loads(capsys.readouterr().out)["policies"]}
+    assert policies == {"fixed", "flexible"}
+
+
+def test_every_registered_operation_is_documented_for_agents() -> None:
+    required = set(public_schema("alpha_operation")["required"])
+    for operation in alpha.list_operations():
+        assert required <= set(operation), operation["name"]
+        assert operation["summary"], operation["name"]

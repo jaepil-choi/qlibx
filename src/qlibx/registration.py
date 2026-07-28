@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import timedelta
@@ -17,6 +16,7 @@ import pyarrow.parquet as pq
 from qlibx.config import read_yaml, require_mapping, require_string, require_strings
 from qlibx.errors import QlibxError
 from qlibx.project import Project
+from qlibx.serialization import digest_file as _digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,11 +305,3 @@ def _validate_primary_key(table: pa.Table, primary_key: tuple[str, ...]) -> None
             f"Found {table.num_rows - unique} duplicate primary-key rows",
             action="Resolve duplicates explicitly outside qlibx.",
         )
-
-
-def _digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()

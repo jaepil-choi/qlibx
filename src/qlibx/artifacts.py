@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -15,6 +14,10 @@ from typing import Any, Literal
 import pandas as pd
 
 from qlibx.project import Project
+from qlibx.serialization import canonical_bytes as _canonical
+from qlibx.serialization import digest_bytes as _digest
+from qlibx.serialization import digest_file as _file_digest
+from qlibx.serialization import validate_name
 from qlibx.strategy import DecisionResult
 
 ArtifactStatus = Literal["complete", "incomplete", "invalid"]
@@ -83,7 +86,7 @@ class ArtifactStore:
         diagnostics: Mapping[str, Any] | None = None,
         status: ArtifactStatus = "complete",
     ) -> ArtifactEnvelope:
-        _validate_name(name)
+        validate_name(name)
         if status not in {"complete", "incomplete", "invalid"}:
             raise ValueError(f"unsupported artifact status: {status}")
         staging = self.root / f".tmp-{uuid.uuid4().hex}"
@@ -273,32 +276,3 @@ def _envelope_json(envelope: ArtifactEnvelope) -> Mapping[str, Any]:
     raw.pop("payload_path")
     raw["payload_file"] = envelope.payload_path.name
     return raw
-
-
-def _validate_name(name: str) -> None:
-    if not name or any(
-        character not in "abcdefghijklmnopqrstuvwxyz0123456789_" for character in name
-    ):
-        raise ValueError(f"invalid artifact name: {name}")
-
-
-def _canonical(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-
-
-def _digest(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()

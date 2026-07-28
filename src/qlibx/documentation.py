@@ -323,6 +323,46 @@ SCHEMAS: Mapping[str, Mapping[str, Any]] = {
         "mapping": "explicit_logical_dataset_roles",
         "derived_financial_fields": "none",
     },
+    "alpha_operation": {
+        "required": [
+            "name",
+            "operation_id",
+            "version",
+            "summary",
+            "axis",
+            "tie_behavior",
+            "nan_behavior",
+            "minimum_observations",
+            "group_missing_behavior",
+            "selection_behavior",
+            "dtype",
+            "parameters",
+            "required_parameters",
+            "requires_groups",
+            "implementation",
+        ],
+        "lookup": "qlibx alpha operations | qlibx alpha operation <name>",
+        "lineage": (
+            "operation_id and version are recorded in TransformResult.lineage for every "
+            "applied step, including project-local and extension-backed operations"
+        ),
+        "registration": (
+            "qlibx.alpha.register_operation(OperationSpec(...)); a validated signal_transform "
+            "extension becomes an OperationSpec through "
+            "qlibx.extensions.signal_transform_operation"
+        ),
+        "composition": "qlibx.alpha.apply_pipeline composes any registered operations in order",
+    },
+    "budget_policy": {
+        "required": ["name", "policy_id", "version", "summary", "unused_budget_behavior"],
+        "lookup": "qlibx alpha budgets",
+        "builtin": ["fixed", "flexible"],
+        "registration": "qlibx.alpha.register_budget_policy(BudgetPolicySpec(...))",
+        "result": (
+            "qlibx.alpha.apply_budget returns rescaled weights plus per-date used and "
+            "leftover side budget; a flexible side is never scaled upward"
+        ),
+    },
     "error_response": {
         "required": ["code", "message", "action", "context"],
         "lookup": "qlibx errors <code>",
@@ -416,12 +456,30 @@ TASK_GUIDES: Mapping[str, Mapping[str, Any]] = {
     "alpha": {
         "version": 1,
         "purpose": TOPICS["alpha"],
+        "read_only": [
+            "qlibx alpha operations",
+            "qlibx alpha operation <name>",
+            "qlibx alpha budgets",
+        ],
         "steps": [
             "Start from a signed ticker-level signal; neutrality is optional.",
+            (
+                "List installed operations before writing a helper; apply them with "
+                "apply_transform or compose them with apply_pipeline."
+            ),
             "Apply deterministic versioned operations with explicit NaN/tie/window semantics.",
             "Record long/short/gross/net, coverage, missingness, turnover and availability audit.",
-            "Preserve unused flexible side budget through ensemble and execution.",
+            (
+                "Choose a registered budget policy; flexible preserves unused side budget "
+                "and reports it as leftover."
+            ),
+            (
+                "If no built-in matches, register an OperationSpec or promote a "
+                "signal_transform extension instead of rewriting the operation."
+            ),
         ],
+        "schemas": ["alpha_operation", "budget_policy"],
+        "examples": ["alpha_pipeline", "custom_alpha_operation"],
     },
     "research": {
         "version": 1,
@@ -611,16 +669,81 @@ EXAMPLES: Mapping[str, Mapping[str, str]] = {
         "content": (
             "from qlibx.execution import SignedExecutionConfig, run_strategy_execution\n"
             "result = run_strategy_execution(\n"
-            "    definition, strategy_program, execution_price=execution_price,\n"
-            "    valuation_price=valuation_price, universe=universe, observed=observed,\n"
-            "    tradable=tradable, volume=volume, initial_cash=5_000_000_000.0,\n"
+            "    definition, strategy_program,\n"
+            "    datasets={'returns': returns},\n"
+            "    execution_price=execution_price, valuation_price=valuation_price,\n"
+            "    universe=universe, volume=volume, tradable=tradable,\n"
+            "    initial_cash=5_000_000_000.0,\n"
             "    signed=SignedExecutionConfig(\n"
             "        observed=observed, shortable=shortable,\n"
             "        active_booksize=1_000_000_000.0,\n"
             "    ),\n"
             ")\n"
             "assert result.mode == 'matched_capitalization'\n"
-            "assert result.reconciliation['passed']\n"
+            "assert result.signed.reconciliation['passed']\n"
+        ),
+    },
+    "alpha_pipeline": {
+        "format": "python",
+        "content": (
+            "from qlibx.alpha import apply_budget, apply_pipeline, list_operations\n"
+            "# Every installed operation and its contract is discoverable before use.\n"
+            "available = {item['name'] for item in list_operations()}\n"
+            "assert {'cross_sectional_rank', 'linear_decay', 'hump'} <= available\n"
+            "transformed = apply_pipeline(\n"
+            "    signal,\n"
+            "    [('linear_decay', {'window': 5}), 'cross_sectional_rank'],\n"
+            ")\n"
+            "# lineage records one versioned contract per applied step.\n"
+            "assert [item.operation_id for item in transformed.lineage] == [\n"
+            "    'qlibx.alpha.linear_decay', 'qlibx.alpha.cross_sectional_rank'\n"
+            "]\n"
+            "budgeted = apply_budget(transformed.values, policy='flexible')\n"
+            "# flexible budget never scales a side up; leftover stays observable.\n"
+            "assert (budgeted.long_leftover >= 0).all()\n"
+        ),
+    },
+    "custom_alpha_operation": {
+        "format": "python",
+        "content": (
+            "from qlibx.alpha import OperationSpec, apply_pipeline, register_operation\n"
+            "from qlibx.extensions import load_extension, signal_transform_operation\n"
+            "\n"
+            "# Option A: register a plain project-local callable.\n"
+            "def zero_mean_by_row(values, *, minimum_count=1):\n"
+            "    return values.sub(values.mean(axis=1), axis=0).where(\n"
+            "        values.count(axis=1).ge(minimum_count)\n"
+            "    )\n"
+            "register_operation(\n"
+            "    OperationSpec(\n"
+            "        name='zero_mean_by_row',\n"
+            "        operation_id='project.zero_mean_by_row',\n"
+            "        version='1',\n"
+            "        axis='date_by_ticker',\n"
+            "        tie_behavior='not_applicable',\n"
+            "        nan_behavior='preserve',\n"
+            "        minimum_observations=1,\n"
+            "        group_missing_behavior='not_applicable',\n"
+            "        dtype='float64',\n"
+            "        summary='Project-local cross-sectional demean.',\n"
+            "        apply=zero_mean_by_row,\n"
+            "        parameters={'minimum_count': 'minimum valid observations per date'},\n"
+            "    )\n"
+            ")\n"
+            "\n"
+            "# Option B: promote a validated signal_transform extension to an operation.\n"
+            "reference, implementation = load_extension(\n"
+            "    project, extension_id='exponential_decay', contract='signal_transform',\n"
+            "    contract_version='1', source='qlibx-custom/decay.py', callable_name='apply',\n"
+            ")\n"
+            "register_operation(\n"
+            "    signal_transform_operation(\n"
+            "        reference, implementation, parameters={'span': 'positive decay span'}\n"
+            "    )\n"
+            ")\n"
+            "result = apply_pipeline(\n"
+            "    signal, ['zero_mean_by_row', ('exponential_decay', {'span': 5})]\n"
+            ")\n"
         ),
     },
     "artifact_reporting": {

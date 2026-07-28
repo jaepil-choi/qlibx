@@ -10,6 +10,7 @@ from typing import Any
 
 import qlib
 
+from qlibx.alpha import list_budget_policies, list_operations, operation_spec
 from qlibx.catalog import ConfigDrivenDataLoader, DataCatalog
 from qlibx.discovery import discover_data, inspect_data
 from qlibx.documentation import (
@@ -115,6 +116,12 @@ def parser() -> argparse.ArgumentParser:
     instruction.add_argument("--detect", action="store_true")
     instruction.add_argument("--apply", action="store_true")
     instruction.add_argument("--remove", action="store_true")
+    alpha = commands.add_parser("alpha")
+    alpha_commands = alpha.add_subparsers(dest="action", required=True)
+    alpha_commands.add_parser("operations")
+    alpha_operation = alpha_commands.add_parser("operation")
+    alpha_operation.add_argument("name")
+    alpha_commands.add_parser("budgets")
     docs = commands.add_parser("docs")
     docs.add_argument("topic", nargs="?")
     schema = commands.add_parser("schema")
@@ -213,6 +220,13 @@ def dispatch(args: argparse.Namespace) -> int:
             _print(execution_profile_requirements(args.target_semantics))
         else:
             _print(plan_execution_profile(Project.load(args.root), args.config))
+    elif args.command == "alpha":
+        if args.action == "operations":
+            _print({"schema": "alpha_operation", "operations": list_operations()})
+        elif args.action == "budgets":
+            _print({"schema": "budget_policy", "policies": list_budget_policies()})
+        else:
+            _print({args.name: operation_spec(args.name).describe()})
     elif args.command == "docs":
         _print(
             {"version": 1, "topics": sorted(TOPICS)}

@@ -3,7 +3,21 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from qlibx.alpha import analyze_exposure, apply_transform
+from qlibx.alpha import (
+    BUDGET_POLICIES,
+    OPERATIONS,
+    BudgetPolicySpec,
+    OperationSpec,
+    analyze_exposure,
+    apply_budget,
+    apply_pipeline,
+    apply_transform,
+    hump,
+    list_operations,
+    register_budget_policy,
+    register_operation,
+    top_bottom,
+)
 
 
 def test_builtin_operation_has_versioned_deterministic_lineage() -> None:
@@ -72,3 +86,116 @@ def test_exposure_artifact_records_method_data_window_coverage_and_missingness()
     assert artifact.factor_exposure.loc[dates[1], "value"] == pytest.approx(0.2)
     assert artifact.intended_realized_gap is not None
     assert "not proof" in artifact.neutrality_warning
+
+
+def test_hump_restarts_after_a_gap_instead_of_poisoning_the_series() -> None:
+    dates = pd.date_range("2025-01-01", periods=4)
+    values = pd.DataFrame(
+        {"A": [1.0, float("nan"), 3.0, 9.0], "B": [1.0, 2.0, 3.0, 4.0]},
+        index=dates,
+    )
+    result = hump(values, maximum_change=1.0)
+    assert pd.isna(result.loc[dates[1], "A"])
+    # The observation after the gap has no previous value to limit against.
+    assert result.loc[dates[2], "A"] == pytest.approx(3.0)
+    # Limiting resumes once a previous value exists again.
+    assert result.loc[dates[3], "A"] == pytest.approx(4.0)
+
+
+def test_top_bottom_fails_instead_of_selecting_one_name_on_both_sides() -> None:
+    values = pd.DataFrame([[1.0, 2.0, 3.0]], columns=list("abc"))
+    with pytest.raises(ValueError, match="at least 4 valid observations"):
+        top_bottom(values, count=2)
+    assert top_bottom(values, count=1).iloc[0].tolist() == [-1.0, 0.0, 1.0]
+
+
+def test_registered_operations_compose_into_one_lineage_chain() -> None:
+    dates = pd.date_range("2025-01-01", periods=3)
+    values = pd.DataFrame([[1.0, 3.0], [2.0, 6.0], [4.0, 8.0]], index=dates, columns=["A", "B"])
+    result = apply_pipeline(
+        values,
+        [("rolling_mean", {"window": 2}), "cross_sectional_demean"],
+    )
+    assert [item.operation_id for item in result.lineage] == [
+        "qlibx.alpha.rolling_mean",
+        "qlibx.alpha.cross_sectional_demean",
+    ]
+    assert result.lineage[0].parameters == {"window": 2}
+    assert result.lineage[0].minimum_observations == 2
+    assert "not proof" in result.neutrality_warning
+
+
+def test_unknown_operation_and_parameter_fail_explicitly() -> None:
+    values = pd.DataFrame([[1.0, 2.0]], columns=["A", "B"])
+    with pytest.raises(ValueError, match="unknown alpha operation"):
+        apply_transform("not_an_operation", values)
+    with pytest.raises(ValueError, match="does not accept parameters"):
+        apply_transform("linear_decay", values, windwo=2)
+    with pytest.raises(ValueError, match="requires parameters"):
+        apply_transform("linear_decay", values)
+
+
+def test_project_local_operation_registers_and_carries_its_own_lineage() -> None:
+    values = pd.DataFrame([[1.0, 3.0]], columns=["A", "B"])
+
+    def double(frame, *, factor=2.0):
+        return frame.mul(factor)
+
+    spec = OperationSpec(
+        name="test_double",
+        operation_id="project.test_double",
+        version="7",
+        axis="date_by_ticker",
+        tie_behavior="not_applicable",
+        nan_behavior="preserve",
+        minimum_observations=1,
+        group_missing_behavior="not_applicable",
+        dtype="float64",
+        summary="Scale every observation by a constant factor.",
+        apply=double,
+        parameters={"factor": "multiplicative constant"},
+    )
+    register_operation(spec)
+    try:
+        result = apply_transform("test_double", values, factor=3.0)
+        assert result.values.iloc[0].tolist() == [3.0, 9.0]
+        assert result.lineage[0].operation_id == "project.test_double"
+        assert result.lineage[0].version == "7"
+        assert "test_double" in {item["name"] for item in list_operations()}
+    finally:
+        OPERATIONS.unregister("test_double")
+
+
+def test_budget_policies_are_registered_and_report_leftover() -> None:
+    weights = pd.DataFrame([[0.2, -0.1, 0.0]], columns=list("abc"))
+    fixed = apply_budget(weights, policy="fixed")
+    assert fixed.long_used.iloc[0] == pytest.approx(1.0)
+    assert fixed.long_leftover.iloc[0] == pytest.approx(0.0)
+
+    flexible = apply_budget(weights, policy="flexible")
+    assert flexible.weights.equals(weights)
+    assert flexible.long_leftover.iloc[0] == pytest.approx(0.8)
+    assert flexible.short_leftover.iloc[0] == pytest.approx(0.9)
+
+    def half(long_sum, short_sum, long_budget, short_budget):
+        scale = pd.Series(0.5, index=long_sum.index)
+        return scale, scale
+
+    register_budget_policy(
+        BudgetPolicySpec(
+            name="test_half",
+            policy_id="project.test_half",
+            version="1",
+            summary="Halve both sides.",
+            unused_budget_behavior="half of each side is always left unused",
+            resolve=half,
+        )
+    )
+    try:
+        halved = apply_budget(weights, policy="test_half")
+        assert halved.weights.iloc[0].tolist() == pytest.approx([0.1, -0.05, 0.0])
+    finally:
+        BUDGET_POLICIES.unregister("test_half")
+
+    with pytest.raises(ValueError, match="unknown budget policy"):
+        apply_budget(weights, policy="not_a_policy")

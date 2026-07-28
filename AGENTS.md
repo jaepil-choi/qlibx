@@ -10,6 +10,33 @@ Project-specific facts belong in `.agent/project.yaml`, not in this file.
 - Treat `references/` as non-authoritative unless the project manifest explicitly promotes a file.
 - When a matching repository skill exists, read and follow that skill instead of duplicating its procedure here.
 
+## Installed-package testbed isolation
+
+When a task's working directory, target, or requested output is under `testbed/`, treat that
+directory as an independent first-time user project rather than as part of this package repository.
+
+- Begin from the premise that the user has already run `uv add qlibx`. Treat onboarding as starting
+  immediately after that installation step; do not install or bootstrap qlibx on the user's behalf.
+- Read and prioritize `testbed/AGENTS.md` before taking any testbed action. Its rules override this
+  file for the entire testbed task.
+- Use only skills installed below `testbed/.agents/skills/`. Do not load or apply skills from this
+  repository's `.agents/skills/` directory to testbed work.
+- Do not load this repository's `.agent/project.yaml`, canonical documents, plans, run state, or
+  other project context for a testbed task.
+- Treat the package under evaluation as an opaque, completed distribution installed in the
+  testbed environment. Use only its documented public CLI, help, schemas, examples, error
+  guidance, and explicitly documented public Python imports.
+- Do not read, search, import, or modify package implementation details in the parent repository or
+  installed environment. This includes `src/`, `config/`, `tests/`, `docs/`, `references/`,
+  `showcases/`, `experiments/`, parent examples, Git history, and source files under
+  `testbed/.venv/`.
+- Do not use implementation knowledge obtained before entering the testbed to infer behavior,
+  hidden defaults, schemas, mappings, or recovery steps. Reason and act as a new user who knows
+  only the installed public surface and the files inside the testbed.
+- Keep inspection, edits, generated data, configuration, state, extensions, and validation inside
+  `testbed/`. If the public surface is incomplete or fails, record that as a QA finding instead of
+  bypassing the boundary through repository internals.
+
 ## Task contract
 
 Before changing files, establish the requested outcome, in-scope paths, acceptance criteria,

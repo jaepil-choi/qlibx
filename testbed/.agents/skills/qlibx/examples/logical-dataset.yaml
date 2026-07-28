@@ -1,0 +1,10 @@
+datasets:
+  confirmed_values:
+    kind: matrix
+    sources: [confirmed]
+    query: |
+      select available_at, ticker, value
+      from confirmed
+    index: available_at
+    columns: ticker
+    values: value

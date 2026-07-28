@@ -1,0 +1,14 @@
+# Structure only. Replace every placeholder after explicit user confirmation.
+registrations:
+  confirmed_dataset_id:
+    source: data/confirmed-source.parquet
+    output: data/qlibx/confirmed_dataset_id.parquet
+    available_at:
+      source: confirmed_time_column
+      offset_days: 0
+    ticker: confirmed_ticker_column
+    information:
+      info_1: confirmed_information_column
+    primary_key: [confirmed_time_column, confirmed_ticker_column]
+    frequency: confirmed_frequency
+    timezone: confirmed_timezone

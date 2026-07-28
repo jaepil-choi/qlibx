@@ -1,0 +1,75 @@
+datasets:
+  daily_market:
+    kind: table
+    sources: [daily_market]
+    query: |
+      select available_at, ticker, date, adj_base, adj_close, return,
+             trade_volume, is_trading_halt
+      from daily_market
+    time_field: date
+    availability_field: available_at
+
+  returns:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, return
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: return
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64
+
+  adj_base:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, adj_base
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: adj_base
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64
+
+  adj_close:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, adj_close
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: adj_close
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64
+
+  trade_volume:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, trade_volume
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: trade_volume
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64
+
+  trading_halt:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, is_trading_halt
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: is_trading_halt
+    time_field: event_date
+    availability_field: available_at
+    dtype: boolean

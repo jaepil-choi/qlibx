@@ -8,6 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+.qlibx/
+qlibx-research/
 
 /data/
 outputs/

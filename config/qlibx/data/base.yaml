@@ -1,0 +1,12 @@
+schema_version: 1
+
+paths:
+  canonical: data/qlibx
+
+catalog:
+  source_file: sources.yaml
+  dataset_files:
+    - datasets/market.yaml
+    - datasets/membership.yaml
+    - datasets/sector.yaml
+    - datasets/execution.yaml

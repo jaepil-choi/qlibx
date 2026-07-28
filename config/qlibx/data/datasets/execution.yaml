@@ -1,0 +1,116 @@
+datasets:
+  execution_price:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, adj_base as value
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64
+
+  valuation_price:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, adj_close as value
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64
+
+  execution_observed:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker,
+             (adj_base is not null and adj_close is not null and trade_volume is not null) as value
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: boolean
+
+  execution_tradable:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker,
+             (adj_base is not null and adj_close is not null and trade_volume is not null
+              and not coalesce(is_trading_halt, true)) as value
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: boolean
+
+  execution_universe:
+    kind: matrix
+    sources: [daily_market, k200_membership]
+    query: |
+      select greatest(m.available_at, k.available_at) as available_at,
+             m.date as event_date, m.ticker,
+             (coalesce(k.is_k200_member, false) and m.adj_base is not null
+              and m.adj_close is not null) as value
+      from daily_market m
+      left join k200_membership k on m.date = k.date and m.ticker = k.ticker
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: boolean
+
+  execution_shortable:
+    kind: matrix
+    sources: [daily_market, k200_membership]
+    query: |
+      select greatest(m.available_at, k.available_at) as available_at,
+             m.date as event_date, m.ticker,
+             (coalesce(k.is_k200_member, false) and m.adj_base is not null
+              and m.adj_close is not null and m.trade_volume is not null
+              and not coalesce(m.is_trading_halt, true)) as value
+      from daily_market m
+      left join k200_membership k on m.date = k.date and m.ticker = k.ticker
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: boolean
+
+  execution_volume:
+    kind: matrix
+    sources: [daily_market]
+    query: |
+      select available_at, date as event_date, ticker, trade_volume as value
+      from daily_market
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64
+
+  execution_benchmark_weight:
+    kind: matrix
+    sources: [k200_membership]
+    query: |
+      select available_at, date as event_date, ticker, index_weight as value
+      from k200_membership
+    index: event_date
+    columns: ticker
+    values: value
+    time_field: event_date
+    availability_field: available_at
+    dtype: float64

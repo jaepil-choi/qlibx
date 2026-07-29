@@ -9,6 +9,7 @@ import qlibx
 from qlibx import Project
 from qlibx.agent import apply_instruction, plan_instruction
 from qlibx.alpha import exposure_summary, group_demean, hump, linear_decay, rescale_budget
+from qlibx.errors import QlibxError
 from qlibx.extensions import load_extension
 from qlibx.strategy import (
     DecisionContext,
@@ -75,8 +76,11 @@ def test_child_strategy_cannot_escape_parent_context() -> None:
     )
     assert result.payload.equals(frame.tail(1))
     future = pd.DataFrame({"a": [3.0]}, index=[dates[-1] + pd.Timedelta(days=1)])
-    with pytest.raises(ValueError, match="exceeds parent time bounds"):
+    with pytest.raises(QlibxError) as escape:
         context.child(datasets={"returns": future})
+    assert escape.value.code == "QLIBX_DECISION_CHILD_AXIS_OUT_OF_BOUNDS"
+    assert escape.value.context["axis"] == "index"
+    assert escape.value.context["violations"] == ["2025-01-03T00:00:00"]
 
 
 def test_onboarding_is_idempotent_and_extension_is_project_local(tmp_path: Path) -> None:

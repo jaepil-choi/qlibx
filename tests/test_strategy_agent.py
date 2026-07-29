@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from qlibx.errors import QlibxError
 from qlibx.strategy import (
     DecisionContext,
     DecisionResult,
@@ -83,12 +84,32 @@ def test_availability_not_event_date_controls_no_look_ahead() -> None:
     assert context.datasets["returns"].index[0] > context.decision_time
 
     too_late = pd.Series(pd.to_datetime(["2025-02-02"]), index=future_event)
-    with pytest.raises(ValueError, match="available after decision time"):
+    with pytest.raises(QlibxError) as leak:
         DecisionContext(
             "2025-02-01",
             {"returns": calendar},
             availability={"returns": too_late},
         )
+    # The most expensive failure has to be recoverable without reading qlibx source: the
+    # report names the boundary that decided it and the cell that crossed it.
+    assert leak.value.code == "QLIBX_DECISION_LOOK_AHEAD"
+    assert leak.value.context["boundary"] == "available_at"
+    assert leak.value.context["decision_time"] == "2025-02-01T00:00:00"
+    assert leak.value.context["violations"] == [
+        {
+            "row": "2025-03-01T00:00:00",
+            "column": "A",
+            "available_at": "2025-02-02T00:00:00",
+        }
+    ]
+
+    # The other boundary: with no available_at the index is itself the availability claim,
+    # and the refusal has to name the same contract rather than a second vocabulary.
+    with pytest.raises(QlibxError) as by_index:
+        DecisionContext("2025-02-01", {"returns": calendar})
+    assert by_index.value.code == "QLIBX_DECISION_LOOK_AHEAD"
+    assert by_index.value.context["boundary"] == "index"
+    assert by_index.value.context["violations"] == ["2025-03-01T00:00:00"]
 
 
 def test_child_composition_reuses_declared_payload_and_isolates_account() -> None:
@@ -121,6 +142,10 @@ def test_child_cannot_change_parent_observation_or_account() -> None:
     request = NestedResearchRequest(_definition(), {"returns": changed}, "mean", 1, {})
     result = evaluate_child(parent, request, _program, lambda decision: 0.0)
     assert result.status == "invalid"
+    # A refused what-if stays an answer rather than a crash, and says why in a code the
+    # caller can branch on. QlibxError is a RuntimeError, so this also pins that the
+    # rejection path still catches the structured error it now raises.
+    assert result.diagnostics["error_code"] == "QLIBX_DECISION_CHILD_OBSERVATIONS_CHANGED"
     assert parent.account == {"cash": 100.0}
 
 
@@ -150,12 +175,16 @@ def test_feedback_order_and_resume_match_uninterrupted_results() -> None:
         pd.testing.assert_frame_equal(actual.payload, expected.payload)
     assert resumed.checkpoint == full.checkpoint
 
-    with pytest.raises(ValueError, match="future feedback"):
+    with pytest.raises(QlibxError) as unconfirmed:
         DecisionContext(
             dates[0],
             {"returns": pd.DataFrame({"A": [1.0]}, index=dates[:1])},
             feedback_history=(FeedbackEvent(dates[1], "fill", {}),),
         )
+    assert unconfirmed.value.code == "QLIBX_DECISION_FEEDBACK_UNCONFIRMED"
+    assert unconfirmed.value.context["violations"] == [
+        {"kind": "fill", "confirmed_at": "2025-01-02T00:00:00"}
+    ]
 
 
 def test_intermediate_recording_does_not_change_primary_result() -> None:

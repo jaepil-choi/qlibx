@@ -434,6 +434,97 @@ ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
             "Run qlibx extension contracts and choose a contract the installed version offers."
         ),
     },
+    "QLIBX_DECISION_LOOK_AHEAD": {
+        "recovery": (
+            "Read context.violations: each entry names an observation the decision could not "
+            "have known. Trim the dataset to context.decision_time, or register available_at "
+            "when the observation timestamp is not when the observation became knowable. "
+            "Never move decision_time forward to admit the data -- that silently converts a "
+            "caught leak into a backtest that cannot be traded."
+        ),
+    },
+    "QLIBX_DECISION_AVAILABILITY_UNDETERMINED": {
+        "recovery": (
+            "qlibx refuses to guess visibility. Give the dataset a DatetimeIndex, or supply "
+            "available_at describing when each cell became knowable."
+        ),
+    },
+    "QLIBX_DECISION_AVAILABILITY_AXES_MISMATCH": {
+        "recovery": (
+            "Rebuild available_at on the dataset's own axes. Misaligned axes would pair one "
+            "cell's value with another cell's visibility, which is a leak no later check sees."
+        ),
+    },
+    "QLIBX_DECISION_FEEDBACK_UNORDERED": {
+        "recovery": "Sort feedback_history by confirmed_at before building the DecisionContext.",
+    },
+    "QLIBX_DECISION_FEEDBACK_UNCONFIRMED": {
+        "recovery": (
+            "Drop the events in context.violations. A decision may only see fills Qlib had "
+            "already confirmed when it was made."
+        ),
+    },
+    "QLIBX_DECISION_UNIVERSE_REDECLARED": {
+        "recovery": (
+            "Remove 'universe' from data_requirements; every Strategy inherits it through "
+            "all_data_requirements."
+        ),
+    },
+    "QLIBX_DECISION_DATASETS_MISSING": {
+        "recovery": (
+            "Compare context.declared with context.supplied, then add the missing datasets or "
+            "narrow data_requirements on the Strategy."
+        ),
+    },
+    "QLIBX_DECISION_CONTEXT_MUTATED": {
+        "recovery": (
+            "Return new objects instead of writing into context.datasets, memory, or account. "
+            "A mutated context breaks the invocation digest that reproduces the run."
+        ),
+    },
+    "QLIBX_DECISION_OUTPUT_KIND_MISMATCH": {
+        "recovery": (
+            "Return context.declared, or change output_kind on the StrategyDefinition to the "
+            "kind the program actually produces."
+        ),
+    },
+    "QLIBX_DECISION_SEQUENCE_UNORDERED": {
+        "recovery": (
+            "Sort the contexts by decision_time and remove duplicates; memory flows forward "
+            "through the sequence, so the order defines the result."
+        ),
+    },
+    "QLIBX_DECISION_SEQUENCE_BOUNDARY_INVALID": {
+        "recovery": (
+            "Resume from the checkpoint's next_position and keep end_position inside the "
+            "contexts you passed."
+        ),
+    },
+    "QLIBX_DECISION_PARENT_ACCOUNT_MUTATED": {
+        "recovery": (
+            "Remove the account write from the child program. Nested research explores "
+            "what-ifs and holds no authority over the account it branched from."
+        ),
+    },
+    # A child context may narrow its parent and nothing else. One recovery covers the family
+    # because every member is the same violation seen from a different axis.
+    **{
+        code: {
+            "recovery": (
+                "Read context.violations or context.mismatch, then rebuild the child as a "
+                "slice of the parent. A child narrows what its parent already saw; it cannot "
+                "add a dataset, widen an axis, rewrite an observation, or change availability."
+            )
+        }
+        for code in (
+            "QLIBX_DECISION_CHILD_AVAILABILITY_ADDED",
+            "QLIBX_DECISION_CHILD_AVAILABILITY_CHANGED",
+            "QLIBX_DECISION_CHILD_AXIS_OUT_OF_BOUNDS",
+            "QLIBX_DECISION_CHILD_DATASET_UNDECLARED",
+            "QLIBX_DECISION_CHILD_LOOKBACK_UNDECLARED",
+            "QLIBX_DECISION_CHILD_OBSERVATIONS_CHANGED",
+        )
+    },
     **{
         code: {
             "recovery": (

@@ -51,8 +51,38 @@ def test_cli_requirements_qlib_status_and_agent_skill(tmp_path, capsys) -> None:
     assert "index: available_at" in logical_example
     assert "event_date" not in logical_example
     assert "qlibx errors <code>" in skill_text
+    assert "QLIBX_CAPABILITY_REQUIREMENT_GAP" in skill_text
+    assert "rerun the exact same capability request" in skill_text
     assert "combine_stored_weights" in skill_text
     json.loads(output.split("}\n{")[0] + "}")
+
+
+def test_cli_exposes_common_requirements_and_read_only_plans(capsys) -> None:
+    command = parser()
+    assert dispatch(command.parse_args(["qlib", "requirements"])) == 0
+    declaration = json.loads(capsys.readouterr().out)
+    assert declaration["capability_id"] == "qlibx.execution.daily_close"
+    assert declaration["requirements"][0]["alternatives"]
+
+    assert (
+        dispatch(
+            command.parse_args(
+                [
+                    "alpha",
+                    "exposure-plan",
+                    "--metric",
+                    "market_exposure",
+                    "--provided-input",
+                    "weights",
+                ]
+            )
+        )
+        == 0
+    )
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["read_only"] is True
+    assert plan["ready"] is False
+    assert plan["resolution"]["missing_requirements"] == ["market_beta"]
 
 
 def test_cli_exposes_exact_versioned_extension_contract(capsys) -> None:

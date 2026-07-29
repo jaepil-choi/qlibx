@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from qlibx.requirements import CapabilityRequirement, DerivationAlternative
+
 from ..contracts import NEUTRALITY_WARNING
 from ..registry import OperationSpec, register_operation
 
@@ -37,7 +39,36 @@ register_operation(
         dtype="float64",
         summary="Subtract each date's group mean using explicit point-in-time labels.",
         apply=group_demean,
-        requires_groups=True,
+        requirements=(
+            CapabilityRequirement(
+                requirement_id="group_label",
+                role="group_label",
+                meaning="Point-in-time industry or sector label for every ticker and date.",
+                axis="date_by_ticker",
+                unit="category",
+                currency="not_applicable",
+                purpose="Calculate the within-group mean removed from each signal value.",
+                satisfaction_rule="An explicit group-label matrix is supplied.",
+                availability="Every label must be knowable no later than its decision time.",
+                mandatory=True,
+                unavailable_effect="Within-group demeaning cannot be calculated.",
+                alternatives=(
+                    DerivationAlternative(
+                        alternative_id="explicit_point_in_time_groups",
+                        description="Use explicit point-in-time group labels.",
+                        required_inputs=("group_label",),
+                        derivation="direct",
+                    ),
+                ),
+                user_questions=(
+                    "Which registered point-in-time dataset contains the group labels?",
+                ),
+                next_commands=(
+                    "qlibx data catalog --root <project>",
+                    "qlibx alpha plan group_demean --provided-input group_label",
+                ),
+            ),
+        ),
         neutrality_warning=NEUTRALITY_WARNING,
     )
 )

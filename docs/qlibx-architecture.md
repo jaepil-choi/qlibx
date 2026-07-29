@@ -75,7 +75,7 @@ flowchart LR
 
 ### 3.1 계층
 
-`src/qlibx/`는 26개 top-level module/package(36개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
+`src/qlibx/`는 27개 top-level module/package(37개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
 만들고, 그 규칙은 `tests/test_architecture.py`가 강제한다. **현재 intra-package import graph는
 acyclic이다** (순환 없음).
 
@@ -84,25 +84,25 @@ acyclic이다** (순환 없음).
 
 ```mermaid
 flowchart TD
-    subgraph L4["entrypoint / facade"]
+    subgraph L5["entrypoint / facade"]
         cli["cli"]
         init["__init__"]
         dataf["data"]
         agentf["agent"]
     end
 
-    subgraph L3["composition"]
+    subgraph L4["composition / cross-capability"]
         ensemble["ensemble"]
         reporting["reporting"]
         extensions["extensions"]
         skill["skill"]
+        profiles["profiles"]
     end
 
-    subgraph L2["capability"]
+    subgraph L3["capability"]
         catalog["catalog"]
         registration["registration"]
         discovery["discovery"]
-        profiles["profiles"]
         artifacts["artifacts"]
         research["research"]
         execution["execution"]
@@ -110,16 +110,20 @@ flowchart TD
         onboarding["onboarding"]
     end
 
+    subgraph L2["project boundary"]
+        project["project"]
+    end
+
     subgraph L1["domain / foundation"]
         alpha["alpha"]
         strategy["strategy"]
         documentation["documentation"]
-        project["project"]
         config["config"]
     end
 
     subgraph L0["kernel (intra-package 의존 없음)"]
         errors["errors"]
+        requirements["requirements"]
         serialization["serialization"]
         optimization["optimization"]
         orthogonality["orthogonality"]
@@ -145,11 +149,13 @@ flowchart TD
     reporting --> execution
     extensions --> alpha
     extensions --> artifacts
+    extensions --> requirements
     skill --> alpha
     skill --> documentation
 
     catalog --> config
     profiles --> catalog
+    profiles --> requirements
     registration --> config
     artifacts --> strategy
     artifacts --> serialization
@@ -161,6 +167,7 @@ flowchart TD
     onboarding --> serialization
 
     alpha --> errors
+    alpha --> requirements
     strategy --> serialization
     documentation --> errors
     project --> config
@@ -174,47 +181,50 @@ flowchart TD
 | module | depends on (intra-package) | external |
 | --- | --- | --- |
 | `errors` | (none) | — |
+| `requirements` | (none) | — |
 | `serialization` | (none) | pandas |
 | `optimization` | (none) | cvxpy, numpy, pandas |
 | `orthogonality` | (none) | pandas |
 | `config` | errors | yaml |
 | `project` | config, errors | yaml |
 | `documentation` | errors | — |
-| `alpha` | errors | pandas |
+| `alpha` | errors, requirements | pandas |
 | `strategy` | serialization | pandas |
 | `catalog` | config, errors, project | duckdb, pandas |
 | `discovery` | errors, project | duckdb, pyarrow |
 | `registration` | config, errors, project, serialization | pyarrow |
-| `profiles` | catalog, config, errors, project | — |
+| `profiles` | catalog, config, errors, project, requirements | — |
 | `artifacts` | project, serialization, strategy | pandas |
 | `research` | orthogonality, project, serialization | duckdb, pandas |
 | `portfolio` | optimization | pandas |
 | `execution` | `_vendor`, strategy | pandas |
 | `onboarding` | errors, project, serialization | — |
-| `extensions` | alpha, artifacts, errors, project | pandas |
+| `extensions` | alpha, artifacts, errors, project, requirements | pandas |
 | `ensemble` | alpha, research | pandas |
 | `reporting` | execution | pandas |
 | `skill` | alpha, documentation, errors, serialization | — |
-| `data` | catalog, discovery, profiles, registration | — |
+| `data` | catalog, discovery, profiles, registration, requirements | — |
 | `agent` | documentation, onboarding, skill | — |
 | `cli` | alpha, catalog, discovery, documentation, errors, extensions, onboarding, profiles, project, registration, skill | qlib |
 | `__init__` | errors, project | — |
 
-가장 많이 의존되는 module: `errors`(13) → `project`(10) → `serialization`(6) → `config`/`alpha`(4).
+가장 많이 의존되는 module: `errors`(13) → `project`(10) → `serialization`(6) →
+`config`/`alpha`/`requirements`(4).
 
 ### 3.3 Dependency 규칙
 
 ```text
 entrypoint (cli, __init__, data, agent)
-  -> composition (ensemble, reporting, extensions, skill)
+  -> composition (profiles, ensemble, reporting, extensions, skill)
     -> capability (catalog, research, execution, artifacts, ...)
-      -> domain (alpha, strategy, project, config, documentation)
-        -> kernel (errors, serialization, optimization, orthogonality)
+      -> project boundary (project)
+        -> domain (alpha, strategy, config, documentation)
+          -> kernel (errors, requirements, serialization, optimization, orthogonality)
 ```
 
 - **Kernel은 아무것도 import하지 않는다.** 새 의존을 추가하려면 그 module이 kernel이 아니라는 뜻이다.
-- **`alpha`는 pandas와 `errors` 외에 아무것도 모른다.** 순수 계산 도메인으로 유지한다. `project`,
-  `catalog`, `research`를 import하면 안 된다.
+- **`alpha`는 pandas와 kernel의 `errors`, `requirements` 외에 아무것도 모른다.** 순수 계산 도메인으로
+  유지한다. `project`, `catalog`, `research`를 import하면 안 된다.
 - **`_vendor/`는 `execution`만 import한다.** 다른 module이 vendored 코드를 직접 참조하면 drift다.
 - **역방향 import 금지.** 표에서 아래 계층이 위 계층을 import하면 순환이 생긴다.
 
@@ -228,10 +238,11 @@ entrypoint (cli, __init__, data, agent)
 
 ```python
 import qlibx
+
 qlibx.__all__
 # ['Project', 'QlibxError', 'agent', 'alpha', 'artifacts', 'data',
 #  'ensemble', 'execution', 'extensions', 'portfolio', 'reporting',
-#  'research', 'strategy']
+#  'requirements', 'research', 'strategy']
 ```
 
 책임 기반의 얇은 facade다. `data`와 `agent`는 하위 module을 재수출하는 facade이고,
@@ -244,13 +255,13 @@ flowchart LR
     Q["qlibx"] --> P["project"] --> P1["init · status"]
     Q --> D["data"] --> D1["requirements · discover · inspect<br/>plan · register · catalog · preview"]
     Q --> QL["qlib"] --> QL1["status · requirements · plan"]
-    Q --> AL["alpha"] --> AL1["operations · operation NAME · budgets"]
+    Q --> AL["alpha"] --> AL1["operations · operation NAME · plan NAME<br/>exposure-requirements · exposure-plan · budgets"]
     Q --> AG["agent"] --> AG1["skill · instruction"]
     Q --> EX["extension"] --> EX1["contracts · contract NAME"]
     Q --> DOC["docs · schema · examples · errors"]
 ```
 
-전체 23개 leaf command. 각 subcommand는 선언되는 자리에서
+전체 26개 leaf command. 각 subcommand는 선언되는 자리에서
 `set_defaults(handler=...)`로 handler를 바인딩하고, `cli.dispatch`는 `args.handler(args)` 한 줄이다.
 handler는 **출력할 값을 return만** 하며 JSON 인코딩·출력·에러 변환은 한 곳에 모여 있다.
 
@@ -416,13 +427,16 @@ alpha/
 
 `OperationSpec`은 **선언된 semantics와 구현을 한 객체에 담는다**: `axis`, `tie_behavior`,
 `nan_behavior`, `minimum_observations`, `group_missing_behavior`, `selection_behavior`, `dtype`,
-`parameters`, 그리고 `apply` 콜러블. 이 덕분에 세 가지가 자동으로 일관된다.
+`parameters`, 공용 `CapabilityRequirement`, 그리고 `apply` 콜러블. 이 덕분에 네 가지가 자동으로
+일관된다.
 
 1. **Dispatch** — `apply_transform`/`apply_pipeline`이 registry를 조회한다.
 2. **Lineage** — `OperationSpec.contract()`가 결과에 기록될 `OperationContract`를 만든다.
    extension이면 `implementation_digest`(source hash)까지 들어간다.
 3. **Discovery** — `qlibx alpha operations`, `alpha_operation` schema, 생성된 skill의
    `references/alpha-operations.md`가 모두 같은 registry에서 나온다.
+4. **Requirement plan/error** — `plan_operation`과 `apply_transform`이 같은 requirement evaluator를
+   사용한다. `group_demean`의 explicit point-in-time group input이 첫 built-in 사례다.
 
 선언되지 않은 parameter는 즉시 거부한다(`operation linear_decay does not accept parameters ['windwo']`).
 
@@ -614,10 +628,35 @@ stored artifact  ->  AnalysisSection  ->  ReportDocument  ->  renderer  ->  outp
 `digest_dataset`을 써야 할 곳에 `digest_document`를 쓰면 dtype이나 결측만 다른 두 프레임이
 같은 해시로 충돌한다. 재현성 식별자에는 반드시 `digest_dataset`을 쓴다.
 
-### 12.2 에러 계약
+### 12.2 Capability requirement 계약 (`requirements.py`)
+
+`CapabilityRequirements`가 capability ID/version과 `CapabilityRequirement` 목록을 선언한다. 각
+requirement는 의미·axis·unit·currency·사용 목적·충족 규칙·availability·mandatory/optional·미충족
+효과·derivation alternative·user 질문·next command를 가진다.
+
+```text
+CapabilityRequirements
+  + RequirementEvidence (capability adapter가 수집)
+  -> evaluate_requirements()        # project/CLI 의존 없는 순수 판정
+  -> CapabilityResolution
+       -> CapabilityPlan            # read-only preflight
+       -> QlibxError.context         # runtime gap, 같은 직렬화
+       -> ExposureArtifact metadata # explicit incomplete result
+```
+
+Optional requirement는 `not_requested`, `satisfied`, `unsatisfied`를 구분한다. Exposure caller는
+`requested_metrics`를 반드시 지정하고, 요청한 input이 없으면 기본적으로
+`QLIBX_CAPABILITY_REQUIREMENT_GAP`으로 실패한다. `allow_incomplete=True`를 명시한 호출만
+`status="incomplete"`와 `UnavailableOutput`을 돌려받는다.
+
+Execution profile의 이전 `ExecutionProfilePlan` 공개 형식은 제거했다.
+`execution_profile_requirements`와 `plan_execution_profile`은 공용 `CapabilityRequirements`와
+`CapabilityPlan`을 반환하며, `require_execution_profile`이 같은 resolution으로 runtime error를 만든다.
+
+### 12.3 에러 계약
 
 모든 실패는 `QlibxError`로 `{code, message, action, context}`를 반환한다.
-현재 **55개 코드**가 등록되어 있고, 모두 `qlibx errors <code>`로 조회 가능하다.
+현재 **56개 코드**가 등록되어 있고, 모두 `qlibx errors <code>`로 조회 가능하다.
 
 ```mermaid
 flowchart LR
@@ -626,15 +665,20 @@ flowchart LR
     Q --> AG2["agent: qlibx errors CODE 로 복구 조회"]
     U["이름 조회 실패"] --> UN["errors.unknown_name(...)"]
     UN --> Q
+    G["requirement gap"] --> RG["errors.requirement_gap(...)"]
+    RG --> Q
 ```
 
 `errors.unknown_name()`이 "등록되지 않은 이름" 실패를 한 모양으로 만든다 — agent는 어느
 registry에서 실패했든 `context["available"]`만 보면 대안을 얻는다.
 
+`errors.requirement_gap()`은 typed `CapabilityResolution.to_dict()`를 변경 없이 context에 넣는다.
+따라서 agent는 capability마다 다른 error shape를 해석하지 않는다.
+
 > **불변식**: 던질 수 있는 모든 코드는 `ERROR_GUIDANCE`에 있어야 하고, 그 역도 참이어야 한다.
 > `tests/test_documentation.py::test_every_raised_error_code_has_installed_recovery_guidance`가 강제한다.
 
-### 12.3 Agent onboarding
+### 12.4 Agent onboarding
 
 ```mermaid
 flowchart LR
@@ -687,7 +731,7 @@ user-project/
 
 ## 14. Testing map
 
-96개 테스트. PRD §13 acceptance criteria와의 대응:
+118개 테스트. PRD §13 acceptance criteria와의 대응:
 
 | PRD | 주요 테스트 |
 | --- | --- |
@@ -699,12 +743,13 @@ user-project/
 | P5 ensemble · enhanced index | `test_ensemble_portfolio`, `test_ensemble_portfolio_journey`, `test_enhanced_optimizer` |
 | P6 Qlib signed execution | `test_signed_execution_journey`, `test_qlib_closed_loop` |
 | P7 local module · raw artifact | `test_artifact_extension_reporting_journey`, `test_reporting`, `test_execution_surface` |
+| P8 capability requirement · interview | `test_requirements`, `test_execution_profile`, `test_alpha_lineage`, `test_cli`, `test_documentation` |
 
 구조적 불변식을 지키는 테스트(회귀 방지용, mutation으로 검증됨):
 
 - **`tests/test_architecture.py`가 §3의 계층을 강제한다** — 모든 module이 layer에 배정되어 있고,
   import는 아래 계층으로만 가며, kernel은 무의존이고, graph는 acyclic이며, `_vendor`는 `execution`만
-  통하고, `alpha`는 `errors` 외에 의존하지 않으며, public import 경로가 살아 있다.
+  통하고, `alpha`는 kernel의 `errors`/`requirements` 외에 의존하지 않으며, public import 경로가 살아 있다.
 - 모든 CLI leaf command가 handler를 가진다.
 - 던지는 모든 error code에 복구 guidance가 있고 그 역도 참이다.
 - 문서화된 예제의 keyword가 실제 signature에 바인딩된다(단순 `compile()`이 아니라).
@@ -726,7 +771,8 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 **계층 위반**
 
 - `alpha`가 `project`, `catalog`, `research`를 import한다 (순수 도메인이어야 한다).
-- kernel module(`errors`, `serialization`, `optimization`, `orthogonality`)이 intra-package 의존을 얻는다.
+- kernel module(`errors`, `requirements`, `serialization`, `optimization`, `orthogonality`)이
+  intra-package 의존을 얻는다.
 - `_vendor/`를 `execution` 외의 module이 직접 import한다.
 - intra-package import graph에 순환이 생긴다.
 
@@ -741,6 +787,8 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 - 이름 조회 실패를 `QlibxError`가 아닌 raw exception으로 던져 CLI가 traceback을 낸다.
 - 새 error code를 `ERROR_GUIDANCE` 등록 없이 던진다.
 - 문서화된 예제가 실제 signature와 맞지 않는다.
+- Plan과 runtime error가 서로 다른 requirement resolution을 반환한다.
+- Optional output에서 `not_requested`와 `unsatisfied`를 같은 상태로 취급한다.
 
 **데이터·실행 위반**
 
@@ -761,8 +809,8 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 
 | 항목 | 현재 상태 |
 | --- | --- |
-| **Capability requirement contract (PRD §5.4/§5.5, P8)** | **미구현 — 최우선 격차.** PRD가 "모든 capability는 required data를 선언하고, 미충족 시 requirement gap을 보고하며, agent layer가 user와 interview한다"를 확정했으나 코드에는 자리가 없다. 상세는 아래 §16.1 |
-| Beta estimation · residualization (PRD §8.2/§8.3) | **미구현.** requirement를 선언할 수단이 없어 정직하게 구현할 수 없었다. capability requirement contract가 선행 조건이다 |
+| **Capability requirement contract (PRD §5.4/§5.5, P8)** | **구현됨.** 공용 declaration/evaluator/plan/error 타입, execution-profile 공개 migration, `group_demean`, exposure request/unavailable 구분, extension declaration, CLI/schema/generated skill을 제공한다. 상세는 아래 §16.1 |
+| Beta estimation · residualization (PRD §8.2/§8.3) | **의도적으로 미구현.** 공용 requirement 기반은 준비됐지만 별도 작업으로 연기했다 |
 | `reporting` → `execution` → `_vendor` 결합 | `reporting`이 run catalog 때문에 `execution`을 경유해 vendored 코드에 간접 의존한다. run catalog port를 분리하면 끊긴다 |
 | `ResearchCatalog` 크기 | event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |
 | `references/`의 target architecture | `contracts/`·`runtime/`·`capabilities/`·`adapters/` 디렉터리 계층, ComponentRef, FrozenInvocationBundle, TemporalSemantics(revision/vintage), CostModelSnapshot, RiskModelSnapshot은 아직 구현되지 않았다. 현재는 flat module + import 방향으로 계층을 강제한다 |
@@ -777,7 +825,7 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 - 다음 승격 후보는 `documentation`(835줄, 대부분 catalog 데이터로 requirement 선언이 추가되면 더
   커진다)과 `research`(777줄, event log · blob store · publication protocol이 한 클래스에 있다)다.
 
-### 16.1 Capability requirement contract 격차 (PRD §5.4/§5.5, P8)
+### 16.1 Capability requirement contract 구현 (PRD §5.4/§5.5, P8)
 
 PRD가 확정한 흐름은 이렇다.
 
@@ -791,32 +839,24 @@ flowchart LR
     F --> A
 ```
 
-현재 코드의 상태를 실측한 결과:
+현재 public implementation:
 
-| 요소 | 상태 | 근거 |
+| 요소 | 구현 | public surface |
 | --- | --- | --- |
-| requirement 선언 필드 | **없음** | `OperationSpec`은 스칼라 `parameters`와 `requires_groups: bool`만 가진다. "어떤 dataset이 왜 필요한가"를 담을 곳이 없다 |
-| 미충족 시 agent-readable 실패 | **없음** | `apply_transform("group_demean", v)` → 평범한 `ValueError`. code·context 없음 |
-| 조용한 부분 결과 | **발생 중** | `analyze_exposure`가 beta 데이터 없이 `market_exposure=None`을 예외도 경고도 없이 반환한다. PRD §2.5가 이제 금지한 behavior |
-| requirement gap error code | **없음** | 55개 코드 중 해당 계열 없음 |
-| read-only plan 형태 | **부분적** | 아래 참조 |
-| skill의 resolution interview | **없음** | SKILL.md에 registration interview는 있으나 operation gap에서 되돌아오는 경로가 없다 |
+| 공용 선언 | `CapabilityRequirements` + `CapabilityRequirement` + `DerivationAlternative` | `qlibx.requirements`, `schema capability_requirement` |
+| 순수 판정 | evidence와 requested optional set에서 `CapabilityResolution` 생성 | `evaluate_requirements` |
+| read-only plan | declaration, resolution, parameters, warnings, limitations | `CapabilityPlan`, `qlibx qlib plan`, `qlibx alpha plan`, `qlibx alpha exposure-plan` |
+| runtime error | plan resolution을 변경 없이 error context에 사용 | `QLIBX_CAPABILITY_REQUIREMENT_GAP` |
+| execution profile | legacy `ExecutionProfilePlan` 제거, 공용 공개 계약으로 전면 이관 | `execution_profile_requirements`, `plan_execution_profile`, `require_execution_profile` |
+| alpha operation | `OperationSpec.requirements`; `requires_groups` boolean 제거 | `group_demean`, project-local/extension-backed `OperationSpec` |
+| exposure | 명시적 metric request, `not_requested`와 `unsatisfied` 구분 | `exposure_requirements`, `plan_exposure`, `ExposureArtifact` |
+| agent interview | gap 해석 → user 선택 → registration/config → 동일 요청 재실행 | generated `SKILL.md` |
 
-**단, 정답 템플릿은 이미 패키지 안에 있다.** 두 곳이 PRD §5.4/§5.5가 요구하는 형태에 근접해 있고,
-capability requirement contract는 이 패턴을 일반화하는 작업이다.
+공용 evaluator는 catalog를 import하지 않는다. `profiles` 같은 capability adapter가 project/catalog에서
+`RequirementEvidence`를 만들고, `alpha`는 이미 전달된 bounded runtime input에서 evidence를 만든다. 이
+분리로 선언과 판정은 공통이지만 data access는 각 책임의 상위 계층에 남는다.
 
-| 기존 구현 | requirement 선언 | gap 보고 | interview 질문 |
-| --- | --- | --- | --- |
-| `profiles.execution_profile_requirements` + `plan_execution_profile` | `required_roles` | `missing_roles`, `unknown_datasets`, `non_matrix_datasets`, `ready` | `agent_action` |
-| `discovery.inspect_data` | — | `unresolved_requirements` | `required_user_questions` |
-
-`plan_execution_profile`은 PRD가 요구하는 "실행 전 read-only plan"에 해당하고, 그 짝인 "실행 시점 error"
-형태가 없다. Alpha·exposure·portfolio·reporting 층에는 두 형태가 모두 없다.
-
-구현 시 지켜야 할 설계 제약(PRD §5.4):
-
-- requirement는 평평한 dataset 목록이 아니라 **derivation alternative를 가진 선택지**다
-  (`market_return` = index return 등록 **또는** `market_cap` + return의 cap-weighted 계산).
-- plan 형태와 error 형태는 **같은 선언에서 파생**되어야 하며 서로 다른 판정을 내면 안 된다.
-- requirement 선언과 실제 실행 조건이 일치해야 한다(요구하지 않는 것을 선언하지 않는다).
-- core package는 절대 user에게 직접 묻지 않는다. 질문은 gap에 담아 agent layer로 넘긴다.
+Exposure는 호출자가 `requested_metrics`를 지정한다. 요청하지 않은 optional 항목은 `not_requested`이고,
+요청했지만 input이 없는 항목은 `unsatisfied`다. 기본 실행은 structured error로 중단한다. 명시적인
+`allow_incomplete=True`만 incomplete artifact를 허용하며, 이 경우에도 `status="incomplete"`와
+`UnavailableOutput` 때문에 완전한 성공으로 표시되지 않는다.

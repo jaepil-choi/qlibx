@@ -19,7 +19,7 @@ PACKAGE_NAME = "qlibx"
 
 # Layer 0 is the kernel; a module may import only from strictly lower layers.
 LAYERS: tuple[tuple[str, ...], ...] = (
-    ("errors", "serialization", "optimization", "orthogonality"),
+    ("errors", "requirements", "serialization", "optimization", "orthogonality"),
     ("config", "documentation", "alpha", "strategy"),
     ("project",),
     (
@@ -147,14 +147,25 @@ def test_vendored_qlib_has_exactly_one_gateway() -> None:
 
 def test_alpha_is_a_pure_domain_package() -> None:
     """Alpha must not learn about projects, catalogs, or storage."""
-    assert GRAPH.get("alpha", set()) <= {"errors"}, (
-        f"alpha must depend only on errors, got {sorted(GRAPH.get('alpha', set()))}"
+    assert GRAPH.get("alpha", set()) <= {"errors", "requirements"}, (
+        "alpha must depend only on errors and requirements, "
+        f"got {sorted(GRAPH.get('alpha', set()))}"
     )
 
 
 @pytest.mark.parametrize(
     "module",
-    ["alpha", "artifacts", "data", "ensemble", "execution", "extensions", "reporting", "research"],
+    [
+        "alpha",
+        "artifacts",
+        "data",
+        "ensemble",
+        "execution",
+        "extensions",
+        "reporting",
+        "requirements",
+        "research",
+    ],
 )
 def test_public_module_paths_stay_importable(module: str) -> None:
     """Installed examples import these paths directly; splitting a module must not break them."""

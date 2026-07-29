@@ -188,6 +188,22 @@ Every `QlibxError` returns `code`, `message`, `action`, and `context`. Run
 `qlibx errors <code>` before editing config or retrying. If guidance requires user confirmation,
 explain the unresolved meaning and ask the user; never guess or silently fall back.
 
+## Capability requirement gaps
+
+Before running a data-dependent capability, read its installed requirement declaration and run its
+read-only plan. If `ready` is false or execution raises `QLIBX_CAPABILITY_REQUIREMENT_GAP`:
+
+1. Read `missing_requirements`, each alternative and its reason from the shared resolution.
+2. Explain what the capability needs and why; show every acceptable derivation alternative.
+3. Ask the listed `user_questions` and inspect only user-selected source data.
+4. Run the data-registration interview; never choose a similar dataset or proxy silently.
+5. Complete the selected registration/config, then rerun the exact same capability request.
+6. Record the selected alternative, assumptions and remaining limitations in the research record.
+
+The plan resolution and runtime error context are the same object shape. Optional outputs marked
+`not_requested` are not failures; requested outputs marked `unsatisfied` must not be reported as a
+complete result.
+
 ## Project-local extension
 
 Run `qlibx extension contracts`, then read `references/contracts.md`. Put trusted code below the
@@ -219,6 +235,7 @@ def _alpha_operations_markdown() -> str:
     for operation in list_operations():
         required = ", ".join(operation["required_parameters"]) or "none"
         declared = ", ".join(sorted(operation["parameters"])) or "none"
+        requirements = operation["requirements"]
         lines.extend(
             [
                 f"### {operation['name']} (`{operation['operation_id']}` v{operation['version']})",
@@ -231,10 +248,22 @@ def _alpha_operations_markdown() -> str:
                 f"- Selection behavior: {operation['selection_behavior']}",
                 f"- Minimum observations: {operation['minimum_observations']}",
                 f"- Parameters: {declared}; required: {required}",
-                f"- Requires explicit groups: {operation['requires_groups']}",
+                f"- Data requirements: {len(requirements)}",
                 "",
             ]
         )
+        for requirement in requirements:
+            alternatives = ", ".join(item["alternative_id"] for item in requirement["alternatives"])
+            lines.extend(
+                [
+                    f"  - `{requirement['requirement_id']}` role `{requirement['role']}`; "
+                    f"mandatory={requirement['mandatory']}",
+                    f"    alternatives: {alternatives}; availability: "
+                    f"{requirement['availability']}",
+                ]
+            )
+        if requirements:
+            lines.append("")
     lines.extend(["## Budget policies", ""])
     for policy in list_budget_policies():
         lines.extend(

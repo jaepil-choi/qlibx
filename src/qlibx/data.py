@@ -3,9 +3,9 @@
 from qlibx.catalog import ConfigDrivenDataLoader, DataCatalog, DatasetSpec, SourceSpec
 from qlibx.discovery import DataCandidate, DataInspection, discover_data, inspect_data
 from qlibx.profiles import (
-    ExecutionProfilePlan,
     execution_profile_requirements,
     plan_execution_profile,
+    require_execution_profile,
 )
 from qlibx.registration import (
     RegistrationPlan,
@@ -14,14 +14,16 @@ from qlibx.registration import (
     plan_registration,
     register_dataset,
 )
+from qlibx.requirements import CapabilityPlan, CapabilityRequirements
 
 __all__ = [
+    "CapabilityPlan",
+    "CapabilityRequirements",
     "ConfigDrivenDataLoader",
     "DataCandidate",
     "DataCatalog",
     "DataInspection",
     "DatasetSpec",
-    "ExecutionProfilePlan",
     "RegistrationPlan",
     "RegistrationResult",
     "SourceSpec",
@@ -32,4 +34,5 @@ __all__ = [
     "plan_execution_profile",
     "plan_registration",
     "register_dataset",
+    "require_execution_profile",
 ]

@@ -14,11 +14,14 @@ from qlibx.alpha import (
     apply_transform,
     hump,
     list_operations,
+    plan_exposure,
+    plan_operation,
     register_budget_policy,
     register_operation,
     top_bottom,
 )
 from qlibx.errors import QlibxError
+from qlibx.requirements import CapabilityRequirement, DerivationAlternative
 
 
 def test_builtin_operation_has_versioned_deterministic_lineage() -> None:
@@ -49,6 +52,17 @@ def test_group_demean_records_missing_group_and_neutrality_warning() -> None:
     assert "not proof" in result.neutrality_warning
 
 
+def test_group_demean_plan_and_runtime_error_share_one_requirement_resolution() -> None:
+    values = pd.DataFrame([[1.0, 3.0]], columns=["A", "B"])
+    plan = plan_operation("group_demean")
+    assert plan.ready is False
+    assert plan.resolution.missing_requirements == ("group_label",)
+    with pytest.raises(QlibxError) as failure:
+        apply_transform("group_demean", values)
+    assert failure.value.code == "QLIBX_CAPABILITY_REQUIREMENT_GAP"
+    assert failure.value.context == plan.resolution.to_dict()
+
+
 def test_exposure_artifact_records_method_data_window_coverage_and_missingness() -> None:
     dates = pd.date_range("2025-01-01", periods=2)
     weights = pd.DataFrame(
@@ -69,6 +83,14 @@ def test_exposure_artifact_records_method_data_window_coverage_and_missingness()
         input_id="alpha-run-1",
         dataset_ids={"market_beta": "beta-v2", "sector": "sector-pit-v1"},
         method="weighted_sum",
+        requested_metrics=(
+            "summary",
+            "market_exposure",
+            "benchmark_exposure",
+            "group_exposure",
+            "factor_exposure",
+            "intended_realized_gap",
+        ),
         market_beta=beta,
         benchmark_beta=beta * 0.8,
         groups=groups,
@@ -76,7 +98,7 @@ def test_exposure_artifact_records_method_data_window_coverage_and_missingness()
         realized_holdings=realized,
     )
     assert artifact.analyzer_id == "qlibx.alpha.exposure"
-    assert artifact.analyzer_version == "1"
+    assert artifact.analyzer_version == "2"
     assert artifact.method == "weighted_sum"
     assert artifact.dataset_ids["sector"] == "sector-pit-v1"
     assert artifact.estimation_window == (str(dates[0]), str(dates[-1]))
@@ -86,7 +108,39 @@ def test_exposure_artifact_records_method_data_window_coverage_and_missingness()
     assert artifact.group_exposure.loc[dates[0], "finance"] == pytest.approx(-0.2)
     assert artifact.factor_exposure.loc[dates[1], "value"] == pytest.approx(0.2)
     assert artifact.intended_realized_gap is not None
+    assert artifact.status == "complete"
+    assert artifact.unavailable_outputs == ()
     assert "not proof" in artifact.neutrality_warning
+
+
+def test_exposure_distinguishes_unrequested_from_requested_but_unavailable() -> None:
+    weights = pd.DataFrame([[0.4, -0.2]], columns=["A", "B"])
+    summary_only = analyze_exposure(
+        weights,
+        input_id="alpha-run-1",
+        dataset_ids={},
+        method="weighted_sum",
+        requested_metrics=("summary",),
+    )
+    assert summary_only.status == "complete"
+    assert summary_only.market_exposure is None
+    assert summary_only.unavailable_outputs == ()
+
+    plan = plan_exposure(
+        requested_metrics=("summary", "market_exposure"),
+        available_inputs=("weights",),
+    )
+    assert plan.ready is False
+    with pytest.raises(QlibxError) as failure:
+        analyze_exposure(
+            weights,
+            input_id="alpha-run-1",
+            dataset_ids={},
+            method="weighted_sum",
+            requested_metrics=("summary", "market_exposure"),
+        )
+    assert failure.value.code == "QLIBX_CAPABILITY_REQUIREMENT_GAP"
+    assert failure.value.context == plan.resolution.to_dict()
 
 
 def test_hump_restarts_after_a_gap_instead_of_poisoning_the_series() -> None:
@@ -167,6 +221,63 @@ def test_project_local_operation_registers_and_carries_its_own_lineage() -> None
         assert "test_double" in {item["name"] for item in list_operations()}
     finally:
         OPERATIONS.unregister("test_double")
+
+
+def test_project_local_operation_uses_the_common_requirement_contract() -> None:
+    values = pd.DataFrame([[1.0, 3.0]], columns=["A", "B"])
+    auxiliary = pd.DataFrame([[2.0, 4.0]], columns=values.columns)
+
+    def add_auxiliary(frame, *, auxiliary):
+        return frame.add(auxiliary)
+
+    requirement = CapabilityRequirement(
+        requirement_id="auxiliary_signal",
+        role="auxiliary",
+        meaning="Explicit auxiliary signal matrix.",
+        axis="date_by_ticker",
+        unit="signal",
+        currency="not_applicable",
+        purpose="Add an explicitly supplied project-local signal.",
+        satisfaction_rule="The auxiliary parameter is supplied.",
+        availability="Bounded by the caller's decision context.",
+        mandatory=True,
+        unavailable_effect="The project-local transform cannot run.",
+        alternatives=(
+            DerivationAlternative(
+                alternative_id="explicit_auxiliary",
+                description="Use an explicitly supplied auxiliary matrix.",
+                required_inputs=("auxiliary",),
+                derivation="direct",
+            ),
+        ),
+        user_questions=("Which registered dataset supplies the auxiliary signal?",),
+        next_commands=("qlibx data catalog --root <project>",),
+    )
+    register_operation(
+        OperationSpec(
+            name="test_auxiliary",
+            operation_id="project.test_auxiliary",
+            version="1",
+            axis="date_by_ticker",
+            tie_behavior="not_applicable",
+            nan_behavior="preserve",
+            minimum_observations=1,
+            group_missing_behavior="not_applicable",
+            dtype="float64",
+            summary="Use one explicitly required auxiliary signal.",
+            apply=add_auxiliary,
+            parameters={"auxiliary": "date-by-ticker auxiliary matrix"},
+            requirements=(requirement,),
+        )
+    )
+    try:
+        with pytest.raises(QlibxError) as failure:
+            apply_transform("test_auxiliary", values)
+        assert failure.value.code == "QLIBX_CAPABILITY_REQUIREMENT_GAP"
+        result = apply_transform("test_auxiliary", values, auxiliary=auxiliary)
+        assert result.values.iloc[0].tolist() == [3.0, 7.0]
+    finally:
+        OPERATIONS.unregister("test_auxiliary")
 
 
 def test_budget_policies_are_registered_and_report_leftover() -> None:

@@ -1,5 +1,10 @@
 # Handoff — Capability requirement contract
 
+> **Superseded:** The common public requirement contract described here was implemented after the
+> user selected full public migration. See `docs/implementations/capability-requirement-contract.md`
+> and current `docs/qlibx-architecture.md` §12.2/§16.1. Beta estimation and residualization remain
+> deferred.
+
 이 문서는 다음 agent가 **이 대화를 읽지 않고** 작업을 이어받기 위한 것이다.
 현재 상태, 다음에 무엇을 왜 어떻게 구현해야 하는지, 그리고 내가 빠졌던 함정을 기록한다.
 
@@ -114,9 +119,24 @@ Core package는 **판정만** 하고 절대 user에게 직접 묻지 않는다. 
 `ExecutionProfilePlan`의 실제 필드를 먼저 읽어볼 것:
 
 ```python
-["profile_id", "target_semantics", "config_path", "clock", "roles", "required_roles",
- "missing_roles", "unknown_datasets", "non_matrix_datasets", "role_contracts",
- "derived_fields", "warnings", "unsupported_features", "ready", "read_only", "mutates"]
+[
+    "profile_id",
+    "target_semantics",
+    "config_path",
+    "clock",
+    "roles",
+    "required_roles",
+    "missing_roles",
+    "unknown_datasets",
+    "non_matrix_datasets",
+    "role_contracts",
+    "derived_fields",
+    "warnings",
+    "unsupported_features",
+    "ready",
+    "read_only",
+    "mutates",
+]
 ```
 
 ---

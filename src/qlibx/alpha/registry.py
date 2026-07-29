@@ -9,12 +9,20 @@ transform are indistinguishable to callers.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import pandas as pd
 
-from qlibx.errors import unknown_name
+from qlibx.errors import requirement_gap, unknown_name
+from qlibx.requirements import (
+    CapabilityPlan,
+    CapabilityRequirement,
+    CapabilityRequirements,
+    RequirementEvidence,
+    evaluate_requirements,
+    make_plan,
+)
 
 from .contracts import OperationContract, TransformResult
 
@@ -23,8 +31,8 @@ from .contracts import OperationContract, TransformResult
 class OperationSpec:
     """Declared semantics plus the implementation of one deterministic operation.
 
-    ``apply`` is called as ``apply(values, **parameters)``, or as
-    ``apply(values, groups=groups, **parameters)`` when ``requires_groups`` is set.
+    ``apply`` is called as ``apply(values, **parameters)``, or with a ``groups`` argument
+    when the common requirement declaration contains the ``group_label`` role.
     ``resolve_minimum_observations`` lets a parameterized window override the declared
     default so lineage records the count actually required.
     """
@@ -42,7 +50,7 @@ class OperationSpec:
     apply: Callable[..., pd.DataFrame]
     parameters: Mapping[str, str] = field(default_factory=dict)
     required_parameters: tuple[str, ...] = ()
-    requires_groups: bool = False
+    requirements: tuple[CapabilityRequirement, ...] = ()
     selection_behavior: str = "not_applicable"
     neutrality_warning: str | None = None
     implementation: str = "builtin"
@@ -85,7 +93,7 @@ class OperationSpec:
             "dtype": self.dtype,
             "parameters": dict(self.parameters),
             "required_parameters": list(self.required_parameters),
-            "requires_groups": self.requires_groups,
+            "requirements": [asdict(item) for item in self.requirements],
             "neutrality_warning": self.neutrality_warning,
             "implementation": self.implementation,
         }
@@ -146,6 +154,51 @@ def operation_contract(name: str, **parameters: Any) -> OperationContract:
     return OPERATIONS.get(name).contract(parameters)
 
 
+def operation_requirements(name: str) -> CapabilityRequirements:
+    spec = OPERATIONS.get(name)
+    return CapabilityRequirements(
+        capability_id=spec.operation_id,
+        capability_version=spec.version,
+        summary=spec.summary,
+        requirements=spec.requirements,
+        parameters={"operation_name": spec.name},
+    )
+
+
+def plan_operation(
+    name: str,
+    *,
+    provided_inputs: Iterable[str] = (),
+) -> CapabilityPlan:
+    """Plan one operation from explicit input roles without executing it."""
+    declaration = operation_requirements(name)
+    provided = set(provided_inputs)
+    evidence: list[RequirementEvidence] = []
+    for requirement in declaration.requirements:
+        for alternative in requirement.alternatives:
+            missing = tuple(sorted(set(alternative.required_inputs) - provided))
+            evidence.append(
+                RequirementEvidence(
+                    requirement_id=requirement.requirement_id,
+                    alternative_id=alternative.alternative_id,
+                    satisfied=not missing,
+                    reason=(
+                        "All required explicit inputs are available."
+                        if not missing
+                        else f"Missing explicit inputs: {list(missing)}"
+                    ),
+                    source="runtime_arguments",
+                    details={"provided_inputs": sorted(provided)},
+                )
+            )
+    resolution = evaluate_requirements(declaration, tuple(evidence))
+    return make_plan(
+        declaration,
+        resolution,
+        parameters={"operation_name": name, "provided_inputs": sorted(provided)},
+    )
+
+
 def _validate_parameters(spec: OperationSpec, parameters: Mapping[str, Any]) -> None:
     unknown = sorted(set(parameters) - set(spec.parameters))
     if unknown:
@@ -165,9 +218,19 @@ def _apply_spec(
     parameters: Mapping[str, Any],
 ) -> pd.DataFrame:
     _validate_parameters(spec, parameters)
-    if spec.requires_groups:
-        if groups is None:
-            raise ValueError(f"{spec.name} requires explicit groups")
+    provided_inputs = {
+        requirement.role
+        for requirement in spec.requirements
+        if requirement.role in parameters and parameters[requirement.role] is not None
+    }
+    if groups is not None:
+        provided_inputs.add("group_label")
+    plan = plan_operation(spec.name, provided_inputs=provided_inputs)
+    if not plan.ready:
+        raise requirement_gap(plan.resolution.to_dict())
+    needs_groups = any(item.role == "group_label" for item in spec.requirements)
+    if needs_groups:
+        assert groups is not None
         return spec.apply(values, groups=groups, **parameters)
     return spec.apply(values, **parameters)
 
@@ -239,6 +302,8 @@ __all__ = [
     "apply_transform",
     "list_operations",
     "operation_contract",
+    "operation_requirements",
     "operation_spec",
+    "plan_operation",
     "register_operation",
 ]

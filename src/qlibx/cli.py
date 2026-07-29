@@ -17,7 +17,14 @@ from typing import Any
 
 import qlib
 
-from qlibx.alpha import list_budget_policies, list_operations, operation_spec
+from qlibx.alpha import (
+    exposure_requirements,
+    list_budget_policies,
+    list_operations,
+    operation_spec,
+    plan_exposure,
+    plan_operation,
+)
 from qlibx.catalog import ConfigDrivenDataLoader, DataCatalog
 from qlibx.discovery import discover_data, inspect_data
 from qlibx.documentation import (
@@ -168,6 +175,21 @@ def _alpha_operations(_: argparse.Namespace) -> Any:
 
 def _alpha_operation(args: argparse.Namespace) -> Any:
     return {args.name: operation_spec(args.name).describe()}
+
+
+def _alpha_plan(args: argparse.Namespace) -> Any:
+    return plan_operation(args.name, provided_inputs=args.provided_input)
+
+
+def _alpha_exposure_requirements(_: argparse.Namespace) -> Any:
+    return exposure_requirements()
+
+
+def _alpha_exposure_plan(args: argparse.Namespace) -> Any:
+    return plan_exposure(
+        requested_metrics=args.metric,
+        available_inputs=args.provided_input,
+    )
 
 
 def _alpha_budgets(_: argparse.Namespace) -> Any:
@@ -333,6 +355,13 @@ def parser() -> argparse.ArgumentParser:
     alpha_commands = commands.add_parser("alpha").add_subparsers(dest="action", required=True)
     _add(alpha_commands, "operations", _alpha_operations)
     _add(alpha_commands, "operation", _alpha_operation).add_argument("name")
+    alpha_plan = _add(alpha_commands, "plan", _alpha_plan)
+    alpha_plan.add_argument("name")
+    alpha_plan.add_argument("--provided-input", action="append", default=[])
+    _add(alpha_commands, "exposure-requirements", _alpha_exposure_requirements)
+    exposure_plan = _add(alpha_commands, "exposure-plan", _alpha_exposure_plan)
+    exposure_plan.add_argument("--metric", action="append", required=True)
+    exposure_plan.add_argument("--provided-input", action="append", default=[])
     _add(alpha_commands, "budgets", _alpha_budgets)
 
     extension_commands = commands.add_parser("extension").add_subparsers(

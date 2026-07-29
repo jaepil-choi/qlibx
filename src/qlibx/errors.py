@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 
@@ -50,4 +50,24 @@ def unknown_name(
     )
 
 
-__all__ = ["QlibxError", "unknown_name"]
+def requirement_gap(context: Mapping[str, Any]) -> QlibxError:
+    """Build the stable error envelope for one typed requirement resolution."""
+    payload = dict(context)
+    capability = payload.get("capability", {})
+    capability_id = capability.get("id", "unknown")
+    missing = list(payload.get("missing_requirements", ()))
+    commands = list(payload.get("next_commands", ()))
+    action = (
+        f"Resolve the requirement gap, then rerun the same capability. Next: {commands[0]}"
+        if commands
+        else "Resolve the reported requirements, then rerun the same capability."
+    )
+    return QlibxError(
+        "QLIBX_CAPABILITY_REQUIREMENT_GAP",
+        f"Capability {capability_id!r} has unsatisfied requirements: {missing}",
+        action=action,
+        context=payload,
+    )
+
+
+__all__ = ["QlibxError", "requirement_gap", "unknown_name"]

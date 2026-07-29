@@ -15,6 +15,7 @@ from qlibx.alpha import OperationSpec
 from qlibx.artifacts import ArtifactEnvelope
 from qlibx.errors import unknown_name
 from qlibx.project import Project
+from qlibx.requirements import CapabilityRequirement
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,7 @@ class ExtensionContract:
     compatibility: str
     composable: bool
     example_name: str
+    requirements: tuple[CapabilityRequirement, ...] = ()
 
 
 CONTRACTS: Mapping[str, ExtensionContract] = {
@@ -198,6 +200,7 @@ def signal_transform_operation(
     summary: str = "Project-local signal_transform extension.",
     parameters: Mapping[str, str] | None = None,
     required_parameters: tuple[str, ...] = (),
+    requirements: tuple[CapabilityRequirement, ...] = (),
     version: str = "1",
 ) -> OperationSpec:
     """Adapt a validated project-local ``signal_transform`` into an alpha operation.
@@ -227,6 +230,7 @@ def signal_transform_operation(
         apply=apply,
         parameters=dict(parameters or {}),
         required_parameters=required_parameters,
+        requirements=requirements,
         implementation=f"extension:{reference.contract}/{reference.contract_version}",
         implementation_digest=reference.source_digest,
     )

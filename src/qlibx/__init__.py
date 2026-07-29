@@ -10,6 +10,7 @@ from qlibx import (
     extensions,
     portfolio,
     reporting,
+    requirements,
     research,
     strategy,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "extensions",
     "portfolio",
     "reporting",
+    "requirements",
     "research",
     "strategy",
 ]

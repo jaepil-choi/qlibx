@@ -138,6 +138,14 @@ def test_installed_alpha_operations_are_discoverable_from_public_cli(capsys) -> 
     contract = json.loads(capsys.readouterr().out)["linear_decay"]
     assert contract["operation_id"] == "qlibx.alpha.linear_decay"
     assert contract["required_parameters"] == ["window"]
+    assert contract["requirements"] == []
+    assert dispatch(parser().parse_args(["alpha", "operation", "group_demean"])) == 0
+    group_contract = json.loads(capsys.readouterr().out)["group_demean"]
+    assert group_contract["requirements"][0]["requirement_id"] == "group_label"
+    assert dispatch(parser().parse_args(["alpha", "plan", "group_demean"])) == 0
+    group_plan = json.loads(capsys.readouterr().out)
+    assert group_plan["ready"] is False
+    assert group_plan["resolution"]["missing_requirements"] == ["group_label"]
     assert dispatch(parser().parse_args(["alpha", "budgets"])) == 0
     policies = {item["name"] for item in json.loads(capsys.readouterr().out)["policies"]}
     assert policies == {"fixed", "flexible"}
@@ -148,6 +156,14 @@ def test_every_registered_operation_is_documented_for_agents() -> None:
     for operation in alpha.list_operations():
         assert required <= set(operation), operation["name"]
         assert operation["summary"], operation["name"]
+
+
+def test_public_requirement_and_plan_schemas_are_installed() -> None:
+    requirement = public_schema("capability_requirement")
+    plan = public_schema("capability_plan")
+    assert {"requirement_id", "alternatives", "next_commands"} <= set(requirement["required"])
+    assert plan["read_only"] is True
+    assert "QLIBX_CAPABILITY_REQUIREMENT_GAP" in plan["error_equivalence"]
 
 
 def _raised_error_codes() -> set[str]:

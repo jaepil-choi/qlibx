@@ -233,6 +233,14 @@ ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
             "OperationSpec instead of editing the package."
         ),
     },
+    "QLIBX_CAPABILITY_REQUIREMENT_GAP": {
+        "recovery": (
+            "Read context.missing_requirements and each alternative, explain them to the user, "
+            "inspect the named source data, register or configure the user-selected alternative, "
+            "then rerun the same capability. Never choose a proxy silently."
+        ),
+        "requires_user_confirmation": True,
+    },
     "QLIBX_BUDGET_POLICY_UNKNOWN": {
         "recovery": (
             "Run qlibx alpha budgets and choose an installed policy, or register your own "
@@ -339,6 +347,47 @@ SCHEMAS: Mapping[str, Mapping[str, Any]] = {
         "required_clock": ["signal_cutoff", "decision_time", "execution_time", "valuation_time"],
         "mapping": "explicit_logical_dataset_roles",
         "derived_financial_fields": "none",
+        "public_plan": "capability_plan",
+    },
+    "capability_requirement": {
+        "required": [
+            "requirement_id",
+            "role",
+            "meaning",
+            "axis",
+            "unit",
+            "currency",
+            "purpose",
+            "satisfaction_rule",
+            "availability",
+            "mandatory",
+            "unavailable_effect",
+            "alternatives",
+            "user_questions",
+            "next_commands",
+        ],
+        "alternative_required": [
+            "alternative_id",
+            "description",
+            "required_inputs",
+            "derivation",
+        ],
+    },
+    "capability_plan": {
+        "required": [
+            "declaration",
+            "resolution",
+            "parameters",
+            "warnings",
+            "unsupported_features",
+            "ready",
+            "read_only",
+            "mutates",
+        ],
+        "read_only": True,
+        "error_equivalence": (
+            "resolution is serialized unchanged into QLIBX_CAPABILITY_REQUIREMENT_GAP context"
+        ),
     },
     "alpha_operation": {
         "required": [
@@ -355,7 +404,7 @@ SCHEMAS: Mapping[str, Mapping[str, Any]] = {
             "dtype",
             "parameters",
             "required_parameters",
-            "requires_groups",
+            "requirements",
             "implementation",
         ],
         "lookup": "qlibx alpha operations | qlibx alpha operation <name>",
@@ -484,6 +533,10 @@ TASK_GUIDES: Mapping[str, Mapping[str, Any]] = {
                 "List installed operations before writing a helper; apply them with "
                 "apply_transform or compose them with apply_pipeline."
             ),
+            (
+                "Read each operation requirement and run the read-only plan before execution; "
+                "resolve a structured gap with the user instead of substituting data."
+            ),
             "Apply deterministic versioned operations with explicit NaN/tie/window semantics.",
             "Record long/short/gross/net, coverage, missingness, turnover and availability audit.",
             (
@@ -495,7 +548,12 @@ TASK_GUIDES: Mapping[str, Mapping[str, Any]] = {
                 "signal_transform extension instead of rewriting the operation."
             ),
         ],
-        "schemas": ["alpha_operation", "budget_policy"],
+        "schemas": [
+            "alpha_operation",
+            "budget_policy",
+            "capability_requirement",
+            "capability_plan",
+        ],
         "examples": ["alpha_pipeline", "custom_alpha_operation"],
     },
     "research": {

@@ -31,6 +31,7 @@ def test_root_api_is_small_and_responsibility_based() -> None:
         "extensions",
         "portfolio",
         "reporting",
+        "requirements",
         "research",
         "strategy",
     ]

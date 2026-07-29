@@ -36,7 +36,16 @@ from .budget import (
     rescale_budget,
 )
 from .contracts import NEUTRALITY_WARNING, OperationContract, TransformResult
-from .exposure import ExposureArtifact, ExposureSummary, analyze_exposure, exposure_summary
+from .exposure import (
+    EXPOSURE_METRICS,
+    ExposureArtifact,
+    ExposureMetric,
+    ExposureSummary,
+    analyze_exposure,
+    exposure_requirements,
+    exposure_summary,
+    plan_exposure,
+)
 
 # Importing the operations package registers every built-in.
 from .operations import (
@@ -63,7 +72,9 @@ from .registry import (
     apply_transform,
     list_operations,
     operation_contract,
+    operation_requirements,
     operation_spec,
+    plan_operation,
     register_operation,
 )
 
@@ -74,6 +85,7 @@ OPERATION_CONTRACTS: Mapping[str, Mapping[str, Any]] = {
 
 __all__ = [
     "BUDGET_POLICIES",
+    "EXPOSURE_METRICS",
     "NEUTRALITY_WARNING",
     "OPERATIONS",
     "OPERATION_CONTRACTS",
@@ -81,6 +93,7 @@ __all__ = [
     "BudgetPolicySpec",
     "BudgetResult",
     "ExposureArtifact",
+    "ExposureMetric",
     "ExposureSummary",
     "OperationContract",
     "OperationRegistry",
@@ -96,6 +109,7 @@ __all__ = [
     "cross_sectional_demean",
     "cross_sectional_rank",
     "cross_sectional_zscore",
+    "exposure_requirements",
     "exposure_summary",
     "group_demean",
     "hump",
@@ -104,8 +118,11 @@ __all__ = [
     "list_budget_policies",
     "list_operations",
     "operation_contract",
+    "operation_requirements",
     "operation_spec",
     "per_name_cap",
+    "plan_exposure",
+    "plan_operation",
     "register_budget_policy",
     "register_operation",
     "rescale_budget",

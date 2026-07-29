@@ -39,6 +39,31 @@ Agent는 private implementation을 읽지 않고도 qlibx 사용법을 확인하
 이를 위해 설치된 package는 사람용 문서뿐 아니라 agent가 필요한 부분만 조회할 수 있는 help,
 machine-readable schema, examples, error description과 task instruction을 제공해야 한다.
 
+#### Core package는 계약을 판정하고, agent layer가 user와 대화한다
+
+`qlibx` core package는 명시된 input contract를 받아 명시된 output을 만드는 deterministic library다. User
+에게 질문하지 않고, 부족한 data를 스스로 찾아 등록하지 않으며, 빠진 input을 유사한 다른 값으로 추정하지
+않는다.
+
+많은 capability는 특정 data가 등록되어 있어야만 성립한다. 예를 들어 beta residualization은 market return을
+요구하고, market return은 index return 또는 market-capitalization weighting 중 하나로 만들어져야 한다.
+OHLCV 가격만 등록된 project에서는 이 중 어느 경로도 성립하지 않으므로 beta를 추정할 수 없다.
+
+이때 core package가 할 일은 조용히 비어 있는 결과를 돌려주거나 임의의 proxy로 대체하는 것이 아니라,
+**무엇이 왜 부족하고 어떤 경로로 충족할 수 있는지를 machine-readable하게 보고하는 것**이다. 이 보고를
+받은 agent layer가 user에게 설명하고, 함께 interview하여 필요한 data registration이나 config 작성을
+완성한 뒤 같은 capability를 다시 실행한다.
+
+```text
+core package        : capability requirement 선언 -> 충족 판정 -> requirement gap 보고
+agent layer (skill) : gap 해석 -> user와 interview -> registration/config 완성 -> 재실행
+```
+
+이 분리 덕분에 core package는 대화형 상태를 갖지 않고 테스트 가능하게 유지되고, agent는 package
+내부 source를 읽지 않고도 무엇을 물어야 할지 알 수 있다. 이 흐름은 alpha operation에만 적용되는 것이
+아니라 data, strategy, exposure analysis, portfolio construction, execution, reporting과 extension을 포함한
+**모든 capability에 동일하게 적용된다**. 상세 contract는 section 5.4와 5.5에서 정의한다.
+
 #### 새 연구는 기존 evidence에서 시작한다
 
 성공한 alpha뿐 아니라 실패, invalid run, 이미 검색한 parameter range와 research decision도 조회할 수
@@ -91,6 +116,7 @@ realized result를 함께 관측할 수 있다는 점이다.
 
 - Project와 dataset contract
 - Agent onboarding, documentation과 skill resource
+- 모든 capability의 requirement 선언, 충족 판정과 requirement gap 보고
 - StrategyAgent input, output, state와 nested research
 - Signed alpha, transform, budget과 diagnostics
 - Stored-alpha ensemble과 enhanced index construction
@@ -139,6 +165,11 @@ realized result를 함께 관측할 수 있다는 점이다.
 - Flexible budget의 unused amount를 복원하거나 관계없는 security에 배분한다.
 - 이미 관측한 기간을 true forward out-of-sample로 표시한다.
 - 다른 agent가 config를 수정하여 이미 시작된 run의 의미를 바꾸게 한다.
+- Required data가 없을 때 해당 항목을 조용히 생략하거나 비어 있는 값으로 채운 부분 결과를 정상 결과로
+  반환한다.
+- Required data를 유사한 다른 dataset, 유사한 column 이름 또는 임의의 proxy로 대체한다.
+- 어떤 requirement가 왜 충족되지 않았는지 알리지 않고 실패한다.
+- Core package가 user에게 직접 질문하거나, agent와 user의 확인 없이 data registration을 수행한다.
 
 ## 3. Human user journey
 
@@ -264,6 +295,9 @@ Data registration request를 받으면 agent는:
 
 Agent는 비슷해 보이는 column name만으로 경제적 의미를 확정해서는 안 된다.
 
+이 절차는 user가 registration을 직접 요청했을 때뿐 아니라, section 4.8의 requirement gap을 해소하는
+과정에서도 동일하게 사용한다.
+
 ### 4.4 Alpha trial 준비
 
 새 alpha experiment를 실행하기 전에 agent는:
@@ -299,6 +333,28 @@ contract를 확인한다. Compatible built-in이 없으면 해당 extension poin
 lifecycle과 validation rule을 읽고 project-local code를 만든다. 실제 연결 방식은 그 extension contract에
 따르며 site-packages를 수정하지 않는다.
 
+Built-in을 선택할 때는 그 capability의 requirement 선언도 함께 확인한다. 요구되는 data가 아직 등록되어
+있지 않으면 실행을 시도하기 전에 section 4.8의 절차로 넘어간다.
+
+### 4.8 Capability requirement gap 해소
+
+이 절차는 특정 단계에 고정된 순서가 아니라, 4.3부터 4.7까지 어느 지점에서든 capability가 requirement
+gap을 보고하면 발생하는 cross-cutting behavior다.
+
+Agent가 요청받은 작업이 등록되지 않은 data를 요구하는 경우:
+
+1. Capability의 requirement 선언을 조회하거나 반환된 requirement gap을 읽는다.
+2. 어떤 capability가 무엇을 왜 요구하는지 user에게 설명한다.
+3. Acceptable derivation alternative와 각각에 필요한 data를 제시한다.
+4. User가 보유한 source data에서 어떤 alternative가 가능한지 함께 확인한다.
+5. 선택된 alternative에 대해 section 4.3의 registration interview를 수행한다.
+6. 원래 요청을 다시 실행한다.
+7. 선택한 alternative, 적용한 가정과 남은 limitation을 research record에 남긴다.
+
+Agent는 requirement gap을 만났을 때 user 확인 없이 alternative를 선택하거나, 요구된 data를 유사한 다른
+dataset으로 대체하거나, 해당 항목을 제외한 부분 결과를 완료된 결과로 보고해서는 안 된다. 어떤
+alternative도 불가능하면 그 사실과 이유를 user에게 보고한다.
+
 ### 4.7 Stored evidence에서 다음 연구 시작
 
 다른 agent는 이전 agent의 전체 scratchpad를 읽지 않고도 proposal, run, artifact, decision과
@@ -321,6 +377,7 @@ Installed package는 다음 주제의 version-matched documentation을 제공해
 - Ensemble, enhanced index construction과 Qlib execution
 - 현재 제공되는 extension point, 정확한 input/output contract와 local extension authoring
 - Raw artifact와 reporting contract
+- 각 capability의 requirement 선언, acceptable derivation alternative와 gap 해소 절차
 - Error code와 recovery guidance
 
 Documentation은 help-style public command와 installed file 양쪽에서 접근할 수 있어야 한다.
@@ -382,6 +439,81 @@ agent가 실제 code를 작성할 수 있을 정도로 포함하거나 version-m
 
 Final packaging과 command name은 interface design에서 확정할 수 있다. 필요한 결과는 agent가 public qlibx
 workflow를 수행하도록 안내하는 valid, discoverable, versioned skill이다.
+
+Skill은 section 5.5의 requirement gap을 받았을 때 수행할 resolution interview 절차를 반드시 포함한다.
+Requirement gap을 단순 실패로 보고하고 종료하는 skill은 이 요구사항을 충족하지 않는다.
+
+### 5.4 Capability requirement contract
+
+Section 1.2에서 정의한 분리를 실현하기 위해, 실행에 특정 registered input이 필요한 모든 capability는 그
+requirement를 machine-readable하게 선언해야 한다.
+
+여기서 capability는 built-in signal operation, exposure analyzer, portfolio constructor, execution profile,
+StrategyAgent definition, reporting analysis와 project-local extension을 모두 포함한다. "이 capability는
+어떤 data가 있어야 동작하는가"라는 질문은 이 중 어느 것에 대해서도 동일한 방식으로 답할 수 있어야 한다.
+
+각 requirement 선언은 최소 다음을 포함한다.
+
+- Stable requirement ID와 role name
+- 경제적 의미, axis, unit과 currency
+- 이 requirement가 어떤 계산에 쓰이는지
+- 충족 여부를 판정하는 방법
+- Point-in-time과 availability 조건
+- Requirement가 optional인지 mandatory인지, optional이면 없을 때 결과가 어떻게 달라지는지
+- 이 requirement를 충족하는 acceptable derivation alternative 목록
+- 충족되지 않았을 때 user에게 확인해야 하는 질문
+- Gap 해소를 위해 실행할 public command
+
+Requirement는 단일 dataset 목록이 아니라 **derivation alternative를 가진 선택지**로 표현한다. 하나의
+requirement를 서로 다른 input 조합으로 충족할 수 있기 때문이다.
+
+```text
+requirement: market_return
+  alternative A: registered index return dataset
+  alternative B: market_capitalization + instrument return  -> cap-weighted market return
+  neither satisfied -> requirement gap
+```
+
+Requirement 선언은 사람용 설명에만 존재해서는 안 된다. Installed help와 machine-readable schema에서
+조회할 수 있어야 하고, generated skill에 포함되거나 version-matched resource로 정확히 연결되어야 한다.
+Agent는 capability를 실행하기 전에 requirement를 조회하여 gap을 미리 확인할 수 있어야 한다.
+
+Capability가 실제로 요구하지 않는 input을 requirement로 선언해서는 안 된다. 선언과 실제 실행 조건은
+일치해야 한다.
+
+### 5.5 Requirement gap과 resolution interview
+
+Requirement가 충족되지 않으면 capability는 계산을 시도하지 않고 **requirement gap**을 보고한다.
+
+Requirement gap 보고는 structured error 또는 structured plan result 형태이며 최소 다음을 포함한다.
+
+- Stable error code
+- 요청한 capability ID와 version
+- 충족되지 않은 requirement 목록과 각각의 이유
+- 각 requirement의 acceptable derivation alternative
+- 이미 충족된 requirement
+- User에게 확인해야 하는 질문
+- 다음에 실행할 public command
+- Gap 해소 후 동일 요청을 다시 실행할 수 있는지 여부
+
+Capability는 실행 전에 gap을 조회할 수 있는 **plan 형태**와, 실행 시점에 gap을 발견하면 실패하는
+**error 형태**를 모두 제공해야 한다. Plan 형태는 read-only이며 아무것도 만들지 않는다. 이 두 형태는 같은
+requirement 선언에서 파생되어야 하며 서로 다른 판정을 내려서는 안 된다.
+
+Requirement gap을 받은 agent는 다음을 수행한다.
+
+1. 어떤 capability가 무엇을 요구하는지 user에게 설명한다.
+2. Acceptable derivation alternative와 각각에 필요한 data를 제시한다.
+3. User가 보유한 data로 어떤 alternative가 가능한지 함께 확인한다.
+4. 선택된 alternative에 대해 section 4.3의 data registration interview를 수행한다.
+5. Registration이나 config 작성을 완료한 뒤 원래 capability를 다시 실행한다.
+6. 어떤 alternative를 선택했고 어떤 가정을 적용했는지 research record에 남긴다.
+
+Agent는 user 확인 없이 alternative를 임의로 선택하지 않는다. 어떤 alternative도 불가능하면 그 사실과
+이유를 user에게 보고하고, 해당 capability를 우회하거나 대체 proxy로 결과를 만들어내지 않는다.
+
+Optional requirement가 충족되지 않아 결과의 일부 항목을 계산할 수 없으면, 해당 항목을 조용히 생략하지
+않고 계산하지 못했다는 사실과 이유를 결과에 명시적으로 기록한다.
 
 ## 6. Project and data contracts
 
@@ -664,8 +796,17 @@ Initial built-in set:
 - Fixed dollar-neutral과 flexible-budget rescaling/validation
 - Matrix alignment, coverage, missingness와 no-look-ahead check
 
-각 operation은 axis, tie behavior, NaN behavior, minimum observation, group-missing behavior, dtype와 parameter
-semantics를 문서화한다. Operation ID와 version은 result lineage에 포함한다.
+각 operation은 axis, tie behavior, NaN behavior, minimum observation, group-missing behavior, dtype,
+parameter semantics와 **required data**를 문서화한다. Operation ID와 version은 result lineage에 포함한다.
+
+이 목록의 대부분은 signal matrix 하나만 있으면 동작하지만 일부는 추가 registered data를 요구한다.
+Industry/sector group demean은 point-in-time group label을 요구하고, beta estimation과 residualization은
+market 또는 factor return을 요구한다. 이런 operation은 section 5.4의 형식으로 requirement를 선언해야 하며,
+요구가 충족되지 않으면 section 5.5의 requirement gap을 보고한다.
+
+Required data가 없는 operation을 신호만으로 실행하거나, 요구된 data를 유사한 다른 dataset으로 대체해서는
+안 된다. Operation의 requirement 선언은 `qlibx` 설치본에서 조회할 수 있어야 하며, agent는 이를 근거로
+section 4.8의 절차를 시작한다.
 
 ### 8.3 Neutralization과 exposure measurement
 
@@ -685,9 +826,22 @@ data, factor-estimation error, selection, cap, rebalance timing과 execution 때
 - User-supplied factor exposure
 - Intended weight와 realized holding의 exposure 차이
 
-Exposure artifact에는 analyzer ID/version, input과 dataset ID, estimation window, method, coverage와
-missingness를 기록한다. Compatible project-local analyzer가 built-in analyzer를 보완하거나 교체할 수
-있다.
+이 목록의 각 항목은 서로 다른 registered data를 요구한다. Long/short/gross/net exposure와 coverage는
+weight만으로 계산되지만, market 또는 benchmark exposure는 해당 beta 또는 return을, industry/sector
+exposure는 point-in-time group label을, factor exposure는 factor data를, intended-realized gap은 realized
+holding을 요구한다.
+
+요청된 항목의 required data가 없으면 exposure analysis는 그 항목을 **조용히 생략하지 않는다**. 계산하지
+못한 항목, 그 이유와 필요한 data를 결과에 명시적으로 기록하고, section 5.5의 형식으로 requirement gap을
+보고한다. 계산된 항목만 담긴 결과를 완전한 exposure analysis로 표시해서는 안 된다.
+
+예를 들어 OHLCV 가격만 등록된 project에서 market beta exposure를 요청하면, analyzer는 beta를 임의로
+추정하거나 해당 필드를 비워 둔 채 성공을 반환하지 않고, market return이 필요하다는 사실과 이를 충족하는
+alternative(등록된 index return, 또는 market capitalization과 return으로부터의 cap-weighted 계산)를 보고한다.
+
+Exposure artifact에는 analyzer ID/version, input과 dataset ID, estimation window, method, coverage,
+missingness와 계산하지 못한 항목의 requirement 정보를 기록한다. Compatible project-local analyzer가
+built-in analyzer를 보완하거나 교체할 수 있다.
 
 ### 8.4 Fixed budget과 flexible budget
 
@@ -1068,6 +1222,7 @@ contract로 고정해서는 안 된다.
 discoverable해야 한다. 각 extension point의 documentation은 최소 다음을 설명한다.
 
 - Extension의 목적과 workflow에서 호출되는 위치
+- Extension이 registered data를 요구하는 경우 section 5.4 형식의 requirement 선언
 - Required input의 type, schema, axis, unit, data semantics와 time-access boundary
 - Required output의 type, schema, semantics와 downstream consumer
 - 호출 lifecycle, state와 허용되는 side effect
@@ -1205,6 +1360,9 @@ reporting을 거치지 않고 raw stored artifacts를 직접 분석할 수도 �
 - Exposure analysis는 method, data, window, coverage와 missingness를 제공한다.
 - Transform 사용을 exact neutrality의 증명으로 표시하지 않는다.
 - Fixed/flexible budget을 지원하고 unused flexible budget을 보존한다.
+- Registered data를 요구하는 operation은 required data를 선언하고 installed surface에서 조회할 수 있다.
+- Required data가 없는 operation은 계산을 시도하지 않고 requirement gap을 보고한다.
+- Exposure analysis는 계산하지 못한 항목을 조용히 생략하지 않고 이유와 함께 기록한다.
 
 ### P4 — Research history와 parallel agent
 
@@ -1250,6 +1408,21 @@ reporting을 거치지 않고 raw stored artifacts를 직접 분석할 수도 �
 - Stored artifact에서 report를 만들 때 research를 다시 실행하지 않는다.
 - Analysis calculation과 visualization을 분리하고 여러 report section과 renderer를 조합할 수 있다.
 - Reporting은 새로운 canonical research artifact를 만들지 않는다.
+
+### P8 — Capability requirement와 resolution interview
+
+- Registered data를 요구하는 모든 capability가 section 5.4 형식의 requirement를 선언한다.
+- Agent가 capability를 실행하지 않고 requirement와 acceptable derivation alternative를 조회할 수 있다.
+- 실행 전 read-only plan과 실행 시점 error가 같은 requirement 선언에서 같은 판정을 만든다.
+- Requirement가 충족되지 않으면 capability는 계산을 시도하지 않고 requirement gap을 보고한다.
+- Requirement gap은 미충족 requirement, 이유, alternative, user 질문과 next command를 포함한다.
+- OHLCV 가격만 등록된 project에서 beta residualization을 요청하면 market return requirement와 그
+  alternative를 보고하고, beta를 추정하거나 해당 항목을 비워 둔 채 성공을 반환하지 않는다.
+- Optional requirement 미충족으로 계산하지 못한 결과 항목이 이유와 함께 결과에 기록된다.
+- Generated skill이 requirement gap을 받았을 때 수행할 resolution interview 절차를 포함한다.
+- Agent가 gap 해소를 위한 registration을 완료한 뒤 같은 요청을 다시 실행하여 성공한다.
+- Agent가 user 확인 없이 alternative를 선택하거나 유사한 dataset으로 대체하지 않는다.
+- Project-local extension도 같은 형식으로 requirement를 선언할 수 있다.
 
 ## 14. Working prototype reference
 

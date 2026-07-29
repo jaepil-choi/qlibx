@@ -14,8 +14,9 @@ from qlibx.requirements import (
     CapabilityRequirement,
     CapabilityRequirements,
     DerivationAlternative,
-    RequirementEvidence,
+    Finding,
     evaluate_requirements,
+    gather_evidence,
     make_plan,
 )
 
@@ -174,54 +175,15 @@ def plan_execution_profile(
         for role, dataset in roles.items()
         if dataset in catalog.datasets
     }
-    evidence: list[RequirementEvidence] = []
-    for requirement in declaration.requirements:
+
+    def probe(requirement: CapabilityRequirement, _alternative: DerivationAlternative) -> Finding:
         if requirement.requirement_id == "execution_clock":
-            clock_matches = profile_id != "daily_close_v1" or clock == DEFAULT_CLOCK
-            evidence.append(
-                RequirementEvidence(
-                    requirement_id="execution_clock",
-                    alternative_id="declared_profile_clock",
-                    satisfied=clock_matches,
-                    reason=(
-                        "The declared clock is compatible with the selected profile."
-                        if clock_matches
-                        else "daily_close_v1 clock differs from the installed default."
-                    ),
-                    source="execution_profile",
-                    details={"profile_id": profile_id, "clock": clock},
-                )
-            )
-            continue
-        role = requirement.role
-        dataset = roles.get(role)
-        if dataset is None:
-            satisfied = False
-            reason = f"Required role {role!r} is not mapped in the execution profile."
-            details: dict[str, object] = {}
-        elif dataset not in catalog.datasets:
-            satisfied = False
-            reason = f"Mapped dataset {dataset!r} is not registered in the logical catalog."
-            details = {"dataset": dataset}
-        elif catalog.datasets[dataset].kind != "matrix":
-            satisfied = False
-            reason = f"Mapped dataset {dataset!r} is not a matrix dataset."
-            details = {"dataset": dataset, "kind": catalog.datasets[dataset].kind}
-        else:
-            satisfied = True
-            reason = f"Role {role!r} is mapped to registered matrix dataset {dataset!r}."
-            details = dict(role_contracts[role])
-        evidence.append(
-            RequirementEvidence(
-                requirement_id=requirement.requirement_id,
-                alternative_id="registered_logical_matrix",
-                satisfied=satisfied,
-                reason=reason,
-                source="project_catalog",
-                details=details,
-            )
-        )
-    resolution = evaluate_requirements(declaration, tuple(evidence))
+            return _clock_finding(profile_id, clock)
+        return _role_finding(requirement.role, roles, catalog, role_contracts)
+
+    # Two steps rather than plan_capability: the warnings below depend on what the
+    # resolution turned out to be missing.
+    resolution = evaluate_requirements(declaration, gather_evidence(declaration, probe))
     warnings = [
         "All mapped values are user-defined data. qlibx does not adjust or normalize them.",
         (
@@ -248,6 +210,57 @@ def plan_execution_profile(
         },
         warnings=tuple(warnings),
         unsupported_features=UNSUPPORTED_FEATURES,
+    )
+
+
+def _clock_finding(profile_id: str, clock: dict[str, str]) -> Finding:
+    """A named profile owns its clock; only `daily_close_v1` is pinned to the default."""
+    matches = profile_id != "daily_close_v1" or clock == DEFAULT_CLOCK
+    return Finding(
+        satisfied=matches,
+        reason=(
+            "The declared clock is compatible with the selected profile."
+            if matches
+            else "daily_close_v1 clock differs from the installed default."
+        ),
+        source="execution_profile",
+        details={"profile_id": profile_id, "clock": clock},
+    )
+
+
+def _role_finding(
+    role: str,
+    roles: dict[str, str],
+    catalog: DataCatalog,
+    role_contracts: dict[str, dict[str, object]],
+) -> Finding:
+    """Report how far one execution role gets toward a registered matrix, and where it stops."""
+    dataset = roles.get(role)
+    if dataset is None:
+        return Finding(
+            False,
+            f"Required role {role!r} is not mapped in the execution profile.",
+            source="project_catalog",
+        )
+    if dataset not in catalog.datasets:
+        return Finding(
+            False,
+            f"Mapped dataset {dataset!r} is not registered in the logical catalog.",
+            source="project_catalog",
+            details={"dataset": dataset},
+        )
+    if catalog.datasets[dataset].kind != "matrix":
+        return Finding(
+            False,
+            f"Mapped dataset {dataset!r} is not a matrix dataset.",
+            source="project_catalog",
+            details={"dataset": dataset, "kind": catalog.datasets[dataset].kind},
+        )
+    return Finding(
+        True,
+        f"Role {role!r} is mapped to registered matrix dataset {dataset!r}.",
+        source="project_catalog",
+        details=dict(role_contracts[role]),
     )
 
 

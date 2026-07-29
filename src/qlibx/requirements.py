@@ -1,7 +1,24 @@
-"""Public capability requirement declarations and pure satisfaction evaluation."""
+"""Public capability requirement declarations and pure satisfaction evaluation.
+
+A capability answers four questions in order: what does it require, what does the world
+currently offer, is that enough, and what should the caller do next. The first is a
+``CapabilityRequirements`` declaration; the last three are ``gather_evidence``,
+``evaluate_requirements`` and ``make_plan``, with ``plan_capability`` running the three
+together.
+
+A capability supplies only the part that is genuinely its own -- a probe answering
+"can this alternative be satisfied right now" -- and never builds a ``RequirementEvidence``
+by hand. Labelling an answer with the requirement and alternative it came from is
+bookkeeping, and every copy of that bookkeeping is somewhere the vocabulary can drift.
+
+This module has no dependencies, inside qlibx or out. That is deliberate: it keeps the
+protocol usable from the pure domain packages, which are forbidden from importing anything
+that could reach a project, a catalog, or the CLI.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -120,6 +137,86 @@ class UnavailableOutput:
     output_id: str
     requirement_ids: tuple[str, ...]
     reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class Finding:
+    """One probe's answer about a single declared alternative.
+
+    Deliberately carries no requirement or alternative ID. The probe is handed both, so
+    making it repeat them back is bookkeeping the protocol can do without help -- and is
+    exactly what let two capabilities describe the same fact in different words.
+    """
+
+    satisfied: bool
+    reason: str
+    source: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+EvidenceProbe = Callable[[CapabilityRequirement, DerivationAlternative], "Finding | None"]
+
+
+def gather_evidence(
+    declaration: CapabilityRequirements,
+    probe: EvidenceProbe,
+) -> tuple[RequirementEvidence, ...]:
+    """Ask ``probe`` about every declared alternative and label each answer.
+
+    A probe returning ``None`` declines the alternative rather than refusing it.
+    ``evaluate_requirements`` treats absent evidence as unsatisfied either way, so the
+    difference is only in the reported reason -- and a capability should not have to invent
+    one for a question it never asked.
+    """
+    evidence: list[RequirementEvidence] = []
+    for requirement in declaration.requirements:
+        for alternative in requirement.alternatives:
+            finding = probe(requirement, alternative)
+            if finding is None:
+                continue
+            evidence.append(
+                RequirementEvidence(
+                    requirement_id=requirement.requirement_id,
+                    alternative_id=alternative.alternative_id,
+                    satisfied=finding.satisfied,
+                    reason=finding.reason,
+                    source=finding.source,
+                    details=dict(finding.details),
+                )
+            )
+    return tuple(evidence)
+
+
+def supplied_roles_probe(
+    supplied: Iterable[str],
+    *,
+    source: str = "runtime_arguments",
+) -> EvidenceProbe:
+    """The evidence rule for capabilities whose inputs are simply handed in by the caller.
+
+    An alternative is satisfied when every role it names was supplied. Capabilities that
+    read a project, a catalog, or a binding need their own probe; this one covers the case
+    where "is it available" means nothing more than "did the caller pass it".
+    """
+    available = {str(item) for item in supplied}
+
+    def probe(
+        _requirement: CapabilityRequirement,
+        alternative: DerivationAlternative,
+    ) -> Finding:
+        missing = sorted(set(alternative.required_inputs) - available)
+        return Finding(
+            satisfied=not missing,
+            reason=(
+                f"Every required input is supplied: {sorted(alternative.required_inputs)}."
+                if not missing
+                else f"Missing required input(s): {missing}."
+            ),
+            source=source,
+            details={"supplied_roles": sorted(available), "missing_roles": missing},
+        )
+
+    return probe
 
 
 def evaluate_requirements(
@@ -242,6 +339,34 @@ def make_plan(
     )
 
 
+def plan_capability(
+    declaration: CapabilityRequirements,
+    probe: EvidenceProbe,
+    *,
+    requested_optional: tuple[str, ...] = (),
+    parameters: dict[str, Any] | None = None,
+    warnings: tuple[str, ...] = (),
+    unsupported_features: tuple[str, ...] = (),
+) -> CapabilityPlan:
+    """Run the whole cycle: gather evidence, evaluate it, and return the read-only plan.
+
+    Use the three steps separately only when something between them needs the resolution --
+    warnings that depend on what turned out to be missing, for instance.
+    """
+    resolution = evaluate_requirements(
+        declaration,
+        gather_evidence(declaration, probe),
+        requested_optional=requested_optional,
+    )
+    return make_plan(
+        declaration,
+        resolution,
+        parameters=parameters,
+        warnings=warnings,
+        unsupported_features=unsupported_features,
+    )
+
+
 __all__ = [
     "AlternativeResolution",
     "CapabilityPlan",
@@ -249,10 +374,15 @@ __all__ = [
     "CapabilityRequirements",
     "CapabilityResolution",
     "DerivationAlternative",
+    "EvidenceProbe",
+    "Finding",
     "RequirementEvidence",
     "RequirementResult",
     "RequirementStatus",
     "UnavailableOutput",
     "evaluate_requirements",
+    "gather_evidence",
     "make_plan",
+    "plan_capability",
+    "supplied_roles_probe",
 ]

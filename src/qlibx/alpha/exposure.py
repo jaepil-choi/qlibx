@@ -15,10 +15,9 @@ from qlibx.requirements import (
     CapabilityRequirements,
     CapabilityResolution,
     DerivationAlternative,
-    RequirementEvidence,
     UnavailableOutput,
-    evaluate_requirements,
-    make_plan,
+    plan_capability,
+    supplied_roles_probe,
 )
 
 from .contracts import NEUTRALITY_WARNING
@@ -207,37 +206,18 @@ def plan_exposure(
     available_inputs: Iterable[str] = (),
 ) -> CapabilityPlan:
     selected = _validated_metrics(requested_metrics)
-    declaration = exposure_requirements()
-    available = set(available_inputs)
-    evidence: list[RequirementEvidence] = []
-    for requirement in declaration.requirements:
-        supplied = requirement.role in available
-        evidence.append(
-            RequirementEvidence(
-                requirement_id=requirement.requirement_id,
-                alternative_id=f"explicit_{requirement.requirement_id}",
-                satisfied=supplied,
-                reason=(
-                    f"Explicit {requirement.role} input is available."
-                    if supplied
-                    else f"Explicit {requirement.role} input was not provided."
-                ),
-                source="runtime_arguments",
-                details={"available_inputs": sorted(available)},
-            )
-        )
-    requested_optional = tuple(_METRIC_REQUIREMENT[item] for item in selected if item != "summary")
-    resolution = evaluate_requirements(
-        declaration,
-        tuple(evidence),
-        requested_optional=requested_optional,
-    )
-    return make_plan(
-        declaration,
-        resolution,
+    available = sorted(set(available_inputs))
+    # Every exposure requirement declares one alternative whose required_inputs is its own
+    # role, so "was this input handed in" is the whole evidence rule.
+    return plan_capability(
+        exposure_requirements(),
+        supplied_roles_probe(available),
+        requested_optional=tuple(
+            _METRIC_REQUIREMENT[item] for item in selected if item != "summary"
+        ),
         parameters={
             "requested_metrics": list(selected),
-            "available_inputs": sorted(available),
+            "available_inputs": available,
         },
     )
 

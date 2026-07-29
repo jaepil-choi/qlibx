@@ -15,7 +15,13 @@ from typing import Any
 from qlibx.catalog import ConfigDrivenDataLoader, DataCatalog
 from qlibx.errors import QlibxError, requirement_gap
 from qlibx.project import Project
-from qlibx.requirements import CapabilityPlan, RequirementEvidence, evaluate_requirements, make_plan
+from qlibx.requirements import (
+    CapabilityPlan,
+    CapabilityRequirement,
+    DerivationAlternative,
+    Finding,
+    plan_capability,
+)
 from qlibx.serialization import digest_document
 
 from .contracts import (
@@ -32,17 +38,16 @@ def plan_strategy_binding(
     manifest: StrategyManifest,
     binding: StrategyBinding | None = None,
 ) -> CapabilityPlan:
-    declaration = manifest.requirements()
     catalog = DataCatalog.from_project(project)
-    loader = ConfigDrivenDataLoader(catalog)
-    inventory = _registered_field_inventory(loader)
-    evidence = tuple(
-        _input_evidence(manifest, binding, item, catalog, inventory) for item in manifest.all_inputs
-    )
-    resolution = evaluate_requirements(declaration, evidence)
-    return make_plan(
-        declaration,
-        resolution,
+    inventory = _registered_field_inventory(ConfigDrivenDataLoader(catalog))
+    by_role = {item.role: item for item in manifest.all_inputs}
+
+    def probe(requirement: CapabilityRequirement, _alternative: DerivationAlternative) -> Finding:
+        return _input_finding(manifest, binding, by_role[requirement.role], catalog, inventory)
+
+    return plan_capability(
+        manifest.requirements(),
+        probe,
         parameters={
             "manifest": manifest_document(manifest),
             "binding": binding_document(binding) if binding is not None else None,
@@ -81,18 +86,21 @@ def effective_config_id(
     )
 
 
-def _input_evidence(
+def _input_finding(
     manifest: StrategyManifest,
     binding: StrategyBinding | None,
     contract: StrategyInput,
     catalog: DataCatalog,
     inventory: Mapping[str, Any],
-) -> RequirementEvidence:
-    requirement_id = f"input.{contract.role}"
+) -> Finding:
+    """Report how far one declared input gets toward being resolvable, and where it stops.
+
+    The order is the order a reader would check by hand: is there a binding, is it for this
+    Strategy, does it cover this role, is the dataset registered, is it the right kind, does
+    the mapping match, and do the mapped fields actually exist.
+    """
     if binding is None:
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             "No Strategy binding was selected.",
             details={"required_fields": [item.name for item in contract.fields]},
@@ -101,35 +109,27 @@ def _input_evidence(
         manifest.strategy_id,
         manifest.version,
     ):
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             "Binding Strategy ID/version does not match the manifest.",
             source=str(binding.source_path),
         )
     selected = binding.by_role().get(contract.role)
     if selected is None:
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             f"Binding has no input role {contract.role!r}.",
             source=str(binding.source_path),
         )
     dataset = catalog.datasets.get(selected.registered_dataset)
     if dataset is None:
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             f"Binding references unknown registered dataset {selected.registered_dataset!r}.",
             source=str(binding.source_path),
         )
     if dataset.kind != contract.pandas.kind:
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             f"Dataset kind {dataset.kind!r} does not satisfy {contract.pandas.kind!r}.",
             source=selected.registered_dataset,
@@ -137,9 +137,7 @@ def _input_evidence(
     required = {item.name for item in contract.fields}
     mapped = set(selected.fields)
     if mapped != required:
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             "Canonical mapping differs; "
             f"missing={sorted(required - mapped)}, extra={sorted(mapped - required)}.",
@@ -148,25 +146,19 @@ def _input_evidence(
     dataset_inventory = inventory.get(selected.registered_dataset, {})
     fields = set(dataset_inventory.get("fields", ()))
     if dataset_inventory.get("error") is not None:
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             f"Registered dataset inventory is unavailable: {dataset_inventory['error']}",
             source=selected.registered_dataset,
         )
     missing_sources = sorted(set(selected.fields.values()) - fields)
     if missing_sources:
-        return RequirementEvidence(
-            requirement_id,
-            "registered_binding",
+        return Finding(
             False,
             f"Mapped registered fields do not exist: {missing_sources}.",
             source=selected.registered_dataset,
         )
-    return RequirementEvidence(
-        requirement_id,
-        "registered_binding",
+    return Finding(
         True,
         f"Input {contract.role!r} resolves from {selected.registered_dataset!r}.",
         source=selected.registered_dataset,

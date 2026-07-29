@@ -19,9 +19,8 @@ from qlibx.requirements import (
     CapabilityPlan,
     CapabilityRequirement,
     CapabilityRequirements,
-    RequirementEvidence,
-    evaluate_requirements,
-    make_plan,
+    plan_capability,
+    supplied_roles_probe,
 )
 
 from .contracts import OperationContract, TransformResult
@@ -171,31 +170,11 @@ def plan_operation(
     provided_inputs: Iterable[str] = (),
 ) -> CapabilityPlan:
     """Plan one operation from explicit input roles without executing it."""
-    declaration = operation_requirements(name)
-    provided = set(provided_inputs)
-    evidence: list[RequirementEvidence] = []
-    for requirement in declaration.requirements:
-        for alternative in requirement.alternatives:
-            missing = tuple(sorted(set(alternative.required_inputs) - provided))
-            evidence.append(
-                RequirementEvidence(
-                    requirement_id=requirement.requirement_id,
-                    alternative_id=alternative.alternative_id,
-                    satisfied=not missing,
-                    reason=(
-                        "All required explicit inputs are available."
-                        if not missing
-                        else f"Missing explicit inputs: {list(missing)}"
-                    ),
-                    source="runtime_arguments",
-                    details={"provided_inputs": sorted(provided)},
-                )
-            )
-    resolution = evaluate_requirements(declaration, tuple(evidence))
-    return make_plan(
-        declaration,
-        resolution,
-        parameters={"operation_name": name, "provided_inputs": sorted(provided)},
+    provided = sorted(set(provided_inputs))
+    return plan_capability(
+        operation_requirements(name),
+        supplied_roles_probe(provided),
+        parameters={"operation_name": name, "provided_inputs": provided},
     )
 
 

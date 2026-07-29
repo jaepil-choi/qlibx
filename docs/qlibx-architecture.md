@@ -13,9 +13,10 @@
 | `references/qlibx/docs/qlibx-architecture.md` | **비권위적 old doc.** 아직 도달하지 않은 target architecture |
 
 > **중요**: `references/`의 architecture 문서는 `entrypoints/`, `application/`, `contracts/`,
-> `runtime/`, `capabilities/`, `adapters/` 같은 디렉터리 계층을 전제한다. 현재 코드는 그 구조가
-> **아니다**. 실제 구조는 `src/qlibx/` 아래 flat module 배치이며, 계층은 디렉터리가 아니라
-> **import 방향**으로 강제된다. 두 문서가 충돌하면 이 문서와 코드가 우선한다.
+> `runtime/`, `capabilities/`, `adapters/` 같은 계층별 디렉터리를 전제한다. 현재 코드는 그 구조가
+> **아니다**. 계층은 디렉터리 이름이 아니라 **import 방향**이 정의하고 `tests/test_architecture.py`가
+> 강제한다. 디렉터리는 계층을 나누는 수단이 아니라 **커진 module을 쪼개는 수단**으로 쓴다
+> (§7.1의 `alpha/` 참조). 두 문서가 충돌하면 이 문서와 코드가 우선한다.
 
 이 문서를 읽는 AI agent에게:
 
@@ -74,8 +75,12 @@ flowchart LR
 
 ### 3.1 계층
 
-`src/qlibx/`는 26개 flat module이다. 계층은 디렉터리가 아니라 import 방향이 만든다.
-**현재 intra-package import graph는 acyclic이다** (순환 없음).
+`src/qlibx/`는 26개 top-level module/package(36개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
+만들고, 그 규칙은 `tests/test_architecture.py`가 강제한다. **현재 intra-package import graph는
+acyclic이다** (순환 없음).
+
+큰 module은 package로 승격한다. Module을 package로 바꾸는 것은 import 관점에서 투명하므로
+`from qlibx.alpha import X` 같은 public 경로가 그대로 유지된다(§7.2 참조).
 
 ```mermaid
 flowchart TD
@@ -341,7 +346,7 @@ signal operation과 weight scaling은 **분기문이 아니라 registry**로 관
 ```mermaid
 flowchart TB
     subgraph REG["alpha.OPERATIONS · OperationRegistry"]
-        BI["built-in 13개 (§7.1 표 참조)"]
+        BI["built-in 13개 (§7.2 표 참조)"]
         PL["project-local<br/>register_operation(OperationSpec(...))"]
         EXT["extension-backed<br/>signal_transform_operation(ref, impl)"]
     end
@@ -361,7 +366,34 @@ flowchart TB
     PP --> BR
 ```
 
-### 7.1 설치된 built-in operation
+### 7.1 alpha package 구조
+
+`alpha`는 operation과 scaling rule이 계속 늘어나는 자리이므로 한 파일로 두지 않는다.
+1014줄짜리 단일 module을 다음 package로 분할했다.
+
+```text
+alpha/
+├─ __init__.py        public 재수출 — from qlibx.alpha import X 를 그대로 유지
+├─ contracts.py       OperationContract · TransformResult (registry와 operation이 공유)
+├─ registry.py        OperationSpec · dispatch · pipeline 합성
+├─ budget.py          weight-scaling policy registry
+├─ exposure.py        exposure 측정
+└─ operations/        built-in operation, 작용 축별로 분리
+   ├─ cross_sectional.py   rank · demean · zscore · winsorize · clip
+   ├─ time_series.py       lag · rolling_mean · rolling_std · linear_decay · hump
+   ├─ grouping.py          group_demean (명시적 group label을 요구)
+   └─ selection.py         top_bottom · per_name_cap
+```
+
+**각 operation 파일은 구현과 `OperationSpec` 선언을 함께 소유한다.** 중앙 등록 표가 없으므로
+새 operation family를 추가하는 일은 *새 파일 + `operations/__init__.py`에 import 한 줄*로 끝난다.
+동기화해야 할 두 번째 장소가 존재하지 않는다.
+
+`from qlibx.alpha import ...` 경로는 설치된 예제(agent가 그대로 복사하는 코드)의 계약이므로,
+`__init__.py`가 전체 public surface를 재수출하여 **어느 파일로 옮기든 import 경로는 불변**이다.
+`tests/test_architecture.py::test_public_module_paths_stay_importable`이 이를 강제한다.
+
+### 7.2 설치된 built-in operation
 
 정확한 등록 이름이다. 런타임 확인은 `qlibx alpha operations`,
 개별 계약은 `qlibx alpha operation <name>`.
@@ -670,10 +702,16 @@ user-project/
 
 구조적 불변식을 지키는 테스트(회귀 방지용, mutation으로 검증됨):
 
+- **`tests/test_architecture.py`가 §3의 계층을 강제한다** — 모든 module이 layer에 배정되어 있고,
+  import는 아래 계층으로만 가며, kernel은 무의존이고, graph는 acyclic이며, `_vendor`는 `execution`만
+  통하고, `alpha`는 `errors` 외에 의존하지 않으며, public import 경로가 살아 있다.
 - 모든 CLI leaf command가 handler를 가진다.
 - 던지는 모든 error code에 복구 guidance가 있고 그 역도 참이다.
 - 문서화된 예제의 keyword가 실제 signature에 바인딩된다(단순 `compile()`이 아니라).
 - 등록된 모든 operation이 `alpha_operation` schema의 필수 필드를 갖는다.
+
+§15의 guardrail 중 계층·확장 관련 항목은 이제 산문이 아니라 실행되는 계약이다. `alpha`에
+`from qlibx.project import Project`를 추가하면 `alpha (layer 1) imports project (layer 2)`로 실패한다.
 
 ```bash
 uv run pytest && uv run ruff check . && uv run ruff format --check .
@@ -730,9 +768,14 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 | `references/`의 target architecture | `contracts/`·`runtime/`·`capabilities/`·`adapters/` 디렉터리 계층, ComponentRef, FrozenInvocationBundle, TemporalSemantics(revision/vintage), CostModelSnapshot, RiskModelSnapshot은 아직 구현되지 않았다. 현재는 flat module + import 방향으로 계층을 강제한다 |
 | Path B (matched capitalization) | compatibility mode. borrow/margin/recall/fee 모델 아님 |
 
-Flat module 구조를 유지하는 이유: 26개 module에 순환이 없고 계층이 명확하며, 디렉터리 계층을
-추가해도 강제되는 규칙은 같다. 얇은 wrapper 수를 늘리기 위해 기계적으로 파일을 나누지 않는다.
-module 수가 크게 늘거나 한 계층이 비대해지면 그때 디렉터리로 승격한다.
+디렉터리 사용 원칙: **계층을 나누는 데 쓰지 않고, 커진 module을 쪼개는 데 쓴다.**
+
+- 계층은 `tests/test_architecture.py`의 `LAYERS` 선언과 import 방향이 정의한다. 디렉터리 이름은
+  Python에서 아무것도 강제하지 못하므로 계층 표현 수단으로 쓰지 않는다.
+- 한 module이 커져 내부에 여러 관심사가 생기면 package로 승격한다(`alpha/`가 그 사례). Module →
+  package 전환은 import 관점에서 투명하여 public 경로를 깨지 않는다.
+- 다음 승격 후보는 `documentation`(835줄, 대부분 catalog 데이터로 requirement 선언이 추가되면 더
+  커진다)과 `research`(777줄, event log · blob store · publication protocol이 한 클래스에 있다)다.
 
 ### 16.1 Capability requirement contract 격차 (PRD §5.4/§5.5, P8)
 

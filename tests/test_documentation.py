@@ -7,6 +7,7 @@ import pathlib
 
 import pytest
 
+import qlibx
 from qlibx import alpha, ensemble, execution, reporting
 from qlibx.agent import error_guidance, public_example, public_schema, task_guide
 from qlibx.cli import dispatch, parser
@@ -152,7 +153,8 @@ def test_every_registered_operation_is_documented_for_agents() -> None:
 def _raised_error_codes() -> set[str]:
     """Collect every QlibxError code the package can raise, without importing behavior."""
     codes: set[str] = set()
-    for path in pathlib.Path(alpha.__file__).parent.rglob("*.py"):
+    # Anchor on the package root, not a member module: a module may become a package.
+    for path in pathlib.Path(qlibx.__file__).parent.rglob("*.py"):
         if "_vendor" in path.parts:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

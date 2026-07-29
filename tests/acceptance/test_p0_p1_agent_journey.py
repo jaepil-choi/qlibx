@@ -10,14 +10,30 @@ import pandas as pd
 
 
 def _qlibx(project: Path, *arguments: str) -> dict[str, object]:
+    """Run the installed CLI as a subprocess, reporting enough to diagnose a failure.
+
+    ``check=True`` alone raises without the child's stderr, and a stdout that is not
+    JSON gives no context at all, so a transient subprocess failure is undiagnosable
+    after the fact. Both paths now carry the command, exit code, stdout and stderr.
+    """
     completed = subprocess.run(
         [sys.executable, "-m", "qlibx", *arguments],
         cwd=project,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
-    return json.loads(completed.stdout)
+    context = (
+        f"command: qlibx {' '.join(arguments)}\n"
+        f"exit code: {completed.returncode}\n"
+        f"stdout: {completed.stdout!r}\n"
+        f"stderr: {completed.stderr!r}"
+    )
+    assert completed.returncode == 0, f"qlibx CLI failed\n{context}"
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise AssertionError(f"qlibx CLI did not emit JSON\n{context}") from error
 
 
 def test_fresh_agent_onboarding_and_data_registration_journey(tmp_path: Path) -> None:

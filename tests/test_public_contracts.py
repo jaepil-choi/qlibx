@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -9,8 +11,11 @@ import qlibx
 from qlibx import Project
 from qlibx.agent import apply_instruction, plan_instruction
 from qlibx.alpha import exposure_summary, group_demean, hump, linear_decay, rescale_budget
+from qlibx.artifacts import ArtifactStore
 from qlibx.errors import QlibxError
 from qlibx.extensions import load_extension
+from qlibx.research import ResearchCatalog
+from qlibx.storage import ProjectStorage
 from qlibx.strategy import (
     DecisionContext,
     DecisionResult,
@@ -34,11 +39,44 @@ def test_root_api_is_small_and_responsibility_based() -> None:
         "reporting",
         "requirements",
         "research",
+        "storage",
         "strategy",
         "strategy_manifest",
     ]
     assert len(qlibx.__all__) <= 16
     assert not hasattr(qlibx, "run_signed_execution")
+
+
+def test_one_storage_door_reaches_the_same_stores_as_the_three_imports(tmp_path: Path) -> None:
+    """`ProjectStorage` points at the existing stores; it does not build different ones."""
+    project = Project.initialize(tmp_path)
+    storage = ProjectStorage.from_project(project)
+
+    assert storage.artifacts.root == ArtifactStore.from_project(project).root
+    assert storage.research.state == ResearchCatalog.from_project(project).state
+    assert storage.project is project
+    # The three direct imports keep working; the door is additive.
+    assert isinstance(storage.artifacts, ArtifactStore)
+    assert isinstance(storage.research, ResearchCatalog)
+
+
+def test_opening_storage_does_not_load_the_vendored_run_store() -> None:
+    """`runs` defers its import so the other two views do not drag in vendored Qlib.
+
+    Not DuckDB -- `research` imports that at module scope, so the door pays for it either
+    way. What the deferral buys is that `_vendor.qlib_engine.store` stays unloaded until a
+    caller actually asks for a run, which is the boundary `run_catalog` exists to hold.
+    """
+    source = (
+        "import sys\n"
+        "from qlibx.storage import ProjectStorage\n"
+        "loaded = 'qlibx._vendor.qlib_engine.store' in sys.modules\n"
+        "assert not loaded, 'importing qlibx.storage loaded the vendored run store'\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", source], capture_output=True, text=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_fixed_and_flexible_budget_preserve_declared_semantics() -> None:

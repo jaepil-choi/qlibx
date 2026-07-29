@@ -11,15 +11,16 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-import pandas as pd
-
 from qlibx.errors import QlibxError, unknown_name
 from qlibx.project import Project
 from qlibx.serialization import (
+    PayloadFormat,
     canonical_bytes,
     digest_document,
     digest_file,
+    read_payload,
     validate_name,
+    write_payload,
 )
 from qlibx.strategy import DecisionResult
 
@@ -45,7 +46,7 @@ class ArtifactEnvelope:
     currency: str | None
     timezone: str | None
     data_semantics: str
-    payload_format: Literal["parquet", "json"]
+    payload_format: PayloadFormat
     payload_path: Path
     payload_digest: str
     coverage: Mapping[str, Any]
@@ -100,7 +101,7 @@ class ArtifactStore:
         staging = self.root / f".tmp-{uuid.uuid4().hex}"
         staging.mkdir(parents=True, exist_ok=False)
         try:
-            payload_format, payload = _write_payload(staging, value)
+            payload_format, payload = write_payload(staging, value)
             payload_digest = digest_file(payload)
             identity = {
                 "schema_version": 1,
@@ -195,9 +196,7 @@ class ArtifactStore:
 
     def load_payload(self, artifact_id: str, *, run_id: str | None = None) -> Any:
         envelope = self.load(artifact_id, run_id=run_id)
-        if envelope.payload_format == "parquet":
-            return pd.read_parquet(envelope.payload_path)
-        return json.loads(envelope.payload_path.read_text(encoding="utf-8"))
+        return read_payload(envelope.payload_path, envelope.payload_format)
 
     def export_bundle(self, artifact_ids: Sequence[str], output: str | Path) -> Path:
         destination = Path(output).resolve()
@@ -311,18 +310,6 @@ def record_decision_intermediates(
             )
         )
     return tuple(output)
-
-
-def _write_payload(directory: Path, value: Any) -> tuple[Literal["parquet", "json"], Path]:
-    if isinstance(value, pd.Series):
-        value = value.to_frame(value.name or "value")
-    if isinstance(value, pd.DataFrame):
-        path = directory / "payload.parquet"
-        value.to_parquet(path, index=True)
-        return "parquet", path
-    path = directory / "payload.json"
-    path.write_bytes(canonical_bytes(value))
-    return "json", path
 
 
 def _envelope_json(envelope: ArtifactEnvelope) -> Mapping[str, Any]:

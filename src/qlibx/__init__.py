@@ -29,6 +29,7 @@ if TYPE_CHECKING:  # pragma: no cover - import-time typing only
     from qlibx import reporting as reporting
     from qlibx import requirements as requirements
     from qlibx import research as research
+    from qlibx import storage as storage
     from qlibx import strategy as strategy
     from qlibx import strategy_manifest as strategy_manifest
 
@@ -47,6 +48,7 @@ _SUBMODULES = frozenset(
         "reporting",
         "requirements",
         "research",
+        "storage",
         "strategy",
         "strategy_manifest",
     }

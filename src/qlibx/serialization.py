@@ -19,12 +19,14 @@ import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
 READ_BLOCK_SIZE = 1024 * 1024
 NAME_ALPHABET = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+
+PayloadFormat = Literal["parquet", "json"]
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -120,6 +122,44 @@ def digest_dataset(value: Any) -> str:
     )
 
 
+def write_payload(
+    directory: Path,
+    value: Any,
+    *,
+    stem: str = "payload",
+) -> tuple[PayloadFormat, Path]:
+    """Write one stored value in the format its type implies, and report which was chosen.
+
+    Pandas objects become Parquet so dtypes and the index survive the round trip; anything
+    else becomes canonical JSON. A Series is framed first, because a one-column frame reads
+    back identifiably while a bare Series does not.
+    """
+    if isinstance(value, pd.Series):
+        value = value.to_frame(value.name or "value")
+    if isinstance(value, pd.DataFrame):
+        path = directory / f"{stem}.parquet"
+        value.to_parquet(path, index=True)
+        return "parquet", path
+    path = directory / f"{stem}.json"
+    path.write_bytes(canonical_bytes(value))
+    return "json", path
+
+
+def read_payload(path: Path, payload_format: PayloadFormat) -> Any:
+    """Read back what ``write_payload`` wrote.
+
+    Callers that store their own spelling of the format (a media type, say) map it to a
+    ``PayloadFormat`` at their boundary and raise their own error for anything else, so
+    that an unreadable stored value fails with that surface's error code rather than this
+    one's ``ValueError``.
+    """
+    if payload_format == "parquet":
+        return pd.read_parquet(path)
+    if payload_format == "json":
+        return json.loads(path.read_text(encoding="utf-8"))
+    raise ValueError(f"unsupported payload format: {payload_format!r}")
+
+
 def validate_name(name: str, *, kind: str = "artifact") -> str:
     """Require a lowercase, filesystem-safe identifier for stored payload names."""
     if not name or any(character not in NAME_ALPHABET for character in name):
@@ -128,6 +168,7 @@ def validate_name(name: str, *, kind: str = "artifact") -> str:
 
 
 __all__ = [
+    "PayloadFormat",
     "canonical_bytes",
     "digest_bytes",
     "digest_dataset",
@@ -135,5 +176,7 @@ __all__ = [
     "digest_file",
     "digest_text",
     "normalize_dataset",
+    "read_payload",
     "validate_name",
+    "write_payload",
 ]

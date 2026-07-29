@@ -1224,12 +1224,13 @@ EXAMPLES: Mapping[str, Mapping[str, str]] = {
         "format": "python",
         "content": (
             "from qlibx import Project\n"
-            "from qlibx.artifacts import ArtifactStore\n"
             "from qlibx.reporting import analyze_stored_run, render_report\n"
+            "from qlibx.storage import ProjectStorage\n"
             "project = Project.load('.')\n"
-            "store = ArtifactStore.from_project(project)\n"
-            "envelope = store.load('artifact-id', run_id='run-id')\n"
-            "payload = store.load_payload(envelope.artifact_id, run_id='run-id')\n"
+            "storage = ProjectStorage.from_project(project)\n"
+            "envelope = storage.artifacts.load('artifact-id', run_id='run-id')\n"
+            "payload = storage.artifacts.load_payload(envelope.artifact_id, run_id='run-id')\n"
+            "orders = storage.runs('runs.duckdb').load_table('backtest-run-id', 'orders')\n"
             "document = analyze_stored_run('runs.duckdb', 'backtest-run-id')\n"
             "rendered = render_report(document, 'report.html', renderer='html')\n"
         ),

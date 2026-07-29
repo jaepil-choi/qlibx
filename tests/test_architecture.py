@@ -35,7 +35,15 @@ LAYERS: tuple[tuple[str, ...], ...] = (
         "portfolio",
         "onboarding",
     ),
-    ("profiles", "extensions", "ensemble", "reporting", "skill", "strategy_manifest"),
+    (
+        "profiles",
+        "extensions",
+        "ensemble",
+        "reporting",
+        "skill",
+        "storage",
+        "strategy_manifest",
+    ),
     ("cli", "data", "agent"),
     # The package facade sits above the entrypoints it re-exports.
     ("__init__",),

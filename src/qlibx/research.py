@@ -20,14 +20,23 @@ from qlibx.errors import QlibxError, unknown_name
 from qlibx.orthogonality import AlphaDescriptor, OrthogonalityResult, compare_alpha
 from qlibx.project import Project
 from qlibx.serialization import (
+    PayloadFormat,
     canonical_bytes,
     digest_bytes,
     digest_document,
+    read_payload,
     validate_name,
 )
 
 RunStatus = Literal["successful", "failed", "invalid", "abandoned"]
 DecisionKind = Literal["promote", "reject", "retain_diagnostic", "supersede"]
+
+# Published records name their payload by media type. Everything else in qlibx names the
+# same two formats `parquet` and `json`; this is the one place the two vocabularies meet.
+_MEDIA_TYPE_FORMATS: Mapping[str, PayloadFormat] = {
+    "application/json": "json",
+    "application/x-parquet": "parquet",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -666,17 +675,18 @@ class ResearchCatalog:
                 (str(item["name"]) for item in manifest["artifacts"]),
             )
         artifact = matches[0]
-        blob = self.blobs / artifact["blob_digest"]
-        if artifact["media_type"] == "application/x-parquet":
-            return pd.read_parquet(blob)
-        if artifact["media_type"] == "application/json":
-            return json.loads(blob.read_text(encoding="utf-8"))
-        raise unknown_name(
-            "QLIBX_RESEARCH_ARTIFACT_MEDIA_TYPE_UNSUPPORTED",
-            "artifact media type",
-            str(artifact["media_type"]),
-            ("application/json", "application/x-parquet"),
-        )
+        media_type = str(artifact["media_type"])
+        # Records on disk carry a media type, so it is mapped here rather than stored as a
+        # PayloadFormat -- an already-published record must stay readable.
+        payload_format = _MEDIA_TYPE_FORMATS.get(media_type)
+        if payload_format is None:
+            raise unknown_name(
+                "QLIBX_RESEARCH_ARTIFACT_MEDIA_TYPE_UNSUPPORTED",
+                "artifact media type",
+                media_type,
+                _MEDIA_TYPE_FORMATS,
+            )
+        return read_payload(self.blobs / artifact["blob_digest"], payload_format)
 
     def _load_publication_plan(self, path: Path) -> PublicationPlan:
         body = json.loads(path.read_text(encoding="utf-8"))

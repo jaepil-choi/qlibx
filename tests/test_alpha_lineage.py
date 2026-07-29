@@ -250,7 +250,6 @@ def test_project_local_operation_uses_the_common_requirement_contract() -> None:
                 derivation="direct",
             ),
         ),
-        user_questions=("Which registered dataset supplies the auxiliary signal?",),
         next_commands=("qlibx data catalog --root <project>",),
     )
     register_operation(

@@ -49,6 +49,12 @@ from qlibx.profiles import execution_profile_requirements, plan_execution_profil
 from qlibx.project import Project
 from qlibx.registration import data_requirements, plan_registration, register_dataset
 from qlibx.skill import apply_agent_skill, plan_agent_skill
+from qlibx.strategy_manifest import (
+    load_strategy_binding,
+    load_strategy_manifest,
+    plan_strategy_binding,
+    resolve_strategy_inputs,
+)
 
 Handler = Callable[[argparse.Namespace], Any]
 
@@ -167,6 +173,50 @@ def _qlib_requirements(args: argparse.Namespace) -> Any:
 
 def _qlib_plan(args: argparse.Namespace) -> Any:
     return plan_execution_profile(Project.load(args.root), args.config)
+
+
+def _strategy_requirements(args: argparse.Namespace) -> Any:
+    project = Project.load(args.root)
+    return load_strategy_manifest(project, args.strategy).requirements()
+
+
+def _strategy_plan(args: argparse.Namespace) -> Any:
+    project = Project.load(args.root)
+    manifest = load_strategy_manifest(project, args.strategy)
+    binding = load_strategy_binding(project, args.binding) if args.binding else None
+    return plan_strategy_binding(project, manifest, binding)
+
+
+def _strategy_preview(args: argparse.Namespace) -> Any:
+    project = Project.load(args.root)
+    manifest = load_strategy_manifest(project, args.strategy)
+    binding = load_strategy_binding(project, args.binding)
+    resolved = resolve_strategy_inputs(
+        project,
+        manifest,
+        binding,
+        decision_time=args.decision_time,
+        tickers=tuple(args.ticker) if args.ticker else None,
+    )
+    return {
+        "strategy": {"id": manifest.strategy_id, "version": manifest.version},
+        "binding_id": binding.binding_id,
+        "decision_time": resolved.decision_time,
+        "effective_config_id": resolved.effective_config_id,
+        "inputs": {
+            name: {
+                "type": type(frame).__name__,
+                "shape": list(frame.shape),
+                "index_names": list(frame.index.names),
+                "columns": list(map(str, frame.columns)),
+                "start": frame.index.get_level_values(0).min() if len(frame) else None,
+                "end": frame.index.get_level_values(0).max() if len(frame) else None,
+            }
+            for name, frame in resolved.inputs.items()
+        },
+        "read_only": True,
+        "mutates": [],
+    }
 
 
 def _alpha_operations(_: argparse.Namespace) -> Any:
@@ -339,6 +389,20 @@ def parser() -> argparse.ArgumentParser:
     )
     qlib_plan = _with_root(_add(qlib_commands, "plan", _qlib_plan))
     qlib_plan.add_argument("--config", default="config/qlibx/execution.yaml")
+
+    strategy_commands = commands.add_parser("strategy").add_subparsers(dest="action", required=True)
+    strategy_requirements = _with_root(
+        _add(strategy_commands, "requirements", _strategy_requirements)
+    )
+    strategy_requirements.add_argument("--strategy", required=True)
+    strategy_plan = _with_root(_add(strategy_commands, "plan", _strategy_plan))
+    strategy_plan.add_argument("--strategy", required=True)
+    strategy_plan.add_argument("--binding")
+    strategy_preview = _with_root(_add(strategy_commands, "preview", _strategy_preview))
+    strategy_preview.add_argument("--strategy", required=True)
+    strategy_preview.add_argument("--binding", required=True)
+    strategy_preview.add_argument("--decision-time", required=True)
+    strategy_preview.add_argument("--ticker", action="append")
 
     agent_commands = commands.add_parser("agent").add_subparsers(dest="action", required=True)
     skill = _add(agent_commands, "skill", _agent_skill)

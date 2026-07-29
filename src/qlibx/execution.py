@@ -225,8 +225,11 @@ def run_strategy_execution(
     def target_policy(date: pd.Timestamp, state: Mapping[str, Any]) -> pd.Series:
         nonlocal memory, previous_result_id
         _append_confirmed_feedback(feedback_history, state)
+        if "universe" in datasets:
+            raise ValueError("universe is inherited from the execution scenario")
+        strategy_datasets = {"universe": universe, **datasets}
         bounded, bounded_availability = _bounded_strategy_data(
-            datasets,
+            strategy_datasets,
             availability_by_dataset,
             pd.Timestamp(date),
             lookbacks,
@@ -535,7 +538,7 @@ def _bounded_strategy_data(
         else:
             if not isinstance(values.index, pd.DatetimeIndex):
                 raise ValueError(f"dataset {name} requires availability metadata")
-            selected = values.loc[values.index.le(decision_time)]
+            selected = values.loc[values.index <= decision_time]
         count = lookbacks.get(name)
         if count is not None:
             if count < 1:

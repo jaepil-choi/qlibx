@@ -114,7 +114,6 @@ def _requirement(
                 derivation="direct",
             ),
         ),
-        user_questions=(f"Which registered dataset or stored artifact supplies {role}?",),
         next_commands=(
             "qlibx data catalog --root <project>",
             "qlibx alpha exposure-plan --metric <metric> --provided-input <role>",

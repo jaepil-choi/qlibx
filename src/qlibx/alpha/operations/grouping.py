@@ -60,9 +60,6 @@ register_operation(
                         derivation="direct",
                     ),
                 ),
-                user_questions=(
-                    "Which registered point-in-time dataset contains the group labels?",
-                ),
                 next_commands=(
                     "qlibx data catalog --root <project>",
                     "qlibx alpha plan group_demean --provided-input group_label",

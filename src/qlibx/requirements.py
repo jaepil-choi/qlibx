@@ -30,7 +30,6 @@ class CapabilityRequirement:
     mandatory: bool
     unavailable_effect: str
     alternatives: tuple[DerivationAlternative, ...]
-    user_questions: tuple[str, ...]
     next_commands: tuple[str, ...]
 
 
@@ -83,7 +82,6 @@ class CapabilityResolution:
     ready: bool
     satisfied_requirements: tuple[str, ...]
     missing_requirements: tuple[str, ...]
-    user_questions: tuple[str, ...]
     next_commands: tuple[str, ...]
     retryable: bool
 
@@ -96,7 +94,6 @@ class CapabilityResolution:
             "requirements": [asdict(item) for item in self.results],
             "satisfied_requirements": list(self.satisfied_requirements),
             "missing_requirements": list(self.missing_requirements),
-            "user_questions": list(self.user_questions),
             "next_commands": list(self.next_commands),
             "retryable": self.retryable,
             "ready": self.ready,
@@ -156,7 +153,6 @@ def evaluate_requirements(
     results: list[RequirementResult] = []
     missing: list[str] = []
     satisfied: list[str] = []
-    questions: list[str] = []
     commands: list[str] = []
     for requirement in declaration.requirements:
         active = requirement.mandatory or requirement.requirement_id in requested
@@ -205,7 +201,6 @@ def evaluate_requirements(
         missing.append(requirement.requirement_id)
         reasons = tuple(item.reason for item in alternatives)
         reason = "; ".join(dict.fromkeys(reasons)) or requirement.unavailable_effect
-        questions.extend(requirement.user_questions)
         commands.extend(requirement.next_commands)
         results.append(
             RequirementResult(
@@ -217,7 +212,6 @@ def evaluate_requirements(
                 tuple(alternatives),
             )
         )
-    unique_questions = tuple(dict.fromkeys(questions))
     unique_commands = tuple(dict.fromkeys(commands))
     return CapabilityResolution(
         capability_id=declaration.capability_id,
@@ -226,7 +220,6 @@ def evaluate_requirements(
         ready=not missing,
         satisfied_requirements=tuple(sorted(satisfied)),
         missing_requirements=tuple(sorted(missing)),
-        user_questions=unique_questions,
         next_commands=unique_commands,
         retryable=bool(unique_commands),
     )

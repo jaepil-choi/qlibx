@@ -32,7 +32,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
         "portfolio",
         "onboarding",
     ),
-    ("profiles", "extensions", "ensemble", "reporting", "skill"),
+    ("profiles", "extensions", "ensemble", "reporting", "skill", "strategy_manifest"),
     ("cli", "data", "agent", "__init__"),
 )
 
@@ -165,6 +165,7 @@ def test_alpha_is_a_pure_domain_package() -> None:
         "reporting",
         "requirements",
         "research",
+        "strategy_manifest",
     ],
 )
 def test_public_module_paths_stay_importable(module: str) -> None:

@@ -35,10 +35,17 @@ def _program(context: DecisionContext, parameters) -> DecisionResult:
     return DecisionResult("weight", payload, memory={"count": count})
 
 
+def _datasets(values: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    return {
+        "universe": pd.DataFrame(True, index=values.index, columns=values.columns),
+        "returns": values,
+    }
+
+
 def test_same_frozen_input_version_state_and_seed_has_same_identity() -> None:
     dates = pd.date_range("2025-01-01", periods=3)
     values = pd.DataFrame({"A": [1.0, 2.0, 3.0]}, index=dates)
-    context = DecisionContext(dates[-1], {"returns": values}, memory={"count": 4}, seed=11)
+    context = DecisionContext(dates[-1], _datasets(values), memory={"count": 4}, seed=11)
     first = run_decision(
         _definition(),
         _program,
@@ -59,7 +66,7 @@ def test_same_frozen_input_version_state_and_seed_has_same_identity() -> None:
     pd.testing.assert_frame_equal(first.payload, second.payload)
     assert first.invocation_id and first.primary_result_id and first.result_id
     changed = freeze_invocation(
-        _definition(), DecisionContext(dates[-1], {"returns": values}, seed=12)
+        _definition(), DecisionContext(dates[-1], _datasets(values), seed=12)
     )
     assert changed.invocation_id != first.invocation_id
 
@@ -87,7 +94,7 @@ def test_availability_not_event_date_controls_no_look_ahead() -> None:
 def test_child_composition_reuses_declared_payload_and_isolates_account() -> None:
     dates = pd.date_range("2025-01-01", periods=2)
     values = pd.DataFrame({"A": [1.0, 2.0]}, index=dates)
-    parent = DecisionContext(dates[-1], {"returns": values}, account={"cash": 100.0})
+    parent = DecisionContext(dates[-1], _datasets(values), account={"cash": 100.0})
     request = NestedResearchRequest(
         _definition(),
         {"returns": values.tail(1)},
@@ -108,7 +115,7 @@ def test_child_composition_reuses_declared_payload_and_isolates_account() -> Non
 def test_child_cannot_change_parent_observation_or_account() -> None:
     dates = pd.date_range("2025-01-01", periods=2)
     values = pd.DataFrame({"A": [1.0, 2.0]}, index=dates)
-    parent = DecisionContext(dates[-1], {"returns": values}, account={"cash": 100.0})
+    parent = DecisionContext(dates[-1], _datasets(values), account={"cash": 100.0})
     changed = values.tail(1).copy()
     changed.iloc[0, 0] = 999.0
     request = NestedResearchRequest(_definition(), {"returns": changed}, "mean", 1, {})
@@ -126,7 +133,7 @@ def test_feedback_order_and_resume_match_uninterrupted_results() -> None:
             FeedbackEvent(dates[offset], "fill", {"quantity": offset})
             for offset in range(position + 1)
         )
-        contexts.append(DecisionContext(date, {"returns": values}, feedback_history=feedback))
+        contexts.append(DecisionContext(date, _datasets(values), feedback_history=feedback))
     full = run_decision_sequence(_definition(), _program, contexts)
     first = run_decision_sequence(_definition(), _program, contexts, end_position=2)
     resumed = run_decision_sequence(
@@ -154,7 +161,7 @@ def test_feedback_order_and_resume_match_uninterrupted_results() -> None:
 def test_intermediate_recording_does_not_change_primary_result() -> None:
     date = pd.Timestamp("2025-01-01")
     values = pd.DataFrame({"A": [1.0]}, index=[date])
-    context = DecisionContext(date, {"returns": values})
+    context = DecisionContext(date, _datasets(values))
     plain = run_decision(_definition(), _program, context)
 
     def recorded(context: DecisionContext, parameters) -> DecisionResult:

@@ -41,7 +41,6 @@ def _declaration() -> CapabilityRequirements:
                         derivation="capitalization-weighted aggregation",
                     ),
                 ),
-                user_questions=("Which market-return alternative should be registered?",),
                 next_commands=("qlibx data inspect --root <project> --path <source>",),
             ),
             CapabilityRequirement(
@@ -64,7 +63,6 @@ def _declaration() -> CapabilityRequirements:
                         derivation="direct",
                     ),
                 ),
-                user_questions=("Which registered dataset contains the group labels?",),
                 next_commands=("qlibx data catalog --root <project>",),
             ),
         ),
@@ -109,8 +107,8 @@ def test_evaluator_reports_one_typed_gap_for_plan_and_error_serialization() -> N
 
     assert resolution.ready is False
     assert resolution.missing_requirements == ("groups", "market_return")
-    assert "Which market-return alternative" in " ".join(resolution.user_questions)
     payload = resolution.to_dict()
+    assert "user_questions" not in payload
     assert payload["capability"] == {"id": "test.capability", "version": "1"}
     assert payload["retryable"] is True
     assert {item["status"] for item in payload["requirements"]} == {"unsatisfied"}

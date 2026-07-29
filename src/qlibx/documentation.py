@@ -17,8 +17,8 @@ TOPICS: Mapping[str, str] = {
         "plan, register, then bounded-preview."
     ),
     "strategy": (
-        "Use StrategyDefinition, bounded DecisionContext, and declared DecisionResult; child "
-        "contexts cannot exceed parent data."
+        "Declare Strategy requirements in project YAML, bind registered fields after user "
+        "approval, and invoke plain pandas Strategy callables with fixed bounded lookbacks."
     ),
     "alpha": (
         "Use qlibx.alpha deterministic transforms; fixed budgets rescale, flexible budgets never "
@@ -252,6 +252,46 @@ ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
             "Run qlibx extension contracts and choose a contract the installed version offers."
         ),
     },
+    **{
+        code: {
+            "recovery": (
+                "Read the Strategy error action, inspect the installed manifest/binding schema "
+                "and registered field inventory, then create a new read-only Strategy plan."
+            )
+        }
+        for code in (
+            "QLIBX_STRATEGY_BOUND_FIELDS_MISSING",
+            "QLIBX_STRATEGY_CALLABLE_MISSING",
+            "QLIBX_STRATEGY_CONFIG_KEYS_INVALID",
+            "QLIBX_STRATEGY_CONFIG_OUTSIDE_ROOT",
+            "QLIBX_STRATEGY_CONFIG_SCHEMA_UNSUPPORTED",
+            "QLIBX_STRATEGY_CONTRACT_UNSUPPORTED",
+            "QLIBX_STRATEGY_EXECUTION_OUTPUT_INVALID",
+            "QLIBX_STRATEGY_EXECUTION_UNIVERSE_MISMATCH",
+            "QLIBX_STRATEGY_FIELD_NULLABLE_INVALID",
+            "QLIBX_STRATEGY_FIELDS_EMPTY",
+            "QLIBX_STRATEGY_INDEX_INVALID",
+            "QLIBX_STRATEGY_INPUT_DTYPE_INVALID",
+            "QLIBX_STRATEGY_INPUT_MUTATED",
+            "QLIBX_STRATEGY_INPUT_NULL_INVALID",
+            "QLIBX_STRATEGY_INPUTS_EMPTY",
+            "QLIBX_STRATEGY_LOOKBACK_INVALID",
+            "QLIBX_STRATEGY_LOOKBACK_UNSUPPORTED",
+            "QLIBX_STRATEGY_OUTPUT_INVALID",
+            "QLIBX_STRATEGY_OUTPUT_NOT_PANDAS",
+            "QLIBX_STRATEGY_PANDAS_KIND_INVALID",
+            "QLIBX_STRATEGY_PARAMETER_COLLISION",
+            "QLIBX_STRATEGY_RESOLUTION_MISMATCH",
+            "QLIBX_STRATEGY_SIGNATURE_MISMATCH",
+            "QLIBX_STRATEGY_SOURCE_INVALID",
+            "QLIBX_STRATEGY_SOURCE_MISSING",
+            "QLIBX_STRATEGY_SOURCE_OUTSIDE_EXTENSIONS",
+            "QLIBX_STRATEGY_UNIVERSE_MISMATCH",
+            "QLIBX_STRATEGY_UNIVERSE_DUPLICATE",
+            "QLIBX_STRATEGY_UNIVERSE_NULL",
+            "QLIBX_STRATEGY_UNIVERSE_REDECLARED",
+        )
+    },
 }
 
 SCHEMAS: Mapping[str, Mapping[str, Any]] = {
@@ -301,6 +341,34 @@ SCHEMAS: Mapping[str, Mapping[str, Any]] = {
     "strategy_definition": {
         "required": ["strategy_id", "name", "parameters", "data_requirements", "output_kind"],
         "output_kind": ["signal", "weight", "order", "payload"],
+        "status": "compatibility_api",
+    },
+    "strategy_manifest": {
+        "required": ["schema_version", "contract", "strategy"],
+        "contract": "qlibx.pandas_strategy",
+        "strategy_required": [
+            "id",
+            "version",
+            "name",
+            "implementation",
+            "parameters",
+            "lookback",
+            "inputs",
+            "output",
+        ],
+        "lookback": {"kind": "rows", "value": "positive_integer"},
+        "inherited_inputs": ["universe"],
+        "source_field_names": "forbidden",
+    },
+    "strategy_binding": {
+        "required": ["schema_version", "binding"],
+        "binding_required": ["id", "strategy", "inputs"],
+        "input_required": ["registered_dataset"],
+        "input_optional": ["fields"],
+        "field_direction": "canonical_name_to_registered_field",
+        "raw_paths": "forbidden",
+        "question_or_confirmation_text": "forbidden",
+        "duplicated_pandas_contract": "forbidden",
     },
     "research_publication": {
         "statuses": ["successful", "failed", "invalid", "abandoned"],
@@ -363,7 +431,6 @@ SCHEMAS: Mapping[str, Mapping[str, Any]] = {
             "mandatory",
             "unavailable_effect",
             "alternatives",
-            "user_questions",
             "next_commands",
         ],
         "alternative_required": [
@@ -503,21 +570,32 @@ TASK_GUIDES: Mapping[str, Mapping[str, Any]] = {
     "strategy": {
         "version": 1,
         "purpose": TOPICS["strategy"],
-        "read_only": ["qlibx docs strategy", "qlibx schema strategy_definition"],
-        "writes": ["frozen invocation and published declared results only"],
-        "steps": [
+        "read_only": [
+            "qlibx strategy requirements --strategy <id> --root <project>",
+            "qlibx strategy plan --strategy <id> [--binding <id>] --root <project>",
             (
-                "Declare stable instance identity, parameters, data requirements, output kind "
-                "and seed."
-            ),
-            "Freeze bounded point-in-time data and feedback before calling the decision program.",
-            "Validate output kind, axes, state and optional intermediate records.",
-            (
-                "Only a parent decision is submitted to Qlib; child what-if results cannot "
-                "mutate account state."
+                "qlibx strategy preview --strategy <id> --binding <id> "
+                "--decision-time <time> --root <project>"
             ),
         ],
-        "examples": ["strategy_definition"],
+        "writes": [
+            "user-approved config/qlibx/strategies/*.yaml",
+            "user-approved config/qlibx/bindings/*.yaml",
+            "trusted qlibx-custom Strategy source",
+        ],
+        "steps": [
+            "Write a plain pandas callable; do not import project, catalog, binding or agent APIs.",
+            "Declare canonical inputs and fields in a Strategy manifest; universe is inherited.",
+            "Run an unbound plan and inspect its registered field inventory.",
+            (
+                "Propose exact canonical-to-registered field mappings to the user; write the "
+                "binding only after approval."
+            ),
+            "Validate and preview fixed bounded pandas inputs, then invoke the Strategy.",
+            "A parent may call child pandas Strategies with equal or narrower bounded inputs.",
+        ],
+        "schemas": ["strategy_manifest", "strategy_binding", "capability_plan"],
+        "examples": ["strategy_manifest", "strategy_binding", "pandas_strategy"],
     },
     "alpha": {
         "version": 1,
@@ -701,6 +779,54 @@ EXAMPLES: Mapping[str, Mapping[str, str]] = {
         "content": (
             "StrategyDefinition('reversal.v1', 'reversal', {'window': 5}, ('returns',), "
             "'weight', version='1')"
+        ),
+    },
+    "strategy_manifest": {
+        "format": "yaml",
+        "content": (
+            "schema_version: 1\n"
+            "contract: qlibx.pandas_strategy\n"
+            "strategy:\n"
+            "  id: open_close_rebound\n"
+            "  version: '1'\n"
+            "  name: Open Close Rebound\n"
+            "  implementation: {source: strategies/open_close_rebound.py, callable: decide}\n"
+            "  parameters: {rebound_threshold: 0.02}\n"
+            "  lookback: {kind: rows, value: 20}\n"
+            "  inputs:\n"
+            "    market_data:\n"
+            "      meaning: Daily market prices.\n"
+            "      pandas: {kind: table, index: [date, ticker]}\n"
+            "      fields:\n"
+            "        open_price: {meaning: Session open, dtype: float64, "
+            "unit: price, nullable: false}\n"
+            "        close_price: {meaning: Session close, dtype: float64, "
+            "unit: price, nullable: false}\n"
+            "  output: {kind: signal}\n"
+        ),
+    },
+    "strategy_binding": {
+        "format": "yaml",
+        "content": (
+            "schema_version: 1\n"
+            "binding:\n"
+            "  id: open_close_rebound.krx\n"
+            "  strategy: {id: open_close_rebound, version: '1'}\n"
+            "  inputs:\n"
+            "    universe: {registered_dataset: krx_daily_universe}\n"
+            "    market_data:\n"
+            "      registered_dataset: krx_daily_ohlcv\n"
+            "      fields: {open_price: 시가, close_price: 종가}\n"
+        ),
+    },
+    "pandas_strategy": {
+        "format": "python",
+        "content": (
+            "def child_rebound(*, market_data):\n"
+            "    return market_data['close_price'] - market_data['open_price']\n\n"
+            "def decide(*, universe, market_data, rebound_threshold):\n"
+            "    signal = child_rebound(market_data=market_data).unstack('ticker')\n"
+            "    return signal.where(universe.reindex_like(signal), 0.0) * rebound_threshold\n"
         ),
     },
     "research_workflow": {

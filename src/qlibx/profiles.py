@@ -66,7 +66,6 @@ def _role_requirement(role: str) -> CapabilityRequirement:
                 derivation="direct project configuration",
             ),
         ),
-        user_questions=(f"Which logical matrix dataset should supply {role}?",),
         next_commands=(
             "qlibx data catalog --root <project>",
             "qlibx qlib plan --root <project> --config config/qlibx/execution.yaml",
@@ -98,7 +97,6 @@ def _clock_requirement() -> CapabilityRequirement:
                 derivation="direct project configuration",
             ),
         ),
-        user_questions=("Which explicit execution clock should this profile use?",),
         next_commands=(
             "qlibx qlib requirements --target-semantics <semantics>",
             "qlibx qlib plan --root <project> --config config/qlibx/execution.yaml",

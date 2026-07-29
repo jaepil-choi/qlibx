@@ -25,6 +25,14 @@ class StrategyDefinition:
     output_kind: OutputKind
     version: str = "1"
 
+    def __post_init__(self) -> None:
+        if "universe" in self.data_requirements:
+            raise ValueError("universe is inherited and must not be redeclared")
+
+    @property
+    def all_data_requirements(self) -> tuple[str, ...]:
+        return ("universe", *self.data_requirements)
+
 
 @dataclass(frozen=True, slots=True)
 class FeedbackEvent:
@@ -117,10 +125,13 @@ class DecisionContext:
         seed: int | None = None,
     ) -> DecisionContext:
         """Create a child capability that can only narrow its parent's data."""
+        requested_datasets = dict(datasets)
+        if "universe" in self.datasets and "universe" not in requested_datasets:
+            requested_datasets["universe"] = self.datasets["universe"]
         bounded: dict[str, pd.DataFrame] = {}
         bounded_availability: dict[str, pd.DataFrame | pd.Series] = {}
         requested_availability = availability or {}
-        for name, child_frame in datasets.items():
+        for name, child_frame in requested_datasets.items():
             if name not in self.datasets:
                 raise ValueError(f"child requested undeclared dataset: {name}")
             parent = self.datasets[name]
@@ -144,7 +155,7 @@ class DecisionContext:
                 raise ValueError(f"child dataset {name} added availability metadata")
         child_lookbacks = dict(lookbacks or {})
         for name in child_lookbacks:
-            if name not in datasets:
+            if name not in requested_datasets:
                 raise ValueError(f"child lookback has no requested dataset: {name}")
         return DecisionContext(
             self.decision_time,
@@ -300,7 +311,7 @@ def run_decision(
     effective_config_id: str = "",
     dependency_versions: Mapping[str, str] | None = None,
 ) -> DecisionResult:
-    missing = sorted(set(definition.data_requirements) - set(context.datasets))
+    missing = sorted(set(definition.all_data_requirements) - set(context.datasets))
     if missing:
         raise ValueError(f"strategy datasets are missing: {missing}")
     invocation = freeze_invocation(

@@ -33,6 +33,9 @@ def test_cli_requirements_qlib_status_and_agent_skill(tmp_path, capsys) -> None:
     assert (skill.parent / "references" / "contracts.md").is_file()
     assert (skill.parent / "examples" / "project-api.py").is_file()
     assert (skill.parent / "examples" / "logical-dataset.yaml").is_file()
+    assert (skill.parent / "examples" / "strategy-manifest.yaml").is_file()
+    assert (skill.parent / "examples" / "strategy-binding.yaml").is_file()
+    assert (skill.parent / "examples" / "pandas-strategy.py").is_file()
     assert (skill.parent / "examples" / "research-workflow.py").is_file()
     assert (skill.parent / "examples" / "stored-ensemble.py").is_file()
     assert (skill.parent / "examples" / "signed-execution.py").is_file()
@@ -53,6 +56,7 @@ def test_cli_requirements_qlib_status_and_agent_skill(tmp_path, capsys) -> None:
     assert "qlibx errors <code>" in skill_text
     assert "QLIBX_CAPABILITY_REQUIREMENT_GAP" in skill_text
     assert "rerun the exact same capability request" in skill_text
+    assert "do not repeat pandas contracts or store question/confirmation" in skill_text
     assert "combine_stored_weights" in skill_text
     json.loads(output.split("}\n{")[0] + "}")
 

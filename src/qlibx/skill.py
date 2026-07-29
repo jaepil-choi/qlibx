@@ -106,6 +106,9 @@ def _skill_files(target: SkillTarget) -> dict[str, str]:
         "examples/project-api.py": _project_example(),
         "examples/data-registration.yaml": _registration_example(),
         "examples/logical-dataset.yaml": _logical_dataset_example(),
+        "examples/strategy-manifest.yaml": _public_example("strategy_manifest"),
+        "examples/strategy-binding.yaml": _public_example("strategy_binding"),
+        "examples/pandas-strategy.py": _public_example("pandas_strategy"),
         "references/alpha-operations.md": _alpha_operations_markdown(),
         "examples/alpha-pipeline.py": _public_example("alpha_pipeline"),
         "examples/custom-alpha-operation.py": _public_example("custom_alpha_operation"),
@@ -166,6 +169,29 @@ unused side budget as leftover. If nothing matches, register your own `Operation
 never edit the installed package. Start from `examples/alpha-pipeline.py` and
 `examples/custom-alpha-operation.py`.
 
+## Author and bind a pandas Strategy
+
+1. Write trusted project-local Strategy code below the configured extension root. It receives
+   canonical pandas inputs and ordinary parameters only; do not import qlibx project, catalog,
+   registration, binding, runner, or agent APIs. A parent may directly call a child Strategy with
+   an equal or narrower slice of its already-bounded pandas inputs.
+2. Author `config/qlibx/strategies/<id>.yaml` from `examples/strategy-manifest.yaml`. Declare the
+   fixed row lookback, canonical input roles, required fields, dtype/nullability, and output. Do
+   not declare `universe`; `qlibx.pandas_strategy` inherits it for every Strategy.
+3. Run `qlibx strategy requirements` and an unbound `qlibx strategy plan`. Read the missing roles,
+   canonical fields, acceptable alternatives, and exact registered field inventory. The core plan
+   reports facts and never chooses a semantic mapping.
+4. Propose an exact canonical-to-registered field mapping in natural language and ask the user to
+   approve it. Do not write config, silently choose a similar field, or treat a proposal as
+   requirement evidence.
+5. Only after approval, write `config/qlibx/bindings/<id>.yaml` from
+   `examples/strategy-binding.yaml`. Record only Strategy ID/version, registered logical dataset
+   IDs and exact field mappings; do not repeat pandas contracts or store question/confirmation
+   text.
+6. Rerun `qlibx strategy plan`, then `qlibx strategy preview --decision-time <time>`. The resolver
+   applies point-in-time bounds, the fixed lookback, canonical renaming, dtype/null checks and
+   universe alignment before Strategy invocation.
+
 ## Research and execution
 
 Before proposing a trial, query prior proposals, successful/failed/invalid attempts, searched
@@ -195,10 +221,12 @@ read-only plan. If `ready` is false or execution raises `QLIBX_CAPABILITY_REQUIR
 
 1. Read `missing_requirements`, each alternative and its reason from the shared resolution.
 2. Explain what the capability needs and why; show every acceptable derivation alternative.
-3. Ask the listed `user_questions` and inspect only user-selected source data.
-4. Run the data-registration interview; never choose a similar dataset or proxy silently.
-5. Complete the selected registration/config, then rerun the exact same capability request.
-6. Record the selected alternative, assumptions and remaining limitations in the research record.
+3. Inspect only user-selected registered data and show the exact available field inventory.
+4. Propose an exact mapping or derivation in natural language and obtain user approval; never
+   choose a similar dataset, field, or proxy silently.
+5. Only after approval, write the project-owned binding/config and validate it.
+6. After validation, rerun the exact same capability request and record the selected alternative,
+   assumptions and remaining limitations in the research record.
 
 The plan resolution and runtime error context are the same object shape. Optional outputs marked
 `not_requested` are not failures; requested outputs marked `unsatisfied` must not be reported as a

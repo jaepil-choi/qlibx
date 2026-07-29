@@ -34,8 +34,9 @@ def test_root_api_is_small_and_responsibility_based() -> None:
         "requirements",
         "research",
         "strategy",
+        "strategy_manifest",
     ]
-    assert len(qlibx.__all__) <= 15
+    assert len(qlibx.__all__) <= 16
     assert not hasattr(qlibx, "run_signed_execution")
 
 
@@ -63,7 +64,8 @@ def test_group_decay_and_hump_are_deterministic() -> None:
 def test_child_strategy_cannot_escape_parent_context() -> None:
     dates = pd.date_range("2025-01-01", periods=2)
     frame = pd.DataFrame({"a": [1.0, 2.0]}, index=dates)
-    context = DecisionContext(dates[-1], {"returns": frame}, seed=7)
+    universe = pd.DataFrame(True, index=dates, columns=frame.columns)
+    context = DecisionContext(dates[-1], {"universe": universe, "returns": frame}, seed=7)
     child = context.child(datasets={"returns": frame.tail(1)})
     definition = StrategyDefinition("s", "sample", {}, ("returns",), "signal")
     result = run_decision(

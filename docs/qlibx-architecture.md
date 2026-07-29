@@ -75,7 +75,7 @@ flowchart LR
 
 ### 3.1 계층
 
-`src/qlibx/`는 27개 top-level module/package(37개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
+`src/qlibx/`는 28개 top-level module/package(38개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
 만들고, 그 규칙은 `tests/test_architecture.py`가 강제한다. **현재 intra-package import graph는
 acyclic이다** (순환 없음).
 
@@ -97,6 +97,7 @@ flowchart TD
         extensions["extensions"]
         skill["skill"]
         profiles["profiles"]
+        sm["strategy_manifest"]
     end
 
     subgraph L3["capability"]
@@ -156,6 +157,13 @@ flowchart TD
     catalog --> config
     profiles --> catalog
     profiles --> requirements
+    sm --> catalog
+    sm --> config
+    sm --> execution
+    sm --> project
+    sm --> requirements
+    sm --> serialization
+    sm --> strategy
     registration --> config
     artifacts --> strategy
     artifacts --> serialization
@@ -194,6 +202,7 @@ flowchart TD
 | `discovery` | errors, project | duckdb, pyarrow |
 | `registration` | config, errors, project, serialization | pyarrow |
 | `profiles` | catalog, config, errors, project, requirements | — |
+| `strategy_manifest` | catalog, config, errors, execution, project, requirements, serialization, strategy | pandas |
 | `artifacts` | project, serialization, strategy | pandas |
 | `research` | orthogonality, project, serialization | duckdb, pandas |
 | `portfolio` | optimization | pandas |
@@ -242,7 +251,7 @@ import qlibx
 qlibx.__all__
 # ['Project', 'QlibxError', 'agent', 'alpha', 'artifacts', 'data',
 #  'ensemble', 'execution', 'extensions', 'portfolio', 'reporting',
-#  'requirements', 'research', 'strategy']
+#  'requirements', 'research', 'strategy', 'strategy_manifest']
 ```
 
 책임 기반의 얇은 facade다. `data`와 `agent`는 하위 module을 재수출하는 facade이고,
@@ -255,13 +264,14 @@ flowchart LR
     Q["qlibx"] --> P["project"] --> P1["init · status"]
     Q --> D["data"] --> D1["requirements · discover · inspect<br/>plan · register · catalog · preview"]
     Q --> QL["qlib"] --> QL1["status · requirements · plan"]
+    Q --> STG["strategy"] --> STG1["requirements · plan · preview"]
     Q --> AL["alpha"] --> AL1["operations · operation NAME · plan NAME<br/>exposure-requirements · exposure-plan · budgets"]
     Q --> AG["agent"] --> AG1["skill · instruction"]
     Q --> EX["extension"] --> EX1["contracts · contract NAME"]
     Q --> DOC["docs · schema · examples · errors"]
 ```
 
-전체 26개 leaf command. 각 subcommand는 선언되는 자리에서
+전체 29개 leaf command. 각 subcommand는 선언되는 자리에서
 `set_defaults(handler=...)`로 handler를 바인딩하고, `cli.dispatch`는 `args.handler(args)` 한 줄이다.
 handler는 **출력할 값을 return만** 하며 JSON 인코딩·출력·에러 변환은 한 곳에 모여 있다.
 
@@ -309,6 +319,8 @@ User가 작성하는 config 파일의 정확한 경로:
 | `config/qlibx/data/registrations.yaml` | source → canonical parquet 매핑 |
 | `config/qlibx/data/datasets/*.yaml` | logical dataset (`kind: table` 또는 `matrix`) |
 | `config/qlibx/execution.yaml` | 실행 profile. clock + role↔dataset 매핑 |
+| `config/qlibx/strategies/*.yaml` | Strategy identity, fixed lookback, canonical pandas requirement |
+| `config/qlibx/bindings/*.yaml` | Strategy/version별 registered dataset과 exact field mapping |
 
 `Project.contained(path)`가 모든 경로 접근의 관문이다. Registration output은 추가로
 `generated_data` 하위여야 하며(`QLIBX_OUTPUT_OUTSIDE_GENERATED_DATA`), extension source는
@@ -333,8 +345,9 @@ flowchart TB
 ```
 
 **설계 의도**: qlibx는 **시간·티커·값의 의미를 절대 추론하지 않는다.** `inspect`는 스키마와 샘플만
-보여주고 미해결 질문 목록을 반환하며, 사용자가 확답한 뒤에만 YAML을 쓴다. 컬럼 이름이 비슷하다는
-이유로 매핑하지 않는다.
+보여주고 미해결 질문 목록을 반환하며, 사용자가 확답한 뒤에만 registration YAML을 쓴다. Basic
+registration은 information field를 opaque하게 보존한다. 컬럼 이름이 비슷하다는 이유로 특정
+Strategy의 canonical field로 rename하지 않는다.
 
 Canonical 형태는 `available_at` + `ticker` + 불투명한 information 컬럼의 long table이다.
 `available_at`이 point-in-time 가시성을 지배하는 유일한 시간축이고, event/observation time은
@@ -346,6 +359,25 @@ Registration은 원본 SHA256을 계획 시점과 기록 직전에 두 번 확�
 `profiles.plan_execution_profile`은 논리 dataset을 Qlib 실행 role
 (`execution_price`, `valuation_price`, `universe`, `tradable`, `volume`, `benchmark_weight`,
 signed일 때 `observed`/`shortable`)에 매핑하고, 누락·비matrix·clock 불일치를 실행 전에 보고한다.
+
+Strategy가 선택된 뒤 semantic mapping은 별도 binding 단계에서만 생긴다.
+
+```mermaid
+flowchart LR
+    R["basic registration<br/>opaque fields: 시가 · 종가"] --> C["DataCatalog<br/>registered field inventory"]
+    M["Strategy manifest<br/>open_price · close_price"] --> P["read-only Strategy plan"]
+    C --> P
+    P -->|"facts only; mapping unresolved"| A["generated skill / agent interview"]
+    A -->|"user approval 후에만"| B["Strategy binding YAML<br/>open_price: 시가<br/>close_price: 종가"]
+    B --> V["resolver validation + bounded preview"]
+    V --> S["plain pandas Strategy"]
+```
+
+Manifest가 pandas kind, index, dtype/nullability, fixed row lookback과 semantic meaning을 소유한다. Binding은
+Strategy ID/version, registered logical dataset ID와 canonical-to-registered field mapping만 소유한다.
+따라서 binding에는 pandas contract, question text, `confirmation.status`를 반복하지 않는다. Core plan은
+candidate mapping을 선택하거나 질문 문장을 생성하지 않고 missing role/field와 registered inventory만
+반환한다. Generated skill이 mapping을 제안하고 user approval 후 YAML을 쓰는 정책을 소유한다.
 
 ---
 
@@ -449,27 +481,74 @@ module이 이 미사용 예산을 임의로 복원하거나 무관한 종목에 
 ## 8. Strategy plane — point-in-time 경계
 
 ```mermaid
-sequenceDiagram
-    participant C as DecisionContext
-    participant F as freeze_invocation
-    participant P as DecisionProgram
-    participant R as DecisionResult
-
-    C->>C: __post_init__ 에서 모든 dataset을<br/>decision_time 기준으로 bound
-    Note over C: available_at > decision_time 이면 즉시 실패<br/>feedback_history 순서·미래 feedback 검증
-    C->>F: definition + context
-    F-->>F: dataset digest · feedback · memory · account · seed
-    F->>P: detached_copy() (깊은 복사)
-    P-->>R: DecisionResult(kind, payload, memory, intermediates)
-    R->>R: context 변조 여부 재검사 (digest 비교)
-    Note over R: 선언한 output_kind와 다르면 실패
-    R-->>R: invocation_id · primary_result_id · result_id 부여
+flowchart LR
+    MY["config/qlibx/strategies/*.yaml<br/>StrategyManifest"] --> CP["common CapabilityRequirements"]
+    BY["config/qlibx/bindings/*.yaml<br/>StrategyBinding"] --> PLAN["plan_strategy_binding"]
+    CAT["DataCatalog<br/>registered fields"] --> PLAN
+    CP --> PLAN
+    PLAN -->|"ready"| RES["resolve_strategy_inputs<br/>as_of + fixed lookback + rename"]
+    RES --> PI["ResolvedStrategyInputs<br/>canonical pandas only"]
+    PI --> INV["invoke_pandas_strategy"]
+    CODE["qlibx-custom trusted callable<br/>def decide(*, universe, market_data, ...)"] --> INV
+    INV --> OUT["pandas Series / DataFrame"]
 ```
 
-강제되는 불변식:
+`strategy_manifest.py`가 user project와 pure Strategy code 사이 adapter다. Immutable 객체의 책임은 다음과
+같다.
+
+| 객체 | 소유하는 것 | 소유하지 않는 것 |
+| --- | --- | --- |
+| `StrategyManifest` | ID/version, trusted callable ref, parameter, positive fixed-row lookback, canonical pandas input/field/output contract | registered field name, raw path, 질문 문구 |
+| `StrategyBinding` | binding ID, Strategy ID/version, role→registered dataset, canonical→registered field mapping | dtype/layout/lookback 중복, confirmation status |
+| `CapabilityPlan` | missing/satisfied role, exact reason, registered field inventory, effective config ID | semantic 추천, config write |
+| `ResolvedStrategyInputs` | decision time에서 bound된 canonical pandas object와 binding/config identity | catalog/YAML/agent 객체 |
+
+`qlibx.pandas_strategy`는 모든 manifest에 `universe` matrix requirement를 자동 상속한다. Manifest가 이를
+다시 선언하면 실패한다. Adaptive compatibility API의 `StrategyDefinition.all_data_requirements`도
+`universe`를 상속하며, `run_strategy_execution`은 별도 dataset으로 추론하지 않고 실제 execution
+scenario의 universe를 각 decision context에 주입한다.
+
+Plain Strategy는 qlibx base class를 상속하지 않는다. Callable keyword는 manifest의 canonical pandas
+role과 ordinary parameter뿐이다. Loader는 source를 configured extension root 아래로 제한하고 source
+digest 기반 module identity로 trusted project code를 로드한다. Invoker는 signature, input mutation과
+pandas output을 검사한다. 이 검증은 schema boundary이지 malicious-code sandbox가 아니다.
+
+Fixed lookback loop:
+
+```mermaid
+sequenceDiagram
+    participant Q as Qlib decision clock / caller
+    participant R as Strategy input resolver
+    participant S as plain pandas Strategy
+    loop each decision time t
+        Q->>R: t + frozen manifest + binding
+        R->>R: registered dataset load(as_of=t)
+        R->>R: availability > t 제외 + 최근 N periods + canonical rename
+        R->>R: dtype/null + universe ticker alignment
+        R->>S: universe, declared pandas inputs, ordinary parameters
+        S-->>Q: new pandas output
+    end
+```
+
+Parent/child composition은 DI container나 runner injection을 요구하지 않는다. Parent callable은 이미 받은
+bounded pandas object의 같거나 더 좁은 slice를 child callable에 직접 전달한다. Child가 config/catalog를
+읽거나 더 긴 lookback을 요청할 API가 없으므로 pandas-only 경계가 access control이 된다. Adaptive
+compatibility path의 `DecisionContext.child()`도 parent universe를 자동 상속하고 시간·컬럼·값·availability
+축소만 허용한다.
+
+`run_manifest_strategy_execution`은 resolver와 trusted callable을 run 시작 시 한 번 freeze하고,
+`pandas_decision_program` adapter를 Qlib callback에 연결한다. 매 decision마다 registered inputs를 다시
+point-in-time resolve하지만 manifest/binding plan과 field inventory validation은 반복하지 않는다. Adapter는
+registered universe의 current row가 Qlib execution universe와 같은지도 확인하고, weight Strategy의 최신
+pandas row만 Qlib target으로 제출한다.
+
+기존 adaptive `DecisionContext`/`DecisionResult` 경로는 feedback, memory, checkpoint와 Qlib closed loop를
+위해 유지한다. 이 경로에서 강제되는 불변식은 다음과 같다.
 
 - **No look-ahead** — dataset은 `available_at` 행렬 또는 DatetimeIndex로 `decision_time`에서 잘린다.
   미래 관측이 섞이면 program 호출 전에 실패한다.
+- **Universe base requirement** — 모든 `StrategyDefinition`은 universe를 상속하며 context에 없으면 호출
+  전에 실패한다. Child는 parent universe를 기본 상속하고 필요하면 명시적으로 좁힌다.
 - **Context 불변** — program 호출 전후 digest를 비교해 bounded context 변조를 검출한다.
 - **Child는 부모를 넘을 수 없다** — `DecisionContext.child()`는 시간·컬럼 범위 축소만 허용하고,
   부모 관측값이나 availability metadata를 바꾸면 실패한다.
@@ -632,7 +711,7 @@ stored artifact  ->  AnalysisSection  ->  ReportDocument  ->  renderer  ->  outp
 
 `CapabilityRequirements`가 capability ID/version과 `CapabilityRequirement` 목록을 선언한다. 각
 requirement는 의미·axis·unit·currency·사용 목적·충족 규칙·availability·mandatory/optional·미충족
-효과·derivation alternative·user 질문·next command를 가진다.
+효과·derivation alternative·next command를 가진다. Literal user question은 core contract가 아니다.
 
 ```text
 CapabilityRequirements
@@ -652,6 +731,11 @@ Optional requirement는 `not_requested`, `satisfied`, `unsatisfied`를 구분한
 Execution profile의 이전 `ExecutionProfilePlan` 공개 형식은 제거했다.
 `execution_profile_requirements`와 `plan_execution_profile`은 공용 `CapabilityRequirements`와
 `CapabilityPlan`을 반환하며, `require_execution_profile`이 같은 resolution으로 runtime error를 만든다.
+
+Strategy manifest도 같은 kernel로 adapt된다. `plan_strategy_binding`은 manifest requirement와 catalog
+evidence를 evaluator에 넣고, `ready=false`일 때 registered field inventory를 plan parameter로 함께
+반환한다. Core는 mapping을 추천하지 않는다. Generated skill은 그 사실을 읽어 user와 interview하고,
+approval 뒤 binding을 작성한 다음 같은 plan을 재실행한다.
 
 ### 12.3 에러 계약
 
@@ -789,10 +873,16 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 - 문서화된 예제가 실제 signature와 맞지 않는다.
 - Plan과 runtime error가 서로 다른 requirement resolution을 반환한다.
 - Optional output에서 `not_requested`와 `unsatisfied`를 같은 상태로 취급한다.
+- Requirement declaration/resolution에 conversational question wording을 저장한다.
+- Strategy binding에 manifest의 pandas contract, lookback 또는 confirmation status를 중복 저장한다.
 
 **데이터·실행 위반**
 
 - 컬럼 이름 유사성으로 시간·티커·값 semantics를 추론한다.
+- Basic registration에서 Strategy-specific canonical field로 semantic rename한다.
+- Strategy implementation이 project/catalog/registration/binding/runner/agent API를 읽는다.
+- Strategy binding이 catalog에 없는 dataset ID나 raw path를 참조한다.
+- 모든 Strategy에 상속되는 universe를 개별 manifest가 다시 선언하거나 runtime에서 추론한다.
 - user source root에 쓴다.
 - 요청 target이나 signed projection을 Qlib 실현 보유량으로 취급한다.
 - Qlib scheduler 밖에 두 번째 production bar loop를 만든다.
@@ -810,6 +900,7 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 | 항목 | 현재 상태 |
 | --- | --- |
 | **Capability requirement contract (PRD §5.4/§5.5, P8)** | **구현됨.** 공용 declaration/evaluator/plan/error 타입, execution-profile 공개 migration, `group_demean`, exposure request/unavailable 구분, extension declaration, CLI/schema/generated skill을 제공한다. 상세는 아래 §16.1 |
+| **Strategy manifest/binding (PRD §6.3/§7/P2/P8)** | **구현됨.** Project YAML manifest와 binding, inherited universe, registered-field plan, fixed-lookback resolver, plain pandas callable, CLI/schema/generated skill을 제공한다. 기존 adaptive API도 universe를 상속한다 |
 | Beta estimation · residualization (PRD §8.2/§8.3) | **의도적으로 미구현.** 공용 requirement 기반은 준비됐지만 별도 작업으로 연기했다 |
 | `reporting` → `execution` → `_vendor` 결합 | `reporting`이 run catalog 때문에 `execution`을 경유해 vendored 코드에 간접 의존한다. run catalog port를 분리하면 끊긴다 |
 | `ResearchCatalog` 크기 | event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |
@@ -833,7 +924,7 @@ PRD가 확정한 흐름은 이렇다.
 flowchart LR
     A["agent: capability 실행 요청"] --> B{"requirement 충족?"}
     B -->|예| C["실행 → 결과"]
-    B -->|아니오| D["requirement gap 보고<br/>미충족 항목 · 이유 · alternative<br/>user 질문 · next command"]
+    B -->|아니오| D["requirement gap 보고<br/>미충족 항목 · 이유 · alternative<br/>field inventory · next command"]
     D --> E["agent layer: user와 interview"]
     E --> F["data registration (§6)"]
     F --> A
@@ -850,11 +941,16 @@ flowchart LR
 | execution profile | legacy `ExecutionProfilePlan` 제거, 공용 공개 계약으로 전면 이관 | `execution_profile_requirements`, `plan_execution_profile`, `require_execution_profile` |
 | alpha operation | `OperationSpec.requirements`; `requires_groups` boolean 제거 | `group_demean`, project-local/extension-backed `OperationSpec` |
 | exposure | 명시적 metric request, `not_requested`와 `unsatisfied` 구분 | `exposure_requirements`, `plan_exposure`, `ExposureArtifact` |
-| agent interview | gap 해석 → user 선택 → registration/config → 동일 요청 재실행 | generated `SKILL.md` |
+| agent interview | gap/inventory 해석 → mapping 제안 → user approval → binding/config → 동일 요청 재실행 | generated `SKILL.md` |
 
 공용 evaluator는 catalog를 import하지 않는다. `profiles` 같은 capability adapter가 project/catalog에서
 `RequirementEvidence`를 만들고, `alpha`는 이미 전달된 bounded runtime input에서 evidence를 만든다. 이
 분리로 선언과 판정은 공통이지만 data access는 각 책임의 상위 계층에 남는다.
+
+Requirement object에는 질문 문구가 없다. Agent는 resolution의 missing requirement, alternative와
+capability-specific plan parameter(Strategy의 registered field inventory 등)에서 설명과 질문을 구성한다.
+Core가 natural-language interview를 versioned domain data로 저장하지 않으므로 agent/model/locale별 표현을
+바꿔도 requirement identity가 변하지 않는다.
 
 Exposure는 호출자가 `requested_metrics`를 지정한다. 요청하지 않은 optional 항목은 `not_requested`이고,
 요청했지만 input이 없는 항목은 `unsatisfied`다. 기본 실행은 structured error로 중단한다. 명시적인

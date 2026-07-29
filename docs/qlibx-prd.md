@@ -295,6 +295,17 @@ Data registration request를 받으면 agent는:
 
 Agent는 비슷해 보이는 column name만으로 경제적 의미를 확정해서는 안 된다.
 
+Basic registration은 source를 project 안에서 안전하게 다시 찾고 읽을 수 있게 만드는 단계다. 이 단계는
+availability, ticker, key, dtype과 opaque information column을 기록하지만, 특정 strategy나 capability가
+요구하는 semantic role을 source column에 부여하지 않는다. 예를 들어 source의 `시가`를
+`open_price`로 해석하는 결정은 basic registration에 포함되지 않는다.
+
+Capability가 선택된 뒤에는 별도의 **capability input binding** 단계가 수행된다. Agent는 basic
+registration 결과의 field inventory만 읽어 requirement와 맞을 가능성이 있는 source field를 user에게
+제안하고, user가 명시적으로 확인한 뒤에만 project-owned binding YAML을 작성하거나 변경한다. Candidate
+mapping은 user 확인 전에는 실행 가능한 binding이 아니며, source Parquet이나 basic registration
+provenance를 변경하지 않는다.
+
 이 절차는 user가 registration을 직접 요청했을 때뿐 아니라, section 4.8의 requirement gap을 해소하는
 과정에서도 동일하게 사용한다.
 
@@ -354,6 +365,50 @@ Agent가 요청받은 작업이 등록되지 않은 data를 요구하는 경우:
 Agent는 requirement gap을 만났을 때 user 확인 없이 alternative를 선택하거나, 요구된 data를 유사한 다른
 dataset으로 대체하거나, 해당 항목을 제외한 부분 결과를 완료된 결과로 보고해서는 안 된다. 어떤
 alternative도 불가능하면 그 사실과 이유를 user에게 보고한다.
+
+#### Example — Open Close Rebound strategy input binding
+
+`open_close_rebound` strategy가 canonical pandas input `open_price`와 `close_price`를 요구하고, user가
+basic registration한 OHLCV dataset에는 `시가`, `고가`, `저가`, `종가`, `거래량`이라는 opaque field가
+있을 수 있다.
+
+이 경우 qlibx core는 `시가`나 `종가`의 경제적 의미를 추측하지 않는다. Read-only plan은
+`open_price`와 `close_price`가 아직 binding되지 않았다는 requirement gap과 registered field inventory를
+반환한다. Agent layer는 generated skill의 resolution interview에 따라 다음처럼 user에게 확인한다.
+
+> 지금 구현하려는 `open_close_rebound` strategy는 `open_price`와 `close_price`를 필요로 합니다.
+> 등록된 dataset에서 `시가`를 `open_price`로, `종가`를 `close_price`로 binding하려고 합니다.
+> 이 mapping이 맞습니까?
+
+확인 후 작성되는 project-owned binding config의 conceptual shape은 다음과 같다. Exact schema는
+installed version의 machine-readable schema가 정한다.
+
+```yaml
+schema_version: 1
+binding:
+  id: open_close_rebound.krx_daily_v1
+  strategy: {id: open_close_rebound, version: "1"}
+  inputs:
+    universe:
+      registered_dataset: krx_daily_universe
+    market_data:
+      registered_dataset: krx_daily_ohlcv
+      fields:
+        open_price: 시가
+        close_price: 종가
+```
+
+User가 확인하기 전에는 agent가 config를 쓰거나 strategy를 실행하지 않는다. 확인 후 agent는
+project-owned binding YAML에 strategy ID/version, input role, registered dataset ID와 exact
+canonical-to-source field mapping만 기록한다. Pandas shape, dtype, lookback과 field semantics는 versioned
+Strategy manifest가 소유하며 binding YAML에서 반복하지 않는다. Core는 실제 대화가 일어났음을 증명할
+수 없으므로 question text나 confirmation status도 binding에 저장하지 않는다. Generated skill이
+user 확인 전에는 binding을 쓰지 못하게 하는 것이 agent-layer policy다.
+
+Resolver는 manifest와 binding YAML 및 registered dataset만 사용해 canonical 이름의 bounded pandas
+object를 만들고 strategy implementation에는 `universe`, `market_data` 같은 canonical pandas input만
+전달한다. `market_data` 안의 column은 `open_price`, `close_price`로 보인다. Strategy는 source
+column명, registration, catalog, YAML 또는 agent를 알지 못한다.
 
 ### 4.7 Stored evidence에서 다음 연구 시작
 
@@ -461,8 +516,13 @@ StrategyAgent definition, reporting analysis와 project-local extension을 모�
 - Point-in-time과 availability 조건
 - Requirement가 optional인지 mandatory인지, optional이면 없을 때 결과가 어떻게 달라지는지
 - 이 requirement를 충족하는 acceptable derivation alternative 목록
-- 충족되지 않았을 때 user에게 확인해야 하는 질문
 - Gap 해소를 위해 실행할 public command
+
+Pandas data를 소비하는 requirement는 위 항목에 더해 runtime pandas type, table/matrix shape,
+required semantic field 또는 column, dtype, index/column axis와 nullability를 machine-readable하게
+선언한다. Strategy requirement의 canonical role과 source field name은 같은 개념이 아니다.
+`open_price` requirement가 source의 `시가` field로 충족될 수는 있지만, 그 관계는 user-confirmed
+capability input binding에만 기록한다.
 
 Requirement는 단일 dataset 목록이 아니라 **derivation alternative를 가진 선택지**로 표현한다. 하나의
 requirement를 서로 다른 input 조합으로 충족할 수 있기 때문이다.
@@ -480,6 +540,18 @@ Agent는 capability를 실행하기 전에 requirement를 조회하여 gap을 �
 
 Capability가 실제로 요구하지 않는 input을 requirement로 선언해서는 안 된다. 선언과 실제 실행 조건은
 일치해야 한다.
+
+Requirement plan은 confirmed binding, unresolved role과 registered field inventory를 구분한다. Agent나
+tool이 제안한 candidate field는 user가 확인하기 전까지 requirement evidence가 아니며 `ready=true`를
+만들 수 없다. Binding config는 registered dataset ID만 참조할 수 있고 raw path를 직접 참조해서는 안
+된다. 같은 registered dataset은 서로 다른 capability/version에 대해 서로 다른 confirmed binding을
+가질 수 있다.
+
+Requirement declaration과 resolution은 literal user question을 포함하지 않는다. Core는 required
+semantics, missing role/field, acceptable alternative, registered field inventory와 next command 같은
+사실만 반환한다. Generated skill은 이 사실에서 exact candidate mapping을 만들고 user에게 자연어로
+확인하며, 확인된 결과만 YAML에 기록한다. 따라서 interview wording은 product domain contract가 아니라
+agent behavior다.
 
 ### 5.5 Requirement gap과 resolution interview
 
@@ -558,43 +630,58 @@ Agent는 `(date, ticker)`의 data uniqueness와 invalid value를 먼저 검사�
 알리고 해결 방법을 제시해야 한다. Agent는 point-in-time availability와 delivery lag처럼 source
 column만 보고 확정할 수 없는 문제도 경고해야 한다.
 
-### 6.3 Registration behavior
+Logical dataset과 capability input binding은 다른 identity를 가진다. Logical dataset은 registered source,
+query/output shape와 point-in-time rule을 설명한다. Capability input binding은 capability ID/version과
+requirement role을 logical dataset 및 exact source field에 연결한다. Binding 변경은 config fingerprint와
+새 run identity를 만들지만 basic registration artifact와 provenance는 바꾸지 않는다.
+
+### 6.3 Basic registration과 capability input binding
 
 Data discovery와 registration은 source data에 대해 read-only다. qlibx는 user-provided dataset을 Qlib에
-그대로 넘기지 않는다. 선택한 backtest 기능에 Qlib이 요구하는 data와 수치적 가정을 먼저 확인하고,
-source dataset이 이를 제공하거나 안전하게 파생할 수 있는지 검증한다.
+그대로 넘기지 않는다. Basic registration은 source identity, axis, availability와 opaque field inventory를
+확정하며 strategy, Qlib profile 또는 다른 capability의 semantic role을 확정하지 않는다.
 
-Registration은 다음 순서로 진행한다.
+Basic registration은 다음 순서로 진행한다.
 
 1. Source schema, date/ticker key, frequency, coverage, duplicate와 invalid value를 검사한다.
-2. 선택한 Qlib backtest convention에 필요한 calendar, instrument, price, factor, volume과 execution
-   constraint input을 결정한다.
-3. Source column과 Qlib input 사이의 proposed mapping, 파생식, 적용할 가정과 지원하지 못하는 기능을
-   user에게 보여준다.
-4. 필수 의미를 확인할 수 없거나 필요한 input을 만들 수 없으면 추측하지 않고 실패한다.
-5. 검증된 mapping을 적용하여 qlibx 전용 derived Parquet을 project의 `data/qlibx/` 영역에 만든다.
-6. Generated dataset을 logical dataset으로 등록하고 bounded load smoke를 실행한다.
-7. 적용한 mapping, 가정, warning과 unresolved limitation을 project-local 문서에 남긴다.
+2. Availability, ticker와 key mapping을 user에게 확인한다.
+3. 선택된 information field를 semantic rename 없이 opaque value로 보존한다.
+4. qlibx 전용 canonical Parquet을 project의 `data/qlibx/` 영역에 만든다.
+5. Generated dataset을 logical dataset으로 등록하고 bounded load smoke를 실행한다.
+6. Source schema와 registered field inventory를 provenance에 남긴다.
 
-Successful registration은 최소 다음 결과를 제공한다.
+Successful basic registration은 최소 다음 결과를 제공한다.
 
 - Generated 또는 selected config path
 - Generated qlibx Parquet path
 - Stable logical dataset ID
 - Source identity와 schema summary
-- Source-to-Qlib field mapping과 derived field
-- Backtest convention과 적용한 가정
+- Availability/ticker/key mapping과 opaque registered field inventory
 - Availability와 point-in-time status
 - Validation result와 bounded load-smoke result
-- 사용할 수 없는 execution feature와 unresolved limitation
 
 원본 data는 이동, 변환 또는 overwrite하지 않는다. Derived Parquet은 같은 source와 mapping으로 다시
 생성했을 때 동일한 logical content를 가져야 한다.
 
-#### Daily OHLCV registration profile
+Capability input binding은 capability가 선택된 뒤 다음 순서로 진행한다.
 
-Timestamp가 없는 daily OHLCV를 등록할 때 qlibx는 Qlib daily backtest에 필요한 input과 source column의
-mapping을 먼저 제시한다. Built-in default convention은 다음과 같다.
+1. Installed requirement declaration에서 canonical role, pandas shape, field semantics와 alternative를 읽는다.
+2. Basic registration provenance와 logical catalog에서 registered dataset 및 field inventory를 조회한다.
+3. Agent가 가능한 exact field mapping과 파생식을 candidate로 작성하되 아직 config를 변경하지 않는다.
+4. Candidate mapping, 적용할 가정과 지원하지 못하는 기능을 user에게 보여주고 확인받는다.
+5. User-confirmed mapping만 project-owned binding YAML에 기록한다.
+6. Resolver가 binding을 logical dataset query 또는 deterministic projection으로 materialize한다.
+7. Canonical pandas input의 dtype, axis, availability, missingness와 bounded load를 검증한다.
+8. Binding identity, validation, warning과 unresolved limitation을 research record에 남긴다.
+
+Successful capability binding은 capability ID/version, requirement role, registered dataset ID, exact source
+field mapping, derivation, validation result와 config fingerprint를 제공한다. Output pandas contract는
+Strategy manifest가 제공하며, interview wording이나 확인 상태는 binding schema에 포함하지 않는다.
+
+#### Daily OHLCV capability-binding and Qlib materialization profile
+
+Timestamp가 없는 daily OHLCV의 basic registration이 끝난 뒤 Qlib daily backtest를 선택하면 qlibx는
+필요한 input과 registered source field의 mapping을 제안한다. Built-in default convention은 다음과 같다.
 
 - 관측된 date로 daily trading calendar를 만들고 ticker로 instrument 후보를 만든다.
 - Strategy는 trade date `t`보다 앞서 available한 data만 본다. 기본 profile은 `t-1`까지 관측하고
@@ -613,9 +700,10 @@ mapping을 먼저 제시한다. Built-in default convention은 다음과 같다.
   이미 normalized되었다고 가정할지, corporate-action-aware execution을 지원하지 않을지는 materialization
   전에 user에게 알리고 project-local 문서에 남긴다.
 
-이 profile은 원본 OHLCV에 qlibx 전용 column을 추가하라는 schema 요구가 아니다. qlibx가 mapping과
-가정을 검증한 뒤 Qlib 전용 Parquet과 설명 문서를 생성하는 registration behavior다. 다른 execution
-timing이나 valuation convention도 같은 mapping·검증·문서화 contract를 만족하면 사용할 수 있다.
+이 profile은 원본 OHLCV나 basic registration artifact에 qlibx 전용 semantic column을 추가하라는 schema
+요구가 아니다. User-confirmed capability binding으로 Qlib 전용 materialization과 설명 문서를 생성하는
+behavior다. 다른 execution timing이나 valuation convention도 같은 binding·검증·문서화 contract를
+만족하면 사용할 수 있다.
 
 ### 6.4 No-look-ahead data access
 
@@ -680,6 +768,47 @@ PRD는 특정 base class, 반환 class 또는 내부 composition pattern을 강�
 책임 분리, 작은 public contract, composition, DRY와 효율적인 data flow를 우선하여 clean하고 efficient한
 방식을 선택해야 한다.
 
+Strategy implementation의 data plane은 pandas object와 strategy parameter만 안다. Strategy code는 raw
+source column, registration spec, project path, catalog, binding YAML 또는 agent API를 import하거나
+해석하지 않는다. Strategy definition은 implementation 밖에서 canonical pandas input role과 field
+requirement를 선언하고, runtime adapter가 confirmed capability binding을 resolve한 뒤 pandas object만
+strategy에 전달한다.
+
+User-side agent는 Strategy requirement를 Python constant로 package에 등록하지 않고 project-owned
+Strategy manifest YAML로 선언한다. 예를 들어 `open_close_rebound`의 conceptual manifest는 다음과 같다.
+
+```yaml
+schema_version: 1
+contract: qlibx.pandas_strategy
+strategy:
+  id: open_close_rebound
+  version: "1"
+  name: Open Close Rebound
+  implementation:
+    source: strategies/open_close_rebound.py
+    callable: decide
+  parameters: {rebound_threshold: 0.02}
+  lookback: {kind: rows, value: 20}
+  inputs:
+    market_data:
+      meaning: Daily market prices used by the rebound rule.
+      pandas: {kind: table, index: [observation_time, ticker]}
+      fields:
+        open_price: {meaning: Session open price, dtype: float64, unit: price, nullable: false}
+        close_price: {meaning: Session close price, dtype: float64, unit: price, nullable: false}
+  output: {kind: signal}
+```
+
+`qlibx.pandas_strategy` contract는 모든 Strategy에 mandatory point-in-time `universe` input을 자동으로
+상속한다. 따라서 개별 manifest가 universe requirement를 반복하지 않는다. Strategy별 input과 field만
+manifest에 추가한다. 현재 fixed lookback schema는 positive row count만 허용하며 runtime loop의 매
+decision마다 각 registered input을 decision time에서 먼저 자른 뒤 최근 fixed rows만 전달한다.
+
+Strategy implementation은 qlibx base class를 상속할 필요가 없다. Plain callable이나 plain class method면
+충분하다. Runtime이 callable signature와 pandas input/output을 검증한다. Parent Strategy가 child
+Strategy를 실행할 때도 별도 DI container나 qlibx runner API를 주입하지 않고, 이미 bounded된 pandas
+input의 같거나 더 좁은 slice를 child callable에 직접 전달할 수 있다.
+
 ### 7.2 Decision context와 result
 
 StrategyAgent는 필요에 따라 다음을 입력받는다.
@@ -693,6 +822,11 @@ StrategyAgent는 필요에 따라 다음을 입력받는다.
 - Strategy-owned memory
 - Optional model 또는 belief-state identity
 - Isolated nested-research interface
+
+Dataset input은 strategy가 선언한 canonical role 이름으로 전달된다. 같은 source의 `시가`와 `종가`가
+confirmed binding을 통해 각각 `open_price`와 `close_price`로 resolve되면 strategy에는 그 canonical
+이름의 bounded pandas object만 보인다. Source field 이름과 binding provenance는 invocation/research
+record에는 남지만 strategy implementation의 input contract에는 노출되지 않는다.
 
 StrategyAgent의 primary decision payload는 signal, weight, order 또는 strategy가 선언한 다른 결과일 수
 있다. Strategy는 필요에 따라 updated memory, physical intent, hold/stop/retrain decision, diagnostics와
@@ -1332,10 +1466,13 @@ reporting을 거치지 않고 raw stored artifacts를 직접 분석할 수도 �
 - Human은 qlibx 설치, agent instruction/skill 추가, `data/` file 준비 후 agent에게 registration을 요청할
   수 있다.
 - Agent는 data를 read-only로 discover하고 ambiguous time, ticker 또는 value semantics를 추측하지 않는다.
+- Basic registration은 availability/ticker/key와 opaque field inventory만 확정하고 capability-specific
+  semantic role을 source field에 부여하지 않는다.
 - Agent는 선택한 Qlib backtest가 요구하는 data와 assumption을 확인하고 source-to-Qlib mapping,
   derived field, warning과 unsupported feature를 materialization 전에 user에게 알린다.
-- Registration은 `data/qlibx/`의 validated derived Parquet, valid project config, logical dataset ID와
-  bounded load smoke를 만든다.
+- Capability binding은 registered dataset만 참조하고 user confirmation 뒤에만 project YAML을 변경한다.
+- Basic registration은 `data/qlibx/`의 validated canonical Parquet, valid project config, logical dataset
+  ID와 bounded load smoke를 만든다.
 - Daily OHLCV default profile은 `t-1`까지 관측하고 `t`일 종가에 거래·평가하며, 다른 convention은
   명시적으로 등록한다.
 - Source data는 변경되지 않는다.
@@ -1346,6 +1483,10 @@ reporting을 거치지 않고 raw stored artifacts를 직접 분석할 수도 �
 - Qlib closed-loop decision/feedback ordering을 보존한다.
 - Strategy instance는 class identity와 별도로 이름, ID, parameter, data requirement와 output contract를
   가진다.
+- Strategy implementation은 canonical named pandas input만 받고 registration, catalog, binding YAML과 raw
+  source field를 알지 못한다.
+- Strategy별 required column/field가 machine-readable requirement로 선언되고 runtime 전에 confirmed
+  binding으로 resolve된다.
 - Strategy output은 signal, weight, order 또는 declared payload일 수 있고 intermediate result를 record할
   수 있다.
 - Parent/wrapper가 child output을 composition하여 재사용하고 같은 signal logic을 반복 구현하지 않는다.
@@ -1415,13 +1556,19 @@ reporting을 거치지 않고 raw stored artifacts를 직접 분석할 수도 �
 - Agent가 capability를 실행하지 않고 requirement와 acceptable derivation alternative를 조회할 수 있다.
 - 실행 전 read-only plan과 실행 시점 error가 같은 requirement 선언에서 같은 판정을 만든다.
 - Requirement가 충족되지 않으면 capability는 계산을 시도하지 않고 requirement gap을 보고한다.
-- Requirement gap은 미충족 requirement, 이유, alternative, user 질문과 next command를 포함한다.
+- Requirement gap은 미충족 requirement, 이유, alternative와 next command를 포함하고,
+  capability-specific plan은 registered field inventory 같은 interview 근거를 제공한다.
 - OHLCV 가격만 등록된 project에서 beta residualization을 요청하면 market return requirement와 그
   alternative를 보고하고, beta를 추정하거나 해당 항목을 비워 둔 채 성공을 반환하지 않는다.
 - Optional requirement 미충족으로 계산하지 못한 결과 항목이 이유와 함께 결과에 기록된다.
 - Generated skill이 requirement gap을 받았을 때 수행할 resolution interview 절차를 포함한다.
 - Agent가 gap 해소를 위한 registration을 완료한 뒤 같은 요청을 다시 실행하여 성공한다.
 - Agent가 user 확인 없이 alternative를 선택하거나 유사한 dataset으로 대체하지 않는다.
+- Registered field와 canonical strategy role 사이의 candidate mapping은 user confirmation 전에는
+  requirement를 충족하지 않으며 config를 변경하지 않는다.
+- `open_close_rebound`가 `open_price`와 `close_price`를 요구하고 registered OHLCV가 `시가`와 `종가`를
+  제공하는 경우, agent가 exact mapping을 user에게 확인받아 binding YAML을 작성한 뒤에만 같은 strategy
+  요청이 canonical pandas input으로 성공한다.
 - Project-local extension도 같은 형식으로 requirement를 선언할 수 있다.
 
 ## 14. Working prototype reference

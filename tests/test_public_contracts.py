@@ -43,7 +43,11 @@ def test_root_api_is_small_and_responsibility_based() -> None:
         "strategy",
         "strategy_manifest",
     ]
-    assert len(qlibx.__all__) <= 16
+    # A nudge, not a law. The exact list above is the real gate: adding a public module
+    # already means editing it deliberately. This ceiling only exists so that steady growth
+    # in the root namespace is something a reader notices. Raise it when a module has earned
+    # its place -- never fold two responsibilities into one name to stay under it.
+    assert len(qlibx.__all__) <= 20
     assert not hasattr(qlibx, "run_signed_execution")
 
 

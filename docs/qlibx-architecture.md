@@ -75,7 +75,7 @@ flowchart LR
 
 ### 3.1 계층
 
-`src/qlibx/`는 28개 top-level module/package(38개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
+`src/qlibx/`는 29개 top-level module/package(39개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
 만들고, 그 규칙은 `tests/test_architecture.py`가 강제한다. **현재 intra-package import graph는
 acyclic이다** (순환 없음).
 
@@ -115,6 +115,10 @@ flowchart TD
         project["project"]
     end
 
+    subgraph LRC["vendor gateway (read)"]
+        runcat["run_catalog"]
+    end
+
     subgraph L1["domain / foundation"]
         alpha["alpha"]
         strategy["strategy"]
@@ -137,6 +141,7 @@ flowchart TD
     cli --> L1
     cli --> L2
     cli --> L3
+    cli --> sm
     dataf --> catalog
     dataf --> registration
     dataf --> discovery
@@ -147,7 +152,7 @@ flowchart TD
 
     ensemble --> alpha
     ensemble --> research
-    reporting --> execution
+    reporting --> runcat
     extensions --> alpha
     extensions --> artifacts
     extensions --> requirements
@@ -170,7 +175,10 @@ flowchart TD
     research --> orthogonality
     research --> serialization
     execution --> strategy
+    execution --> runcat
     execution --> vendor
+    runcat --> vendor
+    vendor --> optimization
     portfolio --> optimization
     onboarding --> serialization
 
@@ -203,21 +211,23 @@ flowchart TD
 | `registration` | config, errors, project, serialization | pyarrow |
 | `profiles` | catalog, config, errors, project, requirements | — |
 | `strategy_manifest` | catalog, config, errors, execution, project, requirements, serialization, strategy | pandas |
-| `artifacts` | project, serialization, strategy | pandas |
-| `research` | orthogonality, project, serialization | duckdb, pandas |
+| `artifacts` | errors, project, serialization, strategy | pandas |
+| `research` | errors, orthogonality, project, serialization | duckdb, pandas |
 | `portfolio` | optimization | pandas |
-| `execution` | `_vendor`, strategy | pandas |
+| `run_catalog` | `_vendor` | — |
+| `execution` | `_vendor`, errors, run_catalog, strategy | pandas |
 | `onboarding` | errors, project, serialization | — |
 | `extensions` | alpha, artifacts, errors, project, requirements | pandas |
 | `ensemble` | alpha, research | pandas |
-| `reporting` | execution | pandas |
+| `reporting` | run_catalog | pandas |
 | `skill` | alpha, documentation, errors, serialization | — |
 | `data` | catalog, discovery, profiles, registration, requirements | — |
 | `agent` | documentation, onboarding, skill | — |
-| `cli` | alpha, catalog, discovery, documentation, errors, extensions, onboarding, profiles, project, registration, skill | qlib |
-| `__init__` | errors, project | — |
+| `cli` | alpha, catalog, discovery, documentation, errors, extensions, onboarding, profiles, project, registration, skill, strategy_manifest | qlib |
+| `__init__` | errors, project + 13개 public submodule(**lazy**, §4.1) | — |
+| `_vendor` | optimization (kernel only) | qlib, duckdb, pandas, numpy, cvxpy, matplotlib, yaml |
 
-가장 많이 의존되는 module: `errors`(13) → `project`(10) → `serialization`(6) →
+가장 많이 의존되는 module: `errors`(16) → `project`(10) → `serialization`(7) →
 `config`/`alpha`/`requirements`(4).
 
 ### 3.3 Dependency 규칙
@@ -234,7 +244,12 @@ entrypoint (cli, __init__, data, agent)
 - **Kernel은 아무것도 import하지 않는다.** 새 의존을 추가하려면 그 module이 kernel이 아니라는 뜻이다.
 - **`alpha`는 pandas와 kernel의 `errors`, `requirements` 외에 아무것도 모른다.** 순수 계산 도메인으로
   유지한다. `project`, `catalog`, `research`를 import하면 안 된다.
-- **`_vendor/`는 `execution`만 import한다.** 다른 module이 vendored 코드를 직접 참조하면 drift다.
+- **`_vendor/`는 `execution`과 `run_catalog`만 import한다.** 둘은 서로 겹치지 않는 절반을
+  번역한다 — `run_catalog`는 저장된 run을 **읽고**, `execution`은 run을 **실행한다**. 다른
+  module이 vendored 코드를 직접 참조하면 drift다.
+- **`_vendor/`는 kernel만 import한다.** 현재 `qlib_engine/enhanced.py`가 `optimization`
+  하나를 쓴다. 그 위 계층으로 올라가면 gateway test가 보지 못하는 순환이 생기므로
+  `test_vendored_qlib_depends_only_on_the_kernel`이 막는다.
 - **역방향 import 금지.** 표에서 아래 계층이 위 계층을 import하면 순환이 생긴다.
 
 ---
@@ -256,6 +271,26 @@ qlibx.__all__
 
 책임 기반의 얇은 facade다. `data`와 `agent`는 하위 module을 재수출하는 facade이고,
 나머지는 실제 module이다. `_vendor`는 public surface가 아니다.
+
+**Submodule은 lazy하게 resolve된다.** `qlibx/__init__.py`는 `_SUBMODULES` 선언과 PEP 562
+`__getattr__`만 가지므로 `import qlibx`는 이름을 지목하기 전까지 아무 capability도 로드하지
+않는다. `import qlibx.alpha`와 `from qlibx import alpha` 둘 다 그대로 동작하고, 지목한 것만
+로드된다.
+
+| import | 비용 | 끌려오는 heavy dependency |
+| --- | --- | --- |
+| `import qlibx` | ~0.05s | 없음 |
+| `import qlibx.reporting` | ~0.4s | duckdb · pyarrow · pandas (**qlib 아님**) |
+| `import qlibx.execution` | ~1.2s | qlib · duckdb · pyarrow · pandas |
+
+이것이 §11.3의 "reporter는 다시 실행하지 않는다"를 import 수준에서 성립시킨다. Report를
+구성하려고 Qlib runtime을 로드하지 않는다.
+
+> **불변식**: `import qlibx`는 qlib·cvxpy·duckdb를 로드하지 않으며 `__all__`의 모든 이름이
+> 실제로 resolve된다. `tests/test_architecture.py`의
+> `test_importing_the_facade_does_not_load_the_execution_runtime`과
+> `test_facade_exports_exactly_what_it_can_resolve`가 강제한다.
+> Lazy import도 의존이므로 layering test는 `_SUBMODULES`를 import graph에 합친다.
 
 ### 4.2 CLI
 
@@ -341,7 +376,7 @@ flowchart TB
     F -->|"qlibx data register"| G["canonical parquet<br/>available_at · ticker · information"]
     G --> H[".qlibx/registrations/ID.json<br/>provenance"]
     G --> I["datasets/*.yaml<br/>logical dataset 선언"]
-    I -->|"ConfigDrivenDataLoader"| J["load_table / load_matrix<br/>DuckDB 쿼리"]
+    I -->|"ConfigDrivenDataLoader"| J["load_table(as_of=t) / load_matrix(as_of=t)<br/>DuckDB 쿼리 · availability <= t"]
 ```
 
 **설계 의도**: qlibx는 **시간·티커·값의 의미를 절대 추론하지 않는다.** `inspect`는 스키마와 샘플만
@@ -352,6 +387,26 @@ Strategy의 canonical field로 rename하지 않는다.
 Canonical 형태는 `available_at` + `ticker` + 불투명한 information 컬럼의 long table이다.
 `available_at`이 point-in-time 가시성을 지배하는 유일한 시간축이고, event/observation time은
 명시적으로 선언할 때만 별도 `time_field`로 존재한다.
+
+**`as_of`는 선택이 아니다.** `load_table`/`load_matrix`는 `as_of`를 keyword-only 필수 인자로
+받는다. 이 패키지에서 인자 하나를 빠뜨렸을 때 **실패 대신 더 좋아 보이는 결과**가 나오는 지점은
+여기뿐이므로, 안전한 쪽을 기본값이 아니라 문법으로 만든다.
+
+```python
+loader.load_table("market", as_of=decision_time)  # point-in-time
+loader.load_matrix("market", as_of=decision_time)
+
+loader.load_full_history("market", reason="registration smoke")  # 명시적 전체 이력
+loader.load_full_history_matrix("market", reason="backtest input matrix")
+```
+
+Registration, schema inventory, operator preview, backtest input 구성은 정당하게 전체 이력이
+필요하다. 그 선택을 **생략된 인자에 숨기지 않고** `reason`으로 호출 지점에 남긴다. 빈 `reason`은
+`QLIBX_FULL_HISTORY_REASON_MISSING`으로 거부한다. `qlibx data preview`는 `--as-of`를 주면
+bounded, 안 주면 full-history로 동작하며 결과의 `availability` 필드가 어느 쪽이었는지 밝힌다.
+
+`limit`은 `available_at`·`ticker` 정렬 뒤에 적용한다. 정렬 없는 `LIMIT`은 스캔 순서에 따라
+매번 다른 행을 돌려주므로 preview가 registration의 재현 가능한 증거가 되지 못한다.
 
 Registration은 원본 SHA256을 계획 시점과 기록 직전에 두 번 확인하며, 도중에 바뀌면
 `QLIBX_SOURCE_CHANGED_DURING_REGISTRATION`으로 실패한다. 쓰기는 staging → `replace`로 원자적이다.
@@ -529,6 +584,11 @@ sequenceDiagram
         S-->>Q: new pandas output
     end
 ```
+
+Ticker 축은 **manifest가 선언한 pandas kind에서** 읽는다 (matrix면 columns, table이면 선언된
+`ticker` index level). 데이터 모양에서 추론하면 안 된다 — "columns가 전부 universe 안에 있다"는
+조건은 정확히 보고할 것이 없을 때만 참이므로, 그것으로 축을 판별하면 검사가 통째로 공회전한다.
+선언된 nullability는 table의 named column과 matrix의 cell 양쪽에 적용한다.
 
 Parent/child composition은 DI container나 runner injection을 요구하지 않는다. Parent callable은 이미 받은
 bounded pandas object의 같거나 더 좁은 slice를 child callable에 직접 전달한다. Child가 config/catalog를
@@ -740,7 +800,10 @@ approval 뒤 binding을 작성한 다음 같은 plan을 재실행한다.
 ### 12.3 에러 계약
 
 모든 실패는 `QlibxError`로 `{code, message, action, context}`를 반환한다.
-현재 **56개 코드**가 등록되어 있고, 모두 `qlibx errors <code>`로 조회 가능하다.
+현재 **126개 코드**가 등록되어 있고, 모두 `qlibx errors <code>`로 조회 가능하다.
+`research`·`execution`·`artifacts`를 포함한 public Python surface는 raw `ValueError`를
+던지지 않는다 — stale decision, identity conflict, reconciliation 실패처럼 agent가
+복구를 판단해야 하는 지점이 모두 code·action·context를 가진다.
 
 ```mermaid
 flowchart LR
@@ -815,7 +878,7 @@ user-project/
 
 ## 14. Testing map
 
-118개 테스트. PRD §13 acceptance criteria와의 대응:
+129개 테스트. PRD §13 acceptance criteria와의 대응:
 
 | PRD | 주요 테스트 |
 | --- | --- |
@@ -832,8 +895,15 @@ user-project/
 구조적 불변식을 지키는 테스트(회귀 방지용, mutation으로 검증됨):
 
 - **`tests/test_architecture.py`가 §3의 계층을 강제한다** — 모든 module이 layer에 배정되어 있고,
-  import는 아래 계층으로만 가며, kernel은 무의존이고, graph는 acyclic이며, `_vendor`는 `execution`만
-  통하고, `alpha`는 kernel의 `errors`/`requirements` 외에 의존하지 않으며, public import 경로가 살아 있다.
+  import는 아래 계층으로만 가며, kernel은 무의존이고, graph는 acyclic이며, `_vendor`는
+  `execution`/`run_catalog`만 통하고 kernel 위로 올라가지 않으며, `reporting`은 `execution`을
+  import하지 않고, `alpha`는 kernel의 `errors`/`requirements` 외에 의존하지 않으며,
+  public import 경로가 살아 있다.
+  - import graph 파서는 `from qlibx import x` 형태와 `_vendor/`, 그리고 facade의 lazy
+    `_SUBMODULES` 선언까지 모두 본다. 한 가지 spelling이라도 빠지면 그 아래 test들이 그
+    spelling에 대해 **조용히 무의미해지므로**, 파서의 커버리지가 곧 guardrail의 범위다.
+- `import qlibx`가 qlib·cvxpy·duckdb를 로드하지 않고, `__all__`의 모든 이름이 resolve된다.
+- `load_table`/`load_matrix`에서 `as_of`를 생략할 수 없고, 전체 이력 읽기는 `reason`을 요구한다.
 - 모든 CLI leaf command가 handler를 가진다.
 - 던지는 모든 error code에 복구 guidance가 있고 그 역도 참이다.
 - 문서화된 예제의 keyword가 실제 signature에 바인딩된다(단순 `compile()`이 아니라).
@@ -857,7 +927,10 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 - `alpha`가 `project`, `catalog`, `research`를 import한다 (순수 도메인이어야 한다).
 - kernel module(`errors`, `requirements`, `serialization`, `optimization`, `orthogonality`)이
   intra-package 의존을 얻는다.
-- `_vendor/`를 `execution` 외의 module이 직접 import한다.
+- `_vendor/`를 `execution`·`run_catalog` 외의 module이 직접 import한다.
+- `_vendor/`가 kernel 위 계층을 import한다.
+- `reporting`이 `execution`을 import한다 (읽기는 `run_catalog`를 쓴다).
+- `qlibx/__init__.py`가 submodule을 eager하게 import해 `import qlibx`가 qlib을 끌어온다.
 - intra-package import graph에 순환이 생긴다.
 
 **확장성 위반**
@@ -869,6 +942,8 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 **계약 위반**
 
 - 이름 조회 실패를 `QlibxError`가 아닌 raw exception으로 던져 CLI가 traceback을 낸다.
+- `research`·`execution`·`artifacts`가 conflict·stale·reconciliation 실패를 raw
+  `ValueError`/`RuntimeError`로 던져 agent가 복구 경로를 얻지 못한다.
 - 새 error code를 `ERROR_GUIDANCE` 등록 없이 던진다.
 - 문서화된 예제가 실제 signature와 맞지 않는다.
 - Plan과 runtime error가 서로 다른 requirement resolution을 반환한다.
@@ -888,6 +963,10 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 - Qlib scheduler 밖에 두 번째 production bar loop를 만든다.
 - generic downstream이 flexible 미사용 예산을 임의로 복원한다.
 - DuckDB projection만 있고 manifest/event가 없는 상태를 완료 증거로 취급한다.
+- 읽을 수 없는 event log line을 건너뛰고 축소된 projection을 정상 결과로 반환한다.
+- decision time에 `as_of` 없이 registered dataset을 읽는다
+  (전체 이력이 필요하면 `load_full_history(reason=...)`로 명시한다).
+- 선언된 matrix axis나 nullability를 `assert`로만 보증하거나 matrix input에서 건너뛴다.
 - reporter가 strategy·optimizer·backtest를 다시 실행한다.
 - extension 계약 검증을 malicious code sandbox라고 표현한다.
 
@@ -902,8 +981,11 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 | **Capability requirement contract (PRD §5.4/§5.5, P8)** | **구현됨.** 공용 declaration/evaluator/plan/error 타입, execution-profile 공개 migration, `group_demean`, exposure request/unavailable 구분, extension declaration, CLI/schema/generated skill을 제공한다. 상세는 아래 §16.1 |
 | **Strategy manifest/binding (PRD §6.3/§7/P2/P8)** | **구현됨.** Project YAML manifest와 binding, inherited universe, registered-field plan, fixed-lookback resolver, plain pandas callable, CLI/schema/generated skill을 제공한다. 기존 adaptive API도 universe를 상속한다 |
 | Beta estimation · residualization (PRD §8.2/§8.3) | **의도적으로 미구현.** 공용 requirement 기반은 준비됐지만 별도 작업으로 연기했다 |
-| `reporting` → `execution` → `_vendor` 결합 | `reporting`이 run catalog 때문에 `execution`을 경유해 vendored 코드에 간접 의존한다. run catalog port를 분리하면 끊긴다 |
+| `reporting` → `execution` → `_vendor` 결합 | **해소됨.** `run_catalog` port가 저장된 run 읽기를 소유하고 `reporting`은 이제 `execution`을 import하지 않는다. `_vendor/qlib_engine/__init__`도 lazy가 되어 report 구성에 qlib runtime이 로드되지 않는다 |
 | `ResearchCatalog` 크기 | event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |
+| `strategy_manifest` 크기 | 1020줄이 YAML schema · requirement 어댑터 · 동적 code 로드 · resolver · Qlib adapter를 모두 소유한다. `alpha/`처럼 package로 승격하고 489줄 `strategy`와 이름을 정리하는 것이 다음 단계 |
+| capability adapter 중복 | `profiles` · `alpha.exposure` · `strategy_manifest`가 declare → evidence → evaluate → plan 파이프라인을 각자 손으로 짠다. `OperationSpec`처럼 공용 `Capability` protocol + registry로 접으면 plan/error/CLI/schema/skill이 각 capability마다가 아니라 통틀어 하나가 된다 |
+| 저장소 3개 | `ArtifactStore`(.qlibx/artifacts) · `ResearchCatalog`(qlibx-research) · `RunCatalog`(vendored)가 서로 다른 identity·lineage 모델을 쓰고 서로를 참조하지 못한다. 단일 content-addressed store 위의 view 3개로 접는 것이 PRD §9.3의 cross-plane reuse 전제 |
 | `references/`의 target architecture | `contracts/`·`runtime/`·`capabilities/`·`adapters/` 디렉터리 계층, ComponentRef, FrozenInvocationBundle, TemporalSemantics(revision/vintage), CostModelSnapshot, RiskModelSnapshot은 아직 구현되지 않았다. 현재는 flat module + import 방향으로 계층을 강제한다 |
 | Path B (matched capitalization) | compatibility mode. borrow/margin/recall/fee 모델 아님 |
 
@@ -913,8 +995,10 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
   Python에서 아무것도 강제하지 못하므로 계층 표현 수단으로 쓰지 않는다.
 - 한 module이 커져 내부에 여러 관심사가 생기면 package로 승격한다(`alpha/`가 그 사례). Module →
   package 전환은 import 관점에서 투명하여 public 경로를 깨지 않는다.
-- 다음 승격 후보는 `documentation`(835줄, 대부분 catalog 데이터로 requirement 선언이 추가되면 더
-  커진다)과 `research`(777줄, event log · blob store · publication protocol이 한 클래스에 있다)다.
+- 다음 승격 후보는 `strategy_manifest`(1020줄, YAML 파싱 · requirement 어댑터 · 동적 code
+  로드 · point-in-time resolver · Qlib adapter를 한 파일이 소유하고 intra-package 의존도
+  8개로 최대다), `documentation`(1300줄+, 대부분 catalog 데이터로 error code가 늘면 더 커진다),
+  `research`(860줄+, event log · blob store · publication protocol이 한 클래스에 있다)다.
 
 ### 16.1 Capability requirement contract 구현 (PRD §5.4/§5.5, P8)
 

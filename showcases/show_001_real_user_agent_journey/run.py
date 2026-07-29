@@ -12,7 +12,7 @@ import pandas as pd
 from qlibx import Project
 from qlibx.agent import task_guide
 from qlibx.artifacts import ArtifactStore
-from qlibx.data import ConfigDrivenDataLoader
+from qlibx.data import ConfigDrivenDataLoader, require_matrix_axes
 from qlibx.ensemble import combine_stored_weights
 from qlibx.execution import run_signed_execution
 from qlibx.extensions import (
@@ -79,12 +79,16 @@ def _load_matrix(
     tickers: list[str] | None = None,
 ) -> tuple[pd.DataFrame, float]:
     spec = loader.catalog.datasets[name]
-    table = loader.load_table(name, start=START, end=END, tickers=tickers)
+    axes = require_matrix_axes(spec)
+    # The whole window is loaded to build the backtest input; the point-in-time cut is
+    # applied per decision inside the execution loop, not here.
+    table = loader.load_full_history(
+        name, reason="backtest input matrix", start=START, end=END, tickers=tickers
+    )
     available_at = pd.to_datetime(table[spec.availability_field], errors="raise")
     event_time = pd.to_datetime(table[spec.time_field], errors="raise")
     violation_seconds = float((available_at - event_time).max().total_seconds())
-    assert spec.index and spec.columns and spec.values
-    matrix = table.pivot(index=spec.index, columns=spec.columns, values=spec.values)
+    matrix = table.pivot(index=axes.index, columns=axes.columns, values=axes.values)
     matrix = matrix.sort_index().sort_index(axis=1)
     if spec.dtype:
         matrix = matrix.astype(spec.dtype)

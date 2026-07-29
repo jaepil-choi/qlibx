@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from qlibx.errors import QlibxError, unknown_name
 from qlibx.project import Project
 from qlibx.serialization import (
     canonical_bytes,
@@ -90,7 +91,12 @@ class ArtifactStore:
     ) -> ArtifactEnvelope:
         validate_name(name)
         if status not in {"complete", "incomplete", "invalid"}:
-            raise ValueError(f"unsupported artifact status: {status}")
+            raise unknown_name(
+                "QLIBX_ARTIFACT_STATUS_INVALID",
+                "artifact status",
+                status,
+                ("complete", "incomplete", "invalid"),
+            )
         staging = self.root / f".tmp-{uuid.uuid4().hex}"
         staging.mkdir(parents=True, exist_ok=False)
         try:
@@ -143,7 +149,15 @@ class ArtifactStore:
             if final.exists():
                 existing = self.load(artifact_id, run_id=run_id)
                 if _envelope_json(existing) != _envelope_json(envelope):
-                    raise ValueError(f"artifact identity conflict: {artifact_id}")
+                    raise QlibxError(
+                        "QLIBX_ARTIFACT_IDENTITY_CONFLICT",
+                        f"A different envelope already claims artifact {artifact_id}",
+                        action=(
+                            "Artifact identity is derived from its declared inputs; change "
+                            "the producer identity or inputs rather than overwriting."
+                        ),
+                        context={"artifact_id": artifact_id, "run_id": run_id},
+                    )
                 return existing
             os.replace(staging, final)
             return envelope
@@ -158,7 +172,12 @@ class ArtifactStore:
             else list(self.root.glob(f"*/{artifact_id}"))
         )
         if len(candidates) != 1 or not candidates[0].is_dir():
-            raise ValueError(f"unknown or ambiguous artifact: {artifact_id}")
+            raise QlibxError(
+                "QLIBX_ARTIFACT_UNKNOWN",
+                f"Artifact {artifact_id} is unknown or matches more than one run",
+                action="Pass run_id to disambiguate, or list the run's stored artifacts.",
+                context={"artifact_id": artifact_id, "run_id": run_id, "matches": len(candidates)},
+            )
         directory = candidates[0]
         raw = json.loads((directory / "envelope.json").read_text(encoding="utf-8"))
         payload = directory / raw.pop("payload_file")
@@ -166,7 +185,12 @@ class ArtifactStore:
             raw[key] = tuple(raw[key])
         envelope = ArtifactEnvelope(payload_path=payload, **raw)
         if digest_file(payload) != envelope.payload_digest:
-            raise ValueError(f"artifact payload is corrupt: {artifact_id}")
+            raise QlibxError(
+                "QLIBX_ARTIFACT_PAYLOAD_CORRUPT",
+                f"Artifact {artifact_id} payload does not match its recorded digest",
+                action="Do not consume this artifact; reproduce it from its declared inputs.",
+                context={"artifact_id": artifact_id, "payload": str(payload)},
+            )
         return envelope
 
     def load_payload(self, artifact_id: str, *, run_id: str | None = None) -> Any:
@@ -178,13 +202,26 @@ class ArtifactStore:
     def export_bundle(self, artifact_ids: Sequence[str], output: str | Path) -> Path:
         destination = Path(output).resolve()
         if destination.exists() and any(destination.iterdir()):
-            raise ValueError(f"export destination is not empty: {destination}")
+            raise QlibxError(
+                "QLIBX_ARTIFACT_EXPORT_DESTINATION_NOT_EMPTY",
+                f"Export destination already has content: {destination}",
+                action="Choose an empty directory so the bundle stays unambiguous.",
+                context={"destination": str(destination)},
+            )
         destination.mkdir(parents=True, exist_ok=True)
         entries: list[Mapping[str, Any]] = []
         for artifact_id in artifact_ids:
             envelope = self.load(artifact_id)
             if envelope.status != "complete":
-                raise ValueError(f"only complete artifacts are portable: {artifact_id}")
+                raise QlibxError(
+                    "QLIBX_ARTIFACT_NOT_PORTABLE",
+                    f"Artifact {artifact_id} has status {envelope.status!r} and is not portable",
+                    action=(
+                        "Export complete artifacts only; an incomplete result must not travel "
+                        "as if it were finished."
+                    ),
+                    context={"artifact_id": artifact_id, "status": envelope.status},
+                )
             artifact_dir = destination / artifact_id
             artifact_dir.mkdir()
             payload = artifact_dir / envelope.payload_path.name
@@ -211,17 +248,32 @@ class ArtifactStore:
         source = Path(bundle).resolve()
         manifest = json.loads((source / "bundle.json").read_text(encoding="utf-8"))
         if manifest.get("schema_version") != 1:
-            raise ValueError("unsupported artifact bundle schema")
+            raise QlibxError(
+                "QLIBX_ARTIFACT_BUNDLE_SCHEMA_UNSUPPORTED",
+                f"Artifact bundle schema_version must be 1, got {manifest.get('schema_version')!r}",
+                action="Export the bundle with a qlibx version that writes schema version 1.",
+                context={"bundle": str(source)},
+            )
         imported: list[ArtifactEnvelope] = []
         for item in manifest["artifacts"]:
             directory = source / item["artifact_id"]
             envelope_path = directory / "envelope.json"
             if digest_file(envelope_path) != item["envelope_digest"]:
-                raise ValueError(f"corrupt artifact envelope: {item['artifact_id']}")
+                raise QlibxError(
+                    "QLIBX_ARTIFACT_ENVELOPE_CORRUPT",
+                    f"Bundled envelope for {item['artifact_id']} fails its digest check",
+                    action="Re-export the bundle; do not import unverified provenance.",
+                    context={"artifact_id": item["artifact_id"], "bundle": str(source)},
+                )
             raw = json.loads(envelope_path.read_text(encoding="utf-8"))
             payload = directory / raw["payload_file"]
             if digest_file(payload) != item["payload_digest"]:
-                raise ValueError(f"corrupt artifact payload: {item['artifact_id']}")
+                raise QlibxError(
+                    "QLIBX_ARTIFACT_PAYLOAD_CORRUPT",
+                    f"Bundled payload for {item['artifact_id']} fails its digest check",
+                    action="Re-export the bundle; do not import unverified content.",
+                    context={"artifact_id": item["artifact_id"], "bundle": str(source)},
+                )
             final = self.root / item["run_id"] / item["artifact_id"]
             final.parent.mkdir(parents=True, exist_ok=True)
             if not final.exists():

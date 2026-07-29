@@ -147,16 +147,29 @@ def _data_catalog(args: argparse.Namespace) -> Any:
 
 def _data_preview(args: argparse.Namespace) -> Any:
     loader = ConfigDrivenDataLoader.from_project(Project.load(args.root))
-    table = loader.load_table(
-        args.dataset,
-        start=args.start,
-        end=args.end,
-        tickers=args.ticker,
-        limit=args.limit,
-        as_of=args.as_of,
+    bounded = args.as_of is not None
+    table = (
+        loader.load_table(
+            args.dataset,
+            as_of=args.as_of,
+            start=args.start,
+            end=args.end,
+            tickers=args.ticker,
+            limit=args.limit,
+        )
+        if bounded
+        else loader.load_full_history(
+            args.dataset,
+            reason="operator preview without a decision time",
+            start=args.start,
+            end=args.end,
+            tickers=args.ticker,
+            limit=args.limit,
+        )
     )
     return {
         "dataset": args.dataset,
+        "availability": {"bounded": bounded, "as_of": args.as_of},
         "rows": len(table),
         "columns": list(table.columns),
         "records": table.to_dict(orient="records"),

@@ -7,7 +7,7 @@ import duckdb
 import pandas as pd
 import pytest
 
-from qlibx import Project
+from qlibx import Project, QlibxError
 from qlibx.research import ResearchCatalog
 
 
@@ -40,8 +40,10 @@ def test_same_identity_different_content_conflicts(tmp_path: Path) -> None:
     catalog.publish(first, status="successful", metadata={})
     second = catalog.begin(session_id="b", invocation={"x": 2}, kind="alpha", result_key="same")
     catalog.stage_json(second, "result", {"value": 2})
-    with pytest.raises(ValueError, match="identity conflict"):
+    with pytest.raises(QlibxError) as conflict:
         catalog.publish(second, status="successful", metadata={})
+    assert conflict.value.code == "QLIBX_RESEARCH_RESULT_IDENTITY_CONFLICT"
+    assert conflict.value.context["result_key"] == "same"
 
 
 def test_idempotent_result_returns_cache_hit(tmp_path: Path) -> None:

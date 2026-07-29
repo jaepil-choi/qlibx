@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from qlibx import Project
+from qlibx import Project, QlibxError
 from qlibx.agent import public_example
 from qlibx.artifacts import ArtifactStore, record_decision_intermediates
 from qlibx.execution import open_run_catalog, run_strategy_batch
@@ -168,14 +168,18 @@ def test_complete_artifact_exports_imports_and_detects_corruption(tmp_path: Path
         data_semantics="incomplete scratch",
         status="incomplete",
     )
-    with pytest.raises(ValueError, match="only complete"):
+    with pytest.raises(QlibxError) as not_portable:
         first.export_bundle((incomplete.artifact_id,), tmp_path / "incomplete-bundle")
+    assert not_portable.value.code == "QLIBX_ARTIFACT_NOT_PORTABLE"
+    assert not_portable.value.context["status"] == "incomplete"
 
     payload = next((bundle / envelope.artifact_id).glob("payload.*"))
     payload.write_bytes(b"corrupt")
     third = ArtifactStore.from_project(Project.initialize(tmp_path / "third"))
-    with pytest.raises(ValueError, match="corrupt artifact payload"):
+    with pytest.raises(QlibxError) as corrupt:
         third.import_bundle(bundle)
+    assert corrupt.value.code == "QLIBX_ARTIFACT_PAYLOAD_CORRUPT"
+    assert corrupt.value.context["artifact_id"] == envelope.artifact_id
 
 
 def test_strategy_intermediate_is_physical_and_reloadable_without_strategy(tmp_path: Path) -> None:

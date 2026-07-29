@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from qlibx import Project
+from qlibx import Project, QlibxError
 from qlibx.research import (
     AlphaDescriptor,
     ResearchCatalog,
@@ -145,7 +145,7 @@ def test_status_context_proposal_nearest_range_and_stale_decision(tmp_path: Path
         expected_version=0,
     )
     assert decision.version == 1
-    with pytest.raises(ValueError, match="stale decision"):
+    with pytest.raises(QlibxError) as stale:
         catalog.record_decision(
             proposal.proposal_id,
             decision="reject",
@@ -155,6 +155,9 @@ def test_status_context_proposal_nearest_range_and_stale_decision(tmp_path: Path
             rationale="stale",
             expected_version=0,
         )
+    assert stale.value.code == "QLIBX_RESEARCH_DECISION_STALE"
+    assert stale.value.context["current_version"] == 1
+    assert stale.value.context["expected_version"] == 0
 
 
 def test_three_independent_processes_publish_on_one_project(tmp_path: Path) -> None:

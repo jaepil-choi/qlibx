@@ -16,7 +16,7 @@ OUTPUT = HERE / "outputs"
 sys.path.insert(0, str(HERE))
 
 from qlibx import Project
-from qlibx.data import ConfigDrivenDataLoader
+from qlibx.data import ConfigDrivenDataLoader, require_matrix_axes
 from qlibx.execution import run_signed_execution
 
 from strategy import signed_momentum
@@ -57,12 +57,16 @@ def _load_pit_matrix(
     tickers: list[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.Timedelta]:
     spec = loader.catalog.datasets[name]
-    table = loader.load_table(name, start=START, end=END, tickers=tickers)
-    assert spec.index and spec.columns and spec.values
+    axes = require_matrix_axes(spec)
+    # The whole window is loaded to build the backtest input; the point-in-time cut is
+    # applied per decision inside the execution loop, not here.
+    table = loader.load_full_history(
+        name, reason="backtest input matrix", start=START, end=END, tickers=tickers
+    )
     event_time = pd.to_datetime(table[spec.time_field], errors="raise")
     available_at = pd.to_datetime(table[spec.availability_field], errors="raise")
     violation = (available_at - event_time).max()
-    matrix = table.pivot(index=spec.index, columns=spec.columns, values=spec.values)
+    matrix = table.pivot(index=axes.index, columns=axes.columns, values=axes.values)
     matrix = matrix.sort_index().sort_index(axis=1)
     if spec.dtype:
         matrix = matrix.astype(spec.dtype)

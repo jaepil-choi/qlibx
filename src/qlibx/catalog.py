@@ -41,6 +41,33 @@ class DatasetSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class MatrixAxes:
+    """The three axis columns a matrix dataset must declare."""
+
+    index: str
+    columns: str
+    values: str
+
+
+def require_matrix_axes(spec: DatasetSpec) -> MatrixAxes:
+    """Narrow a matrix dataset's axis declaration into a total value.
+
+    The declaration comes from project YAML, so a missing axis is a config error an agent
+    has to act on -- not an internal invariant. A bare ``assert`` would state it but
+    disappear under ``python -O``, leaving an opaque pandas failure in its place.
+    """
+    missing = sorted(name for name in ("index", "columns", "values") if getattr(spec, name) is None)
+    if missing:
+        raise QlibxError(
+            "QLIBX_MATRIX_AXES_UNDECLARED",
+            f"Matrix dataset {spec.name!r} does not declare: {missing}",
+            action="Declare index, columns, and values for every matrix dataset.",
+            context={"dataset": spec.name, "missing": missing},
+        )
+    return MatrixAxes(str(spec.index), str(spec.columns), str(spec.values))
+
+
+@dataclass(frozen=True, slots=True)
 class DataCatalog:
     project: Project
     sources: dict[str, SourceSpec]
@@ -109,11 +136,54 @@ class ConfigDrivenDataLoader:
         self,
         name: str,
         *,
+        as_of: str | date | datetime | pd.Timestamp,
         start: str | date | datetime | pd.Timestamp | None = None,
         end: str | date | datetime | pd.Timestamp | None = None,
         tickers: tuple[str, ...] | list[str] | None = None,
         limit: int | None = None,
-        as_of: str | date | datetime | pd.Timestamp | None = None,
+    ) -> pd.DataFrame:
+        """Load rows already available at ``as_of``.
+
+        ``as_of`` is required because forgetting it is the one mistake in this package
+        that produces a better-looking result instead of a failure. Code that genuinely
+        needs unfiltered rows calls :meth:`load_full_history` and says why.
+        """
+        return self._load(name, as_of=as_of, start=start, end=end, tickers=tickers, limit=limit)
+
+    def load_full_history(
+        self,
+        name: str,
+        *,
+        reason: str,
+        start: str | date | datetime | pd.Timestamp | None = None,
+        end: str | date | datetime | pd.Timestamp | None = None,
+        tickers: tuple[str, ...] | list[str] | None = None,
+        limit: int | None = None,
+    ) -> pd.DataFrame:
+        """Load rows without an availability cutoff, for a stated non-decision purpose.
+
+        Registration, schema inventory and operator preview legitimately need every row.
+        ``reason`` keeps that choice visible at the call site rather than hiding it in an
+        omitted argument.
+        """
+        if not reason.strip():
+            raise QlibxError(
+                "QLIBX_FULL_HISTORY_REASON_MISSING",
+                "load_full_history requires a non-empty reason",
+                action="State why this read may ignore point-in-time availability.",
+                context={"dataset": name},
+            )
+        return self._load(name, as_of=None, start=start, end=end, tickers=tickers, limit=limit)
+
+    def _load(
+        self,
+        name: str,
+        *,
+        as_of: str | date | datetime | pd.Timestamp | None,
+        start: str | date | datetime | pd.Timestamp | None,
+        end: str | date | datetime | pd.Timestamp | None,
+        tickers: tuple[str, ...] | list[str] | None,
+        limit: int | None,
     ) -> pd.DataFrame:
         spec = self._require(name)
         query, parameters = _bounded_query(spec, start, end, tickers, limit, as_of)
@@ -129,12 +199,31 @@ class ConfigDrivenDataLoader:
         self,
         name: str,
         *,
+        as_of: str | date | datetime | pd.Timestamp,
         start: str | date | datetime | pd.Timestamp | None = None,
         end: str | date | datetime | pd.Timestamp | None = None,
         tickers: tuple[str, ...] | list[str] | None = None,
         like: pd.DataFrame | None = None,
-        as_of: str | date | datetime | pd.Timestamp | None = None,
     ) -> pd.DataFrame:
+        """Pivot a matrix dataset from rows already available at ``as_of``."""
+        table = self.load_table(name, as_of=as_of, start=start, end=end, tickers=tickers)
+        return self._pivot(name, table, like=like)
+
+    def load_full_history_matrix(
+        self,
+        name: str,
+        *,
+        reason: str,
+        start: str | date | datetime | pd.Timestamp | None = None,
+        end: str | date | datetime | pd.Timestamp | None = None,
+        tickers: tuple[str, ...] | list[str] | None = None,
+        like: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        """Pivot a matrix dataset without an availability cutoff, for a stated purpose."""
+        table = self.load_full_history(name, reason=reason, start=start, end=end, tickers=tickers)
+        return self._pivot(name, table, like=like)
+
+    def _pivot(self, name: str, table: pd.DataFrame, *, like: pd.DataFrame | None) -> pd.DataFrame:
         spec = self._require(name)
         if spec.kind != "matrix":
             raise QlibxError(
@@ -142,23 +231,22 @@ class ConfigDrivenDataLoader:
                 f"Dataset is not a matrix: {name}",
                 action="Use load_table or choose a matrix dataset.",
             )
-        table = self.load_table(name, start=start, end=end, tickers=tickers, as_of=as_of)
-        assert spec.index and spec.columns and spec.values
-        missing = sorted({spec.index, spec.columns, spec.values} - set(table.columns))
+        axes = require_matrix_axes(spec)
+        missing = sorted({axes.index, axes.columns, axes.values} - set(table.columns))
         if missing:
             raise QlibxError(
                 "QLIBX_MATRIX_COLUMNS_MISSING",
                 f"Matrix query is missing columns: {missing}",
                 action="Correct the YAML output contract or SQL.",
             )
-        duplicate = table.duplicated([spec.index, spec.columns], keep=False)
+        duplicate = table.duplicated([axes.index, axes.columns], keep=False)
         if duplicate.any():
             raise QlibxError(
                 "QLIBX_MATRIX_KEY_DUPLICATE",
                 f"Found {int(duplicate.sum())} duplicate matrix-key rows",
                 action="Resolve duplicates explicitly in SQL.",
             )
-        matrix = table.pivot(index=spec.index, columns=spec.columns, values=spec.values)
+        matrix = table.pivot(index=axes.index, columns=axes.columns, values=axes.values)
         matrix = matrix.sort_index().sort_index(axis=1)
         if spec.dtype:
             matrix = matrix.astype(spec.dtype)
@@ -296,6 +384,9 @@ def _bounded_query(
     if predicates:
         query += " where " + " and ".join(predicates)
     if limit:
+        # An unordered LIMIT returns whatever the scan reached first, so the same preview
+        # can disagree with itself after a re-registration rewrites the parquet files.
+        query += f' order by "{spec.availability_field}", "{spec.ticker_field}"'
         query += f" limit {int(limit)}"
     return query, tuple(parameters)
 

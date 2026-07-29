@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from qlibx.catalog import ConfigDrivenDataLoader, DataCatalog
+from qlibx.catalog import ConfigDrivenDataLoader, DataCatalog, require_matrix_axes
 from qlibx.config import read_yaml, require_mapping, require_string
 from qlibx.errors import QlibxError, requirement_gap
 from qlibx.project import Project
@@ -712,7 +712,9 @@ def _registered_field_inventory(loader: ConfigDrivenDataLoader) -> dict[str, Any
     inventory: dict[str, Any] = {}
     for name, spec in sorted(loader.catalog.datasets.items()):
         try:
-            frame = loader.load_table(name, limit=1)
+            frame = loader.load_full_history(
+                name, reason="registered field inventory for a read-only plan", limit=1
+            )
             inventory[name] = {
                 "kind": spec.kind,
                 "fields": list(frame.columns),
@@ -765,6 +767,7 @@ def _resolve_inputs(
                         f"Input {contract.role!r} cannot convert to {contract.pandas.dtype}",
                         action="Correct the manifest or bind a compatible registered dataset.",
                     ) from error
+            _validate_matrix_cells(contract, frame)
         else:
             frame = loader.load_table(
                 selected.registered_dataset,
@@ -787,7 +790,7 @@ def _resolve_inputs(
             frame = _tail_periods(frame, manifest.lookback_rows)
             _validate_fields(contract, frame)
         resolved[contract.role] = frame.copy(deep=True)
-    _validate_universe_alignment(resolved)
+    _validate_universe_alignment(manifest, resolved)
     return ResolvedStrategyInputs(
         strategy_id=manifest.strategy_id,
         strategy_version=manifest.version,
@@ -805,17 +808,16 @@ def _load_universe_matrix(
     cutoff: pd.Timestamp,
     tickers: tuple[str, ...] | None,
 ) -> pd.DataFrame:
-    spec = loader.catalog.datasets[dataset_name]
-    assert spec.index and spec.columns and spec.values
-    table = loader.load_table(dataset_name, tickers=tickers, as_of=cutoff)
-    duplicate = table.duplicated([spec.index, spec.columns], keep=False)
+    axes = require_matrix_axes(loader.catalog.datasets[dataset_name])
+    table = loader.load_table(dataset_name, as_of=cutoff, tickers=tickers)
+    duplicate = table.duplicated([axes.index, axes.columns], keep=False)
     if duplicate.any():
         raise QlibxError(
             "QLIBX_STRATEGY_UNIVERSE_DUPLICATE",
             f"Universe has {int(duplicate.sum())} duplicate date/ticker rows",
             action="Correct the registered universe query before Strategy execution.",
         )
-    matrix = table.pivot(index=spec.index, columns=spec.columns, values=spec.values)
+    matrix = table.pivot(index=axes.index, columns=axes.columns, values=axes.values)
     matrix = matrix.sort_index().sort_index(axis=1)
     if matrix.isna().any().any():
         raise QlibxError(
@@ -846,24 +848,63 @@ def _validate_fields(contract: StrategyInput, frame: pd.DataFrame) -> None:
         frame[declared_field.name] = converted
 
 
-def _validate_universe_alignment(inputs: Mapping[str, pd.DataFrame]) -> None:
+def _validate_matrix_cells(contract: StrategyInput, frame: pd.DataFrame) -> None:
+    """Apply a matrix input's declared nullability to its cells.
+
+    A matrix spreads one semantic field across ticker columns, so the manifest's field
+    declaration constrains every cell rather than a named column. Without this the
+    `nullable: false` a manifest declares would only ever bind on table inputs.
+    """
+    for declared_field in contract.fields:
+        if declared_field.nullable or not frame.isna().to_numpy().any():
+            continue
+        raise QlibxError(
+            "QLIBX_STRATEGY_INPUT_NULL_INVALID",
+            f"Field {contract.role}.{declared_field.name} contains null values",
+            action="Bind a complete matrix or declare nullable behavior.",
+            context={"role": contract.role, "field": declared_field.name},
+        )
+
+
+def _validate_universe_alignment(
+    manifest: StrategyManifest,
+    inputs: Mapping[str, pd.DataFrame],
+) -> None:
+    """Reject any bound input carrying a ticker the inherited universe does not declare.
+
+    The ticker axis comes from the manifest's declared pandas kind, never from the shape
+    of the data: inferring it from the frame made the check vacuous, because "the columns
+    all sit inside the universe" is false in exactly the case worth reporting.
+    """
     universe_tickers = set(map(str, inputs["universe"].columns))
-    for role, frame in inputs.items():
+    for contract in manifest.all_inputs:
+        role = contract.role
         if role == "universe":
             continue
-        if isinstance(frame.index, pd.MultiIndex) and frame.index.nlevels >= 2:
-            tickers = set(map(str, frame.index.get_level_values(1)))
-        elif frame.columns.isin(inputs["universe"].columns).all():
+        frame = inputs[role]
+        if contract.pandas.kind == "matrix":
             tickers = set(map(str, frame.columns))
         else:
-            continue
+            ticker_level = _ticker_index_level(contract)
+            if ticker_level is None:
+                continue
+            tickers = set(map(str, frame.index.get_level_values(ticker_level)))
         outside = sorted(tickers - universe_tickers)
         if outside:
             raise QlibxError(
                 "QLIBX_STRATEGY_UNIVERSE_MISMATCH",
                 f"Input {role!r} contains tickers outside universe axes: {outside}",
                 action="Align bound datasets with the inherited universe input.",
+                context={"role": role, "outside_universe": outside},
             )
+
+
+def _ticker_index_level(contract: StrategyInput) -> int | None:
+    """Locate the declared ticker level of a table input, or None when it has none."""
+    for level, name in enumerate(contract.pandas.index):
+        if name == "ticker":
+            return level
+    return None
 
 
 def _match_execution_universe(

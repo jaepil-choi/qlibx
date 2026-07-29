@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from qlibx.execution import open_run_catalog
+from qlibx.run_catalog import open_run_catalog
 
 
 @dataclass(frozen=True, slots=True)

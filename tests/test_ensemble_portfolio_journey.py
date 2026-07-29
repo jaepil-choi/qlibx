@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from qlibx import Project
+from qlibx import Project, QlibxError
 from qlibx.ensemble import combine_stored_weights
 from qlibx.portfolio import construct_enhanced_index
 from qlibx.research import ResearchCatalog
@@ -89,8 +89,10 @@ def test_corrupt_stored_member_is_not_returned_as_verified(tmp_path: Path) -> No
     manifest = catalog.list_results()[0]
     blob = catalog.blobs / manifest["artifacts"][0]["blob_digest"]
     blob.write_bytes(b"corrupt")
-    with pytest.raises(ValueError, match="incomplete or corrupt"):
+    with pytest.raises(QlibxError) as corrupt:
         combine_stored_weights(catalog, members={record_id: 1.0})
+    assert corrupt.value.code == "QLIBX_RESEARCH_RECORD_CORRUPT"
+    assert corrupt.value.context["record_id"] == record_id
 
 
 def test_opaque_etf_is_physical_without_invented_lookthrough() -> None:

@@ -59,8 +59,10 @@ def test_yaml_registration_then_config_driven_table_and_matrix(tmp_path: Path) -
     loader = ConfigDrivenDataLoader.from_project(project)
     assert loader.catalog.datasets["sample_matrix"].time_field == "available_at"
     assert loader.catalog.datasets["sample_matrix"].availability_field == "available_at"
-    table = loader.load_table("sample_table", end="2024-01-01", tickers=["B"])
-    matrix = loader.load_matrix("sample_matrix")
+    table = loader.load_full_history(
+        "sample_table", reason="registration smoke", end="2024-01-01", tickers=["B"]
+    )
+    matrix = loader.load_full_history_matrix("sample_matrix", reason="registration smoke")
     assert table[["ticker", "value"]].to_dict(orient="records") == [{"ticker": "B", "value": 2.0}]
     assert matrix.loc[pd.Timestamp("2024-01-01"), "B"] == 2.0
     assert matrix.loc[pd.Timestamp("2024-01-02"), "A"] == 3.0
@@ -159,9 +161,22 @@ catalog:
         encoding="utf-8",
     )
     loader = ConfigDrivenDataLoader.from_project(project)
-    matrix = loader.load_matrix("values", start="2025-01-02", end="2025-01-03", as_of="2025-01-01")
+    matrix = loader.load_matrix("values", as_of="2025-01-01", start="2025-01-02", end="2025-01-03")
     assert matrix.index.tolist() == [pd.Timestamp("2025-01-02")]
     assert matrix.iloc[0, 0] == 1.0
+
+    # Forgetting the cutoff is the one mistake here that yields a better-looking result
+    # instead of a failure, so omitting it must not be spellable.
+    with pytest.raises(TypeError, match="as_of"):
+        loader.load_table("values")  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="as_of"):
+        loader.load_matrix("values")  # type: ignore[call-arg]
+
+    unbounded = loader.load_full_history("values", reason="operator inspection")
+    assert len(unbounded) > len(loader.load_table("values", as_of="2025-01-01"))
+    with pytest.raises(QlibxError) as no_reason:
+        loader.load_full_history("values", reason="   ")
+    assert no_reason.value.code == "QLIBX_FULL_HISTORY_REASON_MISSING"
 
 
 def _write_config(root: Path, *, missing_information: bool = False) -> None:

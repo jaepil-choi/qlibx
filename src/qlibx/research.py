@@ -16,6 +16,7 @@ from typing import Any, Literal
 import duckdb
 import pandas as pd
 
+from qlibx.errors import QlibxError, unknown_name
 from qlibx.orthogonality import AlphaDescriptor, OrthogonalityResult, compare_alpha
 from qlibx.project import Project
 from qlibx.serialization import (
@@ -234,11 +235,21 @@ class ResearchCatalog:
     def load_frozen_run(self, bundle_id: str) -> Mapping[str, Any]:
         path = self.frozen / f"{bundle_id}.json"
         if not path.exists():
-            raise ValueError(f"unknown frozen run bundle: {bundle_id}")
+            raise QlibxError(
+                "QLIBX_RESEARCH_FROZEN_RUN_UNKNOWN",
+                f"Unknown frozen run bundle: {bundle_id}",
+                action="Freeze the run before loading it, or choose an existing bundle ID.",
+                context={"bundle_id": bundle_id},
+            )
         body = json.loads(path.read_text(encoding="utf-8"))
         expected = body.pop("bundle_id")
         if expected != bundle_id or digest_document(body) != bundle_id:
-            raise ValueError(f"corrupt frozen run bundle: {bundle_id}")
+            raise QlibxError(
+                "QLIBX_RESEARCH_FROZEN_RUN_CORRUPT",
+                f"Frozen run bundle {bundle_id} does not match its recorded digest",
+                action="Do not reuse this bundle; freeze the run again from its inputs.",
+                context={"bundle_id": bundle_id, "path": str(path)},
+            )
         return {**body, "bundle_id": bundle_id}
 
     def create_proposal(
@@ -249,7 +260,12 @@ class ResearchCatalog:
         agent_id: str,
     ) -> ProposalRecord:
         if proposal.search_limit < 1:
-            raise ValueError("proposal search_limit must be positive")
+            raise QlibxError(
+                "QLIBX_RESEARCH_PROPOSAL_SEARCH_LIMIT_INVALID",
+                f"Proposal search_limit must be positive, got {proposal.search_limit}",
+                action="Declare how many trials the proposal may spend before it stops.",
+                context={"search_limit": proposal.search_limit},
+            )
         body = {
             "schema_version": 1,
             "session_id": session_id,
@@ -273,14 +289,27 @@ class ResearchCatalog:
         rationale: str,
         expected_version: int,
     ) -> ResearchDecision:
-        if decision not in {"promote", "reject", "retain_diagnostic", "supersede"}:
-            raise ValueError(f"invalid research decision: {decision}")
+        allowed = ("promote", "reject", "retain_diagnostic", "supersede")
+        if decision not in allowed:
+            raise unknown_name(
+                "QLIBX_RESEARCH_DECISION_KIND_INVALID", "research decision", decision, allowed
+            )
         with self._lock(f"decision-{target_id}"):
             current = self._decision_version(target_id)
             if current != expected_version:
-                raise ValueError(
-                    f"stale decision for {target_id}: expected {expected_version}, "
-                    f"current {current}"
+                raise QlibxError(
+                    "QLIBX_RESEARCH_DECISION_STALE",
+                    f"Decision for {target_id} expected version {expected_version}, "
+                    f"but the current version is {current}",
+                    action=(
+                        "Re-read the latest decision for this target and retry with its "
+                        "current version; another agent decided first."
+                    ),
+                    context={
+                        "target_id": target_id,
+                        "expected_version": expected_version,
+                        "current_version": current,
+                    },
                 )
             result = ResearchDecision(
                 target_id,
@@ -340,8 +369,9 @@ class ResearchCatalog:
         metadata: Mapping[str, Any],
         parents: tuple[str, ...] = (),
     ) -> PublicationPlan:
-        if status not in {"successful", "failed", "invalid", "abandoned"}:
-            raise ValueError(f"invalid run status: {status}")
+        allowed = ("successful", "failed", "invalid", "abandoned")
+        if status not in allowed:
+            raise unknown_name("QLIBX_RESEARCH_RUN_STATUS_INVALID", "run status", status, allowed)
         staged_files = tuple(
             sorted(
                 path
@@ -350,7 +380,15 @@ class ResearchCatalog:
             )
         )
         if status == "successful" and not staged_files:
-            raise ValueError("successful publication requires at least one artifact")
+            raise QlibxError(
+                "QLIBX_RESEARCH_PUBLICATION_EMPTY",
+                "A successful publication must stage at least one artifact",
+                action=(
+                    "Stage the result with stage_frame/stage_json, or publish with a status "
+                    "that reflects what actually happened."
+                ),
+                context={"attempt_id": attempt.attempt_id, "status": status},
+            )
         artifacts = tuple(self._describe(path) for path in staged_files)
         manifest = {
             "schema_version": 1,
@@ -380,19 +418,42 @@ class ResearchCatalog:
     def install_publication(self, plan: PublicationPlan) -> None:
         for path, artifact in zip(plan.staged_files, plan.artifacts, strict=True):
             if not path.exists() or digest_bytes(path.read_bytes()) != artifact.blob_digest:
-                raise ValueError(f"staged artifact changed: {path}")
+                raise QlibxError(
+                    "QLIBX_RESEARCH_STAGED_ARTIFACT_CHANGED",
+                    f"Staged artifact changed after the publication was prepared: {path.name}",
+                    action="Prepare the publication again from the current staged files.",
+                    context={"path": str(path), "expected_digest": artifact.blob_digest},
+                )
             destination = self.blobs / artifact.blob_digest
             if destination.exists():
                 if digest_bytes(destination.read_bytes()) != artifact.blob_digest:
-                    raise ValueError(f"corrupt existing blob: {artifact.blob_digest}")
+                    raise QlibxError(
+                        "QLIBX_RESEARCH_BLOB_CORRUPT",
+                        f"Stored blob does not match its content address: {artifact.blob_digest}",
+                        action=(
+                            "Do not overwrite it; investigate the blob store before "
+                            "republishing this record."
+                        ),
+                        context={"blob_digest": artifact.blob_digest, "path": str(destination)},
+                    )
             else:
                 _write_once(destination, path.read_bytes())
         record_id = str(plan.manifest["record_id"])
         record_path = self.records / f"{record_id}.json"
         if record_path.exists():
             if not self._same_result(record_path.read_bytes(), plan.manifest):
-                raise ValueError(
-                    f"concurrent result identity conflict: {plan.manifest['result_key']}"
+                raise QlibxError(
+                    "QLIBX_RESEARCH_RESULT_IDENTITY_CONFLICT",
+                    f"Different content already claims result key {plan.manifest['result_key']!r}",
+                    action=(
+                        "Another agent published a different result under this identity. "
+                        "Compare both records and publish under a distinct result key."
+                    ),
+                    context={
+                        "record_id": record_id,
+                        "result_key": plan.manifest["result_key"],
+                        "record_path": str(record_path),
+                    },
                 )
         else:
             _write_once(record_path, canonical_bytes(plan.manifest))
@@ -402,7 +463,15 @@ class ResearchCatalog:
     ) -> PublishedResult:
         record_id = str(plan.manifest["record_id"])
         if not self._installed_manifest_valid(plan.manifest):
-            raise ValueError(f"publication is not completely installed: {record_id}")
+            raise QlibxError(
+                "QLIBX_RESEARCH_PUBLICATION_INCOMPLETE",
+                f"Publication {record_id} is not completely installed",
+                action=(
+                    "Run install_publication (or recover_publications) before committing; "
+                    "a directory existing is not evidence of a complete result."
+                ),
+                context={"record_id": record_id, "attempt_id": plan.manifest["attempt_id"]},
+            )
         already_committed = record_id in self._committed_record_ids()
         if not already_committed:
             self._append_event(
@@ -571,20 +640,43 @@ class ResearchCatalog:
     def load_artifact(self, record_id: str, name: str) -> pd.DataFrame | Any:
         """Load one hash-verified artifact from a committed complete record."""
         if record_id not in self._committed_record_ids():
-            raise ValueError(f"record is not committed: {record_id}")
+            raise QlibxError(
+                "QLIBX_RESEARCH_RECORD_NOT_COMMITTED",
+                f"Record {record_id} has no commit event",
+                action=(
+                    "Only committed records are readable. Run recover_publications if a "
+                    "previous run was interrupted."
+                ),
+                context={"record_id": record_id},
+            )
         manifest = _read_manifest(self.records / f"{record_id}.json")
         if manifest is None or not self._installed_manifest_valid(manifest):
-            raise ValueError(f"record artifacts are incomplete or corrupt: {record_id}")
+            raise QlibxError(
+                "QLIBX_RESEARCH_RECORD_CORRUPT",
+                f"Record {record_id} has incomplete or hash-mismatched artifacts",
+                action="Do not treat this record as evidence; republish the result.",
+                context={"record_id": record_id},
+            )
         matches = [artifact for artifact in manifest["artifacts"] if artifact["name"] == name]
         if len(matches) != 1:
-            raise ValueError(f"record {record_id} has no unique artifact named {name}")
+            raise unknown_name(
+                "QLIBX_RESEARCH_ARTIFACT_UNKNOWN",
+                f"artifact of record {record_id}",
+                name,
+                (str(item["name"]) for item in manifest["artifacts"]),
+            )
         artifact = matches[0]
         blob = self.blobs / artifact["blob_digest"]
         if artifact["media_type"] == "application/x-parquet":
             return pd.read_parquet(blob)
         if artifact["media_type"] == "application/json":
             return json.loads(blob.read_text(encoding="utf-8"))
-        raise ValueError(f"unsupported artifact media type: {artifact['media_type']}")
+        raise unknown_name(
+            "QLIBX_RESEARCH_ARTIFACT_MEDIA_TYPE_UNSUPPORTED",
+            "artifact media type",
+            str(artifact["media_type"]),
+            ("application/json", "application/x-parquet"),
+        )
 
     def _load_publication_plan(self, path: Path) -> PublicationPlan:
         body = json.loads(path.read_text(encoding="utf-8"))
@@ -631,14 +723,30 @@ class ResearchCatalog:
                 os.close(descriptor)
 
     def _read_events(self) -> tuple[Mapping[str, Any], ...]:
+        """Read the append-only log, refusing to interpret a damaged one.
+
+        Skipping an unreadable line would make a committed record silently vanish from
+        every projection -- the log claims to be the durable authority, so a hole in it
+        has to stop the read rather than quietly shrink the answer.
+        """
         if not self.events.exists():
             return ()
         events: list[Mapping[str, Any]] = []
-        for line in self.events.read_text(encoding="utf-8").splitlines():
+        for number, line in enumerate(self.events.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
             try:
                 events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+            except json.JSONDecodeError as error:
+                raise QlibxError(
+                    "QLIBX_RESEARCH_EVENT_LOG_CORRUPT",
+                    f"Research event log line {number} is not readable JSON",
+                    action=(
+                        "Inspect the tail of events/events.jsonl; a crash mid-append can leave "
+                        "a partial final line that must be repaired or removed deliberately."
+                    ),
+                    context={"events": str(self.events), "line_number": number},
+                ) from error
         return tuple(events)
 
     def _project(self) -> _EventProjection:
@@ -733,10 +841,22 @@ def _read_manifest(path: Path) -> Mapping[str, Any] | None:
         return None
 
 
+def _immutable_conflict(path: Path) -> QlibxError:
+    return QlibxError(
+        "QLIBX_RESEARCH_IMMUTABLE_CONTENT_CONFLICT",
+        f"Different content already exists at an immutable path: {path.name}",
+        action=(
+            "This path is write-once. Publish the differing result under its own identity "
+            "instead of overwriting the stored one."
+        ),
+        context={"path": str(path)},
+    )
+
+
 def _write_once(path: Path, payload: bytes) -> None:
     if path.exists():
         if path.read_bytes() != payload:
-            raise ValueError(f"immutable content conflict: {path}")
+            raise _immutable_conflict(path)
         return
     temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
     temporary.write_bytes(payload)
@@ -744,7 +864,7 @@ def _write_once(path: Path, payload: bytes) -> None:
         os.link(temporary, path)
     except FileExistsError:
         if path.read_bytes() != payload:
-            raise ValueError(f"immutable content conflict: {path}") from None
+            raise _immutable_conflict(path) from None
     finally:
         temporary.unlink(missing_ok=True)
 

@@ -47,6 +47,176 @@ TOPICS: Mapping[str, str] = {
 }
 
 ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
+    "QLIBX_RESEARCH_EVENT_LOG_CORRUPT": {
+        "recovery": (
+            "Repair or truncate the damaged tail of events/events.jsonl deliberately; qlibx "
+            "will not silently skip an unreadable event."
+        ),
+    },
+    "QLIBX_RESEARCH_FROZEN_RUN_UNKNOWN": {
+        "recovery": (
+            "Freeze the run before loading it, or list the frozen bundles the catalog holds."
+        ),
+    },
+    "QLIBX_RESEARCH_FROZEN_RUN_CORRUPT": {
+        "recovery": ("Do not reuse the bundle; freeze the run again from its declared inputs."),
+    },
+    "QLIBX_RESEARCH_PROPOSAL_SEARCH_LIMIT_INVALID": {
+        "recovery": (
+            "Declare a positive search limit so the proposal has an explicit stopping condition."
+        ),
+    },
+    "QLIBX_RESEARCH_DECISION_KIND_INVALID": {
+        "recovery": ("Use one of the registered decision kinds listed in context['available']."),
+    },
+    "QLIBX_RESEARCH_DECISION_STALE": {
+        "recovery": (
+            "Another agent decided first. Re-read the target's current decision version and "
+            "retry with it; do not overwrite the newer decision."
+        ),
+    },
+    "QLIBX_RESEARCH_RUN_STATUS_INVALID": {
+        "recovery": (
+            "Publish with one of the registered run statuses listed in context['available']."
+        ),
+    },
+    "QLIBX_RESEARCH_PUBLICATION_EMPTY": {
+        "recovery": (
+            "Stage at least one artifact before publishing a successful result, or publish "
+            "with the status that reflects what happened."
+        ),
+    },
+    "QLIBX_RESEARCH_STAGED_ARTIFACT_CHANGED": {
+        "recovery": (
+            "Prepare the publication again from the current staged files; the plan was built "
+            "against different content."
+        ),
+    },
+    "QLIBX_RESEARCH_BLOB_CORRUPT": {
+        "recovery": (
+            "Investigate the blob store before republishing; qlibx will not overwrite a blob "
+            "whose content no longer matches its address."
+        ),
+    },
+    "QLIBX_RESEARCH_RESULT_IDENTITY_CONFLICT": {
+        "recovery": (
+            "Different content already claims this result key. Compare both records and "
+            "publish under a distinct identity instead of replacing the stored one."
+        ),
+    },
+    "QLIBX_RESEARCH_PUBLICATION_INCOMPLETE": {
+        "recovery": (
+            "Run install_publication or recover_publications first; an existing directory is "
+            "not evidence of a complete result."
+        ),
+    },
+    "QLIBX_RESEARCH_RECORD_NOT_COMMITTED": {
+        "recovery": (
+            "Only committed records are readable. Recover interrupted publications first."
+        ),
+    },
+    "QLIBX_RESEARCH_RECORD_CORRUPT": {
+        "recovery": ("Do not cite this record as evidence; republish the result from its inputs."),
+    },
+    "QLIBX_RESEARCH_ARTIFACT_UNKNOWN": {
+        "recovery": ("Choose one of the record's stored artifact names from context['available']."),
+    },
+    "QLIBX_RESEARCH_ARTIFACT_MEDIA_TYPE_UNSUPPORTED": {
+        "recovery": ("Stage research artifacts as JSON or parquet; see context['available']."),
+    },
+    "QLIBX_RESEARCH_IMMUTABLE_CONTENT_CONFLICT": {
+        "recovery": (
+            "The path is write-once. Publish the differing content under its own identity."
+        ),
+    },
+    "QLIBX_EXECUTION_WEIGHT_OUTPUT_REQUIRED": {
+        "recovery": (
+            "Declare output_kind 'weight' on the Strategy; Qlib execution submits weights."
+        ),
+    },
+    "QLIBX_EXECUTION_UNIVERSE_NOT_OVERRIDABLE": {
+        "recovery": (
+            "Remove 'universe' from the datasets mapping; every Strategy inherits the "
+            "execution scenario's universe."
+        ),
+    },
+    "QLIBX_EXECUTION_WEIGHT_INVALID": {
+        "recovery": (
+            "Long-only targets must be finite, non-negative, and sum to at most 1. Clip or "
+            "renormalize before returning them."
+        ),
+    },
+    "QLIBX_EXECUTION_SIDE_EXPOSURE_INVALID": {
+        "recovery": ("Scale signed weights with a budget policy so neither side exceeds 1."),
+    },
+    "QLIBX_EXECUTION_QUANTITY_RECONCILIATION_FAILED": {
+        "recovery": (
+            "Do not use the result. The composite, baseline, and active books disagree, so "
+            "the signed projection is not a realized position."
+        ),
+    },
+    "QLIBX_EXECUTION_NAV_RECONCILIATION_FAILED": {
+        "recovery": (
+            "Do not use the result; the capitalization journal disagrees with the Qlib account."
+        ),
+    },
+    "QLIBX_EXECUTION_CAPITALIZATION_EVENT_UNKNOWN": {
+        "recovery": (
+            "Use one of the registered capitalization event types in context['available']."
+        ),
+    },
+    "QLIBX_EXECUTION_DATASET_AXES_INCOMPATIBLE": {
+        "recovery": ("Supply availability on exactly the dataset's index and columns."),
+    },
+    "QLIBX_EXECUTION_DATASET_AVAILABILITY_MISSING": {
+        "recovery": (
+            "Declare availability for the dataset; qlibx will not guess when observations "
+            "became visible."
+        ),
+    },
+    "QLIBX_EXECUTION_LOOKBACK_INVALID": {
+        "recovery": ("Declare a positive number of available rows the Strategy may read."),
+    },
+    "QLIBX_EXECUTION_WEIGHT_ROW_INVALID": {
+        "recovery": ("Return only the row for the current decision time."),
+    },
+    "QLIBX_EXECUTION_WEIGHT_PAYLOAD_INVALID": {
+        "recovery": (
+            "Return pandas weights keyed by instrument, as a Series or one-row DataFrame."
+        ),
+    },
+    "QLIBX_EXECUTION_WEIGHT_INSTRUMENT_UNKNOWN": {
+        "recovery": ("Restrict the weights to instruments the execution scenario declares."),
+    },
+    "QLIBX_ARTIFACT_STATUS_INVALID": {
+        "recovery": ("Record one of the registered artifact statuses in context['available']."),
+    },
+    "QLIBX_ARTIFACT_IDENTITY_CONFLICT": {
+        "recovery": (
+            "Artifact identity is derived from its declared inputs. Change the producer "
+            "identity or inputs rather than overwriting the stored envelope."
+        ),
+    },
+    "QLIBX_ARTIFACT_UNKNOWN": {
+        "recovery": ("Pass run_id to disambiguate, or list the run's stored artifacts."),
+    },
+    "QLIBX_ARTIFACT_PAYLOAD_CORRUPT": {
+        "recovery": ("Do not consume the artifact; reproduce it from its declared inputs."),
+    },
+    "QLIBX_ARTIFACT_EXPORT_DESTINATION_NOT_EMPTY": {
+        "recovery": ("Export into an empty directory so the bundle stays unambiguous."),
+    },
+    "QLIBX_ARTIFACT_NOT_PORTABLE": {
+        "recovery": (
+            "Export complete artifacts only; an incomplete result must not travel as finished."
+        ),
+    },
+    "QLIBX_ARTIFACT_BUNDLE_SCHEMA_UNSUPPORTED": {
+        "recovery": ("Export the bundle with a qlibx version that writes schema version 1."),
+    },
+    "QLIBX_ARTIFACT_ENVELOPE_CORRUPT": {
+        "recovery": ("Re-export the bundle; do not import unverified provenance."),
+    },
     "QLIBX_PROJECT_SCHEMA_UNSUPPORTED": {
         "recovery": "Use a project manifest schema supported by the installed qlibx version.",
     },
@@ -183,6 +353,18 @@ ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
     },
     "QLIBX_MATRIX_COLUMNS_MISSING": {
         "recovery": "Declare index, columns, and values fields for the matrix contract.",
+    },
+    "QLIBX_MATRIX_AXES_UNDECLARED": {
+        "recovery": (
+            "Add the index, columns, and values keys to the matrix dataset YAML; qlibx will "
+            "not infer a matrix axis from the query result."
+        ),
+    },
+    "QLIBX_FULL_HISTORY_REASON_MISSING": {
+        "recovery": (
+            "Pass a reason to load_full_history, or call load_table with as_of when the read "
+            "happens at a decision time."
+        ),
     },
     "QLIBX_MATRIX_KEY_DUPLICATE": {
         "recovery": (

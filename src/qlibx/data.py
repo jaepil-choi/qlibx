@@ -1,6 +1,13 @@
 """Data discovery, registration, profiles, and config-driven loading."""
 
-from qlibx.catalog import ConfigDrivenDataLoader, DataCatalog, DatasetSpec, SourceSpec
+from qlibx.catalog import (
+    ConfigDrivenDataLoader,
+    DataCatalog,
+    DatasetSpec,
+    MatrixAxes,
+    SourceSpec,
+    require_matrix_axes,
+)
 from qlibx.discovery import DataCandidate, DataInspection, discover_data, inspect_data
 from qlibx.profiles import (
     execution_profile_requirements,
@@ -24,6 +31,7 @@ __all__ = [
     "DataCatalog",
     "DataInspection",
     "DatasetSpec",
+    "MatrixAxes",
     "RegistrationPlan",
     "RegistrationResult",
     "SourceSpec",
@@ -35,4 +43,5 @@ __all__ = [
     "plan_registration",
     "register_dataset",
     "require_execution_profile",
+    "require_matrix_axes",
 ]

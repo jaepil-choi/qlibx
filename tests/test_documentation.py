@@ -4,6 +4,7 @@ import ast
 import inspect
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -12,7 +13,7 @@ from qlibx import alpha, ensemble, execution, reporting
 from qlibx.agent import error_guidance, public_example, public_schema, task_guide
 from qlibx.cli import dispatch, parser
 from qlibx.documentation import ERROR_GUIDANCE, EXAMPLES
-from qlibx.errors import QlibxError, QlibxInternalError
+from qlibx.errors import STAGES, QlibxError, QlibxInternalError
 
 
 def test_agent_help_and_schema_are_public_and_machine_readable(capsys) -> None:
@@ -71,6 +72,20 @@ def test_a_stage_lookup_names_the_step_and_its_skill(capsys) -> None:
     assert "logical dataset" in lookup["responsibility"]
     assert lookup["skill"] == "qlibx-data_registration"
     assert error_guidance("UNIVERSE")["responsibility"]
+
+
+def test_the_prd_stage_table_and_the_code_agree() -> None:
+    """The stages are a product decision, so the PRD owns them and the code must match.
+
+    PRD 5.6 lists them in a table an agent may be shown. A stage added to one side and not
+    the other is the drift this pass existed to remove, one level up.
+    """
+    prd = pathlib.Path(__file__).resolve().parents[1] / "docs" / "qlibx-prd.md"
+    documented = set(re.findall(r"\| `([A-Z_]+)` \|", prd.read_text(encoding="utf-8")))
+    assert documented == set(STAGES), (
+        f"only in PRD: {sorted(documented - set(STAGES))}; "
+        f"only in code: {sorted(set(STAGES) - documented)}"
+    )
 
 
 def test_the_stages_are_the_user_journey_in_order() -> None:

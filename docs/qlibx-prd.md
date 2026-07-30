@@ -170,6 +170,9 @@ realized result를 함께 관측할 수 있다는 점이다.
 - Required data를 유사한 다른 dataset, 유사한 column 이름 또는 임의의 proxy로 대체한다.
 - 어떤 requirement가 왜 충족되지 않았는지 알리지 않고 실패한다.
 - Core package가 user에게 직접 질문하거나, agent와 user의 확인 없이 data registration을 수행한다.
+- Core package가 실패를 보고하면서 여러 유효한 수리 경로 중 하나를 지시한다 (section 5.6).
+- User code나 user data에서 발생한 예외를 core의 분류로 덮어써서 원래 type과 message를 잃게 만든다.
+- Data 또는 universe의 requirement 위반을 등록 시점에 통과시킨 뒤 Strategy 실행 중에 발견하게 한다.
 
 ## 3. Human user journey
 
@@ -262,7 +265,7 @@ Agent는 repository instruction 또는 installed qlibx skill에서 시작한다.
 - 선택된 project config, state, research와 extension root를 찾는 방법
 - Artifact별 public schema와 example을 찾는 방법
 - 어떤 operation이 read-only이고 어떤 operation이 project file을 만드는지
-- Error detail과 suggested next action을 조회하는 방법
+- 실패했을 때 어느 journey stage에서 막혔는지 읽는 방법과, 그 stage의 skill을 찾는 방법
 - Shared branch와 no-worktree가 default behavior라는 사실
 - Project work를 위해 installed package source를 수정하면 안 된다는 사실
 
@@ -433,7 +436,8 @@ Installed package는 다음 주제의 version-matched documentation을 제공해
 - 현재 제공되는 extension point, 정확한 input/output contract와 local extension authoring
 - Raw artifact와 reporting contract
 - 각 capability의 requirement 선언, acceptable derivation alternative와 gap 해소 절차
-- Error code와 recovery guidance
+- Journey stage 목록과 각 stage가 책임지는 범위 (section 5.6). Recovery 지침은 core documentation이
+  아니라 해당 stage의 skill이 소유한다
 
 Documentation은 help-style public command와 installed file 양쪽에서 접근할 수 있어야 한다.
 Machine-readable schema와 example은 private Python module import 없이 찾을 수 있어야 한다.
@@ -498,6 +502,19 @@ workflow를 수행하도록 안내하는 valid, discoverable, versioned skill이
 Skill은 section 5.5의 requirement gap을 받았을 때 수행할 resolution interview 절차를 반드시 포함한다.
 Requirement gap을 단순 실패로 보고하고 종료하는 skill은 이 요구사항을 충족하지 않는다.
 
+Section 5.6에 따라 **failure를 어떻게 고칠지는 core가 아니라 skill이 소유한다.** 따라서 skill은 각
+journey stage에 대해 다음을 포함해야 한다.
+
+- 그 stage의 계약 요약과 stage code
+- 자주 발생하는 실패와, 각각에 대해 **가능한 해결 경로를 하나가 아니라 목록으로**. 예를 들어 numeric
+  연산이 문자열 때문에 `STRATEGY_RUN`에서 실패하면 Strategy 안에서 cast하는 경로와 registration으로
+  돌아가 preprocess하는 경로를 모두 제시하고, 선택 기준을 설명한다.
+- 어떤 선택이 user 확인을 필요로 하는지
+- 해결 후 다시 실행할 public command
+
+해결 경로를 하나만 제시하는 skill은 core가 처방하지 않기로 한 결정을 skill 층에서 되돌리는 것이므로
+이 요구사항을 충족하지 않는다.
+
 ### 5.4 Capability requirement contract
 
 Section 1.2에서 정의한 분리를 실현하기 위해, 실행에 특정 registered input이 필요한 모든 capability는 그
@@ -559,7 +576,7 @@ Requirement가 충족되지 않으면 capability는 계산을 시도하지 않�
 
 Requirement gap 보고는 structured error 또는 structured plan result 형태이며 최소 다음을 포함한다.
 
-- Stable error code
+- 막힌 journey stage (section 5.6)
 - 요청한 capability ID와 version
 - 충족되지 않은 requirement 목록과 각각의 이유
 - 각 requirement의 acceptable derivation alternative
@@ -583,6 +600,11 @@ Requirement gap을 받은 agent는 다음을 수행한다.
 
 Agent는 user 확인 없이 alternative를 임의로 선택하지 않는다. 어떤 alternative도 불가능하면 그 사실과
 이유를 user에게 보고하고, 해당 capability를 우회하거나 대체 proxy로 결과를 만들어내지 않는다.
+
+Requirement gap이 포함하는 `next_commands`는 section 5.6의 "core는 수리를 처방하지 않는다"와 충돌하지
+않는다. 이것은 **interview를 어디에서 이어가는지**를 가리키는 read-only command이지 어떤 alternative를
+선택하라는 지시가 아니다. 어떤 alternative를 고를지는 여전히 user가 결정하고, 그 판단 절차는 skill이
+소유한다. Capability가 특정 alternative를 권하는 문장을 requirement gap에 담아서는 안 된다.
 
 Optional requirement가 충족되지 않아 결과의 일부 항목을 계산할 수 없으면, 해당 항목을 조용히 생략하지
 않고 계산하지 못했다는 사실과 이유를 결과에 명시적으로 기록한다.
@@ -856,6 +878,22 @@ Qlib closed-loop backtest가 decision과 feedback sequence를 제공한다. qlib
 nested child strategy에 data를 제공할 때 이 time boundary를 보존한다.
 
 ### 6.5 Universe와 tradability
+
+#### Universe dataset 표준
+
+Universe는 모든 Strategy가 상속하는 유일한 requirement이므로 다른 logical dataset보다 강한 표준을
+가지며, 이 표준은 **등록 시점에** 검사하고 맞지 않으면 등록을 거부한다. 잘못 등록된 universe가 나중에
+Strategy 실행 중에 발견되면 원인 추적 비용이 훨씬 커진다.
+
+- 값은 boolean이어야 한다. 결측 cell을 미포함으로 해석하지 않는다.
+- 다른 dataset과 동일하게 available_at을 가져야 하며 같은 point-in-time 규칙을 따른다.
+- `(available_at, ticker)`가 유일해야 한다. 중복이 있으면 qlibx가 어느 row를 쓸지 고르지 않는다.
+- 선언된 axis의 모든 cell이 채워져 있어야 한다.
+
+실패는 `UNIVERSE` stage로 보고한다 (section 5.6). 이 표준을 고치는 방법 — source를 정정할지,
+registration query에서 채울지, universe 정의를 바꿀지 — 는 core가 결정하지 않는다.
+
+#### Universe와 tradability는 다른 개념이다
 
 Research universe와 Qlib execution tradability는 같은 개념이 아니다.
 
@@ -1595,6 +1633,10 @@ reporting을 거치지 않고 raw stored artifacts를 직접 분석할 수도 �
 - Generated instruction과 skill이 private source를 읽지 않고 public qlibx surface를 사용하도록 안내한다.
 - Generated skill이 현재 제공되는 extension point의 workflow 위치, required input/output, time boundary,
   validation과 minimal example을 포함하거나 version-matched installed documentation으로 정확히 연결한다.
+- 모든 public failure가 막힌 journey stage, 관측한 내용, 계약이 요구한 것과 판단 근거를 함께 반환한다.
+- Public failure의 `expected`가 계약을 진술하고 특정 수리 절차를 지시하지 않는다.
+- Generated skill이 stage별로 **복수의** 해결 경로와 선택 기준을 제시한다.
+- Internal invariant 위반은 stage도 `expected`도 갖지 않으며 agent-facing vocabulary에 나타나지 않는다.
 
 ### P1 — Human과 agent data journey
 
@@ -1608,6 +1650,11 @@ reporting을 거치지 않고 raw stored artifacts를 직접 분석할 수도 �
 - Capability binding은 registered dataset만 참조하고 user confirmation 뒤에만 project YAML을 변경한다.
 - Basic registration은 `data/qlibx/`의 validated canonical Parquet, valid project config, logical dataset
   ID와 bounded load smoke를 만든다.
+- Registration은 requirement 위반을 등록 시점에 거부한다. `(available_at, ticker)` 중복과 available_at
+  column의 datetime 변환 실패는 `DATA_REGISTRATION` stage로, 위반한 값과 함께 보고한다.
+- Universe 등록은 section 6.5의 표준을 검사하고, 위반을 `UNIVERSE` stage로 보고한다.
+- Strategy 실행 중 user code가 user data에서 실패하면 `STRATEGY_RUN` stage로 보고하며, 원래 예외의
+  type과 message를 분류하지 않고 그대로 전달한다.
 - Daily OHLCV default profile은 `t-1`까지 관측하고 `t`일 종가에 거래·평가하며, 다른 convention은
   명시적으로 등록한다.
 - Source data는 변경되지 않는다.

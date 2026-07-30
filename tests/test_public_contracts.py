@@ -120,7 +120,7 @@ def test_child_strategy_cannot_escape_parent_context() -> None:
     future = pd.DataFrame({"a": [3.0]}, index=[dates[-1] + pd.Timedelta(days=1)])
     with pytest.raises(QlibxError) as escape:
         context.child(datasets={"returns": future})
-    assert escape.value.code == "QLIBX_BOUNDARY_CHILD_AXIS"
+    assert escape.value.code == "BOUNDARY"
     assert escape.value.context["axis"] == "index"
     assert escape.value.context["violations"] == ["2025-01-03T00:00:00"]
 

@@ -59,7 +59,7 @@ def require_matrix_axes(spec: DatasetSpec) -> MatrixAxes:
     missing = sorted(name for name in ("index", "columns", "values") if getattr(spec, name) is None)
     if missing:
         raise QlibxError(
-            "QLIBX_MISSING_MATRIX_AXES",
+            "MISSING",
             f"Matrix dataset {spec.name!r} does not declare: {missing}",
             action="Declare index, columns, and values for every matrix dataset.",
             context={"dataset": spec.name, "missing": missing},
@@ -82,7 +82,7 @@ class DataCatalog:
         base = read_yaml(base_path)
         if base.get("schema_version") != 1:
             raise QlibxError(
-                "QLIBX_UNSUPPORTED_CATALOG_SCHEMA",
+                "UNSUPPORTED",
                 "data/base.yaml schema_version must be 1",
                 action="Use schema version 1.",
             )
@@ -106,7 +106,7 @@ class DataCatalog:
             duplicate = sorted(set(declarations) & set(fragment))
             if duplicate:
                 raise QlibxError(
-                    "QLIBX_INVALID_DATASET_DUPLICATE",
+                    "INVALID",
                     f"Duplicate logical datasets: {duplicate}",
                     action="Declare each dataset in one YAML fragment.",
                 )
@@ -168,7 +168,7 @@ class ConfigDrivenDataLoader:
         """
         if not reason.strip():
             raise QlibxError(
-                "QLIBX_MISSING_FULL_HISTORY_REASON",
+                "MISSING",
                 "load_full_history requires a non-empty reason",
                 action="State why this read may ignore point-in-time availability.",
                 context={"dataset": name},
@@ -227,7 +227,7 @@ class ConfigDrivenDataLoader:
         spec = self._require(name)
         if spec.kind != "matrix":
             raise QlibxError(
-                "QLIBX_INVALID_DATASET_NOT_MATRIX",
+                "INVALID",
                 f"Dataset is not a matrix: {name}",
                 action="Use load_table or choose a matrix dataset.",
             )
@@ -235,14 +235,14 @@ class ConfigDrivenDataLoader:
         missing = sorted({axes.index, axes.columns, axes.values} - set(table.columns))
         if missing:
             raise QlibxError(
-                "QLIBX_MISSING_MATRIX_AXES",
+                "MISSING",
                 f"Matrix query is missing columns: {missing}",
                 action="Correct the YAML output contract or SQL.",
             )
         duplicate = table.duplicated([axes.index, axes.columns], keep=False)
         if duplicate.any():
             raise QlibxError(
-                "QLIBX_INVALID_MATRIX_KEY_DUPLICATE",
+                "INVALID",
                 f"Found {int(duplicate.sum())} duplicate matrix-key rows",
                 action="Resolve duplicates explicitly in SQL.",
             )
@@ -259,7 +259,7 @@ class ConfigDrivenDataLoader:
             return self.catalog.datasets[name]
         except KeyError as error:
             raise QlibxError(
-                "QLIBX_NOT_FOUND_DATASET",
+                "NOT_FOUND",
                 f"Unknown dataset {name!r}; available: {sorted(self.catalog.datasets)}",
                 action="Choose a YAML-declared dataset.",
             ) from error
@@ -269,7 +269,7 @@ def _fragment(root: Path, value: str) -> Path:
     path = (root / value).resolve()
     if not path.is_relative_to(root.resolve()):
         raise QlibxError(
-            "QLIBX_BOUNDARY_CONFIG_PATH",
+            "BOUNDARY",
             f"Config fragment escapes data config: {path}",
             action="Keep fragments below config/qlibx/data.",
         )
@@ -279,7 +279,7 @@ def _fragment(root: Path, value: str) -> Path:
 def _identifier(value: str, field: str) -> str:
     if not IDENTIFIER.fullmatch(value):
         raise QlibxError(
-            "QLIBX_INVALID_IDENTIFIER",
+            "INVALID",
             f"{field} is not a valid identifier: {value!r}",
             action="Use letters, digits, and underscores.",
         )
@@ -292,7 +292,7 @@ def _source(name: str, raw: Any, roots: dict[str, Path], project: Project) -> So
     root_name = value.get("root", "canonical")
     if root_name not in roots:
         raise QlibxError(
-            "QLIBX_NOT_FOUND_SOURCE_ROOT",
+            "NOT_FOUND",
             f"Unknown source root: {root_name!r}",
             action=f"Choose one of {sorted(roots)}.",
         )
@@ -306,7 +306,7 @@ def _dataset(name: str, raw: Any, sources: dict[str, SourceSpec]) -> DatasetSpec
     kind = require_string(value.get("kind"), f"{name}.kind")
     if kind not in {"table", "matrix"}:
         raise QlibxError(
-            "QLIBX_INVALID_DATASET_KIND",
+            "INVALID",
             f"Unsupported dataset kind: {kind}",
             action="Use table or matrix.",
         )
@@ -314,7 +314,7 @@ def _dataset(name: str, raw: Any, sources: dict[str, SourceSpec]) -> DatasetSpec
     missing = sorted(set(source_names) - set(sources))
     if missing:
         raise QlibxError(
-            "QLIBX_NOT_FOUND_DATASET_SOURCE",
+            "NOT_FOUND",
             f"Dataset references unknown sources: {missing}",
             action="Declare them in sources.yaml.",
         )
@@ -368,7 +368,7 @@ def _bounded_query(
         selected = tuple(map(str, tickers))
         if not selected:
             raise QlibxError(
-                "QLIBX_MISSING_TICKER_FILTER",
+                "MISSING",
                 "Ticker filter is empty",
                 action="Omit it or provide tickers.",
             )
@@ -376,7 +376,7 @@ def _bounded_query(
         parameters.extend(selected)
     if limit is not None and limit <= 0:
         raise QlibxError(
-            "QLIBX_INVALID_LIMIT",
+            "INVALID",
             "limit must be positive",
             action="Provide a positive limit.",
         )
@@ -398,7 +398,7 @@ def _execute(
         for source in sources:
             if not source.path.exists():
                 raise QlibxError(
-                    "QLIBX_NOT_FOUND_GENERATED_SOURCE",
+                    "NOT_FOUND",
                     f"Missing source {source.name}: {source.path}",
                     action="Register or restore the declared canonical Parquet.",
                 )
@@ -411,7 +411,7 @@ def _execute(
             return connection.execute(query, parameters).fetchdf()
         except duckdb.Error as error:
             raise QlibxError(
-                "QLIBX_INVALID_QUERY",
+                "INVALID",
                 f"Configured query failed: {error}",
                 action="Correct the YAML SQL or output contract.",
             ) from error

@@ -155,7 +155,7 @@ def test_status_context_proposal_nearest_range_and_stale_decision(tmp_path: Path
             rationale="stale",
             expected_version=0,
         )
-    assert stale.value.code == "QLIBX_CONFLICT_STALE_DECISION"
+    assert stale.value.code == "CONFLICT"
     assert stale.value.context["current_version"] == 1
     assert stale.value.context["expected_version"] == 0
 

@@ -41,7 +41,7 @@ def plan_agent_skill(
 ) -> SkillPlan:
     if target not in {"codex", "claude", "generic"}:
         raise QlibxError(
-            "QLIBX_INVALID_SKILL_TARGET",
+            "INVALID",
             f"Unsupported skill target: {target}",
             action="Choose codex, claude, or generic.",
         )
@@ -72,15 +72,16 @@ def apply_agent_skill(plan: SkillPlan, *, force: bool = False) -> Path:
         digest = digest_bytes(before) if before is not None else None
         if exists != file.existed or digest != file.before_digest:
             raise QlibxError(
-                "QLIBX_CONFLICT_STALE_PLAN",
+                "CONFLICT",
                 f"Skill file changed after planning: {file.path}",
                 action="Create a new skill plan and review the changed user content.",
             )
         if file.action == "replace_requires_approval" and not force:
             raise QlibxError(
-                "QLIBX_BOUNDARY_USER_CONTENT",
+                "BOUNDARY",
                 f"Skill file has different content: {file.path}",
                 action="Review the planned replacement and apply with explicit force approval.",
+                requires_user_confirmation=True,
             )
     for file in plan.files:
         if file.action == "unchanged":

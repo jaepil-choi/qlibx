@@ -12,7 +12,7 @@ from qlibx import alpha, ensemble, execution, reporting
 from qlibx.agent import error_guidance, public_example, public_schema, task_guide
 from qlibx.cli import dispatch, parser
 from qlibx.documentation import ERROR_GUIDANCE, EXAMPLES
-from qlibx.errors import QlibxError
+from qlibx.errors import QlibxError, QlibxInternalError
 
 
 def test_agent_help_and_schema_are_public_and_machine_readable(capsys) -> None:
@@ -50,22 +50,32 @@ def test_project_and_logical_dataset_guidance_is_installed(capsys) -> None:
 def test_unknown_documentation_topic_is_structured_for_agents() -> None:
     with pytest.raises(QlibxError) as error:
         dispatch(parser().parse_args(["docs", "not-a-topic"]))
-    assert error.value.code == "QLIBX_NOT_FOUND_DOCUMENTATION_TOPIC"
+    assert error.value.code == "NOT_FOUND"
     assert "project" in error.value.context["available"]
 
 
 def test_installed_error_recovery_is_code_specific_and_machine_readable(capsys) -> None:
     assert dispatch(parser().parse_args(["docs", "errors"])) == 0
-    assert dispatch(parser().parse_args(["errors", "QLIBX_MISSING_REGISTRATION_MAPPING"])) == 0
+    assert dispatch(parser().parse_args(["errors", "MISSING"])) == 0
     output = capsys.readouterr().out
     first, second = output.split("}\n{")
     guide = json.loads(first + "}")["errors"]
     lookup = json.loads("{" + second)
     assert guide["schema"] == "error_response"
-    assert lookup["code"] == "QLIBX_MISSING_REGISTRATION_MAPPING"
-    assert lookup["requires_user_confirmation"] is True
-    assert "never guess" in lookup["recovery"]
-    assert error_guidance("QLIBX_CONFLICT_SOURCE_CHANGED")["recovery"]
+    # The code alone answers with what its kind means. What to do about *this* failure
+    # rides on the raised error, where the check that found it wrote it.
+    assert lookup["code"] == "MISSING"
+    assert "Declare, register, or bind it" in lookup["recovery"]
+    assert error_guidance("CONFLICT")["recovery"]
+    assert set(ERROR_GUIDANCE) == {
+        "NOT_FOUND",
+        "MISSING",
+        "INVALID",
+        "BOUNDARY",
+        "CONFLICT",
+        "CORRUPT",
+        "UNSUPPORTED",
+    }
 
 
 def test_agent_journey_guides_link_public_executable_examples() -> None:
@@ -163,87 +173,103 @@ def test_public_requirement_and_plan_schemas_are_installed() -> None:
     plan = public_schema("capability_plan")
     assert {"requirement_id", "alternatives", "next_commands"} <= set(requirement["required"])
     assert plan["read_only"] is True
-    assert "QLIBX_MISSING_CAPABILITY_REQUIREMENTS" in plan["error_equivalence"]
+    assert "MISSING" in plan["error_equivalence"]
 
 
-def _raised_error_codes() -> set[str]:
-    """Collect every QlibxError code the package can raise, without importing behavior."""
-    codes: set[str] = set()
+def _public_raises() -> list[tuple[str, int, str]]:
+    """Every `QlibxError(...)` the package can raise, as (file, line, code).
+
+    Read from source rather than by importing behavior, so a raise on a path no test
+    exercises is still held to the contract.
+    """
+    found: list[tuple[str, int, str]] = []
     # Anchor on the package root, not a member module: a module may become a package.
     for path in pathlib.Path(qlibx.__file__).parent.rglob("*.py"):
         if "_vendor" in path.parts:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            is_error = isinstance(node, ast.Call) and getattr(node.func, "id", "") in {
-                "QlibxError",
-                "unknown_name",
-            }
-            if is_error and node.args and isinstance(node.args[0], ast.Constant):
-                codes.add(node.args[0].value)
-    return codes
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "QlibxError"):
+                continue
+            code = (
+                node.args[0].value if node.args and isinstance(node.args[0], ast.Constant) else None
+            )
+            found.append((path.name, node.lineno, code))
+    return found
 
 
-def test_every_raised_error_code_has_installed_recovery_guidance() -> None:
-    """`qlibx errors <code>` must answer for any code an agent can actually hit."""
-    raised = _raised_error_codes()
-    assert raised, "error-code scan found nothing; the AST walk is broken"
-    assert not raised - set(ERROR_GUIDANCE), "raised but undocumented"
-    assert not set(ERROR_GUIDANCE) - raised, "documented but unreachable"
+def test_the_public_vocabulary_is_the_seven_codes_and_nothing_else() -> None:
+    """A raise may only use a declared code, and every declared code must be reachable.
 
-
-# What the caller must do next. Codes are named for this, not for the module that noticed
-# the failure -- a module-shaped prefix guarantees the same failure gets a new name in every
-# module that can hit it, which is how the scheme this replaced grew to 144 codes.
-ERROR_FAMILIES = (
-    "NOT_FOUND",
-    "MISSING",
-    "INVALID",
-    "BOUNDARY",
-    "CONFLICT",
-    "CORRUPT",
-    "UNSUPPORTED",
-)
-
-
-def test_every_error_code_belongs_to_exactly_one_family() -> None:
-    """The tree is only real if no code sits outside it, and none straddles two branches."""
-    for code in sorted(ERROR_GUIDANCE):
-        matched = [name for name in ERROR_FAMILIES if code.startswith(f"QLIBX_{name}_")]
-        assert matched, f"{code} belongs to no family; pick the caller's next action"
-        assert len(matched) == 1, f"{code} matches {matched}; families must not nest"
-
-
-def test_no_two_codes_give_the_same_recovery() -> None:
-    """Two codes with one recovery are one failure wearing two names.
-
-    This is the check that would have caught the original drift: `provided_inputs` versus
-    `available_inputs`, three spellings of "keep the path under its root", four of "use a
-    positive limit". If a new code's recovery matches an existing one, they are the same
-    code and `context` should carry whatever distinguishes them.
+    The codes are coarse on purpose. Nothing in qlibx branches on one, so a finer set would
+    only restate, in this table, the guidance each raise site already writes -- which is how
+    the scheme this replaced reached 144 names for 126 failures.
     """
-    by_recovery: dict[str, list[str]] = {}
-    for code, entry in ERROR_GUIDANCE.items():
-        if "recovery" not in entry:
-            continue  # inherits its family; nothing of its own to collide
-        key = " ".join(str(entry["recovery"]).split()).casefold()
-        by_recovery.setdefault(key, []).append(code)
-    collisions = {
-        recovery: sorted(codes) for recovery, codes in by_recovery.items() if len(codes) > 1
+    raises = _public_raises()
+    assert raises, "error scan found nothing; the AST walk is broken"
+    unknown = sorted({(f, n, c) for f, n, c in raises if c not in ERROR_GUIDANCE})
+    assert not unknown, f"raises using a code outside the vocabulary: {unknown}"
+    reached = {code for _, _, code in raises}
+    assert not set(ERROR_GUIDANCE) - reached, "documented but unreachable"
+
+
+def test_every_public_failure_says_what_to_do_next() -> None:
+    """`action` is what makes a failure public. A raise without one is an internal defect.
+
+    Enforced at the call site rather than trusted to the constructor's signature, because a
+    positional `action` would satisfy the type checker while leaving this contract to habit.
+    """
+    missing: list[str] = []
+    for path in pathlib.Path(qlibx.__file__).parent.rglob("*.py"):
+        if "_vendor" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "QlibxError"):
+                continue
+            if not any(keyword.arg == "action" for keyword in node.keywords):
+                missing.append(f"{path.name}:{node.lineno}")
+    assert not missing, f"QlibxError raised without an action: {missing}"
+
+
+def test_internal_failures_stay_out_of_the_agent_vocabulary() -> None:
+    """An internal defect carries no code and no action, because there is no action.
+
+    `run_signed_execution` reconciling its own composite/baseline/active books is the case
+    that motivated the split: the caller neither caused a book disagreement nor can repair
+    one, so handing them a stable code and a recovery would be a lie.
+    """
+    assert not issubclass(QlibxInternalError, QlibxError)
+    failure = QlibxInternalError("books disagree", context={"tolerance": 1e-8})
+    assert not hasattr(failure, "code")
+    assert not hasattr(failure, "action")
+    assert failure.to_dict() == {
+        "internal": True,
+        "message": "books disagree",
+        "context": {"tolerance": 1e-8},
     }
-    assert not collisions, f"codes sharing one recovery: {collisions}"
+
+    source = (pathlib.Path(qlibx.__file__).parent / "execution.py").read_text(encoding="utf-8")
+    assert source.count("raise QlibxInternalError(") == 2, (
+        "the two signed-execution reconciliation identities are internal, not agent-facing"
+    )
 
 
-def test_unknown_name_lookups_share_one_structured_shape(capsys) -> None:
+def test_unknown_name_lookups_share_one_structured_shape() -> None:
     """A failed named lookup answers the same way whatever registry it came from."""
-    lookups = [
-        (["alpha", "operation", "nope"], "QLIBX_NOT_FOUND_ALPHA_OPERATION"),
-        (["extension", "contract", "nope"], "QLIBX_NOT_FOUND_EXTENSION_CONTRACT"),
-        (["docs", "nope"], "QLIBX_NOT_FOUND_DOCUMENTATION_TOPIC"),
-    ]
-    for argv, code in lookups:
+    lookups = (
+        ["alpha", "operation", "nope"],
+        ["extension", "contract", "nope"],
+        ["docs", "nope"],
+    )
+    for argv in lookups:
         with pytest.raises(QlibxError) as failure:
             dispatch(parser().parse_args(argv))
-        assert failure.value.code == code
-        assert set(failure.value.to_dict()) == {"code", "message", "action", "context"}
-        assert failure.value.context["available"], code
+        assert failure.value.code == "NOT_FOUND"
+        assert set(failure.value.to_dict()) == {
+            "code",
+            "message",
+            "action",
+            "context",
+            "requires_user_confirmation",
+        }
+        assert failure.value.context["available"], argv
         assert failure.value.context["requested"] == "nope"

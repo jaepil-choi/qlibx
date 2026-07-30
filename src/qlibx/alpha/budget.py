@@ -65,9 +65,7 @@ class BudgetPolicyRegistry:
         try:
             return self._policies[name]
         except KeyError as error:
-            raise unknown_name(
-                "QLIBX_NOT_FOUND_BUDGET_POLICY", "budget policy", name, self._policies
-            ) from error
+            raise unknown_name("budget policy", name, self._policies) from error
 
     def names(self) -> tuple[str, ...]:
         return tuple(sorted(self._policies))

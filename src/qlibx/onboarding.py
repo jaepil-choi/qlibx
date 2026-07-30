@@ -54,7 +54,7 @@ def apply_instruction(plan: InstructionPlan) -> Path:
     current = plan.path.read_text(encoding="utf-8") if exists else ""
     if exists != plan.existed or digest_text(current) != plan.before_digest:
         raise QlibxError(
-            "QLIBX_CONFLICT_STALE_PLAN",
+            "CONFLICT",
             f"Instruction file changed after planning: {plan.path}",
             action="Create a new dry-run plan and review the updated user content.",
         )

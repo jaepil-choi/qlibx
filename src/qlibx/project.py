@@ -34,7 +34,7 @@ class Project:
         manifest = read_yaml(selected / MANIFEST)
         if manifest.get("schema_version") != 1:
             raise QlibxError(
-                "QLIBX_UNSUPPORTED_PROJECT_SCHEMA",
+                "UNSUPPORTED",
                 "qlibx.yaml schema_version must be 1",
                 action="Use the installed project schema.",
             )
@@ -46,7 +46,7 @@ class Project:
             path = (selected / require_string(raw, f"paths.{name}")).resolve()
             if not path.is_relative_to(selected):
                 raise QlibxError(
-                    "QLIBX_BOUNDARY_PROJECT_PATH",
+                    "BOUNDARY",
                     f"paths.{name} escapes the project: {path}",
                     action="Use a project-relative contained path.",
                 )
@@ -88,7 +88,7 @@ class Project:
         )
         if not selected.is_relative_to(self.root):
             raise QlibxError(
-                "QLIBX_BOUNDARY_PROJECT_PATH",
+                "BOUNDARY",
                 f"Path escapes the project: {selected}",
                 action="Use a path below the project root.",
             )

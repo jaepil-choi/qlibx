@@ -42,7 +42,7 @@ def test_same_identity_different_content_conflicts(tmp_path: Path) -> None:
     catalog.stage_json(second, "result", {"value": 2})
     with pytest.raises(QlibxError) as conflict:
         catalog.publish(second, status="successful", metadata={})
-    assert conflict.value.code == "QLIBX_CONFLICT_RESULT_IDENTITY"
+    assert conflict.value.code == "CONFLICT"
     assert conflict.value.context["result_key"] == "same"
 
 

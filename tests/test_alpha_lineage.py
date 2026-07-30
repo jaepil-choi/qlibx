@@ -59,7 +59,7 @@ def test_group_demean_plan_and_runtime_error_share_one_requirement_resolution() 
     assert plan.resolution.missing_requirements == ("group_label",)
     with pytest.raises(QlibxError) as failure:
         apply_transform("group_demean", values)
-    assert failure.value.code == "QLIBX_MISSING_CAPABILITY_REQUIREMENTS"
+    assert failure.value.code == "MISSING"
     assert failure.value.context == plan.resolution.to_dict()
 
 
@@ -139,7 +139,7 @@ def test_exposure_distinguishes_unrequested_from_requested_but_unavailable() -> 
             method="weighted_sum",
             requested_metrics=("summary", "market_exposure"),
         )
-    assert failure.value.code == "QLIBX_MISSING_CAPABILITY_REQUIREMENTS"
+    assert failure.value.code == "MISSING"
     assert failure.value.context == plan.resolution.to_dict()
 
 
@@ -184,7 +184,7 @@ def test_unknown_operation_and_parameter_fail_explicitly() -> None:
     values = pd.DataFrame([[1.0, 2.0]], columns=["A", "B"])
     with pytest.raises(QlibxError) as unknown:
         apply_transform("not_an_operation", values)
-    assert unknown.value.code == "QLIBX_NOT_FOUND_ALPHA_OPERATION"
+    assert unknown.value.code == "NOT_FOUND"
     assert "cross_sectional_rank" in unknown.value.context["available"]
     with pytest.raises(ValueError, match="does not accept parameters"):
         apply_transform("linear_decay", values, windwo=2)
@@ -272,7 +272,7 @@ def test_project_local_operation_uses_the_common_requirement_contract() -> None:
     try:
         with pytest.raises(QlibxError) as failure:
             apply_transform("test_auxiliary", values)
-        assert failure.value.code == "QLIBX_MISSING_CAPABILITY_REQUIREMENTS"
+        assert failure.value.code == "MISSING"
         result = apply_transform("test_auxiliary", values, auxiliary=auxiliary)
         assert result.values.iloc[0].tolist() == [3.0, 7.0]
     finally:
@@ -312,5 +312,5 @@ def test_budget_policies_are_registered_and_report_leftover() -> None:
 
     with pytest.raises(QlibxError) as unknown:
         apply_budget(weights, policy="not_a_policy")
-    assert unknown.value.code == "QLIBX_NOT_FOUND_BUDGET_POLICY"
+    assert unknown.value.code == "NOT_FOUND"
     assert unknown.value.context["available"] == ["fixed", "flexible"]

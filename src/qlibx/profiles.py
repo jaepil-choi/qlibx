@@ -110,7 +110,7 @@ def execution_profile_requirements(
 ) -> CapabilityRequirements:
     if target_semantics not in {"long_only", "signed_weight", "enhanced_index"}:
         raise QlibxError(
-            "QLIBX_INVALID_TARGET_SEMANTICS",
+            "INVALID",
             f"Unsupported target semantics: {target_semantics}",
             action="Choose long_only, signed_weight, or enhanced_index.",
         )
@@ -137,14 +137,14 @@ def plan_execution_profile(
     path = project.contained(config_path)
     if not path.is_relative_to(project.paths.config):
         raise QlibxError(
-            "QLIBX_BOUNDARY_CONFIG_PATH",
+            "BOUNDARY",
             f"Execution profile is outside config root: {path}",
             action="Keep the user-authored profile below config/qlibx.",
         )
     raw = read_yaml(path)
     if raw.get("schema_version") != 1:
         raise QlibxError(
-            "QLIBX_UNSUPPORTED_EXECUTION_SCHEMA",
+            "UNSUPPORTED",
             "execution profile schema_version must be 1",
             action="Use the installed execution profile schema.",
         )

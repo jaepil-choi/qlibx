@@ -113,7 +113,7 @@ def _resolve_inputs(
                     frame = frame.astype(contract.pandas.dtype)
                 except (TypeError, ValueError) as error:
                     raise QlibxError(
-                        "QLIBX_INVALID_INPUT_DTYPE",
+                        "INVALID",
                         f"Input {contract.role!r} cannot convert to {contract.pandas.dtype}",
                         action="Correct the manifest or bind a compatible registered dataset.",
                     ) from error
@@ -129,7 +129,7 @@ def _resolve_inputs(
             missing = sorted(set(selected_columns) - set(frame.columns))
             if missing:
                 raise QlibxError(
-                    "QLIBX_MISSING_BOUND_FIELDS",
+                    "MISSING",
                     f"Bound input {contract.role!r} is missing fields: {missing}",
                     action="Correct the binding after inspecting registered fields.",
                 )
@@ -163,7 +163,7 @@ def _load_universe_matrix(
     duplicate = table.duplicated([axes.index, axes.columns], keep=False)
     if duplicate.any():
         raise QlibxError(
-            "QLIBX_INVALID_UNIVERSE_DUPLICATE",
+            "INVALID",
             f"Universe has {int(duplicate.sum())} duplicate date/ticker rows",
             action="Correct the registered universe query before Strategy execution.",
         )
@@ -171,7 +171,7 @@ def _load_universe_matrix(
     matrix = matrix.sort_index().sort_index(axis=1)
     if matrix.isna().any().any():
         raise QlibxError(
-            "QLIBX_INVALID_UNIVERSE_NULL",
+            "INVALID",
             "Universe membership is missing for one or more registered date/ticker cells",
             action="Provide explicit true/false membership; do not infer membership from absence.",
         )
@@ -184,14 +184,14 @@ def _validate_fields(contract: StrategyInput, frame: pd.DataFrame) -> None:
             converted = frame[declared_field.name].astype(declared_field.dtype)
         except (TypeError, ValueError) as error:
             raise QlibxError(
-                "QLIBX_INVALID_INPUT_DTYPE",
+                "INVALID",
                 f"Field {contract.role}.{declared_field.name} "
                 f"cannot convert to {declared_field.dtype}",
                 action="Correct the binding or manifest dtype.",
             ) from error
         if not declared_field.nullable and converted.isna().any():
             raise QlibxError(
-                "QLIBX_INVALID_INPUT_NULL",
+                "INVALID",
                 f"Field {contract.role}.{declared_field.name} contains null values",
                 action="Bind a complete field or declare nullable behavior.",
             )
@@ -209,7 +209,7 @@ def _validate_matrix_cells(contract: StrategyInput, frame: pd.DataFrame) -> None
         if declared_field.nullable or not frame.isna().to_numpy().any():
             continue
         raise QlibxError(
-            "QLIBX_INVALID_INPUT_NULL",
+            "INVALID",
             f"Field {contract.role}.{declared_field.name} contains null values",
             action="Bind a complete matrix or declare nullable behavior.",
             context={"role": contract.role, "field": declared_field.name},
@@ -242,7 +242,7 @@ def _validate_universe_alignment(
         outside = sorted(tickers - universe_tickers)
         if outside:
             raise QlibxError(
-                "QLIBX_BOUNDARY_UNIVERSE_MISMATCH",
+                "BOUNDARY",
                 f"Input {role!r} contains tickers outside universe axes: {outside}",
                 action="Align bound datasets with the inherited universe input.",
                 context={"role": role, "outside_universe": outside},

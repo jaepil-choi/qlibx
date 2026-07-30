@@ -170,7 +170,7 @@ def test_complete_artifact_exports_imports_and_detects_corruption(tmp_path: Path
     )
     with pytest.raises(QlibxError) as not_portable:
         first.export_bundle((incomplete.artifact_id,), tmp_path / "incomplete-bundle")
-    assert not_portable.value.code == "QLIBX_INVALID_EXPORT_ARTIFACT_STATUS"
+    assert not_portable.value.code == "INVALID"
     assert not_portable.value.context["status"] == "incomplete"
 
     payload = next((bundle / envelope.artifact_id).glob("payload.*"))
@@ -178,7 +178,7 @@ def test_complete_artifact_exports_imports_and_detects_corruption(tmp_path: Path
     third = ArtifactStore.from_project(Project.initialize(tmp_path / "third"))
     with pytest.raises(QlibxError) as corrupt:
         third.import_bundle(bundle)
-    assert corrupt.value.code == "QLIBX_CORRUPT_ARTIFACT_PAYLOAD"
+    assert corrupt.value.code == "CORRUPT"
     assert corrupt.value.context["artifact_id"] == envelope.artifact_id
 
 

@@ -152,6 +152,12 @@ compatible한 result를 다시 workflow에 연결할 수 있다. Ensemble이 저
 Artifact가 local file이라는 사실은 부수적인 구현 선택이 아니다. Module 사이의 결합을 끊고, 실패한
 run도 관측 가능하게 만들고, 병렬 agent가 서로의 process를 공유하지 않고도 같은 evidence를 읽게 한다.
 
+향후 production 연결도 이 원칙의 예외가 아니다. qlibx는 증권사 API나 OMS process를 직접 호출하는
+대신, 실행할 decision을 local storage의 durable artifact로 publish한다. 외부 OMS는 그 artifact를 읽어
+장중 실행하고, 실제 order, fill과 account state를 다시 durable artifact로 반환한다. qlibx와 OMS 사이의
+public integration point는 network client나 live Python object가 아니라 versioned stored-artifact
+protocol이다.
+
 #### Built-in은 일관성을 제공하고 local extension은 자율성을 제공한다
 
 자주 사용하는 signal processing, exposure analysis, portfolio diagnostics와 reporting은 deterministic한
@@ -221,6 +227,7 @@ realized result를 함께 관측할 수 있다는 점이다.
 - Qlib long-only account에서 signed alpha를 관측하기 위한 compatibility mode
 - Research workspace, artifact와 centralized catalog
 - Project-local extension registration과 artifact compatibility
+- Broker-neutral production decision, execution feedback와 checkpoint artifact contract
 - 병렬 agent의 isolation과 conflict behavior
 
 ### 2.2 Qlib에 맡기는 것
@@ -244,10 +251,26 @@ realized result를 함께 관측할 수 있다는 점이다.
 
 `qlibx` 설치와 upgrade는 project-owned definition을 자동으로 설치하거나 조용히 수정해서는 안 된다.
 
-### 2.4 Out of scope
+### 2.4 외부 production runtime과 OMS에 맡기는 것
+
+- New data 도착 감지, process scheduling과 장중 service lifecycle
+- Local storage에 publish된 ready decision을 claim하고 실제 주문으로 변환하는 일
+- 증권사 REST/WebSocket 연결, 인증, secret과 broker-specific identifier 관리
+- 주문 분할, 제출, 정정, 취소, pacing과 execution tactic
+- Rate limit, timeout, retry, duplicate-order 방지와 장애 복구
+- 사람 승인, kill switch, 운영 alert, high availability와 runbook
+- 실제 order, fill, reject reason과 account snapshot을 qlibx-compatible artifact로 반환하는 일
+
+OMS는 qlibx가 publish한 target을 실제 시장에서 달성하려고 시도하지만, requested target을 realized
+holding으로 간주해서는 안 된다. OMS가 반환한 confirmed fill과 account snapshot만 realized execution의
+근거가 된다.
+
+### 2.5 Out of scope
 
 - Qlib 자체에 native short-position support를 추가하는 일
 - Qlib의 core order, fill, account 또는 backtest engine을 대체하는 일
+- 증권사별 REST/WebSocket client, 인증 또는 order API를 qlibx core에 내장하는 일
+- OMS, RMS, broker gateway, always-on scheduler 또는 production operations platform을 만드는 일
 - Upstream market-data normalization system을 만드는 일
 - Git branch, worktree 또는 merge를 관리하는 일
 - User가 선언한 `available_at`이 실제 관측 가능 시점과 일치하는지 검증하는 일. qlibx는 선언된
@@ -255,10 +278,12 @@ realized result를 함께 관측할 수 있다는 점이다.
 - Signal이 완전한 market-neutral 또는 sector-neutral임을 보장하는 일
 - User-defined evidence와 criteria 없이 경제적 가설의 투자 가능성을 대신 결정하는 일
 
-### 2.5 금지해야 하는 behavior
+### 2.6 금지해야 하는 behavior
 
 - 명시적인 요청 없이 data registration 과정에서 user source data를 이동하거나 수정한다.
 - Project extension을 추가하기 위해 installed `qlibx`, Qlib 또는 site-packages를 수정한다.
+- qlibx core가 broker credential을 소유하거나 network를 통해 실제 주문을 제출한다.
+- OMS가 decision artifact를 claim하거나 실행을 완료하기 전에 authoritative strategy state를 전진시킨다.
 - Synthetic inverse ticker 매수로 underlying short를 흉내 낸다.
 - Long leg와 short leg를 관계없는 account에서 실행한 뒤 PnL만 합친다.
 - Requested target 또는 별도 signed ledger를 realized Qlib holding으로 취급한다.
@@ -1936,35 +1961,125 @@ responsibility가 아니다.
 recordability와 Qlib execution isolation을 유지하면서 AI를 사용하는 local Strategy도 연결할 수 있게
 하는 것이다.
 
-### 15.3 Production-ready incremental execution
+### 15.3 Production-deployable incremental decision runtime
 
-지금 qlibx의 실행 형태는 historical backtest다. 향후에는 같은 전략 정의를 **운용 시점에 그대로
-재실행**할 수 있어야 한다.
+qlibx의 목표는 production trading system이나 OMS가 되는 것이 아니다. 향후 목표는 historical
+backtest에서 사용한 같은 strategy definition, binding, lookback과 state contract를 운용 시점에도
+재사용하여 **실행 가능한 next decision을 durable하게 만드는 것**이다.
 
-목표는 다음이다. 전략을 한 번 만들고 나면, 새 데이터가 추가된 뒤 그 전략이 선언한 **lookback 만큼의
-최신 데이터만 읽어** 언제든지 오늘의 output을 낼 수 있다. 전체 history를 다시 backtest하지 않는다.
-Backtest에서 쓴 전략 code, binding과 lookback 선언을 그대로 쓰고 decision time만 오늘로 바꾼다.
+전략을 한 번 만들고 나면, 새 data가 추가된 뒤 그 전략이 선언한 최신 lookback과 직전 completed
+checkpoint만 읽어 오늘의 output을 낼 수 있어야 한다. 전체 history를 매번 다시 backtest하지 않는다.
 
 ```text
-backtest  : decision time을 과거 전체에 대해 순차 실행
-production: decision time = 오늘, lookback window만 읽어 1회 실행
+backtest  : historical decision time을 순차 실행
+production: latest bounded data + completed checkpoint -> next decision 1회 준비
 ```
 
-**Strategy memory와 state cache.** 위 형태는 lookback data만으로 output이 결정되는 전략에는 바로
-적용되지만, path dependent한 전략에는 그것만으로 부족하다. 이 경우 필요한 것은 history 재실행이 아니라
-**직전 decision이 남긴 memory와 state를 저장해 두고 다음 실행에서 이어받는 것**이다. 향후 qlibx는
-strategy memory와 state를 checkpoint로 cache하고 다음 decision에 복원하는 기능을 제공한다.
+#### Local-storage production boundary
 
-Stop loss가 대표적인 예다. "어떤 종목이 최근 n일 손실이 기준을 넘으면 팔고 m일간 재매수하지 않는다"는
-전략은 종목별 손실 기록과 매도 시점이 이어져야 성립한다. 이 memory가 실행 사이에 유지되지 않으면 매일
-상태가 초기화되므로 **production에서는 영원히 구현될 수 없다.** 따라서 memory/state cache는 path
-dependent 전략을 운용 가능하게 만드는 전제 조건이다.
+Production 연결은 local stored artifact를 경계로 한다.
 
-**Path dependency measurement.** 같은 맥락에서, 전략이 declared lookback 밖의 state에 얼마나 의존하는지를
-측정해 research record에 남기는 진단도 함께 제공한다. Fresh state에서 같은 decision time을 재실행했을 때
-같은 output이 나오는지, 오늘 output을 내기 위해 무엇이 복원되어야 하는지를 보고한다. 통과/실패 gate가
-아니라, 그 전략을 운용에 올릴 때 무엇이 필요한지를 알려주는 정보다.
+```text
+new data
+-> qlibx가 PreparedDecision을 local execution outbox에 atomic publish
+-> 외부 OMS가 ready decision을 claim하고 장중 실행
+-> OMS가 order, fill과 account snapshot을 local execution inbox에 publish
+-> qlibx가 execution outcome을 reconcile하고 CompletedCheckpoint를 commit
+```
 
-이 항목은 모두 future roadmap이며 현재 계약에는 포함되지 않는다. 현재 qlibx는 backtest 안에서
-checkpoint/resume을 지원하지만, 운용 시점의 incremental 재실행과 path dependency measurement는 아직
-제공하지 않는다.
+qlibx는 broker credential을 소유하거나 증권사 API를 호출하지 않는다. 외부 OMS도 qlibx process나 private
+Python object를 호출할 필요가 없다. 양쪽은 versioned artifact schema, stable identity와 atomic
+publication rule로만 결합한다.
+
+`PreparedDecision`은 conceptual하게 다음을 포함한다.
+
+- Decision, strategy, run과 idempotency identity
+- Decision time, observation cutoff와 input dataset snapshot
+- Parent completed-checkpoint identity
+- Decision 계산에 사용한 account snapshot
+- Broker-neutral target position, quantity 또는 order intent artifact
+- 실행 가능 시간, target tolerance와 명시된 execution boundary
+- Proposed strategy memory와 diagnostics
+- 아직 authoritative state가 아님을 나타내는 `prepared` status
+
+Exact schema와 target/order 경계는 architecture에서 확정한다. 다만 OMS가 qlibx의 strategy 의미를
+추측하거나 private object를 해석하지 않고 실행할 수 있을 만큼 충분히 명시적이어야 한다.
+
+OMS가 반환하는 execution outcome은 conceptual하게 다음을 포함한다.
+
+- 원래 decision identity
+- Accepted, rejected, running, partial, completed 또는 expired status
+- 제출, 정정, 취소한 order와 timestamp가 있는 actual fill
+- Commission, tax, reject 또는 blocked reason
+- 종료 시점의 actual position, cash, NAV와 account snapshot
+- 더 이상 결과가 추가되지 않는지를 나타내는 finality
+
+`partial`, `rejected`와 `expired`는 숨길 실패가 아니라 realized execution result다. qlibx는 requested target을
+holding으로 취급하지 않고 OMS가 반환한 confirmed fill과 account snapshot을 다음 decision의 feedback으로
+사용한다.
+
+#### Strategy memory와 commit boundary
+
+Lookback data만으로 output이 결정되는 전략에는 bounded 1회 실행으로 충분하지만, path-dependent 전략에는
+직전 strategy memory와 realized feedback이 필요하다. Stop loss, cooldown, incremental EMA와 risk regime이
+대표적인 예다.
+
+Production state transition은 다음 원칙을 따른다.
+
+1. `prepare`는 proposed memory를 `PreparedDecision`에 저장하지만 authoritative strategy state나 account를
+   전진시키지 않는다.
+2. OMS가 장중 실행한 결과를 durable execution outcome으로 반환한다.
+3. qlibx가 parent checkpoint, decision, confirmed fill과 final account snapshot을 reconcile한다.
+4. Reconciliation이 성공한 뒤에만 proposed memory와 realized feedback을 하나의
+   `CompletedCheckpoint`로 commit한다.
+5. Retry는 같은 decision identity와 idempotency key를 사용하며 duplicate decision, fill 또는 state
+   advance를 만들지 않는다.
+
+초기 production contract는 portfolio/account마다 **동시에 하나의 in-flight decision만** 허용한다. 이전
+decision이 아직 final이 아닌 상태에서 새 decision을 병합하거나 대체하는 supersede semantics는 별도
+roadmap으로 남긴다.
+
+#### Execution policy와 monitoring
+
+"장중 최대한 실행"은 암묵적 의미가 아니다. OMS가 지켜야 할 validity window, target tolerance,
+price/quantity/risk boundary, partial completion과 장 종료 처리 원칙을 decision artifact 또는
+project-owned OMS policy가 명시해야 한다. 주문 분할, pacing, broker-specific order type, retry와 cancel은
+section 2.4에 따라 OMS가 소유한다.
+
+OMS는 실행 중 actual account snapshot을 선택된 주기로 local storage에 남길 수 있다. qlibx의 monitoring
+analysis는 저장된 snapshot을 읽는 순수한 artifact consumer로 구현할 수 있지만, snapshot polling,
+always-on scheduling과 실시간 alert는 외부 production runtime의 책임이다. 이를 통해 observation,
+decision, execution과 monitoring clock을 하나의 strategy loop로 강제하지 않는다.
+
+#### Storage와 recovery contract
+
+Local storage를 단순한 임시 file-drop convention으로 취급하지 않는다. Production integration은 최소한
+다음을 보장해야 한다.
+
+- Payload는 immutable하고 schema-versioned이며 content와 producer identity를 검증할 수 있다.
+- `ready`, `claimed`, `running`과 final status publication은 process crash에도 모호하지 않다.
+- OMS는 하나의 ready decision을 한 번만 claim하거나 같은 idempotency identity로 안전하게 resume한다.
+- Order와 fill event는 append-only이며 final account snapshot과 reconcile할 수 있다.
+- Incomplete 또는 corrupt artifact는 completed result나 checkpoint로 보이지 않는다.
+- Exact storage engine은 architecture decision이지만 physical artifact와 transactional publication/claim
+  semantics를 함께 제공한다.
+
+#### Path-dependency diagnostics와 validation
+
+전략이 declared lookback 밖의 state에 얼마나 의존하는지를 측정해 research record에 남기는 진단도
+제공한다. Fresh state에서 같은 decision time을 재실행했을 때 같은 output이 나오는지, 오늘 output을
+내기 위해 어떤 checkpoint와 feedback이 필요한지를 보고한다. 이는 통과/실패 gate가 아니라 production
+운용 전제 조건을 알려주는 정보다.
+
+향후 구현은 최소한 다음 equivalence와 failure behavior를 검증해야 한다.
+
+- Resumed execution과 uninterrupted execution의 동일성
+- One-decision batch 반복과 historical one-shot run의 동일성
+- Repeated prepare의 idempotence와 prepare 중 state가 전진하지 않는다는 사실
+- 하나의 prepared decision이 한 번만 consume되고 commit된다는 사실
+- Partial fill, rejection과 zero-fill 뒤 다음 decision이 actual account를 본다는 사실
+- Crash/restart 뒤 incomplete artifact가 completed checkpoint로 승격되지 않는다는 사실
+
+이 항목은 future roadmap이며 현재 제공되는 production capability가 아니다. 현재 qlibx는 historical
+backtest 안의 checkpoint/resume을 지원하지만, incremental production preparation, local OMS artifact
+protocol, execution-outcome ingestion과 production checkpoint commit은 아직 제공하지 않는다.

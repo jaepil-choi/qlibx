@@ -75,7 +75,7 @@ flowchart LR
 
 ### 3.1 계층
 
-`src/qlibx/`는 30개 top-level module/package(45개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
+`src/qlibx/`는 31개 top-level module/package(46개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
 만들고, 그 규칙은 `tests/test_architecture.py`가 강제한다. **현재 intra-package import graph는
 acyclic이다** (순환 없음).
 
@@ -124,6 +124,7 @@ flowchart TD
         alpha["alpha"]
         strategy["strategy"]
         documentation["documentation"]
+        stagerec["stage_recovery"]
         config["config"]
     end
 
@@ -159,6 +160,7 @@ flowchart TD
     extensions --> requirements
     skill --> alpha
     skill --> documentation
+    skill --> stagerec
     storage --> artifacts
     storage --> research
     storage --> runcat
@@ -190,6 +192,7 @@ flowchart TD
     alpha --> requirements
     strategy --> serialization
     documentation --> errors
+    stagerec --> errors
     project --> config
     config --> errors
 ```
@@ -208,6 +211,7 @@ flowchart TD
 | `config` | errors | yaml |
 | `project` | config, errors | yaml |
 | `documentation` | errors | — |
+| `stage_recovery` | errors | — |
 | `alpha` | errors, requirements | pandas |
 | `strategy` | serialization | pandas |
 | `catalog` | config, errors, project | duckdb, pandas |
@@ -225,7 +229,7 @@ flowchart TD
 | `ensemble` | alpha, research | pandas |
 | `reporting` | run_catalog | pandas |
 | `storage` | artifacts, project, research, run_catalog | — |
-| `skill` | alpha, documentation, errors, serialization | — |
+| `skill` | alpha, documentation, errors, serialization, stage_recovery | — |
 | `data` | catalog, discovery, profiles, registration, requirements | — |
 | `agent` | documentation, onboarding, skill | — |
 | `cli` | alpha, catalog, discovery, documentation, errors, extensions, onboarding, profiles, project, registration, skill, strategy_manifest | qlib |
@@ -242,13 +246,16 @@ entrypoint (cli, __init__, data, agent)
   -> composition (profiles, ensemble, reporting, extensions, skill, storage)
     -> capability (catalog, research, execution, artifacts, ...)
       -> project boundary (project)
-        -> domain (alpha, strategy, config, documentation)
+        -> domain (alpha, strategy, config, documentation, stage_recovery)
           -> kernel (errors, requirements, serialization, optimization, orthogonality)
 ```
 
 - **Kernel은 아무것도 import하지 않는다.** 새 의존을 추가하려면 그 module이 kernel이 아니라는 뜻이다.
 - **`alpha`는 pandas와 kernel의 `errors`, `requirements` 외에 아무것도 모른다.** 순수 계산 도메인으로
   유지한다. `project`, `catalog`, `research`를 import하면 안 된다.
+- **`documentation`은 `stage_recovery`에 도달하지 못한다.** 둘 다 domain 계층이지만 방향이 아니라
+  **도달 가능성**이 규칙이다. `documentation`은 `qlibx docs`/`qlibx errors <stage>`를 받치는 core
+  표면이고, 거기서 수리 경로에 닿으면 core가 다시 처방하는 것이 된다(§12.3).
 - **`_vendor/`는 `execution`과 `run_catalog`만 import한다.** 둘은 서로 겹치지 않는 절반을
   번역한다 — `run_catalog`는 저장된 run을 **읽고**, `execution`은 run을 **실행한다**. 다른
   module이 vendored 코드를 직접 참조하면 drift다.
@@ -315,6 +322,13 @@ flowchart LR
 전체 29개 leaf command. 각 subcommand는 선언되는 자리에서
 `set_defaults(handler=...)`로 handler를 바인딩하고, `cli.dispatch`는 `args.handler(args)` 한 줄이다.
 handler는 **출력할 값을 return만** 하며 JSON 인코딩·출력·에러 변환은 한 곳에 모여 있다.
+
+출력 인코딩은 host locale이 아니라 protocol이 정한다. `main()`이 stdout을 UTF-8 strict로,
+stderr을 UTF-8 backslashreplace로 고정한다 — `print`는 locale codec으로 인코딩하므로 그대로 두면
+같은 command가 machine마다 다른 byte를 내보내고, codepage 밖 문자(비ASCII user 이름 아래의 project
+경로 등)에서 CLI 내부가 `UnicodeEncodeError`로 죽는다. stdout이 strict인 이유는 agent가 디코딩할 수
+없는 응답은 조용히 고칠 것이 아니라 깨진 응답이기 때문이고, stderr이 degrade하는 이유는 실패를
+보고하는 중에 자신이 실패하면 안 되기 때문이다.
 
 > **불변식**: 모든 leaf command는 handler를 가져야 한다.
 > `tests/test_cli.py::test_every_leaf_command_binds_a_handler`가 강제한다.
@@ -762,8 +776,8 @@ Project는 결과를 세 곳에 남기고, 셋은 서로 다른 물건이다. `P
 
 ```python
 storage = ProjectStorage.from_project(project)
-storage.artifacts   # ArtifactStore   — run-local content-addressed
-storage.research    # ResearchCatalog — staged publication + event log
+storage.artifacts  # ArtifactStore   — run-local content-addressed
+storage.research  # ResearchCatalog — staged publication + event log
 storage.runs(path)  # RunCatalog      — vendored Qlib run store (읽기 전용)
 ```
 
@@ -852,6 +866,16 @@ ALPHA  PORTFOLIO  EXECUTION  RESEARCH_RECORD  REPORTING
 안에서 cast할 수도, registration으로 돌아가 preprocess할 수도 있고, 어느 쪽이 옳은지는 그 문자열의
 의미에 달려 있어 core가 알 수 없다. 선택 기준은 stage별 skill이 소유한다.
 
+그 절반은 `stage_recovery.py`에 있다 — 11개 stage, 실패 24건, 수리 경로 61개. 각 경로가 무엇을
+할지, **어느 사실이 그 경로를 고르게 하는지**(`choose_when`), user 확인이 필요한지를 싣고, 각
+실패가 재실행 command를 단다. 기준 없는 경로 목록은 추측을 끝내는 게 아니라 core에서 agent로
+옮기기만 하므로 `choose_when`이 하중을 받는 필드다. Stage의 계약 한 줄은 `errors.STAGES`에서
+읽어오므로 skill이 core가 더 이상 그렇게 정의하지 않는 stage를 설명할 수 없다.
+
+`PORTFOLIO`와 `REPORTING`은 선언돼 있으나 아직 아무 데서도 raise되지 않는다(`portfolio.py` 13개,
+`reporting.py` 6개가 bare `ValueError`). 두 stage는 "이 실패는 분류되지 않은 채 도착하니 메시지로
+매칭하라"는 명시적 note를 달고 나간다 — 없는 제품을 문서화하지 않기 위해서다.
+
 ```mermaid
 flowchart LR
     F["실패"] --> Q["QlibxError<br/>stage · message · expected · context"]
@@ -887,6 +911,11 @@ registry에서 실패했든 `context["available"]`만 보면 대안을 얻는다
 > `expected`가 CLI 명령이나 "user에게 물어라"를 담지 않고,
 > PRD §5.6의 stage 표와 `errors.STAGES`가 정확히 일치한다.
 
+> **불변식** (`tests/test_stage_recovery.py`):
+> 모든 stage가 실패를 최소 1건 문서화하고, 모든 실패가 **경로를 2개 이상** 제시하며,
+> 모든 경로가 선택 기준을 갖고, `STAGE_RECOVERY`의 키가 `errors.STAGES`와 일치하며,
+> 모든 재실행 command가 살아 있는 argparse command tree에 존재한다.
+
 ### 12.4 Agent onboarding
 
 ```mermaid
@@ -903,6 +932,9 @@ stage 실패로 거부한다.
 
 생성되는 skill 패키지에는 `references/alpha-operations.md`가 포함되는데,
 **설치된 registry에서 렌더링**되므로 operation을 추가하면 skill이 자동으로 최신이 된다.
+`references/stage-recovery.md`도 같은 방식으로 `stage_recovery.STAGE_RECOVERY`와
+`errors.STAGES`에서 렌더링된다(§12.3). SKILL.md의 error 섹션은 수리 전에 이 파일을 읽으라고
+지시한다.
 
 ---
 
@@ -959,7 +991,8 @@ user-project/
 - **`tests/test_architecture.py`가 §3의 계층을 강제한다** — 모든 module이 layer에 배정되어 있고,
   import는 아래 계층으로만 가며, kernel은 무의존이고, graph는 acyclic이며, `_vendor`는
   `execution`/`run_catalog`만 통하고 kernel 위로 올라가지 않으며, `reporting`은 `execution`을
-  import하지 않고, `alpha`는 kernel의 `errors`/`requirements` 외에 의존하지 않으며,
+  import하지 않고, `alpha`는 kernel의 `errors`/`requirements` 외에 의존하지 않고,
+  core documentation 표면이 `stage_recovery`에 **전이적으로도** 도달하지 못하며,
   public import 경로가 살아 있다.
   - import graph 파서는 `from qlibx import x` 형태와 `_vendor/`, 그리고 facade의 lazy
     `_SUBMODULES` 선언까지 모두 본다. 한 가지 spelling이라도 빠지면 그 아래 test들이 그
@@ -993,6 +1026,8 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 - `_vendor/`를 `execution`·`run_catalog` 외의 module이 직접 import한다.
 - `_vendor/`가 kernel 위 계층을 import한다.
 - `reporting`이 `execution`을 import한다 (읽기는 `run_catalog`를 쓴다).
+- `documentation`이 직접이든 한 단계 건너서든 `stage_recovery`에 도달한다 (core가 수리를
+  처방하게 된다).
 - `qlibx/__init__.py`가 submodule을 eager하게 import해 `import qlibx`가 qlib을 끌어온다.
 - intra-package import graph에 순환이 생긴다.
 
@@ -1049,6 +1084,8 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 | --- | --- |
 | **Capability requirement contract (PRD §5.4/§5.5, P8)** | **구현됨.** 공용 declaration/evaluator/plan/error 타입, execution-profile 공개 migration, `group_demean`, exposure request/unavailable 구분, extension declaration, CLI/schema/generated skill을 제공한다. 상세는 아래 §16.1 |
 | **Strategy manifest/binding (PRD §6.3/§7/P2/P8)** | **구현됨.** Project YAML manifest와 binding, inherited universe, registered-field plan, fixed-lookback resolver, plain pandas callable, CLI/schema/generated skill을 제공한다. 기존 adaptive API도 universe를 상속한다 |
+| **Stage별 수리 경로 (PRD §5.3)** | **구현됨.** `stage_recovery.py`가 11개 stage · 실패 24건 · 경로 61개를 소유하고 생성 skill의 `references/stage-recovery.md`로 렌더링된다. 경로 2개 이상과 선택 기준을 테스트가 강제한다(§12.3) |
+| `PORTFOLIO`·`REPORTING` stage가 raise되지 않음 | 두 stage는 `errors.STAGES`에 선언만 되어 있고 `portfolio.py` 13개, `reporting.py` 6개(그리고 `optimization.py` 22개)가 여전히 bare `ValueError`다. Skill은 이 사실을 note로 명시한다. 승격하면 그 note가 사라진다 |
 | Beta estimation · residualization (PRD §8.2/§8.3) | **의도적으로 미구현.** 공용 requirement 기반은 준비됐지만 별도 작업으로 연기했다 |
 | `reporting` → `execution` → `_vendor` 결합 | **해소됨.** `run_catalog` port가 저장된 run 읽기를 소유하고 `reporting`은 이제 `execution`을 import하지 않는다. `_vendor/qlib_engine/__init__`도 lazy가 되어 report 구성에 qlib runtime이 로드되지 않는다 |
 | `ResearchCatalog` 크기 | 930줄. event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |

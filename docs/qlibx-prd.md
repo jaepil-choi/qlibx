@@ -442,6 +442,10 @@ Installed package는 다음 주제의 version-matched documentation을 제공해
 Documentation은 help-style public command와 installed file 양쪽에서 접근할 수 있어야 한다.
 Machine-readable schema와 example은 private Python module import 없이 찾을 수 있어야 한다.
 
+Public command의 machine-readable output은 host locale이 아니라 protocol이 인코딩을 정한다. 같은
+command는 어느 machine에서든 같은 byte를 내보내야 하며, 그 인코딩은 UTF-8이다. Agent가 output을 읽기
+전에 host codepage를 조회해야 한다면 그 output은 machine-readable이 아니다.
+
 ### 5.2 Instruction file integration
 
 qlibx는 coding-agent instruction file을 설정하는 onboarding action을 제공해야 한다.

@@ -15,23 +15,30 @@ def _qlibx(project: Path, *arguments: str) -> dict[str, object]:
     ``check=True`` alone raises without the child's stderr, and a stdout that is not
     JSON gives no context at all, so a transient subprocess failure is undiagnosable
     after the fact. Both paths now carry the command, exit code, stdout and stderr.
+
+    Each stream is decoded here rather than through ``text=True``, which would use the
+    locale codec and mangle the CLI's declared UTF-8 output on a legacy codepage --- the
+    journey runs under ``tmp_path``, so a non-ASCII user name reaches this JSON. stderr
+    can still carry bytes written before the CLI pinned its encoding (an interpreter
+    warning during import, say), so it is decoded leniently: it is context for a failure,
+    never the assertion.
     """
     completed = subprocess.run(
         [sys.executable, "-m", "qlibx", *arguments],
         cwd=project,
         check=False,
         capture_output=True,
-        text=True,
     )
+    stdout = completed.stdout.decode("utf-8", errors="replace")
     context = (
         f"command: qlibx {' '.join(arguments)}\n"
         f"exit code: {completed.returncode}\n"
-        f"stdout: {completed.stdout!r}\n"
-        f"stderr: {completed.stderr!r}"
+        f"stdout: {stdout!r}\n"
+        f"stderr: {completed.stderr.decode('utf-8', errors='replace')!r}"
     )
     assert completed.returncode == 0, f"qlibx CLI failed\n{context}"
     try:
-        return json.loads(completed.stdout)
+        return json.loads(stdout)
     except json.JSONDecodeError as error:
         raise AssertionError(f"qlibx CLI did not emit JSON\n{context}") from error
 

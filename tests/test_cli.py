@@ -2,10 +2,40 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from qlibx.cli import dispatch, parser
 from qlibx.project import Project
+
+
+def test_cli_json_is_utf8_whatever_the_callers_locale_says(tmp_path: Path) -> None:
+    """The JSON response declares its own encoding instead of inheriting the caller's.
+
+    ``PYTHONIOENCODING`` and ``PYTHONUTF8`` are cleared so the child falls back to the
+    locale codec, which is what an agent invoking qlibx from a plain shell gets. On a
+    legacy codepage that codec cannot represent this project path, so before the CLI
+    pinned its output the same command emitted undecodable bytes here and clean UTF-8 on
+    a machine that happened to export one of these variables.
+    """
+    project = tmp_path / "한글-프로젝트"
+    project.mkdir()
+    environment = dict(os.environ)
+    environment.pop("PYTHONIOENCODING", None)
+    environment.pop("PYTHONUTF8", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "qlibx", "project", "init", "--root", "."],
+        cwd=project,
+        check=True,
+        capture_output=True,
+        env=environment,
+    )
+
+    payload = json.loads(completed.stdout.decode("utf-8"))
+    assert Path(payload["root"]).name == "한글-프로젝트"
 
 
 def test_cli_requirements_qlib_status_and_agent_skill(tmp_path, capsys) -> None:

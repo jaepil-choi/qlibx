@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -469,7 +470,27 @@ def dispatch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _declare_output_encoding() -> None:
+    """Emit UTF-8 whatever codec the caller's locale happens to name.
+
+    ``print`` encodes with the locale codec, so the same command produced different bytes
+    on a cp949 machine than on a UTF-8 one, and any character outside that codepage --- a
+    project path under a non-ASCII user name, for instance --- raised UnicodeEncodeError
+    from inside the CLI. An agent parsing this output cannot carry a per-machine encoding
+    rule, so the encoding belongs to the protocol rather than to the environment.
+
+    stdout is strict: a byte sequence the agent cannot decode is a broken response, not
+    something to paper over. stderr is diagnostic and must never fail while reporting a
+    failure, so it degrades instead.
+    """
+    for stream, errors in ((sys.stdout, "strict"), (sys.stderr, "backslashreplace")):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors=errors)
+
+
 def main() -> None:
+    _declare_output_encoding()
     try:
         raise SystemExit(dispatch(parser().parse_args()))
     except QlibxError as error:

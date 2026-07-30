@@ -144,7 +144,7 @@ def test_point_in_time_etf_lookthrough_is_separate_and_reports_solver_state() ->
     assert result.tracking_error <= 0.01
     assert result.unimplemented_active_weight.abs().max() <= 0.01
 
-    with pytest.raises(ValueError, match="not available"):
+    with pytest.raises(QlibxError, match="not available") as failure:
         construct_enhanced_index(
             benchmark_weight=pd.Series({"A": 0.5, "B": 0.4}),
             active_weight=pd.Series({"A": 0.1, "B": 0.0}),
@@ -154,6 +154,11 @@ def test_point_in_time_etf_lookthrough_is_separate_and_reports_solver_state() ->
             constituent_available_at=pd.Timestamp("2025-01-03"),
             decision_time=pd.Timestamp("2025-01-02"),
         )
+    # A look-ahead refusal the agent can route: the stage says which step to go back to, and the
+    # context carries both timestamps so it can see how far ahead the constituents were.
+    assert failure.value.stage == "PORTFOLIO"
+    context = failure.value.context
+    assert context["constituent_available_at"] > context["decision_time"]
 
 
 def test_soft_residual_and_hard_infeasibility_are_distinct() -> None:
@@ -178,3 +183,37 @@ def test_soft_residual_and_hard_infeasibility_are_distinct() -> None:
     assert hard.status == "hard_infeasible"
     assert hard.validation_passed is False
     assert "negative" in hard.reason
+
+
+def test_portfolio_input_failures_name_the_stage_and_the_offending_instruments() -> None:
+    """Which instrument broke the contract is the whole question, so it belongs in `context`.
+
+    These are the caller's inputs and the caller can repair them, so they are PORTFOLIO
+    failures rather than the plain `ValueError`s they used to be -- an agent receiving one now
+    knows which step it is in and which names to show the user.
+    """
+    common = {
+        "benchmark_weight": pd.Series({"A": 0.5, "B": 0.4}),
+        "active_weight": pd.Series({"A": 0.1, "B": 0.0}),
+        "price": pd.Series({"A": 10.0, "B": 20.0}),
+        "portfolio_value": 1_000.0,
+    }
+
+    with pytest.raises(QlibxError) as lots:
+        construct_enhanced_index(**common, lot_size=pd.Series({"A": 1, "B": 0}))
+    assert lots.value.stage == "PORTFOLIO"
+    assert lots.value.context["invalid"] == ["B"]
+
+    with pytest.raises(QlibxError) as bounds:
+        construct_enhanced_index(
+            **common,
+            lower_bounds=pd.Series({"A": 0.0, "B": 0.9}),
+            upper_bounds=pd.Series({"A": 1.0, "B": 0.1}),
+        )
+    assert bounds.value.stage == "PORTFOLIO"
+    assert bounds.value.context["invalid"] == ["B"]
+
+    with pytest.raises(QlibxError) as value:
+        construct_enhanced_index(**{**common, "portfolio_value": 0.0})
+    assert value.value.stage == "PORTFOLIO"
+    assert value.value.expected

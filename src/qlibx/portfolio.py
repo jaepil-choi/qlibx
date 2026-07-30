@@ -7,6 +7,7 @@ from typing import Literal
 
 import pandas as pd
 
+from .errors import QlibxError
 from .optimization import (
     ConstraintDiagnostic,
     CvxpyIntentTrackingOptimizer,
@@ -72,11 +73,23 @@ def construct_enhanced_index(
 ) -> EnhancedIndexResult:
     """Construct physical targets without inventing ETF constituents or residual bets."""
     if portfolio_value <= 0:
-        raise ValueError("portfolio_value must be positive")
+        raise QlibxError(
+            "PORTFOLIO",
+            f"portfolio_value must be positive, got {portfolio_value}",
+            expected="Portfolio value is a positive amount of capital to allocate.",
+        )
     if not 0 <= cash_lower <= cash_upper <= 1:
-        raise ValueError("cash bounds must satisfy 0 <= lower <= upper <= 1")
+        raise QlibxError(
+            "PORTFOLIO",
+            f"cash bounds must satisfy 0 <= lower <= upper <= 1, got [{cash_lower}, {cash_upper}]",
+            expected="Cash bounds are fractions of the portfolio, lower no greater than upper.",
+        )
     if tracking_tolerance < 0:
-        raise ValueError("tracking_tolerance must be non-negative")
+        raise QlibxError(
+            "PORTFOLIO",
+            f"tracking_tolerance must be non-negative, got {tracking_tolerance}",
+            expected="Tracking tolerance is a non-negative distance from the benchmark.",
+        )
     desired_index = benchmark_weight.index.union(active_weight.index)
     benchmark = benchmark_weight.reindex(desired_index).fillna(0.0).astype("float64")
     active = active_weight.reindex(desired_index).fillna(0.0).astype("float64")
@@ -101,22 +114,74 @@ def construct_enhanced_index(
     physical_instruments = price.index
     prices = price.astype("float64")
     if prices.index.has_duplicates or prices.isna().any() or prices.le(0).any():
-        raise ValueError("price must uniquely cover every positive-price physical instrument")
+        raise QlibxError(
+            "PORTFOLIO",
+            "price must uniquely cover every positive-price physical instrument",
+            expected="Exactly one positive price per physical instrument.",
+            context={
+                "duplicated": sorted(
+                    {str(name) for name in prices.index[prices.index.duplicated()]}
+                ),
+                "missing_or_non_positive": sorted(
+                    {str(name) for name in prices.index[prices.isna() | prices.le(0)]}
+                ),
+            },
+        )
     aligned = _AxisAligner(physical_instruments)
     types = aligned.series(instrument_type, default="stock", dtype="string")
     if types.isna().any() or not types.isin(["stock", "etf"]).all():
-        raise ValueError("instrument_type must explicitly be stock or etf")
+        raise QlibxError(
+            "PORTFOLIO",
+            "instrument_type must explicitly be stock or etf",
+            expected="Every physical instrument declares its kind; qlibx does not infer it.",
+            context={
+                "undeclared": sorted(
+                    {
+                        str(name)
+                        for name in types.index[types.isna() | ~types.isin(["stock", "etf"])]
+                    }
+                )
+            },
+        )
     lots = aligned.series(lot_size, default=1, dtype="int64")
     if lots.isna().any() or lots.le(0).any():
-        raise ValueError("lot_size must be present and positive for every physical instrument")
+        raise QlibxError(
+            "PORTFOLIO",
+            "lot_size must be present and positive for every physical instrument",
+            expected="Every physical instrument declares a positive lot size.",
+            context={
+                "invalid": sorted({str(name) for name in lots.index[lots.isna() | lots.le(0)]})
+            },
+        )
     available = aligned.series(tradable, default=True, dtype=bool, fill=False)
     lower = aligned.series(lower_bounds, default=0.0, dtype="float64")
     upper = aligned.series(upper_bounds, default=1.0, dtype="float64")
     if lower.isna().any() or upper.isna().any() or lower.lt(0).any() or lower.gt(upper).any():
-        raise ValueError("physical lower/upper bounds are incomplete or incompatible")
+        raise QlibxError(
+            "PORTFOLIO",
+            "physical lower/upper bounds are incomplete or incompatible",
+            expected="Every physical instrument has bounds with 0 <= lower <= upper.",
+            context={
+                "invalid": sorted(
+                    {
+                        str(name)
+                        for name in lower.index[
+                            lower.isna() | upper.isna() | lower.lt(0) | lower.gt(upper)
+                        ]
+                    }
+                )
+            },
+        )
     costs = aligned.series(transaction_cost, default=0.0, dtype="float64")
     if costs.isna().any() or costs.lt(0).any():
-        raise ValueError("transaction_cost must be finite and non-negative")
+        raise QlibxError(
+            "PORTFOLIO",
+            "transaction_cost must be finite and non-negative",
+            expected="Every physical instrument has a finite, non-negative transaction cost.",
+            context={
+                "invalid": sorted({str(name) for name in costs.index[costs.isna() | costs.lt(0)]})
+            },
+        )
     current = aligned.series(current_quantity, default=0, dtype="int64", fill=0)
     current_weight = current.mul(prices).div(portfolio_value)
     current_cash_weight = (
@@ -287,19 +352,67 @@ def _exposure_matrix(
             columns=physical_instruments,
         )
     if constituent_available_at is None or decision_time is None:
-        raise ValueError("ETF look-through requires point-in-time availability and decision time")
+        raise QlibxError(
+            "PORTFOLIO",
+            "ETF look-through requires point-in-time availability and decision time",
+            expected=(
+                "Look-through carries the timestamp its constituents became knowable and the "
+                "decision time they are used at."
+            ),
+        )
     if pd.Timestamp(constituent_available_at) > pd.Timestamp(decision_time):
-        raise ValueError("ETF constituent data was not available at decision time")
+        raise QlibxError(
+            "PORTFOLIO",
+            "ETF constituent data was not available at decision time",
+            expected="Constituent data used at a decision time was knowable at or before it.",
+            context={
+                "constituent_available_at": str(constituent_available_at),
+                "decision_time": str(decision_time),
+            },
+        )
     if set(constituent_exposure.index) != set(desired.index):
-        raise ValueError("constituent exposure axis is incompatible with desired exposure")
+        raise QlibxError(
+            "PORTFOLIO",
+            "constituent exposure axis is incompatible with desired exposure",
+            expected="The look-through rows are exactly the desired-exposure constituents.",
+            context={
+                "only_in_exposure": sorted(
+                    {str(name) for name in set(constituent_exposure.index) - set(desired.index)}
+                ),
+                "only_in_desired": sorted(
+                    {str(name) for name in set(desired.index) - set(constituent_exposure.index)}
+                ),
+            },
+        )
     if set(constituent_exposure.columns) != set(physical_instruments):
-        raise ValueError("constituent exposure does not cover every physical instrument")
+        raise QlibxError(
+            "PORTFOLIO",
+            "constituent exposure does not cover every physical instrument",
+            expected="The look-through columns are exactly the physical instruments.",
+            context={
+                "uncovered": sorted(
+                    {
+                        str(name)
+                        for name in set(physical_instruments) - set(constituent_exposure.columns)
+                    }
+                )
+            },
+        )
     matrix = constituent_exposure.reindex(
         index=desired.index,
         columns=physical_instruments,
     ).astype("float64")
     if matrix.isna().any().any():
-        raise ValueError("constituent exposure contains missing values")
+        raise QlibxError(
+            "PORTFOLIO",
+            "constituent exposure contains missing values",
+            expected="Every look-through cell is a number; a missing cell is not a zero exposure.",
+            context={
+                "constituents_with_missing": sorted(
+                    {str(name) for name in matrix.index[matrix.isna().any(axis=1)]}
+                )
+            },
+        )
     return matrix
 
 

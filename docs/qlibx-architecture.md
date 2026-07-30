@@ -872,9 +872,19 @@ ALPHA  PORTFOLIO  EXECUTION  RESEARCH_RECORD  REPORTING
 옮기기만 하므로 `choose_when`이 하중을 받는 필드다. Stage의 계약 한 줄은 `errors.STAGES`에서
 읽어오므로 skill이 core가 더 이상 그렇게 정의하지 않는 stage를 설명할 수 없다.
 
-`PORTFOLIO`와 `REPORTING`은 선언돼 있으나 아직 아무 데서도 raise되지 않는다(`portfolio.py` 13개,
-`reporting.py` 6개가 bare `ValueError`). 두 stage는 "이 실패는 분류되지 않은 채 도착하니 메시지로
-매칭하라"는 명시적 note를 달고 나간다 — 없는 제품을 문서화하지 않기 위해서다.
+`PORTFOLIO`와 `REPORTING`도 이제 실제로 raise된다. `portfolio.py` 13개와 `reporting.py` 6개의
+bare `ValueError`를 stage 실패로 승격했고, 어느 instrument·section이 계약을 깼는지를
+`context`가 싣는다(`invalid`, `duplicated`, `available`, `missing_from_order`). 판정 기준은
+§12.3의 표 그대로다 — 호출자가 유발했고 호출자가 고칠 수 있으면 stage 실패다. 19개 모두
+`construct_enhanced_index`·`compose_report`·`render_report`·`analyze_stored_run`의 입력 계약
+위반이었다. 반면 infeasible·solver 실패는 원래부터 raise가 아니라 `EnhancedIndexResult.status`로
+**반환**되므로 건드리지 않았다.
+
+남은 예외는 `optimization.py`의 22개다. 이 module은 kernel(layer 0)이라
+`test_kernel_has_no_intra_package_dependencies`가 `errors` import를 금지한다. 따라서
+`LinearConstraint`·`OptimizerConfig`의 self-validation은 여전히 bare `ValueError`이고,
+generated skill이 그 사실을 note로 명시한다. 승격하려면 `optimization`을 kernel 밖으로 옮길지를
+먼저 정해야 한다 — refactor가 아니라 계층 결정이다.
 
 ```mermaid
 flowchart LR
@@ -1085,7 +1095,8 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 | **Capability requirement contract (PRD §5.4/§5.5, P8)** | **구현됨.** 공용 declaration/evaluator/plan/error 타입, execution-profile 공개 migration, `group_demean`, exposure request/unavailable 구분, extension declaration, CLI/schema/generated skill을 제공한다. 상세는 아래 §16.1 |
 | **Strategy manifest/binding (PRD §6.3/§7/P2/P8)** | **구현됨.** Project YAML manifest와 binding, inherited universe, registered-field plan, fixed-lookback resolver, plain pandas callable, CLI/schema/generated skill을 제공한다. 기존 adaptive API도 universe를 상속한다 |
 | **Stage별 수리 경로 (PRD §5.3)** | **구현됨.** `stage_recovery.py`가 11개 stage · 실패 24건 · 경로 61개를 소유하고 생성 skill의 `references/stage-recovery.md`로 렌더링된다. 경로 2개 이상과 선택 기준을 테스트가 강제한다(§12.3) |
-| `PORTFOLIO`·`REPORTING` stage가 raise되지 않음 | 두 stage는 `errors.STAGES`에 선언만 되어 있고 `portfolio.py` 13개, `reporting.py` 6개(그리고 `optimization.py` 22개)가 여전히 bare `ValueError`다. Skill은 이 사실을 note로 명시한다. 승격하면 그 note가 사라진다 |
+| `PORTFOLIO`·`REPORTING` stage가 raise되지 않음 | **해소됨.** 19개(`portfolio.py` 13, `reporting.py` 6)를 stage 실패로 승격했고 `context`가 위반한 instrument·section을 싣는다(§12.3) |
+| `optimization.py`의 bare `ValueError` 22개 | kernel(layer 0)이라 `errors`를 import할 수 없다. `LinearConstraint`·`OptimizerConfig`가 public 경로로 노출되므로 caller는 stage 없는 실패를 받는다. 승격은 `optimization`을 kernel 밖으로 옮기는 계층 결정을 먼저 요구한다 |
 | Beta estimation · residualization (PRD §8.2/§8.3) | **의도적으로 미구현.** 공용 requirement 기반은 준비됐지만 별도 작업으로 연기했다 |
 | `reporting` → `execution` → `_vendor` 결합 | **해소됨.** `run_catalog` port가 저장된 run 읽기를 소유하고 `reporting`은 이제 `execution`을 import하지 않는다. `_vendor/qlib_engine/__init__`도 lazy가 되어 report 구성에 qlib runtime이 로드되지 않는다 |
 | `ResearchCatalog` 크기 | 930줄. event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |

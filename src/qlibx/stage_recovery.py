@@ -474,8 +474,8 @@ STAGE_RECOVERY: Mapping[str, tuple[StageFailure, ...]] = {
     "PORTFOLIO": (
         StageFailure(
             symptom=(
-                "`physical lower/upper bounds are incomplete or incompatible` -- raised as a plain "
-                "`ValueError`; see the note above."
+                "`physical lower/upper bounds are incomplete or incompatible` -- "
+                "`context['invalid']` names the instruments."
             ),
             paths=(
                 RepairPath(
@@ -493,8 +493,8 @@ STAGE_RECOVERY: Mapping[str, tuple[StageFailure, ...]] = {
         ),
         StageFailure(
             symptom=(
-                "`price must uniquely cover every positive-price physical instrument` -- also a "
-                "plain `ValueError`."
+                "`price must uniquely cover every positive-price physical instrument` -- "
+                "`context` separates the duplicated names from the missing ones."
             ),
             paths=(
                 RepairPath(
@@ -620,7 +620,7 @@ STAGE_RECOVERY: Mapping[str, tuple[StageFailure, ...]] = {
         StageFailure(
             symptom=(
                 "`unknown included report sections: [...]` or `report order must exactly cover "
-                "selected sections` -- raised as a plain `ValueError`; see the note above."
+                "selected sections` -- `context` carries the valid ids and the mismatch."
             ),
             paths=(
                 RepairPath(
@@ -638,7 +638,8 @@ STAGE_RECOVERY: Mapping[str, tuple[StageFailure, ...]] = {
         ),
         StageFailure(
             symptom=(
-                "`analysis input is not a backtest run: <run_id>` -- also a plain `ValueError`."
+                "`analysis input is not a backtest run: <run_id>` -- `context['run_kind']` says "
+                "what the run actually is."
             ),
             paths=(
                 RepairPath(
@@ -657,17 +658,15 @@ STAGE_RECOVERY: Mapping[str, tuple[StageFailure, ...]] = {
     ),
 }
 
-# Stages whose failures are not in the agent vocabulary yet. Saying so is the honest thing:
-# an agent told to expect `stage: "PORTFOLIO"` would wait for a field that never arrives.
+# Failures that reach a public surface without a stage. Saying so is the honest thing: an agent
+# told to expect `stage: "PORTFOLIO"` from every portfolio call would wait for a field that does
+# not always arrive.
 UNCLASSIFIED_STAGES: Mapping[str, str] = {
     "PORTFOLIO": (
-        "Portfolio construction still raises plain `ValueError`, so these failures carry no "
-        "`stage`, no `expected` and no `context`. Match them by message and treat this section "
-        "as the stage guide anyway."
-    ),
-    "REPORTING": (
-        "Report composition still raises plain `ValueError`, so these failures carry no `stage`, "
-        "no `expected` and no `context`. Match them by message."
+        "`construct_enhanced_index` reports this stage, but the constraint and solver objects you "
+        "pass it (`LinearConstraint`, `OptimizerConfig`) validate themselves in the optimizer "
+        "kernel and still raise plain `ValueError` with no `stage`, `expected` or `context`. "
+        "Match those by message."
     ),
 }
 

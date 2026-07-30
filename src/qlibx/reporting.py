@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from qlibx.errors import QlibxError, unknown_name
 from qlibx.run_catalog import open_run_catalog
 
 
@@ -67,13 +68,23 @@ def analyze_stored_run(catalog_path: str | Path, run_id: str) -> ReportDocument:
     catalog = open_run_catalog(catalog_path)
     record = catalog.get_run(run_id)
     if record.run_kind != "backtest":
-        raise ValueError(f"analysis input is not a backtest run: {run_id}")
+        raise QlibxError(
+            "REPORTING",
+            f"analysis input is not a backtest run: {run_id}",
+            expected="Backtest analysis reads a run stored with run_kind 'backtest'.",
+            context={"run_id": run_id, "run_kind": record.run_kind},
+        )
     config = record.metadata.get("backtest_config", {})
     signed = config.get("target_semantics") == "signed_weight"
     account_name = "active_account_daily" if signed else "account_daily"
     account = catalog.load_table(run_id, account_name).sort_values("trade_date")
     if account.empty:
-        raise ValueError("stored account artifact is empty")
+        raise QlibxError(
+            "REPORTING",
+            "stored account artifact is empty",
+            expected="A backtest run stores at least one account row to analyze.",
+            context={"run_id": run_id, "artifact": account_name},
+        )
     returns = account["portfolio_return"].astype("float64")
     nav = account["nav"].astype("float64")
     drawdown = nav.div(nav.cummax()).sub(1.0)
@@ -200,17 +211,32 @@ def compose_report(
 ) -> ReportDocument:
     by_id = {section.section_id: section for section in sections}
     if len(by_id) != len(sections):
-        raise ValueError("report section IDs must be unique")
+        raise QlibxError(
+            "REPORTING",
+            "report section IDs must be unique",
+            expected="Each analysis section carries its own section_id.",
+            context={"section_ids": [section.section_id for section in sections]},
+        )
     selected = list(by_id) if include is None else list(include)
     unknown = set(selected).difference(by_id)
     if unknown:
-        raise ValueError(f"unknown included report sections: {sorted(unknown)}")
+        raise QlibxError(
+            "REPORTING",
+            f"unknown included report sections: {sorted(unknown)}",
+            expected="Every included section id is one of the supplied analysis sections.",
+            context={"unknown": sorted(unknown), "available": sorted(by_id)},
+        )
     selected = [name for name in selected if name not in set(exclude)]
     if order is not None:
         missing = set(selected).difference(order)
         extra = set(order).difference(selected)
         if missing or extra:
-            raise ValueError("report order must exactly cover selected sections")
+            raise QlibxError(
+                "REPORTING",
+                "report order must exactly cover selected sections",
+                expected="The order lists every selected section exactly once and nothing else.",
+                context={"missing_from_order": sorted(missing), "not_selected": sorted(extra)},
+            )
         selected = list(order)
     return ReportDocument(report_id, 1, tuple(by_id[name] for name in selected))
 
@@ -242,7 +268,7 @@ def render_report(
         content = _render_html(document)
         renderer_id = "html"
     else:
-        raise ValueError(f"unsupported renderer: {renderer}")
+        raise unknown_name("REPORTING", "renderer", str(renderer), ("html", "json"))
     path.write_bytes(content)
     digest = hashlib.sha256(content).hexdigest()
     manifest_path = path.with_suffix(path.suffix + ".manifest.json")

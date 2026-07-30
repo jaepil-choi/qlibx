@@ -11,6 +11,7 @@ from qlibx.alpha import list_budget_policies, list_operations
 from qlibx.documentation import public_example
 from qlibx.errors import QlibxError
 from qlibx.serialization import digest_bytes
+from qlibx.stage_recovery import stage_recovery_markdown
 
 SkillTarget = Literal["codex", "claude", "generic"]
 
@@ -104,6 +105,7 @@ def _skill_files(target: SkillTarget) -> dict[str, str]:
     return {
         "SKILL.md": _skill_markdown(target),
         "references/contracts.md": _contracts_markdown(),
+        "references/stage-recovery.md": stage_recovery_markdown(),
         "examples/project-api.py": _project_example(),
         "examples/data-registration.yaml": _registration_example(),
         "examples/logical-dataset.yaml": _logical_dataset_example(),
@@ -218,12 +220,18 @@ Every `QlibxError` returns `stage`, `message`, `expected`, `context`, and
 confirm what that step owns.
 
 qlibx reports what it observed and what the contract expected. It does not tell you how to repair
-it, because the repair is usually not unique and depends on what the data means. Decide with the
-user, then rerun the same command.
+it, because the repair is usually not unique and depends on what the data means. Deciding is your
+job, and the user's.
+
+**Read `references/stage-recovery.md` before you repair anything.** It lists, per stage, the
+failures that actually occur, every repair path open to each, the fact that selects one path over
+another, whether that path needs the user's confirmation, and the command to rerun afterwards.
+Take the path the evidence selects, not the first one listed, and never offer the user a single
+path when the reference gives several.
 
 For example, a `STRATEGY_RUN` failure caused by a text value in a numeric column can be repaired
-either by casting inside the Strategy or by preprocessing and re-registering the dataset. Which is
-right depends on whether that text is a data defect or a column that means something. Ask.
+by casting inside the Strategy, by preprocessing and re-registering the dataset, or by branching
+on the value because it is a category. Which is right depends on what that text means. Ask.
 
 If `requires_user_confirmation` is true, explain the unresolved meaning and ask; never guess or
 silently fall back.

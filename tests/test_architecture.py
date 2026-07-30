@@ -22,7 +22,7 @@ PACKAGE_NAME = "qlibx"
 # Layer 0 is the kernel; a module may import only from strictly lower layers.
 LAYERS: tuple[tuple[str, ...], ...] = (
     ("errors", "requirements", "serialization", "optimization", "orthogonality"),
-    ("config", "documentation", "alpha", "strategy"),
+    ("config", "documentation", "alpha", "strategy", "stage_recovery"),
     ("project",),
     ("run_catalog",),
     (
@@ -203,6 +203,29 @@ def test_vendored_qlib_depends_only_on_the_kernel() -> None:
     assert not upward, (
         f"_vendor may import only kernel modules {sorted(VENDOR_ALLOWED_DEPENDENCIES)}, "
         f"but also imports {upward}"
+    )
+
+
+def test_the_core_cannot_reach_a_repair_path() -> None:
+    """PRD 5.6 gives the repair to the skill, so the core must not be able to serve one.
+
+    `documentation` backs `qlibx docs` and `qlibx errors <stage>`. If `stage_recovery` were
+    reachable from there, the core would be prescribing a repair again -- just through an
+    import instead of through an `expected` string, where the existing wording test cannot
+    see it. Reachability, not the direct import, is the property: one hop of indirection
+    would otherwise be enough to lose it.
+    """
+    reachable: set[str] = set()
+    frontier = ["documentation", "errors"]
+    while frontier:
+        module = frontier.pop()
+        for target in GRAPH.get(module, ()):
+            if target not in reachable:
+                reachable.add(target)
+                frontier.append(target)
+    assert "stage_recovery" not in reachable, (
+        "the core documentation surface can reach the skill's repair paths through "
+        f"{sorted(reachable)}"
     )
 
 

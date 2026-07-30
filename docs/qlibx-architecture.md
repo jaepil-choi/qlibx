@@ -75,7 +75,7 @@ flowchart LR
 
 ### 3.1 계층
 
-`src/qlibx/`는 29개 top-level module/package(39개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
+`src/qlibx/`는 30개 top-level module/package(45개 `.py` 파일)로 구성된다. 계층은 **import 방향**이
 만들고, 그 규칙은 `tests/test_architecture.py`가 강제한다. **현재 intra-package import graph는
 acyclic이다** (순환 없음).
 
@@ -98,6 +98,7 @@ flowchart TD
         skill["skill"]
         profiles["profiles"]
         sm["strategy_manifest"]
+        storage["storage"]
     end
 
     subgraph L3["capability"]
@@ -158,6 +159,9 @@ flowchart TD
     extensions --> requirements
     skill --> alpha
     skill --> documentation
+    storage --> artifacts
+    storage --> research
+    storage --> runcat
 
     catalog --> config
     profiles --> catalog
@@ -210,7 +214,7 @@ flowchart TD
 | `discovery` | errors, project | duckdb, pyarrow |
 | `registration` | config, errors, project, serialization | pyarrow |
 | `profiles` | catalog, config, errors, project, requirements | — |
-| `strategy_manifest` | catalog, config, errors, execution, project, requirements, serialization, strategy | pandas |
+| `strategy_manifest` (package) | catalog, config, errors, execution, project, requirements, serialization, strategy | pandas |
 | `artifacts` | errors, project, serialization, strategy | pandas |
 | `research` | errors, orthogonality, project, serialization | duckdb, pandas |
 | `portfolio` | optimization | pandas |
@@ -220,21 +224,22 @@ flowchart TD
 | `extensions` | alpha, artifacts, errors, project, requirements | pandas |
 | `ensemble` | alpha, research | pandas |
 | `reporting` | run_catalog | pandas |
+| `storage` | artifacts, project, research, run_catalog | — |
 | `skill` | alpha, documentation, errors, serialization | — |
 | `data` | catalog, discovery, profiles, registration, requirements | — |
 | `agent` | documentation, onboarding, skill | — |
 | `cli` | alpha, catalog, discovery, documentation, errors, extensions, onboarding, profiles, project, registration, skill, strategy_manifest | qlib |
-| `__init__` | errors, project + 13개 public submodule(**lazy**, §4.1) | — |
+| `__init__` | errors, project + 14개 public submodule(**lazy**, §4.1) | — |
 | `_vendor` | optimization (kernel only) | qlib, duckdb, pandas, numpy, cvxpy, matplotlib, yaml |
 
-가장 많이 의존되는 module: `errors`(16) → `project`(10) → `serialization`(7) →
-`config`/`alpha`/`requirements`(4).
+가장 많이 의존되는 module: `errors` → `project` → `serialization` → `config`/`alpha`/`requirements`.
+`errors`는 이제 `Stage` 타입도 제공하므로 `config`가 stage를 인자로 받을 수 있다(§12.3).
 
 ### 3.3 Dependency 규칙
 
 ```text
 entrypoint (cli, __init__, data, agent)
-  -> composition (profiles, ensemble, reporting, extensions, skill)
+  -> composition (profiles, ensemble, reporting, extensions, skill, storage)
     -> capability (catalog, research, execution, artifacts, ...)
       -> project boundary (project)
         -> domain (alpha, strategy, config, documentation)
@@ -266,11 +271,12 @@ import qlibx
 qlibx.__all__
 # ['Project', 'QlibxError', 'agent', 'alpha', 'artifacts', 'data',
 #  'ensemble', 'execution', 'extensions', 'portfolio', 'reporting',
-#  'requirements', 'research', 'strategy', 'strategy_manifest']
+#  'requirements', 'research', 'storage', 'strategy', 'strategy_manifest']
 ```
 
 책임 기반의 얇은 facade다. `data`와 `agent`는 하위 module을 재수출하는 facade이고,
-나머지는 실제 module이다. `_vendor`는 public surface가 아니다.
+`storage`는 세 저장소를 가리키는 문이며(§11.4), 나머지는 실제 module이다.
+`_vendor`는 public surface가 아니다.
 
 **Submodule은 lazy하게 resolve된다.** `qlibx/__init__.py`는 `_SUBMODULES` 선언과 PEP 562
 `__getattr__`만 가지므로 `import qlibx`는 이름을 지목하기 전까지 아무 capability도 로드하지
@@ -322,7 +328,7 @@ handler는 **출력할 값을 return만** 하며 JSON 인코딩·출력·에러 
 ## 5. Project와 ownership boundary
 
 `qlibx.yaml`(schema_version 1)이 유일한 진입점이다. 모든 경로는 여기서 resolve하고,
-project root 밖으로 나가면 `QLIBX_BOUNDARY_PROJECT_PATH`로 실패한다.
+project root 밖으로 나가면 `PROJECT` stage 실패가 된다.
 
 ```mermaid
 flowchart TB
@@ -358,7 +364,7 @@ User가 작성하는 config 파일의 정확한 경로:
 | `config/qlibx/bindings/*.yaml` | Strategy/version별 registered dataset과 exact field mapping |
 
 `Project.contained(path)`가 모든 경로 접근의 관문이다. Registration output은 추가로
-`generated_data` 하위여야 하며(`QLIBX_BOUNDARY_OUTPUT_PATH`), extension source는
+`generated_data` 하위여야 하며(`DATA_REGISTRATION` stage), extension source는
 `extensions` 하위여야 한다.
 
 ---
@@ -402,14 +408,14 @@ loader.load_full_history_matrix("market", reason="backtest input matrix")
 
 Registration, schema inventory, operator preview, backtest input 구성은 정당하게 전체 이력이
 필요하다. 그 선택을 **생략된 인자에 숨기지 않고** `reason`으로 호출 지점에 남긴다. 빈 `reason`은
-`QLIBX_MISSING_FULL_HISTORY_REASON`으로 거부한다. `qlibx data preview`는 `--as-of`를 주면
+`DATA_REGISTRATION` stage 실패로 거부한다. `qlibx data preview`는 `--as-of`를 주면
 bounded, 안 주면 full-history로 동작하며 결과의 `availability` 필드가 어느 쪽이었는지 밝힌다.
 
 `limit`은 `available_at`·`ticker` 정렬 뒤에 적용한다. 정렬 없는 `LIMIT`은 스캔 순서에 따라
 매번 다른 행을 돌려주므로 preview가 registration의 재현 가능한 증거가 되지 못한다.
 
-Registration은 원본 SHA256을 계획 시점과 기록 직전에 두 번 확인하며, 도중에 바뀌면
-`QLIBX_CONFLICT_SOURCE_CHANGED`으로 실패한다. 쓰기는 staging → `replace`로 원자적이다.
+Registration은 원본 SHA256을 계획 시점과 기록 직전에 두 번 확인하며, 도중에 바뀌면 `DATA_REGISTRATION`
+stage 실패가 된다. 쓰기는 staging → `replace`로 원자적이다.
 
 `profiles.plan_execution_profile`은 논리 dataset을 Qlib 실행 role
 (`execution_price`, `valuation_price`, `universe`, `tradable`, `volume`, `benchmark_weight`,
@@ -693,8 +699,9 @@ sequenceDiagram
 
 Path B의 항등식 — 티커별로 `C = B + A`, `A = C - B` (A=signed active, B=matched baseline ≥ 0,
 C=Qlib composite ≥ 0). `_signed_result_from_backend`가 매 실행마다 수량 항등식과 NAV
-(`composite = baseline + active`)를 1e-8 허용오차로 대조하고, 어긋나면 결과를 반환하지 않고
-`RuntimeError`를 던진다.
+(`composite = baseline + active`)를 1e-8 허용오차로 대조하고, 어긋나면 `QlibxInternalError`를 던진다.
+qlibx 자신의 장부가 서로 어긋난 것이므로 호출자가 유발할 수도 고칠 수도 없다 — §12.3의 두 번째
+종류이고, agent vocabulary에 나타나지 않는 유일한 두 지점이다.
 
 Path B는 borrow/locate/margin/recall/forced buy-in/borrow fee를 **모델링하지 않는다.**
 `SignedExecutionResult.compatibility_limitations`가 이 사실을 결과에 담아 반환한다.
@@ -710,7 +717,7 @@ Path B는 borrow/locate/margin/recall/forced buy-in/borrow fee를 **모델링하
 
 ```mermaid
 flowchart LR
-    V["임의 값<br/>DataFrame · Series · JSON"] --> W["_write_payload<br/>parquet 또는 json"]
+    V["임의 값<br/>DataFrame · Series · JSON"] --> W["serialization.write_payload<br/>parquet 또는 json"]
     W --> ID["artifact_id = digest(identity)"]
     ID --> DIR[".qlibx/artifacts/RUN/ARTIFACT/<br/>envelope.json + payload"]
     DIR --> EXP["export_bundle()<br/>complete 만 이식 가능"]
@@ -748,6 +755,28 @@ stored artifact  ->  AnalysisSection  ->  ReportDocument  ->  renderer  ->  outp
 - Report output은 canonical research artifact가 **아니다**
   (manifest의 `artifact_role`이 이를 명시한다).
 
+### 11.4 저장소 진입점 (`storage.py`)
+
+Project는 결과를 세 곳에 남기고, 셋은 서로 다른 물건이다. `ProjectStorage`는 그 셋을 합치지 않고
+**한 문에서 가리킨다**.
+
+```python
+storage = ProjectStorage.from_project(project)
+storage.artifacts   # ArtifactStore   — run-local content-addressed
+storage.research    # ResearchCatalog — staged publication + event log
+storage.runs(path)  # RunCatalog      — vendored Qlib run store (읽기 전용)
+```
+
+셋을 합치지 않는 이유는 셋이 다른 것이기 때문이다. `RunCatalog`는 vendored 코드이고 `_vendor`
+gateway 2개 중 하나라, 합치면 `reporting`이 execution runtime에 다시 묶인다(§3.3). `runs`가
+method이고 경로를 받는 것도 run catalog는 execution이 위치를 정하기 때문이다 — artifacts와
+research의 root는 manifest가 선언한다.
+
+기존 import 3개는 그대로 동작한다. 이것은 merge가 아니라 front door다.
+
+> `runs`의 import는 지연시킨다. `_vendor.qlib_engine.store`를 artifacts만 원하는 호출자가
+> 로드하지 않게 하기 위해서다. DuckDB는 아낄 수 없다 — `research`가 module scope에서 import한다.
+
 ---
 
 ## 12. 횡단 관심사
@@ -763,6 +792,7 @@ stored artifact  ->  AnalysisSection  ->  ReportDocument  ->  renderer  ->  outp
 | `digest_file(path)` | 대용량 파일 | 1MB 블록 스트리밍 |
 | `digest_text` / `digest_bytes` | 문자열 / 바이트 | — |
 | `validate_name(name)` | 저장 payload 이름 | 소문자·숫자·`_`만 |
+| `write_payload` / `read_payload` | 저장 payload 입출력 | `PayloadFormat`(`parquet`\|`json`) 하나로 통일 |
 
 `digest_dataset`을 써야 할 곳에 `digest_document`를 쓰면 dtype이나 결측만 다른 두 프레임이
 같은 해시로 충돌한다. 재현성 식별자에는 반드시 `digest_dataset`을 쓴다.
@@ -785,7 +815,7 @@ CapabilityRequirements
 
 Optional requirement는 `not_requested`, `satisfied`, `unsatisfied`를 구분한다. Exposure caller는
 `requested_metrics`를 반드시 지정하고, 요청한 input이 없으면 기본적으로
-`QLIBX_MISSING_CAPABILITY_REQUIREMENTS`으로 실패한다. `allow_incomplete=True`를 명시한 호출만
+requirement gap으로 실패한다. `allow_incomplete=True`를 명시한 호출만
 `status="incomplete"`와 `UnavailableOutput`을 돌려받는다.
 
 Execution profile의 이전 `ExecutionProfilePlan` 공개 형식은 제거했다.
@@ -797,24 +827,49 @@ evidence를 evaluator에 넣고, `ready=false`일 때 registered field inventory
 반환한다. Core는 mapping을 추천하지 않는다. Generated skill은 그 사실을 읽어 user와 interview하고,
 approval 뒤 binding을 작성한 다음 같은 plan을 재실행한다.
 
-### 12.3 에러 계약
+### 12.3 에러 계약 (PRD §5.6)
 
-모든 실패는 `QlibxError`로 `{code, message, action, context}`를 반환한다.
-현재 **126개 코드**가 등록되어 있고, 모두 `qlibx errors <code>`로 조회 가능하다.
-`research`·`execution`·`artifacts`를 포함한 public Python surface는 raw `ValueError`를
-던지지 않는다 — stale decision, identity conflict, reconciliation 실패처럼 agent가
-복구를 판단해야 하는 지점이 모두 code·action·context를 가진다.
+실패는 두 종류이고, 그중 하나만 agent에게 나간다.
+
+| | `QlibxError` | `QlibxInternalError` |
+| --- | --- | --- |
+| 의미 | agent가 대응해야 하는 실패 | qlibx 자신의 invariant 위반 |
+| 필드 | `stage` · `message` · `expected` · `context` · `requires_user_confirmation` | `message` · `context` |
+| stage | 있음 | **없음** |
+| `expected` | 있음 (필수) | **없음** |
+| 이유 | 호출자가 유발했거나 대응할 수 있다 | 호출자가 유발할 수 없고 고칠 수도 없다 |
+
+`stage`는 **user journey의 어느 단계에서 막혔는가**이지 어떤 종류의 규칙이 깨졌는가가 아니다.
+규칙 종류는 core가 답할 수 있지만 agent가 쓸 수 없다 — 어느 skill을 열지 결정해 주지 못한다.
+
+```text
+ONBOARDING  PROJECT  DATA_REGISTRATION  UNIVERSE  STRATEGY_CONTRACT  STRATEGY_RUN
+ALPHA  PORTFOLIO  EXECUTION  RESEARCH_RECORD  REPORTING
+```
+
+**Core는 수리를 처방하지 않는다.** `expected`는 계약이 요구한 것을 진술할 뿐이다. 수리 경로가
+대개 하나가 아니기 때문이다 — numeric 연산이 문자열 때문에 `STRATEGY_RUN`에서 실패하면 Strategy
+안에서 cast할 수도, registration으로 돌아가 preprocess할 수도 있고, 어느 쪽이 옳은지는 그 문자열의
+의미에 달려 있어 core가 알 수 없다. 선택 기준은 stage별 skill이 소유한다.
 
 ```mermaid
 flowchart LR
-    F["실패"] --> Q["QlibxError<br/>code · message · action · context"]
+    F["실패"] --> Q["QlibxError<br/>stage · message · expected · context"]
     Q --> CLI2["CLI: JSON 출력 + exit 2"]
-    Q --> AG2["agent: qlibx errors CODE 로 복구 조회"]
-    U["이름 조회 실패"] --> UN["errors.unknown_name(...)"]
+    Q --> AG2["agent: qlibx errors STAGE 로 단계·skill 조회"]
+    AG2 --> SK["stage skill<br/>복수의 수리 경로와 선택 기준"]
+    U["이름 조회 실패"] --> UN["errors.unknown_name(stage, ...)"]
     UN --> Q
-    G["requirement gap"] --> RG["errors.requirement_gap(...)"]
+    G["requirement gap"] --> RG["errors.requirement_gap(stage, ...)"]
     RG --> Q
+    UC["user code 예외"] --> PT["errors.passthrough(stage, error, ...)"]
+    PT --> Q
+    I["invariant 위반"] --> II["QlibxInternalError<br/>agent vocabulary 밖"]
 ```
+
+`errors.passthrough()`는 user code/user data에서 나온 예외를 **분류하지 않고** 원래 type과 message를
+그대로 싣는다. 남의 `TypeError`가 "invalid"인지 "corrupt"인지 판정하는 것은 호출 안쪽에서 답할 수
+없고, 시도하면 정확했던 유일한 설명을 잃는다.
 
 `errors.unknown_name()`이 "등록되지 않은 이름" 실패를 한 모양으로 만든다 — agent는 어느
 registry에서 실패했든 `context["available"]`만 보면 대안을 얻는다.
@@ -822,8 +877,15 @@ registry에서 실패했든 `context["available"]`만 보면 대안을 얻는다
 `errors.requirement_gap()`은 typed `CapabilityResolution.to_dict()`를 변경 없이 context에 넣는다.
 따라서 agent는 capability마다 다른 error shape를 해석하지 않는다.
 
-> **불변식**: 던질 수 있는 모든 코드는 `ERROR_GUIDANCE`에 있어야 하고, 그 역도 참이어야 한다.
-> `tests/test_documentation.py::test_every_raised_error_code_has_installed_recovery_guidance`가 강제한다.
+`config`는 네 단계를 섬기므로 stage를 인자로 받는다. 호출 module이 `for_stage(...)`로 한 번
+바인딩하여 파일 맨 위에 단계를 선언한다. YAML 중복 키는 PyYAML 콜스택 안에서 발견되어 인자가
+닿지 않으므로 `_loader_for(stage)`가 stage를 실은 loader subclass를 만든다.
+
+> **불변식** (`tests/test_documentation.py`):
+> 모든 raise가 선언된 stage를 지목하고(threading 허용, 단 80% 이상은 직접 명시),
+> 모든 `QlibxError`가 `expected`를 넘기며,
+> `expected`가 CLI 명령이나 "user에게 물어라"를 담지 않고,
+> PRD §5.6의 stage 표와 `errors.STAGES`가 정확히 일치한다.
 
 ### 12.4 Agent onboarding
 
@@ -836,8 +898,8 @@ flowchart LR
 ```
 
 `AGENTS.md`/`CLAUDE.md`는 `<!-- qlibx:managed:start -->` 마커 사이만 교체하며 사용자 내용을
-보존하고, 반복 실행해도 블록이 중복되지 않는다. 계획 이후 파일이 바뀌면
-`QLIBX_CONFLICT_STALE_PLAN`으로 거부한다.
+보존하고, 반복 실행해도 블록이 중복되지 않는다. 계획 이후 파일이 바뀌면 `ONBOARDING`
+stage 실패로 거부한다.
 
 생성되는 skill 패키지에는 `references/alpha-operations.md`가 포함되는데,
 **설치된 registry에서 렌더링**되므로 operation을 추가하면 skill이 자동으로 최신이 된다.
@@ -878,7 +940,7 @@ user-project/
 
 ## 14. Testing map
 
-129개 테스트. PRD §13 acceptance criteria와의 대응:
+144개 테스트. PRD §13 acceptance criteria와의 대응:
 
 | PRD | 주요 테스트 |
 | --- | --- |
@@ -905,7 +967,8 @@ user-project/
 - `import qlibx`가 qlib·cvxpy·duckdb를 로드하지 않고, `__all__`의 모든 이름이 resolve된다.
 - `load_table`/`load_matrix`에서 `as_of`를 생략할 수 없고, 전체 이력 읽기는 `reason`을 요구한다.
 - 모든 CLI leaf command가 handler를 가진다.
-- 던지는 모든 error code에 복구 guidance가 있고 그 역도 참이다.
+- 모든 raise가 선언된 journey stage를 지목하고 `expected`를 넘기며, `expected`가 수리 절차를
+  지시하지 않는다. PRD §5.6의 stage 표와 `errors.STAGES`가 일치한다.
 - 문서화된 예제의 keyword가 실제 signature에 바인딩된다(단순 `compile()`이 아니라).
 - 등록된 모든 operation이 `alpha_operation` schema의 필수 필드를 갖는다.
 
@@ -942,9 +1005,15 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 **계약 위반**
 
 - 이름 조회 실패를 `QlibxError`가 아닌 raw exception으로 던져 CLI가 traceback을 낸다.
-- `research`·`execution`·`artifacts`가 conflict·stale·reconciliation 실패를 raw
-  `ValueError`/`RuntimeError`로 던져 agent가 복구 경로를 얻지 못한다.
-- 새 error code를 `ERROR_GUIDANCE` 등록 없이 던진다.
+- `research`·`execution`·`artifacts`가 conflict·stale 실패를 raw `ValueError`/`RuntimeError`로
+  던져 agent가 어느 단계에서 막혔는지 얻지 못한다.
+- 선언되지 않은 stage를 지목하거나, PRD §5.6의 stage 표와 `errors.STAGES`가 어긋난다.
+- `QlibxError`를 `expected` 없이 던진다 (그건 내부 결함이 잘못된 type을 쓴 것이다).
+- `expected`에 CLI 명령이나 "user에게 물어라"를 담아 core가 수리 경로를 지시한다.
+- 여러 유효한 수리 경로 중 하나만 제시한다 (core도, 생성된 skill도).
+- User code/user data에서 나온 예외를 core의 분류로 덮어써 원래 type과 message를 잃게 한다.
+- 내부 invariant 위반에 stage와 `expected`를 붙여 agent vocabulary에 넣는다.
+- Data/universe requirement 위반을 등록 시점에 통과시킨 뒤 Strategy 실행 중에 발견하게 한다.
 - 문서화된 예제가 실제 signature와 맞지 않는다.
 - Plan과 runtime error가 서로 다른 requirement resolution을 반환한다.
 - Optional output에서 `not_requested`와 `unsatisfied`를 같은 상태로 취급한다.
@@ -982,10 +1051,10 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 | **Strategy manifest/binding (PRD §6.3/§7/P2/P8)** | **구현됨.** Project YAML manifest와 binding, inherited universe, registered-field plan, fixed-lookback resolver, plain pandas callable, CLI/schema/generated skill을 제공한다. 기존 adaptive API도 universe를 상속한다 |
 | Beta estimation · residualization (PRD §8.2/§8.3) | **의도적으로 미구현.** 공용 requirement 기반은 준비됐지만 별도 작업으로 연기했다 |
 | `reporting` → `execution` → `_vendor` 결합 | **해소됨.** `run_catalog` port가 저장된 run 읽기를 소유하고 `reporting`은 이제 `execution`을 import하지 않는다. `_vendor/qlib_engine/__init__`도 lazy가 되어 report 구성에 qlib runtime이 로드되지 않는다 |
-| `ResearchCatalog` 크기 | event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |
-| `strategy_manifest` 크기 | 1020줄이 YAML schema · requirement 어댑터 · 동적 code 로드 · resolver · Qlib adapter를 모두 소유한다. `alpha/`처럼 package로 승격하고 489줄 `strategy`와 이름을 정리하는 것이 다음 단계 |
-| capability adapter 중복 | `profiles` · `alpha.exposure` · `strategy_manifest`가 declare → evidence → evaluate → plan 파이프라인을 각자 손으로 짠다. `OperationSpec`처럼 공용 `Capability` protocol + registry로 접으면 plan/error/CLI/schema/skill이 각 capability마다가 아니라 통틀어 하나가 된다 |
-| 저장소 3개 | `ArtifactStore`(.qlibx/artifacts) · `ResearchCatalog`(qlibx-research) · `RunCatalog`(vendored)가 서로 다른 identity·lineage 모델을 쓰고 서로를 참조하지 못한다. 단일 content-addressed store 위의 view 3개로 접는 것이 PRD §9.3의 cross-plane reuse 전제 |
+| `ResearchCatalog` 크기 | 930줄. event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |
+| `strategy_manifest` 크기 | **해소됨.** package로 승격했다 — `contracts` · `loading` · `capability` · `resolution` · `invocation`, 최대 파일 251줄. `strategy`와의 이름 정리는 아직 남았다 |
+| capability adapter 중복 | **해소됨.** `requirements`의 probe protocol(`Finding` · `gather_evidence` · `supplied_roles_probe` · `plan_capability`)로 접었다. `RequirementEvidence`를 만드는 곳은 이제 패키지 전체에서 `gather_evidence` 하나다 |
+| 저장소 3개 | **부분 해소.** `ProjectStorage`(§11.4)가 진입점을 하나로 모으고 payload 입출력을 `serialization`이 공유한다. 다만 identity·lineage 모델은 여전히 셋이다 — `RunCatalog`는 vendored 코드이고 `_vendor` gateway 경계에 묶여 있어 합칠 수 없다. PRD §9.3의 cross-plane reuse는 아직 미완 |
 | `references/`의 target architecture | `contracts/`·`runtime/`·`capabilities/`·`adapters/` 디렉터리 계층, ComponentRef, FrozenInvocationBundle, TemporalSemantics(revision/vintage), CostModelSnapshot, RiskModelSnapshot은 아직 구현되지 않았다. 현재는 flat module + import 방향으로 계층을 강제한다 |
 | Path B (matched capitalization) | compatibility mode. borrow/margin/recall/fee 모델 아님 |
 
@@ -995,10 +1064,9 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
   Python에서 아무것도 강제하지 못하므로 계층 표현 수단으로 쓰지 않는다.
 - 한 module이 커져 내부에 여러 관심사가 생기면 package로 승격한다(`alpha/`가 그 사례). Module →
   package 전환은 import 관점에서 투명하여 public 경로를 깨지 않는다.
-- 다음 승격 후보는 `strategy_manifest`(1020줄, YAML 파싱 · requirement 어댑터 · 동적 code
-  로드 · point-in-time resolver · Qlib adapter를 한 파일이 소유하고 intra-package 의존도
-  8개로 최대다), `documentation`(1300줄+, 대부분 catalog 데이터로 error code가 늘면 더 커진다),
-  `research`(860줄+, event log · blob store · publication protocol이 한 클래스에 있다)다.
+- 다음 승격 후보는 `research`(930줄, event log · blob store · publication protocol이 한
+  클래스에 있다)와 `strategy`(801줄)다. `documentation`은 error 계약이 stage 7 → 11개
+  responsibility로 줄면서 800줄이 되어 급하지 않다.
 
 ### 16.1 Capability requirement contract 구현 (PRD §5.4/§5.5, P8)
 
@@ -1021,7 +1089,7 @@ flowchart LR
 | 공용 선언 | `CapabilityRequirements` + `CapabilityRequirement` + `DerivationAlternative` | `qlibx.requirements`, `schema capability_requirement` |
 | 순수 판정 | evidence와 requested optional set에서 `CapabilityResolution` 생성 | `evaluate_requirements` |
 | read-only plan | declaration, resolution, parameters, warnings, limitations | `CapabilityPlan`, `qlibx qlib plan`, `qlibx alpha plan`, `qlibx alpha exposure-plan` |
-| runtime error | plan resolution을 변경 없이 error context에 사용 | `QLIBX_MISSING_CAPABILITY_REQUIREMENTS` |
+| runtime error | plan resolution을 변경 없이 error context에 사용 | `errors.requirement_gap(stage, ...)` |
 | execution profile | legacy `ExecutionProfilePlan` 제거, 공용 공개 계약으로 전면 이관 | `execution_profile_requirements`, `plan_execution_profile`, `require_execution_profile` |
 | alpha operation | `OperationSpec.requirements`; `requires_groups` boolean 제거 | `group_demean`, project-local/extension-backed `OperationSpec` |
 | exposure | 명시적 metric request, `not_requested`와 `unsatisfied` 구분 | `exposure_requirements`, `plan_exposure`, `ExposureArtifact` |

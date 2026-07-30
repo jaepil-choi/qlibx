@@ -109,7 +109,7 @@ being plural. The ownership test lives in `test_architecture.py`, where the impo
 Baseline `0e0bb41`: `145 passed` under both PowerShell and bash, `ruff check` clean.
 
 After: `161 passed` under both, `ruff check` clean. Mutation checks and their results are
-recorded in `docs/implementations/stage-recovery-in-the-skill.md`.
+recorded in `docs/implementations/017-stage-recovery-in-the-skill.md`.
 
 One finding came out of writing rather than testing: the first draft used em-dashes, which cannot
 be encoded on this machine's cp949 console. The generated file is written as UTF-8 so it was

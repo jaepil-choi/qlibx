@@ -92,6 +92,11 @@ When an approved task changes production source behavior, create an implementati
 manifest-declared directory. Record why the change exists, what outcome it serves, how it works,
 trade-offs, and exact validation.
 
+Always name an implementation record `NNN-kebab-case-slug.md`, where `NNN` is a zero-padded
+three-digit sequence number. Take the next unused number after the highest one already present in
+the directory, so the filenames read in creation order. Never reuse or renumber an existing record;
+if a record is removed, its number stays retired.
+
 Do not create implementation records for harness-only, documentation-only, experiment-only, or
 showcase-only changes.
 

@@ -159,8 +159,10 @@ def test_hump_restarts_after_a_gap_instead_of_poisoning_the_series() -> None:
 
 def test_top_bottom_fails_instead_of_selecting_one_name_on_both_sides() -> None:
     values = pd.DataFrame([[1.0, 2.0, 3.0]], columns=list("abc"))
-    with pytest.raises(ValueError, match="at least 4 valid observations"):
+    with pytest.raises(QlibxError, match="at least 4 valid observations") as thin:
         top_bottom(values, count=2)
+    assert thin.value.stage == "ALPHA"
+    assert thin.value.context["insufficient_dates"] == 1
     assert top_bottom(values, count=1).iloc[0].tolist() == [-1.0, 0.0, 1.0]
 
 
@@ -186,10 +188,13 @@ def test_unknown_operation_and_parameter_fail_explicitly() -> None:
         apply_transform("not_an_operation", values)
     assert unknown.value.stage == "ALPHA"
     assert "cross_sectional_rank" in unknown.value.context["available"]
-    with pytest.raises(ValueError, match="does not accept parameters"):
+    with pytest.raises(QlibxError, match="does not accept parameters") as misspelled:
         apply_transform("linear_decay", values, windwo=2)
-    with pytest.raises(ValueError, match="requires parameters"):
+    assert misspelled.value.stage == "ALPHA"
+    assert misspelled.value.context["declared"] == ["window"]
+    with pytest.raises(QlibxError, match="requires parameters") as absent:
         apply_transform("linear_decay", values)
+    assert absent.value.context["missing"] == ["window"]
 
 
 def test_project_local_operation_registers_and_carries_its_own_lineage() -> None:

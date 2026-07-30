@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from qlibx.errors import requirement_gap, unknown_name
+from qlibx.errors import QlibxError, requirement_gap, unknown_name
 from qlibx.requirements import (
     CapabilityPlan,
     CapabilityRequirement,
@@ -106,10 +106,23 @@ class OperationRegistry:
 
     def register(self, spec: OperationSpec, *, replace_existing: bool = False) -> OperationSpec:
         if spec.name in self._specs and not replace_existing:
-            raise ValueError(f"alpha operation is already registered: {spec.name}")
+            raise QlibxError(
+                "ALPHA",
+                f"alpha operation is already registered: {spec.name}",
+                expected=(
+                    "A registration either introduces a new name or states that it replaces "
+                    "the installed one."
+                ),
+                context={"operation": spec.name},
+            )
         missing = sorted(set(spec.required_parameters) - set(spec.parameters))
         if missing:
-            raise ValueError(f"operation {spec.name} requires undeclared parameters: {missing}")
+            raise QlibxError(
+                "ALPHA",
+                f"operation {spec.name} requires undeclared parameters: {missing}",
+                expected="Every required parameter also appears in the declared parameters.",
+                context={"operation": spec.name, "undeclared": sorted(missing)},
+            )
         self._specs[spec.name] = spec
         return spec
 
@@ -179,13 +192,25 @@ def plan_operation(
 def _validate_parameters(spec: OperationSpec, parameters: Mapping[str, Any]) -> None:
     unknown = sorted(set(parameters) - set(spec.parameters))
     if unknown:
-        raise ValueError(
+        raise QlibxError(
+            "ALPHA",
             f"operation {spec.name} does not accept parameters {unknown}; "
-            f"declared: {sorted(spec.parameters)}"
+            f"declared: {sorted(spec.parameters)}",
+            expected="Every supplied parameter is one the operation declares.",
+            context={
+                "operation": spec.name,
+                "unknown": unknown,
+                "declared": sorted(spec.parameters),
+            },
         )
     missing = sorted(set(spec.required_parameters) - set(parameters))
     if missing:
-        raise ValueError(f"operation {spec.name} requires parameters {missing}")
+        raise QlibxError(
+            "ALPHA",
+            f"operation {spec.name} requires parameters {missing}",
+            expected="Every required parameter is supplied.",
+            context={"operation": spec.name, "missing": missing},
+        )
 
 
 def _apply_spec(
@@ -256,7 +281,11 @@ def apply_pipeline(
     """
     ordered = [_as_step(step) for step in steps]
     if not ordered:
-        raise ValueError("pipeline requires at least one step")
+        raise QlibxError(
+            "ALPHA",
+            "pipeline requires at least one step",
+            expected="A pipeline applies at least one operation.",
+        )
     current = values
     lineage: list[OperationContract] = []
     warnings: list[str] = []

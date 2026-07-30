@@ -57,7 +57,7 @@ def test_installed_example_builds_valid_project_local_exponential_decay(tmp_path
 
     outside = project.paths.state / "outside.py"
     outside.write_text("def apply(values): return values\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="outside the configured extension root"):
+    with pytest.raises(QlibxError, match="outside the configured extension root") as escape:
         load_extension(
             project,
             extension_id="outside",
@@ -66,6 +66,10 @@ def test_installed_example_builds_valid_project_local_exponential_decay(tmp_path
             source=outside,
             callable_name="apply",
         )
+    # Adding capability to the project is ONBOARDING, and the context names the root it must be
+    # under -- otherwise the agent has to go and find that path itself.
+    assert escape.value.stage == "ONBOARDING"
+    assert escape.value.context["extension_root"] == str(project.paths.extensions)
 
 
 def test_local_analyzer_and_renderer_share_public_artifact_contract(tmp_path: Path) -> None:

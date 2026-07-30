@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from qlibx.errors import QlibxError
+
 from ..registry import OperationSpec, register_operation
 
 
@@ -15,14 +17,24 @@ def top_bottom(values: pd.DataFrame, *, count: int) -> pd.DataFrame:
     sides (where the short assignment would have won).
     """
     if count < 1:
-        raise ValueError("count must be positive")
+        raise QlibxError(
+            "ALPHA",
+            "count must be positive",
+            expected="A top/bottom selection takes at least one name.",
+        )
     valid = values.notna().sum(axis=1)
     insufficient = valid.lt(2 * count)
     if insufficient.any():
         offending = [str(label) for label in values.index[insufficient][:5]]
-        raise ValueError(
+        raise QlibxError(
+            "ALPHA",
             f"top_bottom requires at least {2 * count} valid observations per date; "
-            f"insufficient on {int(insufficient.sum())} date(s), for example {offending}"
+            f"insufficient on {int(insufficient.sum())} date(s), for example {offending}",
+            expected=(
+                "Each date has enough valid values to fill both sides; qlibx does not "
+                "assign one name to the long and the short leg."
+            ),
+            context={"insufficient_dates": int(insufficient.sum()), "examples": offending},
         )
     ranks_ascending = values.rank(axis=1, method="first", ascending=True)
     ranks_descending = values.rank(axis=1, method="first", ascending=False)
@@ -35,7 +47,11 @@ def top_bottom(values: pd.DataFrame, *, count: int) -> pd.DataFrame:
 def per_name_cap(values: pd.DataFrame, *, maximum_weight: float) -> pd.DataFrame:
     """Bound each name's absolute weight without changing its sign or missingness."""
     if maximum_weight <= 0:
-        raise ValueError("maximum_weight must be positive")
+        raise QlibxError(
+            "ALPHA",
+            "maximum_weight must be positive",
+            expected="A weight cap is a positive fraction.",
+        )
     return values.clip(lower=-maximum_weight, upper=maximum_weight)
 
 

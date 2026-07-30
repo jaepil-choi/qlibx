@@ -8,7 +8,7 @@ from typing import Literal
 
 import pandas as pd
 
-from qlibx.errors import requirement_gap
+from qlibx.errors import QlibxError, requirement_gap
 from qlibx.requirements import (
     CapabilityPlan,
     CapabilityRequirement,
@@ -194,9 +194,19 @@ def _validated_metrics(metrics: Iterable[str]) -> tuple[ExposureMetric, ...]:
     selected = tuple(dict.fromkeys(str(item) for item in metrics))
     unknown = sorted(set(selected) - set(EXPOSURE_METRICS))
     if unknown:
-        raise ValueError(f"unknown exposure metrics: {unknown}")
+        raise QlibxError(
+            "ALPHA",
+            f"unknown exposure metrics: {unknown}",
+            expected="Every requested metric is one qlibx measures.",
+            context={"unknown": unknown, "available": sorted(EXPOSURE_METRICS)},
+        )
     if not selected:
-        raise ValueError("requested_metrics must contain at least one exposure metric")
+        raise QlibxError(
+            "ALPHA",
+            "requested_metrics must contain at least one exposure metric",
+            expected="An exposure analysis names at least one metric to measure.",
+            context={"available": sorted(EXPOSURE_METRICS)},
+        )
     return selected  # type: ignore[return-value]
 
 
@@ -250,7 +260,11 @@ def analyze_exposure(
 ) -> ExposureArtifact:
     """Measure requested exposures and never confuse absent input with an unrequested output."""
     if weights.empty:
-        raise ValueError("exposure analysis requires at least one row")
+        raise QlibxError(
+            "ALPHA",
+            "exposure analysis requires at least one row",
+            expected="Exposure is measured on weights that have at least one date.",
+        )
     selected = _validated_metrics(requested_metrics)
     available = {"weights"}
     if market_beta is not None:
@@ -332,7 +346,19 @@ def _weighted_exposure(
 ) -> pd.Series:
     aligned_weights, aligned_exposures = weights.align(exposures, join="left")
     if not aligned_exposures.index.equals(weights.index):
-        raise ValueError(f"{label} index is incompatible with weights")
+        raise QlibxError(
+            "ALPHA",
+            f"{label} index is incompatible with weights",
+            expected=(
+                f"The {label} rows cover the weight dates; qlibx does not measure exposure on "
+                "dates it was not given."
+            ),
+            context={
+                "input": label,
+                "weight_rows": len(weights.index),
+                "missing_rows": int((~weights.index.isin(exposures.index)).sum()),
+            },
+        )
     return aligned_weights.mul(aligned_exposures).sum(axis=1, min_count=1)
 
 

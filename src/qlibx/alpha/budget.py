@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from qlibx.errors import unknown_name
+from qlibx.errors import QlibxError, unknown_name
 
 SideScales = tuple[pd.Series, pd.Series]
 
@@ -54,7 +54,15 @@ class BudgetPolicyRegistry:
         self, spec: BudgetPolicySpec, *, replace_existing: bool = False
     ) -> BudgetPolicySpec:
         if spec.name in self._policies and not replace_existing:
-            raise ValueError(f"budget policy is already registered: {spec.name}")
+            raise QlibxError(
+                "ALPHA",
+                f"budget policy is already registered: {spec.name}",
+                expected=(
+                    "A registration either introduces a new name or states that it replaces "
+                    "the installed one."
+                ),
+                context={"policy": spec.name},
+            )
         self._policies[spec.name] = spec
         return spec
 
@@ -169,7 +177,12 @@ def apply_budget(
 ) -> BudgetResult:
     """Apply a registered weight-scaling policy and report the leftover budget."""
     if long_budget < 0 or short_budget < 0:
-        raise ValueError("side budgets must be non-negative")
+        raise QlibxError(
+            "ALPHA",
+            "side budgets must be non-negative",
+            expected="Each side budget is a non-negative fraction of gross exposure.",
+            context={"long_budget": long_budget, "short_budget": short_budget},
+        )
     spec = BUDGET_POLICIES.get(policy)
     positive = weights.clip(lower=0.0)
     negative = weights.clip(upper=0.0)

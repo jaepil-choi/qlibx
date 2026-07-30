@@ -9,6 +9,7 @@ from math import isfinite
 import pandas as pd
 
 from qlibx.alpha import ExposureSummary, exposure_summary
+from qlibx.errors import QlibxError
 from qlibx.research import ResearchCatalog
 
 
@@ -34,14 +35,35 @@ def combine_signed_weights(
 ) -> EnsembleResult:
     """Align and sum weights without restoring member gross or cross-ticker netting."""
     if not members:
-        raise ValueError("ensemble requires at least one member")
+        raise QlibxError(
+            "PORTFOLIO",
+            "ensemble requires at least one member",
+            expected="An ensemble combines at least one stored alpha record.",
+        )
     selected = {name: float(value) for name, value in (coefficients or {}).items()}
     if not selected:
         selected = {name: 1.0 for name in members}
     if set(selected) != set(members):
-        raise ValueError("ensemble coefficients must exactly match member names")
+        raise QlibxError(
+            "PORTFOLIO",
+            "ensemble coefficients must exactly match member names",
+            expected="Every member has a coefficient and every coefficient names a member.",
+            context={
+                "members_without_coefficient": sorted(set(members) - set(selected)),
+                "coefficients_without_member": sorted(set(selected) - set(members)),
+            },
+        )
     if not all(isfinite(value) for value in selected.values()):
-        raise ValueError("ensemble coefficients must be finite")
+        raise QlibxError(
+            "PORTFOLIO",
+            "ensemble coefficients must be finite",
+            expected="Every coefficient is a finite number.",
+            context={
+                "non_finite": sorted(
+                    name for name, value in selected.items() if not isfinite(value)
+                )
+            },
+        )
     index_name = _shared_axis_name(members, axis="index")
     columns_name = _shared_axis_name(members, axis="columns")
     member_indexes = [frame.index for frame in members.values()]
@@ -119,7 +141,16 @@ def combine_stored_weights(
     for record_id in members:
         artifact = catalog.load_artifact(record_id, artifact_name)
         if not isinstance(artifact, pd.DataFrame):
-            raise ValueError(f"stored member artifact is not a DataFrame: {record_id}")
+            raise QlibxError(
+                "PORTFOLIO",
+                f"stored member artifact is not a DataFrame: {record_id}",
+                expected="An ensemble member stores its weights as a table.",
+                context={
+                    "record_id": record_id,
+                    "artifact": artifact_name,
+                    "stored_type": type(artifact).__name__,
+                },
+            )
         frames[record_id] = artifact
     return combine_signed_weights(frames, coefficients=members)
 
@@ -144,5 +175,13 @@ def _shared_axis_name(
         if getattr(frame, axis).name is not None
     }
     if len(names) > 1:
-        raise ValueError(f"ensemble members have incompatible {axis} semantics: {sorted(names)}")
+        raise QlibxError(
+            "PORTFOLIO",
+            f"ensemble members have incompatible {axis} semantics: {sorted(names)}",
+            expected=(
+                f"Every member labels its {axis} the same way; qlibx does not decide that two "
+                "differently named axes mean the same thing."
+            ),
+            context={"axis": axis, "names": sorted(names)},
+        )
     return next(iter(names), None)

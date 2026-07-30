@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from qlibx.errors import QlibxError
+
 from ..contracts import NEUTRALITY_WARNING
 from ..registry import OperationSpec, register_operation
 
@@ -31,7 +33,11 @@ def cross_sectional_zscore(values: pd.DataFrame, *, minimum_count: int = 2) -> p
 
 def winsorize(values: pd.DataFrame, *, lower: float = 0.01, upper: float = 0.99) -> pd.DataFrame:
     if not 0 <= lower <= upper <= 1:
-        raise ValueError("winsorize quantiles must satisfy 0 <= lower <= upper <= 1")
+        raise QlibxError(
+            "ALPHA",
+            "winsorize quantiles must satisfy 0 <= lower <= upper <= 1",
+            expected="Winsorize bounds are quantiles, lower no greater than upper.",
+        )
     floors = values.quantile(lower, axis=1)
     ceilings = values.quantile(upper, axis=1)
     return values.clip(lower=floors, upper=ceilings, axis=0)
@@ -45,9 +51,17 @@ def clip(
 ) -> pd.DataFrame:
     """Clip to explicit absolute bounds; missing observations stay missing."""
     if lower is None and upper is None:
-        raise ValueError("clip requires an explicit lower or upper bound")
+        raise QlibxError(
+            "ALPHA",
+            "clip requires an explicit lower or upper bound",
+            expected="A clip states at least one bound; qlibx does not choose one.",
+        )
     if lower is not None and upper is not None and lower > upper:
-        raise ValueError("clip requires lower <= upper")
+        raise QlibxError(
+            "ALPHA",
+            "clip requires lower <= upper",
+            expected="Clip bounds are ordered.",
+        )
     return values.clip(lower=lower, upper=upper)
 
 

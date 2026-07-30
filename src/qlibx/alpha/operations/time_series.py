@@ -4,33 +4,55 @@ from __future__ import annotations
 
 import pandas as pd
 
+from qlibx.errors import QlibxError
+
 from ..registry import OperationSpec, register_operation
 
 
 def lag(values: pd.DataFrame, *, periods: int = 1) -> pd.DataFrame:
     """Shift each ticker forward in time; the first ``periods`` rows become missing."""
     if periods < 1:
-        raise ValueError("periods must be positive")
+        raise QlibxError(
+            "ALPHA",
+            "periods must be positive",
+            expected="A lag shifts by at least one period.",
+        )
     return values.shift(periods)
 
 
 def rolling_mean(values: pd.DataFrame, *, window: int) -> pd.DataFrame:
     if window < 1:
-        raise ValueError("window must be positive")
+        raise QlibxError(
+            "ALPHA",
+            "window must be positive",
+            expected="A rolling window spans at least one period.",
+        )
     return values.rolling(window, min_periods=window).mean()
 
 
 def rolling_std(values: pd.DataFrame, *, window: int, ddof: int = 1) -> pd.DataFrame:
     if window < 1:
-        raise ValueError("window must be positive")
+        raise QlibxError(
+            "ALPHA",
+            "window must be positive",
+            expected="A rolling window spans at least one period.",
+        )
     if ddof < 0 or ddof >= window:
-        raise ValueError("ddof must satisfy 0 <= ddof < window")
+        raise QlibxError(
+            "ALPHA",
+            "ddof must satisfy 0 <= ddof < window",
+            expected="Degrees of freedom leave at least one observation in the window.",
+        )
     return values.rolling(window, min_periods=window).std(ddof=ddof)
 
 
 def linear_decay(values: pd.DataFrame, *, window: int) -> pd.DataFrame:
     if window < 1:
-        raise ValueError("window must be positive")
+        raise QlibxError(
+            "ALPHA",
+            "window must be positive",
+            expected="A rolling window spans at least one period.",
+        )
     weights = pd.Series(range(1, window + 1), dtype="float64")
     denominator = float(weights.sum())
     return values.rolling(window, min_periods=window).apply(
@@ -46,7 +68,11 @@ def hump(values: pd.DataFrame, *, maximum_change: float) -> pd.DataFrame:
     restarts the limiter instead of propagating missingness for the rest of the series.
     """
     if maximum_change < 0:
-        raise ValueError("maximum_change must be non-negative")
+        raise QlibxError(
+            "ALPHA",
+            "maximum_change must be non-negative",
+            expected="A hump limit is a non-negative change per period.",
+        )
     result = values.copy().astype("float64")
     for offset in range(1, len(result.index)):
         previous = result.iloc[offset - 1]

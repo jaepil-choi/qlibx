@@ -880,11 +880,17 @@ bare `ValueError`를 stage 실패로 승격했고, 어느 instrument·section이
 위반이었다. 반면 infeasible·solver 실패는 원래부터 raise가 아니라 `EnhancedIndexResult.status`로
 **반환**되므로 건드리지 않았다.
 
-남은 예외는 `optimization.py`의 22개다. 이 module은 kernel(layer 0)이라
-`test_kernel_has_no_intra_package_dependencies`가 `errors` import를 금지한다. 따라서
-`LinearConstraint`·`OptimizerConfig`의 self-validation은 여전히 bare `ValueError`이고,
-generated skill이 그 사실을 note로 명시한다. 승격하려면 `optimization`을 kernel 밖으로 옮길지를
-먼저 정해야 한다 — refactor가 아니라 계층 결정이다.
+이어서 `ensemble`(5) → `PORTFOLIO`, `extensions`(11) → `ONBOARDING`/`ALPHA`/`REPORTING`,
+`alpha/*`(23) → `ALPHA`, `onboarding`(1) → `ONBOARDING`도 승격했다. `extensions`는 한 module이
+세 stage로 갈린다 — extension을 **적재**하는 것은 project에 capability를 더하는 일(`ONBOARDING`),
+signal transform을 **실행**하는 것은 `ALPHA`, analyzer/renderer는 `REPORTING`이다. Stage는 module이
+아니라 agent가 서 있는 자리다.
+
+남은 bare `ValueError`는 kernel(layer 0) 안에만 있다 — `optimization` 22, `requirements` 5,
+`serialization` 2. `test_kernel_has_no_intra_package_dependencies`가 `errors` import를 금지하므로
+구조적으로 승격이 불가능하다. Generated skill이 각각 어느 stage 근처에서 나타나는지 note로
+명시한다. 승격하려면 이 module들을 kernel 밖으로 옮길지를 먼저 정해야 한다 — refactor가 아니라
+계층 결정이다.
 
 ```mermaid
 flowchart LR
@@ -1096,7 +1102,7 @@ uv run pytest && uv run ruff check . && uv run ruff format --check .
 | **Strategy manifest/binding (PRD §6.3/§7/P2/P8)** | **구현됨.** Project YAML manifest와 binding, inherited universe, registered-field plan, fixed-lookback resolver, plain pandas callable, CLI/schema/generated skill을 제공한다. 기존 adaptive API도 universe를 상속한다 |
 | **Stage별 수리 경로 (PRD §5.3)** | **구현됨.** `stage_recovery.py`가 11개 stage · 실패 24건 · 경로 61개를 소유하고 생성 skill의 `references/stage-recovery.md`로 렌더링된다. 경로 2개 이상과 선택 기준을 테스트가 강제한다(§12.3) |
 | `PORTFOLIO`·`REPORTING` stage가 raise되지 않음 | **해소됨.** 19개(`portfolio.py` 13, `reporting.py` 6)를 stage 실패로 승격했고 `context`가 위반한 instrument·section을 싣는다(§12.3) |
-| `optimization.py`의 bare `ValueError` 22개 | kernel(layer 0)이라 `errors`를 import할 수 없다. `LinearConstraint`·`OptimizerConfig`가 public 경로로 노출되므로 caller는 stage 없는 실패를 받는다. 승격은 `optimization`을 kernel 밖으로 옮기는 계층 결정을 먼저 요구한다 |
+| kernel의 bare `ValueError` 29개 | `optimization` 22, `requirements` 5, `serialization` 2. layer 0이라 `errors`를 import할 수 없어 구조적으로 승격 불가다. `LinearConstraint`·`OptimizerConfig`가 public 경로로 노출되므로 caller는 stage 없는 실패를 받는다. 승격은 이 module들을 kernel 밖으로 옮기는 계층 결정을 먼저 요구한다 |
 | Beta estimation · residualization (PRD §8.2/§8.3) | **의도적으로 미구현.** 공용 requirement 기반은 준비됐지만 별도 작업으로 연기했다 |
 | `reporting` → `execution` → `_vendor` 결합 | **해소됨.** `run_catalog` port가 저장된 run 읽기를 소유하고 `reporting`은 이제 `execution`을 import하지 않는다. `_vendor/qlib_engine/__init__`도 lazy가 되어 report 구성에 qlib runtime이 로드되지 않는다 |
 | `ResearchCatalog` 크기 | 930줄. event log · blob store · publication protocol · proposal · lock을 한 클래스가 소유한다. 협력 객체로 분리하는 것이 자연스러운 다음 단계 |

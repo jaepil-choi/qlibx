@@ -668,6 +668,16 @@ UNCLASSIFIED_STAGES: Mapping[str, str] = {
         "kernel and still raise plain `ValueError` with no `stage`, `expected` or `context`. "
         "Match those by message."
     ),
+    "ALPHA": (
+        "Operations and exposure analysis report this stage. A capability *declaration* that is "
+        "itself malformed -- duplicate requirement ids, a requirement with no alternative -- is "
+        "checked in the requirements kernel and still raises plain `ValueError`. You will only "
+        "see it while authoring an extension, not while running one."
+    ),
+    "RESEARCH_RECORD": (
+        "Catalog and artifact failures report this stage. Payload naming and format checks live "
+        "in the serialization kernel and still raise plain `ValueError`."
+    ),
 }
 
 

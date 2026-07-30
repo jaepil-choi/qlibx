@@ -37,7 +37,15 @@ def plan_instruction(project: Project, target: str | Path) -> InstructionPlan:
     )
     if START in before or END in before:
         if before.count(START) != 1 or before.count(END) != 1:
-            raise ValueError("instruction file has an invalid qlibx managed block")
+            raise QlibxError(
+                "ONBOARDING",
+                "instruction file has an invalid qlibx managed block",
+                expected=(
+                    "A managed block has exactly one start and one end marker; qlibx does not "
+                    "guess which of several markers it owns."
+                ),
+                context={"start_markers": before.count(START), "end_markers": before.count(END)},
+            )
         start = before.index(START)
         end = before.index(END, start) + len(END)
         after = before[:start] + block + before[end:]

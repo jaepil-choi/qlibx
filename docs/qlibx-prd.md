@@ -4,8 +4,8 @@
 
 ### 1.1 제품 정의
 
-`qlibx`는 Qlib을 실행 기반으로 사용하는 alpha research framework다. Quant researcher와 AI coding
-agent가 다음 작업을 하나의 재사용 가능한 연구 환경에서 수행하도록 돕는다.
+`qlibx`는 Qlib을 실행 기반으로 사용하는 **long-short 전략 리서치 framework**다. Quant researcher와
+AI coding agent가 다음 작업을 하나의 재사용 가능한 연구 환경에서 수행하도록 돕는다.
 
 - 프로젝트 데이터를 logical dataset으로 등록한다.
 - Signed long-short alpha를 만들고 평가한다.
@@ -21,23 +21,96 @@ agent가 다음 작업을 하나의 재사용 가능한 연구 환경에서 수�
 
 ### 1.2 제품 철학
 
+#### Long-short 전략 리서치를 지원한다
+
+`qlibx`의 첫 번째 목적은 **long-short 전략 리서치**다. 나머지 모든 capability는 이 목적을 지원하기
+위해 존재한다.
+
+기본 시나리오는 다음 세 단계다.
+
+```text
+WorldQuant style 가상 long-short 전략
+-> long-short ensemble (ticker-level netting, crossing)
+-> 실제 운용 가능한 long-only enhanced index 전략
+```
+
+1. **가상 long-short alpha 연구.** 실제 공매도 가능성이나 borrow 제약을 먼저 따지지 않고, WorldQuant
+   style의 signed cross-sectional alpha를 자유롭게 만들고 평가한다. 이 단계의 결과물은 즉시 운용하는
+   portfolio가 아니라 재사용 가능한 signed alpha다.
+2. **Long-short ensemble.** 저장된 여러 signed alpha를 다시 실행하지 않고 결합한다. 같은 ticker에
+   반대 방향 intent가 겹치면 ticker level에서 netting하고, alpha 사이의 crossing을 관측한다.
+   결과는 하나의 signed active intent다.
+3. **Long-only enhanced index 전환.** Signed active intent를 benchmark-relative active weight로 해석하고,
+   실제로 운용 가능한 long-only enhanced index portfolio로 변환한다. 이 단계에서 short leg는 benchmark
+   weight의 underweight로 흡수되고, 남는 부분은 명시적으로 실현되지 않은 intent로 보고된다.
+
+이 경로가 기본 시나리오인 이유는, 실무에서 운용 가능한 것은 long-only enhanced index지만 alpha 자체는
+long-short 형태로 연구하는 것이 훨씬 자유롭고 진단하기 쉽기 때문이다. `qlibx`는 두 세계를 하나의
+lineage로 연결해서 original active intent와 realized long-only result를 함께 볼 수 있게 한다.
+
+이 시나리오를 강제하지는 않는다.
+
+- **단순 long-only 전략도 지원한다.** 사용자의 니즈가 long-only signal 하나로 끝난다면 long-short
+  단계나 ensemble 단계를 거치지 않아도 된다.
+- **Market timing 전략도 구현할 수 있다.** 다만 기본은 **cross-sectional stock picking rebalance**다.
+  Decision time마다 universe 안의 종목을 비교해 상대적인 target을 정하는 것이 기본 형태이고, timing은
+  그 위에 올리는 선택이다.
+
 #### Qlib을 backtest와 execution engine으로 사용한다
 
 Qlib은 strategy가 decision time에 관측 가능한 상태를 보고, order를 제출하고, fill을 받은 뒤, 이후
-decision에서 실제 portfolio 상태를 다시 보는 closed-loop backtest lifecycle을 제공한다. `qlibx`는
-이 lifecycle을 다시 만들지 않고 최대한 Qlib에 맡긴다.
+decision에서 실제 portfolio 상태를 다시 보는 closed-loop backtest lifecycle을 제공한다.
 
-`qlibx`가 담당하는 부분은 그 주위의 research automation이다. Data contract, strategy research,
-reusable alpha, ensemble, enhanced index construction, signed-alpha compatibility, result storage와
-agent-facing tool을 제공한다.
+Closed loop이라는 점이 중요하다. Strategy는 신호를 한 번 뿌리고 끝나는 함수가 아니다. 매 decision
+time마다 **자기 결정이 실제로 어떻게 됐는지를 보고** 다음 결정을 한다. 주문이 얼마나 체결됐는지, 지금
+실제로 무엇을 얼마나 들고 있는지, 그 포지션이 얼마를 벌었는지 잃었는지, 비용이 얼마 나갔는지를 볼 수
+있다.
 
-#### AI coding agent가 public surface만으로 사용할 수 있어야 한다
+여기에 strategy는 **자기 memory를 이어서 가질 수 있다.** Decision time마다 남긴 값을 다음 decision
+time에서 다시 읽는다.
 
-Agent는 private implementation을 읽지 않고도 qlibx 사용법을 확인하고, project를 초기화하고, data를
-등록하고, research를 실행하고, 기존 결과를 조회하고, local extension을 추가할 수 있어야 한다.
+이 두 가지가 있어야 구현되는 전략이 많다.
 
-이를 위해 설치된 package는 사람용 문서뿐 아니라 agent가 필요한 부분만 조회할 수 있는 help,
-machine-readable schema, examples, error description과 task instruction을 제공해야 한다.
+- **Stop loss.** "어떤 종목이 최근 n일 동안 몇 % 손실이면 팔고, 이후 m일 동안 다시 사지 않는다"를
+  하려면 종목별 최근 손실과 언제 팔았는지를 기억해야 한다. Signal만 보는 전략은 이것을 표현할 수 없다.
+- **Persisting memory.** 예를 들어 signal의 exponential moving average를 쓰는 전략은 어제 계산한 EMA
+  값을 그대로 이어받아 오늘 값 하나만 반영하면 된다. 매번 과거 전체를 다시 계산하지 않는다. "지금 이
+  전략이 risk-off 상태인가", "지난번 rebalance가 언제였나", "이 종목은 이미 한 번 줄였나" 같은 상태도
+  같은 방식으로 들고 간다.
+- **Realized feedback에 반응하는 전략.** 목표 비중이 60%인데 유동성 때문에 40%만 체결됐다면, 다음
+  결정에서 나머지를 채울지 포기할지를 실제 보유 상태를 보고 정한다. 요청한 target을 보유로 착각하지
+  않는다.
+
+`qlibx`는 이 lifecycle을 다시 만들지 않고 최대한 Qlib에 맡긴다. Order, fill, position, cash, cost와
+account value는 Qlib이 소유하고, strategy가 보는 feedback은 Qlib이 확정한 실제 상태다. `qlibx`가
+담당하는 부분은 그 주위의 research automation이다. Data contract, strategy research, reusable alpha,
+ensemble, enhanced index construction, signed-alpha compatibility, result storage와 agent-facing tool을
+제공한다.
+
+#### 초기 세팅만 하면 internal을 몰라도 쓸 수 있어야 한다
+
+사용자는 Claude Code, Codex 같은 coding agent를 가지고 있다고 가정한다. 사용자가 하는 일은 **처음
+한 번의 세팅**이다. `qlibx`를 설치하고, 쓰는 agent에 qlibx instruction과 skill을 추가하고, 자기 data를
+project에 둔다.
+
+그 다음부터 사용자는 `qlibx`의 internal을 몰라도 된다. 어떤 module이 어떤 class를 상속하는지, dataset이
+내부에서 어떻게 표현되는지, transform이 어디서 호출되는지 알 필요가 없다. 사용자는 자연어로 목적을
+말하고, agent가 public surface를 통해 그것을 수행한다.
+
+```text
+사용자: data/에 있는 데이터를 등록해줘.
+사용자: 등록된 데이터로 새로운 reversal alpha를 연구해줘.
+사용자: 지금까지 만든 alpha들을 ensemble해서 enhanced index로 백테스트해줘.
+```
+
+이것이 성립하려면 agent도 package source를 읽지 않아야 한다. Agent는 public surface — help command,
+machine-readable schema, example, structured error와 generated skill — 만으로 사용법을 확인하고, project를
+초기화하고, data를 등록하고, research를 실행하고, 기존 결과를 조회하고, local extension을 추가할 수
+있어야 한다. Agent가 답을 찾기 위해 `site-packages`의 private module을 열어야 한다면 그것은 public
+surface의 결함이다.
+
+따라서 설치된 package는 사람용 문서뿐 아니라 agent가 필요한 부분만 bounded하게 조회할 수 있는 help,
+machine-readable schema, example, error description과 task instruction을 제공해야 한다.
 
 #### Core package는 계약을 판정하고, agent layer가 user와 대화한다
 
@@ -64,11 +137,20 @@ agent layer (skill) : gap 해석 -> user와 interview -> registration/config 완
 아니라 data, strategy, exposure analysis, portfolio construction, execution, reporting과 extension을 포함한
 **모든 capability에 동일하게 적용된다**. 상세 contract는 section 5.4와 5.5에서 정의한다.
 
-#### 새 연구는 기존 evidence에서 시작한다
+#### Locally stored intermediate result가 module 사이의 public integration point다
 
-성공한 alpha뿐 아니라 실패, invalid run, 이미 검색한 parameter range와 research decision도 조회할 수
-있어야 한다. Agent는 새 trial을 제안하기 전에 이 context를 확인하고, 기존 연구의 단순한 parameter,
-sign 또는 scale variation이 아닌 이유를 설명해야 한다.
+Module은 서로의 Python object를 주고받지 않는다. 각 단계는 결과를 project 안의 file로 남기고, 다음
+단계는 그 file을 읽는다. Data loader, transform, strategy, model, evaluator, ensemble, optimizer, backtest와
+reporter를 잇는 계약은 in-memory API가 아니라 **문서화된 serializable artifact**다.
+
+여기서 중요한 것은 최종 결과뿐 아니라 **중간 결과도 같은 자격을 갖는다**는 점이다. Signal, transform
+이후의 signal, netting 이전의 alpha별 intent, optimizer input과 output, order와 fill은 모두 local
+artifact로 남는다. 따라서 사용자는 pipeline 중간에서 결과를 꺼내 독립적인 Python code로 처리하고,
+compatible한 result를 다시 workflow에 연결할 수 있다. Ensemble이 저장된 alpha를 원래 strategy를 다시
+실행하지 않고 결합할 수 있는 것도 같은 이유다.
+
+Artifact가 local file이라는 사실은 부수적인 구현 선택이 아니다. Module 사이의 결합을 끊고, 실패한
+run도 관측 가능하게 만들고, 병렬 agent가 서로의 process를 공유하지 않고도 같은 evidence를 읽게 한다.
 
 #### Built-in은 일관성을 제공하고 local extension은 자율성을 제공한다
 
@@ -80,11 +162,27 @@ Built-in만 허용하는 것은 아니다. 사용자나 agent는 compatible한 l
 등록하여 workflow에 연결할 수 있어야 한다. 이를 위해 installed `qlibx`, Qlib 또는 site-packages를
 수정할 필요가 없어야 한다.
 
-#### Stored result가 module 사이의 public integration point다
+**Strategy 자체는 built-in이 아니라 local extension이다.** qlibx는 signal processing, exposure analysis,
+diagnostics, reporting 같은 재사용 가능한 building block을 제공하지만, "무엇을 사려는가"를 정하는 전략
+logic은 제공하지 않는다. 전략은 언제나 project가 소유하는 local Python code이고, qlibx는 그것을 실행할
+계약 — canonical pandas input, lookback boundary, output declaration — 만 정의한다. 전략은 사용자의
+alpha이며 package가 소유할 대상이 아니고, built-in strategy를 제공하면 사용자가 그것을 고치기 위해
+package를 수정해야 한다.
 
-Data loader, transform, strategy, model, evaluator, ensemble, optimizer, backtest와 reporter는 문서화된
-serializable artifact를 주고받아야 한다. 사용자는 raw backtest result를 꺼내 독립적인 Python code로
-처리하고, compatible한 result를 다시 workflow에 연결할 수 있어야 한다.
+대신 **작성을 돕는다.** 모든 local extension은 contract에 맞게 작성되어야 workflow에 insert할 수 있으므로,
+qlibx는 각 extension point에 대해 required input, output shape와 validation을 이미 갖춘 **template을
+제공한다.** 사용자나 agent는 빈 file에서 계약을 추측하며 시작하지 않고, template의 빈칸을 채운다.
+
+Template대로 작성해 submit한 code가 workflow에서 실패하면, 그 실패는 **어느 단계에서 무엇이
+관측되었는지와 함께 agent layer로 반환된다** (section 5.6). Manifest나 binding이 계약을 만족하지 못하면
+`STRATEGY_CONTRACT`, 실행 중 user code가 실패하면 `STRATEGY_RUN`으로 보고하고, 하위 예외의 원문을
+그대로 싣는다. User-side agent는 이 error를 읽고 자기 project의 code를 고쳐 다시 submit한다. Extension
+작성은 한 번에 맞히는 작업이 아니라 **고칠 수 있는 loop**이어야 한다.
+
+처음 감을 잡는 비용도 낮춘다. qlibx는 **sample data와 sample strategy code를 제공한다.** 사용자는 자기
+data를 등록하기 전에도 sample로 전체 workflow를 한 번 돌려보고, 동작하는 전략 code가 어떤 모양인지 볼
+수 있다. Sample은 optional install이며, 설치하지 않아도 package 기능에는 영향이 없고 project에
+자동으로 들어오지 않는다.
 
 #### 한 repository와 한 branch에서 병렬 연구한다
 
@@ -152,6 +250,8 @@ realized result를 함께 관측할 수 있다는 점이다.
 - Qlib의 core order, fill, account 또는 backtest engine을 대체하는 일
 - Upstream market-data normalization system을 만드는 일
 - Git branch, worktree 또는 merge를 관리하는 일
+- User가 선언한 `available_at`이 실제 관측 가능 시점과 일치하는지 검증하는 일. qlibx는 선언된
+  availability를 위반하지 않을 뿐, 그 선언의 경제적 정확성은 user가 책임진다 (section 6.4)
 - Signal이 완전한 market-neutral 또는 sector-neutral임을 보장하는 일
 - User-defined evidence와 criteria 없이 경제적 가설의 투자 가능성을 대신 결정하는 일
 
@@ -880,6 +980,24 @@ Dataset은 독립적인 clock과 lookback rule을 가질 수 있다. 예를들�
 
 Qlib closed-loop backtest가 decision과 feedback sequence를 제공한다. qlibx는 parent StrategyAgent와 모든
 nested child strategy에 data를 제공할 때 이 time boundary를 보존한다.
+
+#### 무엇을 qlibx가 보장하고 무엇을 보장하지 않는가
+
+Look-ahead bias는 **구조적으로 차단된다.** Strategy는 data를 직접 읽지 않는다. Runtime이 declared
+availability가 decision time보다 늦지 않은 observation만 골라 bounded pandas object로 전달하므로, strategy
+code가 미래를 보려고 해도 볼 대상이 input에 없다. 이것은 검사해서 경고하는 항목이 아니라 data plane의
+구조다.
+
+그러나 이 보장은 **선언된 `available_at`에 대해서만** 성립한다. 어떤 column이 available_at인지, 실제
+delivery lag가 얼마인지, 그 값이 정말 그 시점에 관측 가능했는지는 **user가 결정하고 user가 책임진다.**
+qlibx는 available_at이 datetime으로 parse되는지, `(available_at, ticker)`가 유일한지, 선언된 axis가 채워져
+있는지 같은 **형식 계약**을 등록 시점에 검사한다. 하지만 available_at 값 자체가 경제적으로 옳은지는
+검증할 수 없다. Source가 restated fundamental을 원래 공시일이 아닌 최신 시점으로 적어 두었다면 qlibx는
+그것을 알 방법이 없고, 선언된 대로 no-look-ahead를 지킬 뿐이다.
+
+즉 **qlibx가 보장하는 것은 "선언된 availability를 위반하지 않는다"이고, "선언된 availability가 현실과
+일치한다"는 것은 보장하지 않는다.** Agent는 registration interview에서 delivery lag와 restatement 여부를
+반드시 user에게 확인하고, 확정할 수 없는 부분을 limitation으로 남긴다.
 
 ### 6.5 Universe와 tradability
 
@@ -1776,7 +1894,26 @@ definition, package layout, migration source 또는 public naming model이 아�
 qlibx requirement의 기준은 이 PRD다. Prototype은 evidence와 reusable reference code이며, prototype의
 accidental structure를 유지해야 하는 constraint가 아니다.
 
-## 15. Future roadmap: AI를 사용하는 user-defined Strategy
+## 15. Future roadmap
+
+### 15.1 Asset class 확장
+
+현재 qlibx가 지원하는 asset class는 **주식**이다. Cross-sectional stock picking rebalance가 기본 형태이고,
+universe, benchmark, enhanced index construction과 execution profile 모두 주식 시장을 전제로 정의되어 있다.
+
+향후 다음 asset class를 지원할 예정이다.
+
+- **Crypto.** 24시간 거래, 거래소별 계약과 다른 rebalance clock을 갖는다. Daily trading calendar를
+  전제한 현재 profile을 그대로 쓸 수 없으므로 별도 execution profile이 필요하다.
+- **Global 선물.** 다수 거래소, contract roll, margin과 notional 기반 position sizing을 갖는다. Cash
+  equity account를 전제한 현재 portfolio·execution 계약의 확장이 필요하다.
+
+이 확장은 새로운 product를 만드는 것이 아니라, 지금의 계약이 asset class에 대해 어디까지 중립적인지를
+드러내는 작업이다. Logical dataset, point-in-time availability, signed alpha, ensemble과 stage-based error
+계약은 asset class와 무관하게 유지하고, calendar, tradability, position sizing과 execution profile처럼
+asset class에 종속된 부분만 확장한다. 지원 전에는 해당 asset class를 지원한다고 표시하지 않는다.
+
+### 15.2 AI를 사용하는 user-defined Strategy
 
 qlibx는 AI agent runtime이 아니라 human과 AI coding agent가 사용하는 alpha research tool이다. Model
 provider, prompt, token/cost, tool call, retry, rate limit과 model failure handling은 qlibx의 product
@@ -1798,3 +1935,36 @@ responsibility가 아니다.
 이 roadmap의 목적은 qlibx 자체에 AI를 내장하는 것이 아니라, lookback boundary, Strategy composition,
 recordability와 Qlib execution isolation을 유지하면서 AI를 사용하는 local Strategy도 연결할 수 있게
 하는 것이다.
+
+### 15.3 Production-ready incremental execution
+
+지금 qlibx의 실행 형태는 historical backtest다. 향후에는 같은 전략 정의를 **운용 시점에 그대로
+재실행**할 수 있어야 한다.
+
+목표는 다음이다. 전략을 한 번 만들고 나면, 새 데이터가 추가된 뒤 그 전략이 선언한 **lookback 만큼의
+최신 데이터만 읽어** 언제든지 오늘의 output을 낼 수 있다. 전체 history를 다시 backtest하지 않는다.
+Backtest에서 쓴 전략 code, binding과 lookback 선언을 그대로 쓰고 decision time만 오늘로 바꾼다.
+
+```text
+backtest  : decision time을 과거 전체에 대해 순차 실행
+production: decision time = 오늘, lookback window만 읽어 1회 실행
+```
+
+**Strategy memory와 state cache.** 위 형태는 lookback data만으로 output이 결정되는 전략에는 바로
+적용되지만, path dependent한 전략에는 그것만으로 부족하다. 이 경우 필요한 것은 history 재실행이 아니라
+**직전 decision이 남긴 memory와 state를 저장해 두고 다음 실행에서 이어받는 것**이다. 향후 qlibx는
+strategy memory와 state를 checkpoint로 cache하고 다음 decision에 복원하는 기능을 제공한다.
+
+Stop loss가 대표적인 예다. "어떤 종목이 최근 n일 손실이 기준을 넘으면 팔고 m일간 재매수하지 않는다"는
+전략은 종목별 손실 기록과 매도 시점이 이어져야 성립한다. 이 memory가 실행 사이에 유지되지 않으면 매일
+상태가 초기화되므로 **production에서는 영원히 구현될 수 없다.** 따라서 memory/state cache는 path
+dependent 전략을 운용 가능하게 만드는 전제 조건이다.
+
+**Path dependency measurement.** 같은 맥락에서, 전략이 declared lookback 밖의 state에 얼마나 의존하는지를
+측정해 research record에 남기는 진단도 함께 제공한다. Fresh state에서 같은 decision time을 재실행했을 때
+같은 output이 나오는지, 오늘 output을 내기 위해 무엇이 복원되어야 하는지를 보고한다. 통과/실패 gate가
+아니라, 그 전략을 운용에 올릴 때 무엇이 필요한지를 알려주는 정보다.
+
+이 항목은 모두 future roadmap이며 현재 계약에는 포함되지 않는다. 현재 qlibx는 backtest 안에서
+checkpoint/resume을 지원하지만, 운용 시점의 incremental 재실행과 path dependency measurement는 아직
+제공하지 않는다.

@@ -50,32 +50,48 @@ def test_project_and_logical_dataset_guidance_is_installed(capsys) -> None:
 def test_unknown_documentation_topic_is_structured_for_agents() -> None:
     with pytest.raises(QlibxError) as error:
         dispatch(parser().parse_args(["docs", "not-a-topic"]))
-    assert error.value.code == "NOT_FOUND"
+    assert error.value.stage == "ONBOARDING"
     assert "project" in error.value.context["available"]
 
 
-def test_installed_error_recovery_is_code_specific_and_machine_readable(capsys) -> None:
+def test_a_stage_lookup_names_the_step_and_its_skill(capsys) -> None:
+    """Looking up a stage says where the agent is and which skill covers repairs there.
+
+    Not how to repair. The failure carries what happened and what was expected; the skill
+    carries the ways out, because more than one is usually valid.
+    """
     assert dispatch(parser().parse_args(["docs", "errors"])) == 0
-    assert dispatch(parser().parse_args(["errors", "MISSING"])) == 0
+    assert dispatch(parser().parse_args(["errors", "DATA_REGISTRATION"])) == 0
     output = capsys.readouterr().out
     first, second = output.split("}\n{")
     guide = json.loads(first + "}")["errors"]
     lookup = json.loads("{" + second)
     assert guide["schema"] == "error_response"
-    # The code alone answers with what its kind means. What to do about *this* failure
-    # rides on the raised error, where the check that found it wrote it.
-    assert lookup["code"] == "MISSING"
-    assert "Declare, register, or bind it" in lookup["recovery"]
-    assert error_guidance("CONFLICT")["recovery"]
-    assert set(ERROR_GUIDANCE) == {
-        "NOT_FOUND",
-        "MISSING",
-        "INVALID",
-        "BOUNDARY",
-        "CONFLICT",
-        "CORRUPT",
-        "UNSUPPORTED",
-    }
+    assert lookup["stage"] == "DATA_REGISTRATION"
+    assert "logical dataset" in lookup["responsibility"]
+    assert lookup["skill"] == "qlibx-data_registration"
+    assert error_guidance("UNIVERSE")["responsibility"]
+
+
+def test_the_stages_are_the_user_journey_in_order() -> None:
+    """Stages come from the product workflow (PRD 5.6), not from a taxonomy of rule kinds.
+
+    Ordered, because the order is the journey: an agent stuck at UNIVERSE has already
+    finished DATA_REGISTRATION, and that is the information a rule-kind code cannot carry.
+    """
+    assert list(ERROR_GUIDANCE) == [
+        "ONBOARDING",
+        "PROJECT",
+        "DATA_REGISTRATION",
+        "UNIVERSE",
+        "STRATEGY_CONTRACT",
+        "STRATEGY_RUN",
+        "ALPHA",
+        "PORTFOLIO",
+        "EXECUTION",
+        "RESEARCH_RECORD",
+        "REPORTING",
+    ]
 
 
 def test_agent_journey_guides_link_public_executable_examples() -> None:
@@ -176,13 +192,13 @@ def test_public_requirement_and_plan_schemas_are_installed() -> None:
     assert "MISSING" in plan["error_equivalence"]
 
 
-def _public_raises() -> list[tuple[str, int, str]]:
-    """Every `QlibxError(...)` the package can raise, as (file, line, code).
+def _public_raises() -> list[tuple[str, int, str | None, ast.Call]]:
+    """Every `QlibxError(...)` the package can raise, as (file, line, stage, call).
 
     Read from source rather than by importing behavior, so a raise on a path no test
     exercises is still held to the contract.
     """
-    found: list[tuple[str, int, str]] = []
+    found: list[tuple[str, int, str | None, ast.Call]] = []
     # Anchor on the package root, not a member module: a module may become a package.
     for path in pathlib.Path(qlibx.__file__).parent.rglob("*.py"):
         if "_vendor" in path.parts:
@@ -190,44 +206,67 @@ def _public_raises() -> list[tuple[str, int, str]]:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "QlibxError"):
                 continue
-            code = (
-                node.args[0].value if node.args and isinstance(node.args[0], ast.Constant) else None
-            )
-            found.append((path.name, node.lineno, code))
+            first = node.args[0] if node.args else None
+            stage = first.value if isinstance(first, ast.Constant) else None
+            found.append((path.name, node.lineno, stage, node))
     return found
 
 
-def test_the_public_vocabulary_is_the_seven_codes_and_nothing_else() -> None:
-    """A raise may only use a declared code, and every declared code must be reachable.
+def test_every_raise_names_a_declared_journey_stage() -> None:
+    """A failure must place the agent somewhere in the journey, not just describe itself.
 
-    The codes are coarse on purpose. Nothing in qlibx branches on one, so a finer set would
-    only restate, in this table, the guidance each raise site already writes -- which is how
-    the scheme this replaced reached 144 names for 126 failures.
+    A non-literal stage is allowed and expected: `config` and `errors` serve several steps,
+    so their callers thread the stage in rather than each guessing one.
     """
     raises = _public_raises()
     assert raises, "error scan found nothing; the AST walk is broken"
-    unknown = sorted({(f, n, c) for f, n, c in raises if c not in ERROR_GUIDANCE})
-    assert not unknown, f"raises using a code outside the vocabulary: {unknown}"
-    reached = {code for _, _, code in raises}
-    assert not set(ERROR_GUIDANCE) - reached, "documented but unreachable"
+    stray = sorted(
+        {(f, n, s) for f, n, s, _ in raises if s is not None and s not in ERROR_GUIDANCE}
+    )
+    assert not stray, f"raises naming an undeclared stage: {stray}"
+    literal = sum(1 for _, _, stage, _ in raises if stage is not None)
+    assert literal > len(raises) * 0.8, "most raises should name their stage directly"
 
 
-def test_every_public_failure_says_what_to_do_next() -> None:
-    """`action` is what makes a failure public. A raise without one is an internal defect.
+def test_every_public_failure_states_what_the_contract_expected() -> None:
+    """`expected` is what makes a failure public, and it is not an instruction.
 
-    Enforced at the call site rather than trusted to the constructor's signature, because a
-    positional `action` would satisfy the type checker while leaving this contract to habit.
+    An agent cannot recover from a failure that says only that something went wrong. But the
+    core also must not say *how* to fix it: a Strategy failing on a string column can be
+    repaired in the Strategy or back at registration, and only the user knows which. So the
+    contract is `expected` -- what was required -- and the repair lives in the stage's skill.
+
+    Checked at the call site rather than trusted to the signature, because a positional
+    argument would satisfy a type checker while leaving this to habit.
     """
-    missing: list[str] = []
-    for path in pathlib.Path(qlibx.__file__).parent.rglob("*.py"):
-        if "_vendor" in path.parts:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "QlibxError"):
-                continue
-            if not any(keyword.arg == "action" for keyword in node.keywords):
-                missing.append(f"{path.name}:{node.lineno}")
-    assert not missing, f"QlibxError raised without an action: {missing}"
+    missing = [
+        f"{name}:{line}"
+        for name, line, _, call in _public_raises()
+        if not any(keyword.arg == "expected" for keyword in call.keywords)
+    ]
+    assert not missing, f"QlibxError raised without `expected`: {missing}"
+
+
+def test_the_core_does_not_prescribe_a_repair_workflow() -> None:
+    """`expected` states the contract. Choosing a repair belongs to the stage's skill.
+
+    PRD 5.6: a Strategy failing on a string column can be fixed inside the Strategy or back
+    at registration, and only the user knows which. Naming a value the contract allows is
+    reporting; telling the agent which command to run or to go interview the user is the
+    core taking a decision that is not its own -- and it goes stale as the CLI changes.
+    """
+    # Stating what qlibx will not do ("qlibx does not aggregate") is reporting. Naming a
+    # command to run, or sending the agent off to interview the user, is not.
+    prescriptions = ("Run qlibx", "Ask the user", "Discuss ", "outside qlibx", "re-plan")
+    offenders = [
+        f"{name}:{line}: {keyword.value.value}"
+        for name, line, _, call in _public_raises()
+        for keyword in call.keywords
+        if keyword.arg == "expected"
+        and isinstance(keyword.value, ast.Constant)
+        and any(token in str(keyword.value.value) for token in prescriptions)
+    ]
+    assert not offenders, f"`expected` prescribes a repair, not a contract:\n{offenders}"
 
 
 def test_internal_failures_stay_out_of_the_agent_vocabulary() -> None:
@@ -263,11 +302,11 @@ def test_unknown_name_lookups_share_one_structured_shape() -> None:
     for argv in lookups:
         with pytest.raises(QlibxError) as failure:
             dispatch(parser().parse_args(argv))
-        assert failure.value.code == "NOT_FOUND"
+        assert failure.value.stage in {"ONBOARDING", "ALPHA"}
         assert set(failure.value.to_dict()) == {
-            "code",
+            "stage",
             "message",
-            "action",
+            "expected",
             "context",
             "requires_user_confirmation",
         }

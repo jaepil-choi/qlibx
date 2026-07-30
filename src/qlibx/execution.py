@@ -193,10 +193,10 @@ def run_strategy_execution(
     """Run long-only or signed weights inside Qlib's confirmed-feedback loop."""
     if definition.output_kind != "weight":
         raise QlibxError(
-            "INVALID",
+            "EXECUTION",
             f"Qlib execution needs a weight output, but the Strategy declares "
             f"{definition.output_kind!r}",
-            action="Declare output_kind 'weight' on the Strategy, or use a signal workflow.",
+            expected="Declare output_kind 'weight' on the Strategy, or use a signal workflow.",
             context={"output_kind": definition.output_kind},
         )
     instruments = execution_price.columns
@@ -228,9 +228,9 @@ def run_strategy_execution(
         _append_confirmed_feedback(feedback_history, state)
         if "universe" in datasets:
             raise QlibxError(
-                "INVALID",
+                "EXECUTION",
                 "universe is inherited from the execution scenario and cannot be passed again",
-                action="Remove 'universe' from datasets; the scenario universe is authoritative.",
+                expected="Remove 'universe' from datasets; the scenario universe is authoritative.",
                 context={"datasets": sorted(datasets)},
             )
         strategy_datasets = {"universe": universe, **datasets}
@@ -287,9 +287,9 @@ def run_strategy_execution(
             target.isna().any() or target.lt(-1e-12).any() or target.sum() > 1.0 + 1e-12
         ):
             raise QlibxError(
-                "INVALID",
+                "EXECUTION",
                 "Long-only weight output must be finite, non-negative, and sum to at most 1",
-                action="Clip or renormalize the Strategy weights before returning them.",
+                expected="Clip or renormalize the Strategy weights before returning them.",
                 context={
                     "decision_time": str(date),
                     "weight_sum": float(target.sum()),
@@ -302,9 +302,9 @@ def run_strategy_execution(
             short_exposure = float(-target.clip(upper=0.0).sum())
             if long_exposure > 1.0 + 1e-12 or short_exposure > 1.0 + 1e-12:
                 raise QlibxError(
-                    "INVALID",
+                    "EXECUTION",
                     "Signed side exposure must not exceed 1 on either side",
-                    action="Scale the signed weights with a budget policy before execution.",
+                    expected="Scale the signed weights with a budget policy before execution.",
                     context={
                         "decision_time": str(date),
                         "long_exposure": long_exposure,
@@ -518,6 +518,7 @@ def _capitalization_nav_error(events: pd.DataFrame) -> float:
     if direction.isna().any():
         observed = sorted(set(events.loc[direction.isna(), "event_type"].astype(str)))
         raise unknown_name(
+            "EXECUTION",
             "capitalization event type",
             ", ".join(observed),
             ("activation", "release", "top_up"),
@@ -568,9 +569,9 @@ def _bounded_strategy_data(
                 matrix = raw
             if not matrix.index.equals(values.index) or not matrix.columns.equals(values.columns):
                 raise QlibxError(
-                    "INVALID",
+                    "EXECUTION",
                     f"Availability matrix for {name!r} does not share the dataset's axes",
-                    action="Provide availability on exactly the dataset's index and columns.",
+                    expected="Provide availability on exactly the dataset's index and columns.",
                     context={"dataset": name},
                 )
             visible = matrix.apply(pd.to_datetime).le(decision_time)
@@ -582,9 +583,9 @@ def _bounded_strategy_data(
         else:
             if not isinstance(values.index, pd.DatetimeIndex):
                 raise QlibxError(
-                    "MISSING",
+                    "EXECUTION",
                     f"Dataset {name!r} has no DatetimeIndex, so availability must be declared",
-                    action=(
+                    expected=(
                         "Pass an availability matrix for this dataset; qlibx will not guess "
                         "when its observations became visible."
                     ),
@@ -595,9 +596,9 @@ def _bounded_strategy_data(
         if count is not None:
             if count < 1:
                 raise QlibxError(
-                    "INVALID",
+                    "EXECUTION",
                     f"lookback_rows for {name!r} must be positive, got {count}",
-                    action="Declare how many available rows the Strategy may read.",
+                    expected="Declare how many available rows the Strategy may read.",
                     context={"dataset": name, "lookback_rows": count},
                 )
             selected = selected.tail(count)
@@ -672,9 +673,9 @@ def _weight_payload(payload: Any, instruments: pd.Index) -> pd.Series:
     if isinstance(payload, pd.DataFrame):
         if len(payload) != 1:
             raise QlibxError(
-                "INVALID",
+                "EXECUTION",
                 f"Weight DataFrame must hold exactly one decision row, got {len(payload)}",
-                action="Return only the row for the current decision time.",
+                expected="Return only the row for the current decision time.",
                 context={"rows": len(payload)},
             )
         result = payload.iloc[0]
@@ -682,17 +683,17 @@ def _weight_payload(payload: Any, instruments: pd.Index) -> pd.Series:
         result = payload
     else:
         raise QlibxError(
-            "INVALID",
+            "EXECUTION",
             f"Weight payload must be a Series or one-row DataFrame, got {type(payload).__name__}",
-            action="Return pandas weights keyed by instrument.",
+            expected="Return pandas weights keyed by instrument.",
             context={"payload_type": type(payload).__name__},
         )
     unknown = result.index.difference(instruments)
     if len(unknown):
         raise QlibxError(
-            "NOT_FOUND",
+            "EXECUTION",
             f"Strategy returned instruments outside the execution universe: {unknown.tolist()}",
-            action="Restrict the weights to the instruments the execution scenario declares.",
+            expected="Restrict the weights to the instruments the execution scenario declares.",
             context={"unknown_instruments": unknown.tolist()},
         )
     return result.reindex(instruments).fillna(0.0).astype("float64")

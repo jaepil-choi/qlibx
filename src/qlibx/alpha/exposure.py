@@ -265,7 +265,7 @@ def analyze_exposure(
         available.add("realized_holdings")
     plan = plan_exposure(requested_metrics=selected, available_inputs=available)
     if not plan.ready and not allow_incomplete:
-        raise requirement_gap(plan.resolution.to_dict())
+        raise requirement_gap("ALPHA", plan.resolution.to_dict())
     unavailable = tuple(
         UnavailableOutput(
             output_id=_REQUIREMENT_METRIC[item.requirement_id],

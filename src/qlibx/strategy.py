@@ -33,10 +33,10 @@ class StrategyDefinition:
     def __post_init__(self) -> None:
         if "universe" in self.data_requirements:
             raise QlibxError(
-                "INVALID",
+                "STRATEGY_RUN",
                 f"Strategy {self.strategy_id!r} redeclares 'universe', which every Strategy "
                 f"inherits",
-                action=(
+                expected=(
                     "Remove 'universe' from data_requirements and read it from "
                     "all_data_requirements."
                 ),
@@ -79,10 +79,10 @@ class DatasetWindow:
         if availability is None:
             if not isinstance(values.index, pd.DatetimeIndex):
                 raise QlibxError(
-                    "MISSING",
+                    "STRATEGY_RUN",
                     f"Dataset {self.dataset_id!r} has neither available_at nor a DatetimeIndex, "
                     f"so point-in-time visibility cannot be decided",
-                    action=(
+                    expected=(
                         "Supply available_at for this dataset, or index it by a DatetimeIndex. "
                         "qlibx will not assume a dataset is visible."
                     ),
@@ -140,9 +140,9 @@ class DecisionContext:
         events = tuple(self.feedback_history)
         if tuple(sorted(events, key=lambda item: item.confirmed_at)) != events:
             raise QlibxError(
-                "INVALID",
+                "STRATEGY_RUN",
                 "Feedback history is not ordered by confirmed_at",
-                action=(
+                expected=(
                     "Sort feedback_history by confirmed_at before building the DecisionContext; "
                     "the order is what makes 'prior feedback only' checkable."
                 ),
@@ -154,10 +154,10 @@ class DecisionContext:
         unconfirmed = [item for item in events if item.confirmed_at > decision_time]
         if unconfirmed:
             raise QlibxError(
-                "BOUNDARY",
+                "STRATEGY_RUN",
                 f"Feedback history carries {len(unconfirmed)} event(s) Qlib had not confirmed "
                 f"at the decision time",
-                action=(
+                expected=(
                     "Drop feedback confirmed after the decision time; a decision may only see "
                     "fills already confirmed when it is made."
                 ),
@@ -194,9 +194,9 @@ class DecisionContext:
         for name, child_frame in requested_datasets.items():
             if name not in self.datasets:
                 raise QlibxError(
-                    "BOUNDARY",
+                    "STRATEGY_RUN",
                     f"Child requested dataset {name!r}, which the parent context does not hold",
-                    action=(
+                    expected=(
                         "Request only datasets the parent declares; a child narrows its parent "
                         "and can never reach data the parent could not see."
                     ),
@@ -213,9 +213,9 @@ class DecisionContext:
             mismatch = _frame_mismatch(parent_subset, child_frame)
             if mismatch is not None:
                 raise QlibxError(
-                    "BOUNDARY",
+                    "STRATEGY_RUN",
                     f"Child dataset {name!r} does not match the parent values on its own axes",
-                    action=(
+                    expected=(
                         "Pass the parent slice through unchanged; a child may narrow the parent "
                         "but must never rewrite an observation."
                     ),
@@ -230,9 +230,9 @@ class DecisionContext:
                 mismatch = _frame_mismatch(expected, supplied_frame)
                 if mismatch is not None:
                     raise QlibxError(
-                        "BOUNDARY",
+                        "STRATEGY_RUN",
                         f"Child dataset {name!r} changed the availability metadata it inherited",
-                        action=(
+                        expected=(
                             "Omit availability for this dataset so the child inherits the "
                             "parent's, or supply the parent slice unchanged."
                         ),
@@ -241,10 +241,10 @@ class DecisionContext:
                 bounded_availability[name] = supplied_frame
             elif name in requested_availability:
                 raise QlibxError(
-                    "BOUNDARY",
+                    "STRATEGY_RUN",
                     f"Child dataset {name!r} supplies available_at, but the parent holds none "
                     f"for it",
-                    action=(
+                    expected=(
                         "Drop the availability entry. A child cannot make data visible that the "
                         "parent bounded by its index alone."
                     ),
@@ -254,9 +254,9 @@ class DecisionContext:
         for name in child_lookbacks:
             if name not in requested_datasets:
                 raise QlibxError(
-                    "BOUNDARY",
+                    "STRATEGY_RUN",
                     f"Child lookback names {name!r}, which is not a requested child dataset",
-                    action="Request the dataset in the same child call, or drop the lookback.",
+                    expected="Request the dataset in the same child call, or drop the lookback.",
                     context={
                         "lookback": name,
                         "requested_datasets": sorted(requested_datasets),
@@ -419,10 +419,10 @@ def run_decision(
     missing = sorted(set(definition.all_data_requirements) - set(context.datasets))
     if missing:
         raise QlibxError(
-            "MISSING",
+            "STRATEGY_RUN",
             f"Strategy {definition.strategy_id!r} declares datasets the context does not "
             f"hold: {missing}",
-            action=(
+            expected=(
                 "Add the declared datasets to the DecisionContext, or narrow "
                 "data_requirements on the Strategy."
             ),
@@ -444,9 +444,9 @@ def run_decision(
     result = program(detached, _deep_copy(dict(definition.parameters)))
     if _digest(detached) != before:
         raise QlibxError(
-            "BOUNDARY",
+            "STRATEGY_RUN",
             f"Strategy {definition.strategy_id!r} mutated its bounded decision context",
-            action=(
+            expected=(
                 "Return new objects instead of writing into context.datasets, memory, or "
                 "account. A mutated context breaks the invocation digest that reproduces the run."
             ),
@@ -458,10 +458,10 @@ def run_decision(
         )
     if result.kind != definition.output_kind:
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_RUN",
             f"Strategy {definition.strategy_id!r} declares {definition.output_kind!r} but "
             f"returned {result.kind!r}",
-            action=(
+            expected=(
                 "Return the declared output_kind, or change output_kind on the "
                 "StrategyDefinition to match what the program produces."
             ),
@@ -536,7 +536,7 @@ def evaluate_child(
         metric = float(evaluator(decision))
     except (TypeError, ValueError, QlibxError) as error:
         # A rejected what-if is an answer, not a crash: the caller keeps its own account
-        # and reads why the child was refused. Carrying `error_code` keeps that reason
+        # and reads why the child was refused. Carrying `stage` keeps that reason
         # machine-readable instead of a string an agent has to pattern-match.
         return NestedResearchResult(
             "invalid",
@@ -545,16 +545,16 @@ def evaluate_child(
             {
                 "evaluator_id": request.evaluator_id,
                 "error": str(error),
-                "error_code": getattr(error, "code", None),
+                "stage": getattr(error, "stage", None),
             },
             parent_account_digest,
         )
     observed_account_digest = _digest(parent.account)
     if observed_account_digest != parent_account_digest:
         raise QlibxError(
-            "BOUNDARY",
+            "STRATEGY_RUN",
             "Nested research changed the parent account state",
-            action=(
+            expected=(
                 "Remove the account write from the child program. Nested research explores "
                 "what-ifs and holds no authority to mutate the account it branched from."
             ),
@@ -589,10 +589,10 @@ def run_decision_sequence(
     for position, (current, following) in enumerate(pairwise(ordered)):
         if current.decision_time >= following.decision_time:
             raise QlibxError(
-                "INVALID",
+                "STRATEGY_RUN",
                 f"Decision contexts must strictly increase in decision_time, but position "
                 f"{position + 1} does not follow position {position}",
-                action=(
+                expected=(
                     "Sort the contexts by decision_time and remove duplicates. Memory flows "
                     "forward through the sequence, so the order defines the result."
                 ),
@@ -607,10 +607,10 @@ def run_decision_sequence(
     stop = len(ordered) if end_position is None else end_position
     if start < 0 or stop < start or stop > len(ordered):
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_RUN",
             f"Sequence boundary [{start}, {stop}) does not lie inside the {len(ordered)} "
             f"supplied contexts",
-            action=(
+            expected=(
                 "Resume from the checkpoint's next_position and keep end_position within the "
                 "contexts you passed."
             ),
@@ -668,9 +668,9 @@ def _require_matching_axis(
     if actual.equals(expected):
         return
     raise QlibxError(
-        "INVALID",
+        "STRATEGY_RUN",
         f"available_at for dataset {dataset_id!r} does not match the dataset {axis}",
-        action=(
+        expected=(
             f"Build available_at on the dataset's own {axis}, in the same order, so each "
             f"visibility timestamp describes the cell beside it."
         ),
@@ -699,10 +699,10 @@ def _look_ahead(
     """
     count, sample = violations
     return QlibxError(
-        "BOUNDARY",
+        "STRATEGY_RUN",
         f"Dataset {dataset_id!r} carries {count} observation(s) that were not available at "
         f"the decision time",
-        action=(
+        expected=(
             "Trim the dataset to the decision time, or supply available_at when the "
             "observation timestamp is not the timestamp the observation became knowable. "
             "Never widen the decision time to admit the data."
@@ -746,10 +746,10 @@ def _child_out_of_bounds(dataset: str, axis: str, outside: pd.Index) -> QlibxErr
     enough for the documentation guard to see it.
     """
     return QlibxError(
-        "BOUNDARY",
+        "STRATEGY_RUN",
         f"Child dataset {dataset!r} carries {len(outside)} {axis} label(s) the parent does "
         f"not hold",
-        action=(
+        expected=(
             f"Slice the child out of the parent frame. A child narrows its parent, so every "
             f"{axis} label it names must already exist there."
         ),

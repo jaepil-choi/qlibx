@@ -12,9 +12,13 @@ from typing import Any, Literal
 import duckdb
 import pandas as pd
 
-from qlibx.config import read_yaml, require_mapping, require_string, require_strings
+from qlibx.config import for_stage
 from qlibx.errors import QlibxError
 from qlibx.project import Project
+
+# Every YAML failure from this module belongs to the same journey step, so the readers
+# are bound to it once here instead of at each call site.
+read_yaml, require_mapping, require_string, require_strings = for_stage("DATA_REGISTRATION")
 
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -59,9 +63,9 @@ def require_matrix_axes(spec: DatasetSpec) -> MatrixAxes:
     missing = sorted(name for name in ("index", "columns", "values") if getattr(spec, name) is None)
     if missing:
         raise QlibxError(
-            "MISSING",
+            "DATA_REGISTRATION",
             f"Matrix dataset {spec.name!r} does not declare: {missing}",
-            action="Declare index, columns, and values for every matrix dataset.",
+            expected="Declare index, columns, and values for every matrix dataset.",
             context={"dataset": spec.name, "missing": missing},
         )
     return MatrixAxes(str(spec.index), str(spec.columns), str(spec.values))
@@ -82,9 +86,9 @@ class DataCatalog:
         base = read_yaml(base_path)
         if base.get("schema_version") != 1:
             raise QlibxError(
-                "UNSUPPORTED",
+                "DATA_REGISTRATION",
                 "data/base.yaml schema_version must be 1",
-                action="Use schema version 1.",
+                expected="Use schema version 1.",
             )
         catalog = require_mapping(base.get("catalog"), "catalog")
         source_path = _fragment(root, require_string(catalog.get("source_file"), "source_file"))
@@ -106,9 +110,9 @@ class DataCatalog:
             duplicate = sorted(set(declarations) & set(fragment))
             if duplicate:
                 raise QlibxError(
-                    "INVALID",
+                    "DATA_REGISTRATION",
                     f"Duplicate logical datasets: {duplicate}",
-                    action="Declare each dataset in one YAML fragment.",
+                    expected="Declare each dataset in one YAML fragment.",
                 )
             declarations.update(fragment)
         datasets = {name: _dataset(name, raw, sources) for name, raw in declarations.items()}
@@ -168,9 +172,9 @@ class ConfigDrivenDataLoader:
         """
         if not reason.strip():
             raise QlibxError(
-                "MISSING",
+                "DATA_REGISTRATION",
                 "load_full_history requires a non-empty reason",
-                action="State why this read may ignore point-in-time availability.",
+                expected="State why this read may ignore point-in-time availability.",
                 context={"dataset": name},
             )
         return self._load(name, as_of=None, start=start, end=end, tickers=tickers, limit=limit)
@@ -227,24 +231,24 @@ class ConfigDrivenDataLoader:
         spec = self._require(name)
         if spec.kind != "matrix":
             raise QlibxError(
-                "INVALID",
+                "DATA_REGISTRATION",
                 f"Dataset is not a matrix: {name}",
-                action="Use load_table or choose a matrix dataset.",
+                expected="Use load_table or choose a matrix dataset.",
             )
         axes = require_matrix_axes(spec)
         missing = sorted({axes.index, axes.columns, axes.values} - set(table.columns))
         if missing:
             raise QlibxError(
-                "MISSING",
+                "DATA_REGISTRATION",
                 f"Matrix query is missing columns: {missing}",
-                action="Correct the YAML output contract or SQL.",
+                expected="Correct the YAML output contract or SQL.",
             )
         duplicate = table.duplicated([axes.index, axes.columns], keep=False)
         if duplicate.any():
             raise QlibxError(
-                "INVALID",
+                "DATA_REGISTRATION",
                 f"Found {int(duplicate.sum())} duplicate matrix-key rows",
-                action="Resolve duplicates explicitly in SQL.",
+                expected="Resolve duplicates explicitly in SQL.",
             )
         matrix = table.pivot(index=axes.index, columns=axes.columns, values=axes.values)
         matrix = matrix.sort_index().sort_index(axis=1)
@@ -259,9 +263,9 @@ class ConfigDrivenDataLoader:
             return self.catalog.datasets[name]
         except KeyError as error:
             raise QlibxError(
-                "NOT_FOUND",
+                "DATA_REGISTRATION",
                 f"Unknown dataset {name!r}; available: {sorted(self.catalog.datasets)}",
-                action="Choose a YAML-declared dataset.",
+                expected="Choose a YAML-declared dataset.",
             ) from error
 
 
@@ -269,9 +273,9 @@ def _fragment(root: Path, value: str) -> Path:
     path = (root / value).resolve()
     if not path.is_relative_to(root.resolve()):
         raise QlibxError(
-            "BOUNDARY",
+            "DATA_REGISTRATION",
             f"Config fragment escapes data config: {path}",
-            action="Keep fragments below config/qlibx/data.",
+            expected="Keep fragments below config/qlibx/data.",
         )
     return path
 
@@ -279,9 +283,9 @@ def _fragment(root: Path, value: str) -> Path:
 def _identifier(value: str, field: str) -> str:
     if not IDENTIFIER.fullmatch(value):
         raise QlibxError(
-            "INVALID",
+            "DATA_REGISTRATION",
             f"{field} is not a valid identifier: {value!r}",
-            action="Use letters, digits, and underscores.",
+            expected="Use letters, digits, and underscores.",
         )
     return value
 
@@ -292,9 +296,9 @@ def _source(name: str, raw: Any, roots: dict[str, Path], project: Project) -> So
     root_name = value.get("root", "canonical")
     if root_name not in roots:
         raise QlibxError(
-            "NOT_FOUND",
+            "DATA_REGISTRATION",
             f"Unknown source root: {root_name!r}",
-            action=f"Choose one of {sorted(roots)}.",
+            expected=f"Choose one of {sorted(roots)}.",
         )
     path = project.contained(roots[root_name] / require_string(value.get("path"), f"{name}.path"))
     return SourceSpec(name, path)
@@ -306,17 +310,17 @@ def _dataset(name: str, raw: Any, sources: dict[str, SourceSpec]) -> DatasetSpec
     kind = require_string(value.get("kind"), f"{name}.kind")
     if kind not in {"table", "matrix"}:
         raise QlibxError(
-            "INVALID",
+            "DATA_REGISTRATION",
             f"Unsupported dataset kind: {kind}",
-            action="Use table or matrix.",
+            expected="Use table or matrix.",
         )
     source_names = require_strings(value.get("sources"), f"{name}.sources")
     missing = sorted(set(source_names) - set(sources))
     if missing:
         raise QlibxError(
-            "NOT_FOUND",
+            "DATA_REGISTRATION",
             f"Dataset references unknown sources: {missing}",
-            action="Declare them in sources.yaml.",
+            expected="Declare them in sources.yaml.",
         )
     availability_field = _identifier(
         str(value.get("availability_field", "available_at")),
@@ -368,17 +372,17 @@ def _bounded_query(
         selected = tuple(map(str, tickers))
         if not selected:
             raise QlibxError(
-                "MISSING",
+                "DATA_REGISTRATION",
                 "Ticker filter is empty",
-                action="Omit it or provide tickers.",
+                expected="Omit it or provide tickers.",
             )
         predicates.append(f'"{spec.ticker_field}" in ({", ".join("?" for _ in selected)})')
         parameters.extend(selected)
     if limit is not None and limit <= 0:
         raise QlibxError(
-            "INVALID",
+            "DATA_REGISTRATION",
             "limit must be positive",
-            action="Provide a positive limit.",
+            expected="Provide a positive limit.",
         )
     query = f"select * from ({spec.query.rstrip().rstrip(';')}) logical_dataset"
     if predicates:
@@ -398,9 +402,9 @@ def _execute(
         for source in sources:
             if not source.path.exists():
                 raise QlibxError(
-                    "NOT_FOUND",
+                    "DATA_REGISTRATION",
                     f"Missing source {source.name}: {source.path}",
-                    action="Register or restore the declared canonical Parquet.",
+                    expected="Register or restore the declared canonical Parquet.",
                 )
             path = source.path / "**" / "*.parquet" if source.path.is_dir() else source.path
             escaped = str(path).replace("\\", "/").replace("'", "''")
@@ -411,9 +415,9 @@ def _execute(
             return connection.execute(query, parameters).fetchdf()
         except duckdb.Error as error:
             raise QlibxError(
-                "INVALID",
+                "DATA_REGISTRATION",
                 f"Configured query failed: {error}",
-                action="Correct the YAML SQL or output contract.",
+                expected="Correct the YAML SQL or output contract.",
             ) from error
 
 

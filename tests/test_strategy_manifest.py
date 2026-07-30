@@ -238,7 +238,7 @@ def test_universe_requires_explicit_membership_for_every_matrix_cell(tmp_path: P
             binding,
             decision_time="2024-01-04",
         )
-    assert captured.value.code == "INVALID"
+    assert captured.value.stage == "UNIVERSE"
 
 
 def test_strategy_cli_exposes_requirements_plan_and_preview(tmp_path: Path, capsys) -> None:

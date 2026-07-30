@@ -12,7 +12,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from qlibx.config import read_yaml, require_mapping, require_string
+from qlibx.config import for_stage
 from qlibx.errors import QlibxError
 from qlibx.project import Project
 from qlibx.serialization import digest_document
@@ -27,6 +27,10 @@ from .contracts import (
     StrategyManifest,
 )
 
+# Every YAML failure from this module belongs to the same journey step, so the readers
+# are bound to it once here instead of at each call site.
+read_yaml, require_mapping, require_string, require_strings = for_stage("STRATEGY_CONTRACT")
+
 
 def load_strategy_manifest(project: Project, strategy: str | Path) -> StrategyManifest:
     path = _config_path(project, strategy, "strategies")
@@ -36,9 +40,9 @@ def load_strategy_manifest(project: Project, strategy: str | Path) -> StrategyMa
     contract = require_string(raw.get("contract"), "contract")
     if contract != "qlibx.pandas_strategy":
         raise QlibxError(
-            "UNSUPPORTED",
+            "STRATEGY_CONTRACT",
             f"Unsupported Strategy contract: {contract!r}",
-            action="Use qlibx.pandas_strategy.",
+            expected="Use qlibx.pandas_strategy.",
         )
     value = require_mapping(raw.get("strategy"), "strategy")
     _keys(
@@ -57,39 +61,39 @@ def load_strategy_manifest(project: Project, strategy: str | Path) -> StrategyMa
     _keys(lookback, {"kind", "value"}, "lookback")
     if lookback.get("kind") != "rows":
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_CONTRACT",
             "Strategy lookback.kind must be rows",
-            action="Use a fixed positive row lookback.",
+            expected="Use a fixed positive row lookback.",
         )
     rows = lookback.get("value")
     if not isinstance(rows, int) or isinstance(rows, bool) or rows <= 0:
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_CONTRACT",
             "Strategy lookback.value must be a positive integer",
-            action="Declare the fixed number of rows supplied at every decision.",
+            expected="Declare the fixed number of rows supplied at every decision.",
         )
     inputs_raw = require_mapping(value.get("inputs"), "inputs")
     if "universe" in inputs_raw:
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_CONTRACT",
             "universe is inherited from qlibx.pandas_strategy",
-            action="Remove universe from the manifest and bind it in the binding YAML.",
+            expected="Remove universe from the manifest and bind it in the binding YAML.",
         )
     inputs = tuple(_strategy_input(role, item) for role, item in inputs_raw.items())
     if not inputs:
         raise QlibxError(
-            "MISSING",
+            "STRATEGY_CONTRACT",
             "Strategy must declare at least one Strategy-specific pandas input",
-            action="Declare the canonical pandas data used by the Strategy.",
+            expected="Declare the canonical pandas data used by the Strategy.",
         )
     output = require_mapping(value.get("output"), "output")
     _keys(output, {"kind"}, "output")
     output_kind = require_string(output.get("kind"), "output.kind")
     if output_kind not in {"signal", "weight", "order", "payload"}:
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_CONTRACT",
             f"Unsupported Strategy output kind: {output_kind!r}",
-            action="Use signal, weight, order, or payload.",
+            expected="Use signal, weight, order, or payload.",
         )
     return StrategyManifest(
         strategy_id=require_string(value.get("id"), "strategy.id"),
@@ -165,16 +169,16 @@ def _strategy_input(role: str, raw: Any) -> StrategyInput:
     kind = require_string(pandas_raw.get("kind"), f"inputs.{role}.pandas.kind")
     if kind not in {"table", "matrix"}:
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_CONTRACT",
             f"Unsupported pandas kind for {role!r}: {kind!r}",
-            action="Use table or matrix.",
+            expected="Use table or matrix.",
         )
     index_raw = pandas_raw.get("index")
     if not isinstance(index_raw, list) or not index_raw:
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_CONTRACT",
             f"inputs.{role}.pandas.index must be a non-empty list",
-            action="Declare canonical index field names in order.",
+            expected="Declare canonical index field names in order.",
         )
     index = tuple(require_string(item, f"inputs.{role}.pandas.index[]") for item in index_raw)
     fields_raw = require_mapping(value.get("fields", {}), f"inputs.{role}.fields")
@@ -189,9 +193,9 @@ def _strategy_input(role: str, raw: Any) -> StrategyInput:
         nullable = field_value.get("nullable")
         if not isinstance(nullable, bool):
             raise QlibxError(
-                "INVALID",
+                "STRATEGY_CONTRACT",
                 f"inputs.{role}.fields.{name}.nullable must be boolean",
-                action="Declare nullable as true or false.",
+                expected="Declare nullable as true or false.",
             )
         fields.append(
             StrategyField(
@@ -204,9 +208,9 @@ def _strategy_input(role: str, raw: Any) -> StrategyInput:
         )
     if kind == "table" and not fields:
         raise QlibxError(
-            "MISSING",
+            "STRATEGY_CONTRACT",
             f"Table input {role!r} must declare canonical fields",
-            action="Declare every pandas column the Strategy reads.",
+            expected="Declare every pandas column the Strategy reads.",
         )
     return StrategyInput(
         role=role,
@@ -234,9 +238,9 @@ def _config_path(project: Project, value: str | Path, directory: str) -> Path:
     expected = (project.paths.config / directory).resolve()
     if not path.is_relative_to(expected):
         raise QlibxError(
-            "BOUNDARY",
+            "STRATEGY_CONTRACT",
             f"Strategy {directory} config is outside {expected}: {path}",
-            action=f"Keep Strategy {directory} YAML below the project config root.",
+            expected=f"Keep Strategy {directory} YAML below the project config root.",
         )
     return path
 
@@ -244,9 +248,9 @@ def _config_path(project: Project, value: str | Path, directory: str) -> Path:
 def _schema(raw: Mapping[str, Any], path: Path) -> None:
     if raw.get("schema_version") != 1:
         raise QlibxError(
-            "UNSUPPORTED",
+            "STRATEGY_CONTRACT",
             f"Strategy config schema_version must be 1: {path}",
-            action="Use the installed Strategy schema version.",
+            expected="Use the installed Strategy schema version.",
         )
 
 
@@ -261,9 +265,9 @@ def _keys(
     unknown = sorted(set(value) - allowed)
     if missing or unknown:
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_CONTRACT",
             f"Invalid keys in {field}; missing={missing}, unknown={unknown}",
-            action="Match the installed Strategy manifest or binding schema exactly.",
+            expected="Match the installed Strategy manifest or binding schema exactly.",
         )
 
 

@@ -1,19 +1,22 @@
-"""The two kinds of failure qlibx can have, and the one it tells an agent about.
+"""Failures qlibx reports to the agent layer, and defects it reports to nobody.
 
-A **public** failure is a message to the agent layer. It always says what happened and what
-to do next, because an agent that cannot act on a failure cannot recover from it. Its code
-names the *kind* of failure -- one of seven -- and everything specific to the occurrence
-travels in ``message``, ``action`` and ``context``, written where the check actually ran.
+PRD section 5.6. The division is the same one section 1.2 sets for capabilities: the core
+package reports **what it observed and where**, and the agent layer decides what to do about
+it by reading the skill for that stage.
 
-An **internal** failure is a defect in qlibx. It carries no code and no action, because
-there is no action: the caller did nothing wrong and can do nothing but stop and report.
-Giving it a stable code and a recovery would be a lie, and would pad the agent's vocabulary
-with entries it can never act on.
+The code names a **stage of the user journey**, not a kind of rule. That is deliberate. "A
+value was invalid" is a question the core can answer and the agent cannot use -- it says
+nothing about where in a workflow the agent is stuck. "Universe registration refused this"
+selects a skill and bounds which repairs are legitimate.
 
-The seven codes are the whole public vocabulary. They are deliberately coarse: nothing in
-qlibx branches on a code, so a finer code set only duplicates, in a static table, the
-guidance each raise site already writes. That duplication is what previously grew this
-vocabulary to 144 names for 126 distinct failures.
+The core does not prescribe a repair, because a repair is rarely unique. A Strategy that
+fails on a string-typed column can be fixed by casting inside the Strategy or by
+preprocessing and re-registering the dataset; which is right depends on whether that string
+is a data defect or an intended column, and the core cannot know. So a public failure
+reports ``expected`` -- what the contract required -- and never an instruction.
+
+A failure raised by user code inside a Strategy is passed through, not classified. Deciding
+whether someone else's TypeError is "invalid" or "corrupt" is both unanswerable and lossy.
 """
 
 from __future__ import annotations
@@ -21,79 +24,85 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 
-ErrorCode = Literal[
-    "NOT_FOUND",
-    "MISSING",
-    "INVALID",
-    "BOUNDARY",
-    "CONFLICT",
-    "CORRUPT",
-    "UNSUPPORTED",
+Stage = Literal[
+    "ONBOARDING",
+    "PROJECT",
+    "DATA_REGISTRATION",
+    "UNIVERSE",
+    "STRATEGY_CONTRACT",
+    "STRATEGY_RUN",
+    "ALPHA",
+    "PORTFOLIO",
+    "EXECUTION",
+    "RESEARCH_RECORD",
+    "REPORTING",
 ]
 
-# What a code alone tells a caller, before reading the occurrence. `qlibx errors <code>`
-# serves these; everything specific rides on the error itself.
-CODE_GUIDANCE: Mapping[str, str] = {
-    "NOT_FOUND": (
-        "A name is not registered. Read context['available'] and choose from it, or restore "
-        "the thing it names. Never substitute something that merely looks similar."
+# What each stage is responsible for. This is where the agent is, not what went wrong there;
+# the failure itself carries that. Ordered as the journey runs.
+STAGES: Mapping[str, str] = {
+    "ONBOARDING": (
+        "Preparing the agent: installed documentation, schemas, examples, generated skills "
+        "and instruction files."
     ),
-    "MISSING": (
-        "A declaration the operation needs was never made. Declare, register, or bind it and "
-        "run the same command again. qlibx supplies no default in its place."
+    "PROJECT": (
+        "Initializing or loading a project, and keeping every configured path inside the "
+        "selected project root."
     ),
-    "INVALID": (
-        "A supplied value breaks a rule the contract declares. Correct the value at its "
-        "source rather than working around the check."
+    "DATA_REGISTRATION": (
+        "Inspecting a source read-only and registering it as a logical dataset: keys, "
+        "availability, dtypes and the opaque information columns."
     ),
-    "BOUNDARY": (
-        "Something reached outside a boundary qlibx enforces -- a configured root, the "
-        "decision time, or a child's inherited scope. Bring the operation back inside it. "
-        "Widening the boundary to admit the data is never the fix."
+    "UNIVERSE": (
+        "Registering the research universe, which every Strategy inherits and which must be "
+        "boolean, point-in-time, unique per (available_at, ticker) and complete."
     ),
-    "CONFLICT": (
-        "Stored state already holds this identity, or moved while you worked. Re-read the "
-        "current state and derive a new identity; never overwrite what is committed."
+    "STRATEGY_CONTRACT": (
+        "Authoring a Strategy manifest and binding its declared inputs to registered fields."
     ),
-    "CORRUPT": (
-        "Stored bytes do not match the digest recorded for them. Do not consume the content. "
-        "Reproduce it from its declared inputs, then investigate the store."
+    "STRATEGY_RUN": (
+        "Running a decision: the point-in-time boundary, the child-context scope, and the "
+        "Strategy callable on its bound inputs."
     ),
-    "UNSUPPORTED": (
-        "The installed build does not implement this version or format. Use one it supports, "
-        "or convert the input outside qlibx with the user's approval."
+    "ALPHA": "Applying signal transforms and budget policies to a signed alpha.",
+    "PORTFOLIO": "Combining stored alpha and constructing an enhanced index portfolio.",
+    "EXECUTION": "Submitting weights into the Qlib order, fill, position and account loop.",
+    "RESEARCH_RECORD": (
+        "Staging, publishing and reading research records, artifacts and the catalog."
     ),
+    "REPORTING": "Analyzing a stored run and rendering a report from it.",
 }
 
 
 class QlibxError(RuntimeError):
     """A failure the agent layer is meant to act on.
 
-    ``action`` is required rather than optional. A public failure that cannot say what to do
-    next is an internal failure wearing the wrong type.
+    ``expected`` states what the stage's contract required. It is not an instruction: the
+    repair belongs to the skill for this stage, because more than one repair is usually
+    valid and only the user knows which fits their data.
     """
 
     def __init__(
         self,
-        code: ErrorCode,
+        stage: Stage,
         message: str,
         *,
-        action: str,
+        expected: str,
         context: dict[str, Any] | None = None,
         requires_user_confirmation: bool = False,
     ) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
+        super().__init__(f"{stage}: {message}")
+        self.stage = stage
         self.message = message
-        self.action = action
+        self.expected = expected
         self.context = context or {}
         self.requires_user_confirmation = requires_user_confirmation
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "code": self.code,
+            "stage": self.stage,
             "message": self.message,
-            "action": self.action,
+            "expected": self.expected,
             "context": self.context,
             "requires_user_confirmation": self.requires_user_confirmation,
         }
@@ -103,8 +112,8 @@ class QlibxInternalError(RuntimeError):
     """An invariant inside qlibx broke. Not part of the agent-facing contract.
 
     Raise this where the caller could not have caused the failure and cannot repair it: a
-    computation disagreeing with itself, a branch that should be unreachable. No code and no
-    action, on purpose -- the only response is to stop and report the state.
+    computation disagreeing with itself, a branch that should be unreachable. No stage and
+    no ``expected``, on purpose -- there is no step of the journey to send anyone back to.
     """
 
     def __init__(self, message: str, *, context: dict[str, Any] | None = None) -> None:
@@ -116,7 +125,7 @@ class QlibxInternalError(RuntimeError):
         return {"internal": True, "message": self.message, "context": self.context}
 
 
-def unknown_name(kind: str, requested: str, available: Iterable[str]) -> QlibxError:
+def unknown_name(stage: Stage, kind: str, requested: str, available: Iterable[str]) -> QlibxError:
     """Build the standard 'name is not registered, here is what is' failure.
 
     Every named-lookup surface in qlibx fails the same shape, so an agent can list the
@@ -124,41 +133,52 @@ def unknown_name(kind: str, requested: str, available: Iterable[str]) -> QlibxEr
     """
     options = sorted(available)
     return QlibxError(
-        "NOT_FOUND",
+        stage,
         f"Unknown {kind}: {requested!r}",
-        action=f"Choose one of {options}.",
+        expected=f"One of the registered {kind}s: {options}.",
         context={"kind": kind, "requested": requested, "available": options},
     )
 
 
-def requirement_gap(context: Mapping[str, Any]) -> QlibxError:
+def passthrough(stage: Stage, error: BaseException, *, expected: str, **context: Any) -> QlibxError:
+    """Report a failure raised by user code without classifying it.
+
+    The original type and text are carried verbatim. Judging whether someone else's
+    exception is a data defect, a contract breach or a bug is not something the core can do
+    from inside the call, and attempting it discards the one description that was accurate.
+    """
+    return QlibxError(
+        stage,
+        f"{type(error).__name__}: {error}",
+        expected=expected,
+        context={"raised": type(error).__name__, **context},
+    )
+
+
+def requirement_gap(stage: Stage, context: Mapping[str, Any]) -> QlibxError:
     """Build the stable envelope for one typed capability requirement resolution."""
     payload = dict(context)
     capability = payload.get("capability", {})
     capability_id = capability.get("id", "unknown")
     missing = list(payload.get("missing_requirements", ()))
-    commands = list(payload.get("next_commands", ()))
-    action = (
-        "Read context.missing_requirements and every alternative, explain them to the user, "
-        "inspect the named source data, then register or configure the alternative the user "
-        "selects and rerun the same capability. Never choose a proxy silently."
-    )
-    if commands:
-        action = f"{action} Next: {commands[0]}"
     return QlibxError(
-        "MISSING",
+        stage,
         f"Capability {capability_id!r} has unsatisfied requirements: {missing}",
-        action=action,
+        expected=(
+            "Every mandatory requirement resolves to a registered dataset through one of its "
+            "declared alternatives."
+        ),
         context=payload,
         requires_user_confirmation=True,
     )
 
 
 __all__ = [
-    "CODE_GUIDANCE",
-    "ErrorCode",
+    "STAGES",
     "QlibxError",
     "QlibxInternalError",
+    "Stage",
+    "passthrough",
     "requirement_gap",
     "unknown_name",
 ]

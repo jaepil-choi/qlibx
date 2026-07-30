@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from qlibx.catalog import DataCatalog
-from qlibx.config import read_yaml, require_mapping, require_string
+from qlibx.config import for_stage
 from qlibx.errors import QlibxError, requirement_gap
 from qlibx.project import Project
 from qlibx.requirements import (
@@ -19,6 +19,10 @@ from qlibx.requirements import (
     gather_evidence,
     make_plan,
 )
+
+# Every YAML failure from this module belongs to the same journey step, so the readers
+# are bound to it once here instead of at each call site.
+read_yaml, require_mapping, require_string, require_strings = for_stage("EXECUTION")
 
 TargetSemantics = Literal["long_only", "signed_weight", "enhanced_index"]
 
@@ -110,9 +114,9 @@ def execution_profile_requirements(
 ) -> CapabilityRequirements:
     if target_semantics not in {"long_only", "signed_weight", "enhanced_index"}:
         raise QlibxError(
-            "INVALID",
+            "EXECUTION",
             f"Unsupported target semantics: {target_semantics}",
-            action="Choose long_only, signed_weight, or enhanced_index.",
+            expected="Choose long_only, signed_weight, or enhanced_index.",
         )
     roles = (*COMMON_ROLES, *(SIGNED_ROLES if target_semantics == "signed_weight" else ()))
     return CapabilityRequirements(
@@ -137,16 +141,16 @@ def plan_execution_profile(
     path = project.contained(config_path)
     if not path.is_relative_to(project.paths.config):
         raise QlibxError(
-            "BOUNDARY",
+            "EXECUTION",
             f"Execution profile is outside config root: {path}",
-            action="Keep the user-authored profile below config/qlibx.",
+            expected="Keep the user-authored profile below config/qlibx.",
         )
     raw = read_yaml(path)
     if raw.get("schema_version") != 1:
         raise QlibxError(
-            "UNSUPPORTED",
+            "EXECUTION",
             "execution profile schema_version must be 1",
-            action="Use the installed execution profile schema.",
+            expected="Use the installed execution profile schema.",
         )
     profile_id = require_string(raw.get("profile_id"), "profile_id")
     semantics = require_string(raw.get("target_semantics"), "target_semantics")
@@ -271,7 +275,7 @@ def require_execution_profile(
     """Return a ready profile plan or fail with the same structured resolution."""
     plan = plan_execution_profile(project, config_path)
     if not plan.ready:
-        raise requirement_gap(plan.resolution.to_dict())
+        raise requirement_gap("EXECUTION", plan.resolution.to_dict())
     return plan
 
 

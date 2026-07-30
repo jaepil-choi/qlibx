@@ -245,18 +245,18 @@ class ResearchCatalog:
         path = self.frozen / f"{bundle_id}.json"
         if not path.exists():
             raise QlibxError(
-                "NOT_FOUND",
+                "RESEARCH_RECORD",
                 f"Unknown frozen run bundle: {bundle_id}",
-                action="Freeze the run before loading it, or choose an existing bundle ID.",
+                expected="Freeze the run before loading it, or choose an existing bundle ID.",
                 context={"bundle_id": bundle_id},
             )
         body = json.loads(path.read_text(encoding="utf-8"))
         expected = body.pop("bundle_id")
         if expected != bundle_id or digest_document(body) != bundle_id:
             raise QlibxError(
-                "CORRUPT",
+                "RESEARCH_RECORD",
                 f"Frozen run bundle {bundle_id} does not match its recorded digest",
-                action="Do not reuse this bundle; freeze the run again from its inputs.",
+                expected="Do not reuse this bundle; freeze the run again from its inputs.",
                 context={"bundle_id": bundle_id, "path": str(path)},
             )
         return {**body, "bundle_id": bundle_id}
@@ -270,9 +270,9 @@ class ResearchCatalog:
     ) -> ProposalRecord:
         if proposal.search_limit < 1:
             raise QlibxError(
-                "INVALID",
+                "RESEARCH_RECORD",
                 f"Proposal search_limit must be positive, got {proposal.search_limit}",
-                action="Declare how many trials the proposal may spend before it stops.",
+                expected="Declare how many trials the proposal may spend before it stops.",
                 context={"search_limit": proposal.search_limit},
             )
         body = {
@@ -300,15 +300,15 @@ class ResearchCatalog:
     ) -> ResearchDecision:
         allowed = ("promote", "reject", "retain_diagnostic", "supersede")
         if decision not in allowed:
-            raise unknown_name("research decision", decision, allowed)
+            raise unknown_name("RESEARCH_RECORD", "research decision", decision, allowed)
         with self._lock(f"decision-{target_id}"):
             current = self._decision_version(target_id)
             if current != expected_version:
                 raise QlibxError(
-                    "CONFLICT",
+                    "RESEARCH_RECORD",
                     f"Decision for {target_id} expected version {expected_version}, "
                     f"but the current version is {current}",
-                    action=(
+                    expected=(
                         "Re-read the latest decision for this target and retry with its "
                         "current version; another agent decided first."
                     ),
@@ -378,7 +378,7 @@ class ResearchCatalog:
     ) -> PublicationPlan:
         allowed = ("successful", "failed", "invalid", "abandoned")
         if status not in allowed:
-            raise unknown_name("run status", status, allowed)
+            raise unknown_name("RESEARCH_RECORD", "run status", status, allowed)
         staged_files = tuple(
             sorted(
                 path
@@ -388,9 +388,9 @@ class ResearchCatalog:
         )
         if status == "successful" and not staged_files:
             raise QlibxError(
-                "MISSING",
+                "RESEARCH_RECORD",
                 "A successful publication must stage at least one artifact",
-                action=(
+                expected=(
                     "Stage the result with stage_frame/stage_json, or publish with a status "
                     "that reflects what actually happened."
                 ),
@@ -426,18 +426,18 @@ class ResearchCatalog:
         for path, artifact in zip(plan.staged_files, plan.artifacts, strict=True):
             if not path.exists() or digest_bytes(path.read_bytes()) != artifact.blob_digest:
                 raise QlibxError(
-                    "CONFLICT",
+                    "RESEARCH_RECORD",
                     f"Staged artifact changed after the publication was prepared: {path.name}",
-                    action="Prepare the publication again from the current staged files.",
+                    expected="Prepare the publication again from the current staged files.",
                     context={"path": str(path), "expected_digest": artifact.blob_digest},
                 )
             destination = self.blobs / artifact.blob_digest
             if destination.exists():
                 if digest_bytes(destination.read_bytes()) != artifact.blob_digest:
                     raise QlibxError(
-                        "CORRUPT",
+                        "RESEARCH_RECORD",
                         f"Stored blob does not match its content address: {artifact.blob_digest}",
-                        action=(
+                        expected=(
                             "Do not overwrite it; investigate the blob store before "
                             "republishing this record."
                         ),
@@ -450,9 +450,9 @@ class ResearchCatalog:
         if record_path.exists():
             if not self._same_result(record_path.read_bytes(), plan.manifest):
                 raise QlibxError(
-                    "CONFLICT",
+                    "RESEARCH_RECORD",
                     f"Different content already claims result key {plan.manifest['result_key']!r}",
-                    action=(
+                    expected=(
                         "Another agent published a different result under this identity. "
                         "Compare both records and publish under a distinct result key."
                     ),
@@ -471,9 +471,9 @@ class ResearchCatalog:
         record_id = str(plan.manifest["record_id"])
         if not self._installed_manifest_valid(plan.manifest):
             raise QlibxError(
-                "CONFLICT",
+                "RESEARCH_RECORD",
                 f"Publication {record_id} is not completely installed",
-                action=(
+                expected=(
                     "Run install_publication (or recover_publications) before committing; "
                     "a directory existing is not evidence of a complete result."
                 ),
@@ -648,9 +648,9 @@ class ResearchCatalog:
         """Load one hash-verified artifact from a committed complete record."""
         if record_id not in self._committed_record_ids():
             raise QlibxError(
-                "CONFLICT",
+                "RESEARCH_RECORD",
                 f"Record {record_id} has no commit event",
-                action=(
+                expected=(
                     "Only committed records are readable. Run recover_publications if a "
                     "previous run was interrupted."
                 ),
@@ -659,14 +659,15 @@ class ResearchCatalog:
         manifest = _read_manifest(self.records / f"{record_id}.json")
         if manifest is None or not self._installed_manifest_valid(manifest):
             raise QlibxError(
-                "CORRUPT",
+                "RESEARCH_RECORD",
                 f"Record {record_id} has incomplete or hash-mismatched artifacts",
-                action="Do not treat this record as evidence; republish the result.",
+                expected="Do not treat this record as evidence; republish the result.",
                 context={"record_id": record_id},
             )
         matches = [artifact for artifact in manifest["artifacts"] if artifact["name"] == name]
         if len(matches) != 1:
             raise unknown_name(
+                "RESEARCH_RECORD",
                 f"artifact of record {record_id}",
                 name,
                 (str(item["name"]) for item in manifest["artifacts"]),
@@ -678,6 +679,7 @@ class ResearchCatalog:
         payload_format = _MEDIA_TYPE_FORMATS.get(media_type)
         if payload_format is None:
             raise unknown_name(
+                "RESEARCH_RECORD",
                 "artifact media type",
                 media_type,
                 _MEDIA_TYPE_FORMATS,
@@ -745,9 +747,9 @@ class ResearchCatalog:
                 events.append(json.loads(line))
             except json.JSONDecodeError as error:
                 raise QlibxError(
-                    "CORRUPT",
+                    "RESEARCH_RECORD",
                     f"Research event log line {number} is not readable JSON",
-                    action=(
+                    expected=(
                         "Inspect the tail of events/events.jsonl; a crash mid-append can leave "
                         "a partial final line that must be repaired or removed deliberately."
                     ),
@@ -849,9 +851,9 @@ def _read_manifest(path: Path) -> Mapping[str, Any] | None:
 
 def _immutable_conflict(path: Path) -> QlibxError:
     return QlibxError(
-        "CONFLICT",
+        "RESEARCH_RECORD",
         f"Different content already exists at an immutable path: {path.name}",
-        action=(
+        expected=(
             "This path is write-once. Publish the differing result under its own identity "
             "instead of overwriting the stored one."
         ),

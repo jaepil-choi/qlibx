@@ -62,9 +62,9 @@ def discover_data(
     """Find supported user-source files without opening or changing them."""
     if limit <= 0:
         raise QlibxError(
-            "INVALID",
+            "DATA_REGISTRATION",
             "Discovery limit must be positive",
-            action="Provide a positive bounded file limit.",
+            expected="Provide a positive bounded file limit.",
         )
     root = _source_path(project, project.paths.source_data if path is None else path)
     if root.is_file():
@@ -74,9 +74,9 @@ def discover_data(
         files = tuple(item for item in iterator if item.is_file())
     else:
         raise QlibxError(
-            "NOT_FOUND",
+            "DATA_REGISTRATION",
             f"Discovery path does not exist: {root}",
-            action="Choose an existing path below the configured source_data root.",
+            expected="Choose an existing path below the configured source_data root.",
         )
     candidates: list[DataCandidate] = []
     for candidate in sorted(files):
@@ -107,23 +107,23 @@ def inspect_data(
     """Inspect schema and a bounded sample without assigning economic semantics."""
     if sample_rows < 0 or sample_rows > 100:
         raise QlibxError(
-            "INVALID",
+            "DATA_REGISTRATION",
             "sample_rows must be between 0 and 100",
-            action="Use a bounded sample between 0 and 100 rows.",
+            expected="Use a bounded sample between 0 and 100 rows.",
         )
     source = _source_path(project, path)
     if not source.is_file():
         raise QlibxError(
-            "NOT_FOUND",
+            "DATA_REGISTRATION",
             f"Inspection source does not exist: {source}",
-            action="Choose a discovered source file.",
+            expected="Choose a discovered source file.",
         )
     format_name = _format(source)
     if format_name is None:
         raise QlibxError(
-            "UNSUPPORTED",
+            "DATA_REGISTRATION",
             f"Unsupported source format: {source.suffix}",
-            action="Use a Parquet or DuckDB source.",
+            expected="Use a Parquet or DuckDB source.",
         )
     tables = (
         (_inspect_parquet(source, sample_rows),)
@@ -179,9 +179,9 @@ def _inspect_duckdb(
         )
         if selected_table is not None and selected_table not in available:
             raise QlibxError(
-                "NOT_FOUND",
+                "DATA_REGISTRATION",
                 f"DuckDB table not found: {selected_table!r}; available: {list(available)}",
-                action="Choose an explicitly listed table.",
+                expected="Choose an explicitly listed table.",
             )
         names = (selected_table,) if selected_table else available
         result: list[TableInspection] = []
@@ -208,9 +208,9 @@ def _source_path(project: Project, path: str | Path) -> Path:
     selected = project.contained(path)
     if not selected.is_relative_to(project.paths.source_data):
         raise QlibxError(
-            "BOUNDARY",
+            "DATA_REGISTRATION",
             f"Source path is outside configured source_data: {selected}",
-            action="Inspect only user-owned files below the source_data root.",
+            expected="Inspect only user-owned files below the source_data root.",
         )
     return selected
 

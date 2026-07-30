@@ -34,9 +34,9 @@ class Project:
         manifest = read_yaml(selected / MANIFEST)
         if manifest.get("schema_version") != 1:
             raise QlibxError(
-                "UNSUPPORTED",
+                "PROJECT",
                 "qlibx.yaml schema_version must be 1",
-                action="Use the installed project schema.",
+                expected="Use the installed project schema.",
             )
         raw_paths = require_mapping(manifest.get("paths"), "paths")
         resolved: dict[str, Path] = {}
@@ -46,9 +46,9 @@ class Project:
             path = (selected / require_string(raw, f"paths.{name}")).resolve()
             if not path.is_relative_to(selected):
                 raise QlibxError(
-                    "BOUNDARY",
+                    "PROJECT",
                     f"paths.{name} escapes the project: {path}",
-                    action="Use a project-relative contained path.",
+                    expected="Use a project-relative contained path.",
                 )
             resolved[name] = path
         return cls(selected, ProjectPaths(**resolved))
@@ -88,8 +88,8 @@ class Project:
         )
         if not selected.is_relative_to(self.root):
             raise QlibxError(
-                "BOUNDARY",
+                "PROJECT",
                 f"Path escapes the project: {selected}",
-                action="Use a path below the project root.",
+                expected="Use a path below the project root.",
             )
         return selected

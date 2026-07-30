@@ -113,9 +113,9 @@ def _resolve_inputs(
                     frame = frame.astype(contract.pandas.dtype)
                 except (TypeError, ValueError) as error:
                     raise QlibxError(
-                        "INVALID",
+                        "STRATEGY_RUN",
                         f"Input {contract.role!r} cannot convert to {contract.pandas.dtype}",
-                        action="Correct the manifest or bind a compatible registered dataset.",
+                        expected="Correct the manifest or bind a compatible registered dataset.",
                     ) from error
             _validate_matrix_cells(contract, frame)
         else:
@@ -129,9 +129,9 @@ def _resolve_inputs(
             missing = sorted(set(selected_columns) - set(frame.columns))
             if missing:
                 raise QlibxError(
-                    "MISSING",
+                    "STRATEGY_RUN",
                     f"Bound input {contract.role!r} is missing fields: {missing}",
-                    action="Correct the binding after inspecting registered fields.",
+                    expected="Correct the binding after inspecting registered fields.",
                 )
             frame = frame.loc[:, selected_columns].rename(
                 columns={source: canonical for canonical, source in source_fields.items()}
@@ -163,17 +163,22 @@ def _load_universe_matrix(
     duplicate = table.duplicated([axes.index, axes.columns], keep=False)
     if duplicate.any():
         raise QlibxError(
-            "INVALID",
-            f"Universe has {int(duplicate.sum())} duplicate date/ticker rows",
-            action="Correct the registered universe query before Strategy execution.",
+            "UNIVERSE",
+            f"Universe has {int(duplicate.sum())} rows sharing an (available_at, ticker) key",
+            expected="One membership row per (available_at, ticker); qlibx does not pick one.",
+            context={"dataset": dataset_name, "duplicate_rows": int(duplicate.sum())},
         )
     matrix = table.pivot(index=axes.index, columns=axes.columns, values=axes.values)
     matrix = matrix.sort_index().sort_index(axis=1)
-    if matrix.isna().any().any():
+    missing = int(matrix.isna().to_numpy().sum())
+    if missing:
         raise QlibxError(
-            "INVALID",
-            "Universe membership is missing for one or more registered date/ticker cells",
-            action="Provide explicit true/false membership; do not infer membership from absence.",
+            "UNIVERSE",
+            f"Universe membership is missing for {missing} registered date/ticker cells",
+            expected=(
+                "Membership is boolean and complete; absence of a row is not non-membership."
+            ),
+            context={"dataset": dataset_name, "missing_cells": missing},
         )
     return matrix.astype(bool)
 
@@ -184,16 +189,16 @@ def _validate_fields(contract: StrategyInput, frame: pd.DataFrame) -> None:
             converted = frame[declared_field.name].astype(declared_field.dtype)
         except (TypeError, ValueError) as error:
             raise QlibxError(
-                "INVALID",
+                "STRATEGY_RUN",
                 f"Field {contract.role}.{declared_field.name} "
                 f"cannot convert to {declared_field.dtype}",
-                action="Correct the binding or manifest dtype.",
+                expected="Correct the binding or manifest dtype.",
             ) from error
         if not declared_field.nullable and converted.isna().any():
             raise QlibxError(
-                "INVALID",
+                "STRATEGY_RUN",
                 f"Field {contract.role}.{declared_field.name} contains null values",
-                action="Bind a complete field or declare nullable behavior.",
+                expected="Bind a complete field or declare nullable behavior.",
             )
         frame[declared_field.name] = converted
 
@@ -209,9 +214,9 @@ def _validate_matrix_cells(contract: StrategyInput, frame: pd.DataFrame) -> None
         if declared_field.nullable or not frame.isna().to_numpy().any():
             continue
         raise QlibxError(
-            "INVALID",
+            "STRATEGY_RUN",
             f"Field {contract.role}.{declared_field.name} contains null values",
-            action="Bind a complete matrix or declare nullable behavior.",
+            expected="Bind a complete matrix or declare nullable behavior.",
             context={"role": contract.role, "field": declared_field.name},
         )
 
@@ -242,9 +247,9 @@ def _validate_universe_alignment(
         outside = sorted(tickers - universe_tickers)
         if outside:
             raise QlibxError(
-                "BOUNDARY",
+                "STRATEGY_RUN",
                 f"Input {role!r} contains tickers outside universe axes: {outside}",
-                action="Align bound datasets with the inherited universe input.",
+                expected="Align bound datasets with the inherited universe input.",
                 context={"role": role, "outside_universe": outside},
             )
 

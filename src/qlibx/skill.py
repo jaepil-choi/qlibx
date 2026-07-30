@@ -41,9 +41,9 @@ def plan_agent_skill(
 ) -> SkillPlan:
     if target not in {"codex", "claude", "generic"}:
         raise QlibxError(
-            "INVALID",
+            "ONBOARDING",
             f"Unsupported skill target: {target}",
-            action="Choose codex, claude, or generic.",
+            expected="Choose codex, claude, or generic.",
         )
     selected = Path(output).resolve()
     root = selected.parent if selected.name.lower() == "skill.md" else selected
@@ -72,15 +72,15 @@ def apply_agent_skill(plan: SkillPlan, *, force: bool = False) -> Path:
         digest = digest_bytes(before) if before is not None else None
         if exists != file.existed or digest != file.before_digest:
             raise QlibxError(
-                "CONFLICT",
+                "ONBOARDING",
                 f"Skill file changed after planning: {file.path}",
-                action="Create a new skill plan and review the changed user content.",
+                expected="Create a new skill plan and review the changed user content.",
             )
         if file.action == "replace_requires_approval" and not force:
             raise QlibxError(
-                "BOUNDARY",
+                "ONBOARDING",
                 f"Skill file has different content: {file.path}",
-                action="Review the planned replacement and apply with explicit force approval.",
+                expected="Review the planned replacement and apply with explicit force approval.",
                 requires_user_confirmation=True,
             )
     for file in plan.files:
@@ -211,14 +211,27 @@ forced buy-in, or borrow-fee support. Treat Qlib dealt quantity and account stat
 
 ## Error recovery
 
-Every `QlibxError` returns `code`, `message`, `action`, and `context`. Run
-`qlibx errors <code>` before editing config or retrying. If guidance requires user confirmation,
-explain the unresolved meaning and ask the user; never guess or silently fall back.
+Every `QlibxError` returns `stage`, `message`, `expected`, `context`, and
+`requires_user_confirmation`. The `stage` is where in this workflow you are stuck -- one of
+`ONBOARDING`, `PROJECT`, `DATA_REGISTRATION`, `UNIVERSE`, `STRATEGY_CONTRACT`, `STRATEGY_RUN`,
+`ALPHA`, `PORTFOLIO`, `EXECUTION`, `RESEARCH_RECORD`, `REPORTING`. Run `qlibx errors <stage>` to
+confirm what that step owns.
+
+qlibx reports what it observed and what the contract expected. It does not tell you how to repair
+it, because the repair is usually not unique and depends on what the data means. Decide with the
+user, then rerun the same command.
+
+For example, a `STRATEGY_RUN` failure caused by a text value in a numeric column can be repaired
+either by casting inside the Strategy or by preprocessing and re-registering the dataset. Which is
+right depends on whether that text is a data defect or a column that means something. Ask.
+
+If `requires_user_confirmation` is true, explain the unresolved meaning and ask; never guess or
+silently fall back.
 
 ## Capability requirement gaps
 
 Before running a data-dependent capability, read its installed requirement declaration and run its
-read-only plan. If `ready` is false or execution raises `QLIBX_MISSING_CAPABILITY_REQUIREMENTS`:
+read-only plan. If `ready` is false or execution raises a `MISSING` requirement gap:
 
 1. Read `missing_requirements`, each alternative and its reason from the shared resolution.
 2. Explain what the capability needs and why; show every acceptable derivation alternative.

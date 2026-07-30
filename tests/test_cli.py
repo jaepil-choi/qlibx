@@ -53,8 +53,8 @@ def test_cli_requirements_qlib_status_and_agent_skill(tmp_path, capsys) -> None:
     )
     assert "index: available_at" in logical_example
     assert "event_date" not in logical_example
-    assert "qlibx errors <code>" in skill_text
-    assert "MISSING" in skill_text
+    assert "qlibx errors <stage>" in skill_text
+    assert "DATA_REGISTRATION" in skill_text
     assert "rerun the exact same capability request" in skill_text
     assert "do not repeat pandas contracts or store question/confirmation" in skill_text
     assert "combine_stored_weights" in skill_text

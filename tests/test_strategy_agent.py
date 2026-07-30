@@ -92,7 +92,7 @@ def test_availability_not_event_date_controls_no_look_ahead() -> None:
         )
     # The most expensive failure has to be recoverable without reading qlibx source: the
     # report names the boundary that decided it and the cell that crossed it.
-    assert leak.value.code == "BOUNDARY"
+    assert leak.value.stage == "STRATEGY_RUN"
     assert leak.value.context["boundary"] == "available_at"
     assert leak.value.context["decision_time"] == "2025-02-01T00:00:00"
     assert leak.value.context["violations"] == [
@@ -107,7 +107,7 @@ def test_availability_not_event_date_controls_no_look_ahead() -> None:
     # and the refusal has to name the same contract rather than a second vocabulary.
     with pytest.raises(QlibxError) as by_index:
         DecisionContext("2025-02-01", {"returns": calendar})
-    assert by_index.value.code == "BOUNDARY"
+    assert by_index.value.stage == "STRATEGY_RUN"
     assert by_index.value.context["boundary"] == "index"
     assert by_index.value.context["violations"] == ["2025-03-01T00:00:00"]
 
@@ -145,7 +145,7 @@ def test_child_cannot_change_parent_observation_or_account() -> None:
     # A refused what-if stays an answer rather than a crash, and says why in a code the
     # caller can branch on. QlibxError is a RuntimeError, so this also pins that the
     # rejection path still catches the structured error it now raises.
-    assert result.diagnostics["error_code"] == "BOUNDARY"
+    assert result.diagnostics["stage"] == "STRATEGY_RUN"
     assert parent.account == {"cash": 100.0}
 
 
@@ -181,7 +181,7 @@ def test_feedback_order_and_resume_match_uninterrupted_results() -> None:
             {"returns": pd.DataFrame({"A": [1.0]}, index=dates[:1])},
             feedback_history=(FeedbackEvent(dates[1], "fill", {}),),
         )
-    assert unconfirmed.value.code == "BOUNDARY"
+    assert unconfirmed.value.stage == "STRATEGY_RUN"
     assert unconfirmed.value.context["violations"] == [
         {"kind": "fill", "confirmed_at": "2025-01-02T00:00:00"}
     ]

@@ -120,7 +120,7 @@ class OperationRegistry:
         try:
             return self._specs[name]
         except KeyError as error:
-            raise unknown_name("alpha operation", name, self._specs) from error
+            raise unknown_name("ALPHA", "alpha operation", name, self._specs) from error
 
     def names(self) -> tuple[str, ...]:
         return tuple(sorted(self._specs))
@@ -204,7 +204,7 @@ def _apply_spec(
         provided_inputs.add("group_label")
     plan = plan_operation(spec.name, provided_inputs=provided_inputs)
     if not plan.ready:
-        raise requirement_gap(plan.resolution.to_dict())
+        raise requirement_gap("ALPHA", plan.resolution.to_dict())
     needs_groups = any(item.role == "group_label" for item in spec.requirements)
     if needs_groups:
         assert groups is not None

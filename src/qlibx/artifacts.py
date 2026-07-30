@@ -93,6 +93,7 @@ class ArtifactStore:
         validate_name(name)
         if status not in {"complete", "incomplete", "invalid"}:
             raise unknown_name(
+                "RESEARCH_RECORD",
                 "artifact status",
                 status,
                 ("complete", "incomplete", "invalid"),
@@ -150,9 +151,9 @@ class ArtifactStore:
                 existing = self.load(artifact_id, run_id=run_id)
                 if _envelope_json(existing) != _envelope_json(envelope):
                     raise QlibxError(
-                        "CONFLICT",
+                        "RESEARCH_RECORD",
                         f"A different envelope already claims artifact {artifact_id}",
-                        action=(
+                        expected=(
                             "Artifact identity is derived from its declared inputs; change "
                             "the producer identity or inputs rather than overwriting."
                         ),
@@ -173,9 +174,9 @@ class ArtifactStore:
         )
         if len(candidates) != 1 or not candidates[0].is_dir():
             raise QlibxError(
-                "NOT_FOUND",
+                "RESEARCH_RECORD",
                 f"Artifact {artifact_id} is unknown or matches more than one run",
-                action="Pass run_id to disambiguate, or list the run's stored artifacts.",
+                expected="Pass run_id to disambiguate, or list the run's stored artifacts.",
                 context={"artifact_id": artifact_id, "run_id": run_id, "matches": len(candidates)},
             )
         directory = candidates[0]
@@ -186,9 +187,9 @@ class ArtifactStore:
         envelope = ArtifactEnvelope(payload_path=payload, **raw)
         if digest_file(payload) != envelope.payload_digest:
             raise QlibxError(
-                "CORRUPT",
+                "RESEARCH_RECORD",
                 f"Artifact {artifact_id} payload does not match its recorded digest",
-                action="Do not consume this artifact; reproduce it from its declared inputs.",
+                expected="Do not consume this artifact; reproduce it from its declared inputs.",
                 context={"artifact_id": artifact_id, "payload": str(payload)},
             )
         return envelope
@@ -201,9 +202,9 @@ class ArtifactStore:
         destination = Path(output).resolve()
         if destination.exists() and any(destination.iterdir()):
             raise QlibxError(
-                "INVALID",
+                "RESEARCH_RECORD",
                 f"Export destination already has content: {destination}",
-                action="Choose an empty directory so the bundle stays unambiguous.",
+                expected="Choose an empty directory so the bundle stays unambiguous.",
                 context={"destination": str(destination)},
             )
         destination.mkdir(parents=True, exist_ok=True)
@@ -212,9 +213,9 @@ class ArtifactStore:
             envelope = self.load(artifact_id)
             if envelope.status != "complete":
                 raise QlibxError(
-                    "INVALID",
+                    "RESEARCH_RECORD",
                     f"Artifact {artifact_id} has status {envelope.status!r} and is not portable",
-                    action=(
+                    expected=(
                         "Export complete artifacts only; an incomplete result must not travel "
                         "as if it were finished."
                     ),
@@ -247,9 +248,9 @@ class ArtifactStore:
         manifest = json.loads((source / "bundle.json").read_text(encoding="utf-8"))
         if manifest.get("schema_version") != 1:
             raise QlibxError(
-                "UNSUPPORTED",
+                "RESEARCH_RECORD",
                 f"Artifact bundle schema_version must be 1, got {manifest.get('schema_version')!r}",
-                action="Export the bundle with a qlibx version that writes schema version 1.",
+                expected="Export the bundle with a qlibx version that writes schema version 1.",
                 context={"bundle": str(source)},
             )
         imported: list[ArtifactEnvelope] = []
@@ -258,18 +259,18 @@ class ArtifactStore:
             envelope_path = directory / "envelope.json"
             if digest_file(envelope_path) != item["envelope_digest"]:
                 raise QlibxError(
-                    "CORRUPT",
+                    "RESEARCH_RECORD",
                     f"Bundled envelope for {item['artifact_id']} fails its digest check",
-                    action="Re-export the bundle; do not import unverified provenance.",
+                    expected="Re-export the bundle; do not import unverified provenance.",
                     context={"artifact_id": item["artifact_id"], "bundle": str(source)},
                 )
             raw = json.loads(envelope_path.read_text(encoding="utf-8"))
             payload = directory / raw["payload_file"]
             if digest_file(payload) != item["payload_digest"]:
                 raise QlibxError(
-                    "CORRUPT",
+                    "RESEARCH_RECORD",
                     f"Bundled payload for {item['artifact_id']} fails its digest check",
-                    action="Re-export the bundle; do not import unverified content.",
+                    expected="Re-export the bundle; do not import unverified content.",
                     context={"artifact_id": item["artifact_id"], "bundle": str(source)},
                 )
             final = self.root / item["run_id"] / item["artifact_id"]

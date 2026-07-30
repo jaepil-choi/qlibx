@@ -68,7 +68,7 @@ def require_strategy_binding(
 ) -> CapabilityPlan:
     plan = plan_strategy_binding(project, manifest, binding)
     if not plan.ready:
-        raise requirement_gap(plan.resolution.to_dict())
+        raise requirement_gap("STRATEGY_CONTRACT", plan.resolution.to_dict())
     return plan
 
 

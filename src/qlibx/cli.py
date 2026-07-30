@@ -291,9 +291,9 @@ def _agent_skill(args: argparse.Namespace) -> Any:
     plan = plan_agent_skill(args.output, target=args.target)
     if args.force and not args.apply:
         raise QlibxError(
-            "INVALID",
+            "ONBOARDING",
             "--force has no effect during dry-run",
-            action="Review the dry-run, then use --apply --force.",
+            expected="Review the dry-run, then use --apply --force.",
             requires_user_confirmation=True,
         )
     skill_path = apply_agent_skill(plan, force=args.force) if args.apply else None
@@ -315,9 +315,9 @@ def _agent_instruction(args: argparse.Namespace) -> Any:
         return {"read_only": True, "targets": detect_instruction_targets(project)}
     if not args.target:
         raise QlibxError(
-            "MISSING",
+            "ONBOARDING",
             "No instruction target was selected",
-            action="Use --detect, then select one or more --target paths.",
+            expected="Use --detect, then select one or more --target paths.",
             requires_user_confirmation=True,
         )
     plans = tuple(

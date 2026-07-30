@@ -587,6 +587,141 @@ Agent는 user 확인 없이 alternative를 임의로 선택하지 않는다. 어
 Optional requirement가 충족되지 않아 결과의 일부 항목을 계산할 수 없으면, 해당 항목을 조용히 생략하지
 않고 계산하지 못했다는 사실과 이유를 결과에 명시적으로 기록한다.
 
+### 5.6 Stage-based error contract
+
+#### Error는 agent layer와의 프로토콜이다
+
+Section 1.2의 분업이 error에도 그대로 적용된다. Core package는 **어느 단계에서 무엇이 관측되었는지**를
+보고하고, 그것을 어떻게 고칠지는 agent layer가 skill을 읽고 판단한다.
+
+이 경계가 중요한 이유는 **고치는 방법이 하나가 아니기 때문**이다. 예를 들어 numeric 연산을 하는
+Strategy가 문자열이 섞인 column에서 실패했다면, 유효한 해결이 최소 두 가지다.
+
+- Strategy 안에서 해당 column을 명시적으로 cast한다.
+- Registration 단계로 돌아가 preprocess한 뒤 다시 register한다.
+
+어느 쪽이 옳은지는 그 문자열이 data quality 결함인지 의도된 column인지에 달려 있고, core package는
+그것을 알 수 없다. 따라서 core는 처방하지 않는다. 관측한 사실과 계약이 요구한 것을 보고하고, 선택은
+user와 agent에게 남긴다.
+
+#### Error code는 workflow stage를 가리킨다
+
+Error code는 "어떤 종류의 규칙이 깨졌는가"가 아니라 **"user journey의 어느 단계에서 막혔는가"**를
+나타낸다. 규칙의 종류는 core가 답할 수 있지만 agent가 쓸 수 없는 정보다. 반면 단계는 agent가 어떤
+skill을 열고 어떤 범위의 수정이 정당한지를 곧바로 결정하게 한다.
+
+| stage code | 단계 | 대응하는 절 |
+| --- | --- | --- |
+| `ONBOARDING` | Agent 준비, documentation, skill, instruction file | 3.2, 5.1-5.3 |
+| `PROJECT` | Project 초기화/로드와 경로 봉쇄 | 4.2, 6.1 |
+| `DATA_REGISTRATION` | Source inspection과 logical dataset 등록 | 4.3, 6.2, 6.3 |
+| `UNIVERSE` | Universe dataset 표준 검사 | 6.5 |
+| `STRATEGY_CONTRACT` | Strategy manifest와 binding 작성 | 6.3, 7.1 |
+| `STRATEGY_RUN` | Decision 실행, point-in-time 경계, user code | 6.4, 7.2, 7.3 |
+| `ALPHA` | Signal transform과 budget | 8.2, 8.4 |
+| `PORTFOLIO` | Ensemble과 enhanced index construction | 10.1, 10.2 |
+| `EXECUTION` | Qlib order/fill/account lifecycle | 11 |
+| `RESEARCH_RECORD` | Session, publication, catalog, artifact | 9, 12.3 |
+| `REPORTING` | Stored run 분석과 rendering | 12.4 |
+
+Stage 수는 분류 설계의 결과가 아니라 제품 workflow 단계 수다. 한 stage 안에서는 message와 context가
+구체적인 내용을 모두 나르므로 stage를 더 쪼갤 필요가 없다.
+
+#### Public error와 internal error
+
+Public error는 agent layer로 나가는 메시지이며 항상 다음을 갖는다.
+
+- `stage`: 위 표의 code
+- `message`: 무엇이 관측되었는지. 하위 예외가 있으면 그 내용을 그대로 포함한다
+- `expected`: 그 단계의 계약이 요구한 것
+- `context`: 판단 근거가 되는 구체적 값. 위반한 row, column, 값, 개수
+- `requires_user_confirmation`: 의미를 user에게 물어야 하는지 여부
+
+Internal error는 qlibx 자신의 invariant가 깨진 것이며 stage도 `expected`도 갖지 않는다. Caller가
+유발할 수 없고 고칠 수도 없으므로 agent contract에 포함하지 않는다.
+
+#### Registration 단계에서 requirement를 검사한다
+
+Data와 universe는 **등록 시점에** 계약을 검사하고, 맞지 않으면 등록을 거부한다. 잘못 등록된 dataset이
+나중에 Strategy 실행 중에 발견되면 원인 추적 비용이 훨씬 커지기 때문이다.
+
+**사례 — `DATA_REGISTRATION`: availability/ticker 중복**
+
+한 `(available_at, ticker)` 쌍에 두 개 이상의 row가 있으면 point-in-time 조회 결과가 결정적이지
+않으므로 등록을 거부한다. qlibx는 어느 row가 옳은지 추측하거나 임의로 aggregate하지 않는다.
+
+```json
+{"stage": "DATA_REGISTRATION",
+ "message": "Found 3 rows sharing an (available_at, ticker) key",
+ "expected": "One row per (available_at, ticker); qlibx does not aggregate silently.",
+ "context": {"dataset": "fundamentals", "duplicate_count": 3,
+             "violations": [{"available_at": "2024-03-01", "ticker": "005930", "rows": 2}]},
+ "requires_user_confirmation": true}
+```
+
+Agent가 선택할 수 있는 해결은 최소 셋이다. Source에서 중복을 제거한다, registration query에 명시적
+dedup 규칙을 넣는다, 또는 key를 다시 정의한다. 어느 것이 옳은지는 data의 의미에 달려 있으므로 agent가
+user에게 확인한다.
+
+**사례 — `DATA_REGISTRATION`: available_at 변환 실패**
+
+available_at으로 선택된 column을 datetime으로 변환할 수 없으면 등록을 거부한다. 변환 실패의 원문을
+`message`에 그대로 싣는다.
+
+```json
+{"stage": "DATA_REGISTRATION",
+ "message": "Column '공시일자' cannot convert to datetime: Unknown datetime string format, unable to parse: 20240301.0",
+ "expected": "The available_at column must parse to datetime without coercion.",
+ "context": {"dataset": "disclosure", "column": "공시일자", "dtype": "float64",
+             "samples": [20240301.0, 20240302.0]}}
+```
+
+**사례 — `UNIVERSE`: universe 표준 위반**
+
+Universe는 모든 Strategy가 상속하는 requirement이므로 별도 표준을 갖는다. 등록 시점에 검사한다.
+
+- 값은 boolean이어야 한다. 결측을 미포함으로 해석하지 않는다.
+- available_at을 가져야 한다. 다른 dataset과 같은 point-in-time 규칙을 따른다.
+- `(available_at, ticker)`가 유일해야 한다.
+- 선언된 axis의 모든 cell이 채워져 있어야 한다.
+
+```json
+{"stage": "UNIVERSE",
+ "message": "Universe values are float64 with 12 missing cells",
+ "expected": "Universe membership must be boolean and complete; absence is not non-membership.",
+ "context": {"dataset": "kospi_universe", "dtype": "float64", "missing_cells": 12,
+             "violations": [{"available_at": "2024-03-04", "ticker": "000660"}]}}
+```
+
+**사례 — `STRATEGY_RUN`: user code가 user data에서 실패**
+
+Strategy 실행 중 발생한 실패는 core가 분류하지 않는다. 어느 단계에서 났는지만 표시하고 원문을 그대로
+전달한다. 분류를 시도하면 정확하지도 않고 원문 정보를 잃는다.
+
+```json
+{"stage": "STRATEGY_RUN",
+ "message": "Strategy 'reversal.v1' raised TypeError at 2024-03-05: unsupported operand type(s) for -: 'str' and 'float'",
+ "expected": "The Strategy callable must run on its bound inputs at every decision time.",
+ "context": {"strategy_id": "reversal.v1", "decision_time": "2024-03-05T00:00:00",
+             "inputs": {"returns": {"dtype": "object", "null_count": 4}},
+             "traceback_tail": "..."}}
+```
+
+이 error를 받은 agent는 skill을 읽고 두 경로 중 하나를 user와 함께 선택한다. Core는 어느 쪽도
+지시하지 않는다.
+
+#### 고치는 지침은 skill이 소유한다
+
+각 stage에 대응하는 skill은 그 단계에서 자주 발생하는 실패와, 각각에 대해 **가능한 여러 해결 경로**를
+담는다. Core package는 skill 내용을 알지 못하며, error에 특정 해결을 지시하는 문장을 쓰지 않는다.
+
+Skill이 담아야 하는 것은 다음과 같다.
+
+- 그 stage의 계약 요약
+- 자주 발생하는 실패와 각각의 가능한 해결 경로 목록
+- 어떤 선택이 user 확인을 필요로 하는지
+- 해결 후 다시 실행할 public command
+
 ## 6. Project and data contracts
 
 ### 6.1 Package와 project 분리

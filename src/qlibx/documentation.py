@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from qlibx.errors import CODE_GUIDANCE, QlibxError, unknown_name
+from qlibx.errors import STAGES, QlibxError, unknown_name
 
 TOPICS: Mapping[str, str] = {
     "project": (
@@ -46,11 +46,12 @@ TOPICS: Mapping[str, str] = {
     ),
 }
 
-# The public error vocabulary is seven codes, defined with the exception type in
-# `qlibx.errors`. Re-exported here because `qlibx docs errors` and `qlibx errors <code>`
-# are documentation surfaces, but the model has one home.
+# An error names the journey stage it interrupted. What each stage is responsible for is
+# defined with the exception type in `qlibx.errors`; this is the documentation surface for
+# it, so `qlibx errors <stage>` can answer without the model having two homes.
 ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
-    code: {"recovery": recovery} for code, recovery in CODE_GUIDANCE.items()
+    stage: {"responsibility": responsibility, "skill": f"qlibx-{stage.lower()}"}
+    for stage, responsibility in STAGES.items()
 }
 
 
@@ -782,17 +783,18 @@ def public_example(name: str) -> Mapping[str, str]:
     return EXAMPLES[name]
 
 
-def error_guidance(code: str) -> Mapping[str, Any]:
-    """What a code alone says, before reading a particular failure.
+def error_guidance(stage: str) -> Mapping[str, Any]:
+    """What a stage is responsible for, and which skill covers repairs inside it.
 
-    This is only half the answer by design. The occurrence carries the rest -- what
-    happened, what to do about it, and the evidence -- because the check that ran is the
-    only thing that knows them.
+    Half the answer by design. The failure itself carries what happened, what the contract
+    expected, and the evidence; the skill carries the ways to repair it. Neither belongs in
+    a static table -- the first is known only where the check ran, the second only to the
+    agent that knows the user's intent.
     """
-    if code not in ERROR_GUIDANCE:
-        raise _unknown("error code", code, ERROR_GUIDANCE)
-    return {"code": code, **ERROR_GUIDANCE[code]}
+    if stage not in ERROR_GUIDANCE:
+        raise _unknown("journey stage", stage, ERROR_GUIDANCE)
+    return {"stage": stage, **ERROR_GUIDANCE[stage]}
 
 
 def _unknown(kind: str, name: str, available: Mapping[str, Any]) -> QlibxError:
-    return unknown_name(kind, name, available)
+    return unknown_name("ONBOARDING", kind, name, available)

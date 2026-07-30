@@ -18,7 +18,7 @@ An agent that trips the no-look-ahead boundary now receives a code it can look u
 boundary that decided the refusal, and the specific observations that crossed it:
 
 ```json
-{"code": "QLIBX_DECISION_LOOK_AHEAD",
+{"code": "QLIBX_BOUNDARY_LOOK_AHEAD",
  "context": {"dataset": "returns", "decision_time": "2025-02-01T00:00:00",
              "boundary": "available_at", "violation_count": 1,
              "violations": [{"row": "2025-03-01T00:00:00", "column": "A",
@@ -57,7 +57,7 @@ branch on.
 place the conversion could have silently broken behavior: `QlibxError` extends
 `RuntimeError`, so every converted raise inside the child evaluation would have escaped the
 rejection path and propagated as a crash. Verified by reverting the widened catch — the
-nested-research test fails with an uncaught `QLIBX_DECISION_CHILD_OBSERVATIONS_CHANGED`.
+nested-research test fails with an uncaught `QLIBX_BOUNDARY_CHILD_OBSERVATIONS`.
 
 ## Trade-offs
 
@@ -66,8 +66,8 @@ nested-research test fails with an uncaught `QLIBX_DECISION_CHILD_OBSERVATIONS_C
   assert on codes and violation contexts instead of message substrings. This is the same
   break the earlier pass took for `research`/`execution`/`artifacts`; taking it here is
   what makes the contract uniform rather than a third convention.
-- Row and column escapes share `QLIBX_DECISION_CHILD_AXIS_OUT_OF_BOUNDS` and separate on
-  `context.axis`, matching how `QLIBX_DECISION_AVAILABILITY_AXES_MISMATCH` already reports.
+- Row and column escapes share `QLIBX_BOUNDARY_CHILD_AXIS` and separate on
+  `context.axis`, matching how `QLIBX_INVALID_AVAILABILITY_AXES` already reports.
   The first attempt used two codes built by a helper taking the code as a parameter; the
   documentation guard's AST scan cannot see a code that is never a literal at a raise site,
   and correctly reported both as documented-but-unreachable. Keeping the raise sites
@@ -92,8 +92,8 @@ nested-research test fails with an uncaught `QLIBX_DECISION_CHILD_OBSERVATIONS_C
   - the child-boundary escape reports `axis` and the offending label;
   - a rejected nested-research child reports `error_code` (reverting the widened `except`
     turns the rejection into an uncaught error).
-- `qlibx errors QLIBX_DECISION_LOOK_AHEAD` and
-  `qlibx errors QLIBX_DECISION_CHILD_AXIS_OUT_OF_BOUNDS` both answer with code-specific
+- `qlibx errors QLIBX_BOUNDARY_LOOK_AHEAD` and
+  `qlibx errors QLIBX_BOUNDARY_CHILD_AXIS` both answer with code-specific
   recovery, which is the gap that motivated the change.
 - The existing bidirectional guard in `test_documentation.py` holds: every raised code has
   installed guidance and every documented code is reachable.

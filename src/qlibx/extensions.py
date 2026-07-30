@@ -117,7 +117,7 @@ CONTRACTS: Mapping[str, ExtensionContract] = {
 def extension_contract(name: str) -> ExtensionContract:
     if name not in CONTRACTS:
         raise unknown_name(
-            "QLIBX_EXTENSION_CONTRACT_UNKNOWN", "extension contract", name, CONTRACTS
+            "QLIBX_NOT_FOUND_EXTENSION_CONTRACT", "extension contract", name, CONTRACTS
         )
     return CONTRACTS[name]
 

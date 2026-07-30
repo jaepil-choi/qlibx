@@ -121,7 +121,7 @@ class OperationRegistry:
             return self._specs[name]
         except KeyError as error:
             raise unknown_name(
-                "QLIBX_ALPHA_OPERATION_UNKNOWN", "alpha operation", name, self._specs
+                "QLIBX_NOT_FOUND_ALPHA_OPERATION", "alpha operation", name, self._specs
             ) from error
 
     def names(self) -> tuple[str, ...]:

@@ -72,7 +72,7 @@ def test_yaml_registration_then_config_driven_table_and_matrix(tmp_path: Path) -
 def test_duplicate_yaml_key_fails(tmp_path: Path) -> None:
     path = tmp_path / "bad.yaml"
     path.write_text("a: 1\na: 2\n", encoding="utf-8")
-    with pytest.raises(QlibxError, match="QLIBX_YAML_DUPLICATE_KEY"):
+    with pytest.raises(QlibxError, match="QLIBX_INVALID_YAML_DUPLICATE_KEY"):
         read_yaml(path)
 
 
@@ -82,7 +82,7 @@ def test_missing_registration_mapping_is_agent_readable(tmp_path: Path) -> None:
     source.parent.mkdir(parents=True)
     pq.write_table(pa.table({"event_date": [datetime(2024, 1, 1)], "instrument": ["A"]}), source)
     _write_config(tmp_path, missing_information=True)
-    with pytest.raises(QlibxError, match="QLIBX_REGISTRATION_MAPPING_MISSING") as raised:
+    with pytest.raises(QlibxError, match="QLIBX_MISSING_REGISTRATION_MAPPING") as raised:
         plan_registration(project, "sample")
     assert raised.value.context["requirements"]["required_axis"][0]["field"] == "available_at"
 
@@ -98,7 +98,7 @@ def test_catalog_rejects_duplicate_dataset_across_fragments(tmp_path: Path) -> N
     )
     base = tmp_path / "config" / "qlibx" / "data" / "base.yaml"
     base.write_text(base.read_text() + "    - datasets/extra.yaml\n", encoding="utf-8")
-    with pytest.raises(QlibxError, match="QLIBX_DATASET_DUPLICATE"):
+    with pytest.raises(QlibxError, match="QLIBX_INVALID_DATASET_DUPLICATE"):
         DataCatalog.from_project(project)
 
 
@@ -176,7 +176,7 @@ catalog:
     assert len(unbounded) > len(loader.load_table("values", as_of="2025-01-01"))
     with pytest.raises(QlibxError) as no_reason:
         loader.load_full_history("values", reason="   ")
-    assert no_reason.value.code == "QLIBX_FULL_HISTORY_REASON_MISSING"
+    assert no_reason.value.code == "QLIBX_MISSING_FULL_HISTORY_REASON"
 
 
 def _write_config(root: Path, *, missing_information: bool = False) -> None:

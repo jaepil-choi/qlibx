@@ -62,7 +62,7 @@ def discover_data(
     """Find supported user-source files without opening or changing them."""
     if limit <= 0:
         raise QlibxError(
-            "QLIBX_DISCOVERY_LIMIT_INVALID",
+            "QLIBX_INVALID_LIMIT",
             "Discovery limit must be positive",
             action="Provide a positive bounded file limit.",
         )
@@ -74,7 +74,7 @@ def discover_data(
         files = tuple(item for item in iterator if item.is_file())
     else:
         raise QlibxError(
-            "QLIBX_DISCOVERY_PATH_MISSING",
+            "QLIBX_NOT_FOUND_SOURCE_PATH",
             f"Discovery path does not exist: {root}",
             action="Choose an existing path below the configured source_data root.",
         )
@@ -107,21 +107,21 @@ def inspect_data(
     """Inspect schema and a bounded sample without assigning economic semantics."""
     if sample_rows < 0 or sample_rows > 100:
         raise QlibxError(
-            "QLIBX_INSPECTION_SAMPLE_INVALID",
+            "QLIBX_INVALID_LIMIT",
             "sample_rows must be between 0 and 100",
             action="Use a bounded sample between 0 and 100 rows.",
         )
     source = _source_path(project, path)
     if not source.is_file():
         raise QlibxError(
-            "QLIBX_INSPECTION_SOURCE_MISSING",
+            "QLIBX_NOT_FOUND_SOURCE_PATH",
             f"Inspection source does not exist: {source}",
             action="Choose a discovered source file.",
         )
     format_name = _format(source)
     if format_name is None:
         raise QlibxError(
-            "QLIBX_INSPECTION_FORMAT_UNSUPPORTED",
+            "QLIBX_UNSUPPORTED_SOURCE_FORMAT",
             f"Unsupported source format: {source.suffix}",
             action="Use a Parquet or DuckDB source.",
         )
@@ -179,7 +179,7 @@ def _inspect_duckdb(
         )
         if selected_table is not None and selected_table not in available:
             raise QlibxError(
-                "QLIBX_DUCKDB_TABLE_UNKNOWN",
+                "QLIBX_NOT_FOUND_DUCKDB_TABLE",
                 f"DuckDB table not found: {selected_table!r}; available: {list(available)}",
                 action="Choose an explicitly listed table.",
             )
@@ -208,7 +208,7 @@ def _source_path(project: Project, path: str | Path) -> Path:
     selected = project.contained(path)
     if not selected.is_relative_to(project.paths.source_data):
         raise QlibxError(
-            "QLIBX_SOURCE_PATH_OUTSIDE_ROOT",
+            "QLIBX_BOUNDARY_SOURCE_PATH",
             f"Source path is outside configured source_data: {selected}",
             action="Inspect only user-owned files below the source_data root.",
         )

@@ -291,7 +291,7 @@ def _agent_skill(args: argparse.Namespace) -> Any:
     plan = plan_agent_skill(args.output, target=args.target)
     if args.force and not args.apply:
         raise QlibxError(
-            "QLIBX_SKILL_FORCE_WITHOUT_APPLY",
+            "QLIBX_INVALID_SKILL_FORCE_FLAG",
             "--force has no effect during dry-run",
             action="Review the dry-run, then use --apply --force.",
         )
@@ -314,7 +314,7 @@ def _agent_instruction(args: argparse.Namespace) -> Any:
         return {"read_only": True, "targets": detect_instruction_targets(project)}
     if not args.target:
         raise QlibxError(
-            "QLIBX_INSTRUCTION_TARGET_REQUIRED",
+            "QLIBX_MISSING_INSTRUCTION_TARGET",
             "No instruction target was selected",
             action="Use --detect, then select one or more --target paths.",
         )

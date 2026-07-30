@@ -50,22 +50,22 @@ def test_project_and_logical_dataset_guidance_is_installed(capsys) -> None:
 def test_unknown_documentation_topic_is_structured_for_agents() -> None:
     with pytest.raises(QlibxError) as error:
         dispatch(parser().parse_args(["docs", "not-a-topic"]))
-    assert error.value.code == "QLIBX_DOCUMENTATION_TOPIC_UNKNOWN"
+    assert error.value.code == "QLIBX_NOT_FOUND_DOCUMENTATION_TOPIC"
     assert "project" in error.value.context["available"]
 
 
 def test_installed_error_recovery_is_code_specific_and_machine_readable(capsys) -> None:
     assert dispatch(parser().parse_args(["docs", "errors"])) == 0
-    assert dispatch(parser().parse_args(["errors", "QLIBX_REGISTRATION_MAPPING_MISSING"])) == 0
+    assert dispatch(parser().parse_args(["errors", "QLIBX_MISSING_REGISTRATION_MAPPING"])) == 0
     output = capsys.readouterr().out
     first, second = output.split("}\n{")
     guide = json.loads(first + "}")["errors"]
     lookup = json.loads("{" + second)
     assert guide["schema"] == "error_response"
-    assert lookup["code"] == "QLIBX_REGISTRATION_MAPPING_MISSING"
+    assert lookup["code"] == "QLIBX_MISSING_REGISTRATION_MAPPING"
     assert lookup["requires_user_confirmation"] is True
     assert "never guess" in lookup["recovery"]
-    assert error_guidance("QLIBX_SOURCE_CHANGED_DURING_REGISTRATION")["recovery"]
+    assert error_guidance("QLIBX_CONFLICT_SOURCE_CHANGED")["recovery"]
 
 
 def test_agent_journey_guides_link_public_executable_examples() -> None:
@@ -163,7 +163,7 @@ def test_public_requirement_and_plan_schemas_are_installed() -> None:
     plan = public_schema("capability_plan")
     assert {"requirement_id", "alternatives", "next_commands"} <= set(requirement["required"])
     assert plan["read_only"] is True
-    assert "QLIBX_CAPABILITY_REQUIREMENT_GAP" in plan["error_equivalence"]
+    assert "QLIBX_MISSING_CAPABILITY_REQUIREMENTS" in plan["error_equivalence"]
 
 
 def _raised_error_codes() -> set[str]:
@@ -191,12 +191,54 @@ def test_every_raised_error_code_has_installed_recovery_guidance() -> None:
     assert not set(ERROR_GUIDANCE) - raised, "documented but unreachable"
 
 
+# What the caller must do next. Codes are named for this, not for the module that noticed
+# the failure -- a module-shaped prefix guarantees the same failure gets a new name in every
+# module that can hit it, which is how the scheme this replaced grew to 144 codes.
+ERROR_FAMILIES = (
+    "NOT_FOUND",
+    "MISSING",
+    "INVALID",
+    "BOUNDARY",
+    "CONFLICT",
+    "CORRUPT",
+    "UNSUPPORTED",
+)
+
+
+def test_every_error_code_belongs_to_exactly_one_family() -> None:
+    """The tree is only real if no code sits outside it, and none straddles two branches."""
+    for code in sorted(ERROR_GUIDANCE):
+        matched = [name for name in ERROR_FAMILIES if code.startswith(f"QLIBX_{name}_")]
+        assert matched, f"{code} belongs to no family; pick the caller's next action"
+        assert len(matched) == 1, f"{code} matches {matched}; families must not nest"
+
+
+def test_no_two_codes_give_the_same_recovery() -> None:
+    """Two codes with one recovery are one failure wearing two names.
+
+    This is the check that would have caught the original drift: `provided_inputs` versus
+    `available_inputs`, three spellings of "keep the path under its root", four of "use a
+    positive limit". If a new code's recovery matches an existing one, they are the same
+    code and `context` should carry whatever distinguishes them.
+    """
+    by_recovery: dict[str, list[str]] = {}
+    for code, entry in ERROR_GUIDANCE.items():
+        if "recovery" not in entry:
+            continue  # inherits its family; nothing of its own to collide
+        key = " ".join(str(entry["recovery"]).split()).casefold()
+        by_recovery.setdefault(key, []).append(code)
+    collisions = {
+        recovery: sorted(codes) for recovery, codes in by_recovery.items() if len(codes) > 1
+    }
+    assert not collisions, f"codes sharing one recovery: {collisions}"
+
+
 def test_unknown_name_lookups_share_one_structured_shape(capsys) -> None:
     """A failed named lookup answers the same way whatever registry it came from."""
     lookups = [
-        (["alpha", "operation", "nope"], "QLIBX_ALPHA_OPERATION_UNKNOWN"),
-        (["extension", "contract", "nope"], "QLIBX_EXTENSION_CONTRACT_UNKNOWN"),
-        (["docs", "nope"], "QLIBX_DOCUMENTATION_TOPIC_UNKNOWN"),
+        (["alpha", "operation", "nope"], "QLIBX_NOT_FOUND_ALPHA_OPERATION"),
+        (["extension", "contract", "nope"], "QLIBX_NOT_FOUND_EXTENSION_CONTRACT"),
+        (["docs", "nope"], "QLIBX_NOT_FOUND_DOCUMENTATION_TOPIC"),
     ]
     for argv, code in lookups:
         with pytest.raises(QlibxError) as failure:

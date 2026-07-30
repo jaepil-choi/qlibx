@@ -322,7 +322,7 @@ handler는 **출력할 값을 return만** 하며 JSON 인코딩·출력·에러 
 ## 5. Project와 ownership boundary
 
 `qlibx.yaml`(schema_version 1)이 유일한 진입점이다. 모든 경로는 여기서 resolve하고,
-project root 밖으로 나가면 `QLIBX_PATH_ESCAPE`로 실패한다.
+project root 밖으로 나가면 `QLIBX_BOUNDARY_PROJECT_PATH`로 실패한다.
 
 ```mermaid
 flowchart TB
@@ -358,7 +358,7 @@ User가 작성하는 config 파일의 정확한 경로:
 | `config/qlibx/bindings/*.yaml` | Strategy/version별 registered dataset과 exact field mapping |
 
 `Project.contained(path)`가 모든 경로 접근의 관문이다. Registration output은 추가로
-`generated_data` 하위여야 하며(`QLIBX_OUTPUT_OUTSIDE_GENERATED_DATA`), extension source는
+`generated_data` 하위여야 하며(`QLIBX_BOUNDARY_OUTPUT_PATH`), extension source는
 `extensions` 하위여야 한다.
 
 ---
@@ -402,14 +402,14 @@ loader.load_full_history_matrix("market", reason="backtest input matrix")
 
 Registration, schema inventory, operator preview, backtest input 구성은 정당하게 전체 이력이
 필요하다. 그 선택을 **생략된 인자에 숨기지 않고** `reason`으로 호출 지점에 남긴다. 빈 `reason`은
-`QLIBX_FULL_HISTORY_REASON_MISSING`으로 거부한다. `qlibx data preview`는 `--as-of`를 주면
+`QLIBX_MISSING_FULL_HISTORY_REASON`으로 거부한다. `qlibx data preview`는 `--as-of`를 주면
 bounded, 안 주면 full-history로 동작하며 결과의 `availability` 필드가 어느 쪽이었는지 밝힌다.
 
 `limit`은 `available_at`·`ticker` 정렬 뒤에 적용한다. 정렬 없는 `LIMIT`은 스캔 순서에 따라
 매번 다른 행을 돌려주므로 preview가 registration의 재현 가능한 증거가 되지 못한다.
 
 Registration은 원본 SHA256을 계획 시점과 기록 직전에 두 번 확인하며, 도중에 바뀌면
-`QLIBX_SOURCE_CHANGED_DURING_REGISTRATION`으로 실패한다. 쓰기는 staging → `replace`로 원자적이다.
+`QLIBX_CONFLICT_SOURCE_CHANGED`으로 실패한다. 쓰기는 staging → `replace`로 원자적이다.
 
 `profiles.plan_execution_profile`은 논리 dataset을 Qlib 실행 role
 (`execution_price`, `valuation_price`, `universe`, `tradable`, `volume`, `benchmark_weight`,
@@ -785,7 +785,7 @@ CapabilityRequirements
 
 Optional requirement는 `not_requested`, `satisfied`, `unsatisfied`를 구분한다. Exposure caller는
 `requested_metrics`를 반드시 지정하고, 요청한 input이 없으면 기본적으로
-`QLIBX_CAPABILITY_REQUIREMENT_GAP`으로 실패한다. `allow_incomplete=True`를 명시한 호출만
+`QLIBX_MISSING_CAPABILITY_REQUIREMENTS`으로 실패한다. `allow_incomplete=True`를 명시한 호출만
 `status="incomplete"`와 `UnavailableOutput`을 돌려받는다.
 
 Execution profile의 이전 `ExecutionProfilePlan` 공개 형식은 제거했다.
@@ -837,7 +837,7 @@ flowchart LR
 
 `AGENTS.md`/`CLAUDE.md`는 `<!-- qlibx:managed:start -->` 마커 사이만 교체하며 사용자 내용을
 보존하고, 반복 실행해도 블록이 중복되지 않는다. 계획 이후 파일이 바뀌면
-`QLIBX_INSTRUCTION_STALE_PLAN`으로 거부한다.
+`QLIBX_CONFLICT_STALE_PLAN`으로 거부한다.
 
 생성되는 skill 패키지에는 `references/alpha-operations.md`가 포함되는데,
 **설치된 registry에서 렌더링**되므로 operation을 추가하면 skill이 자동으로 최신이 된다.
@@ -1021,7 +1021,7 @@ flowchart LR
 | 공용 선언 | `CapabilityRequirements` + `CapabilityRequirement` + `DerivationAlternative` | `qlibx.requirements`, `schema capability_requirement` |
 | 순수 판정 | evidence와 requested optional set에서 `CapabilityResolution` 생성 | `evaluate_requirements` |
 | read-only plan | declaration, resolution, parameters, warnings, limitations | `CapabilityPlan`, `qlibx qlib plan`, `qlibx alpha plan`, `qlibx alpha exposure-plan` |
-| runtime error | plan resolution을 변경 없이 error context에 사용 | `QLIBX_CAPABILITY_REQUIREMENT_GAP` |
+| runtime error | plan resolution을 변경 없이 error context에 사용 | `QLIBX_MISSING_CAPABILITY_REQUIREMENTS` |
 | execution profile | legacy `ExecutionProfilePlan` 제거, 공용 공개 계약으로 전면 이관 | `execution_profile_requirements`, `plan_execution_profile`, `require_execution_profile` |
 | alpha operation | `OperationSpec.requirements`; `requires_groups` boolean 제거 | `group_demean`, project-local/extension-backed `OperationSpec` |
 | exposure | 명시적 metric request, `not_requested`와 `unsatisfied` 구분 | `exposure_requirements`, `plan_exposure`, `ExposureArtifact` |

@@ -22,8 +22,8 @@ translates `QlibxError`. `catalog`, `registration` and `documentation` already r
 ones; they now follow the same convention.
 
 Three error codes are new and documented in `ERROR_GUIDANCE`, so `qlibx errors <code>`
-answers for each: `QLIBX_ALPHA_OPERATION_UNKNOWN`, `QLIBX_BUDGET_POLICY_UNKNOWN`,
-`QLIBX_EXTENSION_CONTRACT_UNKNOWN`.
+answers for each: `QLIBX_NOT_FOUND_ALPHA_OPERATION`, `QLIBX_NOT_FOUND_BUDGET_POLICY`,
+`QLIBX_NOT_FOUND_EXTENSION_CONTRACT`.
 
 `errors.unknown_name` builds the shared shape that four call sites previously hand-rolled,
 so a failed lookup answers identically whichever registry raised it.

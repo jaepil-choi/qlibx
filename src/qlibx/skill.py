@@ -41,7 +41,7 @@ def plan_agent_skill(
 ) -> SkillPlan:
     if target not in {"codex", "claude", "generic"}:
         raise QlibxError(
-            "QLIBX_SKILL_TARGET_UNSUPPORTED",
+            "QLIBX_INVALID_SKILL_TARGET",
             f"Unsupported skill target: {target}",
             action="Choose codex, claude, or generic.",
         )
@@ -72,13 +72,13 @@ def apply_agent_skill(plan: SkillPlan, *, force: bool = False) -> Path:
         digest = digest_bytes(before) if before is not None else None
         if exists != file.existed or digest != file.before_digest:
             raise QlibxError(
-                "QLIBX_SKILL_STALE_PLAN",
+                "QLIBX_CONFLICT_STALE_PLAN",
                 f"Skill file changed after planning: {file.path}",
                 action="Create a new skill plan and review the changed user content.",
             )
         if file.action == "replace_requires_approval" and not force:
             raise QlibxError(
-                "QLIBX_SKILL_USER_CONTENT",
+                "QLIBX_BOUNDARY_USER_CONTENT",
                 f"Skill file has different content: {file.path}",
                 action="Review the planned replacement and apply with explicit force approval.",
             )
@@ -217,7 +217,7 @@ explain the unresolved meaning and ask the user; never guess or silently fall ba
 ## Capability requirement gaps
 
 Before running a data-dependent capability, read its installed requirement declaration and run its
-read-only plan. If `ready` is false or execution raises `QLIBX_CAPABILITY_REQUIREMENT_GAP`:
+read-only plan. If `ready` is false or execution raises `QLIBX_MISSING_CAPABILITY_REQUIREMENTS`:
 
 1. Read `missing_requirements`, each alternative and its reason from the shared resolution.
 2. Explain what the capability needs and why; show every acceptable derivation alternative.

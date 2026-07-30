@@ -5,12 +5,13 @@
 A finished project keeps results in three places, and a caller had to know all three:
 
 ```python
-from qlibx.artifacts import ArtifactStore          # 1
-from qlibx.research import ResearchCatalog         # 2
-from qlibx.run_catalog import open_run_catalog     # 3
+from qlibx.artifacts import ArtifactStore  # 1
+from qlibx.research import ResearchCatalog  # 2
+from qlibx.run_catalog import open_run_catalog  # 3
+
 store = ArtifactStore.from_project(project)
 catalog = ResearchCatalog.from_project(project)
-runs = open_run_catalog(some_path)                 # ...and this one wants a path
+runs = open_run_catalog(some_path)  # ...and this one wants a path
 ```
 
 Three names, three import paths, three construction idioms — one of which takes a file path
@@ -60,7 +61,7 @@ Both stores wrote and read the same two formats under different names — `"parq
 in artifacts, `"application/x-parquet"`/`"application/json"` in research — each with its own
 dispatch. One implementation now serves both. Records on disk keep their media type, mapped
 at the research boundary by `_MEDIA_TYPE_FORMATS`, so already-published records stay
-readable and `QLIBX_RESEARCH_ARTIFACT_MEDIA_TYPE_UNSUPPORTED` stays reachable.
+readable and `QLIBX_UNSUPPORTED_MEDIA_TYPE` stays reachable.
 
 The primitive is in `serialization` (layer 0) because both stores can reach it there. It
 raises `ValueError` for an unknown format rather than a `QlibxError`; the kernel cannot

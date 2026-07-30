@@ -91,7 +91,7 @@ def test_corrupt_stored_member_is_not_returned_as_verified(tmp_path: Path) -> No
     blob.write_bytes(b"corrupt")
     with pytest.raises(QlibxError) as corrupt:
         combine_stored_weights(catalog, members={record_id: 1.0})
-    assert corrupt.value.code == "QLIBX_RESEARCH_RECORD_CORRUPT"
+    assert corrupt.value.code == "QLIBX_CORRUPT_RESEARCH_RECORD"
     assert corrupt.value.context["record_id"] == record_id
 
 

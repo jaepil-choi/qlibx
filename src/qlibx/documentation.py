@@ -46,376 +46,130 @@ TOPICS: Mapping[str, str] = {
     ),
 }
 
+# The first branch of every error code, and what it tells the caller to do. A code is named
+# for the action it demands, never for the module that noticed the failure: a module-shaped
+# prefix guarantees the same failure earns a new name in every module that can raise it,
+# which is how this scheme previously grew to 144 codes for 126 distinct failures.
+FAMILY_RECOVERY: Mapping[str, str] = {
+    "NOT_FOUND": (
+        "The name is not registered. Read context['available'] and choose from it, or "
+        "restore the thing it names. Never substitute something that looks similar."
+    ),
+    "MISSING": (
+        "A declaration the operation needs was never made. Declare, register, or bind it "
+        "and run the same command again. qlibx does not supply a default for it."
+    ),
+    "INVALID": (
+        "The value breaks a rule the contract declares. Read the action and context, then "
+        "correct the value at its source rather than working around the check."
+    ),
+    "BOUNDARY": (
+        "Something reached outside a boundary qlibx enforces -- a configured root, the "
+        "decision time, or a child's inherited scope. Bring the operation back inside it; "
+        "widening the boundary to admit the data is never the fix."
+    ),
+    "CONFLICT": (
+        "Stored state already holds this identity, or moved while you worked. Re-read the "
+        "current state and derive a new identity; do not overwrite what is committed."
+    ),
+    "CORRUPT": (
+        "Stored bytes do not match the digest recorded for them. Do not consume the "
+        "content. Reproduce it from its declared inputs, then investigate the store."
+    ),
+    "UNSUPPORTED": (
+        "The installed build does not implement this version or format. Use one it "
+        "supports, or convert the input outside qlibx with the user's approval."
+    ),
+}
+
+# A leaf carries `recovery` only when it has something to say beyond its family. Repeating
+# the family text on every leaf is what let one recovery spread across 25 codes.
 ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
-    "QLIBX_RESEARCH_EVENT_LOG_CORRUPT": {
-        "recovery": (
-            "Repair or truncate the damaged tail of events/events.jsonl deliberately; qlibx "
-            "will not silently skip an unreadable event."
-        ),
-    },
-    "QLIBX_RESEARCH_FROZEN_RUN_UNKNOWN": {
-        "recovery": (
-            "Freeze the run before loading it, or list the frozen bundles the catalog holds."
-        ),
-    },
-    "QLIBX_RESEARCH_FROZEN_RUN_CORRUPT": {
-        "recovery": ("Do not reuse the bundle; freeze the run again from its declared inputs."),
-    },
-    "QLIBX_RESEARCH_PROPOSAL_SEARCH_LIMIT_INVALID": {
-        "recovery": (
-            "Declare a positive search limit so the proposal has an explicit stopping condition."
-        ),
-    },
-    "QLIBX_RESEARCH_DECISION_KIND_INVALID": {
-        "recovery": ("Use one of the registered decision kinds listed in context['available']."),
-    },
-    "QLIBX_RESEARCH_DECISION_STALE": {
-        "recovery": (
-            "Another agent decided first. Re-read the target's current decision version and "
-            "retry with it; do not overwrite the newer decision."
-        ),
-    },
-    "QLIBX_RESEARCH_RUN_STATUS_INVALID": {
-        "recovery": (
-            "Publish with one of the registered run statuses listed in context['available']."
-        ),
-    },
-    "QLIBX_RESEARCH_PUBLICATION_EMPTY": {
-        "recovery": (
-            "Stage at least one artifact before publishing a successful result, or publish "
-            "with the status that reflects what happened."
-        ),
-    },
-    "QLIBX_RESEARCH_STAGED_ARTIFACT_CHANGED": {
-        "recovery": (
-            "Prepare the publication again from the current staged files; the plan was built "
-            "against different content."
-        ),
-    },
-    "QLIBX_RESEARCH_BLOB_CORRUPT": {
-        "recovery": (
-            "Investigate the blob store before republishing; qlibx will not overwrite a blob "
-            "whose content no longer matches its address."
-        ),
-    },
-    "QLIBX_RESEARCH_RESULT_IDENTITY_CONFLICT": {
-        "recovery": (
-            "Different content already claims this result key. Compare both records and "
-            "publish under a distinct identity instead of replacing the stored one."
-        ),
-    },
-    "QLIBX_RESEARCH_PUBLICATION_INCOMPLETE": {
-        "recovery": (
-            "Run install_publication or recover_publications first; an existing directory is "
-            "not evidence of a complete result."
-        ),
-    },
-    "QLIBX_RESEARCH_RECORD_NOT_COMMITTED": {
-        "recovery": (
-            "Only committed records are readable. Recover interrupted publications first."
-        ),
-    },
-    "QLIBX_RESEARCH_RECORD_CORRUPT": {
-        "recovery": ("Do not cite this record as evidence; republish the result from its inputs."),
-    },
-    "QLIBX_RESEARCH_ARTIFACT_UNKNOWN": {
-        "recovery": ("Choose one of the record's stored artifact names from context['available']."),
-    },
-    "QLIBX_RESEARCH_ARTIFACT_MEDIA_TYPE_UNSUPPORTED": {
-        "recovery": ("Stage research artifacts as JSON or parquet; see context['available']."),
-    },
-    "QLIBX_RESEARCH_IMMUTABLE_CONTENT_CONFLICT": {
-        "recovery": (
-            "The path is write-once. Publish the differing content under its own identity."
-        ),
-    },
-    "QLIBX_EXECUTION_WEIGHT_OUTPUT_REQUIRED": {
-        "recovery": (
-            "Declare output_kind 'weight' on the Strategy; Qlib execution submits weights."
-        ),
-    },
-    "QLIBX_EXECUTION_UNIVERSE_NOT_OVERRIDABLE": {
-        "recovery": (
-            "Remove 'universe' from the datasets mapping; every Strategy inherits the "
-            "execution scenario's universe."
-        ),
-    },
-    "QLIBX_EXECUTION_WEIGHT_INVALID": {
-        "recovery": (
-            "Long-only targets must be finite, non-negative, and sum to at most 1. Clip or "
-            "renormalize before returning them."
-        ),
-    },
-    "QLIBX_EXECUTION_SIDE_EXPOSURE_INVALID": {
-        "recovery": ("Scale signed weights with a budget policy so neither side exceeds 1."),
-    },
-    "QLIBX_EXECUTION_QUANTITY_RECONCILIATION_FAILED": {
-        "recovery": (
-            "Do not use the result. The composite, baseline, and active books disagree, so "
-            "the signed projection is not a realized position."
-        ),
-    },
-    "QLIBX_EXECUTION_NAV_RECONCILIATION_FAILED": {
-        "recovery": (
-            "Do not use the result; the capitalization journal disagrees with the Qlib account."
-        ),
-    },
-    "QLIBX_EXECUTION_CAPITALIZATION_EVENT_UNKNOWN": {
-        "recovery": (
-            "Use one of the registered capitalization event types in context['available']."
-        ),
-    },
-    "QLIBX_EXECUTION_DATASET_AXES_INCOMPATIBLE": {
-        "recovery": ("Supply availability on exactly the dataset's index and columns."),
-    },
-    "QLIBX_EXECUTION_DATASET_AVAILABILITY_MISSING": {
-        "recovery": (
-            "Declare availability for the dataset; qlibx will not guess when observations "
-            "became visible."
-        ),
-    },
-    "QLIBX_EXECUTION_LOOKBACK_INVALID": {
-        "recovery": ("Declare a positive number of available rows the Strategy may read."),
-    },
-    "QLIBX_EXECUTION_WEIGHT_ROW_INVALID": {
-        "recovery": ("Return only the row for the current decision time."),
-    },
-    "QLIBX_EXECUTION_WEIGHT_PAYLOAD_INVALID": {
-        "recovery": (
-            "Return pandas weights keyed by instrument, as a Series or one-row DataFrame."
-        ),
-    },
-    "QLIBX_EXECUTION_WEIGHT_INSTRUMENT_UNKNOWN": {
-        "recovery": ("Restrict the weights to instruments the execution scenario declares."),
-    },
-    "QLIBX_ARTIFACT_STATUS_INVALID": {
-        "recovery": ("Record one of the registered artifact statuses in context['available']."),
-    },
-    "QLIBX_ARTIFACT_IDENTITY_CONFLICT": {
-        "recovery": (
-            "Artifact identity is derived from its declared inputs. Change the producer "
-            "identity or inputs rather than overwriting the stored envelope."
-        ),
-    },
-    "QLIBX_ARTIFACT_UNKNOWN": {
-        "recovery": ("Pass run_id to disambiguate, or list the run's stored artifacts."),
-    },
-    "QLIBX_ARTIFACT_PAYLOAD_CORRUPT": {
-        "recovery": ("Do not consume the artifact; reproduce it from its declared inputs."),
-    },
-    "QLIBX_ARTIFACT_EXPORT_DESTINATION_NOT_EMPTY": {
-        "recovery": ("Export into an empty directory so the bundle stays unambiguous."),
-    },
-    "QLIBX_ARTIFACT_NOT_PORTABLE": {
-        "recovery": (
-            "Export complete artifacts only; an incomplete result must not travel as finished."
-        ),
-    },
-    "QLIBX_ARTIFACT_BUNDLE_SCHEMA_UNSUPPORTED": {
-        "recovery": ("Export the bundle with a qlibx version that writes schema version 1."),
-    },
-    "QLIBX_ARTIFACT_ENVELOPE_CORRUPT": {
-        "recovery": ("Re-export the bundle; do not import unverified provenance."),
-    },
-    "QLIBX_PROJECT_SCHEMA_UNSUPPORTED": {
-        "recovery": "Use a project manifest schema supported by the installed qlibx version.",
-    },
-    "QLIBX_PROJECT_PATH_ESCAPE": {
-        "recovery": "Select a project-owned path below the project root.",
-    },
-    "QLIBX_PATH_ESCAPE": {
-        "recovery": "Select a project-owned path below the project root.",
-    },
-    "QLIBX_CONFIG_MISSING": {
-        "recovery": "Create the requested YAML only after reviewing the installed schema/example.",
-    },
-    "QLIBX_CONFIG_INVALID": {
-        "recovery": "Correct the YAML value named in context; do not silently substitute it.",
-    },
-    "QLIBX_CONFIG_MAPPING_REQUIRED": {
-        "recovery": "Replace the value with an explicit YAML mapping.",
-    },
-    "QLIBX_CONFIG_LIST_REQUIRED": {
-        "recovery": "Replace the value with an explicit YAML list.",
-    },
-    "QLIBX_CONFIG_STRING_REQUIRED": {
-        "recovery": "Replace the value with an explicit non-empty string.",
-    },
-    "QLIBX_YAML_DUPLICATE_KEY": {
-        "recovery": "Remove the duplicate YAML key and review which value the user intended.",
-    },
-    "QLIBX_DISCOVERY_LIMIT_INVALID": {
-        "recovery": "Use a positive bounded discovery limit.",
-    },
-    "QLIBX_DISCOVERY_PATH_MISSING": {
-        "recovery": "Confirm the user-owned source path before discovery.",
-    },
-    "QLIBX_SOURCE_PATH_OUTSIDE_ROOT": {
-        "recovery": "Use a source below the configured read-only source-data root.",
-    },
-    "QLIBX_INSPECTION_SOURCE_MISSING": {
-        "recovery": "Confirm the candidate path and inspect again without creating or changing it.",
-    },
-    "QLIBX_INSPECTION_FORMAT_UNSUPPORTED": {
-        "recovery": (
-            "Use a supported Parquet or DuckDB source, or convert it outside qlibx with approval."
-        ),
-    },
-    "QLIBX_INSPECTION_SAMPLE_INVALID": {
-        "recovery": "Use a positive bounded sample size.",
-    },
-    "QLIBX_DUCKDB_TABLE_UNKNOWN": {
-        "recovery": "Choose an inspected table explicitly; never guess a similar table name.",
-    },
-    "QLIBX_REGISTRATION_UNKNOWN": {
-        "recovery": "Choose a registration ID declared in the selected project YAML.",
-    },
-    "QLIBX_REGISTRATION_SOURCE_MISSING": {
-        "recovery": (
-            "Confirm the source path with the user; do not create or replace upstream data."
-        ),
-    },
-    "QLIBX_REGISTRATION_MAPPING_MISSING": {
-        "recovery": "Discuss the exact available_at, ticker, and information mapping; never guess.",
-        "requires_user_confirmation": True,
-    },
-    "QLIBX_INFORMATION_MAPPING_REQUIRED": {
-        "recovery": "Map at least one user-confirmed opaque information field.",
-        "requires_user_confirmation": True,
-    },
-    "QLIBX_INFORMATION_AXIS_COLLISION": {
-        "recovery": "Choose information output names distinct from available_at and ticker.",
-    },
-    "QLIBX_AVAILABILITY_OFFSET_REQUIRED": {
-        "recovery": "Ask the user for the availability convention and record an explicit offset.",
-        "requires_user_confirmation": True,
-    },
-    "QLIBX_AVAILABILITY_SOURCE_NOT_DATETIME": {
-        "recovery": (
-            "Resolve the source timestamp quality outside qlibx, then re-plan registration."
-        ),
-    },
-    "QLIBX_PRIMARY_KEY_NULL": {
-        "recovery": "Resolve null key rows outside qlibx; qlibx will not invent key values.",
-    },
-    "QLIBX_PRIMARY_KEY_DUPLICATE": {
-        "recovery": (
-            "Agree on a duplicate policy outside qlibx, repair the source or mapping, then re-plan."
-        ),
-        "requires_user_confirmation": True,
-    },
-    "QLIBX_OUTPUT_OUTSIDE_GENERATED_DATA": {
-        "recovery": "Write derived Parquet only below the configured generated-data root.",
-    },
-    "QLIBX_SOURCE_CHANGED_DURING_REGISTRATION": {
-        "recovery": (
-            "Discard the stale plan, inspect the changed source, and request confirmation again."
-        ),
-    },
-    "QLIBX_CATALOG_SCHEMA_UNSUPPORTED": {
-        "recovery": "Use a logical-dataset schema supported by the installed qlibx version.",
-    },
-    "QLIBX_CONFIG_PATH_ESCAPE": {
-        "recovery": "Keep every logical-dataset config path below the selected config root.",
-    },
-    "QLIBX_SOURCE_ROOT_UNKNOWN": {
-        "recovery": "Choose a source root declared in the project catalog.",
-    },
-    "QLIBX_SOURCE_MISSING": {
-        "recovery": "Register or restore the declared generated source before loading it.",
-    },
-    "QLIBX_DATASET_UNKNOWN": {
-        "recovery": "Choose a logical dataset returned by the public catalog command.",
-    },
-    "QLIBX_DATASET_KIND_INVALID": {
-        "recovery": "Use a documented table or matrix dataset kind.",
-    },
-    "QLIBX_DATASET_SOURCE_UNKNOWN": {
-        "recovery": "Declare every query source in the selected logical-dataset YAML.",
-    },
-    "QLIBX_DATASET_DUPLICATE": {
-        "recovery": "Rename or remove the duplicate logical dataset definition explicitly.",
-    },
-    "QLIBX_IDENTIFIER_INVALID": {
-        "recovery": "Use a documented safe identifier without SQL or path syntax.",
-    },
-    "QLIBX_QUERY_FAILED": {
-        "recovery": "Review the declared query and source schema; do not add a silent fallback.",
-    },
-    "QLIBX_LIMIT_INVALID": {
-        "recovery": "Use a positive bounded preview limit.",
-    },
-    "QLIBX_TICKER_FILTER_EMPTY": {
-        "recovery": "Provide at least one explicit ticker or omit the filter.",
-    },
-    "QLIBX_DATASET_NOT_MATRIX": {
-        "recovery": "Use load_table, or select a dataset declared as a matrix.",
-    },
-    "QLIBX_MATRIX_COLUMNS_MISSING": {
-        "recovery": "Declare index, columns, and values fields for the matrix contract.",
-    },
-    "QLIBX_MATRIX_AXES_UNDECLARED": {
-        "recovery": (
-            "Add the index, columns, and values keys to the matrix dataset YAML; qlibx will "
-            "not infer a matrix axis from the query result."
-        ),
-    },
-    "QLIBX_FULL_HISTORY_REASON_MISSING": {
-        "recovery": (
-            "Pass a reason to load_full_history, or call load_table with as_of when the read "
-            "happens at a decision time."
-        ),
-    },
-    "QLIBX_MATRIX_KEY_DUPLICATE": {
-        "recovery": (
-            "Resolve duplicate matrix-index/ticker rows before pivoting; qlibx will not aggregate "
-            "silently."
-        ),
-    },
-    "QLIBX_EXECUTION_CONFIG_OUTSIDE_ROOT": {
-        "recovery": "Select an execution YAML below the configured project config root.",
-    },
-    "QLIBX_EXECUTION_PROFILE_SCHEMA_UNSUPPORTED": {
-        "recovery": "Use an execution-profile schema supported by the installed qlibx version.",
-    },
-    "QLIBX_TARGET_SEMANTICS_UNSUPPORTED": {
-        "recovery": "Choose one of the target semantics listed by qlibx qlib requirements.",
-    },
-    "QLIBX_INSTRUCTION_TARGET_REQUIRED": {
-        "recovery": (
-            "Run detection, let the user select one or more instruction files, then dry-run."
-        ),
-        "requires_user_confirmation": True,
-    },
-    "QLIBX_INSTRUCTION_STALE_PLAN": {
-        "recovery": "Create a new dry-run and re-review user-authored content before applying.",
-    },
-    "QLIBX_SKILL_TARGET_UNSUPPORTED": {
-        "recovery": "Choose codex, claude, or generic.",
-    },
-    "QLIBX_SKILL_FORCE_WITHOUT_APPLY": {
-        "recovery": "Review the dry-run, then use --apply --force only with explicit approval.",
-        "requires_user_confirmation": True,
-    },
-    "QLIBX_SKILL_STALE_PLAN": {
-        "recovery": "Regenerate the skill plan and review the changed file.",
-    },
-    "QLIBX_SKILL_USER_CONTENT": {
-        "recovery": "Preserve or review user edits; replace only after explicit approval.",
-        "requires_user_confirmation": True,
-    },
-    "QLIBX_DOCUMENTATION_TOPIC_UNKNOWN": {
-        "recovery": (
-            "Choose a topic, schema, example, or error code from the returned available list."
-        ),
-    },
-    "QLIBX_ALPHA_OPERATION_UNKNOWN": {
+    # -- NOT_FOUND: A named thing is not there. Choose from what is, or restore it.
+    "QLIBX_NOT_FOUND_ALPHA_OPERATION": {
         "recovery": (
             "Run qlibx alpha operations and choose an installed name, or register your own "
             "OperationSpec instead of editing the package."
         ),
     },
-    "QLIBX_CAPABILITY_REQUIREMENT_GAP": {
+    "QLIBX_NOT_FOUND_ARTIFACT": {
+        "recovery": "Pass run_id to disambiguate, or list the run's stored artifacts.",
+    },
+    "QLIBX_NOT_FOUND_BUDGET_POLICY": {
+        "recovery": (
+            "Run qlibx alpha budgets and choose an installed policy, or register your own "
+            "BudgetPolicySpec."
+        ),
+    },
+    "QLIBX_NOT_FOUND_CAPITALIZATION_EVENT": {
+        "recovery": (
+            "Use one of the registered capitalization event types in context['available']."
+        ),
+    },
+    "QLIBX_NOT_FOUND_CONFIG": {
+        "recovery": "Create the requested YAML only after reviewing the installed schema/example.",
+    },
+    "QLIBX_NOT_FOUND_DATASET": {
+        "recovery": "Choose a logical dataset returned by the public catalog command.",
+    },
+    "QLIBX_NOT_FOUND_DATASET_SOURCE": {
+        "recovery": "Declare every query source in the selected logical-dataset YAML.",
+    },
+    "QLIBX_NOT_FOUND_DOCUMENTATION_TOPIC": {
+        "recovery": (
+            "Choose a topic, schema, example, or error code from the returned available list."
+        ),
+    },
+    "QLIBX_NOT_FOUND_DUCKDB_TABLE": {
+        "recovery": "Choose an inspected table explicitly; never guess a similar table name.",
+    },
+    "QLIBX_NOT_FOUND_EXTENSION_CONTRACT": {
+        "recovery": (
+            "Run qlibx extension contracts and choose a contract the installed version offers."
+        ),
+    },
+    "QLIBX_NOT_FOUND_FROZEN_RUN": {
+        "recovery": (
+            "Freeze the run before loading it, or list the frozen bundles the catalog holds."
+        ),
+    },
+    "QLIBX_NOT_FOUND_GENERATED_SOURCE": {
+        "recovery": "Register or restore the declared generated source before loading it.",
+    },
+    "QLIBX_NOT_FOUND_REGISTRATION": {
+        "recovery": "Choose a registration ID declared in the selected project YAML.",
+    },
+    "QLIBX_NOT_FOUND_RESEARCH_ARTIFACT": {
+        "recovery": "Choose one of the record's stored artifact names from context['available'].",
+    },
+    "QLIBX_NOT_FOUND_SOURCE_PATH": {
+        "recovery": (
+            "Confirm the path with the user and read it as it is. qlibx never creates, moves, or "
+            "replaces a source on your behalf."
+        ),
+    },
+    "QLIBX_NOT_FOUND_SOURCE_ROOT": {
+        "recovery": "Choose a source root declared in the project catalog.",
+    },
+    "QLIBX_NOT_FOUND_STRATEGY_CALLABLE": {},
+    "QLIBX_NOT_FOUND_STRATEGY_SOURCE": {},
+    "QLIBX_NOT_FOUND_WEIGHT_INSTRUMENT": {
+        "recovery": "Restrict the weights to instruments the execution scenario declares.",
+    },
+    # -- MISSING: A required declaration was never given. Declare, register, or bind it.
+    "QLIBX_MISSING_AVAILABILITY": {
+        "recovery": (
+            "Declare when each observation became knowable: register available_at, pass an "
+            "availability matrix, or index the frame by a DatetimeIndex. qlibx refuses to guess "
+            "visibility, because guessing it is what produces look-ahead."
+        ),
+    },
+    "QLIBX_MISSING_AVAILABILITY_OFFSET": {
+        "recovery": "Ask the user for the availability convention and record an explicit offset.",
+        "requires_user_confirmation": True,
+    },
+    "QLIBX_MISSING_BOUND_FIELDS": {},
+    "QLIBX_MISSING_CAPABILITY_REQUIREMENTS": {
         "recovery": (
             "Read context.missing_requirements and each alternative, explain them to the user, "
             "inspect the named source data, register or configure the user-selected alternative, "
@@ -423,149 +177,382 @@ ERROR_GUIDANCE: Mapping[str, Mapping[str, Any]] = {
         ),
         "requires_user_confirmation": True,
     },
-    "QLIBX_BUDGET_POLICY_UNKNOWN": {
-        "recovery": (
-            "Run qlibx alpha budgets and choose an installed policy, or register your own "
-            "BudgetPolicySpec."
-        ),
-    },
-    "QLIBX_EXTENSION_CONTRACT_UNKNOWN": {
-        "recovery": (
-            "Run qlibx extension contracts and choose a contract the installed version offers."
-        ),
-    },
-    "QLIBX_DECISION_LOOK_AHEAD": {
-        "recovery": (
-            "Read context.violations: each entry names an observation the decision could not "
-            "have known. Trim the dataset to context.decision_time, or register available_at "
-            "when the observation timestamp is not when the observation became knowable. "
-            "Never move decision_time forward to admit the data -- that silently converts a "
-            "caught leak into a backtest that cannot be traded."
-        ),
-    },
-    "QLIBX_DECISION_AVAILABILITY_UNDETERMINED": {
-        "recovery": (
-            "qlibx refuses to guess visibility. Give the dataset a DatetimeIndex, or supply "
-            "available_at describing when each cell became knowable."
-        ),
-    },
-    "QLIBX_DECISION_AVAILABILITY_AXES_MISMATCH": {
-        "recovery": (
-            "Rebuild available_at on the dataset's own axes. Misaligned axes would pair one "
-            "cell's value with another cell's visibility, which is a leak no later check sees."
-        ),
-    },
-    "QLIBX_DECISION_FEEDBACK_UNORDERED": {
-        "recovery": "Sort feedback_history by confirmed_at before building the DecisionContext.",
-    },
-    "QLIBX_DECISION_FEEDBACK_UNCONFIRMED": {
-        "recovery": (
-            "Drop the events in context.violations. A decision may only see fills Qlib had "
-            "already confirmed when it was made."
-        ),
-    },
-    "QLIBX_DECISION_UNIVERSE_REDECLARED": {
-        "recovery": (
-            "Remove 'universe' from data_requirements; every Strategy inherits it through "
-            "all_data_requirements."
-        ),
-    },
-    "QLIBX_DECISION_DATASETS_MISSING": {
+    "QLIBX_MISSING_DECISION_DATASETS": {
         "recovery": (
             "Compare context.declared with context.supplied, then add the missing datasets or "
             "narrow data_requirements on the Strategy."
         ),
     },
-    "QLIBX_DECISION_CONTEXT_MUTATED": {
+    "QLIBX_MISSING_FULL_HISTORY_REASON": {
         "recovery": (
-            "Return new objects instead of writing into context.datasets, memory, or account. "
-            "A mutated context breaks the invocation digest that reproduces the run."
+            "Pass a reason to load_full_history, or call load_table with as_of when the read "
+            "happens at a decision time."
         ),
     },
-    "QLIBX_DECISION_OUTPUT_KIND_MISMATCH": {
+    "QLIBX_MISSING_INFORMATION_MAPPING": {
+        "recovery": "Map at least one user-confirmed opaque information field.",
+        "requires_user_confirmation": True,
+    },
+    "QLIBX_MISSING_INSTRUCTION_TARGET": {
+        "recovery": (
+            "Run detection, let the user select one or more instruction files, then dry-run."
+        ),
+        "requires_user_confirmation": True,
+    },
+    "QLIBX_MISSING_MATRIX_AXES": {
+        "recovery": (
+            "Declare index, columns, and values on the matrix dataset. qlibx will not infer a "
+            "matrix axis from the shape of a query result."
+        ),
+    },
+    "QLIBX_MISSING_PUBLICATION_ARTIFACTS": {
+        "recovery": (
+            "Stage at least one artifact before publishing a successful result, or publish with "
+            "the status that reflects what happened."
+        ),
+    },
+    "QLIBX_MISSING_REGISTRATION_MAPPING": {
+        "recovery": (
+            "Discuss the exact available_at, ticker, and information mapping; never guess."
+        ),
+        "requires_user_confirmation": True,
+    },
+    "QLIBX_MISSING_STRATEGY_FIELDS": {},
+    "QLIBX_MISSING_STRATEGY_INPUTS": {},
+    "QLIBX_MISSING_TICKER_FILTER": {
+        "recovery": "Provide at least one explicit ticker or omit the filter.",
+    },
+    # -- INVALID: A supplied value breaks a declared rule. Correct the value.
+    "QLIBX_INVALID_ARTIFACT_STATUS": {
+        "recovery": "Record one of the registered artifact statuses in context['available'].",
+    },
+    "QLIBX_INVALID_AVAILABILITY_AXES": {
+        "recovery": (
+            "Build available_at on exactly the dataset's index and columns, in the same order, "
+            "so each visibility timestamp describes the cell beside it."
+        ),
+    },
+    "QLIBX_INVALID_AVAILABILITY_DTYPE": {
+        "recovery": (
+            "Resolve the source timestamp quality outside qlibx, then re-plan registration."
+        ),
+    },
+    "QLIBX_INVALID_CALLABLE_SIGNATURE": {},
+    "QLIBX_INVALID_CONFIG_KEYS": {},
+    "QLIBX_INVALID_CONFIG_LIST": {
+        "recovery": "Replace the value with an explicit YAML list.",
+    },
+    "QLIBX_INVALID_CONFIG_MAPPING": {
+        "recovery": "Replace the value with an explicit YAML mapping.",
+    },
+    "QLIBX_INVALID_CONFIG_STRING": {
+        "recovery": "Replace the value with an explicit non-empty string.",
+    },
+    "QLIBX_INVALID_CONFIG_VALUE": {
+        "recovery": "Correct the YAML value named in context; do not silently substitute it.",
+    },
+    "QLIBX_INVALID_DATASET_DUPLICATE": {
+        "recovery": "Rename or remove the duplicate logical dataset definition explicitly.",
+    },
+    "QLIBX_INVALID_DATASET_KIND": {
+        "recovery": "Use a documented table or matrix dataset kind.",
+    },
+    "QLIBX_INVALID_DATASET_NOT_MATRIX": {
+        "recovery": "Use load_table, or select a dataset declared as a matrix.",
+    },
+    "QLIBX_INVALID_DECISION_OUTPUT_KIND": {
         "recovery": (
             "Return context.declared, or change output_kind on the StrategyDefinition to the "
             "kind the program actually produces."
         ),
     },
-    "QLIBX_DECISION_SEQUENCE_UNORDERED": {
+    "QLIBX_INVALID_EXECUTION_OUTPUT_KIND": {
         "recovery": (
-            "Sort the contexts by decision_time and remove duplicates; memory flows forward "
-            "through the sequence, so the order defines the result."
+            "Qlib execution submits weights. Declare output_kind 'weight', or put an explicit "
+            "signal-to-weight step in front of execution."
         ),
     },
-    "QLIBX_DECISION_SEQUENCE_BOUNDARY_INVALID": {
+    "QLIBX_INVALID_EXPORT_ARTIFACT_STATUS": {
+        "recovery": (
+            "Export complete artifacts only; an incomplete result must not travel as finished."
+        ),
+    },
+    "QLIBX_INVALID_EXPORT_DESTINATION": {
+        "recovery": "Export into an empty directory so the bundle stays unambiguous.",
+    },
+    "QLIBX_INVALID_FEEDBACK_ORDER": {
+        "recovery": "Sort feedback_history by confirmed_at before building the DecisionContext.",
+    },
+    "QLIBX_INVALID_FIELD_NULLABLE": {},
+    "QLIBX_INVALID_IDENTIFIER": {
+        "recovery": "Use a documented safe identifier without SQL or path syntax.",
+    },
+    "QLIBX_INVALID_INFORMATION_AXIS": {
+        "recovery": "Choose information output names distinct from available_at and ticker.",
+    },
+    "QLIBX_INVALID_INPUT_DTYPE": {},
+    "QLIBX_INVALID_INPUT_NULL": {},
+    "QLIBX_INVALID_LIMIT": {
+        "recovery": (
+            "Pass a positive bounded limit. Every listing, preview, sample, and search stops "
+            "where you say it stops."
+        ),
+    },
+    "QLIBX_INVALID_LONG_ONLY_WEIGHT": {
+        "recovery": (
+            "Long-only targets must be finite, non-negative, and sum to at most 1. Clip or "
+            "renormalize before returning them."
+        ),
+    },
+    "QLIBX_INVALID_LOOKBACK": {
+        "recovery": "Declare a positive number of rows the Strategy may read at each decision.",
+    },
+    "QLIBX_INVALID_LOOKBACK_KIND": {},
+    "QLIBX_INVALID_MATRIX_KEY_DUPLICATE": {
+        "recovery": (
+            "Resolve duplicate matrix-index/ticker rows before pivoting; qlibx will not "
+            "aggregate silently."
+        ),
+    },
+    "QLIBX_INVALID_OUTPUT_KIND_DECLARATION": {},
+    "QLIBX_INVALID_OUTPUT_TYPE": {},
+    "QLIBX_INVALID_PANDAS_INDEX": {},
+    "QLIBX_INVALID_PANDAS_KIND": {},
+    "QLIBX_INVALID_PARAMETER_COLLISION": {},
+    "QLIBX_INVALID_PRIMARY_KEY_DUPLICATE": {
+        "recovery": (
+            "Agree on a duplicate policy outside qlibx, repair the source or mapping, then re- "
+            "plan."
+        ),
+        "requires_user_confirmation": True,
+    },
+    "QLIBX_INVALID_PRIMARY_KEY_NULL": {
+        "recovery": "Resolve null key rows outside qlibx; qlibx will not invent key values.",
+    },
+    "QLIBX_INVALID_QUERY": {
+        "recovery": "Review the declared query and source schema; do not add a silent fallback.",
+    },
+    "QLIBX_INVALID_RESEARCH_DECISION_KIND": {
+        "recovery": "Use one of the registered decision kinds listed in context['available'].",
+    },
+    "QLIBX_INVALID_RESOLVED_INPUTS": {},
+    "QLIBX_INVALID_RUN_STATUS": {
+        "recovery": (
+            "Publish with one of the registered run statuses listed in context['available']."
+        ),
+    },
+    "QLIBX_INVALID_SEQUENCE_BOUNDARY": {
         "recovery": (
             "Resume from the checkpoint's next_position and keep end_position inside the "
             "contexts you passed."
         ),
     },
-    "QLIBX_DECISION_PARENT_ACCOUNT_MUTATED": {
+    "QLIBX_INVALID_SEQUENCE_ORDER": {
         "recovery": (
-            "Remove the account write from the child program. Nested research explores "
-            "what-ifs and holds no authority over the account it branched from."
+            "Sort the contexts by decision_time and remove duplicates; memory flows forward "
+            "through the sequence, so the order defines the result."
         ),
     },
-    # A child context may narrow its parent and nothing else. One recovery covers the family
-    # because every member is the same violation seen from a different axis.
-    **{
-        code: {
-            "recovery": (
-                "Read context.violations or context.mismatch, then rebuild the child as a "
-                "slice of the parent. A child narrows what its parent already saw; it cannot "
-                "add a dataset, widen an axis, rewrite an observation, or change availability."
-            )
-        }
-        for code in (
-            "QLIBX_DECISION_CHILD_AVAILABILITY_ADDED",
-            "QLIBX_DECISION_CHILD_AVAILABILITY_CHANGED",
-            "QLIBX_DECISION_CHILD_AXIS_OUT_OF_BOUNDS",
-            "QLIBX_DECISION_CHILD_DATASET_UNDECLARED",
-            "QLIBX_DECISION_CHILD_LOOKBACK_UNDECLARED",
-            "QLIBX_DECISION_CHILD_OBSERVATIONS_CHANGED",
-        )
+    "QLIBX_INVALID_SIDE_EXPOSURE": {
+        "recovery": "Scale signed weights with a budget policy so neither side exceeds 1.",
     },
-    **{
-        code: {
-            "recovery": (
-                "Read the Strategy error action, inspect the installed manifest/binding schema "
-                "and registered field inventory, then create a new read-only Strategy plan."
-            )
-        }
-        for code in (
-            "QLIBX_STRATEGY_BOUND_FIELDS_MISSING",
-            "QLIBX_STRATEGY_CALLABLE_MISSING",
-            "QLIBX_STRATEGY_CONFIG_KEYS_INVALID",
-            "QLIBX_STRATEGY_CONFIG_OUTSIDE_ROOT",
-            "QLIBX_STRATEGY_CONFIG_SCHEMA_UNSUPPORTED",
-            "QLIBX_STRATEGY_CONTRACT_UNSUPPORTED",
-            "QLIBX_STRATEGY_EXECUTION_OUTPUT_INVALID",
-            "QLIBX_STRATEGY_EXECUTION_UNIVERSE_MISMATCH",
-            "QLIBX_STRATEGY_FIELD_NULLABLE_INVALID",
-            "QLIBX_STRATEGY_FIELDS_EMPTY",
-            "QLIBX_STRATEGY_INDEX_INVALID",
-            "QLIBX_STRATEGY_INPUT_DTYPE_INVALID",
-            "QLIBX_STRATEGY_INPUT_MUTATED",
-            "QLIBX_STRATEGY_INPUT_NULL_INVALID",
-            "QLIBX_STRATEGY_INPUTS_EMPTY",
-            "QLIBX_STRATEGY_LOOKBACK_INVALID",
-            "QLIBX_STRATEGY_LOOKBACK_UNSUPPORTED",
-            "QLIBX_STRATEGY_OUTPUT_INVALID",
-            "QLIBX_STRATEGY_OUTPUT_NOT_PANDAS",
-            "QLIBX_STRATEGY_PANDAS_KIND_INVALID",
-            "QLIBX_STRATEGY_PARAMETER_COLLISION",
-            "QLIBX_STRATEGY_RESOLUTION_MISMATCH",
-            "QLIBX_STRATEGY_SIGNATURE_MISMATCH",
-            "QLIBX_STRATEGY_SOURCE_INVALID",
-            "QLIBX_STRATEGY_SOURCE_MISSING",
-            "QLIBX_STRATEGY_SOURCE_OUTSIDE_EXTENSIONS",
-            "QLIBX_STRATEGY_UNIVERSE_MISMATCH",
-            "QLIBX_STRATEGY_UNIVERSE_DUPLICATE",
-            "QLIBX_STRATEGY_UNIVERSE_NULL",
-            "QLIBX_STRATEGY_UNIVERSE_REDECLARED",
-        )
+    "QLIBX_INVALID_SKILL_FORCE_FLAG": {
+        "recovery": "Review the dry-run, then use --apply --force only with explicit approval.",
+        "requires_user_confirmation": True,
     },
+    "QLIBX_INVALID_SKILL_TARGET": {
+        "recovery": "Choose codex, claude, or generic.",
+    },
+    "QLIBX_INVALID_STRATEGY_SOURCE": {},
+    "QLIBX_INVALID_TARGET_SEMANTICS": {
+        "recovery": "Choose one of the target semantics listed by qlibx qlib requirements.",
+    },
+    "QLIBX_INVALID_UNIVERSE_DUPLICATE": {},
+    "QLIBX_INVALID_UNIVERSE_NULL": {},
+    "QLIBX_INVALID_UNIVERSE_REDECLARED": {
+        "recovery": (
+            "Remove 'universe'. Every Strategy inherits it from the execution scenario or from "
+            "all_data_requirements; passing it again would let a Strategy widen its own "
+            "universe."
+        ),
+    },
+    "QLIBX_INVALID_WEIGHT_PAYLOAD": {
+        "recovery": "Return pandas weights keyed by instrument, as a Series or one-row DataFrame.",
+    },
+    "QLIBX_INVALID_WEIGHT_ROW": {
+        "recovery": "Return only the row for the current decision time.",
+    },
+    "QLIBX_INVALID_YAML_DUPLICATE_KEY": {
+        "recovery": "Remove the duplicate YAML key and review which value the user intended.",
+    },
+    # -- BOUNDARY: Something escaped a declared boundary. Stay inside it.
+    "QLIBX_BOUNDARY_CHILD_AVAILABILITY": {
+        "recovery": (
+            "Omit availability for this dataset. A child inherits its parent's, and may neither "
+            "add nor change it."
+        ),
+    },
+    "QLIBX_BOUNDARY_CHILD_AXIS": {},
+    "QLIBX_BOUNDARY_CHILD_DATASET": {},
+    "QLIBX_BOUNDARY_CHILD_LOOKBACK": {},
+    "QLIBX_BOUNDARY_CHILD_OBSERVATIONS": {},
+    "QLIBX_BOUNDARY_CONFIG_PATH": {
+        "recovery": "Keep user-authored YAML below the configured project config root.",
+    },
+    "QLIBX_BOUNDARY_EXECUTION_UNIVERSE": {},
+    "QLIBX_BOUNDARY_EXTENSION_PATH": {},
+    "QLIBX_BOUNDARY_FEEDBACK_UNCONFIRMED": {
+        "recovery": (
+            "Drop the events in context.violations. A decision may only see fills Qlib had "
+            "already confirmed when it was made."
+        ),
+    },
+    "QLIBX_BOUNDARY_INPUT_MUTATED": {
+        "recovery": (
+            "Return a new pandas object. What a Strategy is handed is on loan, and mutating it "
+            "breaks the digest that reproduces the run."
+        ),
+    },
+    "QLIBX_BOUNDARY_LOOK_AHEAD": {
+        "recovery": (
+            "Read context.violations: each entry names an observation the decision could not "
+            "have known. Trim the dataset to context.decision_time, or register available_at "
+            "when the observation timestamp is not when the observation became knowable. Never "
+            "move decision_time forward to admit the data -- that silently converts a caught "
+            "leak into a backtest that cannot be traded."
+        ),
+    },
+    "QLIBX_BOUNDARY_OUTPUT_PATH": {
+        "recovery": "Write derived Parquet only below the configured generated-data root.",
+    },
+    "QLIBX_BOUNDARY_PARENT_ACCOUNT_MUTATED": {
+        "recovery": (
+            "Remove the account write from the child program. Nested research explores what-ifs "
+            "and holds no authority over the account it branched from."
+        ),
+    },
+    "QLIBX_BOUNDARY_PROJECT_PATH": {
+        "recovery": "Select a project-owned path below the project root.",
+    },
+    "QLIBX_BOUNDARY_SOURCE_PATH": {
+        "recovery": "Use a source below the configured read-only source-data root.",
+    },
+    "QLIBX_BOUNDARY_UNIVERSE_MISMATCH": {},
+    "QLIBX_BOUNDARY_USER_CONTENT": {
+        "recovery": "Preserve or review user edits; replace only after explicit approval.",
+        "requires_user_confirmation": True,
+    },
+    # -- CONFLICT: This collides with immutable or committed state. Do not overwrite.
+    "QLIBX_CONFLICT_ARTIFACT_IDENTITY": {
+        "recovery": (
+            "Artifact identity is derived from its declared inputs. Change the producer identity "
+            "or inputs rather than overwriting the stored envelope."
+        ),
+    },
+    "QLIBX_CONFLICT_IMMUTABLE_CONTENT": {
+        "recovery": (
+            "The path is write-once. Publish the differing content under its own identity."
+        ),
+    },
+    "QLIBX_CONFLICT_NAV_RECONCILIATION": {
+        "recovery": (
+            "Do not use the result; the capitalization journal disagrees with the Qlib account."
+        ),
+    },
+    "QLIBX_CONFLICT_PUBLICATION_INCOMPLETE": {
+        "recovery": (
+            "Run install_publication or recover_publications first; an existing directory is not "
+            "evidence of a complete result."
+        ),
+    },
+    "QLIBX_CONFLICT_QUANTITY_RECONCILIATION": {
+        "recovery": (
+            "Do not use the result. The composite, baseline, and active books disagree, so the "
+            "signed projection is not a realized position."
+        ),
+    },
+    "QLIBX_CONFLICT_RECORD_NOT_COMMITTED": {
+        "recovery": "Only committed records are readable. Recover interrupted publications first.",
+    },
+    "QLIBX_CONFLICT_RESULT_IDENTITY": {
+        "recovery": (
+            "Different content already claims this result key. Compare both records and publish "
+            "under a distinct identity instead of replacing the stored one."
+        ),
+    },
+    "QLIBX_CONFLICT_SOURCE_CHANGED": {
+        "recovery": (
+            "Discard the stale plan, inspect the changed source, and request confirmation again."
+        ),
+    },
+    "QLIBX_CONFLICT_STAGED_ARTIFACT": {
+        "recovery": (
+            "Prepare the publication again from the current staged files; the plan was built "
+            "against different content."
+        ),
+    },
+    "QLIBX_CONFLICT_STALE_DECISION": {
+        "recovery": (
+            "Another agent decided first. Re-read the target's current decision version and "
+            "retry with it; do not overwrite the newer decision."
+        ),
+    },
+    "QLIBX_CONFLICT_STALE_PLAN": {
+        "recovery": (
+            "The file moved under the plan. Regenerate it and re-review the user-authored "
+            "content before applying."
+        ),
+    },
+    # -- CORRUPT: Stored bytes fail their digest. Do not consume them.
+    "QLIBX_CORRUPT_ARTIFACT_ENVELOPE": {
+        "recovery": "Re-export the bundle; do not import unverified provenance.",
+    },
+    "QLIBX_CORRUPT_ARTIFACT_PAYLOAD": {
+        "recovery": "Do not consume the artifact; reproduce it from its declared inputs.",
+    },
+    "QLIBX_CORRUPT_EVENT_LOG": {
+        "recovery": (
+            "Repair or truncate the damaged tail of events/events.jsonl deliberately; qlibx will "
+            "not silently skip an unreadable event."
+        ),
+    },
+    "QLIBX_CORRUPT_FROZEN_RUN": {
+        "recovery": "Do not reuse the bundle; freeze the run again from its declared inputs.",
+    },
+    "QLIBX_CORRUPT_RESEARCH_BLOB": {
+        "recovery": (
+            "Investigate the blob store before republishing; qlibx will not overwrite a blob "
+            "whose content no longer matches its address."
+        ),
+    },
+    "QLIBX_CORRUPT_RESEARCH_RECORD": {
+        "recovery": "Do not cite this record as evidence; republish the result from its inputs.",
+    },
+    # -- UNSUPPORTED: This build does not implement that version or format.
+    "QLIBX_UNSUPPORTED_BUNDLE_SCHEMA": {
+        "recovery": "Export the bundle with a qlibx version that writes schema version 1.",
+    },
+    "QLIBX_UNSUPPORTED_CATALOG_SCHEMA": {
+        "recovery": "Use a logical-dataset schema supported by the installed qlibx version.",
+    },
+    "QLIBX_UNSUPPORTED_EXECUTION_SCHEMA": {
+        "recovery": "Use an execution-profile schema supported by the installed qlibx version.",
+    },
+    "QLIBX_UNSUPPORTED_MEDIA_TYPE": {
+        "recovery": "Stage research artifacts as JSON or parquet; see context['available'].",
+    },
+    "QLIBX_UNSUPPORTED_PROJECT_SCHEMA": {
+        "recovery": "Use a project manifest schema supported by the installed qlibx version.",
+    },
+    "QLIBX_UNSUPPORTED_SOURCE_FORMAT": {
+        "recovery": (
+            "Use a supported Parquet or DuckDB source, or convert it outside qlibx with approval."
+        ),
+    },
+    "QLIBX_UNSUPPORTED_STRATEGY_CONTRACT": {},
+    "QLIBX_UNSUPPORTED_STRATEGY_SCHEMA": {},
 }
+
 
 SCHEMAS: Mapping[str, Mapping[str, Any]] = {
     "project_manifest": {
@@ -726,7 +713,7 @@ SCHEMAS: Mapping[str, Mapping[str, Any]] = {
         ],
         "read_only": True,
         "error_equivalence": (
-            "resolution is serialized unchanged into QLIBX_CAPABILITY_REQUIREMENT_GAP context"
+            "resolution is serialized unchanged into QLIBX_MISSING_CAPABILITY_REQUIREMENTS context"
         ),
     },
     "alpha_operation": {
@@ -820,9 +807,11 @@ TASK_GUIDES: Mapping[str, Mapping[str, Any]] = {
             "Register, verify upstream hash, declare logical datasets, and bounded-preview.",
         ],
         "recovery": {
-            "QLIBX_REGISTRATION_MAPPING_MISSING": "Discuss exact mapping; never guess or fallback.",
-            "QLIBX_PRIMARY_KEY_DUPLICATE": "Resolve duplicate policy outside qlibx, then re-plan.",
-            "QLIBX_SOURCE_CHANGED_DURING_REGISTRATION": "Discard plan and inspect the new source.",
+            "QLIBX_MISSING_REGISTRATION_MAPPING": "Discuss exact mapping; never guess or fallback.",
+            "QLIBX_INVALID_PRIMARY_KEY_DUPLICATE": (
+                "Resolve duplicate policy outside qlibx, then re-plan."
+            ),
+            "QLIBX_CONFLICT_SOURCE_CHANGED": "Discard plan and inspect the new source.",
         },
         "python_api": [
             "project = Project.load(<root>)",
@@ -1238,7 +1227,7 @@ EXAMPLES: Mapping[str, Mapping[str, str]] = {
     "error_response": {
         "format": "json",
         "content": (
-            '{"code":"QLIBX_REGISTRATION_MAPPING_MISSING",'
+            '{"code":"QLIBX_MISSING_REGISTRATION_MAPPING",'
             '"message":"required mapping is unresolved",'
             '"action":"Ask the user to confirm the exact mapping.",'
             '"context":{"missing":["available_at"]}}'
@@ -1295,11 +1284,31 @@ def public_example(name: str) -> Mapping[str, str]:
     return EXAMPLES[name]
 
 
+def error_family(code: str) -> str:
+    """Return the branch of the code tree a code sits on."""
+    for family in FAMILY_RECOVERY:
+        if code.startswith(f"QLIBX_{family}_"):
+            return family
+    raise _unknown("error family", code, FAMILY_RECOVERY)
+
+
 def error_guidance(code: str) -> Mapping[str, Any]:
+    """Resolve one code against the tree: its family's guidance, then its own.
+
+    A leaf without a `recovery` is not undocumented -- it is a failure whose family already
+    says everything useful, and repeating that text per leaf is what makes two codes look
+    distinct when they are not.
+    """
     if code not in ERROR_GUIDANCE:
         raise _unknown("error code", code, ERROR_GUIDANCE)
-    return {"code": code, **ERROR_GUIDANCE[code]}
+    family = error_family(code)
+    return {
+        "code": code,
+        "family": family,
+        "family_recovery": FAMILY_RECOVERY[family],
+        **ERROR_GUIDANCE[code],
+    }
 
 
 def _unknown(kind: str, name: str, available: Mapping[str, Any]) -> QlibxError:
-    return unknown_name("QLIBX_DOCUMENTATION_TOPIC_UNKNOWN", kind, name, available)
+    return unknown_name("QLIBX_NOT_FOUND_DOCUMENTATION_TOPIC", kind, name, available)

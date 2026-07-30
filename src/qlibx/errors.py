@@ -63,7 +63,7 @@ def requirement_gap(context: Mapping[str, Any]) -> QlibxError:
         else "Resolve the reported requirements, then rerun the same capability."
     )
     return QlibxError(
-        "QLIBX_CAPABILITY_REQUIREMENT_GAP",
+        "QLIBX_MISSING_CAPABILITY_REQUIREMENTS",
         f"Capability {capability_id!r} has unsatisfied requirements: {missing}",
         action=action,
         context=payload,

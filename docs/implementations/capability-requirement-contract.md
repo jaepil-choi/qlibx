@@ -41,7 +41,7 @@ catalog/config state into evidence; `alpha` converts already-provided runtime in
 
 `errors.requirement_gap` preserves the existing `QlibxError` transport and places
 `CapabilityResolution.to_dict()` unchanged in `context`. The stable code is
-`QLIBX_CAPABILITY_REQUIREMENT_GAP`.
+`QLIBX_MISSING_CAPABILITY_REQUIREMENTS`.
 
 Execution profiles were deliberately migrated rather than adapted. `ExecutionProfilePlan` is no
 longer public. Declaration, read-only planning, and runtime readiness now use

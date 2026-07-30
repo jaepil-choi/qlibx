@@ -107,7 +107,7 @@ def plan_registration(project: Project, dataset_id: str) -> RegistrationPlan:
     spec = _require_spec(project, dataset_id)
     if not spec.source.is_file():
         raise QlibxError(
-            "QLIBX_REGISTRATION_SOURCE_MISSING",
+            "QLIBX_NOT_FOUND_SOURCE_PATH",
             f"Missing source: {spec.source}",
             action="Correct registrations.yaml after read-only discovery.",
         )
@@ -126,7 +126,7 @@ def plan_registration(project: Project, dataset_id: str) -> RegistrationPlan:
     missing = sorted(set(required) - available)
     if missing:
         raise QlibxError(
-            "QLIBX_REGISTRATION_MAPPING_MISSING",
+            "QLIBX_MISSING_REGISTRATION_MAPPING",
             f"Mapped source columns do not exist: {missing}",
             action="Discuss the exact column mapping with the user; qlibx will not guess.",
             context={"requirements": data_requirements(tuple(spec.information))},
@@ -172,7 +172,7 @@ def register_dataset(project: Project, dataset_id: str) -> RegistrationResult:
         event = pc.cast(event, pa.timestamp("us"))
     if not pa.types.is_timestamp(event.type):
         raise QlibxError(
-            "QLIBX_AVAILABILITY_SOURCE_NOT_DATETIME",
+            "QLIBX_INVALID_AVAILABILITY_DTYPE",
             f"Availability source must be date/timestamp, got {event.type}",
             action="Map a real temporal column or create one outside qlibx.",
         )
@@ -189,7 +189,7 @@ def register_dataset(project: Project, dataset_id: str) -> RegistrationResult:
         pq.write_table(canonical, staging, compression="zstd")
         if digest_file(spec.source) != plan.source_sha256:
             raise QlibxError(
-                "QLIBX_SOURCE_CHANGED_DURING_REGISTRATION",
+                "QLIBX_CONFLICT_SOURCE_CHANGED",
                 "Source changed during registration",
                 action="Inspect again and retry from a new plan.",
             )
@@ -237,20 +237,20 @@ def _build_spec(project: Project, name: str, raw: Any) -> RegistrationSpec:
     offset = availability.get("offset_days")
     if not isinstance(offset, int):
         raise QlibxError(
-            "QLIBX_AVAILABILITY_OFFSET_REQUIRED",
+            "QLIBX_MISSING_AVAILABILITY_OFFSET",
             f"{name}.available_at.offset_days must be an integer",
             action="Ask the user for the explicit calendar-day availability rule.",
         )
     information = require_mapping(value.get("information"), f"{name}.information")
     if not information or not all(isinstance(item, str) for item in information.values()):
         raise QlibxError(
-            "QLIBX_INFORMATION_MAPPING_REQUIRED",
+            "QLIBX_MISSING_INFORMATION_MAPPING",
             f"{name}.information must map output names to source columns",
             action="Select opaque information columns explicitly.",
         )
     if {"available_at", "ticker"} & set(information):
         raise QlibxError(
-            "QLIBX_INFORMATION_AXIS_COLLISION",
+            "QLIBX_INVALID_INFORMATION_AXIS",
             "Information names cannot replace available_at or ticker",
             action="Keep the canonical axis reserved.",
         )
@@ -258,7 +258,7 @@ def _build_spec(project: Project, name: str, raw: Any) -> RegistrationSpec:
     output = project.contained(require_string(value.get("output"), f"{name}.output"))
     if not output.is_relative_to(project.paths.generated_data):
         raise QlibxError(
-            "QLIBX_OUTPUT_OUTSIDE_GENERATED_DATA",
+            "QLIBX_BOUNDARY_OUTPUT_PATH",
             f"Registration output is outside data/qlibx: {output}",
             action="Place processed Parquet below the configured generated_data root.",
         )
@@ -284,7 +284,7 @@ def _require_spec(project: Project, dataset_id: str) -> RegistrationSpec:
         return specs[dataset_id]
     except KeyError as error:
         raise QlibxError(
-            "QLIBX_REGISTRATION_UNKNOWN",
+            "QLIBX_NOT_FOUND_REGISTRATION",
             f"Unknown registration {dataset_id!r}; available: {sorted(specs)}",
             action="Choose a YAML-declared registration.",
         ) from error
@@ -294,14 +294,14 @@ def _validate_primary_key(table: pa.Table, primary_key: tuple[str, ...]) -> None
     nulls = {name: table[name].null_count for name in primary_key if table[name].null_count}
     if nulls:
         raise QlibxError(
-            "QLIBX_PRIMARY_KEY_NULL",
+            "QLIBX_INVALID_PRIMARY_KEY_NULL",
             f"Primary key contains nulls: {nulls}",
             action="Resolve source keys outside qlibx.",
         )
     unique = table.select(primary_key).group_by(list(primary_key)).aggregate([]).num_rows
     if unique != table.num_rows:
         raise QlibxError(
-            "QLIBX_PRIMARY_KEY_DUPLICATE",
+            "QLIBX_INVALID_PRIMARY_KEY_DUPLICATE",
             f"Found {table.num_rows - unique} duplicate primary-key rows",
             action="Resolve duplicates explicitly outside qlibx.",
         )

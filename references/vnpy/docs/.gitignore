@@ -1,0 +1,6 @@
+# Keep documentation assets that are tracked by the upstream repository visible
+# when this snapshot is vendored without its original Git index.
+!_static/
+!_static/**
+!_templates/
+!_templates/**

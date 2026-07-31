@@ -1,0 +1,5 @@
+# Keep upstream-tracked test fixtures visible in the vendored snapshot.
+!*.parquet
+!*.zip
+!*.zst
+!*.xml

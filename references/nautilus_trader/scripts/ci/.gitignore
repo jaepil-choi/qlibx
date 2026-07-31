@@ -1,0 +1,2 @@
+# Keep this upstream-tracked CI helper visible in the vendored snapshot.
+!preload-buildx-base-image-retry.sh

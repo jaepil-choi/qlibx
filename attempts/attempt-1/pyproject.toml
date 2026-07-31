@@ -1,0 +1,41 @@
+[project]
+name = "qlibx"
+version = "0.1.0"
+description = "YAML-configured point-in-time data and reproducible Qlib research"
+readme = "README.md"
+authors = [
+    { name = "Jaepil.Choi", email = "chljeffreyz@gmail.com" }
+]
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "cvxpy>=1.7,<2",
+    "duckdb>=1.3,<2",
+    "pandas>=2.2,<3",
+    "pyarrow>=20,<24",
+    "pyqlib==0.9.7",
+    "pyyaml>=6,<7",
+]
+
+[project.scripts]
+qlibx = "qlibx.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9,<10",
+    "ruff>=0.16,<0.17",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+exclude = [".agents", "references"]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+.pytest_cache/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments and generated qlibx state
+.venv/
+.qlibx/
+qlibx-research/
+/data/
+outputs/
+experiments/outputs/
+showcases/outputs/
+experiments/exp_*/outputs/
+showcases/show_*/outputs/

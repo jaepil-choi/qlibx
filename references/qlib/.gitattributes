@@ -1,0 +1,5 @@
+# Preserve imported upstream blobs byte-for-byte.
+LICENSE -text
+README.md -text
+docs/** -text
+examples/** -text

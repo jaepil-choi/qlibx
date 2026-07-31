@@ -1,0 +1,22 @@
+datasets:
+  sector_classification:
+    kind: table
+    sources: [sector_classification]
+    query: |
+      select available_at, ticker, date, industry_code
+      from sector_classification
+    time_field: date
+    availability_field: available_at
+
+  industry_code:
+    kind: matrix
+    sources: [sector_classification]
+    query: |
+      select available_at, date as event_date, ticker, industry_code
+      from sector_classification
+    index: event_date
+    columns: ticker
+    values: industry_code
+    time_field: event_date
+    availability_field: available_at
+    dtype: Int64

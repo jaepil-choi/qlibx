@@ -1,0 +1,1 @@
+# MiniQMT platform integration

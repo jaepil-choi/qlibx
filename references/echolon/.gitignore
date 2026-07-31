@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+
+# Test + lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Internal-only historical plans / analyses; not part of the public surface.
+docs/
+
+# Local isolated worktrees used for reviewed execution plans
+.worktrees/

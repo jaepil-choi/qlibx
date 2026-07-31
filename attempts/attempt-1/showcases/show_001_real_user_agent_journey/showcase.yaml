@@ -1,0 +1,23 @@
+id: show_001_real_user_agent_journey
+status: current
+source_experiment: exp_003_event_time_qlib_pnl
+verified_against:
+  package: qlibx 0.1.0
+  qlib: 0.9.7
+  prd: docs/qlibx-prd.md
+last_verified_at: "2026-07-27"
+command: uv run python showcases/show_001_real_user_agent_journey/run.py
+environment_assumptions:
+  - The repository project has completed user-confirmed registration under data/qlibx.
+  - config/qlibx/execution.yaml resolves all eight Qlib roles.
+  - The bounded matched-capitalization proof uses 5,000,000,000 total cash and a 1,000,000,000 active book.
+  - Upstream data remains read-only; generated outputs stay in configured generated/state/research roots.
+outputs:
+  - outputs/summary.json
+  - outputs/report.txt
+  - outputs/report.txt.manifest.json
+  - outputs/orders.parquet
+  - outputs/fills.parquet
+  - outputs/signed_positions.parquet
+  - outputs/active_account.parquet
+  - outputs/artifact-bundle/bundle.json

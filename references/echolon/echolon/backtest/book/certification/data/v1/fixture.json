@@ -1,0 +1,149 @@
+{
+  "schema": "futures-book-certification-fixture/v1",
+  "version": "v1",
+  "scenarios": [
+    {
+      "name": "normal_scheduled",
+      "panel_snapshot": "certification-normal-v1",
+      "panel_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "calendar": ["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08"],
+      "instruments": [
+        {
+          "instrument": "per_contract_asset",
+          "meta": {"instrument_id": "per_contract_asset", "sector": "generic", "multiplier": 10.0, "tick": 1.0, "margin_rate": 0.1, "commission": 2.0, "commission_type": "per_contract", "close_today_commission": 7.0, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0},
+          "main_bars": [
+            {"date": "2025-01-02", "contract": "C1", "open": 100.0, "settle": 100.0, "suspended": false},
+            {"date": "2025-01-03", "contract": "C1", "open": 100.0, "settle": 100.0, "suspended": false},
+            {"date": "2025-01-06", "contract": "C2", "open": 110.0, "settle": 110.0, "suspended": false},
+            {"date": "2025-01-07", "contract": "C2", "open": 120.0, "settle": 120.0, "suspended": false},
+            {"date": "2025-01-08", "contract": "C2", "open": 125.0, "settle": 125.0, "suspended": false}
+          ],
+          "exact_bars": [
+            {"date": "2025-01-02", "contract": "C1", "open": 100.0, "settle": 100.0, "suspended": false},
+            {"date": "2025-01-03", "contract": "C1", "open": 100.0, "settle": 100.0, "suspended": false},
+            {"date": "2025-01-06", "contract": "C1", "open": 110.0, "settle": 110.0, "suspended": false},
+            {"date": "2025-01-07", "contract": "C1", "open": 110.0, "settle": 110.0, "suspended": false},
+            {"date": "2025-01-07", "contract": "C2", "open": 120.0, "settle": 120.0, "suspended": false},
+            {"date": "2025-01-08", "contract": "C2", "open": 125.0, "settle": 125.0, "suspended": false}
+          ]
+        },
+        {
+          "instrument": "percentage_asset",
+          "meta": {"instrument_id": "percentage_asset", "sector": "generic", "multiplier": 5.0, "tick": 0.5, "margin_rate": 0.1, "commission": 0.001, "commission_type": "percentage", "close_today_commission": 0.002, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0},
+          "main_bars": [
+            {"date": "2025-01-02", "contract": "P1", "open": 200.0, "settle": 200.0, "suspended": false},
+            {"date": "2025-01-03", "contract": "P1", "open": 200.0, "settle": 200.0, "suspended": false},
+            {"date": "2025-01-07", "contract": "P1", "open": 195.0, "settle": 195.0, "suspended": false},
+            {"date": "2025-01-08", "contract": "P1", "open": 190.0, "settle": 190.0, "suspended": false}
+          ],
+          "exact_bars": [
+            {"date": "2025-01-02", "contract": "P1", "open": 200.0, "settle": 200.0, "suspended": false},
+            {"date": "2025-01-03", "contract": "P1", "open": 200.0, "settle": 200.0, "suspended": false},
+            {"date": "2025-01-07", "contract": "P1", "open": 195.0, "settle": 195.0, "suspended": false},
+            {"date": "2025-01-08", "contract": "P1", "open": 190.0, "settle": 190.0, "suspended": false}
+          ]
+        }
+      ],
+      "initial_equity_rmb": 10000.0,
+      "slippage_bps": 10.0,
+      "targets_by_date": [
+        {"date": "2025-01-02", "targets": [{"instrument": "per_contract_asset", "lots": 2.0}, {"instrument": "percentage_asset", "lots": -1.0}]},
+        {"date": "2025-01-03", "targets": [{"instrument": "per_contract_asset", "lots": 2.0}, {"instrument": "percentage_asset", "lots": -1.0}]},
+        {"date": "2025-01-06", "targets": [{"instrument": "per_contract_asset", "lots": 2.0}, {"instrument": "percentage_asset", "lots": -1.0}]},
+        {"date": "2025-01-07", "targets": [{"instrument": "per_contract_asset", "lots": 2.0}, {"instrument": "percentage_asset", "lots": -1.0}]}
+      ],
+      "execution_contract_schedule": {
+        "schema": "execution-contract-schedule/v1",
+        "source_panel_snapshot": "certification-normal-v1",
+        "source_panel_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "selection_rule": "fixture prior-session declared contract",
+        "availability_assumption": "fixture source is known before each session open",
+        "instruments": ["per_contract_asset", "percentage_asset"],
+        "start": "2025-01-02",
+        "end": "2025-01-08",
+        "rows": [
+          {"fill_date": "2025-01-02", "instrument": "per_contract_asset", "status": "executable", "contract": "C1", "source_date": "2024-12-31", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-02", "instrument": "percentage_asset", "status": "executable", "contract": "P1", "source_date": "2024-12-31", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-03", "instrument": "per_contract_asset", "status": "executable", "contract": "C1", "source_date": "2025-01-02", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-03", "instrument": "percentage_asset", "status": "executable", "contract": "P1", "source_date": "2025-01-02", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-06", "instrument": "per_contract_asset", "status": "executable", "contract": "C2", "source_date": "2025-01-03", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-06", "instrument": "percentage_asset", "status": "product_session_missing", "contract": null, "source_date": "2025-01-03", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-07", "instrument": "per_contract_asset", "status": "executable", "contract": "C2", "source_date": "2025-01-06", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-07", "instrument": "percentage_asset", "status": "executable", "contract": "P1", "source_date": "2025-01-06", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-08", "instrument": "per_contract_asset", "status": "executable", "contract": "C2", "source_date": "2025-01-07", "source_volume": null, "source_open_interest": null},
+          {"fill_date": "2025-01-08", "instrument": "percentage_asset", "status": "executable", "contract": "P1", "source_date": "2025-01-07", "source_volume": null, "source_open_interest": null}
+        ],
+        "sha256": "3b368657d8c1f53ff1c76f91ce4c0017a1cf37e9f8e0756a756711854a88e710"
+      }
+    },
+    {
+      "name": "delayed_liquidation",
+      "panel_snapshot": "certification-liquidation-v1",
+      "panel_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "calendar": ["2025-02-03", "2025-02-04", "2025-02-05", "2025-02-06"],
+      "instruments": [{
+        "instrument": "asset",
+        "meta": {"instrument_id": "asset", "sector": "generic", "multiplier": 10.0, "tick": 1.0, "margin_rate": 10.0, "commission": 106.0, "commission_type": "per_contract", "close_today_commission": 106.0, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0},
+        "main_bars": [
+          {"date": "2025-02-03", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-02-04", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-02-05", "contract": "B1", "open": 90.0, "settle": 90.0, "suspended": false},
+          {"date": "2025-02-06", "contract": "B1", "open": 90.0, "settle": 90.0, "suspended": false}
+        ],
+        "exact_bars": [
+          {"date": "2025-02-03", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-02-04", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-02-05", "contract": "B1", "open": 90.0, "settle": 90.0, "suspended": false},
+          {"date": "2025-02-06", "contract": "A1", "open": 90.0, "settle": 90.0, "suspended": false},
+          {"date": "2025-02-06", "contract": "B1", "open": 90.0, "settle": 90.0, "suspended": false}
+        ]
+      }],
+      "initial_equity_rmb": 1000.0,
+      "slippage_bps": 0.0,
+      "targets_by_date": [{"date": "2025-02-03", "targets": [{"instrument": "asset", "lots": 1.0}]}],
+      "execution_contract_schedule": null
+    },
+    {
+      "name": "blocked_terminal",
+      "panel_snapshot": "certification-blocked-v1",
+      "panel_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "calendar": ["2025-03-03", "2025-03-04", "2025-03-05"],
+      "instruments": [{
+        "instrument": "asset",
+        "meta": {"instrument_id": "asset", "sector": "generic", "multiplier": 1.0, "tick": 1.0, "margin_rate": 0.1, "commission": 2.0, "commission_type": "per_contract", "close_today_commission": 2.0, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0},
+        "main_bars": [
+          {"date": "2025-03-03", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-03-04", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-03-05", "contract": "B1", "open": 100.0, "settle": 100.0, "suspended": false}
+        ],
+        "exact_bars": [
+          {"date": "2025-03-03", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-03-04", "contract": "A1", "open": 100.0, "settle": 100.0, "suspended": false},
+          {"date": "2025-03-05", "contract": "B1", "open": 100.0, "settle": 100.0, "suspended": false}
+        ]
+      }],
+      "initial_equity_rmb": 1100.0,
+      "slippage_bps": 0.0,
+      "targets_by_date": [
+        {"date": "2025-03-03", "targets": [{"instrument": "asset", "lots": 1.0}]},
+        {"date": "2025-03-04", "targets": [{"instrument": "asset", "lots": 1.0}]}
+      ],
+      "execution_contract_schedule": null
+    }
+  ],
+  "fee_primitive_cases": [
+    {"name": "per_contract_regular", "meta": {"instrument_id": "fee_asset", "sector": "generic", "multiplier": 10.0, "tick": 1.0, "margin_rate": 0.1, "commission": 2.0, "commission_type": "per_contract", "close_today_commission": 7.0, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0}, "price": 100.0, "lots_abs": 3.0, "close_today": false, "expected_commission_rmb": 6.0},
+    {"name": "per_contract_close_today", "meta": {"instrument_id": "fee_asset", "sector": "generic", "multiplier": 10.0, "tick": 1.0, "margin_rate": 0.1, "commission": 2.0, "commission_type": "per_contract", "close_today_commission": 7.0, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0}, "price": 100.0, "lots_abs": 3.0, "close_today": true, "expected_commission_rmb": 21.0},
+    {"name": "percentage_regular", "meta": {"instrument_id": "fee_asset", "sector": "generic", "multiplier": 5.0, "tick": 0.5, "margin_rate": 0.1, "commission": 0.001, "commission_type": "percentage", "close_today_commission": 0.002, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0}, "price": 190.5, "lots_abs": 1.0, "close_today": false, "expected_commission_rmb": 0.9525},
+    {"name": "percentage_close_today", "meta": {"instrument_id": "fee_asset", "sector": "generic", "multiplier": 5.0, "tick": 0.5, "margin_rate": 0.1, "commission": 0.001, "commission_type": "percentage", "close_today_commission": 0.002, "currency": "RMB", "min_order_size": 1.0, "t_plus_one": false, "stamp_duty_rate": 0.0, "transfer_fee_rate": 0.0, "min_commission": 0.0}, "price": 190.5, "lots_abs": 1.0, "close_today": true, "expected_commission_rmb": 1.905}
+  ],
+  "lot_primitive_cases": [
+    {"value": 0.999999, "min_order_size": 1.0, "expected": 0},
+    {"value": 1.0, "min_order_size": 1.0, "expected": 1},
+    {"value": -0.999999, "min_order_size": 1.0, "expected": 0},
+    {"value": -1.0, "min_order_size": 1.0, "expected": -1},
+    {"value": 274.9, "min_order_size": 100.0, "expected": 200},
+    {"value": -274.9, "min_order_size": 100.0, "expected": -200}
+  ],
+  "sha256": "8758e7d277930987b9dc37583b2792eaef31ff9f8fef27b025e2ff8736229e2c"
+}

@@ -1,0 +1,89 @@
+[project]
+name = "echolon"
+version = "0.3.0"
+description = "See what others can't. Market-agnostic quantitative trading engine for futures backtesting, optimization, and deployment."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "DolphinQuant", email = "contact@dolphinquant.com" },
+]
+keywords = ["quantitative-trading", "backtesting", "futures", "SHFE", "CTA",
+            "llm", "mcp", "strategy", "optuna"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Office/Business :: Financial",
+]
+
+dependencies = [
+    "backtrader>=1.9.78",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "optuna>=3.0.0",
+    "TA-Lib>=0.4.28",
+    "ccxt>=4.0.0",
+    "apscheduler>=3.10.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "structlog>=23.0.0",
+    "python-dotenv>=1.0.0",
+    "pyarrow>=14.0.0",
+    "matplotlib>=3.7.0",
+    "psutil>=5.9.0",
+    "scikit-learn>=1.3.0",
+    "pytz>=2023.3",
+    "scipy>=1.11.0",
+    "typer>=0.9.0",
+    "hypothesis>=6.100.0",
+    # Batteries-included as of v0.1.x: these used to live behind extras
+    # ([shfe], [mcp], [platformdirs]) but each is on the first-impression
+    # path — `echolon hello` needs akshare, the AI-native pitch needs the
+    # MCP server, PathsConfig.from_platformdirs is the recommended
+    # default for pip-installed users without a workspace marker.
+    # Two-step installs hurt the dolphinquant.com → echolon → qorka funnel.
+    # Re-introduce extras only for genuinely-optional integrations later
+    # (e.g. crypto via ccxt-extras, MiniQMT for live SHFE on Windows).
+    "akshare>=1.13.0",
+    "mcp>=1.0.0",
+    "platformdirs>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["echolon"]
+artifacts = [
+    "echolon/backtest/book/certification/data/**/*.json",
+    "echolon/markets/data/*.csv",
+    "echolon/native/templates/**/*.json",
+    "echolon/native/templates/**/*.md",
+    "echolon/native/errors/codes/*.md",
+    "echolon/llms.txt",
+]
+
+[project.scripts]
+echolon = "echolon.native.cli.main:app"
+echolon-mcp = "echolon.mcp.server:main"
+echolon-bundle = "echolon.bundle.cli:console_main"
+
+[project.urls]
+Homepage = "https://github.com/dolphinquant/echolon"
+Repository = "https://github.com/dolphinquant/echolon"
+Issues = "https://github.com/dolphinquant/echolon/issues"
+Changelog = "https://github.com/dolphinquant/echolon/blob/master/CHANGELOG.md"
+Documentation = "https://github.com/dolphinquant/echolon#readme"

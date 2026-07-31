@@ -1,0 +1,3 @@
+# Keep upstream-tracked Databento fixtures visible in the vendored snapshot.
+!*.dbn
+!*.zst

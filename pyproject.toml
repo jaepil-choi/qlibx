@@ -1,12 +1,12 @@
 [project]
 name = "qlibx"
 version = "0.1.0"
-description = "Add your description here"
+description = "Qlib-native alpha research framework"
 readme = "README.md"
 authors = [
     { name = "Jaepil.Choi", email = "chljeffreyz@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.10,<3.13"
 dependencies = []
 
 [project.scripts]

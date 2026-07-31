@@ -1,0 +1,25 @@
+{
+  "cci": {
+    "timeperiod": [
+      10,
+      13
+    ]
+  },
+  "adxr": {
+    "timeperiod": [
+      13,
+      16
+    ]
+  },
+  "atr": {
+    "timeperiod": [
+      15,
+      19
+    ]
+  },
+  "obv": {},
+  "ad": {},
+  "macd_histogram": {},
+  "bbands_pct_b": {},
+  "market_regime": {}
+}

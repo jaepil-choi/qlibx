@@ -1,0 +1,62 @@
+{
+  "schema": "futures-book-certification-oracle/v1",
+  "fixture_sha256": "8758e7d277930987b9dc37583b2792eaef31ff9f8fef27b025e2ff8736229e2c",
+  "close_today_coverage": "public_primitive_only",
+  "scenarios": [
+    {
+      "name": "normal_scheduled",
+      "status": "VALID_COMPLETE",
+      "ending_cash_rmb": 10247.05,
+      "ending_equity_rmb": 10247.05,
+      "ending_margin_used_rmb": 0.0,
+      "fees_total_rmb": 17.95,
+      "slippage_total_rmb": 85.0,
+      "realized_pnl_rmb": 265.0,
+      "determinism_hash": "07d1b68ae44250006f2b9c3fd2b8f1fee15b742abdd65b20db35413aa4210177",
+      "full_result_manifest_sha256": "3befe6e743317527cc179e6d649a3d9d17ecf05b342e547bb68b2a360053a65f",
+      "trades": [
+        {"date": "2025-01-03", "instrument": "per_contract_asset", "contract": "C1", "side": "BUY", "lots": 2.0, "fill_price": 101.0, "commission_rmb": 4.0, "realized_pnl_rmb": 0.0, "position_after": 2.0},
+        {"date": "2025-01-03", "instrument": "percentage_asset", "contract": "P1", "side": "SELL", "lots": 1.0, "fill_price": 199.5, "commission_rmb": 0.9975, "realized_pnl_rmb": 0.0, "position_after": -1.0},
+        {"date": "2025-01-07", "instrument": "per_contract_asset", "contract": "C1", "side": "SELL", "lots": 2.0, "fill_price": 109.0, "commission_rmb": 4.0, "realized_pnl_rmb": 160.0, "position_after": 0.0},
+        {"date": "2025-01-07", "instrument": "per_contract_asset", "contract": "C2", "side": "BUY", "lots": 2.0, "fill_price": 121.0, "commission_rmb": 4.0, "realized_pnl_rmb": 0.0, "position_after": 2.0},
+        {"date": "2025-01-08", "instrument": "per_contract_asset", "contract": "C2", "side": "SELL", "lots": 2.0, "fill_price": 124.0, "commission_rmb": 4.0, "realized_pnl_rmb": 60.0, "position_after": 0.0},
+        {"date": "2025-01-08", "instrument": "percentage_asset", "contract": "P1", "side": "BUY", "lots": 1.0, "fill_price": 190.5, "commission_rmb": 0.9525, "realized_pnl_rmb": 45.0, "position_after": 0.0}
+      ],
+      "required_event_types": ["execution_contract_schedule_bound", "roll_deferred", "terminal_reconciliation_completed"]
+    },
+    {
+      "name": "delayed_liquidation",
+      "status": "LIQUIDATED_HALT",
+      "ending_cash_rmb": 688.0,
+      "ending_equity_rmb": 688.0,
+      "ending_margin_used_rmb": 0.0,
+      "fees_total_rmb": 212.0,
+      "slippage_total_rmb": 0.0,
+      "realized_pnl_rmb": -100.0,
+      "determinism_hash": "951507969c0131f4622ff5aadf5041f1d6013e933f4d4516a6356b3ee7018c83",
+      "full_result_manifest_sha256": "717debf7e210a3cee23c9a07d514fe97dbe38c39a5eff3e224b96b1071db3600",
+      "trades": [
+        {"date": "2025-02-04", "instrument": "asset", "contract": "A1", "side": "BUY", "lots": 1.0, "fill_price": 100.0, "commission_rmb": 106.0, "realized_pnl_rmb": 0.0, "position_after": 1.0},
+        {"date": "2025-02-06", "instrument": "asset", "contract": "A1", "side": "SELL", "lots": 1.0, "fill_price": 90.0, "commission_rmb": 106.0, "realized_pnl_rmb": -100.0, "position_after": 0.0}
+      ],
+      "required_event_types": ["forced_liquidation_armed", "liquidation_close_deferred", "liquidation_completed"]
+    },
+    {
+      "name": "blocked_terminal",
+      "status": "INVALID_INCOMPLETE",
+      "ending_cash_rmb": 1098.0,
+      "ending_equity_rmb": 1098.0,
+      "ending_margin_used_rmb": 10.0,
+      "fees_total_rmb": 2.0,
+      "slippage_total_rmb": 0.0,
+      "realized_pnl_rmb": 0.0,
+      "determinism_hash": "823a0b7116aabb1bfb71a23f0287a648a41582d290068ae0d960689ebfe376e8",
+      "full_result_manifest_sha256": "39641cd90c5b459a3602d8e49253feae1cff4bbcd56756a075eebf05517e02ff",
+      "trades": [
+        {"date": "2025-03-04", "instrument": "asset", "contract": "A1", "side": "BUY", "lots": 1.0, "fill_price": 100.0, "commission_rmb": 2.0, "realized_pnl_rmb": 0.0, "position_after": 1.0}
+      ],
+      "required_event_types": ["terminal_close_deferred", "terminal_reconciliation_incomplete"]
+    }
+  ],
+  "sha256": "0e9d44c507ec0446ee960ad492e6c1e01e16fbccd1e1cc747485742bc7d1a2a9"
+}

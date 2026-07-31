@@ -1,0 +1,71 @@
+# Echolon
+
+> A Python toolkit for futures trading research, built so an LLM agent can drive it directly. The package ships an MCP server (`echolon-mcp`), in-package skills, structured error codes, and working strategy templates — call them as tools instead of guessing API shapes from training data. Production scope today: SHFE daily futures.
+
+You're an LLM agent. This file orients you to what's reachable at runtime. Don't read prose — call the tools.
+
+## Two surfaces, distinct purposes
+
+- **MCP tools** (`echolon-mcp`, FastMCP over stdio): in-process inspection — skills, templates, indicators, validators, codegen, error docs. Call MCP `list_tools` for the authoritative live list.
+- **CLI** (`echolon ...`, run via Bash): workspace lifecycle — bootstrap, run, troubleshoot. Has NO MCP equivalent today; you must shell out.
+
+Don't try to call CLI commands as MCP tools or vice versa. They are deliberately split: MCP is read-only-ish inspection; CLI mutates the filesystem and runs subprocesses.
+
+## Operating loop
+
+Run the steps in order. Skipping ahead (e.g. backtesting before validation, or scaffolding without a workspace) breaks downstream commands because they recover context from `.echolon-workspace.json`.
+
+1. **Bootstrap a workspace (CLI, ONCE per project).** Check for `.echolon-workspace.json` walking up from the current directory. If absent, run via Bash:
+
+   ```bash
+   echolon init <workspace> --market SHFE --instrument <name> \
+                            --start YYYY-MM-DD --end YYYY-MM-DD \
+                            --template <minimal|momentum_breakout|rsi_mean_reversion>
+   ```
+
+   This downloads OHLCV via akshare (free Sina mirror, no token), runs the standardizer pipeline, derives `main_contract.csv` from the continuous-main series, scaffolds a strategy under `<workspace>/strategy/baseline/`, and writes the marker every later command depends on. For an offline first-impression smoke test (bundled SHFE aluminum), use `echolon hello` instead.
+
+   Variant — strategy-only (no data download): `echolon init <strategy_dir> --template <name>` (omit market/instrument/start/end). Use only when the workspace already exists.
+
+2. **Discover doctrine (MCP).** Call `list_skills`. Load `quick_start` and any per-API skills relevant to the task (e.g. `optuna_optimizer`, `wfa_runner`, `market_factory`, `engine_factory`). Skills are concise; load on demand, not all up front.
+
+3. **Don't write strategy files from scratch (MCP).** Call `list_templates`, then `load_template(name)`. The three templates (`minimal`, `momentum_breakout`, `rsi_mean_reversion`) are working scaffolds — copy and edit. The strategy skeleton placed by `echolon init --template <name>` is the same content; pick whichever flow fits.
+
+4. **Confirm indicator names before referencing them (MCP).** Call `list_indicators(has_lookback=...)` to filter, `indicator_info(name)` for parameters, `validate_indicator_list(...)` to check a draft. Names are exact and lowercase. Casing mismatches → `IND-001`; undeclared lookups → `IND-002`.
+
+5. **Validate before running (MCP).** Call `validate_strategy_full(strategy_dir)`. Address every finding — it is the safety net.
+
+6. **Run the backtest (CLI).** `echolon backtest single <strategy_dir>` walks up to the workspace marker, recomputes indicators, runs Backtrader, prints metrics. Add `--json` for structured output you can parse. There is NO MCP equivalent — shell out via Bash.
+
+7. **On any `[CODE-NNN]` error (MCP).** Call `get_error_doc(code)`. Apply the parameterized `fix` from the traceback first; consult `long_form_markdown` only if the fix is unclear.
+
+8. **If commands behave strangely (CLI).** Run `echolon doctor` to pre-flight ta-lib / akshare / backtrader / optuna availability. Run this BEFORE deeper debugging when imports or data downloads misbehave.
+
+## CLI surface (Bash)
+
+| Command | Purpose |
+|---|---|
+| `echolon hello` | Offline smoke test — bundled SHFE aluminum + bundled strategy + auto-backtest. ~30s. |
+| `echolon init <ws> --market ... --instrument ... --start ... --end ... [--template ...]` | Bootstrap a real workspace with data download. |
+| `echolon init <dir> --template <name>` | Strategy-only scaffold (no data download). |
+| `echolon backtest single <strategy_dir> [--json]` | Run a backtest. Recovers ctx from workspace marker. |
+| `echolon validate <strategy_dir> [--json]` | Same checks as MCP `validate_strategy_full`, runnable from shell. |
+| `echolon doctor` | Dependency pre-flight (ta-lib / akshare / backtrader / optuna). |
+| `echolon schema <ConfigName>` | Dump Pydantic JSON schema (e.g. `BacktestConfig`, `OptunaConfig`). |
+| `echolon indicators list [--format json]` | Indicator catalog (CLI mirror of MCP `list_indicators`). |
+| `echolon examples --list` / `echolon examples copy <name> <dir>` | Template browsing / copying. |
+
+Every subcommand is `--help`-able.
+
+## Hard rules
+
+- Don't run `echolon backtest single` from a directory without an `.echolon-workspace.json` marker on the path. Bootstrap with `echolon init` first.
+- Don't write strategy files from scratch. Always start from a template (`load_template` or `echolon init --template`).
+- Don't pass `--unsafe` to `echolon backtest` or `echolon run`. The validators are the safety net; if you're tempted to skip them, the strategy is wrong.
+- Don't use `try`/`except`, `self.params.get(default)`, or fallback logic in strategy components. Errors must propagate. The validators flag these as `PRM-004`.
+- Don't guess indicator names. Lowercase, exact match against the catalog. Casing mismatches are `IND-001`; undeclared lookups are `IND-002`.
+- Don't call `self.get_market_regime()` unless a regime classifier has been registered. Echolon ships zero classifiers — that's a host-application concern.
+
+## Scope
+
+v0.1.1 production support is **SHFE daily futures, end-to-end**: data ingestion, indicator computation, backtesting, Optuna optimization, walk-forward analysis, validation. SHFE intraday, live deployment, crypto perpetuals, and US markets are in development — components may not work or may not exist. If the user asks for one of those, say so explicitly before generating code.

@@ -1,0 +1,4 @@
+{
+  "highest_high": {"timeperiod": [10, 50]},
+  "lowest_low": {"timeperiod": [5, 20]}
+}

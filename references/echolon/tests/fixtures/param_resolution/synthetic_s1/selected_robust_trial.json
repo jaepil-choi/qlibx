@@ -1,0 +1,18 @@
+{
+  "trial_number": 7,
+  "params": {
+    "entry_alpha_period": 21.0,
+    "entry_gate_threshold": 0.777,
+    "exit_atr_period": 17.0,
+    "exit_down_stop_mult": 1.444,
+    "trailing_mult": 2.222,
+    "entry_entry_gate_threshold": 0.5,
+    "exit_exit_atr_period": 12.0,
+    "exit_exit_down_stop_mult": 1.0,
+    "exit_exit_up_stop_mult": 2.0,
+    "sizer_exit_down_stop_mult": 1.0,
+    "sizer_trailing_mult": 3.0,
+    "sizer_lots": 1.0,
+    "risk_max_drawdown_pct": 10.0
+  }
+}

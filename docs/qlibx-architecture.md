@@ -10,6 +10,10 @@ Borrow research: `docs/research/engine-borrow-benchmark-map.md`
 이 문서가 정하는 것: layer 경계, 책임 배분, 불변식, 핵심 계약의 shape, 의존 방향, 차용 출처.
 이 문서가 정하지 않는 것: 최종 public name, 함수 시그니처의 세부, 파일 분할 단위.
 
+> **§17 설계 감사 기록을 먼저 읽을 것.** 초안을 네 개의 research scenario에 대조한 결과 다섯 개의
+> gap이 확인되었다. I4는 PRD와 모순되어 개정되었고, judge 계약과 §3 event 표는 아직 불완전하며,
+> long-short 실행 회계는 설계 미착수다. 해당 절에 상호참조를 달았다.
+
 ---
 
 ## 1. 설계 명제
@@ -104,10 +108,14 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 | `EXECUTION` | 체결 시점 | exchange.match | fills + diagnostics | apply |
 | `MARK` | t close | valuation | NAV | mark |
 | `MONITOR` | monitoring time | constraint evaluation | findings | **건드리지 않음** |
+| `FIT`† | train_end − label_horizon − embargo | model.fit | FittedState | Memory (proposed → commit) |
 | `FUNDING`* | 정산 시점 | carry 계산 | cash delta | apply |
 
 `MONITOR`만 ④에서 ledger를 변경하지 않는다. PRD §4.3 "monitoring finding은 account를 소급 변경하지
 않는다"가 표에서 직접 보인다.
+
+† `FIT`은 rolling/expanding retraining event다. PRD §8.6이 요구하지만 초안에는 없었다. cutoff
+유도가 핵심이며 §17 G3 참조. `priority`는 `DECISION`보다 앞선다.
 
 \* `FUNDING`은 perpetual 확장 시 추가되는 event다. §16 참조.
 
@@ -124,12 +132,18 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 | **I1** | Clock만 시간을 움직인다. 어떤 부품도 `datetime.now()`를 부르지 않는다 | 소스 스캔 테스트 |
 | **I2** | Judge는 context 밖 데이터에 접근하지 않는다. 전역 provider/cache/모듈 상태 금지 | import 방향 테스트 + context 필드 검사 |
 | **I3** | 자식 context의 cutoff는 부모보다 넓어질 수 없다 | `derive()` 속성 테스트 |
-| **I4** | Ledger가 유일한 mutable state. 변경 경로는 `apply`/`mark` 둘뿐 | 공개 API 표면 테스트 |
+| **I4** | 커밋되는 state store는 Ledger와 Memory 둘이다. 둘 다 flow의 commit boundary에서만 변경된다. Judge는 어느 쪽도 직접 쓰지 않는다 | 공개 API 표면 테스트 |
 | **I5** | 모든 judge 함수는 `(result, diagnostics)`를 반환한다 | 시그니처 테스트 |
 | **I6** | Catalog는 append-only. 같은 identity + 다른 content는 conflict 실패 | 발행 테스트 |
 | **I7** | 같은 frozen config + 같은 데이터 → 같은 event 순서 → 같은 결과 | 2회 실행 비교 |
 
 **I1**이 가장 자주 깨진다. Backtest에서 wall clock을 읽는 것은 조용한 재현성 파괴다.
+
+**I4는 2026-08-03 개정되었다.** 초안은 "Ledger가 유일한 mutable state"였으나 이는 PRD와
+모순이다. PRD §9.1은 alpha decision이 "result에 proposed next state를 포함하고 runtime commit
+boundary에서만 authoritative state로 반영"하도록 요구하고, §9.10은 checkpoint가 "Alpha/strategy
+memory와 prior feedback cursor"를 보존하도록 요구한다. 즉 커밋되는 state store는 처음부터 둘이었다.
+§17 G1 참조.
 
 **I5**는 PRD §4.6과 §11.3을 타입으로 강제하는 장치다. 진단을 버리려면 `_`로 명시적으로 받아야 하고,
 그러면 코드 리뷰에서 잡힌다.
@@ -360,7 +374,13 @@ EXECUTION   cutoff = 현재 체결 시점        ← DECISION보다 넓다. 정�
 inner 전략   cutoff = 부모 executor 이하    ← I3
 MARK        cutoff = t close
 MONITOR     cutoff = monitoring time, 그리고 snapshot.as_of <= monitoring time
+FIT         cutoff = train_end − label_horizon − embargo   ← §17 G3. 라벨 정의에서 자동 유도
 ```
+
+`FIT`의 cutoff는 label horizon을 빼지 않으면 조용한 look-ahead가 된다. 20일 forward return 라벨로
+12/31까지 학습하면 마지막 샘플의 라벨이 1/20까지의 가격을 소비하고, 그 모델이 1/2 decision에
+쓰인다. 예외는 발생하지 않는다. PRD §8.1이 purge/embargo 선언을 요구하므로 gate가 라벨 정의에서
+자동 유도해야 한다 — config에서 사람이 빼는 방식은 실패한다.
 
 실행 계층이 t일 데이터를 보는 것은 정상이다. t일에 체결하기 때문이다. 금지되는 것은 (a) decision
 로직이 t일을 보는 것, (b) 어떤 계층이든 t+1을 보는 것이다.
@@ -396,6 +416,10 @@ convert(target, ctx)            -> (list[Order],     ConversionLog)
 validate(orders, ctx)           -> (Verdict,         list[Finding])
 exchange.match(order, quote, cash) -> (Fill,         FillDiagnostic)
 ```
+
+> **미완 (§17)** — 이 목록은 두 곳이 불완전하다. `alpha`는 PRD §9.1이 요구하는 proposed next
+> state를 반환하지 않는다(G1). `ensemble`과 `model.fit` 계약이 아예 없다(G5, G3). 확정 전까지 이
+> 목록을 완전한 judge 표면으로 읽지 않는다.
 
 모두 `(result, diagnostics)` 쌍을 반환한다 (I5). 이 layer 전체가 상태를 갖지 않으므로 교체
 가능하며, PRD §13.4의 public extension point 대부분이 여기에 있다.
@@ -494,6 +518,17 @@ qlib `backtest/account.py`:
 vnpy `PortfolioDailyResult.calculate_pnl`:
 - **trading PnL / holding PnL 분해.** qlib에는 없다. PRD §13.2 attribution과 §10.10
   flexible-budget attribution의 출발점이다.
+
+### 이 절의 한계 (§17)
+
+위 차용 계획은 **수량과 현금 회계에만 유효하다.** 세 가지가 빠져 있다.
+
+- **G2 round-trip 회계.** qlib `Position`은 `amount`/`price`/`weight`만 보유하며 `price`는
+  취득원가가 아니라 매 bar 덮어써지는 평가가격이다. 평균단가·실현손익·라운드트립이 없으므로
+  "직전 거래가 손실이었는가"에 답할 수 없다. 별도 `TradeLedger`가 필요하다.
+- **G1 Memory.** 전략 상태는 Ledger와 별개의 committed store다. I4 개정 참조.
+- **G4 long-short.** `_sell_stock`이 음수 잔량에서 `ValueError`를 던지므로 이 차용은 구조적으로
+  long-only다. Executable short는 담보 모델과 수익률 분모 선언이 선행되어야 한다.
 
 ---
 
@@ -899,9 +934,13 @@ vnpy 통계는 **계산식은 🟢이나 구조는 🔴**이다. 계산식을 �
 
 ```
 ③ gate 전체              Context, cutoff, derive, bounded load   ← 가장 큼
+③ FIT cutoff 유도        label horizon − embargo (§17 G3)
 ② callback, FillSink
 ④ target→order 변환      전 주문 진단 보존
 ④ 제약 선언/조정/검증     PRD §10.8~10.9
+⑤ TradeLedger            평균단가 · 라운드트립 · 실현손익 (§17 G2)
+⑤ Memory                 전략 상태 commit boundary (§17 G1)
+⑤ long-short 실행 회계    담보 · 수익률 분모 · 차입비용 (§17 G4)
 ⑥ envelope / lineage     fingerprint, dependency graph, 원자적 발행
 ⑥ production outbox      PRD §14
   instrument capability   숏 가능성, 마진, carry (§16)
@@ -970,7 +1009,8 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 |---|---|---|
 | ~~O1~~ | ~~`pyqlib` 의존성 위치~~ | **해결.** `pyproject.toml`에서 완전히 제거. runtime/dev 어느 group에도 두지 않는다. 결과로 in-process parity oracle을 쓸 수 없으므로 §15.1 정적 fixture 대조로 대체한다. 차용 대상 qlib 소스는 `references/`에 보존되어야 한다 (O8) |
 | O2 | **polars 도입** | vnpy alpha 코드 전체가 polars. 저장 Parquet / 질의 duckdb / 계산 polars / 경계 pandas 층 분리를 권고. **결정 필요** |
-| O3 | **matched capitalization 폐기** | qlib long-only position 제약이라는 전제가 소멸. 대체로 instrument capability 모델(숏 가능성/마진/carry/계약단위/청산) 도입. PRD §11.5~11.7 개정 필요 |
+| O3 | **matched capitalization 폐기** | qlib long-only position 제약이라는 전제가 소멸. 대체로 instrument capability 모델(숏 가능성/마진/carry/계약단위/청산) 도입. PRD §11.5~11.7 개정 필요. **§17 G4가 이 결정에 막혀 있다** |
+| O9 | **long-short 수익률 분모** | 달러 뉴트럴 북에서 NAV / gross / declared capital 중 무엇을 분모로 쓸지. 계산으로 도출되지 않는 선언 사항이며 관행도 갈린다. §17 G4 |
 | O4 | hypothetical vs real short | 종목 속성으로 선언. real short 불가 종목의 숏 결과에 hypothetical 낙인을 artifact에 기록 |
 | O5 | crypto perpetual 확장 | funding은 `FUNDING` timer로 §3 원자에 그대로 편입. margin account, 계약단위(linear/inverse), 강제청산이 추가로 필요 |
 | O6 | pub/sub 도입 시점 | 현재는 callback만. 횡단 관심사(전 이벤트 로깅, 사용자 관측자)가 생기면 검토. 도입 시 delivery 우선순위를 함께 설계해야 I7이 유지된다 |
@@ -978,3 +1018,158 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 | ~~O8~~ | ~~qlib 소스 보존~~ | **해결.** `references/qlib`을 upstream `main@79633dd` 전체 트리(619 paths)로 교체. 기존 부분 스냅샷(274 paths)은 소스를 담고 있지 않았다. §14 인용이 저장소만으로 해결된다 |
 
 O3~O5는 서로 묶여 있다. 함께 결정하는 것이 낫다.
+
+---
+
+## 17. 설계 감사 기록
+
+이 절은 초안을 네 개의 구체적 research scenario에 대조해 발견한 gap과 불일치를 기록한다. 감사
+시점 2026-08-03, 대조 대상은 `docs/qlibx-prd.md`와 `references/` 아래 vendored source다.
+
+기록 목적은 두 가지다. 첫째, 초안이 이미 만족한다고 **잘못 읽힐 수 있는** 부분을 명시적으로
+표시한다. 둘째, 해결 순서와 선행 결정을 남긴다. 여기 적힌 gap은 구조의 결함이 아니라 명세의
+미완이다 — G4만 예외다.
+
+| # | 항목 | 성격 | 상태 |
+|---|---|---|---|
+| G1 | Strategy memory 부재 | 불변식 오류 + 계약 누락 | I4 개정 완료, 계약·저장소 미설계 |
+| G2 | Round-trip 회계 부재 | 차용 판단 오류 | 미해결 |
+| G3 | 학습/거래 분리 (`FIT` event) | 명세 누락 | 미해결 |
+| G4 | Long-short 실행 회계 | **설계 미착수** | O3~O5 선행 필요 |
+| G5 | `ensemble` 계약 부재 | 명세 누락 | 미해결 |
+
+### G1 — Strategy memory
+
+초안은 "bounded strategy memory"를 §7의 `DecisionContext` **입력** 항목으로만 언급하고, 출력·
+저장소·commit 경로를 정의하지 않았다. §8의 judge 계약도 `alpha(ctx) -> (AlphaWeights,
+Diagnostics)`로 state 출력이 없다.
+
+PRD §9.1과 §9.10이 요구하는 형태는 다음이다.
+
+```python
+alpha(ctx) -> (AlphaWeights, ProposedMemory, Diagnostics)
+```
+
+`ProposedMemory`는 제안일 뿐이며 flow가 commit boundary에서 반영한다. Alpha는 여전히 순수 함수다 —
+이전 memory를 입력으로 받고 다음 memory를 반환할 뿐 어디에도 쓰지 않는다.
+
+Memory를 소비한 alpha result는 자동으로 path-dependent다 (PRD §9.4). §10 envelope의
+`path_dependent` 플래그가 이를 표시하며, G5의 ensemble member 검사와 연결된다.
+
+**미결정:** Memory를 별도 store로 둘지, evidence의 artifact stream에서 최신 커밋본을 읽는 형태로
+둘지. 후자는 PRD §9.11("재현 가능한 state transition으로 기록")과 더 잘 맞지만 매 decision마다
+조회 비용이 든다.
+
+### G2 — Round-trip 회계
+
+§9는 ledger 산술을 qlib `backtest/position.py::Position`에서 이식한다고 기술했다. 이 판단은 수량과
+현금 회계에는 유효하지만 **PnL 경로 의존 로직에는 불충분하다.**
+
+Vendored source 확인 결과 `Position`이 종목별로 보유하는 필드는 `amount`, `price`, `weight` 셋이며,
+`price`는 취득원가가 아니라 평가가격이다. `update_stock_price`(L401-402)가 매 bar 덮어쓰고,
+`_buy_stock`(L342-350)은 추가 매수 시 평균단가를 갱신하지 않는다. 실현손익 필드와 라운드트립 개념은
+존재하지 않는다.
+
+따라서 "직전 N회 거래가 손실이었는가" 같은 조건은 현재 차용 계획으로 **답할 수 없다.**
+`PositionLedger`와 별개로 다음을 보유하는 `TradeLedger`가 필요하다.
+
+```
+평균 취득단가 · 라운드트립 개시/종료 · 실현손익 · 실현수익률
+```
+
+nautilus `model/position.pxd`가 동일 역할을 하며(`avg_px_open`, `avg_px_close`, `realized_pnl`,
+`realized_return`, `is_closed_c`, `calculate_pnl`) 설계 참고 대상이다. LGPL이므로 🔵다.
+
+vnpy `PortfolioDailyResult`의 trading/holding PnL 분해는 일별 집계이므로 종목별 라운드트립을
+대체하지 못한다.
+
+### G3 — 학습/거래 분리
+
+§3 원자 표에 `FIT` event가 없다. "fitted model"은 §10 lineage 다이어그램에만 등장한다. PRD §8.6과
+P2 수용 기준은 rolling/expanding/event-triggered retraining을 명시적 research lifecycle로 요구한다.
+
+원자 패턴에는 그대로 편입된다.
+
+| event | context cutoff | 순수 함수 | 결과 | store |
+|---|---|---|---|---|
+| `FIT` | train_end − label_horizon − embargo | model.fit | FittedState + selection evidence | Memory (proposed → commit) |
+
+`priority`는 `DECISION`보다 앞선다.
+
+**cutoff 유도가 이 gap의 핵심이다.** §7의 cutoff 규칙에는 `FIT` 항목이 없는데, 라벨 horizon을
+빼지 않으면 조용한 look-ahead가 발생한다. 20일 forward return 라벨로 12/31까지 학습하면 마지막
+샘플의 라벨이 1/20까지의 가격을 소비하고, 그 모델이 1/2 decision에 쓰인다. 예외는 발생하지 않는다.
+
+PRD §8.1이 "Label horizon overlap이 있는 경우 purge/embargo requirement를 선언한다"고 요구하므로,
+gate가 라벨 정의에서 cutoff를 **자동 유도**해야 한다. 사람이 매 config에서 빼는 방식은 실패한다.
+
+부수 요구: `FittedState`는 binary payload 참조로 저장하고(PRD §12.2), 어느 fitted state가 활성인지는
+lineage edge로 기록한다. 최신 파일 경로 참조로 대체하지 않는다(PRD §8.6). 선택되지 않은 후보와
+실패한 fit도 조회 가능해야 한다.
+
+### G4 — Long-short 실행 회계
+
+**초안 구조로는 executable long-short가 불가능하다.** 이 절의 다른 항목과 달리 명세 미완이 아니라
+설계 미착수다.
+
+§9가 차용하는 qlib `Position._sell_stock`(L352-374)은 잔량이 음수가 되면 `ValueError`를 던진다.
+구조적으로 long-only다. 그리고 이 제약을 우회하던 PRD §11.4~11.7 matched capitalization은 §0.3이
+전제 소멸로 무효화했다. 옛 우회로는 폐기되었고 대체 메커니즘은 아직 없다.
+
+**연구 층위와 실행 층위를 분리해야 한다.** PRD §4.2의 세 층 중
+
+- 1층(signal IC/RankIC/quantile spread, long-short diagnostic)과
+- 2층(signed basket return, factor return)은
+
+가중치가 부호 있는 수치일 뿐이고 ledger를 경유하지 않으므로 **현재 구조에서 이미 가능하다.**
+막힌 것은 3층, 즉 order/position/account를 통과하는 executable short다.
+
+3층에 필요한 미설계 항목:
+
+1. **부호 있는 position** — 예외 제거 자체는 사소하다.
+2. **공매도 대금의 성격** — qlib `Position`의 `cash`는 단일 수치이며 free/encumbered 구분이 없다.
+   그대로 두면 공매도 대금으로 재매수하는 무한 레버리지가 성립한다. 담보 모델이 필요하다.
+3. **수익률 분모** — 달러 뉴트럴 북에서 NAV·gross·capital-at-risk 중 무엇을 분모로 쓸지는
+   계산으로 도출되지 않는 **선언 사항**이다. PRD §11.9가 composite와 active return을 구분하지만
+   matched capitalization 맥락에 한정되어 있어 일반 long-short용으로 재작성이 필요하다.
+4. **차입 비용** — 종목별·시점별로 변한다. 데이터가 없으면 모델링하지 않는다(PRD §5.7).
+5. **대차 가능성(locate)** — unknown을 가능으로 추측하지 않는다(PRD §7.7 원칙).
+
+해결 경로는 O3~O5의 instrument capability 선언이다. 종목이 `shortable: none | hypothetical | real`을
+선언하고, `hypothetical`은 1~2층 연구를 허용하되 실행 프로파일에서 거부되며 결과 artifact에
+표시된다. **O3~O5 결정 없이는 진행할 수 없다.**
+
+### G5 — `ensemble` 계약
+
+§8 judge 계약 목록에 `ensemble`이 없다. §10 lineage 다이어그램과 §12 package layout에만 등장한다.
+PRD §10.1은 결과 요구사항(member fingerprint, ticker-level pre/post-net weight, crossing/netting
+amount, gross/net residual, member contribution/overlap)을 상세히 규정하므로 출력은 정의되어 있고
+계약만 없다.
+
+```python
+ensemble(members, ctx) -> (AlphaWeights, EnsembleDiagnostics)
+```
+
+**G4와 독립이다.** Ensemble은 weight space에서 일어나며 ledger를 경유하지 않으므로 long-short
+member를 결합하는 것 자체는 실행 회계와 무관하다.
+
+설계 시 확정할 항목 셋:
+
+- **Crossing 기록.** 두 member가 같은 종목에 반대 intent를 내면 netting 후 gross가 줄고 각 member의
+  의도가 부분적으로만 실현된다. 거래 비용은 발생하지 않지만 gross budget이 상쇄에 소비된 것이므로
+  member allocation과 capacity 진단의 입력이다. PRD §10.1이 명시적으로 요구한다.
+- **Netting 후 normalization.** 네팅으로 줄어든 gross를 목표치로 되돌릴지는 fixed/flexible budget
+  선언에 따른다(PRD §9.3). 말없이 재정규화하면 §9.3 위반이다.
+- **Path-dependency 검사.** Member가 path-dependent면 다른 execution history에서 재사용할 수 없다
+  (PRD §9.4). §10 envelope의 `path_dependent` 플래그로 검사 가능하며, **감사 항목 중 유일하게 이미
+  처리된 부분이다.** G1의 memory 소비 alpha가 이 플래그를 통해 여기 연결된다.
+
+### 해결 순서 제안
+
+```
+G1 · G3 · G5   → 각각 store 하나 / event 하나 / judge 함수 하나. §15 구축 순서에 편입 가능
+G2             → §15 3단계(ledger)에 TradeLedger 추가. 선행 결정 없음
+G4             → O3~O5 결정이 선행되어야 함
+```
+
+G1·G2·G3·G5는 선행 결정 없이 명세를 채울 수 있다. G4만 product decision을 기다린다.

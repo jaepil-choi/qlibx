@@ -1,10 +1,61 @@
 # qlibx Product Requirements Document
 
 Status: canonical
-Qlib compatibility baseline: `pyqlib==0.9.7`
+Runtime: qlibx-owned event-driven engine (no Qlib runtime dependency)
+Companion document: `docs/qlibx-architecture.md`
 
 이 문서는 qlibx의 제품 철학, observable behavior, correctness boundary와 acceptance criteria를 규정하는
 정본이다.
+
+## 0. Runtime ownership
+
+이 절은 normative이며 본문의 다른 모든 절보다 우선한다.
+
+### 0.1 qlibx는 자체 execution engine을 소유한다
+
+qlibx는 Qlib을 backtest runtime backend로 사용하지 않는다. Strategy callback, decision, order,
+fill, position, account와 clock progression을 포함한 execution lifecycle 전체를 qlibx가 소유하고
+구현한다. `pyqlib`는 qlibx의 dependency가 아니며 runtime, test 또는 build 어느 경로에서도 요구하지
+않는다.
+
+Engine은 **event-driven** 구조다. 시간 진행은 registered timer가 만드는 event를 하나의 정렬된
+queue로 병합해 처리하며, observation, decision, execution과 monitoring은 각각 독립적으로
+등록된 event이고 하나의 strategy loop에 합쳐지지 않는다. Event handler는 자신에게 허용된
+information cutoff만 담은 bounded context를 인자로 받는다.
+
+### 0.2 Reference implementation 차용 정책
+
+Engine은 백지에서 설계하지 않고 다음 reference에서 검증된 부분을 선별 차용한다.
+
+- **Qlib** (MIT) — order fill 산술, transaction cost, lot/trade-unit rounding, tradability와
+  suspension 판정, position/account accounting. 코드 차용 가능.
+- **vnpy** (MIT) — daily cross-sectional portfolio backtest 골격, target/actual position 분리,
+  trading/holding PnL 분해, signal transform built-in, artifact lab 표면. 코드 차용 가능.
+- **nautilus_trader** (LGPL-3.0) — clock/event queue, pre-execution risk validation, execution
+  reconciliation, portable catalog, portfolio-statistic plugin 구조. **설계만 차용하며 코드를
+  복사하지 않는다.**
+
+차용한 산술과 구조는 qlibx의 failure contract, diagnostic 보존과 artifact 요구사항을 만족하도록
+재작성한다. Reference의 silent fallback, 자동 renormalization과 진단 소실 동작은 차용 대상이
+아니다.
+
+### 0.3 본문 해석 규칙
+
+본문에는 Qlib을 runtime backend로 전제하던 시기의 서술이 남아 있다. 다음과 같이 읽는다.
+
+- Qlib runtime component(`Executor`, `Exchange`, `Position`, `Account`, `TradeDecision`,
+  `BaseStrategy`, `NestedExecutor`, `SimulatorExecutor`)에 대한 서술은 **qlibx가 소유하는
+  동일 역할의 component**에 대한 요구사항으로 읽는다. 요구되는 semantics, authority와 evidence는
+  그대로 유효하다.
+- Qlib version pinning, upstream compatibility, upgrade gate와 native-vs-adapted 분류를
+  요구하는 서술은 더 이상 적용되지 않는다. 해당 자리에는 qlibx engine 자체의 characterization
+  test와 artifact compatibility gate가 들어간다.
+- Qlib의 long-only stock position 제약에서 파생된 요구사항(matched capitalization 계열)은
+  engine 소유권 이전으로 전제가 사라졌다. 별도 product decision으로 재정의한다.
+- `qrun`, Qlib Recorder와 Qlib config factory에 대한 서술은 optional interoperability이며
+  required capability가 아니다.
+
+이 해석 규칙과 충돌하는 본문 서술은 §0이 우선한다. 본문 정리는 별도 revision에서 수행한다.
 
 ### Document interpretation
 
@@ -16,8 +67,9 @@ Python public name은 명시적으로 확정하지 않는 한 요구사항이 �
 >
 > 이 표기가 붙은 이름, diagram, method shape와 component decomposition은 요구사항을 설명하는 하나의 구현
 > 후보다. 동일한 product semantics, evidence와 acceptance criteria를 만족하는 다른 구조를 허용한다.
-> `BaseStrategy`, `TradeDecision`, `Executor`, `Exchange`, `Position`, `Account`처럼 Qlib upstream compatibility가
-> 직접 요구하는 명칭은 이 규칙의 예외다.
+> `Strategy`, `TradeDecision`, `Executor`, `Exchange`, `Position`, `Account`처럼 역할이 확립된 명칭은
+> 설명 목적으로 계속 사용하지만, 이는 qlibx-owned component를 가리키며 외부 package의 class를
+> 지시하지 않는다.
 
 ## 1. Product thesis
 

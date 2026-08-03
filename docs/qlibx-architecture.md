@@ -2,7 +2,8 @@
 
 Status: draft
 Canonical requirements: `docs/qlibx-prd.md`
-Borrow research: `docs/research/engine-borrow-benchmark-map.md`
+Borrow research: [[engine-borrow-benchmark-map]]
+Backend 채택 판단: [[why-not-nautilus-as-a-dependency]]
 
 이 문서는 PRD가 규정한 product requirement를 만족하는 **구현 설계**를 기술한다. PRD가 정본이고 이
 문서는 그것을 만족하는 하나의 구조다. 둘이 충돌하면 PRD가 우선한다.
@@ -113,7 +114,7 @@ clock의 위치에 따라 달라진다.
 | event | clock 위치 | view | 계산 | 결과 | ledger |
 |---|---|---|---|---|---|
 | `DECISION` | 09:00 | `DecisionView` | alpha → construct → convert → validate | orders + diagnostics | executor에 위임 |
-| `EXECUTION` | 체결 시점 | `ExecutionView` | exchange.match | fills + diagnostics | apply |
+| `EXECUTION` | 체결 시점 | `ExecutionView` | exchange.match_batch | fills + diagnostics | apply_batch |
 | `MARK` | 15:30 | `ExecutionView` | valuation | NAV | mark |
 | `MONITOR` | 15:30 | `MonitorView` | constraint evaluation | findings | **건드리지 않음** |
 | `FIT`† | 학습 시점 | `FitView` | model.fit | FittedState | Memory (proposed → commit) |
@@ -268,45 +269,70 @@ def on_monitor(ev: Event) -> None:
 "pure artifact consumer"로 규정하며, 이래야 저장된 이력을 strategy rerun 없이 `as-was`/`as-if`로
 재평가할 수 있다 (§7.11).
 
-### Executor는 sub-flow다
+### Executor는 횡단면 batch sub-flow다
 
 **Exchange와 Executor는 다른 것이다.**
 
 ```
-Exchange   주문 1건이 얼마나 체결되나        순수 함수. ④ judge. 시간 개념 없음.
-Executor   주문 여러 건을 언제 어떻게 넣나   sub-flow. ② flow. 계산하지 않음.
+Exchange   주문 집합이 얼마나 체결되나       순수 함수. ④ judge. 시간 개념 없음.
+Executor   그 집합을 언제 어떻게 넘기나      sub-flow. ② flow. 계산하지 않음.
 ```
+
+qlibx의 기본 단위는 **decision time의 횡단면**이다. 3000종목 일봉은 같은 순간에 함께 확정되므로
+3000개의 개별 event로 쪼개지 않는다. Executor는 한 시점의 주문 집합을 통째로 받아 처리한다.
 
 ```
 on_decision (flow)
-    │ executor.execute(orders, ctx, sink)
+    │ executor.execute(orders, view, sink)
     ▼
-┌────────────────────────────────────────────┐
-│ Executor (sub-flow)                         │
-│   for 시점 in 자기 일정:                     │
-│       clock 이 그 시점으로 전진 ─────────────┼→ ① kernel
-│       q = view.quote(symbol)   ─────────────┼→ ③ view
-│       fill, diag = exchange.match(...) ─────┼→ ④ judge
-│       sink.apply(fill)                 ─────┼→ ⑤ ledger (좁은 port)
-│   return ExecutionResult(fills, diagnostics)│
-└────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ Executor (sub-flow)                               │
+│   q, v = view.quotes(), view.volumes()  ──────────┼→ ③ view
+│   fills, diags = exchange.match_batch(  ──────────┼→ ④ judge
+│       orders, q, v, sink.cash()                   │
+│   )                                               │
+│   sink.apply_batch(fills)               ──────────┼→ ⑤ ledger (좁은 port)
+│   return ExecutionResult(fills, diags)            │
+└──────────────────────────────────────────────────┘
 ```
 
-교체는 계약 하나로 이루어진다.
+### 계약
 
 ```python
 class Executor(Protocol):
-    def execute(self, orders: list[Order], ctx: Context,
+    def execute(self, orders: Orders, view: ExecutionView,
                 sink: FillSink) -> ExecutionResult: ...
 ```
 
+`Orders`는 단건 목록이 아니라 instrument축 배열 묶음이다. `match_batch`는 §8의 clipping 순서를
+elementwise 연산으로 수행한다.
+
 ```
-DailyCloseExecutor   일정: t일 종가 1회
-MinuteExecutor       일정: 분봉 순회 + slicer(TWAP/VWAP/POV)
+DailyCloseExecutor   기본. t일 종가 1회, 3000종목 batch.
 ```
 
-둘은 `exchange.match`를 공유한다. **산술은 같고 일정만 다르다.** 이것이 교체가 성립하는 이유다.
-Alpha, portfolio construction, conversion, validation은 변경되지 않는다.
+교체 지점은 유지하되 현재 구현은 하나다. 분단위 체결은 요구되지 않는 것으로 확인되었으므로
+`MinuteExecutor`는 계획에 넣지 않는다. 필요해지면 같은 계약 뒤에 추가한다 —
+[[why-not-nautilus-as-a-dependency]] §4의 재검토 조건 2에 해당한다.
+
+### batch가 closed loop를 해치지 않는다
+
+한 event가 횡단면 전체를 나른다는 것과, 시간 축이 순차라는 것은 서로 독립이다.
+
+```
+피드백 유무   →  시간 축이 순차인가로 결정   →  qlibx: 순차. 유지.
+event 입도    →  종목별인가 횡단면인가       →  qlibx: 횡단면. batch.
+```
+
+시간 축이 순차이므로 다음이 모두 성립한다.
+
+- 부분체결 후 다음 decision은 requested target이 아니라 **실제 보유**에서 계산한다 (PRD §4.3)
+- Blocked liquidation은 포지션에 남아 다음 decision에 포함된다 (PRD §7.7)
+- 실현손익 누적에 의존하는 stop-loss 같은 path-dependent 정책이 성립한다 (§17 G1, G2)
+
+흔히 "vectorized backtest"로 불리는 것 — `(weights.shift(1) * returns).sum()` 형태의 시간 축
+일괄 계산 — 은 이와 다르다. 그쪽은 feedback edge 자체가 없어 PRD §4.3을 만족할 수 없으며
+채택하지 않는다. **벡터화 대상은 instrument 축이고 시간 축이 아니다.**
 
 ### FillSink — 좁은 port
 
@@ -314,9 +340,9 @@ Executor에게 `Ledger` 전체를 주면 I4가 깨진다.
 
 ```python
 class FillSink(Protocol):
-    def apply(self, fill: Fill) -> None: ...      # 쓰기 — 이것만
-    def cash(self) -> Money: ...                  # 읽기
-    def position(self, symbol: str) -> Quantity: ...
+    def apply_batch(self, fills: Fills) -> None: ...   # 쓰기 — 이것만
+    def cash(self) -> Money: ...                       # 읽기
+    def positions(self) -> Quantities: ...             # instrument축 배열
 ```
 
 Executor가 할 수 있는 것은 체결 반영뿐이다. `mark()`도, snapshot 생성도, target 주입도 불가능하다.
@@ -332,12 +358,15 @@ qlib은 `exchange.deal_order(order, trade_account=account)`로 **Exchange가 acc
 qlibx는 분리한다.
 
 ```python
-fill, diag = exchange.match(order, quote, cash)   # 순수. 아무것도 바꾸지 않음
-sink.apply(fill)                                   # flow가 반영
+fills, diags = exchange.match_batch(orders, quotes, volumes, cash)  # 순수
+sink.apply_batch(fills)                                             # flow가 반영
 ```
 
-얻는 것: (1) account 없이 체결 산술을 테스트할 수 있다, (2) 같은 주문을 여러 시나리오로 돌릴 수
-있다 (what-if, PRD §9.9), (3) `diag`를 버릴 수 없다.
+얻는 것: (1) account 없이 체결 산술을 테스트할 수 있다, (2) 같은 주문 집합을 여러 시나리오로 돌릴
+수 있다 (what-if, PRD §9.9), (3) `diags`를 버릴 수 없다.
+
+qlib은 주문 단건 순회이므로 이 분리가 성립해도 batch가 되지 않는다. qlibx는 단위 자체를
+instrument축 배열로 두어 `deal_order` 순회를 elementwise 연산으로 대체한다.
 
 ---
 
@@ -487,14 +516,16 @@ construct(weights, view)        -> (PhysicalTarget,  Diagnostics)
 convert(target, view)           -> (list[Order],     ConversionLog)
 validate(orders, view)          -> (Verdict,         list[Finding])
 model.fit(view)                 -> (FittedState,     SelectionEvidence)
-exchange.match(order, quote, cash) -> (Fill,         FillDiagnostic)
+exchange.match_batch(orders, quotes, volumes, cash)
+                                -> (Fills,          FillDiagnostics)
 ```
 
 첫 인자는 초안의 snapshot이 아니라 **clock에 묶인 조회 창구**다(§7). Judge는 필요한 시점에
 필요한 만큼 조회하며, view가 접근을 기록해 lineage가 된다.
 
-`exchange.match`만 view를 받지 않는다. 주문 하나와 시세·현금만으로 결정되는 순수 산술이고, 시간
-개념이 없기 때문이다(§6).
+`exchange.match_batch`만 view를 받지 않는다. 주문 집합과 시세·거래량·현금만으로 결정되는 순수
+산술이고, 시간 개념이 없기 때문이다(§6). 인자는 instrument축 배열이며 clipping이 elementwise로
+수행된다.
 
 > **미완 (§17)** — `alpha`의 `ProposedMemory` 반환(G1), `ensemble`(G5), `model.fit`(G3) 계약은
 > shape만 확정되었고 세부는 미설계다.
@@ -886,6 +917,10 @@ ConstraintFinding(
 
 범례: 🟢 코드 차용(MIT) / 🔵 설계만(LGPL 또는 부적합) / 🔴 반면교사 / ⚪ 순수 창작
 
+세 reference 모두 **dependency가 아니다.** qlibx는 engine을 직접 구현하며 reference에서는 설계와
+산술만 차용한다. nautilus를 execution backend dependency로 채택하지 않은 판단의 근거는
+[[why-not-nautilus-as-a-dependency]]에 있다.
+
 모든 line reference는 `references/` 아래 vendored snapshot 기준이다. 각 snapshot의 upstream commit은
 해당 디렉터리의 `UPSTREAM.md`에 기록되어 있다. Snapshot을 갱신하면 이 표의 line number를 함께
 검증해야 한다.
@@ -1065,11 +1100,11 @@ nautilus_trader  LGPL-3.0   🔵 코드 복사 금지
 
 | # | 단계 | 성격 | 비고 |
 |---|---|---|---|
-| 1 | 도메인 객체 | 🟢 | vnpy 필드 + qlib amount/deal_amount + Status enum |
-| 2 | **exchange.match + 진단** | 🟢 | 가장 검증이 중요. §15.1 fixture parity 먼저 |
-| 3 | ledger (position/account/PnL) | 🟢 | qlib 산술 + vnpy PnL 분해 |
+| 1 | 도메인 객체 (instrument축 배열) | 🟢 | vnpy 필드 + qlib amount/deal_amount + Status enum |
+| 2 | **exchange.match_batch + 진단** | 🟢 | 가장 검증이 중요. §15.1 fixture parity 먼저 |
+| 3 | ledger (position/account/PnL) | 🟢 | qlib 산술 + vnpy PnL 분해 + TradeLedger(§17 G2) |
 | 4 | kernel (clock/event/queue) | 🔵 | 20~30줄. 병렬 clock 검증 |
-| 5 | gate (Context 3종) | ⚪ | 첫 창작 구간 |
+| 5 | view (available_at 질의 + 횡단면 패널) | 🔵⚪ | 시간 경계는 🔵, 접근 축은 ⚪ |
 | 6 | flow + convert + executor | ⚪🟢 | §13 walkthrough가 통합 테스트 |
 | 7 | validate | 🔵⚪ | |
 | 8 | evidence (envelope/catalog) | ⚪ | |
@@ -1079,6 +1114,10 @@ nautilus_trader  LGPL-3.0   🔵 코드 복사 금지
 
 6단계 완료 시 end-to-end long-only backtest가 동작한다. 7단계 이후는 참고 코드가 희박하므로 기반이
 굳은 뒤로 배치한다.
+
+2단계부터 instrument축 배열을 기본 단위로 잡는다. 단건 `match`를 먼저 만든 뒤 batch로 확장하는
+경로는 택하지 않는다 — clipping 순서 중 현금 제약만이 순차이고 나머지는 elementwise이므로, 처음부터
+batch로 두는 편이 단순하다.
 
 ### 15.1 체결 산술 parity 검증
 
@@ -1108,6 +1147,7 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 | ~~O9~~ | ~~long-short 수익률 분모~~ | **해결.** dollar-neutral book은 **gross 기준**으로 수익률을 계산한다. Long 100 / short 100이면 분모는 200이다. NAV 기준은 leverage에 따라 수익률이 달라져 alpha 비교가 불가능해지므로 채택하지 않는다. §17 G4의 나머지 항목(담보 모델, 차입 비용, locate)은 여전히 미해결 |
 | O4 | hypothetical vs real short | 종목 속성으로 선언. real short 불가 종목의 숏 결과에 hypothetical 낙인을 artifact에 기록 |
 | O5 | crypto perpetual 확장 | funding은 `FUNDING` timer로 §3 원자에 그대로 편입. margin account, 계약단위(linear/inverse), 강제청산이 추가로 필요 |
+| ~~O10~~ | ~~nautilus를 execution backend로 채택~~ | **기각.** 기본 작업 단위가 다르다 — instrument별 event 대 decision-time 횡단면. PRD §8~§10·§12에 대응물 없음. v1→v2 전환 중. 3000종목 미검증. 상세와 재검토 조건은 [[why-not-nautilus-as-a-dependency]] |
 | O6 | pub/sub 도입 시점 | 현재는 callback만. 횡단 관심사(전 이벤트 로깅, 사용자 관측자)가 생기면 검토. 도입 시 delivery 우선순위를 함께 설계해야 I7이 유지된다 |
 | O7 | PRD 본문 정리 | §0.3 해석 규칙으로 처리 중. Qlib 전제 서술 195곳의 정식 개정은 별도 revision |
 | ~~O8~~ | ~~qlib 소스 보존~~ | **해결.** `references/qlib`을 upstream `main@79633dd` 전체 트리(619 paths)로 교체. 기존 부분 스냅샷(274 paths)은 소스를 담고 있지 않았다. §14 인용이 저장소만으로 해결된다 |
@@ -1337,3 +1377,28 @@ flow가 유일한 부수효과 지점이라는 배치는 변경되지 않는다.
 
 네 개의 research scenario 대조로 다섯 개 gap 확인. I4가 PRD §9.1·§9.10과 모순되어 개정. 상세는
 §17.
+
+### 2026-08-03 — execution backend 결정 및 batch 단위 확정
+
+**결정.** nautilus_trader를 execution backend dependency로 채택하지 않는다. 설계는 선별 차용하되
+engine은 qlibx가 구현한다. 근거와 재검토 조건은 [[why-not-nautilus-as-a-dependency]]에 있다.
+
+**핵심 사유.** 기본 작업 단위가 다르다. nautilus는 instrument별 event, qlibx는 decision-time
+횡단면이다. 3000종목 × 5000일이면 1500만 event 대 5000 batch step이고, 이는 최적화로 좁힐 수 있는
+차이가 아니다. 여기에 PRD §8~§10·§12에 대응물이 없다는 점, v1→v2 전환 진행 중이라는 점,
+3000종목 규모가 미검증이라는 점이 더해진다.
+
+**구조 변경.** Executor가 "일정표"에서 **횡단면 batch 실행기**로 바뀐다. `exchange.match(order)`는
+`exchange.match_batch(orders)`가 되고, `FillSink.apply`는 `apply_batch`가 된다. §15 구축 순서는
+2단계부터 instrument축 배열을 기본 단위로 잡는다.
+
+**유지되는 것.** event / callback / handler 기반 inversion of control, clock, closed-loop feedback은
+변경되지 않는다. 한 event가 나르는 데이터의 크기만 바뀐다. 시간 축은 여전히 순차이므로 partial
+fill, blocked liquidation, path-dependent stop-loss가 모두 성립한다.
+
+**명시적으로 배제하는 것.** 시간 축을 일괄 계산하는 형태의 backtest — `(weights.shift(1) *
+returns).sum()` — 는 feedback edge가 없어 PRD §4.3을 만족할 수 없으므로 채택하지 않는다.
+벡터화 대상은 instrument 축이지 시간 축이 아니다.
+
+**분단위 체결.** 요구되지 않는 것으로 확인되어 `MinuteExecutor`를 계획에서 제외한다. Executor 교체
+지점은 유지한다.

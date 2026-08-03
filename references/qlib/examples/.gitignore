@@ -1,0 +1,14 @@
+# Local metadata, not part of the upstream snapshot.
+#
+# The upstream root .gitignore lists `*.ipynb` and `*.pkl`, which would hide
+# eight paths that the upstream repository itself tracks. Re-include exactly
+# those eight so the vendored snapshot is complete in the parent repository.
+
+!workflow_by_code.ipynb
+!benchmarks/GRU/csi300_gru_ts.pkl
+!benchmarks/GRU/model_gru_csi300.pkl
+!benchmarks/LSTM/csi300_lstm_ts.pkl
+!benchmarks/LSTM/model_lstm_csi300.pkl
+!benchmarks/TRA/Reports.ipynb
+!rl/simple_example.ipynb
+!tutorial/detailed_workflow.ipynb

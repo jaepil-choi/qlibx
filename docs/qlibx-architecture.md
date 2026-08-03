@@ -40,18 +40,24 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 ### 2.1 상태를 가진 것은 셋뿐이다
 
 ```
-① Clock     지금 몇 시인가        — 시간을 움직이는 유일한 주체
-③ Gate      무엇을 볼 수 있는가    — 시야를 정하는 유일한 주체
-⑤ Ledger    무엇을 갖고 있는가    — 상태를 갖는 유일한 주체
+① Clock              지금 몇 시인가        — 시간을 움직이는 유일한 주체
+⑤ Ledger / Memory    무엇을 갖고 있는가    — 커밋되는 상태 저장소
 ```
 
-나머지 전부는 **순수 함수**다.
+그리고 이 둘 사이에 **view**가 있다. View는 상태를 갖지 않지만 clock에 묶여 있어서, 조회 결과가
+clock의 위치에 따라 달라진다.
 
-- 시간을 모른다 (`datetime.now()`를 부르지 않는다)
-- 상태를 갖지 않는다 (`self`에 저장하지 않는다)
-- 준 것만 본다 (전역 접근을 하지 않는다)
+```
+③ View      무엇을 볼 수 있는가   — 읽기 전용. clock 이 경계를 정한다.
+```
 
-부품이 몇 개로 늘어나든 규율을 지킬 곳은 셋이다. 나머지는 자유롭게 교체·확장·테스트할 수 있다.
+나머지 전부는 **계산만 한다**.
+
+- 시간을 스스로 알아내지 않는다 (`datetime.now()`를 부르지 않는다)
+- 커밋되는 상태를 직접 쓰지 않는다
+- store에 직접 접근하지 않는다 (반드시 view 경유)
+
+부품이 몇 개로 늘어나든 규율을 지킬 곳은 clock, view, 그리고 두 개의 state store다.
 
 ### 2.2 여섯 layer
 
@@ -62,12 +68,12 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 │ ② flow      on_decision / on_mark / on_monitor       │  순서
 │             Executor (sub-flow)                       │
 ├──────────────────────────────────────────────────────┤
-│ ③ gate      Context 생성 · cutoff · bounded load     │  시야  ★
+│ ③ view      clock-bound facade · 횡단면 패널 조회     │  시야  ★
 ├──────────────────────────────────────────────────────┤
 │ ④ judge     alpha · construct · convert              │  계산
 │             validate · exchange.match                 │
 ├──────────────────────────────────────────────────────┤
-│ ⑤ ledger    Position · Account                        │  상태
+│ ⑤ ledger    Position · Account · Trade · Memory       │  상태
 ├──────────────────────────────────────────────────────┤
 │ ⑥ evidence  Artifact · Catalog · Lineage             │  증거
 └──────────────────────────────────────────────────────┘
@@ -80,13 +86,15 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 ### 2.3 흐름과 되먹임
 
 ```
-   Clock ──tick──→ Gate ──context──→ Judge ──(result, diag)──→ Ledger ──→ Evidence
-                     ↑                                            │
-                     └────────── 다음 tick의 bounded input ────────┘
+   Clock ──tick──→ Flow ──view──→ Judge ──(result, diag)──→ Ledger ──→ Evidence
+     │                 ↑                                      │
+     │                 └──── view 는 ledger 를 읽는다 ─────────┘
+     └──── clock 위치가 view 의 조회 경계를 정한다
 ```
 
 되먹임 edge가 PRD §2.4 closed loop이다. 다음 decision은 requested target이 아니라 **ledger의 실제
-상태**를 gate를 통해 받는다.
+상태**를 view를 통해 읽는다. 초안과 달리 flow가 snapshot을 조립해 넘기지 않고, judge가 view로
+필요한 시점에 조회한다.
 
 ---
 
@@ -96,26 +104,31 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 
 ```
 시각이 온다
-  ① gate가 context를 만든다          ← 여기서만 "볼 수 있는 것"이 정해진다
-  ② 순수 함수에 넣는다                ← 부수효과 없음
+  ① clock 이 그 시각으로 이동한다     ← 여기서 "볼 수 있는 것"이 정해진다
+  ② 역할에 맞는 view 를 넘긴다        ← 어떤 종류를 볼지는 view 구성이 정한다
   ③ (result, diagnostics)가 나온다   ← 진단이 항상 동반
-  ④ ledger에 반영하고 기록한다        ← 유일한 부수효과 지점
+  ④ ledger 에 반영하고 기록한다       ← 유일한 부수효과 지점
 ```
 
-| event | context cutoff | 순수 함수 | 결과 | ledger |
-|---|---|---|---|---|
-| `DECISION` | t-1 close | alpha → construct → convert → validate | orders + diagnostics | executor에 위임 |
-| `EXECUTION` | 체결 시점 | exchange.match | fills + diagnostics | apply |
-| `MARK` | t close | valuation | NAV | mark |
-| `MONITOR` | monitoring time | constraint evaluation | findings | **건드리지 않음** |
-| `FIT`† | train_end − label_horizon − embargo | model.fit | FittedState | Memory (proposed → commit) |
-| `FUNDING`* | 정산 시점 | carry 계산 | cash delta | apply |
+| event | clock 위치 | view | 계산 | 결과 | ledger |
+|---|---|---|---|---|---|
+| `DECISION` | 09:00 | `DecisionView` | alpha → construct → convert → validate | orders + diagnostics | executor에 위임 |
+| `EXECUTION` | 체결 시점 | `ExecutionView` | exchange.match | fills + diagnostics | apply |
+| `MARK` | 15:30 | `ExecutionView` | valuation | NAV | mark |
+| `MONITOR` | 15:30 | `MonitorView` | constraint evaluation | findings | **건드리지 않음** |
+| `FIT`† | 학습 시점 | `FitView` | model.fit | FittedState | Memory (proposed → commit) |
+| `FUNDING`* | 정산 시점 | `ExecutionView` | carry 계산 | cash delta | apply |
+
+cutoff 열이 사라진 것에 주의한다. 무엇을 볼 수 있는지는 clock 위치와 각 관측치의 `available_at`이
+결정하므로 event마다 명시할 값이 아니다. 일봉의 `available_at`이 15:30이면 09:00 `DECISION`은 당일
+종가를 조회할 수 없다 — 별도 설정 없이 시간표에서 유도된다(§7).
 
 `MONITOR`만 ④에서 ledger를 변경하지 않는다. PRD §4.3 "monitoring finding은 account를 소급 변경하지
 않는다"가 표에서 직접 보인다.
 
-† `FIT`은 rolling/expanding retraining event다. PRD §8.6이 요구하지만 초안에는 없었다. cutoff
-유도가 핵심이며 §17 G3 참조. `priority`는 `DECISION`보다 앞선다.
+† `FIT`은 rolling/expanding retraining event다. PRD §8.6이 요구하지만 초안에는 없었다.
+`priority`는 `DECISION`보다 앞선다. §17 G3 참조 — view 모델에서는 label의 `available_at`을
+`event_time + horizon`으로 선언하면 purge/embargo가 별도 장치 없이 성립한다.
 
 \* `FUNDING`은 perpetual 확장 시 추가되는 event다. §16 참조.
 
@@ -130,14 +143,18 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 | # | 불변식 | 검증 방법 |
 |---|---|---|
 | **I1** | Clock만 시간을 움직인다. 어떤 부품도 `datetime.now()`를 부르지 않는다 | 소스 스캔 테스트 |
-| **I2** | Judge는 context 밖 데이터에 접근하지 않는다. 전역 provider/cache/모듈 상태 금지 | import 방향 테스트 + context 필드 검사 |
-| **I3** | 자식 context의 cutoff는 부모보다 넓어질 수 없다 | `derive()` 속성 테스트 |
+| **I2** | 모든 데이터 접근은 clock-bound view를 경유한다. View는 `available_at <= clock.now()`를 우회할 수 없고, store 직접 접근·전역 provider·모듈 상태는 금지한다 | import 방향 테스트 + view 질의 술어 검사 |
+| **I3** | 모든 component clock은 kernel이 같은 시각으로 함께 전진시킨다. 어떤 component도 홀로 앞설 수 없다 | clock 단조성 테스트 |
 | **I4** | 커밋되는 state store는 Ledger와 Memory 둘이다. 둘 다 flow의 commit boundary에서만 변경된다. Judge는 어느 쪽도 직접 쓰지 않는다 | 공개 API 표면 테스트 |
 | **I5** | 모든 judge 함수는 `(result, diagnostics)`를 반환한다 | 시그니처 테스트 |
 | **I6** | Catalog는 append-only. 같은 identity + 다른 content는 conflict 실패 | 발행 테스트 |
 | **I7** | 같은 frozen config + 같은 데이터 → 같은 event 순서 → 같은 결과 | 2회 실행 비교 |
 
 **I1**이 가장 자주 깨진다. Backtest에서 wall clock을 읽는 것은 조용한 재현성 파괴다.
+
+**I2와 I3도 2026-08-03 개정되었다.** 초안의 I2는 event마다 조립한 context를 전제했고, I3는 그
+context의 파생 규칙이었다. View 모델에서는 시간 경계가 clock 한 곳에서 강제되므로 두 불변식이
+그에 맞게 다시 쓰였다. §18 참조.
 
 **I4는 2026-08-03 개정되었다.** 초안은 "Ledger가 유일한 mutable state"였으나 이는 PRD와
 모순이다. PRD §9.1은 alpha decision이 "result에 proposed next state를 포함하고 runtime commit
@@ -267,7 +284,8 @@ on_decision (flow)
 ┌────────────────────────────────────────────┐
 │ Executor (sub-flow)                         │
 │   for 시점 in 자기 일정:                     │
-│       inner = ctx.derive(그 시점)  ──────────┼→ ③ gate
+│       clock 이 그 시점으로 전진 ─────────────┼→ ① kernel
+│       q = view.quote(symbol)   ─────────────┼→ ③ view
 │       fill, diag = exchange.match(...) ─────┼→ ④ judge
 │       sink.apply(fill)                 ─────┼→ ⑤ ledger (좁은 port)
 │   return ExecutionResult(fills, diagnostics)│
@@ -323,85 +341,138 @@ sink.apply(fill)                                   # flow가 반영
 
 ---
 
-## 7. ③ gate ★
+## 7. ③ view ★
 
-**qlibx의 정체성이 있는 layer다.** Reference 세 곳 어디에도 대응물이 없다.
+**정보 경계를 강제하는 layer다.** 초안에서는 `gate`가 event마다 snapshot을 조립해 넘기는
+구조였으나, 2026-08-03 개정으로 **clock에 묶인 조회 창구(view)** 방식으로 교체되었다. 변경 이유와
+근거는 §18에 기록한다.
 
-### 책임
+### 두 개의 경계를 분리한다
 
-1. cutoff 결정 — 이 event가 언제까지 볼 수 있는가
-2. bounded load — 선언한 lookback만 적재 (PRD §9.6)
-3. 되먹임 주입 — 실제 position, cash, 직전 execution result
-4. 파생 규칙 강제 — 자식은 부모보다 넓어질 수 없다 (PRD §7.6)
+초안은 "무엇을 볼 수 있는가"를 하나의 문제로 다뤘다. 실제로는 서로 독립인 두 문제다.
 
-### 계약
-
-```python
-@dataclass(frozen=True)
-class Context:
-    as_of:  Timestamp      # 지금 몇 시
-    cutoff: Timestamp      # 무엇까지 볼 수 있는가
-
-    def derive(self, as_of: Timestamp) -> "Context":
-        """자식 context. cutoff는 부모를 넘을 수 없다 — I3."""
+```
+시간 경계   언제까지의 데이터를 볼 수 있는가     →  clock 이 결정. 모든 view 공통.
+역할 경계   어떤 종류의 데이터를 볼 수 있는가     →  view 구성이 결정. view 마다 다름.
 ```
 
-Context는 세 종류이고 **담는 데이터가 다르다.**
+이 분리가 개정의 핵심이다. 시간 경계는 한 곳(clock)에서 일괄 강제되고, 역할 경계는 view에 어떤
+facade를 묶느냐로 표현된다.
 
-| | 담는 것 | 담지 않는 것 |
+### 시간 경계 — stream 순서가 곧 cutoff다
+
+모든 관측치는 두 개의 시각을 갖는다.
+
+```
+event_time      그 사건이 실제로 발생한 시각
+available_at    관측 가능해진 시각          ← PRD §4.4의 available_at
+```
+
+Runtime data stream은 **`available_at` 오름차순**으로 정렬된다. `event_time`이 아니다.
+
+```python
+stream = sorted(observations, key=lambda o: o.available_at)
+```
+
+View의 모든 조회에는 `available_at <= clock.now()` 조건이 붙는다. 우회 경로는 없다 — 조건이
+질의에 박혀 있고 view 밖의 store 직접 접근은 금지한다(I2).
+
+따라서 **cutoff는 파라미터가 아니라 clock의 위치다.**
+
+```
+09:00  DECISION      일봉의 available_at = 15:30 이므로 당일 종가는 조회되지 않는다
+15:30  EXECUTION     당일 종가가 조회된다
+```
+
+초안이 event마다 명시하던 cutoff 표는 사라진다. 시간표에서 유도되기 때문이다.
+
+**위험은 제거되지 않고 이동한다.** 보장은 전적으로 `available_at`이 등록 시점에 올바로 선언되었는지에
+달려 있다. 일봉의 `available_at`을 당일 00:00으로 넣으면 09:00 decision이 당일 종가를 보고, 예외는
+발생하지 않는다. PRD §5.1과 §7.2가 availability 선언을 qlibx 소유로 규정하고 §4.4가 qlibx의 보장
+범위를 "선언된 availability의 준수"로 한정하므로, 이 배치는 PRD의 책임 분담과 일치한다. 대신
+data registration 단계의 검증이 §1 설계 명제를 지탱하는 단일 지점이 된다.
+
+### 역할 경계 — view 구성
+
+| view | 묶는 facade | 제외 |
 |---|---|---|
-| `DecisionContext` | signal, universe, benchmark, tradability, 실제 position/cash, 직전 execution result, bounded strategy memory | **t일 가격** |
-| `ExecutionContext` | 체결 시점까지의 quote/volume, lot, cost profile | t+1 |
-| `MonitorContext` | account snapshot, compliance dataset | **alpha signal** |
+| `DecisionView` | panel(signal/price), universe, benchmark, tradability, positions, cash, 직전 execution result, memory | **compliance dataset** |
+| `ExecutionView` | quote/volume, lot, cost profile, positions, cash | signal panel |
+| `MonitorView` | account snapshot, compliance dataset | **signal panel, memory** |
+| `FitView` | panel(feature/label), universe | positions, cash |
 
-### 핵심: 권한 검사가 아니라 부재다
-
-```python
-def alpha(ctx: DecisionContext):
-    ctx.price_at(today)      # AttributeError — 그런 것이 없다
-```
-
-권한 검사는 실수로 우회할 수 있다. 없는 것은 쓸 수 없다.
-
-이것이 §1 설계 명제의 구체적 구현이다. PIT 위반은 예외를 발생시키지 않으므로, 위반 자체가 불가능한
-구조여야 한다.
-
-### cutoff 규칙
-
-```
-DECISION    cutoff = 직전 관측 경계 (기본 프로파일에서 t-1 close)
-EXECUTION   cutoff = 현재 체결 시점        ← DECISION보다 넓다. 정당하다.
-inner 전략   cutoff = 부모 executor 이하    ← I3
-MARK        cutoff = t close
-MONITOR     cutoff = monitoring time, 그리고 snapshot.as_of <= monitoring time
-FIT         cutoff = train_end − label_horizon − embargo   ← §17 G3. 라벨 정의에서 자동 유도
-```
-
-`FIT`의 cutoff는 label horizon을 빼지 않으면 조용한 look-ahead가 된다. 20일 forward return 라벨로
-12/31까지 학습하면 마지막 샘플의 라벨이 1/20까지의 가격을 소비하고, 그 모델이 1/2 decision에
-쓰인다. 예외는 발생하지 않는다. PRD §8.1이 purge/embargo 선언을 요구하므로 gate가 라벨 정의에서
-자동 유도해야 한다 — config에서 사람이 빼는 방식은 실패한다.
-
-실행 계층이 t일 데이터를 보는 것은 정상이다. t일에 체결하기 때문이다. 금지되는 것은 (a) decision
-로직이 t일을 보는 것, (b) 어떤 계층이든 t+1을 보는 것이다.
-
-### compliance 분리
-
-PRD §4.4는 compliance evaluator가 strategy가 소비하지 않는 독립 데이터를 요구할 수 있으나, 그것이
-자동으로 strategy input이 되어서는 안 된다고 규정한다.
-
-Gate가 이를 구조로 보장한다 — `MonitorContext`의 compliance dataset은 `DecisionContext`에 담기지
-않는다. Monitoring finding을 decision에 쓰려면 명시적으로 선언해야 한다.
+`MonitorView`가 signal을, `DecisionView`가 compliance dataset을 갖지 않는 것이 PRD §4.4의
+"compliance-only data를 undeclared strategy input으로 전달하지 않는다"를 구조로 만든다. Monitoring
+finding을 decision에 쓰려면 명시적으로 주입해야 한다.
 
 ```python
-ctx = gate.decision_context(
-    ts,
-    monitoring_findings=catalog.findings(before=cutoff),   # 명시적 입력
-)
+view = views.decision(monitoring_findings=catalog.findings(before=clock.now()))
 ```
 
-이때 (1) 어떤 finding을 소비했는지 기록되고, (2) cutoff가 적용되며, (3) lineage에 dependency edge가
-남는다. `self`에 저장하는 방식은 셋 다 잃는다.
+이때 (1) 어떤 finding을 소비했는지 기록되고, (2) `available_at` 조건이 적용되며, (3) lineage에
+dependency edge가 남는다.
+
+### 조회 창구 계약
+
+```python
+class PanelView(Protocol):
+    """횡단면 패널 조회. clock 에 묶인다."""
+    def panel(self, field: str, lookback: Lookback) -> DataFrame: ...
+    def universe(self) -> Index: ...
+    def accessed(self) -> list[AccessRecord]: ...
+
+class PositionView(Protocol):
+    def positions(self) -> Mapping[str, Quantity]: ...
+    def cash(self) -> Money: ...
+    def nav(self) -> Money: ...
+```
+
+`Protocol`은 읽기 전용이다. 쓰기 메서드를 노출하지 않는다 — nautilus의 `CacheFacade` /
+`PortfolioFacade`와 같은 배치다.
+
+`lookback`은 rows와 duration semantics를 구분하며(PRD §9.6), 질의에 그대로 반영되어 조회량을
+한정한다. 초안의 "bounded load 사전 선언"은 불필요해진다 — 조회 자체가 한정적이다.
+
+### 횡단면이 기본 축이다
+
+Reference 세 곳은 모두 instrument별 시계열이 기본 접근 단위다. nautilus `cache.bars(bar_type)`은
+한 종목의 deque를 반환하고, 3000종목 패널을 만들려면 3000회 조회해 조립해야 한다. 메모리 상주
+방식이라 20년 × 3000종목을 담을 수도 없다.
+
+qlibx의 기본 접근 단위는 **decision time의 횡단면**이다. 따라서 view는 메모리 누적 컨테이너가
+아니라 **컬럼 저장소에 대한 시간 한정 질의**로 구현한다.
+
+```
+저장   Parquet (available_at 파티션)
+질의   DuckDB   WHERE available_at <= :now AND available_at > :now - :lookback
+반환   DataFrame (instrument × field)
+```
+
+이 부분은 §14에서 여전히 ⚪다. 세 reference 어디에도 대응물이 없다.
+
+### 접근 기록이 lineage가 된다
+
+View는 조회를 기록한다. 따라서 "이 alpha가 실제로 무엇을 읽었는가"가 관측에서 나온다.
+
+```python
+weights, memory, diag = alpha(view)
+recorder.write(weights, lineage=view.accessed())
+```
+
+PRD §7.4는 derived artifact가 의존 input을 stable identity로 기록하도록 요구한다. 선언 기반은
+실제 사용과 어긋날 수 있으나 접근 기록은 어긋나지 않는다. 초안의 사전 선언 방식보다 강한 보장이다.
+
+### backtest / live 동형성
+
+View와 judge는 clock이 무엇인지 모른다. Backtest와 live의 차이는 clock 교체와 stream 공급원뿐이다.
+
+```
+backtest   BacktestClock + 정렬된 과거 stream
+live       LiveClock     + 실시간 도착 stream
+```
+
+초안은 gate 구현이 두 벌 필요했다. 개정 후에는 한 벌이다. 두 벌이 어긋나 "backtest는 통과하고
+live는 실패하는" 부류의 결함이 구조적으로 제거된다.
 
 ---
 
@@ -410,16 +481,23 @@ ctx = gate.decision_context(
 ### 계약 — 전부 같은 모양
 
 ```python
-alpha(ctx)                      -> (AlphaWeights,    Diagnostics)
-construct(weights, ctx)         -> (PhysicalTarget,  Diagnostics)
-convert(target, ctx)            -> (list[Order],     ConversionLog)
-validate(orders, ctx)           -> (Verdict,         list[Finding])
+alpha(view)                     -> (AlphaWeights,    ProposedMemory, Diagnostics)
+ensemble(members, view)         -> (AlphaWeights,    EnsembleDiagnostics)
+construct(weights, view)        -> (PhysicalTarget,  Diagnostics)
+convert(target, view)           -> (list[Order],     ConversionLog)
+validate(orders, view)          -> (Verdict,         list[Finding])
+model.fit(view)                 -> (FittedState,     SelectionEvidence)
 exchange.match(order, quote, cash) -> (Fill,         FillDiagnostic)
 ```
 
-> **미완 (§17)** — 이 목록은 두 곳이 불완전하다. `alpha`는 PRD §9.1이 요구하는 proposed next
-> state를 반환하지 않는다(G1). `ensemble`과 `model.fit` 계약이 아예 없다(G5, G3). 확정 전까지 이
-> 목록을 완전한 judge 표면으로 읽지 않는다.
+첫 인자는 초안의 snapshot이 아니라 **clock에 묶인 조회 창구**다(§7). Judge는 필요한 시점에
+필요한 만큼 조회하며, view가 접근을 기록해 lineage가 된다.
+
+`exchange.match`만 view를 받지 않는다. 주문 하나와 시세·현금만으로 결정되는 순수 산술이고, 시간
+개념이 없기 때문이다(§6).
+
+> **미완 (§17)** — `alpha`의 `ProposedMemory` 반환(G1), `ensemble`(G5), `model.fit`(G3) 계약은
+> shape만 확정되었고 세부는 미설계다.
 
 모두 `(result, diagnostics)` 쌍을 반환한다 (I5). 이 layer 전체가 상태를 갖지 않으므로 교체
 가능하며, PRD §13.4의 public extension point 대부분이 여기에 있다.
@@ -742,8 +820,9 @@ clock.set_timer("MONITOR",  매 거래일     15:30, flow.on_monitor,  priority=
 ### 2024-01-02 09:00 — DECISION
 
 ```
-ctx = DecisionContext(as_of=01/02 09:00, cutoff=12/29 15:30)
-      → 01/02 가격은 담기지 않는다
+clock = 01/02 09:00
+view  = DecisionView(clock)
+      → 01/02 일봉의 available_at = 15:30 이므로 조회되지 않는다
 
 alpha      → {A: 0.5, B: 0.5}
 construct  → A 50%, B 50%  (현재 전량 현금)
@@ -838,19 +917,34 @@ ConstraintFinding(
 | executor 교체 계약, 분할 실행 | nautilus | `execution/client.pyx`, `algorithm.pyx` | 🔵 |
 | **callback, FillSink** | — | — | ⚪ |
 
-### ③ gate ★
+### ③ view ★
+
+> **초안 정정.** 이 표는 원래 "Context 3종, cutoff, bounded load — 어디에도 대응물 없음 ⚪"과
+> "nautilus에는 Context 객체 자체가 없어 PIT가 구조로 강제되지 않는다"고 기술했다. **후자는
+> 사실이 아니다.** nautilus는 Context 객체 대신 이중 timestamp와 `ts_init` 정렬 stream으로 같은
+> 보장을 제공하며, 이는 PRD §4.4가 요구하는 메커니즘 그 자체다. §18 참조.
 
 | 항목 | 출처 | 위치 | |
 |---|---|---|---|
-| **Context 3종, cutoff, derive, bounded load** | — | — | ⚪ |
-| 시간 범위 표현 | qlib | `backtest/decision.py` L206-300 `TradeRange` | 🟢 |
-| learn/infer 데이터 분리 | vnpy | `alpha/dataset/template.py` L181-194 | 🟢 |
+| **이중 timestamp** (`ts_event` / `ts_init`) | nautilus | `core/data.pyx` L30, L42 | 🔵 |
+| ↳ PRD 대응 | — | `ts_event`=event time, **`ts_init`=`available_at`** (§4.4, §7.2) | |
+| **`ts_init` 오름차순 stream** = PIT 강제 | nautilus | `backtest/engine.pyx` L903, L1658-1735 | 🔵 |
+| restatement 표시 | nautilus | `model/data.pyx` L1496 `is_revision` | 🔵 |
+| 읽기 전용 facade | nautilus | `cache/base.pxd` `CacheFacade`, `portfolio/base.pxd` | 🔵 |
+| ↳ Actor가 보유하는 형태 | nautilus | `common/actor.pxd` L73, L83 (`readonly`) | 🔵 |
+| data ↔ timer 실행 순서 | nautilus | `backtest/engine.pyx` L1692, L1731-1735 | 🔵 |
 | 명시적 생성자 주입 | nautilus | `system/kernel.py` L101 | 🔵 |
+| learn/infer 데이터 분리 | vnpy | `alpha/dataset/template.py` L181-194 | 🟢 |
+| 시간 범위 표현 | qlib | `backtest/decision.py` L206-300 `TradeRange` | 🟢 |
 | 문자열 키 서비스 로케이터 | qlib | `common_infra.get(...)` | 🔴 |
+| **횡단면 패널 view** (instrument × field) | — | — | ⚪ |
+| **접근 기록 기반 lineage** | — | — | ⚪ |
+| **역할별 view 구성** (compliance 분리) | — | — | ⚪ |
 
-nautilus에는 Context 객체 자체가 없다 — 데이터를 msgbus로 push하는 방식이라 "이 시점에 무엇을 볼 수
-있나"가 구조로 강제되지 않는다. 실시간 거래에서는 미래 데이터가 물리적으로 없으므로 필요가 없다.
-**이 layer는 backtest에서만 필요하고, backtest에서 가장 어려운 부분이며, qlibx의 존재 이유다.**
+시간 경계 메커니즘은 nautilus에 있고 🔵로 차용한다. 남는 ⚪는 **접근 축**이다. Reference 세 곳은
+모두 instrument별 시계열이 기본 단위이고(`cache.bars(bar_type)`은 한 종목의 deque), 메모리 상주
+방식이라 20년 × 3000종목을 담지 못한다. qlibx의 기본 단위인 decision time 횡단면과 그것을 컬럼
+저장소 질의로 구현하는 부분은 여전히 창작이다.
 
 ### ④ judge
 
@@ -933,8 +1027,9 @@ vnpy 통계는 **계산식은 🟢이나 구조는 🔴**이다. 계산식을 �
 참고 코드가 없는 영역은 전부 **경계와 증거**다.
 
 ```
-③ gate 전체              Context, cutoff, derive, bounded load   ← 가장 큼
-③ FIT cutoff 유도        label horizon − embargo (§17 G3)
+③ 횡단면 패널 view        instrument × field, 컬럼 저장소 질의   ← 가장 큼
+③ 접근 기록 lineage       view 가 조회를 기록
+③ 역할별 view 구성        compliance / signal 분리
 ② callback, FillSink
 ④ target→order 변환      전 주문 진단 보존
 ④ 제약 선언/조정/검증     PRD §10.8~10.9
@@ -1010,7 +1105,7 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 | ~~O1~~ | ~~`pyqlib` 의존성 위치~~ | **해결.** `pyproject.toml`에서 완전히 제거. runtime/dev 어느 group에도 두지 않는다. 결과로 in-process parity oracle을 쓸 수 없으므로 §15.1 정적 fixture 대조로 대체한다. 차용 대상 qlib 소스는 `references/`에 보존되어야 한다 (O8) |
 | O2 | **polars 도입** | vnpy alpha 코드 전체가 polars. 저장 Parquet / 질의 duckdb / 계산 polars / 경계 pandas 층 분리를 권고. **결정 필요** |
 | O3 | **matched capitalization 폐기** | qlib long-only position 제약이라는 전제가 소멸. 대체로 instrument capability 모델(숏 가능성/마진/carry/계약단위/청산) 도입. PRD §11.5~11.7 개정 필요. **§17 G4가 이 결정에 막혀 있다** |
-| O9 | **long-short 수익률 분모** | 달러 뉴트럴 북에서 NAV / gross / declared capital 중 무엇을 분모로 쓸지. 계산으로 도출되지 않는 선언 사항이며 관행도 갈린다. §17 G4 |
+| ~~O9~~ | ~~long-short 수익률 분모~~ | **해결.** dollar-neutral book은 **gross 기준**으로 수익률을 계산한다. Long 100 / short 100이면 분모는 200이다. NAV 기준은 leverage에 따라 수익률이 달라져 alpha 비교가 불가능해지므로 채택하지 않는다. §17 G4의 나머지 항목(담보 모델, 차입 비용, locate)은 여전히 미해결 |
 | O4 | hypothetical vs real short | 종목 속성으로 선언. real short 불가 종목의 숏 결과에 hypothetical 낙인을 artifact에 기록 |
 | O5 | crypto perpetual 확장 | funding은 `FUNDING` timer로 §3 원자에 그대로 편입. margin account, 계약단위(linear/inverse), 강제청산이 추가로 필요 |
 | O6 | pub/sub 도입 시점 | 현재는 callback만. 횡단 관심사(전 이벤트 로깅, 사용자 관측자)가 생기면 검토. 도입 시 delivery 우선순위를 함께 설계해야 I7이 유지된다 |
@@ -1043,6 +1138,9 @@ O3~O5는 서로 묶여 있다. 함께 결정하는 것이 낫다.
 초안은 "bounded strategy memory"를 §7의 `DecisionContext` **입력** 항목으로만 언급하고, 출력·
 저장소·commit 경로를 정의하지 않았다. §8의 judge 계약도 `alpha(ctx) -> (AlphaWeights,
 Diagnostics)`로 state 출력이 없다.
+
+(`DecisionContext`는 §18에서 폐기된 초안 용어다. 현행 대응물은 `DecisionView`이며, memory를
+어떻게 담고 되돌려받을지는 아래 미결정 항목으로 남아 있다.)
 
 PRD §9.1과 §9.10이 요구하는 형태는 다음이다.
 
@@ -1096,12 +1194,17 @@ P2 수용 기준은 rolling/expanding/event-triggered retraining을 명시적 re
 
 `priority`는 `DECISION`보다 앞선다.
 
-**cutoff 유도가 이 gap의 핵심이다.** §7의 cutoff 규칙에는 `FIT` 항목이 없는데, 라벨 horizon을
-빼지 않으면 조용한 look-ahead가 발생한다. 20일 forward return 라벨로 12/31까지 학습하면 마지막
-샘플의 라벨이 1/20까지의 가격을 소비하고, 그 모델이 1/2 decision에 쓰인다. 예외는 발생하지 않는다.
+**라벨의 `available_at` 선언이 이 gap의 핵심이다.** 20일 forward return 라벨로 12/31까지 학습하면
+마지막 샘플의 라벨이 1/20까지의 가격을 소비하고, 그 모델이 1/2 decision에 쓰인다. 예외는 발생하지
+않는다.
 
-PRD §8.1이 "Label horizon overlap이 있는 경우 purge/embargo requirement를 선언한다"고 요구하므로,
-gate가 라벨 정의에서 cutoff를 **자동 유도**해야 한다. 사람이 매 config에서 빼는 방식은 실패한다.
+§18 개정 이후 이 문제는 별도 cutoff 장치가 아니라 **선언으로 해결된다.** 라벨의 `available_at`을
+`event_time + horizon`으로 등록하면, `FIT`이 시각 T에 실행될 때 `available_at > T`인 라벨은 애초에
+조회되지 않는다. purge/embargo가 view의 일반 규칙에서 그대로 따라 나온다.
+
+따라서 남는 요구는 **derived label을 등록할 때 horizon을 `available_at`에 반영하도록 강제**하는
+것이다. PRD §8.1이 요구하는 purge/embargo 선언이 이 지점에 해당한다. 이를 누락하면 §18이 지적한
+"보장이 write 시점으로 이동한 대가"가 정확히 여기서 실현된다.
 
 부수 요구: `FittedState`는 binary payload 참조로 저장하고(PRD §12.2), 어느 fitted state가 활성인지는
 lineage edge로 기록한다. 최신 파일 경로 참조로 대체하지 않는다(PRD §8.6). 선택되지 않은 후보와
@@ -1173,3 +1276,64 @@ G4             → O3~O5 결정이 선행되어야 함
 ```
 
 G1·G2·G3·G5는 선행 결정 없이 명세를 채울 수 있다. G4만 product decision을 기다린다.
+
+---
+
+## 18. 개정 이력
+
+### 2026-08-03 — 정보 전달 모델 교체 (초안 §7 폐기)
+
+**변경.** Event마다 `gate`가 snapshot(`Context`)을 조립해 judge에 넘기던 구조를, **clock에 묶인
+읽기 전용 조회 창구(view)** 를 judge가 들고 필요한 시점에 조회하는 구조로 교체했다.
+
+**계기.** nautilus 소스를 다시 읽는 과정에서 초안의 사실관계 오류가 확인되었다. §14는
+"nautilus에는 Context 객체가 없어 PIT가 구조로 강제되지 않는다"고 기술했으나, nautilus는 다른
+메커니즘으로 같은 보장을 제공한다.
+
+```
+core/data.pyx  L30  ts_event   그 사건이 발생한 시각
+core/data.pyx  L42  ts_init    그 데이터가 시스템에 들어온 시각
+backtest/engine.pyx L903       sorted(data, key=lambda x: x.ts_init)
+model/data.pyx L1496           is_revision
+```
+
+Stream이 `ts_event`가 아니라 **`ts_init` 오름차순**으로 정렬된다는 점이 핵심이다. 이는 PRD §4.4의
+`available_at <= evaluation_time`과 §7.2의 "Event time, observation time와 `available_at`"를 그대로
+구현한 것이다. 미래를 차단하는 것이 아니라 **아직 stream에서 나오지 않았으므로 존재하지 않는다.**
+
+**채택 근거.**
+
+1. **Backtest와 live의 judge 코드가 동일해진다.** 초안은 gate 구현이 두 벌 필요했고, 두 벌이
+   어긋나면 backtest만 통과하는 결함이 생긴다. 개정 후 차이는 clock 교체와 stream 공급원뿐이다.
+2. **Cutoff가 파라미터에서 사라진다.** 일봉의 `available_at`이 15:30이면 09:00 `DECISION`이 당일
+   종가를 볼 수 없다. §3의 cutoff 열이 시간표에서 유도된다.
+3. **Event마다 snapshot을 조립하는 비용이 없다.**
+4. **Lineage가 선언이 아니라 관측에서 나온다.** View가 접근을 기록하므로 실제 사용과 어긋나지
+   않는다(PRD §7.4).
+5. **사전 bounded-load 선언이 불필요하다.** 조회 자체가 lookback으로 한정된다.
+
+**대가.**
+
+1. **Judge가 순수 함수가 아니게 된다.** View를 보유하고 조회하므로 초안의 I2("context 밖 데이터에
+   접근하지 않는다")가 성립하지 않는다. I2는 "모든 접근은 clock-bound view를 경유한다"로
+   개정되었다. 테스트는 가짜 clock과 가짜 view 주입으로 유지된다.
+2. **보장 지점이 read 시점에서 write 시점으로 이동한다.** `available_at`을 잘못 선언하면 조용한
+   look-ahead가 발생하고 예외는 나지 않는다. PRD §5.1·§7.2가 availability 선언을 qlibx 소유로,
+   §4.4가 qlibx의 보장 범위를 "선언된 availability의 준수"로 규정하므로 책임 배분 자체는 일치한다.
+   다만 **data registration 검증이 §1 설계 명제를 지탱하는 단일 지점**이 되므로 그에 상응하는
+   검증이 필요하다.
+
+**유지되는 것.** Event / callback / handler 기반 inversion of control, 여섯 layer 구분, 반복 원자,
+flow가 유일한 부수효과 지점이라는 배치는 변경되지 않는다.
+
+**영향 범위.** §2 멘탈 모델, §3 원자 표(cutoff 열 제거), §4 불변식 I2·I3, §7 전면 재작성,
+§8 judge 계약 첫 인자, §14 매핑표 ③ 정정.
+
+**남는 ⚪.** 시간 경계 메커니즘은 nautilus에서 차용하지만 **접근 축**은 여전히 창작이다. Reference
+세 곳은 instrument별 시계열이 기본 단위이고 메모리 상주 방식이라, decision time 횡단면을 컬럼
+저장소 질의로 제공하는 부분에는 대응물이 없다.
+
+### 2026-08-03 — 설계 감사 (§17)
+
+네 개의 research scenario 대조로 다섯 개 gap 확인. I4가 PRD §9.1·§9.10과 모순되어 개정. 상세는
+§17.

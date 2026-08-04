@@ -34,6 +34,32 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 
 이 명제에서 아키텍처의 중심에 **gate**가 놓인다는 결론이 나온다.
 
+### 1.1 PRD use-case traceability
+
+PRD §3.5는 observable outcome과 evidence를 stable use-case ID로 규정한다. Architecture는 각 ID를
+반복하는 데 그치지 않고 다음 여섯 항목을 추적 가능하게 설명해야 한다.
+
+```text
+trigger → permitted read → calculation → commit → evidence → validation
+```
+
+| PRD use case | scope | architecture flow | commit | evidence | validation |
+|---|---|---|---|---|---|
+| `UC-COST-001` | current | §13.2 product/side rule | Fill | total cost + rule ID | product/side fixture |
+| `UC-COST-002` | current | §13.2 effective-time rule | Fill | schedule version + effective time | date-boundary fixture |
+| `UC-COST-003` | current | §13.3 cost-aware clipping | Fill | requested/dealt + clip reason | cash-limit fixture |
+| `UC-COST-004` | current | §13.3 exact-rule failure | 없음 | structured failure | no-fallback fixture |
+| `UC-CLOSED-LOOP-001` | current | §13.4 actual feedback | Ledger | account snapshot | next-decision fixture |
+| `UC-SCALE-001` | current | §13.5 compiled batch | Fill batch | per-name diagnostics | batch/single-name parity |
+| `UC-ACADEMIC-001` | future | §13.6 academic listing | hypothetical Fill | profile identity | design characterization |
+| `UC-FUTURE-001` | future | §13.6 settlement/expiry | cash/position delta | settlement evidence | design characterization |
+| `UC-PERP-001` | future | §13.6 funding | cash delta | funding evidence | design characterization |
+| `UC-CASHFLOW-001` | future | §13.6 cash-flow attribution | Ledger | category + source | design characterization |
+
+`future` 행은 current acceptance가 아니다. 현재 구조가 해당 flow를 막지 않는지 설명하는 설계
+characterization이며 구현 완료를 주장하지 않는다. Test와 fixture를 만들 때도 같은 use-case ID를 사용해
+PRD → architecture → validation의 연결을 유지한다.
+
 ---
 
 ## 2. 멘탈 모델
@@ -97,6 +123,44 @@ clock의 위치에 따라 달라진다.
 상태**를 view를 통해 읽는다. 초안과 달리 flow가 snapshot을 조립해 넘기지 않고, judge가 view로
 필요한 시점에 조회한다.
 
+### 2.4 Instrument, Exchange와 경제적 cash flow
+
+네 역할을 섞지 않는다.
+
+| 역할 | 답하는 질문 | 예 |
+|---|---|---|
+| Instrument | 이것은 어떤 경제적 계약인가 | Equity, ETF, Future, PerpetualSwap, Index |
+| Exchange / execution venue | 이 venue/profile에서 어떻게 거래되는가 | listing, tradability, lot, fee/tax policy |
+| Clock / flow | 언제 계산하고 commit하는가 | EXECUTION, SETTLEMENT, FUNDING, EXPIRY |
+| Ledger | 실제로 무엇이 바뀌었는가 | Fill, cash flow, position delta, NAV |
+
+Instrument는 immutable contract와 static semantics를 제공한다. Exchange는 instrument를 listing으로 등록하고
+venue/profile/effective-time에 따른 execution policy를 적용한다. 시변 가격, funding rate와 valuation input은
+clock-bound view에서 읽는다. 같은 Index도 일반 profile에서는 tracking-only이고 명시적 academic profile에
+등록되면 hypothetical execution 대상이 될 수 있다.
+
+Architecture의 concrete type 후보는 다음과 같다. PRD가 이 hierarchy를 강제하지 않으며, stock/ETF 밖의
+항목은 future extension이다.
+
+```text
+Instrument
+├── Equity
+│   └── ETF
+├── Index · Factor · Cash · Bond · Option
+└── MarginedContract
+    ├── Future
+    │   ├── FxFuture · CommodityFuture · EquityIndexFuture
+    └── PerpetualSwap
+        └── CryptoPerpetual
+```
+
+`Future`만 expiry와 final settlement를 가지며 `PerpetualSwap`에는 expiry field 자체가 없다. 둘의 공통
+부모는 contract multiplier, settlement currency와 notional/PnL convention을 제공한다. 금리, 배당수익률,
+storage/convenience yield와 funding rate는 시변 observation이므로 Instrument instance에 저장하지 않는다.
+
+`Equities`, `Futures` 같은 복수형은 새로운 금융계약 subtype이 아니라 `InstrumentSet[T]` 또는 registry
+view다. 개별 객체를 보존하면서 registration과 instrument-axis compilation을 묶는 편의 경계일 뿐이다.
+
 ---
 
 ## 3. 반복 원자
@@ -118,7 +182,9 @@ clock의 위치에 따라 달라진다.
 | `MARK` | 15:30 | `ExecutionView` | valuation | NAV | mark |
 | `MONITOR` | 15:30 | `MonitorView` | constraint evaluation | findings | **건드리지 않음** |
 | `FIT`† | 학습 시점 | `FitView` | model.fit | FittedState | Memory (proposed → commit) |
-| `FUNDING`* | 정산 시점 | `ExecutionView` | carry 계산 | cash delta | apply |
+| `SETTLEMENT`* | 정산 시점 | `ExecutionView` | variation/coupon/corporate cash flow | cash/position delta | apply |
+| `FUNDING`* | funding 시점 | `ExecutionView` | perpetual funding | cash delta | apply |
+| `EXPIRY`* | 만기 시점 | `ExecutionView` | final settlement | cash/position delta | apply |
 
 cutoff 열이 사라진 것에 주의한다. 무엇을 볼 수 있는지는 clock 위치와 각 관측치의 `available_at`이
 결정하므로 event마다 명시할 값이 아니다. 일봉의 `available_at`이 15:30이면 09:00 `DECISION`은 당일
@@ -131,7 +197,9 @@ cutoff 열이 사라진 것에 주의한다. 무엇을 볼 수 있는지는 cloc
 `priority`는 `DECISION`보다 앞선다. §17 G3 참조 — view 모델에서는 label의 `available_at`을
 `event_time + horizon`으로 선언하면 purge/embargo가 별도 장치 없이 성립한다.
 
-\* `FUNDING`은 perpetual 확장 시 추가되는 event다. §16 참조.
+\* `SETTLEMENT`·`FUNDING`·`EXPIRY`는 future extension characterization이다. Exchange가 Clock을 직접
+조작하지 않는다. Instrument registration 시 필요한 event specification을 반환하고 engine/flow가 Clock에
+callback을 등록한다. §13.6과 §16 참조.
 
 새 event를 추가할 때 이 표의 행을 채우면 설계가 끝난다.
 
@@ -274,8 +342,8 @@ def on_monitor(ev: Event) -> None:
 **Exchange와 Executor는 다른 것이다.**
 
 ```
-Exchange   주문 집합이 얼마나 체결되나       순수 함수. ④ judge. 시간 개념 없음.
-Executor   그 집합을 언제 어떻게 넘기나      sub-flow. ② flow. 계산하지 않음.
+Exchange   이 시각·venue/profile에서 얼마나 체결되나   상태를 쓰지 않는 계산. ④ judge.
+Executor   그 집합을 언제 어떤 event로 넘기나          sub-flow. ② flow. 계산하지 않음.
 ```
 
 qlibx의 기본 단위는 **decision time의 횡단면**이다. 3000종목 일봉은 같은 순간에 함께 확정되므로
@@ -283,29 +351,40 @@ qlibx의 기본 단위는 **decision time의 횡단면**이다. 3000종목 일�
 
 ```
 on_decision (flow)
-    │ executor.execute(orders, view, sink)
+    │ specs = executor.plan(orders, decision_ts)
+    │ flow가 specs를 Clock에 등록       ← orders는 event payload, 숨은 pending store 없음
     ▼
-┌──────────────────────────────────────────────────┐
-│ Executor (sub-flow)                               │
-│   q, v = view.quotes(), view.volumes()  ──────────┼→ ③ view
-│   fills, diags = exchange.match_batch(  ──────────┼→ ④ judge
-│       orders, q, v, sink.cash()                   │
-│   )                                               │
-│   sink.apply_batch(fills)               ──────────┼→ ⑤ ledger (좁은 port)
-│   return ExecutionResult(fills, diags)            │
-└──────────────────────────────────────────────────┘
+on_execution(event) (flow)
+    │ view = gate.execution(event.ts)
+    ▼
+┌────────────────────────────────────────────────────────┐
+│ Executor (sub-flow)                                     │
+│   q, v = view.quotes(), view.volumes()  ────────────────┼→ ③ view
+│   fills, diags = exchange.match_batch(  ────────────────┼→ ④ judge
+│       at=event.ts, orders=event.orders,                 │
+│       instruments=compiled_terms, quotes=q, volumes=v, │
+│       cash=sink.cash(),                                 │
+│   )                                                     │
+│   sink.apply_batch(fills)                     ──────────┼→ ⑤ ledger (좁은 port)
+│   return ExecutionResult(fills, diags)                  │
+└────────────────────────────────────────────────────────┘
 ```
 
 ### 계약
 
 ```python
 class Executor(Protocol):
-    def execute(self, orders: Orders, view: ExecutionView,
+    def plan(self, orders: Orders, decision_ts: Timestamp) -> list[ExecutionSpec]: ...
+    def execute(self, event: ExecutionEvent, view: ExecutionView,
                 sink: FillSink) -> ExecutionResult: ...
 ```
 
 `Orders`는 단건 목록이 아니라 instrument축 배열 묶음이다. `match_batch`는 §8의 clipping 순서를
 elementwise 연산으로 수행한다.
+
+여러 venue가 지원되면 Executor가 stable venue order로 partition하고 shared cash, currency와 collateral
+semantics를 명시해야 한다. 현재 stock/ETF scope는 하나의 execution profile로 시작한다. Venue 순서에 따라
+공유 현금 결과가 달라질 수 있으므로 이 규칙 없이 병렬 실행하지 않는다.
 
 교체 지점은 유지하되 현재 구현은 하나다. 분단위 체결은 요구되지 않는 것으로 확인되었으므로
 `MinuteExecutor`는 계획에 넣지 않는다. 필요해지면 같은 계약 뒤에 추가한다 —
@@ -377,8 +456,11 @@ qlib은 `exchange.deal_order(order, trade_account=account)`로 **Exchange가 acc
 qlibx는 분리한다.
 
 ```python
-fills, diags = exchange.match_batch(orders, quotes, volumes, cash)  # 순수
-sink.apply_batch(fills)                                             # flow가 반영
+fills, diags = exchange.match_batch(
+    at=event.ts, orders=orders, instruments=compiled_terms,
+    quotes=quotes, volumes=volumes, cash=cash,
+)                                                                    # explicit input의 순수 계산
+sink.apply_batch(fills)                                               # flow가 반영
 ```
 
 얻는 것: (1) account 없이 체결 산술을 테스트할 수 있다, (2) 같은 주문 집합을 여러 시나리오로 돌릴
@@ -445,7 +527,7 @@ data registration 단계의 검증이 §1 설계 명제를 지탱하는 단일 �
 | view | 묶는 facade | 제외 |
 |---|---|---|
 | `DecisionView` | panel(signal/price), universe, benchmark, tradability, positions, cash, 직전 execution result, memory | **compliance dataset** |
-| `ExecutionView` | quote/volume, lot, cost profile, positions, cash | signal panel |
+| `ExecutionView` | quote/volume, positions, cash, 필요 시 funding/settlement observation | signal panel |
 | `MonitorView` | account snapshot, compliance dataset | **signal panel, memory** |
 | `FitView` | panel(feature/label), universe | positions, cash |
 
@@ -535,16 +617,17 @@ construct(weights, view)        -> (PhysicalTarget,  Diagnostics)
 convert(target, view)           -> (list[Order],     ConversionLog)
 validate(orders, view)          -> (Verdict,         list[Finding])
 model.fit(view)                 -> (FittedState,     SelectionEvidence)
-exchange.match_batch(orders, quotes, volumes, cash)
-                                -> (Fills,          FillDiagnostics)
+exchange.match_batch(at, orders, instruments, quotes, volumes, cash)
+                                -> (Fills,           FillDiagnostics)
 ```
 
 첫 인자는 초안의 snapshot이 아니라 **clock에 묶인 조회 창구**다(§7). Judge는 필요한 시점에
 필요한 만큼 조회하며, view가 접근을 기록해 lineage가 된다.
 
-`exchange.match_batch`만 view를 받지 않는다. 주문 집합과 시세·거래량·현금만으로 결정되는 순수
-산술이고, 시간 개념이 없기 때문이다(§6). 인자는 instrument축 배열이며 clipping이 elementwise로
-수행된다.
+`exchange.match_batch`만 view를 받지 않는다. 필요한 관측값은 Executor가 view에서 꺼내고, effective-dated
+policy를 고르기 위한 event time은 `at`으로 명시한다. Exchange는 wall clock을 읽지 않으며 같은 frozen
+instrument/exchange config, `at`과 배열 입력에서 같은 결과를 낸다. 인자는 instrument축 배열이며 clipping이
+elementwise로 수행된다.
 
 > **미완 (§17)** — `alpha`의 `ProposedMemory` 반환(G1), `ensemble`(G5), `model.fit`(G3) 계약은
 > shape만 확정되었고 세부는 미설계다.
@@ -552,7 +635,54 @@ exchange.match_batch(orders, quotes, volumes, cash)
 모두 `(result, diagnostics)` 쌍을 반환한다 (I5). 이 layer 전체가 상태를 갖지 않으므로 교체
 가능하며, PRD §13.4의 public extension point 대부분이 여기에 있다.
 
-### exchange.match — 차용의 핵심
+### Instrument와 Exchange registration
+
+Config/registration 경계에서는 concrete Pydantic model을 사용한다. Generic `kind + parameters` bag으로
+상품을 만들지 않는다.
+
+```python
+engine.add_exchange(KrxExchange(exchange_id="XKRX", cost_schedule=krx_schedule))
+engine.add_instrument(samsung)
+engine.add_instrument(kodex_etf)
+```
+
+`engine.add_instrument`는 stable ID와 concrete type을 registry에 넣고 `venue_id`의 Exchange에 listing을
+등록한다. Exchange는 instrument compatibility와 required policy coverage를 검증한다. Tracking-only Index나
+Factor는 명시적인 executable listing이 없으면 order를 거부한다. Future extension의 `AcademicExchange`는
+동일 객체를 hypothetical listing으로 받을 수 있지만 result에 profile identity를 남긴다.
+
+Instrument와 Exchange model은 생성 시 한 번 검증되고 frozen된다. Engine build 단계는 lot, multiplier,
+currency, exact cost selector처럼 hot path에 필요한 static term을 stable instrument index의 array로 compile한다.
+3,000종목 batch의 fill마다 Pydantic model을 다시 만들지 않는다.
+
+Future extension에서 Exchange는 registration 결과로 lifecycle `EventSpec`을 반환할 수 있다. Flow가 이를
+Clock에 등록하며 Exchange가 Clock이나 Ledger를 직접 보유하거나 변경하지 않는다.
+
+### Transaction cost resolution
+
+거래비용 계산의 진입점은 Exchange다. Exchange subclass는 자기 market에 필요한 schedule schema를 갖는다.
+
+```text
+KrxExchange       effective date × exact product type × BUY/SELL
+AcademicExchange profile-defined hypothetical cost
+CryptoExchange    maker/taker × account tier                 (future)
+```
+
+연도별 rate 때문에 Exchange subclass를 늘리지 않는다. `KrxExchange2024`, `KrxExchange2025` 대신 하나의
+`KrxExchange`가 versioned effective-dated schedule을 가진다. Cost entry는 exact concrete product selector로
+해결하며 ETF가 Equity의 subtype이라는 이유로 Equity rule을 상속하지 않는다. ETF 0bp도 명시적인 rule이다.
+Required rule이 없으면 structured unsupported failure를 반환하고 Fill과 Ledger mutation을 만들지 않는다.
+
+공개 `CostContext`는 두지 않는다. Order, Instrument/compiled terms, fill quantity/price와 event time이 이미
+입력이다. Mandatory `CostBreakdown`도 두지 않는다. Fill은 최소한 `total_cost`, applied rule ID와 schedule
+version을 보존하고, tax/commission attribution 요구가 생기면 optional cost line을 추가한다.
+
+Cash clipping과 final Fill은 같은 pure cost calculator를 사용한다. Candidate quantity의 비용을 계산해 현금을
+검사하고, clipped quantity로 다시 계산해 final Fill에 기록한다. 별도의 estimated-cost 구현을 두지 않는다.
+Broker/account commission은 후속 account overlay가 될 수 있다. Current profile에서는 Exchange instance를
+venue + execution profile로 보고 함께 freeze한다.
+
+### exchange.match_batch — 차용의 핵심
 
 qlib `_calc_trade_info_by_order`(`backtest/exchange.py` L859-950)의 clipping 순서를 이식한다.
 
@@ -575,8 +705,10 @@ L904의 "마지막 매도에서 lot 반올림 생략"은 생략하면 잔여 수
 **필수 개조:** qlib은 각 clip 지점에서 `logger.debug`만 남기고 버린다 (L830, L917, L928, L936). qlibx는
 구조화된 `FillDiagnostic`을 반환값에 싣는다 (PRD §11.3, §4.6). 산술은 그대로, 진단만 추가한다.
 
-Cost model과 fill model은 nautilus `backtest/models/{fee,fill}.pyx` 방식으로 교체 가능한 인터페이스
-뒤에 둔다. PRD §11.2가 profile별 cost/volume policy 명시를 요구하기 때문이다.
+Nautilus `backtest/models/{fee,fill}.pyx`에서는 `order`, `fill_qty`, `fill_px`, `instrument`를 직접 전달하는
+교체 가능한 계산 경계를 참고한다. qlibx의 public entrypoint는 Exchange의
+`calculate_transaction_cost(...)`이며 내부 calculator protocol은 재사용이 실제로 필요할 때만 추출한다.
+Fill price model은 별도 교체 경계로 유지해 slippage/impact를 fee/tax와 이중 집계하지 않는다.
 
 ### convert — 전면 재작성
 
@@ -617,14 +749,21 @@ PRD §10.8(best-effort adjustment)과 §10.9(independent validation)는 다른 �
 
 ```python
 class Ledger:
-    def apply(self, fill: Fill) -> None: ...            # 상태 변경 ①
-    def mark(self, prices: Mapping[str, Price]) -> None: ...  # 상태 변경 ②
+    def apply_fills(self, fills: Fills) -> None: ...
+    def apply_cashflows(self, cashflows: CashFlows) -> None: ...       # future lifecycle
+    def apply_position_deltas(self, deltas: PositionDeltas) -> None: ...  # future lifecycle
+    def mark(self, prices: Mapping[str, Price]) -> None: ...
     def snapshot(self, as_of: Timestamp) -> AccountSnapshot: ...  # 불변 복사본
     def fill_sink(self) -> FillSink: ...
 ```
 
-**상태를 바꾸는 방법이 둘뿐이다.** 체결이 들어오거나, 평가하거나. Target weight를 넣어 상태를 바꾸는
-경로는 존재하지 않는다 — PRD §4.3이 API 형태로 박혀 있다.
+Current stock/ETF path는 Fill과 mark만 사용한다. Future extension은 funding, variation margin, expiry와
+corporate action을 Fill로 위장하지 않고 cash/position delta로 commit한다. Target weight를 넣어 상태를
+바꾸는 경로는 존재하지 않는다 — PRD §4.3이 API 형태로 박혀 있다.
+
+Transaction cost는 Fill에 귀속된다. Funding과 variation margin은 거래가 없어도 발생하므로 lifecycle cash
+flow다. Flow만 위 mutation method를 호출하고 Exchange는 계산 결과만 반환한다. 다음 decision view는 commit된
+cash/NAV/position을 읽는다.
 
 `snapshot()`은 불변 객체를 반환한다. Monitoring이 이를 들고 무엇을 하든 ledger는 변하지 않는다.
 
@@ -726,8 +865,10 @@ Q2. 스키마를 남이 읽어야 하는가?
 | pydantic | dataclass / 일반 클래스 |
 |---|---|
 | `FrozenConfig` | `Event`, `Handler` |
+| Concrete `Instrument`, Exchange config, cost schedule entry | compiled instrument arrays |
 | `ArtifactEnvelope`, `DependencyEdge` | `Context` 3종 |
 | `StageError` (§7.5) | `Order`, `Fill` |
+| Instrument/Exchange registration | `CashFlow`, `PositionDelta`, diagnostic 행 |
 | `ConstraintDeclaration` (§7.11) | `Diagnostic` 행 |
 | `CapabilityRequirement` (§7.3) | `Position`, `Account` |
 | `DatasetRegistration` (§7.2) | `AccountSnapshot` |
@@ -735,6 +876,10 @@ Q2. 스키마를 남이 읽어야 하는가?
 | `PreparedDecision`, `OMSResult` (§14) | |
 
 pydantic 대상은 전부 **저빈도 + 경계**, dataclass 대상은 전부 **고빈도 + 내부**다.
+
+`InstrumentSet[T]`도 registration boundary에서는 전체 collection을 한 번 검증하지만, execution 전에는 stable
+instrument index와 typed array로 compile한다. `Order`, `Fill`, `CashFlow`를 만들 때 concrete Instrument나
+cost schedule을 다시 Pydantic validation하지 않는다. 이것이 `UC-SCALE-001`의 architecture mechanism이다.
 
 ### 기본 설정
 
@@ -849,86 +994,100 @@ qlib의 `common_infra.get("trade_account")` 문자열 키 서비스 로케이터
 
 ---
 
-## 13. Walkthrough
+## 13. PRD use-case walkthrough
 
-기본 프로파일: 일단위 데이터, decision은 t-1까지만 관측, execution은 t일 종가.
+이 절은 PRD의 stable use-case ID를 architecture flow에 연결한다. 숫자는 법령이나 시장 관행을 주장하기
+위한 값이 아니라, 구현이 같은 입력에 같은 결과를 내는지 검증하기 위한 **결정론적 fixture**다.
 
-```
-데이터   12/29 close: A=10,000  B=20,000
-        01/02 close: A=10,200  B=19,800
-초기현금 10,000,000   수수료 0.015%   lot 10주   제약: 단일종목 50% 이하
-```
+### 13.1 공통 등록과 fixture
 
-### 등록
+```text
+InstrumentRegistry
+  005930.XKRX -> Equity
+  069500.XKRX -> ETF
 
-```python
-clock.set_timer("DECISION", 매월 첫 거래일 09:00, flow.on_decision, priority=10)
-clock.set_timer("MARK",     매 거래일     15:30, flow.on_mark,     priority=20)
-clock.set_timer("MONITOR",  매 거래일     15:30, flow.on_monitor,  priority=30)
-```
-
-### 2024-01-02 09:00 — DECISION
-
-```
-clock = 01/02 09:00
-view  = DecisionView(clock)
-      → 01/02 일봉의 available_at = 15:30 이므로 조회되지 않는다
-
-alpha      → {A: 0.5, B: 0.5}
-construct  → A 50%, B 50%  (현재 전량 현금)
-convert    → t-1 가격으로 수량 산정
-             A: 5,000,000 / 10,000 = 500주
-             B: 5,000,000 / 20,000 = 250주
-validate   → 통과
+KrxExchange
+  2024 Equity BUY  : commission 1.5bp, tax  0bp
+  2024 Equity SELL : commission 1.5bp, tax 18bp
+  2024 ETF BUY/SELL: commission 1.5bp, tax  0bp
+  2025 Equity BUY  : commission 1.5bp, tax  0bp
+  2025 Equity SELL : commission 1.5bp, tax 15bp
+  2025 ETF BUY/SELL: commission 1.5bp, tax  0bp
 ```
 
-### EXECUTION (DailyCloseExecutor)
+각 행에는 `rule_id`와 `schedule_version`이 있다. Exchange가 Instrument의 구체 타입, side, event
+timestamp로 정확한 행을 고르고, build 단계가 Instrument와 schedule을 dense array로 compile한다.
 
-```
-A: 500 × 10,200 = 5,100,000  + 수수료 765
-   현금 10,000,000 → 4,899,235          ✓ 전량 체결
+### 13.2 상품·side·유효일 비용 — UC-COST-001, UC-COST-002
 
-B: 요청 250주 = 4,950,000 + 수수료 > 가용 현금 4,899,235
-   최대 = 4,899,235 / (19,800 × 1.00015) ≈ 247.4주
-   lot 10주 반올림 → 240주
-   240 × 19,800 = 4,752,000 + 수수료 713
-   현금 4,899,235 → 146,522             ⚠ 240주만 체결
+2025년에 7,000,000원을 거래하면 다음 결과가 나온다.
 
-   FillDiagnostic(symbol="B", requested=250, dealt=240,
-                  reason="CASH_LIMIT", unfilled=10,
-                  clip_stage="cash_then_lot_rounding")
+```text
+Equity BUY  :  7,000,000 × 1.5bp          =  1,050
+Equity SELL :  7,000,000 × (1.5 + 15)bp   = 11,550
+ETF BUY     :  7,000,000 × 1.5bp          =  1,050
+ETF SELL    :  7,000,000 × 1.5bp          =  1,050
 ```
 
-주문 순서가 결과를 바꾼다 — A가 먼저 현금을 소진해 B가 잘렸다. 이것이 §8 `convert`가 전 주문
-진단을 보존해야 하는 이유다.
+같은 Equity SELL을 2024 timestamp로 평가하면 `(1.5 + 18)bp = 13,650`이다. Instrument는 자신이
+Equity인지 ETF인지 알려줄 뿐 세율을 소유하지 않는다. Exchange가 timestamp와 side까지 포함해
+schedule을 해석하므로 같은 상품도 연도와 매매 방향에 따라 비용이 달라진다.
 
-### 15:30 — MARK (priority 20)
+### 13.3 cash clipping과 exact rule — UC-COST-003, UC-COST-004
 
-```
-A 500 × 10,200 = 5,100,000
-B 240 × 19,800 = 4,752,000
-현금             =   146,522
-NAV             = 9,998,522        검산: 10,000,000 - 765 - 713 ✓
-```
+가용 현금이 7,000,500원이고 가격 70,000원인 ETF를 100주 BUY한다고 하자. 명목금액만 보면 주문이
+들어가지만 비용까지 포함하면 `7,001,050 > 7,000,500`이다. lot이 10주라면 동일한 순수 비용 계산기를
+사용해 90주로 줄인다.
 
-### 15:30 — MONITOR (priority 30)
-
-```
-A 비중 = 5,100,000 / 9,998,522 = 51.01%  >  50%
-
-ConstraintFinding(
-    metric="max_single_name_weight",
-    measured=0.5101, bound=0.50, excess=0.0101,
-    severity="WARNING",
-    classification="EXECUTION_INDUCED",     # 가격 drift가 아니라 체결 결과
-    lineage=[decision_id, order_id_B, fill_id_B],
-)
+```text
+candidate check : 100 × 70,000 + 1,050 = 7,001,050  -> reject
+clipped order   :  90 × 70,000 +   945 = 6,300,945  -> accept
+final Fill      : quantity=90, transaction_cost=945
 ```
 
-의도한 비중은 50%였다. B가 현금 부족으로 덜 체결되어 A 비중이 상승했다. Finding은 기록만 되고 이전
-체결을 rollback하지 않는다 (PRD §4.3).
+candidate check와 최종 Fill이 서로 다른 계산기를 쓰면 closed loop의 cash가 어긋난다. 따라서 둘은
+같은 `calculate_transaction_cost(...)`를 호출한다. 반대로 ETF exact rule이 없다면 Equity rule로
+추측하지 않고 명시적으로 실패하며, Fill과 Ledger mutation도 만들지 않는다.
 
-**이 walkthrough가 첫 통합 테스트의 기대값이다.**
+### 13.4 실제 체결이 다음 판단으로 돌아오는 loop — UC-CLOSED-LOOP-001
+
+```text
+DECISION D1
+  -> target/order
+  -> EXECUTION E1: exact cost로 cash clipping, Fill 생성
+  -> LEDGER COMMIT: position, cash, transaction cost 반영
+  -> MARK: valuation과 NAV 갱신
+  -> DECISION D2: D1의 목표값이 아니라 E1 이후 actual position/cash/NAV를 읽음
+```
+
+예를 들어 위 ETF 주문은 목표 100주가 아니라 실제 90주와 남은 현금 699,555원이 다음 DecisionView에
+보인다. 이것이 단순 수익률 계산과 closed-loop backtest의 차이다.
+
+### 13.5 3,000종목 cross-section — UC-SCALE-001
+
+Pydantic Instrument는 등록 시 한 번 검증한다. 그 뒤 build 단계가 stable instrument index, lot size,
+product selector와 cost schedule lookup key를 배열로 compile한다. EXECUTION 한 번이 3,000개 주문을
+batch로 처리하고, hot loop는 Pydantic 모델을 다시 만들지 않는다. 결과는 stable order의 Fill과
+FillDiagnostic으로 돌아가므로 같은 config와 data에서 event 순서와 결과가 재현된다.
+
+### 13.6 미래 확장의 design characterization
+
+다음 항목은 **현재 제품 acceptance가 아니라 미래 설계를 구속하는 characterization**이다.
+
+- **UC-ACADEMIC-001:** Index나 Factor는 기본 exchange에서 tracking-only다. `AcademicExchange`가 해당
+  Instrument를 명시적으로 listing한 경우에만 가상 체결할 수 있다. tradability는 Instrument의 본성이
+  아니라 Instrument와 Exchange의 관계다.
+- **UC-FUTURE-001:** multiplier 250,000인 Future 1계약의 settlement price가 350에서 352로 움직이면
+  variation margin `+500,000`이 lifecycle cash flow로 Ledger에 반영된다. expiry event는 최종 정산과
+  포지션 종료를 유발한다.
+- **UC-PERP-001:** notional 50,000인 CryptoPerpetual long 1계약에 `+1bp` funding이 적용되면 long은
+  `-5` funding cash flow를 낸다. PerpetualSwap에는 expiry field와 expiry event가 없다.
+- **UC-CASHFLOW-001:** transaction cost는 Fill의 비용이고, funding과 variation margin은 lifecycle cash
+  flow다. 둘 다 cash/NAV에 반영되지만 같은 집계 항목으로 섞지 않으며 다음 decision에서 actual state로
+  관측된다.
+
+통합 테스트와 fixture 이름에 이 use-case ID를 그대로 사용하면 PRD 요구, architecture flow, 검증
+증거 사이의 추적성을 유지할 수 있다.
 
 ---
 
@@ -1095,7 +1254,7 @@ vnpy 통계는 **계산식은 🟢이나 구조는 🔴**이다. 계산식을 �
 ⑤ long-short 실행 회계    담보 · 수익률 분모 · 차입비용 (§17 G4)
 ⑥ envelope / lineage     fingerprint, dependency graph, 원자적 발행
 ⑥ production outbox      PRD §14
-  instrument capability   숏 가능성, 마진, carry (§16)
+  instrument/exchange semantics   계약조건, listing, 비용, lifecycle (§2.4·§16)
 ```
 
 계산은 전부 🟢/🔵이고 경계는 전부 ⚪이다. 이것이 §1 설계 명제의 실증이며, **구축 순서에서 ⚪를 뒤로
@@ -1122,12 +1281,12 @@ nautilus_trader  LGPL-3.0   🔵 코드 복사 금지
 
 | # | 단계 | 성격 | 비고 |
 |---|---|---|---|
-| 1 | 도메인 객체 (instrument축 배열) | 🟢 | vnpy 필드 + qlib amount/deal_amount + Status enum |
-| 2 | **exchange.match_batch + 진단** | 🟢 | 가장 검증이 중요. §15.1 fixture parity 먼저 |
-| 3 | ledger (position/account/PnL) | 🟢 | qlib 산술 + vnpy PnL 분해 + TradeLedger(§17 G2) |
+| 1 | 구체 Instrument/Exchange 등록 + instrument축 compiler | 🟢⚪ | Pydantic은 등록 시 검증, hot path는 stable index와 배열. UC-SCALE-001 |
+| 2 | **exchange.match_batch + exact effective cost + 진단** | 🟢⚪ | §15.1 fixture parity. UC-COST-001~004 |
+| 3 | ledger (fill/position/account/PnL) | 🟢 | qlib 산술 + vnpy PnL 분해 + TradeLedger(§17 G2). lifecycle cash-flow port는 예약. UC-CLOSED-LOOP-001 |
 | 4 | kernel (clock/event/queue) | 🔵 | 20~30줄. 병렬 clock 검증 |
 | 5 | view (available_at 질의 + 횡단면 패널) | 🔵⚪ | 시간 경계는 🔵, 접근 축은 ⚪ |
-| 6 | flow + convert + executor | ⚪🟢 | §13 walkthrough가 통합 테스트 |
+| 6 | flow + convert + executor | ⚪🟢 | §13 use-case walkthrough가 통합 테스트 |
 | 7 | validate | 🔵⚪ | |
 | 8 | evidence (envelope/catalog) | ⚪ | |
 | 9 | analysis plugin | 🔵🟢 | |
@@ -1151,8 +1310,13 @@ fixture 대조**로 수행한다.
    매수, 보유 초과 매도, 마지막 매도 lot 생략(L904), 수수료 미달 취소, `trade_val <= 1e-5`.
 2. Fixture는 입력(주문·시세·거래량·현금·lot·cost)과 기대 출력(deal_amount, trade_val, cost)을
    명시하며, 근거가 된 qlib 위치를 주석으로 남긴다.
-3. qlibx `exchange.match`가 같은 값을 내는지 검증하고, 추가로 반환된 `FillDiagnostic`이 어느
+3. qlibx `exchange.match_batch`가 같은 값을 내는지 검증하고, 추가로 반환된 `FillDiagnostic`이 어느
    단계에서 잘렸는지 정확히 지목하는지 확인한다.
+4. `UC-COST-001`~`004` fixture로 exact product type, BUY/SELL 비대칭, effective date 경계, 비용을
+   포함한 cash clipping, 명시적 0 rule, 금지된 상위 타입 fallback을 검증한다. candidate와 final Fill의
+   transaction cost가 동일한 순수 계산기에서 나온다는 것도 확인한다.
+5. `UC-SCALE-001` fixture는 scalar reference와 3,000종목 batch 결과가 일치하고, 실행 중 Instrument
+   Pydantic 모델을 새로 만들지 않으며, 입력 순서를 고정했을 때 Fill과 진단 순서도 같음을 검증한다.
 
 Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기대값**이다. 따라서 qlib 설치가
 필요하지 않고, 대신 각 fixture가 어느 코드 경로를 근거로 하는지 추적 가능해야 한다.
@@ -1165,18 +1329,18 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 |---|---|---|
 | ~~O1~~ | ~~`pyqlib` 의존성 위치~~ | **해결.** `pyproject.toml`에서 완전히 제거. runtime/dev 어느 group에도 두지 않는다. 결과로 in-process parity oracle을 쓸 수 없으므로 §15.1 정적 fixture 대조로 대체한다. 차용 대상 qlib 소스는 `references/`에 보존되어야 한다 (O8) |
 | ~~O2~~ | ~~polars 도입~~ | **기각.** 우리 접근 축(횡단면 batch)에서 이득이 크지 않다고 판단. 저장 Parquet / 질의 duckdb / 계산·경계 pandas로 간다. 대가로 vnpy signal 연산 이식이 복사가 아니라 재작성이 된다 (§14) |
-| ~~O3~~ | ~~matched capitalization 폐기~~ | **해결.** PRD §11.4~11.7을 §7.12 instrument capability declaration으로 대체 완료. Position direction은 engine 고정 속성이 아니라 instrument 선언이다 |
+| ~~O3~~ | ~~matched capitalization 폐기~~ | **해결.** Position direction은 matched-capitalization 우회가 아니라 concrete Instrument semantics와 execution policy가 함께 결정한다. Architecture가 모델과 policy resolution을 소유하며 PRD는 특정 capability 필드를 강제하지 않는다 |
 | ~~O9~~ | ~~long-short 수익률 분모~~ | **해결.** dollar-neutral book은 **gross 기준**으로 수익률을 계산한다. Long 100 / short 100이면 분모는 200이다. NAV 기준은 leverage에 따라 수익률이 달라져 alpha 비교가 불가능해지므로 채택하지 않는다. §17 G4의 나머지 항목(담보 모델, 차입 비용, locate)은 여전히 미해결 |
-| ~~O4~~ | ~~hypothetical vs real short~~ | **해결.** `long_only` / `hypothetical_short` / `real_short` 세 값으로 instrument가 선언. 미선언은 `long_only`. hypothetical result는 execution profile에서 거부되고 artifact에 표시된다 (PRD §7.12) |
+| ~~O4~~ | ~~hypothetical vs real short~~ | **해결.** workflow가 `long_only` / `hypothetical_short` / `real_short` semantics를 명시적으로 resolve한다. 미해결은 `long_only`이며, hypothetical result는 실제 execution profile에서 거부되고 artifact에 표시된다. 이를 Instrument의 단일 고정 필드로 제한하지 않는다 |
 | O12 | **패키지명 `qlibx` → `vqar`** | **확정, 실행 보류.** vqar = vibe quant alpha research. 급하지 않고 O7(PRD 본문 정리)과 함께 하면 diff가 섞이므로 최종 단계로 미룬다. 범위: 배포/import/CLI 이름, `src/qlibx/`, 문서 파일명과 obsidian 링크, `.agent/project.yaml`의 canonical document 경로, `.gitignore`의 `.qlibx/`·`qlibx-research/`, 그리고 **PRD §6.1의 normative skill entrypoint path**. 착수 전 PyPI 가용성 확인 필요. `.agent/plans/completed/`는 당시 명칭 기록이므로 소급 변경하지 않는다 |
-| O5 | crypto perpetual 확장 | **보류.** 현재 범위 밖 (PRD §5.7). `real_short`의 담보·차입 비용도 함께 보류. 도입 시 §7.12 선언 항목을 늘리는 형태여야 하며 engine 구조 변경을 요구해서는 안 된다. funding은 `FUNDING` timer로 §3 원자에 편입 |
+| O5 | margined contract 확장 | **보류. 설계 characterization 확정.** 현재 범위 밖 (PRD §5.7). 공통 `MarginedContract` 아래 만기·최종정산이 있는 `Future`와 만기 필드가 없는 `PerpetualSwap`을 형제 타입으로 둔다. Exchange가 settlement/funding/expiry callback을 등록하고 Ledger가 lifecycle cash flow를 반영한다. `real_short`의 담보·차입 비용은 별도 후속 결정이다 |
 | ~~O11~~ | ~~qlib을 runtime backend로 채택~~ | **기각.** decision clock이 데이터 인덱스에 묶여 있어 4개 clock 분리가 불가능하고, 저장 최소 단위에 `available_at`이 없으며, 실험 단위 pickle/MLflow가 portable artifact를 대체하지 못한다. 모델 35개를 싣는 배포 형태도 PRD §5.3·§2.7의 소유 경계와 어긋난다. 상세는 [[why-not-qlib-as-a-backend]] |
 | ~~O10~~ | ~~nautilus를 execution backend로 채택~~ | **기각.** 기본 작업 단위가 다르다 — instrument별 event 대 decision-time 횡단면. PRD §8~§10·§12에 대응물 없음. v1→v2 전환 중. 3000종목 미검증. 상세와 재검토 조건은 [[why-not-nautilus-as-a-dependency]] |
 | O6 | pub/sub 도입 시점 | **보류. 근거 확정.** 한 event의 수신자가 2개뿐이고 이름을 안다. 중간층은 호출 그래프를 감추고 배달 순서를 따로 설계해야 I7이 유지된다. 도입 조건은 (a) 사용자 확장 지점 개방 (b) 한 event 수신자 증가 (c) 전 event 로깅/replay. 전환 비용은 발행 지점 1곳 교체 + 구독 등록이며 judge/ledger 계약은 불변이므로 미룰 수 있다 |
 | O7 | PRD 본문 정리 | §0.3 해석 규칙으로 처리 중. Qlib 전제 서술 195곳의 정식 개정은 별도 revision |
 | ~~O8~~ | ~~qlib 소스 보존~~ | **해결.** `references/qlib`을 upstream `main@79633dd` 전체 트리(619 paths)로 교체. 기존 부분 스냅샷(274 paths)은 소스를 담고 있지 않았다. §14 인용이 저장소만으로 해결된다 |
 
-O3~O5는 서로 묶여 있다. 함께 결정하는 것이 낫다.
+O3·O4는 현재 주식 workflow에 필요한 의미를 해결했다. O5는 그 결정을 막지 않는 독립적인 미래 확장이다.
 
 ---
 
@@ -1194,7 +1358,7 @@ O3~O5는 서로 묶여 있다. 함께 결정하는 것이 낫다.
 | G1 | Strategy memory 부재 | 불변식 오류 + 계약 누락 | I4 개정 완료, 계약·저장소 미설계 |
 | G2 | Round-trip 회계 부재 | 차용 판단 오류 | 미해결 |
 | G3 | 학습/거래 분리 (`FIT` event) | 명세 누락 | 미해결 |
-| G4 | Long-short 실행 회계 | 설계 방향 확정 | O3·O4 해결. `hypothetical_short`까지 착수 가능. `real_short`는 O5로 보류 |
+| G4 | Long-short 실행 회계 | 설계 방향 확정 | O3·O4 해결. `hypothetical_short`까지 착수 가능. `real_short` 담보·차입·locate는 별도 후속 범위 |
 | G5 | `ensemble` 계약 부재 | 명세 누락 | 미해결 |
 
 ### G1 — Strategy memory
@@ -1302,9 +1466,12 @@ lineage edge로 기록한다. 최신 파일 경로 참조로 대체하지 않는
 4. **차입 비용** — 종목별·시점별로 변한다. 데이터가 없으면 모델링하지 않는다(PRD §5.7).
 5. **대차 가능성(locate)** — unknown을 가능으로 추측하지 않는다(PRD §7.7 원칙).
 
-해결 경로는 O3~O5의 instrument capability 선언이다. 종목이 `shortable: none | hypothetical | real`을
-선언하고, `hypothetical`은 1~2층 연구를 허용하되 실행 프로파일에서 거부되며 결과 artifact에
-표시된다. **O3~O5 결정 없이는 진행할 수 없다.**
+해결 경로는 concrete Instrument semantics와 Exchange/execution policy의 명시적 결합이다. 연구
+workflow는 `long_only | hypothetical_short | real_short` 중 하나를 resolve하며, unknown은
+`long_only`로 처리한다. `hypothetical_short`는 가상 venue에서만 executable하고 실제 execution
+profile에서는 거부하며 결과 artifact에 표시한다. 실제 short는 borrow/locate, collateral, proceeds
+encumbrance, borrow fee가 모두 명시되어야 한다. 이 경계는 특정 `capability` 필드 하나를 PRD에서
+강제하지 않고 architecture가 모델과 policy resolution으로 구현한다.
 
 ### G5 — `ensemble` 계약
 
@@ -1336,10 +1503,11 @@ member를 결합하는 것 자체는 실행 회계와 무관하다.
 ```
 G1 · G3 · G5   → 각각 store 하나 / event 하나 / judge 함수 하나. §15 구축 순서에 편입 가능
 G2             → §15 3단계(ledger)에 TradeLedger 추가. 선행 결정 없음
-G4             → O3~O5 결정이 선행되어야 함
+G4             → hypothetical은 O3·O4 의미로 진행 가능. real short는 담보·차입·locate 결정 필요
 ```
 
-G1·G2·G3·G5는 선행 결정 없이 명세를 채울 수 있다. G4만 product decision을 기다린다.
+G1·G2·G3·G5는 선행 결정 없이 명세를 채울 수 있다. G4의 hypothetical 범위도 진행 가능하며,
+real-short accounting만 후속 product decision을 기다린다.
 
 ---
 
@@ -1455,3 +1623,31 @@ matched capitalization은 qlib의 long-only Position 제약을 우회하기 위�
 교체에 그치고 judge·ledger 계약이 불변이므로 미룰 수 있다. 반대로 `available_at`, clock 분리,
 `(결과, 진단)` 반환, 시간 축 순차는 나중에 추가하면 정보를 잃으므로 미루지 않았다. 판단 기준은
 **"나중에 추가하면 정보를 잃는가"** 이다.
+
+### 2026-08-04 — PRD use-case traceability와 Instrument/Exchange 책임 정정
+
+**PRD 경계 정정.** PRD는 instrument capability dictionary, cost schedule 선언 형식이나 class hierarchy를
+강제하지 않는다. 대신 상품·side·유효일 비용, 비용을 포함한 cash clipping, exact-rule failure,
+closed-loop feedback과 3,000종목 batch를 stable use-case ID로 정의한다. Academic instrument와 margined
+contract 사례는 현재 acceptance가 아니라 미래 design characterization으로 구분한다.
+
+**책임 배치.** Instrument는 구체 Pydantic 타입으로 정적 경제 계약을 표현한다. Exchange는 listing,
+tradability, transaction-cost policy와 lifecycle event specification을 소유한다. Clock이 event를 순서대로
+발행하고 Flow가 Fill 또는 lifecycle cash flow를 Ledger에 commit한다. 다음 decision은 이 commit 이후의
+actual position, cash와 NAV를 읽는다.
+
+**비용 계약.** 거래비용 계산 entrypoint는 Exchange에 붙인다. Product type, side, explicit event time과
+effective-dated schedule로 exact rule을 선택하고, ETF rule 부재를 Equity rule로 fallback하지 않는다.
+Candidate cash clipping과 최종 Fill이 같은 순수 계산기를 사용한다. 공개 `CostContext`와 필수
+`CostBreakdown`은 도입하지 않고 total cost, rule ID와 schedule version만 최소 evidence로 보존한다.
+
+**상품 계층.** `Future`와 `PerpetualSwap`은 `MarginedContract` 아래의 형제 타입이다. Future만 expiry와
+final settlement를 가지며, PerpetualSwap에는 expiry field 자체가 없다. Funding과 variation margin은
+transaction cost가 아니라 lifecycle cash flow다.
+
+**성능과 결정론.** Pydantic은 등록 경계에서만 검증하고 build 단계가 stable instrument index와 배열을
+compile한다. Hot fill loop에서 Instrument 모델을 다시 만들지 않는다. 모든 Exchange 계산은 wall clock이
+아닌 event time을 명시적으로 받아 같은 config와 data에서 같은 event 순서와 결과를 낸다.
+
+이 항목은 바로 앞의 `instrument capability` 개정 기록을 역사로 보존하되, 현재 설계에서는 그 기록의
+"단일 선언 필드가 책임을 소유한다"는 방향을 대체한다.

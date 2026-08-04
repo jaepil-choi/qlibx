@@ -19,10 +19,21 @@ fill, position, account와 clock progression을 포함한 execution lifecycle �
 구현한다. `pyqlib`는 qlibx의 dependency가 아니며 runtime, test 또는 build 어느 경로에서도 요구하지
 않는다.
 
-Engine은 **event-driven** 구조다. 시간 진행은 registered timer가 만드는 event를 하나의 정렬된
-queue로 병합해 처리하며, observation, decision, execution과 monitoring은 각각 독립적으로
-등록된 event이고 하나의 strategy loop에 합쳐지지 않는다. Event handler는 자신에게 허용된
-information cutoff만 담은 bounded context를 인자로 받는다.
+`qlibx` runtime은 **event-driven callback semantics**를 제공해야 한다. Observation, model fit, decision,
+execution, valuation, settlement와 monitoring은 필요한 cadence와 우선순위를 독립적으로 가질 수 있어야 하며, runtime이
+등록된 callback을 결정론적 순서로 호출한다. 특정 component가 전체 lifecycle을 소유하는 하나의
+strategy loop로 이 역할들을 합치지 않는다.
+
+이 구조는 다음 observable property를 제공해야 한다.
+
+- 같은 frozen input과 data에서 event 및 callback 순서와 결과가 재현된다.
+- 각 callback은 event time과 역할에 허용된 정보만 소비하며 미래 또는 권한 밖 데이터를 우회해 읽지 못한다.
+- Fill, settlement와 기타 committed outcome이 actual state에 반영된 뒤 다음 decision의 입력이 된다.
+- 새로운 cadence나 lifecycle event를 추가해도 관련 없는 decision, execution 또는 monitoring behavior를
+  다시 작성하지 않는다.
+
+PRD는 이를 만족하는 구체적인 queue, context/view, scheduler, callback registry 또는 class decomposition을
+지정하지 않는다.
 
 ### 0.2 Reference implementation 차용 정책
 
@@ -51,8 +62,8 @@ Engine은 백지에서 설계하지 않고 다음 reference에서 검증된 부�
 - Qlib version pinning, upstream compatibility, upgrade gate와 native-vs-adapted 분류를
   요구하는 서술은 더 이상 적용되지 않는다. 해당 자리에는 qlibx engine 자체의 characterization
   test와 artifact compatibility gate가 들어간다.
-- Qlib의 long-only stock position 제약에서 파생되었던 matched capitalization 요구사항은 §7.12
-  instrument capability declaration으로 대체되었다.
+- Qlib의 long-only stock position 제약에서 파생되었던 matched capitalization 요구사항은 §7.12의
+  instrument semantics와 position-direction requirement로 대체되었다.
 - `qrun`, Qlib Recorder와 Qlib config factory에 대한 서술은 optional interoperability이며
   required capability가 아니다.
 
@@ -76,7 +87,9 @@ Python public name은 명시적으로 확정하지 않는 한 요구사항이 �
 
 ### 1.1 제품 정의
 
-`qlibx`는 Qlib을 학습과 backtest 실행 기반으로 사용하는 **재사용 가능한 alpha research framework**다.
+`qlibx`는 자체 event-driven research와 execution runtime을 소유하는 **재사용 가능한 alpha research
+framework**다. Qlib을 포함한 reference implementation은 검증된 산술과 설계의 비교·차용 대상으로만
+사용한다.
 Quantitative researcher와 그 연구를 지원하는 coding agent가 다음 작업을 하나의 누적 가능한 연구 환경에서
 수행하도록 돕는다.
 
@@ -87,7 +100,8 @@ Quantitative researcher와 그 연구를 지원하는 coding agent가 다음 작
 - Signed active intent를 실제 운용 가능한 physical portfolio로 변환한다.
 - Proposed physical target 또는 order를 declared constraint에 맞게 best-effort로 조정하고, 별도 validation으로
   실행 가능 여부를 판정한다.
-- Qlib의 Strategy, order, fill, Position과 Account lifecycle에서 backtest한다.
+- Decision, order, fill, settlement, position과 account가 실제 상태로 되먹임되는 closed-loop lifecycle에서
+  backtest한다.
 - Strategy decision과 독립적인 monitoring clock에서 actual account의 constraint 상태를 관찰한다.
 - Production에서는 broker-neutral decision artifact를 외부 OMS에 전달하고 실제 결과만 authoritative state로
   받아들인다.
@@ -101,7 +115,8 @@ Quantitative researcher와 그 연구를 지원하는 coding agent가 다음 작
 주요 사용자는 quantitative researcher와 research engineer이며, coding agent는 이들의 작업을 지원하는
 first-class user다.
 
-사용자는 Qlib internal class hierarchy나 qlibx private source를 모두 알 필요가 없어야 한다. 대신 데이터의
+사용자는 reference implementation의 internal class hierarchy나 qlibx private source를 모두 알 필요가 없어야
+한다. 대신 데이터의
 경제적 의미, availability, universe, benchmark, alpha hypothesis, risk constraint, execution policy와 production
 authority처럼 결과의 의미를 바꾸는 결정은 명시적으로 내려야 한다.
 
@@ -461,6 +476,81 @@ responsibility ordering은 필요하지만 내부 plane, service 또는 package 
 >   portable results / validation findings / monitoring / dependency graph / catalog / reports
 > ```
 
+### 3.5 Canonical execution and instrument use cases
+
+이 절의 use case는 observable product outcome과 evidence를 규정한다. 구체적인 class hierarchy, policy
+ownership, event type, registry, batch representation과 validation library는 규정하지 않는다. Architecture는
+각 stable use-case ID에 대해 trigger, permitted read, calculation, commit, evidence와 validation flow를
+추적 가능하게 설명해야 한다.
+
+아래 수치와 상품명은 법률 또는 시장 관행을 고정하는 선언이 아니라 deterministic characterization
+fixture다. 실제 run은 선택한 venue/profile과 effective-dated policy를 기록한다.
+
+#### Current product scope
+
+##### UC-COST-001 — 상품과 방향에 따른 거래비용
+
+같은 execution date의 fixture에서 삼성전자와 ETF를 같은 venue/profile로 거래한다. Equity SELL tax는
+15bp, ETF SELL tax는 명시적인 0bp이며 BUY와 SELL policy가 다르다. 각 주문에는 상품과 방향에 맞는
+policy가 적용되고, Fill은 total cost와 적용 policy identity를 보존해야 한다.
+
+##### UC-COST-002 — Effective-dated 거래비용
+
+2024년과 2025년에 서로 다른 cost policy가 등록된 상태에서 경제적으로 같은 주문을 실행하면 각
+execution time에 유효한 policy가 선택되어 비용이 달라져야 한다. Fill과 run evidence는 적용한 policy
+version, rule identity와 effective time을 보존해야 한다.
+
+##### UC-COST-003 — Cost-aware cash clipping
+
+주문 원금만으로는 전량 BUY가 가능하지만 거래비용을 포함하면 현금이 부족한 경우, actual fill quantity는
+비용을 포함한 가용 현금에 맞게 줄어야 한다. Clipping에 사용한 policy와 최종 Fill 비용에 사용한 policy는
+같아야 하며, requested/dealt quantity와 clipping reason을 보존해야 한다.
+
+##### UC-COST-004 — 잘못된 비용 fallback 금지
+
+ETF에 필요한 exact cost policy가 없고 Equity policy만 존재하는 경우, ETF가 Equity와 관련된 상품이라는
+이유로 Equity policy를 암묵적으로 적용하지 않는다. Execution은 missing/unsupported policy로 실패하고 Fill
+또는 account mutation을 만들지 않으며 failure evidence를 남겨야 한다.
+
+##### UC-CLOSED-LOOP-001 — Actual execution feedback
+
+첫 decision의 Fill, transaction cost와 settlement가 commit된 뒤 다음 decision은 requested target이나 비용
+차감 전 현금이 아니라 actual cash, NAV, position과 prior execution result를 소비해야 한다.
+
+##### UC-SCALE-001 — 대규모 횡단면 실행
+
+약 3,000개 주식으로 구성된 일별 횡단면 universe에서 한 decision time의 주문 집합을 처리할 때 종목별
+Fill과 diagnostic을 누락하지 않고 시간 축 closed loop를 유지해야 한다. Supported resource profile에서
+batch와 equivalent single-name characterization의 경제적 결과가 일치해야 한다.
+
+#### Future extension characterization — current support가 아님
+
+##### UC-ACADEMIC-001 — Tracking-only index의 가상 거래
+
+일반 execution profile에서 tracking-only인 Index를 사용자가 명시적으로 선택한 academic/hypothetical
+venue profile에 등록하면 가상으로 거래할 수 있어야 한다. 결과는 hypothetical execution으로 표시되고,
+같은 Index를 허용되지 않은 profile에서 거래하면 거부되어야 한다.
+
+##### UC-FUTURE-001 — 만기 있는 증거금 계약
+
+만기, contract multiplier와 settlement currency가 있는 Future position은 settlement time마다 variation
+margin을 cash에 반영하고 만기에는 final settlement와 position 종료를 수행해야 한다. 만기 이후 주문은
+거부되어야 한다.
+
+##### UC-PERP-001 — 만기 없는 perpetual contract
+
+Expiry가 없는 perpetual position은 정해진 funding time에 당시 관측 가능한 funding rate로 cash flow를
+발생시키고 position을 유지해야 한다. 이 상품에는 expiry event나 final expiry settlement를 만들지 않는다.
+
+##### UC-CASHFLOW-001 — 거래비용과 lifecycle cash flow 구분
+
+Fill fee와 tax만 transaction cost로 집계하고, Future variation margin과 perpetual funding은 lifecycle cash
+flow로 별도 집계해야 한다. 두 결과 모두 commit된 뒤 다음 decision의 actual cash/NAV/position에 반영된다.
+
+같은 frozen config와 data에서 event 순서와 결과가 재현되어야 한다는 요구는 모든 use case에 적용되는
+cross-cutting invariant다. 3,000종목 실행에서 어떤 validation object를 언제 생성하는지는 architecture와
+성능 검증이 결정하며 PRD use case가 특정 library나 hot-path representation을 강제하지 않는다.
+
 ## 4. Product invariants
 
 ### 4.1 Native-first, contract-first
@@ -480,12 +570,12 @@ responsibility ordering은 필요하지만 내부 plane, service 또는 package 
 2. Signed basket return과 factor-return analysis
 3. Orders, Position, Account와 actual fill을 통과하는 executable short portfolio
 
-앞의 두 층은 signed alpha research에 사용할 수 있으며 account를 경유하지 않으므로 instrument의 short
-capability와 무관하게 성립한다.
+앞의 두 층은 signed alpha research에 사용할 수 있으며 account를 경유하지 않으므로 executable-short
+policy와 무관하게 성립한다.
 
-세 번째 층은 instrument가 선언한 position direction constraint(§7.12)에 따른다. `hypothetical_short`
-instrument의 음수 position은 research 관측을 위한 것이며 borrow, 담보, 차입 비용과 locate 가능성을
-모델링하지 않는다. 이를 executable short로 표시하지 않는다.
+세 번째 층은 resolved instrument semantics와 execution policy가 결정한 position direction(§7.12)에
+따른다. `hypothetical_short`의 음수 position은 research 관측을 위한 것이며 borrow, 담보, 차입 비용과
+locate 가능성을 모델링하지 않는다. 이를 executable short로 표시하지 않는다.
 
 ### 4.3 Actual state가 authority다
 
@@ -553,7 +643,7 @@ Config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 - Constraint declaration, best-effort adjustment, pre-execution validation과 finding contracts
 - Signed alpha diagnostics와 long-only physical construction
 - ETF/index look-through와 cash residual
-- Instrument capability declaration과 그 강제
+- Instrument semantics, execution-policy resolution과 unsupported behavior의 명시적 실패
 - Portable artifact envelope, dependency lineage, file-backed catalog와 reporting
 - Trigger, finalization, checkpoint와 resume policy
 - Production decision artifact, reconciliation, commit protocol과 monitoring analysis
@@ -636,13 +726,17 @@ coordinator로 사용하지 않는다. Qlib Recorder는 runtime sink로 사용�
 - Best-effort constraint adjustment, pre-execution validation과 independent monitoring artifacts
 - Local-storage-based production decision/OMS boundary
 
-Instrument capability declaration(§7.12)은 이 범위 안에서 확장 가능한 형태로 설계한다. 다만 다음은
+Instrument와 execution policy의 extension boundary(§7.12)는 이 범위 안에서 확장 가능해야 한다. 다만 다음은
 현재 범위 밖이며 별도 product decision으로 다룬다.
 
 - `real_short`에 필요한 borrow 가능성, 담보와 차입 비용 모델
 - Margin account, leverage와 강제청산
 - Perpetual/futures의 funding, 계약 단위와 expiry
 - Direct broker execution ownership
+
+§3.5의 `UC-COST-001`~`UC-SCALE-001`은 현재 scope의 characterization과 acceptance 대상이다.
+`UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`과 `UC-CASHFLOW-001`은 architecture 확장 가능성을
+검토하기 위한 future characterization이며 현재 지원을 의미하지 않는다.
 
 ## 6. User, agent and config-driven workflow
 
@@ -795,7 +889,7 @@ Frozen run config는 최소한 다음을 완전히 resolve한다.
 - Signal generation, transforms와 fitted state
 - Alpha-weight, ensemble과 physical-construction behavior
 - Constraint declarations, compliance-data bindings, adjustment와 validation policy
-- Qlib-compatible Strategy integration, target-to-order behavior, Executor, Exchange와 cost profile
+- Qlib-compatible Strategy integration, target-to-order behavior, execution venue/profile과 거래비용 가정
 - Observation/decision/execution/monitoring clocks, trigger, finalization, checkpoint와 reporting
 - Artifact location, schema와 provenance
 
@@ -1048,47 +1142,52 @@ Stored account history를 새 constraint로 재평가할 수 있다. 당시 적�
 `as-was` evaluation과 새 constraint를 과거 state에 적용하는 `as-if` evaluation을 별도 semantics와 lineage로
 구분한다.
 
-### 7.12 Instrument capability declaration
+### 7.12 Instrument semantics and product extension
 
-qlibx는 하나의 asset class에 고정되지 않는다. Instrument는 1급 개념이며, 각 instrument는 자신을 보유하고
-거래하고 평가하는 데 필요한 semantics를 **capability로 선언**한다. Engine은 그 선언만 소비하며 instrument
-종류를 하드코딩하지 않는다.
+qlibx는 하나의 asset class에 고정되지 않는다. Instrument는 식별·보유·거래·평가되는 경제적 대상을
+나타내는 1급 개념이다. Product requirement는 모든 의미를 하나의 capability dictionary에 넣는 것이 아니라,
+각 workflow가 필요로 하는 의미를 명확히 결정하고 그 근거와 identity를 보존하는 것이다.
 
-Instrument capability는 최소한 다음을 선언한다.
+지원 범위 안에서 다음 의미를 모호하지 않게 결정할 수 있어야 한다.
 
-- Stable instrument ID와 declaration version
-- Quantity unit과 contract/lot size
-- Price convention, valuation source와 currency
-- **Position direction constraint** — 허용되는 보유 방향과 그 근거
-- Cost schedule과 tax/fee semantics
-- Tradability rule과 settlement convention
-- Corporate-action applicability
-- 선언되지 않은 항목은 unknown이며 추측하지 않는다
+- Stable instrument identity와 version
+- Quantity unit, contract/lot size와 notional convention
+- Price convention, valuation semantics와 currency
+- 허용되는 position direction과 그 근거
+- 적용 가능한 lifecycle, settlement와 corporate-action semantics
+- Execution venue/profile에 따른 tradability, transaction-cost와 기타 execution policy
+- 지원되지 않거나 필요한 의미가 알려지지 않은 경우의 명시적 failure
 
-#### Short capability
+Instrument contract, listing/execution policy와 시변 market observation은 서로 다른 경제적 사실이다. 같은
+경제적 대상도 execution venue나 profile에 따라 tracking-only이거나 거래 가능할 수 있고, 서로 다른 비용과
+정산 규칙을 적용받을 수 있다. PRD는 concrete class, composition, registry, policy object 또는 configuration
+중 어느 구조가 이 의미를 소유하는지 지정하지 않는다.
 
-Position direction constraint는 세 값을 갖는다. 이것이 §4.2의 layer 구분을 instrument 속성으로 표현한 것이다.
+#### Position-direction semantics
+
+실행에 사용되는 instrument의 position-direction semantics는 다음 셋 중 하나로 결정되어야 한다.
 
 - `long_only` — 음수 보유를 허용하지 않는다. Short intent는 physical construction에서 해소되어야 한다.
 - `hypothetical_short` — 음수 weight와 음수 position을 research 목적으로 허용하되, 실제 borrow, 담보,
-  차입 비용과 locate 가능성을 모델링하지 않는다. 이 instrument의 음수 position에 의존한 모든 result는
-  **hypothetical로 표시**되며 execution profile에서는 거부된다.
-- `real_short` — borrow 가능성, 담보와 비용이 선언된 데이터로 뒷받침되는 executable short.
+  차입 비용과 locate 가능성을 모델링하지 않는다. 이 position에 의존한 모든 result는 **hypothetical로
+  표시**되며 execution profile에서는 거부된다.
+- `real_short` — borrow 가능성, 담보와 비용이 검증된 데이터와 policy로 뒷받침되는 executable short.
 
-Short capability가 선언되지 않은 instrument는 `long_only`로 취급한다. Unknown을 shortable로 추측하지
-않는다(§7.7과 같은 원칙).
+Position-direction semantics를 결정할 근거가 없으면 `long_only`로 취급한다. Unknown을 shortable로
+추측하지 않는다(§7.7과 같은 원칙).
 
 `hypothetical_short` result를 `real_short` result와 같은 성과로 비교하거나 promotion 근거로 사용할 수
-없다. Artifact는 각 instrument의 declaration identity를 lineage에 기록한다.
+없다. Artifact는 적용된 instrument semantics와 execution-policy identity를 lineage에 기록한다.
 
 #### 확장 규칙
 
-새 asset class는 instrument ID를 추가해서 지원하지 않는다. Valuation, quantity/contract unit, settlement,
-expiry, margin, corporate action, cost와 risk semantics를 capability로 정의하고, engine이 그 선언을 소비할 수
-있음을 증명해야 한다.
+새 asset class 지원은 instrument ID나 분류 값 추가만으로 완료되지 않는다. 해당 상품의 valuation,
+quantity/notional, order/fill, position/account, lifecycle cash flow와 evidence가 closed loop에서 일관되게
+동작함을 입증해야 한다. 독립 cadence가 필요한 lifecycle은 결정론적으로 예약·실행되고, 그 결과가 다음
+decision 전에 actual state에 반영되어야 한다.
 
-Engine이 해석할 수 없는 capability를 선언한 instrument는 `unsupported`로 실패한다. 부분적으로 해석해
-실행하지 않는다.
+필요한 의미나 policy를 결정할 수 없는 workflow는 `unsupported`로 실패하며 부분적으로 추측해 실행하지
+않는다. 확장은 관련 없는 기존 asset behavior를 다시 작성하거나 그 결과를 변경하도록 요구해서는 안 된다.
 
 ## 8. Signal and model research
 
@@ -1485,51 +1584,59 @@ attribution이 수학적으로 성립하지 않으면 억지로 합을 맞추지
 Attribution table은 actual result, counterfactual result와 exact upstream alpha/portfolio artifact를 lineage로
 연결한다.
 
-## 11. Qlib execution and signed compatibility
+## 11. Event-driven execution and signed compatibility
 
-### 11.1 Native execution lifecycle
+### 11.1 Closed-loop execution lifecycle
 
-Canonical historical execution path는 Qlib native lifecycle을 사용한다.
+Canonical historical execution path는 qlibx가 소유하는 event-driven callback lifecycle을 사용한다.
 
 ```text
-qlibx bounded input and decision behavior
--> Qlib-compatible Strategy integration
+clock- and role-bounded input
+-> registered decision callback
 -> physical target and best-effort constraint adjustment
 -> target-to-order conversion and final constraint validation
--> Qlib TradeDecision
--> SimulatorExecutor or NestedExecutor
--> Exchange order handling and dealt quantity
--> Qlib Account and Position
--> qlibx portable result and diagnostic integration
+-> execution callback and venue/profile policy
+-> fills, diagnostics and lifecycle cash flows
+-> committed position/account state
 -> next bounded decision input
 ```
 
-Strategy, decision, executor, exchange와 account 역할을 하나의 qlibx for-loop에 합치지 않는다.
+Decision, execution, valuation, settlement와 monitoring은 독립 cadence를 가질 수 있으며 같은 시각의 순서는
+명시적으로 결정된다. Runtime은 callback을 호출하고 결과를 commit하지만, 각 계산 component가 전체
+lifecycle이나 mutable account를 임의로 소유하지 않는다.
 
-### 11.2 Qlib Exchange integration
+한 event가 다수 instrument를 횡단면 batch로 처리할 수는 있지만 시간 축은 순차로 진행한다. Partial fill,
+blocked order, transaction cost와 settlement 결과는 다음 decision 전에 actual state에 반영되어야 한다.
 
-Project market data, stock/ETF cost, lot, tradability와 volume policy를 Qlib Exchange extension point로 제공할 수
-있다. 이 integration은 Qlib order/fill/account lifecycle을 우회하지 않는다.
+### 11.2 Execution venue and transaction-cost semantics
+
+Execution venue/profile role은 market/listing별 lot, tradability, volume, price-limit와 transaction-cost policy를
+일관되게 해석해야 한다. 같은 instrument semantics라도 venue, execution profile, account tier와 effective
+time이 다르면 다른 결과가 나올 수 있다.
 
 선택한 profile은 최소한 다음을 명시한다.
 
-- Execution and valuation price
-- Open/close convention
-- Cost and tax schedule
+- Execution and valuation price convention
+- Venue/listing과 필요한 account scope
+- Effective-dated, side-aware cost and tax semantics
 - Lot/quantity unit
 - Suspension and price-limit behavior
 - Volume participation and clipping
 - Missing price behavior
 
-> **Architecture/implementation candidate — non-normative**
->
-> Project scenario를 Qlib `Exchange` extension point에 연결하는 구현에 `ScenarioExchange` 같은 설명용 이름을
-> 사용할 수 있다. 이 이름이나 subclass layout은 product requirement가 아니다.
+Transaction cost는 cash-limited fill을 결정할 때 사용한 것과 동일한 policy로 최종 Fill에 계산·기록되어야
+한다. 적용된 policy identity와 effective time은 replay와 audit이 가능하도록 보존한다. 필요한 rule이 없을 때
+다른 instrument type이나 기간의 rule로 암묵적으로 fallback하지 않는다.
+
+Fee와 tax처럼 fill 때문에 발생하는 transaction cost, execution price에 반영되는 slippage/impact, 포지션
+보유와 시간 경과로 발생하는 funding·variation margin·expiry settlement는 서로 다른 결과로 구분한다.
+PRD는 이 policy를 특정 Instrument field, Exchange subclass 또는 별도 model 중 어디에 배치할지 지정하지
+않지만, 시변 venue/profile policy를 immutable instrument contract의 보편적 진실로 취급해서는 안 된다.
 
 ### 11.3 Order generation
 
-Qlib weight-to-order building block은 qlibx semantics와 parity가 맞을 때 재사용한다. 다음 behavior를 public
-contract로 암묵적으로 받아들이지 않는다.
+Reference implementation의 weight-to-order building block은 qlibx semantics와 parity가 맞을 때 재사용한다.
+다음 behavior를 public contract로 암묵적으로 받아들이지 않는다.
 
 - Tradable subset만 남긴 뒤 automatic renormalization
 - Missing price/untradable target의 silent skip
@@ -1541,21 +1648,22 @@ Target-to-order conversion result는 requested order뿐 아니라 instrument별 
 skip/failure reason을 모두 포함한다.
 
 Conversion이 proposed quantity나 cash를 변경하면 final pre-execution validator가 converted result를 평가한다.
-Unresolved error finding과 approved override가 모두 없는 상태에서 Qlib `TradeDecision`을 제출하지 않는다.
+Unresolved error finding과 approved override가 모두 없는 상태에서 order를 execution callback에 제출하지 않는다.
 
-### 11.4 Position direction과 instrument declaration
+### 11.4 Position-direction enforcement
 
-Position이 음수 수량을 가질 수 있는지는 engine의 고정 속성이 아니라 instrument가 선언하는 capability다
-(§7.12). Engine은 선언을 읽어 강제하며 asset class를 하드코딩하지 않는다.
+Position이 음수 수량을 가질 수 있는지는 engine 전체의 고정 asset-class 분기가 아니라, 해당 workflow에
+대해 결정된 instrument semantics와 execution policy에 따른다(§7.12).
 
 - `long_only` — 미보유 SELL과 보유 초과 SELL을 거부한다. Signed alpha의 short intent는 physical
   construction 단계에서 해소되어야 하며, 권장 경로는 long-only enhanced-index construction이다.
 - `hypothetical_short` — 음수 position을 허용하되 borrow, 담보, 차입 비용과 locate를 모델링하지 않는다.
   해당 position에 의존한 result는 hypothetical로 표시되고 execution profile에서 거부된다.
-- `real_short` — 현재 범위 밖이다(§5.7). 선언 항목이 갖춰지기 전에는 `unsupported`로 실패한다.
+- `real_short` — 현재 범위 밖이다(§5.7). 필요한 semantics와 policy가 검증되기 전에는 `unsupported`로
+  실패한다.
 
-Declaration을 확인하지 않고 음수 position을 허용하거나, `hypothetical_short` 결과를 executable short로
-표시하지 않는다.
+Position-direction 근거를 확인하지 않고 음수 position을 허용하거나, `hypothetical_short` 결과를 executable
+short로 표시하지 않는다.
 
 ### 11.5 Initial-position accounting
 
@@ -1569,7 +1677,7 @@ Resume 시 previous NAV denominator와 accumulated metrics도 uninterrupted run�
 Composite account return과 signed active strategy return은 다르다. Analysis는 baseline, composite와 active
 economics를 분리한다.
 
-- Composite Qlib Position and account value
+- Composite position and account value
 - Baseline stock and financing
 - Active quantity and active PnL
 - Transaction cost and dealt quantity
@@ -1589,8 +1697,9 @@ Result와 report에 limitation을 명시한다.
 ### 11.7 Settlement와 corporate action
 
 Settlement, adjusted price, quantity factor, dividend, split, delisting과 corporate-action semantics가 확인되지
-않으면 exchange 또는 broker behavior를 추측하지 않는다. Qlib settlement option을 사용하기 전에 selected
-market convention과 characterization parity를 검증한다.
+않으면 exchange 또는 broker behavior를 추측하지 않는다. 선택한 settlement와 corporate-action policy는
+market convention과 characterization parity를 검증하고, 그 cash/position delta를 event 순서에 따라 actual
+state에 반영한다.
 
 ## 12. Research workspace, artifact graph and catalog
 
@@ -1665,7 +1774,7 @@ reports/
 - Fill and execution diagnostic
 - Position/account snapshot
 - Actual-account constraint monitoring finding
-- Instrument capability declaration snapshot
+- Instrument semantics and applied execution-policy snapshot
 - Checkpoint/resume state
 - Analysis tables and report manifest
 - Production prepared decision and OMS result
@@ -1870,8 +1979,8 @@ evaluation에 재사용할 수 있다. Monitoring은 account를 mutate하거나 
 - Physical portfolio construction and optimizer backend
 - Constraint metric and best-effort adjustment behavior
 - Pre-execution validation policy
-- Target-to-order conversion and Qlib runtime integration
-- Exchange cost/tradability policy
+- Target-to-order conversion and execution integration
+- Execution venue cost/tradability/settlement policy
 - Actual-account constraint monitoring behavior
 - Analyzer and reporter
 - Production artifact integration
@@ -2174,31 +2283,38 @@ Finding이 remediation 또는 다음 strategy trigger에 사용되면 explicit d
 - Flexible-budget result를 fixed-budget counterfactual과 비교해 selection, invested-budget timing, cash/passive
   residual/financing, implementation과 unexplained residual을 가정·lineage와 함께 구분한다.
 
-### P7 — Native Qlib execution
+### P7 — Event-driven closed-loop execution
 
-- Canonical path가 Qlib Strategy/TradeDecision/Executor/Exchange/Account lifecycle을 사용한다.
+- Observation, fit, decision, execution, valuation, settlement와 monitoring callback이 필요한 cadence와
+  우선순위로 독립 등록되고 같은 frozen input에서 결정론적으로 실행된다.
+- Callback은 event time과 역할에 허용된 정보만 소비한다.
 - Target-to-order conversion이 all-order conversion, rounding, clipping과 failure diagnostics를 보존한다.
 - Quantity-changing conversion 뒤 final validator가 warning/error를 기록하고, unresolved error는 제출 중단 또는
   recorded explicit override를 요구한다.
+- Fill, transaction cost와 lifecycle settlement가 actual position/account에 commit된 뒤 다음 decision이 그
+  상태를 소비한다.
+- `UC-COST-003`, `UC-CLOSED-LOOP-001`과 `UC-SCALE-001`의 current-scope outcome을 만족한다.
 - Adjustment residual, validation finding, evaluator failure와 actual monitoring breach를 서로 다른 status로
   유지한다.
-- Native path와 characterization oracle의 supported long-only result/account parity를 검증한다.
-- Nested execution에서도 PIT boundary와 account metric frequency를 검증한다.
+- Supported long-only fixture의 fill/account 결과를 characterized reference와 대조한다.
+- Cross-sectional batch execution에서도 PIT boundary, event ordering과 account metric frequency를 검증한다.
 - Checkpoint/resume result가 uninterrupted run과 reconcile된다.
 
-### P8 — Instrument capability and signed execution
+### P8 — Instrument semantics and signed execution
 
-- Instrument가 quantity unit, price convention, position direction constraint, cost, tradability와
-  settlement를 declaration으로 제공하고 engine이 asset class를 하드코딩하지 않는다.
-- 선언되지 않은 short capability는 `long_only`로 취급하며 unknown을 shortable로 추측하지 않는다.
+- 각 supported workflow가 quantity/notional, price/valuation, position direction, tradability, transaction cost와
+  적용 가능한 lifecycle/settlement semantics를 명확히 결정한다.
+- Position-direction 근거가 없으면 `long_only`로 취급하며 unknown을 shortable로 추측하지 않는다.
 - `long_only` instrument는 미보유 SELL과 보유 초과 SELL을 거부한다.
 - `hypothetical_short` instrument의 음수 position이 허용되고, 그 position에 의존한 result가
   hypothetical로 표시되며 execution profile에서 거부된다.
 - `hypothetical_short` result를 `real_short` result와 같은 성과로 비교하거나 promotion 근거로 사용할 수
   없다.
-- Engine이 해석할 수 없는 capability를 선언한 instrument는 `unsupported`로 실패하며 부분 해석해
-  실행하지 않는다.
-- Artifact가 소비한 instrument declaration identity를 lineage에 기록한다.
+- 필요한 instrument semantics 또는 execution policy를 결정할 수 없으면 `unsupported`로 실패하며 부분
+  해석하거나 다른 상품·기간의 policy를 추측해 실행하지 않는다.
+- Transaction cost는 effective time, side와 venue/profile을 반영하고 cash clipping과 Fill에 동일하게 적용된다.
+- `UC-COST-001`~`UC-COST-004`의 product/side/effective-time/exact-policy outcome을 만족한다.
+- Artifact가 적용한 instrument semantics와 execution-policy identity를 lineage에 기록한다.
 - Dollar-neutral signed portfolio의 수익률 분모는 gross로 계산하고 그 규약을 result에 기록한다.
 - Initial/first-resume metric denominator가 marked starting NAV와 일치한다.
 
@@ -2266,7 +2382,7 @@ Manual characterization lifecycle을 제거하기 전에 다음 evidence가 있�
 - Constraint adjustment/validation finding parity
 - Dense non-trigger monitoring parity
 - Checkpoint/resume parity
-- Instrument capability declaration 강제 동작
+- Instrument semantics와 execution-policy resolution 및 unsupported failure
 - Bounded performance regression
 - Rollback path
 
@@ -2305,12 +2421,16 @@ feedback ordering, trigger/monitoring clock separation, constraint authority와 
 
 ### 17.2 Asset-class expansion
 
-새 asset class는 instrument ID만 추가해서 지원하지 않는다. §7.12의 instrument capability declaration으로
-valuation, quantity/contract unit, settlement, expiry, margin, corporate action, cost와 risk semantics를
-정의하고, engine이 그 선언을 소비할 수 있음을 증명해야 한다.
+새 asset class는 instrument ID나 분류 값 추가만으로 지원 완료로 간주하지 않는다. §7.12에 따라 valuation,
+quantity/notional, order/fill, position/account, tradability, transaction cost, lifecycle settlement와 risk
+semantics가 closed loop에서 일관되게 동작하고 evidence로 남음을 검증해야 한다.
 
-우선순위가 확인된 확장 후보는 `real_short`(borrow/담보/차입 비용)와 perpetual/futures(funding, 계약 단위,
-강제청산)다. 둘 다 §7.12의 선언 항목을 늘리는 형태이며 engine 구조 변경을 요구하지 않아야 한다.
+§3.5의 future extension use case는 이 검증의 characterization target이며 현재 acceptance gate가 아니다.
+
+우선순위가 확인된 확장 후보는 `real_short`(borrow/담보/차입 비용)와 perpetual/futures(계약 단위, margin,
+funding, variation margin, expiry와 강제청산)다. 독립 cadence가 필요한 behavior는 event-driven callback
+lifecycle에 편입하고, transaction cost와 보유·시간 경과에 따른 settlement cash flow를 구분해야 한다.
+구체적인 instrument hierarchy, policy ownership과 event registration API는 architecture에서 결정한다.
 
 ### 17.3 AI-defined runtime policy
 

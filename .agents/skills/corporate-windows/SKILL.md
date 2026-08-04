@@ -5,13 +5,33 @@ description: Diagnose and recover Windows enterprise environment failures involv
 
 # Corporate Windows Workflow
 
-Run `.agent/bin/detect-environment.ps1` first. When more evidence is needed, run
-`scripts/collect-diagnostics.ps1`; add `-IncludePaths` or `-ProbeWrites` only when the user-visible
-diagnostic need justifies the extra disclosure or temporary write.
+Do not activate a corporate or non-ASCII workaround preemptively. Always try the documented,
+ordinary command once in the current environment first. Examples include the built-in
+`apply_patch` path, a normal `uv` command, or the project's declared test command. If it succeeds,
+stop: do not run environment detection and do not introduce a fallback path.
 
-A non-ASCII username or profile path activates path-related workarounds but does not prove that the
-machine is company-owned. Preserve the original command, error class, and execution boundary before
-trying a workaround. Load only the matching reference:
+The ordinary first attempt must already be safe and authorized. It does not waive database,
+network, destructive-action, or other approval requirements. If the exact failure from the current
+operation is already available, preserve that evidence instead of repeating the command only to
+make it fail again.
+
+Only after a concrete matching failure:
+
+1. Preserve the original command, exact error class and message, working directory, and execution
+   boundary.
+2. Run `.agent/bin/detect-environment.ps1`.
+3. Load only the reference matching the observed failure and detected capabilities.
+4. Use the narrowest reversible workaround, then retry the original operation and verify its
+   result.
+
+When more evidence is needed, run `scripts/collect-diagnostics.ps1`; add `-IncludePaths` or
+`-ProbeWrites` only when the user-visible diagnostic need justifies the extra disclosure or
+temporary write.
+
+A non-ASCII username or profile path permits path-related workarounds only after a relevant failure
+has occurred. It does not prove that the machine is company-owned, and it is not by itself evidence
+that non-ASCII text caused the failure. On an ASCII-only personal machine, diagnose the concrete
+failure normally instead of forcing a non-ASCII fallback. Load only the matching reference:
 
 - TLS, certificate, revocation, `uv`, Python, or Node errors: `references/tls.md`
 - uv cache, managed Python, `.venv`, access denied, or lock errors:

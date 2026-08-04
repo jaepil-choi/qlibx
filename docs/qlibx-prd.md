@@ -2,6 +2,7 @@
 
 Status: canonical
 Runtime: qlibx-owned event-driven engine (no Qlib runtime dependency)
+Planned rename: `qlibx` → `vqar` (확정, 실행 보류 — architecture O12)
 Companion document: `docs/qlibx-architecture.md`
 
 이 문서는 qlibx의 제품 철학, observable behavior, correctness boundary와 acceptance criteria를 규정하는
@@ -690,6 +691,10 @@ instruction file의 managed block, skill resource version과 validation command�
   `.claude/skills/qlibx-skill/SKILL.md`
 - Explicit custom target root: skill directory `<user-selected-output>/qlibx/`, required entrypoint
   `<user-selected-output>/qlibx/SKILL.md`
+
+> **예정된 변경 — 아직 적용되지 않았다.** Package 이름을 `qlibx`에서 `vqar`(vibe quant alpha research)로
+> 변경하기로 확정했으나 실행은 최종 단계로 미룬다. 적용 시 위 세 path의 `qlibx` 부분이 함께 바뀌며,
+> 이 절과 §13.8, §15 P0가 동시에 갱신되어야 한다. 그 전까지 위 path가 유효한 normative contract다.
 
 Custom target root는 user가 명시적으로 선택해야 하며 package가 임의의 output location을 추측하지 않는다.
 각 skill directory 안의 `references/`, `scripts/`, `examples/` 같은 보조 resource는 해당 target protocol과

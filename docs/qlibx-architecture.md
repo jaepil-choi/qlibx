@@ -307,13 +307,32 @@ class Executor(Protocol):
 `Orders`는 단건 목록이 아니라 instrument축 배열 묶음이다. `match_batch`는 §8의 clipping 순서를
 elementwise 연산으로 수행한다.
 
-```
-DailyCloseExecutor   기본. t일 종가 1회, 3000종목 batch.
-```
-
 교체 지점은 유지하되 현재 구현은 하나다. 분단위 체결은 요구되지 않는 것으로 확인되었으므로
 `MinuteExecutor`는 계획에 넣지 않는다. 필요해지면 같은 계약 뒤에 추가한다 —
 [[why-not-nautilus-as-a-dependency]] §4의 재검토 조건 2에 해당한다.
+
+### FillConvention — 체결가 규약을 분리한다
+
+Executor가 정하는 것은 **일정**(언제 몇 번 넘기나)이고, 체결가 규약은 별도 축이다. 둘을 묶으면
+"종가 체결"을 "시가 체결"로 바꾸는 데 executor를 새로 써야 한다.
+
+```python
+class FillConvention(Protocol):
+    def reference_price(self, view: ExecutionView) -> Prices: ...   # instrument축 배열
+```
+
+```
+CloseFill      결정 시점에 관측한 종가에 체결
+NextOpenFill   다음 거래일 시가에 체결
+VWAPFill       구간 VWAP
+```
+
+**`CloseFill`이 기본이며 낙관적이다.** 방금 관측한 종가에 체결된다는 가정은 실무에서 성립하기 어렵다.
+결과 artifact는 사용된 convention identity를 기록하고, report는 이 가정을 명시한다(PRD §7.8 "decision,
+execution과 valuation price convention 기록").
+
+Convention 교체는 alpha, portfolio construction, conversion, validation, ledger에 영향을 주지 않는다.
+`exchange.match_batch`가 받는 가격 배열의 출처만 바뀐다.
 
 ### batch가 closed loop를 해치지 않는다
 
@@ -999,15 +1018,18 @@ ConstraintFinding(
 | TradingState | nautilus | 같은 파일 L228 | 🔵 |
 | target/actual 이원 관리 | vnpy | `alpha/strategy/template.py` L31-32, L133 | 🟢 |
 | 4방향 분해 (숏 대비) | vnpy | 같은 파일 L144-185 | 🟢 |
-| ts 함수 22종 | vnpy | `alpha/dataset/ts_function.py` | 🟢 |
-| cs 함수 5종 | vnpy | `alpha/dataset/cs_function.py` | 🟢 |
-| processor 9종 | vnpy | `alpha/dataset/processor.py` | 🟢 |
+| ts 함수 22종 | vnpy | `alpha/dataset/ts_function.py` | 🟢† |
+| cs 함수 5종 | vnpy | `alpha/dataset/cs_function.py` | 🟢† |
+| processor 9종 | vnpy | `alpha/dataset/processor.py` | 🟢† |
 | 검증용 팩터셋 | vnpy | `alpha/dataset/datasets/alpha_{101,158}.py` | 🟢 |
 | **target→order 변환 전체** | — | — | ⚪ |
 | **Finding 스키마, override 기록** | — | — | ⚪ |
 | 섹터 중립화 / beta 제거 / hump | — | — | ⚪ |
 
 PRD §8.4 built-in 목록과 대조 시 vnpy가 마지막 3개를 제외하고 전부 커버한다.
+
+† polars를 채택하지 않기로 했으므로(O2) 이 세 항목은 **복사가 아니라 pandas 재작성**이다. 연산 정의와
+경계 처리는 그대로 참조하되 구현은 옮겨 쓴다.
 
 ### ⑤ ledger
 
@@ -1142,14 +1164,14 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 | # | 항목 | 상태 |
 |---|---|---|
 | ~~O1~~ | ~~`pyqlib` 의존성 위치~~ | **해결.** `pyproject.toml`에서 완전히 제거. runtime/dev 어느 group에도 두지 않는다. 결과로 in-process parity oracle을 쓸 수 없으므로 §15.1 정적 fixture 대조로 대체한다. 차용 대상 qlib 소스는 `references/`에 보존되어야 한다 (O8) |
-| O2 | **polars 도입** | vnpy alpha 코드 전체가 polars. 저장 Parquet / 질의 duckdb / 계산 polars / 경계 pandas 층 분리를 권고. **결정 필요** |
-| O3 | **matched capitalization 폐기** | qlib long-only position 제약이라는 전제가 소멸. 대체로 instrument capability 모델(숏 가능성/마진/carry/계약단위/청산) 도입. PRD §11.5~11.7 개정 필요. **§17 G4가 이 결정에 막혀 있다** |
+| ~~O2~~ | ~~polars 도입~~ | **기각.** 우리 접근 축(횡단면 batch)에서 이득이 크지 않다고 판단. 저장 Parquet / 질의 duckdb / 계산·경계 pandas로 간다. 대가로 vnpy signal 연산 이식이 복사가 아니라 재작성이 된다 (§14) |
+| ~~O3~~ | ~~matched capitalization 폐기~~ | **해결.** PRD §11.4~11.7을 §7.12 instrument capability declaration으로 대체 완료. Position direction은 engine 고정 속성이 아니라 instrument 선언이다 |
 | ~~O9~~ | ~~long-short 수익률 분모~~ | **해결.** dollar-neutral book은 **gross 기준**으로 수익률을 계산한다. Long 100 / short 100이면 분모는 200이다. NAV 기준은 leverage에 따라 수익률이 달라져 alpha 비교가 불가능해지므로 채택하지 않는다. §17 G4의 나머지 항목(담보 모델, 차입 비용, locate)은 여전히 미해결 |
-| O4 | hypothetical vs real short | 종목 속성으로 선언. real short 불가 종목의 숏 결과에 hypothetical 낙인을 artifact에 기록 |
-| O5 | crypto perpetual 확장 | funding은 `FUNDING` timer로 §3 원자에 그대로 편입. margin account, 계약단위(linear/inverse), 강제청산이 추가로 필요 |
+| ~~O4~~ | ~~hypothetical vs real short~~ | **해결.** `long_only` / `hypothetical_short` / `real_short` 세 값으로 instrument가 선언. 미선언은 `long_only`. hypothetical result는 execution profile에서 거부되고 artifact에 표시된다 (PRD §7.12) |
+| O5 | crypto perpetual 확장 | **보류.** 현재 범위 밖 (PRD §5.7). `real_short`의 담보·차입 비용도 함께 보류. 도입 시 §7.12 선언 항목을 늘리는 형태여야 하며 engine 구조 변경을 요구해서는 안 된다. funding은 `FUNDING` timer로 §3 원자에 편입 |
 | ~~O11~~ | ~~qlib을 runtime backend로 채택~~ | **기각.** decision clock이 데이터 인덱스에 묶여 있어 4개 clock 분리가 불가능하고, 저장 최소 단위에 `available_at`이 없으며, 실험 단위 pickle/MLflow가 portable artifact를 대체하지 못한다. 모델 35개를 싣는 배포 형태도 PRD §5.3·§2.7의 소유 경계와 어긋난다. 상세는 [[why-not-qlib-as-a-backend]] |
 | ~~O10~~ | ~~nautilus를 execution backend로 채택~~ | **기각.** 기본 작업 단위가 다르다 — instrument별 event 대 decision-time 횡단면. PRD §8~§10·§12에 대응물 없음. v1→v2 전환 중. 3000종목 미검증. 상세와 재검토 조건은 [[why-not-nautilus-as-a-dependency]] |
-| O6 | pub/sub 도입 시점 | 현재는 callback만. 횡단 관심사(전 이벤트 로깅, 사용자 관측자)가 생기면 검토. 도입 시 delivery 우선순위를 함께 설계해야 I7이 유지된다 |
+| O6 | pub/sub 도입 시점 | **보류. 근거 확정.** 한 event의 수신자가 2개뿐이고 이름을 안다. 중간층은 호출 그래프를 감추고 배달 순서를 따로 설계해야 I7이 유지된다. 도입 조건은 (a) 사용자 확장 지점 개방 (b) 한 event 수신자 증가 (c) 전 event 로깅/replay. 전환 비용은 발행 지점 1곳 교체 + 구독 등록이며 judge/ledger 계약은 불변이므로 미룰 수 있다 |
 | O7 | PRD 본문 정리 | §0.3 해석 규칙으로 처리 중. Qlib 전제 서술 195곳의 정식 개정은 별도 revision |
 | ~~O8~~ | ~~qlib 소스 보존~~ | **해결.** `references/qlib`을 upstream `main@79633dd` 전체 트리(619 paths)로 교체. 기존 부분 스냅샷(274 paths)은 소스를 담고 있지 않았다. §14 인용이 저장소만으로 해결된다 |
 
@@ -1171,7 +1193,7 @@ O3~O5는 서로 묶여 있다. 함께 결정하는 것이 낫다.
 | G1 | Strategy memory 부재 | 불변식 오류 + 계약 누락 | I4 개정 완료, 계약·저장소 미설계 |
 | G2 | Round-trip 회계 부재 | 차용 판단 오류 | 미해결 |
 | G3 | 학습/거래 분리 (`FIT` event) | 명세 누락 | 미해결 |
-| G4 | Long-short 실행 회계 | **설계 미착수** | O3~O5 선행 필요 |
+| G4 | Long-short 실행 회계 | 설계 방향 확정 | O3·O4 해결. `hypothetical_short`까지 착수 가능. `real_short`는 O5로 보류 |
 | G5 | `ensemble` 계약 부재 | 명세 누락 | 미해결 |
 
 ### G1 — Strategy memory
@@ -1274,8 +1296,8 @@ lineage edge로 기록한다. 최신 파일 경로 참조로 대체하지 않는
 2. **공매도 대금의 성격** — qlib `Position`의 `cash`는 단일 수치이며 free/encumbered 구분이 없다.
    그대로 두면 공매도 대금으로 재매수하는 무한 레버리지가 성립한다. 담보 모델이 필요하다.
 3. **수익률 분모** — 달러 뉴트럴 북에서 NAV·gross·capital-at-risk 중 무엇을 분모로 쓸지는
-   계산으로 도출되지 않는 **선언 사항**이다. PRD §11.9가 composite와 active return을 구분하지만
-   matched capitalization 맥락에 한정되어 있어 일반 long-short용으로 재작성이 필요하다.
+   계산으로 도출되지 않는 **선언 사항**이며 O9에서 gross로 확정되었다. PRD §11.6이 composite와 active
+   return을 구분한다.
 4. **차입 비용** — 종목별·시점별로 변한다. 데이터가 없으면 모델링하지 않는다(PRD §5.7).
 5. **대차 가능성(locate)** — unknown을 가능으로 추측하지 않는다(PRD §7.7 원칙).
 
@@ -1403,3 +1425,32 @@ returns).sum()` — 는 feedback edge가 없어 PRD §4.3을 만족할 수 없�
 
 **분단위 체결.** 요구되지 않는 것으로 확인되어 `MinuteExecutor`를 계획에서 제외한다. Executor 교체
 지점은 유지한다.
+
+### 2026-08-04 — instrument capability 도입, 부수 결정 넷
+
+**instrument (O3·O4 해결).** PRD에 §7.12 instrument capability declaration을 신설하고 §11.4~11.7의
+matched capitalization을 대체했다. Position이 음수를 가질 수 있는지는 engine의 고정 속성이 아니라
+instrument가 선언하는 값이며, `long_only` / `hypothetical_short` / `real_short` 세 값을 갖는다.
+미선언은 `long_only`로 취급하고 unknown을 shortable로 추측하지 않는다. §17 G4가 `hypothetical_short`
+범위까지 착수 가능해졌다.
+
+matched capitalization은 qlib의 long-only Position 제약을 우회하기 위한 장치였다. Engine 소유권이
+넘어오면서 전제가 사라졌고, 우회로 대신 선언을 요구하는 형태로 교체했다. PRD §4.2, §5.1, §5.7,
+§11.4, §11.6, §12.3, §15 P8, §16.2, §17.2가 함께 갱신되었다.
+
+**perp·담보 보류 (O5).** 현재 범위 밖이다. 도입 시 §7.12의 선언 항목을 늘리는 형태여야 하며 engine
+구조 변경을 요구해서는 안 된다는 제약만 남긴다.
+
+**polars 기각 (O2).** 횡단면 batch 접근에서 이득이 크지 않다고 판단했다. 저장 Parquet / 질의 duckdb /
+계산·경계 pandas로 간다. 대가는 vnpy signal 연산 30여 개가 복사가 아니라 pandas 재작성이 된다는 것이며
+§14에 †로 표시했다.
+
+**FillConvention 분리.** Executor가 정하는 것은 일정이고 체결가 규약은 별도 축이다. 둘을 묶으면 종가
+체결을 시가 체결로 바꾸는 데 executor를 새로 써야 한다. `CloseFill`을 기본으로 두되 **낙관적 가정임을
+명시**하고, 사용된 convention identity를 result에 기록한다. Convention 교체는 alpha부터 ledger까지 어느
+계약에도 영향을 주지 않는다.
+
+**pub/sub 보류 근거 확정 (O6).** 한 event의 수신자가 둘뿐이고 이름을 안다. 전환 비용이 발행 지점 1곳
+교체에 그치고 judge·ledger 계약이 불변이므로 미룰 수 있다. 반대로 `available_at`, clock 분리,
+`(결과, 진단)` 반환, 시간 축 순차는 나중에 추가하면 정보를 잃으므로 미루지 않았다. 판단 기준은
+**"나중에 추가하면 정보를 잃는가"** 이다.

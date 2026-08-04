@@ -50,8 +50,8 @@ Engine은 백지에서 설계하지 않고 다음 reference에서 검증된 부�
 - Qlib version pinning, upstream compatibility, upgrade gate와 native-vs-adapted 분류를
   요구하는 서술은 더 이상 적용되지 않는다. 해당 자리에는 qlibx engine 자체의 characterization
   test와 artifact compatibility gate가 들어간다.
-- Qlib의 long-only stock position 제약에서 파생된 요구사항(matched capitalization 계열)은
-  engine 소유권 이전으로 전제가 사라졌다. 별도 product decision으로 재정의한다.
+- Qlib의 long-only stock position 제약에서 파생되었던 matched capitalization 요구사항은 §7.12
+  instrument capability declaration으로 대체되었다.
 - `qrun`, Qlib Recorder와 Qlib config factory에 대한 서술은 optional interoperability이며
   required capability가 아니다.
 
@@ -479,8 +479,12 @@ responsibility ordering은 필요하지만 내부 plane, service 또는 package 
 2. Signed basket return과 factor-return analysis
 3. Orders, Position, Account와 actual fill을 통과하는 executable short portfolio
 
-앞의 두 층은 signed alpha research에 사용할 수 있다. Qlib 0.9.7의 표준 stock Position은 negative quantity를
-지원하지 않으므로 세 번째 층의 native borrow, margin, recall 또는 securities lending을 의미하지 않는다.
+앞의 두 층은 signed alpha research에 사용할 수 있으며 account를 경유하지 않으므로 instrument의 short
+capability와 무관하게 성립한다.
+
+세 번째 층은 instrument가 선언한 position direction constraint(§7.12)에 따른다. `hypothetical_short`
+instrument의 음수 position은 research 관측을 위한 것이며 borrow, 담보, 차입 비용과 locate 가능성을
+모델링하지 않는다. 이를 executable short로 표시하지 않는다.
 
 ### 4.3 Actual state가 authority다
 
@@ -548,7 +552,7 @@ Config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 - Constraint declaration, best-effort adjustment, pre-execution validation과 finding contracts
 - Signed alpha diagnostics와 long-only physical construction
 - ETF/index look-through와 cash residual
-- Qlib long-only account 안의 bounded matched-capitalization compatibility
+- Instrument capability declaration과 그 강제
 - Portable artifact envelope, dependency lineage, file-backed catalog와 reporting
 - Trigger, finalization, checkpoint와 resume policy
 - Production decision artifact, reconciliation, commit protocol과 monitoring analysis
@@ -621,17 +625,23 @@ coordinator로 사용하지 않는다. Qlib Recorder는 runtime sink로 사용�
 현재 product scope는 주식과 ETF다.
 
 - Cross-sectional signed signal과 alpha research
-- Qlib-compatible ML training and inference
+- ML training and inference (model implementation은 project 소유, §5.3)
 - Stored signal/alpha reuse와 ensemble
 - Long-only enhanced-index physical portfolio
+- `hypothetical_short` instrument를 사용하는 signed research (§7.12)
 - ETF opaque execution과 PIT constituent data가 있을 때의 look-through
-- Qlib long-only account 안의 bounded matched-capitalization profile
 - Historical backtest와 portable research catalog
 - Selective decision trigger, explicit hold와 dense actual-account evidence
 - Best-effort constraint adjustment, pre-execution validation과 independent monitoring artifacts
 - Local-storage-based production decision/OMS boundary
 
-Native borrow, margin, recall, forced buy-in, borrow fee와 direct broker execution ownership은 범위 밖이다.
+Instrument capability declaration(§7.12)은 이 범위 안에서 확장 가능한 형태로 설계한다. 다만 다음은
+현재 범위 밖이며 별도 product decision으로 다룬다.
+
+- `real_short`에 필요한 borrow 가능성, 담보와 차입 비용 모델
+- Margin account, leverage와 강제청산
+- Perpetual/futures의 funding, 계약 단위와 expiry
+- Direct broker execution ownership
 
 ## 6. User, agent and config-driven workflow
 
@@ -1032,6 +1042,48 @@ implementation과 data binding을 검사하며, evaluation 시 actual value, mis
 Stored account history를 새 constraint로 재평가할 수 있다. 당시 적용된 constraint/version을 복원하는
 `as-was` evaluation과 새 constraint를 과거 state에 적용하는 `as-if` evaluation을 별도 semantics와 lineage로
 구분한다.
+
+### 7.12 Instrument capability declaration
+
+qlibx는 하나의 asset class에 고정되지 않는다. Instrument는 1급 개념이며, 각 instrument는 자신을 보유하고
+거래하고 평가하는 데 필요한 semantics를 **capability로 선언**한다. Engine은 그 선언만 소비하며 instrument
+종류를 하드코딩하지 않는다.
+
+Instrument capability는 최소한 다음을 선언한다.
+
+- Stable instrument ID와 declaration version
+- Quantity unit과 contract/lot size
+- Price convention, valuation source와 currency
+- **Position direction constraint** — 허용되는 보유 방향과 그 근거
+- Cost schedule과 tax/fee semantics
+- Tradability rule과 settlement convention
+- Corporate-action applicability
+- 선언되지 않은 항목은 unknown이며 추측하지 않는다
+
+#### Short capability
+
+Position direction constraint는 세 값을 갖는다. 이것이 §4.2의 layer 구분을 instrument 속성으로 표현한 것이다.
+
+- `long_only` — 음수 보유를 허용하지 않는다. Short intent는 physical construction에서 해소되어야 한다.
+- `hypothetical_short` — 음수 weight와 음수 position을 research 목적으로 허용하되, 실제 borrow, 담보,
+  차입 비용과 locate 가능성을 모델링하지 않는다. 이 instrument의 음수 position에 의존한 모든 result는
+  **hypothetical로 표시**되며 execution profile에서는 거부된다.
+- `real_short` — borrow 가능성, 담보와 비용이 선언된 데이터로 뒷받침되는 executable short.
+
+Short capability가 선언되지 않은 instrument는 `long_only`로 취급한다. Unknown을 shortable로 추측하지
+않는다(§7.7과 같은 원칙).
+
+`hypothetical_short` result를 `real_short` result와 같은 성과로 비교하거나 promotion 근거로 사용할 수
+없다. Artifact는 각 instrument의 declaration identity를 lineage에 기록한다.
+
+#### 확장 규칙
+
+새 asset class는 instrument ID를 추가해서 지원하지 않는다. Valuation, quantity/contract unit, settlement,
+expiry, margin, corporate action, cost와 risk semantics를 capability로 정의하고, engine이 그 선언을 소비할 수
+있음을 증명해야 한다.
+
+Engine이 해석할 수 없는 capability를 선언한 instrument는 `unsupported`로 실패한다. 부분적으로 해석해
+실행하지 않는다.
 
 ## 8. Signal and model research
 
@@ -1486,67 +1538,28 @@ skip/failure reason을 모두 포함한다.
 Conversion이 proposed quantity나 cash를 변경하면 final pre-execution validator가 converted result를 평가한다.
 Unresolved error finding과 approved override가 모두 없는 상태에서 Qlib `TradeDecision`을 제출하지 않는다.
 
-### 11.4 Qlib long-only limitation
+### 11.4 Position direction과 instrument declaration
 
-Qlib 0.9.7 표준 stock Position은 미보유 SELL과 보유 quantity 초과 SELL을 허용하지 않는다. qlibx는 Qlib이
-native stock short, borrow, margin 또는 securities lending을 지원한다고 주장하지 않는다.
+Position이 음수 수량을 가질 수 있는지는 engine의 고정 속성이 아니라 instrument가 선언하는 capability다
+(§7.12). Engine은 선언을 읽어 강제하며 asset class를 하드코딩하지 않는다.
 
-Signed alpha의 권장 physical path는 long-only enhanced-index construction이다. Matched capitalization은 signed
-active execution을 제한적으로 관측하기 위한 별도 compatibility profile이지 native short simulator가 아니다.
+- `long_only` — 미보유 SELL과 보유 초과 SELL을 거부한다. Signed alpha의 short intent는 physical
+  construction 단계에서 해소되어야 하며, 권장 경로는 long-only enhanced-index construction이다.
+- `hypothetical_short` — 음수 position을 허용하되 borrow, 담보, 차입 비용과 locate를 모델링하지 않는다.
+  해당 position에 의존한 result는 hypothetical로 표시되고 execution profile에서 거부된다.
+- `real_short` — 현재 범위 밖이다(§5.7). 선언 항목이 갖춰지기 전에는 `unsupported`로 실패한다.
 
-### 11.5 Matched-capitalization accounting
+Declaration을 확인하지 않고 음수 position을 허용하거나, `hypothetical_short` 결과를 executable short로
+표시하지 않는다.
 
-Compatibility profile은 다음 quantity를 분리한다.
-
-\[
-A = active\ signed\ quantity
-\]
-
-\[
-B = baseline\ endowed\ quantity, \quad B \ge 0
-\]
-
-\[
-C = Qlib\ composite\ quantity = B + A, \quad C \ge 0
-\]
-
-Qlib Account는 `C`만 소유한다. qlibx는 `B`, `A=C-B`, capitalization event와 active/composite reconciliation을
-소유한다.
-
-### 11.6 Canonical dynamic matched capitalization
-
-Dynamic profile은 필요한 baseline capacity를 activation 시점에 명시적인 capitalization event로 제공한다.
-
-1. Alpha/portfolio policy가 signed active target `A_target`을 만든다.
-2. `B + A_target >= 0`을 만족하는 baseline requirement를 계산한다.
-3. Baseline stock과 matching cash financing을 같은 event와 valuation price로 기록한다.
-4. Event 직전과 직후 economic NAV가 변하지 않도록 reconcile한다.
-5. Qlib에는 `C_target = B + A_target`만 제출한다.
-6. Active short 진입과 cover는 Qlib Exchange의 actual SELL/BUY dealt quantity로만 바뀐다.
-7. Baseline release는 active cover가 실제 체결되고 invariant가 유지된 뒤에만 수행한다.
-
-Qlib 0.9.7에는 exchange fill 없이 run 중간에 stock/cash를 함께 주입하는 표준 administration hook이 없다.
-따라서 dynamic profile은 qlibx-owned capitalization event, account metric reconciliation과 explicit limitation을
-제공해야 한다. 이것이 증명되지 않으면 해당 profile은 unsupported다.
-
-### 11.7 Optional static initial-endowment profile
-
-Static profile은 run 시작 전에 fixed baseline quantity를 Qlib initial Position에 넣는 bounded mode다.
-
-- Universe와 maximum active short capacity를 run 전에 고정한다.
-- Starting stock value와 matching financing을 명시한다.
-- Capacity breach는 명시적으로 실패한다.
-- 새 instrument activation이나 dynamic top-up을 지원한다고 주장하지 않는다.
-- Full dynamic compatibility profile과 같은 status로 표시하지 않는다.
-
-### 11.8 Initial-position accounting
+### 11.5 Initial-position accounting
 
 Initial cash와 stock endowment가 있으면 first return denominator, marked starting NAV와 initial Position state가
 일치해야 한다. Default field를 그대로 사용해 첫 bar return을 왜곡하지 않는다.
 
 Resume 시 previous NAV denominator와 accumulated metrics도 uninterrupted run과 일치해야 한다.
 
-### 11.9 Active performance와 limitations
+### 11.6 Active performance와 limitations
 
 Composite account return과 signed active strategy return은 다르다. Analysis는 baseline, composite와 active
 economics를 분리한다.
@@ -1558,7 +1571,7 @@ economics를 분리한다.
 - Capitalization event neutrality
 - Intended versus realized active exposure
 
-Matched capitalization은 다음을 모델링하지 않는다.
+`hypothetical_short` profile은 다음을 모델링하지 않으며 result와 report에 명시한다.
 
 - Locate/borrow availability
 - Margin/collateral
@@ -1568,7 +1581,7 @@ Matched capitalization은 다음을 모델링하지 않는다.
 
 Result와 report에 limitation을 명시한다.
 
-### 11.10 Settlement와 corporate action
+### 11.7 Settlement와 corporate action
 
 Settlement, adjusted price, quantity factor, dividend, split, delisting과 corporate-action semantics가 확인되지
 않으면 exchange 또는 broker behavior를 추측하지 않는다. Qlib settlement option을 사용하기 전에 selected
@@ -1647,7 +1660,7 @@ reports/
 - Fill and execution diagnostic
 - Position/account snapshot
 - Actual-account constraint monitoring finding
-- Matched-capitalization event and reconciliation
+- Instrument capability declaration snapshot
 - Checkpoint/resume state
 - Analysis tables and report manifest
 - Production prepared decision and OMS result
@@ -2168,15 +2181,20 @@ Finding이 remediation 또는 다음 strategy trigger에 사용되면 explicit d
 - Nested execution에서도 PIT boundary와 account metric frequency를 검증한다.
 - Checkpoint/resume result가 uninterrupted run과 reconcile된다.
 
-### P8 — Signed execution compatibility
+### P8 — Instrument capability and signed execution
 
-- Dynamic matched capitalization이 `C=B+A`, `B>=0`, `C>=0`을 유지한다.
-- Activation/top-up/release event가 NAV-neutral이고 auditable하다.
-- Active short 진입/cover는 Qlib actual SELL/BUY dealt quantity로만 변한다.
-- Blocked cover 뒤 baseline을 유지하고 actual cover 뒤에만 release한다.
-- Insufficient reserve와 negative composite target은 명시적으로 실패한다.
-- Active performance를 composite denominator로 희석하지 않는다.
-- Static profile은 fixed capacity와 limitation을 명시하며 dynamic profile로 가장하지 않는다.
+- Instrument가 quantity unit, price convention, position direction constraint, cost, tradability와
+  settlement를 declaration으로 제공하고 engine이 asset class를 하드코딩하지 않는다.
+- 선언되지 않은 short capability는 `long_only`로 취급하며 unknown을 shortable로 추측하지 않는다.
+- `long_only` instrument는 미보유 SELL과 보유 초과 SELL을 거부한다.
+- `hypothetical_short` instrument의 음수 position이 허용되고, 그 position에 의존한 result가
+  hypothetical로 표시되며 execution profile에서 거부된다.
+- `hypothetical_short` result를 `real_short` result와 같은 성과로 비교하거나 promotion 근거로 사용할 수
+  없다.
+- Engine이 해석할 수 없는 capability를 선언한 instrument는 `unsupported`로 실패하며 부분 해석해
+  실행하지 않는다.
+- Artifact가 소비한 instrument declaration identity를 lineage에 기록한다.
+- Dollar-neutral signed portfolio의 수익률 분모는 gross로 계산하고 그 규약을 result에 기록한다.
 - Initial/first-resume metric denominator가 marked starting NAV와 일치한다.
 
 ### P9 — Artifacts, extensions and reporting
@@ -2243,7 +2261,7 @@ Manual characterization lifecycle을 제거하기 전에 다음 evidence가 있�
 - Constraint adjustment/validation finding parity
 - Dense non-trigger monitoring parity
 - Checkpoint/resume parity
-- Dynamic matched-capitalization reconciliation
+- Instrument capability declaration 강제 동작
 - Bounded performance regression
 - Rollback path
 
@@ -2282,8 +2300,12 @@ feedback ordering, trigger/monitoring clock separation, constraint authority와 
 
 ### 17.2 Asset-class expansion
 
-새 asset class는 instrument ID만 추가해서 지원하지 않는다. Valuation, quantity/contract unit, settlement, expiry,
-margin, corporate action, cost와 risk semantics를 별도 capability로 정의해야 한다.
+새 asset class는 instrument ID만 추가해서 지원하지 않는다. §7.12의 instrument capability declaration으로
+valuation, quantity/contract unit, settlement, expiry, margin, corporate action, cost와 risk semantics를
+정의하고, engine이 그 선언을 소비할 수 있음을 증명해야 한다.
+
+우선순위가 확인된 확장 후보는 `real_short`(borrow/담보/차입 비용)와 perpetual/futures(funding, 계약 단위,
+강제청산)다. 둘 다 §7.12의 선언 항목을 늘리는 형태이며 engine 구조 변경을 요구하지 않아야 한다.
 
 ### 17.3 AI-defined runtime policy
 

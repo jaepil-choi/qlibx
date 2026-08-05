@@ -26,6 +26,71 @@ Only after the normal path fails:
 6. Apply the patch, verify the resulting diff immediately, and remove only the task-specific
    temporary executable after the final patch succeeds.
 
+## Preflight for `--codex-run-as-apply-patch PATCH`
+
+Treat executable mode, patch grammar, and Windows argument length as separate preconditions. Check
+all three before retrying a real edit.
+
+### 1. Preserve the wrapper's mode flag
+
+If `apply_patch.bat` invokes:
+
+```bat
+"...\codex.exe" --codex-run-as-apply-patch %*
+```
+
+invoke the resolved or task-specific copied executable with both the mode flag and the complete
+patch argument:
+
+```powershell
+& $taskPatchExe --codex-run-as-apply-patch $patch
+```
+
+Do not invoke that executable as `& $taskPatchExe $patch`. That starts normal Codex CLI behavior
+instead of apply-patch mode and can produce unrelated TTY or local-state-database errors. Diagnose
+those errors as an invocation-contract failure before blaming the document, sandbox, or database.
+A no-op patch may return nonzero because no file changed; establish the contract from the wrapper
+and actual error text rather than treating a no-op exit code as the primary proof.
+
+### 2. Validate update-hunk grammar before launching
+
+An update patch needs an `@@` marker before changed lines. Every line inside the hunk must begin
+with `-`, `+`, or a context space:
+
+```text
+*** Begin Patch
+*** Update File: path/to/file
+@@
+-old text
++new text
+*** End Patch
+```
+
+Before invoking the executable, inspect a bounded numbered preview of the generated payload. Check
+that `*** Begin Patch`, the file directive, `@@`, prefixed hunk lines, and `*** End Patch` appear in
+that order. Do not retry an invalid payload through a different privilege boundary.
+
+When PowerShell generates a full-section hunk, parenthesize the split before piping so every line
+gets its prefix:
+
+```powershell
+$oldLines = (($oldSection -split "`n") | ForEach-Object { '-' + $_ }) -join "`n"
+$newLines = (($newSection -split "`n") | ForEach-Object { '+' + $_ }) -join "`n"
+```
+
+Do not write `($oldSection -split "`n", -1 | ForEach-Object { ... })`; PowerShell operator
+precedence can leave all but the first line unprefixed.
+
+### 3. Keep the single PATCH argument bounded
+
+When the build requires `PATCH` as one argument, Windows command-line limits still apply. Split a
+large edit into deterministic file- or section-sized patches before invocation. If process launch
+fails with `The filename or extension is too long`, reduce the patch argument; do not switch to
+standard input when the inspected executable contract requires an argument.
+
+After each smaller patch, run `git diff --check` and inspect the affected headings or lines before
+continuing. Do not reapply a section that already succeeded.
+
 Do not substitute `git apply`, a search-and-replace script, or direct file rewriting merely to
 bypass a broken Codex wrapper. Do not copy an executable or switch to an ASCII path before the
 ordinary method has actually failed on the current machine.

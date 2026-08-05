@@ -93,90 +93,169 @@ PRD → architecture → validation의 연결을 유지한다. CI는 두 문서�
 
 ## 2. 멘탈 모델
 
-### 2.1 Authoritative runtime state는 셋뿐이다
+### 2.1 월말 전략 하나를 끝까지 따라간다
 
-```
-① Clock              지금 몇 시인가        — 시간을 움직이는 유일한 주체
-⑤ Ledger / Memory    무엇을 갖고 있는가    — 커밋되는 상태 저장소
-```
+예를 들어 매 거래일 장 마감 뒤 signal을 계산하지만, 월말에만 주문을 결정하고 다음 거래일 종가에
+체결하는 Strategy를 생각한다.
 
-여기서 말하는 state는 다음 decision의 의미를 바꾸는 **authoritative runtime state**다. Catalog는
-append-only durable evidence를 저장하지만 latest file이나 publication 자체가 Position, cash 또는 Strategy
-memory authority를 대신하지 않는다.
+```text
+등록된 PIT data
+(daily/monthly OHLCV, return, stored artifact)
+          │
+          ▼
+Clock-bound View ──→ Strategy ──→ immutable DecisionIntent
+          ▲                              │
+          │                              ▼
+          │                       ExecutionProfile
+          │                              │
+          │                              ▼
+          │                    result + diagnostics
+          │                              │
+          │                         Flow commit
+          │                              │
+          └── 다음 decision feedback ─ Ledger / Memory
 
-Clock과 두 store 사이에 **view**가 있다. View는 상태를 갖지 않지만 clock에 묶여 있어서, 조회 결과가
-clock의 위치에 따라 달라진다.
-
-```
-③ View      무엇을 볼 수 있는가   — 읽기 전용. clock 이 경계를 정한다.
-```
-
-나머지 component는 **계산만 한다**. Flow는 선택한 operation을 조립하고 Ledger/Memory commit과
-artifact publication을 명시적으로 호출한다.
-
-- 시간을 스스로 알아내지 않는다 (`datetime.now()`를 부르지 않는다)
-- 커밋되는 상태를 직접 쓰지 않는다
-- store에 직접 접근하지 않는다 (반드시 view 경유)
-
-부품이 몇 개로 늘어나든 규율을 지킬 곳은 clock, view, 두 authoritative state store와 append-only
-publication boundary다.
-
-### 2.2 여섯 layer
-
-```
-┌──────────────────────────────────────────────────────┐
-│ ① kernel    Clock · Event · Queue                    │  시간
-├──────────────────────────────────────────────────────┤
-│ ② flow      on_decision / on_mark / on_monitor       │  순서
-│             Executor (sub-flow)                       │
-├──────────────────────────────────────────────────────┤
-│ ③ view      clock-bound facade · 횡단면 패널 조회     │  시야  ★
-├──────────────────────────────────────────────────────┤
-│ ④ operation Strategy · Model · construct · analyze    │  계산
-│             adjust · validate · exchange.match        │
-├──────────────────────────────────────────────────────┤
-│ ⑤ ledger    Position · Account · Trade · Memory       │  상태
-├──────────────────────────────────────────────────────┤
-│ ⑥ evidence  Artifact · Catalog · Lineage             │  증거
-└──────────────────────────────────────────────────────┘
+각 단계의 input, assumption, result와 failure ──→ Evidence
 ```
 
-부수효과를 시작할 수 있는 곳은 **② flow뿐**이다. ③④는 순수하고, ⑤⑥은 flow가 좁은 commit/publication
-port로만 변경하는 저장소다. 어떤 ④ operation을 부르는지는 invocation이 선택한 workflow에 달려 있으며
-모든 run이 `Strategy → construct → convert → validate → execute`를 통과하지 않는다.
+실행 순서는 다음과 같다.
 
-`on_decision`이 길어지면 계산이 flow로 흘러들어온 신호다.
-
-### 2.3 흐름과 되먹임
-
-```
-   Clock ──tick──→ Flow ──view──→ Operation ──(result, diag)──→ Ledger ──→ Evidence
-     │                 ↑                                      │
-     │                 └──── view 는 ledger 를 읽는다 ─────────┘
-     └──── clock 위치가 view 의 조회 경계를 정한다
+```text
+매 거래일 장 마감      MATERIALIZE callback → 그날까지 available한 data로 signal 저장
+월말 마지막 거래일     DECISION callback    → signal과 actual state로 DecisionIntent 확정
+다음 거래일 종가       EXECUTION callback   → 미리 확정된 intent를 선택한 가정으로 결과화
+다음 decision          StrategyView          → commit된 실제 결과와 prior Memory를 읽음
 ```
 
-되먹임 edge가 PRD §2.4 closed loop이다. 다음 decision은 requested target이 아니라 **ledger의 실제
-상태**를 view를 통해 읽는다. 초안과 달리 flow가 snapshot을 조립해 넘기지 않고, operation이 view로
-필요한 시점에 조회한다.
+여기서 월말은 달력의 마지막 날이 아니라 **마지막 거래 session**이다. 다음 거래일 종가는 Strategy input이
+아니다. 월말에 freeze된 DecisionIntent를 결과화하는 execution input이다. Executor가 다음날 가격·현금으로
+수량이나 Fill을 계산할 수 있지만 그 가격으로 Strategy intent를 다시 계산하지 않으면 Strategy look-ahead가 아니다.
 
-### 2.4 Instrument, Exchange와 경제적 cash flow
+### 2.2 여섯 질문을 섞지 않는다
 
-네 역할을 섞지 않는다.
+| 질문 | 책임 | 예 |
+|---|---|---|
+| 어떤 data가 존재하는가 | Registry | daily/monthly OHLCV, close-close return, stored signal |
+| 지금 무엇을 볼 수 있는가 | Clock + View | `available_at <= evaluation_time`, resolved requirement |
+| 무엇을 보유하고 싶은가 | Strategy | signed weight, target, `DecisionIntent` |
+| 언제·어떻게 결과화하는가 | ExecutionProfile | next close/open, cost, liquidity, hypothetical convention |
+| 실제로 무엇이 됐는가 | Ledger + Memory | Fill, Position, cash, NAV, committed feedback |
+| 무엇을 근거로 계산했는가 | Evidence | data identity, lineage, assumption, limitation, failure |
+
+**Strategy look-ahead는 View 경계가 결정하고 execution realism은 ExecutionProfile이 결정한다.** Daily 또는
+monthly bar를 쓰거나 단순 종가 체결을 선택했다는 사실만으로 Strategy look-ahead가 발생하지 않는다. 반대로
+정교한 intraday executor를 써도 View가 미래 observation을 보여주면 look-ahead다.
+
+같은 immutable DecisionIntent를 daily close, next open, intraday partial-fill 또는 academic profile이 각각
+처리할 수 있다. Strategy result는 같고 execution result와 이후 actual state만 달라진다. Signal이나 weight만
+분석하는 research는 ExecutionProfile과 Ledger mutation 없이 Evidence publication에서 정상 종료할 수 있다.
+
+### 2.3 Clock, callback과 View
+
+Callback의 business logic은 Flow가 소유하고 Clock은 event 시각, priority와 callback reference를 queue에서
+관리한다. Runtime loop가 Clock이 반환한 handler를 순서대로 호출한다.
+
+```text
+Engine / Flow가 callback 등록
+          ↓
+Clock이 다음 event 시점으로 이동
+          ↓
+Handler(Event, callback)를 priority 순서로 반환
+          ↓
+Runtime loop가 Flow callback 호출
+          ↓
+Flow가 scoped View를 만들고 Operation 실행
+```
+
+월말 session에는 `MATERIALIZE`를 `DECISION`보다 앞선 priority로 실행할 수 있다. `DECISION`은
+DecisionIntent를 확정한 뒤 Executor가 만든 다음 거래일 종가 `EventSpec`을 Clock에 등록한다. `EXECUTION` callback은 그
+시각의 `ExecutionView`로 가격과 policy를 읽고 결과를 commit한다.
+
+View에는 두 문이 있다.
+
+```text
+시간 경계   available_at <= clock.now()인가      → 모든 View에 공통
+역할 경계   이번 Operation이 선언한 binding인가  → View 종류와 resolved requirement가 결정
+```
+
+Close-close return $r_t$는 ending close가 공개되기 전에는 available하지 않다. $r_t$를 보고 만든 weight
+$w_t$는 같은 $r_t$가 아니라 다음 기간 $r_{t+1}$에 적용한다.
+
+Operation은 시간을 스스로 읽거나 store에 직접 접근하지 않고 Ledger, Memory 또는 Evidence를 직접 쓰지
+않는다. Flow가 typed result와 diagnostics를 받은 뒤 허용된 commit/publication port를 호출한다.
+
+### 2.4 세 authority, 두 mutable state store와 여섯 layer
+
+Runtime truth에는 세 authority가 있지만 mutable state store는 둘뿐이다.
+
+```text
+Clock     지금 몇 시인가                 — event 순서와 조회 cutoff의 시간 authority
+Ledger    실제로 무엇을 갖고 있는가      — Position, cash, NAV의 account authority
+Memory    Strategy가 무엇을 기억하는가   — commit된 strategy state의 authority
+
+mutable state store = Ledger + Memory
+```
+
+Catalog와 Artifact는 authority를 대신하지 않는 append-only Evidence다. 영수증이 계좌 잔액 자체가 아닌 것과
+같다. Strategy는 Ledger나 Memory를 직접 변경하지 않고 StrategyView로 commit된 state를 읽으며 proposed
+Memory를 result로 반환한다. Flow가 workflow finalization에 맞춰 이를 commit한다.
+
+| layer | 답하는 질문 | 주요 책임 |
+|---|---|---|
+| ① kernel | 언제 실행하는가 | Clock, Event, Queue, deterministic priority |
+| ② flow | 어떤 순서로 실행하고 무엇을 확정하는가 | callback, direct invocation, Executor sub-flow, commit/publication |
+| ③ view | 무엇을 볼 수 있는가 | clock-bound facade, PIT와 role boundary, access lineage |
+| ④ operation | 무엇을 계산하는가 | Strategy, Model, construct, analyze, validate, exchange.match |
+| ⑤ state | 실제 state는 무엇인가 | Ledger와 Memory |
+| ⑥ evidence | 무엇을 근거로 재현하는가 | Artifact, Catalog, Lineage, diagnostics |
+
+부수효과를 시작할 수 있는 곳은 **② flow뿐**이다. ③④는 순수하고, ⑤⑥은 Flow가 좁은 port로만
+변경한다. Flow는 Clock callback뿐 아니라 dataset registration, analysis, report 같은 direct API/CLI
+invocation도 orchestration한다. 모든 run이 `Strategy → construct → convert → validate → execute`를 통과하지
+않으며, `on_decision`이 길어지면 계산이 Flow로 흘러들어온 신호다.
+
+Ledger에서 View를 거쳐 다음 decision으로 돌아오는 edge가 PRD §2.4 closed loop다. 다음 decision은 requested
+target이 아니라 **commit된 실제 상태**를 읽는다.
+
+### 2.5 Data granularity는 research capability다
+
+Dataset registration은 data를 특정 executor에 맞춰 왜곡하지 않고 실제 의미를 기록한다.
+
+| 보유 data | 가능한 research | 조용히 주장하면 안 되는 것 |
+|---|---|---|
+| daily OHLCV | daily 또는 더 낮은 빈도의 signal, next-bar convention, daily mark | intraday path, order-book liquidity |
+| monthly OHLCV | monthly signal·rebalance·return | daily drawdown, daily tradability, 월중 체결 path |
+| close-close return | IC, factor/portfolio return, attribution, hypothetical NAV | observed quote, share quantity, market volume |
+
+최소 계약은 instrument axis, interval/event time, `available_at`, semantic category와 source provenance다. Return은
+period start/end, gross/net/excess, currency와 compounding convention을 추가로 선언한다. OHLCV, lot, volume와
+tradability는 이를 실제로 사용하는 Operation이 requirement로 요구하며 단순 return research를 막는 전역 필드가
+아니다.
+
+Return-only research는 가격 없이 완결될 수 있다. 전기 weight로 다음 기간 return을 적용한다.
+
+$$
+R_{p,t+1}=\sum_i w_{i,t}r_{i,t+1}
+$$
+
+가격, 수량, lot과 cash clipping이 필요한 physical execution은 그 binding이 없으면 실패해야 한다. 반면
+academic profile은 아래의 명시적 synthetic-price 경로를 선택할 수 있다.
+
+### 2.6 Instrument, Exchange와 Factor synthetic price
 
 | 역할 | 답하는 질문 | 예 |
 |---|---|---|
-| Instrument | 이것은 어떤 경제적 계약인가 | Equity, ETF, Future, PerpetualSwap, Index |
-| Exchange / execution venue | 이 venue/profile에서 어떻게 거래되는가 | listing, tradability, lot, fee/tax policy |
-| Clock / flow | 언제 계산하고 commit하는가 | EXECUTION, SETTLEMENT, FUNDING, EXPIRY |
-| Ledger | 실제로 무엇이 바뀌었는가 | Fill, cash flow, position delta, NAV |
+| Instrument | 이것은 어떤 경제적 계약 또는 exposure인가 | Equity, ETF, Future, PerpetualSwap, Index, Factor |
+| Exchange / profile | 이 profile에서 어떻게 결과화하는가 | listing, tradability, lot, fee/tax, hypothetical convention |
+| Clock / flow | 언제 계산하고 commit하는가 | DECISION, EXECUTION, SETTLEMENT, FUNDING, EXPIRY |
+| Ledger | 실제 또는 명시적 hypothetical state가 어떻게 바뀌었는가 | Fill, cash flow, position delta, NAV |
 
-Instrument는 immutable contract와 static semantics를 제공한다. Exchange는 instrument를 listing으로 등록하고
-venue/profile/effective-time에 따른 execution policy를 적용한다. 시변 가격, funding rate와 valuation input은
-clock-bound view에서 읽는다. 같은 Index도 일반 profile에서는 tracking-only이고 명시적 academic profile에
+Instrument는 immutable contract와 static semantics를 제공한다. Exchange는 listing과
+venue/profile/effective-time policy를 적용한다. 시변 가격, return, funding rate와 valuation input은
+clock-bound View에서 읽는다. 같은 Index도 일반 profile에서는 tracking-only이고 명시적 academic profile에
 등록되면 hypothetical execution 대상이 될 수 있다.
 
-Architecture의 concrete type 후보는 다음과 같다. PRD가 이 hierarchy를 강제하지 않으며, stock/ETF 밖의
+Architecture의 concrete type 후보는 다음과 같다. PRD가 이 hierarchy를 강제하지 않으며 stock/ETF 밖의
 항목은 future extension이다.
 
 ```text
@@ -190,6 +269,33 @@ Instrument
     └── PerpetualSwap
         └── CryptoPerpetual
 ```
+
+`Factor`는 가상의 tracking portfolio를 나타내는 return-native Instrument다. 원천 observation은 기간별
+factor return이며 observable market quote를 요구하지 않는다. Return-based analysis는 이 observation을 직접
+소비한다.
+
+Price-oriented execution 경로를 재사용해야 하면 deterministic transform이 normalized
+`SyntheticUnitPrice`를 만들 수 있다.
+
+$$
+P_0=b>0, \qquad P_t=P_{t-1}(1+r_t)
+$$
+
+이 값은 observed market price가 아니라 **derived unit NAV**다. Derived binding은 source return identity,
+base $b$, period/compounding convention, missing-period policy, transform version과 `available_at`을 보존한다.
+`available_at`은 source return보다 이를 수 없고 전체 경로에서 $P_t>0$이어야 한다. 조건을 만족하지 않으면
+price-compatible profile은 unsupported로 실패하고 return-native research만 허용한다.
+
+Future extension의 Academic profile은 validated `SyntheticUnitPrice` binding과 명시적인 unit, fractional/lot,
+cost와 liquidity assumption이 있을 때 Factor를 hypothetical listing으로 받아 기존 quantity/Fill/Ledger 경로를
+재사용할 수 있다. Result는 synthetic source와 profile limitation을 표시한다. Base를 100에서 1,000으로
+바꾸면 quantity만 1/10로 바뀌고 gross exposure와 pre-cost return은 같아야 한다. Cost policy는 notional-based
+이거나 별도의 base-invariance를 증명해야 하며 exact Factor/profile rule이 없으면 실패한다. 일반 Exchange는
+synthetic value를 market quote로 취급하거나 Factor를 silently tradable로 만들지 않는다.
+
+`ETF <: Equity`는 상품 taxonomy와 코드 재사용 관계일 뿐 Exchange transaction cost policy의 상속 규칙이
+아니다. Cost policy는 exact concrete product selector로 해석한다. ETF cost rule이 없으면 unsupported로
+실패하며 Equity cost rule로 fallback하지 않는다. ETF 비용이 0이어도 명시적인 ETF cost rule이 있어야 한다.
 
 `Future`만 expiry와 final settlement를 가지며 `PerpetualSwap`에는 expiry field 자체가 없다. 둘의 공통
 부모는 contract multiplier, settlement currency와 notional/PnL convention을 제공한다. 금리, 배당수익률,
@@ -708,7 +814,7 @@ qlibx의 기본 접근 단위는 **decision time의 횡단면**이다. 따라서
 반환   DataFrame (instrument × field)
 ```
 
-이 부분은 §14에서 여전히 ⚪다. 세 reference 어디에도 대응물이 없다.
+이 부분은 §14에서 여전히 순수 창작으로 분류한다. 세 reference 어디에도 대응물이 없다.
 
 ### 접근 기록이 lineage가 된다
 
@@ -825,9 +931,12 @@ engine.add_instrument(kodex_etf)
 ```
 
 `engine.add_instrument`는 stable ID와 concrete type을 registry에 넣고 `venue_id`의 Exchange에 listing을
-등록한다. Exchange는 instrument compatibility와 required policy coverage를 검증한다. Tracking-only Index나
-Factor는 명시적인 executable listing이 없으면 order를 거부한다. Future extension의 `AcademicExchange`는
-동일 객체를 hypothetical listing으로 받을 수 있지만 result에 profile identity를 남긴다.
+등록한다. Exchange는 instrument compatibility와 required policy coverage를 검증한다. Tracking-only Index는
+명시적인 executable listing이 없으면 order를 거부한다. Future extension의 `AcademicExchange`는 가격과 수량
+semantics를 명시한 Index만 hypothetical listing으로 받을 수 있고 result에 profile identity를 남긴다.
+Factor는 return-native이며 일반 Exchange는 이를 silently tradable로 만들지 않는다. Future Academic profile은
+validated `SyntheticUnitPrice` binding과 unit/lot, cost, liquidity assumption이 있을 때만 Factor를 hypothetical
+listing으로 받아 quantity/Fill 경로를 사용할 수 있다. Binding이 없으면 return-based research만 허용한다.
 
 Instrument와 Exchange model은 생성 시 한 번 검증되고 frozen된다. Engine build 단계는 lot, multiplier,
 currency, exact cost selector처럼 hot path에 필요한 static term을 stable instrument index의 array로 compile한다.
@@ -1324,9 +1433,12 @@ FillDiagnostic으로 돌아가므로 같은 config와 data에서 event 순서와
 
 다음 항목은 **현재 제품 acceptance가 아니라 미래 설계를 구속하는 characterization**이다.
 
-- **UC-ACADEMIC-001:** Index나 Factor는 기본 exchange에서 tracking-only다. `AcademicExchange`가 해당
-  Instrument를 명시적으로 listing한 경우에만 가상 체결할 수 있다. tradability는 Instrument의 본성이
-  아니라 Instrument와 Exchange의 관계다.
+- **UC-ACADEMIC-001:** Index는 기본 exchange에서 tracking-only다. `AcademicExchange`가 가격과 수량
+  semantics를 갖춘 해당 Instrument를 명시적으로 listing한 경우에만 가상 체결할 수 있다. tradability는
+  Instrument의 본성이 아니라 Instrument와 Exchange의 관계다.
+- **Factor synthetic-price extension:** Factor는 return-native tracking Instrument다. Future Academic profile은
+  validated `SyntheticUnitPrice`와 명시적인 unit/lot, cost, liquidity assumption이 있을 때만 hypothetical
+  Fill을 만들 수 있다. Synthetic source와 limitation을 evidence에 남기며 일반 Exchange는 listing을 거부한다.
 - **UC-FUTURE-001:** multiplier 250,000인 Future 1계약의 settlement price가 350에서 352로 움직이면
   variation margin `+500,000`이 lifecycle cash flow로 Ledger에 반영된다. expiry event는 최종 정산과
   포지션 종료를 유발한다.
@@ -1456,10 +1568,10 @@ monitoring은 outbox target이 아니라 reconciled account authority만 읽는�
 
 ## 14. 차용 출처 매핑
 
-범례: 🟢 코드 차용(MIT) / 🔵 설계만(LGPL 또는 부적합) / 🔴 반면교사 / ⚪ 순수 창작
+각 표의 마지막 열은 차용 방식을 `코드 차용`, `설계만`, `반면교사`, `순수 창작` 중 하나로 직접 표기한다.
 
-세 reference 모두 **dependency가 아니다.** qlibx는 engine을 직접 구현하며 reference에서는 설계와
-산술만 차용한다. 채택하지 않은 판단의 근거는 [[why-not-qlib-as-a-backend]]와
+세 reference 모두 **dependency가 아니다.** qlibx는 engine을 직접 구현하며 reference별 license와 아래
+분류에 따라 코드, 산술 또는 설계만 선택적으로 차용한다. 채택하지 않은 판단의 근거는 [[why-not-qlib-as-a-backend]]와
 [[why-not-nautilus-as-a-dependency]]에 있다.
 
 모든 line reference는 `references/` 아래 vendored snapshot 기준이다. 각 snapshot의 upstream commit은
@@ -1474,134 +1586,134 @@ monitoring은 outbox target이 아니라 reconciled account authority만 읽는�
 
 ### ① kernel
 
-| 항목 | 출처 | 위치 | |
+| 항목 | 출처 | 위치 | 차용 방식 |
 |---|---|---|---|
-| Clock 추상, TestClock, LiveClock | nautilus | `common/component.pyx` L130/L623/L839 | 🔵 |
-| `advance_time` → 시각순 정렬 반환 | nautilus | 같은 파일 L790 | 🔵 |
-| TimeEvent / TimeEventHandler | nautilus | L1013 / L1144 | 🔵 |
-| 동시각 priority | nautilus | `Subscription.priority` L2911 | 🔵 |
-| 단일 시간축 정렬 순회 | vnpy | `alpha/strategy/backtesting.py` L156-166 | 🟢 |
-| 단일 freq/step 캘린더 | qlib | `backtest/utils.py` L23 | 🔴 |
+| Clock 추상, TestClock, LiveClock | nautilus | `common/component.pyx` L130/L623/L839 | 설계만 |
+| `advance_time` → 시각순 정렬 반환 | nautilus | 같은 파일 L790 | 설계만 |
+| TimeEvent / TimeEventHandler | nautilus | L1013 / L1144 | 설계만 |
+| 동시각 priority | nautilus | `Subscription.priority` L2911 | 설계만 |
+| 단일 시간축 정렬 순회 | vnpy | `alpha/strategy/backtesting.py` L156-166 | 코드 차용 |
+| 단일 freq/step 캘린더 | qlib | `backtest/utils.py` L23 | 반면교사 |
 
 ### ② flow
 
-| 항목 | 출처 | 위치 | |
+| 항목 | 출처 | 위치 | 차용 방식 |
 |---|---|---|---|
-| 일단위 executor 골격 | qlib | `backtest/executor.py` L513, L561 | 🟢 |
-| 계층 위임 아이디어 | qlib | 같은 파일 L310 `NestedExecutor` | 🔵 |
-| 일별 순회 + 체결 루프 | vnpy | `alpha/strategy/backtesting.py` `new_bars` | 🟢 |
-| executor 교체 계약, 분할 실행 | nautilus | `execution/client.pyx`, `algorithm.pyx` | 🔵 |
-| **callback, FillSink** | — | — | ⚪ |
+| 일단위 executor 골격 | qlib | `backtest/executor.py` L513, L561 | 코드 차용 |
+| 계층 위임 아이디어 | qlib | 같은 파일 L310 `NestedExecutor` | 설계만 |
+| 일별 순회 + 체결 루프 | vnpy | `alpha/strategy/backtesting.py` `new_bars` | 코드 차용 |
+| executor 교체 계약, 분할 실행 | nautilus | `execution/client.pyx`, `algorithm.pyx` | 설계만 |
+| **callback, FillSink** | — | — | 순수 창작 |
 
 ### ③ view ★
 
-> **초안 정정.** 이 표는 원래 "Context 3종, cutoff, bounded load — 어디에도 대응물 없음 ⚪"과
+> **초안 정정.** 이 표는 원래 "Context 3종, cutoff, bounded load — 어디에도 대응물 없음(순수 창작)"과
 > "nautilus에는 Context 객체 자체가 없어 PIT가 구조로 강제되지 않는다"고 기술했다. **후자는
 > 사실이 아니다.** nautilus는 Context 객체 대신 이중 timestamp와 `ts_init` 정렬 stream으로 같은
 > 보장을 제공하며, 이는 PRD §4.4가 요구하는 메커니즘 그 자체다. §18 참조.
 
-| 항목 | 출처 | 위치 | |
+| 항목 | 출처 | 위치 | 차용 방식 |
 |---|---|---|---|
-| **이중 timestamp** (`ts_event` / `ts_init`) | nautilus | `core/data.pyx` L30, L42 | 🔵 |
-| ↳ PRD 대응 | — | `ts_event`=event time, **`ts_init`=`available_at`** (§4.4, §7.2) | |
-| **`ts_init` 오름차순 stream** = PIT 강제 | nautilus | `backtest/engine.pyx` L903, L1658-1735 | 🔵 |
-| restatement 표시 | nautilus | `model/data.pyx` L1496 `is_revision` | 🔵 |
-| 읽기 전용 facade | nautilus | `cache/base.pxd` `CacheFacade`, `portfolio/base.pxd` | 🔵 |
-| ↳ Actor가 보유하는 형태 | nautilus | `common/actor.pxd` L73, L83 (`readonly`) | 🔵 |
-| data ↔ timer 실행 순서 | nautilus | `backtest/engine.pyx` L1692, L1731-1735 | 🔵 |
-| 명시적 생성자 주입 | nautilus | `system/kernel.py` L101 | 🔵 |
-| learn/infer 데이터 분리 | vnpy | `alpha/dataset/template.py` L181-194 | 🟢 |
-| 시간 범위 표현 | qlib | `backtest/decision.py` L206-300 `TradeRange` | 🟢 |
-| 문자열 키 서비스 로케이터 | qlib | `common_infra.get(...)` | 🔴 |
-| **횡단면 패널 view** (instrument × field) | — | — | ⚪ |
-| **접근 기록 기반 lineage** | — | — | ⚪ |
-| **역할별 view 구성** (compliance 분리) | — | — | ⚪ |
+| **이중 timestamp** (`ts_event` / `ts_init`) | nautilus | `core/data.pyx` L30, L42 | 설계만 |
+| ↳ PRD 대응 | — | `ts_event`=event time, **`ts_init`=`available_at`** (§4.4, §7.2) | — |
+| **`ts_init` 오름차순 stream** = PIT 강제 | nautilus | `backtest/engine.pyx` L903, L1658-1735 | 설계만 |
+| restatement 표시 | nautilus | `model/data.pyx` L1496 `is_revision` | 설계만 |
+| 읽기 전용 facade | nautilus | `cache/base.pxd` `CacheFacade`, `portfolio/base.pxd` | 설계만 |
+| ↳ Actor가 보유하는 형태 | nautilus | `common/actor.pxd` L73, L83 (`readonly`) | 설계만 |
+| data ↔ timer 실행 순서 | nautilus | `backtest/engine.pyx` L1692, L1731-1735 | 설계만 |
+| 명시적 생성자 주입 | nautilus | `system/kernel.py` L101 | 설계만 |
+| learn/infer 데이터 분리 | vnpy | `alpha/dataset/template.py` L181-194 | 코드 차용 |
+| 시간 범위 표현 | qlib | `backtest/decision.py` L206-300 `TradeRange` | 코드 차용 |
+| 문자열 키 서비스 로케이터 | qlib | `common_infra.get(...)` | 반면교사 |
+| **횡단면 패널 view** (instrument × field) | — | — | 순수 창작 |
+| **접근 기록 기반 lineage** | — | — | 순수 창작 |
+| **역할별 view 구성** (compliance 분리) | — | — | 순수 창작 |
 
-시간 경계 메커니즘은 nautilus에 있고 🔵로 차용한다. 남는 ⚪는 **접근 축**이다. Reference 세 곳은
+시간 경계 메커니즘은 nautilus에서 설계만 차용한다. 남는 순수 창작 영역은 **접근 축**이다. Reference 세 곳은
 모두 instrument별 시계열이 기본 단위이고(`cache.bars(bar_type)`은 한 종목의 deque), 메모리 상주
 방식이라 20년 × 3000종목을 담지 못한다. qlibx의 기본 단위인 decision time 횡단면과 그것을 컬럼
 저장소 질의로 구현하는 부분은 여전히 창작이다.
 
 ### ④ operation
 
-| 항목 | 출처 | 위치 | |
+| 항목 | 출처 | 위치 | 차용 방식 |
 |---|---|---|---|
-| **체결 clipping 전체 순서** | qlib | `backtest/exchange.py` **L859-950** | 🟢 |
-| ↳ volume 참여 제한 | qlib | L786 | 🟢 |
-| ↳ 제곱 impact cost | qlib | L892 | 🟢 |
-| ↳ 현금 한도 매수량 | qlib | L834 | 🟢 |
-| ↳ **마지막 매도 반올림 생략** | qlib | **L904** | 🟢 |
-| ↳ lot 반올림 / 거래단위 | qlib | L761 / L728 | 🟢 |
-| 상하한가 / 거래정지 / tradability | qlib | L338 / L378 / L404 | 🟢 |
-| volume threshold 파싱 | qlib | L295 | 🟢 |
-| cost·fill model 교체 인터페이스 | nautilus | `backtest/models/{fee,fill}.pyx` L33/L34 | 🔵 |
-| clipping 사유를 debug 로그로 폐기 | qlib | L830, L917, L928, L936 | 🔴 |
-| pass / deny-with-reason 구조 | nautilus | `risk/engine.pyx` L584-666, L1073-1132 | 🔵 |
-| TradingState | nautilus | 같은 파일 L228 | 🔵 |
-| target/actual 이원 관리 | vnpy | `alpha/strategy/template.py` L31-32, L133 | 🟢 |
-| 4방향 분해 (숏 대비) | vnpy | 같은 파일 L144-185 | 🟢 |
-| ts 함수 22종 | vnpy | `alpha/dataset/ts_function.py` | 🟢† |
-| cs 함수 5종 | vnpy | `alpha/dataset/cs_function.py` | 🟢† |
-| processor 9종 | vnpy | `alpha/dataset/processor.py` | 🟢† |
-| 검증용 팩터셋 | vnpy | `alpha/dataset/datasets/alpha_{101,158}.py` | 🟢 |
-| **target→order 변환 전체** | — | — | ⚪ |
-| **Finding 스키마, override 기록** | — | — | ⚪ |
-| 섹터 중립화 / beta 제거 / hump | — | — | ⚪ |
+| **체결 clipping 전체 순서** | qlib | `backtest/exchange.py` **L859-950** | 코드 차용 |
+| ↳ volume 참여 제한 | qlib | L786 | 코드 차용 |
+| ↳ 제곱 impact cost | qlib | L892 | 코드 차용 |
+| ↳ 현금 한도 매수량 | qlib | L834 | 코드 차용 |
+| ↳ **마지막 매도 반올림 생략** | qlib | **L904** | 코드 차용 |
+| ↳ lot 반올림 / 거래단위 | qlib | L761 / L728 | 코드 차용 |
+| 상하한가 / 거래정지 / tradability | qlib | L338 / L378 / L404 | 코드 차용 |
+| volume threshold 파싱 | qlib | L295 | 코드 차용 |
+| cost·fill model 교체 인터페이스 | nautilus | `backtest/models/{fee,fill}.pyx` L33/L34 | 설계만 |
+| clipping 사유를 debug 로그로 폐기 | qlib | L830, L917, L928, L936 | 반면교사 |
+| pass / deny-with-reason 구조 | nautilus | `risk/engine.pyx` L584-666, L1073-1132 | 설계만 |
+| TradingState | nautilus | 같은 파일 L228 | 설계만 |
+| target/actual 이원 관리 | vnpy | `alpha/strategy/template.py` L31-32, L133 | 코드 차용 |
+| 4방향 분해 (숏 대비) | vnpy | 같은 파일 L144-185 | 코드 차용 |
+| ts 함수 22종 | vnpy | `alpha/dataset/ts_function.py` | 설계만† |
+| cs 함수 5종 | vnpy | `alpha/dataset/cs_function.py` | 설계만† |
+| processor 9종 | vnpy | `alpha/dataset/processor.py` | 설계만† |
+| 검증용 팩터셋 | vnpy | `alpha/dataset/datasets/alpha_{101,158}.py` | 코드 차용 |
+| **target→order 변환 전체** | — | — | 순수 창작 |
+| **Finding 스키마, override 기록** | — | — | 순수 창작 |
+| 섹터 중립화 / beta 제거 / hump | — | — | 순수 창작 |
 
 PRD §8.4 built-in 목록과 대조 시 vnpy가 마지막 3개를 제외하고 전부 커버한다.
 
 † polars를 채택하지 않기로 했으므로(O2) 이 세 항목은 **복사가 아니라 pandas 재작성**이다. 연산 정의와
-경계 처리는 그대로 참조하되 구현은 옮겨 쓴다.
+경계 처리만 참고하고 구현은 pandas로 독립 재작성한다.
 
 ### ⑤ ledger
 
-| 항목 | 출처 | 위치 | |
+| 항목 | 출처 | 위치 | 차용 방식 |
 |---|---|---|---|
-| Position 매수/매도/삭제, 초과매도 거부 | qlib | `backtest/position.py` L342/L352/L384 | 🟢 |
-| settle 2단계 | qlib | L487 / L493 | 🟢 |
-| 초기 endowment | qlib | L280 `fill_stock_value` | 🟢 |
-| 제약 없는 position (what-if) | qlib | L503 `InfPosition` | 🟢 |
-| return/cost/turnover 누적 | qlib | `backtest/account.py` L35 | 🟢 |
-| bar 종료 mark | qlib | L338 `update_bar_end` | 🟢 |
-| metric 명시적 활성화 | qlib | L132 | 🟢 |
-| **trading/holding PnL 분해** | vnpy | `PortfolioDailyResult.calculate_pnl` | 🟢 |
-| 마진 계좌 / 마진 모델 (perp, 후속) | nautilus | `accounting/accounts/margin.pyx` L54, `margin_models.pyx` L26 | 🔵 |
-| **FillSink 좁은 port** | — | — | ⚪ |
+| Position 매수/매도/삭제, 초과매도 거부 | qlib | `backtest/position.py` L342/L352/L384 | 코드 차용 |
+| settle 2단계 | qlib | L487 / L493 | 코드 차용 |
+| 초기 endowment | qlib | L280 `fill_stock_value` | 코드 차용 |
+| 제약 없는 position (what-if) | qlib | L503 `InfPosition` | 코드 차용 |
+| return/cost/turnover 누적 | qlib | `backtest/account.py` L35 | 코드 차용 |
+| bar 종료 mark | qlib | L338 `update_bar_end` | 코드 차용 |
+| metric 명시적 활성화 | qlib | L132 | 코드 차용 |
+| **trading/holding PnL 분해** | vnpy | `PortfolioDailyResult.calculate_pnl` | 코드 차용 |
+| 마진 계좌 / 마진 모델 (perp, 후속) | nautilus | `accounting/accounts/margin.pyx` L54, `margin_models.pyx` L26 | 설계만 |
+| **FillSink 좁은 port** | — | — | 순수 창작 |
 
 ### ⑥ evidence
 
-| 항목 | 출처 | 위치 | |
+| 항목 | 출처 | 위치 | 차용 방식 |
 |---|---|---|---|
-| save/load/list 표면 | vnpy | `alpha/lab.py` L20-480 | 🟢 |
-| parquet 물리 layout | nautilus | `persistence/catalog/parquet.py` L105 | 🔵 |
-| ↳ metadata 시간범위 인덱싱 | nautilus | L570 | 🔵 |
-| ↳ 중복 제거 / 스키마 검증 | nautilus | L820 / L781 | 🔵 |
-| 결과 envelope 필드 | nautilus | `backtest/results.py` L20 | 🔵 |
-| report 직렬화 패턴 | nautilus | `execution/reports.py` L366, L416 | 🔵 |
-| reconciliation report 3분할 | nautilus | 같은 파일 L95/L619/L859, `create_flat` L919 | 🔵 |
-| **fingerprint, lineage, atomic publication** | — | — | ⚪ |
+| save/load/list 표면 | vnpy | `alpha/lab.py` L20-480 | 코드 차용 |
+| parquet 물리 layout | nautilus | `persistence/catalog/parquet.py` L105 | 설계만 |
+| ↳ metadata 시간범위 인덱싱 | nautilus | L570 | 설계만 |
+| ↳ 중복 제거 / 스키마 검증 | nautilus | L820 / L781 | 설계만 |
+| 결과 envelope 필드 | nautilus | `backtest/results.py` L20 | 설계만 |
+| report 직렬화 패턴 | nautilus | `execution/reports.py` L366, L416 | 설계만 |
+| reconciliation report 3분할 | nautilus | 같은 파일 L95/L619/L859, `create_flat` L919 | 설계만 |
+| **fingerprint, lineage, atomic publication** | — | — | 순수 창작 |
 
 ### ⑦ analysis / 도메인 객체
 
-| 항목 | 출처 | 위치 | |
+| 항목 | 출처 | 위치 | 차용 방식 |
 |---|---|---|---|
-| 통계 plugin 구조 | nautilus | `analysis/statistic.py` L25, `analyzer.py` L38/L59 | 🔵 |
-| 성과 지표 계산식 | vnpy | `backtesting.py` L228-380 | 🟢 |
-| ↳ 파산 시 통계 계산 거부 | vnpy | L280-282 | 🟢 |
-| 주문 단위 진단 집계 | qlib | `backtest/report.py` L249-650 `Indicator` | 🟢 |
-| ↳ 체결률 / 가격 유리도 | qlib | L330 / L524 | 🟢 |
-| PortfolioMetrics 레코드 스키마 | qlib | `report.py` L22, L153 | 🟢 |
-| 350줄 단일 함수 통계 | vnpy | L228-380 | 🔴 |
-| dataclass 필드 구성 | vnpy | `trader/object.py` L112-200 | 🟢 |
-| **Status enum** (부분체결/거부/취소/만료) | vnpy | `trader/constant.py` L30 | 🟢 |
-| amount / deal_amount / factor 분리 | qlib | `backtest/decision.py` L36-152 | 🟢 |
-| 고정소수점 Price/Qty/Money | nautilus | `model/objects.pyx` | 🔵 |
-| 주문 상태 개념 부재 | qlib | `Order` dataclass | 🔴 |
+| 통계 plugin 구조 | nautilus | `analysis/statistic.py` L25, `analyzer.py` L38/L59 | 설계만 |
+| 성과 지표 계산식 | vnpy | `backtesting.py` L228-380 | 코드 차용 |
+| ↳ 파산 시 통계 계산 거부 | vnpy | L280-282 | 코드 차용 |
+| 주문 단위 진단 집계 | qlib | `backtest/report.py` L249-650 `Indicator` | 코드 차용 |
+| ↳ 체결률 / 가격 유리도 | qlib | L330 / L524 | 코드 차용 |
+| PortfolioMetrics 레코드 스키마 | qlib | `report.py` L22, L153 | 코드 차용 |
+| 350줄 단일 함수 통계 | vnpy | L228-380 | 반면교사 |
+| dataclass 필드 구성 | vnpy | `trader/object.py` L112-200 | 코드 차용 |
+| **Status enum** (부분체결/거부/취소/만료) | vnpy | `trader/constant.py` L30 | 코드 차용 |
+| amount / deal_amount / factor 분리 | qlib | `backtest/decision.py` L36-152 | 코드 차용 |
+| 고정소수점 Price/Qty/Money | nautilus | `model/objects.pyx` | 설계만 |
+| 주문 상태 개념 부재 | qlib | `Order` dataclass | 반면교사 |
 
-vnpy 통계는 **계산식은 🟢이나 구조는 🔴**이다. 계산식을 추출해 nautilus의 plugin 껍데기에 개별로
+vnpy 통계는 **계산식은 코드 차용이지만 구조는 반면교사**다. 계산식을 추출해 nautilus의 plugin 껍데기에 개별로
 담는다.
 
-### ⚪ 구역 요약
+### 순수 창작 구역 요약
 
 참고 코드가 없는 영역은 전부 **경계와 증거**다.
 
@@ -1620,10 +1732,10 @@ vnpy 통계는 **계산식은 🟢이나 구조는 🔴**이다. 계산식을 �
 ⑤ long-short 실행 회계    담보 · 수익률 분모 · 차입비용 (§17 G4)
 ⑥ artifact / failure     typed load, fingerprint, lineage, 원자적 발행
 ⑥ production reconcile  outbox, OMS result, idempotent confirmed-state commit
-  instrument/exchange semantics   계약조건, listing, 비용, lifecycle (§2.4·§16)
+  instrument/exchange semantics   계약조건, listing, 비용, lifecycle (§2.6·§16)
 ```
 
-계산은 대부분 🟢/🔵이고 경계는 대부분 ⚪이다. 이것이 §1 설계 명제의 실증이다. 그러나 progressive
+계산은 대부분 코드 차용/설계만이고 경계는 대부분 순수 창작이다. 이것이 §1 설계 명제의 실증이다. 그러나 progressive
 workflow에서는 error/evidence 경계를 뒤로 미루면 앞선 계산 slice가 잘못된 success/failure contract로
 굳는다. §15는 최소 resolver, typed evidence와 publication boundary를 foundation으로 먼저 만들고,
 borrowed calculation은 그 뒤의 vertical slice에서 추가하도록 정한다.
@@ -1631,15 +1743,15 @@ borrowed calculation은 그 뒤의 vertical slice에서 추가하도록 정한�
 ### 라이선스 실무
 
 ```
-qlib             MIT        🟢 가능
-vnpy             MIT        🟢 가능
-nautilus_trader  LGPL-3.0   🔵 코드 복사 금지
+qlib             MIT        코드 차용 가능
+vnpy             MIT        코드 차용 가능
+nautilus_trader  LGPL-3.0   설계만 — 코드 복사 금지
 ```
 
-- 🟢 차용 파일 상단에 원출처(파일·함수), 원저작권, 변경 내용을 주석으로 남긴다.
+- 코드 차용 파일 상단에 원출처(파일·함수), 원저작권, 변경 내용을 주석으로 남긴다.
 - 저장소 루트에 `NOTICE`를 두고 qlib·vnpy 라이선스 전문을 포함한다.
-- 🔵는 개념과 명명만 차용한다. 저작권은 표현(코드)을 보호하고 아이디어(구조)를 보호하지 않는다.
-- 🟢/🔵 표기를 코드 주석에 남겨 이후 감사에서 grep으로 추적 가능하게 한다.
+- 설계만 항목은 개념과 명명만 차용한다. 저작권은 표현(코드)을 보호하고 아이디어(구조)를 보호하지 않는다.
+- 코드 주석에 `코드 차용` 또는 `설계만` 분류를 남겨 이후 감사에서 grep으로 추적 가능하게 한다.
 
 ---
 
@@ -1772,7 +1884,7 @@ Vendored source 확인 결과 `Position`이 종목별로 보유하는 필드는 
 ```
 
 nautilus `model/position.pxd`가 동일 역할을 하며(`avg_px_open`, `avg_px_close`, `realized_pnl`,
-`realized_return`, `is_closed_c`, `calculate_pnl`) 설계 참고 대상이다. LGPL이므로 🔵다.
+`realized_return`, `is_closed_c`, `calculate_pnl`) 설계 참고 대상이다. LGPL이므로 `설계만`으로 분류한다.
 
 vnpy `PortfolioDailyResult`의 trading/holding PnL 분해는 일별 집계이므로 종목별 라운드트립을
 대체하지 못한다.
@@ -1929,7 +2041,7 @@ flow가 유일한 부수효과 지점이라는 배치는 변경되지 않는다.
 **영향 범위.** §2 멘탈 모델, §3 원자 표(cutoff 열 제거), §4 불변식 I2·I3, §7 전면 재작성,
 §8 judge 계약 첫 인자, §14 매핑표 ③ 정정.
 
-**남는 ⚪.** 시간 경계 메커니즘은 nautilus에서 차용하지만 **접근 축**은 여전히 창작이다. Reference
+**남는 순수 창작 영역.** 시간 경계 메커니즘은 nautilus에서 차용하지만 **접근 축**은 여전히 창작이다. Reference
 세 곳은 instrument별 시계열이 기본 단위이고 메모리 상주 방식이라, decision time 횡단면을 컬럼
 저장소 질의로 제공하는 부분에는 대응물이 없다.
 

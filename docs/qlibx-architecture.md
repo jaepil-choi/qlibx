@@ -11,9 +11,10 @@ Backend 채택 판단: [[why-not-qlib-as-a-backend]], [[why-not-nautilus-as-a-de
 이 문서가 정하는 것: layer 경계, 책임 배분, 불변식, 핵심 계약의 shape, 의존 방향, 차용 출처.
 이 문서가 정하지 않는 것: 최종 public name, 함수 시그니처의 세부, 파일 분할 단위.
 
-> **§17 설계 감사 기록을 먼저 읽을 것.** 초안을 네 개의 research scenario에 대조한 결과 다섯 개의
-> gap이 확인되었다. I4는 PRD와 모순되어 개정되었고, judge 계약과 §3 event 표는 아직 불완전하며,
-> long-short 실행 회계는 설계 미착수다. 해당 절에 상호참조를 달았다.
+> **§17 설계 감사 기록을 함께 읽을 것.** 이 문서는 초기 고정 pipeline 초안에서 출발했다. 2026-08-05
+> PRD가 독립 workflow와 progressive requirement discovery를 정본 계약으로 확정하면서 orchestration,
+> error, evidence와 production boundary를 다시 감사했다. 현행 본문은 그 revision을 반영하고, §17은
+> 아직 남은 구현 결정과 폐기된 가정을 구분해 기록한다.
 
 ---
 
@@ -36,55 +37,89 @@ PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-lo
 
 ### 1.1 PRD use-case traceability
 
-PRD §3.5는 observable outcome과 evidence를 stable use-case ID로 규정한다. Architecture는 각 ID를
-반복하는 데 그치지 않고 다음 여섯 항목을 추적 가능하게 설명해야 한다.
+PRD는 observable outcome과 evidence를 stable use-case ID로 규정한다. Architecture는 각 ID를 반복하는
+데 그치지 않고 다음 여섯 항목을 추적 가능하게 설명해야 한다.
 
 ```text
 trigger → permitted read → calculation → commit → evidence → validation
 ```
 
-| PRD use case | scope | architecture flow | commit | evidence | validation |
-|---|---|---|---|---|---|
-| `UC-COST-001` | current | §13.2 product/side rule | Fill | total cost + rule ID | product/side fixture |
-| `UC-COST-002` | current | §13.2 effective-time rule | Fill | schedule version + effective time | date-boundary fixture |
-| `UC-COST-003` | current | §13.3 cost-aware clipping | Fill | requested/dealt + clip reason | cash-limit fixture |
-| `UC-COST-004` | current | §13.3 exact-rule failure | 없음 | structured failure | no-fallback fixture |
-| `UC-CLOSED-LOOP-001` | current | §13.4 actual feedback | Ledger | account snapshot | next-decision fixture |
-| `UC-SCALE-001` | current | §13.5 compiled batch | Fill batch | per-name diagnostics | batch/single-name parity |
-| `UC-ACADEMIC-001` | future | §13.6 academic listing | hypothetical Fill | profile identity | design characterization |
-| `UC-FUTURE-001` | future | §13.6 settlement/expiry | cash/position delta | settlement evidence | design characterization |
-| `UC-PERP-001` | future | §13.6 funding | cash delta | funding evidence | design characterization |
-| `UC-CASHFLOW-001` | future | §13.6 cash-flow attribution | Ledger | category + source | design characterization |
+| PRD use case | trigger | permitted read | calculation | commit | evidence | validation |
+|---|---|---|---|---|---|---|
+| `UC-DATA-001` | dataset registration | source sample + user binding | minimal key/time/availability validation | registration | binding + schema fingerprint | arbitrary-field fixture |
+| `UC-DATA-002` | Strategy invocation | requirements + registered bindings | requirement resolution | 없음 on gap | `OperationError` + requirement ID | add-binding retry |
+| `UC-ERROR-001` | short analysis invocation | actual operation path only | requirement check | failure evidence only | hierarchical stage path | no phantom-stage fixture |
+| `UC-PIT-001` | model materialization | labels available at evaluation time | horizon requirement resolution | 없음 on gap | missing `horizon_end` | future-label rejection |
+| `UC-AGENT-001` | ambiguous registration failure | package error + skill + project semantics | agent proposes; package validates | confirmed binding only | user decision + rule ID | no guessed availability |
+| `UC-SIGNAL-001` | direct Strategy run | scoped PIT data + bounded state | signal/weight inside Strategy | results + proposed memory | signed weights + accesses | no mandatory signal stage |
+| `UC-SIGNAL-002` | stored-result Strategy run | compatible typed model result | signed-weight assembly | Strategy result | producer-independent edges | producer not rerun |
+| `UC-ALPHA-BUDGET-001` | flexible-budget Strategy | signed inputs + budget declaration | allocation without forced rescale | alpha-weight result | invested/residual budget | fixed incompatibility |
+| `UC-ALPHA-PATH-001` | cross-state reuse | result state + target state | compatibility assessment | reuse decision artifact | warning + user choice | replay/rerun branches |
+| `UC-ALPHA-CHILD-001` | child execution branch | frozen parent weights + child profile | alternate execution only | child Ledger/artifacts | parent edge + profile | parent unchanged |
+| `UC-ALPHA-ADAPTIVE-001` | feedback-triggered Strategy | committed feedback + prior memory | proposed belief/member update | Memory at flow boundary | before/after + cursor | no future feedback |
+| `UC-ENSEMBLE-001` | Ensemble Strategy run | compatible member results | combine/net/cross by ticker | ensemble result | contribution + residual | producers not rerun |
+| `UC-PORTFOLIO-001` | construction profile selection | same weights + selected profile | profile-specific construction | separate portfolio results | budget/direction/cost lineage | alpha unchanged |
+| `UC-CONSTRAINT-001` | constraint-free analysis | signal/weight artifact only | requested analysis | analysis result | actual dependencies | no compliance binding |
+| `UC-CONSTRAINT-002` | constrained conversion | declaration + metric inputs | requirement resolution | 없음 on gap | missing sector requirement | no order/account mutation |
+| `UC-CONSTRAINT-ADJUST-001` | adjust then validate | intent + actual state + constraint data | adjust; independent validate | eligible candidate only | before/after + residual + finding | residual is not compliance |
+| `UC-COST-001` | execution event | exact product/side policy + quote | §13.2 cost rule | Fill | total cost + rule ID | product/side fixture |
+| `UC-COST-002` | execution event | policy valid at event time | §13.2 schedule resolution | Fill | version + effective time | date-boundary fixture |
+| `UC-COST-003` | cash-limited BUY | actual cash + exact policy | §13.3 shared cost calculator | Fill | requested/dealt + clip reason | cash-limit fixture |
+| `UC-COST-004` | no exact rule | exact selector; no parent fallback | unsupported failure | 없음 | failure artifact | no Fill/Ledger mutation |
+| `UC-CLOSED-LOOP-001` | next decision after commit | committed Ledger/OMS state | Strategy evaluation | next result | feedback cursor + snapshot | requested state excluded |
+| `UC-SCALE-001` | 3,000-name execution | compiled arrays + scoped market data | vectorized match | Fill batch | stable per-name diagnostics | batch/scalar parity |
+| `UC-EXEC-001` | child profile selection | same decision + profile execution view | daily or intraday execution | separate child Ledgers | shared decision ID + fills | only actual result diverges |
+| `UC-EXEC-002` | daily-close execution | observations available by fill time | timing/PIT validation then match | Fill or failure | convention + limitation | no future close |
+| `UC-EXEC-003` | independent monitor timer | actual snapshot + compliance view | constraint evaluation | finding artifact only | breach/missing classification | no decision/order |
+| `UC-ARTIFACT-001` | external artifact load | documented payload + envelope | typed construction + compatibility | imported artifact | external producer lineage | no producer import |
+| `UC-ARTIFACT-002` | load/publication | complete candidate payload | schema + semantic validation | 없음 on invalid | bounded failure evidence | invalid not reusable |
+| `UC-RESEARCH-001` | failed operation then retry | frozen failure inputs + new binding | new resolution | failure then success artifacts | resolution lineage | failure retained |
+| `UC-REPORT-001` | renderer selection | stored analysis values | presentation only | report artifact | source analysis IDs | renderer value parity |
+| `UC-MONITOR-001` | monitoring report | actual-account findings | analysis/rendering | report artifact | actual/intended distinction | breach vs missing |
+| `UC-EXTENSION-001` | extension registration | contract + validation fixture | package compatibility validation | registration on success | validation + producer ID | failure not registered |
+| `UC-PROD-001` | OMS partial result | decision + confirmed fills/account | reconciliation | confirmed delta only | pending/cancel + correlation | next sees 40, not 100 |
+| `UC-PROD-002` | OMS rejection | decision + rejection | reconcile without intended apply | rejection evidence only | retry policy identity | actual unchanged |
+| `UC-ACADEMIC-001` | future academic listing | explicit hypothetical profile | §13.6 match | hypothetical Fill | profile identity | disallowed profile rejects |
+| `UC-FUTURE-001` | future settlement/expiry | observable settlement input | variation/final settlement | cash/position delta | lifecycle evidence | post-expiry reject |
+| `UC-PERP-001` | future funding timer | observable funding rate | funding cash flow | cash delta | funding evidence | no expiry event |
+| `UC-CASHFLOW-001` | future fill/lifecycle event | event-specific inputs | separate fee/lifecycle calculation | Ledger | category + source | attribution separation |
 
-`future` 행은 current acceptance가 아니다. 현재 구조가 해당 flow를 막지 않는지 설명하는 설계
+마지막 네 future 행은 current acceptance가 아니다. 현재 구조가 해당 flow를 막지 않는지 설명하는 설계
 characterization이며 구현 완료를 주장하지 않는다. Test와 fixture를 만들 때도 같은 use-case ID를 사용해
-PRD → architecture → validation의 연결을 유지한다.
+PRD → architecture → validation의 연결을 유지한다. CI는 두 문서의 stable ID 집합을 비교해 누락을
+실패시켜야 한다.
 
 ---
 
 ## 2. 멘탈 모델
 
-### 2.1 상태를 가진 것은 셋뿐이다
+### 2.1 Authoritative runtime state는 셋뿐이다
 
 ```
 ① Clock              지금 몇 시인가        — 시간을 움직이는 유일한 주체
 ⑤ Ledger / Memory    무엇을 갖고 있는가    — 커밋되는 상태 저장소
 ```
 
-그리고 이 둘 사이에 **view**가 있다. View는 상태를 갖지 않지만 clock에 묶여 있어서, 조회 결과가
+여기서 말하는 state는 다음 decision의 의미를 바꾸는 **authoritative runtime state**다. Catalog는
+append-only durable evidence를 저장하지만 latest file이나 publication 자체가 Position, cash 또는 Strategy
+memory authority를 대신하지 않는다.
+
+Clock과 두 store 사이에 **view**가 있다. View는 상태를 갖지 않지만 clock에 묶여 있어서, 조회 결과가
 clock의 위치에 따라 달라진다.
 
 ```
 ③ View      무엇을 볼 수 있는가   — 읽기 전용. clock 이 경계를 정한다.
 ```
 
-나머지 전부는 **계산만 한다**.
+나머지 component는 **계산만 한다**. Flow는 선택한 operation을 조립하고 Ledger/Memory commit과
+artifact publication을 명시적으로 호출한다.
 
 - 시간을 스스로 알아내지 않는다 (`datetime.now()`를 부르지 않는다)
 - 커밋되는 상태를 직접 쓰지 않는다
 - store에 직접 접근하지 않는다 (반드시 view 경유)
 
-부품이 몇 개로 늘어나든 규율을 지킬 곳은 clock, view, 그리고 두 개의 state store다.
+부품이 몇 개로 늘어나든 규율을 지킬 곳은 clock, view, 두 authoritative state store와 append-only
+publication boundary다.
 
 ### 2.2 여섯 layer
 
@@ -97,8 +132,8 @@ clock의 위치에 따라 달라진다.
 ├──────────────────────────────────────────────────────┤
 │ ③ view      clock-bound facade · 횡단면 패널 조회     │  시야  ★
 ├──────────────────────────────────────────────────────┤
-│ ④ judge     alpha · construct · convert              │  계산
-│             validate · exchange.match                 │
+│ ④ operation Strategy · Model · construct · analyze    │  계산
+│             adjust · validate · exchange.match        │
 ├──────────────────────────────────────────────────────┤
 │ ⑤ ledger    Position · Account · Trade · Memory       │  상태
 ├──────────────────────────────────────────────────────┤
@@ -106,21 +141,23 @@ clock의 위치에 따라 달라진다.
 └──────────────────────────────────────────────────────┘
 ```
 
-부수효과는 **② flow에만** 있다. ③④는 순수하고, ⑤⑥은 변경 경로가 좁게 정의된 저장소다.
+부수효과를 시작할 수 있는 곳은 **② flow뿐**이다. ③④는 순수하고, ⑤⑥은 flow가 좁은 commit/publication
+port로만 변경하는 저장소다. 어떤 ④ operation을 부르는지는 invocation이 선택한 workflow에 달려 있으며
+모든 run이 `Strategy → construct → convert → validate → execute`를 통과하지 않는다.
 
 `on_decision`이 길어지면 계산이 flow로 흘러들어온 신호다.
 
 ### 2.3 흐름과 되먹임
 
 ```
-   Clock ──tick──→ Flow ──view──→ Judge ──(result, diag)──→ Ledger ──→ Evidence
+   Clock ──tick──→ Flow ──view──→ Operation ──(result, diag)──→ Ledger ──→ Evidence
      │                 ↑                                      │
      │                 └──── view 는 ledger 를 읽는다 ─────────┘
      └──── clock 위치가 view 의 조회 경계를 정한다
 ```
 
 되먹임 edge가 PRD §2.4 closed loop이다. 다음 decision은 requested target이 아니라 **ledger의 실제
-상태**를 view를 통해 읽는다. 초안과 달리 flow가 snapshot을 조립해 넘기지 않고, judge가 view로
+상태**를 view를 통해 읽는다. 초안과 달리 flow가 snapshot을 조립해 넘기지 않고, operation이 view로
 필요한 시점에 조회한다.
 
 ### 2.4 Instrument, Exchange와 경제적 cash flow
@@ -165,23 +202,32 @@ view다. 개별 객체를 보존하면서 registration과 instrument-axis compil
 
 ## 3. 반복 원자
 
-모든 event 처리가 같은 모양이다.
+모든 operation은 같은 transaction shape를 갖는다. Trigger는 Clock event일 수도 있고 CLI/API가 시작한
+dataset registration, artifact load, analysis 또는 report invocation일 수도 있다.
 
 ```
-시각이 온다
-  ① clock 이 그 시각으로 이동한다     ← 여기서 "볼 수 있는 것"이 정해진다
-  ② 역할에 맞는 view 를 넘긴다        ← 어떤 종류를 볼지는 view 구성이 정한다
-  ③ (result, diagnostics)가 나온다   ← 진단이 항상 동반
-  ④ ledger 에 반영하고 기록한다       ← 유일한 부수효과 지점
+trigger가 온다
+  ① invocation/config/component identity를 freeze한다
+  ② 선택한 operation의 requirement를 registered binding에 resolve한다
+  ③ clock과 역할에 묶인 scoped view를 만든다
+  ④ typed result와 diagnostics를 계산한다
+  ⑤ flow가 허용된 state commit 또는 artifact publication을 수행한다
+  ⑥ actual dependency, outcome 또는 failure evidence를 기록한다
 ```
 
-| event | clock 위치 | view | 계산 | 결과 | ledger |
+Requirement resolution이 실패하면 ④를 호출하지 않고, Ledger/Memory mutation이나 success artifact publication
+없이 hierarchical `OperationError`와 failure evidence를 남긴다. 사용하지 않는 optional operation은 stage
+path에 나타나지 않는다.
+
+Event-driven runtime에서 위 원자는 다음처럼 구체화된다.
+
+| event | clock 위치 | scoped view | 선택 가능한 계산 | 결과 | authoritative commit |
 |---|---|---|---|---|---|
-| `DECISION` | 09:00 | `DecisionView` | alpha → construct → convert → validate | orders + diagnostics | executor에 위임 |
+| `DECISION` | decision time | `StrategyView` | selected Strategy; optional construct/adjust/convert/validate | weights and/or decision intent + diagnostics | proposed Memory만 flow가 commit; execution은 예약 |
 | `EXECUTION` | 체결 시점 | `ExecutionView` | exchange.match_batch | fills + diagnostics | apply_batch |
 | `MARK` | 15:30 | `ExecutionView` | valuation | NAV | mark |
 | `MONITOR` | 15:30 | `MonitorView` | constraint evaluation | findings | **건드리지 않음** |
-| `FIT`† | 학습 시점 | `FitView` | model.fit | FittedState | Memory (proposed → commit) |
+| `MATERIALIZE`† | model/transform cadence | requirement-scoped data view | model/transform | typed research data | artifact publication |
 | `SETTLEMENT`* | 정산 시점 | `ExecutionView` | variation/coupon/corporate cash flow | cash/position delta | apply |
 | `FUNDING`* | funding 시점 | `ExecutionView` | perpetual funding | cash delta | apply |
 | `EXPIRY`* | 만기 시점 | `ExecutionView` | final settlement | cash/position delta | apply |
@@ -190,18 +236,20 @@ cutoff 열이 사라진 것에 주의한다. 무엇을 볼 수 있는지는 cloc
 결정하므로 event마다 명시할 값이 아니다. 일봉의 `available_at`이 15:30이면 09:00 `DECISION`은 당일
 종가를 조회할 수 없다 — 별도 설정 없이 시간표에서 유도된다(§7).
 
-`MONITOR`만 ④에서 ledger를 변경하지 않는다. PRD §4.3 "monitoring finding은 account를 소급 변경하지
-않는다"가 표에서 직접 보인다.
+`DECISION`은 fill을 commit하지 않고 `MONITOR`는 Ledger를 변경하지 않는다. Decision intent는 execution
+event의 immutable input이고, monitoring finding은 account를 소급 변경하지 않는 evidence다.
 
-† `FIT`은 rolling/expanding retraining event다. PRD §8.6이 요구하지만 초안에는 없었다.
-`priority`는 `DECISION`보다 앞선다. §17 G3 참조 — view 모델에서는 label의 `available_at`을
-`event_time + horizon`으로 선언하면 purge/embargo가 별도 장치 없이 성립한다.
+† `MATERIALIZE`는 Model 또는 deterministic transform을 선택한 workflow에만 존재한다. Rolling,
+expanding 또는 event-triggered fit이 필요하면 이 event의 concrete schedule로 등록하고 `DECISION`보다
+앞선 priority를 줄 수 있다. Direct Strategy나 stored-result analysis에는 이 event가 없다. Forward label의
+`available_at`은 horizon을 반영해야 하며, 누락된 `horizon_end` requirement는 계산 전에 실패한다.
 
 \* `SETTLEMENT`·`FUNDING`·`EXPIRY`는 future extension characterization이다. Exchange가 Clock을 직접
 조작하지 않는다. Instrument registration 시 필요한 event specification을 반환하고 engine/flow가 Clock에
 callback을 등록한다. §13.6과 §16 참조.
 
-새 event를 추가할 때 이 표의 행을 채우면 설계가 끝난다.
+새 event나 direct operation을 추가할 때 freeze, requirements, permitted read, calculation, commit, evidence와
+validation을 모두 채워야 한다. Event 이름이나 global stage enum을 추가하는 것만으로 설계가 끝나지 않는다.
 
 ---
 
@@ -214,10 +262,12 @@ callback을 등록한다. §13.6과 §16 참조.
 | **I1** | Clock만 시간을 움직인다. 어떤 부품도 `datetime.now()`를 부르지 않는다 | 소스 스캔 테스트 |
 | **I2** | 모든 데이터 접근은 clock-bound view를 경유한다. View는 `available_at <= clock.now()`를 우회할 수 없고, store 직접 접근·전역 provider·모듈 상태는 금지한다 | import 방향 테스트 + view 질의 술어 검사 |
 | **I3** | 모든 component clock은 kernel이 같은 시각으로 함께 전진시킨다. 어떤 component도 홀로 앞설 수 없다 | clock 단조성 테스트 |
-| **I4** | 커밋되는 state store는 Ledger와 Memory 둘이다. 둘 다 flow의 commit boundary에서만 변경된다. Judge는 어느 쪽도 직접 쓰지 않는다 | 공개 API 표면 테스트 |
-| **I5** | 모든 judge 함수는 `(result, diagnostics)`를 반환한다 | 시그니처 테스트 |
+| **I4** | 커밋되는 authoritative state store는 Ledger와 Memory 둘이다. 둘 다 flow의 commit boundary에서만 변경된다. Operation은 어느 쪽도 직접 쓰지 않는다 | 공개 API 표면 테스트 |
+| **I5** | 모든 operation은 typed result + diagnostics를 반환하거나 commit 전에 `OperationError`로 실패한다 | contract test |
 | **I6** | Catalog는 append-only. 같은 identity + 다른 content는 conflict 실패 | 발행 테스트 |
 | **I7** | 같은 frozen config + 같은 데이터 → 같은 event 순서 → 같은 결과 | 2회 실행 비교 |
+| **I8** | Requirement는 선택한 operation을 호출할 때 resolve한다. 누락은 unrelated registration이나 workflow를 무효화하지 않고 state mutation 전에 실패한다 | progressive-requirement fixture |
+| **I9** | Success, failure, retry, actual state와 intended state는 서로 다른 typed evidence다. Failure나 intended state를 authoritative success로 승격하지 않는다 | artifact/reconciliation fixture |
 
 **I1**이 가장 자주 깨진다. Backtest에서 wall clock을 읽는 것은 조용한 재현성 파괴다.
 
@@ -225,14 +275,13 @@ callback을 등록한다. §13.6과 §16 참조.
 context의 파생 규칙이었다. View 모델에서는 시간 경계가 clock 한 곳에서 강제되므로 두 불변식이
 그에 맞게 다시 쓰였다. §18 참조.
 
-**I4는 2026-08-03 개정되었다.** 초안은 "Ledger가 유일한 mutable state"였으나 이는 PRD와
-모순이다. PRD §9.1은 alpha decision이 "result에 proposed next state를 포함하고 runtime commit
-boundary에서만 authoritative state로 반영"하도록 요구하고, §9.10은 checkpoint가 "Alpha/strategy
-memory와 prior feedback cursor"를 보존하도록 요구한다. 즉 커밋되는 state store는 처음부터 둘이었다.
-§17 G1 참조.
+**I4는 2026-08-03 개정되었다.** 초안은 "Ledger가 유일한 mutable state"였으나 Strategy memory와
+feedback cursor도 checkpoint/resume 뒤 다음 decision의 의미를 바꾼다. Memory는 Strategy가 직접
+변경하지 않고 proposed state를 flow가 commit한다. §17 G1 참조.
 
-**I5**는 PRD §4.6과 §11.3을 타입으로 강제하는 장치다. 진단을 버리려면 `_`로 명시적으로 받아야 하고,
-그러면 코드 리뷰에서 잡힌다.
+**I5**는 명시적 실패와 diagnostics 보존을 타입으로 강제한다. 진단을 버리려면 `_`로 명시적으로
+받아야 하고, 그러면 코드 리뷰에서 잡힌다. Requirement gap은 계산 결과의 한 종류가 아니라 계산 전
+실패이므로 partial result를 success로 publish하지 않는다.
 
 ---
 
@@ -260,6 +309,7 @@ class Handler(NamedTuple):
 
 class Clock(Protocol):
     def set_timer(self, name, schedule, callback, priority) -> None: ...
+    def schedule(self, event: Event, callback: Callable[[Event], None]) -> None: ...
     def advance_to_next(self) -> list[Handler]: ...   # 시각순 정렬 보장
     def is_finished(self) -> bool: ...
 ```
@@ -281,14 +331,17 @@ Kernel은 callback이 무엇을 하는지 모른다. 따라서 가짜 callback�
 monitoring이 갱신된 account를 읽는다. 시각을 인위적으로 벌리는 대신 priority로 표현한다 — 순서의
 이유가 코드에 남기 때문이다.
 
-### backtest / live 교체
+### Clock implementation 교체
 
 ```
 BacktestClock   데이터 끝까지 즉시 감는다
 LiveClock       실제 시각을 기다린다
 ```
 
-이 교체가 backtest와 production을 가르는 **유일한 지점**이다. ②~⑥은 변경되지 않는다.
+Clock 교체는 event progression 차이만 설명한다. Backtest와 production은 같은 Strategy decision과
+actual-feedback contract를 공유하지만 stream source, Executor/OMS adapter, persistence와 authority source도
+명시적으로 교체된다. Clock만 바꿔 simulated Fill을 production Fill로 해석하지 않는다. ③ view와 ④
+operation contract는 유지되고 ② flow가 선택한 runtime profile의 port를 조립한다.
 
 ### 채택하지 않는 것
 
@@ -302,47 +355,74 @@ qlib `TradeCalendarManager`(`backtest/utils.py` L23)는 `freq` 하나와 `trade_
 
 ### 책임
 
-원자를 실행한다. 무엇을 어떤 순서로 부를지만 안다. 계산하지 않는다.
+선택된 operation graph를 실행한다. 무엇을 어떤 순서로 부르고 어느 result를 commit/publish할지만 안다.
+Requirement를 해결하거나 경제적 결과를 계산하지 않는다.
 
 ```python
+def invoke(operation, trigger) -> OperationOutcome:
+    invocation = freezer.freeze(operation, trigger)
+    resolved = resolver.resolve(operation.requirements(invocation), registry)
+    if resolved.failed:
+        failure = OperationError.from_resolution(invocation, resolved)
+        artifacts.publish_failure(failure)       # success artifact나 state mutation 없음
+        return OperationOutcome.failed(failure)
+
+    view = gate.scoped_view(invocation, resolved)
+    result, diagnostics = operation.run(view)
+    return OperationOutcome.succeeded(result, diagnostics, lineage=view.accessed())
+
+
 def on_decision(ev: Event) -> None:
-    ctx      = gate.decision_context(ev.ts)
-    w,  d1   = alpha(ctx)
-    tgt, d2  = construct(w, ctx)
-    orders, d3 = convert(tgt, ctx)
-    verdict, findings = validate(orders, ctx)
+    outcome = invoke(profile.strategy_operation, ev)
+    artifacts.publish(*outcome.artifacts)
+    if outcome.failed:
+        return
+    if outcome.decision_intent is None:           # research-only result or explicit hold
+        finalizer.commit_non_execution(outcome)   # explicit policy + CAS; evidence 기록
+        return
+    pending = finalizer.prepare(outcome)           # proposed memory는 아직 authority가 아님
+    for spec in profile.executor.plan(pending.decision_intent, decision_ts=ev.ts):
+        clock.schedule(spec.to_event(), on_execution)  # fill은 여기서 만들지 않는다
 
-    recorder.write(w, tgt, orders, d1, d2, d3, findings)
-    if verdict.blocked and not verdict.override:
-        return                                   # PRD §10.9
 
-    result = executor.execute(orders, ctx, sink=ledger.fill_sink())
-    recorder.write(result)
+def on_execution(ev: ExecutionEvent) -> None:
+    view = gate.execution_view(ev.ts, ev.requirements)
+    result = profile.executor.execute(ev, view, sink=ledger.fill_sink())
+    artifacts.publish(result)                     # sink commit 뒤 actual result
+    if result.completes_decision:
+        finalizer.commit_simulation_checkpoint(result.decision_id, ledger, memory)
 
 
 def on_mark(ev: Event) -> None:
-    ctx = gate.mark_context(ev.ts)
-    ledger.mark(ctx.close_prices())
-    recorder.write(ledger.snapshot(as_of=ev.ts))
+    view = gate.execution_view(ev.ts, profile.mark_requirements)
+    mark, diagnostics = profile.valuation.run(view)
+    ledger.mark(mark.prices)
+    artifacts.publish(ledger.snapshot(as_of=ev.ts), diagnostics)
 
 
 def on_monitor(ev: Event) -> None:
-    ctx      = gate.monitor_context(ev.ts)
-    snap     = catalog.latest_account_snapshot(as_of=ev.ts)
-    findings = compliance.evaluate(snap, ctx)
-    recorder.write(findings)                     # ledger를 건드리지 않는다
+    view = gate.monitor_view(ev.ts, profile.monitor_requirements)
+    snap = account_authority.snapshot(as_of=ev.ts)
+    findings, diagnostics = profile.monitor.evaluate(snap, view)
+    artifacts.publish(findings, diagnostics)      # account를 건드리지 않는다
 ```
 
-`on_monitor`가 `ledger`가 아니라 `catalog`에서 읽는 것에 주의한다. PRD §13.3이 monitoring을
-"pure artifact consumer"로 규정하며, 이래야 저장된 이력을 strategy rerun 없이 `as-was`/`as-if`로
-재평가할 수 있다 (§7.11).
+`account_authority`는 simulation에서는 Ledger, production에서는 reconciled OMS account port다. Runtime
+monitoring은 이 현재 authority를 읽는다. Stored snapshot의 `as-was`/`as-if` 재평가는 별도 analysis
+invocation이 Catalog artifact를 명시적으로 입력받아 같은 pure evaluator를 호출한다. `latest` 파일을
+암묵적으로 선택해 runtime authority와 historical evidence를 섞지 않는다.
+
+Proposed Memory의 commit timing도 profile contract다. Research-only/hold는 explicit non-execution
+finalization에서, simulation decision은 마지막 execution result와 checkpoint를 묶을 때, production은 OMS
+reconciliation이 completed checkpoint를 만들 때 CAS commit한다. PreparedDecision publish나 OMS
+acknowledgement만으로 Strategy memory를 advance하지 않는다.
 
 ### Executor는 횡단면 batch sub-flow다
 
 **Exchange와 Executor는 다른 것이다.**
 
 ```
-Exchange   이 시각·venue/profile에서 얼마나 체결되나   상태를 쓰지 않는 계산. ④ judge.
+Exchange   이 시각·venue/profile에서 얼마나 체결되나   상태를 쓰지 않는 계산. ④ operation.
 Executor   그 집합을 언제 어떤 event로 넘기나          sub-flow. ② flow. 계산하지 않음.
 ```
 
@@ -360,7 +440,7 @@ on_execution(event) (flow)
 ┌────────────────────────────────────────────────────────┐
 │ Executor (sub-flow)                                     │
 │   q, v = view.quotes(), view.volumes()  ────────────────┼→ ③ view
-│   fills, diags = exchange.match_batch(  ────────────────┼→ ④ judge
+│   fills, diags = exchange.match_batch(  ────────────────┼→ ④ operation
 │       at=event.ts, orders=event.orders,                 │
 │       instruments=compiled_terms, quotes=q, volumes=v, │
 │       cash=sink.cash(),                                 │
@@ -374,9 +454,10 @@ on_execution(event) (flow)
 
 ```python
 class Executor(Protocol):
-    def plan(self, orders: Orders, decision_ts: Timestamp) -> list[ExecutionSpec]: ...
+    def plan(self, decision: DecisionIntent, decision_ts: Timestamp) -> list[ExecutionSpec]: ...
     def execute(self, event: ExecutionEvent, view: ExecutionView,
                 sink: FillSink) -> ExecutionResult: ...
+    def limitations(self) -> tuple[ExecutionLimitation, ...]: ...
 ```
 
 `Orders`는 단건 목록이 아니라 instrument축 배열 묶음이다. `match_batch`는 §8의 clipping 순서를
@@ -386,9 +467,11 @@ elementwise 연산으로 수행한다.
 semantics를 명시해야 한다. 현재 stock/ETF scope는 하나의 execution profile로 시작한다. Venue 순서에 따라
 공유 현금 결과가 달라질 수 있으므로 이 규칙 없이 병렬 실행하지 않는다.
 
-교체 지점은 유지하되 현재 구현은 하나다. 분단위 체결은 요구되지 않는 것으로 확인되었으므로
-`MinuteExecutor`는 계획에 넣지 않는다. 필요해지면 같은 계약 뒤에 추가한다 —
-[[why-not-nautilus-as-a-dependency]] §4의 재검토 조건 2에 해당한다.
+첫 vertical slice는 daily executor 하나로 시작할 수 있지만 architecture validation은 같은 immutable
+decision을 daily profile과 intraday/partial-fill characterization profile이 각각 처리하는 `UC-EXEC-001`을
+포함한다. Intraday profile은 별도 public class name을 요구하지 않으며, schedule granularity, required market
+binding, liquidity model과 limitation을 위 계약 뒤에서 선언한다. 지원하지 않는 granularity를 daily fill로
+조용히 축약하지 않는다.
 
 ### FillConvention — 체결가 규약을 분리한다
 
@@ -401,17 +484,20 @@ class FillConvention(Protocol):
 ```
 
 ```
-CloseFill      결정 시점에 관측한 종가에 체결
+CloseFill      execution event까지 available한 eligible close에 체결
 NextOpenFill   다음 거래일 시가에 체결
 VWAPFill       구간 VWAP
 ```
 
-**`CloseFill`이 기본이며 낙관적이다.** 방금 관측한 종가에 체결된다는 가정은 실무에서 성립하기 어렵다.
-결과 artifact는 사용된 convention identity를 기록하고, report는 이 가정을 명시한다(PRD §7.8 "decision,
-execution과 valuation price convention 기록").
+**`CloseFill`은 명시적 simulation convention이며 낙관적일 수 있다.** 가격은 StrategyView에서 복사하지
+않고 execution event의 `available_at <= event.ts`를 만족하는 ExecutionView에서 읽는다. Decision cutoff와
+같은 시점의 아직 공개되지 않은 종가를 사용하려 하면 `UC-EXEC-002` validation이 Fill 전에 실패한다.
+Result artifact는 convention identity, decision time, fill time, modelled/unmodelled liquidity와 limitation을
+기록한다.
 
-Convention 교체는 alpha, portfolio construction, conversion, validation, ledger에 영향을 주지 않는다.
-`exchange.match_batch`가 받는 가격 배열의 출처만 바뀐다.
+Convention 교체는 Strategy decision artifact를 바꾸지 않는다. 다만 required market binding, execution
+schedule과 actual Fill이 달라질 수 있으므로 Executor profile이 compatibility를 검증하고 그 dependency를
+기록한다. `exchange.match_batch`는 선택된 convention이 ExecutionView에서 만든 가격 배열만 받는다.
 
 ### batch가 closed loop를 해치지 않는다
 
@@ -425,7 +511,7 @@ event 입도    →  종목별인가 횡단면인가       →  qlibx: 횡단면
 시간 축이 순차이므로 다음이 모두 성립한다.
 
 - 부분체결 후 다음 decision은 requested target이 아니라 **실제 보유**에서 계산한다 (PRD §4.3)
-- Blocked liquidation은 포지션에 남아 다음 decision에 포함된다 (PRD §7.7)
+- Blocked liquidation은 포지션에 남아 다음 decision에 포함된다 (PRD §4.3)
 - 실현손익 누적에 의존하는 stop-loss 같은 path-dependent 정책이 성립한다 (§17 G1, G2)
 
 흔히 "vectorized backtest"로 불리는 것 — `(weights.shift(1) * returns).sum()` 형태의 시간 축
@@ -477,6 +563,46 @@ instrument축 배열로 두어 `deal_order` 순회를 elementwise 연산으로 �
 구조였으나, 2026-08-03 개정으로 **clock에 묶인 조회 창구(view)** 방식으로 교체되었다. 변경 이유와
 근거는 §18에 기록한다.
 
+### Minimal registration과 progressive requirement resolution
+
+최초 dataset registration은 모든 미래 workflow의 schema를 요구하지 않는다. 다음 최소 계약만
+validation하고 logical dataset identity를 발행한다.
+
+```text
+logical key / instrument axis
+event time binding
+available_at binding 또는 user-confirmed derivation rule
+payload location, shape, null/uniqueness facts
+semantic category와 source provenance
+```
+
+Currency, universe, sector, benchmark, tradability, OHLCV, lot, label horizon과 compliance binding은 이를
+실제로 사용하는 operation이 requirement로 선언한다. Requirement는 field name이 아니라 semantic role,
+axis, time, unit/shape와 compatibility condition을 표현한다.
+
+```python
+@dataclass(frozen=True)
+class ComponentRequirement:
+    requirement_id: str
+    semantic_role: str
+    axis: AxisRequirement
+    time: TimeRequirement
+    compatibility: tuple[CompatibilityRule, ...]
+
+class RequirementResolver(Protocol):
+    def resolve(self, requirements: tuple[ComponentRequirement, ...],
+                registry: RegistrySnapshot) -> Resolution: ...
+```
+
+Resolver는 user 의미를 추측하지 않는다. 등록된 binding으로 충족되면 immutable `ResolvedBinding`을 만들고,
+부족하면 operation과 hierarchical stage path, requirement ID, bounded observed fact, commit status와 retry
+precondition을 담은 `OperationError`를 반환한다. Agent가 이 evidence와 bundled skill을 해석해 binding
+보강, derived dataset, 다른 profile 또는 local extension 후보를 제시한다. User가 선택한 결과만 package가
+다시 validation한다.
+
+같은 physical source를 Strategy, compliance와 report가 서로 다른 semantic binding으로 사용할 수 있다.
+실제로 resolve되고 읽힌 binding만 lineage에 남으며, 등록됐지만 쓰지 않은 metadata는 dependency가 아니다.
+
 ### 두 개의 경계를 분리한다
 
 초안은 "무엇을 볼 수 있는가"를 하나의 문제로 다뤘다. 실제로는 서로 독립인 두 문제다.
@@ -518,25 +644,28 @@ View의 모든 조회에는 `available_at <= clock.now()` 조건이 붙는다. �
 
 **위험은 제거되지 않고 이동한다.** 보장은 전적으로 `available_at`이 등록 시점에 올바로 선언되었는지에
 달려 있다. 일봉의 `available_at`을 당일 00:00으로 넣으면 09:00 decision이 당일 종가를 보고, 예외는
-발생하지 않는다. PRD §5.1과 §7.2가 availability 선언을 qlibx 소유로 규정하고 §4.4가 qlibx의 보장
-범위를 "선언된 availability의 준수"로 한정하므로, 이 배치는 PRD의 책임 분담과 일치한다. 대신
-data registration 단계의 검증이 §1 설계 명제를 지탱하는 단일 지점이 된다.
+발생하지 않는다. User project가 source 의미와 실제 공개 가정을 소유하고 qlibx가 confirmed binding의
+형식, coverage와 PIT 적용을 validation하므로, 이 배치는 PRD의 책임 분담과 일치한다. 대신 data
+registration과 operation별 time requirement 검증이 §1 설계 명제를 지탱하는 핵심 경계가 된다.
 
 ### 역할 경계 — view 구성
 
-| view | 묶는 facade | 제외 |
+| view | resolve할 수 있는 facade | 구조적으로 제외 |
 |---|---|---|
-| `DecisionView` | panel(signal/price), universe, benchmark, tradability, positions, cash, 직전 execution result, memory | **compliance dataset** |
-| `ExecutionView` | quote/volume, positions, cash, 필요 시 funding/settlement observation | signal panel |
-| `MonitorView` | account snapshot, compliance dataset | **signal panel, memory** |
-| `FitView` | panel(feature/label), universe | positions, cash |
+| `StrategyView` | Strategy가 선언한 PIT data/artifact, 필요한 actual state·feedback·memory | undeclared binding, future feedback |
+| `ExecutionView` | profile이 선언한 quote/volume/lot/tradability와 actual positions/cash | signal/label, unconfirmed account state |
+| `MonitorView` | committed account snapshot + declared compliance binding | undeclared Strategy data, mutable account port |
+| `MaterializeView` | Model/transform이 선언한 feature/label/source data | positions/cash unless explicitly required |
 
-`MonitorView`가 signal을, `DecisionView`가 compliance dataset을 갖지 않는 것이 PRD §4.4의
-"compliance-only data를 undeclared strategy input으로 전달하지 않는다"를 구조로 만든다. Monitoring
-finding을 decision에 쓰려면 명시적으로 주입해야 한다.
+View 이름이 global field 목록을 뜻하지 않는다. Resolver가 이번 operation에 허용한 binding만 facade에
+넣는다. Compliance data나 monitoring finding을 Strategy에 쓰려면 Strategy requirement가 이를 명시해야
+하며 자동 feedback하지 않는다.
 
 ```python
-view = views.decision(monitoring_findings=catalog.findings(before=clock.now()))
+view = views.strategy(
+    resolved=resolver.require("strategy.monitoring_findings"),
+    findings=catalog.findings(before=clock.now()),
+)
 ```
 
 이때 (1) 어떤 finding을 소비했는지 기록되고, (2) `available_at` 조건이 적용되며, (3) lineage에
@@ -547,8 +676,8 @@ dependency edge가 남는다.
 ```python
 class PanelView(Protocol):
     """횡단면 패널 조회. clock 에 묶인다."""
-    def panel(self, field: str, lookback: Lookback) -> DataFrame: ...
-    def universe(self) -> Index: ...
+    def panel(self, binding: ResolvedBinding, lookback: Lookback) -> DataFrame: ...
+    def universe(self, binding: ResolvedBinding) -> Index: ...
     def accessed(self) -> list[AccessRecord]: ...
 
 class PositionView(Protocol):
@@ -558,9 +687,10 @@ class PositionView(Protocol):
 ```
 
 `Protocol`은 읽기 전용이다. 쓰기 메서드를 노출하지 않는다 — nautilus의 `CacheFacade` /
-`PortfolioFacade`와 같은 배치다.
+`PortfolioFacade`와 같은 배치다. 임의 문자열 field를 조회하지 않고 Resolver가 이번 invocation에 발급한
+`ResolvedBinding`만 받는다. 다른 operation의 binding이나 undeclared field를 넘기면 access 전에 실패한다.
 
-`lookback`은 rows와 duration semantics를 구분하며(PRD §9.6), 질의에 그대로 반영되어 조회량을
+`lookback`은 rows와 duration semantics를 구분하며 질의에 그대로 반영되어 조회량을
 한정한다. 초안의 "bounded load 사전 선언"은 불필요해진다 — 조회 자체가 한정적이다.
 
 ### 횡단면이 기본 축이다
@@ -582,58 +712,106 @@ qlibx의 기본 접근 단위는 **decision time의 횡단면**이다. 따라서
 
 ### 접근 기록이 lineage가 된다
 
-View는 조회를 기록한다. 따라서 "이 alpha가 실제로 무엇을 읽었는가"가 관측에서 나온다.
+View는 조회를 기록한다. 따라서 "이 Strategy/operation이 실제로 무엇을 읽었는가"가 관측에서 나온다.
 
 ```python
-weights, memory, diag = alpha(view)
-recorder.write(weights, lineage=view.accessed())
+result, diag = operation.run(view)
+artifacts.publish(result, lineage=view.accessed())
 ```
 
 PRD §7.4는 derived artifact가 의존 input을 stable identity로 기록하도록 요구한다. 선언 기반은
 실제 사용과 어긋날 수 있으나 접근 기록은 어긋나지 않는다. 초안의 사전 선언 방식보다 강한 보장이다.
 
-### backtest / live 동형성
+### Runtime profile 간 view 동형성
 
-View와 judge는 clock이 무엇인지 모른다. Backtest와 live의 차이는 clock 교체와 stream 공급원뿐이다.
+View와 operation은 clock implementation, execution adapter와 storage backend가 무엇인지 모른다. 모든 profile은
+같은 `available_at <= evaluation_time`, resolved binding과 access-record contract를 만족한다.
 
 ```
-backtest   BacktestClock + 정렬된 과거 stream
-live       LiveClock     + 실시간 도착 stream
+backtest    BacktestClock + historical stream + simulated Ledger
+production  LiveClock     + arrival stream + reconciled OMS account
 ```
 
-초안은 gate 구현이 두 벌 필요했다. 개정 후에는 한 벌이다. 두 벌이 어긋나 "backtest는 통과하고
-live는 실패하는" 부류의 결함이 구조적으로 제거된다.
+Gate와 operation 구현은 한 벌이다. 다만 Clock만 바꾸면 production이 되는 것은 아니며 profile이 stream,
+Executor/OMS port와 authority source를 함께 조립한다. 이 차이는 view를 복제하지 않고 port identity와
+lineage로 드러난다.
 
 ---
 
-## 8. ④ judge
+## 8. ④ operation
 
-### 계약 — 전부 같은 모양
+### 공통 계약과 선택 가능한 graph
+
+각 operation은 requirement를 먼저 선언하고 resolved view에서 typed result와 diagnostics를 계산한다.
+공통 모양은 같지만 result type과 graph 위치는 operation마다 다르다.
 
 ```python
-alpha(view)                     -> (AlphaWeights,    ProposedMemory, Diagnostics)
-ensemble(members, view)         -> (AlphaWeights,    EnsembleDiagnostics)
-construct(weights, view)        -> (PhysicalTarget,  Diagnostics)
-convert(target, view)           -> (list[Order],     ConversionLog)
-validate(orders, view)          -> (Verdict,         list[Finding])
-model.fit(view)                 -> (FittedState,     SelectionEvidence)
-exchange.match_batch(at, orders, instruments, quotes, volumes, cash)
-                                -> (Fills,           FillDiagnostics)
+class Operation(Protocol[ResultT]):
+    def requirements(self, invocation: FrozenInvocation) \
+            -> tuple[ComponentRequirement, ...]: ...
+    def run(self, view: ScopedView) -> tuple[ResultT, Diagnostics]: ...
+
+class StrategyOperation(Operation[StrategyResult], Protocol): ...
+class MaterializeOperation(Operation[ResearchDataArtifact], Protocol): ...
+class AnalysisOperation(Operation[AnalysisArtifact], Protocol): ...
+class RendererOperation(Operation[ReportArtifact], Protocol): ...
 ```
 
-첫 인자는 초안의 snapshot이 아니라 **clock에 묶인 조회 창구**다(§7). Judge는 필요한 시점에
-필요한 만큼 조회하며, view가 접근을 기록해 lineage가 된다.
+`StrategyResult`는 signed alpha weights를 보존하고 closed-loop workflow이면 executor-neutral
+`DecisionIntent`를 함께 제공한다. Strategy가 signal과 weights를 내부에서 한 번에 계산해도 되고,
+`MaterializeOperation`이 만든 signal/characteristic/risk result를 읽어도 된다. Public boundary를 넘거나
+재사용되는 intermediate만 정확한 semantic artifact로 materialize한다.
+
+```python
+Strategy.run(view)              -> (StrategyResult, Diagnostics)
+EnsembleStrategy.run(view)      -> (StrategyResult, EnsembleDiagnostics)
+ModelOrTransform.run(view)      -> (ResearchDataArtifact, Diagnostics)
+construct(weights, view)        -> (PhysicalTarget, Diagnostics)       # optional
+adjust(candidate, view)         -> (AdjustmentResult, Diagnostics)     # optional
+convert(target, view)           -> (Orders, ConversionLog)             # optional
+validate(candidate, view)       -> (Verdict, Findings)                 # optional
+analyze(artifact, view)         -> (AnalysisArtifact, Diagnostics)     # optional
+render(analysis, options)       -> (ReportArtifact, Diagnostics)       # optional
+exchange.match_batch(at, orders, instruments, quotes, volumes, cash)
+                                -> (Fills, FillDiagnostics)
+```
+
+첫 view 인자는 **clock과 resolved requirements에 묶인 조회 창구**다(§7). Operation은 필요한 만큼
+조회하며 view가 실제 접근을 lineage로 기록한다. Constraint-free analysis, direct Strategy와 stored-result
+reuse는 construct/adjust/convert/validate를 호출하지 않는다.
+
+Ensemble은 별도 mandatory stage가 아니라 `StrategyOperation` 구현이다. Member Strategy result를 typed
+artifact로 읽고 ticker-level netting, crossing, member contribution과 fixed/flexible budget residual을
+기록한다. Member producer가 direct Strategy인지 Model result를 소비했는지는 Ensemble public contract가
+아니다.
+
+Path-dependent result도 재사용 가능하다. Compatibility operation은 source state/feedback cursor와 target
+state의 차이를 warning으로 제시하고, user가 historical intent replay 또는 target state에서 Strategy rerun을
+선택한 decision artifact를 남긴다. 다른 execution history라는 이유만으로 무조건 거부하거나 조용히
+재사용하지 않는다.
 
 `exchange.match_batch`만 view를 받지 않는다. 필요한 관측값은 Executor가 view에서 꺼내고, effective-dated
 policy를 고르기 위한 event time은 `at`으로 명시한다. Exchange는 wall clock을 읽지 않으며 같은 frozen
 instrument/exchange config, `at`과 배열 입력에서 같은 결과를 낸다. 인자는 instrument축 배열이며 clipping이
 elementwise로 수행된다.
 
-> **미완 (§17)** — `alpha`의 `ProposedMemory` 반환(G1), `ensemble`(G5), `model.fit`(G3) 계약은
-> shape만 확정되었고 세부는 미설계다.
+모두 typed result와 diagnostics를 반환한다(I5). 이 layer는 state를 직접 변경하지 않으므로 built-in,
+project-local과 external implementation을 같은 validation boundary 뒤에서 교체할 수 있다. Package가
+compatibility를 판정하고 agent는 failure evidence를 해석할 뿐 등록 성공을 대신 선언하지 않는다.
 
-모두 `(result, diagnostics)` 쌍을 반환한다 (I5). 이 layer 전체가 상태를 갖지 않으므로 교체
-가능하며, PRD §13.4의 public extension point 대부분이 여기에 있다.
+### Constraint adjustment, validation과 monitoring
+
+세 operation은 authority와 output이 다르다.
+
+```text
+adjust proposed intent   → modified candidate + unresolved residual
+validate final candidate → execution eligibility + finding
+monitor committed actual → actual-account finding; account mutation 없음
+```
+
+Adjustment result가 존재해도 compliance를 의미하지 않는다. Constraint를 선택한 workflow만 declaration과
+metric data requirement를 resolve한다. Missing sector binding은 order나 hypothetical account를 만들기 전에
+실패하고, constraint-free signal research에는 compliance dataset을 요구하지 않는다.
 
 ### Instrument와 Exchange registration
 
@@ -738,7 +916,7 @@ nautilus `risk/engine.pyx`의 구조를 채택한다. Validator는 strategy와 e
 **조용히 수정하지 않는다.** 주문이 크면 줄이는 것이 아니라 거부하고 이유를 남긴다. 조용한 수정이
 허용되면 backtest 결과가 전략 때문인지 engine 보정 때문인지 구분할 수 없다.
 
-PRD §10.8(best-effort adjustment)과 §10.9(independent validation)는 다른 책임이다. 전자는 조정하고
+PRD §10.3의 best-effort adjustment와 independent validation은 다른 책임이다. 전자는 조정하고
 후자는 판정한다. 조정 결과가 존재한다는 사실이 compliance를 보증하지 않는다.
 
 ---
@@ -779,12 +957,12 @@ qlib `backtest/position.py::Position`(L231-500)의 산술을 이식한다.
 
 qlib `backtest/account.py`:
 - `AccumulatedInfo` (L35) — return/cost/turnover 누적
-- `update_bar_end` (L338) — bar 종료 mark. PRD §9.7 "no-trade bar에도 account mark"
+- `update_bar_end` (L338) — bar 종료 mark. no-trade monitoring에도 actual snapshot을 제공
 - `is_port_metr_enabled` (L132) — metric 명시적 활성화
 
 vnpy `PortfolioDailyResult.calculate_pnl`:
-- **trading PnL / holding PnL 분해.** qlib에는 없다. PRD §13.2 attribution과 §10.10
-  flexible-budget attribution의 출발점이다.
+- **trading PnL / holding PnL 분해.** qlib에는 없다. Actual-state analysis와 budget residual attribution의
+  출발점이다.
 
 ### 이 절의 한계 (§17)
 
@@ -804,42 +982,104 @@ vnpy `PortfolioDailyResult.calculate_pnl`:
 ### 계약
 
 ```python
-class Recorder:
-    def write(self, *artifacts) -> list[ArtifactId]: ...   # append-only
+class ArtifactPublisher(Protocol):
+    def publish(self, *candidates: ArtifactCandidate,
+                lineage: tuple[AccessRecord, ...] = ()) -> tuple[ArtifactId, ...]: ...
+    def publish_failure(self, failure: OperationError) -> ArtifactId: ...
+
+class ArtifactLoader(Protocol):
+    def load(self, artifact_id: ArtifactId, expected: ArtifactContract) \
+            -> TypedArtifact: ...
 ```
 
-덮어쓰기 API가 없다 (I6). 같은 identity + 같은 content는 idempotent, 같은 identity + 다른 content는
-conflict 실패다 (PRD §12.6).
+Publisher는 payload, envelope와 dependency edge를 하나의 publication transaction으로 다룬다. Payload만
+쓰였거나 index commit이 실패한 candidate는 reusable artifact로 보이지 않는다. 덮어쓰기 API가 없고(I6),
+같은 logical identity + 같은 content는 idempotent, 같은 identity + 다른 content는 conflict 실패다.
+
+Loader는 raw dictionary를 public consumer에 통과시키지 않는다. Type/version registry에서 schema를 찾고
+payload를 적합한 typed object로 생성하면서 required field, logical key uniqueness, semantic category,
+time/axis/unit와 cross-field invariant를 검증한다. Unknown version은 explicit migration 또는 unsupported
+error이며 producer의 private Python class를 import하지 않는다.
 
 ### Envelope
 
-PRD §12.2가 요구하는 필드를 pydantic 모델로 정의한다 (§11 참조).
+Public envelope는 Pydantic 모델로 정의한다(§11). 이는 architecture가 선택한 boundary implementation이며
+다른 implementation도 같은 object-construction validation과 portable schema를 제공하면 교체 가능하다.
 
-payload는 tabular/matrix는 Parquet, metadata/config는 JSON이다. 물리 layout은 nautilus
+Default local backend의 payload는 tabular/matrix는 Parquet, metadata/config는 JSON이다. 물리 layout은 nautilus
 `persistence/catalog/parquet.py`를 참고한다 — 특히 parquet metadata로 시간 범위를 인덱싱해 전체를
 읽지 않는 기법(L570), 중복 제거(L820), 스키마 검증(L781).
 
 표면 API(`save`/`load`/`list_all_*`)는 vnpy `alpha/lab.py::AlphaLab`을 따른다. 단 vnpy에는
 fingerprint, lineage, envelope, 원자적 발행이 없으므로 **형태만 차용하고 내용은 새로 만든다.**
 
-카탈로그 인덱스는 duckdb로 둔다 (이미 의존성에 있고 parquet을 직접 질의할 수 있다).
+Default local catalog index는 duckdb로 둔다. Object store나 external tracker backend도 같은
+`ArtifactPublisher`/`ArtifactLoader` contract, logical identity, atomic visibility와 conflict outcome을
+만족해야 한다. External tracker run ID나 file path는 producer reference일 수 있지만 canonical artifact
+identity를 대신하지 않는다.
 
 ### Lineage
 
 ```
-dataset snapshot ─┐
-fitted model  ────┼→ signal ─┐
-other data    ────┘          ├→ alpha weights ─┐
-universe/benchmark ──────────┘                 ├→ ensemble
-                                               ├→ physical target
-constraint declaration ────────────────────────┤
-                                               ├→ orders → fills
-                                               └→ validation finding
-account snapshot ────────────────────────────────→ monitoring finding
+registered PIT data ─┬→ direct Strategy ────────────────┐
+                     └→ materialized research data ─────┤
+member Strategy results ─→ Ensemble Strategy ───────────┤
+                                                         ├→ signed weights
+instrument/profile/constraint ───────────────────────────┤
+                                                         ├→ physical target → decision → fills
+                                                         └→ analysis → report
+actual account snapshot + compliance binding ─────────────→ monitoring finding → report
+failure evidence + resolution decision ───────────────────→ retry invocation
 ```
 
 Edge는 consumer role, 선택된 field/column, version/fingerprint, 시간 호환성을 기록한다. Graph는
-acyclic이어야 하며 mutable alias만으로 dependency를 식별하지 않는다 (PRD §12.4).
+acyclic이어야 하며 mutable alias만으로 dependency를 식별하지 않는다. Content hash가 같아도 economic
+meaning, state cursor나 contract가 다르면 같은 logical artifact로 합치지 않는다.
+
+### Failure, retry와 publication status
+
+`OperationError`도 frozen invocation, actual stage path, requirement/error identity, commit status와 bounded
+diagnostic을 가진 typed evidence로 publish한다. Retry는 failure를 덮어쓰지 않고 `resolves_error_id` edge로
+연결한 새 invocation이다. 실패한 fit, rejected research, invalid external payload와 partial publication을
+success catalog query에서 숨기되 audit query에서는 찾을 수 있어야 한다.
+
+### Analysis, renderer와 extension boundary
+
+Analysis는 stored result를 읽어 metric/table artifact를 만들고 Renderer는 그 값을 presentation으로만
+변환한다. Table, chart와 machine-readable renderer가 달라도 return, cost, exposure와 failure count의
+underlying artifact identity는 같다. Renderer 안에서 metric을 재계산하지 않는다.
+
+Built-in과 project-local/external operation은 같은 `ComponentRequirement`, typed result와 validation fixture를
+제공한다. Extension registration은 package compatibility validation이 성공한 뒤에만 commit한다. Agent가
+code를 작성하거나 error를 설명할 수는 있지만 compatibility success를 선언하지 않는다.
+
+### Production outbox와 reconciliation
+
+Production flow도 같은 evidence boundary를 사용하되 prepared intent와 authoritative outcome을 분리한다.
+
+```text
+Strategy result
+  → immutable PreparedDecision + idempotency identity
+  → atomic outbox publication                    # Ledger/Memory advance 없음
+  → external OMS acknowledgement                 # Fill 아님
+  → confirmed fill/reject/cancel/account result
+  → correlate + deduplicate + order-state reconcile
+  → commit confirmed delta/account snapshot only
+  → next Strategy view and independent monitoring
+```
+
+```python
+class Reconciler(Protocol):
+    def reconcile(self, prepared: PreparedDecision,
+                  received: tuple[OMSResult, ...],
+                  account: ConfirmedAccountSnapshot) -> ReconciliationResult: ...
+```
+
+Reconciler는 missing, duplicate, stale, out-of-order와 conflicting result를 state mutation 전에 구분한다.
+Partial fill은 confirmed quantity만 apply하고 remainder의 pending/cancel state를 추측하지 않는다. Rejection은
+evidence를 남기지만 intended position이나 proposed Strategy state를 actual로 commit하지 않는다. 같은
+idempotency identity의 duplicate delivery는 두 번 적용하지 않는다. Production `account_authority`는 이
+reconciliation이 확인한 account snapshot이며 outbox publish나 OMS acknowledgement가 아니다.
 
 ---
 
@@ -866,14 +1106,14 @@ Q2. 스키마를 남이 읽어야 하는가?
 |---|---|
 | `FrozenConfig` | `Event`, `Handler` |
 | Concrete `Instrument`, Exchange config, cost schedule entry | compiled instrument arrays |
-| `ArtifactEnvelope`, `DependencyEdge` | `Context` 3종 |
-| `StageError` (§7.5) | `Order`, `Fill` |
+| `ArtifactEnvelope`, `DependencyEdge` | `ScopedView`, `ResolvedBinding` |
+| `OperationError` (§7) | `Order`, `Fill` |
 | Instrument/Exchange registration | `CashFlow`, `PositionDelta`, diagnostic 행 |
-| `ConstraintDeclaration` (§7.11) | `Diagnostic` 행 |
-| `CapabilityRequirement` (§7.3) | `Position`, `Account` |
-| `DatasetRegistration` (§7.2) | `AccountSnapshot` |
-| `ExtensionContract` (§13.5) | 통계 반환값 (JSON primitive) |
-| `PreparedDecision`, `OMSResult` (§14) | |
+| `ConstraintDeclaration` | `Diagnostic` 행 |
+| `ComponentRequirement` | `Position`, `Account` |
+| `DatasetRegistration` | `AccountSnapshot` |
+| `ExtensionContract` | 통계 반환값 (JSON primitive) |
+| `PreparedDecision`, `OMSResult`, `ReconciliationResult` | |
 
 pydantic 대상은 전부 **저빈도 + 경계**, dataclass 대상은 전부 **고빈도 + 내부**다.
 
@@ -902,23 +1142,27 @@ class QlibxModel(BaseModel):
 
 ### 에러 번역
 
-pydantic `ValidationError`를 그대로 노출하지 않고 §7.5 공개 계약으로 번역한다.
+pydantic `ValidationError`를 그대로 노출하지 않고 §7의 hierarchical operation error로 번역한다.
 
 ```python
 except ValidationError as e:
-    raise StageError(
-        stage="PROJECT_INIT",
-        message="config validation failed",
+    raise OperationError(
+        operation="dataset.register",
+        stage_path="dataset.register.schema",
+        error_code="SCHEMA_VALIDATION_FAILED",
+        requirement_id="dataset.minimal_schema",
         expected=FrozenConfig.model_json_schema(),
-        context={"fields": [...][:MAX_REPORTED]},   # bounded — §7.5
-        requires_user_confirmation=True,
-        retryable=False,
+        context={"fields": [...][:MAX_REPORTED]},
+        commit_status="NONE",
+        retry_preconditions=("provide a schema-valid candidate",),
+        idempotency_identity=invocation.id,
         error_id=new_error_id(),
     ) from e
 ```
 
-`e.errors()`의 `loc`가 필드 경로를 제공하지만 개수를 제한해야 한다 (PRD §7.5 "bounded offending
-values").
+`e.errors()`의 `loc`가 필드 경로를 제공하지만 개수를 제한한다. Package는 observed fact와 retry
+precondition을 제공하고, 어떤 경제적 의미를 선택하거나 user에게 어떤 질문을 할지는 bundled agent skill이
+판단한다.
 
 ### 고빈도 데이터의 검증 위치
 
@@ -934,8 +1178,9 @@ JSON Schema를 함께 파생시킨다.
 
 ### 부수 효과: 스키마 자동 생성
 
-`model_json_schema()`가 PRD §7.3, §13.5, §13.7의 machine-readable schema 요구를 충족한다. 손으로
-관리하는 스키마 문서는 반드시 코드와 어긋나므로 자동 생성이 요구사항 만족의 전제다.
+`model_json_schema()`는 external artifact, operation requirement와 extension contract의 machine-readable
+schema를 같은 type definition에서 생성하는 architecture mechanism이다. Pydantic 자체가 product requirement는
+아니지만, 손으로 별도 관리하는 schema가 runtime validation과 어긋나는 구현은 허용하지 않는다.
 
 ---
 
@@ -945,16 +1190,17 @@ JSON Schema를 함께 파생시킨다.
 src/qlibx/
   kernel/       clock  event  queue  engine          ① 시간
   flow/         decision  mark  monitor  executor/   ② 순서
-  context/      base  decision  execution  monitor  gate    ③ 시야  ★
-  data/         registry  materialize  calendar  provider
-  research/     signal/  alpha/  ensemble/           ┐
+  context/      scoped  strategy  execution  monitor  gate  ③ 시야  ★
+  data/         registry  requirement  resolver  provider
+  operations/   strategy  model  ensemble  extension ┐
   portfolio/    construct  optimizer/                ├ ④ 계산
-  execution/    convert  validate  exchange/         ┘
+  execution/    adjust  convert  validate  exchange/ ┘
   ledger/       position  account  pnl  sink         ⑤ 상태
-  evidence/     artifact  catalog  lineage  recorder ⑥ 증거
+  evidence/     artifact  catalog  lineage  publisher⑥ 증거
   analysis/     statistic  analyzer  report
+  production/   outbox  oms_result  reconcile
   config/       frozen  schema
-  errors.py     stage 기반 에러 계약 (§7.5)
+  errors.py     hierarchical operation error (§7)
   models.py     QlibxModel base
 ```
 
@@ -962,16 +1208,18 @@ src/qlibx/
 
 ```
 kernel     → 없음
-context    → kernel, data
-judge (research/portfolio/execution) → context 만
+data       → domain schema
+context    → kernel, data resolver
+operation (strategy/model/portfolio/execution/analysis) → context + domain type
 ledger     → domain 객체만
 evidence   → domain 객체만
-flow       → context, judge, ledger, evidence
+production → evidence + domain type
+flow       → context, operation, ledger, evidence, production port
 engine     → 전부 (조립 지점)
 ```
 
-**judge가 ledger를 import하지 않는 것이 핵심이다.** Ledger 상태가 필요하면 context에 담겨 들어온다.
-그래야 gate를 우회할 수 없다 (I2).
+**operation이 ledger나 raw provider를 import하지 않는 것이 핵심이다.** State/data가 필요하면 resolved
+scoped view로 들어온다. 그래야 gate와 requirement resolver를 우회할 수 없다(I2, I8).
 
 ### 조립
 
@@ -979,18 +1227,20 @@ nautilus `system/kernel.py::NautilusKernel`(L101) 방식의 명시적 생성자 
 
 ```python
 engine = Engine(
-    clock    = BacktestClock(calendar),
-    gate     = ContextGate(registry, policy),
-    alpha    = MyAlpha(),
-    executor = DailyCloseExecutor(exchange),
-    ledger   = Ledger(initial_cash=...),
-    recorder = Recorder(catalog),
+    clock       = BacktestClock(calendar),
+    registry    = DatasetRegistry(...),
+    resolver    = RequirementResolver(...),
+    gate        = ViewGate(...),
+    strategy    = MyStrategy(),
+    execution   = DailyExecutionProfile(exchange, fill_convention),
+    ledger      = Ledger(initial_cash=...),
+    memory      = StrategyMemoryStore(...),
+    artifacts   = LocalArtifactBackend(catalog),
 )
 ```
 
 qlib의 `common_infra.get("trade_account")` 문자열 키 서비스 로케이터는 채택하지 않는다. 타입이
-사라지고 경계를 강제할 수 없으며, PRD §7.9(process isolation)와 §12.8(parallel agent)이 요구하는
-전역 상태 회피와 상충한다.
+사라지고 resolved requirement, frozen invocation과 authority source를 우회하므로 채택하지 않는다.
 
 ---
 
@@ -1060,7 +1310,7 @@ DECISION D1
   -> DECISION D2: D1의 목표값이 아니라 E1 이후 actual position/cash/NAV를 읽음
 ```
 
-예를 들어 위 ETF 주문은 목표 100주가 아니라 실제 90주와 남은 현금 699,555원이 다음 DecisionView에
+예를 들어 위 ETF 주문은 목표 100주가 아니라 실제 90주와 남은 현금 699,555원이 다음 StrategyView에
 보인다. 이것이 단순 수익률 계산과 closed-loop backtest의 차이다.
 
 ### 13.5 3,000종목 cross-section — UC-SCALE-001
@@ -1088,6 +1338,119 @@ FillDiagnostic으로 돌아가므로 같은 config와 data에서 event 순서와
 
 통합 테스트와 fixture 이름에 이 use-case ID를 그대로 사용하면 PRD 요구, architecture flow, 검증
 증거 사이의 추적성을 유지할 수 있다.
+
+### 13.7 Minimal registration과 progressive gap — UC-DATA-001, UC-DATA-002, UC-ERROR-001, UC-PIT-001, UC-AGENT-001
+
+```text
+REGISTER price_source
+  → user-confirmed instrument/time/available_at binding
+  → minimal validation
+  → DatasetRegistration publish                         UC-DATA-001
+
+RUN price_reversal_strategy
+  → required price binding resolves
+  → Strategy runs
+
+RUN sector_neutral_strategy
+  → required sector binding missing
+  → dataset/registration은 유지
+  → OperationError(strategy.run.requirements.sector)
+  → failure evidence publish                            UC-DATA-002
+  → agent explains add-binding / derived-data / profile alternatives
+  → user selects, package validates, new invocation retries
+```
+
+Signal analysis처럼 짧은 invocation은 실제 `analysis.run.requirements`에서만 실패하고 model, optimizer,
+order stage를 만들지 않는다(`UC-ERROR-001`). Forward-label materialization은 `horizon_end` requirement를
+resolve하지 못하면 label을 만들기 전에 실패한다(`UC-PIT-001`). Availability 의미가 불명확하면 package는
+추측하지 않고 structured gap을 내며, agent가 release timestamp나 confirmed delay-rule 후보를 설명한 뒤
+user-confirmed binding만 등록한다(`UC-AGENT-001`).
+
+### 13.8 Strategy composition과 state — UC-SIGNAL-001, UC-SIGNAL-002, UC-ALPHA-BUDGET-001, UC-ALPHA-PATH-001, UC-ALPHA-CHILD-001, UC-ALPHA-ADAPTIVE-001, UC-ENSEMBLE-001
+
+Direct reversal Strategy는 PIT price binding을 읽어 내부 score와 signed weights를 만들고 optional academic
+profile에서 평가한다. Stored signal이나 physical construction을 요구하지 않는다(`UC-SIGNAL-001`). Value
+characteristic을 materialize한 Model result는 typed artifact로 load되어 long-short Strategy와 long-only
+Strategy가 producer rerun 없이 각각 소비한다(`UC-SIGNAL-002`).
+
+Flexible-budget result는 invested 40%와 residual 60%를 그대로 저장하고 fixed consumer가 요청되면
+compatibility error를 낸다(`UC-ALPHA-BUDGET-001`). 다른 account에서 path-dependent result를 재사용하면
+source/target state 차이를 보여주고 historical replay와 Strategy rerun 중 user choice를 기록한다
+(`UC-ALPHA-PATH-001`).
+
+```text
+parent signed weights ─┬→ daily-close child execution
+                       └→ intraday child execution        UC-ALPHA-CHILD-001
+
+member Strategy results → EnsembleStrategy
+  → ticker netting/crossing/contribution/residual          UC-ENSEMBLE-001
+  → committed fill feedback + prior memory
+  → proposed member-weight update
+  → flow Memory commit with feedback cursor                UC-ALPHA-ADAPTIVE-001
+```
+
+Child는 parent Strategy/Model을 다시 실행하거나 parent state를 바꾸지 않는다. Adaptive update는 commit된
+feedback까지만 읽으며 proposed state는 flow commit 전 authority가 아니다.
+
+### 13.9 Portfolio와 optional constraint — UC-PORTFOLIO-001, UC-CONSTRAINT-001, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001
+
+같은 signed weight artifact를 crypto perpetual long-short profile과 equity enhanced-index profile이 각각
+읽는다. 각 construction operation이 direction, instrument, budget, cost와 settlement requirement를 별도로
+resolve하고 새 result를 만들며 original alpha artifact를 다시 쓰지 않는다(`UC-PORTFOLIO-001`). 이 예시의
+perpetual complete lifecycle은 future characterization이며 current support claim이 아니다.
+
+Constraint가 없는 signal IC/hypothetical return analysis는 compliance binding 없이 끝난다
+(`UC-CONSTRAINT-001`). Sector limit을 선택한 conversion은 sector binding을 먼저 resolve하고, 없으면
+order/account mutation 전에 실패한다(`UC-CONSTRAINT-002`). Binding이 있으면 adjust가 original/adjusted
+intent와 lot-rounding residual을 만들고 validate가 eligibility를 별도로 판정한다. 남은 breach를 adjusted
+success로 숨기지 않는다(`UC-CONSTRAINT-ADJUST-001`).
+
+### 13.10 Pluggable execution과 monitoring — UC-EXEC-001, UC-EXEC-002, UC-EXEC-003
+
+하나의 immutable DecisionIntent를 두 child profile이 참조한다. Daily profile은 다음 eligible close처럼
+선언된 convention으로 하나의 batch event를 만들고, intraday profile은 필요한 market binding과 여러
+execution event를 선언해 partial fill을 만들 수 있다. Decision lineage는 같고 각 child Ledger의 Fill,
+cash, position과 이후 feedback만 다르다(`UC-EXEC-001`).
+
+Daily close profile은 decision time과 close observation의 `available_at`을 비교한다. 아직 공개되지 않은
+동일 시점 close를 fill price로 요청하면 Fill 전에 실패한다. Volume impact나 partial fill을 모델링하지
+않으면 limitation artifact에 남긴다(`UC-EXEC-002`).
+
+MONITOR timer는 decision 유무와 무관하게 `account_authority`의 committed snapshot과 resolved compliance
+view를 읽는다. Price drift로 sector breach가 생기면 finding만 publish하고 order나 account mutation을
+만들지 않는다(`UC-EXEC-003`).
+
+### 13.11 Artifact, failure, report와 extension — UC-ARTIFACT-001, UC-ARTIFACT-002, UC-RESEARCH-001, UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001
+
+External producer가 documented envelope와 payload로 signal을 publish하면 Loader가 producer class import 없이
+typed Signal object를 생성하고 semantics/lineage를 검사한다(`UC-ARTIFACT-001`). Duplicate logical key나
+payload/semantics mismatch는 object construction 또는 publication을 실패시키고 reusable success로 노출하지
+않는다(`UC-ARTIFACT-002`).
+
+Sector gap으로 실패한 Strategy invocation은 failure artifact를 보존한다. Binding 보강 후 retry는 새
+invocation/result를 만들고 `resolves_error_id`로 연결하며 실패를 삭제하지 않는다(`UC-RESEARCH-001`).
+Analysis artifact 하나를 table/chart/machine renderer가 공유하고 metric을 renderer에서 재계산하지 않는다
+(`UC-REPORT-001`). Monitoring report는 actual finding과 intended target을 섞지 않고 breach와 missing input을
+구분한다(`UC-MONITOR-001`). Local neutralization transform은 package contract validation이 성공한 뒤에만
+registry에 commit한다(`UC-EXTENSION-001`).
+
+### 13.12 Production reconcile — UC-PROD-001, UC-PROD-002
+
+```text
+PreparedDecision(100 BUY)
+  → outbox publish / OMS ack                    authority 변화 없음
+  → confirmed Fill(40) + account snapshot
+  → reconcile pending/cancel state
+  → confirmed 40과 actual cash만 commit         UC-PROD-001
+
+PreparedDecision
+  → OMS rejection
+  → rejection evidence publish
+  → intended position/Memory commit 없음        UC-PROD-002
+```
+
+Duplicate, missing, stale, out-of-order와 conflicting result는 commit 전에 구분한다. Next Strategy와 production
+monitoring은 outbox target이 아니라 reconciled account authority만 읽는다.
 
 ---
 
@@ -1159,7 +1522,7 @@ FillDiagnostic으로 돌아가므로 같은 config와 data에서 event 순서와
 방식이라 20년 × 3000종목을 담지 못한다. qlibx의 기본 단위인 decision time 횡단면과 그것을 컬럼
 저장소 질의로 구현하는 부분은 여전히 창작이다.
 
-### ④ judge
+### ④ operation
 
 | 항목 | 출처 | 위치 | |
 |---|---|---|---|
@@ -1245,20 +1608,25 @@ vnpy 통계는 **계산식은 🟢이나 구조는 🔴**이다. 계산식을 �
 ```
 ③ 횡단면 패널 view        instrument × field, 컬럼 저장소 질의   ← 가장 큼
 ③ 접근 기록 lineage       view 가 조회를 기록
-③ 역할별 view 구성        compliance / signal 분리
+③ requirement resolver   minimal registration → operation-scoped binding
+③ 역할별 view 구성        resolved capability만 노출
 ② callback, FillSink
+② finalization            decision/execution/reconcile별 Memory commit timing
+④ Strategy/Ensemble      direct/stored/member result composition
 ④ target→order 변환      전 주문 진단 보존
-④ 제약 선언/조정/검증     PRD §10.8~10.9
+④ 제약 선언/조정/검증     PRD §10.3
 ⑤ TradeLedger            평균단가 · 라운드트립 · 실현손익 (§17 G2)
 ⑤ Memory                 전략 상태 commit boundary (§17 G1)
 ⑤ long-short 실행 회계    담보 · 수익률 분모 · 차입비용 (§17 G4)
-⑥ envelope / lineage     fingerprint, dependency graph, 원자적 발행
-⑥ production outbox      PRD §14
+⑥ artifact / failure     typed load, fingerprint, lineage, 원자적 발행
+⑥ production reconcile  outbox, OMS result, idempotent confirmed-state commit
   instrument/exchange semantics   계약조건, listing, 비용, lifecycle (§2.4·§16)
 ```
 
-계산은 전부 🟢/🔵이고 경계는 전부 ⚪이다. 이것이 §1 설계 명제의 실증이며, **구축 순서에서 ⚪를 뒤로
-미뤄야 하는 근거**다 — 🟢로 기반을 다진 뒤 창작하는 것이 안전하다.
+계산은 대부분 🟢/🔵이고 경계는 대부분 ⚪이다. 이것이 §1 설계 명제의 실증이다. 그러나 progressive
+workflow에서는 error/evidence 경계를 뒤로 미루면 앞선 계산 slice가 잘못된 success/failure contract로
+굳는다. §15는 최소 resolver, typed evidence와 publication boundary를 foundation으로 먼저 만들고,
+borrowed calculation은 그 뒤의 vertical slice에서 추가하도록 정한다.
 
 ### 라이선스 실무
 
@@ -1277,32 +1645,34 @@ nautilus_trader  LGPL-3.0   🔵 코드 복사 금지
 
 ## 15. 구축 순서
 
-각 단계는 앞 단계의 결과물만 의존한다.
+구축 단위는 layer가 아니라 observable vertical use case다. Error와 evidence를 뒤로 미루면 초기
+workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 둔다.
 
-| # | 단계 | 성격 | 비고 |
+| # | vertical slice | 주요 architecture | use-case evidence |
 |---|---|---|---|
-| 1 | 구체 Instrument/Exchange 등록 + instrument축 compiler | 🟢⚪ | Pydantic은 등록 시 검증, hot path는 stable index와 배열. UC-SCALE-001 |
-| 2 | **exchange.match_batch + exact effective cost + 진단** | 🟢⚪ | §15.1 fixture parity. UC-COST-001~004 |
-| 3 | ledger (fill/position/account/PnL) | 🟢 | qlib 산술 + vnpy PnL 분해 + TradeLedger(§17 G2). lifecycle cash-flow port는 예약. UC-CLOSED-LOOP-001 |
-| 4 | kernel (clock/event/queue) | 🔵 | 20~30줄. 병렬 clock 검증 |
-| 5 | view (available_at 질의 + 횡단면 패널) | 🔵⚪ | 시간 경계는 🔵, 접근 축은 ⚪ |
-| 6 | flow + convert + executor | ⚪🟢 | §13 use-case walkthrough가 통합 테스트 |
-| 7 | validate | 🔵⚪ | |
-| 8 | evidence (envelope/catalog) | ⚪ | |
-| 9 | analysis plugin | 🔵🟢 | |
-| 10 | signal/dataset | 🟢 | vnpy 이식 |
-| 11 | production boundary | ⚪ | PRD §14 |
+| 1 | Minimal registration + typed evidence | DatasetRegistration, RequirementResolver, OperationError, atomic local catalog | UC-DATA-001/002, UC-ERROR-001, UC-ARTIFACT-002, UC-RESEARCH-001 |
+| 2 | PIT direct research | Clock/View, ResolvedBinding, Direct Strategy, signed-weight artifact | UC-PIT-001, UC-SIGNAL-001, UC-CONSTRAINT-001 |
+| 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §15.1 |
+| 4 | Daily closed loop | kernel, decision/execution flow, Ledger/Memory, daily profile, checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002 |
+| 5 | Pluggable execution branch | immutable DecisionIntent, daily/intraday child profiles, isolated Ledger | UC-EXEC-001, UC-ALPHA-CHILD-001 |
+| 6 | Stored research + Strategy composition | materialize operation, typed load, Ensemble Strategy, reuse compatibility, Memory update | UC-SIGNAL-002, UC-ALPHA-*, UC-ENSEMBLE-001, UC-ARTIFACT-001 |
+| 7 | Portfolio/constraint/monitoring | construction, adjust/validate, account authority, independent monitor | UC-PORTFOLIO-001, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003 |
+| 8 | Analysis/report/extension | analysis artifact, pure renderer, extension validation | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001 |
+| 9 | Production boundary | prepared decision, atomic outbox, OMS result, reconciler | UC-PROD-001/002 |
+| 10 | Future design characterization | academic listing, lifecycle event spec, cash-flow attribution | UC-ACADEMIC-001, UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001 |
 
-6단계 완료 시 end-to-end long-only backtest가 동작한다. 7단계 이후는 참고 코드가 희박하므로 기반이
-굳은 뒤로 배치한다.
+각 slice는 success만 아니라 requirement gap, commit status, artifact/failure evidence와 deterministic retry를
+함께 검증한다. 4단계 완료 시 daily long-only closed loop가 동작하고, 5단계가 decision contract와
+execution assumption의 독립성을 검증한다. 10단계는 current support publication이 아니라 architecture를
+구속하는 characterization fixture다.
 
-2단계부터 instrument축 배열을 기본 단위로 잡는다. 단건 `match`를 먼저 만든 뒤 batch로 확장하는
+3단계부터 instrument축 배열을 기본 단위로 잡는다. 단건 `match`를 먼저 만든 뒤 batch로 확장하는
 경로는 택하지 않는다 — clipping 순서 중 현금 제약만이 순차이고 나머지는 elementwise이므로, 처음부터
 batch로 두는 편이 단순하다.
 
 ### 15.1 체결 산술 parity 검증
 
-`pyqlib`는 dependency가 아니므로 qlib을 in-process oracle로 실행할 수 없다. 2단계의 검증은 **정적
+`pyqlib`는 dependency가 아니므로 qlib을 in-process oracle로 실행할 수 없다. 3단계의 검증은 **정적
 fixture 대조**로 수행한다.
 
 1. `references/qlib`의 `_calc_trade_info_by_order` 경로를 읽어 clipping 단계별 기대값을 손으로
@@ -1332,12 +1702,12 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 | ~~O3~~ | ~~matched capitalization 폐기~~ | **해결.** Position direction은 matched-capitalization 우회가 아니라 concrete Instrument semantics와 execution policy가 함께 결정한다. Architecture가 모델과 policy resolution을 소유하며 PRD는 특정 capability 필드를 강제하지 않는다 |
 | ~~O9~~ | ~~long-short 수익률 분모~~ | **해결.** dollar-neutral book은 **gross 기준**으로 수익률을 계산한다. Long 100 / short 100이면 분모는 200이다. NAV 기준은 leverage에 따라 수익률이 달라져 alpha 비교가 불가능해지므로 채택하지 않는다. §17 G4의 나머지 항목(담보 모델, 차입 비용, locate)은 여전히 미해결 |
 | ~~O4~~ | ~~hypothetical vs real short~~ | **해결.** workflow가 `long_only` / `hypothetical_short` / `real_short` semantics를 명시적으로 resolve한다. 미해결은 `long_only`이며, hypothetical result는 실제 execution profile에서 거부되고 artifact에 표시된다. 이를 Instrument의 단일 고정 필드로 제한하지 않는다 |
-| O12 | **패키지명 `qlibx` → `vqar`** | **확정, 실행 보류.** vqar = vibe quant alpha research. 급하지 않고 O7(PRD 본문 정리)과 함께 하면 diff가 섞이므로 최종 단계로 미룬다. 범위: 배포/import/CLI 이름, `src/qlibx/`, 문서 파일명과 obsidian 링크, `.agent/project.yaml`의 canonical document 경로, `.gitignore`의 `.qlibx/`·`qlibx-research/`, 그리고 **PRD §6.1의 normative skill entrypoint path**. 착수 전 PyPI 가용성 확인 필요. `.agent/plans/completed/`는 당시 명칭 기록이므로 소급 변경하지 않는다 |
-| O5 | margined contract 확장 | **보류. 설계 characterization 확정.** 현재 범위 밖 (PRD §5.7). 공통 `MarginedContract` 아래 만기·최종정산이 있는 `Future`와 만기 필드가 없는 `PerpetualSwap`을 형제 타입으로 둔다. Exchange가 settlement/funding/expiry callback을 등록하고 Ledger가 lifecycle cash flow를 반영한다. `real_short`의 담보·차입 비용은 별도 후속 결정이다 |
+| O12 | **패키지명 `qlibx` → `vqar`** | **확정, 실행 보류.** vqar = vibe quant alpha research. PRD 본문 정리(O7)는 완료됐지만 rename은 별도 product/release change로 격리한다. 범위: 배포/import/CLI 이름, `src/qlibx/`, 문서 파일명과 obsidian 링크, `.agent/project.yaml`의 canonical document 경로, `.gitignore`의 `.qlibx/`·`qlibx-research/`, bundled skill entrypoint. 착수 전 PyPI 가용성 확인 필요. `.agent/plans/completed/`는 당시 명칭 기록이므로 소급 변경하지 않는다 |
+| O5 | margined contract 확장 | **보류. 설계 characterization 확정.** Complete derivative lifecycle은 현재 범위 밖이다. 공통 `MarginedContract` 아래 만기·최종정산이 있는 `Future`와 만기 필드가 없는 `PerpetualSwap`을 형제 타입으로 둔다. Exchange가 settlement/funding/expiry callback을 등록하고 Ledger가 lifecycle cash flow를 반영한다. `real_short`의 담보·차입 비용은 별도 후속 결정이다 |
 | ~~O11~~ | ~~qlib을 runtime backend로 채택~~ | **기각.** decision clock이 데이터 인덱스에 묶여 있어 4개 clock 분리가 불가능하고, 저장 최소 단위에 `available_at`이 없으며, 실험 단위 pickle/MLflow가 portable artifact를 대체하지 못한다. 모델 35개를 싣는 배포 형태도 PRD §5.3·§2.7의 소유 경계와 어긋난다. 상세는 [[why-not-qlib-as-a-backend]] |
 | ~~O10~~ | ~~nautilus를 execution backend로 채택~~ | **기각.** 기본 작업 단위가 다르다 — instrument별 event 대 decision-time 횡단면. PRD §8~§10·§12에 대응물 없음. v1→v2 전환 중. 3000종목 미검증. 상세와 재검토 조건은 [[why-not-nautilus-as-a-dependency]] |
-| O6 | pub/sub 도입 시점 | **보류. 근거 확정.** 한 event의 수신자가 2개뿐이고 이름을 안다. 중간층은 호출 그래프를 감추고 배달 순서를 따로 설계해야 I7이 유지된다. 도입 조건은 (a) 사용자 확장 지점 개방 (b) 한 event 수신자 증가 (c) 전 event 로깅/replay. 전환 비용은 발행 지점 1곳 교체 + 구독 등록이며 judge/ledger 계약은 불변이므로 미룰 수 있다 |
-| O7 | PRD 본문 정리 | §0.3 해석 규칙으로 처리 중. Qlib 전제 서술 195곳의 정식 개정은 별도 revision |
+| O6 | pub/sub 도입 시점 | **보류. 근거 확정.** 한 event의 수신자가 2개뿐이고 이름을 안다. 중간층은 호출 그래프를 감추고 배달 순서를 따로 설계해야 I7이 유지된다. 도입 조건은 (a) runtime event subscriber extension 개방 (b) 한 event 수신자 증가 (c) 전 event 로깅/replay. 전환 비용이 flow registration에 국한되고 operation/ledger 계약은 불변이므로 미룰 수 있다 |
+| ~~O7~~ | ~~PRD 본문 정리~~ | **해결.** `84cd113`이 Qlib-runtime 전제와 fixed global stage/pipeline 서술을 제거하고 progressive workflow contract로 본문을 정리했다. 현 architecture revision이 그 결과를 반영한다 |
 | ~~O8~~ | ~~qlib 소스 보존~~ | **해결.** `references/qlib`을 upstream `main@79633dd` 전체 트리(619 paths)로 교체. 기존 부분 스냅샷(274 paths)은 소스를 담고 있지 않았다. §14 인용이 저장소만으로 해결된다 |
 
 O3·O4는 현재 주식 workflow에 필요한 의미를 해결했다. O5는 그 결정을 막지 않는 독립적인 미래 확장이다.
@@ -1346,45 +1716,43 @@ O3·O4는 현재 주식 workflow에 필요한 의미를 해결했다. O5는 그 
 
 ## 17. 설계 감사 기록
 
-이 절은 초안을 네 개의 구체적 research scenario에 대조해 발견한 gap과 불일치를 기록한다. 감사
-시점 2026-08-03, 대조 대상은 `docs/qlibx-prd.md`와 `references/` 아래 vendored source다.
+이 절은 architecture를 구체적 research scenario와 canonical PRD에 대조해 발견한 gap과 불일치를
+기록한다. 1차 감사는 2026-08-03의 실행 중심 PRD와 vendored reference를, 2차 감사는 2026-08-05
+`84cd113`의 progressive workflow PRD를 대상으로 했다.
 
 기록 목적은 두 가지다. 첫째, 초안이 이미 만족한다고 **잘못 읽힐 수 있는** 부분을 명시적으로
-표시한다. 둘째, 해결 순서와 선행 결정을 남긴다. 여기 적힌 gap은 구조의 결함이 아니라 명세의
-미완이다 — G4만 예외다.
+표시한다. 둘째, 해결 순서와 선행 결정을 남긴다. 해결된 항목의 상세는 당시 문제를 설명하는 역사로
+보존하되 현행 normative contract는 앞 절이 우선한다.
 
 | # | 항목 | 성격 | 상태 |
 |---|---|---|---|
-| G1 | Strategy memory 부재 | 불변식 오류 + 계약 누락 | I4 개정 완료, 계약·저장소 미설계 |
+| G1 | Strategy memory 부재 | 불변식 오류 + 계약 누락 | **계약 해결.** proposed state → flow commit, CAS identity와 feedback cursor 확정. 물리 backend는 구현 선택 |
 | G2 | Round-trip 회계 부재 | 차용 판단 오류 | 미해결 |
-| G3 | 학습/거래 분리 (`FIT` event) | 명세 누락 | 미해결 |
+| G3 | 학습/거래 분리 (`FIT` event) | fixed-stage 가정 | **해결.** optional `MATERIALIZE` operation/event + horizon requirement |
 | G4 | Long-short 실행 회계 | 설계 방향 확정 | O3·O4 해결. `hypothetical_short`까지 착수 가능. `real_short` 담보·차입·locate는 별도 후속 범위 |
-| G5 | `ensemble` 계약 부재 | 명세 누락 | 미해결 |
+| G5 | `ensemble` 계약 부재 | 명세 누락 | **해결.** Ensemble은 StrategyOperation; typed member result, net/cross/residual 계약 확정 |
 
 ### G1 — Strategy memory
 
-초안은 "bounded strategy memory"를 §7의 `DecisionContext` **입력** 항목으로만 언급하고, 출력·
-저장소·commit 경로를 정의하지 않았다. §8의 judge 계약도 `alpha(ctx) -> (AlphaWeights,
-Diagnostics)`로 state 출력이 없다.
-
-(`DecisionContext`는 §18에서 폐기된 초안 용어다. 현행 대응물은 `DecisionView`이며, memory를
-어떻게 담고 되돌려받을지는 아래 미결정 항목으로 남아 있다.)
-
-PRD §9.1과 §9.10이 요구하는 형태는 다음이다.
+초안은 bounded memory를 decision input으로만 언급하고 output·store·commit 경로를 정의하지 않았다.
+현행 계약은 StrategyView가 resolved prior memory와 feedback cursor를 읽고 StrategyResult가 proposed
+memory를 반환하는 형태다.
 
 ```python
-alpha(ctx) -> (AlphaWeights, ProposedMemory, Diagnostics)
+Strategy.run(view) -> (StrategyResult(weights, decision, proposed_memory), Diagnostics)
+MemoryStore.commit(proposed_memory, expected=prior_memory_id) -> MemoryCommitId
 ```
 
-`ProposedMemory`는 제안일 뿐이며 flow가 commit boundary에서 반영한다. Alpha는 여전히 순수 함수다 —
-이전 memory를 입력으로 받고 다음 memory를 반환할 뿐 어디에도 쓰지 않는다.
+`ProposedMemory`는 제안 artifact일 뿐이며 flow가 compare-and-swap identity로 commit한 뒤에만 다음
+Strategy의 authority가 된다. Concurrent/stale prior identity는 commit conflict로 실패하고 proposed result는
+actual state로 승격되지 않는다. Checkpoint는 committed memory ID와 feedback cursor를 함께 보존한다.
 
-Memory를 소비한 alpha result는 자동으로 path-dependent다 (PRD §9.4). §10 envelope의
-`path_dependent` 플래그가 이를 표시하며, G5의 ensemble member 검사와 연결된다.
+Memory나 actual feedback을 소비한 result는 state identity, account identity와 cursor를 lineage에 기록한다.
+다른 state에서 재사용하면 §8 compatibility operation이 warning과 replay/rerun choice를 만든다.
 
-**미결정:** Memory를 별도 store로 둘지, evidence의 artifact stream에서 최신 커밋본을 읽는 형태로
-둘지. 후자는 PRD §9.11("재현 가능한 state transition으로 기록")과 더 잘 맞지만 매 decision마다
-조회 비용이 든다.
+MemoryStore를 독립 low-latency index로 구현할지 artifact stream의 committed head로 구현할지는 물리
+backend 결정이다. 어느 구현이든 immutable proposed/committed state artifact, CAS identity와 checkpoint
+replay 결과는 같아야 한다.
 
 ### G2 — Round-trip 회계
 
@@ -1411,32 +1779,33 @@ vnpy `PortfolioDailyResult`의 trading/holding PnL 분해는 일별 집계이므
 
 ### G3 — 학습/거래 분리
 
-§3 원자 표에 `FIT` event가 없다. "fitted model"은 §10 lineage 다이어그램에만 등장한다. PRD §8.6과
-P2 수용 기준은 rolling/expanding/event-triggered retraining을 명시적 research lifecycle로 요구한다.
+초안은 Model/FIT을 canonical pipeline의 mandatory stage로 읽었다. 현 PRD는 Direct Strategy와 stored
+Model output을 동등한 선택지로 둔다. 따라서 `FIT` global stage를 추가하는 것이 아니라 Model/transform
+workflow가 선택될 때만 `MATERIALIZE` operation을 direct invocation 또는 scheduled event로 등록한다.
 
-원자 패턴에는 그대로 편입된다.
-
-| event | context cutoff | 순수 함수 | 결과 | store |
+| trigger | scoped view | operation | result | publication |
 |---|---|---|---|---|
-| `FIT` | train_end − label_horizon − embargo | model.fit | FittedState + selection evidence | Memory (proposed → commit) |
+| direct/scheduled `MATERIALIZE` | resolved feature/label bindings | Model/transform | typed research data + diagnostics | artifact catalog |
 
-`priority`는 `DECISION`보다 앞선다.
+Rolling/expanding/event-triggered fit을 사용하는 concrete component는 자신의 schedule과 requirement를
+선언하고, same-time decision이 소비해야 하면 priority를 `DECISION`보다 앞에 둔다. Direct Strategy나
+stored-result analysis에는 이 event가 존재하지 않는다.
 
 **라벨의 `available_at` 선언이 이 gap의 핵심이다.** 20일 forward return 라벨로 12/31까지 학습하면
 마지막 샘플의 라벨이 1/20까지의 가격을 소비하고, 그 모델이 1/2 decision에 쓰인다. 예외는 발생하지
 않는다.
 
-§18 개정 이후 이 문제는 별도 cutoff 장치가 아니라 **선언으로 해결된다.** 라벨의 `available_at`을
-`event_time + horizon`으로 등록하면, `FIT`이 시각 T에 실행될 때 `available_at > T`인 라벨은 애초에
-조회되지 않는다. purge/embargo가 view의 일반 규칙에서 그대로 따라 나온다.
+§7 view에서는 이 문제를 별도 hidden cutoff가 아니라 **binding과 requirement로 해결한다.** 라벨의
+`available_at`을 `event_time + horizon`으로 등록하면, `MATERIALIZE`가 시각 T에 실행될 때
+`available_at > T`인 라벨은 조회되지 않는다. Component가 `horizon_end`를 요구하는데 binding이 없으면
+`UC-PIT-001` OperationError로 materialization 전에 실패한다.
 
-따라서 남는 요구는 **derived label을 등록할 때 horizon을 `available_at`에 반영하도록 강제**하는
-것이다. PRD §8.1이 요구하는 purge/embargo 선언이 이 지점에 해당한다. 이를 누락하면 §18이 지적한
-"보장이 write 시점으로 이동한 대가"가 정확히 여기서 실현된다.
+따라서 derived label registration은 horizon이 availability와 일치하는지 validation해야 한다. 이를
+누락하면 §18이 지적한 "보장이 write 시점으로 이동한 대가"가 정확히 여기서 실현된다.
 
-부수 요구: `FittedState`는 binary payload 참조로 저장하고(PRD §12.2), 어느 fitted state가 활성인지는
-lineage edge로 기록한다. 최신 파일 경로 참조로 대체하지 않는다(PRD §8.6). 선택되지 않은 후보와
-실패한 fit도 조회 가능해야 한다.
+Fitted state가 있는 component는 이를 typed artifact 또는 versioned binary payload reference로 저장하고,
+어느 state를 Strategy가 소비했는지 lineage edge로 기록한다. 최신 파일 경로 alias로 대체하지 않으며
+선택되지 않은 candidate와 failed materialization도 audit query에서 조회 가능해야 한다.
 
 ### G4 — Long-short 실행 회계
 
@@ -1475,39 +1844,38 @@ encumbrance, borrow fee가 모두 명시되어야 한다. 이 경계는 특정 `
 
 ### G5 — `ensemble` 계약
 
-§8 judge 계약 목록에 `ensemble`이 없다. §10 lineage 다이어그램과 §12 package layout에만 등장한다.
-PRD §10.1은 결과 요구사항(member fingerprint, ticker-level pre/post-net weight, crossing/netting
-amount, gross/net residual, member contribution/overlap)을 상세히 규정하므로 출력은 정의되어 있고
-계약만 없다.
+초안은 ensemble을 lineage와 package 폴더에만 두고 callable contract를 정의하지 않았다. 현행 §8은
+Ensemble을 `StrategyOperation`으로 정의한다. RequirementResolver가 compatible member Strategy result를
+typed artifact로 resolve하고 producer를 재실행하지 않는다.
 
 ```python
-ensemble(members, ctx) -> (AlphaWeights, EnsembleDiagnostics)
+EnsembleStrategy.run(view) -> (StrategyResult, EnsembleDiagnostics)
 ```
 
 **G4와 독립이다.** Ensemble은 weight space에서 일어나며 ledger를 경유하지 않으므로 long-short
 member를 결합하는 것 자체는 실행 회계와 무관하다.
 
-설계 시 확정할 항목 셋:
+확정된 계약은 다음과 같다.
 
-- **Crossing 기록.** 두 member가 같은 종목에 반대 intent를 내면 netting 후 gross가 줄고 각 member의
-  의도가 부분적으로만 실현된다. 거래 비용은 발생하지 않지만 gross budget이 상쇄에 소비된 것이므로
-  member allocation과 capacity 진단의 입력이다. PRD §10.1이 명시적으로 요구한다.
+- **Crossing 기록.** 두 member가 같은 종목에 반대 intent를 내면 ticker-level pre/post-net weight,
+  crossing/netting amount와 member contribution을 기록한다. 이 단계의 crossing은 Exchange Fill이 아니므로
+  transaction cost를 발생시키지 않는다.
 - **Netting 후 normalization.** 네팅으로 줄어든 gross를 목표치로 되돌릴지는 fixed/flexible budget
-  선언에 따른다(PRD §9.3). 말없이 재정규화하면 §9.3 위반이다.
-- **Path-dependency 검사.** Member가 path-dependent면 다른 execution history에서 재사용할 수 없다
-  (PRD §9.4). §10 envelope의 `path_dependent` 플래그로 검사 가능하며, **감사 항목 중 유일하게 이미
-  처리된 부분이다.** G1의 memory 소비 alpha가 이 플래그를 통해 여기 연결된다.
+  선언에 따른다. 말없이 재정규화하지 않고 gross/net residual을 evidence로 남긴다.
+- **Path-dependency compatibility.** Member가 state-dependent면 state/account/cursor identity를 보존한다.
+  다른 history에서 사용할 때 무조건 금지하지 않고 compatibility warning 뒤 historical replay 또는
+  rerun choice를 기록한다.
 
-### 해결 순서 제안
+### 현재 남은 감사 action
 
 ```
-G1 · G3 · G5   → 각각 store 하나 / event 하나 / judge 함수 하나. §15 구축 순서에 편입 가능
-G2             → §15 3단계(ledger)에 TradeLedger 추가. 선행 결정 없음
+G1 · G3 · G5   → architecture contract 해결. §15 해당 vertical slice에서 fixture로 검증
+G2             → round-trip/PnL-dependent Strategy를 지원하는 Ledger slice에 TradeLedger 추가
 G4             → hypothetical은 O3·O4 의미로 진행 가능. real short는 담보·차입·locate 결정 필요
 ```
 
-G1·G2·G3·G5는 선행 결정 없이 명세를 채울 수 있다. G4의 hypothetical 범위도 진행 가능하며,
-real-short accounting만 후속 product decision을 기다린다.
+G2는 구현 미완이지만 product 의미를 바꿀 선행 결정은 없다. G4의 hypothetical 범위도 진행 가능하며,
+real-short accounting과 complete derivative lifecycle만 후속 product decision을 기다린다.
 
 ---
 
@@ -1651,3 +2019,34 @@ compile한다. Hot fill loop에서 Instrument 모델을 다시 만들지 않는�
 
 이 항목은 바로 앞의 `instrument capability` 개정 기록을 역사로 보존하되, 현재 설계에서는 그 기록의
 "단일 선언 필드가 책임을 소유한다"는 방향을 대체한다.
+
+### 2026-08-05 — Progressive workflow와 pluggable execution revision
+
+**계기.** PRD `84cd113`이 fixed global stage와 mandatory end-to-end pipeline을 제거하고 minimal
+registration, operation-time requirement discovery, Direct Strategy, stored Model output, Ensemble Strategy,
+pluggable executor, typed failure evidence와 production reconciliation을 observable use case로 확정했다.
+
+**Orchestration.** 여섯 responsibility layer와 callback/IoC는 유지한다. 반복 원자는
+`freeze → resolve requirements → scoped view → typed calculation → commit/publication → evidence`로
+확장하고, `alpha → construct → convert → validate`를 모든 run의 고정 chain으로 사용하지 않는다.
+
+**Data와 error.** 최초 registration은 logical key, instrument/time/availability와 payload facts만 요구한다.
+각 operation이 `ComponentRequirement`를 선언하고 `RequirementResolver`가 binding을 해결한다. Gap은
+hierarchical `OperationError`와 failure artifact로 남으며 unrelated registration이나 workflow를 무효화하지
+않는다. Agent가 resolution candidate를 설명하고 package가 user-confirmed 결과를 validation한다.
+
+**Strategy와 execution.** Strategy는 internal signal과 signed weights를 함께 만들거나 typed Model result를
+소비할 수 있다. Ensemble은 StrategyOperation이다. Decision callback은 immutable intent와 execution event를
+예약할 뿐 fill을 만들지 않으며, daily/intraday profile은 같은 decision contract 뒤에서 다른 actual result를
+commit한다. 2026-08-03의 "MinuteExecutor 제외" 판단은 현 PRD의 `UC-EXEC-001`에 의해 supersede되었다.
+특정 `MinuteExecutor` 이름은 요구하지 않지만 intraday/partial-fill characterization profile은 validation
+범위에 포함한다.
+
+**Evidence와 production.** Artifact load는 typed object construction을 수행하고 publication은 payload,
+envelope와 lineage를 atomic하게 노출한다. Failure/retry, analysis/report와 extension validation을 같은
+boundary에 둔다. Production은 PreparedDecision outbox publication과 OMS acknowledgement를 authority로
+보지 않고 confirmed result reconciliation 뒤의 state만 commit한다.
+
+**Traceability와 build.** §1.1과 §13이 PRD의 stable use case 37개를 모두 추적한다. 구축 순서는 layer
+완성 순서에서 use-case vertical slice로 바뀌며 error/evidence가 foundation으로 이동한다. O7, G1, G3와
+G5의 architecture gap을 해결했고 G2 round-trip 회계와 G4 real-short accounting은 남겨 둔다.

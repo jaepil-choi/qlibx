@@ -29,7 +29,11 @@ def test_codex_onboarding_previews_then_preserves_instruction_content(tmp_path: 
     content = instruction.read_text(encoding="utf-8")
     assert content.startswith("# User instructions\n\nKeep this.\n")
     assert content.count("<!-- qlibx-managed:start -->") == 1
-    assert (tmp_path / ".agents" / "skills" / "qlibx" / "SKILL.md").is_file()
+    installed_skill = tmp_path / ".agents" / "skills" / "qlibx" / "SKILL.md"
+    assert installed_skill.is_file()
+    guidance = installed_skill.read_text(encoding="utf-8")
+    assert "committed MVP simulation fills as current execution feedback" in guidance
+    assert "Do not present them as an available qlibx workflow" in guidance
 
     repeated = current.onboard((request,), apply=True)[0]
     assert repeated.applied is True

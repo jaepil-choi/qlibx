@@ -45,3 +45,10 @@ def test_failure_outcome_requires_error_evidence(status: OutcomeStatus) -> None:
 def test_operation_error_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         make_error(guessed_resolution="use DATE as available_at")
+
+
+def test_future_intraday_types_are_not_current_flow_exports() -> None:
+    import qlibx.flow as flow
+
+    assert "IntradayExecutionFlow" not in flow.__all__
+    assert not hasattr(flow, "IntradayExecutionFlow")

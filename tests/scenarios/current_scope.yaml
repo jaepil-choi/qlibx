@@ -1,5 +1,6 @@
 schema_version: 1
 suite: qlibx-current-scope
+support_status: current
 coverage_sets:
   m5:
     - UC-EXEC-001
@@ -119,19 +120,6 @@ scenarios:
       strategy_rerun: false
       memory_mutation: false
       parent_mutation: false
-
-  - id: UC-EXEC-001
-    case: multi_event_intraday_characterization
-    test: tests/acceptance/test_execution_scenarios.py::test_uc_exec_001_multi_event_characterization_and_no_daily_fallback
-    inputs:
-      data_kind: synthetic_characterization
-      generator: three_event_point_price_volume
-      real_parent_source: data/DW/fng_stock_daily_prices.csv
-    expected:
-      outcome: complete
-      event_count: 3
-      remaining_quantity: 39
-      daily_fallback: false
 
   - id: GAP-RECOVERY-001
     case: account_memory_checkpoint_resume

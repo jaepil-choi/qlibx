@@ -2114,7 +2114,7 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 
 각 slice는 success만 아니라 requirement gap, commit status, artifact/failure evidence와 deterministic retry를
 함께 검증한다. 4단계 완료 시 daily long-only closed loop가 동작하고, 5단계가 decision contract와
-execution assumption의 독립성을 검증한다. 10단계는 current support publication이 아니라 architecture를
+execution assumption의 독립성을 검증한다. 9단계는 current support publication이 아니라 architecture를
 구속하는 characterization fixture다.
 
 3단계부터 instrument축 배열을 기본 단위로 잡는다. 단건 `match`를 먼저 만든 뒤 batch로 확장하는

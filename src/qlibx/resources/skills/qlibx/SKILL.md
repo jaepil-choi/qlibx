@@ -38,9 +38,10 @@ invent missing behavior.
 
 ## Protect authority
 
-- Treat requested targets, orders, prepared decisions, and acknowledgements as intent, not actual
-  state.
-- Treat only committed simulation fills or reconciled OMS results as execution feedback.
+- In current support, treat requested targets and orders as intent, not actual state.
+- Treat only committed MVP simulation fills as current execution feedback.
+- Prepared decisions, OMS acknowledgements, and reconciled OMS results describe a future
+  production boundary. Do not present them as an available qlibx workflow.
 - Never promote failure, partial publication, intended state, or monitoring findings to success.
 - Do not silently normalize, coerce, fall back to a parent product policy, or assume unsupported
   short/lifecycle behavior.

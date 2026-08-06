@@ -447,6 +447,7 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
         FillBatch(
             account_id=account.snapshot().account_id,
             event_id="monitoring-seed-fill",
+            as_of=close_at(2024, 1, 4),
             fills=(
                 Fill(
                     fill_id="monitoring-seed-fill-1",
@@ -468,14 +469,34 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
         MarkBatch(
             account_id=account.snapshot().account_id,
             event_id="monitoring-mark-before-drift",
+            as_of=close_at(2024, 1, 4),
             marks=(Mark("A000660", initial_price),),
         ),
         expected_version=1,
     ).snapshot
+    declaration = ConstraintDeclaration(
+        declaration_id="mvp-no-short-single-name-cap-v1",
+        benchmark_weight_role="benchmark_weight",
+        benchmark_dataset_id="real-k200-benchmark",
+        single_name_floor=0.10,
+    )
+    stale = MonitoringFlow(
+        clock=BacktestClock(close_at(2024, 1, 5)),
+        registry=real_dw_constraint_case.project.registry_snapshot(),
+        artifacts=real_dw_constraint_case.project.artifacts,
+        account=account,
+    ).run(
+        declaration,
+        ConstraintMonitoringRequest(
+            invocation_id="monitoring-stale-account-mark",
+            config_fingerprint="monitoring-single-name-v1",
+        ),
+    )
     after_drift = account.commit(
         MarkBatch(
             account_id=account.snapshot().account_id,
             event_id="monitoring-mark-after-drift",
+            as_of=close_at(2024, 1, 5),
             marks=(Mark("A000660", drift_price),),
         ),
         expected_version=2,
@@ -483,12 +504,6 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
     assert initial_price / before_drift.nav < 0.10
     assert drift_price / after_drift.nav > 0.10
 
-    declaration = ConstraintDeclaration(
-        declaration_id="mvp-no-short-single-name-cap-v1",
-        benchmark_weight_role="benchmark_weight",
-        benchmark_dataset_id="real-k200-benchmark",
-        single_name_floor=0.10,
-    )
     memory = StrategyMemoryStore()
     account_before_monitor = account.checkpoint()
     memory_before_monitor = memory.checkpoint()
@@ -519,6 +534,8 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
 
     assert missing.status is OutcomeStatus.FAILED
     assert missing.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
+    assert stale.status is OutcomeStatus.FAILED
+    assert stale.errors[0].error_code == "ACCOUNT_VALUATION_STALE"
     assert first.status is repeated.status is OutcomeStatus.COMPLETE
     assert first.result == repeated.result
     assert first.diagnostics[0].artifact_id == repeated.diagnostics[0].artifact_id

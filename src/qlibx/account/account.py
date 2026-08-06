@@ -1,14 +1,21 @@
 """Atomic actual-state account aggregate."""
 
 from dataclasses import dataclass, replace
+from datetime import datetime
 from enum import StrEnum
 
 from qlibx.domain import Fill, Side
 
 
+def _require_aware(value: datetime) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("account change as_of must be timezone-aware")
+
+
 class ValuationStatus(StrEnum):
     COMPLETE = "COMPLETE"
     INCOMPLETE = "INCOMPLETE"
+    STALE = "STALE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,13 +25,18 @@ class Position:
     average_cost: float
     realized_pnl: float = 0
     mark: float | None = None
+    marked_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class FillBatch:
     account_id: str
     event_id: str
+    as_of: datetime
     fills: tuple[Fill, ...]
+
+    def __post_init__(self) -> None:
+        _require_aware(self.as_of)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +49,11 @@ class Mark:
 class MarkBatch:
     account_id: str
     event_id: str
+    as_of: datetime
     marks: tuple[Mark, ...]
+
+    def __post_init__(self) -> None:
+        _require_aware(self.as_of)
 
 
 AccountChange = FillBatch | MarkBatch
@@ -47,6 +63,7 @@ AccountChange = FillBatch | MarkBatch
 class JournalEntry:
     cursor: int
     event_id: str
+    as_of: datetime
     change_type: str
     fill_ids: tuple[str, ...] = ()
 
@@ -61,6 +78,7 @@ class AccountSnapshot:
     nav: float
     valuation_status: ValuationStatus
     feedback_cursor: int
+    as_of: datetime | None
 
     def holdings(self) -> dict[str, float]:
         return {position.instrument_id: position.quantity for position in self.positions}
@@ -91,6 +109,7 @@ class AccountCheckpoint:
     version: int
     applied_events: tuple[str, ...]
     journal: tuple[JournalEntry, ...]
+    as_of: datetime | None
 
 
 class AccountCommitRejected(RuntimeError):
@@ -120,10 +139,22 @@ class Account:
         self._version = 0
         self._applied_events: set[str] = set()
         self._journal: list[JournalEntry] = []
+        self._as_of: datetime | None = None
 
-    def snapshot(self) -> AccountSnapshot:
+    def snapshot(self, *, evaluation_time: datetime | None = None) -> AccountSnapshot:
+        if evaluation_time is not None:
+            _require_aware(evaluation_time)
+            if self._as_of is not None and self._as_of > evaluation_time:
+                raise ValueError("account state is later than the requested evaluation time")
         positions = tuple(sorted(self._positions.values(), key=lambda item: item.instrument_id))
-        complete = all(position.mark is not None for position in positions)
+        incomplete = any(
+            position.mark is None or position.marked_at is None for position in positions
+        )
+        stale = (
+            evaluation_time is not None
+            and not incomplete
+            and any(position.marked_at < evaluation_time for position in positions)
+        )
         marked_value = sum(
             position.quantity * position.mark
             for position in positions
@@ -137,9 +168,14 @@ class Account:
             positions=positions,
             nav=self._cash + marked_value,
             valuation_status=(
-                ValuationStatus.COMPLETE if complete else ValuationStatus.INCOMPLETE
+                ValuationStatus.INCOMPLETE
+                if incomplete
+                else ValuationStatus.STALE
+                if stale
+                else ValuationStatus.COMPLETE
             ),
             feedback_cursor=len(self._journal),
+            as_of=self._as_of,
         )
 
     def checkpoint(self) -> AccountCheckpoint:
@@ -154,6 +190,7 @@ class Account:
             version=self._version,
             applied_events=tuple(sorted(self._applied_events)),
             journal=tuple(self._journal),
+            as_of=self._as_of,
         )
 
     @classmethod
@@ -164,6 +201,15 @@ class Account:
             entry.event_id for entry in checkpoint.journal
         }:
             raise ValueError("account checkpoint event identities do not match its journal")
+        if checkpoint.journal:
+            if tuple(entry.as_of for entry in checkpoint.journal) != tuple(
+                sorted(entry.as_of for entry in checkpoint.journal)
+            ):
+                raise ValueError("account checkpoint events are not time ordered")
+            if checkpoint.as_of != checkpoint.journal[-1].as_of:
+                raise ValueError("account checkpoint as_of does not match its journal")
+        elif checkpoint.as_of is not None:
+            raise ValueError("empty account checkpoint cannot have an as_of")
         current = cls(
             account_id=checkpoint.account_id,
             base_currency=checkpoint.base_currency,
@@ -181,6 +227,7 @@ class Account:
         current._version = checkpoint.version
         current._applied_events = set(checkpoint.applied_events)
         current._journal = list(checkpoint.journal)
+        current._as_of = checkpoint.as_of
         return current
 
     def feedback(self, after: int, limit: int) -> AccountFeedback:
@@ -196,6 +243,11 @@ class Account:
             raise AccountCommitRejected("DUPLICATE_EVENT", "event was already applied")
         if expected_version != self._version:
             raise AccountCommitRejected("STALE_VERSION", "expected_version does not match account")
+        if self._as_of is not None and change.as_of < self._as_of:
+            raise AccountCommitRejected(
+                "OUT_OF_ORDER_EVENT",
+                "change precedes current account state",
+            )
 
         cash = self._cash
         positions = dict(self._positions)
@@ -203,7 +255,7 @@ class Account:
             cash, positions = self._apply_fills(change.fills, cash, positions)
             fill_ids = tuple(fill.fill_id for fill in change.fills)
         else:
-            positions = self._apply_marks(change.marks, positions)
+            positions = self._apply_marks(change.marks, positions, change.as_of)
             fill_ids = ()
         if cash < -1e-9:
             raise AccountCommitRejected("NEGATIVE_CASH", "batch would leave negative cash")
@@ -212,16 +264,18 @@ class Account:
         self._cash = cash
         self._positions = positions
         self._applied_events.add(change.event_id)
+        self._as_of = change.as_of
         self._version += 1
         self._journal.append(
             JournalEntry(
                 cursor=len(self._journal) + 1,
                 event_id=change.event_id,
+                as_of=change.as_of,
                 change_type=type(change).__name__,
                 fill_ids=fill_ids,
             )
         )
-        snapshot = self.snapshot()
+        snapshot = self.snapshot(evaluation_time=change.as_of)
         return AccountCommit(
             event_id=change.event_id,
             previous_version=previous,
@@ -258,6 +312,7 @@ class Account:
                     average_cost=new_basis / new_quantity if new_quantity else 0,
                     realized_pnl=current.realized_pnl if current else 0,
                     mark=current.mark if current else None,
+                    marked_at=current.marked_at if current else None,
                 )
                 cash -= fill.trade_value + fill.total_cost
             else:
@@ -287,6 +342,7 @@ class Account:
         self,
         marks: tuple[Mark, ...],
         positions: dict[str, Position],
+        as_of: datetime,
     ) -> dict[str, Position]:
         seen: set[str] = set()
         for mark in marks:
@@ -299,5 +355,9 @@ class Account:
                 raise AccountCommitRejected("INVALID_MARK", "mark price must be positive")
             current = positions.get(mark.instrument_id)
             if current is not None:
-                positions[mark.instrument_id] = replace(current, mark=mark.price)
+                positions[mark.instrument_id] = replace(
+                    current,
+                    mark=mark.price,
+                    marked_at=as_of,
+                )
         return positions

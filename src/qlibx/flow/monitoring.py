@@ -54,7 +54,7 @@ class MonitoringFlow:
         if resolution.failed:
             return self._resolution_failure(resolution.errors)
 
-        snapshot = self._account.snapshot()
+        snapshot = self._account.snapshot(evaluation_time=self._clock.now)
         view = ViewGate(self._registry, self._store).monitor_view(
             self._clock,
             resolution.bindings,

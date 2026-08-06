@@ -32,6 +32,7 @@ class StateHolding(QlibxModel):
     instrument_id: str
     quantity: float
     mark: float | None = None
+    marked_at: datetime | None = None
 
 
 class StateAccessRecord(QlibxModel):
@@ -42,6 +43,7 @@ class StateAccessRecord(QlibxModel):
     nav: float
     valuation_status: str
     holdings: tuple[StateHolding, ...]
+    as_of: datetime | None = None
 
 
 class AccountState(Protocol):
@@ -52,6 +54,7 @@ class AccountState(Protocol):
     nav: float
     valuation_status: object
     positions: tuple[object, ...]
+    as_of: datetime | None
 
 
 class MemoryAccessRecord(QlibxModel):
@@ -168,6 +171,7 @@ class StrategyView:
                     if position.mark is None
                     else float(position.mark)
                 ),
+                marked_at=position.marked_at,
             )
             for position in self._account_state.positions
         )
@@ -181,6 +185,7 @@ class StrategyView:
                 nav=self._account_state.nav,
                 valuation_status=str(getattr(valuation, "value", valuation)),
                 holdings=positions,
+                as_of=self._account_state.as_of,
             )
         )
         return self._account_state

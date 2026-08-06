@@ -255,11 +255,13 @@ def _state(snapshot: AccountSnapshot) -> StateAccessRecord:
         cash=snapshot.cash,
         nav=snapshot.nav,
         valuation_status=snapshot.valuation_status.value,
+        as_of=snapshot.as_of,
         holdings=tuple(
             StateHolding(
                 instrument_id=position.instrument_id,
                 quantity=position.quantity,
                 mark=position.mark,
+                marked_at=position.marked_at,
             )
             for position in snapshot.positions
         ),
@@ -444,7 +446,7 @@ class DailyExecutionFlow:
                 errors=tuple(self._errors),
             )
 
-        final_account = self._account.snapshot()
+        final_account = self._account.snapshot(evaluation_time=self._clock.now)
         checkpoint = SimulationCheckpoint(
             run_id=request.run_id,
             event_time=self._clock.now,
@@ -509,7 +511,7 @@ class DailyExecutionFlow:
         outcome = self._research.invoke_strategy(
             self._strategy,
             invocation,
-            account_state=self._account.snapshot(),
+            account_state=self._account.snapshot(evaluation_time=event.ts),
             memory_state=self._memory.snapshot(self._strategy.strategy_id),
         )
         if outcome.status is not OutcomeStatus.COMPLETE:
@@ -535,7 +537,7 @@ class DailyExecutionFlow:
             self._fail(event, "decision", "SIGNED_TARGET_REQUIRES_CONSTRUCTION")
             return
 
-        snapshot = self._account.snapshot()
+        snapshot = self._account.snapshot(evaluation_time=event.ts)
         intent = DecisionIntent(
             decision_id=decision_id,
             strategy_id=run_result.result.strategy_id,
@@ -629,8 +631,8 @@ class DailyExecutionFlow:
             )
             if volume_binding is None:
                 return
-        before = self._account.snapshot()
-        if before.positions and before.valuation_status.value != "COMPLETE":
+        before = self._account.snapshot(evaluation_time=event.ts)
+        if before.positions and before.valuation_status.value == "INCOMPLETE":
             self._fail(event, "execution", "ACCOUNT_VALUATION_INCOMPLETE")
             return
         view = self._gate.execution_view(
@@ -722,6 +724,7 @@ class DailyExecutionFlow:
                     FillBatch(
                         account_id=before.account_id,
                         event_id=f"{execution_id}:fill",
+                        as_of=event.ts,
                         fills=committed_fills,
                     ),
                     expected_version=before.version,
@@ -822,7 +825,7 @@ class DailyExecutionFlow:
         self._completed_decisions.append(pending.intent.decision_id)
 
     def _on_mark(self, event: Event) -> None:
-        before = self._account.snapshot()
+        before = self._account.snapshot(evaluation_time=event.ts)
         held = tuple(sorted(before.holdings()))
         if not held:
             evidence = MarkEvidence(
@@ -885,6 +888,7 @@ class DailyExecutionFlow:
                 MarkBatch(
                     account_id=before.account_id,
                     event_id=self._event_id(event, "mark"),
+                    as_of=event.ts,
                     marks=marks,
                 ),
                 expected_version=before.version,
@@ -925,12 +929,14 @@ class DailyExecutionFlow:
             self._marks.append(evidence)
 
     def _on_monitor(self, event: Event) -> None:
-        before = self._account.snapshot()
+        before = self._account.snapshot(evaluation_time=event.ts)
         evidence = MonitorEvidence(
             event_id=self._event_id(event, "monitor"),
             event_time=event.ts,
             account=_state(before),
-            account_version_after_callback=self._account.snapshot().version,
+            account_version_after_callback=self._account.snapshot(
+                evaluation_time=event.ts
+            ).version,
         )
         published = self._publish_model(
             event=event,

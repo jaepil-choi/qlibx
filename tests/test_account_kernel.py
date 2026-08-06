@@ -14,6 +14,8 @@ from qlibx.account import (
 from qlibx.execution import Fill, Side
 from qlibx.kernel import BacktestClock, Event
 
+EVENT_TIME = datetime(2025, 1, 2, 15, 30, tzinfo=timezone.utc)
+
 
 def fill(
     fill_id: str,
@@ -48,7 +50,12 @@ def account() -> Account:
 
 def test_fill_batch_commit_is_atomic_versioned_and_idempotent() -> None:
     current = account()
-    batch = FillBatch(account_id="account-1", event_id="event-1", fills=(fill("F1", Side.BUY, 10),))
+    batch = FillBatch(
+        account_id="account-1",
+        event_id="event-1",
+        as_of=EVENT_TIME,
+        fills=(fill("F1", Side.BUY, 10),),
+    )
 
     commit = current.commit(batch, expected_version=0)
 
@@ -67,6 +74,7 @@ def test_failed_batch_changes_nothing() -> None:
     invalid = FillBatch(
         account_id="account-1",
         event_id="event-invalid",
+        as_of=EVENT_TIME,
         fills=(fill("F1", Side.BUY, 1), fill("F2", Side.SELL, 2)),
     )
 
@@ -81,21 +89,64 @@ def test_failed_batch_changes_nothing() -> None:
 def test_mark_batch_values_every_held_instrument_and_advances_feedback() -> None:
     current = account()
     current.commit(
-        FillBatch(account_id="account-1", event_id="buy", fills=(fill("F1", Side.BUY, 10),)),
+        FillBatch(
+            account_id="account-1",
+            event_id="buy",
+            as_of=EVENT_TIME,
+            fills=(fill("F1", Side.BUY, 10),),
+        ),
         expected_version=0,
     )
     assert current.snapshot().valuation_status is ValuationStatus.INCOMPLETE
 
     commit = current.commit(
-        MarkBatch(account_id="account-1", event_id="mark", marks=(Mark("A", 110),)),
+        MarkBatch(
+            account_id="account-1",
+            event_id="mark",
+            as_of=EVENT_TIME,
+            marks=(Mark("A", 110),),
+        ),
         expected_version=1,
     )
 
     assert commit.snapshot.valuation_status is ValuationStatus.COMPLETE
     assert commit.snapshot.nav == 10_099
+    assert commit.snapshot.as_of == EVENT_TIME
+    assert commit.snapshot.positions[0].marked_at == EVENT_TIME
+    assert current.snapshot(
+        evaluation_time=datetime(2025, 1, 3, 15, 30, tzinfo=timezone.utc)
+    ).valuation_status is ValuationStatus.STALE
     feedback = current.feedback(0, 10)
     assert [entry.event_id for entry in feedback.entries] == ["buy", "mark"]
     assert feedback.next_cursor == 2
+
+
+def test_account_rejects_out_of_order_changes() -> None:
+    current = account()
+    current.commit(
+        FillBatch(
+            account_id="account-1",
+            event_id="current",
+            as_of=EVENT_TIME,
+            fills=(fill("F1", Side.BUY, 1),),
+        ),
+        expected_version=0,
+    )
+    before = current.checkpoint()
+
+    with pytest.raises(AccountCommitRejected) as rejected:
+        current.commit(
+            MarkBatch(
+                account_id="account-1",
+                event_id="past",
+                as_of=datetime(2025, 1, 1, 15, 30, tzinfo=timezone.utc),
+                marks=(Mark("A", 110),),
+            ),
+            expected_version=1,
+        )
+
+    assert rejected.value.code == "OUT_OF_ORDER_EVENT"
+    assert current.checkpoint() == before
 
 
 def test_memory_store_is_separate_and_cas_guarded() -> None:
@@ -142,6 +193,7 @@ def test_account_checkpoint_restores_cas_and_idempotency_authority() -> None:
     applied = FillBatch(
         account_id="account-1",
         event_id="event-1",
+        as_of=EVENT_TIME,
         fills=(fill("F1", Side.BUY, 10),),
     )
     current.commit(applied, expected_version=0)

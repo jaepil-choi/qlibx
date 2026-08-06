@@ -44,6 +44,7 @@ def _physical_account(
     cash_units: int,
 ) -> Account:
     direct_price, etf_price = real_lookthrough_physical_prices(trade_date)
+    as_of = close_at(trade_date // 10_000, trade_date // 100 % 100, trade_date % 100)
     quantity_ratio = Fraction(
         etf_units * int(direct_price),
         direct_units * int(etf_price),
@@ -64,6 +65,7 @@ def _physical_account(
         FillBatch(
             account_id=account_id,
             event_id=f"{account_id}:physical-fill",
+            as_of=as_of,
             fills=(
                 Fill(
                     fill_id=f"{account_id}:direct-fill",
@@ -97,6 +99,7 @@ def _physical_account(
         MarkBatch(
             account_id=account_id,
             event_id=f"{account_id}:physical-mark",
+            as_of=as_of,
             marks=(Mark(DIRECT, direct_price), Mark(ETF, etf_price)),
         ),
         expected_version=1,

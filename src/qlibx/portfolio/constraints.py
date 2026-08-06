@@ -304,6 +304,19 @@ def monitor_actual_single_name_caps(
     benchmark: tuple[BenchmarkWeight, ...],
     accesses: tuple[AccessRecord, ...],
 ) -> ConstraintMonitoringResult:
+    if account_state.valuation_status == "STALE":
+        raise ConstraintEvaluationError(
+            "ACCOUNT_VALUATION_STALE",
+            {
+                "valuation_status": account_state.valuation_status,
+                "account_as_of": (
+                    account_state.as_of.isoformat()
+                    if account_state.as_of is not None
+                    else None
+                ),
+                "evaluation_time": evaluation_time.isoformat(),
+            },
+        )
     if account_state.valuation_status != "COMPLETE":
         raise ConstraintEvaluationError(
             "ACCOUNT_VALUATION_INCOMPLETE",

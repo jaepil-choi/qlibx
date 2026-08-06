@@ -1524,6 +1524,27 @@ Default local catalog index는 duckdb로 둔다. Object store나 external tracke
 만족해야 한다. External tracker run ID나 file path는 producer reference일 수 있지만 canonical artifact
 identity를 대신하지 않는다.
 
+#### Default local publication state machine
+
+Default local backend의 durable contract는 다음 순서로 고정한다.
+
+1. Catalog file별 OS-backed writer lock을 bounded timeout으로 획득한다. 같은 process의 thread도 같은
+   path lock을 공유한다. Timeout은 raw DuckDB exception이 아니라 typed failure다.
+2. DuckDB `catalog_metadata`의 schema version을 확인한다. 기존 exact unversioned schema는 v1으로 한 번
+   채택하지만 unknown version이나 partial schema는 추측해 migration하지 않는다.
+3. Candidate별 append-only publication event를 먼저 기록하고 payload를 `.staging`에 write + fsync한다.
+4. Content-addressed final path에 payload를 atomic promote한 뒤에만 envelope, lineage와
+   `CATALOG_COMMITTED` event를 한 DuckDB transaction으로 commit한다.
+5. Reusable query는 `artifacts`의 committed envelope만 읽는다. Staged 또는 promoted-only payload는 audit
+   event로는 관측되지만 reusable success가 아니다.
+6. Recovery는 index commit 전 candidate를 성공으로 승격하지 않는다. Lock 아래에서 uncommitted staging과
+   unreferenced final payload를 제거하고 `RECOVERED_ABANDONED` event를 append한다. 같은 frozen candidate는
+   새 attempt로 retry한다. Commit 뒤 response 전에 process가 종료됐다면 기존 artifact를 그대로 재사용한다.
+
+이 state machine은 한 host의 local filesystem용이다. Multi-host/NFS writer coordination, object store
+consistency와 remote catalog availability는 default lock file로 지원한다고 간주하지 않고 별도 backend
+contract와 fixture를 요구한다.
+
 ### Lineage
 
 ```

@@ -2,6 +2,11 @@
 
 import hashlib
 import os
+import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -12,25 +17,91 @@ from qlibx.evidence.contracts import (
     ArtifactContract,
     ArtifactEnvelope,
     ArtifactStatus,
+    CatalogRecoveryRecord,
+    CatalogRecoveryResult,
     DependencyEdge,
     LoadedArtifact,
     PayloadFormat,
+    PublicationEvent,
+    PublicationPhase,
+    RecoveryAction,
 )
 from qlibx.models import QlibxModel
 
+if os.name == "nt":
+    import msvcrt
+else:  # pragma: no cover - exercised on non-Windows CI
+    import fcntl
+
+
 PayloadModel = TypeVar("PayloadModel", bound=QlibxModel)
+CATALOG_SCHEMA_VERSION = 1
+_ARTIFACT_COLUMNS = (
+    "artifact_id",
+    "logical_identity",
+    "artifact_type",
+    "artifact_schema_version",
+    "producer_id",
+    "content_hash",
+    "payload_format",
+    "payload_path",
+    "status",
+    "envelope_json",
+)
+_EDGE_COLUMNS = ("artifact_id", "dependency_id", "consumer_role", "edge_json")
+_EVENT_COLUMNS = (
+    "event_order",
+    "event_id",
+    "attempt_id",
+    "artifact_id",
+    "logical_identity",
+    "phase",
+    "event_json",
+)
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
 
 
 def digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+class CatalogSchemaError(RuntimeError):
+    """Raised when the durable catalog schema cannot be interpreted safely."""
+
+
+class CatalogRecoveryError(RuntimeError):
+    """Raised when abandoned publication state cannot be recovered safely."""
+
+
+class CatalogCommitError(RuntimeError):
+    """Raised after a catalog transaction has rolled back."""
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationAttempt:
+    attempt_id: str
+    envelope: ArtifactEnvelope
+    staging_path: Path
+    payload_path: Path
+
+
 class LocalArtifactBackend:
     """Append-only artifact publisher and typed loader."""
 
-    def __init__(self, catalog_path: Path, artifact_dir: Path) -> None:
+    def __init__(
+        self,
+        catalog_path: Path,
+        artifact_dir: Path,
+        *,
+        lock_timeout_seconds: float = 10.0,
+    ) -> None:
+        if lock_timeout_seconds <= 0:
+            raise ValueError("lock_timeout_seconds must be positive")
         self._catalog_path = catalog_path.resolve()
         self._artifact_dir = artifact_dir.resolve()
+        self._lock_path = self._catalog_path.with_suffix(f"{self._catalog_path.suffix}.lock")
+        self._lock_timeout_seconds = lock_timeout_seconds
 
     def publish_model(
         self,
@@ -48,9 +119,8 @@ class LocalArtifactBackend:
         artifact_seed = (
             f"{logical_identity}:{artifact_type}:{artifact_schema_version}:{content_hash}"
         ).encode()
-        artifact_id = f"artifact-{digest(artifact_seed)[:32]}"
         envelope = ArtifactEnvelope(
-            artifact_id=artifact_id,
+            artifact_id=f"artifact-{digest(artifact_seed)[:32]}",
             logical_identity=logical_identity,
             artifact_type=artifact_type,
             artifact_schema_version=artifact_schema_version,
@@ -61,86 +131,94 @@ class LocalArtifactBackend:
             dependencies=dependencies,
         )
         self._prepare_storage()
-        connection = self._connect()
         try:
-            existing = connection.execute(
-                """
-                SELECT artifact_id, artifact_type, artifact_schema_version, content_hash,
-                       envelope_json
-                FROM artifacts WHERE logical_identity = ?
-                """,
-                [logical_identity],
-            ).fetchone()
-            if existing:
-                if (
-                    existing[1] == artifact_type
-                    and existing[2] == artifact_schema_version
-                    and existing[3] == content_hash
-                ):
-                    current = ArtifactEnvelope.model_validate_json(existing[4])
-                    return OperationOutcome(status=OutcomeStatus.COMPLETE, result=current)
-                return self._failure(
-                    logical_identity,
-                    "artifact.publish.identity_conflict",
-                    "ARTIFACT_IDENTITY_CONFLICT",
-                    context={
-                        "logical_identity": logical_identity,
-                        "existing_artifact_id": existing[0],
-                    },
-                    retry=("choose a new logical identity or retain the existing artifact",),
-                )
+            with self._writer_lock():
+                connection = self._connect_writer()
+                try:
+                    recovery = self._recover_locked(connection)
+                    existing = self._existing(connection, logical_identity)
+                    if existing:
+                        if (
+                            existing[1] == artifact_type
+                            and existing[2] == artifact_schema_version
+                            and existing[3] == content_hash
+                        ):
+                            current = ArtifactEnvelope.model_validate_json(existing[4])
+                            return OperationOutcome(
+                                status=OutcomeStatus.COMPLETE,
+                                result=current,
+                                diagnostics=(recovery,) if recovery.records else (),
+                            )
+                        return self._failure(
+                            logical_identity,
+                            "artifact.publish.identity_conflict",
+                            "ARTIFACT_IDENTITY_CONFLICT",
+                            context={
+                                "logical_identity": logical_identity,
+                                "existing_artifact_id": existing[0],
+                            },
+                            retry=(
+                                "choose a new logical identity or retain the existing artifact",
+                            ),
+                        )
 
-            payload_path = self._payload_path(envelope)
-            payload_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = payload_path.with_name(f".{payload_path.name}.{os.getpid()}.tmp")
-            temporary.write_bytes(payload_bytes)
-            try:
-                os.rename(temporary, payload_path)
-            except FileExistsError:
-                temporary.unlink(missing_ok=True)
-
-            try:
-                connection.execute("BEGIN TRANSACTION")
-                connection.execute(
-                    """
-                    INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [
-                        envelope.artifact_id,
-                        envelope.logical_identity,
-                        envelope.artifact_type,
-                        envelope.artifact_schema_version,
-                        envelope.producer_id,
-                        envelope.content_hash,
-                        envelope.payload_format.value,
-                        str(payload_path),
-                        envelope.status.value,
-                        envelope.model_dump_json(),
-                    ],
-                )
-                for edge in dependencies:
-                    connection.execute(
-                        "INSERT INTO artifact_edges VALUES (?, ?, ?, ?)",
-                        [
-                            envelope.artifact_id,
-                            edge.dependency_id,
-                            edge.consumer_role,
-                            edge.model_dump_json(),
-                        ],
+                    attempt = self._new_attempt(connection, envelope)
+                    self._append_event(connection, attempt, PublicationPhase.STAGED)
+                    self._write_staged_payload(attempt, payload_bytes)
+                    self._append_event(connection, attempt, PublicationPhase.PAYLOAD_STAGED)
+                    self._promote_staged_payload(attempt)
+                    self._append_event(connection, attempt, PublicationPhase.PAYLOAD_PROMOTED)
+                    self._commit_publication(connection, attempt, envelope, dependencies)
+                    return OperationOutcome(
+                        status=OutcomeStatus.COMPLETE,
+                        result=envelope,
+                        diagnostics=(recovery,) if recovery.records else (),
                     )
-                connection.execute("COMMIT")
-            except Exception as exc:
-                connection.execute("ROLLBACK")
-                return self._failure(
-                    logical_identity,
-                    "artifact.publish.catalog_commit",
-                    "CATALOG_COMMIT_FAILED",
-                    context={"exception": type(exc).__name__, "message": str(exc)[:500]},
-                    retry=("retry publication with the same frozen candidate",),
-                )
-            return OperationOutcome(status=OutcomeStatus.COMPLETE, result=envelope)
-        finally:
-            connection.close()
+                finally:
+                    connection.close()
+        except TimeoutError:
+            return self._failure(
+                logical_identity,
+                "artifact.publish.lock",
+                "CATALOG_WRITE_LOCK_TIMEOUT",
+                context={
+                    "lock_path": str(self._lock_path),
+                    "timeout_seconds": self._lock_timeout_seconds,
+                },
+                retry=("retry after the current catalog writer completes",),
+            )
+        except CatalogSchemaError as exc:
+            return self._failure(
+                logical_identity,
+                "artifact.publish.catalog_schema",
+                "CATALOG_SCHEMA_UNSUPPORTED",
+                context={"message": str(exc)[:500]},
+                retry=("migrate the catalog with an explicitly supported schema",),
+            )
+        except CatalogRecoveryError as exc:
+            return self._failure(
+                logical_identity,
+                "artifact.publish.recovery",
+                "CATALOG_RECOVERY_FAILED",
+                context={"message": str(exc)[:500]},
+                retry=("inspect the publication audit before retrying",),
+            )
+        except CatalogCommitError as exc:
+            return self._failure(
+                logical_identity,
+                "artifact.publish.catalog_commit",
+                "CATALOG_COMMIT_FAILED",
+                context={"message": str(exc)[:500]},
+                retry=("retry publication with the same frozen candidate",),
+            )
+        except OSError as exc:
+            return self._failure(
+                logical_identity,
+                "artifact.publish.payload_stage",
+                "ARTIFACT_PAYLOAD_STAGE_FAILED",
+                context={"exception": type(exc).__name__, "message": str(exc)[:500]},
+                retry=("recover abandoned publication state, then retry",),
+            )
 
     def import_model_bytes(
         self,
@@ -189,31 +267,29 @@ class LocalArtifactBackend:
         include_failure: bool = False,
     ) -> OperationOutcome:
         if not self._catalog_path.is_file():
-            return self._failure(
-                artifact_id,
-                "artifact.load.lookup",
-                "ARTIFACT_NOT_FOUND",
-                context={"artifact_id": artifact_id},
-            )
-        connection = self._connect()
+            return self._not_found(artifact_id)
         try:
-            row = connection.execute(
-                """
-                SELECT artifact_type, artifact_schema_version, content_hash, payload_path,
-                       status, envelope_json
-                FROM artifacts WHERE artifact_id = ?
-                """,
-                [artifact_id],
-            ).fetchone()
-        finally:
-            connection.close()
-        if not row or (row[4] == ArtifactStatus.FAILURE.value and not include_failure):
+            connection = self._connect_reader()
+            try:
+                row = connection.execute(
+                    """
+                    SELECT artifact_type, artifact_schema_version, content_hash, payload_path,
+                           status, envelope_json
+                    FROM artifacts WHERE artifact_id = ?
+                    """,
+                    [artifact_id],
+                ).fetchone()
+            finally:
+                connection.close()
+        except CatalogSchemaError as exc:
             return self._failure(
                 artifact_id,
-                "artifact.load.lookup",
-                "ARTIFACT_NOT_FOUND",
-                context={"artifact_id": artifact_id},
+                "artifact.load.catalog_schema",
+                "CATALOG_SCHEMA_UNSUPPORTED",
+                context={"message": str(exc)[:500]},
             )
+        if not row or (row[4] == ArtifactStatus.FAILURE.value and not include_failure):
+            return self._not_found(artifact_id)
         if row[0] != contract.artifact_type or row[1] != contract.artifact_schema_version:
             return self._failure(
                 artifact_id,
@@ -240,13 +316,15 @@ class LocalArtifactBackend:
                 "ARTIFACT_PAYLOAD_INVALID",
                 context={"exception": type(exc).__name__, "message": str(exc)[:500]},
             )
-        loaded = LoadedArtifact(envelope=envelope, payload=payload)
-        return OperationOutcome(status=OutcomeStatus.COMPLETE, result=loaded)
+        return OperationOutcome(
+            status=OutcomeStatus.COMPLETE,
+            result=LoadedArtifact(envelope=envelope, payload=payload),
+        )
 
     def list_envelopes(self, *, include_failure: bool = False) -> tuple[ArtifactEnvelope, ...]:
         if not self._catalog_path.is_file():
             return ()
-        connection = self._connect()
+        connection = self._connect_reader()
         try:
             if include_failure:
                 rows = connection.execute(
@@ -261,12 +339,416 @@ class LocalArtifactBackend:
             connection.close()
         return tuple(ArtifactEnvelope.model_validate_json(row[0]) for row in rows)
 
+    def audit_publications(self) -> OperationOutcome:
+        if not self._catalog_path.is_file():
+            return OperationOutcome(status=OutcomeStatus.COMPLETE, result=())
+        try:
+            connection = self._connect_reader()
+            try:
+                if "publication_events" not in self._table_names(connection):
+                    events: tuple[PublicationEvent, ...] = ()
+                else:
+                    events = self._read_events(connection)
+            finally:
+                connection.close()
+        except CatalogSchemaError as exc:
+            return self._failure(
+                "catalog-audit",
+                "artifact.audit.catalog_schema",
+                "CATALOG_SCHEMA_UNSUPPORTED",
+                context={"message": str(exc)[:500]},
+            )
+        return OperationOutcome(status=OutcomeStatus.COMPLETE, result=events)
+
+    def recover_publications(self) -> OperationOutcome:
+        if not self._catalog_path.is_file():
+            return OperationOutcome(
+                status=OutcomeStatus.COMPLETE,
+                result=CatalogRecoveryResult(),
+            )
+        try:
+            with self._writer_lock():
+                connection = self._connect_writer()
+                try:
+                    result = self._recover_locked(connection)
+                finally:
+                    connection.close()
+        except TimeoutError:
+            return self._failure(
+                "catalog-recovery",
+                "artifact.recover.lock",
+                "CATALOG_WRITE_LOCK_TIMEOUT",
+                context={"timeout_seconds": self._lock_timeout_seconds},
+            )
+        except CatalogSchemaError as exc:
+            return self._failure(
+                "catalog-recovery",
+                "artifact.recover.catalog_schema",
+                "CATALOG_SCHEMA_UNSUPPORTED",
+                context={"message": str(exc)[:500]},
+            )
+        except CatalogRecoveryError as exc:
+            return self._failure(
+                "catalog-recovery",
+                "artifact.recover.state",
+                "CATALOG_RECOVERY_FAILED",
+                context={"message": str(exc)[:500]},
+            )
+        return OperationOutcome(status=OutcomeStatus.COMPLETE, result=result)
+
+    @contextmanager
+    def _writer_lock(self) -> Iterator[None]:
+        self._prepare_storage()
+        deadline = time.monotonic() + self._lock_timeout_seconds
+        lock_key = str(self._lock_path)
+        with _THREAD_LOCKS_GUARD:
+            thread_lock = _THREAD_LOCKS.setdefault(lock_key, threading.Lock())
+        if not thread_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            raise TimeoutError("catalog thread lock timed out")
+        handle = None
+        locked = False
+        try:
+            handle = self._lock_path.open("a+b")
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+                os.fsync(handle.fileno())
+            while not locked:
+                try:
+                    self._try_file_lock(handle)
+                    locked = True
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("catalog process lock timed out") from None
+                    time.sleep(min(0.025, max(0.0, deadline - time.monotonic())))
+            yield
+        finally:
+            if locked and handle is not None:
+                self._unlock_file(handle)
+            if handle is not None:
+                handle.close()
+            thread_lock.release()
+
+    @staticmethod
+    def _try_file_lock(handle: object) -> None:
+        handle.seek(0)  # type: ignore[attr-defined]
+        if os.name == "nt":
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+        else:  # pragma: no cover - exercised on non-Windows CI
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _unlock_file(handle: object) -> None:
+        try:
+            handle.seek(0)  # type: ignore[attr-defined]
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+            else:  # pragma: no cover - exercised on non-Windows CI
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
+        except OSError:
+            pass
+
+    def _new_attempt(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        envelope: ArtifactEnvelope,
+    ) -> _PublicationAttempt:
+        attempt_number = (
+            connection.execute(
+                "SELECT count(DISTINCT attempt_id) FROM publication_events WHERE artifact_id = ?",
+                [envelope.artifact_id],
+            ).fetchone()[0]
+            + 1
+        )
+        attempt_id = f"attempt-{digest(f'{envelope.artifact_id}:{attempt_number}'.encode())[:24]}"
+        return _PublicationAttempt(
+            attempt_id=attempt_id,
+            envelope=envelope,
+            staging_path=self._artifact_dir / ".staging" / f"{attempt_id}.json",
+            payload_path=self._payload_path(envelope),
+        )
+
+    def _append_event(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        attempt: _PublicationAttempt,
+        phase: PublicationPhase,
+    ) -> PublicationEvent:
+        event_order = connection.execute(
+            "SELECT coalesce(max(event_order), 0) + 1 FROM publication_events"
+        ).fetchone()[0]
+        event = PublicationEvent(
+            event_order=event_order,
+            event_id=f"event-{digest(f'{attempt.attempt_id}:{phase.value}'.encode())[:24]}",
+            attempt_id=attempt.attempt_id,
+            artifact_id=attempt.envelope.artifact_id,
+            logical_identity=attempt.envelope.logical_identity,
+            phase=phase,
+            content_hash=attempt.envelope.content_hash,
+            staging_path=str(attempt.staging_path),
+            payload_path=str(attempt.payload_path),
+        )
+        connection.execute(
+            "INSERT INTO publication_events VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                event.event_order,
+                event.event_id,
+                event.attempt_id,
+                event.artifact_id,
+                event.logical_identity,
+                event.phase.value,
+                event.model_dump_json(),
+            ],
+        )
+        return event
+
+    def _write_staged_payload(
+        self,
+        attempt: _PublicationAttempt,
+        payload_bytes: bytes,
+    ) -> None:
+        attempt.staging_path.parent.mkdir(parents=True, exist_ok=True)
+        with attempt.staging_path.open("xb") as handle:
+            handle.write(payload_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def _promote_staged_payload(self, attempt: _PublicationAttempt) -> None:
+        attempt.payload_path.parent.mkdir(parents=True, exist_ok=True)
+        if attempt.payload_path.exists():
+            if digest(attempt.payload_path.read_bytes()) != attempt.envelope.content_hash:
+                raise CatalogRecoveryError(
+                    f"content-addressed payload conflict: {attempt.payload_path}"
+                )
+            attempt.staging_path.unlink(missing_ok=True)
+            return
+        os.replace(attempt.staging_path, attempt.payload_path)
+
+    def _commit_publication(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        attempt: _PublicationAttempt,
+        envelope: ArtifactEnvelope,
+        dependencies: tuple[DependencyEdge, ...],
+    ) -> None:
+        try:
+            connection.execute("BEGIN TRANSACTION")
+            connection.execute(
+                "INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    envelope.artifact_id,
+                    envelope.logical_identity,
+                    envelope.artifact_type,
+                    envelope.artifact_schema_version,
+                    envelope.producer_id,
+                    envelope.content_hash,
+                    envelope.payload_format.value,
+                    str(attempt.payload_path),
+                    envelope.status.value,
+                    envelope.model_dump_json(),
+                ],
+            )
+            for edge in dependencies:
+                connection.execute(
+                    "INSERT INTO artifact_edges VALUES (?, ?, ?, ?)",
+                    [
+                        envelope.artifact_id,
+                        edge.dependency_id,
+                        edge.consumer_role,
+                        edge.model_dump_json(),
+                    ],
+                )
+            self._append_event(connection, attempt, PublicationPhase.CATALOG_COMMITTED)
+            connection.execute("COMMIT")
+        except Exception as exc:
+            with suppress(Exception):
+                connection.execute("ROLLBACK")
+            raise CatalogCommitError(f"{type(exc).__name__}: {exc}") from exc
+
+    def _recover_locked(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+    ) -> CatalogRecoveryResult:
+        latest: dict[str, PublicationEvent] = {}
+        for event in self._read_events(connection):
+            latest[event.attempt_id] = event
+        records: list[CatalogRecoveryRecord] = []
+        terminal = {
+            PublicationPhase.CATALOG_COMMITTED,
+            PublicationPhase.RECOVERED_ABANDONED,
+        }
+        for event in sorted(latest.values(), key=lambda item: item.event_order):
+            if event.phase in terminal:
+                continue
+            indexed = connection.execute(
+                "SELECT count(*) FROM artifacts WHERE artifact_id = ?",
+                [event.artifact_id],
+            ).fetchone()[0]
+            if indexed:
+                raise CatalogRecoveryError(
+                    f"artifact {event.artifact_id} is indexed without a committed event"
+                )
+            staging_path = self._validated_artifact_path(event.staging_path)
+            payload_path = self._validated_artifact_path(event.payload_path)
+            removed: list[str] = []
+            if staging_path.exists():
+                staging_path.unlink()
+                removed.append(str(staging_path))
+            if payload_path.exists():
+                references = connection.execute(
+                    "SELECT count(*) FROM artifacts WHERE payload_path = ?",
+                    [str(payload_path)],
+                ).fetchone()[0]
+                if references:
+                    raise CatalogRecoveryError(
+                        f"uncommitted payload path is referenced: {payload_path}"
+                    )
+                if digest(payload_path.read_bytes()) != event.content_hash:
+                    raise CatalogRecoveryError(f"uncommitted payload hash mismatch: {payload_path}")
+                payload_path.unlink()
+                removed.append(str(payload_path))
+            attempt = _PublicationAttempt(
+                attempt_id=event.attempt_id,
+                envelope=ArtifactEnvelope(
+                    artifact_id=event.artifact_id,
+                    logical_identity=event.logical_identity,
+                    artifact_type="recovery-placeholder",
+                    artifact_schema_version=1,
+                    producer_id="qlibx.catalog-recovery",
+                    content_hash=event.content_hash,
+                    payload_format=PayloadFormat.JSON,
+                    status=ArtifactStatus.FAILURE,
+                ),
+                staging_path=staging_path,
+                payload_path=payload_path,
+            )
+            self._append_event(connection, attempt, PublicationPhase.RECOVERED_ABANDONED)
+            records.append(
+                CatalogRecoveryRecord(
+                    attempt_id=event.attempt_id,
+                    artifact_id=event.artifact_id,
+                    action=RecoveryAction.REMOVED_ABANDONED,
+                    removed_paths=tuple(removed),
+                )
+            )
+        return CatalogRecoveryResult(records=tuple(records))
+
+    @staticmethod
+    def _read_events(
+        connection: duckdb.DuckDBPyConnection,
+    ) -> tuple[PublicationEvent, ...]:
+        rows = connection.execute(
+            "SELECT event_json FROM publication_events ORDER BY event_order"
+        ).fetchall()
+        try:
+            return tuple(PublicationEvent.model_validate_json(row[0]) for row in rows)
+        except Exception as exc:
+            raise CatalogSchemaError(
+                f"publication event schema is unsupported: {type(exc).__name__}: {exc}"
+            ) from exc
+
+    def _validated_artifact_path(self, value: str) -> Path:
+        path = Path(value).resolve()
+        if not path.is_relative_to(self._artifact_dir):
+            raise CatalogRecoveryError(f"publication path escaped artifact root: {path}")
+        return path
+
     def _prepare_storage(self) -> None:
         self._catalog_path.parent.mkdir(parents=True, exist_ok=True)
         self._artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    def _connect(self) -> duckdb.DuckDBPyConnection:
+    def _connect_writer(self) -> duckdb.DuckDBPyConnection:
         connection = duckdb.connect(str(self._catalog_path))
+        try:
+            self._ensure_writer_schema(connection)
+        except Exception:
+            connection.close()
+            raise
+        return connection
+
+    def _connect_reader(self) -> duckdb.DuckDBPyConnection:
+        connection = duckdb.connect(str(self._catalog_path), read_only=True)
+        try:
+            self._validate_reader_schema(connection)
+        except Exception:
+            connection.close()
+            raise
+        return connection
+
+    def _ensure_writer_schema(self, connection: duckdb.DuckDBPyConnection) -> None:
+        tables = self._table_names(connection)
+        if "catalog_metadata" in tables:
+            self._require_schema_version(connection)
+            self._validate_columns(connection, "artifacts", _ARTIFACT_COLUMNS)
+            self._validate_columns(connection, "artifact_edges", _EDGE_COLUMNS)
+            self._validate_columns(connection, "publication_events", _EVENT_COLUMNS)
+            return
+        legacy_tables = {"artifacts", "artifact_edges"}
+        if tables.intersection(legacy_tables) and not legacy_tables.issubset(tables):
+            raise CatalogSchemaError("partial legacy artifact schema")
+        if legacy_tables.issubset(tables):
+            self._validate_columns(connection, "artifacts", _ARTIFACT_COLUMNS)
+            self._validate_columns(connection, "artifact_edges", _EDGE_COLUMNS)
+        elif "publication_events" in tables:
+            raise CatalogSchemaError("publication events exist without catalog metadata")
+        try:
+            connection.execute("BEGIN TRANSACTION")
+            self._create_artifact_tables(connection)
+            self._create_catalog_metadata(connection)
+            self._create_publication_events(connection)
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+
+    def _validate_reader_schema(self, connection: duckdb.DuckDBPyConnection) -> None:
+        tables = self._table_names(connection)
+        if "catalog_metadata" in tables:
+            self._require_schema_version(connection)
+            self._validate_columns(connection, "artifacts", _ARTIFACT_COLUMNS)
+            self._validate_columns(connection, "artifact_edges", _EDGE_COLUMNS)
+            self._validate_columns(connection, "publication_events", _EVENT_COLUMNS)
+            return
+        if {"artifacts", "artifact_edges"}.issubset(tables):
+            self._validate_columns(connection, "artifacts", _ARTIFACT_COLUMNS)
+            self._validate_columns(connection, "artifact_edges", _EDGE_COLUMNS)
+            return
+        raise CatalogSchemaError("catalog has no supported schema metadata")
+
+    @staticmethod
+    def _table_names(connection: duckdb.DuckDBPyConnection) -> set[str]:
+        return {
+            row[0]
+            for row in connection.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+            ).fetchall()
+        }
+
+    @staticmethod
+    def _validate_columns(
+        connection: duckdb.DuckDBPyConnection,
+        table: str,
+        expected: tuple[str, ...],
+    ) -> None:
+        actual = tuple(
+            row[1] for row in connection.execute(f"PRAGMA table_info('{table}')").fetchall()
+        )
+        if actual != expected:
+            raise CatalogSchemaError(
+                f"unsupported {table} columns: expected={expected}, actual={actual}"
+            )
+
+    @staticmethod
+    def _require_schema_version(connection: duckdb.DuckDBPyConnection) -> None:
+        rows = connection.execute("SELECT schema_version FROM catalog_metadata").fetchall()
+        if rows != [(CATALOG_SCHEMA_VERSION,)]:
+            raise CatalogSchemaError(
+                f"expected catalog schema {CATALOG_SCHEMA_VERSION}, found {rows}"
+            )
+
+    @staticmethod
+    def _create_artifact_tables(connection: duckdb.DuckDBPyConnection) -> None:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS artifacts (
@@ -294,10 +776,53 @@ class LocalArtifactBackend:
             )
             """
         )
-        return connection
+
+    @staticmethod
+    def _create_catalog_metadata(connection: duckdb.DuckDBPyConnection) -> None:
+        connection.execute("CREATE TABLE catalog_metadata (schema_version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO catalog_metadata VALUES (?)", [CATALOG_SCHEMA_VERSION])
+
+    @staticmethod
+    def _create_publication_events(connection: duckdb.DuckDBPyConnection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE publication_events (
+                event_order BIGINT UNIQUE NOT NULL,
+                event_id VARCHAR PRIMARY KEY,
+                attempt_id VARCHAR NOT NULL,
+                artifact_id VARCHAR NOT NULL,
+                logical_identity VARCHAR NOT NULL,
+                phase VARCHAR NOT NULL,
+                event_json VARCHAR NOT NULL
+            )
+            """
+        )
+
+    @staticmethod
+    def _existing(
+        connection: duckdb.DuckDBPyConnection,
+        logical_identity: str,
+    ) -> tuple[object, ...] | None:
+        return connection.execute(
+            """
+            SELECT artifact_id, artifact_type, artifact_schema_version, content_hash,
+                   envelope_json
+            FROM artifacts WHERE logical_identity = ?
+            """,
+            [logical_identity],
+        ).fetchone()
 
     def _payload_path(self, envelope: ArtifactEnvelope) -> Path:
         return self._artifact_dir / envelope.artifact_id[9:11] / f"{envelope.artifact_id}.json"
+
+    @classmethod
+    def _not_found(cls, artifact_id: str) -> OperationOutcome:
+        return cls._failure(
+            artifact_id,
+            "artifact.load.lookup",
+            "ARTIFACT_NOT_FOUND",
+            context={"artifact_id": artifact_id},
+        )
 
     @staticmethod
     def _failure(
@@ -309,8 +834,9 @@ class LocalArtifactBackend:
         retry: tuple[str, ...] = (),
     ) -> OperationOutcome:
         seed = digest(f"{identity}:{stage_path}:{error_code}".encode())[:24]
+        parts = stage_path.split(".")
         error = OperationError(
-            operation=stage_path.split(".", maxsplit=2)[0] + "." + stage_path.split(".")[1],
+            operation=parts[0] + "." + parts[1],
             stage_path=stage_path,
             error_code=error_code,
             context=context or {},

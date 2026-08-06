@@ -1,0 +1,31 @@
+schema_version: 1
+gap_id: GAP-CATALOG-001
+purpose: local_catalog_locking_atomic_visibility_and_crash_recovery
+scenarios:
+  - id: CATALOG-CONCURRENT-IDEMPOTENT-001
+    test: tests/test_catalog_recovery.py::test_same_candidate_concurrent_writers_are_idempotent
+    oracle: both writers complete with one artifact identity and one reusable envelope
+  - id: CATALOG-CONCURRENT-CONFLICT-001
+    test: tests/test_catalog_recovery.py::test_different_candidate_concurrent_writers_conflict
+    oracle: exactly one writer completes and the loser reports ARTIFACT_IDENTITY_CONFLICT
+  - id: CATALOG-CRASH-STAGED-001
+    test: tests/test_catalog_recovery.py::test_precommit_crash_is_hidden_and_recoverable[staged]
+    oracle: staged payload is not reusable and recovery permits deterministic retry
+  - id: CATALOG-CRASH-PROMOTED-001
+    test: tests/test_catalog_recovery.py::test_precommit_crash_is_hidden_and_recoverable[promoted]
+    oracle: promoted but unindexed payload is not reusable and recovery removes it before retry
+  - id: CATALOG-CRASH-COMMITTED-001
+    test: tests/test_catalog_recovery.py::test_postcommit_crash_replays_idempotently
+    oracle: committed publication remains reusable and retry returns the same artifact
+  - id: CATALOG-LOCK-TIMEOUT-001
+    test: tests/test_catalog_recovery.py::test_writer_lock_timeout_is_typed
+    oracle: lock contention returns CATALOG_WRITE_LOCK_TIMEOUT without a partial artifact
+  - id: CATALOG-SCHEMA-001
+    test: tests/test_catalog_recovery.py::test_unknown_catalog_schema_fails_without_mutation
+    oracle: unknown schema returns CATALOG_SCHEMA_UNSUPPORTED and preserves existing rows
+  - id: CATALOG-LEGACY-MIGRATION-001
+    test: tests/test_catalog_recovery.py::test_legacy_catalog_schema_is_adopted_on_first_write
+    oracle: the exact unversioned schema is adopted as v1 before the next publication
+  - id: CATALOG-EVENT-SCHEMA-001
+    test: tests/test_catalog_recovery.py::test_unknown_publication_event_schema_fails_without_mutation
+    oracle: unknown event schema blocks audit and publication without changing reusable artifacts

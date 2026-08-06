@@ -34,6 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     onboard.add_argument("--target", choices=[item.value for item in AgentTarget], required=True)
     onboard.add_argument("--custom-root")
     onboard.add_argument("--apply", action="store_true")
+    sample = project_commands.add_parser("sample")
+    sample.add_argument("root", nargs="?", default=".")
+    sample.add_argument("--apply", action="store_true")
 
     dataset = commands.add_parser("dataset")
     dataset_commands = dataset.add_subparsers(dest="dataset_command")
@@ -46,6 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     list_command = artifact_commands.add_parser("list")
     list_command.add_argument("root")
     list_command.add_argument("--include-failure", action="store_true")
+    show_command = artifact_commands.add_parser("show")
+    show_command.add_argument("root")
+    show_command.add_argument("artifact_id")
     return parser
 
 
@@ -97,6 +103,10 @@ def run(argv: list[str] | None = None) -> int:
             results = project.onboard((request,), apply=args.apply)
             emit(results)
             return 1 if any(result.error for result in results) else 0
+        if args.command == "project" and args.project_command == "sample":
+            result = QlibxProject.open(args.root).materialize_sample(apply=args.apply)
+            emit(result)
+            return 1 if result.error else 0
         if args.command == "dataset" and args.dataset_command == "register":
             payload: Any = yaml.safe_load(Path(args.registration).read_text(encoding="utf-8"))
             registration = DatasetRegistration.model_validate_json(
@@ -108,6 +118,27 @@ def run(argv: list[str] | None = None) -> int:
         if args.command == "artifact" and args.artifact_command == "list":
             project = QlibxProject.open(args.root)
             emit(project.artifacts.list_envelopes(include_failure=args.include_failure))
+            return 0
+        if args.command == "artifact" and args.artifact_command == "show":
+            project = QlibxProject.open(args.root)
+            selected = next(
+                (
+                    envelope
+                    for envelope in project.artifacts.list_envelopes(include_failure=True)
+                    if envelope.artifact_id == args.artifact_id
+                ),
+                None,
+            )
+            if selected is None:
+                emit(
+                    {
+                        "status": "failed",
+                        "error": "ARTIFACT_NOT_FOUND",
+                        "artifact_id": args.artifact_id,
+                    }
+                )
+                return 1
+            emit(selected)
             return 0
     except Exception as exc:
         emit({"status": "failed", "error": type(exc).__name__, "message": str(exc)})

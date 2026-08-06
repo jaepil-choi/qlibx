@@ -1,0 +1,12 @@
+{
+  "sample_schema_version": 1,
+  "sample_id": "basic-real-dw-journey-v1",
+  "ownership": "qlibx_product_owned_example",
+  "source": "data/DW/fng_stock_daily_prices.csv",
+  "source_rows": 4,
+  "value_formula": "close_price / base_price - 1",
+  "observation_time": "session date normalized as 09:00 Asia/Seoul",
+  "available_at": "same-session 15:30 Asia/Seoul close",
+  "expected_direct_winner": "A005930",
+  "current_support_only": true
+}

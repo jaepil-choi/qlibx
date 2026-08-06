@@ -18,6 +18,7 @@ from qlibx.flow import ExtensionFlow, ResearchFlow
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
 from qlibx.operations import StrategyInvocation, StrategyOperation
+from qlibx.sample import SampleMaterializationResult, SampleMaterializer
 
 
 class QlibxProject:
@@ -88,6 +89,9 @@ class QlibxProject:
         apply: bool = False,
     ) -> tuple[TargetOnboardingResult, ...]:
         return ProjectOnboarder(self._root).onboard(requests, apply=apply)
+
+    def materialize_sample(self, *, apply: bool = False) -> SampleMaterializationResult:
+        return SampleMaterializer(self._root).materialize(apply=apply)
 
     def invoke(
         self,

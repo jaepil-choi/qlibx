@@ -384,10 +384,11 @@ class ActualStateMomentumStrategy:
 
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
+        feedback = view.account_feedback()  # type: ignore[attr-defined]
         memory = view.memory_snapshot()  # type: ignore[attr-defined]
         state_identity = f"{account.account_id}:v{account.version}"
         if account.positions:
-            has_new_feedback = account.feedback_cursor > memory.feedback_cursor
+            has_new_feedback = feedback.next_cursor > memory.feedback_cursor
             return StrategyDraft(
                 weights=(),
                 budget_mode=BudgetMode.FLEXIBLE,
@@ -396,9 +397,9 @@ class ActualStateMomentumStrategy:
                 diagnostics=("hold because a committed physical position exists",),
                 path_dependent=True,
                 state_identity=state_identity,
-                feedback_cursor=str(account.feedback_cursor),
+                feedback_cursor=str(feedback.next_cursor),
                 proposed_memory=(
-                    {"confirmed_feedback_cursor": account.feedback_cursor}
+                    {"confirmed_feedback_cursor": feedback.next_cursor}
                     if has_new_feedback
                     else None
                 ),

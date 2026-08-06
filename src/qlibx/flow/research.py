@@ -2,7 +2,13 @@
 
 import hashlib
 
-from qlibx.context import AccountState, MemoryState, ViewGate
+from qlibx.context import (
+    AccountFeedbackState,
+    AccountState,
+    MemoryState,
+    PublishedSessionPerformanceState,
+    ViewGate,
+)
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
@@ -38,6 +44,8 @@ class ResearchFlow:
         invocation: StrategyInvocation,
         *,
         account_state: AccountState | None = None,
+        account_feedback: AccountFeedbackState | None = None,
+        session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
         additional_dependencies: tuple[DependencyEdge, ...] = (),
     ) -> OperationOutcome:
@@ -72,6 +80,8 @@ class ResearchFlow:
             clock,
             resolution.bindings,
             account_state=account_state,
+            account_feedback=account_feedback,
+            session_performance=session_performance,
             memory_state=memory_state,
         )
         try:
@@ -85,6 +95,8 @@ class ResearchFlow:
                 accesses=(
                     *view.accessed(),
                     *view.state_accessed(),
+                    *view.feedback_accessed(),
+                    *view.performance_accessed(),
                     *view.memory_accessed(),
                 ),
             )
@@ -109,6 +121,8 @@ class ResearchFlow:
             diagnostics=draft.diagnostics,
             accesses=view.accessed(),
             state_accesses=view.state_accessed(),
+            feedback_accesses=view.feedback_accessed(),
+            performance_accesses=view.performance_accessed(),
             memory_accesses=view.memory_accessed(),
         )
         dependencies = (
@@ -137,6 +151,37 @@ class ResearchFlow:
                     selected_fields=("cash", "nav", "positions", "feedback_cursor"),
                 )
                 for access in result.state_accesses
+            ),
+            *(
+                DependencyEdge(
+                    dependency_kind="state",
+                    dependency_id=(
+                        f"account:{access.account_id}:feedback:"
+                        f"{access.after_cursor}-{access.next_cursor}"
+                    ),
+                    consumer_role="actual_account_feedback",
+                    selected_fields=(
+                        "event_ids",
+                        "change_types",
+                        "fill_ids",
+                        "marked_instruments",
+                    ),
+                )
+                for access in result.feedback_accesses
+            ),
+            *(
+                DependencyEdge(
+                    dependency_kind="artifact",
+                    dependency_id=access.artifact_id,
+                    consumer_role="completed_session_performance",
+                    selected_fields=(
+                        "portfolio_return",
+                        "transaction_cost",
+                        "turnover",
+                        "closing_nav",
+                    ),
+                )
+                for access in result.performance_accesses
             ),
             *(
                 DependencyEdge(

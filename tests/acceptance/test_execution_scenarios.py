@@ -91,6 +91,7 @@ class RepeatedMemoryHoldStrategy:
         self.calls += 1
         memory = view.memory_snapshot()
         view.account_snapshot()
+        view.account_feedback()
         return StrategyDraft(
             weights=(),
             budget_mode=BudgetMode.FLEXIBLE,
@@ -156,16 +157,117 @@ def test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily(
     assert next_decision.decision_action is DecisionAction.HOLD
     assert actual.version == 2
     assert actual.feedback_cursor == 2
+    assert next_decision.feedback_accesses[0].after_cursor == 0
+    assert next_decision.feedback_accesses[0].next_cursor == 2
+    assert next_decision.feedback_accesses[0].change_types == (
+        "FillBatch",
+        "MarkBatch",
+    )
+    assert next_decision.feedback_accesses[0].fill_ids == (
+        execution.fills[0].fill_id,
+    )
+    assert next_decision.feedback_accesses[0].marked_instruments == ("A005930",)
+    assert next_decision.performance_accesses == ()
     assert actual.cash == pytest.approx(52_100.5)
     assert actual.nav == pytest.approx(9_985_100.5)
     assert [(item.instrument_id, item.quantity) for item in actual.holdings] == [
         ("A005930", 129)
     ]
     assert first.result.final_account.holdings() == {"A005930": 129}
+    first_feedback = first.result.strategy_results[0].feedback_accesses[0]
+    assert first_feedback.after_cursor == 0
+    assert first_feedback.next_cursor == 0
+    strategy_artifact = next(
+        item
+        for item in first.result.artifacts
+        if item.artifact_type == "strategy_result"
+        and any(
+            edge.consumer_role == "actual_account_feedback"
+            and edge.dependency_id.endswith("feedback:0-2")
+            for edge in item.dependencies
+        )
+    )
+    assert strategy_artifact.logical_identity.endswith("2024-01-04T06:30:00Z")
+
+    performance = first.result.session_performance
+    assert len(performance) == 4
+    for record in performance:
+        assert record.portfolio_return == pytest.approx(
+            record.closing_nav / record.opening_nav - 1
+        )
+        assert record.transaction_cost_rate == pytest.approx(
+            record.transaction_cost / record.opening_nav
+        )
+        assert record.turnover == pytest.approx(
+            record.trade_value / record.opening_nav
+        )
+        assert record.gross_return - record.transaction_cost_rate == pytest.approx(
+            record.portfolio_return
+        )
+    traded_session = next(
+        item for item in performance if item.event_time == close_at(2024, 1, 3)
+    )
+    assert traded_session.source_execution_event_ids == (execution.event_id,)
+    assert traded_session.trade_value == pytest.approx(execution.fills[0].trade_value)
+    assert traded_session.transaction_cost == pytest.approx(
+        execution.fills[0].total_cost
+    )
+    assert traded_session.opening_nav == pytest.approx(10_000_000)
+    assert traded_session.closing_nav == pytest.approx(9_985_100.5)
+    performance_artifact = next(
+        item
+        for item in first.result.artifacts
+        if item.artifact_type == "session_performance"
+        and item.logical_identity.endswith(traded_session.event_id)
+    )
+    assert {
+        edge.consumer_role for edge in performance_artifact.dependencies
+    } == {"committed_execution", "committed_mark"}
     assert all(
         item.account.version == item.account_version_after_callback
         for item in first.result.monitors
     )
+
+
+def test_feedback_window_fails_before_strategy_when_limit_is_too_small(
+    real_dw_case: RealDwProject,
+) -> None:
+    sessions = tuple(close_at(2024, 1, day) for day in (2, 3, 4))
+    account = initial_account("bounded-feedback-account")
+    flow = DailyExecutionFlow(
+        clock=BacktestClock(sessions[0]),
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+        exchange=configured_exchange(cost_rate=0.0),
+        account=account,
+        profile=DailyExecutionProfile(
+            market_dataset_id="dw-real-market",
+            execution_price_role="execution_price",
+            valuation_price_role="valuation_price",
+            feedback_entry_limit=1,
+        ),
+    )
+
+    outcome = flow.run(
+        TargetStrategy(),
+        DailyRunRequest(
+            run_id="bounded-feedback",
+            config_fingerprint="bounded-feedback-v1",
+            decision_times=(sessions[0], sessions[2]),
+            session_closes=sessions,
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "ACCOUNT_FEEDBACK_WINDOW_EXCEEDED"
+    assert outcome.errors[0].stage_path == "daily_flow.decision.feedback"
+    assert outcome.errors[0].context["after_cursor"] == 0
+    assert outcome.errors[0].context["next_cursor"] == 1
+    assert outcome.errors[0].context["account_cursor"] == 2
+    assert outcome.errors[0].context["entry_limit"] == 1
+    assert outcome.errors[0].context["account_version"] == 2
+    assert outcome.errors[0].context["event_name"] == "DECISION"
+    assert account.feedback(0, 10).next_cursor == 2
 
 
 def test_rebalance_sizes_from_current_execution_prices(

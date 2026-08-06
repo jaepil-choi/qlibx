@@ -59,6 +59,56 @@ class AccountState(Protocol):
     realized_pnl: tuple[tuple[str, float], ...]
 
 
+class FeedbackAccessRecord(QlibxModel):
+    account_id: str
+    after_cursor: int = Field(ge=0)
+    next_cursor: int = Field(ge=0)
+    entry_cursors: tuple[int, ...]
+    event_ids: tuple[str, ...]
+    change_types: tuple[str, ...]
+    fill_ids: tuple[str, ...]
+    marked_instruments: tuple[str, ...]
+
+
+class FeedbackMarkState(Protocol):
+    instrument_id: str
+
+
+class FeedbackEntryState(Protocol):
+    cursor: int
+    event_id: str
+    change_type: str
+    fill_ids: tuple[str, ...]
+    marks: tuple[FeedbackMarkState, ...]
+
+
+class AccountFeedbackState(Protocol):
+    account_id: str
+    after_cursor: int
+    entries: tuple[FeedbackEntryState, ...]
+    next_cursor: int
+
+
+class SessionPerformanceAccessRecord(QlibxModel):
+    artifact_id: str
+    account_id: str
+    event_id: str
+    event_time: datetime
+    feedback_cursor: int = Field(ge=0)
+
+
+class SessionPerformanceRecordState(Protocol):
+    account_id: str
+    event_id: str
+    event_time: datetime
+    feedback_cursor: int
+
+
+class PublishedSessionPerformanceState(Protocol):
+    artifact_id: str
+    record: SessionPerformanceRecordState
+
+
 class MemoryAccessRecord(QlibxModel):
     strategy_id: str
     version: int = Field(ge=0)
@@ -83,6 +133,8 @@ class StrategyView:
         registry: RegistrySnapshot,
         store: ObservationStore,
         account_state: AccountState | None = None,
+        account_feedback: AccountFeedbackState | None = None,
+        session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
     ) -> None:
         self._as_of = as_of
@@ -90,9 +142,13 @@ class StrategyView:
         self._registry = registry
         self._store = store
         self._account_state = account_state
+        self._account_feedback = account_feedback
+        self._session_performance = session_performance
         self._memory_state = memory_state
         self._accessed: list[AccessRecord] = []
         self._state_accessed: list[StateAccessRecord] = []
+        self._feedback_accessed: list[FeedbackAccessRecord] = []
+        self._performance_accessed: list[SessionPerformanceAccessRecord] = []
         self._memory_accessed: list[MemoryAccessRecord] = []
 
     @property
@@ -196,6 +252,53 @@ class StrategyView:
     def state_accessed(self) -> tuple[StateAccessRecord, ...]:
         return tuple(self._state_accessed)
 
+    def account_feedback(self) -> AccountFeedbackState:
+        if self._account_feedback is None:
+            raise ViewAccessError("this view has no declared actual-account feedback")
+        entries = self._account_feedback.entries
+        self._feedback_accessed.append(
+            FeedbackAccessRecord(
+                account_id=self._account_feedback.account_id,
+                after_cursor=self._account_feedback.after_cursor,
+                next_cursor=self._account_feedback.next_cursor,
+                entry_cursors=tuple(int(entry.cursor) for entry in entries),
+                event_ids=tuple(str(entry.event_id) for entry in entries),
+                change_types=tuple(str(entry.change_type) for entry in entries),
+                fill_ids=tuple(
+                    str(fill_id)
+                    for entry in entries
+                    for fill_id in entry.fill_ids
+                ),
+                marked_instruments=tuple(
+                    str(mark.instrument_id)
+                    for entry in entries
+                    for mark in entry.marks
+                ),
+            )
+        )
+        return self._account_feedback
+
+    def feedback_accessed(self) -> tuple[FeedbackAccessRecord, ...]:
+        return tuple(self._feedback_accessed)
+
+    def latest_session_performance(self) -> SessionPerformanceRecordState:
+        if self._session_performance is None:
+            raise ViewAccessError("this view has no completed session performance")
+        record = self._session_performance.record
+        self._performance_accessed.append(
+            SessionPerformanceAccessRecord(
+                artifact_id=self._session_performance.artifact_id,
+                account_id=record.account_id,
+                event_id=record.event_id,
+                event_time=record.event_time,
+                feedback_cursor=record.feedback_cursor,
+            )
+        )
+        return record
+
+    def performance_accessed(self) -> tuple[SessionPerformanceAccessRecord, ...]:
+        return tuple(self._performance_accessed)
+
     def memory_snapshot(self) -> MemoryState:
         if self._memory_state is None:
             raise ViewAccessError("this view has no declared Strategy memory")
@@ -243,6 +346,8 @@ class ViewGate:
         bindings: tuple[ResolvedBinding, ...],
         *,
         account_state: AccountState | None = None,
+        account_feedback: AccountFeedbackState | None = None,
+        session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
     ) -> StrategyView:
         return StrategyView(
@@ -251,6 +356,8 @@ class ViewGate:
             registry=self._registry,
             store=self._store,
             account_state=account_state,
+            account_feedback=account_feedback,
+            session_performance=session_performance,
             memory_state=memory_state,
         )
 

@@ -9,7 +9,9 @@ from pydantic import Field, model_validator
 
 from qlibx.context import (
     AccessRecord,
+    FeedbackAccessRecord,
     MemoryAccessRecord,
+    SessionPerformanceAccessRecord,
     StateAccessRecord,
     StrategyView,
 )
@@ -92,6 +94,8 @@ class StrategyResult(QlibxModel):
     diagnostics: tuple[str, ...] = ()
     accesses: tuple[AccessRecord, ...] = ()
     state_accesses: tuple[StateAccessRecord, ...] = ()
+    feedback_accesses: tuple[FeedbackAccessRecord, ...] = ()
+    performance_accesses: tuple[SessionPerformanceAccessRecord, ...] = ()
     memory_accesses: tuple[MemoryAccessRecord, ...] = ()
 
 

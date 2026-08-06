@@ -67,6 +67,8 @@ class JournalEntry:
     as_of: datetime
     change_type: str
     fill_ids: tuple[str, ...] = ()
+    fills: tuple[Fill, ...] = ()
+    marks: tuple[Mark, ...] = ()
     realized_pnl: tuple[tuple[str, float], ...] = ()
 
 
@@ -89,6 +91,8 @@ class AccountSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class AccountFeedback:
+    account_id: str
+    after_cursor: int
     entries: tuple[JournalEntry, ...]
     next_cursor: int
 
@@ -270,7 +274,12 @@ class Account:
         if after < 0 or limit < 0 or after > len(self._journal):
             raise ValueError("invalid feedback cursor or limit")
         entries = tuple(self._journal[after : after + limit])
-        return AccountFeedback(entries=entries, next_cursor=after + len(entries))
+        return AccountFeedback(
+            account_id=self._account_id,
+            after_cursor=after,
+            entries=entries,
+            next_cursor=after + len(entries),
+        )
 
     def commit(self, change: AccountChange, *, expected_version: int) -> AccountCommit:
         if change.account_id != self._account_id:
@@ -296,9 +305,13 @@ class Account:
                 realized_pnl,
             )
             fill_ids = tuple(fill.fill_id for fill in change.fills)
+            fills = change.fills
+            marks = ()
         else:
             positions = self._apply_marks(change.marks, positions, change.as_of)
             fill_ids = ()
+            fills = ()
+            marks = change.marks
             realized_delta = ()
         if cash < -1e-9:
             raise AccountCommitRejected("NEGATIVE_CASH", "batch would leave negative cash")
@@ -317,6 +330,8 @@ class Account:
                 as_of=change.as_of,
                 change_type=type(change).__name__,
                 fill_ids=fill_ids,
+                fills=fills,
+                marks=marks,
                 realized_pnl=realized_delta,
             )
         )

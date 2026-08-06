@@ -138,6 +138,68 @@ class MarkEvidence(QlibxModel):
     account_after: StateAccessRecord
 
 
+class SessionPerformanceEvidence(QlibxModel):
+    performance_schema_version: Literal[1] = 1
+    event_id: str
+    event_time: datetime
+    account_id: str
+    source_mark_event_id: str
+    source_execution_event_ids: tuple[str, ...]
+    opening_account_version: int = Field(ge=0)
+    closing_account_version: int = Field(ge=0)
+    feedback_cursor: int = Field(ge=0)
+    opening_nav: float = Field(ge=0)
+    closing_nav: float = Field(ge=0)
+    closing_cash: float
+    trade_value: float = Field(ge=0)
+    transaction_cost: float = Field(ge=0)
+    turnover: float | None
+    transaction_cost_rate: float | None
+    gross_return: float | None
+    portfolio_return: float | None
+
+    @model_validator(mode="after")
+    def validate_reconciliation(self) -> "SessionPerformanceEvidence":
+        ratios = (
+            self.turnover,
+            self.transaction_cost_rate,
+            self.gross_return,
+            self.portfolio_return,
+        )
+        if self.opening_nav == 0:
+            if any(value is not None for value in ratios):
+                raise ValueError("zero opening NAV requires undefined return ratios")
+            return self
+        if any(value is None or not math.isfinite(value) for value in ratios):
+            raise ValueError("positive opening NAV requires finite return ratios")
+        expected_net = self.closing_nav / self.opening_nav - 1
+        expected_cost = self.transaction_cost / self.opening_nav
+        expected_turnover = self.trade_value / self.opening_nav
+        assert self.portfolio_return is not None
+        assert self.transaction_cost_rate is not None
+        assert self.gross_return is not None
+        assert self.turnover is not None
+        if not math.isclose(self.portfolio_return, expected_net, rel_tol=0, abs_tol=1e-12):
+            raise ValueError("portfolio return does not reconcile to NAV")
+        if not math.isclose(
+            self.transaction_cost_rate,
+            expected_cost,
+            rel_tol=0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("transaction cost rate does not reconcile")
+        if not math.isclose(self.turnover, expected_turnover, rel_tol=0, abs_tol=1e-12):
+            raise ValueError("turnover does not reconcile")
+        if not math.isclose(
+            self.gross_return - self.transaction_cost_rate,
+            self.portfolio_return,
+            rel_tol=0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("gross and net return do not reconcile")
+        return self
+
+
 class MonitorEvidence(QlibxModel):
     event_id: str
     event_time: datetime
@@ -192,6 +254,7 @@ class DailyExecutionProfile(QlibxModel):
     valuation_price_role: str = "valuation_price"
     volume_role: str | None = None
     session_timezone: str = "Asia/Seoul"
+    feedback_entry_limit: int = Field(default=256, gt=0)
     limitations: tuple[str, ...] = (
         "single close price for the full cross-sectional batch",
         "intraday path and market impact are not modelled",
@@ -224,6 +287,7 @@ class DailyRunResult:
     decision_intents: tuple[DecisionIntent, ...]
     executions: tuple[ExecutionEvidence, ...]
     marks: tuple[MarkEvidence, ...]
+    session_performance: tuple[SessionPerformanceEvidence, ...]
     monitors: tuple[MonitorEvidence, ...]
     memory_commits: tuple[MemoryCommitEvidence, ...]
     checkpoint: SimulationCheckpoint
@@ -254,6 +318,12 @@ class _AuthorityCommit:
             "event_id": self.event_id,
             "version": self.version,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _PublishedSessionPerformance:
+    artifact_id: str
+    record: SessionPerformanceEvidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,6 +446,7 @@ class DailyExecutionFlow:
         self._intents: list[DecisionIntent] = []
         self._executions: list[ExecutionEvidence] = []
         self._marks: list[MarkEvidence] = []
+        self._session_performance: list[_PublishedSessionPerformance] = []
         self._monitors: list[MonitorEvidence] = []
         self._memory_commits: list[MemoryCommitEvidence] = []
         self._published: list[ArtifactEnvelope] = []
@@ -584,6 +655,9 @@ class DailyExecutionFlow:
                 decision_intents=tuple(self._intents),
                 executions=tuple(self._executions),
                 marks=tuple(self._marks),
+                session_performance=tuple(
+                    item.record for item in self._session_performance
+                ),
                 monitors=tuple(self._monitors),
                 memory_commits=tuple(self._memory_commits),
                 checkpoint=checkpoint,
@@ -605,11 +679,45 @@ class DailyExecutionFlow:
             evaluation_time=event.ts,
             config_fingerprint=self._request.config_fingerprint,
         )
+        account_state = self._account.snapshot(evaluation_time=event.ts)
+        memory_state = self._memory.snapshot(self._strategy.strategy_id)
+        try:
+            account_feedback = self._account.feedback(
+                memory_state.feedback_cursor,
+                self._profile.feedback_entry_limit,
+            )
+        except ValueError as exc:
+            self._fail(
+                event,
+                "decision.feedback",
+                "ACCOUNT_FEEDBACK_CURSOR_INVALID",
+                context={"message": str(exc)},
+            )
+            return
+        if account_feedback.next_cursor != account_state.feedback_cursor:
+            self._fail(
+                event,
+                "decision.feedback",
+                "ACCOUNT_FEEDBACK_WINDOW_EXCEEDED",
+                context={
+                    "after_cursor": account_feedback.after_cursor,
+                    "next_cursor": account_feedback.next_cursor,
+                    "account_cursor": account_state.feedback_cursor,
+                    "entry_limit": self._profile.feedback_entry_limit,
+                },
+            )
+            return
         outcome = self._research.invoke_strategy(
             self._strategy,
             invocation,
-            account_state=self._account.snapshot(evaluation_time=event.ts),
-            memory_state=self._memory.snapshot(self._strategy.strategy_id),
+            account_state=account_state,
+            account_feedback=account_feedback,
+            session_performance=(
+                self._session_performance[-1]
+                if self._session_performance
+                else None
+            ),
+            memory_state=memory_state,
         )
         if outcome.status is not OutcomeStatus.COMPLETE:
             self._errors.extend(outcome.errors)
@@ -1178,6 +1286,113 @@ class DailyExecutionFlow:
             self._marks.append(evidence)
 
     def _on_monitor(self, event: Event) -> None:
+        mark = next(
+            (item for item in reversed(self._marks) if item.event_time == event.ts),
+            None,
+        )
+        if mark is None:
+            self._fail(event, "session_performance", "SESSION_MARK_EVIDENCE_MISSING")
+            return
+        executions = tuple(
+            item for item in self._executions if item.event_time == event.ts
+        )
+        opening = executions[0].account_before if executions else mark.account_before
+        closing = mark.account_after
+        trade_value = sum(
+            abs(fill.trade_value)
+            for execution in executions
+            for fill in execution.fills
+        )
+        transaction_cost = sum(
+            fill.total_cost
+            for execution in executions
+            for fill in execution.fills
+        )
+        if opening.nav == 0:
+            turnover = None
+            transaction_cost_rate = None
+            gross_return = None
+            portfolio_return = None
+        else:
+            turnover = trade_value / opening.nav
+            transaction_cost_rate = transaction_cost / opening.nav
+            portfolio_return = closing.nav / opening.nav - 1
+            gross_return = portfolio_return + transaction_cost_rate
+        performance = SessionPerformanceEvidence(
+            event_id=self._event_id(event, "session-performance"),
+            event_time=event.ts,
+            account_id=closing.account_id,
+            source_mark_event_id=mark.event_id,
+            source_execution_event_ids=tuple(
+                item.event_id for item in executions
+            ),
+            opening_account_version=opening.version,
+            closing_account_version=closing.version,
+            feedback_cursor=closing.feedback_cursor,
+            opening_nav=opening.nav,
+            closing_nav=closing.nav,
+            closing_cash=closing.cash,
+            trade_value=trade_value,
+            transaction_cost=transaction_cost,
+            turnover=turnover,
+            transaction_cost_rate=transaction_cost_rate,
+            gross_return=gross_return,
+            portfolio_return=portfolio_return,
+        )
+        source_logical_identities = (
+            f"mark-result:{mark.event_id}",
+            *(
+                f"execution-result:{execution.event_id}"
+                for execution in executions
+            ),
+        )
+        source_artifacts = {
+            envelope.logical_identity: envelope
+            for envelope in self._published
+            if envelope.logical_identity in source_logical_identities
+        }
+        missing_sources = tuple(
+            logical_identity
+            for logical_identity in source_logical_identities
+            if logical_identity not in source_artifacts
+        )
+        if missing_sources:
+            self._fail(
+                event,
+                "session_performance",
+                "SESSION_SOURCE_ARTIFACT_MISSING",
+                context={"logical_identities": list(missing_sources)},
+            )
+            return
+        performance_artifact = self._publish_model(
+            event=event,
+            stage="session_performance.artifact",
+            logical_identity=f"session-performance:{performance.event_id}",
+            artifact_type="session_performance",
+            producer_id=self._profile.profile_id,
+            payload=performance,
+            dependencies=tuple(
+                DependencyEdge(
+                    dependency_kind="artifact",
+                    dependency_id=source_artifacts[logical_identity].artifact_id,
+                    consumer_role=(
+                        "committed_mark"
+                        if logical_identity.startswith("mark-result:")
+                        else "committed_execution"
+                    ),
+                )
+                for logical_identity in source_logical_identities
+            ),
+        )
+        if performance_artifact is None:
+            return
+        self._session_performance.append(
+            _PublishedSessionPerformance(
+                artifact_id=performance_artifact.artifact_id,
+                record=performance,
+            )
+        )
+
         before = self._account.snapshot(evaluation_time=event.ts)
         evidence = MonitorEvidence(
             event_id=self._event_id(event, "monitor"),
@@ -1240,13 +1455,48 @@ class DailyExecutionFlow:
         if not result.state_accesses:
             self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_ACTUAL_FEEDBACK")
             return None
-        feedback_cursor = result.state_accesses[-1].feedback_cursor
+        state_access = result.state_accesses[-1]
+        initialization_feedback = (
+            not result.feedback_accesses
+            or (
+                result.feedback_accesses[-1].after_cursor == 0
+                and result.feedback_accesses[-1].next_cursor == 0
+            )
+        )
         initialization = (
             current.version == 0
             and current.value is None
             and current.feedback_cursor == 0
-            and feedback_cursor == 0
+            and state_access.feedback_cursor == 0
+            and initialization_feedback
         )
+        if initialization:
+            feedback_cursor = 0
+        else:
+            if not result.feedback_accesses:
+                self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_ACTUAL_FEEDBACK")
+                return None
+            feedback_access = result.feedback_accesses[-1]
+            if (
+                feedback_access.account_id != state_access.account_id
+                or feedback_access.after_cursor != current.feedback_cursor
+                or feedback_access.next_cursor > state_access.feedback_cursor
+            ):
+                self._fail(
+                    event,
+                    "memory",
+                    "MEMORY_FEEDBACK_CURSOR_MISMATCH",
+                    context={
+                        "feedback_account_id": feedback_access.account_id,
+                        "state_account_id": state_access.account_id,
+                        "after_cursor": feedback_access.after_cursor,
+                        "memory_feedback_cursor": current.feedback_cursor,
+                        "next_cursor": feedback_access.next_cursor,
+                        "state_feedback_cursor": state_access.feedback_cursor,
+                    },
+                )
+                return None
+            feedback_cursor = feedback_access.next_cursor
         if feedback_cursor <= current.feedback_cursor and not initialization:
             self._fail(
                 event,
@@ -1692,6 +1942,11 @@ class DailyExecutionFlow:
                 artifact_schema_version=1,
                 payload_model=MonitorEvidence,
             ),
+            "session_performance": ArtifactContract(
+                artifact_type="session_performance",
+                artifact_schema_version=1,
+                payload_model=SessionPerformanceEvidence,
+            ),
             "memory_commit": ArtifactContract(
                 artifact_type="memory_commit",
                 artifact_schema_version=1,
@@ -1720,6 +1975,9 @@ class DailyExecutionFlow:
         monitors: dict[str, MonitorEvidence] = {
             item.event_id: item for item in self._monitors
         }
+        session_performance: dict[str, _PublishedSessionPerformance] = {
+            item.record.event_id: item for item in self._session_performance
+        }
         memory_commits: dict[tuple[str, int], MemoryCommitEvidence] = {
             (item.strategy_id, item.version): item for item in self._memory_commits
         }
@@ -1744,6 +2002,11 @@ class DailyExecutionFlow:
                 marks[payload.event_id] = payload
             elif isinstance(payload, MonitorEvidence):
                 monitors[payload.event_id] = payload
+            elif isinstance(payload, SessionPerformanceEvidence):
+                session_performance[payload.event_id] = _PublishedSessionPerformance(
+                    artifact_id=envelope.artifact_id,
+                    record=payload,
+                )
             elif isinstance(payload, MemoryCommitEvidence):
                 memory_commits[(payload.strategy_id, payload.version)] = payload
 
@@ -1766,6 +2029,10 @@ class DailyExecutionFlow:
         self._monitors = sorted(
             monitors.values(),
             key=lambda item: (item.event_time, item.event_id),
+        )
+        self._session_performance = sorted(
+            session_performance.values(),
+            key=lambda item: (item.record.event_time, item.record.event_id),
         )
         self._memory_commits = sorted(
             memory_commits.values(),

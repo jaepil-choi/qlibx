@@ -40,6 +40,7 @@ from qlibx.flow.daily import (
     MemoryCommitEvidence,
     MonitorEvidence,
     NextSessionCloseExecutor,
+    SessionPerformanceEvidence,
     SimulationCheckpoint,
 )
 from qlibx.flow.extensions import EXTENSION_REGISTRATION_CONTRACT, ExtensionFlow
@@ -93,6 +94,7 @@ __all__ = [
     "PortfolioConstructionFlow",
     "RecoveryPublication",
     "ResearchFlow",
+    "SessionPerformanceEvidence",
     "SimulationCheckpoint",
     "SimulationRecoveryPoint",
     "StoredSignalEntry",

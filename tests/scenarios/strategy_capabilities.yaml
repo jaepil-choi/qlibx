@@ -1,0 +1,83 @@
+schema_version: 1
+suite: qlibx-historical-strategy-capabilities
+authority:
+  product_requirements: docs/qlibx-prd.md
+  implementation_design: docs/qlibx-architecture.md
+  reference_mode: scenario_requirement_source
+  qlib_numeric_or_api_parity: false
+reference_sources:
+  - references/qlib-integration-codex/peer_momentum_runtime/strategy.py
+  - references/qlib-integration-codex/peer_momentum_runtime/signed_alpha.py
+  - references/qlib-integration-codex/report_twin/runner.py
+  - references/qlib-integration-codex/outputs/report_twin/migration-proof.json
+
+capabilities:
+  - id: pit_cross_sectional_signal
+    status: current_supported
+    prd_use_cases: [UC-PIT-001, UC-SIGNAL-001]
+    outcome: Strategy reads only declared observations available at decision time.
+  - id: stored_member_and_ensemble
+    status: current_supported
+    prd_use_cases: [UC-SIGNAL-002, UC-ENSEMBLE-001]
+    outcome: Stored member weights can be combined without rerunning their producers.
+  - id: long_only_enhanced_index_construction
+    status: current_supported
+    prd_use_cases: [UC-PORTFOLIO-001, UC-CONSTRAINT-ADJUST-001]
+    outcome: Signed alpha can become a constrained physical long-only target.
+  - id: actual_account_snapshot
+    status: current_supported
+    prd_use_cases: [UC-CLOSED-LOOP-001]
+    outcome: The next decision reads committed cash, NAV, positions, and cursor.
+  - id: bounded_account_feedback_detail
+    status: current_supported
+    prd_use_cases: [UC-CLOSED-LOOP-001, UC-ALPHA-ADAPTIVE-001]
+    outcome: Strategy reads the exact committed Fill and Mark changes after its prior cursor.
+  - id: daily_session_performance
+    status: current_supported
+    prd_use_cases: [UC-CLOSED-LOOP-001, UC-REPORT-001]
+    outcome: NAV, cost, turnover, and return reconcile from committed execution and marks.
+  - id: real_short_execution
+    status: future_product_scope
+    prd_use_cases: []
+    outcome: Requires collateral, borrow, locate, proceeds, and fee policy.
+  - id: partial_fill_lifecycle
+    status: future_product_scope
+    prd_use_cases: []
+    outcome: Requires pending quantity and cancel, reject, expire lifecycle policy.
+
+strategy_scenarios:
+  - {name: peer_momentum, family: market, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: open_close_rebound, family: market, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: gap_exhaustion, family: market, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: ranked_information_drift, family: market, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: high_free_float_ratio, family: financial, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: high_leverage, family: financial, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: low_depreciation_intensity, family: financial, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: low_lease_liability_intensity, family: financial, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: high_inventory_intensity, family: financial, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: slow_low_lease_liability_intensity, family: financial, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: eps_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: net_income_12m_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: net_income_fy1_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: fy1_sales_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: fy1_adjusted_op_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: fy1_controlling_net_income_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: fy1_net_income_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+  - {name: fy1_margin_revision_20d, family: consensus, capabilities: [pit_cross_sectional_signal, stored_member_and_ensemble, long_only_enhanced_index_construction]}
+
+runtime_scenarios:
+  - name: adaptive_long_only_peer_momentum
+    required_capabilities:
+      - pit_cross_sectional_signal
+      - long_only_enhanced_index_construction
+      - actual_account_snapshot
+      - bounded_account_feedback_detail
+      - daily_session_performance
+    disposition: current_supported
+    test: tests/acceptance/test_historical_strategy_scenarios.py::test_prd_native_peer_momentum_enhanced_index_closed_loop
+  - name: signed_peer_momentum
+    required_capabilities: [pit_cross_sectional_signal, real_short_execution]
+    disposition: future_product_scope
+  - name: volume_limited_execution
+    required_capabilities: [partial_fill_lifecycle]
+    disposition: future_product_scope

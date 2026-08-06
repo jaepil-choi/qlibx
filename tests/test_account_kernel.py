@@ -117,8 +117,18 @@ def test_mark_batch_values_every_held_instrument_and_advances_feedback() -> None
         evaluation_time=datetime(2025, 1, 3, 15, 30, tzinfo=timezone.utc)
     ).valuation_status is ValuationStatus.STALE
     feedback = current.feedback(0, 10)
+    assert feedback.account_id == "account-1"
+    assert feedback.after_cursor == 0
     assert [entry.event_id for entry in feedback.entries] == ["buy", "mark"]
+    assert feedback.entries[0].fills[0].fill_id == "F1"
+    assert feedback.entries[0].marks == ()
+    assert feedback.entries[1].fills == ()
+    assert feedback.entries[1].marks == (Mark("A", 110),)
     assert feedback.next_cursor == 2
+    bounded = current.feedback(1, 1)
+    assert bounded.after_cursor == 1
+    assert bounded.entries == (feedback.entries[1],)
+    assert bounded.next_cursor == 2
 
 
 def test_account_rejects_out_of_order_changes() -> None:

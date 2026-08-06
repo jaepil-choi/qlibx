@@ -127,6 +127,7 @@ def _result_signature(result: object) -> tuple[tuple[str, ...], ...]:
             result.decision_intents,  # type: ignore[attr-defined]
             result.executions,  # type: ignore[attr-defined]
             result.marks,  # type: ignore[attr-defined]
+            result.session_performance,  # type: ignore[attr-defined]
             result.monitors,  # type: ignore[attr-defined]
             result.memory_commits,  # type: ignore[attr-defined]
         )

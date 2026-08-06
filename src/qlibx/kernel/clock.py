@@ -3,14 +3,14 @@
 import heapq
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import NamedTuple, Protocol
 
 
 def require_aware(timestamp: datetime) -> datetime:
     if timestamp.tzinfo is None or timestamp.utcoffset() is None:
         raise ValueError("clock timestamps must be timezone-aware")
-    return timestamp.astimezone(timezone.utc)
+    return timestamp.astimezone(UTC)
 
 
 class Clock(Protocol):

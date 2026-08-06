@@ -1,6 +1,6 @@
 """Private observation access used only by scoped views."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -27,7 +27,7 @@ class ObservationStore:
     ) -> pd.DataFrame:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("view as_of must be timezone-aware")
-        cutoff = as_of.astimezone(timezone.utc)
+        cutoff = as_of.astimezone(UTC)
         source = Path(dataset.source)
         if not source.is_file() or file_hash(source) != dataset.physical_fingerprint:
             raise DataSnapshotError(
@@ -95,7 +95,7 @@ class ObservationStore:
                 )
             if observation_at.tzinfo is None or observation_at.utcoffset() is None:
                 raise ValueError("observation_at must be timezone-aware")
-            selected_observation = observation_at.astimezone(timezone.utc)
+            selected_observation = observation_at.astimezone(UTC)
             visible = visible.loc[
                 visible["observation_time"] == selected_observation
             ]

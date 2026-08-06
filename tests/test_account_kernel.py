@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ from qlibx.account import (
 from qlibx.execution import Fill, Side
 from qlibx.kernel import BacktestClock, Event
 
-EVENT_TIME = datetime(2025, 1, 2, 15, 30, tzinfo=timezone.utc)
+EVENT_TIME = datetime(2025, 1, 2, 15, 30, tzinfo=UTC)
 
 
 def fill(
@@ -114,7 +114,7 @@ def test_mark_batch_values_every_held_instrument_and_advances_feedback() -> None
     assert commit.snapshot.as_of == EVENT_TIME
     assert commit.snapshot.positions[0].marked_at == EVENT_TIME
     assert current.snapshot(
-        evaluation_time=datetime(2025, 1, 3, 15, 30, tzinfo=timezone.utc)
+        evaluation_time=datetime(2025, 1, 3, 15, 30, tzinfo=UTC)
     ).valuation_status is ValuationStatus.STALE
     feedback = current.feedback(0, 10)
     assert feedback.account_id == "account-1"
@@ -149,7 +149,7 @@ def test_account_rejects_out_of_order_changes() -> None:
             MarkBatch(
                 account_id="account-1",
                 event_id="past",
-                as_of=datetime(2025, 1, 1, 15, 30, tzinfo=timezone.utc),
+                as_of=datetime(2025, 1, 1, 15, 30, tzinfo=UTC),
                 marks=(Mark("A", 110),),
             ),
             expected_version=1,
@@ -327,10 +327,10 @@ def test_positive_dust_is_rejected_without_mutating_account() -> None:
 
 
 def test_clock_returns_same_timestamp_handlers_in_priority_order() -> None:
-    start = datetime(2025, 1, 2, 9, tzinfo=timezone.utc)
+    start = datetime(2025, 1, 2, 9, tzinfo=UTC)
     clock = BacktestClock(start)
     called: list[str] = []
-    timestamp = datetime(2025, 1, 2, 15, 30, tzinfo=timezone.utc)
+    timestamp = datetime(2025, 1, 2, 15, 30, tzinfo=UTC)
     clock.schedule(Event("MONITOR", timestamp, 20), lambda event: called.append(event.name))
     clock.schedule(Event("MARK", timestamp, 10), lambda event: called.append(event.name))
 

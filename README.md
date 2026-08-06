@@ -3,6 +3,7 @@
 qlibx is a PIT-safe quantitative research and daily full-fill simulation engine under active
 development.
 
+- Requires Python 3.11 or newer (below 3.13).
 - The second attempt starts from the minimal package scaffold in `src/qlibx/`.
 - The canonical requirements are in [`docs/qlibx-prd.md`](docs/qlibx-prd.md).
 - The first implementation is preserved under [`attempts/attempt-1/`](attempts/attempt-1/).

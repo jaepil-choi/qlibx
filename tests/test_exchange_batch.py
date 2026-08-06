@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ from qlibx.execution import (
     StockInstrument,
 )
 
-UTC = timezone.utc
+UTC = UTC
 
 
 def rule(

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -60,7 +60,7 @@ class NormalizedValueStrategy:
 def invocation(identity: str, hour: int) -> StrategyInvocation:
     return StrategyInvocation(
         invocation_id=identity,
-        evaluation_time=datetime(2025, 1, 2, hour, tzinfo=timezone.utc),
+        evaluation_time=datetime(2025, 1, 2, hour, tzinfo=UTC),
         config_fingerprint="config-1",
     )
 
@@ -69,9 +69,9 @@ def test_backtest_clock_is_aware_and_monotonic() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         BacktestClock(datetime(2025, 1, 2))
 
-    clock = BacktestClock(datetime(2025, 1, 2, 9, tzinfo=timezone.utc))
+    clock = BacktestClock(datetime(2025, 1, 2, 9, tzinfo=UTC))
     with pytest.raises(ValueError, match="backwards"):
-        clock.advance_to(datetime(2025, 1, 2, 8, tzinfo=timezone.utc))
+        clock.advance_to(datetime(2025, 1, 2, 8, tzinfo=UTC))
 
 
 def test_future_observation_is_not_visible(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_future_observation_is_not_visible(tmp_path: Path) -> None:
         "B": 0.6,
     }
     access = morning.result.result.accesses[0]
-    assert access.max_available_at == datetime(2025, 1, 2, 8, tzinfo=timezone.utc)
+    assert access.max_available_at == datetime(2025, 1, 2, 8, tzinfo=UTC)
 
 
 def test_same_frozen_invocation_is_deterministic_and_idempotent(tmp_path: Path) -> None:

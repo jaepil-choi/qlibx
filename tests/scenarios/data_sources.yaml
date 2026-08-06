@@ -1,0 +1,109 @@
+schema_version: 1
+audit_date: 2026-08-06
+purpose: m6_portfolio_constraint_monitoring_inputs
+datasets:
+  k200_membership:
+    intended_roles: [benchmark_weight, benchmark_membership]
+    logical_key: [date, ticker]
+    raw:
+      path: data/DW/fng_k200_members.csv
+      sha256: e355f8405843d72786f10ba94c21ffca4c165e08ac918076fc3c5c9362a42b66
+      rows: 449429
+      dates: 2244
+      tickers: 309
+      first_date: 2017-05-24
+      last_date: 2026-07-20
+      duplicate_keys: 0
+    preprocessed:
+      path: data/preprocessed/k200_members.parquet
+      sha256: c31e8cfaad30132fee9531ef2fdf9f80003cb34841cef196ba7b4a9913f9e424
+      rows: 449429
+      dates: 2244
+      tickers: 309
+      first_date: 2017-05-24
+      last_date: 2026-07-20
+      duplicate_keys: 0
+      weight_unit: fraction
+      weight_sum_min: 0.9987
+      weight_sum_max: 1.0014
+      members_per_date_min: 200
+      members_per_date_max: 202
+      source_projection: exact_after_dw_percentage_divided_by_100
+    qlibx:
+      path: data/qlibx/k200_membership.parquet
+      sha256: 1576a53b12e075275af03dc2d05d34b314dec7350da86892a64f3f36ab45be1f
+      projection_from_preprocessed: exact
+      observed_available_at_rule: date_minus_1_calendar_day
+    pit:
+      status: unresolved
+      reason: membership is exposed before its effective date without source release evidence
+      prohibited_claim: pit_safe_portfolio_construction
+
+  sector_classification:
+    intended_roles: [sector_classification, sector_constraint]
+    logical_key: [date, ticker]
+    raw:
+      path: data/DW/DW_FNG_FGSC종목_20200101-20260430.csv
+      sha256: 7f335d0918032eb00ab737698d4fd5c8f9f9b0d11b994b970cf698b3482cbbea
+      rows: 3507557
+      dates: 1549
+      tickers: 2822
+      first_date: 2020-01-02
+      last_date: 2026-04-29
+      duplicate_keys: 0
+    preprocessed:
+      path: data/preprocessed/sector_classification.parquet
+      sha256: e7f9322b3d543ebcdcf98b3c0feb795f0116184f49d02e64ad83d57c6d259409
+      rows: 1143059
+      dates: 566
+      tickers: 2960
+      first_date: 2018-01-02
+      last_date: 2026-04-29
+      duplicate_keys: 0
+      frequency_2018_2019: daily
+      frequency_2020_onward: month_end_trading_date
+      overlap_code_mismatches_2020_onward: 0
+      raw_only_keys_on_selected_dates_2020_onward: 1228
+      preprocessed_only_keys_2020_onward: 14113
+      missing_raw_provenance_period: [2018-01-02, 2019-12-30]
+    qlibx:
+      path: data/qlibx/sector_classification.parquet
+      sha256: 848bd128fe0a44dbb820c5086ee08614723b8a664387254df3d7c952a2814f0f
+      projection_from_preprocessed: exact
+      observed_available_at_rule: date
+    pit:
+      status: unresolved
+      reason: same-day availability and preprocessed-only keys lack source release/provenance evidence
+      prohibited_claim: pit_safe_sector_constraint
+
+  k200_etf_prices:
+    intended_roles: [execution_price, valuation_price, volume, corporate_action_factor]
+    logical_key: [date, ticker]
+    raw:
+      path: data/Dataguide/데이터가이드K200ETF들_20200101-20260430.csv
+      sha256: 72f339b0cb2ba5c99d08e8128342f13dd5bafe5b790603b8ecd98c6231ad1625
+      source_shape: [41, 1561]
+      field_codes:
+        S410000200: execution_base_price
+        S41000060F: execution_close_price
+        S410001600: quantity_adjustment_factor
+        S41000080F: trade_volume
+        S410000900: tx_amount
+    preprocessed:
+      path: data/preprocessed/k200_etf_prices.parquet
+      sha256: 19dbff5a77dbb94eefb39fcca272b47c47fb00eb6cefa4e54a3d7695df406a35
+      rows: 6220
+      dates: 1555
+      tickers: 4
+      first_date: 2019-12-30
+      last_date: 2026-04-30
+      duplicate_keys: 0
+      source_field_projection: exact
+      position_unit_factor_rule: inverse_future_cumulative_product_excluding_current_date
+    qlibx:
+      path: null
+      registration_status: absent
+    pit:
+      status: unresolved
+      reason: the preprocessed file has no available_at binding
+      prohibited_claim: pit_safe_etf_execution

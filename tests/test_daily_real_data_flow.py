@@ -28,6 +28,9 @@ from qlibx.flow import (
     EnsembleDefinition,
     EnsembleMemberSpec,
     FrozenDecision,
+    IntradayExecutionFlow,
+    IntradayExecutionProfile,
+    IntradayRunRequest,
 )
 from qlibx.kernel import BacktestClock
 from qlibx.operations import (
@@ -402,6 +405,104 @@ def test_uc_closed_loop_001_and_uc_exec_002_use_real_dw_values(tmp_path: Path) -
         for edge in artifact.dependencies
         if edge.consumer_role == "decision_intent"
     )
+
+    # No repository intraday source exists. This bounded fixture characterizes the
+    # multi-event contract explicitly; it is not evidence about historical execution quality.
+    intraday_source = project_root / "intraday-characterization.csv"
+    intraday_source.write_text(
+        "timestamp,available_at,ticker,point_price,event_volume\n"
+        "2024-01-03T09:30:00+09:00,2024-01-03T09:30:00+09:00,A005930,77000,30\n"
+        "2024-01-03T11:00:00+09:00,2024-01-03T11:00:00+09:00,A005930,77000,30\n"
+        "2024-01-03T15:20:00+09:00,2024-01-03T15:20:00+09:00,A005930,77000,30\n",
+        encoding="utf-8",
+    )
+    registered_intraday = project.register_dataset(
+        DatasetRegistration(
+            dataset_id="intraday-characterization",
+            source=intraday_source.name,
+            source_format=SourceFormat.CSV,
+            instrument_field="ticker",
+            observation_time_field="timestamp",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("timestamp", "available_at", "ticker"),
+            semantic_bindings={
+                "intraday_execution_price": "point_price",
+                "intraday_volume": "event_volume",
+            },
+            semantic_category="synthetic_intraday_characterization",
+            source_provenance=(
+                "synthetic multi-event fixture; repository has no intraday source; "
+                "must not be used as market-quality evidence"
+            ),
+        )
+    )
+    assert registered_intraday.status is OutcomeStatus.COMPLETE
+    intraday_times = (
+        datetime(2024, 1, 3, 9, 30, tzinfo=KST),
+        datetime(2024, 1, 3, 11, 0, tzinfo=KST),
+        datetime(2024, 1, 3, 15, 20, tzinfo=KST),
+    )
+    intraday_account = initial_account()
+    intraday_flow = IntradayExecutionFlow(
+        clock=BacktestClock(parent_intent.decision_time),
+        registry=project.registry_snapshot(),
+        artifacts=project.artifacts,
+        exchange=configured_exchange(participation_rate=1.0),
+        account=intraday_account,
+        profile=IntradayExecutionProfile(
+            profile_id="intraday-characterization.v1",
+            market_dataset_id="intraday-characterization",
+        ),
+    )
+    intraday = intraday_flow.execute_frozen(
+        FrozenDecision(intent=parent_intent, artifact=parent_artifact),
+        IntradayRunRequest(
+            run_id="synthetic-intraday-child",
+            config_fingerprint="synthetic-intraday-v1",
+            execution_times=intraday_times,
+        ),
+    )
+
+    assert intraday.status is OutcomeStatus.COMPLETE
+    assert [
+        evidence.execution.account_before.version
+        for evidence in intraday.result.executions
+    ] == [0, 1, 2]
+    assert [
+        evidence.execution.fills[0].dealt_quantity
+        for evidence in intraday.result.executions
+    ] == [30, 30, 30]
+    assert intraday.result.executions[-1].remaining[0].remaining_quantity == 39
+    assert intraday.result.executions[-1].completes_decision is False
+    assert intraday.result.final_account.holdings() == {"A005930": 90}
+    assert intraday.result.final_account.version == 4
+    assert all(
+        artifact.dependencies[0].dependency_id == parent_artifact.artifact_id
+        for artifact in intraday.result.artifacts
+    )
+
+    missing_account = initial_account()
+    missing_intraday = IntradayExecutionFlow(
+        clock=BacktestClock(parent_intent.decision_time),
+        registry=project.registry_snapshot(),
+        artifacts=project.artifacts,
+        exchange=configured_exchange(participation_rate=1.0),
+        account=missing_account,
+        profile=IntradayExecutionProfile(
+            profile_id="missing-intraday.v1",
+            market_dataset_id="dw-real-market",
+        ),
+    ).execute_frozen(
+        FrozenDecision(intent=parent_intent, artifact=parent_artifact),
+        IntradayRunRequest(
+            run_id="missing-intraday-child",
+            config_fingerprint="missing-intraday-v1",
+            execution_times=(intraday_times[0],),
+        ),
+    )
+    assert missing_intraday.status is OutcomeStatus.FAILED
+    assert missing_intraday.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
+    assert missing_account.snapshot().version == 0
 
     phase_one_sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
     phase_one = run_real_daily_flow(

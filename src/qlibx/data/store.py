@@ -23,6 +23,7 @@ class ObservationStore:
         field: str,
         as_of: datetime,
         session_date: date | None = None,
+        observation_at: datetime | None = None,
     ) -> pd.DataFrame:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("view as_of must be timezone-aware")
@@ -87,6 +88,17 @@ class ObservationStore:
                     "session query requires an observation_time_field registration"
                 )
             visible = visible.loc[visible["observation_time"].dt.date == session_date]
+        if observation_at is not None:
+            if dataset.observation_time_field is None:
+                raise DataSnapshotError(
+                    "point query requires an observation_time_field registration"
+                )
+            if observation_at.tzinfo is None or observation_at.utcoffset() is None:
+                raise ValueError("observation_at must be timezone-aware")
+            selected_observation = observation_at.astimezone(timezone.utc)
+            visible = visible.loc[
+                visible["observation_time"] == selected_observation
+            ]
         return visible.sort_values(
             ["available_at", "observation_time", "instrument"],
             kind="mergesort",

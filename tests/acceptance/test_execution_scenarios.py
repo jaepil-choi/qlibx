@@ -42,6 +42,45 @@ class TargetStrategy:
         )
 
 
+class InitialMemoryTargetStrategy(TargetStrategy):
+    strategy_id = "tests.initial-memory-target"
+
+    def run(self, view):
+        memory = view.memory_snapshot()
+        view.account_snapshot()
+        return StrategyDraft(
+            weights=(WeightEntry(instrument="A005930", weight=1.0),),
+            budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+            decision_action=DecisionAction.TARGET,
+            proposed_memory={"initialized": True},
+            expected_memory_version=memory.version,
+        )
+
+
+class RepeatedMemoryHoldStrategy:
+    strategy_id = "tests.repeated-memory-hold"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def requirements(self):
+        return ()
+
+    def run(self, view):
+        self.calls += 1
+        memory = view.memory_snapshot()
+        view.account_snapshot()
+        return StrategyDraft(
+            weights=(),
+            budget_mode=BudgetMode.FLEXIBLE,
+            target_gross=1.0,
+            decision_action=DecisionAction.HOLD,
+            proposed_memory={"calls": self.calls},
+            expected_memory_version=memory.version,
+        )
+
+
 class FailExecutionResultArtifacts:
     def __init__(self, delegate) -> None:
         self._delegate = delegate
@@ -126,8 +165,92 @@ def test_uc_alpha_adaptive_001_memory_commits_only_after_feedback(
     assert commit.previous_version == 0
     assert commit.version == 1
     assert commit.feedback_cursor == 2
+    assert commit.update_kind == "FEEDBACK_UPDATE"
     assert commit.value == {"confirmed_feedback_cursor": 2}
     assert memory.snapshot("acceptance.actual-state-momentum").feedback_cursor == 2
+
+
+def test_first_decision_can_initialize_memory_without_feedback(
+    real_dw_case: RealDwProject,
+) -> None:
+    sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
+    memory = StrategyMemoryStore()
+    flow = DailyExecutionFlow(
+        clock=BacktestClock(sessions[0]),
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+        exchange=configured_exchange(cost_rate=0.0),
+        account=initial_account("initial-memory-account"),
+        memory=memory,
+        profile=DailyExecutionProfile(
+            market_dataset_id="dw-real-market",
+            execution_price_role="execution_price",
+            valuation_price_role="valuation_price",
+        ),
+    )
+
+    outcome = flow.run(
+        InitialMemoryTargetStrategy(),
+        DailyRunRequest(
+            run_id="initial-memory",
+            config_fingerprint="initial-memory-v1",
+            decision_times=(sessions[0],),
+            session_closes=sessions,
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    commit = outcome.result.memory_commits[0]
+    assert commit.previous_version == 0
+    assert commit.version == 1
+    assert commit.feedback_cursor == 0
+    assert commit.update_kind == "INITIALIZATION"
+    assert commit.value == {"initialized": True}
+    artifact = next(
+        item
+        for item in outcome.result.artifacts
+        if item.artifact_type == "memory_commit"
+    )
+    assert any(
+        edge.consumer_role == "initial_actual_state" for edge in artifact.dependencies
+    )
+    assert memory.snapshot(InitialMemoryTargetStrategy.strategy_id).feedback_cursor == 0
+
+
+def test_memory_update_after_initialization_still_requires_new_feedback(
+    real_dw_case: RealDwProject,
+) -> None:
+    sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
+    memory = StrategyMemoryStore()
+    flow = DailyExecutionFlow(
+        clock=BacktestClock(sessions[0]),
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+        exchange=configured_exchange(cost_rate=0.0),
+        account=initial_account("repeated-memory-account"),
+        memory=memory,
+        profile=DailyExecutionProfile(
+            market_dataset_id="dw-real-market",
+            execution_price_role="execution_price",
+            valuation_price_role="valuation_price",
+        ),
+    )
+
+    outcome = flow.run(
+        RepeatedMemoryHoldStrategy(),
+        DailyRunRequest(
+            run_id="repeated-memory",
+            config_fingerprint="repeated-memory-v1",
+            decision_times=sessions,
+            session_closes=sessions,
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "MEMORY_FEEDBACK_NOT_ADVANCED"
+    assert outcome.errors[0].commit_status is CommitStatus.NONE
+    assert memory.snapshot(RepeatedMemoryHoldStrategy.strategy_id).version == 1
+    assert memory.snapshot(RepeatedMemoryHoldStrategy.strategy_id).value == {"calls": 1}
 
 
 def test_post_fill_publication_failure_reports_committed_account(

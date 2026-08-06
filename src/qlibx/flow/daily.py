@@ -4,6 +4,7 @@ import hashlib
 import math
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, model_validator
@@ -135,6 +136,7 @@ class MemoryCommitEvidence(QlibxModel):
     previous_version: int = Field(ge=0)
     version: int = Field(ge=0)
     feedback_cursor: int = Field(ge=0)
+    update_kind: Literal["INITIALIZATION", "FEEDBACK_UPDATE"]
     value: dict[str, object]
 
 
@@ -967,7 +969,13 @@ class DailyExecutionFlow:
             self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_ACTUAL_FEEDBACK")
             return
         feedback_cursor = result.state_accesses[-1].feedback_cursor
-        if feedback_cursor <= current.feedback_cursor:
+        initialization = (
+            current.version == 0
+            and current.value is None
+            and current.feedback_cursor == 0
+            and feedback_cursor == 0
+        )
+        if feedback_cursor <= current.feedback_cursor and not initialization:
             self._fail(
                 event,
                 "memory",
@@ -1007,6 +1015,7 @@ class DailyExecutionFlow:
             previous_version=current.version,
             version=committed.version,
             feedback_cursor=committed.feedback_cursor,
+            update_kind="INITIALIZATION" if initialization else "FEEDBACK_UPDATE",
             value=dict(result.proposed_memory),
         )
         published = self._publish_model(
@@ -1032,7 +1041,9 @@ class DailyExecutionFlow:
                         f"v{result.state_accesses[-1].version}:"
                         f"cursor{feedback_cursor}"
                     ),
-                    consumer_role="confirmed_feedback",
+                    consumer_role=(
+                        "initial_actual_state" if initialization else "confirmed_feedback"
+                    ),
                 ),
             ),
         )

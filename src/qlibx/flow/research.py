@@ -2,7 +2,7 @@
 
 import hashlib
 
-from qlibx.context import AccountState, ViewGate
+from qlibx.context import AccountState, MemoryState, ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
@@ -38,6 +38,8 @@ class ResearchFlow:
         invocation: StrategyInvocation,
         *,
         account_state: AccountState | None = None,
+        memory_state: MemoryState | None = None,
+        additional_dependencies: tuple[DependencyEdge, ...] = (),
     ) -> OperationOutcome:
         try:
             requirements = strategy.requirements()
@@ -70,6 +72,7 @@ class ResearchFlow:
             clock,
             resolution.bindings,
             account_state=account_state,
+            memory_state=memory_state,
         )
         try:
             draft = strategy.run(view)
@@ -79,7 +82,11 @@ class ResearchFlow:
                 "strategy.run.compute",
                 "STRATEGY_RUN_FAILED",
                 exc,
-                accesses=(*view.accessed(), *view.state_accessed()),
+                accesses=(
+                    *view.accessed(),
+                    *view.state_accessed(),
+                    *view.memory_accessed(),
+                ),
             )
 
         invested_gross = sum(abs(entry.weight) for entry in draft.weights)
@@ -97,9 +104,12 @@ class ResearchFlow:
             path_dependent=draft.path_dependent,
             state_identity=draft.state_identity,
             feedback_cursor=draft.feedback_cursor,
+            proposed_memory=draft.proposed_memory,
+            expected_memory_version=draft.expected_memory_version,
             diagnostics=draft.diagnostics,
             accesses=view.accessed(),
             state_accesses=view.state_accessed(),
+            memory_accesses=view.memory_accessed(),
         )
         dependencies = (
             *(
@@ -128,6 +138,19 @@ class ResearchFlow:
                 )
                 for access in result.state_accesses
             ),
+            *(
+                DependencyEdge(
+                    dependency_kind="state",
+                    dependency_id=(
+                        f"memory:{access.strategy_id}:v{access.version}:"
+                        f"cursor{access.feedback_cursor}"
+                    ),
+                    consumer_role="strategy_memory",
+                    selected_fields=("value", "feedback_cursor"),
+                )
+                for access in result.memory_accesses
+            ),
+            *additional_dependencies,
         )
         publication = self._artifacts.publish_model(
             logical_identity=f"strategy:{invocation.invocation_id}",

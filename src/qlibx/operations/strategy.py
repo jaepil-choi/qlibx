@@ -7,7 +7,12 @@ from typing import Protocol
 
 from pydantic import Field, model_validator
 
-from qlibx.context import AccessRecord, StateAccessRecord, StrategyView
+from qlibx.context import (
+    AccessRecord,
+    MemoryAccessRecord,
+    StateAccessRecord,
+    StrategyView,
+)
 from qlibx.data import ComponentRequirement
 from qlibx.models import QlibxModel
 
@@ -43,6 +48,8 @@ class StrategyDraft(QlibxModel):
     path_dependent: bool = False
     state_identity: str | None = None
     feedback_cursor: str | None = None
+    proposed_memory: dict[str, object] | None = None
+    expected_memory_version: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_budget(self) -> "StrategyDraft":
@@ -59,6 +66,10 @@ class StrategyDraft(QlibxModel):
             raise ValueError("path-dependent strategy requires state_identity")
         if self.decision_action is DecisionAction.HOLD and self.weights:
             raise ValueError("an explicit hold must not contain target weights")
+        if (self.proposed_memory is None) != (self.expected_memory_version is None):
+            raise ValueError(
+                "proposed_memory and expected_memory_version must be provided together"
+            )
         return self
 
 
@@ -76,9 +87,12 @@ class StrategyResult(QlibxModel):
     path_dependent: bool
     state_identity: str | None = None
     feedback_cursor: str | None = None
+    proposed_memory: dict[str, object] | None = None
+    expected_memory_version: int | None = None
     diagnostics: tuple[str, ...] = ()
     accesses: tuple[AccessRecord, ...] = ()
     state_accesses: tuple[StateAccessRecord, ...] = ()
+    memory_accesses: tuple[MemoryAccessRecord, ...] = ()
 
 
 class StrategyInvocation(QlibxModel):

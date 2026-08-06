@@ -116,6 +116,27 @@ def test_memory_store_is_separate_and_cas_guarded() -> None:
         )
 
 
+def test_memory_checkpoint_restores_cas_and_feedback_authority() -> None:
+    memory = StrategyMemoryStore()
+    committed = memory.commit(
+        strategy_id="adaptive",
+        value={"belief": 0.6},
+        feedback_cursor=2,
+        expected_version=0,
+    )
+
+    restored = StrategyMemoryStore.from_checkpoint(memory.checkpoint())
+
+    assert restored.snapshot("adaptive") == committed
+    with pytest.raises(ValueError, match="stale"):
+        restored.commit(
+            strategy_id="adaptive",
+            value={"belief": 0.7},
+            feedback_cursor=3,
+            expected_version=0,
+        )
+
+
 def test_account_checkpoint_restores_cas_and_idempotency_authority() -> None:
     current = account()
     applied = FillBatch(

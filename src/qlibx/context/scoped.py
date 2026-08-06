@@ -54,6 +54,19 @@ class AccountState(Protocol):
     positions: tuple[object, ...]
 
 
+class MemoryAccessRecord(QlibxModel):
+    strategy_id: str
+    version: int = Field(ge=0)
+    feedback_cursor: int = Field(ge=0)
+
+
+class MemoryState(Protocol):
+    strategy_id: str
+    version: int
+    value: object | None
+    feedback_cursor: int
+
+
 class StrategyView:
     """Expose only declared Strategy inputs at a frozen clock position."""
 
@@ -65,14 +78,17 @@ class StrategyView:
         registry: RegistrySnapshot,
         store: ObservationStore,
         account_state: AccountState | None = None,
+        memory_state: MemoryState | None = None,
     ) -> None:
         self._as_of = as_of
         self._bindings = {binding.semantic_role: binding for binding in bindings}
         self._registry = registry
         self._store = store
         self._account_state = account_state
+        self._memory_state = memory_state
         self._accessed: list[AccessRecord] = []
         self._state_accessed: list[StateAccessRecord] = []
+        self._memory_accessed: list[MemoryAccessRecord] = []
 
     @property
     def as_of(self) -> datetime:
@@ -165,6 +181,21 @@ class StrategyView:
     def state_accessed(self) -> tuple[StateAccessRecord, ...]:
         return tuple(self._state_accessed)
 
+    def memory_snapshot(self) -> MemoryState:
+        if self._memory_state is None:
+            raise ViewAccessError("this view has no declared Strategy memory")
+        self._memory_accessed.append(
+            MemoryAccessRecord(
+                strategy_id=self._memory_state.strategy_id,
+                version=self._memory_state.version,
+                feedback_cursor=self._memory_state.feedback_cursor,
+            )
+        )
+        return self._memory_state
+
+    def memory_accessed(self) -> tuple[MemoryAccessRecord, ...]:
+        return tuple(self._memory_accessed)
+
     def _binding(self, semantic_role: str) -> ResolvedBinding:
         try:
             return self._bindings[semantic_role]
@@ -197,6 +228,7 @@ class ViewGate:
         bindings: tuple[ResolvedBinding, ...],
         *,
         account_state: AccountState | None = None,
+        memory_state: MemoryState | None = None,
     ) -> StrategyView:
         return StrategyView(
             as_of=clock.now,
@@ -204,6 +236,7 @@ class ViewGate:
             registry=self._registry,
             store=self._store,
             account_state=account_state,
+            memory_state=memory_state,
         )
 
     def materialize_view(

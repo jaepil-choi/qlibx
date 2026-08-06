@@ -23,6 +23,27 @@ class StrategyMemoryStore:
             MemorySnapshot(strategy_id=strategy_id, version=0, value=None, feedback_cursor=0),
         )
 
+    def checkpoint(self) -> tuple[MemorySnapshot, ...]:
+        """Return a deterministic, portable snapshot of every committed strategy."""
+
+        return tuple(self._snapshots[key] for key in sorted(self._snapshots))
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        snapshots: tuple[MemorySnapshot, ...],
+    ) -> "StrategyMemoryStore":
+        """Restore Memory CAS authority without fabricating unconfirmed feedback."""
+
+        restored = cls()
+        for snapshot in snapshots:
+            if snapshot.strategy_id in restored._snapshots:
+                raise ValueError("duplicate Strategy memory checkpoint")
+            if snapshot.version < 0 or snapshot.feedback_cursor < 0:
+                raise ValueError("invalid Strategy memory checkpoint")
+            restored._snapshots[snapshot.strategy_id] = snapshot
+        return restored
+
     def commit(
         self,
         *,

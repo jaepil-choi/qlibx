@@ -21,7 +21,7 @@ fill, position, account와 clock progression을 포함한 execution lifecycle �
 않는다.
 
 `qlibx` runtime은 **event-driven callback semantics**를 제공해야 한다. Observation, model fit, decision,
-execution, valuation, settlement와 monitoring은 필요한 cadence와 우선순위를 독립적으로 가질 수 있어야 하며, runtime이
+execution, valuation과 monitoring은 필요한 cadence와 우선순위를 독립적으로 가질 수 있어야 하며, runtime이
 등록된 callback을 결정론적 순서로 호출한다. 특정 component가 전체 lifecycle을 소유하는 하나의
 strategy loop로 이 역할들을 합치지 않는다.
 
@@ -29,7 +29,7 @@ strategy loop로 이 역할들을 합치지 않는다.
 
 - 같은 frozen input과 data에서 event 및 callback 순서와 결과가 재현된다.
 - 각 callback은 event time과 역할에 허용된 정보만 소비하며 미래 또는 권한 밖 데이터를 우회해 읽지 못한다.
-- Fill, settlement와 기타 committed outcome이 actual state에 반영된 뒤 다음 decision의 입력이 된다.
+- Fill과 기타 current-scope committed outcome이 actual state에 반영된 뒤 다음 decision의 입력이 된다.
 - 새로운 cadence나 lifecycle event를 추가해도 관련 없는 decision, execution 또는 monitoring behavior를
   다시 작성하지 않는다.
 
@@ -99,14 +99,11 @@ Quantitative researcher와 그 연구를 지원하는 coding agent가 다음 작
 - Proposed physical target 또는 order를 declared constraint에 맞게 best-effort로 조정하고, 별도 validation으로
   실행 가능 여부를 판정한다.
 - Decision이 만든 executable intent와 execution을 분리하고, 선택한 Executor, Exchange와 execution policy를
-  통해 closed-loop lifecycle로 simulation한다. Naive daily-close fill부터 intraday fill까지 같은 decision contract
-  뒤의 서로 다른 execution profile로 공존할 수 있어야 한다.
+  통해 closed-loop lifecycle로 simulation한다. MVP execution profile은 eligible order가 전량 체결되고 주식·ETF의
+  cash가 즉시 결제된다고 가정한다. Partial fill, 미체결 order lifecycle과 실제 결제주기는 future work다.
 - Strategy decision과 독립적으로 schedule된 monitoring event에서 marked actual account snapshot과 PIT-safe
   compliance data를 평가한다. Decision이 없는 시점에도 monitoring할 수 있으며, finding은 account를 변경하거나
   주문을 직접 생성하지 않는다.
-- Production에서는 같은 execution boundary에서 immutable broker-neutral prepared decision을 외부 OMS에
-  전달한다. Simulation과 production 모두 requested intent가 아니라 confirmed fill, settlement와 account result처럼
-  commit된 execution outcome만 해당 run의 authoritative state와 다음 decision feedback이 된다.
 - 성공과 실패, input dependency와 intermediate result를 다음 연구의 출발점으로 보존한다.
 
 이 capability는 독립적으로 사용할 수 있다. 모든 연구가 하나의 end-to-end pipeline을 끝까지 따라야 한다고
@@ -119,8 +116,8 @@ first-class user다.
 
 사용자는 reference implementation의 internal class hierarchy나 qlibx private source를 모두 알 필요가 없어야
 한다. 대신 데이터의
-경제적 의미, availability, universe, benchmark, alpha hypothesis, risk constraint, execution policy와 production
-authority처럼 결과의 의미를 바꾸는 결정은 명시적으로 내려야 한다.
+경제적 의미, availability, universe, benchmark, alpha hypothesis, risk constraint와 execution policy처럼 결과의
+의미를 바꾸는 결정은 명시적으로 내려야 한다.
 
 예를 들어 data registration을 돕는 agent는 `DATE`라는 이름만 보고 event time이나 `available_at`을 추측해서는
 안 된다. 다음처럼 정보가 실제로 알려진 시점과 look-ahead 위험을 설명하고 user의 명시적 결정을 받아야 한다.
@@ -197,8 +194,7 @@ existing member Strategies / stored alpha-weight results ─> Ensemble Strategy 
    반대 intent netting, crossing과 dependency를 관측 가능하게 남긴다.
 4. **Portfolio construction 선택.** Signed weights는 declared instrument와 exchange semantics에 맞는 portfolio로
    변환한다. Long-only enhanced index는 benchmark-relative construction profile 중 하나일 뿐이며 필수 단계가
-   아니다. 실제 short accounting을 지원하는 instrument/exchange, 예를 들어 적절히 구성된 crypto perpetual
-   profile에서는 real long-short portfolio도 가능하다.
+   아니다. 실제 short accounting과 derivative portfolio는 future extension이다.
 5. **Execution 선택.** Research-purpose hypothetical portfolio, directly investable portfolio와 enhanced-index
    portfolio 모두 compatible instrument, exchange, Executor와 fill convention을 선택해 closed-loop backtest할 수
    있다. Intended result와 committed execution result를 함께 관측하며 둘을 같은 state로 취급하지 않는다.
@@ -261,19 +257,17 @@ Strategy는 decision time에 허용된 관측과 actual state를 보고 executab
 execution event에서 그 intent를 Exchange와 execution policy에 전달하고 결과를 ledger에 commit한다. 따라서
 Strategy가 결정과 체결을 동시에 수행하거나 특정 가격으로 즉시 체결되었다고 가정해서는 안 된다.
 
-Simulation에서는 Executor schedule, Exchange, FillConvention, fee와 liquidity model을 교체할 수 있어야 한다.
-같은 Strategy decision을 naive daily-close fill로 빠르게 평가하거나 더 세밀한 intraday data로 체결하더라도
-decision contract와 actual-state feedback contract는 바뀌지 않는다. Production에서는 이 경계의 adapter가
-immutable broker-neutral prepared decision을 external OMS에 전달하고 confirmed OMS result를 수신한다.
+Simulation에서는 Executor schedule, Exchange, FillConvention과 fee model을 교체할 수 있어야 한다. MVP는
+eligible order의 전량 체결과 주식·ETF cash의 즉시 결제를 가정한다. Intraday liquidity, partial fill, pending/cancel
+state와 external OMS 연결은 같은 decision contract 뒤에 추가할 future capability다.
 
 Simulation의 simulated fill은 현실 세계의 체결이라는 뜻은 아니지만, 해당 simulation run 안에서는 ledger에
-commit된 actual result다. Production에서는 external OMS가 확인한 fill, settlement와 account snapshot이 같은
-authority를 갖는다. 어느 경우든 requested target, submitted order 또는 hypothetical post-trade state를 actual
-state처럼 사용하지 않는다.
+commit된 actual result다. Requested target, submitted order 또는 hypothetical post-trade state를 actual state처럼
+사용하지 않는다.
 
 Closed loop은 단순한 signal evaluation과 다르다.
 
-- Partial fill 뒤 requested target이 아니라 해당 run의 committed actual holding을 본다.
+- 다음 decision은 requested target이 아니라 해당 run의 committed actual holding을 본다.
 - Stop-loss policy는 realized price와 position history를 사용할 수 있다.
 - Rebalance state, cooldown, risk regime와 fitted belief를 bounded memory로 이어갈 수 있다.
 - Blocked order와 transaction cost가 다음 decision에 영향을 줄 수 있다.
@@ -424,7 +418,7 @@ any compatible signed weights
    |-> selected portfolio construction
           |-> long-only / enhanced index
           |-> real or hypothetical long-short allowed by instrument/exchange
-          -> pluggable executor -> actual simulated or OMS-confirmed feedback
+          -> pluggable executor -> actual simulated feedback
 
 stored results -> analysis / report / later Strategy reuse
 actual account -> independent constraint monitoring
@@ -466,14 +460,13 @@ weighting, netting, crossing, residual과 normalization을 명시한다.
 
 #### Executable physical target
 
-Signed alpha weights, benchmark, current physical holdings, cost, turnover, exposure와 investability constraint를
-반영한 실제 instrument/cash target이다.
+Signed alpha weights, benchmark, current physical holdings와 cost assumption을 반영한 실제 instrument/cash target이다.
+MVP hard constraint는 no-short와 time-varying single-name cap뿐이다.
 
 #### Constraint declaration
 
-선택한 workflow에 적용할 versioned limit intent다. User가 metric, bound, scope와 severity의 경제적 의미를
-명시하고, evaluator가 추가로 필요한 data와 clock은 그 workflow를 호출할 때 요구한다. 구체적인 declaration
-schema와 activation protocol은 architecture가 정한다.
+선택한 workflow에 적용할 versioned limit intent다. MVP declaration은 no-short와 time-varying single-name cap의
+metric, bound와 scope만 다룬다. Evaluator가 필요한 benchmark data와 clock은 그 workflow를 호출할 때 요구한다.
 
 #### Constraint-adjustment result
 
@@ -488,14 +481,14 @@ conversion, rounding, clipping, skip/failure reason이다.
 
 #### Pre-execution validation finding
 
-최종 제출 후보 target/order를 독립적으로 평가한 결과다. Constraint별 measured value, bound, excess,
-warning/error severity, execution eligibility, required override와 exact input lineage를 포함한다.
+최종 제출 후보 target/order를 독립적으로 평가한 결과다. Constraint별 measured value, bound, excess, execution
+eligibility와 exact input lineage를 포함한다. Severity와 override는 future work다.
 
 #### Actual-account monitoring finding
 
-Confirmed fill 이후 actual Position, cash와 account snapshot을 monitoring time에 평가한 결과다. Constraint별
-breach, severity, passive/execution-induced classification, missing/unknown state와 data/account lineage를
-포함한다. Monitoring finding은 account를 소급해 변경하지 않는다.
+Confirmed fill 이후 actual Position, cash와 account snapshot을 monitoring time에 평가한 결과다. MVP constraint별
+breach, missing/unknown state와 data/account lineage를 포함한다. Monitoring finding은 account를 소급해 변경하지
+않는다.
 
 #### Bounded decision input
 
@@ -508,10 +501,11 @@ breach, severity, passive/execution-induced classification, missing/unknown stat
 - Bounded strategy memory와 prior artifact references
 - Trigger, finalization과 run state
 
-#### Prepared production decision
+#### Prepared production decision — future work
 
-Production에서 external OMS에 전달하는 immutable broker-neutral decision artifact다. 생성만으로 authoritative
-strategy state를 advance하지 않는다.
+향후 production integration에서 external OMS에 전달할 수 있는 immutable broker-neutral decision artifact 후보다.
+MVP 계약과 acceptance 대상이 아니며, 생성만으로 authoritative strategy state를 advance하지 않는다는 경계만
+future characterization으로 보존한다.
 
 > **Architecture/implementation candidate — non-normative**
 >
@@ -597,8 +591,9 @@ ETF에 필요한 exact cost policy가 없고 Equity policy만 존재하는 경�
 
 ##### UC-CLOSED-LOOP-001 — Actual execution feedback
 
-첫 decision의 Fill, transaction cost와 settlement가 commit된 뒤 다음 decision은 requested target이나 비용
-차감 전 현금이 아니라 actual cash, NAV, position과 prior execution result를 소비해야 한다.
+첫 decision의 전량 Fill과 transaction cost가 commit된 뒤 다음 decision은 requested target이나 비용 차감 전
+현금이 아니라 actual cash, NAV, position과 prior execution result를 소비해야 한다. MVP의 주식·ETF cash는
+Fill과 동시에 결제된 것으로 처리한다.
 
 ##### UC-SCALE-001 — 대규모 횡단면 실행
 
@@ -625,7 +620,7 @@ ETF constituent 구성이 바뀌었지만 새 observation의 `available_at`이 d
 
 ##### UC-LOOKTHROUGH-003 — Actual holding을 읽는 user recomputation
 
-ETF와 direct stock 주문이 partial fill되거나 이후 가격 drift가 발생하면 look-through를 구현한 user Strategy는
+ETF와 direct stock이 체결된 뒤 가격 drift 또는 다음 rebalance가 발생하면 look-through를 구현한 user Strategy는
 다음 callback에서 requested target이 아니라 StrategyView가 허용한 marked actual AccountSnapshot을 직접 읽어
 exposure를 다시 계산한다. qlibx는 계산값을 Account에 자동 주입하거나 다음 Strategy에 자동 feedback하지 않는다.
 User가 결과를 artifact로 publish한다면 consumed constituent binding, AccountSnapshot과 target/actual 구분을
@@ -652,8 +647,18 @@ Expiry가 없는 perpetual position은 정해진 funding time에 당시 관측 �
 
 ##### UC-CASHFLOW-001 — 거래비용과 lifecycle cash flow 구분
 
-Fill fee와 tax만 transaction cost로 집계하고, Future variation margin과 perpetual funding은 lifecycle cash
-flow로 별도 집계해야 한다. 두 결과 모두 commit된 뒤 다음 decision의 actual cash/NAV/position에 반영된다.
+Fill fee와 tax만 transaction cost로 집계한다. 향후 dividend/distribution, Future variation margin과 perpetual
+funding을 지원한다면 transaction cost가 아닌 lifecycle cash flow로 별도 집계하고 Account cash/PnL에 명시적으로
+commit해야 한다. 해당 data와 policy가 없으면 cash flow를 자동 추정하지 않는다.
+
+##### UC-SETTLEMENT-001 — 주식·ETF 실제 결제주기
+
+MVP는 주식과 ETF의 Fill 원금·비용이 즉시 cash에 반영된다고 가정한다. Unsettled cash, receivable/payable,
+settlement calendar와 buying-power 차이는 future work이며 현재 결과 limitation에 즉시 결제 가정을 남긴다.
+
+Merger, spin-off와 delisting처럼 instrument identity, tradability 또는 reference state를 바꾸는 사건의 해석과
+변환은 qlibx가 아니라 security master와 ETL pipeline 책임이다. qlibx는 향후에도 그 원천 corporate action을
+자체 해석하지 않고 이미 정규화된 instrument/reference data만 소비한다.
 
 같은 frozen config와 data에서 event 순서와 결과가 재현되어야 한다는 요구는 모든 use case에 적용되는
 cross-cutting invariant다. 3,000종목 실행에서 어떤 validation object를 언제 생성하는지는 architecture와
@@ -692,9 +697,9 @@ locate 가능성을 모델링하지 않는다. 이를 executable short로 표시
 - Requested target은 intention이며 realized holding이 아니다.
 - Constraint adjustment와 pre-execution validation은 proposed 또는 hypothetical post-trade state를 평가한다.
 - Simulation의 다음 decision은 qlibx Ledger에 commit된 actual Position, cash와 dealt quantity를 본다.
-- Production의 다음 decision은 external OMS의 confirmed fill과 account snapshot을 본다.
 - Constraint monitoring은 actual account snapshot만 authoritative compliance state로 평가한다.
-- Partial, rejected, blocked, zero-fill과 expired execution은 canonical result다.
+- MVP에서 eligible order는 전량 체결되고 주식·ETF cash는 즉시 결제된다. Partial, pending, cancel과 reject lifecycle은
+  future work다.
 - Intended ledger나 prior target을 actual state처럼 사용하지 않는다.
 - Monitoring finding은 prior fill을 rollback하거나 account를 소급 변경하지 않는다.
 
@@ -757,7 +762,6 @@ Config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 - Instrument semantics, execution-policy resolution과 unsupported behavior의 명시적 실패
 - Portable artifact envelope, dependency lineage, file-backed catalog와 reporting
 - Trigger, finalization, checkpoint와 resume policy
-- Production decision artifact, reconciliation, commit protocol과 monitoring analysis
 - Dense actual-account constraint monitoring과 historical re-evaluation
 - Agent-readable documentation, capability gap과 stage-based errors
 
@@ -785,9 +789,9 @@ qlibx-owned event-driven runtime은 다음 responsibility를 직접 소유한다
 - Compliance reference data의 availability와 applicability assumptions
 - Project-local extensions와 report composition
 - Research objective, evaluation policy와 promotion decision
-- External OMS configuration과 operational approval
+- 향후 production을 도입할 경우의 external OMS configuration과 operational approval
 
-### 5.4 External production runtime과 OMS가 소유하는 것
+### 5.4 External production runtime과 OMS가 소유하는 것 — future boundary
 
 - Broker connectivity, authentication과 secret
 - Broker-specific identifier와 order type
@@ -819,7 +823,7 @@ object, pickle, recorder나 process-global provider는 portable qlibx artifact�
 - Requested/hypothetical state를 actual compliance monitoring state로 사용
 - Compliance-only data를 undeclared strategy input으로 전달
 - Pickle-only result를 portable public artifact라고 주장
-- Production `prepare`가 confirmed result 없이 authoritative memory를 advance
+- 향후 Production `prepare`가 confirmed result 없이 authoritative memory를 advance
 
 ### 5.7 현재 지원 범위
 
@@ -834,7 +838,8 @@ object, pickle, recorder나 process-global provider는 portable qlibx artifact�
 - Historical backtest와 portable research catalog
 - Selective decision trigger, explicit hold와 dense actual-account evidence
 - Best-effort constraint adjustment, pre-execution validation과 independent monitoring artifacts
-- Local-storage-based production decision/OMS boundary
+- MVP hard constraint인 no-short와 time-varying single-name cap
+- Eligible order의 전량 체결과 주식·ETF cash의 즉시 결제를 가정한 simulation
 
 Instrument와 execution policy의 extension boundary(§7.12)는 이 범위 안에서 확장 가능해야 한다. 다만 다음은
 현재 범위 밖이며 별도 product decision으로 다룬다.
@@ -842,11 +847,13 @@ Instrument와 execution policy의 extension boundary(§7.12)는 이 범위 안�
 - `real_short`에 필요한 borrow 가능성, 담보와 차입 비용 모델
 - Margin account, leverage와 강제청산
 - Perpetual/futures의 funding, 계약 단위와 expiry
-- Direct broker execution ownership
+- Dividend/distribution과 기타 instrument lifecycle cash flow
+- Partial fill, pending/cancel order state와 실제 주식·ETF settlement cycle
+- Prepared decision, external OMS reconciliation과 live production authority
 
 §3.5의 `UC-COST-001`~`UC-SCALE-001`과 `UC-LOOKTHROUGH-001`~`003`은 현재 scope의
 characterization과 acceptance 대상이다.
-`UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`과 `UC-CASHFLOW-001`은 architecture 확장 가능성을
+`UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`과 `UC-SETTLEMENT-001`은 architecture 확장 가능성을
 검토하기 위한 future characterization이며 현재 지원을 의미하지 않는다.
 
 ## 6. User, agent and config-driven workflow
@@ -1025,8 +1032,8 @@ resolve frozen invocation
 ```
 
 External experiment frontend나 model trainer는 optional adapter 뒤에서 호출할 수 있다. 그러나 그것이 data
-registration interview, artifact DAG, catalog publication, signed accounting, physical construction, closed-loop
-execution 또는 production commit authority를 대신하지 않는다. External run ID, pickle이나 tracking record는
+registration interview, artifact DAG, catalog publication, signed accounting, physical construction 또는 closed-loop
+simulation execution을 대신하지 않는다. External run ID, pickle이나 tracking record는
 portable qlibx artifact에 lineage로 연결할 수 있지만 유일한 canonical result가 아니다.
 
 ### 6.9 Workflow completion
@@ -1100,12 +1107,13 @@ Agent는 error와 skill 지침을 바탕으로 다음 후보 중 의미가 맞�
 어떤 후보가 적절한지는 data의 경제적 의미와 user intent에 달려 있다. Agent가 선택을 설명하고 질문하며,
 package는 선택된 결과가 requirement를 만족하는지만 deterministic하게 판정한다.
 
-#### UC-DATA-002 — Strategy 실행 중 발견된 universe requirement
+#### UC-DATA-002 — Strategy 실행 중 발견된 benchmark-weight requirement
 
-가격 Strategy는 최소 등록된 dataset만으로 실행되지만 sector-neutral Strategy는 sector binding을 추가로 요구한다.
-두 번째 Strategy를 처음 호출할 때 package는 `sector` requirement가 충족되지 않았음을 보고하고 실행을 중단한다.
-Agent는 sector dataset의 신규 등록, 기존 dataset의 binding 보강 또는 다른 Strategy 선택을 제시한다. User가 선택한
-후 validation에 성공하면 그 operation만 안전하게 retry할 수 있어야 한다.
+가격 Strategy는 최소 등록된 dataset만으로 실행되지만 single-name cap을 적용하는 enhanced-index Strategy는
+time-varying benchmark-weight binding을 추가로 요구한다. 해당 Strategy를 처음 호출할 때 package는 requirement가
+충족되지 않았음을 보고하고 실행을 중단한다. Agent는 benchmark dataset 신규 등록, 기존 dataset의 binding 보강
+또는 constraint 없는 research 선택을 제시한다. User 선택 후 validation에 성공하면 그 operation만 안전하게
+retry할 수 있어야 한다.
 
 ### 7.4 Dependency binding
 
@@ -1180,18 +1188,31 @@ Object construction 시 validation하는 typed model이 유용하며 Pydantic은
 
 Constraint는 모든 research workflow의 선행 조건이 아니다. Constraint adjustment, pre-execution validation 또는
 actual-account monitoring을 선택한 경우에만 해당 operation이 metric, bound, evaluation scope와 필요한 data를
-요구한다. Declaration format, activation phase와 evaluator protocol 같은 구현 상세는 architecture가 정한다.
+요구한다. MVP가 지원하는 hard constraint는 다음 두 개뿐이다.
+
+$$
+w_i(t) \ge 0
+$$
+
+$$
+w_i(t) \le \max\left(10\%, w_i^{index}(t)\right)
+$$
+
+첫 식은 no-short다. 둘째 식의 benchmark constituent weight는 time-varying PIT data이며 해당 constraint를 선택한
+workflow가 명시적으로 구독한다. 종목이 benchmark 비구성종목임이 확인되면 $w_i^{index}(t)=0$이지만, 구성 여부나
+weight data가 누락되면 0으로 추정하지 않고 constraint evaluation을 실패시킨다. 그 밖의 sector, turnover,
+liquidity, leverage, gross/net exposure와 override policy는 future work다.
 
 #### UC-CONSTRAINT-001 — Constraint 없는 signal research
 
 사용자는 stored signal의 IC와 hypothetical long-short return만 분석한다. Portfolio constraint나 compliance dataset을
 등록하지 않아도 이 workflow는 실행되어야 한다.
 
-#### UC-CONSTRAINT-002 — 실행 전에 발견된 sector limit requirement
+#### UC-CONSTRAINT-002 — Time-varying single-name cap
 
-User가 sector exposure limit을 켠 뒤 physical target을 주문으로 바꾸려 한다. Sector binding이 없으면 package는
-constraint evaluation 전에 missing requirement를 보고하고 주문이나 account mutation을 만들지 않는다. Agent는 sector
-data 등록, limit 비활성화가 의미하는 위험 또는 다른 construction profile을 설명하고 user 선택을 받는다.
+User가 single-name cap을 켠 뒤 physical target을 주문으로 바꾸려 한다. Decision time에 사용할 수 있는 benchmark
+constituent weight binding이 없으면 package는 constraint evaluation 전에 missing requirement를 보고하고 주문이나
+account mutation을 만들지 않는다. Weight가 3%인 종목의 cap은 10%, 15%인 종목의 cap은 15%다.
 
 ### 7.12 Instrument semantics are selected capabilities
 
@@ -1289,25 +1310,24 @@ analysis에 재사용할 수 있지만 package는 source account/state 차이를
 
 ### 9.5 Research feedback와 execution feedback
 
-Hypothetical research backtest는 선택한 research fill model의 결과를 다음 decision에 feedback할 수 있다. 더 현실적인
-simulation과 production은 별도 executor가 만든 actual fill/account result만 다음 decision의 authoritative state로
-사용한다. Strategy가 naive daily close 체결을 직접 가정하지 않는다.
+Hypothetical research backtest와 MVP simulation은 별도 executor가 만든 committed fill/account result만 다음
+decision의 authoritative state로 사용한다. Strategy가 naive daily close 체결을 직접 가정하지 않는다.
 
 ### 9.6 Independent clocks
 
 Observation, decision, execution과 monitoring clock은 같을 수도 다를 수도 있다. Strategy decision이 없는 monitoring
-time에도 actual account constraint를 평가할 수 있고, execution은 decision 뒤 intraday event에서 일어날 수 있다.
-각 result는 자신이 평가한 clock과 permitted cutoff를 보존한다.
+time에도 actual account constraint를 평가할 수 있고, execution은 decision과 분리된 PIT-safe event에서 일어난다.
+각 result는 자신이 평가한 clock과 permitted cutoff를 보존한다. Intraday event와 partial fill은 future work다.
 
 ### 9.7 Hold is an explicit decision
 
 새로운 주문을 만들지 않는 `hold`도 정상적인 decision이다. Previous target을 무조건 재제출한다는 뜻이 아니며,
-actual position과 pending execution을 그대로 관찰할지 여부는 Strategy와 execution policy가 명시한다.
+actual position을 그대로 관찰할지 여부는 Strategy와 execution policy가 명시한다. Pending execution state는 MVP에 없다.
 
 ### 9.8 Trigger and finalization
 
-Calendar, data arrival, fill feedback 또는 user event가 decision을 trigger할 수 있다. Run 종료 시 pending result와
-failure evidence를 확정해야 하지만, 특정 event class나 callback method는 PRD가 정하지 않는다.
+Calendar, data arrival, fill feedback 또는 user event가 decision을 trigger할 수 있다. Run 종료 시 result와 failure
+evidence를 확정해야 하지만, 특정 event class나 callback method는 PRD가 정하지 않는다.
 
 ### 9.9 Parent/child research
 
@@ -1315,8 +1335,8 @@ Child research는 parent run의 frozen input과 artifact를 재사용해 대안�
 
 #### UC-ALPHA-CHILD-001 — 체결 규칙만 바꾼 child
 
-Parent의 signed weight를 고정하고 daily-close fill과 intraday fill을 두 child에서 비교한다. Model과 Strategy를 다시
-실행하지 않으며 각 child는 execution assumption과 actual simulated fills를 별도 lineage로 보존한다.
+Parent의 signed weight를 고정하고 next-close와 next-open 같은 두 full-fill convention을 child에서 비교한다. Model과
+Strategy를 다시 실행하지 않으며 각 child는 execution assumption과 actual simulated fills를 별도 lineage로 보존한다.
 
 ### 9.10 Checkpoint와 resume
 
@@ -1351,15 +1371,15 @@ Value와 momentum Strategy의 signed weights를 저장한 뒤 ensemble이 두 re
 
 ### 10.2 Optional construction modes
 
-Signed weight는 그대로 hypothetical long-short portfolio로 평가할 수 있고, long-only physical portfolio,
-benchmark-relative enhanced index 또는 derivative portfolio로 변환할 수도 있다. 가능한 방향과 cost/settlement는 선택한
-instrument와 exchange profile이 결정한다. Enhanced-index 변환 뒤에도 같은 execution boundary를 통해 backtest할 수 있다.
+Signed weight는 그대로 hypothetical long-short portfolio로 평가하거나 long-only physical portfolio 또는
+benchmark-relative enhanced index로 변환할 수 있다. Derivative portfolio는 future work다. Enhanced-index 변환 뒤에도
+같은 execution boundary를 통해 backtest할 수 있다.
 
 #### UC-PORTFOLIO-001 — 같은 alpha의 서로 다른 portfolio use
 
-같은 signed alpha result를 crypto perpetual long-short simulation과 equity long-only enhanced index construction에
-사용한다. 두 workflow는 서로 다른 investability, direction, budget과 cost requirement를 발견하고 각자 결과를 만든다.
-Alpha result 자체를 어느 한 portfolio 의미로 다시 쓰지 않는다.
+같은 signed alpha result를 hypothetical long-short analysis와 equity long-only enhanced-index construction에
+사용한다. 두 workflow는 서로 다른 investability, direction, budget과 cost requirement를 발견하고 각자 결과를
+만든다. Alpha result 자체를 어느 한 portfolio 의미로 다시 쓰지 않는다.
 
 ### 10.3 Constraint adjustment and validation
 
@@ -1367,10 +1387,11 @@ Constraint adjustment는 proposed intent를 가능한 범위에서 수정하고,
 독립적으로 판정한다. Adjustment result가 있다는 사실만으로 compliance를 보증하지 않는다. 이 workflow를 사용하지
 않는 research에는 constraint declaration을 요구하지 않는다.
 
-#### UC-CONSTRAINT-ADJUST-001 — 조정 후에도 남은 breach
+#### UC-CONSTRAINT-ADJUST-001 — 조정 후에도 남은 single-name breach
 
-Sector limit을 맞추려 target을 줄였지만 lot rounding 때문에 작은 breach가 남는다. Result는 original/adjusted intent와
-residual을 보여주고 validation은 실행 가능 여부를 별도로 판단한다. Package가 성공한 adjustment로 위장하지 않는다.
+Single-name cap을 맞추려 target을 줄였지만 lot rounding 때문에 작은 breach가 남는다. Result는 original/adjusted
+intent와 residual을 보여주고 validation은 실행 가능 여부를 별도로 판단한다. Package가 성공한 adjustment로
+위장하지 않는다.
 
 ### 10.4 Budget and residual evidence
 
@@ -1387,8 +1408,8 @@ state requirement를 선언하고 그 Strategy code가 둘을 직접 consume해 
 
 구성종목 데이터는 다른 research data와 같은 user-provided versioned PIT dataset이다. User는 logical dataset을
 등록하고 Strategy requirement로 구독한 뒤 clock-bound StrategyView에서 consume한다. Dataset observation은 source
-identity, event/effective time, `available_at`, instrument/constituent identity, weight unit과 revision을 표현할 수 있어야
-한다. qlibx는 이 데이터를 ETF Instrument와 자동 연결하거나 `LookthroughSnapshot`이라는 특별한 package-owned
+identity, `available_at`, instrument/constituent identity와 weight unit을 표현할 수 있어야 한다. qlibx는 이 데이터를
+ETF Instrument와 자동 연결하거나 `LookthroughSnapshot`이라는 특별한 package-owned
 schema로 강제하지 않는다. 구체 schema, mapping, coverage와 normalization의 경제적 의미는 user Strategy가 소유한다.
 여기서 구독은 runtime MessageBus가 아니라 Strategy가 logical dataset binding을 requirement로 선언한다는 뜻이다.
 
@@ -1421,31 +1442,31 @@ AccountSnapshot과 cutoff를 보존한다.
 
 ## 11. Event-driven execution and signed compatibility
 
-Strategy는 executor-neutral decision intent를 만들고, 별도 executor가 선택한 market/fill model로 처리한다. 이
-경계는 production뿐 아니라 simulation에도 적용된다. 따라서 같은 decision을 daily close로 단순 체결하는 engine과
-intraday order book/data를 사용하는 engine이 공존할 수 있다.
+Strategy는 executor-neutral decision intent를 만들고, 별도 executor가 선택한 market/fill model로 처리한다.
+MVP simulation은 eligible order를 선택한 가격에 전량 체결하고 주식·ETF cash를 즉시 결제한다. Intraday order
+book/data, partial fill과 production adapter는 이 경계를 재사용할 future work다.
 
 ### 11.1 Closed-loop authority
 
 Simulation의 authoritative state는 simulated executor와 Ledger가 commit한 fill, cost, cash와 position이다.
-Production의 authority는 external OMS가 확인한 fill과 account snapshot이다. Requested order나 target은 어느 환경에서도
-realized state가 아니며, 다음 decision에는 실제 결과만 feedback한다.
+Requested order나 target은 realized state가 아니며, 다음 decision에는 committed simulation result만 feedback한다.
 
-#### UC-EXEC-001 — 같은 decision, 다른 simulation executor
+#### UC-EXEC-001 — Decision과 MVP simulation execution의 분리
 
-동일한 signed intent를 child run 두 개에서 실행한다. 첫 executor는 next daily close, 두 번째 executor는 intraday
-liquidity와 partial fill을 사용한다. Strategy artifact는 같고 execution result와 이후 actual state만 달라야 한다.
+Signed intent는 Strategy callback에서 Fill을 직접 만들지 않는다. 별도 MVP executor가 next daily close 같은
+PIT-safe convention에서 eligible order를 전량 체결하고 cost와 즉시 결제 cash를 Account에 commit한다.
 
 ### 11.2 Execution profile defines realism
 
-Academic/hypothetical, daily bar, intraday simulation과 external OMS profile은 fill granularity, tradability, short,
-settlement와 cost capability를 각자 선언한다. Package 이름만 보고 현실성을 과장하지 않으며 result는 선택한 profile과
-limitations를 표시한다.
+MVP의 academic/hypothetical과 daily-bar simulation profile은 fill timing, tradability, short와 cost capability를
+각자 선언한다. Package 이름만 보고 현실성을 과장하지 않으며 result에는 full-fill과 instant-settlement 가정을
+포함한 선택 profile의 limitation을 표시한다. Intraday simulation과 external OMS profile은 future work다.
 
 #### UC-EXEC-002 — Daily close engine의 명시적 한계
 
 Daily close executor는 결정 당일 종가를 무조건 알고 체결한 것처럼 처리하지 않는다. Decision cutoff와 선택한 fill
-timing이 PIT-safe인지 validation하고, volume impact나 partial fill을 모델링하지 않았다면 result limitation에 남긴다.
+timing이 PIT-safe인지 validation하고, volume impact, partial fill과 실제 settlement cycle을 모델링하지 않았다는
+limitation을 남긴다.
 
 ### 11.3 Order conversion and evidence
 
@@ -1466,8 +1487,9 @@ Monitoring clock은 Strategy decision clock과 독립적으로 actual account를
 
 #### UC-EXEC-003 — No-trade day의 actual constraint breach
 
-가격 변화로 actual sector exposure가 limit을 넘었지만 Strategy decision은 없다. Monitoring은 actual snapshot과
-market data cutoff를 사용해 breach를 기록한다. 새 order가 없다는 이유로 finding을 누락하지 않는다.
+가격 변화로 한 종목의 actual weight가 그 시점의 $\max(10\%, w_i^{index}(t))$ cap을 넘었지만 Strategy decision은
+없다. Monitoring은 actual snapshot과 available benchmark weight를 사용해 breach를 기록한다. 새 order가 없다는
+이유로 finding을 누락하지 않는다.
 
 ## 12. Research workspace, artifact graph and catalog
 
@@ -1505,8 +1527,9 @@ action을 제안하고 안전한 retry 여부를 판단할 수 있게 한다.
 
 #### UC-RESEARCH-001 — 실패를 보존한 뒤 보강해 retry
 
-Strategy가 sector requirement 부족으로 실패한다. Catalog는 성공 result 대신 failure evidence를 남긴다. User가 sector
-data를 등록한 뒤 새 invocation이 이전 error와 resolution lineage를 연결해 성공하며, 실패 기록을 삭제하지 않는다.
+Strategy가 benchmark-weight requirement 부족으로 실패한다. Catalog는 성공 result 대신 failure evidence를 남긴다.
+User가 benchmark data를 등록한 뒤 새 invocation이 이전 error와 resolution lineage를 연결해 성공하며, 실패 기록을
+삭제하지 않는다.
 
 ### 12.4 Workspace autonomy
 
@@ -1559,8 +1582,8 @@ built-in extension example을 포함하되 package validation을 대신하지 �
 
 Bundled agent skill은 progressive workflow를 안내한다. 등록 단계에서는 꼭 필요한 semantic choice만 질문하고,
 operation error가 발생하면 package evidence를 읽어 resolution candidate와 trade-off를 user에게 설명한다. Agent는
-source의 경제적 의미, availability, universe, benchmark, alpha hypothesis, risk constraint, execution policy와
-production authority처럼 결과 의미를 바꾸는 결정을 임의로 확정하지 않는다.
+source의 경제적 의미, availability, universe, benchmark, alpha hypothesis, risk constraint와 execution policy처럼
+결과 의미를 바꾸는 결정을 임의로 확정하지 않는다.
 
 #### UC-AGENT-001 — Availability 후보를 제시하는 질문
 
@@ -1568,17 +1591,18 @@ production authority처럼 결과 의미를 바꾸는 결정을 임의로 확정
 look-ahead 문제를 설명하고, 실제 release timestamp field 사용, source별 확인된 지연 규칙 또는 data 보강 같은 후보를
 제시한다. User가 근거와 함께 binding을 선택한 뒤 package validation을 호출한다.
 
-## 14. Production decision and OMS boundary
+## 14. Future work — Production decision and OMS boundary
 
-Production integration의 핵심은 broker-neutral intent와 authoritative outcome을 분리하는 것이다. qlibx가 prepared
-decision을 외부 OMS에 전달해도 그 시점에는 holding, cash 또는 Strategy feedback state를 advance하지 않는다.
+이 절 전체는 MVP requirement와 acceptance 대상이 아닌 future characterization이다. 향후 production integration의
+핵심 후보는 broker-neutral intent와 authoritative outcome의 분리다. qlibx가 prepared decision을 외부 OMS에
+전달해도 그 시점에는 holding, cash 또는 Strategy feedback state를 advance하지 않는 방향을 검토한다.
 
 ### 14.1 Prepared decision
 
 Prepared decision은 frozen input, intended orders/target, policy identity와 idempotency identity를 가진 immutable
 artifact다. 특정 broker API object를 canonical schema로 삼지 않는다.
 
-### 14.2 OMS acknowledgement is not a fill
+### 14.2 OMS acknowledgement is not a fill — future characterization
 
 전송 성공이나 OMS 접수는 execution 완료가 아니다. Confirmed fill, rejection, cancellation과 account snapshot만
 authoritative result로 들어온다. Duplicate delivery는 같은 decision을 두 번 적용하지 않아야 한다.
@@ -1593,13 +1617,13 @@ actual cash를 사용한다. 남은 60주의 pending/cancel 상태가 불명확�
 OMS가 주문을 reject한다. Rejection evidence는 보존하지만 qlibx는 intended position을 actual로 commit하지 않는다.
 Retry 여부와 order 변경은 user-selected execution policy 또는 agent-guided decision을 거친다.
 
-### 14.3 Reconciliation and recovery
+### 14.3 Reconciliation and recovery — future characterization
 
 Production reconciliation은 outbox decision, OMS result와 account snapshot의 대응을 검사한다. Missing, duplicate,
 out-of-order와 conflicting result를 구분하고 state mutation 전에 bounded error를 제공한다. Storage protocol, queue와
 transaction implementation은 architecture가 정한다.
 
-### 14.4 Production monitoring
+### 14.4 Production monitoring — future characterization
 
 Monitoring은 OMS-confirmed actual account를 독립 clock에서 평가한다. Strategy data binding과 compliance data binding은
 같은 source를 사용할 수 있지만 실제 dependency와 cutoff는 별도로 기록한다. Finding은 alert/evidence이며 external
@@ -1634,14 +1658,17 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 
 - Constraint가 없는 research는 `UC-CONSTRAINT-001`처럼 실행되고, constraint workflow는 필요한 data를 호출 시점에
   발견한다.
-- Adjustment와 validation은 `UC-CONSTRAINT-ADJUST-001`처럼 residual과 compliance 판정을 구분한다.
-- `UC-EXEC-001`에서 같은 decision artifact를 daily와 intraday executor가 각각 처리하고 actual simulated result만
-  다음 decision에 feedback한다.
+- MVP constraint는 no-short와 `single-name weight <= max(10%, index constituent weight)`뿐이며 benchmark weight는
+  decision time에 available한 time-varying data를 사용한다.
+- Adjustment와 validation은 `UC-CONSTRAINT-ADJUST-001`처럼 single-name residual과 compliance 판정을 구분한다.
+- `UC-EXEC-001`에서 Strategy decision과 full-fill·instant-settlement MVP simulation execution을 분리하고 committed
+  result만 다음 decision에 feedback한다.
 - `UC-EXEC-002`는 fill timing과 model limitation을 명시하며 look-ahead를 허용하지 않는다.
 - §3.5의 `UC-COST-001`~`UC-COST-004`, `UC-CLOSED-LOOP-001`, `UC-SCALE-001`과
   `UC-LOOKTHROUGH-001`~`003` current-scope outcome을 만족한다.
 - `UC-EXEC-003`처럼 Strategy decision이 없는 clock에도 actual-account monitoring finding을 만든다.
 - Unsupported short, lifecycle 또는 cost policy를 다른 profile의 default로 조용히 대체하지 않는다.
+- Partial fill, pending/cancel, 실제 주식·ETF settlement cycle과 production OMS behavior를 current support로 표시하지 않는다.
 
 ### 15.4 Artifacts, reports and extensions
 
@@ -1652,15 +1679,7 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 - `UC-EXTENSION-001`에서 agent는 built-in 예시로 local extension을 만들 수 있고 package가 compatibility를
   deterministic하게 판정한다.
 
-### 15.5 Production boundary
-
-- Prepared decision은 broker-neutral immutable intent이며 publish만으로 authoritative state를 바꾸지 않는다.
-- `UC-PROD-001`에서 partial fill 이후 confirmed quantity와 actual cash만 다음 decision에 반영한다.
-- `UC-PROD-002`에서 rejected intent를 actual position으로 commit하지 않는다.
-- Duplicate, missing, stale와 out-of-order OMS result를 구분하고 unsafe state mutation 전에 reconciliation error를 낸다.
-- Production monitoring은 confirmed account만 평가하며 finding이 external account나 past fill을 수정하지 않는다.
-
-### 15.6 Current requirement/design readiness gaps
+### 15.5 Current requirement/design readiness gaps
 
 다음 항목은 out of scope가 아니라 **현재 product requirement의 미완성 지점**이다. Architecture 또는 product
 decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 전에는 관련 capability를 current support로
@@ -1669,15 +1688,16 @@ decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 
 | gap ID | 현재 부족한 점 | closure outcome |
 |---|---|---|
 | `GAP-ONBOARD-001` | §6.1의 dry-run, owned block/file, fingerprint, update/remove와 target별 skill protocol이 architecture flow로 닫히지 않았다 | Fresh project와 기존 instruction file fixture에서 preview/apply/update/remove가 user-owned content를 보존하고 idempotent한 결과와 validation evidence를 만든다 |
-| `GAP-CONSTRAINT-001` | Constraint의 version/effective period, scope, activation phase, severity, override와 missing-evaluator 결과가 하나의 public behavior로 충분히 규정되지 않았다 | 같은 declaration이 adjustment, pre-execution validation과 monitoring에서 일관된 identity를 가지며 warning/error/override/unknown outcome이 state mutation 전후 authority와 evidence를 명확히 구분한다 |
+| `GAP-CONSTRAINT-001` | MVP의 no-short와 time-varying single-name cap에 대해 adjustment, independent validation, missing benchmark weight와 lot-rounding residual의 public behavior가 충분히 규정되지 않았다 | 같은 PIT benchmark input에서 no-short와 single-name cap의 adjustment/validation 결과가 일치하고 missing weight는 fail하며 residual evidence를 보존한다 |
 | `GAP-RECOVERY-001` | Account commit, Strategy Memory, feedback cursor, checkpoint와 artifact publication 사이 crash point의 resume behavior가 닫히지 않았다 | 각 crash point에서 재개한 결과가 uninterrupted run과 같고 committed decision/Fill/Memory를 중복 적용하지 않으며 identity가 바뀌면 explicit branch를 요구한다 |
 | `GAP-CATALOG-001` | Local catalog의 locking, index schema, payload staging, atomic visibility와 abandoned partial-publication recovery가 미정이다 | Concurrent writer와 crash fixture에서도 partial payload가 reusable success로 보이지 않고 conflict/idempotent/recovery 결과가 deterministic하다 |
-| `GAP-OUTBOX-001` | Production outbox의 durable state, delivery lease/retry, OMS correlation/deduplication과 crash recovery protocol이 미정이다 | Publish 전후, acknowledgement 전후와 partial result 수신 중 재시작해도 confirmed outcome만 한 번 commit되고 missing/duplicate/stale/out-of-order가 구분된다 |
-| `GAP-CORPACTION-001` | Current stock/ETF scope에서 user-provided PIT corporate-action data를 split, dividend, distribution, merger/delisting에 적용할지 product boundary가 확정되지 않았다 | Current support 또는 future scope를 명시적으로 선택하고, current라면 quantity/cost basis/cash/valuation transition과 required PIT evidence를 별도 use case로 규정한다 |
 
 ETF look-through는 이 revision에서 `UC-LOOKTHROUGH-001`~`003`과 §10.5로 **user-authored Strategy behavior**임을
 명시한다. qlibx가 제공할 current support는 user-declared PIT data consumption, actual AccountSnapshot 접근과 generic
 artifact lineage이며, ETF-specific 자동 mapping/resolution/result 생성은 package scope가 아니다.
+
+Production outbox/reconciliation과 lifecycle cash flow는 current readiness gap이 아니라 명시적인 future work다.
+Merger, spin-off와 delisting의 원천 해석·변환은 security master/ETL 책임이므로 qlibx readiness gap이 아니다.
 
 ## 16. Compatibility gates and validation
 
@@ -1694,8 +1714,8 @@ unsupported failure와 evidence가 이전 contract와 일치하거나 명시적�
 Strategy, executor, artifact backend나 local extension mechanism을 교체해도 다음을 재검증한다.
 
 - same frozen input의 deterministic replay
-- daily/intraday executor의 decision separation과 actual feedback
-- hold/no-trade monitoring, partial/rejected fill과 checkpoint/resume
+- Decision과 full-fill MVP executor의 분리 및 actual feedback
+- hold/no-trade monitoring과 checkpoint/resume
 - typed artifact round-trip, failure evidence와 dependency lineage
 - §3.5 stable current-scope use cases와 §15 acceptance scenario
 
@@ -1714,13 +1734,17 @@ private import, file layout, fixed global stage 목록 또는 특정 validation 
 
 ## 17. Out of scope and roadmap
 
-Current scope는 validated research, simulation, artifact composition과 broker-neutral production boundary다. 다음 항목은
+Current scope는 validated research, full-fill·instant-settlement simulation과 artifact composition이다. 다음 항목은
 지원한다고 추정하지 않는다.
 
 - Borrow, locate, margin, recall과 borrow fee를 포함한 executable real short
 - Derivative margin, funding, expiry와 forced liquidation의 complete lifecycle
+- Dividend/distribution과 기타 instrument lifecycle cash flow
+- Partial fill, pending/cancel state와 stock/ETF 실제 settlement cycle
+- Prepared production decision, external OMS reconciliation, concurrent in-flight decision과 live account authority
 - Direct broker connectivity, secret management, always-on OMS/scheduler와 alert delivery
-- User가 제공하지 않은 availability, universe, shortability 또는 corporate-action truth의 자동 추정
+- User가 제공하지 않은 availability, universe 또는 shortability truth의 자동 추정
+- Merger, spin-off와 delisting을 포함한 security-master event의 원천 해석·변환
 - Unbounded autonomous Strategy state mutation
 
 ### 17.1 Asset-class expansion scenarios
@@ -1731,8 +1755,9 @@ actual feedback이 closed loop에서 일관되게 작동해야 한다. §3.5의 
 
 ### 17.2 Optional future capabilities
 
-Real short, derivatives, alternative optimizer, AI-assisted Strategy, distributed execution과 multiple in-flight production
-decision은 독립적인 product decision으로 추가할 수 있다. 각 확장은 새 requirement를 해당 workflow에서 발견하고,
+Real short, derivatives, lifecycle cash flow, actual settlement, partial fill, alternative optimizer, AI-assisted Strategy,
+distributed execution과 production integration은 독립적인 product decision으로 추가할 수 있다. 각 확장은 새
+requirement를 해당 workflow에서 발견하고,
 기존 minimal registration이나 unrelated research를 막지 않아야 한다. 구체적인 component hierarchy와 service topology는
 architecture가 정한다.
 
@@ -1748,7 +1773,7 @@ qlibx는 하나의 고정 research pipeline을 강제하지 않는다. 최소한
 - Direct Strategy, stored model output와 ensemble Strategy의 선택 가능한 composition
 - Hypothetical, long-only, long-short와 enhanced-index workflow의 명시적 의미
 - Strategy decision과 pluggable executor의 분리
-- Simulation Ledger 또는 external OMS가 확인한 actual result의 authority
+- Simulation Account에 commit된 actual result의 authority
 - Producer-independent typed artifacts, lineage, failure evidence와 safe reuse
 - Decision과 독립적인 actual-account monitoring
 

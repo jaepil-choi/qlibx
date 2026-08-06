@@ -1,15 +1,21 @@
 from datetime import datetime, timezone
 
+import pytest
+
+from qlibx.context import StateAccessRecord, StateHolding
 from qlibx.portfolio import (
     BenchmarkWeight,
     ConstraintAdjustmentRequest,
     ConstraintDeclaration,
+    ConstraintEvaluationError,
+    ConstraintMonitoringRequest,
     ConstraintValidationRequest,
     ConstructionProfile,
     ExecutionLotInput,
     PortfolioConstructionResult,
     PortfolioWeight,
     adjust_single_name_caps,
+    monitor_actual_single_name_caps,
     validate_single_name_caps,
 )
 
@@ -86,3 +92,37 @@ def test_no_short_adjustment_is_independently_validated() -> None:
     assert adjusted == {"A": 0.0, "B": 0.08}
     assert adjustment.items[0].reasons == ("no_short",)
     assert validation.eligible is True
+
+
+def test_monitoring_requires_complete_marked_actual_state() -> None:
+    evaluation_time = datetime(2024, 1, 5, 0, 0, tzinfo=timezone.utc)
+    declaration = ConstraintDeclaration(
+        declaration_id="mvp-v1",
+        benchmark_weight_role="benchmark_weight",
+        single_name_floor=0.10,
+    )
+    request = ConstraintMonitoringRequest(
+        invocation_id="monitor-incomplete",
+        config_fingerprint="monitor-v1",
+    )
+    incomplete = StateAccessRecord(
+        account_id="account-1",
+        version=1,
+        feedback_cursor=1,
+        cash=900,
+        nav=900,
+        valuation_status="INCOMPLETE",
+        holdings=(StateHolding(instrument_id="A", quantity=1, mark=None),),
+    )
+
+    with pytest.raises(ConstraintEvaluationError) as rejected:
+        monitor_actual_single_name_caps(
+            request,
+            evaluation_time,
+            declaration,
+            incomplete,
+            (BenchmarkWeight(instrument="A", weight=0.01),),
+            (),
+        )
+
+    assert rejected.value.code == "ACCOUNT_VALUATION_INCOMPLETE"

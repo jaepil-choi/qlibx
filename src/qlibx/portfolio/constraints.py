@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.context import AccessRecord
+from qlibx.context import AccessRecord, StateAccessRecord
 from qlibx.models import QlibxModel
 from qlibx.portfolio.construction import PortfolioConstructionResult, PortfolioWeight
 
@@ -47,6 +47,11 @@ class ConstraintValidationRequest(QlibxModel):
     invocation_id: str = Field(min_length=1)
     adjustment_artifact_id: str = Field(min_length=1)
     evaluation_time: datetime
+    config_fingerprint: str = Field(min_length=1)
+
+
+class ConstraintMonitoringRequest(QlibxModel):
+    invocation_id: str = Field(min_length=1)
     config_fingerprint: str = Field(min_length=1)
 
 
@@ -105,6 +110,17 @@ class ConstraintValidationResult(QlibxModel):
     adjustment_artifact_id: str
     evaluation_time: datetime
     eligible: bool
+    findings: tuple[ConstraintFinding, ...]
+    accesses: tuple[AccessRecord, ...]
+
+
+class ConstraintMonitoringResult(QlibxModel):
+    monitoring_schema_version: int = 1
+    invocation_id: str
+    declaration_id: str
+    evaluation_time: datetime
+    account_state: StateAccessRecord
+    compliant: bool
     findings: tuple[ConstraintFinding, ...]
     accesses: tuple[AccessRecord, ...]
 
@@ -274,6 +290,93 @@ def validate_single_name_caps(
         adjustment_artifact_id=request.adjustment_artifact_id,
         evaluation_time=request.evaluation_time,
         eligible=all(item.passed for item in findings),
+        findings=tuple(findings),
+        accesses=accesses,
+    )
+
+
+def monitor_actual_single_name_caps(
+    request: ConstraintMonitoringRequest,
+    evaluation_time: datetime,
+    declaration: ConstraintDeclaration,
+    account_state: StateAccessRecord,
+    benchmark: tuple[BenchmarkWeight, ...],
+    accesses: tuple[AccessRecord, ...],
+) -> ConstraintMonitoringResult:
+    if account_state.valuation_status != "COMPLETE":
+        raise ConstraintEvaluationError(
+            "ACCOUNT_VALUATION_INCOMPLETE",
+            {
+                "account_id": account_state.account_id,
+                "account_version": account_state.version,
+                "valuation_status": account_state.valuation_status,
+            },
+        )
+    if account_state.nav <= 0:
+        raise ConstraintEvaluationError(
+            "ACCOUNT_NAV_NON_POSITIVE",
+            {
+                "account_id": account_state.account_id,
+                "account_version": account_state.version,
+                "nav": account_state.nav,
+            },
+        )
+
+    benchmarks = {item.instrument: item.weight for item in benchmark}
+    instruments = {item.instrument_id for item in account_state.holdings}
+    missing = sorted(instruments - benchmarks.keys())
+    if missing:
+        raise ConstraintEvaluationError(
+            "CONSTRAINT_BENCHMARK_COVERAGE_MISSING",
+            {"instruments": missing},
+        )
+
+    findings: list[ConstraintFinding] = []
+    for holding in account_state.holdings:
+        if holding.mark is None:
+            raise ConstraintEvaluationError(
+                "ACCOUNT_VALUATION_INCOMPLETE",
+                {
+                    "account_id": account_state.account_id,
+                    "account_version": account_state.version,
+                    "instrument": holding.instrument_id,
+                },
+            )
+        measured = holding.quantity * holding.mark / account_state.nav
+        cap = max(
+            declaration.single_name_floor,
+            benchmarks[holding.instrument_id],
+        )
+        short_excess = max(0.0, -measured)
+        cap_excess = max(0.0, measured - cap)
+        findings.extend(
+            (
+                ConstraintFinding(
+                    instrument=holding.instrument_id,
+                    metric="no_short",
+                    measured=measured,
+                    bound=0.0,
+                    excess=short_excess,
+                    passed=short_excess == 0.0,
+                    severity="error",
+                ),
+                ConstraintFinding(
+                    instrument=holding.instrument_id,
+                    metric="single_name_cap",
+                    measured=measured,
+                    bound=cap,
+                    excess=cap_excess,
+                    passed=cap_excess == 0.0,
+                    severity="error",
+                ),
+            )
+        )
+    return ConstraintMonitoringResult(
+        invocation_id=request.invocation_id,
+        declaration_id=declaration.declaration_id,
+        evaluation_time=evaluation_time,
+        account_state=account_state,
+        compliant=all(item.passed for item in findings),
         findings=tuple(findings),
         accesses=accesses,
     )

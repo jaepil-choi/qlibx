@@ -16,7 +16,27 @@ coverage_sets:
   m6_constraint:
     - UC-CONSTRAINT-002
     - UC-CONSTRAINT-ADJUST-001
+  m6_monitoring:
+    - UC-EXEC-003
 scenarios:
+  - id: UC-EXEC-003
+    case: real_no_trade_price_drift_finding_only
+    test: tests/acceptance/test_research_scenarios.py::test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_stock_daily_prices.csv
+        - data/DW/fng_k200_members.csv
+        - data/preprocessed/k200_members.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+    expected:
+      outcome: complete
+      decision_created: false
+      order_created: false
+      account_mutation: false
+      memory_mutation: false
+      breach_published: true
+
   - id: UC-CONSTRAINT-002
     case: missing_or_future_k200_weight_fails_before_mutation
     test: tests/acceptance/test_research_scenarios.py::test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutoff

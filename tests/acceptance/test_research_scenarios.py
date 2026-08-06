@@ -3,7 +3,14 @@ from datetime import datetime
 import duckdb
 
 from qlibx import OperationOutcome, OutcomeStatus
-from qlibx.account import StrategyMemoryStore
+from qlibx.account import (
+    Account,
+    FillBatch,
+    Mark,
+    MarkBatch,
+    StrategyMemoryStore,
+)
+from qlibx.execution import Fill, Side
 from qlibx.flow import (
     STORED_SIGNAL_CONTRACT,
     CompositionFlow,
@@ -14,6 +21,7 @@ from qlibx.flow import (
     EnsembleDefinition,
     EnsembleMemberSpec,
     FrozenDecision,
+    MonitoringFlow,
     PortfolioConstructionFlow,
     StoredSignalEntry,
     StoredSignalResult,
@@ -24,6 +32,7 @@ from qlibx.operations import BudgetMode, StrategyInvocation
 from qlibx.portfolio import (
     ConstraintAdjustmentRequest,
     ConstraintDeclaration,
+    ConstraintMonitoringRequest,
     ConstraintValidationRequest,
     ConstructionProfile,
     ExecutionLotInput,
@@ -360,6 +369,136 @@ def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutof
     assert adjustment.result.accesses[0].max_available_at.astimezone(KST) == datetime(
         2024, 1, 3, 9, 0, tzinfo=KST
     )
+
+
+def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
+    real_dw_case: RealDwProject,
+    real_dw_constraint_case: RealDwProject,
+) -> None:
+    prices = duckdb.connect().sql(
+        f"""
+        SELECT CAST(date AS DATE), execution_price
+        FROM read_parquet('{real_dw_constraint_case.source.as_posix()}')
+        WHERE ticker = 'A000660'
+          AND CAST(date AS DATE) IN (DATE '2024-01-04', DATE '2024-01-05')
+        ORDER BY date
+        """
+    ).fetchall()
+    assert len(prices) == 2
+    initial_price = float(prices[0][1])
+    drift_price = float(prices[1][1])
+    assert initial_price == 136_400.0
+    assert drift_price == 137_500.0
+
+    cash_after_fill = 9 * (initial_price + drift_price) / 2
+    account = Account(
+        account_id="monitoring-no-trade-account",
+        base_currency="KRW",
+        initial_cash=cash_after_fill + initial_price,
+        instrument_ids=frozenset({"A000660"}),
+    )
+    account.commit(
+        FillBatch(
+            account_id=account.snapshot().account_id,
+            event_id="monitoring-seed-fill",
+            fills=(
+                Fill(
+                    fill_id="monitoring-seed-fill-1",
+                    instrument_id="A000660",
+                    side=Side.BUY,
+                    requested_quantity=1,
+                    dealt_quantity=1,
+                    price=initial_price,
+                    trade_value=initial_price,
+                    total_cost=0,
+                    cost_rule_id="real-dw-seed",
+                    schedule_version="real-dw-2024",
+                ),
+            ),
+        ),
+        expected_version=0,
+    )
+    before_drift = account.commit(
+        MarkBatch(
+            account_id=account.snapshot().account_id,
+            event_id="monitoring-mark-before-drift",
+            marks=(Mark("A000660", initial_price),),
+        ),
+        expected_version=1,
+    ).snapshot
+    after_drift = account.commit(
+        MarkBatch(
+            account_id=account.snapshot().account_id,
+            event_id="monitoring-mark-after-drift",
+            marks=(Mark("A000660", drift_price),),
+        ),
+        expected_version=2,
+    ).snapshot
+    assert initial_price / before_drift.nav < 0.10
+    assert drift_price / after_drift.nav > 0.10
+
+    declaration = ConstraintDeclaration(
+        declaration_id="mvp-no-short-single-name-cap-v1",
+        benchmark_weight_role="benchmark_weight",
+        single_name_floor=0.10,
+    )
+    memory = StrategyMemoryStore()
+    account_before_monitor = account.checkpoint()
+    memory_before_monitor = memory.checkpoint()
+    missing = MonitoringFlow(
+        clock=BacktestClock(close_at(2024, 1, 5)),
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+        account=account,
+    ).run(
+        declaration,
+        ConstraintMonitoringRequest(
+            invocation_id="monitoring-missing-k200-binding",
+            config_fingerprint="monitoring-single-name-v1",
+        ),
+    )
+    flow = MonitoringFlow(
+        clock=BacktestClock(close_at(2024, 1, 5)),
+        registry=real_dw_constraint_case.project.registry_snapshot(),
+        artifacts=real_dw_constraint_case.project.artifacts,
+        account=account,
+    )
+    request = ConstraintMonitoringRequest(
+        invocation_id="monitoring-real-no-trade-drift",
+        config_fingerprint="monitoring-single-name-v1",
+    )
+    first = flow.run(declaration, request)
+    repeated = flow.run(declaration, request)
+
+    assert missing.status is OutcomeStatus.FAILED
+    assert missing.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
+    assert first.status is repeated.status is OutcomeStatus.COMPLETE
+    assert first.result == repeated.result
+    assert first.diagnostics[0].artifact_id == repeated.diagnostics[0].artifact_id
+    assert first.diagnostics[0].artifact_type == "constraint_monitoring_result"
+    assert first.result.account_state.version == after_drift.version
+    assert first.result.compliant is False
+    cap_finding = next(
+        finding
+        for finding in first.result.findings
+        if finding.instrument == "A000660"
+        and finding.metric == "single_name_cap"
+    )
+    assert cap_finding.measured == drift_price / after_drift.nav
+    assert cap_finding.bound == 0.10
+    assert cap_finding.excess > 0
+    assert cap_finding.passed is False
+    assert first.result.accesses[0].max_available_at.astimezone(KST) == datetime(
+        2024, 1, 3, 9, 0, tzinfo=KST
+    )
+    assert any(
+        edge.consumer_role == "committed_account_snapshot"
+        and edge.dependency_id
+        == f"{after_drift.account_id}:v{after_drift.version}:cursor{after_drift.feedback_cursor}"
+        for edge in first.diagnostics[0].dependencies
+    )
+    assert account.checkpoint() == account_before_monitor
+    assert memory.checkpoint() == memory_before_monitor
 
 
 def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(

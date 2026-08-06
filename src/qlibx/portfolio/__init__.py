@@ -8,10 +8,13 @@ from qlibx.portfolio.constraints import (
     ConstraintDeclaration,
     ConstraintEvaluationError,
     ConstraintFinding,
+    ConstraintMonitoringRequest,
+    ConstraintMonitoringResult,
     ConstraintValidationRequest,
     ConstraintValidationResult,
     ExecutionLotInput,
     adjust_single_name_caps,
+    monitor_actual_single_name_caps,
     validate_single_name_caps,
 )
 from qlibx.portfolio.construction import (
@@ -32,6 +35,8 @@ __all__ = [
     "ConstraintDeclaration",
     "ConstraintEvaluationError",
     "ConstraintFinding",
+    "ConstraintMonitoringRequest",
+    "ConstraintMonitoringResult",
     "ConstraintValidationRequest",
     "ConstraintValidationResult",
     "ConstructionProfile",
@@ -43,5 +48,6 @@ __all__ = [
     "PortfolioWeight",
     "adjust_single_name_caps",
     "construct_portfolio",
+    "monitor_actual_single_name_caps",
     "validate_single_name_caps",
 ]

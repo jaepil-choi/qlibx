@@ -649,3 +649,36 @@ def test_uc_alpha_path_001_uses_child_memory_for_rerun_or_frozen_intent_for_repl
         if envelope.artifact_type == "execution_result"
         for edge in envelope.dependencies
     )
+
+
+def test_uc_signal_001_and_uc_constraint_001_complete_direct_real_dw_research(
+    real_dw_case: RealDwProject,
+) -> None:
+    strategy = StoredWinnerStrategy("acceptance.direct-real-dw-reversal", 1.0)
+    outcome = real_dw_case.project.invoke(
+        strategy,
+        StrategyInvocation(
+            invocation_id="direct-real-dw-reversal",
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="direct-real-dw-reversal-v1",
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert strategy.runs == 1
+    assert outcome.result.result.decision_action.value == "research_only"
+    assert outcome.result.result.invested_gross == 1.0
+    assert outcome.result.result.accesses[0].semantic_role == "decision_return"
+    envelopes = real_dw_case.project.artifacts.list_envelopes()
+    assert tuple(envelope.artifact_type for envelope in envelopes) == ("strategy_result",)
+    assert not any(
+        envelope.artifact_type
+        in {
+            "stored_signal_result",
+            "portfolio_construction_result",
+            "constraint_adjustment_result",
+            "decision_intent",
+            "execution_result",
+        }
+        for envelope in envelopes
+    )

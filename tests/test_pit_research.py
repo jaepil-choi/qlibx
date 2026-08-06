@@ -74,7 +74,7 @@ def test_backtest_clock_is_aware_and_monotonic() -> None:
         clock.advance_to(datetime(2025, 1, 2, 8, tzinfo=timezone.utc))
 
 
-def test_uc_pit_001_future_observation_is_not_visible(tmp_path: Path) -> None:
+def test_future_observation_is_not_visible(tmp_path: Path) -> None:
     current, _ = project_with_market(tmp_path)
 
     morning = current.invoke(NormalizedValueStrategy(), invocation("morning", 9))
@@ -161,7 +161,9 @@ class HorizonStrategy(NormalizedValueStrategy):
         raise AssertionError("must not run without horizon_end")
 
 
-def test_missing_horizon_fails_before_strategy_calculation(tmp_path: Path) -> None:
+def test_uc_pit_001_missing_horizon_fails_before_strategy_calculation(
+    tmp_path: Path,
+) -> None:
     current, _ = project_with_market(tmp_path)
     strategy = HorizonStrategy()
 

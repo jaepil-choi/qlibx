@@ -66,7 +66,9 @@ def test_same_logical_identity_with_other_content_is_a_conflict(tmp_path: Path) 
     assert current.artifacts.list_envelopes() == (first.result,)
 
 
-def test_invalid_external_payload_never_becomes_reusable(tmp_path: Path) -> None:
+def test_uc_artifact_002_invalid_external_payload_never_becomes_reusable(
+    tmp_path: Path,
+) -> None:
     current = project(tmp_path)
     outcome = current.artifacts.import_model_bytes(
         logical_identity="external:invalid",

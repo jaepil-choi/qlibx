@@ -1,0 +1,123 @@
+schema_version: 1
+suite: qlibx-current-deterministic-contracts
+support_status: current
+fixture_policy: deterministic_contract
+scenarios:
+  - id: UC-DATA-001
+    case: arbitrary_user_field_names_need_only_minimal_registration_meaning
+    test: tests/test_data_registration.py::test_uc_data_001_minimal_registration_accepts_user_field_names
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: adversarial column names isolate field-name autonomy better than one vendor schema
+      oracle: strict registration contract and catalog snapshot
+    expected:
+      registration: complete
+      currency_required: false
+      universe_required: false
+
+  - id: UC-DATA-002
+    case: requirement_discovered_then_resolved_without_replacing_registration
+    test: tests/test_data_registration.py::test_uc_data_002_requirement_gap_is_progressive_and_retryable
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: two explicit registry states isolate progressive requirement resolution
+      oracle: ComponentRequirement and RequirementResolver contract
+    expected:
+      first_resolution: failed
+      original_registration_preserved: true
+      enriched_resolution: complete
+
+  - id: UC-PIT-001
+    case: missing_forward_horizon_stops_before_strategy_calculation
+    test: tests/test_pit_research.py::test_uc_pit_001_missing_horizon_fails_before_strategy_calculation
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: deliberately absent horizon binding is the required negative contract fixture
+      oracle: requirement-stage failure and zero strategy calls
+    expected:
+      outcome: failed
+      missing_requirement: label.horizon_end
+      calculation_calls: 0
+      reusable_success_count: 0
+
+  - id: UC-ARTIFACT-002
+    case: invalid_external_weight_payload_is_never_reusable
+    test: tests/test_evidence.py::test_uc_artifact_002_invalid_external_payload_never_becomes_reusable
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: malformed serialized payload must be constructed explicitly
+      oracle: strict Pydantic artifact contract and success catalog query
+    expected:
+      outcome: failed
+      error_code: ARTIFACT_PAYLOAD_INVALID
+      reusable_success_count: 0
+
+  - id: UC-AGENT-001
+    case: bundled_skill_explains_availability_candidates_and_lookahead
+    test: tests/test_onboarding.py::test_uc_agent_001_codex_onboarding_installs_availability_guidance
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: agent guidance is a packaged text contract rather than market data behavior
+      oracle: installed bundled skill content and onboarding fingerprint
+    expected:
+      explains_lookahead: true
+      actual_release_candidate: true
+      confirmed_delay_candidate: true
+      source_enrichment_candidate: true
+
+  - id: UC-COST-001
+    case: exact_product_and_side_cost_rules
+    test: tests/test_exchange_batch.py::test_uc_cost_001_exact_product_and_side_rules
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: economic branch fixtures require exact hand-derived values
+      oracle: scalar branch calculation by product and side
+    expected:
+      exact_policy_selection: true
+      silent_product_fallback: false
+
+  - id: UC-COST-002
+    case: effective_dated_cost_rule_selection
+    test: tests/test_exchange_batch.py::test_uc_cost_002_effective_dated_rule
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: policy-boundary dates require controlled values on both sides of the cutoff
+      oracle: scalar effective-time branch calculation
+    expected:
+      before_rule: old_policy
+      after_rule: new_policy
+
+  - id: UC-COST-003
+    case: cash_clipping_and_fill_share_one_cost_calculator
+    test: tests/test_exchange_batch.py::test_uc_cost_003_cash_clipping_uses_final_cost_calculator
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: clipping boundary requires a hand-derived cash and minimum-cost fixture
+      oracle: scalar affordability equation including final fill cost
+    expected:
+      negative_cash: false
+      clipping_cost_equals_fill_cost: true
+
+  - id: UC-COST-004
+    case: missing_etf_rule_cannot_fall_back_to_stock
+    test: tests/test_exchange_batch.py::test_uc_cost_004_missing_etf_rule_does_not_fall_back_to_stock
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: the required behavior is an intentionally missing exact policy branch
+      oracle: exact product-side-effective-time coverage validation
+    expected:
+      outcome: failed
+      error_code: EXACT_COST_RULE_MISSING
+      stock_fallback: false
+
+  - id: UC-SCALE-001
+    case: three_thousand_instrument_scalar_batch_parity
+    test: tests/test_exchange_batch.py::test_uc_scale_001_three_thousand_names_keep_stable_batch_order
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: generated 3000-name axis gives exhaustive stable-order parity independent of vendor coverage
+      oracle: scalar calculation for every element against compiled batch output
+    expected:
+      instrument_count: 3000
+      scalar_batch_equal: true
+      stable_output_order: true

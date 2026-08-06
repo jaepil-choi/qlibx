@@ -13,7 +13,9 @@ def project(tmp_path: Path) -> QlibxProject:
     return QlibxProject.open(tmp_path)
 
 
-def test_codex_onboarding_previews_then_preserves_instruction_content(tmp_path: Path) -> None:
+def test_uc_agent_001_codex_onboarding_installs_availability_guidance(
+    tmp_path: Path,
+) -> None:
     current = project(tmp_path)
     instruction = tmp_path / "AGENTS.md"
     instruction.write_text("# User instructions\n\nKeep this.\n", encoding="utf-8")
@@ -32,6 +34,10 @@ def test_codex_onboarding_previews_then_preserves_instruction_content(tmp_path: 
     installed_skill = tmp_path / ".agents" / "skills" / "qlibx" / "SKILL.md"
     assert installed_skill.is_file()
     guidance = installed_skill.read_text(encoding="utf-8")
+    assert "Explain look-ahead risk" in guidance
+    assert "actual release timestamp" in guidance
+    assert "source-supported delay rule" in guidance
+    assert "source enrichment" in guidance
     assert "committed MVP simulation fills as current execution feedback" in guidance
     assert "Do not present them as an available qlibx workflow" in guidance
 

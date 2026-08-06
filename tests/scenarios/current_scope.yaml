@@ -1,6 +1,43 @@
 schema_version: 1
 suite: qlibx-current-scope
 support_status: current
+required_current_use_cases:
+  - UC-DATA-001
+  - UC-DATA-002
+  - UC-ERROR-001
+  - UC-PIT-001
+  - UC-CONSTRAINT-001
+  - UC-CONSTRAINT-002
+  - UC-SIGNAL-001
+  - UC-SIGNAL-002
+  - UC-ALPHA-BUDGET-001
+  - UC-ALPHA-PATH-001
+  - UC-ALPHA-CHILD-001
+  - UC-ALPHA-ADAPTIVE-001
+  - UC-ENSEMBLE-001
+  - UC-PORTFOLIO-001
+  - UC-CONSTRAINT-ADJUST-001
+  - UC-EXEC-001
+  - UC-EXEC-002
+  - UC-EXEC-003
+  - UC-ARTIFACT-001
+  - UC-ARTIFACT-002
+  - UC-RESEARCH-001
+  - UC-REPORT-001
+  - UC-MONITOR-001
+  - UC-EXTENSION-001
+  - UC-AGENT-001
+  - UC-COST-001
+  - UC-COST-002
+  - UC-COST-003
+  - UC-COST-004
+  - UC-CLOSED-LOOP-001
+  - UC-SCALE-001
+  - UC-LOOKTHROUGH-001
+  - UC-LOOKTHROUGH-002
+  - UC-LOOKTHROUGH-003
+companion_registries:
+  - tests/scenarios/current_contracts.yaml
 coverage_sets:
   m5:
     - UC-EXEC-001
@@ -30,7 +67,39 @@ coverage_sets:
   m9_short_analysis:
     - UC-ERROR-001
     - UC-RESEARCH-001
+  m10_direct_research:
+    - UC-SIGNAL-001
+    - UC-CONSTRAINT-001
 scenarios:
+  - id: UC-SIGNAL-001
+    case: direct_real_dw_signal_and_weight_research
+    test: tests/acceptance/test_research_scenarios.py::test_uc_signal_001_and_uc_constraint_001_complete_direct_real_dw_research
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      operation: direct_strategy
+    expected:
+      outcome: complete
+      stored_signal_required: false
+      portfolio_required: false
+      execution_required: false
+      account_mutation: false
+      memory_mutation: false
+
+  - id: UC-CONSTRAINT-001
+    case: direct_real_dw_research_without_compliance_capability
+    test: tests/acceptance/test_research_scenarios.py::test_uc_signal_001_and_uc_constraint_001_complete_direct_real_dw_research
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      selected_constraints: []
+    expected:
+      outcome: complete
+      compliance_dataset_required: false
+      constraint_artifact_created: false
+      account_mutation: false
+      memory_mutation: false
+
   - id: UC-ERROR-001
     case: missing_realized_return_fails_at_actual_analysis_path
     test: tests/acceptance/test_analysis_scenarios.py::test_uc_error_001_and_uc_research_001_short_analysis_fails_then_retries

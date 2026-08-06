@@ -3,7 +3,10 @@ audit_date: 2026-08-06
 purpose: m6_portfolio_constraint_monitoring_inputs
 datasets:
   k200_membership:
-    intended_roles: [benchmark_weight, benchmark_membership]
+    intended_roles:
+      - benchmark_weight
+      - benchmark_membership
+      - user_selected_etf_constituent_weight
     logical_key: [date, ticker]
     raw:
       path: data/DW/fng_k200_members.csv
@@ -41,6 +44,12 @@ datasets:
       confirmed_on: 2026-08-06
       observed_qlibx_rule_status: rejected
       permitted_claim: pit_safe_only_after_confirmed_rule_is_materialized
+    user_strategy_mapping:
+      status: fixture_only
+      physical_instrument: A069500
+      selected_members: [A012330, A373220]
+      policy: selected_subset_renormalized
+      automatic_package_mapping: false
 
   sector_classification:
     intended_roles: [sector_classification, future_sector_constraint]
@@ -113,3 +122,4 @@ datasets:
       status: unresolved
       reason: the preprocessed file has no available_at binding
       prohibited_claim: pit_safe_etf_execution
+      permitted_fixture_use: seed_already_committed_account_marks_without_execution_claim

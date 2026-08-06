@@ -7,7 +7,9 @@ from tests.acceptance.real_dw_support import (
     create_real_dw_project,
     extract_real_dw_rows,
     extract_real_k200_rows,
+    extract_real_lookthrough_rows,
     register_real_k200_benchmark,
+    register_real_lookthrough_constituents,
 )
 
 
@@ -38,3 +40,26 @@ def real_dw_constraint_case(
 ) -> RealDwProject:
     case = create_real_dw_project(tmp_path / "constraint-project", bounded_real_dw_source)
     return register_real_k200_benchmark(case, bounded_real_k200_source)
+
+
+@pytest.fixture(scope="session")
+def bounded_real_lookthrough_source(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    destination = (
+        tmp_path_factory.mktemp("real-lookthrough")
+        / "real-k200-etf-constituents.parquet"
+    )
+    extract_real_lookthrough_rows(destination)
+    return destination
+
+
+@pytest.fixture
+def real_dw_lookthrough_case(
+    real_dw_constraint_case: RealDwProject,
+    bounded_real_lookthrough_source: Path,
+) -> RealDwProject:
+    return register_real_lookthrough_constituents(
+        real_dw_constraint_case,
+        bounded_real_lookthrough_source,
+    )

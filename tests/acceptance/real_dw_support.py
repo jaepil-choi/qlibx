@@ -25,6 +25,7 @@ from qlibx.operations import BudgetMode, DecisionAction, StrategyDraft, WeightEn
 ROOT = Path(__file__).parents[2]
 DW_DAILY = ROOT / "data" / "DW" / "fng_stock_daily_prices.csv"
 K200_PREPROCESSED = ROOT / "data" / "preprocessed" / "k200_members.parquet"
+K200_ETF_PREPROCESSED = ROOT / "data" / "preprocessed" / "k200_etf_prices.parquet"
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -100,6 +101,66 @@ def extract_real_k200_rows(destination: Path) -> None:
     relation.write_parquet(str(destination))
 
 
+def extract_real_lookthrough_rows(destination: Path) -> None:
+    assert K200_PREPROCESSED.is_file()
+    relation = duckdb.connect().sql(
+        f"""
+        WITH calendar AS (
+            SELECT DISTINCT date
+            FROM read_parquet('{K200_PREPROCESSED.as_posix()}')
+        ), next_session AS (
+            SELECT date, lead(date) OVER (ORDER BY date) AS available_at
+            FROM calendar
+        )
+        SELECT
+            members.date AS observation_time,
+            sessions.available_at,
+            members.ticker,
+            members.index_weight AS constituent_weight
+        FROM read_parquet('{K200_PREPROCESSED.as_posix()}') AS members
+        JOIN next_session AS sessions USING (date)
+        WHERE members.date IN (DATE '2024-01-02', DATE '2024-01-03')
+          AND members.ticker IN ('A012330', 'A373220')
+        ORDER BY members.date, members.ticker
+        """
+    )
+    relation.write_parquet(str(destination))
+
+
+def real_lookthrough_physical_prices(trade_date: int) -> tuple[float, float]:
+    assert K200_ETF_PREPROCESSED.is_file()
+    columns = (
+        "{'ticker':'VARCHAR','trade_date':'BIGINT','base_price':'DOUBLE',"
+        "'open_price':'DOUBLE','high_price':'DOUBLE','low_price':'DOUBLE',"
+        "'close_price':'DOUBLE','prev_close':'DOUBLE','adjustment_factor':'DOUBLE',"
+        "'volume':'DOUBLE','amount':'DOUBLE','shares':'DOUBLE',"
+        "'listing_type':'VARCHAR','change_type':'VARCHAR','halt_code':'DOUBLE',"
+        "'admin_code':'DOUBLE'}"
+    )
+    stock_rows = duckdb.connect().sql(
+        f"""
+        SELECT close_price
+        FROM read_csv(
+            '{DW_DAILY.as_posix()}',
+            header = true,
+            columns = {columns}
+        )
+        WHERE ticker = 'A012330'
+          AND trade_date = {trade_date}
+        """
+    ).fetchall()
+    etf_rows = duckdb.connect().sql(
+        f"""
+        SELECT execution_close_price
+        FROM read_parquet('{K200_ETF_PREPROCESSED.as_posix()}')
+        WHERE ticker = 'A069500'
+          AND CAST(date AS DATE) = strptime('{trade_date}', '%Y%m%d')::DATE
+        """
+    ).fetchall()
+    assert len(stock_rows) == len(etf_rows) == 1
+    return float(stock_rows[0][0]), float(etf_rows[0][0])
+
+
 def create_real_dw_project(root: Path, bounded_source: Path) -> RealDwProject:
     QlibxProject.init(root, apply=True)
     source = root / "dw-real-market.parquet"
@@ -159,6 +220,36 @@ def register_real_k200_benchmark(
     )
     assert registration.status is OutcomeStatus.COMPLETE
     assert registration.result.evidence.row_count == 2
+    return case
+
+
+def register_real_lookthrough_constituents(
+    case: RealDwProject,
+    bounded_source: Path,
+) -> RealDwProject:
+    source = case.root / "real-k200-etf-constituents.parquet"
+    shutil.copyfile(bounded_source, source)
+    registration = case.project.register_dataset(
+        DatasetRegistration(
+            dataset_id="real-k200-etf-constituents",
+            source=source.name,
+            source_format=SourceFormat.PARQUET,
+            instrument_field="ticker",
+            observation_time_field="observation_time",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("observation_time", "available_at", "ticker"),
+            semantic_bindings={"etf_constituent_weight": "constituent_weight"},
+            semantic_category="user_selected_k200_etf_constituent_subset",
+            source_provenance=(
+                "user-authored KODEX 200 mapping over two equal-weight real K200 members; "
+                "weights come from data/preprocessed/k200_members.parquet and available_at "
+                "uses the confirmed next K200 trading session at 09:00 Asia/Seoul; qlibx "
+                "does not infer or auto-link this dataset from the ETF ticker"
+            ),
+        )
+    )
+    assert registration.status is OutcomeStatus.COMPLETE
+    assert registration.result.evidence.row_count == 4
     return case
 
 

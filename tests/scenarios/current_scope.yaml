@@ -18,7 +18,68 @@ coverage_sets:
     - UC-CONSTRAINT-ADJUST-001
   m6_monitoring:
     - UC-EXEC-003
+  m6_lookthrough:
+    - UC-LOOKTHROUGH-001
+    - UC-LOOKTHROUGH-002
+    - UC-LOOKTHROUGH-003
 scenarios:
+  - id: UC-LOOKTHROUGH-001
+    case: same_real_etf_opaque_or_user_mapped
+    test: tests/acceptance/test_lookthrough_scenarios.py::test_uc_lookthrough_001_is_user_declared_while_same_etf_stays_opaque
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_stock_daily_prices.csv
+        - data/DW/fng_k200_members.csv
+        - data/preprocessed/k200_members.parquet
+        - data/Dataguide/데이터가이드K200ETF들_20200101-20260430.csv
+        - data/preprocessed/k200_etf_prices.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+      mapping_owner: user_strategy
+    expected:
+      opaque_dataset_access: false
+      explicit_dataset_access: true
+      package_lookthrough_artifact: false
+      account_mutation: false
+      memory_mutation: false
+
+  - id: UC-LOOKTHROUGH-002
+    case: future_real_k200_constituent_row_hidden
+    test: tests/acceptance/test_lookthrough_scenarios.py::test_uc_lookthrough_002_hides_future_real_constituent_observation
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_k200_members.csv
+        - data/preprocessed/k200_members.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+      snapshot_policy: user_selected_subset_renormalized
+    expected:
+      early_visible_observation: 2024-01-02
+      early_hidden_observation: 2024-01-03
+      later_visible_observation: 2024-01-03
+      automatic_latest_fallback: false
+
+  - id: UC-LOOKTHROUGH-003
+    case: committed_actual_recomputed_against_strategy_memory_target
+    test: tests/acceptance/test_lookthrough_scenarios.py::test_uc_lookthrough_003_recomputes_actual_instead_of_memory_target
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_stock_daily_prices.csv
+        - data/DW/fng_k200_members.csv
+        - data/preprocessed/k200_members.parquet
+        - data/Dataguide/데이터가이드K200ETF들_20200101-20260430.csv
+        - data/preprocessed/k200_etf_prices.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+      intended_state_source: strategy_memory
+      actual_state_source: committed_account_snapshot
+    expected:
+      actual_exposure: {A012330: 0.4, A373220: 0.2}
+      memory_target_exposure: {A012330: 0.65, A373220: 0.35}
+      intended_as_actual: false
+      account_mutation: false
+      memory_mutation: false
+
   - id: UC-EXEC-003
     case: real_no_trade_price_drift_finding_only
     test: tests/acceptance/test_research_scenarios.py::test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation

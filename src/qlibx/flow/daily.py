@@ -91,6 +91,8 @@ class FillEvidence(QlibxModel):
     total_cost: float
     cost_rule_id: str
     schedule_version: str
+    reference_price: float | None = None
+    price_impact_rate: float = Field(default=0, ge=0)
 
 
 class FillDiagnosticEvidence(QlibxModel):
@@ -280,6 +282,8 @@ def _fill(fill: Fill) -> FillEvidence:
         total_cost=fill.total_cost,
         cost_rule_id=fill.cost_rule_id,
         schedule_version=fill.schedule_version,
+        reference_price=(fill.reference_price if fill.reference_price is not None else fill.price),
+        price_impact_rate=fill.price_impact_rate,
     )
 
 

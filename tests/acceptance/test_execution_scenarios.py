@@ -212,6 +212,41 @@ def test_rebalance_sizes_from_current_execution_prices(
     )
 
 
+def test_daily_profile_rejects_impact_without_total_market_volume(
+    real_dw_case: RealDwProject,
+) -> None:
+    sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
+    account = initial_account("daily-impact-account")
+    flow = DailyExecutionFlow(
+        clock=BacktestClock(sessions[0]),
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+        exchange=configured_exchange(cost_rate=0.0, impact_rate=0.001),
+        account=account,
+        profile=DailyExecutionProfile(
+            market_dataset_id="dw-real-market",
+            execution_price_role="execution_price",
+            valuation_price_role="valuation_price",
+        ),
+    )
+
+    outcome = flow.run(
+        TargetStrategy(),
+        DailyRunRequest(
+            run_id="daily-impact-missing-volume",
+            config_fingerprint="daily-impact-v1",
+            decision_times=(sessions[0],),
+            session_closes=sessions,
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "EXECUTION_MARKET_VOLUME_MISSING"
+    assert outcome.errors[0].commit_status is CommitStatus.NONE
+    assert account.snapshot().version == 0
+    assert account.snapshot().holdings() == {}
+
+
 def test_uc_alpha_adaptive_001_memory_commits_only_after_feedback(
     real_dw_case: RealDwProject,
 ) -> None:

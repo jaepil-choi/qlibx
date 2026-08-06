@@ -165,6 +165,19 @@ class KrxExchange:
                 errors.append(self._error(event_id, index, order, "EXECUTION_QUOTE_MISSING"))
             elif rule is None:
                 errors.append(self._error(event_id, index, order, "EXACT_COST_RULE_MISSING"))
+            elif self._config.impact_rate > 0 and (
+                quote.total_market_volume is None
+                or not math.isfinite(quote.total_market_volume)
+                or quote.total_market_volume <= 0
+            ):
+                errors.append(
+                    self._error(
+                        event_id,
+                        index,
+                        order,
+                        "EXECUTION_MARKET_VOLUME_MISSING",
+                    )
+                )
             else:
                 resolved.append((order, quote, instrument, rule))
         if errors:
@@ -183,19 +196,6 @@ class KrxExchange:
                     quantity = capacity
                     reasons.append("VOLUME_LIMIT")
 
-            market_value = (
-                quote.total_market_volume * quote.price
-                if quote.total_market_volume is not None
-                else 0
-            )
-            proposed_value = quantity * quote.price
-            impact = (
-                self._config.impact_rate * (proposed_value / market_value) ** 2
-                if market_value > 0
-                else self._config.impact_rate
-            )
-            effective_rate = rule.rate + impact
-
             if order.side is Side.SELL:
                 held = max(candidate_holdings.get(order.instrument_id, 0), 0)
                 if quantity > held:
@@ -206,33 +206,65 @@ class KrxExchange:
                     if rounded != quantity:
                         reasons.append("LOT_ROUNDING")
                     quantity = rounded
-                value = quantity * quote.price
-                cost = self._cost(value, effective_rate, rule.minimum_cost)
-                if candidate_cash + value < cost:
-                    quantity = 0
-                    reasons.append("COST_EXCEEDS_CASH")
             else:
-                affordable = self._max_buy_quantity(
-                    cash=candidate_cash,
-                    price=quote.price,
-                    lot_size=instrument.lot_size,
-                    rate=effective_rate,
-                    minimum_cost=rule.minimum_cost,
-                )
-                if quantity > affordable:
-                    quantity = affordable
-                    reasons.append("CASH_LIMIT")
                 rounded = self._round_lot(quantity, instrument.lot_size)
                 if rounded != quantity:
                     reasons.append("LOT_ROUNDING")
                 quantity = rounded
+                affordable = self._max_buy_quantity(
+                    cash=candidate_cash,
+                    reference_price=quote.price,
+                    lot_size=instrument.lot_size,
+                    rate=rule.rate,
+                    minimum_cost=rule.minimum_cost,
+                    maximum_quantity=quantity,
+                    total_market_volume=quote.total_market_volume,
+                    impact_rate=self._config.impact_rate,
+                )
+                if quantity > affordable:
+                    quantity = affordable
+                    reasons.append("CASH_LIMIT")
 
-            value = quantity * quote.price
-            cost = self._cost(value, effective_rate, rule.minimum_cost)
+            price_impact_rate, fill_price = self._impact_price(
+                reference_price=quote.price,
+                quantity=quantity,
+                total_market_volume=quote.total_market_volume,
+                impact_rate=self._config.impact_rate,
+                side=order.side,
+            )
+            if not math.isfinite(fill_price) or fill_price <= 0:
+                return OperationOutcome(
+                    status=OutcomeStatus.UNSUPPORTED,
+                    errors=(
+                        self._error(
+                            event_id,
+                            index,
+                            order,
+                            "EXECUTION_IMPACT_PRICE_INVALID",
+                        ),
+                    ),
+                )
+
+            if order.side is Side.SELL:
+                value = quantity * fill_price
+                cost = self._cost(value, rule.rate, rule.minimum_cost)
+                if candidate_cash + value < cost:
+                    quantity = 0
+                    reasons.append("COST_EXCEEDS_CASH")
+                    price_impact_rate, fill_price = self._impact_price(
+                        reference_price=quote.price,
+                        quantity=quantity,
+                        total_market_volume=quote.total_market_volume,
+                        impact_rate=self._config.impact_rate,
+                        side=order.side,
+                    )
+
+            value = quantity * fill_price
+            cost = self._cost(value, rule.rate, rule.minimum_cost)
             if value <= 1e-5 and "ZERO_VALUE" not in reasons:
                 reasons.append("ZERO_VALUE")
             fill_seed = (
-                f"{event_id}:{index}:{order.instrument_id}:{quantity}:{quote.price}".encode()
+                f"{event_id}:{index}:{order.instrument_id}:{quantity}:{fill_price}".encode()
             )
             fill = Fill(
                 fill_id=f"fill-{hashlib.sha256(fill_seed).hexdigest()[:24]}",
@@ -240,11 +272,13 @@ class KrxExchange:
                 side=order.side,
                 requested_quantity=order.quantity,
                 dealt_quantity=quantity,
-                price=quote.price,
+                price=fill_price,
                 trade_value=value,
                 total_cost=cost,
                 cost_rule_id=rule.rule_id,
                 schedule_version=self._config.schedule_version,
+                reference_price=quote.price,
+                price_impact_rate=price_impact_rate,
             )
             fills.append(fill)
             diagnostics.append(
@@ -298,22 +332,51 @@ class KrxExchange:
         cls,
         *,
         cash: float,
-        price: float,
+        reference_price: float,
         lot_size: int,
         rate: float,
         minimum_cost: float,
+        maximum_quantity: float,
+        total_market_volume: float | None,
+        impact_rate: float,
     ) -> float:
-        high = max(math.floor(cash / (price * lot_size)), 0)
+        high = max(math.floor(maximum_quantity / lot_size), 0)
         low = 0
         while low < high:
             middle = (low + high + 1) // 2
             quantity = middle * lot_size
-            value = quantity * price
+            _, fill_price = cls._impact_price(
+                reference_price=reference_price,
+                quantity=quantity,
+                total_market_volume=total_market_volume,
+                impact_rate=impact_rate,
+                side=Side.BUY,
+            )
+            value = quantity * fill_price
             if value + cls._cost(value, rate, minimum_cost) <= cash:
                 low = middle
             else:
                 high = middle - 1
         return float(low * lot_size)
+
+    @staticmethod
+    def _impact_price(
+        *,
+        reference_price: float,
+        quantity: float,
+        total_market_volume: float | None,
+        impact_rate: float,
+        side: Side,
+    ) -> tuple[float, float]:
+        market_value = (total_market_volume or 0) * reference_price
+        proposed_value = quantity * reference_price
+        price_impact_rate = (
+            impact_rate * (proposed_value / market_value) ** 2
+            if market_value > 0
+            else 0
+        )
+        multiplier = 1 + price_impact_rate if side is Side.BUY else 1 - price_impact_rate
+        return price_impact_rate, reference_price * multiplier
 
     @staticmethod
     def _round_lot(quantity: float, lot_size: int) -> float:
@@ -324,13 +387,21 @@ class KrxExchange:
         seed = hashlib.sha256(
             f"{event_id}:{index}:{order.instrument_id}:{code}".encode()
         ).hexdigest()
+        retry = {
+            "EXECUTION_MARKET_VOLUME_MISSING": (
+                "provide positive total_market_volume or use an impact-free profile"
+            ),
+            "EXECUTION_IMPACT_PRICE_INVALID": (
+                "reduce the declared impact coefficient or order participation"
+            ),
+        }.get(code, "register an exact supported instrument, quote, and cost rule")
         return OperationError(
             operation="exchange.match_batch",
             stage_path="exchange.match_batch.preflight",
             error_code=code,
             context={"instrument_id": order.instrument_id, "side": order.side.value},
             commit_status=CommitStatus.NONE,
-            retry_preconditions=("register an exact supported instrument, quote, and cost rule",),
+            retry_preconditions=(retry,),
             idempotency_identity=event_id,
             error_id=f"error-{seed[:24]}",
         )

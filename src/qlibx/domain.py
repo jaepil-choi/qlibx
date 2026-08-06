@@ -21,3 +21,5 @@ class Fill:
     total_cost: float
     cost_rule_id: str
     schedule_version: str
+    reference_price: float | None = None
+    price_impact_rate: float = 0

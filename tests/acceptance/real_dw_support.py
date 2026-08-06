@@ -483,12 +483,14 @@ def configured_exchange(
     *,
     cost_rate: float = 0.0015,
     participation_rate: float | None = None,
+    impact_rate: float = 0,
 ) -> KrxExchange:
     start = datetime(2020, 1, 1, tzinfo=KST)
     venue = KrxExchange(
         KrxExchangeConfig(
             schedule_version="krx-acceptance-2024-v1",
             participation_rate=participation_rate,
+            impact_rate=impact_rate,
             cost_rules=tuple(
                 CostRule(
                     rule_id=f"stock-{side.value.lower()}-2024",

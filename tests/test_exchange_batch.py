@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from qlibx import OutcomeStatus
 from qlibx.execution import (
     CostRule,
@@ -36,12 +38,17 @@ def rule(
     )
 
 
-def exchange(*rules: CostRule, participation: float | None = None) -> KrxExchange:
+def exchange(
+    *rules: CostRule,
+    participation: float | None = None,
+    impact: float = 0,
+) -> KrxExchange:
     return KrxExchange(
         KrxExchangeConfig(
             schedule_version="krx-test-v1",
             cost_rules=rules,
             participation_rate=participation,
+            impact_rate=impact,
         )
     )
 
@@ -199,6 +206,68 @@ def test_volume_limit_is_reported() -> None:
     )
     assert outcome.result.fills[0].dealt_quantity == 50
     assert outcome.result.diagnostics[0].reasons == ("VOLUME_LIMIT",)
+
+
+def test_impact_requires_total_market_volume() -> None:
+    venue = exchange(rule("stock-buy", "stock", Side.BUY, 0), impact=0.1)
+    venue.add_instrument(stock())
+
+    outcome = venue.match_batch(
+        event_id="impact-missing-volume",
+        event_time=datetime(2025, 1, 2, tzinfo=UTC),
+        orders=(Order("005930", Side.BUY, 100),),
+        quotes=(MarketQuote("005930", 100),),
+        cash=20_000,
+        holdings={},
+    )
+
+    assert outcome.status is OutcomeStatus.UNSUPPORTED
+    assert outcome.errors[0].error_code == "EXECUTION_MARKET_VOLUME_MISSING"
+
+
+def test_impact_changes_fill_price_not_transaction_cost_policy() -> None:
+    venue = exchange(rule("stock-buy", "stock", Side.BUY, 0.01), impact=0.1)
+    venue.add_instrument(stock())
+
+    outcome = venue.match_batch(
+        event_id="impact-priced-fill",
+        event_time=datetime(2025, 1, 2, tzinfo=UTC),
+        orders=(Order("005930", Side.BUY, 100),),
+        quotes=(MarketQuote("005930", 100, total_market_volume=1000),),
+        cash=20_000,
+        holdings={},
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    fill = outcome.result.fills[0]
+    assert fill.reference_price == 100
+    assert fill.price_impact_rate == pytest.approx(0.001)
+    assert fill.price == pytest.approx(100.1)
+    assert fill.trade_value == pytest.approx(10_010)
+    assert fill.total_cost == pytest.approx(100.1)
+    assert fill.cost_rule_id == "stock-buy"
+    assert outcome.result.ending_cash == pytest.approx(9_889.9)
+
+
+def test_impact_is_recomputed_from_cash_clipped_fill_quantity() -> None:
+    venue = exchange(rule("stock-buy", "stock", Side.BUY, 0), impact=0.1)
+    venue.add_instrument(stock())
+
+    outcome = venue.match_batch(
+        event_id="impact-cash-clipped",
+        event_time=datetime(2025, 1, 2, tzinfo=UTC),
+        orders=(Order("005930", Side.BUY, 100),),
+        quotes=(MarketQuote("005930", 100, total_market_volume=1000),),
+        cash=10_000,
+        holdings={},
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    fill = outcome.result.fills[0]
+    assert fill.dealt_quantity == 99
+    assert fill.price_impact_rate == pytest.approx(0.1 * (99 / 1000) ** 2)
+    assert fill.price == pytest.approx(100 * (1 + fill.price_impact_rate))
+    assert outcome.result.diagnostics[0].reasons == ("CASH_LIMIT",)
 
 
 def test_uc_scale_001_three_thousand_names_keep_stable_batch_order() -> None:

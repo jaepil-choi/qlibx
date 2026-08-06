@@ -11,16 +11,24 @@ from qlibx.analysis import (
     MonitoringFindingInput,
     ReportRequest,
     ReportResult,
+    SignalAnalysisInput,
+    SignalAnalysisRequest,
+    SignalValue,
     SimulationAnalysisInput,
     SimulationAnalysisRequest,
     analyze_monitoring,
+    analyze_signal,
     analyze_simulation,
     render_analysis,
 )
+from qlibx.context import ViewGate
+from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
+from qlibx.flow.composition import STORED_SIGNAL_CONTRACT
 from qlibx.flow.daily import ExecutionEvidence, SimulationCheckpoint
 from qlibx.flow.monitoring import CONSTRAINT_MONITORING_CONTRACT
+from qlibx.kernel import BacktestClock
 
 ANALYSIS_RESULT_CONTRACT = ArtifactContract(
     artifact_type="analysis_result",
@@ -56,8 +64,18 @@ OPERATION_ERROR_CONTRACT = ArtifactContract(
 class AnalysisFlow:
     """Load frozen evidence, calculate once, and render only stored values."""
 
-    def __init__(self, *, artifacts: LocalArtifactBackend) -> None:
+    def __init__(
+        self,
+        *,
+        artifacts: LocalArtifactBackend,
+        registry: RegistrySnapshot | None = None,
+        resolver: RequirementResolver | None = None,
+        store: ObservationStore | None = None,
+    ) -> None:
         self._artifacts = artifacts
+        self._registry = registry or RegistrySnapshot(())
+        self._resolver = resolver or RequirementResolver()
+        self._store = store or ObservationStore()
 
     def analyze_simulation(
         self,
@@ -174,6 +192,91 @@ class AnalysisFlow:
             result,
         )
 
+    def analyze_signal(self, request: SignalAnalysisRequest) -> OperationOutcome:
+        loaded = self._artifacts.load_model(
+            request.signal_artifact_id,
+            STORED_SIGNAL_CONTRACT,
+        )
+        if loaded.status is not OutcomeStatus.COMPLETE:
+            return loaded
+        resolution = self._resolver.resolve(
+            operation="analysis.run",
+            idempotency_identity=request.invocation_id,
+            requirements=(request.return_requirement,),
+            registry=self._registry,
+        )
+        if resolution.failed:
+            published = tuple(self._artifacts.publish_failure(error) for error in resolution.errors)
+            return OperationOutcome(
+                status=OutcomeStatus.FAILED,
+                diagnostics=tuple(
+                    item.result for item in published if item.status is OutcomeStatus.COMPLETE
+                ),
+                errors=resolution.errors,
+            )
+        view = ViewGate(self._registry, self._store).materialize_view(
+            BacktestClock(request.evaluation_time),
+            resolution.bindings,
+        )
+        role = request.return_requirement.semantic_role
+        try:
+            frame = view.session(role, request.return_session)
+            frame = frame.drop_duplicates(subset=["instrument"], keep="last")
+            result = analyze_signal(
+                request,
+                SignalAnalysisInput(
+                    signal_semantics=loaded.result.payload.signal_semantics,
+                    signal_observation_time=loaded.result.payload.observation_time,
+                    signals=tuple(
+                        SignalValue(instrument=item.instrument, value=item.value)
+                        for item in loaded.result.payload.entries
+                    ),
+                    returns=tuple(
+                        SignalValue(
+                            instrument=str(row.instrument),
+                            value=float(getattr(row, role)),
+                        )
+                        for row in frame.itertuples(index=False)
+                    ),
+                    accesses=view.accessed(),
+                ),
+            )
+        except AnalysisError as exc:
+            return self._failure(
+                request.invocation_id,
+                "analysis.run.compute",
+                exc.code,
+                {**exc.context, "accesses": self._access_context(view)},
+            )
+        except Exception as exc:
+            return self._failure(
+                request.invocation_id,
+                "analysis.run.data",
+                "ANALYSIS_DATA_READ_FAILED",
+                {
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
+            )
+        additional_dependencies = tuple(
+            ()
+            if request.resolves_error_artifact_id is None
+            else (
+                DependencyEdge(
+                    dependency_kind="error",
+                    dependency_id=request.resolves_error_artifact_id,
+                    consumer_role="resolves_error",
+                ),
+            )
+        )
+        return self._publish_analysis(
+            request.invocation_id,
+            request.config_fingerprint,
+            result,
+            additional_dependencies=additional_dependencies,
+        )
+
     def render(self, request: ReportRequest) -> OperationOutcome:
         loaded = self._artifacts.load_model(
             request.analysis_artifact_id,
@@ -214,6 +317,8 @@ class AnalysisFlow:
         invocation_id: str,
         config_fingerprint: str,
         result: AnalysisResult,
+        *,
+        additional_dependencies: tuple[DependencyEdge, ...] = (),
     ) -> OperationOutcome:
         publication = self._artifacts.publish_model(
             logical_identity=f"analysis:{invocation_id}",
@@ -235,6 +340,16 @@ class AnalysisFlow:
                     dependency_id=config_fingerprint,
                     consumer_role="analysis_config",
                 ),
+                *(
+                    DependencyEdge(
+                        dependency_kind="dataset",
+                        dependency_id=access.registration_identity,
+                        consumer_role=access.semantic_role,
+                        selected_fields=(access.selected_field,),
+                    )
+                    for access in result.accesses
+                ),
+                *additional_dependencies,
             ),
         )
         if publication.status is not OutcomeStatus.COMPLETE:
@@ -244,6 +359,13 @@ class AnalysisFlow:
             result=result,
             diagnostics=(publication.result,),
         )
+
+    @staticmethod
+    def _access_context(view: object) -> list[dict[str, object]]:
+        return [
+            item.model_dump(mode="json")
+            for item in view.accessed()  # type: ignore[attr-defined]
+        ]
 
     def _failure(
         self,

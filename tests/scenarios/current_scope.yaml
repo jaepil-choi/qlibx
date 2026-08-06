@@ -27,7 +27,42 @@ coverage_sets:
     - UC-MONITOR-001
   m8_extension:
     - UC-EXTENSION-001
+  m9_short_analysis:
+    - UC-ERROR-001
+    - UC-RESEARCH-001
 scenarios:
+  - id: UC-ERROR-001
+    case: missing_realized_return_fails_at_actual_analysis_path
+    test: tests/acceptance/test_analysis_scenarios.py::test_uc_error_001_and_uc_research_001_short_analysis_fails_then_retries
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      source_artifact: stored_signal_result
+      missing_requirement: analysis_return
+    expected:
+      failure_stage: analysis.run.requirements.analysis_return
+      model_stage_created: false
+      portfolio_stage_created: false
+      order_stage_created: false
+      account_mutation: false
+      memory_mutation: false
+
+  - id: UC-RESEARCH-001
+    case: failed_signal_analysis_is_preserved_then_resolved
+    test: tests/acceptance/test_analysis_scenarios.py::test_uc_error_001_and_uc_research_001_short_analysis_fails_then_retries
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      source_artifact: stored_signal_result
+      retry_binding: analysis_return
+    expected:
+      failure_preserved: true
+      retry_outcome: complete
+      resolves_error_lineage: true
+      metric_set: [signal_count, information_coefficient, hypothetical_long_short_return]
+      account_mutation: false
+      memory_mutation: false
+
   - id: UC-EXTENSION-001
     case: project_local_sector_demean_validated_before_registration
     test: tests/acceptance/test_extension_scenarios.py::test_uc_extension_001_registers_only_after_real_pit_contract_validation

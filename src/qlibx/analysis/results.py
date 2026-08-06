@@ -2,13 +2,15 @@
 
 import hashlib
 import json
-from datetime import datetime
+import math
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 
 from pydantic import Field
 
-from qlibx.context import StateAccessRecord
+from qlibx.context import AccessRecord, StateAccessRecord
+from qlibx.data import ComponentRequirement
 from qlibx.models import QlibxModel
 
 
@@ -44,7 +46,7 @@ class AnalysisValues(QlibxModel):
 class AnalysisResult(QlibxModel):
     analysis_schema_version: int = 1
     invocation_id: str
-    analysis_kind: Literal["simulation", "monitoring"]
+    analysis_kind: Literal["simulation", "monitoring", "signal"]
     evaluation_time: datetime
     metrics: tuple[AnalysisMetric, ...]
     records: tuple[AnalysisRecord, ...] = ()
@@ -52,6 +54,7 @@ class AnalysisResult(QlibxModel):
     limitations: tuple[str, ...] = ()
     state_semantics: Literal["actual_account", "not_applicable"]
     values_fingerprint: str
+    accesses: tuple[AccessRecord, ...] = ()
 
 
 class ReportResult(QlibxModel):
@@ -80,6 +83,16 @@ class MonitoringAnalysisRequest(QlibxModel):
     missing_input_artifact_ids: tuple[str, ...] = ()
     evaluation_time: datetime
     config_fingerprint: str = Field(min_length=1)
+
+
+class SignalAnalysisRequest(QlibxModel):
+    invocation_id: str = Field(min_length=1)
+    signal_artifact_id: str = Field(min_length=1)
+    evaluation_time: datetime
+    return_session: date
+    return_requirement: ComponentRequirement
+    config_fingerprint: str = Field(min_length=1)
+    resolves_error_artifact_id: str | None = None
 
 
 class ReportRequest(QlibxModel):
@@ -117,6 +130,19 @@ class MonitoringFindingInput(QlibxModel):
 class MonitoringAnalysisInput(QlibxModel):
     findings: tuple[MonitoringFindingInput, ...]
     missing_error_codes: tuple[str, ...]
+
+
+class SignalValue(QlibxModel):
+    instrument: str = Field(min_length=1)
+    value: float
+
+
+class SignalAnalysisInput(QlibxModel):
+    signal_semantics: str = Field(min_length=1)
+    signal_observation_time: datetime
+    signals: tuple[SignalValue, ...]
+    returns: tuple[SignalValue, ...]
+    accesses: tuple[AccessRecord, ...]
 
 
 class AnalysisError(ValueError):
@@ -277,6 +303,75 @@ def analyze_monitoring(
     )
 
 
+def analyze_signal(
+    request: SignalAnalysisRequest,
+    source: SignalAnalysisInput,
+) -> AnalysisResult:
+    signals = {item.instrument: item.value for item in source.signals}
+    returns = {item.instrument: item.value for item in source.returns}
+    if len(signals) != len(source.signals) or len(returns) != len(source.returns):
+        raise AnalysisError("ANALYSIS_SIGNAL_AXIS_DUPLICATE", {})
+    if signals.keys() != returns.keys() or len(signals) < 2:
+        raise AnalysisError(
+            "ANALYSIS_SIGNAL_RETURN_COVERAGE_INVALID",
+            {
+                "signal_instruments": sorted(signals),
+                "return_instruments": sorted(returns),
+            },
+        )
+    instruments = sorted(signals)
+    signal_values = [signals[instrument] for instrument in instruments]
+    return_values = [returns[instrument] for instrument in instruments]
+    if not all(math.isfinite(value) for value in (*signal_values, *return_values)):
+        raise AnalysisError("ANALYSIS_SIGNAL_VALUE_NON_FINITE", {})
+
+    signal_mean = sum(signal_values) / len(signal_values)
+    return_mean = sum(return_values) / len(return_values)
+    centered_signal = [value - signal_mean for value in signal_values]
+    centered_return = [value - return_mean for value in return_values]
+    signal_ss = sum(value * value for value in centered_signal)
+    return_ss = sum(value * value for value in centered_return)
+    if signal_ss <= 0 or return_ss <= 0:
+        raise AnalysisError(
+            "ANALYSIS_SIGNAL_VARIANCE_MISSING",
+            {"signal_sum_squares": signal_ss, "return_sum_squares": return_ss},
+        )
+    information_coefficient = sum(
+        signal * realized
+        for signal, realized in zip(centered_signal, centered_return, strict=True)
+    ) / math.sqrt(signal_ss * return_ss)
+    gross = sum(abs(value) for value in centered_signal)
+    hypothetical_return = sum(
+        signal / gross * realized
+        for signal, realized in zip(centered_signal, return_values, strict=True)
+    )
+    metrics = (
+        AnalysisMetric(name="signal_count", value=float(len(instruments)), unit="count"),
+        AnalysisMetric(
+            name="information_coefficient",
+            value=information_coefficient,
+            unit="correlation",
+        ),
+        AnalysisMetric(
+            name="hypothetical_long_short_return",
+            value=hypothetical_return,
+            unit="fraction",
+        ),
+    )
+    return AnalysisResult(
+        invocation_id=request.invocation_id,
+        analysis_kind="signal",
+        evaluation_time=request.evaluation_time,
+        metrics=metrics,
+        source_artifact_ids=(request.signal_artifact_id,),
+        limitations=(
+            "hypothetical zero-cost weights are demeaned signal values normalized to unit gross",
+            "result is research analysis and does not create an executable portfolio or Account",
+        ),
+        state_semantics="not_applicable",
+        values_fingerprint=values_fingerprint(metrics, ()),
+        accesses=source.accesses,
+    )
 def render_analysis(
     request: ReportRequest,
     analysis: AnalysisResult,

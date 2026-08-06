@@ -14,7 +14,7 @@ LAYER_DEPENDENCIES = {
     "execution": {"context", "data", "domain", "models", "errors"},
     "account": {"domain", "models", "errors"},
     "evidence": {"domain", "models", "errors"},
-    "analysis": {"context", "domain", "models", "errors"},
+    "analysis": {"context", "data", "domain", "models", "errors"},
     "production": {"evidence", "domain", "models", "errors"},
     "flow": {
         "kernel",

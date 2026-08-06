@@ -46,6 +46,13 @@ $result = [ordered]@{
     guidance = [ordered]@{
         use_non_ascii_path_workarounds = (-not (Test-Ascii $userProfile))
         load_corporate_windows_skill = $explicitCorporateProfile -or (-not (Test-Ascii $userProfile))
+        edit_strategy = if (-not (Test-Ascii $userProfile)) {
+            'corporate_non_ascii_direct_editor'
+        } else {
+            'builtin_apply_patch'
+        }
+        allow_task_scoped_codex_copy = (-not (Test-Ascii $userProfile))
+        forbid_non_ascii_profile_edit_workarounds = (Test-Ascii $userProfile)
         company_ownership_inferred = $false
     }
 }

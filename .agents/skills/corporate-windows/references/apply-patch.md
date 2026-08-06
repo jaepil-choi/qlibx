@@ -1,61 +1,143 @@
-# Codex apply_patch on Windows
+# Codex editing on Windows
 
-Use the built-in `apply_patch` path for manual file edits. Always try it normally first, regardless
-of username, profile path, machine ownership, or a previous failure seen on another computer. If it
-succeeds, stop and do not inspect wrappers, copy executables, or create an ASCII fallback.
+## Mandatory environment split
 
-If the built-in patch failure from the current operation is already captured, use that evidence;
-do not repeat the same failing patch solely to activate this workflow.
+Run `.agent/bin/detect-environment.ps1` once before the first edit in a task. Use its result exactly:
 
-Only after the normal path fails:
+| Detection | First edit method | Executable-copy policy |
+|---|---|---|
+| `windows=true` and `user_profile_non_ascii=true` | Use `scripts/edit-text-file.ps1` directly. Do not probe the known-broken built-in patch sandbox first. | A task-specific `C:\tmp` Codex executable is allowed only for a complex patch the direct editor cannot express. |
+| `user_profile_non_ascii=false` | Use built-in `apply_patch`. | Never copy `codex.exe` to `C:\tmp`, the workspace, or another ASCII path merely for editing. Never use `edit-text-file.ps1`. |
 
-1. Preserve the exact error, command boundary, working directory, and whether the failure came from
-   the built-in tool, a shell wrapper, or the underlying executable.
-2. Run `.agent/bin/detect-environment.ps1`. A non-ASCII username or profile enables a path
-   workaround but does not establish causality. If the profile is ASCII-only, continue diagnosing
-   the observed wrapper, ACL, sandbox, or packaging failure without assuming a path-encoding cause.
-3. Inspect `apply_patch.bat` and resolve the actual Codex patch executable and argument contract it
-   invokes.
-4. Invoke the actual executable in apply-patch mode using the contract required by that build. Do
-   not assume that every build accepts standard input. For example, if the executable reports that
-   `--codex-run-as-apply-patch` requires a UTF-8 `PATCH` argument, pass the entire patch as one
-   argument.
-5. If the actual executable is inaccessible from its installed location and a copied fallback is
-   unavoidable, place it under an ASCII task-specific path such as `C:\tmp`. Give every concurrent
-   agent a unique fallback filename to prevent races, and do not overwrite a shared executable.
-6. Apply the patch, verify the resulting diff immediately, and remove only the task-specific
-   temporary executable after the final patch succeeds.
+This split reflects the two actual machines. Do not generalize the company workaround to an
+English-username home PC. A non-ASCII profile selects the compatibility route; it is not a general
+claim about Windows or proof of company ownership.
 
-## Preflight for `--codex-run-as-apply-patch PATCH`
+## Company non-ASCII PC: direct text editing
 
-Treat executable mode, patch grammar, and Windows argument length as separate preconditions. Check
-all three before retrying a real edit.
+Use the bundled editor for ordinary source and document edits. It accepts exact text, requires a
+unique match, detects concurrent changes, stays inside the workspace, and replaces atomically.
 
-### 1. Preserve the wrapper's mode flag
-
-If `apply_patch.bat` invokes:
-
-```bat
-"...\codex.exe" --codex-run-as-apply-patch %*
-```
-
-invoke the resolved or task-specific copied executable with both the mode flag and the complete
-patch argument:
+Update one exact section:
 
 ```powershell
-& $taskPatchExe --codex-run-as-apply-patch $patch
+$old = @"
+exact current text
+"@
+$new = @"
+replacement text
+"@
+
+& '.agents\skills\corporate-windows\scripts\edit-text-file.ps1' `
+    -Path 'relative\path\file.py' `
+    -OldText $old `
+    -NewText $new
+
+git diff --check -- 'relative/path/file.py'
 ```
 
-Do not invoke that executable as `& $taskPatchExe $patch`. That starts normal Codex CLI behavior
-instead of apply-patch mode and can produce unrelated TTY or local-state-database errors. Diagnose
-those errors as an invocation-contract failure before blaming the document, sandbox, or database.
-A no-op patch may return nonzero because no file changed; establish the contract from the wrapper
-and actual error text rather than treating a no-op exit code as the primary proof.
+Create a new text file without overwriting anything:
 
-### 2. Validate update-hunk grammar before launching
+```powershell
+$content = @"
+new file content
+"@
 
-An update patch needs an `@@` marker before changed lines. Every line inside the hunk must begin
-with `-`, `+`, or a context space:
+& '.agents\skills\corporate-windows\scripts\edit-text-file.ps1' `
+    -Path 'relative\path\new-file.md' `
+    -NewText $content `
+    -Create
+
+git diff --check -- 'relative/path/new-file.md'
+```
+
+Rules:
+
+- Re-read the target immediately before constructing `$old`.
+- Use a larger exact context block when the intended text is not unique.
+- Split multi-section work into bounded edits and inspect the diff after each one.
+- Never use ad-hoc `Set-Content`, Python rewriting, or blind search-and-replace.
+- If the helper reports an ASCII profile, stop and use built-in `apply_patch`; do not bypass its
+  hard guard.
+
+## Company non-ASCII PC: complex apply_patch fallback
+
+Use this only when an edit requires Codex patch grammar across multiple files or add/update/delete
+operations that the direct text editor cannot express. Do not first retry the known-broken built-in
+sandbox on this profile.
+
+Resolve the current Codex executable from `apply_patch.bat`, copy it to a unique task-specific
+ASCII path, preserve `--codex-run-as-apply-patch`, and remove the exact copy in `finally`.
+
+```powershell
+$detected = .\.agent\bin\detect-environment.ps1 | ConvertFrom-Json
+if (-not $detected.windows -or -not $detected.user_profile_non_ascii) {
+    throw 'Company non-ASCII patch fallback is forbidden on this profile.'
+}
+if ($patch.Length -gt 24000) {
+    throw 'Split the patch by file or section.'
+}
+if (-not $patch.StartsWith('*** Begin Patch') -or
+    -not $patch.TrimEnd().EndsWith('*** End Patch')) {
+    throw 'Invalid apply_patch envelope.'
+}
+if ($patch -match '(?m)^\*\*\* Update File:' -and $patch -notmatch '(?m)^@@') {
+    throw 'Every update patch requires an @@ hunk marker.'
+}
+
+$wrapper = (Get-Command apply_patch -ErrorAction Stop).Source
+$wrapperText = Get-Content -LiteralPath $wrapper -Raw
+$match = [regex]::Match(
+    $wrapperText,
+    '"(?<exe>[^"\r\n]+codex\.exe)"\s+--codex-run-as-apply-patch'
+)
+if (-not $match.Success) {
+    throw "Cannot resolve codex.exe from $wrapper"
+}
+
+$sourceExe = $match.Groups['exe'].Value
+$taskPatchExe = "C:\tmp\codex-apply-patch-$PID-$([guid]::NewGuid().ToString('N')).exe"
+if (Test-Path -LiteralPath $taskPatchExe) {
+    throw "Refusing to overwrite an existing executable: $taskPatchExe"
+}
+
+try {
+    Copy-Item -LiteralPath $sourceExe -Destination $taskPatchExe
+    & $taskPatchExe --codex-run-as-apply-patch $patch
+    if ($LASTEXITCODE -ne 0) {
+        throw "Codex apply-patch exited with code $LASTEXITCODE"
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $taskPatchExe) {
+        Remove-Item -LiteralPath $taskPatchExe
+    }
+}
+
+git diff --check
+```
+
+Use one scoped elevated shell call if the company sandbox blocks the copy or a protected target
+write. Do not use `-Force`, do not reuse a shared executable name, do not leave the executable
+behind, and do not print a patch that may contain sensitive material.
+
+## English-username home PC
+
+Use built-in `apply_patch` normally. Do not run the company direct editor. Do not inspect the
+wrapper, copy the Codex executable, create a `C:\tmp` fallback, or request elevation solely because
+the company PC needed those steps.
+
+If built-in `apply_patch` fails on this ASCII-profile PC, diagnose the concrete local error. The
+failure is not evidence that the company non-ASCII workaround applies.
+
+## Patch grammar checks
+
+For Codex patch format:
+
+1. Preserve `--codex-run-as-apply-patch` when invoking the resolved executable.
+2. Put `@@` before each update hunk; every hunk line starts with `-`, `+`, or a context space.
+3. Keep the single patch argument below 24,000 characters and split large patches.
+4. Run `git diff --check` and inspect the affected diff after every edit.
 
 ```text
 *** Begin Patch
@@ -65,32 +147,3 @@ with `-`, `+`, or a context space:
 +new text
 *** End Patch
 ```
-
-Before invoking the executable, inspect a bounded numbered preview of the generated payload. Check
-that `*** Begin Patch`, the file directive, `@@`, prefixed hunk lines, and `*** End Patch` appear in
-that order. Do not retry an invalid payload through a different privilege boundary.
-
-When PowerShell generates a full-section hunk, parenthesize the split before piping so every line
-gets its prefix:
-
-```powershell
-$oldLines = (($oldSection -split "`n") | ForEach-Object { '-' + $_ }) -join "`n"
-$newLines = (($newSection -split "`n") | ForEach-Object { '+' + $_ }) -join "`n"
-```
-
-Do not write `($oldSection -split "`n", -1 | ForEach-Object { ... })`; PowerShell operator
-precedence can leave all but the first line unprefixed.
-
-### 3. Keep the single PATCH argument bounded
-
-When the build requires `PATCH` as one argument, Windows command-line limits still apply. Split a
-large edit into deterministic file- or section-sized patches before invocation. If process launch
-fails with `The filename or extension is too long`, reduce the patch argument; do not switch to
-standard input when the inspected executable contract requires an argument.
-
-After each smaller patch, run `git diff --check` and inspect the affected headings or lines before
-continuing. Do not reapply a section that already succeeded.
-
-Do not substitute `git apply`, a search-and-replace script, or direct file rewriting merely to
-bypass a broken Codex wrapper. Do not copy an executable or switch to an ASCII path before the
-ordinary method has actually failed on the current machine.

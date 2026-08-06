@@ -5,17 +5,34 @@ description: Diagnose and recover Windows enterprise environment failures involv
 
 # Corporate Windows Workflow
 
-Do not activate a corporate or non-ASCII workaround preemptively. Always try the documented,
-ordinary command once in the current environment first. Examples include the built-in
-`apply_patch` path, a normal `uv` command, or the project's declared test command. If it succeeds,
-stop: do not run environment detection and do not introduce a fallback path.
+Run `.agent/bin/detect-environment.ps1` once before the first edit or environment-sensitive command
+in a task. Route file edits by the detected profile; do not use one Windows strategy everywhere.
+
+- If `windows=true` and `user_profile_non_ascii=true`, use
+  `scripts/edit-text-file.ps1` from the first edit. Do not spend a tool call proving that the
+  built-in patch sandbox fails again. This is the observed company-PC path.
+- If `user_profile_non_ascii=false`, use the built-in `apply_patch` path. Never invoke the
+  non-ASCII helper and never copy `codex.exe` to `C:\tmp`, the workspace, or another ASCII path
+  merely for patching. This is the English-username home-PC path.
+- Do not infer company ownership from the profile. The profile value selects only the known patch
+  compatibility route.
+
+An explicit user instruction to edit named workspace files establishes the requested edit scope. Do
+not misread a sandbox or read-only error as uncertainty about the user's intent, and do not repeat
+the same blocked command. If the active tool boundary still requires approval, use one scoped
+escalation for only those named targets. This does not authorize unrelated files, destructive
+operations, credential exposure, database access, or writes outside the requested workspace scope.
+
+For operations other than this profile-gated edit route, try the documented ordinary command once.
+Examples include a normal `uv` command or the project's declared test command. If it succeeds,
+stop: do not introduce a fallback path.
 
 The ordinary first attempt must already be safe and authorized. It does not waive database,
 network, destructive-action, or other approval requirements. If the exact failure from the current
 operation is already available, preserve that evidence instead of repeating the command only to
 make it fail again.
 
-Only after a concrete matching failure:
+Only after a concrete matching failure outside the pre-routed edit case:
 
 1. Preserve the original command, exact error class and message, working directory, and execution
    boundary.
@@ -28,10 +45,10 @@ When more evidence is needed, run `scripts/collect-diagnostics.ps1`; add `-Inclu
 `-ProbeWrites` only when the user-visible diagnostic need justifies the extra disclosure or
 temporary write.
 
-A non-ASCII username or profile path permits path-related workarounds only after a relevant failure
-has occurred. It does not prove that the machine is company-owned, and it is not by itself evidence
-that non-ASCII text caused the failure. On an ASCII-only personal machine, diagnose the concrete
-failure normally instead of forcing a non-ASCII fallback. Load only the matching reference:
+A non-ASCII profile selects the known edit helper above but does not prove that the machine is
+company-owned or explain unrelated failures. On an ASCII-only personal machine, diagnose the
+concrete failure normally instead of forcing a non-ASCII fallback. Load only the matching
+reference:
 
 - TLS, certificate, revocation, `uv`, Python, or Node errors: `references/tls.md`
 - uv cache, managed Python, `.venv`, access denied, or lock errors:

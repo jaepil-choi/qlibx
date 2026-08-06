@@ -3,15 +3,15 @@ suite: qlibx-future-characterization
 support_status: future_characterization
 scenarios:
   - id: UC-EXEC-001
-    case: multi_event_intraday_characterization
-    test: tests/characterization/test_intraday_characterization.py::test_uc_exec_001_future_multi_event_characterization_has_no_daily_fallback
+    case: executor_neutral_intent_without_installable_intraday_runtime
+    test: tests/characterization/test_intraday_characterization.py::test_uc_exec_001_future_intraday_is_a_seam_not_an_installable_runtime
     inputs:
       data_kind: synthetic_characterization
-      generator: three_event_point_price_volume
+      generator: executor_neutral_parent_intent_boundary
       real_parent_source: data/DW/fng_stock_daily_prices.csv
     expected:
-      outcome: complete
-      event_count: 3
-      remaining_quantity: 39
+      outcome: unsupported
+      installable_runtime: false
+      executor_neutral_parent_intent: true
       daily_fallback: false
       current_support: false

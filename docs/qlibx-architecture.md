@@ -2,6 +2,7 @@
 
 Status: draft
 Canonical requirements: `docs/qlibx-prd.md`
+Package name: TBD — working name `qlibx`, current candidate `vqapr`
 Borrow research: [[engine-borrow-benchmark-map]]
 Backend 채택 판단: [[why-not-qlib-as-a-backend]], [[why-not-nautilus-as-a-dependency]]
 
@@ -11,9 +12,9 @@ Backend 채택 판단: [[why-not-qlib-as-a-backend]], [[why-not-nautilus-as-a-de
 이 문서가 정하는 것: layer 경계, 책임 배분, 불변식, 핵심 계약의 shape, 의존 방향, 차용 출처.
 이 문서가 정하지 않는 것: 최종 public name, 함수 시그니처의 세부, 파일 분할 단위.
 
-> **§17 설계 감사 기록을 함께 읽을 것.** 이 문서는 초기 고정 pipeline 초안에서 출발했다. 2026-08-05
+> **§16 설계 감사 기록을 함께 읽을 것.** 이 문서는 초기 고정 pipeline 초안에서 출발했다. 2026-08-05
 > PRD가 독립 workflow와 progressive requirement discovery를 정본 계약으로 확정하면서 orchestration,
-> error, evidence와 production boundary를 다시 감사했다. 현행 본문은 그 revision을 반영하고, §17은
+> error, evidence와 production boundary를 다시 감사했다. 현행 본문은 그 revision을 반영하고, §16은
 > 아직 남은 구현 결정과 폐기된 가정을 구분해 기록한다.
 
 ---
@@ -393,7 +394,7 @@ expanding 또는 event-triggered fit이 필요하면 이 event의 concrete sched
 
 \* `SETTLEMENT`·`FUNDING`·`EXPIRY`는 future extension characterization이다. Exchange가 Clock을 직접
 조작하지 않는다. Instrument registration 시 필요한 event specification을 반환하고 engine/flow가 Clock에
-callback을 등록한다. §13.6과 §16 참조.
+callback을 등록한다. §13.6과 §15 참조.
 
 새 event나 direct operation을 추가할 때 freeze, requirements, permitted read, calculation, commit, evidence와
 validation을 모두 채워야 한다. Event 이름이나 global stage enum을 추가하는 것만으로 설계가 끝나지 않는다.
@@ -422,11 +423,11 @@ validation을 모두 채워야 한다. Event 이름이나 global stage enum을 �
 
 **I2와 I3도 2026-08-03 개정되었다.** 초안의 I2는 event마다 조립한 context를 전제했고, I3는 그
 context의 파생 규칙이었다. View 모델에서는 시간 경계가 clock 한 곳에서 강제되므로 두 불변식이
-그에 맞게 다시 쓰였다. §18 참조.
+그에 맞게 다시 쓰였다. §17 참조.
 
 **I4는 2026-08-06 다시 개정되었다.** 2026-08-03 개정은 Ledger와 Memory를 두 store로 두었지만 concrete
 account state를 Ledger와 Account로 중복 표현하고 있었다. 현행은 Account가 actual state의 유일한 aggregate이고
-Memory가 Strategy state의 별도 authority다. 둘 다 Flow만 commit한다. §9와 §17 G1 참조.
+Memory가 Strategy state의 별도 authority다. 둘 다 Flow만 commit한다. §9와 §16 G1 참조.
 
 **I5**는 명시적 실패와 diagnostics 보존을 타입으로 강제한다. 진단을 버리려면 `_`로 명시적으로
 받아야 하고, 그러면 코드 리뷰에서 잡힌다. Requirement gap은 계산 결과의 한 종류가 아니라 계산 전
@@ -492,9 +493,19 @@ actual-feedback contract를 공유하지만 stream source, Executor/OMS adapter,
 명시적으로 교체된다. Clock만 바꿔 simulated Fill을 production Fill로 해석하지 않는다. ③ view와 ④
 operation contract는 유지되고 ② flow가 선택한 runtime profile의 port를 조립한다.
 
+### Reference와 선택 근거
+
+| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
+|---|---|---|---|---|
+| Clock 추상과 test/live 구현 | NautilusTrader | `common/component.pyx` L130/L623/L839 | 설계만 | 같은 callback 계약으로 simulated/live time source를 교체하기 적합 |
+| `advance_time`의 시각순 handler 반환 | NautilusTrader | 같은 파일 L790 | 설계만 | Clock은 순서만 소유하고 business logic을 Flow에 남김 |
+| TimeEvent / TimeEventHandler와 priority | NautilusTrader | 같은 파일 L1013/L1144, `Subscription.priority` L2911 | 설계만 | IoC와 동시각 결정론을 명시적으로 표현 |
+| 단일 시간축 정렬 순회 | vn.py | `alpha/strategy/backtesting.py` L156-166 | 코드 차용 | timestamp merge 산술만 참고하고 callback/priority는 qlibx가 추가 |
+
 ### 채택하지 않는 것
 
-qlib `TradeCalendarManager`(`backtest/utils.py` L23)는 `freq` 하나와 `trade_step` 하나를 갖는다.
+Qlib `TradeCalendarManager`(`backtest/utils.py` L23)는 `freq` 하나와 `trade_step` 하나를 갖는
+**반면교사**다.
 독립 cadence를 가진 병렬 clock을 표현할 수 없다. `NestedExecutor`(`backtest/executor.py` L310)는
 계층만 제공하며 형제 관계를 표현하지 못한다.
 
@@ -641,6 +652,43 @@ order로 잔여 현금을 계산한다. 이 임시 계산은 Account authority�
 commit된다. 여러 intraday execution event라면 앞 event를 commit한 뒤 다음 event가 새 AccountSnapshot과 version을
 읽는다.
 
+### 같은 계약으로 intraday Executor를 끼운다
+
+Daily와 intraday Executor의 차이는 Account mutation 방법이 아니라 **execution event 계획과 필요한 market
+data**다.
+
+```text
+DecisionIntent: 삼성전자 1,000주 BUY                         # 둘이 공유
+
+Next-session close Executor
+  E1 다음 session close → Fill 1,000주 → Account.commit(FillBatch) → 완료
+
+Intraday Executor
+  E1 09:30 → Fill 300주 → Account commit v11
+  E2 11:00 → 최신 Account v11 + 최신 quote/volume → Fill 200주 → commit v12
+  E3 15:20 → 최신 Account v12 + 최신 quote/volume → Fill 100주 → commit v13
+  종료      → 400주 미체결과 limitation을 ExecutionResult/Evidence에 기록
+```
+
+Intraday `plan()`은 calendar와 frozen DecisionIntent만으로 여러 `ExecutionSpec`을 만든다. 미래 quote를 보고
+event 시각을 소급 선택하지 않는다. 각 callback의 `execute()`는 그 시각까지 available한 `ExecutionView`와
+가장 최근 `AccountSnapshot`만 읽는다. `ExecutionResult.completes_decision`이 false이면 다음 event가 같은
+decision ID와 remaining quantity를 이어받고, 마지막 event나 expiry/cancel policy가 decision을 종료한다.
+
+따라서 Executor를 교체해도 다음 계약은 변하지 않는다.
+
+```text
+immutable DecisionIntent
+  → one or many ExecutionEvent
+  → ExecutionResult(FillBatch + diagnostics)
+  → Flow-owned Account.commit(expected_version)
+  → 다음 event와 다음 Strategy가 committed actual state를 읽음
+```
+
+Intraday profile은 quote/volume 또는 order-book binding, latency/liquidity model과 scheduling limitation을 추가로
+선언한다. Data가 없으면 next-close 결과로 조용히 축약하지 않고 requirement resolution에서 실패한다. 이 때문에
+첫 naive profile을 구현해도 Executor/Account public contract를 다시 설계하지 않고 intraday 가정을 추가할 수 있다.
+
 첫 vertical slice는 daily executor 하나로 시작할 수 있지만 architecture validation은 같은 immutable
 decision을 daily profile과 intraday/partial-fill characterization profile이 각각 처리하는 `UC-EXEC-001`을
 포함한다. Intraday profile은 별도 public class name을 요구하지 않으며, schedule granularity, required market
@@ -658,16 +706,26 @@ class FillConvention(Protocol):
 ```
 
 ```
-CloseFill      execution event까지 available한 eligible close에 체결
-NextOpenFill   다음 거래일 시가에 체결
-VWAPFill       구간 VWAP
+ClosePriceFill     execution event가 속한 session의 close를 기준 가격으로 사용
+OpenPriceFill      execution event가 속한 session의 open을 기준 가격으로 사용
+IntradayVWAPFill   execution event가 선언한 intraday 구간의 VWAP을 기준 가격으로 사용
 ```
 
-**`CloseFill`은 명시적 simulation convention이며 낙관적일 수 있다.** 가격은 StrategyView에서 복사하지
-않고 execution event의 `available_at <= event.ts`를 만족하는 ExecutionView에서 읽는다. Decision cutoff와
-같은 시점의 아직 공개되지 않은 종가를 사용하려 하면 `UC-EXEC-002` validation이 Fill 전에 실패한다.
-Result artifact는 convention identity, decision time, fill time, modelled/unmodelled liquidity와 limitation을
-기록한다.
+첫 vertical slice의 기본 조합은 **`NextSessionCloseExecutor + ClosePriceFill`** 이다. 예를 들어 월말
+session 종가가 available해진 뒤 `DECISION`이 확정되면 Executor는 다음 eligible trading session의 close에
+`EXECUTION` event를 등록하고, FillConvention은 그 event가 속한 session의 close를 기준 가격으로 고른다.
+당일 종가나 단순히 "현재 close"에 체결한다는 뜻이 아니다. 이 분리로 **언제 체결을 시도하는가**와
+**어느 가격을 기준으로 삼는가**를 독립적으로 바꿀 수 있다.
+
+이 조합은 가장 단순하고 낙관적인 simulation profile이다. 다음 session close 한 가격으로
+전체 batch가 체결된다고 가정하며, 별도 liquidity model이 없으면 장중 가격 경로, market impact와 partial fill을
+설명하지 못한다. 가격은 StrategyView에서 복사하지 않고 execution event의
+`available_at <= event.ts`를 만족하는 ExecutionView에서 읽는다. 다음 session close가 아직 available하지
+않으면 Fill 전에 실패한다. Result artifact는 convention identity, decision time, scheduled session, fill time,
+modelled/unmodelled liquidity와 limitation을 기록한다.
+
+Same-session close는 기본값의 다른 이름이 아니다. Decision이 close 공개 전에 확정되고 별도 profile이 그
+시점과 availability를 명시할 때만 가능한 별도 convention이다.
 
 Convention 교체는 Strategy decision artifact를 바꾸지 않는다. 다만 required market binding, execution
 schedule과 actual Fill이 달라질 수 있으므로 Executor profile이 compatibility를 검증하고 그 dependency를
@@ -686,7 +744,7 @@ event 입도    →  종목별인가 횡단면인가       →  qlibx: 횡단면
 
 - 부분체결 후 다음 decision은 requested target이 아니라 **실제 보유**에서 계산한다 (PRD §4.3)
 - Blocked liquidation은 포지션에 남아 다음 decision에 포함된다 (PRD §4.3)
-- 실현손익 누적에 의존하는 stop-loss 같은 path-dependent 정책이 성립한다 (§17 G1, G2)
+- 실현손익 누적에 의존하는 stop-loss 같은 path-dependent 정책이 성립한다 (§16 G1, G2)
 
 흔히 "vectorized backtest"로 불리는 것 — `(weights.shift(1) * returns).sum()` 형태의 시간 축
 일괄 계산 — 은 이와 다르다. 그쪽은 feedback edge 자체가 없어 PRD §4.3을 만족할 수 없으며
@@ -732,13 +790,27 @@ account.commit(FillBatch(fills), expected_version=before.version)     # Flow만 
 qlib은 주문 단건 순회이므로 이 분리가 성립해도 batch가 되지 않는다. qlibx는 단위 자체를
 instrument축 배열로 두어 `deal_order` 순회를 elementwise 연산으로 대체한다.
 
+### Flow/Executor reference와 선택 근거
+
+| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
+|---|---|---|---|---|
+| 일단위 executor 골격 | Qlib | `backtest/executor.py` L513/L561 | 코드 차용 | decision 뒤 별도 execution step을 여는 최소 흐름에 사용 |
+| 계층 위임 아이디어 | Qlib | 같은 파일 L310 `NestedExecutor` | 설계만 | 상위 decision과 하위 execution 분리는 참고하되 고정 계층은 강제하지 않음 |
+| 일별 순회와 체결 loop | vn.py | `alpha/strategy/backtesting.py::new_bars` | 코드 차용 | deterministic loop 산술만 참고 |
+| executor 교체와 분할 실행 | NautilusTrader | `execution/client.pyx` L71/L198, `algorithm.pyx` L88/L870-930 | 설계만 | client 교체와 primary order의 child-order 분할 아이디어를 one-or-many execution event seam에 사용 |
+| callback과 Flow-owned Account commit | qlibx | §2.3, §6, §9 | 순수 창작 | reference의 mutable account/cache 접근을 PIT-safe snapshot/atomic commit으로 바꿈 |
+
+NautilusTrader처럼 intraday execution을 별도 client/algorithm 뒤에 둘 수 있다는 점은 배우지만, qlibx는
+MessageBus와 live order graph를 복사하지 않는다. Decision-time 횡단면과 `available_at` View를 유지한 채
+Executor가 event를 나누고 같은 Account commit 계약을 호출하는 것이 현재 product 범위에 더 작고 명확하다.
+
 ---
 
 ## 7. ③ view ★
 
 **정보 경계를 강제하는 layer다.** 초안에서는 `gate`가 event마다 snapshot을 조립해 넘기는
 구조였으나, 2026-08-03 개정으로 **clock에 묶인 조회 창구(view)** 방식으로 교체되었다. 변경 이유와
-근거는 §18에 기록한다.
+근거는 §17에 기록한다.
 
 ### Minimal registration과 progressive requirement resolution
 
@@ -889,7 +961,20 @@ qlibx의 기본 접근 단위는 **decision time의 횡단면**이다. 따라서
 반환   DataFrame (instrument × field)
 ```
 
-이 부분은 §14에서 여전히 순수 창작으로 분류한다. 세 reference 어디에도 대응물이 없다.
+이 횡단면 조회 축은 세 reference 어디에도 대응물이 없으므로 qlibx 순수 창작이다.
+
+### View reference와 선택 근거
+
+| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
+|---|---|---|---|---|
+| `ts_event` / `ts_init` 이중 timestamp | NautilusTrader | `core/data.pyx` L30/L42 | 설계만 | `ts_event`=event time, `ts_init`=`available_at` 대응 |
+| `ts_init` 오름차순 stream과 data/timer ordering | NautilusTrader | `backtest/engine.pyx` L903/L1658-1735 | 설계만 | 아직 available하지 않은 observation을 stream 밖에 둠 |
+| revision 표시 | NautilusTrader | `model/data.pyx` L1496 `is_revision` | 설계만 | restatement를 원본과 구분 |
+| read-only Cache/Portfolio facade | NautilusTrader | `cache/base.pxd`, `portfolio/base.pxd`, `common/actor.pxd` L73/L83 | 설계만 | mutable store 대신 bounded read Protocol을 제공 |
+| learn/infer 데이터 분리 | vn.py | `alpha/dataset/template.py` L181-194 | 코드 차용 | optional materialization의 입력 역할 분리에 사용 |
+| 시간 범위 표현 | Qlib | `backtest/decision.py` L206-300 `TradeRange` | 코드 차용 | event range 표현만 차용 |
+| 문자열 key service locator | Qlib | `common_infra.get(...)` | 반면교사 | 타입·requirement·authority 경계를 우회하므로 거부 |
+| 횡단면 PanelView, 접근 기록 lineage, 역할별 View | qlibx | §7 | 순수 창작 | 20년 × 3,000종목 PIT research와 progressive requirement에 필요 |
 
 ### 접근 기록이 lineage가 된다
 
@@ -1008,6 +1093,20 @@ engine.add_instrument(samsung)
 engine.add_instrument(kodex_etf)
 ```
 
+이 explicit registration 순서는 NautilusTrader
+`backtest/engine.pyx::BacktestEngine.add_venue`(L502)와 `add_instrument`(L733)를 **설계만 차용**한다.
+NautilusTrader는 venue를 먼저 만들고, instrument의 venue가 등록됐는지와 account compatibility를 검증한 뒤
+instrument를 DataEngine/Cache와 SimulatedExchange 양쪽에 연결한다(L756-779).
+
+qlibx에 적합한 부분은 **"venue/profile을 먼저 등록하고 Instrument를 그 경계에 명시적으로 연결한다"**는
+build-time rule이다. 이 순서가 있어야 잘못된 venue ID, cash account에 맞지 않는 margined contract, 누락된
+exact cost/settlement policy를 run 전에 실패시킬 수 있고, 등록 완료 뒤 3,000종목을 stable index array로
+compile할 수 있다. 사용자가 어떤 Exchange를 쓰는지도 config에 드러난다.
+
+NautilusTrader의 구현 전체는 가져오지 않는다. Instrument를 mutable Cache, MessageBus, execution client와
+연결하는 live-runtime object graph는 qlibx의 컬럼 저장소 View와 횡단면 batch에 과하다. qlibx는 frozen
+InstrumentRegistry와 Exchange listing/policy만 만들고 runtime data는 `available_at` View로 읽는다.
+
 `engine.add_instrument`는 stable ID와 concrete type을 registry에 넣고 `venue_id`의 Exchange에 listing을
 등록한다. Exchange는 instrument compatibility와 required policy coverage를 검증한다. Tracking-only Index는
 명시적인 executable listing이 없으면 order를 거부한다. Future extension의 `AcademicExchange`는 가격과 수량
@@ -1096,7 +1195,7 @@ qlib의 weight→order 경로는 PRD 금지 목록을 항목별로 실증한다.
 
 ### validate — pass or deny-with-reason
 
-nautilus `risk/engine.pyx`의 구조를 채택한다. Validator는 strategy와 executor 사이에 물리적으로
+NautilusTrader `risk/engine.pyx`의 구조를 **설계만 차용**한다. Validator는 strategy와 executor 사이에 물리적으로
 위치하며 두 가지만 한다.
 
 ```
@@ -1109,6 +1208,17 @@ nautilus `risk/engine.pyx`의 구조를 채택한다. Validator는 strategy와 e
 
 PRD §10.3의 best-effort adjustment와 independent validation은 다른 책임이다. 전자는 조정하고
 후자는 판정한다. 조정 결과가 존재한다는 사실이 compliance를 보증하지 않는다.
+
+### Operation provenance 요약
+
+| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
+|---|---|---|---|---|
+| clipping, lot, tradability, volume/impact 산술 | Qlib | `backtest/exchange.py` L295/L338/L728/L761/L786/L834/L859-950 | 코드 차용 | 검증된 산술을 batch화하고 모든 clip diagnostic을 반환 |
+| cost/fill model 교체 seam | NautilusTrader | `backtest/models/{fee,fill}.pyx` | 설계만 | fee/tax와 fill-price assumption을 분리 |
+| pass / deny-with-reason risk 경계 | NautilusTrader | `risk/engine.pyx` L584-666/L1073-1132 | 설계만 | Validator가 주문을 조용히 수정하지 않도록 함 |
+| target/actual 이원 관리와 long/short 4방향 분해 | vn.py | `alpha/strategy/template.py` L31-32/L133/L144-185 | 코드 차용 | intended state와 actual state를 섞지 않는 계산에 사용 |
+| ts/cs/processor 연산 정의와 검증용 factor set | vn.py | `alpha/dataset/{ts_function,cs_function,processor}.py`, `datasets/alpha_{101,158}.py` | 설계만/코드 차용 | 연산 의미는 참고하되 pandas 경계로 구현 |
+| target→order 변환, Finding, constraint adjustment | qlibx | §8 | 순수 창작 | residual과 실패 이유를 버리지 않는 PRD 계약에 맞춤 |
 
 ---
 
@@ -1207,26 +1317,41 @@ Current vertical slice는 stock/ETF `FillBatch`와 `MarkBatch`만 지원한다. 
 
 ### Reference에서 차용하고 거부한 것
 
-Qlib `backtest/account.py::Account`가 cash/Position을 한 aggregate에서 관리하고 `update_bar_end`로 모든 보유
-주식을 mark하는 기본 모양을 차용한다. `backtest/position.py::Position`의 매수·매도·초과매도 거부와 현금
-산술은 MIT 조건과 provenance를 지켜 코드 차용할 수 있다.
+| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
+|---|---|---|---|---|
+| cash와 Position을 함께 소유하는 Account, 보유분 bar-end mark | Qlib | `backtest/account.py` L71/L115/L225/L338 | 설계만 | 작은 연구용 aggregate 범위는 유지하되 reporting은 분리 |
+| Position 매수·매도·삭제, 초과매도 거부와 현금 산술 | Qlib | `backtest/position.py` L342/L352/L384 | 코드 차용 | MIT provenance를 남기고 typed batch 산술로 이식 |
+| settlement 2단계, 초기 endowment, unconstrained what-if Position | Qlib | 같은 파일 L280/L487/L493/L503 | 코드 차용 | current stock slice 밖의 항목은 해당 policy가 선택될 때만 사용 |
+| Exchange 직접 mutation, BUY/SELL update 순서, Account의 metrics/history 소유 | Qlib | `backtest/exchange.py` L421, `backtest/account.py` L128/L203/L338 | 반면교사 | 계산·상태·분석 authority가 섞이므로 거부 |
+| 일별 trading/holding PnL 분해 | vn.py | `PortfolioDailyResult.calculate_pnl` | 코드 차용 | attribution 시작점으로 사용하되 Position cost basis를 대신하지 않음 |
+| typed AccountState ID/type/currency 검증과 instrument별 accounting | NautilusTrader | `accounting/accounts/base.pyx` L354-388, `accounting/manager.pyx` L106 | 설계만 | explicit validation 경계만 축소 적용; LGPL 코드는 복사하지 않음 |
+| Account/Position/Portfolio/Cache/AccountsManager/MessageBus 전체 분리 | NautilusTrader | `portfolio/portfolio.pyx`, `accounting/manager.pyx` | 반면교사 | 다중 계좌·live lifecycle용 구조는 현재 연구 범위에 과함 |
+| typed AccountChange + snapshot/feedback/commit | qlibx | §9 | 순수 창작 | actual-state authority를 한 aggregate와 한 commit 경계에 둠 |
 
-다음 Qlib 구조는 차용하지 않는다.
+Qlib `Account`가 cash/Position을 함께 관리하고 모든 보유 주식을 mark하는 기본 모양은 현재 product의 작은
+account authority에 맞는다. Position 산술은 MIT 조건과 provenance를 지켜 이식한다.
+
+다음 Qlib 구조는 **반면교사**로 두고 차용하지 않는다.
 
 - `Exchange.deal_order(..., trade_account=account)`가 Account를 직접 변경하는 구조
 - SELL은 Account를 먼저, BUY는 Position을 먼저 갱신하는 순서 의존적 `update_order`
 - Account 안에서 portfolio metrics와 전체 historical Position 복사를 함께 관리하는 구조
 - 평균단가·실현손익·native short가 없는 기존 Position을 완성된 회계 모델로 간주하는 것
 
-NautilusTrader `Account.apply(AccountState)`에서 typed update의 account ID, account type, base currency를
-검증하는 경계와 cash/margin별 accounting rule을 **설계만** 차용한다. LGPL-3.0 코드는 복사하지 않는다.
+vn.py `PortfolioDailyResult.calculate_pnl`의 trading PnL/holding PnL 분해는 **코드 차용**해 일별 attribution의
+출발점으로 쓴다. 다만 이것은 일별 합계이므로 종목별 average cost, realized PnL와 round-trip을 대신하지 않는다.
+그 path-dependent state는 Position과 Account journal이 소유한다.
 
-NautilusTrader의 `Account + Position + Portfolio + Cache + AccountsManager + MessageBus` 분리는 다중 계좌,
+NautilusTrader `accounting/accounts/base.pyx::Account.apply(AccountState)` L354-388에서 typed update의 account
+ID, account type, base currency를 검증하는 경계와 `accounting/manager.pyx` L106의 instrument-specific
+accounting rule을 **설계만** 차용한다. LGPL-3.0 코드는 복사하지 않는다.
+
+NautilusTrader의 `Account + Position + Portfolio + Cache + AccountsManager + MessageBus` 분리는 **반면교사**다. 다중 계좌,
 실시간 order lifecycle과 margin venue를 위한 구조다. 현재 qlibx 연구 범위에서는 actual-state authority를
 찾기 어렵게 만들므로 전체 구조를 차용하지 않는다. 대신 하나의 Account가 Position까지 소유하고 Flow가 typed
 change를 commit한다.
 
-### 남은 범위 (§17)
+### 남은 범위 (§16)
 
 - **G1 Memory.** Strategy memory는 Account와 별개의 committed store다. 실제 투자 상태와 전략 belief를 섞지 않는다.
 - **G2 round-trip.** 별도 TradeLedger 없이 Position의 average cost/realized PnL와 Account journal로 해결한다.
@@ -1264,12 +1389,16 @@ error이며 producer의 private Python class를 import하지 않는다.
 Public envelope는 Pydantic 모델로 정의한다(§11). 이는 architecture가 선택한 boundary implementation이며
 다른 implementation도 같은 object-construction validation과 portable schema를 제공하면 교체 가능하다.
 
-Default local backend의 payload는 tabular/matrix는 Parquet, metadata/config는 JSON이다. 물리 layout은 nautilus
-`persistence/catalog/parquet.py`를 참고한다 — 특히 parquet metadata로 시간 범위를 인덱싱해 전체를
+NautilusTrader `backtest/results.py`의 backtest result envelope 필드 구성은 **설계만 차용**한다. qlibx는
+그 형태에 producer-independent fingerprint, dependency lineage, failure identity와 atomic publication status를
+추가한다. Reference에는 이 네 계약이 함께 없으므로 확장 부분은 qlibx 순수 창작이다.
+
+Default local backend의 payload는 tabular/matrix는 Parquet, metadata/config는 JSON이다. 물리 layout은 NautilusTrader
+`persistence/catalog/parquet.py`에서 **설계만 차용**한다 — 특히 parquet metadata로 시간 범위를 인덱싱해 전체를
 읽지 않는 기법(L570), 중복 제거(L820), 스키마 검증(L781).
 
-표면 API(`save`/`load`/`list_all_*`)는 vnpy `alpha/lab.py::AlphaLab`을 따른다. 단 vnpy에는
-fingerprint, lineage, envelope, 원자적 발행이 없으므로 **형태만 차용하고 내용은 새로 만든다.**
+표면 API(`save`/`load`/`list_all_*`)는 vn.py `alpha/lab.py::AlphaLab`에서 **코드 차용**한다. 단 vn.py에는
+fingerprint, lineage, envelope, 원자적 발행이 없으므로 그 필드는 qlibx **순수 창작**이다.
 
 Default local catalog index는 duckdb로 둔다. Object store나 external tracker backend도 같은
 `ArtifactPublisher`/`ArtifactLoader` contract, logical identity, atomic visibility와 conflict outcome을
@@ -1311,9 +1440,20 @@ Built-in과 project-local/external operation은 같은 `ComponentRequirement`, t
 제공한다. Extension registration은 package compatibility validation이 성공한 뒤에만 commit한다. Agent가
 code를 작성하거나 error를 설명할 수는 있지만 compatibility success를 선언하지 않는다.
 
+| 분석 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
+|---|---|---|---|---|
+| statistic plugin 구조 | NautilusTrader | `analysis/statistic.py`, `analyzer.py` | 설계만 | metric을 독립 plugin으로 분리 |
+| 성과 지표 계산식과 파산 시 계산 거부 | vn.py | `backtesting.py` L228-380 | 코드 차용 | 검증된 식은 쓰되 350줄 단일 함수 구조는 반면교사 |
+| 주문 진단, 체결률, 가격 유리도 | Qlib | `backtest/report.py::Indicator` L249-650 | 코드 차용 | Account mutation과 분리된 analysis artifact로 계산 |
+| PortfolioMetrics record shape | Qlib | `backtest/report.py` L22/L153 | 코드 차용 | portable schema로 옮기고 Account 내부 책임으로 두지 않음 |
+
 ### Production outbox와 reconciliation
 
 Production flow도 같은 evidence boundary를 사용하되 prepared intent와 authoritative outcome을 분리한다.
+
+NautilusTrader `execution/reports.py`의 order/fill/position reconciliation report 분리와 `create_flat` 패턴은
+**설계만 차용**한다. qlibx는 이를 external OMS result의 duplicate/stale/conflict 판정과
+`ReconciledBatch` 생성에 맞게 축소한다. NautilusTrader의 MessageBus/Cache mutation은 가져오지 않는다.
 
 ```text
 Strategy result
@@ -1379,6 +1519,16 @@ pydantic 대상은 전부 **저빈도 + 경계**, dataclass 대상은 전부 **�
 `InstrumentSet[T]`도 registration boundary에서는 전체 collection을 한 번 검증하지만, execution 전에는 stable
 instrument index와 typed array로 compile한다. `Order`, `Fill`, `CashFlow`를 만들 때 concrete Instrument나
 cost schedule을 다시 Pydantic validation하지 않는다. 이것이 `UC-SCALE-001`의 architecture mechanism이다.
+
+Domain DTO의 provenance도 이 절에서 함께 관리한다.
+
+| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
+|---|---|---|---|---|
+| Order/Trade/Position dataclass field shape | vn.py | `trader/object.py` L112-200 | 코드 차용 | 경계 안의 작은 typed DTO에 적합 |
+| partial fill/reject/cancel/expire Status enum | vn.py | `trader/constant.py` L30 | 코드 차용 | intraday와 OMS reconciliation에 필요한 상태를 명시 |
+| requested amount / dealt amount / factor 분리 | Qlib | `backtest/decision.py` L36-152 | 코드 차용 | intent와 actual execution을 구분 |
+| fixed-point Price/Quantity/Money | NautilusTrader | `model/objects.pyx` | 설계만 | 통화·수량 정밀도 계약에 사용하되 LGPL 코드는 복사하지 않음 |
+| Order status가 없는 mutable Order | Qlib | `Order` dataclass | 반면교사 | Fill을 Order 내부 필드에 덮어쓰지 않고 별도 typed result로 보존 |
 
 ### 기본 설정
 
@@ -1481,9 +1631,12 @@ engine     → 전부 (조립 지점)
 immutable AccountSnapshot 또는 resolved scoped view로 들어온다. 그래야 account commit boundary, gate와
 requirement resolver를 우회할 수 없다(I2, I4, I8).
 
-### 조립
+### 조립 — NautilusTrader에서 차용한 composition root
 
-nautilus `system/kernel.py::NautilusKernel`(L101) 방식의 명시적 생성자 주입을 따른다.
+NautilusTrader `system/kernel.py::NautilusKernel`(L101)의 명시적 composition root를 **설계만 차용**한다.
+Kernel 생성 시 Clock, Cache, Portfolio, execution component를 한 곳에서 조립해 component가 전역 locator를
+찾지 않게 하는 방식이다. qlibx에도 Clock, Executor, Exchange, Account와 Evidence 구현을 user config에 따라
+교체해야 하므로 이 패턴이 적합하다.
 
 ```python
 engine = Engine(
@@ -1503,8 +1656,28 @@ engine = Engine(
 Engine이 concrete implementation을 명시적으로 조립하므로 사용자가 execution 가정을 교체해도 Account와
 Strategy의 snapshot/feedback 계약은 바뀌지 않는다.
 
+NautilusTrader의 concrete Kernel, Cache, MessageBus나 lifecycle을 복사하지 않는다. qlibx composition root는
+PIT View, 횡단면 batch와 producer-independent artifact라는 자체 계약을 조립한다.
+
 qlib의 `common_infra.get("trade_account")` 문자열 키 서비스 로케이터는 채택하지 않는다. 타입이
 사라지고 resolved requirement, frozen invocation과 authority source를 우회하므로 채택하지 않는다.
+
+### Reference provenance와 license 규칙
+
+본문의 모든 차용 지점은 바로 옆에서 `코드 차용`, `설계만`, `반면교사`, `순수 창작`을 표시한다. Line
+reference는 아래 vendored snapshot 기준이며 snapshot을 갱신할 때 해당 본문 설명과 characterization fixture를
+같이 검증한다.
+
+| reference | snapshot | license | 허용 범위 |
+|---|---|---|---|
+| Qlib | `main@79633dd` | MIT | provenance와 notice를 남긴 코드/산술 차용 가능 |
+| vn.py | `master@1b78494` | MIT | provenance와 notice를 남긴 코드/DTO 차용 가능 |
+| NautilusTrader | `develop@4d14b8c` | LGPL-3.0 | 설계 비교만; 코드 복사 금지 |
+
+코드 차용 파일에는 원출처, 함수, 원저작권과 변경 내용을 남기고 repository `NOTICE`에 MIT license를 보존한다.
+설계만 차용한 NautilusTrader는 동일한 source 위치와 qlibx에 맞춘 차이를 문서에 기록한다. 세 reference 모두
+runtime dependency나 qlibx authority가 아니다. Backend 자체를 채택하지 않은 상세 근거는
+[[why-not-qlib-as-a-backend]]와 [[why-not-nautilus-as-a-dependency]]에 있다.
 
 ---
 
@@ -1675,14 +1848,16 @@ success로 숨기지 않는다(`UC-CONSTRAINT-ADJUST-001`).
 
 ### 13.10 Pluggable execution과 monitoring — UC-EXEC-001, UC-EXEC-002, UC-EXEC-003
 
-하나의 immutable DecisionIntent를 두 child profile이 참조한다. Daily profile은 다음 eligible close처럼
-선언된 convention으로 하나의 batch event를 만들고, intraday profile은 필요한 market binding과 여러
-execution event를 선언해 partial fill을 만들 수 있다. Decision lineage는 같고 각 child Account의 Fill,
-cash, position과 이후 feedback만 다르다(`UC-EXEC-001`).
+하나의 immutable DecisionIntent를 두 child profile이 참조한다. 첫 naive daily profile은
+`NextSessionCloseExecutor + ClosePriceFill`로 다음 eligible trading session close에 하나의 batch event를
+만든다. Intraday profile은
+필요한 market binding과 여러 execution event를 선언해 partial fill을 만들고, 각 event 뒤 최신 AccountSnapshot을
+다시 읽는다. Decision lineage는 같고 각 child Account의 Fill, cash, position과 이후 feedback만 다르다
+(`UC-EXEC-001`).
 
-Daily close profile은 decision time과 close observation의 `available_at`을 비교한다. 아직 공개되지 않은
-동일 시점 close를 fill price로 요청하면 Fill 전에 실패한다. Volume impact나 partial fill을 모델링하지
-않으면 limitation artifact에 남긴다(`UC-EXEC-002`).
+Daily profile은 decision 다음 eligible session과 그 close observation의 `available_at`을 검증한다. 아직
+공개되지 않은 close나 기본 convention과 다른 same-session close를 요청하면 Fill 전에 실패한다. Volume
+impact나 partial fill을 모델링하지 않으면 limitation artifact에 남긴다(`UC-EXEC-002`).
 
 MONITOR timer는 decision 유무와 무관하게 Account의 committed snapshot과 resolved compliance
 view를 읽는다. Price drift로 sector breach가 생기면 finding만 publish하고 order나 account mutation을
@@ -1722,206 +1897,7 @@ monitoring은 outbox target이 아니라 reconciled account authority만 읽는�
 
 ---
 
-## 14. 차용 출처 매핑
-
-각 표의 마지막 열은 차용 방식을 `코드 차용`, `설계만`, `반면교사`, `순수 창작` 중 하나로 직접 표기한다.
-
-세 reference 모두 **dependency가 아니다.** qlibx는 engine을 직접 구현하며 reference별 license와 아래
-분류에 따라 코드, 산술 또는 설계만 선택적으로 차용한다. 채택하지 않은 판단의 근거는 [[why-not-qlib-as-a-backend]]와
-[[why-not-nautilus-as-a-dependency]]에 있다.
-
-모든 line reference는 `references/` 아래 vendored snapshot 기준이다. 각 snapshot의 upstream commit은
-해당 디렉터리의 `UPSTREAM.md`에 기록되어 있다. Snapshot을 갱신하면 이 표의 line number를 함께
-검증해야 한다.
-
-| reference | commit | 라이선스 |
-|---|---|---|
-| `references/qlib` | `79633dd` (main) | MIT |
-| `references/vnpy` | `1b78494` (master) | MIT |
-| `references/nautilus_trader` | `4d14b8c` (develop) | LGPL-3.0 |
-
-### ① kernel
-
-| 항목 | 출처 | 위치 | 차용 방식 |
-|---|---|---|---|
-| Clock 추상, TestClock, LiveClock | nautilus | `common/component.pyx` L130/L623/L839 | 설계만 |
-| `advance_time` → 시각순 정렬 반환 | nautilus | 같은 파일 L790 | 설계만 |
-| TimeEvent / TimeEventHandler | nautilus | L1013 / L1144 | 설계만 |
-| 동시각 priority | nautilus | `Subscription.priority` L2911 | 설계만 |
-| 단일 시간축 정렬 순회 | vnpy | `alpha/strategy/backtesting.py` L156-166 | 코드 차용 |
-| 단일 freq/step 캘린더 | qlib | `backtest/utils.py` L23 | 반면교사 |
-
-### ② flow
-
-| 항목 | 출처 | 위치 | 차용 방식 |
-|---|---|---|---|
-| 일단위 executor 골격 | qlib | `backtest/executor.py` L513, L561 | 코드 차용 |
-| 계층 위임 아이디어 | qlib | 같은 파일 L310 `NestedExecutor` | 설계만 |
-| 일별 순회 + 체결 루프 | vnpy | `alpha/strategy/backtesting.py` `new_bars` | 코드 차용 |
-| executor 교체 계약, 분할 실행 | nautilus | `execution/client.pyx`, `algorithm.pyx` | 설계만 |
-| **callback과 Flow-owned Account commit** | — | — | 순수 창작 |
-
-### ③ view ★
-
-> **초안 정정.** 이 표는 원래 "Context 3종, cutoff, bounded load — 어디에도 대응물 없음(순수 창작)"과
-> "nautilus에는 Context 객체 자체가 없어 PIT가 구조로 강제되지 않는다"고 기술했다. **후자는
-> 사실이 아니다.** nautilus는 Context 객체 대신 이중 timestamp와 `ts_init` 정렬 stream으로 같은
-> 보장을 제공하며, 이는 PRD §4.4가 요구하는 메커니즘 그 자체다. §18 참조.
-
-| 항목 | 출처 | 위치 | 차용 방식 |
-|---|---|---|---|
-| **이중 timestamp** (`ts_event` / `ts_init`) | nautilus | `core/data.pyx` L30, L42 | 설계만 |
-| ↳ PRD 대응 | — | `ts_event`=event time, **`ts_init`=`available_at`** (§4.4, §7.2) | — |
-| **`ts_init` 오름차순 stream** = PIT 강제 | nautilus | `backtest/engine.pyx` L903, L1658-1735 | 설계만 |
-| restatement 표시 | nautilus | `model/data.pyx` L1496 `is_revision` | 설계만 |
-| 읽기 전용 facade | nautilus | `cache/base.pxd` `CacheFacade`, `portfolio/base.pxd` | 설계만 |
-| ↳ Actor가 보유하는 형태 | nautilus | `common/actor.pxd` L73, L83 (`readonly`) | 설계만 |
-| data ↔ timer 실행 순서 | nautilus | `backtest/engine.pyx` L1692, L1731-1735 | 설계만 |
-| 명시적 생성자 주입 | nautilus | `system/kernel.py` L101 | 설계만 |
-| learn/infer 데이터 분리 | vnpy | `alpha/dataset/template.py` L181-194 | 코드 차용 |
-| 시간 범위 표현 | qlib | `backtest/decision.py` L206-300 `TradeRange` | 코드 차용 |
-| 문자열 키 서비스 로케이터 | qlib | `common_infra.get(...)` | 반면교사 |
-| **횡단면 패널 view** (instrument × field) | — | — | 순수 창작 |
-| **접근 기록 기반 lineage** | — | — | 순수 창작 |
-| **역할별 view 구성** (compliance 분리) | — | — | 순수 창작 |
-
-시간 경계 메커니즘은 nautilus에서 설계만 차용한다. 남는 순수 창작 영역은 **접근 축**이다. Reference 세 곳은
-모두 instrument별 시계열이 기본 단위이고(`cache.bars(bar_type)`은 한 종목의 deque), 메모리 상주
-방식이라 20년 × 3000종목을 담지 못한다. qlibx의 기본 단위인 decision time 횡단면과 그것을 컬럼
-저장소 질의로 구현하는 부분은 여전히 창작이다.
-
-### ④ operation
-
-| 항목 | 출처 | 위치 | 차용 방식 |
-|---|---|---|---|
-| **체결 clipping 전체 순서** | qlib | `backtest/exchange.py` **L859-950** | 코드 차용 |
-| ↳ volume 참여 제한 | qlib | L786 | 코드 차용 |
-| ↳ 제곱 impact cost | qlib | L892 | 코드 차용 |
-| ↳ 현금 한도 매수량 | qlib | L834 | 코드 차용 |
-| ↳ **마지막 매도 반올림 생략** | qlib | **L904** | 코드 차용 |
-| ↳ lot 반올림 / 거래단위 | qlib | L761 / L728 | 코드 차용 |
-| 상하한가 / 거래정지 / tradability | qlib | L338 / L378 / L404 | 코드 차용 |
-| volume threshold 파싱 | qlib | L295 | 코드 차용 |
-| cost·fill model 교체 인터페이스 | nautilus | `backtest/models/{fee,fill}.pyx` L33/L34 | 설계만 |
-| clipping 사유를 debug 로그로 폐기 | qlib | L830, L917, L928, L936 | 반면교사 |
-| pass / deny-with-reason 구조 | nautilus | `risk/engine.pyx` L584-666, L1073-1132 | 설계만 |
-| TradingState | nautilus | 같은 파일 L228 | 설계만 |
-| target/actual 이원 관리 | vnpy | `alpha/strategy/template.py` L31-32, L133 | 코드 차용 |
-| 4방향 분해 (숏 대비) | vnpy | 같은 파일 L144-185 | 코드 차용 |
-| ts 함수 22종 | vnpy | `alpha/dataset/ts_function.py` | 설계만† |
-| cs 함수 5종 | vnpy | `alpha/dataset/cs_function.py` | 설계만† |
-| processor 9종 | vnpy | `alpha/dataset/processor.py` | 설계만† |
-| 검증용 팩터셋 | vnpy | `alpha/dataset/datasets/alpha_{101,158}.py` | 코드 차용 |
-| **target→order 변환 전체** | — | — | 순수 창작 |
-| **Finding 스키마, override 기록** | — | — | 순수 창작 |
-| 섹터 중립화 / beta 제거 / hump | — | — | 순수 창작 |
-
-PRD §8.4 built-in 목록과 대조 시 vnpy가 마지막 3개를 제외하고 전부 커버한다.
-
-† polars를 채택하지 않기로 했으므로(O2) 이 세 항목은 **복사가 아니라 pandas 재작성**이다. 연산 정의와
-경계 처리만 참고하고 구현은 pandas로 독립 재작성한다.
-
-### ⑤ account
-
-| 항목 | 출처 | 위치 | 차용 방식 |
-|---|---|---|---|
-| Position 매수/매도/삭제, 초과매도 거부 | qlib | `backtest/position.py` L342/L352/L384 | 코드 차용 |
-| settle 2단계 | qlib | L487 / L493 | 코드 차용 |
-| 초기 endowment | qlib | L280 `fill_stock_value` | 코드 차용 |
-| 제약 없는 position (what-if) | qlib | L503 `InfPosition` | 코드 차용 |
-| cash와 Position을 함께 소유하는 Account shape | qlib | `backtest/account.py` L71/L115 | 설계만 |
-| 모든 held position의 bar 종료 mark | qlib | `backtest/account.py` L225/L338 | 설계만 |
-| **trading/holding PnL 분해** | vnpy | `PortfolioDailyResult.calculate_pnl` | 코드 차용 |
-| typed AccountState의 ID/type/currency 검증 | nautilus | `accounting/accounts/base.pyx` L354-388 | 설계만 |
-| instrument별 balance/margin 계산 경계 | nautilus | `accounting/manager.pyx` L106, `accounts/margin.pyx` L54 | 설계만 |
-| Exchange가 Account를 직접 변경 | qlib | `backtest/exchange.py` L421, `account.py` L203 | 반면교사 |
-| BUY/SELL별 update 순서 의존 | qlib | `backtest/account.py` L203-223 | 반면교사 |
-| Account가 metrics/history까지 소유 | qlib | `backtest/account.py` L128-129/L338 | 반면교사 |
-| Account/Position/Portfolio/Cache/Manager 전체 분리 | nautilus | `portfolio/portfolio.pyx`, `accounting/manager.pyx` | 반면교사 |
-| **typed AccountChange + snapshot/feedback/commit 경계** | — | — | 순수 창작 |
-
-Qlib은 연구용 Account의 크기와 bar-end mark를 배우기에 적합하지만 Exchange mutation과 reporting 책임까지
-복사하면 계산/상태/분석 경계가 다시 섞인다. NautilusTrader는 typed state 검증과 instrument-specific accounting
-경계가 강하지만 다중 계좌·실시간 주문 lifecycle을 위한 객체 분할 전체는 현재 qlibx 범위에 과하다. 따라서
-qlibx는 **Qlib에 가까운 단일 Account 범위와 NautilusTrader에 가까운 명시적 commit 검증**을 결합한다.
-
-### ⑥ evidence
-
-| 항목 | 출처 | 위치 | 차용 방식 |
-|---|---|---|---|
-| save/load/list 표면 | vnpy | `alpha/lab.py` L20-480 | 코드 차용 |
-| parquet 물리 layout | nautilus | `persistence/catalog/parquet.py` L105 | 설계만 |
-| ↳ metadata 시간범위 인덱싱 | nautilus | L570 | 설계만 |
-| ↳ 중복 제거 / 스키마 검증 | nautilus | L820 / L781 | 설계만 |
-| 결과 envelope 필드 | nautilus | `backtest/results.py` L20 | 설계만 |
-| report 직렬화 패턴 | nautilus | `execution/reports.py` L366, L416 | 설계만 |
-| reconciliation report 3분할 | nautilus | 같은 파일 L95/L619/L859, `create_flat` L919 | 설계만 |
-| **fingerprint, lineage, atomic publication** | — | — | 순수 창작 |
-
-### ⑦ analysis / 도메인 객체
-
-| 항목 | 출처 | 위치 | 차용 방식 |
-|---|---|---|---|
-| 통계 plugin 구조 | nautilus | `analysis/statistic.py` L25, `analyzer.py` L38/L59 | 설계만 |
-| 성과 지표 계산식 | vnpy | `backtesting.py` L228-380 | 코드 차용 |
-| ↳ 파산 시 통계 계산 거부 | vnpy | L280-282 | 코드 차용 |
-| 주문 단위 진단 집계 | qlib | `backtest/report.py` L249-650 `Indicator` | 코드 차용 |
-| ↳ 체결률 / 가격 유리도 | qlib | L330 / L524 | 코드 차용 |
-| PortfolioMetrics 레코드 스키마 | qlib | `report.py` L22, L153 | 코드 차용 |
-| 350줄 단일 함수 통계 | vnpy | L228-380 | 반면교사 |
-| dataclass 필드 구성 | vnpy | `trader/object.py` L112-200 | 코드 차용 |
-| **Status enum** (부분체결/거부/취소/만료) | vnpy | `trader/constant.py` L30 | 코드 차용 |
-| amount / deal_amount / factor 분리 | qlib | `backtest/decision.py` L36-152 | 코드 차용 |
-| 고정소수점 Price/Qty/Money | nautilus | `model/objects.pyx` | 설계만 |
-| 주문 상태 개념 부재 | qlib | `Order` dataclass | 반면교사 |
-
-vnpy 통계는 **계산식은 코드 차용이지만 구조는 반면교사**다. 계산식을 추출해 nautilus의 plugin 껍데기에 개별로
-담는다.
-
-### 순수 창작 구역 요약
-
-참고 코드가 없는 영역은 전부 **경계와 증거**다.
-
-```
-③ 횡단면 패널 view        instrument × field, 컬럼 저장소 질의   ← 가장 큼
-③ 접근 기록 lineage       view 가 조회를 기록
-③ requirement resolver   minimal registration → operation-scoped binding
-③ 역할별 view 구성        resolved capability만 노출
-② callback, Flow-owned Account commit
-② finalization            decision/execution/reconcile별 Memory commit timing
-④ Strategy/Ensemble      direct/stored/member result composition
-④ target→order 변환      전 주문 진단 보존
-④ 제약 선언/조정/검증     PRD §10.3
-⑤ Account change 경계    snapshot/feedback/typed commit/CAS
-⑤ Position 회계          평균단가 · 라운드트립 · 실현손익 (§17 G2)
-⑤ Memory                 전략 상태 commit boundary (§17 G1)
-⑤ long-short 실행 회계    담보 · 수익률 분모 · 차입비용 (§17 G4)
-⑥ artifact / failure     typed load, fingerprint, lineage, 원자적 발행
-⑥ production reconcile  outbox, OMS result, idempotent confirmed-state commit
-  instrument/exchange semantics   계약조건, listing, 비용, lifecycle (§2.6·§16)
-```
-
-계산은 대부분 코드 차용/설계만이고 경계는 대부분 순수 창작이다. 이것이 §1 설계 명제의 실증이다. 그러나 progressive
-workflow에서는 error/evidence 경계를 뒤로 미루면 앞선 계산 slice가 잘못된 success/failure contract로
-굳는다. §15는 최소 resolver, typed evidence와 publication boundary를 foundation으로 먼저 만들고,
-borrowed calculation은 그 뒤의 vertical slice에서 추가하도록 정한다.
-
-### 라이선스 실무
-
-```
-qlib             MIT        코드 차용 가능
-vnpy             MIT        코드 차용 가능
-nautilus_trader  LGPL-3.0   설계만 — 코드 복사 금지
-```
-
-- 코드 차용 파일 상단에 원출처(파일·함수), 원저작권, 변경 내용을 주석으로 남긴다.
-- 저장소 루트에 `NOTICE`를 두고 qlib·vnpy 라이선스 전문을 포함한다.
-- 설계만 항목은 개념과 명명만 차용한다. 저작권은 표현(코드)을 보호하고 아이디어(구조)를 보호하지 않는다.
-- 코드 주석에 `코드 차용` 또는 `설계만` 분류를 남겨 이후 감사에서 grep으로 추적 가능하게 한다.
-
----
-
-## 15. 구축 순서
+## 14. 구축 순서
 
 구축 단위는 layer가 아니라 observable vertical use case다. Error와 evidence를 뒤로 미루면 초기
 workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 둔다.
@@ -1930,7 +1906,7 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 |---|---|---|---|
 | 1 | Minimal registration + typed evidence | DatasetRegistration, RequirementResolver, OperationError, atomic local catalog | UC-DATA-001/002, UC-ERROR-001, UC-ARTIFACT-002, UC-RESEARCH-001 |
 | 2 | PIT direct research | Clock/View, ResolvedBinding, Direct Strategy, signed-weight artifact | UC-PIT-001, UC-SIGNAL-001, UC-CONSTRAINT-001 |
-| 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §15.1 |
+| 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §14.1 |
 | 4 | Daily closed loop | kernel, decision/execution flow, Account/Memory, daily profile, checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002 |
 | 5 | Pluggable execution branch | immutable DecisionIntent, daily/intraday child profiles, isolated Account | UC-EXEC-001, UC-ALPHA-CHILD-001 |
 | 6 | Stored research + Strategy composition | materialize operation, typed load, Ensemble Strategy, reuse compatibility, Memory update | UC-SIGNAL-002, UC-ALPHA-*, UC-ENSEMBLE-001, UC-ARTIFACT-001 |
@@ -1948,7 +1924,7 @@ execution assumption의 독립성을 검증한다. 10단계는 current support p
 경로는 택하지 않는다 — clipping 순서 중 현금 제약만이 순차이고 나머지는 elementwise이므로, 처음부터
 batch로 두는 편이 단순하다.
 
-### 15.1 체결 산술 parity 검증
+### 14.1 체결 산술 parity 검증
 
 `pyqlib`는 dependency가 아니므로 qlib을 in-process oracle로 실행할 수 없다. 3단계의 검증은 **정적
 fixture 대조**로 수행한다.
@@ -1971,28 +1947,19 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 
 ---
 
-## 16. 열린 결정
+## 15. 열린 결정
 
-| # | 항목 | 상태 |
+이 절에는 **아직 선택이나 구현 범위가 확정되지 않은 항목만** 둔다. 해결·기각된 판단은 §17 개정 이력에서
+보존하며 열린 결정 표에 남기지 않는다.
+
+| # | 항목 | 현재 상태와 결정에 필요한 것 |
 |---|---|---|
-| ~~O1~~ | ~~`pyqlib` 의존성 위치~~ | **해결.** `pyproject.toml`에서 완전히 제거. runtime/dev 어느 group에도 두지 않는다. 결과로 in-process parity oracle을 쓸 수 없으므로 §15.1 정적 fixture 대조로 대체한다. 차용 대상 qlib 소스는 `references/`에 보존되어야 한다 (O8) |
-| ~~O2~~ | ~~polars 도입~~ | **기각.** 우리 접근 축(횡단면 batch)에서 이득이 크지 않다고 판단. 저장 Parquet / 질의 duckdb / 계산·경계 pandas로 간다. 대가로 vnpy signal 연산 이식이 복사가 아니라 재작성이 된다 (§14) |
-| ~~O3~~ | ~~matched capitalization 폐기~~ | **해결.** Position direction은 matched-capitalization 우회가 아니라 concrete Instrument semantics와 execution policy가 함께 결정한다. Architecture가 모델과 policy resolution을 소유하며 PRD는 특정 capability 필드를 강제하지 않는다 |
-| ~~O9~~ | ~~long-short 수익률 분모~~ | **해결.** dollar-neutral book은 **gross 기준**으로 수익률을 계산한다. Long 100 / short 100이면 분모는 200이다. NAV 기준은 leverage에 따라 수익률이 달라져 alpha 비교가 불가능해지므로 채택하지 않는다. §17 G4의 나머지 항목(담보 모델, 차입 비용, locate)은 여전히 미해결 |
-| ~~O4~~ | ~~hypothetical vs real short~~ | **해결.** workflow가 `long_only` / `hypothetical_short` / `real_short` semantics를 명시적으로 resolve한다. 미해결은 `long_only`이며, hypothetical result는 실제 execution profile에서 거부되고 artifact에 표시된다. 이를 Instrument의 단일 고정 필드로 제한하지 않는다 |
-| O12 | **패키지명 `qlibx` → `vqar`** | **확정, 실행 보류.** vqar = vibe quant alpha research. PRD 본문 정리(O7)는 완료됐지만 rename은 별도 product/release change로 격리한다. 범위: 배포/import/CLI 이름, `src/qlibx/`, 문서 파일명과 obsidian 링크, `.agent/project.yaml`의 canonical document 경로, `.gitignore`의 `.qlibx/`·`qlibx-research/`, bundled skill entrypoint. 착수 전 PyPI 가용성 확인 필요. `.agent/plans/completed/`는 당시 명칭 기록이므로 소급 변경하지 않는다 |
-| O5 | margined contract 확장 | **보류. Account 경계 characterization 확정.** Complete derivative lifecycle은 현재 범위 밖이다. 공통 `MarginedContract` 아래 만기·최종정산이 있는 `Future`와 만기 필드가 없는 `PerpetualSwap`을 형제 타입으로 둔다. Exchange가 settlement/funding/expiry event specification을 반환하고 Flow가 typed `LifecycleBatch`를 Account에 commit한다. Account는 held Future를 valuation set에 포함하지만 exact lifecycle policy가 없으면 지원 성공으로 간주하지 않는다. `real_short`의 담보·차입 비용은 별도 후속 결정이다 |
-| ~~O11~~ | ~~qlib을 runtime backend로 채택~~ | **기각.** decision clock이 데이터 인덱스에 묶여 있어 4개 clock 분리가 불가능하고, 저장 최소 단위에 `available_at`이 없으며, 실험 단위 pickle/MLflow가 portable artifact를 대체하지 못한다. 모델 35개를 싣는 배포 형태도 PRD §5.3·§2.7의 소유 경계와 어긋난다. 상세는 [[why-not-qlib-as-a-backend]] |
-| ~~O10~~ | ~~nautilus를 execution backend로 채택~~ | **기각.** 기본 작업 단위가 다르다 — instrument별 event 대 decision-time 횡단면. PRD §8~§10·§12에 대응물 없음. v1→v2 전환 중. 3000종목 미검증. 상세와 재검토 조건은 [[why-not-nautilus-as-a-dependency]] |
-| O6 | pub/sub 도입 시점 | **보류. 근거 확정.** 한 event의 수신자가 2개뿐이고 이름을 안다. 중간층은 호출 그래프를 감추고 배달 순서를 따로 설계해야 I7이 유지된다. 도입 조건은 (a) runtime event subscriber extension 개방 (b) 한 event 수신자 증가 (c) 전 event 로깅/replay. 전환 비용이 flow registration에 국한되고 operation/Account 계약은 불변이므로 미룰 수 있다 |
-| ~~O7~~ | ~~PRD 본문 정리~~ | **해결.** `84cd113`이 Qlib-runtime 전제와 fixed global stage/pipeline 서술을 제거하고 progressive workflow contract로 본문을 정리했다. 현 architecture revision이 그 결과를 반영한다 |
-| ~~O8~~ | ~~qlib 소스 보존~~ | **해결.** `references/qlib`을 upstream `main@79633dd` 전체 트리(619 paths)로 교체. 기존 부분 스냅샷(274 paths)은 소스를 담고 있지 않았다. §14 인용이 저장소만으로 해결된다 |
-
-O3·O4는 현재 주식 workflow에 필요한 의미를 해결했다. O5는 그 결정을 막지 않는 독립적인 미래 확장이다.
+| O5 | margined contract 확장 | **범위 미확정.** Account의 held-instrument valuation과 `LifecycleBatch` 경계는 정했지만 complete Future/Perpetual lifecycle, collateral, borrow fee와 locate의 current-support 포함 여부는 별도 결정이 필요하다 |
+| O6 | pub/sub 도입 시점 | **도입 시점 미확정.** 현재는 수신자가 적고 Flow가 순서를 직접 아는 편이 단순하다. Runtime subscriber extension, 한 event의 다수 소비자 또는 전 event logging/replay가 실제 요구될 때 MessageBus 도입을 재검토한다 |
+| O12 | package name | **미확정. 현재 후보는 `vqapr`.** `vibe quant alpha portfolio / asset pricing research`의 중의적 의미로, alpha strategy research와 academic asset-pricing research를 함께 표현한다. 이름 확정 전 PyPI 가용성, import/CLI/document path migration과 사용자 혼동 가능성을 별도 검토한다. 현재 package/import 이름은 `qlibx`를 유지한다 |
 
 ---
-
-## 17. 설계 감사 기록
+## 16. 설계 감사 기록
 
 이 절은 architecture를 구체적 research scenario와 canonical PRD에 대조해 발견한 gap과 불일치를
 기록한다. 1차 감사는 2026-08-03의 실행 중심 PRD와 vendored reference를, 2차 감사는 2026-08-05
@@ -2085,7 +2052,7 @@ stored-result analysis에는 이 event가 존재하지 않는다.
 `UC-PIT-001` OperationError로 materialization 전에 실패한다.
 
 따라서 derived label registration은 horizon이 availability와 일치하는지 validation해야 한다. 이를
-누락하면 §18이 지적한 "보장이 write 시점으로 이동한 대가"가 정확히 여기서 실현된다.
+누락하면 §17이 지적한 "보장이 write 시점으로 이동한 대가"가 정확히 여기서 실현된다.
 
 Fitted state가 있는 component는 이를 typed artifact 또는 versioned binary payload reference로 저장하고,
 어느 state를 Strategy가 소비했는지 lineage edge로 기록한다. 최신 파일 경로 alias로 대체하지 않으며
@@ -2153,7 +2120,7 @@ member를 결합하는 것 자체는 실행 회계와 무관하다.
 ### 현재 남은 감사 action
 
 ```
-G1 · G2 · G3 · G5 → architecture contract 해결. §15 해당 vertical slice에서 fixture로 검증
+G1 · G2 · G3 · G5 → architecture contract 해결. §14 해당 vertical slice에서 fixture로 검증
 G4             → hypothetical은 O3·O4 의미로 진행 가능. real short는 담보·차입·locate 결정 필요
 ```
 
@@ -2162,7 +2129,28 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 
 ---
 
-## 18. 개정 이력
+## 17. 개정 이력
+
+### 2026-08-06 — execution 시점 명확화와 출처 설명의 본문 통합
+
+**체결 시점.** 첫 vertical slice의 모호한 `CloseFill` 표현을
+`NextSessionCloseExecutor + ClosePriceFill` 조합으로 명확히 했다. Decision이 끝난 **다음 eligible trading
+session의 close**에 체결하며,
+당일 종가 체결과 calendar day 기준 이튿날 체결을 뜻하지 않는다. 이는 intraday path, market impact와
+부분체결을 생략한 가장 단순하고 낙관적인 가정이다. Intraday Executor는 같은 immutable DecisionIntent를
+여러 ExecutionEvent로 나누고, 각 event마다 최신 AccountSnapshot을 읽어 같은 `Account.commit()` 경계를
+통과한다.
+
+**출처 설명.** 별도 차용 출처 표를 제거하고 Clock, Flow/Executor, View, Operation, Account, Evidence,
+DTO와 Engine 조립의 해당 본문에 출처·위치·차용 수준·비차용 이유를 함께 기록한다. 특히 명시적인
+`add_exchange` 뒤 `add_instrument` 조립 순서는 NautilusTrader `BacktestEngine.add_venue`와
+`add_instrument`의 build-time validation에서 설계만 차용했음을 §8에 기록했다. 계약과 근거가 서로 다른
+절에서 독립적으로 변해 sync가 깨지는 것을 막기 위한 변경이다.
+
+**열린 결정.** 해결되거나 기각된 항목은 열린 결정 표에서 제거했다. Package name은 아직 확정하지
+않았으며 현재 후보는 `vqapr`이다. `vibe quant alpha portfolio / asset pricing research`라는 중의적 의미로
+alpha strategy research와 academic asset-pricing research를 함께 표현한다. 확정 전에는 package/import
+이름 `qlibx`를 유지한다.
 
 ### 2026-08-06 — Account authority 통합과 read/write 분리
 
@@ -2195,9 +2183,9 @@ rebuild를 도입하지 않으므로 full CQRS/Event Sourcing이라고 부르지
 **변경.** Event마다 `gate`가 snapshot(`Context`)을 조립해 judge에 넘기던 구조를, **clock에 묶인
 읽기 전용 조회 창구(view)** 를 judge가 들고 필요한 시점에 조회하는 구조로 교체했다.
 
-**계기.** nautilus 소스를 다시 읽는 과정에서 초안의 사실관계 오류가 확인되었다. §14는
-"nautilus에는 Context 객체가 없어 PIT가 구조로 강제되지 않는다"고 기술했으나, nautilus는 다른
-메커니즘으로 같은 보장을 제공한다.
+**계기.** nautilus 소스를 다시 읽는 과정에서 초안의 사실관계 오류가 확인되었다. 당시 별도 차용
+매핑 절은 "nautilus에는 Context 객체가 없어 PIT가 구조로 강제되지 않는다"고 기술했으나, nautilus는
+다른 메커니즘으로 같은 보장을 제공한다. 현행 출처와 판단은 §7 본문에 통합했다.
 
 ```
 core/data.pyx  L30  ts_event   그 사건이 발생한 시각
@@ -2236,16 +2224,16 @@ Stream이 `ts_event`가 아니라 **`ts_init` 오름차순**으로 정렬된다�
 flow가 유일한 부수효과 지점이라는 배치는 변경되지 않는다.
 
 **영향 범위.** §2 멘탈 모델, §3 원자 표(cutoff 열 제거), §4 불변식 I2·I3, §7 전면 재작성,
-§8 judge 계약 첫 인자, §14 매핑표 ③ 정정.
+§8 judge 계약 첫 인자를 정정했다. 당시 별도 매핑표의 내용은 현행 §7 View reference 설명에 흡수했다.
 
 **남는 순수 창작 영역.** 시간 경계 메커니즘은 nautilus에서 차용하지만 **접근 축**은 여전히 창작이다. Reference
 세 곳은 instrument별 시계열이 기본 단위이고 메모리 상주 방식이라, decision time 횡단면을 컬럼
 저장소 질의로 제공하는 부분에는 대응물이 없다.
 
-### 2026-08-03 — 설계 감사 (§17)
+### 2026-08-03 — 설계 감사
 
 네 개의 research scenario 대조로 다섯 개 gap 확인. I4가 PRD §9.1·§9.10과 모순되어 개정. 상세는
-§17.
+현행 §16.
 
 ### 2026-08-03 — execution backend 결정 및 batch 단위 확정
 
@@ -2258,7 +2246,7 @@ engine은 qlibx가 구현한다. 근거와 재검토 조건은 [[why-not-nautilu
 3000종목 규모가 미검증이라는 점이 더해진다.
 
 **구조 변경.** Executor가 "일정표"에서 **횡단면 batch 실행기**로 바뀐다. `exchange.match(order)`는
-`exchange.match_batch(orders)`가 되고, 당시에는 `FillSink.apply_batch`가 commit을 담당했다. §15 구축 순서는
+`exchange.match_batch(orders)`가 되고, 당시에는 `FillSink.apply_batch`가 commit을 담당했다. 현행 §14 구축 순서는
 2단계부터 instrument축 배열을 기본 단위로 잡았다. FillSink 결정은 2026-08-06 Account commit으로 폐기되었다.
 
 **유지되는 것.** event / callback / handler 기반 inversion of control, clock, closed-loop feedback은
@@ -2277,7 +2265,7 @@ returns).sum()` — 는 feedback edge가 없어 PRD §4.3을 만족할 수 없�
 **instrument (O3·O4 해결).** PRD에 §7.12 instrument capability declaration을 신설하고 §11.4~11.7의
 matched capitalization을 대체했다. Position이 음수를 가질 수 있는지는 engine의 고정 속성이 아니라
 instrument가 선언하는 값이며, `long_only` / `hypothetical_short` / `real_short` 세 값을 갖는다.
-미선언은 `long_only`로 취급하고 unknown을 shortable로 추측하지 않는다. §17 G4가 `hypothetical_short`
+미선언은 `long_only`로 취급하고 unknown을 shortable로 추측하지 않는다. §16 G4가 `hypothetical_short`
 범위까지 착수 가능해졌다.
 
 matched capitalization은 qlib의 long-only Position 제약을 우회하기 위한 장치였다. Engine 소유권이
@@ -2288,13 +2276,13 @@ matched capitalization은 qlib의 long-only Position 제약을 우회하기 위�
 구조 변경을 요구해서는 안 된다는 제약만 남긴다.
 
 **polars 기각 (O2).** 횡단면 batch 접근에서 이득이 크지 않다고 판단했다. 저장 Parquet / 질의 duckdb /
-계산·경계 pandas로 간다. 대가는 vnpy signal 연산 30여 개가 복사가 아니라 pandas 재작성이 된다는 것이며
-§14에 †로 표시했다.
+계산·경계 pandas로 간다. 대가는 vnpy signal 연산 30여 개가 복사가 아니라 pandas 재작성이 된다는 것이다.
+현행은 §8 Operation provenance에서 코드 차용과 재작성 경계를 함께 설명한다.
 
 **FillConvention 분리.** Executor가 정하는 것은 일정이고 체결가 규약은 별도 축이다. 둘을 묶으면 종가
-체결을 시가 체결로 바꾸는 데 executor를 새로 써야 한다. `CloseFill`을 기본으로 두되 **낙관적 가정임을
-명시**하고, 사용된 convention identity를 result에 기록한다. Convention 교체는 alpha부터 Account까지 어느
-계약에도 영향을 주지 않는다.
+체결을 시가 체결로 바꾸는 데 executor를 새로 써야 한다. 당시 `CloseFill`이라고 적은 기본값은
+2026-08-06 `NextSessionCloseExecutor + ClosePriceFill` 조합으로 명확히 했고, **낙관적 가정임을 명시**하며 사용된 convention identity를
+result에 기록한다. Convention 교체는 alpha부터 Account까지 어느 계약에도 영향을 주지 않는다.
 
 **pub/sub 보류 근거 확정 (O6).** 한 event의 수신자가 둘뿐이고 이름을 안다. 전환 비용이 발행 지점 1곳
 교체에 그치고 operation·Account 계약이 불변이므로 미룰 수 있다. 반대로 `available_at`, clock 분리,

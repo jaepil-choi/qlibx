@@ -22,7 +22,47 @@ coverage_sets:
     - UC-LOOKTHROUGH-001
     - UC-LOOKTHROUGH-002
     - UC-LOOKTHROUGH-003
+  m7_reporting:
+    - UC-REPORT-001
+    - UC-MONITOR-001
 scenarios:
+  - id: UC-REPORT-001
+    case: one_stored_analysis_three_value_preserving_renderers
+    test: tests/acceptance/test_reporting_scenarios.py::test_uc_report_001_renderers_preserve_one_stored_analysis_value_set
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_stock_daily_prices.csv
+      stored_inputs:
+        - simulation_checkpoint
+        - execution_result
+      renderers: [table, chart, machine]
+    expected:
+      analysis_recalculation_per_renderer: false
+      value_fingerprint_equal: true
+      account_mutation: false
+      memory_mutation: false
+
+  - id: UC-MONITOR-001
+    case: actual_breach_and_missing_input_are_distinct_report_records
+    test: tests/acceptance/test_reporting_scenarios.py::test_uc_monitor_001_report_separates_actual_breach_and_missing_input
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_stock_daily_prices.csv
+        - data/DW/fng_k200_members.csv
+        - data/preprocessed/k200_members.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+      stored_inputs:
+        - constraint_monitoring_result
+        - operation_error
+    expected:
+      breach_count: 1
+      missing_input_count: 1
+      intended_target_as_actual: false
+      account_mutation: false
+      memory_mutation: false
+
   - id: UC-LOOKTHROUGH-001
     case: same_real_etf_opaque_or_user_mapped
     test: tests/acceptance/test_lookthrough_scenarios.py::test_uc_lookthrough_001_is_user_declared_while_same_etf_stays_opaque

@@ -1,0 +1,16 @@
+dataset_id: sample-k200-benchmark
+source: examples/qlibx_owned/constraint_workflow/benchmark.csv
+source_format: csv
+instrument_field: ticker
+observation_time_field: observation_time
+available_at:
+  kind: field
+  field: available_at
+logical_key: [observation_time, available_at, ticker]
+semantic_bindings:
+  benchmark_weight: benchmark_weight
+semantic_category: krx_k200_benchmark_weight
+source_provenance: >-
+  Product-owned bounded rows from audited data/preprocessed/k200_members.parquet,
+  an exact weight projection of data/DW/fng_k200_members.csv; available_at is the
+  user-confirmed next distinct K200 trading session at 09:00 Asia/Seoul.

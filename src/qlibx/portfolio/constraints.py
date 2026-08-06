@@ -249,6 +249,18 @@ def validate_single_name_caps(
                 "validation_evaluation_time": request.evaluation_time.isoformat(),
             },
         )
+    if adjustment.accesses != accesses:
+        raise ConstraintEvaluationError(
+            "CONSTRAINT_BENCHMARK_IDENTITY_MISMATCH",
+            {
+                "adjustment_accesses": [
+                    item.model_dump(mode="json") for item in adjustment.accesses
+                ],
+                "validation_accesses": [
+                    item.model_dump(mode="json") for item in accesses
+                ],
+            },
+        )
     benchmarks = {item.instrument: item.weight for item in benchmark}
     missing = sorted(
         {item.instrument for item in adjustment.adjusted_weights} - benchmarks.keys()

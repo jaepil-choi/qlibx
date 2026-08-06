@@ -30,6 +30,7 @@ class SampleMaterializer:
     sample_id = default_sample_id
     _samples: ClassVar[dict[str, tuple[str, str]]] = {
         default_sample_id: ("basic", "basic"),
+        "constraint-workflow-v1": ("constraint_workflow", "constraint_workflow"),
         "daily-closed-loop-v1": ("daily_closed_loop", "daily_closed_loop"),
     }
 

@@ -10,6 +10,7 @@ from qlibx.config.project import (
     load_project_config,
     preview_project,
 )
+from qlibx.constraints import ConstraintAdjustmentSpec, ConstraintValidationSpec
 from qlibx.data.contracts import DatasetRegistration
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
 from qlibx.errors import OperationOutcome
@@ -17,6 +18,7 @@ from qlibx.evidence import ArtifactContract, LocalArtifactBackend
 from qlibx.execution import KrxExchange
 from qlibx.extensions import ExtensionRegistration, ExtensionValidationRequest
 from qlibx.flow import (
+    ConstraintFlow,
     DailyExecutionFlow,
     DailyExecutionProfile,
     DailyRunRequest,
@@ -117,6 +119,22 @@ class QlibxProject:
             registry=self.registry_snapshot(),
             artifacts=self.artifacts,
         ).invoke_strategy(operation, invocation)
+
+    def adjust_constraints(self, spec: ConstraintAdjustmentSpec) -> OperationOutcome:
+        """Adjust one portfolio candidate under the explicitly selected MVP policy."""
+
+        return ConstraintFlow(
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+        ).adjust(spec.policy.to_declaration(), spec.to_request())
+
+    def validate_constraints(self, spec: ConstraintValidationSpec) -> OperationOutcome:
+        """Independently validate a prior adjustment under the selected MVP policy."""
+
+        return ConstraintFlow(
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+        ).validate(spec.policy.to_declaration(), spec.to_request())
 
     def run_daily(
         self,

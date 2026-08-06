@@ -2,8 +2,8 @@
 
 import hashlib
 
-from qlibx.context import ViewGate
-from qlibx.data import RegistrySnapshot, RequirementResolver
+from qlibx.context import AccountState, ViewGate
+from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
 from qlibx.kernel import BacktestClock
@@ -25,15 +25,19 @@ class ResearchFlow:
         registry: RegistrySnapshot,
         artifacts: LocalArtifactBackend,
         resolver: RequirementResolver | None = None,
+        store: ObservationStore | None = None,
     ) -> None:
         self._registry = registry
         self._artifacts = artifacts
         self._resolver = resolver or RequirementResolver()
+        self._store = store or ObservationStore()
 
     def invoke_strategy(
         self,
         strategy: StrategyOperation,
         invocation: StrategyInvocation,
+        *,
+        account_state: AccountState | None = None,
     ) -> OperationOutcome:
         try:
             requirements = strategy.requirements()
@@ -62,7 +66,11 @@ class ResearchFlow:
             )
 
         clock = BacktestClock(invocation.evaluation_time)
-        view = ViewGate(self._registry).strategy_view(clock, resolution.bindings)
+        view = ViewGate(self._registry, self._store).strategy_view(
+            clock,
+            resolution.bindings,
+            account_state=account_state,
+        )
         try:
             draft = strategy.run(view)
         except Exception as exc:
@@ -71,7 +79,7 @@ class ResearchFlow:
                 "strategy.run.compute",
                 "STRATEGY_RUN_FAILED",
                 exc,
-                accesses=view.accessed(),
+                accesses=(*view.accessed(), *view.state_accessed()),
             )
 
         invested_gross = sum(abs(entry.weight) for entry in draft.weights)
@@ -85,11 +93,13 @@ class ResearchFlow:
             invested_gross=invested_gross,
             net_exposure=sum(entry.weight for entry in draft.weights),
             residual_budget=draft.target_gross - invested_gross,
+            decision_action=draft.decision_action,
             path_dependent=draft.path_dependent,
             state_identity=draft.state_identity,
             feedback_cursor=draft.feedback_cursor,
             diagnostics=draft.diagnostics,
             accesses=view.accessed(),
+            state_accesses=view.state_accessed(),
         )
         dependencies = (
             *(
@@ -105,6 +115,18 @@ class ResearchFlow:
                 dependency_kind="config",
                 dependency_id=invocation.config_fingerprint,
                 consumer_role="strategy_config",
+            ),
+            *(
+                DependencyEdge(
+                    dependency_kind="state",
+                    dependency_id=(
+                        f"account:{access.account_id}:v{access.version}:"
+                        f"cursor{access.feedback_cursor}"
+                    ),
+                    consumer_role="actual_account",
+                    selected_fields=("cash", "nav", "positions", "feedback_cursor"),
+                )
+                for access in result.state_accesses
             ),
         )
         publication = self._artifacts.publish_model(

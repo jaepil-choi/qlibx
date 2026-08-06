@@ -2,6 +2,7 @@
 
 from qlibx.operations.strategy import (
     BudgetMode,
+    DecisionAction,
     StrategyDraft,
     StrategyInvocation,
     StrategyOperation,
@@ -11,6 +12,7 @@ from qlibx.operations.strategy import (
 
 __all__ = [
     "BudgetMode",
+    "DecisionAction",
     "StrategyDraft",
     "StrategyInvocation",
     "StrategyOperation",

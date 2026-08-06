@@ -39,6 +39,7 @@ class DatasetRegistration(QlibxModel):
     source: str = Field(min_length=1)
     source_format: SourceFormat
     instrument_field: str = Field(min_length=1)
+    observation_time_field: str | None = None
     available_at: AvailabilityBinding
     logical_key: tuple[str, ...] = Field(min_length=1)
     semantic_bindings: dict[str, str] = Field(default_factory=dict)
@@ -51,6 +52,11 @@ class DatasetRegistration(QlibxModel):
             raise ValueError("logical_key fields must be unique")
         if self.instrument_field not in self.logical_key:
             raise ValueError("logical_key must contain instrument_field")
+        if (
+            self.observation_time_field is not None
+            and self.observation_time_field not in self.logical_key
+        ):
+            raise ValueError("logical_key must contain observation_time_field")
         time_field = (
             self.available_at.field
             if isinstance(self.available_at, AvailableAtField)
@@ -80,6 +86,7 @@ class RegisteredDataset(QlibxModel):
     source: str
     source_format: SourceFormat
     instrument_field: str
+    observation_time_field: str | None = None
     available_at: AvailabilityBinding
     logical_key: tuple[str, ...]
     bindings: dict[str, str]

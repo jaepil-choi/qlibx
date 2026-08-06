@@ -1,6 +1,6 @@
 """Private observation access used only by scoped views."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -22,6 +22,7 @@ class ObservationStore:
         *,
         field: str,
         as_of: datetime,
+        session_date: date | None = None,
     ) -> pd.DataFrame:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("view as_of must be timezone-aware")
@@ -31,16 +32,31 @@ class ObservationStore:
             raise DataSnapshotError(
                 f"physical source no longer matches registration {dataset.registration_identity}"
             )
-        if dataset.source_format is SourceFormat.CSV:
-            frame = pd.read_csv(source, dtype={dataset.instrument_field: "string"})
-        else:
-            frame = pd.read_parquet(source)
-
         if isinstance(dataset.available_at, AvailableAtField):
             time_field = dataset.available_at.field
-            available_at = pd.to_datetime(frame[time_field], errors="raise", utc=True)
         else:
             time_field = dataset.available_at.source_field
+        selected_columns = {
+            dataset.instrument_field,
+            time_field,
+            *(() if field == "__available_at__" else (field,)),
+            *(
+                ()
+                if dataset.observation_time_field is None
+                else (dataset.observation_time_field,)
+            ),
+        }
+        if dataset.source_format is SourceFormat.CSV:
+            frame = pd.read_csv(
+                source,
+                usecols=sorted(selected_columns),
+                dtype={dataset.instrument_field: "string"},
+            )
+        else:
+            frame = pd.read_parquet(source, columns=sorted(selected_columns))
+
+        available_at = pd.to_datetime(frame[time_field], errors="raise", utc=True)
+        if not isinstance(dataset.available_at, AvailableAtField):
             available_at = pd.to_datetime(frame[time_field], errors="raise", utc=True)
             available_at = available_at + pd.to_timedelta(
                 dataset.available_at.delay_seconds,
@@ -51,15 +67,27 @@ class ObservationStore:
                 f"registered field {field!r} is absent from the physical source"
             )
         values = available_at if field == "__available_at__" else frame[field]
+        observation_time = (
+            pd.to_datetime(frame[dataset.observation_time_field], errors="raise", utc=True)
+            if dataset.observation_time_field is not None
+            else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
+        )
         visible = pd.DataFrame(
             {
                 "instrument": frame[dataset.instrument_field].astype("string"),
                 "available_at": available_at,
+                "observation_time": observation_time,
                 "value": values,
             }
         )
         visible = visible.loc[visible["available_at"] <= cutoff]
+        if session_date is not None:
+            if dataset.observation_time_field is None:
+                raise DataSnapshotError(
+                    "session query requires an observation_time_field registration"
+                )
+            visible = visible.loc[visible["observation_time"].dt.date == session_date]
         return visible.sort_values(
-            ["available_at", "instrument"],
+            ["available_at", "observation_time", "instrument"],
             kind="mergesort",
         ).reset_index(drop=True)

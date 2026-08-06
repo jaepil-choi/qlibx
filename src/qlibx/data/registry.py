@@ -107,6 +107,8 @@ class DatasetRegistry:
 
         required_fields = set(registration.logical_key)
         required_fields.add(registration.instrument_field)
+        if registration.observation_time_field is not None:
+            required_fields.add(registration.observation_time_field)
         required_fields.update(registration.semantic_bindings.values())
         if isinstance(registration.available_at, AvailableAtField):
             time_field = registration.available_at.field
@@ -189,6 +191,7 @@ class DatasetRegistry:
             source=str(source),
             source_format=registration.source_format,
             instrument_field=registration.instrument_field,
+            observation_time_field=registration.observation_time_field,
             available_at=registration.available_at,
             logical_key=registration.logical_key,
             bindings=bindings,

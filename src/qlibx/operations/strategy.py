@@ -7,7 +7,7 @@ from typing import Protocol
 
 from pydantic import Field, model_validator
 
-from qlibx.context import AccessRecord, StrategyView
+from qlibx.context import AccessRecord, StateAccessRecord, StrategyView
 from qlibx.data import ComponentRequirement
 from qlibx.models import QlibxModel
 
@@ -15,6 +15,12 @@ from qlibx.models import QlibxModel
 class BudgetMode(StrEnum):
     FIXED = "fixed"
     FLEXIBLE = "flexible"
+
+
+class DecisionAction(StrEnum):
+    TARGET = "target"
+    HOLD = "hold"
+    RESEARCH_ONLY = "research_only"
 
 
 class WeightEntry(QlibxModel):
@@ -32,6 +38,7 @@ class StrategyDraft(QlibxModel):
     weights: tuple[WeightEntry, ...]
     budget_mode: BudgetMode
     target_gross: float = Field(gt=0)
+    decision_action: DecisionAction = DecisionAction.TARGET
     diagnostics: tuple[str, ...] = ()
     path_dependent: bool = False
     state_identity: str | None = None
@@ -50,6 +57,8 @@ class StrategyDraft(QlibxModel):
             raise ValueError("fixed-budget strategy must meet its declared gross target")
         if self.path_dependent and not self.state_identity:
             raise ValueError("path-dependent strategy requires state_identity")
+        if self.decision_action is DecisionAction.HOLD and self.weights:
+            raise ValueError("an explicit hold must not contain target weights")
         return self
 
 
@@ -63,11 +72,13 @@ class StrategyResult(QlibxModel):
     invested_gross: float
     net_exposure: float
     residual_budget: float
+    decision_action: DecisionAction
     path_dependent: bool
     state_identity: str | None = None
     feedback_cursor: str | None = None
     diagnostics: tuple[str, ...] = ()
     accesses: tuple[AccessRecord, ...] = ()
+    state_accesses: tuple[StateAccessRecord, ...] = ()
 
 
 class StrategyInvocation(QlibxModel):

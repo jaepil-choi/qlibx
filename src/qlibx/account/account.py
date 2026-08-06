@@ -81,6 +81,18 @@ class AccountCommit:
     snapshot: AccountSnapshot
 
 
+@dataclass(frozen=True, slots=True)
+class AccountCheckpoint:
+    account_id: str
+    base_currency: str
+    cash: float
+    instrument_ids: tuple[str, ...]
+    positions: tuple[Position, ...]
+    version: int
+    applied_events: tuple[str, ...]
+    journal: tuple[JournalEntry, ...]
+
+
 class AccountCommitRejected(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -129,6 +141,47 @@ class Account:
             ),
             feedback_cursor=len(self._journal),
         )
+
+    def checkpoint(self) -> AccountCheckpoint:
+        return AccountCheckpoint(
+            account_id=self._account_id,
+            base_currency=self._base_currency,
+            cash=self._cash,
+            instrument_ids=tuple(sorted(self._instrument_ids)),
+            positions=tuple(
+                sorted(self._positions.values(), key=lambda item: item.instrument_id)
+            ),
+            version=self._version,
+            applied_events=tuple(sorted(self._applied_events)),
+            journal=tuple(self._journal),
+        )
+
+    @classmethod
+    def from_checkpoint(cls, checkpoint: AccountCheckpoint) -> "Account":
+        if checkpoint.version != len(checkpoint.journal):
+            raise ValueError("account checkpoint version and journal length differ")
+        if set(checkpoint.applied_events) != {
+            entry.event_id for entry in checkpoint.journal
+        }:
+            raise ValueError("account checkpoint event identities do not match its journal")
+        current = cls(
+            account_id=checkpoint.account_id,
+            base_currency=checkpoint.base_currency,
+            initial_cash=checkpoint.cash,
+            instrument_ids=frozenset(checkpoint.instrument_ids),
+        )
+        if any(
+            position.instrument_id not in current._instrument_ids
+            for position in checkpoint.positions
+        ):
+            raise ValueError("account checkpoint contains an unregistered position")
+        current._positions = {
+            position.instrument_id: position for position in checkpoint.positions
+        }
+        current._version = checkpoint.version
+        current._applied_events = set(checkpoint.applied_events)
+        current._journal = list(checkpoint.journal)
+        return current
 
     def feedback(self, after: int, limit: int) -> AccountFeedback:
         if after < 0 or limit < 0 or after > len(self._journal):

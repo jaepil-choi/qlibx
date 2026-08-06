@@ -116,6 +116,24 @@ def test_memory_store_is_separate_and_cas_guarded() -> None:
         )
 
 
+def test_account_checkpoint_restores_cas_and_idempotency_authority() -> None:
+    current = account()
+    applied = FillBatch(
+        account_id="account-1",
+        event_id="event-1",
+        fills=(fill("F1", Side.BUY, 10),),
+    )
+    current.commit(applied, expected_version=0)
+
+    restored = Account.from_checkpoint(current.checkpoint())
+
+    assert restored.snapshot() == current.snapshot()
+    assert restored.feedback(0, 10) == current.feedback(0, 10)
+    with pytest.raises(AccountCommitRejected) as duplicate:
+        restored.commit(applied, expected_version=1)
+    assert duplicate.value.code == "DUPLICATE_EVENT"
+
+
 def test_clock_returns_same_timestamp_handlers_in_priority_order() -> None:
     start = datetime(2025, 1, 2, 9, tzinfo=timezone.utc)
     clock = BacktestClock(start)

@@ -14,6 +14,7 @@ from qlibx.data.requirements import (
     Resolution,
     ResolvedBinding,
 )
+from qlibx.data.store import ObservationStore
 
 __all__ = [
     "AvailableAtField",
@@ -21,6 +22,7 @@ __all__ = [
     "ConfirmedDelayRule",
     "DatasetRegistration",
     "DatasetRegistry",
+    "ObservationStore",
     "RegisteredDataset",
     "RegistrySnapshot",
     "RequirementResolver",

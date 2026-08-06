@@ -33,6 +33,9 @@ def test_current_scope_scenario_registry_is_executable_and_self_describing() -> 
     scenarios = payload["scenarios"]
     identities = {(item["id"], item["case"]) for item in scenarios}
     assert len(identities) == len(scenarios)
+    registered_ids = {item["id"] for item in scenarios}
+    for coverage_name, required_ids in payload["coverage_sets"].items():
+        assert set(required_ids) <= registered_ids, coverage_name
 
     prd_ids = _document_ids(ROOT / "docs" / "qlibx-prd.md")
     architecture_ids = _document_ids(ROOT / "docs" / "qlibx-architecture.md")

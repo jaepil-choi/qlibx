@@ -1,5 +1,15 @@
 schema_version: 1
 suite: qlibx-current-scope
+coverage_sets:
+  m5:
+    - UC-EXEC-001
+    - UC-SIGNAL-002
+    - UC-ALPHA-BUDGET-001
+    - UC-ALPHA-PATH-001
+    - UC-ALPHA-CHILD-001
+    - UC-ALPHA-ADAPTIVE-001
+    - UC-ENSEMBLE-001
+    - UC-ARTIFACT-001
 scenarios:
   - id: UC-CLOSED-LOOP-001
     case: real_dw_daily_feedback
@@ -91,6 +101,18 @@ scenarios:
       outcome: complete
       producer_rerun: false
       consumer_count: 2
+
+  - id: UC-ALPHA-BUDGET-001
+    case: real_dw_flexible_residual_fixed_rejection
+    test: tests/acceptance/test_research_scenarios.py::test_uc_alpha_budget_001_preserves_real_dw_flexible_residual
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      invested_gross: 0.4
+      residual_budget: 0.6
+      fixed_consumer: failed
 
   - id: UC-ARTIFACT-001
     case: external_real_dw_signal_round_trip

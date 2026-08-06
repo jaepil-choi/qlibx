@@ -193,6 +193,28 @@ class StoredWinnerStrategy:
         )
 
 
+class WeakRealDwStrategy(StoredWinnerStrategy):
+    def __init__(self) -> None:
+        super().__init__("acceptance.weak-real-dw", 0.4)
+
+    def run(self, view: object) -> StrategyDraft:
+        self.runs += 1
+        session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
+        cross_section = view.session("decision_return", session)  # type: ignore[attr-defined]
+        selected = cross_section.sort_values(
+            ["decision_return", "instrument"],
+            ascending=[False, True],
+            kind="mergesort",
+        ).iloc[0]
+        return StrategyDraft(
+            weights=(WeightEntry(instrument=str(selected.instrument), weight=0.4),),
+            budget_mode=BudgetMode.FLEXIBLE,
+            target_gross=1.0,
+            decision_action=DecisionAction.RESEARCH_ONLY,
+            diagnostics=("real DW signal retained only forty percent gross",),
+        )
+
+
 def configured_exchange(
     *,
     cost_rate: float = 0.0015,

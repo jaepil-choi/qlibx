@@ -20,11 +20,55 @@ from qlibx.operations import BudgetMode, StrategyInvocation
 from tests.acceptance.real_dw_support import (
     RealDwProject,
     StoredWinnerStrategy,
+    WeakRealDwStrategy,
     close_at,
     configured_exchange,
     initial_account,
     run_real_daily_flow,
 )
+
+
+def test_uc_alpha_budget_001_preserves_real_dw_flexible_residual(
+    real_dw_case: RealDwProject,
+) -> None:
+    strategy = WeakRealDwStrategy()
+    member = real_dw_case.project.invoke(
+        strategy,
+        StrategyInvocation(
+            invocation_id="weak-real-dw-member",
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="weak-real-dw-v1",
+        ),
+    )
+    composition = CompositionFlow(
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+    )
+    fixed_consumer = composition.invoke_ensemble(
+        EnsembleDefinition(
+            strategy_id="acceptance.weak-fixed-consumer",
+            members=(
+                EnsembleMemberSpec(
+                    artifact_id=member.result.artifact.artifact_id,
+                    allocation=1.0,
+                ),
+            ),
+            budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+        ),
+        StrategyInvocation(
+            invocation_id="weak-real-dw-fixed-consumer",
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="weak-fixed-consumer-v1",
+        ),
+    )
+
+    assert member.status is OutcomeStatus.COMPLETE
+    assert member.result.result.invested_gross == 0.4
+    assert member.result.result.residual_budget == 0.6
+    assert fixed_consumer.status is OutcomeStatus.FAILED
+    assert fixed_consumer.errors[0].error_code == "ENSEMBLE_FIXED_BUDGET_INCOMPATIBLE"
+    assert strategy.runs == 1
 
 
 def test_uc_signal_002_and_uc_artifact_001_reuse_real_dw_stored_signal(

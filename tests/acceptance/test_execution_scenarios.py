@@ -1,7 +1,10 @@
+from datetime import datetime
+
 import pytest
 
-from qlibx import OutcomeStatus
+from qlibx import OperationOutcome, OutcomeStatus
 from qlibx.account import Account, StrategyMemoryStore
+from qlibx.errors import CommitStatus, OperationError
 from qlibx.flow import (
     DailyExecutionFlow,
     DailyExecutionProfile,
@@ -9,7 +12,12 @@ from qlibx.flow import (
     FrozenDecision,
 )
 from qlibx.kernel import BacktestClock
-from qlibx.operations import DecisionAction
+from qlibx.operations import (
+    BudgetMode,
+    DecisionAction,
+    StrategyDraft,
+    WeightEntry,
+)
 from tests.acceptance.real_dw_support import (
     RealDwProject,
     close_at,
@@ -17,6 +25,41 @@ from tests.acceptance.real_dw_support import (
     initial_account,
     run_real_daily_flow,
 )
+
+
+class TargetStrategy:
+    strategy_id = "tests.target"
+
+    def requirements(self):
+        return ()
+
+    def run(self, view):
+        return StrategyDraft(
+            weights=(WeightEntry(instrument="A005930", weight=1.0),),
+            budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+            decision_action=DecisionAction.TARGET,
+        )
+
+
+class FailExecutionResultArtifacts:
+    def __init__(self, delegate) -> None:
+        self._delegate = delegate
+
+    def __getattr__(self, name):
+        return getattr(self._delegate, name)
+
+    def publish_model(self, **kwargs):
+        if kwargs["artifact_type"] != "execution_result":
+            return self._delegate.publish_model(**kwargs)
+        error = OperationError(
+            operation="artifact.publish",
+            stage_path="artifact.publish.injected_failure",
+            error_code="INJECTED_EXECUTION_PUBLICATION_FAILURE",
+            idempotency_identity=kwargs["logical_identity"],
+            error_id="error-injected-execution-publication",
+        )
+        return OperationOutcome(status=OutcomeStatus.FAILED, errors=(error,))
 
 
 def _parent_decision(case: RealDwProject, *, run_id: str):
@@ -85,6 +128,53 @@ def test_uc_alpha_adaptive_001_memory_commits_only_after_feedback(
     assert commit.feedback_cursor == 2
     assert commit.value == {"confirmed_feedback_cursor": 2}
     assert memory.snapshot("acceptance.actual-state-momentum").feedback_cursor == 2
+
+
+def test_post_fill_publication_failure_reports_committed_account(
+    real_dw_case: RealDwProject,
+) -> None:
+    sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
+    account = initial_account("post-commit-failure-account")
+    flow = DailyExecutionFlow(
+        clock=BacktestClock(sessions[0]),
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=FailExecutionResultArtifacts(real_dw_case.project.artifacts),
+        exchange=configured_exchange(cost_rate=0.0),
+        account=account,
+        profile=DailyExecutionProfile(
+            market_dataset_id="dw-real-market",
+            execution_price_role="execution_price",
+            valuation_price_role="valuation_price",
+        ),
+    )
+
+    outcome = flow.run(
+        TargetStrategy(),
+        DailyRunRequest(
+            run_id="post-commit-publication-failure",
+            config_fingerprint="post-commit-v1",
+            decision_times=(sessions[0],),
+            session_closes=sessions,
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    error = outcome.errors[0]
+    assert error.error_code == "ARTIFACT_PUBLICATION_FAILED"
+    assert error.commit_status is CommitStatus.COMMITTED
+    assert error.context["account_version"] == 1
+    committed = error.context["authoritative_commits"]
+    assert len(committed) == 1
+    assert committed[0]["event_name"] == "EXECUTION"
+    assert datetime.fromisoformat(committed[0]["event_time"]) == sessions[1]
+    assert committed[0]["authority"] == "account"
+    assert committed[0]["event_id"].endswith(":fill")
+    assert committed[0]["version"] == 1
+    assert error.context["publication_errors"][0]["error_code"] == (
+        "INJECTED_EXECUTION_PUBLICATION_FAILURE"
+    )
+    assert account.snapshot().version == 1
+    assert account.snapshot().holdings() == {"A005930": 129}
 
 
 def test_uc_exec_001_and_uc_alpha_child_001_isolate_frozen_daily_children(

@@ -204,6 +204,24 @@ class _PendingExecution:
 
 
 @dataclass(frozen=True, slots=True)
+class _AuthorityCommit:
+    event_name: str
+    event_time: datetime
+    authority: str
+    event_id: str
+    version: int
+
+    def context(self) -> dict[str, object]:
+        return {
+            "event_name": self.event_name,
+            "event_time": self.event_time.isoformat(),
+            "authority": self.authority,
+            "event_id": self.event_id,
+            "version": self.version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class FrozenDecision:
     """A parent decision artifact reused by one isolated execution child."""
 
@@ -313,6 +331,7 @@ class DailyExecutionFlow:
         self._trace: list[str] = []
         self._completed_decisions: list[str] = []
         self._errors: list[OperationError] = []
+        self._authority_commits: list[_AuthorityCommit] = []
 
     def run(
         self,
@@ -432,6 +451,8 @@ class DailyExecutionFlow:
             completed_decision_ids=tuple(self._completed_decisions),
         )
         checkpoint_artifact = self._publish_model(
+            event=None,
+            stage="checkpoint.artifact",
             logical_identity=f"simulation-checkpoint:{request.run_id}",
             artifact_type="simulation_checkpoint",
             producer_id=self._profile.profile_id,
@@ -528,6 +549,8 @@ class DailyExecutionFlow:
             ),
         )
         intent_artifact = self._publish_model(
+            event=event,
+            stage="decision.artifact",
             logical_identity=f"decision-intent:{decision_id}",
             artifact_type="decision_intent",
             producer_id=run_result.result.strategy_id,
@@ -694,6 +717,12 @@ class DailyExecutionFlow:
                     context={"message": str(exc)},
                 )
                 return
+            self._record_authority_commit(
+                event,
+                authority="account",
+                event_id=commit.event_id,
+                version=commit.version,
+            )
             after = commit.snapshot
         else:
             after = before
@@ -720,6 +749,8 @@ class DailyExecutionFlow:
             limitations=self._profile.limitations,
         )
         published = self._publish_model(
+            event=event,
+            stage="execution.artifact",
             logical_identity=f"execution-result:{evidence.event_id}",
             artifact_type="execution_result",
             producer_id=self._profile.profile_id,
@@ -784,6 +815,8 @@ class DailyExecutionFlow:
             )
             self._marks.append(evidence)
             self._publish_model(
+                event=event,
+                stage="mark.artifact",
                 logical_identity=f"mark-result:{evidence.event_id}",
                 artifact_type="mark_result",
                 producer_id=self._profile.profile_id,
@@ -840,6 +873,12 @@ class DailyExecutionFlow:
         except AccountCommitRejected as exc:
             self._fail(event, "mark.commit", exc.code, context={"message": str(exc)})
             return
+        self._record_authority_commit(
+            event,
+            authority="account",
+            event_id=commit.event_id,
+            version=commit.version,
+        )
         evidence = MarkEvidence(
             event_id=self._event_id(event, "mark"),
             event_time=event.ts,
@@ -848,6 +887,8 @@ class DailyExecutionFlow:
             account_after=_state(commit.snapshot),
         )
         published = self._publish_model(
+            event=event,
+            stage="mark.artifact",
             logical_identity=f"mark-result:{evidence.event_id}",
             artifact_type="mark_result",
             producer_id=self._profile.profile_id,
@@ -873,6 +914,8 @@ class DailyExecutionFlow:
             account_version_after_callback=self._account.snapshot().version,
         )
         published = self._publish_model(
+            event=event,
+            stage="monitor.artifact",
             logical_identity=f"monitor-result:{evidence.event_id}",
             artifact_type="monitor_observation",
             producer_id=self._profile.profile_id,
@@ -897,6 +940,7 @@ class DailyExecutionFlow:
         result: StrategyResult,
         source_artifact_id: str,
     ) -> None:
+        assert self._request is not None
         if result.proposed_memory is None:
             return
         if result.expected_memory_version is None or not result.memory_accesses:
@@ -949,6 +993,14 @@ class DailyExecutionFlow:
                 context={"message": str(exc)},
             )
             return
+        self._record_authority_commit(
+            event,
+            authority="memory",
+            event_id=(
+                f"{self._request.run_id}:{result.strategy_id}:memory:v{committed.version}"
+            ),
+            version=committed.version,
+        )
         evidence = MemoryCommitEvidence(
             strategy_id=result.strategy_id,
             source_artifact_id=source_artifact_id,
@@ -958,6 +1010,8 @@ class DailyExecutionFlow:
             value=dict(result.proposed_memory),
         )
         published = self._publish_model(
+            event=event,
+            stage="memory.artifact",
             logical_identity=(
                 f"memory-commit:{self._request.run_id}:{result.strategy_id}:"
                 f"v{committed.version}"
@@ -1010,6 +1064,8 @@ class DailyExecutionFlow:
     def _publish_model(
         self,
         *,
+        event: Event | None,
+        stage: str,
         logical_identity: str,
         artifact_type: str,
         producer_id: str,
@@ -1025,10 +1081,57 @@ class DailyExecutionFlow:
             dependencies=dependencies,
         )
         if publication.status is not OutcomeStatus.COMPLETE:
-            self._errors.extend(publication.errors)
+            failure_event = event or Event(
+                "FINALIZE",
+                self._clock.now,
+                MONITOR_PRIORITY,
+            )
+            committed = (
+                self._event_commits(event)
+                if event is not None
+                else tuple(self._authority_commits)
+            )
+            self._fail(
+                failure_event,
+                stage,
+                "ARTIFACT_PUBLICATION_FAILED",
+                context={
+                    "artifact_type": artifact_type,
+                    "logical_identity": logical_identity,
+                    "publication_errors": [
+                        error.model_dump(mode="json") for error in publication.errors[:5]
+                    ],
+                },
+                committed=committed,
+            )
             return None
         self._published.append(publication.result)
         return publication.result
+
+    def _record_authority_commit(
+        self,
+        event: Event,
+        *,
+        authority: str,
+        event_id: str,
+        version: int,
+    ) -> None:
+        self._authority_commits.append(
+            _AuthorityCommit(
+                event_name=event.name,
+                event_time=event.ts,
+                authority=authority,
+                event_id=event_id,
+                version=version,
+            )
+        )
+
+    def _event_commits(self, event: Event) -> tuple[_AuthorityCommit, ...]:
+        return tuple(
+            commit
+            for commit in self._authority_commits
+            if commit.event_name == event.name and commit.event_time == event.ts
+        )
 
     def _fail(
         self,
@@ -1037,10 +1140,19 @@ class DailyExecutionFlow:
         code: str,
         *,
         context: dict[str, object] | None = None,
+        committed: tuple[_AuthorityCommit, ...] | None = None,
     ) -> None:
         assert self._request is not None
+        authoritative_commits = self._event_commits(event) if committed is None else committed
+        crossed_commit = bool(authoritative_commits)
         identity = self._event_id(event, stage)
         seed = hashlib.sha256(f"{identity}:{code}".encode()).hexdigest()[:24]
+        retry_precondition = (
+            "resume from authoritative state at or after the listed committed identities; "
+            "do not replay them"
+            if crossed_commit
+            else "correct the selected profile input and retry from a checkpoint"
+        )
         error = OperationError(
             operation="daily_flow.run",
             stage_path=f"daily_flow.{stage}",
@@ -1049,10 +1161,13 @@ class DailyExecutionFlow:
                 "event_name": event.name,
                 "event_time": event.ts.isoformat(),
                 "account_version": self._account.snapshot().version,
+                "authoritative_commits": [
+                    commit.context() for commit in authoritative_commits
+                ],
                 **(context or {}),
             },
-            commit_status=CommitStatus.NONE,
-            retry_preconditions=("correct the selected profile input and retry from a checkpoint",),
+            commit_status=(CommitStatus.COMMITTED if crossed_commit else CommitStatus.NONE),
+            retry_preconditions=(retry_precondition,),
             idempotency_identity=identity,
             error_id=f"error-{seed}",
         )

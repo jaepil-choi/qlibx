@@ -2,7 +2,8 @@
 
 Status: canonical
 Runtime: qlibx-owned event-driven engine (no Qlib runtime dependency)
-Planned rename: `qlibx` → `vqar` (확정, 실행 보류 — architecture O12)
+Current package/import/CLI name: `qlibx`
+Final rename target: `vqapr` (확정, 마지막 migration 단계까지 실행 보류)
 Companion document: `docs/qlibx-architecture.md`
 
 이 문서는 qlibx의 제품 철학, observable behavior, correctness boundary와 acceptance criteria를 규정하는
@@ -605,6 +606,31 @@ ETF에 필요한 exact cost policy가 없고 Equity policy만 존재하는 경�
 Fill과 diagnostic을 누락하지 않고 시간 축 closed loop를 유지해야 한다. Supported resource profile에서
 batch와 equivalent single-name characterization의 경제적 결과가 일치해야 한다.
 
+##### UC-LOOKTHROUGH-001 — User Strategy의 명시적 ETF exposure 계산
+
+Constituent A/B를 각각 50% 보유한 ETF와 A direct stock을 함께 보유해도 qlibx는 Instrument 또는 Account position만
+보고 look-through를 자동 수행하지 않는다. User가 Strategy에 index/ETF constituent dataset binding과 actual account
+state requirement를 명시하고 둘을 직접 consume한 경우에만 Strategy code가 constituent exposure를 계산한다.
+그 Strategy는 direct stock과 ETF constituent exposure를 정확히 한 번 합산하고 physical cash/residual을 별도로
+취급한다. 같은 ETF를 아무 constituent binding 없이 사용하는 다른 Strategy에서는 ETF가 opaque physical
+Instrument로 남아야 한다.
+
+##### UC-LOOKTHROUGH-002 — User Strategy의 PIT constituent consumption
+
+ETF constituent 구성이 바뀌었지만 새 observation의 `available_at`이 decision time보다 늦으면 StrategyView는
+그 observation을 노출하지 않는다. Look-through를 선택한 user Strategy는 자신이 구독한 binding에서 그 시각에
+읽을 수 있는 구성종목만 consume하고, snapshot 선택·coverage·stale/revision 처리와 재정규화 여부를 Strategy의
+경제적 규칙으로 명시한다. qlibx가 ETF Instrument를 근거로 constituent dataset을 자동 발견하거나 latest 구성을
+대입하지 않는다.
+
+##### UC-LOOKTHROUGH-003 — Actual holding을 읽는 user recomputation
+
+ETF와 direct stock 주문이 partial fill되거나 이후 가격 drift가 발생하면 look-through를 구현한 user Strategy는
+다음 callback에서 requested target이 아니라 StrategyView가 허용한 marked actual AccountSnapshot을 직접 읽어
+exposure를 다시 계산한다. qlibx는 계산값을 Account에 자동 주입하거나 다음 Strategy에 자동 feedback하지 않는다.
+User가 결과를 artifact로 publish한다면 consumed constituent binding, AccountSnapshot과 target/actual 구분을
+lineage로 보존하며 intended exposure를 actual compliance state로 가장하지 않는다.
+
 #### Future extension characterization — current support가 아님
 
 ##### UC-ACADEMIC-001 — Tracking-only index의 가상 거래
@@ -727,7 +753,7 @@ Config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 - Order conversion semantics와 clipping/failure diagnostics
 - Constraint declaration, best-effort adjustment, pre-execution validation과 finding contracts
 - Signed alpha diagnostics와 long-only physical construction
-- ETF/index look-through와 cash residual
+- User Strategy가 명시적으로 구성하는 ETF/index look-through와 cash residual
 - Instrument semantics, execution-policy resolution과 unsupported behavior의 명시적 실패
 - Portable artifact envelope, dependency lineage, file-backed catalog와 reporting
 - Trigger, finalization, checkpoint와 resume policy
@@ -804,7 +830,7 @@ object, pickle, recorder나 process-global provider는 portable qlibx artifact�
 - Stored signal/alpha reuse와 ensemble
 - Long-only enhanced-index physical portfolio
 - `hypothetical_short` instrument를 사용하는 signed research (§7.12)
-- ETF opaque execution과 PIT constituent data가 있을 때의 look-through
+- ETF의 physical/opaque 처리와 user Strategy가 명시적으로 PIT constituent data를 구독·소비해 계산하는 look-through
 - Historical backtest와 portable research catalog
 - Selective decision trigger, explicit hold와 dense actual-account evidence
 - Best-effort constraint adjustment, pre-execution validation과 independent monitoring artifacts
@@ -818,7 +844,8 @@ Instrument와 execution policy의 extension boundary(§7.12)는 이 범위 안�
 - Perpetual/futures의 funding, 계약 단위와 expiry
 - Direct broker execution ownership
 
-§3.5의 `UC-COST-001`~`UC-SCALE-001`은 현재 scope의 characterization과 acceptance 대상이다.
+§3.5의 `UC-COST-001`~`UC-SCALE-001`과 `UC-LOOKTHROUGH-001`~`003`은 현재 scope의
+characterization과 acceptance 대상이다.
 `UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`과 `UC-CASHFLOW-001`은 architecture 확장 가능성을
 검토하기 위한 future characterization이며 현재 지원을 의미하지 않는다.
 
@@ -870,9 +897,10 @@ instruction file의 managed block, skill resource version과 validation command�
 - Explicit custom target root: skill directory `<user-selected-output>/qlibx/`, required entrypoint
   `<user-selected-output>/qlibx/SKILL.md`
 
-> **예정된 변경 — 아직 적용되지 않았다.** Package 이름을 `qlibx`에서 `vqapr`(vibe quant alpha portfolio / asset pricing research)로
-> 변경하기로 확정했으나 실행은 최종 단계로 미룬다. 적용 시 위 세 path의 `qlibx` 부분이 함께 바뀌며,
-> 이 절과 §13.5, §15.1이 동시에 갱신되어야 한다. 그 전까지 위 path가 유효한 normative contract다.
+> **확정된 최종 rename — 아직 적용하지 않는다.** 현재 package, import, CLI와 generated skill path의
+> normative name은 `qlibx`다. 최종 migration 단계에서만 `vqapr`(vibe quant alpha portfolio / asset pricing
+> research)로 한 번에 변경한다. 그때 위 세 path, import/CLI, artifact schema identity, installed docs와
+> migration guide를 같은 change set에서 갱신한다. 그 전까지 위 `qlibx` path가 유효한 normative contract다.
 
 Custom target root는 user가 명시적으로 선택해야 하며 package가 임의의 output location을 추측하지 않는다.
 각 skill directory 안의 `references/`, `scripts/`, `examples/` 같은 보조 resource는 해당 target protocol과
@@ -1349,6 +1377,48 @@ residual을 보여주고 validation은 실행 가능 여부를 별도로 판단�
 Portfolio result는 requested budget, realized gross/net exposure, cash/residual과 중요한 clipping reason을 보여준다.
 세부 optimizer variable, solver class와 internal batch layout은 architecture와 implementation이 결정한다.
 
+### 10.5 ETF look-through는 user-authored Strategy behavior다
+
+ETF look-through는 Instrument capability나 Account의 자동 behavior가 아니다. Exchange와 Account는 ETF를 항상
+독립 physical Instrument로 체결·보유한다. ETF registration, 보유 수량 존재 또는 constituent dataset 등록만으로
+look-through가 켜지지 않는다. User가 특정 Strategy callback에 index/ETF constituent data binding과 actual account
+state requirement를 선언하고 그 Strategy code가 둘을 직접 consume해 계산할 때만 look-through가 존재한다.
+아무 계산도 선언하지 않은 Strategy에서 ETF는 opaque이며, Instrument에 `opaque/transparent` mode를 두지 않는다.
+
+구성종목 데이터는 다른 research data와 같은 user-provided versioned PIT dataset이다. User는 logical dataset을
+등록하고 Strategy requirement로 구독한 뒤 clock-bound StrategyView에서 consume한다. Dataset observation은 source
+identity, event/effective time, `available_at`, instrument/constituent identity, weight unit과 revision을 표현할 수 있어야
+한다. qlibx는 이 데이터를 ETF Instrument와 자동 연결하거나 `LookthroughSnapshot`이라는 특별한 package-owned
+schema로 강제하지 않는다. 구체 schema, mapping, coverage와 normalization의 경제적 의미는 user Strategy가 소유한다.
+여기서 구독은 runtime MessageBus가 아니라 Strategy가 logical dataset binding을 requirement로 선언한다는 뜻이다.
+
+User Strategy가 decision time $t$에 AccountSnapshot에서 만든 physical weight를 $p_t$, 자신이 consume한 구성종목
+데이터로 만든 mapping을 $L_t$라고 하면 constituent exposure 계산은 예를 들어 다음 관계를 사용할 수 있다.
+
+$$
+x_t = L_t p_t
+$$
+
+이 식은 qlibx의 내장 ETF semantics가 아니라 Strategy가 선택한 계산이다. Strategy가 이 방식을 사용한다면 direct
+stock column과 ETF constituent column을 직접 구성하고 한 result에서 정확히 한 번 적용해야 한다. 이미 mapped된
+값을 다시 mapping하거나 ETF weight를 benchmark에 중복 가산하는 오류도 해당 Strategy의 validation 책임이다.
+
+qlibx는 mapping을 만들지 않으므로 누락분을 자동 재정규화하거나 complete/partial/opaque policy를 대신 선택하지
+않는다. User Strategy가 complete coverage를 요구하면 자신의 calculation/validation에서 실패시키고, partial을
+허용하면 mapped/unmapped exposure와 limitation을 자신이 만든 result에 남긴다. Cash와 lot/cost clipping residual을
+constituent exposure로 볼지도 Strategy의 경제적 정의지만, Account는 이를 physical cash로만 제공한다.
+
+Look-through를 이용한 construction이 필요하면 user Strategy가 desired exposure, benchmark, constituent binding과
+marked actual AccountSnapshot을 소비해 physical target이나 constraint input을
+만든다. Built-in construction은 ETF를 발견해 mapping을 주입하지 않고 전달받은 명시적 input만 처리한다. Expected
+cost는 target 선택을 위한 assumption일 뿐 actual transaction cost가 아니며, 최종 order clipping과 Fill 비용은
+§11의 Exchange exact rule이 계산한다.
+
+User Strategy가 target/actual look-through를 publish한다면 둘은 다른 result여야 한다. Target은 construction intent를
+설명하고 actual은 committed Fill 이후 다음 callback에서 읽은 marked AccountSnapshot으로 다시 계산한다. qlibx는
+그 result를 자동 생성·소비하지 않지만 generic artifact lineage는 실제로 읽힌 constituent dataset binding,
+AccountSnapshot과 cutoff를 보존한다.
+
 ## 11. Event-driven execution and signed compatibility
 
 Strategy는 executor-neutral decision intent를 만들고, 별도 executor가 선택한 market/fill model로 처리한다. 이
@@ -1568,7 +1638,8 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 - `UC-EXEC-001`에서 같은 decision artifact를 daily와 intraday executor가 각각 처리하고 actual simulated result만
   다음 decision에 feedback한다.
 - `UC-EXEC-002`는 fill timing과 model limitation을 명시하며 look-ahead를 허용하지 않는다.
-- §3.5의 `UC-COST-001`~`UC-COST-004`, `UC-CLOSED-LOOP-001`, `UC-SCALE-001` current-scope outcome을 만족한다.
+- §3.5의 `UC-COST-001`~`UC-COST-004`, `UC-CLOSED-LOOP-001`, `UC-SCALE-001`과
+  `UC-LOOKTHROUGH-001`~`003` current-scope outcome을 만족한다.
 - `UC-EXEC-003`처럼 Strategy decision이 없는 clock에도 actual-account monitoring finding을 만든다.
 - Unsupported short, lifecycle 또는 cost policy를 다른 profile의 default로 조용히 대체하지 않는다.
 
@@ -1588,6 +1659,25 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 - `UC-PROD-002`에서 rejected intent를 actual position으로 commit하지 않는다.
 - Duplicate, missing, stale와 out-of-order OMS result를 구분하고 unsafe state mutation 전에 reconciliation error를 낸다.
 - Production monitoring은 confirmed account만 평가하며 finding이 external account나 past fill을 수정하지 않는다.
+
+### 15.6 Current requirement/design readiness gaps
+
+다음 항목은 out of scope가 아니라 **현재 product requirement의 미완성 지점**이다. Architecture 또는 product
+decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 전에는 관련 capability를 current support로
+표시하지 않는다. 이 표는 내부 class 이름을 고정하지 않고 필요한 observable closure를 규정한다.
+
+| gap ID | 현재 부족한 점 | closure outcome |
+|---|---|---|
+| `GAP-ONBOARD-001` | §6.1의 dry-run, owned block/file, fingerprint, update/remove와 target별 skill protocol이 architecture flow로 닫히지 않았다 | Fresh project와 기존 instruction file fixture에서 preview/apply/update/remove가 user-owned content를 보존하고 idempotent한 결과와 validation evidence를 만든다 |
+| `GAP-CONSTRAINT-001` | Constraint의 version/effective period, scope, activation phase, severity, override와 missing-evaluator 결과가 하나의 public behavior로 충분히 규정되지 않았다 | 같은 declaration이 adjustment, pre-execution validation과 monitoring에서 일관된 identity를 가지며 warning/error/override/unknown outcome이 state mutation 전후 authority와 evidence를 명확히 구분한다 |
+| `GAP-RECOVERY-001` | Account commit, Strategy Memory, feedback cursor, checkpoint와 artifact publication 사이 crash point의 resume behavior가 닫히지 않았다 | 각 crash point에서 재개한 결과가 uninterrupted run과 같고 committed decision/Fill/Memory를 중복 적용하지 않으며 identity가 바뀌면 explicit branch를 요구한다 |
+| `GAP-CATALOG-001` | Local catalog의 locking, index schema, payload staging, atomic visibility와 abandoned partial-publication recovery가 미정이다 | Concurrent writer와 crash fixture에서도 partial payload가 reusable success로 보이지 않고 conflict/idempotent/recovery 결과가 deterministic하다 |
+| `GAP-OUTBOX-001` | Production outbox의 durable state, delivery lease/retry, OMS correlation/deduplication과 crash recovery protocol이 미정이다 | Publish 전후, acknowledgement 전후와 partial result 수신 중 재시작해도 confirmed outcome만 한 번 commit되고 missing/duplicate/stale/out-of-order가 구분된다 |
+| `GAP-CORPACTION-001` | Current stock/ETF scope에서 user-provided PIT corporate-action data를 split, dividend, distribution, merger/delisting에 적용할지 product boundary가 확정되지 않았다 | Current support 또는 future scope를 명시적으로 선택하고, current라면 quantity/cost basis/cash/valuation transition과 required PIT evidence를 별도 use case로 규정한다 |
+
+ETF look-through는 이 revision에서 `UC-LOOKTHROUGH-001`~`003`과 §10.5로 **user-authored Strategy behavior**임을
+명시한다. qlibx가 제공할 current support는 user-declared PIT data consumption, actual AccountSnapshot 접근과 generic
+artifact lineage이며, ETF-specific 자동 mapping/resolution/result 생성은 package scope가 아니다.
 
 ## 16. Compatibility gates and validation
 

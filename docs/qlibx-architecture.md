@@ -2,7 +2,8 @@
 
 Status: draft
 Canonical requirements: `docs/qlibx-prd.md`
-Package name: TBD — working name `qlibx`, current candidate `vqapr`
+Current package/import/CLI name: `qlibx`
+Final rename target: `vqapr` (확정, 마지막 migration 단계까지 실행 보류)
 Borrow research: [[engine-borrow-benchmark-map]]
 Backend 채택 판단: [[why-not-qlib-as-a-backend]], [[why-not-nautilus-as-a-dependency]]
 
@@ -69,6 +70,9 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-COST-004` | no exact rule | exact selector; no parent fallback | unsupported failure | 없음 | failure artifact | no Fill/Account mutation |
 | `UC-CLOSED-LOOP-001` | next decision after commit | committed Account/OMS state | Strategy evaluation | next result | feedback cursor + snapshot | requested state excluded |
 | `UC-SCALE-001` | 3,000-name execution | compiled arrays + scoped market data | vectorized match | Fill batch | stable per-name diagnostics | batch/scalar parity |
+| `UC-LOOKTHROUGH-001` | user Strategy callback | user-declared constituent binding + actual AccountSnapshot | user code가 선택한 `L @ p` 또는 다른 exposure 계산 | user Strategy result only | actually consumed binding/account edges | same ETF: unsubscribed Strategy는 opaque |
+| `UC-LOOKTHROUGH-002` | StrategyView data read | declared observations with `available_at <= evaluation time` | ViewGate visibility; semantic selection은 user code | 없음 unless user emits result | observation/cutoff access lineage | future row hidden; no auto latest/mapping |
+| `UC-LOOKTHROUGH-003` | next user Strategy callback | marked committed AccountSnapshot + declared constituent binding | user code가 actual quantity로 재계산 | user artifact/intent if returned | target/fill/held input distinction | requested target excluded; no auto feedback |
 | `UC-EXEC-001` | child profile selection | same decision + profile execution view | daily or intraday execution | separate child Accounts | shared decision ID + fills | only actual result diverges |
 | `UC-EXEC-002` | daily-close execution | observations available by fill time | timing/PIT validation then match | Fill or failure | convention + limitation | no future close |
 | `UC-EXEC-003` | independent monitor timer | actual snapshot + compliance view | constraint evaluation | finding artifact only | breach/missing classification | no decision/order |
@@ -1082,6 +1086,117 @@ Adjustment result가 존재해도 compliance를 의미하지 않는다. Constrai
 metric data requirement를 resolve한다. Missing sector binding은 order나 hypothetical account를 만들기 전에
 실패하고, constraint-free signal research에는 compliance dataset을 요구하지 않는다.
 
+### User Strategy-owned ETF look-through
+
+ETF look-through는 qlibx의 Instrument capability나 자동 exposure operation이 아니다. Exchange와 Account는 ETF를
+항상 하나의 physical Instrument로 체결·보유한다. ETF를 등록하거나 Account가 ETF 수량을 보유한다는 사실은
+constituent data requirement, mapping resolution 또는 exposure 계산을 발생시키지 않는다.
+
+선택권은 **Strategy별로 user에게만** 있다. 같은 ETF도 Strategy A가 constituent data를 선언하지 않으면 opaque이고,
+Strategy B가 index/ETF constituent dataset을 명시적으로 구독해 StrategyView에서 consume하면 B의 user code 안에서만
+look-through가 일어난다. Instrument와 config에는 `opaque/transparent` mode를 두지 않는다.
+여기서 구독은 O6의 runtime pub/sub를 뜻하지 않는다. `DatasetRequirement`로 logical binding을 선언하고 Flow가 그
+callback의 scoped StrategyView에 resolve하는 기존 requirement 계약을 뜻한다.
+
+예를 들어 user Strategy가 아래 계산을 선택할 수 있다.
+
+```text
+rows     constituent exposure axis C
+columns  physical instrument axis P — direct Equity와 ETF
+L_t      Strategy가 declared PIT data로 직접 만든 mapping[C, P]
+p_t      Strategy가 actual AccountSnapshot으로 직접 만든 physical weight[P]
+x_t      Strategy-owned constituent exposure[C] = L_t @ p_t
+```
+
+이 식, direct Equity identity column, ETF constituent column과 cash 처리 방식은 package contract가 아니라 user의
+경제적 계산이다. qlibx는 `L_t`를 만들거나 적용하지 않는다. Strategy가 결과를 artifact로 반환할 때만 generic
+Evidence가 실제로 읽힌 dataset과 AccountSnapshot의 dependency edge를 기록한다.
+
+qlibx가 소유하는 경계와 user가 소유하는 의미를 분리한다.
+
+| qlibx가 소유 | user Strategy가 소유 |
+|---|---|
+| Logical dataset registration과 declared binding | 어떤 index/ETF constituent source를 구독할지 |
+| `available_at <= clock.now()` ViewGate | available row 중 어떤 effective/revision을 선택할지 |
+| Immutable actual AccountSnapshot 접근 | ETF 수량·mark·cash에서 어떤 physical exposure를 만들지 |
+| 실제 조회에서 생성한 dependency lineage | mapping schema, axis, coverage, normalization과 계산식 |
+| Generic StrategyResult/Artifact envelope | target/actual exposure result를 만들고 소비할지 |
+
+따라서 package-owned `LookthroughSnapshot`, `LookthroughExposureResult`, coverage profile 또는 ETF mapping resolver는
+두지 않는다. `opaque`도 별도 profile이 아니라 **Strategy가 constituent binding을 선언·소비하지 않은 상태**다.
+Look-through를 쓰는 Strategy가 complete/partial/stale 정책을 원하면 그 Strategy code에서 검증하고
+diagnostic을 반환한다. ViewGate는 미래 observation을 숨기지만 그 데이터의 경제적 해석을 대신하지 않는다.
+
+개념적인 callback은 다음과 같다. 이름은 public API 확정이 아니라 책임 경계를 보여준다.
+
+```python
+class MyEnhancedIndexStrategy:
+    requirements = (
+        DatasetRequirement("etf_constituents"),
+        AccountStateRequirement(),
+    )
+
+    def decide(self, view: StrategyView) -> StrategyResult:
+        members = view.panel("etf_constituents")  # declared PIT data만 노출
+        account = view.account.snapshot()          # marked actual ETF quantity
+        exposure = user_defined_exposure(members, account)
+        return user_defined_result(exposure)
+```
+
+다른 Strategy가 `DatasetRequirement("etf_constituents")`를 선언하지 않으면 같은 ETF를 보유해도 구성종목 데이터는
+View에 없고 exposure result도 생성되지 않는다. ETF Instrument registration에서 이 requirement를 암묵적으로
+추가하는 경로는 금지한다.
+
+Look-through를 선택한 user Strategy의 flow는 다음처럼 기존 callback/IoC 안에 머문다.
+
+```text
+user declares constituent DatasetRequirement + AccountStateRequirement
+  → Flow resolves only those bindings and creates StrategyView
+  → user Strategy consumes PIT constituent rows + marked AccountSnapshot
+  → user code computes optional exposure/constraint/physical target
+  → Strategy returns its chosen result/artifact/diagnostics
+  → ordinary optional construct / adjust / validate / execute flow
+  → Account.commit(FillBatch) keeps physical ETF quantity authoritative
+  → next user Strategy callback may read the new actual snapshot and recompute
+```
+
+User code가 desired constituent exposure, actual holding 대비 turnover, risk와 expected cost를 최적화할 수는 있다.
+그 결과를 built-in construction/constraint에 넘길 때는 explicit input/artifact여야 하며, downstream operation이 ETF를
+보고 constituent exposure를 다시 계산하지 않는다. Expected cost는 target choice의 assumption이고 actual Fill cost는
+§8의 exact Exchange rule이 계산한다. Risk input 부재를 identity covariance로 조용히 대체하지 않는 원칙도 user
+optimizer의 validation contract로 남는다.
+
+User-authored optimizer는 tradable하지 않은 physical instrument를 requested target이 아니라 actual holding에 freeze하고,
+solver 뒤 budget/bounds/user-defined exposure constraint를 독립 검증할 수 있다. 이 behavior는 qlibx ETF subsystem이
+아니라 user Strategy 계산의 계약이며, StrategyResult diagnostic과 generic artifact evidence로 결과를 표현한다.
+
+Account는 오직 physical state authority다. qlibx가 target이나 actual look-through를 Account/feedback에 자동 추가하지
+않는다. User가 두 결과를 publish하면 별도 artifact/schema로 구분하고, actual artifact는 실제로 consume한 marked
+AccountSnapshot에 의존해야 한다. 재계산 가능성, mapping identity와 axis 검증 수준도 그 user-owned artifact schema가
+정한다.
+
+`references/qlib-integration-codex`는 non-authoritative comparative implementation이다. 여기서 확인한 동작을
+다음처럼 선별한다.
+
+| reference behavior | 판단 | qlibx 적용 |
+|---|---|---|
+| `lookthrough_matrix @ physical_target`과 exact axis 검사 | 계산 아이디어 채택 | user Strategy 예제와 fixture에서 사용; package가 자동 실행하지 않음 |
+| Non-tradable physical position을 actual holding에 freeze | 채택 | AccountSnapshot authority와 adjustment requirement로 표현 |
+| Turnover를 current realized physical holding에서 계산 | 채택 | target/requested state가 아니라 marked actual input 사용 |
+| Solver 뒤 독립 budget/bound/hard-constraint validator | 채택 | validate operation으로 분리하고 stored input에서 재계산 |
+| Infeasible와 solver failure 구분, named soft slack 기록 | 채택·확장 | invalid solution도 별도 status로 추가하고 adjustment/validation evidence를 분리 |
+| Stored target과 mapping으로 exactly-once attribution 재검증 | 조건부 채택 | user가 그런 artifact schema를 publish할 때 producer-independent reader validation으로 구현 가능 |
+| Config 안의 날짜 없는 static nested mapping | 거부 | user가 constituent source를 PIT dataset으로 등록·구독하고 StrategyView에서 consume |
+| Risk covariance가 없을 때 identity matrix 사용 | 거부 | 경제적 의미를 바꾸는 silent default이므로 progressive requirement로 실패하거나 risk-free profile을 명시 |
+| Solver 결과를 사후 재정규화 | 제한 | tolerance 안 cleanup만 raw delta를 남기고 전 constraint를 재검증; budget을 맞추기 위한 의미 변경 금지 |
+| Optimizer target exposure를 `realized_lookthrough_exposure`로 기록 | 거부 | user artifact를 만들더라도 target과 actual authority를 분리 |
+| Qlib feedback/object와 결합된 target policy | 거부 | user Strategy가 declared StrategyView와 AccountSnapshot을 직접 consume |
+
+근거 위치는 `kwam_qlib_backend/constraint_optimization.py`, `qlib_extended/enhanced.py`,
+`qlib_extended/enhanced_attribution.py`, `report_twin/portfolio.py`,
+`tests/test_goal_09_optimizer_contract.py`다. 계산식과 fixture idea만 참고하며 Qlib lifecycle이나 public object
+shape를 차용하지 않는다.
+
 ### Instrument와 Exchange registration
 
 Config/registration 경계에서는 concrete Pydantic model을 사용한다. Generic `kind + parameters` bag으로
@@ -1602,7 +1717,7 @@ src/qlibx/
   context/      scoped  strategy  execution  monitor  gate  ③ 시야  ★
   data/         registry  requirement  resolver  provider
   operations/   strategy  model  ensemble  extension ┐
-  portfolio/    construct  optimizer/                ├ ④ 계산
+  portfolio/    construct  optimizer/                 ├ ④ 계산
   execution/    adjust  convert  validate  exchange/ ┘
   account/      account  position  change  feedback  ⑤ 상태
   evidence/     artifact  catalog  lineage  publisher⑥ 증거
@@ -1846,7 +1961,39 @@ order/account mutation 전에 실패한다(`UC-CONSTRAINT-002`). Binding이 있�
 intent와 lot-rounding residual을 만들고 validate가 eligibility를 별도로 판정한다. 남은 breach를 adjusted
 success로 숨기지 않는다(`UC-CONSTRAINT-ADJUST-001`).
 
-### 13.10 Pluggable execution과 monitoring — UC-EXEC-001, UC-EXEC-002, UC-EXEC-003
+### 13.10 User-authored ETF look-through — UC-LOOKTHROUGH-001, UC-LOOKTHROUGH-002, UC-LOOKTHROUGH-003
+
+두 Strategy가 같은 `K200_ETF` Instrument와 Account를 사용한다고 하자. `OpaqueStrategy`는 constituent dataset을
+선언하지 않는다. 이 Strategy의 View에는 ETF 구성종목이 없으며 qlibx도 exposure를 만들지 않는다. ETF는 주문과
+Account에서 하나의 physical Instrument일 뿐이다.
+
+반면 `LookthroughStrategy`는 user가 등록한 `etf_constituents` binding과 actual account state를 requirements에 넣고
+둘을 consume한다. Constituent axis가 `A, B`, physical axis가 `A, K200_ETF`일 때 user code가 만든 mapping이 다음과
+같다고 하자.
+
+```text
+              physical A   K200_ETF
+constituent A      1.0         0.5
+constituent B      0.0         0.5
+```
+
+이 Strategy가 actual AccountSnapshot에서 `A=0.2, K200_ETF=0.6, cash=0.2`를 읽으면 user code는
+mapping을 정확히 한 번 적용해
+`A=0.5, B=0.3`이다. Direct A 0.2와 ETF 안의 A 0.3을 합치되 ETF benchmark 0.6을 다시 더하지 않는다.
+Cash 0.2를 constituent exposure에서 제외하는 것도 이 user-defined calculation의 규칙이다
+(`UC-LOOKTHROUGH-001`). qlibx는 계산하지 않고 실제 dataset/account read lineage만 기록한다.
+
+ETF 구성이 바뀐 observation S2의 effective time이 1월 2일이어도 `available_at`이 1월 3일이면 1월 2일
+StrategyView는 S2를 노출하지 않는다. S1을 사용할지, stale로 실패할지, partial coverage를 허용할지는 user
+Strategy가 결정한다. qlibx가 latest snapshot을 찾거나 ETF에 S1/S2를 자동 연결하지 않는다
+(`UC-LOOKTHROUGH-002`).
+
+Target이 `A=0.3, ETF=0.7`이어도 partial fill 뒤 marked actual이 `A=0.2, ETF=0.4, cash=0.4`라면 다음
+callback에서 `LookthroughStrategy`가 actual AccountSnapshot을 다시 consume해 계산한 exposure는
+`A=0.4, B=0.2`다. Target exposure `A=0.65, B=0.35`는 actual input으로 쓰지 않는다(`UC-LOOKTHROUGH-003`).
+이 재계산도 자동 feedback이 아니라 user Strategy가 다음 callback에서 다시 실행한 결과다.
+
+### 13.11 Pluggable execution과 monitoring — UC-EXEC-001, UC-EXEC-002, UC-EXEC-003
 
 하나의 immutable DecisionIntent를 두 child profile이 참조한다. 첫 naive daily profile은
 `NextSessionCloseExecutor + ClosePriceFill`로 다음 eligible trading session close에 하나의 batch event를
@@ -1863,7 +2010,7 @@ MONITOR timer는 decision 유무와 무관하게 Account의 committed snapshot�
 view를 읽는다. Price drift로 sector breach가 생기면 finding만 publish하고 order나 account mutation을
 만들지 않는다(`UC-EXEC-003`).
 
-### 13.11 Artifact, failure, report와 extension — UC-ARTIFACT-001, UC-ARTIFACT-002, UC-RESEARCH-001, UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001
+### 13.12 Artifact, failure, report와 extension — UC-ARTIFACT-001, UC-ARTIFACT-002, UC-RESEARCH-001, UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001
 
 External producer가 documented envelope와 payload로 signal을 publish하면 Loader가 producer class import 없이
 typed Signal object를 생성하고 semantics/lineage를 검사한다(`UC-ARTIFACT-001`). Duplicate logical key나
@@ -1877,7 +2024,7 @@ Analysis artifact 하나를 table/chart/machine renderer가 공유하고 metric�
 구분한다(`UC-MONITOR-001`). Local neutralization transform은 package contract validation이 성공한 뒤에만
 registry에 commit한다(`UC-EXTENSION-001`).
 
-### 13.12 Production reconcile — UC-PROD-001, UC-PROD-002
+### 13.13 Production reconcile — UC-PROD-001, UC-PROD-002
 
 ```text
 PreparedDecision(100 BUY)
@@ -1910,7 +2057,7 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 | 4 | Daily closed loop | kernel, decision/execution flow, Account/Memory, daily profile, checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002 |
 | 5 | Pluggable execution branch | immutable DecisionIntent, daily/intraday child profiles, isolated Account | UC-EXEC-001, UC-ALPHA-CHILD-001 |
 | 6 | Stored research + Strategy composition | materialize operation, typed load, Ensemble Strategy, reuse compatibility, Memory update | UC-SIGNAL-002, UC-ALPHA-*, UC-ENSEMBLE-001, UC-ARTIFACT-001 |
-| 7 | Portfolio/constraint/monitoring | construction, adjust/validate, account authority, independent monitor | UC-PORTFOLIO-001, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003 |
+| 7 | Portfolio/constraint/monitoring + user look-through fixture | construction, adjust/validate, user-declared PIT/account consumption, independent monitor | UC-PORTFOLIO-001, UC-LOOKTHROUGH-001~003, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003; §14.2 |
 | 8 | Analysis/report/extension | analysis artifact, pure renderer, extension validation | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001 |
 | 9 | Production boundary | prepared decision, atomic outbox, OMS result, reconciler | UC-PROD-001/002 |
 | 10 | Future design characterization | academic listing, lifecycle event spec, cash-flow attribution | UC-ACADEMIC-001, UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001 |
@@ -1945,6 +2092,24 @@ fixture 대조**로 수행한다.
 Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기대값**이다. 따라서 qlib 설치가
 필요하지 않고, 대신 각 fixture가 어느 코드 경로를 근거로 하는지 추적 가능해야 한다.
 
+### 14.2 User-authored ETF look-through boundary validation
+
+7단계는 reference 구현을 runtime oracle로 사용하지 않고 자동 ETF subsystem이 없다는 경계와 user-authored fixture를
+검증한다.
+
+1. 같은 ETF와 Account를 쓰는 두 Strategy 중 constituent requirement를 선언하지 않은 Strategy에는 구성종목 data가
+   노출되지 않고 exposure result도 자동 생성되지 않는다(`UC-LOOKTHROUGH-001`).
+2. Constituent requirement를 선언한 user Strategy만 해당 binding을 consume하며, 2×2 matrix fixture의 `L @ p` 계산은
+   user code에서 실행된다. Instrument registration이나 Account 보유가 이 계산을 trigger하지 않는다.
+3. `UC-LOOKTHROUGH-002`는 effective time과 `available_at`이 다른 두 observation에서 미래 row를 ViewGate가 숨기는지
+   확인한다. Available row의 stale/coverage/normalization 판단은 fixture Strategy가 수행한다.
+4. Undeclared constituent binding을 Strategy가 읽으려 하면 role/requirement gate가 실패하며, package가 ETF ticker로
+   binding을 추측하거나 latest dataset으로 fallback하지 않는다.
+5. `UC-LOOKTHROUGH-003`은 target 70% ETF가 partial fill로 actual 40%가 된 뒤 user Strategy가 다음 callback의 marked
+   AccountSnapshot을 읽어 다시 계산하는지 확인한다. qlibx는 target exposure를 Account나 feedback에 주입하지 않는다.
+6. User가 result artifact를 반환한 경우 generic lineage가 실제 constituent observation과 AccountSnapshot read를
+   기록한다. 별도 result를 반환하지 않은 opaque Strategy에는 ETF-specific artifact를 만들지 않는다.
+
 ---
 
 ## 15. 열린 결정
@@ -1956,7 +2121,6 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 |---|---|---|
 | O5 | margined contract 확장 | **범위 미확정.** Account의 held-instrument valuation과 `LifecycleBatch` 경계는 정했지만 complete Future/Perpetual lifecycle, collateral, borrow fee와 locate의 current-support 포함 여부는 별도 결정이 필요하다 |
 | O6 | pub/sub 도입 시점 | **도입 시점 미확정.** 현재는 수신자가 적고 Flow가 순서를 직접 아는 편이 단순하다. Runtime subscriber extension, 한 event의 다수 소비자 또는 전 event logging/replay가 실제 요구될 때 MessageBus 도입을 재검토한다 |
-| O12 | package name | **미확정. 현재 후보는 `vqapr`.** `vibe quant alpha portfolio / asset pricing research`의 중의적 의미로, alpha strategy research와 academic asset-pricing research를 함께 표현한다. 이름 확정 전 PyPI 가용성, import/CLI/document path migration과 사용자 혼동 가능성을 별도 검토한다. 현재 package/import 이름은 `qlibx`를 유지한다 |
 
 ---
 ## 16. 설계 감사 기록
@@ -2131,6 +2295,21 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 
 ## 17. 개정 이력
 
+### 2026-08-06 — 최종 package name 확정과 user-owned ETF look-through 설계
+
+**Package name.** 현재 package/import/CLI는 구축이 끝날 때까지 `qlibx`를 유지하고, 마지막 migration
+단계에서만 확정된 target `vqapr`로 전환한다. O12는 열린 결정에서 제거했다.
+
+**ETF look-through.** PRD `UC-LOOKTHROUGH-001`~`003`에 맞춰 qlibx core는 ETF를 physical Instrument로만 취급하고,
+look-through는 user Strategy가 constituent dataset과 actual AccountSnapshot을 명시적으로 선언·consume해 계산하는
+behavior로 정정했다. Package-owned mapping resolver, special snapshot/result type, coverage profile과 자동 feedback은
+두지 않는다. qlibx는 PIT ViewGate, actual-state 접근과 generic lineage만 제공한다.
+
+**Reference 판단.** `references/qlib-integration-codex`의 matrix multiplication, exact axis, actual-holding
+turnover, non-tradable freeze, independent validation과 stored attribution 검사는 차용한다. Static config mapping,
+identity-covariance fallback, 의미를 바꾸는 사후 normalization, optimizer target을 realized exposure로 부르는
+동작과 Qlib lifecycle 결합은 거부한다.
+
 ### 2026-08-06 — execution 시점 명확화와 출처 설명의 본문 통합
 
 **체결 시점.** 첫 vertical slice의 모호한 `CloseFill` 표현을
@@ -2147,10 +2326,10 @@ DTO와 Engine 조립의 해당 본문에 출처·위치·차용 수준·비차�
 `add_instrument`의 build-time validation에서 설계만 차용했음을 §8에 기록했다. 계약과 근거가 서로 다른
 절에서 독립적으로 변해 sync가 깨지는 것을 막기 위한 변경이다.
 
-**열린 결정.** 해결되거나 기각된 항목은 열린 결정 표에서 제거했다. Package name은 아직 확정하지
-않았으며 현재 후보는 `vqapr`이다. `vibe quant alpha portfolio / asset pricing research`라는 중의적 의미로
-alpha strategy research와 academic asset-pricing research를 함께 표현한다. 확정 전에는 package/import
-이름 `qlibx`를 유지한다.
+**Package name.** 현재 구축, import, CLI, artifact schema와 generated skill path는 `qlibx`를 사용한다.
+최종 rename target은 `vqapr`로 확정했지만 실행은 마지막 migration 단계까지 보류한다. 그 단계에서 PyPI,
+import/CLI/document path, artifact/schema identity, installed skill과 migration guide를 하나의 versioned change로
+전환한다. 따라서 package name은 더 이상 열린 결정이 아니며 O12를 제거했다.
 
 ### 2026-08-06 — Account authority 통합과 read/write 분리
 

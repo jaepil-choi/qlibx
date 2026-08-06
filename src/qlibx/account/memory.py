@@ -9,6 +9,7 @@ class MemorySnapshot:
     version: int
     value: object | None
     feedback_cursor: int
+    commit_id: str | None = None
 
 
 class StrategyMemoryStore:
@@ -51,8 +52,13 @@ class StrategyMemoryStore:
         value: object,
         feedback_cursor: int,
         expected_version: int,
+        commit_id: str | None = None,
     ) -> MemorySnapshot:
         current = self.snapshot(strategy_id)
+        if commit_id is not None and current.commit_id == commit_id:
+            if current.value != value or current.feedback_cursor != feedback_cursor:
+                raise ValueError("Strategy memory commit identity has conflicting content")
+            return current
         if current.version != expected_version:
             raise ValueError("stale Strategy memory version")
         if feedback_cursor < current.feedback_cursor:
@@ -62,6 +68,7 @@ class StrategyMemoryStore:
             version=current.version + 1,
             value=value,
             feedback_cursor=feedback_cursor,
+            commit_id=commit_id,
         )
         self._snapshots[strategy_id] = updated
         return updated

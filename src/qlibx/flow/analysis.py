@@ -50,7 +50,7 @@ EXECUTION_EVIDENCE_CONTRACT = ArtifactContract(
 
 SIMULATION_CHECKPOINT_CONTRACT = ArtifactContract(
     artifact_type="simulation_checkpoint",
-    artifact_schema_version=1,
+    artifact_schema_version=2,
     payload_model=SimulationCheckpoint,
 )
 

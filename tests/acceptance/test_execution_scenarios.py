@@ -453,7 +453,7 @@ def test_uc_exec_001_and_uc_alpha_child_001_isolate_frozen_daily_children(
     )
 
 
-def test_gap_recovery_001_account_and_memory_checkpoint_resume(
+def test_checkpoint_round_trip_preserves_account_and_memory_state(
     real_dw_case: RealDwProject,
 ) -> None:
     phase_one_sessions = tuple(close_at(2024, 1, day) for day in (2, 3))

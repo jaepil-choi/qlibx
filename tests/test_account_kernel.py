@@ -167,6 +167,35 @@ def test_memory_store_is_separate_and_cas_guarded() -> None:
         )
 
 
+def test_memory_commit_identity_is_idempotent_and_conflict_safe() -> None:
+    memory = StrategyMemoryStore()
+    first = memory.commit(
+        strategy_id="adaptive",
+        value={"belief": 0.6},
+        feedback_cursor=2,
+        expected_version=0,
+        commit_id="memory-event-1",
+    )
+    replay = memory.commit(
+        strategy_id="adaptive",
+        value={"belief": 0.6},
+        feedback_cursor=2,
+        expected_version=0,
+        commit_id="memory-event-1",
+    )
+
+    assert replay == first
+    assert memory.snapshot("adaptive").version == 1
+    with pytest.raises(ValueError, match="conflicting content"):
+        memory.commit(
+            strategy_id="adaptive",
+            value={"belief": 0.7},
+            feedback_cursor=2,
+            expected_version=0,
+            commit_id="memory-event-1",
+        )
+
+
 def test_memory_checkpoint_restores_cas_and_feedback_authority() -> None:
     memory = StrategyMemoryStore()
     committed = memory.commit(

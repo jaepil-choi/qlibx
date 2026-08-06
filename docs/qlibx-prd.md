@@ -1343,6 +1343,15 @@ Strategy를 다시 실행하지 않으며 각 child는 execution assumption과 a
 중단된 run은 committed artifact와 feedback cursor에서 재개할 수 있어야 한다. Resume은 이미 commit된 decision이나
 fill을 중복 적용하지 않고, input/config identity가 달라졌다면 새 run 또는 explicit branch를 요구한다.
 
+Default local daily flow는 callback별 Account/Memory CAS 결과와 scheduler position을 versioned recovery point로
+먼저 durable publication한 뒤 같은 candidate를 live authority에 적용한다. Process가 그 사이 어느 지점에서 종료돼도
+resume은 recovery point에서 Account journal과 Strategy Memory를 복원하고, 누락된 typed evidence만 idempotent하게
+발행한 뒤 저장된 event position보다 뒤의 callback만 실행한다.
+
+Resume identity는 run request, config, execution profile, logical dataset registration과 Strategy를 포함한다. 하나라도
+달라지면 `RESUME_BRANCH_REQUIRED`로 mutation 전에 실패하며, changed identity는 새 run 또는 명시적 parent-checkpoint
+branch로만 진행한다. 이 계약은 local daily simulation 범위이며 external OMS와 distributed transaction을 뜻하지 않는다.
+
 ### 9.11 Adaptive alpha research and belief update
 
 Adaptive Strategy는 realized result나 new observation으로 belief, parameter 또는 member weight를 갱신할 수 있다.
@@ -1689,7 +1698,7 @@ decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 
 |---|---|---|
 | `GAP-ONBOARD-001` | §6.1의 dry-run, owned block/file, fingerprint, update/remove와 target별 skill protocol이 architecture flow로 닫히지 않았다 | Fresh project와 기존 instruction file fixture에서 preview/apply/update/remove가 user-owned content를 보존하고 idempotent한 결과와 validation evidence를 만든다 |
 | `GAP-CONSTRAINT-001` | MVP의 no-short와 time-varying single-name cap에 대해 adjustment, independent validation, missing benchmark weight와 lot-rounding residual의 public behavior가 충분히 규정되지 않았다 | 같은 PIT benchmark input에서 no-short와 single-name cap의 adjustment/validation 결과가 일치하고 missing weight는 fail하며 residual evidence를 보존한다 |
-| `GAP-RECOVERY-001` | Account commit, Strategy Memory, feedback cursor, checkpoint와 artifact publication 사이 crash point의 resume behavior가 닫히지 않았다 | 각 crash point에서 재개한 결과가 uninterrupted run과 같고 committed decision/Fill/Memory를 중복 적용하지 않으며 identity가 바뀌면 explicit branch를 요구한다 |
+| `GAP-RECOVERY-001` (default local daily flow closed) | Versioned recovery point가 Account checkpoint, Strategy Memory, feedback cursor, scheduler position과 누락 가능 evidence를 묶는다. External Account/OMS와 distributed recovery는 별도 contract가 필요하다 | `tests/scenarios/recovery.yaml`의 real-DW process-crash matrix에서 각 crash point의 resume이 uninterrupted result와 같고 decision/Fill/Memory를 중복 적용하지 않으며 changed identity는 mutation 전 `RESUME_BRANCH_REQUIRED`로 실패한다 |
 | `GAP-CATALOG-001` (default local backend closed) | DuckDB schema v1, bounded cross-process writer lock, payload staging, append-only publication audit와 abandoned pre-commit recovery를 current local backend가 제공한다. External backend와 multi-host filesystem은 별도 contract validation이 필요하다 | `tests/scenarios/catalog_recovery.yaml`의 concurrent writer와 process-crash fixture에서 partial payload가 reusable success로 보이지 않고 conflict/idempotent/recovery 결과가 deterministic하다 |
 
 ETF look-through는 이 revision에서 `UC-LOOKTHROUGH-001`~`003`과 §10.5로 **user-authored Strategy behavior**임을

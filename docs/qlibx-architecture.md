@@ -596,6 +596,33 @@ Proposed Memory의 commit timing도 profile contract다. Research-only/hold는 e
 finalization에서, MVP simulation decision은 하나의 full-fill execution result와 checkpoint를 묶을 때 CAS commit한다.
 Production-specific memory timing은 future work다.
 
+### Default local daily recovery protocol
+
+Local Account와 Strategy Memory가 process memory에만 있으면 final checkpoint 하나로는 commit 직후 crash를 복구할 수
+없다. 따라서 Flow는 state-changing callback마다 현재 Account와 Memory를 clone하고 동일한 expected version, event ID,
+Memory commit ID로 typed change를 먼저 검증한다. 검증된 post-state, event position, pending DecisionIntent와 아직 발행되지
+않았을 수 있는 typed evidence를 `simulation_recovery_point`로 durable publication한 뒤 live Account와 Memory에 같은
+candidate를 적용한다. Candidate와 live commit 결과가 다르면 성공으로 진행하지 않는다.
+
+```text
+freeze and validate candidate on cloned Account/Memory
+  → publish immutable recovery point
+  → apply identical Account CAS change
+  → apply identical Strategy Memory CAS change
+  → publish execution/mark/memory evidence
+  → continue events strictly after the stored (timestamp, priority)
+```
+
+Process 재시작은 같은 run의 가장 높은 recovery sequence를 load하고 request/config/profile, logical dataset registration과
+Strategy identity를 mutation 전에 비교한다. 일치하면 checkpoint의 Account journal과 Memory head를 runtime authority로
+복원하고 recovery point에 포함된 누락 evidence를 strict artifact contract로 다시 발행한다. 동일 logical identity와 content는
+catalog idempotency로 같은 artifact가 되고, 다른 content는 conflict다. Identity가 달라지면 자동 merge하지 않고
+`RESUME_BRANCH_REQUIRED`로 실패한다.
+
+Recovery point는 별도 mutable ledger나 세 번째 runtime authority가 아니라 Account/Memory authority의 portable durable
+serialization이다. 이 local simulation protocol은 distributed transaction, external OMS state 또는 broker acknowledgement를
+복구한다고 주장하지 않는다.
+
 ### Executor는 횡단면 batch sub-flow다
 
 **Exchange와 Executor는 다른 것이다.**

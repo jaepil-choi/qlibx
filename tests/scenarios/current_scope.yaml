@@ -38,6 +38,7 @@ required_current_use_cases:
   - UC-LOOKTHROUGH-003
 companion_registries:
   - tests/scenarios/current_contracts.yaml
+  - tests/scenarios/recovery.yaml
 coverage_sets:
   m5:
     - UC-EXEC-001
@@ -370,17 +371,7 @@ scenarios:
       memory_mutation: false
       parent_mutation: false
 
-  - id: GAP-RECOVERY-001
-    case: account_memory_checkpoint_resume
-    test: tests/acceptance/test_execution_scenarios.py::test_gap_recovery_001_account_and_memory_checkpoint_resume
-    inputs:
-      data_kind: real
-      sources: [data/DW/fng_stock_daily_prices.csv]
-    expected:
-      outcome: complete
-      duplicate_commit: false
-      feedback_cursor: 2
-      uninterrupted_parity: true
+
 
   - id: UC-SIGNAL-002
     case: external_real_dw_signal_two_consumers

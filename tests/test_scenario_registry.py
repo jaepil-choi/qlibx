@@ -67,7 +67,8 @@ def test_current_support_ids_are_complete_across_real_and_contract_registries() 
     current = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
     contracts = yaml.safe_load(CONTRACT_REGISTRY.read_text(encoding="utf-8"))
     assert current["companion_registries"] == [
-        "tests/scenarios/current_contracts.yaml"
+        "tests/scenarios/current_contracts.yaml",
+        "tests/scenarios/recovery.yaml",
     ]
     assert contracts["schema_version"] == 1
     assert contracts["support_status"] == "current"

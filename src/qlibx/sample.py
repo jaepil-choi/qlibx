@@ -3,6 +3,7 @@
 import hashlib
 import os
 from pathlib import Path
+from typing import ClassVar
 
 from qlibx.config import ChangeAction
 from qlibx.models import QlibxModel
@@ -23,14 +24,26 @@ class SampleMaterializationResult(QlibxModel):
 
 
 class SampleMaterializer:
-    """Preview or copy one bundled sample without overwriting user changes."""
+    """Preview or copy a selected bundled sample without overwriting user changes."""
 
-    sample_id = "basic-real-dw-journey-v1"
+    default_sample_id = "basic-real-dw-journey-v1"
+    sample_id = default_sample_id
+    _samples: ClassVar[dict[str, tuple[str, str]]] = {
+        default_sample_id: ("basic", "basic"),
+        "daily-closed-loop-v1": ("daily_closed_loop", "daily_closed_loop"),
+    }
 
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, sample_id: str = default_sample_id) -> None:
         self._project_root = project_root.resolve()
-        self._source = Path(__file__).parent / "resources" / "samples" / "basic"
-        self._destination = self._project_root / "examples" / "qlibx_owned" / "basic"
+        try:
+            source_name, destination_name = self._samples[sample_id]
+        except KeyError as exc:
+            raise ValueError(f"unknown bundled sample_id: {sample_id}") from exc
+        self.sample_id = sample_id
+        self._source = Path(__file__).parent / "resources" / "samples" / source_name
+        self._destination = (
+            self._project_root / "examples" / "qlibx_owned" / destination_name
+        )
 
     def materialize(self, *, apply: bool = False) -> SampleMaterializationResult:
         files = {

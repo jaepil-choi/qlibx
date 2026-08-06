@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from qlibx.account import Account
 from qlibx.config.project import (
     ProjectConfig,
     ProjectInitResult,
@@ -13,12 +14,21 @@ from qlibx.data.contracts import DatasetRegistration
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
 from qlibx.errors import OperationOutcome
 from qlibx.evidence import ArtifactContract, LocalArtifactBackend
+from qlibx.execution import KrxExchange
 from qlibx.extensions import ExtensionRegistration, ExtensionValidationRequest
-from qlibx.flow import ExtensionFlow, ResearchFlow
+from qlibx.flow import (
+    DailyExecutionFlow,
+    DailyExecutionProfile,
+    DailyRunRequest,
+    ExtensionFlow,
+    ResearchFlow,
+)
+from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
 from qlibx.operations import StrategyInvocation, StrategyOperation
 from qlibx.sample import SampleMaterializationResult, SampleMaterializer
+from qlibx.simulation import DailySimulationSpec
 
 
 class QlibxProject:
@@ -90,8 +100,13 @@ class QlibxProject:
     ) -> tuple[TargetOnboardingResult, ...]:
         return ProjectOnboarder(self._root).onboard(requests, apply=apply)
 
-    def materialize_sample(self, *, apply: bool = False) -> SampleMaterializationResult:
-        return SampleMaterializer(self._root).materialize(apply=apply)
+    def materialize_sample(
+        self,
+        sample_id: str = SampleMaterializer.default_sample_id,
+        *,
+        apply: bool = False,
+    ) -> SampleMaterializationResult:
+        return SampleMaterializer(self._root, sample_id).materialize(apply=apply)
 
     def invoke(
         self,
@@ -102,6 +117,49 @@ class QlibxProject:
             registry=self.registry_snapshot(),
             artifacts=self.artifacts,
         ).invoke_strategy(operation, invocation)
+
+    def run_daily(
+        self,
+        strategy: StrategyOperation,
+        spec: DailySimulationSpec,
+        *,
+        resume: bool = False,
+    ) -> OperationOutcome:
+        """Run the supported next-session-close profile from frozen public input."""
+
+        exchange = KrxExchange(spec.exchange)
+        for instrument in spec.instruments:
+            exchange.add_instrument(instrument)
+        account = Account(
+            account_id=spec.account.account_id,
+            base_currency=spec.account.base_currency,
+            initial_cash=spec.account.initial_cash,
+            instrument_ids=frozenset(item.instrument_id for item in spec.instruments),
+        )
+        first_event = min((*spec.decision_times, *spec.session_closes))
+        flow = DailyExecutionFlow(
+            clock=BacktestClock(first_event),
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+            exchange=exchange,
+            account=account,
+            profile=DailyExecutionProfile(
+                market_dataset_id=spec.market.market_dataset_id,
+                execution_price_role=spec.market.execution_price_role,
+                valuation_price_role=spec.market.valuation_price_role,
+                feedback_entry_limit=spec.market.feedback_entry_limit,
+            ),
+        )
+        return flow.run(
+            strategy,
+            DailyRunRequest(
+                run_id=spec.run_id,
+                config_fingerprint=spec.frozen_config_fingerprint(),
+                decision_times=spec.decision_times,
+                session_closes=spec.session_closes,
+            ),
+            resume=resume,
+        )
 
     @classmethod
     def init(

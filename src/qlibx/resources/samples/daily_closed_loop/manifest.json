@@ -1,0 +1,13 @@
+{
+  "sample_schema_version": 1,
+  "sample_id": "daily-closed-loop-v1",
+  "ownership": "qlibx_product_owned_example",
+  "source": "data/DW/fng_stock_daily_prices.csv",
+  "source_rows": 8,
+  "observation_time": "session date normalized as 09:00 Asia/Seoul",
+  "available_at": "same-session 15:30 Asia/Seoul close",
+  "decision_times": ["2024-01-02", "2024-01-04"],
+  "expected_winners": ["A005930", "A000660"],
+  "execution_profile": "daily.next-session-close.v1",
+  "current_support_only": true
+}

@@ -6,8 +6,11 @@ from tests.acceptance.real_dw_support import (
     RealDwProject,
     create_real_dw_project,
     extract_real_dw_rows,
+    extract_real_extension_market_rows,
+    extract_real_extension_sector_rows,
     extract_real_k200_rows,
     extract_real_lookthrough_rows,
+    register_real_extension_inputs,
     register_real_k200_benchmark,
     register_real_lookthrough_constituents,
 )
@@ -62,4 +65,28 @@ def real_dw_lookthrough_case(
     return register_real_lookthrough_constituents(
         real_dw_constraint_case,
         bounded_real_lookthrough_source,
+    )
+
+
+@pytest.fixture(scope="session")
+def bounded_real_extension_sources(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, Path]:
+    directory = tmp_path_factory.mktemp("real-extension")
+    market = directory / "real-extension-market.parquet"
+    sector = directory / "real-extension-sector.parquet"
+    extract_real_extension_market_rows(market)
+    extract_real_extension_sector_rows(sector)
+    return market, sector
+
+
+@pytest.fixture
+def real_dw_extension_case(
+    real_dw_case: RealDwProject,
+    bounded_real_extension_sources: tuple[Path, Path],
+) -> RealDwProject:
+    return register_real_extension_inputs(
+        real_dw_case,
+        bounded_real_extension_sources[0],
+        bounded_real_extension_sources[1],
     )

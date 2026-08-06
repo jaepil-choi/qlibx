@@ -13,7 +13,8 @@ from qlibx.data.contracts import DatasetRegistration
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
 from qlibx.errors import OperationOutcome
 from qlibx.evidence import ArtifactContract, LocalArtifactBackend
-from qlibx.flow import ResearchFlow
+from qlibx.extensions import ExtensionRegistration, ExtensionValidationRequest
+from qlibx.flow import ExtensionFlow, ResearchFlow
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
 from qlibx.operations import StrategyInvocation, StrategyOperation
@@ -44,6 +45,21 @@ class QlibxProject:
 
     def registry_snapshot(self) -> RegistrySnapshot:
         return self.dataset_registry.snapshot()
+
+    @property
+    def extension_flow(self) -> ExtensionFlow:
+        return ExtensionFlow(
+            project_root=self._root,
+            extension_root=self._root / self._config.extension_dir,
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+        )
+
+    def validate_extension(self, request: ExtensionValidationRequest) -> OperationOutcome:
+        return self.extension_flow.validate_local(request)
+
+    def registered_extensions(self) -> tuple[ExtensionRegistration, ...]:
+        return self.extension_flow.registered()
 
     @property
     def artifacts(self) -> LocalArtifactBackend:

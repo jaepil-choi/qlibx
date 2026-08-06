@@ -42,6 +42,7 @@ from qlibx.flow.daily import (
     NextSessionCloseExecutor,
     SimulationCheckpoint,
 )
+from qlibx.flow.extensions import EXTENSION_REGISTRATION_CONTRACT, ExtensionFlow
 from qlibx.flow.monitoring import CONSTRAINT_MONITORING_CONTRACT, MonitoringFlow
 from qlibx.flow.portfolio import PORTFOLIO_RESULT_CONTRACT, PortfolioConstructionFlow
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
@@ -53,6 +54,7 @@ __all__ = [
     "CONSTRAINT_VALIDATION_CONTRACT",
     "DECISION_PRIORITY",
     "EXECUTION_PRIORITY",
+    "EXTENSION_REGISTRATION_CONTRACT",
     "MARK_PRIORITY",
     "MONITOR_PRIORITY",
     "PORTFOLIO_RESULT_CONTRACT",
@@ -72,6 +74,7 @@ __all__ = [
     "EnsembleMemberSpec",
     "EnsembleRunResult",
     "ExecutionEvidence",
+    "ExtensionFlow",
     "FrozenDecision",
     "MarkEvidence",
     "MemberContribution",

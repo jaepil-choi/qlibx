@@ -25,7 +25,31 @@ coverage_sets:
   m7_reporting:
     - UC-REPORT-001
     - UC-MONITOR-001
+  m8_extension:
+    - UC-EXTENSION-001
 scenarios:
+  - id: UC-EXTENSION-001
+    case: project_local_sector_demean_validated_before_registration
+    test: tests/acceptance/test_extension_scenarios.py::test_uc_extension_001_registers_only_after_real_pit_contract_validation
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_stock_daily_prices.csv
+        - data/DW/DW_FNG_FGSC종목_20200101-20260430.csv
+        - data/preprocessed/adjusted_prices.parquet
+        - data/preprocessed/sector_classification.parquet
+        - data/preprocessed/industry_mapping.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+      extension_owner: project_local
+      contract: neutralization_transform_v1
+    expected:
+      before_available_at: failed
+      invalid_output: failed
+      failure_registered: false
+      deterministic_output: true
+      group_sum_zero: true
+      validated_registered: true
+
   - id: UC-REPORT-001
     case: one_stored_analysis_three_value_preserving_renderers
     test: tests/acceptance/test_reporting_scenarios.py::test_uc_report_001_renderers_preserve_one_stored_analysis_value_set

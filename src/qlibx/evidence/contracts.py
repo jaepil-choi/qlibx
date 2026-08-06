@@ -1,0 +1,55 @@
+"""Portable artifact boundary contracts."""
+
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Generic, Literal, TypeVar
+
+from pydantic import Field
+
+from qlibx.models import QlibxModel
+
+
+class ArtifactStatus(StrEnum):
+    COMPLETE = "complete"
+    FAILURE = "failure"
+
+
+class PayloadFormat(StrEnum):
+    JSON = "json"
+
+
+class DependencyEdge(QlibxModel):
+    dependency_kind: Literal["artifact", "dataset", "config", "state", "error"]
+    dependency_id: str = Field(min_length=1)
+    consumer_role: str = Field(min_length=1)
+    selected_fields: tuple[str, ...] = ()
+    compatibility_fingerprint: str | None = None
+
+
+class ArtifactEnvelope(QlibxModel):
+    envelope_schema_version: int = 1
+    artifact_id: str
+    logical_identity: str
+    artifact_type: str
+    artifact_schema_version: int = Field(ge=1)
+    producer_id: str
+    content_hash: str
+    payload_format: PayloadFormat
+    status: ArtifactStatus
+    dependencies: tuple[DependencyEdge, ...] = ()
+
+
+PayloadModel = TypeVar("PayloadModel", bound=QlibxModel)
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactContract(Generic[PayloadModel]):
+    artifact_type: str
+    artifact_schema_version: int
+    payload_model: type[PayloadModel]
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedArtifact(Generic[PayloadModel]):
+    envelope: ArtifactEnvelope
+    payload: PayloadModel

@@ -1,0 +1,4 @@
+interface:
+  display_name: "qlibx Workflow"
+  short_description: "Guide PIT-safe qlibx research and recovery"
+  default_prompt: "Use $qlibx to inspect this project, resolve the next requirement safely, and validate the result."

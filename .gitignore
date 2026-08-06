@@ -21,6 +21,11 @@ showcases/show_*/outputs/
 .agent/runs/*
 !.agent/runs/.gitignore
 
+# Local test and tool scratch state.
+/.agent/test-runs/
+/.tmp/
+/tmp/
+
 # Agent execution plans are local working state.
 /.agent/plans/**
 !/.agent/plans/active/

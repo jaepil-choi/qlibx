@@ -12,7 +12,43 @@ coverage_sets:
     - UC-ARTIFACT-001
   m6_portfolio:
     - UC-PORTFOLIO-001
+  m6_constraint:
+    - UC-CONSTRAINT-002
+    - UC-CONSTRAINT-ADJUST-001
 scenarios:
+  - id: UC-CONSTRAINT-002
+    case: missing_or_future_k200_weight_fails_before_mutation
+    test: tests/acceptance/test_research_scenarios.py::test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutoff
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_k200_members.csv
+        - data/preprocessed/k200_members.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+    expected:
+      missing_binding: failed
+      before_available_at: failed
+      account_mutation: false
+      memory_mutation: false
+
+  - id: UC-CONSTRAINT-ADJUST-001
+    case: real_k200_cap_lot_residual_then_independent_deny
+    test: tests/acceptance/test_research_scenarios.py::test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutoff
+    inputs:
+      data_kind: real
+      sources:
+        - data/DW/fng_stock_daily_prices.csv
+        - data/DW/fng_k200_members.csv
+        - data/preprocessed/k200_members.parquet
+      available_at_rule: next_trading_session_at_09_00_kst
+    expected:
+      adjustment_outcome: complete
+      unresolved_excess: positive
+      validation_outcome: complete
+      execution_eligible: false
+      account_mutation: false
+      memory_mutation: false
+
   - id: UC-PORTFOLIO-001
     case: real_dw_same_alpha_two_current_profiles
     test: tests/acceptance/test_research_scenarios.py::test_uc_portfolio_001_constructs_two_portfolios_from_one_real_dw_alpha

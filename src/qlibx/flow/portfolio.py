@@ -3,14 +3,21 @@
 import hashlib
 
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
-from qlibx.evidence import DependencyEdge, LocalArtifactBackend
+from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.flow.composition import STRATEGY_RESULT_CONTRACT
 from qlibx.portfolio import (
     PortfolioConstructionError,
     PortfolioConstructionInput,
     PortfolioConstructionRequest,
+    PortfolioConstructionResult,
     PortfolioWeight,
     construct_portfolio,
+)
+
+PORTFOLIO_RESULT_CONTRACT = ArtifactContract(
+    artifact_type="portfolio_construction_result",
+    artifact_schema_version=1,
+    payload_model=PortfolioConstructionResult,
 )
 
 

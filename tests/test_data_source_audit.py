@@ -40,9 +40,13 @@ def test_data_source_audit_is_bound_to_current_files() -> None:
             assert path.is_file()
             assert _sha256(path) == layer["sha256"]
 
-        assert dataset["pit"]["status"] == "unresolved"
-        assert dataset["pit"]["reason"]
-        assert dataset["pit"]["prohibited_claim"]
+        assert dataset["pit"]["status"] in {"user_confirmed", "unresolved"}
+        if dataset["pit"]["status"] == "user_confirmed":
+            assert dataset["pit"]["confirmed_rule"] == "next_trading_session_at_09_00_kst"
+            assert dataset["pit"]["observed_qlibx_rule_status"] == "rejected"
+        else:
+            assert dataset["pit"]["reason"]
+            assert dataset["pit"]["prohibited_claim"]
 
 
 def test_k200_membership_preprocessed_and_qlibx_projection_are_exact() -> None:

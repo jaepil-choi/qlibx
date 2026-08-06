@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import duckdb
 
 from qlibx import OperationOutcome, OutcomeStatus
@@ -5,6 +7,7 @@ from qlibx.account import StrategyMemoryStore
 from qlibx.flow import (
     STORED_SIGNAL_CONTRACT,
     CompositionFlow,
+    ConstraintFlow,
     DailyExecutionFlow,
     DailyExecutionProfile,
     DailyRunRequest,
@@ -18,8 +21,16 @@ from qlibx.flow import (
 )
 from qlibx.kernel import BacktestClock
 from qlibx.operations import BudgetMode, StrategyInvocation
-from qlibx.portfolio import ConstructionProfile, PortfolioConstructionRequest
+from qlibx.portfolio import (
+    ConstraintAdjustmentRequest,
+    ConstraintDeclaration,
+    ConstraintValidationRequest,
+    ConstructionProfile,
+    ExecutionLotInput,
+    PortfolioConstructionRequest,
+)
 from tests.acceptance.real_dw_support import (
+    KST,
     RealDwProject,
     StoredWinnerStrategy,
     WeakRealDwStrategy,
@@ -55,6 +66,33 @@ def _import_real_dw_signal(real_dw_case: RealDwProject) -> OperationOutcome:
     )
 
 
+def _build_real_dw_long_only_portfolio(
+    real_dw_case: RealDwProject,
+) -> OperationOutcome:
+    imported = _import_real_dw_signal(real_dw_case)
+    alpha = CompositionFlow(
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+    ).invoke_stored_signal_strategy(
+        artifact_id=imported.result.artifact_id,
+        strategy_id="acceptance.constraint-source-alpha",
+        weighting=StoredSignalWeighting.LONG_SHORT_EXTREMES,
+        invocation=StrategyInvocation(
+            invocation_id="constraint-source-alpha-real-dw",
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="constraint-source-alpha-v1",
+        ),
+    )
+    return PortfolioConstructionFlow(artifacts=real_dw_case.project.artifacts).construct(
+        PortfolioConstructionRequest(
+            invocation_id="constraint-source-portfolio-real-dw",
+            source_artifact_id=alpha.result.artifact.artifact_id,
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="constraint-source-portfolio-v1",
+            profile=ConstructionProfile.EQUITY_LONG_ONLY,
+            requested_budget=1.0,
+        )
+    )
 def test_uc_alpha_budget_001_preserves_real_dw_flexible_residual(
     real_dw_case: RealDwProject,
 ) -> None:
@@ -202,6 +240,125 @@ def test_uc_portfolio_001_constructs_two_portfolios_from_one_real_dw_alpha(
         outcome.diagnostics[0].dependencies[0].dependency_id
         == alpha.result.artifact.artifact_id
         for outcome in (signed, long_only)
+    )
+
+
+def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutoff(
+    real_dw_case: RealDwProject,
+    real_dw_constraint_case: RealDwProject,
+) -> None:
+    declaration = ConstraintDeclaration(
+        declaration_id="mvp-no-short-single-name-cap-v1",
+        benchmark_weight_role="benchmark_weight",
+        single_name_floor=0.10,
+    )
+    unconstrained_portfolio = _build_real_dw_long_only_portfolio(real_dw_case)
+    missing = ConstraintFlow(
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+    ).adjust(
+        declaration,
+        ConstraintAdjustmentRequest(
+            invocation_id="constraint-missing-k200-binding",
+            source_portfolio_artifact_id=unconstrained_portfolio.diagnostics[0].artifact_id,
+            evaluation_time=close_at(2024, 1, 3),
+            config_fingerprint="constraint-missing-v1",
+            account_state_identity="account:missing-binding:v0",
+            capital=970_000.0,
+            lots=(
+                ExecutionLotInput(
+                    instrument="A005930",
+                    price=77_000.0,
+                    lot_size=1.0,
+                    current_quantity=12.0,
+                ),
+            ),
+        ),
+    )
+
+    portfolio = _build_real_dw_long_only_portfolio(real_dw_constraint_case)
+    flow = ConstraintFlow(
+        registry=real_dw_constraint_case.project.registry_snapshot(),
+        artifacts=real_dw_constraint_case.project.artifacts,
+    )
+    hidden = flow.adjust(
+        declaration,
+        ConstraintAdjustmentRequest(
+            invocation_id="constraint-k200-before-confirmed-cutoff",
+            source_portfolio_artifact_id=portfolio.diagnostics[0].artifact_id,
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="constraint-hidden-v1",
+            account_state_identity="account:hidden-cutoff:v0",
+            capital=970_000.0,
+            lots=(
+                ExecutionLotInput(
+                    instrument="A005930",
+                    price=77_000.0,
+                    lot_size=1.0,
+                    current_quantity=12.0,
+                ),
+            ),
+        ),
+    )
+    adjustment = flow.adjust(
+        declaration,
+        ConstraintAdjustmentRequest(
+            invocation_id="constraint-k200-after-confirmed-cutoff",
+            source_portfolio_artifact_id=portfolio.diagnostics[0].artifact_id,
+            evaluation_time=close_at(2024, 1, 3),
+            config_fingerprint="constraint-adjust-v1",
+            account_state_identity="account:pretrade:v2",
+            capital=970_000.0,
+            lots=(
+                ExecutionLotInput(
+                    instrument="A005930",
+                    price=77_000.0,
+                    lot_size=1.0,
+                    current_quantity=12.0,
+                ),
+            ),
+        ),
+    )
+    validation = flow.validate(
+        declaration,
+        ConstraintValidationRequest(
+            invocation_id="constraint-independent-validation",
+            adjustment_artifact_id=adjustment.diagnostics[0].artifact_id,
+            evaluation_time=close_at(2024, 1, 3),
+            config_fingerprint="constraint-validate-v1",
+        ),
+    )
+
+    assert missing.status is OutcomeStatus.FAILED
+    assert missing.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
+    assert hidden.status is OutcomeStatus.FAILED
+    assert hidden.errors[0].error_code == "CONSTRAINT_BENCHMARK_COVERAGE_MISSING"
+    assert adjustment.status is validation.status is OutcomeStatus.COMPLETE
+    item = adjustment.result.items[0]
+    assert item.instrument == "A005930"
+    assert item.benchmark_weight == 0.3172
+    assert item.cap == 0.3172
+    assert item.continuous_weight == 0.3172
+    assert item.requested_delta_quantity < -8.0
+    assert item.rounded_delta_quantity == -8.0
+    assert item.projected_quantity == 4.0
+    assert item.adjusted_weight == 4 * 77_000 / 970_000
+    assert item.unresolved_excess == item.adjusted_weight - item.cap
+    assert adjustment.result.unresolved_excess > 0
+    assert any(
+        edge.dependency_id == "account:pretrade:v2"
+        and edge.consumer_role == "actual_pretrade_state"
+        for edge in adjustment.diagnostics[0].dependencies
+    )
+    assert validation.result.eligible is False
+    cap_finding = next(
+        finding for finding in validation.result.findings
+        if finding.metric == "single_name_cap"
+    )
+    assert cap_finding.passed is False
+    assert cap_finding.excess == item.unresolved_excess
+    assert adjustment.result.accesses[0].max_available_at.astimezone(KST) == datetime(
+        2024, 1, 3, 9, 0, tzinfo=KST
     )
 
 

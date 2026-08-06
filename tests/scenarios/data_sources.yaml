@@ -35,12 +35,15 @@ datasets:
       projection_from_preprocessed: exact
       observed_available_at_rule: date_minus_1_calendar_day
     pit:
-      status: unresolved
-      reason: membership is exposed before its effective date without source release evidence
-      prohibited_claim: pit_safe_portfolio_construction
+      status: user_confirmed
+      confirmed_rule: next_trading_session_at_09_00_kst
+      trading_calendar: k200_distinct_observation_dates
+      confirmed_on: 2026-08-06
+      observed_qlibx_rule_status: rejected
+      permitted_claim: pit_safe_only_after_confirmed_rule_is_materialized
 
   sector_classification:
-    intended_roles: [sector_classification, sector_constraint]
+    intended_roles: [sector_classification, future_sector_constraint]
     logical_key: [date, ticker]
     raw:
       path: data/DW/DW_FNG_FGSC종목_20200101-20260430.csv
@@ -72,9 +75,12 @@ datasets:
       projection_from_preprocessed: exact
       observed_available_at_rule: date
     pit:
-      status: unresolved
-      reason: same-day availability and preprocessed-only keys lack source release/provenance evidence
-      prohibited_claim: pit_safe_sector_constraint
+      status: user_confirmed
+      confirmed_rule: next_trading_session_at_09_00_kst
+      trading_calendar: k200_distinct_observation_dates
+      confirmed_on: 2026-08-06
+      observed_qlibx_rule_status: rejected
+      permitted_claim: pit_safe_only_after_confirmed_rule_is_materialized
 
   k200_etf_prices:
     intended_roles: [execution_price, valuation_price, volume, corporate_action_factor]

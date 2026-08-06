@@ -42,6 +42,26 @@ class TargetStrategy:
         )
 
 
+class SwitchingTargetStrategy:
+    strategy_id = "tests.switching-target"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def requirements(self):
+        return ()
+
+    def run(self, view):
+        self.calls += 1
+        target = "A000660" if self.calls == 1 else "A005930"
+        return StrategyDraft(
+            weights=(WeightEntry(instrument=target, weight=1.0),),
+            budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+            decision_action=DecisionAction.TARGET,
+        )
+
+
 class InitialMemoryTargetStrategy(TargetStrategy):
     strategy_id = "tests.initial-memory-target"
 
@@ -145,6 +165,50 @@ def test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily(
     assert all(
         item.account.version == item.account_version_after_callback
         for item in first.result.monitors
+    )
+
+
+def test_rebalance_sizes_from_current_execution_prices(
+    real_dw_case: RealDwProject,
+) -> None:
+    sessions = tuple(close_at(2024, 1, day) for day in (2, 3, 4, 5))
+    flow = DailyExecutionFlow(
+        clock=BacktestClock(sessions[0]),
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+        exchange=configured_exchange(cost_rate=0.0),
+        account=initial_account("switching-target-account"),
+        profile=DailyExecutionProfile(
+            market_dataset_id="dw-real-market",
+            execution_price_role="execution_price",
+            valuation_price_role="valuation_price",
+        ),
+    )
+
+    outcome = flow.run(
+        SwitchingTargetStrategy(),
+        DailyRunRequest(
+            run_id="switching-target",
+            config_fingerprint="switching-target-v1",
+            decision_times=(sessions[0], sessions[2]),
+            session_closes=sessions,
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    second = outcome.result.executions[1]
+    assert second.account_before.nav == pytest.approx(9_970_800)
+    assert second.sizing_nav == pytest.approx(10_051_100)
+    assert second.sizing_price_role == "execution_price"
+    assert [(fill.instrument_id, fill.dealt_quantity) for fill in second.fills] == [
+        ("A000660", 73),
+        ("A005930", 131),
+    ]
+    final = outcome.result.final_account
+    assert final.cash == pytest.approx(16_500)
+    assert final.holdings() == {"A005930": 131}
+    assert final.positions[0].quantity * final.positions[0].mark / final.nav == (
+        pytest.approx(131 * 76_600 / 10_051_100)
     )
 
 

@@ -107,6 +107,8 @@ class ExecutionEvidence(QlibxModel):
     event_time: datetime
     profile_id: str
     convention_id: str
+    sizing_nav: float
+    sizing_price_role: str
     orders: tuple[OrderEvidence, ...]
     fills: tuple[FillEvidence, ...]
     diagnostics: tuple[FillDiagnosticEvidence, ...]
@@ -671,8 +673,21 @@ class DailyExecutionFlow:
 
         orders: list[Order] = []
         holdings = before.holdings()
+        sizing_nav = before.cash + sum(
+            holdings[instrument] * prices[instrument] for instrument in holdings
+        )
+        if not math.isfinite(sizing_nav) or sizing_nav <= 0:
+            self._fail(
+                event,
+                "execution",
+                "EXECUTION_SIZING_NAV_INVALID",
+                context={"sizing_nav": sizing_nav},
+            )
+            return
         for instrument in required_instruments:
-            target_quantity = target_weights.get(instrument, 0) * before.nav / prices[instrument]
+            target_quantity = (
+                target_weights.get(instrument, 0) * sizing_nav / prices[instrument]
+            )
             actual_quantity = holdings.get(instrument, 0)
             delta = target_quantity - actual_quantity
             if delta > 1e-12:
@@ -734,6 +749,8 @@ class DailyExecutionFlow:
             event_time=event.ts,
             profile_id=self._profile.profile_id,
             convention_id=self._profile.convention_id,
+            sizing_nav=sizing_nav,
+            sizing_price_role=self._profile.execution_price_role,
             orders=tuple(
                 OrderEvidence(
                     instrument_id=order.instrument_id,

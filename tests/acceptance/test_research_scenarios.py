@@ -1,6 +1,6 @@
 import duckdb
 
-from qlibx import OutcomeStatus
+from qlibx import OperationOutcome, OutcomeStatus
 from qlibx.account import StrategyMemoryStore
 from qlibx.flow import (
     STORED_SIGNAL_CONTRACT,
@@ -11,12 +11,14 @@ from qlibx.flow import (
     EnsembleDefinition,
     EnsembleMemberSpec,
     FrozenDecision,
+    PortfolioConstructionFlow,
     StoredSignalEntry,
     StoredSignalResult,
     StoredSignalWeighting,
 )
 from qlibx.kernel import BacktestClock
 from qlibx.operations import BudgetMode, StrategyInvocation
+from qlibx.portfolio import ConstructionProfile, PortfolioConstructionRequest
 from tests.acceptance.real_dw_support import (
     RealDwProject,
     StoredWinnerStrategy,
@@ -26,6 +28,31 @@ from tests.acceptance.real_dw_support import (
     initial_account,
     run_real_daily_flow,
 )
+
+
+def _import_real_dw_signal(real_dw_case: RealDwProject) -> OperationOutcome:
+    rows = duckdb.connect().sql(
+        f"""
+        SELECT ticker, decision_return
+        FROM read_parquet('{real_dw_case.source.as_posix()}')
+        WHERE CAST(date AS DATE) = DATE '2024-01-02'
+        ORDER BY ticker
+        """
+    ).fetchall()
+    signal = StoredSignalResult(
+        signal_semantics="real_dw_close_to_base_return",
+        observation_time=close_at(2024, 1, 2),
+        entries=tuple(
+            StoredSignalEntry(instrument=ticker, value=value)
+            for ticker, value in rows
+        ),
+    )
+    return real_dw_case.project.artifacts.import_model_bytes(
+        logical_identity="external-signal:real-dw-2024-01-02",
+        contract=STORED_SIGNAL_CONTRACT,
+        producer_id="external.real-dw-characteristic",
+        payload_bytes=signal.model_dump_json().encode("utf-8"),
+    )
 
 
 def test_uc_alpha_budget_001_preserves_real_dw_flexible_residual(
@@ -74,28 +101,7 @@ def test_uc_alpha_budget_001_preserves_real_dw_flexible_residual(
 def test_uc_signal_002_and_uc_artifact_001_reuse_real_dw_stored_signal(
     real_dw_case: RealDwProject,
 ) -> None:
-    rows = duckdb.connect().sql(
-        f"""
-        SELECT ticker, decision_return
-        FROM read_parquet('{real_dw_case.source.as_posix()}')
-        WHERE CAST(date AS DATE) = DATE '2024-01-02'
-        ORDER BY ticker
-        """
-    ).fetchall()
-    external_signal = StoredSignalResult(
-        signal_semantics="real_dw_close_to_base_return",
-        observation_time=close_at(2024, 1, 2),
-        entries=tuple(
-            StoredSignalEntry(instrument=ticker, value=value)
-            for ticker, value in rows
-        ),
-    )
-    imported = real_dw_case.project.artifacts.import_model_bytes(
-        logical_identity="external-signal:real-dw-2024-01-02",
-        contract=STORED_SIGNAL_CONTRACT,
-        producer_id="external.real-dw-characteristic",
-        payload_bytes=external_signal.model_dump_json().encode("utf-8"),
-    )
+    imported = _import_real_dw_signal(real_dw_case)
     composition = CompositionFlow(
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
@@ -136,6 +142,66 @@ def test_uc_signal_002_and_uc_artifact_001_reuse_real_dw_stored_signal(
             for edge in result.result.artifact.dependencies
         )
         for result in (long_short, long_only)
+    )
+
+
+def test_uc_portfolio_001_constructs_two_portfolios_from_one_real_dw_alpha(
+    real_dw_case: RealDwProject,
+) -> None:
+    imported = _import_real_dw_signal(real_dw_case)
+    composition = CompositionFlow(
+        registry=real_dw_case.project.registry_snapshot(),
+        artifacts=real_dw_case.project.artifacts,
+    )
+    alpha = composition.invoke_stored_signal_strategy(
+        artifact_id=imported.result.artifact_id,
+        strategy_id="acceptance.real-dw-signed-alpha",
+        weighting=StoredSignalWeighting.LONG_SHORT_EXTREMES,
+        invocation=StrategyInvocation(
+            invocation_id="portfolio-source-real-dw",
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="portfolio-source-v1",
+        ),
+    )
+    original_json = alpha.result.result.model_dump_json()
+    construction = PortfolioConstructionFlow(artifacts=real_dw_case.project.artifacts)
+    signed = construction.construct(
+        PortfolioConstructionRequest(
+            invocation_id="portfolio-hypothetical-signed-real-dw",
+            source_artifact_id=alpha.result.artifact.artifact_id,
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="hypothetical-signed-v1",
+            profile=ConstructionProfile.HYPOTHETICAL_SIGNED,
+            requested_budget=1.0,
+        )
+    )
+    long_only = construction.construct(
+        PortfolioConstructionRequest(
+            invocation_id="portfolio-equity-long-only-real-dw",
+            source_artifact_id=alpha.result.artifact.artifact_id,
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="equity-long-only-v1",
+            profile=ConstructionProfile.EQUITY_LONG_ONLY,
+            requested_budget=1.0,
+        )
+    )
+
+    assert signed.status is long_only.status is OutcomeStatus.COMPLETE
+    assert {item.instrument: item.weight for item in signed.result.target_weights} == {
+        "A000660": -0.5,
+        "A005930": 0.5,
+    }
+    assert {item.instrument: item.weight for item in long_only.result.target_weights} == {
+        "A005930": 1.0
+    }
+    assert signed.result.realized_gross == long_only.result.realized_gross == 1.0
+    assert signed.result.realized_net == 0.0
+    assert long_only.result.realized_net == 1.0
+    assert alpha.result.result.model_dump_json() == original_json
+    assert all(
+        outcome.diagnostics[0].dependencies[0].dependency_id
+        == alpha.result.artifact.artifact_id
+        for outcome in (signed, long_only)
     )
 
 

@@ -41,6 +41,7 @@ from qlibx.flow.intraday import (
     IntradayRunResult,
     RemainingTarget,
 )
+from qlibx.flow.portfolio import PortfolioConstructionFlow
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
 
 __all__ = [
@@ -73,6 +74,7 @@ __all__ = [
     "MemoryCommitEvidence",
     "MonitorEvidence",
     "NextSessionCloseExecutor",
+    "PortfolioConstructionFlow",
     "RemainingTarget",
     "ResearchFlow",
     "SimulationCheckpoint",

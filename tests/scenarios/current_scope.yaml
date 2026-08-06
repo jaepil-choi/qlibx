@@ -10,7 +10,25 @@ coverage_sets:
     - UC-ALPHA-ADAPTIVE-001
     - UC-ENSEMBLE-001
     - UC-ARTIFACT-001
+  m6_portfolio:
+    - UC-PORTFOLIO-001
 scenarios:
+  - id: UC-PORTFOLIO-001
+    case: real_dw_same_alpha_two_current_profiles
+    test: tests/acceptance/test_research_scenarios.py::test_uc_portfolio_001_constructs_two_portfolios_from_one_real_dw_alpha
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      source_artifact: signed_alpha
+      profiles: [hypothetical_signed, equity_long_only]
+    expected:
+      outcome: complete
+      source_alpha_mutation: false
+      signed_gross: 1.0
+      signed_net: 0.0
+      long_only_gross: 1.0
+      long_only_net: 1.0
+
   - id: UC-CLOSED-LOOP-001
     case: real_dw_daily_feedback
     test: tests/acceptance/test_execution_scenarios.py::test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily

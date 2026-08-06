@@ -3,6 +3,8 @@
 import hashlib
 import math
 from dataclasses import dataclass
+from datetime import datetime
+from enum import StrEnum
 
 from pydantic import Field, model_validator
 
@@ -31,6 +33,37 @@ STRATEGY_RESULT_CONTRACT = ArtifactContract(
     artifact_schema_version=1,
     payload_model=StrategyResult,
 )
+
+
+class StoredSignalEntry(QlibxModel):
+    instrument: str = Field(min_length=1)
+    value: float
+
+
+class StoredSignalResult(QlibxModel):
+    signal_schema_version: int = 1
+    signal_semantics: str = Field(min_length=1)
+    observation_time: datetime
+    entries: tuple[StoredSignalEntry, ...]
+
+    @model_validator(mode="after")
+    def validate_entries(self) -> "StoredSignalResult":
+        instruments = [entry.instrument for entry in self.entries]
+        if not instruments or len(instruments) != len(set(instruments)):
+            raise ValueError("stored signal requires unique instrument entries")
+        return self
+
+
+STORED_SIGNAL_CONTRACT = ArtifactContract(
+    artifact_type="stored_signal_result",
+    artifact_schema_version=1,
+    payload_model=StoredSignalResult,
+)
+
+
+class StoredSignalWeighting(StrEnum):
+    LONG_SHORT_EXTREMES = "long_short_extremes"
+    LONG_ONLY_MAX = "long_only_max"
 
 
 class EnsembleMemberSpec(QlibxModel):
@@ -238,6 +271,50 @@ class EnsembleStrategyOperation:
         self._state_identities = identities
 
 
+class StoredSignalStrategyOperation:
+    """Build weights from a loaded characteristic without its producer implementation."""
+
+    def __init__(
+        self,
+        *,
+        strategy_id: str,
+        signal: StoredSignalResult,
+        weighting: StoredSignalWeighting,
+    ) -> None:
+        self.strategy_id = strategy_id
+        self._signal = signal
+        self._weighting = weighting
+
+    def requirements(self) -> tuple[ComponentRequirement, ...]:
+        return ()
+
+    def run(self, view: object) -> StrategyDraft:
+        del view
+        ordered = sorted(
+            self._signal.entries,
+            key=lambda entry: (entry.value, entry.instrument),
+        )
+        if self._weighting is StoredSignalWeighting.LONG_ONLY_MAX:
+            weights = (WeightEntry(instrument=ordered[-1].instrument, weight=1.0),)
+        else:
+            if len(ordered) < 2:
+                raise ValueError("long-short weighting requires at least two instruments")
+            weights = (
+                WeightEntry(instrument=ordered[0].instrument, weight=-0.5),
+                WeightEntry(instrument=ordered[-1].instrument, weight=0.5),
+            )
+        return StrategyDraft(
+            weights=weights,
+            budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+            decision_action=DecisionAction.RESEARCH_ONLY,
+            diagnostics=(
+                f"stored_signal_semantics={self._signal.signal_semantics}",
+                f"weighting={self._weighting.value}",
+            ),
+        )
+
+
 class CompositionFlow:
     """Load stored results, combine them, and publish full parent lineage."""
 
@@ -311,6 +388,34 @@ class CompositionFlow:
                 strategy=strategy,
                 evidence=evidence,
                 evidence_artifact=publication.result,
+            ),
+        )
+
+    def invoke_stored_signal_strategy(
+        self,
+        *,
+        artifact_id: str,
+        strategy_id: str,
+        weighting: StoredSignalWeighting,
+        invocation: StrategyInvocation,
+    ) -> OperationOutcome:
+        loaded = self._artifacts.load_model(artifact_id, STORED_SIGNAL_CONTRACT)
+        if loaded.status is not OutcomeStatus.COMPLETE:
+            return loaded
+        operation = StoredSignalStrategyOperation(
+            strategy_id=strategy_id,
+            signal=loaded.result.payload,
+            weighting=weighting,
+        )
+        return self._research.invoke_strategy(
+            operation,
+            invocation,
+            additional_dependencies=(
+                DependencyEdge(
+                    dependency_kind="artifact",
+                    dependency_id=loaded.result.envelope.artifact_id,
+                    consumer_role="stored_signal",
+                ),
             ),
         )
 

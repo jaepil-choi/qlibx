@@ -21,6 +21,7 @@ from qlibx.execution import (
     StockInstrument,
 )
 from qlibx.flow import (
+    STORED_SIGNAL_CONTRACT,
     CompositionFlow,
     DailyExecutionFlow,
     DailyExecutionProfile,
@@ -31,6 +32,9 @@ from qlibx.flow import (
     IntradayExecutionFlow,
     IntradayExecutionProfile,
     IntradayRunRequest,
+    StoredSignalEntry,
+    StoredSignalResult,
+    StoredSignalWeighting,
 )
 from qlibx.kernel import BacktestClock
 from qlibx.operations import (
@@ -531,6 +535,72 @@ def test_uc_closed_loop_001_and_uc_exec_002_use_real_dw_values(tmp_path: Path) -
     assert phase_two.result.memory_commits[0].previous_version == 0
     assert phase_two.result.memory_commits[0].feedback_cursor == 2
     assert phase_two.result.final_account == first.result.final_account
+
+    real_signal_rows = duckdb.connect().sql(
+        f"""
+        SELECT ticker, decision_return
+        FROM read_parquet('{source.as_posix()}')
+        WHERE CAST(date AS DATE) = DATE '2024-01-02'
+        ORDER BY ticker
+        """
+    ).fetchall()
+    external_signal = StoredSignalResult(
+        signal_semantics="real_dw_close_to_base_return",
+        observation_time=close_at(2024, 1, 2),
+        entries=tuple(
+            StoredSignalEntry(instrument=ticker, value=value)
+            for ticker, value in real_signal_rows
+        ),
+    )
+    imported_signal = project.artifacts.import_model_bytes(
+        logical_identity="external-signal:real-dw-2024-01-02",
+        contract=STORED_SIGNAL_CONTRACT,
+        producer_id="external.real-dw-characteristic",
+        payload_bytes=external_signal.model_dump_json().encode("utf-8"),
+    )
+    assert imported_signal.status is OutcomeStatus.COMPLETE
+    signal_composition = CompositionFlow(
+        registry=project.registry_snapshot(),
+        artifacts=project.artifacts,
+    )
+    stored_long_short = signal_composition.invoke_stored_signal_strategy(
+        artifact_id=imported_signal.result.artifact_id,
+        strategy_id="acceptance.real-dw-long-short",
+        weighting=StoredSignalWeighting.LONG_SHORT_EXTREMES,
+        invocation=StrategyInvocation(
+            invocation_id="stored-signal-long-short-real-dw",
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="stored-signal-long-short-v1",
+        ),
+    )
+    stored_long_only = signal_composition.invoke_stored_signal_strategy(
+        artifact_id=imported_signal.result.artifact_id,
+        strategy_id="acceptance.real-dw-long-only",
+        weighting=StoredSignalWeighting.LONG_ONLY_MAX,
+        invocation=StrategyInvocation(
+            invocation_id="stored-signal-long-only-real-dw",
+            evaluation_time=close_at(2024, 1, 2),
+            config_fingerprint="stored-signal-long-only-v1",
+        ),
+    )
+    assert stored_long_short.status is OutcomeStatus.COMPLETE
+    assert stored_long_only.status is OutcomeStatus.COMPLETE
+    assert {
+        item.instrument: item.weight
+        for item in stored_long_short.result.result.weights
+    } == {"A000660": -0.5, "A005930": 0.5}
+    assert {
+        item.instrument: item.weight
+        for item in stored_long_only.result.result.weights
+    } == {"A005930": 1.0}
+    assert all(
+        any(
+            edge.dependency_id == imported_signal.result.artifact_id
+            and edge.consumer_role == "stored_signal"
+            for edge in result.result.artifact.dependencies
+        )
+        for result in (stored_long_short, stored_long_only)
+    )
 
     winner = StoredWinnerStrategy("acceptance.stored-winner", 1.0)
     opposite = StoredWinnerStrategy("acceptance.stored-opposite", -1.0)

@@ -1,12 +1,17 @@
 """Operation orchestration and commit ownership."""
 
 from qlibx.flow.composition import (
+    STORED_SIGNAL_CONTRACT,
     CompositionFlow,
     EnsembleDefinition,
     EnsembleEvidence,
     EnsembleMemberSpec,
     EnsembleRunResult,
     MemberContribution,
+    StoredSignalEntry,
+    StoredSignalResult,
+    StoredSignalStrategyOperation,
+    StoredSignalWeighting,
 )
 from qlibx.flow.daily import (
     DECISION_PRIORITY,
@@ -43,6 +48,7 @@ __all__ = [
     "EXECUTION_PRIORITY",
     "MARK_PRIORITY",
     "MONITOR_PRIORITY",
+    "STORED_SIGNAL_CONTRACT",
     "CompositionFlow",
     "DailyExecutionFlow",
     "DailyExecutionProfile",
@@ -70,5 +76,9 @@ __all__ = [
     "RemainingTarget",
     "ResearchFlow",
     "SimulationCheckpoint",
+    "StoredSignalEntry",
+    "StoredSignalResult",
+    "StoredSignalStrategyOperation",
+    "StoredSignalWeighting",
     "StrategyRunResult",
 ]

@@ -1799,6 +1799,47 @@ engine     → 전부 (조립 지점)
 immutable AccountSnapshot 또는 resolved scoped view로 들어온다. 그래야 account commit boundary, gate와
 requirement resolver를 우회할 수 없다(I2, I4, I8).
 
+### Project onboarding lifecycle — direct operation
+
+Project onboarding은 market-time event나 Flow가 아니다. 설치된 package resource와 user-selected project
+root 사이를 조정하는 **preview-first direct operation**이다. `QlibxProject.onboard`는 target별 request를
+독립된 plan으로 만들며, 한 target의 conflict가 다른 target의 plan이나 mutation을 막지 않는다.
+
+각 target의 순서는 다음과 같다.
+
+```text
+OnboardingRequest(target, desired_state=PRESENT|ABSENT)
+  -> resolve normative skill root and optional instruction file
+  -> read bundled resource + prior generated manifest + current target bytes
+  -> build complete-state diff and fingerprint preflight
+  -> preview, or mutate only when apply=True
+  -> write/remove generated files and managed block; manifest last
+  -> validate entrypoint, manifest, block, and generated fingerprints
+  -> return typed validation evidence + equivalent preview argv
+```
+
+`PRESENT` plan은 current bundle과 prior manifest file set의 union을 계산한다. 새 bundle에 남은 file은
+create/update/unchanged로, prior manifest에만 남은 obsolete file은 remove로 분류한다. Manifest fingerprint와
+현재 bytes가 다르면 user modification으로 간주해 해당 target 전체를 mutation 전에 conflict로 종료한다.
+Manifest에 없는 extension file은 읽기·갱신·삭제 대상이 아니다.
+
+`ABSENT` plan은 manifest가 fingerprint로 소유권을 입증한 generated file과 qlibx marker block만 제거한다.
+`AGENTS.md`와 `CLAUDE.md`는 qlibx가 처음 만들었더라도 file 자체를 삭제하지 않는다. Instruction editing은
+UTF-8 bytes에서 `<!-- qlibx-managed:start -->`와 `<!-- qlibx-managed:end -->` 사이만 교체하므로 marker 밖의
+user bytes와 newline style을 보존한다. Marker가 중복되거나 한쪽만 있으면 추측하지 않고 conflict로 끝낸다.
+
+Generated manifest schema v2는 package version, skill schema, target, generated-file fingerprints와 managed
+instruction metadata를 기록한다. Reader는 기존 schema v1을 받아 update/remove할 수 있지만, 모든 manifest
+path는 skill root 아래 POSIX relative path여야 한다. Absolute path, parent traversal, drive selector와 backslash는
+mutation 전에 거부한다. File mutation은 같은 directory의 temporary file과 replace를 사용하고 manifest를 final
+commit marker로 쓴다. Process interruption 시에는 다음 preview/apply가 actual bytes를 다시 읽어 복구 방향을
+결정한다.
+
+Apply 뒤 validation은 requested state를 새로 관찰한다. `entrypoint_ok`, `manifest_ok`,
+`managed_block_ok`, `fingerprints_ok`를 분리해 반환하며, `validation_argv`는 `--apply`를 제외한 동일 preview
+command다. 따라서 caller는 mutation result를 boolean 하나로 신뢰하지 않고 같은 public operation으로 다시
+검증할 수 있다. 이 flow가 `GAP-ONBOARD-001`의 architecture closure다.
+
 ### 조립 — NautilusTrader에서 차용한 composition root
 
 NautilusTrader `system/kernel.py::NautilusKernel`(L101)의 명시적 composition root를 **설계만 차용**한다.

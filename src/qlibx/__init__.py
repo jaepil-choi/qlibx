@@ -7,7 +7,7 @@ from qlibx.constraints import (
 )
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.models import QlibxModel
-from qlibx.onboarding import AgentTarget, OnboardingRequest
+from qlibx.onboarding import AgentTarget, OnboardingDesiredState, OnboardingRequest
 from qlibx.operations import StrategyInvocation
 from qlibx.portfolio import ExecutionLotInput
 from qlibx.project import QlibxProject
@@ -22,6 +22,7 @@ __all__ = [
     "DailySimulationSpec",
     "ExecutionLotInput",
     "MvpConstraintPolicy",
+    "OnboardingDesiredState",
     "OnboardingRequest",
     "OperationError",
     "OperationOutcome",

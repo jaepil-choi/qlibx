@@ -32,6 +32,7 @@ class ProjectConfig(QlibxModel):
 class ChangeAction(StrEnum):
     CREATE = "create"
     UPDATE = "update"
+    REMOVE = "remove"
     UNCHANGED = "unchanged"
     CONFLICT = "conflict"
 

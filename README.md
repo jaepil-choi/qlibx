@@ -12,6 +12,18 @@ portfolio construction, deterministic daily simulation, monitoring, analysis/rep
 validated project-local neutralization transforms. Intraday/partial-fill execution, real short,
 derivatives, actual settlement, and production OMS reconciliation are not current runtime features.
 
+Project onboarding is preview-first. The JSON result lists the exact changes, post-apply validation,
+and a `validation_argv` preview command. Removal deletes only manifest-owned generated files and the
+qlibx-managed HTML-comment block; it never deletes `AGENTS.md` or `CLAUDE.md` and preserves untracked
+skill extensions.
+
+```powershell
+uv run qlibx project onboard qlibx-research --target codex
+uv run qlibx project onboard qlibx-research --target codex --apply
+uv run qlibx project onboard qlibx-research --target codex --remove
+uv run qlibx project onboard qlibx-research --target codex --remove --apply
+```
+
 To materialize the version-matched opt-in sample without changing files first:
 
 ```powershell

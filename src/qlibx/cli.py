@@ -11,7 +11,7 @@ import yaml
 from qlibx.data import DatasetRegistration
 from qlibx.errors import OperationOutcome
 from qlibx.models import QlibxModel
-from qlibx.onboarding import AgentTarget, OnboardingRequest
+from qlibx.onboarding import AgentTarget, OnboardingDesiredState, OnboardingRequest
 from qlibx.project import QlibxProject
 
 
@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     onboard.add_argument("root", nargs="?", default=".")
     onboard.add_argument("--target", choices=[item.value for item in AgentTarget], required=True)
     onboard.add_argument("--custom-root")
+    onboard.add_argument("--remove", action="store_true")
     onboard.add_argument("--apply", action="store_true")
     sample = project_commands.add_parser("sample")
     sample.add_argument("root", nargs="?", default=".")
@@ -99,6 +100,9 @@ def run(argv: list[str] | None = None) -> int:
             request = OnboardingRequest(
                 target=AgentTarget(args.target),
                 custom_root=args.custom_root,
+                desired_state=(
+                    OnboardingDesiredState.ABSENT if args.remove else OnboardingDesiredState.PRESENT
+                ),
             )
             results = project.onboard((request,), apply=args.apply)
             emit(results)

@@ -66,3 +66,40 @@ def test_onboarding_cli_defaults_to_preview(tmp_path: Path, capsys: object) -> N
     result = output(capsys)
     assert result[0]["applied"] is False
     assert not (tmp_path / ".agents").exists()
+
+
+def test_onboarding_cli_remove_is_preview_first(tmp_path: Path, capsys: object) -> None:
+    assert run(["project", "init", str(tmp_path), "--apply"]) == 0
+    output(capsys)
+    assert run(["project", "onboard", str(tmp_path), "--target", "codex", "--apply"]) == 0
+    output(capsys)
+    skill = tmp_path / ".agents" / "skills" / "qlibx" / "SKILL.md"
+    assert skill.exists()
+
+    assert run(["project", "onboard", str(tmp_path), "--target", "codex", "--remove"]) == 0
+    preview = output(capsys)[0]
+    assert preview["desired_state"] == "absent"
+    assert preview["applied"] is False
+    assert preview["validation"]["matches_desired_state"] is False
+    assert preview["validation_argv"][-1] == "--remove"
+    assert skill.exists()
+
+    assert (
+        run(
+            [
+                "project",
+                "onboard",
+                str(tmp_path),
+                "--target",
+                "codex",
+                "--remove",
+                "--apply",
+            ]
+        )
+        == 0
+    )
+    removed = output(capsys)[0]
+    assert removed["applied"] is True
+    assert removed["validation"]["matches_desired_state"] is True
+    assert not skill.exists()
+    assert (tmp_path / "AGENTS.md").exists()

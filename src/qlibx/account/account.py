@@ -1,5 +1,6 @@
 """Atomic actual-state account aggregate."""
 
+import math
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -66,6 +67,7 @@ class JournalEntry:
     as_of: datetime
     change_type: str
     fill_ids: tuple[str, ...] = ()
+    realized_pnl: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,7 @@ class AccountSnapshot:
     valuation_status: ValuationStatus
     feedback_cursor: int
     as_of: datetime | None
+    realized_pnl: tuple[tuple[str, float], ...] = ()
 
     def holdings(self) -> dict[str, float]:
         return {position.instrument_id: position.quantity for position in self.positions}
@@ -110,6 +113,7 @@ class AccountCheckpoint:
     applied_events: tuple[str, ...]
     journal: tuple[JournalEntry, ...]
     as_of: datetime | None
+    realized_pnl: tuple[tuple[str, float], ...] = ()
 
 
 class AccountCommitRejected(RuntimeError):
@@ -136,6 +140,7 @@ class Account:
         self._cash = initial_cash
         self._instrument_ids = instrument_ids
         self._positions: dict[str, Position] = {}
+        self._realized_pnl: dict[str, float] = {}
         self._version = 0
         self._applied_events: set[str] = set()
         self._journal: list[JournalEntry] = []
@@ -176,6 +181,7 @@ class Account:
             ),
             feedback_cursor=len(self._journal),
             as_of=self._as_of,
+            realized_pnl=tuple(sorted(self._realized_pnl.items())),
         )
 
     def checkpoint(self) -> AccountCheckpoint:
@@ -191,6 +197,7 @@ class Account:
             applied_events=tuple(sorted(self._applied_events)),
             journal=tuple(self._journal),
             as_of=self._as_of,
+            realized_pnl=tuple(sorted(self._realized_pnl.items())),
         )
 
     @classmethod
@@ -224,6 +231,35 @@ class Account:
         current._positions = {
             position.instrument_id: position for position in checkpoint.positions
         }
+        if any(
+            instrument_id not in current._instrument_ids
+            for instrument_id, _ in checkpoint.realized_pnl
+        ):
+            raise ValueError("account checkpoint contains unregistered realized PnL")
+        if len({instrument_id for instrument_id, _ in checkpoint.realized_pnl}) != len(
+            checkpoint.realized_pnl
+        ):
+            raise ValueError("account checkpoint contains duplicate realized PnL")
+        checkpoint_realized = dict(checkpoint.realized_pnl)
+        if not checkpoint_realized:
+            checkpoint_realized = {
+                position.instrument_id: position.realized_pnl
+                for position in checkpoint.positions
+                if position.realized_pnl != 0
+            }
+        if any(not math.isfinite(value) for value in checkpoint_realized.values()):
+            raise ValueError("account checkpoint contains non-finite realized PnL")
+        if any(
+            not math.isclose(
+                position.realized_pnl,
+                checkpoint_realized.get(position.instrument_id, 0),
+                rel_tol=0,
+                abs_tol=1e-9,
+            )
+            for position in checkpoint.positions
+        ):
+            raise ValueError("account checkpoint position and realized PnL differ")
+        current._realized_pnl = checkpoint_realized
         current._version = checkpoint.version
         current._applied_events = set(checkpoint.applied_events)
         current._journal = list(checkpoint.journal)
@@ -251,18 +287,26 @@ class Account:
 
         cash = self._cash
         positions = dict(self._positions)
+        realized_pnl = dict(self._realized_pnl)
         if isinstance(change, FillBatch):
-            cash, positions = self._apply_fills(change.fills, cash, positions)
+            cash, positions, realized_pnl, realized_delta = self._apply_fills(
+                change.fills,
+                cash,
+                positions,
+                realized_pnl,
+            )
             fill_ids = tuple(fill.fill_id for fill in change.fills)
         else:
             positions = self._apply_marks(change.marks, positions, change.as_of)
             fill_ids = ()
+            realized_delta = ()
         if cash < -1e-9:
             raise AccountCommitRejected("NEGATIVE_CASH", "batch would leave negative cash")
 
         previous = self._version
         self._cash = cash
         self._positions = positions
+        self._realized_pnl = realized_pnl
         self._applied_events.add(change.event_id)
         self._as_of = change.as_of
         self._version += 1
@@ -273,6 +317,7 @@ class Account:
                 as_of=change.as_of,
                 change_type=type(change).__name__,
                 fill_ids=fill_ids,
+                realized_pnl=realized_delta,
             )
         )
         snapshot = self.snapshot(evaluation_time=change.as_of)
@@ -289,8 +334,15 @@ class Account:
         fills: tuple[Fill, ...],
         cash: float,
         positions: dict[str, Position],
-    ) -> tuple[float, dict[str, Position]]:
+        realized_pnl: dict[str, float],
+    ) -> tuple[
+        float,
+        dict[str, Position],
+        dict[str, float],
+        tuple[tuple[str, float], ...],
+    ]:
         seen: set[str] = set()
+        realized_delta: dict[str, float] = {}
         for fill in fills:
             if fill.fill_id in seen:
                 raise AccountCommitRejected("DUPLICATE_FILL", "batch contains duplicate fill IDs")
@@ -310,24 +362,33 @@ class Account:
                     instrument_id=fill.instrument_id,
                     quantity=new_quantity,
                     average_cost=new_basis / new_quantity if new_quantity else 0,
-                    realized_pnl=current.realized_pnl if current else 0,
+                    realized_pnl=realized_pnl.get(fill.instrument_id, 0),
                     mark=current.mark if current else None,
                     marked_at=current.marked_at if current else None,
                 )
                 cash -= fill.trade_value + fill.total_cost
             else:
-                if current is None or fill.dealt_quantity > current.quantity + 1e-12:
+                if current is None or fill.dealt_quantity > current.quantity:
                     raise AccountCommitRejected(
                         "SELL_EXCEEDS_POSITION",
                         "sell exceeds actual position",
                     )
                 quantity = current.quantity - fill.dealt_quantity
-                realized = (
-                    current.realized_pnl
-                    + (fill.price - current.average_cost) * fill.dealt_quantity
+                if 0 < quantity <= 1e-12:
+                    raise AccountCommitRejected(
+                        "POSITION_DUST_UNSUPPORTED",
+                        "sell would silently discard a positive residual position",
+                    )
+                delta = (
+                    (fill.price - current.average_cost) * fill.dealt_quantity
                     - fill.total_cost
                 )
-                if quantity <= 1e-12:
+                realized = realized_pnl.get(fill.instrument_id, 0) + delta
+                realized_pnl[fill.instrument_id] = realized
+                realized_delta[fill.instrument_id] = (
+                    realized_delta.get(fill.instrument_id, 0) + delta
+                )
+                if quantity == 0:
                     positions.pop(fill.instrument_id)
                 else:
                     positions[fill.instrument_id] = replace(
@@ -336,7 +397,7 @@ class Account:
                         realized_pnl=realized,
                     )
                 cash += fill.trade_value - fill.total_cost
-        return cash, positions
+        return cash, positions, realized_pnl, tuple(sorted(realized_delta.items()))
 
     def _apply_marks(
         self,

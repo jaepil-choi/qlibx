@@ -258,6 +258,7 @@ def _state(snapshot: AccountSnapshot) -> StateAccessRecord:
         nav=snapshot.nav,
         valuation_status=snapshot.valuation_status.value,
         as_of=snapshot.as_of,
+        realized_pnl=snapshot.realized_pnl,
         holdings=tuple(
             StateHolding(
                 instrument_id=position.instrument_id,

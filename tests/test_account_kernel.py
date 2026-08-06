@@ -207,6 +207,86 @@ def test_account_checkpoint_restores_cas_and_idempotency_authority() -> None:
     assert duplicate.value.code == "DUPLICATE_EVENT"
 
 
+def test_realized_pnl_survives_close_reopen_feedback_and_checkpoint() -> None:
+    current = account()
+    current.commit(
+        FillBatch(
+            account_id="account-1",
+            event_id="buy-1",
+            as_of=EVENT_TIME,
+            fills=(fill("F1", Side.BUY, 10, price=100, cost=0),),
+        ),
+        expected_version=0,
+    )
+    closed = current.commit(
+        FillBatch(
+            account_id="account-1",
+            event_id="sell-1",
+            as_of=EVENT_TIME,
+            fills=(fill("F2", Side.SELL, 10, price=120, cost=2),),
+        ),
+        expected_version=1,
+    )
+
+    assert closed.snapshot.positions == ()
+    assert closed.snapshot.realized_pnl == (("A", 198),)
+    assert current.feedback(1, 1).entries[0].realized_pnl == (("A", 198),)
+
+    reopened = current.commit(
+        FillBatch(
+            account_id="account-1",
+            event_id="buy-2",
+            as_of=EVENT_TIME,
+            fills=(fill("F3", Side.BUY, 5, price=110, cost=0),),
+        ),
+        expected_version=2,
+    )
+    assert reopened.snapshot.positions[0].realized_pnl == 198
+    current.commit(
+        FillBatch(
+            account_id="account-1",
+            event_id="sell-2",
+            as_of=EVENT_TIME,
+            fills=(fill("F4", Side.SELL, 5, price=130, cost=3),),
+        ),
+        expected_version=3,
+    )
+
+    restored = Account.from_checkpoint(current.checkpoint())
+
+    assert restored.snapshot().positions == ()
+    assert restored.snapshot().realized_pnl == (("A", 295),)
+    assert restored.feedback(3, 1).entries[0].realized_pnl == (("A", 97),)
+
+
+def test_positive_dust_is_rejected_without_mutating_account() -> None:
+    current = account()
+    current.commit(
+        FillBatch(
+            account_id="account-1",
+            event_id="buy",
+            as_of=EVENT_TIME,
+            fills=(fill("F1", Side.BUY, 1, cost=0),),
+        ),
+        expected_version=0,
+    )
+    before = current.checkpoint()
+
+    with pytest.raises(AccountCommitRejected) as rejected:
+        current.commit(
+            FillBatch(
+                account_id="account-1",
+                event_id="dust",
+                as_of=EVENT_TIME,
+                fills=(fill("F2", Side.SELL, 1 - 5e-13, cost=0),),
+            ),
+            expected_version=1,
+        )
+
+    assert rejected.value.code == "POSITION_DUST_UNSUPPORTED"
+    assert current.checkpoint() == before
+
+
 def test_clock_returns_same_timestamp_handlers_in_priority_order() -> None:
     start = datetime(2025, 1, 2, 9, tzinfo=timezone.utc)
     clock = BacktestClock(start)

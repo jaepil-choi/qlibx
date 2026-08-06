@@ -44,6 +44,7 @@ class StateAccessRecord(QlibxModel):
     valuation_status: str
     holdings: tuple[StateHolding, ...]
     as_of: datetime | None = None
+    realized_pnl: tuple[tuple[str, float], ...] = ()
 
 
 class AccountState(Protocol):
@@ -55,6 +56,7 @@ class AccountState(Protocol):
     valuation_status: object
     positions: tuple[object, ...]
     as_of: datetime | None
+    realized_pnl: tuple[tuple[str, float], ...]
 
 
 class MemoryAccessRecord(QlibxModel):
@@ -186,6 +188,7 @@ class StrategyView:
                 valuation_status=str(getattr(valuation, "value", valuation)),
                 holdings=positions,
                 as_of=self._account_state.as_of,
+                realized_pnl=self._account_state.realized_pnl,
             )
         )
         return self._account_state

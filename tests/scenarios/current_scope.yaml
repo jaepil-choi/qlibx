@@ -1,0 +1,131 @@
+schema_version: 1
+suite: qlibx-current-scope
+scenarios:
+  - id: UC-CLOSED-LOOP-001
+    case: real_dw_daily_feedback
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      account_mutation: flow_commit_only
+      memory_mutation: flow_commit_only
+
+  - id: UC-EXEC-002
+    case: real_dw_next_close_limitations
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      fill_price: 77000
+      dealt_quantity: 129
+
+  - id: UC-ALPHA-ADAPTIVE-001
+    case: confirmed_feedback_memory_commit
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_alpha_adaptive_001_memory_commits_only_after_feedback
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      memory_mutation: flow_commit_after_feedback
+      feedback_cursor: 2
+
+  - id: UC-EXEC-001
+    case: frozen_daily_children
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_exec_001_and_uc_alpha_child_001_isolate_frozen_daily_children
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      parent_mutation: false
+      child_account_isolation: true
+
+  - id: UC-ALPHA-CHILD-001
+    case: frozen_daily_children
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_exec_001_and_uc_alpha_child_001_isolate_frozen_daily_children
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      strategy_rerun: false
+      memory_mutation: false
+      parent_mutation: false
+
+  - id: UC-EXEC-001
+    case: multi_event_intraday_characterization
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_exec_001_multi_event_characterization_and_no_daily_fallback
+    inputs:
+      data_kind: synthetic_characterization
+      generator: three_event_point_price_volume
+      real_parent_source: data/DW/fng_stock_daily_prices.csv
+    expected:
+      outcome: complete
+      event_count: 3
+      remaining_quantity: 39
+      daily_fallback: false
+
+  - id: GAP-RECOVERY-001
+    case: account_memory_checkpoint_resume
+    test: tests/acceptance/test_execution_scenarios.py::test_gap_recovery_001_account_and_memory_checkpoint_resume
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      duplicate_commit: false
+      feedback_cursor: 2
+      uninterrupted_parity: true
+
+  - id: UC-SIGNAL-002
+    case: external_real_dw_signal_two_consumers
+    test: tests/acceptance/test_research_scenarios.py::test_uc_signal_002_and_uc_artifact_001_reuse_real_dw_stored_signal
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      producer_rerun: false
+      consumer_count: 2
+
+  - id: UC-ARTIFACT-001
+    case: external_real_dw_signal_round_trip
+    test: tests/acceptance/test_research_scenarios.py::test_uc_signal_002_and_uc_artifact_001_reuse_real_dw_stored_signal
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      typed_load: true
+      producer_import: false
+
+  - id: UC-ENSEMBLE-001
+    case: stored_member_crossing
+    test: tests/acceptance/test_research_scenarios.py::test_uc_ensemble_001_records_crossing_budget_and_member_lineage
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+    expected:
+      outcome: complete
+      gross_before: 1.0
+      gross_after: 0.0
+      residual_budget: 1.0
+
+  - id: UC-ALPHA-PATH-001
+    case: child_memory_rerun_or_frozen_replay
+    test: tests/acceptance/test_research_scenarios.py::test_uc_alpha_path_001_uses_child_memory_for_rerun_or_frozen_intent_for_replay
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      rerun_state: account_b_and_child_memory_b
+      replay_input: parent_decision_intent
+    expected:
+      outcome: complete
+      new_assessment_model: false
+      rerun_uses_child_memory: true
+      replay_strategy_rerun: false
+      replay_memory_mutation: false

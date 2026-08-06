@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from qlibx.data import (
     ComponentRequirement,
     ConfirmedDelayRule,
     DatasetRegistration,
+    ObservationStore,
     RequirementResolver,
     SourceFormat,
 )
@@ -20,6 +22,7 @@ def registration(dataset_id: str, source: str, **bindings: str) -> DatasetRegist
         source=source,
         source_format=SourceFormat.CSV,
         instrument_field="CODE",
+        source_timezone="UTC",
         available_at=AvailableAtField(field="DATE"),
         logical_key=("DATE", "CODE"),
         semantic_bindings={"value": "VALUE", **bindings},
@@ -172,6 +175,99 @@ def test_duplicate_logical_key_fails_before_publication(tmp_path: Path) -> None:
     assert outcome.errors[0].stage_path == "dataset.register.key_uniqueness"
     assert not project.registry_snapshot().datasets
 
+
+def test_naive_source_timestamps_require_declared_timezone(tmp_path: Path) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text("DATE,CODE,VALUE\n2025-01-02,005930,10.0\n", encoding="utf-8")
+    project = initialized_project(tmp_path)
+    undeclared = registration("market", "market.csv").model_copy(
+        update={"source_timezone": None}
+    )
+
+    outcome = project.register_dataset(undeclared)
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "TIMESTAMP_TIMEZONE_UNDECLARED"
+    assert outcome.errors[0].stage_path == "dataset.register.timestamp_timezone"
+    assert outcome.errors[0].commit_status.value == "NONE"
+    assert project.registry_snapshot().datasets == ()
+
+
+def test_declared_source_timezone_localizes_naive_timestamps(tmp_path: Path) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text(
+        "DATE,CODE,VALUE\n2025-01-02T15:30:00,005930,10.0\n",
+        encoding="utf-8",
+    )
+    project = initialized_project(tmp_path)
+    declared = registration("market", "market.csv").model_copy(
+        update={"source_timezone": "Asia/Seoul"}
+    )
+
+    outcome = project.register_dataset(declared)
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    registered = outcome.result
+    assert registered.evidence.available_at_min == "2025-01-02T06:30:00+00:00"
+    assert registered.evidence.localized_source_timezone == "Asia/Seoul"
+    store = ObservationStore()
+    before = store.query(
+        registered,
+        field="VALUE",
+        as_of=datetime(2025, 1, 2, 6, 29, tzinfo=UTC),
+    )
+    at = store.query(
+        registered,
+        field="VALUE",
+        as_of=datetime(2025, 1, 2, 6, 30, tzinfo=UTC),
+    )
+    assert before.empty
+    assert at["value"].tolist() == [10.0]
+
+
+def test_declared_timezone_over_aware_timestamps_is_rejected(tmp_path: Path) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text(
+        "DATE,CODE,VALUE\n2025-01-02T06:30:00+00:00,005930,10.0\n",
+        encoding="utf-8",
+    )
+    project = initialized_project(tmp_path)
+
+    outcome = project.register_dataset(registration("market", "market.csv"))
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "TIMESTAMP_TIMEZONE_UNUSED"
+    assert outcome.errors[0].commit_status.value == "NONE"
+    assert project.registry_snapshot().datasets == ()
+
+
+def test_unknown_source_timezone_is_a_validation_error() -> None:
+    payload = registration("market", "market.csv").model_dump()
+    payload["source_timezone"] = "Mars/Olympus"
+
+    with pytest.raises(ValidationError, match="unknown source_timezone"):
+        DatasetRegistration.model_validate(payload)
+
+
+def test_unsupported_atomic_publication_fails_without_visibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text("DATE,CODE,VALUE\n2025-01-02,005930,10.0\n", encoding="utf-8")
+    project = initialized_project(tmp_path)
+
+    def reject_link(source_path: object, destination_path: object) -> None:
+        del source_path, destination_path
+        raise OSError("hard links unsupported")
+
+    monkeypatch.setattr("qlibx.data.registry.os.link", reject_link)
+    outcome = project.register_dataset(registration("market", "market.csv"))
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "REGISTRY_PUBLICATION_FAILED"
+    assert outcome.errors[0].commit_status.value == "NONE"
+    assert project.registry_snapshot().datasets == ()
 
 def test_delay_rule_requires_explicit_user_confirmation() -> None:
     with pytest.raises(ValidationError):

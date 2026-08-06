@@ -301,6 +301,7 @@ def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutof
             dataset_id="shadow-k200-benchmark",
             source=shadow.name,
             source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
             instrument_field="ticker",
             observation_time_field="observation_time",
             available_at=AvailableAtField(field="available_at"),

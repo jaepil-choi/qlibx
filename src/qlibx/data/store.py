@@ -7,6 +7,7 @@ import pandas as pd
 
 from qlibx.data.contracts import AvailableAtField, RegisteredDataset, SourceFormat
 from qlibx.data.registry import file_hash
+from qlibx.data.timestamps import TimestampNormalizationError, normalize_timestamps
 
 
 class DataSnapshotError(RuntimeError):
@@ -56,9 +57,27 @@ class ObservationStore:
         else:
             frame = pd.read_parquet(source, columns=sorted(selected_columns))
 
-        available_at = pd.to_datetime(frame[time_field], errors="raise", utc=True)
+        try:
+            available_at = normalize_timestamps(
+                frame[time_field],
+                field=time_field,
+                source_timezone=dataset.source_timezone,
+            ).utc
+            observation_time = (
+                normalize_timestamps(
+                    frame[dataset.observation_time_field],
+                    field=dataset.observation_time_field,
+                    source_timezone=dataset.source_timezone,
+                ).utc
+                if dataset.observation_time_field is not None
+                else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
+            )
+        except TimestampNormalizationError as exc:
+            raise DataSnapshotError(
+                f"registered timestamp contract is no longer readable ({exc.code}); "
+                "re-register the dataset with an explicit source_timezone"
+            ) from exc
         if not isinstance(dataset.available_at, AvailableAtField):
-            available_at = pd.to_datetime(frame[time_field], errors="raise", utc=True)
             available_at = available_at + pd.to_timedelta(
                 dataset.available_at.delay_seconds,
                 unit="s",
@@ -68,11 +87,6 @@ class ObservationStore:
                 f"registered field {field!r} is absent from the physical source"
             )
         values = available_at if field == "__available_at__" else frame[field]
-        observation_time = (
-            pd.to_datetime(frame[dataset.observation_time_field], errors="raise", utc=True)
-            if dataset.observation_time_field is not None
-            else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
-        )
         visible = pd.DataFrame(
             {
                 "instrument": frame[dataset.instrument_field].astype("string"),

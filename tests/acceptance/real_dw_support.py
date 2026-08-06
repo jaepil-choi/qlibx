@@ -236,6 +236,7 @@ def create_real_dw_project(root: Path, bounded_source: Path) -> RealDwProject:
             dataset_id="dw-real-market",
             source=source.name,
             source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
             instrument_field="ticker",
             observation_time_field="date",
             available_at=AvailableAtField(field="available_at"),
@@ -249,8 +250,8 @@ def create_real_dw_project(root: Path, bounded_source: Path) -> RealDwProject:
             },
             semantic_category="krx_daily_market",
             source_provenance=(
-                "bounded unchanged rows from data/DW/fng_stock_daily_prices.csv; "
-                "availability is architecture close convention 15:30 Asia/Seoul"
+                "bounded unchanged rows from data/DW/fng_stock_daily_prices.csv; physical "
+                "timestamps are naive UTC and the availability convention is 15:30 Asia/Seoul"
             ),
         )
     )
@@ -270,6 +271,7 @@ def register_real_k200_benchmark(
             dataset_id="real-k200-benchmark",
             source=source.name,
             source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
             instrument_field="ticker",
             observation_time_field="observation_time",
             available_at=AvailableAtField(field="available_at"),
@@ -278,8 +280,9 @@ def register_real_k200_benchmark(
             semantic_category="krx_k200_benchmark_weight",
             source_provenance=(
                 "bounded rows from audited data/preprocessed/k200_members.parquet, which is an "
-                "exact weight projection of data/DW/fng_k200_members.csv; available_at is the "
-                "user-confirmed next distinct K200 trading session at 09:00 Asia/Seoul"
+                "exact weight projection of data/DW/fng_k200_members.csv; physical timestamps "
+                "are naive UTC and available_at is the user-confirmed next distinct K200 "
+                "trading session at 09:00 Asia/Seoul"
             ),
         )
     )
@@ -299,6 +302,7 @@ def register_real_lookthrough_constituents(
             dataset_id="real-k200-etf-constituents",
             source=source.name,
             source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
             instrument_field="ticker",
             observation_time_field="observation_time",
             available_at=AvailableAtField(field="available_at"),
@@ -307,8 +311,9 @@ def register_real_lookthrough_constituents(
             semantic_category="user_selected_k200_etf_constituent_subset",
             source_provenance=(
                 "user-authored KODEX 200 mapping over two equal-weight real K200 members; "
-                "weights come from data/preprocessed/k200_members.parquet and available_at "
-                "uses the confirmed next K200 trading session at 09:00 Asia/Seoul; qlibx "
+                "weights come from data/preprocessed/k200_members.parquet; physical timestamps "
+                "are naive UTC and available_at uses the confirmed next K200 trading session "
+                "at 09:00 Asia/Seoul; qlibx "
                 "does not infer or auto-link this dataset from the ETF ticker"
             ),
         )
@@ -332,6 +337,7 @@ def register_real_extension_inputs(
             dataset_id="real-extension-market",
             source=project_market.name,
             source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
             instrument_field="ticker",
             observation_time_field="observation_time",
             available_at=AvailableAtField(field="available_at"),
@@ -340,7 +346,8 @@ def register_real_extension_inputs(
             semantic_category="krx_daily_return",
             source_provenance=(
                 "bounded unchanged calculation from data/DW/fng_stock_daily_prices.csv; "
-                "available at the observed close, 15:30 Asia/Seoul"
+                "physical timestamps are naive UTC and available at the observed close, "
+                "15:30 Asia/Seoul"
             ),
         )
     )
@@ -349,6 +356,7 @@ def register_real_extension_inputs(
             dataset_id="real-extension-sector",
             source=project_sector.name,
             source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
             instrument_field="ticker",
             observation_time_field="observation_time",
             available_at=AvailableAtField(field="available_at"),
@@ -358,8 +366,9 @@ def register_real_extension_inputs(
             source_provenance=(
                 "bounded rows from data/preprocessed/sector_classification.parquet and "
                 "industry_mapping.parquet, preprocessed from "
-                "data/DW/DW_FNG_FGSC종목_20200101-20260430.csv; available_at is the "
-                "user-confirmed next trading session at 09:00 Asia/Seoul"
+                "data/DW/DW_FNG_FGSC종목_20200101-20260430.csv; physical timestamps are "
+                "naive UTC and available_at is the user-confirmed next trading session at "
+                "09:00 Asia/Seoul"
             ),
         )
     )

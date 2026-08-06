@@ -2434,6 +2434,24 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 
 ## 17. 개정 이력
 
+### 2026-08-07 — 선언된 source timezone과 원자적 dataset 등록
+
+**Timestamp 의미.** Naive availability 또는 observation timestamp는 더 이상 UTC로 추정하지 않는다.
+Dataset registration이 user-confirmed IANA `source_timezone`을 보존하고, data layer가 localize한 뒤 UTC
+instant로 변환한다. 이미 offset이 있는 source에 사용되지 않는 timezone을 선언하거나 혼합·DST 경계로
+정확한 instant를 만들 수 없으면 mutation 전에 typed failure를 반환한다. 이는
+`ConfirmedDelayRule.user_confirmed`와 같은 명시적 의미 선언이며 schema fingerprint는 원본 dtype을 계속
+나타낸다.
+
+**Identity와 migration.** `source_timezone`은 registration identity에 포함된다. Upgrade 전 registration은
+읽을 수 있지만 naive source를 다시 query하려면 명시적 timezone으로 재등록해야 하고, 기존 identity와의
+충돌 또는 이전 run resume은 각각 `REGISTRATION_IDENTITY_CONFLICT`와 `RESUME_BRANCH_REQUIRED`로 드러난다.
+Silent identity migration은 하지 않는다.
+
+**Append-only publication.** Registry publication은 destination을 교체할 수 있는 `os.rename` 대신 같은
+filesystem의 atomic hard-link create-if-absent를 사용한다. Hard link를 지원하지 않는 filesystem에서는
+부분 JSON을 노출하는 직접쓰기 fallback 없이 `REGISTRY_PUBLICATION_FAILED`로 종료한다.
+
 ### 2026-08-06 — 최종 package name 확정과 user-owned ETF look-through 설계
 
 **Package name.** 현재 package/import/CLI는 구축이 끝날 때까지 `qlibx`를 유지하고, 마지막 migration

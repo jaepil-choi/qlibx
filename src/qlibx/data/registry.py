@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from contextlib import suppress
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,7 @@ from qlibx.data.contracts import (
     RegistrationEvidence,
     SourceFormat,
 )
+from qlibx.data.timestamps import TimestampNormalizationError, normalize_timestamps
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 
 
@@ -150,7 +152,56 @@ class DatasetRegistry:
                 retry=("add the missing event or sequence axis, or correct duplicate rows",),
             )
 
-        parsed_time = pd.to_datetime(frame[time_field], errors="coerce", utc=True)
+        try:
+            available_at = normalize_timestamps(
+                frame[time_field],
+                field=time_field,
+                source_timezone=registration.source_timezone,
+            )
+            normalized_fields = [available_at]
+            if (
+                registration.observation_time_field is not None
+                and registration.observation_time_field != time_field
+            ):
+                normalized_fields.append(
+                    normalize_timestamps(
+                        frame[registration.observation_time_field],
+                        field=registration.observation_time_field,
+                        source_timezone=registration.source_timezone,
+                    )
+                )
+        except TimestampNormalizationError as exc:
+            retry = {
+                "TIMESTAMP_TIMEZONE_UNDECLARED": (
+                    "declare source_timezone for the naive source, or provide "
+                    "offset-qualified timestamps",
+                ),
+                "TIMESTAMP_LOCALIZATION_FAILED": (
+                    "provide offset-qualified timestamps for the ambiguous or mixed local times",
+                ),
+            }[exc.code]
+            return failure(
+                registration,
+                invocation_id,
+                "timestamp_timezone",
+                exc.code,
+                context=exc.context,
+                retry=retry,
+            )
+        if registration.source_timezone is not None and not any(
+            item.was_naive for item in normalized_fields
+        ):
+            return failure(
+                registration,
+                invocation_id,
+                "timestamp_timezone",
+                "TIMESTAMP_TIMEZONE_UNUSED",
+                context={"source_timezone": registration.source_timezone},
+                retry=(
+                    "remove source_timezone; the source timestamps already carry an offset",
+                ),
+            )
+        parsed_time = available_at.utc
         invalid_time = int(parsed_time.isna().sum())
         if invalid_time:
             return failure(
@@ -192,6 +243,7 @@ class DatasetRegistry:
             source_format=registration.source_format,
             instrument_field=registration.instrument_field,
             observation_time_field=registration.observation_time_field,
+            source_timezone=registration.source_timezone,
             available_at=registration.available_at,
             logical_key=registration.logical_key,
             bindings=bindings,
@@ -204,6 +256,11 @@ class DatasetRegistry:
                 logical_key_null_count=0,
                 available_at_min=parsed_time.min().isoformat() if len(parsed_time) else None,
                 available_at_max=parsed_time.max().isoformat() if len(parsed_time) else None,
+                localized_source_timezone=(
+                    registration.source_timezone
+                    if any(item.was_naive for item in normalized_fields)
+                    else None
+                ),
             ),
         )
         return self._publish(registered, registration, invocation_id)
@@ -247,8 +304,20 @@ class DatasetRegistry:
         temporary = self._registry_dir / f".{registered.dataset_id}.{os.getpid()}.tmp"
         temporary.write_text(registered.model_dump_json(indent=2), encoding="utf-8", newline="\n")
         try:
-            os.rename(temporary, destination)
+            os.link(temporary, destination)
         except FileExistsError:
             temporary.unlink(missing_ok=True)
             return self._publish(registered, registration, invocation_id)
+        except OSError as exc:
+            temporary.unlink(missing_ok=True)
+            return failure(
+                registration,
+                invocation_id,
+                "publication",
+                "REGISTRY_PUBLICATION_FAILED",
+                context={"exception": type(exc).__name__, "message": str(exc)[:500]},
+                retry=("use a local filesystem that supports atomic hard-link publication",),
+            )
+        with suppress(OSError):
+            temporary.unlink(missing_ok=True)
         return OperationOutcome(status=OutcomeStatus.COMPLETE, result=registered)

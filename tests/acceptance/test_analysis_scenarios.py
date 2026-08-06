@@ -90,6 +90,7 @@ def test_uc_error_001_and_uc_research_001_short_analysis_fails_then_retries(
             dataset_id="real-analysis-return",
             source=real_dw_case.source.name,
             source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
             instrument_field="ticker",
             observation_time_field="date",
             available_at=AvailableAtField(field="available_at"),

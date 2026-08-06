@@ -40,6 +40,7 @@ def test_dataset_registration_and_status_cli(tmp_path: Path, capsys: object) -> 
                 "source": "market.csv",
                 "source_format": "csv",
                 "instrument_field": "CODE",
+                "source_timezone": "UTC",
                 "available_at": {"kind": "field", "field": "DATE"},
                 "logical_key": ["DATE", "CODE"],
                 "semantic_bindings": {"value": "VALUE"},

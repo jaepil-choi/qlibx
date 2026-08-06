@@ -22,8 +22,10 @@ invent missing behavior.
    alone.
 3. Explain look-ahead risk. If availability is ambiguous, compare an actual release timestamp,
    a source-supported delay rule, and source enrichment.
-4. Ask the user to choose the economic meaning, then call qlibx registration validation.
-5. Record the confirmed binding and validation result. Do not infer available_at from DATE alone.
+4. Ask the user to choose the economic meaning and the IANA `source_timezone` of any naive
+   timestamp. Never assume that a naive source is UTC or local time.
+5. Call qlibx registration validation with the confirmed availability and timezone declarations.
+6. Record the confirmed binding and validation result. Do not infer available_at from DATE alone.
 
 ## Recover an OperationError
 

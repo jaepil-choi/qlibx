@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, model_validator
 
@@ -40,6 +41,7 @@ class DatasetRegistration(QlibxModel):
     source_format: SourceFormat
     instrument_field: str = Field(min_length=1)
     observation_time_field: str | None = None
+    source_timezone: str | None = Field(default=None, min_length=1)
     available_at: AvailabilityBinding
     logical_key: tuple[str, ...] = Field(min_length=1)
     semantic_bindings: dict[str, str] = Field(default_factory=dict)
@@ -48,6 +50,11 @@ class DatasetRegistration(QlibxModel):
 
     @model_validator(mode="after")
     def validate_minimal_key(self) -> "DatasetRegistration":
+        if self.source_timezone is not None:
+            try:
+                ZoneInfo(self.source_timezone)
+            except ZoneInfoNotFoundError as exc:
+                raise ValueError(f"unknown source_timezone: {self.source_timezone!r}") from exc
         if len(set(self.logical_key)) != len(self.logical_key):
             raise ValueError("logical_key fields must be unique")
         if self.instrument_field not in self.logical_key:
@@ -76,6 +83,7 @@ class RegistrationEvidence(QlibxModel):
     logical_key_null_count: int = Field(ge=0)
     available_at_min: str | None = None
     available_at_max: str | None = None
+    localized_source_timezone: str | None = None
 
 
 class RegisteredDataset(QlibxModel):
@@ -87,6 +95,7 @@ class RegisteredDataset(QlibxModel):
     source_format: SourceFormat
     instrument_field: str
     observation_time_field: str | None = None
+    source_timezone: str | None = None
     available_at: AvailabilityBinding
     logical_key: tuple[str, ...]
     bindings: dict[str, str]

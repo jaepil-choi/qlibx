@@ -15,6 +15,7 @@ class ConstraintDeclaration(QlibxModel):
     declaration_schema_version: int = 1
     declaration_id: str = Field(min_length=1)
     benchmark_weight_role: str = Field(min_length=1)
+    benchmark_dataset_id: str | None = Field(default=None, min_length=1)
     single_name_floor: float = Field(gt=0, le=1)
     no_short: Literal[True] = True
 

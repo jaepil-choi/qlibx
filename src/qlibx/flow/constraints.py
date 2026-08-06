@@ -201,6 +201,7 @@ class ConstraintFlow:
                 ComponentRequirement(
                     requirement_id=f"{declaration.declaration_id}.benchmark_weight",
                     semantic_role=declaration.benchmark_weight_role,
+                    dataset_id=declaration.benchmark_dataset_id,
                 ),
             ),
             registry=self._registry,

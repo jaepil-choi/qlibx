@@ -1,3 +1,4 @@
+import shutil
 from datetime import datetime
 
 import duckdb
@@ -10,6 +11,7 @@ from qlibx.account import (
     MarkBatch,
     StrategyMemoryStore,
 )
+from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.execution import Fill, Side
 from qlibx.flow import (
     STORED_SIGNAL_CONTRACT,
@@ -256,17 +258,20 @@ def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutof
     real_dw_case: RealDwProject,
     real_dw_constraint_case: RealDwProject,
 ) -> None:
-    declaration = ConstraintDeclaration(
+    unpinned_declaration = ConstraintDeclaration(
         declaration_id="mvp-no-short-single-name-cap-v1",
         benchmark_weight_role="benchmark_weight",
         single_name_floor=0.10,
+    )
+    declaration = unpinned_declaration.model_copy(
+        update={"benchmark_dataset_id": "real-k200-benchmark"}
     )
     unconstrained_portfolio = _build_real_dw_long_only_portfolio(real_dw_case)
     missing = ConstraintFlow(
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
     ).adjust(
-        declaration,
+        unpinned_declaration,
         ConstraintAdjustmentRequest(
             invocation_id="constraint-missing-k200-binding",
             source_portfolio_artifact_id=unconstrained_portfolio.diagnostics[0].artifact_id,
@@ -286,9 +291,48 @@ def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutof
     )
 
     portfolio = _build_real_dw_long_only_portfolio(real_dw_constraint_case)
+    shadow = real_dw_constraint_case.root / "shadow-k200-benchmark.parquet"
+    shutil.copyfile(
+        real_dw_constraint_case.root / "real-k200-benchmark.parquet",
+        shadow,
+    )
+    registered_shadow = real_dw_constraint_case.project.register_dataset(
+        DatasetRegistration(
+            dataset_id="shadow-k200-benchmark",
+            source=shadow.name,
+            source_format=SourceFormat.PARQUET,
+            instrument_field="ticker",
+            observation_time_field="observation_time",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("observation_time", "available_at", "ticker"),
+            semantic_bindings={"benchmark_weight": "index_weight"},
+            semantic_category="krx_k200_benchmark_weight",
+            source_provenance="duplicate binding used to verify explicit selection",
+        )
+    )
+    assert registered_shadow.status is OutcomeStatus.COMPLETE
     flow = ConstraintFlow(
         registry=real_dw_constraint_case.project.registry_snapshot(),
         artifacts=real_dw_constraint_case.project.artifacts,
+    )
+    ambiguous = flow.adjust(
+        unpinned_declaration,
+        ConstraintAdjustmentRequest(
+            invocation_id="constraint-k200-ambiguous-binding",
+            source_portfolio_artifact_id=portfolio.diagnostics[0].artifact_id,
+            evaluation_time=close_at(2024, 1, 3),
+            config_fingerprint="constraint-ambiguous-v1",
+            account_state_identity="account:ambiguous:v0",
+            capital=970_000.0,
+            lots=(
+                ExecutionLotInput(
+                    instrument="A005930",
+                    price=77_000.0,
+                    lot_size=1.0,
+                    current_quantity=12.0,
+                ),
+            ),
+        ),
     )
     hidden = flow.adjust(
         declaration,
@@ -340,6 +384,8 @@ def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutof
 
     assert missing.status is OutcomeStatus.FAILED
     assert missing.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
+    assert ambiguous.status is OutcomeStatus.FAILED
+    assert ambiguous.errors[0].error_code == "REQUIREMENT_AMBIGUOUS"
     assert hidden.status is OutcomeStatus.FAILED
     assert hidden.errors[0].error_code == "CONSTRAINT_BENCHMARK_COVERAGE_MISSING"
     assert adjustment.status is validation.status is OutcomeStatus.COMPLETE
@@ -440,6 +486,7 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
     declaration = ConstraintDeclaration(
         declaration_id="mvp-no-short-single-name-cap-v1",
         benchmark_weight_role="benchmark_weight",
+        benchmark_dataset_id="real-k200-benchmark",
         single_name_floor=0.10,
     )
     memory = StrategyMemoryStore()

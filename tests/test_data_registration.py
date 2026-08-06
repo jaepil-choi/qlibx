@@ -90,6 +90,58 @@ def test_uc_data_002_requirement_gap_is_progressive_and_retryable(tmp_path: Path
     assert retried.bindings[0].dataset_id == "market-with-sector"
 
 
+def test_ambiguous_semantic_role_requires_an_explicit_dataset(tmp_path: Path) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text(
+        "DATE,CODE,VALUE\n2025-01-02,005930,10.0\n",
+        encoding="utf-8",
+    )
+    project = initialized_project(tmp_path)
+    for dataset_id in ("z-market", "a-market"):
+        assert project.register_dataset(
+            registration(dataset_id, "market.csv")
+        ).status is OutcomeStatus.COMPLETE
+    resolver = RequirementResolver()
+    implicit = ComponentRequirement(
+        requirement_id="strategy.value",
+        semantic_role="value",
+    )
+
+    ambiguous = resolver.resolve(
+        operation="strategy.run",
+        idempotency_identity="strategy-ambiguous",
+        requirements=(implicit,),
+        registry=project.registry_snapshot(),
+    )
+    explicit = resolver.resolve(
+        operation="strategy.run",
+        idempotency_identity="strategy-explicit",
+        requirements=(implicit.model_copy(update={"dataset_id": "z-market"}),),
+        registry=project.registry_snapshot(),
+    )
+
+    assert ambiguous.failed
+    error = ambiguous.errors[0]
+    assert error.error_code == "REQUIREMENT_AMBIGUOUS"
+    assert error.context["candidate_count"] == 2
+    assert error.context["candidates"] == [
+        {
+            "dataset_id": "a-market",
+            "registration_identity": project.registry_snapshot().get(
+                "a-market"
+            ).registration_identity,
+        },
+        {
+            "dataset_id": "z-market",
+            "registration_identity": project.registry_snapshot().get(
+                "z-market"
+            ).registration_identity,
+        },
+    ]
+    assert not explicit.failed
+    assert explicit.bindings[0].dataset_id == "z-market"
+
+
 def test_registration_conflict_does_not_replace_existing_identity(tmp_path: Path) -> None:
     source = tmp_path / "market.csv"
     source.write_text("DATE,CODE,VALUE\n2025-01-02,005930,10.0\n", encoding="utf-8")

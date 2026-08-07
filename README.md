@@ -10,8 +10,10 @@ development.
 
 Current support covers registered stock/ETF data, direct and stored-signal research, optional
 portfolio construction, deterministic daily simulation, monitoring, analysis/reporting, and
-validated project-local neutralization transforms. Intraday/partial-fill execution, real short,
-derivatives, actual settlement, and production OMS reconciliation are not current runtime features.
+validated project-local neutralization transforms, and exact-ID validated project-local Strategy
+research/daily execution. Multi-source path-dependent Ensemble lineage, intraday/partial-fill
+execution, real short, derivatives, actual settlement, and production OMS reconciliation are not
+current runtime features.
 
 Project onboarding is preview-first. The JSON result lists the exact changes, post-apply validation,
 and a `validation_argv` preview command. Removal deletes only manifest-owned generated files and the
@@ -37,6 +39,14 @@ uv run qlibx project sample qlibx-research --sample-id daily-closed-loop-v1 --ap
 uv run python qlibx-research/examples/qlibx_owned/daily_closed_loop/run.py qlibx-research
 uv run qlibx project sample qlibx-research --sample-id constraint-workflow-v1 --apply
 uv run python qlibx-research/examples/qlibx_owned/constraint_workflow/run.py qlibx-research
+uv run qlibx project sample qlibx-research --sample-id strategy-extension-v1 --apply
+uv run python qlibx-research/examples/qlibx_owned/strategy_extension/run.py qlibx-research
+uv run qlibx strategy list qlibx-research
 
 uv run qlibx artifact list qlibx-research
 ```
+
+Local Strategy modules are trusted project code, not sandboxed plugins. qlibx confines and hashes
+the selected file, validates two fresh instances, and executes only the exact registration artifact
+ID supplied by the caller. A source/schema change requires a new validation and explicit new ID;
+there is no implicit latest-compatible selection.

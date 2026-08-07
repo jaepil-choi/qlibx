@@ -31,6 +31,7 @@ class SampleMaterializer:
         default_sample_id: "basic",
         "constraint-workflow-v1": "constraint_workflow",
         "daily-closed-loop-v1": "daily_closed_loop",
+        "strategy-extension-v1": "strategy_extension",
     }
 
     def __init__(self, project_root: Path, sample_id: str = default_sample_id) -> None:

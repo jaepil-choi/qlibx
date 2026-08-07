@@ -15,6 +15,11 @@ Use the exact public error fields. Candidate actions are guidance, not package-o
 | REQUIREMENT_NOT_RESOLVED | The selected operation needs an unregistered semantic capability | Add a binding/dataset, derive it, select another profile, or validate an extension |
 | ARTIFACT_IDENTITY_CONFLICT | The same logical identity already has different immutable content | Retain it or choose a new logical identity |
 | ARTIFACT_PAYLOAD_INVALID | Serialized content violates its documented contract | Fix the producer payload before import |
+| STRATEGY_EXTENSION_MODULE_INVALID or STRATEGY_EXTENSION_CONTRACT_INVALID | The local file is outside the extension root, cannot import, lacks fixed symbols, returns a singleton, or declares an invalid Strategy contract | Keep one trusted `.py` file under the configured extension root, fix `STRATEGY_SPEC` / zero-argument `create_strategy()`, and validate again |
+| STRATEGY_EXTENSION_ARTIFACT_MODEL_INVALID | A declared project-local payload model is not module-local, has an unstable schema, or collides with a built-in contract | Rename the project contract, define one local `QlibxModel`, or use the existing built-in payload contract |
+| STRATEGY_EXTENSION_NONDETERMINISTIC or STRATEGY_EXTENSION_VALIDATION_FAILED | Fresh instances differ or the frozen fixture cannot supply a view input/output contract | Remove hidden random/global/wall-clock state, provide exact fixture artifacts, and validate a new frozen request |
+| STRATEGY_EXTENSION_REGISTRATION_INVALID or STRATEGY_EXTENSION_LOAD_FAILED | The selected exact registration cannot be loaded or reconstructed | Select a successful registration artifact ID and restore its declared local dependencies/path |
+| STRATEGY_EXTENSION_SOURCE_DRIFT or STRATEGY_EXTENSION_CONTRACT_DRIFT | Current source or declaration no longer matches the selected registration | Validate the changed module and explicitly select the new registration ID; never fall back to latest compatible |
 | CONSTRAINT_COMPUTE_FAILED, MONITORING_COMPUTE_FAILED, or ANALYSIS_COMPUTE_FAILED | An unexpected defect occurred after immutable inputs were materialized | Preserve the error and frozen inputs, report the diagnostic, and retry only after the implementation or input contract changes |
 
 Do not retry until every retry_precondition is either satisfied or explicitly rejected by the

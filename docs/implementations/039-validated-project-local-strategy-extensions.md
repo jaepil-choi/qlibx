@@ -121,10 +121,36 @@ Registered execution validation:
 
 The slice proves exact-ID research and daily execution, registration lineage, registration-scoped
 payload deserialization, source-drift rejection before compute, CLI validate/list, and curated
-installed-Strategy imports. Build and fresh-wheel sample evidence is added in the final M3 commit.
+installed-Strategy imports.
+
+Final M3 validation:
+
+```
+.venv/Scripts/python.exe -m pytest tests -q -p no:cacheprovider --basetemp C:\tmp\qlibx-pytest-m3-final-full-019fd94d
+-> 207 passed in 134.46s
+
+.venv/Scripts/python.exe -m ruff check .
+-> clean
+
+git diff --check
+-> clean
+
+UV_CACHE_DIR=C:\tmp\qlibx-uv-cache-m3-019fd94d uv build
+-> dist/qlibx-0.1.0.tar.gz
+-> dist/qlibx-0.1.0-py3-none-any.whl
+```
+
+Wheel inspection found all required extension contracts, flow, bundled sample, skill, and recovery
+guidance. A fresh Python 3.12 environment installed only that wheel, imported every curated Strategy
+symbol, initialized a fresh project, materialized `strategy-extension-v1`, validated and registered
+the module, executed its exact registration ID, and listed it through the installed CLI. The result
+selected `A005930`, published stored-signal/registration/Strategy artifacts, and included both the
+signal and registration artifact IDs in dependency lineage.
 
 ## Remaining limitations
 
-- Installed template, PRD/Architecture closure and fresh-wheel evidence remain in the final M3
-  documentation/sample commit.
+- Local Python is trusted user code. M3 provides path confinement and source/schema integrity, not a
+  security sandbox or dependency installer.
+- CLI owns validation and listing only; typed research/daily execution remains on the public Python
+  facade to avoid a duplicate YAML execution contract.
 - Ensemble multi-source state/cursor semantics and `StrategyResult` schema remain M4 scope.

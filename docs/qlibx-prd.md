@@ -1599,6 +1599,16 @@ Built-in 예시를 참고해 agent가 project-local neutralization transform을 
 requirement, PIT behavior와 output artifact를 검사한다. 실패하면 agent는 error를 설명하고 수정안을 제시하며,
 성공하기 전까지 compatible component로 등록하지 않는다.
 
+#### UC-EXTENSION-002 — Project-local Strategy의 검증과 exact 등록 실행
+
+Fresh installed project에서 user가 curated top-level `qlibx` contract만 import하는 local Strategy module을 작성한다.
+Strategy는 fixed module symbol, dataset/artifact requirement와 typed output을 선언한다. Package는 configured extension
+root 안의 source를 hash하고 두 fresh instance가 같은 requirement, output과 access evidence를 만드는지 검증한 뒤에만
+registration artifact를 publish한다. Research 또는 daily 실행은 caller가 지정한 exact registration artifact ID의
+source/schema를 다시 확인하고, 실제로 소비한 typed artifact와 registration을 lineage로 남긴다. Source가 바뀌면 기존
+registration 실행은 compute 전에 실패하며 latest/first-compatible registration을 자동 선택하지 않는다. Local Python
+module은 trusted project code이며 이 validation은 security sandbox나 dependency installer가 아니다.
+
 ### 13.4 Agent-readable guidance
 
 Public docs는 user가 internal class hierarchy나 private source를 읽지 않고도 supported operation, required decision,
@@ -1705,8 +1715,10 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 - `UC-ARTIFACT-002`의 invalid payload와 partial publication을 reusable success로 노출하지 않는다.
 - Failure와 retry history는 `UC-RESEARCH-001`처럼 queryable evidence로 남는다.
 - `UC-REPORT-001`, `UC-MONITOR-001`에서 stored result를 재실행 없이 report하고 actual과 intended state를 구분한다.
-- `UC-EXTENSION-001`에서 agent는 built-in 예시로 local extension을 만들 수 있고 package가 compatibility를
+- `UC-EXTENSION-001`에서 agent는 built-in 예시로 local transform을 만들 수 있고 package가 compatibility를
   deterministic하게 판정한다.
+- `UC-EXTENSION-002`에서 installed project의 local Strategy를 public contract로 검증·등록하고 exact registration
+  ID로 research/daily 실행하며, source drift와 implicit latest selection을 compute 전에 거부한다.
 
 ### 15.5 Current requirement/design readiness gaps
 
@@ -1720,7 +1732,7 @@ decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 
 | `GAP-TIME-001` (declared time semantics closed) | Naive source timestamp는 declared `source_timezone` 없이 등록되지 않고, session query는 caller가 선언한 session timezone의 calendar day로 관측치를 선택한다. Offset-qualified source의 unused timezone과 ambiguous local time은 mutation 전에 실패한다 | `tests/test_data_registration.py`에서 source localization과 PIT cutoff를, `tests/test_session_timezone.py`에서 UTC/KST 날짜 경계의 session selection을 검증한다 |
 | `GAP-CONSTRAINT-001` (default public workflow closed) | 설치 프로젝트의 선택적 constraint workflow가 고정 no-short·10% floor·PIT benchmark cap adjustment와 독립 validation을 제공한다. Constraint-free workflow는 benchmark를 요구하지 않고, validation은 adjustment와 동일한 benchmark access identity를 요구하며 lot-rounding residual을 evidence로 보존한다. Sector, turnover와 liquidity constraint는 future work다 | `tests/test_public_constraints.py`와 `tests/test_public_constraint_sample.py`에서 같은 PIT benchmark input의 adjustment/validation 일치, missing·ambiguous·future-hidden·incomplete weight의 mutation 전 실패, lot residual에 따른 ineligible 결과와 installed sample 결정론을 검증한다 |
 | `GAP-MONITOR-001` (public no-trade monitoring closed) | 설치 project가 committed Account checkpoint에서 독립 constraint monitoring을 frozen spec으로 실행한다. 같은 evaluation instant가 Account valuation과 benchmark PIT cutoff를 결정하며, wall clock이나 daily flow 자동 삽입을 사용하지 않는다 | `tests/test_public_constraints.py`에서 checkpoint 복원, 동일 spec의 동일 artifact identity, held-position mark freshness, stale valuation과 손상 checkpoint의 typed failure를 검증한다 |
-| `GAP-STRATEGY-COMPOSITION-001` | Project-local Strategy의 package validation, typed artifact input과 path-dependent multi-source lineage가 아직 하나의 installed workflow로 닫히지 않았다. 기존 replay/rerun fixture는 frozen Strategy-result composition을 증명하지 않으므로 이 capability를 current support로 표시하지 않는다 | Closure acceptance는 installed project의 local Strategy를 public contract로 검증하고, path-dependent result를 producer rerun 없이 다른 Strategy/Ensemble이 소비하며, consumed artifact와 모든 source state/cursor lineage가 보존되고 downstream execution만 current Account를 사용함을 증명한다 |
+| `GAP-STRATEGY-COMPOSITION-001` | `UC-EXTENSION-002`로 project-local Strategy validation, exact registration 실행과 typed artifact input은 installed workflow로 닫혔다. 아직 `StrategyResult:v1`과 Ensemble special flow는 여러 path-dependent source의 Account/Memory identity와 cursor를 한 result에 보존하지 못하므로 full frozen Strategy-result composition은 current support가 아니다 | 남은 closure acceptance는 path-dependent result를 producer rerun 없이 다른 Strategy/Ensemble이 소비하고, consumed artifact와 **모든** source state/cursor lineage가 보존되며 downstream execution만 current Account를 사용함을 증명한다. 기존 replay/rerun fixture는 이 oracle을 대신하지 않는다 |
 | `GAP-RECOVERY-001` (default local daily flow closed) | Versioned recovery point가 Account checkpoint, Strategy Memory, feedback cursor, scheduler position과 누락 가능 evidence를 묶는다. External Account/OMS와 distributed recovery는 별도 contract가 필요하다 | `tests/scenarios/recovery.yaml`의 real-DW process-crash matrix에서 각 crash point의 resume이 uninterrupted result와 같고 decision/Fill/Memory를 중복 적용하지 않으며 changed identity는 mutation 전 `RESUME_BRANCH_REQUIRED`로 실패한다 |
 | `GAP-CATALOG-001` (default local backend closed) | DuckDB schema v1, bounded cross-process writer lock, payload staging, append-only publication audit와 abandoned pre-commit recovery를 current local backend가 제공한다. External backend와 multi-host filesystem은 별도 contract validation이 필요하다 | `tests/scenarios/catalog_recovery.yaml`의 concurrent writer와 process-crash fixture에서 partial payload가 reusable success로 보이지 않고 conflict/idempotent/recovery 결과가 deterministic하다 |
 

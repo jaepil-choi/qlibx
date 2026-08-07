@@ -1,0 +1,11 @@
+{
+  "sample_schema_version": 1,
+  "sample_id": "strategy-extension-v1",
+  "ownership": "qlibx_product_owned_example",
+  "strategy_id": "sample.local-ranked-signal",
+  "artifact_contract": "stored_signal_result:v1",
+  "validation_contract": "strategy_extension_registration:v1",
+  "selection_policy": "exact_registration_artifact_id",
+  "trusted_code_no_sandbox": true,
+  "current_support_only": true
+}

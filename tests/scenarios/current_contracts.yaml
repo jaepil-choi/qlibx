@@ -121,3 +121,17 @@ scenarios:
       instrument_count: 3000
       scalar_batch_equal: true
       stable_output_order: true
+
+  - id: UC-EXTENSION-002
+    case: installed_local_strategy_validates_registers_and_executes_exact_id
+    test: tests/test_strategy_extension_sample.py::test_uc_extension_002_installed_strategy_sample_validates_registers_and_executes
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: source drift, exact registration selection, and overwrite refusal require controlled package-owned files
+      oracle: bundled installed-project sample using only curated top-level Strategy imports
+    expected:
+      validation: complete
+      registration: append_only
+      exact_execution: complete
+      registration_lineage: true
+      implicit_latest_selection: false

@@ -25,6 +25,7 @@ required_current_use_cases:
   - UC-REPORT-001
   - UC-MONITOR-001
   - UC-EXTENSION-001
+  - UC-EXTENSION-002
   - UC-AGENT-001
   - UC-COST-001
   - UC-COST-002

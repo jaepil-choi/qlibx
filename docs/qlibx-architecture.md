@@ -81,7 +81,8 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-RESEARCH-001` | failed operation then retry | frozen failure inputs + new binding | new resolution | failure then success artifacts | resolution lineage | failure retained |
 | `UC-REPORT-001` | renderer selection | stored analysis values | presentation only | report artifact | source analysis IDs | renderer value parity |
 | `UC-MONITOR-001` | monitoring report | actual-account findings | analysis/rendering | report artifact | actual/intended distinction | breach vs missing |
-| `UC-EXTENSION-001` | extension registration | contract + validation fixture | package compatibility validation | registration on success | validation + producer ID | failure not registered |
+| `UC-EXTENSION-001` | transform extension registration | contract + validation fixture | package compatibility validation | registration on success | validation + producer ID | failure not registered |
+| `UC-EXTENSION-002` | exact local Strategy registration | path-confined source + fixed symbols + frozen fixture | two fresh instances; hash/schema/access comparison | registration, then exact-ID Strategy result | source/schema hash + actual artifact/registration edges | drift or implicit selection fails before compute |
 | `UC-PROD-001` | future OMS partial result | decision + confirmed fills/account | future reconciliation | confirmed delta only | pending/cancel + correlation | not MVP acceptance |
 | `UC-PROD-002` | future OMS rejection | decision + rejection | future reconcile without intended apply | rejection evidence only | retry policy identity | not MVP acceptance |
 | `UC-ACADEMIC-001` | future academic listing | explicit hypothetical profile | §13.6 match | hypothetical Fill | profile identity | disallowed profile rejects |
@@ -1697,7 +1698,7 @@ Q2. 스키마를 남이 읽어야 하는가?
 | `ConstraintDeclaration` | `Diagnostic` 행 |
 | `ComponentRequirement` | `Position`, `Account` |
 | `DatasetRegistration` | `Account`, `AccountSnapshot`, `AccountFeedback`, `AccountCommit` |
-| `ExtensionContract` | 통계 반환값 (JSON primitive) |
+| `ExtensionContract`, `StrategyExtensionRegistration` | 통계 반환값 (JSON primitive) |
 | future `PreparedDecision`, `OMSResult`, `ReconciliationResult` | |
 
 pydantic 대상은 전부 **저빈도 + 경계**, dataclass 대상은 전부 **고빈도 + 내부**다.
@@ -2169,7 +2170,7 @@ finding만 publish하고 order나 account mutation을 만들지 않는다(`UC-EX
 독립 cadence로 호출하며 current `run_daily()`의 session-close `MONITOR` callback에 자동 연결되지 않는다. Shared
 scheduler가 필요하면 같은 frozen spec operation을 별도 callback으로 등록하는 optional integration으로 다룬다.
 
-### 13.12 Artifact, failure, report와 extension — UC-ARTIFACT-001, UC-ARTIFACT-002, UC-RESEARCH-001, UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001
+### 13.12 Artifact, failure, report와 extension — UC-ARTIFACT-001, UC-ARTIFACT-002, UC-RESEARCH-001, UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001, UC-EXTENSION-002
 
 External producer가 documented envelope와 payload로 signal을 publish하면 Loader가 producer class import 없이
 typed Signal object를 생성하고 semantics/lineage를 검사한다(`UC-ARTIFACT-001`). Duplicate logical key나
@@ -2182,6 +2183,19 @@ Analysis artifact 하나를 table/chart/machine renderer가 공유하고 metric�
 (`UC-REPORT-001`). Monitoring report는 actual finding과 intended target을 섞지 않고 breach와 missing input을
 구분한다(`UC-MONITOR-001`). Local neutralization transform은 package contract validation이 성공한 뒤에만
 registry에 commit한다(`UC-EXTENSION-001`).
+
+Project-local Strategy는 configured extension root 아래의 한 `.py` file과 fixed `STRATEGY_SPEC` /
+zero-argument `create_strategy()` contract를 사용한다. `StrategyExtensionFlow`가 source hash, 두 fresh instance의
+requirements, local `QlibxModel` JSON schema, typed `StrategyDraft`와 모든 view access evidence를 비교한다. Local
+payload model은 registration-scoped `StrategyArtifactContractRegistry`에만 추가하며 built-in registry를 mutation하지
+않는다. Validation success만 append-only `strategy_extension_registration:v1`을 publish한다.
+
+Runtime facade는 caller가 지정한 exact registration artifact를 먼저 typed load하고 source hash를 import 전에 확인한
+뒤 module contract를 다시 구성한다. Registration-scoped registry와 registration dependency를 기존 `ResearchFlow` /
+`DailyExecutionFlow`에 주입하므로 Strategy는 backend/path/loader를 보지 않는다. Registered daily config identity에는
+registration ID와 source hash가 들어간다. Source/schema drift, missing ID와 implicit latest selection은 compute와
+Account/Memory mutation 전에 실패한다(`UC-EXTENSION-002`). Python module은 trusted project code이며 path confinement와
+hashing은 hostile-code sandbox가 아니다.
 
 ### 13.13 Future work — Production reconcile — UC-PROD-001, UC-PROD-002
 
@@ -2219,7 +2233,7 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 | 5 | Pluggable full-fill convention branch | immutable DecisionIntent, next-close/next-open child profiles, isolated Account | UC-EXEC-001, UC-ALPHA-CHILD-001 |
 | 6 | Stored research + Strategy composition | materialize operation, typed load, Ensemble Strategy, reuse compatibility, Memory update | UC-SIGNAL-002, UC-ALPHA-*, UC-ENSEMBLE-001, UC-ARTIFACT-001 |
 | 7 | Portfolio/constraint/monitoring + user look-through fixture | construction, adjust/validate, user-declared PIT/account consumption, independent monitor | UC-PORTFOLIO-001, UC-LOOKTHROUGH-001~003, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003; §14.2 |
-| 8 | Analysis/report/extension | analysis artifact, pure renderer, extension validation | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001 |
+| 8 | Analysis/report/extension | analysis artifact, pure renderer, transform validation, exact local Strategy registration/execution | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001/002 |
 | 9 | Future design characterization — current build 밖 | academic listing, lifecycle cash flow, actual settlement, partial fill와 production boundary | UC-ACADEMIC-001, UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001, UC-SETTLEMENT-001, UC-PROD-001/002 |
 
 각 slice는 success만 아니라 requirement gap, commit status, artifact/failure evidence와 deterministic retry를
@@ -2446,11 +2460,13 @@ member를 결합하는 것 자체는 실행 회계와 무관하다.
 
 ### Current Strategy-composition readiness
 
-`GAP-STRATEGY-COMPOSITION-001`은 아직 implementation gap이다. Current extension validation은
-neutralization transform에 한정되고, `StrategyView`에는 typed artifact input surface가 없으며,
-`CompositionFlow`는 서로 다른 path-dependent state identity를 함께 쓰는 경우 거부한다. 따라서 이 architecture의
-project-local Strategy validation과 multi-source lineage 계약은 closure fixture가 통과하기 전까지 current support가
-아니다. 기존 decision-intent replay/rerun fixture도 Strategy-result composition의 acceptance oracle로 사용하지 않는다.
+`UC-EXTENSION-002`로 project-local Strategy validation, registration-scoped payload model, typed artifact input,
+exact-ID research/daily 실행과 installed sample은 current support가 되었다. 다만
+`GAP-STRATEGY-COMPOSITION-001` 전체가 닫힌 것은 아니다. `StrategyResult:v1`은 한 producer의
+`state_identity`/`feedback_cursor`만 표현하고, current Ensemble special flow는 서로 다른 path-dependent state
+identity를 함께 쓰는 경우 거부한다. 따라서 여러 frozen Strategy result의 모든 Account/Memory source와 cursor를
+보존하는 composition은 M4 closure fixture가 통과하기 전까지 current support가 아니다. 기존 decision-intent
+replay/rerun fixture도 이 acceptance oracle을 대신하지 않는다.
 
 ### 현재 남은 감사 action
 
@@ -2466,6 +2482,23 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 
 ## 17. 개정 이력
 
+### 2026-08-07 — Installed project-local Strategy lifecycle
+
+**검증과 등록.** Configured extension root의 trusted Python file은 fixed `STRATEGY_SPEC`와 fresh-instance
+`create_strategy()` contract로 검증한다. Package가 dataset/artifact/state fixture를 materialize하고 declaration,
+typed draft와 실제 access evidence가 deterministic할 때만 source/schema hash를 포함한 registration artifact를
+publish한다. Project-local payload model은 registration-scoped registry만 확장한다.
+
+**Exact 실행.** Research/daily facade는 caller가 지정한 registration artifact ID만 load한다. Current source를 import
+전에 hash하고 module contract를 다시 비교하며 registration-scoped payload contract와 registration lineage를 기존
+Flow에 주입한다. Source drift, schema drift, missing ID와 latest-compatible 추측은 compute/authority mutation 전에
+실패한다. Bundled `strategy-extension-v1` sample은 installed public imports로 validation, registration과 exact 실행을
+재현한다(`UC-EXTENSION-002`).
+
+**남은 composition gap.** 이 lifecycle은 M3 범위만 닫는다. 여러 path-dependent `StrategyResult` source의 모든
+Account/Memory identity와 cursor를 Ensemble result에 보존하는 schema/compatibility 변경은
+`GAP-STRATEGY-COMPOSITION-001`의 남은 M4 범위다.
+
 ### 2026-08-07 — Strategy-first composition contract 정정
 
 **Path-dependent reuse.** Account 또는 Memory를 소비한 Strategy result는 다른 Strategy/Ensemble의 frozen typed
@@ -2475,8 +2508,8 @@ target/order conversion에서만 authority다.
 
 **Extension lifecycle.** Project-local Strategy를 alpha logic의 primary extension point로 두고 Model/materialization은
 선택된 component가 reusable intermediate를 요구할 때만 사용한다. Flow가 typed artifact를 resolve·load하고 bounded
-projection을 Strategy view에 주입한다. Current build에는 이 full lifecycle이 아직 없어
-`GAP-STRATEGY-COMPOSITION-001`로 명시했다.
+projection을 Strategy view에 주입한다. 이 revision 당시 build에는 full lifecycle이 없어
+`GAP-STRATEGY-COMPOSITION-001`로 명시했으며, 위 M3 revision이 local validation/execution 부분을 닫았다.
 
 **Monitoring clock.** Daily runtime의 session-close `MONITOR`는 performance/observation callback이며 constraint
 evaluation이 아니다. Constraint monitoring은 committed checkpoint와 frozen evaluation instant를 받는 standalone
@@ -2495,9 +2528,9 @@ instant가 Account mark freshness와 benchmark의 PIT cutoff를 동시에 결정
 checkpoint의 반복 실행은 동일 monitoring artifact identity를 반환한다. Held position의 mark가 이 instant보다
 이르면 `ACCOUNT_VALUATION_STALE`이며, facade는 mark를 보정하거나 최신 가격을 추측하지 않는다.
 
-**Bundled sample 선택.** `project sample --sample-id`는 세 bundled sample identity를 argparse choice로
-공개한다. 기존 basic sample은 default로 유지하며 네 번째 sample이나 daily flow의 자동 monitoring 단계는
-추가하지 않는다.
+**Bundled sample 선택.** 이 revision에서 `project sample --sample-id`는 세 bundled sample identity를 argparse
+choice로 공개하고 기존 basic sample을 default로 유지했다. 위 M3 revision은 별도 closure evidence와 함께 네 번째
+`strategy-extension-v1` sample을 추가했으며 daily flow의 자동 constraint monitoring 단계는 여전히 추가하지 않는다.
 
 ### 2026-08-07 — 선언된 source timezone과 원자적 dataset 등록
 

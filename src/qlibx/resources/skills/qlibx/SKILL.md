@@ -27,6 +27,25 @@ invent missing behavior.
 5. Call qlibx registration validation with the confirmed availability and timezone declarations.
 6. Record the confirmed binding and validation result. Do not infer available_at from DATE alone.
 
+## Validate a project-local Strategy
+
+1. Treat a local Python module as trusted project code. qlibx path/hash validation is not a hostile-code
+   sandbox and does not install dependencies.
+2. Keep the module under the configured extension directory. Import documented types from the curated
+   top-level `qlibx` surface and expose fixed `STRATEGY_SPEC` plus zero-argument `create_strategy()`.
+3. Declare dataset requirements and optional artifact requirements by consumer role. Bind each artifact
+   role to an exact artifact ID; never ask qlibx to choose the latest compatible result.
+4. Run `qlibx strategy validate <project-root> <request.yaml>`. Compatibility exists only when the
+   package returns a successful `strategy_extension_registration:v1` artifact.
+5. Inspect registrations with `qlibx strategy list <project-root>`, then pass the selected exact
+   registration artifact ID to `QlibxProject.invoke_registered_strategy(...)` or
+   `run_daily_registered_strategy(...)`.
+6. If source or schema changes, validate again and use the new registration ID. Do not reuse the old
+   compatibility claim or overwrite modified sample/user source.
+
+The bundled `strategy-extension-v1` sample demonstrates typed stored-signal input, validation,
+registration lineage, exact execution, and safe overwrite refusal through installed public APIs.
+
 ## Recover an OperationError
 
 1. Report the observed operation, stage path, error code, requirement ID, commit status, and bounded

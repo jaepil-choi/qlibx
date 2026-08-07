@@ -1,6 +1,7 @@
 """Public project facade."""
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 
 from qlibx.account import Account
@@ -19,7 +20,13 @@ from qlibx.constraints import (
 from qlibx.data.contracts import DatasetRegistration
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
-from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
+from qlibx.evidence import (
+    ArtifactContract,
+    CatalogSessionConflictError,
+    DependencyEdge,
+    LocalArtifactBackend,
+)
+from qlibx.evidence.local import CatalogSchemaError
 from qlibx.execution import KrxExchange
 from qlibx.extensions import (
     ExtensionRegistration,
@@ -87,7 +94,11 @@ class QlibxProject:
         )
 
     def validate_extension(self, request: ExtensionValidationRequest) -> OperationOutcome:
-        return self.extension_flow.validate_local(request)
+        return self._with_catalog_session(
+            operation="extension.validate",
+            identity=request.invocation_id,
+            callback=lambda: self.extension_flow.validate_local(request),
+        )
 
     def registered_extensions(self) -> tuple[ExtensionRegistration, ...]:
         return self.extension_flow.registered()
@@ -105,7 +116,11 @@ class QlibxProject:
         self,
         request: StrategyExtensionValidationRequest,
     ) -> OperationOutcome:
-        return self.strategy_extension_flow.validate_local(request)
+        return self._with_catalog_session(
+            operation="strategy.extension.validate",
+            identity=request.invocation_id,
+            callback=lambda: self.strategy_extension_flow.validate_local(request),
+        )
 
     def registered_strategy_extensions(self) -> tuple[RegisteredStrategyExtension, ...]:
         return self.strategy_extension_flow.registered()
@@ -159,62 +174,88 @@ class QlibxProject:
         operation: StrategyOperation,
         invocation: StrategyInvocation,
     ) -> OperationOutcome:
-        return ResearchFlow(
-            registry=self.registry_snapshot(),
-            artifacts=self.artifacts,
-        ).invoke_strategy(operation, invocation)
+        return self._with_catalog_session(
+            operation="strategy.invoke",
+            identity=invocation.invocation_id,
+            callback=lambda: ResearchFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+            ).invoke_strategy(operation, invocation),
+        )
 
     def invoke_registered_strategy(
         self,
         registration_artifact_id: str,
         invocation: StrategyInvocation,
     ) -> OperationOutcome:
-        loaded = self.strategy_extension_flow.load_registered(registration_artifact_id)
-        if loaded.status is not OutcomeStatus.COMPLETE:
-            return loaded
-        selected = loaded.result
-        return ResearchFlow(
-            registry=self.registry_snapshot(),
-            artifacts=self.artifacts,
-            artifact_contracts=selected.artifact_contracts,
-            strategy_dependencies=(self._strategy_registration_dependency(selected),),
-        ).invoke_strategy(selected.operation, invocation)
+        def invoke_registered() -> OperationOutcome:
+            loaded = self.strategy_extension_flow.load_registered(registration_artifact_id)
+            if loaded.status is not OutcomeStatus.COMPLETE:
+                return loaded
+            selected = loaded.result
+            return ResearchFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+                artifact_contracts=selected.artifact_contracts,
+                strategy_dependencies=(self._strategy_registration_dependency(selected),),
+            ).invoke_strategy(selected.operation, invocation)
+
+        return self._with_catalog_session(
+            operation="strategy.invoke.registered",
+            identity=invocation.invocation_id,
+            callback=invoke_registered,
+        )
 
     def adjust_constraints(self, spec: ConstraintAdjustmentSpec) -> OperationOutcome:
         """Adjust one portfolio candidate under the explicitly selected MVP policy."""
 
-        return ConstraintFlow(
-            registry=self.registry_snapshot(),
-            artifacts=self.artifacts,
-        ).adjust(spec.policy.to_declaration(), spec.to_request())
+        return self._with_catalog_session(
+            operation="constraint.adjust",
+            identity=spec.invocation_id,
+            callback=lambda: ConstraintFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+            ).adjust(spec.policy.to_declaration(), spec.to_request()),
+        )
 
     def validate_constraints(self, spec: ConstraintValidationSpec) -> OperationOutcome:
         """Independently validate a prior adjustment under the selected MVP policy."""
 
-        return ConstraintFlow(
-            registry=self.registry_snapshot(),
-            artifacts=self.artifacts,
-        ).validate(spec.policy.to_declaration(), spec.to_request())
+        return self._with_catalog_session(
+            operation="constraint.validate",
+            identity=spec.invocation_id,
+            callback=lambda: ConstraintFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+            ).validate(spec.policy.to_declaration(), spec.to_request()),
+        )
 
     def monitor_constraints(self, spec: ConstraintMonitoringSpec) -> OperationOutcome:
         """Independently monitor committed Account state under the selected MVP policy."""
 
-        loaded = self.load_artifact(
-            spec.checkpoint_artifact_id,
-            SIMULATION_CHECKPOINT_CONTRACT,
+        def monitor() -> OperationOutcome:
+            loaded = self.load_artifact(
+                spec.checkpoint_artifact_id,
+                SIMULATION_CHECKPOINT_CONTRACT,
+            )
+            if loaded.status is not OutcomeStatus.COMPLETE:
+                return loaded
+            try:
+                account = Account.from_checkpoint(loaded.result.payload.account_checkpoint)
+            except ValueError as exc:
+                return self._checkpoint_failure(spec, exc)
+            return MonitoringFlow(
+                clock=BacktestClock(spec.evaluation_time),
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+                account=account,
+            ).run(spec.policy.to_declaration(), spec.to_request())
+
+        return self._with_catalog_session(
+            operation="constraint.monitor",
+            identity=spec.invocation_id,
+            callback=monitor,
         )
-        if loaded.status is not OutcomeStatus.COMPLETE:
-            return loaded
-        try:
-            account = Account.from_checkpoint(loaded.result.payload.account_checkpoint)
-        except ValueError as exc:
-            return self._checkpoint_failure(spec, exc)
-        return MonitoringFlow(
-            clock=BacktestClock(spec.evaluation_time),
-            registry=self.registry_snapshot(),
-            artifacts=self.artifacts,
-            account=account,
-        ).run(spec.policy.to_declaration(), spec.to_request())
 
     def run_daily(
         self,
@@ -225,7 +266,11 @@ class QlibxProject:
     ) -> OperationOutcome:
         """Run the supported next-session-close profile from frozen public input."""
 
-        return self._run_daily(strategy, spec, resume=resume)
+        return self._with_catalog_session(
+            operation="simulation.daily",
+            identity=spec.run_id,
+            callback=lambda: self._run_daily(strategy, spec, resume=resume),
+        )
 
     def run_daily_registered_strategy(
         self,
@@ -236,24 +281,31 @@ class QlibxProject:
     ) -> OperationOutcome:
         """Run an exact registered Strategy after source and contract revalidation."""
 
-        loaded = self.strategy_extension_flow.load_registered(registration_artifact_id)
-        if loaded.status is not OutcomeStatus.COMPLETE:
-            return loaded
-        selected = loaded.result
-        registered_identity = hashlib.sha256(
-            (
-                f"{spec.frozen_config_fingerprint()}|"
-                f"registration:{selected.registration_artifact_id}|"
-                f"source:{selected.registration.source_hash}"
-            ).encode()
-        ).hexdigest()
-        return self._run_daily(
-            selected.operation,
-            spec,
-            resume=resume,
-            config_fingerprint=registered_identity,
-            artifact_contracts=selected.artifact_contracts,
-            strategy_dependencies=(self._strategy_registration_dependency(selected),),
+        def run_registered() -> OperationOutcome:
+            loaded = self.strategy_extension_flow.load_registered(registration_artifact_id)
+            if loaded.status is not OutcomeStatus.COMPLETE:
+                return loaded
+            selected = loaded.result
+            registered_identity = hashlib.sha256(
+                (
+                    f"{spec.frozen_config_fingerprint()}|"
+                    f"registration:{selected.registration_artifact_id}|"
+                    f"source:{selected.registration.source_hash}"
+                ).encode()
+            ).hexdigest()
+            return self._run_daily(
+                selected.operation,
+                spec,
+                resume=resume,
+                config_fingerprint=registered_identity,
+                artifact_contracts=selected.artifact_contracts,
+                strategy_dependencies=(self._strategy_registration_dependency(selected),),
+            )
+
+        return self._with_catalog_session(
+            operation="simulation.daily.registered",
+            identity=spec.run_id,
+            callback=run_registered,
         )
 
     def _run_daily(
@@ -304,6 +356,59 @@ class QlibxProject:
             ),
             resume=resume,
         )
+
+    def _with_catalog_session(
+        self,
+        *,
+        operation: str,
+        identity: str,
+        callback: Callable[[], OperationOutcome],
+    ) -> OperationOutcome:
+        try:
+            with self.artifacts.session():
+                return callback()
+        except CatalogSessionConflictError as exc:
+            return self._catalog_scope_failure(
+                operation=operation,
+                identity=identity,
+                stage="catalog_session",
+                error_code=exc.error_code,
+                context={"catalog_path": str(exc.catalog_path), "message": exc.detail},
+                retry=exc.retry_preconditions,
+            )
+        except CatalogSchemaError as exc:
+            return self._catalog_scope_failure(
+                operation=operation,
+                identity=identity,
+                stage="catalog_schema",
+                error_code="CATALOG_SCHEMA_UNSUPPORTED",
+                context={"message": str(exc)[:500]},
+                retry=("migrate the catalog with an explicitly supported schema",),
+            )
+
+    @staticmethod
+    def _catalog_scope_failure(
+        *,
+        operation: str,
+        identity: str,
+        stage: str,
+        error_code: str,
+        context: dict[str, object],
+        retry: tuple[str, ...],
+    ) -> OperationOutcome:
+        stage_path = f"{operation}.{stage}"
+        seed = hashlib.sha256(f"{identity}:{stage_path}:{error_code}".encode()).hexdigest()[:24]
+        error = OperationError(
+            operation=operation,
+            stage_path=stage_path,
+            error_code=error_code,
+            context=context,
+            commit_status=CommitStatus.NONE,
+            retry_preconditions=retry,
+            idempotency_identity=identity,
+            error_id=f"error-{seed}",
+        )
+        return OperationOutcome(status=OutcomeStatus.FAILED, errors=(error,))
 
     @staticmethod
     def _strategy_registration_dependency(

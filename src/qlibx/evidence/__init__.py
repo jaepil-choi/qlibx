@@ -12,7 +12,7 @@ from qlibx.evidence.contracts import (
     PublicationPhase,
     RecoveryAction,
 )
-from qlibx.evidence.local import LocalArtifactBackend
+from qlibx.evidence.local import CatalogSessionConflictError, LocalArtifactBackend
 
 __all__ = [
     "ArtifactContract",
@@ -20,6 +20,7 @@ __all__ = [
     "ArtifactStatus",
     "CatalogRecoveryRecord",
     "CatalogRecoveryResult",
+    "CatalogSessionConflictError",
     "DependencyEdge",
     "LoadedArtifact",
     "LocalArtifactBackend",

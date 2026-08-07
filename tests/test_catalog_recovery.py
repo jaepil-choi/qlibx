@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from multiprocessing.context import BaseContext
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import yaml
 from qlibx import OutcomeStatus, QlibxModel, QlibxProject
 from qlibx.evidence import (
     ArtifactContract,
+    CatalogSessionConflictError,
     LocalArtifactBackend,
     PublicationPhase,
     RecoveryAction,
@@ -124,6 +126,88 @@ def _hold_lock(root: str, ready: Any, release: Any) -> None:
     with backend._writer_lock():
         ready.set()
         release.wait(10)
+
+
+def test_catalog_session_reuses_one_connection_and_supports_nesting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    backend = _backend(tmp_path)
+    real_connect = duckdb.connect
+    calls: list[dict[str, object]] = []
+
+    def tracked_connect(*args: object, **kwargs: object):
+        calls.append(dict(kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(duckdb, "connect", tracked_connect)
+    with backend.session():
+        published = _publish(backend, 0.5)
+        assert published.status is OutcomeStatus.COMPLETE
+        with backend.session():
+            loaded = backend.load_model(published.result.artifact_id, CONTRACT)
+            assert loaded.status is OutcomeStatus.COMPLETE
+            assert len(backend.list_envelopes()) == 1
+        assert len(calls) == 1
+
+    loaded = backend.load_model(published.result.artifact_id, CONTRACT)
+    assert loaded.status is OutcomeStatus.COMPLETE
+    assert len(calls) == 2
+    assert calls[1] == {"read_only": True}
+
+
+def test_catalog_session_rejects_cross_thread_reentry(tmp_path: Path) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    backend = _backend(tmp_path)
+    observed: list[CatalogSessionConflictError] = []
+
+    def enter_session() -> None:
+        try:
+            with backend.session():
+                pass
+        except CatalogSessionConflictError as exc:
+            observed.append(exc)
+
+    with backend.session():
+        thread = threading.Thread(target=enter_session)
+        thread.start()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert len(observed) == 1
+    assert observed[0].error_code == "CATALOG_SESSION_CONFLICT"
+
+
+def test_catalog_session_conflict_is_typed_for_other_backend_readers(
+    tmp_path: Path,
+) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    owner = _backend(tmp_path)
+    published = _publish(owner, 0.5)
+    assert published.status is OutcomeStatus.COMPLETE
+    other = _backend(tmp_path)
+
+    with owner.session():
+        loaded = other.load_model(published.result.artifact_id, CONTRACT)
+        assert loaded.status is OutcomeStatus.FAILED
+        assert loaded.errors[0].error_code == "CATALOG_SESSION_CONFLICT"
+        with pytest.raises(CatalogSessionConflictError) as captured:
+            other.list_envelopes()
+        assert captured.value.error_code == "CATALOG_SESSION_CONFLICT"
+
+    assert other.load_model(published.result.artifact_id, CONTRACT).status is OutcomeStatus.COMPLETE
+
+
+def test_catalog_session_closes_after_body_failure(tmp_path: Path) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    backend = _backend(tmp_path)
+
+    with pytest.raises(RuntimeError, match="injected"), backend.session():
+        raise RuntimeError("injected")
+
+    with backend.session():
+        assert _publish(backend, 0.5).status is OutcomeStatus.COMPLETE
 
 
 def test_same_candidate_concurrent_writers_are_idempotent(tmp_path: Path) -> None:

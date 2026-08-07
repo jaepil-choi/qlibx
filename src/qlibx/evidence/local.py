@@ -78,6 +78,18 @@ class CatalogCommitError(RuntimeError):
     """Raised after a catalog transaction has rolled back."""
 
 
+class CatalogSessionConflictError(RuntimeError):
+    """Raised when a bounded catalog session makes the database unavailable."""
+
+    error_code = "CATALOG_SESSION_CONFLICT"
+    retry_preconditions = ("retry after the active catalog session completes",)
+
+    def __init__(self, catalog_path: Path, detail: str) -> None:
+        self.catalog_path = catalog_path
+        self.detail = detail
+        super().__init__(f"catalog session conflict for {catalog_path}: {detail}")
+
+
 @dataclass(frozen=True, slots=True)
 class _PublicationAttempt:
     attempt_id: str
@@ -102,6 +114,78 @@ class LocalArtifactBackend:
         self._artifact_dir = artifact_dir.resolve()
         self._lock_path = self._catalog_path.with_suffix(f"{self._catalog_path.suffix}.lock")
         self._lock_timeout_seconds = lock_timeout_seconds
+        self._session_state_lock = threading.Lock()
+        self._session_owner_thread_id: int | None = None
+        self._session_depth = 0
+        self._session_connection: duckdb.DuckDBPyConnection | None = None
+
+    @contextmanager
+    def session(self) -> Iterator[None]:
+        """Reuse one catalog connection inside a single-threaded unit of work.
+
+        The outer session holds the catalog writer lock and DuckDB file exclusively. Same-thread
+        nested sessions share it by reference count. Other threads and processes must retry after
+        the outer session exits. Outside a session, operations retain their per-call connections.
+        """
+
+        thread_id = threading.get_ident()
+        with self._session_state_lock:
+            if self._session_owner_thread_id == thread_id:
+                if self._session_connection is None:
+                    raise CatalogSessionConflictError(
+                        self._catalog_path,
+                        "the owning thread is still opening its outer session",
+                    )
+                self._session_depth += 1
+                nested = True
+            elif self._session_owner_thread_id is not None:
+                raise CatalogSessionConflictError(
+                    self._catalog_path,
+                    "another thread owns the active session",
+                )
+            else:
+                self._session_owner_thread_id = thread_id
+                self._session_depth = 1
+                nested = False
+
+        if nested:
+            try:
+                yield
+            finally:
+                with self._session_state_lock:
+                    self._session_depth -= 1
+            return
+
+        lock_context = self._exclusive_writer_lock()
+        lock_acquired = False
+        connection: duckdb.DuckDBPyConnection | None = None
+        try:
+            try:
+                lock_context.__enter__()
+                lock_acquired = True
+            except TimeoutError as exc:
+                raise CatalogSessionConflictError(
+                    self._catalog_path,
+                    "the catalog writer lock is held by another process",
+                ) from exc
+            try:
+                connection = duckdb.connect(str(self._catalog_path))
+                self._ensure_writer_schema(connection)
+            except duckdb.Error as exc:
+                self._raise_if_session_conflict(exc)
+                raise
+            with self._session_state_lock:
+                self._session_connection = connection
+            yield
+        finally:
+            if connection is not None:
+                connection.close()
+            if lock_acquired:
+                lock_context.__exit__(None, None, None)
+            with self._session_state_lock:
+                self._session_connection = None
+                self._session_owner_thread_id = None
+                self._session_depth = 0
 
     def publish_model(
         self,
@@ -176,6 +260,14 @@ class LocalArtifactBackend:
                     )
                 finally:
                     connection.close()
+        except CatalogSessionConflictError as exc:
+            return self._failure(
+                logical_identity,
+                "artifact.publish.catalog_session",
+                exc.error_code,
+                context={"catalog_path": str(exc.catalog_path), "message": exc.detail},
+                retry=exc.retry_preconditions,
+            )
         except TimeoutError:
             return self._failure(
                 logical_identity,
@@ -278,6 +370,14 @@ class LocalArtifactBackend:
                 ).fetchone()
             finally:
                 connection.close()
+        except CatalogSessionConflictError as exc:
+            return self._failure(
+                artifact_id,
+                "artifact.load.catalog_session",
+                exc.error_code,
+                context={"catalog_path": str(exc.catalog_path), "message": exc.detail},
+                retry=exc.retry_preconditions,
+            )
         except CatalogSchemaError as exc:
             return self._failure(
                 artifact_id,
@@ -320,6 +420,14 @@ class LocalArtifactBackend:
                 ).fetchone()
             finally:
                 connection.close()
+        except CatalogSessionConflictError as exc:
+            return self._failure(
+                artifact_id,
+                "artifact.load.catalog_session",
+                exc.error_code,
+                context={"catalog_path": str(exc.catalog_path), "message": exc.detail},
+                retry=exc.retry_preconditions,
+            )
         except CatalogSchemaError as exc:
             return self._failure(
                 artifact_id,
@@ -399,6 +507,14 @@ class LocalArtifactBackend:
                     events = self._read_events(connection)
             finally:
                 connection.close()
+        except CatalogSessionConflictError as exc:
+            return self._failure(
+                "catalog-audit",
+                "artifact.audit.catalog_session",
+                exc.error_code,
+                context={"catalog_path": str(exc.catalog_path), "message": exc.detail},
+                retry=exc.retry_preconditions,
+            )
         except CatalogSchemaError as exc:
             return self._failure(
                 "catalog-audit",
@@ -421,6 +537,14 @@ class LocalArtifactBackend:
                     result = self._recover_locked(connection)
                 finally:
                     connection.close()
+        except CatalogSessionConflictError as exc:
+            return self._failure(
+                "catalog-recovery",
+                "artifact.recover.catalog_session",
+                exc.error_code,
+                context={"catalog_path": str(exc.catalog_path), "message": exc.detail},
+                retry=exc.retry_preconditions,
+            )
         except TimeoutError:
             return self._failure(
                 "catalog-recovery",
@@ -446,6 +570,22 @@ class LocalArtifactBackend:
 
     @contextmanager
     def _writer_lock(self) -> Iterator[None]:
+        thread_id = threading.get_ident()
+        with self._session_state_lock:
+            owner = self._session_owner_thread_id
+        if owner is not None:
+            if owner != thread_id:
+                raise CatalogSessionConflictError(
+                    self._catalog_path,
+                    "another thread owns the active session",
+                )
+            yield
+            return
+        with self._exclusive_writer_lock():
+            yield
+
+    @contextmanager
+    def _exclusive_writer_lock(self) -> Iterator[None]:
         self._prepare_storage()
         deadline = time.monotonic() + self._lock_timeout_seconds
         lock_key = str(self._lock_path)
@@ -754,7 +894,14 @@ class LocalArtifactBackend:
         self._artifact_dir.mkdir(parents=True, exist_ok=True)
 
     def _connect_writer(self) -> duckdb.DuckDBPyConnection:
-        connection = duckdb.connect(str(self._catalog_path))
+        session_cursor = self._session_cursor()
+        if session_cursor is not None:
+            return session_cursor
+        try:
+            connection = duckdb.connect(str(self._catalog_path))
+        except duckdb.Error as exc:
+            self._raise_if_session_conflict(exc)
+            raise
         try:
             self._ensure_writer_schema(connection)
         except Exception:
@@ -763,13 +910,52 @@ class LocalArtifactBackend:
         return connection
 
     def _connect_reader(self) -> duckdb.DuckDBPyConnection:
-        connection = duckdb.connect(str(self._catalog_path), read_only=True)
+        session_cursor = self._session_cursor()
+        if session_cursor is not None:
+            return session_cursor
+        try:
+            connection = duckdb.connect(str(self._catalog_path), read_only=True)
+        except duckdb.Error as exc:
+            self._raise_if_session_conflict(exc)
+            raise
         try:
             self._validate_reader_schema(connection)
         except Exception:
             connection.close()
             raise
         return connection
+
+    def _session_cursor(self) -> duckdb.DuckDBPyConnection | None:
+        thread_id = threading.get_ident()
+        with self._session_state_lock:
+            owner = self._session_owner_thread_id
+            connection = self._session_connection
+            if owner is None:
+                return None
+            if owner != thread_id:
+                raise CatalogSessionConflictError(
+                    self._catalog_path,
+                    "another thread owns the active session",
+                )
+            if connection is None:
+                raise CatalogSessionConflictError(
+                    self._catalog_path,
+                    "the owning thread is still opening its outer session",
+                )
+            return connection.cursor()
+
+    def _raise_if_session_conflict(self, exc: duckdb.Error) -> None:
+        message = str(exc)
+        lowered = message.lower()
+        markers = (
+            "different configuration than existing connections",
+            "could not set lock on file",
+            "conflicting lock",
+            "another process",
+            "database is locked",
+        )
+        if any(marker in lowered for marker in markers):
+            raise CatalogSessionConflictError(self._catalog_path, message[:500]) from exc
 
     def _ensure_writer_schema(self, connection: duckdb.DuckDBPyConnection) -> None:
         tables = self._table_names(connection)

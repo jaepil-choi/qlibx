@@ -43,13 +43,16 @@ class RebalanceThenFailStrategy:
 
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
-        view.account_feedback()  # type: ignore[attr-defined]
+        feedback = view.account_feedback()  # type: ignore[attr-defined]
         selected = "A000002" if account.positions else "A000001"
         return StrategyDraft(
             weights=(WeightEntry(instrument=selected, weight=1.0),),
             budget_mode=BudgetMode.FIXED,
             target_gross=1.0,
             decision_action=DecisionAction.TARGET,
+            path_dependent=True,
+            state_identity=f"{account.account_id}:v{account.version}",
+            feedback_cursor=str(feedback.next_cursor),
         )
 
 
@@ -69,12 +72,18 @@ class PublicDailyStrategy:
                 budget_mode=BudgetMode.FLEXIBLE,
                 target_gross=1.0,
                 decision_action=DecisionAction.HOLD,
+                path_dependent=True,
+                state_identity=f"{account.account_id}:v{account.version}",
+                feedback_cursor=str(feedback.next_cursor),
             )
         return StrategyDraft(
             weights=(WeightEntry(instrument="A000001", weight=1.0),),
             budget_mode=BudgetMode.FIXED,
             target_gross=1.0,
             decision_action=DecisionAction.TARGET,
+            path_dependent=True,
+            state_identity=f"{account.account_id}:v{account.version}",
+            feedback_cursor=str(feedback.next_cursor),
         )
 
 

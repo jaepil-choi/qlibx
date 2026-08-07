@@ -172,6 +172,19 @@ def strategy_accesses_are_path_dependent(
     return bool(state_accesses or feedback_accesses or performance_accesses or memory_accesses)
 
 
+class StrategyComputationError(ValueError):
+    """Raised by package Strategy operations for a typed computation failure."""
+
+    def __init__(self, code: str, context: dict[str, object]) -> None:
+        super().__init__(code)
+        self.code = code
+        self.context = context
+
+
+class StrategyPathDependenceError(ValueError):
+    """Raised when a draft declaration contradicts observed direct state access."""
+
+
 def validate_strategy_draft_path_dependence(
     draft: StrategyDraft,
     *,
@@ -189,13 +202,15 @@ def validate_strategy_draft_path_dependence(
         memory_accesses=memory_accesses,
     )
     if draft.path_dependent is not observed_direct:
-        raise ValueError(
+        raise StrategyPathDependenceError(
             "StrategyDraft.path_dependent does not match observed direct stateful access"
         )
     if not observed_direct and (
         draft.state_identity is not None or draft.feedback_cursor is not None
     ):
-        raise ValueError("direct state_identity and feedback_cursor require direct stateful access")
+        raise StrategyPathDependenceError(
+            "direct state_identity and feedback_cursor require direct stateful access"
+        )
     return observed_direct
 
 

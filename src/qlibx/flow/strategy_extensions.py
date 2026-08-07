@@ -57,6 +57,8 @@ from qlibx.operations import (
     StrategyArtifactRequirement,
     StrategyDraft,
     StrategyOperation,
+    StrategyPathDependenceError,
+    validate_strategy_draft_path_dependence,
 )
 
 STRATEGY_EXTENSION_REGISTRATION_CONTRACT = ArtifactContract(
@@ -230,9 +232,33 @@ class StrategyExtensionFlow:
             first_draft = contract.first.run(first_view)
             if not isinstance(first_draft, StrategyDraft):
                 raise TypeError("Strategy run must return StrategyDraft")
+            validate_strategy_draft_path_dependence(
+                first_draft,
+                state_accesses=first_view.state_accessed(),
+                feedback_accesses=first_view.feedback_accessed(),
+                performance_accesses=first_view.performance_accessed(),
+                memory_accesses=first_view.memory_accessed(),
+            )
             second_draft = contract.second.run(second_view)
             if not isinstance(second_draft, StrategyDraft):
                 raise TypeError("Strategy run must return StrategyDraft")
+            validate_strategy_draft_path_dependence(
+                second_draft,
+                state_accesses=second_view.state_accessed(),
+                feedback_accesses=second_view.feedback_accessed(),
+                performance_accesses=second_view.performance_accessed(),
+                memory_accesses=second_view.memory_accessed(),
+            )
+        except StrategyPathDependenceError as exc:
+            return self._failure(
+                request,
+                stage_path=f"{self.operation}.fixture.path_dependence",
+                code="STRATEGY_EXTENSION_PATH_DEPENDENCE_INCONSISTENT",
+                exception=exc,
+                retry=(
+                    "make StrategyDraft.path_dependent match direct fixture state access",
+                ),
+            )
         except ArtifactViewAccessError as exc:
             return self._failure(
                 request,

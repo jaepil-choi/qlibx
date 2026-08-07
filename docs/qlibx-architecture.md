@@ -2471,8 +2471,8 @@ encumbrance, borrow fee가 모두 명시되어야 한다. 이 경계는 특정 `
 ### G5 — `ensemble` 계약
 
 초안은 ensemble을 lineage와 package 폴더에만 두고 callable contract를 정의하지 않았다. 현행 §8은
-Ensemble을 `StrategyOperation`으로 정의한다. RequirementResolver가 compatible member Strategy result를
-typed artifact로 resolve하고 producer를 재실행하지 않는다.
+Ensemble을 `StrategyOperation`으로 정의한다. `StrategyArtifactResolver`가 member별 stable consumer role과 exact
+artifact ID/schema binding을 검증해 immutable projection을 `StrategyView`에 주입하고 producer를 재실행하지 않는다.
 
 ```python
 EnsembleStrategyOperation.run(view) -> StrategyDraft  # Flow가 StrategyResult로 승격
@@ -2496,12 +2496,17 @@ member를 결합하는 것 자체는 실행 회계와 무관하다.
 ### Current Strategy-composition readiness
 
 `UC-EXTENSION-002`로 project-local Strategy validation, registration-scoped payload model, typed artifact input,
-exact-ID research/daily 실행과 installed sample은 current support가 되었다. 다만
-`GAP-STRATEGY-COMPOSITION-001` 전체가 닫힌 것은 아니다. `StrategyResult:v1`은 한 producer의
-`state_identity`/`feedback_cursor`만 표현하고, current Ensemble special flow는 서로 다른 path-dependent state
-identity를 함께 쓰는 경우 거부한다. 따라서 여러 frozen Strategy result의 모든 Account/Memory source와 cursor를
-보존하는 composition은 M4 closure fixture가 통과하기 전까지 current support가 아니다. 기존 decision-intent
-replay/rerun fixture도 이 acceptance oracle을 대신하지 않는다.
+exact-ID research/daily 실행과 installed sample은 current support다. Library mechanism은 `strategy_result:v2`에서 현재
+invocation의 direct state와 consumed frozen result의 `source_state_lineage`를 분리한다. Flow는 Account, feedback,
+completed-performance와 Memory actual access로 direct path-dependence 선언을 검증하고, 실제 `StrategyView.artifact()`
+access만 immediate artifact edge와 transitive source state/cursor edge로 승격한다. Daily recovery와 Portfolio는 exact
+envelope version을 먼저 읽어 v1/v2를 dispatch하며 latest-compatible을 선택하지 않는다.
+
+Ensemble special backend load와 synthetic single-state identity는 제거되었다. Ensemble은 stable member role과 exact
+binding을 선언하고 `run(view)`에서 한 번 계산하며, 서로 다른 frozen source identity를 그대로 보존한다. 다만
+`GAP-STRATEGY-COMPOSITION-001`을 current support에서 닫으려면 M5 installed producer-consumer-current-Account vertical
+slice가 여전히 필요하다. 기존 decision-intent replay/rerun fixture나 source-checkout unit test는 이 installed
+acceptance oracle을 대신하지 않는다.
 
 ### 현재 남은 감사 action
 
@@ -2518,6 +2523,22 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 ---
 
 ## 17. 개정 이력
+
+### 2026-08-07 — StrategyResult v2 source-lineage migration
+
+**Version boundary.** Persisted v1 payload는 `StrategyResultV1` exact reader로 유지한다. 새 ResearchFlow success는
+`strategy_result:v2`를 publish하고, exact envelope metadata로 v1/v2 contract를 dispatch한다. 같은 logical identity의
+v1을 v2로 덮어쓰지 않으며 기존 artifact identity conflict가 append-only 경계를 지킨다.
+
+**Observed path dependence.** `StrategyDraft.path_dependent`는 이번 computation의 direct stateful access 선언이다.
+Flow와 local Strategy validation은 package-observed Account/feedback/completed-performance/Memory access와 선언을
+대조한다. 최종 result의 path dependence는 direct access 또는 inherited `source_state_lineage`로 결정하며,
+inherited-only consumer는 synthetic direct identity를 만들지 않는다.
+
+**Ensemble mechanism.** `EnsembleMemberSpec`의 exact schema/version과 artifact ID는 stable consumer role binding으로
+변환된다. `EnsembleStrategyOperation.run(view)`가 member를 typed input으로 읽고 한 번 계산한 `EnsembleDraft`에서
+Strategy result와 Ensemble evidence를 발행한다. Provenance를 복원할 수 없는 legacy path-dependent v1 composition은
+`STRATEGY_SOURCE_LINEAGE_INCOMPLETE`로 실패하지만 ordinary v1 recovery/Portfolio read는 유지한다.
 
 ### 2026-08-07 — Actual implementation sync and readiness correction
 

@@ -27,9 +27,10 @@ between source alpha state and the current downstream execution Account.
   the pure direct path-dependence rule.
 - `LocalArtifactBackend` exposes exact envelope metadata without selecting or decoding a payload.
 - `qlibx.flow.strategy_results` owns exact v1/v2 contract dispatch.
-- `ResearchFlow` will own actual-access lineage promotion and v2 publication.
-- `StrategyExtensionFlow` will apply the same direct path-dependence rule before registration.
-- `CompositionFlow` will translate Ensemble member IDs into typed roles and bindings.
+- `ResearchFlow` owns actual-access lineage promotion, dependency-key conflict checks, v2 publication,
+  and a package-owned typed computation-error boundary.
+- `StrategyExtensionFlow` applies the same direct path-dependence rule before registration.
+- `CompositionFlow` translates Ensemble member IDs into typed roles and bindings.
 - Daily and Portfolio remain consumers of exact stored evidence; inherited lineage never becomes
   current mutable Account or Memory authority.
 
@@ -47,45 +48,63 @@ between source alpha state and the current downstream execution Account.
 
 ## Validation evidence
 
-Completed during the version-reader foundation:
-
-Commit-scoped foundation subset: 32 passed in 30.91s.
+Version-reader and recovery checkpoints:
 
 ```text
-.venv/Scripts/python.exe -m pytest \
-  tests/test_strategy_results.py tests/test_evidence.py \
-  tests/test_strategy_artifact_inputs.py \
-  tests/acceptance/test_recovery_scenarios.py \
-  tests/test_public_daily.py tests/test_public_constraints.py \
-  -q -p no:cacheprovider --basetemp .agent/tmp/pytest-m4-version-readers
+foundation and exact-reader subsets: 53 passed in 220.89s
+commit-scoped foundation subset: 32 passed in 30.91s
+Daily and recovery subset: 21 passed in 178.73s
+```
 
-53 passed in 220.89s
+Promotion, extension-parity and Ensemble checkpoints:
+
+```text
+lineage and extension core: 33 passed in 30.91s
+generic and Ensemble paths: 31 passed in 47.30s
+M3 parity and Ensemble paths: 27 passed in 46.50s
+final typed-error and dependency-key subset: 29 passed in 17.39s
+```
+
+The first complete-suite run exposed nine test Strategies that read package-observed state while
+still declaring `path_dependent=False`. Their fixtures were corrected to state their real contract;
+production code did not add a compatibility fallback. The exact failed scenarios then passed 16
+checks. The final complete suite passed:
+
+```text
+UV_CACHE_DIR=D:\chljeffreyz\DevProjects\qlibx\.uv-cache-m4 \
+  uv run pytest -q --basetemp C:\tmp\qlibx-m4-final-full-20260807
+
+231 passed in 111.14s
 ```
 
 ```text
-.venv/Scripts/python.exe -m ruff check <M4 changed Python files>
+uv run ruff check .
 All checks passed
 
 git diff --check
 clean
+
+UV_CACHE_DIR=D:\chljeffreyz\DevProjects\qlibx\.uv-cache-m4 uv build
+Successfully built dist\qlibx-0.1.0.tar.gz
+Successfully built dist\qlibx-0.1.0-py3-none-any.whl
 ```
 
-Daily exact-version recovery checkpoint:
+Ruff emitted only the pre-existing access-denied warnings for ignored `.agent/tmp` pytest scratch
+directories. The build initially reproduced the managed-Windows default-cache access denial and a
+sandboxed network denial; the documented task-scoped ASCII cache plus approved network boundary
+completed the same build. Archive inspection found every changed production module in both wheel
+and sdist.
 
-```text
-.venv/Scripts/python.exe -m pytest \
-  tests/acceptance/test_recovery_scenarios.py tests/test_public_daily.py \
-  -q -p no:cacheprovider --basetemp .agent/tmp/pytest-m4-daily-recovery-commit
-
-21 passed in 178.73s
-```
-
-Final full-suite, build, wheel and installed smoke evidence will be appended before M4 completion.
+A fresh Python 3.12 environment installed only the built wheel. Outside the source checkout it
+published a legacy `strategy_result:v1`, consumed it through a typed Strategy artifact role,
+published `strategy_result:v2`, and consumed that exact v2 artifact through the migrated Ensemble
+path. The smoke completed with `wheel-smoke: v1-load -> v2-publish -> typed-ensemble passed`.
 
 ## Remaining limitations and follow-up
 
-- The version-safe reader foundation is complete, but ResearchFlow v2 promotion and Ensemble typed
-  member migration still remain in this implementation record.
-- `GAP-STRATEGY-COMPOSITION-001` remains open until M5 proves the installed producer-consumer-current
-  Account vertical slice.
-- Stored-signal CompositionFlow compatibility remains out of M4 scope.
+- `GAP-STRATEGY-COMPOSITION-001` remains open until M5 proves the full installed
+  producer-consumer-current Account execution slice. M4 proves the library mechanisms, not that
+  complete installed workflow.
+- Provenance-incomplete path-dependent v1 artifacts remain readable by recovery and Portfolio but
+  are intentionally rejected for compositional lineage promotion.
+- Stored-signal CompositionFlow compatibility remains unchanged and outside M4 scope.

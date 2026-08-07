@@ -3,33 +3,34 @@
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import Field, model_validator
 
+from qlibx.context import StrategyView
 from qlibx.data import ComponentRequirement, RegistrySnapshot
 from qlibx.errors import OperationOutcome, OutcomeStatus
-from qlibx.evidence import (
-    ArtifactEnvelope,
-    DependencyEdge,
-    LoadedArtifact,
-    LocalArtifactBackend,
-)
-from qlibx.flow.artifact_inputs import (
-    STORED_SIGNAL_CONTRACT,
-    STRATEGY_RESULT_V1_CONTRACT,
-)
-from qlibx.flow.artifact_inputs import (
-    STRATEGY_RESULT_CONTRACT as STRATEGY_RESULT_CONTRACT,
-)
+from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
+from qlibx.flow.artifact_inputs import STORED_SIGNAL_CONTRACT
 from qlibx.flow.failures import build_operation_error, publish_failed_outcome
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
+from qlibx.flow.strategy_results import (
+    STRATEGY_RESULT_CONTRACT as STRATEGY_RESULT_CONTRACT,
+)
+from qlibx.flow.strategy_results import (
+    STRATEGY_RESULT_V1_CONTRACT as STRATEGY_RESULT_V1_CONTRACT,
+)
 from qlibx.models import QlibxModel
 from qlibx.operations import (
     BudgetMode,
     DecisionAction,
     StoredSignalResult,
+    StrategyArtifactBinding,
+    StrategyArtifactRequirement,
+    StrategyComputationError,
     StrategyDraft,
     StrategyInvocation,
+    StrategyResult,
     StrategyResultV1,
     WeightEntry,
 )
@@ -44,6 +45,7 @@ class StoredSignalWeighting(StrEnum):
 class EnsembleMemberSpec(QlibxModel):
     artifact_id: str = Field(min_length=1)
     allocation: float = Field(gt=0)
+    artifact_schema_version: Literal[1, 2] = 2
 
 
 class EnsembleDefinition(QlibxModel):
@@ -71,18 +73,28 @@ class MemberContribution(QlibxModel):
     contribution: float
 
 
-class EnsembleEvidence(QlibxModel):
-    ensemble_schema_version: int = 1
-    invocation_id: str
-    strategy_id: str
-    result_artifact_id: str
+class EnsembleDraft(StrategyDraft):
+    member_artifact_ids: tuple[str, ...]
     contributions: tuple[MemberContribution, ...]
     gross_before_netting: float
     gross_after_netting: float
     net_exposure: float
     crossed_gross: float
     residual_budget: float
-    member_state_identities: tuple[str, ...]
+
+
+class EnsembleEvidence(QlibxModel):
+    ensemble_schema_version: Literal[2] = 2
+    invocation_id: str
+    strategy_id: str
+    result_artifact_id: str
+    member_artifact_ids: tuple[str, ...]
+    contributions: tuple[MemberContribution, ...]
+    gross_before_netting: float
+    gross_after_netting: float
+    net_exposure: float
+    crossed_gross: float
+    residual_budget: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,80 +104,53 @@ class EnsembleRunResult:
     evidence_artifact: ArtifactEnvelope
 
 
-class EnsembleCompatibilityError(ValueError):
-    def __init__(self, code: str, context: dict[str, object]) -> None:
-        super().__init__(code)
-        self.code = code
-        self.context = context
-
-
-@dataclass(frozen=True, slots=True)
-class _StoredMember:
-    spec: EnsembleMemberSpec
-    loaded: LoadedArtifact[StrategyResultV1]
-
-
-@dataclass(frozen=True, slots=True)
-class _EnsembleComputation:
-    draft: StrategyDraft
-    contributions: tuple[MemberContribution, ...]
-    gross_before: float
-    gross_after: float
-    net: float
+class EnsembleCompatibilityError(StrategyComputationError):
+    """Raised when typed member inputs cannot satisfy the Ensemble budget contract."""
 
 
 class EnsembleStrategyOperation:
-    """Pure Strategy operation over already-loaded immutable member results."""
+    """Pure Strategy operation over typed frozen member-result inputs."""
 
-    def __init__(
-        self,
-        definition: EnsembleDefinition,
-        members: tuple[_StoredMember, ...],
-    ) -> None:
+    def __init__(self, definition: EnsembleDefinition) -> None:
         self.strategy_id = definition.strategy_id
         self._definition = definition
-        self._members = members
-        self._state_identities = self._validated_state_identities()
-        self._computation = self._compute()
 
     def requirements(self) -> tuple[ComponentRequirement, ...]:
         return ()
 
-    def run(self, view: object) -> StrategyDraft:
-        del view
-        return self._computation.draft
-
-    def evidence(
-        self,
-        invocation: StrategyInvocation,
-        result_artifact_id: str,
-    ) -> EnsembleEvidence:
-        computation = self._computation
-        return EnsembleEvidence(
-            invocation_id=invocation.invocation_id,
-            strategy_id=self.strategy_id,
-            result_artifact_id=result_artifact_id,
-            contributions=computation.contributions,
-            gross_before_netting=computation.gross_before,
-            gross_after_netting=computation.gross_after,
-            net_exposure=computation.net,
-            crossed_gross=computation.gross_before - computation.gross_after,
-            residual_budget=self._definition.target_gross - computation.gross_after,
-            member_state_identities=self._state_identities,
+    def artifact_requirements(self) -> tuple[StrategyArtifactRequirement, ...]:
+        return tuple(
+            StrategyArtifactRequirement(
+                requirement_id=self._requirement_id(index),
+                consumer_role=self._consumer_role(index),
+                artifact_type="strategy_result",
+                artifact_schema_version=member.artifact_schema_version,
+            )
+            for index, member in enumerate(self._definition.members)
         )
 
-    def _compute(self) -> _EnsembleComputation:
+    def run(self, view: StrategyView) -> EnsembleDraft:
+        members = tuple(
+            (
+                member,
+                view.artifact(
+                    self._consumer_role(index),
+                    StrategyResultV1 if member.artifact_schema_version == 1 else StrategyResult,
+                ),
+            )
+            for index, member in enumerate(self._definition.members)
+        )
         contributions = tuple(
             MemberContribution(
                 instrument=weight.instrument,
-                member_artifact_id=member.loaded.envelope.artifact_id,
-                member_strategy_id=member.loaded.payload.strategy_id,
+                member_artifact_id=member.artifact_id,
+                member_strategy_id=payload.strategy_id,
                 member_weight=weight.weight,
-                allocation=member.spec.allocation,
-                contribution=weight.weight * member.spec.allocation,
+                allocation=member.allocation,
+                contribution=weight.weight * member.allocation,
             )
-            for member in self._members
-            for weight in member.loaded.payload.weights
+            for member, payload in members
+            for weight in payload.weights
         )
         netted: dict[str, float] = {}
         for item in contributions:
@@ -185,13 +170,10 @@ class EnsembleStrategyOperation:
                     "target_gross": self._definition.target_gross,
                 },
             )
-        if (
-            self._definition.budget_mode is BudgetMode.FIXED
-            and not math.isclose(
-                gross_after,
-                self._definition.target_gross,
-                abs_tol=1e-10,
-            )
+        if self._definition.budget_mode is BudgetMode.FIXED and not math.isclose(
+            gross_after,
+            self._definition.target_gross,
+            abs_tol=1e-10,
         ):
             raise EnsembleCompatibilityError(
                 "ENSEMBLE_FIXED_BUDGET_INCOMPATIBLE",
@@ -200,16 +182,8 @@ class EnsembleStrategyOperation:
                     "target_gross": self._definition.target_gross,
                 },
             )
-        state_identity = self._state_identities[0] if self._state_identities else None
-        cursor = next(
-            (
-                member.loaded.payload.feedback_cursor
-                for member in self._members
-                if member.loaded.payload.path_dependent
-            ),
-            None,
-        )
-        draft = StrategyDraft(
+        net = sum(item.weight for item in weights)
+        return EnsembleDraft(
             weights=weights,
             budget_mode=self._definition.budget_mode,
             target_gross=self._definition.target_gross,
@@ -218,44 +192,42 @@ class EnsembleStrategyOperation:
                 f"member_gross={gross_before:.12g}",
                 f"crossed_gross={gross_before - gross_after:.12g}",
             ),
-            path_dependent=bool(self._state_identities),
-            state_identity=state_identity,
-            feedback_cursor=cursor,
-        )
-        return _EnsembleComputation(
-            draft=draft,
+            member_artifact_ids=tuple(member.artifact_id for member, _ in members),
             contributions=contributions,
-            gross_before=gross_before,
-            gross_after=gross_after,
-            net=sum(item.weight for item in weights),
+            gross_before_netting=gross_before,
+            gross_after_netting=gross_after,
+            net_exposure=net,
+            crossed_gross=gross_before - gross_after,
+            residual_budget=self._definition.target_gross - gross_after,
         )
 
-    def _validated_state_identities(self) -> tuple[str, ...]:
-        path_members = tuple(
-            member.loaded.payload
-            for member in self._members
-            if member.loaded.payload.path_dependent
+    @staticmethod
+    def evidence(
+        invocation: StrategyInvocation,
+        strategy_id: str,
+        result_artifact_id: str,
+        draft: EnsembleDraft,
+    ) -> EnsembleEvidence:
+        return EnsembleEvidence(
+            invocation_id=invocation.invocation_id,
+            strategy_id=strategy_id,
+            result_artifact_id=result_artifact_id,
+            member_artifact_ids=draft.member_artifact_ids,
+            contributions=draft.contributions,
+            gross_before_netting=draft.gross_before_netting,
+            gross_after_netting=draft.gross_after_netting,
+            net_exposure=draft.net_exposure,
+            crossed_gross=draft.crossed_gross,
+            residual_budget=draft.residual_budget,
         )
-        identities = tuple(
-            sorted(
-                {
-                    (
-                        f"{member.state_identity}:cursor={member.feedback_cursor}:"
-                        + ",".join(
-                            f"{state.account_id}:v{state.version}:c{state.feedback_cursor}"
-                            for state in member.state_accesses
-                        )
-                    )
-                    for member in path_members
-                }
-            )
-        )
-        if len(identities) > 1:
-            raise EnsembleCompatibilityError(
-                "ENSEMBLE_STATE_INCOMPATIBLE",
-                {"member_state_identities": list(identities)},
-            )
-        return identities
+
+    @staticmethod
+    def _requirement_id(index: int) -> str:
+        return f"ensemble.member.{index:03d}"
+
+    @staticmethod
+    def _consumer_role(index: int) -> str:
+        return f"ensemble_member_{index:03d}"
 
 
 class StoredSignalStrategyOperation:
@@ -319,46 +291,58 @@ class CompositionFlow:
         definition: EnsembleDefinition,
         invocation: StrategyInvocation,
     ) -> OperationOutcome:
-        members: list[_StoredMember] = []
-        for spec in definition.members:
-            loaded = self._artifacts.load_model(
-                spec.artifact_id,
-                STRATEGY_RESULT_V1_CONTRACT,
+        derived_bindings = tuple(
+            StrategyArtifactBinding(
+                consumer_role=EnsembleStrategyOperation._consumer_role(index),
+                artifact_id=member.artifact_id,
             )
-            if loaded.status is not OutcomeStatus.COMPLETE:
-                return loaded
-            members.append(_StoredMember(spec=spec, loaded=loaded.result))
-        try:
-            operation = EnsembleStrategyOperation(definition, tuple(members))
-        except EnsembleCompatibilityError as exc:
-            return self._failure(invocation, exc.code, exc.context)
-        dependencies = tuple(
-            DependencyEdge(
-                dependency_kind="artifact",
-                dependency_id=member.loaded.envelope.artifact_id,
-                consumer_role="ensemble_member",
+            for index, member in enumerate(definition.members)
+        )
+        if invocation.artifact_bindings and invocation.artifact_bindings != derived_bindings:
+            return self._failure(
+                invocation,
+                "ENSEMBLE_ARTIFACT_BINDINGS_CONFLICT",
+                {
+                    "expected_bindings": tuple(
+                        item.model_dump(mode="json") for item in derived_bindings
+                    ),
+                    "actual_bindings": tuple(
+                        item.model_dump(mode="json") for item in invocation.artifact_bindings
+                    ),
+                },
             )
-            for member in members
-        )
-        combined = self._research.invoke_strategy(
-            operation,
-            invocation,
-            additional_dependencies=dependencies,
-        )
+        selected_invocation = invocation.model_copy(update={"artifact_bindings": derived_bindings})
+        operation = EnsembleStrategyOperation(definition)
+        combined = self._research.invoke_strategy(operation, selected_invocation)
         if combined.status is not OutcomeStatus.COMPLETE:
             return combined
         strategy = combined.result
-        if not isinstance(strategy, StrategyRunResult):
+        if not isinstance(strategy, StrategyRunResult) or not isinstance(
+            strategy.computed_draft,
+            EnsembleDraft,
+        ):
             return self._failure(invocation, "ENSEMBLE_RESULT_INVALID", {})
-        evidence = operation.evidence(invocation, strategy.artifact.artifact_id)
+        draft = strategy.computed_draft
+        evidence = operation.evidence(
+            invocation,
+            definition.strategy_id,
+            strategy.artifact.artifact_id,
+            draft,
+        )
+        member_dependencies = tuple(
+            edge
+            for edge in strategy.artifact.dependencies
+            if edge.dependency_kind == "artifact"
+            and edge.consumer_role.startswith("ensemble_member_")
+        )
         publication = self._artifacts.publish_model(
             logical_identity=f"ensemble-evidence:{invocation.invocation_id}",
             artifact_type="ensemble_evidence",
-            artifact_schema_version=1,
+            artifact_schema_version=2,
             producer_id=definition.strategy_id,
             payload=evidence,
             dependencies=(
-                *dependencies,
+                *member_dependencies,
                 DependencyEdge(
                     dependency_kind="artifact",
                     dependency_id=strategy.artifact.artifact_id,
@@ -418,9 +402,7 @@ class CompositionFlow:
             idempotency_identity=invocation.invocation_id,
             error_identity_seed=f"{invocation.invocation_id}:{code}",
             context=context,
-            retry_preconditions=(
-                "select compatible stored member results or a flexible budget",
-            ),
+            retry_preconditions=("select compatible stored member results or a flexible budget",),
         )
         return publish_failed_outcome(
             self._artifacts,

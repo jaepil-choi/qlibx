@@ -1,5 +1,7 @@
 """Orchestration for PIT-safe direct Strategy research."""
 
+from pydantic import Field
+
 from qlibx.context import (
     AccountFeedbackState,
     AccountState,
@@ -20,21 +22,32 @@ from qlibx.flow.failures import (
     publish_failed_errors,
     publish_failed_outcome,
 )
-from qlibx.flow.strategy_results import STRATEGY_RESULT_V1_CONTRACT
+from qlibx.flow.strategy_results import (
+    STRATEGY_RESULT_CONTRACT,
+    StrategySourceLineageError,
+    canonicalize_dependencies,
+    collect_strategy_source_lineage,
+    source_lineage_dependencies,
+)
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.operations import (
     StrategyArtifactRequirement,
+    StrategyComputationError,
+    StrategyDraft,
     StrategyInvocation,
     StrategyOperation,
+    StrategyPathDependenceError,
     StrategyResult,
     StrategyResultV1,
+    validate_strategy_draft_path_dependence,
 )
 
 
 class StrategyRunResult(QlibxModel):
     result: StrategyResultV1 | StrategyResult
     artifact: ArtifactEnvelope
+    computed_draft: StrategyDraft | None = Field(default=None, exclude=True, repr=False)
 
 
 class ResearchFlow:
@@ -54,9 +67,7 @@ class ResearchFlow:
         self._artifacts = artifacts
         self._resolver = resolver or RequirementResolver()
         self._store = store or ObservationStore()
-        self._artifact_contracts = (
-            artifact_contracts or StrategyArtifactContractRegistry.built_in()
-        )
+        self._artifact_contracts = artifact_contracts or StrategyArtifactContractRegistry.built_in()
         self._strategy_dependencies = strategy_dependencies
 
     def invoke_strategy(
@@ -133,6 +144,8 @@ class ResearchFlow:
         )
         try:
             draft = strategy.run(view)
+            if not isinstance(draft, StrategyDraft):
+                raise TypeError("Strategy run must return StrategyDraft")
         except ArtifactViewAccessError as exc:
             return self._failed_invocation(
                 invocation,
@@ -141,6 +154,22 @@ class ResearchFlow:
                 exc,
                 requirement_id=exc.context.get("requirement_id"),
                 expected=exc.context.get("expected_contract"),
+                error_context=exc.context,
+                accesses=(
+                    *view.accessed(),
+                    *view.state_accessed(),
+                    *view.feedback_accessed(),
+                    *view.performance_accessed(),
+                    *view.memory_accessed(),
+                    *view.artifact_accessed(),
+                ),
+            )
+        except StrategyComputationError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.compute",
+                exc.code,
+                exc,
                 error_context=exc.context,
                 accesses=(
                     *view.accessed(),
@@ -167,8 +196,51 @@ class ResearchFlow:
                 ),
             )
 
+        accesses = view.accessed()
+        state_accesses = view.state_accessed()
+        feedback_accesses = view.feedback_accessed()
+        performance_accesses = view.performance_accessed()
+        memory_accesses = view.memory_accessed()
+        artifact_accesses = view.artifact_accessed()
+        try:
+            observed_direct = validate_strategy_draft_path_dependence(
+                draft,
+                state_accesses=state_accesses,
+                feedback_accesses=feedback_accesses,
+                performance_accesses=performance_accesses,
+                memory_accesses=memory_accesses,
+            )
+            source_state_lineage = collect_strategy_source_lineage(
+                artifact_resolution.projections,
+                artifact_accesses,
+            )
+        except StrategyPathDependenceError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.path_dependence",
+                "STRATEGY_PATH_DEPENDENCE_INCONSISTENT",
+                exc,
+                accesses=(
+                    *accesses,
+                    *state_accesses,
+                    *feedback_accesses,
+                    *performance_accesses,
+                    *memory_accesses,
+                    *artifact_accesses,
+                ),
+            )
+        except StrategySourceLineageError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.source_lineage",
+                exc.code,
+                exc,
+                error_context=exc.context,
+                accesses=artifact_accesses,
+            )
+
         invested_gross = sum(abs(entry.weight) for entry in draft.weights)
-        result = StrategyResultV1(
+        result = StrategyResult(
             invocation_id=invocation.invocation_id,
             strategy_id=strategy.strategy_id,
             evaluation_time=invocation.evaluation_time,
@@ -179,17 +251,18 @@ class ResearchFlow:
             net_exposure=sum(entry.weight for entry in draft.weights),
             residual_budget=draft.target_gross - invested_gross,
             decision_action=draft.decision_action,
-            path_dependent=draft.path_dependent,
-            state_identity=draft.state_identity,
-            feedback_cursor=draft.feedback_cursor,
+            path_dependent=observed_direct or bool(source_state_lineage),
+            state_identity=draft.state_identity if observed_direct else None,
+            feedback_cursor=draft.feedback_cursor if observed_direct else None,
             proposed_memory=draft.proposed_memory,
             expected_memory_version=draft.expected_memory_version,
             diagnostics=draft.diagnostics,
-            accesses=view.accessed(),
-            state_accesses=view.state_accessed(),
-            feedback_accesses=view.feedback_accessed(),
-            performance_accesses=view.performance_accessed(),
-            memory_accesses=view.memory_accessed(),
+            accesses=accesses,
+            state_accesses=state_accesses,
+            feedback_accesses=feedback_accesses,
+            performance_accesses=performance_accesses,
+            memory_accesses=memory_accesses,
+            source_state_lineage=source_state_lineage,
         )
         dependencies = (
             *(
@@ -268,15 +341,27 @@ class ResearchFlow:
                     consumer_role=access.consumer_role,
                     compatibility_fingerprint=access.content_hash,
                 )
-                for access in view.artifact_accessed()
+                for access in artifact_accesses
             ),
+            *source_lineage_dependencies(source_state_lineage),
             *self._strategy_dependencies,
             *additional_dependencies,
         )
+        try:
+            dependencies = canonicalize_dependencies(dependencies)
+        except StrategySourceLineageError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.dependencies",
+                exc.code,
+                exc,
+                error_context=exc.context,
+                accesses=artifact_accesses,
+            )
         publication = self._artifacts.publish_model(
             logical_identity=f"strategy:{invocation.invocation_id}",
-            artifact_type=STRATEGY_RESULT_V1_CONTRACT.artifact_type,
-            artifact_schema_version=STRATEGY_RESULT_V1_CONTRACT.artifact_schema_version,
+            artifact_type=STRATEGY_RESULT_CONTRACT.artifact_type,
+            artifact_schema_version=STRATEGY_RESULT_CONTRACT.artifact_schema_version,
             producer_id=strategy.strategy_id,
             payload=result,
             dependencies=dependencies,
@@ -285,7 +370,11 @@ class ResearchFlow:
             return publication
         return OperationOutcome(
             status=OutcomeStatus.COMPLETE,
-            result=StrategyRunResult(result=result, artifact=publication.result),
+            result=StrategyRunResult(
+                result=result,
+                artifact=publication.result,
+                computed_draft=draft,
+            ),
         )
 
     def _failed_invocation(
@@ -314,9 +403,7 @@ class ResearchFlow:
             },
             retry_preconditions=("correct the Strategy contract or selected input",),
             idempotency_identity=invocation.invocation_id,
-            error_identity_seed=(
-                f"{invocation.invocation_id}:{stage_path}:{error_code}"
-            ),
+            error_identity_seed=(f"{invocation.invocation_id}:{stage_path}:{error_code}"),
         )
         return publish_failed_outcome(self._artifacts, error)
 

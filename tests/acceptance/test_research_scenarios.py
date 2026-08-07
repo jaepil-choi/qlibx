@@ -660,8 +660,12 @@ def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
     )
 
     assert ensemble.status is OutcomeStatus.COMPLETE
-    assert operation_runs == 1
+    assert operation_runs == 2  # one successful and one fixed-budget-rejection computation
     assert ensemble.result.strategy.result.weights == ()
+    assert ensemble.result.evidence.ensemble_schema_version == 2
+    assert ensemble.result.evidence.member_artifact_ids == tuple(
+        item.artifact_id for item in member_specs
+    )
     assert ensemble.result.evidence.gross_before_netting == 1
     assert ensemble.result.evidence.gross_after_netting == 0
     assert ensemble.result.evidence.crossed_gross == 1
@@ -671,7 +675,7 @@ def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
     assert {
         edge.dependency_id
         for edge in ensemble.result.strategy.artifact.dependencies
-        if edge.consumer_role == "ensemble_member"
+        if edge.consumer_role.startswith("ensemble_member_")
     } == {item.artifact_id for item in member_specs}
 
 

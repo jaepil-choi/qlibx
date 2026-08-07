@@ -67,12 +67,15 @@ class InitialMemoryTargetStrategy(TargetStrategy):
 
     def run(self, view):
         memory = view.memory_snapshot()
-        view.account_snapshot()
+        account = view.account_snapshot()
         return StrategyDraft(
             weights=(WeightEntry(instrument="A005930", weight=1.0),),
             budget_mode=BudgetMode.FIXED,
             target_gross=1.0,
             decision_action=DecisionAction.TARGET,
+            path_dependent=True,
+            state_identity=f"{account.account_id}:v{account.version}",
+            feedback_cursor=str(account.feedback_cursor),
             proposed_memory={"initialized": True},
             expected_memory_version=memory.version,
         )
@@ -90,13 +93,16 @@ class RepeatedMemoryHoldStrategy:
     def run(self, view):
         self.calls += 1
         memory = view.memory_snapshot()
-        view.account_snapshot()
-        view.account_feedback()
+        account = view.account_snapshot()
+        feedback = view.account_feedback()
         return StrategyDraft(
             weights=(),
             budget_mode=BudgetMode.FLEXIBLE,
             target_gross=1.0,
             decision_action=DecisionAction.HOLD,
+            path_dependent=True,
+            state_identity=f"{account.account_id}:v{account.version}",
+            feedback_cursor=str(feedback.next_cursor),
             proposed_memory={"calls": self.calls},
             expected_memory_version=memory.version,
         )

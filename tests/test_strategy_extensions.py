@@ -608,6 +608,32 @@ def test_stateful_validation_requires_and_uses_exact_frozen_state(
     )
 
 
+def test_stateful_extension_rejects_false_path_declaration(tmp_path: Path) -> None:
+    project = project_with_market(tmp_path)
+    false_path = STATEFUL_MODULE.replace("project.stateful", "project.false-path").replace(
+        "path_dependent=True",
+        "path_dependent=False",
+    )
+    write_module(project, "false_path.py", false_path)
+    checkpoint_id, performance_id = publish_state_fixture(project)
+
+    outcome = flow(project).validate_local(
+        request(
+            "project.false-path",
+            "false_path.py",
+            invocation_id="false-path",
+            account_checkpoint_artifact_id=checkpoint_id,
+            session_performance_artifact_id=performance_id,
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == (
+        "STRATEGY_EXTENSION_PATH_DEPENDENCE_INCONSISTENT"
+    )
+    assert flow(project).registered() == ()
+
+
 def test_exact_registration_executes_through_public_facade(tmp_path: Path) -> None:
     project = project_with_market(tmp_path)
     write_module(project, "valid.py", VALID_MODULE)

@@ -62,6 +62,10 @@ from qlibx.flow.recovery import (
     SimulationRecoveryPoint,
 )
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
+from qlibx.flow.strategy_results import (
+    StrategyResultPayload,
+    load_strategy_result,
+)
 from qlibx.kernel import BacktestClock, Event
 from qlibx.kernel.clock import require_aware
 from qlibx.models import QlibxModel
@@ -71,6 +75,7 @@ from qlibx.operations import (
     StrategyInvocation,
     StrategyOperation,
     StrategyResult,
+    StrategyResultV1,
 )
 
 DECISION_PRIORITY = 0
@@ -200,11 +205,6 @@ DECISION_INTENT_CONTRACT = ArtifactContract(
     payload_model=DecisionIntent,
 )
 
-STRATEGY_RESULT_RECOVERY_CONTRACT = ArtifactContract(
-    artifact_type="strategy_result",
-    artifact_schema_version=1,
-    payload_model=StrategyResult,
-)
 
 
 class DailyExecutionProfile(QlibxModel):
@@ -255,7 +255,7 @@ class DailyRunRequest(QlibxModel):
 
 @dataclass(frozen=True, slots=True)
 class DailyRunResult:
-    strategy_results: tuple[StrategyResult, ...]
+    strategy_results: tuple[StrategyResultPayload, ...]
     decision_intents: tuple[DecisionIntent, ...]
     executions: tuple[ExecutionEvidence, ...]
     marks: tuple[MarkEvidence, ...]
@@ -271,7 +271,7 @@ class DailyRunResult:
 class _PendingExecution:
     intent: DecisionIntent
     intent_artifact: ArtifactEnvelope
-    strategy_result: StrategyResult | None = None
+    strategy_result: StrategyResultPayload | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,7 +418,7 @@ class DailyExecutionFlow:
         self._request: DailyRunRequest | None = None
         self._strategy: StrategyOperation | None = None
         self._executor: NextSessionCloseExecutor | None = None
-        self._strategy_results: list[StrategyResult] = []
+        self._strategy_results: list[StrategyResultPayload] = []
         self._intents: list[DecisionIntent] = []
         self._executions: list[ExecutionEvidence] = []
         self._marks: list[MarkEvidence] = []
@@ -1401,7 +1401,7 @@ class DailyExecutionFlow:
     def _plan_memory(
         self,
         event: Event,
-        result: StrategyResult,
+        result: StrategyResultPayload,
         source_artifact_id: str,
     ) -> _MemoryPlan | None:
         assert self._request is not None
@@ -1529,7 +1529,7 @@ class DailyExecutionFlow:
     @staticmethod
     def _memory_dependencies(
         plan: _MemoryPlan,
-        result: StrategyResult,
+        result: StrategyResultPayload,
     ) -> tuple[DependencyEdge, ...]:
         return (
             DependencyEdge(
@@ -1555,7 +1555,7 @@ class DailyExecutionFlow:
     def _memory_recovery_publication(
         self,
         plan: _MemoryPlan,
-        result: StrategyResult,
+        result: StrategyResultPayload,
     ) -> RecoveryPublication:
         assert self._request is not None
         return self._recovery_publication(
@@ -1573,7 +1573,7 @@ class DailyExecutionFlow:
         self,
         event: Event,
         plan: _MemoryPlan,
-        result: StrategyResult,
+        result: StrategyResultPayload,
         *,
         store: StrategyMemoryStore,
         publish: bool,
@@ -1819,9 +1819,11 @@ class DailyExecutionFlow:
                 return
             strategy_result = None
             if pending.commit_strategy_memory:
-                loaded_strategy = self._artifacts.load_model(
+                loaded_strategy = load_strategy_result(
+                    self._artifacts,
                     intent.strategy_artifact_id,
-                    STRATEGY_RESULT_RECOVERY_CONTRACT,
+                    operation="simulation.resume",
+                    idempotency_identity=self._request.run_id,
                 )
                 if loaded_strategy.status is not OutcomeStatus.COMPLETE:
                     self._errors.extend(loaded_strategy.errors)
@@ -1896,11 +1898,6 @@ class DailyExecutionFlow:
     def _hydrate_run_evidence(self) -> None:
         assert self._request is not None
         contracts: dict[str, ArtifactContract[QlibxModel]] = {
-            "strategy_result": ArtifactContract(
-                artifact_type="strategy_result",
-                artifact_schema_version=1,
-                payload_model=StrategyResult,
-            ),
             "decision_intent": DECISION_INTENT_CONTRACT,
             "execution_result": ArtifactContract(
                 artifact_type="execution_result",
@@ -1933,9 +1930,12 @@ class DailyExecutionFlow:
             envelope
             for envelope in self._artifacts.list_envelopes()
             if marker in envelope.logical_identity
-            and envelope.artifact_type in contracts
+            and (
+                envelope.artifact_type == "strategy_result"
+                or envelope.artifact_type in contracts
+            )
         )
-        strategy_results: dict[str, StrategyResult] = {
+        strategy_results: dict[str, StrategyResultPayload] = {
             item.invocation_id: item for item in self._strategy_results
         }
         intents: dict[str, DecisionIntent] = {
@@ -1958,16 +1958,25 @@ class DailyExecutionFlow:
         }
         published = {item.artifact_id: item for item in self._published}
         for envelope in envelopes:
-            loaded = self._artifacts.load_model(
-                envelope.artifact_id,
-                contracts[envelope.artifact_type],
-            )
+            if envelope.artifact_type == "strategy_result":
+                loaded = load_strategy_result(
+                    self._artifacts,
+                    envelope.artifact_id,
+                    envelope=envelope,
+                    operation="simulation.resume",
+                    idempotency_identity=self._request.run_id,
+                )
+            else:
+                loaded = self._artifacts.load_model(
+                    envelope.artifact_id,
+                    contracts[envelope.artifact_type],
+                )
             if loaded.status is not OutcomeStatus.COMPLETE:
                 self._errors.extend(loaded.errors)
                 return
             payload = loaded.result.payload
             published[envelope.artifact_id] = envelope
-            if isinstance(payload, StrategyResult):
+            if isinstance(payload, (StrategyResultV1, StrategyResult)):
                 strategy_results[payload.invocation_id] = payload
             elif isinstance(payload, DecisionIntent):
                 intents[payload.decision_id] = payload

@@ -70,6 +70,16 @@ git diff --check
 clean
 ```
 
+Daily exact-version recovery checkpoint:
+
+```text
+.venv/Scripts/python.exe -m pytest \
+  tests/acceptance/test_recovery_scenarios.py tests/test_public_daily.py \
+  -q -p no:cacheprovider --basetemp .agent/tmp/pytest-m4-daily-recovery-commit
+
+21 passed in 178.73s
+```
+
 Final full-suite, build, wheel and installed smoke evidence will be appended before M4 completion.
 
 ## Remaining limitations and follow-up

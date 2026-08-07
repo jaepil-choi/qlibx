@@ -1,5 +1,6 @@
 """Stored-result analysis values and presentation-only renderers."""
 
+
 from qlibx.analysis.results import (
     AnalysisError,
     AnalysisMetric,
@@ -23,6 +24,13 @@ from qlibx.analysis.results import (
     render_analysis,
     values_fingerprint,
 )
+from qlibx.analysis.sessions import (
+    SessionExecutionInput,
+    SessionPerformanceEvidence,
+    SessionPerformanceInput,
+    SessionPerformanceRequest,
+    compute_session_performance,
+)
 
 __all__ = [
     "AnalysisError",
@@ -36,6 +44,10 @@ __all__ = [
     "RendererKind",
     "ReportRequest",
     "ReportResult",
+    "SessionExecutionInput",
+    "SessionPerformanceEvidence",
+    "SessionPerformanceInput",
+    "SessionPerformanceRequest",
     "SignalAnalysisInput",
     "SignalAnalysisRequest",
     "SignalValue",
@@ -44,6 +56,7 @@ __all__ = [
     "analyze_monitoring",
     "analyze_signal",
     "analyze_simulation",
+    "compute_session_performance",
     "render_analysis",
     "values_fingerprint",
 ]

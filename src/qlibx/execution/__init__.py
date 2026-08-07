@@ -17,6 +17,15 @@ from qlibx.execution.instruments import (
     IndexInstrument,
     StockInstrument,
 )
+from qlibx.execution.sizing import (
+    SessionSizing,
+    SessionSizingInput,
+    SessionSizingRequest,
+    SizingError,
+    SizingPrice,
+    SizingTarget,
+    size_session_orders,
+)
 
 __all__ = [
     "CostRule",
@@ -30,6 +39,13 @@ __all__ = [
     "MarketQuote",
     "MatchBatchResult",
     "Order",
+    "SessionSizing",
+    "SessionSizingInput",
+    "SessionSizingRequest",
     "Side",
+    "SizingError",
+    "SizingPrice",
+    "SizingTarget",
     "StockInstrument",
+    "size_session_orders",
 ]

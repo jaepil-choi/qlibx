@@ -20,6 +20,14 @@ from qlibx.account import (
     MemorySnapshot,
     StrategyMemoryStore,
 )
+from qlibx.analysis import (
+    AnalysisError,
+    SessionExecutionInput,
+    SessionPerformanceEvidence,
+    SessionPerformanceInput,
+    SessionPerformanceRequest,
+    compute_session_performance,
+)
 from qlibx.context import StateAccessRecord, StateHolding, ViewGate
 from qlibx.data import (
     ComponentRequirement,
@@ -35,7 +43,17 @@ from qlibx.evidence import (
     DependencyEdge,
     LocalArtifactBackend,
 )
-from qlibx.execution import FillDiagnostic, KrxExchange, MarketQuote, Order
+from qlibx.execution import (
+    FillDiagnostic,
+    KrxExchange,
+    MarketQuote,
+    SessionSizingInput,
+    SessionSizingRequest,
+    SizingError,
+    SizingPrice,
+    SizingTarget,
+    size_session_orders,
+)
 from qlibx.flow.recovery import (
     SIMULATION_RECOVERY_POINT_CONTRACT,
     PendingExecutionRecovery,
@@ -138,66 +156,6 @@ class MarkEvidence(QlibxModel):
     account_after: StateAccessRecord
 
 
-class SessionPerformanceEvidence(QlibxModel):
-    performance_schema_version: Literal[1] = 1
-    event_id: str
-    event_time: datetime
-    account_id: str
-    source_mark_event_id: str
-    source_execution_event_ids: tuple[str, ...]
-    opening_account_version: int = Field(ge=0)
-    closing_account_version: int = Field(ge=0)
-    feedback_cursor: int = Field(ge=0)
-    opening_nav: float = Field(ge=0)
-    closing_nav: float = Field(ge=0)
-    closing_cash: float
-    trade_value: float = Field(ge=0)
-    transaction_cost: float = Field(ge=0)
-    turnover: float | None
-    transaction_cost_rate: float | None
-    gross_return: float | None
-    portfolio_return: float | None
-
-    @model_validator(mode="after")
-    def validate_reconciliation(self) -> "SessionPerformanceEvidence":
-        ratios = (
-            self.turnover,
-            self.transaction_cost_rate,
-            self.gross_return,
-            self.portfolio_return,
-        )
-        if self.opening_nav == 0:
-            if any(value is not None for value in ratios):
-                raise ValueError("zero opening NAV requires undefined return ratios")
-            return self
-        if any(value is None or not math.isfinite(value) for value in ratios):
-            raise ValueError("positive opening NAV requires finite return ratios")
-        expected_net = self.closing_nav / self.opening_nav - 1
-        expected_cost = self.transaction_cost / self.opening_nav
-        expected_turnover = self.trade_value / self.opening_nav
-        assert self.portfolio_return is not None
-        assert self.transaction_cost_rate is not None
-        assert self.gross_return is not None
-        assert self.turnover is not None
-        if not math.isclose(self.portfolio_return, expected_net, rel_tol=0, abs_tol=1e-12):
-            raise ValueError("portfolio return does not reconcile to NAV")
-        if not math.isclose(
-            self.transaction_cost_rate,
-            expected_cost,
-            rel_tol=0,
-            abs_tol=1e-12,
-        ):
-            raise ValueError("transaction cost rate does not reconcile")
-        if not math.isclose(self.turnover, expected_turnover, rel_tol=0, abs_tol=1e-12):
-            raise ValueError("turnover does not reconcile")
-        if not math.isclose(
-            self.gross_return - self.transaction_cost_rate,
-            self.portfolio_return,
-            rel_tol=0,
-            abs_tol=1e-12,
-        ):
-            raise ValueError("gross and net return do not reconcile")
-        return self
 
 
 class MonitorEvidence(QlibxModel):
@@ -205,6 +163,7 @@ class MonitorEvidence(QlibxModel):
     event_time: datetime
     account: StateAccessRecord
     account_version_after_callback: int = Field(ge=0)
+    session_performance_status: Literal["published", "skipped_missing_mark"] = "published"
 
 
 class MemoryCommitEvidence(QlibxModel):
@@ -909,46 +868,39 @@ class DailyExecutionFlow:
                 if math.isfinite(float(getattr(row, self._profile.volume_role)))
                 and float(getattr(row, self._profile.volume_role)) >= 0
             }
-        target_weights = {
-            target.instrument_id: target.weight for target in pending.intent.targets
-        }
-        required_instruments = sorted(set(target_weights) | set(before.holdings()))
-        missing = tuple(
-            instrument for instrument in required_instruments if instrument not in prices
-        )
-        if missing:
+        try:
+            sizing = size_session_orders(
+                SessionSizingRequest(
+                    session_date=session_date,
+                    sizing_price_role=self._profile.execution_price_role,
+                    targets=tuple(
+                        SizingTarget(
+                            instrument_id=target.instrument_id,
+                            weight=target.weight,
+                        )
+                        for target in pending.intent.targets
+                    ),
+                ),
+                SessionSizingInput(
+                    account_state=_state(before),
+                    prices=tuple(
+                        SizingPrice(instrument_id=instrument, price=price)
+                        for instrument, price in prices.items()
+                    ),
+                ),
+            )
+        except SizingError as exc:
             self._fail(
                 event,
                 "execution",
-                "EXECUTION_SESSION_PRICE_MISSING",
-                context={"session": str(session_date), "instruments": list(missing[:20])},
+                exc.code,
+                context=exc.context,
             )
             return
-
-        orders: list[Order] = []
+        orders = sizing.orders
+        required_instruments = sizing.required_instruments
+        sizing_nav = sizing.sizing_nav
         holdings = before.holdings()
-        sizing_nav = before.cash + sum(
-            holdings[instrument] * prices[instrument] for instrument in holdings
-        )
-        if not math.isfinite(sizing_nav) or sizing_nav <= 0:
-            self._fail(
-                event,
-                "execution",
-                "EXECUTION_SIZING_NAV_INVALID",
-                context={"sizing_nav": sizing_nav},
-            )
-            return
-        for instrument in required_instruments:
-            target_quantity = (
-                target_weights.get(instrument, 0) * sizing_nav / prices[instrument]
-            )
-            actual_quantity = holdings.get(instrument, 0)
-            delta = target_quantity - actual_quantity
-            if delta > 1e-12:
-                orders.append(Order(instrument, Side.BUY, delta))
-            elif delta < -1e-12:
-                orders.append(Order(instrument, Side.SELL, -delta))
-        orders.sort(key=lambda order: (0 if order.side is Side.SELL else 1, order.instrument_id))
         match = self._exchange.match_batch(
             event_id=execution_id,
             event_time=event.ts,
@@ -1302,108 +1254,101 @@ class DailyExecutionFlow:
             (item for item in reversed(self._marks) if item.event_time == event.ts),
             None,
         )
-        if mark is None:
-            self._fail(event, "session_performance", "SESSION_MARK_EVIDENCE_MISSING")
-            return
-        executions = tuple(
-            item for item in self._executions if item.event_time == event.ts
+        performance_status: Literal["published", "skipped_missing_mark"] = (
+            "skipped_missing_mark"
         )
-        opening = executions[0].account_before if executions else mark.account_before
-        closing = mark.account_after
-        trade_value = sum(
-            abs(fill.trade_value)
-            for execution in executions
-            for fill in execution.fills
-        )
-        transaction_cost = sum(
-            fill.total_cost
-            for execution in executions
-            for fill in execution.fills
-        )
-        if opening.nav == 0:
-            turnover = None
-            transaction_cost_rate = None
-            gross_return = None
-            portfolio_return = None
-        else:
-            turnover = trade_value / opening.nav
-            transaction_cost_rate = transaction_cost / opening.nav
-            portfolio_return = closing.nav / opening.nav - 1
-            gross_return = portfolio_return + transaction_cost_rate
-        performance = SessionPerformanceEvidence(
-            event_id=self._event_id(event, "session-performance"),
-            event_time=event.ts,
-            account_id=closing.account_id,
-            source_mark_event_id=mark.event_id,
-            source_execution_event_ids=tuple(
-                item.event_id for item in executions
-            ),
-            opening_account_version=opening.version,
-            closing_account_version=closing.version,
-            feedback_cursor=closing.feedback_cursor,
-            opening_nav=opening.nav,
-            closing_nav=closing.nav,
-            closing_cash=closing.cash,
-            trade_value=trade_value,
-            transaction_cost=transaction_cost,
-            turnover=turnover,
-            transaction_cost_rate=transaction_cost_rate,
-            gross_return=gross_return,
-            portfolio_return=portfolio_return,
-        )
-        source_logical_identities = (
-            f"mark-result:{mark.event_id}",
-            *(
-                f"execution-result:{execution.event_id}"
-                for execution in executions
-            ),
-        )
-        source_artifacts = {
-            envelope.logical_identity: envelope
-            for envelope in self._published
-            if envelope.logical_identity in source_logical_identities
-        }
-        missing_sources = tuple(
-            logical_identity
-            for logical_identity in source_logical_identities
-            if logical_identity not in source_artifacts
-        )
-        if missing_sources:
-            self._fail(
-                event,
-                "session_performance",
-                "SESSION_SOURCE_ARTIFACT_MISSING",
-                context={"logical_identities": list(missing_sources)},
+        if mark is not None:
+            executions = tuple(
+                item for item in self._executions if item.event_time == event.ts
             )
-            return
-        performance_artifact = self._publish_model(
-            event=event,
-            stage="session_performance.artifact",
-            logical_identity=f"session-performance:{performance.event_id}",
-            artifact_type="session_performance",
-            producer_id=self._profile.profile_id,
-            payload=performance,
-            dependencies=tuple(
-                DependencyEdge(
-                    dependency_kind="artifact",
-                    dependency_id=source_artifacts[logical_identity].artifact_id,
-                    consumer_role=(
-                        "committed_mark"
-                        if logical_identity.startswith("mark-result:")
-                        else "committed_execution"
+            opening = executions[0].account_before if executions else mark.account_before
+            closing = mark.account_after
+            try:
+                performance = compute_session_performance(
+                    SessionPerformanceRequest(
+                        event_id=self._event_id(event, "session-performance"),
+                        event_time=event.ts,
+                        source_mark_event_id=mark.event_id,
+                        source_execution_event_ids=tuple(
+                            item.event_id for item in executions
+                        ),
+                    ),
+                    SessionPerformanceInput(
+                        opening=opening,
+                        closing=closing,
+                        executions=tuple(
+                            SessionExecutionInput(
+                                event_id=execution.event_id,
+                                trade_value=sum(
+                                    abs(fill.trade_value) for fill in execution.fills
+                                ),
+                                transaction_cost=sum(
+                                    fill.total_cost for fill in execution.fills
+                                ),
+                            )
+                            for execution in executions
+                        ),
                     ),
                 )
-                for logical_identity in source_logical_identities
-            ),
-        )
-        if performance_artifact is None:
-            return
-        self._session_performance.append(
-            _PublishedSessionPerformance(
-                artifact_id=performance_artifact.artifact_id,
-                record=performance,
+            except AnalysisError as exc:
+                self._fail(
+                    event,
+                    "session_performance",
+                    exc.code,
+                    context=exc.context,
+                )
+                return
+            source_logical_identities = (
+                f"mark-result:{mark.event_id}",
+                *(f"execution-result:{item.event_id}" for item in executions),
             )
-        )
+            source_artifacts = {
+                envelope.logical_identity: envelope
+                for envelope in self._published
+                if envelope.logical_identity in source_logical_identities
+            }
+            missing_sources = tuple(
+                logical_identity
+                for logical_identity in source_logical_identities
+                if logical_identity not in source_artifacts
+            )
+            if missing_sources:
+                self._fail(
+                    event,
+                    "session_performance",
+                    "SESSION_SOURCE_ARTIFACT_MISSING",
+                    context={"logical_identities": list(missing_sources)},
+                )
+                return
+            performance_artifact = self._publish_model(
+                event=event,
+                stage="session_performance.artifact",
+                logical_identity=f"session-performance:{performance.event_id}",
+                artifact_type="session_performance",
+                producer_id=self._profile.profile_id,
+                payload=performance,
+                dependencies=tuple(
+                    DependencyEdge(
+                        dependency_kind="artifact",
+                        dependency_id=source_artifacts[logical_identity].artifact_id,
+                        consumer_role=(
+                            "committed_mark"
+                            if logical_identity.startswith("mark-result:")
+                            else "committed_execution"
+                        ),
+                    )
+                    for logical_identity in source_logical_identities
+                ),
+            )
+            if performance_artifact is None:
+                return
+            self._session_performance.append(
+                _PublishedSessionPerformance(
+                    artifact_id=performance_artifact.artifact_id,
+                    record=performance,
+                )
+            )
+            performance_status = "published"
 
         before = self._account.snapshot(evaluation_time=event.ts)
         evidence = MonitorEvidence(
@@ -1413,6 +1358,7 @@ class DailyExecutionFlow:
             account_version_after_callback=self._account.snapshot(
                 evaluation_time=event.ts
             ).version,
+            session_performance_status=performance_status,
         )
         published = self._publish_model(
             event=event,

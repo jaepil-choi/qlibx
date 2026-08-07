@@ -1,5 +1,6 @@
 """Operation orchestration and commit ownership."""
 
+from qlibx.analysis import SessionPerformanceEvidence
 from qlibx.flow.analysis import (
     ANALYSIS_RESULT_CONTRACT,
     REPORT_RESULT_CONTRACT,
@@ -40,7 +41,6 @@ from qlibx.flow.daily import (
     MemoryCommitEvidence,
     MonitorEvidence,
     NextSessionCloseExecutor,
-    SessionPerformanceEvidence,
     SimulationCheckpoint,
 )
 from qlibx.flow.extensions import EXTENSION_REGISTRATION_CONTRACT, ExtensionFlow

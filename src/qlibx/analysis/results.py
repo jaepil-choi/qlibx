@@ -6,8 +6,9 @@ import math
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from qlibx.context import AccessRecord, StateAccessRecord
 from qlibx.data import ComponentRequirement
@@ -90,9 +91,19 @@ class SignalAnalysisRequest(QlibxModel):
     signal_artifact_id: str = Field(min_length=1)
     evaluation_time: datetime
     return_session: date
+    return_session_timezone: str = Field(min_length=1)
     return_requirement: ComponentRequirement
     config_fingerprint: str = Field(min_length=1)
     resolves_error_artifact_id: str | None = None
+
+    @field_validator("return_session_timezone")
+    @classmethod
+    def validate_return_session_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"unknown return_session_timezone: {value!r}") from exc
+        return value
 
 
 class ReportRequest(QlibxModel):

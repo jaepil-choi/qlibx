@@ -1,5 +1,9 @@
+from zoneinfo import ZoneInfo
+
 from qlibx.data import ComponentRequirement
 from qlibx.operations import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 class SampleReversalStrategy:
@@ -15,7 +19,12 @@ class SampleReversalStrategy:
         )
 
     def run(self, view: object) -> StrategyDraft:
-        frame = view.session("decision_return", view.as_of.date())  # type: ignore[attr-defined]
+        session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
+        frame = view.session(  # type: ignore[attr-defined]
+            "decision_return",
+            session,
+            session_timezone="Asia/Seoul",
+        )
         winner = frame.sort_values(
             ["decision_return", "instrument"],
             ascending=[False, True],

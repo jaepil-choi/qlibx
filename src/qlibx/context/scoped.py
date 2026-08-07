@@ -158,8 +158,18 @@ class StrategyView:
     def history(self, semantic_role: str) -> pd.DataFrame:
         return self._read(semantic_role)
 
-    def session(self, semantic_role: str, session_date: date) -> pd.DataFrame:
-        return self._read(semantic_role, session_date=session_date)
+    def session(
+        self,
+        semantic_role: str,
+        session_date: date,
+        *,
+        session_timezone: str,
+    ) -> pd.DataFrame:
+        return self._read(
+            semantic_role,
+            session_date=session_date,
+            session_timezone=session_timezone,
+        )
 
     def at(self, semantic_role: str, observation_at: datetime) -> pd.DataFrame:
         """Read only the observation whose event time exactly matches the callback."""
@@ -171,6 +181,7 @@ class StrategyView:
         semantic_role: str,
         *,
         session_date: date | None = None,
+        session_timezone: str | None = None,
         observation_at: datetime | None = None,
     ) -> pd.DataFrame:
         binding = self._binding(semantic_role)
@@ -182,6 +193,7 @@ class StrategyView:
             field=binding.field,
             as_of=self._as_of,
             session_date=session_date,
+            session_timezone=session_timezone,
             observation_at=observation_at,
         )
         maximum = frame["available_at"].max() if len(frame) else None

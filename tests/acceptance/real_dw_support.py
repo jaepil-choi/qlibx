@@ -415,7 +415,11 @@ class ActualStateMomentumStrategy:
                 expected_memory_version=memory.version if has_new_feedback else None,
             )
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
-        cross_section = view.session("decision_return", session)  # type: ignore[attr-defined]
+        cross_section = view.session(  # type: ignore[attr-defined]
+            "decision_return",
+            session,
+            session_timezone="Asia/Seoul",
+        )
         selected = cross_section.sort_values(
             ["decision_return", "instrument"],
             ascending=[False, True],
@@ -451,7 +455,11 @@ class StoredWinnerStrategy:
     def run(self, view: object) -> StrategyDraft:
         self.runs += 1
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
-        cross_section = view.session("decision_return", session)  # type: ignore[attr-defined]
+        cross_section = view.session(  # type: ignore[attr-defined]
+            "decision_return",
+            session,
+            session_timezone="Asia/Seoul",
+        )
         selected = cross_section.sort_values(
             ["decision_return", "instrument"],
             ascending=[False, True],
@@ -474,7 +482,11 @@ class WeakRealDwStrategy(StoredWinnerStrategy):
     def run(self, view: object) -> StrategyDraft:
         self.runs += 1
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
-        cross_section = view.session("decision_return", session)  # type: ignore[attr-defined]
+        cross_section = view.session(  # type: ignore[attr-defined]
+            "decision_return",
+            session,
+            session_timezone="Asia/Seoul",
+        )
         selected = cross_section.sort_values(
             ["decision_return", "instrument"],
             ascending=[False, True],

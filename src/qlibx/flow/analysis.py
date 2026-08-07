@@ -220,7 +220,11 @@ class AnalysisFlow:
         )
         role = request.return_requirement.semantic_role
         try:
-            frame = view.session(role, request.return_session)
+            frame = view.session(
+                role,
+                request.return_session,
+                session_timezone=request.return_session_timezone,
+            )
             frame = frame.drop_duplicates(subset=["instrument"], keep="last")
             result = analyze_signal(
                 request,

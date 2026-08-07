@@ -175,7 +175,11 @@ class PeerMomentumEnhancedIndexStrategy:
         feedback = view.account_feedback()  # type: ignore[attr-defined]
         memory = view.memory_snapshot()  # type: ignore[attr-defined]
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
-        return_frame = view.session("decision_return", session)  # type: ignore[attr-defined]
+        return_frame = view.session(  # type: ignore[attr-defined]
+            "decision_return",
+            session,
+            session_timezone="Asia/Seoul",
+        )
         benchmark_frame = view.latest("benchmark_weight")  # type: ignore[attr-defined]
 
         observed = {

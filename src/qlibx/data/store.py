@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -24,10 +25,13 @@ class ObservationStore:
         field: str,
         as_of: datetime,
         session_date: date | None = None,
+        session_timezone: str | None = None,
         observation_at: datetime | None = None,
     ) -> pd.DataFrame:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("view as_of must be timezone-aware")
+        if session_date is not None and session_timezone is None:
+            raise ValueError("session query requires an explicit session_timezone")
         cutoff = as_of.astimezone(UTC)
         source = Path(dataset.source)
         if not source.is_file() or file_hash(source) != dataset.physical_fingerprint:
@@ -101,7 +105,12 @@ class ObservationStore:
                 raise DataSnapshotError(
                     "session query requires an observation_time_field registration"
                 )
-            visible = visible.loc[visible["observation_time"].dt.date == session_date]
+            visible = visible.loc[
+                visible["observation_time"]
+                .dt.tz_convert(ZoneInfo(session_timezone))
+                .dt.date
+                == session_date
+            ]
         if observation_at is not None:
             if dataset.observation_time_field is None:
                 raise DataSnapshotError(

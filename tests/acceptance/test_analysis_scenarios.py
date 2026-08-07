@@ -46,6 +46,7 @@ def _request(
         signal_artifact_id=signal_artifact_id,
         evaluation_time=close_at(2024, 1, 3),
         return_session=date(2024, 1, 3),
+        return_session_timezone="Asia/Seoul",
         return_requirement=ComponentRequirement(
             requirement_id="analysis.realized_return",
             semantic_role="analysis_return",

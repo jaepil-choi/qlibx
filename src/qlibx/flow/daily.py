@@ -885,7 +885,11 @@ class DailyExecutionFlow:
             account_state=before,
         )
         session_date = event.ts.astimezone(ZoneInfo(self._profile.session_timezone)).date()
-        frame = view.session(self._profile.execution_price_role, session_date)
+        frame = view.session(
+            self._profile.execution_price_role,
+            session_date,
+            session_timezone=self._profile.session_timezone,
+        )
         prices = {
             str(row.instrument): float(getattr(row, self._profile.execution_price_role))
             for row in frame.itertuples()
@@ -894,7 +898,11 @@ class DailyExecutionFlow:
         }
         volumes: dict[str, float] = {}
         if volume_binding is not None and self._profile.volume_role is not None:
-            volume_frame = view.session(self._profile.volume_role, session_date)
+            volume_frame = view.session(
+                self._profile.volume_role,
+                session_date,
+                session_timezone=self._profile.session_timezone,
+            )
             volumes = {
                 str(row.instrument): float(getattr(row, self._profile.volume_role))
                 for row in volume_frame.itertuples()
@@ -1190,7 +1198,11 @@ class DailyExecutionFlow:
             account_state=before,
         )
         session_date = event.ts.astimezone(ZoneInfo(self._profile.session_timezone)).date()
-        frame = view.session(self._profile.valuation_price_role, session_date)
+        frame = view.session(
+            self._profile.valuation_price_role,
+            session_date,
+            session_timezone=self._profile.session_timezone,
+        )
         price_by_instrument = {
             str(row.instrument): float(getattr(row, self._profile.valuation_price_role))
             for row in frame.itertuples()

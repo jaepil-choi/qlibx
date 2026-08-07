@@ -23,7 +23,11 @@ class SampleDailyFeedbackStrategy:
         feedback = view.account_feedback()  # type: ignore[attr-defined]
         memory = view.memory_snapshot()  # type: ignore[attr-defined]
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
-        frame = view.session("decision_return", session)  # type: ignore[attr-defined]
+        frame = view.session(  # type: ignore[attr-defined]
+            "decision_return",
+            session,
+            session_timezone="Asia/Seoul",
+        )
         winner = frame.sort_values(
             ["decision_return", "instrument"],
             ascending=[False, True],

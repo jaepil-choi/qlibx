@@ -2443,6 +2443,11 @@ instant로 변환한다. 이미 offset이 있는 source에 사용되지 않는 t
 `ConfirmedDelayRule.user_confirmed`와 같은 명시적 의미 선언이며 schema fingerprint는 원본 dtype을 계속
 나타낸다.
 
+**Session calendar.** Session query는 UTC calendar date를 암묵적으로 사용하지 않고 caller가 선언한
+`session_timezone`으로 observation instant를 변환한 뒤 local date를 비교한다. `StrategyView.session`은
+필수 keyword로 이 달력을 받고, signal analysis는 `return_session_timezone`을 frozen request에 보존한다.
+Daily execution은 `DailyExecutionProfile.session_timezone`을 date 계산과 조회에 동일하게 사용한다.
+
 **Identity와 migration.** `source_timezone`은 registration identity에 포함된다. Upgrade 전 registration은
 읽을 수 있지만 naive source를 다시 query하려면 명시적 timezone으로 재등록해야 하고, 기존 identity와의
 충돌 또는 이전 run resume은 각각 `REGISTRATION_IDENTITY_CONFLICT`와 `RESUME_BRANCH_REQUIRED`로 드러난다.

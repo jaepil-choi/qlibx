@@ -130,6 +130,7 @@ def main(project_root: Path) -> dict[str, object]:
                 signal_artifact_id=stored.result.artifact_id,
                 evaluation_time=datetime(2024, 1, 3, 15, 30, tzinfo=KST),
                 return_session=date(2024, 1, 3),
+                return_session_timezone="Asia/Seoul",
                 return_requirement=ComponentRequirement(
                     requirement_id="sample.analysis.return",
                     semantic_role="analysis_return",

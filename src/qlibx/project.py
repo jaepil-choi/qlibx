@@ -1,5 +1,6 @@
 """Public project facade."""
 
+import hashlib
 from pathlib import Path
 
 from qlibx.account import Account
@@ -10,10 +11,14 @@ from qlibx.config.project import (
     load_project_config,
     preview_project,
 )
-from qlibx.constraints import ConstraintAdjustmentSpec, ConstraintValidationSpec
+from qlibx.constraints import (
+    ConstraintAdjustmentSpec,
+    ConstraintMonitoringSpec,
+    ConstraintValidationSpec,
+)
 from qlibx.data.contracts import DatasetRegistration
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
-from qlibx.errors import OperationOutcome
+from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, LocalArtifactBackend
 from qlibx.execution import KrxExchange
 from qlibx.extensions import ExtensionRegistration, ExtensionValidationRequest
@@ -23,8 +28,10 @@ from qlibx.flow import (
     DailyExecutionProfile,
     DailyRunRequest,
     ExtensionFlow,
+    MonitoringFlow,
     ResearchFlow,
 )
+from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
@@ -35,6 +42,8 @@ from qlibx.simulation import DailySimulationSpec
 
 class QlibxProject:
     """A user-owned qlibx project rooted at an explicit directory."""
+
+    default_sample_id = SampleMaterializer.default_sample_id
 
     def __init__(self, root: Path, config: ProjectConfig) -> None:
         self._root = root.resolve()
@@ -102,6 +111,12 @@ class QlibxProject:
     ) -> tuple[TargetOnboardingResult, ...]:
         return ProjectOnboarder(self._root).onboard(requests, apply=apply)
 
+    @classmethod
+    def available_sample_ids(cls) -> tuple[str, ...]:
+        """Return the bundled sample identities accepted by the public facade."""
+
+        return SampleMaterializer.sample_ids()
+
     def materialize_sample(
         self,
         sample_id: str = SampleMaterializer.default_sample_id,
@@ -135,6 +150,26 @@ class QlibxProject:
             registry=self.registry_snapshot(),
             artifacts=self.artifacts,
         ).validate(spec.policy.to_declaration(), spec.to_request())
+
+    def monitor_constraints(self, spec: ConstraintMonitoringSpec) -> OperationOutcome:
+        """Independently monitor committed Account state under the selected MVP policy."""
+
+        loaded = self.load_artifact(
+            spec.checkpoint_artifact_id,
+            SIMULATION_CHECKPOINT_CONTRACT,
+        )
+        if loaded.status is not OutcomeStatus.COMPLETE:
+            return loaded
+        try:
+            account = Account.from_checkpoint(loaded.result.payload.account_checkpoint)
+        except ValueError as exc:
+            return self._checkpoint_failure(spec, exc)
+        return MonitoringFlow(
+            clock=BacktestClock(spec.evaluation_time),
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+            account=account,
+        ).run(spec.policy.to_declaration(), spec.to_request())
 
     def run_daily(
         self,
@@ -178,6 +213,34 @@ class QlibxProject:
             ),
             resume=resume,
         )
+
+    @staticmethod
+    def _checkpoint_failure(
+        spec: ConstraintMonitoringSpec,
+        exc: ValueError,
+    ) -> OperationOutcome:
+        stage_path = "monitoring.constraint.checkpoint"
+        error_code = "MONITORING_ACCOUNT_CHECKPOINT_INVALID"
+        seed = hashlib.sha256(
+            f"{spec.invocation_id}:{stage_path}:{error_code}".encode()
+        ).hexdigest()[:24]
+        error = OperationError(
+            operation="monitoring.constraint",
+            stage_path=stage_path,
+            error_code=error_code,
+            context={
+                "checkpoint_artifact_id": spec.checkpoint_artifact_id,
+                "exception": type(exc).__name__,
+                "message": str(exc)[:500],
+            },
+            commit_status=CommitStatus.NONE,
+            retry_preconditions=(
+                "provide a simulation checkpoint with a valid Account checkpoint",
+            ),
+            idempotency_identity=spec.invocation_id,
+            error_id=f"error-{seed}",
+        )
+        return OperationOutcome(status=OutcomeStatus.FAILED, errors=(error,))
 
     @classmethod
     def init(

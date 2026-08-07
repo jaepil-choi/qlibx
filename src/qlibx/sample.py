@@ -27,24 +27,27 @@ class SampleMaterializer:
     """Preview or copy a selected bundled sample without overwriting user changes."""
 
     default_sample_id = "basic-real-dw-journey-v1"
-    sample_id = default_sample_id
-    _samples: ClassVar[dict[str, tuple[str, str]]] = {
-        default_sample_id: ("basic", "basic"),
-        "constraint-workflow-v1": ("constraint_workflow", "constraint_workflow"),
-        "daily-closed-loop-v1": ("daily_closed_loop", "daily_closed_loop"),
+    _samples: ClassVar[dict[str, str]] = {
+        default_sample_id: "basic",
+        "constraint-workflow-v1": "constraint_workflow",
+        "daily-closed-loop-v1": "daily_closed_loop",
     }
 
     def __init__(self, project_root: Path, sample_id: str = default_sample_id) -> None:
         self._project_root = project_root.resolve()
         try:
-            source_name, destination_name = self._samples[sample_id]
+            directory_name = self._samples[sample_id]
         except KeyError as exc:
             raise ValueError(f"unknown bundled sample_id: {sample_id}") from exc
         self.sample_id = sample_id
-        self._source = Path(__file__).parent / "resources" / "samples" / source_name
-        self._destination = (
-            self._project_root / "examples" / "qlibx_owned" / destination_name
-        )
+        self._source = Path(__file__).parent / "resources" / "samples" / directory_name
+        self._destination = self._project_root / "examples" / "qlibx_owned" / directory_name
+
+    @classmethod
+    def sample_ids(cls) -> tuple[str, ...]:
+        """Return every bundled sample identity in deterministic order."""
+
+        return tuple(sorted(cls._samples))
 
     def materialize(self, *, apply: bool = False) -> SampleMaterializationResult:
         files = {

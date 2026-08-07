@@ -1,9 +1,26 @@
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
 
-from qlibx import OperationError, OperationOutcome, OutcomeStatus, QlibxModel
+from qlibx import (
+    ConstraintMonitoringSpec,
+    CostRule,
+    DailyAccountSeed,
+    DailyMarketBinding,
+    DailySimulationSpec,
+    EtfInstrument,
+    KrxExchangeConfig,
+    MvpConstraintPolicy,
+    OperationError,
+    OperationOutcome,
+    OutcomeStatus,
+    QlibxModel,
+    Side,
+    StockInstrument,
+)
 
 
 class ExampleBoundary(QlibxModel):
@@ -52,3 +69,67 @@ def test_future_intraday_types_are_not_current_flow_exports() -> None:
 
     assert "IntradayExecutionFlow" not in flow.__all__
     assert not hasattr(flow, "IntradayExecutionFlow")
+
+
+def test_top_level_exports_construct_daily_and_monitoring_specs() -> None:
+    kst = ZoneInfo("Asia/Seoul")
+    effective_from = datetime(2024, 1, 1, tzinfo=kst)
+    session_close = datetime(2024, 1, 2, 15, 30, tzinfo=kst)
+    instruments = (
+        StockInstrument(
+            instrument_id="A005930",
+            exchange_id="XKRX",
+            currency="KRW",
+            lot_size=1,
+        ),
+        EtfInstrument(
+            instrument_id="A069500",
+            exchange_id="XKRX",
+            currency="KRW",
+            lot_size=1,
+        ),
+    )
+    exchange = KrxExchangeConfig(
+        schedule_version="top-level-smoke-v1",
+        cost_rules=tuple(
+            CostRule(
+                rule_id=f"{product}-{side.value.lower()}",
+                product_type=product,
+                side=side,
+                effective_from=effective_from,
+                rate=0,
+                minimum_cost=0,
+            )
+            for product in ("stock", "etf")
+            for side in Side
+        ),
+    )
+
+    daily = DailySimulationSpec(
+        run_id="top-level-daily",
+        strategy_fingerprint="top-level-strategy-v1",
+        account=DailyAccountSeed(
+            account_id="top-level-account",
+            base_currency="KRW",
+            initial_cash=1_000_000,
+        ),
+        instruments=instruments,
+        exchange=exchange,
+        market=DailyMarketBinding(market_dataset_id="market"),
+        decision_times=(session_close,),
+        session_closes=(session_close,),
+    )
+    monitoring = ConstraintMonitoringSpec(
+        invocation_id="top-level-monitoring",
+        checkpoint_artifact_id="artifact-checkpoint",
+        evaluation_time=session_close,
+        policy=MvpConstraintPolicy(
+            policy_id="top-level-policy",
+            benchmark_dataset_id="benchmark",
+        ),
+    )
+
+    assert daily.instruments == instruments
+    assert monitoring.to_request().config_fingerprint == (
+        monitoring.frozen_config_fingerprint()
+    )

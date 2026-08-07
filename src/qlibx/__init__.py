@@ -2,10 +2,18 @@
 
 from qlibx.constraints import (
     ConstraintAdjustmentSpec,
+    ConstraintMonitoringSpec,
     ConstraintValidationSpec,
     MvpConstraintPolicy,
 )
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
+from qlibx.execution import (
+    CostRule,
+    EtfInstrument,
+    KrxExchangeConfig,
+    Side,
+    StockInstrument,
+)
 from qlibx.models import QlibxModel
 from qlibx.onboarding import AgentTarget, OnboardingDesiredState, OnboardingRequest
 from qlibx.operations import StrategyInvocation
@@ -16,11 +24,15 @@ from qlibx.simulation import DailyAccountSeed, DailyMarketBinding, DailySimulati
 __all__ = [
     "AgentTarget",
     "ConstraintAdjustmentSpec",
+    "ConstraintMonitoringSpec",
     "ConstraintValidationSpec",
+    "CostRule",
     "DailyAccountSeed",
     "DailyMarketBinding",
     "DailySimulationSpec",
+    "EtfInstrument",
     "ExecutionLotInput",
+    "KrxExchangeConfig",
     "MvpConstraintPolicy",
     "OnboardingDesiredState",
     "OnboardingRequest",
@@ -29,6 +41,8 @@ __all__ = [
     "OutcomeStatus",
     "QlibxModel",
     "QlibxProject",
+    "Side",
+    "StockInstrument",
     "StrategyInvocation",
     "main",
 ]

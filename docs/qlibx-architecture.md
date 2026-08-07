@@ -2434,6 +2434,23 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 
 ## 17. 개정 이력
 
+### 2026-08-07 — public sample 선택과 constraint monitoring 노출
+
+**독립 monitoring 경로.** 설치 project의 공인 mutable Account 복원 경로는
+`SimulationCheckpoint → AccountCheckpoint → Account.from_checkpoint`다. Public facade는 frozen
+`ConstraintMonitoringSpec`이 가리키는 checkpoint artifact를 typed contract로 읽고 Account 무결성을
+검증한 뒤 기존 `MonitoringFlow`를 호출한다. Checkpoint의 version, journal, event identity 또는 `as_of`
+관계가 손상되면 raw `ValueError` 대신 `MONITORING_ACCOUNT_CHECKPOINT_INVALID`를 반환한다.
+
+**단일 evaluation instant.** `evaluation_time`은 wall clock에서 읽지 않고 frozen spec에 저장한다. 같은
+instant가 Account mark freshness와 benchmark의 PIT cutoff를 동시에 결정하므로 동일 spec과 immutable
+checkpoint의 반복 실행은 동일 monitoring artifact identity를 반환한다. Held position의 mark가 이 instant보다
+이르면 `ACCOUNT_VALUATION_STALE`이며, facade는 mark를 보정하거나 최신 가격을 추측하지 않는다.
+
+**Bundled sample 선택.** `project sample --sample-id`는 세 bundled sample identity를 argparse choice로
+공개한다. 기존 basic sample은 default로 유지하며 네 번째 sample이나 daily flow의 자동 monitoring 단계는
+추가하지 않는다.
+
 ### 2026-08-07 — 선언된 source timezone과 원자적 dataset 등록
 
 **Timestamp 의미.** Naive availability 또는 observation timestamp는 더 이상 UTC로 추정하지 않는다.

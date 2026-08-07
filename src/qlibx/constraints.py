@@ -12,6 +12,7 @@ from qlibx.models import QlibxModel
 from qlibx.portfolio import (
     ConstraintAdjustmentRequest,
     ConstraintDeclaration,
+    ConstraintMonitoringRequest,
     ConstraintValidationRequest,
     ExecutionLotInput,
 )
@@ -129,5 +130,41 @@ class ConstraintValidationSpec(QlibxModel):
             invocation_id=self.invocation_id,
             adjustment_artifact_id=self.adjustment_artifact_id,
             evaluation_time=self.evaluation_time,
+            config_fingerprint=self.frozen_config_fingerprint(),
+        )
+
+
+class ConstraintMonitoringSpec(QlibxModel):
+    """Frozen public input for independent monitoring of committed Account state.
+
+    ``evaluation_time`` is the single instant used for both Account valuation and the PIT
+    benchmark cutoff. It should match the checkpoint's last mark time; a later instant makes any
+    older held-position mark stale and returns ``ACCOUNT_VALUATION_STALE``.
+    """
+
+    spec_schema_version: Literal[1] = 1
+    invocation_id: str = Field(min_length=1)
+    checkpoint_artifact_id: str = Field(min_length=1)
+    evaluation_time: datetime
+    policy: MvpConstraintPolicy
+
+    @model_validator(mode="after")
+    def validate_public_monitoring(self) -> "ConstraintMonitoringSpec":
+        require_aware(self.evaluation_time)
+        return self
+
+    def frozen_config_fingerprint(self) -> str:
+        """Hash the independently selected monitoring policy."""
+
+        return _fingerprint(
+            {
+                "spec_schema_version": self.spec_schema_version,
+                "policy": self.policy.model_dump(mode="json"),
+            }
+        )
+
+    def to_request(self) -> ConstraintMonitoringRequest:
+        return ConstraintMonitoringRequest(
+            invocation_id=self.invocation_id,
             config_fingerprint=self.frozen_config_fingerprint(),
         )

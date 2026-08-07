@@ -32,5 +32,11 @@ uv run qlibx project init qlibx-research --apply
 uv run qlibx project sample qlibx-research
 uv run qlibx project sample qlibx-research --apply
 uv run python qlibx-research/examples/qlibx_owned/basic/run.py qlibx-research
+
+uv run qlibx project sample qlibx-research --sample-id daily-closed-loop-v1 --apply
+uv run python qlibx-research/examples/qlibx_owned/daily_closed_loop/run.py qlibx-research
+uv run qlibx project sample qlibx-research --sample-id constraint-workflow-v1 --apply
+uv run python qlibx-research/examples/qlibx_owned/constraint_workflow/run.py qlibx-research
+
 uv run qlibx artifact list qlibx-research
 ```

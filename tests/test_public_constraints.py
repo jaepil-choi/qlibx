@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -7,16 +8,25 @@ from pydantic import ValidationError
 
 from qlibx import (
     ConstraintAdjustmentSpec,
+    ConstraintMonitoringSpec,
     ConstraintValidationSpec,
+    CostRule,
+    DailyAccountSeed,
+    DailyMarketBinding,
+    DailySimulationSpec,
     ExecutionLotInput,
+    KrxExchangeConfig,
     MvpConstraintPolicy,
     OutcomeStatus,
     QlibxProject,
+    Side,
+    StockInstrument,
     StrategyInvocation,
 )
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
 from qlibx.flow import PORTFOLIO_RESULT_CONTRACT
+from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
 from qlibx.operations import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
 from qlibx.portfolio import (
     ConstructionProfile,
@@ -39,6 +49,21 @@ class ConstraintFreeStrategy:
             budget_mode=BudgetMode.FIXED,
             target_gross=1.0,
             decision_action=DecisionAction.RESEARCH_ONLY,
+        )
+
+
+class MonitoringSeedStrategy:
+    strategy_id = "test.monitoring-seed"
+
+    def requirements(self) -> tuple[object, ...]:
+        return ()
+
+    def run(self, view: object) -> StrategyDraft:
+        return StrategyDraft(
+            weights=(WeightEntry(instrument="A005930", weight=1.0),),
+            budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+            decision_action=DecisionAction.TARGET,
         )
 
 
@@ -116,6 +141,77 @@ def register_benchmark(
         )
     )
     assert outcome.status is OutcomeStatus.COMPLETE
+
+
+def register_daily_market(project: QlibxProject) -> None:
+    source = project.root / "monitoring-market.csv"
+    source.write_text(
+        "observation_time,available_at,ticker,close\n"
+        "2024-01-02T09:00:00+09:00,2024-01-02T15:30:00+09:00,A000660,100000\n"
+        "2024-01-02T09:00:00+09:00,2024-01-02T15:30:00+09:00,A005930,77000\n"
+        "2024-01-03T09:00:00+09:00,2024-01-03T15:30:00+09:00,A000660,101000\n"
+        "2024-01-03T09:00:00+09:00,2024-01-03T15:30:00+09:00,A005930,78000\n",
+        encoding="utf-8",
+    )
+    outcome = project.register_dataset(
+        DatasetRegistration(
+            dataset_id="monitoring-market",
+            source=source.name,
+            source_format=SourceFormat.CSV,
+            instrument_field="ticker",
+            observation_time_field="observation_time",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("observation_time", "available_at", "ticker"),
+            semantic_bindings={
+                "execution_price": "close",
+                "valuation_price": "close",
+            },
+            source_provenance="bounded public monitoring facade fixture",
+        )
+    )
+    assert outcome.status is OutcomeStatus.COMPLETE
+
+
+def monitoring_daily_spec() -> DailySimulationSpec:
+    start = datetime(2020, 1, 1, tzinfo=KST)
+    return DailySimulationSpec(
+        run_id="public-monitoring-seed-run",
+        strategy_fingerprint="public-monitoring-seed-v1",
+        account=DailyAccountSeed(
+            account_id="public-monitoring-account",
+            base_currency="KRW",
+            initial_cash=1_000_000,
+        ),
+        instruments=tuple(
+            StockInstrument(
+                instrument_id=instrument,
+                exchange_id="XKRX",
+                currency="KRW",
+                lot_size=1,
+            )
+            for instrument in ("A000660", "A005930")
+        ),
+        exchange=KrxExchangeConfig(
+            schedule_version="public-monitoring-cost-v1",
+            cost_rules=tuple(
+                CostRule(
+                    rule_id=f"stock-{side.value.lower()}",
+                    product_type="stock",
+                    side=side,
+                    effective_from=start,
+                    rate=0,
+                    minimum_cost=0,
+                )
+                for side in Side
+            ),
+        ),
+        market=DailyMarketBinding(market_dataset_id="monitoring-market"),
+        decision_times=(datetime(2024, 1, 2, 15, 30, tzinfo=KST),),
+        session_closes=(
+            datetime(2024, 1, 2, 15, 30, tzinfo=KST),
+            evaluation_time(),
+        ),
+    )
 
 
 def policy(dataset_id: str | None) -> MvpConstraintPolicy:
@@ -424,3 +520,77 @@ def test_constraint_flow_distinguishes_data_and_compute_failures(
     assert data_failure.errors[0].error_code == "CONSTRAINT_DATA_READ_FAILED"
     assert data_failure.errors[0].stage_path == "constraint.adjust.data"
     assert data_failure.errors[0].commit_status is CommitStatus.NONE
+
+
+def test_public_constraint_monitoring_restores_checkpoint_and_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path, "public-monitoring")
+    register_daily_market(project)
+    register_benchmark(project, "monitoring-benchmark")
+    daily = project.run_daily(MonitoringSeedStrategy(), monitoring_daily_spec())
+    assert daily.status is OutcomeStatus.COMPLETE
+    checkpoint_artifact = next(
+        artifact
+        for artifact in daily.result.artifacts
+        if artifact.artifact_type == "simulation_checkpoint"
+    )
+    monitoring_spec = ConstraintMonitoringSpec(
+        invocation_id="public-constraint-monitoring",
+        checkpoint_artifact_id=checkpoint_artifact.artifact_id,
+        evaluation_time=evaluation_time(),
+        policy=policy("monitoring-benchmark"),
+    )
+
+    first = project.monitor_constraints(monitoring_spec)
+    repeated = project.monitor_constraints(monitoring_spec)
+
+    assert first.status is repeated.status is OutcomeStatus.COMPLETE
+    assert first.result == repeated.result
+    assert first.diagnostics[0].artifact_type == "constraint_monitoring_result"
+    assert first.diagnostics[0].artifact_id == repeated.diagnostics[0].artifact_id
+    held = first.result.account_state.holdings[0]
+    assert held.marked_at == monitoring_spec.evaluation_time
+    assert first.result.account_state.valuation_status == "COMPLETE"
+
+    stale = project.monitor_constraints(
+        monitoring_spec.model_copy(
+            update={
+                "invocation_id": "public-constraint-monitoring-stale",
+                "evaluation_time": datetime(2024, 1, 5, 15, 30, tzinfo=KST),
+            }
+        )
+    )
+    assert stale.status is OutcomeStatus.FAILED
+    assert stale.errors[0].error_code == "ACCOUNT_VALUATION_STALE"
+
+    checkpoint = daily.result.checkpoint
+    invalid_account = replace(
+        checkpoint.account_checkpoint,
+        version=checkpoint.account_checkpoint.version + 1,
+    )
+    invalid_checkpoint = checkpoint.model_copy(
+        update={
+            "run_id": "invalid-account-checkpoint",
+            "account_checkpoint": invalid_account,
+        }
+    )
+    imported = project.artifacts.import_model_bytes(
+        logical_identity="simulation-checkpoint:invalid-account-checkpoint",
+        contract=SIMULATION_CHECKPOINT_CONTRACT,
+        producer_id="test.invalid-account-checkpoint",
+        payload_bytes=invalid_checkpoint.model_dump_json().encode(),
+    )
+    assert imported.status is OutcomeStatus.COMPLETE
+    invalid = project.monitor_constraints(
+        monitoring_spec.model_copy(
+            update={
+                "invocation_id": "public-constraint-monitoring-invalid",
+                "checkpoint_artifact_id": imported.result.artifact_id,
+            }
+        )
+    )
+    assert invalid.status is OutcomeStatus.FAILED
+    assert invalid.errors[0].error_code == "MONITORING_ACCOUNT_CHECKPOINT_INVALID"
+    assert invalid.errors[0].stage_path == "monitoring.constraint.checkpoint"
+    assert invalid.errors[0].commit_status is CommitStatus.NONE

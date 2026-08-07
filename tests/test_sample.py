@@ -10,6 +10,7 @@ import pytest
 from qlibx import QlibxProject
 from qlibx.cli import run
 from qlibx.config import ChangeAction
+from qlibx.sample import SampleMaterializer
 
 
 def _output(capsys: object) -> object:
@@ -118,3 +119,47 @@ def test_sample_cli_is_preview_first_and_refuses_modified_files(
     assert conflict["applied"] is False
     assert "refusing to overwrite" in conflict["error"]
     assert readme.read_text(encoding="utf-8").endswith("user edit\n")
+
+
+@pytest.mark.parametrize(
+    ("sample_id", "directory_name"),
+    (
+        ("basic-real-dw-journey-v1", "basic"),
+        ("constraint-workflow-v1", "constraint_workflow"),
+        ("daily-closed-loop-v1", "daily_closed_loop"),
+    ),
+)
+def test_sample_cli_selects_each_bundled_sample(
+    tmp_path: Path,
+    capsys: object,
+    sample_id: str,
+    directory_name: str,
+) -> None:
+    root = tmp_path / sample_id
+    QlibxProject.init(root, apply=True)
+
+    assert run(["project", "sample", str(root), "--sample-id", sample_id]) == 0
+    preview = _output(capsys)
+
+    assert preview["sample_id"] == sample_id
+    assert Path(preview["destination"]).name == directory_name
+    assert {change["action"] for change in preview["changes"]} == {"create"}
+
+
+def test_sample_ids_match_bundled_directories_and_cli_rejects_unknown(
+    tmp_path: Path,
+) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    project = QlibxProject.open(tmp_path)
+    destination_names = {
+        Path(project.materialize_sample(sample_id).destination).name
+        for sample_id in SampleMaterializer.sample_ids()
+    }
+    resource_root = Path(__file__).parents[1] / "src" / "qlibx" / "resources" / "samples"
+    bundled_names = {path.name for path in resource_root.iterdir() if path.is_dir()}
+
+    assert SampleMaterializer.sample_ids() == QlibxProject.available_sample_ids()
+    assert destination_names == bundled_names
+    with pytest.raises(SystemExit) as exc_info:
+        run(["project", "sample", str(tmp_path), "--sample-id", "nope"])
+    assert exc_info.value.code == 2

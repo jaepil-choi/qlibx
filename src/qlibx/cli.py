@@ -37,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     onboard.add_argument("--apply", action="store_true")
     sample = project_commands.add_parser("sample")
     sample.add_argument("root", nargs="?", default=".")
+    sample.add_argument(
+        "--sample-id",
+        default=QlibxProject.default_sample_id,
+        choices=QlibxProject.available_sample_ids(),
+    )
     sample.add_argument("--apply", action="store_true")
 
     dataset = commands.add_parser("dataset")
@@ -108,7 +113,10 @@ def run(argv: list[str] | None = None) -> int:
             emit(results)
             return 1 if any(result.error for result in results) else 0
         if args.command == "project" and args.project_command == "sample":
-            result = QlibxProject.open(args.root).materialize_sample(apply=args.apply)
+            result = QlibxProject.open(args.root).materialize_sample(
+                args.sample_id,
+                apply=args.apply,
+            )
             emit(result)
             return 1 if result.error else 0
         if args.command == "dataset" and args.dataset_command == "register":

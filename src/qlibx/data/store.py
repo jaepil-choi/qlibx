@@ -18,6 +18,9 @@ class DataSnapshotError(RuntimeError):
 class ObservationStore:
     """Read registered observations with an unavoidable availability predicate."""
 
+    def __init__(self) -> None:
+        self._frame_cache: dict[tuple[str, str, str, str], pd.DataFrame] = {}
+
     def query(
         self,
         dataset: RegisteredDataset,
@@ -33,11 +36,57 @@ class ObservationStore:
         if session_date is not None and session_timezone is None:
             raise ValueError("session query requires an explicit session_timezone")
         cutoff = as_of.astimezone(UTC)
-        source = Path(dataset.source)
+        source = Path(dataset.source).resolve()
         if not source.is_file() or file_hash(source) != dataset.physical_fingerprint:
             raise DataSnapshotError(
                 f"physical source no longer matches registration {dataset.registration_identity}"
             )
+        cache_key = (
+            dataset.registration_identity,
+            str(source),
+            dataset.physical_fingerprint,
+            field,
+        )
+        cached = self._frame_cache.get(cache_key)
+        if cached is None:
+            cached = self._load_normalized_frame(dataset, source=source, field=field)
+            self._frame_cache[cache_key] = cached
+        visible = cached.copy()
+        visible = visible.loc[visible["available_at"] <= cutoff]
+        if session_date is not None:
+            if dataset.observation_time_field is None:
+                raise DataSnapshotError(
+                    "session query requires an observation_time_field registration"
+                )
+            visible = visible.loc[
+                visible["observation_time"]
+                .dt.tz_convert(ZoneInfo(session_timezone))
+                .dt.date
+                == session_date
+            ]
+        if observation_at is not None:
+            if dataset.observation_time_field is None:
+                raise DataSnapshotError(
+                    "point query requires an observation_time_field registration"
+                )
+            if observation_at.tzinfo is None or observation_at.utcoffset() is None:
+                raise ValueError("observation_at must be timezone-aware")
+            selected_observation = observation_at.astimezone(UTC)
+            visible = visible.loc[
+                visible["observation_time"] == selected_observation
+            ]
+        return visible.sort_values(
+            ["available_at", "observation_time", "instrument"],
+            kind="mergesort",
+        ).reset_index(drop=True)
+
+    @staticmethod
+    def _load_normalized_frame(
+        dataset: RegisteredDataset,
+        *,
+        source: Path,
+        field: str,
+    ) -> pd.DataFrame:
         if isinstance(dataset.available_at, AvailableAtField):
             time_field = dataset.available_at.field
         else:
@@ -91,7 +140,7 @@ class ObservationStore:
                 f"registered field {field!r} is absent from the physical source"
             )
         values = available_at if field == "__available_at__" else frame[field]
-        visible = pd.DataFrame(
+        return pd.DataFrame(
             {
                 "instrument": frame[dataset.instrument_field].astype("string"),
                 "available_at": available_at,
@@ -99,30 +148,3 @@ class ObservationStore:
                 "value": values,
             }
         )
-        visible = visible.loc[visible["available_at"] <= cutoff]
-        if session_date is not None:
-            if dataset.observation_time_field is None:
-                raise DataSnapshotError(
-                    "session query requires an observation_time_field registration"
-                )
-            visible = visible.loc[
-                visible["observation_time"]
-                .dt.tz_convert(ZoneInfo(session_timezone))
-                .dt.date
-                == session_date
-            ]
-        if observation_at is not None:
-            if dataset.observation_time_field is None:
-                raise DataSnapshotError(
-                    "point query requires an observation_time_field registration"
-                )
-            if observation_at.tzinfo is None or observation_at.utcoffset() is None:
-                raise ValueError("observation_at must be timezone-aware")
-            selected_observation = observation_at.astimezone(UTC)
-            visible = visible.loc[
-                visible["observation_time"] == selected_observation
-            ]
-        return visible.sort_values(
-            ["available_at", "observation_time", "instrument"],
-            kind="mergesort",
-        ).reset_index(drop=True)

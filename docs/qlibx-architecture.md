@@ -1619,6 +1619,13 @@ Default local backend의 durable contract는 다음 순서로 고정한다.
    unreferenced final payload를 제거하고 `RECOVERED_ABANDONED` event를 append한다. 같은 frozen candidate는
    새 attempt로 retry한다. Commit 뒤 response 전에 process가 종료됐다면 기존 artifact를 그대로 재사용한다.
 
+여러 catalog 연산으로 구성된 공개 workflow는 `LocalArtifactBackend.session()`으로 bounded exclusive
+session을 열 수 있다. 최외곽 session은 기존 writer lock과 하나의 read-write DuckDB connection을 보유하고,
+같은 thread의 중첩 session과 operation cursor만 허용한다. Session이 열린 동안 다른 thread/process의 같은
+catalog 접근은 차단되며, bounded 충돌은 outcome API에서 `CATALOG_SESSION_CONFLICT`로 변환된다. Tuple을
+반환하는 저수준 listing API는 같은 stable code의 `CatalogSessionConflictError`를 직접 발생시킨다. Session
+밖의 단일 load/list/publish는 기존처럼 operation별 connection을 열고 닫으므로 multiprocess 계약은 변하지 않는다.
+
 이 state machine은 한 host의 local filesystem용이다. Multi-host/NFS writer coordination, object store
 consistency와 remote catalog availability는 default lock file로 지원한다고 간주하지 않고 별도 backend
 contract와 fixture를 요구한다.

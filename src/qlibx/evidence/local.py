@@ -259,6 +259,45 @@ class LocalArtifactBackend:
             status=ArtifactStatus.FAILURE,
         )
 
+    def load_envelope(
+        self,
+        artifact_id: str,
+        *,
+        include_failure: bool = False,
+    ) -> OperationOutcome:
+        """Load exact artifact metadata without selecting or decoding a payload model."""
+
+        if not self._catalog_path.is_file():
+            return self._not_found(artifact_id)
+        try:
+            connection = self._connect_reader()
+            try:
+                row = connection.execute(
+                    "SELECT status, envelope_json FROM artifacts WHERE artifact_id = ?",
+                    [artifact_id],
+                ).fetchone()
+            finally:
+                connection.close()
+        except CatalogSchemaError as exc:
+            return self._failure(
+                artifact_id,
+                "artifact.load.catalog_schema",
+                "CATALOG_SCHEMA_UNSUPPORTED",
+                context={"message": str(exc)[:500]},
+            )
+        if not row or (row[0] == ArtifactStatus.FAILURE.value and not include_failure):
+            return self._not_found(artifact_id)
+        try:
+            envelope = ArtifactEnvelope.model_validate_json(row[1])
+        except Exception as exc:
+            return self._failure(
+                artifact_id,
+                "artifact.load.envelope",
+                "ARTIFACT_ENVELOPE_INVALID",
+                context={"exception": type(exc).__name__, "message": str(exc)[:500]},
+            )
+        return OperationOutcome(status=OutcomeStatus.COMPLETE, result=envelope)
+
     def load_model(
         self,
         artifact_id: str,

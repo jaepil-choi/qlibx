@@ -16,7 +16,10 @@ from qlibx.evidence import (
 )
 from qlibx.flow.artifact_inputs import (
     STORED_SIGNAL_CONTRACT,
-    STRATEGY_RESULT_CONTRACT,
+    STRATEGY_RESULT_V1_CONTRACT,
+)
+from qlibx.flow.artifact_inputs import (
+    STRATEGY_RESULT_CONTRACT as STRATEGY_RESULT_CONTRACT,
 )
 from qlibx.flow.failures import build_operation_error, publish_failed_outcome
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
@@ -27,7 +30,7 @@ from qlibx.operations import (
     StoredSignalResult,
     StrategyDraft,
     StrategyInvocation,
-    StrategyResult,
+    StrategyResultV1,
     WeightEntry,
 )
 from qlibx.operations import StoredSignalEntry as StoredSignalEntry
@@ -99,7 +102,7 @@ class EnsembleCompatibilityError(ValueError):
 @dataclass(frozen=True, slots=True)
 class _StoredMember:
     spec: EnsembleMemberSpec
-    loaded: LoadedArtifact[StrategyResult]
+    loaded: LoadedArtifact[StrategyResultV1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,7 +323,7 @@ class CompositionFlow:
         for spec in definition.members:
             loaded = self._artifacts.load_model(
                 spec.artifact_id,
-                STRATEGY_RESULT_CONTRACT,
+                STRATEGY_RESULT_V1_CONTRACT,
             )
             if loaded.status is not OutcomeStatus.COMPLETE:
                 return loaded

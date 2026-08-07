@@ -20,6 +20,7 @@ from qlibx.flow.failures import (
     publish_failed_errors,
     publish_failed_outcome,
 )
+from qlibx.flow.strategy_results import STRATEGY_RESULT_V1_CONTRACT
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.operations import (
@@ -27,11 +28,12 @@ from qlibx.operations import (
     StrategyInvocation,
     StrategyOperation,
     StrategyResult,
+    StrategyResultV1,
 )
 
 
 class StrategyRunResult(QlibxModel):
-    result: StrategyResult
+    result: StrategyResultV1 | StrategyResult
     artifact: ArtifactEnvelope
 
 
@@ -166,7 +168,7 @@ class ResearchFlow:
             )
 
         invested_gross = sum(abs(entry.weight) for entry in draft.weights)
-        result = StrategyResult(
+        result = StrategyResultV1(
             invocation_id=invocation.invocation_id,
             strategy_id=strategy.strategy_id,
             evaluation_time=invocation.evaluation_time,
@@ -273,8 +275,8 @@ class ResearchFlow:
         )
         publication = self._artifacts.publish_model(
             logical_identity=f"strategy:{invocation.invocation_id}",
-            artifact_type="strategy_result",
-            artifact_schema_version=1,
+            artifact_type=STRATEGY_RESULT_V1_CONTRACT.artifact_type,
+            artifact_schema_version=STRATEGY_RESULT_V1_CONTRACT.artifact_schema_version,
             producer_id=strategy.strategy_id,
             payload=result,
             dependencies=dependencies,

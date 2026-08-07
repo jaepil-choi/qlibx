@@ -15,7 +15,11 @@ from qlibx.operations.strategy import (
     StrategyInvocation,
     StrategyOperation,
     StrategyResult,
+    StrategyResultV1,
+    StrategySourceStateLineage,
     WeightEntry,
+    strategy_accesses_are_path_dependent,
+    validate_strategy_draft_path_dependence,
 )
 
 __all__ = [
@@ -31,5 +35,9 @@ __all__ = [
     "StrategyInvocation",
     "StrategyOperation",
     "StrategyResult",
+    "StrategyResultV1",
+    "StrategySourceStateLineage",
     "WeightEntry",
+    "strategy_accesses_are_path_dependent",
+    "validate_strategy_draft_path_dependence",
 ]

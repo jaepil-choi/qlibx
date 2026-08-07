@@ -8,18 +8,15 @@ from dataclasses import dataclass
 from qlibx.context import ArtifactInputProjection
 from qlibx.errors import CommitStatus, OperationError, OutcomeStatus
 from qlibx.evidence import ArtifactContract, LocalArtifactBackend
+from qlibx.flow.strategy_results import (
+    STRATEGY_RESULT_CONTRACT,
+    STRATEGY_RESULT_V1_CONTRACT,
+)
 from qlibx.models import QlibxModel
 from qlibx.operations import (
     StoredSignalResult,
     StrategyArtifactBinding,
     StrategyArtifactRequirement,
-    StrategyResult,
-)
-
-STRATEGY_RESULT_CONTRACT = ArtifactContract(
-    artifact_type="strategy_result",
-    artifact_schema_version=1,
-    payload_model=StrategyResult,
 )
 
 STORED_SIGNAL_CONTRACT = ArtifactContract(
@@ -30,6 +27,7 @@ STORED_SIGNAL_CONTRACT = ArtifactContract(
 
 BUILT_IN_STRATEGY_ARTIFACT_CONTRACTS = (
     STORED_SIGNAL_CONTRACT,
+    STRATEGY_RESULT_V1_CONTRACT,
     STRATEGY_RESULT_CONTRACT,
 )
 

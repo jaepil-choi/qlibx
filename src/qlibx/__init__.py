@@ -38,6 +38,8 @@ from qlibx.operations import (
     StrategyDraft,
     StrategyInvocation,
     StrategyResult,
+    StrategyResultV1,
+    StrategySourceStateLineage,
     WeightEntry,
 )
 from qlibx.portfolio import ExecutionLotInput
@@ -84,6 +86,8 @@ __all__ = [
     "StrategyExtensionValidationResult",
     "StrategyInvocation",
     "StrategyResult",
+    "StrategyResultV1",
+    "StrategySourceStateLineage",
     "StrategyView",
     "WeightEntry",
     "main",

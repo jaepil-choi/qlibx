@@ -2,8 +2,8 @@
 
 from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
-from qlibx.flow.composition import STRATEGY_RESULT_CONTRACT
 from qlibx.flow.failures import build_operation_error, publish_failed_outcome
+from qlibx.flow.strategy_results import load_strategy_result
 from qlibx.portfolio import (
     PortfolioConstructionError,
     PortfolioConstructionInput,
@@ -27,9 +27,11 @@ class PortfolioConstructionFlow:
         self._artifacts = artifacts
 
     def construct(self, request: PortfolioConstructionRequest) -> OperationOutcome:
-        loaded = self._artifacts.load_model(
+        loaded = load_strategy_result(
+            self._artifacts,
             request.source_artifact_id,
-            STRATEGY_RESULT_CONTRACT,
+            operation="portfolio.construct",
+            idempotency_identity=request.invocation_id,
         )
         if loaded.status is not OutcomeStatus.COMPLETE:
             return loaded

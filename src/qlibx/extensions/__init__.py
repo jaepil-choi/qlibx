@@ -10,6 +10,15 @@ from qlibx.extensions.contracts import (
     NeutralizationResult,
     NeutralizedValue,
 )
+from qlibx.extensions.strategy import (
+    RegisteredStrategyExtension,
+    StrategyArtifactModelRegistration,
+    StrategyArtifactModelSpec,
+    StrategyExtensionRegistration,
+    StrategyExtensionSpec,
+    StrategyExtensionValidationRequest,
+    StrategyExtensionValidationResult,
+)
 
 __all__ = [
     "ExtensionRegistration",
@@ -19,5 +28,12 @@ __all__ = [
     "NeutralizationInputRow",
     "NeutralizationResult",
     "NeutralizedValue",
+    "RegisteredStrategyExtension",
+    "StrategyArtifactModelRegistration",
+    "StrategyArtifactModelSpec",
+    "StrategyExtensionRegistration",
+    "StrategyExtensionSpec",
+    "StrategyExtensionValidationRequest",
+    "StrategyExtensionValidationResult",
     "group_demean",
 ]

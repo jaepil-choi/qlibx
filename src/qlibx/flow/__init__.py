@@ -53,6 +53,11 @@ from qlibx.flow.recovery import (
     SimulationRecoveryPoint,
 )
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
+from qlibx.flow.strategy_extensions import (
+    SESSION_PERFORMANCE_CONTRACT,
+    STRATEGY_EXTENSION_REGISTRATION_CONTRACT,
+    StrategyExtensionFlow,
+)
 
 __all__ = [
     "ANALYSIS_RESULT_CONTRACT",
@@ -66,8 +71,10 @@ __all__ = [
     "MONITOR_PRIORITY",
     "PORTFOLIO_RESULT_CONTRACT",
     "REPORT_RESULT_CONTRACT",
+    "SESSION_PERFORMANCE_CONTRACT",
     "SIMULATION_RECOVERY_POINT_CONTRACT",
     "STORED_SIGNAL_CONTRACT",
+    "STRATEGY_EXTENSION_REGISTRATION_CONTRACT",
     "AnalysisFlow",
     "CompositionFlow",
     "ConstraintFlow",
@@ -101,5 +108,6 @@ __all__ = [
     "StoredSignalResult",
     "StoredSignalStrategyOperation",
     "StoredSignalWeighting",
+    "StrategyExtensionFlow",
     "StrategyRunResult",
 ]

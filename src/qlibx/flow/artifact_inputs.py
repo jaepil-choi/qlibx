@@ -1,6 +1,7 @@
 """Flow-owned resolution of typed Strategy artifact inputs."""
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from qlibx.context import ArtifactInputProjection
@@ -26,16 +27,42 @@ STORED_SIGNAL_CONTRACT = ArtifactContract(
     payload_model=StoredSignalResult,
 )
 
-STRATEGY_ARTIFACT_CONTRACTS = {
-    (
-        STORED_SIGNAL_CONTRACT.artifact_type,
-        STORED_SIGNAL_CONTRACT.artifact_schema_version,
-    ): STORED_SIGNAL_CONTRACT,
-    (
-        STRATEGY_RESULT_CONTRACT.artifact_type,
-        STRATEGY_RESULT_CONTRACT.artifact_schema_version,
-    ): STRATEGY_RESULT_CONTRACT,
-}
+BUILT_IN_STRATEGY_ARTIFACT_CONTRACTS = (
+    STORED_SIGNAL_CONTRACT,
+    STRATEGY_RESULT_CONTRACT,
+)
+
+
+class StrategyArtifactContractRegistry:
+    """Immutable operation-scoped artifact contract lookup."""
+
+    def __init__(self, contracts: Iterable[ArtifactContract] = ()) -> None:
+        indexed: dict[tuple[str, int], ArtifactContract] = {}
+        for contract in contracts:
+            key = (contract.artifact_type, contract.artifact_schema_version)
+            if key in indexed:
+                raise ValueError(f"duplicate Strategy artifact contract: {key[0]}:v{key[1]}")
+            indexed[key] = contract
+        self._contracts = indexed
+
+    @classmethod
+    def built_in(cls) -> "StrategyArtifactContractRegistry":
+        return cls(BUILT_IN_STRATEGY_ARTIFACT_CONTRACTS)
+
+    def extended(
+        self,
+        contracts: Iterable[ArtifactContract],
+    ) -> "StrategyArtifactContractRegistry":
+        return StrategyArtifactContractRegistry((*self._contracts.values(), *contracts))
+
+    def get(self, artifact_type: str, version: int) -> ArtifactContract | None:
+        return self._contracts.get((artifact_type, version))
+
+    def supported_contracts(self) -> tuple[str, ...]:
+        return tuple(
+            f"{artifact_type}:v{version}"
+            for artifact_type, version in sorted(self._contracts)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +85,12 @@ class StrategyArtifactResolver:
         requirements: tuple[StrategyArtifactRequirement, ...],
         bindings: tuple[StrategyArtifactBinding, ...],
         artifacts: LocalArtifactBackend,
+        contract_registry: StrategyArtifactContractRegistry | None = None,
+        operation: str = "strategy.run",
     ) -> StrategyArtifactResolution:
+        selected_registry = contract_registry or StrategyArtifactContractRegistry.built_in()
         declaration_errors = self._validate_cardinality(
+            operation=operation,
             invocation_id=invocation_id,
             requirements=requirements,
             bindings=bindings,
@@ -70,19 +101,23 @@ class StrategyArtifactResolver:
         binding_by_role = {binding.consumer_role: binding for binding in bindings}
         projections: list[ArtifactInputProjection] = []
         for requirement in requirements:
-            contract = STRATEGY_ARTIFACT_CONTRACTS.get(
-                (requirement.artifact_type, requirement.artifact_schema_version)
+            contract = selected_registry.get(
+                requirement.artifact_type,
+                requirement.artifact_schema_version,
             )
             if contract is None:
                 return StrategyArtifactResolution(
                     errors=(
                         self._error(
+                            operation=operation,
                             invocation_id=invocation_id,
                             requirement=requirement,
                             error_code="STRATEGY_ARTIFACT_CONTRACT_UNSUPPORTED",
                             expected_contract=self._contract_context(requirement),
                             actual_contract=None,
-                            context={"supported_contracts": self._supported_contracts()},
+                            context={
+                                "supported_contracts": selected_registry.supported_contracts()
+                            },
                         ),
                     )
                 )
@@ -101,6 +136,7 @@ class StrategyArtifactResolver:
                 return StrategyArtifactResolution(
                     errors=(
                         self._error(
+                            operation=operation,
                             invocation_id=invocation_id,
                             requirement=requirement,
                             error_code="STRATEGY_ARTIFACT_CONTRACT_UNSUPPORTED",
@@ -118,6 +154,7 @@ class StrategyArtifactResolver:
 
             payload = loaded.result.payload
             semantic_error = self._semantic_error(
+                operation=operation,
                 invocation_id=invocation_id,
                 requirement=requirement,
                 artifact_id=binding.artifact_id,
@@ -143,6 +180,7 @@ class StrategyArtifactResolver:
     def _validate_cardinality(
         self,
         *,
+        operation: str,
         invocation_id: str,
         requirements: tuple[StrategyArtifactRequirement, ...],
         bindings: tuple[StrategyArtifactBinding, ...],
@@ -155,6 +193,7 @@ class StrategyArtifactResolver:
         for duplicate in self._duplicates(requirement_ids):
             errors.append(
                 self._declaration_error(
+                    operation,
                     invocation_id,
                     "duplicate_requirement_id",
                     duplicate,
@@ -163,6 +202,7 @@ class StrategyArtifactResolver:
         for duplicate in self._duplicates(requirement_roles):
             errors.append(
                 self._declaration_error(
+                    operation,
                     invocation_id,
                     "duplicate_consumer_role",
                     duplicate,
@@ -171,6 +211,7 @@ class StrategyArtifactResolver:
         for duplicate in self._duplicates(binding_roles):
             errors.append(
                 self._declaration_error(
+                    operation,
                     invocation_id,
                     "duplicate_binding_role",
                     duplicate,
@@ -187,6 +228,7 @@ class StrategyArtifactResolver:
             if requirement.consumer_role not in binding_role_set:
                 errors.append(
                     self._error(
+                        operation=operation,
                         invocation_id=invocation_id,
                         requirement=requirement,
                         error_code="STRATEGY_ARTIFACT_BINDING_MISSING",
@@ -198,6 +240,7 @@ class StrategyArtifactResolver:
             if binding.consumer_role not in requirement_by_role:
                 errors.append(
                     self._error(
+                        operation=operation,
                         invocation_id=invocation_id,
                         requirement=None,
                         error_code="STRATEGY_ARTIFACT_BINDING_UNDECLARED",
@@ -212,6 +255,7 @@ class StrategyArtifactResolver:
     def _semantic_error(
         self,
         *,
+        operation: str,
         invocation_id: str,
         requirement: StrategyArtifactRequirement,
         artifact_id: str,
@@ -232,6 +276,7 @@ class StrategyArtifactResolver:
                     "value_type": type(value).__name__,
                 }
             return self._error(
+                operation=operation,
                 invocation_id=invocation_id,
                 requirement=requirement,
                 error_code="STRATEGY_ARTIFACT_SEMANTICS_INCOMPATIBLE",
@@ -248,11 +293,13 @@ class StrategyArtifactResolver:
 
     def _declaration_error(
         self,
+        operation: str,
         invocation_id: str,
         issue: str,
         value: str,
     ) -> OperationError:
         return self._error(
+            operation=operation,
             invocation_id=invocation_id,
             requirement=None,
             error_code="STRATEGY_ARTIFACT_REQUIREMENTS_FAILED",
@@ -271,16 +318,12 @@ class StrategyArtifactResolver:
             "artifact_schema_version": requirement.artifact_schema_version,
         }
 
-    @staticmethod
-    def _supported_contracts() -> tuple[str, ...]:
-        return tuple(
-            f"{artifact_type}:v{version}"
-            for artifact_type, version in sorted(STRATEGY_ARTIFACT_CONTRACTS)
-        )
+
 
     @staticmethod
     def _error(
         *,
+        operation: str,
         invocation_id: str,
         requirement: StrategyArtifactRequirement | None,
         error_code: str,
@@ -296,7 +339,7 @@ class StrategyArtifactResolver:
         requirement_id = requirement.requirement_id if requirement is not None else None
         seed = hashlib.sha256(
             (
-                f"{invocation_id}:strategy.run.artifacts:{error_code}:"
+                f"{invocation_id}:{operation}.artifacts:{error_code}:"
                 f"{requirement_id}:{role}:{artifact_id}"
             ).encode()
         ).hexdigest()[:24]
@@ -307,9 +350,9 @@ class StrategyArtifactResolver:
             **(context or {}),
         }
         return OperationError(
-            operation="strategy.run",
+            operation=operation,
             stage_path=(
-                f"strategy.run.artifacts.{role}" if role else "strategy.run.artifacts"
+                f"{operation}.artifacts.{role}" if role else f"{operation}.artifacts"
             ),
             error_code=error_code,
             requirement_id=requirement_id,

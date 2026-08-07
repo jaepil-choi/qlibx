@@ -3,7 +3,6 @@
 import hashlib
 import math
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
 
 from pydantic import Field, model_validator
@@ -11,54 +10,27 @@ from pydantic import Field, model_validator
 from qlibx.data import ComponentRequirement, RegistrySnapshot
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import (
-    ArtifactContract,
     ArtifactEnvelope,
     DependencyEdge,
     LoadedArtifact,
     LocalArtifactBackend,
+)
+from qlibx.flow.artifact_inputs import (
+    STORED_SIGNAL_CONTRACT,
+    STRATEGY_RESULT_CONTRACT,
 )
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
 from qlibx.models import QlibxModel
 from qlibx.operations import (
     BudgetMode,
     DecisionAction,
+    StoredSignalResult,
     StrategyDraft,
     StrategyInvocation,
     StrategyResult,
     WeightEntry,
 )
-
-STRATEGY_RESULT_CONTRACT = ArtifactContract(
-    artifact_type="strategy_result",
-    artifact_schema_version=1,
-    payload_model=StrategyResult,
-)
-
-
-class StoredSignalEntry(QlibxModel):
-    instrument: str = Field(min_length=1)
-    value: float
-
-
-class StoredSignalResult(QlibxModel):
-    signal_schema_version: int = 1
-    signal_semantics: str = Field(min_length=1)
-    observation_time: datetime
-    entries: tuple[StoredSignalEntry, ...]
-
-    @model_validator(mode="after")
-    def validate_entries(self) -> "StoredSignalResult":
-        instruments = [entry.instrument for entry in self.entries]
-        if not instruments or len(instruments) != len(set(instruments)):
-            raise ValueError("stored signal requires unique instrument entries")
-        return self
-
-
-STORED_SIGNAL_CONTRACT = ArtifactContract(
-    artifact_type="stored_signal_result",
-    artifact_schema_version=1,
-    payload_model=StoredSignalResult,
-)
+from qlibx.operations import StoredSignalEntry as StoredSignalEntry
 
 
 class StoredSignalWeighting(StrEnum):

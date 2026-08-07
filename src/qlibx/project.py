@@ -56,6 +56,7 @@ class QlibxProject:
     def __init__(self, root: Path, config: ProjectConfig) -> None:
         self._root = root.resolve()
         self._config = config
+        self._artifacts: LocalArtifactBackend | None = None
 
     @property
     def root(self) -> Path:
@@ -111,10 +112,12 @@ class QlibxProject:
 
     @property
     def artifacts(self) -> LocalArtifactBackend:
-        return LocalArtifactBackend(
-            self._root / self._config.catalog_path,
-            self._root / self._config.artifact_dir,
-        )
+        if self._artifacts is None:
+            self._artifacts = LocalArtifactBackend(
+                self._root / self._config.catalog_path,
+                self._root / self._config.artifact_dir,
+            )
+        return self._artifacts
 
     def load_artifact(
         self,

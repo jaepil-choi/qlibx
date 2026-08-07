@@ -26,6 +26,14 @@ def test_project_init_apply_is_idempotent(tmp_path: Path) -> None:
     assert QlibxProject.open(root).root == root.resolve()
 
 
+def test_project_reuses_one_artifact_backend(tmp_path: Path) -> None:
+    root = tmp_path / "research"
+    QlibxProject.init(root, apply=True)
+    project = QlibxProject.open(root)
+
+    assert project.artifacts is project.artifacts
+
+
 def test_project_init_does_not_overwrite_existing_config(tmp_path: Path) -> None:
     root = tmp_path / "research"
     root.mkdir()

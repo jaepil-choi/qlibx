@@ -31,11 +31,27 @@ def normalize_timestamps(
     """Return UTC instants while requiring an explicit meaning for naive values."""
 
     try:
-        local = pd.to_datetime(values, errors="coerce", utc=False)
+        local = pd.to_datetime(values, errors="coerce", utc=False, format="mixed")
     except (TypeError, ValueError) as exc:
         raise _localization_error(field, exc) from exc
     if not isinstance(local, pd.Series):
         local = pd.Series(local, index=values.index)
+    unparseable = values.notna() & local.isna()
+    if unparseable.any():
+        samples = tuple(str(value) for value in values.loc[unparseable].head(3))
+        raise TimestampNormalizationError(
+            "TIMESTAMP_VALUES_UNPARSEABLE",
+            {
+                "field": field,
+                "invalid_count": int(unparseable.sum()),
+                "samples": samples,
+            },
+        )
+    if not local.notna().any():
+        return NormalizedTimestamps(
+            utc=pd.to_datetime(local, errors="coerce", utc=True),
+            was_naive=False,
+        )
     if not is_datetime64_any_dtype(local.dtype):
         raise TimestampNormalizationError(
             "TIMESTAMP_LOCALIZATION_FAILED",

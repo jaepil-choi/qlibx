@@ -1,10 +1,9 @@
 """Artifact-backed orchestration for optional portfolio construction."""
 
-import hashlib
-
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.flow.composition import STRATEGY_RESULT_CONTRACT
+from qlibx.flow.failures import build_operation_error, publish_failed_outcome
 from qlibx.portfolio import (
     PortfolioConstructionError,
     PortfolioConstructionInput,
@@ -88,25 +87,15 @@ class PortfolioConstructionFlow:
         code: str,
         context: dict[str, object],
     ) -> OperationOutcome:
-        seed = hashlib.sha256(
-            f"{request.invocation_id}:{code}".encode()
-        ).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation="portfolio.construct",
             stage_path="portfolio.construct.compute",
             error_code=code,
-            context=context,
-            commit_status=CommitStatus.NONE,
-            retry_preconditions=("select a compatible construction profile and signed alpha",),
             idempotency_identity=request.invocation_id,
-            error_id=f"error-{seed}",
+            error_identity_seed=f"{request.invocation_id}:{code}",
+            context=context,
+            retry_preconditions=(
+                "select a compatible construction profile and signed alpha",
+            ),
         )
-        published = self._artifacts.publish_failure(error)
-        diagnostics = (
-            (published.result,) if published.status is OutcomeStatus.COMPLETE else published.errors
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=(error,),
-        )
+        return publish_failed_outcome(self._artifacts, error)

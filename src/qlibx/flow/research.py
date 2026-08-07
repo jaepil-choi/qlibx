@@ -1,7 +1,5 @@
 """Orchestration for PIT-safe direct Strategy research."""
 
-import hashlib
-
 from qlibx.context import (
     AccountFeedbackState,
     AccountState,
@@ -11,11 +9,16 @@ from qlibx.context import (
     ViewGate,
 )
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
 from qlibx.flow.artifact_inputs import (
     StrategyArtifactContractRegistry,
     StrategyArtifactResolver,
+)
+from qlibx.flow.failures import (
+    build_operation_error,
+    publish_failed_errors,
+    publish_failed_outcome,
 )
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
@@ -295,10 +298,7 @@ class ResearchFlow:
         error_context: dict[str, object] | None = None,
         accesses: tuple[QlibxModel, ...] = (),
     ) -> OperationOutcome:
-        seed = hashlib.sha256(
-            f"{invocation.invocation_id}:{stage_path}:{error_code}".encode()
-        ).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation="strategy.run",
             stage_path=stage_path,
             error_code=error_code,
@@ -310,31 +310,16 @@ class ResearchFlow:
                 "accesses": [access.model_dump(mode="json") for access in accesses],
                 **(error_context or {}),
             },
-            commit_status=CommitStatus.NONE,
             retry_preconditions=("correct the Strategy contract or selected input",),
             idempotency_identity=invocation.invocation_id,
-            error_id=f"error-{seed}",
+            error_identity_seed=(
+                f"{invocation.invocation_id}:{stage_path}:{error_code}"
+            ),
         )
-        published = self._artifacts.publish_failure(error)
-        diagnostics = (
-            (published.result,) if published.status is OutcomeStatus.COMPLETE else published.errors
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=(error,),
-        )
+        return publish_failed_outcome(self._artifacts, error)
 
     def _publish_errors(
         self,
         errors: tuple[OperationError, ...],
     ) -> OperationOutcome:
-        published = tuple(self._artifacts.publish_failure(error) for error in errors)
-        diagnostics = tuple(
-            outcome.result for outcome in published if outcome.status is OutcomeStatus.COMPLETE
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=errors,
-        )
+        return publish_failed_errors(self._artifacts, errors)

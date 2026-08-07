@@ -27,18 +27,7 @@ scenarios:
       original_registration_preserved: true
       enriched_resolution: complete
 
-  - id: UC-PIT-001
-    case: missing_forward_horizon_stops_before_strategy_calculation
-    test: tests/test_pit_research.py::test_uc_pit_001_missing_horizon_fails_before_strategy_calculation
-    inputs:
-      fixture_kind: deterministic_contract
-      reason: deliberately absent horizon binding is the required negative contract fixture
-      oracle: requirement-stage failure and zero strategy calls
-    expected:
-      outcome: failed
-      missing_requirement: label.horizon_end
-      calculation_calls: 0
-      reusable_success_count: 0
+# Generic missing-horizon preflight remains in tests/test_pit_research.py but is not UC-PIT-001 closure evidence.
 
   - id: UC-ARTIFACT-002
     case: invalid_external_weight_payload_is_never_reusable

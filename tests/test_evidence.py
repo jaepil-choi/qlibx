@@ -111,6 +111,14 @@ def test_failure_and_resolution_are_distinct_lineage_artifacts(tmp_path: Path) -
     assert failure.result.status is ArtifactStatus.FAILURE
     assert success.status is OutcomeStatus.COMPLETE
     assert current.artifacts.list_envelopes() == (success.result,)
+    assert current.artifacts.list_envelopes(artifact_type=CONTRACT.artifact_type) == (
+        success.result,
+    )
+    assert current.artifacts.list_envelopes(artifact_type="operation_error") == ()
+    assert current.artifacts.list_envelopes(
+        include_failure=True,
+        artifact_type="operation_error",
+    ) == (failure.result,)
     assert len(current.artifacts.list_envelopes(include_failure=True)) == 2
 
 

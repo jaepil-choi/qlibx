@@ -155,8 +155,8 @@ class MemoryState(Protocol):
     feedback_cursor: int
 
 
-class StrategyView:
-    """Expose only declared Strategy inputs at a frozen clock position."""
+class _DatasetView:
+    """Expose only declared PIT dataset inputs at a frozen clock position."""
 
     def __init__(
         self,
@@ -165,81 +165,16 @@ class StrategyView:
         bindings: tuple[ResolvedBinding, ...],
         registry: RegistrySnapshot,
         store: ObservationStore,
-        account_state: AccountState | None = None,
-        account_feedback: AccountFeedbackState | None = None,
-        session_performance: PublishedSessionPerformanceState | None = None,
-        memory_state: MemoryState | None = None,
-        artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
     ) -> None:
         self._as_of = as_of
         self._bindings = {binding.semantic_role: binding for binding in bindings}
         self._registry = registry
         self._store = store
-        self._account_state = account_state
-        self._account_feedback = account_feedback
-        self._session_performance = session_performance
-        self._memory_state = memory_state
-        self._artifact_inputs = {
-            artifact.consumer_role: artifact for artifact in artifact_inputs
-        }
         self._accessed: list[AccessRecord] = []
-        self._state_accessed: list[StateAccessRecord] = []
-        self._feedback_accessed: list[FeedbackAccessRecord] = []
-        self._performance_accessed: list[SessionPerformanceAccessRecord] = []
-        self._memory_accessed: list[MemoryAccessRecord] = []
-        self._artifact_accessed: list[ArtifactAccessRecord] = []
 
     @property
     def as_of(self) -> datetime:
         return self._as_of
-
-    def artifact(
-        self,
-        consumer_role: str,
-        payload_type: type[PayloadModel],
-    ) -> PayloadModel:
-        projection = self._artifact_inputs.get(consumer_role)
-        if projection is None:
-            raise ArtifactViewAccessError(
-                "STRATEGY_ARTIFACT_ACCESS_UNDECLARED",
-                {
-                    "consumer_role": consumer_role,
-                    "expected_contract": None,
-                    "actual_contract": None,
-                    "message": f"artifact role {consumer_role!r} was not declared",
-                },
-            )
-        if not isinstance(projection.payload, payload_type):
-            raise ArtifactViewAccessError(
-                "STRATEGY_ARTIFACT_PAYLOAD_TYPE_MISMATCH",
-                {
-                    "requirement_id": projection.requirement_id,
-                    "consumer_role": consumer_role,
-                    "artifact_id": projection.artifact_id,
-                    "expected_contract": {"payload_model": payload_type.__name__},
-                    "actual_contract": {
-                        "payload_model": type(projection.payload).__name__
-                    },
-                    "message": (
-                        f"artifact role {consumer_role!r} contains "
-                        f"{type(projection.payload).__name__}, not {payload_type.__name__}"
-                    ),
-                },
-            )
-        self._artifact_accessed.append(
-            ArtifactAccessRecord(
-                requirement_id=projection.requirement_id,
-                consumer_role=projection.consumer_role,
-                artifact_id=projection.artifact_id,
-                artifact_type=projection.artifact_type,
-                artifact_schema_version=projection.artifact_schema_version,
-                content_hash=projection.content_hash,
-            )
-        )
-        return cast(PayloadModel, projection.payload)
-
-    def artifact_accessed(self) -> tuple[ArtifactAccessRecord, ...]:
-        return tuple(self._artifact_accessed)
 
     def history(self, semantic_role: str) -> pd.DataFrame:
         return self._read(semantic_role)
@@ -315,6 +250,34 @@ class StrategyView:
     def accessed(self) -> tuple[AccessRecord, ...]:
         return tuple(self._accessed)
 
+    def _binding(self, semantic_role: str) -> ResolvedBinding:
+        try:
+            return self._bindings[semantic_role]
+        except KeyError as exc:
+            raise ViewAccessError(f"semantic role {semantic_role!r} was not declared") from exc
+
+
+class _AccountStateView(_DatasetView):
+    """Add actual-account snapshot access to a dataset-scoped view."""
+
+    def __init__(
+        self,
+        *,
+        as_of: datetime,
+        bindings: tuple[ResolvedBinding, ...],
+        registry: RegistrySnapshot,
+        store: ObservationStore,
+        account_state: AccountState | None = None,
+    ) -> None:
+        super().__init__(
+            as_of=as_of,
+            bindings=bindings,
+            registry=registry,
+            store=store,
+        )
+        self._account_state = account_state
+        self._state_accessed: list[StateAccessRecord] = []
+
     def account_snapshot(self) -> AccountState:
         if self._account_state is None:
             raise ViewAccessError("this view has no declared actual-account state")
@@ -322,11 +285,7 @@ class StrategyView:
             StateHolding(
                 instrument_id=str(position.instrument_id),
                 quantity=float(position.quantity),
-                mark=(
-                    None
-                    if position.mark is None
-                    else float(position.mark)
-                ),
+                mark=None if position.mark is None else float(position.mark),
                 marked_at=position.marked_at,
             )
             for position in self._account_state.positions
@@ -349,6 +308,89 @@ class StrategyView:
 
     def state_accessed(self) -> tuple[StateAccessRecord, ...]:
         return tuple(self._state_accessed)
+
+
+class StrategyView(_AccountStateView):
+    """Expose declared Strategy data, evidence, actual state, feedback, and memory."""
+
+    def __init__(
+        self,
+        *,
+        as_of: datetime,
+        bindings: tuple[ResolvedBinding, ...],
+        registry: RegistrySnapshot,
+        store: ObservationStore,
+        account_state: AccountState | None = None,
+        account_feedback: AccountFeedbackState | None = None,
+        session_performance: PublishedSessionPerformanceState | None = None,
+        memory_state: MemoryState | None = None,
+        artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
+    ) -> None:
+        super().__init__(
+            as_of=as_of,
+            bindings=bindings,
+            registry=registry,
+            store=store,
+            account_state=account_state,
+        )
+        self._account_feedback = account_feedback
+        self._session_performance = session_performance
+        self._memory_state = memory_state
+        self._artifact_inputs = {
+            artifact.consumer_role: artifact for artifact in artifact_inputs
+        }
+        self._feedback_accessed: list[FeedbackAccessRecord] = []
+        self._performance_accessed: list[SessionPerformanceAccessRecord] = []
+        self._memory_accessed: list[MemoryAccessRecord] = []
+        self._artifact_accessed: list[ArtifactAccessRecord] = []
+
+    def artifact(
+        self,
+        consumer_role: str,
+        payload_type: type[PayloadModel],
+    ) -> PayloadModel:
+        projection = self._artifact_inputs.get(consumer_role)
+        if projection is None:
+            raise ArtifactViewAccessError(
+                "STRATEGY_ARTIFACT_ACCESS_UNDECLARED",
+                {
+                    "consumer_role": consumer_role,
+                    "expected_contract": None,
+                    "actual_contract": None,
+                    "message": f"artifact role {consumer_role!r} was not declared",
+                },
+            )
+        if not isinstance(projection.payload, payload_type):
+            raise ArtifactViewAccessError(
+                "STRATEGY_ARTIFACT_PAYLOAD_TYPE_MISMATCH",
+                {
+                    "requirement_id": projection.requirement_id,
+                    "consumer_role": consumer_role,
+                    "artifact_id": projection.artifact_id,
+                    "expected_contract": {"payload_model": payload_type.__name__},
+                    "actual_contract": {
+                        "payload_model": type(projection.payload).__name__
+                    },
+                    "message": (
+                        f"artifact role {consumer_role!r} contains "
+                        f"{type(projection.payload).__name__}, not {payload_type.__name__}"
+                    ),
+                },
+            )
+        self._artifact_accessed.append(
+            ArtifactAccessRecord(
+                requirement_id=projection.requirement_id,
+                consumer_role=projection.consumer_role,
+                artifact_id=projection.artifact_id,
+                artifact_type=projection.artifact_type,
+                artifact_schema_version=projection.artifact_schema_version,
+                content_hash=projection.content_hash,
+            )
+        )
+        return cast(PayloadModel, projection.payload)
+
+    def artifact_accessed(self) -> tuple[ArtifactAccessRecord, ...]:
+        return tuple(self._artifact_accessed)
 
     def account_feedback(self) -> AccountFeedbackState:
         if self._account_feedback is None:
@@ -412,23 +454,17 @@ class StrategyView:
     def memory_accessed(self) -> tuple[MemoryAccessRecord, ...]:
         return tuple(self._memory_accessed)
 
-    def _binding(self, semantic_role: str) -> ResolvedBinding:
-        try:
-            return self._bindings[semantic_role]
-        except KeyError as exc:
-            raise ViewAccessError(f"semantic role {semantic_role!r} was not declared") from exc
+
+class MaterializeView(_DatasetView):
+    """Dataset-only view for model or transform materialization."""
 
 
-class MaterializeView(StrategyView):
-    """Role-scoped view for model or transform materialization."""
+class ExecutionView(_DatasetView):
+    """Dataset-only market view for an execution callback."""
 
 
-class ExecutionView(StrategyView):
-    """Role-scoped market view for an execution callback."""
-
-
-class MonitorView(StrategyView):
-    """Role-scoped data view for an independent monitoring callback."""
+class MonitorView(_AccountStateView):
+    """Dataset and committed-account view for independent monitoring."""
 
 
 class ViewGate:
@@ -477,15 +513,12 @@ class ViewGate:
         self,
         clock: Clock,
         bindings: tuple[ResolvedBinding, ...],
-        *,
-        account_state: AccountState,
     ) -> ExecutionView:
         return ExecutionView(
             as_of=clock.now,
             bindings=bindings,
             registry=self._registry,
             store=self._store,
-            account_state=account_state,
         )
 
     def monitor_view(

@@ -161,7 +161,7 @@ class HorizonStrategy(NormalizedValueStrategy):
         raise AssertionError("must not run without horizon_end")
 
 
-def test_uc_pit_001_missing_horizon_fails_before_strategy_calculation(
+def test_missing_horizon_requirement_fails_before_strategy_calculation(
     tmp_path: Path,
 ) -> None:
     current, _ = project_with_market(tmp_path)

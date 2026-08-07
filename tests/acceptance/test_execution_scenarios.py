@@ -501,7 +501,7 @@ def test_post_fill_publication_failure_reports_committed_account(
     assert account.snapshot().holdings() == {"A005930": 129}
 
 
-def test_uc_exec_001_and_uc_alpha_child_001_isolate_frozen_daily_children(
+def test_uc_exec_001_isolates_frozen_daily_children(
     real_dw_case: RealDwProject,
 ) -> None:
     parent, intent, artifact = _parent_decision(real_dw_case, run_id="daily-child-parent")

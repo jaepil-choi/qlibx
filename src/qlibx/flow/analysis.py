@@ -1,7 +1,5 @@
 """Stored-artifact analysis and presentation-only report orchestration."""
 
-import hashlib
-
 from qlibx.analysis import (
     AnalysisError,
     AnalysisResult,
@@ -23,10 +21,15 @@ from qlibx.analysis import (
 )
 from qlibx.context import ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.flow.composition import STORED_SIGNAL_CONTRACT
 from qlibx.flow.daily import ExecutionEvidence, SimulationCheckpoint
+from qlibx.flow.failures import (
+    build_operation_error,
+    publish_failed_errors,
+    publish_failed_outcome,
+)
 from qlibx.flow.monitoring import CONSTRAINT_MONITORING_CONTRACT
 from qlibx.kernel import BacktestClock
 
@@ -206,14 +209,7 @@ class AnalysisFlow:
             registry=self._registry,
         )
         if resolution.failed:
-            published = tuple(self._artifacts.publish_failure(error) for error in resolution.errors)
-            return OperationOutcome(
-                status=OutcomeStatus.FAILED,
-                diagnostics=tuple(
-                    item.result for item in published if item.status is OutcomeStatus.COMPLETE
-                ),
-                errors=resolution.errors,
-            )
+            return publish_failed_errors(self._artifacts, resolution.errors)
         view = ViewGate(self._registry, self._store).materialize_view(
             BacktestClock(request.evaluation_time),
             resolution.bindings,
@@ -388,23 +384,13 @@ class AnalysisFlow:
         code: str,
         context: dict[str, object],
     ) -> OperationOutcome:
-        seed = hashlib.sha256(f"{identity}:{stage_path}:{code}".encode()).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation="analysis.run",
             stage_path=stage_path,
             error_code=code,
-            context=context,
-            commit_status=CommitStatus.NONE,
-            retry_preconditions=("provide complete compatible stored evidence",),
             idempotency_identity=identity,
-            error_id=f"error-{seed}",
+            error_identity_seed=f"{identity}:{stage_path}:{code}",
+            context=context,
+            retry_preconditions=("provide complete compatible stored evidence",),
         )
-        published = self._artifacts.publish_failure(error)
-        diagnostics = (
-            (published.result,) if published.status is OutcomeStatus.COMPLETE else published.errors
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=(error,),
-        )
+        return publish_failed_outcome(self._artifacts, error)

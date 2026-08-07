@@ -859,7 +859,6 @@ class DailyExecutionFlow:
         view = self._gate.execution_view(
             self._clock,
             (binding, *((volume_binding,) if volume_binding is not None else ())),
-            account_state=before,
         )
         session_date = event.ts.astimezone(ZoneInfo(self._profile.session_timezone)).date()
         frame = view.session(
@@ -1166,7 +1165,6 @@ class DailyExecutionFlow:
         view = self._gate.execution_view(
             self._clock,
             (binding,),
-            account_state=before,
         )
         session_date = event.ts.astimezone(ZoneInfo(self._profile.session_timezone)).date()
         frame = view.session(

@@ -1,6 +1,8 @@
 import ast
 from pathlib import Path
 
+from qlibx.context import ExecutionView, MaterializeView, MonitorView, StrategyView
+
 ROOT = Path(__file__).parents[1]
 SOURCE = ROOT / "src" / "qlibx"
 
@@ -67,6 +69,35 @@ def test_layer_import_direction() -> None:
             if forbidden:
                 violations.append(f"{path.relative_to(ROOT)} imports {sorted(forbidden)}")
     assert not violations, "\n".join(violations)
+
+
+def test_role_views_expose_only_their_authorized_capabilities() -> None:
+    dataset_capabilities = {"as_of", "history", "session", "at", "latest", "accessed"}
+    strategy_only_capabilities = {
+        "artifact",
+        "artifact_accessed",
+        "account_feedback",
+        "feedback_accessed",
+        "latest_session_performance",
+        "performance_accessed",
+        "memory_snapshot",
+        "memory_accessed",
+    }
+    account_capabilities = {"account_snapshot", "state_accessed"}
+
+    for view_type in (MaterializeView, ExecutionView, MonitorView, StrategyView):
+        assert all(hasattr(view_type, capability) for capability in dataset_capabilities)
+    for view_type in (MaterializeView, ExecutionView, MonitorView):
+        assert not any(
+            hasattr(view_type, capability) for capability in strategy_only_capabilities
+        )
+    for view_type in (MaterializeView, ExecutionView):
+        assert not any(hasattr(view_type, capability) for capability in account_capabilities)
+    assert all(hasattr(MonitorView, capability) for capability in account_capabilities)
+    assert all(hasattr(StrategyView, capability) for capability in account_capabilities)
+    assert all(
+        hasattr(StrategyView, capability) for capability in strategy_only_capabilities
+    )
 
 
 def test_production_source_does_not_read_wall_clock_directly() -> None:

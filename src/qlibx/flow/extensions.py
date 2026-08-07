@@ -8,7 +8,7 @@ from typing import cast
 
 from qlibx.context import MaterializeView, ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.extensions import (
     ExtensionRegistration,
@@ -19,6 +19,11 @@ from qlibx.extensions import (
     NeutralizationResult,
 )
 from qlibx.extensions.local_modules import LocalModuleLoader
+from qlibx.flow.failures import (
+    build_operation_error,
+    publish_failed_errors,
+    publish_failed_outcome,
+)
 from qlibx.kernel import BacktestClock
 
 EXTENSION_REGISTRATION_CONTRACT = ArtifactContract(
@@ -74,14 +79,7 @@ class ExtensionFlow:
             registry=self._registry,
         )
         if resolution.failed:
-            published = tuple(self._artifacts.publish_failure(error) for error in resolution.errors)
-            return OperationOutcome(
-                status=OutcomeStatus.FAILED,
-                diagnostics=tuple(
-                    item.result for item in published if item.status is OutcomeStatus.COMPLETE
-                ),
-                errors=resolution.errors,
-            )
+            return publish_failed_errors(self._artifacts, resolution.errors)
 
         view = ViewGate(self._registry, self._store).materialize_view(
             BacktestClock(request.evaluation_time),
@@ -152,7 +150,9 @@ class ExtensionFlow:
 
     def registered(self) -> tuple[ExtensionRegistration, ...]:
         registrations: list[ExtensionRegistration] = []
-        for envelope in self._artifacts.list_envelopes():
+        for envelope in self._artifacts.list_envelopes(
+            artifact_type=EXTENSION_REGISTRATION_CONTRACT.artifact_type
+        ):
             if envelope.artifact_type != EXTENSION_REGISTRATION_CONTRACT.artifact_type:
                 continue
             loaded = self._artifacts.load_model(
@@ -235,25 +235,13 @@ class ExtensionFlow:
         context: dict[str, object],
         retry: tuple[str, ...],
     ) -> OperationOutcome:
-        seed = hashlib.sha256(
-            f"{request.invocation_id}:{stage_path}:{code}".encode()
-        ).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation="extension.validate",
             stage_path=stage_path,
             error_code=code,
-            context=context,
-            commit_status=CommitStatus.NONE,
-            retry_preconditions=retry,
             idempotency_identity=request.invocation_id,
-            error_id=f"error-{seed}",
+            error_identity_seed=f"{request.invocation_id}:{stage_path}:{code}",
+            context=context,
+            retry_preconditions=retry,
         )
-        published = self._artifacts.publish_failure(error)
-        diagnostics = (
-            (published.result,) if published.status is OutcomeStatus.COMPLETE else published.errors
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=(error,),
-        )
+        return publish_failed_outcome(self._artifacts, error)

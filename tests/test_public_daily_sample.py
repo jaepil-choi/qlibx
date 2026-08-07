@@ -1,7 +1,7 @@
 import csv
 import json
 import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import duckdb
@@ -59,7 +59,10 @@ def test_daily_sample_rows_reconcile_to_real_dw() -> None:
         assert row["available_at"].endswith("T15:30:00+09:00")
 
 
-def test_daily_sample_materializes_and_runs_public_closed_loop(tmp_path: Path) -> None:
+def test_daily_sample_materializes_and_runs_public_closed_loop(
+    tmp_path: Path,
+    run_python_subprocess: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     root = tmp_path / "daily-sample-project"
     QlibxProject.init(root, apply=True)
     project = QlibxProject.open(root)
@@ -75,14 +78,7 @@ def test_daily_sample_materializes_and_runs_public_closed_loop(tmp_path: Path) -
     assert all(change.action is ChangeAction.UNCHANGED for change in repeated.changes)
 
     script = root / "examples" / "qlibx_owned" / "daily_closed_loop" / "run.py"
-    completed = subprocess.run(
-        [sys.executable, str(script), str(root)],
-        check=True,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    completed = run_python_subprocess((script, root), check=True, cwd=root)
     result = json.loads(completed.stdout)
 
     assert result["selected_instruments"] == ["A005930", "A000660"]

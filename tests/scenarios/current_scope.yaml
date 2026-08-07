@@ -5,13 +5,11 @@ required_current_use_cases:
   - UC-DATA-001
   - UC-DATA-002
   - UC-ERROR-001
-  - UC-PIT-001
   - UC-CONSTRAINT-001
   - UC-CONSTRAINT-002
   - UC-SIGNAL-001
   - UC-SIGNAL-002
   - UC-ALPHA-BUDGET-001
-  - UC-ALPHA-CHILD-001
   - UC-ALPHA-ADAPTIVE-001
   - UC-ENSEMBLE-001
   - UC-PORTFOLIO-001
@@ -44,7 +42,6 @@ coverage_sets:
     - UC-EXEC-001
     - UC-SIGNAL-002
     - UC-ALPHA-BUDGET-001
-    - UC-ALPHA-CHILD-001
     - UC-ALPHA-ADAPTIVE-001
     - UC-ENSEMBLE-001
     - UC-ARTIFACT-001
@@ -350,7 +347,7 @@ scenarios:
 
   - id: UC-EXEC-001
     case: frozen_daily_children
-    test: tests/acceptance/test_execution_scenarios.py::test_uc_exec_001_and_uc_alpha_child_001_isolate_frozen_daily_children
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_exec_001_isolates_frozen_daily_children
     inputs:
       data_kind: real
       sources: [data/DW/fng_stock_daily_prices.csv]
@@ -359,16 +356,7 @@ scenarios:
       parent_mutation: false
       child_account_isolation: true
 
-  - id: UC-ALPHA-CHILD-001
-    case: frozen_daily_children
-    test: tests/acceptance/test_execution_scenarios.py::test_uc_exec_001_and_uc_alpha_child_001_isolate_frozen_daily_children
-    inputs:
-      data_kind: real
-      sources: [data/DW/fng_stock_daily_prices.csv]
-    expected:
-      strategy_rerun: false
-      memory_mutation: false
-      parent_mutation: false
+# UC-ALPHA-CHILD-001 is excluded below until real next-close/next-open closure evidence exists.
 
 
 
@@ -419,6 +407,14 @@ scenarios:
       residual_budget: 1.0
 
 excluded_readiness_gaps:
+  - id: GAP-MATERIALIZATION-PIT-001
+    excludes_current_use_case: UC-PIT-001
+    reason: generic Strategy requirement ordering does not prove a real forward-label Model materialization boundary
+    closure_oracle: optional materialization fails on missing horizon before calculation or mutation, then succeeds with a valid PIT label horizon
+  - id: GAP-EXECUTION-CONVENTION-001
+    excludes_current_use_case: UC-ALPHA-CHILD-001
+    reason: next-close participation-rate children do not prove a next-open schedule and price convention
+    closure_oracle: one frozen real-PIT parent executes next-close and next-open without Strategy rerun, with isolated child Account and lineage
   - id: GAP-STRATEGY-COMPOSITION-001
     excludes_current_use_case: UC-ALPHA-PATH-001
     reason: decision-intent replay does not prove frozen Strategy-result composition

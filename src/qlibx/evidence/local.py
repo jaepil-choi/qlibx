@@ -321,20 +321,29 @@ class LocalArtifactBackend:
             result=LoadedArtifact(envelope=envelope, payload=payload),
         )
 
-    def list_envelopes(self, *, include_failure: bool = False) -> tuple[ArtifactEnvelope, ...]:
+    def list_envelopes(
+        self,
+        *,
+        include_failure: bool = False,
+        artifact_type: str | None = None,
+    ) -> tuple[ArtifactEnvelope, ...]:
         if not self._catalog_path.is_file():
             return ()
+        conditions: list[str] = []
+        parameters: list[str] = []
+        if not include_failure:
+            conditions.append("status = ?")
+            parameters.append(ArtifactStatus.COMPLETE.value)
+        if artifact_type is not None:
+            conditions.append("artifact_type = ?")
+            parameters.append(artifact_type)
+        where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         connection = self._connect_reader()
         try:
-            if include_failure:
-                rows = connection.execute(
-                    "SELECT envelope_json FROM artifacts ORDER BY artifact_id"
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT envelope_json FROM artifacts WHERE status = ? ORDER BY artifact_id",
-                    [ArtifactStatus.COMPLETE.value],
-                ).fetchall()
+            rows = connection.execute(
+                f"SELECT envelope_json FROM artifacts{where_clause} ORDER BY artifact_id",
+                parameters,
+            ).fetchall()
         finally:
             connection.close()
         return tuple(ArtifactEnvelope.model_validate_json(row[0]) for row in rows)

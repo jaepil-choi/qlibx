@@ -14,7 +14,7 @@ reference_sources:
 capabilities:
   - id: pit_cross_sectional_signal
     status: current_supported
-    prd_use_cases: [UC-PIT-001, UC-SIGNAL-001]
+    prd_use_cases: [UC-SIGNAL-001]
     outcome: Strategy reads only declared observations available at decision time.
   - id: stored_member_and_ensemble
     status: current_supported

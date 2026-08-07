@@ -7,7 +7,8 @@ Use the exact public error fields. Candidate actions are guidance, not package-o
 | SOURCE_NOT_FOUND or SOURCE_READ_FAILED | The declared physical source is unavailable or unreadable | Correct the explicit source or format |
 | BOUND_FIELD_MISSING | A confirmed binding names a field absent from the source | Rebind an existing field or choose another source |
 | LOGICAL_KEY_NULL or LOGICAL_KEY_DUPLICATE | The declared logical identity is invalid | Correct rows or add the real event/sequence key |
-| AVAILABLE_AT_INVALID | The confirmed availability input cannot be parsed | Choose a release timestamp, supported delay rule, or enriched source |
+| AVAILABLE_AT_INVALID | The confirmed availability input is null or otherwise lacks a usable instant | Choose a release timestamp, supported delay rule, or enriched source |
+| TIMESTAMP_VALUES_UNPARSEABLE | A non-null availability or observation-time value cannot be parsed | Correct the bounded offending values before declaring timezone semantics |
 | TIMESTAMP_TIMEZONE_UNDECLARED | A naive timestamp has no declared timezone meaning | Confirm its IANA source timezone or provide offset-qualified timestamps |
 | TIMESTAMP_TIMEZONE_UNUSED | A timezone was declared although every parsed timestamp already carries an offset | Remove the unused source_timezone declaration |
 | TIMESTAMP_LOCALIZATION_FAILED | Local timestamps are mixed, ambiguous, or nonexistent | Provide offset-qualified timestamps that identify exact instants |

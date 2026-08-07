@@ -1,12 +1,15 @@
 """PIT-safe constraint adjustment and independent validation orchestration."""
 
-import hashlib
-
 from qlibx.context import AccessRecord, MaterializeView, ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver, Resolution
 from qlibx.data.requirements import ComponentRequirement
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
+from qlibx.flow.failures import (
+    build_operation_error,
+    publish_failed_errors,
+    publish_failed_outcome,
+)
 from qlibx.flow.portfolio import PORTFOLIO_RESULT_CONTRACT
 from qlibx.kernel import BacktestClock
 from qlibx.portfolio import (
@@ -304,15 +307,7 @@ class ConstraintFlow:
         )
 
     def _resolution_failure(self, errors: tuple[OperationError, ...]) -> OperationOutcome:
-        published = tuple(self._artifacts.publish_failure(error) for error in errors)
-        diagnostics = tuple(
-            item.result for item in published if item.status is OutcomeStatus.COMPLETE
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=errors,
-        )
+        return publish_failed_errors(self._artifacts, errors)
 
     def _failure(
         self,
@@ -323,23 +318,15 @@ class ConstraintFlow:
         code: str,
         context: dict[str, object],
     ) -> OperationOutcome:
-        seed = hashlib.sha256(f"{identity}:{stage_path}:{code}".encode()).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation=operation,
             stage_path=stage_path,
             error_code=code,
-            context=context,
-            commit_status=CommitStatus.NONE,
-            retry_preconditions=("provide complete PIT benchmark and execution-lot inputs",),
             idempotency_identity=identity,
-            error_id=f"error-{seed}",
+            error_identity_seed=f"{identity}:{stage_path}:{code}",
+            context=context,
+            retry_preconditions=(
+                "provide complete PIT benchmark and execution-lot inputs",
+            ),
         )
-        published = self._artifacts.publish_failure(error)
-        diagnostics = (
-            (published.result,) if published.status is OutcomeStatus.COMPLETE else published.errors
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=(error,),
-        )
+        return publish_failed_outcome(self._artifacts, error)

@@ -1,6 +1,6 @@
 import json
 import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from qlibx import QlibxProject
@@ -9,20 +9,18 @@ from qlibx.config import ChangeAction
 SAMPLE_ID = "strategy-extension-v1"
 
 
-def run_sample(script: Path, project_root: Path) -> dict[str, object]:
-    completed = subprocess.run(
-        [sys.executable, str(script), str(project_root)],
-        check=True,
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+def run_sample(
+    script: Path,
+    project_root: Path,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+) -> dict[str, object]:
+    completed = runner((script, project_root), check=True, cwd=project_root)
     return json.loads(completed.stdout)
 
 
 def test_uc_extension_002_installed_strategy_sample_validates_registers_and_executes(
     tmp_path: Path,
+    run_python_subprocess: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     root = tmp_path / "strategy-extension-project"
     QlibxProject.init(root, apply=True)
@@ -40,8 +38,8 @@ def test_uc_extension_002_installed_strategy_sample_validates_registers_and_exec
     assert "from qlibx." not in strategy_source
     script = sample_dir / "run.py"
 
-    first = run_sample(script, root)
-    repeated = run_sample(script, root)
+    first = run_sample(script, root, run_python_subprocess)
+    repeated = run_sample(script, root, run_python_subprocess)
 
     assert first == repeated
     assert first["module_path"] == "sample_ranked_signal.py"
@@ -61,13 +59,6 @@ def test_uc_extension_002_installed_strategy_sample_validates_registers_and_exec
         installed.read_text(encoding="utf-8") + "\n# user change\n",
         encoding="utf-8",
     )
-    refused = subprocess.run(
-        [sys.executable, str(script), str(root)],
-        check=False,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    refused = run_python_subprocess((script, root), check=False, cwd=root)
     assert refused.returncode != 0
     assert "refusing to overwrite modified" in refused.stderr

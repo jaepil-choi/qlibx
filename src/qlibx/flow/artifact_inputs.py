@@ -1,6 +1,7 @@
 """Flow-owned resolution of typed Strategy artifact inputs."""
 
 import hashlib
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -309,7 +310,7 @@ class StrategyArtifactResolver:
 
     @staticmethod
     def _duplicates(values: list[str]) -> tuple[str, ...]:
-        return tuple(sorted({value for value in values if values.count(value) > 1}))
+        return tuple(sorted(value for value, count in Counter(values).items() if count > 1))
 
     @staticmethod
     def _contract_context(requirement: StrategyArtifactRequirement) -> dict[str, object]:
@@ -317,8 +318,6 @@ class StrategyArtifactResolver:
             "artifact_type": requirement.artifact_type,
             "artifact_schema_version": requirement.artifact_schema_version,
         }
-
-
 
     @staticmethod
     def _error(

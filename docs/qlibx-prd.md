@@ -1676,7 +1676,7 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 - `UC-DATA-001`처럼 field 이름을 강제하지 않고 selected instrument/availability binding과 logical key를 validation한다.
 - Availability가 불명확하면 `UC-AGENT-001`처럼 agent가 look-ahead와 delay-rule 후보를 설명하고 user가 선택한다.
 - 아직 사용하지 않는 metadata나 optional workflow requirement가 최초 registration을 막지 않는다.
-- 실제 operation의 requirement gap은 `UC-DATA-002`, `UC-PIT-001`, `UC-ERROR-001`처럼 package error → agent 제안 →
+- 실제 current operation의 requirement gap은 `UC-DATA-002`, `UC-ERROR-001`처럼 package error → agent 제안 →
   user 결정 → package validation → safe retry로 이어진다.
 - Frozen invocation과 `available_at <= evaluation_time`을 위반하는 data access는 거부된다.
 
@@ -1690,8 +1690,8 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
   표시하지 않는다.
 - `UC-ENSEMBLE-001`에서 기존 Strategy result를 member로 조합하고 ticker-level netting과 lineage를 확인할 수 있다.
 - `UC-PORTFOLIO-001`처럼 같은 alpha를 서로 다른 valid instrument/exchange construction에 사용할 수 있다.
-- Parent/child와 adaptive scenario는 `UC-ALPHA-CHILD-001`, `UC-ALPHA-ADAPTIVE-001`의 state isolation과 evidence를
-  만족한다.
+- Current frozen-child regression과 adaptive scenario는 parent/child Account isolation 및 `UC-ALPHA-ADAPTIVE-001`의 state/evidence를
+  만족한다. Next-close와 next-open의 실제 비교인 `UC-ALPHA-CHILD-001`은 §15.5 readiness gap이다.
 
 ### 15.3 Construction, execution and monitoring
 
@@ -1732,6 +1732,8 @@ decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 
 | `GAP-TIME-001` (declared time semantics closed) | Naive source timestamp는 declared `source_timezone` 없이 등록되지 않고, session query는 caller가 선언한 session timezone의 calendar day로 관측치를 선택한다. Offset-qualified source의 unused timezone과 ambiguous local time은 mutation 전에 실패한다 | `tests/test_data_registration.py`에서 source localization과 PIT cutoff를, `tests/test_session_timezone.py`에서 UTC/KST 날짜 경계의 session selection을 검증한다 |
 | `GAP-CONSTRAINT-001` (default public workflow closed) | 설치 프로젝트의 선택적 constraint workflow가 고정 no-short·10% floor·PIT benchmark cap adjustment와 독립 validation을 제공한다. Constraint-free workflow는 benchmark를 요구하지 않고, validation은 adjustment와 동일한 benchmark access identity를 요구하며 lot-rounding residual을 evidence로 보존한다. Sector, turnover와 liquidity constraint는 future work다 | `tests/test_public_constraints.py`와 `tests/test_public_constraint_sample.py`에서 같은 PIT benchmark input의 adjustment/validation 일치, missing·ambiguous·future-hidden·incomplete weight의 mutation 전 실패, lot residual에 따른 ineligible 결과와 installed sample 결정론을 검증한다 |
 | `GAP-MONITOR-001` (public no-trade monitoring closed) | 설치 project가 committed Account checkpoint에서 독립 constraint monitoring을 frozen spec으로 실행한다. 같은 evaluation instant가 Account valuation과 benchmark PIT cutoff를 결정하며, wall clock이나 daily flow 자동 삽입을 사용하지 않는다 | `tests/test_public_constraints.py`에서 checkpoint 복원, 동일 spec의 동일 artifact identity, held-position mark freshness, stale valuation과 손상 checkpoint의 typed failure를 검증한다 |
+| `GAP-MATERIALIZATION-PIT-001` | `UC-PIT-001` 요구는 forward-return label을 만드는 실제 optional Model materialization 전에 `horizon_end` 누락을 거부하는 것이다. Current test는 Strategy requirement ordering만 검증하며 Model, label availability 또는 materialization operation을 실행하지 않으므로 current support 증거가 아니다 | Public optional materialization operation/fixture가 real forward-label binding을 사용하고, missing horizon이 계산·artifact/state mutation 전에 typed failure가 되며 valid horizon retry가 PIT cutoff를 지키는 acceptance를 통과한다 |
+| `GAP-EXECUTION-CONVENTION-001` | `UC-ALPHA-CHILD-001`은 같은 frozen parent decision으로 next-close와 next-open을 비교해야 한다. Current child test는 next-close에서 participation-rate만 바꾸므로 generic isolation 회귀일 뿐 next-open support 증거가 아니다 | 같은 real PIT parent decision을 Strategy/Model 재실행 없이 real next-close와 next-open schedule/price contract로 실행하고, 각 child Account와 lineage가 격리되며 parent가 불변임을 증명한다 |
 | `GAP-STRATEGY-COMPOSITION-001` | `UC-EXTENSION-002`로 project-local Strategy validation, exact registration 실행과 typed artifact input은 installed workflow로 닫혔다. 아직 `StrategyResult:v1`과 Ensemble special flow는 여러 path-dependent source의 Account/Memory identity와 cursor를 한 result에 보존하지 못하므로 full frozen Strategy-result composition은 current support가 아니다 | 남은 closure acceptance는 path-dependent result를 producer rerun 없이 다른 Strategy/Ensemble이 소비하고, consumed artifact와 **모든** source state/cursor lineage가 보존되며 downstream execution만 current Account를 사용함을 증명한다. 기존 replay/rerun fixture는 이 oracle을 대신하지 않는다 |
 | `GAP-RECOVERY-001` (default local daily flow closed) | Versioned recovery point가 Account checkpoint, Strategy Memory, feedback cursor, scheduler position과 누락 가능 evidence를 묶는다. External Account/OMS와 distributed recovery는 별도 contract가 필요하다 | `tests/scenarios/recovery.yaml`의 real-DW process-crash matrix에서 각 crash point의 resume이 uninterrupted result와 같고 decision/Fill/Memory를 중복 적용하지 않으며 changed identity는 mutation 전 `RESUME_BRANCH_REQUIRED`로 실패한다 |
 | `GAP-CATALOG-001` (default local backend closed) | DuckDB schema v1, bounded cross-process writer lock, payload staging, append-only publication audit와 abandoned pre-commit recovery를 current local backend가 제공한다. External backend와 multi-host filesystem은 별도 contract validation이 필요하다 | `tests/scenarios/catalog_recovery.yaml`의 concurrent writer와 process-crash fixture에서 partial payload가 reusable success로 보이지 않고 conflict/idempotent/recovery 결과가 deterministic하다 |

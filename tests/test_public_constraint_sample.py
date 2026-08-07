@@ -1,7 +1,7 @@
 import csv
 import json
 import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import duckdb
@@ -82,7 +82,10 @@ def test_constraint_sample_rows_reconcile_to_real_sources() -> None:
         assert float(row["lot_size"]) == 1
 
 
-def test_constraint_sample_materializes_and_runs_deterministically(tmp_path: Path) -> None:
+def test_constraint_sample_materializes_and_runs_deterministically(
+    tmp_path: Path,
+    run_python_subprocess: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     root = tmp_path / "constraint-sample-project"
     QlibxProject.init(root, apply=True)
     project = QlibxProject.open(root)
@@ -103,14 +106,7 @@ def test_constraint_sample_materializes_and_runs_deterministically(tmp_path: Pat
     script = root / "examples" / "qlibx_owned" / "constraint_workflow" / "run.py"
 
     def run_sample() -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(script), str(root)],
-            check=True,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
+        completed = run_python_subprocess((script, root), check=True, cwd=root)
         return json.loads(completed.stdout)
 
     first = run_sample()

@@ -193,6 +193,95 @@ def test_naive_source_timestamps_require_declared_timezone(tmp_path: Path) -> No
     assert project.registry_snapshot().datasets == ()
 
 
+@pytest.mark.parametrize(
+    ("rows", "invalid_count", "samples"),
+    (
+        (
+            "not-a-date,005930,10.0\nstill-not-a-date,069500,20.0\n",
+            2,
+            ("not-a-date", "still-not-a-date"),
+        ),
+        (
+            "2025-01-02T06:30:00+00:00,005930,10.0\nnot-a-date,069500,20.0\n",
+            1,
+            ("not-a-date",),
+        ),
+    ),
+)
+def test_non_null_unparseable_availability_is_not_reported_as_timezone_error(
+    tmp_path: Path,
+    rows: str,
+    invalid_count: int,
+    samples: tuple[str, ...],
+) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text("DATE,CODE,VALUE\n" + rows, encoding="utf-8")
+    project = initialized_project(tmp_path)
+    undeclared = registration("market", "market.csv").model_copy(
+        update={"source_timezone": None}
+    )
+
+    outcome = project.register_dataset(undeclared)
+
+    assert outcome.status is OutcomeStatus.FAILED
+    error = outcome.errors[0]
+    assert error.error_code == "TIMESTAMP_VALUES_UNPARSEABLE"
+    assert error.stage_path == "dataset.register.available_at"
+    assert error.requirement_id == "dataset.available_at"
+    assert error.context == {
+        "field": "DATE",
+        "invalid_count": invalid_count,
+        "samples": samples,
+    }
+    assert project.registry_snapshot().datasets == ()
+
+
+def test_unparseable_observation_time_identifies_its_requirement(tmp_path: Path) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text(
+        "AVAILABLE,OBSERVED,CODE,VALUE\n"
+        "2025-01-02T06:30:00+00:00,not-a-date,005930,10.0\n",
+        encoding="utf-8",
+    )
+    project = initialized_project(tmp_path)
+    observed = registration("market", "market.csv").model_copy(
+        update={
+            "source_timezone": None,
+            "available_at": AvailableAtField(field="AVAILABLE"),
+            "observation_time_field": "OBSERVED",
+            "logical_key": ("AVAILABLE", "CODE"),
+        }
+    )
+
+    outcome = project.register_dataset(observed)
+
+    assert outcome.status is OutcomeStatus.FAILED
+    error = outcome.errors[0]
+    assert error.error_code == "TIMESTAMP_VALUES_UNPARSEABLE"
+    assert error.stage_path == "dataset.register.observation_time"
+    assert error.requirement_id == "dataset.observation_time"
+    assert error.context["samples"] == ("not-a-date",)
+    assert project.registry_snapshot().datasets == ()
+
+
+def test_null_availability_retains_available_at_invalid_error(tmp_path: Path) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text("DATE,CODE,VALUE\n,005930,10.0\n", encoding="utf-8")
+    project = initialized_project(tmp_path)
+    nullable = registration("market", "market.csv").model_copy(
+        update={"source_timezone": None, "logical_key": ("CODE",)}
+    )
+
+    outcome = project.register_dataset(nullable)
+
+    assert outcome.status is OutcomeStatus.FAILED
+    error = outcome.errors[0]
+    assert error.error_code == "AVAILABLE_AT_INVALID"
+    assert error.stage_path == "dataset.register.available_at"
+    assert error.requirement_id == "dataset.available_at"
+    assert project.registry_snapshot().datasets == ()
+
+
 def test_declared_source_timezone_localizes_naive_timestamps(tmp_path: Path) -> None:
     source = tmp_path / "market.csv"
     source.write_text(

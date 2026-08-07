@@ -1,6 +1,5 @@
 """Producer-independent stored Strategy composition."""
 
-import hashlib
 import math
 from dataclasses import dataclass
 from enum import StrEnum
@@ -8,7 +7,7 @@ from enum import StrEnum
 from pydantic import Field, model_validator
 
 from qlibx.data import ComponentRequirement, RegistrySnapshot
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import (
     ArtifactEnvelope,
     DependencyEdge,
@@ -19,6 +18,7 @@ from qlibx.flow.artifact_inputs import (
     STORED_SIGNAL_CONTRACT,
     STRATEGY_RESULT_CONTRACT,
 )
+from qlibx.flow.failures import build_operation_error, publish_failed_outcome
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
 from qlibx.models import QlibxModel
 from qlibx.operations import (
@@ -408,18 +408,19 @@ class CompositionFlow:
         code: str,
         context: dict[str, object],
     ) -> OperationOutcome:
-        seed = hashlib.sha256(
-            f"{invocation.invocation_id}:{code}".encode()
-        ).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation="ensemble.run",
             stage_path="ensemble.run.compatibility",
             error_code=code,
-            context=context,
-            commit_status=CommitStatus.NONE,
-            retry_preconditions=("select compatible stored member results or a flexible budget",),
             idempotency_identity=invocation.invocation_id,
-            error_id=f"error-{seed}",
+            error_identity_seed=f"{invocation.invocation_id}:{code}",
+            context=context,
+            retry_preconditions=(
+                "select compatible stored member results or a flexible budget",
+            ),
         )
-        self._artifacts.publish_failure(error)
-        return OperationOutcome(status=OutcomeStatus.FAILED, errors=(error,))
+        return publish_failed_outcome(
+            self._artifacts,
+            error,
+            include_publication_diagnostics=False,
+        )

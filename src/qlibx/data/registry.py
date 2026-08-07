@@ -171,6 +171,22 @@ class DatasetRegistry:
                     )
                 )
         except TimestampNormalizationError as exc:
+            if exc.code == "TIMESTAMP_VALUES_UNPARSEABLE":
+                failed_field = str(exc.context["field"])
+                is_availability = failed_field == time_field
+                return failure(
+                    registration,
+                    invocation_id,
+                    "available_at" if is_availability else "observation_time",
+                    exc.code,
+                    requirement_id=(
+                        "dataset.available_at"
+                        if is_availability
+                        else "dataset.observation_time"
+                    ),
+                    context=exc.context,
+                    retry=("replace non-null values that cannot be parsed as timestamps",),
+                )
             retry = {
                 "TIMESTAMP_TIMEZONE_UNDECLARED": (
                     "declare source_timezone for the naive source, or provide "
@@ -179,7 +195,10 @@ class DatasetRegistry:
                 "TIMESTAMP_LOCALIZATION_FAILED": (
                     "provide offset-qualified timestamps for the ambiguous or mixed local times",
                 ),
-            }[exc.code]
+            }.get(
+                exc.code,
+                ("provide timestamps with explicit, parseable instant semantics",),
+            )
             return failure(
                 registration,
                 invocation_id,
@@ -187,6 +206,18 @@ class DatasetRegistry:
                 exc.code,
                 context=exc.context,
                 retry=retry,
+            )
+        parsed_time = available_at.utc
+        invalid_time = int(parsed_time.isna().sum())
+        if invalid_time:
+            return failure(
+                registration,
+                invocation_id,
+                "available_at",
+                "AVAILABLE_AT_INVALID",
+                requirement_id="dataset.available_at",
+                context={"invalid_rows": invalid_time, "field": time_field},
+                retry=("bind a parseable availability field or confirm a valid delay rule",),
             )
         if registration.source_timezone is not None and not any(
             item.was_naive for item in normalized_fields
@@ -200,18 +231,6 @@ class DatasetRegistry:
                 retry=(
                     "remove source_timezone; the source timestamps already carry an offset",
                 ),
-            )
-        parsed_time = available_at.utc
-        invalid_time = int(parsed_time.isna().sum())
-        if invalid_time:
-            return failure(
-                registration,
-                invocation_id,
-                "available_at",
-                "AVAILABLE_AT_INVALID",
-                requirement_id="dataset.available_at",
-                context={"invalid_rows": invalid_time, "field": time_field},
-                retry=("bind a parseable availability field or confirm a valid delay rule",),
             )
         if not isinstance(registration.available_at, AvailableAtField):
             parsed_time = parsed_time + pd.to_timedelta(

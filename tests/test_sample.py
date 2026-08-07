@@ -1,7 +1,7 @@
 import csv
 import json
 import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import duckdb
@@ -57,6 +57,7 @@ def test_bundled_sample_rows_reconcile_to_real_dw() -> None:
 def test_opt_in_sample_materializes_and_runs_through_public_surface(
     tmp_path: Path,
     capsys: object,
+    run_python_subprocess: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     root = tmp_path / "sample-project"
     QlibxProject.init(root, apply=True)
@@ -72,14 +73,7 @@ def test_opt_in_sample_materializes_and_runs_through_public_surface(
     assert applied.applied is repeated.applied is True
     assert all(change.action is ChangeAction.UNCHANGED for change in repeated.changes)
     script = root / "examples" / "qlibx_owned" / "basic" / "run.py"
-    completed = subprocess.run(
-        [sys.executable, str(script), str(root)],
-        check=True,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    completed = run_python_subprocess((script, root), check=True, cwd=root)
     result = json.loads(completed.stdout)
     assert result["direct_weights"] == {"A005930": 1.0}
     assert result["stored_consumer_count"] == 2

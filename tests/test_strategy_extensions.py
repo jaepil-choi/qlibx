@@ -16,6 +16,7 @@ from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.extensions import StrategyExtensionValidationRequest
 from qlibx.extensions.local_modules import LocalModuleLoader
 from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
+from qlibx.flow.artifact_inputs import StrategyArtifactResolver
 from qlibx.flow.daily import SimulationCheckpoint
 from qlibx.flow.strategy_extensions import (
     SESSION_PERFORMANCE_CONTRACT,
@@ -162,6 +163,64 @@ class Strategy:
         return StrategyDraft(
             weights=(WeightEntry(instrument="A", weight=sign),),
             budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+        )
+
+def create_strategy():
+    return Strategy()
+'''
+
+MUTATING_ARTIFACT_MODULE = '''from qlibx.extensions import (
+    StrategyArtifactModelSpec,
+    StrategyExtensionSpec,
+)
+from qlibx.models import QlibxModel
+from qlibx.operations import (
+    BudgetMode,
+    StrategyArtifactRequirement,
+    StrategyDraft,
+    WeightEntry,
+)
+
+class MutableSignal(QlibxModel):
+    values: dict[str, float]
+
+STRATEGY_SPEC = StrategyExtensionSpec(
+    strategy_id="project.mutating-artifact",
+    artifact_models=(
+        StrategyArtifactModelSpec(
+            artifact_type="project_mutable_signal",
+            artifact_schema_version=1,
+            model_symbol="MutableSignal",
+        ),
+    ),
+)
+_counter = 0
+
+class Strategy:
+    strategy_id = STRATEGY_SPEC.strategy_id
+
+    def requirements(self):
+        return ()
+
+    def artifact_requirements(self):
+        return (
+            StrategyArtifactRequirement(
+                requirement_id="project.mutable.signal",
+                consumer_role="mutable_signal",
+                artifact_type="project_mutable_signal",
+                artifact_schema_version=1,
+            ),
+        )
+
+    def run(self, view):
+        global _counter
+        _counter += 1
+        signal = view.artifact("mutable_signal", MutableSignal)
+        signal.values.setdefault("selected", 0.25 if _counter == 1 else 0.75)
+        return StrategyDraft(
+            weights=(WeightEntry(instrument="A", weight=signal.values["selected"]),),
+            budget_mode=BudgetMode.FLEXIBLE,
             target_gross=1.0,
         )
 
@@ -316,6 +375,38 @@ def test_valid_local_strategy_registers_only_after_deterministic_fixture(
     assert registered[0].registration_artifact_id == outcome.result.registration_artifact_id
 
 
+def test_registered_listing_deserializes_only_strategy_registrations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = project_with_market(tmp_path)
+    write_module(project, "valid.py", VALID_MODULE)
+    validated = flow(project).validate_local(request("project.valid", "valid.py"))
+    assert validated.status is OutcomeStatus.COMPLETE
+    unrelated = project.artifacts.publish_model(
+        logical_identity="unrelated-registration-shaped-payload",
+        artifact_type="unrelated_payload",
+        artifact_schema_version=1,
+        producer_id="tests",
+        payload=validated.result.registration,
+    )
+    assert unrelated.status is OutcomeStatus.COMPLETE
+    selected_flow = flow(project)
+    loaded_artifact_ids: list[str] = []
+    original_load_model = selected_flow._artifacts.load_model
+
+    def counting_load_model(artifact_id: str, contract: object) -> object:
+        loaded_artifact_ids.append(artifact_id)
+        return original_load_model(artifact_id, contract)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(selected_flow._artifacts, "load_model", counting_load_model)
+
+    registered = selected_flow.registered()
+
+    assert len(registered) == 1
+    assert loaded_artifact_ids == [validated.result.registration_artifact_id]
+
+
 @pytest.mark.parametrize(
     ("module_path", "error_code"),
     [
@@ -369,6 +460,57 @@ def test_nondeterministic_output_is_rejected_without_success_artifact(
         envelope.artifact_type == "strategy_result"
         for envelope in project.artifacts.list_envelopes()
     )
+
+
+def test_validation_isolates_mutable_artifact_payloads_between_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = project_with_market(tmp_path)
+    write_module(project, "mutating.py", MUTATING_ARTIFACT_MODULE)
+    loaded = LocalModuleLoader(
+        project_root=project.root,
+        extension_root=project.root / project.config.extension_dir,
+    ).load("mutating.py", module_prefix="_qlibx_local_strategy")
+    publication = project.artifacts.publish_model(
+        logical_identity="mutable-signal",
+        artifact_type="project_mutable_signal",
+        artifact_schema_version=1,
+        producer_id="tests",
+        payload=loaded.module.MutableSignal(values={"base": 1.0}),
+    )
+    assert publication.status is OutcomeStatus.COMPLETE
+    captured_projections: list[object] = []
+    original_resolve = StrategyArtifactResolver.resolve
+
+    def capture_resolution(
+        resolver: StrategyArtifactResolver,
+        **kwargs: object,
+    ) -> object:
+        resolution = original_resolve(resolver, **kwargs)  # type: ignore[arg-type]
+        captured_projections.extend(resolution.projections)
+        return resolution
+
+    monkeypatch.setattr(StrategyArtifactResolver, "resolve", capture_resolution)
+
+    outcome = flow(project).validate_local(
+        request(
+            "project.mutating-artifact",
+            "mutating.py",
+            artifact_bindings=(
+                StrategyArtifactBinding(
+                    consumer_role="mutable_signal",
+                    artifact_id=publication.result.artifact_id,
+                ),
+            ),
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "STRATEGY_EXTENSION_NONDETERMINISTIC"
+    assert len(captured_projections) == 1
+    assert captured_projections[0].payload.values == {"base": 1.0}  # type: ignore[attr-defined]
+    assert flow(project).registered() == ()
 
 
 def test_registration_scoped_local_payload_model_is_validated_and_accessed(

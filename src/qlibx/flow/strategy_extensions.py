@@ -26,7 +26,7 @@ from qlibx.data import (
     RequirementResolver,
     ResolvedBinding,
 )
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.extensions import (
     RegisteredStrategyExtension,
@@ -36,11 +36,20 @@ from qlibx.extensions import (
     StrategyExtensionValidationRequest,
     StrategyExtensionValidationResult,
 )
-from qlibx.extensions.local_modules import LoadedLocalModule, LocalModuleLoader
+from qlibx.extensions.local_modules import (
+    LoadedLocalModule,
+    LocalModuleLoader,
+    LocalModuleSourceDriftError,
+)
 from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
 from qlibx.flow.artifact_inputs import (
     StrategyArtifactContractRegistry,
     StrategyArtifactResolver,
+)
+from qlibx.flow.failures import (
+    build_operation_error,
+    publish_failed_errors,
+    publish_failed_outcome,
 )
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
@@ -197,16 +206,24 @@ class StrategyExtensionFlow:
                 retry=("provide compatible frozen checkpoint or performance evidence",),
             )
 
+        first_projections = tuple(
+            projection.model_copy(deep=True)
+            for projection in artifact_resolution.projections
+        )
+        second_projections = tuple(
+            projection.model_copy(deep=True)
+            for projection in artifact_resolution.projections
+        )
         first_view = self._strategy_view(
             request,
             resolution.bindings,
-            artifact_resolution.projections,
+            first_projections,
             fixture,
         )
         second_view = self._strategy_view(
             request,
             resolution.bindings,
-            artifact_resolution.projections,
+            second_projections,
             fixture,
         )
         try:
@@ -311,7 +328,9 @@ class StrategyExtensionFlow:
 
     def registered(self) -> tuple[RegisteredStrategyExtension, ...]:
         values: list[RegisteredStrategyExtension] = []
-        for envelope in self._artifacts.list_envelopes():
+        for envelope in self._artifacts.list_envelopes(
+            artifact_type=STRATEGY_EXTENSION_REGISTRATION_CONTRACT.artifact_type
+        ):
             if envelope.artifact_type != STRATEGY_EXTENSION_REGISTRATION_CONTRACT.artifact_type:
                 continue
             loaded = self._artifacts.load_model(
@@ -374,7 +393,30 @@ class StrategyExtensionFlow:
             loaded_module = self._module_loader.load_registered(
                 registration.module_path,
                 module_prefix="_qlibx_registered_strategy",
+                expected_source_hash=registration.source_hash,
             )
+        except LocalModuleSourceDriftError as exc:
+            return self._registered_failure(
+                registration_artifact_id,
+                stage_path="strategy_extension.load.source",
+                code="STRATEGY_EXTENSION_SOURCE_DRIFT",
+                exception=exc,
+                context={
+                    "expected_source_hash": exc.expected_source_hash,
+                    "actual_source_hash": exc.actual_source_hash,
+                    "module_path": registration.module_path,
+                },
+                retry=("validate the changed source and select its new registration ID",),
+            )
+        except Exception as exc:
+            return self._registered_failure(
+                registration_artifact_id,
+                stage_path="strategy_extension.load.contract",
+                code="STRATEGY_EXTENSION_LOAD_FAILED",
+                exception=exc,
+                retry=("restore dependencies or validate the Strategy module again",),
+            )
+        try:
             contract = self._module_contract(loaded_module, registration.strategy_id)
         except Exception as exc:
             return self._registered_failure(
@@ -806,14 +848,7 @@ class StrategyExtensionFlow:
         return hashlib.sha256(model.model_dump_json().encode()).hexdigest()
 
     def _publish_errors(self, errors: tuple[OperationError, ...]) -> OperationOutcome:
-        publications = tuple(self._artifacts.publish_failure(error) for error in errors)
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=tuple(
-                item.result for item in publications if item.status is OutcomeStatus.COMPLETE
-            ),
-            errors=errors,
-        )
+        return publish_failed_errors(self._artifacts, errors)
 
     def _registered_failure(
         self,
@@ -825,35 +860,21 @@ class StrategyExtensionFlow:
         retry: tuple[str, ...],
         context: dict[str, object] | None = None,
     ) -> OperationOutcome:
-        seed = hashlib.sha256(
-            f"{registration_artifact_id}:{stage_path}:{code}".encode()
-        ).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation="strategy_extension.load",
             stage_path=stage_path,
             error_code=code,
+            idempotency_identity=registration_artifact_id,
+            error_identity_seed=f"{registration_artifact_id}:{stage_path}:{code}",
             context={
                 "registration_artifact_id": registration_artifact_id,
                 "exception": type(exception).__name__,
                 "message": str(exception)[:500],
                 **(context or {}),
             },
-            commit_status=CommitStatus.NONE,
             retry_preconditions=retry,
-            idempotency_identity=registration_artifact_id,
-            error_id=f"error-{seed}",
         )
-        publication = self._artifacts.publish_failure(error)
-        diagnostics = (
-            (publication.result,)
-            if publication.status is OutcomeStatus.COMPLETE
-            else publication.errors
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=(error,),
-        )
+        return publish_failed_outcome(self._artifacts, error)
 
     def _failure(
         self,
@@ -865,13 +886,12 @@ class StrategyExtensionFlow:
         retry: tuple[str, ...],
         context: dict[str, object] | None = None,
     ) -> OperationOutcome:
-        seed = hashlib.sha256(
-            f"{request.invocation_id}:{stage_path}:{code}".encode()
-        ).hexdigest()[:24]
-        error = OperationError(
+        error = build_operation_error(
             operation=self.operation,
             stage_path=stage_path,
             error_code=code,
+            idempotency_identity=request.invocation_id,
+            error_identity_seed=f"{request.invocation_id}:{stage_path}:{code}",
             context={
                 "strategy_id": request.strategy_id,
                 "module_path": request.module_path,
@@ -879,19 +899,6 @@ class StrategyExtensionFlow:
                 "message": str(exception)[:500],
                 **(context or {}),
             },
-            commit_status=CommitStatus.NONE,
             retry_preconditions=retry,
-            idempotency_identity=request.invocation_id,
-            error_id=f"error-{seed}",
         )
-        publication = self._artifacts.publish_failure(error)
-        diagnostics = (
-            (publication.result,)
-            if publication.status is OutcomeStatus.COMPLETE
-            else publication.errors
-        )
-        return OperationOutcome(
-            status=OutcomeStatus.FAILED,
-            diagnostics=diagnostics,
-            errors=(error,),
-        )
+        return publish_failed_outcome(self._artifacts, error)

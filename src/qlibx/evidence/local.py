@@ -619,7 +619,7 @@ class LocalArtifactBackend:
         connection: duckdb.DuckDBPyConnection,
     ) -> CatalogRecoveryResult:
         latest: dict[str, PublicationEvent] = {}
-        for event in self._read_events(connection):
+        for event in self._read_unterminated_events(connection):
             latest[event.attempt_id] = event
         records: list[CatalogRecoveryRecord] = []
         terminal = {
@@ -682,13 +682,60 @@ class LocalArtifactBackend:
             )
         return CatalogRecoveryResult(records=tuple(records))
 
+    @classmethod
+    def _read_unterminated_events(
+        cls,
+        connection: duckdb.DuckDBPyConnection,
+    ) -> tuple[PublicationEvent, ...]:
+        cls._validate_event_schema_versions(connection)
+        rows = connection.execute(
+            "SELECT event_json FROM publication_events "
+            "WHERE attempt_id NOT IN ("
+            "SELECT attempt_id FROM publication_events WHERE phase IN (?, ?)"
+            ") ORDER BY event_order",
+            [
+                PublicationPhase.CATALOG_COMMITTED.value,
+                PublicationPhase.RECOVERED_ABANDONED.value,
+            ],
+        ).fetchall()
+        return cls._deserialize_events(rows)
+
     @staticmethod
+    def _validate_event_schema_versions(
+        connection: duckdb.DuckDBPyConnection,
+    ) -> None:
+        expected = str(PublicationEvent.model_fields["event_schema_version"].default)
+        try:
+            unsupported = connection.execute(
+                "SELECT event_order FROM publication_events WHERE "
+                "CAST(json_extract(event_json, '$.event_schema_version') AS VARCHAR) "
+                "IS DISTINCT FROM ? LIMIT 1",
+                [expected],
+            ).fetchone()
+        except Exception as exc:
+            raise CatalogSchemaError(
+                f"publication event schema is unsupported: {type(exc).__name__}: {exc}"
+            ) from exc
+        if unsupported is not None:
+            raise CatalogSchemaError(
+                "publication event schema is unsupported: "
+                f"event_order={unsupported[0]} has an unknown event_schema_version"
+            )
+
+    @classmethod
     def _read_events(
+        cls,
         connection: duckdb.DuckDBPyConnection,
     ) -> tuple[PublicationEvent, ...]:
         rows = connection.execute(
             "SELECT event_json FROM publication_events ORDER BY event_order"
         ).fetchall()
+        return cls._deserialize_events(rows)
+
+    @staticmethod
+    def _deserialize_events(
+        rows: list[tuple[object, ...]],
+    ) -> tuple[PublicationEvent, ...]:
         try:
             return tuple(PublicationEvent.model_validate_json(row[0]) for row in rows)
         except Exception as exc:

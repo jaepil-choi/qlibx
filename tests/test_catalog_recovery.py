@@ -298,6 +298,52 @@ def test_legacy_catalog_schema_is_adopted_on_first_write(tmp_path: Path) -> None
         connection.close()
 
 
+def test_completed_publications_are_excluded_from_recovery_scan(tmp_path: Path) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    backend = _backend(tmp_path)
+    assert _publish(backend, 0.5).status is OutcomeStatus.COMPLETE
+
+    connection = duckdb.connect(
+        str(tmp_path / ".qlibx" / "catalog.duckdb"),
+        read_only=True,
+    )
+    try:
+        assert backend._read_unterminated_events(connection) == ()
+    finally:
+        connection.close()
+
+
+def test_malformed_terminal_event_blocks_publication(tmp_path: Path) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    backend = _backend(tmp_path)
+    assert _publish(backend, 0.5).status is OutcomeStatus.COMPLETE
+    catalog_path = tmp_path / ".qlibx" / "catalog.duckdb"
+    connection = duckdb.connect(str(catalog_path))
+    try:
+        connection.execute(
+            "UPDATE publication_events SET event_json = ? WHERE event_order = 1",
+            ["{not-json"],
+        )
+    finally:
+        connection.close()
+
+    rejected = backend.publish_model(
+        logical_identity="catalog:malformed-event",
+        artifact_type=CONTRACT.artifact_type,
+        artifact_schema_version=1,
+        producer_id="tests.catalog",
+        payload=WeightPayload(weights={"A000660": 0.5}),
+    )
+
+    assert rejected.status is OutcomeStatus.FAILED
+    assert rejected.errors[0].error_code == "CATALOG_SCHEMA_UNSUPPORTED"
+    connection = duckdb.connect(str(catalog_path), read_only=True)
+    try:
+        assert connection.execute("SELECT count(*) FROM artifacts").fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
 def test_unknown_publication_event_schema_fails_without_mutation(tmp_path: Path) -> None:
     QlibxProject.init(tmp_path, apply=True)
     backend = _backend(tmp_path)

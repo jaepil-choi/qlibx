@@ -1,7 +1,7 @@
 """Clock-bound, role-scoped views with access lineage."""
 
 from datetime import date, datetime
-from typing import Protocol
+from typing import Any, Protocol, TypeVar, cast
 
 import pandas as pd
 from pydantic import Field
@@ -15,6 +15,39 @@ from qlibx.models import QlibxModel
 
 class ViewAccessError(RuntimeError):
     """Raised when code requests an undeclared or stale binding."""
+
+
+class ArtifactViewAccessError(ViewAccessError):
+    """Typed Strategy artifact access failure translated by the owning Flow."""
+
+    def __init__(self, error_code: str, context: dict[str, Any]) -> None:
+        self.error_code = error_code
+        self.context = context
+        super().__init__(str(context.get("message", error_code)))
+
+
+class ArtifactInputProjection(QlibxModel):
+    """Backend-free immutable artifact payload injected into a Strategy view."""
+
+    requirement_id: str = Field(min_length=1)
+    consumer_role: str = Field(min_length=1)
+    artifact_id: str = Field(min_length=1)
+    artifact_type: str = Field(min_length=1)
+    artifact_schema_version: int = Field(ge=1)
+    content_hash: str = Field(min_length=1)
+    payload: QlibxModel
+
+
+class ArtifactAccessRecord(QlibxModel):
+    requirement_id: str = Field(min_length=1)
+    consumer_role: str = Field(min_length=1)
+    artifact_id: str = Field(min_length=1)
+    artifact_type: str = Field(min_length=1)
+    artifact_schema_version: int = Field(ge=1)
+    content_hash: str = Field(min_length=1)
+
+
+PayloadModel = TypeVar("PayloadModel", bound=QlibxModel)
 
 
 class AccessRecord(QlibxModel):
@@ -136,6 +169,7 @@ class StrategyView:
         account_feedback: AccountFeedbackState | None = None,
         session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
+        artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
     ) -> None:
         self._as_of = as_of
         self._bindings = {binding.semantic_role: binding for binding in bindings}
@@ -145,15 +179,67 @@ class StrategyView:
         self._account_feedback = account_feedback
         self._session_performance = session_performance
         self._memory_state = memory_state
+        self._artifact_inputs = {
+            artifact.consumer_role: artifact for artifact in artifact_inputs
+        }
         self._accessed: list[AccessRecord] = []
         self._state_accessed: list[StateAccessRecord] = []
         self._feedback_accessed: list[FeedbackAccessRecord] = []
         self._performance_accessed: list[SessionPerformanceAccessRecord] = []
         self._memory_accessed: list[MemoryAccessRecord] = []
+        self._artifact_accessed: list[ArtifactAccessRecord] = []
 
     @property
     def as_of(self) -> datetime:
         return self._as_of
+
+    def artifact(
+        self,
+        consumer_role: str,
+        payload_type: type[PayloadModel],
+    ) -> PayloadModel:
+        projection = self._artifact_inputs.get(consumer_role)
+        if projection is None:
+            raise ArtifactViewAccessError(
+                "STRATEGY_ARTIFACT_ACCESS_UNDECLARED",
+                {
+                    "consumer_role": consumer_role,
+                    "expected_contract": None,
+                    "actual_contract": None,
+                    "message": f"artifact role {consumer_role!r} was not declared",
+                },
+            )
+        if not isinstance(projection.payload, payload_type):
+            raise ArtifactViewAccessError(
+                "STRATEGY_ARTIFACT_PAYLOAD_TYPE_MISMATCH",
+                {
+                    "requirement_id": projection.requirement_id,
+                    "consumer_role": consumer_role,
+                    "artifact_id": projection.artifact_id,
+                    "expected_contract": {"payload_model": payload_type.__name__},
+                    "actual_contract": {
+                        "payload_model": type(projection.payload).__name__
+                    },
+                    "message": (
+                        f"artifact role {consumer_role!r} contains "
+                        f"{type(projection.payload).__name__}, not {payload_type.__name__}"
+                    ),
+                },
+            )
+        self._artifact_accessed.append(
+            ArtifactAccessRecord(
+                requirement_id=projection.requirement_id,
+                consumer_role=projection.consumer_role,
+                artifact_id=projection.artifact_id,
+                artifact_type=projection.artifact_type,
+                artifact_schema_version=projection.artifact_schema_version,
+                content_hash=projection.content_hash,
+            )
+        )
+        return cast(PayloadModel, projection.payload)
+
+    def artifact_accessed(self) -> tuple[ArtifactAccessRecord, ...]:
+        return tuple(self._artifact_accessed)
 
     def history(self, semantic_role: str) -> pd.DataFrame:
         return self._read(semantic_role)
@@ -361,6 +447,7 @@ class ViewGate:
         account_feedback: AccountFeedbackState | None = None,
         session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
+        artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
     ) -> StrategyView:
         return StrategyView(
             as_of=clock.now,
@@ -371,6 +458,7 @@ class ViewGate:
             account_feedback=account_feedback,
             session_performance=session_performance,
             memory_state=memory_state,
+            artifact_inputs=artifact_inputs,
         )
 
     def materialize_view(

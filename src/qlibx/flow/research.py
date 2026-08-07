@@ -5,6 +5,7 @@ import hashlib
 from qlibx.context import (
     AccountFeedbackState,
     AccountState,
+    ArtifactViewAccessError,
     MemoryState,
     PublishedSessionPerformanceState,
     ViewGate,
@@ -12,9 +13,15 @@ from qlibx.context import (
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
+from qlibx.flow.artifact_inputs import StrategyArtifactResolver
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
-from qlibx.operations import StrategyInvocation, StrategyOperation, StrategyResult
+from qlibx.operations import (
+    StrategyArtifactRequirement,
+    StrategyInvocation,
+    StrategyOperation,
+    StrategyResult,
+)
 
 
 class StrategyRunResult(QlibxModel):
@@ -65,15 +72,39 @@ class ResearchFlow:
             registry=self._registry,
         )
         if resolution.failed:
-            published = tuple(self._artifacts.publish_failure(error) for error in resolution.errors)
-            envelopes = tuple(
-                outcome.result for outcome in published if outcome.status is OutcomeStatus.COMPLETE
+            return self._publish_errors(resolution.errors)
+
+        try:
+            artifact_requirements_method = getattr(strategy, "artifact_requirements", None)
+            if artifact_requirements_method is None:
+                artifact_requirements: tuple[StrategyArtifactRequirement, ...] = ()
+            else:
+                if not callable(artifact_requirements_method):
+                    raise TypeError("artifact_requirements must be callable")
+                artifact_requirements = tuple(artifact_requirements_method())
+                if not all(
+                    isinstance(requirement, StrategyArtifactRequirement)
+                    for requirement in artifact_requirements
+                ):
+                    raise TypeError(
+                        "artifact_requirements must return StrategyArtifactRequirement values"
+                    )
+        except Exception as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.artifacts.requirements",
+                "STRATEGY_ARTIFACT_REQUIREMENTS_FAILED",
+                exc,
             )
-            return OperationOutcome(
-                status=OutcomeStatus.FAILED,
-                diagnostics=envelopes,
-                errors=resolution.errors,
-            )
+
+        artifact_resolution = StrategyArtifactResolver().resolve(
+            invocation_id=invocation.invocation_id,
+            requirements=artifact_requirements,
+            bindings=invocation.artifact_bindings,
+            artifacts=self._artifacts,
+        )
+        if artifact_resolution.failed:
+            return self._publish_errors(artifact_resolution.errors)
 
         clock = BacktestClock(invocation.evaluation_time)
         view = ViewGate(self._registry, self._store).strategy_view(
@@ -83,9 +114,28 @@ class ResearchFlow:
             account_feedback=account_feedback,
             session_performance=session_performance,
             memory_state=memory_state,
+            artifact_inputs=artifact_resolution.projections,
         )
         try:
             draft = strategy.run(view)
+        except ArtifactViewAccessError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.artifacts.access",
+                exc.error_code,
+                exc,
+                requirement_id=exc.context.get("requirement_id"),
+                expected=exc.context.get("expected_contract"),
+                error_context=exc.context,
+                accesses=(
+                    *view.accessed(),
+                    *view.state_accessed(),
+                    *view.feedback_accessed(),
+                    *view.performance_accessed(),
+                    *view.memory_accessed(),
+                    *view.artifact_accessed(),
+                ),
+            )
         except Exception as exc:
             return self._failed_invocation(
                 invocation,
@@ -98,6 +148,7 @@ class ResearchFlow:
                     *view.feedback_accessed(),
                     *view.performance_accessed(),
                     *view.memory_accessed(),
+                    *view.artifact_accessed(),
                 ),
             )
 
@@ -195,6 +246,15 @@ class ResearchFlow:
                 )
                 for access in result.memory_accesses
             ),
+            *(
+                DependencyEdge(
+                    dependency_kind="artifact",
+                    dependency_id=access.artifact_id,
+                    consumer_role=access.consumer_role,
+                    compatibility_fingerprint=access.content_hash,
+                )
+                for access in view.artifact_accessed()
+            ),
             *additional_dependencies,
         )
         publication = self._artifacts.publish_model(
@@ -219,6 +279,9 @@ class ResearchFlow:
         error_code: str,
         exception: Exception,
         *,
+        requirement_id: str | None = None,
+        expected: dict[str, object] | None = None,
+        error_context: dict[str, object] | None = None,
         accesses: tuple[QlibxModel, ...] = (),
     ) -> OperationOutcome:
         seed = hashlib.sha256(
@@ -228,10 +291,13 @@ class ResearchFlow:
             operation="strategy.run",
             stage_path=stage_path,
             error_code=error_code,
+            requirement_id=requirement_id,
+            expected=expected,
             context={
                 "exception": type(exception).__name__,
                 "message": str(exception)[:500],
                 "accesses": [access.model_dump(mode="json") for access in accesses],
+                **(error_context or {}),
             },
             commit_status=CommitStatus.NONE,
             retry_preconditions=("correct the Strategy contract or selected input",),
@@ -246,4 +312,18 @@ class ResearchFlow:
             status=OutcomeStatus.FAILED,
             diagnostics=diagnostics,
             errors=(error,),
+        )
+
+    def _publish_errors(
+        self,
+        errors: tuple[OperationError, ...],
+    ) -> OperationOutcome:
+        published = tuple(self._artifacts.publish_failure(error) for error in errors)
+        diagnostics = tuple(
+            outcome.result for outcome in published if outcome.status is OutcomeStatus.COMPLETE
+        )
+        return OperationOutcome(
+            status=OutcomeStatus.FAILED,
+            diagnostics=diagnostics,
+            errors=errors,
         )

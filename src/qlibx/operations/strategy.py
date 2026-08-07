@@ -17,6 +17,7 @@ from qlibx.context import (
 )
 from qlibx.data import ComponentRequirement
 from qlibx.models import QlibxModel
+from qlibx.operations.artifacts import StrategyArtifactBinding, StrategyArtifactRequirement
 
 
 class BudgetMode(StrEnum):
@@ -103,6 +104,14 @@ class StrategyInvocation(QlibxModel):
     invocation_id: str = Field(min_length=1)
     evaluation_time: datetime
     config_fingerprint: str = Field(min_length=1)
+    artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_artifact_binding_roles(self) -> "StrategyInvocation":
+        roles = [binding.consumer_role for binding in self.artifact_bindings]
+        if len(roles) != len(set(roles)):
+            raise ValueError("Strategy artifact binding roles must be unique")
+        return self
 
 
 class StrategyOperation(Protocol):
@@ -111,3 +120,7 @@ class StrategyOperation(Protocol):
     def requirements(self) -> tuple[ComponentRequirement, ...]: ...
 
     def run(self, view: StrategyView) -> StrategyDraft: ...
+
+
+class ArtifactAwareStrategyOperation(StrategyOperation, Protocol):
+    def artifact_requirements(self) -> tuple[StrategyArtifactRequirement, ...]: ...

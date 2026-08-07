@@ -1,7 +1,14 @@
 """Pure research and decision operations."""
 
-from qlibx.operations.artifacts import StoredSignalEntry, StoredSignalResult
+from qlibx.operations.artifacts import (
+    ArtifactSemanticConstraint,
+    StoredSignalEntry,
+    StoredSignalResult,
+    StrategyArtifactBinding,
+    StrategyArtifactRequirement,
+)
 from qlibx.operations.strategy import (
+    ArtifactAwareStrategyOperation,
     BudgetMode,
     DecisionAction,
     StrategyDraft,
@@ -12,10 +19,14 @@ from qlibx.operations.strategy import (
 )
 
 __all__ = [
+    "ArtifactAwareStrategyOperation",
+    "ArtifactSemanticConstraint",
     "BudgetMode",
     "DecisionAction",
     "StoredSignalEntry",
     "StoredSignalResult",
+    "StrategyArtifactBinding",
+    "StrategyArtifactRequirement",
     "StrategyDraft",
     "StrategyInvocation",
     "StrategyOperation",

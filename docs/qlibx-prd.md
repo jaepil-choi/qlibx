@@ -374,8 +374,11 @@ deterministic built-in으로 제공한다. Agent마다 같은 helper를 다르�
 failure behavior를 보여주는 executable example 역할도 한다. Agent는 이 예시와 extension contract를 함께 사용해
 더 정확하게 compatible한 local extension을 작성할 수 있어야 한다.
 
-사용자 고유의 signal model과 alpha logic은 project가 소유한다. 사용자는 installed qlibx 또는
-`site-packages`를 수정하지 않고 compatible한 local Python implementation을 작성·등록할 수 있어야 한다.
+사용자 고유의 signal model과 alpha logic은 project가 소유한다. **Project-local Strategy가 alpha logic의
+primary extension point**다. 사용자는 installed qlibx 또는 `site-packages`를 수정하지 않고 compatible한 local
+Python implementation을 작성·검증·등록할 수 있어야 한다. Model이나 deterministic materialization은 그
+Strategy가 reusable intermediate data를 요구할 때 선택하는 optional component이며 direct Strategy의 선행 조건이
+아니다.
 
 qlibx는 각 extension point에 대해 다음을 제공한다.
 
@@ -449,9 +452,11 @@ return처럼 axis와 경제적 의미가 다른 derived data를 signal로 가장
 intent다. Decision time별 instrument signed weight와 budget semantics를 포함하며 weight가 raw, active,
 benchmark-relative 또는 physical인지 명시해야 한다.
 
-Actual holding이나 prior execution feedback에 의존해 생성된 weight는 path-dependent다. 이러한 result도 재사용할
-수 있지만 run identity, prior Position, feedback cursor와 execution profile을 기록해야 한다. 다른 state나 경로에서
-사용할 때는 compatibility warning을 제공하고 historical intent reuse인지 state-based rerun인지 user가 선택한다.
+Actual holding이나 prior execution feedback에 의존해 생성된 weight는 path-dependent다. 이러한 result도 frozen
+typed input으로 재사용할 수 있으며 run identity, 실제로 의존한 Account/Memory state identity, feedback cursor와
+execution profile을 기록해야 한다. 다른 Strategy나 Ensemble이 이를 소비하는 것은 저장된 alpha intent를 입력으로
+사용한다는 뜻이지, 그 producer가 consumer의 현재 state에서 재실행되었음을 뜻하지 않는다. 이후 executable target이나
+order를 만들 때는 별도 downstream operation이 현재 committed Account와 현재 execution input을 사용한다.
 
 #### Ensemble result
 
@@ -1026,7 +1031,7 @@ Public workflow는 다음 lifecycle을 package-owned contract로 실행한다.
 ```text
 resolve frozen invocation
 -> instantiate and validate datasets/components
--> fit or load model state when requested
+-> optionally materialize or load model state only when the selected component requests it
 -> run Strategy / execution / analysis stages selected by the user
 -> publish typed portable artifacts and terminal status
 ```
@@ -1298,15 +1303,22 @@ Flexible Strategy가 기준보다 강한 종목만 선택한 결과 gross budget
 ### 9.4 Path-independent와 path-dependent alpha
 
 Path-independent result는 동일 frozen input에서 prior holding과 fill history 없이 재현된다. Path-dependent result는
-actual holding, cash, prior fill, cooldown 또는 Strategy memory에 의존한다. **두 result 모두 재사용할 수 있다.** 다만
-path-dependent result는 의존한 state identity와 cursor를 보존하고, 다른 state에서 사용할 때 compatibility warning과
-명시적인 user choice를 요구한다. 이를 보편적인 금지나 조용한 재사용으로 처리하지 않는다.
+actual holding, cash, prior fill, cooldown 또는 Strategy memory에 의존한다. **두 result 모두 producer를 다시 실행하지
+않고 frozen input으로 재사용할 수 있다.** Consumer Strategy는 필요한 artifact role, schema와 semantics를 선언하고
+package가 이를 resolve한다. 실제로 소비한 artifact만 dependency edge가 되며 source result가 의존했던 Account/Memory
+state identity와 feedback cursor는 새 result의 lineage에서도 보존된다.
 
-#### UC-ALPHA-PATH-001 — Path-dependent weight의 의도적 재사용
+이 재사용은 source result를 consumer의 현재 Account에서 다시 계산했다는 뜻이 아니다. Budget, schema 또는 semantics가
+consumer 요구와 맞지 않으면 계산 전에 compatibility error로 실패한다. Compatible한 frozen alpha를 이후 physical
+target이나 order로 변환할 때는 그 downstream operation이 현재 committed Account와 현재 execution input을 사용한다.
 
-Turnover-aware Strategy가 account A의 actual holding을 반영한 weight를 만든다. User는 이를 account B의 scenario
-analysis에 재사용할 수 있지만 package는 source account/state 차이를 표시한다. User가 historical intent replay로
-사용할지, account B state로 Strategy를 다시 실행할지를 선택한다.
+#### UC-ALPHA-PATH-001 — Path-dependent weight의 producer-independent 재사용
+
+Turnover-aware Strategy가 account A의 actual holding과 Memory cursor를 소비해 path-dependent signed-weight result를
+만든다. 이후 Ensemble Strategy가 이 frozen result와 다른 member result를 입력으로 조합한다. Source producer는 다시
+실행되지 않고 parent result도 변경되지 않으며, Ensemble result는 consumed artifact와 source Account/Memory state
+identity 및 cursor lineage를 보존한다. Ensemble weight를 account B의 executable target으로 변환하면 account B의 현재
+committed holding과 현재 execution input을 사용하지만, source member가 account B에서 재계산되었다고 표시하지 않는다.
 
 ### 9.5 Research feedback와 execution feedback
 
@@ -1315,9 +1327,11 @@ decision의 authoritative state로 사용한다. Strategy가 naive daily close �
 
 ### 9.6 Independent clocks
 
-Observation, decision, execution과 monitoring clock은 같을 수도 다를 수도 있다. Strategy decision이 없는 monitoring
-time에도 actual account constraint를 평가할 수 있고, execution은 decision과 분리된 PIT-safe event에서 일어난다.
-각 result는 자신이 평가한 clock과 permitted cutoff를 보존한다. Intraday event와 partial fill은 future work다.
+Observation, decision, execution과 monitoring evaluation time은 같을 수도 다를 수도 있다. Strategy decision이 없는
+시점에도 actual account constraint를 평가할 수 있고, execution은 decision과 분리된 PIT-safe event에서 일어난다.
+여기서 독립 clock은 별도 Clock object나 별도 runtime을 의무화한다는 뜻이 아니라, monitoring cadence와 frozen
+evaluation time이 Strategy decision cadence에 종속되지 않는다는 뜻이다. 각 result는 자신이 평가한 instant와
+permitted cutoff를 보존한다. Intraday event와 partial fill은 future work다.
 
 ### 9.7 Hold is an explicit decision
 
@@ -1491,8 +1505,10 @@ lifecycle behavior의 기준 사례는 §3.5 `UC-COST-*`, `UC-CLOSED-LOOP-001`�
 
 ### 11.5 Monitoring without a decision
 
-Monitoring clock은 Strategy decision clock과 독립적으로 actual account를 관찰한다. 새 decision이나 order가 없는
-날에도 constraint finding을 만들 수 있고, finding은 계좌를 수정하거나 과거 fill을 rollback하지 않는다.
+Constraint monitoring은 Strategy decision cadence와 독립적으로 actual account를 관찰한다. 현재 public contract는
+`QlibxProject.monitor_constraints()`에 committed checkpoint와 frozen `evaluation_time`을 명시해 호출하는 standalone
+operation이다. 새 decision이나 order가 없는 날에도 caller 또는 선택적 scheduler가 이 operation을 호출해 finding을
+만들 수 있다. `run_daily()`가 이를 자동 실행하지 않으며 finding은 계좌를 수정하거나 과거 fill을 rollback하지 않는다.
 
 #### UC-EXEC-003 — No-trade day의 actual constraint breach
 
@@ -1572,8 +1588,10 @@ built-in으로 제공한다. Built-in은 공통 vocabulary와 일관성을 제�
 ### 13.3 Local and external extensions
 
 User는 local Python module 또는 external process로 data producer, Strategy, executor, analysis와 renderer를 확장할 수
-있다. Package는 documented input/output contract와 deterministic validation을 제공한다. Agent가 validation을 호출하고
-오류를 해석하지만 extension의 compatibility를 최종 판정하는 책임은 package에 있다.
+있다. 이 중 project-owned alpha logic의 기본 경로는 local Strategy다. Direct Strategy는 Model이나 materialization을
+요구하지 않으며, stored signal 또는 다른 Strategy result가 필요할 때만 typed artifact input을 선언한다. Package는
+각 extension kind의 documented input/output contract와 deterministic validation을 제공한다. Agent가 validation을
+호출하고 오류를 해석하지만 extension의 compatibility를 최종 판정하는 책임은 package에 있다.
 
 #### UC-EXTENSION-001 — Agent가 만든 local transform의 검증
 
@@ -1657,7 +1675,9 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 - `UC-SIGNAL-001`의 direct Strategy와 `UC-SIGNAL-002`의 stored model output 경로가 모두 동작한다.
 - Signed weight는 budget semantics와 actual dependency를 보존하고 producer를 다시 실행하지 않고 재사용할 수 있다.
 - `UC-ALPHA-BUDGET-001`에서 flexible residual을 fixed budget으로 자동 확대하지 않는다.
-- `UC-ALPHA-PATH-001`에서 path-dependent result의 재사용을 허용하되 state 차이를 경고하고 user choice를 기록한다.
+- `UC-ALPHA-PATH-001`에서 path-dependent result를 producer rerun 없이 frozen member input으로 소비하고,
+  source Account/Memory state identity와 cursor를 새 result lineage에 보존하며 current-state recomputation으로
+  표시하지 않는다.
 - `UC-ENSEMBLE-001`에서 기존 Strategy result를 member로 조합하고 ticker-level netting과 lineage를 확인할 수 있다.
 - `UC-PORTFOLIO-001`처럼 같은 alpha를 서로 다른 valid instrument/exchange construction에 사용할 수 있다.
 - Parent/child와 adaptive scenario는 `UC-ALPHA-CHILD-001`, `UC-ALPHA-ADAPTIVE-001`의 state isolation과 evidence를
@@ -1700,6 +1720,7 @@ decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 
 | `GAP-TIME-001` (declared time semantics closed) | Naive source timestamp는 declared `source_timezone` 없이 등록되지 않고, session query는 caller가 선언한 session timezone의 calendar day로 관측치를 선택한다. Offset-qualified source의 unused timezone과 ambiguous local time은 mutation 전에 실패한다 | `tests/test_data_registration.py`에서 source localization과 PIT cutoff를, `tests/test_session_timezone.py`에서 UTC/KST 날짜 경계의 session selection을 검증한다 |
 | `GAP-CONSTRAINT-001` (default public workflow closed) | 설치 프로젝트의 선택적 constraint workflow가 고정 no-short·10% floor·PIT benchmark cap adjustment와 독립 validation을 제공한다. Constraint-free workflow는 benchmark를 요구하지 않고, validation은 adjustment와 동일한 benchmark access identity를 요구하며 lot-rounding residual을 evidence로 보존한다. Sector, turnover와 liquidity constraint는 future work다 | `tests/test_public_constraints.py`와 `tests/test_public_constraint_sample.py`에서 같은 PIT benchmark input의 adjustment/validation 일치, missing·ambiguous·future-hidden·incomplete weight의 mutation 전 실패, lot residual에 따른 ineligible 결과와 installed sample 결정론을 검증한다 |
 | `GAP-MONITOR-001` (public no-trade monitoring closed) | 설치 project가 committed Account checkpoint에서 독립 constraint monitoring을 frozen spec으로 실행한다. 같은 evaluation instant가 Account valuation과 benchmark PIT cutoff를 결정하며, wall clock이나 daily flow 자동 삽입을 사용하지 않는다 | `tests/test_public_constraints.py`에서 checkpoint 복원, 동일 spec의 동일 artifact identity, held-position mark freshness, stale valuation과 손상 checkpoint의 typed failure를 검증한다 |
+| `GAP-STRATEGY-COMPOSITION-001` | Project-local Strategy의 package validation, typed artifact input과 path-dependent multi-source lineage가 아직 하나의 installed workflow로 닫히지 않았다. 기존 replay/rerun fixture는 frozen Strategy-result composition을 증명하지 않으므로 이 capability를 current support로 표시하지 않는다 | Closure acceptance는 installed project의 local Strategy를 public contract로 검증하고, path-dependent result를 producer rerun 없이 다른 Strategy/Ensemble이 소비하며, consumed artifact와 모든 source state/cursor lineage가 보존되고 downstream execution만 current Account를 사용함을 증명한다 |
 | `GAP-RECOVERY-001` (default local daily flow closed) | Versioned recovery point가 Account checkpoint, Strategy Memory, feedback cursor, scheduler position과 누락 가능 evidence를 묶는다. External Account/OMS와 distributed recovery는 별도 contract가 필요하다 | `tests/scenarios/recovery.yaml`의 real-DW process-crash matrix에서 각 crash point의 resume이 uninterrupted result와 같고 decision/Fill/Memory를 중복 적용하지 않으며 changed identity는 mutation 전 `RESUME_BRANCH_REQUIRED`로 실패한다 |
 | `GAP-CATALOG-001` (default local backend closed) | DuckDB schema v1, bounded cross-process writer lock, payload staging, append-only publication audit와 abandoned pre-commit recovery를 current local backend가 제공한다. External backend와 multi-host filesystem은 별도 contract validation이 필요하다 | `tests/scenarios/catalog_recovery.yaml`의 concurrent writer와 process-crash fixture에서 partial payload가 reusable success로 보이지 않고 conflict/idempotent/recovery 결과가 deterministic하다 |
 
@@ -1735,8 +1756,8 @@ Internal class나 callback 이름의 parity는 요구하지 않는다.
 ### 16.3 Schema and artifact change
 
 Old artifact는 안전하게 읽히거나 explicit migration/unsupported error를 제공해야 한다. Schema change가 logical identity,
-producer-independent loading, path-dependent reuse warning, partial publication recovery 또는 actual/intended state separation을
-깨뜨려서는 안 된다.
+producer-independent loading, path-dependent source state/cursor lineage, partial publication recovery 또는 actual/intended
+state separation을 깨뜨려서는 안 된다. 여러 source state를 하나의 fabricated identity로 합쳐서도 안 된다.
 
 ### 16.4 Test philosophy
 

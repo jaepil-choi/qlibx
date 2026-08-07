@@ -675,7 +675,7 @@ def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
     } == {item.artifact_id for item in member_specs}
 
 
-def test_uc_alpha_path_001_uses_child_memory_for_rerun_or_frozen_intent_for_replay(
+def test_frozen_intent_replay_and_separate_account_rerun_do_not_mutate_parent(
     real_dw_case: RealDwProject,
 ) -> None:
     memory_a = StrategyMemoryStore()

@@ -11,7 +11,6 @@ required_current_use_cases:
   - UC-SIGNAL-001
   - UC-SIGNAL-002
   - UC-ALPHA-BUDGET-001
-  - UC-ALPHA-PATH-001
   - UC-ALPHA-CHILD-001
   - UC-ALPHA-ADAPTIVE-001
   - UC-ENSEMBLE-001
@@ -44,7 +43,6 @@ coverage_sets:
     - UC-EXEC-001
     - UC-SIGNAL-002
     - UC-ALPHA-BUDGET-001
-    - UC-ALPHA-PATH-001
     - UC-ALPHA-CHILD-001
     - UC-ALPHA-ADAPTIVE-001
     - UC-ENSEMBLE-001
@@ -419,17 +417,8 @@ scenarios:
       gross_after: 0.0
       residual_budget: 1.0
 
-  - id: UC-ALPHA-PATH-001
-    case: child_memory_rerun_or_frozen_replay
-    test: tests/acceptance/test_research_scenarios.py::test_uc_alpha_path_001_uses_child_memory_for_rerun_or_frozen_intent_for_replay
-    inputs:
-      data_kind: real
-      sources: [data/DW/fng_stock_daily_prices.csv]
-      rerun_state: account_b_and_child_memory_b
-      replay_input: parent_decision_intent
-    expected:
-      outcome: complete
-      new_assessment_model: false
-      rerun_uses_child_memory: true
-      replay_strategy_rerun: false
-      replay_memory_mutation: false
+excluded_readiness_gaps:
+  - id: GAP-STRATEGY-COMPOSITION-001
+    excludes_current_use_case: UC-ALPHA-PATH-001
+    reason: decision-intent replay does not prove frozen Strategy-result composition
+    closure_oracle: producer non-rerun, parent immutability, and complete multi-source state/cursor lineage

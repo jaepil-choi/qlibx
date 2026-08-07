@@ -56,7 +56,7 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-SIGNAL-001` | direct Strategy run | scoped PIT data + bounded state | signal/weight inside Strategy | results + proposed memory | signed weights + accesses | no mandatory signal stage |
 | `UC-SIGNAL-002` | stored-result Strategy run | compatible typed model result | signed-weight assembly | Strategy result | producer-independent edges | producer not rerun |
 | `UC-ALPHA-BUDGET-001` | flexible-budget Strategy | signed inputs + budget declaration | allocation without forced rescale | alpha-weight result | invested/residual budget | fixed incompatibility |
-| `UC-ALPHA-PATH-001` | cross-state reuse | result state + target state | compatibility assessment | reuse decision artifact | warning + user choice | replay/rerun branches |
+| `UC-ALPHA-PATH-001` | later Strategy/Ensemble composition | frozen typed result + source state/cursor lineage | consumer compatibility + composition | new Strategy result | consumed artifact + all source state/cursor edges | producer not rerun; no current-state recomputation claim |
 | `UC-ALPHA-CHILD-001` | child execution branch | frozen parent weights + child profile | alternate execution only | child Account/artifacts | parent edge + profile | parent unchanged |
 | `UC-ALPHA-ADAPTIVE-001` | feedback-triggered Strategy | committed feedback + prior memory | proposed belief/member update | Memory at flow boundary | before/after + cursor | no future feedback |
 | `UC-ENSEMBLE-001` | Ensemble Strategy run | compatible member results | combine/net/cross by ticker | ensemble result | contribution + residual | producers not rerun |
@@ -75,7 +75,7 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-LOOKTHROUGH-003` | next user Strategy callback | marked committed AccountSnapshot + declared constituent binding | user code가 actual quantity로 재계산 | user artifact/intent if returned | target/fill/held input distinction | requested target excluded; no auto feedback |
 | `UC-EXEC-001` | MVP execution | decision + PIT execution view | full-fill convention | committed Account | decision ID + FillBatch | Strategy does not fill directly |
 | `UC-EXEC-002` | daily-close execution | observations available by fill time | timing/PIT validation then match | Fill or failure | convention + limitation | no future close |
-| `UC-EXEC-003` | independent monitor timer | actual snapshot + compliance view | constraint evaluation | finding artifact only | breach/missing classification | no decision/order |
+| `UC-EXEC-003` | explicit `monitor_constraints(spec)` call at caller-selected cadence | committed checkpoint + frozen evaluation time + compliance view | constraint evaluation | finding artifact only | breach/missing classification | no decision/order; not auto-injected into daily flow |
 | `UC-ARTIFACT-001` | external artifact load | documented payload + envelope | typed construction + compatibility | imported artifact | external producer lineage | no producer import |
 | `UC-ARTIFACT-002` | load/publication | complete candidate payload | schema + semantic validation | 없음 on invalid | bounded failure evidence | invalid not reusable |
 | `UC-RESEARCH-001` | failed operation then retry | frozen failure inputs + new binding | new resolution | failure then success artifacts | resolution lineage | failure retained |
@@ -126,10 +126,11 @@ Clock-bound View ──→ Strategy ──→ immutable DecisionIntent
 각 단계의 input, assumption, result와 failure ──→ Evidence
 ```
 
-실행 순서는 다음과 같다.
+Model/materialization을 선택한 한 workflow의 실행 순서는 다음과 같다. Direct Strategy workflow에는
+첫 `MATERIALIZE` callback이 없다.
 
 ```text
-매 거래일 장 마감      MATERIALIZE callback → 그날까지 available한 data로 signal 저장
+매 거래일 장 마감      MATERIALIZE callback → 그날까지 available한 data로 signal 저장 (optional)
 월말 마지막 거래일     DECISION callback    → signal과 AccountSnapshot으로 주식 intent 확정
 다음 거래일 종가       EXECUTION callback   → 미리 확정된 intent를 선택한 가정으로 결과화
 선물 정산 시각          SETTLEMENT callback  → variation margin을 Account에 commit
@@ -380,7 +381,7 @@ Event-driven runtime에서 위 원자는 다음처럼 구체화된다.
 | `DECISION` | decision time | `StrategyView` | selected Strategy; optional construct/adjust/convert/validate | weights and/or decision intent + diagnostics | proposed Memory만 flow가 commit; execution은 예약 |
 | `EXECUTION` | 체결 시점 | `ExecutionView` | exchange.match_batch | fills + diagnostics | `Account.commit(FillBatch)` |
 | `MARK` | 15:30 | `ExecutionView` | valuation | marks + NAV | `Account.commit(MarkBatch)` |
-| `MONITOR` | 15:30 | `MonitorView` | constraint evaluation | findings | **건드리지 않음** |
+| `MONITOR` | session close | committed mark/execution + Account snapshot | session performance와 account observation | monitor evidence | **건드리지 않음** |
 | `MATERIALIZE`† | model/transform cadence | requirement-scoped data view | model/transform | typed research data | artifact publication |
 | `SETTLEMENT`* | 정산 시점 | `ExecutionView` | future variation/coupon/dividend cash flow | cash/position delta | future `Account.commit(LifecycleBatch)` |
 | `FUNDING`* | funding 시점 | `ExecutionView` | future perpetual funding | cash delta | future `Account.commit(LifecycleBatch)` |
@@ -390,8 +391,14 @@ cutoff 열이 사라진 것에 주의한다. 무엇을 볼 수 있는지는 cloc
 결정하므로 event마다 명시할 값이 아니다. 일봉의 `available_at`이 15:30이면 09:00 `DECISION`은 당일
 종가를 조회할 수 없다 — 별도 설정 없이 시간표에서 유도된다(§7).
 
-별표(`*`) event는 MVP scheduler와 acceptance 대상이 아닌 future extension point다. `DECISION`은 fill을 commit하지 않고 `MONITOR`는 Account를 변경하지 않는다. Decision intent는 execution
-event의 immutable input이고, monitoring finding은 account를 소급 변경하지 않는 evidence다.
+별표(`*`) event는 MVP scheduler와 acceptance 대상이 아닌 future extension point다. `DECISION`은 fill을
+commit하지 않고 daily runtime의 `MONITOR`도 Account를 변경하지 않는다. Decision intent는 execution event의
+immutable input이다.
+
+여기서 current `DailyExecutionFlow`의 `MONITOR` callback은 session performance와 account observation evidence를
+만들 뿐 constraint를 평가하지 않는다. Constraint monitoring은 committed checkpoint와 frozen `evaluation_time`을
+받는 별도 `QlibxProject.monitor_constraints()` operation이다. Caller가 원하는 cadence로 명시적으로 호출할 수 있고,
+future optional scheduler가 같은 operation을 callback으로 등록할 수는 있지만 `run_daily()`는 현재 자동 호출하지 않는다.
 
 † `MATERIALIZE`는 Model 또는 deterministic transform을 선택한 workflow에만 존재한다. Rolling,
 expanding 또는 event-triggered fit이 필요하면 이 event의 concrete schedule로 등록하고 `DECISION`보다
@@ -483,9 +490,10 @@ Kernel은 callback이 무엇을 하는지 모른다. 따라서 가짜 callback�
 
 ### 동시각 순서
 
-같은 timestamp의 event는 `priority` 오름차순으로 처리한다. `MARK`(10)가 `MONITOR`(20)보다 먼저여야
-monitoring이 갱신된 account를 읽는다. 시각을 인위적으로 벌리는 대신 priority로 표현한다 — 순서의
-이유가 코드에 남기 때문이다.
+같은 timestamp의 event는 `priority` 오름차순으로 처리한다. `MARK`가 daily `MONITOR`보다 먼저여야
+session performance와 account observation이 갱신된 committed mark를 읽는다. 시각을 인위적으로 벌리는 대신
+priority로 표현한다 — 순서의 이유가 코드에 남기 때문이다. 이 순서는 별도 constraint-monitoring operation을
+daily flow에 자동 연결한다는 뜻이 아니다.
 
 ### Clock implementation 교체
 
@@ -1056,6 +1064,12 @@ class RendererOperation(Operation[ReportArtifact], Protocol): ...
 `MaterializeOperation`이 만든 signal/characteristic/risk result를 읽어도 된다. Public boundary를 넘거나
 재사용되는 intermediate만 정확한 semantic artifact로 materialize한다.
 
+Project-local Strategy가 alpha logic의 primary extension point다. Package는 module/source identity, public
+input/output contract와 deterministic fixture로 compatibility를 판정하고 성공한 component만 등록한다. Strategy가
+stored artifact를 요구하면 Flow가 role/schema/semantics를 resolve·load하고 evidence-independent immutable projection만
+scoped view에 주입한다. User code는 artifact backend나 raw observation store를 직접 읽지 않는다. Model과
+`MATERIALIZE`는 selected Strategy가 reusable intermediate를 요구할 때만 존재하는 optional path다.
+
 ```python
 Strategy.run(view)              -> (StrategyResult, Diagnostics)
 EnsembleStrategy.run(view)      -> (StrategyResult, EnsembleDiagnostics)
@@ -1079,10 +1093,14 @@ artifact로 읽고 ticker-level netting, crossing, member contribution과 fixed/
 기록한다. Member producer가 direct Strategy인지 Model result를 소비했는지는 Ensemble public contract가
 아니다.
 
-Path-dependent result도 재사용 가능하다. Compatibility operation은 source state/feedback cursor와 target
-state의 차이를 warning으로 제시하고, user가 historical intent replay 또는 target state에서 Strategy rerun을
-선택한 decision artifact를 남긴다. 다른 execution history라는 이유만으로 무조건 거부하거나 조용히
-재사용하지 않는다.
+Path-dependent result도 frozen typed input으로 재사용 가능하다. Flow는 consumer가 선언한 artifact role, schema와
+semantics를 확인하고 실제로 load·consume한 member에만 dependency edge를 만든다. 새 Strategy/Ensemble result는 source
+artifact ID뿐 아니라 그 member가 의존한 모든 Account/Memory state identity와 feedback cursor를 보존한다. Member
+producer는 재실행하지 않고 parent artifact도 변경하지 않는다.
+
+이 reuse는 target/current Account에서 member를 다시 계산했다는 주장이 아니다. 이후 physical target 또는 order
+conversion만 현재 committed Account와 그 시점의 execution input을 읽는다. Consumer-declared budget/schema/semantic
+requirement가 맞지 않으면 Strategy 계산 전에 explicit compatibility error로 실패한다.
 
 `exchange.match_batch`만 view를 받지 않는다. 필요한 관측값은 Executor가 view에서 꺼내고, effective-dated
 policy를 고르기 위한 event time은 `at`으로 명시한다. Exchange는 wall clock을 읽지 않으며 같은 frozen
@@ -2070,9 +2088,10 @@ characteristic을 materialize한 Model result는 typed artifact로 load되어 lo
 Strategy가 producer rerun 없이 각각 소비한다(`UC-SIGNAL-002`).
 
 Flexible-budget result는 invested 40%와 residual 60%를 그대로 저장하고 fixed consumer가 요청되면
-compatibility error를 낸다(`UC-ALPHA-BUDGET-001`). 다른 account에서 path-dependent result를 재사용하면
-source/target state 차이를 보여주고 historical replay와 Strategy rerun 중 user choice를 기록한다
-(`UC-ALPHA-PATH-001`).
+compatibility error를 낸다(`UC-ALPHA-BUDGET-001`). Path-dependent result는 frozen Ensemble member로 소비하고
+producer를 다시 실행하지 않는다. Ensemble dependency는 consumed artifact와 source Account/Memory state identity 및
+cursor를 모두 보존한다. 이후 account B에서 executable target을 만들면 conversion만 account B의 current committed
+state를 읽으며 member를 account B에서 재계산했다고 표시하지 않는다(`UC-ALPHA-PATH-001`).
 
 ```text
 parent signed weights ─┬→ next-close full-fill child execution
@@ -2144,9 +2163,11 @@ Daily profile은 decision 다음 eligible session과 그 close observation의 `a
 공개되지 않은 close나 기본 convention과 다른 same-session close를 요청하면 Fill 전에 실패한다. Volume
 impact나 partial fill을 모델링하지 않으면 limitation artifact에 남긴다(`UC-EXEC-002`).
 
-MONITOR timer는 decision 유무와 무관하게 Account의 committed snapshot과 resolved compliance
-view를 읽는다. Price drift로 time-varying single-name cap breach가 생기면 finding만 publish하고 order나 account mutation을
-만들지 않는다(`UC-EXEC-003`).
+`QlibxProject.monitor_constraints(spec)`는 decision 유무와 무관하게 spec이 지정한 committed checkpoint와 frozen
+evaluation instant의 resolved compliance view를 읽는다. Price drift로 time-varying single-name cap breach가 생기면
+finding만 publish하고 order나 account mutation을 만들지 않는다(`UC-EXEC-003`). 이 standalone operation은 caller가
+독립 cadence로 호출하며 current `run_daily()`의 session-close `MONITOR` callback에 자동 연결되지 않는다. Shared
+scheduler가 필요하면 같은 frozen spec operation을 별도 callback으로 등록하는 optional integration으로 다룬다.
 
 ### 13.12 Artifact, failure, report와 extension — UC-ARTIFACT-001, UC-ARTIFACT-002, UC-RESEARCH-001, UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001
 
@@ -2296,7 +2317,9 @@ Strategy의 authority가 된다. Concurrent/stale prior identity는 commit confl
 actual state로 승격되지 않는다. Checkpoint는 committed memory ID와 feedback cursor를 함께 보존한다.
 
 Memory나 actual feedback을 소비한 result는 state identity, account identity와 cursor를 lineage에 기록한다.
-다른 state에서 재사용하면 §8 compatibility operation이 warning과 replay/rerun choice를 만든다.
+Later Strategy가 frozen result를 소비하면 이 lineage를 새 result dependency로 전파한다. Producer를 rerun하거나
+consumer Account에서 recompute한 것으로 표시하지 않으며, 실제 current Account는 downstream target/order conversion에서
+별도로 읽는다.
 
 MemoryStore를 독립 low-latency index로 구현할지 artifact stream의 committed head로 구현할지는 물리
 backend 결정이다. 어느 구현이든 immutable proposed/committed state artifact, CAS identity와 checkpoint
@@ -2416,9 +2439,18 @@ member를 결합하는 것 자체는 실행 회계와 무관하다.
   transaction cost를 발생시키지 않는다.
 - **Netting 후 normalization.** 네팅으로 줄어든 gross를 목표치로 되돌릴지는 fixed/flexible budget
   선언에 따른다. 말없이 재정규화하지 않고 gross/net residual을 evidence로 남긴다.
-- **Path-dependency compatibility.** Member가 state-dependent면 state/account/cursor identity를 보존한다.
-  다른 history에서 사용할 때 무조건 금지하지 않고 compatibility warning 뒤 historical replay 또는
-  rerun choice를 기록한다.
+- **Path-dependency lineage.** Member가 state-dependent면 artifact dependency와 함께 모든
+  state/account/cursor identity를 보존한다. Compatible frozen member의 producer는 rerun하지 않고, 여러 source
+  identity를 fabricated single identity로 축약하지 않는다. Current Account는 downstream target/order conversion에서만
+  authority로 읽는다.
+
+### Current Strategy-composition readiness
+
+`GAP-STRATEGY-COMPOSITION-001`은 아직 implementation gap이다. Current extension validation은
+neutralization transform에 한정되고, `StrategyView`에는 typed artifact input surface가 없으며,
+`CompositionFlow`는 서로 다른 path-dependent state identity를 함께 쓰는 경우 거부한다. 따라서 이 architecture의
+project-local Strategy validation과 multi-source lineage 계약은 closure fixture가 통과하기 전까지 current support가
+아니다. 기존 decision-intent replay/rerun fixture도 Strategy-result composition의 acceptance oracle로 사용하지 않는다.
 
 ### 현재 남은 감사 action
 
@@ -2433,6 +2465,22 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 ---
 
 ## 17. 개정 이력
+
+### 2026-08-07 — Strategy-first composition contract 정정
+
+**Path-dependent reuse.** Account 또는 Memory를 소비한 Strategy result는 다른 Strategy/Ensemble의 frozen typed
+input으로 재사용한다. Producer rerun이나 cross-account replay/rerun interview를 요구하지 않고, 실제로 소비한
+artifact와 모든 source state/cursor lineage를 새 result에 전파한다. Current Account는 downstream physical
+target/order conversion에서만 authority다.
+
+**Extension lifecycle.** Project-local Strategy를 alpha logic의 primary extension point로 두고 Model/materialization은
+선택된 component가 reusable intermediate를 요구할 때만 사용한다. Flow가 typed artifact를 resolve·load하고 bounded
+projection을 Strategy view에 주입한다. Current build에는 이 full lifecycle이 아직 없어
+`GAP-STRATEGY-COMPOSITION-001`로 명시했다.
+
+**Monitoring clock.** Daily runtime의 session-close `MONITOR`는 performance/observation callback이며 constraint
+evaluation이 아니다. Constraint monitoring은 committed checkpoint와 frozen evaluation instant를 받는 standalone
+public operation이다. Optional scheduler integration은 가능하지만 `run_daily()`에 자동 삽입하지 않는다.
 
 ### 2026-08-07 — public sample 선택과 constraint monitoring 노출
 

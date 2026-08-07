@@ -92,6 +92,16 @@ def test_current_support_ids_are_complete_across_real_and_contract_registries() 
 
     prd_ids = _document_ids(ROOT / "docs" / "qlibx-prd.md")
     architecture_ids = _document_ids(ROOT / "docs" / "qlibx-architecture.md")
+    excluded_gaps = current["excluded_readiness_gaps"]
+    assert len({item["id"] for item in excluded_gaps}) == len(excluded_gaps)
+    for gap in excluded_gaps:
+        assert gap["id"] in prd_ids
+        assert gap["id"] in architecture_ids
+        assert gap["excludes_current_use_case"] not in required
+        assert gap["excludes_current_use_case"] not in observed_current_ids
+        assert gap["reason"]
+        assert gap["closure_oracle"]
+
     for scenario in contract_scenarios:
         scenario_id = scenario["id"]
         assert scenario_id in prd_ids

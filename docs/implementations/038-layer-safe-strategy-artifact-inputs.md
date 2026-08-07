@@ -85,10 +85,41 @@ The tests prove generic stored-signal consumption, eager validation of unused in
 actual-access-only dependency edges, cardinality failures, exact type/schema failures, semantic
 failures, optional-contract failures, and typed role/payload access failures.
 
+Daily propagation validation:
+
+```
+.venv/Scripts/python.exe -m pytest tests/test_public_daily.py tests/test_strategy_artifact_inputs.py -q -p no:cacheprovider --basetemp C:\tmp\qlibx-pytest-m2-daily-019fd94d
+-> 28 passed in 31.67s
+```
+
+The daily tests pin the pre-M2 empty-binding configuration and request hashes, prove non-empty
+bindings change both frozen and recovery identity, observe the same exact input artifact dependency
+at every decision, and reject changed artifact selection on resume.
+
+Final completion gate:
+
+```
+.venv/Scripts/python.exe -m pytest tests -q -p no:cacheprovider --basetemp C:\tmp\qlibx-pytest-m2-final-019fd94d
+-> 191 passed in 270.87s
+
+.venv/Scripts/python.exe -m ruff check .
+-> All checks passed!
+
+git diff --check
+-> clean
+
+$env:UV_CACHE_DIR = 'C:\tmp\qlibx-uv-cache-m2-final-019fd94d'; uv build
+-> built dist/qlibx-0.1.0.tar.gz and dist/qlibx-0.1.0-py3-none-any.whl
+```
+
+The default uv cache under the non-ASCII user profile returned access denied. The build was rerun
+with a task-scoped ASCII cache according to the corporate Windows workflow. Wheel and sdist
+inspection confirmed the new artifact contracts, resolver, ResearchFlow, daily flow, and simulation
+modules are packaged. An import smoke loaded the new public operation/context types directly from
+the wheel.
+
 ## Remaining limitations
 
 - Only the two built-in contracts are registered.
 - Semantic constraints cannot inspect nested fields or execute custom code.
 - Ensemble continues to use its specialized M1/M4 compatibility path.
-- Daily binding propagation and recovery-fingerprint compatibility are completed in the following
-  M2 milestone and recorded here with final validation evidence.

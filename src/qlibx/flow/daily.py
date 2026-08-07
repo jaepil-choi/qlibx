@@ -66,6 +66,7 @@ from qlibx.kernel.clock import require_aware
 from qlibx.models import QlibxModel
 from qlibx.operations import (
     DecisionAction,
+    StrategyArtifactBinding,
     StrategyInvocation,
     StrategyOperation,
     StrategyResult,
@@ -226,6 +227,7 @@ class DailyRunRequest(QlibxModel):
     config_fingerprint: str = Field(min_length=1)
     decision_times: tuple[datetime, ...]
     session_closes: tuple[datetime, ...]
+    artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
 
     @model_validator(mode="after")
     def validate_schedule(self) -> "DailyRunRequest":
@@ -237,7 +239,17 @@ class DailyRunRequest(QlibxModel):
             raise ValueError("session_closes must be unique and sorted")
         if not sessions:
             raise ValueError("daily flow requires at least one session close")
+        binding_roles = [binding.consumer_role for binding in self.artifact_bindings]
+        if len(binding_roles) != len(set(binding_roles)):
+            raise ValueError("daily Strategy artifact binding roles must be unique")
         return self
+
+    def compatibility_json(self) -> str:
+        """Preserve the pre-M2 request identity when no artifacts are bound."""
+
+        if not self.artifact_bindings:
+            return self.model_dump_json(exclude={"artifact_bindings"})
+        return self.model_dump_json()
 
 
 @dataclass(frozen=True, slots=True)
@@ -506,7 +518,7 @@ class DailyExecutionFlow:
         self._request = request
         self._strategy = strategy
         self._executor = NextSessionCloseExecutor(self._profile, request.session_closes)
-        self._request_fingerprint = self._fingerprint(request.model_dump_json())
+        self._request_fingerprint = self._fingerprint(request.compatibility_json())
         self._profile_fingerprint = self._fingerprint(self._profile.model_dump_json())
         self._registry_fingerprint = self._fingerprint(
             "|".join(
@@ -637,6 +649,7 @@ class DailyExecutionFlow:
             invocation_id=decision_id,
             evaluation_time=event.ts,
             config_fingerprint=self._request.config_fingerprint,
+            artifact_bindings=self._request.artifact_bindings,
         )
         account_state = self._account.snapshot(evaluation_time=event.ts)
         memory_state = self._memory.snapshot(self._strategy.strategy_id)

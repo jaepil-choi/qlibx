@@ -210,6 +210,7 @@ class QlibxProject:
                 config_fingerprint=spec.frozen_config_fingerprint(),
                 decision_times=spec.decision_times,
                 session_closes=spec.session_closes,
+                artifact_bindings=spec.artifact_bindings,
             ),
             resume=resume,
         )

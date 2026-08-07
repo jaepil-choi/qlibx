@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 from qlibx.execution import EtfInstrument, KrxExchangeConfig, StockInstrument
 from qlibx.kernel.clock import require_aware
 from qlibx.models import QlibxModel
+from qlibx.operations import StrategyArtifactBinding
 
 
 class DailyAccountSeed(QlibxModel):
@@ -47,6 +48,7 @@ class DailySimulationSpec(QlibxModel):
     market: DailyMarketBinding
     decision_times: tuple[datetime, ...]
     session_closes: tuple[datetime, ...] = Field(min_length=1)
+    artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
 
     @model_validator(mode="after")
     def validate_current_daily_scope(self) -> "DailySimulationSpec":
@@ -61,6 +63,9 @@ class DailySimulationSpec(QlibxModel):
             raise ValueError("public daily simulation does not support volume participation")
         if self.exchange.impact_rate != 0:
             raise ValueError("public daily simulation does not support market impact")
+        binding_roles = [binding.consumer_role for binding in self.artifact_bindings]
+        if len(binding_roles) != len(set(binding_roles)):
+            raise ValueError("daily Strategy artifact binding roles must be unique")
 
         decisions = tuple(require_aware(value) for value in self.decision_times)
         sessions = tuple(require_aware(value) for value in self.session_closes)
@@ -81,6 +86,10 @@ class DailySimulationSpec(QlibxModel):
             "exchange": self.exchange.model_dump(mode="json"),
             "market": self.market.model_dump(mode="json"),
         }
+        if self.artifact_bindings:
+            payload["artifact_bindings"] = [
+                binding.model_dump(mode="json") for binding in self.artifact_bindings
+            ]
         encoded = json.dumps(
             payload,
             ensure_ascii=False,

@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,8 +19,17 @@ from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
 from qlibx.evidence import ArtifactEnvelope, LocalArtifactBackend
 from qlibx.execution import CostRule, KrxExchangeConfig, Side, StockInstrument
-from qlibx.flow import DailyExecutionFlow
-from qlibx.operations import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
+from qlibx.flow import DailyExecutionFlow, DailyRunRequest
+from qlibx.operations import (
+    BudgetMode,
+    DecisionAction,
+    StoredSignalEntry,
+    StoredSignalResult,
+    StrategyArtifactBinding,
+    StrategyArtifactRequirement,
+    StrategyDraft,
+    WeightEntry,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -65,6 +75,28 @@ class PublicDailyStrategy:
             target_gross=1.0,
             decision_action=DecisionAction.TARGET,
         )
+
+
+class ArtifactDailyStrategy(PublicDailyStrategy):
+    strategy_id = "test.public-daily-artifact"
+
+    def __init__(self) -> None:
+        self.artifact_access_count = 0
+
+    def artifact_requirements(self) -> tuple[StrategyArtifactRequirement, ...]:
+        return (
+            StrategyArtifactRequirement(
+                requirement_id="daily.alpha_signal",
+                consumer_role="alpha_signal",
+                artifact_type="stored_signal_result",
+                artifact_schema_version=1,
+            ),
+        )
+
+    def run(self, view: object) -> StrategyDraft:
+        view.artifact("alpha_signal", StoredSignalResult)  # type: ignore[attr-defined]
+        self.artifact_access_count += 1
+        return super().run(view)
 
 
 def at(day: int) -> datetime:
@@ -146,6 +178,22 @@ def project(tmp_path: Path) -> QlibxProject:
     )
     assert outcome.status is OutcomeStatus.COMPLETE
     return selected
+
+
+def publish_daily_signal(selected: QlibxProject, identity: str) -> ArtifactEnvelope:
+    outcome = selected.artifacts.publish_model(
+        logical_identity=identity,
+        artifact_type="stored_signal_result",
+        artifact_schema_version=1,
+        producer_id="tests.daily-signal",
+        payload=StoredSignalResult(
+            signal_semantics="alpha",
+            observation_time=at(1),
+            entries=(StoredSignalEntry(instrument="A000001", value=1.0),),
+        ),
+    )
+    assert outcome.status is OutcomeStatus.COMPLETE
+    return outcome.result
 
 
 def test_public_daily_facade_runs_closed_loop(tmp_path: Path) -> None:
@@ -230,6 +278,137 @@ def test_public_daily_is_deterministic_and_resumable(tmp_path: Path) -> None:
     assert rejected.status is OutcomeStatus.FAILED
     assert rejected.errors[0].error_code == "RESUME_BRANCH_REQUIRED"
     assert rejected.errors[0].commit_status is CommitStatus.NONE
+
+
+def test_empty_daily_bindings_preserve_pre_m2_fingerprints() -> None:
+    selected = spec()
+    assert (
+        selected.frozen_config_fingerprint()
+        == "0e602a61282040af577e7187e92b3c20f4851247672fa3ec803e94cf86ea4628"
+    )
+    request = DailyRunRequest(
+        run_id=selected.run_id,
+        config_fingerprint=selected.frozen_config_fingerprint(),
+        decision_times=selected.decision_times,
+        session_closes=selected.session_closes,
+    )
+    assert hashlib.sha256(request.compatibility_json().encode()).hexdigest() == (
+        "6120f8fc7dfe1e4526bbd054ce0ed61f40ffa528ca0d714c44cdc6b0bb6eb643"
+    )
+    assert "artifact_bindings" not in request.compatibility_json()
+
+
+def test_non_empty_daily_bindings_change_frozen_and_recovery_identity() -> None:
+    binding = StrategyArtifactBinding(
+        consumer_role="alpha_signal",
+        artifact_id="artifact-alpha-1",
+    )
+    empty = spec()
+    bound = spec(artifact_bindings=(binding,))
+    assert bound.frozen_config_fingerprint() != empty.frozen_config_fingerprint()
+
+    empty_request = DailyRunRequest(
+        run_id=empty.run_id,
+        config_fingerprint=empty.frozen_config_fingerprint(),
+        decision_times=empty.decision_times,
+        session_closes=empty.session_closes,
+    )
+    bound_request = DailyRunRequest(
+        run_id=bound.run_id,
+        config_fingerprint=bound.frozen_config_fingerprint(),
+        decision_times=bound.decision_times,
+        session_closes=bound.session_closes,
+        artifact_bindings=bound.artifact_bindings,
+    )
+    assert bound_request.compatibility_json() != empty_request.compatibility_json()
+    assert "artifact-alpha-1" in bound_request.compatibility_json()
+
+
+def test_daily_propagates_the_same_frozen_binding_to_every_decision(
+    tmp_path: Path,
+) -> None:
+    selected = project(tmp_path)
+    signal = publish_daily_signal(selected, "daily-signal:alpha")
+    strategy = ArtifactDailyStrategy()
+    selected_spec = spec(
+        artifact_bindings=(
+            StrategyArtifactBinding(
+                consumer_role="alpha_signal",
+                artifact_id=signal.artifact_id,
+            ),
+        )
+    )
+
+    outcome = selected.run_daily(strategy, selected_spec)
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert strategy.artifact_access_count == len(selected_spec.decision_times)
+    strategy_artifacts = tuple(
+        envelope
+        for envelope in outcome.result.artifacts
+        if envelope.artifact_type == "strategy_result"
+    )
+    assert len(strategy_artifacts) == len(selected_spec.decision_times)
+    for envelope in strategy_artifacts:
+        artifact_edges = tuple(
+            edge for edge in envelope.dependencies if edge.consumer_role == "alpha_signal"
+        )
+        assert len(artifact_edges) == 1
+        assert artifact_edges[0].dependency_id == signal.artifact_id
+
+
+def test_changed_daily_artifact_selection_requires_a_new_recovery_branch(
+    tmp_path: Path,
+) -> None:
+    selected = project(tmp_path)
+    first_signal = publish_daily_signal(selected, "daily-signal:first")
+    second_signal = publish_daily_signal(selected, "daily-signal:second")
+    first_spec = spec(
+        artifact_bindings=(
+            StrategyArtifactBinding(
+                consumer_role="alpha_signal",
+                artifact_id=first_signal.artifact_id,
+            ),
+        )
+    )
+    first = selected.run_daily(ArtifactDailyStrategy(), first_spec)
+    assert first.status is OutcomeStatus.COMPLETE
+
+    changed = spec(
+        artifact_bindings=(
+            StrategyArtifactBinding(
+                consumer_role="alpha_signal",
+                artifact_id=second_signal.artifact_id,
+            ),
+        )
+    )
+    resumed = selected.run_daily(ArtifactDailyStrategy(), changed, resume=True)
+
+    assert resumed.status is OutcomeStatus.FAILED
+    assert resumed.errors[0].error_code == "RESUME_BRANCH_REQUIRED"
+    assert resumed.errors[0].commit_status is CommitStatus.NONE
+
+
+def test_daily_binding_roles_must_be_unique() -> None:
+    duplicate = StrategyArtifactBinding(
+        consumer_role="alpha_signal",
+        artifact_id="artifact-alpha-1",
+    )
+    second = StrategyArtifactBinding(
+        consumer_role="alpha_signal",
+        artifact_id="artifact-alpha-2",
+    )
+    with pytest.raises(ValidationError, match="binding roles must be unique"):
+        spec(artifact_bindings=(duplicate, second))
+    selected = spec()
+    with pytest.raises(ValidationError, match="binding roles must be unique"):
+        DailyRunRequest(
+            run_id=selected.run_id,
+            config_fingerprint=selected.frozen_config_fingerprint(),
+            decision_times=selected.decision_times,
+            session_closes=selected.session_closes,
+            artifact_bindings=(duplicate, second),
+        )
 
 
 def test_public_daily_missing_market_role_fails_before_account_commit(tmp_path: Path) -> None:

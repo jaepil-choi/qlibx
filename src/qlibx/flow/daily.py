@@ -54,6 +54,7 @@ from qlibx.execution import (
     SizingTarget,
     size_session_orders,
 )
+from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
 from qlibx.flow.recovery import (
     SIMULATION_RECOVERY_POINT_CONTRACT,
     PendingExecutionRecovery,
@@ -393,6 +394,8 @@ class DailyExecutionFlow:
         resolver: RequirementResolver | None = None,
         store: ObservationStore | None = None,
         memory: StrategyMemoryStore | None = None,
+        artifact_contracts: StrategyArtifactContractRegistry | None = None,
+        strategy_dependencies: tuple[DependencyEdge, ...] = (),
     ) -> None:
         self._clock = clock
         self._registry = registry
@@ -409,6 +412,8 @@ class DailyExecutionFlow:
             artifacts=artifacts,
             resolver=self._resolver,
             store=self._store,
+            artifact_contracts=artifact_contracts,
+            strategy_dependencies=strategy_dependencies,
         )
         self._request: DailyRunRequest | None = None
         self._strategy: StrategyOperation | None = None

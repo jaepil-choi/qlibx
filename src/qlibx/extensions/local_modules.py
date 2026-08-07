@@ -45,6 +45,25 @@ class LocalModuleLoader:
             module=module,
         )
 
+    def registered_source_hash(self, project_relative: str) -> str:
+        """Hash registered source without importing it."""
+
+        return hashlib.sha256(
+            self._resolve_registered_path(project_relative).read_bytes()
+        ).hexdigest()
+
+    def load_registered(
+        self,
+        project_relative: str,
+        *,
+        module_prefix: str = "_qlibx_local_extension",
+    ) -> LoadedLocalModule:
+        """Reload an exact project-relative path recorded in registration evidence."""
+
+        module_path = self._resolve_registered_path(project_relative)
+        relative = module_path.relative_to(self._extension_root).as_posix()
+        return self.load(relative, module_prefix=module_prefix)
+
     def _resolve_module_path(self, relative: str) -> Path:
         normalized = PurePosixPath(relative.replace("\\", "/"))
         if normalized.is_absolute() or ".." in normalized.parts or normalized.suffix != ".py":
@@ -52,4 +71,15 @@ class LocalModuleLoader:
         candidate = (self._extension_root / normalized.as_posix()).resolve()
         if not candidate.is_relative_to(self._extension_root) or not candidate.is_file():
             raise ValueError("module_path must identify a file inside the project extension root")
+        return candidate
+
+    def _resolve_registered_path(self, project_relative: str) -> Path:
+        normalized = PurePosixPath(project_relative.replace("\\", "/"))
+        if normalized.is_absolute() or ".." in normalized.parts or normalized.suffix != ".py":
+            raise ValueError("registered module_path must be a project-relative .py path")
+        candidate = (self._project_root / normalized.as_posix()).resolve()
+        if not candidate.is_relative_to(self._extension_root) or not candidate.is_file():
+            raise ValueError(
+                "registered module_path must identify a file inside the extension root"
+            )
         return candidate

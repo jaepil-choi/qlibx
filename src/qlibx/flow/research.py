@@ -13,7 +13,10 @@ from qlibx.context import (
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
-from qlibx.flow.artifact_inputs import StrategyArtifactResolver
+from qlibx.flow.artifact_inputs import (
+    StrategyArtifactContractRegistry,
+    StrategyArtifactResolver,
+)
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.operations import (
@@ -39,11 +42,17 @@ class ResearchFlow:
         artifacts: LocalArtifactBackend,
         resolver: RequirementResolver | None = None,
         store: ObservationStore | None = None,
+        artifact_contracts: StrategyArtifactContractRegistry | None = None,
+        strategy_dependencies: tuple[DependencyEdge, ...] = (),
     ) -> None:
         self._registry = registry
         self._artifacts = artifacts
         self._resolver = resolver or RequirementResolver()
         self._store = store or ObservationStore()
+        self._artifact_contracts = (
+            artifact_contracts or StrategyArtifactContractRegistry.built_in()
+        )
+        self._strategy_dependencies = strategy_dependencies
 
     def invoke_strategy(
         self,
@@ -102,6 +111,7 @@ class ResearchFlow:
             requirements=artifact_requirements,
             bindings=invocation.artifact_bindings,
             artifacts=self._artifacts,
+            contract_registry=self._artifact_contracts,
         )
         if artifact_resolution.failed:
             return self._publish_errors(artifact_resolution.errors)
@@ -255,6 +265,7 @@ class ResearchFlow:
                 )
                 for access in view.artifact_accessed()
             ),
+            *self._strategy_dependencies,
             *additional_dependencies,
         )
         publication = self._artifacts.publish_model(

@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from qlibx import OutcomeStatus, QlibxProject
+from qlibx import (
+    OutcomeStatus,
+    QlibxProject,
+    StrategyArtifactBinding,
+    StrategyInvocation,
+)
 from qlibx.account import Account
 from qlibx.analysis import SessionPerformanceEvidence
 from qlibx.context import StateAccessRecord
@@ -459,3 +464,144 @@ def test_stateful_validation_requires_and_uses_exact_frozen_state(
     assert {checkpoint_id, performance_id}.issubset(
         {edge.dependency_id for edge in dependencies}
     )
+
+
+def test_exact_registration_executes_through_public_facade(tmp_path: Path) -> None:
+    project = project_with_market(tmp_path)
+    write_module(project, "valid.py", VALID_MODULE)
+    validated = project.validate_strategy_extension(
+        request("project.valid", "valid.py")
+    )
+    assert validated.status is OutcomeStatus.COMPLETE
+
+    outcome = project.invoke_registered_strategy(
+        validated.result.registration_artifact_id,
+        StrategyInvocation(
+            invocation_id="registered-project-valid",
+            evaluation_time=EVALUATION_TIME,
+            config_fingerprint="registered-runtime-v1",
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert outcome.result.result.weights[0].instrument == "A"
+    dependencies = outcome.result.artifact.dependencies
+    assert any(
+        edge.consumer_role == "strategy_extension_registration"
+        and edge.dependency_id == validated.result.registration_artifact_id
+        for edge in dependencies
+    )
+
+
+def test_registered_local_payload_contract_is_available_at_runtime(
+    tmp_path: Path,
+) -> None:
+    project = project_with_market(tmp_path)
+    write_module(project, "custom.py", CUSTOM_ARTIFACT_MODULE)
+    loaded = LocalModuleLoader(
+        project_root=project.root,
+        extension_root=project.root / project.config.extension_dir,
+    ).load("custom.py", module_prefix="_qlibx_test_custom")
+    publication = project.artifacts.publish_model(
+        logical_identity="custom-runtime-signal",
+        artifact_type="project_custom_signal",
+        artifact_schema_version=1,
+        producer_id="tests",
+        payload=loaded.module.CustomSignal(
+            semantics="runtime-alpha",
+            instrument="A",
+            score=2.0,
+        ),
+    )
+    assert publication.status is OutcomeStatus.COMPLETE
+    binding = StrategyArtifactBinding(
+        consumer_role="custom_signal",
+        artifact_id=publication.result.artifact_id,
+    )
+    validated = project.validate_strategy_extension(
+        request(
+            "project.custom-artifact",
+            "custom.py",
+            artifact_bindings=(binding,),
+        )
+    )
+    assert validated.status is OutcomeStatus.COMPLETE
+
+    outcome = project.invoke_registered_strategy(
+        validated.result.registration_artifact_id,
+        StrategyInvocation(
+            invocation_id="registered-custom-runtime",
+            evaluation_time=EVALUATION_TIME,
+            config_fingerprint="registered-custom-v1",
+            artifact_bindings=(binding,),
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert outcome.result.result.diagnostics == ("runtime-alpha",)
+    assert {
+        edge.dependency_id for edge in outcome.result.artifact.dependencies
+    }.issuperset(
+        {
+            publication.result.artifact_id,
+            validated.result.registration_artifact_id,
+        }
+    )
+
+
+def test_registered_execution_rejects_source_drift_before_strategy_result(
+    tmp_path: Path,
+) -> None:
+    project = project_with_market(tmp_path)
+    write_module(project, "valid.py", VALID_MODULE)
+    validated = project.validate_strategy_extension(
+        request("project.valid", "valid.py")
+    )
+    assert validated.status is OutcomeStatus.COMPLETE
+    write_module(
+        project,
+        "valid.py",
+        VALID_MODULE.replace(
+            "target_gross=1.0,",
+            'target_gross=1.0,\n            diagnostics=("changed",),',
+        ),
+    )
+
+    outcome = project.invoke_registered_strategy(
+        validated.result.registration_artifact_id,
+        StrategyInvocation(
+            invocation_id="source-drift",
+            evaluation_time=EVALUATION_TIME,
+            config_fingerprint="source-drift-v1",
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "STRATEGY_EXTENSION_SOURCE_DRIFT"
+    assert not any(
+        envelope.artifact_type == "strategy_result"
+        for envelope in project.artifacts.list_envelopes()
+    )
+
+
+def test_registered_execution_never_searches_for_missing_registration(
+    tmp_path: Path,
+) -> None:
+    project = project_with_market(tmp_path)
+    write_module(project, "valid.py", VALID_MODULE)
+    validated = project.validate_strategy_extension(
+        request("project.valid", "valid.py")
+    )
+    assert validated.status is OutcomeStatus.COMPLETE
+
+    outcome = project.invoke_registered_strategy(
+        "artifact-does-not-exist",
+        StrategyInvocation(
+            invocation_id="missing-registration",
+            evaluation_time=EVALUATION_TIME,
+            config_fingerprint="missing-registration-v1",
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "STRATEGY_EXTENSION_REGISTRATION_INVALID"

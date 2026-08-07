@@ -104,3 +104,52 @@ def test_onboarding_cli_remove_is_preview_first(tmp_path: Path, capsys: object) 
     assert removed["validation"]["matches_desired_state"] is True
     assert not skill.exists()
     assert (tmp_path / "AGENTS.md").exists()
+
+
+def test_strategy_validate_and_list_cli(tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "strategy-project"
+    assert run(["project", "init", str(root), "--apply"]) == 0
+    output(capsys)
+    module = root / "qlibx_extensions" / "static_strategy.py"
+    module.write_text(
+        "from qlibx import (\n"
+        "    BudgetMode, StrategyDraft, StrategyExtensionSpec, WeightEntry,\n"
+        ")\n\n"
+        "STRATEGY_SPEC = StrategyExtensionSpec(strategy_id='project.cli')\n\n"
+        "class Strategy:\n"
+        "    strategy_id = STRATEGY_SPEC.strategy_id\n"
+        "    def requirements(self):\n"
+        "        return ()\n"
+        "    def run(self, view):\n"
+        "        return StrategyDraft(\n"
+        "            weights=(WeightEntry(instrument='A', weight=1.0),),\n"
+        "            budget_mode=BudgetMode.FIXED,\n"
+        "            target_gross=1.0,\n"
+        "        )\n\n"
+        "def create_strategy():\n"
+        "    return Strategy()\n",
+        encoding="utf-8",
+    )
+    request = tmp_path / "strategy-request.yaml"
+    request.write_text(
+        yaml.safe_dump(
+            {
+                "invocation_id": "cli-strategy-validation",
+                "strategy_id": "project.cli",
+                "module_path": "static_strategy.py",
+                "evaluation_time": "2025-01-03T09:00:00Z",
+                "config_fingerprint": "cli-strategy-v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert run(["strategy", "validate", str(root), str(request)]) == 0
+    validated = output(capsys)
+    registration_id = validated["result"]["registration_artifact_id"]
+    assert validated["status"] == "complete"
+
+    assert run(["strategy", "list", str(root)]) == 0
+    registered = output(capsys)
+    assert registered[0]["registration_artifact_id"] == registration_id
+    assert registered[0]["registration"]["strategy_id"] == "project.cli"

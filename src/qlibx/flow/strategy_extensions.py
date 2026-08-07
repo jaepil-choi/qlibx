@@ -82,6 +82,14 @@ class _ModuleContract:
 
 
 @dataclass(frozen=True, slots=True)
+class LoadedStrategyExtension:
+    registration_artifact_id: str
+    registration: StrategyExtensionRegistration
+    operation: StrategyOperation
+    artifact_contracts: StrategyArtifactContractRegistry
+
+
+@dataclass(frozen=True, slots=True)
 class _FixtureState:
     account_state: AccountState | None = None
     account_feedback: AccountFeedbackState | None = None
@@ -319,6 +327,100 @@ class StrategyExtensionFlow:
                 )
         return tuple(sorted(values, key=lambda item: item.registration_artifact_id))
 
+    def load_registered(self, registration_artifact_id: str) -> OperationOutcome:
+        """Load only the exact registration selected by the caller."""
+
+        loaded_registration = self._artifacts.load_model(
+            registration_artifact_id,
+            STRATEGY_EXTENSION_REGISTRATION_CONTRACT,
+        )
+        if loaded_registration.status is not OutcomeStatus.COMPLETE:
+            return self._registered_failure(
+                registration_artifact_id,
+                stage_path="strategy_extension.load.registration",
+                code="STRATEGY_EXTENSION_REGISTRATION_INVALID",
+                exception=ValueError(
+                    "registration artifact is missing, failed, or contract-incompatible"
+                ),
+                retry=("select an exact successful Strategy registration artifact ID",),
+            )
+        registration = loaded_registration.result.payload
+        try:
+            current_source_hash = self._module_loader.registered_source_hash(
+                registration.module_path
+            )
+        except Exception as exc:
+            return self._registered_failure(
+                registration_artifact_id,
+                stage_path="strategy_extension.load.source",
+                code="STRATEGY_EXTENSION_LOAD_FAILED",
+                exception=exc,
+                retry=("restore the registered module path and validate it again",),
+            )
+        if current_source_hash != registration.source_hash:
+            return self._registered_failure(
+                registration_artifact_id,
+                stage_path="strategy_extension.load.source",
+                code="STRATEGY_EXTENSION_SOURCE_DRIFT",
+                exception=ValueError("current Strategy source hash differs from registration"),
+                context={
+                    "expected_source_hash": registration.source_hash,
+                    "actual_source_hash": current_source_hash,
+                    "module_path": registration.module_path,
+                },
+                retry=("validate the changed source and select its new registration ID",),
+            )
+        try:
+            loaded_module = self._module_loader.load_registered(
+                registration.module_path,
+                module_prefix="_qlibx_registered_strategy",
+            )
+            contract = self._module_contract(loaded_module, registration.strategy_id)
+        except Exception as exc:
+            return self._registered_failure(
+                registration_artifact_id,
+                stage_path="strategy_extension.load.contract",
+                code="STRATEGY_EXTENSION_LOAD_FAILED",
+                exception=exc,
+                retry=("restore dependencies or validate the Strategy module again",),
+            )
+        expected_contract = (
+            registration.spec,
+            registration.dataset_requirements,
+            registration.artifact_requirements,
+            registration.artifact_models,
+        )
+        actual_contract = (
+            contract.spec,
+            contract.dataset_requirements,
+            contract.artifact_requirements,
+            contract.artifact_models,
+        )
+        if actual_contract != expected_contract:
+            return self._registered_failure(
+                registration_artifact_id,
+                stage_path="strategy_extension.load.contract",
+                code="STRATEGY_EXTENSION_CONTRACT_DRIFT",
+                exception=ValueError(
+                    "current Strategy declaration or payload schema differs from registration"
+                ),
+                context={
+                    "strategy_id": registration.strategy_id,
+                    "module_path": registration.module_path,
+                },
+                retry=("validate the changed contract and select its new registration ID",),
+            )
+        return OperationOutcome(
+            status=OutcomeStatus.COMPLETE,
+            result=LoadedStrategyExtension(
+                registration_artifact_id=registration_artifact_id,
+                registration=registration,
+                operation=contract.first,
+                artifact_contracts=contract.artifact_contracts,
+            ),
+            diagnostics=(loaded_registration.result.envelope,),
+        )
+
     def _module_contract(
         self,
         loaded: LoadedLocalModule,
@@ -353,7 +455,7 @@ class StrategyExtensionFlow:
                     "STRATEGY_EXTENSION_CONTRACT_INVALID",
                     "create_strategy must accept no arguments",
                 )
-        except (TypeError, ValueError) as exc:
+        except TypeError as exc:
             raise _ContractError(
                 "STRATEGY_EXTENSION_CONTRACT_INVALID",
                 "create_strategy must expose an inspectable zero-argument signature",
@@ -711,6 +813,46 @@ class StrategyExtensionFlow:
                 item.result for item in publications if item.status is OutcomeStatus.COMPLETE
             ),
             errors=errors,
+        )
+
+    def _registered_failure(
+        self,
+        registration_artifact_id: str,
+        *,
+        stage_path: str,
+        code: str,
+        exception: Exception,
+        retry: tuple[str, ...],
+        context: dict[str, object] | None = None,
+    ) -> OperationOutcome:
+        seed = hashlib.sha256(
+            f"{registration_artifact_id}:{stage_path}:{code}".encode()
+        ).hexdigest()[:24]
+        error = OperationError(
+            operation="strategy_extension.load",
+            stage_path=stage_path,
+            error_code=code,
+            context={
+                "registration_artifact_id": registration_artifact_id,
+                "exception": type(exception).__name__,
+                "message": str(exception)[:500],
+                **(context or {}),
+            },
+            commit_status=CommitStatus.NONE,
+            retry_preconditions=retry,
+            idempotency_identity=registration_artifact_id,
+            error_id=f"error-{seed}",
+        )
+        publication = self._artifacts.publish_failure(error)
+        diagnostics = (
+            (publication.result,)
+            if publication.status is OutcomeStatus.COMPLETE
+            else publication.errors
+        )
+        return OperationOutcome(
+            status=OutcomeStatus.FAILED,
+            diagnostics=diagnostics,
+            errors=(error,),
         )
 
     def _failure(

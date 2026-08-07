@@ -10,6 +10,7 @@ import yaml
 
 from qlibx.data import DatasetRegistration
 from qlibx.errors import OperationOutcome
+from qlibx.extensions import StrategyExtensionValidationRequest
 from qlibx.models import QlibxModel
 from qlibx.onboarding import AgentTarget, OnboardingDesiredState, OnboardingRequest
 from qlibx.project import QlibxProject
@@ -49,6 +50,14 @@ def build_parser() -> argparse.ArgumentParser:
     register = dataset_commands.add_parser("register")
     register.add_argument("root")
     register.add_argument("registration")
+
+    strategy = commands.add_parser("strategy")
+    strategy_commands = strategy.add_subparsers(dest="strategy_command")
+    strategy_validate = strategy_commands.add_parser("validate")
+    strategy_validate.add_argument("root")
+    strategy_validate.add_argument("request")
+    strategy_list = strategy_commands.add_parser("list")
+    strategy_list.add_argument("root")
 
     artifact = commands.add_parser("artifact")
     artifact_commands = artifact.add_subparsers(dest="artifact_command")
@@ -127,6 +136,17 @@ def run(argv: list[str] | None = None) -> int:
             outcome = QlibxProject.open(args.root).register_dataset(registration)
             emit(outcome)
             return 0 if not outcome.errors else 1
+        if args.command == "strategy" and args.strategy_command == "validate":
+            payload: Any = yaml.safe_load(Path(args.request).read_text(encoding="utf-8"))
+            request = StrategyExtensionValidationRequest.model_validate_json(
+                json.dumps(payload, ensure_ascii=False)
+            )
+            outcome = QlibxProject.open(args.root).validate_strategy_extension(request)
+            emit(outcome)
+            return 0 if not outcome.errors else 1
+        if args.command == "strategy" and args.strategy_command == "list":
+            emit(QlibxProject.open(args.root).registered_strategy_extensions())
+            return 0
         if args.command == "artifact" and args.artifact_command == "list":
             project = QlibxProject.open(args.root)
             emit(project.artifacts.list_envelopes(include_failure=args.include_failure))

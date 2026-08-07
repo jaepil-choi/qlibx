@@ -19,19 +19,27 @@ from qlibx.constraints import (
 from qlibx.data.contracts import DatasetRegistration
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
-from qlibx.evidence import ArtifactContract, LocalArtifactBackend
+from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.execution import KrxExchange
-from qlibx.extensions import ExtensionRegistration, ExtensionValidationRequest
+from qlibx.extensions import (
+    ExtensionRegistration,
+    ExtensionValidationRequest,
+    RegisteredStrategyExtension,
+    StrategyExtensionValidationRequest,
+)
 from qlibx.flow import (
     ConstraintFlow,
     DailyExecutionFlow,
     DailyExecutionProfile,
     DailyRunRequest,
     ExtensionFlow,
+    LoadedStrategyExtension,
     MonitoringFlow,
     ResearchFlow,
+    StrategyExtensionFlow,
 )
 from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
+from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
@@ -82,6 +90,24 @@ class QlibxProject:
 
     def registered_extensions(self) -> tuple[ExtensionRegistration, ...]:
         return self.extension_flow.registered()
+
+    @property
+    def strategy_extension_flow(self) -> StrategyExtensionFlow:
+        return StrategyExtensionFlow(
+            project_root=self._root,
+            extension_root=self._root / self._config.extension_dir,
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+        )
+
+    def validate_strategy_extension(
+        self,
+        request: StrategyExtensionValidationRequest,
+    ) -> OperationOutcome:
+        return self.strategy_extension_flow.validate_local(request)
+
+    def registered_strategy_extensions(self) -> tuple[RegisteredStrategyExtension, ...]:
+        return self.strategy_extension_flow.registered()
 
     @property
     def artifacts(self) -> LocalArtifactBackend:
@@ -135,6 +161,22 @@ class QlibxProject:
             artifacts=self.artifacts,
         ).invoke_strategy(operation, invocation)
 
+    def invoke_registered_strategy(
+        self,
+        registration_artifact_id: str,
+        invocation: StrategyInvocation,
+    ) -> OperationOutcome:
+        loaded = self.strategy_extension_flow.load_registered(registration_artifact_id)
+        if loaded.status is not OutcomeStatus.COMPLETE:
+            return loaded
+        selected = loaded.result
+        return ResearchFlow(
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+            artifact_contracts=selected.artifact_contracts,
+            strategy_dependencies=(self._strategy_registration_dependency(selected),),
+        ).invoke_strategy(selected.operation, invocation)
+
     def adjust_constraints(self, spec: ConstraintAdjustmentSpec) -> OperationOutcome:
         """Adjust one portfolio candidate under the explicitly selected MVP policy."""
 
@@ -180,6 +222,47 @@ class QlibxProject:
     ) -> OperationOutcome:
         """Run the supported next-session-close profile from frozen public input."""
 
+        return self._run_daily(strategy, spec, resume=resume)
+
+    def run_daily_registered_strategy(
+        self,
+        registration_artifact_id: str,
+        spec: DailySimulationSpec,
+        *,
+        resume: bool = False,
+    ) -> OperationOutcome:
+        """Run an exact registered Strategy after source and contract revalidation."""
+
+        loaded = self.strategy_extension_flow.load_registered(registration_artifact_id)
+        if loaded.status is not OutcomeStatus.COMPLETE:
+            return loaded
+        selected = loaded.result
+        registered_identity = hashlib.sha256(
+            (
+                f"{spec.frozen_config_fingerprint()}|"
+                f"registration:{selected.registration_artifact_id}|"
+                f"source:{selected.registration.source_hash}"
+            ).encode()
+        ).hexdigest()
+        return self._run_daily(
+            selected.operation,
+            spec,
+            resume=resume,
+            config_fingerprint=registered_identity,
+            artifact_contracts=selected.artifact_contracts,
+            strategy_dependencies=(self._strategy_registration_dependency(selected),),
+        )
+
+    def _run_daily(
+        self,
+        strategy: StrategyOperation,
+        spec: DailySimulationSpec,
+        *,
+        resume: bool,
+        config_fingerprint: str | None = None,
+        artifact_contracts: StrategyArtifactContractRegistry | None = None,
+        strategy_dependencies: tuple[DependencyEdge, ...] = (),
+    ) -> OperationOutcome:
         exchange = KrxExchange(spec.exchange)
         for instrument in spec.instruments:
             exchange.add_instrument(instrument)
@@ -202,17 +285,32 @@ class QlibxProject:
                 valuation_price_role=spec.market.valuation_price_role,
                 feedback_entry_limit=spec.market.feedback_entry_limit,
             ),
+            artifact_contracts=artifact_contracts,
+            strategy_dependencies=strategy_dependencies,
         )
         return flow.run(
             strategy,
             DailyRunRequest(
                 run_id=spec.run_id,
-                config_fingerprint=spec.frozen_config_fingerprint(),
+                config_fingerprint=(
+                    config_fingerprint or spec.frozen_config_fingerprint()
+                ),
                 decision_times=spec.decision_times,
                 session_closes=spec.session_closes,
                 artifact_bindings=spec.artifact_bindings,
             ),
             resume=resume,
+        )
+
+    @staticmethod
+    def _strategy_registration_dependency(
+        selected: LoadedStrategyExtension,
+    ) -> DependencyEdge:
+        return DependencyEdge(
+            dependency_kind="artifact",
+            dependency_id=selected.registration_artifact_id,
+            consumer_role="strategy_extension_registration",
+            compatibility_fingerprint=selected.registration.source_hash,
         )
 
     @staticmethod

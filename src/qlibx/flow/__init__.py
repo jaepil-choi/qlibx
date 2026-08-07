@@ -56,6 +56,7 @@ from qlibx.flow.research import ResearchFlow, StrategyRunResult
 from qlibx.flow.strategy_extensions import (
     SESSION_PERFORMANCE_CONTRACT,
     STRATEGY_EXTENSION_REGISTRATION_CONTRACT,
+    LoadedStrategyExtension,
     StrategyExtensionFlow,
 )
 
@@ -91,6 +92,7 @@ __all__ = [
     "ExecutionEvidence",
     "ExtensionFlow",
     "FrozenDecision",
+    "LoadedStrategyExtension",
     "MarkEvidence",
     "MemberContribution",
     "MemoryCommitEvidence",

@@ -24,6 +24,13 @@ type/version and JSON-schema hash are stored in the registration and used throug
 registration-scoped contract registry. Built-in collisions, dotted/import symbols, non-local models,
 and schema drift are rejected. The process-global built-in registry is never mutated.
 
+Runtime execution accepts only an exact registration artifact ID. It hashes the registered file
+before importing it, reconstructs and compares the fixed module contract, injects the
+registration-scoped artifact registry into the existing Research/Daily flows, and records the
+registration as a dependency of every resulting Strategy artifact. Registered daily configuration
+identity includes the exact registration and source hash, so a different registration cannot resume
+as the same frozen run.
+
 ## Responsibilities and flow
 
 - `extensions.local_modules` confines one trusted file to the project extension root, computes its
@@ -57,6 +64,11 @@ factory, and requirement defects use `STRATEGY_EXTENSION_CONTRACT_INVALID`. Loca
 failures use `STRATEGY_EXTENSION_ARTIFACT_MODEL_INVALID`. Invalid output or unavailable view inputs
 use `STRATEGY_EXTENSION_VALIDATION_FAILED`; different declarations, drafts, or access evidence from
 fresh instances use `STRATEGY_EXTENSION_NONDETERMINISTIC`.
+
+Exact reload failures use `STRATEGY_EXTENSION_REGISTRATION_INVALID`,
+`STRATEGY_EXTENSION_LOAD_FAILED`, `STRATEGY_EXTENSION_SOURCE_DRIFT`, or
+`STRATEGY_EXTENSION_CONTRACT_DRIFT`. Source hash is checked before import, and no execution path
+searches for a latest or compatible registration.
 
 Dataset resolution retains package requirement errors. Artifact resolution retains the M2
 `STRATEGY_ARTIFACT_*` family under the Strategy-extension validation operation identity. Every
@@ -97,11 +109,22 @@ Full validation before the registration-validation commit:
 -> clean
 ```
 
-Build, installed-wheel and registered execution evidence is added in the remaining M3 commits.
+Registered execution validation:
+
+```
+.venv/Scripts/python.exe -m pytest tests/test_strategy_extensions.py tests/test_strategy_artifact_inputs.py tests/test_public_daily.py tests/test_cli.py -q -p no:cacheprovider --basetemp C:\tmp\qlibx-pytest-m3-execution-new-019fd94d
+-> 46 passed in 25.59s
+
+.venv/Scripts/python.exe -m pytest tests -q -p no:cacheprovider --basetemp C:\tmp\qlibx-pytest-m3-execution-full-019fd94d
+-> 205 passed in 130.98s
+```
+
+The slice proves exact-ID research and daily execution, registration lineage, registration-scoped
+payload deserialization, source-drift rejection before compute, CLI validate/list, and curated
+installed-Strategy imports. Build and fresh-wheel sample evidence is added in the final M3 commit.
 
 ## Remaining limitations
 
-- Registered source reload and Research/Daily facade execution are completed in the next M3 commit.
-- CLI, installed template, PRD/Architecture closure and fresh-wheel evidence remain in the final M3
+- Installed template, PRD/Architecture closure and fresh-wheel evidence remain in the final M3
   documentation/sample commit.
 - Ensemble multi-source state/cursor semantics and `StrategyResult` schema remain M4 scope.

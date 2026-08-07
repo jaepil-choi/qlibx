@@ -14,6 +14,7 @@ from qlibx import (
     OperationOutcome,
     OutcomeStatus,
     QlibxProject,
+    StrategyExtensionValidationRequest,
 )
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
@@ -543,3 +544,67 @@ def test_empty_mark_is_recorded_only_after_publication_succeeds(
     assert outcome.errors[0].error_code == "ARTIFACT_PUBLICATION_FAILED"
     assert outcome.errors[0].stage_path == "daily_flow.mark.artifact"
     assert marks_seen_at_publication == [()]
+
+
+def test_exact_registered_strategy_runs_through_daily_facade(tmp_path: Path) -> None:
+    selected = project(tmp_path)
+    module = selected.root / selected.config.extension_dir / "daily_strategy.py"
+    module.write_text(
+        "from qlibx import (\n"
+        "    BudgetMode, StrategyDraft, StrategyExtensionSpec, WeightEntry,\n"
+        ")\n\n"
+        "STRATEGY_SPEC = StrategyExtensionSpec(strategy_id='project.daily')\n\n"
+        "class Strategy:\n"
+        "    strategy_id = STRATEGY_SPEC.strategy_id\n"
+        "    def requirements(self):\n"
+        "        return ()\n"
+        "    def run(self, view):\n"
+        "        return StrategyDraft(\n"
+        "            weights=(WeightEntry(instrument='A000001', weight=1.0),),\n"
+        "            budget_mode=BudgetMode.FIXED,\n"
+        "            target_gross=1.0,\n"
+        "        )\n\n"
+        "def create_strategy():\n"
+        "    return Strategy()\n",
+        encoding="utf-8",
+    )
+    validated = selected.validate_strategy_extension(
+        StrategyExtensionValidationRequest(
+            invocation_id="validate-project-daily",
+            strategy_id="project.daily",
+            module_path="daily_strategy.py",
+            evaluation_time=at(2),
+            config_fingerprint="project-daily-validation-v1",
+        )
+    )
+    assert validated.status is OutcomeStatus.COMPLETE
+    selected_spec = spec(
+        run_id="registered-daily-run",
+        strategy_fingerprint="registered-daily-v1",
+    )
+
+    outcome = selected.run_daily_registered_strategy(
+        validated.result.registration_artifact_id,
+        selected_spec,
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert len(outcome.result.strategy_results) == 2
+    assert (
+        outcome.result.checkpoint.config_fingerprint
+        != selected_spec.frozen_config_fingerprint()
+    )
+    strategy_artifacts = tuple(
+        artifact
+        for artifact in outcome.result.artifacts
+        if artifact.artifact_type == "strategy_result"
+    )
+    assert len(strategy_artifacts) == 2
+    assert all(
+        any(
+            edge.consumer_role == "strategy_extension_registration"
+            and edge.dependency_id == validated.result.registration_artifact_id
+            for edge in artifact.dependencies
+        )
+        for artifact in strategy_artifacts
+    )

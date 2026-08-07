@@ -1123,8 +1123,7 @@ class DailyExecutionFlow:
                 account_before=_state(before),
                 account_after=_state(before),
             )
-            self._marks.append(evidence)
-            self._publish_model(
+            published = self._publish_model(
                 event=event,
                 stage="mark.artifact",
                 logical_identity=f"mark-result:{evidence.event_id}",
@@ -1132,6 +1131,8 @@ class DailyExecutionFlow:
                 producer_id=self._profile.profile_id,
                 payload=evidence,
             )
+            if published is not None:
+                self._marks.append(evidence)
             return
         binding = self._resolve(
             event,

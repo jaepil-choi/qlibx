@@ -59,6 +59,7 @@ def _request(
 
 def test_uc_error_001_and_uc_research_001_short_analysis_fails_then_retries(
     real_dw_case: RealDwProject,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     imported = _publish_real_signal(real_dw_case)
     assert imported.status is OutcomeStatus.COMPLETE
@@ -164,6 +165,21 @@ def test_uc_error_001_and_uc_research_001_short_analysis_fails_then_retries(
         and edge.consumer_role == "resolves_error"
         for edge in retry.diagnostics[0].dependencies
     )
+
+    def fail_compute(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic analysis compute defect")
+
+    monkeypatch.setattr("qlibx.flow.analysis.analyze_signal", fail_compute)
+    compute_failure = AnalysisFlow(
+        artifacts=real_dw_case.project.artifacts,
+        registry=real_dw_case.project.registry_snapshot(),
+    ).analyze_signal(
+        _request("signal-analysis-compute-failure", imported.result.artifact_id)
+    )
+    assert compute_failure.status is OutcomeStatus.FAILED
+    assert compute_failure.errors[0].error_code == "ANALYSIS_COMPUTE_FAILED"
+    assert compute_failure.errors[0].stage_path == "analysis.run.compute"
+
     complete_types = {
         envelope.artifact_type
         for envelope in real_dw_case.project.artifacts.list_envelopes()

@@ -74,12 +74,26 @@ class ConstraintFlow:
         )
         try:
             benchmark = self._benchmark(view, declaration)
+            accesses = view.accessed()
+        except Exception as exc:
+            return self._failure(
+                operation="constraint.adjust",
+                stage_path="constraint.adjust.data",
+                identity=request.invocation_id,
+                code="CONSTRAINT_DATA_READ_FAILED",
+                context={
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
+            )
+        try:
             result = adjust_single_name_caps(
                 request,
                 declaration,
                 loaded.result.payload,
                 benchmark,
-                view.accessed(),
+                accesses,
             )
         except ConstraintEvaluationError as exc:
             return self._failure(
@@ -92,10 +106,14 @@ class ConstraintFlow:
         except Exception as exc:
             return self._failure(
                 operation="constraint.adjust",
-                stage_path="constraint.adjust.data",
+                stage_path="constraint.adjust.compute",
                 identity=request.invocation_id,
-                code="CONSTRAINT_DATA_READ_FAILED",
-                context={"exception": type(exc).__name__, "message": str(exc)[:500]},
+                code="CONSTRAINT_COMPUTE_FAILED",
+                context={
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
             )
         publication = self._artifacts.publish_model(
             logical_identity=f"constraint-adjustment:{request.invocation_id}",
@@ -143,12 +161,26 @@ class ConstraintFlow:
         )
         try:
             benchmark = self._benchmark(view, declaration)
+            accesses = view.accessed()
+        except Exception as exc:
+            return self._failure(
+                operation="constraint.validate",
+                stage_path="constraint.validate.data",
+                identity=request.invocation_id,
+                code="CONSTRAINT_DATA_READ_FAILED",
+                context={
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
+            )
+        try:
             result = validate_single_name_caps(
                 request,
                 declaration,
                 loaded.result.payload,
                 benchmark,
-                view.accessed(),
+                accesses,
             )
         except ConstraintEvaluationError as exc:
             return self._failure(
@@ -161,10 +193,14 @@ class ConstraintFlow:
         except Exception as exc:
             return self._failure(
                 operation="constraint.validate",
-                stage_path="constraint.validate.data",
+                stage_path="constraint.validate.compute",
                 identity=request.invocation_id,
-                code="CONSTRAINT_DATA_READ_FAILED",
-                context={"exception": type(exc).__name__, "message": str(exc)[:500]},
+                code="CONSTRAINT_COMPUTE_FAILED",
+                context={
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
             )
         publication = self._artifacts.publish_model(
             logical_identity=f"constraint-validation:{request.invocation_id}",

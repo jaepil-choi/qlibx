@@ -373,3 +373,54 @@ def test_public_validation_rejects_changed_benchmark_identity(tmp_path: Path) ->
     assert validation.status is OutcomeStatus.FAILED
     assert validation.errors[0].error_code == "CONSTRAINT_BENCHMARK_IDENTITY_MISMATCH"
     assert validation.errors[0].commit_status is CommitStatus.NONE
+
+
+def test_constraint_flow_distinguishes_data_and_compute_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = create_project(tmp_path, "failure-boundaries")
+    register_benchmark(project, "benchmark-a")
+    source = import_source_portfolio(project, "failure-boundaries")
+    selected_policy = policy("benchmark-a")
+
+    def fail_compute(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic compute defect")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "qlibx.flow.constraints.adjust_single_name_caps",
+            fail_compute,
+        )
+        compute_failure = project.adjust_constraints(
+            adjustment_spec(
+                source,
+                selected_policy,
+                invocation_id="constraint-compute-failure",
+            )
+        )
+
+    def fail_data(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic data defect")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "qlibx.flow.constraints.ConstraintFlow._benchmark",
+            fail_data,
+        )
+        data_failure = project.adjust_constraints(
+            adjustment_spec(
+                source,
+                selected_policy,
+                invocation_id="constraint-data-failure",
+            )
+        )
+
+    assert compute_failure.status is OutcomeStatus.FAILED
+    assert compute_failure.errors[0].error_code == "CONSTRAINT_COMPUTE_FAILED"
+    assert compute_failure.errors[0].stage_path == "constraint.adjust.compute"
+    assert compute_failure.errors[0].commit_status is CommitStatus.NONE
+    assert data_failure.status is OutcomeStatus.FAILED
+    assert data_failure.errors[0].error_code == "CONSTRAINT_DATA_READ_FAILED"
+    assert data_failure.errors[0].stage_path == "constraint.adjust.data"
+    assert data_failure.errors[0].commit_status is CommitStatus.NONE

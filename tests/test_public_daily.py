@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -9,12 +10,15 @@ from qlibx import (
     DailyAccountSeed,
     DailyMarketBinding,
     DailySimulationSpec,
+    OperationOutcome,
     OutcomeStatus,
     QlibxProject,
 )
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
+from qlibx.evidence import ArtifactEnvelope, LocalArtifactBackend
 from qlibx.execution import CostRule, KrxExchangeConfig, Side, StockInstrument
+from qlibx.flow import DailyExecutionFlow
 from qlibx.operations import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
 
 KST = ZoneInfo("Asia/Seoul")
@@ -312,3 +316,51 @@ def test_public_daily_missing_later_sell_cost_preserves_prior_evidence(
         artifact.artifact_type == "simulation_recovery_point"
         for artifact in selected.artifacts.list_envelopes()
     )
+
+
+def test_empty_mark_is_recorded_only_after_publication_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = project(tmp_path)
+    original_backend_publish = LocalArtifactBackend.publish_model
+    original_flow_publish = DailyExecutionFlow._publish_model
+    marks_seen_at_publication: list[tuple[object, ...]] = []
+
+    def fail_mark_publication(
+        backend: LocalArtifactBackend,
+        **kwargs: Any,
+    ) -> OperationOutcome:
+        if kwargs["artifact_type"] == "mark_result":
+            return backend._failure(
+                str(kwargs["logical_identity"]),
+                "artifact.publish.test",
+                "SYNTHETIC_MARK_PUBLICATION_FAILURE",
+            )
+        return original_backend_publish(backend, **kwargs)
+
+    def observe_mark_publication(
+        flow: DailyExecutionFlow,
+        **kwargs: Any,
+    ) -> ArtifactEnvelope | None:
+        if kwargs["artifact_type"] == "mark_result":
+            marks_seen_at_publication.append(tuple(flow._marks))
+        return original_flow_publish(flow, **kwargs)
+
+    monkeypatch.setattr(LocalArtifactBackend, "publish_model", fail_mark_publication)
+    monkeypatch.setattr(DailyExecutionFlow, "_publish_model", observe_mark_publication)
+
+    outcome = selected.run_daily(
+        PublicDailyStrategy(),
+        spec(
+            run_id="empty-mark-publication-failure",
+            strategy_fingerprint="empty-mark-publication-failure-v1",
+            decision_times=(),
+            session_closes=(at(2),),
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "ARTIFACT_PUBLICATION_FAILED"
+    assert outcome.errors[0].stage_path == "daily_flow.mark.artifact"
+    assert marks_seen_at_publication == [()]

@@ -2,6 +2,7 @@ import shutil
 from datetime import datetime
 
 import duckdb
+import pytest
 
 from qlibx import OperationOutcome, OutcomeStatus
 from qlibx.account import (
@@ -29,8 +30,9 @@ from qlibx.flow import (
     StoredSignalResult,
     StoredSignalWeighting,
 )
+from qlibx.flow.composition import EnsembleStrategyOperation
 from qlibx.kernel import BacktestClock
-from qlibx.operations import BudgetMode, StrategyInvocation
+from qlibx.operations import BudgetMode, StrategyDraft, StrategyInvocation
 from qlibx.portfolio import (
     ConstraintAdjustmentRequest,
     ConstraintDeclaration,
@@ -421,6 +423,7 @@ def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutof
 def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
     real_dw_case: RealDwProject,
     real_dw_constraint_case: RealDwProject,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prices = duckdb.connect().sql(
         f"""
@@ -533,10 +536,25 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
     first = flow.run(declaration, request)
     repeated = flow.run(declaration, request)
 
+    def fail_compute(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic monitoring compute defect")
+
+    monkeypatch.setattr(
+        "qlibx.flow.monitoring.monitor_actual_single_name_caps",
+        fail_compute,
+    )
+    compute_failure = flow.run(
+        declaration,
+        request.model_copy(update={"invocation_id": "monitoring-compute-failure"}),
+    )
+
     assert missing.status is OutcomeStatus.FAILED
     assert missing.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
     assert stale.status is OutcomeStatus.FAILED
     assert stale.errors[0].error_code == "ACCOUNT_VALUATION_STALE"
+    assert compute_failure.status is OutcomeStatus.FAILED
+    assert compute_failure.errors[0].error_code == "MONITORING_COMPUTE_FAILED"
+    assert compute_failure.errors[0].stage_path == "monitoring.constraint.compute"
     assert first.status is repeated.status is OutcomeStatus.COMPLETE
     assert first.result == repeated.result
     assert first.diagnostics[0].artifact_id == repeated.diagnostics[0].artifact_id
@@ -568,6 +586,7 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
 
 def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
     real_dw_case: RealDwProject,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     winner = StoredWinnerStrategy("acceptance.stored-winner", 1.0)
     opposite = StoredWinnerStrategy("acceptance.stored-opposite", -1.0)
@@ -601,6 +620,18 @@ def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
     )
+    operation_runs = 0
+    original_run = EnsembleStrategyOperation.run
+
+    def counted_run(
+        operation: EnsembleStrategyOperation,
+        view: object,
+    ) -> StrategyDraft:
+        nonlocal operation_runs
+        operation_runs += 1
+        return original_run(operation, view)
+
+    monkeypatch.setattr(EnsembleStrategyOperation, "run", counted_run)
     ensemble = composition.invoke_ensemble(
         EnsembleDefinition(
             strategy_id="acceptance.stored-crossing",
@@ -629,6 +660,7 @@ def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
     )
 
     assert ensemble.status is OutcomeStatus.COMPLETE
+    assert operation_runs == 1
     assert ensemble.result.strategy.result.weights == ()
     assert ensemble.result.evidence.gross_before_netting == 1
     assert ensemble.result.evidence.gross_after_netting == 0

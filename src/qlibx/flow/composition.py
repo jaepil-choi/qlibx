@@ -130,6 +130,15 @@ class _StoredMember:
     loaded: LoadedArtifact[StrategyResult]
 
 
+@dataclass(frozen=True, slots=True)
+class _EnsembleComputation:
+    draft: StrategyDraft
+    contributions: tuple[MemberContribution, ...]
+    gross_before: float
+    gross_after: float
+    net: float
+
+
 class EnsembleStrategyOperation:
     """Pure Strategy operation over already-loaded immutable member results."""
 
@@ -141,18 +150,36 @@ class EnsembleStrategyOperation:
         self.strategy_id = definition.strategy_id
         self._definition = definition
         self._members = members
-        self._contributions: tuple[MemberContribution, ...] = ()
-        self._gross_before = 0.0
-        self._gross_after = 0.0
-        self._net = 0.0
-        self._state_identities: tuple[str, ...] = ()
-        self._validate_state_compatibility()
+        self._state_identities = self._validated_state_identities()
+        self._computation = self._compute()
 
     def requirements(self) -> tuple[ComponentRequirement, ...]:
         return ()
 
     def run(self, view: object) -> StrategyDraft:
         del view
+        return self._computation.draft
+
+    def evidence(
+        self,
+        invocation: StrategyInvocation,
+        result_artifact_id: str,
+    ) -> EnsembleEvidence:
+        computation = self._computation
+        return EnsembleEvidence(
+            invocation_id=invocation.invocation_id,
+            strategy_id=self.strategy_id,
+            result_artifact_id=result_artifact_id,
+            contributions=computation.contributions,
+            gross_before_netting=computation.gross_before,
+            gross_after_netting=computation.gross_after,
+            net_exposure=computation.net,
+            crossed_gross=computation.gross_before - computation.gross_after,
+            residual_budget=self._definition.target_gross - computation.gross_after,
+            member_state_identities=self._state_identities,
+        )
+
+    def _compute(self) -> _EnsembleComputation:
         contributions = tuple(
             MemberContribution(
                 instrument=weight.instrument,
@@ -198,10 +225,6 @@ class EnsembleStrategyOperation:
                     "target_gross": self._definition.target_gross,
                 },
             )
-        self._contributions = contributions
-        self._gross_before = gross_before
-        self._gross_after = gross_after
-        self._net = sum(item.weight for item in weights)
         state_identity = self._state_identities[0] if self._state_identities else None
         cursor = next(
             (
@@ -211,7 +234,7 @@ class EnsembleStrategyOperation:
             ),
             None,
         )
-        return StrategyDraft(
+        draft = StrategyDraft(
             weights=weights,
             budget_mode=self._definition.budget_mode,
             target_gross=self._definition.target_gross,
@@ -224,26 +247,15 @@ class EnsembleStrategyOperation:
             state_identity=state_identity,
             feedback_cursor=cursor,
         )
-
-    def evidence(
-        self,
-        invocation: StrategyInvocation,
-        result_artifact_id: str,
-    ) -> EnsembleEvidence:
-        return EnsembleEvidence(
-            invocation_id=invocation.invocation_id,
-            strategy_id=self.strategy_id,
-            result_artifact_id=result_artifact_id,
-            contributions=self._contributions,
-            gross_before_netting=self._gross_before,
-            gross_after_netting=self._gross_after,
-            net_exposure=self._net,
-            crossed_gross=self._gross_before - self._gross_after,
-            residual_budget=self._definition.target_gross - self._gross_after,
-            member_state_identities=self._state_identities,
+        return _EnsembleComputation(
+            draft=draft,
+            contributions=contributions,
+            gross_before=gross_before,
+            gross_after=gross_after,
+            net=sum(item.weight for item in weights),
         )
 
-    def _validate_state_compatibility(self) -> None:
+    def _validated_state_identities(self) -> tuple[str, ...]:
         path_members = tuple(
             member.loaded.payload
             for member in self._members
@@ -268,7 +280,7 @@ class EnsembleStrategyOperation:
                 "ENSEMBLE_STATE_INCOMPATIBLE",
                 {"member_state_identities": list(identities)},
             )
-        self._state_identities = identities
+        return identities
 
 
 class StoredSignalStrategyOperation:
@@ -343,7 +355,6 @@ class CompositionFlow:
             members.append(_StoredMember(spec=spec, loaded=loaded.result))
         try:
             operation = EnsembleStrategyOperation(definition, tuple(members))
-            operation.run(object())
         except EnsembleCompatibilityError as exc:
             return self._failure(invocation, exc.code, exc.context)
         dependencies = tuple(

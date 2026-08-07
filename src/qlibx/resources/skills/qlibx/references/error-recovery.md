@@ -15,6 +15,12 @@ Use the exact public error fields. Candidate actions are guidance, not package-o
 | REQUIREMENT_NOT_RESOLVED | The selected operation needs an unregistered semantic capability | Add a binding/dataset, derive it, select another profile, or validate an extension |
 | ARTIFACT_IDENTITY_CONFLICT | The same logical identity already has different immutable content | Retain it or choose a new logical identity |
 | ARTIFACT_PAYLOAD_INVALID | Serialized content violates its documented contract | Fix the producer payload before import |
+| CONSTRAINT_COMPUTE_FAILED, MONITORING_COMPUTE_FAILED, or ANALYSIS_COMPUTE_FAILED | An unexpected defect occurred after immutable inputs were materialized | Preserve the error and frozen inputs, report the diagnostic, and retry only after the implementation or input contract changes |
 
 Do not retry until every retry_precondition is either satisfied or explicitly rejected by the
 user. A retry is a new invocation linked to the prior error; it never deletes the failure record.
+
+An unexpected compute failure is deterministic for the same frozen input and implementation.
+Repeating that invocation is diagnostic reproduction, not recovery. Keep the failure artifact,
+report its stage, exception type, and immutable input identities, then use a new linked invocation
+only after a code fix or an explicit input-contract change.

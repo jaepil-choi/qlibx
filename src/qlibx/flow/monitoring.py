@@ -62,14 +62,28 @@ class MonitoringFlow:
         )
         try:
             view.account_snapshot()
+            account_state = view.state_accessed()[0]
             benchmark = self._benchmark(view, declaration)
+            accesses = view.accessed()
+        except Exception as exc:
+            return self._failure(
+                request=request,
+                stage_path="monitoring.constraint.data",
+                code="MONITORING_DATA_READ_FAILED",
+                context={
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
+            )
+        try:
             result = monitor_actual_single_name_caps(
                 request,
                 self._clock.now,
                 declaration,
-                view.state_accessed()[0],
+                account_state,
                 benchmark,
-                view.accessed(),
+                accesses,
             )
         except ConstraintEvaluationError as exc:
             return self._failure(
@@ -84,9 +98,13 @@ class MonitoringFlow:
         except Exception as exc:
             return self._failure(
                 request=request,
-                stage_path="monitoring.constraint.data",
-                code="MONITORING_DATA_READ_FAILED",
-                context={"exception": type(exc).__name__, "message": str(exc)[:500]},
+                stage_path="monitoring.constraint.compute",
+                code="MONITORING_COMPUTE_FAILED",
+                context={
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
             )
 
         publication = self._artifacts.publish_model(

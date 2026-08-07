@@ -226,25 +226,35 @@ class AnalysisFlow:
                 session_timezone=request.return_session_timezone,
             )
             frame = frame.drop_duplicates(subset=["instrument"], keep="last")
-            result = analyze_signal(
-                request,
-                SignalAnalysisInput(
-                    signal_semantics=loaded.result.payload.signal_semantics,
-                    signal_observation_time=loaded.result.payload.observation_time,
-                    signals=tuple(
-                        SignalValue(instrument=item.instrument, value=item.value)
-                        for item in loaded.result.payload.entries
-                    ),
-                    returns=tuple(
-                        SignalValue(
-                            instrument=str(row.instrument),
-                            value=float(getattr(row, role)),
-                        )
-                        for row in frame.itertuples(index=False)
-                    ),
-                    accesses=view.accessed(),
+            analysis_input = SignalAnalysisInput(
+                signal_semantics=loaded.result.payload.signal_semantics,
+                signal_observation_time=loaded.result.payload.observation_time,
+                signals=tuple(
+                    SignalValue(instrument=item.instrument, value=item.value)
+                    for item in loaded.result.payload.entries
                 ),
+                returns=tuple(
+                    SignalValue(
+                        instrument=str(row.instrument),
+                        value=float(getattr(row, role)),
+                    )
+                    for row in frame.itertuples(index=False)
+                ),
+                accesses=view.accessed(),
             )
+        except Exception as exc:
+            return self._failure(
+                request.invocation_id,
+                "analysis.run.data",
+                "ANALYSIS_DATA_READ_FAILED",
+                {
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "accesses": self._access_context(view),
+                },
+            )
+        try:
+            result = analyze_signal(request, analysis_input)
         except AnalysisError as exc:
             return self._failure(
                 request.invocation_id,
@@ -255,8 +265,8 @@ class AnalysisFlow:
         except Exception as exc:
             return self._failure(
                 request.invocation_id,
-                "analysis.run.data",
-                "ANALYSIS_DATA_READ_FAILED",
+                "analysis.run.compute",
+                "ANALYSIS_COMPUTE_FAILED",
                 {
                     "exception": type(exc).__name__,
                     "message": str(exc)[:500],

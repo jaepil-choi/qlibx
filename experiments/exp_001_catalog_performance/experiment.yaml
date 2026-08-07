@@ -1,0 +1,121 @@
+schema_version: 1
+id: exp_001_catalog_performance
+status: concluded
+hypothesis: >-
+  Bounding publication recovery deserialization, reusing one catalog connection inside explicit
+  work scopes, and caching normalized observation frames will reduce execution cost without
+  weakening catalog recovery, physical fingerprint, or PIT contracts.
+created_at: 2026-08-07
+freshness:
+  branch: exp/2nd-attempt
+  baseline_head: ce15634
+relationships:
+  review: docs/code-review/2026-08-07-2100-catalog-performance-profile-and-fix-plan.md
+  exec_plan: .agent/plans/active/catalog-performance-and-observation-cache.md
+  implementation_records:
+    - docs/implementations/046-bounded-catalog-recovery-scans.md
+    - docs/implementations/047-project-artifact-backend-reuse.md
+    - docs/implementations/048-bounded-catalog-sessions.md
+    - docs/implementations/049-observation-frame-cache.md
+commands:
+  catalog_profile: >-
+    PYTHONPATH=experiments/exp_001_catalog_performance
+    .venv/Scripts/python.exe -m pytest tests -q -s -p qxprof
+  observation_profile: >-
+    PYTHONPATH=experiments/exp_001_catalog_performance
+    .venv/Scripts/python.exe -m pytest tests -q -s -p qxprof2
+  publish_scaling: >-
+    .venv/Scripts/python.exe experiments/exp_001_catalog_performance/bench_publish.py 800 operation
+  session_publish_scaling: >-
+    .venv/Scripts/python.exe experiments/exp_001_catalog_performance/bench_publish.py 800 session
+  connection_probe: >-
+    .venv/Scripts/python.exe experiments/exp_001_catalog_performance/probe_conn.py
+  cold_probe: >-
+    .venv/Scripts/python.exe experiments/exp_001_catalog_performance/probe_cold.py
+  sql_probe: >-
+    .venv/Scripts/python.exe experiments/exp_001_catalog_performance/probe_sql.py
+evidence:
+  baseline_tests: 231 passed in 469.68s on ce15634
+  publish_scaling_ms:
+    100: 344.1
+    200: 331.4
+    300: 345.0
+    400: 362.5
+    500: 428.4
+    600: 373.6
+    700: 384.6
+    800: 443.3
+  publish_last_to_first_ratio: 1.29
+  catalog_profile:
+    tests: 231 passed in 442.80s
+    instrumented_wall_seconds: 442.88
+    connect_write: 981
+    connect_read_only: 853
+    close: 1809
+    execute: 23427
+    full_event_log_reads: 957
+  observation_profile:
+    tests: 231 passed in 416.50s
+    instrumented_wall_seconds: 416.63
+    queries: 206
+    query_file_hash: 206
+    registry_file_hash: 105
+    read_parquet: 196
+    read_csv: 126
+    normalize_timestamps: 392
+  probes:
+    full_event_log_20k_ms: 15.945
+    unterminated_events_20k_ms: 3.679
+    schema_guard_20k_ms: 6.546
+    cold_open_close_ms: 16.07
+    cold_current_validation_ms: 19.09
+  c1_publish_scaling_ms:
+    100: 346.9
+    200: 342.2
+    300: 383.3
+    400: 372.1
+    500: 371.8
+    600: 422.6
+    700: 391.9
+    800: 403.3
+  c1_last_to_first_ratio: 1.16
+  c3_session_publish_scaling_ms:
+    100: 13.5
+    200: 14.7
+    300: 18.0
+    400: 21.3
+    500: 20.3
+    600: 18.4
+    700: 19.4
+    800: 19.5
+  c3_session_last_to_first_ratio: 1.44
+  c3_catalog_profile:
+    tests: 239 passed in 347.69s
+    instrumented_wall_seconds: 347.78
+    connect_write: 802
+    connect_read_only: 649
+    connect_total: 1451
+    baseline_connect_total: 1834
+    connection_reduction_percent: 20.9
+  c5_observation_profile:
+    tests: 243 passed in 323.32s
+    instrumented_wall_seconds: 323.40
+    queries: 215
+    query_file_hash_existing_source: 214
+    registry_file_hash: 110
+    read_parquet: 146
+    read_csv: 108
+    normalize_timestamps: 252
+    note: one deliberate warm-cache deletion query stopped before hashing
+  c5_read_reduction_from_baseline: 68
+  c5_normalize_reduction_from_baseline: 140
+  completion:
+    plain_full_suite: 243 passed in 343.70s
+    build:
+      wheel: dist/qlibx-0.1.0-py3-none-any.whl
+      sdist: dist/qlibx-0.1.0.tar.gz
+    fresh_python: 3.12.13
+    fresh_wheel_catalog_publish_load: passed
+    fresh_wheel_repeated_observation_query: passed
+decision: adopt the bounded scans, project backend reuse, scoped sessions, and private frame cache
+outputs_dir: outputs

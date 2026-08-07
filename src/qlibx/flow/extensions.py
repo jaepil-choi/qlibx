@@ -1,9 +1,8 @@
 """Validation and append-only registration of project-local transforms."""
 
 import hashlib
-import importlib.util
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from types import ModuleType
 from typing import cast
 
@@ -19,6 +18,7 @@ from qlibx.extensions import (
     NeutralizationInputRow,
     NeutralizationResult,
 )
+from qlibx.extensions.local_modules import LocalModuleLoader
 from qlibx.kernel import BacktestClock
 
 EXTENSION_REGISTRATION_CONTRACT = ArtifactContract(
@@ -43,8 +43,10 @@ class ExtensionFlow:
         resolver: RequirementResolver | None = None,
         store: ObservationStore | None = None,
     ) -> None:
-        self._project_root = project_root.resolve()
-        self._extension_root = extension_root.resolve()
+        self._module_loader = LocalModuleLoader(
+            project_root=project_root,
+            extension_root=extension_root,
+        )
         self._registry = registry
         self._artifacts = artifacts
         self._resolver = resolver or RequirementResolver()
@@ -52,11 +54,8 @@ class ExtensionFlow:
 
     def validate_local(self, request: ExtensionValidationRequest) -> OperationOutcome:
         try:
-            module_path = self._resolve_module_path(request.module_path)
-            source_bytes = module_path.read_bytes()
-            source_hash = hashlib.sha256(source_bytes).hexdigest()
-            module = self._load_module(module_path, source_hash)
-            spec, transform = self._module_contract(module)
+            loaded_module = self._module_loader.load(request.module_path)
+            spec, transform = self._module_contract(loaded_module.module)
             if spec.extension_id != request.extension_id:
                 raise ValueError("request extension_id does not match EXTENSION_SPEC")
         except Exception as exc:
@@ -108,8 +107,8 @@ class ExtensionFlow:
 
         registration = ExtensionRegistration(
             extension_id=spec.extension_id,
-            module_path=module_path.relative_to(self._project_root).as_posix(),
-            source_hash=source_hash,
+            module_path=loaded_module.project_relative_path,
+            source_hash=loaded_module.source_hash,
             producer_id=f"project-local.{spec.extension_id}",
             spec=spec,
             validation_input_hash=self._model_hash(validation_input),
@@ -119,7 +118,9 @@ class ExtensionFlow:
             accesses=view.accessed(),
         )
         publication = self._artifacts.publish_model(
-            logical_identity=f"extension-registration:{spec.extension_id}:{source_hash}",
+            logical_identity=(
+                f"extension-registration:{spec.extension_id}:{loaded_module.source_hash}"
+            ),
             artifact_type="extension_registration",
             artifact_schema_version=1,
             producer_id=registration.producer_id,
@@ -161,25 +162,6 @@ class ExtensionFlow:
             if loaded.status is OutcomeStatus.COMPLETE:
                 registrations.append(loaded.result.payload)
         return tuple(sorted(registrations, key=lambda item: (item.extension_id, item.source_hash)))
-
-    def _resolve_module_path(self, relative: str) -> Path:
-        normalized = PurePosixPath(relative.replace("\\", "/"))
-        if normalized.is_absolute() or ".." in normalized.parts or normalized.suffix != ".py":
-            raise ValueError("module_path must be a relative .py path without '..'")
-        candidate = (self._extension_root / normalized.as_posix()).resolve()
-        if not candidate.is_relative_to(self._extension_root) or not candidate.is_file():
-            raise ValueError("module_path must identify a file inside the project extension root")
-        return candidate
-
-    @staticmethod
-    def _load_module(path: Path, source_hash: str) -> ModuleType:
-        name = f"_qlibx_local_extension_{source_hash[:24]}"
-        module_spec = importlib.util.spec_from_file_location(name, path)
-        if module_spec is None or module_spec.loader is None:
-            raise ValueError("local extension module cannot be loaded")
-        module = importlib.util.module_from_spec(module_spec)
-        module_spec.loader.exec_module(module)
-        return module
 
     @staticmethod
     def _module_contract(module: ModuleType) -> tuple[NeutralizationExtensionSpec, Transform]:

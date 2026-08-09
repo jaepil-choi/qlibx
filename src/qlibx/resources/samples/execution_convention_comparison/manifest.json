@@ -1,0 +1,11 @@
+{
+  "sample_schema_version": 1,
+  "sample_id": "execution-convention-comparison-v1",
+  "ownership": "qlibx_product_owned_example",
+  "prd_use_case": "UC-ALPHA-CHILD-001",
+  "parent_contract": "decision_intent:v1",
+  "child_profiles": ["daily.next-session-close.v1", "daily.next-session-open.v1"],
+  "availability_policy": "open and close observations use separate event_time and available_at instants",
+  "producer_reexecution": false,
+  "current_support_only": true
+}

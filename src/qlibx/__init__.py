@@ -50,7 +50,12 @@ from qlibx.operations import (
 )
 from qlibx.portfolio import ExecutionLotInput
 from qlibx.project import QlibxProject
-from qlibx.simulation import DailyAccountSeed, DailyMarketBinding, DailySimulationSpec
+from qlibx.simulation import (
+    DailyAccountSeed,
+    DailyMarketBinding,
+    DailySimulationSpec,
+    FrozenDailyExecutionSpec,
+)
 
 __all__ = [
     "AgentTarget",
@@ -70,6 +75,7 @@ __all__ = [
     "ForwardReturnLabelEntry",
     "ForwardReturnLabelModel",
     "ForwardReturnLabelResult",
+    "FrozenDailyExecutionSpec",
     "KrxExchangeConfig",
     "MaterializationInvocation",
     "MaterializationOperation",

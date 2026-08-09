@@ -136,7 +136,7 @@ def _publish_v1_anchor(case: RealDwProject, request: DailyRunRequest):
         run_id=request.run_id,
         request_fingerprint=_fingerprint(request.compatibility_json()),
         config_fingerprint=request.config_fingerprint,
-        profile_fingerprint=_fingerprint(profile.model_dump_json()),
+        profile_fingerprint=_fingerprint(profile.compatibility_json()),
         registry_fingerprint=_fingerprint(
             "|".join(
                 item.registration_identity

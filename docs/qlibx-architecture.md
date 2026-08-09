@@ -33,7 +33,7 @@ future pseudocode는 구현된 API가 아니다.
 | observation source | **current:** registered CSV/Parquet source를 pandas로 읽고 정규화한 frame을 `ObservationStore` 인스턴스 안에서 registration contract/path/fingerprint/field별로 cache한다. 매 query마다 source 존재와 SHA-256을 다시 검증하고 cache 사본에 PIT/session/point filter를 적용한다. Warm query는 full scan을 피하지만 첫 read와 source 크기 한계는 남는다 | partitioned Parquet + DuckDB predicate pushdown은 대규모 PIT query에 유리하지만 ingestion, invalidation과 migration cost가 생긴다 | **현재 actual 명시.** 무결성 검사는 cache 대상이 아니며 columnar store는 target이지 current가 아니다 | 대표 workload benchmark에서 cold scan cost가 budget을 넘고 ingestion/fingerprint contract가 정의될 때 전환한다 |
 | artifact payload | **current:** typed `QlibxModel` payload는 JSON이고 DuckDB는 catalog/index다. 단순하고 inspectable하지만 큰 matrix에는 비효율적이다 | Parquet payload backend는 tabular artifact에 효율적이지만 schema split과 backend complexity가 증가한다 | **현재 actual 채택.** Parquet payload는 future backend다 | 대형 matrix benchmark와 JSON/Parquet 간 atomic publication·compatibility 계약이 준비될 때 추가한다 |
 | generic ports | **current:** concrete flow/API 중심이며 공용 failure helper만 실제 중복에 맞춰 추출했다. abstraction 수는 적지만 backend 대체성은 낮다 | 범용 `Operation`/`ArtifactPublisher`/`ArtifactLoader` protocol은 DIP에 유리하나 단일 구현에서는 speculative하다 | **actual 채택.** 아래 protocol 코드는 conceptual target으로만 읽는다 | 독립적인 두 번째 구현 또는 test double이 같은 계약을 소비할 때 protocol을 추출한다 |
-| execution convention | **current:** `NextSessionCloseExecutor`가 schedule을 만들고 `DailyExecutionFlow`가 profile의 execution-price role로 size/match한다. 검증된 경로는 좁다 | 별도 `FillConvention`과 next-open 구현은 schedule/price 역할을 더 깨끗이 분리하지만 real next-open data와 calendar 계약이 없다 | **현재 next-close만 지원.** next-open은 readiness gap이다 | 같은 frozen parent decision을 Strategy rerun 없이 real PIT next-close/next-open으로 비교하는 acceptance가 필요하다 |
+| execution convention | **current:** `NextSessionCloseExecutor`와 `NextSessionOpenExecutor`가 독립 schedule을 만들고 `DailyExecutionFlow`가 profile의 execution-price role로 size/match한다. `execute_frozen_daily()`는 exact parent를 격리된 child Account에서 실행한다 | 별도 `FillConvention` class는 세 번째 가격 선택 구현에 유리하지만 현재 role field로 schedule/price 축이 이미 분리돼 있어 class hierarchy는 이르다 | **public daily close/open actual 채택.** explicit event calendar와 PIT price binding을 요구한다 | intraday VWAP/order-book profile이 공통 계산 behavior를 요구할 때 protocol을 추출한다 |
 | materialization | **current:** public direct `MaterializationOperation`과 `QlibxProject.materialize()`가 requirement-first execution을 제공하고, built-in `ForwardReturnLabelModel`이 PIT-bounded typed label artifact를 만든다. Scheduler와 Model registry는 없다 | scheduled rolling/expanding materialization은 반복 실행에는 유리하지만 lifecycle·cache invalidation 계약이 추가된다 | **direct operation만 actual 채택.** optional boundary와 no-look-ahead를 먼저 닫고 scheduling은 과장하지 않는다 | 반복 materialization cadence와 durable model registration 수요가 검증될 때 scheduler/registry를 추가한다 |
 | daily orchestration | **current:** 큰 `DailyExecutionFlow`가 recovery와 event ordering을 한곳에서 보존한다. 이해·변경 비용이 크다 | cohesive state machine/phase extraction은 유지보수에 유리하지만 기계적 파일 분리는 control flow를 숨긴다 | **이번에는 actual 유지.** 기술 부채를 인정한다 | 둘 이상의 phase가 독립 테스트·재사용 경계를 갖거나 변경 충돌이 반복될 때 state machine을 추출한다 |
 
@@ -76,7 +76,7 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-SIGNAL-002` | stored-result Strategy run | compatible typed model result | signed-weight assembly | Strategy result | producer-independent edges | producer not rerun |
 | `UC-ALPHA-BUDGET-001` | flexible-budget Strategy | signed inputs + budget declaration | allocation without forced rescale | alpha-weight result | invested/residual budget | fixed incompatibility |
 | `UC-ALPHA-PATH-001` | later Strategy/Ensemble composition | frozen typed result + source state/cursor lineage | consumer compatibility + composition | new Strategy result | consumed artifact + all source state/cursor edges | producer not rerun; no current-state recomputation claim |
-| `UC-ALPHA-CHILD-001` | **readiness gap:** next-close/next-open child branch | frozen parent weights + two real PIT conventions | alternate execution only, no Strategy rerun | isolated child Account/artifacts | parent edge + convention | same parent, parent unchanged, both conventions proven |
+| `UC-ALPHA-CHILD-001` | exact frozen-decision child invocation | parent `decision_intent:v1` + explicit close/open event data | alternate schedule/price sizing and matching only | isolated child Account/artifacts | exact parent + dataset/state + profile/convention | real-DW close/open, parent unchanged, no producer rerun, installed sample |
 | `UC-ALPHA-ADAPTIVE-001` | feedback-triggered Strategy | committed feedback + prior memory | proposed belief/member update | Memory at flow boundary | before/after + cursor | no future feedback |
 | `UC-ENSEMBLE-001` | Ensemble Strategy run | compatible member results | combine/net/cross by ticker | ensemble result | contribution + residual | producers not rerun |
 | `UC-PORTFOLIO-001` | construction profile selection | same weights + selected profile | profile-specific construction | separate portfolio results | budget/direction/cost lineage | alpha unchanged |
@@ -111,8 +111,8 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-SETTLEMENT-001` | future stock/ETF settlement | Fill + settlement calendar | receivable/payable transition | Account | settlement assumption/source | MVP remains instant |
 
 `UC-PIT-001`은 2026-08-09 direct materialization과 real-DW/installed acceptance로 current-support registry에
-승격됐다. `UC-ALPHA-CHILD-001`은 real next-close/next-open 비교 증거가 없어 readiness gap으로 남는다.
-Frozen child isolation 테스트는 기반 회귀로 유지하되 그 use case의 closure로 사용하지 않는다.
+승격됐다. `UC-ALPHA-CHILD-001`도 2026-08-09 real-DW와 installed close/open child 비교 증거로 current에
+승격됐다. 기존 participation-rate child test는 generic isolation 회귀로 유지한다.
 `UC-PROD-*`, `UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`과
 `UC-SETTLEMENT-001`도 current acceptance가 아니다. 현재 구조가 해당 flow를 막지 않는지 설명하는 설계
 characterization이며 구현 완료를 주장하지 않는다. Test와 fixture를 만들 때도 같은 use-case ID를 사용해
@@ -187,9 +187,9 @@ profile은 Future position을 지원한다고 주장하지 않으며 exact lifec
 monthly bar를 쓰거나 단순 종가 체결을 선택했다는 사실만으로 Strategy look-ahead가 발생하지 않는다. 반대로
 정교한 intraday executor를 써도 View가 미래 observation을 보여주면 look-ahead다.
 
-Current MVP는 immutable DecisionIntent를 **next-session close**에서 처리하는 경로만 검증했다. Next-open은 같은
-Strategy result를 재실행하지 않고 alternate execution result와 actual state만 만드는 target이지만, real open
-observation과 schedule 계약이 없어 `GAP-EXECUTION-CONVENTION-001`로 남는다. Intraday partial-fill은 future
+Current daily profile은 immutable DecisionIntent를 **next-session close 또는 next-session open**에서 처리한다.
+Next-open은 별도 open-event calendar와 그 시각까지 available한 price role을 요구하며 같은 Strategy result를
+재실행하지 않고 alternate execution result와 child Account만 만든다. Intraday partial-fill은 future
 characterization이다. Signal이나 weight만 분석하는 research는 ExecutionProfile과 Account mutation 없이
 Evidence publication에서 정상 종료할 수 있다.
 
@@ -754,12 +754,13 @@ MVP architecture validation은 daily full-fill executor만 대상으로 한다. 
 public class name을 PRD에 고정하지 않고 schedule granularity, required market binding, liquidity model과 limitation을
 위 계약 뒤에서 선언한다. 지원하지 않는 granularity를 daily fill로 조용히 축약하지 않는다.
 
-### Current next-close execution과 future FillConvention
+### Current next-close/open execution과 future FillConvention class
 
-**Current implementation.** `NextSessionCloseExecutor`는 다음 eligible session close의 `EventSpec`만 만들고,
-`DailyExecutionFlow`가 `DailyExecutionProfile.execution_price_role`을 `ExecutionView`에서 resolve해 size/match한다.
-별도 `FillConvention`, `ClosePriceFill`, `OpenPriceFill` class는 현재 없다. 아래는 두 번째 convention이 실제로
-생길 때의 **target/future pseudocode**이며 current public symbol이 아니다.
+**Current implementation.** `NextSessionCloseExecutor`와 `NextSessionOpenExecutor`는 각각 다음 eligible close/open
+event를 만들고, `DailyExecutionFlow`가 독립된 `DailyExecutionProfile.execution_price_role`을
+`ExecutionView`에서 resolve해 size/match한다. Schedule 선택은 `execution_timing`, 가격 선택은 semantic role이라
+서로 독립이다. 별도 `FillConvention`, `ClosePriceFill`, `OpenPriceFill` class는 아직 없으며 아래 protocol은 세
+번째 reference-price behavior가 실제로 필요할 때의 **target/future pseudocode**다.
 
 Executor가 정하는 것은 **일정**(언제 몇 번 넘기나)이고, 체결가 규약은 별도 축이다. 둘을 묶으면
 "종가 체결"을 "시가 체결"로 바꾸는 데 executor를 새로 써야 한다.
@@ -776,25 +777,27 @@ OpenPriceFill      execution event가 속한 session의 open을 기준 가격으
 IntradayVWAPFill   execution event가 선언한 intraday 구간의 VWAP을 기준 가격으로 사용
 ```
 
-Target 설계가 의도하는 첫 조합은 `NextSessionCloseExecutor`와 close-price convention의 분리지만, current 구현은 **`NextSessionCloseExecutor` + profile의 execution-price role + `DailyExecutionFlow`** 이다. 예를 들어 월말
-session 종가가 available해진 뒤 `DECISION`이 확정되면 Executor는 다음 eligible trading session의 close에
-`EXECUTION` event를 등록하고, FillConvention은 그 event가 속한 session의 close를 기준 가격으로 고른다.
-당일 종가나 단순히 "현재 close"에 체결한다는 뜻이 아니다. 이 분리로 **언제 체결을 시도하는가**와
-**어느 가격을 기준으로 삼는가**를 독립적으로 바꿀 수 있다.
+Current close 조합은 `NextSessionCloseExecutor + close execution-price role`, open 조합은
+`NextSessionOpenExecutor + open execution-price role`이다. 예를 들어 close 공개 뒤 확정된 `DECISION`은 다음
+eligible session의 open 또는 close에 `EXECUTION` event를 등록한다. 선택된 role의 관측치가 그 event 시각까지
+available해야 하므로 close-available row를 open에 사용할 수 없다. 이 field-level contract가 **언제 체결을
+시도하는가**와 **어느 가격을 기준으로 삼는가**를 독립적으로 바꾼다.
 
-이 조합은 가장 단순하고 낙관적인 simulation profile이다. 다음 session close 한 가격으로
+두 조합 모두 가장 단순하고 낙관적인 simulation profile이다. 다음 session의 open 또는 close 한 가격으로
 전체 batch가 체결된다고 가정하며, 별도 liquidity model이 없으면 장중 가격 경로, market impact와 partial fill을
 설명하지 못한다. 가격은 StrategyView에서 복사하지 않고 execution event의
-`available_at <= event.ts`를 만족하는 ExecutionView에서 읽는다. 다음 session close가 아직 available하지
+`available_at <= event.ts`를 만족하는 ExecutionView에서 읽는다. 선택한 session price가 아직 available하지
 않으면 Fill 전에 실패한다. Result artifact는 convention identity, decision time, scheduled session, fill time,
 modelled/unmodelled liquidity와 limitation을 기록한다.
 
 Same-session close는 기본값의 다른 이름이 아니다. Decision이 close 공개 전에 확정되고 별도 profile이 그
 시점과 availability를 명시할 때만 가능한 별도 convention이다.
 
-Future convention 교체는 Strategy decision artifact를 바꾸지 않아야 한다. Next-open은 real PIT open observation, schedule 계약과 no-Strategy-rerun acceptance가 없는 readiness gap이다. 다만 required market binding, execution
-schedule과 actual Fill이 달라질 수 있으므로 Executor profile이 compatibility를 검증하고 그 dependency를
-기록한다. `exchange.match_batch`는 선택된 convention이 ExecutionView에서 만든 가격 배열만 받는다.
+Convention 교체는 Strategy decision artifact를 바꾸지 않아야 한다. Current next-open은 real PIT open
+observation, explicit schedule 계약과 no-Strategy-rerun acceptance를 갖춘 frozen-child profile이다. Required
+market binding, execution schedule과 actual Fill이 달라질 수 있으므로 Executor profile이 compatibility를
+검증하고 그 dependency를 기록한다. `exchange.match_batch`는 선택된 convention이 ExecutionView에서 만든
+가격 배열만 받는다.
 
 ### batch가 closed loop를 해치지 않는다
 
@@ -2137,8 +2140,8 @@ cursor를 모두 보존한다. 이후 account B에서 executable target을 만�
 state를 읽으며 member를 account B에서 재계산했다고 표시하지 않는다(`UC-ALPHA-PATH-001`).
 
 ```text
-parent signed weights ─┬→ current: next-close frozen-child isolation
-                       └→ gap: real PIT next-open comparison   UC-ALPHA-CHILD-001
+parent decision_intent ─┬→ current: real PIT next-close child
+                        └→ current: real PIT next-open child   UC-ALPHA-CHILD-001
 
 member Strategy results → EnsembleStrategy
   → ticker netting/crossing/contribution/residual          UC-ENSEMBLE-001
@@ -2147,7 +2150,9 @@ member Strategy results → EnsembleStrategy
   → flow Memory commit with feedback cursor                UC-ALPHA-ADAPTIVE-001
 ```
 
-Current child regression은 parent Strategy/Model을 다시 실행하거나 parent state를 바꾸지 않지만 participation-rate만 비교한다. Next-open을 실행하지 않으므로 `UC-ALPHA-CHILD-001` closure가 아니며 `GAP-EXECUTION-CONVENTION-001`로 남는다. Adaptive update는 commit된
+Current `execute_frozen_daily()`는 exact parent artifact를 load하고 Strategy/Model을 다시 실행하지 않는다. Real-DW
+acceptance는 별도 close/open event와 price role, child Account, execution artifact lineage를 비교하고 parent hash가
+불변임을 검증한다. 기존 participation-rate child는 별도 generic isolation 회귀다. Adaptive update는 commit된
 feedback까지만 읽으며 proposed state는 flow commit 전 authority가 아니다.
 
 ### 13.9 Portfolio와 optional constraint — UC-PORTFOLIO-001, UC-CONSTRAINT-001, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001
@@ -2197,14 +2202,14 @@ callback에서 `LookthroughStrategy`가 actual AccountSnapshot을 다시 consume
 
 ### 13.11 Pluggable execution과 monitoring — UC-EXEC-001, UC-EXEC-002, UC-EXEC-003
 
-하나의 immutable DecisionIntent를 MVP daily profile이 참조한다. Current `NextSessionCloseExecutor`는 다음 eligible
-trading session close의 batch event를 만들고, `DailyExecutionFlow`가 profile의 execution-price role로 가격을
-resolve해 match한 뒤 원금·cost를 cash에 반영한다(`UC-EXEC-001`). 별도 `ClosePriceFill` 구현은 없다.
-Next-open은 같은 경계를 사용할 target이지만 current acceptance가 아니며 `GAP-EXECUTION-CONVENTION-001`이다.
+하나의 immutable DecisionIntent를 daily profile이 참조한다. Current `NextSessionCloseExecutor`와
+`NextSessionOpenExecutor`는 다음 eligible event를 만들고, `DailyExecutionFlow`가 profile의 execution-price role로
+가격을 resolve해 match한 뒤 원금·cost를 child cash에 반영한다(`UC-EXEC-001`, `UC-ALPHA-CHILD-001`). 별도
+`ClosePriceFill`/`OpenPriceFill` class 없이 timing과 price role field가 두 축을 분리한다.
 Intraday/partial-fill profile도 §6의 future characterization이다.
 
-Daily profile은 decision 다음 eligible session과 그 close observation의 `available_at`을 검증한다. 아직
-공개되지 않은 close나 기본 convention과 다른 same-session close를 요청하면 Fill 전에 실패한다. Volume
+Daily profile은 decision 다음 eligible close/open event와 선택한 price observation의 `available_at`을 검증한다.
+아직 공개되지 않은 price나 explicit schedule에 없는 event를 요청하면 Fill 전에 실패한다. Volume
 impact나 partial fill을 모델링하지 않으면 limitation artifact에 남긴다(`UC-EXEC-002`).
 
 `QlibxProject.monitor_constraints(spec)`는 decision 유무와 무관하게 spec이 지정한 committed checkpoint와 frozen
@@ -2273,16 +2278,16 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 | 2 | PIT direct research + direct label materialization (**current**) | Clock/View, ResolvedBinding, Direct Strategy, MaterializationOperation, forward-label preflight | UC-SIGNAL-001, UC-CONSTRAINT-001, UC-PIT-001; GAP-MATERIALIZATION-PIT-001 closed for the public direct profile |
 | 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §14.1 |
 | 4 | Daily closed loop | kernel, decision/execution flow, Account/Memory, daily profile, checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002 |
-| 5 | next-close frozen execution (**current**) / next-open branch (**gap**) | immutable DecisionIntent, current next-close executor, isolated Account; future real next-open | UC-EXEC-001; UC-ALPHA-CHILD-001 is GAP-EXECUTION-CONVENTION-001 |
+| 5 | next-close/open frozen execution (**current**) | exact immutable DecisionIntent, close/open executors, explicit PIT price roles, isolated child Account | UC-EXEC-001, UC-ALPHA-CHILD-001; GAP-EXECUTION-CONVENTION-001 closed for public frozen children |
 | 6 | Stored research + frozen Strategy composition (**current**) | exact typed load, v2 source-state lineage, Ensemble flow, registered artifact-only consumer, Memory update | UC-SIGNAL-002, UC-ALPHA-PATH-001, supported UC-ALPHA cases, UC-ENSEMBLE-001, UC-ARTIFACT-001; GAP-STRATEGY-COMPOSITION-001 closed for the installed local profile |
 | 7 | Portfolio/constraint/monitoring + user look-through fixture | construction, adjust/validate, user-declared PIT/account consumption, independent monitor | UC-PORTFOLIO-001, UC-LOOKTHROUGH-001~003, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003; §14.2 |
 | 8 | Analysis/report/extension | analysis artifact, pure renderer, transform validation, exact local Strategy registration/execution | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001/002 |
 | 9 | Future design characterization — current build 밖 | academic listing, lifecycle cash flow, actual settlement, partial fill와 production boundary | UC-ACADEMIC-001, UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001, UC-SETTLEMENT-001, UC-PROD-001/002 |
 
 각 current slice는 success만 아니라 requirement gap, commit status, artifact/failure evidence와 deterministic
-retry를 함께 검증한다. Daily long-only closed loop와 frozen next-close child isolation은 동작하지만, 그
-isolation만으로 next-open convention 독립성을 입증하지 않는다. Materialization과 next-open gap은 위 closure
-oracle이 통과할 때만 current로 이동한다. 9단계는 current support publication이 아니라 architecture를
+retry를 함께 검증한다. Daily long-only closed loop와 frozen close/open children은 distinct event/price/Account
+lineage를 보존한다. Materialization과 execution-convention gap은 각각 direct/installed closure oracle을
+통과했다. 9단계는 current support publication이 아니라 architecture를
 구속하는 characterization fixture다.
 
 3단계부터 instrument축 배열을 기본 단위로 잡는다. 단건 `match`를 먼저 만든 뒤 batch로 확장하는
@@ -2525,7 +2530,7 @@ installed-project 경로로 검증한다. 따라서 `GAP-STRATEGY-COMPOSITION-00
 G1 · G2 · G5      → current local contract/implementation evidence 있음; 각 제한은 본문 참조
 G3                 → public direct contract/real-DW/installed evidence 있음; scheduling과 Model registry는 future
 G4                 → hypothetical은 O3·O4 의미로 진행 가능. real short는 담보·차입·locate 결정 필요
-execution convention → GAP-EXECUTION-CONVENTION-001 closure 필요
+execution convention → public frozen close/open real-DW/installed evidence 있음; intraday는 future
 ```
 
 G2의 구현은 Account/Position slice에 남아 있지만 별도 state store 결정은 필요하지 않다. G4의 hypothetical
@@ -2578,8 +2583,9 @@ a shared domain/evidence contract is extracted only when a second real consumer 
 
 **Evidence correction.** `UC-PIT-001` is current for the public direct materialization profile; real-DW and installed
 acceptance close `GAP-MATERIALIZATION-PIT-001` without claiming a scheduler or Model registry. `UC-ALPHA-CHILD-001`
-remains excluded by `GAP-EXECUTION-CONVENTION-001`; frozen participation-rate child tests are regressions, not closure
-evidence. `GAP-STRATEGY-COMPOSITION-001` is closed for the installed local profile described below.
+is current for public frozen close/open children; real-DW and installed acceptance close
+`GAP-EXECUTION-CONVENTION-001` without claiming intraday execution. Frozen participation-rate children remain generic
+isolation regressions. `GAP-STRATEGY-COMPOSITION-001` is closed for the installed local profile described below.
 
 ### 2026-08-07 — Installed project-local Strategy lifecycle
 

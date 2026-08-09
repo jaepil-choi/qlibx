@@ -31,6 +31,7 @@ class SampleMaterializer:
         default_sample_id: "basic",
         "constraint-workflow-v1": "constraint_workflow",
         "daily-closed-loop-v1": "daily_closed_loop",
+        "execution-convention-comparison-v1": "execution_convention_comparison",
         "forward-label-materialization-v1": "forward_label_materialization",
         "strategy-extension-v1": "strategy_extension",
         "strategy-composition-v1": "strategy_composition",

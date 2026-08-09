@@ -45,6 +45,23 @@ The bundled `forward-label-materialization-v1` sample demonstrates pre-compute r
 an explicit immutable horizon registration, linked retry, and future-hidden labels through installed
 public APIs.
 
+## Compare frozen execution conventions
+
+1. Select exact `decision_intent:v1` artifact IDs. Do not rerun the Strategy or choose a latest
+   compatible parent.
+2. Use `FrozenDailyExecutionSpec` and `QlibxProject.execute_frozen_daily()` with a distinct Account
+   ID for every child.
+3. Select `next_session_close` or `next_session_open` explicitly. Next-open requires a non-empty
+   `session_opens` calendar; `session_closes` remains required for mark and monitor events.
+4. Bind the execution price to an observation actually available at the selected event. Never use a
+   close-available row at the open event or silently fall back from open to close.
+5. Compare profile/convention IDs, event times, prices, fills, Account before/after, exact parent
+   dependency, dataset lineage, limitations, and terminal status.
+
+The bundled `execution-convention-comparison-v1` sample reuses one immutable parent for isolated
+next-close and next-open children and demonstrates failure when a close-available price is requested
+at the open event.
+
 ## Validate a project-local Strategy
 
 1. Treat a local Python module as trusted project code. qlibx path/hash validation is not a hostile-code

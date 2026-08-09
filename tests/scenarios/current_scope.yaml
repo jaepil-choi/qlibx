@@ -12,6 +12,7 @@ required_current_use_cases:
   - UC-SIGNAL-002
   - UC-ALPHA-BUDGET-001
   - UC-ALPHA-ADAPTIVE-001
+  - UC-ALPHA-CHILD-001
   - UC-ALPHA-PATH-001
   - UC-ENSEMBLE-001
   - UC-PORTFOLIO-001
@@ -71,6 +72,8 @@ coverage_sets:
     - UC-CONSTRAINT-001
   m11_materialization:
     - UC-PIT-001
+  m12_execution_convention:
+    - UC-ALPHA-CHILD-001
 scenarios:
   - id: UC-PIT-001
     case: real_forward_label_missing_horizon_then_linked_retry
@@ -377,9 +380,21 @@ scenarios:
       parent_mutation: false
       child_account_isolation: true
 
-# UC-ALPHA-CHILD-001 is excluded below until real next-close/next-open closure evidence exists.
-
-
+  - id: UC-ALPHA-CHILD-001
+    case: real_frozen_parent_next_close_and_open
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_alpha_child_001_compares_real_next_close_and_open_without_rerun
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      parent_contract: decision_intent:v1
+      child_profiles: [daily.next-session-close.v1, daily.next-session-open.v1]
+    expected:
+      outcome: complete
+      producer_rerun: false
+      parent_mutation: false
+      child_account_isolation: true
+      exact_open_close_prices: true
+      future_hidden_open_price: failed
 
   - id: UC-SIGNAL-002
     case: external_real_dw_signal_two_consumers
@@ -427,8 +442,4 @@ scenarios:
       gross_after: 0.0
       residual_budget: 1.0
 
-excluded_readiness_gaps:
-  - id: GAP-EXECUTION-CONVENTION-001
-    excludes_current_use_case: UC-ALPHA-CHILD-001
-    reason: next-close participation-rate children do not prove a next-open schedule and price convention
-    closure_oracle: one frozen real-PIT parent executes next-close and next-open without Strategy rerun, with isolated child Account and lineage
+excluded_readiness_gaps: []

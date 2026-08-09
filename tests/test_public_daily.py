@@ -20,7 +20,7 @@ from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
 from qlibx.evidence import ArtifactEnvelope, LocalArtifactBackend
 from qlibx.execution import CostRule, KrxExchangeConfig, Side, StockInstrument
-from qlibx.flow import DailyExecutionFlow, DailyRunRequest
+from qlibx.flow import DailyExecutionFlow, DailyExecutionProfile, DailyRunRequest
 from qlibx.operations import (
     BudgetMode,
     DecisionAction,
@@ -306,6 +306,35 @@ def test_empty_daily_bindings_preserve_pre_m2_fingerprints() -> None:
         "6120f8fc7dfe1e4526bbd054ce0ed61f40ffa528ca0d714c44cdc6b0bb6eb643"
     )
     assert "artifact_bindings" not in request.compatibility_json()
+    assert "session_opens" not in request.compatibility_json()
+    profile = DailyExecutionProfile(market_dataset_id="dw-real-market")
+    assert hashlib.sha256(profile.compatibility_json().encode()).hexdigest() == (
+        "71ad9830c5a66478a449e724b7e96369a43ad4c99a487f50671d37331619588d"
+    )
+    assert "execution_timing" not in profile.compatibility_json()
+
+
+def test_next_open_requires_an_explicit_open_schedule() -> None:
+    with pytest.raises(ValidationError, match="requires session_opens"):
+        spec(execution_timing="next_session_open")
+
+    with pytest.raises(ValidationError, match="session_opens require"):
+        spec(session_opens=(datetime(2024, 1, 3, 9, 0, tzinfo=KST),))
+
+    with pytest.raises(ValidationError, match="session_opens must be unique and sorted"):
+        spec(
+            execution_timing="next_session_open",
+            session_opens=(
+                datetime(2024, 1, 4, 9, 0, tzinfo=KST),
+                datetime(2024, 1, 3, 9, 0, tzinfo=KST),
+            ),
+        )
+
+    selected = spec(
+        execution_timing="next_session_open",
+        session_opens=(datetime(2024, 1, 3, 9, 0, tzinfo=KST),),
+    )
+    assert selected.frozen_config_fingerprint() != spec().frozen_config_fingerprint()
 
 
 def test_non_empty_daily_bindings_change_frozen_and_recovery_identity() -> None:

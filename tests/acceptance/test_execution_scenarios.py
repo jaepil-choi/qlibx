@@ -1,8 +1,17 @@
+import math
 from datetime import datetime
 
+import duckdb
 import pytest
 
-from qlibx import OperationOutcome, OutcomeStatus
+from qlibx import (
+    DailyAccountSeed,
+    DailyMarketBinding,
+    DailySimulationSpec,
+    FrozenDailyExecutionSpec,
+    OperationOutcome,
+    OutcomeStatus,
+)
 from qlibx.account import Account, StrategyMemoryStore
 from qlibx.errors import CommitStatus, OperationError
 from qlibx.flow import (
@@ -11,6 +20,7 @@ from qlibx.flow import (
     DailyRunRequest,
     FrozenDecision,
 )
+from qlibx.flow.recovery import SIMULATION_RECOVERY_POINT_CONTRACT
 from qlibx.kernel import BacktestClock
 from qlibx.operations import (
     BudgetMode,
@@ -22,7 +32,10 @@ from tests.acceptance.real_dw_support import (
     RealDwProject,
     close_at,
     configured_exchange,
+    configured_exchange_config,
+    configured_instruments,
     initial_account,
+    open_at,
     run_real_daily_flow,
 )
 
@@ -562,6 +575,284 @@ def test_uc_exec_001_isolates_frozen_daily_children(
         for edge in envelope.dependencies
         if edge.consumer_role == "decision_intent"
     )
+
+
+def test_uc_alpha_child_001_compares_real_next_close_and_open_without_rerun(
+    real_dw_execution_convention_case: RealDwProject,
+) -> None:
+    case = real_dw_execution_convention_case
+    parent, intent, artifact = _parent_decision(case, run_id="convention-parent")
+    parent_checkpoint = parent.result.checkpoint
+    session_close = close_at(2024, 1, 3)
+    session_open = open_at(2024, 1, 3)
+
+    def child_spec(
+        *,
+        run_id: str,
+        account_id: str,
+        timing: str,
+        price_role: str,
+    ) -> FrozenDailyExecutionSpec:
+        return FrozenDailyExecutionSpec(
+            run_id=run_id,
+            parent_decision_artifact_ids=(artifact.artifact_id,),
+            account=DailyAccountSeed(
+                account_id=account_id,
+                base_currency="KRW",
+                initial_cash=10_000_000,
+            ),
+            instruments=configured_instruments(),
+            exchange=configured_exchange_config(cost_rate=0),
+            market=DailyMarketBinding(
+                market_dataset_id="dw-real-execution-events",
+                execution_price_role=price_role,
+                valuation_price_role="valuation_price",
+            ),
+            execution_timing=timing,
+            session_closes=(session_close,),
+            session_opens=(session_open,) if timing == "next_session_open" else (),
+        )
+
+    close_child = case.project.execute_frozen_daily(
+        child_spec(
+            run_id="convention-close-child",
+            account_id="convention-close-account",
+            timing="next_session_close",
+            price_role="close_execution_price",
+        )
+    )
+    open_child = case.project.execute_frozen_daily(
+        child_spec(
+            run_id="convention-open-child",
+            account_id="convention-open-account",
+            timing="next_session_open",
+            price_role="open_execution_price",
+        )
+    )
+
+    assert close_child.status is open_child.status is OutcomeStatus.COMPLETE
+    assert close_child.result.strategy_results == open_child.result.strategy_results == ()
+    assert close_child.result.memory_commits == open_child.result.memory_commits == ()
+    assert close_child.result.decision_intents == open_child.result.decision_intents == (
+        intent,
+    )
+    close_execution = close_child.result.executions[0]
+    open_execution = open_child.result.executions[0]
+    assert close_execution.event_time == session_close
+    assert open_execution.event_time == session_open
+    assert close_execution.profile_id == "daily.next-session-close.v1"
+    assert open_execution.profile_id == "daily.next-session-open.v1"
+    assert close_execution.convention_id == "close-price.v1"
+    assert open_execution.convention_id == "open-price.v1"
+    assert close_execution.sizing_price_role == "close_execution_price"
+    assert open_execution.sizing_price_role == "open_execution_price"
+
+    expected_open, expected_close = duckdb.sql(
+        f"""
+        SELECT
+            max(open_execution_price),
+            max(close_execution_price)
+        FROM read_parquet('{case.source.as_posix()}')
+        WHERE ticker = 'A005930'
+          AND CAST(event_time AS DATE) = DATE '2024-01-03'
+        """
+    ).fetchone()
+    assert open_execution.fills[0].price == pytest.approx(expected_open)
+    assert close_execution.fills[0].price == pytest.approx(expected_close)
+    assert open_execution.fills[0].dealt_quantity == math.floor(
+        10_000_000 / expected_open
+    )
+    assert close_execution.fills[0].dealt_quantity == math.floor(
+        10_000_000 / expected_close
+    )
+    assert open_execution.fills[0].price != close_execution.fills[0].price
+    assert open_execution.account_after.account_id == "convention-open-account"
+    assert close_execution.account_after.account_id == "convention-close-account"
+
+    for outcome, price_role in (
+        (open_child, "open_execution_price"),
+        (close_child, "close_execution_price"),
+    ):
+        execution_artifact = next(
+            item
+            for item in outcome.result.artifacts
+            if item.artifact_type == "execution_result"
+        )
+        assert any(
+            edge.consumer_role == "decision_intent"
+            and edge.dependency_id == artifact.artifact_id
+            for edge in execution_artifact.dependencies
+        )
+        assert any(
+            edge.consumer_role == price_role
+            and edge.dependency_kind == "dataset"
+            for edge in execution_artifact.dependencies
+        )
+
+    reloaded_parent = next(
+        item
+        for item in case.project.artifacts.list_envelopes(include_failure=True)
+        if item.artifact_id == artifact.artifact_id
+    )
+    assert reloaded_parent == artifact
+    assert parent.result.checkpoint == parent_checkpoint
+
+
+def test_next_open_rejects_close_available_price_before_account_mutation(
+    real_dw_execution_convention_case: RealDwProject,
+) -> None:
+    case = real_dw_execution_convention_case
+    _, _, artifact = _parent_decision(case, run_id="future-hidden-parent")
+    outcome = case.project.execute_frozen_daily(
+        FrozenDailyExecutionSpec(
+            run_id="future-hidden-open-child",
+            parent_decision_artifact_ids=(artifact.artifact_id,),
+            account=DailyAccountSeed(
+                account_id="future-hidden-open-account",
+                base_currency="KRW",
+                initial_cash=10_000_000,
+            ),
+            instruments=configured_instruments(),
+            exchange=configured_exchange_config(cost_rate=0),
+            market=DailyMarketBinding(
+                market_dataset_id="dw-real-market",
+                execution_price_role="execution_price",
+                valuation_price_role="valuation_price",
+            ),
+            execution_timing="next_session_open",
+            session_closes=(close_at(2024, 1, 3),),
+            session_opens=(open_at(2024, 1, 3),),
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "EXECUTION_SESSION_PRICE_MISSING"
+    assert outcome.errors[0].commit_status is CommitStatus.NONE
+    assert not any(
+        item.artifact_type == "execution_result" for item in outcome.diagnostics
+    )
+
+
+def test_next_open_missing_binding_fails_without_execution_result(
+    real_dw_execution_convention_case: RealDwProject,
+) -> None:
+    case = real_dw_execution_convention_case
+    _, _, artifact = _parent_decision(case, run_id="missing-open-binding-parent")
+    outcome = case.project.execute_frozen_daily(
+        FrozenDailyExecutionSpec(
+            run_id="missing-open-binding-child",
+            parent_decision_artifact_ids=(artifact.artifact_id,),
+            account=DailyAccountSeed(
+                account_id="missing-open-binding-account",
+                base_currency="KRW",
+                initial_cash=10_000_000,
+            ),
+            instruments=configured_instruments(),
+            exchange=configured_exchange_config(cost_rate=0),
+            market=DailyMarketBinding(
+                market_dataset_id="dw-real-execution-events",
+                execution_price_role="missing_open_execution_price",
+                valuation_price_role="valuation_price",
+            ),
+            execution_timing="next_session_open",
+            session_closes=(close_at(2024, 1, 3),),
+            session_opens=(open_at(2024, 1, 3),),
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
+    assert outcome.errors[0].commit_status is CommitStatus.NONE
+    assert not any(
+        item.artifact_type == "execution_result" for item in outcome.diagnostics
+    )
+
+
+def test_open_profile_without_schedule_fails_before_strategy_or_state_mutation(
+    real_dw_execution_convention_case: RealDwProject,
+) -> None:
+    case = real_dw_execution_convention_case
+    strategy = SwitchingTargetStrategy()
+    account = initial_account("missing-open-schedule-account")
+    flow = DailyExecutionFlow(
+        clock=BacktestClock(close_at(2024, 1, 2)),
+        registry=case.project.registry_snapshot(),
+        artifacts=case.project.artifacts,
+        exchange=configured_exchange(cost_rate=0),
+        account=account,
+        profile=DailyExecutionProfile(
+            profile_id="daily.next-session-open.v1",
+            convention_id="open-price.v1",
+            execution_timing="next_session_open",
+            market_dataset_id="dw-real-execution-events",
+            execution_price_role="open_execution_price",
+            valuation_price_role="valuation_price",
+        ),
+    )
+    outcome = flow.run(
+        strategy,
+        DailyRunRequest(
+            run_id="missing-open-schedule",
+            config_fingerprint="missing-open-schedule.v1",
+            decision_times=(close_at(2024, 1, 2),),
+            session_closes=(close_at(2024, 1, 2), close_at(2024, 1, 3)),
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "NEXT_SESSION_OPEN_SCHEDULE_REQUIRED"
+    assert strategy.calls == 0
+    assert account.snapshot().version == 0
+    assert account.snapshot().holdings() == {}
+
+
+def test_next_open_recovery_records_the_exact_pending_execution_time(
+    real_dw_execution_convention_case: RealDwProject,
+) -> None:
+    case = real_dw_execution_convention_case
+    session_open = open_at(2024, 1, 3)
+    outcome = case.project.run_daily(
+        TargetStrategy(),
+        DailySimulationSpec(
+            run_id="next-open-recovery-contract",
+            strategy_fingerprint="tests.target.v1",
+            account=DailyAccountSeed(
+                account_id="next-open-recovery-account",
+                base_currency="KRW",
+                initial_cash=10_000_000,
+            ),
+            instruments=configured_instruments(),
+            exchange=configured_exchange_config(cost_rate=0),
+            market=DailyMarketBinding(
+                market_dataset_id="dw-real-execution-events",
+                execution_price_role="open_execution_price",
+                valuation_price_role="valuation_price",
+            ),
+            execution_timing="next_session_open",
+            decision_times=(close_at(2024, 1, 2),),
+            session_closes=(close_at(2024, 1, 2), close_at(2024, 1, 3)),
+            session_opens=(session_open,),
+        ),
+    )
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    pending_times: list[datetime] = []
+    for envelope in case.project.artifacts.list_envelopes():
+        if envelope.artifact_type != "simulation_recovery_point":
+            continue
+        loaded = case.project.load_artifact(
+            envelope.artifact_id,
+            SIMULATION_RECOVERY_POINT_CONTRACT,
+        )
+        if (
+            loaded.status is OutcomeStatus.COMPLETE
+            and loaded.result.payload.run_id == "next-open-recovery-contract"
+        ):
+            pending_times.extend(
+                item.execution_time
+                for item in loaded.result.payload.pending_executions
+            )
+    assert session_open in pending_times
 
 
 def test_checkpoint_round_trip_preserves_account_and_memory_state(

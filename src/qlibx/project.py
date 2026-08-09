@@ -36,11 +36,13 @@ from qlibx.extensions import (
     StrategyExtensionValidationRequest,
 )
 from qlibx.flow import (
+    DECISION_INTENT_CONTRACT,
     ConstraintFlow,
     DailyExecutionFlow,
     DailyExecutionProfile,
     DailyRunRequest,
     ExtensionFlow,
+    FrozenDecision,
     LoadedStrategyExtension,
     MaterializationFlow,
     MonitoringFlow,
@@ -59,7 +61,7 @@ from qlibx.operations import (
     StrategyOperation,
 )
 from qlibx.sample import SampleMaterializationResult, SampleMaterializer
-from qlibx.simulation import DailySimulationSpec
+from qlibx.simulation import DailySimulationSpec, FrozenDailyExecutionSpec
 
 
 class QlibxProject:
@@ -296,7 +298,7 @@ class QlibxProject:
         *,
         resume: bool = False,
     ) -> OperationOutcome:
-        """Run the supported next-session-close profile from frozen public input."""
+        """Run a supported daily close/open profile from frozen public input."""
 
         return self._with_catalog_session(
             operation="simulation.daily",
@@ -340,6 +342,70 @@ class QlibxProject:
             callback=run_registered,
         )
 
+    def execute_frozen_daily(
+        self,
+        spec: FrozenDailyExecutionSpec,
+    ) -> OperationOutcome:
+        """Execute exact DecisionIntent artifacts without rerunning their producers."""
+
+        return self._with_catalog_session(
+            operation="simulation.daily.frozen",
+            identity=spec.run_id,
+            callback=lambda: self._execute_frozen_daily(spec),
+        )
+
+    def _execute_frozen_daily(
+        self,
+        spec: FrozenDailyExecutionSpec,
+    ) -> OperationOutcome:
+        frozen: list[FrozenDecision] = []
+        for artifact_id in spec.parent_decision_artifact_ids:
+            loaded = self.load_artifact(artifact_id, DECISION_INTENT_CONTRACT)
+            if loaded.status is not OutcomeStatus.COMPLETE:
+                return loaded
+            frozen.append(
+                FrozenDecision(
+                    intent=loaded.result.payload,
+                    artifact=loaded.result.envelope,
+                )
+            )
+
+        exchange = KrxExchange(spec.exchange)
+        for instrument in spec.instruments:
+            exchange.add_instrument(instrument)
+        account = Account(
+            account_id=spec.account.account_id,
+            base_currency=spec.account.base_currency,
+            initial_cash=spec.account.initial_cash,
+            instrument_ids=frozenset(item.instrument_id for item in spec.instruments),
+        )
+        first_event = min(
+            *(
+                item.intent.decision_time for item in frozen
+            ),
+            *spec.session_closes,
+            *spec.session_opens,
+        )
+        flow = DailyExecutionFlow(
+            clock=BacktestClock(first_event),
+            registry=self.registry_snapshot(),
+            artifacts=self.artifacts,
+            exchange=exchange,
+            account=account,
+            store=self._store,
+            profile=self._daily_profile(spec),
+        )
+        return flow.execute_frozen(
+            tuple(frozen),
+            DailyRunRequest(
+                run_id=spec.run_id,
+                config_fingerprint=spec.frozen_config_fingerprint(),
+                decision_times=(),
+                session_closes=spec.session_closes,
+                session_opens=spec.session_opens,
+            ),
+        )
+
     def _run_daily(
         self,
         strategy: StrategyOperation,
@@ -359,7 +425,9 @@ class QlibxProject:
             initial_cash=spec.account.initial_cash,
             instrument_ids=frozenset(item.instrument_id for item in spec.instruments),
         )
-        first_event = min((*spec.decision_times, *spec.session_closes))
+        first_event = min(
+            (*spec.decision_times, *spec.session_closes, *spec.session_opens)
+        )
         flow = DailyExecutionFlow(
             clock=BacktestClock(first_event),
             registry=self.registry_snapshot(),
@@ -367,12 +435,7 @@ class QlibxProject:
             exchange=exchange,
             account=account,
             store=self._store,
-            profile=DailyExecutionProfile(
-                market_dataset_id=spec.market.market_dataset_id,
-                execution_price_role=spec.market.execution_price_role,
-                valuation_price_role=spec.market.valuation_price_role,
-                feedback_entry_limit=spec.market.feedback_entry_limit,
-            ),
+            profile=self._daily_profile(spec),
             artifact_contracts=artifact_contracts,
             strategy_dependencies=strategy_dependencies,
         )
@@ -385,9 +448,36 @@ class QlibxProject:
                 ),
                 decision_times=spec.decision_times,
                 session_closes=spec.session_closes,
+                session_opens=spec.session_opens,
                 artifact_bindings=spec.artifact_bindings,
             ),
             resume=resume,
+        )
+
+    @staticmethod
+    def _daily_profile(
+        spec: DailySimulationSpec | FrozenDailyExecutionSpec,
+    ) -> DailyExecutionProfile:
+        if spec.execution_timing == "next_session_open":
+            return DailyExecutionProfile(
+                profile_id="daily.next-session-open.v1",
+                convention_id="open-price.v1",
+                execution_timing="next_session_open",
+                market_dataset_id=spec.market.market_dataset_id,
+                execution_price_role=spec.market.execution_price_role,
+                valuation_price_role=spec.market.valuation_price_role,
+                feedback_entry_limit=spec.market.feedback_entry_limit,
+                limitations=(
+                    "single open price for the full cross-sectional batch",
+                    "overnight gap is reflected but intraday path is not modelled",
+                    "market impact and partial fill are not modelled",
+                ),
+            )
+        return DailyExecutionProfile(
+            market_dataset_id=spec.market.market_dataset_id,
+            execution_price_role=spec.market.execution_price_role,
+            valuation_price_role=spec.market.valuation_price_role,
+            feedback_entry_limit=spec.market.feedback_entry_limit,
         )
 
     def _with_catalog_session(

@@ -7,11 +7,13 @@ from tests.acceptance.real_dw_support import (
     create_real_dw_project,
     create_real_forward_label_project,
     extract_real_dw_rows,
+    extract_real_execution_event_rows,
     extract_real_extension_market_rows,
     extract_real_extension_sector_rows,
     extract_real_forward_label_rows,
     extract_real_k200_rows,
     extract_real_lookthrough_rows,
+    register_real_execution_events,
     register_real_extension_inputs,
     register_real_forward_label_horizon,
     register_real_k200_benchmark,
@@ -29,6 +31,28 @@ def bounded_real_dw_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture
 def real_dw_case(tmp_path: Path, bounded_real_dw_source: Path) -> RealDwProject:
     return create_real_dw_project(tmp_path / "project", bounded_real_dw_source)
+
+
+@pytest.fixture(scope="session")
+def bounded_real_execution_event_source(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    destination = (
+        tmp_path_factory.mktemp("real-execution-events") / "execution-events.parquet"
+    )
+    extract_real_execution_event_rows(destination)
+    return destination
+
+
+@pytest.fixture
+def real_dw_execution_convention_case(
+    real_dw_case: RealDwProject,
+    bounded_real_execution_event_source: Path,
+) -> RealDwProject:
+    return register_real_execution_events(
+        real_dw_case,
+        bounded_real_execution_event_source,
+    )
 
 
 @pytest.fixture(scope="session")

@@ -1,4 +1,4 @@
-"""Deterministic next-session-close simulation flow."""
+"""Deterministic daily simulation flow."""
 
 import hashlib
 import math
@@ -230,6 +230,9 @@ DECISION_INTENT_CONTRACT = ArtifactContract(
 class DailyExecutionProfile(QlibxModel):
     profile_id: str = "daily.next-session-close.v1"
     convention_id: str = "close-price.v1"
+    execution_timing: Literal["next_session_close", "next_session_open"] = (
+        "next_session_close"
+    )
     market_dataset_id: str
     execution_price_role: str = "execution_price"
     valuation_price_role: str = "valuation_price"
@@ -242,24 +245,34 @@ class DailyExecutionProfile(QlibxModel):
         "partial fill is not modelled unless the Exchange has a participation policy",
     )
 
+    def compatibility_json(self) -> str:
+        """Preserve the legacy close-profile identity when timing is defaulted."""
+
+        exclude = {"execution_timing"} if self.execution_timing == "next_session_close" else set()
+        return self.model_dump_json(exclude=exclude)
+
 
 class DailyRunRequest(QlibxModel):
     run_id: str = Field(min_length=1)
     config_fingerprint: str = Field(min_length=1)
     decision_times: tuple[datetime, ...]
     session_closes: tuple[datetime, ...]
+    session_opens: tuple[datetime, ...] = ()
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
 
     @model_validator(mode="after")
     def validate_schedule(self) -> "DailyRunRequest":
         decisions = tuple(require_aware(value) for value in self.decision_times)
         sessions = tuple(require_aware(value) for value in self.session_closes)
+        opens = tuple(require_aware(value) for value in self.session_opens)
         if decisions != tuple(sorted(set(decisions))):
             raise ValueError("decision_times must be unique and sorted")
         if sessions != tuple(sorted(set(sessions))):
             raise ValueError("session_closes must be unique and sorted")
         if not sessions:
             raise ValueError("daily flow requires at least one session close")
+        if opens != tuple(sorted(set(opens))):
+            raise ValueError("session_opens must be unique and sorted")
         binding_roles = [binding.consumer_role for binding in self.artifact_bindings]
         if len(binding_roles) != len(set(binding_roles)):
             raise ValueError("daily Strategy artifact binding roles must be unique")
@@ -268,9 +281,12 @@ class DailyRunRequest(QlibxModel):
     def compatibility_json(self) -> str:
         """Preserve the pre-M2 request identity when no artifacts are bound."""
 
+        exclude: set[str] = set()
         if not self.artifact_bindings:
-            return self.model_dump_json(exclude={"artifact_bindings"})
-        return self.model_dump_json()
+            exclude.add("artifact_bindings")
+        if not self.session_opens:
+            exclude.add("session_opens")
+        return self.model_dump_json(exclude=exclude)
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,6 +355,20 @@ class FrozenDecision:
 
 class NextSessionCloseExecutor:
     """Plan exactly one execution at the first eligible later session close."""
+
+    def __init__(self, profile: DailyExecutionProfile, sessions: tuple[datetime, ...]) -> None:
+        self.profile = profile
+        self._sessions = tuple(require_aware(value) for value in sessions)
+
+    def plan(self, decision: DecisionIntent) -> datetime | None:
+        return next(
+            (session for session in self._sessions if session > decision.decision_time),
+            None,
+        )
+
+
+class NextSessionOpenExecutor:
+    """Plan exactly one execution at the first eligible later session open."""
 
     def __init__(self, profile: DailyExecutionProfile, sessions: tuple[datetime, ...]) -> None:
         self.profile = profile
@@ -438,7 +468,7 @@ class DailyExecutionFlow:
         )
         self._request: DailyRunRequest | None = None
         self._strategy: StrategyOperation | None = None
-        self._executor: NextSessionCloseExecutor | None = None
+        self._executor: NextSessionCloseExecutor | NextSessionOpenExecutor | None = None
         self._strategy_results: list[StrategyResultPayload] = []
         self._intents: list[DecisionIntent] = []
         self._executions: list[ExecutionEvidence] = []
@@ -486,6 +516,8 @@ class DailyExecutionFlow:
         """Execute parent artifacts without importing or rerunning their Strategy."""
 
         self._prepare(request)
+        if self._errors:
+            return self._drain(request)
         assert self._executor is not None
         for frozen in decisions:
             if (
@@ -547,21 +579,35 @@ class DailyExecutionFlow:
             raise RuntimeError("DailyExecutionFlow instances are single-use")
         self._request = request
         self._strategy = strategy
-        self._executor = NextSessionCloseExecutor(self._profile, request.session_closes)
         self._request_fingerprint = self._fingerprint(request.compatibility_json())
-        self._profile_fingerprint = self._fingerprint(self._profile.model_dump_json())
+        self._profile_fingerprint = self._fingerprint(self._profile.compatibility_json())
         self._registry_fingerprint = self._fingerprint(
             "|".join(
                 item.registration_identity
                 for item in sorted(self._registry.datasets, key=lambda value: value.dataset_id)
             )
         )
+        if self._profile.execution_timing == "next_session_open":
+            if not request.session_opens:
+                self._fail(
+                    Event("EXECUTION", self._clock.now, EXECUTION_PRIORITY),
+                    "execution_plan",
+                    "NEXT_SESSION_OPEN_SCHEDULE_REQUIRED",
+                )
+                return
+            self._executor = NextSessionOpenExecutor(self._profile, request.session_opens)
+        else:
+            self._executor = NextSessionCloseExecutor(
+                self._profile,
+                request.session_closes,
+            )
         if resume:
             self._restore_recovery_point(strategy_id=strategy.strategy_id if strategy else None)
         else:
             self._publish_recovery_point(event=None)
         if self._errors:
             return
+        assert self._executor is not None
         for timestamp in request.session_closes:
             normalized = require_aware(timestamp)
             mark = Event("MARK", normalized, MARK_PRIORITY)

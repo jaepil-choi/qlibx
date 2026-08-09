@@ -43,6 +43,10 @@ def close_at(year: int, month: int, day: int) -> datetime:
     return datetime(year, month, day, 15, 30, tzinfo=KST)
 
 
+def open_at(year: int, month: int, day: int) -> datetime:
+    return datetime(year, month, day, 9, 0, tzinfo=KST)
+
+
 def extract_real_dw_rows(destination: Path) -> None:
     assert DW_DAILY.is_file(), "repository acceptance requires the real DW daily-price CSV"
     columns = (
@@ -73,6 +77,59 @@ def extract_real_dw_rows(destination: Path) -> None:
         WHERE ticker IN ('A005930', 'A000660')
           AND trade_date BETWEEN 20240102 AND 20240105
         ORDER BY date, ticker
+        """
+    )
+    relation.write_parquet(str(destination))
+
+
+def extract_real_execution_event_rows(destination: Path) -> None:
+    """Project honest open/close availability events from the real DW corpus."""
+
+    assert DW_DAILY.is_file(), "repository acceptance requires the real DW daily-price CSV"
+    columns = (
+        "{'ticker':'VARCHAR','trade_date':'BIGINT','base_price':'DOUBLE',"
+        "'open_price':'DOUBLE','high_price':'DOUBLE','low_price':'DOUBLE',"
+        "'close_price':'DOUBLE','prev_close':'DOUBLE','adjustment_factor':'DOUBLE',"
+        "'volume':'DOUBLE','amount':'DOUBLE','shares':'DOUBLE',"
+        "'listing_type':'VARCHAR','change_type':'VARCHAR','halt_code':'DOUBLE',"
+        "'admin_code':'DOUBLE'}"
+    )
+    relation = duckdb.connect().sql(
+        f"""
+        WITH prices AS (
+            SELECT
+                ticker,
+                strptime(CAST(trade_date AS VARCHAR), '%Y%m%d') AS session_open,
+                strptime(CAST(trade_date AS VARCHAR), '%Y%m%d')
+                    + INTERVAL '6 hours 30 minutes' AS session_close,
+                open_price,
+                close_price
+            FROM read_csv(
+                '{DW_DAILY.as_posix()}',
+                header = true,
+                columns = {columns}
+            )
+            WHERE ticker IN ('A005930', 'A000660')
+              AND trade_date BETWEEN 20240102 AND 20240105
+        )
+        SELECT
+            session_open AS event_time,
+            session_open AS available_at,
+            ticker,
+            open_price AS open_execution_price,
+            CAST(NULL AS DOUBLE) AS close_execution_price,
+            CAST(NULL AS DOUBLE) AS valuation_price
+        FROM prices
+        UNION ALL
+        SELECT
+            session_close AS event_time,
+            session_close AS available_at,
+            ticker,
+            CAST(NULL AS DOUBLE) AS open_execution_price,
+            close_price AS close_execution_price,
+            close_price AS valuation_price
+        FROM prices
+        ORDER BY event_time, ticker
         """
     )
     relation.write_parquet(str(destination))
@@ -341,6 +398,40 @@ def create_real_forward_label_project(root: Path, bounded_source: Path) -> RealD
     assert registration.status is OutcomeStatus.COMPLETE
     assert registration.result.evidence.row_count == 6
     return RealDwProject(root=root, source=source, project=project)
+
+
+def register_real_execution_events(
+    case: RealDwProject,
+    bounded_source: Path,
+) -> RealDwProject:
+    source = case.root / "real-execution-events.parquet"
+    shutil.copyfile(bounded_source, source)
+    registration = case.project.register_dataset(
+        DatasetRegistration(
+            dataset_id="dw-real-execution-events",
+            source=source.name,
+            source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
+            instrument_field="ticker",
+            observation_time_field="event_time",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("event_time", "available_at", "ticker"),
+            semantic_bindings={
+                "open_execution_price": "open_execution_price",
+                "close_execution_price": "close_execution_price",
+                "valuation_price": "valuation_price",
+            },
+            semantic_category="krx_daily_execution_events",
+            source_provenance=(
+                "bounded unchanged open/close values from "
+                "data/DW/fng_stock_daily_prices.csv; open rows are available at 09:00 "
+                "Asia/Seoul and close rows at 15:30 Asia/Seoul"
+            ),
+        )
+    )
+    assert registration.status is OutcomeStatus.COMPLETE
+    assert registration.result.evidence.row_count == 16
+    return RealDwProject(root=case.root, source=source, project=case.project)
 
 
 def register_real_forward_label_horizon(case: RealDwProject) -> RealDwProject:
@@ -614,35 +705,53 @@ def configured_exchange(
     participation_rate: float | None = None,
     impact_rate: float = 0,
 ) -> KrxExchange:
-    start = datetime(2020, 1, 1, tzinfo=KST)
     venue = KrxExchange(
-        KrxExchangeConfig(
-            schedule_version="krx-acceptance-2024-v1",
+        configured_exchange_config(
+            cost_rate=cost_rate,
             participation_rate=participation_rate,
             impact_rate=impact_rate,
-            cost_rules=tuple(
-                CostRule(
-                    rule_id=f"stock-{side.value.lower()}-2024",
-                    product_type="stock",
-                    side=side,
-                    effective_from=start,
-                    rate=cost_rate,
-                    minimum_cost=0,
-                )
-                for side in (Side.BUY, Side.SELL)
-            ),
         )
     )
-    for ticker in ("A000660", "A005930"):
-        venue.add_instrument(
-            StockInstrument(
-                instrument_id=ticker,
-                exchange_id="XKRX",
-                currency="KRW",
-                lot_size=1,
-            )
-        )
+    for instrument in configured_instruments():
+        venue.add_instrument(instrument)
     return venue
+
+
+def configured_exchange_config(
+    *,
+    cost_rate: float = 0.0015,
+    participation_rate: float | None = None,
+    impact_rate: float = 0,
+) -> KrxExchangeConfig:
+    start = datetime(2020, 1, 1, tzinfo=KST)
+    return KrxExchangeConfig(
+        schedule_version="krx-acceptance-2024-v1",
+        participation_rate=participation_rate,
+        impact_rate=impact_rate,
+        cost_rules=tuple(
+            CostRule(
+                rule_id=f"stock-{side.value.lower()}-2024",
+                product_type="stock",
+                side=side,
+                effective_from=start,
+                rate=cost_rate,
+                minimum_cost=0,
+            )
+            for side in (Side.BUY, Side.SELL)
+        ),
+    )
+
+
+def configured_instruments() -> tuple[StockInstrument, ...]:
+    return tuple(
+        StockInstrument(
+            instrument_id=ticker,
+            exchange_id="XKRX",
+            currency="KRW",
+            lot_size=1,
+        )
+        for ticker in ("A000660", "A005930")
+    )
 
 
 def initial_account(account_id: str = "real-dw-account") -> Account:

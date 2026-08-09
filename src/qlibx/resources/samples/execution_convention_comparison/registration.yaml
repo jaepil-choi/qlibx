@@ -1,0 +1,17 @@
+dataset_id: sample-execution-events
+source: examples/qlibx_owned/execution_convention_comparison/market.csv
+source_format: csv
+instrument_field: ticker
+observation_time_field: event_time
+available_at:
+  kind: field
+  field: available_at
+logical_key: [event_time, available_at, ticker]
+semantic_bindings:
+  open_execution_price: open_execution_price
+  close_execution_price: close_execution_price
+  valuation_price: valuation_price
+semantic_category: krx_daily_execution_event_sample
+source_provenance: >-
+  Product-owned deterministic contract rows. Open and close observations are separate events whose
+  available_at equals 09:00 and 15:30 Asia/Seoul respectively.

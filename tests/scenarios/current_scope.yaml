@@ -5,6 +5,7 @@ required_current_use_cases:
   - UC-DATA-001
   - UC-DATA-002
   - UC-ERROR-001
+  - UC-PIT-001
   - UC-CONSTRAINT-001
   - UC-CONSTRAINT-002
   - UC-SIGNAL-001
@@ -68,7 +69,25 @@ coverage_sets:
   m10_direct_research:
     - UC-SIGNAL-001
     - UC-CONSTRAINT-001
+  m11_materialization:
+    - UC-PIT-001
 scenarios:
+  - id: UC-PIT-001
+    case: real_forward_label_missing_horizon_then_linked_retry
+    test: tests/acceptance/test_materialization_scenarios.py::test_uc_pit_001_real_forward_label_fails_then_retries_without_lookahead
+    inputs:
+      data_kind: real
+      sources: [data/DW/fng_stock_daily_prices.csv]
+      missing_requirement: label.horizon_end
+    expected:
+      initial_outcome: failed
+      producer_calls_before_binding: 0
+      retry_outcome: complete
+      future_hidden: true
+      resolves_error_lineage: true
+      account_mutation: false
+      memory_mutation: false
+
   - id: UC-SIGNAL-001
     case: direct_real_dw_signal_and_weight_research
     test: tests/acceptance/test_research_scenarios.py::test_uc_signal_001_and_uc_constraint_001_complete_direct_real_dw_research
@@ -409,10 +428,6 @@ scenarios:
       residual_budget: 1.0
 
 excluded_readiness_gaps:
-  - id: GAP-MATERIALIZATION-PIT-001
-    excludes_current_use_case: UC-PIT-001
-    reason: generic Strategy requirement ordering does not prove a real forward-label Model materialization boundary
-    closure_oracle: optional materialization fails on missing horizon before calculation or mutation, then succeeds with a valid PIT label horizon
   - id: GAP-EXECUTION-CONVENTION-001
     excludes_current_use_case: UC-ALPHA-CHILD-001
     reason: next-close participation-rate children do not prove a next-open schedule and price convention

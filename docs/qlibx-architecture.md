@@ -34,7 +34,7 @@ future pseudocode는 구현된 API가 아니다.
 | artifact payload | **current:** typed `QlibxModel` payload는 JSON이고 DuckDB는 catalog/index다. 단순하고 inspectable하지만 큰 matrix에는 비효율적이다 | Parquet payload backend는 tabular artifact에 효율적이지만 schema split과 backend complexity가 증가한다 | **현재 actual 채택.** Parquet payload는 future backend다 | 대형 matrix benchmark와 JSON/Parquet 간 atomic publication·compatibility 계약이 준비될 때 추가한다 |
 | generic ports | **current:** concrete flow/API 중심이며 공용 failure helper만 실제 중복에 맞춰 추출했다. abstraction 수는 적지만 backend 대체성은 낮다 | 범용 `Operation`/`ArtifactPublisher`/`ArtifactLoader` protocol은 DIP에 유리하나 단일 구현에서는 speculative하다 | **actual 채택.** 아래 protocol 코드는 conceptual target으로만 읽는다 | 독립적인 두 번째 구현 또는 test double이 같은 계약을 소비할 때 protocol을 추출한다 |
 | execution convention | **current:** `NextSessionCloseExecutor`가 schedule을 만들고 `DailyExecutionFlow`가 profile의 execution-price role로 size/match한다. 검증된 경로는 좁다 | 별도 `FillConvention`과 next-open 구현은 schedule/price 역할을 더 깨끗이 분리하지만 real next-open data와 calendar 계약이 없다 | **현재 next-close만 지원.** next-open은 readiness gap이다 | 같은 frozen parent decision을 Strategy rerun 없이 real PIT next-close/next-open으로 비교하는 acceptance가 필요하다 |
-| materialization | **current:** generic requirement resolver만 있고 public `MaterializeOperation`과 forward-label Model materialization 증거는 없다 | optional materialization boundary는 PIT 학습/거래 분리에 타당하지만 현재 구현된 것처럼 쓰면 과장이다 | **target 유지, current support에서 제외.** resolver test는 기반 회귀일 뿐 closure evidence가 아니다 | 실제 optional operation과 label-horizon preflight failure/no-mutation acceptance가 필요하다 |
+| materialization | **current:** public direct `MaterializationOperation`과 `QlibxProject.materialize()`가 requirement-first execution을 제공하고, built-in `ForwardReturnLabelModel`이 PIT-bounded typed label artifact를 만든다. Scheduler와 Model registry는 없다 | scheduled rolling/expanding materialization은 반복 실행에는 유리하지만 lifecycle·cache invalidation 계약이 추가된다 | **direct operation만 actual 채택.** optional boundary와 no-look-ahead를 먼저 닫고 scheduling은 과장하지 않는다 | 반복 materialization cadence와 durable model registration 수요가 검증될 때 scheduler/registry를 추가한다 |
 | daily orchestration | **current:** 큰 `DailyExecutionFlow`가 recovery와 event ordering을 한곳에서 보존한다. 이해·변경 비용이 크다 | cohesive state machine/phase extraction은 유지보수에 유리하지만 기계적 파일 분리는 control flow를 숨긴다 | **이번에는 actual 유지.** 기술 부채를 인정한다 | 둘 이상의 phase가 독립 테스트·재사용 경계를 갖거나 변경 충돌이 반복될 때 state machine을 추출한다 |
 
 ---
@@ -70,7 +70,7 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-DATA-001` | dataset registration | source sample + user binding | minimal key/instrument/availability validation | registration | binding + schema fingerprint | arbitrary-field fixture |
 | `UC-DATA-002` | Strategy invocation | requirements + registered bindings | requirement resolution | 없음 on gap | `OperationError` + requirement ID | add-binding retry |
 | `UC-ERROR-001` | short analysis invocation | actual operation path only | requirement check | failure evidence only | hierarchical stage path | no phantom-stage fixture |
-| `UC-PIT-001` | **readiness gap:** future model materialization | target label availability at evaluation time | target horizon preflight | 없음 on gap | missing `horizon_end` | real MaterializeOperation + forward-label no-mutation acceptance required |
+| `UC-PIT-001` | direct `QlibxProject.materialize()` | resolved label roles through `MaterializeView` | horizon preflight + simple forward return | failure evidence or typed label artifact | dataset/config/error lineage + row availability | real-DW missing-horizon no-call, linked retry, future-hidden labels, installed sample |
 | `UC-AGENT-001` | ambiguous registration failure | package error + skill + project semantics | agent proposes; package validates | confirmed binding only | user decision + rule ID | no guessed availability |
 | `UC-SIGNAL-001` | direct Strategy run | scoped PIT data + bounded state | signal/weight inside Strategy | results + proposed memory | signed weights + accesses | no mandatory signal stage |
 | `UC-SIGNAL-002` | stored-result Strategy run | compatible typed model result | signed-weight assembly | Strategy result | producer-independent edges | producer not rerun |
@@ -110,10 +110,10 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-CASHFLOW-001` | future lifecycle event | event-specific inputs | separate fee/lifecycle calculation | Account | category + source | attribution separation |
 | `UC-SETTLEMENT-001` | future stock/ETF settlement | Fill + settlement calendar | receivable/payable transition | Account | settlement assumption/source | MVP remains instant |
 
-`UC-PIT-001`과 `UC-ALPHA-CHILD-001`은 product requirement이지만 2026-08-07 current-support registry에서는
-각각 real Model materialization과 real next-close/next-open 비교 증거가 없어 readiness gap으로 분류한다.
-Generic requirement rejection과 frozen child isolation 테스트는 기반 회귀로 유지하되 두 use case의 closure로
-사용하지 않는다. `UC-PROD-*`, `UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`과
+`UC-PIT-001`은 2026-08-09 direct materialization과 real-DW/installed acceptance로 current-support registry에
+승격됐다. `UC-ALPHA-CHILD-001`은 real next-close/next-open 비교 증거가 없어 readiness gap으로 남는다.
+Frozen child isolation 테스트는 기반 회귀로 유지하되 그 use case의 closure로 사용하지 않는다.
+`UC-PROD-*`, `UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`과
 `UC-SETTLEMENT-001`도 current acceptance가 아니다. 현재 구조가 해당 flow를 막지 않는지 설명하는 설계
 characterization이며 구현 완료를 주장하지 않는다. Test와 fixture를 만들 때도 같은 use-case ID를 사용해
 PRD → architecture → validation의 연결을 유지한다. CI는 두 문서의 stable ID 집합을 비교해 누락을
@@ -424,10 +424,10 @@ immutable input이다.
 받는 별도 `QlibxProject.monitor_constraints()` operation이다. Caller가 원하는 cadence로 명시적으로 호출할 수 있고,
 future optional scheduler가 같은 operation을 callback으로 등록할 수는 있지만 `run_daily()`는 현재 자동 호출하지 않는다.
 
-† `MATERIALIZE`는 **target boundary**다. Current code에는 public materialization operation/scheduler가 없고
-Strategy invocation의 generic requirement resolver만 있다. Rolling/expanding/event-triggered fit, forward-label
-`available_at`과 `horizon_end` preflight는 `GAP-MATERIALIZATION-PIT-001` closure acceptance를 갖춘 뒤 current로
-승격한다. Direct Strategy나 stored-result analysis에는 이 event가 없다.
+† Public direct materialization boundary는 **current**다. `QlibxProject.materialize()`가 frozen evaluation time과
+resolved requirements로 `MaterializeView`를 만들고, forward-label `available_at`과 `horizon_end` preflight를
+강제한다. 다만 표의 scheduled `MATERIALIZE` callback은 여전히 target이다. Rolling/expanding/event-triggered fit과
+durable Model registration은 구현되지 않았고 Direct Strategy나 stored-result analysis에는 이 event가 없다.
 
 \* `SETTLEMENT`·`FUNDING`·`EXPIRY`는 future extension characterization이다. Exchange가 Clock을 직접
 조작하지 않는다. Instrument registration 시 필요한 event specification을 반환하고 engine/flow가 Clock에
@@ -971,7 +971,7 @@ registration과 operation별 time requirement 검증이 §1 설계 명제를 지
 | `StrategyView` | declared PIT dataset/artifact, committed Account snapshot, bounded feedback/performance, Strategy memory | undeclared binding, future feedback, mutable state port |
 | `ExecutionView` | declared PIT dataset only | artifact, Account, feedback, performance, memory |
 | `MonitorView` | declared PIT dataset + committed Account snapshot | artifact, feedback, performance, memory, mutable Account port |
-| `MaterializeView` | declared PIT dataset only; public materialization operation은 아직 gap | artifact, Account, feedback, performance, memory |
+| `MaterializeView` | direct materialization에 resolve된 declared PIT dataset과 access lineage | artifact, Account, feedback, performance, memory |
 
 View 이름이 global field 목록을 뜻하지 않는다. Resolver가 이번 operation에 허용한 binding만 facade에
 넣는다. Compliance data나 monitoring finding을 Strategy에 쓰려면 Strategy requirement가 이를 명시해야
@@ -1076,7 +1076,9 @@ MVP는 backtest profile만 구현한다. Future production에서도 Gate와 oper
 ### 공통 계약과 선택 가능한 graph
 
 각 operation은 requirement를 먼저 선언하고 resolved view에서 typed result와 diagnostics를 계산한다.
-공통 모양은 같지만 result type과 graph 위치는 operation마다 다르다. 다음 `Operation` 계열은 두 번째 구현이 생길 때 추출할 **target pseudocode**이며 current public protocol이 아니다.
+공통 모양은 같지만 result type과 graph 위치는 operation마다 다르다. 다음 공용 `Operation` base는 두 번째
+구현이 생길 때 추출할 **target pseudocode**다. `MaterializationOperation`은 이 base 없이 독립된 current public
+protocol로 존재한다.
 
 ```python
 # target pseudocode — current code uses concrete operation/flow contracts
@@ -1086,26 +1088,28 @@ class Operation(Protocol[ResultT]):
     def run(self, view: ScopedView) -> tuple[ResultT, Diagnostics]: ...
 
 class StrategyOperation(Operation[StrategyDraft], Protocol): ...
-class MaterializeOperation(Operation[ResearchDataArtifact], Protocol): ...  # readiness gap
+class MaterializationOperation(Protocol[PayloadT]): ...  # current direct protocol
 class AnalysisOperation(Operation[AnalysisArtifact], Protocol): ...
 class RendererOperation(Operation[ReportArtifact], Protocol): ...
 ```
 
 Current Strategy는 signed alpha weights와 optional proposed memory를 담은 `StrategyDraft`를 반환한다. Flow가 실제 view access와 frozen invocation identity를 결합해 authoritative `StrategyResult`로 승격하고, closed-loop workflow이면 executor-neutral
 `DecisionIntent`를 함께 제공한다. Strategy가 signal과 weights를 내부에서 한 번에 계산해도 되고,
-stored signal/characteristic/risk result를 읽어도 된다. Future `MaterializeOperation`은 그 reusable result를 생산하는 optional path다. Public boundary를 넘거나
+stored signal/characteristic/risk result를 읽어도 된다. Current direct `MaterializationOperation`은 reusable typed
+research result를 생산하는 optional path다. Public boundary를 넘거나
 재사용되는 intermediate만 정확한 semantic artifact로 materialize한다.
 
 Project-local Strategy가 alpha logic의 primary extension point다. Package는 module/source identity, public
 input/output contract와 deterministic fixture로 compatibility를 판정하고 성공한 component만 등록한다. Strategy가
 stored artifact를 요구하면 Flow가 role/schema/semantics를 resolve·load하고 evidence-independent immutable projection만
-scoped view에 주입한다. User code는 artifact backend나 raw observation store를 직접 읽지 않는다. Current에는 Model materialization public operation이 없다. Target에서 Model과
-`MATERIALIZE`는 selected Strategy가 reusable intermediate를 요구할 때만 존재하는 optional path다.
+scoped view에 주입한다. User code는 artifact backend나 raw observation store를 직접 읽지 않는다. Current direct
+materialization은 caller가 명시적으로 호출하며, target scheduled `MATERIALIZE`는 selected Strategy가 reusable
+intermediate를 요구할 때만 존재하는 optional path다.
 
 ```python
 StrategyOperation.run(view)     -> StrategyDraft
 Flow.promote(draft, accesses)   -> StrategyResult
-ModelOrTransform.run(view)      -> ResearchDataArtifact  # target; not current materialization API
+MaterializationOperation.run(view) -> typed payload      # current direct materialization API
 construct(weights, view)        -> (PhysicalTarget, Diagnostics)       # optional
 adjust(candidate, view)         -> (AdjustmentResult, Diagnostics)     # optional
 convert(target, view)           -> (Orders, ConversionLog)             # optional
@@ -2113,12 +2117,11 @@ RUN single_name_constrained_strategy
 ```
 
 Signal analysis처럼 짧은 invocation은 실제 `analysis.run.requirements`에서만 실패하고 model, optimizer,
-order stage를 만들지 않는다(`UC-ERROR-001`). Current generic resolver test는 Strategy requirement의
-`horizon_end` 누락을 계산 전에 거부하지만, 이것은 forward-label Model materialization을 실행한 증거가 아니다.
-`UC-PIT-001`은 real optional materialization operation과 label-horizon no-mutation acceptance가 생길 때까지
-`GAP-MATERIALIZATION-PIT-001`이다. Availability 의미가 불명확하면 package는 추측하지 않고 structured gap을
-내며, agent가 release timestamp나 confirmed delay-rule 후보를 설명한 뒤 user-confirmed binding만 등록한다
-(`UC-AGENT-001`).
+order stage를 만들지 않는다(`UC-ERROR-001`). `UC-PIT-001`의 direct forward-label materialization은
+`label.horizon_end` 누락을 producer 계산 전에 거부하고 failure evidence만 남긴다. 명시적 immutable horizon
+registration 뒤의 새 invocation은 이전 failure를 lineage로 연결하고 frozen evaluation time까지 available한
+label만 발행한다. Availability 의미가 불명확하면 package는 추측하지 않고 structured gap을 내며, agent가
+release timestamp나 confirmed delay-rule 후보를 설명한 뒤 user-confirmed binding만 등록한다(`UC-AGENT-001`).
 
 ### 13.8 Strategy composition과 state — UC-SIGNAL-001, UC-SIGNAL-002, UC-ALPHA-BUDGET-001, UC-ALPHA-PATH-001, UC-ALPHA-CHILD-001, UC-ALPHA-ADAPTIVE-001, UC-ENSEMBLE-001
 
@@ -2261,17 +2264,17 @@ monitoring은 outbox target이 아니라 reconciled account authority만 읽는�
 
 ## 14. Implementation/readiness map
 
-이 표는 과거 구축 순서가 아니라 2026-08-07의 current/gap을 함께 표시하는 readiness map이다. 구축 단위는 layer가 아니라 observable vertical use case다. Error와 evidence를 뒤로 미루면 초기
+이 표는 과거 구축 순서가 아니라 2026-08-09의 current/gap을 함께 표시하는 readiness map이다. 구축 단위는 layer가 아니라 observable vertical use case다. Error와 evidence를 뒤로 미루면 초기
 workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 둔다.
 
 | # | vertical slice | 주요 architecture | use-case evidence |
 |---|---|---|---|
 | 1 | Minimal registration + typed evidence | DatasetRegistration, RequirementResolver, OperationError, atomic local catalog | UC-DATA-001/002, UC-ERROR-001, UC-ARTIFACT-002, UC-RESEARCH-001 |
-| 2 | PIT direct research (**current**) / Model materialization (**gap**) | Clock/View, ResolvedBinding, Direct Strategy; future materialization preflight | UC-SIGNAL-001, UC-CONSTRAINT-001; UC-PIT-001 is GAP-MATERIALIZATION-PIT-001 |
+| 2 | PIT direct research + direct label materialization (**current**) | Clock/View, ResolvedBinding, Direct Strategy, MaterializationOperation, forward-label preflight | UC-SIGNAL-001, UC-CONSTRAINT-001, UC-PIT-001; GAP-MATERIALIZATION-PIT-001 closed for the public direct profile |
 | 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §14.1 |
 | 4 | Daily closed loop | kernel, decision/execution flow, Account/Memory, daily profile, checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002 |
 | 5 | next-close frozen execution (**current**) / next-open branch (**gap**) | immutable DecisionIntent, current next-close executor, isolated Account; future real next-open | UC-EXEC-001; UC-ALPHA-CHILD-001 is GAP-EXECUTION-CONVENTION-001 |
-| 6 | Stored research + frozen Strategy composition (**current**) | exact typed load, v2 source-state lineage, Ensemble flow, registered artifact-only consumer, Memory update; no current materialize operation | UC-SIGNAL-002, UC-ALPHA-PATH-001, supported UC-ALPHA cases, UC-ENSEMBLE-001, UC-ARTIFACT-001; GAP-STRATEGY-COMPOSITION-001 closed for the installed local profile |
+| 6 | Stored research + frozen Strategy composition (**current**) | exact typed load, v2 source-state lineage, Ensemble flow, registered artifact-only consumer, Memory update | UC-SIGNAL-002, UC-ALPHA-PATH-001, supported UC-ALPHA cases, UC-ENSEMBLE-001, UC-ARTIFACT-001; GAP-STRATEGY-COMPOSITION-001 closed for the installed local profile |
 | 7 | Portfolio/constraint/monitoring + user look-through fixture | construction, adjust/validate, user-declared PIT/account consumption, independent monitor | UC-PORTFOLIO-001, UC-LOOKTHROUGH-001~003, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003; §14.2 |
 | 8 | Analysis/report/extension | analysis artifact, pure renderer, transform validation, exact local Strategy registration/execution | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001/002 |
 | 9 | Future design characterization — current build 밖 | academic listing, lifecycle cash flow, actual settlement, partial fill와 production boundary | UC-ACADEMIC-001, UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001, UC-SETTLEMENT-001, UC-PROD-001/002 |
@@ -2431,7 +2434,8 @@ stored-result analysis에는 이 event가 존재하지 않는다.
 §7 view에서는 이 문제를 별도 hidden cutoff가 아니라 **binding과 requirement로 해결한다.** 라벨의
 `available_at`을 `event_time + horizon`으로 등록하면, `MATERIALIZE`가 시각 T에 실행될 때
 `available_at > T`인 라벨은 조회되지 않는다. Target Model component가 `horizon_end`를 요구하는데 binding이 없으면
-`UC-PIT-001` OperationError로 materialization 전에 실패해야 한다. Current Strategy requirement rejection test는 이 target의 일부만 검증하므로 closure가 아니다.
+`UC-PIT-001` OperationError로 producer 계산 전에 실패한다. Current direct acceptance는 no-call failure evidence,
+explicit horizon registration, linked retry와 future-hidden label을 함께 검증한다.
 
 따라서 derived label registration은 horizon이 availability와 일치하는지 validation해야 한다. 이를
 누락하면 §17이 지적한 "보장이 write 시점으로 이동한 대가"가 정확히 여기서 실현된다.
@@ -2519,7 +2523,7 @@ installed-project 경로로 검증한다. 따라서 `GAP-STRATEGY-COMPOSITION-00
 
 ```
 G1 · G2 · G5      → current local contract/implementation evidence 있음; 각 제한은 본문 참조
-G3                 → target contract만 있음. GAP-MATERIALIZATION-PIT-001 closure 필요
+G3                 → public direct contract/real-DW/installed evidence 있음; scheduling과 Model registry는 future
 G4                 → hypothetical은 O3·O4 의미로 진행 가능. real short는 담보·차입·locate 결정 필요
 execution convention → GAP-EXECUTION-CONVENTION-001 closure 필요
 ```
@@ -2572,10 +2576,10 @@ payload, generic operation/publisher/loader protocols and a decomposed daily sta
 options with the trade-offs and activation criteria in the alignment table. Same-layer flow imports remain audit debt;
 a shared domain/evidence contract is extracted only when a second real consumer exists, with compatibility re-export.
 
-**Evidence correction.** `UC-PIT-001` is excluded from current support by
-`GAP-MATERIALIZATION-PIT-001`; `UC-ALPHA-CHILD-001` is excluded by
-`GAP-EXECUTION-CONVENTION-001`. Existing generic horizon rejection and frozen participation-rate child tests remain
-regressions but are not closure evidence. `GAP-STRATEGY-COMPOSITION-001` remains open.
+**Evidence correction.** `UC-PIT-001` is current for the public direct materialization profile; real-DW and installed
+acceptance close `GAP-MATERIALIZATION-PIT-001` without claiming a scheduler or Model registry. `UC-ALPHA-CHILD-001`
+remains excluded by `GAP-EXECUTION-CONVENTION-001`; frozen participation-rate child tests are regressions, not closure
+evidence. `GAP-STRATEGY-COMPOSITION-001` is closed for the installed local profile described below.
 
 ### 2026-08-07 — Installed project-local Strategy lifecycle
 

@@ -6,7 +6,7 @@ from qlibx.constraints import (
     ConstraintValidationSpec,
     MvpConstraintPolicy,
 )
-from qlibx.context import StrategyView
+from qlibx.context import MaterializeView, StrategyView
 from qlibx.data import ComponentRequirement
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.execution import (
@@ -31,6 +31,12 @@ from qlibx.operations import (
     ArtifactSemanticConstraint,
     BudgetMode,
     DecisionAction,
+    ForwardReturnLabelEntry,
+    ForwardReturnLabelModel,
+    ForwardReturnLabelResult,
+    MaterializationInvocation,
+    MaterializationOperation,
+    MaterializationOutputContract,
     StoredSignalEntry,
     StoredSignalResult,
     StrategyArtifactBinding,
@@ -61,7 +67,14 @@ __all__ = [
     "DecisionAction",
     "EtfInstrument",
     "ExecutionLotInput",
+    "ForwardReturnLabelEntry",
+    "ForwardReturnLabelModel",
+    "ForwardReturnLabelResult",
     "KrxExchangeConfig",
+    "MaterializationInvocation",
+    "MaterializationOperation",
+    "MaterializationOutputContract",
+    "MaterializeView",
     "MvpConstraintPolicy",
     "OnboardingDesiredState",
     "OnboardingRequest",

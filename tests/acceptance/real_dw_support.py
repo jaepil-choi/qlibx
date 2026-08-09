@@ -78,6 +78,58 @@ def extract_real_dw_rows(destination: Path) -> None:
     relation.write_parquet(str(destination))
 
 
+def extract_real_forward_label_rows(destination: Path) -> None:
+    """Project a bounded close-to-next-close label source from the real DW corpus."""
+
+    assert DW_DAILY.is_file(), "repository acceptance requires the real DW daily-price CSV"
+    columns = (
+        "{'ticker':'VARCHAR','trade_date':'BIGINT','base_price':'DOUBLE',"
+        "'open_price':'DOUBLE','high_price':'DOUBLE','low_price':'DOUBLE',"
+        "'close_price':'DOUBLE','prev_close':'DOUBLE','adjustment_factor':'DOUBLE',"
+        "'volume':'DOUBLE','amount':'DOUBLE','shares':'DOUBLE',"
+        "'listing_type':'VARCHAR','change_type':'VARCHAR','halt_code':'DOUBLE',"
+        "'admin_code':'DOUBLE'}"
+    )
+    relation = duckdb.connect().sql(
+        f"""
+        WITH prices AS (
+            SELECT
+                ticker,
+                trade_date,
+                strptime(CAST(trade_date AS VARCHAR), '%Y%m%d') AS observation_time,
+                close_price AS label_start_value,
+                lead(close_price) OVER (
+                    PARTITION BY ticker ORDER BY trade_date
+                ) AS label_end_value,
+                lead(
+                    strptime(CAST(trade_date AS VARCHAR), '%Y%m%d')
+                        + INTERVAL '6 hours 30 minutes'
+                ) OVER (
+                    PARTITION BY ticker ORDER BY trade_date
+                ) AS horizon_end
+            FROM read_csv(
+                '{DW_DAILY.as_posix()}',
+                header = true,
+                columns = {columns}
+            )
+            WHERE ticker IN ('A005930', 'A000660')
+              AND trade_date BETWEEN 20240102 AND 20240105
+        )
+        SELECT
+            observation_time,
+            horizon_end AS available_at,
+            ticker,
+            label_start_value,
+            label_end_value,
+            horizon_end
+        FROM prices
+        WHERE label_end_value IS NOT NULL
+        ORDER BY observation_time, ticker
+        """
+    )
+    relation.write_parquet(str(destination))
+
+
 def extract_real_k200_rows(destination: Path) -> None:
     assert K200_PREPROCESSED.is_file(), "repository acceptance requires real K200 membership"
     relation = duckdb.connect().sql(
@@ -258,6 +310,61 @@ def create_real_dw_project(root: Path, bounded_source: Path) -> RealDwProject:
     assert registration.status is OutcomeStatus.COMPLETE
     assert registration.result.evidence.row_count == 8
     return RealDwProject(root=root, source=source, project=project)
+
+
+def create_real_forward_label_project(root: Path, bounded_source: Path) -> RealDwProject:
+    QlibxProject.init(root, apply=True)
+    source = root / "real-forward-label.parquet"
+    shutil.copyfile(bounded_source, source)
+    project = QlibxProject.open(root)
+    registration = project.register_dataset(
+        DatasetRegistration(
+            dataset_id="real-forward-label-prices",
+            source=source.name,
+            source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
+            instrument_field="ticker",
+            observation_time_field="observation_time",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("observation_time", "available_at", "ticker"),
+            semantic_bindings={
+                "label_start_value": "label_start_value",
+                "label_end_value": "label_end_value",
+            },
+            semantic_category="real_krx_forward_label_source",
+            source_provenance=(
+                "bounded unchanged closes from data/DW/fng_stock_daily_prices.csv; "
+                "each row is available at the observed next-session close in Asia/Seoul"
+            ),
+        )
+    )
+    assert registration.status is OutcomeStatus.COMPLETE
+    assert registration.result.evidence.row_count == 6
+    return RealDwProject(root=root, source=source, project=project)
+
+
+def register_real_forward_label_horizon(case: RealDwProject) -> RealDwProject:
+    registration = case.project.register_dataset(
+        DatasetRegistration(
+            dataset_id="real-forward-label-horizon",
+            source=case.source.name,
+            source_format=SourceFormat.PARQUET,
+            source_timezone="UTC",
+            instrument_field="ticker",
+            observation_time_field="observation_time",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("observation_time", "available_at", "ticker"),
+            semantic_bindings={"horizon_end": "horizon_end"},
+            semantic_category="real_krx_forward_label_source",
+            source_provenance=(
+                "explicit horizon binding over bounded unchanged closes from "
+                "data/DW/fng_stock_daily_prices.csv; horizon_end is also the confirmed "
+                "next-session-close availability instant"
+            ),
+        )
+    )
+    assert registration.status is OutcomeStatus.COMPLETE
+    return case
 
 
 def register_real_k200_benchmark(

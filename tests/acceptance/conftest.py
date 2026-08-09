@@ -5,12 +5,15 @@ import pytest
 from tests.acceptance.real_dw_support import (
     RealDwProject,
     create_real_dw_project,
+    create_real_forward_label_project,
     extract_real_dw_rows,
     extract_real_extension_market_rows,
     extract_real_extension_sector_rows,
+    extract_real_forward_label_rows,
     extract_real_k200_rows,
     extract_real_lookthrough_rows,
     register_real_extension_inputs,
+    register_real_forward_label_horizon,
     register_real_k200_benchmark,
     register_real_lookthrough_constituents,
 )
@@ -26,6 +29,31 @@ def bounded_real_dw_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture
 def real_dw_case(tmp_path: Path, bounded_real_dw_source: Path) -> RealDwProject:
     return create_real_dw_project(tmp_path / "project", bounded_real_dw_source)
+
+
+@pytest.fixture(scope="session")
+def bounded_real_forward_label_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    destination = tmp_path_factory.mktemp("real-forward-label") / "forward-label.parquet"
+    extract_real_forward_label_rows(destination)
+    return destination
+
+
+@pytest.fixture
+def real_forward_label_case(
+    tmp_path: Path,
+    bounded_real_forward_label_source: Path,
+) -> RealDwProject:
+    return create_real_forward_label_project(
+        tmp_path / "forward-label-project",
+        bounded_real_forward_label_source,
+    )
+
+
+@pytest.fixture
+def real_forward_label_complete_case(
+    real_forward_label_case: RealDwProject,
+) -> RealDwProject:
+    return register_real_forward_label_horizon(real_forward_label_case)
 
 
 @pytest.fixture(scope="session")

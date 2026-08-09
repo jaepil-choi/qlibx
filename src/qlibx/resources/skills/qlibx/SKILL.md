@@ -27,6 +27,24 @@ invent missing behavior.
 5. Call qlibx registration validation with the confirmed availability and timezone declarations.
 6. Record the confirmed binding and validation result. Do not infer available_at from DATE alone.
 
+## Materialize research data
+
+1. Use direct materialization only when a reusable typed research result is actually required. A
+   direct Strategy does not require this stage.
+2. Inspect the selected operation's declared requirements before invoking it. Forward-return labels
+   require explicit `label_start_value`, `label_end_value`, and `horizon_end` bindings.
+3. Never infer a horizon or availability delay. If `label.horizon_end` is unresolved, explain the
+   compatible choices: bind a source-supported field, register a separate immutable logical dataset,
+   derive and validate a dataset, or select a model with different requirements.
+4. Retry with a new `MaterializationInvocation`, preserve the prior failure artifact through
+   `resolves_error_artifact_id`, and confirm every emitted row has `available_at <= evaluation_time`.
+5. Treat `forward_return_label_result:v1` as a label artifact, not a stored signal, Account update,
+   or Strategy Memory update.
+
+The bundled `forward-label-materialization-v1` sample demonstrates pre-compute requirement failure,
+an explicit immutable horizon registration, linked retry, and future-hidden labels through installed
+public APIs.
+
 ## Validate a project-local Strategy
 
 1. Treat a local Python module as trusted project code. qlibx path/hash validation is not a hostile-code

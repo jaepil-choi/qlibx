@@ -1,0 +1,16 @@
+dataset_id: sample-forward-label-prices
+source: examples/qlibx_owned/forward_label_materialization/labels.csv
+source_format: csv
+instrument_field: instrument
+observation_time_field: observation_time
+available_at:
+  kind: field
+  field: available_at
+logical_key: [observation_time, available_at, instrument]
+semantic_bindings:
+  label_start_value: start_value
+  label_end_value: end_value
+semantic_category: sample_forward_label_source
+source_provenance: >-
+  Product-owned deterministic close-to-next-close label fixture. Each row becomes available only
+  at its explicit horizon_end; values are contract evidence, not market-performance evidence.

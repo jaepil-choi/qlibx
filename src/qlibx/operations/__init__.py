@@ -7,6 +7,16 @@ from qlibx.operations.artifacts import (
     StrategyArtifactBinding,
     StrategyArtifactRequirement,
 )
+from qlibx.operations.materialization import (
+    FORWARD_RETURN_LABEL_OUTPUT,
+    ForwardReturnLabelEntry,
+    ForwardReturnLabelModel,
+    ForwardReturnLabelResult,
+    MaterializationComputationError,
+    MaterializationInvocation,
+    MaterializationOperation,
+    MaterializationOutputContract,
+)
 from qlibx.operations.strategy import (
     ArtifactAwareStrategyOperation,
     BudgetMode,
@@ -25,10 +35,18 @@ from qlibx.operations.strategy import (
 )
 
 __all__ = [
+    "FORWARD_RETURN_LABEL_OUTPUT",
     "ArtifactAwareStrategyOperation",
     "ArtifactSemanticConstraint",
     "BudgetMode",
     "DecisionAction",
+    "ForwardReturnLabelEntry",
+    "ForwardReturnLabelModel",
+    "ForwardReturnLabelResult",
+    "MaterializationComputationError",
+    "MaterializationInvocation",
+    "MaterializationOperation",
+    "MaterializationOutputContract",
     "StoredSignalEntry",
     "StoredSignalResult",
     "StrategyArtifactBinding",

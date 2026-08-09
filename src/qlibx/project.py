@@ -42,6 +42,7 @@ from qlibx.flow import (
     DailyRunRequest,
     ExtensionFlow,
     LoadedStrategyExtension,
+    MaterializationFlow,
     MonitoringFlow,
     ResearchFlow,
     StrategyExtensionFlow,
@@ -51,7 +52,12 @@ from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
-from qlibx.operations import StrategyInvocation, StrategyOperation
+from qlibx.operations import (
+    MaterializationInvocation,
+    MaterializationOperation,
+    StrategyInvocation,
+    StrategyOperation,
+)
 from qlibx.sample import SampleMaterializationResult, SampleMaterializer
 from qlibx.simulation import DailySimulationSpec
 
@@ -186,6 +192,23 @@ class QlibxProject:
                 artifacts=self.artifacts,
                 store=self._store,
             ).invoke_strategy(operation, invocation),
+        )
+
+    def materialize(
+        self,
+        operation: MaterializationOperation,
+        invocation: MaterializationInvocation,
+    ) -> OperationOutcome:
+        """Run one direct optional research-data materialization invocation."""
+
+        return self._with_catalog_session(
+            operation="materialization.run",
+            identity=invocation.invocation_id,
+            callback=lambda: MaterializationFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+                store=self._store,
+            ).invoke(operation, invocation),
         )
 
     def invoke_registered_strategy(

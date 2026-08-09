@@ -1,0 +1,11 @@
+{
+  "sample_schema_version": 1,
+  "sample_id": "forward-label-materialization-v1",
+  "ownership": "qlibx_product_owned_example",
+  "prd_use_case": "UC-PIT-001",
+  "output_contract": "forward_return_label_result:v1",
+  "calculation": "label_end_value / label_start_value - 1",
+  "horizon_policy": "explicit binding; never inferred",
+  "availability_policy": "observation_time < horizon_end <= available_at <= evaluation_time",
+  "current_support_only": true
+}

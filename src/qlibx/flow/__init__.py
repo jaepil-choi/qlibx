@@ -44,6 +44,11 @@ from qlibx.flow.daily import (
     SimulationCheckpoint,
 )
 from qlibx.flow.extensions import EXTENSION_REGISTRATION_CONTRACT, ExtensionFlow
+from qlibx.flow.materialization import (
+    FORWARD_RETURN_LABEL_CONTRACT,
+    MaterializationFlow,
+    MaterializationRunResult,
+)
 from qlibx.flow.monitoring import CONSTRAINT_MONITORING_CONTRACT, MonitoringFlow
 from qlibx.flow.portfolio import (
     PORTFOLIO_RESULT_CONTRACT,
@@ -73,6 +78,7 @@ __all__ = [
     "DECISION_PRIORITY",
     "EXECUTION_PRIORITY",
     "EXTENSION_REGISTRATION_CONTRACT",
+    "FORWARD_RETURN_LABEL_CONTRACT",
     "MARK_PRIORITY",
     "MONITOR_PRIORITY",
     "PORTFOLIO_RESULT_CONTRACT",
@@ -100,6 +106,8 @@ __all__ = [
     "FrozenDecision",
     "LoadedStrategyExtension",
     "MarkEvidence",
+    "MaterializationFlow",
+    "MaterializationRunResult",
     "MemberContribution",
     "MemoryCommitEvidence",
     "MonitorEvidence",

@@ -14,6 +14,12 @@ Use the exact public error fields. Candidate actions are guidance, not package-o
 | TIMESTAMP_LOCALIZATION_FAILED | Local timestamps are mixed, ambiguous, or nonexistent | Provide offset-qualified timestamps that identify exact instants |
 | REGISTRY_PUBLICATION_FAILED | The filesystem cannot publish the immutable registration atomically | Use a local filesystem that supports atomic hard-link creation |
 | REQUIREMENT_NOT_RESOLVED | The selected operation needs an unregistered semantic capability | Add a binding/dataset, derive it, select another profile, or validate an extension |
+| MATERIALIZATION_CONTRACT_INVALID or MATERIALIZATION_RESULT_INVALID | The selected operation or returned payload violates the public materialization contract | Fix the operation declaration/result schema; do not publish or coerce an incompatible payload |
+| MATERIALIZATION_REQUIREMENTS_FAILED or MATERIALIZATION_RESOLUTION_ERROR_INVALID | Requirements cannot be declared or the selected prior failure is not a valid linked requirement-resolution error | Correct the declaration or select the exact prior materialization failure artifact, then use a new invocation |
+| MATERIALIZATION_DATA_READ_FAILED | A declared PIT dataset could not be read after requirement resolution | Restore the immutable registered source and fingerprint; do not substitute another source silently |
+| MATERIALIZATION_COMPUTE_FAILED | An unexpected producer defect occurred after immutable inputs were materialized | Preserve the failure and frozen inputs; retry only after a code or explicit input-contract change |
+| FORWARD_LABEL_INPUT_EMPTY or FORWARD_LABEL_COVERAGE_MISMATCH | Required label roles have no common instrument/observation coverage | Correct the explicit datasets so start, end, and horizon rows have exact key coverage |
+| FORWARD_LABEL_VALUE_INVALID or FORWARD_LABEL_HORIZON_INVALID | A label value is non-positive/non-finite or its horizon/availability ordering is invalid | Correct source values or declared horizon semantics; never invent a delay or drop offending rows silently |
 | ARTIFACT_IDENTITY_CONFLICT | The same logical identity already has different immutable content | Retain it or choose a new logical identity |
 | ARTIFACT_PAYLOAD_INVALID | Serialized content violates its documented contract | Fix the producer payload before import |
 | CATALOG_SESSION_CONFLICT | Another thread or process owns the bounded exclusive catalog session | Wait until the active workflow finishes, then retry the whole operation; do not bypass the catalog lock |
@@ -26,6 +32,10 @@ Use the exact public error fields. Candidate actions are guidance, not package-o
 
 Do not retry until every retry_precondition is either satisfied or explicitly rejected by the
 user. A retry is a new invocation linked to the prior error; it never deletes the failure record.
+
+For unresolved `label.horizon_end`, report that exact requirement and offer only a confirmed binding,
+a separately registered or derived dataset, or a different model. Do not guess a horizon from file
+names, row order, observation frequency, or a conventional trading-day count.
 
 An unexpected compute failure is deterministic for the same frozen input and implementation.
 Repeating that invocation is diagnostic reproduction, not recovery. Keep the failure artifact,

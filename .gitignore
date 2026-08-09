@@ -23,6 +23,7 @@ showcases/show_*/outputs/
 
 # Local test and tool scratch state.
 /.agent/test-runs/
+/.agent/tmp/
 /.tmp/
 /tmp/
 

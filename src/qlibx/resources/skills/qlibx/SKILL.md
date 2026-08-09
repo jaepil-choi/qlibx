@@ -45,6 +45,11 @@ invent missing behavior.
 
 The bundled `strategy-extension-v1` sample demonstrates typed stored-signal input, validation,
 registration lineage, exact execution, and safe overwrite refusal through installed public APIs.
+The bundled `strategy-composition-v1` sample runs two path-dependent producers with distinct
+Account and Memory origins, composes their exact frozen `strategy_result:v2` artifacts without
+rerunning them, and executes an exact registered artifact-only consumer on a separate current
+Account. Treat inherited source lineage as historical provenance, not as recomputation from the
+downstream Account.
 
 ## Recover an OperationError
 

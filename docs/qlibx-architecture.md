@@ -2271,7 +2271,7 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 | 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §14.1 |
 | 4 | Daily closed loop | kernel, decision/execution flow, Account/Memory, daily profile, checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002 |
 | 5 | next-close frozen execution (**current**) / next-open branch (**gap**) | immutable DecisionIntent, current next-close executor, isolated Account; future real next-open | UC-EXEC-001; UC-ALPHA-CHILD-001 is GAP-EXECUTION-CONVENTION-001 |
-| 6 | Stored research + bounded Strategy composition (**current with separate composition gap**) | typed load, Ensemble flow, reuse compatibility, Memory update; no current materialize operation | UC-SIGNAL-002, supported UC-ALPHA cases, UC-ENSEMBLE-001, UC-ARTIFACT-001; GAP-STRATEGY-COMPOSITION-001 remains |
+| 6 | Stored research + frozen Strategy composition (**current**) | exact typed load, v2 source-state lineage, Ensemble flow, registered artifact-only consumer, Memory update; no current materialize operation | UC-SIGNAL-002, UC-ALPHA-PATH-001, supported UC-ALPHA cases, UC-ENSEMBLE-001, UC-ARTIFACT-001; GAP-STRATEGY-COMPOSITION-001 closed for the installed local profile |
 | 7 | Portfolio/constraint/monitoring + user look-through fixture | construction, adjust/validate, user-declared PIT/account consumption, independent monitor | UC-PORTFOLIO-001, UC-LOOKTHROUGH-001~003, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003; §14.2 |
 | 8 | Analysis/report/extension | analysis artifact, pure renderer, transform validation, exact local Strategy registration/execution | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001/002 |
 | 9 | Future design characterization — current build 밖 | academic listing, lifecycle cash flow, actual settlement, partial fill와 production boundary | UC-ACADEMIC-001, UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001, UC-SETTLEMENT-001, UC-PROD-001/002 |
@@ -2510,10 +2510,10 @@ access만 immediate artifact edge와 transitive source state/cursor edge로 승�
 envelope version을 먼저 읽어 v1/v2를 dispatch하며 latest-compatible을 선택하지 않는다.
 
 Ensemble special backend load와 synthetic single-state identity는 제거되었다. Ensemble은 stable member role과 exact
-binding을 선언하고 `run(view)`에서 한 번 계산하며, 서로 다른 frozen source identity를 그대로 보존한다. 다만
-`GAP-STRATEGY-COMPOSITION-001`을 current support에서 닫으려면 M5 installed producer-consumer-current-Account vertical
-slice가 여전히 필요하다. 기존 decision-intent replay/rerun fixture나 source-checkout unit test는 이 installed
-acceptance oracle을 대신하지 않는다.
+binding을 선언하고 `run(view)`에서 한 번 계산하며, 서로 다른 frozen source identity를 그대로 보존한다. Bundled
+`strategy-composition-v1`은 두 distinct Account/Memory producer가 만든 exact v2 artifacts를 변경·재실행 없이 합성하고,
+exact registered artifact-only consumer가 더 늦은 session의 별도 Account B에서 decision과 execution을 수행함을
+installed-project 경로로 검증한다. 따라서 `GAP-STRATEGY-COMPOSITION-001`은 이 local installed profile에서 닫혔다.
 
 ### 현재 남은 감사 action
 
@@ -2530,6 +2530,18 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 ---
 
 ## 17. 개정 이력
+
+### 2026-08-09 — Installed frozen Strategy composition closure
+
+**Installed oracle.** `strategy-composition-v1`은 서로 다른 Account와 Strategy Memory를 실제로 읽은 두 daily
+producer의 exact final `strategy_result:v2` IDs를 합성한다. Source artifact content hash와 producer call count가
+composition 및 downstream execution 전후 동일하며, Ensemble은 모든 source Account/Memory/cursor lineage를 보존하고
+fabricated singular state identity를 만들지 않는다.
+
+**Downstream authority.** Project-local artifact-only consumer는 curated top-level imports로 validation/register된 exact
+registration만 실행한다. Frozen source가 만들어진 뒤의 session에서 Account B의 committed version으로 target sizing과
+execution을 수행하며, inherited lineage를 Account B recomputation으로 표시하지 않는다. 이 installed acceptance로
+`UC-ALPHA-PATH-001`과 `GAP-STRATEGY-COMPOSITION-001`의 local current-support closure를 고정한다.
 
 ### 2026-08-07 — StrategyResult v2 source-lineage migration
 

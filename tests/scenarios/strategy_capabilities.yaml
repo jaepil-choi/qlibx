@@ -26,6 +26,10 @@ capabilities:
     status: current_supported
     prd_use_cases: [UC-SIGNAL-002, UC-ENSEMBLE-001]
     outcome: Stored member weights can be combined without rerunning their producers.
+  - id: frozen_path_dependent_composition
+    status: current_supported
+    prd_use_cases: [UC-ALPHA-PATH-001]
+    outcome: Exact frozen v2 members preserve every source Account and Memory lineage while downstream execution uses only its current Account.
   - id: long_only_enhanced_index_construction
     status: current_supported
     prd_use_cases: [UC-PORTFOLIO-001, UC-CONSTRAINT-ADJUST-001]
@@ -81,6 +85,13 @@ runtime_scenarios:
       - daily_session_performance
     disposition: current_supported
     test: tests/acceptance/test_historical_strategy_scenarios.py::test_prd_native_peer_momentum_enhanced_index_closed_loop
+  - name: frozen_path_dependent_composition
+    required_capabilities:
+      - stored_member_and_ensemble
+      - frozen_path_dependent_composition
+      - actual_account_snapshot
+    disposition: current_supported
+    test: tests/test_strategy_composition_sample.py::test_uc_alpha_path_001_installed_composition_preserves_source_lineage
   - name: signed_peer_momentum
     required_capabilities: [pit_cross_sectional_signal, real_short_execution]
     disposition: future_product_scope

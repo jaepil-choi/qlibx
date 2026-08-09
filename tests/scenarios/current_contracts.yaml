@@ -124,3 +124,17 @@ scenarios:
       exact_execution: complete
       registration_lineage: true
       implicit_latest_selection: false
+
+  - id: UC-ALPHA-PATH-001
+    case: installed_frozen_path_dependent_composition_uses_downstream_account_authority
+    test: tests/test_strategy_composition_sample.py::test_uc_alpha_path_001_installed_composition_preserves_source_lineage
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: distinct Account and Memory origins plus overwrite refusal require controlled package-owned files
+      oracle: bundled installed-project sample using exact v2 member and registration artifact IDs
+    expected:
+      producer_rerun: false
+      source_artifact_mutation: false
+      complete_multi_source_lineage: true
+      fabricated_singular_state_identity: false
+      downstream_account_authority: sample-downstream-account-b

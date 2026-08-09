@@ -121,6 +121,7 @@ def test_sample_cli_is_preview_first_and_refuses_modified_files(
         ("basic-real-dw-journey-v1", "basic"),
         ("constraint-workflow-v1", "constraint_workflow"),
         ("daily-closed-loop-v1", "daily_closed_loop"),
+        ("strategy-composition-v1", "strategy_composition"),
         ("strategy-extension-v1", "strategy_extension"),
     ),
 )

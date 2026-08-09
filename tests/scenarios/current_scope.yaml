@@ -11,6 +11,7 @@ required_current_use_cases:
   - UC-SIGNAL-002
   - UC-ALPHA-BUDGET-001
   - UC-ALPHA-ADAPTIVE-001
+  - UC-ALPHA-PATH-001
   - UC-ENSEMBLE-001
   - UC-PORTFOLIO-001
   - UC-CONSTRAINT-ADJUST-001
@@ -416,7 +417,3 @@ excluded_readiness_gaps:
     excludes_current_use_case: UC-ALPHA-CHILD-001
     reason: next-close participation-rate children do not prove a next-open schedule and price convention
     closure_oracle: one frozen real-PIT parent executes next-close and next-open without Strategy rerun, with isolated child Account and lineage
-  - id: GAP-STRATEGY-COMPOSITION-001
-    excludes_current_use_case: UC-ALPHA-PATH-001
-    reason: decision-intent replay does not prove frozen Strategy-result composition
-    closure_oracle: producer non-rerun, parent immutability, and complete multi-source state/cursor lineage

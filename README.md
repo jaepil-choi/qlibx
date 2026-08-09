@@ -10,10 +10,10 @@ development.
 
 Current support covers registered stock/ETF data, direct and stored-signal research, optional
 portfolio construction, deterministic daily simulation, monitoring, analysis/reporting, and
-validated project-local neutralization transforms, and exact-ID validated project-local Strategy
-research/daily execution. Multi-source path-dependent Ensemble lineage, intraday/partial-fill
-execution, real short, derivatives, actual settlement, and production OMS reconciliation are not
-current runtime features.
+validated project-local neutralization transforms, exact-ID validated project-local Strategy
+research/daily execution, and frozen multi-source path-dependent Ensemble composition with complete
+source lineage. Intraday/partial-fill execution, real short, derivatives, actual settlement, and
+production OMS reconciliation are not current runtime features.
 
 Project onboarding is preview-first. The JSON result lists the exact changes, post-apply validation,
 and a `validation_argv` preview command. Removal deletes only manifest-owned generated files and the
@@ -41,6 +41,8 @@ uv run qlibx project sample qlibx-research --sample-id constraint-workflow-v1 --
 uv run python qlibx-research/examples/qlibx_owned/constraint_workflow/run.py qlibx-research
 uv run qlibx project sample qlibx-research --sample-id strategy-extension-v1 --apply
 uv run python qlibx-research/examples/qlibx_owned/strategy_extension/run.py qlibx-research
+uv run qlibx project sample qlibx-research --sample-id strategy-composition-v1 --apply
+uv run python qlibx-research/examples/qlibx_owned/strategy_composition/run.py qlibx-research
 uv run qlibx strategy list qlibx-research
 
 uv run qlibx artifact list qlibx-research

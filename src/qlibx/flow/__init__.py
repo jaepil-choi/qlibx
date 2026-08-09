@@ -1,6 +1,15 @@
 """Operation orchestration and commit ownership."""
 
 from qlibx.analysis import SessionPerformanceEvidence
+from qlibx.flow.academic import (
+    ACADEMIC_CHECKPOINT_CONTRACT,
+    ACADEMIC_EXECUTION_CONTRACT,
+    ACADEMIC_RUN_RESULT_CONTRACT,
+    AcademicCheckpoint,
+    AcademicExecutionFlow,
+    AcademicExecutionResult,
+    AcademicRunResult,
+)
 from qlibx.flow.analysis import (
     ANALYSIS_RESULT_CONTRACT,
     REPORT_RESULT_CONTRACT,
@@ -73,6 +82,9 @@ from qlibx.flow.strategy_extensions import (
 )
 
 __all__ = [
+    "ACADEMIC_CHECKPOINT_CONTRACT",
+    "ACADEMIC_EXECUTION_CONTRACT",
+    "ACADEMIC_RUN_RESULT_CONTRACT",
     "ANALYSIS_RESULT_CONTRACT",
     "CONSTRAINT_ADJUSTMENT_CONTRACT",
     "CONSTRAINT_MONITORING_CONTRACT",
@@ -91,6 +103,10 @@ __all__ = [
     "SIMULATION_RECOVERY_POINT_CONTRACT",
     "STORED_SIGNAL_CONTRACT",
     "STRATEGY_EXTENSION_REGISTRATION_CONTRACT",
+    "AcademicCheckpoint",
+    "AcademicExecutionFlow",
+    "AcademicExecutionResult",
+    "AcademicRunResult",
     "AnalysisFlow",
     "CompositionFlow",
     "ConstraintFlow",

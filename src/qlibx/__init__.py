@@ -1,5 +1,16 @@
 """Public package surface for qlibx."""
 
+from qlibx.academic import (
+    AcademicExchange,
+    AcademicExchangeProfile,
+    AcademicFill,
+    AcademicInstrumentKind,
+    AcademicInstrumentListing,
+    AcademicPortfolioSnapshot,
+    AcademicPortfolioState,
+    AcademicPriceSemantics,
+    AcademicRunSpec,
+)
 from qlibx.constraints import (
     ConstraintAdjustmentSpec,
     ConstraintMonitoringSpec,
@@ -58,6 +69,15 @@ from qlibx.simulation import (
 )
 
 __all__ = [
+    "AcademicExchange",
+    "AcademicExchangeProfile",
+    "AcademicFill",
+    "AcademicInstrumentKind",
+    "AcademicInstrumentListing",
+    "AcademicPortfolioSnapshot",
+    "AcademicPortfolioState",
+    "AcademicPriceSemantics",
+    "AcademicRunSpec",
     "AgentTarget",
     "ArtifactSemanticConstraint",
     "BudgetMode",

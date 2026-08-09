@@ -104,7 +104,7 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-EXTENSION-002` | exact local Strategy registration | path-confined source + fixed symbols + frozen fixture | two fresh instances; hash/schema/access comparison | registration, then exact-ID Strategy result | source/schema hash + actual artifact/registration edges | drift or implicit selection fails before compute |
 | `UC-PROD-001` | future OMS partial result | decision + confirmed fills/account | future reconciliation | confirmed delta only | pending/cancel + correlation | not MVP acceptance |
 | `UC-PROD-002` | future OMS rejection | decision + rejection | future reconcile without intended apply | rejection evidence only | retry policy identity | not MVP acceptance |
-| `UC-ACADEMIC-001` | future academic listing | explicit hypothetical profile | §13.6 match | hypothetical Fill | profile identity | disallowed profile rejects |
+| `UC-ACADEMIC-001` | exact signed portfolio artifact | explicit academic listing + next-session-close PIT price | AcademicExecutionFlow signed fractional match | AcademicFill + signed state checkpoint | parent artifact + dataset/config/checkpoint lineage | missing listing/price, non-hypothetical profile, or non-positive NAV rejects before rebalance commit |
 | `UC-FUTURE-001` | future settlement/expiry | observable settlement input | variation/final settlement | cash/position delta | lifecycle evidence | post-expiry reject |
 | `UC-PERP-001` | future funding timer | observable funding rate | funding cash flow | cash delta | funding evidence | no expiry event |
 | `UC-CASHFLOW-001` | future lifecycle event | event-specific inputs | separate fee/lifecycle calculation | Account | category + source | attribution separation |
@@ -113,11 +113,10 @@ trigger → permitted read → calculation → commit → evidence → validatio
 `UC-PIT-001`은 2026-08-09 direct materialization과 real-DW/installed acceptance로 current-support registry에
 승격됐다. `UC-ALPHA-CHILD-001`도 2026-08-09 real-DW와 installed close/open child 비교 증거로 current에
 승격됐다. 기존 participation-rate child test는 generic isolation 회귀로 유지한다.
-`UC-PROD-*`, `UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`과
-`UC-SETTLEMENT-001`도 current acceptance가 아니다. 현재 구조가 해당 flow를 막지 않는지 설명하는 설계
-characterization이며 구현 완료를 주장하지 않는다. Test와 fixture를 만들 때도 같은 use-case ID를 사용해
-PRD → architecture → validation의 연결을 유지한다. CI는 두 문서의 stable ID 집합을 비교해 누락을
-실패시켜야 한다.
+`UC-ACADEMIC-001`은 2026-08-10 zero-friction signed state, Stock/ETF/Index/Factor listing, artifact lineage와
+recovery acceptance로 current-support registry에 승격됐다. `UC-PROD-*`, `UC-FUTURE-001`, `UC-PERP-001`,
+`UC-CASHFLOW-001`과 `UC-SETTLEMENT-001`은 current acceptance가 아니다. Test와 fixture를 만들 때도 같은
+use-case ID를 사용해 PRD → architecture → validation의 연결을 유지한다.
 
 ---
 
@@ -1307,11 +1306,10 @@ InstrumentRegistry와 Exchange listing/policy만 만들고 runtime data는 `avai
 
 `engine.add_instrument`는 stable ID와 concrete type을 registry에 넣고 `venue_id`의 Exchange에 listing을
 등록한다. Exchange는 instrument compatibility와 required policy coverage를 검증한다. Tracking-only Index는
-명시적인 executable listing이 없으면 order를 거부한다. Future extension의 `AcademicExchange`는 가격과 수량
-semantics를 명시한 Index만 hypothetical listing으로 받을 수 있고 result에 profile identity를 남긴다.
-Factor는 return-native이며 일반 Exchange는 이를 silently tradable로 만들지 않는다. Future Academic profile은
-validated `SyntheticUnitPrice` binding과 unit/lot, cost, liquidity assumption이 있을 때만 Factor를 hypothetical
-listing으로 받아 quantity/Fill 경로를 사용할 수 있다. Binding이 없으면 return-based research만 허용한다.
+명시적인 executable listing이 없으면 order를 거부한다. 현재 `AcademicExchange`는 Stock/ETF의 traded reference,
+Index의 tracking-only reference와 Factor의 validated `SyntheticUnitPrice`를 explicit listing으로 받는다. 전용
+profile은 fractional quantity, full fill과 모든 friction 0을 고정하며 result에 hypothetical/profile identity를
+남긴다. Factor return을 가격으로 암묵 변환하지 않고 synthetic price binding이 없으면 execution을 거부한다.
 
 Instrument와 Exchange model은 생성 시 한 번 검증되고 frozen된다. Engine build 단계는 lot, multiplier,
 currency, exact cost selector처럼 hot path에 필요한 static term을 stable instrument index의 array로 compile한다.
@@ -1330,7 +1328,7 @@ Clock에 등록하며 Exchange가 Clock이나 Account를 직접 보유하거나 
 
 ```text
 KrxExchange       effective date × exact product type × BUY/SELL
-AcademicExchange profile-defined hypothetical cost
+AcademicExchange fixed zero-friction hypothetical profile
 CryptoExchange    maker/taker × account tier                 (future)
 ```
 
@@ -2029,16 +2027,16 @@ product selector와 cost schedule lookup key를 배열로 compile한다. EXECUTI
 batch로 처리하고, hot loop는 Pydantic 모델을 다시 만들지 않는다. 결과는 stable order의 Fill과
 FillDiagnostic으로 돌아가므로 같은 config와 data에서 event 순서와 결과가 재현된다.
 
-### 13.6 미래 확장의 design characterization
+### 13.6 Academic current path와 미래 확장의 design characterization
 
-다음 항목은 **현재 제품 acceptance가 아니라 미래 설계를 구속하는 characterization**이다.
+첫 두 항목은 current AcademicExchange acceptance이고, 나머지는 미래 설계를 구속하는 characterization이다.
 
-- **UC-ACADEMIC-001:** Index는 기본 exchange에서 tracking-only다. `AcademicExchange`가 가격과 수량
-  semantics를 갖춘 해당 Instrument를 명시적으로 listing한 경우에만 가상 체결할 수 있다. tradability는
-  Instrument의 본성이 아니라 Instrument와 Exchange의 관계다.
-- **Factor synthetic-price extension:** Factor는 return-native tracking Instrument다. Future Academic profile은
-  validated `SyntheticUnitPrice`와 명시적인 unit/lot, cost, liquidity assumption이 있을 때만 hypothetical
-  Fill을 만들 수 있다. Synthetic source와 limitation을 evidence에 남기며 일반 Exchange는 listing을 거부한다.
+- **UC-ACADEMIC-001:** `AcademicExchange`가 Stock/ETF/Index/Factor를 explicit listing한 경우에만 exact signed
+  portfolio를 다음 session close에서 가상 체결한다. 전용 signed state와 checkpoint를 쓰며 production Account를
+  변경하지 않는다. tradability는 Instrument의 본성이 아니라 Instrument와 Exchange/profile의 관계다.
+- **Factor synthetic-price path:** Factor는 return-native tracking Instrument다. Academic profile도 validated
+  `SyntheticUnitPrice` binding이 있을 때만 hypothetical Fill을 만들 수 있다. Synthetic source와 limitation을
+  evidence에 남기며 일반 Exchange는 listing을 거부한다.
 - **UC-FUTURE-001:** multiplier 250,000인 Future 1계약의 settlement price가 350에서 352로 움직이면
   variation margin `+500,000`이 `LifecycleBatch`로 Account에 반영된다. 이 Account를 읽는 주식 Strategy는
   Future order를 만들 수 없지만 증가한 cash/NAV와 Future exposure를 다음 decision에서 본다. Expiry event는
@@ -2282,12 +2280,13 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 | 6 | Stored research + frozen Strategy composition (**current**) | exact typed load, v2 source-state lineage, Ensemble flow, registered artifact-only consumer, Memory update | UC-SIGNAL-002, UC-ALPHA-PATH-001, supported UC-ALPHA cases, UC-ENSEMBLE-001, UC-ARTIFACT-001; GAP-STRATEGY-COMPOSITION-001 closed for the installed local profile |
 | 7 | Portfolio/constraint/monitoring + user look-through fixture | construction, adjust/validate, user-declared PIT/account consumption, independent monitor | UC-PORTFOLIO-001, UC-LOOKTHROUGH-001~003, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003; §14.2 |
 | 8 | Analysis/report/extension | analysis artifact, pure renderer, transform validation, exact local Strategy registration/execution | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001/002 |
-| 9 | Future design characterization — current build 밖 | academic listing, lifecycle cash flow, actual settlement, partial fill와 production boundary | UC-ACADEMIC-001, UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001, UC-SETTLEMENT-001, UC-PROD-001/002 |
+| 9 | AcademicExchange signed state (**current**) | exact signed portfolio load, explicit Stock/ETF/Index/Factor listing, next-close PIT price, fractional hypothetical Fill, checkpoint/replay | UC-ACADEMIC-001; GAP-DIRECTION-001 closed for the fixed zero-friction profile |
+| 10 | Future design characterization — current build 밖 | lifecycle cash flow, actual settlement, partial fill, real short와 production boundary | UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001, UC-SETTLEMENT-001, UC-PROD-001/002; GAP-REAL-SHORT-001 |
 
 각 current slice는 success만 아니라 requirement gap, commit status, artifact/failure evidence와 deterministic
 retry를 함께 검증한다. Daily long-only closed loop와 frozen close/open children은 distinct event/price/Account
 lineage를 보존한다. Materialization과 execution-convention gap은 각각 direct/installed closure oracle을
-통과했다. 9단계는 current support publication이 아니라 architecture를
+통과했다. 10단계는 current support publication이 아니라 architecture를
 구속하는 characterization fixture다.
 
 3단계부터 instrument축 배열을 기본 단위로 잡는다. 단건 `match`를 먼저 만든 뒤 batch로 확장하는
@@ -2361,7 +2360,7 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 | G1 | Strategy memory 부재 | 불변식 오류 + 계약 누락 | **current local implementation.** in-memory `StrategyMemoryStore`, CAS identity, flow commit와 checkpoint/recovery evidence가 있다. Durable/distributed backend는 future |
 | G2 | Round-trip 회계 부재 | 차용 판단 오류 | **계약 해결.** Account Position의 cost basis/realized PnL + committed journal/feedback로 통합 |
 | G3 | 학습/거래 분리 (`FIT` event) | fixed-stage 가정 | **target contract만 해결, implementation gap.** generic resolver는 있으나 optional `MATERIALIZE` operation/event와 forward-label acceptance는 없다 |
-| G4 | Long-short 실행 회계 | readiness gap | Signed research 분석만 current support다. Instrument-direction contract가 없어 `hypothetical_short`와 `real_short` 실행은 모두 후속 범위다 (`GAP-DIRECTION-001`) |
+| G4 | Long-short 실행 회계 | hypothetical closed, real-short gap | `AcademicExchange`가 분리된 signed fractional state로 `hypothetical_short`를 지원한다 (`GAP-DIRECTION-001`). Production Account의 `real_short`는 borrow/collateral/locate가 없어 후속 범위다 (`GAP-REAL-SHORT-001`) |
 | G5 | `ensemble` 계약 부재 | 명세 누락 | **해결.** Ensemble은 StrategyOperation; typed member result, net/cross/residual 계약 확정 |
 
 ### G1 — Strategy memory
@@ -2478,11 +2477,11 @@ Fitted state가 있는 component는 이를 typed artifact 또는 versioned binar
 5. **대차 가능성(locate)** — unknown을 가능으로 추측하지 않는다(PRD §7.7 원칙).
 
 해결 경로는 concrete Instrument semantics와 Exchange/execution policy의 명시적 결합이다. 연구
-향후 workflow는 `long_only | hypothetical_short | real_short` 중 하나를 명시적으로 resolve해야 하며,
-unknown을 `long_only`로 대체해서는 안 된다. 현재는 signed research analysis와 physical long-only만
-지원하며 `hypothetical_short`도 executable instrument capability가 아니다. 실제 short는 borrow/locate, collateral, proceeds
-encumbrance, borrow fee가 모두 명시되어야 한다. 이 경계는 특정 `capability` 필드 하나를 PRD에서
-강제하지 않고 architecture가 모델과 policy resolution으로 구현한다.
+Workflow는 `long_only | hypothetical_short | real_short` 중 하나를 명시적으로 resolve해야 하며 unknown을
+`long_only`로 대체해서는 안 된다. 현재 `hypothetical_short`는 explicit academic listing과 fixed hypothetical
+profile에서만 지원되고 production Account와 분리된다. 실제 short는 borrow/locate, collateral, proceeds
+encumbrance, borrow fee가 모두 명시되어야 한다. 이 경계는 특정 `capability` 필드 하나가 아니라 listing,
+venue/profile과 state authority의 결합으로 구현한다.
 
 ### G5 — `ensemble` 계약
 
@@ -2810,9 +2809,9 @@ returns).sum()` — 는 feedback edge가 없어 PRD §4.3을 만족할 수 없�
 **instrument (O3·O4 해결).** PRD에 §7.12 instrument capability declaration을 신설하고 §11.4~11.7의
 matched capitalization을 대체했다. Position이 음수를 가질 수 있는지는 engine의 고정 속성이 아니라
 instrument가 장차 선언해야 할 값이며, `long_only` / `hypothetical_short` / `real_short` 세 값을 갖는다.
-현재 public instrument model에는 이 direction contract가 없으므로 미선언을 `long_only`로 간주하지 않는다.
-§16 G4의 `hypothetical_short`
-범위까지 착수 가능해졌다.
+Production public instrument model에는 이 direction contract가 없으므로 미선언을 `long_only`로 간주하지 않는다.
+별도 `AcademicInstrumentListing`과 fixed academic profile이 `hypothetical_short` 범위를 닫았고 real short는 계속
+production instrument/account 계약을 요구한다.
 
 matched capitalization은 qlib의 long-only Position 제약을 우회하기 위한 장치였다. Engine 소유권이
 넘어오면서 전제가 사라졌고, 우회로 대신 선언을 요구하는 형태로 교체했다. PRD §4.2, §5.1, §5.7,

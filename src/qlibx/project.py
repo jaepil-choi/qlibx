@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
+from qlibx.academic import AcademicRunSpec
 from qlibx.account import Account
 from qlibx.config.project import (
     ProjectConfig,
@@ -37,6 +38,7 @@ from qlibx.extensions import (
 )
 from qlibx.flow import (
     DECISION_INTENT_CONTRACT,
+    AcademicExecutionFlow,
     ConstraintFlow,
     DailyExecutionFlow,
     DailyExecutionProfile,
@@ -289,6 +291,24 @@ class QlibxProject:
             operation="constraint.monitor",
             identity=spec.invocation_id,
             callback=monitor,
+        )
+
+    def run_academic(
+        self,
+        spec: AcademicRunSpec,
+        *,
+        resume: bool = False,
+    ) -> OperationOutcome:
+        """Execute exact signed portfolios in the hypothetical academic venue."""
+
+        return self._with_catalog_session(
+            operation="academic.run",
+            identity=spec.run_id,
+            callback=lambda: AcademicExecutionFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+                store=self._store,
+            ).run(spec, resume=resume),
         )
 
     def run_daily(

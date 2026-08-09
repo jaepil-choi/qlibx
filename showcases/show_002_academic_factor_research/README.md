@@ -1,12 +1,12 @@
 # Academic factor research showcase
 
-Status: current
+Status: superseded by `show_003_academic_exchange_factor_execution`
 
 Last verified: 2026-08-09
 
 Verified against: qlibx 0.1.0, implementations 009, 016, 059, and 060
 
-This showcase makes the current qlibx factor-research boundary visible with a real-DW study. A
+This showcase preserves the pre-AcademicExchange qlibx factor-research boundary with a real-DW study. A
 showcase-local 20-session reversal model uses `QlibxProject.materialize()` to publish one typed
 stored-signal artifact at each monthly decision time. `AnalysisFlow.analyze_signal()` then evaluates
 each exact artifact against the following monthly return and preserves PIT dataset lineage.
@@ -15,9 +15,12 @@ The generated HTML distinguishes package-owned behavior from showcase-local diag
 
 - qlibx demonstrates PIT factor materialization and one-period Pearson IC / zero-cost return;
 - this runner calculates RankIC, ICIR, quantile spread, turnover, costs, and a multi-period return
-  index for inspection;
+index for inspection;
 - `AcademicExchange` remains absent, so no Fill, Position, Account, borrow, or collateral behavior
   is claimed.
+
+Its capability verdict is historical and no longer current. Use
+`show_003_academic_exchange_factor_execution` for package-owned signed fills, state, and recovery.
 
 The showcase cites implementation records 009, 016, and 059. It reads the real
 `data/DW/fng_stock_daily_prices.csv`, but all bounded data, project state, artifacts, CSV summaries,

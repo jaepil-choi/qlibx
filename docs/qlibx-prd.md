@@ -506,6 +506,13 @@ breach, missing/unknown state와 data/account lineage를 포함한다. Monitorin
 - Bounded strategy memory와 prior artifact references
 - Trigger, finalization과 run state
 
+#### Hypothetical academic execution result
+
+Exact signed portfolio artifact를 explicit academic listing과 PIT reference price로 평가한 결과다. Fractional signed
+quantity, hypothetical Fill, financing balance, NAV, gross/net exposure, PnL, turnover와 checkpoint를 포함하지만
+actual Account 또는 broker-executable order가 아니다. Profile의 zero-friction과 full-fill 가정 및 미모델링된
+borrow·margin·lifecycle 항목을 결과에 직렬화한다.
+
 #### Prepared production decision — future work
 
 향후 production integration에서 external OMS에 전달할 수 있는 immutable broker-neutral decision artifact 후보다.
@@ -631,13 +638,16 @@ exposure를 다시 계산한다. qlibx는 계산값을 Account에 자동 주입�
 User가 결과를 artifact로 publish한다면 consumed constituent binding, AccountSnapshot과 target/actual 구분을
 lineage로 보존하며 intended exposure를 actual compliance state로 가장하지 않는다.
 
+##### UC-ACADEMIC-001 — Signed portfolio의 명시적 가상 거래
+
+사용자가 `hypothetical_signed` portfolio artifact와 Stock, ETF, tracking-only Index 또는 synthetic-unit-price
+Factor listing을 `academic.zero-friction.signed-fractional.v1` venue에 제출하면, decision session 다음 session
+종가의 PIT price로 signed fractional target을 전량 가상 체결한다. 거래비용·tax·slippage·market impact·borrow
+cost는 명시적인 0이고 turnover는 별도 기록한다. Listing, exact-time price, positive NAV 또는 supported profile이
+없으면 해당 rebalance 전체를 state mutation 전에 거부한다. 결과와 checkpoint는 `hypothetical`로 표시하며
+production Account, borrow/locate, collateral, margin 또는 executable real short capability로 주장하지 않는다.
+
 #### Future extension characterization — current support가 아님
-
-##### UC-ACADEMIC-001 — Tracking-only index의 가상 거래
-
-일반 execution profile에서 tracking-only인 Index를 사용자가 명시적으로 선택한 academic/hypothetical
-venue profile에 등록하면 가상으로 거래할 수 있어야 한다. 결과는 hypothetical execution으로 표시되고,
-같은 Index를 허용되지 않은 profile에서 거래하면 거부되어야 한다.
 
 ##### UC-FUTURE-001 — 만기 있는 증거금 계약
 
@@ -688,14 +698,15 @@ cross-cutting invariant다. 3,000종목 실행에서 어떤 validation object를
 
 1. Signal/prediction/label의 IC, RankIC, quantile spread와 long-short diagnostic
 2. Signed basket return과 factor-return analysis
-3. Orders, Position, Account와 actual fill을 통과하는 executable short portfolio
+3. Explicit academic listing, hypothetical Fill과 signed research state를 사용하는 가상 execution
+4. Orders, production Position/Account와 actual fill을 통과하는 executable real short portfolio
 
-앞의 두 층은 signed alpha research에 사용할 수 있으며 account를 경유하지 않으므로 executable-short
-policy와 무관하게 성립한다.
+앞의 두 층은 signed alpha research에 사용할 수 있으며 execution state를 경유하지 않는다. 세 번째 층은
+production Account와 분리된 academic state에서만 성립한다.
 
-세 번째 층은 resolved instrument semantics와 execution policy가 결정한 position direction(§7.12)에
-따른다. `hypothetical_short`의 음수 position은 research 관측을 위한 것이며 borrow, 담보, 차입 비용과
-locate 가능성을 모델링하지 않는다. 이를 executable short로 표시하지 않는다.
+네 번째 층은 resolved instrument semantics와 execution policy가 결정한 position direction(§7.12)에 따른다.
+`hypothetical_short`의 음수 position은 research 관측을 위한 것이며 borrow, 담보, 차입 비용과 locate 가능성을
+모델링하지 않는다. 이를 executable real short 또는 actual Account state로 표시하지 않는다.
 
 ### 4.3 Actual state가 authority다
 
@@ -832,13 +843,14 @@ object, pickle, recorder나 process-global provider는 portable qlibx artifact�
 
 ### 5.7 현재 지원 범위
 
-현재 product scope는 주식과 ETF다.
+Physical simulation의 현재 product scope는 주식과 ETF다. 별도 academic profile은 Stock, ETF, Index와 Factor의
+hypothetical signed evaluation을 지원한다.
 
 - Cross-sectional signed signal과 alpha research
 - ML training and inference (model implementation은 project 소유, §5.3)
 - Stored signal/alpha reuse와 ensemble
 - Long-only enhanced-index physical portfolio
-- `hypothetical_short` instrument를 사용하는 signed research (§7.12)
+- Exact signed portfolio artifact를 사용하는 zero-friction fractional AcademicExchange (§7.12)
 - ETF의 physical/opaque 처리와 user Strategy가 명시적으로 PIT constituent data를 구독·소비해 계산하는 look-through
 - Historical backtest와 portable research catalog
 - Selective decision trigger, explicit hold와 dense actual-account evidence
@@ -856,10 +868,10 @@ Instrument와 execution policy의 extension boundary(§7.12)는 이 범위 안�
 - Partial fill, pending/cancel order state와 실제 주식·ETF settlement cycle
 - Prepared decision, external OMS reconciliation과 live production authority
 
-§3.5의 `UC-COST-001`~`UC-SCALE-001`과 `UC-LOOKTHROUGH-001`~`003`은 현재 scope의
-characterization과 acceptance 대상이다.
-`UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`과 `UC-SETTLEMENT-001`은 architecture 확장 가능성을
-검토하기 위한 future characterization이며 현재 지원을 의미하지 않는다.
+§3.5의 `UC-COST-001`~`UC-SCALE-001`, `UC-LOOKTHROUGH-001`~`003`과 `UC-ACADEMIC-001`은 현재 scope의
+characterization과 acceptance 대상이다. `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`과
+`UC-SETTLEMENT-001`은 architecture 확장 가능성을 검토하기 위한 future characterization이며 현재 지원을
+의미하지 않는다.
 
 ## 6. User, agent and config-driven workflow
 
@@ -1225,6 +1237,9 @@ Instrument type, venue와 execution profile은 가능한 position direction, lif
 결정한다. `long_only`, `hypothetical_short`, borrow-aware short와 derivative exposure를 같은 capability로 취급하지 않는다.
 다만 이 의미는 해당 instrument를 실제로 연구하거나 실행할 때 요구하며, unrelated dataset registration을 막는
 전역 schema가 되어서는 안 된다. 현재 지원과 future characterization은 §3.5의 stable use case로 구분한다.
+현재 `hypothetical_short`는 explicit academic listing, next-session-close PIT price, zero-friction full-fill profile과
+분리된 signed state ledger에서만 지원한다. Production KRX profile은 계속 long-only이며 real short capability를
+추론하지 않는다.
 
 ## 8. Signal and model research
 
@@ -1738,7 +1753,8 @@ decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 
 | `GAP-TIME-001` (declared time semantics closed) | Naive source timestamp는 declared `source_timezone` 없이 등록되지 않고, session query는 caller가 선언한 session timezone의 calendar day로 관측치를 선택한다. Offset-qualified source의 unused timezone과 ambiguous local time은 mutation 전에 실패한다 | `tests/test_data_registration.py`에서 source localization과 PIT cutoff를, `tests/test_session_timezone.py`에서 UTC/KST 날짜 경계의 session selection을 검증한다 |
 | `GAP-CONSTRAINT-001` (default public workflow closed) | 설치 프로젝트의 선택적 constraint workflow가 고정 no-short·10% floor·PIT benchmark cap adjustment와 독립 validation을 제공한다. Constraint-free workflow는 benchmark를 요구하지 않고, validation은 adjustment와 동일한 benchmark access identity를 요구하며 lot-rounding residual을 evidence로 보존한다. Sector, turnover와 liquidity constraint는 future work다 | `tests/test_public_constraints.py`와 `tests/test_public_constraint_sample.py`에서 같은 PIT benchmark input의 adjustment/validation 일치, missing·ambiguous·future-hidden·incomplete weight의 mutation 전 실패, lot residual에 따른 ineligible 결과와 installed sample 결정론을 검증한다 |
 | `GAP-IMPACT-001` | 현재 Exchange의 participation 산술은 observed available volume을 사용할 수 있지만 total-market-volume authority가 없다. 따라서 market-impact parameter는 public daily profile에서 지원하지 않으며 impact 미모델링 limitation을 유지한다 | total-market-volume semantic role, PIT binding, price-impact oracle, fee/impact 비중복 검증이 모두 추가되어야 한다 |
-| `GAP-DIRECTION-001` | Signed alpha와 hypothetical long-short 분석은 지원하지만 instrument-level position-direction capability는 없다. `hypothetical_short` instrument나 executable short를 current support로 주장하지 않는다 | explicit instrument direction, borrow/collateral/locate policy와 Account short invariants가 함께 검증되어야 한다 |
+| `GAP-DIRECTION-001` (hypothetical direction closed) | Explicit AcademicExchange listing이 Stock/ETF/Index/Factor의 `hypothetical_short`를 production Account와 분리해 지원한다. Fixed zero-friction profile, signed fractional quantity, next-session-close PIT price, state checkpoint와 hypothetical limitation을 보존한다 | `tests/test_academic_exchange.py`와 `tests/test_public_academic.py`에서 direction/price semantics, long-short/flip, all-or-fail preflight, lineage, replay와 checkpoint recovery를 검증한다 |
+| `GAP-REAL-SHORT-001` | Production KRX와 Account는 long-only다. Borrow availability, locate, collateral, margin, short proceeds, recall과 borrow fee authority가 없으므로 executable real short를 current support로 주장하지 않는다 | explicit real-short instrument direction, borrow/collateral/locate policy, Account short invariants와 independent reconciliation이 함께 검증되어야 한다 |
 | `GAP-MONITOR-001` (public no-trade monitoring closed) | 설치 project가 committed Account checkpoint에서 독립 constraint monitoring을 frozen spec으로 실행한다. 같은 evaluation instant가 Account valuation과 benchmark PIT cutoff를 결정하며, wall clock이나 daily flow 자동 삽입을 사용하지 않는다 | `tests/test_public_constraints.py`에서 checkpoint 복원, 동일 spec의 동일 artifact identity, held-position mark freshness, stale valuation과 손상 checkpoint의 typed failure를 검증한다 |
 | `GAP-MATERIALIZATION-PIT-001` (public direct forward-label materialization closed) | `QlibxProject.materialize()`가 generic `MaterializationOperation` requirement를 producer 실행 전에 resolve하고, built-in `ForwardReturnLabelModel`은 start/end value와 explicit `horizon_end`를 읽어 PIT-bounded `forward_return_label_result:v1`을 만든다. 이는 direct invocation 지원이며 scheduled materialization이나 model registry 지원을 뜻하지 않는다 | `tests/test_materialization.py`, `tests/acceptance/test_materialization_scenarios.py`, `tests/test_public_materialization_sample.py`가 missing/ambiguous horizon의 pre-compute failure, no reusable success/state mutation, immutable binding 추가 후 linked retry, real-DW 수치, future-hidden label, installed public sample을 검증한다 |
 | `GAP-EXECUTION-CONVENTION-001` (public frozen close/open comparison closed) | `FrozenDailyExecutionSpec`과 `QlibxProject.execute_frozen_daily()`가 exact `decision_intent:v1` parent를 package-owned next-session-close/open timing으로 실행한다. `session_closes`는 mark/monitor cadence로 유지되고 next-open은 별도 `session_opens`와 open-price binding을 요구한다. Intraday VWAP, market impact와 production OMS는 포함하지 않는다 | `tests/acceptance/test_execution_scenarios.py`와 `tests/test_execution_convention_sample.py`가 real-DW open/close 가격·수량, producer non-rerun, parent hash 불변, child Account/lineage 격리, missing/future-hidden price와 missing schedule의 pre-mutation failure, recovery execution time, installed public sample을 검증한다 |
@@ -1804,8 +1820,9 @@ Current scope는 validated research, full-fill·instant-settlement simulation과
 ### 17.1 Asset-class expansion scenarios
 
 새 asset class는 type label 추가로 완료되지 않는다. Quantity/notional, valuation, permitted direction, cost, settlement와
-actual feedback이 closed loop에서 일관되게 작동해야 한다. §3.5의 `UC-ACADEMIC-001`, `UC-FUTURE-001`, `UC-PERP-001`과
-`UC-CASHFLOW-001`은 future characterization이며 current support claim이 아니다.
+actual feedback이 closed loop에서 일관되게 작동해야 한다. `UC-ACADEMIC-001`은 분리된 hypothetical state와 명시적
+한계 안에서 current support다. `UC-FUTURE-001`, `UC-PERP-001`과 `UC-CASHFLOW-001`은 future characterization이며
+current support claim이 아니다.
 
 ### 17.2 Optional future capabilities
 

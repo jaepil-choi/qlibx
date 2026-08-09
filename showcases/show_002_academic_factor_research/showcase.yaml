@@ -1,6 +1,7 @@
 schema_version: 1
 showcase_id: show_002_academic_factor_research
-status: current
+status: superseded
+superseded_by: show_003_academic_exchange_factor_execution
 demonstrates:
   - implementation-009-stored-signal-reuse
   - implementation-016-short-stored-signal-analysis

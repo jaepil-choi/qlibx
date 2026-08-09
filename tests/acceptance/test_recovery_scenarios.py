@@ -1,3 +1,4 @@
+import hashlib
 import multiprocessing
 import os
 from dataclasses import dataclass
@@ -9,6 +10,11 @@ from qlibx import OutcomeStatus, QlibxProject
 from qlibx.account import Account, FillBatch, MarkBatch, StrategyMemoryStore
 from qlibx.errors import CommitStatus
 from qlibx.flow import DailyExecutionFlow, DailyExecutionProfile, DailyRunRequest
+from qlibx.flow.recovery import (
+    SIMULATION_RECOVERY_POINT_CONTRACT,
+    SimulationRecoveryPoint,
+    SimulationRecoveryPointV1,
+)
 from qlibx.kernel import BacktestClock
 from tests.acceptance.real_dw_support import (
     ActualStateMomentumStrategy,
@@ -117,6 +123,39 @@ def _profile() -> DailyExecutionProfile:
         execution_price_role="execution_price",
         valuation_price_role="valuation_price",
     )
+
+
+def _fingerprint(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _publish_v1_anchor(case: RealDwProject, request: DailyRunRequest):
+    registry = case.project.registry_snapshot()
+    profile = _profile()
+    point = SimulationRecoveryPointV1(
+        run_id=request.run_id,
+        request_fingerprint=_fingerprint(request.compatibility_json()),
+        config_fingerprint=request.config_fingerprint,
+        profile_fingerprint=_fingerprint(profile.model_dump_json()),
+        registry_fingerprint=_fingerprint(
+            "|".join(
+                item.registration_identity
+                for item in sorted(registry.datasets, key=lambda value: value.dataset_id)
+            )
+        ),
+        strategy_id=ActualStateMomentumStrategy.strategy_id,
+        sequence=0,
+        account_checkpoint=initial_account().checkpoint(),
+    )
+    published = case.project.artifacts.publish_model(
+        logical_identity=f"simulation-recovery:{request.run_id}:00000000:initial",
+        artifact_type="simulation_recovery_point",
+        artifact_schema_version=1,
+        producer_id=profile.profile_id,
+        payload=point,
+    )
+    assert published.status is OutcomeStatus.COMPLETE
+    return published.result, point
 
 
 def _result_signature(result: object) -> tuple[tuple[str, ...], ...]:
@@ -289,3 +328,92 @@ def test_gap_recovery_001_changed_identity_requires_explicit_branch(
     assert outcome.errors[0].commit_status is CommitStatus.NONE
     assert account.checkpoint() == account_before
     assert memory.checkpoint() == memory_before
+
+
+def test_v1_anchor_resumes_and_bridges_to_v2(
+    tmp_path: Path,
+    bounded_real_dw_source: Path,
+) -> None:
+    case = create_real_dw_project(tmp_path / "v1-bridge", bounded_real_dw_source)
+    request = _request()
+    anchor, _ = _publish_v1_anchor(case, request)
+
+    resumed = DailyExecutionFlow(
+        clock=BacktestClock(request.session_closes[0]),
+        registry=case.project.registry_snapshot(),
+        artifacts=case.project.artifacts,
+        exchange=configured_exchange(),
+        account=initial_account(),
+        memory=StrategyMemoryStore(),
+        profile=_profile(),
+    ).run(ActualStateMomentumStrategy(), request, resume=True)
+
+    assert resumed.status is OutcomeStatus.COMPLETE
+    envelopes = tuple(
+        sorted(
+            (
+                item
+                for item in case.project.artifacts.list_envelopes()
+                if item.artifact_type == "simulation_recovery_point"
+                and item.logical_identity.startswith(
+                    f"simulation-recovery:{request.run_id}:"
+                )
+            ),
+            key=lambda item: item.logical_identity,
+        )
+    )
+    assert envelopes[0].artifact_schema_version == 1
+    first_v2 = next(item for item in envelopes if item.artifact_schema_version == 2)
+    loaded = case.project.artifacts.load_model(
+        first_v2.artifact_id,
+        SIMULATION_RECOVERY_POINT_CONTRACT,
+    )
+    assert loaded.status is OutcomeStatus.COMPLETE
+    assert loaded.result.payload.previous_recovery_artifact_id == anchor.artifact_id
+
+
+def test_v2_chain_sequence_gap_is_rejected(
+    tmp_path: Path,
+    bounded_real_dw_source: Path,
+) -> None:
+    case = create_real_dw_project(tmp_path / "v2-gap", bounded_real_dw_source)
+    request = _request()
+    anchor, v1 = _publish_v1_anchor(case, request)
+    checkpoint = v1.account_checkpoint
+    gap = SimulationRecoveryPoint(
+        run_id=v1.run_id,
+        request_fingerprint=v1.request_fingerprint,
+        config_fingerprint=v1.config_fingerprint,
+        profile_fingerprint=v1.profile_fingerprint,
+        registry_fingerprint=v1.registry_fingerprint,
+        strategy_id=v1.strategy_id,
+        sequence=2,
+        previous_recovery_artifact_id=anchor.artifact_id,
+        account_id=checkpoint.account_id,
+        account_base_currency=checkpoint.base_currency,
+        account_cash=checkpoint.cash,
+        account_instrument_ids=checkpoint.instrument_ids,
+        account_positions=checkpoint.positions,
+        account_version=checkpoint.version,
+    )
+    published = case.project.artifacts.publish_model(
+        logical_identity=f"simulation-recovery:{request.run_id}:00000002:gap",
+        artifact_type="simulation_recovery_point",
+        artifact_schema_version=2,
+        producer_id=_profile().profile_id,
+        payload=gap,
+    )
+    assert published.status is OutcomeStatus.COMPLETE
+
+    outcome = DailyExecutionFlow(
+        clock=BacktestClock(request.session_closes[0]),
+        registry=case.project.registry_snapshot(),
+        artifacts=case.project.artifacts,
+        exchange=configured_exchange(),
+        account=initial_account(),
+        memory=StrategyMemoryStore(),
+        profile=_profile(),
+    ).run(ActualStateMomentumStrategy(), request, resume=True)
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "RECOVERY_CHAIN_SEQUENCE_GAP"

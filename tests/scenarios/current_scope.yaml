@@ -309,8 +309,9 @@ scenarios:
       source_alpha_mutation: false
       signed_gross: 1.0
       signed_net: 0.0
-      long_only_gross: 1.0
-      long_only_net: 1.0
+      long_only_gross: 0.5
+      long_only_net: 0.5
+      long_only_cash_residual: 0.5
 
   - id: UC-CLOSED-LOOP-001
     case: real_dw_daily_feedback

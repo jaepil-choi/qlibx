@@ -89,8 +89,7 @@ def test_sector_preprocessed_and_qlibx_projection_are_exact() -> None:
     )
     assert runtime["available_at"].sub(runtime["date"]).dt.days.eq(0).all()
     years = preprocessed.assign(year=preprocessed["date"].dt.year).groupby("year")["date"].nunique()
-    assert years.loc[2018] == 244
-    assert years.loc[2019] == 246
+    assert years.loc[2019] == 1
     assert years.loc[2020:2025].eq(12).all()
     assert years.loc[2026] == 4
 

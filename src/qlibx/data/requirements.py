@@ -13,11 +13,11 @@ from qlibx.models import QlibxModel
 
 
 class AxisRequirement(QlibxModel):
-    kind: Literal["instrument", "scalar", "any"] = "instrument"
+    kind: Literal["instrument"] = "instrument"
 
 
 class TimeRequirement(QlibxModel):
-    available_at_required: bool = True
+    available_at_required: Literal[True] = True
 
 
 class CompatibilityRule(QlibxModel):

@@ -1,5 +1,5 @@
 schema_version: 1
-audit_date: 2026-08-06
+audit_date: 2026-08-09
 purpose: m6_portfolio_constraint_monitoring_inputs
 datasets:
   k200_membership:
@@ -34,8 +34,9 @@ datasets:
       source_projection: exact_after_dw_percentage_divided_by_100
     qlibx:
       path: data/qlibx/k200_membership.parquet
-      sha256: 1576a53b12e075275af03dc2d05d34b314dec7350da86892a64f3f36ab45be1f
+      sha256: d70150263add6cae9a44d1d409ab3af230761593e60d2a7f3138540f3f572a62
       projection_from_preprocessed: exact
+      materializer_environment: kwam_locked_uv
       observed_available_at_rule: date_minus_1_calendar_day
     pit:
       status: user_confirmed
@@ -55,33 +56,37 @@ datasets:
     intended_roles: [sector_classification, future_sector_constraint]
     logical_key: [date, ticker]
     raw:
-      path: data/DW/DW_FNG_FGSC종목_20200101-20260430.csv
-      sha256: 7f335d0918032eb00ab737698d4fd5c8f9f9b0d11b994b970cf698b3482cbbea
-      rows: 3507557
-      dates: 1549
-      tickers: 2822
-      first_date: 2020-01-02
-      last_date: 2026-04-29
-      duplicate_keys: 0
+      path: data/Dataguide/데이터가이드FGSC_20200101-20260430_월간.csv
+      sha256: b8a00a30ab86faa73e5711a9da7129158d87ec13e8358b48b374fe94b809328c
+      source_shape: [24249, 83]
+      retained_field: FnGuide Industry Code
+      retained_projection_rows: 187615
+      retained_projection_dates: 77
+      retained_projection_tickers: 2935
+      retained_projection_first_date: 2019-12-30
+      retained_projection_last_date: 2026-04-29
+      retained_projection_duplicate_keys: 0
     preprocessed:
       path: data/preprocessed/sector_classification.parquet
-      sha256: e7f9322b3d543ebcdcf98b3c0feb795f0116184f49d02e64ad83d57c6d259409
-      rows: 1143059
-      dates: 566
-      tickers: 2960
-      first_date: 2018-01-02
+      sha256: b46b6cb2dfb740cb8475ce127225b38c45a688de3cef8bdf732428b07bb8ad68
+      rows: 187615
+      dates: 77
+      tickers: 2935
+      first_date: 2019-12-30
       last_date: 2026-04-29
       duplicate_keys: 0
-      frequency_2018_2019: daily
-      frequency_2020_onward: month_end_trading_date
-      overlap_code_mismatches_2020_onward: 0
-      raw_only_keys_on_selected_dates_2020_onward: 1228
-      preprocessed_only_keys_2020_onward: 14113
-      missing_raw_provenance_period: [2018-01-02, 2019-12-30]
+      frequency: month_end_trading_date
+      producer_repository: kwam-enhanced-index
+      producer_commit: d8b3df5
+      producer_path: src/kwam_enhanced_index/data/preprocessing.py
+      producer_sha256: 03e947f77cbc387bdacf2046756e9df1328f8dc8f9cf04d7776802d4caa1bdd9
+      independent_regeneration_sha256: b46b6cb2dfb740cb8475ce127225b38c45a688de3cef8bdf732428b07bb8ad68
+      independent_regeneration_equal: true
     qlibx:
       path: data/qlibx/sector_classification.parquet
-      sha256: 848bd128fe0a44dbb820c5086ee08614723b8a664387254df3d7c952a2814f0f
+      sha256: 67e3339a839d938b99c8654d3de0103fd6585789d5e8fa9a036a9cba3ff85c4e
       projection_from_preprocessed: exact
+      materializer_environment: kwam_locked_uv
       observed_available_at_rule: date
     pit:
       status: user_confirmed

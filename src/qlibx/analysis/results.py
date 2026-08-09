@@ -114,16 +114,19 @@ class ReportRequest(QlibxModel):
 
 
 class ExecutionAnalysisInput(QlibxModel):
+    event_id: str
+    event_time: datetime
     account_id: str
-    initial_nav: float
     total_cost: float = Field(ge=0)
     fill_count: int = Field(ge=0)
     limitations: tuple[str, ...]
 
 
 class SimulationAnalysisInput(QlibxModel):
+    initial_account: StateAccessRecord
     checkpoint_state: StateAccessRecord
     journal_event_count: int = Field(ge=0)
+    journal_has_fills: bool = False
     executions: tuple[ExecutionAnalysisInput, ...]
     failure_count: int = Field(ge=0)
 
@@ -175,7 +178,7 @@ def analyze_simulation(
     request: SimulationAnalysisRequest,
     source: SimulationAnalysisInput,
 ) -> AnalysisResult:
-    if not source.executions:
+    if not source.executions and source.journal_has_fills:
         raise AnalysisError("ANALYSIS_EXECUTION_INPUT_MISSING", {})
     account_ids = {item.account_id for item in source.executions}
     account_ids.add(source.checkpoint_state.account_id)
@@ -184,7 +187,8 @@ def analyze_simulation(
             "ANALYSIS_ACCOUNT_ID_MISMATCH",
             {"account_ids": sorted(account_ids)},
         )
-    initial_nav = source.executions[0].initial_nav
+    account_ids.add(source.initial_account.account_id)
+    initial_nav = source.initial_account.nav
     if initial_nav <= 0:
         raise AnalysisError(
             "ANALYSIS_INITIAL_NAV_NON_POSITIVE",
@@ -235,10 +239,13 @@ def analyze_simulation(
             unit="count",
         ),
     )
+    ordered_executions = tuple(
+        sorted(source.executions, key=lambda item: (item.event_time, item.event_id))
+    )
     limitations = tuple(
         dict.fromkeys(
             limitation
-            for execution in source.executions
+            for execution in ordered_executions
             for limitation in execution.limitations
         )
     )
@@ -249,8 +256,8 @@ def analyze_simulation(
         metrics=metrics,
         source_artifact_ids=(
             request.checkpoint_artifact_id,
-            *request.execution_artifact_ids,
-            *request.failure_artifact_ids,
+            *sorted(request.execution_artifact_ids),
+            *sorted(request.failure_artifact_ids),
         ),
         limitations=limitations,
         state_semantics="actual_account",

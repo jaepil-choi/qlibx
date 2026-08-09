@@ -9,15 +9,39 @@ from qlibx.portfolio import (
     PortfolioConstructionInput,
     PortfolioConstructionRequest,
     PortfolioConstructionResult,
+    PortfolioConstructionResultV1,
     PortfolioWeight,
     construct_portfolio,
 )
 
-PORTFOLIO_RESULT_CONTRACT = ArtifactContract(
+PORTFOLIO_RESULT_V1_CONTRACT = ArtifactContract(
     artifact_type="portfolio_construction_result",
     artifact_schema_version=1,
+    payload_model=PortfolioConstructionResultV1,
+)
+
+PORTFOLIO_RESULT_CONTRACT = ArtifactContract(
+    artifact_type="portfolio_construction_result",
+    artifact_schema_version=2,
     payload_model=PortfolioConstructionResult,
 )
+
+
+def load_portfolio_result(
+    artifacts: LocalArtifactBackend,
+    artifact_id: str,
+) -> OperationOutcome:
+    """Load either persisted portfolio result schema without guessing its payload."""
+
+    envelope = artifacts.load_envelope(artifact_id)
+    if envelope.status is not OutcomeStatus.COMPLETE:
+        return envelope
+    contract = (
+        PORTFOLIO_RESULT_V1_CONTRACT
+        if envelope.result.artifact_schema_version == 1
+        else PORTFOLIO_RESULT_CONTRACT
+    )
+    return artifacts.load_model(artifact_id, contract)
 
 
 class PortfolioConstructionFlow:
@@ -43,6 +67,8 @@ class PortfolioConstructionFlow:
                     PortfolioWeight(instrument=entry.instrument, weight=entry.weight)
                     for entry in strategy.weights
                 ),
+                budget_mode=strategy.budget_mode,
+                target_gross=strategy.target_gross,
             )
             result = construct_portfolio(request, source)
         except (PortfolioConstructionError, ValueError) as exc:
@@ -59,7 +85,7 @@ class PortfolioConstructionFlow:
         publication = self._artifacts.publish_model(
             logical_identity=f"portfolio:{request.invocation_id}",
             artifact_type="portfolio_construction_result",
-            artifact_schema_version=1,
+            artifact_schema_version=2,
             producer_id=f"portfolio.{request.profile.value}",
             payload=result,
             dependencies=(

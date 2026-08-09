@@ -300,6 +300,17 @@ def publish_state_fixture(project: QlibxProject) -> tuple[str, str]:
         registry_fingerprint="registry-v1",
         strategy_id="project.stateful",
         event_time=EVALUATION_TIME,
+        initial_account=StateAccessRecord(
+            account_id=snapshot.account_id,
+            version=snapshot.version,
+            feedback_cursor=snapshot.feedback_cursor,
+            cash=snapshot.cash,
+            nav=snapshot.nav,
+            valuation_status=snapshot.valuation_status.value,
+            holdings=(),
+            as_of=snapshot.as_of,
+            realized_pnl=snapshot.realized_pnl,
+        ),
         account=StateAccessRecord(
             account_id=snapshot.account_id,
             version=snapshot.version,

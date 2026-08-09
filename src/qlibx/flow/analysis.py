@@ -24,7 +24,7 @@ from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.flow.composition import STORED_SIGNAL_CONTRACT
-from qlibx.flow.daily import ExecutionEvidence, SimulationCheckpoint
+from qlibx.flow.daily import ExecutionEvidence, SimulationCheckpoint, SimulationCheckpointV2
 from qlibx.flow.failures import (
     build_operation_error,
     publish_failed_errors,
@@ -51,9 +51,15 @@ EXECUTION_EVIDENCE_CONTRACT = ArtifactContract(
     payload_model=ExecutionEvidence,
 )
 
-SIMULATION_CHECKPOINT_CONTRACT = ArtifactContract(
+SIMULATION_CHECKPOINT_V2_CONTRACT = ArtifactContract(
     artifact_type="simulation_checkpoint",
     artifact_schema_version=2,
+    payload_model=SimulationCheckpointV2,
+)
+
+SIMULATION_CHECKPOINT_CONTRACT = ArtifactContract(
+    artifact_type="simulation_checkpoint",
+    artifact_schema_version=3,
     payload_model=SimulationCheckpoint,
 )
 
@@ -84,9 +90,16 @@ class AnalysisFlow:
         self,
         request: SimulationAnalysisRequest,
     ) -> OperationOutcome:
+        envelope = self._artifacts.load_envelope(request.checkpoint_artifact_id)
+        if envelope.status is not OutcomeStatus.COMPLETE:
+            return envelope
+        checkpoint_contract = (
+            SIMULATION_CHECKPOINT_CONTRACT
+            if envelope.result.artifact_schema_version == 3
+            else SIMULATION_CHECKPOINT_V2_CONTRACT
+        )
         checkpoint = self._artifacts.load_model(
-            request.checkpoint_artifact_id,
-            SIMULATION_CHECKPOINT_CONTRACT,
+            request.checkpoint_artifact_id, checkpoint_contract
         )
         if checkpoint.status is not OutcomeStatus.COMPLETE:
             return checkpoint
@@ -109,23 +122,42 @@ class AnalysisFlow:
             if loaded.status is not OutcomeStatus.COMPLETE:
                 return loaded
             failures.append(loaded.result.payload)
+        checkpoint_payload = checkpoint.result.payload
+        ordered_executions = tuple(
+            sorted(executions, key=lambda item: (item.event_time, item.event_id))
+        )
+        initial_account = (
+            checkpoint_payload.initial_account
+            if isinstance(checkpoint_payload, SimulationCheckpoint)
+            else (
+                ordered_executions[0].account_before
+                if ordered_executions
+                else checkpoint_payload.account
+            )
+        )
         try:
             result = analyze_simulation(
                 request,
                 SimulationAnalysisInput(
-                    checkpoint_state=checkpoint.result.payload.account,
+                    initial_account=initial_account,
+                    checkpoint_state=checkpoint_payload.account,
                     journal_event_count=len(
-                        checkpoint.result.payload.account_checkpoint.journal
+                        checkpoint_payload.account_checkpoint.journal
+                    ),
+                    journal_has_fills=any(
+                        entry.fill_ids
+                        for entry in checkpoint_payload.account_checkpoint.journal
                     ),
                     executions=tuple(
                         ExecutionAnalysisInput(
+                            event_id=item.event_id,
+                            event_time=item.event_time,
                             account_id=item.account_before.account_id,
-                            initial_nav=item.account_before.nav,
                             total_cost=sum(fill.total_cost for fill in item.fills),
                             fill_count=sum(fill.dealt_quantity > 0 for fill in item.fills),
                             limitations=item.limitations,
                         )
-                        for item in executions
+                        for item in ordered_executions
                     ),
                     failure_count=len(failures),
                 ),

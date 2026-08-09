@@ -16,13 +16,9 @@ from qlibx.context import (
     StrategyView,
 )
 from qlibx.data import ComponentRequirement
+from qlibx.domain import BudgetMode
 from qlibx.models import QlibxModel
 from qlibx.operations.artifacts import StrategyArtifactBinding, StrategyArtifactRequirement
-
-
-class BudgetMode(StrEnum):
-    FIXED = "fixed"
-    FLEXIBLE = "flexible"
 
 
 class DecisionAction(StrEnum):

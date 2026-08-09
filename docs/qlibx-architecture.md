@@ -2353,7 +2353,7 @@ Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기
 | G1 | Strategy memory 부재 | 불변식 오류 + 계약 누락 | **current local implementation.** in-memory `StrategyMemoryStore`, CAS identity, flow commit와 checkpoint/recovery evidence가 있다. Durable/distributed backend는 future |
 | G2 | Round-trip 회계 부재 | 차용 판단 오류 | **계약 해결.** Account Position의 cost basis/realized PnL + committed journal/feedback로 통합 |
 | G3 | 학습/거래 분리 (`FIT` event) | fixed-stage 가정 | **target contract만 해결, implementation gap.** generic resolver는 있으나 optional `MATERIALIZE` operation/event와 forward-label acceptance는 없다 |
-| G4 | Long-short 실행 회계 | 설계 방향 확정 | O3·O4 해결. `hypothetical_short`까지 착수 가능. `real_short` 담보·차입·locate는 별도 후속 범위 |
+| G4 | Long-short 실행 회계 | readiness gap | Signed research 분석만 current support다. Instrument-direction contract가 없어 `hypothetical_short`와 `real_short` 실행은 모두 후속 범위다 (`GAP-DIRECTION-001`) |
 | G5 | `ensemble` 계약 부재 | 명세 누락 | **해결.** Ensemble은 StrategyOperation; typed member result, net/cross/residual 계약 확정 |
 
 ### G1 — Strategy memory
@@ -2469,9 +2469,9 @@ Fitted state가 있는 component는 이를 typed artifact 또는 versioned binar
 5. **대차 가능성(locate)** — unknown을 가능으로 추측하지 않는다(PRD §7.7 원칙).
 
 해결 경로는 concrete Instrument semantics와 Exchange/execution policy의 명시적 결합이다. 연구
-workflow는 `long_only | hypothetical_short | real_short` 중 하나를 resolve하며, unknown은
-`long_only`로 처리한다. `hypothetical_short`는 가상 venue에서만 executable하고 실제 execution
-profile에서는 거부하며 결과 artifact에 표시한다. 실제 short는 borrow/locate, collateral, proceeds
+향후 workflow는 `long_only | hypothetical_short | real_short` 중 하나를 명시적으로 resolve해야 하며,
+unknown을 `long_only`로 대체해서는 안 된다. 현재는 signed research analysis와 physical long-only만
+지원하며 `hypothetical_short`도 executable instrument capability가 아니다. 실제 short는 borrow/locate, collateral, proceeds
 encumbrance, borrow fee가 모두 명시되어야 한다. 이 경계는 특정 `capability` 필드 하나를 PRD에서
 강제하지 않고 architecture가 모델과 policy resolution으로 구현한다.
 
@@ -2787,8 +2787,9 @@ returns).sum()` — 는 feedback edge가 없어 PRD §4.3을 만족할 수 없�
 
 **instrument (O3·O4 해결).** PRD에 §7.12 instrument capability declaration을 신설하고 §11.4~11.7의
 matched capitalization을 대체했다. Position이 음수를 가질 수 있는지는 engine의 고정 속성이 아니라
-instrument가 선언하는 값이며, `long_only` / `hypothetical_short` / `real_short` 세 값을 갖는다.
-미선언은 `long_only`로 취급하고 unknown을 shortable로 추측하지 않는다. §16 G4가 `hypothetical_short`
+instrument가 장차 선언해야 할 값이며, `long_only` / `hypothetical_short` / `real_short` 세 값을 갖는다.
+현재 public instrument model에는 이 direction contract가 없으므로 미선언을 `long_only`로 간주하지 않는다.
+§16 G4의 `hypothetical_short`
 범위까지 착수 가능해졌다.
 
 matched capitalization은 qlib의 long-only Position 제약을 우회하기 위한 장치였다. Engine 소유권이

@@ -495,6 +495,34 @@ class LocalArtifactBackend:
             connection.close()
         return tuple(ArtifactEnvelope.model_validate_json(row[0]) for row in rows)
 
+    def latest_envelope(
+        self,
+        *,
+        artifact_type: str,
+        logical_identity_prefix: str,
+        include_failure: bool = False,
+    ) -> ArtifactEnvelope | None:
+        """Return the lexicographically latest exact-prefix identity without LIKE wildcards."""
+
+        if not self._catalog_path.is_file():
+            return None
+        conditions = ["artifact_type = ?", "starts_with(logical_identity, ?)"]
+        parameters = [artifact_type, logical_identity_prefix]
+        if not include_failure:
+            conditions.append("status = ?")
+            parameters.append(ArtifactStatus.COMPLETE.value)
+        connection = self._connect_reader()
+        try:
+            row = connection.execute(
+                "SELECT envelope_json FROM artifacts "
+                f"WHERE {' AND '.join(conditions)} "
+                "ORDER BY logical_identity DESC LIMIT 1",
+                parameters,
+            ).fetchone()
+        finally:
+            connection.close()
+        return None if row is None else ArtifactEnvelope.model_validate_json(row[0])
+
     def audit_publications(self) -> OperationOutcome:
         if not self._catalog_path.is_file():
             return OperationOutcome(status=OutcomeStatus.COMPLETE, result=())

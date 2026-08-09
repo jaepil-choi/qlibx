@@ -13,6 +13,7 @@ from qlibx.account import (
     Account,
     AccountCheckpoint,
     AccountCommitRejected,
+    AccountFeedback,
     AccountSnapshot,
     FillBatch,
     Mark,
@@ -57,9 +58,11 @@ from qlibx.execution import (
 from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
 from qlibx.flow.recovery import (
     SIMULATION_RECOVERY_POINT_CONTRACT,
+    SIMULATION_RECOVERY_POINT_V1_CONTRACT,
     PendingExecutionRecovery,
     RecoveryPublication,
     SimulationRecoveryPoint,
+    SimulationRecoveryPointV1,
 )
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
 from qlibx.flow.strategy_results import (
@@ -183,7 +186,7 @@ class MemoryCommitEvidence(QlibxModel):
     value: dict[str, object]
 
 
-class SimulationCheckpoint(QlibxModel):
+class SimulationCheckpointV2(QlibxModel):
     checkpoint_schema_version: Literal[2] = 2
     run_id: str
     request_fingerprint: str
@@ -192,6 +195,23 @@ class SimulationCheckpoint(QlibxModel):
     registry_fingerprint: str
     strategy_id: str | None
     event_time: datetime
+    account: StateAccessRecord
+    account_checkpoint: AccountCheckpoint
+    memory_snapshots: tuple[MemorySnapshot, ...] = ()
+    event_trace: tuple[str, ...]
+    completed_decision_ids: tuple[str, ...]
+
+
+class SimulationCheckpoint(QlibxModel):
+    checkpoint_schema_version: Literal[3] = 3
+    run_id: str
+    request_fingerprint: str
+    config_fingerprint: str
+    profile_fingerprint: str
+    registry_fingerprint: str
+    strategy_id: str | None
+    event_time: datetime
+    initial_account: StateAccessRecord
     account: StateAccessRecord
     account_checkpoint: AccountCheckpoint
     memory_snapshots: tuple[MemorySnapshot, ...] = ()
@@ -402,6 +422,7 @@ class DailyExecutionFlow:
         self._artifacts = artifacts
         self._exchange = exchange
         self._account = account
+        self._initial_account = _state(account.snapshot(evaluation_time=clock.now))
         self._profile = profile
         self._resolver = resolver or RequirementResolver()
         self._store = store or ObservationStore()
@@ -432,6 +453,10 @@ class DailyExecutionFlow:
         self._authority_commits: list[_AuthorityCommit] = []
         self._pending_executions: dict[str, _PendingExecution] = {}
         self._recovery_sequence = 0
+        self._previous_recovery_artifact_id: str | None = None
+        self._recovery_journal_cursor = 0
+        self._recovery_trace_cursor = 0
+        self._recovery_completed_cursor = 0
         self._resume_position: tuple[datetime, int] | None = None
         self._request_fingerprint = ""
         self._profile_fingerprint = ""
@@ -571,7 +596,18 @@ class DailyExecutionFlow:
                     f"{handler.event.ts.isoformat()}|{handler.event.priority}|"
                     f"{handler.event.name}"
                 )
-                handler.callback(handler.event)
+                try:
+                    handler.callback(handler.event)
+                except Exception as exc:
+                    self._fail(
+                        handler.event,
+                        "callback",
+                        "DAILY_FLOW_CALLBACK_FAILED",
+                        context={
+                            "exception": type(exc).__name__,
+                            "message": str(exc)[:500],
+                        },
+                    )
                 if self._errors:
                     break
 
@@ -593,6 +629,7 @@ class DailyExecutionFlow:
             registry_fingerprint=self._registry_fingerprint,
             strategy_id=self._strategy.strategy_id if self._strategy is not None else None,
             event_time=self._clock.now,
+            initial_account=self._initial_account,
             account=_state(final_account),
             account_checkpoint=self._account.checkpoint(),
             memory_snapshots=self._memory.checkpoint(),
@@ -604,7 +641,7 @@ class DailyExecutionFlow:
             stage="checkpoint.artifact",
             logical_identity=f"simulation-checkpoint:{request.run_id}",
             artifact_type="simulation_checkpoint",
-            artifact_schema_version=2,
+            artifact_schema_version=3,
             producer_id=self._profile.profile_id,
             payload=checkpoint,
             dependencies=(
@@ -659,9 +696,18 @@ class DailyExecutionFlow:
         account_state = self._account.snapshot(evaluation_time=event.ts)
         memory_state = self._memory.snapshot(self._strategy.strategy_id)
         try:
-            account_feedback = self._account.feedback(
-                memory_state.feedback_cursor,
-                self._profile.feedback_entry_limit,
+            account_feedback = (
+                AccountFeedback(
+                    account_id=account_state.account_id,
+                    after_cursor=account_state.feedback_cursor,
+                    entries=(),
+                    next_cursor=account_state.feedback_cursor,
+                )
+                if memory_state.version == 0 and memory_state.value is None
+                else self._account.feedback(
+                    memory_state.feedback_cursor,
+                    self._profile.feedback_entry_limit,
+                )
             )
         except ValueError as exc:
             self._fail(
@@ -754,23 +800,42 @@ class DailyExecutionFlow:
             self._fail(event, "decision", "SIGNED_TARGET_REQUIRES_CONSTRUCTION")
             return
 
+        target_gross = sum(weight.weight for weight in run_result.result.weights)
+        if target_gross > 1 + 1e-10:
+            self._fail(
+                event,
+                "decision",
+                "DAILY_TARGET_BUDGET_UNSUPPORTED",
+                context={"target_gross": target_gross, "supported_gross": 1.0},
+            )
+            return
+
         snapshot = self._account.snapshot(evaluation_time=event.ts)
-        intent = DecisionIntent(
-            decision_id=decision_id,
-            strategy_id=run_result.result.strategy_id,
-            strategy_artifact_id=run_result.artifact.artifact_id,
-            decision_time=event.ts,
-            account_id=snapshot.account_id,
-            account_version=snapshot.version,
-            feedback_cursor=snapshot.feedback_cursor,
-            targets=tuple(
-                DecisionTarget(instrument_id=weight.instrument, weight=weight.weight)
-                for weight in sorted(
-                    run_result.result.weights,
-                    key=lambda value: value.instrument,
-                )
-            ),
-        )
+        try:
+            intent = DecisionIntent(
+                decision_id=decision_id,
+                strategy_id=run_result.result.strategy_id,
+                strategy_artifact_id=run_result.artifact.artifact_id,
+                decision_time=event.ts,
+                account_id=snapshot.account_id,
+                account_version=snapshot.version,
+                feedback_cursor=snapshot.feedback_cursor,
+                targets=tuple(
+                    DecisionTarget(instrument_id=weight.instrument, weight=weight.weight)
+                    for weight in sorted(
+                        run_result.result.weights,
+                        key=lambda value: value.instrument,
+                    )
+                ),
+            )
+        except ValueError as exc:
+            self._fail(
+                event,
+                "decision",
+                "DECISION_INTENT_INVALID",
+                context={"message": str(exc)[:500]},
+            )
+            return
         intent_artifact = self._publish_model(
             event=event,
             stage="decision.artifact",
@@ -1431,22 +1496,18 @@ class DailyExecutionFlow:
             self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_ACTUAL_FEEDBACK")
             return None
         state_access = result.state_accesses[-1]
-        initialization_feedback = (
-            not result.feedback_accesses
-            or (
-                result.feedback_accesses[-1].after_cursor == 0
-                and result.feedback_accesses[-1].next_cursor == 0
-            )
+        initialization_feedback = not result.feedback_accesses or (
+            result.feedback_accesses[-1].after_cursor == state_access.feedback_cursor
+            and result.feedback_accesses[-1].next_cursor == state_access.feedback_cursor
         )
         initialization = (
             current.version == 0
             and current.value is None
             and current.feedback_cursor == 0
-            and state_access.feedback_cursor == 0
             and initialization_feedback
         )
         if initialization:
-            feedback_cursor = 0
+            feedback_cursor = state_access.feedback_cursor
         else:
             if not result.feedback_accesses:
                 self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_ACTUAL_FEEDBACK")
@@ -1667,6 +1728,32 @@ class DailyExecutionFlow:
     ) -> SimulationRecoveryPoint | None:
         assert self._request is not None
         sequence = self._recovery_sequence + 1 if event is not None else 0
+        if sequence >= 10**8:
+            failure_event = event or Event(
+                "RECOVERY", self._clock.now, DECISION_PRIORITY
+            )
+            self._fail(
+                failure_event,
+                "recovery.sequence",
+                "RECOVERY_SEQUENCE_EXHAUSTED",
+                context={"sequence": sequence, "maximum_exclusive": 10**8},
+            )
+            return None
+        selected_account = account_checkpoint or self._account.checkpoint()
+        selected_trace = tuple(self._trace)
+        selected_completed = (
+            completed_decision_ids
+            if completed_decision_ids is not None
+            else tuple(self._completed_decisions)
+        )
+        if (
+            len(selected_account.journal) < self._recovery_journal_cursor
+            or len(selected_trace) < self._recovery_trace_cursor
+            or len(selected_completed) < self._recovery_completed_cursor
+        ):
+            failure_event = event or Event("RECOVERY", self._clock.now, DECISION_PRIORITY)
+            self._fail(failure_event, "recovery.delta", "RECOVERY_DELTA_CURSOR_INVALID")
+            return None
         point = SimulationRecoveryPoint(
             run_id=self._request.run_id,
             request_fingerprint=self._request_fingerprint,
@@ -1675,21 +1762,28 @@ class DailyExecutionFlow:
             registry_fingerprint=self._registry_fingerprint,
             strategy_id=self._strategy.strategy_id if self._strategy is not None else None,
             sequence=sequence,
+            previous_recovery_artifact_id=self._previous_recovery_artifact_id,
             last_event_time=event.ts if event is not None else None,
             last_event_priority=event.priority if event is not None else None,
             last_event_name=event.name if event is not None else None,
-            account_checkpoint=account_checkpoint or self._account.checkpoint(),
+            account_id=selected_account.account_id,
+            account_base_currency=selected_account.base_currency,
+            account_cash=selected_account.cash,
+            account_instrument_ids=selected_account.instrument_ids,
+            account_positions=selected_account.positions,
+            account_version=selected_account.version,
+            account_as_of=selected_account.as_of,
+            account_realized_pnl=selected_account.realized_pnl,
+            account_journal_delta=selected_account.journal[self._recovery_journal_cursor :],
             memory_snapshots=(
                 memory_snapshots
                 if memory_snapshots is not None
                 else self._memory.checkpoint()
             ),
-            event_trace=tuple(self._trace),
-            completed_decision_ids=(
-                completed_decision_ids
-                if completed_decision_ids is not None
-                else tuple(self._completed_decisions)
-            ),
+            event_trace_delta=selected_trace[self._recovery_trace_cursor :],
+            completed_decision_ids_delta=selected_completed[
+                self._recovery_completed_cursor :
+            ],
             pending_executions=self._pending_recovery(pending_executions),
             pending_publications=pending_publications,
         )
@@ -1706,17 +1800,27 @@ class DailyExecutionFlow:
                 f"simulation-recovery:{self._request.run_id}:{sequence:08d}:{suffix}"
             ),
             artifact_type="simulation_recovery_point",
-            artifact_schema_version=1,
+            artifact_schema_version=2,
             producer_id=self._profile.profile_id,
             payload=point,
             dependencies=(
                 DependencyEdge(
                     dependency_kind="state",
                     dependency_id=(
-                        f"account:{point.account_checkpoint.account_id}:"
-                        f"v{point.account_checkpoint.version}"
+                        f"account:{point.account_id}:v{point.account_version}"
                     ),
                     consumer_role="recoverable_actual_state",
+                ),
+                *(
+                    ()
+                    if point.previous_recovery_artifact_id is None
+                    else (
+                        DependencyEdge(
+                            dependency_kind="artifact",
+                            dependency_id=point.previous_recovery_artifact_id,
+                            consumer_role="previous_recovery_point",
+                        ),
+                    )
                 ),
             ),
         )
@@ -1739,19 +1843,21 @@ class DailyExecutionFlow:
             )
             return None
         self._recovery_sequence = sequence
+        self._previous_recovery_artifact_id = publication.result.artifact_id
+        self._recovery_journal_cursor = len(selected_account.journal)
+        self._recovery_trace_cursor = len(selected_trace)
+        self._recovery_completed_cursor = len(selected_completed)
         return point
 
     def _restore_recovery_point(self, *, strategy_id: str | None) -> None:
         assert self._request is not None
         prefix = f"simulation-recovery:{self._request.run_id}:"
-        envelopes = tuple(
-            envelope
-            for envelope in self._artifacts.list_envelopes()
-            if envelope.logical_identity.startswith(prefix)
-            and envelope.artifact_type == "simulation_recovery_point"
+        envelope = self._artifacts.latest_envelope(
+            artifact_type="simulation_recovery_point",
+            logical_identity_prefix=prefix,
         )
         resume_event = Event("RESUME", self._clock.now, DECISION_PRIORITY)
-        if not envelopes:
+        if envelope is None:
             self._fail(
                 resume_event,
                 "resume",
@@ -1759,17 +1865,137 @@ class DailyExecutionFlow:
                 context={"run_id": self._request.run_id},
             )
             return
-        loaded_points: list[tuple[ArtifactEnvelope, SimulationRecoveryPoint]] = []
-        for envelope in envelopes:
-            loaded = self._artifacts.load_model(
-                envelope.artifact_id,
-                SIMULATION_RECOVERY_POINT_CONTRACT,
+        latest_envelope = envelope
+        seen: set[str] = set()
+        v2_points: list[SimulationRecoveryPoint] = []
+        anchor: SimulationRecoveryPointV1 | None = None
+        expected_identity = {
+            "run_id": self._request.run_id,
+            "request_fingerprint": self._request_fingerprint,
+            "config_fingerprint": self._request.config_fingerprint,
+            "profile_fingerprint": self._profile_fingerprint,
+            "registry_fingerprint": self._registry_fingerprint,
+            "strategy_id": strategy_id,
+        }
+        while True:
+            if envelope.artifact_id in seen:
+                self._fail(
+                    resume_event,
+                    "resume.chain",
+                    "RECOVERY_CHAIN_CYCLE",
+                    context={"artifact_id": envelope.artifact_id},
+                )
+                return
+            seen.add(envelope.artifact_id)
+            contract = (
+                SIMULATION_RECOVERY_POINT_CONTRACT
+                if envelope.artifact_schema_version == 2
+                else SIMULATION_RECOVERY_POINT_V1_CONTRACT
             )
+            loaded = self._artifacts.load_model(envelope.artifact_id, contract)
             if loaded.status is not OutcomeStatus.COMPLETE:
                 self._errors.extend(loaded.errors)
                 return
-            loaded_points.append((loaded.result.envelope, loaded.result.payload))
-        _, point = max(loaded_points, key=lambda item: item[1].sequence)
+            loaded_point = loaded.result.payload
+            actual_identity = {
+                "run_id": loaded_point.run_id,
+                "request_fingerprint": loaded_point.request_fingerprint,
+                "config_fingerprint": loaded_point.config_fingerprint,
+                "profile_fingerprint": loaded_point.profile_fingerprint,
+                "registry_fingerprint": loaded_point.registry_fingerprint,
+                "strategy_id": loaded_point.strategy_id,
+            }
+            mismatches = {
+                key: {
+                    "expected": expected_identity[key],
+                    "actual": actual_identity[key],
+                }
+                for key in expected_identity
+                if expected_identity[key] != actual_identity[key]
+            }
+            if mismatches and envelope.artifact_id == latest_envelope.artifact_id:
+                self._fail(
+                    resume_event,
+                    "resume.identity",
+                    "RESUME_BRANCH_REQUIRED",
+                    context={"mismatches": mismatches},
+                )
+                return
+            if not envelope.logical_identity.startswith(prefix) or mismatches:
+                self._fail(
+                    resume_event,
+                    "resume.chain",
+                    "RECOVERY_CHAIN_IDENTITY_MISMATCH",
+                    context={
+                        "artifact_id": envelope.artifact_id,
+                        "logical_identity": envelope.logical_identity,
+                        "mismatches": mismatches,
+                    },
+                )
+                return
+            if isinstance(loaded_point, SimulationRecoveryPointV1):
+                anchor = loaded_point
+                break
+            v2_points.append(loaded_point)
+            previous_id = loaded_point.previous_recovery_artifact_id
+            if previous_id is None:
+                break
+            previous = self._artifacts.load_envelope(previous_id)
+            if previous.status is not OutcomeStatus.COMPLETE:
+                self._errors.extend(previous.errors)
+                return
+            if previous.result.artifact_type != "simulation_recovery_point":
+                self._fail(
+                    resume_event,
+                    "resume.chain",
+                    "RECOVERY_CHAIN_IDENTITY_MISMATCH",
+                    context={"artifact_id": previous_id},
+                )
+                return
+            envelope = previous.result
+
+        chronological = tuple(reversed(v2_points))
+        journal = list(anchor.account_checkpoint.journal if anchor is not None else ())
+        event_trace = list(anchor.event_trace if anchor is not None else ())
+        completed = list(anchor.completed_decision_ids if anchor is not None else ())
+        previous_version = anchor.account_checkpoint.version if anchor is not None else 0
+        previous_sequence = anchor.sequence if anchor is not None else -1
+        for candidate in chronological:
+            if candidate.sequence != previous_sequence + 1:
+                self._fail(
+                    resume_event,
+                    "resume.chain",
+                    "RECOVERY_CHAIN_SEQUENCE_GAP",
+                    context={
+                        "previous_sequence": previous_sequence,
+                        "sequence": candidate.sequence,
+                    },
+                )
+                return
+            if candidate.account_version != previous_version + len(
+                candidate.account_journal_delta
+            ):
+                self._fail(
+                    resume_event,
+                    "resume.chain",
+                    "RECOVERY_CHAIN_ACCOUNT_VERSION_GAP",
+                    context={
+                        "previous_version": previous_version,
+                        "account_version": candidate.account_version,
+                        "delta_length": len(candidate.account_journal_delta),
+                    },
+                )
+                return
+            journal.extend(candidate.account_journal_delta)
+            event_trace.extend(candidate.event_trace_delta)
+            completed.extend(candidate.completed_decision_ids_delta)
+            previous_version = candidate.account_version
+            previous_sequence = candidate.sequence
+
+        point: SimulationRecoveryPoint | SimulationRecoveryPointV1 = (
+            v2_points[0] if v2_points else anchor
+        )
+        assert point is not None
         expected = {
             "request_fingerprint": self._request_fingerprint,
             "config_fingerprint": self._request.config_fingerprint,
@@ -1798,7 +2024,31 @@ class DailyExecutionFlow:
             )
             return
 
-        restored_account = Account.from_checkpoint(point.account_checkpoint)
+        if isinstance(point, SimulationRecoveryPointV1):
+            restored_checkpoint = point.account_checkpoint
+        else:
+            restored_checkpoint = AccountCheckpoint(
+                account_id=point.account_id,
+                base_currency=point.account_base_currency,
+                cash=point.account_cash,
+                instrument_ids=point.account_instrument_ids,
+                positions=point.account_positions,
+                version=point.account_version,
+                applied_events=tuple(sorted(entry.event_id for entry in journal)),
+                journal=tuple(journal),
+                as_of=point.account_as_of,
+                realized_pnl=point.account_realized_pnl,
+            )
+        try:
+            restored_account = Account.from_checkpoint(restored_checkpoint)
+        except ValueError as exc:
+            self._fail(
+                resume_event,
+                "resume.chain",
+                "RECOVERY_CHAIN_ACCOUNT_INVALID",
+                context={"message": str(exc)[:500]},
+            )
+            return
         restored_memory = StrategyMemoryStore.from_checkpoint(point.memory_snapshots)
         restored_pending: dict[str, _PendingExecution] = {}
         for pending in point.pending_executions:
@@ -1841,10 +2091,14 @@ class DailyExecutionFlow:
 
         self._account = restored_account
         self._memory = restored_memory
-        self._trace = list(point.event_trace)
-        self._completed_decisions = list(point.completed_decision_ids)
+        self._trace = event_trace
+        self._completed_decisions = completed
         self._pending_executions = restored_pending
         self._recovery_sequence = point.sequence
+        self._previous_recovery_artifact_id = latest_envelope.artifact_id
+        self._recovery_journal_cursor = len(journal)
+        self._recovery_trace_cursor = len(event_trace)
+        self._recovery_completed_cursor = len(completed)
         self._resume_position = (
             (point.last_event_time, point.last_event_priority)
             if point.last_event_time is not None

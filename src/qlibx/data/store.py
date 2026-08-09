@@ -1,5 +1,7 @@
 """Private observation access used only by scoped views."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -20,6 +22,23 @@ class ObservationStore:
 
     def __init__(self) -> None:
         self._frame_cache: dict[tuple[str, str, str, str], pd.DataFrame] = {}
+        self._frozen_depth = 0
+        self._frozen_verified: set[tuple[str, str]] = set()
+
+    @contextmanager
+    def frozen(self) -> Iterator[None]:
+        """Verify each physical source once in one reentrant invocation scope."""
+
+        outermost = self._frozen_depth == 0
+        if outermost:
+            self._frozen_verified.clear()
+        self._frozen_depth += 1
+        try:
+            yield
+        finally:
+            self._frozen_depth -= 1
+            if outermost:
+                self._frozen_verified.clear()
 
     def query(
         self,
@@ -37,10 +56,16 @@ class ObservationStore:
             raise ValueError("session query requires an explicit session_timezone")
         cutoff = as_of.astimezone(UTC)
         source = Path(dataset.source).resolve()
-        if not source.is_file() or file_hash(source) != dataset.physical_fingerprint:
+        verification_key = (str(source), dataset.physical_fingerprint)
+        verified = self._frozen_depth > 0 and verification_key in self._frozen_verified
+        if not source.is_file() or (
+            not verified and file_hash(source) != dataset.physical_fingerprint
+        ):
             raise DataSnapshotError(
                 f"physical source no longer matches registration {dataset.registration_identity}"
             )
+        if self._frozen_depth > 0:
+            self._frozen_verified.add(verification_key)
         cache_key = (
             dataset.registration_identity,
             str(source),
@@ -51,8 +76,7 @@ class ObservationStore:
         if cached is None:
             cached = self._load_normalized_frame(dataset, source=source, field=field)
             self._frame_cache[cache_key] = cached
-        visible = cached.copy()
-        visible = visible.loc[visible["available_at"] <= cutoff]
+        visible = cached.loc[cached["available_at"] <= cutoff]
         if session_date is not None:
             if dataset.observation_time_field is None:
                 raise DataSnapshotError(

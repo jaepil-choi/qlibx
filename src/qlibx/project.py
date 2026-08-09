@@ -19,6 +19,7 @@ from qlibx.constraints import (
 )
 from qlibx.data.contracts import DatasetRegistration
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
+from qlibx.data.store import ObservationStore
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import (
     ArtifactContract,
@@ -64,6 +65,7 @@ class QlibxProject:
         self._root = root.resolve()
         self._config = config
         self._artifacts: LocalArtifactBackend | None = None
+        self._store = ObservationStore()
 
     @property
     def root(self) -> Path:
@@ -91,6 +93,7 @@ class QlibxProject:
             extension_root=self._root / self._config.extension_dir,
             registry=self.registry_snapshot(),
             artifacts=self.artifacts,
+            store=self._store,
         )
 
     def validate_extension(self, request: ExtensionValidationRequest) -> OperationOutcome:
@@ -110,6 +113,7 @@ class QlibxProject:
             extension_root=self._root / self._config.extension_dir,
             registry=self.registry_snapshot(),
             artifacts=self.artifacts,
+            store=self._store,
         )
 
     def validate_strategy_extension(
@@ -180,6 +184,7 @@ class QlibxProject:
             callback=lambda: ResearchFlow(
                 registry=self.registry_snapshot(),
                 artifacts=self.artifacts,
+                store=self._store,
             ).invoke_strategy(operation, invocation),
         )
 
@@ -196,6 +201,7 @@ class QlibxProject:
             return ResearchFlow(
                 registry=self.registry_snapshot(),
                 artifacts=self.artifacts,
+                store=self._store,
                 artifact_contracts=selected.artifact_contracts,
                 strategy_dependencies=(self._strategy_registration_dependency(selected),),
             ).invoke_strategy(selected.operation, invocation)
@@ -215,6 +221,7 @@ class QlibxProject:
             callback=lambda: ConstraintFlow(
                 registry=self.registry_snapshot(),
                 artifacts=self.artifacts,
+                store=self._store,
             ).adjust(spec.policy.to_declaration(), spec.to_request()),
         )
 
@@ -227,6 +234,7 @@ class QlibxProject:
             callback=lambda: ConstraintFlow(
                 registry=self.registry_snapshot(),
                 artifacts=self.artifacts,
+                store=self._store,
             ).validate(spec.policy.to_declaration(), spec.to_request()),
         )
 
@@ -249,6 +257,7 @@ class QlibxProject:
                 registry=self.registry_snapshot(),
                 artifacts=self.artifacts,
                 account=account,
+                store=self._store,
             ).run(spec.policy.to_declaration(), spec.to_request())
 
         return self._with_catalog_session(
@@ -334,6 +343,7 @@ class QlibxProject:
             artifacts=self.artifacts,
             exchange=exchange,
             account=account,
+            store=self._store,
             profile=DailyExecutionProfile(
                 market_dataset_id=spec.market.market_dataset_id,
                 execution_price_role=spec.market.execution_price_role,
@@ -365,7 +375,7 @@ class QlibxProject:
         callback: Callable[[], OperationOutcome],
     ) -> OperationOutcome:
         try:
-            with self.artifacts.session():
+            with self.artifacts.session(), self._store.frozen():
                 return callback()
         except CatalogSessionConflictError as exc:
             return self._catalog_scope_failure(

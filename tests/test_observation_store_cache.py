@@ -93,6 +93,36 @@ def test_warm_cache_hashes_every_query_but_reads_and_normalizes_once(
     assert counts == {"hash": 2, "read": 1, "normalize": 2}
 
 
+def test_frozen_scope_hashes_each_physical_source_once_and_is_reentrant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "market.csv"
+    write_source(source)
+    registered = register_source(tmp_path)
+    store = ObservationStore()
+    real_hash = store_module.file_hash
+    hash_count = 0
+
+    def counted_hash(path: Path) -> str:
+        nonlocal hash_count
+        hash_count += 1
+        return real_hash(path)
+
+    monkeypatch.setattr(store_module, "file_hash", counted_hash)
+    cutoff = datetime(2025, 1, 3, tzinfo=UTC)
+    with store.frozen():
+        store.query(registered, field="value", as_of=cutoff)
+        with store.frozen():
+            store.query(registered, field="alternate", as_of=cutoff)
+        store.query(registered, field="value", as_of=cutoff)
+    assert hash_count == 1
+
+    store.query(registered, field="value", as_of=cutoff)
+    store.query(registered, field="value", as_of=cutoff)
+    assert hash_count == 3
+
+
 def test_warm_cache_rejects_deleted_source(tmp_path: Path) -> None:
     source = tmp_path / "market.csv"
     write_source(source)

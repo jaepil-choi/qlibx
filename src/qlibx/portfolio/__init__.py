@@ -23,6 +23,7 @@ from qlibx.portfolio.construction import (
     PortfolioConstructionInput,
     PortfolioConstructionRequest,
     PortfolioConstructionResult,
+    PortfolioConstructionResultV1,
     PortfolioWeight,
     construct_portfolio,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "PortfolioConstructionInput",
     "PortfolioConstructionRequest",
     "PortfolioConstructionResult",
+    "PortfolioConstructionResultV1",
     "PortfolioWeight",
     "adjust_single_name_caps",
     "construct_portfolio",

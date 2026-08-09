@@ -45,7 +45,12 @@ from qlibx.flow.daily import (
 )
 from qlibx.flow.extensions import EXTENSION_REGISTRATION_CONTRACT, ExtensionFlow
 from qlibx.flow.monitoring import CONSTRAINT_MONITORING_CONTRACT, MonitoringFlow
-from qlibx.flow.portfolio import PORTFOLIO_RESULT_CONTRACT, PortfolioConstructionFlow
+from qlibx.flow.portfolio import (
+    PORTFOLIO_RESULT_CONTRACT,
+    PORTFOLIO_RESULT_V1_CONTRACT,
+    PortfolioConstructionFlow,
+    load_portfolio_result,
+)
 from qlibx.flow.recovery import (
     SIMULATION_RECOVERY_POINT_CONTRACT,
     PendingExecutionRecovery,
@@ -71,6 +76,7 @@ __all__ = [
     "MARK_PRIORITY",
     "MONITOR_PRIORITY",
     "PORTFOLIO_RESULT_CONTRACT",
+    "PORTFOLIO_RESULT_V1_CONTRACT",
     "REPORT_RESULT_CONTRACT",
     "SESSION_PERFORMANCE_CONTRACT",
     "SIMULATION_RECOVERY_POINT_CONTRACT",
@@ -112,4 +118,5 @@ __all__ = [
     "StoredSignalWeighting",
     "StrategyExtensionFlow",
     "StrategyRunResult",
+    "load_portfolio_result",
 ]

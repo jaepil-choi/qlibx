@@ -9,6 +9,13 @@ class Side(StrEnum):
     SELL = "SELL"
 
 
+class BudgetMode(StrEnum):
+    """Whether a portfolio target must consume its declared gross budget."""
+
+    FIXED = "fixed"
+    FLEXIBLE = "flexible"
+
+
 @dataclass(frozen=True, slots=True)
 class Fill:
     fill_id: str

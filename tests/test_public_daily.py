@@ -66,7 +66,7 @@ class PublicDailyStrategy:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
         if account.positions:
-            assert feedback.next_cursor > feedback.after_cursor
+            assert feedback.next_cursor == feedback.after_cursor
             return StrategyDraft(
                 weights=(),
                 budget_mode=BudgetMode.FLEXIBLE,

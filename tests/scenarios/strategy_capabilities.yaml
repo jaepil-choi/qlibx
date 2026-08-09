@@ -9,7 +9,13 @@ reference_sources:
   - references/qlib-integration-codex/peer_momentum_runtime/strategy.py
   - references/qlib-integration-codex/peer_momentum_runtime/signed_alpha.py
   - references/qlib-integration-codex/report_twin/runner.py
-  - references/qlib-integration-codex/outputs/report_twin/migration-proof.json
+reference_snapshot:
+  producer_repository: kwam-enhanced-index
+  producer_commit: 881b80e0a068cb24a2d3f23a11f26d3b5d84173b
+  files:
+    references/qlib-integration-codex/peer_momentum_runtime/strategy.py: 3c54f8a65fdacda86778a80f1dc38b7f36326d718f1f777542a5c7b1b9118b33
+    references/qlib-integration-codex/peer_momentum_runtime/signed_alpha.py: ef8428975eccfdaf37689e7a8e377dc21cb581750a3f4d06929e3eb18ee6e4ca
+    references/qlib-integration-codex/report_twin/runner.py: cfacabc6d7b4f3781ccf88e9b0c0935bddaa7932b6baa7efa036cd601df25ee0
 
 capabilities:
   - id: pit_cross_sectional_signal

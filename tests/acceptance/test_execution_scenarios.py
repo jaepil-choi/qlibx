@@ -163,16 +163,11 @@ def test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily(
     assert next_decision.decision_action is DecisionAction.HOLD
     assert actual.version == 2
     assert actual.feedback_cursor == 2
-    assert next_decision.feedback_accesses[0].after_cursor == 0
+    assert next_decision.feedback_accesses[0].after_cursor == 2
     assert next_decision.feedback_accesses[0].next_cursor == 2
-    assert next_decision.feedback_accesses[0].change_types == (
-        "FillBatch",
-        "MarkBatch",
-    )
-    assert next_decision.feedback_accesses[0].fill_ids == (
-        execution.fills[0].fill_id,
-    )
-    assert next_decision.feedback_accesses[0].marked_instruments == ("A005930",)
+    assert next_decision.feedback_accesses[0].change_types == ()
+    assert next_decision.feedback_accesses[0].fill_ids == ()
+    assert next_decision.feedback_accesses[0].marked_instruments == ()
     assert next_decision.performance_accesses == ()
     assert actual.cash == pytest.approx(52_100.5)
     assert actual.nav == pytest.approx(9_985_100.5)
@@ -189,7 +184,7 @@ def test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily(
         if item.artifact_type == "strategy_result"
         and any(
             edge.consumer_role == "actual_account_feedback"
-            and edge.dependency_id.endswith("feedback:0-2")
+                and edge.dependency_id.endswith("feedback:2-2")
             for edge in item.dependencies
         )
     )
@@ -240,12 +235,20 @@ def test_feedback_window_fails_before_strategy_when_limit_is_too_small(
 ) -> None:
     sessions = tuple(close_at(2024, 1, day) for day in (2, 3, 4))
     account = initial_account("bounded-feedback-account")
+    memory = StrategyMemoryStore()
+    memory.commit(
+        strategy_id=TargetStrategy.strategy_id,
+        value={"initialized": True},
+        feedback_cursor=0,
+        expected_version=0,
+    )
     flow = DailyExecutionFlow(
         clock=BacktestClock(sessions[0]),
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
         exchange=configured_exchange(cost_rate=0.0),
         account=account,
+        memory=memory,
         profile=DailyExecutionProfile(
             market_dataset_id="dw-real-market",
             execution_price_role="execution_price",
@@ -372,7 +375,7 @@ def test_uc_alpha_adaptive_001_memory_commits_only_after_feedback(
     assert commit.previous_version == 0
     assert commit.version == 1
     assert commit.feedback_cursor == 2
-    assert commit.update_kind == "FEEDBACK_UPDATE"
+    assert commit.update_kind == "INITIALIZATION"
     assert commit.value == {"confirmed_feedback_cursor": 2}
     assert memory.snapshot("acceptance.actual-state-momentum").feedback_cursor == 2
 

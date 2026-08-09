@@ -210,6 +210,37 @@ def test_catalog_session_closes_after_body_failure(tmp_path: Path) -> None:
         assert _publish(backend, 0.5).status is OutcomeStatus.COMPLETE
 
 
+def test_latest_envelope_treats_percent_and_underscore_as_literal_prefix(
+    tmp_path: Path,
+) -> None:
+    QlibxProject.init(tmp_path, apply=True)
+    backend = _backend(tmp_path)
+    prefix = "simulation-recovery:run_%:"
+    expected = None
+    for identity, value in (
+        (f"{prefix}00000001:first", 0.1),
+        (f"{prefix}00000002:second", 0.2),
+        ("simulation-recovery:run-AX:99999999:wildcard-decoy", 0.9),
+    ):
+        published = backend.publish_model(
+            logical_identity=identity,
+            artifact_type=CONTRACT.artifact_type,
+            artifact_schema_version=CONTRACT.artifact_schema_version,
+            producer_id="tests.catalog.latest",
+            payload=WeightPayload(weights={"A005930": value}),
+        )
+        assert published.status is OutcomeStatus.COMPLETE
+        if value == 0.2:
+            expected = published.result
+
+    latest = backend.latest_envelope(
+        artifact_type=CONTRACT.artifact_type,
+        logical_identity_prefix=prefix,
+    )
+
+    assert latest == expected
+
+
 def test_same_candidate_concurrent_writers_are_idempotent(tmp_path: Path) -> None:
     QlibxProject.init(tmp_path, apply=True)
     context = pytest.importorskip("multiprocessing").get_context("spawn")

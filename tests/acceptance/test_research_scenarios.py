@@ -243,11 +243,15 @@ def test_uc_portfolio_001_constructs_two_portfolios_from_one_real_dw_alpha(
         "A005930": 0.5,
     }
     assert {item.instrument: item.weight for item in long_only.result.target_weights} == {
-        "A005930": 1.0
+        "A005930": 0.5
     }
-    assert signed.result.realized_gross == long_only.result.realized_gross == 1.0
+    assert signed.result.realized_gross == 1.0
+    assert long_only.result.realized_gross == 0.5
     assert signed.result.realized_net == 0.0
-    assert long_only.result.realized_net == 1.0
+    assert long_only.result.realized_net == 0.5
+    assert long_only.result.cash_residual == 0.5
+    assert long_only.result.dropped_gross == 0.5
+    assert long_only.result.renormalized is False
     assert alpha.result.result.model_dump_json() == original_json
     assert all(
         outcome.diagnostics[0].dependencies[0].dependency_id

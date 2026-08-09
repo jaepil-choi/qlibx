@@ -3,9 +3,11 @@
 import math
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import Field, model_validator
 
+from qlibx.domain import BudgetMode
 from qlibx.models import QlibxModel
 
 
@@ -32,11 +34,17 @@ class PortfolioConstructionRequest(QlibxModel):
     config_fingerprint: str = Field(min_length=1)
     profile: ConstructionProfile
     requested_budget: float = Field(gt=0)
+    requested_budget_mode: BudgetMode = BudgetMode.FLEXIBLE
+    normalization_policy: Literal[
+        "preserve_source_residual", "renormalize_to_requested_budget"
+    ] = "preserve_source_residual"
 
 
 class PortfolioConstructionInput(QlibxModel):
     source_strategy_id: str = Field(min_length=1)
     weights: tuple[PortfolioWeight, ...]
+    budget_mode: BudgetMode = BudgetMode.FIXED
+    target_gross: float = Field(default=1.0, gt=0)
 
     @model_validator(mode="after")
     def validate_weights(self) -> "PortfolioConstructionInput":
@@ -50,7 +58,7 @@ class PortfolioConstructionInput(QlibxModel):
         return self
 
 
-class PortfolioConstructionResult(QlibxModel):
+class PortfolioConstructionResultV1(QlibxModel):
     portfolio_schema_version: int = 1
     invocation_id: str
     source_artifact_id: str
@@ -66,6 +74,20 @@ class PortfolioConstructionResult(QlibxModel):
     diagnostics: tuple[str, ...]
 
 
+class PortfolioConstructionResult(PortfolioConstructionResultV1):
+    portfolio_schema_version: Literal[2] = 2
+    source_budget_mode: BudgetMode = BudgetMode.FIXED
+    source_target_gross: float = 1.0
+    requested_budget_mode: BudgetMode = BudgetMode.FLEXIBLE
+    normalization_policy: Literal[
+        "preserve_source_residual", "renormalize_to_requested_budget"
+    ] = "preserve_source_residual"
+    dropped_weights: tuple[PortfolioWeight, ...] = ()
+    dropped_gross: float = Field(default=0.0, ge=0)
+    renormalized: bool = False
+    renormalization_scale: float = 1.0
+
+
 class PortfolioConstructionError(ValueError):
     def __init__(self, code: str, context: dict[str, object]) -> None:
         super().__init__(code)
@@ -79,9 +101,11 @@ def construct_portfolio(
 ) -> PortfolioConstructionResult:
     if request.profile is ConstructionProfile.HYPOTHETICAL_SIGNED:
         selected = source.weights
+        dropped = ()
         diagnostic = "signed directions preserved for hypothetical evaluation"
     else:
         selected = tuple(entry for entry in source.weights if entry.weight > 0)
+        dropped = tuple(entry for entry in source.weights if entry.weight <= 0)
         if not selected:
             raise PortfolioConstructionError(
                 "CONSTRUCTION_NO_LONG_CANDIDATES",
@@ -89,8 +113,29 @@ def construct_portfolio(
             )
         diagnostic = "negative signed alpha removed for equity long-only target"
 
+    source_gross = sum(abs(entry.weight) for entry in source.weights)
     selected_gross = sum(abs(entry.weight) for entry in selected)
-    scale = request.requested_budget / selected_gross
+    source_utilization = source_gross / source.target_gross
+    preserved_budget = request.requested_budget * source_utilization
+    if request.normalization_policy == "renormalize_to_requested_budget":
+        target_budget = request.requested_budget
+        renormalized = not math.isclose(selected_gross, target_budget, abs_tol=1e-10)
+    else:
+        target_budget = preserved_budget * (selected_gross / source_gross)
+        renormalized = False
+    if (
+        request.requested_budget_mode is BudgetMode.FIXED
+        and request.normalization_policy == "preserve_source_residual"
+        and not math.isclose(target_budget, request.requested_budget, abs_tol=1e-10)
+    ):
+        raise PortfolioConstructionError(
+            "CONSTRUCTION_FIXED_BUDGET_INCOMPATIBLE",
+            {
+                "requested_budget": request.requested_budget,
+                "preserved_budget": target_budget,
+            },
+        )
+    scale = target_budget / selected_gross
     targets = tuple(
         PortfolioWeight(instrument=entry.instrument, weight=entry.weight * scale)
         for entry in selected
@@ -110,4 +155,12 @@ def construct_portfolio(
         realized_net=realized_net,
         cash_residual=max(0.0, request.requested_budget - realized_gross),
         diagnostics=(diagnostic, f"construction_scale={scale:.12g}"),
+        source_budget_mode=source.budget_mode,
+        source_target_gross=source.target_gross,
+        requested_budget_mode=request.requested_budget_mode,
+        normalization_policy=request.normalization_policy,
+        dropped_weights=dropped,
+        dropped_gross=sum(abs(entry.weight) for entry in dropped),
+        renormalized=renormalized,
+        renormalization_scale=scale,
     )

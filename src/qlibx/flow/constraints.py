@@ -10,7 +10,7 @@ from qlibx.flow.failures import (
     publish_failed_errors,
     publish_failed_outcome,
 )
-from qlibx.flow.portfolio import PORTFOLIO_RESULT_CONTRACT
+from qlibx.flow.portfolio import load_portfolio_result
 from qlibx.kernel import BacktestClock
 from qlibx.portfolio import (
     BenchmarkWeight,
@@ -58,9 +58,9 @@ class ConstraintFlow:
         declaration: ConstraintDeclaration,
         request: ConstraintAdjustmentRequest,
     ) -> OperationOutcome:
-        loaded = self._artifacts.load_model(
+        loaded = load_portfolio_result(
+            self._artifacts,
             request.source_portfolio_artifact_id,
-            PORTFOLIO_RESULT_CONTRACT,
         )
         if loaded.status is not OutcomeStatus.COMPLETE:
             return loaded

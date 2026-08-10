@@ -24,6 +24,7 @@ from qlibx.data import (
     RowsLookback,
     SourceFormat,
 )
+from qlibx.data.registry import file_hash
 from qlibx.data.store import DataSnapshotError
 
 
@@ -285,6 +286,76 @@ def test_explicit_reindex_upgrades_legacy_pointer_idempotently(tmp_path: Path) -
     assert current.query_snapshot is not None
 
 
+def test_explicit_reindex_upgrades_legacy_snapshot_layout_idempotently(
+    tmp_path: Path,
+) -> None:
+    project, dataset = register(
+        tmp_path,
+        "2025-01-02T00:00:00,2025-01-02T01:00:00,A,2,3\n"
+        "2025-01-01T00:00:00,2025-01-01T01:00:00,A,1,1\n"
+        "2025-01-02T00:00:00,2025-01-02T01:00:00,A,1,2\n",
+    )
+    assert dataset.query_snapshot is not None
+    canonical_path = Path(dataset.query_snapshot.path)
+    legacy_path = canonical_path.parent / "legacy-unsorted.parquet"
+    pd.read_parquet(canonical_path).iloc[::-1].reset_index(drop=True).to_parquet(
+        legacy_path,
+        index=False,
+    )
+    legacy_fingerprint = file_hash(legacy_path)
+    registry_path = canonical_path.parent.parent / "registrations" / "panel.json"
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    payload["query_snapshot"]["path"] = str(legacy_path.resolve())
+    payload["query_snapshot"]["fingerprint"] = legacy_fingerprint
+    payload["query_snapshot"].pop("layout_version", None)
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
+    legacy = project.registry_snapshot().get("panel")
+    assert legacy is not None
+    assert legacy.registration_schema_version == 2
+    assert legacy.query_snapshot is not None
+    assert legacy.query_snapshot.layout_version == 1
+
+    with pytest.raises(DataSnapshotError) as raised:
+        ObservationStore().query(
+            legacy,
+            field="value",
+            as_of=datetime(2025, 1, 3, tzinfo=UTC),
+            lookback=RowsLookback(rows=2),
+        )
+    assert raised.value.code == "DATASET_QUERY_SNAPSHOT_LAYOUT_REQUIRED"
+    public_outcome = project.invoke(
+        BoundedHistoryStrategy(),
+        StrategyInvocation(
+            invocation_id="legacy-layout-required",
+            evaluation_time=datetime(2025, 1, 3, tzinfo=UTC),
+            config_fingerprint="legacy-layout-required-v1",
+        ),
+    )
+    assert public_outcome.status is OutcomeStatus.FAILED
+    assert public_outcome.errors[0].error_code == "DATASET_QUERY_SNAPSHOT_LAYOUT_REQUIRED"
+
+    upgraded = project.reindex_datasets(("panel",))
+    repeated = project.reindex_datasets(("panel",))
+
+    assert upgraded.status is repeated.status is OutcomeStatus.COMPLETE
+    assert upgraded.result.items[0].changed is True
+    assert repeated.result.items[0].changed is False
+    current = project.registry_snapshot().get("panel")
+    assert current is not None
+    assert current.registration_identity == dataset.registration_identity
+    assert current.query_snapshot is not None
+    assert current.query_snapshot.layout_version == 2
+    assert current.query_snapshot.fingerprint != legacy_fingerprint
+    assert current.query_snapshot.path == str(canonical_path)
+    frame = ObservationStore().query(
+        current,
+        field="value",
+        as_of=datetime(2025, 1, 3, tzinfo=UTC),
+        lookback=RowsLookback(rows=2),
+    )
+    assert frame["value"].tolist() == [2, 3]
+
+
 def test_reindex_source_drift_fails_before_registry_pointer_write(tmp_path: Path) -> None:
     project, dataset = register(
         tmp_path,
@@ -299,4 +370,25 @@ def test_reindex_source_drift_fails_before_registry_pointer_write(tmp_path: Path
 
     assert outcome.status is OutcomeStatus.FAILED
     assert outcome.errors[0].error_code == "DATASET_SOURCE_DRIFT"
+    assert registry_path.read_bytes() == before
+
+
+def test_reindex_snapshot_drift_fails_before_registry_pointer_write(tmp_path: Path) -> None:
+    project, dataset = register(
+        tmp_path,
+        "2025-01-01T00:00:00,2025-01-01T01:00:00,A,1,1\n",
+    )
+    assert dataset.query_snapshot is not None
+    snapshot_path = Path(dataset.query_snapshot.path)
+    registry_path = snapshot_path.parent.parent / "registrations" / "panel.json"
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    payload["query_snapshot"].pop("layout_version", None)
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
+    before = registry_path.read_bytes()
+    snapshot_path.write_bytes(snapshot_path.read_bytes() + b"tamper")
+
+    outcome = project.reindex_datasets(("panel",))
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "DATASET_QUERY_SNAPSHOT_DRIFT"
     assert registry_path.read_bytes() == before

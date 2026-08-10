@@ -14,7 +14,7 @@
 
 | capability | status | 현재 진입점과 실제 동작 | 남은 경계 |
 |---|---|---|---|
-| Dataset registration/PIT resolution | Current | registration v2가 content-addressed normalized Parquet snapshot을 만들고, `RowsLookback`/`CalendarLookback`을 DuckDB predicate/projection pushdown으로 읽으며 explicit `reindex_datasets()`가 v1을 전환한다 | 기존 registration은 query 전에 명시적 reindex 필요 |
+| Dataset registration/PIT resolution | Current | registration v2가 layout-v2 time-major content-addressed normalized Parquet snapshot을 만들고, `RowsLookback`/`CalendarLookback`을 DuckDB predicate/projection pushdown으로 읽으며 explicit `reindex_datasets()`가 legacy registration 또는 snapshot layout을 전환한다 | 기존 registration/layout은 query 전에 명시적 reindex 필요 |
 | Direct Strategy research | Current | `QlibxProject.invoke()`가 `ResearchFlow`를 조립하고 Strategy draft를 lineage가 붙은 result artifact로 승격한다 | 없음 |
 | Direct Model materialization | Current | `QlibxProject.materialize()`와 `MaterializationFlow`가 optional typed intermediate artifact를 발행한다 | recurring scheduler/model registry는 current requirement가 아님 |
 | Project-local Strategy extension | Current | validation, immutable registration, registered execution 경로가 있다 | arbitrary plugin registry는 current requirement가 아님 |

@@ -10,7 +10,13 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pandas as pd
 
-from qlibx.data.contracts import CalendarLookback, Lookback, RegisteredDataset, RowsLookback
+from qlibx.data.contracts import (
+    CURRENT_QUERY_SNAPSHOT_LAYOUT_VERSION,
+    CalendarLookback,
+    Lookback,
+    RegisteredDataset,
+    RowsLookback,
+)
 from qlibx.data.registry import file_hash
 
 
@@ -86,6 +92,14 @@ class ObservationStore:
             raise DataSnapshotError(
                 "DATASET_QUERY_SNAPSHOT_REQUIRED",
                 f"dataset {dataset.dataset_id!r} requires project.reindex_datasets()",
+            )
+        if snapshot.layout_version != CURRENT_QUERY_SNAPSHOT_LAYOUT_VERSION:
+            raise DataSnapshotError(
+                "DATASET_QUERY_SNAPSHOT_LAYOUT_REQUIRED",
+                (
+                    f"dataset {dataset.dataset_id!r} uses query snapshot layout "
+                    f"v{snapshot.layout_version}; run project.reindex_datasets()"
+                ),
             )
         source = Path(dataset.source).resolve()
         snapshot_path = Path(snapshot.path).resolve()

@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from qlibx.data.contracts import (
+    CURRENT_QUERY_SNAPSHOT_LAYOUT_VERSION,
     AvailableAtField,
     DatasetRegistration,
     DatasetReindexItem,
@@ -372,7 +373,10 @@ class DatasetRegistry:
                         context={"dataset_id": dataset.dataset_id},
                         retry=("restore the registered query snapshot",),
                     )
-                if dataset.registration_schema_version == 2:
+                if (
+                    dataset.registration_schema_version == 2
+                    and existing.layout_version == CURRENT_QUERY_SNAPSHOT_LAYOUT_VERSION
+                ):
                     pending.append((dataset, dataset, False))
                     continue
             semantic_bindings = dataset.source_bindings or {

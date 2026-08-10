@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from pydantic import ValidationError
 
@@ -53,6 +54,46 @@ def test_uc_data_001_minimal_registration_accepts_user_field_names(tmp_path: Pat
     assert registered.evidence.row_count == 2
     assert "currency" not in registered.bindings
     assert "universe" not in registered.bindings
+
+
+def test_query_snapshot_uses_deterministic_time_major_layout(tmp_path: Path) -> None:
+    source = tmp_path / "market.csv"
+    source.write_text(
+        "DATE,CODE,VALUE\n"
+        "2025-01-03,069500,30.0\n"
+        "2025-01-02,069500,20.0\n"
+        "2025-01-02,005930,10.0\n",
+        encoding="utf-8",
+    )
+    project = initialized_project(tmp_path)
+
+    outcome = project.register_dataset(registration("market", "market.csv"))
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    snapshot = outcome.result.query_snapshot
+    assert snapshot is not None
+    assert snapshot.layout_version == 2
+    frame = pd.read_parquet(snapshot.path)
+    assert frame[["available_at", "instrument"]].to_records(index=False).tolist() == [
+        (pd.Timestamp("2025-01-02T00:00:00+00:00"), "005930"),
+        (pd.Timestamp("2025-01-02T00:00:00+00:00"), "069500"),
+        (pd.Timestamp("2025-01-03T00:00:00+00:00"), "069500"),
+    ]
+    reordered_source = tmp_path / "market-reordered.csv"
+    reordered_source.write_text(
+        "DATE,CODE,VALUE\n"
+        "2025-01-02,005930,10.0\n"
+        "2025-01-03,069500,30.0\n"
+        "2025-01-02,069500,20.0\n",
+        encoding="utf-8",
+    )
+    reordered = project.register_dataset(
+        registration("market-reordered", "market-reordered.csv")
+    )
+    assert reordered.status is OutcomeStatus.COMPLETE
+    assert reordered.result.query_snapshot is not None
+    assert reordered.result.query_snapshot.fingerprint == snapshot.fingerprint
+    assert reordered.result.query_snapshot.path == snapshot.path
 
 
 def test_uc_data_002_requirement_gap_is_progressive_and_retryable(tmp_path: Path) -> None:

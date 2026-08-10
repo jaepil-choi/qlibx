@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from qlibx.data.contracts import DatasetQuerySnapshot, DatasetRegistration
+from qlibx.data.contracts import (
+    CURRENT_QUERY_SNAPSHOT_LAYOUT_VERSION,
+    DatasetQuerySnapshot,
+    DatasetRegistration,
+)
 from qlibx.data.timestamps import normalize_timestamps
 
 
@@ -98,6 +102,19 @@ def build_query_snapshot(
             normalized[column] = frame[source_field]
 
     normalized_frame = pd.DataFrame(normalized)
+    physical_order = [
+        "available_at",
+        "observation_time",
+        "instrument",
+        *logical_order_columns,
+    ]
+    normalized_frame.sort_values(
+        physical_order,
+        kind="mergesort",
+        na_position="last",
+        inplace=True,
+    )
+    normalized_frame.reset_index(drop=True, inplace=True)
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     temporary = snapshot_dir / f".query-snapshot.{os.getpid()}.tmp.parquet"
     normalized_frame.to_parquet(temporary, index=False)
@@ -113,6 +130,7 @@ def build_query_snapshot(
             temporary.unlink(missing_ok=True)
     return BuiltQuerySnapshot(
         snapshot=DatasetQuerySnapshot(
+            layout_version=CURRENT_QUERY_SNAPSHOT_LAYOUT_VERSION,
             path=str(destination.resolve()),
             fingerprint=fingerprint,
             row_count=len(normalized_frame),

@@ -97,6 +97,7 @@ def registered(root: Path) -> RegisteredDataset:
             logical_key_null_count=0,
         ),
         query_snapshot=DatasetQuerySnapshot(
+            layout_version=2,
             path=str(snapshot),
             fingerprint=file_hash(snapshot),
             row_count=ROW_COUNT,

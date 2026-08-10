@@ -36,7 +36,7 @@ Read authority and state authority
 | `flow/` | use-case orchestration, requirement resolution, event ordering, artifact publication, Account/Memory commit, recovery | application layer이자 imperative shell |
 | `specs/` | daily, constraint와 academic run의 frozen public input | public configuration contract |
 | `view/` | Strategy/Materialize/Monitor에 허용된 read capability만 주는 records, scoped View와 ViewGate | least-authority query boundary |
-| `data/` | dataset registration, requirement binding, timezone/PIT normalization, source fingerprint와 observation read | observation authority |
+| `data/` | dataset registration, requirement binding, timezone/PIT normalization, deterministic versioned query snapshot, source fingerprint와 observation read | observation authority |
 | `operations/` | Strategy/Model contract와 built-in calculation | user logic 및 pure calculation boundary |
 | `portfolio/` | construction, adjustment, validation의 typed calculation | standalone operation과 KRX execution preparation이 공유하는 pure calculation |
 | `execution/` | generic Exchange/preparation lifecycle, KRX/Academic concrete preparation/request/result, Instrument와 sizing/matching | market-specific execution mechanics와 pure request preparation |

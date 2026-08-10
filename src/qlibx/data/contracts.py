@@ -116,7 +116,11 @@ class RegistrationEvidence(QlibxModel):
     localized_source_timezone: str | None = None
 
 
+CURRENT_QUERY_SNAPSHOT_LAYOUT_VERSION = 2
+
+
 class DatasetQuerySnapshot(QlibxModel):
+    layout_version: Literal[1, 2] = 1
     path: str = Field(min_length=1)
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     row_count: int = Field(ge=0)

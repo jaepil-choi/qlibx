@@ -17,7 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from factor_model import MonthlyReversalModel
+from factor_model import DemeanedUnitGrossStrategy, MonthlyReversalModel
 
 from qlibx import (
     ACADEMIC_EXECUTION_CONTRACT,
@@ -30,13 +30,13 @@ from qlibx import (
     OutcomeStatus,
     QlibxProject,
     SignalAnalysisRequest,
+    StrategyArtifactBinding,
+    StrategyInvocation,
 )
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
-from qlibx.evidence import DependencyEdge
 from qlibx.portfolio import (
     ConstructionProfile,
-    PortfolioConstructionResult,
-    PortfolioWeight,
+    PortfolioConstructionRequest,
 )
 
 SHOWCASE_ID = "show_003_academic_exchange_factor_execution"
@@ -84,6 +84,7 @@ class PeriodResult:
     long_positions: int
     short_positions: int
     signal_artifact_id: str
+    strategy_artifact_id: str
     portfolio_artifact_id: str
     execution_artifact_id: str
 
@@ -221,54 +222,57 @@ def metric(result: Any, name: str) -> float:
     return float({item.name: item.value for item in result.metrics}[name])
 
 
-def publish_portfolio(
+def construct_portfolio(
     project: QlibxProject,
     *,
     decision_day: pd.Timestamp,
     signal_artifact_id: str,
-    weights: pd.Series,
-) -> str:
-    targets = tuple(
-        PortfolioWeight(instrument=str(instrument), weight=float(weight))
-        for instrument, weight in weights.sort_index().items()
-    )
-    payload = PortfolioConstructionResult(
-        invocation_id=f"showcase-academic-portfolio-{decision_day:%Y%m%d}-v1",
-        source_artifact_id=signal_artifact_id,
-        source_strategy_id="showcase.monthly-reversal.signed-portfolio.v1",
-        evaluation_time=close_at(decision_day),
-        profile=ConstructionProfile.HYPOTHETICAL_SIGNED,
-        original_weights=targets,
-        target_weights=targets,
-        requested_budget=1.0,
-        realized_gross=sum(abs(item.weight) for item in targets),
-        realized_net=sum(item.weight for item in targets),
-        cash_residual=0.0,
-        diagnostics=("cross-sectional demean and normalize to unit gross",),
-    )
-    publication = require_complete(
-        project.artifacts.publish_model(
-            logical_identity=f"portfolio:{payload.invocation_id}",
-            artifact_type="portfolio_construction_result",
-            artifact_schema_version=2,
-            producer_id="showcase.academic-factor-portfolio.v1",
-            payload=payload,
-            dependencies=(
-                DependencyEdge(
-                    dependency_kind="artifact",
-                    dependency_id=signal_artifact_id,
-                    consumer_role="stored_signal",
-                ),
-                DependencyEdge(
-                    dependency_kind="config",
-                    dependency_id="showcase-unit-gross-demeaned-v1",
-                    consumer_role="portfolio_construction",
+    strategy: DemeanedUnitGrossStrategy,
+) -> tuple[str, str, pd.Series]:
+    strategy_run = require_complete(
+        project.invoke(
+            strategy,
+            StrategyInvocation(
+                invocation_id=f"showcase-academic-alpha-{decision_day:%Y%m%d}-v1",
+                evaluation_time=close_at(decision_day),
+                config_fingerprint="showcase-unit-gross-demeaned-v1",
+                artifact_bindings=(
+                    StrategyArtifactBinding(
+                        consumer_role="stored_signal",
+                        artifact_id=signal_artifact_id,
+                    ),
                 ),
             ),
         ),
-        f"portfolio publication {decision_day.date()}",
+        f"signed alpha Strategy {decision_day.date()}",
     )
-    return publication.result.artifact_id
+    strategy_artifact_id = strategy_run.result.artifact.artifact_id
+    weights = pd.Series(
+        {
+            item.instrument: float(item.weight)
+            for item in strategy_run.result.result.weights
+        },
+        dtype="float64",
+    ).sort_index()
+    construction = require_complete(
+        project.construct_portfolio(
+            PortfolioConstructionRequest(
+                invocation_id=f"showcase-academic-portfolio-{decision_day:%Y%m%d}-v2",
+                source_artifact_id=strategy_artifact_id,
+                evaluation_time=close_at(decision_day),
+                config_fingerprint="showcase-hypothetical-signed-construction-v2",
+                profile=ConstructionProfile.HYPOTHETICAL_SIGNED,
+                requested_budget=1.0,
+            )
+        ),
+        f"portfolio construction {decision_day.date()}",
+    )
+    if len(construction.diagnostics) != 1 or not hasattr(
+        construction.diagnostics[0], "artifact_id"
+    ):
+        raise RuntimeError("portfolio construction did not return publication evidence")
+    portfolio_artifact_id = str(construction.diagnostics[0].artifact_id)
+    return strategy_artifact_id, portfolio_artifact_id, weights
 
 
 def line_svg(rows: list[dict[str, Any]]) -> str:
@@ -318,7 +322,7 @@ main{{max-width:1180px;margin:auto;padding:42px 24px 72px}} h1{{font:750 43px/1.
 .lede{{font-size:17px;color:var(--muted);max-width:940px}} .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:13px;margin:26px 0}}
 .card,.panel{{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:18px;box-shadow:0 3px 14px #24372c0d}}
 .label{{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}} .value{{font-size:27px;font-weight:780;margin-top:4px}} .ok{{color:var(--green)}}
-.flow{{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:center}} .step{{background:#f8faf8;border:1px solid var(--line);padding:14px 10px;text-align:center;border-radius:10px;font-weight:650}} .arrow{{display:none}}
+.flow{{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:center}} .step{{background:#f8faf8;border:1px solid var(--line);padding:14px 10px;text-align:center;border-radius:10px;font-weight:650}} .arrow{{display:none}}
 .nav-line{{fill:none;stroke:var(--navy);stroke-width:3}} .axis{{stroke:#8c9690;stroke-width:1}} svg{{width:100%;height:auto}}
 .table-wrap{{overflow:auto}} table{{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}} th,td{{padding:9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}} th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){{text-align:left}}
 .boundary{{border-left:5px solid var(--gold)}} code{{background:#e8ece9;padding:2px 5px;border-radius:4px}} footer{{margin-top:34px;color:var(--muted);font-size:13px}}
@@ -326,7 +330,7 @@ main{{max-width:1180px;margin:auto;padding:42px 24px 72px}} h1{{font:750 43px/1.
 </style></head><body><main>
 <div class="label">qlibx / real-DW / {SHOWCASE_ID}</div>
 <h1>Academic factor research now reaches signed stock execution</h1>
-<p class="lede">A 20-session reversal model creates frozen monthly signals. Exact signed portfolio artifacts are then executed by qlibx at the next session close with fractional stock quantities, hypothetical short positions, and every friction term fixed at zero.</p>
+<p class="lede">A 20-session reversal model creates frozen monthly signals. A showcase-local Strategy consumes each exact signal through qlibx's typed artifact-input contract, emits signed unit-gross alpha, and passes through public portfolio construction before next-close AcademicExchange execution.</p>
 <section class="grid">
   <div class="card"><div class="label">AcademicExchange</div><div class="value ok">Demonstrated</div></div>
   <div class="card"><div class="label">Stock fills</div><div class="value">{metrics['fill_count']}</div></div>
@@ -336,11 +340,12 @@ main{{max-width:1180px;margin:auto;padding:42px 24px 72px}} h1{{font:750 43px/1.
   <div class="card"><div class="label">Total cost</div><div class="value ok">0</div></div>
 </section>
 <h2>Package-owned evidence path</h2>
-<div class="panel flow"><div class="step">PIT prices</div><div class="step">Stored signal</div><div class="step">Signed portfolio:v2</div><div class="step">AcademicFill</div><div class="step">Checkpoint + NAV</div></div>
+<div class="panel flow"><div class="step">PIT prices</div><div class="step">Stored signal</div><div class="step">Local Strategy:v3</div><div class="step">Signed portfolio:v2</div><div class="step">AcademicFill</div><div class="step">Checkpoint + NAV</div></div>
 <h2>Academic NAV after each next-close rebalance</h2><div class="panel">{line_svg(periods)}</div>
 <h2>Independent reconciliation</h2>
 <div class="grid">
   <div class="card"><div class="label">Max NAV delta</div><div class="value">{verification['maximum_absolute_nav_delta']:.2e}</div></div>
+  <div class="card"><div class="label">Max weight delta</div><div class="value">{verification['maximum_absolute_weight_delta']:.2e}</div></div>
   <div class="card"><div class="label">Max quantity delta</div><div class="value">{verification['maximum_absolute_quantity_delta']:.2e}</div></div>
   <div class="card"><div class="label">Max turnover delta</div><div class="value">{verification['maximum_absolute_turnover_delta']:.2e}</div></div>
   <div class="card"><div class="label">Max &Sigma;wr identity delta<br><span class="muted">{verification['verified_identity_periods']} holding periods</span></div><div class="value">{verification['maximum_absolute_period_identity_delta']:.2e}</div></div>
@@ -349,6 +354,7 @@ main{{max-width:1180px;margin:auto;padding:42px 24px 72px}} h1{{font:750 43px/1.
 <h2>Monthly evidence</h2><div class="panel table-wrap"><table><thead><tr><th>Decision</th><th>Execution</th><th>IC</th><th>Rank IC</th><th>Turnover</th><th>Gross</th><th>Net</th><th>NAV</th><th>Long/Short</th></tr></thead><tbody>{table_rows}</tbody></table></div>
 <h2>Interpretation boundary</h2><div class="panel boundary"><ul>
 <li>IC and Rank IC test the factor artifact and build no portfolio. Every return, NAV and turnover figure here comes from AcademicExchange and the Account, never from a weighted average of returns (PRD 4.2, 4.6).</li>
+<li>The stored signal, Strategy result, portfolio construction result, and academic execution are distinct typed artifacts. Their catalog dependencies preserve the exact signal-to-weight-to-portfolio lineage.</li>
 <li>The &Sigma;wr identity delta shows that holding one rebalance for one period reaches exactly the NAV those weights and the realized price returns imply. That identity verifies a single period; it is not accumulated, because compounding it would silently assume costless full rebalancing every period.</li>
 <li>All instruments here are stocks. The public listing contract also accepts ETF, tracking-only Index, and explicit synthetic-unit-price Factor inputs.</li>
 <li>Zero costs are an explicit profile assumption, not missing data. Turnover is still recorded.</li>
@@ -399,11 +405,18 @@ def run(repo_root: Path) -> dict[str, Any]:
         raise RuntimeError("registered dataset is absent")
 
     model = MonthlyReversalModel(DATASET_ID, LOOKBACK_SESSIONS)
+    weighting_strategy = DemeanedUnitGrossStrategy(
+        signal_semantics=(
+            f"negative_compounded_close_return_{LOOKBACK_SESSIONS}_complete_sessions"
+        )
+    )
     decision_dates: tuple[pd.Timestamp, ...] = extraction["decision_dates"]
     forward_returns: dict[pd.Timestamp, pd.Series] = extraction["evaluation_returns"]
+    strategy_ids: list[str] = []
     portfolio_ids: list[str] = []
     research_rows: list[dict[str, Any]] = []
     maximum_ic_delta = 0.0
+    maximum_weight_delta = 0.0
 
     for decision_day, evaluation_day in pairwise(decision_dates):
         decision_time = close_at(decision_day)
@@ -445,16 +458,23 @@ def run(repo_root: Path) -> dict[str, Any]:
         oracle_ic = correlation(signals, realized)
         qlibx_ic = metric(analyzed.result, "information_coefficient")
         centered = signals - signals.mean()
-        weights = centered / centered.abs().sum()
+        oracle_weights = centered / centered.abs().sum()
         maximum_ic_delta = max(maximum_ic_delta, abs(qlibx_ic - oracle_ic))
         if not math.isclose(qlibx_ic, oracle_ic, rel_tol=0, abs_tol=1e-12):
             raise RuntimeError("qlibx IC does not reconcile")
-        portfolio_id = publish_portfolio(
+        strategy_id, portfolio_id, weights = construct_portfolio(
             project,
             decision_day=decision_day,
             signal_artifact_id=signal_artifact.artifact_id,
-            weights=weights,
+            strategy=weighting_strategy,
         )
+        if not weights.index.equals(oracle_weights.index):
+            raise RuntimeError("Strategy weights do not cover the independent oracle universe")
+        weight_delta = float((weights - oracle_weights).abs().max())
+        maximum_weight_delta = max(maximum_weight_delta, weight_delta)
+        if weight_delta > 1e-15:
+            raise RuntimeError("Strategy weights do not reconcile with the independent oracle")
+        strategy_ids.append(strategy_id)
         portfolio_ids.append(portfolio_id)
         research_rows.append(
             {
@@ -465,6 +485,7 @@ def run(repo_root: Path) -> dict[str, Any]:
                     signals.rank(method="average"), realized.rank(method="average")
                 ),
                 "signal_artifact_id": signal_artifact.artifact_id,
+                "strategy_artifact_id": strategy_id,
                 "portfolio_artifact_id": portfolio_id,
                 "weights": weights.to_dict(),
             }
@@ -631,6 +652,7 @@ def run(repo_root: Path) -> dict[str, Any]:
                 long_positions=long_count,
                 short_positions=short_count,
                 signal_artifact_id=research["signal_artifact_id"],
+                strategy_artifact_id=research["strategy_artifact_id"],
                 portfolio_artifact_id=research["portfolio_artifact_id"],
                 execution_artifact_id=execution_artifact_id,
             )
@@ -648,10 +670,12 @@ def run(repo_root: Path) -> dict[str, Any]:
     summary = {
         "showcase_id": SHOWCASE_ID,
         "status": "complete",
-        "verified_against": "qlibx-0.1.0+implementations-009-059-061",
+        "verified_against": "qlibx-0.1.0+implementations-009-038-059-061",
         "capabilities": {
             "factor_materialization": "demonstrated",
             "one_period_signal_analysis": "demonstrated",
+            "typed_strategy_artifact_input": "demonstrated",
+            "public_portfolio_construction": "demonstrated",
             "academic_exchange": "demonstrated",
             "stock_hypothetical_short": "demonstrated",
             "production_real_short": "not_claimed",
@@ -673,12 +697,14 @@ def run(repo_root: Path) -> dict[str, Any]:
             "factor_id": "monthly-reversal-20-complete-sessions-v1",
             "lookback_sessions": LOOKBACK_SESSIONS,
             "weighting": "cross-sectional demean then normalize to unit gross",
+            "weighting_strategy_id": weighting_strategy.strategy_id,
         },
         "academic_run": {
             "profile_id": academic.result.profile.profile_id,
             "execution_timing": academic.result.profile.execution_timing,
             "quantity_policy": academic.result.profile.quantity_policy,
             "direction_policy": academic.result.profile.direction_policy,
+            "strategy_artifact_ids": strategy_ids,
             "portfolio_artifact_ids": list(academic.result.portfolio_artifact_ids),
             "execution_artifact_ids": list(academic.result.execution_artifact_ids),
             "final_checkpoint_artifact_id": academic.result.final_checkpoint_artifact_id,
@@ -700,6 +726,7 @@ def run(repo_root: Path) -> dict[str, Any]:
         },
         "verification": {
             "maximum_absolute_ic_delta": maximum_ic_delta,
+            "maximum_absolute_weight_delta": maximum_weight_delta,
             "maximum_absolute_period_identity_delta": maximum_period_identity_delta,
             "verified_identity_periods": verified_identity_periods,
             "maximum_absolute_nav_delta": maximum_nav_delta,

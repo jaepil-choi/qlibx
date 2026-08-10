@@ -3,6 +3,7 @@ showcase_id: show_003_academic_exchange_factor_execution
 status: current
 demonstrates:
   - implementation-009-stored-signal-reuse
+  - implementation-038-layer-safe-strategy-artifact-inputs
   - implementation-059-forward-label-pit-materialization
   - implementation-061-academic-exchange-signed-fractional-state
   - UC-ACADEMIC-001
@@ -10,6 +11,6 @@ environment_assumptions:
   - Python 3.11 or 3.12 through the synchronized project uv environment
   - data/DW/fng_stock_daily_prices.csv exists and is readable
   - enough memory to scan the source in 250000-row chunks
-last_verified_at: 2026-08-10
-verified_against: qlibx-0.1.0+implementations-009-059-061
+last_verified_at: 2026-08-10T20:16:23+09:00
+verified_against: qlibx-0.1.0+implementations-009-038-059-061
 reproduction_command: uv run python showcases/show_003_academic_exchange_factor_execution/run.py

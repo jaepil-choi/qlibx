@@ -7,11 +7,18 @@ from typing import ClassVar
 import pandas as pd
 
 from qlibx import (
+    ArtifactSemanticConstraint,
+    BudgetMode,
     ComponentRequirement,
+    DecisionAction,
     MaterializeView,
     RowsLookback,
     StoredSignalEntry,
     StoredSignalResult,
+    StrategyArtifactRequirement,
+    StrategyDraft,
+    StrategyView,
+    WeightEntry,
 )
 from qlibx.operations import (
     MaterializationComputationError,
@@ -83,4 +90,53 @@ class MonthlyReversalModel:
             ),
             observation_time=view.as_of,
             entries=tuple(entries),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DemeanedUnitGrossStrategy:
+    """Turn one exact stored signal into signed unit-gross alpha weights."""
+
+    signal_semantics: str
+    strategy_id: str = "showcase.monthly-reversal.signed-portfolio.v1"
+
+    def requirements(self) -> tuple[ComponentRequirement, ...]:
+        return ()
+
+    def artifact_requirements(self) -> tuple[StrategyArtifactRequirement, ...]:
+        return (
+            StrategyArtifactRequirement(
+                requirement_id="showcase.portfolio.stored-signal",
+                consumer_role="stored_signal",
+                artifact_type="stored_signal_result",
+                artifact_schema_version=1,
+                semantic_constraints=(
+                    ArtifactSemanticConstraint(
+                        field="signal_semantics",
+                        expected=self.signal_semantics,
+                    ),
+                ),
+            ),
+        )
+
+    def run(self, view: StrategyView) -> StrategyDraft:
+        signal = view.artifact("stored_signal", StoredSignalResult)
+        values = pd.Series(
+            {entry.instrument: float(entry.value) for entry in signal.entries},
+            dtype="float64",
+        ).sort_index()
+        centered = values - values.mean()
+        gross = float(centered.abs().sum())
+        if len(centered) < 2 or not math.isfinite(gross) or gross <= 0:
+            raise ValueError("demeaned unit-gross weighting requires varying finite signals")
+        weights = centered / gross
+        return StrategyDraft(
+            weights=tuple(
+                WeightEntry(instrument=str(instrument), weight=float(weight))
+                for instrument, weight in weights.items()
+            ),
+            budget_mode=BudgetMode.FIXED,
+            target_gross=1.0,
+            decision_action=DecisionAction.RESEARCH_ONLY,
+            diagnostics=("cross-sectional demean and normalize to unit gross",),
         )

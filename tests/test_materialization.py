@@ -187,7 +187,7 @@ def test_no_visible_forward_label_is_a_typed_failure(tmp_path: Path) -> None:
     assert project.artifacts.list_envelopes() == ()
 
 
-def test_source_drift_is_a_materialization_data_failure(tmp_path: Path) -> None:
+def test_source_drift_preserves_the_specific_dataset_error(tmp_path: Path) -> None:
     project, source = _project(tmp_path)
     _register_horizon(project, source)
     source.write_text(source.read_text(encoding="utf-8") + "\n", encoding="utf-8")
@@ -202,7 +202,7 @@ def test_source_drift_is_a_materialization_data_failure(tmp_path: Path) -> None:
     )
 
     assert outcome.status is OutcomeStatus.FAILED
-    assert outcome.errors[0].error_code == "MATERIALIZATION_DATA_READ_FAILED"
+    assert outcome.errors[0].error_code == "DATASET_SOURCE_DRIFT"
     assert outcome.errors[0].stage_path == "materialization.run.data"
     assert project.artifacts.list_envelopes() == ()
 

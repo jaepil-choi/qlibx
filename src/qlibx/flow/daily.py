@@ -1286,11 +1286,7 @@ class DailyExecutionFlow:
                 dependency_id=preparation_artifact.artifact_id,
                 consumer_role="execution_preparation",
             ),
-            DependencyEdge(
-                dependency_kind="artifact",
-                dependency_id=pending.intent_artifact.artifact_id,
-                consumer_role="decision_intent",
-            ),
+            *preparation_dependencies,
         )
         recovery_publications = [
             self._recovery_publication(

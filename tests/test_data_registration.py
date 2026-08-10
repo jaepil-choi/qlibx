@@ -12,6 +12,7 @@ from qlibx.data import (
     DatasetRegistration,
     ObservationStore,
     RequirementResolver,
+    RowsLookback,
     SourceFormat,
 )
 
@@ -304,11 +305,13 @@ def test_declared_source_timezone_localizes_naive_timestamps(tmp_path: Path) -> 
         registered,
         field="VALUE",
         as_of=datetime(2025, 1, 2, 6, 29, tzinfo=UTC),
+        lookback=RowsLookback(rows=1),
     )
     at = store.query(
         registered,
         field="VALUE",
         as_of=datetime(2025, 1, 2, 6, 30, tzinfo=UTC),
+        lookback=RowsLookback(rows=1),
     )
     assert before.empty
     assert at["value"].tolist() == [10.0]

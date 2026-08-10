@@ -28,6 +28,7 @@ class ObservationStore:
     def __init__(self) -> None:
         self._frozen_depth = 0
         self._frozen_verified: set[tuple[str, str, str]] = set()
+        self._connection: duckdb.DuckDBPyConnection | None = None
 
     @contextmanager
     def frozen(self) -> Iterator[None]:
@@ -42,7 +43,13 @@ class ObservationStore:
         finally:
             self._frozen_depth -= 1
             if outermost:
-                self._frozen_verified.clear()
+                connection = self._connection
+                self._connection = None
+                try:
+                    if connection is not None:
+                        connection.close()
+                finally:
+                    self._frozen_verified.clear()
 
     def query(
         self,
@@ -153,25 +160,38 @@ class ObservationStore:
         )
         query_parameters: list[object] = [str(snapshot_path), *parameters]
         if isinstance(lookback, RowsLookback):
+            payload = _selection_payload(snapshot.logical_order_columns)
+            sort_key = _selection_sort_key(snapshot.logical_order_columns)
+            payload_ordering = _payload_ordering(snapshot.logical_order_columns)
             sql = (
                 "WITH visible AS ("
                 + source_sql
-                + "), ranked AS (SELECT *, row_number() OVER (PARTITION BY instrument ORDER BY "
-                + _descending_order(snapshot.logical_order_columns)
-                + ") AS __rank FROM visible) "
-                "SELECT instrument, available_at, observation_time, value FROM ranked "
-                "WHERE __rank <= ? ORDER BY instrument, available_at, observation_time, " + ordering
+                + "), selected AS (SELECT instrument, arg_min("
+                + payload
+                + ", "
+                + sort_key
+                + ", ?) AS items FROM visible GROUP BY instrument), "
+                "expanded AS (SELECT instrument, unnest(items) AS item FROM selected) "
+                "SELECT instrument, item.available_at AS available_at, "
+                "item.observation_time AS observation_time, item.value AS value FROM expanded "
+                "ORDER BY instrument, available_at, observation_time, "
+                + payload_ordering
             )
             query_parameters.append(lookback.rows)
         elif latest:
+            payload = _selection_payload(snapshot.logical_order_columns)
+            sort_key = _selection_sort_key(snapshot.logical_order_columns)
             sql = (
                 "WITH visible AS ("
                 + source_sql
-                + "), ranked AS (SELECT *, row_number() OVER (PARTITION BY instrument ORDER BY "
-                + _descending_order(snapshot.logical_order_columns)
-                + ") AS __rank FROM visible) "
-                "SELECT instrument, available_at, observation_time, value FROM ranked "
-                "WHERE __rank = 1 ORDER BY instrument"
+                + "), selected AS (SELECT instrument, arg_min("
+                + payload
+                + ", "
+                + sort_key
+                + ") AS item FROM visible GROUP BY instrument) "
+                "SELECT instrument, item.available_at AS available_at, "
+                "item.observation_time AS observation_time, item.value AS value "
+                "FROM selected ORDER BY instrument"
             )
         else:
             sql = (
@@ -180,11 +200,19 @@ class ObservationStore:
                 + ") SELECT instrument, available_at, observation_time, value FROM visible "
                 "ORDER BY instrument, available_at, observation_time, " + ordering
             )
-        connection = duckdb.connect(database=":memory:")
+        connection = self._connection
+        owns_connection = False
+        if connection is None:
+            connection = duckdb.connect(database=":memory:")
+            if self._frozen_depth > 0:
+                self._connection = connection
+            else:
+                owns_connection = True
         try:
             return connection.execute(sql, query_parameters).fetchdf()
         finally:
-            connection.close()
+            if owns_connection:
+                connection.close()
 
     def latest(
         self,
@@ -228,10 +256,33 @@ def _ordering(columns: tuple[str, ...]) -> str:
     return ", ".join(_identifier(column) for column in columns)
 
 
-def _descending_order(columns: tuple[str, ...]) -> str:
-    return "available_at DESC, observation_time DESC, " + ", ".join(
-        f"{_identifier(column)} DESC NULLS LAST" for column in columns
+def _selection_payload(columns: tuple[str, ...]) -> str:
+    fields = [
+        "available_at := available_at",
+        "observation_time := observation_time",
+        "value := value",
+    ]
+    fields.extend(
+        f"__order_{index:03d} := {_identifier(column)}"
+        for index, column in enumerate(columns)
     )
+    return "struct_pack(" + ", ".join(fields) + ")"
+
+
+def _selection_sort_key(columns: tuple[str, ...]) -> str:
+    fields = [
+        "available_at",
+        "'DESC NULLS LAST'",
+        "observation_time",
+        "'DESC NULLS LAST'",
+    ]
+    for column in columns:
+        fields.extend((_identifier(column), "'DESC NULLS LAST'"))
+    return "create_sort_key(" + ", ".join(fields) + ")"
+
+
+def _payload_ordering(columns: tuple[str, ...]) -> str:
+    return ", ".join(f"item.__order_{index:03d}" for index, _column in enumerate(columns))
 
 
 def _calendar_lower_bound(as_of: datetime, lookback: CalendarLookback) -> datetime:

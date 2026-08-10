@@ -105,6 +105,62 @@ def test_frozen_scope_hashes_source_and_snapshot_once(
     assert hash_count == 6
 
 
+def test_frozen_scope_lazily_reuses_and_closes_one_duckdb_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "market.csv"
+    write_source(source)
+    registered = register_source(tmp_path)
+    store = ObservationStore()
+    real_connect = store_module.duckdb.connect
+
+    class ConnectionProbe:
+        def __init__(self) -> None:
+            self.inner = real_connect(database=":memory:")
+            self.close_count = 0
+
+        def execute(self, *args: object, **kwargs: object):
+            return self.inner.execute(*args, **kwargs)
+
+        def close(self) -> None:
+            self.close_count += 1
+            self.inner.close()
+
+    probes: list[ConnectionProbe] = []
+
+    def connect(*_args: object, **_kwargs: object) -> ConnectionProbe:
+        probe = ConnectionProbe()
+        probes.append(probe)
+        return probe
+
+    monkeypatch.setattr(store_module.duckdb, "connect", connect)
+
+    with store.frozen():
+        assert probes == []
+    assert probes == []
+
+    with store.frozen():
+        query(store, registered)
+        with store.frozen():
+            query(store, registered, field="alternate")
+        query(store, registered)
+        assert len(probes) == 1
+        assert probes[0].close_count == 0
+    assert probes[0].close_count == 1
+
+    with pytest.raises(RuntimeError, match="scope failure"), store.frozen():
+        query(store, registered)
+        raise RuntimeError("scope failure")
+    assert len(probes) == 2
+    assert probes[1].close_count == 1
+
+    query(store, registered)
+    query(store, registered)
+    assert len(probes) == 4
+    assert [probe.close_count for probe in probes] == [1, 1, 1, 1]
+
+
 def test_query_rejects_deleted_or_changed_source(tmp_path: Path) -> None:
     source = tmp_path / "market.csv"
     write_source(source)

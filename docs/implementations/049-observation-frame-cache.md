@@ -1,5 +1,11 @@
 # Integrity-preserving observation frame cache
 
+> **Historical implementation — superseded.** The in-memory normalized frame cache described
+> below was removed when registration-time normalized Parquet snapshots became the query authority.
+> See implementation records 062 and 063 for the current DuckDB snapshot query path and its bounded
+> top-N/frozen-connection behavior. The remainder of this record is retained as implementation
+> history rather than rewritten as current design.
+
 ## Intent
 
 Repeated observation queries in one flow reread the same registered CSV/Parquet columns and renormalized identical timestamps. The optimization must not weaken the frozen physical fingerprint or point-in-time contract, so source existence and SHA-256 remain mandatory on every query.

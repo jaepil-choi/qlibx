@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 
 from qlibx import (
@@ -113,6 +114,59 @@ def test_rows_lookback_is_per_instrument_and_tie_deterministic(tmp_path: Path) -
         instruments=("C",),
     )
     assert empty.empty
+
+
+def test_top_n_queries_preserve_ragged_nullable_pit_and_latest_semantics(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    QlibxProject.init(root, apply=True)
+    source = root / "nullable-panel.csv"
+    source.write_text(
+        "available_at,instrument,sequence,value\n"
+        "2025-01-01T01:00:00,A,1,1\n"
+        "2025-01-02T01:00:00,A,1,2\n"
+        "2025-01-02T01:00:00,A,2,\n"
+        "2025-01-04T01:00:00,A,1,99\n"
+        "2025-01-01T01:00:00,B,1,4\n",
+        encoding="utf-8",
+    )
+    project = QlibxProject.open(root)
+    outcome = project.register_dataset(
+        DatasetRegistration(
+            dataset_id="nullable-panel",
+            source="nullable-panel.csv",
+            source_format=SourceFormat.CSV,
+            instrument_field="instrument",
+            source_timezone="UTC",
+            available_at=AvailableAtField(field="available_at"),
+            logical_key=("available_at", "instrument", "sequence"),
+            semantic_bindings={"value": "value"},
+            source_provenance="nullable exact top-N fixture",
+        )
+    )
+    assert outcome.status is OutcomeStatus.COMPLETE
+    dataset = outcome.result
+    store = ObservationStore()
+    as_of = datetime(2025, 1, 3, tzinfo=UTC)
+
+    rows = store.query(
+        dataset,
+        field="value",
+        as_of=as_of,
+        lookback=RowsLookback(rows=2),
+        instruments=("A", "B", "C"),
+    )
+    assert rows["instrument"].tolist() == ["A", "A", "B"]
+    assert rows["available_at"].dt.day.tolist() == [2, 2, 1]
+    assert rows["value"].iloc[0] == 2
+    assert pd.isna(rows["value"].iloc[1])
+    assert rows["value"].iloc[2] == 4
+
+    latest = store.latest(dataset, field="value", as_of=as_of)
+    assert latest["instrument"].tolist() == ["A", "B"]
+    assert pd.isna(latest["value"].iloc[0])
+    assert latest["value"].iloc[1] == 4
 
 
 def test_strategy_v3_records_exact_lookback_snapshot_and_short_instrument_count(

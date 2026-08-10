@@ -30,7 +30,7 @@ future pseudocode는 구현된 API가 아니다.
 | Strategy 결과 권한 | **current:** `StrategyOperation.run()`은 `StrategyDraft`를 반환하고 Flow가 실제 data/artifact/state access를 붙여 `StrategyResult`를 생성·발행한다. DTO 승격 단계가 추가되는 단점이 있다 | Strategy가 `StrategyResult`를 직접 반환하면 API는 짧지만 Strategy가 관측할 수 없는 lineage를 스스로 작성하게 된다 | **actual 채택.** evidence authority와 계산 책임을 분리하는 편이 clean architecture에 가깝다 | 없음. Flow-owned 승격을 normative contract로 유지한다 |
 | composition root | **current:** `QlibxProject`가 주요 operation의 facade이자 composition root지만 composition/portfolio/analysis에는 public wrapper가 없다. 일부 caller가 concrete flow를 조립한다 | 장수명 `Engine`은 DI와 backend 교체가 쉽지만 현재 수요에는 global graph와 lifecycle 관리가 과도하다 | **부분 actual.** composition root는 유지하고 누락된 facade만 `GAP-PUBLIC-FACADE-001`로 닫는다 | 누락된 use case를 public method로 감싸고 bundled sample을 전환한다. 둘 이상의 runtime backend가 lifecycle을 공유할 때만 container/Engine을 재검토한다 |
 | role View | **current:** dataset-only base, Strategy 전용 artifact/account/feedback/performance/memory, Monitor 전용 account capability로 최소 권한을 강제한다 | 기능이 큰 단일 View를 상속하면 재사용은 쉽지만 Interface Segregation과 least-authority를 위반한다 | **architecture 채택 후 코드 동기화 완료.** 작은 내부 base의 중복보다 권한 누출 비용이 크다 | 새 operation은 실제 read set을 증명한 capability만 받는다 |
-| observation source | **current:** registered CSV/Parquet source를 pandas로 읽고 정규화한 frame을 `ObservationStore` 인스턴스 안에서 registration contract/path/fingerprint/field별로 cache한다. 매 query마다 source 존재와 SHA-256을 다시 검증하고 cache 사본에 PIT/session/point filter를 적용한다. Warm query는 full scan을 피하지만 첫 read와 source 크기 한계는 남는다 | partitioned Parquet + DuckDB predicate pushdown은 대규모 PIT query에 유리하지만 ingestion, invalidation과 migration cost가 생긴다 | **현재 actual 명시.** 무결성 검사는 cache 대상이 아니며 columnar store는 target이지 current가 아니다 | 대표 workload benchmark에서 cold scan cost가 budget을 넘고 ingestion/fingerprint contract가 정의될 때 전환한다 |
+| observation source | **current:** registration이 등록된 query column만 정규화해 content-addressed Parquet snapshot(`data/snapshot.py`)으로 발행하고, `ObservationStore`가 DuckDB `read_parquet`으로 질의한다. PIT cutoff, session/point filter와 선언된 `rows`/`calendar` lookback이 SQL predicate로 내려간다. 매 query마다 source SHA-256을 다시 검증한다. Ingestion 단계가 생겼고 snapshot invalidation 계약을 유지해야 한다 | 원본을 매 query마다 pandas로 읽고 in-memory filter하는 이전 방식은 ingestion이 없어 단순하지만 반복 full scan과 unbounded read를 막지 못한다 | **actual 채택 (2026-08-10 전환).** Exact lookback을 store query까지 강제하려면 predicate pushdown이 필요했다. 전체 history를 읽고 Strategy에서 자르는 경로를 구조적으로 막는다(PRD §7.6.1) | 전환 완료. `tests/performance/lookback_gate.py`가 fresh-process gate이며 대표 workload 수치는 implementation record에 기록한다 |
 | artifact payload | **current:** typed `QlibxModel` payload는 JSON이고 DuckDB는 catalog/index다. 단순하고 inspectable하지만 큰 matrix에는 비효율적이다 | Parquet payload backend는 tabular artifact에 효율적이지만 schema split과 backend complexity가 증가한다 | **현재 actual 채택.** Parquet payload는 future backend다 | 대형 matrix benchmark와 JSON/Parquet 간 atomic publication·compatibility 계약이 준비될 때 추가한다 |
 | generic ports | **current:** `BaseExchange[RequestT, ResultT]`와 `ExecutionPreparation[IntentT, ContextT, RequestT, EvidenceT]`가 공통 lifecycle만 정의하고 KRX/Academic concrete semantics는 분리한다 | 대부분의 추가 범용 port는 단일 구현에서 speculative하다 | **actual 채택.** Exchange와 preparation만 검증된 두 구현 경계에서 generic화했다 | `Operation`/publisher/loader protocol은 독립 구현 또는 test double이 같은 계약을 소비할 때만 추출한다 |
 | execution convention | **current:** `NextSessionCloseExecutor`와 `NextSessionOpenExecutor`가 독립 schedule을 만들고 `DailyExecutionFlow`가 profile의 execution-price role로 size/match한다. `execute_frozen_daily()`는 exact parent를 격리된 child Account에서 실행한다 | 별도 `FillConvention` class는 세 번째 가격 선택 구현에 유리하지만 현재 role field로 schedule/price 축이 이미 분리돼 있어 class hierarchy는 이르다 | **public daily close/open actual 채택.** explicit event calendar와 PIT price binding을 요구한다 | intraday VWAP/order-book profile이 공통 계산 behavior를 요구할 때 protocol을 추출한다 |
@@ -1057,16 +1057,20 @@ Reference 세 곳은 모두 instrument별 시계열이 기본 접근 단위다. 
 방식이라 20년 × 3000종목을 담을 수도 없다.
 
 qlibx의 논리적 접근 단위는 **decision time의 횡단면**이다. Current view는 메모리 누적 컨테이너가
-아니라 registered source를 매 query에 읽는 시간 한정 projection으로 구현한다. Query 전에 source fingerprint를 확인해 drift를 거부한다.
+아니라 등록 시점에 만든 normalized snapshot에 대한 시간 한정 projection으로 구현한다. Query 전에 source
+fingerprint를 확인해 drift를 거부한다.
 
 ```
-current source   user-owned CSV 또는 Parquet
-current query    pandas read + projected columns + in-memory PIT/filter
-current return   DataFrame (instrument × field)
-future target    partitioned Parquet + DuckDB predicate pushdown
+current source     user-owned CSV 또는 Parquet
+current ingestion  registration이 등록된 query column만 정규화한 content-addressed Parquet snapshot 발행
+current query      DuckDB read_parquet + predicate pushdown (PIT cutoff, session/point, rows/calendar lookback)
+current return     DataFrame (instrument × field)
 ```
 
-Current 방식은 별도 ingestion 없이 user source를 보존해 단순하지만 반복 full scan과 대규모 workload 비용이 단점이다. Columnar store는 representative PIT benchmark와 ingestion/invalidation/migration 계약이 준비된 뒤 도입한다. 이 횡단면 논리 축은 세 reference 어디에도 대응물이 없으므로 qlibx 순수 창작이다.
+이 배치는 2026-08-10에 pandas in-memory filter에서 전환했다. 전환 이유는 성능만이 아니다. PRD §7.6.1이
+*"전체 history를 먼저 읽은 뒤 Strategy code에서 자르는 경로를 bounded access로 간주하지 않는다"* 를
+요구하므로, 선언된 lookback이 **질의 자체에 박혀야** 한다. Ingestion 단계와 snapshot invalidation 계약이
+비용으로 추가되었다. 이 횡단면 논리 축은 세 reference 어디에도 대응물이 없으므로 qlibx 순수 창작이다.
 
 ### View reference와 선택 근거
 
@@ -2625,6 +2629,23 @@ G2의 구현은 Account/Position slice에 남아 있지만 별도 state store �
 ---
 
 ## 17. 개정 이력
+
+### 2026-08-10 — Observation store를 normalized Parquet + DuckDB로 전환
+
+Exact `rows`/`calendar` lookback을 구현하면서 observation source가 pandas in-memory filter에서
+registration-time normalized Parquet snapshot + DuckDB predicate pushdown으로 전환됐다. §1 alignment
+표와 §7의 서술을 actual에 맞춰 갱신했다.
+
+전환 근거는 성능만이 아니다. PRD §7.6.1이 *"전체 history를 먼저 읽은 뒤 Strategy code에서 자르는
+경로를 bounded access로 간주하지 않는다"* 를 요구하므로 선언된 lookback이 질의 자체에 박혀야 한다.
+그러려면 predicate pushdown이 필요하다. 대가로 ingestion 단계와 snapshot invalidation 계약이 생겼다.
+`tests/performance/lookback_gate.py`가 fresh-process gate이며 대표 workload 수치는 implementation
+record에 기록한다.
+
+`AccessRecord`는 lookback 증거로 `lookback`, `snapshot_fingerprint`와 `instruments_below_window`만
+남긴다. 초기 구현의 `requested_instruments`/`per_instrument_actual_count`는 PRD §7.6.1이 요구하는
+requested/actual **count**를 넘어 instrument마다 항목을 만들었고, 그 결과가 모든 published
+`StrategyResult`에 직렬화되어 횡단면 크기에 비례해 커졌다. 제거했다.
 
 ### 2026-08-10 — Price-axis authority와 return 산출 경로 단일화
 

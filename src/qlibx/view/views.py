@@ -5,7 +5,7 @@ from typing import cast
 
 import pandas as pd
 
-from qlibx.data.contracts import Lookback
+from qlibx.data.contracts import Lookback, RowsLookback
 from qlibx.data.registry import RegistrySnapshot
 from qlibx.data.requirements import ResolvedBinding
 from qlibx.data.store import ObservationStore
@@ -30,6 +30,27 @@ from qlibx.view.records import (
     StateHolding,
     ViewAccessError,
 )
+
+
+def _instruments_below_window(
+    frame: pd.DataFrame,
+    *,
+    lookback: Lookback | None,
+    instruments: tuple[str, ...] | None,
+) -> int:
+    """Count instruments that returned fewer rows than an exact rows lookback requested.
+
+    A declared instrument set also counts instruments with no visible row. Without one, only
+    instruments actually present are counted: PRD 7.6.1 forbids inferring an undeclared universe.
+    """
+
+    if not isinstance(lookback, RowsLookback):
+        return 0
+    counts = frame.groupby("instrument", sort=False).size()
+    satisfied = {str(name) for name, count in counts.items() if count >= lookback.rows}
+    if instruments is None:
+        return len(counts) - len(satisfied)
+    return len({str(item) for item in instruments} - satisfied)
 
 
 class _DatasetView:
@@ -131,24 +152,10 @@ class _DatasetView:
                     if dataset.query_snapshot is not None
                     else None
                 ),
-                requested_instruments=(
-                    tuple(sorted(set(instruments))) if instruments is not None else ()
-                ),
-                per_instrument_actual_count=(
-                    tuple(
-                        (
-                            instrument,
-                            int((frame["instrument"].astype(str) == instrument).sum()),
-                        )
-                        for instrument in sorted(set(instruments))
-                    )
-                    if instruments is not None
-                    else tuple(
-                        (str(instrument), int(count))
-                        for instrument, count in frame.groupby("instrument", sort=True)
-                        .size()
-                        .items()
-                    )
+                instruments_below_window=_instruments_below_window(
+                    frame,
+                    lookback=lookback,
+                    instruments=instruments,
                 ),
             )
         )

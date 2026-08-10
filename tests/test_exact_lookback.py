@@ -115,7 +115,7 @@ def test_rows_lookback_is_per_instrument_and_tie_deterministic(tmp_path: Path) -
     assert empty.empty
 
 
-def test_strategy_v3_records_exact_lookback_snapshot_and_requested_counts(
+def test_strategy_v3_records_exact_lookback_snapshot_and_short_instrument_count(
     tmp_path: Path,
 ) -> None:
     project, dataset = register(
@@ -138,8 +138,9 @@ def test_strategy_v3_records_exact_lookback_snapshot_and_requested_counts(
     assert access.lookback == RowsLookback(rows=2)
     assert dataset.query_snapshot is not None
     assert access.snapshot_fingerprint == dataset.query_snapshot.fingerprint
-    assert access.requested_instruments == ("A", "C")
-    assert access.per_instrument_actual_count == (("A", 2), ("C", 0))
+    assert access.row_count == 2
+    # "A" returned the requested two rows; declared "C" has none, so exactly one is short.
+    assert access.instruments_below_window == 1
     assert outcome.result.artifact.artifact_schema_version == 3
 
 

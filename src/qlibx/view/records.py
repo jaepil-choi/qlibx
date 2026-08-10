@@ -72,8 +72,7 @@ class AccessRecord(QlibxModel):
     max_observation_time: datetime | None = None
     lookback: Lookback | None = None
     snapshot_fingerprint: str | None = None
-    requested_instruments: tuple[str, ...] = ()
-    per_instrument_actual_count: tuple[tuple[str, int], ...] = ()
+    instruments_below_window: int = Field(default=0, ge=0)
 
 
 class StateHolding(QlibxModel):

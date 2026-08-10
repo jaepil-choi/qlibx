@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import TypeVar
 
@@ -36,6 +37,7 @@ from qlibx.execution import (
     BaseExchange,
     KrxBatchRequest,
     KrxExchange,
+    KrxExchangeConfig,
     MatchBatchResult,
 )
 from qlibx.execution.academic import (
@@ -79,6 +81,7 @@ from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardi
 from qlibx.operations import (
     MaterializationInvocation,
     MaterializationOperation,
+    StrategyArtifactBinding,
     StrategyInvocation,
     StrategyOperation,
 )
@@ -89,8 +92,16 @@ from qlibx.specs.constraints import (
     ConstraintAdjustmentSpec,
     ConstraintMonitoringSpec,
     ConstraintValidationSpec,
+    MvpConstraintPolicy,
 )
-from qlibx.specs.daily import DailySimulationSpec, FrozenDailyExecutionSpec
+from qlibx.specs.daily import (
+    DailyAccountSeed,
+    DailyMarketBinding,
+    DailySimulationSpec,
+    ExecutableInstrument,
+    ExecutionTiming,
+    FrozenDailyExecutionSpec,
+)
 
 ResultT = TypeVar("ResultT")
 
@@ -105,6 +116,8 @@ class QlibxProject:
         self._config = config
         self._artifacts: LocalArtifactBackend | None = None
         self._store = ObservationStore()
+        self._instruments: dict[str, ExecutableInstrument] = {}
+        self._exchange: KrxExchangeConfig | None = None
 
     @property
     def root(self) -> Path:
@@ -121,6 +134,76 @@ class QlibxProject:
 
     def register_dataset(self, registration: DatasetRegistration) -> OperationOutcome:
         return self.dataset_registry.register(registration)
+
+    def add_instrument(self, instrument: ExecutableInstrument) -> None:
+        """Accumulate one executable instrument for later spec construction (PRD 7.10.1).
+
+        Accumulation is deliberately incremental so an onboarding interview can confirm one
+        instrument at a time. Nothing here is frozen; `daily_spec` takes the snapshot.
+        """
+
+        existing = self._instruments.get(instrument.instrument_id)
+        if existing is not None and existing != instrument:
+            raise ValueError(
+                f"instrument {instrument.instrument_id!r} is already configured differently; "
+                "remove the earlier declaration before replacing it"
+            )
+        self._instruments[instrument.instrument_id] = instrument
+
+    def set_exchange(self, exchange: KrxExchangeConfig) -> None:
+        """Declare the venue configuration later specs freeze into their identity."""
+
+        self._exchange = exchange
+
+    @property
+    def configured_instruments(self) -> tuple[ExecutableInstrument, ...]:
+        return tuple(
+            self._instruments[key] for key in sorted(self._instruments)
+        )
+
+    @property
+    def configured_exchange(self) -> KrxExchangeConfig | None:
+        return self._exchange
+
+    def daily_spec(
+        self,
+        *,
+        run_id: str,
+        strategy_fingerprint: str,
+        account: DailyAccountSeed,
+        market: DailyMarketBinding,
+        decision_times: tuple[datetime, ...],
+        session_closes: tuple[datetime, ...],
+        session_opens: tuple[datetime, ...] = (),
+        execution_timing: ExecutionTiming = "next_session_close",
+        artifact_bindings: tuple[StrategyArtifactBinding, ...] = (),
+        constraint_policy: MvpConstraintPolicy | None = None,
+    ) -> DailySimulationSpec:
+        """Freeze the accumulated execution environment into one complete simulation spec.
+
+        The returned spec carries the instruments and exchange config by value, so it replays
+        without this project instance and later `add_instrument`/`set_exchange` calls cannot
+        change a run that already started (PRD 7.10, 7.10.1).
+        """
+
+        if not self._instruments:
+            raise ValueError("declare at least one instrument with add_instrument() first")
+        if self._exchange is None:
+            raise ValueError("declare the venue with set_exchange() first")
+        return DailySimulationSpec(
+            run_id=run_id,
+            strategy_fingerprint=strategy_fingerprint,
+            account=account,
+            instruments=self.configured_instruments,
+            exchange=self._exchange,
+            market=market,
+            execution_timing=execution_timing,
+            decision_times=decision_times,
+            session_closes=session_closes,
+            session_opens=session_opens,
+            artifact_bindings=artifact_bindings,
+            constraint_policy=constraint_policy,
+        )
 
     def reindex_datasets(
         self,

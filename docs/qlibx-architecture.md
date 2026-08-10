@@ -1988,6 +1988,13 @@ daily = project.run_daily(strategy, request, account=account, memory=memory)
 monitoring = project.monitor_constraints(spec)
 ```
 
+`QlibxProject`는 execution environment(instrument, exchange config)를 점진적으로 누적하는 API도 제공해야
+한다(PRD §7.10.1). 누적은 project instance에 머물고, spec factory가 그 스냅샷을 **complete frozen spec**으로
+굳힌 뒤 `run_*`가 그 spec만 소비한다. Flow는 project를 참조하지 않으므로 invocation 시작 이후의 누적
+변경이 진행 중인 run을 바꿀 수 없다. 이것이 인터뷰형 onboarding과 frozen invocation을 동시에 만족하는
+배치다. Spec에 "누적 상태를 나중에 읽는다"는 optional 구멍을 만드는 대안은 spec만으로 replay할 수 없게
+만들므로 채택하지 않는다. 현재 부재 상태는 `GAP-PROJECT-CONFIGURATION-001`이다.
+
 Current `QlibxProject`는 operation별 composition root지만 모든 flow에 완전한 facade method를 제공하지는 않는다.
 일부 sample이 `qlibx.flow` concrete class와 private catalog-session helper를 직접 조립하는 상태는
 `GAP-PUBLIC-FACADE-001`이다. Existing public method가 Flow, `ViewGate`, backend와 policy를 생성자에서 조립하는 방식은

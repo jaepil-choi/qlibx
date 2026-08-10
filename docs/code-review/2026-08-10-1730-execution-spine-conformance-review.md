@@ -259,13 +259,28 @@ Note가 `3f0c076` 시점에 작성되고 이후 커밋을 반영하지 않은 �
 
 ## 5. Product decision이 필요한 항목
 
-**Q-A — builder-style project configuration.** B-3에서 사용자가 `add_instrument`/`set_exchange`를
-요구했으나 PRD에 기록되지 않았고 Codex가 반대 방향으로 구현했다. (a) 현행 injection 유지,
-(b) builder 추가 후 `run_*`가 freeze, (c) 둘 다. 권고는 (b) — 인터뷰 기반 온보딩(PRD §1.2, §6.2)과
-매핑되기 때문이다.
+**Q-A — builder-style project configuration → ✅ (b)로 확정, 구현 완료.**
+사용자가 B-3 결정을 PRD에 기록하고 구현을 고치도록 지시했다. PRD §7.10.1을 신설하고
+`GAP-PROJECT-CONFIGURATION-001`을 등록했으며, `QlibxProject.add_instrument`/`set_exchange`/
+`daily_spec`을 구현했다.
 
-**Q-B — `qlibx.context` / root DTO module의 compatibility shim 부재.** PRD가 이미 "두지 않는다"로
-적혀 있으나 사용자 확인을 거치지 않았다. 설치된 프로젝트가 있다면 breaking change다.
+Codex가 든 거부 논거(*"hidden mutable composition이 replay/resume identity를 모호하게 만든다"*)는
+**타당하지만 특정 구현 방식의 문제**였다. 채택한 설계가 그 우려를 제거한다.
+
+| Codex의 우려 | 이 설계 |
+|---|---|
+| spec에 "나중에 project를 읽는다"는 구멍 | 만들지 않는다. spec은 완전하다 |
+| Flow가 project를 계속 참조 | 참조하지 않는다. spec만 소비한다 |
+| fingerprint에 환경이 빠짐 | `frozen_config_fingerprint()`가 instruments·exchange를 포함한다 |
+
+누적은 project instance에만 머물고 `daily_spec()`이 값으로 스냅샷한다. `DailySimulationSpec`의
+필드는 하나도 optional로 바꾸지 않았다. 세션 간 persistence는 수요가 확인되지 않아 넣지 않았다.
+
+**Q-B — compatibility shim 부재 → ✅ 현행 유지로 확정.**
+사용자 확인: qlibx를 설치해 쓰는 외부 프로젝트가 없고 0.1.0도 아직 release되지 않았다. 따라서
+`qlibx.context` 등 옛 import 경로가 사라져도 깨질 consumer가 없다. PRD의 "shim을 두지 않는다"
+문장을 그대로 둔다. Repo 내부는 이미 전부 새 경로로 통과한다. **Release 이후에는 같은 판단이
+성립하지 않으므로 다음 rename부터는 이 질문을 다시 물어야 한다.**
 
 ---
 
@@ -276,7 +291,7 @@ Note가 `3f0c076` 시점에 작성되고 이후 커밋을 반영하지 않은 �
 | **F-1** | C1 | `AccessRecord`에서 `requested_instruments`, `per_instrument_actual_count` 제거하고 `instruments_below_window: int`로 대체. `views.py`의 groupby/quadratic 계산 삭제 | ✅ 완료 |
 | **F-2** | C2 | architecture §1 alignment 표와 §7의 pandas 서술을 DuckDB/Parquet current로 갱신. §17에 전환 이력 추가 | ✅ 완료 |
 | **F-3** | C5 | `062` note의 "Remaining limitations" 갱신 | ✅ 완료 |
-| **F-4** | C4 | `GAP-RETURN-AUTHORITY-001` — `hypothetical_long_short_return` 제거 + showcase를 academic 경로 대조로 재작성 | 대기 |
+| **F-4** | C4 | `GAP-RETURN-AUTHORITY-001` — `hypothetical_long_short_return` 제거 + showcase를 academic 경로 대조로 재작성 | ✅ 완료 (show_002는 §8 참조) |
 | **F-5** | Q-A | 사용자 결정 후 진행 | 대기 |
 | — | Q3 | 조치 없음 (§4) | — |
 
@@ -331,3 +346,56 @@ qlibx 밖에서 재생성된 user-owned source다. 직전 리뷰(`2026-08-09-131
 `data_sources.yaml`을 현재 파일에 맞춰 갱신하거나 데이터를 되돌려야 한다. 별도 작업이다.
 
 미확인으로 남는 것: `tests/performance/lookback_gate.py`의 실제 수치(§3 C2의 전환 조건 근거).
+
+### F-4 실행 증거
+
+`show_003`을 재작성한 뒤 실제로 실행했다.
+
+```json
+"maximum_absolute_period_identity_delta": 1.1726730697603216e-15,
+"verified_identity_periods": 22
+```
+
+22개 보유기간 전부에서 **AcademicExchange가 도달한 NAV 수익률이 직전 rebalance weight와 실현 가격
+수익률이 함의하는 값과 부동소수점 오차 내로 일치**한다. Architecture §2.5가 $\sum w r$ 을 "1기간 검증
+항등식"으로 재정의한 것의 실행 증거다.
+
+이전 showcase는 pandas로 계산한 $\sum w r$ 을 qlibx가 계산한 같은 공식과 비교했다 — 두 구현이 같은
+식을 쓰는지만 확인했을 뿐 아무것도 증명하지 않았다. 지금은 **회계 경로가 항등식을 만족함**을 증명한다.
+
+---
+
+## 8. F-4 중 발견 — `show_002`는 이미 죽어 있다
+
+`showcases/show_002_academic_factor_research/run.py:461`도 삭제된 metric을 소비한다. 원래 리뷰 범위에는
+없었는데, Codex의 `3f0c076`이 이 파일을 수정하면서 드러났다.
+
+조사 결과 이 showcase는 **세 겹으로 이미 폐기 상태**다.
+
+1. **자기 README가 "superseded by `show_003_academic_exchange_factor_execution`"** 이라고 선언한다.
+2. **자기 staleness guard에 걸려 실행되지 않는다.**
+   ```python
+   if academic_exchange_present:
+       raise RuntimeError("showcase verdict is stale: AcademicExchange now exists")
+   ```
+   `hasattr(qlibx, "AcademicExchange")`는 **현재 True**다. 즉 이 runner는 아무것도 만들지 못하고 즉시 실패한다.
+3. **어떤 테스트도 참조하지 않는다.**
+
+그리고 내용 자체가 새 규칙의 정확한 반례다.
+
+```python
+cost = turnover * HYPOTHETICAL_COST_RATE
+net_return = qlibx_return - cost
+cumulative_gross *= 1 + qlibx_return     # ← Σwr 을 직접 누적
+cumulative_net  *= 1 + net_return
+```
+
+Exchange도 Account도 없이 $\sum w r$ 을 복리로 쌓고 손수 만든 비용 모델을 빼서 **"Net academic
+return"** 으로 보고한다. Architecture §2.5가 *"이 식을 직접 누적하면 무비용과 매기간 완전 리밸런싱을
+암묵적으로 가정하게 되고 turnover는 0으로 보고된다"* 고 쓴 바로 그 패턴이다. Quantile spread도 계산하는데
+PRD §4.2 개정으로 1층에서 빠진 항목이다.
+
+**권고: 디렉토리 폐기.** 이유는 (a) 이미 superseded이고 (b) 이미 실행 불가이며 (c) 남겨 두면 새 규칙을
+어기는 코드가 repo에 남는다. show_003이 같은 데이터 축으로 더 강한 증거를 만든다.
+
+**→ ✅ 사용자 결정으로 폐기했다.** 4개 파일을 제거했고 dangling reference는 없다.

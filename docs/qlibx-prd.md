@@ -1265,6 +1265,33 @@ Object construction 시 validation하는 typed model이 유용하며 Pydantic은
 동시 수정은 다음 invocation에만 반영한다. Failure evidence도 같은 frozen input identity를 가리켜야 안전한 retry와
 비교가 가능하다.
 
+#### 7.10.1 Incremental configuration은 frozen invocation과 충돌하지 않는다
+
+Freeze 시점은 **operation이 시작될 때**다. 그 전에 어떤 순서로 config를 조립했는지는 규정하지 않는다.
+따라서 project는 instrument와 exchange 같은 execution environment를 **점진적으로 누적하는 public
+API를 제공해야 한다.**
+
+```text
+add_instrument / set_exchange …   ← 누적. 이 구간은 mutable하다
+        ↓
+spec 생성                          ← 누적분을 complete frozen spec으로 스냅샷
+        ↓
+run_*                              ← spec을 freeze해 실행. 이후 누적 변경은 이 run에 영향을 주지 않는다
+```
+
+이 요구는 PRD §1.2와 §6.2의 인터뷰 기반 onboarding에서 나온다. Agent는 "어떤 종목을 거래하나요",
+"체결 가정은 무엇인가요"를 **한 번에 하나씩** 확인한다. 거대한 spec 생성자를 한 번에 채우는 표면만
+제공하면 그 대화 형태를 표현할 수 없다.
+
+다음 두 성질은 유지해야 한다.
+
+- **Spec은 완전하다.** 누적 상태를 참조하는 구멍을 남기지 않는다. 생성된 spec만으로 실행과 재현이
+  가능해야 하며 fingerprint가 실제 instrument 집합과 exchange config를 포함한다.
+- **Run은 스냅샷을 본다.** Invocation이 시작된 뒤의 누적 변경은 그 run을 바꾸지 않는다(§7.10).
+
+누적 상태를 숨긴 채 `run_*`가 project를 계속 참조하는 구현은 허용하지 않는다. Replay identity가
+모호해지기 때문이다. 누적 상태의 세션 간 persistence는 current requirement가 아니다.
+
 ### 7.11 Constraints are workflow capabilities
 
 Constraint는 모든 research workflow의 선행 조건이 아니다. Constraint adjustment, pre-execution validation 또는
@@ -1839,6 +1866,7 @@ decision이 closure evidence를 정의하고 acceptance fixture가 통과하기 
 | `GAP-LOOKBACK-001` | `ComponentRequirement`와 current `DatasetView.history()`에는 exact `rows`/`calendar` lookback이 없어 PIT 상한 이전의 전체 history를 읽는다 | Requirement→ResolvedBinding→Store query→AccessRecord 전체에서 rows/calendar semantics를 강제한다. 신규 registration은 content-addressed normalized Parquet query snapshot을 만들고 DuckDB predicate/projection pushdown으로 읽는다. 기존 registration은 explicit `QlibxProject.reindex_datasets()` 전에는 `DATASET_QUERY_SNAPSHOT_REQUIRED`로 실패하며 lazy query-time migration은 허용하지 않는다 |
 | `GAP-EXECUTION-FEEDBACK-001` | Execution artifact에는 zero-dealt diagnostic이 있지만 current StrategyView는 prior execution result를 직접 노출하지 않아 전량 blocked result가 다음 Strategy input에 도달하지 않는다 | `latest_execution_result()`가 exact execution artifact와 requested/dealt/reason을 노출하고 실제 access lineage를 기록한다. Zero-dealt는 Fill/Account mutation을 만들지 않으며 current profile은 decision 사이에 소비할 execution result가 하나라는 schedule invariant를 검증한다 |
 | `GAP-PUBLIC-FACADE-001` | Ensemble, stored-signal strategy, portfolio construction과 analysis/report sample이 `qlibx.flow` concrete class를 직접 조립해 `QlibxProject._with_catalog_session()` 경계를 우회한다 | `QlibxProject`가 기존 flow를 감싼 public methods를 제공하고 bundled samples/tests가 facade를 사용한다. Catalog session conflict는 raw exception이 아니라 typed `OperationOutcome`이다. 지원 import surface는 `from qlibx import ...`로 고정하고 제거되는 root/context module에는 compatibility shim을 두지 않는다 |
+| `GAP-PROJECT-CONFIGURATION-001` | `QlibxProject`는 instrument와 exchange를 점진적으로 누적하는 public API가 없다. Caller가 매 invocation마다 `DailySimulationSpec`에 전체 목록과 exchange config를 직접 채워야 하므로 §7.10.1의 인터뷰형 onboarding을 표현할 수 없다 | Project가 `add_instrument`/`set_exchange`로 execution environment를 누적하고, spec 생성 시 그 스냅샷을 complete frozen spec으로 굳힌다. 생성된 spec은 누적 상태를 참조하지 않으며 fingerprint가 실제 instrument 집합과 exchange config를 포함한다. Invocation 시작 후의 누적 변경은 그 run에 영향을 주지 않는다 |
 | `GAP-RETURN-AUTHORITY-001` | `analyze_signal`이 Exchange와 Account를 거치지 않고 `hypothetical_long_short_return`을 계산해 public analysis artifact로 발행한다. §4.2와 §4.6이 금지한 경로다 | 해당 metric과 그 계산을 제거해 signal 분석이 portfolio 수익률을 산출하지 않는다. Bundled showcase는 같은 1기간 수치를 academic execution 경로로 재현해 두 경로가 일치함을 증거로 남긴다 |
 | `GAP-IMPACT-001` | 현재 Exchange의 participation 산술은 observed available volume을 사용할 수 있지만 total-market-volume authority가 없다. 따라서 market-impact parameter는 public daily profile에서 지원하지 않으며 impact 미모델링 limitation을 유지한다 | total-market-volume semantic role, PIT binding, price-impact oracle, fee/impact 비중복 검증이 모두 추가되어야 한다 |
 | `GAP-DIRECTION-001` (hypothetical direction closed) | Explicit AcademicExchange listing이 Stock/ETF/Index/Factor의 `hypothetical_short`를 production Account와 분리해 지원한다. Fixed zero-friction profile, signed fractional quantity, next-session-close PIT price, state checkpoint와 hypothetical limitation을 보존한다 | `tests/test_academic_exchange.py`와 `tests/test_public_academic.py`에서 direction/price semantics, long-short/flip, all-or-fail preflight, lineage, replay와 checkpoint recovery를 검증한다 |

@@ -215,12 +215,17 @@ class ResolvedBinding(QlibxModel):
 ```python
 class AccessRecord(QlibxModel):
     ...
-    lookback_kind: str | None = None
-    lookback_window_start: datetime | None = None     # calendar일 때만
-    lookback_rows_requested: int | None = None        # rows일 때만
-    instruments_below_window: int = 0                 # rows일 때 N행 미만 종목 수
-    instruments_below_window_examples: tuple[str, ...] = ()   # bounded, 최대 20개
+    lookback: Lookback | None = None      # requested. typed 그대로 담는다
+    instruments_below_window: int = 0     # actual 부족분 (rows일 때만 0이 아님)
 ```
+
+> **2026-08-10 정정 — 필드 5개에서 2개로 줄였다.** 초안은 `lookback_kind`,
+> `lookback_window_start`, `lookback_rows_requested`, `instruments_below_window`,
+> `instruments_below_window_examples` 다섯 개를 제안했다. PRD §7.6.1이 요구하는 것은
+> *"requested/actual count를 access evidence에 기록한다"* 뿐이고, `Lookback` 객체 하나가
+> requested를 전부 담는다. `*_examples`는 뺀다 — PRD §4.6/§7.5의 "bounded offending example"은
+> **error**에 대한 요구이고 ragged panel은 error가 아니라 정상이기 때문이다.
+> 사용자 원칙: 새 attribute/lineage 필드는 꼭 필요할 때만 남긴다.
 
 #### `calendar` semantics
 

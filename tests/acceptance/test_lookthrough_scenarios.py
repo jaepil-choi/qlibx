@@ -12,7 +12,6 @@ from qlibx.account import (
     MemorySnapshot,
     StrategyMemoryStore,
 )
-from qlibx.context import StrategyView
 from qlibx.data import ComponentRequirement
 from qlibx.execution import Fill, Side
 from qlibx.flow import ResearchFlow
@@ -24,6 +23,7 @@ from qlibx.operations import (
     StrategyOperation,
     WeightEntry,
 )
+from qlibx.view import StrategyView
 from tests.acceptance.real_dw_support import (
     RealDwProject,
     close_at,

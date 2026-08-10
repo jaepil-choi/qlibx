@@ -7,18 +7,19 @@ from typing import Literal, Protocol
 
 from pydantic import Field, model_validator
 
-from qlibx.context import (
+from qlibx.data import ComponentRequirement
+from qlibx.domain import BudgetMode
+from qlibx.models import QlibxModel
+from qlibx.operations.artifacts import StrategyArtifactBinding, StrategyArtifactRequirement
+from qlibx.view import (
     AccessRecord,
+    ExecutionAccessRecord,
     FeedbackAccessRecord,
     MemoryAccessRecord,
     SessionPerformanceAccessRecord,
     StateAccessRecord,
     StrategyView,
 )
-from qlibx.data import ComponentRequirement
-from qlibx.domain import BudgetMode
-from qlibx.models import QlibxModel
-from qlibx.operations.artifacts import StrategyArtifactBinding, StrategyArtifactRequirement
 
 
 class DecisionAction(StrEnum):
@@ -90,21 +91,18 @@ class _StrategyResultFields(QlibxModel):
     expected_memory_version: int | None = None
     diagnostics: tuple[str, ...] = ()
     accesses: tuple[AccessRecord, ...] = ()
+    execution_accesses: tuple[ExecutionAccessRecord, ...] = ()
     state_accesses: tuple[StateAccessRecord, ...] = ()
     feedback_accesses: tuple[FeedbackAccessRecord, ...] = ()
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...] = ()
     memory_accesses: tuple[MemoryAccessRecord, ...] = ()
 
 
-class StrategyResultV1(_StrategyResultFields):
-    """Exact reader for the persisted strategy_result:v1 payload."""
-
-
 class StrategySourceStateLineage(QlibxModel):
     """One original stateful Strategy result carried through frozen composition."""
 
     source_artifact_id: str = Field(min_length=1)
-    source_artifact_schema_version: Literal[1, 2]
+    source_artifact_schema_version: Literal[3]
     source_invocation_id: str = Field(min_length=1)
     source_strategy_id: str = Field(min_length=1)
     declared_state_identity: str = Field(min_length=1)
@@ -113,6 +111,7 @@ class StrategySourceStateLineage(QlibxModel):
     feedback_accesses: tuple[FeedbackAccessRecord, ...] = ()
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...] = ()
     memory_accesses: tuple[MemoryAccessRecord, ...] = ()
+    execution_accesses: tuple[ExecutionAccessRecord, ...] = ()
 
     @model_validator(mode="after")
     def validate_observed_state(self) -> "StrategySourceStateLineage":
@@ -121,13 +120,14 @@ class StrategySourceStateLineage(QlibxModel):
             feedback_accesses=self.feedback_accesses,
             performance_accesses=self.performance_accesses,
             memory_accesses=self.memory_accesses,
+            execution_accesses=self.execution_accesses,
         ):
             raise ValueError("source lineage requires package-observed stateful access")
         return self
 
 
 class StrategyResult(_StrategyResultFields):
-    """Canonical strategy_result:v2 payload with transitive source-state lineage."""
+    """Canonical strategy_result:v3 payload with exact data and execution lineage."""
 
     source_state_lineage: tuple[StrategySourceStateLineage, ...] = ()
 
@@ -138,6 +138,7 @@ class StrategyResult(_StrategyResultFields):
             feedback_accesses=self.feedback_accesses,
             performance_accesses=self.performance_accesses,
             memory_accesses=self.memory_accesses,
+            execution_accesses=self.execution_accesses,
         )
         if observed_direct and not self.state_identity:
             raise ValueError("direct path dependence requires state_identity")
@@ -162,10 +163,17 @@ def strategy_accesses_are_path_dependent(
     feedback_accesses: tuple[FeedbackAccessRecord, ...],
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...],
     memory_accesses: tuple[MemoryAccessRecord, ...],
+    execution_accesses: tuple[ExecutionAccessRecord, ...] = (),
 ) -> bool:
     """Return package-observed direct path dependence for one Strategy computation."""
 
-    return bool(state_accesses or feedback_accesses or performance_accesses or memory_accesses)
+    return bool(
+        state_accesses
+        or feedback_accesses
+        or performance_accesses
+        or memory_accesses
+        or execution_accesses
+    )
 
 
 class StrategyComputationError(ValueError):
@@ -188,6 +196,7 @@ def validate_strategy_draft_path_dependence(
     feedback_accesses: tuple[FeedbackAccessRecord, ...],
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...],
     memory_accesses: tuple[MemoryAccessRecord, ...],
+    execution_accesses: tuple[ExecutionAccessRecord, ...] = (),
 ) -> bool:
     """Validate a Strategy's direct-state declaration against package-owned access evidence."""
 
@@ -196,6 +205,7 @@ def validate_strategy_draft_path_dependence(
         feedback_accesses=feedback_accesses,
         performance_accesses=performance_accesses,
         memory_accesses=memory_accesses,
+        execution_accesses=execution_accesses,
     )
     if draft.path_dependent is not observed_direct:
         raise StrategyPathDependenceError(

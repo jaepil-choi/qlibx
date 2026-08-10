@@ -1,6 +1,5 @@
-"""Exact version dispatch for persisted Strategy results."""
+"""Exact v3 dispatch and lineage handling for persisted Strategy results."""
 
-from qlibx.context import ArtifactAccessRecord, ArtifactInputProjection
 from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import (
     ArtifactContract,
@@ -11,29 +10,18 @@ from qlibx.evidence import (
 from qlibx.flow.failures import build_operation_error
 from qlibx.operations import (
     StrategyResult,
-    StrategyResultV1,
     StrategySourceStateLineage,
     strategy_accesses_are_path_dependent,
 )
-
-STRATEGY_RESULT_V1_CONTRACT = ArtifactContract(
-    artifact_type="strategy_result",
-    artifact_schema_version=1,
-    payload_model=StrategyResultV1,
-)
+from qlibx.view import ArtifactAccessRecord, ArtifactInputProjection
 
 STRATEGY_RESULT_CONTRACT = ArtifactContract(
     artifact_type="strategy_result",
-    artifact_schema_version=2,
+    artifact_schema_version=3,
     payload_model=StrategyResult,
 )
-
-STRATEGY_RESULT_CONTRACTS = (
-    STRATEGY_RESULT_V1_CONTRACT,
-    STRATEGY_RESULT_CONTRACT,
-)
-
-StrategyResultPayload = StrategyResultV1 | StrategyResult
+STRATEGY_RESULT_CONTRACTS = (STRATEGY_RESULT_CONTRACT,)
+StrategyResultPayload = StrategyResult
 
 
 def load_strategy_result(
@@ -44,7 +32,7 @@ def load_strategy_result(
     operation: str = "strategy_result.load",
     idempotency_identity: str | None = None,
 ) -> OperationOutcome:
-    """Load schema 1 or 2 by exact envelope metadata, never by catalog selection."""
+    """Load only canonical schema v3 by exact artifact ID and envelope metadata."""
 
     selected_envelope = envelope
     if selected_envelope is None:
@@ -61,20 +49,20 @@ def load_strategy_result(
             actual_version=selected_envelope.artifact_schema_version,
             reason="provided envelope does not match the exact artifact ID",
         )
-    contract_by_version = {
-        contract.artifact_schema_version: contract for contract in STRATEGY_RESULT_CONTRACTS
-    }
-    contract = contract_by_version.get(selected_envelope.artifact_schema_version)
-    if selected_envelope.artifact_type != "strategy_result" or contract is None:
+    if (
+        selected_envelope.artifact_type != STRATEGY_RESULT_CONTRACT.artifact_type
+        or selected_envelope.artifact_schema_version
+        != STRATEGY_RESULT_CONTRACT.artifact_schema_version
+    ):
         return _unsupported(
             artifact_id=artifact_id,
             operation=operation,
             idempotency_identity=idempotency_identity,
             actual_type=selected_envelope.artifact_type,
             actual_version=selected_envelope.artifact_schema_version,
-            reason="artifact is not a supported Strategy result schema",
+            reason="artifact is not canonical strategy_result:v3",
         )
-    return artifacts.load_model(artifact_id, contract)
+    return artifacts.load_model(artifact_id, STRATEGY_RESULT_CONTRACT)
 
 
 def _unsupported(
@@ -103,11 +91,9 @@ def _unsupported(
         },
         expected={
             "artifact_type": "strategy_result",
-            "artifact_schema_versions": (1, 2),
+            "artifact_schema_versions": (3,),
         },
-        retry_preconditions=(
-            "supply the exact ID of a supported strategy_result:v1 or v2 artifact",
-        ),
+        retry_preconditions=("rerun the Strategy producer to create strategy_result:v3",),
     )
     return OperationOutcome(status=OutcomeStatus.FAILED, errors=(error,))
 
@@ -125,7 +111,7 @@ def collect_strategy_source_lineage(
     projections: tuple[ArtifactInputProjection, ...],
     accesses: tuple[ArtifactAccessRecord, ...],
 ) -> tuple[StrategySourceStateLineage, ...]:
-    """Flatten canonical lineage from actually accessed Strategy-result projections."""
+    """Flatten canonical lineage from actually accessed v3 Strategy projections."""
 
     projection_by_key = {
         (projection.consumer_role, projection.artifact_id): projection for projection in projections
@@ -156,11 +142,7 @@ def collect_strategy_source_lineage(
         if access.artifact_type != "strategy_result":
             continue
         payload = projection.payload
-        if isinstance(payload, StrategyResult):
-            candidates = _v2_source_lineage(access.artifact_id, payload)
-        elif isinstance(payload, StrategyResultV1):
-            candidates = _v1_source_lineage(access.artifact_id, payload)
-        else:
+        if not isinstance(payload, StrategyResult):
             raise StrategySourceLineageError(
                 "STRATEGY_SOURCE_LINEAGE_CONFLICT",
                 {
@@ -168,7 +150,7 @@ def collect_strategy_source_lineage(
                     "payload_model": type(payload).__name__,
                 },
             )
-        for candidate in candidates:
+        for candidate in _v3_source_lineage(access.artifact_id, payload):
             existing = lineage_by_source.get(candidate.source_artifact_id)
             if existing is not None and existing != candidate:
                 raise StrategySourceLineageError(
@@ -179,45 +161,7 @@ def collect_strategy_source_lineage(
     return tuple(lineage_by_source[key] for key in sorted(lineage_by_source))
 
 
-def _v1_source_lineage(
-    artifact_id: str,
-    payload: StrategyResultV1,
-) -> tuple[StrategySourceStateLineage, ...]:
-    observed = strategy_accesses_are_path_dependent(
-        state_accesses=payload.state_accesses,
-        feedback_accesses=payload.feedback_accesses,
-        performance_accesses=payload.performance_accesses,
-        memory_accesses=payload.memory_accesses,
-    )
-    if payload.path_dependent is not observed or (observed and not payload.state_identity):
-        raise StrategySourceLineageError(
-            "STRATEGY_SOURCE_LINEAGE_INCOMPLETE",
-            {
-                "source_artifact_id": artifact_id,
-                "source_schema_version": 1,
-                "declared_path_dependent": payload.path_dependent,
-                "observed_stateful_access": observed,
-            },
-        )
-    if not observed:
-        return ()
-    return (
-        StrategySourceStateLineage(
-            source_artifact_id=artifact_id,
-            source_artifact_schema_version=1,
-            source_invocation_id=payload.invocation_id,
-            source_strategy_id=payload.strategy_id,
-            declared_state_identity=payload.state_identity,
-            declared_feedback_cursor=payload.feedback_cursor,
-            state_accesses=payload.state_accesses,
-            feedback_accesses=payload.feedback_accesses,
-            performance_accesses=payload.performance_accesses,
-            memory_accesses=payload.memory_accesses,
-        ),
-    )
-
-
-def _v2_source_lineage(
+def _v3_source_lineage(
     artifact_id: str,
     payload: StrategyResult,
 ) -> tuple[StrategySourceStateLineage, ...]:
@@ -227,13 +171,14 @@ def _v2_source_lineage(
         feedback_accesses=payload.feedback_accesses,
         performance_accesses=payload.performance_accesses,
         memory_accesses=payload.memory_accesses,
+        execution_accesses=payload.execution_accesses,
     )
     if observed:
         assert payload.state_identity is not None
         inherited.append(
             StrategySourceStateLineage(
                 source_artifact_id=artifact_id,
-                source_artifact_schema_version=2,
+                source_artifact_schema_version=3,
                 source_invocation_id=payload.invocation_id,
                 source_strategy_id=payload.strategy_id,
                 declared_state_identity=payload.state_identity,
@@ -242,6 +187,7 @@ def _v2_source_lineage(
                 feedback_accesses=payload.feedback_accesses,
                 performance_accesses=payload.performance_accesses,
                 memory_accesses=payload.memory_accesses,
+                execution_accesses=payload.execution_accesses,
             )
         )
     return tuple(inherited)
@@ -250,7 +196,7 @@ def _v2_source_lineage(
 def source_lineage_dependencies(
     lineages: tuple[StrategySourceStateLineage, ...],
 ) -> tuple[DependencyEdge, ...]:
-    """Expose each inherited state/cursor origin as deterministic dependency edges."""
+    """Expose every inherited state and execution origin as dependency edges."""
 
     dependencies: list[DependencyEdge] = []
     for source_index, lineage in enumerate(lineages):
@@ -305,6 +251,15 @@ def source_lineage_dependencies(
                 selected_fields=("value", "feedback_cursor"),
             )
             for index, access in enumerate(lineage.memory_accesses)
+        )
+        dependencies.extend(
+            DependencyEdge(
+                dependency_kind="artifact",
+                dependency_id=access.artifact_id,
+                consumer_role=f"{prefix}_execution_{index:03d}",
+                compatibility_fingerprint=access.content_hash,
+            )
+            for index, access in enumerate(lineage.execution_accesses)
         )
     return tuple(dependencies)
 

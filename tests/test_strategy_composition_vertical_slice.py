@@ -221,9 +221,9 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
     ensemble_artifact = composed.result.strategy.artifact
     assert ensemble_result.state_identity is None
     assert ensemble_result.feedback_cursor is None
-    assert tuple(
-        item.source_artifact_id for item in ensemble_result.source_state_lineage
-    ) == tuple(sorted((source_envelope_a.artifact_id, source_envelope_b.artifact_id)))
+    assert tuple(item.source_artifact_id for item in ensemble_result.source_state_lineage) == tuple(
+        sorted((source_envelope_a.artifact_id, source_envelope_b.artifact_id))
+    )
     assert {
         access.account_id
         for lineage in ensemble_result.source_state_lineage
@@ -253,7 +253,7 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
         "            requirement_id='frozen.ensemble',\n"
         "            consumer_role='frozen_ensemble',\n"
         "            artifact_type='strategy_result',\n"
-        "            artifact_schema_version=2,\n"
+        "            artifact_schema_version=3,\n"
         "        ),)\n"
         "    def run(self, view):\n"
         "        source = view.artifact('frozen_ensemble', StrategyResult)\n"
@@ -295,15 +295,17 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
     )
     assert downstream.status is OutcomeStatus.COMPLETE
     assert (producer_a.call_count, producer_b.call_count) == producer_counts_before
-    assert tuple(
-        selected.artifacts.load_envelope(item.artifact_id).result
-        for item in (source_envelope_a, source_envelope_b)
-    ) == source_envelopes_before
+    assert (
+        tuple(
+            selected.artifacts.load_envelope(item.artifact_id).result
+            for item in (source_envelope_a, source_envelope_b)
+        )
+        == source_envelopes_before
+    )
 
     downstream_result = downstream.result
     assert all(
-        item.account_id == "downstream-account-b"
-        for item in downstream_result.decision_intents
+        item.account_id == "downstream-account-b" for item in downstream_result.decision_intents
     )
     assert downstream_result.decision_intents[-1].account_version > 0
     assert all(
@@ -319,8 +321,6 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
         assert result.feedback_cursor is None
         assert result.state_accesses == ()
         assert result.memory_accesses == ()
-        assert tuple(
-            item.source_artifact_id for item in result.source_state_lineage
-        ) == tuple(
+        assert tuple(item.source_artifact_id for item in result.source_state_lineage) == tuple(
             item.source_artifact_id for item in ensemble_result.source_state_lineage
         )

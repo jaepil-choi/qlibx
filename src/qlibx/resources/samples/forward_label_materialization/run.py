@@ -13,7 +13,7 @@ from qlibx import (
     OutcomeStatus,
     QlibxProject,
 )
-from qlibx.data import DatasetRegistration
+from qlibx.data import DatasetRegistration, RowsLookback
 
 
 def at_close(day: int) -> datetime:
@@ -43,6 +43,7 @@ def main(project_root: Path) -> dict[str, object]:
     missing_model = ForwardReturnLabelModel(
         "sample-forward-label-prices",
         "sample-forward-label-unregistered-horizon",
+        RowsLookback(rows=100),
         producer_id="sample.forward-label.missing-horizon",
     )
     missing = project.materialize(
@@ -65,6 +66,7 @@ def main(project_root: Path) -> dict[str, object]:
     model = ForwardReturnLabelModel(
         "sample-forward-label-prices",
         "sample-forward-label-horizon",
+        RowsLookback(rows=100),
         producer_id="sample.forward-label.v1",
     )
     retry = require_complete(
@@ -100,9 +102,7 @@ def main(project_root: Path) -> dict[str, object]:
         "failure_stage": missing.errors[0].stage_path,
         "failure_requirement_id": missing.errors[0].requirement_id,
         "retry_artifact_id": retry_result.artifact.artifact_id,
-        "retry_entries": [
-            entry.model_dump(mode="json") for entry in retry_result.result.entries
-        ],
+        "retry_entries": [entry.model_dump(mode="json") for entry in retry_result.result.entries],
         "later_entry_count": len(later_result.result.entries),
         "future_hidden_entry_count": (
             len(later_result.result.entries) - len(retry_result.result.entries)
@@ -118,8 +118,7 @@ def main(project_root: Path) -> dict[str, object]:
             edge.consumer_role for edge in retry_result.artifact.dependencies
         ],
         "retry_resolves_error": any(
-            edge.dependency_kind == "error"
-            and edge.dependency_id == failure.artifact_id
+            edge.dependency_kind == "error" and edge.dependency_id == failure.artifact_id
             for edge in retry_result.artifact.dependencies
         ),
         "artifact_types": sorted(

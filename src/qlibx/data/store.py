@@ -1,33 +1,37 @@
-"""Private observation access used only by scoped views."""
+"""Private bounded observation access used only by scoped views."""
 
+import calendar
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import duckdb
 import pandas as pd
 
-from qlibx.data.contracts import AvailableAtField, RegisteredDataset, SourceFormat
+from qlibx.data.contracts import CalendarLookback, Lookback, RegisteredDataset, RowsLookback
 from qlibx.data.registry import file_hash
-from qlibx.data.timestamps import TimestampNormalizationError, normalize_timestamps
 
 
 class DataSnapshotError(RuntimeError):
-    """Raised when registered physical data no longer matches its frozen identity."""
+    """Raised when registered source or query-snapshot authority is unavailable."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(f"{code}: {message}")
 
 
 class ObservationStore:
-    """Read registered observations with an unavoidable availability predicate."""
+    """Query immutable normalized Parquet with mandatory PIT and bounded history."""
 
     def __init__(self) -> None:
-        self._frame_cache: dict[tuple[str, str, str, str], pd.DataFrame] = {}
         self._frozen_depth = 0
-        self._frozen_verified: set[tuple[str, str]] = set()
+        self._frozen_verified: set[tuple[str, str, str]] = set()
 
     @contextmanager
     def frozen(self) -> Iterator[None]:
-        """Verify each physical source once in one reentrant invocation scope."""
+        """Verify each physical source and snapshot once in one invocation scope."""
 
         outermost = self._frozen_depth == 0
         if outermost:
@@ -49,126 +53,194 @@ class ObservationStore:
         session_date: date | None = None,
         session_timezone: str | None = None,
         observation_at: datetime | None = None,
+        lookback: Lookback | None = None,
+        instruments: tuple[str, ...] | None = None,
+        latest: bool = False,
     ) -> pd.DataFrame:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("view as_of must be timezone-aware")
         if session_date is not None and session_timezone is None:
             raise ValueError("session query requires an explicit session_timezone")
-        cutoff = as_of.astimezone(UTC)
-        source = Path(dataset.source).resolve()
-        verification_key = (str(source), dataset.physical_fingerprint)
-        verified = self._frozen_depth > 0 and verification_key in self._frozen_verified
-        if not source.is_file() or (
-            not verified and file_hash(source) != dataset.physical_fingerprint
+        if observation_at is not None and (
+            observation_at.tzinfo is None or observation_at.utcoffset() is None
         ):
+            raise ValueError("observation_at must be timezone-aware")
+        bounded_point = session_date is not None or observation_at is not None or latest
+        if lookback is None and not bounded_point:
             raise DataSnapshotError(
-                f"physical source no longer matches registration {dataset.registration_identity}"
+                "DATASET_LOOKBACK_REQUIRED",
+                "historical reads require a declared rows or calendar lookback",
             )
-        if self._frozen_depth > 0:
-            self._frozen_verified.add(verification_key)
-        cache_key = (
-            dataset.registration_identity,
-            str(source),
-            dataset.physical_fingerprint,
-            field,
+        if sum(value is not None for value in (session_date, observation_at)) + int(latest) > 1:
+            raise ValueError("session, point, and latest query modes are mutually exclusive")
+
+        snapshot = dataset.query_snapshot
+        if dataset.registration_schema_version != 2 or snapshot is None:
+            raise DataSnapshotError(
+                "DATASET_QUERY_SNAPSHOT_REQUIRED",
+                f"dataset {dataset.dataset_id!r} requires project.reindex_datasets()",
+            )
+        source = Path(dataset.source).resolve()
+        snapshot_path = Path(snapshot.path).resolve()
+        self._verify(
+            kind="source",
+            path=source,
+            expected=dataset.physical_fingerprint,
+            code="DATASET_SOURCE_DRIFT",
+            message=(
+                f"physical source no longer matches registration {dataset.registration_identity}"
+            ),
         )
-        cached = self._frame_cache.get(cache_key)
-        if cached is None:
-            cached = self._load_normalized_frame(dataset, source=source, field=field)
-            self._frame_cache[cache_key] = cached
-        visible = cached.loc[cached["available_at"] <= cutoff]
+        self._verify(
+            kind="snapshot",
+            path=snapshot_path,
+            expected=snapshot.fingerprint,
+            code="DATASET_QUERY_SNAPSHOT_DRIFT",
+            message=f"query snapshot no longer matches dataset {dataset.dataset_id!r}",
+        )
+        selected_field = "available_at" if field == "__available_at__" else field
+        if selected_field not in snapshot.columns:
+            raise DataSnapshotError(
+                "DATASET_BOUND_FIELD_MISSING",
+                f"registered field {field!r} is absent from the query snapshot",
+            )
+
+        cutoff = as_of.astimezone(UTC)
+        predicates = ["available_at <= ?"]
+        parameters: list[object] = [cutoff]
+        if instruments is not None:
+            canonical = tuple(sorted(set(instruments)))
+            if canonical:
+                predicates.append(f"instrument IN ({','.join('?' for _ in canonical)})")
+                parameters.extend(canonical)
+            else:
+                predicates.append("FALSE")
         if session_date is not None:
             if dataset.observation_time_field is None:
                 raise DataSnapshotError(
-                    "session query requires an observation_time_field registration"
+                    "DATASET_OBSERVATION_TIME_REQUIRED",
+                    "session query requires an observation_time_field registration",
                 )
-            visible = visible.loc[
-                visible["observation_time"]
-                .dt.tz_convert(ZoneInfo(session_timezone))
-                .dt.date
-                == session_date
-            ]
+            start = datetime.combine(
+                session_date,
+                time.min,
+                tzinfo=ZoneInfo(session_timezone),
+            ).astimezone(UTC)
+            end = start + timedelta(days=1)
+            predicates.extend(("observation_time >= ?", "observation_time < ?"))
+            parameters.extend((start, end))
         if observation_at is not None:
             if dataset.observation_time_field is None:
                 raise DataSnapshotError(
-                    "point query requires an observation_time_field registration"
+                    "DATASET_OBSERVATION_TIME_REQUIRED",
+                    "point query requires an observation_time_field registration",
                 )
-            if observation_at.tzinfo is None or observation_at.utcoffset() is None:
-                raise ValueError("observation_at must be timezone-aware")
-            selected_observation = observation_at.astimezone(UTC)
-            visible = visible.loc[
-                visible["observation_time"] == selected_observation
-            ]
-        return visible.sort_values(
-            ["available_at", "observation_time", "instrument"],
-            kind="mergesort",
-        ).reset_index(drop=True)
+            predicates.append("observation_time = ?")
+            parameters.append(observation_at.astimezone(UTC))
+        if isinstance(lookback, CalendarLookback):
+            lower = _calendar_lower_bound(as_of, lookback)
+            predicates.append("available_at >= ?")
+            parameters.append(lower)
 
-    @staticmethod
-    def _load_normalized_frame(
+        field_sql = _identifier(selected_field)
+        ordering = _ordering(snapshot.logical_order_columns)
+        where_sql = " AND ".join(predicates)
+        source_sql = (
+            "SELECT instrument, available_at, observation_time, "
+            f"{field_sql} AS value, {ordering} "
+            "FROM read_parquet(?) "
+            f"WHERE {where_sql}"
+        )
+        query_parameters: list[object] = [str(snapshot_path), *parameters]
+        if isinstance(lookback, RowsLookback):
+            sql = (
+                "WITH visible AS ("
+                + source_sql
+                + "), ranked AS (SELECT *, row_number() OVER (PARTITION BY instrument ORDER BY "
+                + _descending_order(snapshot.logical_order_columns)
+                + ") AS __rank FROM visible) "
+                "SELECT instrument, available_at, observation_time, value FROM ranked "
+                "WHERE __rank <= ? ORDER BY instrument, available_at, observation_time, " + ordering
+            )
+            query_parameters.append(lookback.rows)
+        elif latest:
+            sql = (
+                "WITH visible AS ("
+                + source_sql
+                + "), ranked AS (SELECT *, row_number() OVER (PARTITION BY instrument ORDER BY "
+                + _descending_order(snapshot.logical_order_columns)
+                + ") AS __rank FROM visible) "
+                "SELECT instrument, available_at, observation_time, value FROM ranked "
+                "WHERE __rank = 1 ORDER BY instrument"
+            )
+        else:
+            sql = (
+                "WITH visible AS ("
+                + source_sql
+                + ") SELECT instrument, available_at, observation_time, value FROM visible "
+                "ORDER BY instrument, available_at, observation_time, " + ordering
+            )
+        connection = duckdb.connect(database=":memory:")
+        try:
+            return connection.execute(sql, query_parameters).fetchdf()
+        finally:
+            connection.close()
+
+    def latest(
+        self,
         dataset: RegisteredDataset,
         *,
-        source: Path,
         field: str,
+        as_of: datetime,
+        instruments: tuple[str, ...] | None = None,
     ) -> pd.DataFrame:
-        if isinstance(dataset.available_at, AvailableAtField):
-            time_field = dataset.available_at.field
-        else:
-            time_field = dataset.available_at.source_field
-        selected_columns = {
-            dataset.instrument_field,
-            time_field,
-            *(() if field == "__available_at__" else (field,)),
-            *(
-                ()
-                if dataset.observation_time_field is None
-                else (dataset.observation_time_field,)
-            ),
-        }
-        if dataset.source_format is SourceFormat.CSV:
-            frame = pd.read_csv(
-                source,
-                usecols=sorted(selected_columns),
-                dtype={dataset.instrument_field: "string"},
-            )
-        else:
-            frame = pd.read_parquet(source, columns=sorted(selected_columns))
-
-        try:
-            available_at = normalize_timestamps(
-                frame[time_field],
-                field=time_field,
-                source_timezone=dataset.source_timezone,
-            ).utc
-            observation_time = (
-                normalize_timestamps(
-                    frame[dataset.observation_time_field],
-                    field=dataset.observation_time_field,
-                    source_timezone=dataset.source_timezone,
-                ).utc
-                if dataset.observation_time_field is not None
-                else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
-            )
-        except TimestampNormalizationError as exc:
-            raise DataSnapshotError(
-                f"registered timestamp contract is no longer readable ({exc.code}); "
-                "re-register the dataset with an explicit source_timezone"
-            ) from exc
-        if not isinstance(dataset.available_at, AvailableAtField):
-            available_at = available_at + pd.to_timedelta(
-                dataset.available_at.delay_seconds,
-                unit="s",
-            )
-        if field != "__available_at__" and field not in frame.columns:
-            raise DataSnapshotError(
-                f"registered field {field!r} is absent from the physical source"
-            )
-        values = available_at if field == "__available_at__" else frame[field]
-        return pd.DataFrame(
-            {
-                "instrument": frame[dataset.instrument_field].astype("string"),
-                "available_at": available_at,
-                "observation_time": observation_time,
-                "value": values,
-            }
+        return self.query(
+            dataset,
+            field=field,
+            as_of=as_of,
+            instruments=instruments,
+            latest=True,
         )
+
+    def _verify(
+        self,
+        *,
+        kind: str,
+        path: Path,
+        expected: str,
+        code: str,
+        message: str,
+    ) -> None:
+        key = (kind, str(path), expected)
+        if self._frozen_depth > 0 and key in self._frozen_verified:
+            return
+        if not path.is_file() or file_hash(path) != expected:
+            raise DataSnapshotError(code, message)
+        if self._frozen_depth > 0:
+            self._frozen_verified.add(key)
+
+
+def _identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _ordering(columns: tuple[str, ...]) -> str:
+    return ", ".join(_identifier(column) for column in columns)
+
+
+def _descending_order(columns: tuple[str, ...]) -> str:
+    return "available_at DESC, observation_time DESC, " + ", ".join(
+        f"{_identifier(column)} DESC NULLS LAST" for column in columns
+    )
+
+
+def _calendar_lower_bound(as_of: datetime, lookback: CalendarLookback) -> datetime:
+    timezone = ZoneInfo(lookback.timezone)
+    local_date = as_of.astimezone(timezone).date()
+    total_months = local_date.year * 12 + local_date.month - 1
+    total_months -= lookback.years * 12 + lookback.months
+    year, zero_based_month = divmod(total_months, 12)
+    month = zero_based_month + 1
+    day = min(local_date.day, calendar.monthrange(year, month)[1])
+    shifted = date(year, month, day) - timedelta(days=lookback.days)
+    return datetime.combine(shifted, time.min, tzinfo=timezone).astimezone(UTC)

@@ -6,6 +6,7 @@ from typing import Any, Protocol, TypeVar, cast
 import pandas as pd
 from pydantic import Field
 
+from qlibx.data.contracts import Lookback
 from qlibx.data.registry import RegistrySnapshot
 from qlibx.data.requirements import ResolvedBinding
 from qlibx.data.store import ObservationStore
@@ -38,6 +39,21 @@ class ArtifactInputProjection(QlibxModel):
     payload: QlibxModel
 
 
+class ExecutionInputProjection(QlibxModel):
+    artifact_id: str = Field(min_length=1)
+    artifact_type: str = Field(min_length=1)
+    artifact_schema_version: int = Field(ge=1)
+    content_hash: str = Field(min_length=1)
+    payload: QlibxModel
+
+
+class ExecutionAccessRecord(QlibxModel):
+    artifact_id: str = Field(min_length=1)
+    artifact_type: str = Field(min_length=1)
+    artifact_schema_version: int = Field(ge=1)
+    content_hash: str = Field(min_length=1)
+
+
 class ArtifactAccessRecord(QlibxModel):
     requirement_id: str = Field(min_length=1)
     consumer_role: str = Field(min_length=1)
@@ -59,6 +75,10 @@ class AccessRecord(QlibxModel):
     row_count: int = Field(ge=0)
     max_available_at: datetime | None = None
     max_observation_time: datetime | None = None
+    lookback: Lookback | None = None
+    snapshot_fingerprint: str | None = None
+    requested_instruments: tuple[str, ...] = ()
+    per_instrument_actual_count: tuple[tuple[str, int], ...] = ()
 
 
 class StateHolding(QlibxModel):
@@ -176,8 +196,17 @@ class _DatasetView:
     def as_of(self) -> datetime:
         return self._as_of
 
-    def history(self, semantic_role: str) -> pd.DataFrame:
-        return self._read(semantic_role)
+    def history(
+        self,
+        semantic_role: str,
+        instruments: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame:
+        binding = self._binding(semantic_role)
+        return self._read(
+            semantic_role,
+            lookback=binding.lookback,
+            instruments=instruments,
+        )
 
     def session(
         self,
@@ -204,6 +233,9 @@ class _DatasetView:
         session_date: date | None = None,
         session_timezone: str | None = None,
         observation_at: datetime | None = None,
+        lookback: Lookback | None = None,
+        instruments: tuple[str, ...] | None = None,
+        latest: bool = False,
     ) -> pd.DataFrame:
         binding = self._binding(semantic_role)
         dataset = self._registry.get(binding.dataset_id)
@@ -216,6 +248,9 @@ class _DatasetView:
             session_date=session_date,
             session_timezone=session_timezone,
             observation_at=observation_at,
+            lookback=lookback,
+            instruments=instruments,
+            latest=latest,
         )
         maximum = frame["available_at"].max() if len(frame) else None
         maximum_observation = frame["observation_time"].max() if len(frame) else None
@@ -233,18 +268,44 @@ class _DatasetView:
                     if maximum_observation is not None and not pd.isna(maximum_observation)
                     else None
                 ),
+                lookback=lookback,
+                snapshot_fingerprint=(
+                    dataset.query_snapshot.fingerprint
+                    if dataset.query_snapshot is not None
+                    else None
+                ),
+                requested_instruments=(
+                    tuple(sorted(set(instruments))) if instruments is not None else ()
+                ),
+                per_instrument_actual_count=(
+                    tuple(
+                        (
+                            instrument,
+                            int((frame["instrument"].astype(str) == instrument).sum()),
+                        )
+                        for instrument in sorted(set(instruments))
+                    )
+                    if instruments is not None
+                    else tuple(
+                        (str(instrument), int(count))
+                        for instrument, count in frame.groupby("instrument", sort=True)
+                        .size()
+                        .items()
+                    )
+                ),
             )
         )
         return frame.rename(columns={"value": semantic_role}).copy()
 
-    def latest(self, semantic_role: str) -> pd.DataFrame:
-        frame = self.history(semantic_role)
-        if not len(frame):
-            return frame
-        return (
-            frame.drop_duplicates(subset=["instrument"], keep="last")
-            .sort_values("instrument", kind="mergesort")
-            .reset_index(drop=True)
+    def latest(
+        self,
+        semantic_role: str,
+        instruments: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame:
+        return self._read(
+            semantic_role,
+            instruments=instruments,
+            latest=True,
         )
 
     def accessed(self) -> tuple[AccessRecord, ...]:
@@ -325,6 +386,7 @@ class StrategyView(_AccountStateView):
         session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
         artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
+        execution_inputs: tuple[ExecutionInputProjection, ...] = (),
     ) -> None:
         super().__init__(
             as_of=as_of,
@@ -336,13 +398,38 @@ class StrategyView(_AccountStateView):
         self._account_feedback = account_feedback
         self._session_performance = session_performance
         self._memory_state = memory_state
-        self._artifact_inputs = {
-            artifact.consumer_role: artifact for artifact in artifact_inputs
-        }
+        self._artifact_inputs = {artifact.consumer_role: artifact for artifact in artifact_inputs}
+        self._execution_inputs = execution_inputs
         self._feedback_accessed: list[FeedbackAccessRecord] = []
         self._performance_accessed: list[SessionPerformanceAccessRecord] = []
         self._memory_accessed: list[MemoryAccessRecord] = []
         self._artifact_accessed: list[ArtifactAccessRecord] = []
+        self._execution_accessed: list[ExecutionAccessRecord] = []
+
+    def latest_execution_result(self) -> QlibxModel | None:
+        if len(self._execution_inputs) > 1:
+            raise ArtifactViewAccessError(
+                "STRATEGY_EXECUTION_SCHEDULE_INVARIANT",
+                {
+                    "artifact_ids": [item.artifact_id for item in self._execution_inputs],
+                    "message": "more than one execution occurred between Strategy decisions",
+                },
+            )
+        if not self._execution_inputs:
+            return None
+        projection = self._execution_inputs[0]
+        self._execution_accessed.append(
+            ExecutionAccessRecord(
+                artifact_id=projection.artifact_id,
+                artifact_type=projection.artifact_type,
+                artifact_schema_version=projection.artifact_schema_version,
+                content_hash=projection.content_hash,
+            )
+        )
+        return projection.payload
+
+    def execution_accessed(self) -> tuple[ExecutionAccessRecord, ...]:
+        return tuple(self._execution_accessed)
 
     def artifact(
         self,
@@ -368,9 +455,7 @@ class StrategyView(_AccountStateView):
                     "consumer_role": consumer_role,
                     "artifact_id": projection.artifact_id,
                     "expected_contract": {"payload_model": payload_type.__name__},
-                    "actual_contract": {
-                        "payload_model": type(projection.payload).__name__
-                    },
+                    "actual_contract": {"payload_model": type(projection.payload).__name__},
                     "message": (
                         f"artifact role {consumer_role!r} contains "
                         f"{type(projection.payload).__name__}, not {payload_type.__name__}"
@@ -404,15 +489,9 @@ class StrategyView(_AccountStateView):
                 entry_cursors=tuple(int(entry.cursor) for entry in entries),
                 event_ids=tuple(str(entry.event_id) for entry in entries),
                 change_types=tuple(str(entry.change_type) for entry in entries),
-                fill_ids=tuple(
-                    str(fill_id)
-                    for entry in entries
-                    for fill_id in entry.fill_ids
-                ),
+                fill_ids=tuple(str(fill_id) for entry in entries for fill_id in entry.fill_ids),
                 marked_instruments=tuple(
-                    str(mark.instrument_id)
-                    for entry in entries
-                    for mark in entry.marks
+                    str(mark.instrument_id) for entry in entries for mark in entry.marks
                 ),
             )
         )
@@ -484,6 +563,7 @@ class ViewGate:
         session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
         artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
+        execution_inputs: tuple[ExecutionInputProjection, ...] = (),
     ) -> StrategyView:
         return StrategyView(
             as_of=clock.now,
@@ -495,6 +575,7 @@ class ViewGate:
             session_performance=session_performance,
             memory_state=memory_state,
             artifact_inputs=artifact_inputs,
+            execution_inputs=execution_inputs,
         )
 
     def materialize_view(

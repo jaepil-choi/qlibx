@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,15 +16,21 @@ from qlibx.data.store import DataSnapshotError, ObservationStore
 from qlibx.errors import CommitStatus, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.execution.academic import (
-    AcademicExchange,
+    AcademicBatchRequest,
     AcademicExchangeProfile,
     AcademicInstrumentListing,
     AcademicMatchResult,
     AcademicPortfolioSnapshot,
     AcademicPortfolioState,
     AcademicQuote,
-    AcademicRunSpec,
     AcademicTargetWeight,
+)
+from qlibx.execution.base import BaseExchange
+from qlibx.execution.preparation import (
+    ACADEMIC_PREPARATION_CONTRACT,
+    AcademicExecutionPreparation,
+    AcademicPreparationContext,
+    AcademicPreparationIntent,
 )
 from qlibx.flow.failures import (
     build_operation_error,
@@ -33,6 +40,7 @@ from qlibx.flow.failures import (
 from qlibx.flow.portfolio import PORTFOLIO_RESULT_CONTRACT
 from qlibx.models import QlibxModel
 from qlibx.portfolio import ConstructionProfile, PortfolioConstructionResult
+from qlibx.specs.academic import AcademicRunSpec
 
 ACADEMIC_LIMITATIONS = (
     "hypothetical research execution only; not an executable market order",
@@ -44,9 +52,12 @@ ACADEMIC_LIMITATIONS = (
 
 
 class AcademicExecutionResult(QlibxModel):
-    execution_schema_version: Literal[1] = 1
+    execution_schema_version: Literal[2] = 2
     run_id: str = Field(min_length=1)
     config_fingerprint: str = Field(min_length=1)
+    exchange_id: str = Field(min_length=1)
+    exchange_config_fingerprint: str = Field(min_length=1)
+    preparation_artifact_id: str = Field(min_length=1)
     execution_index: int = Field(ge=0)
     event_id: str = Field(min_length=1)
     event_time: datetime
@@ -91,7 +102,7 @@ class AcademicRunResult(QlibxModel):
 
 ACADEMIC_EXECUTION_CONTRACT = ArtifactContract(
     artifact_type="academic_execution_result",
-    artifact_schema_version=1,
+    artifact_schema_version=2,
     payload_model=AcademicExecutionResult,
 )
 
@@ -132,13 +143,23 @@ class AcademicExecutionFlow:
         registry: RegistrySnapshot,
         artifacts: LocalArtifactBackend,
         store: ObservationStore,
+        exchange: BaseExchange[AcademicBatchRequest, AcademicMatchResult],
+        preparation: AcademicExecutionPreparation | None = None,
     ) -> None:
         self._registry = registry
         self._artifacts = artifacts
         self._store = store
+        self._exchange = exchange
+        self._preparation = preparation or AcademicExecutionPreparation()
 
     def run(self, spec: AcademicRunSpec, *, resume: bool = False) -> OperationOutcome:
-        fingerprint = spec.frozen_config_fingerprint()
+        fingerprint = hashlib.sha256(
+            (
+                f"{spec.frozen_config_fingerprint()}|"
+                f"exchange:{self._exchange.exchange_id}|"
+                f"exchange-config:{self._exchange.config_fingerprint}"
+            ).encode()
+        ).hexdigest()
         try:
             portfolios = self._load_portfolios(spec)
             self._validate_listings(spec)
@@ -164,7 +185,6 @@ class AcademicExecutionFlow:
                 committed=True,
             )
 
-        exchange = AcademicExchange(profile=spec.profile, listings=spec.listings)
         last_snapshot: AcademicPortfolioSnapshot | None = None
         if checkpoint_envelope_id is not None:
             loaded_checkpoint = self._artifacts.load_model(
@@ -202,13 +222,55 @@ class AcademicExecutionFlow:
                     exc.context,
                     committed=state.version > 0,
                 )
-            match = exchange.match_batch(
-                event_id=event_id,
-                event_time=frozen.execution_time,
-                targets=targets,
-                quotes=quotes,
-                state=state,
+            prepared = self._preparation.prepare(
+                AcademicPreparationIntent(
+                    portfolio_artifact_id=frozen.artifact_id,
+                    targets=targets,
+                ),
+                AcademicPreparationContext(
+                    event_id=event_id,
+                    event_time=frozen.execution_time,
+                    state=state,
+                    quotes=quotes,
+                    exchange_id=self._exchange.exchange_id,
+                    exchange_config_fingerprint=self._exchange.config_fingerprint,
+                ),
             )
+            if prepared.status is not OutcomeStatus.COMPLETE:
+                errors = tuple(
+                    error.model_copy(
+                        update={
+                            "commit_status": (
+                                CommitStatus.COMMITTED
+                                if state.version > 0
+                                else CommitStatus.NONE
+                            )
+                        }
+                    )
+                    for error in prepared.errors
+                )
+                return publish_failed_errors(self._artifacts, errors)
+            preparation_dependencies = self._execution_dependencies(
+                spec=spec,
+                frozen=frozen,
+                quotes=quotes,
+                prior_checkpoint_artifact_id=checkpoint_envelope_id,
+            )
+            preparation_publication = self._artifacts.publish_model(
+                logical_identity=(
+                    f"academic-execution-preparation:{spec.run_id}:{index:08d}"
+                ),
+                artifact_type=ACADEMIC_PREPARATION_CONTRACT.artifact_type,
+                artifact_schema_version=(
+                    ACADEMIC_PREPARATION_CONTRACT.artifact_schema_version
+                ),
+                producer_id="execution.preparation.academic.v1",
+                payload=prepared.result.evidence,
+                dependencies=preparation_dependencies,
+            )
+            if preparation_publication.status is not OutcomeStatus.COMPLETE:
+                return preparation_publication
+            match = self._exchange.match_batch(prepared.result.request)
             if match.status is not OutcomeStatus.COMPLETE:
                 errors = tuple(
                     error.model_copy(
@@ -223,10 +285,25 @@ class AcademicExecutionFlow:
                     for error in match.errors
                 )
                 return publish_failed_errors(self._artifacts, errors)
-            selected: AcademicMatchResult = match.result
+            if not isinstance(match.result, AcademicMatchResult):
+                return self._failure(
+                    spec,
+                    "EXCHANGE_RESULT_TYPE_MISMATCH",
+                    "academic.run.exchange",
+                    {
+                        "exchange_id": self._exchange.exchange_id,
+                        "expected": "AcademicMatchResult",
+                        "actual": type(match.result).__name__,
+                    },
+                    committed=state.version > 0,
+                )
+            selected = match.result
             execution = AcademicExecutionResult(
                 run_id=spec.run_id,
                 config_fingerprint=fingerprint,
+                exchange_id=self._exchange.exchange_id,
+                exchange_config_fingerprint=self._exchange.config_fingerprint,
+                preparation_artifact_id=preparation_publication.result.artifact_id,
                 execution_index=index,
                 event_id=event_id,
                 event_time=frozen.execution_time,
@@ -250,11 +327,13 @@ class AcademicExecutionFlow:
                 artifact_schema_version=ACADEMIC_EXECUTION_CONTRACT.artifact_schema_version,
                 producer_id="academic.zero-friction.signed-fractional.v1",
                 payload=execution,
-                dependencies=self._execution_dependencies(
-                    spec=spec,
-                    frozen=frozen,
-                    quotes=quotes,
-                    prior_checkpoint_artifact_id=checkpoint_envelope_id,
+                dependencies=(
+                    DependencyEdge(
+                        dependency_kind="artifact",
+                        dependency_id=preparation_publication.result.artifact_id,
+                        consumer_role="execution_preparation",
+                    ),
+                    *preparation_dependencies,
                 ),
             )
             if execution_publication.status is not OutcomeStatus.COMPLETE:

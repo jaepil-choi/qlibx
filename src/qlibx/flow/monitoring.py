@@ -1,7 +1,6 @@
 """Independent monitoring over committed Account state and PIT compliance data."""
 
 from qlibx.account import Account
-from qlibx.context import MonitorView, ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver, Resolution
 from qlibx.data.requirements import ComponentRequirement
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
@@ -20,6 +19,7 @@ from qlibx.portfolio import (
     ConstraintMonitoringResult,
     monitor_actual_single_name_caps,
 )
+from qlibx.view import MonitorView, ViewGate
 
 CONSTRAINT_MONITORING_CONTRACT = ArtifactContract(
     artifact_type="constraint_monitoring_result",

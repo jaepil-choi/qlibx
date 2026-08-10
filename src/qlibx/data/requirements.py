@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from qlibx.data.contracts import RegisteredDataset
+from qlibx.data.contracts import Lookback, RegisteredDataset
 from qlibx.data.registry import RegistrySnapshot
 from qlibx.errors import CommitStatus, OperationError
 from qlibx.models import QlibxModel
@@ -32,6 +32,7 @@ class ComponentRequirement(QlibxModel):
     time: TimeRequirement = TimeRequirement()
     compatibility: tuple[CompatibilityRule, ...] = ()
     dataset_id: str | None = None
+    lookback: Lookback | None = None
 
 
 class ResolvedBinding(QlibxModel):
@@ -40,6 +41,7 @@ class ResolvedBinding(QlibxModel):
     dataset_id: str
     field: str
     registration_identity: str
+    lookback: Lookback | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,9 +79,7 @@ class RequirementResolver:
                 )
             ]
             if not candidates:
-                errors.append(
-                    self._missing_error(operation, idempotency_identity, requirement)
-                )
+                errors.append(self._missing_error(operation, idempotency_identity, requirement))
                 continue
             candidates.sort(key=lambda item: item.dataset_id)
             if len(candidates) > 1:
@@ -100,6 +100,7 @@ class RequirementResolver:
                     dataset_id=selected.dataset_id,
                     field=selected.bindings[requirement.semantic_role],
                     registration_identity=selected.registration_identity,
+                    lookback=requirement.lookback,
                 )
             )
         return Resolution(bindings=tuple(bindings), errors=tuple(errors))
@@ -145,8 +146,7 @@ class RequirementResolver:
             for candidate in candidates
         ]
         candidate_identity = ":".join(
-            f"{item['dataset_id']}={item['registration_identity']}"
-            for item in candidate_context
+            f"{item['dataset_id']}={item['registration_identity']}" for item in candidate_context
         )
         seed = (
             f"{operation}:{idempotency_identity}:{requirement.requirement_id}:"

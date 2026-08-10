@@ -25,6 +25,7 @@ from qlibx import (
 )
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
+from qlibx.execution.preparation import KRX_PREPARATION_CONTRACT
 from qlibx.flow import PORTFOLIO_RESULT_CONTRACT
 from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
 from qlibx.operations import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
@@ -319,9 +320,7 @@ def test_public_constraint_facade_adjusts_then_independently_denies_residual(
         "order_delta_lot_floor",
     )
     assert adjustment.result.items[1].reasons == ("no_short",)
-    assert adjustment.result.unresolved_excess == pytest.approx(
-        0.00032577319587628883
-    )
+    assert adjustment.result.unresolved_excess == pytest.approx(0.00032577319587628883)
 
     validation_spec = ConstraintValidationSpec(
         invocation_id="public-constraint-validation",
@@ -333,11 +332,9 @@ def test_public_constraint_facade_adjusts_then_independently_denies_residual(
     repeated_validation = project.validate_constraints(validation_spec)
     assert validation.status is repeated_validation.status is OutcomeStatus.COMPLETE
     assert validation.diagnostics[0].artifact_id == repeated_validation.diagnostics[0].artifact_id
-    assert validation.result.eligible is False
+    assert validation.result.compliant is False
     failed = tuple(item for item in validation.result.findings if not item.passed)
-    assert [(item.instrument, item.metric) for item in failed] == [
-        ("A005930", "single_name_cap")
-    ]
+    assert [(item.instrument, item.metric) for item in failed] == [("A005930", "single_name_cap")]
     assert adjustment.result.accesses == validation.result.accesses
     assert {edge.dependency_kind for edge in adjustment.diagnostics[0].dependencies} == {
         "artifact",
@@ -390,8 +387,7 @@ def test_public_constraint_missing_and_ambiguous_binding_fail_before_mutation(
 
     for selected in (missing_project, ambiguous_project):
         types = {
-            item.artifact_type
-            for item in selected.artifacts.list_envelopes(include_failure=True)
+            item.artifact_type for item in selected.artifacts.list_envelopes(include_failure=True)
         }
         assert types == {"operation_error", "portfolio_construction_result"}
 
@@ -520,6 +516,64 @@ def test_constraint_flow_distinguishes_data_and_compute_failures(
     assert data_failure.errors[0].error_code == "CONSTRAINT_DATA_READ_FAILED"
     assert data_failure.errors[0].stage_path == "constraint.adjust.data"
     assert data_failure.errors[0].commit_status is CommitStatus.NONE
+
+
+def test_daily_execution_applies_constraint_preparation_before_exchange(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path, "daily-preparation")
+    register_daily_market(project)
+    register_benchmark(project, "monitoring-benchmark")
+    selected_spec = monitoring_daily_spec().model_copy(
+        update={"constraint_policy": policy("monitoring-benchmark")}
+    )
+
+    outcome = project.run_daily(MonitoringSeedStrategy(), selected_spec)
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert len(outcome.result.executions) == 1
+    execution = outcome.result.executions[0]
+    loaded = project.artifacts.load_model(
+        execution.preparation_artifact_id,
+        KRX_PREPARATION_CONTRACT,
+    )
+    assert loaded.status is OutcomeStatus.COMPLETE
+    preparation = loaded.result.payload
+    assert preparation.constraint_adjustment is not None
+    assert preparation.constraint_validation is not None
+    assert preparation.compliant is True
+    assert preparation.adjusted_weights != preparation.constructed_weights
+
+
+def test_daily_constraint_missing_benchmark_does_not_call_exchange(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = create_project(tmp_path, "daily-preparation-missing")
+    register_daily_market(project)
+    selected_spec = monitoring_daily_spec().model_copy(
+        update={"constraint_policy": policy("missing-benchmark")}
+    )
+    called = False
+
+    def unexpected_exchange_call(*_args: object, **_kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("exchange must not be called after preparation input failure")
+
+    monkeypatch.setattr(
+        "qlibx.execution.krx.KrxExchange.match_batch",
+        unexpected_exchange_call,
+    )
+    outcome = project.run_daily(MonitoringSeedStrategy(), selected_spec)
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert called is False
+    assert outcome.errors[0].error_code == "REQUIREMENT_NOT_RESOLVED"
+    assert not any(
+        item.artifact_type in {"krx_execution_preparation", "execution_result"}
+        for item in project.artifacts.list_envelopes(include_failure=True)
+    )
 
 
 def test_public_constraint_monitoring_restores_checkpoint_and_is_deterministic(

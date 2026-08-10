@@ -8,7 +8,7 @@ Verified against: qlibx 0.1.0, implementations 009, 016, 059, and 060
 
 This showcase preserves the pre-AcademicExchange qlibx factor-research boundary with a real-DW study. A
 showcase-local 20-session reversal model uses `QlibxProject.materialize()` to publish one typed
-stored-signal artifact at each monthly decision time. `AnalysisFlow.analyze_signal()` then evaluates
+stored-signal artifact at each monthly decision time. `QlibxProject.analyze_signal()` then evaluates
 each exact artifact against the following monthly return and preserves PIT dataset lineage.
 
 The generated HTML distinguishes package-owned behavior from showcase-local diagnostics:

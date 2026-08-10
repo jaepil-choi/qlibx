@@ -315,7 +315,7 @@ scenarios:
       adjustment_outcome: complete
       unresolved_excess: positive
       validation_outcome: complete
-      execution_eligible: false
+      validation_compliant: false
       account_mutation: false
       memory_mutation: false
 

@@ -8,9 +8,9 @@ from typing import ClassVar, Generic, Literal, Protocol, TypeVar
 import pandas as pd
 from pydantic import Field, model_validator
 
-from qlibx.context import MaterializeView
-from qlibx.data import ComponentRequirement
+from qlibx.data import ComponentRequirement, Lookback
 from qlibx.models import QlibxModel
+from qlibx.view import MaterializeView
 
 PayloadModel = TypeVar("PayloadModel", bound=QlibxModel)
 
@@ -138,6 +138,7 @@ class ForwardReturnLabelModel:
 
     price_dataset_id: str
     horizon_dataset_id: str
+    lookback: Lookback
     producer_id: str = "qlibx.forward-return-label.v1"
 
     output_contract: ClassVar[MaterializationOutputContract[ForwardReturnLabelResult]] = (
@@ -154,16 +155,19 @@ class ForwardReturnLabelModel:
         return (
             ComponentRequirement(
                 requirement_id="label.start_value",
+                lookback=self.lookback,
                 semantic_role="label_start_value",
                 dataset_id=self.price_dataset_id,
             ),
             ComponentRequirement(
                 requirement_id="label.end_value",
+                lookback=self.lookback,
                 semantic_role="label_end_value",
                 dataset_id=self.price_dataset_id,
             ),
             ComponentRequirement(
                 requirement_id="label.horizon_end",
+                lookback=self.lookback,
                 semantic_role="horizon_end",
                 dataset_id=self.horizon_dataset_id,
             ),

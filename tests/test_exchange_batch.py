@@ -6,6 +6,7 @@ from qlibx import OutcomeStatus
 from qlibx.execution import (
     CostRule,
     EtfInstrument,
+    KrxBatchRequest,
     KrxExchange,
     KrxExchangeConfig,
     MarketQuote,
@@ -53,6 +54,17 @@ def exchange(
     )
 
 
+def match(venue: KrxExchange, **kwargs: object):
+    holdings = kwargs.pop("holdings")
+    assert isinstance(holdings, dict)
+    return venue.match_batch(
+        KrxBatchRequest(
+            holdings=tuple(sorted(holdings.items())),
+            **kwargs,
+        )
+    )
+
+
 def stock(identifier: str = "005930", lot: int = 1) -> StockInstrument:
     return StockInstrument(
         instrument_id=identifier,
@@ -79,7 +91,8 @@ def test_uc_cost_001_exact_product_and_side_rules() -> None:
     venue.add_instrument(stock())
     venue.add_instrument(etf())
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="cost-products",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.SELL, 100), Order("069500", Side.SELL, 100)),
@@ -110,7 +123,8 @@ def test_uc_cost_002_effective_dated_rule() -> None:
     order = (Order("005930", Side.BUY, 10),)
     quote = (MarketQuote("005930", 1000),)
 
-    old = venue.match_batch(
+    old = match(
+        venue,
         event_id="old",
         event_time=datetime(2024, 6, 1, tzinfo=UTC),
         orders=order,
@@ -118,7 +132,8 @@ def test_uc_cost_002_effective_dated_rule() -> None:
         cash=20_000,
         holdings={},
     )
-    new = venue.match_batch(
+    new = match(
+        venue,
         event_id="new",
         event_time=datetime(2025, 6, 1, tzinfo=UTC),
         orders=order,
@@ -134,7 +149,8 @@ def test_uc_cost_003_cash_clipping_uses_final_cost_calculator() -> None:
     venue = exchange(rule("stock-buy", "stock", Side.BUY, 0.01))
     venue.add_instrument(stock())
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="cash-clip",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.BUY, 10),),
@@ -155,7 +171,8 @@ def test_uc_cost_004_missing_etf_rule_does_not_fall_back_to_stock() -> None:
     venue.add_instrument(etf())
     holdings: dict[str, float] = {}
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="missing-etf",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("069500", Side.BUY, 10),),
@@ -172,7 +189,8 @@ def test_uc_cost_004_missing_etf_rule_does_not_fall_back_to_stock() -> None:
 def test_last_sell_bypasses_lot_rounding_but_partial_sell_does_not() -> None:
     venue = exchange(rule("stock-sell", "stock", Side.SELL, 0))
     venue.add_instrument(stock(lot=100))
-    last = venue.match_batch(
+    last = match(
+        venue,
         event_id="last-sell",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.SELL, 137),),
@@ -180,7 +198,8 @@ def test_last_sell_bypasses_lot_rounding_but_partial_sell_does_not() -> None:
         cash=0,
         holdings={"005930": 137},
     )
-    partial = venue.match_batch(
+    partial = match(
+        venue,
         event_id="partial-sell",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.SELL, 37),),
@@ -196,7 +215,8 @@ def test_last_sell_bypasses_lot_rounding_but_partial_sell_does_not() -> None:
 def test_volume_limit_is_reported() -> None:
     venue = exchange(rule("stock-buy", "stock", Side.BUY, 0), participation=0.1)
     venue.add_instrument(stock(lot=10))
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="volume",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.BUY, 1000),),
@@ -212,7 +232,8 @@ def test_impact_requires_total_market_volume() -> None:
     venue = exchange(rule("stock-buy", "stock", Side.BUY, 0), impact=0.1)
     venue.add_instrument(stock())
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="impact-missing-volume",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.BUY, 100),),
@@ -229,7 +250,8 @@ def test_impact_changes_fill_price_not_transaction_cost_policy() -> None:
     venue = exchange(rule("stock-buy", "stock", Side.BUY, 0.01), impact=0.1)
     venue.add_instrument(stock())
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="impact-priced-fill",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.BUY, 100),),
@@ -253,7 +275,8 @@ def test_impact_is_recomputed_from_cash_clipped_fill_quantity() -> None:
     venue = exchange(rule("stock-buy", "stock", Side.BUY, 0), impact=0.1)
     venue.add_instrument(stock())
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="impact-cash-clipped",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=(Order("005930", Side.BUY, 100),),
@@ -280,7 +303,8 @@ def test_uc_scale_001_three_thousand_names_keep_stable_batch_order() -> None:
         orders.append(Order(identifier, Side.BUY, 1))
         quotes.append(MarketQuote(identifier, 1))
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="scale-3000",
         event_time=datetime(2025, 1, 2, tzinfo=UTC),
         orders=tuple(orders),

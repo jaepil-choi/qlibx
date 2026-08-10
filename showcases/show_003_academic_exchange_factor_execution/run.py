@@ -20,6 +20,7 @@ import pandas as pd
 from factor_model import MonthlyReversalModel
 
 from qlibx import (
+    ACADEMIC_EXECUTION_CONTRACT,
     AcademicInstrumentKind,
     AcademicInstrumentListing,
     AcademicPriceSemantics,
@@ -28,11 +29,10 @@ from qlibx import (
     MaterializationInvocation,
     OutcomeStatus,
     QlibxProject,
+    SignalAnalysisRequest,
 )
-from qlibx.analysis import SignalAnalysisRequest
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.evidence import DependencyEdge
-from qlibx.flow import ACADEMIC_EXECUTION_CONTRACT, AnalysisFlow
 from qlibx.portfolio import (
     ConstructionProfile,
     PortfolioConstructionResult,
@@ -398,10 +398,6 @@ def run(repo_root: Path) -> dict[str, Any]:
         raise RuntimeError("registered dataset is absent")
 
     model = MonthlyReversalModel(DATASET_ID, LOOKBACK_SESSIONS)
-    analysis_flow = AnalysisFlow(
-        artifacts=project.artifacts,
-        registry=project.registry_snapshot(),
-    )
     decision_dates: tuple[pd.Timestamp, ...] = extraction["decision_dates"]
     forward_returns: dict[pd.Timestamp, pd.Series] = extraction["evaluation_returns"]
     portfolio_ids: list[str] = []
@@ -425,7 +421,7 @@ def run(repo_root: Path) -> dict[str, Any]:
         )
         signal_artifact = materialized.result.artifact
         analyzed = require_complete(
-            analysis_flow.analyze_signal(
+            project.analyze_signal(
                 SignalAnalysisRequest(
                     invocation_id=f"showcase-factor-analysis-{evaluation_day:%Y%m%d}-v1",
                     signal_artifact_id=signal_artifact.artifact_id,

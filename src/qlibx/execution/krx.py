@@ -5,6 +5,7 @@ snapshot main@79633dd (MIT). qlibx uses immutable DTOs, batch preflight, and str
 """
 
 import hashlib
+import json
 import math
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,6 +14,7 @@ from pydantic import Field, model_validator
 
 from qlibx.domain import Fill, Side
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.execution.base import BaseExchange
 from qlibx.execution.instruments import (
     CompiledInstrument,
     CompiledInstrumentSet,
@@ -90,6 +92,27 @@ class MarketQuote:
 
 
 @dataclass(frozen=True, slots=True)
+class KrxBatchRequest:
+    event_id: str
+    event_time: datetime
+    orders: tuple[Order, ...]
+    quotes: tuple[MarketQuote, ...]
+    cash: float
+    holdings: tuple[tuple[str, float], ...]
+
+    def __post_init__(self) -> None:
+        if not self.event_id:
+            raise ValueError("KRX batch request requires event_id")
+        if self.event_time.tzinfo is None or self.event_time.utcoffset() is None:
+            raise ValueError("execution event_time must be timezone-aware")
+        instruments = tuple(item[0] for item in self.holdings)
+        if len(instruments) != len(set(instruments)):
+            raise ValueError("KRX batch holdings must have unique instruments")
+        if not math.isfinite(self.cash):
+            raise ValueError("KRX batch cash must be finite")
+
+
+@dataclass(frozen=True, slots=True)
 class FillDiagnostic:
     instrument_id: str
     requested_quantity: float
@@ -105,13 +128,36 @@ class MatchBatchResult:
     ending_holdings: tuple[tuple[str, float], ...]
 
 
-class KrxExchange:
+class KrxExchange(BaseExchange[KrxBatchRequest, MatchBatchResult]):
     """Frozen exchange registration compiled before batch execution."""
 
     def __init__(self, config: KrxExchangeConfig) -> None:
         self._config = config
         self._instruments: list[Instrument] = []
         self._instrument_ids: set[str] = set()
+
+    @property
+    def exchange_id(self) -> str:
+        return self._config.exchange_id
+
+    @property
+    def config_fingerprint(self) -> str:
+        payload = json.dumps(
+            {
+                "config": self._config.model_dump(mode="json"),
+                "instruments": [
+                    instrument.model_dump(mode="json")
+                    for instrument in sorted(
+                        self._instruments,
+                        key=lambda item: item.instrument_id,
+                    )
+                ],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
 
     def add_instrument(self, instrument: Instrument) -> None:
         if instrument.exchange_id != self._config.exchange_id:
@@ -141,16 +187,14 @@ class KrxExchange:
 
     def match_batch(
         self,
-        *,
-        event_id: str,
-        event_time: datetime,
-        orders: tuple[Order, ...],
-        quotes: tuple[MarketQuote, ...],
-        cash: float,
-        holdings: dict[str, float],
-    ) -> OperationOutcome:
-        if event_time.tzinfo is None:
-            raise ValueError("execution event_time must be timezone-aware")
+        request: KrxBatchRequest,
+    ) -> OperationOutcome[MatchBatchResult]:
+        event_id = request.event_id
+        event_time = request.event_time
+        orders = request.orders
+        quotes = request.quotes
+        cash = request.cash
+        holdings = dict(request.holdings)
         terms = self.compile().by_id()
         quote_by_id = {quote.instrument_id: quote for quote in quotes}
         resolved: list[tuple[Order, MarketQuote, CompiledInstrument, CostRule]] = []
@@ -263,9 +307,7 @@ class KrxExchange:
             cost = self._cost(value, rule.rate, rule.minimum_cost)
             if value <= 1e-5 and "ZERO_VALUE" not in reasons:
                 reasons.append("ZERO_VALUE")
-            fill_seed = (
-                f"{event_id}:{index}:{order.instrument_id}:{quantity}:{fill_price}".encode()
-            )
+            fill_seed = f"{event_id}:{index}:{order.instrument_id}:{quantity}:{fill_price}".encode()
             fill = Fill(
                 fill_id=f"fill-{hashlib.sha256(fill_seed).hexdigest()[:24]}",
                 instrument_id=order.instrument_id,
@@ -371,9 +413,7 @@ class KrxExchange:
         market_value = (total_market_volume or 0) * reference_price
         proposed_value = quantity * reference_price
         price_impact_rate = (
-            impact_rate * (proposed_value / market_value) ** 2
-            if market_value > 0
-            else 0
+            impact_rate * (proposed_value / market_value) ** 2 if market_value > 0 else 0
         )
         multiplier = 1 + price_impact_rate if side is Side.BUY else 1 - price_impact_rate
         return price_impact_rate, reference_price * multiplier

@@ -6,7 +6,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import cast
 
-from qlibx.context import MaterializeView, ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
@@ -25,6 +24,7 @@ from qlibx.flow.failures import (
     publish_failed_outcome,
 )
 from qlibx.kernel import BacktestClock
+from qlibx.view import MaterializeView, ViewGate
 
 EXTENSION_REGISTRATION_CONTRACT = ArtifactContract(
     artifact_type="extension_registration",

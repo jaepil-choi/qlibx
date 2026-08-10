@@ -13,7 +13,7 @@ from qlibx import (
     QlibxModel,
     QlibxProject,
 )
-from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
+from qlibx.data import AvailableAtField, DatasetRegistration, RowsLookback, SourceFormat
 from qlibx.operations import FORWARD_RETURN_LABEL_OUTPUT
 
 
@@ -101,7 +101,11 @@ class CountingForwardLabelModel:
     output_contract = FORWARD_RETURN_LABEL_OUTPUT
 
     def __init__(self) -> None:
-        self._delegate = ForwardReturnLabelModel("label-prices", "label-horizon")
+        self._delegate = ForwardReturnLabelModel(
+            "label-prices",
+            "label-horizon",
+            RowsLookback(rows=100),
+        )
         self.calls = 0
 
     def requirements(self) -> tuple[object, ...]:
@@ -148,10 +152,7 @@ def test_missing_horizon_fails_before_model_then_linked_retry_respects_pit(
     assert {item.observation_time.day for item in result.entries} == {2}
     assert all(item.available_at <= result.evaluation_time for item in result.entries)
     dependencies = retry.result.artifact.dependencies
-    assert {
-        edge.consumer_role
-        for edge in dependencies
-    } == {
+    assert {edge.consumer_role for edge in dependencies} == {
         "horizon_end",
         "label_end_value",
         "label_start_value",
@@ -159,8 +160,7 @@ def test_missing_horizon_fails_before_model_then_linked_retry_respects_pit(
         "resolves_error",
     }
     assert any(
-        edge.dependency_kind == "error"
-        and edge.dependency_id == failure.artifact_id
+        edge.dependency_kind == "error" and edge.dependency_id == failure.artifact_id
         for edge in dependencies
     )
     assert len(project.artifacts.list_envelopes(include_failure=True)) == 2
@@ -193,7 +193,11 @@ def test_source_drift_is_a_materialization_data_failure(tmp_path: Path) -> None:
     source.write_text(source.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
     outcome = project.materialize(
-        ForwardReturnLabelModel("label-prices", "label-horizon"),
+        ForwardReturnLabelModel(
+            "label-prices",
+            "label-horizon",
+            RowsLookback(rows=100),
+        ),
         _invocation("source-drift", 3),
     )
 

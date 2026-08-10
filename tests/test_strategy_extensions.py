@@ -11,7 +11,6 @@ from qlibx import (
 )
 from qlibx.account import Account
 from qlibx.analysis import SessionPerformanceEvidence
-from qlibx.context import StateAccessRecord
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.extensions import StrategyExtensionValidationRequest
 from qlibx.extensions.local_modules import LocalModuleLoader
@@ -22,6 +21,7 @@ from qlibx.flow.strategy_extensions import (
     SESSION_PERFORMANCE_CONTRACT,
     StrategyExtensionFlow,
 )
+from qlibx.view import StateAccessRecord
 
 EVALUATION_TIME = datetime(2025, 1, 3, 9, tzinfo=UTC)
 

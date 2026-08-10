@@ -10,8 +10,8 @@ from qlibx.analysis import (
     SessionPerformanceRequest,
     compute_session_performance,
 )
-from qlibx.context import StateAccessRecord
 from qlibx.evidence import ArtifactContract
+from qlibx.view import StateAccessRecord
 
 EVENT_TIME = datetime(2025, 1, 2, 6, 30, tzinfo=UTC)
 LEGACY_JSON = (

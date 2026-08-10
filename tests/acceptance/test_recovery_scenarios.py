@@ -202,6 +202,12 @@ def _crash_worker(project_root: str, crash_point: str) -> None:
             marker,
             occurrence=2,
         )
+    elif crash_point == "preparation_artifact_published":
+        artifacts = _CrashAfterArtifact(
+            artifacts,
+            "krx_execution_preparation",
+            marker,
+        )
     elif crash_point == "account_fill_committed":
         account = _CrashAfterAccountCommit(FillBatch, marker)
     elif crash_point == "execution_artifact_published":
@@ -252,6 +258,7 @@ def recovery_baseline(
     "crash_point",
     (
         "decision_recovery_published",
+        "preparation_artifact_published",
         "account_fill_committed",
         "execution_artifact_published",
         "account_mark_committed",

@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from qlibx.context import StateAccessRecord, StateHolding
 from qlibx.portfolio import (
     BenchmarkWeight,
     ConstraintAdjustmentRequest,
@@ -18,6 +17,7 @@ from qlibx.portfolio import (
     monitor_actual_single_name_caps,
     validate_single_name_caps,
 )
+from qlibx.view import StateAccessRecord, StateHolding
 
 
 def test_no_short_adjustment_is_independently_validated() -> None:
@@ -91,7 +91,7 @@ def test_no_short_adjustment_is_independently_validated() -> None:
     adjusted = {item.instrument: item.weight for item in adjustment.adjusted_weights}
     assert adjusted == {"A": 0.0, "B": 0.08}
     assert adjustment.items[0].reasons == ("no_short",)
-    assert validation.eligible is True
+    assert validation.compliant is True
 
 
 def test_monitoring_requires_complete_marked_actual_state() -> None:

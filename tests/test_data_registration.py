@@ -354,7 +354,7 @@ def test_unsupported_atomic_publication_fails_without_visibility(
     outcome = project.register_dataset(registration("market", "market.csv"))
 
     assert outcome.status is OutcomeStatus.FAILED
-    assert outcome.errors[0].error_code == "REGISTRY_PUBLICATION_FAILED"
+    assert outcome.errors[0].error_code == "DATASET_QUERY_SNAPSHOT_PUBLICATION_FAILED"
     assert outcome.errors[0].commit_status.value == "NONE"
     assert project.registry_snapshot().datasets == ()
 

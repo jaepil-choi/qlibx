@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from pydantic import Field
 
@@ -40,12 +40,15 @@ class OperationError(QlibxModel):
     error_id: str = Field(min_length=1)
 
 
+ResultT = TypeVar("ResultT")
+
+
 @dataclass(frozen=True, slots=True)
-class OperationOutcome:
+class OperationOutcome(Generic[ResultT]):
     """Internal result carrier with explicit terminal status."""
 
     status: OutcomeStatus
-    result: object | None = None
+    result: ResultT | None = None
     diagnostics: tuple[object, ...] = ()
     errors: tuple[OperationError, ...] = ()
 

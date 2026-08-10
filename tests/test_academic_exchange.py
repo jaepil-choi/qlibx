@@ -2,7 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from qlibx.academic import (
+from qlibx import (
+    AcademicBatchRequest,
     AcademicExchange,
     AcademicExchangeProfile,
     AcademicInstrumentKind,
@@ -65,6 +66,10 @@ def spec(*instruments: AcademicInstrumentListing) -> AcademicRunSpec:
     )
 
 
+def match(venue: AcademicExchange, **kwargs: object):
+    return venue.match_batch(AcademicBatchRequest(**kwargs))
+
+
 def test_profile_rejects_non_zero_friction() -> None:
     with pytest.raises(ValueError, match="exactly zero"):
         AcademicExchangeProfile(transaction_cost_rate=0.001)
@@ -90,7 +95,8 @@ def test_signed_fractional_rebalance_and_cross_zero_accounting() -> None:
     venue = AcademicExchange(profile=AcademicExchangeProfile(), listings=listings)
     state = AcademicPortfolioState.seed(spec(*listings))
 
-    opened = venue.match_batch(
+    opened = match(
+        venue,
         event_id="event-1",
         event_time=EVENT_1,
         targets=(
@@ -110,7 +116,8 @@ def test_signed_fractional_rebalance_and_cross_zero_accounting() -> None:
     assert opened.result.after.net_exposure == pytest.approx(0.2)
     assert opened.result.turnover == pytest.approx(1.0)
 
-    flipped = venue.match_batch(
+    flipped = match(
+        venue,
         event_id="event-2",
         event_time=EVENT_2,
         targets=(
@@ -140,7 +147,8 @@ def test_missing_quote_rejects_whole_batch_without_mutating_state() -> None:
     venue = AcademicExchange(profile=AcademicExchangeProfile(), listings=listings)
     state = AcademicPortfolioState.seed(spec(*listings))
 
-    outcome = venue.match_batch(
+    outcome = match(
+        venue,
         event_id="missing-quote",
         event_time=EVENT_1,
         targets=(
@@ -160,7 +168,8 @@ def test_absent_target_liquidates_existing_position() -> None:
     listings = (listing("A"), listing("B"))
     venue = AcademicExchange(profile=AcademicExchangeProfile(), listings=listings)
     state = AcademicPortfolioState.seed(spec(*listings))
-    opened = venue.match_batch(
+    opened = match(
+        venue,
         event_id="open",
         event_time=EVENT_1,
         targets=(AcademicTargetWeight(instrument_id="A", weight=0.333),),
@@ -168,7 +177,8 @@ def test_absent_target_liquidates_existing_position() -> None:
         state=state,
     )
 
-    closed = venue.match_batch(
+    closed = match(
+        venue,
         event_id="close",
         event_time=EVENT_2,
         targets=(AcademicTargetWeight(instrument_id="B", weight=0.25),),
@@ -179,6 +189,4 @@ def test_absent_target_liquidates_existing_position() -> None:
     positions = {item.instrument_id: item for item in closed.result.state.positions}
     assert positions["A"].quantity == 0
     assert positions["A"].average_entry_price is None
-    assert positions["B"].quantity == pytest.approx(
-        closed.result.before.nav * 0.25 / 11.0
-    )
+    assert positions["B"].quantity == pytest.approx(closed.result.before.nav * 0.25 / 11.0)

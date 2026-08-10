@@ -5,7 +5,6 @@ import pytest
 
 from qlibx import OutcomeStatus, QlibxProject
 from qlibx.account import Account
-from qlibx.context import MemoryAccessRecord, StateAccessRecord, StrategyView
 from qlibx.evidence import DependencyEdge
 from qlibx.flow.composition import (
     CompositionFlow,
@@ -15,7 +14,6 @@ from qlibx.flow.composition import (
 from qlibx.flow.research import ResearchFlow
 from qlibx.flow.strategy_results import (
     STRATEGY_RESULT_CONTRACT,
-    STRATEGY_RESULT_V1_CONTRACT,
     StrategySourceLineageError,
     canonicalize_dependencies,
 )
@@ -27,9 +25,9 @@ from qlibx.operations import (
     StrategyDraft,
     StrategyInvocation,
     StrategyResult,
-    StrategyResultV1,
     WeightEntry,
 )
+from qlibx.view import MemoryAccessRecord, StateAccessRecord, StrategyView
 
 EVALUATION_TIME = datetime(2025, 1, 3, 9, tzinfo=UTC)
 
@@ -39,24 +37,20 @@ def project(tmp_path: Path) -> QlibxProject:
     return QlibxProject.open(tmp_path)
 
 
-def source_result(identity: str, *, complete: bool = True) -> StrategyResultV1:
+def source_result(identity: str) -> StrategyResult:
     state_accesses = (
-        (
-            StateAccessRecord(
-                account_id=identity,
-                version=4,
-                feedback_cursor=7,
-                cash=100.0,
-                nav=100.0,
-                valuation_status="complete",
-                holdings=(),
-                as_of=EVALUATION_TIME,
-            ),
-        )
-        if complete
-        else ()
+        StateAccessRecord(
+            account_id=identity,
+            version=4,
+            feedback_cursor=7,
+            cash=100.0,
+            nav=100.0,
+            valuation_status="complete",
+            holdings=(),
+            as_of=EVALUATION_TIME,
+        ),
     )
-    return StrategyResultV1(
+    return StrategyResult(
         invocation_id=f"{identity}-invocation",
         strategy_id=f"tests.{identity}",
         evaluation_time=EVALUATION_TIME,
@@ -74,11 +68,11 @@ def source_result(identity: str, *, complete: bool = True) -> StrategyResultV1:
     )
 
 
-def publish_source(current: QlibxProject, result: StrategyResultV1) -> object:
+def publish_source(current: QlibxProject, result: StrategyResult) -> object:
     publication = current.artifacts.publish_model(
         logical_identity=f"strategy:{result.invocation_id}",
-        artifact_type=STRATEGY_RESULT_V1_CONTRACT.artifact_type,
-        artifact_schema_version=STRATEGY_RESULT_V1_CONTRACT.artifact_schema_version,
+        artifact_type=STRATEGY_RESULT_CONTRACT.artifact_type,
+        artifact_schema_version=STRATEGY_RESULT_CONTRACT.artifact_schema_version,
         producer_id=result.strategy_id,
         payload=result,
     )
@@ -101,14 +95,14 @@ class FrozenSourceConsumer:
                 requirement_id="source.member",
                 consumer_role="member",
                 artifact_type="strategy_result",
-                artifact_schema_version=1,
+                artifact_schema_version=3,
             ),
         )
 
     def run(self, view: StrategyView) -> StrategyDraft:
-        source = view.artifact("member", StrategyResultV1)
+        source = view.artifact("member", StrategyResult)
         if self.repeat_access:
-            assert view.artifact("member", StrategyResultV1) is source
+            assert view.artifact("member", StrategyResult) is source
         return StrategyDraft(
             weights=source.weights,
             budget_mode=source.budget_mode,
@@ -128,7 +122,7 @@ def invocation(identity: str, artifact_id: str = "artifact-missing") -> Strategy
     )
 
 
-def test_generic_consumer_promotes_v1_source_lineage_and_deduplicates_access(
+def test_generic_consumer_promotes_v3_source_lineage_and_deduplicates_access(
     tmp_path: Path,
 ) -> None:
     current = project(tmp_path)
@@ -141,7 +135,7 @@ def test_generic_consumer_promotes_v1_source_lineage_and_deduplicates_access(
 
     assert outcome.status is OutcomeStatus.COMPLETE
     assert type(outcome.result.result) is StrategyResult
-    assert outcome.result.artifact.artifact_schema_version == 2
+    assert outcome.result.artifact.artifact_schema_version == 3
     assert outcome.result.result.path_dependent is True
     assert outcome.result.result.state_identity is None
     assert tuple(
@@ -154,23 +148,6 @@ def test_generic_consumer_promotes_v1_source_lineage_and_deduplicates_access(
     )
     assert len(immediate) == 1
     assert "computed_draft" not in outcome.result.model_dump()
-
-
-def test_incomplete_path_dependent_v1_source_fails_before_success(tmp_path: Path) -> None:
-    current = project(tmp_path)
-    source = publish_source(current, source_result("legacy-ensemble", complete=False))
-
-    outcome = current.invoke(
-        FrozenSourceConsumer(),
-        invocation("incomplete-consumer", source.artifact_id),
-    )
-
-    assert outcome.status is OutcomeStatus.FAILED
-    assert outcome.errors[0].error_code == "STRATEGY_SOURCE_LINEAGE_INCOMPLETE"
-    assert not any(
-        envelope.logical_identity == "strategy:incomplete-consumer"
-        for envelope in current.artifacts.list_envelopes()
-    )
 
 
 class FalseNegativePathStrategy:
@@ -213,10 +190,10 @@ def test_observed_direct_state_rejects_false_path_declaration(tmp_path: Path) ->
     assert outcome.errors[0].error_code == "STRATEGY_PATH_DEPENDENCE_INCONSISTENT"
 
 
-def path_source_v2(identity: str, instrument: str) -> StrategyResult:
+def path_source_v3(identity: str, instrument: str) -> StrategyResult:
     return StrategyResult(
-        invocation_id=f"{identity}-v2-invocation",
-        strategy_id=f"tests.{identity}.v2",
+        invocation_id=f"{identity}-v3-invocation",
+        strategy_id=f"tests.{identity}.v3",
         evaluation_time=EVALUATION_TIME,
         weights=(WeightEntry(instrument=instrument, weight=0.5),),
         budget_mode=BudgetMode.FLEXIBLE,
@@ -242,7 +219,7 @@ def path_source_v2(identity: str, instrument: str) -> StrategyResult:
         ),
         memory_accesses=(
             MemoryAccessRecord(
-                strategy_id=f"tests.{identity}.v2",
+                strategy_id=f"tests.{identity}.v3",
                 version=2,
                 feedback_cursor=7,
             ),
@@ -250,12 +227,12 @@ def path_source_v2(identity: str, instrument: str) -> StrategyResult:
     )
 
 
-def test_ensemble_preserves_two_distinct_v2_state_and_memory_origins(
+def test_ensemble_preserves_two_distinct_v3_state_and_memory_origins(
     tmp_path: Path,
 ) -> None:
     current = project(tmp_path)
     sources = tuple(
-        path_source_v2(identity, instrument) for identity, instrument in (("A", "X"), ("B", "Y"))
+        path_source_v3(identity, instrument) for identity, instrument in (("A", "X"), ("B", "Y"))
     )
     publications = tuple(
         current.artifacts.publish_model(

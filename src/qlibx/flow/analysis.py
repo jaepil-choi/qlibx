@@ -19,7 +19,6 @@ from qlibx.analysis import (
     analyze_simulation,
     render_analysis,
 )
-from qlibx.context import ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
@@ -32,6 +31,7 @@ from qlibx.flow.failures import (
 )
 from qlibx.flow.monitoring import CONSTRAINT_MONITORING_CONTRACT
 from qlibx.kernel import BacktestClock
+from qlibx.view import ViewGate
 
 ANALYSIS_RESULT_CONTRACT = ArtifactContract(
     artifact_type="analysis_result",
@@ -47,7 +47,7 @@ REPORT_RESULT_CONTRACT = ArtifactContract(
 
 EXECUTION_EVIDENCE_CONTRACT = ArtifactContract(
     artifact_type="execution_result",
-    artifact_schema_version=1,
+    artifact_schema_version=2,
     payload_model=ExecutionEvidence,
 )
 

@@ -3,7 +3,7 @@
   "sample_id": "strategy-composition-v1",
   "ownership": "qlibx_product_owned_example",
   "prd_use_case": "UC-ALPHA-PATH-001",
-  "source_artifact_contract": "strategy_result:v2",
+  "source_artifact_contract": "strategy_result:v3",
   "source_selection_policy": "exact_artifact_id",
   "consumer_validation_contract": "strategy_extension_registration:v1",
   "downstream_execution_profile": "daily.next-session-close.v1",

@@ -7,7 +7,6 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.context import StrategyView
 from qlibx.data import ComponentRequirement, RegistrySnapshot
 from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
@@ -16,9 +15,6 @@ from qlibx.flow.failures import build_operation_error, publish_failed_outcome
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
 from qlibx.flow.strategy_results import (
     STRATEGY_RESULT_CONTRACT as STRATEGY_RESULT_CONTRACT,
-)
-from qlibx.flow.strategy_results import (
-    STRATEGY_RESULT_V1_CONTRACT as STRATEGY_RESULT_V1_CONTRACT,
 )
 from qlibx.models import QlibxModel
 from qlibx.operations import (
@@ -31,10 +27,10 @@ from qlibx.operations import (
     StrategyDraft,
     StrategyInvocation,
     StrategyResult,
-    StrategyResultV1,
     WeightEntry,
 )
 from qlibx.operations import StoredSignalEntry as StoredSignalEntry
+from qlibx.view import StrategyView
 
 
 class StoredSignalWeighting(StrEnum):
@@ -45,7 +41,7 @@ class StoredSignalWeighting(StrEnum):
 class EnsembleMemberSpec(QlibxModel):
     artifact_id: str = Field(min_length=1)
     allocation: float = Field(gt=0)
-    artifact_schema_version: Literal[1, 2] = 2
+    artifact_schema_version: Literal[3] = 3
 
 
 class EnsembleDefinition(QlibxModel):
@@ -135,7 +131,7 @@ class EnsembleStrategyOperation:
                 member,
                 view.artifact(
                     self._consumer_role(index),
-                    StrategyResultV1 if member.artifact_schema_version == 1 else StrategyResult,
+                    StrategyResult,
                 ),
             )
             for index, member in enumerate(self._definition.members)

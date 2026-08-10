@@ -95,8 +95,7 @@ def portfolio(
     profile: ConstructionProfile = ConstructionProfile.HYPOTHETICAL_SIGNED,
 ) -> PortfolioConstructionResult:
     target_weights = tuple(
-        PortfolioWeight(instrument=instrument, weight=weight)
-        for instrument, weight in weights
+        PortfolioWeight(instrument=instrument, weight=weight) for instrument, weight in weights
     )
     gross = sum(abs(item.weight) for item in target_weights)
     return PortfolioConstructionResult(
@@ -170,12 +169,19 @@ def test_public_academic_facade_executes_stocks_at_next_session_close(
         ACADEMIC_EXECUTION_CONTRACT,
     )
     assert first.result.payload.event_time == at(3)
+    assert first.result.payload.exchange_id == "ACADEMIC"
+    assert len(first.result.payload.exchange_config_fingerprint) == 64
+    preparation_id = first.result.payload.preparation_artifact_id
+    assert {
+        item.artifact_id
+        for item in selected.artifacts.list_envelopes(
+            artifact_type="academic_execution_preparation"
+        )
+    }.issuperset({preparation_id})
     assert first.result.payload.portfolio_evaluation_time == at(2)
     assert {fill.instrument_id for fill in first.result.payload.match.fills} == {"A", "B"}
     assert all(fill.hypothetical for fill in first.result.payload.match.fills)
-    dependency_kinds = {
-        edge.dependency_kind for edge in first.result.envelope.dependencies
-    }
+    dependency_kinds = {edge.dependency_kind for edge in first.result.envelope.dependencies}
     assert {"artifact", "config", "dataset"}.issubset(dependency_kinds)
 
 
@@ -188,9 +194,7 @@ def test_public_academic_replay_and_resume_are_idempotent(tmp_path: Path) -> Non
 
     assert resumed.status is OutcomeStatus.COMPLETE
     assert resumed.result == baseline.result
-    assert len(
-        selected.artifacts.list_envelopes(artifact_type="academic_execution_result")
-    ) == 2
+    assert len(selected.artifacts.list_envelopes(artifact_type="academic_execution_result")) == 2
     assert len(selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")) == 2
     assert len(selected.artifacts.list_envelopes(artifact_type="academic_run_result")) == 1
     loaded = selected.load_artifact(
@@ -231,15 +235,68 @@ def test_checkpoint_publication_failure_recovers_without_duplicate_fill(
     monkeypatch.setattr(selected.artifacts, "publish_model", fail_first_checkpoint)
     interrupted = selected.run_academic(selected_spec)
     assert interrupted.status is OutcomeStatus.FAILED
-    assert len(
-        selected.artifacts.list_envelopes(artifact_type="academic_execution_result")
-    ) == 1
+    assert len(selected.artifacts.list_envelopes(artifact_type="academic_execution_result")) == 1
     assert not selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")
 
     monkeypatch.setattr(selected.artifacts, "publish_model", original_publish)
     recovered = selected.run_academic(selected_spec, resume=True)
 
     assert recovered.status is OutcomeStatus.COMPLETE
+    assert len(selected.artifacts.list_envelopes(artifact_type="academic_execution_result")) == 2
+    assert len(selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")) == 2
+
+
+@pytest.mark.parametrize(
+    "artifact_type",
+    ("academic_execution_preparation", "academic_execution_result"),
+)
+def test_published_preparation_or_execution_recovers_idempotently(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artifact_type: str,
+) -> None:
+    selected = project(tmp_path)
+    selected_spec = run_spec(
+        two_portfolios(selected),
+        run_id=f"academic-published-{artifact_type}",
+    )
+    original_publish = selected.artifacts.publish_model
+    failed_once = False
+
+    def publish_then_report_failure(**kwargs: Any) -> OperationOutcome:
+        nonlocal failed_once
+        published = original_publish(**kwargs)
+        if kwargs["artifact_type"] == artifact_type and not failed_once:
+            failed_once = True
+            return OperationOutcome(
+                status=OutcomeStatus.FAILED,
+                errors=(
+                    OperationError(
+                        operation="artifact.publish",
+                        stage_path="artifact.publish.after_commit.test_crash",
+                        error_code="TEST_AFTER_PUBLICATION_CRASH",
+                        commit_status=CommitStatus.COMMITTED,
+                        idempotency_identity=selected_spec.run_id,
+                        error_id=f"error-after-{artifact_type}",
+                    ),
+                ),
+                diagnostics=published.diagnostics,
+            )
+        return published
+
+    monkeypatch.setattr(selected.artifacts, "publish_model", publish_then_report_failure)
+    interrupted = selected.run_academic(selected_spec)
+    assert interrupted.status is OutcomeStatus.FAILED
+
+    monkeypatch.setattr(selected.artifacts, "publish_model", original_publish)
+    recovered = selected.run_academic(selected_spec, resume=True)
+
+    assert recovered.status is OutcomeStatus.COMPLETE
+    assert len(
+        selected.artifacts.list_envelopes(
+            artifact_type="academic_execution_preparation"
+        )
+    ) == 2
     assert len(
         selected.artifacts.list_envelopes(artifact_type="academic_execution_result")
     ) == 2
@@ -304,8 +361,6 @@ def test_academic_flow_accepts_stock_etf_index_and_synthetic_factor(
         "I",
     }
     factor_quote = next(
-        item
-        for item in execution.result.payload.match.quotes
-        if item.instrument_id == "F"
+        item for item in execution.result.payload.match.quotes if item.instrument_id == "F"
     )
     assert factor_quote.price == 1.25

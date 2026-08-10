@@ -118,7 +118,7 @@ def test_constraint_sample_materializes_and_runs_deterministically(
         0.31752577319587627
     )
     assert first["unresolved_excess"] == pytest.approx(0.00032577319587628883)
-    assert first["eligible"] is False
+    assert first["compliant"] is False
     assert first["failed_findings"] == [
         {
             "bound": 0.3172,

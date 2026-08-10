@@ -5,20 +5,20 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.context import (
-    AccessRecord,
-    ArtifactAccessRecord,
-    FeedbackAccessRecord,
-    MemoryAccessRecord,
-    SessionPerformanceAccessRecord,
-    StateAccessRecord,
-)
 from qlibx.data import ComponentRequirement
 from qlibx.models import QlibxModel
 from qlibx.operations import (
     StrategyArtifactBinding,
     StrategyArtifactRequirement,
     StrategyDraft,
+)
+from qlibx.view import (
+    AccessRecord,
+    ArtifactAccessRecord,
+    FeedbackAccessRecord,
+    MemoryAccessRecord,
+    SessionPerformanceAccessRecord,
+    StateAccessRecord,
 )
 
 _EXTENSION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"

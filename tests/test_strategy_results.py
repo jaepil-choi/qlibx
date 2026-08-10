@@ -10,16 +10,11 @@ from qlibx import (
     OutcomeStatus,
     QlibxProject,
     StrategyResult,
-    StrategyResultV1,
     StrategySourceStateLineage,
     WeightEntry,
 )
-from qlibx.context import StateAccessRecord
-from qlibx.flow.strategy_results import (
-    STRATEGY_RESULT_CONTRACT,
-    STRATEGY_RESULT_V1_CONTRACT,
-    load_strategy_result,
-)
+from qlibx.flow.strategy_results import STRATEGY_RESULT_CONTRACT, load_strategy_result
+from qlibx.view import StateAccessRecord
 
 EVALUATION_TIME = datetime(2025, 1, 3, 9, tzinfo=UTC)
 
@@ -45,56 +40,54 @@ def project(tmp_path: Path) -> QlibxProject:
     return QlibxProject.open(tmp_path)
 
 
-def test_exact_strategy_result_loader_dispatches_v1_and_v2(tmp_path: Path) -> None:
+def test_exact_strategy_result_loader_accepts_only_v3(tmp_path: Path) -> None:
     current = project(tmp_path)
-    v1 = StrategyResultV1(**result_fields("v1"))
-    v2 = StrategyResult(**result_fields("v2"))
-    published_v1 = current.artifacts.publish_model(
-        logical_identity="strategy:v1",
-        artifact_type=STRATEGY_RESULT_V1_CONTRACT.artifact_type,
-        artifact_schema_version=STRATEGY_RESULT_V1_CONTRACT.artifact_schema_version,
-        producer_id=v1.strategy_id,
-        payload=v1,
-    )
-    published_v2 = current.artifacts.publish_model(
-        logical_identity="strategy:v2",
-        artifact_type=STRATEGY_RESULT_CONTRACT.artifact_type,
-        artifact_schema_version=STRATEGY_RESULT_CONTRACT.artifact_schema_version,
-        producer_id=v2.strategy_id,
-        payload=v2,
-    )
-
-    loaded_v1 = load_strategy_result(current.artifacts, published_v1.result.artifact_id)
-    loaded_v2 = load_strategy_result(current.artifacts, published_v2.result.artifact_id)
-
-    assert loaded_v1.status is OutcomeStatus.COMPLETE
-    assert loaded_v2.status is OutcomeStatus.COMPLETE
-    assert type(loaded_v1.result.payload) is StrategyResultV1
-    assert type(loaded_v2.result.payload) is StrategyResult
-
-
-def test_strategy_result_loader_rejects_unknown_exact_schema(tmp_path: Path) -> None:
-    current = project(tmp_path)
-    legacy = StrategyResultV1(**result_fields("v3"))
-    published = current.artifacts.publish_model(
-        logical_identity="strategy:v3",
+    payload = StrategyResult(**result_fields("canonical"))
+    canonical = current.artifacts.publish_model(
+        logical_identity="strategy:canonical",
         artifact_type="strategy_result",
         artifact_schema_version=3,
-        producer_id=legacy.strategy_id,
-        payload=legacy,
+        producer_id=payload.strategy_id,
+        payload=payload,
+    )
+    assert canonical.status is OutcomeStatus.COMPLETE
+
+    loaded = load_strategy_result(current.artifacts, canonical.result.artifact_id)
+
+    assert loaded.status is OutcomeStatus.COMPLETE
+    assert type(loaded.result.payload) is StrategyResult
+    assert STRATEGY_RESULT_CONTRACT.artifact_schema_version == 3
+
+
+@pytest.mark.parametrize("legacy_version", [1, 2])
+def test_strategy_result_loader_rejects_v1_and_v2(
+    tmp_path: Path,
+    legacy_version: int,
+) -> None:
+    current = project(tmp_path)
+    payload = StrategyResult(**result_fields(f"legacy-v{legacy_version}"))
+    published = current.artifacts.publish_model(
+        logical_identity=f"strategy:legacy-v{legacy_version}",
+        artifact_type="strategy_result",
+        artifact_schema_version=legacy_version,
+        producer_id=payload.strategy_id,
+        payload=payload,
     )
 
     loaded = load_strategy_result(current.artifacts, published.result.artifact_id)
 
     assert loaded.status is OutcomeStatus.FAILED
     assert loaded.errors[0].error_code == "STRATEGY_RESULT_SCHEMA_UNSUPPORTED"
-    assert loaded.errors[0].context["actual_version"] == 3
+    assert loaded.errors[0].context["actual_version"] == legacy_version
+    assert loaded.errors[0].retry_preconditions == (
+        "rerun the Strategy producer to create strategy_result:v3",
+    )
 
 
-def test_v2_distinguishes_inherited_lineage_from_direct_state() -> None:
+def test_v3_distinguishes_inherited_lineage_from_direct_state() -> None:
     source = StrategySourceStateLineage(
         source_artifact_id="artifact-source",
-        source_artifact_schema_version=2,
+        source_artifact_schema_version=3,
         source_invocation_id="source-invocation",
         source_strategy_id="tests.source",
         declared_state_identity="account:A:v4",
@@ -111,7 +104,6 @@ def test_v2_distinguishes_inherited_lineage_from_direct_state() -> None:
             ),
         ),
     )
-
     inherited = StrategyResult(
         **{
             **result_fields("consumer"),
@@ -125,6 +117,6 @@ def test_v2_distinguishes_inherited_lineage_from_direct_state() -> None:
     assert inherited.source_state_lineage == (source,)
 
 
-def test_v2_rejects_unobserved_or_unsorted_path_claims() -> None:
+def test_v3_rejects_unobserved_path_claim() -> None:
     with pytest.raises(ValidationError, match="path_dependent must match"):
         StrategyResult(**{**result_fields("false-claim"), "path_dependent": True})

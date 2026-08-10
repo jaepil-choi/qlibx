@@ -21,10 +21,16 @@ from factor_model import MonthlyReversalModel
 
 import qlibx
 import qlibx.execution as qlibx_execution
-from qlibx import MaterializationInvocation, OutcomeStatus, QlibxProject
-from qlibx.analysis import SignalAnalysisRequest
-from qlibx.data import AvailableAtField, ComponentRequirement, DatasetRegistration, SourceFormat
-from qlibx.flow import AnalysisFlow
+from qlibx import (
+    AvailableAtField,
+    ComponentRequirement,
+    DatasetRegistration,
+    MaterializationInvocation,
+    OutcomeStatus,
+    QlibxProject,
+    SignalAnalysisRequest,
+    SourceFormat,
+)
 
 SHOWCASE_ID = "show_002_academic_factor_research"
 DATASET_ID = "showcase-academic-factor-daily-v1"
@@ -384,10 +390,6 @@ def run(repo_root: Path) -> dict[str, Any]:
         raise RuntimeError("registered dataset is absent from the project snapshot")
 
     model = MonthlyReversalModel(DATASET_ID, LOOKBACK_SESSIONS)
-    analysis_flow = AnalysisFlow(
-        artifacts=project.artifacts,
-        registry=project.registry_snapshot(),
-    )
     decision_dates = [pd.Timestamp(value) for value in extraction["decision_dates"]]
     forward_returns: dict[pd.Timestamp, pd.Series] = extraction["evaluation_returns"]
     previous_weights = {instrument: 0.0 for instrument in UNIVERSE}
@@ -422,7 +424,7 @@ def run(repo_root: Path) -> dict[str, Any]:
             raise RuntimeError("factor materialization accessed future-hidden data")
 
         analyzed = require_complete(
-            analysis_flow.analyze_signal(
+            project.analyze_signal(
                 SignalAnalysisRequest(
                     invocation_id=f"showcase-factor-analysis-{evaluation_day:%Y%m%d}-v1",
                     signal_artifact_id=signal_artifact.artifact_id,

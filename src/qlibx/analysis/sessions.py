@@ -7,8 +7,8 @@ from typing import Literal
 from pydantic import Field, ValidationError, model_validator
 
 from qlibx.analysis.results import AnalysisError
-from qlibx.context import StateAccessRecord
 from qlibx.models import QlibxModel
+from qlibx.view import StateAccessRecord
 
 
 class SessionExecutionInput(QlibxModel):

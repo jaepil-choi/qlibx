@@ -33,6 +33,36 @@ AvailabilityBinding = Annotated[
 ]
 
 
+class RowsLookback(QlibxModel):
+    kind: Literal["rows"] = "rows"
+    rows: int = Field(gt=0)
+
+
+class CalendarLookback(QlibxModel):
+    kind: Literal["calendar"] = "calendar"
+    years: int = Field(default=0, ge=0)
+    months: int = Field(default=0, ge=0)
+    days: int = Field(default=0, ge=0)
+    timezone: str = Field(min_length=1)
+    month_end_policy: Literal["clamp"] = "clamp"
+
+    @model_validator(mode="after")
+    def validate_period(self) -> "CalendarLookback":
+        if not (self.years or self.months or self.days):
+            raise ValueError("calendar lookback requires a positive period")
+        try:
+            ZoneInfo(self.timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"unknown lookback timezone: {self.timezone!r}") from exc
+        return self
+
+
+Lookback = Annotated[
+    RowsLookback | CalendarLookback,
+    Field(discriminator="kind"),
+]
+
+
 class DatasetRegistration(QlibxModel):
     """User-confirmed minimal meaning for one physical dataset."""
 
@@ -86,7 +116,27 @@ class RegistrationEvidence(QlibxModel):
     localized_source_timezone: str | None = None
 
 
+class DatasetQuerySnapshot(QlibxModel):
+    path: str = Field(min_length=1)
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    row_count: int = Field(ge=0)
+    columns: tuple[str, ...]
+    logical_order_columns: tuple[str, ...]
+
+
+class DatasetReindexItem(QlibxModel):
+    dataset_id: str
+    registration_identity: str
+    snapshot_fingerprint: str
+    changed: bool
+
+
+class DatasetReindexResult(QlibxModel):
+    items: tuple[DatasetReindexItem, ...]
+
+
 class RegisteredDataset(QlibxModel):
+    registration_schema_version: Literal[1, 2] = 1
     dataset_id: str
     registration_identity: str
     physical_fingerprint: str
@@ -99,6 +149,8 @@ class RegisteredDataset(QlibxModel):
     available_at: AvailabilityBinding
     logical_key: tuple[str, ...]
     bindings: dict[str, str]
+    source_bindings: dict[str, str] = Field(default_factory=dict)
     semantic_category: str | None = None
     source_provenance: str
     evidence: RegistrationEvidence
+    query_snapshot: DatasetQuerySnapshot | None = None

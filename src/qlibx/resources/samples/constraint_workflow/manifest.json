@@ -10,6 +10,6 @@
   "benchmark_available_at": "2024-01-03 09:00 Asia/Seoul",
   "evaluation_time": "2024-01-03 15:30 Asia/Seoul",
   "constraint_profile": "mvp-no-short-single-name-cap-v1",
-  "expected_eligible": false,
+  "expected_compliant": false,
   "current_support_only": true
 }

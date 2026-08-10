@@ -2,7 +2,6 @@ from datetime import date
 
 import pytest
 
-from qlibx.context import StateAccessRecord, StateHolding
 from qlibx.domain import Side
 from qlibx.execution import (
     SessionSizingInput,
@@ -12,6 +11,7 @@ from qlibx.execution import (
     SizingTarget,
     size_session_orders,
 )
+from qlibx.view import StateAccessRecord, StateHolding
 
 
 def state(

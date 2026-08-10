@@ -8,21 +8,21 @@ from zoneinfo import ZoneInfo
 import yaml
 from strategy import SampleReversalStrategy
 
-from qlibx import OutcomeStatus, QlibxProject, StrategyInvocation
-from qlibx.analysis import RendererKind, ReportRequest, SignalAnalysisRequest
-from qlibx.data import ComponentRequirement, DatasetRegistration
-from qlibx.flow import (
+from qlibx import (
     STORED_SIGNAL_CONTRACT,
-    AnalysisFlow,
-    CompositionFlow,
-    PortfolioConstructionFlow,
+    ComponentRequirement,
+    ConstructionProfile,
+    DatasetRegistration,
+    OutcomeStatus,
+    PortfolioConstructionRequest,
+    QlibxProject,
+    RendererKind,
+    ReportRequest,
+    SignalAnalysisRequest,
     StoredSignalEntry,
     StoredSignalResult,
     StoredSignalWeighting,
-)
-from qlibx.portfolio import (
-    ConstructionProfile,
-    PortfolioConstructionRequest,
+    StrategyInvocation,
 )
 
 KST = ZoneInfo("Asia/Seoul")
@@ -86,13 +86,9 @@ def main(project_root: Path) -> dict[str, object]:
         ),
         "stored signal",
     )
-    composition = CompositionFlow(
-        registry=project.registry_snapshot(),
-        artifacts=project.artifacts,
-    )
     consumers = tuple(
         require_complete(
-            composition.invoke_stored_signal_strategy(
+            project.invoke_stored_signal_strategy(
                 artifact_id=stored.result.artifact_id,
                 strategy_id=f"sample.stored.{weighting.value}",
                 weighting=weighting,
@@ -107,7 +103,7 @@ def main(project_root: Path) -> dict[str, object]:
         for weighting in StoredSignalWeighting
     )
     portfolio = require_complete(
-        PortfolioConstructionFlow(artifacts=project.artifacts).construct(
+        project.construct_portfolio(
             PortfolioConstructionRequest(
                 invocation_id="sample-long-only-construction",
                 source_artifact_id=direct.result.artifact.artifact_id,
@@ -119,12 +115,8 @@ def main(project_root: Path) -> dict[str, object]:
         ),
         "portfolio construction",
     )
-    analysis_flow = AnalysisFlow(
-        artifacts=project.artifacts,
-        registry=project.registry_snapshot(),
-    )
     analysis = require_complete(
-        analysis_flow.analyze_signal(
+        project.analyze_signal(
             SignalAnalysisRequest(
                 invocation_id="sample-signal-analysis",
                 signal_artifact_id=stored.result.artifact_id,
@@ -142,7 +134,7 @@ def main(project_root: Path) -> dict[str, object]:
         "signal analysis",
     )
     report = require_complete(
-        analysis_flow.render(
+        project.render_report(
             ReportRequest(
                 invocation_id="sample-machine-report",
                 analysis_artifact_id=analysis.diagnostics[0].artifact_id,

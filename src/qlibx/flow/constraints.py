@@ -1,6 +1,5 @@
 """PIT-safe constraint adjustment and independent validation orchestration."""
 
-from qlibx.context import AccessRecord, MaterializeView, ViewGate
 from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver, Resolution
 from qlibx.data.requirements import ComponentRequirement
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
@@ -23,6 +22,7 @@ from qlibx.portfolio import (
     adjust_single_name_caps,
     validate_single_name_caps,
 )
+from qlibx.view import AccessRecord, MaterializeView, ViewGate
 
 CONSTRAINT_ADJUSTMENT_CONTRACT = ArtifactContract(
     artifact_type="constraint_adjustment_result",
@@ -32,7 +32,7 @@ CONSTRAINT_ADJUSTMENT_CONTRACT = ArtifactContract(
 
 CONSTRAINT_VALIDATION_CONTRACT = ArtifactContract(
     artifact_type="constraint_validation_result",
-    artifact_schema_version=1,
+    artifact_schema_version=2,
     payload_model=ConstraintValidationResult,
 )
 
@@ -208,7 +208,7 @@ class ConstraintFlow:
         publication = self._artifacts.publish_model(
             logical_identity=f"constraint-validation:{request.invocation_id}",
             artifact_type="constraint_validation_result",
-            artifact_schema_version=1,
+            artifact_schema_version=2,
             producer_id="constraint.single_name_cap.validate",
             payload=result,
             dependencies=self._dependencies(

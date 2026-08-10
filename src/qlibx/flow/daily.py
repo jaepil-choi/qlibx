@@ -29,7 +29,6 @@ from qlibx.analysis import (
     SessionPerformanceRequest,
     compute_session_performance,
 )
-from qlibx.context import StateAccessRecord, StateHolding, ViewGate
 from qlibx.data import (
     ComponentRequirement,
     ObservationStore,
@@ -45,15 +44,20 @@ from qlibx.evidence import (
     LocalArtifactBackend,
 )
 from qlibx.execution import (
+    BaseExchange,
     FillDiagnostic,
-    KrxExchange,
+    KrxBatchRequest,
     MarketQuote,
-    SessionSizingInput,
-    SessionSizingRequest,
-    SizingError,
+    MatchBatchResult,
     SizingPrice,
     SizingTarget,
-    size_session_orders,
+)
+from qlibx.execution.preparation import (
+    KRX_PREPARATION_CONTRACT,
+    KrxConstraintInput,
+    KrxExecutionPreparation,
+    KrxPreparationContext,
+    KrxPreparationIntent,
 )
 from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
 from qlibx.flow.recovery import (
@@ -78,8 +82,10 @@ from qlibx.operations import (
     StrategyInvocation,
     StrategyOperation,
     StrategyResult,
-    StrategyResultV1,
 )
+from qlibx.portfolio import BenchmarkWeight, ExecutionLotInput
+from qlibx.specs.constraints import MvpConstraintPolicy
+from qlibx.view import ExecutionInputProjection, StateAccessRecord, StateHolding, ViewGate
 
 DECISION_PRIORITY = 0
 EXECUTION_PRIORITY = 10
@@ -142,12 +148,15 @@ class FillDiagnosticEvidence(QlibxModel):
 
 
 class ExecutionEvidence(QlibxModel):
-    execution_schema_version: int = 1
+    execution_schema_version: Literal[2] = 2
     event_id: str
     decision_id: str
     event_time: datetime
     profile_id: str
     convention_id: str
+    exchange_id: str
+    exchange_config_fingerprint: str
+    preparation_artifact_id: str
     sizing_nav: float
     sizing_price_role: str
     orders: tuple[OrderEvidence, ...]
@@ -164,8 +173,6 @@ class MarkEvidence(QlibxModel):
     marks: tuple[tuple[str, float], ...]
     account_before: StateAccessRecord
     account_after: StateAccessRecord
-
-
 
 
 class MonitorEvidence(QlibxModel):
@@ -226,18 +233,17 @@ DECISION_INTENT_CONTRACT = ArtifactContract(
 )
 
 
-
 class DailyExecutionProfile(QlibxModel):
     profile_id: str = "daily.next-session-close.v1"
     convention_id: str = "close-price.v1"
-    execution_timing: Literal["next_session_close", "next_session_open"] = (
-        "next_session_close"
-    )
+    execution_timing: Literal["next_session_close", "next_session_open"] = "next_session_close"
     market_dataset_id: str
     execution_price_role: str = "execution_price"
     valuation_price_role: str = "valuation_price"
     volume_role: str | None = None
     session_timezone: str = "Asia/Seoul"
+    execution_lots: tuple[tuple[str, float], ...] = ()
+    constraint_policy: MvpConstraintPolicy | None = None
     feedback_entry_limit: int = Field(default=256, gt=0)
     limitations: tuple[str, ...] = (
         "single close price for the full cross-sectional batch",
@@ -249,6 +255,10 @@ class DailyExecutionProfile(QlibxModel):
         """Preserve the legacy close-profile identity when timing is defaulted."""
 
         exclude = {"execution_timing"} if self.execution_timing == "next_session_close" else set()
+        if not self.execution_lots:
+            exclude.add("execution_lots")
+        if self.constraint_policy is None:
+            exclude.add("constraint_policy")
         return self.model_dump_json(exclude=exclude)
 
 
@@ -438,9 +448,10 @@ class DailyExecutionFlow:
         clock: BacktestClock,
         registry: RegistrySnapshot,
         artifacts: LocalArtifactBackend,
-        exchange: KrxExchange,
+        exchange: BaseExchange[KrxBatchRequest, MatchBatchResult],
         account: Account,
         profile: DailyExecutionProfile,
+        preparation: KrxExecutionPreparation | None = None,
         resolver: RequirementResolver | None = None,
         store: ObservationStore | None = None,
         memory: StrategyMemoryStore | None = None,
@@ -454,6 +465,7 @@ class DailyExecutionFlow:
         self._account = account
         self._initial_account = _state(account.snapshot(evaluation_time=clock.now))
         self._profile = profile
+        self._preparation = preparation or KrxExecutionPreparation()
         self._resolver = resolver or RequirementResolver()
         self._store = store or ObservationStore()
         self._memory = memory or StrategyMemoryStore()
@@ -553,9 +565,12 @@ class DailyExecutionFlow:
                 intent_artifact=frozen.artifact,
             )
             self._pending_executions[frozen.intent.decision_id] = pending
-            if self._publish_recovery_point(
-                event=Event("DECISION", frozen.intent.decision_time, DECISION_PRIORITY)
-            ) is None:
+            if (
+                self._publish_recovery_point(
+                    event=Event("DECISION", frozen.intent.decision_time, DECISION_PRIORITY)
+                )
+                is None
+            ):
                 break
             self._clock.schedule(
                 Event(
@@ -639,8 +654,7 @@ class DailyExecutionFlow:
         while not self._clock.is_finished() and not self._errors:
             for handler in self._clock.advance_to_next():
                 self._trace.append(
-                    f"{handler.event.ts.isoformat()}|{handler.event.priority}|"
-                    f"{handler.event.name}"
+                    f"{handler.event.ts.isoformat()}|{handler.event.priority}|{handler.event.name}"
                 )
                 try:
                     handler.callback(handler.event)
@@ -714,9 +728,7 @@ class DailyExecutionFlow:
                 decision_intents=tuple(self._intents),
                 executions=tuple(self._executions),
                 marks=tuple(self._marks),
-                session_performance=tuple(
-                    item.record for item in self._session_performance
-                ),
+                session_performance=tuple(item.record for item in self._session_performance),
                 monitors=tuple(self._monitors),
                 memory_commits=tuple(self._memory_commits),
                 checkpoint=checkpoint,
@@ -725,13 +737,42 @@ class DailyExecutionFlow:
             ),
         )
 
+    def _execution_inputs_for_decision(
+        self,
+        decision_time: datetime,
+    ) -> tuple[ExecutionInputProjection, ...]:
+        if not self._strategy_results:
+            return ()
+        previous_decision_time = max(result.evaluation_time for result in self._strategy_results)
+        envelopes = {
+            envelope.logical_identity: envelope
+            for envelope in self._published
+            if envelope.artifact_type == "execution_result"
+        }
+        projections: list[ExecutionInputProjection] = []
+        for evidence in self._executions:
+            if not (previous_decision_time < evidence.event_time <= decision_time):
+                continue
+            envelope = envelopes.get(f"execution-result:{evidence.event_id}")
+            if envelope is None:
+                continue
+            projections.append(
+                ExecutionInputProjection(
+                    artifact_id=envelope.artifact_id,
+                    artifact_type=envelope.artifact_type,
+                    artifact_schema_version=envelope.artifact_schema_version,
+                    content_hash=envelope.content_hash,
+                    payload=evidence,
+                )
+            )
+        return tuple(sorted(projections, key=lambda item: item.artifact_id))
+
     def _on_decision(self, event: Event) -> None:
         assert self._request is not None
         assert self._strategy is not None
         assert self._executor is not None
         decision_id = (
-            f"{self._request.run_id}:decision:"
-            f"{event.ts.isoformat().replace('+00:00', 'Z')}"
+            f"{self._request.run_id}:decision:{event.ts.isoformat().replace('+00:00', 'Z')}"
         )
         invocation = StrategyInvocation(
             invocation_id=decision_id,
@@ -782,11 +823,10 @@ class DailyExecutionFlow:
             account_state=account_state,
             account_feedback=account_feedback,
             session_performance=(
-                self._session_performance[-1]
-                if self._session_performance
-                else None
+                self._session_performance[-1] if self._session_performance else None
             ),
             memory_state=memory_state,
+            execution_inputs=self._execution_inputs_for_decision(event.ts),
         )
         if outcome.status is not OutcomeStatus.COMPLETE:
             self._errors.extend(outcome.errors)
@@ -805,9 +845,7 @@ class DailyExecutionFlow:
             )
             if self._errors:
                 return
-            candidate_memory = StrategyMemoryStore.from_checkpoint(
-                self._memory.checkpoint()
-            )
+            candidate_memory = StrategyMemoryStore.from_checkpoint(self._memory.checkpoint())
             if plan is not None:
                 self._apply_memory_plan(
                     event,
@@ -819,16 +857,19 @@ class DailyExecutionFlow:
                 if self._errors:
                     return
             completed = (*self._completed_decisions, decision_id)
-            if self._publish_recovery_point(
-                event=event,
-                memory_snapshots=candidate_memory.checkpoint(),
-                completed_decision_ids=completed,
-                pending_publications=(
-                    (self._memory_recovery_publication(plan, run_result.result),)
-                    if plan is not None
-                    else ()
-                ),
-            ) is None:
+            if (
+                self._publish_recovery_point(
+                    event=event,
+                    memory_snapshots=candidate_memory.checkpoint(),
+                    completed_decision_ids=completed,
+                    pending_publications=(
+                        (self._memory_recovery_publication(plan, run_result.result),)
+                        if plan is not None
+                        else ()
+                    ),
+                )
+                is None
+            ):
                 return
             if plan is not None:
                 self._apply_memory_plan(
@@ -963,13 +1004,31 @@ class DailyExecutionFlow:
             )
             if volume_binding is None:
                 return
+        benchmark_binding = None
+        if self._profile.constraint_policy is not None:
+            policy = self._profile.constraint_policy
+            benchmark_binding = self._resolve(
+                event,
+                "execution.constraint",
+                ComponentRequirement(
+                    requirement_id=f"{policy.policy_id}.benchmark_weight",
+                    semantic_role=policy.benchmark_weight_role,
+                    dataset_id=policy.benchmark_dataset_id,
+                ),
+            )
+            if benchmark_binding is None:
+                return
         before = self._account.snapshot(evaluation_time=event.ts)
         if before.positions and before.valuation_status.value == "INCOMPLETE":
             self._fail(event, "execution", "ACCOUNT_VALUATION_INCOMPLETE")
             return
         view = self._gate.execution_view(
             self._clock,
-            (binding, *((volume_binding,) if volume_binding is not None else ())),
+            (
+                binding,
+                *((volume_binding,) if volume_binding is not None else ()),
+                *((benchmark_binding,) if benchmark_binding is not None else ()),
+            ),
         )
         session_date = event.ts.astimezone(ZoneInfo(self._profile.session_timezone)).date()
         frame = view.session(
@@ -996,60 +1055,154 @@ class DailyExecutionFlow:
                 if math.isfinite(float(getattr(row, self._profile.volume_role)))
                 and float(getattr(row, self._profile.volume_role)) >= 0
             }
-        try:
-            sizing = size_session_orders(
-                SessionSizingRequest(
-                    session_date=session_date,
-                    sizing_price_role=self._profile.execution_price_role,
-                    targets=tuple(
-                        SizingTarget(
-                            instrument_id=target.instrument_id,
-                            weight=target.weight,
-                        )
-                        for target in pending.intent.targets
-                    ),
-                ),
-                SessionSizingInput(
-                    account_state=_state(before),
-                    prices=tuple(
-                        SizingPrice(instrument_id=instrument, price=price)
-                        for instrument, price in prices.items()
-                    ),
-                ),
-            )
-        except SizingError as exc:
-            self._fail(
-                event,
-                "execution",
-                exc.code,
-                context=exc.context,
-            )
-            return
-        orders = sizing.orders
-        required_instruments = sizing.required_instruments
-        sizing_nav = sizing.sizing_nav
-        holdings = before.holdings()
-        match = self._exchange.match_batch(
-            event_id=execution_id,
-            event_time=event.ts,
-            orders=tuple(orders),
-            quotes=tuple(
-                MarketQuote(
-                    instrument_id=instrument,
-                    price=prices[instrument],
-                    available_volume=volumes.get(instrument),
+        benchmark: tuple[BenchmarkWeight, ...] = ()
+        if self._profile.constraint_policy is not None:
+            policy = self._profile.constraint_policy
+            benchmark_frame = view.latest(policy.benchmark_weight_role)
+            benchmark = tuple(
+                BenchmarkWeight(
+                    instrument=str(row.instrument),
+                    weight=float(getattr(row, policy.benchmark_weight_role)),
                 )
-                for instrument in required_instruments
+                for row in benchmark_frame.itertuples(index=False)
+            )
+        holdings = before.holdings()
+        lot_sizes = dict(self._profile.execution_lots)
+        constraint_input = None
+        if self._profile.constraint_policy is not None:
+            constraint_input = KrxConstraintInput(
+                declaration=self._profile.constraint_policy.to_declaration(),
+                benchmark=benchmark,
+                lots=tuple(
+                    ExecutionLotInput(
+                        instrument=target.instrument_id,
+                        price=prices[target.instrument_id],
+                        lot_size=lot_sizes[target.instrument_id],
+                        current_quantity=holdings.get(target.instrument_id, 0.0),
+                    )
+                    for target in pending.intent.targets
+                    if target.instrument_id in prices and target.instrument_id in lot_sizes
+                ),
+                accesses=view.accessed(),
+            )
+        prepared = self._preparation.prepare(
+            KrxPreparationIntent(
+                decision_id=pending.intent.decision_id,
+                strategy_id=pending.intent.strategy_id,
+                targets=tuple(
+                    SizingTarget(
+                        instrument_id=target.instrument_id,
+                        weight=target.weight,
+                    )
+                    for target in pending.intent.targets
+                ),
             ),
-            cash=before.cash,
-            holdings=holdings,
+            KrxPreparationContext(
+                event_id=execution_id,
+                event_time=event.ts,
+                session_date=session_date,
+                sizing_price_role=self._profile.execution_price_role,
+                account_state=_state(before),
+                prices=tuple(
+                    SizingPrice(instrument_id=instrument, price=price)
+                    for instrument, price in sorted(prices.items())
+                ),
+                quotes=tuple(
+                    MarketQuote(
+                        instrument_id=instrument,
+                        price=price,
+                        available_volume=volumes.get(instrument),
+                    )
+                    for instrument, price in sorted(prices.items())
+                ),
+                exchange_id=self._exchange.exchange_id,
+                exchange_config_fingerprint=self._exchange.config_fingerprint,
+                constraint=constraint_input,
+            ),
         )
+        if prepared.status is not OutcomeStatus.COMPLETE:
+            self._errors.extend(prepared.errors)
+            return
+        preparation_dependencies = (
+            DependencyEdge(
+                dependency_kind="artifact",
+                dependency_id=pending.intent_artifact.artifact_id,
+                consumer_role="decision_intent",
+            ),
+            DependencyEdge(
+                dependency_kind="dataset",
+                dependency_id=binding.registration_identity,
+                consumer_role=self._profile.execution_price_role,
+                selected_fields=(binding.field,),
+            ),
+            *(
+                (
+                    DependencyEdge(
+                        dependency_kind="dataset",
+                        dependency_id=volume_binding.registration_identity,
+                        consumer_role=self._profile.volume_role or "available_volume",
+                        selected_fields=(volume_binding.field,),
+                    ),
+                )
+                if volume_binding is not None
+                else ()
+            ),
+            *(
+                (
+                    DependencyEdge(
+                        dependency_kind="dataset",
+                        dependency_id=benchmark_binding.registration_identity,
+                        consumer_role=(
+                            self._profile.constraint_policy.benchmark_weight_role
+                            if self._profile.constraint_policy is not None
+                            else "benchmark_weight"
+                        ),
+                        selected_fields=(benchmark_binding.field,),
+                    ),
+                )
+                if benchmark_binding is not None
+                else ()
+            ),
+            DependencyEdge(
+                dependency_kind="state",
+                dependency_id=(
+                    f"account:{before.account_id}:v{before.version}:cursor{before.feedback_cursor}"
+                ),
+                consumer_role="pre_execution_actual_state",
+            ),
+        )
+        preparation_artifact = self._publish_model(
+            event=event,
+            stage="execution.preparation.artifact",
+            logical_identity=f"krx-execution-preparation:{execution_id}",
+            artifact_type=KRX_PREPARATION_CONTRACT.artifact_type,
+            artifact_schema_version=KRX_PREPARATION_CONTRACT.artifact_schema_version,
+            producer_id="execution.preparation.krx.v1",
+            payload=prepared.result.evidence,
+            dependencies=preparation_dependencies,
+        )
+        if preparation_artifact is None:
+            return
+        orders = prepared.result.request.orders
+        sizing_nav = prepared.result.evidence.sizing_nav
+        match = self._exchange.match_batch(prepared.result.request)
         if match.status is not OutcomeStatus.COMPLETE:
             self._errors.extend(match.errors)
             return
-        committed_fills = tuple(
-            fill for fill in match.result.fills if fill.dealt_quantity > 1e-12
-        )
+        if not isinstance(match.result, MatchBatchResult):
+            self._fail(
+                event,
+                "execution.exchange",
+                "EXCHANGE_RESULT_TYPE_MISMATCH",
+                context={
+                    "exchange_id": self._exchange.exchange_id,
+                    "expected": "MatchBatchResult",
+                    "actual": type(match.result).__name__,
+                },
+            )
+            return
+        match_result = match.result
+        committed_fills = tuple(fill for fill in match_result.fills if fill.dealt_quantity > 1e-12)
         fill_batch = (
             FillBatch(
                 account_id=before.account_id,
@@ -1108,6 +1261,9 @@ class DailyExecutionFlow:
             event_time=event.ts,
             profile_id=self._profile.profile_id,
             convention_id=self._profile.convention_id,
+            exchange_id=self._exchange.exchange_id,
+            exchange_config_fingerprint=self._exchange.config_fingerprint,
+            preparation_artifact_id=preparation_artifact.artifact_id,
             sizing_nav=sizing_nav,
             sizing_price_role=self._profile.execution_price_role,
             orders=tuple(
@@ -1118,10 +1274,8 @@ class DailyExecutionFlow:
                 )
                 for order in orders
             ),
-            fills=tuple(_fill(fill) for fill in match.result.fills),
-            diagnostics=tuple(
-                _diagnostic(diagnostic) for diagnostic in match.result.diagnostics
-            ),
+            fills=tuple(_fill(fill) for fill in match_result.fills),
+            diagnostics=tuple(_diagnostic(diagnostic) for diagnostic in match_result.diagnostics),
             account_before=_state(before),
             account_after=_state(candidate_after),
             limitations=self._profile.limitations,
@@ -1129,34 +1283,13 @@ class DailyExecutionFlow:
         execution_dependencies = (
             DependencyEdge(
                 dependency_kind="artifact",
+                dependency_id=preparation_artifact.artifact_id,
+                consumer_role="execution_preparation",
+            ),
+            DependencyEdge(
+                dependency_kind="artifact",
                 dependency_id=pending.intent_artifact.artifact_id,
                 consumer_role="decision_intent",
-            ),
-            DependencyEdge(
-                dependency_kind="dataset",
-                dependency_id=binding.registration_identity,
-                consumer_role=self._profile.execution_price_role,
-                selected_fields=(binding.field,),
-            ),
-            *(
-                (
-                    DependencyEdge(
-                        dependency_kind="dataset",
-                        dependency_id=volume_binding.registration_identity,
-                        consumer_role=self._profile.volume_role or "available_volume",
-                        selected_fields=(volume_binding.field,),
-                    ),
-                )
-                if volume_binding is not None
-                else ()
-            ),
-            DependencyEdge(
-                dependency_kind="state",
-                dependency_id=(
-                    f"account:{before.account_id}:v{before.version}:"
-                    f"cursor{before.feedback_cursor}"
-                ),
-                consumer_role="pre_execution_actual_state",
             ),
         )
         recovery_publications = [
@@ -1165,6 +1298,7 @@ class DailyExecutionFlow:
                 logical_identity=f"execution-result:{evidence_candidate.event_id}",
                 producer_id=self._profile.profile_id,
                 payload=evidence_candidate,
+                artifact_schema_version=2,
                 dependencies=execution_dependencies,
             )
         ]
@@ -1175,14 +1309,17 @@ class DailyExecutionFlow:
                     pending.strategy_result,
                 )
             )
-        if self._publish_recovery_point(
-            event=event,
-            account_checkpoint=candidate_account.checkpoint(),
-            memory_snapshots=candidate_memory.checkpoint(),
-            completed_decision_ids=completed_after,
-            pending_executions=pending_after,
-            pending_publications=tuple(recovery_publications),
-        ) is None:
+        if (
+            self._publish_recovery_point(
+                event=event,
+                account_checkpoint=candidate_account.checkpoint(),
+                memory_snapshots=candidate_memory.checkpoint(),
+                completed_decision_ids=completed_after,
+                pending_executions=pending_after,
+                pending_publications=tuple(recovery_publications),
+            )
+            is None
+        ):
             return
 
         if fill_batch is not None:
@@ -1218,6 +1355,7 @@ class DailyExecutionFlow:
             logical_identity=f"execution-result:{evidence.event_id}",
             artifact_type="execution_result",
             producer_id=self._profile.profile_id,
+            artifact_schema_version=2,
             payload=evidence,
             dependencies=execution_dependencies,
         )
@@ -1333,19 +1471,22 @@ class DailyExecutionFlow:
                 selected_fields=(binding.field,),
             ),
         )
-        if self._publish_recovery_point(
-            event=event,
-            account_checkpoint=candidate_account.checkpoint(),
-            pending_publications=(
-                self._recovery_publication(
-                    artifact_type="mark_result",
-                    logical_identity=f"mark-result:{evidence_candidate.event_id}",
-                    producer_id=self._profile.profile_id,
-                    payload=evidence_candidate,
-                    dependencies=mark_dependencies,
+        if (
+            self._publish_recovery_point(
+                event=event,
+                account_checkpoint=candidate_account.checkpoint(),
+                pending_publications=(
+                    self._recovery_publication(
+                        artifact_type="mark_result",
+                        logical_identity=f"mark-result:{evidence_candidate.event_id}",
+                        producer_id=self._profile.profile_id,
+                        payload=evidence_candidate,
+                        dependencies=mark_dependencies,
+                    ),
                 ),
-            ),
-        ) is None:
+            )
+            is None
+        ):
             return
         try:
             commit = self._account.commit(
@@ -1382,13 +1523,9 @@ class DailyExecutionFlow:
             (item for item in reversed(self._marks) if item.event_time == event.ts),
             None,
         )
-        performance_status: Literal["published", "skipped_missing_mark"] = (
-            "skipped_missing_mark"
-        )
+        performance_status: Literal["published", "skipped_missing_mark"] = "skipped_missing_mark"
         if mark is not None:
-            executions = tuple(
-                item for item in self._executions if item.event_time == event.ts
-            )
+            executions = tuple(item for item in self._executions if item.event_time == event.ts)
             opening = executions[0].account_before if executions else mark.account_before
             closing = mark.account_after
             try:
@@ -1397,9 +1534,7 @@ class DailyExecutionFlow:
                         event_id=self._event_id(event, "session-performance"),
                         event_time=event.ts,
                         source_mark_event_id=mark.event_id,
-                        source_execution_event_ids=tuple(
-                            item.event_id for item in executions
-                        ),
+                        source_execution_event_ids=tuple(item.event_id for item in executions),
                     ),
                     SessionPerformanceInput(
                         opening=opening,
@@ -1407,12 +1542,8 @@ class DailyExecutionFlow:
                         executions=tuple(
                             SessionExecutionInput(
                                 event_id=execution.event_id,
-                                trade_value=sum(
-                                    abs(fill.trade_value) for fill in execution.fills
-                                ),
-                                transaction_cost=sum(
-                                    fill.total_cost for fill in execution.fills
-                                ),
+                                trade_value=sum(abs(fill.trade_value) for fill in execution.fills),
+                                transaction_cost=sum(fill.total_cost for fill in execution.fills),
                             )
                             for execution in executions
                         ),
@@ -1483,9 +1614,7 @@ class DailyExecutionFlow:
             event_id=self._event_id(event, "monitor"),
             event_time=event.ts,
             account=_state(before),
-            account_version_after_callback=self._account.snapshot(
-                evaluation_time=event.ts
-            ).version,
+            account_version_after_callback=self._account.snapshot(evaluation_time=event.ts).version,
             session_performance_status=performance_status,
         )
         published = self._publish_model(
@@ -1611,13 +1740,14 @@ class DailyExecutionFlow:
         logical_identity: str,
         producer_id: str,
         payload: QlibxModel,
+        artifact_schema_version: int = 1,
         dependencies: tuple[DependencyEdge, ...] = (),
     ) -> RecoveryPublication:
         return RecoveryPublication(
             artifact_type=artifact_type,
             logical_identity=logical_identity,
             producer_id=producer_id,
-            artifact_schema_version=1,
+            artifact_schema_version=artifact_schema_version,
             payload_json=payload.model_dump_json(),
             dependencies=dependencies,
         )
@@ -1652,9 +1782,7 @@ class DailyExecutionFlow:
                     f"cursor{plan.feedback_cursor}"
                 ),
                 consumer_role=(
-                    "initial_actual_state"
-                    if plan.initialization
-                    else "confirmed_feedback"
+                    "initial_actual_state" if plan.initialization else "confirmed_feedback"
                 ),
             ),
         )
@@ -1718,8 +1846,7 @@ class DailyExecutionFlow:
             event=event,
             stage="memory.artifact",
             logical_identity=(
-                f"memory-commit:{self._request.run_id}:{plan.strategy_id}:"
-                f"v{committed.version}"
+                f"memory-commit:{self._request.run_id}:{plan.strategy_id}:v{committed.version}"
             ),
             artifact_type="memory_commit",
             producer_id=plan.strategy_id,
@@ -1735,10 +1862,14 @@ class DailyExecutionFlow:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def _should_schedule(self, event: Event) -> bool:
-        return self._resume_position is None or (
-            event.ts,
-            event.priority,
-        ) > self._resume_position
+        return (
+            self._resume_position is None
+            or (
+                event.ts,
+                event.priority,
+            )
+            > self._resume_position
+        )
 
     def _pending_recovery(
         self,
@@ -1775,9 +1906,7 @@ class DailyExecutionFlow:
         assert self._request is not None
         sequence = self._recovery_sequence + 1 if event is not None else 0
         if sequence >= 10**8:
-            failure_event = event or Event(
-                "RECOVERY", self._clock.now, DECISION_PRIORITY
-            )
+            failure_event = event or Event("RECOVERY", self._clock.now, DECISION_PRIORITY)
             self._fail(
                 failure_event,
                 "recovery.sequence",
@@ -1822,14 +1951,10 @@ class DailyExecutionFlow:
             account_realized_pnl=selected_account.realized_pnl,
             account_journal_delta=selected_account.journal[self._recovery_journal_cursor :],
             memory_snapshots=(
-                memory_snapshots
-                if memory_snapshots is not None
-                else self._memory.checkpoint()
+                memory_snapshots if memory_snapshots is not None else self._memory.checkpoint()
             ),
             event_trace_delta=selected_trace[self._recovery_trace_cursor :],
-            completed_decision_ids_delta=selected_completed[
-                self._recovery_completed_cursor :
-            ],
+            completed_decision_ids_delta=selected_completed[self._recovery_completed_cursor :],
             pending_executions=self._pending_recovery(pending_executions),
             pending_publications=pending_publications,
         )
@@ -1852,9 +1977,7 @@ class DailyExecutionFlow:
             dependencies=(
                 DependencyEdge(
                     dependency_kind="state",
-                    dependency_id=(
-                        f"account:{point.account_id}:v{point.account_version}"
-                    ),
+                    dependency_id=(f"account:{point.account_id}:v{point.account_version}"),
                     consumer_role="recoverable_actual_state",
                 ),
                 *(
@@ -1882,8 +2005,7 @@ class DailyExecutionFlow:
                 "RECOVERY_POINT_PUBLICATION_FAILED",
                 context={
                     "publication_errors": [
-                        error.model_dump(mode="json")
-                        for error in publication.errors[:5]
+                        error.model_dump(mode="json") for error in publication.errors[:5]
                     ],
                 },
             )
@@ -2018,9 +2140,7 @@ class DailyExecutionFlow:
                     },
                 )
                 return
-            if candidate.account_version != previous_version + len(
-                candidate.account_journal_delta
-            ):
+            if candidate.account_version != previous_version + len(candidate.account_journal_delta):
                 self._fail(
                     resume_event,
                     "resume.chain",
@@ -2147,8 +2267,7 @@ class DailyExecutionFlow:
         self._recovery_completed_cursor = len(completed)
         self._resume_position = (
             (point.last_event_time, point.last_event_priority)
-            if point.last_event_time is not None
-            and point.last_event_priority is not None
+            if point.last_event_time is not None and point.last_event_priority is not None
             else None
         )
         publication_models: dict[str, type[QlibxModel]] = {
@@ -2159,9 +2278,7 @@ class DailyExecutionFlow:
         for pending_publication in point.pending_publications:
             payload_model = publication_models[pending_publication.artifact_type]
             try:
-                payload = payload_model.model_validate_json(
-                    pending_publication.payload_json
-                )
+                payload = payload_model.model_validate_json(pending_publication.payload_json)
             except Exception as exc:
                 self._fail(
                     resume_event,
@@ -2176,9 +2293,7 @@ class DailyExecutionFlow:
             publication = self._artifacts.publish_model(
                 logical_identity=pending_publication.logical_identity,
                 artifact_type=pending_publication.artifact_type,
-                artifact_schema_version=(
-                    pending_publication.artifact_schema_version
-                ),
+                artifact_schema_version=(pending_publication.artifact_schema_version),
                 producer_id=pending_publication.producer_id,
                 payload=payload,
                 dependencies=pending_publication.dependencies,
@@ -2199,9 +2314,10 @@ class DailyExecutionFlow:
         assert self._request is not None
         contracts: dict[str, ArtifactContract[QlibxModel]] = {
             "decision_intent": DECISION_INTENT_CONTRACT,
+            "krx_execution_preparation": KRX_PREPARATION_CONTRACT,
             "execution_result": ArtifactContract(
                 artifact_type="execution_result",
-                artifact_schema_version=1,
+                artifact_schema_version=2,
                 payload_model=ExecutionEvidence,
             ),
             "mark_result": ArtifactContract(
@@ -2230,26 +2346,17 @@ class DailyExecutionFlow:
             envelope
             for envelope in self._artifacts.list_envelopes()
             if marker in envelope.logical_identity
-            and (
-                envelope.artifact_type == "strategy_result"
-                or envelope.artifact_type in contracts
-            )
+            and (envelope.artifact_type == "strategy_result" or envelope.artifact_type in contracts)
         )
         strategy_results: dict[str, StrategyResultPayload] = {
             item.invocation_id: item for item in self._strategy_results
         }
-        intents: dict[str, DecisionIntent] = {
-            item.decision_id: item for item in self._intents
-        }
+        intents: dict[str, DecisionIntent] = {item.decision_id: item for item in self._intents}
         executions: dict[str, ExecutionEvidence] = {
             item.event_id: item for item in self._executions
         }
-        marks: dict[str, MarkEvidence] = {
-            item.event_id: item for item in self._marks
-        }
-        monitors: dict[str, MonitorEvidence] = {
-            item.event_id: item for item in self._monitors
-        }
+        marks: dict[str, MarkEvidence] = {item.event_id: item for item in self._marks}
+        monitors: dict[str, MonitorEvidence] = {item.event_id: item for item in self._monitors}
         session_performance: dict[str, _PublishedSessionPerformance] = {
             item.record.event_id: item for item in self._session_performance
         }
@@ -2276,7 +2383,7 @@ class DailyExecutionFlow:
                 return
             payload = loaded.result.payload
             published[envelope.artifact_id] = envelope
-            if isinstance(payload, (StrategyResultV1, StrategyResult)):
+            if isinstance(payload, StrategyResult):
                 strategy_results[payload.invocation_id] = payload
             elif isinstance(payload, DecisionIntent):
                 intents[payload.decision_id] = payload
@@ -2373,9 +2480,7 @@ class DailyExecutionFlow:
                 MONITOR_PRIORITY,
             )
             committed = (
-                self._event_commits(event)
-                if event is not None
-                else tuple(self._authority_commits)
+                self._event_commits(event) if event is not None else tuple(self._authority_commits)
             )
             self._fail(
                 failure_event,
@@ -2447,9 +2552,7 @@ class DailyExecutionFlow:
                 "event_name": event.name,
                 "event_time": event.ts.isoformat(),
                 "account_version": self._account.snapshot().version,
-                "authoritative_commits": [
-                    commit.context() for commit in authoritative_commits
-                ],
+                "authoritative_commits": [commit.context() for commit in authoritative_commits],
                 **(context or {}),
             },
             commit_status=(CommitStatus.COMMITTED if crossed_commit else CommitStatus.NONE),

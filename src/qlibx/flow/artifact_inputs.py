@@ -5,12 +5,10 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from qlibx.context import ArtifactInputProjection
 from qlibx.errors import CommitStatus, OperationError, OutcomeStatus
 from qlibx.evidence import ArtifactContract, LocalArtifactBackend
 from qlibx.flow.strategy_results import (
     STRATEGY_RESULT_CONTRACT,
-    STRATEGY_RESULT_V1_CONTRACT,
 )
 from qlibx.models import QlibxModel
 from qlibx.operations import (
@@ -18,6 +16,7 @@ from qlibx.operations import (
     StrategyArtifactBinding,
     StrategyArtifactRequirement,
 )
+from qlibx.view import ArtifactInputProjection
 
 STORED_SIGNAL_CONTRACT = ArtifactContract(
     artifact_type="stored_signal_result",
@@ -27,7 +26,6 @@ STORED_SIGNAL_CONTRACT = ArtifactContract(
 
 BUILT_IN_STRATEGY_ARTIFACT_CONTRACTS = (
     STORED_SIGNAL_CONTRACT,
-    STRATEGY_RESULT_V1_CONTRACT,
     STRATEGY_RESULT_CONTRACT,
 )
 
@@ -59,8 +57,7 @@ class StrategyArtifactContractRegistry:
 
     def supported_contracts(self) -> tuple[str, ...]:
         return tuple(
-            f"{artifact_type}:v{version}"
-            for artifact_type, version in sorted(self._contracts)
+            f"{artifact_type}:v{version}" for artifact_type, version in sorted(self._contracts)
         )
 
 
@@ -330,9 +327,7 @@ class StrategyArtifactResolver:
         consumer_role: str | None = None,
         context: dict[str, object] | None = None,
     ) -> OperationError:
-        role = consumer_role or (
-            requirement.consumer_role if requirement is not None else None
-        )
+        role = consumer_role or (requirement.consumer_role if requirement is not None else None)
         requirement_id = requirement.requirement_id if requirement is not None else None
         seed = hashlib.sha256(
             (
@@ -348,17 +343,13 @@ class StrategyArtifactResolver:
         }
         return OperationError(
             operation=operation,
-            stage_path=(
-                f"{operation}.artifacts.{role}" if role else f"{operation}.artifacts"
-            ),
+            stage_path=(f"{operation}.artifacts.{role}" if role else f"{operation}.artifacts"),
             error_code=error_code,
             requirement_id=requirement_id,
             expected=expected_contract,
             context=bounded_context,
             commit_status=CommitStatus.NONE,
-            retry_preconditions=(
-                "correct the Strategy artifact declaration or frozen binding",
-            ),
+            retry_preconditions=("correct the Strategy artifact declaration or frozen binding",),
             idempotency_identity=invocation_id,
             error_id=f"error-{seed}",
         )

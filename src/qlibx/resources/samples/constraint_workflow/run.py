@@ -11,15 +11,15 @@ from strategy import SampleSignedConstraintStrategy
 from qlibx import (
     ConstraintAdjustmentSpec,
     ConstraintValidationSpec,
+    ConstructionProfile,
     ExecutionLotInput,
     MvpConstraintPolicy,
     OutcomeStatus,
+    PortfolioConstructionRequest,
     QlibxProject,
     StrategyInvocation,
 )
 from qlibx.data import DatasetRegistration
-from qlibx.flow import PortfolioConstructionFlow
-from qlibx.portfolio import ConstructionProfile, PortfolioConstructionRequest
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -59,7 +59,7 @@ def main(project_root: Path) -> dict[str, object]:
         "signed Strategy",
     )
     portfolio = require_complete(
-        PortfolioConstructionFlow(artifacts=project.artifacts).construct(
+        project.construct_portfolio(
             PortfolioConstructionRequest(
                 invocation_id="sample-constraint-portfolio",
                 source_artifact_id=strategy.result.artifact.artifact_id,
@@ -132,7 +132,7 @@ def main(project_root: Path) -> dict[str, object]:
         ],
         "cash_residual": adjustment.result.cash_residual,
         "unresolved_excess": adjustment.result.unresolved_excess,
-        "eligible": validation.result.eligible,
+        "compliant": validation.result.compliant,
         "failed_findings": [
             {
                 "instrument": item.instrument,

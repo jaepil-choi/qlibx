@@ -6,9 +6,9 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.context import AccessRecord, StateAccessRecord
 from qlibx.models import QlibxModel
 from qlibx.portfolio.construction import PortfolioConstructionResult, PortfolioWeight
+from qlibx.view import AccessRecord, StateAccessRecord
 
 
 class ConstraintDeclaration(QlibxModel):
@@ -105,12 +105,12 @@ class ConstraintFinding(QlibxModel):
 
 
 class ConstraintValidationResult(QlibxModel):
-    validation_schema_version: int = 1
+    validation_schema_version: Literal[2] = 2
     invocation_id: str
     declaration_id: str
     adjustment_artifact_id: str
     evaluation_time: datetime
-    eligible: bool
+    compliant: bool
     findings: tuple[ConstraintFinding, ...]
     accesses: tuple[AccessRecord, ...]
 
@@ -302,7 +302,7 @@ def validate_single_name_caps(
         declaration_id=declaration.declaration_id,
         adjustment_artifact_id=request.adjustment_artifact_id,
         evaluation_time=request.evaluation_time,
-        eligible=all(item.passed for item in findings),
+        compliant=all(item.passed for item in findings),
         findings=tuple(findings),
         accesses=accesses,
     )

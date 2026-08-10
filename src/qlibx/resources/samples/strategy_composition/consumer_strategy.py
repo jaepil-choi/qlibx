@@ -21,7 +21,7 @@ class FrozenEnsembleConsumer:
                 requirement_id="sample.frozen-ensemble",
                 consumer_role="frozen_ensemble",
                 artifact_type="strategy_result",
-                artifact_schema_version=2,
+                artifact_schema_version=3,
             ),
         )
 

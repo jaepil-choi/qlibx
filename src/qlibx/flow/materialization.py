@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
-from qlibx.context import AccessRecord, ViewAccessError, ViewGate
 from qlibx.data import (
     ComponentRequirement,
     ObservationStore,
@@ -33,6 +32,7 @@ from qlibx.operations import (
     MaterializationOperation,
     MaterializationOutputContract,
 )
+from qlibx.view import AccessRecord, ViewAccessError, ViewGate
 
 PayloadModel = TypeVar("PayloadModel", bound=QlibxModel)
 
@@ -125,7 +125,15 @@ class MaterializationFlow:
                 context=exc.context,
                 accesses=view.accessed(),
             )
-        except (DataSnapshotError, ViewAccessError) as exc:
+        except DataSnapshotError as exc:
+            return self._failure(
+                invocation,
+                "materialization.run.data",
+                exc.code,
+                exc,
+                accesses=view.accessed(),
+            )
+        except ViewAccessError as exc:
             return self._failure(
                 invocation,
                 "materialization.run.data",

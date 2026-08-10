@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from qlibx import OutcomeStatus, QlibxProject
-from qlibx.context import ViewGate
 from qlibx.data import (
     AvailableAtField,
     ComponentRequirement,
@@ -15,6 +14,7 @@ from qlibx.data import (
     SourceFormat,
 )
 from qlibx.kernel import BacktestClock
+from qlibx.view import ViewGate
 
 KST = ZoneInfo("Asia/Seoul")
 

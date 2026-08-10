@@ -6,7 +6,13 @@ from typing import ClassVar
 
 import pandas as pd
 
-from qlibx import ComponentRequirement, MaterializeView, StoredSignalEntry, StoredSignalResult
+from qlibx import (
+    ComponentRequirement,
+    MaterializeView,
+    RowsLookback,
+    StoredSignalEntry,
+    StoredSignalResult,
+)
 from qlibx.operations import (
     MaterializationComputationError,
     MaterializationOutputContract,
@@ -37,6 +43,7 @@ class MonthlyReversalModel:
                 requirement_id="showcase.factor.input_return",
                 semantic_role="factor_input_return",
                 dataset_id=self.dataset_id,
+                lookback=RowsLookback(rows=self.lookback_sessions),
             ),
         )
 

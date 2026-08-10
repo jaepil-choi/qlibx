@@ -6,9 +6,9 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.context import AccessRecord
 from qlibx.data import ComponentRequirement
 from qlibx.models import QlibxModel
+from qlibx.view import AccessRecord
 
 
 class NeutralizationExtensionSpec(QlibxModel):

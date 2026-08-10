@@ -9,7 +9,7 @@ from qlibx import (
     MaterializationInvocation,
     OutcomeStatus,
 )
-from qlibx.data import ComponentRequirement
+from qlibx.data import ComponentRequirement, RowsLookback
 from qlibx.operations import FORWARD_RETURN_LABEL_OUTPUT
 from tests.acceptance.real_dw_support import (
     RealDwProject,
@@ -29,6 +29,7 @@ class CountingRealForwardLabelModel:
         self._delegate = ForwardReturnLabelModel(
             "real-forward-label-prices",
             "real-forward-label-horizon",
+            RowsLookback(rows=100_000),
             producer_id=self.producer_id,
         )
         self.calls = 0
@@ -91,9 +92,7 @@ def test_uc_pit_001_real_forward_label_fails_then_retries_without_lookahead(
             """
         ).fetchall()
     }
-    assert {entry.instrument: entry.value for entry in result.entries} == pytest.approx(
-        expected
-    )
+    assert {entry.instrument: entry.value for entry in result.entries} == pytest.approx(expected)
 
     accesses = retry.result.accesses
     assert {access.semantic_role for access in accesses} == {
@@ -109,11 +108,7 @@ def test_uc_pit_001_real_forward_label_fails_then_retries_without_lookahead(
         and edge.consumer_role == "resolves_error"
         for edge in dependencies
     )
-    assert {
-        edge.dependency_id
-        for edge in dependencies
-        if edge.dependency_kind == "dataset"
-    } == {
+    assert {edge.dependency_id for edge in dependencies if edge.dependency_kind == "dataset"} == {
         case.project.registry_snapshot().get("real-forward-label-prices").registration_identity,
         case.project.registry_snapshot().get("real-forward-label-horizon").registration_identity,
     }

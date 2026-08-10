@@ -19,7 +19,16 @@ from qlibx import (
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
 from qlibx.evidence import ArtifactEnvelope, LocalArtifactBackend
-from qlibx.execution import CostRule, KrxExchangeConfig, Side, StockInstrument
+from qlibx.execution import (
+    CostRule,
+    FillDiagnostic,
+    KrxBatchRequest,
+    KrxExchange,
+    KrxExchangeConfig,
+    MatchBatchResult,
+    Side,
+    StockInstrument,
+)
 from qlibx.flow import DailyExecutionFlow, DailyExecutionProfile, DailyRunRequest
 from qlibx.operations import (
     BudgetMode,
@@ -33,6 +42,40 @@ from qlibx.operations import (
 )
 
 KST = ZoneInfo("Asia/Seoul")
+
+
+class RecordingKrxExchange(KrxExchange):
+    def __init__(self, config: KrxExchangeConfig) -> None:
+        super().__init__(config)
+        self.call_count = 0
+
+    def match_batch(self, request: object) -> OperationOutcome[object]:
+        self.call_count += 1
+        return super().match_batch(request)  # type: ignore[arg-type, return-value]
+
+
+class ZeroDealKrxExchange(KrxExchange):
+    def match_batch(
+        self,
+        request: KrxBatchRequest,
+    ) -> OperationOutcome[MatchBatchResult]:
+        return OperationOutcome(
+            status=OutcomeStatus.COMPLETE,
+            result=MatchBatchResult(
+                fills=(),
+                diagnostics=tuple(
+                    FillDiagnostic(
+                        instrument_id=order.instrument_id,
+                        requested_quantity=order.quantity,
+                        dealt_quantity=0,
+                        reasons=("TEST_ZERO_DEALT",),
+                    )
+                    for order in request.orders
+                ),
+                ending_cash=request.cash,
+                ending_holdings=request.holdings,
+            ),
+        )
 
 
 class RebalanceThenFailStrategy:
@@ -85,6 +128,19 @@ class PublicDailyStrategy:
             state_identity=f"{account.account_id}:v{account.version}",
             feedback_cursor=str(feedback.next_cursor),
         )
+
+
+class ExecutionFeedbackStrategy(PublicDailyStrategy):
+    strategy_id = "test.public-daily-execution-feedback"
+
+    def __init__(self) -> None:
+        self.execution_feedback: list[object | None] = []
+
+    def run(self, view: object) -> StrategyDraft:
+        self.execution_feedback.append(
+            view.latest_execution_result()  # type: ignore[attr-defined]
+        )
+        return super().run(view)
 
 
 class ArtifactDailyStrategy(PublicDailyStrategy):
@@ -207,14 +263,55 @@ def publish_daily_signal(selected: QlibxProject, identity: str) -> ArtifactEnvel
 
 
 def test_public_daily_facade_runs_closed_loop(tmp_path: Path) -> None:
-    outcome = project(tmp_path).run_daily(PublicDailyStrategy(), spec())
+    selected = project(tmp_path)
+    selected_spec = spec()
+    venue = RecordingKrxExchange(selected_spec.exchange)
+    for instrument in selected_spec.instruments:
+        venue.add_instrument(instrument)
 
-    assert outcome.status is OutcomeStatus.COMPLETE
+    outcome = selected.run_daily(PublicDailyStrategy(), selected_spec, exchange=venue)
+
+    assert outcome.status is OutcomeStatus.COMPLETE, outcome.errors
+    assert venue.call_count == 1
     assert len(outcome.result.strategy_results) == 2
     assert len(outcome.result.executions) == 1
+    execution = outcome.result.executions[0]
+    assert execution.exchange_id == venue.exchange_id
+    assert execution.exchange_config_fingerprint == venue.config_fingerprint
+    assert execution.preparation_artifact_id
+    preparation_ids = {
+        item.artifact_id
+        for item in outcome.result.artifacts
+        if item.artifact_type == "krx_execution_preparation"
+    }
+    assert preparation_ids == {execution.preparation_artifact_id}
     assert outcome.result.final_account.positions[0].quantity == 100
     assert outcome.result.strategy_results[1].feedback_accesses[0].next_cursor == 2
-    assert outcome.result.checkpoint.config_fingerprint == spec().frozen_config_fingerprint()
+    assert len(outcome.result.checkpoint.config_fingerprint) == 64
+    assert outcome.result.checkpoint.config_fingerprint != selected_spec.frozen_config_fingerprint()
+
+
+def test_strategy_reads_exact_zero_dealt_execution_feedback(tmp_path: Path) -> None:
+    selected = project(tmp_path)
+    selected_spec = spec(run_id="execution-feedback-run")
+    venue = ZeroDealKrxExchange(selected_spec.exchange)
+    for instrument in selected_spec.instruments:
+        venue.add_instrument(instrument)
+    strategy = ExecutionFeedbackStrategy()
+
+    outcome = selected.run_daily(strategy, selected_spec, exchange=venue)
+
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert strategy.execution_feedback[0] is None
+    feedback = strategy.execution_feedback[1]
+    assert feedback is not None
+    assert feedback.fills == ()  # type: ignore[attr-defined]
+    assert feedback.diagnostics[0].requested_quantity == 100  # type: ignore[attr-defined]
+    assert feedback.diagnostics[0].dealt_quantity == 0  # type: ignore[attr-defined]
+    assert feedback.diagnostics[0].reasons == ("TEST_ZERO_DEALT",)  # type: ignore[attr-defined]
+    assert outcome.result.strategy_results[0].execution_accesses == ()
+    assert len(outcome.result.strategy_results[1].execution_accesses) == 1
+    assert outcome.result.final_account.positions == ()
 
 
 def test_public_daily_spec_rejects_runtime_capability_overclaims() -> None:
@@ -272,9 +369,7 @@ def test_public_daily_is_deterministic_and_resumable(tmp_path: Path) -> None:
 
     assert first.status is repeated.status is resumed.status is OutcomeStatus.COMPLETE
     assert (
-        first.result.final_account
-        == repeated.result.final_account
-        == resumed.result.final_account
+        first.result.final_account == repeated.result.final_account == resumed.result.final_account
     )
     assert tuple(item.artifact_id for item in first.result.artifacts) == tuple(
         item.artifact_id for item in repeated.result.artifacts
@@ -464,9 +559,7 @@ def test_public_daily_missing_market_role_fails_before_account_commit(tmp_path: 
     assert outcome.status is OutcomeStatus.FAILED
     assert any(error.error_code == "REQUIREMENT_NOT_RESOLVED" for error in outcome.errors)
     assert all(error.commit_status is CommitStatus.NONE for error in outcome.errors)
-    assert not any(
-        artifact.artifact_type == "execution_result" for artifact in outcome.diagnostics
-    )
+    assert not any(artifact.artifact_type == "execution_result" for artifact in outcome.diagnostics)
 
 
 def test_public_daily_missing_initial_buy_cost_fails_before_account_commit(
@@ -494,9 +587,7 @@ def test_public_daily_missing_initial_buy_cost_fails_before_account_commit(
         error for error in outcome.errors if error.error_code == "EXACT_COST_RULE_MISSING"
     )
     assert missing.commit_status is CommitStatus.NONE
-    assert not any(
-        artifact.artifact_type == "execution_result" for artifact in outcome.diagnostics
-    )
+    assert not any(artifact.artifact_type == "execution_result" for artifact in outcome.diagnostics)
 
 
 def test_public_daily_missing_later_sell_cost_preserves_prior_evidence(
@@ -527,9 +618,7 @@ def test_public_daily_missing_later_sell_cost_preserves_prior_evidence(
         error for error in outcome.errors if error.error_code == "EXACT_COST_RULE_MISSING"
     )
     assert missing.commit_status is CommitStatus.NONE
-    assert any(
-        artifact.artifact_type == "execution_result" for artifact in outcome.diagnostics
-    )
+    assert any(artifact.artifact_type == "execution_result" for artifact in outcome.diagnostics)
     assert any(
         artifact.artifact_type == "simulation_recovery_point"
         for artifact in selected.artifacts.list_envelopes()
@@ -628,10 +717,7 @@ def test_exact_registered_strategy_runs_through_daily_facade(tmp_path: Path) -> 
 
     assert outcome.status is OutcomeStatus.COMPLETE
     assert len(outcome.result.strategy_results) == 2
-    assert (
-        outcome.result.checkpoint.config_fingerprint
-        != selected_spec.frozen_config_fingerprint()
-    )
+    assert outcome.result.checkpoint.config_fingerprint != selected_spec.frozen_config_fingerprint()
     strategy_artifacts = tuple(
         artifact
         for artifact in outcome.result.artifacts

@@ -3,9 +3,17 @@
 import hashlib
 from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
-from qlibx.academic import AcademicRunSpec
 from qlibx.account import Account
+from qlibx.analysis import (
+    AnalysisResult,
+    MonitoringAnalysisRequest,
+    ReportRequest,
+    ReportResult,
+    SignalAnalysisRequest,
+    SimulationAnalysisRequest,
+)
 from qlibx.config.project import (
     ProjectConfig,
     ProjectInitResult,
@@ -13,12 +21,7 @@ from qlibx.config.project import (
     load_project_config,
     preview_project,
 )
-from qlibx.constraints import (
-    ConstraintAdjustmentSpec,
-    ConstraintMonitoringSpec,
-    ConstraintValidationSpec,
-)
-from qlibx.data.contracts import DatasetRegistration
+from qlibx.data.contracts import DatasetRegistration, DatasetReindexResult
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
 from qlibx.data.store import ObservationStore
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
@@ -29,7 +32,17 @@ from qlibx.evidence import (
     LocalArtifactBackend,
 )
 from qlibx.evidence.local import CatalogSchemaError
-from qlibx.execution import KrxExchange
+from qlibx.execution import (
+    BaseExchange,
+    KrxBatchRequest,
+    KrxExchange,
+    MatchBatchResult,
+)
+from qlibx.execution.academic import (
+    AcademicBatchRequest,
+    AcademicExchange,
+    AcademicMatchResult,
+)
 from qlibx.extensions import (
     ExtensionRegistration,
     ExtensionValidationRequest,
@@ -39,20 +52,27 @@ from qlibx.extensions import (
 from qlibx.flow import (
     DECISION_INTENT_CONTRACT,
     AcademicExecutionFlow,
+    AnalysisFlow,
+    CompositionFlow,
     ConstraintFlow,
     DailyExecutionFlow,
     DailyExecutionProfile,
     DailyRunRequest,
+    EnsembleDefinition,
     ExtensionFlow,
     FrozenDecision,
     LoadedStrategyExtension,
     MaterializationFlow,
     MonitoringFlow,
+    PortfolioConstructionFlow,
     ResearchFlow,
+    StoredSignalWeighting,
     StrategyExtensionFlow,
 )
 from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
 from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
+from qlibx.flow.composition import EnsembleRunResult
+from qlibx.flow.research import StrategyRunResult
 from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
@@ -62,8 +82,17 @@ from qlibx.operations import (
     StrategyInvocation,
     StrategyOperation,
 )
+from qlibx.portfolio import PortfolioConstructionRequest, PortfolioConstructionResult
 from qlibx.sample import SampleMaterializationResult, SampleMaterializer
-from qlibx.simulation import DailySimulationSpec, FrozenDailyExecutionSpec
+from qlibx.specs.academic import AcademicRunSpec
+from qlibx.specs.constraints import (
+    ConstraintAdjustmentSpec,
+    ConstraintMonitoringSpec,
+    ConstraintValidationSpec,
+)
+from qlibx.specs.daily import DailySimulationSpec, FrozenDailyExecutionSpec
+
+ResultT = TypeVar("ResultT")
 
 
 class QlibxProject:
@@ -92,6 +121,12 @@ class QlibxProject:
 
     def register_dataset(self, registration: DatasetRegistration) -> OperationOutcome:
         return self.dataset_registry.register(registration)
+
+    def reindex_datasets(
+        self,
+        dataset_ids: tuple[str, ...] | None = None,
+    ) -> OperationOutcome[DatasetReindexResult]:
+        return self.dataset_registry.reindex(dataset_ids)
 
     def registry_snapshot(self) -> RegistrySnapshot:
         return self.dataset_registry.snapshot()
@@ -239,6 +274,95 @@ class QlibxProject:
             callback=invoke_registered,
         )
 
+    def run_ensemble(
+        self,
+        definition: EnsembleDefinition,
+        invocation: StrategyInvocation,
+    ) -> OperationOutcome[EnsembleRunResult]:
+        return self._with_catalog_session(
+            operation="ensemble.run",
+            identity=invocation.invocation_id,
+            callback=lambda: CompositionFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+            ).invoke_ensemble(definition, invocation),
+        )
+
+    def invoke_stored_signal_strategy(
+        self,
+        artifact_id: str,
+        strategy_id: str,
+        weighting: StoredSignalWeighting,
+        invocation: StrategyInvocation,
+    ) -> OperationOutcome[StrategyRunResult]:
+        return self._with_catalog_session(
+            operation="strategy.invoke.stored_signal",
+            identity=invocation.invocation_id,
+            callback=lambda: CompositionFlow(
+                registry=self.registry_snapshot(),
+                artifacts=self.artifacts,
+            ).invoke_stored_signal_strategy(
+                artifact_id=artifact_id,
+                strategy_id=strategy_id,
+                weighting=weighting,
+                invocation=invocation,
+            ),
+        )
+
+    def construct_portfolio(
+        self,
+        request: PortfolioConstructionRequest,
+    ) -> OperationOutcome[PortfolioConstructionResult]:
+        return self._with_catalog_session(
+            operation="portfolio.construct",
+            identity=request.invocation_id,
+            callback=lambda: PortfolioConstructionFlow(artifacts=self.artifacts).construct(request),
+        )
+
+    def analyze_simulation(
+        self,
+        request: SimulationAnalysisRequest,
+    ) -> OperationOutcome[AnalysisResult]:
+        return self._with_catalog_session(
+            operation="analysis.simulation",
+            identity=request.invocation_id,
+            callback=lambda: self._analysis_flow().analyze_simulation(request),
+        )
+
+    def analyze_monitoring(
+        self,
+        request: MonitoringAnalysisRequest,
+    ) -> OperationOutcome[AnalysisResult]:
+        return self._with_catalog_session(
+            operation="analysis.monitoring",
+            identity=request.invocation_id,
+            callback=lambda: self._analysis_flow().analyze_monitoring(request),
+        )
+
+    def analyze_signal(
+        self,
+        request: SignalAnalysisRequest,
+    ) -> OperationOutcome[AnalysisResult]:
+        return self._with_catalog_session(
+            operation="analysis.signal",
+            identity=request.invocation_id,
+            callback=lambda: self._analysis_flow().analyze_signal(request),
+        )
+
+    def render_report(self, request: ReportRequest) -> OperationOutcome[ReportResult]:
+        return self._with_catalog_session(
+            operation="report.render",
+            identity=request.invocation_id,
+            callback=lambda: self._analysis_flow().render(request),
+        )
+
+    def _analysis_flow(self) -> AnalysisFlow:
+        return AnalysisFlow(
+            artifacts=self.artifacts,
+            registry=self.registry_snapshot(),
+            store=self._store,
+        )
+
     def adjust_constraints(self, spec: ConstraintAdjustmentSpec) -> OperationOutcome:
         """Adjust one portfolio candidate under the explicitly selected MVP policy."""
 
@@ -297,10 +421,15 @@ class QlibxProject:
         self,
         spec: AcademicRunSpec,
         *,
+        exchange: BaseExchange[AcademicBatchRequest, AcademicMatchResult] | None = None,
         resume: bool = False,
     ) -> OperationOutcome:
         """Execute exact signed portfolios in the hypothetical academic venue."""
 
+        selected_exchange = exchange or AcademicExchange(
+            profile=spec.profile,
+            listings=spec.listings,
+        )
         return self._with_catalog_session(
             operation="academic.run",
             identity=spec.run_id,
@@ -308,6 +437,7 @@ class QlibxProject:
                 registry=self.registry_snapshot(),
                 artifacts=self.artifacts,
                 store=self._store,
+                exchange=selected_exchange,
             ).run(spec, resume=resume),
         )
 
@@ -316,6 +446,7 @@ class QlibxProject:
         strategy: StrategyOperation,
         spec: DailySimulationSpec,
         *,
+        exchange: BaseExchange[KrxBatchRequest, MatchBatchResult] | None = None,
         resume: bool = False,
     ) -> OperationOutcome:
         """Run a supported daily close/open profile from frozen public input."""
@@ -323,7 +454,12 @@ class QlibxProject:
         return self._with_catalog_session(
             operation="simulation.daily",
             identity=spec.run_id,
-            callback=lambda: self._run_daily(strategy, spec, resume=resume),
+            callback=lambda: self._run_daily(
+                strategy,
+                spec,
+                exchange=exchange,
+                resume=resume,
+            ),
         )
 
     def run_daily_registered_strategy(
@@ -331,6 +467,7 @@ class QlibxProject:
         registration_artifact_id: str,
         spec: DailySimulationSpec,
         *,
+        exchange: BaseExchange[KrxBatchRequest, MatchBatchResult] | None = None,
         resume: bool = False,
     ) -> OperationOutcome:
         """Run an exact registered Strategy after source and contract revalidation."""
@@ -350,6 +487,7 @@ class QlibxProject:
             return self._run_daily(
                 selected.operation,
                 spec,
+                exchange=exchange,
                 resume=resume,
                 config_fingerprint=registered_identity,
                 artifact_contracts=selected.artifact_contracts,
@@ -400,9 +538,7 @@ class QlibxProject:
             instrument_ids=frozenset(item.instrument_id for item in spec.instruments),
         )
         first_event = min(
-            *(
-                item.intent.decision_time for item in frozen
-            ),
+            *(item.intent.decision_time for item in frozen),
             *spec.session_closes,
             *spec.session_opens,
         )
@@ -431,28 +567,37 @@ class QlibxProject:
         strategy: StrategyOperation,
         spec: DailySimulationSpec,
         *,
+        exchange: BaseExchange[KrxBatchRequest, MatchBatchResult] | None,
         resume: bool,
         config_fingerprint: str | None = None,
         artifact_contracts: StrategyArtifactContractRegistry | None = None,
         strategy_dependencies: tuple[DependencyEdge, ...] = (),
     ) -> OperationOutcome:
-        exchange = KrxExchange(spec.exchange)
-        for instrument in spec.instruments:
-            exchange.add_instrument(instrument)
+        selected_exchange = exchange
+        if selected_exchange is None:
+            built_in = KrxExchange(spec.exchange)
+            for instrument in spec.instruments:
+                built_in.add_instrument(instrument)
+            selected_exchange = built_in
+        effective_fingerprint = hashlib.sha256(
+            (
+                f"{config_fingerprint or spec.frozen_config_fingerprint()}|"
+                f"exchange:{selected_exchange.exchange_id}|"
+                f"exchange-config:{selected_exchange.config_fingerprint}"
+            ).encode()
+        ).hexdigest()
         account = Account(
             account_id=spec.account.account_id,
             base_currency=spec.account.base_currency,
             initial_cash=spec.account.initial_cash,
             instrument_ids=frozenset(item.instrument_id for item in spec.instruments),
         )
-        first_event = min(
-            (*spec.decision_times, *spec.session_closes, *spec.session_opens)
-        )
+        first_event = min((*spec.decision_times, *spec.session_closes, *spec.session_opens))
         flow = DailyExecutionFlow(
             clock=BacktestClock(first_event),
             registry=self.registry_snapshot(),
             artifacts=self.artifacts,
-            exchange=exchange,
+            exchange=selected_exchange,
             account=account,
             store=self._store,
             profile=self._daily_profile(spec),
@@ -463,9 +608,7 @@ class QlibxProject:
             strategy,
             DailyRunRequest(
                 run_id=spec.run_id,
-                config_fingerprint=(
-                    config_fingerprint or spec.frozen_config_fingerprint()
-                ),
+                config_fingerprint=effective_fingerprint,
                 decision_times=spec.decision_times,
                 session_closes=spec.session_closes,
                 session_opens=spec.session_opens,
@@ -487,6 +630,10 @@ class QlibxProject:
                 execution_price_role=spec.market.execution_price_role,
                 valuation_price_role=spec.market.valuation_price_role,
                 feedback_entry_limit=spec.market.feedback_entry_limit,
+                execution_lots=tuple(
+                    (item.instrument_id, float(item.lot_size)) for item in spec.instruments
+                ),
+                constraint_policy=spec.constraint_policy,
                 limitations=(
                     "single open price for the full cross-sectional batch",
                     "overnight gap is reflected but intraday path is not modelled",
@@ -498,6 +645,10 @@ class QlibxProject:
             execution_price_role=spec.market.execution_price_role,
             valuation_price_role=spec.market.valuation_price_role,
             feedback_entry_limit=spec.market.feedback_entry_limit,
+            execution_lots=tuple(
+                (item.instrument_id, float(item.lot_size)) for item in spec.instruments
+            ),
+            constraint_policy=spec.constraint_policy,
         )
 
     def _with_catalog_session(
@@ -505,8 +656,8 @@ class QlibxProject:
         *,
         operation: str,
         identity: str,
-        callback: Callable[[], OperationOutcome],
-    ) -> OperationOutcome:
+        callback: Callable[[], OperationOutcome[ResultT]],
+    ) -> OperationOutcome[ResultT]:
         try:
             with self.artifacts.session(), self._store.frozen():
                 return callback()

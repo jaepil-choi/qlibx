@@ -23,6 +23,6 @@ operation resolves the two bounded K200 weights, whose 2024-01-02 observations u
 next-session 09:00 Asia/Seoul availability. Adjustment applies no-short and
 `weight <= max(10%, benchmark weight)`, then floors order deltas to one-share lots. Independent
 validation reads the adjustment artifact and benchmark again. The A005930 lot residual remains
-slightly above its 31.72% cap, so adjustment completes but validation reports `eligible=false`.
+slightly above its 31.72% cap, so adjustment completes but validation reports `compliant=false`.
 
 The sample does not add sector, turnover, liquidity, partial-fill, settlement, or OMS behavior.

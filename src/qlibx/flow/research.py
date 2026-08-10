@@ -2,15 +2,7 @@
 
 from pydantic import Field
 
-from qlibx.context import (
-    AccountFeedbackState,
-    AccountState,
-    ArtifactViewAccessError,
-    MemoryState,
-    PublishedSessionPerformanceState,
-    ViewGate,
-)
-from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
+from qlibx.data import DataSnapshotError, ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactEnvelope, DependencyEdge, LocalArtifactBackend
 from qlibx.flow.artifact_inputs import (
@@ -39,13 +31,21 @@ from qlibx.operations import (
     StrategyOperation,
     StrategyPathDependenceError,
     StrategyResult,
-    StrategyResultV1,
     validate_strategy_draft_path_dependence,
+)
+from qlibx.view import (
+    AccountFeedbackState,
+    AccountState,
+    ArtifactViewAccessError,
+    ExecutionInputProjection,
+    MemoryState,
+    PublishedSessionPerformanceState,
+    ViewGate,
 )
 
 
 class StrategyRunResult(QlibxModel):
-    result: StrategyResultV1 | StrategyResult
+    result: StrategyResult
     artifact: ArtifactEnvelope
     computed_draft: StrategyDraft | None = Field(default=None, exclude=True, repr=False)
 
@@ -80,6 +80,7 @@ class ResearchFlow:
         session_performance: PublishedSessionPerformanceState | None = None,
         memory_state: MemoryState | None = None,
         additional_dependencies: tuple[DependencyEdge, ...] = (),
+        execution_inputs: tuple[ExecutionInputProjection, ...] = (),
     ) -> OperationOutcome:
         try:
             requirements = strategy.requirements()
@@ -141,6 +142,7 @@ class ResearchFlow:
             session_performance=session_performance,
             memory_state=memory_state,
             artifact_inputs=artifact_resolution.projections,
+            execution_inputs=execution_inputs,
         )
         try:
             draft = strategy.run(view)
@@ -162,6 +164,7 @@ class ResearchFlow:
                     *view.performance_accessed(),
                     *view.memory_accessed(),
                     *view.artifact_accessed(),
+                    *view.execution_accessed(),
                 ),
             )
         except StrategyComputationError as exc:
@@ -178,6 +181,23 @@ class ResearchFlow:
                     *view.performance_accessed(),
                     *view.memory_accessed(),
                     *view.artifact_accessed(),
+                    *view.execution_accessed(),
+                ),
+            )
+        except DataSnapshotError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.data",
+                exc.code,
+                exc,
+                accesses=(
+                    *view.accessed(),
+                    *view.state_accessed(),
+                    *view.feedback_accessed(),
+                    *view.performance_accessed(),
+                    *view.memory_accessed(),
+                    *view.artifact_accessed(),
+                    *view.execution_accessed(),
                 ),
             )
         except Exception as exc:
@@ -193,6 +213,7 @@ class ResearchFlow:
                     *view.performance_accessed(),
                     *view.memory_accessed(),
                     *view.artifact_accessed(),
+                    *view.execution_accessed(),
                 ),
             )
 
@@ -202,6 +223,7 @@ class ResearchFlow:
         performance_accesses = view.performance_accessed()
         memory_accesses = view.memory_accessed()
         artifact_accesses = view.artifact_accessed()
+        execution_accesses = view.execution_accessed()
         try:
             observed_direct = validate_strategy_draft_path_dependence(
                 draft,
@@ -209,6 +231,7 @@ class ResearchFlow:
                 feedback_accesses=feedback_accesses,
                 performance_accesses=performance_accesses,
                 memory_accesses=memory_accesses,
+                execution_accesses=execution_accesses,
             )
             source_state_lineage = collect_strategy_source_lineage(
                 artifact_resolution.projections,
@@ -262,6 +285,7 @@ class ResearchFlow:
             feedback_accesses=feedback_accesses,
             performance_accesses=performance_accesses,
             memory_accesses=memory_accesses,
+            execution_accesses=execution_accesses,
             source_state_lineage=source_state_lineage,
         )
         dependencies = (
@@ -271,6 +295,7 @@ class ResearchFlow:
                     dependency_id=access.registration_identity,
                     consumer_role=access.semantic_role,
                     selected_fields=(access.selected_field,),
+                    compatibility_fingerprint=access.snapshot_fingerprint,
                 )
                 for access in result.accesses
             ),
@@ -342,6 +367,15 @@ class ResearchFlow:
                     compatibility_fingerprint=access.content_hash,
                 )
                 for access in artifact_accesses
+            ),
+            *(
+                DependencyEdge(
+                    dependency_kind="artifact",
+                    dependency_id=access.artifact_id,
+                    consumer_role="latest_execution_result",
+                    compatibility_fingerprint=access.content_hash,
+                )
+                for access in execution_accesses
             ),
             *source_lineage_dependencies(source_state_lineage),
             *self._strategy_dependencies,

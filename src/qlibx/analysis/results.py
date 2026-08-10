@@ -10,9 +10,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator
 
-from qlibx.context import AccessRecord, StateAccessRecord
 from qlibx.data import ComponentRequirement
 from qlibx.models import QlibxModel
+from qlibx.view import AccessRecord, StateAccessRecord
 
 
 class RendererKind(StrEnum):

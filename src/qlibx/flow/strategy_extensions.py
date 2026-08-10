@@ -9,16 +9,6 @@ from types import ModuleType
 
 from qlibx.account import Account, StrategyMemoryStore
 from qlibx.analysis import SessionPerformanceEvidence
-from qlibx.context import (
-    AccountFeedbackState,
-    AccountState,
-    ArtifactInputProjection,
-    ArtifactViewAccessError,
-    MemoryState,
-    StrategyView,
-    ViewAccessError,
-    ViewGate,
-)
 from qlibx.data import (
     ComponentRequirement,
     ObservationStore,
@@ -59,6 +49,16 @@ from qlibx.operations import (
     StrategyOperation,
     StrategyPathDependenceError,
     validate_strategy_draft_path_dependence,
+)
+from qlibx.view import (
+    AccountFeedbackState,
+    AccountState,
+    ArtifactInputProjection,
+    ArtifactViewAccessError,
+    MemoryState,
+    StrategyView,
+    ViewAccessError,
+    ViewGate,
 )
 
 STRATEGY_EXTENSION_REGISTRATION_CONTRACT = ArtifactContract(

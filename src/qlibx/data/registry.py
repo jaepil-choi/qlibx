@@ -11,10 +11,13 @@ import pandas as pd
 from qlibx.data.contracts import (
     AvailableAtField,
     DatasetRegistration,
+    DatasetReindexItem,
+    DatasetReindexResult,
     RegisteredDataset,
     RegistrationEvidence,
     SourceFormat,
 )
+from qlibx.data.snapshot import build_query_snapshot
 from qlibx.data.timestamps import TimestampNormalizationError, normalize_timestamps
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
 
@@ -54,6 +57,32 @@ def failure(
         error_id=f"error-{identity}",
     )
     return OperationOutcome(status=OutcomeStatus.FAILED, errors=(error,))
+
+
+def reindex_failure(
+    invocation_id: str,
+    stage: str,
+    code: str,
+    *,
+    context: dict[str, object] | None = None,
+    retry: tuple[str, ...] = (),
+) -> OperationOutcome[DatasetReindexResult]:
+    identity = stable_hash(f"{invocation_id}:{stage}:{code}".encode())[:24]
+    return OperationOutcome(
+        status=OutcomeStatus.FAILED,
+        errors=(
+            OperationError(
+                operation="dataset.reindex",
+                stage_path=f"dataset.reindex.{stage}",
+                error_code=code,
+                context=context or {},
+                commit_status=CommitStatus.NONE,
+                retry_preconditions=retry,
+                idempotency_identity=invocation_id,
+                error_id=f"error-{identity}",
+            ),
+        ),
+    )
 
 
 class RegistrySnapshot:
@@ -180,9 +209,7 @@ class DatasetRegistry:
                     "available_at" if is_availability else "observation_time",
                     exc.code,
                     requirement_id=(
-                        "dataset.available_at"
-                        if is_availability
-                        else "dataset.observation_time"
+                        "dataset.available_at" if is_availability else "dataset.observation_time"
                     ),
                     context=exc.context,
                     retry=("replace non-null values that cannot be parsed as timestamps",),
@@ -228,9 +255,7 @@ class DatasetRegistry:
                 "timestamp_timezone",
                 "TIMESTAMP_TIMEZONE_UNUSED",
                 context={"source_timezone": registration.source_timezone},
-                retry=(
-                    "remove source_timezone; the source timestamps already carry an offset",
-                ),
+                retry=("remove source_timezone; the source timestamps already carry an offset",),
             )
         if not isinstance(registration.available_at, AvailableAtField):
             parsed_time = parsed_time + pd.to_timedelta(
@@ -248,12 +273,24 @@ class DatasetRegistry:
             registration.model_dump_json() + physical_fingerprint + schema_fingerprint
         ).encode()
         registration_identity = stable_hash(identity_payload)
-        bindings = {
-            "instrument": registration.instrument_field,
-            "available_at": "__available_at__",
-            **registration.semantic_bindings,
-        }
+        try:
+            built_snapshot = build_query_snapshot(
+                registration=registration,
+                frame=frame,
+                available_at=parsed_time,
+                snapshot_dir=self._registry_dir.parent / "query-snapshots",
+            )
+        except Exception as exc:
+            return failure(
+                registration,
+                invocation_id,
+                "query_snapshot",
+                "DATASET_QUERY_SNAPSHOT_PUBLICATION_FAILED",
+                context={"exception": type(exc).__name__, "message": str(exc)[:500]},
+                retry=("make the project data directory writable and retry registration",),
+            )
         registered = RegisteredDataset(
+            registration_schema_version=2,
             dataset_id=registration.dataset_id,
             registration_identity=registration_identity,
             physical_fingerprint=physical_fingerprint,
@@ -265,9 +302,11 @@ class DatasetRegistry:
             source_timezone=registration.source_timezone,
             available_at=registration.available_at,
             logical_key=registration.logical_key,
-            bindings=bindings,
+            bindings=built_snapshot.bindings,
+            source_bindings=registration.semantic_bindings,
             semantic_category=registration.semantic_category,
             source_provenance=registration.source_provenance,
+            query_snapshot=built_snapshot.snapshot,
             evidence=RegistrationEvidence(
                 row_count=len(frame),
                 columns=tuple(str(column) for column in frame.columns),
@@ -283,6 +322,146 @@ class DatasetRegistry:
             ),
         )
         return self._publish(registered, registration, invocation_id)
+
+    def reindex(
+        self,
+        dataset_ids: tuple[str, ...] | None = None,
+    ) -> OperationOutcome[DatasetReindexResult]:
+        snapshot = self.snapshot()
+        selected_ids = (
+            tuple(sorted(dataset_ids))
+            if dataset_ids is not None
+            else tuple(item.dataset_id for item in snapshot.datasets)
+        )
+        invocation_id = f"dataset-reindex:{stable_hash(':'.join(selected_ids).encode())[:24]}"
+        selected: list[RegisteredDataset] = []
+        for dataset_id in selected_ids:
+            dataset = snapshot.get(dataset_id)
+            if dataset is None:
+                return reindex_failure(
+                    invocation_id,
+                    "selection",
+                    "DATASET_NOT_REGISTERED",
+                    context={"dataset_id": dataset_id},
+                    retry=("select only registered dataset IDs",),
+                )
+            source = Path(dataset.source).resolve()
+            if not source.is_file() or file_hash(source) != dataset.physical_fingerprint:
+                return reindex_failure(
+                    invocation_id,
+                    "source",
+                    "DATASET_SOURCE_DRIFT",
+                    context={
+                        "dataset_id": dataset.dataset_id,
+                        "registration_identity": dataset.registration_identity,
+                    },
+                    retry=("restore the exact registered source before reindexing",),
+                )
+            selected.append(dataset)
+
+        pending: list[tuple[RegisteredDataset, RegisteredDataset, bool]] = []
+        for dataset in selected:
+            existing = dataset.query_snapshot
+            if existing is not None:
+                path = Path(existing.path).resolve()
+                if not path.is_file() or file_hash(path) != existing.fingerprint:
+                    return reindex_failure(
+                        invocation_id,
+                        "snapshot",
+                        "DATASET_QUERY_SNAPSHOT_DRIFT",
+                        context={"dataset_id": dataset.dataset_id},
+                        retry=("restore the registered query snapshot",),
+                    )
+                if dataset.registration_schema_version == 2:
+                    pending.append((dataset, dataset, False))
+                    continue
+            semantic_bindings = dataset.source_bindings or {
+                role: field
+                for role, field in dataset.bindings.items()
+                if role not in {"instrument", "available_at"}
+            }
+            registration = DatasetRegistration(
+                dataset_id=dataset.dataset_id,
+                source=dataset.source,
+                source_format=dataset.source_format,
+                instrument_field=dataset.instrument_field,
+                observation_time_field=dataset.observation_time_field,
+                source_timezone=dataset.source_timezone,
+                available_at=dataset.available_at,
+                logical_key=dataset.logical_key,
+                semantic_bindings=semantic_bindings,
+                semantic_category=dataset.semantic_category,
+                source_provenance=dataset.source_provenance,
+            )
+            try:
+                frame = self._read(Path(dataset.source), registration)
+                time_field = (
+                    registration.available_at.field
+                    if isinstance(registration.available_at, AvailableAtField)
+                    else registration.available_at.source_field
+                )
+                available_at = normalize_timestamps(
+                    frame[time_field],
+                    field=time_field,
+                    source_timezone=registration.source_timezone,
+                ).utc
+                if not isinstance(registration.available_at, AvailableAtField):
+                    available_at = available_at + pd.to_timedelta(
+                        registration.available_at.delay_seconds,
+                        unit="s",
+                    )
+                built = build_query_snapshot(
+                    registration=registration,
+                    frame=frame,
+                    available_at=available_at,
+                    snapshot_dir=self._registry_dir.parent / "query-snapshots",
+                )
+            except Exception as exc:
+                return reindex_failure(
+                    invocation_id,
+                    "build",
+                    "DATASET_REINDEX_FAILED",
+                    context={
+                        "dataset_id": dataset.dataset_id,
+                        "exception": type(exc).__name__,
+                        "message": str(exc)[:500],
+                    },
+                    retry=("repair the registered source contract and retry reindex",),
+                )
+            upgraded = dataset.model_copy(
+                update={
+                    "registration_schema_version": 2,
+                    "bindings": built.bindings,
+                    "source_bindings": semantic_bindings,
+                    "query_snapshot": built.snapshot,
+                }
+            )
+            pending.append((dataset, upgraded, True))
+
+        items: list[DatasetReindexItem] = []
+        for original, upgraded, changed in pending:
+            if changed:
+                destination = self._registry_dir / f"{original.dataset_id}.json"
+                temporary = self._registry_dir / f".{original.dataset_id}.{os.getpid()}.reindex.tmp"
+                temporary.write_text(
+                    upgraded.model_dump_json(indent=2),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                os.replace(temporary, destination)
+            assert upgraded.query_snapshot is not None
+            items.append(
+                DatasetReindexItem(
+                    dataset_id=upgraded.dataset_id,
+                    registration_identity=upgraded.registration_identity,
+                    snapshot_fingerprint=upgraded.query_snapshot.fingerprint,
+                    changed=changed,
+                )
+            )
+        return OperationOutcome(
+            status=OutcomeStatus.COMPLETE,
+            result=DatasetReindexResult(items=tuple(items)),
+        )
 
     def snapshot(self) -> RegistrySnapshot:
         if not self._registry_dir.is_dir():

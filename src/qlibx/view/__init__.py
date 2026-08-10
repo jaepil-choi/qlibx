@@ -1,26 +1,30 @@
 """Clock-bound, role-scoped data views."""
 
-from qlibx.context.scoped import (
+from qlibx.view.gate import ViewGate
+from qlibx.view.records import (
     AccessRecord,
     AccountFeedbackState,
     AccountState,
     ArtifactAccessRecord,
     ArtifactInputProjection,
     ArtifactViewAccessError,
-    ExecutionView,
+    ExecutionAccessRecord,
+    ExecutionInputProjection,
     FeedbackAccessRecord,
-    MaterializeView,
     MemoryAccessRecord,
     MemoryState,
-    MonitorView,
     PublishedSessionPerformanceState,
     SessionPerformanceAccessRecord,
     SessionPerformanceRecordState,
     StateAccessRecord,
     StateHolding,
-    StrategyView,
     ViewAccessError,
-    ViewGate,
+)
+from qlibx.view.views import (
+    ExecutionView,
+    MaterializeView,
+    MonitorView,
+    StrategyView,
 )
 
 __all__ = [
@@ -30,6 +34,8 @@ __all__ = [
     "ArtifactAccessRecord",
     "ArtifactInputProjection",
     "ArtifactViewAccessError",
+    "ExecutionAccessRecord",
+    "ExecutionInputProjection",
     "ExecutionView",
     "FeedbackAccessRecord",
     "MaterializeView",

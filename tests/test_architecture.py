@@ -1,7 +1,7 @@
 import ast
 from pathlib import Path
 
-from qlibx.context import ExecutionView, MaterializeView, MonitorView, StrategyView
+from qlibx.view import ExecutionView, MaterializeView, MonitorView, StrategyView
 
 ROOT = Path(__file__).parents[1]
 SOURCE = ROOT / "src" / "qlibx"
@@ -9,26 +9,35 @@ SOURCE = ROOT / "src" / "qlibx"
 LAYER_DEPENDENCIES = {
     "kernel": set(),
     "data": {"domain", "models", "errors"},
-    "context": {"kernel", "data", "domain", "models", "errors"},
-    "operations": {"context", "data", "domain", "models", "errors"},
+    "view": {"kernel", "data", "domain", "models", "errors"},
+    "operations": {"view", "data", "domain", "models", "errors"},
     "extensions": {
-        "context",
+        "view",
         "data",
         "domain",
         "operations",
         "models",
         "errors",
     },
-    "portfolio": {"context", "data", "domain", "models", "errors"},
-    "execution": {"context", "data", "domain", "models", "errors"},
+    "portfolio": {"view", "data", "domain", "models", "errors"},
+    "execution": {
+        "view",
+        "data",
+        "portfolio",
+        "evidence",
+        "domain",
+        "models",
+        "errors",
+    },
     "account": {"domain", "models", "errors"},
     "evidence": {"domain", "models", "errors"},
-    "analysis": {"context", "data", "domain", "models", "errors"},
+    "analysis": {"view", "data", "domain", "models", "errors"},
     "production": {"evidence", "domain", "models", "errors"},
     "flow": {
         "kernel",
         "data",
-        "context",
+        "view",
+        "specs",
         "operations",
         "extensions",
         "portfolio",
@@ -41,6 +50,7 @@ LAYER_DEPENDENCIES = {
         "models",
         "errors",
     },
+    "specs": {"execution", "portfolio", "operations", "kernel", "models", "errors"},
     "config": {"models", "errors"},
 }
 

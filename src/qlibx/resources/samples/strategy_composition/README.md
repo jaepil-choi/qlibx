@@ -3,7 +3,7 @@
 This product-owned example closes the installed workflow for `UC-ALPHA-PATH-001`:
 
 1. two path-dependent Strategies run against distinct simulation Accounts and Strategy Memory;
-2. their exact frozen `strategy_result:v2` artifacts are combined without rerunning either
+2. their exact frozen `strategy_result:v3` artifacts are combined without rerunning either
    producer;
 3. every source Account/Memory identity and cursor is preserved in transitive lineage;
 4. a project-local artifact-only consumer is validated and registered against the exact composed

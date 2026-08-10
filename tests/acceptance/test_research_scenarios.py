@@ -412,7 +412,7 @@ def test_uc_constraint_002_and_uc_constraint_adjust_001_use_confirmed_k200_cutof
         and edge.consumer_role == "actual_pretrade_state"
         for edge in adjustment.diagnostics[0].dependencies
     )
-    assert validation.result.eligible is False
+    assert validation.result.compliant is False
     cap_finding = next(
         finding for finding in validation.result.findings
         if finding.metric == "single_name_cap"

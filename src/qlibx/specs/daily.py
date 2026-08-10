@@ -11,6 +11,7 @@ from qlibx.execution import EtfInstrument, KrxExchangeConfig, StockInstrument
 from qlibx.kernel.clock import require_aware
 from qlibx.models import QlibxModel
 from qlibx.operations import StrategyArtifactBinding
+from qlibx.specs.constraints import MvpConstraintPolicy
 
 
 class DailyAccountSeed(QlibxModel):
@@ -82,6 +83,7 @@ def _base_config_payload(
     exchange: KrxExchangeConfig,
     market: DailyMarketBinding,
     execution_timing: ExecutionTiming,
+    constraint_policy: MvpConstraintPolicy | None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "spec_schema_version": 1,
@@ -92,6 +94,8 @@ def _base_config_payload(
     }
     if execution_timing != "next_session_close":
         payload["execution_timing"] = execution_timing
+    if constraint_policy is not None:
+        payload["constraint_policy"] = constraint_policy.model_dump(mode="json")
     return payload
 
 
@@ -110,6 +114,7 @@ class DailySimulationSpec(QlibxModel):
     session_closes: tuple[datetime, ...] = Field(min_length=1)
     session_opens: tuple[datetime, ...] = ()
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
+    constraint_policy: MvpConstraintPolicy | None = None
 
     @model_validator(mode="after")
     def validate_current_daily_scope(self) -> "DailySimulationSpec":
@@ -141,6 +146,7 @@ class DailySimulationSpec(QlibxModel):
             exchange=self.exchange,
             market=self.market,
             execution_timing=self.execution_timing,
+            constraint_policy=self.constraint_policy,
         )
         payload.update(
             {
@@ -173,6 +179,7 @@ class FrozenDailyExecutionSpec(QlibxModel):
     execution_timing: ExecutionTiming = "next_session_close"
     session_closes: tuple[datetime, ...] = Field(min_length=1)
     session_opens: tuple[datetime, ...] = ()
+    constraint_policy: MvpConstraintPolicy | None = None
 
     @model_validator(mode="after")
     def validate_frozen_execution(self) -> "FrozenDailyExecutionSpec":
@@ -199,6 +206,7 @@ class FrozenDailyExecutionSpec(QlibxModel):
             exchange=self.exchange,
             market=self.market,
             execution_timing=self.execution_timing,
+            constraint_policy=self.constraint_policy,
         )
         payload["parent_decision_artifact_ids"] = list(
             self.parent_decision_artifact_ids

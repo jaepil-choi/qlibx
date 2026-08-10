@@ -5,7 +5,6 @@ import pytest
 from pydantic import ValidationError
 
 from qlibx import OutcomeStatus, QlibxProject
-from qlibx.context import StrategyView
 from qlibx.operations import (
     ArtifactSemanticConstraint,
     BudgetMode,
@@ -18,6 +17,7 @@ from qlibx.operations import (
     StrategyResult,
     WeightEntry,
 )
+from qlibx.view import StrategyView
 
 EVALUATION_TIME = datetime(2025, 1, 3, 9, tzinfo=UTC)
 

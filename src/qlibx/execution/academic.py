@@ -7,12 +7,13 @@ import json
 import math
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import Field, model_validator
 
 from qlibx.domain import Side
 from qlibx.errors import CommitStatus, OperationError, OperationOutcome, OutcomeStatus
+from qlibx.execution.base import BaseExchange
 from qlibx.models import QlibxModel
 
 
@@ -87,49 +88,8 @@ class AcademicInstrumentListing(QlibxModel):
     def require_kind_price_semantics(self) -> AcademicInstrumentListing:
         expected = _PRICE_SEMANTICS[self.kind]
         if self.price_semantics is not expected:
-            raise ValueError(
-                f"{self.kind.value} requires price_semantics={expected.value}"
-            )
+            raise ValueError(f"{self.kind.value} requires price_semantics={expected.value}")
         return self
-
-
-class AcademicRunSpec(QlibxModel):
-    """Frozen input for exact signed portfolio execution."""
-
-    spec_schema_version: Literal[1] = 1
-    run_id: str = Field(min_length=1)
-    portfolio_artifact_ids: tuple[str, ...] = Field(min_length=1)
-    initial_nav: float = Field(gt=0)
-    base_currency: str = Field(min_length=3, max_length=3)
-    listings: tuple[AcademicInstrumentListing, ...] = Field(min_length=1)
-    session_closes: tuple[datetime, ...] = Field(min_length=1)
-    profile: AcademicExchangeProfile = AcademicExchangeProfile()
-
-    @model_validator(mode="after")
-    def validate_frozen_run(self) -> AcademicRunSpec:
-        if not math.isfinite(self.initial_nav):
-            raise ValueError("initial_nav must be finite")
-        if len(self.portfolio_artifact_ids) != len(set(self.portfolio_artifact_ids)):
-            raise ValueError("portfolio artifact IDs must be unique")
-        instruments = tuple(item.instrument_id for item in self.listings)
-        if len(instruments) != len(set(instruments)):
-            raise ValueError("academic instrument listings must be unique")
-        if any(item.currency != self.base_currency for item in self.listings):
-            raise ValueError("academic listing currency must match base_currency")
-        closes = tuple(_require_aware(value) for value in self.session_closes)
-        if closes != tuple(sorted(set(closes))):
-            raise ValueError("session_closes must be unique and sorted")
-        return self
-
-    def frozen_config_fingerprint(self) -> str:
-        payload = self.model_dump(mode="json", exclude={"run_id"})
-        encoded = json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        return hashlib.sha256(encoded).hexdigest()
 
 
 class AcademicTargetWeight(QlibxModel):
@@ -191,6 +151,12 @@ class AcademicPositionState(QlibxModel):
         return self
 
 
+class _AcademicSeedSpec(Protocol):
+    run_id: str
+    base_currency: str
+    initial_nav: float
+
+
 class AcademicPortfolioState(QlibxModel):
     state_schema_version: Literal[1] = 1
     portfolio_id: str = Field(min_length=1)
@@ -214,7 +180,7 @@ class AcademicPortfolioState(QlibxModel):
         return self
 
     @classmethod
-    def seed(cls, spec: AcademicRunSpec) -> AcademicPortfolioState:
+    def seed(cls, spec: _AcademicSeedSpec) -> AcademicPortfolioState:
         return cls(
             portfolio_id=f"academic:{spec.run_id}",
             base_currency=spec.base_currency,
@@ -263,6 +229,19 @@ class AcademicFill(QlibxModel):
     )
 
 
+class AcademicBatchRequest(QlibxModel):
+    event_id: str = Field(min_length=1)
+    event_time: datetime
+    targets: tuple[AcademicTargetWeight, ...]
+    quotes: tuple[AcademicQuote, ...]
+    state: AcademicPortfolioState
+
+    @model_validator(mode="after")
+    def validate_event_time(self) -> AcademicBatchRequest:
+        _require_aware(self.event_time)
+        return self
+
+
 class AcademicMatchResult(QlibxModel):
     event_id: str
     event_time: datetime
@@ -276,7 +255,7 @@ class AcademicMatchResult(QlibxModel):
     total_cost: Literal[0.0] = 0.0
 
 
-class AcademicExchange:
+class AcademicExchange(BaseExchange[AcademicBatchRequest, AcademicMatchResult]):
     """Full-fill venue for hypothetical signed fractional positions only."""
 
     def __init__(
@@ -290,16 +269,35 @@ class AcademicExchange:
         if len(self._listings) != len(listings):
             raise ValueError("academic instrument listings must be unique")
 
+    @property
+    def exchange_id(self) -> str:
+        return self._profile.exchange_id
+
+    @property
+    def config_fingerprint(self) -> str:
+        payload = json.dumps(
+            {
+                "profile": self._profile.model_dump(mode="json"),
+                "listings": [
+                    item.model_dump(mode="json")
+                    for item in sorted(self._listings.values(), key=lambda item: item.instrument_id)
+                ],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
+
     def match_batch(
         self,
-        *,
-        event_id: str,
-        event_time: datetime,
-        targets: tuple[AcademicTargetWeight, ...],
-        quotes: tuple[AcademicQuote, ...],
-        state: AcademicPortfolioState,
-    ) -> OperationOutcome:
-        _require_aware(event_time)
+        request: AcademicBatchRequest,
+    ) -> OperationOutcome[AcademicMatchResult]:
+        event_id = request.event_id
+        event_time = request.event_time
+        targets = request.targets
+        quotes = request.quotes
+        state = request.state
         errors = self._preflight(
             event_id=event_id,
             event_time=event_time,

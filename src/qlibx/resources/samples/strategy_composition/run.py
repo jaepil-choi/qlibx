@@ -15,6 +15,8 @@ from qlibx import (
     DailyAccountSeed,
     DailyMarketBinding,
     DailySimulationSpec,
+    EnsembleDefinition,
+    EnsembleMemberSpec,
     OutcomeStatus,
     QlibxProject,
     StrategyArtifactBinding,
@@ -25,7 +27,6 @@ from qlibx import (
 from qlibx.data import DatasetRegistration
 from qlibx.evidence import ArtifactEnvelope
 from qlibx.execution import CostRule, KrxExchangeConfig, Side, StockInstrument
-from qlibx.flow import CompositionFlow, EnsembleDefinition, EnsembleMemberSpec
 from qlibx.operations import BudgetMode
 
 KST = ZoneInfo("Asia/Seoul")
@@ -50,8 +51,7 @@ def install_consumer_source(sample_dir: Path, project: QlibxProject) -> str:
     if target.exists():
         if target.read_bytes() != payload:
             raise RuntimeError(
-                "refusing to overwrite modified "
-                "qlibx_extensions/sample_frozen_ensemble_consumer.py"
+                "refusing to overwrite modified qlibx_extensions/sample_frozen_ensemble_consumer.py"
             )
     else:
         temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
@@ -111,7 +111,7 @@ def final_strategy_artifact(outcome: object) -> tuple[StrategyResult, ArtifactEn
     result = outcome.result  # type: ignore[attr-defined]
     strategy_result = result.strategy_results[-1]
     if not isinstance(strategy_result, StrategyResult):
-        raise RuntimeError("daily source did not publish strategy_result:v2")
+        raise RuntimeError("daily source did not publish strategy_result:v3")
     envelope = next(
         item
         for item in result.artifacts
@@ -128,10 +128,7 @@ def source_fingerprints(
     loaded = tuple(project.artifacts.load_envelope(artifact_id) for artifact_id in source_ids)
     if any(item.status is not OutcomeStatus.COMPLETE for item in loaded):
         raise RuntimeError("failed to reload exact source envelopes")
-    return {
-        item.result.artifact_id: item.result.content_hash
-        for item in loaded
-    }
+    return {item.result.artifact_id: item.result.content_hash for item in loaded}
 
 
 def main(project_root: Path) -> dict[str, object]:
@@ -150,9 +147,7 @@ def main(project_root: Path) -> dict[str, object]:
             "sample composition registration",
         )
 
-    producer_source_hash = hashlib.sha256(
-        (sample_dir / "producer.py").read_bytes()
-    ).hexdigest()
+    producer_source_hash = hashlib.sha256((sample_dir / "producer.py").read_bytes()).hexdigest()
     producer_a = CountingPathProducer("a", "A000001")
     producer_b = CountingPathProducer("b", "A000002")
     source_decisions = (at(2), at(4))
@@ -185,9 +180,7 @@ def main(project_root: Path) -> dict[str, object]:
     )
     source_result_a, source_envelope_a = final_strategy_artifact(source_a)
     source_result_b, source_envelope_b = final_strategy_artifact(source_b)
-    source_ids = tuple(
-        sorted((source_envelope_a.artifact_id, source_envelope_b.artifact_id))
-    )
+    source_ids = tuple(sorted((source_envelope_a.artifact_id, source_envelope_b.artifact_id)))
     fingerprints_before = source_fingerprints(project, source_ids)
     producer_calls_before = {
         producer_a.strategy_id: producer_a.call_count,
@@ -195,10 +188,7 @@ def main(project_root: Path) -> dict[str, object]:
     }
 
     composed = require_complete(
-        CompositionFlow(
-            registry=project.registry_snapshot(),
-            artifacts=project.artifacts,
-        ).invoke_ensemble(
+        project.run_ensemble(
             EnsembleDefinition(
                 strategy_id="sample.path-dependent-ensemble",
                 members=(
@@ -320,8 +310,7 @@ def main(project_root: Path) -> dict[str, object]:
         ],
         "downstream_source_lineage_ids": downstream_lineage_ids,
         "final_positions": {
-            item.instrument_id: item.quantity
-            for item in downstream_result.final_account.positions
+            item.instrument_id: item.quantity for item in downstream_result.final_account.positions
         },
         "artifact_types": sorted(
             {item.artifact_type for item in project.artifacts.list_envelopes()}

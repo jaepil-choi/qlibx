@@ -10,10 +10,10 @@ from datetime import date
 
 from pydantic import Field
 
-from qlibx.context import StateAccessRecord
 from qlibx.domain import Side
-from qlibx.execution.exchange import Order
+from qlibx.execution.krx import Order
 from qlibx.models import QlibxModel
+from qlibx.view import StateAccessRecord
 
 
 class SizingTarget(QlibxModel):

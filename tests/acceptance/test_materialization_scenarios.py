@@ -6,11 +6,11 @@ import pytest
 from qlibx import (
     ForwardReturnLabelModel,
     ForwardReturnLabelResult,
-    MaterializationInvocation,
+    ModelInvocation,
     OutcomeStatus,
 )
+from qlibx.contracts import FORWARD_RETURN_LABEL_OUTPUT
 from qlibx.data import ComponentRequirement, RowsLookback
-from qlibx.operations import FORWARD_RETURN_LABEL_OUTPUT
 from tests.acceptance.real_dw_support import (
     RealDwProject,
     register_real_forward_label_horizon,
@@ -49,7 +49,7 @@ def test_uc_pit_001_real_forward_label_fails_then_retries_without_lookahead(
     model = CountingRealForwardLabelModel()
     missing = case.project.materialize(
         model,
-        MaterializationInvocation(
+        ModelInvocation(
             invocation_id="uc-pit-001-missing-horizon",
             evaluation_time=_at_close(3),
             config_fingerprint="real-forward-label-v1",
@@ -66,7 +66,7 @@ def test_uc_pit_001_real_forward_label_fails_then_retries_without_lookahead(
     register_real_forward_label_horizon(case)
     retry = case.project.materialize(
         model,
-        MaterializationInvocation(
+        ModelInvocation(
             invocation_id="uc-pit-001-valid-horizon",
             evaluation_time=_at_close(3),
             config_fingerprint="real-forward-label-v1",

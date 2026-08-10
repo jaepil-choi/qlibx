@@ -22,6 +22,13 @@ from qlibx.config.project import (
     load_project_config,
     preview_project,
 )
+from qlibx.contracts import (
+    ModelInvocation,
+    ResearchModel,
+    StrategyArtifactBinding,
+    StrategyInvocation,
+    StrategyOperation,
+)
 from qlibx.data.contracts import DatasetRegistration, DatasetReindexResult
 from qlibx.data.registry import DatasetRegistry, RegistrySnapshot
 from qlibx.data.store import ObservationStore
@@ -64,7 +71,7 @@ from qlibx.flow import (
     ExtensionFlow,
     FrozenDecision,
     LoadedStrategyExtension,
-    MaterializationFlow,
+    ModelFlow,
     MonitoringFlow,
     PortfolioConstructionFlow,
     ResearchFlow,
@@ -75,17 +82,10 @@ from qlibx.flow.analysis import SIMULATION_CHECKPOINT_CONTRACT
 from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
 from qlibx.flow.composition import EnsembleRunResult
 from qlibx.flow.research import StrategyRunResult
-from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
 from qlibx.onboarding import OnboardingRequest, ProjectOnboarder, TargetOnboardingResult
-from qlibx.operations import (
-    MaterializationInvocation,
-    MaterializationOperation,
-    StrategyArtifactBinding,
-    StrategyInvocation,
-    StrategyOperation,
-)
 from qlibx.portfolio import PortfolioConstructionRequest, PortfolioConstructionResult
+from qlibx.runtime import BacktestClock
 from qlibx.sample import SampleMaterializationResult, SampleMaterializer
 from qlibx.specs.academic import AcademicRunSpec
 from qlibx.specs.constraints import (
@@ -318,15 +318,15 @@ class QlibxProject:
 
     def materialize(
         self,
-        operation: MaterializationOperation,
-        invocation: MaterializationInvocation,
+        operation: ResearchModel,
+        invocation: ModelInvocation,
     ) -> OperationOutcome:
         """Run one direct optional research-data materialization invocation."""
 
         return self._with_catalog_session(
             operation="materialization.run",
             identity=invocation.invocation_id,
-            callback=lambda: MaterializationFlow(
+            callback=lambda: ModelFlow(
                 registry=self.registry_snapshot(),
                 artifacts=self.artifacts,
                 store=self._store,

@@ -34,7 +34,7 @@ future pseudocode는 구현된 API가 아니다.
 | artifact payload | **current:** typed `QlibxModel` payload는 JSON이고 DuckDB는 catalog/index다. 단순하고 inspectable하지만 큰 matrix에는 비효율적이다 | Parquet payload backend는 tabular artifact에 효율적이지만 schema split과 backend complexity가 증가한다 | **현재 actual 채택.** Parquet payload는 future backend다 | 대형 matrix benchmark와 JSON/Parquet 간 atomic publication·compatibility 계약이 준비될 때 추가한다 |
 | generic ports | **current:** `BaseExchange[RequestT, ResultT]`와 `ExecutionPreparation[IntentT, ContextT, RequestT, EvidenceT]`가 공통 lifecycle만 정의하고 KRX/Academic concrete semantics는 분리한다 | 대부분의 추가 범용 port는 단일 구현에서 speculative하다 | **actual 채택.** Exchange와 preparation만 검증된 두 구현 경계에서 generic화했다 | `Operation`/publisher/loader protocol은 독립 구현 또는 test double이 같은 계약을 소비할 때만 추출한다 |
 | execution convention | **current:** `NextSessionCloseExecutor`와 `NextSessionOpenExecutor`가 독립 schedule을 만들고 `DailyExecutionFlow`가 profile의 execution-price role로 size/match한다. `execute_frozen_daily()`는 exact parent를 격리된 child Account에서 실행한다 | 별도 `FillConvention` class는 세 번째 가격 선택 구현에 유리하지만 현재 role field로 schedule/price 축이 이미 분리돼 있어 class hierarchy는 이르다 | **public daily close/open actual 채택.** explicit event calendar와 PIT price binding을 요구한다 | intraday VWAP/order-book profile이 공통 계산 behavior를 요구할 때 protocol을 추출한다 |
-| materialization | **current:** public direct `MaterializationOperation`과 `QlibxProject.materialize()`가 requirement-first execution을 제공하고, built-in `ForwardReturnLabelModel`이 PIT-bounded typed label artifact를 만든다. Scheduler와 Model registry는 없다 | scheduled rolling/expanding materialization은 반복 실행에는 유리하지만 lifecycle·cache invalidation 계약이 추가된다 | **direct operation만 actual 채택.** optional boundary와 no-look-ahead를 먼저 닫고 scheduling은 과장하지 않는다 | 반복 materialization cadence와 durable model registration 수요가 검증될 때 scheduler/registry를 추가한다 |
+| materialization | **current:** public direct `ResearchModel`과 `QlibxProject.materialize()`가 requirement-first execution을 제공하고, built-in `ForwardReturnLabelModel`이 PIT-bounded typed label artifact를 만든다. Scheduler와 Model registry는 없다 | scheduled rolling/expanding materialization은 반복 실행에는 유리하지만 lifecycle·cache invalidation 계약이 추가된다 | **direct operation만 actual 채택.** optional boundary와 no-look-ahead를 먼저 닫고 scheduling은 과장하지 않는다 | 반복 materialization cadence와 durable model registration 수요가 검증될 때 scheduler/registry를 추가한다 |
 | daily orchestration | **current:** 큰 `DailyExecutionFlow`가 recovery와 event ordering을 한곳에서 보존한다. 이해·변경 비용이 크다 | cohesive state machine/phase extraction은 유지보수에 유리하지만 기계적 파일 분리는 control flow를 숨긴다 | **이번에는 actual 유지.** 기술 부채를 인정한다 | 둘 이상의 phase가 독립 테스트·재사용 경계를 갖거나 변경 충돌이 반복될 때 state machine을 추출한다 |
 
 ---
@@ -70,7 +70,7 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-DATA-001` | dataset registration | source sample + user binding | minimal key/instrument/availability validation | registration | binding + schema fingerprint | arbitrary-field fixture |
 | `UC-DATA-002` | Strategy invocation | requirements + registered bindings | requirement resolution | 없음 on gap | `OperationError` + requirement ID | add-binding retry |
 | `UC-ERROR-001` | short analysis invocation | actual operation path only | requirement check | failure evidence only | hierarchical stage path | no phantom-stage fixture |
-| `UC-PIT-001` | direct `QlibxProject.materialize()` | resolved label roles through `MaterializeView` | horizon preflight + simple forward return | failure evidence or typed label artifact | dataset/config/error lineage + row availability | real-DW missing-horizon no-call, linked retry, future-hidden labels, installed sample |
+| `UC-PIT-001` | direct `QlibxProject.materialize()` | resolved label roles through `ModelView` | horizon preflight + simple forward return | failure evidence or typed label artifact | dataset/config/error lineage + row availability | real-DW missing-horizon no-call, linked retry, future-hidden labels, installed sample |
 | `UC-AGENT-001` | ambiguous registration failure | package error + skill + project semantics | agent proposes; package validates | confirmed binding only | user decision + rule ID | no guessed availability |
 | `UC-SIGNAL-001` | direct Strategy run | scoped PIT data + bounded state | signal/weight inside Strategy | results + proposed memory | signed weights + accesses | no mandatory signal stage |
 | `UC-SIGNAL-002` | stored-result Strategy run | compatible typed model result | signed-weight assembly | Strategy result | producer-independent edges | producer not rerun |
@@ -430,7 +430,7 @@ immutable input이다.
 future optional scheduler가 같은 operation을 callback으로 등록할 수는 있지만 `run_daily()`는 현재 자동 호출하지 않는다.
 
 † Public direct materialization boundary는 **current**다. `QlibxProject.materialize()`가 frozen evaluation time과
-resolved requirements로 `MaterializeView`를 만들고, forward-label `available_at`과 `horizon_end` preflight를
+resolved requirements로 `ModelView`를 만들고, forward-label `available_at`과 `horizon_end` preflight를
 강제한다. 다만 표의 scheduled `MATERIALIZE` callback은 여전히 target이다. Rolling/expanding/event-triggered fit과
 durable Model registration은 구현되지 않았고 Direct Strategy나 stored-result analysis에는 이 event가 없다.
 
@@ -984,7 +984,7 @@ registration과 operation별 time requirement 검증이 §1 설계 명제를 지
 | `StrategyView` | declared PIT dataset/artifact, committed Account snapshot, bounded feedback/performance, Strategy memory | undeclared binding, future feedback, mutable state port |
 | `ExecutionView` | declared PIT dataset only | artifact, Account, feedback, performance, memory |
 | `MonitorView` | declared PIT dataset + committed Account snapshot | artifact, feedback, performance, memory, mutable Account port |
-| `MaterializeView` | direct materialization에 resolve된 declared PIT dataset과 access lineage | artifact, Account, feedback, performance, memory |
+| `ModelView` | direct materialization에 resolve된 declared PIT dataset과 access lineage | artifact, Account, feedback, performance, memory |
 
 View 이름이 global field 목록을 뜻하지 않는다. Resolver가 이번 operation에 허용한 binding만 facade에
 넣는다. Compliance data나 monitoring finding을 Strategy에 쓰려면 Strategy requirement가 이를 명시해야
@@ -1118,7 +1118,7 @@ MVP는 backtest profile만 구현한다. Future production에서도 Gate와 oper
 
 각 operation은 requirement를 먼저 선언하고 resolved view에서 typed result와 diagnostics를 계산한다.
 공통 모양은 같지만 result type과 graph 위치는 operation마다 다르다. 다음 공용 `Operation` base는 두 번째
-구현이 생길 때 추출할 **target pseudocode**다. `MaterializationOperation`은 이 base 없이 독립된 current public
+구현이 생길 때 추출할 **target pseudocode**다. `ResearchModel`은 이 base 없이 독립된 current public
 protocol로 존재한다.
 
 ```python
@@ -1129,14 +1129,14 @@ class Operation(Protocol[ResultT]):
     def run(self, view: ScopedView) -> tuple[ResultT, Diagnostics]: ...
 
 class StrategyOperation(Operation[StrategyDraft], Protocol): ...
-class MaterializationOperation(Protocol[PayloadT]): ...  # current direct protocol
+class ResearchModel(Protocol[PayloadT]): ...  # current direct protocol
 class AnalysisOperation(Operation[AnalysisArtifact], Protocol): ...
 class RendererOperation(Operation[ReportArtifact], Protocol): ...
 ```
 
 Current Strategy는 signed alpha weights와 optional proposed memory를 담은 `StrategyDraft`를 반환한다. Flow가 실제 view access와 frozen invocation identity를 결합해 authoritative `StrategyResult`로 승격하고, closed-loop workflow이면 executor-neutral
 `DecisionIntent`를 함께 제공한다. Strategy가 signal과 weights를 내부에서 한 번에 계산해도 되고,
-stored signal/characteristic/risk result를 읽어도 된다. Current direct `MaterializationOperation`은 reusable typed
+stored signal/characteristic/risk result를 읽어도 된다. Current direct `ResearchModel`은 reusable typed
 research result를 생산하는 optional path다. Public boundary를 넘거나
 재사용되는 intermediate만 정확한 semantic artifact로 materialize한다.
 
@@ -1150,7 +1150,7 @@ intermediate를 요구할 때만 존재하는 optional path다.
 ```python
 StrategyOperation.run(view)     -> StrategyDraft
 Flow.promote(draft, accesses)   -> StrategyResult
-MaterializationOperation.run(view) -> typed payload      # current direct materialization API
+ResearchModel.run(view) -> typed payload      # current direct materialization API
 ExecutionPreparation.prepare(intent, account, execution_view, constraint_policy)
                                 -> (ExchangeRequest, PreparationEvidence)  # target fixed boundary
 BaseExchange.match_batch(request) -> ExchangeResult      # target common lifecycle
@@ -1897,19 +1897,18 @@ src/qlibx/
   project.py    public facade + operation별 composition root
   specs/        daily, constraints, academic frozen public specs
   onboarding.py installed-project preview/apply/remove operation
-  kernel/       clock, event, queue
-  flow/         research, daily, analysis, portfolio, constraints, monitoring,
+  runtime/      clock, event, queue
+  flow/         research, daily, model, analysis, portfolio, constraints, monitoring,
                 extensions, strategy_extensions, recovery, shared failures
   view/         least-authority access records, role views + ViewGate
   data/         registration, requirement resolution, normalized Parquet + DuckDB bounded query
-  operations/   Strategy operation contracts and built-in implementations
+  contracts/    Strategy and ResearchModel contracts, artifact I/O, built-in implementations
   portfolio/    construction contracts/implementations
   execution/    BaseExchange, concrete KRX/Academic exchanges, preparation, instruments, sizing
   account/      Account aggregate, committed feedback/performance/memory
   evidence/     QlibxModel artifacts, JSON payload, DuckDB catalog/index
   analysis/     typed analysis and rendering
   extensions/   exact project-local module loading
-  production/   future boundary only; no current OMS/reconcile support
   config/       project/runtime schemas
   errors.py     hierarchical operation error
   models.py     QlibxModel base
@@ -2363,7 +2362,7 @@ workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 �
 | # | vertical slice | 주요 architecture | use-case evidence |
 |---|---|---|---|
 | 1 | Minimal registration + typed evidence | DatasetRegistration, RequirementResolver, OperationError, atomic local catalog | UC-DATA-001/002, UC-ERROR-001, UC-ARTIFACT-002, UC-RESEARCH-001 |
-| 2 | PIT direct research + direct label materialization (**current**) | Clock/View, ResolvedBinding, Direct Strategy, MaterializationOperation, forward-label preflight | UC-SIGNAL-001, UC-CONSTRAINT-001, UC-PIT-001; GAP-MATERIALIZATION-PIT-001 closed for the public direct profile |
+| 2 | PIT direct research + direct label materialization (**current**) | Clock/View, ResolvedBinding, Direct Strategy, ResearchModel, forward-label preflight | UC-SIGNAL-001, UC-CONSTRAINT-001, UC-PIT-001; GAP-MATERIALIZATION-PIT-001 closed for the public direct profile |
 | 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §14.1 |
 | 4 | Daily closed loop | kernel, decision/execution flow, Account/Memory, daily profile, checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002 |
 | 5 | next-close/open frozen execution (**current**) | exact immutable DecisionIntent, close/open executors, explicit PIT price roles, isolated child Account | UC-EXEC-001, UC-ALPHA-CHILD-001; GAP-EXECUTION-CONVENTION-001 closed for public frozen children |

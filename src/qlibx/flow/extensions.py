@@ -23,8 +23,8 @@ from qlibx.flow.failures import (
     publish_failed_errors,
     publish_failed_outcome,
 )
-from qlibx.kernel import BacktestClock
-from qlibx.view import MaterializeView, ViewGate
+from qlibx.runtime import BacktestClock
+from qlibx.view import ModelView, ViewGate
 
 EXTENSION_REGISTRATION_CONTRACT = ArtifactContract(
     artifact_type="extension_registration",
@@ -81,7 +81,7 @@ class ExtensionFlow:
         if resolution.failed:
             return publish_failed_errors(self._artifacts, resolution.errors)
 
-        view = ViewGate(self._registry, self._store).materialize_view(
+        view = ViewGate(self._registry, self._store).model_view(
             BacktestClock(request.evaluation_time),
             resolution.bindings,
         )
@@ -173,7 +173,7 @@ class ExtensionFlow:
 
     @staticmethod
     def _materialize_input(
-        view: MaterializeView,
+        view: ModelView,
         spec: NeutralizationExtensionSpec,
         request: ExtensionValidationRequest,
     ) -> NeutralizationInput:

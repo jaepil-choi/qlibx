@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from qlibx import OutcomeStatus, QlibxProject
-from qlibx.operations import (
+from qlibx.contracts import (
     ArtifactSemanticConstraint,
     BudgetMode,
     StoredSignalEntry,

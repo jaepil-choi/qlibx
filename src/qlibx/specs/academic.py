@@ -12,8 +12,8 @@ from qlibx.execution.academic import (
     AcademicExchangeProfile,
     AcademicInstrumentListing,
 )
-from qlibx.kernel.clock import require_aware
 from qlibx.models import QlibxModel
+from qlibx.runtime.clock import require_aware
 
 
 class AcademicRunSpec(QlibxModel):

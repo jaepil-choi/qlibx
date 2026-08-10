@@ -13,7 +13,7 @@ from qlibx.data import (
     RequirementResolver,
     SourceFormat,
 )
-from qlibx.kernel import BacktestClock
+from qlibx.runtime import BacktestClock
 from qlibx.view import ViewGate
 
 KST = ZoneInfo("Asia/Seoul")
@@ -69,7 +69,7 @@ def test_session_query_uses_the_declared_calendar_day(
         registry=project.registry_snapshot(),
     )
     assert not resolution.failed
-    view = ViewGate(project.registry_snapshot(), ObservationStore()).materialize_view(
+    view = ViewGate(project.registry_snapshot(), ObservationStore()).model_view(
         BacktestClock(datetime(2024, 1, 3, 1, 0, tzinfo=KST)),
         resolution.bindings,
     )

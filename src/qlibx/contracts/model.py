@@ -10,13 +10,13 @@ from pydantic import Field, model_validator
 
 from qlibx.data import ComponentRequirement, Lookback
 from qlibx.models import QlibxModel
-from qlibx.view import MaterializeView
+from qlibx.view import ModelView
 
 PayloadModel = TypeVar("PayloadModel", bound=QlibxModel)
 
 
 @dataclass(frozen=True, slots=True)
-class MaterializationOutputContract(Generic[PayloadModel]):
+class ModelOutputContract(Generic[PayloadModel]):
     """Operation-owned output declaration translated to storage only by a Flow."""
 
     artifact_type: str
@@ -35,29 +35,29 @@ class MaterializationOutputContract(Generic[PayloadModel]):
             raise TypeError("materialization payload_model must be a QlibxModel subclass")
 
 
-class MaterializationInvocation(QlibxModel):
+class ModelInvocation(QlibxModel):
     invocation_id: str = Field(min_length=1)
     evaluation_time: datetime
     config_fingerprint: str = Field(min_length=1)
     resolves_error_artifact_id: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
-    def validate_evaluation_time(self) -> "MaterializationInvocation":
+    def validate_evaluation_time(self) -> "ModelInvocation":
         if self.evaluation_time.tzinfo is None or self.evaluation_time.utcoffset() is None:
             raise ValueError("materialization evaluation_time must be timezone-aware")
         return self
 
 
-class MaterializationOperation(Protocol[PayloadModel]):
+class ResearchModel(Protocol[PayloadModel]):
     producer_id: str
-    output_contract: MaterializationOutputContract[PayloadModel]
+    output_contract: ModelOutputContract[PayloadModel]
 
     def requirements(self) -> tuple[ComponentRequirement, ...]: ...
 
-    def run(self, view: MaterializeView) -> PayloadModel: ...
+    def run(self, view: ModelView) -> PayloadModel: ...
 
 
-class MaterializationComputationError(ValueError):
+class ModelComputationError(ValueError):
     """Known deterministic rejection of frozen materialization inputs."""
 
     def __init__(self, code: str, message: str, *, context: dict[str, object] | None = None):
@@ -125,7 +125,7 @@ class ForwardReturnLabelResult(QlibxModel):
         return self
 
 
-FORWARD_RETURN_LABEL_OUTPUT = MaterializationOutputContract(
+FORWARD_RETURN_LABEL_OUTPUT = ModelOutputContract(
     artifact_type="forward_return_label_result",
     artifact_schema_version=1,
     payload_model=ForwardReturnLabelResult,
@@ -141,7 +141,7 @@ class ForwardReturnLabelModel:
     lookback: Lookback
     producer_id: str = "qlibx.forward-return-label.v1"
 
-    output_contract: ClassVar[MaterializationOutputContract[ForwardReturnLabelResult]] = (
+    output_contract: ClassVar[ModelOutputContract[ForwardReturnLabelResult]] = (
         FORWARD_RETURN_LABEL_OUTPUT
     )
 
@@ -173,7 +173,7 @@ class ForwardReturnLabelModel:
             ),
         )
 
-    def run(self, view: MaterializeView) -> ForwardReturnLabelResult:
+    def run(self, view: ModelView) -> ForwardReturnLabelResult:
         start = self._role_frame(view, "label_start_value")
         end = self._role_frame(view, "label_end_value")
         horizon = self._role_frame(view, "horizon_end")
@@ -183,7 +183,7 @@ class ForwardReturnLabelModel:
             "horizon_end": horizon,
         }
         if any(frame.empty for frame in frames.values()):
-            raise MaterializationComputationError(
+            raise ModelComputationError(
                 "FORWARD_LABEL_INPUT_EMPTY",
                 "no complete forward-label input is visible at the evaluation time",
                 context={role: len(frame) for role, frame in frames.items()},
@@ -197,7 +197,7 @@ class ForwardReturnLabelModel:
         expected_keys = key_sets["label_start_value"]
         if any(keys != expected_keys for keys in key_sets.values()):
             union = set().union(*key_sets.values())
-            raise MaterializationComputationError(
+            raise ModelComputationError(
                 "FORWARD_LABEL_COVERAGE_MISMATCH",
                 "forward-label roles do not have identical instrument/time coverage",
                 context={
@@ -225,7 +225,7 @@ class ForwardReturnLabelModel:
             | (end_values <= 0)
         )
         if bool(invalid_values.any()):
-            raise MaterializationComputationError(
+            raise ModelComputationError(
                 "FORWARD_LABEL_VALUE_INVALID",
                 "forward-label start/end values must be finite and positive",
                 context={"invalid_rows": int(invalid_values.sum())},
@@ -246,7 +246,7 @@ class ForwardReturnLabelModel:
             | (effective_available > view.as_of)
         )
         if bool(invalid_horizons.any()):
-            raise MaterializationComputationError(
+            raise ModelComputationError(
                 "FORWARD_LABEL_HORIZON_INVALID",
                 "forward-label horizon or availability ordering is invalid",
                 context={"invalid_rows": int(invalid_horizons.sum())},
@@ -276,18 +276,18 @@ class ForwardReturnLabelModel:
         return ForwardReturnLabelResult(evaluation_time=view.as_of, entries=entries)
 
     @staticmethod
-    def _role_frame(view: MaterializeView, role: str) -> pd.DataFrame:
+    def _role_frame(view: ModelView, role: str) -> pd.DataFrame:
         frame = view.history(role)
         keys = ["instrument", "observation_time"]
         if frame["observation_time"].isna().any():
-            raise MaterializationComputationError(
+            raise ModelComputationError(
                 "FORWARD_LABEL_HORIZON_INVALID",
                 "forward-label inputs require observation_time",
                 context={"semantic_role": role},
             )
         duplicates = frame.duplicated(subset=keys)
         if bool(duplicates.any()):
-            raise MaterializationComputationError(
+            raise ModelComputationError(
                 "FORWARD_LABEL_COVERAGE_MISMATCH",
                 "forward-label input keys must be unique per role",
                 context={"semantic_role": role, "duplicate_rows": int(duplicates.sum())},

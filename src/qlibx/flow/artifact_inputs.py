@@ -5,17 +5,17 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from qlibx.contracts import (
+    StoredSignalResult,
+    StrategyArtifactBinding,
+    StrategyArtifactRequirement,
+)
 from qlibx.errors import CommitStatus, OperationError, OutcomeStatus
 from qlibx.evidence import ArtifactContract, LocalArtifactBackend
 from qlibx.flow.strategy_results import (
     STRATEGY_RESULT_CONTRACT,
 )
 from qlibx.models import QlibxModel
-from qlibx.operations import (
-    StoredSignalResult,
-    StrategyArtifactBinding,
-    StrategyArtifactRequirement,
-)
 from qlibx.view import ArtifactInputProjection
 
 STORED_SIGNAL_CONTRACT = ArtifactContract(

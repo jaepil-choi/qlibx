@@ -26,7 +26,7 @@ from qlibx import (
     AcademicPriceSemantics,
     AcademicRunSpec,
     ComponentRequirement,
-    MaterializationInvocation,
+    ModelInvocation,
     OutcomeStatus,
     QlibxProject,
     SignalAnalysisRequest,
@@ -424,7 +424,7 @@ def run(repo_root: Path) -> dict[str, Any]:
         materialized = require_complete(
             project.materialize(
                 model,
-                MaterializationInvocation(
+                ModelInvocation(
                     invocation_id=f"showcase-factor-{decision_day:%Y%m%d}-v1",
                     evaluation_time=decision_time,
                     config_fingerprint=f"monthly-reversal-{LOOKBACK_SESSIONS}-v1",

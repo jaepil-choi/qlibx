@@ -7,10 +7,10 @@ from typing import Literal, Protocol
 
 from pydantic import Field, model_validator
 
+from qlibx.contracts.artifacts import StrategyArtifactBinding, StrategyArtifactRequirement
 from qlibx.data import ComponentRequirement
 from qlibx.domain import BudgetMode
 from qlibx.models import QlibxModel
-from qlibx.operations.artifacts import StrategyArtifactBinding, StrategyArtifactRequirement
 from qlibx.view import (
     AccessRecord,
     ExecutionAccessRecord,

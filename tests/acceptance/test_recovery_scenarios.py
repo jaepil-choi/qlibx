@@ -15,7 +15,7 @@ from qlibx.flow.recovery import (
     SimulationRecoveryPoint,
     SimulationRecoveryPointV1,
 )
-from qlibx.kernel import BacktestClock
+from qlibx.runtime import BacktestClock
 from tests.acceptance.real_dw_support import (
     ActualStateMomentumStrategy,
     RealDwProject,

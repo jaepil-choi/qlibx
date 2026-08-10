@@ -22,7 +22,7 @@ from qlibx.view.records import (
 )
 from qlibx.view.views import (
     ExecutionView,
-    MaterializeView,
+    ModelView,
     MonitorView,
     StrategyView,
 )
@@ -38,9 +38,9 @@ __all__ = [
     "ExecutionInputProjection",
     "ExecutionView",
     "FeedbackAccessRecord",
-    "MaterializeView",
     "MemoryAccessRecord",
     "MemoryState",
+    "ModelView",
     "MonitorView",
     "PublishedSessionPerformanceState",
     "SessionPerformanceAccessRecord",

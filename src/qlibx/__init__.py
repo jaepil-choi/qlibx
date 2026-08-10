@@ -9,6 +9,26 @@ from qlibx.analysis import (
     SignalAnalysisRequest,
     SimulationAnalysisRequest,
 )
+from qlibx.contracts import (
+    ArtifactSemanticConstraint,
+    BudgetMode,
+    DecisionAction,
+    ForwardReturnLabelEntry,
+    ForwardReturnLabelModel,
+    ForwardReturnLabelResult,
+    ModelInvocation,
+    ModelOutputContract,
+    ResearchModel,
+    StoredSignalEntry,
+    StoredSignalResult,
+    StrategyArtifactBinding,
+    StrategyArtifactRequirement,
+    StrategyDraft,
+    StrategyInvocation,
+    StrategyResult,
+    StrategySourceStateLineage,
+    WeightEntry,
+)
 from qlibx.data import (
     AvailableAtField,
     CalendarLookback,
@@ -67,26 +87,6 @@ from qlibx.flow import (
 )
 from qlibx.models import QlibxModel
 from qlibx.onboarding import AgentTarget, OnboardingDesiredState, OnboardingRequest
-from qlibx.operations import (
-    ArtifactSemanticConstraint,
-    BudgetMode,
-    DecisionAction,
-    ForwardReturnLabelEntry,
-    ForwardReturnLabelModel,
-    ForwardReturnLabelResult,
-    MaterializationInvocation,
-    MaterializationOperation,
-    MaterializationOutputContract,
-    StoredSignalEntry,
-    StoredSignalResult,
-    StrategyArtifactBinding,
-    StrategyArtifactRequirement,
-    StrategyDraft,
-    StrategyInvocation,
-    StrategyResult,
-    StrategySourceStateLineage,
-    WeightEntry,
-)
 from qlibx.portfolio import (
     ConstructionProfile,
     ExecutionLotInput,
@@ -107,7 +107,7 @@ from qlibx.specs.daily import (
     DailySimulationSpec,
     FrozenDailyExecutionSpec,
 )
-from qlibx.view import MaterializeView, StrategyView
+from qlibx.view import ModelView, StrategyView
 
 __all__ = [
     "ACADEMIC_EXECUTION_CONTRACT",
@@ -161,10 +161,9 @@ __all__ = [
     "KrxExchangeConfig",
     "KrxExecutionPreparation",
     "MatchBatchResult",
-    "MaterializationInvocation",
-    "MaterializationOperation",
-    "MaterializationOutputContract",
-    "MaterializeView",
+    "ModelInvocation",
+    "ModelOutputContract",
+    "ModelView",
     "MonitoringAnalysisRequest",
     "MvpConstraintPolicy",
     "OnboardingDesiredState",
@@ -180,6 +179,7 @@ __all__ = [
     "RendererKind",
     "ReportRequest",
     "ReportResult",
+    "ResearchModel",
     "RowsLookback",
     "Side",
     "SignalAnalysisRequest",

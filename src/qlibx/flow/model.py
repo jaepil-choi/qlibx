@@ -3,6 +3,13 @@
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
+from qlibx.contracts import (
+    FORWARD_RETURN_LABEL_OUTPUT,
+    ModelComputationError,
+    ModelInvocation,
+    ModelOutputContract,
+    ResearchModel,
+)
 from qlibx.data import (
     ComponentRequirement,
     ObservationStore,
@@ -23,15 +30,8 @@ from qlibx.flow.failures import (
     publish_failed_errors,
     publish_failed_outcome,
 )
-from qlibx.kernel import BacktestClock
 from qlibx.models import QlibxModel
-from qlibx.operations import (
-    FORWARD_RETURN_LABEL_OUTPUT,
-    MaterializationComputationError,
-    MaterializationInvocation,
-    MaterializationOperation,
-    MaterializationOutputContract,
-)
+from qlibx.runtime import BacktestClock
 from qlibx.view import AccessRecord, ViewAccessError, ViewGate
 
 PayloadModel = TypeVar("PayloadModel", bound=QlibxModel)
@@ -51,13 +51,13 @@ _OPERATION_ERROR_CONTRACT = ArtifactContract(
 
 
 @dataclass(frozen=True, slots=True)
-class MaterializationRunResult(Generic[PayloadModel]):
+class ModelRunResult(Generic[PayloadModel]):
     result: PayloadModel
     artifact: ArtifactEnvelope
     accesses: tuple[AccessRecord, ...]
 
 
-class MaterializationFlow:
+class ModelFlow:
     """Resolve, scope, calculate, and publish one optional materialization operation."""
 
     def __init__(
@@ -75,8 +75,8 @@ class MaterializationFlow:
 
     def invoke(
         self,
-        operation: MaterializationOperation[PayloadModel],
-        invocation: MaterializationInvocation,
+        operation: ResearchModel[PayloadModel],
+        invocation: ModelInvocation,
     ) -> OperationOutcome:
         declared = self._declared_contract(operation, invocation)
         if isinstance(declared, OperationOutcome):
@@ -110,13 +110,13 @@ class MaterializationFlow:
         if resolution.failed:
             return publish_failed_errors(self._artifacts, resolution.errors)
 
-        view = ViewGate(self._registry, self._store).materialize_view(
+        view = ViewGate(self._registry, self._store).model_view(
             BacktestClock(invocation.evaluation_time),
             resolution.bindings,
         )
         try:
             result = operation.run(view)
-        except MaterializationComputationError as exc:
+        except ModelComputationError as exc:
             return self._failure(
                 invocation,
                 "materialization.run.compute",
@@ -180,7 +180,7 @@ class MaterializationFlow:
             return publication
         return OperationOutcome(
             status=OutcomeStatus.COMPLETE,
-            result=MaterializationRunResult(
+            result=ModelRunResult(
                 result=result,
                 artifact=publication.result,
                 accesses=accesses,
@@ -189,17 +189,17 @@ class MaterializationFlow:
 
     def _declared_contract(
         self,
-        operation: MaterializationOperation[PayloadModel],
-        invocation: MaterializationInvocation,
-    ) -> tuple[str, MaterializationOutputContract[PayloadModel]] | OperationOutcome:
+        operation: ResearchModel[PayloadModel],
+        invocation: ModelInvocation,
+    ) -> tuple[str, ModelOutputContract[PayloadModel]] | OperationOutcome:
         try:
             producer_id = operation.producer_id
             output_contract = operation.output_contract
             if not isinstance(producer_id, str) or not producer_id:
                 raise TypeError("materialization producer_id must be a non-empty string")
-            if not isinstance(output_contract, MaterializationOutputContract):
+            if not isinstance(output_contract, ModelOutputContract):
                 raise TypeError(
-                    "materialization output_contract must be MaterializationOutputContract"
+                    "materialization output_contract must be ModelOutputContract"
                 )
         except Exception as exc:
             return self._failure(
@@ -212,7 +212,7 @@ class MaterializationFlow:
 
     def _resolution_dependency(
         self,
-        invocation: MaterializationInvocation,
+        invocation: ModelInvocation,
     ) -> DependencyEdge | OperationOutcome | None:
         artifact_id = invocation.resolves_error_artifact_id
         if artifact_id is None:
@@ -254,7 +254,7 @@ class MaterializationFlow:
 
     @staticmethod
     def _dependencies(
-        invocation: MaterializationInvocation,
+        invocation: ModelInvocation,
         accesses: tuple[AccessRecord, ...],
         resolution_dependency: DependencyEdge | None,
     ) -> tuple[DependencyEdge, ...]:
@@ -289,7 +289,7 @@ class MaterializationFlow:
 
     def _failure(
         self,
-        invocation: MaterializationInvocation,
+        invocation: ModelInvocation,
         stage_path: str,
         error_code: str,
         exception: Exception,

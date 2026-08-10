@@ -5,6 +5,16 @@ import pytest
 
 from qlibx import OutcomeStatus, QlibxProject
 from qlibx.account import Account
+from qlibx.contracts import (
+    BudgetMode,
+    DecisionAction,
+    StrategyArtifactBinding,
+    StrategyArtifactRequirement,
+    StrategyDraft,
+    StrategyInvocation,
+    StrategyResult,
+    WeightEntry,
+)
 from qlibx.evidence import DependencyEdge
 from qlibx.flow.composition import (
     CompositionFlow,
@@ -16,16 +26,6 @@ from qlibx.flow.strategy_results import (
     STRATEGY_RESULT_CONTRACT,
     StrategySourceLineageError,
     canonicalize_dependencies,
-)
-from qlibx.operations import (
-    BudgetMode,
-    DecisionAction,
-    StrategyArtifactBinding,
-    StrategyArtifactRequirement,
-    StrategyDraft,
-    StrategyInvocation,
-    StrategyResult,
-    WeightEntry,
 )
 from qlibx.view import MemoryAccessRecord, StateAccessRecord, StrategyView
 

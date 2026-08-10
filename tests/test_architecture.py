@@ -1,21 +1,21 @@
 import ast
 from pathlib import Path
 
-from qlibx.view import ExecutionView, MaterializeView, MonitorView, StrategyView
+from qlibx.view import ExecutionView, ModelView, MonitorView, StrategyView
 
 ROOT = Path(__file__).parents[1]
 SOURCE = ROOT / "src" / "qlibx"
 
 LAYER_DEPENDENCIES = {
-    "kernel": set(),
+    "runtime": set(),
     "data": {"domain", "models", "errors"},
-    "view": {"kernel", "data", "domain", "models", "errors"},
-    "operations": {"view", "data", "domain", "models", "errors"},
+    "view": {"runtime", "data", "domain", "models", "errors"},
+    "contracts": {"view", "data", "domain", "models", "errors"},
     "extensions": {
         "view",
         "data",
         "domain",
-        "operations",
+        "contracts",
         "models",
         "errors",
     },
@@ -32,25 +32,23 @@ LAYER_DEPENDENCIES = {
     "account": {"domain", "models", "errors"},
     "evidence": {"domain", "models", "errors"},
     "analysis": {"view", "data", "domain", "models", "errors"},
-    "production": {"evidence", "domain", "models", "errors"},
     "flow": {
-        "kernel",
+        "runtime",
         "data",
         "view",
         "specs",
-        "operations",
+        "contracts",
         "extensions",
         "portfolio",
         "execution",
         "account",
         "evidence",
         "analysis",
-        "production",
         "domain",
         "models",
         "errors",
     },
-    "specs": {"execution", "portfolio", "operations", "kernel", "models", "errors"},
+    "specs": {"execution", "portfolio", "contracts", "runtime", "models", "errors"},
     "config": {"models", "errors"},
 }
 
@@ -95,13 +93,13 @@ def test_role_views_expose_only_their_authorized_capabilities() -> None:
     }
     account_capabilities = {"account_snapshot", "state_accessed"}
 
-    for view_type in (MaterializeView, ExecutionView, MonitorView, StrategyView):
+    for view_type in (ModelView, ExecutionView, MonitorView, StrategyView):
         assert all(hasattr(view_type, capability) for capability in dataset_capabilities)
-    for view_type in (MaterializeView, ExecutionView, MonitorView):
+    for view_type in (ModelView, ExecutionView, MonitorView):
         assert not any(
             hasattr(view_type, capability) for capability in strategy_only_capabilities
         )
-    for view_type in (MaterializeView, ExecutionView):
+    for view_type in (ModelView, ExecutionView):
         assert not any(hasattr(view_type, capability) for capability in account_capabilities)
     assert all(hasattr(MonitorView, capability) for capability in account_capabilities)
     assert all(hasattr(StrategyView, capability) for capability in account_capabilities)

@@ -8,13 +8,13 @@ from qlibx import (
     ForwardReturnLabelEntry,
     ForwardReturnLabelModel,
     ForwardReturnLabelResult,
-    MaterializationInvocation,
+    ModelInvocation,
     OutcomeStatus,
     QlibxModel,
     QlibxProject,
 )
+from qlibx.contracts import FORWARD_RETURN_LABEL_OUTPUT
 from qlibx.data import AvailableAtField, DatasetRegistration, RowsLookback, SourceFormat
-from qlibx.operations import FORWARD_RETURN_LABEL_OUTPUT
 
 
 def _write_source(path: Path, *, horizon_instruments: tuple[str, ...] = ("A", "B")) -> None:
@@ -87,8 +87,8 @@ def _invocation(
     hour: int = 6,
     minute: int = 30,
     resolves_error_artifact_id: str | None = None,
-) -> MaterializationInvocation:
-    return MaterializationInvocation(
+) -> ModelInvocation:
+    return ModelInvocation(
         invocation_id=identity,
         evaluation_time=datetime(2024, 1, day, hour, minute, tzinfo=UTC),
         config_fingerprint="forward-label-config-v1",

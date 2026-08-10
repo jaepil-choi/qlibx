@@ -1,4 +1,4 @@
-from qlibx.operations import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
+from qlibx.contracts import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
 
 
 class SampleSignedConstraintStrategy:

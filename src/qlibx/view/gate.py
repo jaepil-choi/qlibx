@@ -3,7 +3,7 @@
 from qlibx.data.registry import RegistrySnapshot
 from qlibx.data.requirements import ResolvedBinding
 from qlibx.data.store import ObservationStore
-from qlibx.kernel import Clock
+from qlibx.runtime import Clock
 from qlibx.view.records import (
     AccountFeedbackState,
     AccountState,
@@ -12,7 +12,7 @@ from qlibx.view.records import (
     MemoryState,
     PublishedSessionPerformanceState,
 )
-from qlibx.view.views import ExecutionView, MaterializeView, MonitorView, StrategyView
+from qlibx.view.views import ExecutionView, ModelView, MonitorView, StrategyView
 
 
 class ViewGate:
@@ -47,12 +47,12 @@ class ViewGate:
             execution_inputs=execution_inputs,
         )
 
-    def materialize_view(
+    def model_view(
         self,
         clock: Clock,
         bindings: tuple[ResolvedBinding, ...],
-    ) -> MaterializeView:
-        return MaterializeView(
+    ) -> ModelView:
+        return ModelView(
             as_of=clock.now,
             bindings=bindings,
             registry=self._registry,

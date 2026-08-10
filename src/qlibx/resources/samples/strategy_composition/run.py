@@ -24,10 +24,10 @@ from qlibx import (
     StrategyInvocation,
     StrategyResult,
 )
+from qlibx.contracts import BudgetMode
 from qlibx.data import DatasetRegistration
 from qlibx.evidence import ArtifactEnvelope
 from qlibx.execution import CostRule, KrxExchangeConfig, Side, StockInstrument
-from qlibx.operations import BudgetMode
 
 KST = ZoneInfo("Asia/Seoul")
 

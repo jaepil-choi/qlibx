@@ -10,7 +10,6 @@ from qlibx.flow.failures import (
     publish_failed_outcome,
 )
 from qlibx.flow.portfolio import load_portfolio_result
-from qlibx.kernel import BacktestClock
 from qlibx.portfolio import (
     BenchmarkWeight,
     ConstraintAdjustmentRequest,
@@ -22,7 +21,8 @@ from qlibx.portfolio import (
     adjust_single_name_caps,
     validate_single_name_caps,
 )
-from qlibx.view import AccessRecord, MaterializeView, ViewGate
+from qlibx.runtime import BacktestClock
+from qlibx.view import AccessRecord, ModelView, ViewGate
 
 CONSTRAINT_ADJUSTMENT_CONTRACT = ArtifactContract(
     artifact_type="constraint_adjustment_result",
@@ -71,7 +71,7 @@ class ConstraintFlow:
         )
         if resolution.failed:
             return self._resolution_failure(resolution.errors)
-        view = ViewGate(self._registry, self._store).materialize_view(
+        view = ViewGate(self._registry, self._store).model_view(
             BacktestClock(request.evaluation_time),
             resolution.bindings,
         )
@@ -158,7 +158,7 @@ class ConstraintFlow:
         )
         if resolution.failed:
             return self._resolution_failure(resolution.errors)
-        view = ViewGate(self._registry, self._store).materialize_view(
+        view = ViewGate(self._registry, self._store).model_view(
             BacktestClock(request.evaluation_time),
             resolution.bindings,
         )
@@ -248,7 +248,7 @@ class ConstraintFlow:
 
     @staticmethod
     def _benchmark(
-        view: MaterializeView,
+        view: ModelView,
         declaration: ConstraintDeclaration,
     ) -> tuple[BenchmarkWeight, ...]:
         frame = view.latest(declaration.benchmark_weight_role)
@@ -261,7 +261,7 @@ class ConstraintFlow:
         )
 
     @staticmethod
-    def _access_context(view: MaterializeView) -> list[dict[str, object]]:
+    def _access_context(view: ModelView) -> list[dict[str, object]]:
         return [item.model_dump(mode="json") for item in view.accessed()]
 
     @staticmethod

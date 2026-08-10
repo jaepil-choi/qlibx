@@ -12,7 +12,7 @@ from qlibx.account import (
     ValuationStatus,
 )
 from qlibx.execution import Fill, Side
-from qlibx.kernel import BacktestClock, Event
+from qlibx.runtime import BacktestClock, Event
 
 EVENT_TIME = datetime(2025, 1, 2, 15, 30, tzinfo=UTC)
 

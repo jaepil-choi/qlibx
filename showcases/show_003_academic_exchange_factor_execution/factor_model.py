@@ -11,7 +11,7 @@ from qlibx import (
     BudgetMode,
     ComponentRequirement,
     DecisionAction,
-    MaterializeView,
+    ModelView,
     RowsLookback,
     StoredSignalEntry,
     StoredSignalResult,
@@ -20,12 +20,12 @@ from qlibx import (
     StrategyView,
     WeightEntry,
 )
-from qlibx.operations import (
-    MaterializationComputationError,
-    MaterializationOutputContract,
+from qlibx.contracts import (
+    ModelComputationError,
+    ModelOutputContract,
 )
 
-STORED_SIGNAL_OUTPUT = MaterializationOutputContract(
+STORED_SIGNAL_OUTPUT = ModelOutputContract(
     artifact_type="stored_signal_result",
     artifact_schema_version=1,
     payload_model=StoredSignalResult,
@@ -40,7 +40,7 @@ class MonthlyReversalModel:
     lookback_sessions: int = 20
     producer_id: str = "showcase.monthly-reversal.v1"
 
-    output_contract: ClassVar[MaterializationOutputContract[StoredSignalResult]] = (
+    output_contract: ClassVar[ModelOutputContract[StoredSignalResult]] = (
         STORED_SIGNAL_OUTPUT
     )
 
@@ -54,7 +54,7 @@ class MonthlyReversalModel:
             ),
         )
 
-    def run(self, view: MaterializeView) -> StoredSignalResult:
+    def run(self, view: ModelView) -> StoredSignalResult:
         frame = view.history("factor_input_return")
         values = pd.to_numeric(frame["factor_input_return"], errors="coerce")
         usable = frame.assign(factor_input_return=values).loc[values.notna()].copy()
@@ -79,7 +79,7 @@ class MonthlyReversalModel:
                 StoredSignalEntry(instrument=str(instrument), value=-trailing_return)
             )
         if invalid or len(entries) < 4:
-            raise MaterializationComputationError(
+            raise ModelComputationError(
                 "SHOWCASE_FACTOR_COVERAGE_INVALID",
                 "each instrument requires a complete window ending at the decision",
                 context={"invalid": invalid[:20], "valid_instruments": len(entries)},

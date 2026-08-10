@@ -10,7 +10,6 @@ from qlibx.flow.failures import (
     publish_failed_errors,
     publish_failed_outcome,
 )
-from qlibx.kernel import Clock
 from qlibx.portfolio import (
     BenchmarkWeight,
     ConstraintDeclaration,
@@ -19,6 +18,7 @@ from qlibx.portfolio import (
     ConstraintMonitoringResult,
     monitor_actual_single_name_caps,
 )
+from qlibx.runtime import Clock
 from qlibx.view import MonitorView, ViewGate
 
 CONSTRAINT_MONITORING_CONTRACT = ArtifactContract(

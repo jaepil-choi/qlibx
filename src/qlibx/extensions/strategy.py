@@ -5,13 +5,13 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.data import ComponentRequirement
-from qlibx.models import QlibxModel
-from qlibx.operations import (
+from qlibx.contracts import (
     StrategyArtifactBinding,
     StrategyArtifactRequirement,
     StrategyDraft,
 )
+from qlibx.data import ComponentRequirement
+from qlibx.models import QlibxModel
 from qlibx.view import (
     AccessRecord,
     ArtifactAccessRecord,

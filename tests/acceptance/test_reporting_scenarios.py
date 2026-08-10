@@ -11,11 +11,11 @@ from qlibx.analysis import (
     SimulationAnalysisRequest,
 )
 from qlibx.flow import AnalysisFlow, MonitoringFlow
-from qlibx.kernel import BacktestClock
 from qlibx.portfolio import (
     ConstraintDeclaration,
     ConstraintMonitoringRequest,
 )
+from qlibx.runtime import BacktestClock
 from tests.acceptance.real_dw_support import (
     RealDwProject,
     close_at,

@@ -1,5 +1,10 @@
 """Exact v3 dispatch and lineage handling for persisted Strategy results."""
 
+from qlibx.contracts import (
+    StrategyResult,
+    StrategySourceStateLineage,
+    strategy_accesses_are_path_dependent,
+)
 from qlibx.errors import OperationOutcome, OutcomeStatus
 from qlibx.evidence import (
     ArtifactContract,
@@ -8,11 +13,6 @@ from qlibx.evidence import (
     LocalArtifactBackend,
 )
 from qlibx.flow.failures import build_operation_error
-from qlibx.operations import (
-    StrategyResult,
-    StrategySourceStateLineage,
-    strategy_accesses_are_path_dependent,
-)
 from qlibx.view import ArtifactAccessRecord, ArtifactInputProjection
 
 STRATEGY_RESULT_CONTRACT = ArtifactContract(

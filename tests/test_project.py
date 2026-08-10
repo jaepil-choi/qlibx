@@ -5,8 +5,8 @@ import pytest
 
 from qlibx import OutcomeStatus, QlibxProject
 from qlibx.config import ChangeAction
+from qlibx.contracts import StrategyInvocation
 from qlibx.evidence import CatalogSessionConflictError, LocalArtifactBackend
-from qlibx.operations import StrategyInvocation
 
 
 def test_project_init_is_preview_only_by_default(tmp_path: Path) -> None:

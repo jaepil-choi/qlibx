@@ -7,10 +7,10 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from qlibx.contracts import StrategyArtifactBinding
 from qlibx.execution import EtfInstrument, KrxExchangeConfig, StockInstrument
-from qlibx.kernel.clock import require_aware
 from qlibx.models import QlibxModel
-from qlibx.operations import StrategyArtifactBinding
+from qlibx.runtime.clock import require_aware
 from qlibx.specs.constraints import MvpConstraintPolicy
 
 

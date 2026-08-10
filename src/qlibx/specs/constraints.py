@@ -7,7 +7,6 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.kernel.clock import require_aware
 from qlibx.models import QlibxModel
 from qlibx.portfolio import (
     ConstraintAdjustmentRequest,
@@ -16,6 +15,7 @@ from qlibx.portfolio import (
     ConstraintValidationRequest,
     ExecutionLotInput,
 )
+from qlibx.runtime.clock import require_aware
 
 
 def _fingerprint(payload: dict[str, object]) -> str:

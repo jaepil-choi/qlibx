@@ -27,7 +27,7 @@ EVALUATION_TIME = datetime(2025, 1, 3, 9, tzinfo=UTC)
 
 VALID_MODULE = '''from qlibx.data import ComponentRequirement
 from qlibx.extensions import StrategyExtensionSpec
-from qlibx.operations import BudgetMode, StrategyDraft, WeightEntry
+from qlibx.contracts import BudgetMode, StrategyDraft, WeightEntry
 
 STRATEGY_SPEC = StrategyExtensionSpec(strategy_id="project.valid")
 
@@ -61,7 +61,7 @@ CUSTOM_ARTIFACT_MODULE = '''from qlibx.extensions import (
     StrategyExtensionSpec,
 )
 from qlibx.models import QlibxModel
-from qlibx.operations import (
+from qlibx.contracts import (
     BudgetMode,
     StrategyArtifactRequirement,
     StrategyDraft,
@@ -114,7 +114,7 @@ def create_strategy():
 '''
 
 STATEFUL_MODULE = '''from qlibx.extensions import StrategyExtensionSpec
-from qlibx.operations import BudgetMode, StrategyDraft, WeightEntry
+from qlibx.contracts import BudgetMode, StrategyDraft, WeightEntry
 
 STRATEGY_SPEC = StrategyExtensionSpec(strategy_id="project.stateful")
 
@@ -145,7 +145,7 @@ def create_strategy():
 '''
 
 NONDETERMINISTIC_MODULE = '''from qlibx.extensions import StrategyExtensionSpec
-from qlibx.operations import BudgetMode, StrategyDraft, WeightEntry
+from qlibx.contracts import BudgetMode, StrategyDraft, WeightEntry
 
 STRATEGY_SPEC = StrategyExtensionSpec(strategy_id="project.nondeterministic")
 _counter = 0
@@ -175,7 +175,7 @@ MUTATING_ARTIFACT_MODULE = '''from qlibx.extensions import (
     StrategyExtensionSpec,
 )
 from qlibx.models import QlibxModel
-from qlibx.operations import (
+from qlibx.contracts import (
     BudgetMode,
     StrategyArtifactRequirement,
     StrategyDraft,

@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from qlibx import OutcomeStatus, QlibxProject, StrategyInvocation
+from qlibx.contracts import BudgetMode, StrategyDraft, WeightEntry
 from qlibx.data import AvailableAtField, ComponentRequirement, DatasetRegistration, SourceFormat
-from qlibx.kernel import BacktestClock
-from qlibx.operations import BudgetMode, StrategyDraft, WeightEntry
+from qlibx.runtime import BacktestClock
 
 
 def project_with_market(tmp_path: Path) -> tuple[QlibxProject, Path]:

@@ -55,10 +55,10 @@ from qlibx.flow.daily import (
     SimulationCheckpoint,
 )
 from qlibx.flow.extensions import EXTENSION_REGISTRATION_CONTRACT, ExtensionFlow
-from qlibx.flow.materialization import (
+from qlibx.flow.model import (
     FORWARD_RETURN_LABEL_CONTRACT,
-    MaterializationFlow,
-    MaterializationRunResult,
+    ModelFlow,
+    ModelRunResult,
 )
 from qlibx.flow.monitoring import CONSTRAINT_MONITORING_CONTRACT, MonitoringFlow
 from qlibx.flow.portfolio import (
@@ -125,10 +125,10 @@ __all__ = [
     "FrozenDecision",
     "LoadedStrategyExtension",
     "MarkEvidence",
-    "MaterializationFlow",
-    "MaterializationRunResult",
     "MemberContribution",
     "MemoryCommitEvidence",
+    "ModelFlow",
+    "ModelRunResult",
     "MonitorEvidence",
     "MonitoringFlow",
     "NextSessionCloseExecutor",

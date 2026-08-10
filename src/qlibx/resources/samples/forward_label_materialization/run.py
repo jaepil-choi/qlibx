@@ -9,7 +9,7 @@ import yaml
 
 from qlibx import (
     ForwardReturnLabelModel,
-    MaterializationInvocation,
+    ModelInvocation,
     OutcomeStatus,
     QlibxProject,
 )
@@ -48,7 +48,7 @@ def main(project_root: Path) -> dict[str, object]:
     )
     missing = project.materialize(
         missing_model,
-        MaterializationInvocation(
+        ModelInvocation(
             invocation_id="sample-forward-label-missing-horizon",
             evaluation_time=at_close(3),
             config_fingerprint="sample-forward-label-missing-v1",
@@ -72,7 +72,7 @@ def main(project_root: Path) -> dict[str, object]:
     retry = require_complete(
         project.materialize(
             model,
-            MaterializationInvocation(
+            ModelInvocation(
                 invocation_id="sample-forward-label-valid-horizon",
                 evaluation_time=at_close(3),
                 config_fingerprint="sample-forward-label-valid-v1",
@@ -84,7 +84,7 @@ def main(project_root: Path) -> dict[str, object]:
     later = require_complete(
         project.materialize(
             model,
-            MaterializationInvocation(
+            ModelInvocation(
                 invocation_id="sample-forward-label-later-horizon",
                 evaluation_time=at_close(4),
                 config_fingerprint="sample-forward-label-valid-v1",

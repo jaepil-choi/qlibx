@@ -398,7 +398,7 @@ class StrategyView(_AccountStateView):
         return tuple(self._memory_accessed)
 
 
-class MaterializeView(_DatasetView):
+class ModelView(_DatasetView):
     """Dataset-only view for model or transform materialization."""
 
 

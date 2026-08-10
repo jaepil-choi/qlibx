@@ -1,23 +1,23 @@
 """Pure research and decision operations."""
 
-from qlibx.operations.artifacts import (
+from qlibx.contracts.artifacts import (
     ArtifactSemanticConstraint,
     StoredSignalEntry,
     StoredSignalResult,
     StrategyArtifactBinding,
     StrategyArtifactRequirement,
 )
-from qlibx.operations.materialization import (
+from qlibx.contracts.model import (
     FORWARD_RETURN_LABEL_OUTPUT,
     ForwardReturnLabelEntry,
     ForwardReturnLabelModel,
     ForwardReturnLabelResult,
-    MaterializationComputationError,
-    MaterializationInvocation,
-    MaterializationOperation,
-    MaterializationOutputContract,
+    ModelComputationError,
+    ModelInvocation,
+    ModelOutputContract,
+    ResearchModel,
 )
-from qlibx.operations.strategy import (
+from qlibx.contracts.strategy import (
     ArtifactAwareStrategyOperation,
     BudgetMode,
     DecisionAction,
@@ -42,10 +42,10 @@ __all__ = [
     "ForwardReturnLabelEntry",
     "ForwardReturnLabelModel",
     "ForwardReturnLabelResult",
-    "MaterializationComputationError",
-    "MaterializationInvocation",
-    "MaterializationOperation",
-    "MaterializationOutputContract",
+    "ModelComputationError",
+    "ModelInvocation",
+    "ModelOutputContract",
+    "ResearchModel",
     "StoredSignalEntry",
     "StoredSignalResult",
     "StrategyArtifactBinding",

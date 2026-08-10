@@ -22,6 +22,9 @@ showcases/show_*/outputs/
 !.agent/runs/.gitignore
 
 # Local test and tool scratch state.
+/.codex-tmp/
+/.ruff_cache/
+/.uv-cache*/
 /.agent/test-runs/
 /.agent/tmp/
 /.tmp/

@@ -81,6 +81,78 @@ spec 생성자로 돌아가야 한다. 두 venue의 onboarding 대화 형태가 
 현 시점 권고는 (a)다. Academic listing은 instrument identity가 아니라 가격 semantics 선언이므로
 같은 누적 버킷에 넣으면 의미가 섞인다.
 
+### N-03 `DEBT` — `latest()`와 `RowsLookback`이 요청 window가 아니라 전체 visible history를 랭킹한다
+
+[data/store.py:155-175](../../src/qlibx/data/store.py)의 `RowsLookback`과 `latest` 경로는
+`row_number() OVER (PARTITION BY instrument ORDER BY available_at DESC ...)`를 사용한다.
+Window function은 PIT gate를 통과한 **모든 행**에 순위를 매긴 뒤 `__rank <= N`으로 자른다.
+따라서 쿼리 비용이 요청한 N이 아니라 **누적 history 길이**에 비례한다.
+
+실측(3,000 instrument × 1,500 session = 4.5M행, 27.9MB Parquet, warm, frozen scope 안):
+
+| query | 반환 행 | median |
+|---|---|---|
+| `session()` 1일 | 3,000 | **16.3 ms** |
+| `latest()` | 3,000 | **498.7 ms** |
+| `RowsLookback(rows=20)` | 60,000 | **653.7 ms** |
+
+`session()` 대비 30~40배다. `latest()`는 instrument당 1행만 필요한데도 그렇다.
+
+영향: constraint를 켠 daily run은 execution event마다 benchmark weight를 `latest()`로 읽는다
+([flow/daily.py:1085](../../src/qlibx/flow/daily.py)). 1,500 거래일이면 이 한 줄만 **약 12분**을
+추가한다. History가 길어질수록 선형으로 나빠진다.
+
+제안(승인 필요): correlated subquery 또는 `available_at` 하한 예비필터로 랭킹 대상을 먼저 줄인다.
+`latest`는 window function 없이 `max(available_at)` group-by join으로 표현할 수 있다.
+계약(반환 semantics)은 바뀌지 않으므로 순수 최적화다.
+
+### N-04 `DEBT` — 쿼리마다 DuckDB connection을 새로 만들고 닫는다
+
+[data/store.py:183-187](../../src/qlibx/data/store.py)은 `query()` 호출마다
+`duckdb.connect(":memory:")` → `execute` → `close()`를 수행한다. 실측 connect+close만
+**9.2 ms**이며, 이는 가장 흔한 `session()` 쿼리(16.3 ms)의 **약 56%**다.
+
+`ObservationStore`는 이미 `frozen()` scope로 invocation 수명을 갖고 있으므로 그 안에서
+connection을 재사용해도 격리 semantics가 바뀌지 않는다.
+
+### N-05 `DEBT` — Query snapshot을 정렬 없이 기록해 row-group pruning이 source 순서에 의존한다
+
+[data/snapshot.py:98](../../src/qlibx/data/snapshot.py)은 normalized frame을 `to_parquet`으로
+그대로 쓴다. 정렬하지 않으므로 `available_at`의 row-group min/max 통계가 source의 물리적 순서를
+그대로 물려받는다. `available_at <= cutoff` predicate pushdown의 효율이 **등록한 파일이 어떤
+순서로 덤프됐는지**에 좌우된다.
+
+실측(같은 4.5M행, 물리적 순서만 다름):
+
+| snapshot 물리 순서 | 크기 | `session()` median |
+|---|---|---|
+| 시간순 `(date, instrument)` | 27.9 MB | **37.7 ms** |
+| 종목순 `(instrument, date)` | 29.4 MB | **60.2 ms** |
+
+1.6배 차이다. 종목별 블록 덤프는 vendor CSV에서 매우 흔한 형태이므로 우연에 맡길 값이 아니다.
+
+제안(승인 필요): snapshot 기록 시 `available_at`(또는 registered logical key) 순으로 정렬한다.
+Snapshot은 content-addressed이므로 정렬은 fingerprint를 바꾸며 기존 registration은 explicit
+`reindex_datasets()` 경로를 이미 갖고 있다.
+
+### 성능 관련 확인된 사실 (finding 아님, 기록용)
+
+- 현재 구조는 naive pandas 경로보다 훨씬 빠르다. `tests/performance/lookback_gate.py`
+  (2M행, 50 instrument, rows=60) 실측: pandas baseline median **51.52 s** vs
+  qlibx bounded median **0.289 s** → **178배**. Gate 기준(50% 이하) 대비 0.56%.
+- 원본 CSV를 매 쿼리마다 다시 읽지 않는다. Registration이 normalized Parquet snapshot을
+  만들고 쿼리는 그것만 친다. 실측 129 MB CSV → 1.5 MB Parquet.
+- `frozen()` scope가 SHA-256 검증을 invocation당 1회로 memoize한다. 실측 129MB source
+  hash 93.2 ms가 매 쿼리 → 1회로 줄어든다. Scope 밖 cold 쿼리는 281.9 ms, 안에서는 156.2 ms.
+
+### 문서 drift
+
+`docs/implementations/049-observation-frame-cache.md`는 `ObservationStore`가
+`(registration_identity, source path, fingerprint, field)` 키의 in-memory normalized frame
+cache를 갖는다고 기술한다. **현재 source에는 그 cache가 없다.** GAP-LOOKBACK-001의
+normalized Parquet snapshot으로 대체되면서 제거됐고 049는 갱신되지 않았다.
+`2026-08-10-1730` 리뷰의 C5(implementation note 지연)와 같은 종류다.
+
 ## 2. 이번 세션이 보지 않은 것
 
 `evidence/local.py`(1,157줄), `flow/strategy_extensions.py`(929줄), `onboarding.py`(700줄),

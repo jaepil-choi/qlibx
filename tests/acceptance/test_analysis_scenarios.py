@@ -149,15 +149,9 @@ def test_uc_error_001_and_uc_research_001_short_analysis_fails_then_retries(
         sum(value * value for value in centered_signal)
         * sum(value * value for value in centered_return)
     ) ** 0.5
-    expected_return = sum(
-        signal / sum(abs(value) for value in centered_signal) * realized
-        for signal, realized in zip(centered_signal, returns, strict=True)
-    )
     assert metrics["information_coefficient"] == pytest.approx(expected_ic, abs=1e-15)
-    assert metrics["hypothetical_long_short_return"] == pytest.approx(
-        expected_return,
-        abs=1e-15,
-    )
+    # Signal analysis builds no portfolio, so it reports no basket return (PRD 4.2, 4.6).
+    assert "hypothetical_long_short_return" not in metrics
     assert retry.result.accesses[0].max_available_at <= retry.result.evaluation_time
     assert any(
         edge.dependency_kind == "error"

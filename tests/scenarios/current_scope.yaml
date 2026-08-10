@@ -148,7 +148,7 @@ scenarios:
       failure_preserved: true
       retry_outcome: complete
       resolves_error_lineage: true
-      metric_set: [signal_count, information_coefficient, hypothetical_long_short_return]
+      metric_set: [signal_count, information_coefficient]
       account_mutation: false
       memory_mutation: false
 

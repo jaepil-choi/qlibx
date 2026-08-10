@@ -358,22 +358,12 @@ def analyze_signal(
         signal * realized
         for signal, realized in zip(centered_signal, centered_return, strict=True)
     ) / math.sqrt(signal_ss * return_ss)
-    gross = sum(abs(value) for value in centered_signal)
-    hypothetical_return = sum(
-        signal / gross * realized
-        for signal, realized in zip(centered_signal, return_values, strict=True)
-    )
     metrics = (
         AnalysisMetric(name="signal_count", value=float(len(instruments)), unit="count"),
         AnalysisMetric(
             name="information_coefficient",
             value=information_coefficient,
             unit="correlation",
-        ),
-        AnalysisMetric(
-            name="hypothetical_long_short_return",
-            value=hypothetical_return,
-            unit="fraction",
         ),
     )
     return AnalysisResult(
@@ -383,8 +373,8 @@ def analyze_signal(
         metrics=metrics,
         source_artifact_ids=(request.signal_artifact_id,),
         limitations=(
-            "hypothetical zero-cost weights are demeaned signal values normalized to unit gross",
-            "result is research analysis and does not create an executable portfolio or Account",
+            "signal analysis builds no portfolio and reports no portfolio return, NAV or turnover",
+            "basket performance requires the Exchange and Account path (PRD 4.2, 4.6)",
         ),
         state_semantics="not_applicable",
         values_fingerprint=values_fingerprint(metrics, ()),

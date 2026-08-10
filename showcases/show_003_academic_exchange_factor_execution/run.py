@@ -76,7 +76,6 @@ class PeriodResult:
     analysis_end_date: str
     information_coefficient: float
     rank_ic: float
-    analysis_long_short_return: float
     nav: float
     cumulative_academic_return: float
     gross_exposure: float
@@ -300,7 +299,7 @@ def render_report(summary: dict[str, Any], periods: list[dict[str, Any]]) -> str
         f"<td>{html.escape(row['decision_date'])}</td>"
         f"<td>{html.escape(row['execution_date'])}</td>"
         f"<td>{row['information_coefficient']:.3f}</td>"
-        f"<td>{row['analysis_long_short_return']:.2%}</td>"
+        f"<td>{row['rank_ic']:.3f}</td>"
         f"<td>{row['turnover']:.3f}</td>"
         f"<td>{row['gross_exposure']:.3f}</td>"
         f"<td>{row['net_exposure']:.3f}</td>"
@@ -344,11 +343,13 @@ main{{max-width:1180px;margin:auto;padding:42px 24px 72px}} h1{{font:750 43px/1.
   <div class="card"><div class="label">Max NAV delta</div><div class="value">{verification['maximum_absolute_nav_delta']:.2e}</div></div>
   <div class="card"><div class="label">Max quantity delta</div><div class="value">{verification['maximum_absolute_quantity_delta']:.2e}</div></div>
   <div class="card"><div class="label">Max turnover delta</div><div class="value">{verification['maximum_absolute_turnover_delta']:.2e}</div></div>
+  <div class="card"><div class="label">Max &Sigma;wr identity delta<br><span class="muted">{verification['verified_identity_periods']} holding periods</span></div><div class="value">{verification['maximum_absolute_period_identity_delta']:.2e}</div></div>
   <div class="card"><div class="label">Negative positions</div><div class="value ok">Observed</div></div>
 </div>
-<h2>Monthly evidence</h2><div class="panel table-wrap"><table><thead><tr><th>Decision</th><th>Execution</th><th>IC</th><th>Next-month diagnostic</th><th>Turnover</th><th>Gross</th><th>Net</th><th>NAV</th><th>Long/Short</th></tr></thead><tbody>{table_rows}</tbody></table></div>
+<h2>Monthly evidence</h2><div class="panel table-wrap"><table><thead><tr><th>Decision</th><th>Execution</th><th>IC</th><th>Rank IC</th><th>Turnover</th><th>Gross</th><th>Net</th><th>NAV</th><th>Long/Short</th></tr></thead><tbody>{table_rows}</tbody></table></div>
 <h2>Interpretation boundary</h2><div class="panel boundary"><ul>
-<li>The IC and next-month long-short diagnostic test the factor artifact; AcademicExchange NAV starts after the next-session close, so they intentionally use different holding boundaries.</li>
+<li>IC and Rank IC test the factor artifact and build no portfolio. Every return, NAV and turnover figure here comes from AcademicExchange and the Account, never from a weighted average of returns (PRD 4.2, 4.6).</li>
+<li>The &Sigma;wr identity delta shows that holding one rebalance for one period reaches exactly the NAV those weights and the realized price returns imply. That identity verifies a single period; it is not accumulated, because compounding it would silently assume costless full rebalancing every period.</li>
 <li>All instruments here are stocks. The public listing contract also accepts ETF, tracking-only Index, and explicit synthetic-unit-price Factor inputs.</li>
 <li>Zero costs are an explicit profile assumption, not missing data. Turnover is still recorded.</li>
 <li>Hypothetical shorts do not prove borrow, locate, collateral, margin, capacity, dividends, market impact, or real executability.</li>
@@ -403,7 +404,6 @@ def run(repo_root: Path) -> dict[str, Any]:
     portfolio_ids: list[str] = []
     research_rows: list[dict[str, Any]] = []
     maximum_ic_delta = 0.0
-    maximum_analysis_return_delta = 0.0
 
     for decision_day, evaluation_day in pairwise(decision_dates):
         decision_time = close_at(decision_day)
@@ -446,16 +446,9 @@ def run(repo_root: Path) -> dict[str, Any]:
         qlibx_ic = metric(analyzed.result, "information_coefficient")
         centered = signals - signals.mean()
         weights = centered / centered.abs().sum()
-        oracle_return = float((weights * realized).sum())
-        qlibx_return = metric(analyzed.result, "hypothetical_long_short_return")
         maximum_ic_delta = max(maximum_ic_delta, abs(qlibx_ic - oracle_ic))
-        maximum_analysis_return_delta = max(
-            maximum_analysis_return_delta, abs(qlibx_return - oracle_return)
-        )
         if not math.isclose(qlibx_ic, oracle_ic, rel_tol=0, abs_tol=1e-12):
             raise RuntimeError("qlibx IC does not reconcile")
-        if not math.isclose(qlibx_return, oracle_return, rel_tol=0, abs_tol=1e-12):
-            raise RuntimeError("qlibx analysis return does not reconcile")
         portfolio_id = publish_portfolio(
             project,
             decision_day=decision_day,
@@ -471,7 +464,6 @@ def run(repo_root: Path) -> dict[str, Any]:
                 "rank_ic": correlation(
                     signals.rank(method="average"), realized.rank(method="average")
                 ),
-                "analysis_long_short_return": qlibx_return,
                 "signal_artifact_id": signal_artifact.artifact_id,
                 "portfolio_artifact_id": portfolio_id,
                 "weights": weights.to_dict(),
@@ -506,6 +498,11 @@ def run(repo_root: Path) -> dict[str, Any]:
     maximum_nav_delta = 0.0
     maximum_quantity_delta = 0.0
     maximum_turnover_delta = 0.0
+    maximum_period_identity_delta = 0.0
+    verified_identity_periods = 0
+    previous_prices: dict[str, float] | None = None
+    previous_weights: dict[str, float] | None = None
+    previous_after_nav: float | None = None
     period_results: list[PeriodResult] = []
     fill_rows: list[dict[str, Any]] = []
     total_fill_count = 0
@@ -530,6 +527,34 @@ def run(repo_root: Path) -> dict[str, Any]:
             str(instrument): float(weight)
             for instrument, weight in research["weights"].items()
         }
+        # Architecture 2.5: sum(w * r) is a one-period verification identity, not a shortcut that
+        # may be accumulated. Hold the previous rebalance for one period and check that the NAV the
+        # Account actually reached equals what those weights and the realized price returns imply.
+        if (
+            previous_prices is not None
+            and previous_weights is not None
+            and previous_after_nav is not None
+        ):
+            realized_period_return = oracle_nav / previous_after_nav - 1
+            identity_period_return = sum(
+                previous_weights.get(instrument, 0.0)
+                * (prices[instrument] / previous_prices[instrument] - 1)
+                for instrument in UNIVERSE
+            )
+            maximum_period_identity_delta = max(
+                maximum_period_identity_delta,
+                abs(realized_period_return - identity_period_return),
+            )
+            verified_identity_periods += 1
+            if not math.isclose(
+                realized_period_return,
+                identity_period_return,
+                rel_tol=0,
+                abs_tol=1e-12,
+            ):
+                raise RuntimeError(
+                    "AcademicExchange NAV return does not satisfy the one-period weight identity"
+                )
         target_quantities = {
             instrument: target_weights.get(instrument, 0.0) * oracle_nav / prices[instrument]
             for instrument in UNIVERSE
@@ -598,7 +623,6 @@ def run(repo_root: Path) -> dict[str, Any]:
                 analysis_end_date=research["analysis_end_date"],
                 information_coefficient=research["information_coefficient"],
                 rank_ic=research["rank_ic"],
-                analysis_long_short_return=research["analysis_long_short_return"],
                 nav=match.after.nav,
                 cumulative_academic_return=match.after.nav / INITIAL_NAV - 1,
                 gross_exposure=match.after.gross_exposure,
@@ -611,7 +635,12 @@ def run(repo_root: Path) -> dict[str, Any]:
                 execution_artifact_id=execution_artifact_id,
             )
         )
+        previous_prices = prices
+        previous_weights = target_weights
+        previous_after_nav = match.after.nav
 
+    if verified_identity_periods == 0:
+        raise RuntimeError("no holding period was available to verify the weight identity")
     if not negative_position_observed or not all_zero_cost:
         raise RuntimeError("academic short/zero-cost acceptance was not observed")
     period_payload = [asdict(item) for item in period_results]
@@ -671,7 +700,8 @@ def run(repo_root: Path) -> dict[str, Any]:
         },
         "verification": {
             "maximum_absolute_ic_delta": maximum_ic_delta,
-            "maximum_absolute_analysis_return_delta": maximum_analysis_return_delta,
+            "maximum_absolute_period_identity_delta": maximum_period_identity_delta,
+            "verified_identity_periods": verified_identity_periods,
             "maximum_absolute_nav_delta": maximum_nav_delta,
             "maximum_absolute_quantity_delta": maximum_quantity_delta,
             "maximum_absolute_turnover_delta": maximum_turnover_delta,

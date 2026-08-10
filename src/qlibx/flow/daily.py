@@ -61,12 +61,13 @@ from qlibx.execution.preparation import (
 )
 from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
 from qlibx.flow.recovery import (
-    SIMULATION_RECOVERY_POINT_CONTRACT,
-    SIMULATION_RECOVERY_POINT_V1_CONTRACT,
+    DailyRecoveryCoordinator,
+    DailyRecoveryDependencyErrors,
+    DailyRecoveryIdentity,
+    DailyRecoveryIssue,
+    DailyRecoveryWrite,
     PendingExecutionRecovery,
     RecoveryPublication,
-    SimulationRecoveryPoint,
-    SimulationRecoveryPointV1,
 )
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
 from qlibx.flow.strategy_results import (
@@ -494,11 +495,7 @@ class DailyExecutionFlow:
         self._errors: list[OperationError] = []
         self._authority_commits: list[_AuthorityCommit] = []
         self._pending_executions: dict[str, _PendingExecution] = {}
-        self._recovery_sequence = 0
-        self._previous_recovery_artifact_id: str | None = None
-        self._recovery_journal_cursor = 0
-        self._recovery_trace_cursor = 0
-        self._recovery_completed_cursor = 0
+        self._recovery: DailyRecoveryCoordinator | None = None
         self._resume_position: tuple[datetime, int] | None = None
         self._request_fingerprint = ""
         self._profile_fingerprint = ""
@@ -602,6 +599,18 @@ class DailyExecutionFlow:
                 for item in sorted(self._registry.datasets, key=lambda value: value.dataset_id)
             )
         )
+        self._recovery = DailyRecoveryCoordinator(
+            artifacts=self._artifacts,
+            identity=DailyRecoveryIdentity(
+                run_id=request.run_id,
+                request_fingerprint=self._request_fingerprint,
+                config_fingerprint=request.config_fingerprint,
+                profile_fingerprint=self._profile_fingerprint,
+                registry_fingerprint=self._registry_fingerprint,
+                strategy_id=strategy.strategy_id if strategy is not None else None,
+            ),
+            producer_id=self._profile.profile_id,
+        )
         if self._profile.execution_timing == "next_session_open":
             if not request.session_opens:
                 self._fail(
@@ -617,7 +626,7 @@ class DailyExecutionFlow:
                 request.session_closes,
             )
         if resume:
-            self._restore_recovery_point(strategy_id=strategy.strategy_id if strategy else None)
+            self._restore_recovery_point()
         else:
             self._publish_recovery_point(event=None)
         if self._errors:
@@ -857,13 +866,28 @@ class DailyExecutionFlow:
                 if self._errors:
                     return
             completed = (*self._completed_decisions, decision_id)
+            assert self._recovery is not None
             if (
                 self._publish_recovery_point(
                     event=event,
                     memory_snapshots=candidate_memory.checkpoint(),
                     completed_decision_ids=completed,
                     pending_publications=(
-                        (self._memory_recovery_publication(plan, run_result.result),)
+                        (
+                            self._recovery.publication(
+                                artifact_type="memory_commit",
+                                logical_identity=(
+                                    f"memory-commit:{self._request.run_id}:"
+                                    f"{plan.strategy_id}:v{plan.expected_version + 1}"
+                                ),
+                                producer_id=plan.strategy_id,
+                                payload=self._memory_evidence(plan),
+                                dependencies=self._memory_dependencies(
+                                    plan,
+                                    run_result.result,
+                                ),
+                            ),
+                        )
                         if plan is not None
                         else ()
                     ),
@@ -1288,8 +1312,9 @@ class DailyExecutionFlow:
             ),
             *preparation_dependencies,
         )
+        assert self._recovery is not None
         recovery_publications = [
-            self._recovery_publication(
+            self._recovery.publication(
                 artifact_type="execution_result",
                 logical_identity=f"execution-result:{evidence_candidate.event_id}",
                 producer_id=self._profile.profile_id,
@@ -1300,9 +1325,18 @@ class DailyExecutionFlow:
         ]
         if memory_plan is not None and pending.strategy_result is not None:
             recovery_publications.append(
-                self._memory_recovery_publication(
-                    memory_plan,
-                    pending.strategy_result,
+                self._recovery.publication(
+                    artifact_type="memory_commit",
+                    logical_identity=(
+                        f"memory-commit:{self._request.run_id}:"
+                        f"{memory_plan.strategy_id}:v{memory_plan.expected_version + 1}"
+                    ),
+                    producer_id=memory_plan.strategy_id,
+                    payload=self._memory_evidence(memory_plan),
+                    dependencies=self._memory_dependencies(
+                        memory_plan,
+                        pending.strategy_result,
+                    ),
                 )
             )
         if (
@@ -1467,12 +1501,13 @@ class DailyExecutionFlow:
                 selected_fields=(binding.field,),
             ),
         )
+        assert self._recovery is not None
         if (
             self._publish_recovery_point(
                 event=event,
                 account_checkpoint=candidate_account.checkpoint(),
                 pending_publications=(
-                    self._recovery_publication(
+                    self._recovery.publication(
                         artifact_type="mark_result",
                         logical_identity=f"mark-result:{evidence_candidate.event_id}",
                         producer_id=self._profile.profile_id,
@@ -1729,25 +1764,6 @@ class DailyExecutionFlow:
             source_artifact_id=source_artifact_id,
         )
 
-    @staticmethod
-    def _recovery_publication(
-        *,
-        artifact_type: Literal["execution_result", "mark_result", "memory_commit"],
-        logical_identity: str,
-        producer_id: str,
-        payload: QlibxModel,
-        artifact_schema_version: int = 1,
-        dependencies: tuple[DependencyEdge, ...] = (),
-    ) -> RecoveryPublication:
-        return RecoveryPublication(
-            artifact_type=artifact_type,
-            logical_identity=logical_identity,
-            producer_id=producer_id,
-            artifact_schema_version=artifact_schema_version,
-            payload_json=payload.model_dump_json(),
-            dependencies=dependencies,
-        )
-
     def _memory_evidence(self, plan: _MemoryPlan) -> MemoryCommitEvidence:
         return MemoryCommitEvidence(
             strategy_id=plan.strategy_id,
@@ -1781,23 +1797,6 @@ class DailyExecutionFlow:
                     "initial_actual_state" if plan.initialization else "confirmed_feedback"
                 ),
             ),
-        )
-
-    def _memory_recovery_publication(
-        self,
-        plan: _MemoryPlan,
-        result: StrategyResultPayload,
-    ) -> RecoveryPublication:
-        assert self._request is not None
-        return self._recovery_publication(
-            artifact_type="memory_commit",
-            logical_identity=(
-                f"memory-commit:{self._request.run_id}:{plan.strategy_id}:"
-                f"v{plan.expected_version + 1}"
-            ),
-            producer_id=plan.strategy_id,
-            payload=self._memory_evidence(plan),
-            dependencies=self._memory_dependencies(plan, result),
         )
 
     def _apply_memory_plan(
@@ -1867,7 +1866,7 @@ class DailyExecutionFlow:
             > self._resume_position
         )
 
-    def _pending_recovery(
+    def _pending_recovery_records(
         self,
         pending: dict[str, _PendingExecution] | None = None,
     ) -> tuple[PendingExecutionRecovery, ...]:
@@ -1898,18 +1897,9 @@ class DailyExecutionFlow:
         completed_decision_ids: tuple[str, ...] | None = None,
         pending_executions: dict[str, _PendingExecution] | None = None,
         pending_publications: tuple[RecoveryPublication, ...] = (),
-    ) -> SimulationRecoveryPoint | None:
+    ) -> QlibxModel | None:
         assert self._request is not None
-        sequence = self._recovery_sequence + 1 if event is not None else 0
-        if sequence >= 10**8:
-            failure_event = event or Event("RECOVERY", self._clock.now, DECISION_PRIORITY)
-            self._fail(
-                failure_event,
-                "recovery.sequence",
-                "RECOVERY_SEQUENCE_EXHAUSTED",
-                context={"sequence": sequence, "maximum_exclusive": 10**8},
-            )
-            return None
+        assert self._recovery is not None
         selected_account = account_checkpoint or self._account.checkpoint()
         selected_trace = tuple(self._trace)
         selected_completed = (
@@ -1917,79 +1907,25 @@ class DailyExecutionFlow:
             if completed_decision_ids is not None
             else tuple(self._completed_decisions)
         )
-        if (
-            len(selected_account.journal) < self._recovery_journal_cursor
-            or len(selected_trace) < self._recovery_trace_cursor
-            or len(selected_completed) < self._recovery_completed_cursor
-        ):
-            failure_event = event or Event("RECOVERY", self._clock.now, DECISION_PRIORITY)
-            self._fail(failure_event, "recovery.delta", "RECOVERY_DELTA_CURSOR_INVALID")
-            return None
-        point = SimulationRecoveryPoint(
-            run_id=self._request.run_id,
-            request_fingerprint=self._request_fingerprint,
-            config_fingerprint=self._request.config_fingerprint,
-            profile_fingerprint=self._profile_fingerprint,
-            registry_fingerprint=self._registry_fingerprint,
-            strategy_id=self._strategy.strategy_id if self._strategy is not None else None,
-            sequence=sequence,
-            previous_recovery_artifact_id=self._previous_recovery_artifact_id,
-            last_event_time=event.ts if event is not None else None,
-            last_event_priority=event.priority if event is not None else None,
-            last_event_name=event.name if event is not None else None,
-            account_id=selected_account.account_id,
-            account_base_currency=selected_account.base_currency,
-            account_cash=selected_account.cash,
-            account_instrument_ids=selected_account.instrument_ids,
-            account_positions=selected_account.positions,
-            account_version=selected_account.version,
-            account_as_of=selected_account.as_of,
-            account_realized_pnl=selected_account.realized_pnl,
-            account_journal_delta=selected_account.journal[self._recovery_journal_cursor :],
-            memory_snapshots=(
-                memory_snapshots if memory_snapshots is not None else self._memory.checkpoint()
-            ),
-            event_trace_delta=selected_trace[self._recovery_trace_cursor :],
-            completed_decision_ids_delta=selected_completed[self._recovery_completed_cursor :],
-            pending_executions=self._pending_recovery(pending_executions),
-            pending_publications=pending_publications,
-        )
-        suffix = (
-            "initial"
-            if event is None
-            else (
-                f"{event.ts.isoformat().replace('+00:00', 'Z')}:"
-                f"{event.priority}:{event.name.lower()}"
+        try:
+            return self._recovery.publish(
+                DailyRecoveryWrite(
+                    account_checkpoint=selected_account,
+                    memory_snapshots=(
+                        memory_snapshots
+                        if memory_snapshots is not None
+                        else self._memory.checkpoint()
+                    ),
+                    event_trace=selected_trace,
+                    completed_decision_ids=selected_completed,
+                    pending_executions=self._pending_recovery_records(pending_executions),
+                    pending_publications=pending_publications,
+                    event_time=event.ts if event is not None else None,
+                    event_priority=event.priority if event is not None else None,
+                    event_name=event.name if event is not None else None,
+                )
             )
-        )
-        publication = self._artifacts.publish_model(
-            logical_identity=(
-                f"simulation-recovery:{self._request.run_id}:{sequence:08d}:{suffix}"
-            ),
-            artifact_type="simulation_recovery_point",
-            artifact_schema_version=2,
-            producer_id=self._profile.profile_id,
-            payload=point,
-            dependencies=(
-                DependencyEdge(
-                    dependency_kind="state",
-                    dependency_id=(f"account:{point.account_id}:v{point.account_version}"),
-                    consumer_role="recoverable_actual_state",
-                ),
-                *(
-                    ()
-                    if point.previous_recovery_artifact_id is None
-                    else (
-                        DependencyEdge(
-                            dependency_kind="artifact",
-                            dependency_id=point.previous_recovery_artifact_id,
-                            consumer_role="previous_recovery_point",
-                        ),
-                    )
-                ),
-            ),
-        )
-        if publication.status is not OutcomeStatus.COMPLETE:
+        except DailyRecoveryIssue as issue:
             failure_event = event or Event(
                 "RECOVERY",
                 self._clock.now,
@@ -1997,212 +1933,32 @@ class DailyExecutionFlow:
             )
             self._fail(
                 failure_event,
-                "recovery.publish",
-                "RECOVERY_POINT_PUBLICATION_FAILED",
-                context={
-                    "publication_errors": [
-                        error.model_dump(mode="json") for error in publication.errors[:5]
-                    ],
-                },
+                issue.stage,
+                issue.code,
+                context=issue.context,
             )
             return None
-        self._recovery_sequence = sequence
-        self._previous_recovery_artifact_id = publication.result.artifact_id
-        self._recovery_journal_cursor = len(selected_account.journal)
-        self._recovery_trace_cursor = len(selected_trace)
-        self._recovery_completed_cursor = len(selected_completed)
-        return point
 
-    def _restore_recovery_point(self, *, strategy_id: str | None) -> None:
+    def _restore_recovery_point(self) -> None:
         assert self._request is not None
-        prefix = f"simulation-recovery:{self._request.run_id}:"
-        envelope = self._artifacts.latest_envelope(
-            artifact_type="simulation_recovery_point",
-            logical_identity_prefix=prefix,
-        )
+        assert self._recovery is not None
         resume_event = Event("RESUME", self._clock.now, DECISION_PRIORITY)
-        if envelope is None:
-            self._fail(
-                resume_event,
-                "resume",
-                "RECOVERY_POINT_NOT_FOUND",
-                context={"run_id": self._request.run_id},
-            )
-            return
-        latest_envelope = envelope
-        seen: set[str] = set()
-        v2_points: list[SimulationRecoveryPoint] = []
-        anchor: SimulationRecoveryPointV1 | None = None
-        expected_identity = {
-            "run_id": self._request.run_id,
-            "request_fingerprint": self._request_fingerprint,
-            "config_fingerprint": self._request.config_fingerprint,
-            "profile_fingerprint": self._profile_fingerprint,
-            "registry_fingerprint": self._registry_fingerprint,
-            "strategy_id": strategy_id,
-        }
-        while True:
-            if envelope.artifact_id in seen:
-                self._fail(
-                    resume_event,
-                    "resume.chain",
-                    "RECOVERY_CHAIN_CYCLE",
-                    context={"artifact_id": envelope.artifact_id},
-                )
-                return
-            seen.add(envelope.artifact_id)
-            contract = (
-                SIMULATION_RECOVERY_POINT_CONTRACT
-                if envelope.artifact_schema_version == 2
-                else SIMULATION_RECOVERY_POINT_V1_CONTRACT
-            )
-            loaded = self._artifacts.load_model(envelope.artifact_id, contract)
-            if loaded.status is not OutcomeStatus.COMPLETE:
-                self._errors.extend(loaded.errors)
-                return
-            loaded_point = loaded.result.payload
-            actual_identity = {
-                "run_id": loaded_point.run_id,
-                "request_fingerprint": loaded_point.request_fingerprint,
-                "config_fingerprint": loaded_point.config_fingerprint,
-                "profile_fingerprint": loaded_point.profile_fingerprint,
-                "registry_fingerprint": loaded_point.registry_fingerprint,
-                "strategy_id": loaded_point.strategy_id,
-            }
-            mismatches = {
-                key: {
-                    "expected": expected_identity[key],
-                    "actual": actual_identity[key],
-                }
-                for key in expected_identity
-                if expected_identity[key] != actual_identity[key]
-            }
-            if mismatches and envelope.artifact_id == latest_envelope.artifact_id:
-                self._fail(
-                    resume_event,
-                    "resume.identity",
-                    "RESUME_BRANCH_REQUIRED",
-                    context={"mismatches": mismatches},
-                )
-                return
-            if not envelope.logical_identity.startswith(prefix) or mismatches:
-                self._fail(
-                    resume_event,
-                    "resume.chain",
-                    "RECOVERY_CHAIN_IDENTITY_MISMATCH",
-                    context={
-                        "artifact_id": envelope.artifact_id,
-                        "logical_identity": envelope.logical_identity,
-                        "mismatches": mismatches,
-                    },
-                )
-                return
-            if isinstance(loaded_point, SimulationRecoveryPointV1):
-                anchor = loaded_point
-                break
-            v2_points.append(loaded_point)
-            previous_id = loaded_point.previous_recovery_artifact_id
-            if previous_id is None:
-                break
-            previous = self._artifacts.load_envelope(previous_id)
-            if previous.status is not OutcomeStatus.COMPLETE:
-                self._errors.extend(previous.errors)
-                return
-            if previous.result.artifact_type != "simulation_recovery_point":
-                self._fail(
-                    resume_event,
-                    "resume.chain",
-                    "RECOVERY_CHAIN_IDENTITY_MISMATCH",
-                    context={"artifact_id": previous_id},
-                )
-                return
-            envelope = previous.result
-
-        chronological = tuple(reversed(v2_points))
-        journal = list(anchor.account_checkpoint.journal if anchor is not None else ())
-        event_trace = list(anchor.event_trace if anchor is not None else ())
-        completed = list(anchor.completed_decision_ids if anchor is not None else ())
-        previous_version = anchor.account_checkpoint.version if anchor is not None else 0
-        previous_sequence = anchor.sequence if anchor is not None else -1
-        for candidate in chronological:
-            if candidate.sequence != previous_sequence + 1:
-                self._fail(
-                    resume_event,
-                    "resume.chain",
-                    "RECOVERY_CHAIN_SEQUENCE_GAP",
-                    context={
-                        "previous_sequence": previous_sequence,
-                        "sequence": candidate.sequence,
-                    },
-                )
-                return
-            if candidate.account_version != previous_version + len(candidate.account_journal_delta):
-                self._fail(
-                    resume_event,
-                    "resume.chain",
-                    "RECOVERY_CHAIN_ACCOUNT_VERSION_GAP",
-                    context={
-                        "previous_version": previous_version,
-                        "account_version": candidate.account_version,
-                        "delta_length": len(candidate.account_journal_delta),
-                    },
-                )
-                return
-            journal.extend(candidate.account_journal_delta)
-            event_trace.extend(candidate.event_trace_delta)
-            completed.extend(candidate.completed_decision_ids_delta)
-            previous_version = candidate.account_version
-            previous_sequence = candidate.sequence
-
-        point: SimulationRecoveryPoint | SimulationRecoveryPointV1 = (
-            v2_points[0] if v2_points else anchor
-        )
-        assert point is not None
-        expected = {
-            "request_fingerprint": self._request_fingerprint,
-            "config_fingerprint": self._request.config_fingerprint,
-            "profile_fingerprint": self._profile_fingerprint,
-            "registry_fingerprint": self._registry_fingerprint,
-            "strategy_id": strategy_id,
-        }
-        actual = {
-            "request_fingerprint": point.request_fingerprint,
-            "config_fingerprint": point.config_fingerprint,
-            "profile_fingerprint": point.profile_fingerprint,
-            "registry_fingerprint": point.registry_fingerprint,
-            "strategy_id": point.strategy_id,
-        }
-        mismatches = {
-            key: {"expected": expected[key], "actual": actual[key]}
-            for key in expected
-            if expected[key] != actual[key]
-        }
-        if mismatches:
-            self._fail(
-                resume_event,
-                "resume.identity",
-                "RESUME_BRANCH_REQUIRED",
-                context={"mismatches": mismatches},
-            )
-            return
-
-        if isinstance(point, SimulationRecoveryPointV1):
-            restored_checkpoint = point.account_checkpoint
-        else:
-            restored_checkpoint = AccountCheckpoint(
-                account_id=point.account_id,
-                base_currency=point.account_base_currency,
-                cash=point.account_cash,
-                instrument_ids=point.account_instrument_ids,
-                positions=point.account_positions,
-                version=point.account_version,
-                applied_events=tuple(sorted(entry.event_id for entry in journal)),
-                journal=tuple(journal),
-                as_of=point.account_as_of,
-                realized_pnl=point.account_realized_pnl,
-            )
         try:
-            restored_account = Account.from_checkpoint(restored_checkpoint)
+            restored = self._recovery.restore()
+        except DailyRecoveryDependencyErrors as exc:
+            self._errors.extend(exc.errors)
+            return
+        except DailyRecoveryIssue as issue:
+            self._fail(
+                resume_event,
+                issue.stage,
+                issue.code,
+                context=issue.context,
+            )
+            return
+
+        try:
+            restored_account = Account.from_checkpoint(restored.account_checkpoint)
         except ValueError as exc:
             self._fail(
                 resume_event,
@@ -2211,9 +1967,9 @@ class DailyExecutionFlow:
                 context={"message": str(exc)[:500]},
             )
             return
-        restored_memory = StrategyMemoryStore.from_checkpoint(point.memory_snapshots)
+        restored_memory = StrategyMemoryStore.from_checkpoint(restored.memory_snapshots)
         restored_pending: dict[str, _PendingExecution] = {}
-        for pending in point.pending_executions:
+        for pending in restored.pending_executions:
             loaded_intent = self._artifacts.load_model(
                 pending.intent_artifact_id,
                 DECISION_INTENT_CONTRACT,
@@ -2253,25 +2009,16 @@ class DailyExecutionFlow:
 
         self._account = restored_account
         self._memory = restored_memory
-        self._trace = event_trace
-        self._completed_decisions = completed
+        self._trace = list(restored.event_trace)
+        self._completed_decisions = list(restored.completed_decision_ids)
         self._pending_executions = restored_pending
-        self._recovery_sequence = point.sequence
-        self._previous_recovery_artifact_id = latest_envelope.artifact_id
-        self._recovery_journal_cursor = len(journal)
-        self._recovery_trace_cursor = len(event_trace)
-        self._recovery_completed_cursor = len(completed)
-        self._resume_position = (
-            (point.last_event_time, point.last_event_priority)
-            if point.last_event_time is not None and point.last_event_priority is not None
-            else None
-        )
+        self._resume_position = restored.resume_position
         publication_models: dict[str, type[QlibxModel]] = {
             "execution_result": ExecutionEvidence,
             "mark_result": MarkEvidence,
             "memory_commit": MemoryCommitEvidence,
         }
-        for pending_publication in point.pending_publications:
+        for pending_publication in restored.pending_publications:
             payload_model = publication_models[pending_publication.artifact_type]
             try:
                 payload = payload_model.model_validate_json(pending_publication.payload_json)
@@ -2289,7 +2036,7 @@ class DailyExecutionFlow:
             publication = self._artifacts.publish_model(
                 logical_identity=pending_publication.logical_identity,
                 artifact_type=pending_publication.artifact_type,
-                artifact_schema_version=(pending_publication.artifact_schema_version),
+                artifact_schema_version=pending_publication.artifact_schema_version,
                 producer_id=pending_publication.producer_id,
                 payload=payload,
                 dependencies=pending_publication.dependencies,

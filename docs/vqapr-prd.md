@@ -1547,6 +1547,7 @@ hypothetical signed evaluation을 지원한다.
 
 - borrow, locate, margin, recall, borrow fee를 포함한 executable real short
 - derivative margin, funding, expiry, 강제청산의 complete lifecycle
+- **차입** — 보유 현금보다 많이 투자하는 것. 아래 참고
 - dividend/distribution과 기타 instrument lifecycle cash flow
 - partial fill, pending/cancel order state, 실제 주식·ETF settlement cycle
 - prepared production decision, external OMS reconciliation, live account authority
@@ -1559,6 +1560,21 @@ hypothetical signed evaluation을 지원한다.
 merger, spin-off, delisting처럼 instrument identity, tradability, reference state를 바꾸는 사건의 해석과 변환은
 vqapr가 아니라 **security master와 ETL pipeline의 책임**이다. vqapr는 향후에도 원천 corporate action을 자체
 해석하지 않고 이미 정규화된 instrument/reference data만 소비한다. 따라서 이것은 vqapr의 readiness gap이 아니다.
+
+#### 차입은 exposure를 키우는 것과 다르다
+
+**gross exposure를 키우는 것 자체는 차입이 아니다.** 자본 100에서 long 200 / short 100을 잡으면 공매도 대금이
+매수를 조달하므로 보유 현금이 정확히 0이 되고 빌린 것은 없다. 이런 portfolio는 현재 범위 안이다.
+
+**차입은 보유 현금이 음수가 되는 것**이다. 이것은 범위 밖이며, 계좌 상태가 그렇게 되는 결과는 계산 전에
+실패한다. 차입을 지원하려면 **차입 비용, 유지증거금, 강제청산**을 함께 정의해야 한다. 그것 없이 차입만
+허용하면 레버리지를 키울수록 대가 없이 수익이 커지는 결과를 보고하게 된다. `UC-REAL-SHORT-001`이
+executable short에 요구하는 것과 같은 조건이다.
+
+**유휴자본이 수익을 내는지는 user가 선언한다.** 보유 현금 자체는 이자를 만들지 않는다(그것은
+`UC-CASHFLOW-001`의 future 항목이다). 무위험자산 수익을 반영하려면 §4.4로 등록한 자산을 **포지션으로**
+보유한다. 그러면 무엇을 얼마나 들었는지가 result의 dependency로 남는다. package가 유휴자본에 조용히 수익을
+붙이지 않는다.
 
 ### 13.3 Future characterization — current support가 아님
 
@@ -1803,3 +1819,51 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-EXTENSION-001`, `UC-EXTENSION-002` | §12.3 | current |
 | `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`, `UC-SETTLEMENT-001` | §13.3 | future |
 | `UC-PROD-001`, `UC-PROD-002`, `UC-RECOVERY-001`, `UC-IMPACT-001`, `UC-REAL-SHORT-001` | §13.3 | future |
+
+## Appendix B. 이 경계를 확인한 연구 사례
+
+이 문서의 요구사항 중 여럿은 **실제 연구를 문서에 대입해보다가** 발견했다. 나중에 읽는 사람이 "왜 이렇게
+정했나"와 "왜 여기서 멈췄나"를 알 수 있도록, 각 결정을 낳은 구체적 사례를 남긴다.
+
+이 표는 normative가 아니다. 요구사항 자체는 본문에 있다.
+
+### B.1 KRX daily 두 전략 — peer momentum long-short와 5일 top-10 long-only
+
+| 확인한 것 | 정해진 것 |
+|---|---|
+| 두 전략이 같은 lifecycle을 통과하는가 | 통과한다. 다른 것은 판단 로직과 profile 정책뿐 (§6.1) |
+| 등록에 목적별 role(`research_close` 같은)이 필요한가 | 필요 없다. 소비자가 각자 field를 요구한다 (§4.1) |
+| 체결 기록의 길이가 거래 횟수인가 | 아니다. dealt 0인 진단 레코드가 섞인다 → intended/requested/dealt/committed 4단 구분 (§2.4) |
+| lookback이 다른 두 전략의 첫 판단 시점 | warm-up을 선언으로 표현하고, 그 구간은 실패가 아니라 기록된 skip |
+
+### B.2 Fama-French 스타일 팩터 — independent double sort
+
+| 확인한 것 | 정해진 것 |
+|---|---|
+| "매년 6월 마지막 거래일" cadence를 표현할 수 있는가 | **표현할 수 없었다.** 세션 수로 세는 cadence로는 달력 경계를 근사할 수 없어 달력 기준 cadence를 추가 (§3.3) |
+| 거래소 calendar 파일 없이 시작할 수 있는가 | **없었다.** availability와 같은 방식의 선언된 유도 규칙을 허용 (`UC-CALENDAR-001`). 날짜는 유도되고 시각은 이미 `available_at` 선언에 있다 |
+| 여러 버킷 portfolio가 같은 분류를 썼음을 증명할 수 있는가 | 분류를 재사용 가능한 result로 만들면 dependency로 증명된다. 별도 grouping 개념은 만들지 않았다 (`UC-FACTOR-001`) |
+| 버킷별 구성종목 수를 어디서 얻는가 | 분류 result에 이미 있다. actual state에 물을 필요가 없다 |
+| 가중 방식과 리밸런싱 주기의 관계 | 시가총액 가중은 보유만 해도 유지되지만 균등 가중은 그렇지 않다. 따라서 cadence가 결과를 바꾸며 **어느 cadence도 정답이 아니다.** package가 대신 고르지 않는다 |
+
+검토 대상: Kimchi Factor 방법론 재현 (KOSPI 기준 breakpoint를 양 시장에 적용, 3개월 보고 지연, 6월 형성,
+VW/EW, 2×3과 5분위, 일간·월간 독립 산출).
+
+### B.3 Betting-Against-Beta — 레버리지처럼 보이는 것
+
+$$r_{BAB} = \frac{1}{\beta_L}(r_L - r_f) - \frac{1}{\beta_H}(r_H - r_f)$$
+
+| 확인한 것 | 정해진 것 |
+|---|---|
+| BAB에 차입이 필요한가 | **필요 없었다.** 자본 100 기준 long 1.43 / short 0.71이면 보유 현금이 +0.28이다. "leverage"는 β 조정이지 금융 차입이 아니었다 |
+| exposure를 키우는 것과 차입의 경계 | 보유 현금이 음수가 되는 것만 차입이다. long 2.0 / short 1.0은 현금이 0이 될 뿐 빌린 것이 없다 (§13.2) |
+| 차입을 허용해야 하는가 | **아니다.** 차입 비용·유지증거금·강제청산 없이 허용하면 레버리지를 키울수록 대가 없이 수익이 커진다 |
+| 유휴자본의 $r_f$를 어떻게 반영하는가 | 현금에 이자를 자동으로 붙이지 않는다. §4.4로 등록한 무위험자산을 **포지션으로** 보유해 user가 선언한다 (§13.2) |
+| 예산이 항상 gross 1 또는 ±1인가 | **아니다.** BAB는 매 리밸런싱마다 $\beta$에 따라 예산이 달라진다. 예산 표현을 하나로 고정하지 않은 이유의 실제 근거다 (§5.5) |
+
+### B.4 아직 확인 중
+
+- **횡단면 회귀 기반 팩터(Barra 계열)** — 회귀계수는 statistical estimate이므로 `UC-MODEL-002`가 이미 다룬다.
+  다만 이런 연구는 Model이 주역인데, Model이 어떤 시간 경계로 데이터를 읽는지가 아직 충분히 규정되지 않았다.
+  Strategy는 판단 1회에 평가 시각 1개이지만, 반복 계산 결과를 만드는 Model은 **출력 행마다 평가 시각이
+  하나**다. 이 차이의 취급은 별도 검토 대상이다.

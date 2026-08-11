@@ -125,6 +125,28 @@ DRY는 **모양이 같은 것**이 아니라 **변경 이유가 같은 것**에 
   적용하지 않는다"가 조건 분기 하나 차이로 무너진다.
 - **없으면 (부족한 공유)**: envelope을 profile마다 따로 두면 `UC-PORTFOLIO-001`을 비교할 공통 축이 사라진다.
 
+### 2.8 어떤 제약이 어디에 속하는가
+
+새 제약이 생길 때마다 "이건 Exchange야 Account야"를 다시 논쟁하지 않기 위한 판정 규칙이다.
+
+> **venue를 바꾸면 달라지는가?** → **Exchange**
+> **계좌를 바꾸면 달라지는가?** → **Account**
+> **둘 다 안 바꾸고 회계 항등식인가?** → **공통 불변식**
+
+| 제약 | 검사 | 소속 |
+|---|---|---|
+| fractional / lot / quantity step | 같은 종목이 academic venue에선 `0.000001`, KRX에선 `1` | Exchange |
+| permitted side | venue가 그 방향을 지원하는가 | Exchange |
+| 가격·비용·체결 시점 | venue 규칙 | Exchange |
+| 음수 position | 같은 venue에서도 계좌 유형에 따라 다르다 | Account |
+| 음수 cash | 같은 venue에서도 현금계좌/증거금계좌에 따라 다르다 | Account |
+| `NAV = cash + Σ position value` | 무엇을 바꿔도 성립해야 한다 | 공통 불변식 |
+
+- **왜 이 규칙이 필요한가**: fractional은 **상장의 성질**이고 음수 cash는 **계좌의 성질**이다. 둘 다
+  "허용되는가"라는 같은 모양의 질문이라 규칙 없이는 헷갈린다.
+- **없으면**: 제약이 편한 곳에 붙는다. 그러면 venue를 하나 추가할 때 Account를 고치게 되고 §2.5의
+  주입이 더 이상 순수하지 않다.
+
 ---
 
 ## 3. 시간
@@ -584,6 +606,10 @@ config**가 소유한다. `RunDefinition`에 별도 listing 필드를 두지 않
 
 ## 7. State
 
+> **Account는 자기가 어떤 profile에 쓰이는지 모른다.** "academic Account"나 "KRX Account" 같은 것은 없다.
+> profile 차이는 전부 Exchange에 있고(§6), Account는 **상태 전이의 유효성**만 본다. 같은 Account 구현이
+> academic run과 KRX run에서 그대로 쓰인다.
+
 ### 7.1 Account
 
 ```python
@@ -597,6 +623,32 @@ class Account:
 - mode와 무관하게 같은 cash/position/cost/version/journal/history 구조를 쓴다.
 - `expected_version`으로 optimistic concurrency. 불일치면 mutation 없이 실패.
 - validation 실패 시 **하나도 바꾸지 않는다** (all-or-nothing).
+
+#### `cash >= 0`은 공통 불변식이다 — mode가 아니다
+
+commit 후 cash가 음수면 mutation 없이 실패한다. **모든 mode, 모든 profile에서 동일하다.**
+
+- **왜 mode로 만들지 않나**: 차입을 허용하면서 **차입 비용·유지증거금·강제청산**을 모델링하지 않으면
+  그 mode는 **공짜 돈 버튼**이다. 레버리지를 올릴수록 수익이 선형으로 커지는데 대가가 없다.
+  `UC-REAL-SHORT-001`이 "borrow/locate/collateral/margin/proceeds/recall/fee를 함께 검증해야 한다"고
+  요구하는 것과 같은 논리이며, PRD §13.2가 margin/leverage를 범위 밖으로 둔 것과 일관된다.
+- **gross를 키우는 것과 차입은 다르다.** NAV 100에서 long 2.0 / short 1.0은 공매도 대금이 매수를
+  조달하므로 cash가 정확히 0이 되고 **차입이 없다.** cash가 음수가 되는 것만 차입이다.
+  BAB의 `+1.43 / -0.71`도 cash가 `+0.28`이라 차입이 아니다.
+- 이중 방어: OrderPlanner가 이미 cash clipping을 한다(`UC-COST-003`). 여기까지 오는 것은 intent가
+  명시적으로 과도한 gross를 요구한 경우뿐이고, 그건 조용히 넘어가면 안 된다.
+- **확장 지점**: margin이 범위에 들어오면 §15-3을 먼저 정한다.
+
+#### 유휴자본이 무엇을 버는지는 사용자가 선언한다
+
+`cash`는 **이자를 벌지 않는 numéraire**다. 유휴자본에 수익을 주고 싶으면 §4.4의 derived unit price로
+등록한 자산을 **포지션으로** 보유한다.
+
+$$P_t = P_{t-1}(1 + r_{f,t})$$
+
+- BAB의 `1/\beta` leg 조정 뒤 남는 `+0.28`을 무위험자산으로 보유하면 총수익 − $r_f$가 정확히 BAB가 된다.
+- **왜 cash에 이자를 자동으로 주지 않나**: 그것은 lifecycle cash flow이고 `UC-CASHFLOW-001`이 future다.
+  그리고 조용한 기본값보다 **선언된 포지션**이 낫다 — 무엇을 얼마에 들었는지 lineage에 남는다.
 
 ### 7.2 AccountMode — 하는 일이 하나뿐이다
 
@@ -964,6 +1016,27 @@ Strategy가 `context.calendar`로 판단 시점의 성질을 묻는다(§5.1). "
 
 **미결.** 다만 새는 것이 **데이터가 아니라 스케줄**이라 영향이 작다. 후보: 전체 노출 / 선언된 horizon까지만
 노출 / calendar에도 `available_at`을 적용. 실제 전략이 무엇을 묻는지 관측한 뒤 정한다.
+
+### 15-3. cash를 instrument로 볼 것인가
+
+현재 `cash`는 이자를 벌지 않는 numéraire이고, 이자를 원하면 §4.4의 합성 자산을 포지션으로 보유한다(§7.1).
+즉 **이미 절반은 instrument처럼 다루고 있다.** 전면적으로 바꾸면 모든 것이 포지션이 되고 `NAV = Σ q·p`
+하나로 통일된다.
+
+**지금 바꾸지 않는 이유**
+
+- **shorting과 borrowing이 결합된다.** cash가 instrument면 "음수 cash = cash instrument의 음수 포지션"이므로
+  `SIGNED`가 자동으로 차입을 허용한다. §13.2가 범위 밖으로 둔 것을 공짜로 켜는 셈이다.
+- **cash는 numéraire라서 실제로 특별하다.** instrument로 만들어도 가격이 정의상 1인 특별한 instrument로
+  남는다.
+
+**언제 다시 보나**
+
+- **margin이 범위에 들어올 때.** 그때 차입은 $P_t = P_{t-1}(1 + r_{borrow,t})$인 financing 자산을 공매도하는
+  것으로 표현되고, **차입 비용이 가격 drift에 들어 있어 공짜가 아니게 된다.** 무위험자산 보유와 부호만
+  반대인 대칭 구조다.
+- **multi-currency가 들어올 때.** KRW/USD를 각각 instrument로 두면 FX가 두 instrument의 교환으로 자연히
+  떨어진다. 이때는 cash-as-instrument가 오히려 단순하다.
 
 ---
 

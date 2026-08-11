@@ -312,6 +312,7 @@ ratio           =  0.005606       (gate 기준: 0.5 이하)
 - implementation record를 삭제하거나 소급 재작성.
 - Strategy가 cadence를 소유하도록 바꾸는 시도. PRD §9.8이 현재 설계를 확정했다.
   변경하려면 PRD 개정이 선행되어야 한다.
+  **2026-08-11:** `2026-08-11-1000-strategy-owned-decision-trigger.md`로 대체됨.
 
 ---
 

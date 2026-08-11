@@ -84,6 +84,8 @@ def test_role_views_expose_only_their_authorized_capabilities() -> None:
     strategy_only_capabilities = {
         "artifact",
         "artifact_accessed",
+        "latest_execution_result",
+        "execution_accessed",
         "account_feedback",
         "feedback_accessed",
         "latest_session_performance",
@@ -92,6 +94,16 @@ def test_role_views_expose_only_their_authorized_capabilities() -> None:
         "memory_accessed",
     }
     account_capabilities = {"account_snapshot", "state_accessed"}
+    classified = dataset_capabilities | strategy_only_capabilities | account_capabilities
+
+    # A capability that reaches a role view without being classified here is not
+    # covered by any assertion below, so require the classification to be total.
+    for view_type in (ModelView, ExecutionView, MonitorView, StrategyView):
+        exposed = {name for name in dir(view_type) if not name.startswith("_")}
+        assert exposed <= classified, (
+            f"{view_type.__name__} exposes unclassified capabilities: "
+            f"{sorted(exposed - classified)}"
+        )
 
     for view_type in (ModelView, ExecutionView, MonitorView, StrategyView):
         assert all(hasattr(view_type, capability) for capability in dataset_capabilities)

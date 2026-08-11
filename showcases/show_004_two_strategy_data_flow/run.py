@@ -36,6 +36,7 @@ from qlibx import (
     SourceFormat,
     StockInstrument,
     StrategyInvocation,
+    TriggerContext,
 )
 
 SHOWCASE_ID = "show_004_two_strategy_data_flow"
@@ -44,6 +45,20 @@ KST = ZoneInfo("Asia/Seoul")
 INITIAL_NAV = 100_000_000.0
 SOURCE_START = 20240102
 SOURCE_END = 20240329
+ACADEMIC_CANDIDATE_START = date.fromisoformat("2024-01-30")
+KRX_CANDIDATE_START = date.fromisoformat("2024-01-09")
+DECISION_END = date.fromisoformat("2024-03-22")
+KRX_FLOW_END = date.fromisoformat("2024-03-25")
+
+# Candidate calendar는 price coverage가 아니라 이 showcase가 선언한 KRX session 사실이다.
+DECLARED_MARKET_HOLIDAYS = frozenset(
+    date.fromisoformat(value) for value in ("2024-02-09", "2024-02-12", "2024-03-01")
+)
+DECLARED_SESSION_DATES = tuple(
+    timestamp.date()
+    for timestamp in pd.bdate_range("2024-01-02", "2024-03-29")
+    if timestamp.date() not in DECLARED_MARKET_HOLIDAYS
+)
 
 # 고정 universe와 peer 분류는 데이터에서 추론하지 않는다. 이 선택은 showcase의 연구 가정이다.
 PEER_GROUPS = {
@@ -86,6 +101,51 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_declared_market_coverage(frame: pd.DataFrame) -> None:
+    """Fail if any declared session/universe cell is absent; never shrink the calendar."""
+
+    observed = frame.copy()
+    observed["session"] = pd.to_datetime(observed["session"]).dt.date
+    expected = pd.MultiIndex.from_product(
+        [DECLARED_SESSION_DATES, UNIVERSE],
+        names=("session", "instrument"),
+    )
+    actual = pd.MultiIndex.from_frame(observed[["session", "instrument"]])
+    missing = expected.difference(actual)
+    unexpected_sessions = sorted(set(observed["session"]) - set(DECLARED_SESSION_DATES))
+    if len(missing) or unexpected_sessions:
+        missing_preview = [f"{session}:{instrument}" for session, instrument in missing[:10]]
+        raise RuntimeError(
+            "BOUNDED_MARKET_COVERAGE_INCOMPLETE: "
+            f"missing_count={len(missing)}, missing_preview={missing_preview}, "
+            f"unexpected_sessions={unexpected_sessions}"
+        )
+    if observed["close"].isna().any():
+        raise RuntimeError("BOUNDED_MARKET_COVERAGE_INCOMPLETE: null close")
+
+
+def triggered_candidates(strategy: Any, candidates: tuple[datetime, ...]) -> tuple[datetime, ...]:
+    """Apply one Strategy-owned schedule policy without exposing Clock or data."""
+
+    policy = strategy.trigger()
+    if tuple(policy.requirements()):
+        raise RuntimeError("showcase supports schedule-shaped trigger requirements only")
+    fired_at: list[datetime] = []
+    for index, candidate in enumerate(candidates):
+        decision = policy.evaluate(
+            TriggerContext(
+                candidate_time=candidate,
+                candidate_index=index,
+                fired_at=tuple(fired_at),
+            )
+        )
+        if decision.accesses:
+            raise RuntimeError("schedule-shaped showcase trigger must not access data")
+        if decision.decision == "FIRE":
+            fired_at.append(candidate)
+    return tuple(fired_at)
+
+
 def extract_bounded_market(source: Path, destination: Path) -> pd.DataFrame:
     """실제 DW에서 고정 universe와 기간만 읽어 portable showcase input을 만든다."""
 
@@ -113,16 +173,7 @@ def extract_bounded_market(source: Path, destination: Path) -> pd.DataFrame:
     frame["session"] = pd.to_datetime(frame["session"])
     if frame.duplicated(["session", "instrument"]).any():
         raise RuntimeError("bounded source contains duplicate instrument/session rows")
-    pivot = frame.pivot(index="session", columns="instrument", values="close").sort_index()
-    if tuple(sorted(pivot.columns)) != UNIVERSE:
-        missing = sorted(set(UNIVERSE) - set(pivot.columns))
-        raise RuntimeError(f"bounded source is missing declared instruments: {missing}")
-    complete = pivot.dropna(how="any")
-    if len(complete) < 56:
-        raise RuntimeError(
-            f"at least 56 complete common sessions are required, got {len(complete)}"
-        )
-    frame = frame.loc[frame["session"].isin(complete.index)].copy()
+    validate_declared_market_coverage(frame)
     if (frame["close"] <= 0).any():
         raise RuntimeError("bounded source contains a non-positive close")
 
@@ -238,14 +289,19 @@ def run_academic_flow(
         dataset_id=DATASET_ID,
         peer_groups=PEER_GROUPS,
     )
-    decision_times = tuple(sessions[index] for index in range(20, 56, 5))
+    eligible_candidates = tuple(
+        candidate
+        for candidate in sessions
+        if ACADEMIC_CANDIDATE_START <= candidate.date() <= DECISION_END
+    )
+    fired_candidates = triggered_candidates(strategy, eligible_candidates)
     strategy_artifact_ids: list[str] = []
     portfolio_artifact_ids: list[str] = []
     strategy_results: list[Any] = []
     decision_rows: list[dict[str, Any]] = []
     max_weight_delta = 0.0
 
-    for ordinal, decision_time in enumerate(decision_times, start=1):
+    for ordinal, decision_time in enumerate(fired_candidates, start=1):
         strategy_id, portfolio_id, result = portfolio_artifact(
             project,
             strategy=strategy,
@@ -406,8 +462,12 @@ def run_krx_flow(
             ),
         )
     )
-    decision_times = tuple(sessions[index] for index in range(5, 56, 5))
     strategy_path = Path(__file__).with_name("strategies.py")
+    flow_sessions = tuple(
+        candidate
+        for candidate in sessions
+        if KRX_CANDIDATE_START <= candidate.date() <= KRX_FLOW_END
+    )
     spec = project.daily_spec(
         run_id="showcase-five-session-top-ten-krx-v1",
         strategy_fingerprint=sha256(strategy_path),
@@ -417,8 +477,7 @@ def run_krx_flow(
             initial_cash=INITIAL_NAV,
         ),
         market=DailyMarketBinding(market_dataset_id=DATASET_ID),
-        decision_times=decision_times,
-        session_closes=sessions,
+        session_closes=flow_sessions,
     )
     if tuple(item.instrument_id for item in spec.instruments) != UNIVERSE:
         raise RuntimeError("daily_spec did not freeze the incrementally added instruments")
@@ -431,9 +490,8 @@ def run_krx_flow(
     )
     result = outcome.result
     decision_rows: list[dict[str, Any]] = []
-    for decision_time, strategy_result in zip(
-        decision_times, result.strategy_results, strict=True
-    ):
+    for strategy_result in result.strategy_results:
+        decision_time = strategy_result.evaluation_time
         weights = {item.instrument: float(item.weight) for item in strategy_result.weights}
         if len(weights) != 10 or any(value != 0.1 for value in weights.values()):
             raise RuntimeError("KRX Strategy did not produce ten equal 10% targets")
@@ -515,7 +573,7 @@ def run_krx_flow(
 def run(repo_root: Path) -> dict[str, Any]:
     showcase_root = Path(__file__).resolve().parent
     output_root = showcase_root / "outputs"
-    project_root = output_root / "project"
+    project_root = output_root / "project-trigger-v1"
     bounded_path = project_root / "data" / "two_strategy_market.csv"
     source = repo_root / "data" / "DW" / "fng_stock_daily_prices.csv"
     if not source.is_file():
@@ -529,7 +587,7 @@ def run(repo_root: Path) -> dict[str, Any]:
     if registered is None or registered.query_snapshot is None:
         raise RuntimeError("registered dataset has no immutable query snapshot")
 
-    sessions = tuple(close_at(pd.Timestamp(value)) for value in sorted(bounded["session"].unique()))
+    sessions = tuple(close_at(value) for value in DECLARED_SESSION_DATES)
     price_frame = bounded.copy()
     price_frame["session"] = pd.to_datetime(price_frame["session"])
     prices = price_frame.pivot(
@@ -545,7 +603,7 @@ def run(repo_root: Path) -> dict[str, Any]:
     summary = {
         "showcase_id": SHOWCASE_ID,
         "status": "complete",
-        "verified_against": f"qlibx-{version('qlibx')}+implementations-061-062-063-064-065",
+        "verified_against": f"qlibx-{version('qlibx')}+implementations-061-through-066",
         "dataset": {
             "dataset_id": DATASET_ID,
             "source": str(source.relative_to(repo_root).as_posix()),
@@ -600,7 +658,10 @@ def run(repo_root: Path) -> dict[str, Any]:
             "quote -> fractional signed Fill -> academic checkpoint"
         ),
         "[2K] KRX: add_instrument x20 -> set_exchange -> daily_spec가 실행 환경을 값으로 동결",
-        "[3K] KRX: 6-row PIT history -> 5-session return rank -> top 10 x 10% DecisionIntent",
+        (
+            "[3K] KRX: Strategy EveryNSessions(5) -> FIRE/SKIP -> "
+            "6-row PIT history -> top 10 DecisionIntent"
+        ),
         (
             "[4K] KRX: next-close preparation -> KrxExchange -> integer Fill/cost -> "
             "Account commit -> mark/performance/checkpoint"

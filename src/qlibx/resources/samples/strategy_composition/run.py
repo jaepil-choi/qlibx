@@ -65,7 +65,6 @@ def daily_spec(
     account_id: str,
     strategy_fingerprint: str,
     *,
-    decision_times: tuple[datetime, ...],
     session_closes: tuple[datetime, ...],
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = (),
 ) -> DailySimulationSpec:
@@ -101,7 +100,6 @@ def daily_spec(
             ),
         ),
         market=DailyMarketBinding(market_dataset_id="sample-composition-market"),
-        decision_times=decision_times,
         session_closes=session_closes,
         artifact_bindings=artifact_bindings,
     )
@@ -150,7 +148,6 @@ def main(project_root: Path) -> dict[str, object]:
     producer_source_hash = hashlib.sha256((sample_dir / "producer.py").read_bytes()).hexdigest()
     producer_a = CountingPathProducer("a", "A000001")
     producer_b = CountingPathProducer("b", "A000002")
-    source_decisions = (at(2), at(4))
     source_sessions = (at(2), at(3), at(4), at(5))
     source_a = require_complete(
         project.run_daily(
@@ -159,7 +156,6 @@ def main(project_root: Path) -> dict[str, object]:
                 "sample-composition-source-a",
                 "sample-source-account-a",
                 f"{producer_source_hash}:a",
-                decision_times=source_decisions,
                 session_closes=source_sessions,
             ),
         ),
@@ -172,7 +168,6 @@ def main(project_root: Path) -> dict[str, object]:
                 "sample-composition-source-b",
                 "sample-source-account-b",
                 f"{producer_source_hash}:b",
-                decision_times=source_decisions,
                 session_closes=source_sessions,
             ),
         ),
@@ -240,7 +235,6 @@ def main(project_root: Path) -> dict[str, object]:
                 "sample-composition-downstream-b",
                 "sample-downstream-account-b",
                 "sample-frozen-ensemble-consumer-v1",
-                decision_times=(at(8), at(10)),
                 session_closes=(at(8), at(9), at(10), at(11)),
                 artifact_bindings=(binding,),
             ),

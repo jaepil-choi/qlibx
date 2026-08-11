@@ -16,6 +16,8 @@ from qlibx.account import Account, StrategyMemoryStore
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
+    EveryCandidate,
+    EveryNSessions,
     StrategyDraft,
     WeightEntry,
 )
@@ -43,8 +45,14 @@ from tests.acceptance.real_dw_support import (
 class TargetStrategy:
     strategy_id = "tests.target"
 
+    def __init__(self, cadence: int = 2) -> None:
+        self._cadence = cadence
+
     def requirements(self):
         return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=self._cadence)
 
     def run(self, view):
         return StrategyDraft(
@@ -63,6 +71,9 @@ class SwitchingTargetStrategy:
 
     def requirements(self):
         return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view):
         self.calls += 1
@@ -102,6 +113,9 @@ class RepeatedMemoryHoldStrategy:
 
     def requirements(self):
         return ()
+
+    def trigger(self) -> EveryCandidate:
+        return EveryCandidate()
 
     def run(self, view):
         self.calls += 1
@@ -275,7 +289,6 @@ def test_feedback_window_fails_before_strategy_when_limit_is_too_small(
         DailyRunRequest(
             run_id="bounded-feedback",
             config_fingerprint="bounded-feedback-v1",
-            decision_times=(sessions[0], sessions[2]),
             session_closes=sessions,
         ),
     )
@@ -314,7 +327,6 @@ def test_rebalance_sizes_from_current_execution_prices(
         DailyRunRequest(
             run_id="switching-target",
             config_fingerprint="switching-target-v1",
-            decision_times=(sessions[0], sessions[2]),
             session_closes=sessions,
         ),
     )
@@ -359,7 +371,6 @@ def test_daily_profile_rejects_impact_without_total_market_volume(
         DailyRunRequest(
             run_id="daily-impact-missing-volume",
             config_fingerprint="daily-impact-v1",
-            decision_times=(sessions[0],),
             session_closes=sessions,
         ),
     )
@@ -417,7 +428,6 @@ def test_first_decision_can_initialize_memory_without_feedback(
         DailyRunRequest(
             run_id="initial-memory",
             config_fingerprint="initial-memory-v1",
-            decision_times=(sessions[0],),
             session_closes=sessions,
         ),
     )
@@ -464,7 +474,6 @@ def test_memory_update_after_initialization_still_requires_new_feedback(
         DailyRunRequest(
             run_id="repeated-memory",
             config_fingerprint="repeated-memory-v1",
-            decision_times=sessions,
             session_closes=sessions,
         ),
     )
@@ -499,7 +508,6 @@ def test_post_fill_publication_failure_reports_committed_account(
         DailyRunRequest(
             run_id="post-commit-publication-failure",
             config_fingerprint="post-commit-v1",
-            decision_times=(sessions[0],),
             session_closes=sessions,
         ),
     )
@@ -550,7 +558,6 @@ def test_uc_exec_001_isolates_frozen_daily_children(
             DailyRunRequest(
                 run_id=run_id,
                 config_fingerprint=f"{run_id}.config",
-                decision_times=(),
                 session_closes=child_session,
             ),
         )
@@ -794,7 +801,6 @@ def test_open_profile_without_schedule_fails_before_strategy_or_state_mutation(
         DailyRunRequest(
             run_id="missing-open-schedule",
             config_fingerprint="missing-open-schedule.v1",
-            decision_times=(close_at(2024, 1, 2),),
             session_closes=(close_at(2024, 1, 2), close_at(2024, 1, 3)),
         ),
     )
@@ -829,7 +835,6 @@ def test_next_open_recovery_records_the_exact_pending_execution_time(
                 valuation_price_role="valuation_price",
             ),
             execution_timing="next_session_open",
-            decision_times=(close_at(2024, 1, 2),),
             session_closes=(close_at(2024, 1, 2), close_at(2024, 1, 3)),
             session_opens=(session_open,),
         ),
@@ -863,7 +868,6 @@ def test_checkpoint_round_trip_preserves_account_and_memory_state(
         real_dw_case,
         run_id="resume-phase-1",
         sessions=phase_one_sessions,
-        decision_times=(phase_one_sessions[0],),
     )
     restored_account = Account.from_checkpoint(phase_one.result.checkpoint.account_checkpoint)
     restored_memory = StrategyMemoryStore.from_checkpoint(
@@ -874,7 +878,6 @@ def test_checkpoint_round_trip_preserves_account_and_memory_state(
         real_dw_case,
         run_id="resume-phase-2",
         sessions=phase_two_sessions,
-        decision_times=(phase_two_sessions[0],),
         account=restored_account,
         memory=restored_memory,
     )

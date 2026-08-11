@@ -116,7 +116,6 @@ def test_top_level_exports_construct_daily_and_monitoring_specs() -> None:
         instruments=instruments,
         exchange=exchange,
         market=DailyMarketBinding(market_dataset_id="market"),
-        decision_times=(session_close,),
         session_closes=(session_close,),
     )
     monitoring = ConstraintMonitoringSpec(
@@ -130,6 +129,7 @@ def test_top_level_exports_construct_daily_and_monitoring_specs() -> None:
     )
 
     assert daily.instruments == instruments
+    assert daily.spec_schema_version == 2
     assert monitoring.to_request().config_fingerprint == (
         monitoring.frozen_config_fingerprint()
     )

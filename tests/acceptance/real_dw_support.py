@@ -10,7 +10,13 @@ import duckdb
 
 from qlibx import OutcomeStatus, QlibxProject
 from qlibx.account import Account, StrategyMemoryStore
-from qlibx.contracts import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
+from qlibx.contracts import (
+    BudgetMode,
+    DecisionAction,
+    EveryNSessions,
+    StrategyDraft,
+    WeightEntry,
+)
 from qlibx.data import AvailableAtField, ComponentRequirement, DatasetRegistration, SourceFormat
 from qlibx.execution import (
     CostRule,
@@ -589,6 +595,9 @@ class ActualStateMomentumStrategy:
             ),
         )
 
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
+
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
@@ -768,12 +777,10 @@ def run_real_daily_flow(
     *,
     run_id: str = "real-dw-daily-2024-01",
     sessions: tuple[datetime, ...] | None = None,
-    decision_times: tuple[datetime, ...] | None = None,
     account: Account | None = None,
     memory: StrategyMemoryStore | None = None,
 ):
     selected_sessions = sessions or tuple(close_at(2024, 1, day) for day in (2, 3, 4, 5))
-    selected_decisions = decision_times or (selected_sessions[0], selected_sessions[2])
     flow = DailyExecutionFlow(
         clock=BacktestClock(selected_sessions[0]),
         registry=case.project.registry_snapshot(),
@@ -792,7 +799,6 @@ def run_real_daily_flow(
         DailyRunRequest(
             run_id=run_id,
             config_fingerprint="real-dw-actual-state-momentum-v1",
-            decision_times=selected_decisions,
             session_closes=selected_sessions,
         ),
     )

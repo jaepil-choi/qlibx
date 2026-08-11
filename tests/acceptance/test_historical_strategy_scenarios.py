@@ -10,6 +10,7 @@ from qlibx.account import Account, StrategyMemoryStore
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
+    EveryNSessions,
     StrategyDraft,
     WeightEntry,
 )
@@ -169,6 +170,9 @@ class PeerMomentumEnhancedIndexStrategy:
                 dataset_id="peer-momentum-benchmark",
             ),
         )
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
@@ -339,7 +343,6 @@ def _run(case: RealDwProject, run_id: str):
         DailyRunRequest(
             run_id=run_id,
             config_fingerprint="peer-momentum-enhanced-index-v1",
-            decision_times=(sessions[0], sessions[2]),
             session_closes=sessions,
         ),
     )

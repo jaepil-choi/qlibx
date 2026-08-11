@@ -78,6 +78,7 @@ def _validate_schedule(
 
 def _base_config_payload(
     *,
+    spec_schema_version: int,
     account: DailyAccountSeed,
     instruments: tuple[ExecutableInstrument, ...],
     exchange: KrxExchangeConfig,
@@ -86,7 +87,7 @@ def _base_config_payload(
     constraint_policy: MvpConstraintPolicy | None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
-        "spec_schema_version": 1,
+        "spec_schema_version": spec_schema_version,
         "account": account.model_dump(mode="json"),
         "instruments": [item.model_dump(mode="json") for item in instruments],
         "exchange": exchange.model_dump(mode="json"),
@@ -102,7 +103,7 @@ def _base_config_payload(
 class DailySimulationSpec(QlibxModel):
     """Frozen public input for supported next-session close or open simulation."""
 
-    spec_schema_version: Literal[1] = 1
+    spec_schema_version: Literal[2] = 2
     run_id: str = Field(min_length=1)
     strategy_fingerprint: str = Field(min_length=1)
     account: DailyAccountSeed
@@ -110,7 +111,6 @@ class DailySimulationSpec(QlibxModel):
     exchange: KrxExchangeConfig
     market: DailyMarketBinding
     execution_timing: ExecutionTiming = "next_session_close"
-    decision_times: tuple[datetime, ...]
     session_closes: tuple[datetime, ...] = Field(min_length=1)
     session_opens: tuple[datetime, ...] = ()
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
@@ -127,9 +127,6 @@ class DailySimulationSpec(QlibxModel):
         if len(binding_roles) != len(set(binding_roles)):
             raise ValueError("daily Strategy artifact binding roles must be unique")
 
-        decisions = tuple(require_aware(value) for value in self.decision_times)
-        if decisions != tuple(sorted(set(decisions))):
-            raise ValueError("decision_times must be unique and sorted")
         _validate_schedule(
             session_closes=self.session_closes,
             session_opens=self.session_opens,
@@ -141,6 +138,7 @@ class DailySimulationSpec(QlibxModel):
         """Hash economic configuration separately from run schedule and run identity."""
 
         payload = _base_config_payload(
+            spec_schema_version=self.spec_schema_version,
             account=self.account,
             instruments=self.instruments,
             exchange=self.exchange,
@@ -201,6 +199,7 @@ class FrozenDailyExecutionSpec(QlibxModel):
 
     def frozen_config_fingerprint(self) -> str:
         payload = _base_config_payload(
+            spec_schema_version=self.spec_schema_version,
             account=self.account,
             instruments=self.instruments,
             exchange=self.exchange,

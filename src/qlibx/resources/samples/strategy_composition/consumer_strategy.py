@@ -1,5 +1,6 @@
 from qlibx import (
     DecisionAction,
+    EveryNSessions,
     StrategyArtifactRequirement,
     StrategyDraft,
     StrategyExtensionSpec,
@@ -24,6 +25,9 @@ class FrozenEnsembleConsumer:
                 artifact_schema_version=3,
             ),
         )
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view: object) -> StrategyDraft:
         source = view.artifact(  # type: ignore[attr-defined]

@@ -1428,6 +1428,11 @@ actual position을 그대로 관찰할지 여부는 Strategy와 execution policy
 Calendar, data arrival, fill feedback 또는 user event가 decision을 trigger할 수 있다. Run 종료 시 result와 failure
 evidence를 확정해야 하지만, 특정 event class나 callback method는 PRD가 정하지 않는다.
 
+Current daily profile에서는 user가 invocation 전에 decision cadence를 명시하고, Strategy는 각 decision time에
+`hold` 또는 새로운 target/intent를 선택한다. Invocation이 시작된 뒤 Strategy가 과거 cadence를 바꾸거나 시간을
+소급해서는 안 된다. 새로운 trigger 종류는 product use case와 time semantics가 승인될 때 추가하며, 구체 scheduling
+API와 trigger representation은 architecture가 정한다.
+
 ### 9.9 Parent/child research
 
 Child research는 parent run의 frozen input과 artifact를 재사용해 대안을 평가하되 parent state를 바꾸지 않는다.

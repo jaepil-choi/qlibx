@@ -172,7 +172,6 @@ class QlibxProject:
         strategy_fingerprint: str,
         account: DailyAccountSeed,
         market: DailyMarketBinding,
-        decision_times: tuple[datetime, ...],
         session_closes: tuple[datetime, ...],
         session_opens: tuple[datetime, ...] = (),
         execution_timing: ExecutionTiming = "next_session_close",
@@ -198,7 +197,6 @@ class QlibxProject:
             exchange=self._exchange,
             market=market,
             execution_timing=execution_timing,
-            decision_times=decision_times,
             session_closes=session_closes,
             session_opens=session_opens,
             artifact_bindings=artifact_bindings,
@@ -639,7 +637,6 @@ class QlibxProject:
             DailyRunRequest(
                 run_id=spec.run_id,
                 config_fingerprint=spec.frozen_config_fingerprint(),
-                decision_times=(),
                 session_closes=spec.session_closes,
                 session_opens=spec.session_opens,
             ),
@@ -675,7 +672,7 @@ class QlibxProject:
             initial_cash=spec.account.initial_cash,
             instrument_ids=frozenset(item.instrument_id for item in spec.instruments),
         )
-        first_event = min((*spec.decision_times, *spec.session_closes, *spec.session_opens))
+        first_event = min((*spec.session_closes, *spec.session_opens))
         flow = DailyExecutionFlow(
             clock=BacktestClock(first_event),
             registry=self.registry_snapshot(),
@@ -692,7 +689,6 @@ class QlibxProject:
             DailyRunRequest(
                 run_id=spec.run_id,
                 config_fingerprint=effective_fingerprint,
-                decision_times=spec.decision_times,
                 session_closes=spec.session_closes,
                 session_opens=spec.session_opens,
                 artifact_bindings=spec.artifact_bindings,

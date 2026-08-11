@@ -34,6 +34,7 @@ future pseudocode는 구현된 API가 아니다.
 | artifact payload | **current:** typed `QlibxModel` payload는 JSON이고 DuckDB는 catalog/index다. 단순하고 inspectable하지만 큰 matrix에는 비효율적이다 | Parquet payload backend는 tabular artifact에 효율적이지만 schema split과 backend complexity가 증가한다 | **현재 actual 채택.** Parquet payload는 future backend다 | 대형 matrix benchmark와 JSON/Parquet 간 atomic publication·compatibility 계약이 준비될 때 추가한다 |
 | generic ports | **current:** `BaseExchange[RequestT, ResultT]`와 `ExecutionPreparation[IntentT, ContextT, RequestT, EvidenceT]`가 공통 lifecycle만 정의하고 KRX/Academic concrete semantics는 분리한다 | 대부분의 추가 범용 port는 단일 구현에서 speculative하다 | **actual 채택.** Exchange와 preparation만 검증된 두 구현 경계에서 generic화했다 | `Operation`/publisher/loader protocol은 독립 구현 또는 test double이 같은 계약을 소비할 때만 추출한다 |
 | execution convention | **current:** `NextSessionCloseExecutor`와 `NextSessionOpenExecutor`가 독립 schedule을 만들고 `DailyExecutionFlow`가 profile의 execution-price role로 size/match한다. `execute_frozen_daily()`는 exact parent를 격리된 child Account에서 실행한다 | 별도 `FillConvention` class는 세 번째 가격 선택 구현에 유리하지만 현재 role field로 schedule/price 축이 이미 분리돼 있어 class hierarchy는 이르다 | **public daily close/open actual 채택.** explicit event calendar와 PIT price binding을 요구한다 | intraday VWAP/order-book profile이 공통 계산 behavior를 요구할 때 protocol을 추출한다 |
+| decision cadence | **current:** Strategy가 optional `trigger()`로 schedule-shaped `TriggerPolicy`를 고르고, `DailyExecutionFlow`가 session candidate마다 순수 평가한다. 미선언 Strategy는 `EveryCandidate`, built-in periodic policy는 `EveryNSessions`다 | invocation spec이 exact decision timestamp를 소유하면 replay 입력은 직접적이지만 경제적 cadence가 orchestration에 분산된다 | **Strategy-owned declaration + Flow-owned enforcement 채택.** Policy fingerprint를 effective config/recovery identity와 FIRE result dependency에 넣고 SKIP은 run trace에만 기록한다 | data/fill 조건이 실제 current scope가 될 때 별도 PIT `TriggerView`와 failure/access lineage를 설계한다 |
 | materialization | **current:** public direct `ResearchModel`과 `QlibxProject.materialize()`가 requirement-first execution을 제공하고, built-in `ForwardReturnLabelModel`이 PIT-bounded typed label artifact를 만든다. Scheduler와 Model registry는 없다 | scheduled rolling/expanding materialization은 반복 실행에는 유리하지만 lifecycle·cache invalidation 계약이 추가된다 | **direct operation만 actual 채택.** optional boundary와 no-look-ahead를 먼저 닫고 scheduling은 과장하지 않는다 | 반복 materialization cadence와 durable model registration 수요가 검증될 때 scheduler/registry를 추가한다 |
 | daily orchestration | **current:** 큰 `DailyExecutionFlow`가 recovery와 event ordering을 한곳에서 보존한다. 이해·변경 비용이 크다 | cohesive state machine/phase extraction은 유지보수에 유리하지만 기계적 파일 분리는 control flow를 숨긴다 | **이번에는 actual 유지.** 기술 부채를 인정한다 | 둘 이상의 phase가 독립 테스트·재사용 경계를 갖거나 변경 충돌이 반복될 때 state machine을 추출한다 |
 
@@ -469,6 +470,7 @@ validation을 모두 채워야 한다. Event 이름이나 global stage enum을 �
 | **I10** | Account의 모든 held Instrument는 frozen registry에 등록되어 있고, Strategy tradable universe와 무관하게 valuation set에 포함된다 | registration + mixed-instrument fixture |
 | **I11** | Account change는 event ID 기준 idempotent하고 `expected_version` CAS와 batch atomicity를 지킨다. 실패한 batch는 cash, Position, journal 어느 것도 바꾸지 않는다 | duplicate/stale/partial-failure fixture |
 | **I12** | 모든 체결과 valuation은 수량 × 가격으로 표현된다. Return-native execution 경로는 존재하지 않으며 portfolio return, NAV, PnL과 turnover는 Account를 거친 결과에서만 산출된다 | analysis operation의 출력 metric 검사 + return-only source의 execution 거부 fixture |
+| **I13** | Trigger 평가는 순수 함수다. Schedule-shaped current policy의 입력은 candidate event와 이번 run의 FIRE 이력뿐이며 Account/Memory를 읽거나 쓰지 않는다 | Clock/data 없는 동일 입력 반복 평가 + Flow trace/recovery identity fixture |
 
 **I1**이 가장 자주 깨진다. Backtest에서 wall clock을 읽는 것은 조용한 재현성 파괴다.
 
@@ -519,8 +521,9 @@ class Clock(Protocol):
     def is_finished(self) -> bool: ...
 ```
 
-Timer 등록 API(`set_timer`)는 두지 않는다. 반복 schedule은 Clock의 기능이 아니라 frozen spec이 소유하며
-(`DailySimulationSpec.decision_times`), Flow가 그 목록을 `schedule()`로 등록한다. Clock은 반복 규칙을 모른다.
+Timer 등록 API(`set_timer`)는 두지 않는다. Flow가 frozen session calendar의 candidate마다 callback을 등록하고,
+Strategy가 고른 schedule-shaped `TriggerPolicy`를 callback 선두에서 평가한다. Clock은 반복 규칙이나 Strategy를
+모르며 event 시각·priority·callback reference만 정렬한다.
 
 `BacktestClock`은 `advance_to(timestamp)`로 명시 전진하고 `require_aware()`가 naive timestamp를 거부한다.
 
@@ -2446,12 +2449,15 @@ callback에서 `LookthroughStrategy`가 actual AccountSnapshot을 다시 consume
 
 ### 13.11 Pluggable execution과 monitoring — UC-EXEC-001, UC-EXEC-002, UC-EXEC-003
 
-하나의 immutable DecisionIntent를 daily profile이 참조한다. Current cadence authority는 invocation에 frozen된
-`DailySimulationSpec.decision_times`이며 Strategy가 schedule을 등록하거나 Clock을 조작하지 않는다. Entry/exit 조건은
-같은 callback의 `HOLD`/`TARGET`으로 표현한다. Current `NextSessionCloseExecutor`와
+하나의 immutable DecisionIntent를 daily profile이 참조한다. Current cadence policy는 Strategy가 optional
+`trigger()`로 선언하고 `DailyExecutionFlow`가 frozen session candidate에 적용한다. Strategy는 Clock을 조작하거나
+자기 callback을 호출하지 않는다. `EveryCandidate`와 `EveryNSessions`만 built-in current policy이며 data-conditional
+trigger와 `TriggerView`는 current contract가 아니다. SKIP은 failure나 개별 artifact가 아니라 deterministic run trace이고,
+FIRE가 만든 StrategyResult는 policy fingerprint를 dependency로 보존한다. Entry/exit 조건은 같은 callback의
+`HOLD`/`TARGET`으로 표현한다. Current `NextSessionCloseExecutor`와
 `NextSessionOpenExecutor`는 다음 eligible event를 만들고, `DailyExecutionFlow`가 profile의 execution-price role로
 가격을 resolve해 match한 뒤 원금·cost를 child cash에 반영한다(`UC-EXEC-001`, `UC-ALPHA-CHILD-001`). 별도
-`TriggerPolicy`, generic stage list 또는 shared runtime journal은 current contract가 아니다.
+generic stage list 또는 shared runtime journal은 current contract가 아니다.
 
 Current flow는 match 직전에 concrete `ExecutionPreparation`을 호출하고 selected `BaseExchange`의 typed result를 Flow가
 Account에 commit한다. `StrategyView.latest_execution_result()`는 직전 execution artifact의 requested/dealt/reason을
@@ -2888,6 +2894,10 @@ execution 경로의 부재를 테스트 가능한 불변식으로 고정했다.
 **Exchange.** Generic abstract `BaseExchange[RequestT, ResultT]`는 stable ID, config fingerprint, immutable batch request, typed outcome과 Account/Memory non-mutation만 공유한다. `KrxExchange` physical flow와 `AcademicExchange` hypothetical flow는 request/result 및 state semantics를 분리 유지한다. (이 결정 당시에는 common base가 없었고, 2026-08-11 sync 시점에는 구현되어 있다.)
 
 **Data/feedback.** Lookback은 `ComponentRequirement`에 exact `rows` 또는 `calendar`로 선언하고 Store query까지 관통시킨다. Daily cadence는 frozen `decision_times`가 소유한다. 다음 Strategy input은 cursor stream 대신 `latest_execution_result()` 한 건으로 제한한다. 이 결정들은 PRD readiness gap과 `docs/current-support-map.md`, `docs/module-map.md`에 current/target을 나누어 기록했다.
+
+**2026-08-11 superseded note.** 위 paragraph의 frozen `decision_times` cadence 판단과 Runtime paragraph의
+`TriggerPolicy` 배제는 strategy-owned schedule-shaped trigger 구현으로 대체됐다. Generic scheduler/journal과
+data-conditional trigger 배제는 유지한다. 현행 normative contract는 상단 alignment 표, §4 I13, §5와 §13.11이다.
 
 ### 2026-08-09 — Installed frozen Strategy composition closure
 

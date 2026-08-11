@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from pydantic import Field, model_validator
 
 from qlibx.contracts.artifacts import StrategyArtifactBinding, StrategyArtifactRequirement
+from qlibx.contracts.trigger import TriggerPolicy
 from qlibx.data import ComponentRequirement
 from qlibx.domain import BudgetMode
 from qlibx.models import QlibxModel
@@ -244,3 +245,9 @@ class StrategyOperation(Protocol):
 
 class ArtifactAwareStrategyOperation(StrategyOperation, Protocol):
     def artifact_requirements(self) -> tuple[StrategyArtifactRequirement, ...]: ...
+
+
+class TriggerAwareStrategyOperation(StrategyOperation, Protocol):
+    """Opt-in Strategy surface for declaring decision cadence."""
+
+    def trigger(self) -> TriggerPolicy: ...

@@ -31,10 +31,13 @@ from qlibx.analysis import (
 )
 from qlibx.contracts import (
     DecisionAction,
+    EveryCandidate,
     StrategyArtifactBinding,
     StrategyInvocation,
     StrategyOperation,
     StrategyResult,
+    TriggerContext,
+    TriggerPolicy,
 )
 from qlibx.data import (
     ComponentRequirement,
@@ -266,18 +269,14 @@ class DailyExecutionProfile(QlibxModel):
 class DailyRunRequest(QlibxModel):
     run_id: str = Field(min_length=1)
     config_fingerprint: str = Field(min_length=1)
-    decision_times: tuple[datetime, ...]
     session_closes: tuple[datetime, ...]
     session_opens: tuple[datetime, ...] = ()
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
 
     @model_validator(mode="after")
     def validate_schedule(self) -> "DailyRunRequest":
-        decisions = tuple(require_aware(value) for value in self.decision_times)
         sessions = tuple(require_aware(value) for value in self.session_closes)
         opens = tuple(require_aware(value) for value in self.session_opens)
-        if decisions != tuple(sorted(set(decisions))):
-            raise ValueError("decision_times must be unique and sorted")
         if sessions != tuple(sorted(set(sessions))):
             raise ValueError("session_closes must be unique and sorted")
         if not sessions:
@@ -481,6 +480,11 @@ class DailyExecutionFlow:
         )
         self._request: DailyRunRequest | None = None
         self._strategy: StrategyOperation | None = None
+        self._trigger_policy: TriggerPolicy | None = None
+        self._trigger_policy_fingerprint = ""
+        self._fired_at: list[datetime] = []
+        self._candidate_indices: dict[datetime, int] = {}
+        self._config_fingerprint = ""
         self._executor: NextSessionCloseExecutor | NextSessionOpenExecutor | None = None
         self._strategy_results: list[StrategyResultPayload] = []
         self._intents: list[DecisionIntent] = []
@@ -510,7 +514,7 @@ class DailyExecutionFlow:
     ) -> OperationOutcome:
         self._prepare(request, strategy=strategy, resume=resume)
         if not self._errors:
-            for timestamp in request.decision_times:
+            for timestamp in request.session_closes:
                 normalized = require_aware(timestamp)
                 event = Event("DECISION", normalized, DECISION_PRIORITY)
                 if self._should_schedule(event):
@@ -591,6 +595,52 @@ class DailyExecutionFlow:
             raise RuntimeError("DailyExecutionFlow instances are single-use")
         self._request = request
         self._strategy = strategy
+        self._config_fingerprint = request.config_fingerprint
+        if strategy is not None:
+            try:
+                trigger_method = getattr(strategy, "trigger", None)
+                if trigger_method is None:
+                    policy: TriggerPolicy = EveryCandidate()
+                else:
+                    if not callable(trigger_method):
+                        raise TypeError("Strategy trigger must be callable")
+                    policy = trigger_method()
+                if not isinstance(policy.policy_id, str) or not policy.policy_id:
+                    raise TypeError("TriggerPolicy.policy_id must be a non-empty string")
+                requirements = tuple(policy.requirements())
+                if requirements:
+                    raise ValueError(
+                        "schedule-shaped TriggerPolicy requirements must be empty"
+                    )
+                policy_fingerprint = policy.frozen_config_fingerprint()
+                if (
+                    not isinstance(policy_fingerprint, str)
+                    or len(policy_fingerprint) != 64
+                    or any(character not in "0123456789abcdef" for character in policy_fingerprint)
+                ):
+                    raise TypeError(
+                        "TriggerPolicy.frozen_config_fingerprint() must return lowercase SHA-256"
+                    )
+            except Exception as exc:
+                self._fail(
+                    Event("DECISION", self._clock.now, DECISION_PRIORITY),
+                    "decision.trigger.contract",
+                    "STRATEGY_TRIGGER_INVALID",
+                    context={
+                        "exception": type(exc).__name__,
+                        "message": str(exc)[:500],
+                    },
+                )
+                return
+            self._trigger_policy = policy
+            self._trigger_policy_fingerprint = policy_fingerprint
+            self._config_fingerprint = self._fingerprint(
+                f"{request.config_fingerprint}|trigger:{policy_fingerprint}"
+            )
+            self._candidate_indices = {
+                require_aware(timestamp): index
+                for index, timestamp in enumerate(request.session_closes)
+            }
         self._request_fingerprint = self._fingerprint(request.compatibility_json())
         self._profile_fingerprint = self._fingerprint(self._profile.compatibility_json())
         self._registry_fingerprint = self._fingerprint(
@@ -604,7 +654,7 @@ class DailyExecutionFlow:
             identity=DailyRecoveryIdentity(
                 run_id=request.run_id,
                 request_fingerprint=self._request_fingerprint,
-                config_fingerprint=request.config_fingerprint,
+                config_fingerprint=self._config_fingerprint,
                 profile_fingerprint=self._profile_fingerprint,
                 registry_fingerprint=self._registry_fingerprint,
                 strategy_id=strategy.strategy_id if strategy is not None else None,
@@ -693,7 +743,7 @@ class DailyExecutionFlow:
         checkpoint = SimulationCheckpoint(
             run_id=request.run_id,
             request_fingerprint=self._request_fingerprint,
-            config_fingerprint=request.config_fingerprint,
+            config_fingerprint=self._config_fingerprint,
             profile_fingerprint=self._profile_fingerprint,
             registry_fingerprint=self._registry_fingerprint,
             strategy_id=self._strategy.strategy_id if self._strategy is not None else None,
@@ -780,13 +830,47 @@ class DailyExecutionFlow:
         assert self._request is not None
         assert self._strategy is not None
         assert self._executor is not None
+        assert self._trigger_policy is not None
+        try:
+            trigger = self._trigger_policy.evaluate(
+                TriggerContext(
+                    candidate_time=event.ts,
+                    candidate_index=self._candidate_indices[event.ts],
+                    fired_at=tuple(self._fired_at),
+                )
+            )
+            if trigger.policy_id != self._trigger_policy.policy_id:
+                raise ValueError("TriggerDecision policy_id does not match its policy")
+            if trigger.candidate_time != event.ts:
+                raise ValueError("TriggerDecision candidate_time does not match its event")
+            if trigger.accesses:
+                raise ValueError("schedule-shaped TriggerPolicy must not report data accesses")
+        except Exception as exc:
+            self._fail(
+                event,
+                "decision.trigger.evaluate",
+                "TRIGGER_EVALUATION_FAILED",
+                context={
+                    "policy_id": self._trigger_policy.policy_id,
+                    "exception": type(exc).__name__,
+                    "message": str(exc)[:500],
+                },
+            )
+            return
+        self._trace.append(
+            f"{event.ts.isoformat()}|TRIGGER|{self._trigger_policy_fingerprint}|"
+            f"{trigger.decision}|{trigger.reason}"
+        )
+        if trigger.decision == "SKIP":
+            return
+        self._fired_at.append(event.ts)
         decision_id = (
             f"{self._request.run_id}:decision:{event.ts.isoformat().replace('+00:00', 'Z')}"
         )
         invocation = StrategyInvocation(
             invocation_id=decision_id,
             evaluation_time=event.ts,
-            config_fingerprint=self._request.config_fingerprint,
+            config_fingerprint=self._config_fingerprint,
             artifact_bindings=self._request.artifact_bindings,
         )
         account_state = self._account.snapshot(evaluation_time=event.ts)
@@ -836,6 +920,13 @@ class DailyExecutionFlow:
             ),
             memory_state=memory_state,
             execution_inputs=self._execution_inputs_for_decision(event.ts),
+            additional_dependencies=(
+                DependencyEdge(
+                    dependency_kind="trigger",
+                    dependency_id=self._trigger_policy_fingerprint,
+                    consumer_role="decision_cadence",
+                ),
+            ),
         )
         if outcome.status is not OutcomeStatus.COMPLETE:
             self._errors.extend(outcome.errors)
@@ -2012,6 +2103,27 @@ class DailyExecutionFlow:
         self._trace = list(restored.event_trace)
         self._completed_decisions = list(restored.completed_decision_ids)
         self._pending_executions = restored_pending
+        fired_decision_ids = {
+            *restored.completed_decision_ids,
+            *(pending.decision_id for pending in restored.pending_executions),
+        }
+        decision_prefix = f"{self._request.run_id}:decision:"
+        try:
+            self._fired_at = sorted(
+                datetime.fromisoformat(
+                    decision_id.removeprefix(decision_prefix).replace("Z", "+00:00")
+                )
+                for decision_id in fired_decision_ids
+                if decision_id.startswith(decision_prefix)
+            )
+        except ValueError as exc:
+            self._fail(
+                resume_event,
+                "resume.chain",
+                "RECOVERY_TRIGGER_HISTORY_INVALID",
+                context={"message": str(exc)[:500]},
+            )
+            return
         self._resume_position = restored.resume_position
         publication_models: dict[str, type[QlibxModel]] = {
             "execution_result": ExecutionEvidence,

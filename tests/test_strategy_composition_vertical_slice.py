@@ -15,6 +15,7 @@ from qlibx import (
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
+    EveryNSessions,
     StrategyDraft,
     StrategyResult,
     WeightEntry,
@@ -38,6 +39,9 @@ class CountingPathProducer:
 
     def requirements(self) -> tuple[object, ...]:
         return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
@@ -140,7 +144,6 @@ def daily_spec(run_id: str, account_id: str, **updates: object) -> DailySimulati
             ),
         ),
         "market": DailyMarketBinding(market_dataset_id="composition-market"),
-        "decision_times": (at(2), at(4)),
         "session_closes": (at(2), at(3), at(4), at(5)),
     }
     payload.update(updates)
@@ -240,7 +243,7 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
     consumer = extension_root / "frozen_ensemble_consumer.py"
     consumer.write_text(
         "from qlibx import (\n"
-        "    DecisionAction, StrategyArtifactRequirement, StrategyDraft,\n"
+        "    DecisionAction, EveryNSessions, StrategyArtifactRequirement, StrategyDraft,\n"
         "    StrategyExtensionSpec, StrategyResult,\n"
         ")\n\n"
         "STRATEGY_SPEC = StrategyExtensionSpec(strategy_id='project.frozen-ensemble')\n\n"
@@ -255,6 +258,8 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
         "            artifact_type='strategy_result',\n"
         "            artifact_schema_version=3,\n"
         "        ),)\n"
+        "    def trigger(self):\n"
+        "        return EveryNSessions(n=2)\n"
         "    def run(self, view):\n"
         "        source = view.artifact('frozen_ensemble', StrategyResult)\n"
         "        return StrategyDraft(\n"
@@ -289,7 +294,6 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
             "downstream-run-b",
             "downstream-account-b",
             artifact_bindings=(binding,),
-            decision_times=(at(8), at(10)),
             session_closes=(at(8), at(9), at(10), at(11)),
         ),
     )

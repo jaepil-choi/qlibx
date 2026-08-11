@@ -23,7 +23,13 @@ from qlibx import (
     StockInstrument,
     StrategyInvocation,
 )
-from qlibx.contracts import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
+from qlibx.contracts import (
+    BudgetMode,
+    DecisionAction,
+    EveryNSessions,
+    StrategyDraft,
+    WeightEntry,
+)
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
 from qlibx.errors import CommitStatus
 from qlibx.execution.preparation import KRX_PREPARATION_CONTRACT
@@ -58,6 +64,9 @@ class MonitoringSeedStrategy:
 
     def requirements(self) -> tuple[object, ...]:
         return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view: object) -> StrategyDraft:
         return StrategyDraft(
@@ -207,7 +216,6 @@ def monitoring_daily_spec() -> DailySimulationSpec:
             ),
         ),
         market=DailyMarketBinding(market_dataset_id="monitoring-market"),
-        decision_times=(datetime(2024, 1, 2, 15, 30, tzinfo=KST),),
         session_closes=(
             datetime(2024, 1, 2, 15, 30, tzinfo=KST),
             evaluation_time(),

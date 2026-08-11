@@ -1,6 +1,12 @@
 from zoneinfo import ZoneInfo
 
-from qlibx.contracts import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
+from qlibx.contracts import (
+    BudgetMode,
+    DecisionAction,
+    EveryNSessions,
+    StrategyDraft,
+    WeightEntry,
+)
 from qlibx.data import ComponentRequirement
 
 KST = ZoneInfo("Asia/Seoul")
@@ -67,3 +73,6 @@ class SampleDailyFeedbackStrategy:
             proposed_memory=proposed_memory,
             expected_memory_version=memory.version,
         )
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)

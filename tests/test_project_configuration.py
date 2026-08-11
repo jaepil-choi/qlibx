@@ -56,7 +56,6 @@ def build_spec(project: QlibxProject, run_id: str = "run-1"):
             initial_cash=10_000,
         ),
         market=DailyMarketBinding(market_dataset_id="market"),
-        decision_times=(at(2),),
         session_closes=(at(2), at(3)),
     )
 

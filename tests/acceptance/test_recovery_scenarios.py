@@ -8,6 +8,7 @@ import pytest
 
 from qlibx import OutcomeStatus, QlibxProject
 from qlibx.account import Account, FillBatch, MarkBatch, StrategyMemoryStore
+from qlibx.contracts import EveryNSessions
 from qlibx.errors import CommitStatus
 from qlibx.flow import DailyExecutionFlow, DailyExecutionProfile, DailyRunRequest
 from qlibx.flow.recovery import (
@@ -112,7 +113,6 @@ def _request(*, config_fingerprint: str = "real-dw-actual-state-momentum-v1") ->
     return DailyRunRequest(
         run_id=RUN_ID,
         config_fingerprint=config_fingerprint,
-        decision_times=(sessions[0], sessions[2]),
         session_closes=sessions,
     )
 
@@ -135,7 +135,10 @@ def _publish_v1_anchor(case: RealDwProject, request: DailyRunRequest):
     point = SimulationRecoveryPointV1(
         run_id=request.run_id,
         request_fingerprint=_fingerprint(request.compatibility_json()),
-        config_fingerprint=request.config_fingerprint,
+        config_fingerprint=_fingerprint(
+            f"{request.config_fingerprint}|trigger:"
+            f"{EveryNSessions(n=2).frozen_config_fingerprint()}"
+        ),
         profile_fingerprint=_fingerprint(profile.compatibility_json()),
         registry_fingerprint=_fingerprint(
             "|".join(

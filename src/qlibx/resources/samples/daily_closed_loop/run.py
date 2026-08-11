@@ -87,7 +87,6 @@ def main(project_root: Path) -> dict[str, object]:
                 market=DailyMarketBinding(
                     market_dataset_id="sample-daily-market"
                 ),
-                decision_times=(sessions[0], sessions[2]),
                 session_closes=sessions,
             ),
         ),

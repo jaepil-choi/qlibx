@@ -2,9 +2,9 @@
 
 Status: current
 
-Last verified: 2026-08-11T09:18:40+09:00
+Last verified: 2026-08-11T10:33:05+09:00
 
-Verified against: qlibx 0.1.0, implementations 061–065
+Verified against: qlibx 0.1.0, implementations 061–066
 
 이 showcase는 “dataset이 이미 등록되었다”는 지점부터 같은 PIT 가격이 두 실행 경로에서 어떻게 다른
 state와 evidence로 이어지는지 비교한다. 맨 앞의 real-DW projection과 minimal registration은 다른 환경에서도
@@ -14,7 +14,12 @@ state와 evidence로 이어지는지 비교한다. 맨 앞의 real-DW projection
    사용하고, 횡단면 평균 제거와 unit-gross 정규화로 long-short alpha weight를 만든다. 이 weight는
    `hypothetical_signed` portfolio를 거쳐 AcademicExchange에서만 signed fractional position으로 실행된다.
 2. `FiveSessionTopTenStrategy`: 직전 5-session 종가 수익률을 순위화하고 상위 10종목을 10%씩 보유한다.
-   5 session마다 판단하고 다음 session 종가에 KrxExchange가 정수 수량·비용을 계산해 Account에 commit한다.
+   Strategy가 `EveryNSessions(5)` cadence를 선언하고 Flow가 candidate마다 FIRE/SKIP을 평가한다. FIRE 다음
+   session 종가에 KrxExchange가 정수 수량·비용을 계산해 Account에 commit한다.
+
+61개 candidate session은 선언된 2024-01-02–2024-03-29 KRX weekday/holiday calendar에서 만든다. 가격 row의
+공통 coverage로 session을 줄이지 않는다. 선언 universe의 한 종목·한 session이라도 빠지면
+`BOUNDED_MARKET_COVERAGE_INCOMPLETE`로 실패하며, `validate_missing_coverage.py`가 이 경계를 독립 검증한다.
 
 중요한 instrument 경계도 일부러 나란히 보인다. Academic 경로는 `AcademicRunSpec.listings`가 가상 venue의
 listing 계약이다. KRX 경로는 `QlibxProject.add_instrument()`로 주식을 하나씩 추가하고 `daily_spec()`이 그
@@ -24,6 +29,7 @@ listing 계약이다. KRX 경로는 `QlibxProject.add_instrument()`로 주식을
 
 ```powershell
 uv run python showcases/show_004_two_strategy_data_flow/run.py
+uv run python showcases/show_004_two_strategy_data_flow/validate_missing_coverage.py
 ```
 
 생성 결과는 이 showcase의 `outputs/` 아래에만 저장된다. `summary.json`은 전체 검증 요약,
@@ -38,7 +44,8 @@ uv run python showcases/show_004_two_strategy_data_flow/run.py
 portfolio artifact가 된 뒤 2024-01-31 종가에 20개 signed fractional Fill로 가상 체결됐다.
 
 첫 KRX decision은 2024-01-09 15:30 KST다. `RowsLookback(6)`으로 120 rows를 읽고 5-session 수익률
-상위 10개를 각각 0.1 target으로 발행했다. 다음 session인 2024-01-10 종가에 instrument lot, 현금과
+상위 10개를 각각 0.1 target으로 발행했다. 이 시점과 이후 5-session cadence는 Strategy의
+`EveryNSessions(5)`에서 나온다. 다음 session인 2024-01-10 종가에 instrument lot, 현금과
 명시적 cost rule을 적용해 정수 수량을 체결한 뒤 Account와 mark를 commit했다. 전체 11회 decision은
 독립 pandas oracle의 top-10과 모두 일치했다.
 

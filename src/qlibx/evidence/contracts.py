@@ -31,7 +31,7 @@ class RecoveryAction(StrEnum):
 
 
 class DependencyEdge(QlibxModel):
-    dependency_kind: Literal["artifact", "dataset", "config", "state", "error"]
+    dependency_kind: Literal["artifact", "dataset", "config", "state", "error", "trigger"]
     dependency_id: str = Field(min_length=1)
     consumer_role: str = Field(min_length=1)
     selected_fields: tuple[str, ...] = ()

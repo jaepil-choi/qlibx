@@ -1,4 +1,4 @@
-from qlibx import BudgetMode, DecisionAction, StrategyDraft, WeightEntry
+from qlibx import BudgetMode, DecisionAction, EveryNSessions, StrategyDraft, WeightEntry
 
 
 class CountingPathProducer:
@@ -11,6 +11,9 @@ class CountingPathProducer:
 
     def requirements(self) -> tuple[object, ...]:
         return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]

@@ -15,6 +15,7 @@ from qlibx import (
     DailyMarketBinding,
     DailySimulationSpec,
     DecisionAction,
+    EveryNSessions,
     FrozenDailyExecutionSpec,
     KrxExchangeConfig,
     OutcomeStatus,
@@ -45,6 +46,9 @@ class CountingParentStrategy:
 
     def requirements(self) -> tuple[object, ...]:
         return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view: object) -> StrategyDraft:
         self.calls += 1
@@ -186,7 +190,6 @@ def main(project_root: Path) -> dict[str, object]:
                 instruments=instruments(),
                 exchange=exchange(),
                 market=market("close_execution_price"),
-                decision_times=(at_close(2),),
                 session_closes=(at_close(2), at_close(3)),
             ),
         ),

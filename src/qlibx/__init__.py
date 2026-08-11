@@ -13,6 +13,8 @@ from qlibx.contracts import (
     ArtifactSemanticConstraint,
     BudgetMode,
     DecisionAction,
+    EveryCandidate,
+    EveryNSessions,
     ForwardReturnLabelEntry,
     ForwardReturnLabelModel,
     ForwardReturnLabelResult,
@@ -27,6 +29,9 @@ from qlibx.contracts import (
     StrategyInvocation,
     StrategyResult,
     StrategySourceStateLineage,
+    TriggerContext,
+    TriggerDecision,
+    TriggerPolicy,
     WeightEntry,
 )
 from qlibx.data import (
@@ -150,6 +155,8 @@ __all__ = [
     "EnsembleDefinition",
     "EnsembleMemberSpec",
     "EtfInstrument",
+    "EveryCandidate",
+    "EveryNSessions",
     "ExecutionLotInput",
     "ExecutionPreparation",
     "ForwardReturnLabelEntry",
@@ -202,6 +209,9 @@ __all__ = [
     "StrategyResult",
     "StrategySourceStateLineage",
     "StrategyView",
+    "TriggerContext",
+    "TriggerDecision",
+    "TriggerPolicy",
     "WeightEntry",
     "main",
 ]

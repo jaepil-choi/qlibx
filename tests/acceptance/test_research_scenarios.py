@@ -731,7 +731,6 @@ def test_frozen_intent_replay_and_separate_account_rerun_do_not_mutate_parent(
         DailyRunRequest(
             run_id="path-historical-replay-account-b",
             config_fingerprint="historical-replay-v1",
-            decision_times=(),
             session_closes=(close_at(2024, 1, 3),),
         ),
     )

@@ -28,9 +28,17 @@ from qlibx.contracts.strategy import (
     StrategyPathDependenceError,
     StrategyResult,
     StrategySourceStateLineage,
+    TriggerAwareStrategyOperation,
     WeightEntry,
     strategy_accesses_are_path_dependent,
     validate_strategy_draft_path_dependence,
+)
+from qlibx.contracts.trigger import (
+    EveryCandidate,
+    EveryNSessions,
+    TriggerContext,
+    TriggerDecision,
+    TriggerPolicy,
 )
 
 __all__ = [
@@ -39,6 +47,8 @@ __all__ = [
     "ArtifactSemanticConstraint",
     "BudgetMode",
     "DecisionAction",
+    "EveryCandidate",
+    "EveryNSessions",
     "ForwardReturnLabelEntry",
     "ForwardReturnLabelModel",
     "ForwardReturnLabelResult",
@@ -57,6 +67,10 @@ __all__ = [
     "StrategyPathDependenceError",
     "StrategyResult",
     "StrategySourceStateLineage",
+    "TriggerAwareStrategyOperation",
+    "TriggerContext",
+    "TriggerDecision",
+    "TriggerPolicy",
     "WeightEntry",
     "strategy_accesses_are_path_dependent",
     "validate_strategy_draft_path_dependence",

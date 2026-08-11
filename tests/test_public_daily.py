@@ -19,11 +19,14 @@ from qlibx import (
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
+    EveryNSessions,
     StoredSignalEntry,
     StoredSignalResult,
     StrategyArtifactBinding,
     StrategyArtifactRequirement,
     StrategyDraft,
+    TriggerContext,
+    TriggerDecision,
     WeightEntry,
 )
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
@@ -84,6 +87,9 @@ class RebalanceThenFailStrategy:
     def requirements(self) -> tuple[object, ...]:
         return ()
 
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
+
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
@@ -104,6 +110,9 @@ class PublicDailyStrategy:
 
     def requirements(self) -> tuple[object, ...]:
         return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
 
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
@@ -165,6 +174,29 @@ class ArtifactDailyStrategy(PublicDailyStrategy):
         return super().run(view)
 
 
+class SkipAllPolicy:
+    policy_id = "test-skip-all"
+
+    def requirements(self) -> tuple[object, ...]:
+        return ()
+
+    def evaluate(self, context: TriggerContext) -> TriggerDecision:
+        return TriggerDecision(
+            policy_id=self.policy_id,
+            decision="SKIP",
+            candidate_time=context.candidate_time,
+            reason="test fixture skips every candidate",
+        )
+
+    def frozen_config_fingerprint(self) -> str:
+        return "0" * 64
+
+
+class SkipAllStrategy(PublicDailyStrategy):
+    def trigger(self) -> SkipAllPolicy:
+        return SkipAllPolicy()
+
+
 def at(day: int) -> datetime:
     return datetime(2024, 1, day, 15, 30, tzinfo=KST)
 
@@ -202,7 +234,6 @@ def spec(**updates: object) -> DailySimulationSpec:
             ),
         ),
         "market": DailyMarketBinding(market_dataset_id="public-market"),
-        "decision_times": (at(2), at(4)),
         "session_closes": (at(2), at(3), at(4), at(5)),
     }
     payload.update(updates)
@@ -287,6 +318,28 @@ def test_public_daily_facade_runs_closed_loop(tmp_path: Path) -> None:
     assert preparation_ids == {execution.preparation_artifact_id}
     assert outcome.result.final_account.positions[0].quantity == 100
     assert outcome.result.strategy_results[1].feedback_accesses[0].next_cursor == 2
+    trigger_entries = tuple(
+        entry for entry in outcome.result.checkpoint.event_trace if "|TRIGGER|" in entry
+    )
+    assert tuple("|FIRE|" in entry for entry in trigger_entries) == (
+        True,
+        False,
+        True,
+        False,
+    )
+    strategy_artifacts = tuple(
+        artifact
+        for artifact in outcome.result.artifacts
+        if artifact.artifact_type == "strategy_result"
+    )
+    assert all(
+        any(
+            edge.dependency_kind == "trigger"
+            and edge.consumer_role == "decision_cadence"
+            for edge in artifact.dependencies
+        )
+        for artifact in strategy_artifacts
+    )
     assert len(outcome.result.checkpoint.config_fingerprint) == 64
     assert outcome.result.checkpoint.config_fingerprint != selected_spec.frozen_config_fingerprint()
 
@@ -377,6 +430,7 @@ def test_public_daily_is_deterministic_and_resumable(tmp_path: Path) -> None:
     assert {item.artifact_id for item in first.result.artifacts} == {
         item.artifact_id for item in resumed.result.artifacts
     }
+    assert first.result.checkpoint.event_trace == repeated.result.checkpoint.event_trace
 
     changed = spec(strategy_fingerprint="test-public-daily-v2")
     rejected = selected.run_daily(PublicDailyStrategy(), changed, resume=True)
@@ -385,20 +439,37 @@ def test_public_daily_is_deterministic_and_resumable(tmp_path: Path) -> None:
     assert rejected.errors[0].commit_status is CommitStatus.NONE
 
 
-def test_empty_daily_bindings_preserve_pre_m2_fingerprints() -> None:
+def test_trigger_policy_change_requires_a_new_recovery_branch(tmp_path: Path) -> None:
+    selected = project(tmp_path)
+    selected_spec = spec(run_id="trigger-policy-recovery-run")
+
+    first = selected.run_daily(PublicDailyStrategy(), selected_spec)
+    assert first.status is OutcomeStatus.COMPLETE
+
+    class ChangedCadenceStrategy(PublicDailyStrategy):
+        def trigger(self) -> EveryNSessions:
+            return EveryNSessions(n=3)
+
+    changed = selected.run_daily(ChangedCadenceStrategy(), selected_spec, resume=True)
+
+    assert changed.status is OutcomeStatus.FAILED
+    assert changed.errors[0].error_code == "RESUME_BRANCH_REQUIRED"
+    assert changed.errors[0].commit_status is CommitStatus.NONE
+
+
+def test_empty_daily_bindings_have_schema_v2_fingerprints() -> None:
     selected = spec()
     assert (
         selected.frozen_config_fingerprint()
-        == "0e602a61282040af577e7187e92b3c20f4851247672fa3ec803e94cf86ea4628"
+        == "fa9c5c25f2c743670fad82259d32ce2b2d4e55f4eeb7147f0b1b9442eab3e092"
     )
     request = DailyRunRequest(
         run_id=selected.run_id,
         config_fingerprint=selected.frozen_config_fingerprint(),
-        decision_times=selected.decision_times,
         session_closes=selected.session_closes,
     )
     assert hashlib.sha256(request.compatibility_json().encode()).hexdigest() == (
-        "6120f8fc7dfe1e4526bbd054ce0ed61f40ffa528ca0d714c44cdc6b0bb6eb643"
+        "1c681cc198def2a7a44e3fd00a8be43670e292950c66cfb71b3b771a896de6ef"
     )
     assert "artifact_bindings" not in request.compatibility_json()
     assert "session_opens" not in request.compatibility_json()
@@ -444,13 +515,11 @@ def test_non_empty_daily_bindings_change_frozen_and_recovery_identity() -> None:
     empty_request = DailyRunRequest(
         run_id=empty.run_id,
         config_fingerprint=empty.frozen_config_fingerprint(),
-        decision_times=empty.decision_times,
         session_closes=empty.session_closes,
     )
     bound_request = DailyRunRequest(
         run_id=bound.run_id,
         config_fingerprint=bound.frozen_config_fingerprint(),
-        decision_times=bound.decision_times,
         session_closes=bound.session_closes,
         artifact_bindings=bound.artifact_bindings,
     )
@@ -476,13 +545,13 @@ def test_daily_propagates_the_same_frozen_binding_to_every_decision(
     outcome = selected.run_daily(strategy, selected_spec)
 
     assert outcome.status is OutcomeStatus.COMPLETE
-    assert strategy.artifact_access_count == len(selected_spec.decision_times)
+    assert strategy.artifact_access_count == 2
     strategy_artifacts = tuple(
         envelope
         for envelope in outcome.result.artifacts
         if envelope.artifact_type == "strategy_result"
     )
-    assert len(strategy_artifacts) == len(selected_spec.decision_times)
+    assert len(strategy_artifacts) == 2
     for envelope in strategy_artifacts:
         artifact_edges = tuple(
             edge for edge in envelope.dependencies if edge.consumer_role == "alpha_signal"
@@ -539,7 +608,6 @@ def test_daily_binding_roles_must_be_unique() -> None:
         DailyRunRequest(
             run_id=selected.run_id,
             config_fingerprint=selected.frozen_config_fingerprint(),
-            decision_times=selected.decision_times,
             session_closes=selected.session_closes,
             artifact_bindings=(duplicate, second),
         )
@@ -658,11 +726,10 @@ def test_empty_mark_is_recorded_only_after_publication_succeeds(
     monkeypatch.setattr(DailyExecutionFlow, "_publish_model", observe_mark_publication)
 
     outcome = selected.run_daily(
-        PublicDailyStrategy(),
+        SkipAllStrategy(),
         spec(
             run_id="empty-mark-publication-failure",
             strategy_fingerprint="empty-mark-publication-failure-v1",
-            decision_times=(),
             session_closes=(at(2),),
         ),
     )
@@ -678,7 +745,7 @@ def test_exact_registered_strategy_runs_through_daily_facade(tmp_path: Path) -> 
     module = selected.root / selected.config.extension_dir / "daily_strategy.py"
     module.write_text(
         "from qlibx import (\n"
-        "    BudgetMode, StrategyDraft, StrategyExtensionSpec, WeightEntry,\n"
+        "    BudgetMode, DecisionAction, StrategyDraft, StrategyExtensionSpec,\n"
         ")\n\n"
         "STRATEGY_SPEC = StrategyExtensionSpec(strategy_id='project.daily')\n\n"
         "class Strategy:\n"
@@ -687,9 +754,10 @@ def test_exact_registered_strategy_runs_through_daily_facade(tmp_path: Path) -> 
         "        return ()\n"
         "    def run(self, view):\n"
         "        return StrategyDraft(\n"
-        "            weights=(WeightEntry(instrument='A000001', weight=1.0),),\n"
-        "            budget_mode=BudgetMode.FIXED,\n"
+        "            weights=(),\n"
+        "            budget_mode=BudgetMode.FLEXIBLE,\n"
         "            target_gross=1.0,\n"
+        "            decision_action=DecisionAction.HOLD,\n"
         "        )\n\n"
         "def create_strategy():\n"
         "    return Strategy()\n",
@@ -716,14 +784,14 @@ def test_exact_registered_strategy_runs_through_daily_facade(tmp_path: Path) -> 
     )
 
     assert outcome.status is OutcomeStatus.COMPLETE
-    assert len(outcome.result.strategy_results) == 2
+    assert len(outcome.result.strategy_results) == 4
     assert outcome.result.checkpoint.config_fingerprint != selected_spec.frozen_config_fingerprint()
     strategy_artifacts = tuple(
         artifact
         for artifact in outcome.result.artifacts
         if artifact.artifact_type == "strategy_result"
     )
-    assert len(strategy_artifacts) == 2
+    assert len(strategy_artifacts) == 4
     assert all(
         any(
             edge.consumer_role == "strategy_extension_registration"

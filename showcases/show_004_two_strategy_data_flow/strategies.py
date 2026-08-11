@@ -10,6 +10,7 @@ from qlibx import (
     BudgetMode,
     ComponentRequirement,
     DecisionAction,
+    EveryNSessions,
     RowsLookback,
     StrategyDraft,
     WeightEntry,
@@ -87,6 +88,9 @@ class PeerMomentumLongShortStrategy:
             ),
         )
 
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=5)
+
     def run(self, view: object) -> StrategyDraft:
         # Strategy는 등록 파일을 직접 열지 않고, 선언한 semantic role만 PIT view로 읽는다.
         history = view.history(  # type: ignore[attr-defined]
@@ -158,6 +162,9 @@ class FiveSessionTopTenStrategy:
                 lookback=RowsLookback(rows=6),
             ),
         )
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=5)
 
     def run(self, view: object) -> StrategyDraft:
         history = view.history(  # type: ignore[attr-defined]

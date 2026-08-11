@@ -441,8 +441,8 @@ intent다. Decision time별 instrument signed weight와 budget semantics를 포�
 benchmark-relative 또는 physical인지 명시해야 한다.
 
 Actual holding이나 prior execution feedback에 의존해 생성된 weight는 path-dependent다. 이러한 result도 frozen
-typed input으로 재사용할 수 있으며 run identity, 실제로 의존한 Account/Memory state identity, feedback cursor와
-execution profile을 기록해야 한다. 다른 Strategy나 Ensemble이 이를 소비하는 것은 저장된 alpha intent를 입력으로
+typed input으로 재사용할 수 있으며 run identity, 실제로 의존한 actual state와 strategy state의 identity, 어떤
+committed outcome까지 반영했는지와 execution profile을 기록해야 한다. 다른 Strategy나 Ensemble이 이를 소비하는 것은 저장된 alpha intent를 입력으로
 사용한다는 뜻이지, 그 producer가 consumer의 현재 state에서 재실행되었음을 뜻하지 않는다. 이후 executable target이나
 order를 만들 때는 별도 downstream operation이 현재 committed Account와 현재 execution input을 사용한다.
 
@@ -708,12 +708,33 @@ cross-cutting invariant다. 3,000종목 실행에서 어떤 validation object를
 - Intended ledger나 prior target을 actual state처럼 사용하지 않는다.
 - Monitoring finding은 prior fill을 rollback하거나 account를 소급 변경하지 않는다.
 
+### 4.3.1 Actual state는 이력으로 관측할 수 있다
+
+Strategy와 monitoring은 actual state를 현재 시점의 한 장면으로만이 아니라 관측 이력으로 읽을 수 있어야 한다.
+
+- 관측 단위는 최소한 둘을 선택할 수 있어야 한다. 계좌 전체의 session 시계열(cash, NAV, 실현손익 등)과
+  instrument 단위 panel(보유 수량, 진입 평단, 실현손익 등)이다.
+- 소비자는 필요한 관측 항목과 범위를 선언하고, 선언하지 않은 항목은 보이지 않는다. 등록된 data 관측과 같은
+  원칙이다.
+- User는 actual state가 무엇을 기록할지 선택할 수 있어야 하며, 선택하지 않은 항목을 조용히 추정하거나 다른
+  값으로 대체하지 않는다.
+- **Stop-loss, cooldown, 연속 손실 판정 같은 규칙은 strategy state 없이 actual state 이력만으로 표현될 수 있어야
+  한다.**
+- **Actual state 이력 접근은 strategy state 보유 여부에 종속되지 않는다.**
+
+#### UC-ACCOUNT-HISTORY-001 — Strategy state 없는 stop-loss
+
+Strategy가 진입 평단과 최근 세션의 실현손익 이력을 선언해 읽고, 손실 한도를 넘은 종목을 청산 대상으로 판정한다.
+이 판정에 strategy state를 사용하지 않으며, 실제로 소비한 actual-state 항목과 범위가 result의 dependency로 남는다.
+선언하지 않은 항목은 읽을 수 없고, 기록되지 않은 항목을 요구하면 계산 전에 실패한다.
+
 ### 4.4 Point-in-time과 data meaning을 강제한다
 
 모든 data consumer는 선언된 `available_at <= evaluation_time`인 observation만 사용한다. Strategy와 alpha의
 evaluation time은 decision time이고, proposed target/order의 constraint adjustment와 validation은 해당
 execution evaluation time, monitoring은 monitoring time이다. Actual account snapshot의 `as_of`도 evaluation
-time보다 늦을 수 없다.
+time보다 늦을 수 없다. 이 보장은 actual state가 과거 committed outcome만 담기 때문에 성립하며, 별도의 cutoff
+장치를 요구하지 않는다.
 qlibx가 보장하는 것은 선언된 availability의 준수다. Bundled agent skill은 source와 data category에 맞는
 availability candidate와 근거를 제시해야 하고, source의 실제 경제적 공시 시점에 대한 최종 확인은 user가
 내린다. 선택된 rule의 형식과 PIT 적용은 package가 deterministic하게 validation한다.
@@ -768,7 +789,7 @@ Config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 - User Strategy가 명시적으로 구성하는 ETF/index look-through와 cash residual
 - Instrument semantics, execution-policy resolution과 unsupported behavior의 명시적 실패
 - Portable artifact envelope, dependency lineage, file-backed catalog와 reporting
-- Trigger, finalization, checkpoint와 resume policy
+- Trigger, finalization과 run 종료 시 결과·실패 evidence의 확정
 - Dense actual-account constraint monitoring과 historical re-evaluation
 - Agent-readable documentation, capability gap과 stage-based errors
 
@@ -1390,8 +1411,8 @@ Flexible Strategy가 기준보다 강한 종목만 선택한 결과 gross budget
 Path-independent result는 동일 frozen input에서 prior holding과 fill history 없이 재현된다. Path-dependent result는
 actual holding, cash, prior fill, cooldown 또는 Strategy memory에 의존한다. **두 result 모두 producer를 다시 실행하지
 않고 frozen input으로 재사용할 수 있다.** Consumer Strategy는 필요한 artifact role, schema와 semantics를 선언하고
-package가 이를 resolve한다. 실제로 소비한 artifact만 dependency edge가 되며 source result가 의존했던 Account/Memory
-state identity와 feedback cursor는 새 result의 lineage에서도 보존된다.
+package가 이를 resolve한다. 실제로 소비한 artifact만 dependency edge가 되며 source result가 의존했던 actual
+state·strategy state identity와 반영 범위는 새 result의 lineage에서도 보존된다.
 
 이 재사용은 source result를 consumer의 현재 Account에서 다시 계산했다는 뜻이 아니다. Budget, schema 또는 semantics가
 consumer 요구와 맞지 않으면 계산 전에 compatibility error로 실패한다. Compatible한 frozen alpha를 이후 physical
@@ -1399,10 +1420,10 @@ target이나 order로 변환할 때는 그 downstream operation이 현재 commit
 
 #### UC-ALPHA-PATH-001 — Path-dependent weight의 producer-independent 재사용
 
-Turnover-aware Strategy가 account A의 actual holding과 Memory cursor를 소비해 path-dependent signed-weight result를
+Turnover-aware Strategy가 account A의 actual holding과 strategy state를 소비해 path-dependent signed-weight result를
 만든다. 이후 Ensemble Strategy가 이 frozen result와 다른 member result를 입력으로 조합한다. Source producer는 다시
-실행되지 않고 parent result도 변경되지 않으며, Ensemble result는 consumed artifact와 source Account/Memory state
-identity 및 cursor lineage를 보존한다. Ensemble weight를 account B의 executable target으로 변환하면 account B의 현재
+실행되지 않고 parent result도 변경되지 않으며, Ensemble result는 consumed artifact와 source actual state·strategy
+state identity 및 반영 범위 lineage를 보존한다. Ensemble weight를 account B의 executable target으로 변환하면 account B의 현재
 committed holding과 현재 execution input을 사용하지만, source member가 account B에서 재계산되었다고 표시하지 않는다.
 
 ### 9.5 Research feedback와 execution feedback
@@ -1428,10 +1449,20 @@ actual position을 그대로 관찰할지 여부는 Strategy와 execution policy
 Calendar, data arrival, fill feedback 또는 user event가 decision을 trigger할 수 있다. Run 종료 시 result와 failure
 evidence를 확정해야 하지만, 특정 event class나 callback method는 PRD가 정하지 않는다.
 
-Current daily profile에서는 user가 invocation 전에 decision cadence를 명시하고, Strategy는 각 decision time에
-`hold` 또는 새로운 target/intent를 선택한다. Invocation이 시작된 뒤 Strategy가 과거 cadence를 바꾸거나 시간을
-소급해서는 안 된다. 새로운 trigger 종류는 product use case와 time semantics가 승인될 때 추가하며, 구체 scheduling
-API와 trigger representation은 architecture가 정한다.
+Decision cadence는 strategy의 경제적 의미의 일부다. User는 strategy 정의만 읽고 그 strategy가 언제 판단하는지
+알 수 있어야 하며, cadence를 확인하기 위해 실행 스크립트나 orchestration 설정을 읽어야 해서는 안 된다. 이는
+strategy가 시간을 직접 진행시키거나 자신을 호출한다는 뜻이 아니다. Invocation이 시작된 뒤 과거 cadence를 바꾸거나
+시간을 소급해서는 안 되며, 실행 시점 선택에 사용하는 정보는 그 시점에 관측 가능해야 한다.
+
+판단 후보가 되는 session 목록은 거래 calendar 사실이어야 하고 data coverage에서 유도해서는 안 된다. 특정 종목의
+결측 때문에 후보 session이 사라지면 cadence 전체가 미래 정보에 오염된다. 새로운 trigger 종류는 product use case와
+time semantics가 승인될 때 추가하며, 구체 scheduling API와 trigger representation은 architecture가 정한다.
+
+#### UC-TRIGGER-001 — 선언된 decision cadence
+
+Strategy 정의 안에서 "5 거래 session마다 판단한다"를 선언한다. Run 결과의 판단 시점이 그 선언과 정확히 일치하고,
+같은 strategy를 다른 기간에 실행해도 선언만 읽으면 cadence를 알 수 있다. 판단하지 않은 session은 실패가 아니라
+정상적인 결과이며 재현 가능한 기록으로 남는다. Cadence를 바꾸면 result identity가 달라진다.
 
 ### 9.9 Parent/child research
 
@@ -1442,24 +1473,33 @@ Child research는 parent run의 frozen input과 artifact를 재사용해 대안�
 Parent의 signed weight를 고정하고 next-close와 next-open 같은 두 full-fill convention을 child에서 비교한다. Model과
 Strategy를 다시 실행하지 않으며 각 child는 execution assumption과 actual simulated fills를 별도 lineage로 보존한다.
 
-### 9.10 Checkpoint와 resume
+### 9.10 Run 종료 결과
 
-중단된 run은 committed artifact와 feedback cursor에서 재개할 수 있어야 한다. Resume은 이미 commit된 decision이나
-fill을 중복 적용하지 않고, input/config identity가 달라졌다면 새 run 또는 explicit branch를 요구한다.
+Run은 종료 시 최종 actual state와 최종 strategy state를 결과로 제공해야 하며, 그 결과만으로 이어지는 run을
+시작할 수 있어야 한다. 이것은 중단된 run의 재개와 다르다. 중단 복구는 current scope가 아니다(§17.2).
 
-재개 결과는 중단되지 않은 동일 run과 경제적으로 같아야 한다. 이미 committed된 decision, fill과 strategy-state
-update를 중복 적용하지 않고, 아직 publish되지 않은 required evidence만 완성해야 한다. Resume identity는 run
-request, config, execution profile, logical dataset registration과 Strategy를 포함한다. 하나라도 달라지면 state
-mutation 전에 명시적으로 실패하고 새 run 또는 explicit branch를 요구한다.
+### 9.11 Strategy state and adaptive belief update
 
-Checkpoint format, journal, compare-and-swap, recovery-point publication 순서와 error code는 public compatibility로
-별도 확정한 경우를 제외하면 architecture가 정한다. Current requirement는 local daily simulation의 observable
-recovery behavior이며 external OMS나 distributed transaction을 뜻하지 않는다.
+Strategy는 이전 판단의 결과를 다음 판단으로 이어갈 수 있어야 한다.
 
-### 9.11 Adaptive alpha research and belief update
+- Strategy state의 내용과 구조는 strategy가 정하며 package는 이를 해석하지 않는다.
+- Strategy state는 durable하고 portable해야 하며, 한 run의 종료 state를 다음 run의 시작 state로 사용할 수 있어야
+  한다. Production에서 하루 단위로 실행하며 전날 state를 이어받는 것이 기준 사례다.
+- **Strategy state의 갱신은 execution이나 fill 발생 여부에 종속되지 않는다.** 체결이 없는 세션에도, execution
+  profile을 사용하지 않는 research-only strategy도 state를 이어갈 수 있어야 한다.
+- Strategy state를 사용한 result는 그 사실을 드러내야 한다. 소비자가 "이 result는 data만으로 재현되지 않는다"를
+  알 수 있어야 하기 때문이다.
+- Strategy state는 최후 수단이다. 같은 값을 bounded lookback이나 durable artifact로 표현할 수 있으면 그쪽이
+  재현 가능성이 높다.
 
 Adaptive Strategy는 realized result나 new observation으로 belief, parameter 또는 member weight를 갱신할 수 있다.
 특정 Bayesian class hierarchy를 요구하지 않고, update 전후의 state와 사용한 evidence를 비교 가능하게 보존한다.
+
+#### UC-STATE-001 — 체결 없는 세션과 run 경계를 넘는 state 연속성
+
+Strategy가 판단 결과를 state로 남긴다. 그 세션에 주문이 없거나 dealt quantity가 0이어도 state는 이어진다. Run이
+끝나면 최종 state를 결과로 얻을 수 있고, 다음 run의 시작 state로 명시적으로 지정해 이어서 실행할 수 있다. 이때
+이전 run의 state를 자동으로 선택하지 않는다.
 
 #### UC-ALPHA-ADAPTIVE-001 — Fill 이후 ensemble belief 갱신
 
@@ -1787,8 +1827,12 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 - Signed weight는 budget semantics와 actual dependency를 보존하고 producer를 다시 실행하지 않고 재사용할 수 있다.
 - `UC-ALPHA-BUDGET-001`에서 flexible residual을 fixed budget으로 자동 확대하지 않는다.
 - `UC-ALPHA-PATH-001`에서 path-dependent result를 producer rerun 없이 frozen member input으로 소비하고,
-  source Account/Memory state identity와 cursor를 새 result lineage에 보존하며 current-state recomputation으로
+  source actual state·strategy state identity와 반영 범위를 새 result lineage에 보존하며 current-state recomputation으로
   표시하지 않는다.
+- `UC-STATE-001`에서 체결이 없는 세션과 run 경계를 넘어 strategy state가 이어지고, 다음 run의 시작 state는
+  명시적으로 지정된다. Strategy state 갱신이 execution 발생 여부에 종속되지 않는다.
+- `UC-TRIGGER-001`에서 strategy가 선언한 decision cadence가 실행 결과의 판단 시점과 일치하고, 판단하지 않은
+  session이 실패로 기록되지 않는다.
 - `UC-ENSEMBLE-001`에서 기존 Strategy result를 member로 조합하고 ticker-level netting과 lineage를 확인할 수 있다.
 - `UC-PORTFOLIO-001`처럼 같은 alpha를 서로 다른 valid instrument/execution profile에 사용할 수 있다.
 - `UC-ALPHA-CHILD-001`은 같은 exact parent intent를 Strategy/Model 재실행 없이 next-close와 next-open
@@ -1810,6 +1854,9 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
   `UC-LOOKTHROUGH-001`~`003` current-scope outcome을 만족한다.
 - Path-dependent, multi-instrument와 multi-frequency scenario에서 actual-state-dependent
   decision, shared portfolio state와 independent cadence를 검증한다.
+- `UC-ACCOUNT-HISTORY-001`처럼 strategy state 없이 actual state 이력만으로 stop-loss와 cooldown 규칙을 표현할 수
+  있고, actual state 이력 접근이 strategy state 보유 여부에 종속되지 않는다. 계좌 전체 session 시계열과 instrument
+  단위 panel을 선택해 구독할 수 있다.
 - `UC-EXEC-003`처럼 Strategy decision이 없는 evaluation time에도 actual-account monitoring finding을 만든다.
 - Unsupported short, lifecycle 또는 cost policy를 다른 profile의 default로 조용히 대체하지 않는다.
 - Partial fill, pending/cancel, 실제 주식·ETF settlement cycle과 production OMS behavior를 current support로 표시하지 않는다.
@@ -1853,7 +1900,9 @@ current/future scope만 규정한다. 현재 구현 상태, public symbol, schem
 | `GAP-MATERIALIZATION-PIT-001` | Model calculation 전에 label horizon과 PIT requirement를 resolve하고 missing input은 reusable success 없이 실패한다 | current |
 | `GAP-EXECUTION-CONVENTION-001` | 같은 frozen parent intent를 producer 재실행 없이 서로 다른 PIT-safe execution timing으로 비교하고 child state와 evidence를 격리한다 | current |
 | `GAP-STRATEGY-COMPOSITION-001` | 여러 stored Strategy result를 producer 재실행 없이 조합하며 path-dependent source state와 feedback dependency를 보존한다 | current |
-| `GAP-RECOVERY-001` | Process interruption 뒤 동일 frozen identity를 중복 decision/fill/state update 없이 재개하고 changed identity는 mutation 전에 분기 요구로 실패한다 | current local simulation |
+| `GAP-RECOVERY-001` | Process interruption 뒤 동일 frozen identity를 중복 decision/fill/state update 없이 재개하고 changed identity는 mutation 전에 분기 요구로 실패한다 | future (§17.2) |
+| `GAP-ACCOUNT-HISTORY-001` | Actual state를 session 시계열과 instrument panel로 선언해 읽을 수 있고, 그 접근이 strategy state 보유에 종속되지 않으며, 기록하지 않은 항목은 추정 없이 실패한다 | current |
+| `GAP-STRATEGY-STATE-001` | Strategy state를 package가 해석하지 않고 이어가며, 갱신이 execution 발생에 종속되지 않고, run 종료 state를 다음 run의 시작 state로 명시적으로 지정한다 | current |
 | `GAP-CATALOG-001` | Concurrent publication과 process interruption에서도 partial result가 reusable success로 보이지 않고 conflict, idempotency와 recovery outcome이 결정적이다 | current local storage |
 
 ETF look-through는 이 revision에서 `UC-LOOKTHROUGH-001`~`003`과 §10.5로 **user-authored Strategy behavior**임을
@@ -1879,7 +1928,7 @@ Model, Strategy, execution mechanism, artifact backend나 local extension mechan
 
 - same frozen input의 deterministic replay
 - Decision과 full-fill MVP execution outcome의 분리 및 actual feedback
-- hold/no-trade monitoring과 checkpoint/resume
+- hold/no-trade monitoring과 run 종료 결과의 이어받기
 - typed artifact round-trip, failure evidence와 dependency lineage
 - §3.5 stable current-scope use cases와 §15 acceptance scenario
 
@@ -1888,7 +1937,7 @@ Internal class나 callback 이름의 parity는 요구하지 않는다.
 ### 16.3 Schema and artifact change
 
 Old artifact는 안전하게 읽히거나 explicit migration/unsupported error를 제공해야 한다. Schema change가 logical identity,
-producer-independent loading, path-dependent source state/cursor lineage, partial publication recovery 또는 actual/intended
+producer-independent loading, path-dependent source state와 반영 범위 lineage, partial publication 무결성 또는 actual/intended
 state separation을 깨뜨려서는 안 된다. 여러 source state를 하나의 fabricated identity로 합쳐서도 안 된다.
 
 ### 16.4 Test philosophy
@@ -1921,7 +1970,12 @@ current support claim이 아니다.
 ### 17.2 Optional future capabilities
 
 Real short, derivatives, lifecycle cash flow, actual settlement, partial fill, alternative optimizer, AI-assisted Strategy,
-distributed execution과 production integration은 독립적인 product decision으로 추가할 수 있다. 각 확장은 새
+distributed execution과 production integration은 독립적인 product decision으로 추가할 수 있다.
+
+중단된 run의 재개도 여기에 속한다. 실패하거나 중단된 run은 current scope에서 처음부터 다시 실행한다. 장시간 run
+이나 production 연속 운영에서 재개 수요가 검증되면 별도의 product decision으로 추가한다.
+
+각 확장은 새
 requirement를 해당 workflow에서 발견하고,
 기존 minimal registration이나 unrelated research를 막지 않아야 한다. 구체적인 component hierarchy와 service topology는
 architecture가 정한다.

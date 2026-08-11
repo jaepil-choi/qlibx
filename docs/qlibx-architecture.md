@@ -79,6 +79,9 @@ trigger → permitted read → calculation → commit → evidence → validatio
 | `UC-ALPHA-PATH-001` | later Strategy/Ensemble composition | frozen typed result + source state/cursor lineage | consumer compatibility + composition | new Strategy result | consumed artifact + all source state/cursor edges | producer not rerun; no current-state recomputation claim |
 | `UC-ALPHA-CHILD-001` | exact frozen-decision child invocation | parent `decision_intent:v1` + explicit close/open event data | alternate schedule/price sizing and matching only | isolated child Account/artifacts | exact parent + dataset/state + profile/convention | real-DW close/open, parent unchanged, no producer rerun, installed sample |
 | `UC-ALPHA-ADAPTIVE-001` | feedback-triggered Strategy | committed feedback + prior memory | proposed belief/member update | Memory at flow boundary | before/after + cursor | no future feedback |
+| `UC-TRIGGER-001` | session candidate reached | declared cadence policy + this run's FIRE history | pure FIRE/SKIP evaluation | Strategy runs only on FIRE | policy fingerprint on the FIRE result + SKIP in the run trace | declared cadence matches observed decision times; SKIP is not a failure |
+| `UC-STATE-001` | Strategy returns state on any decision | prior strategy state, independent of fills | strategy-owned computation the package does not interpret | state carried to the next decision and to the run result | state was consumed marks the result as not data-reproducible | state advances with zero-dealt or absent execution; next run seeded explicitly |
+| `UC-ACCOUNT-HISTORY-001` | Strategy declares actual-state history | declared account series and/or instrument panel | stop-loss or cooldown from history alone | user Strategy result only | consumed account items and range | no strategy state used; unrecorded item fails before compute |
 | `UC-ENSEMBLE-001` | Ensemble Strategy run | compatible member results | combine/net/cross by ticker | ensemble result | contribution + residual | producers not rerun |
 | `UC-PORTFOLIO-001` | construction profile selection | same weights + selected profile | profile-specific construction | separate portfolio results | budget/direction/cost lineage | alpha unchanged |
 | `UC-CONSTRAINT-001` | constraint-free analysis | signal/weight artifact only | requested analysis | analysis result | actual dependencies | no compliance binding |
@@ -118,6 +121,11 @@ trigger → permitted read → calculation → commit → evidence → validatio
 recovery acceptance로 current-support registry에 승격됐다. `UC-PROD-*`, `UC-FUTURE-001`, `UC-PERP-001`,
 `UC-CASHFLOW-001`과 `UC-SETTLEMENT-001`은 current acceptance가 아니다. Test와 fixture를 만들 때도 같은
 use-case ID를 사용해 PRD → architecture → validation의 연결을 유지한다.
+
+`UC-TRIGGER-001`은 2026-08-11 strategy-owned schedule-shaped trigger 구현과 `tests/test_trigger.py`로 current다.
+같은 날 PRD에 추가된 `UC-STATE-001`과 `UC-ACCOUNT-HISTORY-001`은 **아직 구현되지 않은 target**이다. 현행 코드는
+strategy state 갱신을 account feedback 전진에 결합하고(`MEMORY_FEEDBACK_NOT_ADVANCED` 계열), actual state를
+현재 snapshot과 memory-cursor 기반 증분으로만 노출한다. 두 use case는 그 결합을 끊는 것을 요구한다.
 
 ---
 

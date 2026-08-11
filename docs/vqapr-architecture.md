@@ -139,8 +139,10 @@ DRY는 **모양이 같은 것**이 아니라 **변경 이유가 같은 것**에 
 
 $$available\_at \le event.ts$$
 
-- `SessionCalendar`는 명시적 session 목록 또는 승인된 provider의 결과만 받는다.
-- 가격 coverage나 weekday 추정으로 calendar를 만들지 않는다. → `UC-TRIGGER-001`
+- `SessionCalendar`는 명시적 session 목록, 승인된 provider의 결과, 또는 **user가 선언한 유도 규칙**의
+  결과만 받는다(§3.6).
+- **package가 알아서 추측하지 않는다.** 가격 coverage나 weekday로 calendar를 조용히 만들어내는 경로는 없다.
+  → `UC-TRIGGER-001`
 
 ### 3.2 동일 timestamp 우선순위
 
@@ -171,11 +173,34 @@ class EveryNSessions(BaseModel):
     local_time: time = time(4, 0)
     timezone: str = "Asia/Seoul"
     anchor: date | None = None
+
+class LastSessionOfMonth(BaseModel):
+    months: tuple[int, ...] | None = None    # None이면 매월. (6,)이면 매년 6월
+    local_time: time = time(4, 0)
+    timezone: str = "Asia/Seoul"
 ```
 
 - Flow가 `SessionCalendar × TriggerPolicy`를 결합해 DECISION 이벤트를 만든다.
 - **왜 Strategy가 소유하나**: PRD §3.3 — "정의만 읽고 cadence를 알 수 있어야 한다". run script에 두면
   같은 Strategy가 스크립트마다 다른 전략이 된다.
+
+**vocabulary는 닫힌 집합으로 둔다.** 임의의 cron 표현이나 콜백을 받지 않는다.
+
+| trigger | 필요한 이유 |
+|---|---|
+| `EveryNSessions` | 세션 수로 세는 cadence. 매 세션, N 세션마다 |
+| `LastSessionOfMonth` | **달력 경계**로 세는 cadence. 월말 리밸런싱과 연 1회 형성(Fama-French 6월말)은 세션 수로 근사할 수 없다 — 매년 날짜가 밀린다 |
+
+- **왜 두 종류가 필요한가**: "N 세션마다"와 "매월 마지막 거래일"은 서로를 표현하지 못한다. 한 달의
+  거래일 수가 달마다 다르기 때문이다.
+- **왜 임의 표현을 안 받나**: cadence는 경제적 의미이고 재현 가능해야 한다. 임의 콜백은 데이터나 외부
+  상태를 읽을 수 있어 §3.1(데이터에서 cadence를 유도하지 않는다)을 우회한다.
+- **왜 Strategy가 "오늘 월말이야?"를 묻지 않나**: 물을 필요가 없다. `LastSessionOfMonth`를 선언했으면
+  **불려온 순간 그날이 월말이다.** 판단 시점의 다른 성질(형성일로부터 며칠째인가 등)이 필요하면 §5.1의
+  calendar view로 읽는다.
+
+**월말이 언제인지는 calendar가 안다.** Flow가 `SessionCalendar`에서 해당 월의 마지막 eligible session을
+찾는다. 6월 30일이 휴장이면 6월의 마지막 거래일이 형성일이 된다. 데이터에서 유도하지 않는다.
 
 ### 3.5 Warm-up — 판단할 준비가 되기 전의 candidate
 
@@ -197,6 +222,48 @@ class Warmup(BaseModel):
 - skip은 실패가 아니라 **기록된 정상 결과**다. run result에 어느 candidate가 왜 판단되지 않았는지 남는다.
   → `UC-TRIGGER-001` "판단하지 않은 session은 실패가 아니라 재현 가능한 기록으로 남는다"
 - **기본값은 0이다.** warm-up이 필요 없는 전략은 아무것도 선언하지 않는다.
+
+### 3.6 Calendar를 유도해야 할 때
+
+**상황.** 사용자가 가진 것이 daily OHLCV뿐이고 거래소 calendar 파일이 없다. 이것이 일반적인 출발점이다.
+
+**결정.** `available_at` 유도(§4.2)와 **정확히 같은 패턴**을 쓴다.
+
+| | availability (§4.2) | calendar (여기) |
+|---|---|---|
+| package | 추측하지 않는다 | 추측하지 않는다 |
+| user | 유도 규칙을 근거와 함께 선언 | 유도 규칙을 근거와 함께 선언 |
+| package | 형식·coverage·일관성을 결정적으로 검증 | 동일 |
+| 기록 | 규칙이 frozen input에 남는다 | 동일 + result limitation |
+
+#### 날짜는 유도될 수 있고 시각은 유도될 수 없다
+
+daily OHLCV에는 `2024-03-05`만 있고 `15:30 KST`가 없다. 그런데 `available_at`도 execution 이벤트도 시각을
+요구한다. 그래서 답이 두 조각으로 갈린다.
+
+```text
+session 날짜   ← 선언된 유도 규칙으로 데이터에서
+open/close 시각 ← user 선언 (이미 §4.2의 available_at 규칙이 담고 있다)
+```
+
+**두 번째는 새로 요구하지 않는다.** "`DATE=2024-03-05`인 종가 행은 `2024-03-05 15:30 Asia/Seoul`에
+available해진다"는 선언에 이미 그 venue의 종가 시각이 들어 있다. 같은 선언을 재사용한다.
+
+#### 유도 규칙마다 위험이 다르다
+
+| 규칙 | 위험 |
+|---|---|
+| 전 종목 날짜 **union** — 하루라도 거래된 날이 session | 한 종목의 결측·거래정지에 무너지지 않는다. 상대적으로 안전 |
+| 단일 기준 종목의 날짜 | 그 종목이 거래정지되면 **session이 사라진다.** 위험 |
+| 지수 시계열의 날짜 | 안전. 다만 지수 데이터가 있어야 한다 |
+
+bundled agent skill이 후보와 위험을 설명하고 user가 고른다. package는 고른 규칙을 검증하고 적용할 뿐이다.
+
+- **여전히 금지되는 것**: 아무도 선언하지 않았는데 Flow가 가격 coverage로 session을 만들어내는 것.
+  §3.1의 금지는 **package의 추측**을 향한 것이지 user의 선언을 향한 것이 아니었다.
+- **왜 이 완화가 안전한가**: 유도 규칙이 frozen input에 남아 재현되고, 어떤 dataset의 어떤 규칙에서
+  나왔는지 감사할 수 있으며, result에 limitation으로 표시된다. 조용한 추측과 정반대다.
+- **UC**: `UC-CALENDAR-001`
 
 ---
 
@@ -273,7 +340,16 @@ class Strategy(ABC):
     def decide(self, context: StrategyContext) -> PortfolioIntent: ...
 ```
 
-- `StrategyContext`는 `view`, `event`, `universe`만 준다. Clock·Store·Exchange·mutable Account는 없다.
+- `StrategyContext`는 `view`, `event`, `universe`, `calendar`만 준다. Clock·Store·Exchange·mutable
+  Account는 없다.
+
+**calendar view.** Account snapshot과 같은 급의 읽기 전용 surface다. Strategy가 판단 시점의 **성질**을
+물을 수 있다 — 이번 달 몇 번째 거래일인가, 분기 첫 거래일인가, 직전 형성일로부터 몇 세션 지났는가.
+
+- **왜 필요한가**: trigger는 *언제 불릴지*만 정한다. *불린 시점이 어떤 날인지*는 알려주지 않는다.
+  두 질문은 다르다.
+- **왜 Clock 자체를 주지 않나**: Clock을 주면 시간을 진행시킬 수 있다. §2.1의 IoC가 무너진다.
+- 미래 session을 어디까지 노출할지는 **§15-2 열린 결정**이다.
 
 ### 5.1.1 Memory — 슬롯 하나, strict JSON
 
@@ -692,6 +768,68 @@ decision 03-06 04:00, execution 03-06 15:30.
 0단계의 차이가 두 전략의 첫 판단 시점을 가른다. 같은 `EveryNSessions(5)`를 선언해도 warm-up이 다르면
 첫 FIRE가 다른 session에서 일어나고, 그 사이의 candidate는 실패가 아니라 skip으로 기록된다.
 
+### 11.1 Fama-French 스타일 팩터 — independent double sort
+
+앞의 두 walkthrough는 **하나의 전략 = 하나의 run**이었다. 팩터 구성은 다르다. 여러 포트폴리오가 **같은
+분류**를 공유해야 하고, 그 공유를 증명할 수 있어야 한다.
+
+```text
+Model 1  firm characteristics                      → materialized (PIT, 재사용)
+           BM, OPE/BE, asset growth, momentum
+
+Model 2  bucket membership                         → formation date별 (ticker, bucket)
+           universe 자격필터 → KOSPI breakpoint → 2×3 배정
+
+Strategy(bucket="SH")  membership에서 자기 버킷만 읽어 weighting → PortfolioIntent
+   × 6 buckets → 6 runs (Academic Exchange, cost 0)  → 6 NAV 시계열
+
+Strategy(HML)          같은 membership을 읽어 long (SH,BH) / short (SL,BL) → 1 run
+```
+
+#### 왜 membership이 Model artifact인가
+
+6개 run의 Strategy가 각자 breakpoint를 다시 계산하면 미묘하게 갈릴 수 있다. **membership을 artifact로
+만들면 6개 run이 같은 버킷을 썼다는 사실이 lineage로 증명된다.**
+
+부수 효과가 둘 있다.
+
+- 버킷별 **종목 수**가 이 artifact에 이미 있다. Account에 물을 필요가 없다. Kimchi 비교 검증이
+  "상관 0.9928인데 평균 종목 수 278.5 vs 349.4"를 잡아낸 그 진단이 여기서 나온다.
+- "이 6개 run이 하나의 연구"라는 관계가 **dependency graph에서 유도된다.** 같은 artifact를 가리키므로
+  별도 grouping 개념을 만들 필요가 없다.
+
+#### HML은 두 경로가 있고 둘은 일치해야 한다
+
+| 경로 | 무엇 |
+|---|---|
+| **직접** — signed 포트폴리오 하나로 spine 통과 | authoritative HML |
+| **조합** — 6버킷 return에서 `(SH+BH)/2 − (SL+BL)/2` | 검산이자 논문 산출물 |
+
+Academic Exchange가 zero-cost·full-fill이므로 **정확히 일치해야 한다.** 어긋나면 어딘가 틀린 것이고,
+그 자체가 좋은 검산이다.
+
+#### VW와 EW는 리밸런싱 cadence의 의미가 다르다
+
+**시총가중은 자기유지된다.** 포지션을 그대로 들면 가치가 가격을 따라 움직이고, 그것이 정확히 시총
+비중이다. 리밸런싱이 필요한 것은 편입 변경(형성 주기)과 주식수 변동뿐이다.
+
+$$w_{i,t} = \frac{P_{i,t}S_i}{\sum_j P_{j,t}S_j} \quad\text{— 보유만 해도 성립}$$
+
+**균등가중은 자기유지되지 않는다.** 가격이 움직이면 균등에서 멀어진다. 따라서 **cadence가 결과를 바꾼다.**
+매일 균등으로 되돌린 EW 팩터와 월별로 되돌린 EW 팩터는 서로 다른 시계열이고, **어느 쪽도 정답이 아니다.**
+사용자가 고르는 모델링 선택이다.
+
+- **왜 이것이 설계상 중요한가**: pandas로 짜면 이 차이가 `mean()`이냐 `sum/sum`이냐 한 줄에 숨는다.
+  우리 구조에서는 **trigger 선언**으로 드러날 수밖에 없다. 숨은 가정이 계약이 된다.
+- 같은 이유로 "형성 시점 시총 고정" vs "전일 시총" 같은 선택도 trigger와 intent의 선택으로 명시된다.
+
+#### 한계
+
+보유 중 상장폐지·거래정지 종목의 처리는 현재 범위 밖이다(PRD §13.2 — security master/ETL 책임).
+사용자가 명시해야 하며, 조용히 빠지지 않는다.
+
+**UC**: `UC-FACTOR-001`
+
 ---
 
 ## 12. Run definition과 preflight
@@ -757,8 +895,10 @@ class RunDefinition(BaseModel):
 | `UC-DATA-001`, `UC-AGENT-001` | §4.1 |
 | `UC-DATA-002`, `UC-PIT-001`, `UC-ERROR-001` | §4.2 + §8.3 |
 | `UC-LOOKBACK-001` | §4.2 (lookback → Store query) |
-| `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger 소유 · warm-up skip) |
+| `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger vocabulary · warm-up skip) |
+| `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
+| `UC-FACTOR-001` | §11.1 (Model membership → 버킷 run → 조합 검산) |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.4 (`BudgetSemantics`) — **형태 미확정, §15-1** |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
@@ -814,6 +954,17 @@ class RunDefinition(BaseModel):
 
 **언제 정하나**: constraint optimizer 설계 시. 그 전에 이 부분을 구현하면 optimizer가 들어올 때 다시 뜯는다.
 
+### 15-2. Calendar view가 미래 session을 어디까지 보여주는가
+
+Strategy가 `context.calendar`로 판단 시점의 성질을 묻는다(§5.1). "이번 달 마지막 거래일인가"를 답하려면
+그 달의 남은 session을 봐야 한다.
+
+- 예정된 휴장은 실제로 미리 공표되므로 보아도 look-ahead가 아니다.
+- 예기치 못한 폐쇄(재난, 시장 중단)까지 frozen calendar에 있으면 그것은 새는 것이다.
+
+**미결.** 다만 새는 것이 **데이터가 아니라 스케줄**이라 영향이 작다. 후보: 전체 노출 / 선언된 horizon까지만
+노출 / calendar에도 `available_at`을 적용. 실제 전략이 무엇을 묻는지 관측한 뒤 정한다.
+
 ---
 
 ## 16. Acceptance checklist
@@ -832,6 +983,10 @@ class RunDefinition(BaseModel):
 - [ ] fractional/lot 규칙이 `ListingRule`에 있고 `AccountMode`에는 없다
 - [ ] listing이 Exchange의 frozen config에 있고 `RunDefinition`에는 없다
 - [ ] warm-up 구간 candidate가 `DECISION_SKIPPED`로 기록되고, 그 이후의 결측은 실패한다
+- [ ] `LastSessionOfMonth(months=(6,))`가 휴장을 반영한 6월 마지막 거래일에 발화한다
+- [ ] 선언 없이 가격 coverage에서 session을 만들어내는 경로가 없다
+- [ ] 같은 membership artifact를 소비한 버킷 run들이 그 사실을 lineage로 증명한다
+- [ ] 버킷 조합 팩터와 signed 직접 실행 팩터가 zero-friction profile에서 일치한다
 - [ ] `AccountMode`의 차이가 음수 position 유효성 하나뿐이다
 - [ ] account history 접근이 strategy state 보유와 무관하다
 - [ ] commit 전 실패가 position/cash/version/journal을 하나도 바꾸지 않는다

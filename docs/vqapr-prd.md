@@ -406,11 +406,32 @@ decision은 그 행을 읽을 수 있고, 그 decision의 next eligible close ex
 판단 후보가 되는 session 목록과 open/close 시각은 **선택한 venue의 거래 calendar 사실**이어야 하고,
 Strategy나 data coverage에서 유도해서는 안 된다.
 
-Strategy는 휴장일이나 session 자체를 만들어내지 않는다. run은 명시적으로 동결된 session calendar 또는 선택
-환경이 식별한 calendar provider의 결과를 사용한다.
+Strategy는 휴장일이나 session 자체를 만들어내지 않는다. run은 명시적으로 동결된 session calendar, 선택
+환경이 식별한 calendar provider의 결과, 또는 user가 근거와 함께 선언한 유도 규칙의 결과를 사용한다.
 
-이 규칙이 막는 것: 특정 종목의 결측 때문에 후보 session이 사라지면 cadence 전체가 미래 정보에 오염된다.
-가격 행 coverage나 단순 weekday 추정으로 session calendar를 만들지 않는다.
+**금지되는 것은 package의 추측이다.** 특정 종목의 결측 때문에 후보 session이 사라지면 cadence 전체가
+미래 정보에 오염된다. 따라서 아무도 선언하지 않았는데 가격 행 coverage나 weekday 추정으로 session
+calendar를 만들어내는 경로는 두지 않는다.
+
+#### Calendar 유도는 availability 유도와 같은 규칙을 따른다
+
+거래소 calendar 파일 없이 daily 가격 데이터만 가진 project는 흔하다. 이 경우 user는 §4.2와 **같은
+방식으로** 유도 규칙을 선언할 수 있다. package는 추측하지 않고, user가 근거와 함께 규칙을 고르며,
+package는 그 규칙을 deterministic하게 검증하고 frozen input에 기록한다.
+
+**날짜는 유도될 수 있지만 시각은 유도될 수 없다.** daily 가격 행에는 날짜만 있고 개장·종가 시각이 없다.
+그 시각은 이미 `available_at` 규칙(§4.2)이 담고 있으므로 새로 요구하지 않고 같은 선언을 재사용한다.
+
+유도 규칙마다 위험이 다르므로 bundled agent skill이 후보와 그 위험을 설명하고 user가 선택한다. 예를 들어
+전체 instrument의 날짜 union은 한 종목의 거래정지에 무너지지 않지만, 단일 기준 종목의 날짜를 쓰면 그 종목이
+멈출 때 session 자체가 사라진다. 선택된 규칙과 그 한계는 result에 남는다.
+
+#### UC-CALENDAR-001 — 가격 데이터만 있는 project의 calendar
+
+user가 daily OHLCV만 가지고 있고 거래소 calendar 파일이 없다. package는 임의로 session을 만들지 않고,
+agent가 유도 규칙 후보와 각각의 위험을 설명한다. user가 규칙을 선택하면 package는 그 규칙을 검증해
+frozen session calendar를 만들고, 유도 방식과 한계를 result에 기록한다. 같은 규칙과 같은 data에서 같은
+session 집합이 재현된다. 규칙을 바꾸면 경제적으로 다른 run으로 구분된다.
 
 ### 3.5 Bounded lookback
 
@@ -611,6 +632,29 @@ Model이 한 시점의 cross-sectional exposure와 observed return으로 factor-
 추정한다. result는 statistical estimate, regression specification, input period, availability를 명시하며
 **portfolio NAV나 executable factor return으로 표시하지 않는다.** 같은 factor를 실제 portfolio로 평가하려면
 별도 Strategy와 execution workflow를 선택해야 한다.
+
+#### UC-FACTOR-001 — Independent double sort로 구성한 팩터 수익률
+
+user가 firm characteristic으로 sorted portfolio를 만들고 그 수익률로 팩터를 구성한다. 이것은 이 제품의
+일급 research use case이며 다음을 만족해야 한다.
+
+- **characteristic은 재사용 가능한 Model result다.** 회계 항목의 availability rule과 fiscal period 정렬은
+  §4.1–4.2를 따르고, 그 가정(예: 확인된 보고 지연)이 result의 limitation에 남는다.
+- **분류(membership)도 저장 가능한 result다.** universe 자격 조건, breakpoint를 계산한 기준 집합, 배정 결과와
+  버킷별 구성종목 수를 보존한다. breakpoint 기준 집합이 최종 대상 집합과 다를 수 있으므로(예: 한 시장의
+  분위수를 두 시장에 적용) 둘을 구분해 기록한다.
+- **같은 분류를 쓴 여러 portfolio가 그 사실을 증명할 수 있어야 한다.** 각 버킷 portfolio의 result는 자신이
+  소비한 membership을 dependency로 가리키며, 이를 통해 여러 result가 하나의 연구를 구성함을 확인할 수 있다.
+  각 portfolio가 분류를 독립적으로 다시 계산하도록 강요하지 않는다.
+- **버킷 수익률은 execution을 거쳐 산출한다.** §2.2를 우회하지 않는다. zero-friction profile을 선택하면
+  거래비용 없는 정의상의 팩터 수익률이 나온다.
+- **버킷 조합으로 만든 팩터와 signed portfolio로 직접 실행한 팩터가 zero-friction profile에서 일치해야 한다.**
+  일치하지 않으면 실패가 아니라 관측 가능한 불일치로 보고한다.
+- **리밸런싱 cadence는 명시적 선택이다.** 가중 방식에 따라 cadence가 결과를 바꿀 수도, 거의 바꾸지 않을 수도
+  있다. 어느 쪽이든 package가 대신 고르지 않으며, 선택한 cadence가 result에 남는다.
+
+보유 중 발생하는 상장폐지·거래정지 등 instrument lifecycle 사건의 해석은 현재 범위 밖이다(§13.2).
+해당 종목이 조용히 제외되어서는 안 된다.
 
 ### 5.2 Strategy research
 
@@ -1601,6 +1645,9 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - `UC-SIGNAL-001`의 direct Strategy와 `UC-SIGNAL-002`의 stored model output 경로가 모두 동작한다.
 - `UC-MODEL-001`처럼 portfolio 없이 Model signal을 연구·평가·저장할 수 있다.
 - `UC-MODEL-002`에서 statistical factor-return estimate를 executed portfolio return/NAV로 표시하지 않는다.
+- `UC-FACTOR-001`에서 characteristic과 membership을 재사용 가능한 result로 만들고, 같은 membership을 소비한
+  여러 버킷 portfolio가 그 사실을 dependency로 증명하며, 버킷 조합 팩터와 직접 실행 팩터가 zero-friction
+  profile에서 일치한다.
 - signed weight는 budget semantics와 actual dependency를 보존하고 producer 재실행 없이 재사용할 수 있다.
 - `UC-ALPHA-BUDGET-001`에서 flexible residual을 fixed budget으로 자동 확대하지 않는다.
 - `UC-BUILTIN-001`에서 built-in weighting 함수가 data/state/clock에 접근하지 않고, 부수 입력의 결측에 계산 전
@@ -1609,6 +1656,8 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   state identity와 반영 범위를 새 lineage에 보존하며 current-state recomputation으로 표시하지 않는다.
 - `UC-STATE-001`에서 체결이 없는 세션과 run 경계를 넘어 strategy state가 이어지고, 다음 run의 시작 state는
   명시적으로 지정된다. state 갱신이 execution 발생 여부에 종속되지 않는다.
+- `UC-CALENDAR-001`에서 가격 데이터만 있는 project가 선언된 유도 규칙으로 frozen session calendar를 만들고,
+  package는 규칙 없이 session을 추측하지 않으며, 유도 방식과 한계가 result에 남는다.
 - `UC-TRIGGER-001`에서 Strategy가 선언한 cadence와 local decision time을 frozen venue calendar와 결합한 판단
   시점이 실행 결과와 일치한다. 해당 시각에 data row가 없어도 event는 성립하며, 판단하지 않은 session은 실패로
   기록되지 않는다.
@@ -1730,7 +1779,8 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-AGENT-001` | §4.2 | current |
 | `UC-DATA-002` | §4.3 | current |
 | `UC-PIT-001` | §4.3 | current |
-| `UC-MODEL-001`, `UC-MODEL-002` | §5.1 | current |
+| `UC-CALENDAR-001` | §3.4 | current |
+| `UC-MODEL-001`, `UC-MODEL-002`, `UC-FACTOR-001` | §5.1 | current |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.2 | current |
 | `UC-ENSEMBLE-001` | §5.4 | current |
 | `UC-ALPHA-BUDGET-001` | §5.5 | current |

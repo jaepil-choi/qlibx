@@ -63,9 +63,9 @@ def test_uc_alpha_path_001_installed_composition_preserves_source_lineage(
         "sample-source-account-b",
     }
     assert {
-        memory["strategy_id"]
+        state["strategy_id"]
         for item in lineage
-        for memory in item["memory"]
+        for state in item["strategy_state"]
     } == {"sample.path-producer-a", "sample.path-producer-b"}
     source_ids = result["source_artifact_ids"]
     assert [item["source_artifact_id"] for item in lineage] == source_ids
@@ -81,7 +81,7 @@ def test_uc_alpha_path_001_installed_composition_preserves_source_lineage(
         for account_id in pair
     } == {"sample-downstream-account-b"}
     assert set(result["downstream_direct_state_access_counts"]) == {0}
-    assert set(result["downstream_direct_memory_access_counts"]) == {0}
+    assert set(result["downstream_direct_strategy_state_access_counts"]) == {0}
     assert all(item == source_ids for item in result["downstream_source_lineage_ids"])
     assert result["final_positions"]
     assert {

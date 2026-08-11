@@ -14,7 +14,7 @@ from qlibx.account.account import (
     Position,
     ValuationStatus,
 )
-from qlibx.account.memory import MemorySnapshot, StrategyMemoryStore
+from qlibx.account.memory import MemorySnapshot
 
 __all__ = [
     "Account",
@@ -29,6 +29,6 @@ __all__ = [
     "MarkBatch",
     "MemorySnapshot",
     "Position",
-    "StrategyMemoryStore",
+
     "ValuationStatus",
 ]

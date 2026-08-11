@@ -17,4 +17,4 @@ uv run python examples/qlibx_owned/forward_label_materialization/run.py .
 
 The bundled values are deterministic contract evidence, not a market-quality or predictive-power
 claim. The sample never infers `horizon_end`, does not create a stored signal, and does not access or
-mutate Account or Strategy Memory.
+mutate Account or Strategy state.

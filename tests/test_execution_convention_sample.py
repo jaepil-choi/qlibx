@@ -67,7 +67,7 @@ def test_installed_execution_convention_sample_reuses_one_frozen_parent(
     assert open_child["dataset_dependency_roles"] == ["open_execution_price"]
 
     assert close_child["strategy_result_count"] == open_child["strategy_result_count"] == 0
-    assert close_child["memory_commit_count"] == open_child["memory_commit_count"] == 0
+    assert close_child["strategy_state"] is open_child["strategy_state"] is None
     assert result["future_hidden_failure_code"] == "EXECUTION_SESSION_PRICE_MISSING"
     assert result["future_hidden_commit_status"] == "NONE"
     assert result["future_hidden_execution_artifacts"] == 0

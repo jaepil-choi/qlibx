@@ -14,6 +14,9 @@ required_current_use_cases:
   - UC-ALPHA-ADAPTIVE-001
   - UC-ALPHA-CHILD-001
   - UC-ALPHA-PATH-001
+  - UC-TRIGGER-001
+  - UC-STATE-001
+  - UC-ACCOUNT-HISTORY-001
   - UC-ENSEMBLE-001
   - UC-PORTFOLIO-001
   - UC-CONSTRAINT-ADJUST-001
@@ -39,7 +42,7 @@ required_current_use_cases:
   - UC-LOOKTHROUGH-003
 companion_registries:
   - tests/scenarios/current_contracts.yaml
-  - tests/scenarios/recovery.yaml
+  # Interrupted-run recovery is outside the current product scope.
 coverage_sets:
   m5:
     - UC-EXEC-001
@@ -89,7 +92,7 @@ scenarios:
       future_hidden: true
       resolves_error_lineage: true
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-SIGNAL-001
     case: direct_real_dw_signal_and_weight_research
@@ -104,7 +107,7 @@ scenarios:
       portfolio_required: false
       execution_required: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-CONSTRAINT-001
     case: direct_real_dw_research_without_compliance_capability
@@ -118,7 +121,7 @@ scenarios:
       compliance_dataset_required: false
       constraint_artifact_created: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-ERROR-001
     case: missing_realized_return_fails_at_actual_analysis_path
@@ -134,7 +137,7 @@ scenarios:
       portfolio_stage_created: false
       order_stage_created: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-RESEARCH-001
     case: failed_signal_analysis_is_preserved_then_resolved
@@ -150,7 +153,7 @@ scenarios:
       resolves_error_lineage: true
       metric_set: [signal_count, information_coefficient]
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-EXTENSION-001
     case: project_local_sector_demean_validated_before_registration
@@ -189,7 +192,7 @@ scenarios:
       analysis_recalculation_per_renderer: false
       value_fingerprint_equal: true
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-MONITOR-001
     case: actual_breach_and_missing_input_are_distinct_report_records
@@ -209,7 +212,7 @@ scenarios:
       missing_input_count: 1
       intended_target_as_actual: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-LOOKTHROUGH-001
     case: same_real_etf_opaque_or_user_mapped
@@ -229,7 +232,7 @@ scenarios:
       explicit_dataset_access: true
       package_lookthrough_artifact: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-LOOKTHROUGH-002
     case: future_real_k200_constituent_row_hidden
@@ -248,8 +251,8 @@ scenarios:
       automatic_latest_fallback: false
 
   - id: UC-LOOKTHROUGH-003
-    case: committed_actual_recomputed_against_strategy_memory_target
-    test: tests/acceptance/test_lookthrough_scenarios.py::test_uc_lookthrough_003_recomputes_actual_instead_of_memory_target
+    case: committed_actual_recomputed_against_strategy_state_target
+    test: tests/acceptance/test_lookthrough_scenarios.py::test_uc_lookthrough_003_recomputes_actual_instead_of_strategy_state_target
     inputs:
       data_kind: real
       sources:
@@ -259,14 +262,14 @@ scenarios:
         - data/Dataguide/데이터가이드K200ETF들_20200101-20260430.csv
         - data/preprocessed/k200_etf_prices.parquet
       available_at_rule: next_trading_session_at_09_00_kst
-      intended_state_source: strategy_memory
+      intended_state_source: explicit_strategy_state
       actual_state_source: committed_account_snapshot
     expected:
       actual_exposure: {A012330: 0.4, A373220: 0.2}
-      memory_target_exposure: {A012330: 0.65, A373220: 0.35}
+      strategy_state_target_exposure: {A012330: 0.65, A373220: 0.35}
       intended_as_actual: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-EXEC-003
     case: real_no_trade_price_drift_finding_only
@@ -283,7 +286,7 @@ scenarios:
       decision_created: false
       order_created: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
       breach_published: true
 
   - id: UC-CONSTRAINT-002
@@ -299,7 +302,7 @@ scenarios:
       missing_binding: failed
       before_available_at: failed
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-CONSTRAINT-ADJUST-001
     case: real_k200_cap_lot_residual_then_independent_deny
@@ -317,7 +320,7 @@ scenarios:
       validation_outcome: complete
       validation_compliant: false
       account_mutation: false
-      memory_mutation: false
+      strategy_state_mutation: false
 
   - id: UC-PORTFOLIO-001
     case: real_dw_same_alpha_two_current_profiles
@@ -345,7 +348,7 @@ scenarios:
     expected:
       outcome: complete
       account_mutation: flow_commit_only
-      memory_mutation: flow_commit_only
+      strategy_state_update: after_strategy_return
 
   - id: UC-EXEC-002
     case: real_dw_next_close_limitations
@@ -359,14 +362,14 @@ scenarios:
       dealt_quantity: 129
 
   - id: UC-ALPHA-ADAPTIVE-001
-    case: confirmed_feedback_memory_commit
-    test: tests/acceptance/test_execution_scenarios.py::test_uc_alpha_adaptive_001_memory_commits_only_after_feedback
+    case: confirmed_feedback_strategy_state_update
+    test: tests/acceptance/test_execution_scenarios.py::test_uc_alpha_adaptive_001_state_is_returned_after_strategy
     inputs:
       data_kind: real
       sources: [data/DW/fng_stock_daily_prices.csv]
     expected:
       outcome: complete
-      memory_mutation: flow_commit_after_feedback
+      strategy_state_update: after_strategy_return
       feedback_cursor: 2
 
   - id: UC-EXEC-001

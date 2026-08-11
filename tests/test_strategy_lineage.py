@@ -27,7 +27,7 @@ from qlibx.flow.strategy_results import (
     StrategySourceLineageError,
     canonicalize_dependencies,
 )
-from qlibx.view import MemoryAccessRecord, StateAccessRecord, StrategyView
+from qlibx.view import StateAccessRecord, StrategyStateAccessRecord, StrategyView
 
 EVALUATION_TIME = datetime(2025, 1, 3, 9, tzinfo=UTC)
 
@@ -63,7 +63,6 @@ def source_result(identity: str) -> StrategyResult:
         decision_action=DecisionAction.RESEARCH_ONLY,
         path_dependent=True,
         state_identity=f"account:{identity}:v4",
-        feedback_cursor="7",
         state_accesses=state_accesses,
     )
 
@@ -95,7 +94,7 @@ class FrozenSourceConsumer:
                 requirement_id="source.member",
                 consumer_role="member",
                 artifact_type="strategy_result",
-                artifact_schema_version=3,
+                artifact_schema_version=4,
             ),
         )
 
@@ -122,7 +121,7 @@ def invocation(identity: str, artifact_id: str = "artifact-missing") -> Strategy
     )
 
 
-def test_generic_consumer_promotes_v3_source_lineage_and_deduplicates_access(
+def test_generic_consumer_promotes_v4_source_lineage_and_deduplicates_access(
     tmp_path: Path,
 ) -> None:
     current = project(tmp_path)
@@ -135,7 +134,7 @@ def test_generic_consumer_promotes_v3_source_lineage_and_deduplicates_access(
 
     assert outcome.status is OutcomeStatus.COMPLETE
     assert type(outcome.result.result) is StrategyResult
-    assert outcome.result.artifact.artifact_schema_version == 3
+    assert outcome.result.artifact.artifact_schema_version == 4
     assert outcome.result.result.path_dependent is True
     assert outcome.result.result.state_identity is None
     assert tuple(
@@ -190,10 +189,10 @@ def test_observed_direct_state_rejects_false_path_declaration(tmp_path: Path) ->
     assert outcome.errors[0].error_code == "STRATEGY_PATH_DEPENDENCE_INCONSISTENT"
 
 
-def path_source_v3(identity: str, instrument: str) -> StrategyResult:
+def path_source_v4(identity: str, instrument: str) -> StrategyResult:
     return StrategyResult(
-        invocation_id=f"{identity}-v3-invocation",
-        strategy_id=f"tests.{identity}.v3",
+        invocation_id=f"{identity}-v4-invocation",
+        strategy_id=f"tests.{identity}.v4",
         evaluation_time=EVALUATION_TIME,
         weights=(WeightEntry(instrument=instrument, weight=0.5),),
         budget_mode=BudgetMode.FLEXIBLE,
@@ -204,7 +203,6 @@ def path_source_v3(identity: str, instrument: str) -> StrategyResult:
         decision_action=DecisionAction.RESEARCH_ONLY,
         path_dependent=True,
         state_identity=f"account:{identity}:v4",
-        feedback_cursor="7",
         state_accesses=(
             StateAccessRecord(
                 account_id=identity,
@@ -217,22 +215,21 @@ def path_source_v3(identity: str, instrument: str) -> StrategyResult:
                 as_of=EVALUATION_TIME,
             ),
         ),
-        memory_accesses=(
-            MemoryAccessRecord(
-                strategy_id=f"tests.{identity}.v3",
-                version=2,
-                feedback_cursor=7,
+        strategy_state_accesses=(
+            StrategyStateAccessRecord(
+                strategy_id=f"tests.{identity}.v4",
+                state_fingerprint="a" * 64,
             ),
         ),
     )
 
 
-def test_ensemble_preserves_two_distinct_v3_state_and_memory_origins(
+def test_ensemble_preserves_two_distinct_v4_state_and_strategy_state_origins(
     tmp_path: Path,
 ) -> None:
     current = project(tmp_path)
     sources = tuple(
-        path_source_v3(identity, instrument) for identity, instrument in (("A", "X"), ("B", "Y"))
+        path_source_v4(identity, instrument) for identity, instrument in (("A", "X"), ("B", "Y"))
     )
     publications = tuple(
         current.artifacts.publish_model(
@@ -276,9 +273,11 @@ def test_ensemble_preserves_two_distinct_v3_state_and_memory_origins(
     assert tuple(item.source_artifact_id for item in result.source_state_lineage) == tuple(
         sorted(item.result.artifact_id for item in publications)
     )
-    assert {item.memory_accesses[0].strategy_id for item in result.source_state_lineage} == {
-        source.strategy_id for source in sources
+    source_state_strategy_ids = {
+        item.strategy_state_accesses[0].strategy_id
+        for item in result.source_state_lineage
     }
+    assert source_state_strategy_ids == {source.strategy_id for source in sources}
     after = tuple(current.artifacts.load_envelope(item.artifact_id).result for item in before)
     assert after == before
 

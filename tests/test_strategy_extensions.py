@@ -27,7 +27,7 @@ EVALUATION_TIME = datetime(2025, 1, 3, 9, tzinfo=UTC)
 
 VALID_MODULE = '''from qlibx.data import ComponentRequirement
 from qlibx.extensions import StrategyExtensionSpec
-from qlibx.contracts import BudgetMode, StrategyDraft, WeightEntry
+from qlibx.contracts import BudgetMode, StrategyDraft, StrategyStateUpdate, WeightEntry
 
 STRATEGY_SPEC = StrategyExtensionSpec(strategy_id="project.valid")
 
@@ -114,7 +114,7 @@ def create_strategy():
 '''
 
 STATEFUL_MODULE = '''from qlibx.extensions import StrategyExtensionSpec
-from qlibx.contracts import BudgetMode, StrategyDraft, WeightEntry
+from qlibx.contracts import BudgetMode, StrategyDraft, StrategyStateUpdate, WeightEntry
 
 STRATEGY_SPEC = StrategyExtensionSpec(strategy_id="project.stateful")
 
@@ -127,7 +127,7 @@ class Strategy:
     def run(self, view):
         account = view.account_snapshot()
         feedback = view.account_feedback()
-        memory = view.memory_snapshot()
+        view.strategy_state()
         performance = view.latest_session_performance()
         return StrategyDraft(
             weights=(WeightEntry(instrument="A", weight=1.0),),
@@ -135,9 +135,9 @@ class Strategy:
             target_gross=1.0,
             path_dependent=True,
             state_identity=f"{account.account_id}:v{account.version}",
-            feedback_cursor=str(feedback.next_cursor),
-            proposed_memory={"performance_event": performance.event_id},
-            expected_memory_version=memory.version,
+            proposed_state=StrategyStateUpdate(
+                value={"performance_event": performance.event_id}
+            ),
         )
 
 def create_strategy():
@@ -145,7 +145,7 @@ def create_strategy():
 '''
 
 NONDETERMINISTIC_MODULE = '''from qlibx.extensions import StrategyExtensionSpec
-from qlibx.contracts import BudgetMode, StrategyDraft, WeightEntry
+from qlibx.contracts import BudgetMode, StrategyDraft, StrategyStateUpdate, WeightEntry
 
 STRATEGY_SPEC = StrategyExtensionSpec(strategy_id="project.nondeterministic")
 _counter = 0
@@ -323,7 +323,8 @@ def publish_state_fixture(project: QlibxProject) -> tuple[str, str]:
             realized_pnl=snapshot.realized_pnl,
         ),
         account_checkpoint=account.checkpoint(),
-        memory_snapshots=(),
+        initial_strategy_state=None,
+        strategy_state={"fixture": True},
         event_trace=(),
         completed_decision_ids=(),
     )
@@ -611,7 +612,7 @@ def test_stateful_validation_requires_and_uses_exact_frozen_state(
     registration = validated.result.registration
     assert len(registration.state_accesses) == 1
     assert len(registration.feedback_accesses) == 1
-    assert len(registration.memory_accesses) == 1
+    assert len(registration.strategy_state_accesses) == 1
     assert len(registration.performance_accesses) == 1
     dependencies = validated.diagnostics[0].dependencies
     assert {checkpoint_id, performance_id}.issubset(

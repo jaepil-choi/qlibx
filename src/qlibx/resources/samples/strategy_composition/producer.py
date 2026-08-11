@@ -1,4 +1,11 @@
-from qlibx import BudgetMode, DecisionAction, EveryNSessions, StrategyDraft, WeightEntry
+from qlibx import (
+    BudgetMode,
+    DecisionAction,
+    EveryNSessions,
+    StrategyDraft,
+    StrategyStateUpdate,
+    WeightEntry,
+)
 
 
 class CountingPathProducer:
@@ -18,7 +25,7 @@ class CountingPathProducer:
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
-        memory = view.memory_snapshot()  # type: ignore[attr-defined]
+        view.strategy_state()  # type: ignore[attr-defined]
         self.call_count += 1
         return StrategyDraft(
             weights=(WeightEntry(instrument=self.instrument, weight=0.5),),
@@ -29,10 +36,8 @@ class CountingPathProducer:
             state_identity=(
                 f"{account.account_id}:v{account.version}:cursor{feedback.next_cursor}"
             ),
-            feedback_cursor=str(feedback.next_cursor),
-            proposed_memory={
+            proposed_state=StrategyStateUpdate(value={
                 "call_count": self.call_count,
                 "feedback_cursor": feedback.next_cursor,
-            },
-            expected_memory_version=memory.version,
+            }),
         )

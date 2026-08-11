@@ -91,7 +91,7 @@ def test_daily_sample_materializes_and_runs_public_closed_loop(
         "decision_intent",
         "execution_result",
         "mark_result",
-        "memory_commit",
+        "monitor_observation",
         "session_performance",
         "simulation_checkpoint",
         "strategy_result",

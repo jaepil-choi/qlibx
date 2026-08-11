@@ -39,7 +39,7 @@ invent missing behavior.
 4. Retry with a new `MaterializationInvocation`, preserve the prior failure artifact through
    `resolves_error_artifact_id`, and confirm every emitted row has `available_at <= evaluation_time`.
 5. Treat `forward_return_label_result:v1` as a label artifact, not a stored signal, Account update,
-   or Strategy Memory update.
+   or Strategy-state update.
 
 The bundled `forward-label-materialization-v1` sample demonstrates pre-compute requirement failure,
 an explicit immutable horizon registration, linked retry, and future-hidden labels through installed
@@ -81,10 +81,11 @@ at the open event.
 The bundled `strategy-extension-v1` sample demonstrates typed stored-signal input, validation,
 registration lineage, exact execution, and safe overwrite refusal through installed public APIs.
 The bundled `strategy-composition-v1` sample runs two path-dependent producers with distinct
-Account and Memory origins, composes their exact frozen `strategy_result:v3` artifacts without
+Account and Strategy-state origins, composes their exact frozen `strategy_result:v4` artifacts without
 rerunning them, and executes an exact registered artifact-only consumer on a separate current
 Account. Treat inherited source lineage as historical provenance, not as recomputation from the
-downstream Account.
+downstream Account. Strategy state is an explicit JSON input/output value, not a package-selected
+latest value or a package-owned durable store.
 
 ## Recover an OperationError
 

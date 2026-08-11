@@ -10,6 +10,13 @@ from qlibx.analysis import (
     SimulationAnalysisRequest,
 )
 from qlibx.contracts import (
+    AccountHistoryAccessRecord,
+    AccountHistoryProjection,
+    AccountHistoryRecordingSpec,
+    AccountHistoryRequirement,
+    AccountHistoryShape,
+    AccountSeriesField,
+    AccountSeriesHistoryRow,
     ArtifactSemanticConstraint,
     BudgetMode,
     DecisionAction,
@@ -18,6 +25,8 @@ from qlibx.contracts import (
     ForwardReturnLabelEntry,
     ForwardReturnLabelModel,
     ForwardReturnLabelResult,
+    InstrumentPanelField,
+    InstrumentPanelHistoryRow,
     ModelInvocation,
     ModelOutputContract,
     ResearchModel,
@@ -112,6 +121,7 @@ from qlibx.specs.daily import (
     DailySimulationSpec,
     FrozenDailyExecutionSpec,
 )
+from qlibx.strategy_state import StrategyStateUpdate
 from qlibx.view import ModelView, StrategyView
 
 __all__ = [
@@ -132,6 +142,13 @@ __all__ = [
     "AcademicQuote",
     "AcademicRunSpec",
     "AcademicTargetWeight",
+    "AccountHistoryAccessRecord",
+    "AccountHistoryProjection",
+    "AccountHistoryRecordingSpec",
+    "AccountHistoryRequirement",
+    "AccountHistoryShape",
+    "AccountSeriesField",
+    "AccountSeriesHistoryRow",
     "AgentTarget",
     "AnalysisResult",
     "ArtifactSemanticConstraint",
@@ -163,6 +180,8 @@ __all__ = [
     "ForwardReturnLabelModel",
     "ForwardReturnLabelResult",
     "FrozenDailyExecutionSpec",
+    "InstrumentPanelField",
+    "InstrumentPanelHistoryRow",
     "KrxBatchRequest",
     "KrxExchange",
     "KrxExchangeConfig",
@@ -208,6 +227,7 @@ __all__ = [
     "StrategyInvocation",
     "StrategyResult",
     "StrategySourceStateLineage",
+    "StrategyStateUpdate",
     "StrategyView",
     "TriggerContext",
     "TriggerDecision",

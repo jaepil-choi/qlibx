@@ -73,13 +73,13 @@ class AcademicExecutionResult(QlibxModel):
 
 
 class AcademicCheckpoint(QlibxModel):
-    checkpoint_schema_version: Literal[1] = 1
+    checkpoint_schema_version: Literal[2] = 2
     run_id: str = Field(min_length=1)
     config_fingerprint: str = Field(min_length=1)
     completed_count: int = Field(ge=1)
     completed_portfolio_artifact_ids: tuple[str, ...] = Field(min_length=1)
     execution_artifact_ids: tuple[str, ...] = Field(min_length=1)
-    prior_checkpoint_artifact_id: str | None = None
+
     state: AcademicPortfolioState
     snapshot: AcademicPortfolioSnapshot
 
@@ -108,7 +108,7 @@ ACADEMIC_EXECUTION_CONTRACT = ArtifactContract(
 
 ACADEMIC_CHECKPOINT_CONTRACT = ArtifactContract(
     artifact_type="academic_checkpoint",
-    artifact_schema_version=1,
+    artifact_schema_version=2,
     payload_model=AcademicCheckpoint,
 )
 
@@ -152,7 +152,7 @@ class AcademicExecutionFlow:
         self._exchange = exchange
         self._preparation = preparation or AcademicExecutionPreparation()
 
-    def run(self, spec: AcademicRunSpec, *, resume: bool = False) -> OperationOutcome:
+    def run(self, spec: AcademicRunSpec) -> OperationOutcome:
         fingerprint = hashlib.sha256(
             (
                 f"{spec.frozen_config_fingerprint()}|"
@@ -163,9 +163,9 @@ class AcademicExecutionFlow:
         try:
             portfolios = self._load_portfolios(spec)
             self._validate_listings(spec)
-            checkpoint_envelope_id, state, execution_ids, total_turnover = (
-                self._resume(spec, fingerprint) if resume else self._seed(spec)
-            )
+            state = AcademicPortfolioState.seed(spec)
+            execution_ids: tuple[str, ...] = ()
+            total_turnover = 0.0
         except _AcademicFlowError as exc:
             return self._failure(
                 spec,
@@ -175,28 +175,8 @@ class AcademicExecutionFlow:
                 committed=False,
             )
 
-        completed = len(execution_ids)
-        if completed > len(portfolios):
-            return self._failure(
-                spec,
-                "ACADEMIC_CHECKPOINT_AHEAD_OF_RUN",
-                "academic.run.resume",
-                {"completed_count": completed, "portfolio_count": len(portfolios)},
-                committed=True,
-            )
-
         last_snapshot: AcademicPortfolioSnapshot | None = None
-        if checkpoint_envelope_id is not None:
-            loaded_checkpoint = self._artifacts.load_model(
-                checkpoint_envelope_id,
-                ACADEMIC_CHECKPOINT_CONTRACT,
-            )
-            if loaded_checkpoint.status is not OutcomeStatus.COMPLETE:
-                return loaded_checkpoint
-            last_snapshot = loaded_checkpoint.result.payload.snapshot
-
-        for index in range(completed, len(portfolios)):
-            frozen = portfolios[index]
+        for index, frozen in enumerate(portfolios):
             event_id = f"academic:{spec.run_id}:{index:08d}"
             targets = tuple(
                 AcademicTargetWeight(
@@ -254,7 +234,6 @@ class AcademicExecutionFlow:
                 spec=spec,
                 frozen=frozen,
                 quotes=quotes,
-                prior_checkpoint_artifact_id=checkpoint_envelope_id,
             )
             preparation_publication = self._artifacts.publish_model(
                 logical_identity=(
@@ -338,58 +317,11 @@ class AcademicExecutionFlow:
             )
             if execution_publication.status is not OutcomeStatus.COMPLETE:
                 return execution_publication
-            candidate_execution_ids = (*execution_ids, execution_publication.result.artifact_id)
-            checkpoint = AcademicCheckpoint(
-                run_id=spec.run_id,
-                config_fingerprint=fingerprint,
-                completed_count=index + 1,
-                completed_portfolio_artifact_ids=tuple(
-                    item.artifact_id for item in portfolios[: index + 1]
-                ),
-                execution_artifact_ids=candidate_execution_ids,
-                prior_checkpoint_artifact_id=checkpoint_envelope_id,
-                state=selected.state,
-                snapshot=selected.after,
-            )
-            checkpoint_dependencies = [
-                DependencyEdge(
-                    dependency_kind="artifact",
-                    dependency_id=execution_publication.result.artifact_id,
-                    consumer_role="committed_execution",
-                ),
-                DependencyEdge(
-                    dependency_kind="config",
-                    dependency_id=fingerprint,
-                    consumer_role="academic_run_config",
-                ),
-            ]
-            if checkpoint_envelope_id is not None:
-                checkpoint_dependencies.append(
-                    DependencyEdge(
-                        dependency_kind="state",
-                        dependency_id=checkpoint_envelope_id,
-                        consumer_role="prior_academic_checkpoint",
-                    )
-                )
-            checkpoint_publication = self._artifacts.publish_model(
-                logical_identity=f"academic-checkpoint:{spec.run_id}:{index + 1:08d}",
-                artifact_type=ACADEMIC_CHECKPOINT_CONTRACT.artifact_type,
-                artifact_schema_version=ACADEMIC_CHECKPOINT_CONTRACT.artifact_schema_version,
-                producer_id="academic.portfolio-state.v1",
-                payload=checkpoint,
-                dependencies=tuple(checkpoint_dependencies),
-            )
-            if checkpoint_publication.status is not OutcomeStatus.COMPLETE:
-                return checkpoint_publication
-
-            # The checkpoint is the authority boundary. Advance only after it is durable.
-            checkpoint_envelope_id = checkpoint_publication.result.artifact_id
+            execution_ids = (*execution_ids, execution_publication.result.artifact_id)
             state = selected.state
             last_snapshot = selected.after
-            execution_ids = candidate_execution_ids
             total_turnover += selected.turnover
-
-        if checkpoint_envelope_id is None or last_snapshot is None:
+        if last_snapshot is None:
             return self._failure(
                 spec,
                 "ACADEMIC_RUN_EMPTY",
@@ -397,6 +329,42 @@ class AcademicExecutionFlow:
                 {},
                 committed=False,
             )
+        checkpoint = AcademicCheckpoint(
+            run_id=spec.run_id,
+            config_fingerprint=fingerprint,
+            completed_count=len(portfolios),
+            completed_portfolio_artifact_ids=tuple(
+                item.artifact_id for item in portfolios
+            ),
+            execution_artifact_ids=execution_ids,
+            state=state,
+            snapshot=last_snapshot,
+        )
+        checkpoint_publication = self._artifacts.publish_model(
+            logical_identity=f"academic-checkpoint:{spec.run_id}",
+            artifact_type=ACADEMIC_CHECKPOINT_CONTRACT.artifact_type,
+            artifact_schema_version=ACADEMIC_CHECKPOINT_CONTRACT.artifact_schema_version,
+            producer_id="academic.portfolio-state.v1",
+            payload=checkpoint,
+            dependencies=(
+                *(
+                    DependencyEdge(
+                        dependency_kind="artifact",
+                        dependency_id=artifact_id,
+                        consumer_role="committed_execution",
+                    )
+                    for artifact_id in execution_ids
+                ),
+                DependencyEdge(
+                    dependency_kind="config",
+                    dependency_id=fingerprint,
+                    consumer_role="academic_run_config",
+                ),
+            ),
+        )
+        if checkpoint_publication.status is not OutcomeStatus.COMPLETE:
+            return checkpoint_publication
+        checkpoint_envelope_id = checkpoint_publication.result.artifact_id
         result = AcademicRunResult(
             run_id=spec.run_id,
             config_fingerprint=fingerprint,
@@ -616,64 +584,6 @@ class AcademicExecutionFlow:
                 )
         return tuple(sorted(quotes, key=lambda item: item.instrument_id))
 
-    def _resume(
-        self,
-        spec: AcademicRunSpec,
-        fingerprint: str,
-    ) -> tuple[str | None, AcademicPortfolioState, tuple[str, ...], float]:
-        envelope = self._artifacts.latest_envelope(
-            artifact_type=ACADEMIC_CHECKPOINT_CONTRACT.artifact_type,
-            logical_identity_prefix=f"academic-checkpoint:{spec.run_id}:",
-        )
-        if envelope is None:
-            return self._seed(spec)
-        loaded = self._artifacts.load_model(envelope.artifact_id, ACADEMIC_CHECKPOINT_CONTRACT)
-        if loaded.status is not OutcomeStatus.COMPLETE:
-            raise _AcademicFlowError(
-                "ACADEMIC_CHECKPOINT_UNAVAILABLE",
-                "academic.run.resume",
-                {"artifact_id": envelope.artifact_id},
-            )
-        checkpoint = loaded.result.payload
-        if (
-            checkpoint.run_id != spec.run_id
-            or checkpoint.config_fingerprint != fingerprint
-            or checkpoint.completed_count != len(checkpoint.execution_artifact_ids)
-            or checkpoint.completed_count
-            != len(checkpoint.completed_portfolio_artifact_ids)
-            or checkpoint.completed_portfolio_artifact_ids
-            != spec.portfolio_artifact_ids[: checkpoint.completed_count]
-            or checkpoint.state.version != checkpoint.completed_count
-            or checkpoint.state.event_cursor != checkpoint.completed_count
-        ):
-            raise _AcademicFlowError(
-                "ACADEMIC_CHECKPOINT_INCOMPATIBLE",
-                "academic.run.resume",
-                {"artifact_id": envelope.artifact_id},
-            )
-        turnover = 0.0
-        for artifact_id in checkpoint.execution_artifact_ids:
-            execution = self._artifacts.load_model(artifact_id, ACADEMIC_EXECUTION_CONTRACT)
-            if execution.status is not OutcomeStatus.COMPLETE:
-                raise _AcademicFlowError(
-                    "ACADEMIC_EXECUTION_ARTIFACT_UNAVAILABLE",
-                    "academic.run.resume",
-                    {"artifact_id": artifact_id},
-                )
-            turnover += execution.result.payload.match.turnover
-        return (
-            envelope.artifact_id,
-            checkpoint.state,
-            checkpoint.execution_artifact_ids,
-            turnover,
-        )
-
-    @staticmethod
-    def _seed(
-        spec: AcademicRunSpec,
-    ) -> tuple[None, AcademicPortfolioState, tuple[str, ...], float]:
-        return None, AcademicPortfolioState.seed(spec), (), 0.0
-
     @staticmethod
     def _next_session_close(
         evaluation_time: datetime,
@@ -707,7 +617,7 @@ class AcademicExecutionFlow:
         spec: AcademicRunSpec,
         frozen: _FrozenPortfolio,
         quotes: tuple[AcademicQuote, ...],
-        prior_checkpoint_artifact_id: str | None,
+        # No interrupted-run checkpoint input in the current scope.
     ) -> tuple[DependencyEdge, ...]:
         dependencies = [
             DependencyEdge(
@@ -736,14 +646,7 @@ class AcademicExecutionFlow:
                     compatibility_fingerprint=quote.physical_fingerprint,
                 )
             )
-        if prior_checkpoint_artifact_id is not None:
-            dependencies.append(
-                DependencyEdge(
-                    dependency_kind="state",
-                    dependency_id=prior_checkpoint_artifact_id,
-                    consumer_role="prior_academic_checkpoint",
-                )
-            )
+
         return tuple(dependencies)
 
     def _failure(

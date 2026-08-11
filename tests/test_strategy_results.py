@@ -40,13 +40,13 @@ def project(tmp_path: Path) -> QlibxProject:
     return QlibxProject.open(tmp_path)
 
 
-def test_exact_strategy_result_loader_accepts_only_v3(tmp_path: Path) -> None:
+def test_exact_strategy_result_loader_accepts_only_v4(tmp_path: Path) -> None:
     current = project(tmp_path)
     payload = StrategyResult(**result_fields("canonical"))
     canonical = current.artifacts.publish_model(
         logical_identity="strategy:canonical",
         artifact_type="strategy_result",
-        artifact_schema_version=3,
+        artifact_schema_version=4,
         producer_id=payload.strategy_id,
         payload=payload,
     )
@@ -56,11 +56,11 @@ def test_exact_strategy_result_loader_accepts_only_v3(tmp_path: Path) -> None:
 
     assert loaded.status is OutcomeStatus.COMPLETE
     assert type(loaded.result.payload) is StrategyResult
-    assert STRATEGY_RESULT_CONTRACT.artifact_schema_version == 3
+    assert STRATEGY_RESULT_CONTRACT.artifact_schema_version == 4
 
 
-@pytest.mark.parametrize("legacy_version", [1, 2])
-def test_strategy_result_loader_rejects_v1_and_v2(
+@pytest.mark.parametrize("legacy_version", [1, 2, 3])
+def test_strategy_result_loader_rejects_legacy_versions(
     tmp_path: Path,
     legacy_version: int,
 ) -> None:
@@ -80,14 +80,14 @@ def test_strategy_result_loader_rejects_v1_and_v2(
     assert loaded.errors[0].error_code == "STRATEGY_RESULT_SCHEMA_UNSUPPORTED"
     assert loaded.errors[0].context["actual_version"] == legacy_version
     assert loaded.errors[0].retry_preconditions == (
-        "rerun the Strategy producer to create strategy_result:v3",
+        "rerun the Strategy producer to create strategy_result:v4",
     )
 
 
-def test_v3_distinguishes_inherited_lineage_from_direct_state() -> None:
+def test_v4_distinguishes_inherited_lineage_from_direct_state() -> None:
     source = StrategySourceStateLineage(
         source_artifact_id="artifact-source",
-        source_artifact_schema_version=3,
+        source_artifact_schema_version=4,
         source_invocation_id="source-invocation",
         source_strategy_id="tests.source",
         declared_state_identity="account:A:v4",
@@ -117,6 +117,6 @@ def test_v3_distinguishes_inherited_lineage_from_direct_state() -> None:
     assert inherited.source_state_lineage == (source,)
 
 
-def test_v3_rejects_unobserved_path_claim() -> None:
+def test_v4_rejects_unobserved_path_claim() -> None:
     with pytest.raises(ValidationError, match="path_dependent must match"):
         StrategyResult(**{**result_fields("false-claim"), "path_dependent": True})

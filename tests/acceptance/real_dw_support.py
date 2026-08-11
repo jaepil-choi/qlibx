@@ -9,12 +9,13 @@ from zoneinfo import ZoneInfo
 import duckdb
 
 from qlibx import OutcomeStatus, QlibxProject
-from qlibx.account import Account, StrategyMemoryStore
+from qlibx.account import Account
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
     EveryNSessions,
     StrategyDraft,
+    StrategyStateUpdate,
     WeightEntry,
 )
 from qlibx.data import AvailableAtField, ComponentRequirement, DatasetRegistration, SourceFormat
@@ -601,10 +602,15 @@ class ActualStateMomentumStrategy:
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
-        memory = view.memory_snapshot()  # type: ignore[attr-defined]
+        strategy_state = view.strategy_state()  # type: ignore[attr-defined]
         state_identity = f"{account.account_id}:v{account.version}"
         if account.positions:
-            has_new_feedback = feedback.next_cursor > memory.feedback_cursor
+            prior_cursor = (
+                0
+                if strategy_state is None
+                else int(strategy_state["confirmed_feedback_cursor"])
+            )
+            has_new_feedback = feedback.next_cursor > prior_cursor
             return StrategyDraft(
                 weights=(),
                 budget_mode=BudgetMode.FLEXIBLE,
@@ -613,13 +619,13 @@ class ActualStateMomentumStrategy:
                 diagnostics=("hold because a committed physical position exists",),
                 path_dependent=True,
                 state_identity=state_identity,
-                feedback_cursor=str(feedback.next_cursor),
-                proposed_memory=(
-                    {"confirmed_feedback_cursor": feedback.next_cursor}
+                proposed_state=(
+                    StrategyStateUpdate(
+                        value={"confirmed_feedback_cursor": feedback.next_cursor}
+                    )
                     if has_new_feedback
                     else None
                 ),
-                expected_memory_version=memory.version if has_new_feedback else None,
             )
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
         cross_section = view.session(  # type: ignore[attr-defined]
@@ -640,7 +646,6 @@ class ActualStateMomentumStrategy:
             diagnostics=("selected the highest real DW close-to-base return",),
             path_dependent=True,
             state_identity=state_identity,
-            feedback_cursor=str(account.feedback_cursor),
         )
 
 
@@ -778,7 +783,7 @@ def run_real_daily_flow(
     run_id: str = "real-dw-daily-2024-01",
     sessions: tuple[datetime, ...] | None = None,
     account: Account | None = None,
-    memory: StrategyMemoryStore | None = None,
+    initial_strategy_state: object = None,
 ):
     selected_sessions = sessions or tuple(close_at(2024, 1, day) for day in (2, 3, 4, 5))
     flow = DailyExecutionFlow(
@@ -787,7 +792,6 @@ def run_real_daily_flow(
         artifacts=case.project.artifacts,
         exchange=configured_exchange(),
         account=account or initial_account(),
-        memory=memory,
         profile=DailyExecutionProfile(
             market_dataset_id="dw-real-market",
             execution_price_role="execution_price",
@@ -800,5 +804,6 @@ def run_real_daily_flow(
             run_id=run_id,
             config_fingerprint="real-dw-actual-state-momentum-v1",
             session_closes=selected_sessions,
+            initial_strategy_state=initial_strategy_state,
         ),
     )

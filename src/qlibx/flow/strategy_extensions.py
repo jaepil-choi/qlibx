@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
-from qlibx.account import Account, StrategyMemoryStore
+from qlibx.account import Account
 from qlibx.analysis import SessionPerformanceEvidence
 from qlibx.contracts import (
     StrategyArtifactRequirement,
@@ -50,12 +50,12 @@ from qlibx.flow.failures import (
 )
 from qlibx.models import QlibxModel
 from qlibx.runtime import BacktestClock
+from qlibx.strategy_state import StrategyStateSnapshot
 from qlibx.view import (
     AccountFeedbackState,
     AccountState,
     ArtifactInputProjection,
     ArtifactViewAccessError,
-    MemoryState,
     StrategyView,
     ViewAccessError,
     ViewGate,
@@ -63,7 +63,7 @@ from qlibx.view import (
 
 STRATEGY_EXTENSION_REGISTRATION_CONTRACT = ArtifactContract(
     artifact_type="strategy_extension_registration",
-    artifact_schema_version=1,
+    artifact_schema_version=2,
     payload_model=StrategyExtensionRegistration,
 )
 
@@ -104,7 +104,7 @@ class LoadedStrategyExtension:
 class _FixtureState:
     account_state: AccountState | None = None
     account_feedback: AccountFeedbackState | None = None
-    memory_state: MemoryState | None = None
+    strategy_state: StrategyStateSnapshot | None = None
     session_performance: _PublishedPerformance | None = None
 
 
@@ -237,7 +237,7 @@ class StrategyExtensionFlow:
                 state_accesses=first_view.state_accessed(),
                 feedback_accesses=first_view.feedback_accessed(),
                 performance_accesses=first_view.performance_accessed(),
-                memory_accesses=first_view.memory_accessed(),
+                strategy_state_accesses=first_view.strategy_state_accessed(),
             )
             second_draft = contract.second.run(second_view)
             if not isinstance(second_draft, StrategyDraft):
@@ -247,7 +247,7 @@ class StrategyExtensionFlow:
                 state_accesses=second_view.state_accessed(),
                 feedback_accesses=second_view.feedback_accessed(),
                 performance_accesses=second_view.performance_accessed(),
-                memory_accesses=second_view.memory_accessed(),
+                strategy_state_accesses=second_view.strategy_state_accessed(),
             )
         except StrategyPathDependenceError as exc:
             return self._failure(
@@ -326,7 +326,7 @@ class StrategyExtensionFlow:
             state_accesses=first_view.state_accessed(),
             feedback_accesses=first_view.feedback_accessed(),
             performance_accesses=first_view.performance_accessed(),
-            memory_accesses=first_view.memory_accessed(),
+            strategy_state_accesses=first_view.strategy_state_accessed(),
         )
         publication = self._artifacts.publish_model(
             logical_identity=(
@@ -713,7 +713,7 @@ class StrategyExtensionFlow:
     ) -> _FixtureState:
         account_state = None
         account_feedback = None
-        memory_state = None
+        strategy_state = None
         if request.account_checkpoint_artifact_id is not None:
             loaded = self._artifacts.load_model(
                 request.account_checkpoint_artifact_id,
@@ -726,10 +726,12 @@ class StrategyExtensionFlow:
                 raise ValueError("account checkpoint is later than validation evaluation_time")
             account = Account.from_checkpoint(checkpoint.account_checkpoint)
             account_state = account.snapshot(evaluation_time=request.evaluation_time)
-            memory_store = StrategyMemoryStore.from_checkpoint(checkpoint.memory_snapshots)
-            memory_state = memory_store.snapshot(strategy_id)
+            strategy_state = StrategyStateSnapshot(
+                strategy_id=strategy_id,
+                value=checkpoint.strategy_state,
+            )
             account_feedback = account.feedback(
-                memory_state.feedback_cursor,
+                0,
                 request.feedback_entry_limit,
             )
 
@@ -753,7 +755,7 @@ class StrategyExtensionFlow:
         return _FixtureState(
             account_state=account_state,
             account_feedback=account_feedback,
-            memory_state=memory_state,
+            strategy_state=strategy_state,
             session_performance=session_performance,
         )
 
@@ -770,7 +772,7 @@ class StrategyExtensionFlow:
             account_state=fixture.account_state,
             account_feedback=fixture.account_feedback,
             session_performance=fixture.session_performance,
-            memory_state=fixture.memory_state,
+            strategy_state=fixture.strategy_state,
             artifact_inputs=artifact_inputs,
         )
 
@@ -782,7 +784,7 @@ class StrategyExtensionFlow:
             view.state_accessed(),
             view.feedback_accessed(),
             view.performance_accessed(),
-            view.memory_accessed(),
+            view.strategy_state_accessed(),
         )
 
     @staticmethod
@@ -822,7 +824,7 @@ class StrategyExtensionFlow:
         if registration.account_checkpoint_artifact_id is not None and (
             registration.state_accesses
             or registration.feedback_accesses
-            or registration.memory_accesses
+            or registration.strategy_state_accesses
         ):
             dependencies.append(
                 DependencyEdge(

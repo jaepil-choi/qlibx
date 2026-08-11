@@ -109,7 +109,7 @@ def final_strategy_artifact(outcome: object) -> tuple[StrategyResult, ArtifactEn
     result = outcome.result  # type: ignore[attr-defined]
     strategy_result = result.strategy_results[-1]
     if not isinstance(strategy_result, StrategyResult):
-        raise RuntimeError("daily source did not publish strategy_result:v3")
+        raise RuntimeError("daily source did not publish strategy_result:v4")
     envelope = next(
         item
         for item in result.artifacts
@@ -252,15 +252,13 @@ def main(project_root: Path) -> dict[str, object]:
             "source_artifact_id": item.source_artifact_id,
             "source_strategy_id": item.source_strategy_id,
             "declared_state_identity": item.declared_state_identity,
-            "declared_feedback_cursor": item.declared_feedback_cursor,
             "account_ids": sorted(access.account_id for access in item.state_accesses),
-            "memory": [
+            "strategy_state": [
                 {
                     "strategy_id": access.strategy_id,
-                    "version": access.version,
-                    "feedback_cursor": access.feedback_cursor,
+                    "state_fingerprint": access.state_fingerprint,
                 }
-                for access in item.memory_accesses
+                for access in item.strategy_state_accesses
             ],
         }
         for item in ensemble_result.source_state_lineage
@@ -299,8 +297,8 @@ def main(project_root: Path) -> dict[str, object]:
         "downstream_direct_state_access_counts": [
             len(item.state_accesses) for item in downstream_result.strategy_results
         ],
-        "downstream_direct_memory_access_counts": [
-            len(item.memory_accesses) for item in downstream_result.strategy_results
+        "downstream_direct_strategy_state_access_counts": [
+            len(item.strategy_state_accesses) for item in downstream_result.strategy_results
         ],
         "downstream_source_lineage_ids": downstream_lineage_ids,
         "final_positions": {

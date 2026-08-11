@@ -7,11 +7,12 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from qlibx.contracts import StrategyArtifactBinding
+from qlibx.contracts import AccountHistoryRecordingSpec, StrategyArtifactBinding
 from qlibx.execution import EtfInstrument, KrxExchangeConfig, StockInstrument
 from qlibx.models import QlibxModel
 from qlibx.runtime.clock import require_aware
 from qlibx.specs.constraints import MvpConstraintPolicy
+from qlibx.strategy_state import normalize_strategy_state
 
 
 class DailyAccountSeed(QlibxModel):
@@ -85,6 +86,8 @@ def _base_config_payload(
     market: DailyMarketBinding,
     execution_timing: ExecutionTiming,
     constraint_policy: MvpConstraintPolicy | None,
+    account_history: AccountHistoryRecordingSpec | None,
+    initial_strategy_state: object = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "spec_schema_version": spec_schema_version,
@@ -97,6 +100,14 @@ def _base_config_payload(
         payload["execution_timing"] = execution_timing
     if constraint_policy is not None:
         payload["constraint_policy"] = constraint_policy.model_dump(mode="json")
+    if account_history is not None and (
+        account_history.account_series_fields or account_history.instrument_panel_fields
+    ):
+        payload["account_history"] = account_history.model_dump(mode="json")
+    if initial_strategy_state is not None:
+        payload["initial_strategy_state"] = normalize_strategy_state(
+            initial_strategy_state
+        )
     return payload
 
 
@@ -114,6 +125,8 @@ class DailySimulationSpec(QlibxModel):
     session_closes: tuple[datetime, ...] = Field(min_length=1)
     session_opens: tuple[datetime, ...] = ()
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
+    account_history: AccountHistoryRecordingSpec = AccountHistoryRecordingSpec()
+    initial_strategy_state: object = None
     constraint_policy: MvpConstraintPolicy | None = None
 
     @model_validator(mode="after")
@@ -132,6 +145,7 @@ class DailySimulationSpec(QlibxModel):
             session_opens=self.session_opens,
             execution_timing=self.execution_timing,
         )
+        normalize_strategy_state(self.initial_strategy_state)
         return self
 
     def frozen_config_fingerprint(self) -> str:
@@ -145,6 +159,8 @@ class DailySimulationSpec(QlibxModel):
             market=self.market,
             execution_timing=self.execution_timing,
             constraint_policy=self.constraint_policy,
+            account_history=self.account_history,
+            initial_strategy_state=self.initial_strategy_state,
         )
         payload.update(
             {
@@ -206,6 +222,8 @@ class FrozenDailyExecutionSpec(QlibxModel):
             market=self.market,
             execution_timing=self.execution_timing,
             constraint_policy=self.constraint_policy,
+            account_history=None,
+            initial_strategy_state=None,
         )
         payload["parent_decision_artifact_ids"] = list(
             self.parent_decision_artifact_ids

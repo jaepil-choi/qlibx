@@ -1,4 +1,4 @@
-"""Exact v3 dispatch and lineage handling for persisted Strategy results."""
+"""Exact v4 dispatch and lineage handling for persisted Strategy results."""
 
 from qlibx.contracts import (
     StrategyResult,
@@ -17,7 +17,7 @@ from qlibx.view import ArtifactAccessRecord, ArtifactInputProjection
 
 STRATEGY_RESULT_CONTRACT = ArtifactContract(
     artifact_type="strategy_result",
-    artifact_schema_version=3,
+    artifact_schema_version=4,
     payload_model=StrategyResult,
 )
 STRATEGY_RESULT_CONTRACTS = (STRATEGY_RESULT_CONTRACT,)
@@ -32,7 +32,7 @@ def load_strategy_result(
     operation: str = "strategy_result.load",
     idempotency_identity: str | None = None,
 ) -> OperationOutcome:
-    """Load only canonical schema v3 by exact artifact ID and envelope metadata."""
+    """Load only canonical schema v4 by exact artifact ID and envelope metadata."""
 
     selected_envelope = envelope
     if selected_envelope is None:
@@ -60,7 +60,7 @@ def load_strategy_result(
             idempotency_identity=idempotency_identity,
             actual_type=selected_envelope.artifact_type,
             actual_version=selected_envelope.artifact_schema_version,
-            reason="artifact is not canonical strategy_result:v3",
+            reason="artifact is not canonical strategy_result:v4",
         )
     return artifacts.load_model(artifact_id, STRATEGY_RESULT_CONTRACT)
 
@@ -91,9 +91,9 @@ def _unsupported(
         },
         expected={
             "artifact_type": "strategy_result",
-            "artifact_schema_versions": (3,),
+            "artifact_schema_versions": (4,),
         },
-        retry_preconditions=("rerun the Strategy producer to create strategy_result:v3",),
+        retry_preconditions=("rerun the Strategy producer to create strategy_result:v4",),
     )
     return OperationOutcome(status=OutcomeStatus.FAILED, errors=(error,))
 
@@ -150,7 +150,7 @@ def collect_strategy_source_lineage(
                     "payload_model": type(payload).__name__,
                 },
             )
-        for candidate in _v3_source_lineage(access.artifact_id, payload):
+        for candidate in _v4_source_lineage(access.artifact_id, payload):
             existing = lineage_by_source.get(candidate.source_artifact_id)
             if existing is not None and existing != candidate:
                 raise StrategySourceLineageError(
@@ -161,16 +161,17 @@ def collect_strategy_source_lineage(
     return tuple(lineage_by_source[key] for key in sorted(lineage_by_source))
 
 
-def _v3_source_lineage(
+def _v4_source_lineage(
     artifact_id: str,
     payload: StrategyResult,
 ) -> tuple[StrategySourceStateLineage, ...]:
     inherited = list(payload.source_state_lineage)
     observed = strategy_accesses_are_path_dependent(
+        account_history_accesses=payload.account_history_accesses,
         state_accesses=payload.state_accesses,
         feedback_accesses=payload.feedback_accesses,
         performance_accesses=payload.performance_accesses,
-        memory_accesses=payload.memory_accesses,
+        strategy_state_accesses=payload.strategy_state_accesses,
         execution_accesses=payload.execution_accesses,
     )
     if observed:
@@ -178,15 +179,16 @@ def _v3_source_lineage(
         inherited.append(
             StrategySourceStateLineage(
                 source_artifact_id=artifact_id,
-                source_artifact_schema_version=3,
+                source_artifact_schema_version=4,
                 source_invocation_id=payload.invocation_id,
                 source_strategy_id=payload.strategy_id,
                 declared_state_identity=payload.state_identity,
-                declared_feedback_cursor=payload.feedback_cursor,
+
                 state_accesses=payload.state_accesses,
+                account_history_accesses=payload.account_history_accesses,
                 feedback_accesses=payload.feedback_accesses,
                 performance_accesses=payload.performance_accesses,
-                memory_accesses=payload.memory_accesses,
+                strategy_state_accesses=payload.strategy_state_accesses,
                 execution_accesses=payload.execution_accesses,
             )
         )
@@ -206,9 +208,24 @@ def source_lineage_dependencies(
                 dependency_kind="state",
                 dependency_id=lineage.declared_state_identity,
                 consumer_role=f"{prefix}_declared_state",
-                selected_fields=("state_identity", "feedback_cursor"),
-                compatibility_fingerprint=lineage.declared_feedback_cursor,
+                selected_fields=("state_identity",),
             )
+        )
+        dependencies.extend(
+            DependencyEdge(
+                dependency_kind="state",
+                dependency_id=(
+                    f"account:{access.account_id}:history:{access.shape.value}:"
+                    f"{access.start_session}:{access.end_session}"
+                ),
+                consumer_role=f"{prefix}_account_history_{index:03d}",
+                selected_fields=access.selected_fields,
+                compatibility_fingerprint=(
+                    f"rows:{access.requested_rows}:sessions:{access.available_sessions}:"
+                    f"instruments:{','.join(access.instruments)}"
+                ),
+            )
+            for index, access in enumerate(lineage.account_history_accesses)
         )
         dependencies.extend(
             DependencyEdge(
@@ -245,12 +262,13 @@ def source_lineage_dependencies(
             DependencyEdge(
                 dependency_kind="state",
                 dependency_id=(
-                    f"memory:{access.strategy_id}:v{access.version}:cursor{access.feedback_cursor}"
+                    f"strategy-state:{access.strategy_id}:{access.state_fingerprint}"
                 ),
-                consumer_role=f"{prefix}_memory_{index:03d}",
-                selected_fields=("value", "feedback_cursor"),
+                consumer_role=f"{prefix}_strategy_state_{index:03d}",
+                selected_fields=("value",),
+                compatibility_fingerprint=access.state_fingerprint,
             )
-            for index, access in enumerate(lineage.memory_accesses)
+            for index, access in enumerate(lineage.strategy_state_accesses)
         )
         dependencies.extend(
             DependencyEdge(

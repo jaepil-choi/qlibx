@@ -10,9 +10,13 @@ from qlibx.data.registry import RegistrySnapshot
 from qlibx.data.requirements import ResolvedBinding
 from qlibx.data.store import ObservationStore
 from qlibx.models import QlibxModel
+from qlibx.strategy_state import strategy_state_fingerprint
 from qlibx.view.records import (
     AccessRecord,
     AccountFeedbackState,
+    AccountHistoryAccessRecord,
+    AccountHistoryProjection,
+    AccountHistoryViewAccessError,
     AccountState,
     ArtifactAccessRecord,
     ArtifactInputProjection,
@@ -20,14 +24,14 @@ from qlibx.view.records import (
     ExecutionAccessRecord,
     ExecutionInputProjection,
     FeedbackAccessRecord,
-    MemoryAccessRecord,
-    MemoryState,
     PayloadModel,
     PublishedSessionPerformanceState,
     SessionPerformanceAccessRecord,
     SessionPerformanceRecordState,
     StateAccessRecord,
     StateHolding,
+    StrategyStateAccessRecord,
+    StrategyStateSnapshot,
     ViewAccessError,
 )
 
@@ -210,6 +214,8 @@ class _AccountStateView(_DatasetView):
             StateHolding(
                 instrument_id=str(position.instrument_id),
                 quantity=float(position.quantity),
+                average_cost=float(position.average_cost),
+                realized_pnl=float(position.realized_pnl),
                 mark=None if position.mark is None else float(position.mark),
                 marked_at=position.marked_at,
             )
@@ -248,7 +254,8 @@ class StrategyView(_AccountStateView):
         account_state: AccountState | None = None,
         account_feedback: AccountFeedbackState | None = None,
         session_performance: PublishedSessionPerformanceState | None = None,
-        memory_state: MemoryState | None = None,
+        strategy_state: StrategyStateSnapshot | None = None,
+        account_history_inputs: tuple[AccountHistoryProjection, ...] = (),
         artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
         execution_inputs: tuple[ExecutionInputProjection, ...] = (),
     ) -> None:
@@ -261,14 +268,56 @@ class StrategyView(_AccountStateView):
         )
         self._account_feedback = account_feedback
         self._session_performance = session_performance
-        self._memory_state = memory_state
+        self._strategy_state = strategy_state
+        self._account_history_inputs = {
+            item.requirement_id: item for item in account_history_inputs
+        }
         self._artifact_inputs = {artifact.consumer_role: artifact for artifact in artifact_inputs}
         self._execution_inputs = execution_inputs
         self._feedback_accessed: list[FeedbackAccessRecord] = []
         self._performance_accessed: list[SessionPerformanceAccessRecord] = []
-        self._memory_accessed: list[MemoryAccessRecord] = []
+        self._strategy_state_accessed: list[StrategyStateAccessRecord] = []
+        self._account_history_accessed: list[AccountHistoryAccessRecord] = []
         self._artifact_accessed: list[ArtifactAccessRecord] = []
         self._execution_accessed: list[ExecutionAccessRecord] = []
+
+    def account_history(self, requirement_id: str) -> AccountHistoryProjection:
+        projection = self._account_history_inputs.get(requirement_id)
+        if projection is None:
+            raise AccountHistoryViewAccessError(
+                "ACCOUNT_HISTORY_ACCESS_UNDECLARED",
+                {
+                    "requirement_id": requirement_id,
+                    "message": f"actual-state history {requirement_id!r} was not declared",
+                },
+            )
+        sessions = tuple(sorted({row.session_time for row in projection.rows}))
+        instruments = tuple(
+            sorted(
+                {
+                    row.instrument_id
+                    for row in projection.rows
+                    if hasattr(row, "instrument_id")
+                }
+            )
+        )
+        self._account_history_accessed.append(
+            AccountHistoryAccessRecord(
+                requirement_id=projection.requirement_id,
+                account_id=projection.account_id,
+                shape=projection.shape,
+                selected_fields=projection.selected_fields,
+                requested_rows=projection.requested_rows,
+                available_sessions=len(sessions),
+                start_session=sessions[0] if sessions else None,
+                end_session=sessions[-1] if sessions else None,
+                instruments=instruments,
+            )
+        )
+        return projection
+
+    def account_history_accessed(self) -> tuple[AccountHistoryAccessRecord, ...]:
+        return tuple(self._account_history_accessed)
 
     def latest_execution_result(self) -> QlibxModel | None:
         if len(self._execution_inputs) > 1:
@@ -382,21 +431,19 @@ class StrategyView(_AccountStateView):
     def performance_accessed(self) -> tuple[SessionPerformanceAccessRecord, ...]:
         return tuple(self._performance_accessed)
 
-    def memory_snapshot(self) -> MemoryState:
-        if self._memory_state is None:
-            raise ViewAccessError("this view has no declared Strategy memory")
-        self._memory_accessed.append(
-            MemoryAccessRecord(
-                strategy_id=self._memory_state.strategy_id,
-                version=self._memory_state.version,
-                feedback_cursor=self._memory_state.feedback_cursor,
+    def strategy_state(self) -> object:
+        if self._strategy_state is None:
+            raise ViewAccessError("this view has no declared Strategy state")
+        self._strategy_state_accessed.append(
+            StrategyStateAccessRecord(
+                strategy_id=self._strategy_state.strategy_id,
+                state_fingerprint=strategy_state_fingerprint(self._strategy_state.value),
             )
         )
-        return self._memory_state
+        return self._strategy_state.value
 
-    def memory_accessed(self) -> tuple[MemoryAccessRecord, ...]:
-        return tuple(self._memory_accessed)
-
+    def strategy_state_accessed(self) -> tuple[StrategyStateAccessRecord, ...]:
+        return tuple(self._strategy_state_accessed)
 
 class ModelView(_DatasetView):
     """Dataset-only view for model or transform materialization."""

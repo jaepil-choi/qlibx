@@ -8,12 +8,18 @@ import pytest
 from pydantic import ValidationError
 
 from qlibx import (
+    AccountHistoryRecordingSpec,
+    AccountHistoryRequirement,
+    AccountHistoryShape,
+    AccountSeriesField,
     DailyAccountSeed,
     DailyMarketBinding,
     DailySimulationSpec,
+    InstrumentPanelField,
     OperationOutcome,
     OutcomeStatus,
     QlibxProject,
+    RowsLookback,
     StrategyExtensionValidationRequest,
 )
 from qlibx.contracts import (
@@ -92,7 +98,7 @@ class RebalanceThenFailStrategy:
 
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
-        feedback = view.account_feedback()  # type: ignore[attr-defined]
+        view.account_feedback()  # type: ignore[attr-defined]
         selected = "A000002" if account.positions else "A000001"
         return StrategyDraft(
             weights=(WeightEntry(instrument=selected, weight=1.0),),
@@ -101,7 +107,6 @@ class RebalanceThenFailStrategy:
             decision_action=DecisionAction.TARGET,
             path_dependent=True,
             state_identity=f"{account.account_id}:v{account.version}",
-            feedback_cursor=str(feedback.next_cursor),
         )
 
 
@@ -118,7 +123,7 @@ class PublicDailyStrategy:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
         if account.positions:
-            assert feedback.next_cursor == feedback.after_cursor
+            assert feedback.next_cursor > feedback.after_cursor
             return StrategyDraft(
                 weights=(),
                 budget_mode=BudgetMode.FLEXIBLE,
@@ -126,7 +131,7 @@ class PublicDailyStrategy:
                 decision_action=DecisionAction.HOLD,
                 path_dependent=True,
                 state_identity=f"{account.account_id}:v{account.version}",
-                feedback_cursor=str(feedback.next_cursor),
+
             )
         return StrategyDraft(
             weights=(WeightEntry(instrument="A000001", weight=1.0),),
@@ -135,7 +140,6 @@ class PublicDailyStrategy:
             decision_action=DecisionAction.TARGET,
             path_dependent=True,
             state_identity=f"{account.account_id}:v{account.version}",
-            feedback_cursor=str(feedback.next_cursor),
         )
 
 
@@ -195,6 +199,62 @@ class SkipAllPolicy:
 class SkipAllStrategy(PublicDailyStrategy):
     def trigger(self) -> SkipAllPolicy:
         return SkipAllPolicy()
+
+
+class HistoryStopLossStrategy:
+    strategy_id = "test.actual-history-stop-loss"
+
+    def __init__(self) -> None:
+        self.run_count = 0
+
+    def requirements(self) -> tuple[object, ...]:
+        return ()
+
+    def trigger(self) -> EveryNSessions:
+        return EveryNSessions(n=2)
+
+    def account_history_requirements(self) -> tuple[AccountHistoryRequirement, ...]:
+        return (
+            AccountHistoryRequirement(
+                requirement_id="recent-account",
+                shape=AccountHistoryShape.ACCOUNT_SERIES,
+                fields=("cash", "nav", "realized_pnl"),
+                lookback=RowsLookback(rows=2),
+            ),
+            AccountHistoryRequirement(
+                requirement_id="held-instrument",
+                shape=AccountHistoryShape.INSTRUMENT_PANEL,
+                fields=("quantity", "average_cost", "realized_pnl", "mark"),
+                lookback=RowsLookback(rows=2),
+                instruments=("A000001",),
+            ),
+        )
+
+    def run(self, view: object) -> StrategyDraft:
+        self.run_count += 1
+        account_series = view.account_history("recent-account")  # type: ignore[attr-defined]
+        instrument_panel = view.account_history("held-instrument")  # type: ignore[attr-defined]
+        if not instrument_panel.rows:
+            weights = (WeightEntry(instrument="A000001", weight=1.0),)
+            budget_mode = BudgetMode.FIXED
+        else:
+            latest = instrument_panel.rows[-1]
+            assert latest.values["average_cost"] == 100
+            assert latest.values["realized_pnl"] == 0
+            assert latest.values["mark"] == 100
+            weights = ()
+            budget_mode = BudgetMode.FLEXIBLE
+        return StrategyDraft(
+            weights=weights,
+            budget_mode=budget_mode,
+            target_gross=1.0,
+            decision_action=DecisionAction.TARGET,
+            path_dependent=True,
+            state_identity=(
+                f"actual-history:{account_series.account_id}:"
+                f"{len(account_series.rows)}:{len(instrument_panel.rows)}"
+            ),
+        )
 
 
 def at(day: int) -> datetime:
@@ -293,7 +353,9 @@ def publish_daily_signal(selected: QlibxProject, identity: str) -> ArtifactEnvel
     return outcome.result
 
 
-def test_public_daily_facade_runs_closed_loop(tmp_path: Path) -> None:
+def test_uc_trigger_001_public_daily_facade_enforces_declared_cadence(
+    tmp_path: Path,
+) -> None:
     selected = project(tmp_path)
     selected_spec = spec()
     venue = RecordingKrxExchange(selected_spec.exchange)
@@ -412,49 +474,19 @@ def test_public_daily_spec_rejects_inconsistent_instrument_authority() -> None:
         DailySimulationSpec.model_validate(unsupported)
 
 
-def test_public_daily_is_deterministic_and_resumable(tmp_path: Path) -> None:
+def test_public_daily_replay_is_deterministic(tmp_path: Path) -> None:
     selected = project(tmp_path)
     selected_spec = spec()
 
     first = selected.run_daily(PublicDailyStrategy(), selected_spec)
     repeated = selected.run_daily(PublicDailyStrategy(), selected_spec)
-    resumed = selected.run_daily(PublicDailyStrategy(), selected_spec, resume=True)
 
-    assert first.status is repeated.status is resumed.status is OutcomeStatus.COMPLETE
-    assert (
-        first.result.final_account == repeated.result.final_account == resumed.result.final_account
-    )
+    assert first.status is repeated.status is OutcomeStatus.COMPLETE
+    assert first.result.final_account == repeated.result.final_account
     assert tuple(item.artifact_id for item in first.result.artifacts) == tuple(
         item.artifact_id for item in repeated.result.artifacts
     )
-    assert {item.artifact_id for item in first.result.artifacts} == {
-        item.artifact_id for item in resumed.result.artifacts
-    }
     assert first.result.checkpoint.event_trace == repeated.result.checkpoint.event_trace
-
-    changed = spec(strategy_fingerprint="test-public-daily-v2")
-    rejected = selected.run_daily(PublicDailyStrategy(), changed, resume=True)
-    assert rejected.status is OutcomeStatus.FAILED
-    assert rejected.errors[0].error_code == "RESUME_BRANCH_REQUIRED"
-    assert rejected.errors[0].commit_status is CommitStatus.NONE
-
-
-def test_trigger_policy_change_requires_a_new_recovery_branch(tmp_path: Path) -> None:
-    selected = project(tmp_path)
-    selected_spec = spec(run_id="trigger-policy-recovery-run")
-
-    first = selected.run_daily(PublicDailyStrategy(), selected_spec)
-    assert first.status is OutcomeStatus.COMPLETE
-
-    class ChangedCadenceStrategy(PublicDailyStrategy):
-        def trigger(self) -> EveryNSessions:
-            return EveryNSessions(n=3)
-
-    changed = selected.run_daily(ChangedCadenceStrategy(), selected_spec, resume=True)
-
-    assert changed.status is OutcomeStatus.FAILED
-    assert changed.errors[0].error_code == "RESUME_BRANCH_REQUIRED"
-    assert changed.errors[0].commit_status is CommitStatus.NONE
 
 
 def test_empty_daily_bindings_have_schema_v2_fingerprints() -> None:
@@ -503,7 +535,7 @@ def test_next_open_requires_an_explicit_open_schedule() -> None:
     assert selected.frozen_config_fingerprint() != spec().frozen_config_fingerprint()
 
 
-def test_non_empty_daily_bindings_change_frozen_and_recovery_identity() -> None:
+def test_non_empty_daily_bindings_change_frozen_identity() -> None:
     binding = StrategyArtifactBinding(
         consumer_role="alpha_signal",
         artifact_id="artifact-alpha-1",
@@ -559,37 +591,6 @@ def test_daily_propagates_the_same_frozen_binding_to_every_decision(
         assert len(artifact_edges) == 1
         assert artifact_edges[0].dependency_id == signal.artifact_id
 
-
-def test_changed_daily_artifact_selection_requires_a_new_recovery_branch(
-    tmp_path: Path,
-) -> None:
-    selected = project(tmp_path)
-    first_signal = publish_daily_signal(selected, "daily-signal:first")
-    second_signal = publish_daily_signal(selected, "daily-signal:second")
-    first_spec = spec(
-        artifact_bindings=(
-            StrategyArtifactBinding(
-                consumer_role="alpha_signal",
-                artifact_id=first_signal.artifact_id,
-            ),
-        )
-    )
-    first = selected.run_daily(ArtifactDailyStrategy(), first_spec)
-    assert first.status is OutcomeStatus.COMPLETE
-
-    changed = spec(
-        artifact_bindings=(
-            StrategyArtifactBinding(
-                consumer_role="alpha_signal",
-                artifact_id=second_signal.artifact_id,
-            ),
-        )
-    )
-    resumed = selected.run_daily(ArtifactDailyStrategy(), changed, resume=True)
-
-    assert resumed.status is OutcomeStatus.FAILED
-    assert resumed.errors[0].error_code == "RESUME_BRANCH_REQUIRED"
-    assert resumed.errors[0].commit_status is CommitStatus.NONE
 
 
 def test_daily_binding_roles_must_be_unique() -> None:
@@ -687,10 +688,7 @@ def test_public_daily_missing_later_sell_cost_preserves_prior_evidence(
     )
     assert missing.commit_status is CommitStatus.NONE
     assert any(artifact.artifact_type == "execution_result" for artifact in outcome.diagnostics)
-    assert any(
-        artifact.artifact_type == "simulation_recovery_point"
-        for artifact in selected.artifacts.list_envelopes()
-    )
+    assert outcome.result is None
 
 
 def test_empty_mark_is_recorded_only_after_publication_succeeds(
@@ -800,3 +798,87 @@ def test_exact_registered_strategy_runs_through_daily_facade(tmp_path: Path) -> 
         )
         for artifact in strategy_artifacts
     )
+
+
+def test_uc_account_history_001_uses_declared_history_without_strategy_state(
+    tmp_path: Path,
+) -> None:
+    selected = project(tmp_path)
+    strategy = HistoryStopLossStrategy()
+    selected_spec = spec(
+        run_id="actual-history-stop-loss",
+        strategy_fingerprint="actual-history-stop-loss-v1",
+        account_history=AccountHistoryRecordingSpec(
+            account_series_fields=(
+                AccountSeriesField.CASH,
+                AccountSeriesField.NAV,
+                AccountSeriesField.REALIZED_PNL,
+            ),
+            instrument_panel_fields=(
+                InstrumentPanelField.QUANTITY,
+                InstrumentPanelField.AVERAGE_COST,
+                InstrumentPanelField.REALIZED_PNL,
+                InstrumentPanelField.MARK,
+            ),
+        ),
+    )
+
+    outcome = selected.run_daily(strategy, selected_spec)
+
+    assert outcome.status is OutcomeStatus.COMPLETE, outcome.errors
+    assert strategy.run_count == 2
+    assert len(outcome.result.executions) == 2
+    assert outcome.result.final_account.positions == ()
+    second = outcome.result.strategy_results[1]
+    assert second.strategy_state_accesses == ()
+    assert second.state_accesses == ()
+    assert tuple(item.requirement_id for item in second.account_history_accesses) == (
+        "recent-account",
+        "held-instrument",
+    )
+    assert second.account_history_accesses[0].available_sessions == 2
+    assert second.account_history_accesses[1].available_sessions == 1
+    artifact = next(
+        item
+        for item in outcome.result.artifacts
+        if item.logical_identity
+        == f"strategy:{second.invocation_id}"
+    )
+    history_edges = tuple(
+        edge
+        for edge in artifact.dependencies
+        if edge.consumer_role.startswith("actual_account_history:")
+    )
+    assert tuple(edge.selected_fields for edge in history_edges) == (
+        ("cash", "nav", "realized_pnl"),
+        ("quantity", "average_cost", "realized_pnl", "mark"),
+    )
+
+
+def test_unrecorded_account_history_fails_before_strategy_or_account_mutation(
+    tmp_path: Path,
+) -> None:
+    selected = project(tmp_path)
+    strategy = HistoryStopLossStrategy()
+    selected_spec = spec()
+    venue = RecordingKrxExchange(selected_spec.exchange)
+    for instrument in selected_spec.instruments:
+        venue.add_instrument(instrument)
+
+    outcome = selected.run_daily(
+        strategy,
+        spec(
+            run_id="actual-history-unrecorded",
+            strategy_fingerprint="actual-history-unrecorded-v1",
+            account_history=AccountHistoryRecordingSpec(
+                account_series_fields=(AccountSeriesField.CASH,),
+            ),
+        ),
+        exchange=venue,
+    )
+
+    assert outcome.status is OutcomeStatus.FAILED
+    assert outcome.errors[0].error_code == "ACCOUNT_HISTORY_NOT_RECORDED"
+    assert outcome.errors[0].commit_status is CommitStatus.NONE
+    assert strategy.run_count == 0
+    assert venue.call_count == 0

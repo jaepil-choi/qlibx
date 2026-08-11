@@ -1,5 +1,16 @@
 """Pure research and decision operations."""
 
+from qlibx.account_history import (
+    AccountHistoryAccessRecord,
+    AccountHistoryProjection,
+    AccountHistoryRecordingSpec,
+    AccountHistoryRequirement,
+    AccountHistoryShape,
+    AccountSeriesField,
+    AccountSeriesHistoryRow,
+    InstrumentPanelField,
+    InstrumentPanelHistoryRow,
+)
 from qlibx.contracts.artifacts import (
     ArtifactSemanticConstraint,
     StoredSignalEntry,
@@ -40,9 +51,17 @@ from qlibx.contracts.trigger import (
     TriggerDecision,
     TriggerPolicy,
 )
+from qlibx.strategy_state import StrategyStateUpdate
 
 __all__ = [
     "FORWARD_RETURN_LABEL_OUTPUT",
+    "AccountHistoryAccessRecord",
+    "AccountHistoryProjection",
+    "AccountHistoryRecordingSpec",
+    "AccountHistoryRequirement",
+    "AccountHistoryShape",
+    "AccountSeriesField",
+    "AccountSeriesHistoryRow",
     "ArtifactAwareStrategyOperation",
     "ArtifactSemanticConstraint",
     "BudgetMode",
@@ -52,6 +71,8 @@ __all__ = [
     "ForwardReturnLabelEntry",
     "ForwardReturnLabelModel",
     "ForwardReturnLabelResult",
+    "InstrumentPanelField",
+    "InstrumentPanelHistoryRow",
     "ModelComputationError",
     "ModelInvocation",
     "ModelOutputContract",
@@ -67,6 +88,7 @@ __all__ = [
     "StrategyPathDependenceError",
     "StrategyResult",
     "StrategySourceStateLineage",
+    "StrategyStateUpdate",
     "TriggerAwareStrategyOperation",
     "TriggerContext",
     "TriggerDecision",

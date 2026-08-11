@@ -12,13 +12,15 @@ from qlibx.contracts.trigger import TriggerPolicy
 from qlibx.data import ComponentRequirement
 from qlibx.domain import BudgetMode
 from qlibx.models import QlibxModel
+from qlibx.strategy_state import StrategyStateUpdate
 from qlibx.view import (
     AccessRecord,
+    AccountHistoryAccessRecord,
     ExecutionAccessRecord,
     FeedbackAccessRecord,
-    MemoryAccessRecord,
     SessionPerformanceAccessRecord,
     StateAccessRecord,
+    StrategyStateAccessRecord,
     StrategyView,
 )
 
@@ -48,9 +50,7 @@ class StrategyDraft(QlibxModel):
     diagnostics: tuple[str, ...] = ()
     path_dependent: bool = False
     state_identity: str | None = None
-    feedback_cursor: str | None = None
-    proposed_memory: dict[str, object] | None = None
-    expected_memory_version: int | None = Field(default=None, ge=0)
+    proposed_state: StrategyStateUpdate | None = None
 
     @model_validator(mode="after")
     def validate_budget(self) -> "StrategyDraft":
@@ -67,10 +67,7 @@ class StrategyDraft(QlibxModel):
             raise ValueError("path-dependent strategy requires state_identity")
         if self.decision_action is DecisionAction.HOLD and self.weights:
             raise ValueError("an explicit hold must not contain target weights")
-        if (self.proposed_memory is None) != (self.expected_memory_version is None):
-            raise ValueError(
-                "proposed_memory and expected_memory_version must be provided together"
-            )
+        # Strategy state validation and normalization belongs to the invoking Flow.
         return self
 
 
@@ -87,40 +84,41 @@ class _StrategyResultFields(QlibxModel):
     decision_action: DecisionAction
     path_dependent: bool
     state_identity: str | None = None
-    feedback_cursor: str | None = None
-    proposed_memory: dict[str, object] | None = None
-    expected_memory_version: int | None = None
+    proposed_state: StrategyStateUpdate | None = None
     diagnostics: tuple[str, ...] = ()
     accesses: tuple[AccessRecord, ...] = ()
+    account_history_accesses: tuple[AccountHistoryAccessRecord, ...] = ()
     execution_accesses: tuple[ExecutionAccessRecord, ...] = ()
     state_accesses: tuple[StateAccessRecord, ...] = ()
     feedback_accesses: tuple[FeedbackAccessRecord, ...] = ()
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...] = ()
-    memory_accesses: tuple[MemoryAccessRecord, ...] = ()
+    strategy_state_accesses: tuple[StrategyStateAccessRecord, ...] = ()
 
 
 class StrategySourceStateLineage(QlibxModel):
     """One original stateful Strategy result carried through frozen composition."""
 
     source_artifact_id: str = Field(min_length=1)
-    source_artifact_schema_version: Literal[3]
+    source_artifact_schema_version: Literal[4]
     source_invocation_id: str = Field(min_length=1)
     source_strategy_id: str = Field(min_length=1)
     declared_state_identity: str = Field(min_length=1)
-    declared_feedback_cursor: str | None = None
+
+    account_history_accesses: tuple[AccountHistoryAccessRecord, ...] = ()
     state_accesses: tuple[StateAccessRecord, ...] = ()
     feedback_accesses: tuple[FeedbackAccessRecord, ...] = ()
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...] = ()
-    memory_accesses: tuple[MemoryAccessRecord, ...] = ()
+    strategy_state_accesses: tuple[StrategyStateAccessRecord, ...] = ()
     execution_accesses: tuple[ExecutionAccessRecord, ...] = ()
 
     @model_validator(mode="after")
     def validate_observed_state(self) -> "StrategySourceStateLineage":
         if not strategy_accesses_are_path_dependent(
+            account_history_accesses=self.account_history_accesses,
             state_accesses=self.state_accesses,
             feedback_accesses=self.feedback_accesses,
             performance_accesses=self.performance_accesses,
-            memory_accesses=self.memory_accesses,
+            strategy_state_accesses=self.strategy_state_accesses,
             execution_accesses=self.execution_accesses,
         ):
             raise ValueError("source lineage requires package-observed stateful access")
@@ -128,25 +126,24 @@ class StrategySourceStateLineage(QlibxModel):
 
 
 class StrategyResult(_StrategyResultFields):
-    """Canonical strategy_result:v3 payload with exact data and execution lineage."""
+    """Canonical strategy_result:v4 payload with exact data and execution lineage."""
 
     source_state_lineage: tuple[StrategySourceStateLineage, ...] = ()
 
     @model_validator(mode="after")
     def validate_path_lineage(self) -> "StrategyResult":
         observed_direct = strategy_accesses_are_path_dependent(
+            account_history_accesses=self.account_history_accesses,
             state_accesses=self.state_accesses,
             feedback_accesses=self.feedback_accesses,
             performance_accesses=self.performance_accesses,
-            memory_accesses=self.memory_accesses,
+            strategy_state_accesses=self.strategy_state_accesses,
             execution_accesses=self.execution_accesses,
         )
         if observed_direct and not self.state_identity:
             raise ValueError("direct path dependence requires state_identity")
-        if not observed_direct and (
-            self.state_identity is not None or self.feedback_cursor is not None
-        ):
-            raise ValueError("state_identity and feedback_cursor describe direct state only")
+        if not observed_direct and self.state_identity is not None:
+            raise ValueError("state_identity describes direct state only")
         expected_path_dependent = observed_direct or bool(self.source_state_lineage)
         if self.path_dependent is not expected_path_dependent:
             raise ValueError("path_dependent must match direct or inherited state evidence")
@@ -163,16 +160,18 @@ def strategy_accesses_are_path_dependent(
     state_accesses: tuple[StateAccessRecord, ...],
     feedback_accesses: tuple[FeedbackAccessRecord, ...],
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...],
-    memory_accesses: tuple[MemoryAccessRecord, ...],
+    strategy_state_accesses: tuple[StrategyStateAccessRecord, ...],
     execution_accesses: tuple[ExecutionAccessRecord, ...] = (),
+    account_history_accesses: tuple[AccountHistoryAccessRecord, ...] = (),
 ) -> bool:
     """Return package-observed direct path dependence for one Strategy computation."""
 
     return bool(
-        state_accesses
+        account_history_accesses
+        or state_accesses
         or feedback_accesses
         or performance_accesses
-        or memory_accesses
+        or strategy_state_accesses
         or execution_accesses
     )
 
@@ -196,27 +195,27 @@ def validate_strategy_draft_path_dependence(
     state_accesses: tuple[StateAccessRecord, ...],
     feedback_accesses: tuple[FeedbackAccessRecord, ...],
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...],
-    memory_accesses: tuple[MemoryAccessRecord, ...],
+    strategy_state_accesses: tuple[StrategyStateAccessRecord, ...],
     execution_accesses: tuple[ExecutionAccessRecord, ...] = (),
+    account_history_accesses: tuple[AccountHistoryAccessRecord, ...] = (),
 ) -> bool:
-    """Validate a Strategy's direct-state declaration against package-owned access evidence."""
+    """Validate a Strategy direct-state declaration against observed access evidence."""
 
     observed_direct = strategy_accesses_are_path_dependent(
+        account_history_accesses=account_history_accesses,
         state_accesses=state_accesses,
         feedback_accesses=feedback_accesses,
         performance_accesses=performance_accesses,
-        memory_accesses=memory_accesses,
+        strategy_state_accesses=strategy_state_accesses,
         execution_accesses=execution_accesses,
     )
     if draft.path_dependent is not observed_direct:
         raise StrategyPathDependenceError(
             "StrategyDraft.path_dependent does not match observed direct stateful access"
         )
-    if not observed_direct and (
-        draft.state_identity is not None or draft.feedback_cursor is not None
-    ):
+    if not observed_direct and draft.state_identity is not None:
         raise StrategyPathDependenceError(
-            "direct state_identity and feedback_cursor require direct stateful access"
+            "direct state_identity requires direct stateful access"
         )
     return observed_direct
 
@@ -226,6 +225,7 @@ class StrategyInvocation(QlibxModel):
     evaluation_time: datetime
     config_fingerprint: str = Field(min_length=1)
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
+    initial_strategy_state: object = None
 
     @model_validator(mode="after")
     def validate_artifact_binding_roles(self) -> "StrategyInvocation":

@@ -5,12 +5,25 @@ from typing import Any, Protocol, TypeVar
 
 from pydantic import Field
 
+from qlibx.account_history import (
+    AccountHistoryAccessRecord,
+    AccountHistoryProjection,
+)
 from qlibx.data.contracts import Lookback
 from qlibx.models import QlibxModel
 
 
 class ViewAccessError(RuntimeError):
     """Raised when code requests an undeclared or stale binding."""
+
+
+class AccountHistoryViewAccessError(ViewAccessError):
+    """Typed actual-state history access failure translated by the owning Flow."""
+
+    def __init__(self, error_code: str, context: dict[str, Any]) -> None:
+        self.error_code = error_code
+        self.context = context
+        super().__init__(str(context.get("message", error_code)))
 
 
 class ArtifactViewAccessError(ViewAccessError):
@@ -78,6 +91,8 @@ class AccessRecord(QlibxModel):
 class StateHolding(QlibxModel):
     instrument_id: str
     quantity: float
+    average_cost: float | None = None
+    realized_pnl: float | None = None
     mark: float | None = None
     marked_at: datetime | None = None
 
@@ -94,6 +109,15 @@ class StateAccessRecord(QlibxModel):
     realized_pnl: tuple[tuple[str, float], ...] = ()
 
 
+class AccountPositionState(Protocol):
+    instrument_id: str
+    quantity: float
+    average_cost: float
+    realized_pnl: float
+    mark: float | None
+    marked_at: datetime | None
+
+
 class AccountState(Protocol):
     account_id: str
     version: int
@@ -101,7 +125,7 @@ class AccountState(Protocol):
     cash: float
     nav: float
     valuation_status: object
-    positions: tuple[object, ...]
+    positions: tuple[AccountPositionState, ...]
     as_of: datetime | None
     realized_pnl: tuple[tuple[str, float], ...]
 
@@ -156,22 +180,23 @@ class PublishedSessionPerformanceState(Protocol):
     record: SessionPerformanceRecordState
 
 
-class MemoryAccessRecord(QlibxModel):
+class StrategyStateAccessRecord(QlibxModel):
     strategy_id: str
-    version: int = Field(ge=0)
-    feedback_cursor: int = Field(ge=0)
+    state_fingerprint: str = Field(min_length=64, max_length=64)
 
 
-class MemoryState(Protocol):
+class StrategyStateSnapshot(Protocol):
     strategy_id: str
-    version: int
-    value: object | None
-    feedback_cursor: int
+    value: object
 
 
 __all__ = [
     "AccessRecord",
     "AccountFeedbackState",
+    "AccountHistoryAccessRecord",
+    "AccountHistoryProjection",
+    "AccountHistoryViewAccessError",
+    "AccountPositionState",
     "AccountState",
     "ArtifactAccessRecord",
     "ArtifactInputProjection",
@@ -179,13 +204,13 @@ __all__ = [
     "ExecutionAccessRecord",
     "ExecutionInputProjection",
     "FeedbackAccessRecord",
-    "MemoryAccessRecord",
-    "MemoryState",
     "PayloadModel",
     "PublishedSessionPerformanceState",
     "SessionPerformanceAccessRecord",
     "SessionPerformanceRecordState",
     "StateAccessRecord",
     "StateHolding",
+    "StrategyStateAccessRecord",
+    "StrategyStateSnapshot",
     "ViewAccessError",
 ]

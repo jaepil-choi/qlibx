@@ -1,6 +1,5 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -14,7 +13,7 @@ from qlibx import (
     QlibxProject,
 )
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
-from qlibx.errors import CommitStatus, OperationError, OperationOutcome
+from qlibx.errors import CommitStatus
 from qlibx.flow import (
     ACADEMIC_EXECUTION_CONTRACT,
     ACADEMIC_RUN_RESULT_CONTRACT,
@@ -185,122 +184,23 @@ def test_public_academic_facade_executes_stocks_at_next_session_close(
     assert {"artifact", "config", "dataset"}.issubset(dependency_kinds)
 
 
-def test_public_academic_replay_and_resume_are_idempotent(tmp_path: Path) -> None:
+def test_public_academic_replay_is_idempotent(tmp_path: Path) -> None:
     selected = project(tmp_path)
     selected_spec = run_spec(two_portfolios(selected))
     baseline = selected.run_academic(selected_spec)
+    repeated = selected.run_academic(selected_spec)
 
-    resumed = selected.run_academic(selected_spec, resume=True)
-
-    assert resumed.status is OutcomeStatus.COMPLETE
-    assert resumed.result == baseline.result
+    assert repeated.status is OutcomeStatus.COMPLETE
+    assert repeated.result == baseline.result
     assert len(selected.artifacts.list_envelopes(artifact_type="academic_execution_result")) == 2
-    assert len(selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")) == 2
+    assert len(selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")) == 1
     assert len(selected.artifacts.list_envelopes(artifact_type="academic_run_result")) == 1
     loaded = selected.load_artifact(
-        resumed.diagnostics[0].artifact_id,
+        repeated.diagnostics[0].artifact_id,
         ACADEMIC_RUN_RESULT_CONTRACT,
     )
     assert loaded.result.payload == baseline.result
 
-
-def test_checkpoint_publication_failure_recovers_without_duplicate_fill(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    selected = project(tmp_path)
-    selected_spec = run_spec(two_portfolios(selected), run_id="academic-recovery")
-    original_publish = selected.artifacts.publish_model
-    failed_once = False
-
-    def fail_first_checkpoint(**kwargs: Any) -> OperationOutcome:
-        nonlocal failed_once
-        if kwargs["artifact_type"] == "academic_checkpoint" and not failed_once:
-            failed_once = True
-            return OperationOutcome(
-                status=OutcomeStatus.FAILED,
-                errors=(
-                    OperationError(
-                        operation="artifact.publish",
-                        stage_path="artifact.publish.test_crash",
-                        error_code="TEST_CHECKPOINT_CRASH",
-                        commit_status=CommitStatus.NONE,
-                        idempotency_identity=selected_spec.run_id,
-                        error_id="error-test-checkpoint-crash",
-                    ),
-                ),
-            )
-        return original_publish(**kwargs)
-
-    monkeypatch.setattr(selected.artifacts, "publish_model", fail_first_checkpoint)
-    interrupted = selected.run_academic(selected_spec)
-    assert interrupted.status is OutcomeStatus.FAILED
-    assert len(selected.artifacts.list_envelopes(artifact_type="academic_execution_result")) == 1
-    assert not selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")
-
-    monkeypatch.setattr(selected.artifacts, "publish_model", original_publish)
-    recovered = selected.run_academic(selected_spec, resume=True)
-
-    assert recovered.status is OutcomeStatus.COMPLETE
-    assert len(selected.artifacts.list_envelopes(artifact_type="academic_execution_result")) == 2
-    assert len(selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")) == 2
-
-
-@pytest.mark.parametrize(
-    "artifact_type",
-    ("academic_execution_preparation", "academic_execution_result"),
-)
-def test_published_preparation_or_execution_recovers_idempotently(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    artifact_type: str,
-) -> None:
-    selected = project(tmp_path)
-    selected_spec = run_spec(
-        two_portfolios(selected),
-        run_id=f"academic-published-{artifact_type}",
-    )
-    original_publish = selected.artifacts.publish_model
-    failed_once = False
-
-    def publish_then_report_failure(**kwargs: Any) -> OperationOutcome:
-        nonlocal failed_once
-        published = original_publish(**kwargs)
-        if kwargs["artifact_type"] == artifact_type and not failed_once:
-            failed_once = True
-            return OperationOutcome(
-                status=OutcomeStatus.FAILED,
-                errors=(
-                    OperationError(
-                        operation="artifact.publish",
-                        stage_path="artifact.publish.after_commit.test_crash",
-                        error_code="TEST_AFTER_PUBLICATION_CRASH",
-                        commit_status=CommitStatus.COMMITTED,
-                        idempotency_identity=selected_spec.run_id,
-                        error_id=f"error-after-{artifact_type}",
-                    ),
-                ),
-                diagnostics=published.diagnostics,
-            )
-        return published
-
-    monkeypatch.setattr(selected.artifacts, "publish_model", publish_then_report_failure)
-    interrupted = selected.run_academic(selected_spec)
-    assert interrupted.status is OutcomeStatus.FAILED
-
-    monkeypatch.setattr(selected.artifacts, "publish_model", original_publish)
-    recovered = selected.run_academic(selected_spec, resume=True)
-
-    assert recovered.status is OutcomeStatus.COMPLETE
-    assert len(
-        selected.artifacts.list_envelopes(
-            artifact_type="academic_execution_preparation"
-        )
-    ) == 2
-    assert len(
-        selected.artifacts.list_envelopes(artifact_type="academic_execution_result")
-    ) == 2
-    assert len(selected.artifacts.list_envelopes(artifact_type="academic_checkpoint")) == 2
 
 
 def test_wrong_portfolio_profile_fails_before_checkpoint(tmp_path: Path) -> None:

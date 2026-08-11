@@ -510,7 +510,7 @@ def run(repo_root: Path) -> dict[str, Any]:
         session_closes=extraction["session_closes"],
     )
     academic = require_complete(
-        project.run_academic(academic_spec, resume=True),
+        project.run_academic(academic_spec),
         "AcademicExchange run",
     )
 

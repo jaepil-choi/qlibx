@@ -10,7 +10,6 @@ from qlibx.account import (
     FillBatch,
     Mark,
     MarkBatch,
-    StrategyMemoryStore,
 )
 from qlibx.contracts import BudgetMode, StrategyDraft, StrategyInvocation
 from qlibx.data import AvailableAtField, DatasetRegistration, SourceFormat
@@ -512,9 +511,7 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
     assert initial_price / before_drift.nav < 0.10
     assert drift_price / after_drift.nav > 0.10
 
-    memory = StrategyMemoryStore()
     account_before_monitor = account.checkpoint()
-    memory_before_monitor = memory.checkpoint()
     missing = MonitoringFlow(
         clock=BacktestClock(close_at(2024, 1, 5)),
         registry=real_dw_case.project.registry_snapshot(),
@@ -585,7 +582,6 @@ def test_uc_exec_003_monitors_real_no_trade_price_drift_without_mutation(
         for edge in first.diagnostics[0].dependencies
     )
     assert account.checkpoint() == account_before_monitor
-    assert memory.checkpoint() == memory_before_monitor
 
 
 def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
@@ -686,12 +682,10 @@ def test_uc_ensemble_001_records_crossing_budget_and_member_lineage(
 def test_frozen_intent_replay_and_separate_account_rerun_do_not_mutate_parent(
     real_dw_case: RealDwProject,
 ) -> None:
-    memory_a = StrategyMemoryStore()
     parent = run_real_daily_flow(
         real_dw_case,
         run_id="path-parent-account-a",
         account=initial_account("account-a"),
-        memory=memory_a,
     )
     parent_intent = parent.result.decision_intents[0]
     parent_artifact = next(
@@ -699,24 +693,20 @@ def test_frozen_intent_replay_and_separate_account_rerun_do_not_mutate_parent(
         for artifact in parent.result.artifacts
         if artifact.artifact_type == "decision_intent"
     )
-    memory_a_before = memory_a.checkpoint()
+    parent_state_before = parent.result.final_strategy_state
 
-    memory_b = StrategyMemoryStore()
     rerun = run_real_daily_flow(
         real_dw_case,
         run_id="path-rerun-account-b",
         account=initial_account("account-b"),
-        memory=memory_b,
     )
 
-    replay_memory = StrategyMemoryStore()
     replay = DailyExecutionFlow(
         clock=BacktestClock(parent_intent.decision_time),
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
         exchange=configured_exchange(),
         account=initial_account("account-b-replay"),
-        memory=replay_memory,
         profile=DailyExecutionProfile(
             profile_id="historical-intent-replay.v1",
             market_dataset_id="dw-real-market",
@@ -738,11 +728,11 @@ def test_frozen_intent_replay_and_separate_account_rerun_do_not_mutate_parent(
     assert parent.status is rerun.status is replay.status is OutcomeStatus.COMPLETE
     assert parent.result.strategy_results[0].state_identity == "account-a:v0"
     assert rerun.result.strategy_results[0].state_identity == "account-b:v0"
-    assert memory_a.checkpoint() == memory_a_before
-    assert memory_b.snapshot("acceptance.actual-state-momentum").version == 1
-    assert replay_memory.checkpoint() == ()
+    assert parent.result.final_strategy_state == parent_state_before
+    assert rerun.result.final_strategy_state is not None
+    assert replay.result.final_strategy_state is None
     assert replay.result.strategy_results == ()
-    assert replay.result.memory_commits == ()
+    assert replay.result.strategy_results == ()
     assert replay.result.executions[0].limitations == (
         "historical parent intent replayed without target-account Strategy rerun",
     )

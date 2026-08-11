@@ -4,14 +4,7 @@ from fractions import Fraction
 import pytest
 
 from qlibx import OutcomeStatus
-from qlibx.account import (
-    Account,
-    FillBatch,
-    Mark,
-    MarkBatch,
-    MemorySnapshot,
-    StrategyMemoryStore,
-)
+from qlibx.account import Account, FillBatch, Mark, MarkBatch
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
@@ -116,22 +109,13 @@ def _physical_account(
     return account
 
 
-def _memory(strategy_id: str) -> StrategyMemoryStore:
-    return StrategyMemoryStore.from_checkpoint(
-        (
-            MemorySnapshot(
-                strategy_id=strategy_id,
-                version=1,
-                value={
-                    "requested_physical_target": {
-                        DIRECT: 0.3,
-                        ETF: 0.7,
-                    }
-                },
-                feedback_cursor=2,
-            ),
-        )
-    )
+def _strategy_state() -> dict[str, object]:
+    return {
+        "requested_physical_target": {
+            DIRECT: 0.3,
+            ETF: 0.7,
+        }
+    }
 
 
 class OpaqueEtfStrategy:
@@ -158,7 +142,6 @@ class OpaqueEtfStrategy:
             diagnostics=("physical ETF kept opaque; no constituent binding consumed",),
             path_dependent=True,
             state_identity=f"{account.account_id}:v{account.version}",
-            feedback_cursor=str(account.feedback_cursor),
         )
 
 
@@ -188,7 +171,7 @@ class UserLookthroughStrategy:
     def run(self, view: StrategyView) -> StrategyDraft:
         frame = view.latest("etf_constituent_weight")
         account = view.account_snapshot()
-        memory = view.memory_snapshot()
+        strategy_state = view.strategy_state()
         if set(frame["instrument"]) != {DIRECT, OTHER_CONSTITUENT}:
             raise ValueError("user policy requires the selected two-member coverage")
         raw = {
@@ -206,9 +189,9 @@ class UserLookthroughStrategy:
             DIRECT: physical.get(DIRECT, 0.0) + physical.get(ETF, 0.0) * mapping[DIRECT],
             OTHER_CONSTITUENT: physical.get(ETF, 0.0) * mapping[OTHER_CONSTITUENT],
         }
-        if not isinstance(memory.value, dict):
-            raise ValueError("user Strategy requires its committed target Memory")
-        target = memory.value["requested_physical_target"]
+        if not isinstance(strategy_state, dict):
+            raise ValueError("user Strategy requires an explicit target state")
+        target = strategy_state["requested_physical_target"]
         if not isinstance(target, dict):
             raise ValueError("requested target Memory must be a mapping")
         target_direct = float(target[DIRECT])
@@ -229,13 +212,12 @@ class UserLookthroughStrategy:
                 "mapping_policy=user_selected_two_member_subset_renormalized",
                 "actual_source=marked_account_snapshot",
                 (
-                    f"memory_target_exposure:{DIRECT}={target_exposure[DIRECT]:.12f},"
+                    f"state_target_exposure:{DIRECT}={target_exposure[DIRECT]:.12f},"
                     f"{OTHER_CONSTITUENT}={target_exposure[OTHER_CONSTITUENT]:.12f}"
                 ),
             ),
             path_dependent=True,
             state_identity=f"{account.account_id}:v{account.version}",
-            feedback_cursor=str(account.feedback_cursor),
         )
 
 
@@ -246,7 +228,7 @@ def _invoke(
     invocation_id: str,
     evaluation_time: datetime,
     account: Account,
-    memory: StrategyMemoryStore,
+    strategy_state: object = None,
 ):
     return ResearchFlow(
         registry=case.project.registry_snapshot(),
@@ -257,9 +239,9 @@ def _invoke(
             invocation_id=invocation_id,
             evaluation_time=evaluation_time,
             config_fingerprint="user-lookthrough-v1",
+            initial_strategy_state=strategy_state,
         ),
         account_state=account.snapshot(),
-        memory_state=memory.snapshot(strategy.strategy_id),
     )
 
 
@@ -274,16 +256,14 @@ def test_uc_lookthrough_001_is_user_declared_while_same_etf_stays_opaque(
         cash_units=1,
     )
     strategy = UserLookthroughStrategy()
-    memory = _memory(strategy.strategy_id)
+    strategy_state = _strategy_state()
     account_before = account.checkpoint()
-    memory_before = memory.checkpoint()
     opaque = _invoke(
         real_dw_lookthrough_case,
         OpaqueEtfStrategy(),
         invocation_id="lookthrough-001-opaque",
         evaluation_time=close_at(2024, 1, 3),
         account=account,
-        memory=StrategyMemoryStore(),
     )
     explicit = _invoke(
         real_dw_lookthrough_case,
@@ -291,7 +271,7 @@ def test_uc_lookthrough_001_is_user_declared_while_same_etf_stays_opaque(
         invocation_id="lookthrough-001-explicit",
         evaluation_time=close_at(2024, 1, 3),
         account=account,
-        memory=memory,
+        strategy_state=strategy_state,
     )
     undeclared = _invoke(
         real_dw_lookthrough_case,
@@ -299,7 +279,6 @@ def test_uc_lookthrough_001_is_user_declared_while_same_etf_stays_opaque(
         invocation_id="lookthrough-001-undeclared",
         evaluation_time=close_at(2024, 1, 3),
         account=account,
-        memory=StrategyMemoryStore(),
     )
 
     assert opaque.status is explicit.status is OutcomeStatus.COMPLETE
@@ -313,7 +292,7 @@ def test_uc_lookthrough_001_is_user_declared_while_same_etf_stays_opaque(
     assert explicit.result.artifact.artifact_type == "strategy_result"
     assert len(explicit.result.result.accesses) == 1
     assert len(explicit.result.result.state_accesses) == 1
-    assert len(explicit.result.result.memory_accesses) == 1
+    assert len(explicit.result.result.strategy_state_accesses) == 1
     assert any(
         edge.consumer_role == "etf_constituent_weight"
         for edge in explicit.result.artifact.dependencies
@@ -326,7 +305,6 @@ def test_uc_lookthrough_001_is_user_declared_while_same_etf_stays_opaque(
     assert undeclared.errors[0].error_code == "STRATEGY_RUN_FAILED"
     assert "was not declared" in undeclared.errors[0].context["message"]
     assert account.checkpoint() == account_before
-    assert memory.checkpoint() == memory_before
 
 
 def test_uc_lookthrough_002_hides_future_real_constituent_observation(
@@ -353,7 +331,7 @@ def test_uc_lookthrough_002_hides_future_real_constituent_observation(
         invocation_id="lookthrough-002-early",
         evaluation_time=close_at(2024, 1, 3),
         account=early_account,
-        memory=_memory(strategy.strategy_id),
+        strategy_state=_strategy_state(),
     )
     late = _invoke(
         real_dw_lookthrough_case,
@@ -361,7 +339,7 @@ def test_uc_lookthrough_002_hides_future_real_constituent_observation(
         invocation_id="lookthrough-002-late",
         evaluation_time=close_at(2024, 1, 4),
         account=late_account,
-        memory=_memory(strategy.strategy_id),
+        strategy_state=_strategy_state(),
     )
 
     assert early.status is late.status is OutcomeStatus.COMPLETE
@@ -386,7 +364,7 @@ def test_uc_lookthrough_002_hides_future_real_constituent_observation(
     assert late_weights[OTHER_CONSTITUENT] == pytest.approx(0.6 * (0.0127 / 0.0253))
 
 
-def test_uc_lookthrough_003_recomputes_actual_instead_of_memory_target(
+def test_uc_lookthrough_003_recomputes_actual_instead_of_strategy_state_target(
     real_dw_lookthrough_case: RealDwProject,
 ) -> None:
     account = _physical_account(
@@ -397,16 +375,15 @@ def test_uc_lookthrough_003_recomputes_actual_instead_of_memory_target(
         cash_units=2,
     )
     strategy = UserLookthroughStrategy()
-    memory = _memory(strategy.strategy_id)
+    strategy_state = _strategy_state()
     before_account = account.checkpoint()
-    before_memory = memory.checkpoint()
     result = _invoke(
         real_dw_lookthrough_case,
         strategy,
         invocation_id="lookthrough-003-actual",
         evaluation_time=close_at(2024, 1, 3),
         account=account,
-        memory=memory,
+        strategy_state=strategy_state,
     )
 
     assert result.status is OutcomeStatus.COMPLETE
@@ -414,7 +391,7 @@ def test_uc_lookthrough_003_recomputes_actual_instead_of_memory_target(
         item.instrument: item.weight for item in result.result.result.weights
     } == pytest.approx({DIRECT: 0.4, OTHER_CONSTITUENT: 0.2})
     assert (
-        f"memory_target_exposure:{DIRECT}=0.650000000000,"
+        f"state_target_exposure:{DIRECT}=0.650000000000,"
         f"{OTHER_CONSTITUENT}=0.350000000000"
     ) in result.result.result.diagnostics
     assert result.result.result.state_identity == (
@@ -425,8 +402,7 @@ def test_uc_lookthrough_003_recomputes_actual_instead_of_memory_target(
         for edge in result.result.artifact.dependencies
     )
     assert any(
-        edge.consumer_role == "strategy_memory"
+        edge.consumer_role == "strategy_state"
         for edge in result.result.artifact.dependencies
     )
     assert account.checkpoint() == before_account
-    assert memory.checkpoint() == before_memory

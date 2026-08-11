@@ -6,11 +6,12 @@ from qlibx.data.store import ObservationStore
 from qlibx.runtime import Clock
 from qlibx.view.records import (
     AccountFeedbackState,
+    AccountHistoryProjection,
     AccountState,
     ArtifactInputProjection,
     ExecutionInputProjection,
-    MemoryState,
     PublishedSessionPerformanceState,
+    StrategyStateSnapshot,
 )
 from qlibx.view.views import ExecutionView, ModelView, MonitorView, StrategyView
 
@@ -30,7 +31,8 @@ class ViewGate:
         account_state: AccountState | None = None,
         account_feedback: AccountFeedbackState | None = None,
         session_performance: PublishedSessionPerformanceState | None = None,
-        memory_state: MemoryState | None = None,
+        strategy_state: StrategyStateSnapshot | None = None,
+        account_history_inputs: tuple[AccountHistoryProjection, ...] = (),
         artifact_inputs: tuple[ArtifactInputProjection, ...] = (),
         execution_inputs: tuple[ExecutionInputProjection, ...] = (),
     ) -> StrategyView:
@@ -42,7 +44,8 @@ class ViewGate:
             account_state=account_state,
             account_feedback=account_feedback,
             session_performance=session_performance,
-            memory_state=memory_state,
+            strategy_state=strategy_state,
+            account_history_inputs=account_history_inputs,
             artifact_inputs=artifact_inputs,
             execution_inputs=execution_inputs,
         )

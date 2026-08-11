@@ -1,7 +1,7 @@
 # qlibx module map
 
-> Snapshot: 2026-08-10. 이 문서는 현재 `src/qlibx/`를 제품 역할로 번역한다. 파일 위치는 current implementation이고,
-> execution spine, exact lookback/Strategy v3, public facade와 semantic module 이동까지 반영한 current implementation snapshot이다.
+> Snapshot: 2026-08-11. 이 문서는 현재 `src/qlibx/`를 제품 역할로 번역한다. 파일 위치는 current implementation이고,
+> execution spine, exact lookback/Strategy v4, declared account history와 explicit strategy state까지 반영한 snapshot이다.
 
 ## 큰 구조
 
@@ -23,7 +23,7 @@ Read authority and state authority
 
 - **Dependency Injection**: `QlibxProject`와 Flow가 concrete dependency를 생성자에서 명시적으로 조립한다.
 - **Inversion of Control**: Flow가 clock/event 순서를 소유하고 user Strategy callback을 호출한다. Strategy가 runtime을 돌리지 않는다.
-- **Functional Core / Imperative Shell**: 계산 component는 typed result를 만들고, Flow가 artifact publication과 Account/Memory commit을 수행한다.
+- **Functional Core / Imperative Shell**: 계산 component는 typed result를 만들고, Flow가 artifact publication, Account commit과 strategy-state 전달을 수행한다.
 - **Aggregate Root**: `Account`가 actual cash, Position과 committed journal의 쓰기 권한을 가진다.
 - **Command-Query Separation**: Strategy/Monitor는 immutable View로 읽고, Flow만 commit command를 호출한다.
 - **Strategy Pattern**: public run 호출에 주입한 `BaseExchange` concrete implementation으로 execution algorithm을 교체한다. KRX와 Academic의 경제적 의미까지 하나로 합친다는 뜻은 아니다.
@@ -33,14 +33,15 @@ Read authority and state authority
 | path | 현재 책임 | 큰 흐름에서의 위치 |
 |---|---|---|
 | `project.py` | public facade, project open/init, operation별 composition root, catalog-session boundary | 사용자가 시작하는 최상위 API |
-| `flow/` | use-case orchestration, requirement resolution, event ordering, artifact publication, Account/Memory commit, recovery | application layer이자 imperative shell |
+| `flow/` | use-case orchestration, requirement resolution, event ordering, artifact publication, Account commit, strategy-state/history projection | application layer이자 imperative shell |
 | `specs/` | daily, constraint와 academic run의 frozen public input | public configuration contract |
 | `view/` | Strategy/Model/Monitor에 허용된 read capability만 주는 records, scoped View와 ViewGate | least-authority query boundary |
 | `data/` | dataset registration, requirement binding, timezone/PIT normalization, deterministic versioned query snapshot, source fingerprint와 observation read | observation authority |
 | `contracts/` | 사용자가 구현하는 계약: `strategy.py`(StrategyOperation), `model.py`(ResearchModel), `artifacts.py`(artifact I/O)와 built-in calculation | user logic 및 pure calculation boundary |
 | `portfolio/` | construction, adjustment, validation의 typed calculation | standalone operation과 KRX execution preparation이 공유하는 pure calculation |
 | `execution/` | generic Exchange/preparation lifecycle, KRX/Academic concrete preparation/request/result, Instrument와 sizing/matching | market-specific execution mechanics와 pure request preparation |
-| `account/` | Account aggregate와 Strategy memory | committed actual state authority |
+| `account/` | Account aggregate와 legacy checkpoint schema | committed actual state authority |
+| `account_history.py`, `strategy_state.py` | declared recording/requirement types와 strict JSON state normalization | Strategy input contract |
 | `evidence/` | typed artifact envelope와 local JSON/DuckDB backend | durable result/lineage authority |
 | `analysis/` | typed analysis session/result와 renderer support | committed artifact를 읽는 downstream read model |
 | `extensions/` | project-local module validation, fingerprint, registration/loading | local Strategy/transform extension boundary |
@@ -81,8 +82,8 @@ Read authority and state authority
 |---|---|
 | `research.py` | direct Strategy invocation과 result promotion |
 | `model.py` | optional Model/intermediate artifact materialization |
-| `daily.py` | explicit daily events, decision/execution/mark/monitor ordering, KRX Account/Memory commit과 recovery |
-| `academic.py` | separate hypothetical signed execution와 recovery |
+| `daily.py` | explicit daily events, decision/execution/mark/monitor ordering, KRX Account commit, account-history recording과 strategy-state 전달 |
+| `academic.py` | separate hypothetical signed execution와 final checkpoint |
 | `composition.py` | stored StrategyResult/Signal을 소비하는 Ensemble/stored-signal Strategy |
 | `portfolio.py` | stored weight를 physical construction result로 변환 |
 | `constraints.py` | standalone adjustment와 validation |
@@ -90,9 +91,9 @@ Read authority and state authority
 | `analysis.py` | signal/simulation/monitoring artifact 분석과 report render |
 | `strategy_extensions.py`, `extensions.py` | local module 검증/등록/실행 |
 | `artifact_inputs.py`, `strategy_results.py` | producer-independent artifact contract와 result promotion helper |
-| `recovery.py`, `failures.py` | flow-specific restart evidence와 shared typed failure helper |
+| `account_history.py`, `failures.py` | Flow-owned actual-history recording과 shared typed failure helper |
 
-`daily.py`가 큰 이유는 event ordering, commit, recovery가 한곳에 있기 때문이다. 파일 크기만으로 쪼개면 control
+`daily.py`가 큰 이유는 event ordering, Account commit, state propagation과 evidence가 한곳에 있기 때문이다. 파일 크기만으로 쪼개면 control
 flow가 더 숨을 수 있다. 먼저 `ExecutionPreparation`이라는 실제 responsibility seam을 추출한 뒤 추가 분리를 판단한다.
 
 ## 현재 semantic layout
@@ -119,7 +120,9 @@ src/qlibx/
     preparation.py   # generic lifecycle + concrete KRX/Academic preparation
     krx.py           # KrxExchange physical semantics
     academic.py      # AcademicExchange hypothetical semantics
-  account/          # Account aggregate + Strategy memory
+  account/          # Account aggregate + legacy checkpoint schema
+  account_history.py
+  strategy_state.py # declared actual history + explicit JSON state contracts
   portfolio/        # construction/constraint pure functions
   flow/             # internal orchestration
 
@@ -136,8 +139,8 @@ src/qlibx/
 그 행위를 수행하는 **행위자**만 Model 어휘를 쓴다(`ResearchModel`, `ForwardReturnLabelModel`, `ModelView`).
 `SampleMaterializer`는 sample 파일 materialization이라는 별개 개념이므로 이 어휘에 포함되지 않는다.
 
-이 위치는 새 범용 `engine/`, `stages/`, `plugins/`, `journal/` hierarchy를 만들지 않는다. Daily와 Academic recovery는
-각 Flow에 남긴다. Exact rows/calendar lookback은 execution이 아니라 `data/contracts.py`, `data/requirements.py`,
+이 위치는 새 범용 `engine/`, `stages/`, `plugins/`, `journal/` hierarchy를 만들지 않는다. Interrupted-run recovery는
+current scope에 두지 않는다. Exact rows/calendar lookback은 execution이 아니라 `data/contracts.py`, `data/requirements.py`,
 `data/store.py`, `view/views.py`를 관통하는 data-access contract다. Latest execution result는 execution evidence를
 재사용해 `StrategyView`의 최소 query와 access lineage로 구현한다.
 

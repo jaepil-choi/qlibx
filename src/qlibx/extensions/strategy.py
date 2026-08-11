@@ -16,9 +16,9 @@ from qlibx.view import (
     AccessRecord,
     ArtifactAccessRecord,
     FeedbackAccessRecord,
-    MemoryAccessRecord,
     SessionPerformanceAccessRecord,
     StateAccessRecord,
+    StrategyStateAccessRecord,
 )
 
 _EXTENSION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
@@ -77,7 +77,7 @@ class StrategyExtensionValidationRequest(QlibxModel):
 
 
 class StrategyExtensionRegistration(QlibxModel):
-    registration_schema_version: Literal[1] = 1
+    registration_schema_version: Literal[2] = 2
     extension_kind: Literal["strategy"] = "strategy"
     strategy_id: str
     module_path: str
@@ -100,7 +100,7 @@ class StrategyExtensionRegistration(QlibxModel):
     state_accesses: tuple[StateAccessRecord, ...] = ()
     feedback_accesses: tuple[FeedbackAccessRecord, ...] = ()
     performance_accesses: tuple[SessionPerformanceAccessRecord, ...] = ()
-    memory_accesses: tuple[MemoryAccessRecord, ...] = ()
+    strategy_state_accesses: tuple[StrategyStateAccessRecord, ...] = ()
 
 
 class RegisteredStrategyExtension(QlibxModel):

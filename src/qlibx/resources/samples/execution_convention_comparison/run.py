@@ -145,7 +145,7 @@ def execution_summary(outcome: object) -> dict[str, object]:
         "account_before": execution.account_before.account_id,
         "account_after": execution.account_after.account_id,
         "strategy_result_count": len(result.strategy_results),
-        "memory_commit_count": len(result.memory_commits),
+        "strategy_state": result.final_strategy_state,
         "decision_dependency_ids": [
             edge.dependency_id
             for edge in execution_artifact.dependencies

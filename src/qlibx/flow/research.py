@@ -1,5 +1,7 @@
 """Orchestration for PIT-safe direct Strategy research."""
 
+from dataclasses import dataclass
+
 from pydantic import Field
 
 from qlibx.contracts import (
@@ -33,12 +35,18 @@ from qlibx.flow.strategy_results import (
 )
 from qlibx.models import QlibxModel
 from qlibx.runtime import BacktestClock
+from qlibx.strategy_state import (
+    StrategyStateJsonError,
+    StrategyStateUpdate,
+    normalize_strategy_state,
+)
 from qlibx.view import (
     AccountFeedbackState,
+    AccountHistoryProjection,
+    AccountHistoryViewAccessError,
     AccountState,
     ArtifactViewAccessError,
     ExecutionInputProjection,
-    MemoryState,
     PublishedSessionPerformanceState,
     ViewGate,
 )
@@ -47,7 +55,17 @@ from qlibx.view import (
 class StrategyRunResult(QlibxModel):
     result: StrategyResult
     artifact: ArtifactEnvelope
+    final_strategy_state: object = None
     computed_draft: StrategyDraft | None = Field(default=None, exclude=True, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class _StrategyStateSnapshot:
+    strategy_id: str
+    value: object
+
+
+_UNSET = object()
 
 
 class ResearchFlow:
@@ -77,11 +95,26 @@ class ResearchFlow:
         *,
         account_state: AccountState | None = None,
         account_feedback: AccountFeedbackState | None = None,
+        account_history_inputs: tuple[AccountHistoryProjection, ...] = (),
         session_performance: PublishedSessionPerformanceState | None = None,
-        memory_state: MemoryState | None = None,
+        strategy_state: object = _UNSET,
         additional_dependencies: tuple[DependencyEdge, ...] = (),
         execution_inputs: tuple[ExecutionInputProjection, ...] = (),
     ) -> OperationOutcome:
+        raw_strategy_state = (
+            invocation.initial_strategy_state
+            if strategy_state is _UNSET
+            else strategy_state
+        )
+        try:
+            prior_strategy_state = normalize_strategy_state(raw_strategy_state)
+        except StrategyStateJsonError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.state.seed",
+                "MEMORY_NOT_JSON",
+                exc,
+            )
         try:
             requirements = strategy.requirements()
         except Exception as exc:
@@ -139,8 +172,12 @@ class ResearchFlow:
             resolution.bindings,
             account_state=account_state,
             account_feedback=account_feedback,
+            account_history_inputs=account_history_inputs,
             session_performance=session_performance,
-            memory_state=memory_state,
+            strategy_state=_StrategyStateSnapshot(
+                strategy_id=strategy.strategy_id,
+                value=prior_strategy_state,
+            ),
             artifact_inputs=artifact_resolution.projections,
             execution_inputs=execution_inputs,
         )
@@ -148,6 +185,25 @@ class ResearchFlow:
             draft = strategy.run(view)
             if not isinstance(draft, StrategyDraft):
                 raise TypeError("Strategy run must return StrategyDraft")
+        except AccountHistoryViewAccessError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.account_history.access",
+                exc.error_code,
+                exc,
+                requirement_id=exc.context.get("requirement_id"),
+                error_context=exc.context,
+                accesses=(
+                    *view.accessed(),
+                    *view.account_history_accessed(),
+                    *view.state_accessed(),
+                    *view.feedback_accessed(),
+                    *view.performance_accessed(),
+                    *view.strategy_state_accessed(),
+                    *view.artifact_accessed(),
+                    *view.execution_accessed(),
+                ),
+            )
         except ArtifactViewAccessError as exc:
             return self._failed_invocation(
                 invocation,
@@ -162,7 +218,7 @@ class ResearchFlow:
                     *view.state_accessed(),
                     *view.feedback_accessed(),
                     *view.performance_accessed(),
-                    *view.memory_accessed(),
+                    *view.strategy_state_accessed(),
                     *view.artifact_accessed(),
                     *view.execution_accessed(),
                 ),
@@ -179,7 +235,7 @@ class ResearchFlow:
                     *view.state_accessed(),
                     *view.feedback_accessed(),
                     *view.performance_accessed(),
-                    *view.memory_accessed(),
+                    *view.strategy_state_accessed(),
                     *view.artifact_accessed(),
                     *view.execution_accessed(),
                 ),
@@ -195,7 +251,7 @@ class ResearchFlow:
                     *view.state_accessed(),
                     *view.feedback_accessed(),
                     *view.performance_accessed(),
-                    *view.memory_accessed(),
+                    *view.strategy_state_accessed(),
                     *view.artifact_accessed(),
                     *view.execution_accessed(),
                 ),
@@ -211,7 +267,38 @@ class ResearchFlow:
                     *view.state_accessed(),
                     *view.feedback_accessed(),
                     *view.performance_accessed(),
-                    *view.memory_accessed(),
+                    *view.strategy_state_accessed(),
+                    *view.artifact_accessed(),
+                    *view.execution_accessed(),
+                ),
+            )
+
+        try:
+            proposed_state = (
+                None
+                if draft.proposed_state is None
+                else StrategyStateUpdate(
+                    value=normalize_strategy_state(draft.proposed_state.value)
+                )
+            )
+            final_strategy_state = (
+                prior_strategy_state
+                if proposed_state is None
+                else proposed_state.value
+            )
+        except StrategyStateJsonError as exc:
+            return self._failed_invocation(
+                invocation,
+                "strategy.run.state.update",
+                "MEMORY_NOT_JSON",
+                exc,
+                accesses=(
+                    *view.accessed(),
+                    *view.account_history_accessed(),
+                    *view.state_accessed(),
+                    *view.feedback_accessed(),
+                    *view.performance_accessed(),
+                    *view.strategy_state_accessed(),
                     *view.artifact_accessed(),
                     *view.execution_accessed(),
                 ),
@@ -219,18 +306,20 @@ class ResearchFlow:
 
         accesses = view.accessed()
         state_accesses = view.state_accessed()
+        account_history_accesses = view.account_history_accessed()
         feedback_accesses = view.feedback_accessed()
         performance_accesses = view.performance_accessed()
-        memory_accesses = view.memory_accessed()
+        strategy_state_accesses = view.strategy_state_accessed()
         artifact_accesses = view.artifact_accessed()
         execution_accesses = view.execution_accessed()
         try:
             observed_direct = validate_strategy_draft_path_dependence(
                 draft,
+                account_history_accesses=account_history_accesses,
                 state_accesses=state_accesses,
                 feedback_accesses=feedback_accesses,
                 performance_accesses=performance_accesses,
-                memory_accesses=memory_accesses,
+                strategy_state_accesses=strategy_state_accesses,
                 execution_accesses=execution_accesses,
             )
             source_state_lineage = collect_strategy_source_lineage(
@@ -248,7 +337,7 @@ class ResearchFlow:
                     *state_accesses,
                     *feedback_accesses,
                     *performance_accesses,
-                    *memory_accesses,
+                    *strategy_state_accesses,
                     *artifact_accesses,
                 ),
             )
@@ -276,15 +365,15 @@ class ResearchFlow:
             decision_action=draft.decision_action,
             path_dependent=observed_direct or bool(source_state_lineage),
             state_identity=draft.state_identity if observed_direct else None,
-            feedback_cursor=draft.feedback_cursor if observed_direct else None,
-            proposed_memory=draft.proposed_memory,
-            expected_memory_version=draft.expected_memory_version,
+
+            proposed_state=proposed_state,
             diagnostics=draft.diagnostics,
             accesses=accesses,
+            account_history_accesses=account_history_accesses,
             state_accesses=state_accesses,
             feedback_accesses=feedback_accesses,
             performance_accesses=performance_accesses,
-            memory_accesses=memory_accesses,
+            strategy_state_accesses=strategy_state_accesses,
             execution_accesses=execution_accesses,
             source_state_lineage=source_state_lineage,
         )
@@ -303,6 +392,22 @@ class ResearchFlow:
                 dependency_kind="config",
                 dependency_id=invocation.config_fingerprint,
                 consumer_role="strategy_config",
+            ),
+            *(
+                DependencyEdge(
+                    dependency_kind="state",
+                    dependency_id=(
+                        f"account:{access.account_id}:history:{access.shape.value}:"
+                        f"{access.start_session}:{access.end_session}"
+                    ),
+                    consumer_role=f"actual_account_history:{access.requirement_id}",
+                    selected_fields=access.selected_fields,
+                    compatibility_fingerprint=(
+                        f"rows:{access.requested_rows}:sessions:{access.available_sessions}:"
+                        f"instruments:{','.join(access.instruments)}"
+                    ),
+                )
+                for access in result.account_history_accesses
             ),
             *(
                 DependencyEdge(
@@ -351,13 +456,14 @@ class ResearchFlow:
                 DependencyEdge(
                     dependency_kind="state",
                     dependency_id=(
-                        f"memory:{access.strategy_id}:v{access.version}:"
-                        f"cursor{access.feedback_cursor}"
+                        f"strategy-state:{access.strategy_id}:"
+                        f"{access.state_fingerprint}"
                     ),
-                    consumer_role="strategy_memory",
-                    selected_fields=("value", "feedback_cursor"),
+                    consumer_role="strategy_state",
+                    selected_fields=("value",),
+                    compatibility_fingerprint=access.state_fingerprint,
                 )
-                for access in result.memory_accesses
+                for access in result.strategy_state_accesses
             ),
             *(
                 DependencyEdge(
@@ -407,6 +513,7 @@ class ResearchFlow:
             result=StrategyRunResult(
                 result=result,
                 artifact=publication.result,
+                final_strategy_state=final_strategy_state,
                 computed_draft=draft,
             ),
         )

@@ -23,6 +23,7 @@ from qlibx.config.project import (
     preview_project,
 )
 from qlibx.contracts import (
+    AccountHistoryRecordingSpec,
     ModelInvocation,
     ResearchModel,
     StrategyArtifactBinding,
@@ -176,6 +177,8 @@ class QlibxProject:
         session_opens: tuple[datetime, ...] = (),
         execution_timing: ExecutionTiming = "next_session_close",
         artifact_bindings: tuple[StrategyArtifactBinding, ...] = (),
+        account_history: AccountHistoryRecordingSpec | None = None,
+        initial_strategy_state: object = None,
         constraint_policy: MvpConstraintPolicy | None = None,
     ) -> DailySimulationSpec:
         """Freeze the accumulated execution environment into one complete simulation spec.
@@ -200,6 +203,8 @@ class QlibxProject:
             session_closes=session_closes,
             session_opens=session_opens,
             artifact_bindings=artifact_bindings,
+            account_history=account_history or AccountHistoryRecordingSpec(),
+            initial_strategy_state=initial_strategy_state,
             constraint_policy=constraint_policy,
         )
 
@@ -503,7 +508,6 @@ class QlibxProject:
         spec: AcademicRunSpec,
         *,
         exchange: BaseExchange[AcademicBatchRequest, AcademicMatchResult] | None = None,
-        resume: bool = False,
     ) -> OperationOutcome:
         """Execute exact signed portfolios in the hypothetical academic venue."""
 
@@ -519,7 +523,7 @@ class QlibxProject:
                 artifacts=self.artifacts,
                 store=self._store,
                 exchange=selected_exchange,
-            ).run(spec, resume=resume),
+            ).run(spec),
         )
 
     def run_daily(
@@ -528,7 +532,6 @@ class QlibxProject:
         spec: DailySimulationSpec,
         *,
         exchange: BaseExchange[KrxBatchRequest, MatchBatchResult] | None = None,
-        resume: bool = False,
     ) -> OperationOutcome:
         """Run a supported daily close/open profile from frozen public input."""
 
@@ -539,7 +542,6 @@ class QlibxProject:
                 strategy,
                 spec,
                 exchange=exchange,
-                resume=resume,
             ),
         )
 
@@ -549,7 +551,6 @@ class QlibxProject:
         spec: DailySimulationSpec,
         *,
         exchange: BaseExchange[KrxBatchRequest, MatchBatchResult] | None = None,
-        resume: bool = False,
     ) -> OperationOutcome:
         """Run an exact registered Strategy after source and contract revalidation."""
 
@@ -569,7 +570,6 @@ class QlibxProject:
                 selected.operation,
                 spec,
                 exchange=exchange,
-                resume=resume,
                 config_fingerprint=registered_identity,
                 artifact_contracts=selected.artifact_contracts,
                 strategy_dependencies=(self._strategy_registration_dependency(selected),),
@@ -580,7 +580,6 @@ class QlibxProject:
             identity=spec.run_id,
             callback=run_registered,
         )
-
     def execute_frozen_daily(
         self,
         spec: FrozenDailyExecutionSpec,
@@ -648,7 +647,6 @@ class QlibxProject:
         spec: DailySimulationSpec,
         *,
         exchange: BaseExchange[KrxBatchRequest, MatchBatchResult] | None,
-        resume: bool,
         config_fingerprint: str | None = None,
         artifact_contracts: StrategyArtifactContractRegistry | None = None,
         strategy_dependencies: tuple[DependencyEdge, ...] = (),
@@ -692,10 +690,10 @@ class QlibxProject:
                 session_closes=spec.session_closes,
                 session_opens=spec.session_opens,
                 artifact_bindings=spec.artifact_bindings,
+                account_history=spec.account_history,
+                initial_strategy_state=spec.initial_strategy_state,
             ),
-            resume=resume,
         )
-
     @staticmethod
     def _daily_profile(
         spec: DailySimulationSpec | FrozenDailyExecutionSpec,

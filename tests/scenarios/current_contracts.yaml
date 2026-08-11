@@ -138,3 +138,40 @@ scenarios:
       complete_multi_source_lineage: true
       fabricated_singular_state_identity: false
       downstream_account_authority: sample-downstream-account-b
+
+  - id: UC-TRIGGER-001
+    case: strategy_declared_cadence_matches_daily_decision_times
+    test: tests/test_public_daily.py::test_uc_trigger_001_public_daily_facade_enforces_declared_cadence
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: exact FIRE and SKIP timestamps require a controlled four-session calendar
+      oracle: Strategy-owned EveryNSessions policy and persisted daily event trace
+    expected:
+      cadence: every_two_sessions
+      decision_count: 2
+      skipped_sessions_are_failures: false
+
+  - id: UC-STATE-001
+    case: zero_order_state_continues_only_with_explicit_seed
+    test: tests/test_strategy_state.py::test_uc_state_001_zero_order_state_crosses_run_boundary_only_through_explicit_seed
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: zero-order HOLD and fresh-run isolation need an execution-independent fixture
+      oracle: explicit initial and final strategy state values on DailyRunResult
+    expected:
+      zero_order_state_update: true
+      explicit_seed_continues: true
+      implicit_prior_state_selection: false
+
+  - id: UC-ACCOUNT-HISTORY-001
+    case: declared_account_series_and_instrument_panel_without_strategy_state
+    test: tests/test_public_daily.py::test_uc_account_history_001_uses_declared_history_without_strategy_state
+    inputs:
+      fixture_kind: deterministic_contract
+      reason: exact entry cost and realized PnL require controlled fills and marks
+      oracle: declared recording spec, bounded Strategy requirements, and result lineage
+    expected:
+      account_series: [cash, nav, realized_pnl]
+      instrument_panel: [quantity, average_cost, realized_pnl, mark]
+      strategy_state_access: false
+      unrecorded_inference: false

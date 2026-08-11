@@ -5,6 +5,7 @@ from qlibx.contracts import (
     DecisionAction,
     EveryNSessions,
     StrategyDraft,
+    StrategyStateUpdate,
     WeightEntry,
 )
 from qlibx.data import ComponentRequirement
@@ -27,7 +28,7 @@ class SampleDailyFeedbackStrategy:
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
-        memory = view.memory_snapshot()  # type: ignore[attr-defined]
+        view.strategy_state()  # type: ignore[attr-defined]
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
         frame = view.session(  # type: ignore[attr-defined]
             "decision_return",
@@ -49,7 +50,7 @@ class SampleDailyFeedbackStrategy:
             for entry in feedback.entries
             for fill in entry.fills
         )
-        proposed_memory = {
+        proposed_state = {
             "selected": str(winner.instrument),
             "consumed_feedback_cursor": feedback.next_cursor,
             "feedback_transaction_cost": transaction_cost,
@@ -69,9 +70,7 @@ class SampleDailyFeedbackStrategy:
             state_identity=(
                 f"{account.account_id}:v{account.version}:cursor{feedback.next_cursor}"
             ),
-            feedback_cursor=str(feedback.next_cursor),
-            proposed_memory=proposed_memory,
-            expected_memory_version=memory.version,
+            proposed_state=StrategyStateUpdate(value=proposed_state),
         )
 
     def trigger(self) -> EveryNSessions:

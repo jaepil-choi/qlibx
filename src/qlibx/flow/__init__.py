@@ -48,7 +48,6 @@ from qlibx.flow.daily import (
     ExecutionEvidence,
     FrozenDecision,
     MarkEvidence,
-    MemoryCommitEvidence,
     MonitorEvidence,
     NextSessionCloseExecutor,
     NextSessionOpenExecutor,
@@ -67,12 +66,8 @@ from qlibx.flow.portfolio import (
     PortfolioConstructionFlow,
     load_portfolio_result,
 )
-from qlibx.flow.recovery import (
-    SIMULATION_RECOVERY_POINT_CONTRACT,
-    PendingExecutionRecovery,
-    RecoveryPublication,
-    SimulationRecoveryPoint,
-)
+
+# Interrupted-run recovery is not part of the current public flow surface.
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
 from qlibx.flow.strategy_extensions import (
     SESSION_PERFORMANCE_CONTRACT,
@@ -100,7 +95,7 @@ __all__ = [
     "PORTFOLIO_RESULT_V1_CONTRACT",
     "REPORT_RESULT_CONTRACT",
     "SESSION_PERFORMANCE_CONTRACT",
-    "SIMULATION_RECOVERY_POINT_CONTRACT",
+
     "STORED_SIGNAL_CONTRACT",
     "STRATEGY_EXTENSION_REGISTRATION_CONTRACT",
     "AcademicCheckpoint",
@@ -126,20 +121,20 @@ __all__ = [
     "LoadedStrategyExtension",
     "MarkEvidence",
     "MemberContribution",
-    "MemoryCommitEvidence",
+
     "ModelFlow",
     "ModelRunResult",
     "MonitorEvidence",
     "MonitoringFlow",
     "NextSessionCloseExecutor",
     "NextSessionOpenExecutor",
-    "PendingExecutionRecovery",
+
     "PortfolioConstructionFlow",
-    "RecoveryPublication",
+
     "ResearchFlow",
     "SessionPerformanceEvidence",
     "SimulationCheckpoint",
-    "SimulationRecoveryPoint",
+
     "StoredSignalEntry",
     "StoredSignalResult",
     "StoredSignalStrategyOperation",

@@ -41,7 +41,7 @@ class StoredSignalWeighting(StrEnum):
 class EnsembleMemberSpec(QlibxModel):
     artifact_id: str = Field(min_length=1)
     allocation: float = Field(gt=0)
-    artifact_schema_version: Literal[3] = 3
+    artifact_schema_version: Literal[4] = 4
 
 
 class EnsembleDefinition(QlibxModel):

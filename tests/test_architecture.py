@@ -9,8 +9,16 @@ SOURCE = ROOT / "src" / "qlibx"
 LAYER_DEPENDENCIES = {
     "runtime": set(),
     "data": {"domain", "models", "errors"},
-    "view": {"runtime", "data", "domain", "models", "errors"},
-    "contracts": {"view", "data", "domain", "models", "errors"},
+    "view": {"runtime", "data", "domain", "models", "errors", "account_history", "strategy_state"},
+    "contracts": {
+        "view",
+        "data",
+        "domain",
+        "models",
+        "errors",
+        "account_history",
+        "strategy_state",
+    },
     "extensions": {
         "view",
         "data",
@@ -18,6 +26,7 @@ LAYER_DEPENDENCIES = {
         "contracts",
         "models",
         "errors",
+        "strategy_state",
     },
     "portfolio": {"view", "data", "domain", "models", "errors"},
     "execution": {
@@ -47,8 +56,18 @@ LAYER_DEPENDENCIES = {
         "domain",
         "models",
         "errors",
+        "account_history",
+        "strategy_state",
     },
-    "specs": {"execution", "portfolio", "contracts", "runtime", "models", "errors"},
+    "specs": {
+        "execution",
+        "portfolio",
+        "contracts",
+        "runtime",
+        "models",
+        "errors",
+        "strategy_state",
+    },
     "config": {"models", "errors"},
 }
 
@@ -82,6 +101,8 @@ def test_layer_import_direction() -> None:
 def test_role_views_expose_only_their_authorized_capabilities() -> None:
     dataset_capabilities = {"as_of", "history", "session", "at", "latest", "accessed"}
     strategy_only_capabilities = {
+        "account_history",
+        "account_history_accessed",
         "artifact",
         "artifact_accessed",
         "latest_execution_result",
@@ -90,8 +111,8 @@ def test_role_views_expose_only_their_authorized_capabilities() -> None:
         "feedback_accessed",
         "latest_session_performance",
         "performance_accessed",
-        "memory_snapshot",
-        "memory_accessed",
+        "strategy_state",
+        "strategy_state_accessed",
     }
     account_capabilities = {"account_snapshot", "state_accessed"}
     classified = dataset_capabilities | strategy_only_capabilities | account_capabilities

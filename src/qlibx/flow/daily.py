@@ -13,13 +13,11 @@ from qlibx.account import (
     Account,
     AccountCheckpoint,
     AccountCommitRejected,
-    AccountFeedback,
     AccountSnapshot,
     FillBatch,
     Mark,
     MarkBatch,
     MemorySnapshot,
-    StrategyMemoryStore,
 )
 from qlibx.analysis import (
     AnalysisError,
@@ -30,12 +28,13 @@ from qlibx.analysis import (
     compute_session_performance,
 )
 from qlibx.contracts import (
+    AccountHistoryRecordingSpec,
+    AccountHistoryRequirement,
     DecisionAction,
     EveryCandidate,
     StrategyArtifactBinding,
     StrategyInvocation,
     StrategyOperation,
-    StrategyResult,
     TriggerContext,
     TriggerPolicy,
 )
@@ -69,26 +68,19 @@ from qlibx.execution.preparation import (
     KrxPreparationContext,
     KrxPreparationIntent,
 )
+from qlibx.flow.account_history import (
+    AccountHistoryContractError,
+    ActualStateHistoryRecorder,
+)
 from qlibx.flow.artifact_inputs import StrategyArtifactContractRegistry
-from qlibx.flow.recovery import (
-    DailyRecoveryCoordinator,
-    DailyRecoveryDependencyErrors,
-    DailyRecoveryIdentity,
-    DailyRecoveryIssue,
-    DailyRecoveryWrite,
-    PendingExecutionRecovery,
-    RecoveryPublication,
-)
 from qlibx.flow.research import ResearchFlow, StrategyRunResult
-from qlibx.flow.strategy_results import (
-    StrategyResultPayload,
-    load_strategy_result,
-)
+from qlibx.flow.strategy_results import StrategyResultPayload
 from qlibx.models import QlibxModel
 from qlibx.portfolio import BenchmarkWeight, ExecutionLotInput
 from qlibx.runtime import BacktestClock, Event
 from qlibx.runtime.clock import require_aware
 from qlibx.specs.constraints import MvpConstraintPolicy
+from qlibx.strategy_state import normalize_strategy_state
 from qlibx.view import ExecutionInputProjection, StateAccessRecord, StateHolding, ViewGate
 
 DECISION_PRIORITY = 0
@@ -187,16 +179,6 @@ class MonitorEvidence(QlibxModel):
     session_performance_status: Literal["published", "skipped_missing_mark"] = "published"
 
 
-class MemoryCommitEvidence(QlibxModel):
-    strategy_id: str
-    source_artifact_id: str
-    previous_version: int = Field(ge=0)
-    version: int = Field(ge=0)
-    feedback_cursor: int = Field(ge=0)
-    update_kind: Literal["INITIALIZATION", "FEEDBACK_UPDATE"]
-    value: dict[str, object]
-
-
 class SimulationCheckpointV2(QlibxModel):
     checkpoint_schema_version: Literal[2] = 2
     run_id: str
@@ -213,7 +195,7 @@ class SimulationCheckpointV2(QlibxModel):
     completed_decision_ids: tuple[str, ...]
 
 
-class SimulationCheckpoint(QlibxModel):
+class SimulationCheckpointV3(QlibxModel):
     checkpoint_schema_version: Literal[3] = 3
     run_id: str
     request_fingerprint: str
@@ -226,6 +208,24 @@ class SimulationCheckpoint(QlibxModel):
     account: StateAccessRecord
     account_checkpoint: AccountCheckpoint
     memory_snapshots: tuple[MemorySnapshot, ...] = ()
+    event_trace: tuple[str, ...]
+    completed_decision_ids: tuple[str, ...]
+
+
+class SimulationCheckpoint(QlibxModel):
+    checkpoint_schema_version: Literal[4] = 4
+    run_id: str
+    request_fingerprint: str
+    config_fingerprint: str
+    profile_fingerprint: str
+    registry_fingerprint: str
+    strategy_id: str | None
+    event_time: datetime
+    initial_account: StateAccessRecord
+    account: StateAccessRecord
+    account_checkpoint: AccountCheckpoint
+    initial_strategy_state: object = None
+    strategy_state: object = None
     event_trace: tuple[str, ...]
     completed_decision_ids: tuple[str, ...]
 
@@ -272,6 +272,8 @@ class DailyRunRequest(QlibxModel):
     session_closes: tuple[datetime, ...]
     session_opens: tuple[datetime, ...] = ()
     artifact_bindings: tuple[StrategyArtifactBinding, ...] = ()
+    account_history: AccountHistoryRecordingSpec = AccountHistoryRecordingSpec()
+    initial_strategy_state: object = None
 
     @model_validator(mode="after")
     def validate_schedule(self) -> "DailyRunRequest":
@@ -286,6 +288,7 @@ class DailyRunRequest(QlibxModel):
         binding_roles = [binding.consumer_role for binding in self.artifact_bindings]
         if len(binding_roles) != len(set(binding_roles)):
             raise ValueError("daily Strategy artifact binding roles must be unique")
+        normalize_strategy_state(self.initial_strategy_state)
         return self
 
     def compatibility_json(self) -> str:
@@ -294,8 +297,15 @@ class DailyRunRequest(QlibxModel):
         exclude: set[str] = set()
         if not self.artifact_bindings:
             exclude.add("artifact_bindings")
+        if not (
+            self.account_history.account_series_fields
+            or self.account_history.instrument_panel_fields
+        ):
+            exclude.add("account_history")
         if not self.session_opens:
             exclude.add("session_opens")
+        if self.initial_strategy_state is None:
+            exclude.add("initial_strategy_state")
         return self.model_dump_json(exclude=exclude)
 
 
@@ -307,7 +317,8 @@ class DailyRunResult:
     marks: tuple[MarkEvidence, ...]
     session_performance: tuple[SessionPerformanceEvidence, ...]
     monitors: tuple[MonitorEvidence, ...]
-    memory_commits: tuple[MemoryCommitEvidence, ...]
+    initial_strategy_state: object
+    final_strategy_state: object
     checkpoint: SimulationCheckpoint
     final_account: AccountSnapshot
     artifacts: tuple[ArtifactEnvelope, ...]
@@ -317,7 +328,7 @@ class DailyRunResult:
 class _PendingExecution:
     intent: DecisionIntent
     intent_artifact: ArtifactEnvelope
-    strategy_result: StrategyResultPayload | None = None
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,17 +353,6 @@ class _AuthorityCommit:
 class _PublishedSessionPerformance:
     artifact_id: str
     record: SessionPerformanceEvidence
-
-
-@dataclass(frozen=True, slots=True)
-class _MemoryPlan:
-    strategy_id: str
-    value: dict[str, object]
-    feedback_cursor: int
-    expected_version: int
-    commit_id: str
-    initialization: bool
-    source_artifact_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,6 +405,8 @@ def _state(snapshot: AccountSnapshot) -> StateAccessRecord:
             StateHolding(
                 instrument_id=position.instrument_id,
                 quantity=position.quantity,
+                average_cost=position.average_cost,
+                realized_pnl=position.realized_pnl,
                 mark=position.mark,
                 marked_at=position.marked_at,
             )
@@ -454,7 +456,7 @@ class DailyExecutionFlow:
         preparation: KrxExecutionPreparation | None = None,
         resolver: RequirementResolver | None = None,
         store: ObservationStore | None = None,
-        memory: StrategyMemoryStore | None = None,
+
         artifact_contracts: StrategyArtifactContractRegistry | None = None,
         strategy_dependencies: tuple[DependencyEdge, ...] = (),
     ) -> None:
@@ -468,7 +470,11 @@ class DailyExecutionFlow:
         self._preparation = preparation or KrxExecutionPreparation()
         self._resolver = resolver or RequirementResolver()
         self._store = store or ObservationStore()
-        self._memory = memory or StrategyMemoryStore()
+        self._initial_strategy_state: object = None
+        self._strategy_state: object = None
+        self._feedback_cursor = account.snapshot().feedback_cursor
+        self._account_history_recorder: ActualStateHistoryRecorder | None = None
+        self._account_history_requirements: tuple[AccountHistoryRequirement, ...] = ()
         self._gate = ViewGate(registry, self._store)
         self._research = ResearchFlow(
             registry=registry,
@@ -492,15 +498,15 @@ class DailyExecutionFlow:
         self._marks: list[MarkEvidence] = []
         self._session_performance: list[_PublishedSessionPerformance] = []
         self._monitors: list[MonitorEvidence] = []
-        self._memory_commits: list[MemoryCommitEvidence] = []
+
         self._published: list[ArtifactEnvelope] = []
         self._trace: list[str] = []
         self._completed_decisions: list[str] = []
         self._errors: list[OperationError] = []
         self._authority_commits: list[_AuthorityCommit] = []
         self._pending_executions: dict[str, _PendingExecution] = {}
-        self._recovery: DailyRecoveryCoordinator | None = None
-        self._resume_position: tuple[datetime, int] | None = None
+        # Interrupted-run recovery is outside the current product scope.
+        # Final checkpoints remain result evidence, not resume points.
         self._request_fingerprint = ""
         self._profile_fingerprint = ""
         self._registry_fingerprint = ""
@@ -509,16 +515,15 @@ class DailyExecutionFlow:
         self,
         strategy: StrategyOperation,
         request: DailyRunRequest,
-        *,
-        resume: bool = False,
     ) -> OperationOutcome:
-        self._prepare(request, strategy=strategy, resume=resume)
+        self._prepare(request, strategy=strategy)
         if not self._errors:
             for timestamp in request.session_closes:
                 normalized = require_aware(timestamp)
-                event = Event("DECISION", normalized, DECISION_PRIORITY)
-                if self._should_schedule(event):
-                    self._clock.schedule(event, self._on_decision)
+                self._clock.schedule(
+                    Event("DECISION", normalized, DECISION_PRIORITY),
+                    self._on_decision,
+                )
         return self._drain(request)
 
     def execute_frozen(
@@ -539,11 +544,7 @@ class DailyExecutionFlow:
                 != f"decision-intent:{frozen.intent.decision_id}"
             ):
                 self._fail(
-                    Event(
-                        "EXECUTION",
-                        frozen.intent.decision_time,
-                        EXECUTION_PRIORITY,
-                    ),
+                    Event("EXECUTION", frozen.intent.decision_time, EXECUTION_PRIORITY),
                     "execution_plan",
                     "PARENT_ARTIFACT_ID_MISMATCH",
                 )
@@ -551,11 +552,7 @@ class DailyExecutionFlow:
             execution_time = self._executor.plan(frozen.intent)
             if execution_time is None:
                 self._fail(
-                    Event(
-                        "EXECUTION",
-                        frozen.intent.decision_time,
-                        EXECUTION_PRIORITY,
-                    ),
+                    Event("EXECUTION", frozen.intent.decision_time, EXECUTION_PRIORITY),
                     "execution_plan",
                     "NEXT_SESSION_NOT_AVAILABLE",
                 )
@@ -566,35 +563,25 @@ class DailyExecutionFlow:
                 intent_artifact=frozen.artifact,
             )
             self._pending_executions[frozen.intent.decision_id] = pending
-            if (
-                self._publish_recovery_point(
-                    event=Event("DECISION", frozen.intent.decision_time, DECISION_PRIORITY)
-                )
-                is None
-            ):
-                break
             self._clock.schedule(
-                Event(
-                    "EXECUTION",
-                    execution_time,
-                    EXECUTION_PRIORITY,
-                    pending,
-                ),
+                Event("EXECUTION", execution_time, EXECUTION_PRIORITY, pending),
                 self._on_execution,
             )
         return self._drain(request)
-
     def _prepare(
         self,
         request: DailyRunRequest,
         *,
         strategy: StrategyOperation | None = None,
-        resume: bool = False,
     ) -> None:
         if self._request is not None:
             raise RuntimeError("DailyExecutionFlow instances are single-use")
         self._request = request
         self._strategy = strategy
+        self._initial_strategy_state = normalize_strategy_state(
+            request.initial_strategy_state
+        )
+        self._strategy_state = self._initial_strategy_state
         self._config_fingerprint = request.config_fingerprint
         if strategy is not None:
             try:
@@ -609,9 +596,7 @@ class DailyExecutionFlow:
                     raise TypeError("TriggerPolicy.policy_id must be a non-empty string")
                 requirements = tuple(policy.requirements())
                 if requirements:
-                    raise ValueError(
-                        "schedule-shaped TriggerPolicy requirements must be empty"
-                    )
+                    raise ValueError("schedule-shaped TriggerPolicy requirements must be empty")
                 policy_fingerprint = policy.frozen_config_fingerprint()
                 if (
                     not isinstance(policy_fingerprint, str)
@@ -641,6 +626,48 @@ class DailyExecutionFlow:
                 require_aware(timestamp): index
                 for index, timestamp in enumerate(request.session_closes)
             }
+        self._account_history_recorder = ActualStateHistoryRecorder(
+            request.account_history,
+            self._account,
+        )
+        if strategy is not None:
+            try:
+                requirements_method = getattr(strategy, "account_history_requirements", None)
+                if requirements_method is None:
+                    history_requirements: tuple[AccountHistoryRequirement, ...] = ()
+                else:
+                    if not callable(requirements_method):
+                        raise TypeError("account_history_requirements must be callable")
+                    history_requirements = tuple(requirements_method())
+                    if not all(
+                        isinstance(requirement, AccountHistoryRequirement)
+                        for requirement in history_requirements
+                    ):
+                        raise TypeError(
+                            "account_history_requirements must return "
+                            "AccountHistoryRequirement values"
+                        )
+                self._account_history_recorder.validate_requirements(history_requirements)
+                self._account_history_requirements = history_requirements
+            except AccountHistoryContractError as exc:
+                self._fail(
+                    Event("DECISION", self._clock.now, DECISION_PRIORITY),
+                    "decision.account_history.requirements",
+                    exc.code,
+                    context=exc.context,
+                )
+                return
+            except Exception as exc:
+                self._fail(
+                    Event("DECISION", self._clock.now, DECISION_PRIORITY),
+                    "decision.account_history.requirements",
+                    "ACCOUNT_HISTORY_REQUIREMENTS_FAILED",
+                    context={
+                        "exception": type(exc).__name__,
+                        "message": str(exc)[:500],
+                    },
+                )
+                return
         self._request_fingerprint = self._fingerprint(request.compatibility_json())
         self._profile_fingerprint = self._fingerprint(self._profile.compatibility_json())
         self._registry_fingerprint = self._fingerprint(
@@ -648,18 +675,6 @@ class DailyExecutionFlow:
                 item.registration_identity
                 for item in sorted(self._registry.datasets, key=lambda value: value.dataset_id)
             )
-        )
-        self._recovery = DailyRecoveryCoordinator(
-            artifacts=self._artifacts,
-            identity=DailyRecoveryIdentity(
-                run_id=request.run_id,
-                request_fingerprint=self._request_fingerprint,
-                config_fingerprint=self._config_fingerprint,
-                profile_fingerprint=self._profile_fingerprint,
-                registry_fingerprint=self._registry_fingerprint,
-                strategy_id=strategy.strategy_id if strategy is not None else None,
-            ),
-            producer_id=self._profile.profile_id,
         )
         if self._profile.execution_timing == "next_session_open":
             if not request.session_opens:
@@ -675,39 +690,10 @@ class DailyExecutionFlow:
                 self._profile,
                 request.session_closes,
             )
-        if resume:
-            self._restore_recovery_point()
-        else:
-            self._publish_recovery_point(event=None)
-        if self._errors:
-            return
-        assert self._executor is not None
         for timestamp in request.session_closes:
             normalized = require_aware(timestamp)
-            mark = Event("MARK", normalized, MARK_PRIORITY)
-            monitor = Event("MONITOR", normalized, MONITOR_PRIORITY)
-            if self._should_schedule(mark):
-                self._clock.schedule(mark, self._on_mark)
-            if self._should_schedule(monitor):
-                self._clock.schedule(monitor, self._on_monitor)
-        for pending in self._pending_executions.values():
-            execution_time = self._executor.plan(pending.intent)
-            if execution_time is None:
-                self._fail(
-                    Event("RESUME", self._clock.now, EXECUTION_PRIORITY),
-                    "resume",
-                    "NEXT_SESSION_NOT_AVAILABLE",
-                )
-                return
-            execution = Event(
-                "EXECUTION",
-                execution_time,
-                EXECUTION_PRIORITY,
-                pending,
-            )
-            if self._should_schedule(execution):
-                self._clock.schedule(execution, self._on_execution)
-
+            self._clock.schedule(Event("MARK", normalized, MARK_PRIORITY), self._on_mark)
+            self._clock.schedule(Event("MONITOR", normalized, MONITOR_PRIORITY), self._on_monitor)
     def _drain(self, request: DailyRunRequest) -> OperationOutcome:
 
         while not self._clock.is_finished() and not self._errors:
@@ -730,8 +716,7 @@ class DailyExecutionFlow:
                 if self._errors:
                     break
 
-        if not self._errors:
-            self._hydrate_run_evidence()
+
         if self._errors:
             return OperationOutcome(
                 status=OutcomeStatus.FAILED,
@@ -751,7 +736,8 @@ class DailyExecutionFlow:
             initial_account=self._initial_account,
             account=_state(final_account),
             account_checkpoint=self._account.checkpoint(),
-            memory_snapshots=self._memory.checkpoint(),
+            initial_strategy_state=self._initial_strategy_state,
+            strategy_state=self._strategy_state,
             event_trace=tuple(self._trace),
             completed_decision_ids=tuple(self._completed_decisions),
         )
@@ -760,7 +746,7 @@ class DailyExecutionFlow:
             stage="checkpoint.artifact",
             logical_identity=f"simulation-checkpoint:{request.run_id}",
             artifact_type="simulation_checkpoint",
-            artifact_schema_version=3,
+            artifact_schema_version=4,
             producer_id=self._profile.profile_id,
             payload=checkpoint,
             dependencies=(
@@ -789,7 +775,8 @@ class DailyExecutionFlow:
                 marks=tuple(self._marks),
                 session_performance=tuple(item.record for item in self._session_performance),
                 monitors=tuple(self._monitors),
-                memory_commits=tuple(self._memory_commits),
+                initial_strategy_state=self._initial_strategy_state,
+                final_strategy_state=self._strategy_state,
                 checkpoint=checkpoint,
                 final_account=final_account,
                 artifacts=tuple(self._published),
@@ -874,20 +861,10 @@ class DailyExecutionFlow:
             artifact_bindings=self._request.artifact_bindings,
         )
         account_state = self._account.snapshot(evaluation_time=event.ts)
-        memory_state = self._memory.snapshot(self._strategy.strategy_id)
         try:
-            account_feedback = (
-                AccountFeedback(
-                    account_id=account_state.account_id,
-                    after_cursor=account_state.feedback_cursor,
-                    entries=(),
-                    next_cursor=account_state.feedback_cursor,
-                )
-                if memory_state.version == 0 and memory_state.value is None
-                else self._account.feedback(
-                    memory_state.feedback_cursor,
-                    self._profile.feedback_entry_limit,
-                )
+            account_feedback = self._account.feedback(
+                self._feedback_cursor,
+                self._profile.feedback_entry_limit,
             )
         except ValueError as exc:
             self._fail(
@@ -914,11 +891,15 @@ class DailyExecutionFlow:
             self._strategy,
             invocation,
             account_state=account_state,
+            account_history_inputs=tuple(
+                self._account_history_recorder.project(requirement)
+                for requirement in self._account_history_requirements
+            ),
             account_feedback=account_feedback,
             session_performance=(
                 self._session_performance[-1] if self._session_performance else None
             ),
-            memory_state=memory_state,
+            strategy_state=self._strategy_state,
             execution_inputs=self._execution_inputs_for_decision(event.ts),
             additional_dependencies=(
                 DependencyEdge(
@@ -937,65 +918,11 @@ class DailyExecutionFlow:
             return
         self._strategy_results.append(run_result.result)
         self._published.append(run_result.artifact)
+        self._strategy_state = run_result.final_strategy_state
+        if run_result.result.feedback_accesses:
+            self._feedback_cursor = run_result.result.feedback_accesses[-1].next_cursor
         if run_result.result.decision_action is not DecisionAction.TARGET:
-            plan = self._plan_memory(
-                event,
-                run_result.result,
-                run_result.artifact.artifact_id,
-            )
-            if self._errors:
-                return
-            candidate_memory = StrategyMemoryStore.from_checkpoint(self._memory.checkpoint())
-            if plan is not None:
-                self._apply_memory_plan(
-                    event,
-                    plan,
-                    run_result.result,
-                    store=candidate_memory,
-                    publish=False,
-                )
-                if self._errors:
-                    return
-            completed = (*self._completed_decisions, decision_id)
-            assert self._recovery is not None
-            if (
-                self._publish_recovery_point(
-                    event=event,
-                    memory_snapshots=candidate_memory.checkpoint(),
-                    completed_decision_ids=completed,
-                    pending_publications=(
-                        (
-                            self._recovery.publication(
-                                artifact_type="memory_commit",
-                                logical_identity=(
-                                    f"memory-commit:{self._request.run_id}:"
-                                    f"{plan.strategy_id}:v{plan.expected_version + 1}"
-                                ),
-                                producer_id=plan.strategy_id,
-                                payload=self._memory_evidence(plan),
-                                dependencies=self._memory_dependencies(
-                                    plan,
-                                    run_result.result,
-                                ),
-                            ),
-                        )
-                        if plan is not None
-                        else ()
-                    ),
-                )
-                is None
-            ):
-                return
-            if plan is not None:
-                self._apply_memory_plan(
-                    event,
-                    plan,
-                    run_result.result,
-                    store=self._memory,
-                    publish=True,
-                )
-                if self._errors:
-                    return
+
             self._completed_decisions.append(decision_id)
             return
         if any(weight.weight < 0 for weight in run_result.result.weights):
@@ -1071,11 +998,10 @@ class DailyExecutionFlow:
         pending = _PendingExecution(
             intent=intent,
             intent_artifact=intent_artifact,
-            strategy_result=run_result.result,
+
         )
         self._pending_executions[intent.decision_id] = pending
-        if self._publish_recovery_point(event=event) is None:
-            return
+
         self._clock.schedule(
             Event(
                 "EXECUTION",
@@ -1328,121 +1254,6 @@ class DailyExecutionFlow:
             if committed_fills
             else None
         )
-        candidate_account = Account.from_checkpoint(self._account.checkpoint())
-        if fill_batch is not None:
-            try:
-                candidate_commit = candidate_account.commit(
-                    fill_batch,
-                    expected_version=before.version,
-                )
-            except AccountCommitRejected as exc:
-                self._fail(
-                    event,
-                    "execution.prepare",
-                    exc.code,
-                    context={"message": str(exc)},
-                )
-                return
-            candidate_after = candidate_commit.snapshot
-        else:
-            candidate_after = before
-
-        memory_plan = None
-        candidate_memory = StrategyMemoryStore.from_checkpoint(self._memory.checkpoint())
-        if pending.strategy_result is not None:
-            memory_plan = self._plan_memory(
-                event,
-                pending.strategy_result,
-                pending.intent.strategy_artifact_id,
-            )
-            if self._errors:
-                return
-            if memory_plan is not None:
-                self._apply_memory_plan(
-                    event,
-                    memory_plan,
-                    pending.strategy_result,
-                    store=candidate_memory,
-                    publish=False,
-                )
-                if self._errors:
-                    return
-        pending_after = dict(self._pending_executions)
-        pending_after.pop(pending.intent.decision_id, None)
-        completed_after = (*self._completed_decisions, pending.intent.decision_id)
-        evidence_candidate = ExecutionEvidence(
-            event_id=execution_id,
-            decision_id=pending.intent.decision_id,
-            event_time=event.ts,
-            profile_id=self._profile.profile_id,
-            convention_id=self._profile.convention_id,
-            exchange_id=self._exchange.exchange_id,
-            exchange_config_fingerprint=self._exchange.config_fingerprint,
-            preparation_artifact_id=preparation_artifact.artifact_id,
-            sizing_nav=sizing_nav,
-            sizing_price_role=self._profile.execution_price_role,
-            orders=tuple(
-                OrderEvidence(
-                    instrument_id=order.instrument_id,
-                    side=order.side,
-                    quantity=order.quantity,
-                )
-                for order in orders
-            ),
-            fills=tuple(_fill(fill) for fill in match_result.fills),
-            diagnostics=tuple(_diagnostic(diagnostic) for diagnostic in match_result.diagnostics),
-            account_before=_state(before),
-            account_after=_state(candidate_after),
-            limitations=self._profile.limitations,
-        )
-        execution_dependencies = (
-            DependencyEdge(
-                dependency_kind="artifact",
-                dependency_id=preparation_artifact.artifact_id,
-                consumer_role="execution_preparation",
-            ),
-            *preparation_dependencies,
-        )
-        assert self._recovery is not None
-        recovery_publications = [
-            self._recovery.publication(
-                artifact_type="execution_result",
-                logical_identity=f"execution-result:{evidence_candidate.event_id}",
-                producer_id=self._profile.profile_id,
-                payload=evidence_candidate,
-                artifact_schema_version=2,
-                dependencies=execution_dependencies,
-            )
-        ]
-        if memory_plan is not None and pending.strategy_result is not None:
-            recovery_publications.append(
-                self._recovery.publication(
-                    artifact_type="memory_commit",
-                    logical_identity=(
-                        f"memory-commit:{self._request.run_id}:"
-                        f"{memory_plan.strategy_id}:v{memory_plan.expected_version + 1}"
-                    ),
-                    producer_id=memory_plan.strategy_id,
-                    payload=self._memory_evidence(memory_plan),
-                    dependencies=self._memory_dependencies(
-                        memory_plan,
-                        pending.strategy_result,
-                    ),
-                )
-            )
-        if (
-            self._publish_recovery_point(
-                event=event,
-                account_checkpoint=candidate_account.checkpoint(),
-                memory_snapshots=candidate_memory.checkpoint(),
-                completed_decision_ids=completed_after,
-                pending_executions=pending_after,
-                pending_publications=tuple(recovery_publications),
-            )
-            is None
-        ):
-            return
-
         if fill_batch is not None:
             try:
                 commit = self._account.commit(
@@ -1466,10 +1277,43 @@ class DailyExecutionFlow:
             after = commit.snapshot
         else:
             after = before
-        if after != candidate_after:
-            self._fail(event, "execution.commit", "RECOVERY_CANDIDATE_DIVERGED")
-            return
-        evidence = evidence_candidate
+
+
+        evidence = ExecutionEvidence(
+            event_id=execution_id,
+            decision_id=pending.intent.decision_id,
+            event_time=event.ts,
+            profile_id=self._profile.profile_id,
+            convention_id=self._profile.convention_id,
+            exchange_id=self._exchange.exchange_id,
+            exchange_config_fingerprint=self._exchange.config_fingerprint,
+            preparation_artifact_id=preparation_artifact.artifact_id,
+            sizing_nav=sizing_nav,
+            sizing_price_role=self._profile.execution_price_role,
+            orders=tuple(
+                OrderEvidence(
+                    instrument_id=order.instrument_id,
+                    side=order.side,
+                    quantity=order.quantity,
+                )
+                for order in orders
+            ),
+            fills=tuple(_fill(fill) for fill in match_result.fills),
+            diagnostics=tuple(
+                _diagnostic(diagnostic) for diagnostic in match_result.diagnostics
+            ),
+            account_before=_state(before),
+            account_after=_state(after),
+            limitations=self._profile.limitations,
+        )
+        execution_dependencies = (
+            DependencyEdge(
+                dependency_kind="artifact",
+                dependency_id=preparation_artifact.artifact_id,
+                consumer_role="execution_preparation",
+            ),
+            *preparation_dependencies,
+        )
         published = self._publish_model(
             event=event,
             stage="execution.artifact",
@@ -1482,23 +1326,10 @@ class DailyExecutionFlow:
         )
         if published is None:
             return
-        if pending.strategy_result is not None and memory_plan is not None:
-            committed_memory = self._apply_memory_plan(
-                event,
-                memory_plan,
-                pending.strategy_result,
-                store=self._memory,
-                publish=True,
-            )
-            if self._errors or committed_memory is None:
-                return
-            if committed_memory != candidate_memory.snapshot(memory_plan.strategy_id):
-                self._fail(event, "memory.commit", "RECOVERY_CANDIDATE_DIVERGED")
-                return
+
         self._executions.append(evidence)
         self._completed_decisions.append(pending.intent.decision_id)
         self._pending_executions.pop(pending.intent.decision_id, None)
-
     def _on_mark(self, event: Event) -> None:
         before = self._account.snapshot(evaluation_time=event.ts)
         held = tuple(sorted(before.holdings()))
@@ -1520,6 +1351,8 @@ class DailyExecutionFlow:
             )
             if published is not None:
                 self._marks.append(evidence)
+                assert self._account_history_recorder is not None
+                self._account_history_recorder.record(event.ts, self._account)
             return
         binding = self._resolve(
             event,
@@ -1568,48 +1401,6 @@ class DailyExecutionFlow:
             as_of=event.ts,
             marks=marks,
         )
-        candidate_account = Account.from_checkpoint(self._account.checkpoint())
-        try:
-            candidate_commit = candidate_account.commit(
-                mark_batch,
-                expected_version=before.version,
-            )
-        except AccountCommitRejected as exc:
-            self._fail(event, "mark.prepare", exc.code, context={"message": str(exc)})
-            return
-        evidence_candidate = MarkEvidence(
-            event_id=self._event_id(event, "mark"),
-            event_time=event.ts,
-            marks=tuple((mark.instrument_id, mark.price) for mark in marks),
-            account_before=_state(before),
-            account_after=_state(candidate_commit.snapshot),
-        )
-        mark_dependencies = (
-            DependencyEdge(
-                dependency_kind="dataset",
-                dependency_id=binding.registration_identity,
-                consumer_role=self._profile.valuation_price_role,
-                selected_fields=(binding.field,),
-            ),
-        )
-        assert self._recovery is not None
-        if (
-            self._publish_recovery_point(
-                event=event,
-                account_checkpoint=candidate_account.checkpoint(),
-                pending_publications=(
-                    self._recovery.publication(
-                        artifact_type="mark_result",
-                        logical_identity=f"mark-result:{evidence_candidate.event_id}",
-                        producer_id=self._profile.profile_id,
-                        payload=evidence_candidate,
-                        dependencies=mark_dependencies,
-                    ),
-                ),
-            )
-            is None
-        ):
-            return
         try:
             commit = self._account.commit(
                 mark_batch,
@@ -1624,10 +1415,21 @@ class DailyExecutionFlow:
             event_id=commit.event_id,
             version=commit.version,
         )
-        if commit.snapshot != candidate_commit.snapshot:
-            self._fail(event, "mark.commit", "RECOVERY_CANDIDATE_DIVERGED")
-            return
-        evidence = evidence_candidate
+        evidence = MarkEvidence(
+            event_id=self._event_id(event, "mark"),
+            event_time=event.ts,
+            marks=tuple((mark.instrument_id, mark.price) for mark in marks),
+            account_before=_state(before),
+            account_after=_state(commit.snapshot),
+        )
+        mark_dependencies = (
+            DependencyEdge(
+                dependency_kind="dataset",
+                dependency_id=binding.registration_identity,
+                consumer_role=self._profile.valuation_price_role,
+                selected_fields=(binding.field,),
+            ),
+        )
         published = self._publish_model(
             event=event,
             stage="mark.artifact",
@@ -1639,7 +1441,8 @@ class DailyExecutionFlow:
         )
         if published is not None:
             self._marks.append(evidence)
-
+            assert self._account_history_recorder is not None
+            self._account_history_recorder.record(event.ts, self._account)
     def _on_monitor(self, event: Event) -> None:
         mark = next(
             (item for item in reversed(self._marks) if item.event_time == event.ts),
@@ -1760,531 +1563,10 @@ class DailyExecutionFlow:
         if published is not None:
             self._monitors.append(evidence)
 
-    def _plan_memory(
-        self,
-        event: Event,
-        result: StrategyResultPayload,
-        source_artifact_id: str,
-    ) -> _MemoryPlan | None:
-        assert self._request is not None
-        if result.proposed_memory is None:
-            return None
-        if result.expected_memory_version is None or not result.memory_accesses:
-            self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_PRIOR_STATE")
-            return None
-        prior = result.memory_accesses[-1]
-        current = self._memory.snapshot(result.strategy_id)
-        if (
-            prior.strategy_id != result.strategy_id
-            or prior.version != result.expected_memory_version
-            or current.version != result.expected_memory_version
-        ):
-            self._fail(
-                event,
-                "memory",
-                "MEMORY_CAS_MISMATCH",
-                context={
-                    "expected_version": result.expected_memory_version,
-                    "current_version": current.version,
-                },
-            )
-            return None
-        if not result.state_accesses:
-            self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_ACTUAL_FEEDBACK")
-            return None
-        state_access = result.state_accesses[-1]
-        initialization_feedback = not result.feedback_accesses or (
-            result.feedback_accesses[-1].after_cursor == state_access.feedback_cursor
-            and result.feedback_accesses[-1].next_cursor == state_access.feedback_cursor
-        )
-        initialization = (
-            current.version == 0
-            and current.value is None
-            and current.feedback_cursor == 0
-            and initialization_feedback
-        )
-        if initialization:
-            feedback_cursor = state_access.feedback_cursor
-        else:
-            if not result.feedback_accesses:
-                self._fail(event, "memory", "MEMORY_PROPOSAL_WITHOUT_ACTUAL_FEEDBACK")
-                return None
-            feedback_access = result.feedback_accesses[-1]
-            if (
-                feedback_access.account_id != state_access.account_id
-                or feedback_access.after_cursor != current.feedback_cursor
-                or feedback_access.next_cursor > state_access.feedback_cursor
-            ):
-                self._fail(
-                    event,
-                    "memory",
-                    "MEMORY_FEEDBACK_CURSOR_MISMATCH",
-                    context={
-                        "feedback_account_id": feedback_access.account_id,
-                        "state_account_id": state_access.account_id,
-                        "after_cursor": feedback_access.after_cursor,
-                        "memory_feedback_cursor": current.feedback_cursor,
-                        "next_cursor": feedback_access.next_cursor,
-                        "state_feedback_cursor": state_access.feedback_cursor,
-                    },
-                )
-                return None
-            feedback_cursor = feedback_access.next_cursor
-        if feedback_cursor <= current.feedback_cursor and not initialization:
-            self._fail(
-                event,
-                "memory",
-                "MEMORY_FEEDBACK_NOT_ADVANCED",
-                context={
-                    "consumed_feedback_cursor": feedback_cursor,
-                    "memory_feedback_cursor": current.feedback_cursor,
-                },
-            )
-            return None
-        commit_seed = (
-            f"{self._request.run_id}:{result.strategy_id}:{source_artifact_id}:"
-            f"v{result.expected_memory_version + 1}"
-        )
-        return _MemoryPlan(
-            strategy_id=result.strategy_id,
-            value=dict(result.proposed_memory),
-            feedback_cursor=feedback_cursor,
-            expected_version=result.expected_memory_version,
-            commit_id=f"memory-{self._fingerprint(commit_seed)[:24]}",
-            initialization=initialization,
-            source_artifact_id=source_artifact_id,
-        )
-
-    def _memory_evidence(self, plan: _MemoryPlan) -> MemoryCommitEvidence:
-        return MemoryCommitEvidence(
-            strategy_id=plan.strategy_id,
-            source_artifact_id=plan.source_artifact_id,
-            previous_version=plan.expected_version,
-            version=plan.expected_version + 1,
-            feedback_cursor=plan.feedback_cursor,
-            update_kind="INITIALIZATION" if plan.initialization else "FEEDBACK_UPDATE",
-            value=plan.value,
-        )
-
-    @staticmethod
-    def _memory_dependencies(
-        plan: _MemoryPlan,
-        result: StrategyResultPayload,
-    ) -> tuple[DependencyEdge, ...]:
-        return (
-            DependencyEdge(
-                dependency_kind="artifact",
-                dependency_id=plan.source_artifact_id,
-                consumer_role="proposed_memory",
-            ),
-            DependencyEdge(
-                dependency_kind="state",
-                dependency_id=(
-                    f"account:{result.state_accesses[-1].account_id}:"
-                    f"v{result.state_accesses[-1].version}:"
-                    f"cursor{plan.feedback_cursor}"
-                ),
-                consumer_role=(
-                    "initial_actual_state" if plan.initialization else "confirmed_feedback"
-                ),
-            ),
-        )
-
-    def _apply_memory_plan(
-        self,
-        event: Event,
-        plan: _MemoryPlan,
-        result: StrategyResultPayload,
-        *,
-        store: StrategyMemoryStore,
-        publish: bool,
-    ) -> MemorySnapshot | None:
-        assert self._request is not None
-        try:
-            committed = store.commit(
-                strategy_id=plan.strategy_id,
-                value=plan.value,
-                feedback_cursor=plan.feedback_cursor,
-                expected_version=plan.expected_version,
-                commit_id=plan.commit_id,
-            )
-        except ValueError as exc:
-            self._fail(
-                event,
-                "memory.commit",
-                "MEMORY_COMMIT_REJECTED",
-                context={"message": str(exc)},
-            )
-            return None
-        if not publish:
-            return committed
-        self._record_authority_commit(
-            event,
-            authority="memory",
-            event_id=plan.commit_id,
-            version=committed.version,
-        )
-        evidence = self._memory_evidence(plan)
-        if committed.version != evidence.version:
-            self._fail(event, "memory.commit", "RECOVERY_CANDIDATE_DIVERGED")
-            return None
-        published = self._publish_model(
-            event=event,
-            stage="memory.artifact",
-            logical_identity=(
-                f"memory-commit:{self._request.run_id}:{plan.strategy_id}:v{committed.version}"
-            ),
-            artifact_type="memory_commit",
-            producer_id=plan.strategy_id,
-            payload=evidence,
-            dependencies=self._memory_dependencies(plan, result),
-        )
-        if published is not None:
-            self._memory_commits.append(evidence)
-        return committed
-
     @staticmethod
     def _fingerprint(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
-    def _should_schedule(self, event: Event) -> bool:
-        return (
-            self._resume_position is None
-            or (
-                event.ts,
-                event.priority,
-            )
-            > self._resume_position
-        )
-
-    def _pending_recovery_records(
-        self,
-        pending: dict[str, _PendingExecution] | None = None,
-    ) -> tuple[PendingExecutionRecovery, ...]:
-        assert self._executor is not None
-        selected = pending if pending is not None else self._pending_executions
-        recovered: list[PendingExecutionRecovery] = []
-        for decision_id in sorted(selected):
-            item = selected[decision_id]
-            execution_time = self._executor.plan(item.intent)
-            if execution_time is None:
-                raise ValueError("pending decision has no eligible execution session")
-            recovered.append(
-                PendingExecutionRecovery(
-                    decision_id=decision_id,
-                    intent_artifact_id=item.intent_artifact.artifact_id,
-                    execution_time=execution_time,
-                    commit_strategy_memory=item.strategy_result is not None,
-                )
-            )
-        return tuple(recovered)
-
-    def _publish_recovery_point(
-        self,
-        *,
-        event: Event | None,
-        account_checkpoint: AccountCheckpoint | None = None,
-        memory_snapshots: tuple[MemorySnapshot, ...] | None = None,
-        completed_decision_ids: tuple[str, ...] | None = None,
-        pending_executions: dict[str, _PendingExecution] | None = None,
-        pending_publications: tuple[RecoveryPublication, ...] = (),
-    ) -> QlibxModel | None:
-        assert self._request is not None
-        assert self._recovery is not None
-        selected_account = account_checkpoint or self._account.checkpoint()
-        selected_trace = tuple(self._trace)
-        selected_completed = (
-            completed_decision_ids
-            if completed_decision_ids is not None
-            else tuple(self._completed_decisions)
-        )
-        try:
-            return self._recovery.publish(
-                DailyRecoveryWrite(
-                    account_checkpoint=selected_account,
-                    memory_snapshots=(
-                        memory_snapshots
-                        if memory_snapshots is not None
-                        else self._memory.checkpoint()
-                    ),
-                    event_trace=selected_trace,
-                    completed_decision_ids=selected_completed,
-                    pending_executions=self._pending_recovery_records(pending_executions),
-                    pending_publications=pending_publications,
-                    event_time=event.ts if event is not None else None,
-                    event_priority=event.priority if event is not None else None,
-                    event_name=event.name if event is not None else None,
-                )
-            )
-        except DailyRecoveryIssue as issue:
-            failure_event = event or Event(
-                "RECOVERY",
-                self._clock.now,
-                DECISION_PRIORITY,
-            )
-            self._fail(
-                failure_event,
-                issue.stage,
-                issue.code,
-                context=issue.context,
-            )
-            return None
-
-    def _restore_recovery_point(self) -> None:
-        assert self._request is not None
-        assert self._recovery is not None
-        resume_event = Event("RESUME", self._clock.now, DECISION_PRIORITY)
-        try:
-            restored = self._recovery.restore()
-        except DailyRecoveryDependencyErrors as exc:
-            self._errors.extend(exc.errors)
-            return
-        except DailyRecoveryIssue as issue:
-            self._fail(
-                resume_event,
-                issue.stage,
-                issue.code,
-                context=issue.context,
-            )
-            return
-
-        try:
-            restored_account = Account.from_checkpoint(restored.account_checkpoint)
-        except ValueError as exc:
-            self._fail(
-                resume_event,
-                "resume.chain",
-                "RECOVERY_CHAIN_ACCOUNT_INVALID",
-                context={"message": str(exc)[:500]},
-            )
-            return
-        restored_memory = StrategyMemoryStore.from_checkpoint(restored.memory_snapshots)
-        restored_pending: dict[str, _PendingExecution] = {}
-        for pending in restored.pending_executions:
-            loaded_intent = self._artifacts.load_model(
-                pending.intent_artifact_id,
-                DECISION_INTENT_CONTRACT,
-            )
-            if loaded_intent.status is not OutcomeStatus.COMPLETE:
-                self._errors.extend(loaded_intent.errors)
-                return
-            intent = loaded_intent.result.payload
-            if intent.decision_id != pending.decision_id:
-                self._fail(
-                    resume_event,
-                    "resume.pending",
-                    "RECOVERY_PENDING_DECISION_MISMATCH",
-                )
-                return
-            strategy_result = None
-            if pending.commit_strategy_memory:
-                loaded_strategy = load_strategy_result(
-                    self._artifacts,
-                    intent.strategy_artifact_id,
-                    operation="simulation.resume",
-                    idempotency_identity=self._request.run_id,
-                )
-                if loaded_strategy.status is not OutcomeStatus.COMPLETE:
-                    self._errors.extend(loaded_strategy.errors)
-                    return
-                strategy_result = loaded_strategy.result.payload
-                self._strategy_results.append(strategy_result)
-                self._published.append(loaded_strategy.result.envelope)
-            restored_pending[pending.decision_id] = _PendingExecution(
-                intent=intent,
-                intent_artifact=loaded_intent.result.envelope,
-                strategy_result=strategy_result,
-            )
-            self._intents.append(intent)
-            self._published.append(loaded_intent.result.envelope)
-
-        self._account = restored_account
-        self._memory = restored_memory
-        self._trace = list(restored.event_trace)
-        self._completed_decisions = list(restored.completed_decision_ids)
-        self._pending_executions = restored_pending
-        fired_decision_ids = {
-            *restored.completed_decision_ids,
-            *(pending.decision_id for pending in restored.pending_executions),
-        }
-        decision_prefix = f"{self._request.run_id}:decision:"
-        try:
-            self._fired_at = sorted(
-                datetime.fromisoformat(
-                    decision_id.removeprefix(decision_prefix).replace("Z", "+00:00")
-                )
-                for decision_id in fired_decision_ids
-                if decision_id.startswith(decision_prefix)
-            )
-        except ValueError as exc:
-            self._fail(
-                resume_event,
-                "resume.chain",
-                "RECOVERY_TRIGGER_HISTORY_INVALID",
-                context={"message": str(exc)[:500]},
-            )
-            return
-        self._resume_position = restored.resume_position
-        publication_models: dict[str, type[QlibxModel]] = {
-            "execution_result": ExecutionEvidence,
-            "mark_result": MarkEvidence,
-            "memory_commit": MemoryCommitEvidence,
-        }
-        for pending_publication in restored.pending_publications:
-            payload_model = publication_models[pending_publication.artifact_type]
-            try:
-                payload = payload_model.model_validate_json(pending_publication.payload_json)
-            except Exception as exc:
-                self._fail(
-                    resume_event,
-                    "resume.publication",
-                    "RECOVERY_PUBLICATION_INVALID",
-                    context={
-                        "artifact_type": pending_publication.artifact_type,
-                        "message": str(exc)[:500],
-                    },
-                )
-                return
-            publication = self._artifacts.publish_model(
-                logical_identity=pending_publication.logical_identity,
-                artifact_type=pending_publication.artifact_type,
-                artifact_schema_version=pending_publication.artifact_schema_version,
-                producer_id=pending_publication.producer_id,
-                payload=payload,
-                dependencies=pending_publication.dependencies,
-            )
-            if publication.status is not OutcomeStatus.COMPLETE:
-                self._errors.extend(publication.errors)
-                return
-            self._published.append(publication.result)
-            if isinstance(payload, ExecutionEvidence):
-                self._executions.append(payload)
-            elif isinstance(payload, MarkEvidence):
-                self._marks.append(payload)
-            elif isinstance(payload, MemoryCommitEvidence):
-                self._memory_commits.append(payload)
-        self._hydrate_run_evidence()
-
-    def _hydrate_run_evidence(self) -> None:
-        assert self._request is not None
-        contracts: dict[str, ArtifactContract[QlibxModel]] = {
-            "decision_intent": DECISION_INTENT_CONTRACT,
-            "krx_execution_preparation": KRX_PREPARATION_CONTRACT,
-            "execution_result": ArtifactContract(
-                artifact_type="execution_result",
-                artifact_schema_version=2,
-                payload_model=ExecutionEvidence,
-            ),
-            "mark_result": ArtifactContract(
-                artifact_type="mark_result",
-                artifact_schema_version=1,
-                payload_model=MarkEvidence,
-            ),
-            "monitor_observation": ArtifactContract(
-                artifact_type="monitor_observation",
-                artifact_schema_version=1,
-                payload_model=MonitorEvidence,
-            ),
-            "session_performance": ArtifactContract(
-                artifact_type="session_performance",
-                artifact_schema_version=1,
-                payload_model=SessionPerformanceEvidence,
-            ),
-            "memory_commit": ArtifactContract(
-                artifact_type="memory_commit",
-                artifact_schema_version=1,
-                payload_model=MemoryCommitEvidence,
-            ),
-        }
-        marker = f":{self._request.run_id}:"
-        envelopes = tuple(
-            envelope
-            for envelope in self._artifacts.list_envelopes()
-            if marker in envelope.logical_identity
-            and (envelope.artifact_type == "strategy_result" or envelope.artifact_type in contracts)
-        )
-        strategy_results: dict[str, StrategyResultPayload] = {
-            item.invocation_id: item for item in self._strategy_results
-        }
-        intents: dict[str, DecisionIntent] = {item.decision_id: item for item in self._intents}
-        executions: dict[str, ExecutionEvidence] = {
-            item.event_id: item for item in self._executions
-        }
-        marks: dict[str, MarkEvidence] = {item.event_id: item for item in self._marks}
-        monitors: dict[str, MonitorEvidence] = {item.event_id: item for item in self._monitors}
-        session_performance: dict[str, _PublishedSessionPerformance] = {
-            item.record.event_id: item for item in self._session_performance
-        }
-        memory_commits: dict[tuple[str, int], MemoryCommitEvidence] = {
-            (item.strategy_id, item.version): item for item in self._memory_commits
-        }
-        published = {item.artifact_id: item for item in self._published}
-        for envelope in envelopes:
-            if envelope.artifact_type == "strategy_result":
-                loaded = load_strategy_result(
-                    self._artifacts,
-                    envelope.artifact_id,
-                    envelope=envelope,
-                    operation="simulation.resume",
-                    idempotency_identity=self._request.run_id,
-                )
-            else:
-                loaded = self._artifacts.load_model(
-                    envelope.artifact_id,
-                    contracts[envelope.artifact_type],
-                )
-            if loaded.status is not OutcomeStatus.COMPLETE:
-                self._errors.extend(loaded.errors)
-                return
-            payload = loaded.result.payload
-            published[envelope.artifact_id] = envelope
-            if isinstance(payload, StrategyResult):
-                strategy_results[payload.invocation_id] = payload
-            elif isinstance(payload, DecisionIntent):
-                intents[payload.decision_id] = payload
-            elif isinstance(payload, ExecutionEvidence):
-                executions[payload.event_id] = payload
-            elif isinstance(payload, MarkEvidence):
-                marks[payload.event_id] = payload
-            elif isinstance(payload, MonitorEvidence):
-                monitors[payload.event_id] = payload
-            elif isinstance(payload, SessionPerformanceEvidence):
-                session_performance[payload.event_id] = _PublishedSessionPerformance(
-                    artifact_id=envelope.artifact_id,
-                    record=payload,
-                )
-            elif isinstance(payload, MemoryCommitEvidence):
-                memory_commits[(payload.strategy_id, payload.version)] = payload
-
-        self._strategy_results = sorted(
-            strategy_results.values(),
-            key=lambda item: (item.evaluation_time, item.invocation_id),
-        )
-        self._intents = sorted(
-            intents.values(),
-            key=lambda item: (item.decision_time, item.decision_id),
-        )
-        self._executions = sorted(
-            executions.values(),
-            key=lambda item: (item.event_time, item.event_id),
-        )
-        self._marks = sorted(
-            marks.values(),
-            key=lambda item: (item.event_time, item.event_id),
-        )
-        self._monitors = sorted(
-            monitors.values(),
-            key=lambda item: (item.event_time, item.event_id),
-        )
-        self._session_performance = sorted(
-            session_performance.values(),
-            key=lambda item: (item.record.event_time, item.record.event_id),
-        )
-        self._memory_commits = sorted(
-            memory_commits.values(),
-            key=lambda item: (item.strategy_id, item.version),
-        )
-        self._published = list(published.values())
 
     def _resolve(
         self,
@@ -2394,10 +1676,9 @@ class DailyExecutionFlow:
         identity = self._event_id(event, stage)
         seed = hashlib.sha256(f"{identity}:{code}".encode()).hexdigest()[:24]
         retry_precondition = (
-            "resume from authoritative state at or after the listed committed identities; "
-            "do not replay them"
+            "discard this failed run result; the listed commits are diagnostic only"
             if crossed_commit
-            else "correct the selected profile input and retry from a checkpoint"
+            else "correct the selected profile input and start a new run"
         )
         error = OperationError(
             operation="daily_flow.run",

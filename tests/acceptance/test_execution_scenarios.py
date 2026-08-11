@@ -7,18 +7,18 @@ import pytest
 from qlibx import (
     DailyAccountSeed,
     DailyMarketBinding,
-    DailySimulationSpec,
     FrozenDailyExecutionSpec,
     OperationOutcome,
     OutcomeStatus,
 )
-from qlibx.account import Account, StrategyMemoryStore
+from qlibx.account import Account
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
     EveryCandidate,
     EveryNSessions,
     StrategyDraft,
+    StrategyStateUpdate,
     WeightEntry,
 )
 from qlibx.errors import CommitStatus, OperationError
@@ -28,7 +28,6 @@ from qlibx.flow import (
     DailyRunRequest,
     FrozenDecision,
 )
-from qlibx.flow.recovery import SIMULATION_RECOVERY_POINT_CONTRACT
 from qlibx.runtime import BacktestClock
 from tests.acceptance.real_dw_support import (
     RealDwProject,
@@ -86,11 +85,10 @@ class SwitchingTargetStrategy:
         )
 
 
-class InitialMemoryTargetStrategy(TargetStrategy):
-    strategy_id = "tests.initial-memory-target"
+class InitialStateTargetStrategy(TargetStrategy):
+    strategy_id = "tests.initial-state-target"
 
     def run(self, view):
-        memory = view.memory_snapshot()
         account = view.account_snapshot()
         return StrategyDraft(
             weights=(WeightEntry(instrument="A005930", weight=1.0),),
@@ -99,14 +97,12 @@ class InitialMemoryTargetStrategy(TargetStrategy):
             decision_action=DecisionAction.TARGET,
             path_dependent=True,
             state_identity=f"{account.account_id}:v{account.version}",
-            feedback_cursor=str(account.feedback_cursor),
-            proposed_memory={"initialized": True},
-            expected_memory_version=memory.version,
+            proposed_state=StrategyStateUpdate(value={"initialized": True}),
         )
 
 
-class RepeatedMemoryHoldStrategy:
-    strategy_id = "tests.repeated-memory-hold"
+class RepeatedStateHoldStrategy:
+    strategy_id = "tests.repeated-state-hold"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -119,9 +115,9 @@ class RepeatedMemoryHoldStrategy:
 
     def run(self, view):
         self.calls += 1
-        memory = view.memory_snapshot()
         account = view.account_snapshot()
-        feedback = view.account_feedback()
+        previous = view.strategy_state()
+        previous_calls = previous.get("calls", 0) if isinstance(previous, dict) else 0
         return StrategyDraft(
             weights=(),
             budget_mode=BudgetMode.FLEXIBLE,
@@ -129,9 +125,7 @@ class RepeatedMemoryHoldStrategy:
             decision_action=DecisionAction.HOLD,
             path_dependent=True,
             state_identity=f"{account.account_id}:v{account.version}",
-            feedback_cursor=str(feedback.next_cursor),
-            proposed_memory={"calls": self.calls},
-            expected_memory_version=memory.version,
+            proposed_state=StrategyStateUpdate(value={"calls": previous_calls + 1}),
         )
 
 
@@ -190,11 +184,14 @@ def test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily(
     assert next_decision.decision_action is DecisionAction.HOLD
     assert actual.version == 2
     assert actual.feedback_cursor == 2
-    assert next_decision.feedback_accesses[0].after_cursor == 2
+    assert next_decision.feedback_accesses[0].after_cursor == 0
     assert next_decision.feedback_accesses[0].next_cursor == 2
-    assert next_decision.feedback_accesses[0].change_types == ()
-    assert next_decision.feedback_accesses[0].fill_ids == ()
-    assert next_decision.feedback_accesses[0].marked_instruments == ()
+    assert next_decision.feedback_accesses[0].change_types == (
+        "FillBatch",
+        "MarkBatch",
+    )
+    assert len(next_decision.feedback_accesses[0].fill_ids) == 1
+    assert next_decision.feedback_accesses[0].marked_instruments == ("A005930",)
     assert next_decision.performance_accesses == ()
     assert actual.cash == pytest.approx(52_100.5)
     assert actual.nav == pytest.approx(9_985_100.5)
@@ -211,7 +208,7 @@ def test_uc_closed_loop_001_and_uc_exec_002_real_dw_daily(
         if item.artifact_type == "strategy_result"
         and any(
             edge.consumer_role == "actual_account_feedback"
-                and edge.dependency_id.endswith("feedback:2-2")
+            and edge.dependency_id.endswith("feedback:0-2")
             for edge in item.dependencies
         )
     )
@@ -262,20 +259,12 @@ def test_feedback_window_fails_before_strategy_when_limit_is_too_small(
 ) -> None:
     sessions = tuple(close_at(2024, 1, day) for day in (2, 3, 4))
     account = initial_account("bounded-feedback-account")
-    memory = StrategyMemoryStore()
-    memory.commit(
-        strategy_id=TargetStrategy.strategy_id,
-        value={"initialized": True},
-        feedback_cursor=0,
-        expected_version=0,
-    )
     flow = DailyExecutionFlow(
         clock=BacktestClock(sessions[0]),
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
         exchange=configured_exchange(cost_rate=0.0),
         account=account,
-        memory=memory,
         profile=DailyExecutionProfile(
             market_dataset_id="dw-real-market",
             execution_price_role="execution_price",
@@ -290,6 +279,7 @@ def test_feedback_window_fails_before_strategy_when_limit_is_too_small(
             run_id="bounded-feedback",
             config_fingerprint="bounded-feedback-v1",
             session_closes=sessions,
+            initial_strategy_state={"initialized": True},
         ),
     )
 
@@ -382,40 +372,30 @@ def test_daily_profile_rejects_impact_without_total_market_volume(
     assert account.snapshot().holdings() == {}
 
 
-def test_uc_alpha_adaptive_001_memory_commits_only_after_feedback(
+def test_uc_alpha_adaptive_001_state_is_returned_after_strategy(
     real_dw_case: RealDwProject,
 ) -> None:
-    memory = StrategyMemoryStore()
     result = run_real_daily_flow(
         real_dw_case,
         run_id="adaptive-memory",
         account=initial_account("account-a"),
-        memory=memory,
     )
 
     assert result.status is OutcomeStatus.COMPLETE
-    assert len(result.result.memory_commits) == 1
-    commit = result.result.memory_commits[0]
-    assert commit.previous_version == 0
-    assert commit.version == 1
-    assert commit.feedback_cursor == 2
-    assert commit.update_kind == "INITIALIZATION"
-    assert commit.value == {"confirmed_feedback_cursor": 2}
-    assert memory.snapshot("acceptance.actual-state-momentum").feedback_cursor == 2
+    assert result.result.initial_strategy_state is None
+    assert result.result.final_strategy_state == {"confirmed_feedback_cursor": 2}
 
 
-def test_first_decision_can_initialize_memory_without_feedback(
+def test_first_decision_can_initialize_state_without_feedback(
     real_dw_case: RealDwProject,
 ) -> None:
     sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
-    memory = StrategyMemoryStore()
     flow = DailyExecutionFlow(
         clock=BacktestClock(sessions[0]),
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
         exchange=configured_exchange(cost_rate=0.0),
-        account=initial_account("initial-memory-account"),
-        memory=memory,
+        account=initial_account("initial-state-account"),
         profile=DailyExecutionProfile(
             market_dataset_id="dw-real-market",
             execution_price_role="execution_price",
@@ -424,44 +404,29 @@ def test_first_decision_can_initialize_memory_without_feedback(
     )
 
     outcome = flow.run(
-        InitialMemoryTargetStrategy(),
+        InitialStateTargetStrategy(),
         DailyRunRequest(
-            run_id="initial-memory",
-            config_fingerprint="initial-memory-v1",
+            run_id="initial-state",
+            config_fingerprint="initial-state-v1",
             session_closes=sessions,
         ),
     )
 
     assert outcome.status is OutcomeStatus.COMPLETE
-    commit = outcome.result.memory_commits[0]
-    assert commit.previous_version == 0
-    assert commit.version == 1
-    assert commit.feedback_cursor == 0
-    assert commit.update_kind == "INITIALIZATION"
-    assert commit.value == {"initialized": True}
-    artifact = next(
-        item
-        for item in outcome.result.artifacts
-        if item.artifact_type == "memory_commit"
-    )
-    assert any(
-        edge.consumer_role == "initial_actual_state" for edge in artifact.dependencies
-    )
-    assert memory.snapshot(InitialMemoryTargetStrategy.strategy_id).feedback_cursor == 0
+    assert outcome.result.initial_strategy_state is None
+    assert outcome.result.final_strategy_state == {"initialized": True}
 
 
-def test_memory_update_after_initialization_still_requires_new_feedback(
+def test_state_update_does_not_require_new_feedback(
     real_dw_case: RealDwProject,
 ) -> None:
     sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
-    memory = StrategyMemoryStore()
     flow = DailyExecutionFlow(
         clock=BacktestClock(sessions[0]),
         registry=real_dw_case.project.registry_snapshot(),
         artifacts=real_dw_case.project.artifacts,
         exchange=configured_exchange(cost_rate=0.0),
-        account=initial_account("repeated-memory-account"),
-        memory=memory,
+        account=initial_account("repeated-state-account"),
         profile=DailyExecutionProfile(
             market_dataset_id="dw-real-market",
             execution_price_role="execution_price",
@@ -470,19 +435,17 @@ def test_memory_update_after_initialization_still_requires_new_feedback(
     )
 
     outcome = flow.run(
-        RepeatedMemoryHoldStrategy(),
+        RepeatedStateHoldStrategy(),
         DailyRunRequest(
-            run_id="repeated-memory",
-            config_fingerprint="repeated-memory-v1",
+            run_id="repeated-state",
+            config_fingerprint="repeated-state-v1",
             session_closes=sessions,
         ),
     )
 
-    assert outcome.status is OutcomeStatus.FAILED
-    assert outcome.errors[0].error_code == "MEMORY_FEEDBACK_NOT_ADVANCED"
-    assert outcome.errors[0].commit_status is CommitStatus.NONE
-    assert memory.snapshot(RepeatedMemoryHoldStrategy.strategy_id).version == 1
-    assert memory.snapshot(RepeatedMemoryHoldStrategy.strategy_id).value == {"calls": 1}
+    assert outcome.status is OutcomeStatus.COMPLETE
+    assert outcome.result.initial_strategy_state is None
+    assert outcome.result.final_strategy_state == {"calls": 2}
 
 
 def test_post_fill_publication_failure_reports_committed_account(
@@ -573,7 +536,7 @@ def test_uc_exec_001_isolates_frozen_daily_children(
     )
     assert parent.result.checkpoint == parent_checkpoint
     assert normal.result.strategy_results == partial.result.strategy_results == ()
-    assert normal.result.memory_commits == partial.result.memory_commits == ()
+    assert normal.result.final_strategy_state is partial.result.final_strategy_state is None
     assert all(
         edge.dependency_id == artifact.artifact_id
         for outcome in (normal, partial)
@@ -639,7 +602,8 @@ def test_uc_alpha_child_001_compares_real_next_close_and_open_without_rerun(
 
     assert close_child.status is open_child.status is OutcomeStatus.COMPLETE
     assert close_child.result.strategy_results == open_child.result.strategy_results == ()
-    assert close_child.result.memory_commits == open_child.result.memory_commits == ()
+    assert close_child.result.final_strategy_state is None
+    assert open_child.result.final_strategy_state is None
     assert close_child.result.decision_intents == open_child.result.decision_intents == (
         intent,
     )
@@ -812,55 +776,8 @@ def test_open_profile_without_schedule_fails_before_strategy_or_state_mutation(
     assert account.snapshot().holdings() == {}
 
 
-def test_next_open_recovery_records_the_exact_pending_execution_time(
-    real_dw_execution_convention_case: RealDwProject,
-) -> None:
-    case = real_dw_execution_convention_case
-    session_open = open_at(2024, 1, 3)
-    outcome = case.project.run_daily(
-        TargetStrategy(),
-        DailySimulationSpec(
-            run_id="next-open-recovery-contract",
-            strategy_fingerprint="tests.target.v1",
-            account=DailyAccountSeed(
-                account_id="next-open-recovery-account",
-                base_currency="KRW",
-                initial_cash=10_000_000,
-            ),
-            instruments=configured_instruments(),
-            exchange=configured_exchange_config(cost_rate=0),
-            market=DailyMarketBinding(
-                market_dataset_id="dw-real-execution-events",
-                execution_price_role="open_execution_price",
-                valuation_price_role="valuation_price",
-            ),
-            execution_timing="next_session_open",
-            session_closes=(close_at(2024, 1, 2), close_at(2024, 1, 3)),
-            session_opens=(session_open,),
-        ),
-    )
 
-    assert outcome.status is OutcomeStatus.COMPLETE
-    pending_times: list[datetime] = []
-    for envelope in case.project.artifacts.list_envelopes():
-        if envelope.artifact_type != "simulation_recovery_point":
-            continue
-        loaded = case.project.load_artifact(
-            envelope.artifact_id,
-            SIMULATION_RECOVERY_POINT_CONTRACT,
-        )
-        if (
-            loaded.status is OutcomeStatus.COMPLETE
-            and loaded.result.payload.run_id == "next-open-recovery-contract"
-        ):
-            pending_times.extend(
-                item.execution_time
-                for item in loaded.result.payload.pending_executions
-            )
-    assert session_open in pending_times
-
-
-def test_checkpoint_round_trip_preserves_account_and_memory_state(
+def test_explicit_seed_continues_account_and_strategy_state(
     real_dw_case: RealDwProject,
 ) -> None:
     phase_one_sessions = tuple(close_at(2024, 1, day) for day in (2, 3))
@@ -870,16 +787,16 @@ def test_checkpoint_round_trip_preserves_account_and_memory_state(
         sessions=phase_one_sessions,
     )
     restored_account = Account.from_checkpoint(phase_one.result.checkpoint.account_checkpoint)
-    restored_memory = StrategyMemoryStore.from_checkpoint(
-        phase_one.result.checkpoint.memory_snapshots
-    )
+    continued_state = {
+        "confirmed_feedback_cursor": phase_one.result.final_account.feedback_cursor
+    }
     phase_two_sessions = tuple(close_at(2024, 1, day) for day in (4, 5))
     phase_two = run_real_daily_flow(
         real_dw_case,
         run_id="resume-phase-2",
         sessions=phase_two_sessions,
         account=restored_account,
-        memory=restored_memory,
+        initial_strategy_state=continued_state,
     )
     uninterrupted = run_real_daily_flow(
         real_dw_case,
@@ -888,6 +805,7 @@ def test_checkpoint_round_trip_preserves_account_and_memory_state(
 
     assert phase_one.status is OutcomeStatus.COMPLETE
     assert phase_two.status is OutcomeStatus.COMPLETE
-    assert phase_two.result.strategy_results[0].state_accesses[0].version == 2
-    assert phase_two.result.memory_commits[0].feedback_cursor == 2
+    assert phase_one.result.final_strategy_state is None
+    assert phase_two.result.initial_strategy_state == continued_state
+    assert phase_two.result.final_strategy_state == continued_state
     assert phase_two.result.final_account == uninterrupted.result.final_account

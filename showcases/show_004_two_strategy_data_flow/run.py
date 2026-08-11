@@ -368,7 +368,7 @@ def run_academic_flow(
         session_closes=sessions,
     )
     academic = require_complete(
-        project.run_academic(spec, resume=True),
+        project.run_academic(spec),
         "peer momentum AcademicExchange run",
     )
 
@@ -484,8 +484,8 @@ def run_krx_flow(
 
     strategy = FiveSessionTopTenStrategy(dataset_id=DATASET_ID, instruments=UNIVERSE)
     outcome = require_complete(
-        # 첫 실행은 checkpoint resume가 아니라 명시적인 fresh simulation이다.
-        project.run_daily(strategy, spec, resume=False),
+        # The daily simulation always starts from the explicit spec seed.
+        project.run_daily(strategy, spec),
         "five-session top-ten KRX run",
     )
     result = outcome.result

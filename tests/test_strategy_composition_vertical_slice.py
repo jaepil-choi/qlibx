@@ -11,6 +11,7 @@ from qlibx import (
     StrategyArtifactBinding,
     StrategyExtensionValidationRequest,
     StrategyInvocation,
+    StrategyStateUpdate,
 )
 from qlibx.contracts import (
     BudgetMode,
@@ -46,7 +47,7 @@ class CountingPathProducer:
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
-        memory = view.memory_snapshot()  # type: ignore[attr-defined]
+        view.strategy_state()  # type: ignore[attr-defined]
         self.call_count += 1
         return StrategyDraft(
             weights=(WeightEntry(instrument=self.instrument, weight=0.5),),
@@ -57,12 +58,10 @@ class CountingPathProducer:
             state_identity=(
                 f"{account.account_id}:v{account.version}:cursor{feedback.next_cursor}"
             ),
-            feedback_cursor=str(feedback.next_cursor),
-            proposed_memory={
+            proposed_state=StrategyStateUpdate(value={
                 "call_count": self.call_count,
                 "feedback_cursor": feedback.next_cursor,
-            },
-            expected_memory_version=memory.version,
+            }),
         )
 
 
@@ -189,10 +188,10 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
     assert producer_counts_before == (2, 2)
     assert source_result_a.state_accesses[-1].account_id == "source-account-a"
     assert source_result_b.state_accesses[-1].account_id == "source-account-b"
-    assert source_result_a.memory_accesses[-1].strategy_id == producer_a.strategy_id
-    assert source_result_b.memory_accesses[-1].strategy_id == producer_b.strategy_id
-    assert source_result_a.memory_accesses[-1].version == 1
-    assert source_result_b.memory_accesses[-1].version == 1
+    assert source_result_a.strategy_state_accesses[-1].strategy_id == producer_a.strategy_id
+    assert source_result_b.strategy_state_accesses[-1].strategy_id == producer_b.strategy_id
+    assert len(source_result_a.strategy_state_accesses[-1].state_fingerprint) == 64
+    assert len(source_result_b.strategy_state_accesses[-1].state_fingerprint) == 64
 
     composed = CompositionFlow(
         registry=selected.registry_snapshot(),
@@ -223,7 +222,6 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
     ensemble_result = composed.result.strategy.result
     ensemble_artifact = composed.result.strategy.artifact
     assert ensemble_result.state_identity is None
-    assert ensemble_result.feedback_cursor is None
     assert tuple(item.source_artifact_id for item in ensemble_result.source_state_lineage) == tuple(
         sorted((source_envelope_a.artifact_id, source_envelope_b.artifact_id))
     )
@@ -235,7 +233,7 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
     assert {
         access.strategy_id
         for lineage in ensemble_result.source_state_lineage
-        for access in lineage.memory_accesses
+        for access in lineage.strategy_state_accesses
     } == {producer_a.strategy_id, producer_b.strategy_id}
 
     extension_root = selected.root / selected.config.extension_dir
@@ -256,7 +254,7 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
         "            requirement_id='frozen.ensemble',\n"
         "            consumer_role='frozen_ensemble',\n"
         "            artifact_type='strategy_result',\n"
-        "            artifact_schema_version=3,\n"
+        "            artifact_schema_version=4,\n"
         "        ),)\n"
         "    def trigger(self):\n"
         "        return EveryNSessions(n=2)\n"
@@ -322,9 +320,9 @@ def test_installed_path_dependent_composition_uses_current_account_only_downstre
     for result in downstream_result.strategy_results:
         assert isinstance(result, StrategyResult)
         assert result.state_identity is None
-        assert result.feedback_cursor is None
+
         assert result.state_accesses == ()
-        assert result.memory_accesses == ()
+        assert result.strategy_state_accesses == ()
         assert tuple(item.source_artifact_id for item in result.source_state_lineage) == tuple(
             item.source_artifact_id for item in ensemble_result.source_state_lineage
         )

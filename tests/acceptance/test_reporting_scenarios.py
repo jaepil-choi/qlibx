@@ -3,7 +3,6 @@ import json
 import pytest
 
 from qlibx import OutcomeStatus
-from qlibx.account import StrategyMemoryStore
 from qlibx.analysis import (
     MonitoringAnalysisRequest,
     RendererKind,
@@ -43,19 +42,17 @@ def test_uc_report_001_renderers_preserve_one_stored_analysis_value_set(
     real_dw_constraint_case: RealDwProject,
 ) -> None:
     account = initial_account("report-simulation-account")
-    memory = StrategyMemoryStore()
     run = run_real_daily_flow(
         real_dw_constraint_case,
         run_id="report-source-simulation",
         account=account,
-        memory=memory,
     )
     checkpoint = _artifacts(run, "simulation_checkpoint")
     executions = _artifacts(run, "execution_result")
     assert len(checkpoint) == 1
     assert executions
     account_before = account.checkpoint()
-    memory_before = memory.checkpoint()
+    strategy_state_before = run.result.final_strategy_state
 
     flow = AnalysisFlow(artifacts=real_dw_constraint_case.project.artifacts)
     analysis = flow.analyze_simulation(
@@ -132,19 +129,17 @@ def test_uc_report_001_renderers_preserve_one_stored_analysis_value_set(
         for item in json.loads(chart.result.rendered_content)["series"]
     } == pytest.approx(metrics)
     assert account.checkpoint() == account_before
-    assert memory.checkpoint() == memory_before
+    assert run.result.final_strategy_state == strategy_state_before
 
 
 def test_uc_monitor_001_report_separates_actual_breach_and_missing_input(
     real_dw_constraint_case: RealDwProject,
 ) -> None:
     account = initial_account("report-monitoring-account")
-    memory = StrategyMemoryStore()
-    run_real_daily_flow(
+    run = run_real_daily_flow(
         real_dw_constraint_case,
         run_id="report-monitoring-source",
         account=account,
-        memory=memory,
     )
     declaration = ConstraintDeclaration(
         declaration_id="mvp-no-short-single-name-cap-v1",
@@ -176,7 +171,7 @@ def test_uc_monitor_001_report_separates_actual_breach_and_missing_input(
         ),
     )
     account_before_report = account.checkpoint()
-    memory_before_report = memory.checkpoint()
+    strategy_state_before_report = run.result.final_strategy_state
     flow = AnalysisFlow(artifacts=real_dw_constraint_case.project.artifacts)
     analysis = flow.analyze_monitoring(
         MonitoringAnalysisRequest(
@@ -231,4 +226,4 @@ def test_uc_monitor_001_report_separates_actual_breach_and_missing_input(
     assert report.result.records == analysis.result.records
     assert report.result.values_fingerprint == analysis.result.values_fingerprint
     assert account.checkpoint() == account_before_report
-    assert memory.checkpoint() == memory_before_report
+    assert run.result.final_strategy_state == strategy_state_before_report

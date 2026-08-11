@@ -23,7 +23,12 @@ from qlibx.data import ObservationStore, RegistrySnapshot, RequirementResolver
 from qlibx.errors import OperationError, OperationOutcome, OutcomeStatus
 from qlibx.evidence import ArtifactContract, DependencyEdge, LocalArtifactBackend
 from qlibx.flow.composition import STORED_SIGNAL_CONTRACT
-from qlibx.flow.daily import ExecutionEvidence, SimulationCheckpoint, SimulationCheckpointV2
+from qlibx.flow.daily import (
+    ExecutionEvidence,
+    SimulationCheckpoint,
+    SimulationCheckpointV2,
+    SimulationCheckpointV3,
+)
 from qlibx.flow.failures import (
     build_operation_error,
     publish_failed_errors,
@@ -57,9 +62,15 @@ SIMULATION_CHECKPOINT_V2_CONTRACT = ArtifactContract(
     payload_model=SimulationCheckpointV2,
 )
 
-SIMULATION_CHECKPOINT_CONTRACT = ArtifactContract(
+SIMULATION_CHECKPOINT_V3_CONTRACT = ArtifactContract(
     artifact_type="simulation_checkpoint",
     artifact_schema_version=3,
+    payload_model=SimulationCheckpointV3,
+)
+
+SIMULATION_CHECKPOINT_CONTRACT = ArtifactContract(
+    artifact_type="simulation_checkpoint",
+    artifact_schema_version=4,
     payload_model=SimulationCheckpoint,
 )
 
@@ -93,11 +104,21 @@ class AnalysisFlow:
         envelope = self._artifacts.load_envelope(request.checkpoint_artifact_id)
         if envelope.status is not OutcomeStatus.COMPLETE:
             return envelope
-        checkpoint_contract = (
-            SIMULATION_CHECKPOINT_CONTRACT
-            if envelope.result.artifact_schema_version == 3
-            else SIMULATION_CHECKPOINT_V2_CONTRACT
-        )
+        checkpoint_contract = {
+            2: SIMULATION_CHECKPOINT_V2_CONTRACT,
+            3: SIMULATION_CHECKPOINT_V3_CONTRACT,
+            4: SIMULATION_CHECKPOINT_CONTRACT,
+        }.get(envelope.result.artifact_schema_version)
+        if checkpoint_contract is None:
+            return self._failure(
+                request.invocation_id,
+                "analysis.simulation.checkpoint.contract",
+                "SIMULATION_CHECKPOINT_SCHEMA_UNSUPPORTED",
+                {
+                    "artifact_id": envelope.result.artifact_id,
+                    "artifact_schema_version": envelope.result.artifact_schema_version,
+                },
+            )
         checkpoint = self._artifacts.load_model(
             request.checkpoint_artifact_id, checkpoint_contract
         )

@@ -6,12 +6,13 @@ import duckdb
 import pytest
 
 from qlibx import OutcomeStatus, QlibxProject
-from qlibx.account import Account, StrategyMemoryStore
+from qlibx.account import Account
 from qlibx.contracts import (
     BudgetMode,
     DecisionAction,
     EveryNSessions,
     StrategyDraft,
+    StrategyStateUpdate,
     WeightEntry,
 )
 from qlibx.data import (
@@ -177,7 +178,7 @@ class PeerMomentumEnhancedIndexStrategy:
     def run(self, view: object) -> StrategyDraft:
         account = view.account_snapshot()  # type: ignore[attr-defined]
         feedback = view.account_feedback()  # type: ignore[attr-defined]
-        memory = view.memory_snapshot()  # type: ignore[attr-defined]
+        strategy_state = view.strategy_state()  # type: ignore[attr-defined]
         session = view.as_of.astimezone(KST).date()  # type: ignore[attr-defined]
         return_frame = view.session(  # type: ignore[attr-defined]
             "decision_return",
@@ -200,7 +201,7 @@ class PeerMomentumEnhancedIndexStrategy:
             for instrument in STOCKS
         }
 
-        prior = memory.value if isinstance(memory.value, dict) else {}
+        prior = strategy_state if isinstance(strategy_state, dict) else {}
         prior_history = prior.get("signal_history", {})
         updated_history: dict[str, list[float]] = {}
         decayed: dict[str, float] = {}
@@ -241,7 +242,7 @@ class PeerMomentumEnhancedIndexStrategy:
         if account.positions:
             previous_performance = view.latest_session_performance()  # type: ignore[attr-defined]
 
-        proposed_memory = {
+        proposed_state = {
             "signal_history": updated_history,
             "selected": selected,
             "consumed_feedback_cursor": feedback.next_cursor,
@@ -269,9 +270,7 @@ class PeerMomentumEnhancedIndexStrategy:
                 f"{account.account_id}:v{account.version}:"
                 f"cursor{feedback.next_cursor}"
             ),
-            feedback_cursor=str(feedback.next_cursor),
-            proposed_memory=proposed_memory,
-            expected_memory_version=memory.version,
+            proposed_state=StrategyStateUpdate(value=proposed_state),
         )
 
 
@@ -325,14 +324,12 @@ def _run(case: RealDwProject, run_id: str):
         initial_cash=100_000_000,
         instrument_ids=frozenset((*STOCKS, ETF)),
     )
-    memory = StrategyMemoryStore()
     outcome = DailyExecutionFlow(
         clock=BacktestClock(sessions[0]),
         registry=case.project.registry_snapshot(),
         artifacts=case.project.artifacts,
         exchange=_exchange(),
         account=account,
-        memory=memory,
         profile=DailyExecutionProfile(
             market_dataset_id="peer-momentum-market",
             execution_price_role="execution_price",
@@ -346,7 +343,7 @@ def _run(case: RealDwProject, run_id: str):
             session_closes=sessions,
         ),
     )
-    return outcome, memory
+    return outcome
 
 
 def test_prd_native_peer_momentum_enhanced_index_closed_loop(
@@ -354,8 +351,8 @@ def test_prd_native_peer_momentum_enhanced_index_closed_loop(
     bounded_real_k200_source: Path,
 ) -> None:
     case = _peer_project(tmp_path / "peer-project", bounded_real_k200_source)
-    first, first_memory = _run(case, "peer-momentum-native")
-    second, _ = _run(case, "peer-momentum-native")
+    first = _run(case, "peer-momentum-native")
+    second = _run(case, "peer-momentum-native")
 
     assert first.status is OutcomeStatus.COMPLETE
     assert second.status is OutcomeStatus.COMPLETE
@@ -402,17 +399,9 @@ def test_prd_native_peer_momentum_enhanced_index_closed_loop(
     assert second_decision.performance_accesses[0].event_time == close_at(2024, 1, 4)
     assert second_decision.performance_accesses[0].feedback_cursor == 2
 
-    assert len(first.result.memory_commits) == 2
-    assert first.result.memory_commits[0].update_kind == "INITIALIZATION"
-    assert first.result.memory_commits[0].feedback_cursor == 0
-    assert first.result.memory_commits[1].update_kind == "FEEDBACK_UPDATE"
-    assert first.result.memory_commits[1].feedback_cursor == 2
-    committed_memory = first_memory.snapshot(
-        PeerMomentumEnhancedIndexStrategy.strategy_id
-    )
-    assert committed_memory.version == 2
-    assert committed_memory.feedback_cursor == 2
-    assert committed_memory.value["previous_portfolio_return"] == pytest.approx(
+    assert first.result.initial_strategy_state is None
+    assert first.result.final_strategy_state["consumed_feedback_cursor"] == 2
+    assert first.result.final_strategy_state["previous_portfolio_return"] == pytest.approx(
         first.result.session_performance[1].portfolio_return
     )
 

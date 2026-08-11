@@ -177,6 +177,27 @@ class EveryNSessions(BaseModel):
 - **왜 Strategy가 소유하나**: PRD §3.3 — "정의만 읽고 cadence를 알 수 있어야 한다". run script에 두면
   같은 Strategy가 스크립트마다 다른 전략이 된다.
 
+### 3.5 Warm-up — 판단할 준비가 되기 전의 candidate
+
+**결정.** Strategy가 `warmup(self) -> Warmup`(단위: session)을 **선언**한다. run start로부터 그만큼의
+eligible session이 지나기 전의 candidate는 `DECISION_SKIPPED(warmup)`으로 **기록하고** 넘어간다.
+
+```python
+class Warmup(BaseModel):
+    sessions: int = 0
+```
+
+- **왜 명시 선언인가**: "lookback을 못 채우면 알아서 건너뛴다"로 하면 run 중간의 진짜 결측(상장폐지, 데이터
+  누락)까지 조용히 skip된다. 그건 PRD §10.2가 금지하는 silent skip이다. **warm-up 구간의 결측은 예상된 것,
+  그 이후의 결측은 실패** — 이 구분이 선언으로만 가능하다.
+- **왜 run start 기준인가**: 데이터가 언제 시작되는지를 기준으로 삼으면 cadence가 데이터에서 유도된다.
+  §3.1이 금지하는 바로 그것이다. calendar와 run start만으로 결정되어야 재현된다.
+- **왜 lookback과 별도인가**: 같은 수가 아니다. 분기 재무제표를 `RowsLookback(4)`로 읽는 전략의 warm-up은
+  4 session이 아니라 약 252 session이다.
+- skip은 실패가 아니라 **기록된 정상 결과**다. run result에 어느 candidate가 왜 판단되지 않았는지 남는다.
+  → `UC-TRIGGER-001` "판단하지 않은 session은 실패가 아니라 재현 가능한 기록으로 남는다"
+- **기본값은 0이다.** warm-up이 필요 없는 전략은 아무것도 선언하지 않는다.
+
 ---
 
 ## 4. Data
@@ -247,6 +268,7 @@ class Strategy(ABC):
     memory: StrategyMemory = None        # 유일한 mutable 슬롯
 
     def trigger(self) -> TriggerPolicy: ...
+    def warmup(self) -> Warmup: ...      # 기본 0 (§3.5)
     def requirements(self) -> tuple[DataRequirement, ...]: ...
     def decide(self, context: StrategyContext) -> PortfolioIntent: ...
 ```
@@ -447,6 +469,20 @@ class ListingRule(BaseModel):
 - Exchange는 Store를 모른다. Flow가 resolve한 `ExecutionView`만 받는다.
 - **UC**: `UC-ACADEMIC-001`, `UC-PROFILE-001`
 
+#### listing의 소유자는 Exchange다
+
+**결정.** 어떤 instrument가 그 venue에 상장되어 있고 어떤 수량 규칙을 갖는지는 **Exchange의 frozen
+config**가 소유한다. `RunDefinition`에 별도 listing 필드를 두지 않는다.
+
+- **왜**: fractional/lot이 이미 Exchange 소관이다. listing을 다른 곳에 두면 "거래 가능한데 lot을 모른다"는
+  상태가 생긴다. 하나의 사실은 한 곳에 있어야 한다.
+- **없으면**: venue를 추가할 때마다 `RunDefinition`을 고쳐야 하고, Exchange 교체가 더 이상 §2.5의 순수한
+  주입이 아니게 된다.
+- **dataset registration과 listing은 다른 일이다.** 가격 데이터가 등록되어 있다는 사실이 그 종목을 그 venue에서
+  거래할 수 있다는 뜻이 아니다. 거꾸로도 마찬가지다.
+- preflight가 intent의 **모든 instrument**에 대해 `exchange.rules()`가 listing을 돌려주는지 검사한다(§12).
+  하나라도 없으면 run 시작 전에 실패한다.
+
 ### 6.3 두 fixture profile
 
 | | Academic | KRX daily |
@@ -552,6 +588,7 @@ Strategy 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · me
 
 ```text
 CREATED → PREFLIGHTED → RUNNING
+    DECISION → DECISION_SKIPPED(warmup)          — 기록하고 다음 candidate로
     DECISION → INTENT_FROZEN → EXECUTION_READY → FILLS_PRODUCED
              → ACCOUNT_COMMITTED → MARKED → FEEDBACK_PUBLISHED → (반복)
   → FINALIZED
@@ -639,6 +676,7 @@ decision 03-06 04:00, execution 03-06 15:30.
 
 | 단계 | Peer momentum long-short | 5일 수익률 top-10 long-only |
 |---|---|---|
+| 0. warm-up | `Warmup(sessions=21)` — 그전 candidate는 skip 기록 | `Warmup(sessions=6)` |
 | 1. read | peer group + 5일 수익률 | 5일 수익률 |
 | 2. research value | peer 상대 랭크 (signed) | 상위 10 선택 (양수만) |
 | 3. weights | `equal_weight(centered_signal, …)` → gross 1, net 0 | `equal_weight(top10, …)` → 각 10% |
@@ -648,8 +686,11 @@ decision 03-06 04:00, execution 03-06 15:30.
 | 7. commit | `SIGNED` | `LONG_ONLY` |
 | 8. mark | NAV, gross/net exposure, PnL, turnover | 동일 |
 
-**다른 것은 2·3·6·7의 정책뿐이다.** peer momentum이 반드시 Academic이어야 하는 것도 아니다 —
+**다른 것은 0·2·3·6·7의 정책뿐이다.** peer momentum이 반드시 Academic이어야 하는 것도 아니다 —
 호환되는 조합이면 같은 intent를 다른 profile에서 별도 run으로 비교할 수 있다(`UC-PORTFOLIO-001`).
+
+0단계의 차이가 두 전략의 첫 판단 시점을 가른다. 같은 `EveryNSessions(5)`를 선언해도 warm-up이 다르면
+첫 FIRE가 다른 session에서 일어나고, 그 사이의 candidate는 실패가 아니라 skip으로 기록된다.
 
 ---
 
@@ -677,6 +718,7 @@ class RunDefinition(BaseModel):
 - Exchange ↔ AccountMode
 - instrument listing과 quantity rule 존재
 - 모든 component requirement 충족 가능
+- intent가 다룰 수 있는 모든 instrument에 대해 Exchange가 listing을 갖고 있음 (§6.2)
 - initial account 불변식
 - `initial_memory`가 strict JSON (§5.1.1)
 - schedule 결정성
@@ -715,7 +757,7 @@ class RunDefinition(BaseModel):
 | `UC-DATA-001`, `UC-AGENT-001` | §4.1 |
 | `UC-DATA-002`, `UC-PIT-001`, `UC-ERROR-001` | §4.2 + §8.3 |
 | `UC-LOOKBACK-001` | §4.2 (lookback → Store query) |
-| `UC-TIME-001`, `UC-TRIGGER-001` | §3 |
+| `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger 소유 · warm-up skip) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.4 (`BudgetSemantics`) — **형태 미확정, §15-1** |
@@ -772,27 +814,6 @@ class RunDefinition(BaseModel):
 
 **언제 정하나**: constraint optimizer 설계 시. 그 전에 이 부분을 구현하면 optimizer가 들어올 때 다시 뜯는다.
 
-### 15-2. Instrument listing의 소유자 (§12)
-
-`RunDefinition`에 `exchange: ComponentRef`만 있고 listing 출처가 없다. preflight가 "listing과 quantity rule
-availability"를 검사한다고 적었지만 어디서 오는지 정하지 않았다.
-
-- 후보 A: Exchange의 frozen config가 listing을 소유한다 (fractional/lot이 이미 Exchange 소관이므로 일관)
-- 후보 B: `RunDefinition`에 별도 listing 필드
-
-**미결.** 다만 A가 §6.2와 일관된다.
-
-### 15-3. Lookback warm-up이 부족한 candidate session (§3.4)
-
-lookback을 채우지 못하는 초기 session에서 무엇이 일어나는지 정하지 않았다. 지금 문서대로면
-`DATA_*` 실패로 run이 중단된다. PRD `UC-TRIGGER-001`은 "판단하지 않은 session은 실패가 아니다"를 허용하지만,
-**무엇이 그것을 skip으로 만드는지**가 없다.
-
-- 후보 A: Strategy가 warm-up을 선언하고, 그 전 candidate는 기록된 skip으로 넘어간다
-- 후보 B: skip 개념 없이 run `start`를 워밍업 이후로 잡는다
-
-**미결.** A는 "정의만 읽고 cadence를 안다"(PRD §3.3)와 일관되고, B는 사용자가 휴장일을 손으로 세야 한다.
-
 ---
 
 ## 16. Acceptance checklist
@@ -809,6 +830,8 @@ lookback을 채우지 못하는 초기 session에서 무엇이 일어나는지 �
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
 - [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다
 - [ ] fractional/lot 규칙이 `ListingRule`에 있고 `AccountMode`에는 없다
+- [ ] listing이 Exchange의 frozen config에 있고 `RunDefinition`에는 없다
+- [ ] warm-up 구간 candidate가 `DECISION_SKIPPED`로 기록되고, 그 이후의 결측은 실패한다
 - [ ] `AccountMode`의 차이가 음수 position 유효성 하나뿐이다
 - [ ] account history 접근이 strategy state 보유와 무관하다
 - [ ] commit 전 실패가 position/cash/version/journal을 하나도 바꾸지 않는다

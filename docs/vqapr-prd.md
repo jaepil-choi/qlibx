@@ -742,6 +742,13 @@ binding, fill dependency를 보존하고 parent result는 불변이다.
 Strategy는 이전 판단의 결과를 다음 판단으로 이어갈 수 있어야 한다.
 
 - **내용과 구조는 strategy가 정하며 package는 이를 해석하지 않는다.**
+- **하나의 bounded value다.** Strategy가 임의의 이름으로 상태를 늘려갈 수 있는 표면을 제공하지 않는다.
+  package가 해석하지 않으면서도 durable·portable하려면 값의 **범위와 형식**이 정해져 있어야 한다.
+  범위가 없는 state는 저장할 수도, 다음 run에 넘길 수도, "무엇이 바뀌었는가"를 보일 수도 없다.
+- **portable format으로 표현 가능해야 한다.** 표현할 수 없는 값(비유한 수치, 문자열이 아닌 key, 임의의
+  in-memory 객체)은 계산 전에 거부한다. 저장 시점에 조용히 잘라내지 않는다.
+- **저장되는 값은 Strategy가 들고 있는 객체와 분리된다.** Strategy가 이후에 같은 객체를 계속 변경해도 이미
+  기록된 state가 따라 바뀌어서는 안 된다. 그렇지 않으면 이력 전체가 마지막 값 하나로 붕괴한다.
 - durable하고 portable해야 하며, 한 run의 종료 state를 다음 run의 시작 state로 사용할 수 있어야 한다.
   production에서 하루 단위로 실행하며 전날 state를 이어받는 것이 기준 사례다.
 - **갱신은 execution이나 fill 발생 여부에 종속되지 않는다.** 체결이 없는 세션에도, execution profile을 쓰지
@@ -917,8 +924,8 @@ Strategy와 monitoring은 actual state를 현재 시점의 한 장면으로만�
   **instrument 단위 panel**(보유 수량, 진입 평단, 실현손익 등).
 - 소비자는 필요한 관측 항목과 범위를 **선언**하고, 선언하지 않은 항목은 보이지 않는다. registered data
   관측과 같은 원칙이다.
-- user는 actual state가 무엇을 기록할지 선택할 수 있어야 하며, 선택하지 않은 항목을 조용히 추정하거나 다른
-  값으로 대체하지 않는다.
+- 기록 대상은 **committed state transition이 이미 계산하는 값**이다. 이력을 위해 별도 계산을 하지 않으며,
+  그 집합 밖의 항목을 요구하면 **계산 전에 실패한다.** 추정하거나 다른 값으로 대체하지 않는다.
 - **stop-loss, cooldown, 연속 손실 판정 같은 규칙은 strategy state 없이 actual state 이력만으로 표현될 수
   있어야 한다.**
 - **actual state 이력 접근은 strategy state 보유 여부에 종속되지 않는다.**

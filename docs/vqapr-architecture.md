@@ -237,16 +237,49 @@ class StrategyView(Protocol):
 ### 5.1 Strategy
 
 ```python
-class Strategy(Protocol):
+StrategyMemory: TypeAlias = (
+    bool | int | float | str | list["StrategyMemory"] | dict[str, "StrategyMemory"] | None
+)
+
+class Strategy(ABC):
+    memory: StrategyMemory = None        # 유일한 mutable 슬롯
+
     def trigger(self) -> TriggerPolicy: ...
     def requirements(self) -> tuple[DataRequirement, ...]: ...
-    def decide(self, context: StrategyContext) -> StrategyDecision: ...
+    def decide(self, context: StrategyContext) -> PortfolioIntent: ...
 ```
 
-`StrategyDecision`은 `PortfolioIntent`와 선택적 `StrategyStateUpdate`를 담는다.
-
-- state 갱신이 **fill 발생과 무관**해야 하므로(`UC-STATE-001`) 반환값에 함께 실어 Flow가 항상 반영한다.
 - `StrategyContext`는 `view`, `event`, `universe`만 준다. Clock·Store·Exchange·mutable Account는 없다.
+
+### 5.1.1 Memory — 슬롯 하나, strict JSON
+
+**결정.** Strategy가 이어갈 수 있는 상태는 **`self.memory` 하나**다. `__init__` 이후에는 그 밖의 어떤
+attribute도 쓸 수 없다(`__setattr__` 가드).
+
+- **왜 슬롯 하나인가**: package가 내용을 해석하지 않으면서 durable·portable하려면 값의 **범위**가 정해져야
+  한다. `self.losses`, `self.cooldown`처럼 이름이 자유롭게 늘어나면 무엇을 저장하고 무엇을 다음 run에
+  넘길지 결정할 수 없다.
+- **왜 strict JSON인가**: numpy array나 DataFrame을 담을 수 있으면 "portable"이 거짓이 된다.
+  비유한 수치와 문자열 아닌 key도 거부한다.
+- **왜 `__init__`은 예외인가**: 전략 파라미터(`n`, `threshold`)는 **불변 config**다. 생성 후 변하지 않으므로
+  memory가 아니다.
+
+**Flow가 판단 직후 스냅샷한다.**
+
+```python
+snapshot = normalize_memory(strategy.memory)   # 검증 + detached deep copy
+```
+
+- **왜 할당 시점이 아니라 스냅샷 시점인가**: `self.memory["cooldown"] = 5`는 in-place 변경이라
+  `__setattr__`을 거치지 않는다. 확실히 잡히는 유일한 지점은 Flow의 스냅샷이다.
+- **왜 detached copy인가**: 같은 dict를 계속 변경하면 모든 스냅샷이 같은 객체를 가리켜 **이력 전체가
+  마지막 값 하나로 붕괴한다.** normalize의 round-trip이 detach를 증명한다.
+- **왜 `StrategyStateUpdate` 같은 별도 타입이 없는가**: 매 판단마다 현재 값을 스냅샷하므로 memory를 건드리지
+  않으면 이전 값이 그대로 남는다. "갱신 안 함"이 저절로 표현된다.
+- 스냅샷은 fill 발생과 무관하게 항상 일어난다 → `UC-STATE-001`
+- `memory`가 `None`이 아니면 그 result는 **path-dependent**로 표시된다 → PRD §5.7
+
+**UC**: `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001`, `UC-ALPHA-PATH-001`
 
 ### 5.2 Strategy 내부의 3단 — 강제하지 않는다
 
@@ -293,7 +326,12 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
 
 불변식:
 
-- data/state/clock을 모른다. import도 하지 않는다. → `domain` 값 타입만 의존하는 **leaf**
+- **`domain` 외에는 아무것도 import하지 않는다.** 아래는 전부 금지다.
+  ```text
+  vqapr.data  vqapr.account  vqapr.exchange  vqapr.runtime  vqapr.flow  vqapr.strategy
+  ```
+  시가총액이 필요하면 **인자로 받는다.** 여기서 직접 읽으면 그 data가 Strategy의 declared requirement를
+  거치지 않아 §4.2의 lineage에 남지 않는다.
 - `sizes`에 선택된 종목이 없으면 **실패**. 빼고 재정규화하지 않는다.
 - `signal`의 결측은 다루지 않는다. 호출자가 위 helper로 먼저 해소한다.
 - 선택된 종목이 없으면 실패하지 않고 **빈 weights**를 낸다 → hold(§6.7)를 표현할 수 있어야 하므로
@@ -306,6 +344,29 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
 - **왜 이 제약들인가**: 이것이 없으면 built-in은 편의 함수가 아니라 **보이지 않는 곳에서 판단하는 두 번째
   Strategy**가 된다. 특히 "결측 빼고 재정규화"는 PRD §10.2가 금지한 바로 그 행위다.
 - **UC**: `UC-BUILTIN-001`, `UC-ALPHA-BUDGET-001`
+
+#### 이 leaf 규칙은 두 층으로 지킨다
+
+문서만으로는 부족하고 도구만으로도 부족하다. 두 층은 시점이 다르다.
+
+| 층 | 언제 | 역할 |
+|---|---|---|
+| 이 문서 §5.3 + `weighting.py` module docstring | 코드를 **쓰기 전** | 예방 — 애초에 안 쓰게 한다 |
+| import linter | CI | 포착 — 안 읽었으면 터뜨린다 |
+
+```toml
+[[tool.importlinter.contracts]]
+name = "weighting is a pure leaf"      # 계약 이름이 곧 실패 이유가 되게 짓는다
+type = "forbidden"
+source_modules = ["vqapr.portfolio.weighting"]
+forbidden_modules = [
+  "vqapr.data", "vqapr.account", "vqapr.exchange",
+  "vqapr.runtime", "vqapr.flow", "vqapr.strategy",
+]
+```
+
+`weighting.py`의 module docstring에도 같은 금지와 그 이유(`UC-BUILTIN-001`)를 적는다. 파일을 여는 사람이
+가장 먼저 보는 곳이기 때문이다.
 
 > **signal과 weights는 shape가 같고 의미가 다르다.** 타입이 경계를 지켜주지 못하므로, 위 함수를 통과했다는
 > 사실 자체가 전환이 의도되었다는 증거가 된다.
@@ -440,19 +501,24 @@ class AccountMode(str, Enum):
   - **왜 두 번 검사하나**: Exchange는 교체 가능한 주입물이다(§2.5). authority가 주입물을 신뢰하면 authority가
     아니다.
 
-### 7.3 History — 선언한 것만 보인다
+### 7.3 History — 기록은 고정, 구독은 선언
 
-```python
-class AccountHistoryRecordingSpec(BaseModel):
-    account_series: tuple[str, ...]      # cash, nav, realized_pnl, ...
-    instrument_panel: tuple[str, ...]    # quantity, avg_entry_price, realized_pnl, ...
+**결정.** Account는 **`commit`과 `mark`가 이미 계산하는 값**을 기록한다. 이력을 위해 추가로 계산하지 않는다.
+기록 대상을 run마다 설정하는 스위치는 두지 않는다.
+
+```text
+account series     cash, nav, realized_pnl, gross/net exposure
+instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
 ```
 
-- 기록할 항목을 run 시작 시 **선언**한다. 선언하지 않은 항목은 읽을 수 없고 **추정하지 않고 실패**한다.
-- 소비자(Strategy/Monitor)는 `HistoryRequirement`로 항목과 범위를 좁혀 읽는다 — data 접근과 같은 원칙.
+- **왜 설정하지 않는가**: 위 값들은 commit을 수행하려면 어차피 구해야 한다. 기록은 한 줄 append일 뿐이고
+  3,000종목 × 250세션도 무겁지 않다. 설정 가능하게 만들면 **얻는 것 없이 run identity에 필드만 하나 는다.**
+- **왜 고정 집합인가**: 집합이 고정이어야 "집합 밖 항목 요구 → 계산 전 실패"가 성립한다.
+  추정 금지(PRD §6.6)를 지키는 데 필요한 건 *선언*이 아니라 *경계*다.
+- 소비자(Strategy/Monitor)는 `HistoryRequirement`로 **읽을 항목과 범위를 좁혀** 요구한다 — data 접근과 같은 원칙.
 - raw journal은 노출하지 않는다. immutable projection만 준다.
-- **왜**: `UC-ACCOUNT-HISTORY-001` — strategy state 없이 stop-loss/cooldown이 표현 가능해야 한다.
-  history를 strategy state에 얹으면 research-only Strategy가 그 규칙을 쓸 수 없다.
+- **왜 `memory`와 분리되어 있나**: `UC-ACCOUNT-HISTORY-001`은 strategy state 없이 stop-loss/cooldown이 표현
+  가능해야 한다고 요구한다. history를 memory 위에 얹으면 research-only Strategy가 그 규칙을 쓸 수 없다.
 
 ### 7.4 Valuation
 
@@ -477,7 +543,7 @@ class SimulationFlow:
 ```
 
 책임: run 동결과 preflight · schedule 조립 · 이벤트 dispatch · requirement resolution과 View 생성 ·
-Strategy 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · strategy state 전달 · evidence · finalize.
+Strategy 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · memory 스냅샷 · evidence · finalize.
 
 - **Academic Flow와 KRX Flow를 따로 만들지 않는다.** Exchange, AccountMode, calendar, policy를 주입한다.
 - Clock은 Strategy나 Exchange의 의미를 모른다. callback을 부를 뿐이다.
@@ -599,7 +665,7 @@ class RunDefinition(BaseModel):
     start: datetime
     end: datetime
     initial_account: AccountSnapshot
-    history_recording: AccountHistoryRecordingSpec
+    initial_memory: StrategyMemory
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
 ```
@@ -612,6 +678,7 @@ class RunDefinition(BaseModel):
 - instrument listing과 quantity rule 존재
 - 모든 component requirement 충족 가능
 - initial account 불변식
+- `initial_memory`가 strict JSON (§5.1.1)
 - schedule 결정성
 
 **동결 후 project config 변경은 이 run에 영향을 주지 않는다.** → `UC-CONFIG-001`
@@ -652,7 +719,7 @@ class RunDefinition(BaseModel):
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.3 (`side_budget`) + §5.4 (`BudgetSemantics`) |
-| `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1 (`StrategyDecision`) + §8.1 |
+| `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.4 (immutable intent + source_refs) + §12 |
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
 | `UC-EXEC-001`, `UC-EXEC-002` | §6.1 |
@@ -680,9 +747,12 @@ class RunDefinition(BaseModel):
 - [ ] registration의 universal 시간 필드는 `available_at`뿐이다
 - [ ] Strategy·Exchange·Valuation이 각자 field requirement를 선언한다
 - [ ] `lookback`이 Store query까지 도달한다 (전체 읽고 자르기 없음)
-- [ ] `portfolio.weighting`이 `domain` 외 아무것도 import하지 않는다 (import linter)
+- [ ] `portfolio.weighting`이 `domain` 외 아무것도 import하지 않는다 (import linter + module docstring)
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
 - [ ] `PortfolioIntent`에 `cash_target`이 없다
+- [ ] Strategy가 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
+- [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
+- [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다
 - [ ] fractional/lot 규칙이 `ListingRule`에 있고 `AccountMode`에는 없다
 - [ ] `AccountMode`의 차이가 음수 position 유효성 하나뿐이다
 - [ ] account history 접근이 strategy state 보유와 무관하다

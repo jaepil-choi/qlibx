@@ -53,15 +53,28 @@ the cadence applied within it.
 
 ## Validation
 
-- `.venv\\Scripts\\python.exe -m ruff check src tests` — passed.
+- `.venv\\Scripts\\python.exe -m ruff check src tests
+  showcases\\show_004_two_strategy_data_flow` — passed.
 - Focused contract/config/public daily suite — 27 passed.
 - Pure trigger plus public daily suite — 18 passed after correcting the registered default-policy
   fixture.
 - Trigger/public daily/recovery/registry/acceptance aggregate — 64 passed, 2 fixture failures in
   330.75s; both legacy v1 anchors lacked the new effective trigger identity.
 - Corrected legacy v1 anchor rerun — 2 passed in 10.30s.
-- Remaining document, showcase, full-suite, build, and final diff validation will be recorded before
-  completion.
+- Architecture/traceability rerun — 2 passed after removing a forbidden `contracts -> runtime`
+  import discovered by the layer test.
+- Full suite — 301 passed and 2 unrelated data-audit failures in 517.34s. Both failures report that
+  the local `data/preprocessed/sector_classification.parquet` no longer matches the existing audit
+  contract (1,143,059 actual rows versus 187,615 recorded rows, plus SHA-256 drift); neither the
+  dataset nor its audit contract was changed for this task.
+- Public import smoke test — passed for `qlibx` and every new trigger export.
+- `uv build` — built `qlibx-0.1.0.tar.gz` and `qlibx-0.1.0-py3-none-any.whl`. The first attempt
+  preserved a managed-Windows default-cache `WinError 5`; the successful attempt used a unique
+  ASCII cache without deleting or mutating the default cache.
+- Showcase 004 — two consecutive complete-data runs preserved 61 sessions/1,220 observations,
+  Academic 8 decisions/160 fills/final NAV 110124723.71750417, and KRX 11 decisions/11
+  executions/157 fill records/final cash 588983.2800000105 with identical terminal positions.
+  `validate_missing_coverage.py` also passed by observing the explicit incomplete-coverage error.
 
 ## Remaining limitations and follow-up
 

@@ -81,6 +81,8 @@ the cadence applied within it.
 - `docs/qlibx-prd.md` §9.8 still describes invocation-owned cadence. The user explicitly excluded
   PRD edits during implementation, so this record does not claim product-document alignment. The
   architecture and executable contract describe the implemented Strategy-owned schedule policy.
+  **2026-08-11 note:** closed separately. §9.8 now states cadence as part of the Strategy's economic
+  meaning and adds `UC-TRIGGER-001`.
 - A Strategy that always returns `TARGET` under default `EveryCandidate` still needs a candidate
   calendar with a later eligible execution event or must return `HOLD` at the terminal candidate.
 - Warmup readiness should later become an explicit typed Strategy outcome rather than hand-coded

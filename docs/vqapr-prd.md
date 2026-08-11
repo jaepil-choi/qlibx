@@ -308,7 +308,7 @@ built-in으로 제공한다. 이 built-in에는 다음 제약이 붙는다. 이�
 - registered data, account state, clock, execution profile에 **접근하지 않는다.** 필요한 값은 전부 인자로
   받는다. 크기 결정에 외부 panel(시가총액 등)이 필요하면 그 panel을 호출자가 넘긴다. 그래야 그 data가
   Strategy의 declared requirement를 거쳐 §4.6의 lineage에 남는다.
-- **budget을 결정하지 않고 인자로 받는다.** 선언된 것보다 적게 배분된 결과를 자동으로 채우지 않는다(§5.5).
+- **budget을 스스로 결정하지 않는다.** 선언된 것보다 적게 배분된 결과를 자동으로 채우지 않는다(§5.5).
 - **결측을 조용히 처리하지 않는다.** 요구한 부수 입력이 없으면 계산 전에 실패하고, 해당 종목을 빼고
   나머지를 재정규화하지 않는다(§10.2).
 - 연구 결과 자체의 결측 해소는 built-in weighting의 책임이 아니다. 별도의 명시적 built-in으로 제공하되,
@@ -695,13 +695,23 @@ value와 momentum Strategy의 signed weight를 저장한 뒤 ensemble이 두 res
 cost, risk 조건 때문에 일부를 cash/residual로 남길 수 있다. package가 빈 weight를 자동 재정규화해 두 의미를
 바꾸지 않는다.
 
-budget은 **weight를 만드는 연산의 입력**이지 그 연산이 결정하는 값이 아니다. 호출자가 배분할 예산을 지정하고,
-연산은 그 예산만큼만 배분한다. 선언된 예산보다 적게 배분된 결과를 연산이 자동으로 채우면 flexible을 fixed로
-몰래 바꾸는 것이므로 금지한다.
+budget을 **weight를 만드는 연산이 스스로 결정하지 않는다.** 선언된 예산보다 적게 배분된 결과를 연산이 자동으로
+채우면 flexible을 fixed로 몰래 바꾸는 것이므로 금지한다.
 
-현금은 **별도로 선언하지 않는다.** 배분되지 않은 잔여는 산술적으로 현금이며 target과 portfolio value에서
-유도된다. 같은 정보를 두 곳에 두면 둘이 어긋날 수 있고, 그 불일치 검증은 이미 account가 commit 시점에
-수행한다.
+#### 의도된 cash와 잔여는 다르다
+
+배분되지 않은 부분은 산술적으로 언제나 현금이다. 그러나 다음 둘은 경제적 의미가 다르다.
+
+- **의도된 cash 포지션.** 무위험자산 비중을 알파의 일부로 삼는 전략(betting-against-beta의 leverage/무위험자산
+  구성, risk parity의 cash sleeve, market timing의 현금 비중)에서 cash는 **선택한 포지션**이다.
+- **배분하지 못한 잔여.** flexible budget에서 약한 signal, 높은 cost, risk 조건 때문에 남은 부분이다.
+
+두 경우의 숫자가 같아도 같은 것으로 보고해서는 안 된다. 결과는 어느 쪽인지 구분할 수 있어야 한다.
+
+#### 실현된 budget은 의도한 budget과 다를 수 있다
+
+constraint 조정, lot rounding, cash clipping을 거치면 실현 gross/net이 의도한 값과 달라진다. 결과는 **의도한
+budget과 실현된 budget을 함께** 보여야 하며, 하나를 다른 하나로 대체해 보고하지 않는다(§9.4).
 
 #### UC-ALPHA-BUDGET-001 — 약한 signal의 residual
 
@@ -801,8 +811,8 @@ executable Strategy run은 signed, long-only, benchmark-relative 여부와 무�
 하나의 frozen intended portfolio**로 확정한다. construction 규칙은 profile마다 다를 수 있지만 이 경계를
 우회할 수 없다.
 
-frozen intended portfolio는 budget, direction, instrument target, source lineage를 동결한다. 배분되지 않은
-잔여 현금은 별도로 선언하지 않고 target과 portfolio value에서 유도한다(§5.5). **Strategy result나 raw weight를
+frozen intended portfolio는 budget semantics, direction, instrument target, source lineage를 동결한다. cash를
+의도된 포지션으로 표현할지 잔여로 표현할지는 §5.5의 구분을 따른다. **Strategy result나 raw weight를
 execution profile에 직접 제출하지 않는다.**
 
 construction 내부에서 §2.7의 built-in weighting 함수를 조합할 수 있다. 그러나 그 함수들은 run identity,

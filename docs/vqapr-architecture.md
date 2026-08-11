@@ -223,11 +223,13 @@ class StrategyView(Protocol):
     def account(self) -> AccountSnapshot: ...
     def account_history(self, requirement: HistoryRequirement) -> AccountHistory: ...
     def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
-    def strategy_state(self) -> StrategyStateSnapshot | None: ...
 ```
 
+- memory는 View에 없다. Flow가 run 시작 시 `strategy.memory`에 넣어주므로 Strategy는 `self.memory`로 읽는다
+  (§5.1.1). 읽는 경로를 둘로 두지 않는다.
+
 - View는 실제 access를 기록해 lineage를 만든다. **읽지 않은 dataset은 dependency가 아니다.**
-- `account_history`가 `strategy_state`와 **독립**인 것이 핵심 — `UC-ACCOUNT-HISTORY-001`은 state 없이
+- `account_history`가 `memory`와 **독립**인 것이 핵심 — `UC-ACCOUNT-HISTORY-001`은 state 없이
   stop-loss가 가능해야 한다고 요구한다.
 
 ---
@@ -308,14 +310,12 @@ research values  ──►  weights  ──►  PortfolioIntent
 
 | 함수 | 크기 | 외부 입력 |
 |---|---|---|
-| `signal_weight(signal, *, side_budget)` | `\|signal\|`에 비례 | 없음 |
-| `equal_weight(signal, *, side_budget)` | 균등 | 없음 |
-| `proportional_weight(signal, sizes, *, side_budget)` | `sizes`에 비례 | 크기 panel |
+| `signal_weight(signal, ...)` | `\|signal\|`에 비례 | 없음 |
+| `equal_weight(signal, ...)` | 균등 | 없음 |
+| `proportional_weight(signal, sizes, ...)` | `sizes`에 비례 | 크기 panel |
 
-**`side_budget`이 손잡이다.** dollar-neutrality는 인자가 아니라 결과다.
-
-- 양/음이 모두 있으면 → 각 side에 `B` → gross `2B`, net `0`
-- 양만 있으면 → gross `B`, net `B`
+> ⚠️ **`...` 자리의 normalization 인자는 아직 정하지 않았다.** §15-1 참고. 확정된 것은 위 세 함수를
+> 가르는 축이 **크기의 출처**이고 부호는 항상 입력에서 온다는 것뿐이다.
 
 보조 함수 (결측을 **명시적으로** 다루기 위한 것):
 
@@ -380,15 +380,15 @@ class PortfolioIntent(BaseModel):
     decision_time: datetime
     effective_after: datetime
     targets: tuple[PortfolioTarget, ...]
-    budget: BudgetSemantics          # declared gross / net
+    budget: BudgetSemantics          # 형태 미확정 — §15-1
     source_refs: tuple[ArtifactRef, ...]
     account_version_seen: int
-    strategy_state_ref: ArtifactRef | None
+    memory_ref: ArtifactRef | None   # 있으면 이 result는 path-dependent
 ```
 
 - `PortfolioTarget`은 weight **또는** quantity 중 정확히 하나. 둘 다 채우거나 비우면 validation error.
-- **`cash_target` 없음.** 잔여는 targets와 portfolio value에서 유도된다. 같은 정보를 두 곳에 두면 어긋날 수
-  있고, 그 검증은 이미 Account가 commit 시점에 한다. → PRD §5.5
+- ⚠️ **cash를 어떻게 표현할지는 미확정.** 산술적으로는 `1 - Σw`로 유도되지만, **의도된 cash 포지션**(BAB의
+  무위험자산, risk parity의 cash sleeve)과 **배분하지 못한 잔여**는 경제적 의미가 다르다. §15-1 참고.
 - 생성 시 검증: tz-aware 시각, 유일 instrument, 유한 값, 선언된 budget, lineage, profile direction 호환.
 - **fractional/lot 검증은 하지 않는다.** 그건 venue가 안다(§6.2).
 
@@ -641,7 +641,7 @@ decision 03-06 04:00, execution 03-06 15:30.
 |---|---|---|
 | 1. read | peer group + 5일 수익률 | 5일 수익률 |
 | 2. research value | peer 상대 랭크 (signed) | 상위 10 선택 (양수만) |
-| 3. weights | `equal_weight(rank_signal, side_budget=1)` → gross 2, net 0 | `equal_weight(top10, side_budget=1)` → 각 10% |
+| 3. weights | `equal_weight(centered_signal, …)` → gross 1, net 0 | `equal_weight(top10, …)` → 각 10% |
 | 4. intent | signed `PortfolioIntent` | long-only `PortfolioIntent` |
 | 5. plan | 15:30 snapshot + exact 가격 → delta | 동일 planner |
 | 6. exchange | Academic: fractional 허용 | KRX: 정수 step, 비용, cash clipping |
@@ -718,7 +718,7 @@ class RunDefinition(BaseModel):
 | `UC-TIME-001`, `UC-TRIGGER-001` | §3 |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
 | `UC-BUILTIN-001` | §5.3 |
-| `UC-ALPHA-BUDGET-001` | §5.3 (`side_budget`) + §5.4 (`BudgetSemantics`) |
+| `UC-ALPHA-BUDGET-001` | §5.4 (`BudgetSemantics`) — **형태 미확정, §15-1** |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.4 (immutable intent + source_refs) + §12 |
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
@@ -739,7 +739,63 @@ class RunDefinition(BaseModel):
 
 ---
 
-## 15. Acceptance checklist
+## 15. 열어 둔 결정
+
+**이 섹션이 비어 있으면 안 된다.** 아직 답을 모르는 것을 확정처럼 적으면, 다음 사람이 문서를 전부
+계약으로 읽고 첫 구현이 그 답을 조용히 확정해버린다. 열린 결정은 **어떤 미래 기능이 답을 바꾸는지와 함께**
+여기 적는다. 그 기능을 만들 때 이 질문이 딸려 나오게 하기 위해서다.
+
+### 15-1. Budget과 cash를 어떻게 표현하는가
+
+**무엇이 안 정해졌나**
+
+- signal → weights 변환에서 normalization 인자의 형태 (§5.3의 `...`)
+- `BudgetSemantics`가 담는 것: 의도한 target인가, 실현된 관측인가, 둘 다인가
+- `PortfolioIntent`가 cash를 명시 target으로 갖는가, `1 - Σw`로 유도하는가
+
+**왜 지금 못 정하나 — 두 가지가 답을 바꾼다**
+
+1. **Constraint optimizer.** weight cap에 걸려 truncate되면 실현 gross가 의도한 gross와 달라진다.
+   normalization 인자가 budget을 *선언*하는 형태면 그 선언이 downstream에서 거짓이 된다.
+   → **budget은 weighting 함수의 인자가 아니라 최종 intent의 성질일 가능성이 높다.**
+2. **Cash를 자산으로 다루는 전략.** BAB의 무위험자산, risk parity의 cash sleeve, market timing의 현금
+   비중은 **의도된 포지션**이다. "배분하지 못한 잔여"와 산술값은 같아도 경제적 의미가 다르다.
+   유도로 처리하면 둘을 영원히 구분할 수 없다.
+
+**지금 확정된 것 (이 결정과 무관하게 참)**
+
+- 세 weighting 함수를 가르는 축은 **크기의 출처**이고 부호는 항상 입력에서 온다 (§5.3)
+- weighting 함수는 순수하고 data/state/clock을 모른다 (§5.3)
+- 결측은 조용히 처리하지 않는다 (§5.3)
+- weighting 함수는 budget을 **스스로 정하지 않는다** — 어떤 형태로 받든
+- 실현된 gross/net/cash는 committed state에서 관측 가능하다 (§7)
+
+**언제 정하나**: constraint optimizer 설계 시. 그 전에 이 부분을 구현하면 optimizer가 들어올 때 다시 뜯는다.
+
+### 15-2. Instrument listing의 소유자 (§12)
+
+`RunDefinition`에 `exchange: ComponentRef`만 있고 listing 출처가 없다. preflight가 "listing과 quantity rule
+availability"를 검사한다고 적었지만 어디서 오는지 정하지 않았다.
+
+- 후보 A: Exchange의 frozen config가 listing을 소유한다 (fractional/lot이 이미 Exchange 소관이므로 일관)
+- 후보 B: `RunDefinition`에 별도 listing 필드
+
+**미결.** 다만 A가 §6.2와 일관된다.
+
+### 15-3. Lookback warm-up이 부족한 candidate session (§3.4)
+
+lookback을 채우지 못하는 초기 session에서 무엇이 일어나는지 정하지 않았다. 지금 문서대로면
+`DATA_*` 실패로 run이 중단된다. PRD `UC-TRIGGER-001`은 "판단하지 않은 session은 실패가 아니다"를 허용하지만,
+**무엇이 그것을 skip으로 만드는지**가 없다.
+
+- 후보 A: Strategy가 warm-up을 선언하고, 그 전 candidate는 기록된 skip으로 넘어간다
+- 후보 B: skip 개념 없이 run `start`를 워밍업 이후로 잡는다
+
+**미결.** A는 "정의만 읽고 cadence를 안다"(PRD §3.3)와 일관되고, B는 사용자가 휴장일을 손으로 세야 한다.
+
+---
+
+## 16. Acceptance checklist
 
 - [ ] 두 showcase가 같은 `SimulationFlow`와 같은 이벤트 순서를 쓴다
 - [ ] executable Strategy의 public 결과는 `PortfolioIntent` 하나뿐이다
@@ -749,7 +805,6 @@ class RunDefinition(BaseModel):
 - [ ] `lookback`이 Store query까지 도달한다 (전체 읽고 자르기 없음)
 - [ ] `portfolio.weighting`이 `domain` 외 아무것도 import하지 않는다 (import linter + module docstring)
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
-- [ ] `PortfolioIntent`에 `cash_target`이 없다
 - [ ] Strategy가 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
 - [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다

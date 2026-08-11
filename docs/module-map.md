@@ -80,7 +80,7 @@ Read authority and state authority
 | flow | 수행하는 use case |
 |---|---|
 | `research.py` | direct Strategy invocation과 result promotion |
-| `materialization.py` | optional Model/intermediate artifact materialization |
+| `model.py` | optional Model/intermediate artifact materialization |
 | `daily.py` | explicit daily events, decision/execution/mark/monitor ordering, KRX Account/Memory commit과 recovery |
 | `academic.py` | separate hypothetical signed execution와 recovery |
 | `composition.py` | stored StrategyResult/Signal을 소비하는 Ensemble/stored-signal Strategy |

@@ -26,7 +26,7 @@
 | Ensemble/stored-signal composition | Current | `run_ensemble()`와 `invoke_stored_signal_strategy()`가 catalog session 안에서 v3 lineage-preserving composition을 실행한다 | 없음 |
 | Portfolio construction | Current | `construct_portfolio()`가 internal portfolio Flow를 catalog session 안에서 실행한다 | 없음 |
 | Analysis/report | Current | `analyze_simulation()`, `analyze_monitoring()`, `analyze_signal()`과 `render_report()`가 public facade에 있다 | 없음 |
-| Exact lookback | Current | `ComponentRequirement.lookback`이 resolver/view까지 보존되고 rows/calendar query와 per-instrument actual count/snapshot SHA-256이 access evidence에 기록된다 | sessions lookback은 이번 범위 밖 |
+| Exact lookback | Current | `ComponentRequirement.lookback`이 resolver/view를 지나 store query까지 보존되고, lookback 없는 historical read는 `DATASET_LOOKBACK_REQUIRED`로 실패한다. Access evidence에는 `lookback`, `snapshot_fingerprint`, `instruments_below_window`가 남는다 | sessions lookback은 이번 범위 밖. per-instrument actual count는 result 크기 때문에 의도적으로 남기지 않는다 |
 | Unified execution preparation | Current | generic lifecycle 아래 `KrxExecutionPreparation`과 `AcademicExecutionPreparation`이 각각 하나의 immutable preparation bundle과 typed request를 만든다 | concrete 경제적 의미는 의도적으로 분리됨 |
 | Common Exchange boundary | Current | `BaseExchange[RequestT, ResultT]` 아래 KRX/Academic concrete class가 독립 request/result를 사용하고 run-level keyword DI로 선택된다 | arbitrary plugin registry나 mutable project Exchange state는 없음 |
 | Latest execution feedback | Current | `StrategyView.latest_execution_result()`가 직전 decision 이후의 유일한 exact v2 execution evidence만 노출하고 실제 접근을 `strategy_result:v3` lineage에 기록한다 | 복수 execution이면 schedule invariant로 실패 |

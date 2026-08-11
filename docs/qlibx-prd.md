@@ -1,24 +1,24 @@
-# qlibx Product Requirements Document
+# vqapr Product Requirements Document
 
 Status: canonical
-Runtime: qlibx-owned research and execution capability (no Qlib runtime dependency)
-Current package/import/CLI name: `qlibx`
-Final rename target: `vqapr` (확정, 마지막 migration 단계까지 실행 보류)
-Companion document: `docs/qlibx-architecture.md`
+Runtime: vqapr-owned research and execution capability (no Qlib runtime dependency)
+Target package/import/CLI name: `vqapr`
+Implementation status: target product contract; package migration and rewrite follow architecture completion
+Companion document: the architecture document maintained beside this PRD
 
-이 문서는 qlibx의 제품 철학, observable behavior, correctness boundary와 acceptance criteria를 규정하는
+이 문서는 vqapr의 제품 철학, observable behavior, correctness boundary와 acceptance criteria를 규정하는
 정본이다.
 
 ## 0. Runtime ownership
 
 이 절은 normative이며 본문의 다른 모든 절보다 우선한다.
 
-### 0.1 qlibx는 자체 execution engine을 소유한다
+### 0.1 vqapr는 자체 execution engine을 소유한다
 
-qlibx는 Qlib을 backtest runtime backend로 사용하지 않는다. Historical simulation과 선택된 execution
-profile의 상태 전이를 qlibx가 책임지며, `pyqlib`는 runtime, test 또는 build dependency가 아니다.
+vqapr는 Qlib을 backtest runtime backend로 사용하지 않는다. Historical simulation과 선택된 execution
+profile의 상태 전이를 vqapr가 책임지며, `pyqlib`는 runtime, test 또는 build dependency가 아니다.
 
-qlibx-owned execution capability는 다음 product behavior를 제공해야 한다.
+vqapr-owned execution capability는 다음 product behavior를 제공해야 한다.
 
 - **Path-dependent strategy.** Stop-loss, cooldown, turnover-aware rebalance와 adaptive belief처럼 이전의
   committed fill, realized price, actual holding, cash 또는 bounded strategy state에 따라 다음 판단이 달라지는
@@ -50,11 +50,11 @@ qlibx-owned execution capability는 다음 product behavior를 제공해야 한�
 ### 0.2 Reference implementation은 product authority가 아니다
 
 Qlib, vn.py, NautilusTrader와 다른 reference implementation은 behavior comparison, calculation
-characterization과 설계 검토에 사용할 수 있다. 그러나 어느 reference도 qlibx의 runtime dependency, state
+characterization과 설계 검토에 사용할 수 있다. 그러나 어느 reference도 vqapr의 runtime dependency, state
 authority, public result format 또는 workflow coordinator가 아니다.
 
 Reference에서 관찰하거나 차용한 behavior도 이 PRD의 correctness, explicit failure, diagnostic preservation와
-portable result 요구사항을 만족해야 한다. Reference version을 바꾸거나 대체해도 qlibx의 observable product
+portable result 요구사항을 만족해야 한다. Reference version을 바꾸거나 대체해도 vqapr의 observable product
 semantics가 암묵적으로 달라져서는 안 된다.
 
 구체적인 source, version, license, 차용 범위와 검증 방법은 companion architecture와 provenance record에서
@@ -70,7 +70,7 @@ semantics가 암묵적으로 달라져서는 안 된다.
 
 ### Document interpretation
 
-본문의 normative 제품 요구사항은 qlibx가 제공해야 하는 user-visible capability, economic semantics,
+본문의 normative 제품 요구사항은 vqapr가 제공해야 하는 user-visible capability, economic semantics,
 observable behavior, external compatibility, stored result와 correctness boundary를 규정한다. 특정 class hierarchy,
 object count, process boundary, registry, file layout, storage engine와 Python method name은 명시적으로
 **external product contract**라고 선언하지 않는 한 요구사항이 아니다.
@@ -84,7 +84,7 @@ object count, process boundary, registry, file layout, storage engine와 Python 
 
 ### 1.1 제품 정의
 
-`qlibx`는 자체 research와 execution capability를 소유하는 **재사용 가능한 alpha research framework**다.
+`vqapr`는 자체 research와 execution capability를 소유하는 **재사용 가능한 alpha research framework**다.
 Qlib을 포함한 reference implementation은 behavior와 계산의 비교 대상으로만 사용한다.
 Quantitative researcher와 그 연구를 지원하는 coding agent가 다음 작업을 하나의 누적 가능한 연구 환경에서
 수행하도록 돕는다.
@@ -115,7 +115,7 @@ Quantitative researcher와 그 연구를 지원하는 coding agent가 다음 작
 주요 사용자는 quantitative researcher와 research engineer이며, coding agent는 이들의 작업을 지원하는
 first-class user다.
 
-사용자는 reference implementation의 internal class hierarchy나 qlibx private source를 모두 알 필요가 없어야
+사용자는 reference implementation의 internal class hierarchy나 vqapr private source를 모두 알 필요가 없어야
 한다. 대신 데이터의
 경제적 의미, availability, universe, benchmark, alpha hypothesis, risk constraint와 execution policy처럼 결과의
 의미를 바꾸는 결정은 명시적으로 내려야 한다.
@@ -128,7 +128,7 @@ Agent: DATE 컬럼의 값은 데이터가 나타내는 사건의 발생 시점�
        실제로 알 수 있게 된 시점인가요? 예를 들어 DATE=2025-01-02인 종가 행 전체를 같은 날 장 시작 전에
        사용할 수 없다면, DATE를 그 시점의 투자 결정 input으로 사용하면 look-ahead가 발생합니다.
 
-Agent: qlibx는 모든 관측치에 available_at을 정해야 합니다. available_at은 "이 값으로 투자 결정을 내려도
+Agent: vqapr는 모든 관측치에 available_at을 정해야 합니다. available_at은 "이 값으로 투자 결정을 내려도
        되는 최초 시점"입니다. source에 실제 공개 시각 컬럼이 있다면 어느 컬럼인지 지정해 주세요. 없다면
        DATE + 확정된 공개 지연 규칙(예: 다음 영업일 08:00)을 사용할지, 명시적 timestamp를 source에
        추가할지 결정해 주세요. 근거가 확인되기 전에는 DATE를 available_at으로 간주해 등록하지 않겠습니다.
@@ -157,48 +157,48 @@ surface의 결함으로 취급한다.
 
 ### 2.1 Signed alpha가 중심 연구 자산이다
 
-qlibx의 첫 번째 목적은 **signed cross-sectional alpha research**다. Signal이 양수와 음수를 갖고 alpha
+vqapr의 첫 번째 목적은 **signed cross-sectional alpha research**다. Signal이 양수와 음수를 갖고 alpha
 weight가 long과 short intent를 표현하는 것은 정상적인 research behavior다. 실제 borrow 가능성이나 선택한
 execution profile의 long-only 제약 때문에 research intent를 미리 long-only로 축소하지 않는다.
 
-Alpha research는 하나의 고정된 선형 pipeline이 아니다. 대표적인 composition은 다음과 같다.
+Model research는 portfolio나 execution 없이 끝날 수 있다. 반면 **portfolio return, NAV, PnL 또는 turnover를
+주장하는 모든 executable Strategy run은 동일한 closed-loop lifecycle을 끝까지 따른다.** 대표적인 composition은
+다음과 같다.
 
 ```text
-registered PIT data ─┬─> Strategy 내부 signal/feature 계산 ─────────────┐
-                    └─> Model/transform ─> stored research data ──────┤
-                                                                       v
-                                                            signed alpha weights
-                                                                       |
-existing member Strategies / stored alpha-weight results ─> Ensemble Strategy (optional)
-                                                                       |
-                                                                       v
-                                                    portfolio construction profile
-                    ┌──────────────────────────────────┼──────────────────────────────┐
-                    v                                  v                              v
-         academic/hypothetical              directly investable             benchmark-relative
-         long-short portfolio               long-only or real-short          enhanced index (optional)
-                    └──────────────────────────────────┼──────────────────────────────┘
-                                                       v
-                                  declared instrument / exchange / execution profile
-                                                       v
-                         closed-loop research or realistic execution backtest
+registered PIT data ──> Model/transform ──> reusable research result ──> analysis / reuse
+          |
+          └────────────> Strategy decision
+                              |
+                   mandatory portfolio construction
+                              |
+                    frozen intended portfolio
+                              |
+        execution-time order conversion from committed state
+                              |
+         selected academic or physical execution profile
+                              |
+              fills -> committed account -> valuation
+                              |
+                 feedback / analysis / evidence
 ```
 
-1. **Alpha research loop.** Strategy는 registered PIT data를 직접 받아 내부에서 signal/feature와 ticker-level
-   signed weights까지 계산할 수 있다. 이 단계에서 academic/hypothetical exchange profile을 사용한 long-short
-   closed-loop backtest로 hypothesis를 평가할 수 있다.
-2. **Reusable model output.** 별도 Model 또는 transform은 feature, firm characteristic, signal, factor return과
-   같은 derived research data를 먼저 만들고 저장할 수 있다. Strategy는 필요한 semantic category를 구분해
-   불러와 signed weights를 조립한다.
+1. **Model/research loop.** Model 또는 transform은 feature, firm characteristic, signal, label, factor return과
+   같은 derived research data를 만들고 저장할 수 있다. IC·RankIC·prediction diagnostic처럼 portfolio 성과를
+   주장하지 않는 연구는 여기서 완결될 수 있다.
+2. **Strategy decision.** Strategy는 registered PIT data, 선택적인 reusable research result, committed account
+   state와 bounded strategy state를 소비해 경제적 판단을 만든다. 그 public output shape는 별도 설계 논의로
+   남기며 downstream lifecycle에 결합하지 않는다.
 3. **Strategy composition.** Ensemble은 별도의 후처리 단계로 강제되는 것이 아니라 기존 member Strategy와
    그 compatible stored alpha-weight result를 입력으로 삼는 하나의 Strategy다. Member contribution, 같은 ticker의
    반대 intent netting, crossing과 dependency를 관측 가능하게 남긴다.
-4. **Portfolio construction 선택.** Signed weights는 declared instrument와 exchange semantics에 맞는 portfolio로
-   변환한다. Long-only enhanced index는 benchmark-relative construction profile 중 하나일 뿐이며 필수 단계가
-   아니다. 실제 short accounting과 derivative portfolio는 future extension이다.
-5. **Execution 선택.** Research-purpose hypothetical portfolio, directly investable portfolio와 enhanced-index
-   portfolio 모두 compatible instrument와 execution profile을 선택해 closed-loop backtest할 수
-   있다. Intended result와 committed execution result를 함께 관측하며 둘을 같은 state로 취급하지 않는다.
+4. **Portfolio construction 공통 경계.** Executable Strategy run은 signed, long-only, benchmark-relative 여부와
+   무관하게 현재 연구 결과를 실행 가능한 하나의 frozen intended portfolio로 확정한다. Construction 규칙은
+   profile마다 다를 수 있지만 이 경계를 우회할 수는 없다.
+5. **하나의 execution lifecycle.** Academic long-short와 physical long-only는 같은 intended-portfolio → order
+   conversion → fill → account commit → valuation → feedback 순서를 따른다. 달라지는 것은 선택 profile이 허용하는
+   direction, instrument별 quantity granularity, price, cost와 realism뿐이다. Intended result와 committed result를
+   같은 state로 취급하지 않는다.
 
 실제 운용 portfolio가 long-only여도 original signed alpha를 덮어쓰지 않는다. 실현되지 않은 short intent,
 constraint clipping, residual과 physical mapping은 별도 evidence로 남긴다.
@@ -214,8 +214,9 @@ Prediction, signal, feature, firm characteristic, risk estimate와 statistical f
 없다.
 
 **Strategy**는 registered data와 선택적인 Model result, 그리고 필요한 경우 actual portfolio state와 bounded
-strategy state를 소비해 portfolio intent를 만든다. Signed weight, target, hold와 executable decision이 대표적인
-결과다. Deterministic rule만으로 판단하는 Strategy는 Model을 선행 조건으로 요구하지 않는다.
+strategy state를 소비해 경제적 decision result를 만든다. 이 PRD는 Strategy가 signal, score, weight 또는 target
+중 하나를 반드시 public output으로 내도록 고정하지 않는다. Deterministic rule만으로 판단하는 Strategy는 Model을
+선행 조건으로 요구하지 않는다.
 
 Model result와 Strategy result는 경제적 의미가 다르다. Signal을 weight로, statistical estimate를 executed
 portfolio return으로, intended target을 actual holding으로 가장해서는 안 된다. 같은 implementation이 내부에서
@@ -240,10 +241,11 @@ Research가 반드시 order로 변환되거나 end-to-end execution까지 진행
 ```text
 registered PIT data -> Model -> reusable signal / estimate / research result
 registered PIT data ------------------------------------┐
-reusable Model result ----------------------------------┼-> Strategy -> portfolio intent
-actual portfolio state, when required ------------------┘                  |
-                                                        analysis / reuse <-┤
-                                                        selected execution <- optional
+reusable Model result ----------------------------------┼-> Strategy result -> analysis / reuse
+actual portfolio state, when required ------------------┘                         |
+                                          executable run selected ----------------┘
+                                                       |
+                                  frozen intended portfolio -> common execution loop
 ```
 
 제품은 다음 composition을 지원해야 한다.
@@ -251,7 +253,8 @@ actual portfolio state, when required ------------------┘                  |
 - 같은 Model result를 서로 다른 Strategy가 재사용하고 독립적으로 평가한다.
 - 같은 Strategy logic을 compatible한 여러 Model result와 비교한다.
 - 여러 Strategy result를 producer 재실행 없이 조합한다.
-- Strategy result를 analysis, comparison, export 또는 compatible execution에 선택적으로 사용한다.
+- Strategy result를 analysis, comparison 또는 export에 사용할 수 있다. Execution을 선택한 run은 frozen intended
+  portfolio를 반드시 확정한 뒤 공통 execution lifecycle을 따른다.
 
 Result dependency는 구체적으로 확인 가능해야 한다. Strategy result는 실제로 소비한 data와 Model/Strategy result를
 식별하고, execution result는 자신이 처리한 Strategy intent를 식별한다. 이 traceability는 producer를 특정 class나
@@ -299,7 +302,7 @@ public contract는 versioned portable artifact다.
 - 실패한 run을 감사하거나 재개할 때
 - 외부 OMS나 reporter와 통신할 때
 
-Downstream consumer는 producer가 qlibx built-in, local Python module 또는 외부 process인지 몰라도 schema,
+Downstream consumer는 producer가 vqapr built-in, local Python module 또는 외부 process인지 몰라도 schema,
 semantics, compatibility와 lineage를 검사할 수 있어야 한다. 따라서 local serialized data를 읽을 때 단순
 `dict`로 넘기는 데서 끝내지 않고 semantic role에 맞는 typed Python object를 생성해야 하며, object 생성 또는
 deserialization 경계에서 schema, required field, type, version과 cross-field invariant를 validation해야 한다.
@@ -323,7 +326,7 @@ package error, skill 지침, project context와 user가 제공한 의미를 함�
 각 경로의 가정·trade-off·변경 범위를 설명한다. 경제적 의미나 authority를 바꾸는 선택은 agent가 최종 결정을
 대신하지 않고 user가 판단할 수 있도록 질문해야 한다.
 
-qlibx package distribution은 현재 package version과 일치하는 agent skill resource를 포함해야 한다. Project
+vqapr package distribution은 현재 package version과 일치하는 agent skill resource를 포함해야 한다. Project
 onboarding은 사용자가 선택한 coding-agent environment에서 이 skill을 사용할 수 있게 해야 한다. Bundled
 skill은 structured gap을 user에게 설명하고, 필요한 질문을 하고, user-confirmed registration/config 또는
 project-local extension을 작성한 뒤 package의 public validation과 capability를 다시 호출하는 reference
@@ -359,12 +362,12 @@ failure behavior를 보여주는 executable example 역할도 한다. Agent는 �
 더 정확하게 compatible한 local extension을 작성할 수 있어야 한다.
 
 사용자 고유의 signal model과 alpha logic은 project가 소유한다. **Project-local Strategy가 alpha logic의
-primary extension point**다. 사용자는 installed qlibx 또는 `site-packages`를 수정하지 않고 compatible한 local
+primary extension point**다. 사용자는 installed vqapr 또는 `site-packages`를 수정하지 않고 compatible한 local
 Python implementation을 작성·검증·등록할 수 있어야 한다. Model이나 deterministic materialization은 그
 Strategy가 reusable intermediate data를 요구할 때 선택하는 optional component이며 direct Strategy의 선행 조건이
 아니다.
 
-qlibx는 각 extension point에 대해 다음을 제공한다.
+vqapr는 각 extension point에 대해 다음을 제공한다.
 
 - Public input/output contract
 - Machine-readable requirement와 schema
@@ -372,12 +375,12 @@ qlibx는 각 extension point에 대해 다음을 제공한다.
 - Validation command
 - Stage-specific error와 bounded offending example
 
-qlibx가 reference/sample component를 제공할 수는 있지만 project-owned proprietary alpha를 package built-in에
+vqapr가 reference/sample component를 제공할 수는 있지만 project-owned proprietary alpha를 package built-in에
 가두지 않는다.
 
 ### 2.8 연구는 누적되어야 한다
 
-성공한 trial만 남기면 같은 실패와 중복 hypothesis를 반복한다. qlibx는 성공, 실패, unsupported result,
+성공한 trial만 남기면 같은 실패와 중복 hypothesis를 반복한다. vqapr는 성공, 실패, unsupported result,
 diagnostic과 user decision을 catalog에 남겨 다음 연구의 출발점으로 사용한다.
 
 새 연구는 가능한 경우 다음을 먼저 확인한다.
@@ -395,25 +398,28 @@ diagnostic과 user decision을 catalog에 남겨 다음 연구의 출발점으�
 ```text
 project-owned source data
 -> minimal logical dataset registration
-   |-> Strategy: signal + signed weights + research backtest
+   |-> Strategy: decision result
    |-> Model: feature / characteristic / factor / stored signal
-                 -> Strategy: signed weights + research backtest
-   |-> existing Strategy results -> Ensemble Strategy -> combined signed weights
+                 -> Strategy: decision result
+   |-> existing Strategy results -> Ensemble Strategy -> combined result
 
-any compatible signed weights
-   |-> hypothetical long-short analysis (academic execution/accounting 경유, §4.2 3층)
-   |-> selected portfolio construction
-          |-> long-only / enhanced index
-          |-> real or hypothetical long-short allowed by instrument/exchange
-          -> selected execution profile -> actual simulated feedback
+research-only result -> analysis / report / later Strategy reuse
+
+executable Strategy result
+   -> mandatory portfolio construction
+   -> frozen intended portfolio
+   -> execution-time order conversion
+   -> selected academic or physical execution profile
+   -> fills -> committed account state -> valuation -> feedback
 
 stored results -> analysis / report / later Strategy reuse
 actual account -> independent constraint monitoring
 ```
 
-각 branch는 선택 가능한 use case다. Backtest는 research 단계와 construction 이후 모두 실행할 수 있고, enhanced
-index는 그중 하나의 option일 뿐이다. Artifact가 이미 존재하고 identity와 compatibility가 맞으면 upstream
-producer를 다시 실행하지 않는다.
+Model-only와 non-portfolio analysis는 execution 없이 완결될 수 있다. 그러나 새로운 portfolio return, NAV, PnL
+또는 turnover를 만드는 run은 portfolio construction 이후의 공통 lifecycle을 우회할 수 없다. Academic
+long-short와 physical long-only는 서로 다른 lifecycle이 아니라 같은 lifecycle에 서로 다른 profile을 적용한
+결과다. Artifact가 이미 존재하고 identity와 compatibility가 맞으면 upstream producer를 다시 실행하지 않는다.
 
 ### 3.2 Semantic roles and result categories
 
@@ -451,10 +457,11 @@ order를 만들 때는 별도 downstream operation이 현재 committed Account�
 여러 stored alpha-weight results를 member lineage와 함께 소비해 만든 combined signed weights다. Member
 weighting, netting, crossing, residual과 normalization을 명시한다.
 
-#### Executable physical target
+#### Frozen intended portfolio
 
-Signed alpha weights, benchmark, current physical holdings와 cost assumption을 반영한 실제 instrument/cash target이다.
-MVP hard constraint는 no-short와 time-varying single-name cap뿐이다.
+Strategy result, portfolio construction rule, budget, benchmark와 필요한 제약을 반영해 실행 전에 동결한
+instrument/cash target이다. Academic signed target과 physical long-only target 모두 이 category를 사용한다.
+이 결과는 아직 order, Fill 또는 actual holding이 아니다.
 
 #### Constraint declaration
 
@@ -498,10 +505,11 @@ breach, missing/unknown state와 data/account lineage를 포함한다. Monitorin
 
 #### Hypothetical academic execution result
 
-Exact signed portfolio artifact를 explicit academic listing과 PIT reference price로 평가한 결과다. Fractional signed
-quantity, hypothetical Fill, financing balance, NAV, gross/net exposure, PnL, turnover와 checkpoint를 포함하지만
-actual Account 또는 broker-executable order가 아니다. Profile의 zero-friction과 full-fill 가정 및 미모델링된
-borrow·margin·lifecycle 항목을 결과에 직렬화한다.
+Frozen intended portfolio를 explicit academic listing과 PIT reference price로 공통 execution lifecycle에서
+평가한 결과다. Hypothetical Fill, committed hypothetical account state, financing balance, NAV, gross/net exposure,
+PnL과 turnover를 포함한다. Fractional 허용 여부는 선택한 venue에서 instrument별로 결정한다. Profile의
+zero-friction과 full-fill 가정 및 미모델링된 borrow·margin·lifecycle 항목을 결과에 직렬화하며, broker-confirmed
+production state로 주장하지 않는다.
 
 #### Prepared production decision — future work
 
@@ -511,18 +519,20 @@ future characterization으로 보존한다.
 
 ### 3.3 Alpha output과 executable Strategy output의 구분
 
-Alpha research의 observable output은 signed weights일 수 있다. Closed-loop execution을 선택한 Strategy의
-observable output은 아직 체결되지 않은 portfolio 또는 trade intent다. 두 요구사항은 동시에 성립하며, alpha
-연구 결과를 weight로 재사용하는 것과 그 weight를 execution에 사용할 intent로 선택하는 것은 충돌하지 않는다.
-Strategy output 자체는 fill이나 authoritative actual state가 아니다.
+Alpha research의 observable output은 signed weights일 수 있다. 그러나 그 표현을 execution contract로 직접
+사용하지 않는다. Closed-loop execution을 선택하면 portfolio construction이 Strategy result를 frozen intended
+portfolio로 확정하고, order conversion은 execution 시점의 committed state와 PIT input을 사용한다. 따라서
+Strategy가 signal, score, signed weight 또는 다른 intermediate shape 중 무엇을 내는지는 향후 public API 설계에서
+결정해도 downstream execution lifecycle은 변하지 않는다. 어느 경우에도 Strategy output 자체는 Fill이나
+authoritative actual state가 아니다.
 
 ### 3.4 System mental model
 
-qlibx의 product flow는 다음 다섯 질문을 구분한다.
+vqapr의 product flow는 다음 다섯 질문을 구분한다.
 
 1. 어떤 data를 언제 알 수 있었는가.
 2. Model이 어떤 reusable research result를 만들었는가.
-3. Strategy가 어떤 portfolio intent를 선택했는가.
+3. Strategy result가 어떤 frozen intended portfolio로 construction되었는가.
 4. Execution을 선택했다면 실제로 어떤 결과가 발생했는가.
 5. 어떤 input, limitation과 failure evidence가 결과를 뒷받침하는가.
 
@@ -600,7 +610,7 @@ valuation과 monitoring 결과를 만들 수 있어야 한다. 이 use case는 i
 
 ##### UC-LOOKTHROUGH-001 — User Strategy의 명시적 ETF exposure 계산
 
-Constituent A/B를 각각 50% 보유한 ETF와 A direct stock을 함께 보유해도 qlibx는 Instrument 또는 Account position만
+Constituent A/B를 각각 50% 보유한 ETF와 A direct stock을 함께 보유해도 vqapr는 Instrument 또는 Account position만
 보고 look-through를 자동 수행하지 않는다. User가 Strategy에 index/ETF constituent dataset binding과 actual account
 state requirement를 명시하고 둘을 직접 consume한 경우에만 Strategy code가 constituent exposure를 계산한다.
 그 Strategy는 direct stock과 ETF constituent exposure를 정확히 한 번 합산하고 physical cash/residual을 별도로
@@ -609,28 +619,32 @@ Instrument로 남아야 한다.
 
 ##### UC-LOOKTHROUGH-002 — User Strategy의 PIT constituent consumption
 
-ETF constituent 구성이 바뀌었지만 새 observation의 `available_at`이 decision time보다 늦으면 qlibx는
+ETF constituent 구성이 바뀌었지만 새 observation의 `available_at`이 decision time보다 늦으면 vqapr는
 그 observation을 노출하지 않는다. Look-through를 선택한 user Strategy는 자신이 구독한 binding에서 그 시각에
 읽을 수 있는 구성종목만 consume하고, snapshot 선택·coverage·stale/revision 처리와 재정규화 여부를 Strategy의
-경제적 규칙으로 명시한다. qlibx가 ETF Instrument를 근거로 constituent dataset을 자동 발견하거나 latest 구성을
+경제적 규칙으로 명시한다. vqapr가 ETF Instrument를 근거로 constituent dataset을 자동 발견하거나 latest 구성을
 대입하지 않는다.
 
 ##### UC-LOOKTHROUGH-003 — Actual holding을 읽는 user recomputation
 
 ETF와 direct stock이 체결된 뒤 가격 drift 또는 다음 rebalance가 발생하면 look-through를 구현한 user Strategy는
 다음 decision에서 requested target이 아니라 그 시점에 허용된 marked actual portfolio state를 읽어
-exposure를 다시 계산한다. qlibx는 계산값을 Account에 자동 주입하거나 다음 Strategy에 자동 feedback하지 않는다.
+exposure를 다시 계산한다. vqapr는 계산값을 Account에 자동 주입하거나 다음 Strategy에 자동 feedback하지 않는다.
 User가 결과를 publish한다면 consumed constituent binding, actual-state identity와 target/actual 구분을
 lineage로 보존하며 intended exposure를 actual compliance state로 가장하지 않는다.
 
 ##### UC-ACADEMIC-001 — Signed portfolio의 명시적 가상 거래
 
-사용자가 `hypothetical_signed` portfolio artifact와 Stock, ETF, tracking-only Index 또는 synthetic-unit-price
-Factor listing을 `academic.zero-friction.signed-fractional.v1` venue에 제출하면, decision session 다음 session
-종가의 PIT price로 signed fractional target을 전량 가상 체결한다. 거래비용·tax·slippage·market impact·borrow
-cost는 명시적인 0이고 turnover는 별도 기록한다. Listing, exact-time price, positive NAV 또는 supported profile이
-없으면 해당 rebalance 전체를 state mutation 전에 거부한다. 결과와 checkpoint는 `hypothetical`로 표시하며
-production Account, borrow/locate, collateral, margin 또는 executable real short capability로 주장하지 않는다.
+사용자가 signed Strategy result를 academic profile로 실행하면 먼저 frozen intended portfolio를 확정하고,
+execution 시점의 committed hypothetical account state와 PIT reference price를 사용해 physical profile과 같은
+order → Fill → account commit → valuation lifecycle을 따른다. 선택한 academic venue는 Stock, ETF,
+tracking-only Index 또는 synthetic-unit-price Factor의 listing과 instrument별 fractional/lot 규칙을 판정한다.
+Fractional execution을 허용한 instrument는 signed fractional quantity를 전량 가상 체결할 수 있다.
+
+거래비용·tax·slippage·market impact·borrow cost는 이 fixture에서 명시적인 0이고 turnover는 별도 기록한다.
+Listing, exact-time price, positive NAV, compatible signed state transition 또는 supported quantity rule이 없으면
+해당 rebalance 전체를 mutation 전에 거부한다. 결과는 `hypothetical`로 표시하며 broker-confirmed production
+state, borrow/locate, collateral, margin 또는 executable real short capability로 주장하지 않는다.
 
 #### Future extension characterization — current support가 아님
 
@@ -657,7 +671,7 @@ MVP는 주식과 ETF의 Fill 원금·비용이 즉시 cash에 반영된다고 �
 settlement calendar와 buying-power 차이는 future work이며 현재 결과 limitation에 즉시 결제 가정을 남긴다.
 
 Merger, spin-off와 delisting처럼 instrument identity, tradability 또는 reference state를 바꾸는 사건의 해석과
-변환은 qlibx가 아니라 security master와 ETL pipeline 책임이다. qlibx는 향후에도 그 원천 corporate action을
+변환은 vqapr가 아니라 security master와 ETL pipeline 책임이다. vqapr는 향후에도 그 원천 corporate action을
 자체 해석하지 않고 이미 정규화된 instrument/reference data만 소비한다.
 
 같은 frozen config와 data에서 event 순서와 결과가 재현되어야 한다는 요구는 모든 use case에 적용되는
@@ -668,11 +682,11 @@ cross-cutting invariant다. 3,000종목 실행에서 어떤 validation object를
 
 ### 4.1 Contract-owned, reference-informed
 
-- qlibx가 product semantics, failure behavior, state authority와 artifact portability를 소유한다.
+- vqapr가 product semantics, failure behavior, state authority와 artifact portability를 소유한다.
 - Reference implementation의 계산 또는 구조는 source provenance와 version을 기록하고 characterization test로
   동등성이 확인된 범위에서 차용할 수 있다.
-- Reference snapshot이나 차용한 산술을 갱신해도 qlibx public semantics가 암묵적으로 바뀌어서는 안 된다.
-- External runtime lifecycle을 canonical execution authority로 두거나 qlibx의 PIT, actual-state와 evidence
+- Reference snapshot이나 차용한 산술을 갱신해도 vqapr public semantics가 암묵적으로 바뀌어서는 안 된다.
+- External runtime lifecycle을 canonical execution authority로 두거나 vqapr의 PIT, actual-state와 evidence
   boundary를 우회하지 않는다.
 - 같은 product contract를 만족하는 built-in과 local extension은 producer identity와 무관하게 같은 validation과
   artifact boundary를 통과한다.
@@ -684,17 +698,19 @@ cross-cutting invariant다. 3,000종목 실행에서 어떤 validation object를
 1. Signal/prediction/label의 IC, RankIC와 rank-based diagnostic — portfolio를 구성하지 않는다
 2. Execution을 거쳐 산출·저장된 return/NAV 시계열에 대한 분석 — attribution, correlation, factor
    regression처럼 기존 result를 읽으며 새 return을 만들지 않는다
-3. Explicit academic listing, hypothetical Fill과 signed research state를 사용하는 가상 execution
+3. Explicit academic listing, hypothetical Fill과 signed state-transition rule을 사용하는 가상 execution
 4. Orders, production Position/Account와 actual fill을 통과하는 executable real short portfolio
 
 첫 번째 층만 execution state를 경유하지 않는다. **새로운 portfolio return을 만드는 것은 세 번째 층부터이며,
 두 번째 층은 그 이상의 층이 만든 result를 읽는 분석이다.** Quantile spread와 signed basket return처럼 basket
-수익률을 뜻하는 지표는 첫 번째 층이 아니라 세 번째 층 경로로 산출한다. 세 번째 층은 production Account와
-분리된 academic state에서만 성립한다.
+수익률을 뜻하는 지표는 첫 번째 층이 아니라 세 번째 층 경로로 산출한다. 세 번째와 네 번째 층은 같은
+fill → commit → valuation lifecycle을 사용하되, 서로 다른 run과 명시적으로 다른 state-transition validity,
+venue rule과 realism label을 가진다.
 
 네 번째 층은 resolved instrument semantics와 execution policy가 결정한 position direction(§7.12)에 따른다.
-`hypothetical_short`의 음수 position은 research 관측을 위한 것이며 borrow, 담보, 차입 비용과 locate 가능성을
-모델링하지 않는다. 이를 executable real short 또는 actual Account state로 표시하지 않는다.
+`hypothetical_short`의 음수 position은 research 관측을 위한 committed hypothetical state이며 borrow, 담보,
+차입 비용과 locate 가능성을 모델링하지 않는다. 이를 executable real short 또는 broker-confirmed production
+state로 표시하지 않는다.
 
 ### 4.3 Actual state가 authority다
 
@@ -735,7 +751,7 @@ evaluation time은 decision time이고, proposed target/order의 constraint adju
 execution evaluation time, monitoring은 monitoring time이다. Actual account snapshot의 `as_of`도 evaluation
 time보다 늦을 수 없다. 이 보장은 actual state가 과거 committed outcome만 담기 때문에 성립하며, 별도의 cutoff
 장치를 요구하지 않는다.
-qlibx가 보장하는 것은 선언된 availability의 준수다. Bundled agent skill은 source와 data category에 맞는
+vqapr가 보장하는 것은 선언된 availability의 준수다. Bundled agent skill은 source와 data category에 맞는
 availability candidate와 근거를 제시해야 하고, source의 실제 경제적 공시 시점에 대한 최종 확인은 user가
 내린다. 선택된 rule의 형식과 PIT 적용은 package가 deterministic하게 validation한다.
 
@@ -775,7 +791,7 @@ Config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 
 ## 5. Product boundaries
 
-### 5.1 qlibx가 소유하는 것
+### 5.1 vqapr가 소유하는 것
 
 - Project initialization, config resolution과 frozen invocation
 - Logical dataset registration, schema와 capability binding
@@ -793,9 +809,9 @@ Config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 - Dense actual-account constraint monitoring과 historical re-evaluation
 - Agent-readable documentation, capability gap과 stage-based errors
 
-### 5.2 qlibx execution runtime이 소유하는 것
+### 5.2 vqapr execution runtime이 소유하는 것
 
-qlibx-owned execution capability는 다음 product outcome을 책임진다.
+vqapr-owned execution capability는 다음 product outcome을 책임진다.
 
 - 서로 다른 observation, decision, execution, valuation과 monitoring time의 일관된 진행
 - 각 evaluation time에서 `available_at` 경계를 지킨 data access
@@ -831,13 +847,13 @@ qlibx-owned execution capability는 다음 product outcome을 책임진다.
 - Validation override approval, alert delivery와 operational remediation
 - Confirmed order, fill, reject reason과 account snapshot publication
 
-qlibx는 broker SDK wrapper나 always-on OMS가 아니다.
+vqapr는 broker SDK wrapper나 always-on OMS가 아니다.
 
 ### 5.5 Reference implementation 사용 경계
 
-Qlib, vn.py와 NautilusTrader는 §0.2에 선언된 산술·구조의 비교 및 차용 source다. 이들은 qlibx runtime
+Qlib, vn.py와 NautilusTrader는 §0.2에 선언된 산술·구조의 비교 및 차용 source다. 이들은 vqapr runtime
 dependency, state authority, default project catalog 또는 workflow coordinator가 아니다. Reference-specific
-object, pickle, recorder나 process-global provider는 portable qlibx artifact와 clock-bound access를 대체하지
+object, pickle, recorder나 process-global provider는 portable vqapr artifact와 clock-bound access를 대체하지
 않는다.
 
 ### 5.6 금지 behavior
@@ -895,15 +911,15 @@ Instrument와 execution policy의 extension boundary(§7.12)는 이 범위 안�
 
 ### 6.1 Initial setup
 
-사용자는 package를 설치한 뒤 project root에서 qlibx project를 초기화한다. Initial setup은 다음을 만든다.
+사용자는 package를 설치한 뒤 project root에서 vqapr project를 초기화한다. Initial setup은 다음을 만든다.
 
 - Project-owned config와 schema version
 - Data, artifact, catalog와 extension locations
 - Version-matched bundled agent skill을 selected coding-agent target에서 사용할 수 있게 하는 onboarding result
 - Installed documentation과 capability inventory
-- qlibx runtime, artifact schema와 extension-contract version information
+- vqapr runtime, artifact schema와 extension-contract version information
 
-설치 후 정상 사용에 qlibx source checkout이나 reference implementation internal 탐색을 요구하지 않는다. Sample data와 sample
+설치 후 정상 사용에 vqapr source checkout이나 reference implementation internal 탐색을 요구하지 않는다. Sample data와 sample
 components는 명시적으로 요청할 때만 project에 materialize한다.
 
 #### Safe and idempotent onboarding
@@ -912,19 +928,19 @@ Onboarding은 project file을 소유한다고 가정하지 않는다. 실행 전
 instruction file의 managed block, skill resource version과 validation command를 preview하는 dry-run을 제공해야
 한다. 실제 적용은 다음을 만족한다.
 
-- 기존 `AGENTS.md`, `CLAUDE.md`와 같은 instruction file을 발견하고 qlibx가 소유하는 marked block만
+- 기존 `AGENTS.md`, `CLAUDE.md`와 같은 instruction file을 발견하고 vqapr가 소유하는 marked block만
   추가·갱신·제거한다.
 - Supported instruction file이 없으면 creation target을 preview하고 user가 creation을 요청한 경우에만 새로
   만든다.
 - 같은 target과 version으로 반복 실행해도 duplicate block, duplicate skill 또는 의미 없는 diff를 만들지
   않는다.
 - 여러 agent target을 선택한 경우 각 target의 변경을 독립적으로 보여주고 검증한다.
-- qlibx가 생성한 skill file이 user에 의해 수정되었으면 content fingerprint 차이를 감지하고 명시적 확인 없이
+- vqapr가 생성한 skill file이 user에 의해 수정되었으면 content fingerprint 차이를 감지하고 명시적 확인 없이
   덮어쓰지 않는다.
-- Update는 qlibx-owned file/block만 갱신하고 같은 skill directory의 user-owned extension file을 보존한다.
-- Remove는 qlibx-owned block과 확인된 generated file만 제거하며 instruction file의 나머지 내용이나 project
+- Update는 vqapr-owned file/block만 갱신하고 같은 skill directory의 user-owned extension file을 보존한다.
+- Remove는 vqapr-owned block과 확인된 generated file만 제거하며 instruction file의 나머지 내용이나 project
   artifact를 삭제하지 않는다.
-- 생성 결과에 qlibx package version, skill schema/version과 target type을 기록하고 target별 skill structure를
+- 생성 결과에 vqapr package version, skill schema/version과 target type을 기록하고 target별 skill structure를
   validation한다.
 
 #### Mandatory agent-skill output protocol
@@ -932,17 +948,17 @@ instruction file의 managed block, skill resource version과 validation command�
 다음 entrypoint path는 selected target이 skill을 발견하기 위해 사용하는 **normative product contract**다.
 일반적인 project directory convention이나 architecture candidate가 아니다.
 
-- Codex target: skill directory `.agents/skills/qlibx/`, required entrypoint
-  `.agents/skills/qlibx/SKILL.md`
-- Claude Code target: skill directory `.claude/skills/qlibx-skill/`, required entrypoint
-  `.claude/skills/qlibx-skill/SKILL.md`
-- Explicit custom target root: skill directory `<user-selected-output>/qlibx/`, required entrypoint
-  `<user-selected-output>/qlibx/SKILL.md`
+- Codex target: skill directory `.agents/skills/vqapr/`, required entrypoint
+  `.agents/skills/vqapr/SKILL.md`
+- Claude Code target: skill directory `.claude/skills/vqapr-skill/`, required entrypoint
+  `.claude/skills/vqapr-skill/SKILL.md`
+- Explicit custom target root: skill directory `<user-selected-output>/vqapr/`, required entrypoint
+  `<user-selected-output>/vqapr/SKILL.md`
 
 > **확정된 최종 rename — 아직 적용하지 않는다.** 현재 package, import, CLI와 generated skill path의
-> normative name은 `qlibx`다. 최종 migration 단계에서만 `vqapr`(vibe quant alpha portfolio / asset pricing
+> normative name은 `vqapr`다. 최종 migration 단계에서만 `vqapr`(vibe quant alpha portfolio / asset pricing
 > research)로 한 번에 변경한다. 그때 위 세 path, import/CLI, artifact schema identity, installed docs와
-> migration guide를 같은 change set에서 갱신한다. 그 전까지 위 `qlibx` path가 유효한 normative contract다.
+> migration guide를 같은 change set에서 갱신한다. 그 전까지 위 `vqapr` path가 유효한 normative contract다.
 
 Custom target root는 user가 명시적으로 선택해야 하며 package가 임의의 output location을 추측하지 않는다.
 각 skill directory 안의 `references/`, `scripts/`, `examples/` 같은 보조 resource는 해당 target protocol과
@@ -1042,7 +1058,7 @@ monitoring과 reporting도 호출한 workflow의 dependency일 때만 포함한�
 
 ### 6.7 Local extension configuration
 
-Project-local extension은 user가 선택한 source, version과 validated parameter로 명시적으로 식별할 수 있어야 한다. Source를 찾거나 load할 수 있다는 사실만으로 compatibility가 증명되지는 않는다. qlibx는 다음을
+Project-local extension은 user가 선택한 source, version과 validated parameter로 명시적으로 식별할 수 있어야 한다. Source를 찾거나 load할 수 있다는 사실만으로 compatibility가 증명되지는 않는다. vqapr는 다음을
 deterministic하게 validation한다.
 
 - Allowed extension boundary
@@ -1070,7 +1086,7 @@ capability를 요구하지 않는다. 실행하는 workflow는 시작 전에 필
 portable result와 terminal status를 제공해야 한다.
 
 External experiment frontend나 model trainer를 사용할 수 있지만 data meaning, portable result, actual-state
-authority 또는 closed-loop correctness를 대신하지 않는다. External run ID, pickle이나 tracking record는 qlibx
+authority 또는 closed-loop correctness를 대신하지 않는다. External run ID, pickle이나 tracking record는 vqapr
 result에 dependency로 연결할 수 있지만 유일한 canonical result가 아니다.
 
 ### 6.9 Workflow completion
@@ -1086,7 +1102,7 @@ Required output에 대한 warning-and-skip은 `complete`가 될 수 없다.
 
 ## 7. Project, data and capability contracts
 
-이 절의 목적은 처음부터 완전한 dataset·project schema를 요구하는 것이 아니다. qlibx는 현재 작업에 꼭 필요한
+이 절의 목적은 처음부터 완전한 dataset·project schema를 요구하는 것이 아니다. vqapr는 현재 작업에 꼭 필요한
 semantic binding만 먼저 확인하고, 실제 Strategy나 workflow component를 호출할 때 추가 requirement를 발견한다.
 등록 성공은 모든 downstream workflow와의 호환성 보증이 아니다.
 
@@ -1106,15 +1122,19 @@ Logical dataset은 physical file과 구분되는 versioned reference다. 최초 
 - instrument를 식별하는 field
 - observation을 사용할 수 있게 된 시점을 뜻하는 `available_at` field 또는 user-confirmed availability rule
 - 해당 dataset의 logical row key
+- 등록할 data field의 선택
 
 Field 이름은 강제하지 않는다. 예를 들어 `ticker`, `symbol`, `종목코드` 중 무엇이 instrument인지 user가 binding할
 수 있다. 기본 instrument-time panel에서는 `(available_at, instrument)`가 null 없이 해석 가능하고 유일한지
 검사한다. 같은 instrument와 time에 여러 행이 필요한 event/long-form dataset은 event ID나 sequence 같은 추가 key
 axis를 선언하거나 별도 logical dataset으로 등록한다.
 
-Registration result는 선택된 binding, physical source fingerprint와 validation evidence를 보존한다. Event time,
-unit, currency, timezone, universe coverage와 missingness 같은 metadata는 등록 시 알려져 있으면 기록하지만, 아직
-선택하지 않은 workflow가 필요로 한다는 이유만으로 최초 등록을 막지 않는다.
+Registration result는 선택된 binding, 선택 field, physical source identity와 validation evidence를 보존한다.
+`available_at`만 모든 dataset에 공통으로 특별 취급하는 시간 경계다. `fiscal_period`, `session_date`, `event_time`,
+`revision`, `horizon_end`, unit, currency, universe coverage와 missingness는 source가 제공하는 일반 column 또는
+metadata다. 이를 필요로 하는 consumer가 명시적으로 요구하고 해석하며, 아직 선택하지 않은 workflow 때문에
+최초 등록을 막지 않는다. 같은 field를 research, execution, valuation 목적마다 별도 등록 role로 중복 선언하지
+않는다.
 
 `DATE`를 `available_at`으로 바로 binding할 수 있는 것은 user가 그 값이 실제 공개 시각이라고 확인한 경우뿐이다.
 별도 availability field가 없다면 bundled agent skill은 data category와 source 관행에 근거한 지연 규칙 후보와
@@ -1123,13 +1143,16 @@ unit, currency, timezone, universe coverage와 missingness 같은 metadata는 �
 
 #### UC-DATA-001 — 최소 등록과 field-name 자율성
 
-`DATE`, `CODE`, `VALUE` 컬럼이 있는 file에서 user는 `CODE`를 instrument, 확인된 `DATE`를 `available_at`으로
-binding한다. Package는 이름을 바꾸라고 요구하지 않고 `(DATE, CODE)`의 parseability, null과 uniqueness를 검사해
-logical dataset을 등록한다. Currency나 universe metadata가 없다는 이유만으로 이 단계가 실패해서는 안 된다.
+`DATE`, `CODE`, `VALUE`, `FISCAL_PERIOD` 컬럼이 있는 file에서 user는 `CODE`를 instrument, source rule로 확정한
+`DATE`를 `available_at`, `(DATE, CODE)`를 logical key로 binding하고 필요한 data field를 선택한다. Daily close
+row의 `DATE=2024-03-05`가 해당 session 종가를 뜻한다면 확정된 availability rule은
+`2024-03-05 15:30 Asia/Seoul`을 만든다. `FISCAL_PERIOD`는 Strategy가 필요할 때 요구하는 일반 column이다.
+Package는 field 이름을 바꾸거나 universal observation timestamp를 추가하라고 요구하지 않는다. Currency나
+universe metadata가 없다는 이유만으로 이 단계가 실패해서는 안 된다.
 
 ### 7.2.1 Price axis and derived unit price
 
-Execution을 선택한 workflow는 예외 없이 가격 축을 요구한다. qlibx에는 return-native 체결 경로가 없으며,
+Execution을 선택한 workflow는 예외 없이 가격 축을 요구한다. vqapr에는 return-native 체결 경로가 없으며,
 모든 체결과 valuation은 수량과 가격으로 표현한다.
 
 Source가 기간 return만 제공하면, 그것을 unit price 시계열로 변환한 dataset을 등록한다.
@@ -1248,7 +1271,7 @@ lot와 tradability binding이 없는데도 추정 default로 진행해서는 안
 
 ### 7.9 Provider와 process isolation
 
-Downstream consumer는 producer가 qlibx built-in, Qlib component, local Python module 또는 external process인지 몰라도
+Downstream consumer는 producer가 vqapr built-in, Qlib component, local Python module 또는 external process인지 몰라도
 serialized result를 적합한 Python object로 읽고 schema, semantics, compatibility와 lineage를 검사할 수 있어야 한다.
 Object construction 시 validation해야 하지만 구체 validation library와 object model은 architecture가 정한다.
 
@@ -1446,23 +1469,33 @@ actual position을 그대로 관찰할지 여부는 Strategy와 execution policy
 
 ### 9.8 Trigger and finalization
 
-Calendar, data arrival, fill feedback 또는 user event가 decision을 trigger할 수 있다. Run 종료 시 result와 failure
-evidence를 확정해야 하지만, 특정 event class나 callback method는 PRD가 정하지 않는다.
+Calendar, data arrival, fill feedback 또는 user event가 decision을 trigger할 수 있다. 전략이 calendar cadence를
+사용하면 cadence와 local decision time은 Strategy 정의에 속한다. Run 종료 시 result와 failure evidence를
+확정해야 하지만, 특정 event class나 callback method는 PRD가 정하지 않는다.
 
 Decision cadence는 strategy의 경제적 의미의 일부다. User는 strategy 정의만 읽고 그 strategy가 언제 판단하는지
 알 수 있어야 하며, cadence를 확인하기 위해 실행 스크립트나 orchestration 설정을 읽어야 해서는 안 된다. 이는
 strategy가 시간을 직접 진행시키거나 자신을 호출한다는 뜻이 아니다. Invocation이 시작된 뒤 과거 cadence를 바꾸거나
 시간을 소급해서는 안 되며, 실행 시점 선택에 사용하는 정보는 그 시점에 관측 가능해야 한다.
 
-판단 후보가 되는 session 목록은 거래 calendar 사실이어야 하고 data coverage에서 유도해서는 안 된다. 특정 종목의
-결측 때문에 후보 session이 사라지면 cadence 전체가 미래 정보에 오염된다. 새로운 trigger 종류는 product use case와
-time semantics가 승인될 때 추가하며, 구체 scheduling API와 trigger representation은 architecture가 정한다.
+판단 후보가 되는 session 목록과 open/close 시각은 선택 venue의 거래 calendar 사실이어야 하고 Strategy나 data
+coverage에서 유도해서는 안 된다. Strategy는 “어떤 session마다 몇 시에 판단하는가”를 선언하지만 휴장일이나
+session 자체를 만들어내지 않는다. Run은 명시적으로 동결된 session calendar 또는 선택 environment가 식별한
+calendar provider의 결과를 사용한다. 특정 종목의 결측 때문에 후보 session이 사라지면 cadence 전체가 미래 정보에
+오염된다. 새로운 trigger 종류는 product use case와 time semantics가 승인될 때 추가하며, 구체 scheduling API와
+trigger representation은 architecture가 정한다.
 
 #### UC-TRIGGER-001 — 선언된 decision cadence
 
-Strategy 정의 안에서 "5 거래 session마다 판단한다"를 선언한다. Run 결과의 판단 시점이 그 선언과 정확히 일치하고,
-같은 strategy를 다른 기간에 실행해도 선언만 읽으면 cadence를 알 수 있다. 판단하지 않은 session은 실패가 아니라
-정상적인 결과이며 재현 가능한 기록으로 남는다. Cadence를 바꾸면 result identity가 달라진다.
+Strategy 정의 안에서 "eligible session마다 04:00 Asia/Seoul에 판단한다" 또는 "5 eligible session마다
+04:00에 판단한다"를 선언한다. Run 결과의 판단 시점은 그 선언과 frozen venue calendar의 교집합과 정확히
+일치해야 한다. 같은 Strategy를 다른 기간에 실행해도 정의만 읽으면 cadence와 local time을 알 수 있다.
+
+Daily close `2024-03-05` row는 `2024-03-05 15:30 Asia/Seoul`에 available해진다. 따라서
+`2024-03-06 04:00` decision은 그 row를 읽을 수 있고, 그 decision의 next eligible close execution은
+`2024-03-06 15:30`이다. `2024-03-05 04:00` decision은 같은 row를 읽을 수 없다. 04:00 timestamp가 dataset에
+행으로 존재할 필요는 없다. 판단하지 않은 session은 실패가 아니라 정상적인 결과이며 재현 가능한 기록으로
+남는다. Cadence 또는 local time을 바꾸면 경제적으로 다른 run으로 구분되어야 한다.
 
 ### 9.9 Parent/child research
 
@@ -1508,9 +1541,10 @@ feedback까지 반영했는지 보여준다. 같은 update를 feedback 없이 �
 
 ## 10. Ensemble and portfolio construction
 
-Ensemble과 portfolio construction은 alpha research 이후 반드시 거쳐야 하는 고정 단계가 아니다. 둘 다 기존 result를
-소비해 새로운 intent를 만드는 선택 가능한 Strategy/workflow다. Enhanced index는 qlibx가 잘 지원해야 할 주요
-flow지만 package 전체의 canonical flow는 아니다.
+Ensemble은 선택 가능한 Strategy composition이다. Portfolio construction은 Model-only 또는 non-portfolio
+analysis에는 필요하지 않지만, **새로운 portfolio return이나 execution outcome을 만드는 모든 Strategy run에는
+필수 경계**다. Enhanced index, academic long-short와 simple top-N long-only는 construction 규칙이 서로 다를 뿐
+이 경계를 동일하게 통과한다.
 
 ### 10.1 Ensemble is a Strategy
 
@@ -1522,17 +1556,19 @@ Ensemble Strategy는 기존 Strategy 또는 signed alpha-weight result를 member
 Value와 momentum Strategy의 signed weights를 저장한 뒤 ensemble이 두 result를 읽어 ticker-level netting을 한다.
 한 member의 long과 다른 member의 short가 상쇄된 수량, 최종 signed weight와 member lineage가 확인 가능해야 한다.
 
-### 10.2 Optional construction modes
+### 10.2 Mandatory construction boundary for executable runs
 
-Signed weight는 그대로 hypothetical long-short portfolio로 평가하거나 long-only physical portfolio 또는
-benchmark-relative enhanced index로 변환할 수 있다. Derivative portfolio는 future work다. Enhanced-index 변환 뒤에도
-같은 execution boundary를 통해 backtest할 수 있다.
+Strategy result는 academic signed, long-only physical 또는 benchmark-relative enhanced-index construction으로
+변환할 수 있다. 어떤 규칙을 선택해도 실행 전에 budget, direction, instrument/cash target과 source lineage가
+동결된 intended portfolio를 만든다. Strategy result나 raw weight를 execution profile에 직접 제출하지 않는다.
+Derivative portfolio는 future work다.
 
 #### UC-PORTFOLIO-001 — 같은 alpha의 서로 다른 portfolio use
 
-같은 signed alpha result를 hypothetical long-short analysis와 equity long-only enhanced-index construction에
-사용한다. 두 workflow는 서로 다른 investability, direction, budget과 cost requirement를 발견하고 각자 결과를
-만든다. Alpha result 자체를 어느 한 portfolio 의미로 다시 쓰지 않는다.
+같은 signed alpha result를 academic long-short construction과 equity long-only enhanced-index construction에
+사용한다. 두 workflow는 서로 다른 investability, direction, budget과 cost requirement를 발견해 각각 frozen
+intended portfolio를 만든다. 이후에는 같은 order conversion, fill, commit, valuation과 feedback lifecycle을
+따른다. Alpha result 자체를 어느 한 portfolio 의미로 다시 쓰지 않는다.
 
 ### 10.3 Constraint adjustment and validation
 
@@ -1562,7 +1598,7 @@ actual portfolio state를 명시적으로 선택하고 자신의 경제적 규�
 
 Constituent data는 source identity, `available_at`, instrument/constituent identity와 weight unit을 표현하는
 user-provided PIT data다. Mapping, coverage, stale/revision 처리, normalization과 cash residual의 경제적 의미는
-Strategy가 소유한다. qlibx는 ETF ticker를 근거로 dataset을 자동 발견하거나 누락된 구성종목을 추정하지 않는다.
+Strategy가 소유한다. vqapr는 ETF ticker를 근거로 dataset을 자동 발견하거나 누락된 구성종목을 추정하지 않는다.
 
 User Strategy가 decision time $t$의 actual portfolio state에서 만든 physical weight를 $p_t$, 자신이 consume한 구성종목
 데이터로 만든 mapping을 $L_t$라고 하면 constituent exposure 계산은 예를 들어 다음 관계를 사용할 수 있다.
@@ -1571,10 +1607,10 @@ $$
 x_t = L_t p_t
 $$
 
-이 식은 qlibx의 내장 ETF semantics가 아니라 Strategy가 선택할 수 있는 계산 예시다. Strategy가 이 방식을
+이 식은 vqapr의 내장 ETF semantics가 아니라 Strategy가 선택할 수 있는 계산 예시다. Strategy가 이 방식을
 사용한다면 direct stock과 ETF constituent exposure를 중복 없이 결합하고 그 계산 rule을 result에 남겨야 한다.
 
-qlibx는 mapping을 만들지 않으므로 누락분을 자동 재정규화하거나 complete/partial/opaque policy를 대신 선택하지
+vqapr는 mapping을 만들지 않으므로 누락분을 자동 재정규화하거나 complete/partial/opaque policy를 대신 선택하지
 않는다. User Strategy가 complete coverage를 요구하면 자신의 calculation/validation에서 실패시키고, partial을
 허용하면 mapped/unmapped exposure와 limitation을 자신이 만든 result에 남긴다. Cash와 lot/cost clipping residual을
 constituent exposure로 볼지도 Strategy의 경제적 정의지만, Account는 이를 physical cash로만 제공한다.
@@ -1585,13 +1621,15 @@ ETF를 발견해 mapping을 자동 주입하지 않고 전달받은 explicit inp
 assumption일 뿐 actual transaction cost가 아니다.
 
 User Strategy가 target/actual look-through를 publish한다면 둘은 다른 result여야 한다. Target은 construction intent를
-설명하고 actual은 committed Fill 이후의 marked actual portfolio state로 다시 계산한다. qlibx는 그 result를 자동
+설명하고 actual은 committed Fill 이후의 marked actual portfolio state로 다시 계산한다. vqapr는 그 result를 자동
 생성·소비하지 않지만 result dependency는 실제로 읽힌 constituent data, actual state와 cutoff를 보존한다.
 
 ## 11. Path-dependent execution and signed compatibility
 
-Strategy는 아직 체결되지 않은 decision intent를 만들고, 선택한 execution profile이 market/fill assumption에
-따라 결과를 만든다. MVP simulation은 지원되는 order를 선택한 가격에 전량 체결하고 주식·ETF cash를 즉시
+Executable Strategy run은 frozen intended portfolio를 만든다. Order conversion은 그 결과와 execution 시점의
+committed account state, instrument rule과 PIT market input을 사용해 physical order를 만든다. 선택한 execution
+profile은 market/fill assumption에 따라 Fill을 만들고, compatible state-transition rule을 통과한 Fill만 account에
+atomic하게 commit한다. MVP simulation은 지원되는 order를 선택한 가격에 전량 체결하고 주식·ETF cash를 즉시
 결제한다. Intraday order book/data, partial fill과 production integration은 future work다.
 
 ### 11.1 Closed-loop authority
@@ -1601,22 +1639,27 @@ state가 아니며, 다음 decision에는 committed simulation result만 feedbac
 
 #### UC-EXEC-001 — Decision과 MVP simulation execution의 분리
 
-Strategy가 signed intent를 만들었다는 사실만으로 Fill이 생기지 않는다. 선택한 MVP execution profile은 next daily
-close 같은 PIT-safe convention에서 지원되는 order를 전량 체결하고 cost와 즉시 결제 cash를 actual state에
-반영한다.
+Strategy result나 frozen intended portfolio가 존재한다는 사실만으로 Fill이 생기지 않는다. 선택한 MVP execution
+profile은 next daily close 같은 PIT-safe convention에서 execution-time order conversion을 수행한 뒤 지원되는
+order를 전량 체결하고 cost와 즉시 결제 cash를 committed state에 반영한다. Academic과 physical profile 모두
+같은 단계와 결과 lineage를 제공해야 한다.
 
 ### 11.2 Execution profile defines realism
 
-MVP의 academic/hypothetical과 daily-bar simulation profile은 fill timing, tradability, short와 cost capability를
-각자 선언한다. Package 이름만 보고 현실성을 과장하지 않으며 result에는 full-fill과 instant-settlement 가정을
-포함한 선택 profile의 limitation을 표시한다. Intraday simulation과 external OMS profile은 future work다.
+MVP의 academic/hypothetical과 daily-bar physical simulation profile은 fill timing, tradability, direction,
+instrument별 quantity granularity와 cost capability를 각자 선언한다. Account state-transition validity는 선택한
+run이 음수 position을 허용하는지 여부만 판정하며 fractional 또는 lot quantity를 결정하지 않는다. Package 이름만
+보고 현실성을 과장하지 않으며 result에는 full-fill과 instant-settlement 가정을 포함한 선택 profile의 limitation을
+표시한다. Intraday simulation과 external OMS profile은 future work다.
 
 #### Execution profile은 서로 다른 경제적 의미를 보존한다
 
-Daily physical simulation과 academic hypothetical execution은 공통된 이름 때문에 같은 request, state 또는
-realism을 가진 것으로 취급하지 않는다. 각 profile은 supported instrument, permitted direction, quantity semantics,
-fill timing, cost, cash treatment와 limitation을 독립적으로 선언한다. User는 invocation마다 compatible profile을
-선택할 수 있어야 하며, profile을 교체해도 기존 Strategy intent의 의미를 암묵적으로 다시 쓰지 않는다.
+Daily physical simulation과 academic hypothetical execution은 **같은 request/fill/commit/mark lifecycle**을
+공유하지만 같은 realism을 가진 것으로 취급하지 않는다. 각 profile은 supported instrument, permitted direction,
+instrument별 quantity semantics, fill timing, cost, cash treatment와 limitation을 독립적으로 선언한다. 각 run의
+state-transition validity는 시작 시 동결되며 중간에 long-only와 signed 사이를 바꿀 수 없다. User는 invocation마다
+compatible profile을 선택할 수 있어야 하며, profile을 교체해도 frozen intended portfolio의 의미를 암묵적으로
+다시 쓰지 않는다.
 
 이를 구현하는 base class, generic type, subclass, dependency injection과 plugin mechanism은 architecture와 public API
 design이 정한다.
@@ -1629,9 +1672,11 @@ limitation을 남긴다.
 
 ### 11.3 Order conversion and evidence
 
-실제 주문을 만드는 workflow는 target, actual holding, cash, price, lot와 tradability를 사용한다. 필요한 binding이
-없으면 §7의 progressive error로 멈춘다. Rounding, clipping, skip, rejection과 requested/dealt quantity는 결과에서
-확인 가능해야 한다.
+실제 주문을 만드는 workflow는 frozen intended portfolio, execution 시점의 committed holding/cash, instrument
+rule, price와 tradability를 사용한다. Strategy가 요구한 data와 execution profile이 요구한 data는 각각 명시적으로
+resolve하며, purpose-specific registration alias를 통해 암묵적으로 선택하지 않는다. 필요한 binding이 없으면 §7의
+progressive error로 mutation 전에 멈춘다. Fractional 허용, lot rounding, clipping, skip, rejection과
+requested/dealt quantity는 instrument별 결과에서 확인 가능해야 한다.
 
 ### 11.4 Product and direction compatibility
 
@@ -1666,7 +1711,7 @@ validation한다. Unknown type/version, invalid key 또는 incompatible semantic
 
 #### UC-ARTIFACT-001 — External producer round-trip
 
-외부 process가 documented artifact schema로 signal을 저장한다. qlibx는 이를 typed object로 읽고 local Strategy에
+외부 process가 documented artifact schema로 signal을 저장한다. vqapr는 이를 typed object로 읽고 local Strategy에
 전달한다. Producer의 internal Python class를 import하지 않아도 compatibility와 lineage를 검사할 수 있어야 한다.
 
 #### UC-ARTIFACT-002 — Invalid serialized result 거부
@@ -1767,7 +1812,7 @@ look-ahead 문제를 설명하고, 실제 release timestamp field 사용, source
 ## 14. Future work — Production decision and OMS boundary
 
 이 절 전체는 MVP requirement와 acceptance 대상이 아닌 future characterization이다. 향후 production integration의
-핵심 후보는 broker-neutral intent와 authoritative outcome의 분리다. qlibx가 prepared decision을 외부 OMS에
+핵심 후보는 broker-neutral intent와 authoritative outcome의 분리다. vqapr가 prepared decision을 외부 OMS에
 전달해도 그 시점에는 holding, cash 또는 Strategy feedback state를 advance하지 않는 방향을 검토한다.
 
 ### 14.1 Prepared decision
@@ -1787,7 +1832,7 @@ actual cash를 사용한다. 남은 60주의 pending/cancel 상태가 불명확�
 
 #### UC-PROD-002 — Rejected decision의 state 보존
 
-OMS가 주문을 reject한다. Rejection evidence는 보존하지만 qlibx는 intended position을 actual로 commit하지 않는다.
+OMS가 주문을 reject한다. Rejection evidence는 보존하지만 vqapr는 intended position을 actual로 commit하지 않는다.
 Retry 여부와 order 변경은 user-selected execution policy 또는 agent-guided decision을 거친다.
 
 ### 14.3 Reconciliation and recovery — future characterization
@@ -1809,7 +1854,8 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 ### 15.1 Progressive onboarding and data
 
 - Fresh project에서 installed docs와 bundled skill만으로 minimal data registration을 시작할 수 있다.
-- `UC-DATA-001`처럼 field 이름을 강제하지 않고 selected instrument/availability binding과 logical key를 validation한다.
+- `UC-DATA-001`처럼 field 이름을 강제하지 않고 selected instrument/availability binding, logical key와 selected
+  data fields만 validation한다. Universal observation timestamp나 consumer-purpose price role을 요구하지 않는다.
 - Availability가 불명확하면 `UC-AGENT-001`처럼 agent가 look-ahead와 delay-rule 후보를 설명하고 user가 선택한다.
 - 아직 사용하지 않는 metadata나 optional workflow requirement가 최초 registration을 막지 않는다.
 - 실제 current operation의 requirement gap은 `UC-DATA-002`, `UC-ERROR-001`처럼 package error → agent 제안 →
@@ -1831,10 +1877,12 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
   표시하지 않는다.
 - `UC-STATE-001`에서 체결이 없는 세션과 run 경계를 넘어 strategy state가 이어지고, 다음 run의 시작 state는
   명시적으로 지정된다. Strategy state 갱신이 execution 발생 여부에 종속되지 않는다.
-- `UC-TRIGGER-001`에서 strategy가 선언한 decision cadence가 실행 결과의 판단 시점과 일치하고, 판단하지 않은
-  session이 실패로 기록되지 않는다.
+- `UC-TRIGGER-001`에서 Strategy가 선언한 cadence와 04:00 local decision time을 frozen venue calendar와 결합한
+  판단 시점이 실행 결과와 일치한다. 04:00에 data row가 없어도 event는 성립하며, 판단하지 않은 session은
+  실패로 기록되지 않는다.
 - `UC-ENSEMBLE-001`에서 기존 Strategy result를 member로 조합하고 ticker-level netting과 lineage를 확인할 수 있다.
-- `UC-PORTFOLIO-001`처럼 같은 alpha를 서로 다른 valid instrument/execution profile에 사용할 수 있다.
+- `UC-PORTFOLIO-001`처럼 같은 alpha를 서로 다른 valid construction/profile에 사용할 수 있고, 각 executable
+  branch가 execution 전에 frozen intended portfolio를 만든다.
 - `UC-ALPHA-CHILD-001`은 같은 exact parent intent를 Strategy/Model 재실행 없이 next-close와 next-open
   child에서 실행한다. 각 child는 별도 actual state, schedule/profile/convention, PIT price binding과 Fill
   dependency를 가지며 parent result는 불변이다. Adaptive scenario는 `UC-ALPHA-ADAPTIVE-001`의 state/evidence를
@@ -1844,12 +1892,17 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 
 - Constraint가 없는 research는 `UC-CONSTRAINT-001`처럼 실행되고, constraint workflow는 필요한 data를 호출 시점에
   발견한다.
+- Academic long-short, peer momentum, top-N long-only와 enhanced index처럼 executable한 모든 Strategy는
+  construction 규칙이 달라도 frozen intended portfolio → execution-time order conversion → selected profile →
+  Fill → account commit → valuation → feedback의 같은 observable lifecycle을 따른다.
 - MVP constraint는 no-short와 `single-name weight <= max(10%, index constituent weight)`뿐이며 benchmark weight는
   execution evaluation time에 available한 time-varying data를 사용한다.
 - Adjustment와 advisory validation은 `UC-CONSTRAINT-ADJUST-001`처럼 single-name residual과 compliance finding을 구분하며, breach만으로 execution을 차단하지 않는다.
 - `UC-EXEC-001`에서 Strategy decision과 selected full-fill·instant-settlement MVP execution outcome을 분리하고
   committed result만 다음 decision에 feedback한다.
 - `UC-EXEC-002`는 fill timing과 model limitation을 명시하며 look-ahead를 허용하지 않는다.
+- Fractional/lot quantity는 selected venue가 instrument별로 결정한다. Account validity는 signed 또는 long-only
+  position transition만 검사하며 두 profile에서 같은 atomic commit/history/valuation 결과 shape를 사용한다.
 - §3.5의 `UC-COST-001`~`UC-COST-004`, `UC-CLOSED-LOOP-001`, `UC-SCALE-001`과
   `UC-LOOKTHROUGH-001`~`003` current-scope outcome을 만족한다.
 - Path-dependent, multi-instrument와 multi-frequency scenario에서 actual-state-dependent
@@ -1878,8 +1931,8 @@ Acceptance는 내부 class, stage 수 또는 storage layout이 아니라 이 PRD
 
 아래 legacy `GAP-*` ID는 architecture에서 사용해 온 stable cross-reference를 보존하기 위해 유지한다.
 이름에 `GAP`이 포함되어 있다는 사실은 현재 구현이 미완성이라는 뜻이 아니다. PRD는 observable acceptance와
-current/future scope만 규정한다. 현재 구현 상태, public symbol, schema migration, test file과 closure evidence는
-`docs/current-support-map.md`와 `docs/qlibx-architecture.md`에서 관리한다.
+current/future scope만 규정한다. 구현 상태, public symbol, schema migration, test file과 closure evidence는
+support map과 companion architecture에서 관리한다.
 
 | requirement ID | product acceptance outcome | scope |
 |---|---|---|
@@ -1894,7 +1947,7 @@ current/future scope만 규정한다. 현재 구현 상태, public symbol, schem
 | `GAP-PROJECT-CONFIGURATION-001` | Execution environment를 점진적으로 구성하되 시작된 run은 complete frozen input과 identity를 유지한다 | current |
 | `GAP-RETURN-AUTHORITY-001` | Signal analysis는 non-portfolio diagnostic만 만들고 portfolio return/NAV/PnL/turnover는 explicit execution/accounting result에서만 나온다 | current |
 | `GAP-IMPACT-001` | Market impact를 지원하려면 authoritative volume, PIT binding, price-impact semantics와 fee 중복 방지 계약을 먼저 정의한다 | future |
-| `GAP-DIRECTION-001` | Academic profile은 production actual state와 분리된 signed fractional hypothetical portfolio와 limitation을 제공한다 | current |
+| `GAP-DIRECTION-001` | Academic과 physical profile은 같은 lifecycle을 사용하고, signed/long-only state validity와 venue별 instrument quantity rule 및 realism을 명시적으로 구분한다 | current |
 | `GAP-REAL-SHORT-001` | Executable real short를 지원하려면 borrow, locate, collateral, margin, proceeds, recall과 fee authority를 함께 검증한다 | future |
 | `GAP-MONITOR-001` | Decision이 없는 시점에도 committed actual state를 frozen evaluation time에서 독립적으로 monitoring한다 | current |
 | `GAP-MATERIALIZATION-PIT-001` | Model calculation 전에 label horizon과 PIT requirement를 resolve하고 missing input은 reusable success 없이 실패한다 | current |
@@ -1906,11 +1959,11 @@ current/future scope만 규정한다. 현재 구현 상태, public symbol, schem
 | `GAP-CATALOG-001` | Concurrent publication과 process interruption에서도 partial result가 reusable success로 보이지 않고 conflict, idempotency와 recovery outcome이 결정적이다 | current local storage |
 
 ETF look-through는 이 revision에서 `UC-LOOKTHROUGH-001`~`003`과 §10.5로 **user-authored Strategy behavior**임을
-명시한다. qlibx가 제공할 current support는 user-declared PIT data consumption, actual portfolio-state 접근과 generic
+명시한다. vqapr가 제공할 current support는 user-declared PIT data consumption, actual portfolio-state 접근과 generic
 result dependency이며, ETF-specific 자동 mapping/resolution/result 생성은 package scope가 아니다.
 
 Production outbox/reconciliation과 lifecycle cash flow는 current readiness gap이 아니라 명시적인 future work다.
-Merger, spin-off와 delisting의 원천 해석·변환은 security master/ETL 책임이므로 qlibx readiness gap이 아니다.
+Merger, spin-off와 delisting의 원천 해석·변환은 security master/ETL 책임이므로 vqapr readiness gap이 아니다.
 
 ## 16. Compatibility gates and validation
 
@@ -1963,8 +2016,9 @@ Current scope는 validated research, full-fill·instant-settlement simulation과
 ### 17.1 Asset-class expansion scenarios
 
 새 asset class는 type label 추가로 완료되지 않는다. Quantity/notional, valuation, permitted direction, cost, settlement와
-actual feedback이 closed loop에서 일관되게 작동해야 한다. `UC-ACADEMIC-001`은 분리된 hypothetical state와 명시적
-한계 안에서 current support다. `UC-FUTURE-001`, `UC-PERP-001`과 `UC-CASHFLOW-001`은 future characterization이며
+actual feedback이 closed loop에서 일관되게 작동해야 한다. `UC-ACADEMIC-001`은 공통 lifecycle 안의 별도
+hypothetical run/state와 명시적 한계로 current scope다. `UC-FUTURE-001`, `UC-PERP-001`과
+`UC-CASHFLOW-001`은 future characterization이며
 current support claim이 아니다.
 
 ### 17.2 Optional future capabilities
@@ -1982,7 +2036,7 @@ architecture가 정한다.
 
 ## 18. Product-level conclusion
 
-qlibx는 하나의 고정 research pipeline을 강제하지 않는다. 최소한의 semantic binding으로 시작하고, 선택한 workflow가
+vqapr는 하나의 고정 research pipeline을 강제하지 않는다. 최소한의 semantic binding으로 시작하고, 선택한 workflow가
 필요로 하는 requirement를 실행 시점에 발견하며, package의 deterministic error와 validation을 agent가 user decision으로
 연결한다.
 

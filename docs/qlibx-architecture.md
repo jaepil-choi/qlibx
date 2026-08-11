@@ -1,3277 +1,796 @@
-# qlibx Architecture
+# vqapr Architecture
 
-Status: current implementation baseline + explicit target/future gaps (audited 2026-08-11)
-Canonical requirements: `docs/qlibx-prd.md`
-Current package/import/CLI name: `qlibx`
-Final rename target: `vqapr` (확정, 마지막 migration 단계까지 실행 보류)
-Borrow research: [[engine-borrow-benchmark-map]]
-Backend 채택 판단: [[why-not-qlib-as-a-backend]], [[why-not-nautilus-as-a-dependency]]
+Status: target architecture for the clean rewrite
+Product authority: the canonical vqapr PRD
+Target package/import/CLI name: `vqapr`
+Implementation status: not yet implemented; source migration starts only after this architecture is accepted
 
-이 문서는 PRD가 규정한 product requirement를 만족하는 **구현 설계**를 기술한다. PRD가 정본이고 이
-문서는 그것을 만족하는 하나의 구조다. 둘이 충돌하면 PRD가 우선한다.
+이 문서는 **vibe quant asset pricing / alpha portfolio research**를 뜻하는 `vqapr`의 목표 구조를 정의한다.
+PRD가 요구하는 observable behavior와 use case가 authority이고, 이 문서의 class·module·event 이름은 그 요구를
+구현하기 위한 concrete design이다. 구현이 이 문서와 다르면 구현을 현재 architecture로 간주하지 않는다.
 
-이 문서가 정하는 것: layer 경계, 책임 배분, 불변식, 핵심 계약의 shape, 의존 방향, 차용 출처.
-이 문서가 정하지 않는 것: 최종 public name, 함수 시그니처의 세부, 파일 분할 단위.
+## 1. 핵심 명제
 
-> **§16 설계 감사 기록을 함께 읽을 것.** 이 문서는 초기 고정 pipeline 초안에서 출발했다. 2026-08-05
-> PRD가 독립 workflow와 progressive requirement discovery를 정본 계약으로 확정하면서 orchestration,
-> error, evidence와 production boundary를 다시 감사했다. 현행 본문은 그 revision을 반영하고, §16은
-> 아직 남은 구현 결정과 폐기된 가정을 구분해 기록한다.
+### 1.1 모든 executable Strategy는 하나의 spine을 따른다
 
----
-
-### Current implementation alignment (2026-08-11)
-
-이 표에서 **current**는 실제 public symbol 또는 실행 가능한 회귀 테스트가 있는 상태만 뜻한다. Target과
-future pseudocode는 구현된 API가 아니다.
-
-| 경계 | actual implementation | architecture 대안 | 판단과 trade-off | 전환 조건 |
-|---|---|---|---|---|
-| Strategy 결과 권한 | **current:** `StrategyOperation.run()`은 `StrategyDraft`를 반환하고 Flow가 실제 data/artifact/state access를 붙여 `StrategyResult`를 생성·발행한다. DTO 승격 단계가 추가되는 단점이 있다 | Strategy가 `StrategyResult`를 직접 반환하면 API는 짧지만 Strategy가 관측할 수 없는 lineage를 스스로 작성하게 된다 | **actual 채택.** evidence authority와 계산 책임을 분리하는 편이 clean architecture에 가깝다 | 없음. Flow-owned 승격을 normative contract로 유지한다 |
-| composition root | **current:** `QlibxProject`가 모든 public use case의 facade이자 operation별 composition root다. composition/portfolio/analysis/report도 public method이고 bundled sample은 `qlibx.flow`를 import하지 않는다. `add_instrument()`/`set_exchange()`로 execution environment를 누적하고 `daily_spec()`이 frozen spec으로 굳힌다 | 장수명 `Engine`은 DI와 backend 교체가 쉽지만 현재 수요에는 global graph와 lifecycle 관리가 과도하다 | **actual 채택.** `GAP-PUBLIC-FACADE-001`과 `GAP-PROJECT-CONFIGURATION-001`은 닫혔다 | 둘 이상의 runtime backend가 lifecycle을 공유할 때만 container/Engine을 재검토한다 |
-| role View | **current:** dataset-only base, Strategy 전용 artifact/account/feedback/performance/strategy-state/account-history, Monitor 전용 account capability로 최소 권한을 강제한다 | 기능이 큰 단일 View를 상속하면 재사용은 쉽지만 Interface Segregation과 least-authority를 위반한다 | **architecture 채택 후 코드 동기화 완료.** 작은 내부 base의 중복보다 권한 누출 비용이 크다 | 새 operation은 실제 read set을 증명한 capability만 받는다 |
-| observation source | **current:** registration schema v2가 등록된 query column만 정규화해 content-addressed Parquet snapshot(`data/snapshot.py`)으로 발행하고, `ObservationStore`가 DuckDB `read_parquet`으로 질의한다. PIT cutoff, session/point filter와 선언된 `rows`/`calendar` lookback이 SQL predicate로 내려간다. 매 query마다 source와 snapshot SHA-256을 함께 재검증하고, schema/layout version이 다르면 `reindex_datasets()`를 요구한다. **lookback 없는 historical read는 `DATASET_LOOKBACK_REQUIRED`로 실패한다.** Ingestion 단계와 explicit reindex 계약이 비용이다 | 원본을 매 query마다 pandas로 읽고 in-memory filter하는 이전 방식은 ingestion이 없어 단순하지만 반복 full scan과 unbounded read를 막지 못한다 | **actual 채택 (2026-08-10 전환).** Exact lookback을 store query까지 강제하려면 predicate pushdown이 필요했다. 전체 history를 읽고 Strategy에서 자르는 경로를 관습이 아니라 **구조로** 막는다(PRD §7.6.1) | 전환 완료. `tests/performance/lookback_gate.py`가 fresh-process gate이며 대표 workload 수치는 implementation record에 기록한다 |
-| artifact payload | **current:** typed `QlibxModel` payload는 JSON이고 DuckDB는 catalog/index다. 단순하고 inspectable하지만 큰 matrix에는 비효율적이다 | Parquet payload backend는 tabular artifact에 효율적이지만 schema split과 backend complexity가 증가한다 | **현재 actual 채택.** Parquet payload는 future backend다 | 대형 matrix benchmark와 JSON/Parquet 간 atomic publication·compatibility 계약이 준비될 때 추가한다 |
-| generic ports | **current:** `BaseExchange[RequestT, ResultT]`와 `ExecutionPreparation[IntentT, ContextT, RequestT, EvidenceT]`가 공통 lifecycle만 정의하고 KRX/Academic concrete semantics는 분리한다 | 대부분의 추가 범용 port는 단일 구현에서 speculative하다 | **actual 채택.** Exchange와 preparation만 검증된 두 구현 경계에서 generic화했다 | `Operation`/publisher/loader protocol은 독립 구현 또는 test double이 같은 계약을 소비할 때만 추출한다 |
-| execution convention | **current:** `NextSessionCloseExecutor`와 `NextSessionOpenExecutor`가 독립 schedule을 만들고 `DailyExecutionFlow`가 profile의 execution-price role로 size/match한다. `execute_frozen_daily()`는 exact parent를 격리된 child Account에서 실행한다 | 별도 `FillConvention` class는 세 번째 가격 선택 구현에 유리하지만 현재 role field로 schedule/price 축이 이미 분리돼 있어 class hierarchy는 이르다 | **public daily close/open actual 채택.** explicit event calendar와 PIT price binding을 요구한다 | intraday VWAP/order-book profile이 공통 계산 behavior를 요구할 때 protocol을 추출한다 |
-| decision cadence | **current:** Strategy가 optional `trigger()`로 schedule-shaped `TriggerPolicy`를 고르고, `DailyExecutionFlow`가 session candidate마다 순수 평가한다. 미선언 Strategy는 `EveryCandidate`, built-in periodic policy는 `EveryNSessions`다 | invocation spec이 exact decision timestamp를 소유하면 replay 입력은 직접적이지만 경제적 cadence가 orchestration에 분산된다 | **Strategy-owned declaration + Flow-owned enforcement 채택.** Policy fingerprint를 effective config identity와 FIRE result dependency에 넣고 SKIP은 run trace에만 기록한다 | data/fill 조건이 실제 current scope가 될 때 별도 PIT `TriggerView`와 failure/access lineage를 설계한다 |
-| materialization | **current:** public direct `ResearchModel`과 `QlibxProject.materialize()`가 requirement-first execution을 제공하고, built-in `ForwardReturnLabelModel`이 PIT-bounded typed label artifact를 만든다. Scheduler와 Model registry는 없다 | scheduled rolling/expanding materialization은 반복 실행에는 유리하지만 lifecycle·cache invalidation 계약이 추가된다 | **direct operation만 actual 채택.** optional boundary와 no-look-ahead를 먼저 닫고 scheduling은 과장하지 않는다 | 반복 materialization cadence와 durable model registration 수요가 검증될 때 scheduler/registry를 추가한다 |
-| daily orchestration | **current:** 큰 `DailyExecutionFlow`가 event ordering, Account commit, strategy-state 전달과 evidence publication을 한곳에서 보존한다. 이해·변경 비용이 크다 | cohesive state machine/phase extraction은 유지보수에 유리하지만 기계적 파일 분리는 control flow를 숨긴다 | **actual 유지.** 중단 재개는 current scope에서 제거했고 최종 checkpoint만 발행한다 | 둘 이상의 phase가 독립 테스트·재사용 경계를 갖거나 변경 충돌이 반복될 때 state machine을 추출한다 |
-
----
-
-## 1. 설계 명제
-
-> **qlibx는 backtester가 아니라 정보 통제 장치다. Backtest는 그 장치가 하는 일 중 하나다.**
-
-체결 계산, 손익 누적, 성과 지표는 어렵지 않다. 검증된 구현이 reference에 이미 있고 차용하면 된다.
-어려운 것은 이것이다.
-
-> **지금 이 시점에, 이 코드가, 이 데이터를 봐도 되는가?**
-
-PRD 요구사항의 압도적 다수가 이 문제다 — §4.4 PIT, §7.6 no-look-ahead, §2.4 monitoring authority,
-§4.3 actual state authority, §9.4 path-dependency. 전부 "무엇을 무엇에게 보여줄 것인가"다.
-
-그리고 경계는 계산과 달리 **틀려도 예외가 발생하지 않는다.** 결과가 좋아질 뿐이다. 따라서 경계는
-관습이나 코드 리뷰가 아니라 **구조**로 강제해야 한다.
-
-이 명제에서 아키텍처의 중심에 **gate**가 놓인다는 결론이 나온다.
-
-### 1.1 PRD use-case traceability
-
-PRD는 observable outcome과 evidence를 stable use-case ID로 규정한다. Architecture는 각 ID를 반복하는
-데 그치지 않고 다음 여섯 항목을 추적 가능하게 설명해야 한다.
-
-```text
-trigger → permitted read → calculation → commit → evidence → validation
+```mermaid
+flowchart LR
+    Calendar["Venue SessionCalendar"] --> Trigger["Strategy-owned TriggerPolicy"]
+    Trigger --> Strategy["Strategy"]
+    Data["PIT Data View"] --> Strategy
+    AccountRead["Committed Account Snapshot"] --> Strategy
+    Strategy --> Intent["PortfolioIntent"]
+    Intent --> Orders["OrderPlanner at execution time"]
+    AccountRead --> Orders
+    ExecData["PIT Execution Inputs"] --> Orders
+    Orders --> Exchange["Selected Exchange"]
+    Exchange --> Fills["FillBatch"]
+    Fills --> Commit["Account.commit"]
+    Commit --> Mark["Valuation / Account.mark"]
+    Mark --> Feedback["Feedback and Evidence"]
+    Feedback --> Strategy
 ```
 
-| PRD use case | trigger | permitted read | calculation | commit | evidence | validation |
-|---|---|---|---|---|---|---|
-| `UC-DATA-001` | dataset registration | source sample + user binding | minimal key/instrument/availability validation | registration | binding + schema fingerprint | arbitrary-field fixture |
-| `UC-DATA-002` | Strategy invocation | requirements + registered bindings | requirement resolution | 없음 on gap | `OperationError` + requirement ID | add-binding retry |
-| `UC-ERROR-001` | short analysis invocation | actual operation path only | requirement check | failure evidence only | hierarchical stage path | no phantom-stage fixture |
-| `UC-PIT-001` | direct `QlibxProject.materialize()` | resolved label roles through `ModelView` | horizon preflight + simple forward return | failure evidence or typed label artifact | dataset/config/error lineage + row availability | real-DW missing-horizon no-call, linked retry, future-hidden labels, installed sample |
-| `UC-AGENT-001` | ambiguous registration failure | package error + skill + project semantics | agent proposes; package validates | confirmed binding only | user decision + rule ID | no guessed availability |
-| `UC-SIGNAL-001` | direct Strategy run | scoped PIT data + optional explicit strategy state | signal/weight inside Strategy | result + optional proposed state | signed weights + accesses | no mandatory signal stage |
-| `UC-SIGNAL-002` | stored-result Strategy run | compatible typed model result | signed-weight assembly | Strategy result | producer-independent edges | producer not rerun |
-| `UC-ALPHA-BUDGET-001` | flexible-budget Strategy | signed inputs + budget declaration | allocation without forced rescale | alpha-weight result | invested/residual budget | fixed incompatibility |
-| `UC-ALPHA-PATH-001` | later Strategy/Ensemble composition | frozen typed result + source state/cursor lineage | consumer compatibility + composition | new Strategy result | consumed artifact + all source state/cursor edges | producer not rerun; no current-state recomputation claim |
-| `UC-ALPHA-CHILD-001` | exact frozen-decision child invocation | parent `decision_intent:v1` + explicit close/open event data | alternate schedule/price sizing and matching only | isolated child Account/artifacts | exact parent + dataset/state + profile/convention | real-DW close/open, parent unchanged, no producer rerun, installed sample |
-| `UC-ALPHA-ADAPTIVE-001` | feedback-triggered Strategy | committed feedback + prior strategy state | proposed belief/member update | strategy state after Strategy return | consumed feedback + state fingerprint | no future feedback |
-| `UC-TRIGGER-001` | session candidate reached | declared cadence policy + this run's FIRE history | pure FIRE/SKIP evaluation | Strategy runs only on FIRE | policy fingerprint on the FIRE result + SKIP in the run trace | declared cadence matches observed decision times; SKIP is not a failure |
-| `UC-STATE-001` | Strategy returns state on any decision | prior strategy state, independent of fills | strategy-owned computation the package does not interpret | state carried to the next decision and to the run result | state was consumed marks the result as not data-reproducible | state advances with zero-dealt or absent execution; next run seeded explicitly |
-| `UC-ACCOUNT-HISTORY-001` | Strategy declares actual-state history | declared account series and/or instrument panel | stop-loss or cooldown from history alone | user Strategy result only | consumed account items and range | no strategy state used; unrecorded item fails before compute |
-| `UC-ENSEMBLE-001` | Ensemble Strategy run | compatible member results | combine/net/cross by ticker | ensemble result | contribution + residual | producers not rerun |
-| `UC-PORTFOLIO-001` | construction profile selection | same weights + selected profile | profile-specific construction | separate portfolio results | budget/direction/cost lineage | alpha unchanged |
-| `UC-CONSTRAINT-001` | constraint-free analysis | signal/weight artifact only | requested analysis | analysis result | actual dependencies | no compliance binding |
-| `UC-CONSTRAINT-002` | constrained conversion | no-short + PIT benchmark weight | requirement resolution | 없음 on gap | missing benchmark weight | no order/account mutation |
-| `UC-CONSTRAINT-ADJUST-001` | adjust then validate | intent + actual state + constraint data | adjust; advisory validate | candidate + finding | before/after + residual + finding | breach is recorded and execution continues |
-| `UC-COST-001` | execution event | exact product/side policy + quote | §13.2 cost rule | Fill | total cost + rule ID | product/side fixture |
-| `UC-COST-002` | execution event | policy valid at event time | §13.2 schedule resolution | Fill | version + effective time | date-boundary fixture |
-| `UC-COST-003` | cash-limited BUY | actual cash + exact policy | §13.3 shared cost calculator | Fill | requested/dealt + clip reason | cash-limit fixture |
-| `UC-COST-004` | no exact rule | exact selector; no parent fallback | unsupported failure | 없음 | failure artifact | no Fill/Account mutation |
-| `UC-CLOSED-LOOP-001` | next decision after commit | committed simulation Account | Strategy evaluation | next result | feedback cursor + snapshot | requested state excluded |
-| `UC-SCALE-001` | 3,000-name execution | compiled arrays + scoped market data | vectorized match | Fill batch | stable per-name diagnostics | batch/scalar parity |
-| `UC-LOOKTHROUGH-001` | user Strategy callback | user-declared constituent binding + actual AccountSnapshot | user code가 선택한 `L @ p` 또는 다른 exposure 계산 | user Strategy result only | actually consumed binding/account edges | same ETF: unsubscribed Strategy는 opaque |
-| `UC-LOOKTHROUGH-002` | StrategyView data read | declared observations with `available_at <= evaluation time` | ViewGate visibility; semantic selection은 user code | 없음 unless user emits result | observation/cutoff access lineage | future row hidden; no auto latest/mapping |
-| `UC-LOOKTHROUGH-003` | next user Strategy callback | marked committed AccountSnapshot + declared constituent binding | user code가 actual quantity로 재계산 | user artifact/intent if returned | target/fill/held input distinction | requested target excluded; no auto feedback |
-| `UC-EXEC-001` | MVP execution | decision + PIT execution view | full-fill convention | committed Account | decision ID + FillBatch | Strategy does not fill directly |
-| `UC-EXEC-002` | daily-close execution | observations available by fill time | timing/PIT validation then match | Fill or failure | convention + limitation | no future close |
-| `UC-EXEC-003` | explicit `monitor_constraints(spec)` call at caller-selected cadence | committed checkpoint + frozen evaluation time + compliance view | constraint evaluation | finding artifact only | breach/missing classification | no decision/order; not auto-injected into daily flow |
-| `UC-ARTIFACT-001` | external artifact load | documented payload + envelope | typed construction + compatibility | imported artifact | external producer lineage | no producer import |
-| `UC-ARTIFACT-002` | load/publication | complete candidate payload | schema + semantic validation | 없음 on invalid | bounded failure evidence | invalid not reusable |
-| `UC-RESEARCH-001` | failed operation then retry | frozen failure inputs + new binding | new resolution | failure then success artifacts | resolution lineage | failure retained |
-| `UC-REPORT-001` | renderer selection | stored analysis values | presentation only | report artifact | source analysis IDs | renderer value parity |
-| `UC-MONITOR-001` | monitoring report | actual-account findings | analysis/rendering | report artifact | actual/intended distinction | breach vs missing |
-| `UC-EXTENSION-001` | transform extension registration | contract + validation fixture | package compatibility validation | registration on success | validation + producer ID | failure not registered |
-| `UC-EXTENSION-002` | exact local Strategy registration | path-confined source + fixed symbols + frozen fixture | two fresh instances; hash/schema/access comparison | registration, then exact-ID Strategy result | source/schema hash + actual artifact/registration edges | drift or implicit selection fails before compute |
-| `UC-PROD-001` | future OMS partial result | decision + confirmed fills/account | future reconciliation | confirmed delta only | pending/cancel + correlation | not MVP acceptance |
-| `UC-PROD-002` | future OMS rejection | decision + rejection | future reconcile without intended apply | rejection evidence only | retry policy identity | not MVP acceptance |
-| `UC-ACADEMIC-001` | exact signed portfolio artifact | explicit academic listing + next-session-close PIT price | AcademicExecutionFlow signed fractional match | AcademicFill + signed state checkpoint | parent artifact + dataset/config/checkpoint lineage | missing listing/price, non-hypothetical profile, or non-positive NAV rejects before rebalance commit |
-| `UC-FUTURE-001` | future settlement/expiry | observable settlement input | variation/final settlement | cash/position delta | lifecycle evidence | post-expiry reject |
-| `UC-PERP-001` | future funding timer | observable funding rate | funding cash flow | cash delta | funding evidence | no expiry event |
-| `UC-CASHFLOW-001` | future lifecycle event | event-specific inputs | separate fee/lifecycle calculation | Account | category + source | attribution separation |
-| `UC-SETTLEMENT-001` | future stock/ETF settlement | Fill + settlement calendar | receivable/payable transition | Account | settlement assumption/source | MVP remains instant |
+Peer momentum의 long-short와 5-day return top-10의 long-only는 **Strategy 내부 계산만 다르다.** 둘 다 public
+execution boundary에서 `PortfolioIntent`를 반환하고, 이후 `OrderPlanner → Exchange → FillBatch → Account →
+Valuation`을 그대로 통과한다.
 
-`UC-PIT-001`은 2026-08-09 direct materialization과 real-DW/installed acceptance로 current-support registry에
-승격됐다. `UC-ALPHA-CHILD-001`도 2026-08-09 real-DW와 installed close/open child 비교 증거로 current에
-승격됐다. 기존 participation-rate child test는 generic isolation 회귀로 유지한다.
-`UC-ACADEMIC-001`은 2026-08-10 zero-friction signed state, Stock/ETF/Index/Factor listing, artifact lineage와
-recovery acceptance로 current-support registry에 승격됐다. `UC-PROD-*`, `UC-FUTURE-001`, `UC-PERP-001`,
-`UC-CASHFLOW-001`과 `UC-SETTLEMENT-001`은 current acceptance가 아니다. Test와 fixture를 만들 때도 같은
-use-case ID를 사용해 PRD → architecture → validation의 연결을 유지한다.
+Model-only, feature materialization, label, IC/RankIC, stored-result comparison과 report는 research operation이다.
+이들은 portfolio return을 만들지 않으므로 execution spine 전에 끝날 수 있다. 반대로 portfolio return, NAV,
+PnL 또는 turnover를 만드는 workflow가 spine을 우회하는 것은 금지한다.
 
-`UC-TRIGGER-001`은 2026-08-11 strategy-owned schedule-shaped trigger와 Flow-owned enforcement로 current다.
-`UC-STATE-001`도 같은 날 단일 JSON strategy state, direct/daily explicit seed, zero-order 갱신과 최종 state 반환으로
-current가 됐다. `UC-ACCOUNT-HISTORY-001`은 user-selected recording spec, Strategy-declared account series/instrument
-panel, strict unrecorded-field failure와 consumed-range lineage로 current다. 중단된 run의 resume은 PRD §17.2에 따라
-current API에서 제거했으며 final checkpoint와 catalog publication recovery는 별도 계약으로 유지한다.
+### 1.2 `PortfolioIntent`만 executable portfolio target이다
 
----
+Executable Strategy의 public output은 `PortfolioIntent` 하나다. `DecisionIntent`, `TARGET`/`RESEARCH_ONLY` action,
+raw weight의 Exchange 직접 제출은 두지 않는다. Research-only 여부는 Strategy output의 action이 아니라 사용자가
+선택한 workflow 종류로 구분한다.
 
-## 2. 멘탈 모델
+Strategy 내부에서 signal, score, rank, weight를 어떤 순서와 타입으로 계산할지는 다음 설계 대화에서 확정할 수
+있다. 그 선택은 외부 계약을 바꾸지 않는다.
 
-### 2.1 주식 Strategy와 선물 position을 함께 따라간다
-
-예를 들어 매 거래일 장 마감 뒤 signal을 계산하지만, 월말에만 주문을 결정하고 다음 거래일 종가에
-체결하는 Strategy를 생각한다. 이 Strategy는 주식만 거래하지만 Account에는 이전에 만들어진
-KOSPI200 선물 Long 1계약도 남아 있다.
-
-```text
-등록된 PIT data
-(daily/monthly OHLCV, return, stored artifact)
-          │
-          ▼
-Clock-bound View ──→ Strategy ──→ immutable DecisionIntent
-          ▲                              │
-          │                              ▼
-          │                       ExecutionProfile
-          │                              │
-          │                              ▼
-          │                    result + diagnostics
-          │                              │
-          │                         Flow commit
-          │                              │
-          └── 다음 decision input ─ Account / Strategy state
-
-각 단계의 input, assumption, result와 failure ──→ Evidence
+```python
+class Strategy(Protocol):
+    def trigger(self) -> TriggerPolicy: ...
+    def requirements(self) -> tuple[DataRequirement, ...]: ...
+    def decide(self, context: StrategyContext) -> PortfolioIntent: ...
 ```
 
-Model/materialization을 선택한 한 workflow의 실행 순서는 다음과 같다. Direct Strategy workflow에는
-첫 `MATERIALIZE` callback이 없다.
+`PortfolioIntent`는 최소한 다음을 가진 immutable value다.
 
-```text
-매 거래일 장 마감      MATERIALIZE callback → 그날까지 available한 data로 signal 저장 (optional)
-월말 마지막 거래일     DECISION callback    → signal과 AccountSnapshot으로 주식 intent 확정
-다음 거래일 종가       EXECUTION callback   → 미리 확정된 intent를 선택한 가정으로 결과화
-선물 정산 시각          SETTLEMENT callback  → variation margin을 Account에 commit
-다음 decision          StrategyView          → 둘 다 반영된 AccountSnapshot과 prior Memory를 읽음
+```python
+class PortfolioIntent(BaseModel):
+    intent_id: UUID
+    strategy_id: str
+    decision_time: datetime
+    effective_after: datetime
+    targets: tuple[PortfolioTarget, ...]
+    cash_target: Decimal | None
+    budget: BudgetSemantics
+    source_refs: tuple[ArtifactRef, ...]
+    account_version_seen: int
+    strategy_state_ref: ArtifactRef | None
 ```
 
-선물 정산가격이 2포인트 오르고 계약승수가 250,000원이면 Long 1계약의 variation margin은
-$2 \times 250{,}000 = 500{,}000$원이다. Strategy가 선물 주문을 만들 수 없더라도 이 현금 변화와 NAV는
-Account에 반영된다. 다음 주식 decision은 변경된 현금과 전체 exposure를 본다.
+`PortfolioTarget`은 instrument와 target weight 또는 target quantity 중 정확히 하나를 표현한다. 둘을 동시에
+채우거나 둘 다 비우면 validation error다. `PortfolioIntent`는 아직 order나 Fill이 아니고 actual holding을
+바꾸지 않는다.
 
-이 선물 부분은 Account 경계를 설명하는 **future-extension characterization**이다. Current stock/ETF
-profile은 Future position을 지원한다고 주장하지 않으며 exact lifecycle policy가 없는 Future 초기화는 실패한다.
+### 1.3 Profile 차이는 spine이 아니라 policy 차이다
 
-여기서 월말은 달력의 마지막 날이 아니라 **마지막 거래 session**이다. 다음 거래일 종가는 Strategy input이
-아니다. 월말에 freeze된 DecisionIntent를 결과화하는 execution input이다. Executor가 다음날 가격·현금으로
-수량이나 Fill을 계산할 수 있지만 그 가격으로 Strategy intent를 다시 계산하지 않으면 Strategy look-ahead가 아니다.
+Academic과 KRX-style daily simulation은 다음 interface를 공유한다.
 
-### 2.2 일곱 질문을 섞지 않는다
+- 동일한 `PortfolioIntent`
+- 동일한 execution-time `OrderPlanner`
+- 동일한 `OrderBatch`와 `FillBatch` envelope
+- 동일한 `Account.commit(expected_version=...)`
+- 동일한 valuation, history, feedback, failure와 evidence shape
 
-| 질문 | 책임 | 예 |
+다음 항목만 profile에 따라 달라진다.
+
+- listing과 supported instrument
+- permitted direction과 short realism
+- instrument별 fractional/lot quantity rule
+- execution event와 price rule
+- tradability, cost, tax, slippage와 liquidity assumption
+- compatible Account state-transition mode
+- result limitation과 realism label
+
+## 2. Authority와 layer
+
+### 2.1 두 runtime authority
+
+vqapr에는 서로 바꾸어 쓸 수 없는 두 상태 authority가 있다.
+
+1. **Account authority**: committed Fill과 Mark가 만든 cash, position, cost, NAV와 history
+2. **Strategy-state authority**: Strategy가 명시적으로 반환하고 commit한 bounded private state
+
+`PortfolioIntent`, proposed post-trade state, constraint finding, requested order와 evidence는 authority가 아니다.
+그것들은 의도·계산·감사 기록이다.
+
+### 2.2 여섯 semantic layer
+
+| layer | 질문 | 대표 module |
 |---|---|---|
-| 어떤 data가 존재하는가 | Registry | daily/monthly OHLCV, close-close return, stored signal |
-| 지금 무엇을 볼 수 있는가 | Clock + View | `available_at <= evaluation_time`, resolved requirement |
-| 무엇을 보유하고 싶은가 | Strategy | signed weight, target, `DecisionIntent` |
-| 언제·어떻게 결과화하는가 | ExecutionProfile | next close/open, cost, liquidity, hypothetical convention |
-| 실제로 무엇을 갖고 있는가 | Account | Fill, Position, cash, mark, NAV, committed feedback |
-| Strategy가 무엇을 기억하는가 | Memory | prior belief, cooldown, feedback cursor |
-| 무엇을 근거로 계산했는가 | Evidence | data identity, lineage, assumption, limitation, failure |
+| Runtime | 언제 callback을 호출하는가 | `runtime.clock`, `runtime.calendar` |
+| Data | 그 시점에 무엇을 읽을 수 있는가 | `data.registration`, `data.store`, `data.view` |
+| Decision | Strategy가 어떤 portfolio를 의도하는가 | `strategy`, `portfolio` |
+| Execution | intent가 어떤 order와 Fill이 되는가 | `orders`, `exchange` |
+| State | Fill과 Mark가 실제 run state를 어떻게 바꾸는가 | `account`, `valuation` |
+| Evidence | 무엇을 읽고 무엇이 일어났는가 | `evidence`, `artifacts` |
 
-**Strategy look-ahead는 View 경계가 결정하고 execution realism은 ExecutionProfile이 결정한다.** Daily 또는
-monthly bar를 쓰거나 단순 종가 체결을 선택했다는 사실만으로 Strategy look-ahead가 발생하지 않는다. 반대로
-정교한 intraday executor를 써도 View가 미래 observation을 보여주면 look-ahead다.
+`flow`는 이 layer들을 조립하고 event를 배달하지만 경제 규칙을 소유하지 않는다.
 
-Current daily profile은 immutable DecisionIntent를 **next-session close 또는 next-session open**에서 처리한다.
-Next-open은 별도 open-event calendar와 그 시각까지 available한 price role을 요구하며 같은 Strategy result를
-재실행하지 않고 alternate execution result와 child Account만 만든다. Intraday partial-fill은 future
-characterization이다. Signal이나 weight만 분석하는 research는 ExecutionProfile과 Account mutation 없이
-Evidence publication에서 정상 종료할 수 있다.
+## 3. 시간 모델
 
-### 2.3 Clock, callback과 View — IoC
+### 3.1 세 축을 분리한다
 
-Callback의 business logic은 Flow가 소유하고 Clock은 event 시각, priority와 callback reference를 queue에서
-관리한다. Runtime loop가 Clock이 반환한 handler를 순서대로 호출한다.
+1. **Session time**: venue가 제공하는 eligible session date, open, close
+2. **Event time**: Clock이 callback을 호출하는 timezone-aware timestamp
+3. **Availability time**: observation을 처음 사용할 수 있는 `available_at`
 
-```text
-QlibxProject가 조립한 Flow가 callback 등록
-          ↓
-Clock이 다음 event 시점으로 이동
-          ↓
-Handler(Event, callback)를 priority 순서로 반환
-          ↓
-Runtime loop가 Flow callback 호출
-          ↓
-Flow가 scoped View를 만들고 Operation 실행
-```
-
-이것은 **Inversion of Control(IoC)** 이다. Strategy가 시간을 진행하거나 callback을 직접 부르지 않고
-Runtime이 event 순서에 따라 Strategy를 호출한다. 따라서 Strategy 밖에서 동일시각 priority와 PIT cutoff를
-한 번만 통제할 수 있다.
-
-월말 session에는 `MATERIALIZE`를 `DECISION`보다 앞선 priority로 실행할 수 있다. `DECISION`은
-DecisionIntent를 확정한 뒤 Executor가 만든 다음 거래일 종가 `EventSpec`을 Clock에 등록한다. `EXECUTION` callback은 그
-시각의 `ExecutionView`로 가격과 policy를 읽고 결과를 commit한다.
-
-View에는 두 문이 있다.
-
-```text
-시간 경계   available_at <= clock.now()인가      → 모든 View에 공통
-역할 경계   이번 Operation이 선언한 binding인가  → View 종류와 resolved requirement가 결정
-```
-
-Close-close return $r_t$는 ending close가 공개되기 전에는 available하지 않다. $r_t$를 보고 만든 weight
-$w_t$는 같은 $r_t$가 아니라 다음 기간 $r_{t+1}$에 적용한다.
-
-Operation은 시간을 스스로 읽거나 store에 직접 접근하지 않고 Account 또는 Evidence를 직접 쓰지
-않는다. Flow가 typed result와 diagnostics를 받은 뒤 허용된 commit/publication port를 호출한다.
-
-### 2.4 두 runtime authority, explicit strategy state와 여섯 layer
-
-Runtime truth의 authority는 Clock과 Account다. Strategy state는 caller가 명시적으로 seed하고 Flow가 판단 사이에
-전달하는 portable JSON value이며, package-owned mutable store가 아니다.
-
-```text
-Clock     지금 몇 시인가                 — event 순서와 조회 cutoff의 시간 authority
-Account   실제로 무엇을 갖고 있는가      — Position, cash, mark, NAV의 actual-state authority
-Strategy state   Strategy가 무엇을 기억하는가   — explicit input/output value
-
-mutable runtime state store = Account
-```
-
-PRD의 `ledger`는 "실제 결과를 authoritative state에 commit한다"는 **역할명**이다. Architecture의 concrete
-state object는 `Account`이며 별도 `Ledger` 객체를 만들지 않는다. Catalog와 Artifact는 authority를 대신하지
-않는 append-only Evidence다. 영수증이 계좌 잔액 자체가 아닌 것과 같다.
-
-Strategy는 Account를 직접 변경하지 않고 StrategyView로 current state를 읽으며 optional `StrategyStateUpdate`를
-draft로 반환한다. Flow는 성공한 Strategy 반환 직후 JSON validity를 확인하고 그 값을 다음 판단으로 전달한다.
-Execution 또는 fill 성공은 state 갱신 조건이 아니다.
-
-| layer | 답하는 질문 | 주요 책임 |
-|---|---|---|
-| ① runtime | 언제 실행하는가 | Clock, Event, Handler, deterministic priority |
-| ② flow | 어떤 순서로 실행하고 무엇을 확정하는가 | callback, direct invocation, Executor sub-flow, commit/publication |
-| ③ view | 무엇을 볼 수 있는가 | clock-bound facade, PIT와 role boundary, access lineage |
-| ④ operation | 무엇을 계산하는가 | Strategy, Model, construct, analyze, validate, exchange.match |
-| ⑤ state | 실제 state와 strategy-owned context는 무엇인가 | Account와 explicit strategy state |
-| ⑥ evidence | 무엇을 근거로 재현하는가 | Artifact, Catalog, Lineage, diagnostics |
-
-부수효과를 시작할 수 있는 곳은 **② flow뿐**이다. ③④는 순수하고, ⑤⑥은 Flow가 좁은 port로만
-변경한다. Flow는 Clock callback뿐 아니라 dataset registration, analysis, report 같은 direct API/CLI
-invocation도 orchestration한다. 모든 run이 `Strategy → construct → convert → validate → execute`를 통과하지
-않으며, `on_decision`이 길어지면 계산이 Flow로 흘러들어온 신호다.
-
-Account에서 View를 거쳐 다음 decision으로 돌아오는 edge가 PRD §2.4 closed loop다. 다음 decision은 requested
-target이 아니라 **commit된 실제 상태**를 읽는다.
-
-### 2.5 Data granularity는 research capability다
-
-Dataset registration은 data를 특정 executor에 맞춰 왜곡하지 않고 실제 의미를 기록한다.
-
-| 보유 data | 가능한 research | 조용히 주장하면 안 되는 것 |
-|---|---|---|
-| daily OHLCV | daily 또는 더 낮은 빈도의 signal, next-bar convention, daily mark | intraday path, order-book liquidity |
-| monthly OHLCV | monthly signal·rebalance·return | daily drawdown, daily tradability, 월중 체결 path |
-| close-close return (원본 그대로) | IC, RankIC 등 portfolio를 구성하지 않는 signal 진단 | portfolio return, NAV, turnover — derived unit price를 등록하기 전에는 주장하지 않는다 |
-| close-close return → 등록된 derived unit price | 위 전부 + academic profile을 통한 hypothetical NAV·turnover | observed quote, share quantity, market volume |
-
-최초 logical dataset registration의 최소 계약은 instrument axis, `available_at`과 logical row key다. Event time,
-effective date, semantic category와 source provenance는 알려져 있으면 보존할 수 있지만 전역 필수 field가 아니다.
-Return의 period start/end, gross/net/excess, currency와 compounding convention도 이를 사용하는 Operation이 점진적으로
-요구한다. OHLCV, lot, volume와 tradability 역시 단순 return research를 막는 전역 필드가 아니다.
-
-Return-only source도 closed loop을 거친다. 다음 식은 결과를 만드는 지름길이 아니라 academic profile이
-1기간에서 만족해야 하는 **검증 항등식**이다.
+Event timestamp가 dataset row에 존재할 필요는 없다. PIT read의 유일한 universal predicate는 다음이다.
 
 $$
-R_{p,t+1}=\sum_i w_{i,t}r_{i,t+1}
+available\_at \le event.ts
 $$
 
-다기간에서는 가격 변동에 따른 weight drift와 리밸런싱 거래가 개입한다. 따라서 이 식을 직접 누적하면
-무비용과 매기간 완전 리밸런싱을 암묵적으로 가정하게 되고 turnover는 0으로 보고된다. qlibx는 그 가정을
-숨긴 경로를 제공하지 않는다(PRD §4.6).
-
-가격, 수량, lot과 cash clipping이 필요한 physical execution은 그 binding이 없으면 실패해야 한다.
-Return-only source는 아래의 synthetic-price 경로로 등록해 academic profile에서 사용한다.
-
-### 2.6 Instrument, Exchange와 Factor synthetic price
-
-| 역할 | 답하는 질문 | 예 |
-|---|---|---|
-| Instrument | 이것은 어떤 경제적 계약 또는 exposure인가 | Equity, ETF, Future, PerpetualSwap, Index, Factor |
-| Exchange / profile | 이 profile에서 어떻게 결과화하는가 | listing, tradability, lot, fee/tax, hypothetical convention |
-| Clock / flow | 언제 계산하고 commit하는가 | DECISION, EXECUTION, MARK, MONITOR; future SETTLEMENT/FUNDING/EXPIRY |
-| Account | 실제 또는 명시적 hypothetical state가 어떻게 바뀌었는가 | Fill, cash flow, position delta, mark, NAV |
-
-Instrument는 immutable contract와 static semantics를 제공한다. Exchange는 listing과
-venue/profile/effective-time policy를 적용한다. 시변 가격, return, funding rate와 valuation input은
-clock-bound View에서 읽는다. 같은 Index도 일반 profile에서는 tracking-only이고 명시적 academic profile에
-등록되면 hypothetical execution 대상이 될 수 있다.
-
-서로 다른 네 집합을 같은 universe로 부르지 않는다.
-
-| 집합 | 의미 | 예 |
-|---|---|---|
-| registered instruments | project config와 Instrument registry가 stable ID와 계약조건을 아는 전체 상품 | 삼성전자, SK하이닉스, KOSPI200 Future |
-| held instruments | Account가 0이 아닌 Position을 가진 상품 | 삼성전자 100주, Future Long 1계약 |
-| Strategy tradable universe | 이 Strategy가 주문할 수 있는 상품 | 삼성전자와 SK하이닉스만 |
-| valuation set | Account가 현재 평가해야 하는 상품 | 모든 held instrument |
-
-`held instruments ⊆ registered instruments`는 불변식이다. Position map은 실제 보유 상품만 담는 sparse map이며
-등록 Instrument마다 0 position을 만들지 않는다. Strategy tradable universe에서 빠진 상품도 이미 보유 중이면
-Account에서 사라지지 않는다. **거래 가능 범위는 주문을 제한하고 valuation set은 실제 보유를 따른다.**
-
-향후 derivative capability를 추가할 때 Strategy tradable universe 밖의 held Future도 valuation set에 남고 exact
-settlement policy가 선택된 경우에만 variation margin을 cash에 반영해야 한다. 이는 current behavior가 아니다.
-필요한 가격이나 lifecycle input이 없으면 이전 값을 정상값처럼 사용하지 않고 `INCOMPLETE` 또는 `STALE` diagnostic을
-남기는 확장 경계만 보존한다.
-
-Architecture의 concrete type 후보는 다음과 같다. PRD가 이 hierarchy를 강제하지 않으며 stock/ETF 밖의
-항목은 future extension이다.
-
-```text
-Instrument
-├── Equity
-│   └── ETF
-├── Index · Factor · Cash · Bond · Option
-└── MarginedContract
-    ├── Future
-    │   ├── FxFuture · CommodityFuture · EquityIndexFuture
-    └── PerpetualSwap
-        └── CryptoPerpetual
-```
-
-`Factor`는 가상의 tracking portfolio를 나타내는 Instrument이며 원천 observation은 기간별 factor return이다.
-Observable market quote는 없지만, execution에 참여하려면 등록된 unit price가 반드시 있어야 한다.
-
-Return-only source는 등록 단계에서 normalized `SyntheticUnitPrice`로 변환해 등록한다(PRD §7.2.1).
-
-$$
-P_0=b>0, \qquad P_t=P_{t-1}(1+r_t)
-$$
-
-이 값은 observed market price가 아니라 **derived unit NAV**다. **변환은 package operation이 아니며 별도
-derived-binding schema, transform registry 또는 등록 시점 재계산 검증을 두지 않는다.** Base $b$와 변환 가정은
-user가 확정하고, 결과 dataset은 다른 dataset과 동일한 최소 등록 계약을 따른다. 가격의 양수성과 체결
-가능성은 execution 시점에 판정한다. Return-native fallback은 없다 — 모든 execution 경로가 가격 축을
-요구하기 때문이다(I12).
-
-Academic profile은 등록된 `SyntheticUnitPrice` binding과 명시적인 unit, fractional/lot,
-cost와 liquidity assumption이 있을 때 Factor를 hypothetical listing으로 받아 기존 quantity/Fill/Account 경로를
-재사용한다. Profile은 등록된 가격을 소비할 뿐 변환하지 않는다. Result는 synthetic source와 profile
-limitation을 표시한다. Base를 100에서 1,000으로
-바꾸면 quantity만 1/10로 바뀌고 gross exposure와 pre-cost return은 같아야 한다. Cost policy는 notional-based
-이거나 별도의 base-invariance를 증명해야 하며 exact Factor/profile rule이 없으면 실패한다. 일반 Exchange는
-synthetic value를 market quote로 취급하거나 Factor를 silently tradable로 만들지 않는다.
-
-`ETF <: Equity`는 상품 taxonomy와 코드 재사용 관계일 뿐 Exchange transaction cost policy의 상속 규칙이
-아니다. Cost policy는 exact concrete product selector로 해석한다. ETF cost rule이 없으면 unsupported로
-실패하며 Equity cost rule로 fallback하지 않는다. ETF 비용이 0이어도 명시적인 ETF cost rule이 있어야 한다.
-
-`Future`만 expiry와 final settlement를 가지며 `PerpetualSwap`에는 expiry field 자체가 없다. 둘의 공통
-부모는 contract multiplier, settlement currency와 notional/PnL convention을 제공한다. 금리, 배당수익률,
-storage/convenience yield와 funding rate는 시변 observation이므로 Instrument instance에 저장하지 않는다.
-
-`Equities`, `Futures` 같은 복수형은 새로운 금융계약 subtype이 아니라 `InstrumentSet[T]` 또는 registry
-view다. 개별 객체를 보존하면서 registration과 instrument-axis compilation을 묶는 편의 경계일 뿐이다.
-
-Future position을 담을 수 있는 Account 계약과 Future가 **current support**라는 주장은 다르다. Current
-vertical slice는 stock/ETF Fill과 mark를 구현한다. Future multiplier, variation margin, expiry를 다루는
-`LifecycleBatch`는 PRD `UC-FUTURE-001`을 위한 future-extension characterization이며 exact settlement policy가
-등록되기 전에는 Future position 초기화나 commit을 unsupported로 실패시킨다.
-
----
-
-## 3. 반복 원자
-
-모든 operation은 같은 transaction shape를 갖는다. Trigger는 Clock event일 수도 있고 CLI/API가 시작한
-dataset registration, artifact load, analysis 또는 report invocation일 수도 있다.
-
-```
-trigger가 온다
-  ① invocation/config/component identity를 freeze한다
-  ② 선택한 operation의 requirement를 registered binding에 resolve한다
-  ③ clock과 역할에 묶인 scoped view를 만든다
-  ④ typed result와 diagnostics를 계산한다
-  ⑤ flow가 허용된 state commit 또는 artifact publication을 수행한다
-  ⑥ actual dependency, outcome 또는 failure evidence를 기록한다
-```
-
-Requirement resolution이 실패하면 ④를 호출하지 않고, Account mutation이나 success artifact publication
-없이 hierarchical `OperationError`와 failure evidence를 남긴다. 사용하지 않는 optional operation은 stage
-path에 나타나지 않는다.
-
-Event-driven runtime에서 위 원자는 다음처럼 구체화된다.
-
-| event | clock 위치 | scoped view | 선택 가능한 계산 | 결과 | authoritative commit |
-|---|---|---|---|---|---|
-| `DECISION` | decision time | `StrategyView` | selected Strategy; optional construct/adjust/convert/validate | weights and/or decision intent + optional state update | state update는 Strategy 반환 직후 전달; execution은 예약 |
-| `EXECUTION` | 체결 시점 | `ExecutionView` | exchange.match_batch | fills + diagnostics | `Account.commit(FillBatch)` |
-| `MARK` | 15:30 | `ExecutionView` | valuation | marks + NAV | `Account.commit(MarkBatch)` |
-| `MONITOR` | session close | committed mark/execution + Account snapshot | session performance와 account observation | monitor evidence | **건드리지 않음** |
-| `MATERIALIZE`† | model/transform cadence | requirement-scoped data view | model/transform | typed research data | artifact publication |
-| `SETTLEMENT`* | 정산 시점 | `ExecutionView` | future variation/coupon/dividend cash flow | cash/position delta | future `Account.commit(LifecycleBatch)` |
-| `FUNDING`* | funding 시점 | `ExecutionView` | future perpetual funding | cash delta | future `Account.commit(LifecycleBatch)` |
-| `EXPIRY`* | 만기 시점 | `ExecutionView` | future final settlement | cash/position delta | future `Account.commit(LifecycleBatch)` |
-
-cutoff 열이 사라진 것에 주의한다. 무엇을 볼 수 있는지는 clock 위치와 각 관측치의 `available_at`이
-결정하므로 event마다 명시할 값이 아니다. 일봉의 `available_at`이 15:30이면 09:00 `DECISION`은 당일
-종가를 조회할 수 없다 — 별도 설정 없이 시간표에서 유도된다(§7).
-
-별표(`*`) event는 MVP scheduler와 acceptance 대상이 아닌 future extension point다. `DECISION`은 fill을
-commit하지 않고 daily runtime의 `MONITOR`도 Account를 변경하지 않는다. Decision intent는 execution event의
-immutable input이다. 중단된 run의 `RESUME` event는 current scope가 아니며, 실패하거나 중단된 run은 처음부터
-다시 실행한다. 종료된 run의 final Account와 strategy state를 caller가 다음 run에 명시적으로 seed하는 것은 resume이 아니다.
-
-Current daily runtime의 동시각 순서는 고정 상수로 표현한다(`flow/daily.py`).
-
-```text
-DECISION 0  →  EXECUTION 10  →  MARK 20  →  MONITOR 30
-```
-
-여기서 current `DailyExecutionFlow`의 `MONITOR` callback은 session performance와 account observation evidence를
-만들 뿐 constraint를 평가하지 않는다. Constraint monitoring은 committed checkpoint와 frozen `evaluation_time`을
-받는 별도 `QlibxProject.monitor_constraints()` operation이다. Caller가 원하는 cadence로 명시적으로 호출할 수 있고,
-future optional scheduler가 같은 operation을 callback으로 등록할 수는 있지만 `run_daily()`는 현재 자동 호출하지 않는다.
-
-† Public direct materialization boundary는 **current**다. `QlibxProject.materialize()`가 frozen evaluation time과
-resolved requirements로 `ModelView`를 만들고, forward-label `available_at`과 `horizon_end` preflight를
-강제한다. 다만 표의 scheduled `MATERIALIZE` callback은 여전히 target이다. Rolling/expanding/event-triggered fit과
-durable Model registration은 구현되지 않았고 Direct Strategy나 stored-result analysis에는 이 event가 없다.
-
-\* `SETTLEMENT`·`FUNDING`·`EXPIRY`는 future extension characterization이다. Exchange가 Clock을 직접
-조작하지 않는다. Instrument registration 시 필요한 event specification을 반환하고 engine/flow가 Clock에
-callback을 등록한다. §13.6과 §15 참조.
-
-새 event나 direct operation을 추가할 때 freeze, requirements, permitted read, calculation, commit, evidence와
-validation을 모두 채워야 한다. Event 이름이나 global stage enum을 추가하는 것만으로 설계가 끝나지 않는다.
-
----
-
-## 4. 불변식
-
-아키텍처의 실체는 부품 목록이 아니라 어겨서는 안 되는 규칙이다. 각 항목은 테스트 가능해야 한다.
-
-| # | 불변식 | 검증 방법 |
-|---|---|---|
-| **I1** | Clock만 시간을 움직인다. 어떤 부품도 `datetime.now()`를 부르지 않는다 | 소스 스캔 테스트 |
-| **I2** | 모든 데이터 접근은 clock-bound view를 경유한다. View는 `available_at <= clock.now()`를 우회할 수 없고, store 직접 접근·전역 provider·모듈 상태는 금지한다 | import 방향 테스트 + view 질의 술어 검사 |
-| **I3** | 모든 component clock은 runtime이 같은 시각으로 함께 전진시킨다. 어떤 component도 홀로 앞설 수 없다 | clock 단조성 테스트 |
-| **I4** | 커밋되는 authoritative runtime state store는 Account 하나다. Strategy state는 package store가 아니라 explicit input/output JSON value이며 Flow만 다음 판단으로 전달한다 | 공개 API 표면 + explicit seed 테스트 |
-| **I5** | 모든 operation은 typed result + diagnostics를 반환하거나 commit 전에 `OperationError`로 실패한다 | contract test |
-| **I6** | Catalog는 append-only. 같은 identity + 다른 content는 conflict 실패 | 발행 테스트 |
-| **I7** | 같은 frozen config + 같은 데이터 → 같은 event 순서 → 같은 결과 | 2회 실행 비교 |
-| **I8** | Requirement는 선택한 operation을 호출할 때 resolve한다. 누락은 unrelated registration이나 workflow를 무효화하지 않고 state mutation 전에 실패한다 | progressive-requirement fixture |
-| **I9** | Success, failure, retry, actual state와 intended state는 서로 다른 typed evidence다. Failure나 intended state를 authoritative success로 승격하지 않는다 | artifact/reconciliation fixture |
-| **I10** | Account의 모든 held Instrument는 frozen registry에 등록되어 있고, Strategy tradable universe와 무관하게 valuation set에 포함된다 | registration + mixed-instrument fixture |
-| **I11** | Account change는 event ID 기준 idempotent하고 `expected_version` CAS와 batch atomicity를 지킨다. 실패한 batch는 cash, Position, journal 어느 것도 바꾸지 않는다 | duplicate/stale/partial-failure fixture |
-| **I12** | 모든 체결과 valuation은 수량 × 가격으로 표현된다. Return-native execution 경로는 존재하지 않으며 portfolio return, NAV, PnL과 turnover는 Account를 거친 결과에서만 산출된다 | analysis operation의 출력 metric 검사 + return-only source의 execution 거부 fixture |
-| **I13** | Trigger 평가는 순수 함수다. Schedule-shaped current policy의 입력은 candidate event와 이번 run의 FIRE 이력뿐이며 Account/strategy state를 읽거나 쓰지 않는다 | Clock/data 없는 동일 입력 반복 평가 + Flow trace fixture |
-| **I14** | Strategy state 갱신은 성공한 Strategy 반환 직후 일어나며 order/fill/execution 성공 여부에 종속되지 않는다. 새 run은 prior state를 자동 선택하지 않는다 | zero-order HOLD + explicit-seed/fresh-run 비교 |
-| **I15** | Actual-state history는 user-selected recording spec과 Strategy-declared field/range의 교집합만 보인다. 미기록·미선언 항목은 추정 없이 계산 전에 실패한다 | account-series/instrument-panel + unrecorded-field fixture |
-
-**I1**이 가장 자주 깨진다. Backtest에서 wall clock을 읽는 것은 조용한 재현성 파괴다.
-
-**I2와 I3도 2026-08-03 개정되었다.** 초안의 I2는 event마다 조립한 context를 전제했고, I3는 그
-context의 파생 규칙이었다. View 모델에서는 시간 경계가 clock 한 곳에서 강제되므로 두 불변식이
-그에 맞게 다시 쓰였다. §17 참조.
-
-**I4는 2026-08-11 다시 개정되었다.** Account는 actual state의 유일한 mutable aggregate다. 이전
-`StrategyMemoryStore`/CAS authority는 PRD §9.11의 execution-independent state와 충돌해 제거했다. Strategy state는
-한 개의 strict JSON value로 invocation/run 경계를 명시적으로 넘는다. §9와 §16 G1 참조.
-
-**I5**는 명시적 실패와 diagnostics 보존을 타입으로 강제한다. 진단을 버리려면 `_`로 명시적으로
-받아야 하고, 그러면 코드 리뷰에서 잡힌다. Requirement gap은 계산 결과의 한 종류가 아니라 계산 전
-실패이므로 partial result를 success로 publish하지 않는다.
-
----
-
-## 5. ① runtime
-
-> 이 layer의 package 이름은 `src/qlibx/runtime/`이다. 본문의 "① kernel"은 2026-08-11 sync에서 `runtime`으로
-> 통일했다. 파일은 `clock.py` 하나이며 `Event`와 `Handler`가 그 안에 함께 있다. 별도 `event.py`/`queue.py`
-> 모듈은 없고 queue는 `BacktestClock`의 내부 heap이다.
-
-### 책임
-
-시간을 앞으로 감고, 등록된 event를 시각순으로 뱉는다. 그것뿐이다.
-
-Runtime은 alpha, order, market이 무엇인지 모른다. `Callable`만 안다.
-
-### 계약
+### 3.2 SessionCalendar는 venue fact다
 
 ```python
-@dataclass(frozen=True, slots=True)
-class Event:
-    name: str            # "DECISION" | "EXECUTION" | "MARK" | "MONITOR" | "RESUME"
-    ts: datetime         # timezone-aware
-    priority: int        # 동시각 결정론
-    payload: object | None = None
+class Session(BaseModel):
+    session_date: date
+    open_at: datetime
+    close_at: datetime
 
-class Handler(NamedTuple):
-    event: Event
-    callback: Callable[[Event], None]
-
-class Clock(Protocol):
-    def now(self) -> datetime: ...
-    def schedule(self, event: Event, callback: Callable[[Event], None]) -> None: ...
-    def advance_to_next(self) -> list[Handler]: ...   # 시각순 정렬 보장
-    def is_finished(self) -> bool: ...
+class SessionCalendar(Protocol):
+    venue_id: str
+    timezone: ZoneInfo
+    def sessions(self, start: date, end: date) -> tuple[Session, ...]: ...
 ```
 
-Timer 등록 API(`set_timer`)는 두지 않는다. Flow가 frozen session calendar의 candidate마다 callback을 등록하고,
-Strategy가 고른 schedule-shaped `TriggerPolicy`를 callback 선두에서 평가한다. Clock은 반복 규칙이나 Strategy를
-모르며 event 시각·priority·callback reference만 정렬한다.
+Strategy는 휴장일이나 session을 생성하지 않는다. 첫 구현은 다음 중 하나를 frozen run input으로 받는다.
 
-`BacktestClock`은 `advance_to(timestamp)`로 명시 전진하고 `require_aware()`가 naive timestamp를 거부한다.
+- 명시적으로 전달한 session 목록
+- run definition에 provider identity/version을 기록한 승인된 calendar provider의 결과
 
-### event / callback / handler 의 소속
+가격 row coverage, 특정 instrument의 결측, 단순 weekday 추정으로 session calendar를 만들지 않는다.
 
-| | layer | 정체 | 생성자 | 수명 |
-|---|---|---|---|---|
-| `Event` | ① runtime | 불변 데이터 | Flow가 만들고 Clock이 정렬 | 기록 가능 |
-| `Handler` | ① runtime | `(event, callback)` 묶음 | Clock | 일회용 |
-| callback | ② flow | 함수 | **우리가 작성** | 상태 없음 |
-
-Runtime은 callback이 무엇을 하는지 모른다. 따라서 가짜 callback으로 순서만 검증하는 독립 테스트가
-가능하다.
-
-### 동시각 순서
-
-같은 timestamp의 event는 `priority` 오름차순으로 처리한다. `MARK`가 daily `MONITOR`보다 먼저여야
-session performance와 account observation이 갱신된 committed mark를 읽는다. 시각을 인위적으로 벌리는 대신
-priority로 표현한다 — 순서의 이유가 코드에 남기 때문이다. 이 순서는 별도 constraint-monitoring operation을
-daily flow에 자동 연결한다는 뜻이 아니다.
-
-### Clock implementation 교체
-
-```
-BacktestClock   데이터 끝까지 즉시 감는다
-LiveClock       실제 시각을 기다린다
-```
-
-Clock 교체는 event progression 차이만 설명한다. MVP는 `BacktestClock`만 acceptance 대상으로 삼는다. 향후 live
-production은 stream source, Executor/OMS adapter, persistence와 authority source까지 별도로 설계해야 하며 Clock만
-바꿔 simulated Fill을 production Fill로 해석하지 않는다.
-
-### Reference와 선택 근거
-
-| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
-|---|---|---|---|---|
-| Clock 추상과 test/live 구현 | NautilusTrader | `common/component.pyx` L130/L623/L839 | 설계만 | 같은 callback 계약으로 simulated/live time source를 교체하기 적합 |
-| `advance_time`의 시각순 handler 반환 | NautilusTrader | 같은 파일 L790 | 설계만 | Clock은 순서만 소유하고 business logic을 Flow에 남김 |
-| TimeEvent / TimeEventHandler와 priority | NautilusTrader | 같은 파일 L1013/L1144, `Subscription.priority` L2911 | 설계만 | IoC와 동시각 결정론을 명시적으로 표현 |
-| 단일 시간축 정렬 순회 | vn.py | `alpha/strategy/backtesting.py` L156-166 | 코드 차용 | timestamp merge 산술만 참고하고 callback/priority는 qlibx가 추가 |
-
-### 채택하지 않는 것
-
-Qlib `TradeCalendarManager`(`backtest/utils.py` L23)는 `freq` 하나와 `trade_step` 하나를 갖는
-**반면교사**다.
-독립 cadence를 가진 병렬 clock을 표현할 수 없다. `NestedExecutor`(`backtest/executor.py` L310)는
-계층만 제공하며 형제 관계를 표현하지 못한다.
-
----
-
-## 6. ② flow
-
-### 책임
-
-선택된 operation graph를 실행한다. 무엇을 어떤 순서로 부르고 어느 result를 commit/publish할지만 안다.
-Requirement를 해결하거나 경제적 결과를 계산하지 않는다.
-
-아래는 current `flow/` 구조를 요약한 shape다. 실제 method 이름은 `ViewGate.strategy_view()` /
-`model_view()` / `execution_view()` / `monitor_view()` 넷이며 generic `scoped_view()`는 두지 않는다 — role이
-호출부에서 드러나야 least-authority 위반이 리뷰에서 보이기 때문이다.
+### 3.3 Trigger는 Strategy가 소유한다
 
 ```python
-def invoke(operation, trigger) -> OperationOutcome:
-    invocation = freezer.freeze(operation, trigger)
-    resolved = resolver.resolve(operation.requirements(), registry)
-    if resolved.failed:
-        failure = OperationError.from_resolution(invocation, resolved)
-        artifacts.publish_failure(failure)       # success artifact나 state mutation 없음
-        return OperationOutcome.failed(failure)
-
-    view = gate.strategy_view(as_of=invocation.evaluation_time, bindings=resolved.bindings, ...)
-    draft = operation.run(view)                  # StrategyOperation은 StrategyDraft를 반환
-    return OperationOutcome.succeeded(promote(draft, view.accessed()))
-
-
-def on_decision(ev: Event) -> None:
-    outcome = invoke(profile.strategy_operation, ev)
-    artifacts.publish(*outcome.artifacts)
-    if outcome.failed:
-        return
-    if outcome.decision_intent is None:           # research-only result or explicit hold
-        finalizer.commit_non_execution(outcome)   # explicit policy + CAS; evidence 기록
-        return
-    pending = finalizer.prepare(outcome)           # proposed memory는 아직 authority가 아님
-    execution_ts = profile.executor.plan(pending.decision_intent)   # 시각 하나 또는 None
-    if execution_ts is not None:
-        clock.schedule(Event("EXECUTION", execution_ts, EXECUTION_PRIORITY), on_execution)
-
-
-def on_execution(ev: Event) -> None:
-    view = gate.execution_view(as_of=ev.ts, bindings=resolved.bindings, ...)
-    before = account.snapshot(evaluation_time=ev.ts)
-    prepared = preparation.prepare(intent, context)        # OperationOutcome[PreparedExecution]
-    if prepared.failed:
-        artifacts.publish_failure(prepared.error)          # Exchange 호출 없음
-        return
-    matched = exchange.match_batch(prepared.value.request) # OperationOutcome[ResultT]
-    commit = account.commit(
-        FillBatch(...), expected_version=before.version,
-    )
-    artifacts.publish(matched.value, prepared.value.evidence, commit)
-    finalizer.commit_simulation_checkpoint(decision_id, account, memory)
-
-
-def on_mark(ev: Event) -> None:
-    view = gate.execution_view(as_of=ev.ts, bindings=profile.mark_bindings, ...)
-    before = account.snapshot(evaluation_time=ev.ts)
-    mark, diagnostics = profile.valuation.run(view, account=before)
-    commit = account.commit(mark, expected_version=before.version)  # MarkBatch
-    artifacts.publish(account.snapshot(evaluation_time=ev.ts), commit, diagnostics)
-
-
-def on_monitor(ev: Event) -> None:                     # daily runtime의 MONITOR
-    findings = compute_session_performance(mark, executions)
-    artifacts.publish(findings)                        # account를 건드리지 않는다
-
-
-def on_settlement(ev: Event) -> None:                  # future characterization only
-    view = gate.execution_view(as_of=ev.ts, ...)
-    before = account.snapshot(evaluation_time=ev.ts)
-    lifecycle, diagnostics = profile.settlement.run(view, account=before)
-    commit = account.commit(lifecycle, expected_version=before.version)  # LifecycleBatch
-    artifacts.publish(account.snapshot(evaluation_time=ev.ts), commit, diagnostics)
+class EveryNSessions(BaseModel):
+    n: int
+    local_time: time = time(4, 0)
+    timezone: str = "Asia/Seoul"
+    anchor: date | None = None
 ```
 
-Current daily `MONITOR` callback은 `MonitorView`를 만들지 않는다. 같은 시각의 committed mark와 execution
-record에서 session performance를 계산할 뿐이다. `MonitorView`를 쓰는 것은 별도 standalone
-`monitor_constraints()` operation(`flow/monitoring.py`)이다.
+`n=1`은 매 eligible session, `n=5`는 anchor부터 센 다섯 번째 eligible session마다 decision candidate를 만든다.
+Flow가 `SessionCalendar`의 날짜와 Strategy의 `TriggerPolicy`를 결합해 DECISION event를 schedule한다. Strategy는
+trigger를 선언하지만 Clock을 직접 진행시키거나 자신을 호출하지 않는다.
 
-Simulation에서는 local Account가 actual-state authority다. Runtime monitoring은 이 committed Account snapshot을
-읽는다. External OMS reconciliation과 production Account projection은 future work이며 MVP flow에 포함하지 않는다.
-Stored snapshot의 `as-was`/`as-if` 재평가는 별도 analysis invocation이 Catalog artifact를 명시적으로
-입력받아 같은 pure evaluator를 호출한다. `latest` 파일을 암묵적으로 선택해 runtime authority와 historical
-evidence를 섞지 않는다.
-
-Strategy state는 profile finalization에서 commit되는 store가 아니다. `ResearchFlow`가 성공한 Strategy draft의
-`proposed_state`를 strict JSON으로 정규화한 뒤 즉시 다음 state로 확정한다. 이후 decision conversion이나 execution이
-실패해도 이미 발행된 Strategy result와 proposed state evidence는 남을 수 있고, Account는 실제 commit된 사실만 유지한다.
-이 의도적 분리는 decision memory를 intended position이나 actual fill과 혼동하지 않게 한다.
-
-### Run 종료 checkpoint와 recovery 범위
-
-Current daily/academic flow는 종료 시 final checkpoint를 발행한다. Daily 결과는 final Account와 final strategy state를,
-Academic 결과는 final hypothetical checkpoint를 제공한다. Caller는 이 종료 결과를 새 run의 explicit seed로 사용할 수
-있지만, package는 prior run이나 partial recovery point를 자동 선택하지 않는다.
-
-중단된 run의 event position 복원, partial evidence 재발행, `resume=` API와 `simulation_recovery_point`는 PRD §17.2의
-future capability다. Current scope에서는 실패하거나 중단된 run을 처음부터 다시 실행한다. 이 제거는
-`LocalArtifactBackend` catalog publication의 conflict/idempotency/recovery 계약에는 영향을 주지 않는다.
-
-### Executor, Preparation, Exchange는 서로 다른 것이다
-
-```
-Executor      그 결정을 언제 넘기나            시각 선택만. ② flow.
-Preparation   그 시각의 입력으로 무엇을 요청하나  request 조립. ④ operation 경계.
-Exchange      그 요청에서 얼마나 체결되나       상태를 쓰지 않는 계산. ④ operation.
-Flow          누가 commit/전달하나             Account commit, strategy state 전달과 evidence 발행.
-```
-
-qlibx의 기본 단위는 **decision time의 횡단면**이다. 3000종목 일봉은 같은 순간에 함께 확정되므로
-3000개의 개별 event로 쪼개지 않는다. 한 execution event가 주문 집합 전체를 나른다.
-
-```
-on_decision (flow)
-    │ execution_ts = executor.plan(decision)       ← 다음 eligible 시각 하나 또는 None
-    │ flow가 EXECUTION event를 Clock에 등록          숨은 pending store 없음
-    ▼
-on_execution(event) (flow)
-    │ view   = gate.execution_view(as_of=event.ts, ...)      → ③ view
-    │ before = account.snapshot(evaluation_time=event.ts)
-    ▼
-┌──────────────────────────────────────────────────────────────┐
-│ ExecutionPreparation.prepare(intent, context)                │  ④ 경계
-│   construct → adjust → advisory validate → convert (고정 순서) │
-│   → OperationOutcome[PreparedExecution(request, evidence)]   │
-└──────────────────────────────────────────────────────────────┘
-    │ 실패면 Exchange를 호출하지 않고 failure evidence만 발행
-    ▼
-┌──────────────────────────────────────────────────────────────┐
-│ BaseExchange.match_batch(request)                            │  ④ operation
-│   → OperationOutcome[ResultT]   (instrument축 elementwise)    │
-└──────────────────────────────────────────────────────────────┘
-    │ flow: account.commit(FillBatch, expected_version=before.version)
-    ▼
-⑤ Account — batch 전체를 원자적으로 반영
-```
-
-### 계약
-
-Current executor는 **시각 선택기**다. 공용 `Executor` Protocol은 두 번째 schedule 축이 생길 때 추출하며,
-지금은 두 concrete class가 같은 shape를 갖는 것으로 충분하다.
-
-```python
-class NextSessionCloseExecutor:
-    def __init__(self, profile: DailyExecutionProfile, sessions: tuple[datetime, ...]) -> None: ...
-    def plan(self, decision: DecisionIntent) -> datetime | None: ...
-
-class NextSessionOpenExecutor:      # 같은 shape, session open calendar를 받는다
-    def plan(self, decision: DecisionIntent) -> datetime | None: ...
-```
-
-`plan()`은 `decision.decision_time`보다 **엄격히 뒤인 첫 eligible session**을 고르고 없으면 `None`을
-반환한다. 체결 계산도, limitation 선언도, Account 접근도 하지 않는다 — 그 셋은 각각 Preparation, evidence
-schema, Flow의 몫이다. `ExecutionSpec`, `ExecutionEvent`, `ExecutionResult`, `ExecutionLimitation` 같은
-generic executor 타입은 두지 않는다. Schedule은 `DailySimulationSpec.execution_timing`
-(`next_session_close` | `next_session_open`)이 고르고, Flow가 그에 맞는 executor를 만든다.
-
-`request`는 단건 목록이 아니라 instrument축 배열 묶음이다. `match_batch`는 §8의 clipping 순서를
-elementwise 연산으로 수행한다.
-
-여러 venue가 지원되면 Flow가 stable venue order로 partition하고 shared cash, currency와 collateral
-semantics를 명시해야 한다. 현재 stock/ETF scope는 하나의 execution profile로 시작한다. Venue 순서에 따라
-공유 현금 결과가 달라질 수 있으므로 이 규칙 없이 병렬 실행하지 않는다.
-
-한 execution event 안에서 여러 주문이 같은 현금을 경쟁하면 Exchange의 local working state가 stable
-order로 잔여 현금을 계산한다. 이 임시 계산은 Account authority가 아니며 성공한 전체 `FillBatch`만 한 번에
-commit된다. MVP에는 partial fill이나 여러 execution event에 걸친 pending quantity가 없다.
-
-`DecisionIntent`는 현재 `flow/daily.py`에 정의된 daily-flow 지역 타입이다. Executor-neutral한 개념이지만
-두 번째 flow가 같은 shape를 요구할 때까지 공용 `domain.py`로 올리지 않는다.
-
-### Future work — 같은 계약으로 intraday Executor를 끼운다
-
-다음 내용은 MVP acceptance가 아닌 future characterization이다. Daily와 intraday Executor의 차이는 Account
-mutation 방법이 아니라 **execution event 계획과 필요한 market data**다.
+### 3.4 표준 daily-close timeline
 
 ```text
-DecisionIntent: 삼성전자 1,000주 BUY                         # 둘이 공유
+2024-03-05 15:30 Asia/Seoul
+  close row becomes available
 
-Next-session close Executor
-  E1 다음 session close → Fill 1,000주 → Account.commit(FillBatch) → 완료
+2024-03-06 04:00 Asia/Seoul
+  Strategy decision event
+  permitted rows: available_at <= 04:00
+  PortfolioIntent is frozen
 
-Intraday Executor
-  E1 09:30 → Fill 300주 → Account commit v11
-  E2 11:00 → 최신 Account v11 + 최신 quote/volume → Fill 200주 → commit v12
-  E3 15:20 → 최신 Account v12 + 최신 quote/volume → Fill 100주 → commit v13
-  종료      → 400주 미체결과 limitation을 ExecutionResult/Evidence에 기록
+2024-03-06 15:30 Asia/Seoul
+  next eligible close execution event
+  OrderPlanner uses current Account + execution-time PIT inputs
+  Exchange produces FillBatch
+  Account commits, then valuation marks
 ```
 
-이 절의 `ExecutionSpec`, `ExecutionEvent`, `ExecutionResult`, `completes_decision`은 **아직 존재하지 않는
-future 타입 이름**이다. Current `plan()`은 시각 하나를 반환하고 remaining-quantity 개념이 없다.
+`2024-03-05 04:00`에는 3월 5일 close를 읽을 수 없다. `2024-03-06 04:00` event는 data에 04:00 row가 없어도
+Clock queue에 정상적으로 들어간다.
 
-Intraday `plan()`은 calendar와 frozen DecisionIntent만으로 여러 execution 시각을 만든다. 미래 quote를 보고
-event 시각을 소급 선택하지 않는다. 각 callback은 그 시각까지 available한 `ExecutionView`와
-가장 최근 `AccountSnapshot`만 읽는다. Decision이 아직 끝나지 않았으면 다음 event가 같은
-decision ID와 remaining quantity를 이어받고, 마지막 event나 expiry/cancel policy가 decision을 종료한다.
+### 3.5 동일 timestamp 순서
 
-따라서 Executor를 교체해도 다음 계약은 변하지 않는다.
+동일 timestamp에서는 deterministic priority를 사용한다.
 
-```text
-immutable DecisionIntent
-  → one or many EXECUTION event
-  → prepared request → typed exchange result (+ diagnostics)
-  → Flow-owned Account.commit(expected_version)
-  → 다음 event와 다음 Strategy가 committed actual state를 읽음
-```
+1. `DATA_AVAILABLE`
+2. `DECISION`
+3. `EXECUTION`
+4. `FILL_COMMIT`
+5. `VALUATION`
+6. `MONITORING`
+7. `FINALIZE`
 
-Intraday profile은 quote/volume 또는 order-book binding, latency/liquidity model과 scheduling limitation을 추가로
-선언한다. Data가 없으면 next-close 결과로 조용히 축약하지 않고 requirement resolution에서 실패한다. 이 때문에
-첫 naive profile을 구현해도 Executor/Account public contract를 다시 설계하지 않고 intraday 가정을 추가할 수 있다.
+같은 timestamp에 decision과 execution을 배치하려면 price availability를 별도로 증명해야 한다. Daily-close
+default는 04:00 decision과 15:30 execution을 분리한다.
 
-MVP architecture validation은 daily full-fill executor만 대상으로 한다. 향후 intraday profile을 추가할 때도 별도
-public class name을 PRD에 고정하지 않고 schedule granularity, required market binding, liquidity model과 limitation을
-위 계약 뒤에서 선언한다. 지원하지 않는 granularity를 daily fill로 조용히 축약하지 않는다.
+## 4. Data registration과 PIT View
 
-### Current next-close/open execution과 future FillConvention class
-
-**Current implementation.** `NextSessionCloseExecutor`와 `NextSessionOpenExecutor`는 각각 다음 eligible close/open
-event를 만들고, `DailyExecutionFlow`가 독립된 `DailyExecutionProfile.execution_price_role`을
-`ExecutionView`에서 resolve해 size/match한다. Schedule 선택은 `execution_timing`, 가격 선택은 semantic role이라
-서로 독립이다. 별도 `FillConvention`, `ClosePriceFill`, `OpenPriceFill` class는 아직 없으며 아래 protocol은 세
-번째 reference-price behavior가 실제로 필요할 때의 **target/future pseudocode**다.
-
-Executor가 정하는 것은 **일정**(언제 몇 번 넘기나)이고, 체결가 규약은 별도 축이다. 둘을 묶으면
-"종가 체결"을 "시가 체결"로 바꾸는 데 executor를 새로 써야 한다.
+### 4.1 최소 등록
 
 ```python
-# target/future pseudocode — not a current public symbol
-class FillConvention(Protocol):
-    def reference_price(self, view: ExecutionView) -> Prices: ...   # instrument축 배열
-```
-
-```
-ClosePriceFill     execution event가 속한 session의 close를 기준 가격으로 사용
-OpenPriceFill      execution event가 속한 session의 open을 기준 가격으로 사용
-IntradayVWAPFill   execution event가 선언한 intraday 구간의 VWAP을 기준 가격으로 사용
-```
-
-Current close 조합은 `NextSessionCloseExecutor + close execution-price role`, open 조합은
-`NextSessionOpenExecutor + open execution-price role`이다. 예를 들어 close 공개 뒤 확정된 `DECISION`은 다음
-eligible session의 open 또는 close에 `EXECUTION` event를 등록한다. 선택된 role의 관측치가 그 event 시각까지
-available해야 하므로 close-available row를 open에 사용할 수 없다. 이 field-level contract가 **언제 체결을
-시도하는가**와 **어느 가격을 기준으로 삼는가**를 독립적으로 바꾼다.
-
-두 조합 모두 가장 단순하고 낙관적인 simulation profile이다. 다음 session의 open 또는 close 한 가격으로
-전체 batch가 체결된다고 가정하며, 별도 liquidity model이 없으면 장중 가격 경로, market impact와 partial fill을
-설명하지 못한다. 가격은 StrategyView에서 복사하지 않고 execution event의
-`available_at <= event.ts`를 만족하는 ExecutionView에서 읽는다. 선택한 session price가 아직 available하지
-않으면 Fill 전에 실패한다. Result artifact는 convention identity, decision time, scheduled session, fill time,
-modelled/unmodelled liquidity와 limitation을 기록한다.
-
-Same-session close는 기본값의 다른 이름이 아니다. Decision이 close 공개 전에 확정되고 별도 profile이 그
-시점과 availability를 명시할 때만 가능한 별도 convention이다.
-
-Convention 교체는 Strategy decision artifact를 바꾸지 않아야 한다. Current next-open은 real PIT open
-observation, explicit schedule 계약과 no-Strategy-rerun acceptance를 갖춘 frozen-child profile이다. Required
-market binding, execution schedule과 actual Fill이 달라질 수 있으므로 Executor profile이 compatibility를
-검증하고 그 dependency를 기록한다. `exchange.match_batch`는 선택된 convention이 ExecutionView에서 만든
-가격 배열만 받는다.
-
-### batch가 closed loop를 해치지 않는다
-
-한 event가 횡단면 전체를 나른다는 것과, 시간 축이 순차라는 것은 서로 독립이다.
-
-```
-피드백 유무   →  시간 축이 순차인가로 결정   →  qlibx: 순차. 유지.
-event 입도    →  종목별인가 횡단면인가       →  qlibx: 횡단면. batch.
-```
-
-시간 축이 순차이므로 다음이 모두 성립한다.
-
-- 부분체결 후 다음 decision은 requested target이 아니라 **실제 보유**에서 계산한다 (PRD §4.3)
-- Blocked liquidation은 포지션에 남아 다음 decision에 포함된다 (PRD §4.3)
-- 실현손익 누적에 의존하는 stop-loss 같은 path-dependent 정책이 성립한다 (§16 G1, G2)
-
-흔히 "vectorized backtest"로 불리는 것 — `(weights.shift(1) * returns).sum()` 형태의 시간 축
-일괄 계산 — 은 이와 다르다. 그쪽은 feedback edge 자체가 없어 PRD §4.3을 만족할 수 없으며
-채택하지 않는다. **벡터화 대상은 instrument 축이고 시간 축이 아니다.**
-
-### 읽기와 쓰기를 분리한다
-
-Preparation과 Exchange는 immutable `AccountSnapshot`만 읽고 typed outcome을 반환한다. `Account.commit()`은
-Flow만 호출한다. 이름은 쓰기 전용처럼 보이지만 cash/positions 조회까지 제공하던 `FillSink`는 제거한다.
-
-```text
-query     Account.snapshot()        → immutable state
-compute   Preparation / Exchange    → OperationOutcome[typed result]
-command   Account.commit()          → validated atomic transition
-```
-
-이 경계는 **Functional Core, Imperative Shell** 패턴이다. Exchange와 valuation policy는 frozen input으로
-결과를 계산하는 functional core이고, Flow는 callback 순서와 commit을 담당하는 imperative shell이다. 계산
-실패를 Account mutation과 분리하고 같은 입력의 체결 산술을 독립적으로 검증하기 위해 적절하다.
-
-Executor와 valuation policy는 생성자 주입으로 교체한다. Exchange는 `BaseExchange[RequestT, ResultT]` 아래에서
-public run 호출별 keyword 주입으로 선택하므로 이 경계에도 **Strategy Pattern**이 성립한다. 향후 daily executor를
-intraday executor로 바꾸더라도 `typed exchange result → Account.commit()` 계약은 변하지 않도록 유지한다.
-
-### qlib과의 차이
-
-qlib은 `exchange.deal_order(order, trade_account=account)`로 **Exchange가 account를 직접 변경**한다
-(`backtest/exchange.py` L421). 계산기가 상태를 건드린다.
-
-qlibx는 분리한다.
-
-```python
-prepared = preparation.prepare(intent, context)      # 관측값을 immutable request에 고정
-matched = exchange.match_batch(prepared.value.request)  # explicit input의 순수 계산
-account.commit(FillBatch(...), expected_version=before.version)   # Flow만 반영
-```
-
-얻는 것: (1) account 없이 체결 산술을 테스트할 수 있다, (2) 같은 주문 집합을 여러 시나리오로 돌릴
-수 있다 (what-if, PRD §9.9), (3) diagnostic을 버릴 수 없다 — `OperationOutcome`이 result와 실패를 함께 나른다.
-
-qlib은 주문 단건 순회이므로 이 분리가 성립해도 batch가 되지 않는다. qlibx는 단위 자체를
-instrument축 배열로 두어 `deal_order` 순회를 elementwise 연산으로 대체한다.
-
-### Flow/Executor reference와 선택 근거
-
-| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
-|---|---|---|---|---|
-| 일단위 executor 골격 | Qlib | `backtest/executor.py` L513/L561 | 코드 차용 | decision 뒤 별도 execution step을 여는 최소 흐름에 사용 |
-| 계층 위임 아이디어 | Qlib | 같은 파일 L310 `NestedExecutor` | 설계만 | 상위 decision과 하위 execution 분리는 참고하되 고정 계층은 강제하지 않음 |
-| 일별 순회와 체결 loop | vn.py | `alpha/strategy/backtesting.py::new_bars` | 코드 차용 | deterministic loop 산술만 참고 |
-| executor 교체와 분할 실행 | NautilusTrader | `execution/client.pyx` L71/L198, `algorithm.pyx` L88/L870-930 | 설계만 | client 교체와 primary order의 child-order 분할 아이디어를 one-or-many execution event seam에 사용 |
-| callback과 Flow-owned Account commit | qlibx | §2.3, §6, §9 | 순수 창작 | reference의 mutable account/cache 접근을 PIT-safe snapshot/atomic commit으로 바꿈 |
-
-NautilusTrader처럼 intraday execution을 별도 client/algorithm 뒤에 둘 수 있다는 점은 배우지만, qlibx는
-MessageBus와 live order graph를 복사하지 않는다. Decision-time 횡단면과 `available_at` View를 유지한 채
-Executor가 event를 나누고 같은 Account commit 계약을 호출하는 것이 현재 product 범위에 더 작고 명확하다.
-
----
-
-## 7. ③ view ★
-
-**정보 경계를 강제하는 layer다.** 초안에서는 `gate`가 event마다 snapshot을 조립해 넘기는
-구조였으나, 2026-08-03 개정으로 **clock에 묶인 조회 창구(view)** 방식으로 교체되었다. 변경 이유와
-근거는 §17에 기록한다.
-
-### Minimal registration과 progressive requirement resolution
-
-최초 dataset registration은 모든 미래 workflow의 schema를 요구하지 않는다. 다음 최소 계약만
-validation하고 logical dataset identity를 발행한다.
-
-```text
-logical key / instrument axis
-available_at binding 또는 user-confirmed derivation rule
-payload location, shape, null/uniqueness facts
-```
-
-Event/effective time, semantic category와 source provenance는 알려져 있으면 기록할 수 있지만 최초 registration을
-막는 전역 필드가 아니다. 이를 실제로 필요로 하는 future lifecycle operation 등이 자신의 requirement로 요구한다.
-
-Currency, universe, sector, benchmark, tradability, OHLCV, lot, label horizon과 compliance binding은 이를
-실제로 사용하는 operation이 requirement로 선언한다. Requirement는 field name이 아니라 semantic role,
-axis, time, unit/shape와 compatibility condition을 표현한다.
-
-Execution을 선택할 workflow는 가격 축을 요구한다(PRD §7.2.1). Return-only source는 unit price dataset으로
-변환해 등록하며, 그 dataset은 다른 dataset과 동일한 최소 계약을 따른다. Resolver는 이를 다른 price
-binding과 같은 방식으로 다루고, synthetic 여부는 Exchange listing의 `price_semantics`가 구분한다.
-
-```python
-class ComponentRequirement(QlibxModel):
-    requirement_id: str
-    semantic_role: str
-    axis: AxisRequirement = AxisRequirement()
-    time: TimeRequirement = TimeRequirement()
-    compatibility: tuple[CompatibilityRule, ...] = ()
-    dataset_id: str | None = None
-    lookback: Lookback | None = None      # RowsLookback | CalendarLookback
-
-class ResolvedBinding(QlibxModel):
-    requirement_id: str
-    semantic_role: str
+class DatasetRegistration(BaseModel):
     dataset_id: str
-    field: str
-    registration_identity: str
-    lookback: Lookback | None = None      # requirement에서 그대로 전달된다
-
-class RequirementResolver(Protocol):
-    def resolve(self, requirements: tuple[ComponentRequirement, ...],
-                registry: RegistrySnapshot) -> Resolution: ...
+    instrument_field: str
+    available_at: AvailabilityBinding
+    key_fields: tuple[str, ...]
+    fields: tuple[str, ...]
+    source: SourceIdentity
 ```
 
-`lookback`이 `ComponentRequirement`에도 `ResolvedBinding`에도 있는 것이 핵심이다. 선언이 view를 지나 Store
-query까지 그대로 흘러야 §7.6.1의 bounded access가 성립한다(아래 "조회 창구 계약" 참조).
+Universal required semantics는 다음뿐이다.
 
-Resolver는 user 의미를 추측하지 않는다. 등록된 binding으로 충족되면 immutable `ResolvedBinding`을 만들고,
-부족하면 operation과 hierarchical stage path, requirement ID, bounded observed fact, commit status와 retry
-precondition을 담은 `OperationError`를 반환한다. Agent가 이 evidence와 bundled skill을 해석해 binding
-보강, derived dataset, 다른 profile 또는 local extension 후보를 제시한다. User가 선택한 결과만 package가
-다시 validation한다.
+- instrument binding
+- `available_at` field 또는 user-confirmed derivation rule
+- logical row key
+- 선택한 data fields
+- source identity와 provenance
 
-같은 physical source를 Strategy, compliance와 report가 서로 다른 semantic binding으로 사용할 수 있다.
-실제로 resolve되고 읽힌 binding만 lineage에 남으며, 등록됐지만 쓰지 않은 metadata는 dependency가 아니다.
+`observation_time`은 universal field가 아니다. `fiscal_period`, `session_date`, `event_time`, `revision`,
+`horizon_end`는 일반 column이며 필요한 component가 요구하고 해석한다.
 
-### 두 개의 경계를 분리한다
+Registration에는 `research_close`, `execution_price`, `valuation_price` 같은 consumer-purpose alias를 두지 않는다.
+같은 `close` field도 Strategy, Exchange와 Valuation이 각자 자기 requirement로 선택한다.
 
-초안은 "무엇을 볼 수 있는가"를 하나의 문제로 다뤘다. 실제로는 서로 독립인 두 문제다.
-
-```
-시간 경계   언제까지의 데이터를 볼 수 있는가     →  clock 이 결정. 모든 view 공통.
-역할 경계   어떤 종류의 데이터를 볼 수 있는가     →  view 구성이 결정. view 마다 다름.
-```
-
-이 분리가 개정의 핵심이다. 시간 경계는 한 곳(clock)에서 일괄 강제되고, 역할 경계는 view에 어떤
-facade를 묶느냐로 표현된다.
-
-### 시간 경계 — stream 순서가 곧 cutoff다
-
-모든 관측치는 qlibx PIT gate가 사용하는 `available_at`을 갖는다. `event_time`은 source가 제공하거나 선택한
-operation이 경제적 의미상 요구할 때 보존할 수 있지만 MVP의 전역 계약이 아니다.
-
-```
-available_at    관측 가능해진 시각          ← PRD §4.4의 available_at
-event_time?     그 사건이 발생한 시각       ← optional payload/operation requirement
-```
-
-Runtime data stream은 **`available_at` 오름차순**으로 정렬된다. `event_time`이 아니다.
+### 4.2 component-owned requirement
 
 ```python
-stream = sorted(observations, key=lambda o: o.available_at)
+class DataRequirement(BaseModel):
+    consumer_id: str
+    dataset_id: str
+    fields: tuple[str, ...]
+    lookback: Lookback
+    coverage: CoverageRequirement | None = None
 ```
 
-View의 모든 조회에는 `available_at <= clock.now()` 조건이 붙는다. 우회 경로는 없다 — 조건이
-질의에 박혀 있고 view 밖의 store 직접 접근은 금지한다(I2).
+- Strategy는 signal/feature/benchmark/constituent field와 lookback을 요구한다.
+- OrderPlanner 또는 Exchange는 fill에 필요한 price, volume, tradability field를 요구한다.
+- Valuation은 모든 held instrument를 mark할 field를 요구한다.
 
-따라서 **cutoff는 파라미터가 아니라 clock의 위치다.**
+Flow의 `RequirementResolver`가 event마다 requirement를 resolve하고 bounded immutable View를 주입한다. Exchange나
+Strategy가 Store를 직접 열어 PIT gate를 우회할 수 없다.
 
-```
-09:00  DECISION      일봉의 available_at = 15:30 이므로 당일 종가는 조회되지 않는다
-15:30  EXECUTION     당일 종가가 조회된다
-```
-
-초안이 event마다 명시하던 cutoff 표는 사라진다. 시간표에서 유도되기 때문이다.
-
-**위험은 제거되지 않고 이동한다.** 보장은 전적으로 `available_at`이 등록 시점에 올바로 선언되었는지에
-달려 있다. 일봉의 `available_at`을 당일 00:00으로 넣으면 09:00 decision이 당일 종가를 보고, 예외는
-발생하지 않는다. User project가 source 의미와 실제 공개 가정을 소유하고 qlibx가 confirmed binding의
-형식, coverage와 PIT 적용을 validation하므로, 이 배치는 PRD의 책임 분담과 일치한다. 대신 data
-registration과 operation별 time requirement 검증이 §1 설계 명제를 지탱하는 핵심 경계가 된다.
-
-### 역할 경계 — view 구성
-
-| view | current capability | 구조적으로 제외 |
-|---|---|---|
-| `StrategyView` | declared PIT dataset/artifact, committed Account snapshot/history, latest execution result, bounded feedback/performance, explicit strategy state | undeclared binding/history, future feedback, mutable state port |
-| `ExecutionView` | declared PIT dataset only | artifact, Account, execution feedback, feedback, performance, strategy state |
-| `MonitorView` | declared PIT dataset + committed Account snapshot | artifact, execution feedback, feedback, performance, strategy state, mutable Account port |
-| `ModelView` | declared PIT dataset과 access lineage only | artifact, Account, execution feedback, feedback, performance, strategy state |
-
-구현은 상속으로 권한을 쌓는다. `_DatasetView`(dataset-only) → `_AccountStateView`(+ account) →
-`StrategyView`(+ artifact/execution/feedback/performance/strategy-state/account-history). `ModelView`와 `ExecutionView`는
-`_DatasetView`를, `MonitorView`는 `_AccountStateView`를 그대로 쓴다.
-`tests/test_architecture.py::test_role_views_expose_only_their_authorized_capabilities`가 이 분리를 회귀로 강제한다.
-
-`ModelView`는 이름과 달리 materialization 전용이 아니다. **dataset-only operation의 범용 view**이며
-`ModelFlow` 외에 `AnalysisFlow`, `ConstraintFlow`, `ExtensionFlow`도 같은 view를 받는다. Model 어휘를 쓰는 것은
-그 view를 소비하는 `ResearchModel` 계약 쪽이다.
-
-View 이름이 global field 목록을 뜻하지 않는다. Resolver가 이번 operation에 허용한 binding만 facade에
-넣는다. Compliance data나 monitoring finding을 Strategy에 쓰려면 Strategy requirement가 이를 명시해야
-하며 자동 feedback하지 않는다.
-
-Strategy가 actual account state를 요구하면 `AccountSnapshot`에는 모든 held position과 전체 cash/NAV가
-들어간다. Strategy tradable universe는 이 snapshot을 잘라내는 filter가 아니라 **새 주문을 검증하는 경계**다.
-따라서 주식 Strategy는 보유 Future와 그 평가 결과를 볼 수 있지만 Future order는 만들 수 없다. Future의 raw
-quote나 funding observation은 별도 data requirement를 선언하지 않는 한 StrategyView에 자동 노출되지 않는다.
+### 4.3 Store와 View
 
 ```python
-view = views.strategy(
-    resolved=resolver.require("strategy.monitoring_findings"),
-    findings=catalog.findings(before=clock.now()),
-)
+class ObservationStore(Protocol):
+    def query(self, query: BoundedQuery) -> ObservationBatch: ...
+
+class StrategyView(Protocol):
+    evaluation_time: datetime
+    def observations(self, requirement: DataRequirement) -> ObservationBatch: ...
+    def account(self) -> AccountSnapshot: ...
+    def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
+    def strategy_state(self) -> StrategyStateSnapshot | None: ...
 ```
 
-이때 (1) 어떤 finding을 소비했는지 기록되고, (2) `available_at` 조건이 적용되며, (3) lineage에
-dependency edge가 남는다.
+`BoundedQuery`는 dataset, fields, instruments, lower bound/lookback, `available_at <= evaluation_time`을 모두 Store
+query에 전달한다. 전체 history를 읽은 뒤 Strategy에서 slice하는 방식은 허용하지 않는다. View는 실제 access를
+기록해 lineage를 만든다.
 
-### 조회 창구 계약
+### 4.4 availability derivation example
+
+Source에 date만 있고 그 값이 KRX daily close를 의미한다고 user가 확인했다면 registration rule이
+`2024-03-05 -> 2024-03-05 15:30 Asia/Seoul`로 변환한다. Source date를 00:00으로 자동 해석하지 않는다.
+Fundamental row가 어느 회계기간을 설명하는지는 `fiscal_period` column으로 Strategy가 요구하면 된다.
+
+## 5. Strategy와 `PortfolioIntent`
+
+### 5.1 StrategyContext
 
 ```python
-class RowsLookback(QlibxModel):
-    kind: Literal["rows"] = "rows"
-    rows: int                              # > 0
-
-class CalendarLookback(QlibxModel):
-    kind: Literal["calendar"] = "calendar"
-    years: int = 0
-    months: int = 0
-    days: int = 0
-    timezone: str                          # 필수. 암묵 default를 두지 않는다
-    month_end_policy: Literal["clamp"] = "clamp"
-
-Lookback = RowsLookback | CalendarLookback
+class StrategyContext(Protocol):
+    event: DecisionEvent
+    view: StrategyView
+    universe: UniverseSnapshot
+    account: AccountSnapshot
+    state: StrategyStateSnapshot | None
 ```
 
-조회 창구는 별도 `PanelView`/`AccountView` Protocol이 아니라 role view의 method 집합으로 표현한다.
-Protocol 하나를 더 두면 실제 구현과 두 벌이 되어 어긋나므로 두지 않는다.
-
-```python
-# dataset capability — 모든 role view 공통 (_DatasetView)
-as_of      -> datetime
-history(semantic_role, instruments=None)                  -> DataFrame   # declared lookback 필수
-session(semantic_role, session_date, *, session_timezone) -> DataFrame
-at(semantic_role, observation_at)                         -> DataFrame
-latest(semantic_role, ...)                                -> DataFrame
-accessed() -> tuple[AccessRecord, ...]
-
-# account capability — MonitorView, StrategyView (_AccountStateView)
-account_snapshot() -> AccountState
-state_accessed()   -> tuple[StateAccessRecord, ...]
-
-# StrategyView 전용
-latest_execution_result() -> QlibxModel | None
-artifact(...)             -> ArtifactInputProjection
-account_feedback()        -> AccountFeedbackState
-latest_session_performance() -> SessionPerformanceRecordState
-strategy_state()         -> strict JSON value
-account_history(requirement_id) -> declared immutable projection
-# 각각 짝이 되는 *_accessed() lineage getter를 함께 노출한다
-```
-
-모두 읽기 전용이다. 쓰기 메서드를 노출하지 않는다 — nautilus의 `CacheFacade` / `PortfolioFacade`와 같은
-배치다. 임의 문자열 field를 조회하지 않고 Resolver가 이번 invocation에 발급한 `ResolvedBinding`의
-`semantic_role`만 받는다. 다른 operation의 binding이나 undeclared role을 넘기면 access 전에 실패한다.
-
-Lookback은 호출자가 임의로 붙이는 인자가 아니라 `ComponentRequirement`의 exact contract다. `history()`는
-lookback 인자를 받지 않고 **resolved binding에 실린 것만** 쓴다. `rows=N`은 PIT gate 이후 registered logical
-key로 결정적으로 정렬한 instrument별 최근 N행이고(DuckDB `arg_min(payload, sort_key, N) GROUP BY instrument`),
-`calendar`는 선언된 timezone의 evaluation date에서 years/months/days 달력 산술로 계산한 00:00부터 evaluation
-time까지의 `available_at` window다. Calendar month-end는 clamp하며 trading-session 수를 뜻하지 않는다.
-
-**이 강제는 관습이 아니라 store의 실패 조건이다.** `session`/`at`/`latest` 같은 bounded point query가 아닌
-historical read에 declared lookback이 없으면 `ObservationStore.query()`가 `DATASET_LOOKBACK_REQUIRED`로
-실패한다. 전체 history를 먼저 읽고 Strategy code에서 자르는 경로는 **구조적으로 호출할 수 없다**(PRD §7.6.1).
-
-Rows가 부족하면 있는 만큼의 ragged panel과 `instruments_below_window` count를 evidence로 남긴다. Global
-`available_at_min`으로 instrument별 coverage를 추정하지 않으며 최소 관측치 정책은 Strategy가 정한다.
-`AccessRecord`가 남기는 lookback 증거는 `lookback`, `snapshot_fingerprint`, `instruments_below_window`
-셋이다 — instrument마다 항목을 만들면 published result가 횡단면 크기에 비례해 커지므로 두지 않는다.
-
-### 횡단면이 기본 축이다
-
-Reference 세 곳은 모두 instrument별 시계열이 기본 접근 단위다. nautilus `cache.bars(bar_type)`은
-한 종목의 deque를 반환하고, 3000종목 패널을 만들려면 3000회 조회해 조립해야 한다. 메모리 상주
-방식이라 20년 × 3000종목을 담을 수도 없다.
-
-qlibx의 논리적 접근 단위는 **decision time의 횡단면**이다. Current view는 메모리 누적 컨테이너가
-아니라 등록 시점에 만든 normalized snapshot에 대한 시간 한정 projection으로 구현한다.
-
-```
-current source     user-owned CSV 또는 Parquet
-current ingestion  registration schema v2가 등록된 query column만 정규화한
-                   content-addressed Parquet snapshot을 versioned layout으로 발행
-current query      DuckDB read_parquet + predicate pushdown
-                   (PIT cutoff, session/point, rows/calendar lookback)
-current return     DataFrame (instrument × field)
-```
-
-#### Snapshot 계약과 explicit reindex
-
-Ingestion을 도입한 대가로 **snapshot invalidation 계약**이 생겼다. `ObservationStore.query()`는 조회 전에
-네 가지를 확인하고 어느 하나라도 어긋나면 추측 없이 typed failure로 끝낸다.
-
-| 조건 | 실패 코드 | 해소 방법 |
-|---|---|---|
-| registration이 schema v2가 아니거나 query snapshot이 없다 | `DATASET_QUERY_SNAPSHOT_REQUIRED` | `QlibxProject.reindex_datasets()` |
-| snapshot의 `layout_version`이 current와 다르다 | `DATASET_QUERY_SNAPSHOT_LAYOUT_REQUIRED` | `QlibxProject.reindex_datasets()` |
-| 원본 파일 SHA-256이 registration과 다르다 | `DATASET_SOURCE_DRIFT` | 등록된 원본을 복원 |
-| snapshot 파일 SHA-256이 dataset record와 다르다 | `DATASET_QUERY_SNAPSHOT_DRIFT` | reindex |
-
-Reindex는 **명시적 public operation**이다. Query 경로가 stale snapshot을 발견하고 자동으로 다시 만들지
-않는다 — 그러면 조회 시각에 ingestion 비용과 registration identity 변경이 숨어 들어간다. 같은 이유로
-`session`/`at` query는 `observation_time_field` registration이 없으면
-`DATASET_OBSERVATION_TIME_REQUIRED`로 실패하고 available row에서 event time을 추정하지 않는다.
-
-Fingerprint 재검증은 **매 query마다** 수행한다. 한 invocation 동안은 `ObservationStore.frozen()`
-context manager가 DuckDB in-memory connection을 재사용해 반복 connect 비용만 제거하며, 이 재사용이
-drift 검증을 건너뛰게 하지는 않는다.
-
-이 배치는 2026-08-10에 pandas in-memory filter에서 전환했다. 전환 이유는 성능만이 아니다. PRD §7.6.1이
-*"전체 history를 먼저 읽은 뒤 Strategy code에서 자르는 경로를 bounded access로 간주하지 않는다"* 를
-요구하므로, 선언된 lookback이 **질의 자체에 박혀야** 한다. Ingestion 단계와 snapshot invalidation 계약이
-비용으로 추가되었다. 이 횡단면 논리 축은 세 reference 어디에도 대응물이 없으므로 qlibx 순수 창작이다.
-
-### View reference와 선택 근거
-
-| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
-|---|---|---|---|---|
-| `ts_event` / `ts_init` 이중 timestamp | NautilusTrader | `core/data.pyx` L30/L42 | 비교 근거 | qlibx는 `ts_init`에 대응하는 `available_at`만 전역 필수로 채택하고 event time은 optional로 둠 |
-| `ts_init` 오름차순 stream과 data/timer ordering | NautilusTrader | `backtest/engine.pyx` L903/L1658-1735 | 설계만 | 아직 available하지 않은 observation을 stream 밖에 둠 |
-| revision 표시 | NautilusTrader | `model/data.pyx` L1496 `is_revision` | 설계만 | restatement를 원본과 구분 |
-| read-only Cache/Portfolio facade | NautilusTrader | `cache/base.pxd`, `portfolio/base.pxd`, `common/actor.pxd` L73/L83 | 설계만 | mutable store 대신 bounded read Protocol을 제공 |
-| learn/infer 데이터 분리 | vn.py | `alpha/dataset/template.py` L181-194 | 코드 차용 | optional materialization의 입력 역할 분리에 사용 |
-| 시간 범위 표현 | Qlib | `backtest/decision.py` L206-300 `TradeRange` | 코드 차용 | event range 표현만 차용 |
-| 문자열 key service locator | Qlib | `common_infra.get(...)` | 반면교사 | 타입·requirement·authority 경계를 우회하므로 거부 |
-| 횡단면 panel 조회, 접근 기록 lineage, 역할별 View | qlibx | §7 | 순수 창작 | 20년 × 3,000종목 PIT research와 progressive requirement에 필요 |
-
-### 접근 기록이 lineage가 된다
-
-View는 조회를 기록한다. 따라서 "이 Strategy/operation이 실제로 무엇을 읽었는가"가 관측에서 나온다.
-
-```python
-result, diag = operation.run(view)
-artifacts.publish(result, lineage=view.accessed())
-```
-
-PRD §7.4는 derived artifact가 의존 input을 stable identity로 기록하도록 요구한다. 선언 기반은
-실제 사용과 어긋날 수 있으나 접근 기록은 어긋나지 않는다. 초안의 사전 선언 방식보다 강한 보장이다.
-
-### Runtime profile 간 view 동형성
-
-View와 operation은 clock implementation, execution adapter와 storage backend가 무엇인지 모른다. 모든 profile은
-같은 `available_at <= evaluation_time`, resolved binding과 access-record contract를 만족한다.
-
-```
-backtest    BacktestClock + historical stream + simulated Account
-future production  LiveClock + arrival stream + reconciled OMS account
-```
-
-MVP는 backtest profile만 구현한다. Future production에서도 Gate와 operation 구현은 재사용할 수 있지만 Clock만
-바꾸면 production이 되는 것은 아니며 stream, Executor/OMS port와 authority source를 함께 설계해야 한다.
-
----
-
-## 8. ④ operation
-
-### 공통 계약과 선택 가능한 graph
-
-각 operation은 requirement를 먼저 선언하고 resolved view에서 typed result와 diagnostics를 계산한다.
-공통 모양은 같지만 result type과 graph 위치는 operation마다 다르다. 다음 공용 `Operation` base는 두 번째
-구현이 생길 때 추출할 **target pseudocode**다. `ResearchModel`은 이 base 없이 독립된 current public
-protocol로 존재한다.
-
-```python
-# target pseudocode — current code uses concrete operation/flow contracts
-class Operation(Protocol[ResultT]):
-    def requirements(self, invocation: FrozenInvocation) \
-            -> tuple[ComponentRequirement, ...]: ...
-    def run(self, view: ScopedView) -> tuple[ResultT, Diagnostics]: ...
-
-class StrategyOperation(Operation[StrategyDraft], Protocol): ...
-class ResearchModel(Protocol[PayloadT]): ...  # current direct protocol
-class AnalysisOperation(Operation[AnalysisArtifact], Protocol): ...
-class RendererOperation(Operation[ReportArtifact], Protocol): ...
-```
-
-Current Strategy는 signed alpha weights와 optional `StrategyStateUpdate`를 담은 `StrategyDraft`를 반환한다. Flow가 실제 view access와 frozen invocation identity를 결합해 authoritative `StrategyResult`로 승격하고, closed-loop workflow이면 executor-neutral
-`DecisionIntent`를 함께 제공한다. Strategy가 signal과 weights를 내부에서 한 번에 계산해도 되고,
-stored signal/characteristic/risk result를 읽어도 된다. Current direct `ResearchModel`은 reusable typed
-research result를 생산하는 optional path다. Public boundary를 넘거나
-재사용되는 intermediate만 정확한 semantic artifact로 materialize한다.
-
-Project-local Strategy가 alpha logic의 primary extension point다. Package는 module/source identity, public
-input/output contract와 deterministic fixture로 compatibility를 판정하고 성공한 component만 등록한다. Strategy가
-stored artifact를 요구하면 Flow가 role/schema/semantics를 resolve·load하고 evidence-independent immutable projection만
-scoped view에 주입한다. User code는 artifact backend나 raw observation store를 직접 읽지 않는다. Current direct
-materialization은 caller가 명시적으로 호출하며, target scheduled `MATERIALIZE`는 selected Strategy가 reusable
-intermediate를 요구할 때만 존재하는 optional path다.
-
-```python
-StrategyOperation.requirements()  -> tuple[ComponentRequirement, ...]
-StrategyOperation.run(view)       -> StrategyDraft
-Flow.promote(draft, accesses)     -> StrategyResult                    # strategy_result:v4
-ResearchModel.run(view)           -> typed payload
-ExecutionPreparation.prepare(intent, context)
-        -> OperationOutcome[PreparedExecution[RequestT, EvidenceT]]
-BaseExchange.match_batch(request) -> OperationOutcome[ResultT]
-analyze(artifact, view)           -> (AnalysisArtifact, Diagnostics)   # optional
-render(analysis, options)         -> (ReportArtifact, Diagnostics)     # optional
-```
-
-`requirements()`는 invocation 인자를 받지 않는다. Operation은 자기 요구를 정적으로 선언하고, 어느 dataset이
-그 요구를 채우는지는 Resolver와 registry가 정한다. Execution 경계의 두 호출은 raw result가 아니라
-`OperationOutcome[...]`을 반환한다 — 실패가 반환 타입에 실려야 diagnostic을 버릴 수 없다(I5).
-
-View를 받는 operation의 입력은 **clock과 resolved requirements에 묶인 조회 창구**다(§7). Operation은 필요한 만큼
-조회하며 view가 실제 접근을 lineage로 기록한다. Constraint-free analysis, direct Strategy와 stored-result
-reuse는 execution preparation을 호출하지 않는다.
-
-`analyze`는 portfolio 수익률을 만들지 않는다. Signal analysis는 IC와 rank diagnostic처럼 portfolio를
-구성하지 않는 지표만 산출하고, basket return·NAV·turnover가 필요하면 academic execution 경로를 사용한다(I12).
-Return/NAV 시계열에 대한 attribution이나 regression은 이미 execution을 거쳐 저장된 result를 읽는 analysis다.
-Current `analyze_signal`이 발행하는 metric은 `information_coefficient` 하나이며
-`GAP-RETURN-AUTHORITY-001`은 닫혔다.
-
-`ExecutionPreparation`은 execution event의 current Account, execution price, lot, 선택적 benchmark를 한 번
-resolve하고 construct → adjust → advisory validate → convert 계산을 고정된 순서로 호출하는 하나의 경계다.
-User-configurable `DecisionStage[]`, stage registry 또는 profile별 validation switch는 두지 않는다. Constraint가
-없으면 adjustment/validation requirement를 resolve하지 않는 pass-through다. Current concrete 구현은
-`KrxExecutionPreparation`과 `AcademicExecutionPreparation`이고 각각 자기 intent/context/request/evidence
-타입으로 generic base를 채운다. `GAP-EXECUTION-PREPARATION-001`은 닫혔다.
-
-Ensemble은 별도 mandatory stage가 아니라 `StrategyOperation` 구현이다. Member Strategy result를 typed
-artifact로 읽고 ticker-level netting, crossing, member contribution과 fixed/flexible budget residual을
-기록한다. Member producer가 direct Strategy인지 Model result를 소비했는지는 Ensemble public contract가
-아니다.
-
-Path-dependent result도 frozen typed input으로 재사용 가능하다. Flow는 consumer가 선언한 artifact role, schema와
-semantics를 확인하고 실제로 load·consume한 member에만 dependency edge를 만든다. 새 Strategy/Ensemble result는 source
-artifact ID뿐 아니라 그 member가 의존한 모든 Account/strategy-state identity와 feedback cursor를 보존한다. Member
-producer는 재실행하지 않고 parent artifact도 변경하지 않는다.
-
-이 reuse는 target/current Account에서 member를 다시 계산했다는 주장이 아니다. 이후 physical target 또는 order
-conversion만 현재 committed Account와 그 시점의 execution input을 읽는다. Consumer-declared budget/schema/semantic
-requirement가 맞지 않으면 Strategy 계산 전에 explicit compatibility error로 실패한다.
-
-`BaseExchange.match_batch`는 view를 받지 않는다. 필요한 관측값은 `ExecutionPreparation`이 bounded execution
-view에서 꺼내 immutable typed request에 고정한다. Exchange는 wall clock을 읽지 않고 Account/strategy state를 변경하지
-않으며 같은 frozen request에서 같은 result를 낸다. Physical KRX와 academic hypothetical request/result는 서로
-다른 concrete type이고 Flow가 각 result를 자기 Account semantics에 맞게 commit한다.
-
-모두 typed result와 diagnostics를 반환한다(I5). 이 layer는 state를 직접 변경하지 않으므로 built-in,
-project-local과 external implementation을 같은 validation boundary 뒤에서 교체할 수 있다. Package가
-compatibility를 판정하고 agent는 failure evidence를 해석할 뿐 등록 성공을 대신 선언하지 않는다.
-
-`Account.commit()`은 Operation이 아니다. Operation은 계산 결과를 만들고, commit은 Flow가 호출하는 state
-transition이다. 이 구분이 없으면 user-defined Operation이 actual cash나 Position을 우회 변경할 수 있다.
-
-### Constraint adjustment, validation과 monitoring
-
-세 operation은 authority와 output이 다르다.
-
-```text
-adjust proposed intent   → modified candidate + unresolved residual
-validate final candidate → advisory compliance finding; breach여도 execution 계속
-monitor committed actual → actual-account finding; account mutation 없음
-```
-
-Adjustment result가 존재해도 compliance를 의미하지 않는다. Constraint를 선택한 workflow만 declaration과
-metric data requirement를 resolve한다. MVP constraint는 no-short와
-`single-name weight <= max(10%, index constituent weight)`뿐이다. Validation은 `passed`/`compliant`와 exact excess를
-기록하는 advisory observation이며 breach만으로 Exchange 호출을 막지 않는다. Missing PIT benchmark weight 또는
-evaluator runtime failure는 finding으로 꾸미지 않고 Exchange request 생성 전에 explicit operation failure로 끝낸다.
-Constraint-free signal research에는 compliance dataset을 요구하지 않는다. Sector와 기타 constraint는 future work다.
-
-### User Strategy-owned ETF look-through
-
-ETF look-through는 qlibx의 Instrument capability나 자동 exposure operation이 아니다. Exchange와 Account는 ETF를
-항상 하나의 physical Instrument로 체결·보유한다. ETF를 등록하거나 Account가 ETF 수량을 보유한다는 사실은
-constituent data requirement, mapping resolution 또는 exposure 계산을 발생시키지 않는다.
-
-선택권은 **Strategy별로 user에게만** 있다. 같은 ETF도 Strategy A가 constituent data를 선언하지 않으면 opaque이고,
-Strategy B가 index/ETF constituent dataset을 명시적으로 구독해 StrategyView에서 consume하면 B의 user code 안에서만
-look-through가 일어난다. Instrument와 config에는 `opaque/transparent` mode를 두지 않는다.
-여기서 구독은 O6의 runtime pub/sub를 뜻하지 않는다. `DatasetRequirement`로 logical binding을 선언하고 Flow가 그
-callback의 scoped StrategyView에 resolve하는 기존 requirement 계약을 뜻한다.
-
-예를 들어 user Strategy가 아래 계산을 선택할 수 있다.
-
-```text
-rows     constituent exposure axis C
-columns  physical instrument axis P — direct Equity와 ETF
-L_t      Strategy가 declared PIT data로 직접 만든 mapping[C, P]
-p_t      Strategy가 actual AccountSnapshot으로 직접 만든 physical weight[P]
-x_t      Strategy-owned constituent exposure[C] = L_t @ p_t
-```
-
-이 식, direct Equity identity column, ETF constituent column과 cash 처리 방식은 package contract가 아니라 user의
-경제적 계산이다. qlibx는 `L_t`를 만들거나 적용하지 않는다. Strategy가 결과를 artifact로 반환할 때만 generic
-Evidence가 실제로 읽힌 dataset과 AccountSnapshot의 dependency edge를 기록한다.
-
-qlibx가 소유하는 경계와 user가 소유하는 의미를 분리한다.
-
-| qlibx가 소유 | user Strategy가 소유 |
-|---|---|
-| Logical dataset registration과 declared binding | 어떤 index/ETF constituent source를 구독할지 |
-| `available_at <= clock.now()` ViewGate | available row 중 어떤 observation을 사용할지 |
-| Immutable actual AccountSnapshot 접근 | ETF 수량·mark·cash에서 어떤 physical exposure를 만들지 |
-| 실제 조회에서 생성한 dependency lineage | mapping schema, axis, coverage, normalization과 계산식 |
-| Generic StrategyResult/Artifact envelope | target/actual exposure result를 만들고 소비할지 |
-
-따라서 package-owned `LookthroughSnapshot`, `LookthroughExposureResult`, coverage profile 또는 ETF mapping resolver는
-두지 않는다. `opaque`도 별도 profile이 아니라 **Strategy가 constituent binding을 선언·소비하지 않은 상태**다.
-Look-through를 쓰는 Strategy가 complete/partial/stale 정책을 원하면 그 Strategy code에서 검증하고
-diagnostic을 반환한다. ViewGate는 미래 observation을 숨기지만 그 데이터의 경제적 해석을 대신하지 않는다.
-
-개념적인 callback은 다음과 같다. 이름은 public API 확정이 아니라 책임 경계를 보여준다.
-
-```python
-class MyEnhancedIndexStrategy:
-    requirements = (
-        DatasetRequirement("etf_constituents"),
-        AccountStateRequirement(),
-    )
-
-    def decide(self, view: StrategyView) -> StrategyResult:
-        members = view.panel("etf_constituents")  # declared PIT data만 노출
-        account = view.account.snapshot()          # marked actual ETF quantity
-        exposure = user_defined_exposure(members, account)
-        return user_defined_result(exposure)
-```
-
-다른 Strategy가 `DatasetRequirement("etf_constituents")`를 선언하지 않으면 같은 ETF를 보유해도 구성종목 데이터는
-View에 없고 exposure result도 생성되지 않는다. ETF Instrument registration에서 이 requirement를 암묵적으로
-추가하는 경로는 금지한다.
-
-Look-through를 선택한 user Strategy의 flow는 다음처럼 기존 callback/IoC 안에 머문다.
-
-```text
-user declares constituent DatasetRequirement + AccountStateRequirement
-  → Flow resolves only those bindings and creates StrategyView
-  → user Strategy consumes PIT constituent rows + marked AccountSnapshot
-  → user code computes optional exposure/constraint/physical target
-  → Strategy returns its chosen result/artifact/diagnostics
-  → ordinary optional construct / adjust / validate / execute flow
-  → Account.commit(FillBatch) keeps physical ETF quantity authoritative
-  → next user Strategy callback may read the new actual snapshot and recompute
-```
-
-User code가 desired constituent exposure, actual holding 대비 turnover, risk와 expected cost를 최적화할 수는 있다.
-그 결과를 built-in construction/constraint에 넘길 때는 explicit input/artifact여야 하며, downstream operation이 ETF를
-보고 constituent exposure를 다시 계산하지 않는다. Expected cost는 target choice의 assumption이고 actual Fill cost는
-§8의 exact Exchange rule이 계산한다. Risk input 부재를 identity covariance로 조용히 대체하지 않는 원칙도 user
-optimizer의 validation contract로 남는다.
-
-User-authored optimizer는 tradable하지 않은 physical instrument를 requested target이 아니라 actual holding에 freeze하고,
-solver 뒤 budget/bounds/user-defined exposure constraint를 독립 검증할 수 있다. 이 behavior는 qlibx ETF subsystem이
-아니라 user Strategy 계산의 계약이며, StrategyResult diagnostic과 generic artifact evidence로 결과를 표현한다.
-
-Account는 오직 physical state authority다. qlibx가 target이나 actual look-through를 Account/feedback에 자동 추가하지
-않는다. User가 두 결과를 publish하면 별도 artifact/schema로 구분하고, actual artifact는 실제로 consume한 marked
-AccountSnapshot에 의존해야 한다. 재계산 가능성, mapping identity와 axis 검증 수준도 그 user-owned artifact schema가
-정한다.
-
-`references/qlib-integration-codex`는 non-authoritative comparative implementation이다. 여기서 확인한 동작을
-다음처럼 선별한다.
-
-| reference behavior | 판단 | qlibx 적용 |
-|---|---|---|
-| `lookthrough_matrix @ physical_target`과 exact axis 검사 | 계산 아이디어 채택 | user Strategy 예제와 fixture에서 사용; package가 자동 실행하지 않음 |
-| Non-tradable physical position을 actual holding에 freeze | 채택 | AccountSnapshot authority와 adjustment requirement로 표현 |
-| Turnover를 current realized physical holding에서 계산 | 채택 | target/requested state가 아니라 marked actual input 사용 |
-| Solver 뒤 독립 budget/bound/hard-constraint validator | 채택 | validate operation으로 분리하고 stored input에서 재계산 |
-| Infeasible와 solver failure 구분, named soft slack 기록 | 채택·확장 | invalid solution도 별도 status로 추가하고 adjustment/validation evidence를 분리 |
-| Stored target과 mapping으로 exactly-once attribution 재검증 | 조건부 채택 | user가 그런 artifact schema를 publish할 때 producer-independent reader validation으로 구현 가능 |
-| Config 안의 날짜 없는 static nested mapping | 거부 | user가 constituent source를 PIT dataset으로 등록·구독하고 StrategyView에서 consume |
-| Risk covariance가 없을 때 identity matrix 사용 | 거부 | 경제적 의미를 바꾸는 silent default이므로 progressive requirement로 실패하거나 risk-free profile을 명시 |
-| Solver 결과를 사후 재정규화 | 제한 | tolerance 안 cleanup만 raw delta를 남기고 전 constraint를 재검증; budget을 맞추기 위한 의미 변경 금지 |
-| Optimizer target exposure를 `realized_lookthrough_exposure`로 기록 | 거부 | user artifact를 만들더라도 target과 actual authority를 분리 |
-| Qlib feedback/object와 결합된 target policy | 거부 | user Strategy가 declared StrategyView와 AccountSnapshot을 직접 consume |
-
-근거 위치는 `kwam_qlib_backend/constraint_optimization.py`, `qlib_extended/enhanced.py`,
-`qlib_extended/enhanced_attribution.py`, `report_twin/portfolio.py`,
-`tests/test_goal_09_optimizer_contract.py`다. 계산식과 fixture idea만 참고하며 Qlib lifecycle이나 public object
-shape를 차용하지 않는다.
-
-### Instrument와 Exchange registration
-
-Config/registration 경계에서는 concrete Pydantic model을 사용한다. Generic `kind + parameters` bag으로
-상품을 만들지 않는다.
-
-Exchange의 current contract는 공통 lifecycle만 가진 generic abstract base다.
-
-```python
-RequestT = TypeVar("RequestT")
-ResultT = TypeVar("ResultT")
-
-class BaseExchange(ABC, Generic[RequestT, ResultT]):
-    @property
-    @abstractmethod
-    def exchange_id(self) -> str: ...            # stable venue identity
-
-    @property
-    @abstractmethod
-    def config_fingerprint(self) -> str: ...     # deterministic 경제 설정 identity
-
-    @abstractmethod
-    def match_batch(self, request: RequestT) -> OperationOutcome[ResultT]: ...
-
-class KrxExchange(BaseExchange[KrxBatchRequest, MatchBatchResult]): ...
-class AcademicExchange(BaseExchange[AcademicBatchRequest, AcademicMatchResult]): ...
-```
-
-Base는 stable identity, config fingerprint, immutable batch request, typed outcome과 Account/strategy-state
-non-mutation만 강제한다. `config_fingerprint`를 abstract로 둔 이유는 Exchange를 run별로 주입하기 때문이다 —
-어떤 경제 설정이 그 결과를 만들었는지가 evidence에 고정되지 않으면 재현성이 깨진다.
-
-`KrxExchange`와 `AcademicExchange`는 request/result 및 ledger semantics를 공유하지 않는다. Exchange 선택은
-public run 호출별 keyword injection(`run_daily(..., exchange=...)`)이며 plugin registry와 arbitrary class path
-loading은 도입하지 않는다.
-
-Instrument 등록은 두 층으로 나뉜다. `QlibxProject`가 project-level execution environment를 누적하고,
-`KrxExchange`가 자기 listing을 받아 build 단계에서 compile한다.
-
-```python
-project.set_exchange(krx_exchange_config)     # venue/profile 먼저
-project.add_instrument(samsung)               # 그 다음 instrument
-project.add_instrument(kodex_etf)
-spec = project.daily_spec(...)                # 누적 상태를 frozen spec으로 고정
-
-exchange = KrxExchange(config)
-exchange.add_instrument(samsung)
-compiled = exchange.compile()                 # stable index array
-```
-
-이 explicit registration 순서는 NautilusTrader
-`backtest/engine.pyx::BacktestEngine.add_venue`(L502)와 `add_instrument`(L733)를 **설계만 차용**한다.
-NautilusTrader는 venue를 먼저 만들고, instrument의 venue가 등록됐는지와 account compatibility를 검증한 뒤
-instrument를 DataEngine/Cache와 SimulatedExchange 양쪽에 연결한다(L756-779).
-
-qlibx에 적합한 부분은 **"venue/profile을 먼저 등록하고 Instrument를 그 경계에 명시적으로 연결한다"**는
-build-time rule이다. 이 순서가 있어야 잘못된 venue ID, cash account에 맞지 않는 margined contract, 누락된
-exact cost/settlement policy를 run 전에 실패시킬 수 있고, 등록 완료 뒤 3,000종목을 stable index array로
-compile할 수 있다. 사용자가 어떤 Exchange를 쓰는지도 config에 드러난다. 다만 그 조립을 소유하는 것은
-장수명 `engine` 객체가 아니라 `QlibxProject` facade와 frozen spec이다(§12).
-
-NautilusTrader의 구현 전체는 가져오지 않는다. Instrument를 mutable Cache, MessageBus, execution client와
-연결하는 live-runtime object graph는 qlibx의 컬럼 저장소 View와 횡단면 batch에 과하다. qlibx는 frozen
-InstrumentRegistry와 Exchange listing/policy만 만들고 runtime data는 `available_at` View로 읽는다.
-
-`add_instrument`는 stable ID와 concrete type을 registry에 넣고 해당 Exchange에 listing을
-등록한다. Exchange는 instrument compatibility와 required policy coverage를 검증한다. Tracking-only Index는
-명시적인 executable listing이 없으면 order를 거부한다. 현재 `AcademicExchange`는 Stock/ETF의 traded reference,
-Index의 tracking-only reference와 Factor의 validated `SyntheticUnitPrice`를 explicit listing으로 받는다. 전용
-profile은 fractional quantity, full fill과 모든 friction 0을 고정하며 result에 hypothetical/profile identity를
-남긴다. Factor return을 가격으로 암묵 변환하지 않고 synthetic price binding이 없으면 execution을 거부한다.
-
-Instrument와 Exchange model은 생성 시 한 번 검증되고 frozen된다. `KrxExchange.compile()` build 단계는 lot, multiplier,
-currency, exact cost selector처럼 hot path에 필요한 static term을 stable instrument index의 array로 compile한다.
-3,000종목 batch의 fill마다 Pydantic model을 다시 만들지 않는다.
-
-Account 초기 Position도 같은 frozen registry에 대해 검증한다. 등록되지 않은 Instrument, venue/listing과 맞지
-않는 Instrument 또는 required accounting policy가 없는 Position은 run 시작 전에 실패한다. Strategy
-tradable universe는 별도로 등록하며 Account의 기존 held instrument를 삭제하지 않는다.
-
-Future extension에서 Exchange는 registration 결과로 lifecycle `EventSpec`을 반환할 수 있다. Flow가 이를
-Clock에 등록하며 Exchange가 Clock이나 Account를 직접 보유하거나 변경하지 않는다.
-
-### Transaction cost resolution
-
-거래비용 계산의 진입점은 Exchange다. Exchange subclass는 자기 market에 필요한 schedule schema를 갖는다.
-
-```text
-KrxExchange       effective date × exact product type × BUY/SELL
-AcademicExchange fixed zero-friction hypothetical profile
-CryptoExchange    maker/taker × account tier                 (future)
-```
-
-연도별 rate 때문에 Exchange subclass를 늘리지 않는다. `KrxExchange2024`, `KrxExchange2025` 대신 하나의
-`KrxExchange`가 versioned effective-dated schedule을 가진다. Cost entry는 exact concrete product selector로
-해결하며 ETF가 Equity의 subtype이라는 이유로 Equity rule을 상속하지 않는다. ETF 0bp도 명시적인 rule이다.
-Required rule이 없으면 structured unsupported failure를 반환하고 Fill과 Account mutation을 만들지 않는다.
-
-공개 `CostContext`는 두지 않는다. Order, Instrument/compiled terms, fill quantity/price와 event time이 이미
-입력이다. Mandatory `CostBreakdown`도 두지 않는다. Fill은 최소한 `total_cost`, applied rule ID와 schedule
-version을 보존하고, tax/commission attribution 요구가 생기면 optional cost line을 추가한다.
-
-Cash clipping과 final Fill은 **같은** pure cost calculator를 사용한다. Candidate quantity의 비용을 계산해 현금을
-검사하고, clipped quantity로 다시 계산해 final Fill에 기록한다. 별도의 estimated-cost 구현을 두지 않는다.
-Current 구현에서 이 계산기는 `KrxExchange` 내부의 private helper이며 별도 public entrypoint로 노출하지 않는다 —
-계약은 "두 경로가 같은 계산기를 쓴다"이지 "그 계산기가 public API다"가 아니다.
-Broker/account commission은 후속 account overlay가 될 수 있다. Current profile에서는 Exchange instance를
-venue + execution profile로 보고 함께 freeze한다.
-
-### exchange.match_batch — 차용의 핵심
-
-qlib `_calc_trade_info_by_order`(`backtest/exchange.py` L859-950)의 clipping 순서를 이식한다.
-
-```
-deal_amount = order.amount
-  → volume 참여 제한                     (L786 _clip_amount_by_volume)
-  → impact cost = impact * (val/total)²  (L892)
-  → SELL: min(보유, deal) → lot 반올림
-          단, 마지막 매도는 반올림 생략   (L904 np.isclose)
-          현금이 수수료를 못 내면 deal = 0
-  → BUY : 현금 한도 계산                 (L834) → lot 반올림
-  → cost = max(val * ratio, min_cost)
-  → val <= 1e-5 이면 cost = 0
-```
-
-L904의 "마지막 매도에서 lot 반올림 생략"은 생략하면 잔여 수량이 영구히 청산되지 않는 함정을
-막는다. 137주 보유 + lot 100주에서 반올림하면 37주가 남고, 다음에도 37 → 0으로 반올림되어 유령
-포지션이 된다.
-
-**필수 개조:** qlib은 각 clip 지점에서 `logger.debug`만 남기고 버린다 (L830, L917, L928, L936). qlibx는
-구조화된 `FillDiagnostic`을 반환값에 싣는다 (PRD §11.3, §4.6). 산술은 그대로, 진단만 추가한다.
-
-Nautilus `backtest/models/{fee,fill}.pyx`에서는 `order`, `fill_qty`, `fill_px`, `instrument`를 직접 전달하는
-교체 가능한 계산 경계를 참고한다. qlibx의 비용 계산 진입점은 Exchange이며, 내부 calculator를 public symbol이나
-별도 protocol로 추출하는 것은 재사용이 실제로 필요할 때만 한다.
-Fill price model은 별도 교체 경계로 유지해 slippage/impact를 fee/tax와 이중 집계하지 않는다.
-
-### convert — 전면 재작성
-
-qlib의 weight→order 경로는 PRD 금지 목록을 항목별로 실증한다. 차용하지 않는다.
-
-| qlib 위치 | 동작 | 위반 |
-|---|---|---|
-| `order_generator.py` L115-121 | 현금 부족 시 tradable 전량 매도 폴백 | §4.6 |
-| `order_generator.py` L124 | cost를 `max(open, close)`로 근사 | §4.6 |
-| `exchange.py` L534 | tradable subset만 남기고 weight 재정규화 | §9.3, §11.3 |
-| 전 경로 | skip 사유가 반환값에 없음 | §11.3 |
-| `signal_strategy.py` L345 | trigger 없이 매 step 재제출 | §5.6 |
-| vnpy `template.py` L138 | bar 없는 종목 조용히 skip | §4.6 |
-
-`convert`의 반환값은 order list와 **instrument별 conversion/rounding/clipping/skip 사유 전체**다.
-
-### validate — compliance를 관찰하되 current MVP execution은 차단하지 않는다
-
-NautilusTrader `risk/engine.pyx`의 pass/deny 구조는 비교 근거로만 남기며 current qlibx contract로 채택하지 않는다.
-qlibx validation은 adjustment 뒤의 candidate를 수정하지 않고 metric, bound, excess와 `passed`/`compliant`를 남기는
-advisory observer다. `passed=false`여도 같은 candidate는 Exchange로 진행한다. 따라서 validator가 order를 조용히
-줄이지도 않고 breach를 deny로 바꾸지도 않는다.
-
-PRD §10.3의 best-effort adjustment와 independent validation은 다른 계산 책임이지만, current runtime에서는 하나의
-`ExecutionPreparation` 안에서 고정 순서로 호출한다. Required benchmark 부재, schema mismatch 또는 evaluator runtime
-failure는 compliance finding이 아니라 preparation failure이며 Exchange request와 Account mutation을 만들지 않는다.
-Blocking, severity와 override policy는 future product decision이다.
-
-### Operation provenance 요약
-
-| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
-|---|---|---|---|---|
-| clipping, lot, tradability, volume/impact 산술 | Qlib | `backtest/exchange.py` L295/L338/L728/L761/L786/L834/L859-950 | 코드 차용 | 검증된 산술을 batch화하고 모든 clip diagnostic을 반환 |
-| cost/fill model 교체 seam | NautilusTrader | `backtest/models/{fee,fill}.pyx` | 설계만 | fee/tax와 fill-price assumption을 분리 |
-| pass / deny-with-reason risk 경계 | NautilusTrader | `risk/engine.pyx` L584-666/L1073-1132 | 비교 근거만 | silent mutation은 거부하되 deny semantics는 채택하지 않고 advisory finding을 사용 |
-| target/actual 이원 관리와 long/short 4방향 분해 | vn.py | `alpha/strategy/template.py` L31-32/L133/L144-185 | 코드 차용 | intended state와 actual state를 섞지 않는 계산에 사용 |
-| ts/cs/processor 연산 정의와 검증용 factor set | vn.py | `alpha/dataset/{ts_function,cs_function,processor}.py`, `datasets/alpha_{101,158}.py` | 설계만/코드 차용 | 연산 의미는 참고하되 pandas 경계로 구현 |
-| target→order 변환, Finding, constraint adjustment | qlibx | §8 | 순수 창작 | residual과 실패 이유를 버리지 않는 PRD 계약에 맞춤 |
-
----
-
-## 9. ⑤ account
-
-### Account는 하나의 consistency boundary다
-
-`Account`는 실제 cash, Position, mark와 accounting journal을 함께 관리하는 **Aggregate Root**다. Position이나
-cash를 외부 객체가 직접 수정할 수 없다. PRD에서 ledger라고 부른 역할을 이 concrete object가 수행하며 별도
-`Ledger`, `FillSink`, `TradeLedger` 객체를 만들지 않는다.
-
-```python
-AccountChange = FillBatch | MarkBatch      # current union은 둘뿐이다
-
-class Account:
-    def snapshot(self, *, evaluation_time: datetime | None = None) -> AccountSnapshot: ...
-    def feedback(self, after: int, limit: int) -> AccountFeedback: ...
-    def checkpoint(self) -> AccountCheckpoint: ...
-    @classmethod
-    def from_checkpoint(cls, checkpoint: AccountCheckpoint) -> "Account": ...
-    def commit(
-        self,
-        change: AccountChange,
-        *,
-        expected_version: int,
-    ) -> AccountCommit: ...
-```
-
-`LifecycleBatch`와 `ReconciledBatch`는 아래 표에서 future로 표시하지만 **현재 타입 자체가 없다.** Future
-characterization을 코드에 선반영하지 않는다는 뜻이다. Feedback cursor도 별도 값 타입이 아니라 journal
-위치를 가리키는 `int`이며, `checkpoint()`/`from_checkpoint()`가 종료 결과를 다음 run에 명시적으로 seed하는 직렬화 경계다.
-
-`snapshot()`과 `feedback()`은 immutable read model을 반환하고 `commit()`만 state를 변경한다. 이는
-**Command-Query Separation**이다. 별도 read database가 없고 event replay만으로 현재 state를 재구성하도록
-강제하지 않으므로 full CQRS나 Event Sourcing이라고 부르지 않는다.
-
-Account의 논리 상태는 다음으로 제한한다.
-
-```text
-identity        account ID, base currency, frozen InstrumentRegistry identity
-current state   cash, sparse positions, marks, valuation status, NAV
-position state  quantity, average cost, realized PnL, instrument-specific settlement basis
-commit state    applied event IDs, feedback cursor, version
-journal         committed Fill, lifecycle cash flow, position delta의 순서
-```
-
-성과 지표, chart와 report는 Account 책임이 아니다. Evidence/analysis가 AccountSnapshot과 journal artifact에서
-계산한다. Account journal은 commit 순서, resume와 Strategy feedback의 authority이고, Evidence는 process 밖에서
-재사용할 수 있는 portable immutable 기록이다.
-
-### Typed change와 atomic commit
-
-| AccountChange | 의미 | current support |
-|---|---|---|
-| `FillBatch` | Fill, transaction cost, cash와 Position 변화 | stock/ETF current path |
-| `MarkBatch` | 모든 held instrument의 valuation input과 NAV 변화 | stock/ETF current path |
-| `LifecycleBatch` | future dividend/distribution, variation margin, funding, expiry | future characterization |
-| `ReconciledBatch` | external OMS가 확인한 Fill/account 결과 | future production boundary |
-
-MVP `FillBatch`는 지원되는 stock/ETF order를 전량 체결하고 원금과 거래비용을 같은 commit에서 cash에 반영한다.
-Unsettled cash, receivable/payable과 settlement calendar는 만들지 않는다. 이 instant-settlement assumption은 profile
-limitation으로 보존한다. Merger, spin-off와 delisting의 해석·instrument 변환은 security master/ETL 책임이며
-`LifecycleBatch`가 원천 corporate-action processor가 되어서는 안 된다.
-
-Flow만 `commit()`을 호출한다. Account는 commit 전에 다음을 모두 검증한다.
-
-1. change의 account ID와 base currency가 일치한다.
-2. 모든 Instrument ID가 frozen registry에 등록되어 있다.
-3. event/fill ID가 아직 적용되지 않았다.
-4. `expected_version`이 현재 version과 같다.
-5. instrument-specific accounting와 exact policy가 해당 change를 지원한다.
-6. batch 전체 적용 뒤 cash, Position과 settlement state가 유효하다.
-
-하나라도 실패하면 아무 state도 바뀌지 않는다. 성공하면 batch 전체, journal append, feedback cursor와 version
-증가가 하나의 commit이다. Target weight, submitted order나 hypothetical post-trade state를 commit하는 change는
-존재하지 않는다.
-
-```text
-Account version 17
-  + FillBatch(F1, F2) 검증 성공
-  → cash/positions/journal을 함께 반영
-  → Account version 18
-
-Account version 18
-  + 같은 F1 재수신
-  → duplicate failure, state 변화 없음
-```
-
-### 모든 held instrument를 평가한다
-
-`MarkBatch`의 대상은 Strategy tradable universe가 아니라 Account의 held instruments다. 아래 Future 사례는
-current stock/ETF path가 아니라 future extension에서 이 원칙을 유지하는 characterization이다.
-
-```text
-Future settlement price +2 point
-× multiplier 250,000원
-× Long 1계약
-→ LifecycleBatch(variation_margin=+500,000원)
-→ Account cash와 NAV 변경
-```
-
-일반 mark는 평가손익과 NAV를 갱신하고, settlement event는 product policy에 따라 variation margin을 cash로
-이전하고 settlement basis를 갱신한다. 필요한 valuation input이 없으면 `INCOMPLETE`/`STALE` snapshot과
-diagnostic을 만들며 조용히 정상 valuation으로 취급하지 않는다.
-
-Current vertical slice는 stock/ETF `FillBatch`와 `MarkBatch`만 지원한다. 위 Future 예시는 Account contract의
-확장 가능성을 검증하는 design characterization이며 exact lifecycle policy가 구현되기 전에는 지원 성공을
-주장하지 않는다.
-
-### Reference에서 차용하고 거부한 것
-
-| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
-|---|---|---|---|---|
-| cash와 Position을 함께 소유하는 Account, 보유분 bar-end mark | Qlib | `backtest/account.py` L71/L115/L225/L338 | 설계만 | 작은 연구용 aggregate 범위는 유지하되 reporting은 분리 |
-| Position 매수·매도·삭제, 초과매도 거부와 현금 산술 | Qlib | `backtest/position.py` L342/L352/L384 | 코드 차용 | MIT provenance를 남기고 typed batch 산술로 이식 |
-| settlement 2단계, 초기 endowment, unconstrained what-if Position | Qlib | 같은 파일 L280/L487/L493/L503 | 코드 차용 | current stock slice 밖의 항목은 해당 policy가 선택될 때만 사용 |
-| Exchange 직접 mutation, BUY/SELL update 순서, Account의 metrics/history 소유 | Qlib | `backtest/exchange.py` L421, `backtest/account.py` L128/L203/L338 | 반면교사 | 계산·상태·분석 authority가 섞이므로 거부 |
-| 일별 trading/holding PnL 분해 | vn.py | `PortfolioDailyResult.calculate_pnl` | 코드 차용 | attribution 시작점으로 사용하되 Position cost basis를 대신하지 않음 |
-| typed AccountState ID/type/currency 검증과 instrument별 accounting | NautilusTrader | `accounting/accounts/base.pyx` L354-388, `accounting/manager.pyx` L106 | 설계만 | explicit validation 경계만 축소 적용; LGPL 코드는 복사하지 않음 |
-| Account/Position/Portfolio/Cache/AccountsManager/MessageBus 전체 분리 | NautilusTrader | `portfolio/portfolio.pyx`, `accounting/manager.pyx` | 반면교사 | 다중 계좌·live lifecycle용 구조는 현재 연구 범위에 과함 |
-| typed AccountChange + snapshot/feedback/commit | qlibx | §9 | 순수 창작 | actual-state authority를 한 aggregate와 한 commit 경계에 둠 |
-
-Qlib `Account`가 cash/Position을 함께 관리하고 모든 보유 주식을 mark하는 기본 모양은 현재 product의 작은
-account authority에 맞는다. Position 산술은 MIT 조건과 provenance를 지켜 이식한다.
-
-다음 Qlib 구조는 **반면교사**로 두고 차용하지 않는다.
-
-- `Exchange.deal_order(..., trade_account=account)`가 Account를 직접 변경하는 구조
-- SELL은 Account를 먼저, BUY는 Position을 먼저 갱신하는 순서 의존적 `update_order`
-- Account 안에서 portfolio metrics와 전체 historical Position 복사를 함께 관리하는 구조
-- 평균단가·실현손익·native short가 없는 기존 Position을 완성된 회계 모델로 간주하는 것
-
-vn.py `PortfolioDailyResult.calculate_pnl`의 trading PnL/holding PnL 분해는 **코드 차용**해 일별 attribution의
-출발점으로 쓴다. 다만 이것은 일별 합계이므로 종목별 average cost, realized PnL와 round-trip을 대신하지 않는다.
-그 path-dependent state는 Position과 Account journal이 소유한다.
-
-NautilusTrader `accounting/accounts/base.pyx::Account.apply(AccountState)` L354-388에서 typed update의 account
-ID, account type, base currency를 검증하는 경계와 `accounting/manager.pyx` L106의 instrument-specific
-accounting rule을 **설계만** 차용한다. LGPL-3.0 코드는 복사하지 않는다.
-
-NautilusTrader의 `Account + Position + Portfolio + Cache + AccountsManager + MessageBus` 분리는 **반면교사**다. 다중 계좌,
-실시간 order lifecycle과 margin venue를 위한 구조다. 현재 qlibx 연구 범위에서는 actual-state authority를
-찾기 어렵게 만들므로 전체 구조를 차용하지 않는다. 대신 하나의 Account가 Position까지 소유하고 Flow가 typed
-change를 commit한다.
-
-### 남은 범위 (§16)
-
-- **G1 Strategy state.** Strategy-owned JSON state는 Account와 분리된 explicit input/output다. 실제 투자 상태와 전략 belief를 섞지 않는다.
-- **G2 round-trip.** 별도 TradeLedger 없이 Position의 average cost/realized PnL와 Account journal로 해결한다.
-- **G4 long-short.** Account aggregate만으로 real-short collateral, borrow fee와 locate가 자동 해결되지는 않는다.
-  Exact accounting policy가 없는 real short는 여전히 unsupported다.
-
----
-
-## 10. ⑥ evidence
-
-### 계약
-
-```python
-# target pseudocode; current public facade is concrete LocalArtifactBackend
-class ArtifactPublisher(Protocol):
-    def publish(self, *candidates: ArtifactCandidate,
-                lineage: tuple[AccessRecord, ...] = ()) -> tuple[ArtifactId, ...]: ...
-    def publish_failure(self, failure: OperationError) -> ArtifactId: ...
-
-class ArtifactLoader(Protocol):
-    def load(self, artifact_id: ArtifactId, expected: ArtifactContract) \
-            -> TypedArtifact: ...
-```
-
-Publisher는 payload, envelope와 dependency edge를 하나의 publication transaction으로 다룬다. Payload만
-쓰였거나 index commit이 실패한 candidate는 reusable artifact로 보이지 않는다. 덮어쓰기 API가 없고(I6),
-같은 logical identity + 같은 content는 idempotent, 같은 identity + 다른 content는 conflict 실패다.
-
-Loader는 raw dictionary를 public consumer에 통과시키지 않는다. Type/version registry에서 schema를 찾고
-payload를 적합한 typed object로 생성하면서 required field, logical key uniqueness, semantic category,
-time/axis/unit와 cross-field invariant를 검증한다. Unknown version은 explicit migration 또는 unsupported
-error이며 producer의 private Python class를 import하지 않는다.
-
-### Envelope
-
-Public envelope는 Pydantic 모델로 정의한다(§11). 이는 architecture가 선택한 boundary implementation이며
-다른 implementation도 같은 object-construction validation과 portable schema를 제공하면 교체 가능하다.
-
-NautilusTrader `backtest/results.py`의 backtest result envelope 필드 구성은 **설계만 차용**한다. qlibx는
-그 형태에 producer-independent fingerprint, dependency lineage, failure identity와 atomic publication status를
-추가한다. Reference에는 이 네 계약이 함께 없으므로 확장 부분은 qlibx 순수 창작이다.
-
-Current `LocalArtifactBackend`는 typed `QlibxModel` payload를 canonical JSON으로 저장하고 DuckDB를 catalog/index로만 사용한다. JSON은 단순하고 inspectable하지만 큰 tabular/matrix에는 비효율적이다. Parquet payload는 compatibility·atomic publication·benchmark 계약이 준비된 뒤 추가할 future backend다. Future Parquet 물리 layout은 NautilusTrader
-`persistence/catalog/parquet.py`에서 **설계만 차용**한다 — 특히 parquet metadata로 시간 범위를 인덱싱해 전체를
-읽지 않는 기법(L570), 중복 제거(L820), 스키마 검증(L781).
-
-표면 API(`save`/`load`/`list_all_*`)는 vn.py `alpha/lab.py::AlphaLab`에서 **코드 차용**한다. 단 vn.py에는
-fingerprint, lineage, envelope, 원자적 발행이 없으므로 그 필드는 qlibx **순수 창작**이다.
-
-Current default local catalog index는 DuckDB다. Object store나 external tracker backend도 같은
-`ArtifactPublisher`/`ArtifactLoader` contract, logical identity, atomic visibility와 conflict outcome을
-만족해야 한다. External tracker run ID나 file path는 producer reference일 수 있지만 canonical artifact
-identity를 대신하지 않는다.
-
-#### Default local publication state machine
-
-Default local backend의 durable contract는 다음 순서로 고정한다.
-
-1. Catalog file별 OS-backed writer lock을 bounded timeout으로 획득한다. 같은 process의 thread도 같은
-   path lock을 공유한다. Timeout은 raw DuckDB exception이 아니라 typed failure다.
-2. DuckDB `catalog_metadata`의 schema version을 확인한다. 기존 exact unversioned schema는 v1으로 한 번
-   채택하지만 unknown version이나 partial schema는 추측해 migration하지 않는다.
-3. Candidate별 append-only publication event를 먼저 기록하고 payload를 `.staging`에 write + fsync한다.
-4. Content-addressed final path에 payload를 atomic promote한 뒤에만 envelope, lineage와
-   `CATALOG_COMMITTED` event를 한 DuckDB transaction으로 commit한다.
-5. Reusable query는 `artifacts`의 committed envelope만 읽는다. Staged 또는 promoted-only payload는 audit
-   event로는 관측되지만 reusable success가 아니다.
-6. Recovery는 index commit 전 candidate를 성공으로 승격하지 않는다. Lock 아래에서 uncommitted staging과
-   unreferenced final payload를 제거하고 `RECOVERED_ABANDONED` event를 append한다. 같은 frozen candidate는
-   새 attempt로 retry한다. Commit 뒤 response 전에 process가 종료됐다면 기존 artifact를 그대로 재사용한다.
-
-여러 catalog 연산으로 구성된 공개 workflow는 `LocalArtifactBackend.session()`으로 bounded exclusive
-session을 열 수 있다. 최외곽 session은 기존 writer lock과 하나의 read-write DuckDB connection을 보유하고,
-같은 thread의 중첩 session과 operation cursor만 허용한다. Session이 열린 동안 다른 thread/process의 같은
-catalog 접근은 차단되며, bounded 충돌은 outcome API에서 `CATALOG_SESSION_CONFLICT`로 변환된다. Tuple을
-반환하는 저수준 listing API는 같은 stable code의 `CatalogSessionConflictError`를 직접 발생시킨다. Session
-밖의 단일 load/list/publish는 기존처럼 operation별 connection을 열고 닫으므로 multiprocess 계약은 변하지 않는다.
-
-이 state machine은 한 host의 local filesystem용이다. Multi-host/NFS writer coordination, object store
-consistency와 remote catalog availability는 default lock file로 지원한다고 간주하지 않고 별도 backend
-contract와 fixture를 요구한다.
-
-### Lineage
-
-```
-registered PIT data ─┬→ direct Strategy ────────────────┐
-                     └→ materialized research data ─────┤
-member Strategy results ─→ Ensemble Strategy ───────────┤
-                                                         ├→ signed weights
-instrument/profile/constraint ───────────────────────────┤
-                                                         ├→ physical target → decision → fills
-                                                         └→ analysis → report
-actual account snapshot + compliance binding ─────────────→ monitoring finding → report
-failure evidence + resolution decision ───────────────────→ retry invocation
-```
-
-Edge는 consumer role, 선택된 field/column, version/fingerprint, 시간 호환성을 기록한다. Graph는
-acyclic이어야 하며 mutable alias만으로 dependency를 식별하지 않는다. Content hash가 같아도 economic
-meaning, state cursor나 contract가 다르면 같은 logical artifact로 합치지 않는다.
-
-### Failure, retry와 publication status
-
-`OperationError`도 frozen invocation, actual stage path, requirement/error identity, commit status와 bounded
-diagnostic을 가진 typed evidence로 publish한다. Retry는 failure를 덮어쓰지 않고 `resolves_error_id` edge로
-연결한 새 invocation이다. 실패한 fit, rejected research, invalid external payload와 partial publication을
-success catalog query에서 숨기되 audit query에서는 찾을 수 있어야 한다.
-
-### Analysis, renderer와 extension boundary
-
-Analysis는 stored result를 읽어 metric/table artifact를 만들고 Renderer는 그 값을 presentation으로만
-변환한다. Table, chart와 machine-readable renderer가 달라도 return, cost, exposure와 failure count의
-underlying artifact identity는 같다. Renderer 안에서 metric을 재계산하지 않는다.
-
-Built-in과 project-local/external operation은 같은 `ComponentRequirement`, typed result와 validation fixture를
-제공한다. Extension registration은 package compatibility validation이 성공한 뒤에만 commit한다. Agent가
-code를 작성하거나 error를 설명할 수는 있지만 compatibility success를 선언하지 않는다.
-
-| 분석 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
-|---|---|---|---|---|
-| statistic plugin 구조 | NautilusTrader | `analysis/statistic.py`, `analyzer.py` | 설계만 | metric을 독립 plugin으로 분리 |
-| 성과 지표 계산식과 파산 시 계산 거부 | vn.py | `backtesting.py` L228-380 | 코드 차용 | 검증된 식은 쓰되 350줄 단일 함수 구조는 반면교사 |
-| 주문 진단, 체결률, 가격 유리도 | Qlib | `backtest/report.py::Indicator` L249-650 | 코드 차용 | Account mutation과 분리된 analysis artifact로 계산 |
-| PortfolioMetrics record shape | Qlib | `backtest/report.py` L22/L153 | 코드 차용 | portable schema로 옮기고 Account 내부 책임으로 두지 않음 |
-
-### Future work — Production outbox와 reconciliation
-
-이 절은 MVP architecture와 acceptance 대상이 아닌 future characterization이다. 향후 production flow도 같은 evidence
-boundary를 사용하되 prepared intent와 authoritative outcome을 분리하는 방향을 검토한다.
-
-NautilusTrader `execution/reports.py`의 order/fill/position reconciliation report 분리와 `create_flat` 패턴은
-**설계만 차용**한다. qlibx는 이를 external OMS result의 duplicate/stale/conflict 판정과
-`ReconciledBatch` 생성에 맞게 축소한다. NautilusTrader의 MessageBus/Cache mutation은 가져오지 않는다.
-
-```text
-Strategy result
-  → immutable PreparedDecision + idempotency identity
-  → atomic outbox publication                    # Account/strategy-state advance 없음
-  → external OMS acknowledgement                 # Fill 아님
-  → confirmed fill/reject/cancel/account result
-  → correlate + deduplicate + order-state reconcile
-  → Account.commit(ReconciledBatch)               # confirmed result만
-  → next Strategy view and independent monitoring
-```
-
-```python
-class Reconciler(Protocol):
-    def reconcile(self, prepared: PreparedDecision,
-                  received: tuple[OMSResult, ...],
-                  account: ConfirmedAccountSnapshot) -> ReconciliationResult: ...
-```
-
-Reconciler는 missing, duplicate, stale, out-of-order와 conflicting result를 state mutation 전에 구분한다.
-Partial fill은 confirmed quantity만 apply하고 remainder의 pending/cancel state를 추측하지 않는다. Rejection은
-evidence를 남기지만 intended position이나 proposed Strategy state를 actual로 commit하지 않는다. 같은
-idempotency identity의 duplicate delivery는 두 번 적용하지 않는다. Production Account projection은 이
-reconciliation이 확인한 결과만 반영하며 outbox publish나 OMS acknowledgement가 아니다. External OMS가 원천
-authority이고 local Account는 Strategy/View가 읽는 reconciled projection이다.
-
----
-
-## 11. 타입과 직렬화 정책
-
-### 규칙
-
-> **pydantic은 경계를 넘는 것에, dataclass는 경계 안에서 도는 것에.**
-
-MVP 경계는 파일↔메모리, 사용자↔패키지와 프로세스↔프로세스다. 외부 OMS↔qlibx는 future production 경계다.
-
-판단은 두 질문으로 한다.
-
-```
-Q1. 잘못된 상태로 만들어질 수 있는가?  (밖에서 오는가)
-Q2. 스키마를 남이 읽어야 하는가?
-     하나라도 예 → pydantic
-     둘 다 아니오 → dataclass
-```
-
-### 배치
-
-| pydantic | dataclass / 일반 클래스 |
-|---|---|
-| `FrozenConfig` | `Event`, `Handler` |
-| Concrete `Instrument`, Exchange config, cost schedule entry | compiled instrument arrays |
-| `ArtifactEnvelope`, `DependencyEdge` | role view 인스턴스 |
-| `OperationError` (§7) | `Order`, `Fill`, `FillBatch`, `MarkBatch` |
-| Instrument/Exchange registration | `PreparedExecution`, diagnostic 행 |
-| `ConstraintDeclaration` | `Diagnostic` 행, `FillDiagnostic` |
-| `ComponentRequirement`, `ResolvedBinding` | `Position`, `Account` |
-| `RowsLookback`, `CalendarLookback` | `MarketQuote`, `KrxBatchRequest` |
-| `DatasetRegistration` | `AccountSnapshot`, `AccountFeedback`, `AccountCommit` |
-| `ExtensionContract`, `StrategyExtensionRegistration` | 통계 반환값 (JSON primitive) |
-| future `PreparedDecision`, `OMSResult`, `ReconciliationResult` | |
-
-pydantic 대상은 전부 **저빈도 + 경계**, dataclass 대상은 전부 **고빈도 + 내부**다.
-
-`InstrumentSet[T]`도 registration boundary에서는 전체 collection을 한 번 검증하지만, execution 전에는 stable
-instrument index와 typed array로 compile한다. `Order`, `Fill`, `CashFlow`를 만들 때 concrete Instrument나
-cost schedule을 다시 Pydantic validation하지 않는다. 이것이 `UC-SCALE-001`의 architecture mechanism이다.
-
-Domain DTO의 provenance도 이 절에서 함께 관리한다.
-
-| 항목 | 출처 | 위치 | 차용 방식 | qlibx 판단 |
-|---|---|---|---|---|
-| Order/Trade/Position dataclass field shape | vn.py | `trader/object.py` L112-200 | 코드 차용 | 경계 안의 작은 typed DTO에 적합 |
-| partial fill/reject/cancel/expire Status enum | vn.py | `trader/constant.py` L30 | future 코드 차용 후보 | intraday와 OMS reconciliation을 추가할 때만 필요 |
-| requested amount / dealt amount / factor 분리 | Qlib | `backtest/decision.py` L36-152 | 코드 차용 | intent와 actual execution을 구분 |
-| fixed-point Price/Quantity/Money | NautilusTrader | `model/objects.pyx` | 설계만 | 통화·수량 정밀도 계약에 사용하되 LGPL 코드는 복사하지 않음 |
-| Order status가 없는 mutable Order | Qlib | `Order` dataclass | 반면교사 | Fill을 Order 내부 필드에 덮어쓰지 않고 별도 typed result로 보존 |
-
-### 기본 설정
-
-```python
-class QlibxModel(BaseModel):
-    model_config = ConfigDict(
-        strict=True,        # 타입 강제 변환 금지  ← §4.6
-        extra="forbid",     # 모르는 필드는 실패    ← §4.6
-        frozen=True,        # 생성 후 불변          ← §7.10
-        validate_default=True,
-    )
-```
-
-**`strict=True`가 중요하다.** pydantic 기본 동작은 `"0.05"` → `0.05` 같은 강제 변환인데, 이는 PRD
-§4.6이 금지한 silent coercion이다. 마찬가지로 `@field_validator`에서 값을 보정해서는 안 된다 —
-검증기가 값을 고치는 순간 우리가 제거하려던 문제를 다시 만든 것이다.
-
-**`extra="forbid"`**는 config 오타를 즉시 실패시킨다. dict 파싱은 오타를 조용히 무시하고 기본값으로
-진행하며, 이것이 PRD §4.6이 금지한 동작이다.
-
-### 에러 번역
-
-pydantic `ValidationError`를 그대로 노출하지 않고 §7의 hierarchical operation error로 번역한다.
-
-```python
-except ValidationError as e:
-    raise OperationError(
-        operation="dataset.register",
-        stage_path="dataset.register.schema",
-        error_code="SCHEMA_VALIDATION_FAILED",
-        requirement_id="dataset.minimal_schema",
-        expected=FrozenConfig.model_json_schema(),
-        context={"fields": [...][:MAX_REPORTED]},
-        commit_status="NONE",
-        retry_preconditions=("provide a schema-valid candidate",),
-        idempotency_identity=invocation.id,
-        error_id=new_error_id(),
-    ) from e
-```
-
-`e.errors()`의 `loc`가 필드 경로를 제공하지만 개수를 제한한다. Package는 observed fact와 retry
-precondition을 제공하고, 어떤 경제적 의미를 선택하거나 user에게 어떤 질문을 할지는 bundled agent skill이
-판단한다.
-
-### 고빈도 데이터의 검증 위치
-
-Diagnostic은 행마다 검증하지 않는다. Arrow 스키마가 이미 타입 검증이다.
-
-```
-행 단위 검증  ✗
-테이블 단위 스키마 선언 + 1회 검증  ✓
-```
-
-pydantic 모델은 **테이블의 계약서** 역할만 하고 인스턴스는 만들지 않는다. 여기서 Arrow 스키마와
-JSON Schema를 함께 파생시킨다.
-
-### 부수 효과: 스키마 자동 생성
-
-`model_json_schema()`는 external artifact, operation requirement와 extension contract의 machine-readable
-schema를 같은 type definition에서 생성하는 architecture mechanism이다. Pydantic 자체가 product requirement는
-아니지만, 손으로 별도 관리하는 schema가 runtime validation과 어긋나는 구현은 허용하지 않는다.
-
----
-
-## 12. 패키지 layout과 의존 방향
-
-```
-src/qlibx/
-  project.py    public facade + operation별 composition root + catalog session 경계
-  specs/        daily, constraints, academic frozen public specs
-  onboarding.py installed-project preview/apply/remove operation
-  runtime/      clock.py — Clock protocol, BacktestClock, Event, Handler
-  flow/         research, model, daily, academic, composition, portfolio, constraints,
-                monitoring, analysis, extensions, strategy_extensions,
-                artifact_inputs, strategy_results, recovery, shared failures
-  view/         least-authority access records, role views + ViewGate
-  data/         registration, requirement resolution, versioned Parquet snapshot + DuckDB bounded query
-  contracts/    Strategy and ResearchModel contracts, artifact I/O, built-in implementations
-  portfolio/    construction contracts/implementations
-  execution/    BaseExchange, concrete KRX/Academic exchanges, preparation, instruments, sizing
-  account/      Account aggregate, committed feedback/performance/memory
-  evidence/     QlibxModel artifacts, JSON payload, DuckDB catalog/index
-  analysis/     typed analysis and rendering
-  extensions/   exact project-local module loading
-  config/       project/runtime schemas
-  domain.py     layer 공유 core value (Side, BudgetMode, Fill)
-  errors.py     hierarchical operation error
-  models.py     QlibxModel base
-```
-
-`runtime/`은 파일 하나(`clock.py`)이며 `Event`와 `Handler`가 그 안에 함께 있다. 별도 `event.py`/`queue.py`를
-만들지 않는다 — queue는 `BacktestClock`의 구현 세부이지 layer의 public 개념이 아니다.
-
-### 의존 방향
-
-`tests/test_architecture.py::test_layer_import_direction`이 아래 표를 실행 가능한 회귀로 강제한다.
-`domain`, `models`, `errors`는 어느 layer에서나 허용하므로 표에서 생략한다.
-
-```
-runtime    → (없음)
-data       → (공통만)
-account    → (공통만)
-evidence   → (공통만)
-config     → (공통만)
-
-view       → runtime, data
-contracts  → view, data
-portfolio  → view, data
-analysis   → view, data
-extensions → view, data, contracts
-execution  → view, data, portfolio, evidence
-specs      → runtime, contracts, portfolio, execution
-
-flow       → runtime, data, view, specs, contracts, extensions,
-             portfolio, execution, account, evidence, analysis
-project    → operation별로 필요한 concrete flow/backend (public composition root)
-```
-
-두 가지가 순진한 layer 그림과 다르므로 명시한다.
-
-- `execution`이 `portfolio`와 `evidence`를 import한다. `ExecutionPreparation`이 constraint 계산(`portfolio`)을
-  호출하고 preparation evidence 타입을 만들기 때문이다. 순수 계산 layer가 아니라 **operation 조립 경계**다.
-- `specs`가 `execution`을 import한다. Frozen public spec이 concrete instrument/exchange config를 담기 때문이다.
-
-`future production` layer는 더 이상 코드에 없다. 부재는 `docs/qlibx-prd.md` §14와 `docs/oms-future-plans.md`가
-기술한다.
-
-**operation이 mutable Account나 raw provider를 import하지 않는 것이 핵심이다.** State/data가 필요하면
-immutable AccountSnapshot 또는 resolved scoped view로 들어온다. 그래야 account commit boundary, gate와
-requirement resolver를 우회할 수 없다(I2, I4, I8).
-
-### Project onboarding lifecycle — direct operation
-
-Project onboarding은 market-time event나 Flow가 아니다. 설치된 package resource와 user-selected project
-root 사이를 조정하는 **preview-first direct operation**이다. `QlibxProject.onboard`는 target별 request를
-독립된 plan으로 만들며, 한 target의 conflict가 다른 target의 plan이나 mutation을 막지 않는다.
-
-각 target의 순서는 다음과 같다.
-
-```text
-OnboardingRequest(target, desired_state=PRESENT|ABSENT)
-  -> resolve normative skill root and optional instruction file
-  -> read bundled resource + prior generated manifest + current target bytes
-  -> build complete-state diff and fingerprint preflight
-  -> preview, or mutate only when apply=True
-  -> write/remove generated files and managed block; manifest last
-  -> validate entrypoint, manifest, block, and generated fingerprints
-  -> return typed validation evidence + equivalent preview argv
-```
-
-`PRESENT` plan은 current bundle과 prior manifest file set의 union을 계산한다. 새 bundle에 남은 file은
-create/update/unchanged로, prior manifest에만 남은 obsolete file은 remove로 분류한다. Manifest fingerprint와
-현재 bytes가 다르면 user modification으로 간주해 해당 target 전체를 mutation 전에 conflict로 종료한다.
-Manifest에 없는 extension file은 읽기·갱신·삭제 대상이 아니다.
-
-`ABSENT` plan은 manifest가 fingerprint로 소유권을 입증한 generated file과 qlibx marker block만 제거한다.
-`AGENTS.md`와 `CLAUDE.md`는 qlibx가 처음 만들었더라도 file 자체를 삭제하지 않는다. Instruction editing은
-UTF-8 bytes에서 `<!-- qlibx-managed:start -->`와 `<!-- qlibx-managed:end -->` 사이만 교체하므로 marker 밖의
-user bytes와 newline style을 보존한다. Marker가 중복되거나 한쪽만 있으면 추측하지 않고 conflict로 끝낸다.
-
-Generated manifest schema v2는 package version, skill schema, target, generated-file fingerprints와 managed
-instruction metadata를 기록한다. Reader는 기존 schema v1을 받아 update/remove할 수 있지만, 모든 manifest
-path는 skill root 아래 POSIX relative path여야 한다. Absolute path, parent traversal, drive selector와 backslash는
-mutation 전에 거부한다. File mutation은 같은 directory의 temporary file과 replace를 사용하고 manifest를 final
-commit marker로 쓴다. Process interruption 시에는 다음 preview/apply가 actual bytes를 다시 읽어 복구 방향을
-결정한다.
-
-Apply 뒤 validation은 requested state를 새로 관찰한다. `entrypoint_ok`, `manifest_ok`,
-`managed_block_ok`, `fingerprints_ok`를 분리해 반환하며, `validation_argv`는 `--apply`를 제외한 동일 preview
-command다. 따라서 caller는 mutation result를 boolean 하나로 신뢰하지 않고 같은 public operation으로 다시
-검증할 수 있다. 이 flow가 `GAP-ONBOARD-001`의 architecture closure다.
-
-### 조립 — current QlibxProject와 conditional future Engine
-
-NautilusTrader `system/kernel.py::NautilusKernel`(L101)의 명시적 composition root를 **설계만 차용**한다.
-Kernel 생성 시 Clock, Cache, Portfolio, execution component를 한 곳에서 조립해 component가 전역 locator를
-찾지 않게 하는 방식이다. qlibx current code도 Clock, Executor, Exchange, Account와 Evidence 구현을 operation 요청에 따라
-교체해야 하므로 이 패턴이 적합하다.
-
-```python
-project = QlibxProject.open(project_root)
-research = project.invoke(strategy, invocation)
-daily = project.run_daily(strategy, request, account=account, memory=memory)
-monitoring = project.monitor_constraints(spec)
-```
-
-`QlibxProject`는 execution environment(instrument, exchange config)를 점진적으로 누적하는 API를 제공한다
-(PRD §7.10.1). `add_instrument()`와 `set_exchange()`가 project instance에 상태를 쌓고, `daily_spec()`이 그
-스냅샷을 **complete frozen spec**으로 굳힌 뒤 `run_*`가 그 spec만 소비한다. Flow는 project를 참조하지 않으므로
-invocation 시작 이후의 누적 변경이 진행 중인 run을 바꿀 수 없다. 이것이 인터뷰형 onboarding과 frozen
-invocation을 동시에 만족하는 배치다. Spec에 "누적 상태를 나중에 읽는다"는 optional 구멍을 만드는 대안은
-spec만으로 replay할 수 없게 만들므로 채택하지 않는다. `GAP-PROJECT-CONFIGURATION-001`은 닫혔다.
-
-Current `QlibxProject`는 모든 public use case에 facade method를 제공한다 — registration/reindex, direct
-Strategy, materialization, daily/frozen-child/academic execution, ensemble/stored-signal composition, portfolio
-construction, constraint adjust/validate/monitor, analysis/report, extension validation/실행, onboarding, sample.
-Bundled sample은 `qlibx.flow` concrete class를 import하지 않으므로 `GAP-PUBLIC-FACADE-001`은 닫혔다. Public
-method가 Flow, `ViewGate`, backend와 policy를 생성자에서 조립하는 방식은 명시적 **Dependency Injection**이다.
-
-여러 catalog 연산으로 구성된 public method는 `LocalArtifactBackend.session()` bounded exclusive session을 열고
-그 안에서 Flow를 실행한다. Session 충돌은 raw exception이 아니라 `CATALOG_SESSION_CONFLICT` outcome으로
-표면화된다(§10).
-
-Current composition은 각 daily/academic Flow에 자기 request/result type과 맞는 `BaseExchange` dependency를 run 호출별로
-주입하는 **Strategy Pattern**을 사용한다. 두 public
-flow를 하나로 합치거나 plugin registry를 추가하지 않으며, Exchange 선택이 Account와 Strategy의 snapshot/feedback
-계약을 바꾸지 않게 한다.
-
-NautilusTrader의 concrete Kernel, Cache, MessageBus나 lifecycle을 복사하지 않는다. Current qlibx composition root는
-PIT View, 횡단면 batch와 producer-independent artifact라는 자체 계약을 조립한다. 장수명 `Engine`은 backend 둘 이상이 공통 lifecycle과 graph를 공유할 때만 도입할 conditional future다. 지금 도입하면 조립 반복은 줄지만 global lifetime과 speculative abstraction이 늘어난다.
-
-qlib의 `common_infra.get("trade_account")` 문자열 키 서비스 로케이터는 채택하지 않는다. 타입이
-사라지고 resolved requirement, frozen invocation과 authority source를 우회하므로 채택하지 않는다.
-
-### Reference provenance와 license 규칙
-
-본문의 모든 차용 지점은 바로 옆에서 `코드 차용`, `설계만`, `반면교사`, `순수 창작`을 표시한다. Line
-reference는 아래 vendored snapshot 기준이며 snapshot을 갱신할 때 해당 본문 설명과 characterization fixture를
-같이 검증한다.
-
-| reference | snapshot | license | 허용 범위 |
-|---|---|---|---|
-| Qlib | `main@79633dd` | MIT | provenance와 notice를 남긴 코드/산술 차용 가능 |
-| vn.py | `master@1b78494` | MIT | provenance와 notice를 남긴 코드/DTO 차용 가능 |
-| NautilusTrader | `develop@4d14b8c` | LGPL-3.0 | 설계 비교만; 코드 복사 금지 |
-
-코드 차용 파일에는 원출처, 함수, 원저작권과 변경 내용을 남기고 repository `NOTICE`에 MIT license를 보존한다.
-설계만 차용한 NautilusTrader는 동일한 source 위치와 qlibx에 맞춘 차이를 문서에 기록한다. 세 reference 모두
-runtime dependency나 qlibx authority가 아니다. Backend 자체를 채택하지 않은 상세 근거는
-[[why-not-qlib-as-a-backend]]와 [[why-not-nautilus-as-a-dependency]]에 있다.
-
----
-
-## 13. PRD use-case walkthrough
-
-이 절은 PRD의 stable use-case ID를 architecture flow에 연결한다. 숫자는 법령이나 시장 관행을 주장하기
-위한 값이 아니라, 구현이 같은 입력에 같은 결과를 내는지 검증하기 위한 **결정론적 fixture**다.
-
-### 13.1 공통 등록과 fixture
-
-```text
-InstrumentRegistry
-  005930.XKRX -> Equity
-  069500.XKRX -> ETF
-
-KrxExchange
-  2024 Equity BUY  : commission 1.5bp, tax  0bp
-  2024 Equity SELL : commission 1.5bp, tax 18bp
-  2024 ETF BUY/SELL: commission 1.5bp, tax  0bp
-  2025 Equity BUY  : commission 1.5bp, tax  0bp
-  2025 Equity SELL : commission 1.5bp, tax 15bp
-  2025 ETF BUY/SELL: commission 1.5bp, tax  0bp
-```
-
-각 행에는 `rule_id`와 `schedule_version`이 있다. Exchange가 Instrument의 구체 타입, side, event
-timestamp로 정확한 행을 고르고, build 단계가 Instrument와 schedule을 dense array로 compile한다.
-
-### 13.2 상품·side·유효일 비용 — UC-COST-001, UC-COST-002
-
-2025년에 7,000,000원을 거래하면 다음 결과가 나온다.
-
-```text
-Equity BUY  :  7,000,000 × 1.5bp          =  1,050
-Equity SELL :  7,000,000 × (1.5 + 15)bp   = 11,550
-ETF BUY     :  7,000,000 × 1.5bp          =  1,050
-ETF SELL    :  7,000,000 × 1.5bp          =  1,050
-```
-
-같은 Equity SELL을 2024 timestamp로 평가하면 `(1.5 + 18)bp = 13,650`이다. Instrument는 자신이
-Equity인지 ETF인지 알려줄 뿐 세율을 소유하지 않는다. Exchange가 timestamp와 side까지 포함해
-schedule을 해석하므로 같은 상품도 연도와 매매 방향에 따라 비용이 달라진다.
-
-### 13.3 cash clipping과 exact rule — UC-COST-003, UC-COST-004
-
-가용 현금이 7,000,500원이고 가격 70,000원인 ETF를 100주 BUY한다고 하자. 명목금액만 보면 주문이
-들어가지만 비용까지 포함하면 `7,001,050 > 7,000,500`이다. lot이 10주라면 동일한 순수 비용 계산기를
-사용해 90주로 줄인다.
-
-```text
-candidate check : 100 × 70,000 + 1,050 = 7,001,050  -> reject
-clipped order   :  90 × 70,000 +   945 = 6,300,945  -> accept
-final Fill      : quantity=90, transaction_cost=945
-```
-
-candidate check와 최종 Fill이 서로 다른 계산기를 쓰면 closed loop의 cash가 어긋난다. 따라서 둘은
-`KrxExchange` 안의 같은 pure cost helper를 호출한다. 반대로 ETF exact rule이 없다면 Equity rule로
-추측하지 않고 명시적으로 실패하며, Fill과 Account mutation도 만들지 않는다.
-
-### 13.4 실제 체결이 다음 판단으로 돌아오는 loop — UC-CLOSED-LOOP-001
-
-```text
-DECISION D1
-  -> target/order
-  -> EXECUTION E1: exact cost로 cash clipping, Fill 생성
-  -> ACCOUNT COMMIT(FillBatch): position, cash, transaction cost 반영
-  -> ACCOUNT COMMIT(MarkBatch): valuation과 NAV 갱신
-  -> DECISION D2: D1의 목표값이 아니라 E1 이후 actual position/cash/NAV를 읽음
-```
-
-예를 들어 위 ETF 주문은 목표 100주가 아니라 실제 90주와 남은 현금 699,555원이 다음 StrategyView에
-보인다. 이것이 단순 수익률 계산과 closed-loop backtest의 차이다.
-
-### 13.5 3,000종목 cross-section — UC-SCALE-001
-
-Pydantic Instrument는 등록 시 한 번 검증한다. 그 뒤 build 단계가 stable instrument index, lot size,
-product selector와 cost schedule lookup key를 배열로 compile한다. EXECUTION 한 번이 3,000개 주문을
-batch로 처리하고, hot loop는 Pydantic 모델을 다시 만들지 않는다. 결과는 stable order의 Fill과
-FillDiagnostic으로 돌아가므로 같은 config와 data에서 event 순서와 결과가 재현된다.
-
-### 13.6 Academic current path와 미래 확장의 design characterization
-
-첫 두 항목은 current AcademicExchange acceptance이고, 나머지는 미래 설계를 구속하는 characterization이다.
-
-- **UC-ACADEMIC-001:** `AcademicExchange`가 Stock/ETF/Index/Factor를 explicit listing한 경우에만 exact signed
-  portfolio를 다음 session close에서 가상 체결한다. 전용 signed state와 checkpoint를 쓰며 production Account를
-  변경하지 않는다. tradability는 Instrument의 본성이 아니라 Instrument와 Exchange/profile의 관계다.
-- **Factor synthetic-price path:** Factor는 return 원천을 갖는 tracking Instrument지만 execution에 참여하려면
-  등록된 derived unit price를 반드시 가져야 한다(§2.6, PRD §7.2.1). Academic profile은 등록된 `SyntheticUnitPrice`
-  binding이 있을 때만 hypothetical Fill을 만들며 변환을 스스로 수행하지 않는다. Synthetic source와 limitation을
-  evidence에 남기며 일반 Exchange는 listing을 거부한다.
-- **UC-FUTURE-001:** multiplier 250,000인 Future 1계약의 settlement price가 350에서 352로 움직이면
-  variation margin `+500,000`이 `LifecycleBatch`로 Account에 반영된다. 이 Account를 읽는 주식 Strategy는
-  Future order를 만들 수 없지만 증가한 cash/NAV와 Future exposure를 다음 decision에서 본다. Expiry event는
-  최종 정산과 포지션 종료를 유발한다.
-- **UC-PERP-001:** notional 50,000인 CryptoPerpetual long 1계약에 `+1bp` funding이 적용되면 long은
-  `-5` funding cash flow를 낸다. PerpetualSwap에는 expiry field와 expiry event가 없다.
-- **UC-CASHFLOW-001:** transaction cost는 Fill의 비용이고, funding과 variation margin은 lifecycle cash
-  flow다. 둘 다 cash/NAV에 반영되지만 같은 집계 항목으로 섞지 않으며 다음 decision에서 actual state로
-  관측된다.
-
-#### NautilusTrader perpetual funding 비교 기록
-
-이 절은 **future design reference**이며 MVP 구현 지시가 아니다. 비교 기준은 repository의 non-authoritative
-NautilusTrader snapshot `v1.231.0`, upstream commit
-`4d14b8c669f8fc31f343da9ae39526729a78381f`이다(`references/nautilus_trader/UPSTREAM.md`). 공식 설명은
-[Backtest Accounts and Margin](https://nautilustrader.io/docs/latest/concepts/backtesting/accounts-and-margin/)과
-[FundingRateUpdate](https://raw.githubusercontent.com/nautechsystems/nautilus_trader/develop/docs/concepts/data/funding_rate_update.md),
-구현 근거는 `crates/backtest/src/exchange.rs` L1020-1063, L1190-1283, L1317-1349, L1407-1429다.
-
-NautilusTrader의 핵심은 **funding-rate observation**과 **funding payment**를 분리하는 것이다.
-
-1. `FundingRateUpdate`는 `instrument_id`, `rate`, optional `interval`/`next_funding_ns`, `ts_event`, `ts_init`을 가진
-   reference data다. Rate observation 자체는 payment가 아니다.
-2. `next_funding_ns`가 있으면 그 boundary를 예약한다. 없으면 `ts_event`가 명시된 `interval` boundary와 정확히
-   일치할 때만 settlement한다. Boundary를 식별할 수 없는 update는 Strategy data로 남고 cash flow를 만들지 않는다.
-3. Boundary에서 해당 instrument의 open positions를 모으고 funding settlement price를 구한다. 구현은 mark price를
-   우선하고, 없으면 best bid/ask midpoint를 사용한다.
-4. Position별 amount는 다음 부호 계약을 사용한다.
-
-   $$
-   \text{funding amount}=\text{notional(settlement price)}\times\text{rate}\times
-   \begin{cases}-1,&\text{long}\\+1,&\text{short}\end{cases}
-   $$
-
-   따라서 positive funding rate는 long의 cash/PnL을 차감하고 short에 가산한다.
-5. 성공한 settlement는 `FundingSettlement` identity를 만들고 position에
-   `PositionAdjusted(Funding)`을 적용하며 matching account balance를 함께 변경한다. 같은 boundary/instrument
-   settlement를 중복 적용하지 않는다.
-
-qlibx가 향후 채택할 것은 구체 class나 MessageBus가 아니라 이 책임 경계다. User가 perpetual funding capability와
-funding data를 명시적으로 선택한 경우에만 operation-specific requirement가 rate와 settlement boundary를 요구하고,
-Clock이 boundary event를 예약하며, pure calculation 결과를 하나의 idempotent `LifecycleBatch`로 Account에 commit한다.
-Instrument를 보유했다는 사실만으로 funding data를 자동 발견하거나 cash flow를 생성하지 않는다. Funding evidence는
-rate observation identity, boundary, settlement price source, notional, side, currency와 resulting cash/PnL delta를
-보존한다. Transaction fee와 같은 집계로 섞지 않는다.
-
-Dividend/distribution도 향후 같은 lifecycle cash-flow commit 경계를 재사용할 수 있지만 entitlement, ex/pay date와
-withholding 계산은 별도 policy다. Merger, spin-off와 delisting의 security identity/reference transformation은 이
-경계에 넣지 않고 security master/ETL에 남긴다.
-
-같은 snapshot에서 일반 futures daily variation-margin settlement의 대응 구현은 확인되지 않았다. Matching engine의
-`process_instrument_close`는 `ContractExpired` close에서만 expiration을 실행하고 end-of-session close로 일일 cash
-settlement를 수행하지 않는다(`crates/execution/src/matching_engine/engine.rs` L2260-2277). 따라서 qlibx의 future
-daily settlement는 NautilusTrader behavior를 그대로 차용한다고 주장하지 않고 별도의 settlement calendar, price,
-cash transfer와 basis-reset policy로 설계해야 한다. 이는 source inspection에 근거한 architecture inference다.
-
-통합 테스트와 fixture 이름에 이 use-case ID를 그대로 사용하면 PRD 요구, architecture flow, 검증
-증거 사이의 추적성을 유지할 수 있다.
-
-### 13.7 Minimal registration과 progressive gap — UC-DATA-001, UC-DATA-002, UC-ERROR-001, UC-PIT-001, UC-AGENT-001
-
-```text
-REGISTER price_source
-  → user-confirmed instrument/available_at binding + logical key
-  → minimal validation
-  → DatasetRegistration publish                         UC-DATA-001
-
-RUN price_reversal_strategy
-  → required price binding resolves
-  → Strategy runs
-
-RUN single_name_constrained_strategy
-  → required PIT benchmark-weight binding missing
-  → dataset/registration은 유지
-  → OperationError(strategy.run.requirements.benchmark_weight)
-  → failure evidence publish                            UC-DATA-002
-  → agent explains add-binding / derived-data / profile alternatives
-  → user selects, package validates, new invocation retries
-```
-
-Signal analysis처럼 짧은 invocation은 실제 `analysis.run.requirements`에서만 실패하고 model, optimizer,
-order stage를 만들지 않는다(`UC-ERROR-001`). `UC-PIT-001`의 direct forward-label materialization은
-`label.horizon_end` 누락을 producer 계산 전에 거부하고 failure evidence만 남긴다. 명시적 immutable horizon
-registration 뒤의 새 invocation은 이전 failure를 lineage로 연결하고 frozen evaluation time까지 available한
-label만 발행한다. Availability 의미가 불명확하면 package는 추측하지 않고 structured gap을 내며, agent가
-release timestamp나 confirmed delay-rule 후보를 설명한 뒤 user-confirmed binding만 등록한다(`UC-AGENT-001`).
-
-### 13.8 Strategy composition과 state — UC-SIGNAL-001, UC-SIGNAL-002, UC-ALPHA-BUDGET-001, UC-ALPHA-PATH-001, UC-ALPHA-CHILD-001, UC-ALPHA-ADAPTIVE-001, UC-ENSEMBLE-001
-
-Direct reversal Strategy는 PIT price binding을 읽어 내부 score와 signed weights를 만들고 optional academic
-profile에서 평가한다. Stored signal이나 physical construction을 요구하지 않는다(`UC-SIGNAL-001`). Value
-characteristic을 materialize한 Model result는 typed artifact로 load되어 long-short Strategy와 long-only
-Strategy가 producer rerun 없이 각각 소비한다(`UC-SIGNAL-002`).
-
-Flexible-budget result는 invested 40%와 residual 60%를 그대로 저장하고 fixed consumer가 요청되면
-compatibility error를 낸다(`UC-ALPHA-BUDGET-001`). Path-dependent result는 frozen Ensemble member로 소비하고
-producer를 다시 실행하지 않는다. Ensemble dependency는 consumed artifact와 source Account/strategy-state identity 및
-cursor를 모두 보존한다. 이후 account B에서 executable target을 만들면 conversion만 account B의 current committed
-state를 읽으며 member를 account B에서 재계산했다고 표시하지 않는다(`UC-ALPHA-PATH-001`).
-
-```text
-parent decision_intent ─┬→ current: real PIT next-close child
-                        └→ current: real PIT next-open child   UC-ALPHA-CHILD-001
-
-member Strategy results → EnsembleStrategy
-  → ticker netting/crossing/contribution/residual          UC-ENSEMBLE-001
-  → committed fill feedback + prior memory
-  → proposed member-weight update
-  → flow Memory commit with feedback cursor                UC-ALPHA-ADAPTIVE-001
-```
-
-Current `execute_frozen_daily()`는 exact parent artifact를 load하고 Strategy/Model을 다시 실행하지 않는다. Real-DW
-acceptance는 별도 close/open event와 price role, child Account, execution artifact lineage를 비교하고 parent hash가
-불변임을 검증한다. 기존 participation-rate child는 별도 generic isolation 회귀다. Adaptive update는 commit된
-feedback까지만 읽으며 proposed state는 flow commit 전 authority가 아니다.
-
-### 13.9 Portfolio와 optional constraint — UC-PORTFOLIO-001, UC-CONSTRAINT-001, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001
-
-같은 signed weight artifact를 hypothetical long-short analysis와 equity enhanced-index profile이 각각 읽는다.
-각 construction operation이 direction, instrument, budget과 cost requirement를 별도로 resolve하고 새 result를
-만들며 original alpha artifact를 다시 쓰지 않는다(`UC-PORTFOLIO-001`). Derivative construction은 future work다.
-
-Constraint가 없는 signal IC analysis는 compliance binding 없이 끝난다
-(`UC-CONSTRAINT-001`). Basket 수익률이 필요하면 그 analysis가 아니라 academic execution 경로를 쓴다(I12). Constraint profile은 execution event의 `ExecutionPreparation`에서 no-short와 time-varying
-single-name cap을 계산한다. PIT benchmark weight가 없으면 Exchange request/account mutation 전에 실패한다
-(`UC-CONSTRAINT-002`). Binding이 있으면 adjust가 original/adjusted intent와 lot-rounding residual을 만들고 validate가
-`passed`/`compliant` finding을 남긴다. 남은 breach를 adjusted success로 숨기지 않지만 current MVP는 execution을
-계속한다(`UC-CONSTRAINT-ADJUST-001`). Current implementation은 standalone operation과 같은 pure adjustment/validation을
-`KrxExecutionPreparation` 안에서 호출하고 event마다 하나의 preparation bundle을 발행한다.
-
-### 13.10 User-authored ETF look-through — UC-LOOKTHROUGH-001, UC-LOOKTHROUGH-002, UC-LOOKTHROUGH-003
-
-두 Strategy가 같은 `K200_ETF` Instrument와 Account를 사용한다고 하자. `OpaqueStrategy`는 constituent dataset을
-선언하지 않는다. 이 Strategy의 View에는 ETF 구성종목이 없으며 qlibx도 exposure를 만들지 않는다. ETF는 주문과
-Account에서 하나의 physical Instrument일 뿐이다.
-
-반면 `LookthroughStrategy`는 user가 등록한 `etf_constituents` binding과 actual account state를 requirements에 넣고
-둘을 consume한다. Constituent axis가 `A, B`, physical axis가 `A, K200_ETF`일 때 user code가 만든 mapping이 다음과
-같다고 하자.
-
-```text
-              physical A   K200_ETF
-constituent A      1.0         0.5
-constituent B      0.0         0.5
-```
-
-이 Strategy가 actual AccountSnapshot에서 `A=0.2, K200_ETF=0.6, cash=0.2`를 읽으면 user code는
-mapping을 정확히 한 번 적용해
-`A=0.5, B=0.3`이다. Direct A 0.2와 ETF 안의 A 0.3을 합치되 ETF benchmark 0.6을 다시 더하지 않는다.
-Cash 0.2를 constituent exposure에서 제외하는 것도 이 user-defined calculation의 규칙이다
-(`UC-LOOKTHROUGH-001`). qlibx는 계산하지 않고 실제 dataset/account read lineage만 기록한다.
-
-ETF 구성이 바뀐 observation S2의 `available_at`이 1월 3일이면 1월 2일 StrategyView는 S2를 노출하지 않는다.
-그 시점에 available한 S1을 사용할지, stale로 실패할지, partial coverage를 허용할지는 user Strategy가 결정한다.
-qlibx가 latest snapshot을 찾거나 ETF에 S1/S2를 자동 연결하지 않는다
-(`UC-LOOKTHROUGH-002`).
-
-다음 rebalance target이 `A=0.3, ETF=0.7`이어도 현재 marked actual이 `A=0.2, ETF=0.4, cash=0.4`라면
-execution 전
-callback에서 `LookthroughStrategy`가 actual AccountSnapshot을 다시 consume해 계산한 exposure는
-`A=0.4, B=0.2`다. Target exposure `A=0.65, B=0.35`는 actual input으로 쓰지 않는다(`UC-LOOKTHROUGH-003`).
-이 재계산도 자동 feedback이 아니라 user Strategy가 다음 callback에서 다시 실행한 결과다.
-
-### 13.11 Pluggable execution과 monitoring — UC-EXEC-001, UC-EXEC-002, UC-EXEC-003
-
-하나의 immutable DecisionIntent를 daily profile이 참조한다. Current cadence policy는 Strategy가 optional
-`trigger()`로 선언하고 `DailyExecutionFlow`가 frozen session candidate에 적용한다. Strategy는 Clock을 조작하거나
-자기 callback을 호출하지 않는다. `EveryCandidate`와 `EveryNSessions`만 built-in current policy이며 data-conditional
-trigger와 `TriggerView`는 current contract가 아니다. SKIP은 failure나 개별 artifact가 아니라 deterministic run trace이고,
-FIRE가 만든 StrategyResult는 policy fingerprint를 dependency로 보존한다. Entry/exit 조건은 같은 callback의
-`HOLD`/`TARGET`으로 표현한다. Current `NextSessionCloseExecutor`와
-`NextSessionOpenExecutor`는 다음 eligible event를 만들고, `DailyExecutionFlow`가 profile의 execution-price role로
-가격을 resolve해 match한 뒤 원금·cost를 child cash에 반영한다(`UC-EXEC-001`, `UC-ALPHA-CHILD-001`). 별도
-generic stage list 또는 shared runtime journal은 current contract가 아니다.
-
-Current flow는 match 직전에 concrete `ExecutionPreparation`을 호출하고 selected `BaseExchange`의 typed result를 Flow가
-Account에 commit한다. `StrategyView.latest_execution_result()`는 직전 execution artifact의 requested/dealt/reason을
-다음 decision에 read-only로 노출하고 실제 access lineage를 `strategy_result:v4`에 남긴다. Zero-dealt/blocked
-result는 `Fill`로 만들지 않는다. Current schedule은 decision 사이에 소비할 result가 최대 하나라는 invariant를
-사용하며(둘 이상이면 schedule invariant 실패) cursor stream은 도입하지 않는다.
-`GAP-EXECUTION-FEEDBACK-001`은 닫혔다. Intraday/partial-fill profile은 §6의 future characterization이다.
-
-Daily profile은 decision 다음 eligible close/open event와 선택한 price observation의 `available_at`을 검증한다.
-아직 공개되지 않은 price나 explicit schedule에 없는 event를 요청하면 Fill 전에 실패한다. Volume
-impact나 partial fill을 모델링하지 않으면 limitation artifact에 남긴다(`UC-EXEC-002`).
-
-`QlibxProject.monitor_constraints(spec)`는 decision 유무와 무관하게 spec이 지정한 committed checkpoint와 frozen
-evaluation instant의 resolved compliance view를 읽는다. Price drift로 time-varying single-name cap breach가 생기면
-finding만 publish하고 order나 account mutation을 만들지 않는다(`UC-EXEC-003`). 이 standalone operation은 caller가
-독립 cadence로 호출하며 current `run_daily()`의 session-close `MONITOR` callback에 자동 연결되지 않는다. Shared
-scheduler가 필요하면 같은 frozen spec operation을 별도 callback으로 등록하는 optional integration으로 다룬다.
-
-### 13.12 Artifact, failure, report와 extension — UC-ARTIFACT-001, UC-ARTIFACT-002, UC-RESEARCH-001, UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001, UC-EXTENSION-002
-
-External producer가 documented envelope와 payload로 signal을 publish하면 Loader가 producer class import 없이
-typed Signal object를 생성하고 semantics/lineage를 검사한다(`UC-ARTIFACT-001`). Duplicate logical key나
-payload/semantics mismatch는 object construction 또는 publication을 실패시키고 reusable success로 노출하지
-않는다(`UC-ARTIFACT-002`).
-
-Benchmark-weight gap으로 실패한 Strategy invocation은 failure artifact를 보존한다. Binding 보강 후 retry는 새
-invocation/result를 만들고 `resolves_error_id`로 연결하며 실패를 삭제하지 않는다(`UC-RESEARCH-001`).
-Analysis artifact 하나를 table/chart/machine renderer가 공유하고 metric을 renderer에서 재계산하지 않는다
-(`UC-REPORT-001`). Monitoring report는 actual finding과 intended target을 섞지 않고 breach와 missing input을
-구분한다(`UC-MONITOR-001`). Local neutralization transform은 package contract validation이 성공한 뒤에만
-registry에 commit한다(`UC-EXTENSION-001`).
-
-Project-local Strategy는 configured extension root 아래의 한 `.py` file과 fixed `STRATEGY_SPEC` /
-zero-argument `create_strategy()` contract를 사용한다. `StrategyExtensionFlow`가 source hash, 두 fresh instance의
-requirements, local `QlibxModel` JSON schema, typed `StrategyDraft`와 모든 view access evidence를 비교한다. Local
-payload model은 registration-scoped `StrategyArtifactContractRegistry`에만 추가하며 built-in registry를 mutation하지
-않는다. Validation success만 append-only `strategy_extension_registration:v1`을 publish한다.
-
-Runtime facade는 caller가 지정한 exact registration artifact를 먼저 typed load하고 source hash를 import 전에 확인한
-뒤 module contract를 다시 구성한다. Registration-scoped registry와 registration dependency를 기존 `ResearchFlow` /
-`DailyExecutionFlow`에 주입하므로 Strategy는 backend/path/loader를 보지 않는다. Registered daily config identity에는
-registration ID와 source hash가 들어간다. Source/schema drift, missing ID와 implicit latest selection은 compute와
-Account/strategy-state mutation 전에 실패한다(`UC-EXTENSION-002`). Python module은 trusted project code이며 path confinement와
-hashing은 hostile-code sandbox가 아니다.
-
-### 13.13 Future work — Production reconcile — UC-PROD-001, UC-PROD-002
-
-다음은 MVP acceptance 대상이 아닌 future characterization이다.
-
-```text
-PreparedDecision(100 BUY)
-  → outbox publish / OMS ack                    authority 변화 없음
-  → confirmed Fill(40) + account snapshot
-  → reconcile pending/cancel state
-  → confirmed 40과 actual cash만 commit         UC-PROD-001
-
-PreparedDecision
-  → OMS rejection
-  → rejection evidence publish
-  → intended position/Memory commit 없음        UC-PROD-002
-```
-
-Duplicate, missing, stale, out-of-order와 conflicting result는 commit 전에 구분한다. Next Strategy와 production
-monitoring은 outbox target이 아니라 reconciled account authority만 읽는다.
-
----
-
-## 14. Implementation/readiness map
-
-이 표는 과거 구축 순서가 아니라 2026-08-11의 current/gap을 함께 표시하는 readiness map이다. 구축 단위는 layer가 아니라 observable vertical use case다. Error와 evidence를 뒤로 미루면 초기
-workflow가 failure/lineage contract 없이 굳으므로 foundation에 먼저 둔다.
-
-| # | vertical slice | 주요 architecture | use-case evidence |
-|---|---|---|---|
-| 1 | Minimal registration + typed evidence | DatasetRegistration, RequirementResolver, OperationError, atomic local catalog | UC-DATA-001/002, UC-ERROR-001, UC-ARTIFACT-002, UC-RESEARCH-001 |
-| 2 | PIT direct research + direct label materialization (**current**) | Clock/View, ResolvedBinding, Direct Strategy, ResearchModel, forward-label preflight | UC-SIGNAL-001, UC-CONSTRAINT-001, UC-PIT-001; GAP-MATERIALIZATION-PIT-001 closed for the public direct profile |
-| 3 | Instrument/exact-cost batch | Instrument/Exchange registration, compiler, match_batch, diagnostics | UC-COST-001~004, UC-SCALE-001; §14.1 |
-| 4 | Daily closed loop | runtime clock, decision/execution flow, Account, explicit strategy state, daily profile, final checkpoint | UC-CLOSED-LOOP-001, UC-EXEC-002, UC-TRIGGER-001, UC-STATE-001, UC-ACCOUNT-HISTORY-001 |
-| 5 | next-close/open frozen execution (**current**) | exact immutable DecisionIntent, close/open executors, explicit PIT price roles, isolated child Account | UC-EXEC-001, UC-ALPHA-CHILD-001; GAP-EXECUTION-CONVENTION-001 closed for public frozen children |
-| 6 | Stored research + frozen Strategy composition (**current**) | exact typed load, `strategy_result:v4` source-state lineage, Ensemble flow, registered artifact-only consumer, strategy-state access | UC-SIGNAL-002, UC-ALPHA-PATH-001, supported UC-ALPHA cases, UC-ENSEMBLE-001, UC-ARTIFACT-001; GAP-STRATEGY-COMPOSITION-001 closed for the installed local profile |
-| 7 | Portfolio/constraint/monitoring + user look-through fixture | construction, adjust/validate, user-declared PIT/account consumption, independent monitor | UC-PORTFOLIO-001, UC-LOOKTHROUGH-001~003, UC-CONSTRAINT-002, UC-CONSTRAINT-ADJUST-001, UC-EXEC-003; §14.2 |
-| 8 | Analysis/report/extension | analysis artifact, pure renderer, transform validation, exact local Strategy registration/execution | UC-REPORT-001, UC-MONITOR-001, UC-EXTENSION-001/002 |
-| 9 | AcademicExchange signed state (**current**) | exact signed portfolio load, explicit Stock/ETF/Index/Factor listing, next-close PIT price, fractional hypothetical Fill, final checkpoint | UC-ACADEMIC-001; GAP-DIRECTION-001 closed for the fixed zero-friction profile |
-| 10 | Simplified execution boundary (**current**) | exact rows/calendar lookback with required declaration, versioned query snapshot + explicit reindex, one `ExecutionPreparation`, `BaseExchange` with separate concrete semantics, `latest_execution_result()`, complete public facade, accumulated project configuration | GAP-LOOKBACK-001, GAP-EXECUTION-PREPARATION-001, GAP-EXCHANGE-BASE-001, GAP-EXECUTION-FEEDBACK-001, GAP-PUBLIC-FACADE-001, GAP-PROJECT-CONFIGURATION-001, GAP-RETURN-AUTHORITY-001 — 전부 closed |
-| 11 | Future design characterization — current build 밖 | lifecycle cash flow, actual settlement, partial fill, real short와 production boundary | UC-FUTURE-001, UC-PERP-001, UC-CASHFLOW-001, UC-SETTLEMENT-001, UC-PROD-001/002; GAP-REAL-SHORT-001 |
-
-각 current slice는 success만 아니라 requirement gap, commit status, artifact/failure evidence와 deterministic
-retry를 함께 검증한다. Daily long-only closed loop와 frozen close/open children은 distinct event/price/Account
-lineage를 보존한다. Materialization과 execution-convention gap은 각각 direct/installed closure oracle을
-통과했다. 10단계는 2026-08-11 기준 전부 닫혔고, 11단계는 current support publication이 아니라 architecture를
-구속하는 future characterization fixture다. 남은 current gap은 없으며, 다음 범위는 §15 열린 결정과
-11단계 future characterization이다.
-
-3단계부터 instrument축 배열을 기본 단위로 잡는다. 단건 `match`를 먼저 만든 뒤 batch로 확장하는
-경로는 택하지 않는다 — clipping 순서 중 현금 제약만이 순차이고 나머지는 elementwise이므로, 처음부터
-batch로 두는 편이 단순하다.
-
-### 14.1 체결 산술 parity 검증
-
-`pyqlib`는 dependency가 아니므로 qlib을 in-process oracle로 실행할 수 없다. 3단계의 검증은 **정적
-fixture 대조**로 수행한다.
-
-1. `references/qlib`의 `_calc_trade_info_by_order` 경로를 읽어 clipping 단계별 기대값을 손으로
-   계산한 fixture를 만든다. 각 fixture는 하나의 clipping 분기를 겨냥한다 — volume 제한, 현금 부족
-   매수, 보유 초과 매도, 마지막 매도 lot 생략(L904), 수수료 미달 취소, `trade_val <= 1e-5`.
-2. Fixture는 입력(주문·시세·거래량·현금·lot·cost)과 기대 출력(deal_amount, trade_val, cost)을
-   명시하며, 근거가 된 qlib 위치를 주석으로 남긴다.
-3. qlibx `exchange.match_batch`가 같은 값을 내는지 검증하고, 추가로 반환된 `FillDiagnostic`이 어느
-   단계에서 잘렸는지 정확히 지목하는지 확인한다.
-4. `UC-COST-001`~`004` fixture로 exact product type, BUY/SELL 비대칭, effective date 경계, 비용을
-   포함한 cash clipping, 명시적 0 rule, 금지된 상위 타입 fallback을 검증한다. candidate와 final Fill의
-   transaction cost가 동일한 순수 계산기에서 나온다는 것도 확인한다.
-5. `UC-SCALE-001` fixture는 scalar reference와 3,000종목 batch 결과가 일치하고, 실행 중 Instrument
-   Pydantic 모델을 새로 만들지 않으며, 입력 순서를 고정했을 때 Fill과 진단 순서도 같음을 검증한다.
-
-Fixture는 qlib 실행 결과가 아니라 qlib **코드를 읽고 도출한 기대값**이다. 따라서 qlib 설치가
-필요하지 않고, 대신 각 fixture가 어느 코드 경로를 근거로 하는지 추적 가능해야 한다.
-
-### 14.2 User-authored ETF look-through boundary validation
-
-7단계는 reference 구현을 runtime oracle로 사용하지 않고 자동 ETF subsystem이 없다는 경계와 user-authored fixture를
-검증한다.
-
-1. 같은 ETF와 Account를 쓰는 두 Strategy 중 constituent requirement를 선언하지 않은 Strategy에는 구성종목 data가
-   노출되지 않고 exposure result도 자동 생성되지 않는다(`UC-LOOKTHROUGH-001`).
-2. Constituent requirement를 선언한 user Strategy만 해당 binding을 consume하며, 2×2 matrix fixture의 `L @ p` 계산은
-   user code에서 실행된다. Instrument registration이나 Account 보유가 이 계산을 trigger하지 않는다.
-3. `UC-LOOKTHROUGH-002`는 `available_at`이 다른 두 observation에서 미래 row를 ViewGate가 숨기는지 확인한다.
-   Available row의 stale/coverage/normalization 판단은 fixture Strategy가 수행한다.
-4. Undeclared constituent binding을 Strategy가 읽으려 하면 role/requirement gate가 실패하며, package가 ETF ticker로
-   binding을 추측하거나 latest dataset으로 fallback하지 않는다.
-5. `UC-LOOKTHROUGH-003`은 다음 target과 현재 marked AccountSnapshot이 다를 때 user Strategy가 current actual
-   quantity로 exposure를 다시 계산하는지 확인한다. qlibx는 target exposure를 Account나 feedback에 주입하지 않는다.
-6. User가 result artifact를 반환한 경우 generic lineage가 실제 constituent observation과 AccountSnapshot read를
-   기록한다. 별도 result를 반환하지 않은 opaque Strategy에는 ETF-specific artifact를 만들지 않는다.
-
----
-
-## 15. 열린 결정
-
-이 절에는 **아직 선택이나 구현 범위가 확정되지 않은 항목만** 둔다. 해결·기각된 판단은 §17 개정 이력에서
-보존하며 열린 결정 표에 남기지 않는다.
-
-| # | 항목 | 현재 상태와 결정에 필요한 것 |
-|---|---|---|
-| O5 | margined contract 확장 | **범위 미확정.** Account의 held-instrument valuation과 `LifecycleBatch` 경계는 정했지만 complete Future/Perpetual lifecycle, collateral, borrow fee와 locate의 current-support 포함 여부는 별도 결정이 필요하다 |
-| O6 | pub/sub 도입 시점 | **도입 시점 미확정.** 현재는 수신자가 적고 Flow가 순서를 직접 아는 편이 단순하다. Runtime subscriber extension, 한 event의 다수 소비자 또는 전 event logging/replay가 실제 요구될 때 MessageBus 도입을 재검토한다 |
-
----
-
-## 16. 설계 감사 기록
-
-이 절은 architecture를 구체적 research scenario와 canonical PRD에 대조해 발견한 gap과 불일치를
-기록한다. 1차 감사는 2026-08-03의 실행 중심 PRD와 vendored reference를, 2차 감사는 2026-08-05
-`84cd113`의 progressive workflow PRD를 대상으로 했다.
-
-기록 목적은 두 가지다. 첫째, 초안이 이미 만족한다고 **잘못 읽힐 수 있는** 부분을 명시적으로
-표시한다. 둘째, 해결 순서와 선행 결정을 남긴다. 해결된 항목의 상세는 당시 문제를 설명하는 역사로
-보존하되 현행 normative contract는 앞 절이 우선한다.
-
-| # | 항목 | 성격 | 상태 |
-|---|---|---|---|
-| G1 | Strategy state 연속성 | 불변식 오류 + 계약 누락 | **current.** one strict JSON value, explicit invocation/run seed, immediate post-Strategy update와 consumed-state fingerprint가 있다. Package-owned store와 automatic prior-state selection은 없다 |
-| G2 | Round-trip 회계 부재 | 차용 판단 오류 | **계약 해결.** Account Position의 cost basis/realized PnL + committed journal/feedback로 통합 |
-| G3 | 학습/거래 분리 (`FIT` event) | fixed-stage 가정 | **target contract만 해결, implementation gap.** generic resolver는 있으나 optional `MATERIALIZE` operation/event와 forward-label acceptance는 없다 |
-| G4 | Long-short 실행 회계 | hypothetical closed, real-short gap | `AcademicExchange`가 분리된 signed fractional state로 `hypothetical_short`를 지원한다 (`GAP-DIRECTION-001`). Production Account의 `real_short`는 borrow/collateral/locate가 없어 후속 범위다 (`GAP-REAL-SHORT-001`) |
-| G5 | `ensemble` 계약 부재 | 명세 누락 | **해결.** Ensemble은 StrategyOperation; typed member result, net/cross/residual 계약 확정 |
-
-### G1 — Strategy state
-
-초안은 bounded state를 decision input으로만 언급하고 output과 run-boundary 전달을 정의하지 않았다. Current 계약은
-package가 해석하지 않는 strict JSON value 하나다.
-
-```python
-seed = StrategyInvocation(initial_strategy_state=prior_value)
-current = view.strategy_state()
-draft = StrategyDraft(..., proposed_state=StrategyStateUpdate(value=next_value))
-outcome.result.final_strategy_state
-```
-
-`ResearchFlow`는 seed와 proposed update를 recursive JSON contract로 검증하고 deep-normalize한다. Tuple, set,
-non-string mapping key와 NaN/Infinity는 `MEMORY_NOT_JSON`으로 success publication 전에 거부한다. `None`은 valid JSON
-state이므로 no-update와 null update는 `StrategyStateUpdate` wrapper로 구분한다.
-
-업데이트는 Strategy가 성공적으로 반환한 직후 발생한다. HOLD, zero-order, zero-dealt와 research-only 판단도 state를
-진행시킬 수 있다. Feedback cursor는 Flow-owned account-history cursor이며 state CAS/version 축이 아니다. State를 읽은
-result는 strategy ID와 canonical state fingerprint를 lineage에 남기고, frozen member composition은 이를 source lineage로
-전파한다.
-
-Package는 durable state store, schema migration 또는 latest-state selector를 제공하지 않는다. Run 결과의 final state를
-어디에 보관하고 어느 값을 다음 run에 seed할지는 caller 책임이다. 이 명시성이 PRD §9.10의 run chaining과 §17.2의
-interrupted-run resume를 구분한다.
-
-### G2 — Round-trip 회계
-
-초안 §9는 상태 산술을 qlib `backtest/position.py::Position`에서 이식한다고 기술했다. 이 판단은 수량과
-현금 회계에는 유효하지만 **PnL 경로 의존 로직에는 불충분하다.**
-
-Vendored source 확인 결과 `Position`이 종목별로 보유하는 필드는 `amount`, `price`, `weight` 셋이며,
-`price`는 취득원가가 아니라 평가가격이다. `update_stock_price`(L401-402)가 매 bar 덮어쓰고,
-`_buy_stock`(L342-350)은 추가 매수 시 평균단가를 갱신하지 않는다. 실현손익 필드와 라운드트립 개념은
-존재하지 않는다.
-
-따라서 "직전 N회 거래가 손실이었는가" 같은 조건은 Qlib Position을 그대로 복사해서는 **답할 수 없다.**
-초안은 별도 TradeLedger를 제안했지만 state authority를 다시 나누므로 폐기한다. 현행 §9는 다음을 하나의
-Account aggregate에 둔다.
-
-```
-Position        평균 취득단가 · 수량 · 실현손익 · settlement basis
-Account journal Fill · lifecycle cash flow · position delta의 commit 순서
-AccountFeedback Strategy가 cursor 이후 읽는 bounded execution 결과
-```
-
-Position이 닫히더라도 journal의 Fill과 realized PnL feedback은 사라지지 않는다. Full portable history는
-Evidence에도 publish하지만 runtime commit 순서와 feedback cursor의 authority는 Account다.
-
-nautilus `model/position.pxd`가 동일 역할을 하며(`avg_px_open`, `avg_px_close`, `realized_pnl`,
-`realized_return`, `is_closed_c`, `calculate_pnl`) 설계 참고 대상이다. LGPL이므로 `설계만`으로 분류한다.
-
-vnpy `PortfolioDailyResult`의 trading/holding PnL 분해는 일별 집계이므로 종목별 라운드트립을
-대체하지 못한다.
-
-### G3 — 학습/거래 분리
-
-초안은 Model/FIT을 canonical pipeline의 mandatory stage로 읽었다. 현 PRD는 Direct Strategy와 stored
-Model output을 동등한 선택지로 둔다. 아래는 구현 완료 설명이 아니라 **target contract**다. `FIT` global stage를 추가하는 것이 아니라 Model/transform
-workflow가 선택될 때만 `MATERIALIZE` operation을 direct invocation 또는 scheduled event로 등록한다.
-
-| trigger | scoped view | operation | result | publication |
-|---|---|---|---|---|
-| direct/scheduled `MATERIALIZE` | resolved feature/label bindings | Model/transform | typed research data + diagnostics | artifact catalog |
-
-Rolling/expanding/event-triggered fit을 사용하는 concrete component는 자신의 schedule과 requirement를
-선언하고, same-time decision이 소비해야 하면 priority를 `DECISION`보다 앞에 둔다. Direct Strategy나
-stored-result analysis에는 이 event가 존재하지 않는다.
-
-**라벨의 `available_at` 선언이 이 gap의 핵심이다.** 20일 forward return 라벨로 12/31까지 학습하면
-마지막 샘플의 라벨이 1/20까지의 가격을 소비하고, 그 모델이 1/2 decision에 쓰인다. 예외는 발생하지
+Strategy는 Context가 제공한 bounded surface만 읽는다. Clock, Store, Exchange, mutable Account를 직접 참조하지
 않는다.
 
-§7 view에서는 이 문제를 별도 hidden cutoff가 아니라 **binding과 requirement로 해결한다.** 라벨의
-`available_at`을 `event_time + horizon`으로 등록하면, `MATERIALIZE`가 시각 T에 실행될 때
-`available_at > T`인 라벨은 조회되지 않는다. Target Model component가 `horizon_end`를 요구하는데 binding이 없으면
-`UC-PIT-001` OperationError로 producer 계산 전에 실패한다. Current direct acceptance는 no-call failure evidence,
-explicit horizon registration, linked retry와 future-hidden label을 함께 검증한다.
+### 5.2 Portfolio construction 위치
 
-따라서 derived label registration은 horizon이 availability와 일치하는지 validation해야 한다. 이를
-누락하면 §17이 지적한 "보장이 write 시점으로 이동한 대가"가 정확히 여기서 실현된다.
-
-Fitted state가 있는 component는 이를 typed artifact 또는 versioned binary payload reference로 저장하고,
-어느 state를 Strategy가 소비했는지 lineage edge로 기록한다. 최신 파일 경로 alias로 대체하지 않으며
-선택되지 않은 candidate와 failed materialization도 audit query에서 조회 가능해야 한다.
-
-### G4 — Long-short 실행 회계
-
-**초안 구조로는 executable long-short가 불가능하다.** 이 절의 다른 항목과 달리 명세 미완이 아니라
-설계 미착수다.
-
-§9가 차용하는 qlib `Position._sell_stock`(L352-374)은 잔량이 음수가 되면 `ValueError`를 던진다.
-구조적으로 long-only다. 그리고 이 제약을 우회하던 PRD §11.4~11.7 matched capitalization은 §0.3이
-전제 소멸로 무효화했다. 옛 우회로는 폐기되었고 대체 메커니즘은 아직 없다.
-
-**연구 층위와 실행 층위를 분리해야 한다.** PRD §4.2의 세 층 중
-
-- 1층(signal IC/RankIC/quantile spread, long-short diagnostic)과
-- 2층(signed basket return, factor return)은
-
-가중치가 부호 있는 수치일 뿐이고 Account를 경유하지 않으므로 **현재 구조에서 이미 가능하다.**
-막힌 것은 3층, 즉 order/position/account를 통과하는 executable short다.
-
-> **2026-08-10 정정.** 위 두 항목은 당시 층위 정의를 기록한 것이며 현행 계약이 아니다. PRD §4.2가
-> 개정되어 quantile spread와 signed basket return은 1·2층이 아니라 **academic execution 층에서
-> 산출**한다. 현재 Account를 경유하지 않는 것은 portfolio를 구성하지 않는 IC/RankIC뿐이다(I12).
-> "executable real short가 미설계"라는 이 절의 결론 자체는 유효하다.
-
-3층에 필요한 미설계 항목:
-
-1. **부호 있는 position** — 예외 제거 자체는 사소하다.
-2. **공매도 대금의 성격** — qlib `Position`의 `cash`는 단일 수치이며 free/encumbered 구분이 없다.
-   그대로 두면 공매도 대금으로 재매수하는 무한 레버리지가 성립한다. 담보 모델이 필요하다.
-3. **수익률 분모** — 달러 뉴트럴 북에서 NAV·gross·capital-at-risk 중 무엇을 분모로 쓸지는
-   계산으로 도출되지 않는 **선언 사항**이며 O9에서 gross로 확정되었다. PRD §11.6이 composite와 active
-   return을 구분한다.
-4. **차입 비용** — 종목별·시점별로 변한다. 데이터가 없으면 모델링하지 않는다(PRD §5.7).
-5. **대차 가능성(locate)** — unknown을 가능으로 추측하지 않는다(PRD §7.7 원칙).
-
-해결 경로는 concrete Instrument semantics와 Exchange/execution policy의 명시적 결합이다. 연구
-Workflow는 `long_only | hypothetical_short | real_short` 중 하나를 명시적으로 resolve해야 하며 unknown을
-`long_only`로 대체해서는 안 된다. 현재 `hypothetical_short`는 explicit academic listing과 fixed hypothetical
-profile에서만 지원되고 production Account와 분리된다. 실제 short는 borrow/locate, collateral, proceeds
-encumbrance, borrow fee가 모두 명시되어야 한다. 이 경계는 특정 `capability` 필드 하나가 아니라 listing,
-venue/profile과 state authority의 결합으로 구현한다.
-
-### G5 — `ensemble` 계약
-
-초안은 ensemble을 lineage와 package 폴더에만 두고 callable contract를 정의하지 않았다. 현행 §8은
-Ensemble을 `StrategyOperation`으로 정의한다. `StrategyArtifactResolver`가 member별 stable consumer role과 exact
-artifact ID/schema binding을 검증해 immutable projection을 `StrategyView`에 주입하고 producer를 재실행하지 않는다.
+Portfolio construction은 executable Strategy의 public boundary다. Built-in Strategy는 내부에서 reusable
+`PortfolioConstructor`를 composition할 수 있고, user Strategy는 직접 construction할 수 있다. 어느 쪽이든
+`decide()` 반환값은 `PortfolioIntent`다.
 
 ```python
-EnsembleStrategyOperation.run(view) -> StrategyDraft  # Flow가 StrategyResult로 승격
+class PortfolioConstructor(Protocol):
+    def construct(
+        self,
+        research_values: object,
+        context: PortfolioContext,
+    ) -> PortfolioIntent: ...
 ```
 
-**G4와 독립이다.** Ensemble은 weight space에서 일어나며 Account를 경유하지 않으므로 long-short
-member를 결합하는 것 자체는 실행 회계와 무관하다.
+`research_values`의 public 표준화 여부는 아직 확정하지 않는다. 이것이 signal인지 weight인지에 관한 결정은
+Strategy 내부 composition API에만 영향을 주고 execution contract에는 영향을 주지 않는다.
 
-확정된 계약은 다음과 같다.
+### 5.3 Intent validation
 
-- **Crossing 기록.** 두 member가 같은 종목에 반대 intent를 내면 ticker-level pre/post-net weight,
-  crossing/netting amount와 member contribution을 기록한다. 이 단계의 crossing은 Exchange Fill이 아니므로
-  transaction cost를 발생시키지 않는다.
-- **Netting 후 normalization.** 네팅으로 줄어든 gross를 목표치로 되돌릴지는 fixed/flexible budget
-  선언에 따른다. 말없이 재정규화하지 않고 gross/net residual을 evidence로 남긴다.
-- **Path-dependency lineage.** Member가 state-dependent면 artifact dependency와 함께 모든
-  state/account/cursor identity를 보존한다. Compatible frozen member의 producer는 rerun하지 않고, 여러 source
-  identity를 fabricated single identity로 축약하지 않는다. Current Account는 downstream target/order conversion에서만
-  authority로 읽는다.
+`PortfolioIntent` 생성 시 다음을 검증한다.
 
-### Current Strategy-composition readiness
+- timezone-aware decision/effective time
+- unique instrument target
+- finite quantity/weight
+- declared budget semantics
+- source and account-version lineage
+- selected execution profile과의 direction/instrument compatibility preflight
 
-`UC-EXTENSION-002`로 project-local Strategy validation, registration-scoped payload model, typed artifact input,
-exact-ID research/daily 실행과 installed sample은 current support다. Current canonical artifact는
-`strategy_result:v4` 하나이며, 현재 invocation의 direct state와 consumed frozen result의
-`source_state_lineage`를 분리하고 exact lookback access와 latest execution access를 함께 담는다. Breaking
-migration은 완료됐고 v1/v2/v3 reader는 제거했다 — v4가 아닌 candidate는 promotion 단계에서 거부한다. Flow는
-Account, feedback, completed-performance와 strategy-state actual access로 direct path-dependence 선언을 검증하고, 실제
-`StrategyView.artifact()` access만 immediate artifact edge와 transitive source state/cursor edge로 승격한다.
-Portfolio도 exact envelope version을 먼저 읽으며 latest-compatible을 선택하지 않는다.
+Fractional/lot validation은 하지 않는다. 그것은 execution venue가 instrument listing을 해석할 때 결정한다.
 
-Ensemble special backend load와 synthetic single-state identity는 제거되었다. Ensemble은 stable member role과 exact
-binding을 선언하고 `run(view)`에서 한 번 계산하며, 서로 다른 frozen source identity를 그대로 보존한다. Bundled
-`strategy-composition-v1`은 두 distinct Account/strategy-state producer가 만든 exact v4 artifacts를 변경·재실행 없이 합성하고,
-exact registered artifact-only consumer가 더 늦은 session의 별도 Account B에서 decision과 execution을 수행함을
-installed-project 경로로 검증한다. 따라서 `GAP-STRATEGY-COMPOSITION-001`은 이 local installed profile에서 닫혔다.
+### 5.4 Hold도 `PortfolioIntent`다
 
-### 현재 남은 감사 action
+Hold를 별도 action enum이나 `None`으로 표현하지 않는다. Strategy는 현재 committed portfolio와 같은 complete
+target을 가진 `PortfolioIntent`를 반환한다. OrderPlanner가 execution 시점 state와 비교하면 delta가 0인
+`OrderBatch`가 되고, intent와 no-trade diagnostic은 남지만 Fill이나 Account mutation은 생기지 않는다. 이렇게
+하면 “판단하지 않음”, “판단해서 유지함”, “주문했지만 dealt 0”을 구분할 수 있다.
 
-```
-G1 · G2 · G5         → current local contract/implementation evidence 있음; 각 제한은 본문 참조
-G3                   → public direct contract/real-DW/installed evidence 있음; scheduling과 Model registry는 future
-G4                   → hypothetical은 O3·O4 의미로 진행 가능. real short는 담보·차입·locate 결정 필요
-execution convention → public frozen close/open real-DW/installed evidence 있음; intraday는 future
-execution boundary   → §14 10단계 gap 전부 닫힘 (2026-08-11 sync)
+## 6. Order preparation
+
+### 6.1 execution-time responsibility
+
+```python
+class OrderPlanner(Protocol):
+    def requirements(self, intent: PortfolioIntent) -> tuple[DataRequirement, ...]: ...
+    def plan(
+        self,
+        intent: PortfolioIntent,
+        account: AccountSnapshot,
+        market: ExecutionView,
+        exchange_rules: ExchangeRulesView,
+    ) -> OrderBatch: ...
 ```
 
-G2의 구현은 Account/Position slice에 남아 있지만 별도 state store 결정은 필요하지 않다. G4의 hypothetical
-범위도 진행 가능하며, real-short accounting과 complete derivative lifecycle만 후속 product decision을 기다린다.
+OrderPlanner는 decision time의 stale quantity를 재사용하지 않는다. Execution event에서 읽은 committed position,
+cash, execution price, tradability와 venue rule로 target delta를 physical order로 바꾼다.
 
----
+각 `OrderRequest`는 다음을 가진다.
 
-## 17. 개정 이력
+- instrument, side, requested quantity
+- originating intent ID와 target
+- account version seen
+- conversion price와 data lineage
+- rounding/clipping/skip diagnostic
 
-### 2026-08-11 — Declared actual history와 independent Strategy state
+`PortfolioIntent`를 다시 계산하거나 Strategy를 재호출하지 않는다.
 
-PRD `UC-ACCOUNT-HISTORY-001`/`UC-STATE-001` 및 §17.2 변경에 맞춰 account-series/instrument-panel 기록·조회,
-single JSON strategy state와 explicit run seed를 current로 구현했다. StrategyResult는 v4, SimulationCheckpoint는
-v4, Strategy extension registration은 v2다. 같은 변경에서 `StrategyMemoryStore`, feedback-coupled CAS,
-`simulation_recovery_point`, daily/academic `resume=`과 recovery coordinator를 제거했다. 아래의 같은 날짜 이전
-sync 기록에 나오는 Memory/CAS/RESUME 설명은 당시 코드의 역사이며 현행 normative contract가 아니다.
+### 6.2 atomic batch boundary
 
-### 2026-08-11 — 코드 대조 sync
+MVP decision은 하나의 `OrderBatch`다. Required price나 listing이 하나라도 없고 profile이 batch-atomic을 선언하면
+Exchange 호출 전에 전체 batch가 실패한다. 부분 성공 policy는 future capability다.
 
-`src/qlibx/`를 직접 읽어 본문을 actual implementation에 맞췄다. 관찰 기록 전문은
-`docs/actual-implementation-20260811-0900.md`에 있다. 이 sync에서는 **코드를 바꾸지 않고 문서만** 고쳤다 —
-대조에서 "코드가 doc을 따라야 하는" 항목은 나오지 않았다.
+## 7. Exchange
 
-**닫힌 gap 표기 정정.** `GAP-LOOKBACK-001`, `GAP-RETURN-AUTHORITY-001`, `GAP-EXECUTION-PREPARATION-001`,
-`GAP-EXCHANGE-BASE-001`, `GAP-PROJECT-CONFIGURATION-001`, `GAP-PUBLIC-FACADE-001`,
-`GAP-EXECUTION-FEEDBACK-001` 일곱 개가 코드에서 닫혔으나 §1·§7·§8·§12·§13.11·§14·§17이 열린 것으로
-기술하고 있었다. §14 readiness map 10단계는 target gap 행에서 current 행으로 바꿨다. Artifact 버전도
-`strategy_result:v2` → `v3`로 정정했다(v1/v2 reader 제거됨).
+### 7.1 공통 계약
 
-**존재하지 않던 계약 제거.** §5 `Clock.set_timer`, §6 `Executor` Protocol과
-`ExecutionSpec`/`ExecutionEvent`/`ExecutionResult`/`ExecutionLimitation`, §7 `PanelView`/`AccountView`,
-§8 public `calculate_transaction_cost`와 `engine.add_*`, §6 `gate.scoped_view`는 코드에 없다. 실제 shape로
-교체하거나 future 타입 이름임을 명시했다. 특히 current executor는 `plan(decision) -> datetime | None`
-**하나뿐**이며 체결은 Flow가, request 조립은 `ExecutionPreparation`이 맡는다는 책임 분배를 §6에 다시 그렸다.
+```python
+class Exchange(Protocol):
+    exchange_id: str
+    calendar: SessionCalendar
 
-**시그니처 정정.** `BaseExchange.match_batch`와 `ExecutionPreparation.prepare`는 `OperationOutcome[...]`을
-반환한다. `Account.snapshot(*, evaluation_time=...)`, `feedback(after: int, ...)`, `AccountChange = FillBatch
-| MarkBatch`(두 개뿐), `StrategyMemoryStore.commit(..., expected_version=...)`으로 고쳤다. `RowsLookback.rows`,
-필수 `CalendarLookback.timezone`, `ComponentRequirement`의 중복 정의도 정리했다.
-
-**누락 계약 추가.** registration schema v2, query snapshot `layout_version`, explicit `reindex_datasets()`와
-네 가지 drift 실패 코드를 §7에 기술했다. 가장 중요한 누락은 **lookback 없는 historical read가
-`DATASET_LOOKBACK_REQUIRED`로 실패한다**는 것이다 — doc이 주장하던 것보다 코드가 강했다. `RESUME` event,
-daily priority 상수, `config_fingerprint` 강제도 추가했다.
-
-**Module 이름.** `kernel` → `runtime`(§2.4, §5, §12). `runtime/`은 `clock.py` 하나이며 별도 event/queue
-모듈이 없다는 점, `flow/`의 실제 14개 모듈, 그리고 `tests/test_architecture.py::LAYER_DEPENDENCIES`가 강제하는
-실제 의존 방향(`execution → portfolio/evidence`, `specs → execution` 포함)으로 §12를 갱신했다.
-
-### 2026-08-10 — Observation store를 normalized Parquet + DuckDB로 전환
-
-Exact `rows`/`calendar` lookback을 구현하면서 observation source가 pandas in-memory filter에서
-registration-time normalized Parquet snapshot + DuckDB predicate pushdown으로 전환됐다. §1 alignment
-표와 §7의 서술을 actual에 맞춰 갱신했다.
-
-전환 근거는 성능만이 아니다. PRD §7.6.1이 *"전체 history를 먼저 읽은 뒤 Strategy code에서 자르는
-경로를 bounded access로 간주하지 않는다"* 를 요구하므로 선언된 lookback이 질의 자체에 박혀야 한다.
-그러려면 predicate pushdown이 필요하다. 대가로 ingestion 단계와 snapshot invalidation 계약이 생겼다.
-`tests/performance/lookback_gate.py`가 fresh-process gate이며 대표 workload 수치는 implementation
-record에 기록한다.
-
-`AccessRecord`는 lookback 증거로 `lookback`, `snapshot_fingerprint`와 `instruments_below_window`만
-남긴다. 초기 구현의 `requested_instruments`/`per_instrument_actual_count`는 PRD §7.6.1이 요구하는
-requested/actual **count**를 넘어 instrument마다 항목을 만들었고, 그 결과가 모든 published
-`StrategyResult`에 직렬화되어 횡단면 크기에 비례해 커졌다. 제거했다.
-
-### 2026-08-10 — Price-axis authority와 return 산출 경로 단일화
-
-사용자 결정으로 다음 셋을 확정했다.
-
-1. **Portfolio return, NAV, PnL과 turnover는 Exchange/Account 경로에서만 산출한다.** PRD §4.2의 계층을
-   다시 나눠 basket 수익률을 만드는 것은 세 번째 층(academic execution)부터임을 명시했고, §4.6 금지
-   목록에 우회 경로 보고를 추가했다. Quantile spread와 signed basket return이 첫 번째 층에서 빠졌다.
-2. **`analyze_signal`의 `hypothetical_long_short_return`을 제거한다**(`GAP-RETURN-AUTHORITY-001`).
-   §8의 `analyze` 계약이 portfolio 수익률 산출을 금지하도록 정정했다.
-3. **Return-only source의 unit price 변환 책임을 registration 단계로 옮긴다**(PRD §7.2.1). Package는
-   변환하지 않고 별도 derived-binding schema나 등록 시점 재계산 검증도 두지 않는다. §2.6에 있던
-   derived-binding 보존 요구를 삭제했다. 가격 양수성은 이미 execution 시점에 판정되므로 등록 시점
-   중복 검증이 불필요하고, 특정 transform 하나에만 lineage를 강제하면 user가 만드는 다른 파생
-   dataset과 일관성이 깨진다.
-
-§2.5의 $R_{p,t+1}=\sum_i w_{i,t}r_{i,t+1}$ 은 **결과 산출식에서 1기간 검증 항등식으로 역할이 바뀌었다.**
-다기간 누적은 무비용·매기간 완전 리밸런싱을 암묵 가정하므로 제공하지 않는다. I12를 신설해 return-native
-execution 경로의 부재를 테스트 가능한 불변식으로 고정했다.
-
-### 2026-08-10 — 단순화된 execution boundary와 Exchange hierarchy 확정
-
-**Runtime.** Current-scope target을 `Strategy → ExecutionPreparation → BaseExchange → Flow-owned Account commit / execution feedback`으로 고정했다. `ExecutionPreparation`은 execution event의 current Account/price/lot/optional benchmark를 사용해 construct, adjust, advisory validate와 convert를 한 번의 고정 순서로 호출한다. Generic `DecisionStage[]`, stage registry, `TriggerPolicy`와 shared `DurableRunJournal`은 도입하지 않는다.
-
-**Constraint.** Validation은 `passed`/`compliant`와 excess를 기록하는 advisory finding이다. Breach 자체는 execution을 막지 않는다. Missing required input, schema mismatch와 evaluator failure만 Exchange request 전에 explicit failure다. Current standalone result의 `eligible` semantics와 daily integration은 gap이다.
-
-**Exchange.** Generic abstract `BaseExchange[RequestT, ResultT]`는 stable ID, config fingerprint, immutable batch request, typed outcome과 Account/strategy-state non-mutation만 공유한다. `KrxExchange` physical flow와 `AcademicExchange` hypothetical flow는 request/result 및 state semantics를 분리 유지한다. (이 결정 당시에는 common base가 없었고, 2026-08-11 sync 시점에는 구현되어 있다.)
-
-**Data/feedback.** Lookback은 `ComponentRequirement`에 exact `rows` 또는 `calendar`로 선언하고 Store query까지 관통시킨다. Daily cadence는 frozen `decision_times`가 소유한다. 다음 Strategy input은 cursor stream 대신 `latest_execution_result()` 한 건으로 제한한다. 이 결정들은 PRD readiness gap과 `docs/current-support-map.md`, `docs/module-map.md`에 current/target을 나누어 기록했다.
-
-**2026-08-11 superseded note.** 위 paragraph의 frozen `decision_times` cadence 판단과 Runtime paragraph의
-`TriggerPolicy` 배제는 strategy-owned schedule-shaped trigger 구현으로 대체됐다. Generic scheduler/journal과
-data-conditional trigger 배제는 유지한다. 현행 normative contract는 상단 alignment 표, §4 I13, §5와 §13.11이다.
-
-### 2026-08-09 — Installed frozen Strategy composition closure
-
-**Installed oracle.** `strategy-composition-v1`은 서로 다른 Account와 Strategy Memory를 실제로 읽은 두 daily
-producer의 exact final `strategy_result:v2` IDs를 합성한다. Source artifact content hash와 producer call count가
-composition 및 downstream execution 전후 동일하며, Ensemble은 모든 source Account/strategy-state/cursor lineage를 보존하고
-fabricated singular state identity를 만들지 않는다.
-
-**Downstream authority.** Project-local artifact-only consumer는 curated top-level imports로 validation/register된 exact
-registration만 실행한다. Frozen source가 만들어진 뒤의 session에서 Account B의 committed version으로 target sizing과
-execution을 수행하며, inherited lineage를 Account B recomputation으로 표시하지 않는다. 이 installed acceptance로
-`UC-ALPHA-PATH-001`과 `GAP-STRATEGY-COMPOSITION-001`의 local current-support closure를 고정한다.
-
-### 2026-08-07 — StrategyResult v2 source-lineage migration
-
-**Version boundary.** Persisted v1 payload는 `StrategyResultV1` exact reader로 유지한다. 새 ResearchFlow success는
-`strategy_result:v2`를 publish하고, exact envelope metadata로 v1/v2 contract를 dispatch한다. 같은 logical identity의
-v1을 v2로 덮어쓰지 않으며 기존 artifact identity conflict가 append-only 경계를 지킨다.
-
-**Observed path dependence.** `StrategyDraft.path_dependent`는 이번 computation의 direct stateful access 선언이다.
-Flow와 local Strategy validation은 package-observed Account/feedback/completed-performance/Memory access와 선언을
-대조한다. 최종 result의 path dependence는 direct access 또는 inherited `source_state_lineage`로 결정하며,
-inherited-only consumer는 synthetic direct identity를 만들지 않는다.
-
-**Ensemble mechanism.** `EnsembleMemberSpec`의 exact schema/version과 artifact ID는 stable consumer role binding으로
-변환된다. `EnsembleStrategyOperation.run(view)`가 member를 typed input으로 읽고 한 번 계산한 `EnsembleDraft`에서
-Strategy result와 Ensemble evidence를 발행한다. Provenance를 복원할 수 없는 legacy path-dependent v1 composition은
-`STRATEGY_SOURCE_LINEAGE_INCOMPLETE`로 실패하지만 ordinary v1 recovery/Portfolio read는 유지한다.
-
-### 2026-08-07 — Actual implementation sync and readiness correction
-
-**Current authority.** Strategy returns `StrategyDraft`; Flow owns observed-lineage promotion to `StrategyResult`.
-`QlibxProject` is the operation-specific composition root. Role views now expose only their structural capability,
-ObservationStore reads registered sources with pandas and keeps an instance-local normalized-frame cache while
-rechecking source existence and SHA-256 on every query. Artifacts use JSON payloads with a DuckDB catalog, and
-Strategy memory is an in-memory CAS store included in local recovery checkpoints.
-
-**Design alternatives retained honestly.** A long-lived Engine, partitioned columnar source store, Parquet artifact
-payload, generic operation/publisher/loader protocols and a decomposed daily state machine remain conditional future
-options with the trade-offs and activation criteria in the alignment table. Same-layer flow imports remain audit debt;
-a shared domain/evidence contract is extracted only when a second real consumer exists, with compatibility re-export.
-
-**Evidence correction.** `UC-PIT-001` is current for the public direct materialization profile; real-DW and installed
-acceptance close `GAP-MATERIALIZATION-PIT-001` without claiming a scheduler or Model registry. `UC-ALPHA-CHILD-001`
-is current for public frozen close/open children; real-DW and installed acceptance close
-`GAP-EXECUTION-CONVENTION-001` without claiming intraday execution. Frozen participation-rate children remain generic
-isolation regressions. `GAP-STRATEGY-COMPOSITION-001` is closed for the installed local profile described below.
-
-### 2026-08-07 — Installed project-local Strategy lifecycle
-
-**검증과 등록.** Configured extension root의 trusted Python file은 fixed `STRATEGY_SPEC`와 fresh-instance
-`create_strategy()` contract로 검증한다. Package가 dataset/artifact/state fixture를 materialize하고 declaration,
-typed draft와 실제 access evidence가 deterministic할 때만 source/schema hash를 포함한 registration artifact를
-publish한다. Project-local payload model은 registration-scoped registry만 확장한다.
-
-**Exact 실행.** Research/daily facade는 caller가 지정한 registration artifact ID만 load한다. Current source를 import
-전에 hash하고 module contract를 다시 비교하며 registration-scoped payload contract와 registration lineage를 기존
-Flow에 주입한다. Source drift, schema drift, missing ID와 latest-compatible 추측은 compute/authority mutation 전에
-실패한다. Bundled `strategy-extension-v1` sample은 installed public imports로 validation, registration과 exact 실행을
-재현한다(`UC-EXTENSION-002`).
-
-**남은 composition gap.** 이 lifecycle은 M3 범위만 닫는다. 여러 path-dependent `StrategyResult` source의 모든
-Account/strategy-state identity와 cursor를 Ensemble result에 보존하는 schema/compatibility 변경은
-`GAP-STRATEGY-COMPOSITION-001`의 남은 M4 범위다.
-
-### 2026-08-07 — Strategy-first composition contract 정정
-
-**Path-dependent reuse.** Account 또는 Memory를 소비한 Strategy result는 다른 Strategy/Ensemble의 frozen typed
-input으로 재사용한다. Producer rerun이나 cross-account replay/rerun interview를 요구하지 않고, 실제로 소비한
-artifact와 모든 source state/cursor lineage를 새 result에 전파한다. Current Account는 downstream physical
-target/order conversion에서만 authority다.
-
-**Extension lifecycle.** Project-local Strategy를 alpha logic의 primary extension point로 두고 Model/materialization은
-선택된 component가 reusable intermediate를 요구할 때만 사용한다. Flow가 typed artifact를 resolve·load하고 bounded
-projection을 Strategy view에 주입한다. 이 revision 당시 build에는 full lifecycle이 없어
-`GAP-STRATEGY-COMPOSITION-001`로 명시했으며, 위 M3 revision이 local validation/execution 부분을 닫았다.
-
-**Monitoring clock.** Daily runtime의 session-close `MONITOR`는 performance/observation callback이며 constraint
-evaluation이 아니다. Constraint monitoring은 committed checkpoint와 frozen evaluation instant를 받는 standalone
-public operation이다. Optional scheduler integration은 가능하지만 `run_daily()`에 자동 삽입하지 않는다.
-
-### 2026-08-07 — public sample 선택과 constraint monitoring 노출
-
-**독립 monitoring 경로.** 설치 project의 공인 mutable Account 복원 경로는
-`SimulationCheckpoint → AccountCheckpoint → Account.from_checkpoint`다. Public facade는 frozen
-`ConstraintMonitoringSpec`이 가리키는 checkpoint artifact를 typed contract로 읽고 Account 무결성을
-검증한 뒤 기존 `MonitoringFlow`를 호출한다. Checkpoint의 version, journal, event identity 또는 `as_of`
-관계가 손상되면 raw `ValueError` 대신 `MONITORING_ACCOUNT_CHECKPOINT_INVALID`를 반환한다.
-
-**단일 evaluation instant.** `evaluation_time`은 wall clock에서 읽지 않고 frozen spec에 저장한다. 같은
-instant가 Account mark freshness와 benchmark의 PIT cutoff를 동시에 결정하므로 동일 spec과 immutable
-checkpoint의 반복 실행은 동일 monitoring artifact identity를 반환한다. Held position의 mark가 이 instant보다
-이르면 `ACCOUNT_VALUATION_STALE`이며, facade는 mark를 보정하거나 최신 가격을 추측하지 않는다.
-
-**Bundled sample 선택.** 이 revision에서 `project sample --sample-id`는 세 bundled sample identity를 argparse
-choice로 공개하고 기존 basic sample을 default로 유지했다. 위 M3 revision은 별도 closure evidence와 함께 네 번째
-`strategy-extension-v1` sample을 추가했으며 daily flow의 자동 constraint monitoring 단계는 여전히 추가하지 않는다.
-
-### 2026-08-07 — 선언된 source timezone과 원자적 dataset 등록
-
-**Timestamp 의미.** Naive availability 또는 observation timestamp는 더 이상 UTC로 추정하지 않는다.
-Dataset registration이 user-confirmed IANA `source_timezone`을 보존하고, data layer가 localize한 뒤 UTC
-instant로 변환한다. 이미 offset이 있는 source에 사용되지 않는 timezone을 선언하거나 혼합·DST 경계로
-정확한 instant를 만들 수 없으면 mutation 전에 typed failure를 반환한다. 이는
-`ConfirmedDelayRule.user_confirmed`와 같은 명시적 의미 선언이며 schema fingerprint는 원본 dtype을 계속
-나타낸다.
-
-**Session calendar.** Session query는 UTC calendar date를 암묵적으로 사용하지 않고 caller가 선언한
-`session_timezone`으로 observation instant를 변환한 뒤 local date를 비교한다. `StrategyView.session`은
-필수 keyword로 이 달력을 받고, signal analysis는 `return_session_timezone`을 frozen request에 보존한다.
-Daily execution은 `DailyExecutionProfile.session_timezone`을 date 계산과 조회에 동일하게 사용한다.
-
-**Identity와 migration.** `source_timezone`은 registration identity에 포함된다. Upgrade 전 registration은
-읽을 수 있지만 naive source를 다시 query하려면 명시적 timezone으로 재등록해야 하고, 기존 identity와의
-충돌은 `REGISTRATION_IDENTITY_CONFLICT`로 드러난다. 이전 run resume은 current scope가 아니다.
-Silent identity migration은 하지 않는다.
-
-**Append-only publication.** Registry publication은 destination을 교체할 수 있는 `os.rename` 대신 같은
-filesystem의 atomic hard-link create-if-absent를 사용한다. Hard link를 지원하지 않는 filesystem에서는
-부분 JSON을 노출하는 직접쓰기 fallback 없이 `REGISTRY_PUBLICATION_FAILED`로 종료한다.
-
-### 2026-08-06 — 최종 package name 확정과 user-owned ETF look-through 설계
-
-**Package name.** 현재 package/import/CLI는 구축이 끝날 때까지 `qlibx`를 유지하고, 마지막 migration
-단계에서만 확정된 target `vqapr`로 전환한다. O12는 열린 결정에서 제거했다.
-
-**ETF look-through.** PRD `UC-LOOKTHROUGH-001`~`003`에 맞춰 qlibx core는 ETF를 physical Instrument로만 취급하고,
-look-through는 user Strategy가 constituent dataset과 actual AccountSnapshot을 명시적으로 선언·consume해 계산하는
-behavior로 정정했다. Package-owned mapping resolver, special snapshot/result type, coverage profile과 자동 feedback은
-두지 않는다. qlibx는 PIT ViewGate, actual-state 접근과 generic lineage만 제공한다.
-
-**Reference 판단.** `references/qlib-integration-codex`의 matrix multiplication, exact axis, actual-holding
-turnover, non-tradable freeze, independent validation과 stored attribution 검사는 차용한다. Static config mapping,
-identity-covariance fallback, 의미를 바꾸는 사후 normalization, optimizer target을 realized exposure로 부르는
-동작과 Qlib lifecycle 결합은 거부한다.
-
-### 2026-08-06 — execution 시점 명확화와 출처 설명의 본문 통합
-
-**체결 시점.** 첫 vertical slice의 모호한 `CloseFill` 표현을
-`NextSessionCloseExecutor + ClosePriceFill` 조합으로 명확히 했다. Decision이 끝난 **다음 eligible trading
-session의 close**에 체결하며,
-당일 종가 체결과 calendar day 기준 이튿날 체결을 뜻하지 않는다. 이는 intraday path, market impact와
-부분체결을 생략한 가장 단순하고 낙관적인 가정이다. Intraday Executor는 같은 immutable DecisionIntent를
-여러 ExecutionEvent로 나누고, 각 event마다 최신 AccountSnapshot을 읽어 같은 `Account.commit()` 경계를
-통과한다.
-
-**출처 설명.** 별도 차용 출처 표를 제거하고 Clock, Flow/Executor, View, Operation, Account, Evidence,
-DTO와 Engine 조립의 해당 본문에 출처·위치·차용 수준·비차용 이유를 함께 기록한다. 특히 명시적인
-`add_exchange` 뒤 `add_instrument` 조립 순서는 NautilusTrader `BacktestEngine.add_venue`와
-`add_instrument`의 build-time validation에서 설계만 차용했음을 §8에 기록했다. 계약과 근거가 서로 다른
-절에서 독립적으로 변해 sync가 깨지는 것을 막기 위한 변경이다.
-
-**Package name.** 현재 구축, import, CLI, artifact schema와 generated skill path는 `qlibx`를 사용한다.
-최종 rename target은 `vqapr`로 확정했지만 실행은 마지막 migration 단계까지 보류한다. 그 단계에서 PyPI,
-import/CLI/document path, artifact/schema identity, installed skill과 migration guide를 하나의 versioned change로
-전환한다. 따라서 package name은 더 이상 열린 결정이 아니며 O12를 제거했다.
-
-### 2026-08-06 — Account authority 통합과 read/write 분리
-
-**계기.** Ledger가 actual-state authority이면서 AccountSnapshot을 만들고, 쓰기 port인 FillSink가 cash와
-positions까지 읽으며, round-trip을 위해 다시 TradeLedger를 추가하려 했다. 같은 계좌 상태를 여러 객체가
-나누어 소유해 "누가 commit하는가"가 불명확해지는 구조였다.
-
-**결정.** PRD의 ledger는 actual result commit 역할명으로 해석하고 concrete state object는 하나의 Account로
-통합한다. Account는 cash, sparse Position, marks, Position cost basis/realized PnL, committed journal,
-feedback cursor와 version을 소유한다. 읽기는 immutable `AccountSnapshot`/`AccountFeedback`, 쓰기는 Flow가
-호출하는 `Account.commit(AccountChange, expected_version)`으로 분리한다. FillSink와 별도 TradeLedger는
-폐기한다.
-
-**Instrument 범위.** Registered, held, Strategy tradable, valuation instrument 집합을 분리한다. Strategy가
-주식만 거래해도 Account가 보유한 Future는 valuation set에 남고 exact settlement policy에 따라 cash/NAV에
-반영된다. 다만 complete Future lifecycle은 current support가 아니라 PRD future characterization이다.
-
-**차용 판단.** Qlib에서 cash/Position을 함께 소유하는 연구용 Account shape와 bar-end mark를 배우되 Exchange
-직접 mutation, 순서 의존적 update와 metrics/history 혼합은 거부한다. NautilusTrader에서 typed AccountState의
-identity/currency 검증과 instrument-specific accounting 경계를 설계만 차용하되 Account/Position/Portfolio/
-Cache/Manager 전체 분리는 현재 범위에 과해 채택하지 않는다.
-
-**패턴.** Callback/Clock은 IoC, Engine 조립은 Dependency Injection, Executor/Exchange/valuation 교체는
-Strategy Pattern, 계산과 commit 분리는 Functional Core/Imperative Shell, Account는 Aggregate Root,
-snapshot/feedback 대 commit은 Command-Query Separation으로 명시한다. 별도 read database나 event-only state
-rebuild를 도입하지 않으므로 full CQRS/Event Sourcing이라고 부르지 않는다.
-
-### 2026-08-03 — 정보 전달 모델 교체 (초안 §7 폐기)
-
-**변경.** Event마다 `gate`가 snapshot(`Context`)을 조립해 judge에 넘기던 구조를, **clock에 묶인
-읽기 전용 조회 창구(view)** 를 judge가 들고 필요한 시점에 조회하는 구조로 교체했다.
-
-**계기.** nautilus 소스를 다시 읽는 과정에서 초안의 사실관계 오류가 확인되었다. 당시 별도 차용
-매핑 절은 "nautilus에는 Context 객체가 없어 PIT가 구조로 강제되지 않는다"고 기술했으나, nautilus는
-다른 메커니즘으로 같은 보장을 제공한다. 현행 출처와 판단은 §7 본문에 통합했다.
-
-```
-core/data.pyx  L30  ts_event   그 사건이 발생한 시각
-core/data.pyx  L42  ts_init    그 데이터가 시스템에 들어온 시각
-backtest/engine.pyx L903       sorted(data, key=lambda x: x.ts_init)
-model/data.pyx L1496           is_revision
+    def rules(self, at: datetime, instruments: tuple[InstrumentId, ...]) -> ExchangeRulesView: ...
+    def requirements(self, orders: OrderBatch) -> tuple[DataRequirement, ...]: ...
+    def execute(
+        self,
+        event: ExecutionEvent,
+        orders: OrderBatch,
+        account: AccountSnapshot,
+        market: ExecutionView,
+    ) -> FillBatch: ...
 ```
 
-Stream이 `ts_event`가 아니라 **`ts_init` 오름차순**으로 정렬된다는 점이 핵심이다. qlibx가 채택하는 부분은
-PRD §4.4의 `available_at <= evaluation_time` 보장이다. NautilusTrader의 `ts_event`는 비교 근거로 기록하지만
-qlibx 최초 registration의 필수 field로 채택하지 않는다. 미래를 차단하는 것이 아니라 **아직 stream에서 나오지
-않았으므로 존재하지 않는다.**
+Exchange는 Store를 직접 읽지 않는다. Flow가 Exchange requirement를 resolve한 `ExecutionView`만 전달한다.
 
-**채택 근거.**
+### 7.2 Instrument-specific quantity rule
 
-1. **Backtest와 live의 judge 코드가 동일해진다.** 초안은 gate 구현이 두 벌 필요했고, 두 벌이
-   어긋나면 backtest만 통과하는 결함이 생긴다. 개정 후 차이는 clock 교체와 stream 공급원뿐이다.
-2. **Cutoff가 파라미터에서 사라진다.** 일봉의 `available_at`이 15:30이면 09:00 `DECISION`이 당일
-   종가를 볼 수 없다. §3의 cutoff 열이 시간표에서 유도된다.
-3. **Event마다 snapshot을 조립하는 비용이 없다.**
-4. **Lineage가 선언이 아니라 관측에서 나온다.** View가 접근을 기록하므로 실제 사용과 어긋나지
-   않는다(PRD §7.4).
-5. **사전 bounded-load 선언이 불필요하다.** 조회 자체가 lookback으로 한정된다.
+```python
+class ListingRule(BaseModel):
+    instrument_id: InstrumentId
+    quantity_step: Decimal
+    minimum_quantity: Decimal
+    fractional_allowed: bool
+    permitted_sides: frozenset[Side]
+```
 
-**대가.**
+Fractional quantity는 Account mode가 아니라 **Exchange가 해당 venue의 Instrument listing에 대해** 결정한다.
+같은 instrument도 academic venue에서는 `quantity_step=0.000001`, KRX profile에서는 `quantity_step=1`일 수 있다.
+Exchange는 rounding 결과, requested/dealt quantity와 rule identity를 Fill diagnostic에 남긴다.
 
-1. **Judge가 순수 함수가 아니게 된다.** View를 보유하고 조회하므로 초안의 I2("context 밖 데이터에
-   접근하지 않는다")가 성립하지 않는다. I2는 "모든 접근은 clock-bound view를 경유한다"로
-   개정되었다. 테스트는 가짜 clock과 가짜 view 주입으로 유지된다.
-2. **보장 지점이 read 시점에서 write 시점으로 이동한다.** `available_at`을 잘못 선언하면 조용한
-   look-ahead가 발생하고 예외는 나지 않는다. PRD §5.1·§7.2가 availability 선언을 qlibx 소유로,
-   §4.4가 qlibx의 보장 범위를 "선언된 availability의 준수"로 규정하므로 책임 배분 자체는 일치한다.
-   다만 **data registration 검증이 §1 설계 명제를 지탱하는 단일 지점**이 되므로 그에 상응하는
-   검증이 필요하다.
+### 7.3 Academic profile
 
-**유지되는 것.** Event / callback / handler 기반 inversion of control, 여섯 layer 구분, 반복 원자,
-flow가 유일한 부수효과 지점이라는 배치는 변경되지 않는다.
+첫 fixture profile은 다음을 명시한다.
 
-**영향 범위.** §2 멘탈 모델, §3 원자 표(cutoff 열 제거), §4 불변식 I2·I3, §7 전면 재작성,
-§8 judge 계약 첫 인자를 정정했다. 당시 별도 매핑표의 내용은 현행 §7 View reference 설명에 흡수했다.
+- signed direction 지원
+- listing별 fractional quantity 허용 가능
+- next eligible close의 exact PIT reference price
+- full fill
+- fee, tax, slippage, impact, borrow cost = 0
+- borrow/locate/margin/collateral 미모델링
+- result realism = `hypothetical`
 
-**남는 순수 창작 영역.** 시간 경계 메커니즘은 nautilus에서 차용하지만 **접근 축**은 여전히 창작이다. Reference
-세 곳은 instrument별 시계열이 기본 단위이고 메모리 상주 방식이라, decision time 횡단면을 컬럼
-저장소 질의로 제공하는 부분에는 대응물이 없다.
+Academic profile도 `OrderBatch -> FillBatch -> Account.commit -> mark`를 그대로 따른다.
 
-### 2026-08-03 — 설계 감사
+### 7.4 KRX daily physical-simulation profile
 
-네 개의 research scenario 대조로 다섯 개 gap 확인. I4가 PRD §9.1·§9.10과 모순되어 개정. 상세는
-현행 §16.
+첫 fixture profile은 다음을 명시한다.
 
-### 2026-08-03 — execution backend 결정 및 batch 단위 확정
+- long-only equity/ETF
+- listing의 integer lot/quantity step
+- next eligible close price
+- supported order full fill
+- effective-dated fee/tax
+- cost-aware cash clipping
+- partial fill, volume impact, actual settlement 미모델링
+- result realism = `simulation`
 
-**결정.** nautilus_trader를 execution backend dependency로 채택하지 않는다. 설계는 선별 차용하되
-engine은 qlibx가 구현한다. 근거와 재검토 조건은 [[why-not-nautilus-as-a-dependency]]에 있다.
+“KRX”라는 label 자체가 실제 거래소 완전 재현을 뜻하지 않는다. 구현된 rule과 limitation만 주장한다.
 
-**핵심 사유.** 기본 작업 단위가 다르다. nautilus는 instrument별 event, qlibx는 decision-time
-횡단면이다. 3000종목 × 5000일이면 1500만 event 대 5000 batch step이고, 이는 최적화로 좁힐 수 있는
-차이가 아니다. 여기에 PRD §8~§10·§12에 대응물이 없다는 점, v1→v2 전환 진행 중이라는 점,
-3000종목 규모가 미검증이라는 점이 더해진다.
+### 7.5 FillBatch
 
-**구조 변경.** Executor가 "일정표"에서 **횡단면 batch 실행기**로 바뀐다. `exchange.match(order)`는
-`exchange.match_batch(orders)`가 되고, 당시에는 `FillSink.apply_batch`가 commit을 담당했다. 현행 §14 구축 순서는
-2단계부터 instrument축 배열을 기본 단위로 잡았다. FillSink 결정은 2026-08-06 Account commit으로 폐기되었다.
+`FillBatch`는 requested/dealt quantity, price, fee/tax/cost, reason, listing rule, execution data lineage, exchange ID,
+intent ID와 order batch ID를 가진다. Zero-dealt와 rejected order를 Fill로 가장하지 않는다.
 
-**유지되는 것.** event / callback / handler 기반 inversion of control, clock, closed-loop feedback은
-변경되지 않는다. 한 event가 나르는 데이터의 크기만 바뀐다. 시간 축은 여전히 순차이므로 partial
-fill, blocked liquidation, path-dependent stop-loss가 모두 성립한다.
+## 8. Account
 
-**명시적으로 배제하는 것.** 시간 축을 일괄 계산하는 형태의 backtest — `(weights.shift(1) *
-returns).sum()` — 는 feedback edge가 없어 PRD §4.3을 만족할 수 없으므로 채택하지 않는다.
-벡터화 대상은 instrument 축이지 시간 축이 아니다.
+### 8.1 하나의 aggregate
 
-**분단위 체결.** 요구되지 않는 것으로 확인되어 `MinuteExecutor`를 계획에서 제외한다. Executor 교체
-지점은 유지한다.
+```python
+class AccountMode(str, Enum):
+    LONG_ONLY = "long_only"
+    SIGNED = "signed"
 
-### 2026-08-04 — instrument capability 도입, 부수 결정 넷
+class Account:
+    def snapshot(self) -> AccountSnapshot: ...
+    def commit(self, fills: FillBatch, *, expected_version: int) -> AccountSnapshot: ...
+    def mark(self, marks: MarkBatch, *, expected_version: int) -> AccountSnapshot: ...
+    def history(self, query: AccountHistoryQuery) -> AccountHistory: ...
+```
 
-**instrument (O3·O4 해결).** PRD에 §7.12 instrument capability declaration을 신설하고 §11.4~11.7의
-matched capitalization을 대체했다. Position이 음수를 가질 수 있는지는 engine의 고정 속성이 아니라
-instrument가 장차 선언해야 할 값이며, `long_only` / `hypothetical_short` / `real_short` 세 값을 갖는다.
-Production public instrument model에는 이 direction contract가 없으므로 미선언을 `long_only`로 간주하지 않는다.
-별도 `AcademicInstrumentListing`과 fixed academic profile이 `hypothetical_short` 범위를 닫았고 real short는 계속
-production instrument/account 계약을 요구한다.
+Account는 mode와 무관하게 같은 cash, position, cost, version, journal, snapshot과 history 구조를 사용한다.
+Mode는 run 시작 시 동결되고 중간에 바뀌지 않는다.
 
-matched capitalization은 qlib의 long-only Position 제약을 우회하기 위한 장치였다. Engine 소유권이
-넘어오면서 전제가 사라졌고, 우회로 대신 선언을 요구하는 형태로 교체했다. PRD §4.2, §5.1, §5.7,
-§11.4, §11.6, §12.3, §15 P8, §16.2, §17.2가 함께 갱신되었다.
+### 8.2 mode별 차이는 state-transition validity뿐이다
 
-**perp·담보 보류 (O5).** 현재 범위 밖이다. 도입 시 §7.12의 선언 항목을 늘리는 형태여야 하며 engine
-구조 변경을 요구해서는 안 된다는 제약만 남긴다.
+- `LONG_ONLY`: FillBatch 적용 후 어떤 position도 0보다 작을 수 없다.
+- `SIGNED`: FillBatch 적용 후 negative position을 허용한다.
 
-**polars 기각 (O2).** 횡단면 batch 접근에서 이득이 크지 않다고 판단했다. 저장 Parquet / 질의 duckdb /
-계산·경계 pandas로 간다. 대가는 vnpy signal 연산 30여 개가 복사가 아니라 pandas 재작성이 된다는 것이다.
-현행은 §8 Operation provenance에서 코드 차용과 재작성 경계를 함께 설명한다.
+이 차이만 mode-specific이다. AccountMode는 fractional 허용, lot size, rounding, listing, price source, cost와 fill
+timing을 결정하지 않는다.
 
-**FillConvention 분리.** Executor가 정하는 것은 일정이고 체결가 규약은 별도 축이다. 둘을 묶으면 종가
-체결을 시가 체결로 바꾸는 데 executor를 새로 써야 한다. 당시 `CloseFill`이라고 적은 기본값은
-2026-08-06 `NextSessionCloseExecutor + ClosePriceFill` 조합으로 명확히 했고, **낙관적 가정임을 명시**하며 사용된 convention identity를
-result에 기록한다. Convention 교체는 alpha부터 Account까지 어느 계약에도 영향을 주지 않는다.
+공통 validation은 expected version, finite amount, known instrument/currency, batch integrity, cash arithmetic와
+journal consistency다. Validation 실패 시 position, cash, version과 journal을 하나도 바꾸지 않는다.
 
-**pub/sub 보류 근거 확정 (O6).** 한 event의 수신자가 둘뿐이고 이름을 안다. 전환 비용이 발행 지점 1곳
-교체에 그치고 operation·Account 계약이 불변이므로 미룰 수 있다. 반대로 `available_at`, clock 분리,
-`(결과, 진단)` 반환, 시간 축 순차는 나중에 추가하면 정보를 잃으므로 미루지 않았다. 판단 기준은
-**"나중에 추가하면 정보를 잃는가"** 이다.
+### 8.3 Exchange와 Account의 이중 방어
 
-### 2026-08-04 — PRD use-case traceability와 Instrument/Exchange 책임 정정
+Exchange는 venue 규칙에 맞는 Fill만 만든다. Account는 그 Fill을 신뢰해 무조건 적용하지 않고 자신의 frozen
+state-transition mode와 공통 accounting invariant를 마지막으로 검증한다. 예를 들어 signed Academic Fill을
+`LONG_ONLY` Account에 commit하면 mutation 전에 실패한다.
 
-**PRD 경계 정정.** PRD는 instrument capability dictionary, cost schedule 선언 형식이나 class hierarchy를
-강제하지 않는다. 대신 상품·side·유효일 비용, 비용을 포함한 cash clipping, exact-rule failure,
-closed-loop feedback과 3,000종목 batch를 stable use-case ID로 정의한다. Academic instrument와 margined
-contract 사례는 현재 acceptance가 아니라 미래 design characterization으로 구분한다.
+### 8.4 valuation
 
-**책임 배치.** Instrument는 구체 Pydantic 타입으로 정적 경제 계약을 표현한다. Exchange는 listing,
-tradability, transaction-cost policy와 lifecycle event specification을 소유한다. Clock이 event를 순서대로
-발행하고 Flow가 Fill 또는 lifecycle cash flow를 Account에 commit한다. 다음 decision은 이 commit 이후의
-actual position, cash와 NAV를 읽는다.
+Valuation은 held instrument 전체를 요구한다. `ValuationService.requirements(snapshot)`가 필요한 field를 선언하고,
+Flow가 PIT MarkView를 공급한다. 일부 held instrument의 mark가 없으면 NAV를 추정하지 않고 `MarkBatch` commit 전에
+실패한다.
 
-**비용 계약.** 거래비용 계산 entrypoint는 Exchange에 붙인다. Product type, side, explicit event time과
-effective-dated schedule로 exact rule을 선택하고, ETF rule 부재를 Equity rule로 fallback하지 않는다.
-Candidate cash clipping과 최종 Fill이 같은 순수 계산기를 사용한다. 공개 `CostContext`와 필수
-`CostBreakdown`은 도입하지 않고 total cost, rule ID와 schedule version만 최소 evidence로 보존한다.
+## 9. Flow와 event-driven IoC
 
-**상품 계층.** `Future`와 `PerpetualSwap`은 `MarginedContract` 아래의 형제 타입이다. Future만 expiry와
-final settlement를 가지며, PerpetualSwap에는 expiry field 자체가 없다. Funding과 variation margin은
-transaction cost가 아니라 lifecycle cash flow다.
+### 9.1 Flow 책임
 
-**성능과 결정론.** Pydantic은 등록 경계에서만 검증하고 build 단계가 stable instrument index와 배열을
-compile한다. Hot fill loop에서 Instrument 모델을 다시 만들지 않는다. 모든 Exchange 계산은 wall clock이
-아닌 event time을 명시적으로 받아 같은 config와 data에서 같은 event 순서와 결과를 낸다.
+`SimulationFlow`는 하나만 둔다.
 
-이 항목은 바로 앞의 `instrument capability` 개정 기록을 역사로 보존하되, 현재 설계에서는 그 기록의
-"단일 선언 필드가 책임을 소유한다"는 방향을 대체한다.
+- run definition freeze와 compatibility preflight
+- SessionCalendar + Strategy TriggerPolicy schedule 조립
+- event dispatch와 동일 timestamp ordering
+- component requirement resolution과 bounded View 생성
+- Strategy 호출과 `PortfolioIntent` publication
+- execution event에서 OrderPlanner/Exchange 호출
+- FillBatch와 MarkBatch Account commit
+- feedback, evidence와 finalization
 
-### 2026-08-05 — Progressive workflow와 pluggable execution revision
+Academic용 Flow와 KRX용 Flow를 따로 만들지 않는다. Exchange, AccountMode, policies와 calendar를 주입한다.
 
-**계기.** PRD `84cd113`이 fixed global stage와 mandatory end-to-end pipeline을 제거하고 minimal
-registration, operation-time requirement discovery, Direct Strategy, stored Model output, Ensemble Strategy,
-pluggable executor, typed failure evidence와 production reconciliation을 observable use case로 확정했다.
+### 9.2 callback shape
 
-**Orchestration.** 여섯 responsibility layer와 callback/IoC는 유지한다. 반복 원자는
-`freeze → resolve requirements → scoped view → typed calculation → commit/publication → evidence`로
-확장하고, `alpha → construct → convert → validate`를 모든 run의 고정 chain으로 사용하지 않는다.
+```python
+class SimulationFlow:
+    def on_decision(self, event: DecisionEvent) -> None: ...
+    def on_execution(self, event: ExecutionEvent) -> None: ...
+    def on_fill_commit(self, event: FillCommitEvent) -> None: ...
+    def on_valuation(self, event: ValuationEvent) -> None: ...
+    def on_monitoring(self, event: MonitoringEvent) -> None: ...
+    def on_finalize(self, event: FinalizeEvent) -> RunResult: ...
+```
 
-**Data와 error.** 최초 registration은 logical key, instrument/time/availability와 payload facts만 요구한다.
-각 operation이 `ComponentRequirement`를 선언하고 `RequirementResolver`가 binding을 해결한다. Gap은
-hierarchical `OperationError`와 failure artifact로 남으며 unrelated registration이나 workflow를 무효화하지
-않는다. Agent가 resolution candidate를 설명하고 package가 user-confirmed 결과를 validation한다.
+Clock은 callback을 호출할 뿐 Strategy나 Exchange 의미를 알지 못한다. Component는 다음 component를 직접 호출하지
+않고 결과를 Flow에 반환한다.
 
-**Strategy와 execution.** Strategy는 internal signal과 signed weights를 함께 만들거나 typed Model result를
-소비할 수 있다. Ensemble은 StrategyOperation이다. Decision callback은 immutable intent와 execution event를
-예약할 뿐 fill을 만들지 않으며, daily/intraday profile은 같은 decision contract 뒤에서 다른 actual result를
-commit한다. 2026-08-03의 "MinuteExecutor 제외" 판단은 현 PRD의 `UC-EXEC-001`에 의해 supersede되었다.
-특정 `MinuteExecutor` 이름은 요구하지 않지만 intraday/partial-fill characterization profile은 validation
-범위에 포함한다.
+### 9.3 event state machine
 
-**Evidence와 production.** Artifact load는 typed object construction을 수행하고 publication은 payload,
-envelope와 lineage를 atomic하게 노출한다. Failure/retry, analysis/report와 extension validation을 같은
-boundary에 둔다. Production은 PreparedDecision outbox publication과 OMS acknowledgement를 authority로
-보지 않고 confirmed result reconciliation 뒤의 state만 commit한다.
+```text
+CREATED
+  -> PREFLIGHTED
+  -> RUNNING
+       DECISION -> INTENT_FROZEN
+       INTENT_FROZEN -> EXECUTION_READY
+       EXECUTION_READY -> FILLS_PRODUCED
+       FILLS_PRODUCED -> ACCOUNT_COMMITTED
+       ACCOUNT_COMMITTED -> MARKED
+       MARKED -> FEEDBACK_PUBLISHED
+       ... repeat ...
+  -> FINALIZED
 
-**Traceability와 build.** §1.1과 §13이 PRD의 stable use case 37개를 모두 추적한다. 구축 순서는 layer
-완성 순서에서 use-case vertical slice로 바뀌며 error/evidence가 foundation으로 이동한다. O7, G1, G3와
-G5의 architecture gap을 해결했고 당시에는 G2 round-trip 회계와 G4 real-short accounting을 남겨 두었다.
-G2의 state 경계는 2026-08-06 Account/Position 회계로 해결되었다.
+any pre-commit step -> FAILED_WITHOUT_MUTATION
+post-commit publication failure -> FAILED_AFTER_COMMIT(account_version recorded)
+```
 
-### 2026-08-06 — MVP execution·time·lifecycle 범위 축소
+Failure를 warning-and-skip으로 숨기지 않는다. Retry는 같은 operation identity와 expected Account version에서만
+idempotent해야 한다. Interrupted-run resume는 future scope다.
 
-**Superseding scope decision.** 이 결정은 위 2026-08-05 기록 중 intraday/partial-fill validation과 production
-reconciliation을 current scope로 둔 부분을 대체한다. MVP는 지원되는 order 전량 체결, 주식·ETF cash 즉시 결제와
-local simulation Account만 지원한다. Pending/cancel/reject, multiple in-flight decision, external OMS authority와
-reconciliation은 future work다.
+## 10. Evidence와 artifact
 
-**Data time.** 최초 registration과 PIT gate의 유일한 필수 시점은 `available_at`이다. Event/effective time은
-전역 schema가 아니며 미래 lifecycle operation처럼 실제로 필요한 operation만 점진적으로 요구한다. ETF constituent
-ViewGate도 `available_at`만 강제하고 available observation의 선택과 해석은 user Strategy에 남긴다.
+### 10.1 evidence는 영수증이다
 
-**Constraint.** MVP hard constraint는 no-short와
-`single-name weight <= max(10%, index constituent weight)`뿐이다. Benchmark weight는 decision time에 available한
-time-varying data다. Missing weight를 0으로 추정하지 않는다. Sector와 그 밖의 constraint는 future work다.
+Evidence는 authority가 아니라 “무엇을 보고 어떤 계산과 state transition이 일어났는지”를 보여주는 영수증이다.
+최소 lineage chain은 다음과 같다.
 
-**Lifecycle boundary.** Dividend/distribution, futures settlement와 perpetual funding은 current implementation이
-아닌 future `LifecycleBatch` 확장이다. Merger, spin-off와 delisting의 원천 해석·instrument/reference 변환은
-security master/ETL 책임이다. Stock/ETF의 실제 settlement cycle도 future work다.
+```text
+data access
+-> Strategy + trigger
+-> PortfolioIntent
+-> OrderBatch conversion
+-> Exchange rules + execution inputs
+-> FillBatch
+-> Account version before/after
+-> MarkBatch
+-> feedback / performance / limitations
+```
 
-**NautilusTrader funding reference.** Future perpetual funding 설계는 §13.6의 비교 기록을 따른다. 핵심은
-`FundingRateUpdate`가 payment가 아니며 settlement boundary가 식별될 때만 open position notional과 side로 cash/PnL을
-계산해 idempotent event로 반영한다는 점이다. qlibx도 향후 instrument 보유만으로 data를 자동 발견하거나 funding을
-발생시키지 않는다.
+서로 경제적으로 다른 cadence, calendar, Strategy version, Exchange profile, AccountMode 또는 data source를 같은
+run으로 취급하지 않는다. 이를 구현하는 hash를 public product 용어로 강제하지 않으며, immutable run definition과
+dependency identity로 비교 가능하게 만든다.
+
+### 10.2 publication
+
+Portable artifact는 producer private class 없이 읽고 validation할 수 있어야 한다. Success publication은 envelope,
+payload와 catalog record가 완결된 뒤에만 visible하다. Failure artifact는 성공 결과와 구분하고 mutation 여부와
+account version을 기록한다.
+
+### 10.3 intended와 realized 분리
+
+Report는 최소한 다음을 나란히 보여준다.
+
+- intended target
+- requested order
+- dealt quantity와 Fill
+- committed position/cash/NAV
+- rounding, clipping, rejection, missing-data reason
+- selected profile, AccountMode와 realism limitation
+
+## 11. 두 Strategy walkthrough
+
+### 11.1 공통 fixture
+
+- Venue sessions: 2024-03-05, 2024-03-06
+- Daily close available at each session close 15:30 Asia/Seoul
+- Strategy trigger: every eligible session at 04:00 Asia/Seoul
+- Decision: 2024-03-06 04:00, using data through 2024-03-05 15:30
+- Execution: 2024-03-06 15:30
+
+### 11.2 Peer momentum long-short
+
+1. StrategyView에서 peer group과 5-day returns를 읽는다.
+2. Strategy 내부에서 peer-relative rank를 계산한다.
+3. Portfolio construction이 winner long, loser short, gross 200%, net 0% target을 만든다.
+4. Strategy는 signed `PortfolioIntent`를 반환한다.
+5. OrderPlanner가 15:30의 signed Account snapshot과 exact execution price로 quantity delta를 만든다.
+6. Academic Exchange가 listing별 fractional rule로 FillBatch를 만든다.
+7. `SIGNED` Account가 negative position을 허용해 atomic commit한다.
+8. Valuation이 NAV, gross/net exposure, PnL과 turnover를 mark한다.
+9. 다음 04:00 decision은 이 committed hypothetical state와 Fill feedback을 읽는다.
+
+### 11.3 5-day return top 10 long-only
+
+1. StrategyView에서 같은 5-day return input을 읽는다.
+2. Strategy 내부에서 상위 10종목을 고른다.
+3. Portfolio construction이 각 10%, cash 0%의 long-only target을 만든다.
+4. Strategy는 long-only `PortfolioIntent`를 반환한다.
+5. 같은 OrderPlanner가 15:30 Account snapshot과 price로 quantity delta를 만든다.
+6. KRX Exchange가 instrument listing의 integer step, cost와 cash clipping을 적용해 FillBatch를 만든다.
+7. `LONG_ONLY` Account가 negative position 없는 전이를 atomic commit한다.
+8. 같은 Valuation과 feedback path를 따른다.
+
+차이는 3, 6, 7의 policy다. Flow와 lifecycle은 같다. Peer momentum이 반드시 Academic이고 top-10이 반드시 KRX인
+것도 아니다. Compatible한 intent/profile/mode 조합이면 같은 Strategy intent를 다른 profile에서 별도 run으로
+비교할 수 있다.
+
+## 12. Package layout
+
+```text
+src/vqapr/
+├── domain/              # shared immutable IDs, money, instrument, errors
+├── runtime/
+│   ├── clock.py         # deterministic event queue
+│   ├── events.py        # typed events and priorities
+│   └── calendar.py      # Session and SessionCalendar contracts
+├── data/
+│   ├── registration.py  # minimal registration
+│   ├── requirements.py  # component-owned DataRequirement
+│   ├── store.py         # PIT query port
+│   └── view.py          # bounded role views and access lineage
+├── strategy/
+│   ├── base.py          # Strategy protocol
+│   ├── trigger.py       # TriggerPolicy, EveryNSessions
+│   └── context.py       # StrategyContext
+├── portfolio/
+│   ├── intent.py        # PortfolioIntent, PortfolioTarget
+│   └── construction.py  # reusable construction policies
+├── orders/
+│   ├── planner.py       # execution-time target-to-order conversion
+│   └── contracts.py     # OrderRequest, OrderBatch
+├── exchange/
+│   ├── base.py          # Exchange protocol, ListingRule
+│   ├── academic.py      # hypothetical signed profile
+│   └── krx_daily.py     # KRX-style daily simulation profile
+├── account/
+│   ├── aggregate.py     # Account commit/mark authority
+│   ├── mode.py          # LONG_ONLY/SIGNED transition validity
+│   ├── snapshot.py      # AccountSnapshot and history
+│   └── journal.py       # atomic state transition record
+├── valuation/
+│   ├── service.py       # held-instrument requirements and MarkBatch
+│   └── performance.py   # NAV/PnL/return from committed state only
+├── flow/
+│   ├── simulation.py    # one common executable coordinator
+│   ├── resolver.py      # requirement resolution and View assembly
+│   └── run.py           # frozen RunDefinition and RunResult
+├── evidence/
+│   ├── lineage.py       # access and dependency graph
+│   └── artifacts.py     # portable publication envelope
+├── research/            # model/materialization/analysis operations without execution claims
+├── project/             # user config, registry and assembly
+└── public.py            # documented installed-package facade
+```
+
+### 12.1 의존 방향
+
+```text
+domain <- runtime/data/portfolio/orders/account
+domain + ports <- strategy/exchange/valuation/research
+all component ports <- flow
+flow + project assembly <- public facade
+```
+
+`domain`은 storage, pandas, provider 또는 concrete Exchange를 import하지 않는다. `strategy`는 `exchange`와 mutable
+`account`를 import하지 않는다. `exchange`는 Store를 import하지 않는다. `account`는 Strategy와 Exchange 구현을
+import하지 않는다.
+
+## 13. Configuration과 compatibility preflight
+
+```python
+class RunDefinition(BaseModel):
+    run_id: UUID
+    strategy: ComponentRef
+    exchange: ComponentRef
+    account_mode: AccountMode
+    calendar: CalendarRef
+    start: datetime
+    end: datetime
+    initial_account: AccountSnapshot
+    dataset_bindings: tuple[DatasetBindingRef, ...]
+    policies: tuple[PolicyRef, ...]
+```
+
+Run 시작 전에 다음을 검사하고 freeze한다.
+
+- Strategy trigger timezone과 calendar timezone compatibility
+- Portfolio direction과 Exchange permitted side compatibility
+- Exchange와 AccountMode compatibility
+- instrument listing과 quantity rule availability
+- component data requirement satisfiability
+- initial account invariant
+- event schedule determinism
+
+Preflight 성공 후 project config 변경은 해당 run에 영향을 주지 않는다.
+
+## 14. Failure taxonomy
+
+| code family | 의미 | mutation |
+|---|---|---|
+| `DATA_*` | required field, coverage, PIT input 부족 | 없음 |
+| `CALENDAR_*` | session/calendar/timezone 불일치 | 없음 |
+| `INTENT_*` | invalid portfolio target/budget/lineage | 없음 |
+| `ORDER_*` | target conversion 불가 | 없음 |
+| `EXCHANGE_*` | listing, side, quantity, cost, price rule 불가 | 없음 |
+| `ACCOUNT_*` | version conflict 또는 invalid state transition | 없음 |
+| `VALUATION_*` | held instrument mark 불가 | Fill commit 가능; exact version 기록 |
+| `PUBLICATION_*` | artifact publication 불완전 | authority 변화 여부 기록 |
+
+모든 error는 operation, event time, failed requirement, mutation 여부, retry precondition과 correlation identity를
+가진다. 비슷한 field, 이전 price, 다른 cost policy로 silent fallback하지 않는다.
+
+## 15. PRD traceability
+
+| PRD requirement/use case | architecture path |
+|---|---|
+| `UC-DATA-001`, `UC-DATA-002`, `UC-PIT-001`, `UC-ERROR-001`, `GAP-MATERIALIZATION-PIT-001` | §4 registration → progressive requirement → bounded Store query; §14 structured failure |
+| `UC-AGENT-001` | §4/§14 machine-readable requirement gap를 public agent guidance가 설명하되 의미를 추측하지 않음 |
+| `UC-TRIGGER-001`, `GAP-TIME-001` | §3 Strategy TriggerPolicy + frozen SessionCalendar + Clock |
+| `UC-SIGNAL-001`, `UC-SIGNAL-002`, `UC-ENSEMBLE-001`, `UC-STATE-001` | §5 StrategyContext/Strategy + separate strategy-state authority |
+| `UC-ALPHA-BUDGET-001`, `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ALPHA-ADAPTIVE-001` | §5 immutable intent/source state + §9 feedback and isolated run definition |
+| `UC-PORTFOLIO-001` | §5 sole `PortfolioIntent` executable boundary |
+| `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | optional construction policy inside §5; missing inputs fail through §4/§14 before mutation |
+| `UC-EXEC-001`, `UC-EXEC-002`, `GAP-EXECUTION-PREPARATION-001` | §6 execution-time OrderPlanner → §7 Exchange |
+| `UC-ACADEMIC-001`, `GAP-DIRECTION-001` | §7.3 Academic Exchange + §8 `SIGNED` Account |
+| `UC-COST-001`, `UC-COST-002`, `UC-COST-003`, `UC-COST-004`, `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §7 effective rules/batch → §8 atomic commit → §9 feedback |
+| `UC-ACCOUNT-HISTORY-001`, `UC-EXEC-003` | §8 snapshot/history + independent monitoring event |
+| `UC-MONITOR-001` | §9 independent MONITORING callback + §10 finding evidence |
+| `UC-LOOKTHROUGH-001`, `UC-LOOKTHROUGH-002`, `UC-LOOKTHROUGH-003` | Strategy-owned §4 requirement and §5 calculation; no Instrument auto-expansion |
+| `UC-ARTIFACT-001`, `UC-ARTIFACT-002`, `UC-RESEARCH-001`, `UC-REPORT-001` | §10 portable lineage/publication and intended-realized split |
+| `UC-EXTENSION-001`, `UC-EXTENSION-002` | §12 inward ports/public facade; local producer must return and validate the same public contracts |
+| `UC-PROD-001`, `UC-PROD-002` | future OMS adapter must preserve §7 order/fill distinction and §8 authority; not current implementation |
+| `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`, `UC-SETTLEMENT-001` | future lifecycle/cash-flow ports; current Exchange/Account algorithms explicitly reject unsupported semantics |
+
+Stable `GAP-*` acceptance inventory도 다음 target boundary로 추적한다.
+
+| GAP acceptance ID | architecture path |
+|---|---|
+| `GAP-ONBOARD-001`, `GAP-PROJECT-CONFIGURATION-001`, `GAP-PUBLIC-FACADE-001` | §12 public/project assembly + §13 frozen incremental run definition |
+| `GAP-LOOKBACK-001`, `GAP-RETURN-AUTHORITY-001` | §4 bounded query + §1 research/execution return boundary |
+| `GAP-CONSTRAINT-001`, `GAP-MONITOR-001` | §5 construction policy + §9 independent monitoring callback |
+| `GAP-EXCHANGE-BASE-001`, `GAP-IMPACT-001`, `GAP-REAL-SHORT-001` | §7 common Exchange and explicit unsupported realism boundaries |
+| `GAP-EXECUTION-CONVENTION-001`, `GAP-EXECUTION-FEEDBACK-001` | §3 execution schedule + §9 committed feedback loop |
+| `GAP-ACCOUNT-HISTORY-001`, `GAP-STRATEGY-STATE-001` | §2 separate authorities + §8 common Account history |
+| `GAP-STRATEGY-COMPOSITION-001` | §5 immutable member/source lineage and sole intent boundary |
+| `GAP-CATALOG-001` | §10 atomic portable publication |
+| `GAP-RECOVERY-001` | §9 failure state records mutation/version; interrupted-run resume remains future scope |
+
+## 16. Rewrite order
+
+이 architecture가 승인된 뒤 구현은 기존 source를 조금씩 호환시키는 방식이 아니라 다음 vertical slices로 다시 만든다.
+
+1. `domain` + `runtime` + explicit `SessionCalendar`
+2. minimal `data` registration/requirement/PIT View
+3. `Account` aggregate, `AccountMode`, Fill/Mark commit
+4. `PortfolioIntent` + `OrderPlanner`
+5. common `Exchange` contract + Academic fixture
+6. one `SimulationFlow` closed loop
+7. KRX daily profile
+8. peer momentum and top-10 showcases on the same public spine
+9. artifacts, reports, installed-package facade and external-consumer test
+10. package metadata/import/CLI migration to `vqapr`
+
+중간 단계에서 두 번째 executable Flow, legacy intent adapter 또는 Account fork를 만들지 않는다. Temporary adapter가
+불가피하면 public surface 밖에 두고 제거 조건과 test를 같은 implementation record에 기록한다.
+
+## 17. 아직 열어 둔 한 가지 결정
+
+**Strategy 내부 research value의 표준 shape**는 아직 확정하지 않는다. Signal, score, rank, signed weight 중 무엇을
+first-class reusable value로 둘지 다음 architecture discussion에서 결정한다. 다만 다음은 이미 확정되어 있어 이
+결정 때문에 downstream을 다시 설계하지 않는다.
+
+- executable Strategy의 public result는 `PortfolioIntent`
+- portfolio construction은 Strategy boundary 안에서 반드시 완료
+- OrderPlanner는 `PortfolioIntent`만 소비
+- Exchange는 `OrderBatch`만 소비
+- Account는 `FillBatch`와 `MarkBatch`만 commit
+
+## 18. Acceptance checklist
+
+- [ ] Peer momentum과 top-10이 같은 `SimulationFlow`와 event sequence를 사용한다.
+- [ ] 두 Strategy 모두 `PortfolioIntent`만 execution boundary에 반환한다.
+- [ ] `EveryNSessions`와 04:00 decision event가 explicit calendar에서 생성된다.
+- [ ] 04:00 event는 data row 없이 schedule되고 PIT cutoff만 data visibility를 결정한다.
+- [ ] registration의 universal time field는 `available_at`뿐이다.
+- [ ] Strategy, Exchange, Valuation이 자신의 field requirement를 각각 선언한다.
+- [ ] Academic과 KRX Exchange가 같은 `OrderBatch`/`FillBatch` contract를 구현한다.
+- [ ] fractional/lot rule은 Exchange listing에 있고 AccountMode에는 없다.
+- [ ] Account mode별 차이는 negative-position state-transition validity뿐이다.
+- [ ] Fill/Mark commit, history, feedback와 evidence shape가 profile 간 동일하다.
+- [ ] intended, requested, dealt, committed와 marked state가 report에서 구분된다.
+- [ ] source/package/import/CLI가 최종적으로 `vqapr`로 일치한다.
+
+이 checklist가 architecture와 characterization test로 닫히기 전에는 clean rewrite를 완료했다고 주장하지 않는다.

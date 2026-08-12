@@ -13,8 +13,8 @@
 
 ```mermaid
 flowchart LR
-    Cal[SessionCalendar] --> Trig[Strategy TriggerPolicy]
-    Trig --> S[Strategy.decide]
+    Cal[SessionCalendar] --> Trig[StrategyModel TriggerPolicy]
+    Trig --> S[StrategyModel.decide]
     Data[PIT View] --> S
     Acc[(Account)] -->|snapshot| S
     S --> I[PortfolioIntent]
@@ -29,7 +29,7 @@ flowchart LR
 ```
 
 - 위 경로를 통과하지 않고 return/NAV/PnL/turnover를 만드는 코드는 없다. — PRD §2.2
-- Model, feature, label, IC 같은 research 연산은 이 척추에 **들어오지 않고** 끝난다.
+- DataModel, feature, label, IC 같은 research 연산은 이 척추에 **들어오지 않고** 끝난다.
 
 ### 1.2 여섯 layer
 
@@ -56,12 +56,12 @@ flowchart LR
 
 ### 2.1 IoC — Flow가 시간을 소유한다
 
-**결정.** Clock이 이벤트를 발화하고 Flow가 callback을 부른다. Strategy는 언제 판단할지 *선언*만 하고
+**결정.** Clock이 이벤트를 발화하고 Flow가 callback을 부른다. StrategyModel은 언제 판단할지 *선언*만 하고
 자신을 호출하거나 시간을 진행시키지 않는다.
 
 - **왜**: decision, execution, valuation, monitoring이 서로 다른 cadence를 가져야 한다. cadence를
   component가 소유하면 조합이 불가능하다.
-- **없으면**: Strategy가 execution을 직접 부르는 순간 "decision time에 보이는 정보"와 "execution time에
+- **없으면**: StrategyModel이 execution을 직접 부르는 순간 "decision time에 보이는 정보"와 "execution time에
   보이는 정보"가 같은 호출 스택에 섞여 PIT 경계가 코드로 표현되지 않는다.
 - **UC**: `UC-TRIGGER-001`, `UC-EXEC-001`, `UC-EXEC-003`, multi-frequency scenario
 
@@ -93,7 +93,7 @@ publication, state 전달)은 Flow에만 있다.
   단일종목 검증과 등가임을 보일 수 없다.
 - **UC**: 전 범위 (deterministic replay는 cross-cutting invariant)
 
-### 2.5 Strategy Pattern — profile은 주입한다
+### 2.5 StrategyModel Pattern — profile은 주입한다
 
 **결정.** `Exchange`는 protocol이고 Academic/KRX는 그 구현이다. run마다 keyword로 주입한다. profile별
 Flow를 만들지 않는다.
@@ -187,7 +187,7 @@ DATA_AVAILABLE → DECISION → EXECUTION → FILL_COMMIT → VALUATION → MONI
 - `03-05 04:00`에는 03-05 종가를 읽을 수 없다.
 - `03-06 04:00`에 데이터 행이 없어도 이벤트는 큐에 정상 진입한다.
 
-### 3.4 Trigger는 Strategy가 소유한다
+### 3.4 Trigger는 StrategyModel이 소유한다
 
 ```python
 class EveryNSessions(BaseModel):
@@ -203,8 +203,8 @@ class LastSessionOfMonth(BaseModel):
 ```
 
 - Flow가 `SessionCalendar × TriggerPolicy`를 결합해 DECISION 이벤트를 만든다.
-- **왜 Strategy가 소유하나**: PRD §3.3 — "정의만 읽고 cadence를 알 수 있어야 한다". run script에 두면
-  같은 Strategy가 스크립트마다 다른 전략이 된다.
+- **왜 StrategyModel이 소유하나**: PRD §3.3 — "정의만 읽고 cadence를 알 수 있어야 한다". run script에 두면
+  같은 StrategyModel이 스크립트마다 다른 전략이 된다.
 
 **vocabulary는 닫힌 집합으로 둔다.** 임의의 cron 표현이나 콜백을 받지 않는다.
 
@@ -217,7 +217,7 @@ class LastSessionOfMonth(BaseModel):
   거래일 수가 달마다 다르기 때문이다.
 - **왜 임의 표현을 안 받나**: cadence는 경제적 의미이고 재현 가능해야 한다. 임의 콜백은 데이터나 외부
   상태를 읽을 수 있어 §3.1(데이터에서 cadence를 유도하지 않는다)을 우회한다.
-- **왜 Strategy가 "오늘 월말이야?"를 묻지 않나**: 물을 필요가 없다. `LastSessionOfMonth`를 선언했으면
+- **왜 StrategyModel이 "오늘 월말이야?"를 묻지 않나**: 물을 필요가 없다. `LastSessionOfMonth`를 선언했으면
   **불려온 순간 그날이 월말이다.** 판단 시점의 다른 성질(형성일로부터 며칠째인가 등)이 필요하면 §5.1의
   calendar view로 읽는다.
 
@@ -226,7 +226,7 @@ class LastSessionOfMonth(BaseModel):
 
 ### 3.5 Warm-up — 판단할 준비가 되기 전의 candidate
 
-**결정.** Strategy가 `warmup(self) -> Warmup`(단위: session)을 **선언**한다. run start로부터 그만큼의
+**결정.** StrategyModel이 `warmup(self) -> Warmup`(단위: session)을 **선언**한다. run start로부터 그만큼의
 eligible session이 지나기 전의 candidate는 `DECISION_SKIPPED(warmup)`으로 **기록하고** 넘어간다.
 
 ```python
@@ -305,7 +305,7 @@ class DatasetRegistration(BaseModel):
 
 - 이 여섯 개가 전부다. `fiscal_period`, `session_date`, `revision`, `horizon_end`는 **일반 column**이다.
 - **consumer-purpose alias 없음.** `execution_price` 같은 role을 등록에 새기지 않는다.
-  - **왜**: 같은 `close`를 Strategy·Exchange·Valuation이 각자 요구해야 누가 무엇을 읽었는지 lineage에 남는다.
+  - **왜**: 같은 `close`를 StrategyModel·Exchange·Valuation이 각자 요구해야 누가 무엇을 읽었는지 lineage에 남는다.
   - **없으면**: `UC-EXEC-002`의 "어떤 가격으로 체결했는가"가 등록 시점의 이름 선택에 숨는다.
 - **UC**: `UC-DATA-001`, `UC-AGENT-001`
 
@@ -320,14 +320,14 @@ class DataRequirement(BaseModel):
     coverage: CoverageRequirement | None = None
 ```
 
-- Strategy는 signal/benchmark/constituent field를, OrderPlanner·Exchange는 price/tradability를,
+- StrategyModel은 signal/benchmark/constituent field를, OrderPlanner·Exchange는 price/tradability를,
   Valuation은 보유 종목 mark field를 각각 선언한다.
 - `lookback`은 **Store query까지 그대로 내려간다.** 전체 읽고 자르기 금지 → `UC-LOOKBACK-001`
 
 ### 4.3 View
 
 ```python
-class StrategyView(Protocol):
+class StrategyModelView(Protocol):
     evaluation_time: datetime
     def observations(self, requirement: DataRequirement) -> ObservationBatch: ...
     def account(self) -> AccountSnapshot: ...
@@ -335,7 +335,7 @@ class StrategyView(Protocol):
     def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
 ```
 
-- memory는 View에 없다. Flow가 run 시작 시 `strategy.memory`에 넣어주므로 Strategy는 `self.memory`로 읽는다
+- memory는 View에 없다. Flow가 run 시작 시 `strategy.memory`에 넣어주므로 StrategyModel은 `self.memory`로 읽는다
   (§5.1.1). 읽는 경로를 둘로 두지 않는다.
 
 - View는 실제 access를 기록해 lineage를 만든다. **읽지 않은 dataset은 dependency가 아니다.**
@@ -346,26 +346,26 @@ class StrategyView(Protocol):
 
 ## 5. Decision
 
-### 5.1 Strategy
+### 5.1 StrategyModel
 
 ```python
-StrategyMemory: TypeAlias = (
-    bool | int | float | str | list["StrategyMemory"] | dict[str, "StrategyMemory"] | None
+ModelMemory: TypeAlias = (
+    bool | int | float | str | list["ModelMemory"] | dict[str, "ModelMemory"] | None
 )
 
-class Strategy(ABC):
-    memory: StrategyMemory = None        # 유일한 mutable 슬롯
+class StrategyModel(ABC):
+    memory: ModelMemory = None        # 유일한 mutable 슬롯
 
     def trigger(self) -> TriggerPolicy: ...
     def warmup(self) -> Warmup: ...      # 기본 0 (§3.5)
     def requirements(self) -> tuple[DataRequirement, ...]: ...
-    def decide(self, context: StrategyContext) -> PortfolioIntent: ...
+    def decide(self, context: StrategyModelContext) -> PortfolioIntent: ...
 ```
 
-- `StrategyContext`는 `view`, `event`, `universe`, `calendar`만 준다. Clock·Store·Exchange·mutable
+- `StrategyModelContext`는 `view`, `event`, `universe`, `calendar`만 준다. Clock·Store·Exchange·mutable
   Account는 없다.
 
-**calendar view.** Account snapshot과 같은 급의 읽기 전용 surface다. Strategy가 판단 시점의 **성질**을
+**calendar view.** Account snapshot과 같은 급의 읽기 전용 surface다. StrategyModel이 판단 시점의 **성질**을
 물을 수 있다 — 이번 달 몇 번째 거래일인가, 분기 첫 거래일인가, 직전 형성일로부터 몇 세션 지났는가.
 
 - **왜 필요한가**: trigger는 *언제 불릴지*만 정한다. *불린 시점이 어떤 날인지*는 알려주지 않는다.
@@ -375,7 +375,7 @@ class Strategy(ABC):
 
 ### 5.1.1 Memory — 슬롯 하나, strict JSON
 
-**결정.** Strategy가 이어갈 수 있는 상태는 **`self.memory` 하나**다. `__init__` 이후에는 그 밖의 어떤
+**결정.** StrategyModel이 이어갈 수 있는 상태는 **`self.memory` 하나**다. `__init__` 이후에는 그 밖의 어떤
 attribute도 쓸 수 없다(`__setattr__` 가드).
 
 - **왜 슬롯 하나인가**: package가 내용을 해석하지 않으면서 durable·portable하려면 값의 **범위**가 정해져야
@@ -403,11 +403,11 @@ snapshot = normalize_memory(strategy.memory)   # 검증 + detached deep copy
 
 **UC**: `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001`, `UC-ALPHA-PATH-001`
 
-### 5.2 Strategy 내부의 3단 — 강제하지 않는다
+### 5.2 StrategyModel 내부의 3단 — 강제하지 않는다
 
 ```text
 research values  ──►  weights  ──►  PortfolioIntent
-   (자유)            (built-in 가능)      (Strategy 책임)
+   (자유)            (built-in 가능)      (StrategyModel 책임)
 ```
 
 **결정.** 프레임워크는 `decide()`의 중간값 타입을 표준화하지 않는다. 대신 재사용 가능한 **순수 weighting
@@ -415,13 +415,13 @@ research values  ──►  weights  ──►  PortfolioIntent
 
 - **왜**: peer momentum(랭크 기반)과 top-N(선택 기반)이 서로 다른 중간값을 쓴다. 하나로 표준화하면 한쪽이
   정보를 잃거나 우회 경로를 만든다.
-- **왜 함수인가**: 타입 계약은 모든 Strategy를 구속하고, 함수 시그니처는 **그것을 부르기로 한 Strategy만**
+- **왜 함수인가**: 타입 계약은 모든 StrategyModel을 구속하고, 함수 시그니처는 **그것을 부르기로 한 StrategyModel만**
   구속한다.
 - **없으면**: 표준 타입을 두면 6개월 뒤 그것이 사실상 두 번째 signal 계약이 되어 PRD §5.3과 중복된다.
 - **UC**: `UC-SIGNAL-001`, `UC-SIGNAL-002`, `UC-PORTFOLIO-001`
 
-> built-in weighting 함수는 공통적으로 instrument별 signed 값을 받는다. 이는 **built-in을 부르는 Strategy만
-> 구속하는 사실**이며 `decide()`의 요구 shape가 아니다. built-in을 쓰지 않는 Strategy는 그런 중간값을 만들지
+> built-in weighting 함수는 공통적으로 instrument별 signed 값을 받는다. 이는 **built-in을 부르는 StrategyModel만
+> 구속하는 사실**이며 `decide()`의 요구 shape가 아니다. built-in을 쓰지 않는 StrategyModel은 그런 중간값을 만들지
 > 않아도 된다.
 
 ### 5.3 `portfolio/weighting.py` — 순수 leaf
@@ -450,7 +450,7 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
   ```text
   vqapr.data  vqapr.account  vqapr.exchange  vqapr.runtime  vqapr.flow  vqapr.strategy
   ```
-  시가총액이 필요하면 **인자로 받는다.** 여기서 직접 읽으면 그 data가 Strategy의 declared requirement를
+  시가총액이 필요하면 **인자로 받는다.** 여기서 직접 읽으면 그 data가 StrategyModel의 declared requirement를
   거치지 않아 §4.2의 lineage에 남지 않는다.
 - `sizes`에 선택된 종목이 없으면 **실패**. 빼고 재정규화하지 않는다.
 - `signal`의 결측은 다루지 않는다. 호출자가 위 helper로 먼저 해소한다.
@@ -462,7 +462,7 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
 연구 결정이다. built-in이 대신 말하면 안 된다.
 
 - **왜 이 제약들인가**: 이것이 없으면 built-in은 편의 함수가 아니라 **보이지 않는 곳에서 판단하는 두 번째
-  Strategy**가 된다. 특히 "결측 빼고 재정규화"는 PRD §10.2가 금지한 바로 그 행위다.
+  StrategyModel**이 된다. 특히 "결측 빼고 재정규화"는 PRD §10.2가 금지한 바로 그 행위다.
 - **UC**: `UC-BUILTIN-001`, `UC-ALPHA-BUDGET-001`
 
 #### 이 leaf 규칙은 두 층으로 지킨다
@@ -533,7 +533,7 @@ class OrderPlanner(Protocol):
 
 - decision time의 stale quantity를 **재사용하지 않는다.** execution 시점의 committed position/cash/price로
   delta를 계산한다.
-- Strategy를 재호출하거나 intent를 재계산하지 않는다.
+- StrategyModel을 재호출하거나 intent를 재계산하지 않는다.
 - 각 `OrderRequest`: instrument, side, quantity, 출처 intent/target, account version, 변환 가격,
   rounding/clipping/skip 진단.
 - MVP는 **batch-atomic**: 가격이나 listing이 하나라도 없으면 Exchange 호출 전에 전체 실패. 부분 성공은 future.
@@ -679,10 +679,10 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
   3,000종목 × 250세션도 무겁지 않다. 설정 가능하게 만들면 **얻는 것 없이 run identity에 필드만 하나 는다.**
 - **왜 고정 집합인가**: 집합이 고정이어야 "집합 밖 항목 요구 → 계산 전 실패"가 성립한다.
   추정 금지(PRD §6.6)를 지키는 데 필요한 건 *선언*이 아니라 *경계*다.
-- 소비자(Strategy/Monitor)는 `HistoryRequirement`로 **읽을 항목과 범위를 좁혀** 요구한다 — data 접근과 같은 원칙.
+- 소비자(StrategyModel/Monitor)는 `HistoryRequirement`로 **읽을 항목과 범위를 좁혀** 요구한다 — data 접근과 같은 원칙.
 - raw journal은 노출하지 않는다. immutable projection만 준다.
 - **왜 `memory`와 분리되어 있나**: `UC-ACCOUNT-HISTORY-001`은 strategy state 없이 stop-loss/cooldown이 표현
-  가능해야 한다고 요구한다. history를 memory 위에 얹으면 research-only Strategy가 그 규칙을 쓸 수 없다.
+  가능해야 한다고 요구한다. history를 memory 위에 얹으면 research-only StrategyModel이 그 규칙을 쓸 수 없다.
 
 ### 7.4 Valuation
 
@@ -707,10 +707,10 @@ class SimulationFlow:
 ```
 
 책임: run 동결과 preflight · schedule 조립 · 이벤트 dispatch · requirement resolution과 View 생성 ·
-Strategy 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · memory 스냅샷 · evidence · finalize.
+StrategyModel 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · memory 스냅샷 · evidence · finalize.
 
 - **Academic Flow와 KRX Flow를 따로 만들지 않는다.** Exchange, AccountMode, calendar, policy를 주입한다.
-- Clock은 Strategy나 Exchange의 의미를 모른다. callback을 부를 뿐이다.
+- Clock은 StrategyModel나 Exchange의 의미를 모른다. callback을 부를 뿐이다.
 
 ### 8.2 State machine
 
@@ -745,7 +745,7 @@ commit 후 발행 실패   → FAILED_AFTER_COMMIT(account_version 기록)
 Evidence는 authority가 아니라 **영수증**이다.
 
 ```text
-data access → Strategy + trigger → PortfolioIntent → OrderBatch → Exchange rules + inputs
+data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → Exchange rules + inputs
 → FillBatch → Account version before/after → MarkBatch → feedback / limitations
 ```
 
@@ -762,7 +762,7 @@ src/vqapr/
 ├── domain/                 # ID, money, instrument, 공통 error
 ├── runtime/                # clock, events(priority), calendar
 ├── data/                   # registration, requirements, store(port), view
-├── strategy/               # Strategy protocol, trigger, context
+├── strategy/               # StrategyModel protocol, trigger, context
 ├── portfolio/
 │   ├── weighting.py        # 순수 함수 (leaf) — signal_weight / equal_weight / proportional_weight
 │   ├── construction.py     # PortfolioIntent 조립
@@ -793,7 +793,7 @@ flow + project  ←  public
 - `portfolio.weighting`은 **`domain`만** import한다. view/store/clock/account/exchange 전부 금지.
 - `strategy`는 `exchange`와 mutable `account`를 import하지 않는다.
 - `exchange`는 store를 import하지 않는다.
-- `account`는 Strategy/Exchange 구현을 import하지 않는다.
+- `account`는 StrategyModel/Exchange 구현을 import하지 않는다.
 
 ---
 
@@ -826,21 +826,21 @@ decision 03-06 04:00, execution 03-06 15:30.
 분류**를 공유해야 하고, 그 공유를 증명할 수 있어야 한다.
 
 ```text
-Model 1  firm characteristics                      → materialized (PIT, 재사용)
+DataModel 1  firm characteristics                      → materialized (PIT, 재사용)
            BM, OPE/BE, asset growth, momentum
 
-Model 2  bucket membership                         → formation date별 (ticker, bucket)
+DataModel 2  bucket membership                         → formation date별 (ticker, bucket)
            universe 자격필터 → KOSPI breakpoint → 2×3 배정
 
-Strategy(bucket="SH")  membership에서 자기 버킷만 읽어 weighting → PortfolioIntent
+StrategyModel(bucket="SH")  membership에서 자기 버킷만 읽어 weighting → PortfolioIntent
    × 6 buckets → 6 runs (Academic Exchange, cost 0)  → 6 NAV 시계열
 
-Strategy(HML)          같은 membership을 읽어 long (SH,BH) / short (SL,BL) → 1 run
+StrategyModel(HML)          같은 membership을 읽어 long (SH,BH) / short (SL,BL) → 1 run
 ```
 
-#### 왜 membership이 Model artifact인가
+#### 왜 membership이 DataModel artifact인가
 
-6개 run의 Strategy가 각자 breakpoint를 다시 계산하면 미묘하게 갈릴 수 있다. **membership을 artifact로
+6개 run의 StrategyModel이 각자 breakpoint를 다시 계산하면 미묘하게 갈릴 수 있다. **membership을 artifact로
 만들면 6개 run이 같은 버킷을 썼다는 사실이 lineage로 증명된다.**
 
 부수 효과가 둘 있다.
@@ -896,7 +896,7 @@ class RunDefinition(BaseModel):
     start: datetime
     end: datetime
     initial_account: AccountSnapshot
-    initial_memory: StrategyMemory
+    initial_memory: ModelMemory
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
 ```
@@ -950,7 +950,7 @@ class RunDefinition(BaseModel):
 | `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger vocabulary · warm-up skip) |
 | `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
-| `UC-FACTOR-001` | §11.1 (Model membership → 버킷 run → 조합 검산) |
+| `UC-FACTOR-001` | §11.1 (DataModel membership → 버킷 run → 조합 검산) |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.4 (`BudgetSemantics`) — **형태 미확정, §15-1** |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
@@ -963,7 +963,7 @@ class RunDefinition(BaseModel):
 | `UC-ACCOUNT-HISTORY-001` | §7.3 |
 | `UC-EXEC-003`, `UC-MONITOR-001` | §8.1 (독립 MONITORING callback) |
 | `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.2 (construction 내 optional policy) + §8.3 |
-| `UC-LOOKTHROUGH-001`~`003` | §4.2 + §5.2 — Strategy가 선언하고 계산. 자동 확장 없음 |
+| `UC-LOOKTHROUGH-001`~`003` | §4.2 + §5.2 — StrategyModel이 선언하고 계산. 자동 확장 없음 |
 | `UC-ARTIFACT-001`~`003`, `UC-RESEARCH-001`, `UC-REPORT-001` | §9 |
 | `UC-EXTENSION-001`, `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10 |
 | `UC-CONFIG-001` | §12 |
@@ -1008,7 +1008,7 @@ class RunDefinition(BaseModel):
 
 ### 15-2. Calendar view가 미래 session을 어디까지 보여주는가
 
-Strategy가 `context.calendar`로 판단 시점의 성질을 묻는다(§5.1). "이번 달 마지막 거래일인가"를 답하려면
+StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.1). "이번 달 마지막 거래일인가"를 답하려면
 그 달의 남은 session을 봐야 한다.
 
 - 예정된 휴장은 실제로 미리 공표되므로 보아도 look-ahead가 아니다.
@@ -1043,14 +1043,14 @@ Strategy가 `context.calendar`로 판단 시점의 성질을 묻는다(§5.1). "
 ## 16. Acceptance checklist
 
 - [ ] 두 showcase가 같은 `SimulationFlow`와 같은 이벤트 순서를 쓴다
-- [ ] executable Strategy의 public 결과는 `PortfolioIntent` 하나뿐이다
+- [ ] executable StrategyModel의 public 결과는 `PortfolioIntent` 하나뿐이다
 - [ ] 04:00 DECISION 이벤트가 데이터 행 없이 explicit calendar에서 생성된다
 - [ ] registration의 universal 시간 필드는 `available_at`뿐이다
-- [ ] Strategy·Exchange·Valuation이 각자 field requirement를 선언한다
+- [ ] StrategyModel·Exchange·Valuation이 각자 field requirement를 선언한다
 - [ ] `lookback`이 Store query까지 도달한다 (전체 읽고 자르기 없음)
 - [ ] `portfolio.weighting`이 `domain` 외 아무것도 import하지 않는다 (import linter + module docstring)
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
-- [ ] Strategy가 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
+- [ ] StrategyModel이 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
 - [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다
 - [ ] fractional/lot 규칙이 `ListingRule`에 있고 `AccountMode`에는 없다

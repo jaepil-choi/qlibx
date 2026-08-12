@@ -23,7 +23,7 @@ behavior, correctness boundary, stored result의 의미**를 규정한다.
 - 특정 method name과 signature
 - process 경계와 service topology
 
-이 문서가 `Strategy`, `Model`, `Account`, `Exchange` 같은 이름을 쓸 때는 **제품의 semantic role**을 뜻한다.
+이 문서가 `StrategyModel`, `DataModel`, `Account`, `Exchange` 같은 이름을 쓸 때는 **제품의 semantic role**을 뜻한다.
 Python class를 뜻하지 않는다.
 
 > **Architecture candidate — non-normative**
@@ -59,11 +59,11 @@ vqapr는 **자체 research·execution capability를 소유하는 재사용 가�
 quantitative researcher와 그 연구를 돕는 coding agent가 다음을 하나의 누적 가능한 환경에서 수행한다.
 
 - project data를 의미와 point-in-time availability가 명시된 logical dataset으로 등록한다.
-- Model 또는 deterministic transform이 재사용 가능한 signal, feature, label, risk estimate를 만들어 축적한다.
-- Strategy가 point-in-time data와 선택적 Model result를 소비해 경제적 판단을 만든다.
-- 기존 Strategy를 member로 참조하는 ensemble Strategy가 저장된 결과를 조합하고 ticker 수준에서 netting한다.
+- DataModel 또는 deterministic transform이 재사용 가능한 signal, feature, label, risk estimate를 만들어 축적한다.
+- StrategyModel이 point-in-time data와 선택적 DataModel result를 소비해 경제적 판단을 만든다.
+- 기존 StrategyModel을 member로 참조하는 ensemble StrategyModel이 저장된 결과를 조합하고 ticker 수준에서 netting한다.
 - 판단을 실행 가능한 portfolio로 확정하고, 선택한 execution profile로 closed-loop simulation한다.
-- Strategy decision과 독립적으로 schedule된 시점에 actual account를 monitoring한다.
+- StrategyModel decision과 독립적으로 schedule된 시점에 actual account를 monitoring한다.
 - 성공, 실패, 미지원, diagnostic과 user decision을 다음 연구의 출발점으로 보존한다.
 
 각 capability는 **독립적으로 사용할 수 있다.** 모든 연구가 하나의 end-to-end pipeline을 끝까지 따라야
@@ -95,7 +95,7 @@ vqapr는 Qlib을 backtest runtime backend로 사용하지 않는다. `pyqlib`는
 6. **Deterministic replay.** 같은 frozen input, data, policy에서 판단 순서, state transition, diagnostic,
    결과가 재현된다.
 7. **Lifecycle extensibility.** 새 cadence, instrument lifecycle, monitoring requirement를 추가할 때 무관한
-   Model, Strategy, execution의 의미를 다시 정의하지 않는다.
+   DataModel, StrategyModel, execution의 의미를 다시 정의하지 않는다.
 
 이 요구는 intraday order book, partial fill, 실제 settlement 또는 모든 asset class를 현재 지원한다는 뜻이
 아니다. current/future 경계는 §13이 정한다.
@@ -127,7 +127,7 @@ policy — 은 명시적으로 내려야 한다.
 #### UC-FACADE-001 — 설치된 package의 public surface만으로 완주
 
 fresh project에서 installed documentation, bundled agent skill, public API/CLI만 사용해 dataset registration,
-Model materialization, Strategy research, composition, portfolio construction, execution, analysis, report를
+DataModel materialization, StrategyModel research, composition, portfolio construction, execution, analysis, report를
 수행할 수 있다. 어느 단계에서도 package 내부 module을 import하거나 source를 읽도록 요구하지 않는다.
 
 ### 1.5 설치 직후 사용자가 표현할 수 있어야 하는 것
@@ -161,11 +161,11 @@ vqapr에는 두 개의 루프가 있고, 척추는 하나다.
 
 ```text
 [research loop]
-registered PIT data -> Model / transform -> reusable research result -> analysis / reuse
+registered PIT data -> DataModel / transform -> reusable research result -> analysis / reuse
    여기서 끝나도 완결된 workflow다. portfolio return을 주장하지 않기 때문이다.
 
 [execution spine]
-Strategy decision
+StrategyModel decision
   -> mandatory portfolio construction
   -> frozen intended portfolio
   -> execution-time order conversion (현재 committed state + 현재 PIT input)
@@ -173,7 +173,7 @@ Strategy decision
   -> fills
   -> committed account state
   -> valuation / mark
-  -> feedback -> 다음 Strategy decision
+  -> feedback -> 다음 StrategyModel decision
 ```
 
 **규칙:** 새로운 portfolio return, NAV, PnL, turnover를 만드는 모든 workflow는 이 spine을 끝까지 통과한다.
@@ -187,31 +187,42 @@ Strategy decision
 academic long-short와 physical long-only는 서로 다른 lifecycle이 아니라 **같은 lifecycle에 서로 다른
 profile을 적용한 결과**다.
 
-### 2.3 Model과 Strategy는 분리된 semantic role이다
+### 2.3 DataModel과 StrategyModel은 분리된 semantic role이다
 
-두 역할의 차이는 **무엇에 답하는가**에서 나온다.
+사용자가 작성하는 계산 단위를 통틀어 **Model**이라 부른다. Model은 두 종류다.
+
+```text
+Model  — 사용자가 작성하고, 선언한 시점마다 선언한 관측만 읽어 결과를 만든다
+├── DataModel      — 값을 만든다
+└── StrategyModel  — 의도를 만든다
+```
+
+둘은 **언제 계산할지 선언하는 방식**과 **이전 계산을 이어가는 방식**을 공유한다. 그 규칙은 종류마다 다르지
+않으며 문서에도 한 번만 나온다.
+
+두 종류의 차이는 **무엇에 답하는가**에서 나온다.
 
 | | 답하는 질문 | 입력 | 출력 |
 |---|---|---|---|
-| **Model** | *"이 값은 얼마인가"* | data | **data** |
-| **Strategy** | *"지금 어떤 portfolio를 원하는가"* | data + committed actual state | **의도** |
+| **DataModel** | *"이 값은 얼마인가"* | data | **data** |
+| **StrategyModel** | *"지금 어떤 portfolio를 원하는가"* | data + committed actual state | **의도** |
 
 여기서 두 가지가 따라 나온다.
 
-- **Model은 actual state를 소비하지 않는다.** Model의 출력은 다른 연구가 읽을 데이터인데, 그것이 특정
-  account에 의존하면 더 이상 재사용 가능한 데이터가 아니다. 따라서 Model은 path-dependent가 될 수 없다.
-- **Model은 필수 단계가 아니다.** Strategy가 필요한 계산을 직접 수행해도 된다. Model은 **여러 소비자가
+- **DataModel은 actual state를 소비하지 않는다.** DataModel의 출력은 다른 연구가 읽을 데이터인데, 그것이 특정
+  account에 의존하면 더 이상 재사용 가능한 데이터가 아니다. 따라서 DataModel은 path-dependent가 될 수 없다.
+- **DataModel은 필수 단계가 아니다.** StrategyModel이 필요한 계산을 직접 수행해도 된다. DataModel은 **여러 소비자가
   같은 값을 나눠 쓰거나 반복 계산을 피하기 위한 선택**이지 선행 조건이 아니다(§2.7).
 
-Model도 여러 시점에 걸쳐 반복 계산할 수 있다. 다만 그 반복은 **order, fill, account를 거치지 않는다.**
+DataModel도 여러 시점에 걸쳐 반복 계산할 수 있다. 다만 그 반복은 **order, fill, account를 거치지 않는다.**
 portfolio return을 만드는 §2.2의 경로와 별개의 흐름이다.
 
-**Model**은 point-in-time data를 소비해 다른 연구와 Strategy가 재사용할 수 있는 research result를 만든다.
+**DataModel**은 point-in-time data를 소비해 다른 연구와 StrategyModel이 재사용할 수 있는 research result를 만든다.
 prediction, signal, feature, firm characteristic, risk estimate, statistical factor-return estimate가 대표적이다.
-Model의 정상적인 종착점은 reusable result와 그 평가 evidence이며, portfolio나 order를 만들 필요가 없다.
+DataModel의 정상적인 종착점은 reusable result와 그 평가 evidence이며, portfolio나 order를 만들 필요가 없다.
 
-**Strategy**는 registered data와 선택적 Model result, 필요하면 actual portfolio state와 bounded strategy
-state를 소비해 경제적 decision을 만든다. deterministic rule만으로 판단하는 Strategy는 Model을 선행 조건으로
+**StrategyModel**은 registered data와 선택적 DataModel result, 필요하면 actual portfolio state와 bounded strategy
+state를 소비해 경제적 decision을 만든다. deterministic rule만으로 판단하는 StrategyModel은 DataModel을 선행 조건으로
 요구하지 않는다.
 
 두 result는 경제적 의미가 다르다. **signal을 weight로, statistical estimate를 executed portfolio return으로,
@@ -221,7 +232,7 @@ process를 두라는 요구가 아니다.
 
 factor return도 마찬가지로 구분한다.
 
-- cross-sectional regression coefficient나 statistical factor estimate는 **Model result**로 만들 수 있다.
+- cross-sectional regression coefficient나 statistical factor estimate는 **DataModel result**로 만들 수 있다.
 - 실제 factor portfolio의 return, NAV, PnL, turnover는 **execution spine을 거친 결과**여야 한다.
 
 ### 2.4 Committed actual state만 authority다
@@ -229,7 +240,7 @@ factor return도 마찬가지로 구분한다.
 vqapr에는 서로 바꾸어 쓸 수 없는 두 개의 runtime authority가 있다.
 
 1. **Account authority** — committed fill과 mark가 만든 cash, position, cost, NAV와 그 이력
-2. **Strategy-state authority** — Strategy가 명시적으로 반환하고 commit한 bounded private state
+2. **StrategyModel-state authority** — StrategyModel이 명시적으로 반환하고 commit한 bounded private state
 
 나머지는 authority가 아니다. intended portfolio, requested order, constraint adjustment result, validation
 finding, monitoring finding, evidence는 **의도와 영수증**이다.
@@ -241,7 +252,7 @@ intended  ≠  requested  ≠  dealt  ≠  committed
 (목표)       (주문)       (체결)     (계좌 반영)
 ```
 
-- Strategy intent는 fill도 realized holding도 아니다.
+- StrategyModel intent는 fill도 realized holding도 아니다.
 - simulation의 committed fill은 현실의 체결은 아니지만 **그 run의 authoritative execution result**다.
 - 다음 decision은 requested target이 아니라 committed holding, cash, execution result를 본다.
 - blocked 또는 zero-dealt order를 fill로 가장하지 않으며, 다음 decision이 이를 구분해 읽을 수 있다.
@@ -304,10 +315,10 @@ deterministic built-in으로 제공한다. agent마다 같은 helper를 다르�
 주기 위해서다. built-in은 계산 기능이자 **executable example**이다 — valid config, typed input/output, expected
 diagnostic, failure behavior를 함께 보여준다.
 
-사용자 고유의 signal model과 alpha logic은 project가 소유한다. **project-local Strategy가 alpha logic의
+사용자 고유의 signal model과 alpha logic은 project가 소유한다. **project-local StrategyModel이 alpha logic의
 primary extension point**다. 사용자는 installed vqapr나 `site-packages`를 수정하지 않고 compatible한 local
-Python implementation을 작성·검증·등록할 수 있어야 한다. Model이나 deterministic materialization은 그
-Strategy가 reusable intermediate data를 요구할 때 선택하는 optional component이며 direct Strategy의 선행
+Python implementation을 작성·검증·등록할 수 있어야 한다. DataModel이나 deterministic materialization은 그
+StrategyModel이 reusable intermediate data를 요구할 때 선택하는 optional component이며 direct StrategyModel의 선행
 조건이 아니다.
 
 각 extension point마다 public input/output contract, machine-readable requirement와 schema, built-in과 같은
@@ -320,18 +331,18 @@ vqapr가 reference component를 제공할 수는 있지만 **project-owned propr
 
 연구 결과를 portfolio weight로 바꾸는 계산(균등 배분, 크기 비례 배분, 예산 재조정 등)은 자주 반복되므로
 built-in으로 제공한다. 이 built-in에는 다음 제약이 붙는다. 이것이 없으면 built-in은 편의 함수가 아니라
-**보이지 않는 곳에서 경제적 판단을 내리는 두 번째 Strategy**가 된다.
+**보이지 않는 곳에서 경제적 판단을 내리는 두 번째 StrategyModel**이 된다.
 
 - registered data, account state, clock, execution profile에 **접근하지 않는다.** 필요한 값은 전부 인자로
   받는다. 크기 결정에 외부 panel(시가총액 등)이 필요하면 그 panel을 호출자가 넘긴다. 그래야 그 data가
-  Strategy의 declared requirement를 거쳐 §4.6의 lineage에 남는다.
+  StrategyModel의 declared requirement를 거쳐 §4.6의 lineage에 남는다.
 - **budget을 스스로 결정하지 않는다.** 선언된 것보다 적게 배분된 결과를 자동으로 채우지 않는다(§5.5).
 - **결측을 조용히 처리하지 않는다.** 요구한 부수 입력이 없으면 계산 전에 실패하고, 해당 종목을 빼고
   나머지를 재정규화하지 않는다(§10.2).
 - 연구 결과 자체의 결측 해소는 built-in weighting의 책임이 아니다. 별도의 명시적 built-in으로 제공하되,
   **어떤 종목이 왜 제외되었는지가 호출자에게 값으로 반환되어** result evidence에 실릴 수 있어야 한다.
 - 같은 입력에 같은 출력을 낸다. run identity, decision time, account version을 알지 못하므로 실행 가능한
-  intent를 스스로 만들지 못한다. intent 조립과 lineage 기록은 Strategy의 책임이다(§6.2).
+  intent를 스스로 만들지 못한다. intent 조립과 lineage 기록은 StrategyModel의 책임이다(§6.2).
 
 #### UC-BUILTIN-001 — Built-in weighting의 순수성과 명시적 결측 처리
 
@@ -363,7 +374,7 @@ operation이 쓰였는가, 기존 alpha와의 correlation·overlap·incremental 
 | **availability time** | 그 관측을 처음 사용할 수 있는 시각 (`available_at`) | dataset registration |
 
 **event time과 data row time은 같지 않다.** event timestamp가 dataset의 행으로 존재할 필요가 없다.
-`2024-03-06 04:00`에 판단하는 Strategy는 데이터에 04:00 행이 하나도 없어도 정상적으로 그 시각에 판단한다.
+`2024-03-06 04:00`에 판단하는 StrategyModel은 데이터에 04:00 행이 하나도 없어도 정상적으로 그 시각에 판단한다.
 그 시각에 보이는 것은 `available_at <= 2024-03-06 04:00`인 행들뿐이다.
 
 ### 3.2 PIT의 유일한 보편 술어
@@ -374,7 +385,7 @@ $$
 available\_at \le evaluation\_time
 $$
 
-- Strategy와 alpha의 evaluation time은 **decision time**이다.
+- StrategyModel과 alpha의 evaluation time은 **decision time**이다.
 - order conversion, constraint adjustment, pre-execution validation의 evaluation time은 **execution time**이다.
 - monitoring의 evaluation time은 **monitoring time**이다.
 - actual account snapshot의 `as_of`도 evaluation time보다 늦을 수 없다. 이는 actual state가 과거 committed
@@ -383,7 +394,7 @@ $$
 vqapr가 보장하는 것은 **선언된 availability의 준수**다. source의 실제 경제적 공시 시점에 대한 최종 확인은
 user가 내리고, bundled agent skill이 근거 있는 후보를 제시한다(§11).
 
-Strategy, child research, model inference, inner execution component가 permitted cutoff를 우회해 source를
+StrategyModel, child research, model inference, inner execution component가 permitted cutoff를 우회해 source를
 직접 읽어서는 안 된다.
 
 compliance evaluator는 strategy가 소비하지 않는 independent registered data를 요구할 수 있다. 그러나 그
@@ -395,10 +406,13 @@ explicit dependency, availability cutoff, lineage를 가져야 한다.
 source timestamp와 session timezone이 명시되어야 하며, timezone이 없거나 서로 모순된 timestamp는 state
 mutation 전에 실패한다. naive datetime을 임의의 timezone으로 해석하지 않는다.
 
-### 3.3 Decision cadence는 strategy의 경제적 의미다
+### 3.3 Cadence는 Model 정의의 일부다
 
-**user는 strategy 정의만 읽고 그 strategy가 언제 판단하는지 알 수 있어야 한다.** cadence를 확인하려고
+**user는 Model 정의만 읽고 그것이 언제 계산하는지 알 수 있어야 한다.** cadence를 확인하려고
 실행 스크립트나 orchestration 설정을 읽어야 한다면 그것은 결함이다.
+
+이 절은 두 종류 모두에 적용된다. StrategyModel은 *언제 판단하는가*를, DataModel은 *어느 시점의 값을
+만드는가*를 선언하며, 선언하는 방식과 그것이 frozen calendar와 결합되는 방식은 같다.
 
 이것은 strategy가 시간을 직접 진행시키거나 자기를 호출한다는 뜻이 **아니다.** strategy는 "어떤 session마다
 몇 시에 판단하는가"를 **선언**하고, run이 그 선언과 frozen calendar를 결합해 판단 시점을 만든다.
@@ -408,9 +422,9 @@ invocation이 시작된 뒤 과거 cadence를 바꾸거나 시간을 소급해�
 
 #### UC-TRIGGER-001 — 선언된 decision cadence
 
-Strategy 정의 안에서 "eligible session마다 04:00 Asia/Seoul에 판단한다" 또는 "5 eligible session마다 04:00에
+StrategyModel 정의 안에서 "eligible session마다 04:00 Asia/Seoul에 판단한다" 또는 "5 eligible session마다 04:00에
 판단한다"를 선언한다. run 결과의 판단 시점은 그 선언과 frozen venue calendar의 교집합과 정확히 일치해야
-한다. 같은 Strategy를 다른 기간에 실행해도 정의만 읽으면 cadence와 local time을 알 수 있다.
+한다. 같은 StrategyModel을 다른 기간에 실행해도 정의만 읽으면 cadence와 local time을 알 수 있다.
 
 daily close `2024-03-05` 행은 `2024-03-05 15:30 Asia/Seoul`에 available해진다. 따라서 `2024-03-06 04:00`
 decision은 그 행을 읽을 수 있고, 그 decision의 next eligible close execution은 `2024-03-06 15:30`이다.
@@ -421,9 +435,9 @@ decision은 그 행을 읽을 수 있고, 그 decision의 next eligible close ex
 ### 3.4 Session calendar는 venue fact다
 
 판단 후보가 되는 session 목록과 open/close 시각은 **선택한 venue의 거래 calendar 사실**이어야 하고,
-Strategy나 data coverage에서 유도해서는 안 된다.
+StrategyModel나 data coverage에서 유도해서는 안 된다.
 
-Strategy는 휴장일이나 session 자체를 만들어내지 않는다. run은 명시적으로 동결된 session calendar, 선택
+StrategyModel은 휴장일이나 session 자체를 만들어내지 않는다. run은 명시적으로 동결된 session calendar, 선택
 환경이 식별한 calendar provider의 결과, 또는 user가 근거와 함께 선언한 유도 규칙의 결과를 사용한다.
 
 **금지되는 것은 package의 추측이다.** 특정 종목의 결측 때문에 후보 session이 사라지면 cadence 전체가
@@ -462,7 +476,7 @@ historical data access는 선택한 operation이 선언한 **exact lookback**을
   semantics가 **아니다.**
 
 두 종류 모두 `available_at <= evaluation_time` 상한을 바꾸지 않고 **store query에 직접 반영**한다. 전체
-history를 먼저 읽은 뒤 Strategy code에서 자르는 경로를 bounded access로 간주하지 않는다.
+history를 먼저 읽은 뒤 StrategyModel code에서 자르는 경로를 bounded access로 간주하지 않는다.
 
 **두 종류 모두 과거 방향이다.** 미래 관측을 당겨 읽는 lookback은 없다. 미래 구간이 필요해 보이는 계산은
 값을 나중 시점에 기록하고 소비자가 시점을 맞춰 읽는 방식으로 표현한다 — 예를 들어 "$t$의 20일 후 수익률"은
@@ -471,7 +485,7 @@ history를 먼저 읽은 뒤 Strategy code에서 자르는 경로를 bounded acc
 `rows`보다 적은 행만 존재하면 있는 만큼 반환하고 requested/actual coverage를 access evidence에 기록한다.
 dataset 전체의 `available_at_min`만으로 instrument별 coverage를 추정하거나, 행이 전혀 없는 instrument를
 declared universe 없이 존재한다고 추측하지 않는다. 계산에 필요한 최소 관측치와 ragged-panel 처리 방식은
-해당 Strategy의 경제적 규칙이다.
+해당 StrategyModel의 경제적 규칙이다.
 
 calendar lookback은 years/months/days 중 적어도 하나가 양수여야 하고 timezone과 month-end clamp policy를
 frozen input에 보존한다. 동일 `available_at`의 순서는 registered logical key로 결정해 같은 input에서 같은 row
@@ -479,16 +493,16 @@ set을 만든다.
 
 #### UC-LOOKBACK-001 — Store까지 강제되는 exact lookback
 
-Strategy가 60 rows lookback을 선언하면 그 제한이 store query까지 전달되어야 하고, lookback을 선언하지 않은
+StrategyModel이 60 rows lookback을 선언하면 그 제한이 store query까지 전달되어야 하고, lookback을 선언하지 않은
 historical read는 실패해야 한다. access evidence에는 요청한 lookback과 실제 coverage 정보가 남는다.
 
 ### 3.6 독립적인 clock
 
-observation, decision, execution, monitoring의 evaluation time은 같을 수도 다를 수도 있다. Strategy decision이
+observation, decision, execution, monitoring의 evaluation time은 같을 수도 다를 수도 있다. StrategyModel decision이
 없는 시점에도 actual account를 평가할 수 있고, execution은 decision과 분리된 PIT-safe 시점에 일어난다.
 
 "독립 clock"은 별도의 clock object나 별도 runtime을 의무화한다는 뜻이 아니라, **monitoring cadence와 frozen
-evaluation time이 Strategy decision cadence에 종속되지 않는다**는 뜻이다. 각 result는 자신이 평가한 instant와
+evaluation time이 StrategyModel decision cadence에 종속되지 않는다**는 뜻이다. 각 result는 자신이 평가한 instant와
 permitted cutoff를 보존한다.
 
 intraday event와 partial fill은 future work다.
@@ -522,13 +536,13 @@ field 이름은 강제하지 않는다. `ticker`, `symbol`, `종목코드` 중 �
 workflow 때문에 최초 등록을 막지 않는다.
 
 **consumer-purpose alias를 등록에 두지 않는다.** `research_close`, `execution_price`, `valuation_price` 같은
-role을 registration에 새기지 않는다. 같은 `close` field를 Strategy, execution, valuation이 각자 자기
+role을 registration에 새기지 않는다. 같은 `close` field를 StrategyModel, execution, valuation이 각자 자기
 requirement로 선택한다. 그래야 하나의 field가 여러 목적으로 쓰일 때 어느 소비자가 실제로 무엇을 읽었는지
 lineage에 남는다.
 
 #### 계산이 만든 데이터도 같은 계약을 따른다
 
-Model이나 Strategy가 만들어 저장한 데이터도 위와 **동일한 등록 계약**을 따른다. 소비자는 그것이 원본
+DataModel이나 StrategyModel이 만들어 저장한 데이터도 위와 **동일한 등록 계약**을 따른다. 소비자는 그것이 원본
 source인지 계산 결과인지 몰라도 **같은 방식으로 읽을 수 있어야 한다.** 계산 결과라는 이유로 별도의 공개
 읽기 방식을 요구하지 않는다.
 
@@ -551,7 +565,7 @@ source인지 계산 결과인지 몰라도 **같은 방식으로 읽을 수 있�
 `DATE`, `CODE`, `VALUE`, `FISCAL_PERIOD` 컬럼이 있는 file에서 user는 `CODE`를 instrument로, source rule로
 확정한 `DATE`를 `available_at`으로, `(DATE, CODE)`를 logical key로 binding하고 필요한 data field를 선택한다.
 daily close 행의 `DATE=2024-03-05`가 해당 session 종가를 뜻한다면 확정된 availability rule은
-`2024-03-05 15:30 Asia/Seoul`을 만든다. `FISCAL_PERIOD`는 Strategy가 필요할 때 요구하는 일반 column이다.
+`2024-03-05 15:30 Asia/Seoul`을 만든다. `FISCAL_PERIOD`는 StrategyModel이 필요할 때 요구하는 일반 column이다.
 package는 field 이름을 바꾸거나 universal observation timestamp를 추가하라고 요구하지 않는다. currency나
 universe metadata가 없다는 이유만으로 이 단계가 실패해서는 안 된다.
 
@@ -576,7 +590,7 @@ look-ahead 문제를 설명하고, 실제 release timestamp field 사용, source
 
 ### 4.3 Progressive requirement discovery
 
-Strategy, model, optimizer, report, executor는 **실제로 호출될 때** 자신에게 필요한 capability를 선언한다.
+StrategyModel, model, optimizer, report, executor는 **실제로 호출될 때** 자신에게 필요한 capability를 선언한다.
 등록된 dataset이 requirement를 충족하지 못하면 package는 해당 operation을 state mutation 전에 멈추고
 structured error를 낸다. **이 실패는 기존 registration 전체를 무효화하지 않는다.**
 
@@ -589,7 +603,7 @@ requirement가 적은 workflow profile 선택, compatible local extension 작성
 
 #### UC-DATA-002 — Downstream workflow에서 발견된 benchmark-weight requirement
 
-가격 Strategy는 최소 등록된 dataset만으로 실행되지만, single-name cap을 선택한 execution workflow는 execution
+가격 StrategyModel은 최소 등록된 dataset만으로 실행되지만, single-name cap을 선택한 execution workflow는 execution
 evaluation 시점의 time-varying benchmark-weight binding을 추가로 요구한다. 해당 workflow를 처음 호출할 때
 package는 requirement 미충족을 보고하고 order나 account mutation을 만들지 않는다. agent는 benchmark dataset
 신규 등록, 기존 dataset의 binding 보강, constraint 없는 research 선택을 제시한다. user 선택 후 validation에
@@ -638,38 +652,38 @@ OHLCV, 상하한가, 거래정지, lot size, price source도 이를 사용하는
 ### 4.6 Dependency binding
 
 각 operation은 **실제로 소비한** logical dataset, artifact, config identity를 결과 lineage에 기록한다. 같은
-source를 쓰더라도 Strategy input, compliance input, reporting input은 서로 다른 binding일 수 있다. 등록되어
+source를 쓰더라도 StrategyModel input, compliance input, reporting input은 서로 다른 binding일 수 있다. 등록되어
 있지만 해당 operation이 읽지 않은 field나 dataset은 dependency로 기록하지 않는다.
 
 ---
 
-## 5. Research — Model과 Strategy
+## 5. Research — DataModel과 StrategyModel
 
-Model과 Strategy는 서로 다른 질문에 답한다. 두 역할은 독립적으로 실행·평가할 수 있으며 하나의 의무적인
+DataModel과 StrategyModel은 서로 다른 질문에 답한다. 두 역할은 독립적으로 실행·평가할 수 있으며 하나의 의무적인
 pipeline을 공유하지 않는다.
 
 ```text
-registered PIT data -> Model -> reusable signal / estimate / research result
+registered PIT data -> DataModel -> reusable signal / estimate / research result
 registered PIT data ------------------------------------┐
-reusable Model result ----------------------------------┼-> Strategy result -> analysis / reuse
+reusable DataModel result ----------------------------------┼-> StrategyModel result -> analysis / reuse
 actual portfolio state, when required ------------------┘                          |
                                           executable run을 선택했다면 --------------┘
                                                         |
                                    frozen intended portfolio -> execution spine (§6)
 ```
 
-### 5.1 Reusable Model research
+### 5.1 Reusable DataModel research
 
-Model은 prediction, signal, feature, firm characteristic, factor exposure, risk estimate, statistical
+DataModel은 prediction, signal, feature, firm characteristic, factor exposure, risk estimate, statistical
 factor-return estimate를 만들 수 있다. 결과는 경제적 의미, axis, unit, time semantics가 맞는 reusable result로
 저장해야 하며, **서로 다른 결과를 모두 `signal`이라는 이름으로 뭉개지 않는다.**
 
-#### Model 결과의 계약
+#### DataModel 결과의 계약
 
 - **§4.1의 dataset 계약을 그대로 따른다.** 소비자는 이것이 계산 결과인지 원본인지 몰라도 읽는다.
-- **`available_at`은 package가 정한다**(§4.1). Model이 자기 결과의 유효 시점을 주장하지 않는다.
+- **`available_at`은 package가 정한다**(§4.1). DataModel이 자기 결과의 유효 시점을 주장하지 않는다.
 - **actual state를 소비하지 않으므로 path-dependent가 될 수 없다**(§2.3). 계좌·체결에 의존하는 판단은
-  Strategy의 영역이다.
+  StrategyModel의 영역이다.
 
 #### 반복 재학습은 새로운 capability를 요구하지 않는다
 
@@ -704,34 +718,34 @@ factor-return estimate를 만들 수 있다. 결과는 경제적 의미, axis, u
 > 예측 단계가 그중 그 시점에 유효한 것을 읽는 구성이 가능하다. 그러면 예측은 **고정된 학습 결과와 최신
 > 입력**을 함께 쓰게 된다.
 
-#### Model도 이전 계산을 이어갈 수 있다
+#### DataModel도 이전 계산을 이어갈 수 있다
 
-Model은 이전 실행의 계산 상태를 다음 실행으로 이어갈 수 있으며, 그 규칙은 §5.7과 같다. 창이 한 칸 움직일 때
+DataModel은 이전 실행의 계산 상태를 다음 실행으로 이어갈 수 있으며, 그 규칙은 §5.7과 같다. 창이 한 칸 움직일 때
 전체를 다시 계산하지 않고 증분으로 갱신하는 것이 대표적인 용도다.
 
 이어가기를 선택하면 **결과가 순차 생성된다.** 시점 순서대로 만들어야 같은 값이 나오므로, 일부 구간만 다시
 만들거나 병렬로 만들 수 없다. 그 사실이 결과에 남아야 하며, 그렇지 않으면 나중에 구간을 다시 생성하려는
 시도가 조용히 다른 값을 만든다.
 
-#### UC-MODEL-001 — Portfolio 없는 Model 연구
+#### UC-MODEL-001 — Portfolio 없는 DataModel 연구
 
-Model이 point-in-time feature로 다음 기간의 cross-sectional score를 만든다. user는 score coverage, IC,
-stability를 평가하고 reusable result로 저장하지만 Strategy, target, order, portfolio return을 만들지 않는다.
-**이 workflow는 완전한 Model research run이어야 한다.**
+DataModel이 point-in-time feature로 다음 기간의 cross-sectional score를 만든다. user는 score coverage, IC,
+stability를 평가하고 reusable result로 저장하지만 StrategyModel, target, order, portfolio return을 만들지 않는다.
+**이 workflow는 완전한 DataModel research run이어야 한다.**
 
 #### UC-MODEL-002 — Statistical factor return과 executed portfolio return의 구분
 
-Model이 한 시점의 cross-sectional exposure와 observed return으로 factor-return regression coefficient를
+DataModel이 한 시점의 cross-sectional exposure와 observed return으로 factor-return regression coefficient를
 추정한다. result는 statistical estimate, regression specification, input period, availability를 명시하며
 **portfolio NAV나 executable factor return으로 표시하지 않는다.** 같은 factor를 실제 portfolio로 평가하려면
-별도 Strategy와 execution workflow를 선택해야 한다.
+별도 StrategyModel과 execution workflow를 선택해야 한다.
 
 #### UC-FACTOR-001 — Independent double sort로 구성한 팩터 수익률
 
 user가 firm characteristic으로 sorted portfolio를 만들고 그 수익률로 팩터를 구성한다. 이것은 이 제품의
 일급 research use case이며 다음을 만족해야 한다.
 
-- **characteristic은 재사용 가능한 Model result다.** 회계 항목의 availability rule과 fiscal period 정렬은
+- **characteristic은 재사용 가능한 DataModel result다.** 회계 항목의 availability rule과 fiscal period 정렬은
   §4.1–4.2를 따르고, 그 가정(예: 확인된 보고 지연)이 result의 limitation에 남는다.
 - **분류(membership)도 저장 가능한 result다.** universe 자격 조건, breakpoint를 계산한 기준 집합, 배정 결과와
   버킷별 구성종목 수를 보존한다. breakpoint 기준 집합이 최종 대상 집합과 다를 수 있으므로(예: 한 시장의
@@ -749,31 +763,31 @@ user가 firm characteristic으로 sorted portfolio를 만들고 그 수익률로
 보유 중 발생하는 상장폐지·거래정지 등 instrument lifecycle 사건의 해석은 현재 범위 밖이다(§13.2).
 해당 종목이 조용히 제외되어서는 안 된다.
 
-### 5.2 Strategy research
+### 5.2 StrategyModel research
 
-Strategy는 registered data와 compatible Model result를 소비해 경제적 판단을 만든다. deterministic rule
-Strategy는 Model 없이 raw registered data를 직접 사용할 수 있다. 내부에서 score를 계산하더라도 **reusable
-signal을 publish한다면 Model result와 같은 semantic contract를 따라야 한다.**
+StrategyModel은 registered data와 compatible DataModel result를 소비해 경제적 판단을 만든다. deterministic rule
+StrategyModel은 DataModel 없이 raw registered data를 직접 사용할 수 있다. 내부에서 score를 계산하더라도 **reusable
+signal을 publish한다면 DataModel result와 같은 semantic contract를 따라야 한다.**
 
-이 PRD는 Strategy가 signal, score, weight, target 중 무엇을 public output으로 내는지 고정하지 않는다. 어떤
-shape를 고르든 downstream execution lifecycle은 변하지 않는다(§6). 어느 경우에도 Strategy output 자체는 fill도
+이 PRD는 StrategyModel이 signal, score, weight, target 중 무엇을 public output으로 내는지 고정하지 않는다. 어떤
+shape를 고르든 downstream execution lifecycle은 변하지 않는다(§6). 어느 경우에도 StrategyModel output 자체는 fill도
 authoritative actual state도 아니다.
 
 §2.7의 built-in weighting 함수들은 공통적으로 instrument별 signed 값을 입력으로 받는다. 이는 **built-in을
-호출하기로 선택한 Strategy만 구속하는 사실**이며, Strategy가 그 shape의 값을 만들어야 한다는 요구가 아니다.
-built-in을 하나도 쓰지 않는 Strategy는 그런 중간값을 만들지 않고 곧바로 target을 구성해도 된다.
+호출하기로 선택한 StrategyModel만 구속하는 사실**이며, StrategyModel이 그 shape의 값을 만들어야 한다는 요구가 아니다.
+built-in을 하나도 쓰지 않는 StrategyModel은 그런 중간값을 만들지 않고 곧바로 target을 구성해도 된다.
 
-#### UC-SIGNAL-001 — Strategy 내부의 deterministic signal과 weight 조립
+#### UC-SIGNAL-001 — StrategyModel 내부의 deterministic signal과 weight 조립
 
-user가 price reversal Strategy를 선택한다. Strategy는 point-in-time price를 읽어 내부 reversal score와 signed
+user가 price reversal StrategyModel을 선택한다. StrategyModel은 point-in-time price를 읽어 내부 reversal score와 signed
 weight를 만들고 optional academic execution profile에서 long-short 결과를 평가한다. reusable signal을 별도로
-publish하지 않는다면 stored Model result나 enhanced-index portfolio를 만들지 않아도 workflow가 완결된다.
+publish하지 않는다면 stored DataModel result나 enhanced-index portfolio를 만들지 않아도 workflow가 완결된다.
 
-#### UC-SIGNAL-002 — Stored Model result의 다중 재사용
+#### UC-SIGNAL-002 — Stored DataModel result의 다중 재사용
 
-한 Model이 monthly value characteristic을 materialize한다. long-short research Strategy와 long-only
-construction Strategy가 같은 result를 소비하되 각자 다른 weighting rule과 execution profile을 사용한다.
-Model은 다시 실행하지 않아도 되고, 두 Strategy result는 자신의 input dependency와 weighting semantics를 따로
+한 DataModel이 monthly value characteristic을 materialize한다. long-short research StrategyModel과 long-only
+construction StrategyModel이 같은 result를 소비하되 각자 다른 weighting rule과 execution profile을 사용한다.
+DataModel은 다시 실행하지 않아도 되고, 두 StrategyModel result는 자신의 input dependency와 weighting semantics를 따로
 보존한다.
 
 ### 5.3 Result category
@@ -784,7 +798,7 @@ Model은 다시 실행하지 않아도 되고, 두 Strategy result는 자신의 
 **모든 category는 §4.1의 dataset 계약 위에 얹힌다.** category가 다르다는 이유로 읽는 방식이 달라지지
 않으며, 얹히는 것은 그 category가 추가로 선언해야 하는 의미뿐이다.
 
-특히 Strategy가 만든 category(signed alpha-weight, ensemble)는 다음 셋을 **추가로 선언**한다.
+특히 StrategyModel이 만든 category(signed alpha-weight, ensemble)는 다음 셋을 **추가로 선언**한다.
 
 | 선언 | 없으면 |
 |---|---|
@@ -796,7 +810,7 @@ Model은 다시 실행하지 않아도 되고, 두 Strategy result는 자신의 
 다르거나, long-only를 선언했는데 음수가 있으면 — 결과를 만들기 전에 실패한다.
 
 **읽는 쪽에서는 값의 차이를 실패로 보지 않는다.** fixed 1.0 결과와 flexible 0.4 결과는 둘 다 정상이며, 그
-둘을 어떻게 다룰지는 소비하는 Strategy의 경제적 결정이다. package가 생산자와 소비자 사이를 중재하지 않는다.
+둘을 어떻게 다룰지는 소비하는 StrategyModel의 경제적 결정이다. package가 생산자와 소비자 사이를 중재하지 않는다.
 
 다만 **의미 불일치는 실패한다.** benchmark 대비 초과비중을 실제 보유비중으로 읽는 것은 경제적 선택이 아니라
 단위 오류다.
@@ -829,21 +843,21 @@ weight는 **예산의 배분**을 뜻한다. signal을 그대로 weight로 사�
 따라서 **signal에서 weight로 가는 전환은 명시적 연산이어야 한다.** 타입 검사가 이 경계를 지켜주지 못하므로,
 전환을 수행하는 연산을 통과했다는 사실 자체가 그 전환이 의도되었다는 증거가 된다.
 
-### 5.4 Composition — Ensemble은 하나의 Strategy다
+### 5.4 Composition — Ensemble은 하나의 StrategyModel다
 
-ensemble은 별도의 후처리 단계로 강제되는 것이 아니라, **기존 member Strategy와 그 compatible stored
-alpha-weight result를 입력으로 삼는 하나의 Strategy**다. member producer가 direct Strategy인지 stored model
+ensemble은 별도의 후처리 단계로 강제되는 것이 아니라, **기존 member StrategyModel과 그 compatible stored
+alpha-weight result를 입력으로 삼는 하나의 StrategyModel**다. member producer가 direct StrategyModel인지 stored model
 output을 소비했는지는 ensemble의 public contract가 아니다.
 
 다음 composition을 모두 지원해야 한다.
 
-- 같은 Model result를 서로 다른 Strategy가 재사용하고 독립적으로 평가한다.
-- 같은 Strategy logic을 compatible한 여러 Model result와 비교한다.
-- 여러 Strategy result를 producer 재실행 없이 조합한다.
+- 같은 DataModel result를 서로 다른 StrategyModel이 재사용하고 독립적으로 평가한다.
+- 같은 StrategyModel logic을 compatible한 여러 DataModel result와 비교한다.
+- 여러 StrategyModel result를 producer 재실행 없이 조합한다.
 
-#### UC-ENSEMBLE-001 — 기존 Strategy result의 조합
+#### UC-ENSEMBLE-001 — 기존 StrategyModel result의 조합
 
-value와 momentum Strategy의 signed weight를 저장한 뒤 ensemble이 두 result를 읽어 ticker-level netting을 한다.
+value와 momentum StrategyModel의 signed weight를 저장한 뒤 ensemble이 두 result를 읽어 ticker-level netting을 한다.
 한 member의 long과 다른 member의 short가 상쇄된 수량, 최종 signed weight, member lineage가 확인 가능해야 한다.
 
 ### 5.5 Budget semantics
@@ -872,22 +886,22 @@ budget과 실현된 budget을 함께** 보여야 하며, 하나를 다른 하나
 
 #### UC-ALPHA-BUDGET-001 — 약한 signal의 residual
 
-Strategy가 flexible budget을 선언하고, 기준보다 강한 종목만 선택한 결과 gross budget의 40%만 사용한다.
+StrategyModel이 flexible budget을 선언하고, 기준보다 강한 종목만 선택한 결과 gross budget의 40%만 사용한다.
 결과는 자기 선언과 함께 저장되며 **package가 이를 1.0으로 자동 확대하지 않는다.**
 
 **선언과 실제 weight가 어긋나면 결과를 만들기 전에 실패한다.** fixed gross 1.0을 선언했는데 합이 0.4이거나,
-long-only를 선언했는데 음수가 있는 경우다. **선언을 지키는 것은 Strategy의 책임**이며 package가 대신
+long-only를 선언했는데 음수가 있는 경우다. **선언을 지키는 것은 StrategyModel의 책임**이며 package가 대신
 맞춰주지 않는다.
 
-이 결과를 읽는 다른 Strategy는 선언을 보고 **자기 규칙으로** 처리한다. 1.0으로 늘려 쓸지 0.4 그대로 쓸지는
-그 Strategy의 경제적 결정이며, package가 두 결과의 budget이 다르다는 이유로 실패시키지 않는다.
+이 결과를 읽는 다른 StrategyModel은 선언을 보고 **자기 규칙으로** 처리한다. 1.0으로 늘려 쓸지 0.4 그대로 쓸지는
+그 StrategyModel의 경제적 결정이며, package가 두 결과의 budget이 다르다는 이유로 실패시키지 않는다.
 
 ### 5.6 Path-independent와 path-dependent alpha
 
 path-independent result는 동일 frozen input에서 prior holding과 fill history 없이 재현된다. path-dependent
 result는 actual holding, cash, prior fill, cooldown, strategy state에 의존한다.
 
-**두 result 모두 producer를 다시 실행하지 않고 frozen input으로 재사용할 수 있다.** consumer Strategy는
+**두 result 모두 producer를 다시 실행하지 않고 frozen input으로 재사용할 수 있다.** consumer StrategyModel은
 필요한 artifact role, schema, semantics를 선언하고 package가 이를 resolve한다. 실제로 소비한 artifact만
 dependency edge가 되며, source result가 의존했던 actual state·strategy state identity와 반영 범위는 새
 result의 lineage에서도 보존된다.
@@ -897,8 +911,8 @@ semantics가 consumer 요구와 맞지 않으면 계산 전에 compatibility err
 
 #### UC-ALPHA-PATH-001 — Path-dependent weight의 producer-independent 재사용
 
-turnover-aware Strategy가 account A의 actual holding과 strategy state를 소비해 path-dependent signed-weight
-result를 만든다. 이후 ensemble Strategy가 이 frozen result와 다른 member result를 조합한다. source producer는
+turnover-aware StrategyModel이 account A의 actual holding과 strategy state를 소비해 path-dependent signed-weight
+result를 만든다. 이후 ensemble StrategyModel이 이 frozen result와 다른 member result를 조합한다. source producer는
 다시 실행되지 않고 parent result도 변경되지 않으며, ensemble result는 consumed artifact와 source actual
 state·strategy state identity 및 반영 범위 lineage를 보존한다. ensemble weight를 account B의 executable
 target으로 변환하면 account B의 현재 committed holding과 현재 execution input을 사용하지만, **source member가
@@ -907,42 +921,43 @@ account B에서 재계산되었다고 표시하지 않는다.**
 #### UC-ALPHA-CHILD-001 — 체결 규칙만 바꾼 child research
 
 parent의 signed weight를 고정하고 next-close와 next-open 같은 두 full-fill convention을 child에서 비교한다.
-Model과 Strategy를 다시 실행하지 않으며, 각 child는 별도 actual state, execution assumption, PIT price
+DataModel과 StrategyModel을 다시 실행하지 않으며, 각 child는 별도 actual state, execution assumption, PIT price
 binding, fill dependency를 보존하고 parent result는 불변이다.
 
-### 5.7 Strategy state
+### 5.7 Model state
 
-Strategy는 이전 판단의 결과를 다음 판단으로 이어갈 수 있어야 한다.
+Model은 이전 계산의 결과를 다음 계산으로 이어갈 수 있어야 한다. **이 절의 규칙은 두 종류 모두에
+적용된다** — StrategyModel은 이전 판단을, DataModel은 이전 계산 상태를 이어간다(§5.1).
 
-- **내용과 구조는 strategy가 정하며 package는 이를 해석하지 않는다.**
-- **하나의 bounded value다.** Strategy가 임의의 이름으로 상태를 늘려갈 수 있는 표면을 제공하지 않는다.
+- **내용과 구조는 Model이 정하며 package는 이를 해석하지 않는다.**
+- **하나의 bounded value다.** Model이 임의의 이름으로 상태를 늘려갈 수 있는 표면을 제공하지 않는다.
   package가 해석하지 않으면서도 durable·portable하려면 값의 **범위와 형식**이 정해져 있어야 한다.
   범위가 없는 state는 저장할 수도, 다음 run에 넘길 수도, "무엇이 바뀌었는가"를 보일 수도 없다.
 - **portable format으로 표현 가능해야 한다.** 표현할 수 없는 값(비유한 수치, 문자열이 아닌 key, 임의의
   in-memory 객체)은 계산 전에 거부한다. 저장 시점에 조용히 잘라내지 않는다.
-- **저장되는 값은 Strategy가 들고 있는 객체와 분리된다.** Strategy가 이후에 같은 객체를 계속 변경해도 이미
+- **저장되는 값은 Model이 들고 있는 객체와 분리된다.** Model이 이후에 같은 객체를 계속 변경해도 이미
   기록된 state가 따라 바뀌어서는 안 된다. 그렇지 않으면 이력 전체가 마지막 값 하나로 붕괴한다.
 - durable하고 portable해야 하며, 한 run의 종료 state를 다음 run의 시작 state로 사용할 수 있어야 한다.
   production에서 하루 단위로 실행하며 전날 state를 이어받는 것이 기준 사례다.
 - **갱신은 execution이나 fill 발생 여부에 종속되지 않는다.** 체결이 없는 세션에도, execution profile을 쓰지
-  않는 research-only strategy도 state를 이어갈 수 있다.
-- strategy state를 사용한 result는 그 사실을 드러내야 한다. 소비자가 "이 result는 data만으로 재현되지 않는다"를
+  않는 research-only Model도 state를 이어갈 수 있다.
+- state를 사용한 result는 그 사실을 드러내야 한다. 소비자가 "이 result는 data만으로 재현되지 않는다"를
   알아야 하기 때문이다.
-- **strategy state는 최후 수단이다.** 같은 값을 bounded lookback이나 actual-state 이력(§6.6)이나 durable
+- **state는 최후 수단이다.** 같은 값을 bounded lookback이나 actual-state 이력(§6.6)이나 durable
   artifact로 표현할 수 있으면 그쪽이 재현 가능성이 높다.
 
-adaptive Strategy는 realized result나 new observation으로 belief, parameter, member weight를 갱신할 수 있다.
+adaptive StrategyModel은 realized result나 new observation으로 belief, parameter, member weight를 갱신할 수 있다.
 특정 Bayesian class hierarchy를 요구하지 않고, update 전후의 state와 사용한 evidence를 비교 가능하게 보존한다.
 
 #### UC-STATE-001 — 체결 없는 세션과 run 경계를 넘는 state 연속성
 
-Strategy가 판단 결과를 state로 남긴다. 그 세션에 주문이 없거나 dealt quantity가 0이어도 state는 이어진다.
+StrategyModel이 판단 결과를 state로 남긴다. 그 세션에 주문이 없거나 dealt quantity가 0이어도 state는 이어진다.
 run이 끝나면 최종 state를 결과로 얻을 수 있고, 다음 run의 시작 state로 **명시적으로 지정해** 이어서 실행할
 수 있다. 이때 이전 run의 state를 자동으로 선택하지 않는다.
 
 #### UC-ALPHA-ADAPTIVE-001 — Fill 이후 ensemble belief 갱신
 
-ensemble Strategy가 member별 realized outcome을 받은 뒤 다음 decision의 member weight를 바꾼다. result는 어떤
+ensemble StrategyModel이 member별 realized outcome을 받은 뒤 다음 decision의 member weight를 바꾼다. result는 어떤
 feedback까지 반영했는지 보여준다. 같은 update를 feedback 없이 재생하거나 미래 fill을 앞당겨 사용해서는 안 된다.
 
 ---
@@ -956,7 +971,7 @@ physical long-only의 차이는 **선택한 profile이 허용하는 direction, i
 cost, realism**뿐이다.
 
 ```text
-Strategy decision
+StrategyModel decision
   -> mandatory portfolio construction
   -> frozen intended portfolio
   -> execution-time order conversion
@@ -970,19 +985,19 @@ Strategy decision
 
 ### 6.2 Portfolio construction은 필수 경계다
 
-executable Strategy run은 signed, long-only, benchmark-relative 여부와 무관하게 현재 연구 결과를 **실행 가능한
+executable StrategyModel run은 signed, long-only, benchmark-relative 여부와 무관하게 현재 연구 결과를 **실행 가능한
 하나의 frozen intended portfolio**로 확정한다. construction 규칙은 profile마다 다를 수 있지만 이 경계를
 우회할 수 없다.
 
 frozen intended portfolio는 budget semantics, direction, instrument target, source lineage를 동결한다. cash를
-의도된 포지션으로 표현할지 잔여로 표현할지는 §5.5의 구분을 따른다. **Strategy result나 raw weight를
+의도된 포지션으로 표현할지 잔여로 표현할지는 §5.5의 구분을 따른다. **StrategyModel result나 raw weight를
 execution profile에 직접 제출하지 않는다.**
 
 construction 내부에서 §2.7의 built-in weighting 함수를 조합할 수 있다. 그러나 그 함수들은 run identity,
 decision time, account version을 알지 못하므로 실행 가능한 intent를 만들지 못한다. **intent 조립과 lineage
-기록은 Strategy의 책임이며 이 경계는 built-in 사용 여부와 무관하다.**
+기록은 StrategyModel의 책임이며 이 경계는 built-in 사용 여부와 무관하다.**
 
-Model-only 또는 non-portfolio analysis에는 construction이 필요하지 않다.
+DataModel-only 또는 non-portfolio analysis에는 construction이 필요하지 않다.
 
 #### UC-PORTFOLIO-001 — 같은 alpha의 서로 다른 portfolio 사용
 
@@ -996,7 +1011,7 @@ intended portfolio를 만든다. 이후에는 같은 order conversion, fill, com
 실제 주문을 만드는 단계는 frozen intended portfolio, **execution 시점의** committed holding/cash, instrument
 rule, price, tradability를 사용한다. decision time의 stale quantity를 재사용하지 않는다.
 
-Strategy가 요구한 data와 execution profile이 요구한 data는 **각각 명시적으로 resolve**하며,
+StrategyModel이 요구한 data와 execution profile이 요구한 data는 **각각 명시적으로 resolve**하며,
 purpose-specific registration alias를 통해 암묵적으로 선택하지 않는다. 필요한 binding이 없으면 §10의
 progressive error로 mutation 전에 멈춘다.
 
@@ -1005,10 +1020,10 @@ instrument별로 fractional 허용, lot rounding, clipping, skip, rejection, req
 
 #### UC-EXEC-001 — Decision과 execution의 분리
 
-Strategy result나 frozen intended portfolio가 존재한다는 사실만으로 fill이 생기지 않는다. 선택한 MVP execution
+StrategyModel result나 frozen intended portfolio가 존재한다는 사실만으로 fill이 생기지 않는다. 선택한 MVP execution
 profile은 next daily close 같은 PIT-safe convention에서 execution-time order conversion을 수행한 뒤 지원되는
 order를 전량 체결하고 cost와 즉시 결제 cash를 committed state에 반영한다. **execution time에 새로 보이는
-정보로 과거 Strategy intent를 암묵적으로 다시 계산하지 않는다.**
+정보로 과거 StrategyModel intent를 암묵적으로 다시 계산하지 않는다.**
 
 #### UC-EXEC-002 — Daily close profile의 명시적 한계
 
@@ -1047,7 +1062,7 @@ supported instrument, permitted direction, quantity semantics, fill timing, cost
 
 #### UC-ACADEMIC-001 — Signed portfolio의 명시적 가상 거래
 
-user가 signed Strategy result를 academic profile로 실행하면 먼저 frozen intended portfolio를 확정하고,
+user가 signed StrategyModel result를 academic profile로 실행하면 먼저 frozen intended portfolio를 확정하고,
 execution 시점의 committed hypothetical account state와 PIT reference price를 사용해 physical profile과 같은
 order → fill → commit → valuation lifecycle을 따른다. 선택한 academic venue는 Stock, ETF, tracking-only Index,
 synthetic-unit-price Factor의 listing과 instrument별 fractional/lot 규칙을 판정한다. fractional execution을
@@ -1090,7 +1105,7 @@ simulation의 authoritative state는 committed fill, cost, cash, position이다.
 
 #### 이력으로서의 actual state
 
-Strategy와 monitoring은 actual state를 현재 시점의 한 장면으로만이 아니라 **관측 이력**으로 읽을 수 있어야
+StrategyModel과 monitoring은 actual state를 현재 시점의 한 장면으로만이 아니라 **관측 이력**으로 읽을 수 있어야
 한다.
 
 - 관측 단위는 최소한 둘을 선택할 수 있다: **계좌 전체의 session 시계열**(cash, NAV, 실현손익 등)과
@@ -1103,9 +1118,9 @@ Strategy와 monitoring은 actual state를 현재 시점의 한 장면으로만�
   있어야 한다.**
 - **actual state 이력 접근은 strategy state 보유 여부에 종속되지 않는다.**
 
-#### UC-ACCOUNT-HISTORY-001 — Strategy state 없는 stop-loss
+#### UC-ACCOUNT-HISTORY-001 — StrategyModel state 없는 stop-loss
 
-Strategy가 진입 평단과 최근 세션의 실현손익 이력을 선언해 읽고, 손실 한도를 넘은 종목을 청산 대상으로
+StrategyModel이 진입 평단과 최근 세션의 실현손익 이력을 선언해 읽고, 손실 한도를 넘은 종목을 청산 대상으로
 판정한다. 이 판정에 strategy state를 사용하지 않으며, 실제로 소비한 actual-state 항목과 범위가 result의
 dependency로 남는다. 선언하지 않은 항목은 읽을 수 없고, **기록되지 않은 항목을 요구하면 계산 전에
 실패한다.**
@@ -1118,21 +1133,21 @@ fill과 동시에 결제된 것으로 처리한다.
 
 #### 경로 의존 시나리오 — Actual fill에 의존하는 stop-loss
 
-Strategy가 첫 decision에서 주식을 매수했지만 cost와 clipping 때문에 requested quantity보다 적게 체결된다.
+StrategyModel이 첫 decision에서 주식을 매수했지만 cost와 clipping 때문에 requested quantity보다 적게 체결된다.
 이후 marked price가 **actual entry price** 대비 user-declared stop-loss threshold를 넘게 하락하면 다음
 decision은 requested target이 아니라 committed quantity와 actual fill price를 사용해 exit intent를 만든다.
 두 decision을 날짜별 독립 weight 계산으로 대체하거나 미래 fill을 앞당겨 사용해서는 안 된다.
 
 #### Multi-instrument 시나리오 — 하나의 portfolio에서 여러 instrument
 
-한 Strategy가 여러 주식과 ETF를 같은 decision에서 선택하면 shared cash, instrument별 cost, actual holding을
+한 StrategyModel이 여러 주식과 ETF를 같은 decision에서 선택하면 shared cash, instrument별 cost, actual holding을
 하나의 portfolio constraint 안에서 처리해야 한다. 종목별 requested/dealt quantity와 failure reason을 모두
 보존하며, 한 instrument의 cash consumption이나 blocked execution이 다른 instrument의 결과와 다음 decision에
 미치는 영향을 재현할 수 있어야 한다.
 
 #### Multi-frequency 시나리오 — 서로 다른 data와 decision cadence
 
-daily observation과 valuation을 사용하면서 monthly Strategy rebalance와 daily actual-account monitoring을
+daily observation과 valuation을 사용하면서 monthly StrategyModel rebalance와 daily actual-account monitoring을
 수행한다. 각 operation은 자신의 evaluation time과 permitted cutoff를 보존하고, rebalance가 없는 날에도
 valuation과 monitoring 결과를 만들 수 있어야 한다. 이 use case는 intraday order book이나 partial fill 지원을
 의미하지 않는다.
@@ -1157,14 +1172,14 @@ current target을 반복 제출해 hold를 흉내 내고 price-drift rebalance�
 
 ### 6.8 Monitoring은 decision과 독립이다
 
-constraint monitoring은 Strategy decision cadence와 독립적으로 committed actual account를 관찰할 수 있어야
+constraint monitoring은 StrategyModel decision cadence와 독립적으로 committed actual account를 관찰할 수 있어야
 한다. user가 committed state와 frozen evaluation time을 선택해 monitoring을 실행하면, 새 decision이나 order가
 없는 날에도 finding을 만들 수 있어야 한다. **monitoring finding은 계좌를 수정하거나 과거 fill을 rollback하지
 않는다.**
 
 #### UC-EXEC-003 — No-trade day의 actual constraint breach
 
-가격 변화로 한 종목의 actual weight가 그 시점의 $\max(10\%, w_i^{index}(t))$ cap을 넘었지만 Strategy decision은
+가격 변화로 한 종목의 actual weight가 그 시점의 $\max(10\%, w_i^{index}(t))$ cap을 넘었지만 StrategyModel decision은
 없다. monitoring은 actual snapshot과 available benchmark weight를 사용해 breach를 기록한다. **새 order가 없다는
 이유로 finding을 누락하지 않는다.**
 
@@ -1262,40 +1277,40 @@ capability를 추론하지 않는다.
 state-transition validity, venue rule, realism label을 갖는다. `hypothetical_short`의 음수 position은 research
 관측을 위한 committed hypothetical state이며 borrow, 담보, 차입 비용, locate 가능성을 모델링하지 않는다.
 
-### 8.2 ETF look-through는 user-authored Strategy behavior다
+### 8.2 ETF look-through는 user-authored StrategyModel behavior다
 
 ETF look-through는 ETF position에서 **자동으로 발생하는 package behavior가 아니다.** ETF registration, 보유
 수량, constituent dataset이 존재한다는 이유만으로 look-through를 켜지 않는다.
 
 constituent data는 source identity, `available_at`, instrument/constituent identity, weight unit을 표현하는
 user-provided PIT data다. mapping, coverage, stale/revision 처리, normalization, cash residual의 경제적 의미는
-**Strategy가 소유한다.** vqapr는 ETF ticker를 근거로 dataset을 자동 발견하거나 누락된 구성종목을 추정하지
+**StrategyModel이 소유한다.** vqapr는 ETF ticker를 근거로 dataset을 자동 발견하거나 누락된 구성종목을 추정하지
 않는다.
 
-Strategy가 decision time $t$의 actual portfolio state에서 만든 physical weight를 $p_t$, 자신이 소비한 구성종목
+StrategyModel이 decision time $t$의 actual portfolio state에서 만든 physical weight를 $p_t$, 자신이 소비한 구성종목
 데이터로 만든 mapping을 $L_t$라 하면 constituent exposure는 예를 들어 $x_t = L_t p_t$로 계산할 수 있다.
-**이 식은 vqapr의 내장 ETF semantics가 아니라 Strategy가 선택할 수 있는 계산 예시다.**
+**이 식은 vqapr의 내장 ETF semantics가 아니라 StrategyModel이 선택할 수 있는 계산 예시다.**
 
 #### UC-LOOKTHROUGH-001 — 명시적 ETF exposure 계산
 
 constituent A/B를 각각 50% 보유한 ETF와 A direct stock을 함께 보유해도 vqapr는 instrument나 account position만
-보고 look-through를 자동 수행하지 않는다. user가 Strategy에 constituent dataset binding과 actual account state
-requirement를 명시하고 둘을 직접 소비한 경우에만 Strategy code가 constituent exposure를 계산한다. 그 Strategy는
+보고 look-through를 자동 수행하지 않는다. user가 StrategyModel에 constituent dataset binding과 actual account state
+requirement를 명시하고 둘을 직접 소비한 경우에만 StrategyModel code가 constituent exposure를 계산한다. 그 StrategyModel은
 direct stock과 ETF constituent exposure를 **정확히 한 번** 합산하고 physical cash/residual을 별도로 취급한다.
-같은 ETF를 아무 constituent binding 없이 사용하는 다른 Strategy에서는 ETF가 opaque physical instrument로
+같은 ETF를 아무 constituent binding 없이 사용하는 다른 StrategyModel에서는 ETF가 opaque physical instrument로
 남아야 한다.
 
 #### UC-LOOKTHROUGH-002 — PIT constituent consumption
 
 ETF 구성이 바뀌었지만 새 observation의 `available_at`이 decision time보다 늦으면 vqapr는 그 observation을
-노출하지 않는다. look-through를 선택한 Strategy는 그 시각에 읽을 수 있는 구성종목만 소비하고, snapshot 선택,
+노출하지 않는다. look-through를 선택한 StrategyModel은 그 시각에 읽을 수 있는 구성종목만 소비하고, snapshot 선택,
 coverage, stale/revision 처리, 재정규화 여부를 자신의 경제적 규칙으로 명시한다.
 
 #### UC-LOOKTHROUGH-003 — Actual holding을 읽는 recomputation
 
-ETF와 direct stock이 체결된 뒤 가격 drift 또는 다음 rebalance가 발생하면 Strategy는 다음 decision에서
+ETF와 direct stock이 체결된 뒤 가격 drift 또는 다음 rebalance가 발생하면 StrategyModel은 다음 decision에서
 requested target이 아니라 그 시점에 허용된 **marked actual portfolio state**를 읽어 exposure를 다시 계산한다.
-vqapr는 계산값을 account에 자동 주입하거나 다음 Strategy에 자동 feedback하지 않는다. user가 결과를
+vqapr는 계산값을 account에 자동 주입하거나 다음 StrategyModel에 자동 feedback하지 않는다. user가 결과를
 publish한다면 consumed constituent binding, actual-state identity, target/actual 구분을 lineage로 보존하며
 **intended exposure를 actual compliance state로 가장하지 않는다.**
 
@@ -1318,7 +1333,7 @@ result가 아니다.**
 #### UC-ARTIFACT-001 — External producer round-trip
 
 외부 process가 documented artifact schema로 signal을 저장한다. vqapr는 이를 typed object로 읽고 local
-Strategy에 전달한다. producer의 internal class를 import하지 않아도 compatibility와 lineage를 검사할 수 있어야
+StrategyModel에 전달한다. producer의 internal class를 import하지 않아도 compatibility와 lineage를 검사할 수 있어야
 한다.
 
 #### UC-ARTIFACT-002 — Invalid serialized result 거부
@@ -1332,7 +1347,7 @@ artifact는 **실제** input artifact/data/config와 producer identity를 가리
 compatible output이 이미 있으면 재사용할 수 있고, input이나 semantic contract가 달라지면 별도 result로
 취급한다. content hash만 같다는 이유로 서로 다른 경제적 의미를 합치지 않는다.
 
-경제적으로 다른 cadence, calendar, Strategy version, execution profile, account validity, data source를 같은
+경제적으로 다른 cadence, calendar, StrategyModel version, execution profile, account validity, data source를 같은
 run으로 취급하지 않는다.
 
 ### 9.3 Publication은 원자적이다
@@ -1348,7 +1363,7 @@ idempotency, recovery outcome이 결정적이어야 한다.
 
 #### UC-RESEARCH-001 — 실패를 보존한 뒤 보강해 retry
 
-Strategy가 benchmark-weight requirement 부족으로 실패한다. catalog는 성공 result 대신 failure evidence를
+StrategyModel이 benchmark-weight requirement 부족으로 실패한다. catalog는 성공 result 대신 failure evidence를
 남긴다. user가 benchmark data를 등록한 뒤 새 invocation이 이전 error와 resolution lineage를 연결해 성공하며,
 **실패 기록을 삭제하지 않는다.**
 
@@ -1529,9 +1544,9 @@ sample project-local logic, config, expected result를 제공한다.
 
 ```text
 sample data registration
-|-> direct Strategy: signal + signed weights + research backtest
-|-> Model output -> Strategy: signed weights + research backtest
-|-> optional Ensemble Strategy
+|-> direct StrategyModel: signal + signed weights + research backtest
+|-> DataModel output -> StrategyModel: signed weights + research backtest
+|-> optional Ensemble StrategyModel
 |-> optional physical / enhanced-index construction -> selected execution profile
 -> portable artifacts, report, catalog lookup
 ```
@@ -1590,9 +1605,9 @@ built-in 예시를 참고해 agent가 project-local neutralization transform을 
 requirement, PIT behavior, output artifact를 검사한다. 실패하면 agent는 error를 설명하고 수정안을 제시하며,
 성공하기 전까지 compatible component로 등록하지 않는다.
 
-#### UC-EXTENSION-002 — Project-local Strategy의 검증과 재현 가능한 실행
+#### UC-EXTENSION-002 — Project-local StrategyModel의 검증과 재현 가능한 실행
 
-fresh installed project에서 user가 documented public contract만 사용하는 local Strategy를 작성한다. Strategy는
+fresh installed project에서 user가 documented public contract만 사용하는 local StrategyModel을 작성한다. StrategyModel은
 필요한 dataset/artifact와 output semantics를 선언하고 package validation을 통과한 뒤에만 reusable extension으로
 등록된다. 이후 research 또는 daily execution은 user가 선택한 **exact registered version**을 사용하고 실제
 dependency를 result에 남긴다. 등록 뒤 source나 contract가 바뀌면 이전 registration을 암묵적으로 latest code에
@@ -1602,7 +1617,7 @@ dependency를 result에 남긴다. 등록 뒤 source나 contract가 바뀌면 �
 
 **vqapr가 소유:** project initialization과 frozen invocation, logical dataset registration과 capability binding,
 field semantics·unit·currency·timezone·universe·tradability 구분, point-in-time materialization과 bounded access,
-signal/alpha weight/ensemble/intended portfolio/artifact contract, Model result·Strategy intent·execution
+signal/alpha weight/ensemble/intended portfolio/artifact contract, DataModel result·StrategyModel intent·execution
 profile·actual-state result 사이의 compatibility, order conversion semantics와 clipping/failure diagnostics,
 constraint declaration·adjustment·validation·finding contract, signed alpha diagnostics와 long-only physical
 construction, instrument semantics와 execution-policy resolution, portable artifact envelope·lineage·catalog·
@@ -1652,9 +1667,9 @@ hypothetical signed evaluation을 지원한다.
 - 반복 재학습을 포함한 파생 데이터 생산과 재사용
 - long-only enhanced-index physical portfolio
 - zero-friction fractional academic execution profile
-- ETF의 physical/opaque 처리와 user Strategy가 명시적으로 PIT constituent data를 소비해 계산하는 look-through
+- ETF의 physical/opaque 처리와 user StrategyModel이 명시적으로 PIT constituent data를 소비해 계산하는 look-through
 - historical backtest와 portable research catalog
-- actual fill, marked state, bounded strategy state에 의존하는 path-dependent Strategy
+- actual fill, marked state, bounded strategy state에 의존하는 path-dependent StrategyModel
 - 하나의 portfolio에서 여러 주식·ETF와 shared cash를 함께 처리하는 multi-instrument simulation
 - daily observation/valuation, 선택적 lower-frequency decision, 독립 monitoring을 결합하는 multi-frequency workflow
 - selective decision trigger, explicit hold, dense actual-account evidence
@@ -1676,7 +1691,7 @@ hypothetical signed evaluation을 지원한다.
 - merger, spin-off, delisting을 포함한 security-master event의 **원천 해석·변환**
 - unbounded autonomous strategy state mutation
 - **actual state에 의존하는 model 학습** — 자기 매매 결과를 보고 정책을 갱신하는 방식(강화학습 계열).
-  §2.3이 Model을 execution 경로 밖에 둘 수 있는 것은 학습이 계좌를 보지 않기 때문이며, 이 예외를 열면
+  §2.3이 DataModel을 execution 경로 밖에 둘 수 있는 것은 학습이 계좌를 보지 않기 때문이며, 이 예외를 열면
   파생 데이터의 재사용 가능성이 무너진다
 - **중단된 run의 재개** — 실패하거나 중단된 run은 current scope에서 처음부터 다시 실행한다
 
@@ -1783,10 +1798,10 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 
 ### 14.2 Research composition
 
-- `UC-SIGNAL-001`의 direct Strategy와 `UC-SIGNAL-002`의 stored model output 경로가 모두 동작한다.
-- `UC-MODEL-001`처럼 portfolio 없이 Model signal을 연구·평가·저장할 수 있다.
+- `UC-SIGNAL-001`의 direct StrategyModel과 `UC-SIGNAL-002`의 stored model output 경로가 모두 동작한다.
+- `UC-MODEL-001`처럼 portfolio 없이 DataModel signal을 연구·평가·저장할 수 있다.
 - `UC-MODEL-002`에서 statistical factor-return estimate를 executed portfolio return/NAV로 표시하지 않는다.
-- Model이 actual state를 소비하지 않으며, 반복 재학습이 같은 Model의 여러 실행으로 표현된다. 이전 계산을
+- DataModel이 actual state를 소비하지 않으며, 반복 재학습이 같은 DataModel의 여러 실행으로 표현된다. 이전 계산을
   이어간 결과는 순차 생성임이 드러난다.
 - `UC-FACTOR-001`에서 characteristic과 membership을 재사용 가능한 result로 만들고, 같은 membership을 소비한
   여러 버킷 portfolio가 그 사실을 dependency로 증명하며, 버킷 조합 팩터와 직접 실행 팩터가 zero-friction
@@ -1802,11 +1817,11 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   명시적으로 지정된다. state 갱신이 execution 발생 여부에 종속되지 않는다.
 - `UC-CALENDAR-001`에서 가격 데이터만 있는 project가 선언된 유도 규칙으로 frozen session calendar를 만들고,
   package는 규칙 없이 session을 추측하지 않으며, 유도 방식과 한계가 result에 남는다.
-- `UC-TRIGGER-001`에서 Strategy가 선언한 cadence와 local decision time을 frozen venue calendar와 결합한 판단
+- `UC-TRIGGER-001`에서 StrategyModel이 선언한 cadence와 local decision time을 frozen venue calendar와 결합한 판단
   시점이 실행 결과와 일치한다. 해당 시각에 data row가 없어도 event는 성립하며, 판단하지 않은 session은 실패로
   기록되지 않는다.
-- `UC-ENSEMBLE-001`에서 기존 Strategy result를 member로 조합하고 ticker-level netting과 lineage를 확인할 수 있다.
-- `UC-ALPHA-CHILD-001`은 같은 exact parent intent를 Strategy/Model 재실행 없이 두 execution convention에서
+- `UC-ENSEMBLE-001`에서 기존 StrategyModel result를 member로 조합하고 ticker-level netting과 lineage를 확인할 수 있다.
+- `UC-ALPHA-CHILD-001`은 같은 exact parent intent를 StrategyModel/DataModel 재실행 없이 두 execution convention에서
   비교하며 parent result는 불변이다. adaptive scenario는 `UC-ALPHA-ADAPTIVE-001`의 state/evidence를 별도로
   만족한다.
 
@@ -1814,7 +1829,7 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 
 - constraint가 없는 research는 `UC-CONSTRAINT-001`처럼 실행되고, constraint workflow는 필요한 data를 호출
   시점에 발견한다. (`UC-CONSTRAINT-002`)
-- academic long-short, peer momentum, top-N long-only, enhanced index처럼 executable한 모든 Strategy는
+- academic long-short, peer momentum, top-N long-only, enhanced index처럼 executable한 모든 StrategyModel은
   construction 규칙이 달라도 **frozen intended portfolio → execution-time order conversion → selected profile →
   fill → account commit → valuation → feedback**의 같은 observable lifecycle을 따른다. (`UC-PORTFOLIO-001`,
   `UC-PROFILE-001`)
@@ -1846,7 +1861,7 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - `UC-REPORT-001`, `UC-MONITOR-001`에서 stored result를 재실행 없이 report하고 actual과 intended state를
   구분한다.
 - `UC-EXTENSION-001`에서 agent가 만든 local transform의 compatibility를 package가 deterministic하게 판정한다.
-- `UC-EXTENSION-002`에서 local Strategy를 documented public contract로 검증·등록하고 user-selected exact
+- `UC-EXTENSION-002`에서 local StrategyModel을 documented public contract로 검증·등록하고 user-selected exact
   version으로 실행하며 source drift와 implicit latest selection을 compute 전에 거부한다.
 
 ---
@@ -1863,7 +1878,7 @@ unsupported failure, evidence가 이전 contract와 일치하거나 **명시적�
 
 ### 15.2 Runtime 또는 component 변경
 
-Model, Strategy, execution mechanism, artifact backend, extension mechanism을 교체해도 다음을 재검증한다.
+DataModel, StrategyModel, execution mechanism, artifact backend, extension mechanism을 교체해도 다음을 재검증한다.
 
 - same frozen input의 deterministic replay
 - decision과 execution outcome의 분리 및 actual feedback
@@ -1897,10 +1912,10 @@ user decision으로 연결한다.
 
 1. **`available_at <= evaluation_time`과 exact `rows`/`calendar` lookback의 PIT integrity**
 2. **event time과 data row time의 분리** — 판단 시각은 데이터가 아니라 venue calendar와 strategy 선언에서 온다
-3. direct Strategy, stored model output, ensemble Strategy의 선택 가능한 composition
-4. path-dependent Strategy, multi-instrument portfolio, multi-frequency workflow
+3. direct StrategyModel, stored model output, ensemble StrategyModel의 선택 가능한 composition
+4. path-dependent StrategyModel, multi-instrument portfolio, multi-frequency workflow
 5. **portfolio return을 주장하는 모든 것은 하나의 execution spine을 통과한다**
-6. Model result, Strategy decision, execution outcome의 semantic 분리
+6. DataModel result, StrategyModel decision, execution outcome의 semantic 분리
 7. **committed actual state만이 authority다** — intended ≠ requested ≠ dealt ≠ committed
 8. **fractional/lot은 venue listing이, 음수 position 허용은 account validity가 결정한다**
 9. producer-independent typed artifact, lineage, failure evidence, safe reuse
@@ -1989,14 +2004,14 @@ $$r_{BAB} = \frac{1}{\beta_L}(r_L - r_f) - \frac{1}{\beta_H}(r_H - r_f)$$
 | 유휴자본의 $r_f$를 어떻게 반영하는가 | 현금에 이자를 자동으로 붙이지 않는다. §4.4로 등록한 무위험자산을 **포지션으로** 보유해 user가 선언한다 (§13.2) |
 | 예산이 항상 gross 1 또는 ±1인가 | **아니다.** BAB는 매 리밸런싱마다 $\beta$에 따라 예산이 달라진다. 예산 표현을 하나로 고정하지 않은 이유의 실제 근거다 (§5.5) |
 
-### B.4 ML 연구와 Model의 시간 경계
+### B.4 ML 연구와 DataModel의 시간 경계
 
-Strategy는 판단 1회에 평가 시각이 하나지만, 반복 계산 결과를 만드는 Model은 **출력 행마다 평가 시각이
+StrategyModel은 판단 1회에 평가 시각이 하나지만, 반복 계산 결과를 만드는 DataModel은 **출력 행마다 평가 시각이
 하나**다. 이 차이를 어떻게 다룰지가 오래 열려 있었고, 참조 구현(Qlib)의 실제 구조를 확인하면서 정리했다.
 
 | 확인한 것 | 정해진 것 |
 |---|---|
-| 참조 구현은 ML을 어떻게 다루나 | **학습을 backtest loop 안에 넣지 않았다.** 미리 계산한 예측표를 loop가 읽을 뿐이다. 이 제품의 Model/Strategy 분리와 같은 구조다 |
+| 참조 구현은 ML을 어떻게 다루나 | **학습을 backtest loop 안에 넣지 않았다.** 미리 계산한 예측표를 loop가 읽을 뿐이다. 이 제품의 DataModel/StrategyModel 분리와 같은 구조다 |
 | 반복 계산의 look-ahead를 무엇이 막나 | **각 시점에 허용된 관측만 보이는 것 자체가 막는다.** 전체 기간을 한 번에 학습한 결과가 섞여 들어갈 경로가 없으므로 별도 감지 장치를 두지 않는다 |
 | 미래를 읽는 계산이 필요한가 | **필요 없다.** "$t$의 20일 후 수익률"은 "$t{+}20$에 기록된 20일 수익률"과 같은 값이고, 후자는 미래를 읽지 않는다(§3.5) |
 | 반복 재학습이 새 개념인가 | **아니다.** 이미 모든 계산에 적용되는 요구만 만족하면 된다(§5.1) |

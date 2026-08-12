@@ -189,6 +189,23 @@ profile을 적용한 결과**다.
 
 ### 2.3 Model과 Strategy는 분리된 semantic role이다
 
+두 역할의 차이는 **무엇에 답하는가**에서 나온다.
+
+| | 답하는 질문 | 입력 | 출력 |
+|---|---|---|---|
+| **Model** | *"이 값은 얼마인가"* | data | **data** |
+| **Strategy** | *"지금 어떤 portfolio를 원하는가"* | data + committed actual state | **의도** |
+
+여기서 두 가지가 따라 나온다.
+
+- **Model은 actual state를 소비하지 않는다.** Model의 출력은 다른 연구가 읽을 데이터인데, 그것이 특정
+  account에 의존하면 더 이상 재사용 가능한 데이터가 아니다. 따라서 Model은 path-dependent가 될 수 없다.
+- **Model은 필수 단계가 아니다.** Strategy가 필요한 계산을 직접 수행해도 된다. Model은 **여러 소비자가
+  같은 값을 나눠 쓰거나 반복 계산을 피하기 위한 선택**이지 선행 조건이 아니다(§2.7).
+
+Model도 여러 시점에 걸쳐 반복 계산할 수 있다. 다만 그 반복은 **order, fill, account를 거치지 않는다.**
+portfolio return을 만드는 §2.2의 경로와 별개의 흐름이다.
+
 **Model**은 point-in-time data를 소비해 다른 연구와 Strategy가 재사용할 수 있는 research result를 만든다.
 prediction, signal, feature, firm characteristic, risk estimate, statistical factor-return estimate가 대표적이다.
 Model의 정상적인 종착점은 reusable result와 그 평가 evidence이며, portfolio나 order를 만들 필요가 없다.
@@ -447,6 +464,10 @@ historical data access는 선택한 operation이 선언한 **exact lookback**을
 두 종류 모두 `available_at <= evaluation_time` 상한을 바꾸지 않고 **store query에 직접 반영**한다. 전체
 history를 먼저 읽은 뒤 Strategy code에서 자르는 경로를 bounded access로 간주하지 않는다.
 
+**두 종류 모두 과거 방향이다.** 미래 관측을 당겨 읽는 lookback은 없다. 미래 구간이 필요해 보이는 계산은
+값을 나중 시점에 기록하고 소비자가 시점을 맞춰 읽는 방식으로 표현한다 — 예를 들어 "$t$의 20일 후 수익률"은
+"$t{+}20$에 기록된 20일 수익률"과 같은 값이며, 후자는 미래를 읽지 않는다.
+
 `rows`보다 적은 행만 존재하면 있는 만큼 반환하고 requested/actual coverage를 access evidence에 기록한다.
 dataset 전체의 `available_at_min`만으로 instrument별 coverage를 추정하거나, 행이 전혀 없는 instrument를
 declared universe 없이 존재한다고 추측하지 않는다. 계산에 필요한 최소 관측치와 ragged-panel 처리 방식은
@@ -505,6 +526,16 @@ role을 registration에 새기지 않는다. 같은 `close` field를 Strategy, e
 requirement로 선택한다. 그래야 하나의 field가 여러 목적으로 쓰일 때 어느 소비자가 실제로 무엇을 읽었는지
 lineage에 남는다.
 
+#### 계산이 만든 데이터도 같은 계약을 따른다
+
+Model이나 Strategy가 만들어 저장한 데이터도 위와 **동일한 등록 계약**을 따른다. 소비자는 그것이 원본
+source인지 계산 결과인지 몰라도 읽을 수 있어야 하며, 계산 결과를 위한 별도의 저장 체계나 별도의 읽기
+경로를 두지 않는다.
+
+다만 한 가지가 다르다. **계산 결과의 `available_at`은 package가 정한다.** 그 값이 실제로 소비한 관측에서
+결정되기 때문이다. 생산자가 자기 결과의 유효 시점을 직접 주장하지 않으며, 실제로 읽은 것보다 이른 시점을
+주장할 수 없다. 이 규칙이 없으면 계산 한 단계를 거칠 때마다 PIT 경계가 느슨해진다.
+
 #### UC-DATA-001 — 최소 등록과 field-name 자율성
 
 `DATE`, `CODE`, `VALUE`, `FISCAL_PERIOD` 컬럼이 있는 file에서 user는 `CODE`를 instrument로, source rule로
@@ -554,13 +585,16 @@ package는 requirement 미충족을 보고하고 order나 account mutation을 �
 신규 등록, 기존 dataset의 binding 보강, constraint 없는 research 선택을 제시한다. user 선택 후 validation에
 성공하면 **그 operation만** 안전하게 retry할 수 있어야 한다.
 
-#### UC-PIT-001 — Label horizon의 늦은 발견
+#### UC-PIT-001 — 파생 계산이 요구하는 binding의 늦은 발견
 
-forward-return label을 만드는 model이 `horizon_end`를 요구하지만 input dataset에는 binding이 없다. package는
-model materialization **전에** 실패하고 어떤 requirement가 부족한지 보고한다. agent는 계산 가능한 derived
-field인지, 별도 dataset이 필요한지, model을 바꿀지를 설명해 user의 결정을 받는다. 임의의 horizon이나 delay를
-채우지 않는다. horizon 보강 뒤의 새 invocation은 이전 failure를 dependency로 연결하고, frozen evaluation
-time까지 이용 가능한 label만 발행한다.
+회계 항목으로 firm characteristic을 만드는 계산이 `fiscal_period` binding을 요구한다. 어느 회계연도의 값을
+어느 형성 시점에 대응시킬지가 그 계산의 경제적 규칙이기 때문이다. 그런데 input dataset에는 그 binding이
+없다.
+
+package는 **계산 전에** 실패하고 어떤 requirement가 부족한지 보고한다. agent는 계산 가능한 derived field인지,
+별도 dataset이 필요한지, 다른 계산을 선택할지를 설명해 user의 결정을 받는다. **임의의 회계연도 정렬이나
+보고 지연을 채우지 않는다.** binding 보강 뒤의 새 invocation은 이전 failure를 dependency로 연결하고,
+그 시점까지 이용 가능한 값만 발행한다.
 
 ### 4.4 Price axis와 derived unit price
 
@@ -619,6 +653,29 @@ actual portfolio state, when required ------------------┘                     
 Model은 prediction, signal, feature, firm characteristic, factor exposure, risk estimate, statistical
 factor-return estimate를 만들 수 있다. 결과는 경제적 의미, axis, unit, time semantics가 맞는 reusable result로
 저장해야 하며, **서로 다른 결과를 모두 `signal`이라는 이름으로 뭉개지 않는다.**
+
+#### Model 결과의 계약
+
+- **§4.1의 dataset 계약을 그대로 따른다.** 소비자는 이것이 계산 결과인지 원본인지 몰라도 읽는다.
+- **`available_at`은 package가 정한다**(§4.1). Model이 자기 결과의 유효 시점을 주장하지 않는다.
+- **actual state를 소비하지 않으므로 path-dependent가 될 수 없다**(§2.3). 계좌·체결에 의존하는 판단은
+  Strategy의 영역이다.
+
+#### 반복 재학습은 새로운 개념이 아니다
+
+일정 구간으로 학습해 다음 구간을 예측하고, 구간을 밀어가며 반복하는 방식(walk-forward)은 **같은 Model을
+여러 시점에 실행하는 것**이다. 각 실행은 자기 시점에 허용된 관측만 보고 자기 결과의 유효 시점을 갖는다.
+따라서 전체 기간을 한 번에 학습해 만든 결과가 우연히 섞여 들어갈 수 없다 — 어느 시점에서도 그 시점 이후의
+관측이 보이지 않기 때문이다.
+
+#### Model도 이전 계산을 이어갈 수 있다
+
+Model은 이전 실행의 계산 상태를 다음 실행으로 이어갈 수 있으며, 그 규칙은 §5.7과 같다. 창이 한 칸 움직일 때
+전체를 다시 계산하지 않고 증분으로 갱신하는 것이 대표적인 용도다.
+
+이어가기를 선택하면 **결과가 순차 생성된다.** 시점 순서대로 만들어야 같은 값이 나오므로, 일부 구간만 다시
+만들거나 병렬로 만들 수 없다. 그 사실이 결과에 남아야 하며, 그렇지 않으면 나중에 구간을 다시 생성하려는
+시도가 조용히 다른 값을 만든다.
 
 #### UC-MODEL-001 — Portfolio 없는 Model 연구
 
@@ -687,6 +744,26 @@ Model은 다시 실행하지 않아도 되고, 두 Strategy result는 자신의 
 
 각 category는 axis, unit, time semantics, compatibility를 스스로 선언한다. 서로 다른 category를 같은 이름으로
 저장하지 않는다.
+
+**모든 category는 §4.1의 dataset 계약 위에 얹힌다.** category마다 별도의 저장 체계나 읽기 경로를 두지
+않으며, 얹히는 것은 그 category가 추가로 선언해야 하는 의미뿐이다.
+
+특히 Strategy가 만든 category(signed alpha-weight, ensemble)는 다음 셋을 **추가로 선언**한다.
+
+| 선언 | 없으면 |
+|---|---|
+| weight가 raw / active / benchmark-relative / physical 중 무엇인지 | 초과비중과 실제 보유비중을 섞게 된다 |
+| budget이 fixed인지 flexible인지 | 합이 0.4인 결과가 "의도한 40%"인지 "정규화 안 된 것"인지 모른다 |
+| actual state나 strategy state를 소비했는지 | 소비자가 "데이터만으로 재현되지 않는다"를 알 수 없다 |
+
+이 선언은 **결과를 만들 때 검증한다.** 선언과 실제 값이 어긋나면 — fixed gross 1.0을 선언했는데 합이
+다르거나, long-only를 선언했는데 음수가 있으면 — 결과를 만들기 전에 실패한다.
+
+**읽는 쪽에서는 값의 차이를 실패로 보지 않는다.** fixed 1.0 결과와 flexible 0.4 결과는 둘 다 정상이며, 그
+둘을 어떻게 다룰지는 소비하는 Strategy의 경제적 결정이다. package가 생산자와 소비자 사이를 중재하지 않는다.
+
+다만 **의미 불일치는 실패한다.** benchmark 대비 초과비중을 실제 보유비중으로 읽는 것은 경제적 선택이 아니라
+단위 오류다.
 
 | category | 의미 | 반드시 구분되는 이유 |
 |---|---|---|
@@ -759,9 +836,15 @@ budget과 실현된 budget을 함께** 보여야 하며, 하나를 다른 하나
 
 #### UC-ALPHA-BUDGET-001 — 약한 signal의 residual
 
-flexible Strategy가 기준보다 강한 종목만 선택한 결과 gross budget의 40%만 사용한다. result는 60% residual을
-보존한다. fixed-budget consumer가 이를 요구하면 **자동 확대하지 않고** incompatibility를 보고해 user가
-normalization 또는 다른 Strategy를 선택하게 한다.
+Strategy가 flexible budget을 선언하고, 기준보다 강한 종목만 선택한 결과 gross budget의 40%만 사용한다.
+결과는 자기 선언과 함께 저장되며 **package가 이를 1.0으로 자동 확대하지 않는다.**
+
+**선언과 실제 weight가 어긋나면 결과를 만들기 전에 실패한다.** fixed gross 1.0을 선언했는데 합이 0.4이거나,
+long-only를 선언했는데 음수가 있는 경우다. **선언을 지키는 것은 Strategy의 책임**이며 package가 대신
+맞춰주지 않는다.
+
+이 결과를 읽는 다른 Strategy는 선언을 보고 **자기 규칙으로** 처리한다. 1.0으로 늘려 쓸지 0.4 그대로 쓸지는
+그 Strategy의 경제적 결정이며, package가 두 결과의 budget이 다르다는 이유로 실패시키지 않는다.
 
 ### 5.6 Path-independent와 path-dependent alpha
 
@@ -1530,6 +1613,7 @@ hypothetical signed evaluation을 지원한다.
 - cross-sectional signed signal과 alpha research
 - ML training/inference (model implementation은 project 소유)
 - stored signal/alpha reuse와 ensemble
+- 반복 재학습을 포함한 파생 데이터 생산과 재사용
 - long-only enhanced-index physical portfolio
 - zero-friction fractional academic execution profile
 - ETF의 physical/opaque 처리와 user Strategy가 명시적으로 PIT constituent data를 소비해 계산하는 look-through
@@ -1555,6 +1639,9 @@ hypothetical signed evaluation을 지원한다.
 - user가 제공하지 않은 availability, universe, shortability truth의 자동 추정
 - merger, spin-off, delisting을 포함한 security-master event의 **원천 해석·변환**
 - unbounded autonomous strategy state mutation
+- **actual state에 의존하는 model 학습** — 자기 매매 결과를 보고 정책을 갱신하는 방식(강화학습 계열).
+  §2.3이 Model을 execution 경로 밖에 둘 수 있는 것은 학습이 계좌를 보지 않기 때문이며, 이 예외를 열면
+  파생 데이터의 재사용 가능성이 무너진다
 - **중단된 run의 재개** — 실패하거나 중단된 run은 current scope에서 처음부터 다시 실행한다
 
 merger, spin-off, delisting처럼 instrument identity, tradability, reference state를 바꾸는 사건의 해석과 변환은
@@ -1652,20 +1739,25 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   validation → safe retry로 이어진다.
 - frozen invocation과 `available_at <= evaluation_time`을 위반하는 data access는 거부된다. (`UC-TIME-001`,
   `UC-CONFIG-001`)
-- `UC-PIT-001`의 forward-return label materialization은 계산 전에 explicit horizon을 resolve하고, 누락 시
-  reusable success를 만들지 않는다.
-- `UC-LOOKBACK-001`의 exact lookback이 store query까지 강제되고 coverage가 evidence에 남는다.
+- `UC-PIT-001`처럼 파생 계산이 요구하는 binding이 없으면 계산 전에 실패하고 reusable success를 만들지 않는다.
+- `UC-LOOKBACK-001`의 exact lookback이 store query까지 강제되고 coverage가 evidence에 남는다. **모든 lookback은
+  과거 방향이며 미래 관측을 당겨 읽는 경로가 없다.**
+- 계산이 만든 데이터도 원본과 같은 등록 계약으로 읽히고, 그 `available_at`은 **생산자가 아니라 package가
+  정한다.**
 
 ### 14.2 Research composition
 
 - `UC-SIGNAL-001`의 direct Strategy와 `UC-SIGNAL-002`의 stored model output 경로가 모두 동작한다.
 - `UC-MODEL-001`처럼 portfolio 없이 Model signal을 연구·평가·저장할 수 있다.
 - `UC-MODEL-002`에서 statistical factor-return estimate를 executed portfolio return/NAV로 표시하지 않는다.
+- Model이 actual state를 소비하지 않으며, 반복 재학습이 같은 Model의 여러 실행으로 표현된다. 이전 계산을
+  이어간 결과는 순차 생성임이 드러난다.
 - `UC-FACTOR-001`에서 characteristic과 membership을 재사용 가능한 result로 만들고, 같은 membership을 소비한
   여러 버킷 portfolio가 그 사실을 dependency로 증명하며, 버킷 조합 팩터와 직접 실행 팩터가 zero-friction
   profile에서 일치한다.
 - signed weight는 budget semantics와 actual dependency를 보존하고 producer 재실행 없이 재사용할 수 있다.
-- `UC-ALPHA-BUDGET-001`에서 flexible residual을 fixed budget으로 자동 확대하지 않는다.
+- `UC-ALPHA-BUDGET-001`에서 flexible residual을 fixed budget으로 자동 확대하지 않고, **선언과 실제 weight가
+  어긋나면 결과를 만들기 전에 실패한다.** 두 결과의 budget이 다르다는 이유로 소비를 막지는 않는다.
 - `UC-BUILTIN-001`에서 built-in weighting 함수가 data/state/clock에 접근하지 않고, 부수 입력의 결측에 계산 전
   실패하며, 종목을 빼고 재정규화하지 않는다. 제외된 종목은 호출자에게 값으로 반환되어 evidence에 남는다.
 - `UC-ALPHA-PATH-001`에서 path-dependent result를 producer rerun 없이 frozen member input으로 소비하고, source
@@ -1861,9 +1953,23 @@ $$r_{BAB} = \frac{1}{\beta_L}(r_L - r_f) - \frac{1}{\beta_H}(r_H - r_f)$$
 | 유휴자본의 $r_f$를 어떻게 반영하는가 | 현금에 이자를 자동으로 붙이지 않는다. §4.4로 등록한 무위험자산을 **포지션으로** 보유해 user가 선언한다 (§13.2) |
 | 예산이 항상 gross 1 또는 ±1인가 | **아니다.** BAB는 매 리밸런싱마다 $\beta$에 따라 예산이 달라진다. 예산 표현을 하나로 고정하지 않은 이유의 실제 근거다 (§5.5) |
 
-### B.4 아직 확인 중
+### B.4 ML 연구와 Model의 시간 경계
 
-- **횡단면 회귀 기반 팩터(Barra 계열)** — 회귀계수는 statistical estimate이므로 `UC-MODEL-002`가 이미 다룬다.
-  다만 이런 연구는 Model이 주역인데, Model이 어떤 시간 경계로 데이터를 읽는지가 아직 충분히 규정되지 않았다.
-  Strategy는 판단 1회에 평가 시각 1개이지만, 반복 계산 결과를 만드는 Model은 **출력 행마다 평가 시각이
-  하나**다. 이 차이의 취급은 별도 검토 대상이다.
+Strategy는 판단 1회에 평가 시각이 하나지만, 반복 계산 결과를 만드는 Model은 **출력 행마다 평가 시각이
+하나**다. 이 차이를 어떻게 다룰지가 오래 열려 있었고, 참조 구현(Qlib)의 실제 구조를 확인하면서 정리했다.
+
+| 확인한 것 | 정해진 것 |
+|---|---|
+| 참조 구현은 ML을 어떻게 다루나 | **학습을 backtest loop 안에 넣지 않았다.** 미리 계산한 예측표를 loop가 읽을 뿐이다. 이 제품의 Model/Strategy 분리와 같은 구조다 |
+| 반복 계산의 look-ahead를 무엇이 막나 | **각 시점에 허용된 관측만 보이는 것 자체가 막는다.** 전체 기간을 한 번에 학습한 결과가 섞여 들어갈 경로가 없으므로 별도 감지 장치를 두지 않는다 |
+| 미래를 읽는 계산이 필요한가 | **필요 없다.** "$t$의 20일 후 수익률"은 "$t{+}20$에 기록된 20일 수익률"과 같은 값이고, 후자는 미래를 읽지 않는다(§3.5) |
+| 반복 재학습이 새 개념인가 | **아니다.** 같은 Model을 여러 시점에 실행하는 것이다(§5.1) |
+| 한 번에 넓은 구간을 계산하면 빠르지 않나 | **`available_at`이 늦어져 쓸모없어진다.** 넓게 읽을수록 결과가 늦게 유효해지므로 금지 규칙 없이 억제된다 |
+| 계산 결과를 어떻게 저장하나 | **원본과 같은 등록 계약**을 따른다. 계산 결과 전용 저장 체계를 두지 않는다(§4.1) |
+
+**기록해 둘 오판**: 검토 중에 "시점마다 관측 범위를 다시 잡으면 계산량이 불가능하다"고 판단한 적이 있으나,
+이는 **매 시점 원본을 다시 조회한다고 가정**했기 때문이었다. 한 번 읽고 필요한 구간만 잘라 쓰면 지금까지
+검토한 사례 대부분이 감당 가능하다. 이 오판 때문에 하마터면 PIT 경계를 성능과 맞바꿀 뻔했다.
+
+**취소한 요구사항**: 반복 재학습 결과에 "어느 구간의 학습에서 나왔는지"를 남기도록 요구하려 했으나 취소했다.
+전체 기간 학습이 애초에 불가능하므로 구분할 대상이 없다.

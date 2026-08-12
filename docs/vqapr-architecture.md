@@ -36,7 +36,7 @@ flowchart LR
 | layer | 답하는 질문 | module |
 |---|---|---|
 | Runtime | 언제 호출하는가 | `runtime/` |
-| Data | 그때 무엇을 읽을 수 있는가 | `data/` |
+| Data | 그때 무엇을 읽을 수 있는가 · 어떤 값을 만드는가 | `data/`, `research/` |
 | Decision | 무엇을 의도하는가 | `strategy/`, `portfolio/` |
 | Execution | 의도가 어떤 주문·체결이 되는가 | `orders/`, `exchange/` |
 | State | 실제 상태가 어떻게 바뀌는가 | `account/`, `valuation/` |
@@ -187,7 +187,7 @@ DATA_AVAILABLE → DECISION → EXECUTION → FILL_COMMIT → VALUATION → MONI
 - `03-05 04:00`에는 03-05 종가를 읽을 수 없다.
 - `03-06 04:00`에 데이터 행이 없어도 이벤트는 큐에 정상 진입한다.
 
-### 3.4 Trigger는 StrategyModel이 소유한다
+### 3.4 Trigger는 Model이 소유한다
 
 ```python
 class EveryNSessions(BaseModel):
@@ -202,9 +202,14 @@ class LastSessionOfMonth(BaseModel):
     timezone: str = "Asia/Seoul"
 ```
 
-- Flow가 `SessionCalendar × TriggerPolicy`를 결합해 DECISION 이벤트를 만든다.
-- **왜 StrategyModel이 소유하나**: PRD §3.3 — "정의만 읽고 cadence를 알 수 있어야 한다". run script에 두면
-  같은 StrategyModel이 스크립트마다 다른 전략이 된다.
+**두 종류가 같은 vocabulary를 쓴다.** StrategyModel은 *언제 판단하는가*를, DataModel은 *어느 시점의 값을
+만드는가*를 선언한다. 질문은 다르지만 답의 모양은 같다 — calendar에서 어느 session을 고를 것인가.
+해석하는 코드도 하나다(§4.7).
+
+- Flow가 `SessionCalendar × TriggerPolicy`를 결합해 DECISION 이벤트를 만들고, materialization은 같은 결합으로
+  계산 시점을 만든다.
+- **왜 Model이 소유하나**: PRD §3.3 — "정의만 읽고 cadence를 알 수 있어야 한다". run script에 두면
+  같은 Model이 스크립트마다 다른 것이 된다.
 
 **vocabulary는 닫힌 집합으로 둔다.** 임의의 cron 표현이나 콜백을 받지 않는다.
 
@@ -320,27 +325,143 @@ class DataRequirement(BaseModel):
     coverage: CoverageRequirement | None = None
 ```
 
-- StrategyModel은 signal/benchmark/constituent field를, OrderPlanner·Exchange는 price/tradability를,
-  Valuation은 보유 종목 mark field를 각각 선언한다.
+- **DataModel**은 계산 입력을, **StrategyModel**은 signal/benchmark/constituent field를,
+  OrderPlanner·Exchange는 price/tradability를, Valuation은 보유 종목 mark field를 각각 선언한다.
 - `lookback`은 **Store query까지 그대로 내려간다.** 전체 읽고 자르기 금지 → `UC-LOOKBACK-001`
+- **`Lookback`은 전부 과거 방향이다.** 미래 방향 타입이 존재하지 않으므로, 어떤 소비자도 미래 관측을
+  당겨 읽을 수 없다. label처럼 미래가 필요해 보이는 계산은 값을 나중 시점에 기록하고 소비자가 시점을 맞춰
+  읽는다(PRD §3.5).
 
-### 4.3 View
+#### `ArtifactRequirement`를 만들지 않는다
+
+**결정.** 계산 결과를 읽을 때도 `DataRequirement` 하나만 쓴다. 별도의 artifact 요구 타입을 두지 않는다.
+
+- **왜**: 계산 결과는 dataset이다(PRD §4.1). DataModel이 다른 DataModel의 결과를 읽는 것은 **그냥 데이터를
+  읽는 것**이다.
+- **없으면**: PIT 처리(`available_at` 필터, lookback 경계)를 두 경로에 각각 구현하게 되고, 둘이 어긋나는
+  순간 **파생 데이터에서만** look-ahead가 생긴다. 그 버그는 원본 데이터 테스트로는 잡히지 않는다.
+- 계산이 몇 단으로 이어져도 개념이 늘지 않는다.
+
+### 4.3 View — 창은 사각형 하나다
 
 ```python
-class StrategyModelView(Protocol):
+class ModelWindow(Protocol):                      # 두 종류가 공유
     evaluation_time: datetime
+    instruments: tuple[InstrumentId, ...]
     def observations(self, requirement: DataRequirement) -> ObservationBatch: ...
+```
+
+**창은 (선언 종목 × 선언 lookback) 사각형 하나다.**
+
+```text
+              종목A  종목B  종목C  …  종목N
+   t-2          ·      ·      ·         ·
+   t-1          ·      ·      ·         ·
+   t            ·      ·      ·         ·
+```
+
+| 계산 | lookback | 창 |
+|---|---|---|
+| 횡단면 회귀·정렬·랭킹 | 1 | 1 × N |
+| 20일 이동평균 | 20 | 20 × N |
+| 5년 rolling beta | 1,260 | 1,260 × N |
+| 패널 회귀 | 252 | 252 × N |
+
+- **모양이 다른 게 아니라 비율이 다르다.** "횡단면 창"과 "시계열 창"을 별도 개념으로 두지 않는다.
+- **왜 이게 가능한가**: 계산식 DSL을 두지 않고 사각형을 통째로 넘기기 때문이다. DSL을 쓰면 rolling 연산자와
+  횡단면 연산자를 따로 만들어야 하고, 그때 두 개념이 갈린다.
+- requirement가 여럿이면 dataset마다 사각형 하나씩이다.
+
+StrategyModel은 여기에 실행 문맥을 더 받는다.
+
+```python
+class StrategyModelContext(Protocol):
+    window: ModelWindow
+    calendar: CalendarView
     def account(self) -> AccountSnapshot: ...
     def account_history(self, requirement: HistoryRequirement) -> AccountHistory: ...
     def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
 ```
 
-- memory는 View에 없다. Flow가 run 시작 시 `strategy.memory`에 넣어주므로 StrategyModel은 `self.memory`로 읽는다
-  (§5.1.1). 읽는 경로를 둘로 두지 않는다.
-
-- View는 실제 access를 기록해 lineage를 만든다. **읽지 않은 dataset은 dependency가 아니다.**
+- **DataModel에는 `account`가 없다.** 있으면 결과가 그 run에 묶여 재사용할 수 없게 된다(PRD §2.3).
+- memory는 창에 없다. Flow가 시작 시 `model.memory`에 넣어주므로 `self.memory`로 읽는다(§5.1.1).
+  읽는 경로를 둘로 두지 않는다.
+- 창은 실제 access를 기록해 lineage를 만든다. **읽지 않은 dataset은 dependency가 아니다.**
 - `account_history`가 `memory`와 **독립**인 것이 핵심 — `UC-ACCOUNT-HISTORY-001`은 state 없이
   stop-loss가 가능해야 한다고 요구한다.
+
+### 4.4 Model 공통 계약과 DataModel
+
+```python
+class Model(ABC):                                        # 공통 부모
+    memory: ModelMemory = None
+    def trigger(self) -> TriggerPolicy: ...
+    def requirements(self) -> tuple[DataRequirement, ...]: ...
+
+class DataModel(Model):
+    def compute(self, window: ModelWindow) -> Rows: ...
+```
+
+| | 공유 | DataModel | StrategyModel |
+|---|---|---|---|
+| `trigger()` | ✅ | | |
+| `requirements()` | ✅ | | |
+| `memory` | ✅ | | |
+| `warmup()` | | ✗ | ✅ |
+| account 접근 | | ✗ | ✅ |
+| 출력 | | rows | `PortfolioIntent` |
+
+**공유 항목의 해석 코드는 하나다.** `TriggerPolicy → 시점 목록` 변환과 memory 정규화·스냅샷은 각각 한
+군데에만 존재한다. 두 종류가 같은 선언을 하되 그것을 해석하는 코드를 두 벌 두면, 새 trigger를 추가할 때
+한쪽만 고치는 사고가 난다. StrategyModel 고유 부분은 §5.1에 있다.
+
+#### DataModel이 Data layer에 있는 이유
+
+**data → data.** DataModel은 data layer를 넓히는 장치이지 execution 경로의 단계가 아니다.
+
+- **account를 안 받는다.** 받는 순간 결과가 그 run에 묶여 여러 소비자가 나눠 쓸 수 없다.
+- **진입점이 다르다.** `materialize()`와 `run()`. 한 번 materialize한 결과를 여러 run이 공유한다.
+- **없어도 된다.** StrategyModel이 같은 계산을 직접 수행해도 된다(PRD §2.3). DataModel은 공유와 절약을
+  위한 선택이다.
+
+#### warm-up이 없다
+
+데이터가 부족하면 그 시점 행을 만들지 않으면 된다. StrategyModel과 달리 "판단하지 않았음"을 기록할 이벤트
+자체가 없고, 부족한 coverage는 그 결과를 읽는 쪽의 `CoverageRequirement`가 잡는다.
+
+#### memory를 쓰면 순차 생성이 된다
+
+memory를 쓰는 DataModel은 **trigger 순서대로 호출되어야** 같은 값이 나온다. 따라서 병렬 계산과 부분
+재생성이 불가능해지고, **그 사실이 출력에 남아야 한다.** 남지 않으면 나중에 구간만 다시 만들려는 시도가
+조용히 다른 값을 만든다.
+
+memory를 쓰지 않으면 이 제약이 없다. 순서 무관이고 병렬 가능하다.
+
+#### 성능 한계와 그 대응
+
+창을 시점마다 넘기므로, **긴 lookback × 잦은 출력** 조합에서만 벡터화된 rolling 연산보다 느리다.
+데이터 조회는 한 번이고 잘라 쓰는 것이므로 대부분의 사례는 감당된다.
+
+정말 병목이 되면 **causal primitive**(창 밖을 건드리지 않음이 구현으로 보장되는 순수 함수)를 제공해
+패널 전체를 안전하게 넘길 수 있다. 그 방식을 나중에 추가해도 **지금의 창 계약을 뜯지 않는다** — 두
+방식이 공존 가능하다. 그래서 지금 만들지 않는다.
+
+### 4.5 `available_at`은 package가 붙인다
+
+$$available\_at = \max\big(\text{trigger 시각},\ \max(\text{창 안 } available\_at)\big)$$
+
+- **생산자가 주장하지 않는다.** 실제로 읽은 것에서 나오므로 위조할 수 없다.
+- **자기 행 시각보다 먼저 알 수는 없다.** 재무만 읽는 6월말 계산이 3월 공시를 썼더라도 `available_at`은
+  6월말이다. 그렇지 않으면 "6월말 분류"가 5월에 보인다.
+
+#### 창을 크게 잡으면 스스로 쓸모없어진다
+
+전체 기간을 한 번에 읽어 빠르게 계산하고 싶은 유혹이 있다. 그렇게 하면 창 안 최댓값이 마지막 날이 되고,
+**모든 출력 행이 마지막 날부터 유효**해진다. 과거 시점의 판단이 그 데이터를 하나도 읽을 수 없다.
+
+- **금지 규칙을 쓰지 않아도 된다.** "전체 패널을 보지 마세요"라고 적을 필요가 없다 — 그렇게 하면 결과가
+  쓸모없어지므로 아무도 하지 않는다.
+- 진짜로 마지막 날에나 알 수 있는 값(전 기간 통계 등)은 이 규칙이 **정확히 맞다.** 예외 처리가 필요 없다.
 
 ---
 
@@ -348,22 +469,16 @@ class StrategyModelView(Protocol):
 
 ### 5.1 StrategyModel
 
+공통 계약(`trigger`·`requirements`·`memory`)은 §4.4에 있다. 여기서는 StrategyModel 고유 부분만 다룬다.
+
 ```python
-ModelMemory: TypeAlias = (
-    bool | int | float | str | list["ModelMemory"] | dict[str, "ModelMemory"] | None
-)
-
-class StrategyModel(ABC):
-    memory: ModelMemory = None        # 유일한 mutable 슬롯
-
-    def trigger(self) -> TriggerPolicy: ...
+class StrategyModel(Model):
     def warmup(self) -> Warmup: ...      # 기본 0 (§3.5)
-    def requirements(self) -> tuple[DataRequirement, ...]: ...
     def decide(self, context: StrategyModelContext) -> PortfolioIntent: ...
 ```
 
-- `StrategyModelContext`는 `view`, `event`, `universe`, `calendar`만 준다. Clock·Store·Exchange·mutable
-  Account는 없다.
+- `StrategyModelContext`는 `window`, `event`, `universe`, `calendar`와 account 접근만 준다(§4.3).
+  Clock·Store·Exchange·mutable Account는 없다.
 
 **calendar view.** Account snapshot과 같은 급의 읽기 전용 surface다. StrategyModel이 판단 시점의 **성질**을
 물을 수 있다 — 이번 달 몇 번째 거래일인가, 분기 첫 거래일인가, 직전 형성일로부터 몇 세션 지났는가.
@@ -375,7 +490,16 @@ class StrategyModel(ABC):
 
 ### 5.1.1 Memory — 슬롯 하나, strict JSON
 
-**결정.** StrategyModel이 이어갈 수 있는 상태는 **`self.memory` 하나**다. `__init__` 이후에는 그 밖의 어떤
+> **두 종류가 공유한다.** 이 절의 규칙은 StrategyModel과 DataModel에 똑같이 적용되며,
+> `normalize_memory`는 한 곳에만 존재한다.
+
+```python
+ModelMemory: TypeAlias = (
+    bool | int | float | str | list["ModelMemory"] | dict[str, "ModelMemory"] | None
+)
+```
+
+**결정.** Model이 이어갈 수 있는 상태는 **`self.memory` 하나**다. `__init__` 이후에는 그 밖의 어떤
 attribute도 쓸 수 없다(`__setattr__` 가드).
 
 - **왜 슬롯 하나인가**: package가 내용을 해석하지 않으면서 durable·portable하려면 값의 **범위**가 정해져야
@@ -389,7 +513,7 @@ attribute도 쓸 수 없다(`__setattr__` 가드).
 **Flow가 판단 직후 스냅샷한다.**
 
 ```python
-snapshot = normalize_memory(strategy.memory)   # 검증 + detached deep copy
+snapshot = normalize_memory(model.memory)   # 검증 + detached deep copy
 ```
 
 - **왜 할당 시점이 아니라 스냅샷 시점인가**: `self.memory["cooldown"] = 5`는 in-place 변경이라
@@ -400,6 +524,35 @@ snapshot = normalize_memory(strategy.memory)   # 검증 + detached deep copy
   않으면 이전 값이 그대로 남는다. "갱신 안 함"이 저절로 표현된다.
 - 스냅샷은 fill 발생과 무관하게 항상 일어난다 → `UC-STATE-001`
 - `memory`가 `None`이 아니면 그 result는 **path-dependent**로 표시된다 → PRD §5.7
+
+#### 증분 계산 — 창 계약을 바꾸지 않아도 된다
+
+창이 한 칸 움직이면 실제로 바뀌는 것은 두 행뿐이다.
+
+```text
+t    :  [ x₁ x₂ x₃ … x_N       ]
+t+1  :  [    x₂ x₃ … x_N x_N₊₁ ]
+          ↑ 하나 빠짐      ↑ 하나 추가
+```
+
+**delta를 프레임워크가 알려줄 필요가 없다.** Model이 이전 창의 경계를 memory에 적어두고 이번 창과 비교하면
+스스로 계산할 수 있다.
+
+```python
+memory = {"last_window_start": "2020-01-02", "coef": [...]}
+```
+
+- 창 계약을 바꾸지 않으므로 **증분을 쓰지 않는 Model에는 아무 영향이 없다.**
+- 대가는 순차 생성이다(§4.4).
+
+#### memory에 담기 큰 값
+
+strict JSON에 담기 어려운 파라미터(신경망 가중치 등)는 **로컬에 dump하고 경로만 memory에 둔다.**
+
+- 그 파일은 **private state이지 공개 결과가 아니므로** PRD §12.5의 "pickle을 portable artifact로 주장"에
+  해당하지 않는다.
+- 실제로 잘 맞아떨어진다. 증분 갱신이 정확히 되는 계산(최소제곱, 공분산)은 파라미터가 작아 memory에 들어가고,
+  파라미터가 큰 모델은 애초에 증분 제거가 되지 않아 증분 대상이 아니다.
 
 **UC**: `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001`, `UC-ALPHA-PATH-001`
 
@@ -761,8 +914,12 @@ data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → E
 src/vqapr/
 ├── domain/                 # ID, money, instrument, 공통 error
 ├── runtime/                # clock, events(priority), calendar
-├── data/                   # registration, requirements, store(port), view
-├── strategy/               # StrategyModel protocol, trigger, context
+├── data/                   # registration, requirements, store(port), window
+├── research/
+│   ├── model.py            # Model 공통 계약 + DataModel
+│   ├── schedule.py         # TriggerPolicy → 시점 목록 (두 종류가 공유)
+│   └── materialize.py      # 시점마다 창을 만들어 compute 호출
+├── strategy/               # StrategyModel protocol, warmup, context
 ├── portfolio/
 │   ├── weighting.py        # 순수 함수 (leaf) — signal_weight / equal_weight / proportional_weight
 │   ├── construction.py     # PortfolioIntent 조립
@@ -773,7 +930,7 @@ src/vqapr/
 ├── valuation/              # requirements → MarkBatch, performance
 ├── flow/                   # simulation, resolver, run(RunDefinition/RunResult)
 ├── evidence/               # lineage, artifacts
-├── research/               # model / materialization / analysis (execution 주장 없음)
+├── analysis/               # 저장된 result를 읽는 read model (execution 주장 없음)
 ├── project/                # config, registry, assembly
 └── public.py               # Facade
 ```
@@ -782,7 +939,8 @@ src/vqapr/
 
 ```text
 domain  ←  runtime · data · portfolio · orders · account
-domain + ports  ←  strategy · exchange · valuation · research
+domain + data  ←  research
+domain + ports  ←  strategy · exchange · valuation · analysis
 all ports  ←  flow
 flow + project  ←  public
 ```
@@ -791,6 +949,10 @@ flow + project  ←  public
 
 - `domain`은 storage/pandas/provider/concrete Exchange를 import하지 않는다.
 - `portfolio.weighting`은 **`domain`만** import한다. view/store/clock/account/exchange 전부 금지.
+- **`research`는 `data`와 `domain`만** import한다. `account`·`exchange`·`orders`·`flow` 전부 금지.
+  - **왜**: DataModel이 account를 보면 결과가 그 run에 묶여 재사용할 수 없다(PRD §2.3). 그 경계를
+    문서가 아니라 도구가 지킨다.
+  - `strategy`는 `research`를 import한다 — 공통 계약이 거기 있기 때문이다. 반대 방향은 금지.
 - `strategy`는 `exchange`와 mutable `account`를 import하지 않는다.
 - `exchange`는 store를 import하지 않는다.
 - `account`는 StrategyModel/Exchange 구현을 import하지 않는다.
@@ -826,17 +988,25 @@ decision 03-06 04:00, execution 03-06 15:30.
 분류**를 공유해야 하고, 그 공유를 증명할 수 있어야 한다.
 
 ```text
-DataModel 1  firm characteristics                      → materialized (PIT, 재사용)
-           BM, OPE/BE, asset growth, momentum
+[materialize]  DataModel 1  trigger = LastSessionOfMonth(months=(6,))
+                            읽음: 재무(CalendarLookback 3y) + 시총(RowsLookback 1)
+                            만듦: BM · OPE/BE · asset growth · 시총
+                                          │  등록된 dataset
+                                          ▼
+[materialize]  DataModel 2  trigger = LastSessionOfMonth(months=(6,))
+                            읽음: 위 결과 + security master   ← artifact가 아니라 그냥 dataset
+                            만듦: (ticker, bucket) + breakpoint 값
+                                          │
+                                          ▼
+[run × 6]      StrategyModel(bucket="SH" …)  자기 버킷만 읽어 weighting → PortfolioIntent
+                            Academic Exchange (cost 0) → 6개 NAV 시계열
 
-DataModel 2  bucket membership                         → formation date별 (ticker, bucket)
-           universe 자격필터 → KOSPI breakpoint → 2×3 배정
-
-StrategyModel(bucket="SH")  membership에서 자기 버킷만 읽어 weighting → PortfolioIntent
-   × 6 buckets → 6 runs (Academic Exchange, cost 0)  → 6 NAV 시계열
-
-StrategyModel(HML)          같은 membership을 읽어 long (SH,BH) / short (SL,BL) → 1 run
+[run × 1]      StrategyModel(HML)  같은 분류를 읽어 long (SH,BH) / short (SL,BL)
 ```
+
+**DataModel 2가 DataModel 1의 결과를 읽는 것은 "artifact를 읽는" 특별한 일이 아니다.** 등록된 dataset을
+`DataRequirement`로 읽는 것이고, PIT 처리도 원본과 같은 경로를 탄다(§4.2). 계산이 몇 단으로 이어져도
+개념이 늘지 않는다.
 
 #### 왜 membership이 DataModel artifact인가
 
@@ -925,15 +1095,19 @@ class RunDefinition(BaseModel):
 기존 source를 조금씩 호환시키지 않는다. 아래 vertical slice로 다시 만든다.
 
 1. `domain` + `runtime` + explicit `SessionCalendar`
-2. minimal `data` — registration / requirement / PIT View
-3. `Account` aggregate + mode + history recording
-4. `portfolio.weighting` (순수 함수 + 테이블 기반 테스트)
-5. `PortfolioIntent` + `OrderPlanner`
-6. `Exchange` protocol + Academic fixture
-7. 하나의 `SimulationFlow` closed loop
-8. KRX daily profile
-9. 두 showcase를 같은 public spine 위에서
-10. artifacts / reports / Facade / 외부 소비자 테스트
+2. minimal `data` — registration / requirement / `ModelWindow`
+3. `research` — `Model` 공통 계약 + `DataModel` + materialize + `available_at` 부여
+4. `Account` aggregate + mode + history recording
+5. `portfolio.weighting` (순수 함수 + 테이블 기반 테스트)
+6. `PortfolioIntent` + `OrderPlanner`
+7. `Exchange` protocol + Academic fixture
+8. 하나의 `SimulationFlow` closed loop
+9. KRX daily profile
+10. 세 showcase를 같은 public spine 위에서 (두 전략 + Fama-French)
+11. artifacts / reports / Facade / 외부 소비자 테스트
+
+**3번을 4번보다 앞에 둔 이유**: `Model` 공통 계약(trigger·requirements·memory)이 `StrategyModel`의 상위이므로
+먼저 서야 한다. 그리고 DataModel은 account 없이 검증할 수 있어 execution 없이 닫힌다.
 
 중간 단계에서 **두 번째 Flow, legacy intent adapter, Account fork를 만들지 않는다.** 임시 adapter가
 불가피하면 public surface 밖에 두고 제거 조건과 테스트를 같은 implementation record에 적는다.
@@ -950,6 +1124,7 @@ class RunDefinition(BaseModel):
 | `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger vocabulary · warm-up skip) |
 | `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
+| `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · account 없음 · materialize 진입점) |
 | `UC-FACTOR-001` | §11.1 (DataModel membership → 버킷 run → 조합 검산) |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.4 (`BudgetSemantics`) — **형태 미확정, §15-1** |
@@ -1058,6 +1233,11 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] warm-up 구간 candidate가 `DECISION_SKIPPED`로 기록되고, 그 이후의 결측은 실패한다
 - [ ] `LastSessionOfMonth(months=(6,))`가 휴장을 반영한 6월 마지막 거래일에 발화한다
 - [ ] 선언 없이 가격 coverage에서 session을 만들어내는 경로가 없다
+- [ ] `research`가 `account`/`exchange`/`orders`/`flow`를 import하지 않는다 (import linter)
+- [ ] 미래 방향 `Lookback` 타입이 존재하지 않는다
+- [ ] 계산 결과의 `available_at`을 생산자가 적을 수 없다
+- [ ] memory를 쓴 DataModel의 출력에 순차 생성 표시가 남는다
+- [ ] `TriggerPolicy` 해석과 memory 정규화 코드가 각각 한 곳에만 있다
 - [ ] 같은 membership artifact를 소비한 버킷 run들이 그 사실을 lineage로 증명한다
 - [ ] 버킷 조합 팩터와 signed 직접 실행 팩터가 zero-friction profile에서 일치한다
 - [ ] `AccountMode`의 차이가 음수 position 유효성 하나뿐이다

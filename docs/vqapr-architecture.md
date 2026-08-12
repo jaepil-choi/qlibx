@@ -502,7 +502,7 @@ class StrategyModel(Model):
 - **왜 필요한가**: trigger는 *언제 불릴지*만 정한다. *불린 시점이 어떤 날인지*는 알려주지 않는다.
   두 질문은 다르다.
 - **왜 Clock 자체를 주지 않나**: Clock을 주면 시간을 진행시킬 수 있다. §2.1의 IoC가 무너진다.
-- 미래 session을 어디까지 노출할지는 **§15-2 열린 결정**이다.
+- 미래 session을 어디까지 노출할지는 **§15-1 열린 결정**이다.
 
 ### 5.1.1 Memory — 슬롯 하나, strict JSON
 
@@ -593,18 +593,48 @@ research values  ──►  weights  ──►  PortfolioIntent
 > 구속하는 사실**이며 `decide()`의 요구 shape가 아니다. built-in을 쓰지 않는 StrategyModel은 그런 중간값을 만들지
 > 않아도 된다.
 
-### 5.3 `portfolio/weighting.py` — 순수 leaf
+### 5.3 `portfolio/` — 순수 계산 leaf
+
+값을 weight로 바꾸는 함수들이다. **전부 순수 함수**이고 같은 import 규칙을 받는다.
+
+#### `weighting.py` — 배분
 
 부호는 항상 입력에서 오고, **크기의 출처**만 다르다.
 
 | 함수 | 크기 | 외부 입력 |
 |---|---|---|
-| `signal_weight(signal, ...)` | `\|signal\|`에 비례 | 없음 |
-| `equal_weight(signal, ...)` | 균등 | 없음 |
-| `proportional_weight(signal, sizes, ...)` | `sizes`에 비례 | 크기 panel |
+| `signal_weight(signal, *, cash_range)` | `\|signal\|`에 비례 | 없음 |
+| `equal_weight(signal, *, cash_range)` | 균등 | 없음 |
+| `proportional_weight(signal, sizes, *, cash_range)` | `sizes`에 비례 | 크기 panel |
 
-> ⚠️ **`...` 자리의 normalization 인자는 아직 정하지 않았다.** §15-1 참고. 확정된 것은 위 세 함수를
-> 가르는 축이 **크기의 출처**이고 부호는 항상 입력에서 온다는 것뿐이다.
+예산은 **현금 범위**로 선언한다(PRD §5.5). `cash_range=(0, 0)`이면 전부 배분하고, 넓게 두면 남길 수 있다.
+
+#### `optimize.py` — 제약 하 배분
+
+상한·하한·거래정지·비용이 함께 걸리면 **자르고 재분배하는 대신 한 번에 푼다.**
+
+```python
+def optimize(
+    *, desired, current, lower, upper, frozen,
+    cash_range, cost, turnover_penalty,
+) -> tuple[Weights, Decimal, Diagnostics]: ...
+```
+
+$$\min_{w,\,c}\ \underbrace{\|w - w^{desired}\|^2}_{\text{원하는 노출과의 거리}}
+\;+\; \underbrace{\textstyle\sum_i \text{cost}_i\,|w_i - w^0_i|}_{\text{거래비용}}
+\;+\; \lambda\|w-w^0\|_1$$
+
+$$\text{s.t.}\quad \textstyle\sum w + c = 1,\quad l \le w \le u,\quad c_{lo} \le c \le c_{hi},
+\quad w_j = w^0_j\ \ (j \in \text{frozen})$$
+
+- **`c`(현금)는 결정 변수다.** 유도값이 아니라 예산 항등식 `Σw + c = 1`을 만족하는 해의 일부다.
+  그래서 **"상한에 걸려 잘린 비중을 어디로 보내나"라는 질문이 생기지 않는다** — 현금이 흡수한다.
+- **거래 불가 종목은 제외가 아니라 `w_j = w⁰_j` 제약이다.** 조용히 빼면 PRD §10.2 위반이다.
+- 리스크 항(`active′Σactive`)은 **선택**이며 기본은 없다. 공분산을 요구하는 순간 계약이 무거워진다.
+- **왜 자르지 않고 푸는가**: 자르면 남은 비중을 재분배해야 하고, 재분배하면 다른 종목이 다시 상한에 걸려
+  반복이 생긴다. 그리고 무엇보다 **잘릴 것을 미리 알았다면 다른 종목을 다르게 잡았을** 기회가 사라진다.
+
+`weighting`과 `optimize`는 복잡도만 다른 같은 계열이다. 전자는 제약 없는 배분, 후자는 제약 하 배분이다.
 
 보조 함수 (결측을 **명시적으로** 다루기 위한 것):
 
@@ -615,7 +645,7 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
 
 불변식:
 
-- **`domain` 외에는 아무것도 import하지 않는다.** 아래는 전부 금지다.
+- **`weighting`과 `optimize` 모두 `domain`(+ solver) 외에는 아무것도 import하지 않는다.** 아래는 전부 금지다.
   ```text
   vqapr.data  vqapr.account  vqapr.exchange  vqapr.runtime  vqapr.flow  vqapr.strategy
   ```
@@ -647,7 +677,7 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
 [[tool.importlinter.contracts]]
 name = "weighting is a pure leaf"      # 계약 이름이 곧 실패 이유가 되게 짓는다
 type = "forbidden"
-source_modules = ["vqapr.portfolio.weighting"]
+source_modules = ["vqapr.portfolio.weighting", "vqapr.portfolio.optimize"]
 forbidden_modules = [
   "vqapr.data", "vqapr.account", "vqapr.exchange",
   "vqapr.runtime", "vqapr.flow", "vqapr.strategy",
@@ -669,16 +699,32 @@ class PortfolioIntent(BaseModel):
     decision_time: datetime
     effective_after: datetime
     targets: tuple[PortfolioTarget, ...]
-    budget: BudgetSemantics          # 형태 미확정 — §15-1
+    cash_target: Decimal             # 결정된 값. 유도하지 않는다
+    budget: BudgetSemantics          # 선언된 현금 범위 + direction
     source_refs: tuple[ArtifactRef, ...]
     account_version_seen: int
     memory_ref: ArtifactRef | None   # 있으면 이 result는 path-dependent
 ```
 
 - `PortfolioTarget`은 weight **또는** quantity 중 정확히 하나. 둘 다 채우거나 비우면 validation error.
-- ⚠️ **cash를 어떻게 표현할지는 미확정.** 산술적으로는 `1 - Σw`로 유도되지만, **의도된 cash 포지션**(BAB의
-  무위험자산, risk parity의 cash sleeve)과 **배분하지 못한 잔여**는 경제적 의미가 다르다. §15-1 참고.
-- 생성 시 검증: tz-aware 시각, 유일 instrument, 유한 값, 선언된 budget, lineage, profile direction 호환.
+- **`cash_target`은 유도하지 않는다.** `1 - Σw`로 계산되는 값이 아니라 §5.3이 결정한 값이다.
+  **의도된 현금 포지션**(무위험자산 보유)과 **배분하지 못한 잔여**는 선언한 현금 범위의 폭으로 구분된다
+  (PRD §5.5).
+
+#### 생성 시 검증 — 계산한 쪽을 믿지 않는다
+
+```text
+Σw + cash_target = 1        예산 항등식
+l ≤ w ≤ u                   선언된 상하한
+c_lo ≤ cash ≤ c_hi          선언된 현금 범위
+w_j = w⁰_j  (j ∈ frozen)    거래 불가 종목 불변
+tz-aware 시각 · 유일 instrument · 유한 값 · lineage · profile direction 호환
+```
+
+- **왜 §5.3이 이미 제약을 넣었는데 또 검사하나**: solver가 수치적으로 살짝 벗어날 수 있고, `optimize`를
+  쓰지 않고 직접 target을 만드는 StrategyModel도 있고, 전략에 버그가 있을 수 있다. **§7.2의 이중 방어와
+  같은 논리다** — 계산한 쪽을 authority가 신뢰하지 않는다.
+- 어기면 `PortfolioIntent`를 만들지 않는다. 그러면 주문도 account mutation도 생기지 않는다.
 - **fractional/lot 검증은 하지 않는다.** 그건 venue가 안다(§6.2).
 
 ### 5.5 Hold도 `PortfolioIntent`다
@@ -690,6 +736,13 @@ class PortfolioIntent(BaseModel):
 ---
 
 ## 6. Execution
+
+> **execution 경로에는 제약 평가가 없다.** OrderPlanner는 확정된 target을 수량으로 바꾸고 Exchange는
+> 체결시킨다. 제약 평가는 경제적 판단이므로 §5에 있다(PRD §7.1).
+>
+> execution으로 미루면 그 시점에 할 수 있는 일이 **기록밖에 없다.** 다시 최적화하는 것은 판단을 되돌리는
+> 것이라 §2.4가 금지하기 때문이다. 수량 변환 때문에 뒤늦게 생긴 위반은 fill 진단에 남고 monitoring이
+> 잡는다(`UC-EXEC-003`).
 
 ### 6.1 OrderPlanner — execution time의 책임
 
@@ -806,7 +859,7 @@ commit 후 cash가 음수면 mutation 없이 실패한다. **모든 mode, 모든
   BAB의 `+1.43 / -0.71`도 cash가 `+0.28`이라 차입이 아니다.
 - 이중 방어: OrderPlanner가 이미 cash clipping을 한다(`UC-COST-003`). 여기까지 오는 것은 intent가
   명시적으로 과도한 gross를 요구한 경우뿐이고, 그건 조용히 넘어가면 안 된다.
-- **확장 지점**: margin이 범위에 들어오면 §15-3을 먼저 정한다.
+- **확장 지점**: margin이 범위에 들어오면 §15-2를 먼저 정한다.
 
 #### 유휴자본이 무엇을 버는지는 사용자가 선언한다
 
@@ -937,7 +990,8 @@ src/vqapr/
 │   └── materialize.py      # 시점마다 창을 만들어 compute 호출
 ├── strategy/               # StrategyModel protocol, warmup, context
 ├── portfolio/
-│   ├── weighting.py        # 순수 함수 (leaf) — signal_weight / equal_weight / proportional_weight
+│   ├── weighting.py        # 순수 leaf — signal_weight / equal_weight / proportional_weight
+│   ├── optimize.py         # 순수 leaf — 제약 하 배분, 현금은 결정 변수
 │   ├── construction.py     # PortfolioIntent 조립
 │   └── intent.py           # PortfolioIntent, PortfolioTarget, BudgetSemantics
 ├── orders/                 # OrderPlanner, OrderRequest/OrderBatch
@@ -964,7 +1018,8 @@ flow + project  ←  public
 강제 규칙 (import linter로 검사):
 
 - `domain`은 storage/pandas/provider/concrete Exchange를 import하지 않는다.
-- `portfolio.weighting`은 **`domain`만** import한다. view/store/clock/account/exchange 전부 금지.
+- `portfolio.weighting`과 `portfolio.optimize`는 **`domain`(+ solver)만** import한다.
+  view/store/clock/account/exchange 전부 금지.
 - **`research`는 `data`와 `domain`만** import한다. `account`·`exchange`·`orders`·`flow` 전부 금지.
   - **왜**: DataModel이 account를 보면 결과가 그 run에 묶여 재사용할 수 없다(PRD §2.3). 그 경계를
     문서가 아니라 도구가 지킨다.
@@ -1187,6 +1242,79 @@ PRD §10.2 금지 목록의 첫 항목("tradable만 남기고 자동 재정규�
 
 ---
 
+### 11.3 Enhanced index — 제약이 걸린 portfolio
+
+벤치마크를 따라가되 알파로 기울이고, **공매도 금지와 종목별 상한**을 함께 만족시켜야 하는 전략이다.
+제약이 실제로 어디서 걸리는지를 따라간다.
+
+검증 대상: `UC-CONSTRAINT-002` · `UC-CONSTRAINT-ADJUST-001` · `UC-PORTFOLIO-001`
+
+#### 무엇이 문제인가
+
+$$w^{physical}_i = w^{bench}_i + a_i, \qquad
+0 \le w_i \le \max\big(10\%,\ w^{bench}_i\big)$$
+
+| 종목 | 벤치 | 틸트 | 원하는 값 | 상한 | 걸리는 것 |
+|---|---|---|---|---|---|
+| A | 20% | +3% | 23% | 20% | **상한 초과** |
+| B | 15% | −5% | 10% | 15% | — |
+| C | 10% | −12% | **−2%** | — | **하한 위반** |
+| D | 5% | +2% | 7% | 10% | — |
+
+**두 제약이 반대 방향으로 민다.** A를 자르면 비중이 남고, C를 올리면 비중이 모자란다.
+
+#### 잘라서 재분배하지 않는다
+
+A를 20%로 자르고 남은 3%를 B·D에 나눠주면 **B가 다시 상한에 걸릴 수 있다.** 반복이 생기고 수렴 보장이
+없다. 무엇보다 **A가 잘릴 것을 미리 알았다면 B·D를 처음부터 다르게 잡았을** 기회가 사라진다.
+
+대신 §5.3의 `optimize`가 제약을 넣고 한 번에 푼다. **현금이 결정 변수**이므로 잔여가 갈 곳이 정해져 있다.
+
+```text
+A  23% → 20%   상한          현금 +3%
+C  −2% →  0%   하한          현금 −2%
+                          ─────────
+                          순 +1% → 현금
+```
+
+**"3%를 어디로 보내나"라는 질문이 성립하지 않는다.**
+
+#### 세 시점
+
+```text
+[판단]     ctx.window에서 벤치마크·거래가능 여부를 읽는다
+           ctx.account()에서 현재 비중을 읽는다
+           optimize(desired, lower=0, upper=max(10%, bench), frozen=…, cash_range=…)
+                   ↓
+           PortfolioIntent 생성 시 독립 검증 (§5.4)
+                   Σw + cash = 1 · 상하한 · 현금 범위 · frozen 불변
+                   어기면 intent를 만들지 않는다 → 주문도 mutation도 없다
+
+[체결]     OrderPlanner → Exchange.  제약 평가 없음(§6)
+
+[감시]     committed actual state 평가 → finding
+```
+
+- **벤치마크가 없으면 판단 시점에 실패한다**(`UC-CONSTRAINT-002`). 관찰 결과는 "주문·mutation 없음"으로
+  같고, 실패 지점만 앞이다.
+- **정수 수량 변환 때문에 실제 비중이 상한을 살짝 넘을 수 있다.** 판단 시점에는 알 수 없는 값이다.
+  fill 진단에 남고 monitoring이 잡는다(`UC-CONSTRAINT-ADJUST-001`, `UC-EXEC-003`).
+
+#### 확인된 것
+
+| | |
+|---|---|
+| 현금 | **결정 변수.** 유도값이 아니다. 예산은 현금 범위 선언이다(PRD §5.5) |
+| 거래정지 종목 | 제외가 아니라 `w_j = w⁰_j` 제약. §11.2 확인 2의 답이 여기 있다 |
+| solver를 믿나 | 아니다. §5.4의 생성 시 검증이 독립적으로 다시 판정한다 |
+| 제약 평가 위치 | **판단 시점 하나.** execution은 체결만 한다 |
+
+이 대입으로 오래 열려 있던 **budget과 cash 표현** 결정이 닫혔다. 열려 있던 이유가 *"조정이 실현 budget을
+바꾼다"*였는데, **조정이 아니라 제약 하 구성**이므로 의도(선언한 범위)와 실현(결정된 값)이 어긋나는 것이
+아니라 애초에 다른 자리에 있다.
+
+---
+
 ## 12. Run definition과 preflight
 
 ```python
@@ -1231,7 +1359,7 @@ class RunDefinition(BaseModel):
 2. minimal `data` — registration / requirement / `ModelWindow`
 3. `research` — `Model` 공통 계약 + `DataModel` + materialize + `available_at` 부여
 4. `Account` aggregate + mode + history recording
-5. `portfolio.weighting` (순수 함수 + 테이블 기반 테스트)
+5. `portfolio.weighting` + `portfolio.optimize` (순수 함수 + 테이블 기반 테스트)
 6. `PortfolioIntent` + `OrderPlanner`
 7. `Exchange` protocol + Academic fixture
 8. 하나의 `SimulationFlow` closed loop
@@ -1260,7 +1388,7 @@ class RunDefinition(BaseModel):
 | `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · account 없음 · materialize 진입점) |
 | `UC-FACTOR-001` | §11.1 (패턴) + §11.2 (전체 규모 검증) |
 | `UC-BUILTIN-001` | §5.3 |
-| `UC-ALPHA-BUDGET-001` | §5.4 (`BudgetSemantics`) — **형태 미확정, §15-1** |
+| `UC-ALPHA-BUDGET-001` | §5.3 (`cash_range`) + §5.4 (생성 시 검증) |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.4 (immutable intent + source_refs) + §12 |
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
@@ -1270,7 +1398,7 @@ class RunDefinition(BaseModel):
 | `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §6.4 + §7.1 |
 | `UC-ACCOUNT-HISTORY-001` | §7.3 |
 | `UC-EXEC-003`, `UC-MONITOR-001` | §8.1 (독립 MONITORING callback) |
-| `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.2 (construction 내 optional policy) + §8.3 |
+| `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.3 (`optimize`) + §5.4 (생성 시 검증) + §11.3 |
 | `UC-LOOKTHROUGH-001`~`003` | §4.2 + §5.2 — StrategyModel이 선언하고 계산. 자동 확장 없음 |
 | `UC-ARTIFACT-001`~`003`, `UC-RESEARCH-001`, `UC-REPORT-001` | §9 |
 | `UC-EXTENSION-001`, `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10 |
@@ -1287,34 +1415,7 @@ class RunDefinition(BaseModel):
 계약으로 읽고 첫 구현이 그 답을 조용히 확정해버린다. 열린 결정은 **어떤 미래 기능이 답을 바꾸는지와 함께**
 여기 적는다. 그 기능을 만들 때 이 질문이 딸려 나오게 하기 위해서다.
 
-### 15-1. Budget과 cash를 어떻게 표현하는가
-
-**무엇이 안 정해졌나**
-
-- signal → weights 변환에서 normalization 인자의 형태 (§5.3의 `...`)
-- `BudgetSemantics`가 담는 것: 의도한 target인가, 실현된 관측인가, 둘 다인가
-- `PortfolioIntent`가 cash를 명시 target으로 갖는가, `1 - Σw`로 유도하는가
-
-**왜 지금 못 정하나 — 두 가지가 답을 바꾼다**
-
-1. **Constraint optimizer.** weight cap에 걸려 truncate되면 실현 gross가 의도한 gross와 달라진다.
-   normalization 인자가 budget을 *선언*하는 형태면 그 선언이 downstream에서 거짓이 된다.
-   → **budget은 weighting 함수의 인자가 아니라 최종 intent의 성질일 가능성이 높다.**
-2. **Cash를 자산으로 다루는 전략.** BAB의 무위험자산, risk parity의 cash sleeve, market timing의 현금
-   비중은 **의도된 포지션**이다. "배분하지 못한 잔여"와 산술값은 같아도 경제적 의미가 다르다.
-   유도로 처리하면 둘을 영원히 구분할 수 없다.
-
-**지금 확정된 것 (이 결정과 무관하게 참)**
-
-- 세 weighting 함수를 가르는 축은 **크기의 출처**이고 부호는 항상 입력에서 온다 (§5.3)
-- weighting 함수는 순수하고 data/state/clock을 모른다 (§5.3)
-- 결측은 조용히 처리하지 않는다 (§5.3)
-- weighting 함수는 budget을 **스스로 정하지 않는다** — 어떤 형태로 받든
-- 실현된 gross/net/cash는 committed state에서 관측 가능하다 (§7)
-
-**언제 정하나**: constraint optimizer 설계 시. 그 전에 이 부분을 구현하면 optimizer가 들어올 때 다시 뜯는다.
-
-### 15-2. Calendar view가 미래 session을 어디까지 보여주는가
+### 15-1. Calendar view가 미래 session을 어디까지 보여주는가
 
 StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.1). "이번 달 마지막 거래일인가"를 답하려면
 그 달의 남은 session을 봐야 한다.
@@ -1325,7 +1426,7 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 **미결.** 다만 새는 것이 **데이터가 아니라 스케줄**이라 영향이 작다. 후보: 전체 노출 / 선언된 horizon까지만
 노출 / calendar에도 `available_at`을 적용. 실제 전략이 무엇을 묻는지 관측한 뒤 정한다.
 
-### 15-3. cash를 instrument로 볼 것인가
+### 15-2. cash를 instrument로 볼 것인가
 
 현재 `cash`는 이자를 벌지 않는 numéraire이고, 이자를 원하면 §4.4의 합성 자산을 포지션으로 보유한다(§7.1).
 즉 **이미 절반은 instrument처럼 다루고 있다.** 전면적으로 바꾸면 모든 것이 포지션이 되고 `NAV = Σ q·p`
@@ -1356,7 +1457,7 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] registration의 universal 시간 필드는 `available_at`뿐이다
 - [ ] StrategyModel·Exchange·Valuation이 각자 field requirement를 선언한다
 - [ ] `lookback`이 Store query까지 도달한다 (전체 읽고 자르기 없음)
-- [ ] `portfolio.weighting`이 `domain` 외 아무것도 import하지 않는다 (import linter + module docstring)
+- [ ] `portfolio.weighting`과 `portfolio.optimize`가 `domain`(+solver) 외 아무것도 import하지 않는다
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
 - [ ] StrategyModel이 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
@@ -1376,6 +1477,9 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] `AccountMode`의 차이가 음수 position 유효성 하나뿐이다
 - [ ] account history 접근이 strategy state 보유와 무관하다
 - [ ] commit 전 실패가 position/cash/version/journal을 하나도 바꾸지 않는다
+- [ ] `PortfolioIntent` 생성 시 `Σw + cash = 1`과 상하한·현금 범위를 검증한다
+- [ ] execution 경로에 제약 평가가 없다
+- [ ] 거래 불가 종목이 제외가 아니라 현재 비중 고정으로 처리된다
 - [ ] report가 intended / requested / dealt / committed / marked를 구분한다
 - [ ] source/package/import/CLI가 전부 `vqapr`다
 

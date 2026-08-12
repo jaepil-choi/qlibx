@@ -879,6 +879,19 @@ budget을 **weight를 만드는 연산이 스스로 결정하지 않는다.** �
 
 두 경우의 숫자가 같아도 같은 것으로 보고해서는 안 된다. 결과는 어느 쪽인지 구분할 수 있어야 한다.
 
+#### budget semantics는 현금 범위 선언이다
+
+이 구분은 **현금에 허용 범위를 선언**하는 것으로 표현된다. 별도 개념이 아니라 제약의 한 종류다.
+
+| | 현금 범위 |
+|---|---|
+| fixed budget | 하한 = 상한 = 0 — 전부 배분해야 한다 |
+| flexible budget | 하한 0, 상한 자유 — 남겨도 된다 |
+| 의도된 현금 보유 | 원하는 값으로 하한·상한을 좁게 지정 |
+
+**의도된 cash는 범위를 좁게 선언한 것이고, 잔여는 넓게 두고 남은 것이다.** 그래서 결과만 봐도 어느 쪽인지
+알 수 있다. 그리고 현금은 **유도값이 아니라 결정된 값**이므로 결과에 그대로 남는다.
+
 #### 실현된 budget은 의도한 budget과 다를 수 있다
 
 constraint 조정, lot rounding, cash clipping을 거치면 실현 gross/net이 의도한 값과 달라진다. 결과는 **의도한
@@ -1214,16 +1227,19 @@ sector, turnover, liquidity, leverage, gross/net exposure, override policy는 fu
 
 ### 7.1 세 가지 서로 다른 결과
 
-- **adjustment** — proposed intent를 가능한 범위에서 수정한다. original/adjusted intent, hypothetical
-  post-trade state, constraint별 before/after value, method/status, unresolved residual을 보존한다.
-- **pre-execution validation** — 최종 candidate가 limit을 만족하는지 독립적으로 판정한다. constraint별
-  measured value, bound, excess, pass/fail status, exact input lineage를 포함한다.
-- **actual-account monitoring** — committed state를 monitoring time에 평가한다.
+| 결과 | **언제** | 무엇 |
+|---|---|---|
+| **constraint 반영 구성** | **판단 시점** | 제약을 반영해 portfolio를 만든다. 원래 의도, 반영된 결과, constraint별 before/after, 해소되지 않은 잔여를 보존한다 |
+| **생산 검증** | **판단 결과를 만들 때** | 만들어진 결과가 선언한 limit을 실제로 만족하는지 **독립적으로** 판정한다. constraint별 measured value, bound, excess, pass/fail, input lineage를 포함한다 |
+| **actual-account monitoring** | 별도 cadence | committed state를 monitoring time에 평가한다 |
 
-**adjustment result가 존재한다는 사실만으로 compliance를 선언하지 않는다.** current MVP validation은
-advisory이므로 breach finding을 기록한 뒤 같은 candidate의 execution을 계속하며, profile별 blocking switch를
-두지 않는다. required input 부재나 evaluator 계산 실패는 finding이 아니라 **execution 시작 전의 structured
-operation error**다. blocking, severity, override policy는 future work다.
+**execution은 제약을 평가하지 않는다.** 제약 평가는 경제적 판단이고, execution은 이미 확정된 것을 체결시킬
+뿐이다(§2.4). 제약을 execution 단계로 미루면 그 시점에 할 수 있는 일이 "기록"밖에 없어 — 다시 최적화하는
+것은 판단을 되돌리는 것이므로 §2.4가 금지한다.
+
+**구성 결과가 존재한다는 사실만으로 compliance를 선언하지 않는다.** 생산 검증이 독립적으로 판정한다.
+required input 부재나 evaluator 계산 실패는 finding이 아니라 **결과를 만들기 전의 structured operation
+error**다. blocking, severity, override policy는 future work다.
 
 #### UC-CONSTRAINT-001 — Constraint 없는 signal research
 
@@ -1232,17 +1248,20 @@ user가 stored signal의 IC와 hypothetical long-short 결과만 분석한다. p
 
 #### UC-CONSTRAINT-002 — Time-varying single-name cap
 
-user가 single-name cap을 켠 뒤 physical target을 주문으로 바꾸려 한다. execution preparation 시점에 사용할 수
-있는 benchmark constituent weight binding이 없으면 package는 constraint evaluation 전에 missing requirement를
-보고하고 주문이나 account mutation을 만들지 않는다. weight가 3%인 종목의 cap은 10%, 15%인 종목의 cap은
-15%다.
+user가 single-name cap을 켠 전략이 판단을 만들려 한다. **그 판단 시점에** 사용할 수 있는 benchmark
+constituent weight binding이 없으면 package는 constraint 평가 전에 missing requirement를 보고하고 **portfolio
+결과를 만들지 않는다.** 따라서 주문도 account mutation도 생기지 않는다. weight가 3%인 종목의 cap은 10%,
+15%인 종목의 cap은 15%다.
 
-#### UC-CONSTRAINT-ADJUST-001 — 조정 후에도 남은 breach
+#### UC-CONSTRAINT-ADJUST-001 — 판단 시점에 알 수 없는 breach
 
-single-name cap을 맞추려 target을 줄였지만 lot rounding 때문에 작은 breach가 남는다. result는
-original/adjusted intent와 residual을 보여주고, validation은 fail 판정과 exact excess를 **별도 finding**으로
-남긴다. current MVP는 이를 성공한 adjustment나 compliant result로 위장하지 않지만 같은 candidate의 execution을
-계속한다.
+판단 시점에 weight 공간에서 제약을 만족시켰어도, **정수 수량 변환 때문에 실제 비중이 한계를 살짝 넘을 수
+있다.** 이 차이는 판단 시점에 알 수 없다 — 그때는 아직 어느 가격에 몇 주가 체결될지 정해지지 않았기
+때문이다.
+
+그 차이는 requested/dealt 진단에 남고, **committed state의 실제 위반은 monitoring이 잡는다**(`UC-EXEC-003`).
+package는 이를 성공한 조정이나 compliant result로 위장하지 않지만, 그 때문에 execution을 되돌리거나 중단하지도
+않는다.
 
 ---
 
@@ -1833,8 +1852,10 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   construction 규칙이 달라도 **frozen intended portfolio → execution-time order conversion → selected profile →
   fill → account commit → valuation → feedback**의 같은 observable lifecycle을 따른다. (`UC-PORTFOLIO-001`,
   `UC-PROFILE-001`)
-- adjustment와 advisory validation은 `UC-CONSTRAINT-ADJUST-001`처럼 residual과 compliance finding을 구분하며,
-  breach만으로 execution을 차단하지 않는다.
+- 제약은 **판단 시점에** 반영되고 그 결과가 만들어질 때 독립적으로 검증된다. **execution 경로에는 제약
+  평가가 없다**(§7.1). 수량 변환 때문에 뒤늦게 생긴 위반은 `UC-CONSTRAINT-ADJUST-001`처럼 진단에 남고
+  `UC-EXEC-003`의 monitoring이 잡으며, 그 때문에 execution을 되돌리지 않는다.
+- budget은 현금 범위 선언으로 표현되고, 현금은 유도값이 아니라 결과에 남는 결정된 값이다(§5.5).
 - `UC-EXEC-001`에서 decision과 execution outcome을 분리하고 committed result만 다음 decision에 feedback한다.
 - `UC-EXEC-002`는 fill timing과 model limitation을 명시하며 look-ahead를 허용하지 않는다.
 - **fractional/lot quantity는 selected venue가 instrument별로 결정한다.** account validity는 signed 또는
@@ -2024,3 +2045,22 @@ StrategyModel은 판단 1회에 평가 시각이 하나지만, 반복 계산 결
 
 **취소한 요구사항**: 반복 재학습 결과에 "어느 구간의 학습에서 나왔는지"를 남기도록 요구하려 했으나 취소했다.
 전체 기간 학습이 애초에 불가능하므로 구분할 대상이 없다.
+
+### B.5 Enhanced index — 제약이 걸린 portfolio
+
+벤치마크를 따라가되 알파로 기울이고, 공매도 금지와 종목별 상한을 함께 만족시켜야 하는 전략을 대입했다.
+기존 구현이 이 문제를 어떻게 풀었는지도 함께 확인했다.
+
+| 확인한 것 | 정해진 것 |
+|---|---|
+| 상한에 걸려 잘린 비중은 어디로 가나 | **질문이 성립하지 않는다.** 자르고 재분배하는 것이 아니라 제약을 반영해 한 번에 구성한다. 현금이 결정 변수이므로 잔여를 흡수한다 |
+| 그러면 budget이란 무엇인가 | **현금 범위 선언**이다. 별도 개념이 아니라 제약의 한 종류다(§5.5) |
+| 현금을 유도할 수 있나 | **없다.** 결정된 값이며 결과에 남는다 |
+| 제약을 언제 평가하나 | **판단 시점.** execution은 체결만 한다. execution으로 미루면 그 시점에 할 수 있는 일이 기록밖에 없고, 다시 최적화하는 것은 §2.4가 금지한다 |
+| 거래 불가 종목은 | 제외가 아니라 **현재 비중 고정**을 제약으로 표현한다. 조용히 빠지면 §10.2 위반이다 |
+| 계산 결과를 믿나 | **아니다.** 만들어진 결과가 선언한 제약을 실제로 만족하는지 독립적으로 다시 판정한다 |
+| 수량 변환 때문에 생긴 위반은 | 판단 시점에 알 수 없다. 진단에 남기고 **monitoring이 잡는다**(`UC-EXEC-003`) |
+
+이 대입으로 오래 열려 있던 "budget과 cash를 어떻게 표현하는가"가 닫혔다. 열려 있던 이유가 *"조정이 실현
+budget을 바꾼다"*였는데, **조정이 아니라 제약 하 구성**이므로 의도(선언한 범위)와 실현(결정된 값)이 어긋나는
+것이 아니라 애초에 서로 다른 자리에 있다.

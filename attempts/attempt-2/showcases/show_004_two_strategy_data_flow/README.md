@@ -1,6 +1,6 @@
 # 두 전략으로 읽는 qlibx data flow
 
-Status: current
+Status: archived
 
 Last verified: 2026-08-11T10:33:05+09:00
 

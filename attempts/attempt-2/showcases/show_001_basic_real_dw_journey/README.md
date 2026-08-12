@@ -1,6 +1,6 @@
 # Basic real-DW-derived sample journey
 
-Status: current
+Status: archived
 
 Last verified: 2026-08-06
 

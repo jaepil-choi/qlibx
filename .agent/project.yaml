@@ -5,7 +5,7 @@ project:
   kind: python-package
 
 canonical_documents:
-  product_requirements: docs/qlibx-prd.md
+  product_requirements: docs/vqapr-prd.md
 
 non_authoritative_directories:
   - references

@@ -1,6 +1,6 @@
 schema_version: 1
 showcase_id: show_004_two_strategy_data_flow
-status: current
+status: archived
 demonstrates:
   - implementation-061-academic-exchange-signed-fractional-state
   - implementation-062-typed-execution-spine-and-preparation

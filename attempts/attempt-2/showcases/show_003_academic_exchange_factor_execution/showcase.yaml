@@ -1,6 +1,6 @@
 schema_version: 1
 showcase_id: show_003_academic_exchange_factor_execution
-status: current
+status: archived
 demonstrates:
   - implementation-009-stored-signal-reuse
   - implementation-038-layer-safe-strategy-artifact-inputs

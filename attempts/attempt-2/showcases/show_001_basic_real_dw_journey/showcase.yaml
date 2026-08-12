@@ -1,6 +1,6 @@
 schema_version: 1
 showcase_id: show_001_basic_real_dw_journey
-status: current
+status: archived
 demonstrates:
   - implementation-018-opt-in-sample-journey
   - UC-DATA-001

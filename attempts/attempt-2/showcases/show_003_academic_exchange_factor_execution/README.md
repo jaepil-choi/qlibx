@@ -1,6 +1,6 @@
 # AcademicExchange factor execution showcase
 
-Status: current
+Status: archived
 
 Last verified: 2026-08-10T20:16:23+09:00
 

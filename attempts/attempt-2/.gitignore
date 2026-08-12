@@ -1,0 +1,38 @@
+# Python-generated files
+__pycache__/
+.pytest_cache/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.qlibx/
+qlibx-research/
+
+/data/
+outputs/
+experiments/outputs/
+showcases/outputs/
+experiments/exp_*/outputs/
+showcases/show_*/outputs/
+.agent/runs/*
+!.agent/runs/.gitignore
+
+# Local test and tool scratch state.
+/.codex-tmp/
+/.ruff_cache/
+/.uv-cache*/
+/.agent/test-runs/
+/.agent/tmp/
+/.tmp/
+/tmp/
+
+# Agent execution plans are local working state.
+/.agent/plans/**
+!/.agent/plans/active/
+!/.agent/plans/active/.gitkeep
+!/.agent/plans/completed/
+!/.agent/plans/completed/.gitkeep

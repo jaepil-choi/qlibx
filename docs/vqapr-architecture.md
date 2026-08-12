@@ -309,6 +309,11 @@ class DatasetRegistration(BaseModel):
 ```
 
 - 이 여섯 개가 전부다. `fiscal_period`, `session_date`, `revision`, `horizon_end`는 **일반 column**이다.
+- **종목 축이 없는 시계열도 같은 계약을 쓴다.** 지수 레벨, 금리, 환율처럼 instrument가 없어 보이는
+  데이터는 상수 컬럼 하나를 두어 합성 instrument(`_KOSPI`, `_CD91`)로 등록한다.
+  - **왜 예외를 만들지 않나**: 예외를 두면 `ModelWindow`가 두 모양을 갖게 되고, 소비자가 "이건 종목이
+    있나 없나"로 분기해야 한다. `UC-ACADEMIC-001`이 tracking-only Index를 instrument로 인정하는 것과도
+    일관된다.
 - **consumer-purpose alias 없음.** `execution_price` 같은 role을 등록에 새기지 않는다.
   - **왜**: 같은 `close`를 StrategyModel·Exchange·Valuation이 각자 요구해야 누가 무엇을 읽었는지 lineage에 남는다.
   - **없으면**: `UC-EXEC-002`의 "어떤 가격으로 체결했는가"가 등록 시점의 이름 선택에 숨는다.
@@ -331,6 +336,17 @@ class DataRequirement(BaseModel):
 - **`Lookback`은 전부 과거 방향이다.** 미래 방향 타입이 존재하지 않으므로, 어떤 소비자도 미래 관측을
   당겨 읽을 수 없다. label처럼 미래가 필요해 보이는 계산은 값을 나중 시점에 기록하고 소비자가 시점을 맞춰
   읽는다(PRD §3.5).
+
+#### vocabulary를 늘리지 않고 넓게 받아 거른다
+
+"이번 달 행만", "직전 분기만" 같은 경계를 `Lookback`에 추가하지 않는다. 필요하면 **넉넉히 받아 소비자가
+거른다.**
+
+- **왜**: 경계를 타입으로 만들면 "이번 달"이 월초인지 첫 거래일인지가 또 결정 대상이 되고, 종류가 늘수록
+  조합이 폭발한다.
+- **어차피 그 판단은 소비자 것이다.** PRD §3.5 — "계산에 필요한 최소 관측치와 ragged-panel 처리 방식은
+  그 Model의 경제적 규칙이다."
+- 대가는 창이 조금 큰 것뿐이고, `available_at` 상한은 그대로라 PIT은 영향받지 않는다.
 
 #### `ArtifactRequirement`를 만들지 않는다
 
@@ -961,6 +977,16 @@ flow + project  ←  public
 
 ## 11. Walkthrough
 
+**Walkthrough는 예시가 아니라 검증 장치다.** PRD의 use case를 하나 골라 데이터가 실제로 어느 경로를
+지나는지 끝까지 따라가고, 흐르지 않는 곳과 마찰이 생기는 곳을 여기 남긴다.
+
+- **흐르지 않으면** 설계를 고친다. §3의 달력 경계 trigger와 §3.6의 calendar 유도가 이렇게 나왔다.
+- **흐르지만 마찰이 있으면** 그 마찰을 기록한다. 나중에 같은 것을 다시 발견하지 않기 위해서다.
+- 새 use case를 추가할 때는 §14 traceability에 절 번호를 적는 것으로 끝내지 않고, 필요하면 여기에
+  경로를 남긴다.
+
+### 11.0 공통 fixture — 두 전략
+
 공통 fixture: sessions 03-05/03-06, close available 15:30 KST, trigger 매 세션 04:00,
 decision 03-06 04:00, execution 03-06 15:30.
 
@@ -1054,6 +1080,113 @@ $$w_{i,t} = \frac{P_{i,t}S_i}{\sum_j P_{j,t}S_j} \quad\text{— 보유만 해도
 
 ---
 
+### 11.2 실제 팩터 재현 — 전체 규모 검증
+
+§11.1이 패턴이라면 이 절은 **실제 연구 하나를 통째로** 통과시킨 기록이다. 5개 팩터, 2개 주기, VW/EW,
+2×3과 5분위, 시장·무위험 수익률까지 포함한 국내 팩터 재현을 대입했다.
+
+검증 대상: `UC-FACTOR-001` · `UC-DATA-001` · `UC-CALENDAR-001` · `UC-PIT-001` · `UC-MODEL-001`
+
+#### 등록
+
+| dataset | instrument | `available_at` |
+|---|---|---|
+| 일별 시세 | ticker | 세션 종가 시각 |
+| security master 스냅샷 | ticker | 스냅샷 시각 |
+| 재무제표 | ticker | **결산월말 + 3개월** ← user 선언 (§4.2 PRD) |
+| 지수 레벨 | `_KOSPI` (합성) | 세션 종가 시각 |
+| 단기금리 | `_CD91` (합성) | 공표 시각 |
+
+#### DataModel 체인
+
+```text
+일별시세 ─┬─► [D1] 월별수익률·월말시총    trigger = LastSessionOfMonth()
+          │
+          ├─► [D2] 회계 characteristic     trigger = LastSessionOfMonth(months=(6,))
+          │        읽음: 재무(3y) + 시세(1)
+          │
+          └─► [D3] 시장·무위험 수익률      trigger = EveryNSessions(1)
+                   읽음: 지수(2) + 금리(2)
+
+[D1] ─────► [D4] momentum signal           trigger = LastSessionOfMonth()
+                 읽음: [D1] RowsLookback(12)
+                 씀:   lag 1~11 (직전 달은 건너뜀 — Model의 경제적 규칙)
+
+[D2],[D4] ► [M1] 2×3 분류 / [M2] 5분위 분류
+                 읽음: 위 + security master
+                 KOSPI 종목만으로 breakpoint → 양 시장에 적용
+                 breakpoint 값과 기준 표본 크기를 컬럼으로 함께 기록
+```
+
+`available_at`은 전부 §4.5 규칙으로 붙는다. **재무가 3월에 공표되어도 D2의 6월말 행은 6월말부터
+유효하다** — trigger 시각이 하한이기 때문이다.
+
+#### run
+
+```text
+2×3 버킷  6 × 5팩터 = 30
+5분위     5 × 5팩터 = 25
+signed 직접 실행       5      ← authoritative
+                     ────
+                      60  × VW/EW(2) × daily/monthly(2) = 240 run
+```
+
+각 run이 독립이라 동시에 돌릴 수 있다.
+
+---
+
+#### 확인 1 — 재가중 주기가 trigger로 드러난다
+
+참조 구현은 가중치를 이렇게 잡는다.
+
+```text
+daily   : 전일 시총으로 매일 재가중
+monthly : 전월말 시총으로 매월 재가중
+```
+
+**둘 다 buy-and-hold가 아니다.** 시총가중이 보유만으로 유지되는 것은 **주식수가 고정일 때**뿐이고,
+유상증자·소각이 있으면 시총은 변하는데 보유 수량은 변하지 않는다. 참조 구현은 그 차이를 매일(또는 매월)
+다시 반영한다.
+
+우리 구조에서는 그 선택이 **trigger 선언**이 된다.
+
+| 원하는 정의 | trigger |
+|---|---|
+| 형성 후 그대로 보유 | `LastSessionOfMonth(months=(6,))` |
+| 매일 시총 재가중 | `EveryNSessions(1)` |
+| 매월 시총 재가중 | `LastSessionOfMonth()` |
+
+zero-cost profile에서 숫자는 같게 나오면서 **turnover가 evidence에 남는다.** "정의상의 일간 시총가중
+팩터"가 실제로는 매일 전 종목 재조정을 함의한다는 사실이 결과에 드러나는 것이다. 벡터화 코드에서는
+`weight_cap = lag_market_cap` 한 줄에 숨어 영원히 보이지 않는다.
+
+#### 확인 2 — 거래정지 종목에서 우리가 더 엄격하다
+
+참조 구현은 수익률이 결측인 행을 버킷에서 제외하고 나머지로 가중평균한다. 이는 **암묵적 재정규화**이며
+PRD §10.2 금지 목록의 첫 항목("tradable만 남기고 자동 재정규화")에 해당한다.
+
+우리 구조에서는 포지션이 Account에 남아 있고 Valuation이 **보유 종목 전체**의 mark를 요구하므로(§7.4),
+가격이 없으면 NAV를 추정하지 않고 실패한다.
+
+따라서 재현하려면 user가 정책을 **명시**해야 한다 — 정지일에 직전가로 mark할지, 형성 시점에 제외할지.
+이것은 결함이 아니라 의도된 차이다.
+
+#### 확인 3 — 한 번에 통과하지 못하고 발견된 것
+
+이 대입에서 **설계를 고쳐야 했던 것은 없었다.** 다만 두 가지가 문서에 없어서 추가했다.
+
+- 종목 축이 없는 시계열(지수·금리)의 등록 방법 → §4.1
+- "이번 달 행만" 같은 경계를 `Lookback`에 넣지 않고 넓게 받아 거른다는 원칙 → §4.2
+
+#### 한계
+
+- 이 규모(240 run)는 **모든 return이 execution을 거친다**는 §2.2의 직접적 비용이다. 벡터화 한 번으로
+  끝내는 참조 구현과 대비된다. 대신 각 return이 어떤 체결·비용·계좌 상태에서 나왔는지가 남는다.
+- 참조 구현이 사용한 회계 정렬은 확정된 보고 지연 가정이며 실제 공시 시점이 아니다. 그 가정은 등록의
+  availability rule로 선언되고 결과의 limitation에 남는다(PRD §4.2).
+
+---
+
 ## 12. Run definition과 preflight
 
 ```python
@@ -1125,7 +1258,7 @@ class RunDefinition(BaseModel):
 | `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
 | `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · account 없음 · materialize 진입점) |
-| `UC-FACTOR-001` | §11.1 (DataModel membership → 버킷 run → 조합 검산) |
+| `UC-FACTOR-001` | §11.1 (패턴) + §11.2 (전체 규모 검증) |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.4 (`BudgetSemantics`) — **형태 미확정, §15-1** |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |

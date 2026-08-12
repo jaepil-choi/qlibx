@@ -26,6 +26,9 @@ behavior, correctness boundary, stored result의 의미**를 규정한다.
 이 문서가 `StrategyModel`, `DataModel`, `Account`, `Exchange` 같은 이름을 쓸 때는 **제품의 semantic role**을 뜻한다.
 Python class를 뜻하지 않는다.
 
+특히 **DataModel**과 **StrategyModel**은 두 semantic role의 이름이다. 같은 이름의 class, 상속 관계, 공통
+부모를 요구하지 않는다. 두 역할이 무엇을 공유하고 그것을 어떤 구조로 구현할지는 architecture가 정한다.
+
 > **Architecture candidate — non-normative**
 >
 > 이 표기가 붙은 이름, diagram, 구조 제안은 요구사항을 만족할 수 있는 하나의 후보다. 같은 product
@@ -189,33 +192,45 @@ profile을 적용한 결과**다.
 
 ### 2.3 DataModel과 StrategyModel은 분리된 semantic role이다
 
-사용자가 작성하는 계산 단위를 통틀어 **Model**이라 부른다. Model은 두 종류다.
+사용자가 작성하는 계산에는 두 역할이 있다.
 
-```text
-Model  — 사용자가 작성하고, 선언한 시점마다 선언한 관측만 읽어 결과를 만든다
-├── DataModel      — 값을 만든다
-└── StrategyModel  — 의도를 만든다
-```
+| | 답하는 질문 | 출력 | execution | 계좌 |
+|---|---|---|---|---|
+| **DataModel** | *"이 값은 얼마인가"* | **값** | **거치지 않는다** | 없다 |
+| **StrategyModel** | *"자본을 어떻게 나눌 것인가"* | **배분** | **반드시 거친다** | 있다 |
 
-둘은 **언제 계산할지 선언하는 방식**과 **이전 계산을 이어가는 방식**을 공유한다. 그 규칙은 종류마다 다르지
-않으며 문서에도 한 번만 나온다.
+#### 판정 기준은 execution을 거치는가다
 
-두 종류의 차이는 **무엇에 답하는가**에서 나온다.
+**배분은 체결될 수 있다.** 그리고 체결되면 return이 생기므로 §2.2에 따라 반드시 execution을 통과해야 한다.
+**zero-friction academic profile을 선택해도 마찬가지다** — 비용이 0일 뿐 체결, 계좌 반영, feedback은 그대로
+일어난다. **배분을 만들고 실행을 건너뛰는 경로는 없다.**
 
-| | 답하는 질문 | 입력 | 출력 |
-|---|---|---|---|
-| **DataModel** | *"이 값은 얼마인가"* | data | **data** |
-| **StrategyModel** | *"지금 어떤 portfolio를 원하는가"* | data + committed actual state | **의도** |
+**값은 체결될 것이 없다.** 시가총액이나 베타를 "체결한다"는 말은 성립하지 않는다. 그래서 DataModel의 연산은
+execution 앞에서 끝나며, 그 자체로 완결된 workflow다.
 
-여기서 두 가지가 따라 나온다.
+#### 계좌 접근은 이 차이의 결과다
 
-- **DataModel은 actual state를 소비하지 않는다.** DataModel의 출력은 다른 연구가 읽을 데이터인데, 그것이 특정
-  account에 의존하면 더 이상 재사용 가능한 데이터가 아니다. 따라서 DataModel은 path-dependent가 될 수 없다.
-- **DataModel은 필수 단계가 아니다.** StrategyModel이 필요한 계산을 직접 수행해도 된다. DataModel은 **여러 소비자가
-  같은 값을 나눠 쓰거나 반복 계산을 피하기 위한 선택**이지 선행 조건이 아니다(§2.7).
+- **배분을 만드는 역할은 계좌를 본다.** 체결 결과가 자기에게 돌아오므로 현재 보유와 이력을 볼 수 있어야
+  한다 — turnover-aware rebalance, stop-loss, adaptive weighting이 전부 그것을 요구한다
+  (`UC-ALPHA-PATH-001`, `UC-ACCOUNT-HISTORY-001`, `UC-ALPHA-ADAPTIVE-001`).
+- **값을 만드는 역할에는 계좌가 없다.** 시가총액이 누구의 계좌냐에 따라 달라지면 그건 시가총액이 아니다.
+  값이 계좌에 의존할 이유가 없으므로 DataModel은 actual state를 읽지 않는다.
+- **배분은 계좌에 의존해도 된다.** 그 경우 path-dependent임을 드러내고 어떤 state를 보았는지 남기면 다른
+  연구가 frozen input으로 재사용할 수 있다(§5.6).
 
-DataModel도 여러 시점에 걸쳐 반복 계산할 수 있다. 다만 그 반복은 **order, fill, account를 거치지 않는다.**
-portfolio return을 만드는 §2.2의 경로와 별개의 흐름이다.
+> 계좌를 보느냐로 두 역할을 가르면 틀린다. 어떤 배분이 계좌를 쓰지 않을 수도 있지만, 그것이 그 역할이
+> 계좌를 **볼 수 없다**는 뜻은 아니다.
+
+#### DataModel은 필수 단계가 아니다
+
+StrategyModel이 필요한 계산을 직접 수행해도 된다. DataModel은 **여러 소비자가 같은 값을 나눠 쓰거나 반복
+계산을 피하기 위한 선택**이지 선행 조건이 아니다(§2.7).
+
+> **Architecture candidate — non-normative**
+>
+> 두 역할은 *언제 계산할지 선언하는 방식*과 *이전 계산을 이어가는 방식*을 공유한다. 공통 부모를 두어 그
+> 선언을 한 곳에 모으면 해석하는 코드가 하나가 되고, 새 cadence 종류를 추가할 때 한쪽만 고치는 사고가
+> 없다. 같은 요구를 만족하는 다른 구조도 허용한다.
 
 **DataModel**은 point-in-time data를 소비해 다른 연구와 StrategyModel이 재사용할 수 있는 research result를 만든다.
 prediction, signal, feature, firm characteristic, risk estimate, statistical factor-return estimate가 대표적이다.
@@ -684,6 +699,9 @@ factor-return estimate를 만들 수 있다. 결과는 경제적 의미, axis, u
 - **`available_at`은 package가 정한다**(§4.1). DataModel이 자기 결과의 유효 시점을 주장하지 않는다.
 - **actual state를 소비하지 않으므로 path-dependent가 될 수 없다**(§2.3). 계좌·체결에 의존하는 판단은
   StrategyModel의 영역이다.
+- **배분을 만들지 않는다.** signal, characteristic, 분류처럼 계좌 없이 정의되는 값까지가 이 역할이며,
+  그 값을 weight로 바꾸는 것은 StrategyModel의 판단이다.
+- **execution을 거치지 않는다.** 체결될 것이 없기 때문이며, 그래서 DataModel run은 그 자체로 완결된다.
 
 #### 반복 재학습은 새로운 capability를 요구하지 않는다
 
@@ -769,9 +787,12 @@ StrategyModel은 registered data와 compatible DataModel result를 소비해 경
 StrategyModel은 DataModel 없이 raw registered data를 직접 사용할 수 있다. 내부에서 score를 계산하더라도 **reusable
 signal을 publish한다면 DataModel result와 같은 semantic contract를 따라야 한다.**
 
-이 PRD는 StrategyModel이 signal, score, weight, target 중 무엇을 public output으로 내는지 고정하지 않는다. 어떤
-shape를 고르든 downstream execution lifecycle은 변하지 않는다(§6). 어느 경우에도 StrategyModel output 자체는 fill도
-authoritative actual state도 아니다.
+**내부에서** signal, score, rank 중 무엇을 계산하는지는 고정하지 않는다. 그러나 **public 결과는 배분**이다 —
+어느 instrument에 자본의 얼마를 둘 것인가.
+
+그리고 **그 배분은 실행된다.** 선택한 profile이 zero-friction academic이어도 체결, 계좌 반영, feedback이
+일어나고 그 결과가 저장되어 다른 StrategyModel의 입력이 될 수 있다. **배분만 저장하고 실행을 건너뛰는
+경로는 없다**(§2.3). 어느 경우에도 StrategyModel output 자체는 fill도 authoritative actual state도 아니다.
 
 §2.7의 built-in weighting 함수들은 공통적으로 instrument별 signed 값을 입력으로 받는다. 이는 **built-in을
 호출하기로 선택한 StrategyModel만 구속하는 사실**이며, StrategyModel이 그 shape의 값을 만들어야 한다는 요구가 아니다.
@@ -843,17 +864,39 @@ weight는 **예산의 배분**을 뜻한다. signal을 그대로 weight로 사�
 따라서 **signal에서 weight로 가는 전환은 명시적 연산이어야 한다.** 타입 검사가 이 경계를 지켜주지 못하므로,
 전환을 수행하는 연산을 통과했다는 사실 자체가 그 전환이 의도되었다는 증거가 된다.
 
-### 5.4 Composition — Ensemble은 하나의 StrategyModel다
+### 5.4 Composition — StrategyModel이 StrategyModel의 결과를 구독한다
 
-ensemble은 별도의 후처리 단계로 강제되는 것이 아니라, **기존 member StrategyModel과 그 compatible stored
-alpha-weight result를 입력으로 삼는 하나의 StrategyModel**다. member producer가 direct StrategyModel인지 stored model
-output을 소비했는지는 ensemble의 public contract가 아니다.
+**StrategyModel은 다른 StrategyModel의 저장된 결과를 입력으로 삼을 수 있다.** 그 결과도 dataset이기
+때문이다(§4.1). ensemble은 이 패턴의 한 사례일 뿐이며 별도의 후처리 단계로 강제되지 않는다.
 
-다음 composition을 모두 지원해야 한다.
+```text
+StrategyModel A   long-short alpha    → 실행 → 저장된 결과
+StrategyModel B   ensemble            → A와 다른 member를 읽어 조합 → 실행 → 저장된 결과
+StrategyModel C   enhanced index      → B와 benchmark를 읽어 long-only 배분 → 실행
+```
+
+**각 단계가 execution을 거친다**(§2.3). A와 B가 zero-friction academic profile을 쓰면 비용 없는 가상 체결이지만
+계좌·NAV·feedback은 실제로 생긴다. 그래서 turnover-aware한 A가 자기 계좌를 볼 수 있고, adaptive한 B가
+member의 realized outcome을 볼 수 있다(`UC-ALPHA-ADAPTIVE-001`).
+
+#### 왜 한 계산 안에서 변환하지 않는가
+
+이 체인은 §2.1의 *"운용 portfolio가 long-only여도 original signed alpha를 덮어쓰지 않는다"*를 **구조로
+만족시킨다.** A의 결과가 독립된 result로 남기 때문이다. 한 계산 안에서 signed alpha를 long-only로 변환하면
+원본이 중간값으로 사라지고, 그것을 보존하려면 별도 장치가 필요해진다.
+
+그리고 benchmark나 배분 강도를 바꿔볼 때 **A와 B를 다시 실행하지 않아도 된다**(`UC-ALPHA-CHILD-001`).
+
+`UC-ALPHA-PATH-001`이 account A와 account B를 구분하는 이유도 여기에 있다. A의 배분은 계좌 A 기준으로
+만들어졌고, C가 계좌 C에서 그것을 사용해도 **A가 계좌 C에서 재계산된 것은 아니다.** 그 사실이 lineage에
+남아야 한다.
+
+#### 지원해야 하는 composition
 
 - 같은 DataModel result를 서로 다른 StrategyModel이 재사용하고 독립적으로 평가한다.
 - 같은 StrategyModel logic을 compatible한 여러 DataModel result와 비교한다.
 - 여러 StrategyModel result를 producer 재실행 없이 조합한다.
+- 저장된 배분을 다른 benchmark, 다른 제약, 다른 execution profile로 다시 사용한다.
 
 #### UC-ENSEMBLE-001 — 기존 StrategyModel result의 조합
 
@@ -952,8 +995,8 @@ Model은 이전 계산의 결과를 다음 계산으로 이어갈 수 있어야 
   기록된 state가 따라 바뀌어서는 안 된다. 그렇지 않으면 이력 전체가 마지막 값 하나로 붕괴한다.
 - durable하고 portable해야 하며, 한 run의 종료 state를 다음 run의 시작 state로 사용할 수 있어야 한다.
   production에서 하루 단위로 실행하며 전날 state를 이어받는 것이 기준 사례다.
-- **갱신은 execution이나 fill 발생 여부에 종속되지 않는다.** 체결이 없는 세션에도, execution profile을 쓰지
-  않는 research-only Model도 state를 이어갈 수 있다.
+- **갱신은 execution이나 fill 발생 여부에 종속되지 않는다.** 주문이 없거나 dealt quantity가 0인 세션에도
+  StrategyModel의 state는 이어지고, execution을 거치지 않는 DataModel도 마찬가지다.
 - state를 사용한 result는 그 사실을 드러내야 한다. 소비자가 "이 result는 data만으로 재현되지 않는다"를
   알아야 하기 때문이다.
 - **state는 최후 수단이다.** 같은 값을 bounded lookback이나 actual-state 이력(§6.6)이나 durable
@@ -1282,11 +1325,15 @@ capability를 추론하지 않는다.
 
 다음은 서로 다른 capability다.
 
-1. signal/prediction/label의 IC, RankIC, rank-based diagnostic — **portfolio를 구성하지 않는다**
-2. execution을 거쳐 산출·저장된 return/NAV 시계열에 대한 분석 — attribution, correlation, factor regression처럼
-   기존 result를 읽으며 **새 return을 만들지 않는다**
-3. explicit academic listing, hypothetical fill, signed state-transition rule을 사용하는 가상 execution
-4. order, production position/account, actual fill을 통과하는 **executable real short portfolio**
+| 층 | 무엇 | §2.3의 역할 |
+|---|---|---|
+| 1 | signal/prediction/label의 IC, RankIC, rank-based diagnostic — **portfolio를 구성하지 않는다** | **DataModel** |
+| 2 | execution을 거쳐 산출·저장된 return/NAV 시계열에 대한 분석 — attribution, correlation, factor regression처럼 기존 result를 읽으며 **새 return을 만들지 않는다** | analysis |
+| 3 | explicit academic listing, hypothetical fill, signed state-transition rule을 사용하는 가상 execution | **StrategyModel** |
+| 4 | order, production position/account, actual fill을 통과하는 **executable real short portfolio** | **StrategyModel** |
+
+**이 분류는 §2.3의 경계와 같은 것을 다른 각도에서 말한다.** 1층은 배분을 만들지 않으므로 execution이
+없고, 3·4층은 배분을 만들므로 반드시 execution을 거친다.
 
 첫 번째 층만 execution state를 경유하지 않는다. **새로운 portfolio return을 만드는 것은 세 번째 층부터이며,
 두 번째 층은 그 이상의 층이 만든 result를 읽는 분석이다.** quantile spread와 signed basket return처럼 basket
@@ -2064,3 +2111,25 @@ StrategyModel은 판단 1회에 평가 시각이 하나지만, 반복 계산 결
 이 대입으로 오래 열려 있던 "budget과 cash를 어떻게 표현하는가"가 닫혔다. 열려 있던 이유가 *"조정이 실현
 budget을 바꾼다"*였는데, **조정이 아니라 제약 하 구성**이므로 의도(선언한 범위)와 실현(결정된 값)이 어긋나는
 것이 아니라 애초에 서로 다른 자리에 있다.
+
+### B.6 두 역할의 경계 — 무엇으로 가르는가
+
+alpha → ensemble → enhanced index로 이어지는 체인을 대입하면서 §2.3의 경계를 다시 확인했다.
+
+| 확인한 것 | 정해진 것 |
+|---|---|
+| 두 역할을 무엇으로 가르나 | **execution을 거치는가.** 계좌 접근과 출력 형태는 그 결과다 |
+| 배분만 만들고 실행을 건너뛸 수 있나 | **없다.** zero-friction profile을 써도 체결·계좌·feedback은 일어난다 |
+| 왜 그런가 | 배분은 체결될 수 있고, 체결되면 return이 생기므로 §2.2가 적용된다 |
+| 값과 배분의 차이는 | 시가총액은 계좌가 없어도 정의되지만 weight는 *"무엇의"*가 전제된다 |
+| enhanced index는 | 별도 StrategyModel이며, 저장된 alpha를 구독하고 자기도 실행된다(§5.4) |
+
+**기록해 둘 오판 두 개.**
+
+1. *"long-short alpha와 ensemble은 계좌를 안 보니 값을 만드는 역할"* — **"이 예시가 계좌를 안 쓸 수도 있다"와
+   "이 역할은 계좌를 볼 수 없다"를 뒤바꿨다.** 그렇게 두면 turnover-aware rebalance, stop-loss, adaptive
+   ensemble이 전부 표현 불가능해진다.
+2. *"실행 여부는 workflow 선택"* — 정반대다. 배분을 만드는 역할은 실행을 건너뛸 수 없다.
+
+두 오판 모두 **판정 기준을 계좌 접근으로 잡았기 때문**이다. execution 통과 여부로 잡으면 나오지 않는다.
+§8.1의 네 층이 같은 경계를 다른 각도에서 이미 말하고 있었다는 것도 뒤늦게 확인했다.

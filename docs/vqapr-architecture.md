@@ -153,6 +153,31 @@ DRY는 **모양이 같은 것**이 아니라 **변경 이유가 같은 것**에 
 - **없으면**: 제약이 편한 곳에 붙는다. 그러면 venue를 하나 추가할 때 Account를 고치게 되고 §2.5의
   주입이 더 이상 순수하지 않다.
 
+#### 두 번째 축 — 시점에 따라 변하는가
+
+instrument의 **속성**을 어디에 둘지는 위 규칙만으로 안 갈린다. 축이 하나 더 필요하다.
+
+> **venue를 바꾸면 달라지나?** → 예: **Exchange**
+> **시점에 따라 변하나?** → 예: **데이터**
+> 둘 다 아니면 → **Instrument**
+
+| 속성 | 변하나 | venue별인가 | 소속 |
+|---|---|---|---|
+| `kind` (stock / etf) | ✗ 주식이 ETF가 되지 않는다 | ✗ | **Instrument** |
+| `currency` | ✗ | ✗ | **Instrument** |
+| 보통주/우선주 | ✗ | ✗ | **Instrument** |
+| `quantity_step` · `permitted_sides` | ✗ | ✅ | **ListingRule** |
+| 거래비용 요율 | 기간별 | ✅ | **CostRule** |
+| 업종 분류 | ✅ 재분류된다 | ✗ | **데이터** |
+| 거래정지 여부 | ✅ 매일 | ✗ | **데이터** |
+| 상장 여부 | ✅ | ✗ | **데이터** |
+
+- **왜 이 축이 필요한가**: 업종 분류와 `kind`는 둘 다 "이 종목이 무엇인가"처럼 보이지만, 하나는
+  **재분류될 수 있고** 하나는 아니다. 변하는 것을 정적 선언에 넣으면 과거 시점의 판단이 오늘의 분류로
+  오염된다.
+- **없으면**: 거래정지 여부를 Instrument에 넣는 실수가 나온다. 그러면 PIT이 적용되지 않아 **어제의 판단이
+  오늘의 정지 상태를 보게 된다.**
+
 ---
 
 ## 3. 시간
@@ -678,15 +703,24 @@ StrategyModel이 자기 판단 안에서 다른 run을 실행하지 않는다. �
 def optimize(
     *, desired, current, lower, upper, frozen,
     cash_range, cost, turnover_penalty,
+    L=None,                      # 노출 매핑. 기본은 항등(= look-through 없음)
 ) -> tuple[Weights, Decimal, Diagnostics]: ...
 ```
 
-$$\min_{w,\,c}\ \underbrace{\|w - w^{desired}\|^2}_{\text{원하는 노출과의 거리}}
+$$\min_{w,\,c}\ \underbrace{\|Lw - x^{desired}\|^2}_{\text{원하는 노출과의 거리}}
 \;+\; \underbrace{\textstyle\sum_i \text{cost}_i\,|w_i - w^0_i|}_{\text{거래비용}}
 \;+\; \lambda\|w-w^0\|_1$$
 
 $$\text{s.t.}\quad \textstyle\sum w + c = 1,\quad l \le w \le u,\quad c_{lo} \le c \le c_{hi},
 \quad w_j = w^0_j\ \ (j \in \text{frozen})$$
+
+**`L`은 목적함수에만 들어가고 제약에는 들어가지 않는다.**
+
+- **제약은 physical `w`에만 건다**(PRD §8.2). 계좌에 남는 것은 실제 보유이고, monitoring이 판정할 대상도
+  그것이다. 노출은 계산값이라 **매핑이 바뀌면 과거 판정까지 달라진다.**
+- 그래서 **임의의 선형 제약이 필요 없다.** 종목별 상하한 벡터면 충분하다.
+- **패키지는 `L`을 만들지 않는다**(PRD §8.2). StrategyModel이 구성종목 데이터를 읽어 만들어 넘긴다.
+  `L=None`이면 ETF 없이 physical == exposure인 보통의 경우다.
 
 - **`c`(현금)는 결정 변수다.** 유도값이 아니라 예산 항등식 `Σw + c = 1`을 만족하는 해의 일부다.
   그래서 **"상한에 걸려 잘린 비중을 어디로 보내나"라는 질문이 생기지 않는다** — 현금이 흡수한다.
@@ -833,6 +867,38 @@ class Exchange(Protocol):
     def execute(self, event, orders, account, market: ExecutionView) -> FillBatch: ...
 ```
 
+#### Instrument — `domain`에 있고 venue를 모른다
+
+```python
+class InstrumentBase(BaseModel):          # 공통 필드는 여기 한 번만
+    instrument_id: InstrumentId
+    currency: str
+
+class StockInstrument(InstrumentBase):
+    kind: Literal["stock"] = "stock"
+
+class EtfInstrument(InstrumentBase):
+    kind: Literal["etf"] = "etf"
+
+Instrument = Annotated[StockInstrument | EtfInstrument, Field(discriminator="kind")]
+```
+
+| 결정 | 왜 |
+|---|---|
+| **`kind`가 있는 이유** | **직렬화 경계를 건너기 위한 꼬리표다.** JSON에는 클래스가 없어서, 두 종류의 필드가 같으면 읽을 때 어느 것인지 복원할 수 없다. PRD §2.5가 raw dict가 아닌 typed object 복원을 요구한다 |
+| **`Literal`인 이유** | 꼬리표가 클래스와 어긋날 수 없게. `str`이면 `StockInstrument(kind="etf")`가 통과한다 |
+| **클래스 이름을 저장하지 않는 이유** | config가 Python 클래스 이름에 묶여 리팩터가 예전 config를 깨뜨리고, Python 밖에서 읽을 수 없다. `"stock"`은 안정적인 도메인 용어다 |
+| **미리 나누는 이유** | 나중에 나누면 **모든 생성 지점**을 고쳐야 한다. 반대로 **필드 추가는 나중이 싸다**(기본값을 주면 기존 생성 지점이 안 변한다). 그래서 클래스는 미리, 필드는 나중에 |
+| **지금 비어 있는 이유** | 우선주 구분 같은 것은 실제로 필요할 때 넣는다. 미리 넣으면 추측이다 |
+| **`exchange_id`가 없는 이유** | 아래 §6.2가 *"같은 종목이 venue마다 다른 수량 단위"*를 전제한다. venue를 넣으면 종목을 venue마다 다시 선언하게 되어 **"같은 종목"이라는 사실이 깨진다** |
+| **거래 가능 여부를 넣지 않는 이유** | `permitted_sides`가 이미 표현한다. 같은 사실을 두 곳에 두지 않는다 |
+| **`domain`에 두는 이유** | venue 무관이고 Account·Valuation도 참조한다. `exchange/`에 두면 `account`가 `exchange`를 import하게 되어 §10.1을 깬다 |
+
+**언제 하위를 늘리나**: 어떤 종류가 **고유 필드**를 갖게 될 때다. Future(만기·계약 승수·결제통화),
+Perpetual(funding 시각), Bond(만기·쿠폰)가 그 시점이다. `kind`가 discriminator라 그때 추가가 국소적이다.
+
+#### ListingRule — venue별 수량 규칙
+
 ```python
 class ListingRule(BaseModel):
     instrument_id: InstrumentId
@@ -863,6 +929,39 @@ config**가 소유한다. `RunDefinition`에 별도 listing 필드를 두지 않
   거래할 수 있다는 뜻이 아니다. 거꾸로도 마찬가지다.
 - preflight가 intent의 **모든 instrument**에 대해 `exchange.rules()`가 listing을 돌려주는지 검사한다(§12).
   하나라도 없으면 run 시작 전에 실패한다.
+
+#### CostRule — 종목이 아니라 종류에 건다
+
+```python
+class CostRule(BaseModel):
+    rule_id: str
+    kind: InstrumentKind          # ← 종목 id가 아니라 종류
+    side: Side
+    effective_from: datetime
+    effective_to: datetime | None
+    rate: Decimal
+    minimum_cost: Decimal
+```
+
+**결정.** 비용 정책의 선택자는 `(kind, side, 적용 기간)`이다. 3,000종목을 거래해도 주식 규칙 하나와 ETF
+규칙 하나면 된다.
+
+- **왜**: 종목마다 요율을 적으면 세율이 바뀔 때 3,000줄을 고쳐야 하고, `UC-COST-002`의 시기별 요율은
+  종목마다 시계열이 되어 감당할 수 없다.
+- **왜 `kind`가 Instrument에 있고 요율은 Exchange에 있나**: *"삼성전자는 주식이다"*는 venue를 바꿔도 안
+  변하고, *"주식 매도세는 15bp다"*는 KRX의 규칙이다(§2.8).
+
+**모호함을 두 겹으로 막는다.**
+
+```text
+[선언 시]  같은 (kind, side)에 적용 기간이 겹치면  →  config 생성 실패
+[해석 시]  matches = [(kind, side)가 맞고 event_time을 포함하는 규칙]
+           len(matches) == 1 이어야 한다.  0개도 2개도 실패
+```
+
+- **`len(matches) == 1` 하나가 두 요구를 동시에 만족시킨다.** 0개 실패가 `UC-COST-004`(비슷한 종류의
+  정책으로 대체하지 않는다)이고, 2개 이상 실패가 모호한 정책으로 조용히 계산하지 않는 것이다.
+- **UC**: `UC-COST-001`, `UC-COST-002`, `UC-COST-004`
 
 ### 6.3 두 fixture profile
 
@@ -1042,7 +1141,7 @@ data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → E
 
 ```text
 src/vqapr/
-├── domain/                 # ID, money, instrument, 공통 error
+├── domain/                 # ID, money, Instrument(kind별 union), 공통 error
 ├── runtime/                # clock, events(priority), calendar
 ├── data/                   # registration, requirements, store(port), window
 ├── research/
@@ -1471,6 +1570,79 @@ run으로 돌아간다. **path-independent 변형에서는 정확하고 path-dep
 
 ---
 
+### 11.5 ETF와 look-through — 두 축
+
+ETF를 함께 거래하면 **사고파는 것**과 **원하는 노출**이 갈린다. 그 둘을 어떻게 잇는지 따라간다.
+
+검증 대상: `UC-LOOKTHROUGH-001`~`003` · `UC-COST-001` · `UC-COST-004`
+
+#### 두 축
+
+| 축 | 무엇 | 예 |
+|---|---|---|
+| **physical** | 실제로 사고파는 것 | 주식 A·B·C, **ETF X** |
+| **exposure** | 알파가 원하는 경제적 노출 대상 | 주식 A·B·C |
+
+ETF X가 A 50% / B 30% / C 20%를 담으면
+
+$$x = L\,w,\qquad
+L = \begin{array}{c|cccc} & A & B & C & X \\ \hline
+A & 1 & 0 & 0 & 0.5 \\ B & 0 & 1 & 0 & 0.3 \\ C & 0 & 0 & 1 & 0.2 \end{array}$$
+
+A를 5% 직접 들고 X를 10% 들면 **A 노출 = 0.05 + 0.10 × 0.5 = 0.10**이다.
+
+#### 선언
+
+```text
+[Instrument]  StockInstrument("005930", KRW)      ← kind="stock"
+              EtfInstrument("069500", KRW)        ← kind="etf"
+
+[Exchange]    ListingRule: 둘 다 quantity_step=1, permitted_sides={BUY, SELL}
+              CostRule: ("stock", SELL, 2024~) rate=0.0015
+                        ("etf",   SELL, 2024~) rate=0.0
+
+[dataset]     etf_constituents
+              instrument_field = etf_id
+              key_fields       = (available_at, etf_id, constituent_id)
+              fields           = (weight,)          ← 추가 key axis (§4.1)
+```
+
+**ETF 매도세가 0인 것이 `kind="etf"` 하나로 나온다.** 종목마다 요율을 적지 않는다.
+
+#### 흐름
+
+```text
+[run A]  long-short alpha  →  A·B·C에 대한 signed 노출  →  저장
+
+[run C]  enhanced index
+         ① window에서 그 시점의 구성종목을 읽어 L을 만든다   ← StrategyModel이 직접
+         ② desired 노출 = bench + s·active
+         ③ optimize(desired, L=L, lower=0, upper=…, cash_range=…)
+                  → physical w (주식 + ETF)
+         ④ 생성 시 검증 (§5.4)
+         ⑤ Exchange: 주식은 15bp 매도세, ETF는 0bp. kind로 갈린다
+```
+
+#### 확인된 것
+
+| | |
+|---|---|
+| `L`은 누가 만드나 | **StrategyModel.** 패키지는 ETF ticker로 구성종목을 자동 발견하지 않는다(PRD §8.2) |
+| `L`은 어디에 쓰이나 | **목적함수에만.** 제약은 physical `w`에만 건다 |
+| 왜 제약이 physical인가 | 계좌에 남는 것이 physical이고 monitoring이 판정할 대상도 그것이다. 노출은 계산값이라 **매핑이 바뀌면 과거 판정까지 달라진다** |
+| 구성종목이 바뀌면 | dataset이라 `available_at`이 적용된다. 변경을 알 수 있게 된 시점 전에는 보이지 않는다(`UC-LOOKTHROUGH-002`) |
+| 비용은 어떻게 갈리나 | `kind`로 정확히 하나의 `CostRule`이 매칭된다. 못 찾으면 실패(§6.2) |
+
+#### 한계
+
+- **ETF 자체의 노출은 중복 계산되지 않는다.** `L`에 ETF 열이 있고 ETF 행은 없다 — ETF는 수단이지 노출
+  대상이 아니기 때문이다. 만약 ETF 자체를 노출 대상으로도 보고 싶다면 그것은 **다른 `L`**이며
+  StrategyModel의 경제적 정의다.
+- **현금과 lot rounding 잔여는 `L`에 들어가지 않는다.** Account는 그것을 physical cash로만 제공한다
+  (PRD §8.2).
+
+---
+
 ## 12. Run definition과 preflight
 
 ```python
@@ -1496,6 +1668,7 @@ class RunDefinition(BaseModel):
 - instrument listing과 quantity rule 존재
 - 모든 component requirement 충족 가능
 - intent가 다룰 수 있는 모든 instrument에 대해 Exchange가 listing을 갖고 있음 (§6.2)
+- 모든 (instrument 종류, 방향, 실행 시점)에 **정확히 하나의** `CostRule`이 매칭됨 (§6.2)
 - initial account 불변식
 - `initial_memory`가 strict JSON (§5.1.1)
 - schedule 결정성
@@ -1550,12 +1723,12 @@ class RunDefinition(BaseModel):
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
 | `UC-EXEC-001`, `UC-EXEC-002` | §6.1 |
 | `UC-ACADEMIC-001` | §6.2 + §7.2 |
-| `UC-COST-001`~`004` | §6.2 (effective-dated rules) + §8.3 (fallback 금지) |
+| `UC-COST-001`~`004` | §6.2 (`Instrument.kind` + `CostRule` 선택자 + 정확히 하나) + §8.3 |
 | `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §6.4 + §7.1 |
 | `UC-ACCOUNT-HISTORY-001` | §7.3 |
 | `UC-EXEC-003`, `UC-MONITOR-001` | §8.1 (독립 MONITORING callback) |
 | `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.3 (`optimize`) + §5.4 (생성 시 검증) + §11.3 |
-| `UC-LOOKTHROUGH-001`~`003` | §4.2 + §5.2 — StrategyModel이 선언하고 계산. 자동 확장 없음 |
+| `UC-LOOKTHROUGH-001`~`003` | §5.3 (`optimize`의 `L`) + §11.5. StrategyModel이 만들고 패키지는 자동 확장하지 않음 |
 | `UC-ARTIFACT-001`~`003`, `UC-RESEARCH-001`, `UC-REPORT-001` | §9 |
 | `UC-EXTENSION-001`, `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10 |
 | `UC-CONFIG-001` | §12 |
@@ -1619,6 +1792,10 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
 - [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다
 - [ ] fractional/lot 규칙이 `ListingRule`에 있고 `AccountMode`에는 없다
+- [ ] `Instrument`에 venue 정보(`exchange_id`)가 없다
+- [ ] 비용 정책이 종목 id가 아니라 종류에 걸린다
+- [ ] 매칭되는 `CostRule`이 0개거나 2개 이상이면 실패한다
+- [ ] 제약이 physical 보유에만 걸리고 look-through 노출에는 걸리지 않는다
 - [ ] listing이 Exchange의 frozen config에 있고 `RunDefinition`에는 없다
 - [ ] warm-up 구간 candidate가 `DECISION_SKIPPED`로 기록되고, 그 이후의 결측은 실패한다
 - [ ] `LastSessionOfMonth(months=(6,))`가 휴장을 반영한 6월 마지막 거래일에 발화한다

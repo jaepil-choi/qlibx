@@ -1167,8 +1167,8 @@ production state, borrow/locate, collateral, margin 또는 executable real short
 #### UC-COST-001 — 상품과 방향에 따른 거래비용
 
 같은 execution date의 fixture에서 주식과 ETF를 같은 venue/profile로 거래한다. equity SELL tax는 15bp, ETF
-SELL tax는 명시적인 0bp이며 BUY와 SELL policy가 다르다. 각 주문에는 상품과 방향에 맞는 policy가 적용되고,
-fill은 total cost와 **적용 policy identity**를 보존해야 한다.
+SELL tax는 명시적인 0bp이며 BUY와 SELL policy가 다르다. 각 주문에는 **instrument 종류와 방향에** 맞는
+policy가 정확히 하나 적용되고(§8), fill은 total cost와 **적용 policy identity**를 보존해야 한다.
 
 #### UC-COST-002 — Effective-dated 거래비용
 
@@ -1350,6 +1350,24 @@ policy를 결정한다. `long_only`, `hypothetical_short`, borrow-aware short, d
 다만 이 의미는 해당 instrument를 실제로 연구하거나 실행할 때 요구하며, **무관한 dataset registration을 막는
 전역 schema가 되어서는 안 된다.**
 
+#### 정책은 instrument 종류에 걸린다
+
+거래비용, 허용 방향, lifecycle 같은 정책은 **개별 instrument가 아니라 그 종류**에 선언한다. 3,000종목을
+거래해도 주식용 규칙 하나와 ETF용 규칙 하나면 된다.
+
+- **왜**: 종목마다 요율을 적으면 세율이 바뀔 때 3,000줄을 고쳐야 하고, `UC-COST-002`의 시기별 요율은
+  종목마다 시계열이 되어 감당할 수 없다.
+- 종목의 **종류**는 그 종목의 성질이고 **요율**은 venue의 성질이다. 둘은 다른 곳에 선언되며, 정책은
+  종류를 키로 삼아 둘을 잇는다.
+
+#### 적용되는 정책은 정확히 하나여야 한다
+
+한 주문에 적용 가능한 정책이 **0개면 실패**하고 **2개 이상이어도 실패**한다.
+
+- **0개 실패**가 `UC-COST-004`가 요구하는 것이다 — 비슷한 종류의 정책으로 대체하지 않는다.
+- **2개 이상 실패**는 모호한 정책으로 조용히 계산하지 않기 위해서다. 같은 선택자에 적용 기간이 겹치는
+  정책은 **선언 시점에** 거부한다.
+
 현재 `hypothetical_short`는 explicit academic listing, next-session-close PIT price, zero-friction full-fill
 profile, 분리된 signed state ledger에서만 지원한다. physical KRX profile은 계속 long-only이며 real short
 capability를 추론하지 않는다.
@@ -1389,6 +1407,21 @@ user-provided PIT data다. mapping, coverage, stale/revision 처리, normalizati
 StrategyModel이 decision time $t$의 actual portfolio state에서 만든 physical weight를 $p_t$, 자신이 소비한 구성종목
 데이터로 만든 mapping을 $L_t$라 하면 constituent exposure는 예를 들어 $x_t = L_t p_t$로 계산할 수 있다.
 **이 식은 vqapr의 내장 ETF semantics가 아니라 StrategyModel이 선택할 수 있는 계산 예시다.**
+
+#### 구성종목 데이터의 형태
+
+한 시점에 하나의 ETF가 **여러 구성종목 행**을 갖는다. 따라서 §4.1의 **추가 key axis**를 선언해 등록한다.
+그리고 `UC-LOOKTHROUGH-002`가 PIT 소비를 요구하므로 **정적 설정이 아니라 등록된 dataset**이어야 한다 —
+구성이 바뀌는 시점과 그 사실을 알 수 있게 된 시점이 데이터에 있어야 하기 때문이다.
+
+#### 제약은 physical 보유에만 건다
+
+look-through로 계산한 노출에는 제약을 걸지 않는다. **제약은 실제 보유 비중을 대상으로 한다.**
+
+- **왜**: 계좌에 남는 것은 physical 보유이고, monitoring이 실제 위반을 판정하려면 그 대상이어야 한다(§7.1).
+  노출은 계산값이라 **mapping이 바뀌면 과거 판정까지 달라진다.**
+- 두 쓰임이 다르다 — look-through는 *"무엇을 원하는가"*에 쓰이고, 제약은 *"무엇을 보유할 수 있는가"*에
+  쓰인다.
 
 #### UC-LOOKTHROUGH-001 — 명시적 ETF exposure 계산
 

@@ -639,6 +639,21 @@ research values  ──►  weights  ──►  PortfolioIntent
   필요해진다. 그리고 benchmark나 배분 강도를 바꿔볼 때 앞 단계를 다시 실행하지 않아도 된다.
 - **UC**: `UC-ENSEMBLE-001`, `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`
 
+#### 중첩 run은 없다
+
+StrategyModel이 자기 판단 안에서 다른 run을 실행하지 않는다. 파라미터 후보를 각각 backtest해 비교하고
+싶은 요구가 대표적인데, 그것은 위 체인으로 표현한다(§11.4).
+
+| 이유 | |
+|---|---|
+| **시간 소유가 깨진다** | 중첩 run은 중첩 clock이다. Flow 하나가 시간을 소유한다는 §2.1이 무너지고 이벤트 순서가 두 축이 된다 |
+| **재귀에 경계가 없다** | 깊이 제한을 두면 임의의 숫자이고, 두지 않으면 무한이다 |
+| **계산이 곱으로 는다** | 250 판단 × 후보 3개 × 250일 재생 = 187,500 decision-day. 바깥 loop는 750이다. 그리고 중첩은 순차라 병렬화도 안 된다 |
+| **바깥으로 뺄 수 있다** | 후보를 각각 run으로 돌리고 결과를 읽어 고르면 된다. 위 체인 그대로다 |
+
+**PIT도 바깥 쪽이 유리하다.** 후보 성과를 읽는 창이 `t`까지만 보므로 미래 성과를 볼 수 없다. 중첩에서는
+그 경계를 손으로 지켜야 한다.
+
 ### 5.3 `portfolio/` — 순수 계산 leaf
 
 값을 weight로 바꾸는 함수들이다. **전부 순수 함수**이고 같은 import 규칙을 받는다.
@@ -1389,6 +1404,73 @@ turnover-aware한 A가 자기 계좌를 볼 수 있다. **C는 B의 결과를 �
 
 ---
 
+### 11.4 파라미터 선택 — "안에서 돌려보고 싶다"
+
+*"세 파라미터를 각각 backtest해보고 좋은 쪽을 쓴다"*는 요구를 대입한다. 중첩 run이 필요해 보이는 대표적인
+경우다.
+
+검증 대상: `UC-ALPHA-ADAPTIVE-001` · `UC-ALPHA-CHILD-001`
+
+#### 먼저 두 갈래를 가른다
+
+| 하려는 것 | 필요한 것 |
+|---|---|
+| **내 실현 성과로 조절** — "지난 3개월 실제 성과가 나쁘니 바꾼다" | `account_history`(§7.3) + `memory`(§5.1.1). **중첩 불필요, 이미 된다** |
+| **후보를 비교해 선택** — "세 파라미터를 다 돌려보고 고른다" | counterfactual이므로 바깥 loop |
+
+**첫 번째가 더 정직하다.** 무비용 가상 성과가 아니라 **실제 체결과 비용을 겪은 성과**로 판단하기
+때문이다. 가능하면 이쪽을 먼저 검토할 일이다.
+
+#### 두 번째의 흐름
+
+```text
+[run × 3]    변형 StrategyModel (param=1,2,3), 각자 자기 계좌
+             → NAV 시계열 + 배분을 남긴다
+
+[materialize] DataModel: 세 NAV를 읽어 시점별 "그때까지 최선인 후보" 라벨
+              trigger = 리밸런싱 주기
+              → 값이므로 계좌도 execution도 없다(§4.4)
+
+[run]        메타 StrategyModel
+             window: 라벨 + 세 후보의 배분
+             → 선택된 배분을 자기 intent로 → 실행 → 자기 계좌
+```
+
+**전부 기존 조각이다.** 변형 3개는 그냥 run 3개고, NAV·배분이 dataset이 되는 것은 §5.2이며, 라벨이
+DataModel인 것은 §4.4의 판정 기준(값이므로)이고, 메타가 저장된 배분을 구독하는 것은 `UC-ENSEMBLE-001`과
+같은 모양이다.
+
+#### 확인된 것
+
+| | |
+|---|---|
+| PIT | **구조가 지킨다.** 라벨 DataModel의 창이 `t`까지만 보므로 `t` 이후 성과를 볼 수 없다. 중첩에서는 손으로 지켜야 한다 |
+| 계산량 | 후보 3개 × 250일 = 750 decision-day. 중첩은 187,500이다 |
+| 병렬화 | 변형 3개가 독립이라 동시에 돌릴 수 있다 |
+| 재사용 | 후보를 하나 추가해도 기존 셋을 다시 돌리지 않는다 |
+
+#### 한계
+
+**후보가 자기 보유에 의존하면 근사가 된다.** param=2 변형의 배분은 *"처음부터 param=2로 실행되었다면"*의
+보유를 전제로 계산된 것이다. 메타가 중간에 1→2로 바꾸면 실제 계좌에는 param=1의 보유가 있으므로,
+turnover-aware한 변형이라면 잘못된 보유를 기준으로 계산된 배분을 쓰게 된다.
+
+정확히 하려면 메타가 배분이 아니라 **규칙**을 받아 자기 계좌 기준으로 다시 계산해야 하는데, 그것은 중첩
+run으로 돌아간다. **path-independent 변형에서는 정확하고 path-dependent 변형에서는 근사**라는 것을 결과에
+남긴다.
+
+#### 그리고 위험 하나
+
+`decide()` 안에서 후보별로 수익률을 곱해 누적하는 계산을 막을 수는 없다(설계상 내부 계산은 자유다).
+그러나 그 값은 **무비용·즉시체결·현금 무제한**을 암묵적으로 가정하므로, 그것으로 후보를 고르면
+**회전율이 높은 쪽으로 편향된다.**
+
+§2.2가 막으려던 것이 정확히 이것인데, 여기서는 결과를 발표하는 것이 아니라 내부 판단이라 문언에 걸리지
+않는다. **그래서 오히려 조용히 지나간다.** 위 흐름으로 표현하면 각 후보가 실제 체결과 비용을 거치므로
+편향이 사라진다.
+
+---
+
 ## 12. Run definition과 preflight
 
 ```python
@@ -1464,7 +1546,7 @@ class RunDefinition(BaseModel):
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.3 (`cash_range`) + §5.4 (생성 시 검증) |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
-| `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.2 (StrategyModel 체인) + §5.4 (immutable intent + source_refs) |
+| `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.2 (StrategyModel 체인 · 중첩 없음) + §5.4 + §11.4 |
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
 | `UC-EXEC-001`, `UC-EXEC-002` | §6.1 |
 | `UC-ACADEMIC-001` | §6.2 + §7.2 |
@@ -1543,6 +1625,7 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] 선언 없이 가격 coverage에서 session을 만들어내는 경로가 없다
 - [ ] `research`가 `account`/`exchange`/`orders`/`flow`를 import하지 않는다 (import linter)
 - [ ] `decide()`가 반환한 intent가 예외 없이 execution을 통과한다
+- [ ] `decide()` 안에서 다른 run을 실행하는 경로가 없다
 - [ ] DataModel 결과가 execution을 거치지 않는다
 - [ ] StrategyModel이 다른 StrategyModel의 저장된 결과를 `DataRequirement`로 읽는다
 - [ ] 미래 방향 `Lookback` 타입이 존재하지 않는다

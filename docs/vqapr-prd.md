@@ -794,6 +794,15 @@ signal을 publish한다면 DataModel result와 같은 semantic contract를 따�
 일어나고 그 결과가 저장되어 다른 StrategyModel의 입력이 될 수 있다. **배분만 저장하고 실행을 건너뛰는
 경로는 없다**(§2.3). 어느 경우에도 StrategyModel output 자체는 fill도 authoritative actual state도 아니다.
 
+#### 내부 계산이 무엇을 가정하는지
+
+내부 계산은 자유다. 그러나 **판단을 위해 내부에서 만든 성과 추정치는 체결·비용·현금 제약을 거치지 않은
+값**임을 유의해야 한다. 비용이 없다고 가정한 성과로 후보를 고르면 **회전율이 높은 쪽으로 편향된다** —
+실제로는 비용이 잠식할 후보가 좋아 보이기 때문이다.
+
+같은 목적을 §5.4의 방식으로 표현하면 각 후보가 실제 체결과 비용을 거치므로 그 편향이 사라진다. 어느
+경우든 내부 추정치를 portfolio return으로 **발표**하는 것은 §2.2가 금지한다.
+
 §2.7의 built-in weighting 함수들은 공통적으로 instrument별 signed 값을 입력으로 받는다. 이는 **built-in을
 호출하기로 선택한 StrategyModel만 구속하는 사실**이며, StrategyModel이 그 shape의 값을 만들어야 한다는 요구가 아니다.
 built-in을 하나도 쓰지 않는 StrategyModel은 그런 중간값을 만들지 않고 곧바로 target을 구성해도 된다.
@@ -897,6 +906,30 @@ member의 realized outcome을 볼 수 있다(`UC-ALPHA-ADAPTIVE-001`).
 - 같은 StrategyModel logic을 compatible한 여러 DataModel result와 비교한다.
 - 여러 StrategyModel result를 producer 재실행 없이 조합한다.
 - 저장된 배분을 다른 benchmark, 다른 제약, 다른 execution profile로 다시 사용한다.
+
+#### 후보를 비교해 고르는 것도 같은 패턴이다
+
+파라미터 후보 여럿을 비교해 그때그때 나은 것을 쓰고 싶을 수 있다. 이것은 **하나의 판단 안에서 후보를
+돌려보는 것이 아니라** 위와 같은 composition으로 표현한다.
+
+```text
+후보 3개를 각각 실행   →  각자 성과와 배분을 남긴다
+                              ↓
+그 성과를 읽어 시점별 "그때까지 최선인 후보"를 만든다   ← 값이므로 §2.3의 DataModel
+                              ↓
+그 라벨이 가리키는 후보의 배분을 읽어 판단한다          ← StrategyModel
+```
+
+**반복 재학습(§5.1), 체결 규약 비교(`UC-ALPHA-CHILD-001`), 파라미터 선택은 같은 형태다** — 후보를 각각
+실행하고 그 결과를 읽어 조합한다. *"안에서 돌려보고 싶다"*는 요구는 매번 *"밖에서 각각 돌리고 결과를
+조합한다"*로 표현된다.
+
+**한계.** 후보가 자기 보유에 의존하는 경우(turnover-aware 등) 그 후보의 배분은 *"그 후보가 계속
+실행되었다면"*의 보유를 전제로 계산된 것이다. 중간에 후보를 바꾸면 실제 보유와 어긋나므로 근사가 된다.
+이 차이는 결과에서 확인할 수 있어야 한다.
+
+그리고 **자기 실현 성과로 조절하는 것은 이 패턴이 필요 없다.** actual state 이력(§6.6)과 state(§5.7)만으로
+표현되며, 가상 성과가 아니라 실제 체결과 비용을 겪은 성과를 쓰므로 더 정확하다(`UC-ALPHA-ADAPTIVE-001`).
 
 #### UC-ENSEMBLE-001 — 기존 StrategyModel result의 조합
 
@@ -1756,6 +1789,9 @@ hypothetical signed evaluation을 지원한다.
 - user가 제공하지 않은 availability, universe, shortability truth의 자동 추정
 - merger, spin-off, delisting을 포함한 security-master event의 **원천 해석·변환**
 - unbounded autonomous strategy state mutation
+- **중첩 실행** — 하나의 판단 안에서 다른 판단 과정을 실행하는 것. 파라미터 후보를 각각 backtest해
+  비교하는 것이 대표적이다. 같은 목적은 **각 후보를 별도 run으로 실행하고 그 결과를 조합하는 것**으로
+  표현한다(§5.4)
 - **actual state에 의존하는 model 학습** — 자기 매매 결과를 보고 정책을 갱신하는 방식(강화학습 계열).
   §2.3이 DataModel을 execution 경로 밖에 둘 수 있는 것은 학습이 계좌를 보지 않기 때문이며, 이 예외를 열면
   파생 데이터의 재사용 가능성이 무너진다
@@ -1779,6 +1815,15 @@ executable short에 요구하는 것과 같은 조건이다.
 `UC-CASHFLOW-001`의 future 항목이다). 무위험자산 수익을 반영하려면 §4.4로 등록한 자산을 **포지션으로**
 보유한다. 그러면 무엇을 얼마나 들었는지가 result의 dependency로 남는다. package가 유휴자본에 조용히 수익을
 붙이지 않는다.
+
+#### 왜 중첩 실행을 범위 밖에 두는가
+
+하나의 판단 안에서 다른 판단 과정을 실행하면 **시간을 진행시키는 주체가 둘 이상이 된다.** 깊이에 경계가
+없어지고, 계산량이 후보 수와 재생 구간의 곱으로 늘어난다.
+
+그리고 **바깥에서 표현할 수 있다.** 후보를 각각 실행하고 그 결과를 읽어 고르는 것은 이미 지원하는
+composition이다(§5.4). 바깥으로 빼면 각 후보가 실제 체결과 비용을 거치고, 후보 성과를 읽는 시점 경계도
+다른 관측과 같은 방식으로 지켜진다.
 
 ### 13.3 Future characterization — current support가 아님
 

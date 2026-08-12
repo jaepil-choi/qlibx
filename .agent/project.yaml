@@ -1,7 +1,7 @@
 schema_version: 1
 
 project:
-  name: qlibx
+  name: vqapr
   kind: python-package
 
 canonical_documents:
@@ -13,7 +13,7 @@ non_authoritative_directories:
 commands:
   environment_manager: uv
   install: uv sync
-  import: uv run python -c "import qlibx"
+  import: uv run python -c "import vqapr"
   build: uv build
 
 workflow:

@@ -1,41 +1,105 @@
 [project]
-name = "qlibx"
+name = "vqapr"
 version = "0.1.0"
-description = "Qlib-native alpha research framework"
+description = "Point-in-time quantitative research and portfolio execution framework"
 readme = "README.md"
 authors = [
     { name = "Jaepil.Choi", email = "chljeffreyz@gmail.com" }
 ]
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.15"
 dependencies = [
-    "cvxpy>=1.7,<2",
-    "duckdb>=1.3,<2",
-    "pandas>=2.2,<3",
-    "pyarrow>=20,<24",
-    "pydantic>=2.9,<3",
+    "cvxpy>=1.9,<2",
+    "duckdb>=1.5,<2",
+    "pandas>=3,<4",
+    "pyarrow>=25,<26",
+    "pydantic>=2.13,<3",
     "pyyaml>=6,<7",
 ]
 
 [project.scripts]
-qlibx = "qlibx:main"
+vqapr = "vqapr:main"
 
 [build-system]
-requires = ["uv_build>=0.11.21,<0.12.0"]
+requires = ["uv_build>=0.12,<0.13"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "pytest>=9,<10",
+    "import-linter>=2.13,<3",
+    "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
 ]
 
+[tool.importlinter]
+root_package = "vqapr"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "domain does not depend on storage or concrete services"
+type = "forbidden"
+source_modules = ["vqapr.domain"]
+forbidden_modules = [
+    "vqapr.data",
+    "vqapr.exchange",
+    "vqapr.project",
+    "cvxpy",
+    "duckdb",
+    "pandas",
+    "pyarrow",
+    "yaml",
+]
+
+[[tool.importlinter.contracts]]
+name = "portfolio calculation is a pure leaf"
+type = "forbidden"
+source_modules = ["vqapr.portfolio.weighting", "vqapr.portfolio.optimize"]
+forbidden_modules = [
+    "vqapr.data",
+    "vqapr.account",
+    "vqapr.exchange",
+    "vqapr.runtime",
+    "vqapr.flow",
+    "vqapr.strategy",
+]
+
+[[tool.importlinter.contracts]]
+name = "research depends only on data and domain"
+type = "forbidden"
+source_modules = ["vqapr.research"]
+forbidden_modules = [
+    "vqapr.account",
+    "vqapr.exchange",
+    "vqapr.orders",
+    "vqapr.flow",
+    "vqapr.strategy",
+]
+
+[[tool.importlinter.contracts]]
+name = "strategy does not depend on execution state owners"
+type = "forbidden"
+source_modules = ["vqapr.strategy"]
+forbidden_modules = ["vqapr.account", "vqapr.exchange"]
+
+[[tool.importlinter.contracts]]
+name = "account does not depend on strategy or exchange implementations"
+type = "forbidden"
+source_modules = ["vqapr.account"]
+forbidden_modules = ["vqapr.strategy", "vqapr.exchange"]
+
 [tool.pytest.ini_options]
+minversion = "9.1"
 testpaths = ["tests"]
+strict_config = true
+strict_markers = true
+markers = [
+    "real_data: requires an explicitly provisioned and versioned external dataset",
+    "concurrency: exercises operating-system process, thread, or lock behavior",
+]
 
 [tool.ruff]
-exclude = [".agents", "attempts", "references"]
+exclude = [".agents", "attempts", "docs", "references"]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

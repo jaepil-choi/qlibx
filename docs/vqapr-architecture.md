@@ -13,9 +13,11 @@
 
 ```mermaid
 flowchart LR
-    Cal[SessionCalendar] --> Trig[StrategyModel TriggerPolicy]
-    Trig --> S[StrategyModel.decide]
-    Data[PIT View] --> S
+    Raw[(등록된 dataset)] --> DM[DataModel.compute]
+    DM -->|값| Raw
+    Raw --> S[StrategyModel.decide]
+    Cal[SessionCalendar] --> Trig[TriggerPolicy]
+    Trig --> S
     Acc[(Account)] -->|snapshot| S
     S --> I[PortfolioIntent]
     I --> P[OrderPlanner]
@@ -26,10 +28,14 @@ flowchart LR
     F --> C[Account.commit]
     C --> M[Valuation.mark]
     M --> Acc
+    C -->|배분 결과가 dataset으로| Raw
 ```
 
 - 위 경로를 통과하지 않고 return/NAV/PnL/turnover를 만드는 코드는 없다. — PRD §2.2
-- DataModel, feature, label, IC 같은 research 연산은 이 척추에 **들어오지 않고** 끝난다.
+- **DataModel은 척추에 들어오지 않는다. StrategyModel은 반드시 통과한다.** 이것이 두 역할의 판정
+  기준이다(PRD §2.3).
+- StrategyModel의 결과도 dataset이 되므로 **다른 StrategyModel이 그것을 읽을 수 있다**(§5.2).
+  그림의 마지막 화살표가 그것이다.
 
 ### 1.2 여섯 layer
 
@@ -420,12 +426,14 @@ class DataModel(Model):
 
 | | 공유 | DataModel | StrategyModel |
 |---|---|---|---|
-| `trigger()` | ✅ | | |
-| `requirements()` | ✅ | | |
-| `memory` | ✅ | | |
-| `warmup()` | | ✗ | ✅ |
+| `trigger()` · `requirements()` · `memory` | ✅ | | |
+| **execution 통과** | | **✗ 거치지 않는다** | **✅ 반드시 거친다** |
+| 출력 | | 값 (rows) | 배분 (`PortfolioIntent`) |
 | account 접근 | | ✗ | ✅ |
-| 출력 | | rows | `PortfolioIntent` |
+| `warmup()` | | ✗ | ✅ |
+
+**판정 기준은 execution 통과 여부다.** 아래 세 행은 그 결과다 — 배분은 체결될 수 있으므로 계좌가 필요하고,
+값은 체결될 것이 없으므로 계좌가 없다(PRD §2.3). **계좌 접근으로 두 역할을 가르면 틀린다.**
 
 **공유 항목의 해석 코드는 하나다.** `TriggerPolicy → 시점 목록` 변환과 memory 정규화·스냅샷은 각각 한
 군데에만 존재한다. 두 종류가 같은 선언을 하되 그것을 해석하는 코드를 두 벌 두면, 새 trigger를 추가할 때
@@ -435,7 +443,9 @@ class DataModel(Model):
 
 **data → data.** DataModel은 data layer를 넓히는 장치이지 execution 경로의 단계가 아니다.
 
-- **account를 안 받는다.** 받는 순간 결과가 그 run에 묶여 여러 소비자가 나눠 쓸 수 없다.
+- **체결될 것이 없다.** 시가총액이나 베타를 체결한다는 말은 성립하지 않는다. 그래서 계산이 execution
+  앞에서 끝나고, 그 결과를 여러 소비자가 나눠 쓸 수 있다.
+- **account를 안 받는 것은 그 결과다.** 받으면 결과가 그 run에 묶여 나눠 쓸 수 없게 된다.
 - **진입점이 다르다.** `materialize()`와 `run()`. 한 번 materialize한 결과를 여러 run이 공유한다.
 - **없어도 된다.** StrategyModel이 같은 계산을 직접 수행해도 된다(PRD §2.3). DataModel은 공유와 절약을
   위한 선택이다.
@@ -495,6 +505,19 @@ class StrategyModel(Model):
 
 - `StrategyModelContext`는 `window`, `event`, `universe`, `calendar`와 account 접근만 준다(§4.3).
   Clock·Store·Exchange·mutable Account는 없다.
+
+#### 실행을 건너뛸 수 없다
+
+`decide()`가 반환한 `PortfolioIntent`는 **반드시 §6의 execution을 통과한다.** 배분을 만들기만 하고 저장하는
+경로는 없다.
+
+- **왜**: 배분은 체결될 수 있고, 체결되면 return이 생긴다(PRD §2.2). 실행을 건너뛰면 그 return이 어떤
+  체결·비용·계좌 상태에서 나왔는지 말할 수 없게 된다.
+- **비용이 문제라면 profile을 바꾼다.** zero-friction academic profile은 비용 0에 전량 체결이지만
+  **체결·계좌 반영·feedback은 그대로 일어난다.** 그래서 turnover-aware한 전략이 자기 계좌를 볼 수 있고,
+  adaptive ensemble이 member의 realized outcome을 볼 수 있다.
+- **hold도 통과한다**(§5.5). delta 0인 `OrderBatch`가 되고 no-trade 진단만 남는다.
+- 이것이 DataModel과의 판정 기준이다(§4.4).
 
 **calendar view.** Account snapshot과 같은 급의 읽기 전용 surface다. StrategyModel이 판단 시점의 **성질**을
 물을 수 있다 — 이번 달 몇 번째 거래일인가, 분기 첫 거래일인가, 직전 형성일로부터 몇 세션 지났는가.
@@ -592,6 +615,29 @@ research values  ──►  weights  ──►  PortfolioIntent
 > built-in weighting 함수는 공통적으로 instrument별 signed 값을 받는다. 이는 **built-in을 부르는 StrategyModel만
 > 구속하는 사실**이며 `decide()`의 요구 shape가 아니다. built-in을 쓰지 않는 StrategyModel은 그런 중간값을 만들지
 > 않아도 된다.
+
+#### 3단 바깥 — StrategyModel이 StrategyModel의 결과를 읽는다
+
+위 3단은 **하나의 `decide()` 안**이다. 그 바깥에 체인이 있다.
+
+```text
+[StrategyModel A]  research values → weights → Intent → 실행 → 저장된 결과
+                                                                     │
+[StrategyModel B]  ◄──────── DataRequirement로 읽음 ─────────────────┘
+                   research values → weights → Intent → 실행 → 저장된 결과
+                                                                     │
+[StrategyModel C]  ◄─────────────────────────────────────────────────┘
+```
+
+- **저장된 결과를 읽는 것은 특별한 일이 아니다.** 그것도 dataset이므로 `DataRequirement` 하나로 읽는다(§4.2).
+  `ArtifactRequirement` 같은 별도 타입이 없는 이유가 여기에도 적용된다.
+- **run은 각자 자기 계좌를 갖는다.** C는 B의 **결과**를 읽지 B의 **계좌**를 읽지 않는다. `UC-ALPHA-PATH-001`이
+  account A와 account B를 구분하는 것이 이 뜻이다 — A의 배분이 계좌 A 기준으로 만들어졌고 계좌 C에서
+  재계산된 것이 아님을 lineage가 보존해야 한다.
+- **왜 한 `decide()` 안에서 변환하지 않나**: PRD §2.1의 *"signed alpha를 덮어쓰지 않는다"*를 구조가 지킨다.
+  한 계산 안에서 long-short를 long-only로 바꾸면 원본이 중간값으로 사라지고, 그것을 보존하려면 별도 장치가
+  필요해진다. 그리고 benchmark나 배분 강도를 바꿔볼 때 앞 단계를 다시 실행하지 않아도 된다.
+- **UC**: `UC-ENSEMBLE-001`, `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`
 
 ### 5.3 `portfolio/` — 순수 계산 leaf
 
@@ -1089,7 +1135,7 @@ decision 03-06 04:00, execution 03-06 15:30.
 `DataRequirement`로 읽는 것이고, PIT 처리도 원본과 같은 경로를 탄다(§4.2). 계산이 몇 단으로 이어져도
 개념이 늘지 않는다.
 
-#### 왜 membership이 DataModel artifact인가
+#### 왜 membership을 별도 DataModel로 두는가
 
 6개 run의 StrategyModel이 각자 breakpoint를 다시 계산하면 미묘하게 갈릴 수 있다. **membership을 artifact로
 만들면 6개 run이 같은 버킷을 썼다는 사실이 lineage로 증명된다.**
@@ -1279,12 +1325,38 @@ C  −2% →  0%   하한          현금 −2%
 
 **"3%를 어디로 보내나"라는 질문이 성립하지 않는다.**
 
-#### 세 시점
+#### alpha는 별도 run에서 온다
+
+enhanced index는 **저장된 배분을 구독하는 StrategyModel**이다(§5.2). 한 `decide()` 안에서 long-short를
+long-only로 바꾸지 않는다.
 
 ```text
-[판단]     ctx.window에서 벤치마크·거래가능 여부를 읽는다
-           ctx.account()에서 현재 비중을 읽는다
-           optimize(desired, lower=0, upper=max(10%, bench), frozen=…, cash_range=…)
+[run A]  long-short alpha            account A
+         window: 가격 · 재무
+         → signed weights → Academic Exchange (cost 0) → 저장된 결과
+
+[run B]  ensemble (선택)             account B
+         window: A와 다른 member의 저장된 결과
+         → combined weights → Academic Exchange → 저장된 결과
+
+[run C]  enhanced index              account C
+         window: B의 저장된 결과 + benchmark + 거래가능 여부
+         account: 현재 physical 비중
+         → optimize(desired = bench + s·active, lower=0,
+                    upper=max(10%, bench), frozen=…, cash_range=…)
+         → 생성 시 검증 (§5.4)
+         → KRX Exchange → fill → commit
+```
+
+**A와 B도 실행된다.** zero-friction이라 비용은 0이지만 계좌·NAV·feedback은 실제로 생기고, 그래서
+turnover-aware한 A가 자기 계좌를 볼 수 있다. **C는 B의 결과를 읽지 B의 계좌를 읽지 않는다.**
+
+#### 세 시점 (run C 안에서)
+
+```text
+[판단]     window에서 벤치마크·거래가능 여부·A(또는 B)의 배분을 읽는다
+           account C의 현재 비중을 읽는다
+           optimize(…)
                    ↓
            PortfolioIntent 생성 시 독립 검증 (§5.4)
                    Σw + cash = 1 · 상하한 · 현금 범위 · frozen 불변
@@ -1308,6 +1380,8 @@ C  −2% →  0%   하한          현금 −2%
 | 거래정지 종목 | 제외가 아니라 `w_j = w⁰_j` 제약. §11.2 확인 2의 답이 여기 있다 |
 | solver를 믿나 | 아니다. §5.4의 생성 시 검증이 독립적으로 다시 판정한다 |
 | 제약 평가 위치 | **판단 시점 하나.** execution은 체결만 한다 |
+| alpha는 어디서 오나 | **별도 run.** C가 저장된 배분을 구독한다(§5.2) |
+| A·B도 실행되나 | **된다.** zero-friction이라 비용은 0이지만 계좌·NAV·feedback은 생긴다 |
 
 이 대입으로 오래 열려 있던 **budget과 cash 표현** 결정이 닫혔다. 열려 있던 이유가 *"조정이 실현 budget을
 바꾼다"*였는데, **조정이 아니라 제약 하 구성**이므로 의도(선언한 범위)와 실현(결정된 값)이 어긋나는 것이
@@ -1385,12 +1459,12 @@ class RunDefinition(BaseModel):
 | `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger vocabulary · warm-up skip) |
 | `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
-| `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · account 없음 · materialize 진입점) |
+| `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · execution 거치지 않음 · materialize 진입점) |
 | `UC-FACTOR-001` | §11.1 (패턴) + §11.2 (전체 규모 검증) |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.3 (`cash_range`) + §5.4 (생성 시 검증) |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
-| `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.4 (immutable intent + source_refs) + §12 |
+| `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.2 (StrategyModel 체인) + §5.4 (immutable intent + source_refs) |
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
 | `UC-EXEC-001`, `UC-EXEC-002` | §6.1 |
 | `UC-ACADEMIC-001` | §6.2 + §7.2 |
@@ -1468,6 +1542,9 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] `LastSessionOfMonth(months=(6,))`가 휴장을 반영한 6월 마지막 거래일에 발화한다
 - [ ] 선언 없이 가격 coverage에서 session을 만들어내는 경로가 없다
 - [ ] `research`가 `account`/`exchange`/`orders`/`flow`를 import하지 않는다 (import linter)
+- [ ] `decide()`가 반환한 intent가 예외 없이 execution을 통과한다
+- [ ] DataModel 결과가 execution을 거치지 않는다
+- [ ] StrategyModel이 다른 StrategyModel의 저장된 결과를 `DataRequirement`로 읽는다
 - [ ] 미래 방향 `Lookback` 타입이 존재하지 않는다
 - [ ] 계산 결과의 `available_at`을 생산자가 적을 수 없다
 - [ ] memory를 쓴 DataModel의 출력에 순차 생성 표시가 남는다

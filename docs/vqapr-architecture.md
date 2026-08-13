@@ -624,15 +624,15 @@ StrategyModel은 여기에 실행 문맥을 더 받는다.
 class StrategyModelContext(Protocol):
     window: ModelWindow
     calendar: CalendarView
-    recorder: StrategyRecorder
     def account(self) -> AccountSnapshot: ...
     def account_history(self, requirement: HistoryRequirement) -> AccountHistory: ...
     def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
 ```
 
 - **DataModel에는 `account`가 없다.** 있으면 결과가 그 run에 묶여 재사용할 수 없게 된다(PRD §2.3).
-- memory는 창에 없다. Flow가 시작 시 `model.memory`에 넣어주므로 `self.memory`로 읽는다(§5.1.1).
-  읽는 경로를 둘로 두지 않는다.
+- memory와 recorder는 창에도 context에도 없다. Flow가 시작 시 `model`에 넣어주므로 `self.memory`,
+  `self.recorder`로 쓴다(§5.1.1, §9.1). **읽고 쓰는 경로를 둘로 두지 않는다** — 두 종류가 공유하는
+  것이라 한쪽에만 있는 자리에 두면 다른 쪽이 다른 경로를 갖게 된다.
 - 창은 실제 access를 기록해 lineage를 만든다. **읽지 않은 dataset은 dependency가 아니다.**
 - `account_history`가 `memory`와 **독립**인 것이 핵심 — `UC-ACCOUNT-HISTORY-001`은 state 없이
   stop-loss가 가능해야 한다고 요구한다.
@@ -642,8 +642,10 @@ class StrategyModelContext(Protocol):
 ```python
 class Model(ABC):                                        # 공통 부모
     memory: ModelMemory = None
+    recorder: Recorder                                   # write-only (§9.1)
     def trigger(self) -> TriggerPolicy: ...
     def requirements(self) -> tuple[DataRequirement, ...]: ...
+    def tables(self) -> tuple[TableSpec, ...]: ...       # 기록할 것을 미리 선언
 
 class DataModel(Model):
     def compute(self, window: ModelWindow) -> Rows: ...
@@ -651,7 +653,7 @@ class DataModel(Model):
 
 | | 공유 | DataModel | StrategyModel |
 |---|---|---|---|
-| `trigger()` · `requirements()` · `memory` | ✅ | | |
+| `trigger()` · `requirements()` · `memory` · `recorder` | ✅ | | |
 | **execution 통과** | | **✗ 거치지 않는다** | **✅ 반드시 거친다** |
 | 출력 | | 값 (rows) | 배분 (`PortfolioIntent`) |
 | account 접근 | | ✗ | ✅ |
@@ -663,6 +665,23 @@ class DataModel(Model):
 **공유 항목의 해석 코드는 하나다.** `TriggerPolicy → 시점 목록` 변환과 memory 정규화·스냅샷은 각각 한
 군데에만 존재한다. 두 종류가 같은 선언을 하되 그것을 해석하는 코드를 두 벌 두면, 새 trigger를 추가할 때
 한쪽만 고치는 사고가 난다. StrategyModel 고유 부분은 §5.1에 있다.
+
+#### 왜 DataModel에도 recorder가 있나
+
+출력으로 표현할 수 없는 것이 생기기 때문이다. **모양이 다르다.**
+
+```text
+출력   살아남은 종목당 한 행
+진단   "이 30종목을 왜 뺐는가"      ← 카디널리티도 key도 다르다
+```
+
+§11.1이 membership DataModel에게 breakpoint 값을 **컬럼으로** 남기라고 한 것은 그것이 출력과 같은 모양이기
+때문이다. 제외 사유는 그렇지 않다.
+
+- **recorder는 출력이 아니다.** `compute()`가 반환한 `Rows`만 등록된 dataset이 되고, 기록은 별도 table로
+  간다(§9.1). 둘을 섞으면 소비자가 진단 행까지 데이터로 읽는다.
+- **memory와 다르다.** memory는 다음 계산으로 이어지는 상태이고 recorder는 되읽을 수 없다. 그래서
+  recorder는 결과를 바꾸지 못하고, path-dependent 표시의 대상도 아니다.
 
 #### DataModel이 Data layer에 있는 이유
 
@@ -728,8 +747,10 @@ class StrategyModel(Model):
     def decide(self, context: StrategyModelContext) -> PortfolioIntent: ...
 ```
 
-- `StrategyModelContext`는 `window`, `event`, `universe`, `calendar`, account 접근과 strategy-specific evidence를
-  기록하는 write-only `recorder`만 준다(§4.3, §9). Clock·Store·Exchange·mutable Account는 없다.
+- `StrategyModelContext`는 `window`, `event`, `universe`, `calendar`와 account 접근만 준다(§4.3).
+  Clock·Store·Exchange·mutable Account는 없다.
+- 기록은 context가 아니라 `self.recorder`로 한다(§4.4, §9.1). **두 종류가 공유하는 것이므로 StrategyModel
+  쪽에만 있는 자리에 두지 않는다.**
 - `recorder`는 읽을 수 없으며 `memory`나 `PortfolioIntent`의 일부가 아니다.
 
 #### 실행을 건너뛸 수 없다
@@ -1649,25 +1670,104 @@ data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → E
 - artifact는 producer의 private class 없이 typed object로 읽히고 validation된다 → `UC-ARTIFACT-001`
 - report는 **intended / requested / dealt / committed / marked**를 나란히 보여준다 → `UC-REPORT-001`
 
-### 9.1 Strategy diagnostic recorder
+### 9.1 Diagnostic recorder
 
 ```python
-class StrategyRecorder(Protocol):
+class Recorder(Protocol):
     def append(self, table_id: str, row: Mapping[str, Scalar]) -> None: ...
     def append_batch(self, table_id: str, rows: Rows) -> None: ...
 ```
 
-StrategyModel은 run 시작 전에 고정된 `TableSpec`에 따라 diagnostic row 또는 batch를 write-only recorder에
-추가할 수 있다. schema는 portable scalar type으로 제한하며, Flow가 run·strategy·decision time과 sequence
-identity를 덧붙인다.
+Model은 run 시작 전에 고정된 `TableSpec`에 따라 diagnostic row 또는 batch를 write-only recorder에 추가할 수
+있다. schema는 portable scalar type으로 제한한다. **두 종류가 공유하며** 경로는 `self.recorder`다(§4.4).
 
-한 `decide()`에서 기록한 row는 해당 invocation의 intent와 memory 검증이 성공한 뒤에만 정상 evidence로
-확정된다. artifact backend는 row 수 또는 buffer byte 한도에 도달하면 immutable chunk로 flush하고,
-finalize에서 chunk manifest와 metadata를 원자적으로 publish한다. staging chunk만 존재하는 incomplete table은
-reusable artifact로 보이지 않는다.
+한 invocation에서 기록한 row는 그 invocation의 결과 검증이 성공한 뒤에만 정상 evidence로 확정된다.
+artifact backend는 row 수 또는 buffer byte 한도에 도달하면 immutable chunk로 flush하고, finalize에서 chunk
+manifest와 metadata를 원자적으로 publish한다. staging chunk만 존재하는 incomplete table은 reusable artifact로
+보이지 않는다.
 
 buffer 크기와 compression은 storage tuning이며 경제적 run identity가 아니다. 예를 들어 10,000 rows 또는
 64 MiB 중 먼저 도달한 조건으로 flush할 수 있다. → `UC-REPORT-002`
+
+#### Flow가 봉투를 덧붙인다
+
+user가 쓴 컬럼 옆에 **Flow가 다섯을 찍는다.**
+
+```text
+run_id        어느 run
+producer_id   누가 썼나 (strategy_id 또는 datamodel_id)
+stage         §3.2의 event 종류 — 이 timestamp가 어느 축에 있나
+event_time    그 stage의 evaluation time
+sequence      같은 (stage, event_time) 안의 순서
+```
+
+##### `stage`는 "누가 돌았나"가 아니라 "어느 clock인가"다
+
+나중에 테이블을 여는 쪽에서는 timestamp 컬럼 하나가 보이는데, 그것이 무슨 시각인지 알 방법이 없다.
+
+```text
+2024-03-06 04:00   판단한 시각
+2024-06-28 15:30   그 값이 유효해지는 시각        ← DataModel의 trigger
+```
+
+**§3.1이 세 시간축을 분리한 것과 같은 문제다** — 어느 축인지 모르는 timestamp는 timestamp가 아니다.
+§3.4가 이미 두 종류의 질문이 다르다고 못 박아 놨다: StrategyModel은 *언제 판단하는가*를, DataModel은
+*어느 시점의 값을 만드는가*를 선언한다. 두 테이블의 timestamp를 같은 뜻으로 읽으면 틀린다.
+
+- **vocabulary는 §3.2를 그대로 쓴다.** `DATA_AVAILABLE → DECISION → EXECUTION → FILL_COMMIT → VALUATION
+  → MONITORING → FINALIZE`. 자유 문자열로 두면 `"strategy"`/`"STRATEGY"`/`"decide"`가 섞이고 읽는 쪽이
+  정규화하게 된다.
+- 지금 실제로 나타나는 값은 둘이다. **집합을 미리 열어두되 기록 지점을 열지는 않는다** — 아래 참고.
+
+##### 왜 Flow가 찍나
+
+§4.5가 `available_at`에 대해 말한 것과 같은 논리다.
+
+> 생산자가 주장하지 않는다. 실제로 읽은 것에서 나오므로 **위조할 수 없다.**
+
+Model이 자기 timestamp를 쓸 수 있으면 아무 값이나 쓸 수 있고, 그러면 읽는 쪽이 믿을 수 없다. **Flow는
+자기가 지금 어느 이벤트를 dispatch 중인지 알므로** Flow가 찍는다. recorder가 write-only인 것도 같은
+이유에 붙는다.
+
+##### 예약 컬럼 — 선언 시점에 막는다
+
+위 다섯 이름은 예약이다. `TableSpec`이 그중 하나를 선언하면 **run 시작 전에 실패한다.**
+
+- **왜 선언 시점인가**: 쓰는 시점에 막으면 이미 그 이름으로 코드를 짠 뒤다. §6.2가 `CostRule`의 기간
+  겹침을 선언 시점에 거부하는 것과 같은 자리다.
+- **없으면**: model이 자기 `stage` 컬럼으로 진짜 것을 가릴 수 있다.
+
+`sequence`는 **(stage, event_time) 안에서** 센다. 그래야 한 판단 안에서 세 번째로 쓴 행이 세 번째로
+복원된다.
+
+#### 기록 테이블은 dataset으로 읽는다
+
+publish된 table은 §4.1의 등록 계약을 따르는 dataset이며, reporting도 다른 Model도 `DataRequirement`
+하나로 읽는다.
+
+- **왜 새 경로를 안 만드나**: §4.2가 이미 정했다 — *"`ArtifactRequirement`를 만들지 않는다. 계산 결과는
+  dataset이다."* 기록 테이블도 같다. producer를 몰라도 읽히고, PIT 처리가 한 곳에만 있다.
+- **buffered-until-finalize가 여기서 맞아떨어진다.** run 중에는 아무것도 보이지 않으므로 같은 run 안에서
+  자기 기록을 되읽는 경로가 **구조적으로** 없다. reporting은 run이 끝난 뒤에 읽고, 다른 전략이 소비하는
+  것은 §5.2의 run 경계 그대로다.
+
+#### 두 가지를 열지 않는다
+
+**① execution 단계에 free-form 기록을 두지 않는다.** `stage` 집합에 `EXECUTION`이 있는 것과 execution
+코드에 recorder를 주는 것은 다르다.
+
+- 체결 쪽 진단은 **이미 구조화되어 있다.** §6.4의 `FillBatch`가 requested/dealt와 세 가지 zero-dealt
+  사유를, §6.1이 clipping 진단을 담는다.
+- 자유 형식을 얹으면 **같은 사실을 표현하는 방법이 둘**이 되고 읽는 쪽이 어느 것을 봐야 하는지 모른다.
+- `stage`는 timestamp를 해석하기 위한 것이지 기록 지점을 늘리기 위한 것이 아니다.
+
+**② 기록 테이블은 return의 출처가 될 수 없다.** recorder는 자유 형식 side channel이라 **두 번째 결과
+표면**이 되기 쉽다. `memory`가 두 번째 상태가 되는 것은 write-only가 막지만, 두 번째 결과가 되는 것은
+막지 않는다. 진단 테이블에 weight와 수익률을 적고 그것으로 성과를 보고하면 §2.2의 척추를 우회한다.
+→ PRD §5.3, §10.2
+
+`TableSpec` 위반은 **조용히 행을 버리는 것이 아니라 run 실패**다. 기록이 결과를 바꾸면 안 되지만 schema
+위반은 드러나야 하고, 결정적이므로 재현에 문제가 없다.
 
 ---
 
@@ -2502,8 +2602,14 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] StrategyModel이 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
 - [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다
-- [ ] strategy diagnostic recorder는 write-only이고, staging chunk만 존재하는 incomplete table을 reusable artifact로
+- [ ] diagnostic recorder는 write-only이고, staging chunk만 존재하는 incomplete table을 reusable artifact로
   노출하지 않는다
+- [ ] DataModel과 StrategyModel이 같은 `self.recorder` 경로를 쓴다
+- [ ] 기록된 모든 행에 `run_id`·`producer_id`·`stage`·`event_time`·`sequence`가 붙고 Model이 그것을 쓰지 못한다
+- [ ] `TableSpec`이 예약 컬럼 이름을 선언하면 run 시작 전에 실패한다
+- [ ] `stage`가 §3.2의 event 종류이고 자유 문자열이 아니다
+- [ ] 기록 테이블이 `DataRequirement`로 읽히고 별도 조회 경로가 없다
+- [ ] execution 코드에 free-form recorder가 없다 (체결 진단은 `FillBatch`에만 있다)
 - [ ] fractional/lot 규칙이 `ListingRule`에 있고 `AccountMode`에는 없다
 - [ ] `Instrument`에 venue 정보(`exchange_id`)가 없다
 - [ ] 비용 정책이 종목 id가 아니라 종류에 걸린다

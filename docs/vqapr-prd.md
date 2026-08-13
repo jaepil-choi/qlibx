@@ -943,6 +943,17 @@ statistical factor-return estimate는 regression specification과 input data를 
 portfolio의 return을 담은 materialized data는 **그것을 산출한 execution과 actual state를 dependency로** 갖는다.
 산출 경로 없이 portfolio return 시계열을 등록하지 않는다.
 
+#### 진단 기록은 result category가 아니다
+
+Model이 판단 과정에서 남긴 기록(§9.4)은 위 표의 어느 category도 아니다. **무엇이든 담을 수 있는 자유
+형식이기 때문에** category가 보장하는 axis, unit, time semantics를 선언하지 않으며, 따라서 category가 하는
+일 — 서로 다른 의미를 섞지 않게 막는 것 — 을 하지 못한다.
+
+그래서 **진단 기록에 담긴 값으로 portfolio return, NAV, PnL, turnover를 주장하지 않는다.** weight와
+수익률을 기록해 두고 그것을 성과로 보고하면 §2.2의 execution spine을 우회하는 것이며, 그 값은 체결·비용·
+현금 제약을 거치지 않았으므로 이 제품에서는 portfolio return이 아니다. 성과를 주장하려면 execution
+result에서 나와야 한다.
+
 #### Signal과 weight는 shape가 같고 의미가 다르다
 
 둘 다 instrument별 signed 값이므로 타입이 서로를 막아주지 않는다. 그러나 signal은 **확신의 방향과 크기**를,
@@ -1674,14 +1685,22 @@ report는 최소한 다음을 구분해 보여준다.
 하나의 backtest result를 table, chart, machine-readable report로 표현한다. renderer가 달라도 return, cost,
 exposure, failure count의 underlying value와 lineage는 같아야 한다.
 
-#### UC-REPORT-002 — Strategy diagnostic table
+#### UC-REPORT-002 — Model diagnostic table
 
-StrategyModel은 판단 과정에서 사용한 signal, 선택 여부, 원 weight와 사유 같은 strategy-specific 정보를
-user-declared typed schema에 따라 기록할 수 있다.
+**DataModel과 StrategyModel 모두** 계산 과정에서 사용한 signal, 선택 여부, 원 weight, 제외 사유 같은
+정보를 user-declared typed schema에 따라 기록할 수 있다. 출력으로 표현할 수 없는 것이 있기 때문이다 —
+어느 종목을 왜 제외했는지는 살아남은 종목당 한 행인 출력에 담기지 않는다.
 
-기록된 값은 Model state나 Account authority가 아니며 StrategyModel이 다시 읽을 수 없다. run이 끝난 뒤에는
-producer를 재실행하지 않고 report와 분석에서 사용할 수 있는 versioned table artifact로 조회할 수 있어야 한다.
-실패하거나 중단된 publication의 일부 row를 complete result로 노출하지 않는다.
+기록된 각 행에는 **어느 run의 누가, 어느 시각에, 그 시각이 어떤 종류의 시각인지**가 함께 남아야 한다.
+이것을 producer가 주장하지 않고 package가 붙이며, user가 선언한 schema가 이 항목들을 덮어쓰려 하면 기록
+전에 실패한다. 판단 시각과 값의 유효 시각은 서로 다른 의미이므로, 시각만 있고 그것이 어느 종류인지 없으면
+읽는 쪽이 두 테이블을 같은 뜻으로 해석하게 된다(§3.1).
+
+기록된 값은 Model state나 Account authority가 아니며 **Model이 다시 읽을 수 없다.** run이 끝난 뒤에는
+producer를 재실행하지 않고 report와 분석에서 사용할 수 있는 versioned table artifact로 조회할 수 있어야
+하며, 이때 다른 저장된 결과와 **같은 방식으로** 읽힌다. 실패하거나 중단된 publication의 일부 row를
+complete result로 노출하지 않는다. 이 기록은 §5.3의 result category가 아니며 portfolio return의 출처가
+될 수 없다.
 
 #### UC-MONITOR-001 — Monitoring finding report
 
@@ -1748,6 +1767,7 @@ resolution candidate와 user에게 물을 질문은 package의 고정 error sche
   값을 대체하는 것보다 한 단계 더 나아간 것이며, 거래할 수 없었던 종목을 거래 가능한 것으로 보이게 한다
 - failed artifact publication을 complete로 표시
 - **explicit execution과 accounting을 거치지 않고 계산한 값을 portfolio return, NAV, PnL, turnover로 보고**
+  — Model이 판단 과정에서 남긴 진단 기록을 그 출처로 삼는 경우를 포함한다(§5.3, §9.4)
 
 이 목록은 **built-in에도 동일하게 구속된다.** 특히 첫 항목은 built-in weighting 함수가 결측 종목을 빼고
 나머지를 재정규화하는 경우를 포함한다. 그 편의는 사용자가 요청하지 않은 portfolio를 만들면서 그 사실을
@@ -2257,8 +2277,11 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - 실패와 retry history는 `UC-RESEARCH-001`처럼 queryable evidence로 남는다.
 - `UC-REPORT-001`, `UC-MONITOR-001`에서 stored result를 재실행 없이 report하고 actual과 intended state를
   구분한다.
-- `UC-REPORT-002`에서 strategy diagnostic row를 typed table artifact로 보존하고, StrategyModel 재실행 없이
-  report하며, 이를 Model state나 actual state로 취급하지 않는다.
+- `UC-REPORT-002`에서 DataModel과 StrategyModel의 diagnostic row를 typed table artifact로 보존하고, producer
+  재실행 없이 report하며, 이를 Model state나 actual state로 취급하지 않는다. 각 행은 어느 run의 누가 어느
+  시각에 남겼고 **그 시각이 어떤 종류인지**를 함께 갖고, producer가 그 값을 주장하지 못한다.
+- diagnostic 기록은 §5.3의 result category가 아니며 portfolio return, NAV, PnL, turnover의 출처가 되지
+  않는다.
 - `UC-EXTENSION-001`에서 agent가 만든 local transform의 compatibility를 package가 deterministic하게 판정한다.
 - `UC-EXTENSION-002`에서 local StrategyModel을 documented public contract로 검증·등록하고 user-selected exact
   version으로 실행하며 source drift와 implicit latest selection을 compute 전에 거부한다.

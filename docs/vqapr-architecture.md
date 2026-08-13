@@ -940,6 +940,16 @@ model.save_payload(payload_target)       # default no-op
 state_ref = state_store.commit(memory_snapshot, payload_target)
 ```
 
+**state store는 `flow/`의 port다**(§10). `data/`의 store가 관측을 보관하듯 이쪽은 Model state를 보관하고
+`ModelStateRef`를 발행한다. 둘 다 port이므로 로컬 파일이든 객체 저장소든 바꿀 수 있다.
+
+- **Model은 이것을 import하지 않는다.** `save_payload(target)`이 받는 것은 열려 있는 대상일 뿐이고 그것이
+  어디에 쓰이는지 모른다. §10.1의 *"`research`는 `data`와 `domain`만 import한다"*가 그대로 유지된다.
+- **왜 `evidence/`가 아닌가**: state는 영수증이 아니라 **authority**다(§2.4). evidence에 두면 그 구분이
+  흐려지고, 기록을 지우면 state가 사라지는 것처럼 보인다.
+- **왜 `flow/`인가**: `save_payload()`를 부르는 것이 invocation 경계이고 그것이 flow다. 저장은 경제 규칙이
+  아니라 배관이라 §1.2의 *"flow는 경제 규칙을 소유하지 않는다"*와 부딪히지 않는다.
+
 - detached memory와 저장된 payload는 이후 runtime object 변경에 따라 바뀌지 않는다.
 - `StrategyStateUpdate` 같은 별도 반환 타입은 없다. Model이 memory나 payload를 바꾸지 않으면 이전 state가
   그대로 유지된다.
@@ -2090,7 +2100,8 @@ src/vqapr/
 │                           #   ExecutionTableSpec, FillConvention, academic, krx_daily
 ├── account/                # aggregate, mode, snapshot, history, journal
 ├── valuation/              # requirements → MarkBatch, performance
-├── flow/                   # simulation, resolver, run(RunDefinition/RunResult)
+├── flow/                   # simulation, resolver, run(RunDefinition/RunResult),
+│                           #   model state store(port) — committed/working state와 ModelStateRef
 ├── evidence/               # lineage, artifacts
 ├── analysis/               # 저장된 result를 읽는 read model (execution 주장 없음)
 ├── project/                # config, registry, assembly
@@ -2113,6 +2124,9 @@ flow + project  ←  public
 - `portfolio.weighting`과 `portfolio.optimize`는 **`domain`(+ solver)만** import한다.
   view/store/clock/account/exchange 전부 금지.
 - **`research`는 `data`와 `domain`만** import한다. `account`·`exchange`·`orders`·`flow` 전부 금지.
+  - **state store도 여기 걸린다.** `save_payload()`/`load_payload()`는 열려 있는 대상만 받고, 그것을
+    열고 닫고 `ModelStateRef`를 발행하는 것은 `flow/`다(§5.1.1). Model이 store를 알면 state를 자기가
+    commit할 수 있게 되어 §5.7의 working/committed 경계가 무너진다.
   - **왜**: DataModel이 account를 보면 결과가 그 run에 묶여 재사용할 수 없다(PRD §2.3). 그 경계를
     문서가 아니라 도구가 지킨다.
   - `strategy`는 `research`를 import한다 — 공통 계약이 거기 있기 때문이다. 반대 방향은 금지.

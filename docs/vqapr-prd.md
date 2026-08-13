@@ -2135,7 +2135,9 @@ hypothetical signed evaluation을 지원한다.
   방향을 가르지 않는다(§4.5). 아래 참고
 - **가격 제한(상하한가) 모델링** — 상한가·하한가 도달 여부의 판정과 그에 따른 체결 제약
 - merger, spin-off, delisting을 포함한 security-master event의 **원천 해석·변환**
-- unbounded autonomous strategy state mutation
+- **상태 표면의 자율적 확장** — Model이 `memory`와 `payload` 밖에 임의의 이름으로 durable state를 늘려가는
+  것. **크기의 문제가 아니다** — payload는 신경망 weight처럼 큰 값을 담을 수 있다. 표면이 하나로 닫혀
+  있지 않으면 무엇을 저장하고 무엇을 다음 invocation에 넘길지 정할 수 없다(§5.7)
 - **중첩 실행** — 하나의 판단 안에서 다른 판단 과정을 실행하는 것. 파라미터 후보를 각각 backtest해
   비교하는 것이 대표적이다. 같은 목적은 **각 후보를 별도 run으로 실행하고 그 결과를 조합하는 것**으로
   표현한다(§5.4)

@@ -1,0 +1,432 @@
+---
+title: "JKP data: code migration from SAS/R to Python"
+author: ""
+format:
+  html:
+    theme: cosmo
+    page-layout: full
+    code-fold: true
+    toc: true
+    toc-location: left
+    embed-resources: true
+execute:
+  echo: false
+---
+
+## Introduction
+
+We’re excited to announce the release of the newest version of the code that generates the global dataset of factor returns, stock returns, and firm characteristics from [“Is there a Replication Crisis in Finance?”](https://onlinelibrary.wiley.com/doi/full/10.1111/jofi.13249) (Jensen, Kelly, and Pedersen, *Journal of Finance* 2023). This new version has been completely rewritten in Python, replacing the previous SAS and R codebase, and is freely available on [`GitHub`](https://github.com/bkelly-lab/jkp-data). We are grateful to Faheem Almas and Fernando Reyes De La Luz for excellent research assistance.
+
+**Highlights of this release:**
+
+- **Migration to Python:** We’ve switched from SAS and R to Python.
+- **Modular, faster codebase:** The code is now more modular and leverages Polars and DuckDB for performance.
+- **Substantial speed-ups:** The full database and factor returns can be generated in ~6 hours.
+- **Single-command execution:** The characteristics database and factor returns can be computed using a single Python command.
+- **Reproducible environments with uv:** We now use uv for fast, lockfile-based dependency management, making installs and runs consistent across machines.
+- **More data:** The code now outputs additional data, like global standardized quarterly and annual accounting data; global daily and monthly factors for the Fama-French three-factor model and the Hou-Xue-Zhang four-factor model; and global GICS industry returns.
+- **Modern output formats:** Outputs have moved from CSV to Parquet.
+
+Naturally, changing the programming language led to some differences in the underlying algorithms relative to SAS. Nevertheless, most functions and the overall structure of the SAS/R codebase have been retained. For details on factor definitions and construction, see our [documentation](https://jkpfactors.s3.amazonaws.com/documents/Documentation.pdf).
+
+## Output structure
+
+All output is contained in:
+
+```
+jkp-data/data/processed/
+```
+
+The output is organized as follows:
+
+1. **accounting_data/**
+   - `quarterly.parquet` and `annual.parquet` contain firm-level accounting characteristics from Compustat data sourced from quarterly and annual filings, respectively, and standardized across countries.
+
+2. **characteristics/**
+   - `world_data.parquet` contains the monthly stock file with stock-level characteristics, filtered by the standard screens: `primary_sec == 1` (primary security flag), `common == 1` (common stock flag), `obs_main == 1` (main observation flag), `exch_main == 1` (main exchange flag).
+   - CRSP-sourced rows carry native CIZ exchange descriptors `primaryexch` and `conditionaltype` (replacing legacy `crsp_shrcd` / `crsp_exchcd` passthrough columns). NYSE breakpoint logic uses `primaryexch == "N"` and `conditionaltype == "RW"` on CRSP rows; Compustat NYSE rows still use `comp_exchg == 11`.
+   - Partitions of `world_data.parquet` by country (e.g., `GBR.parquet`, `USA.parquet`). Files are named using [ISO Alpha-3 country codes](https://www.nationsonline.org/oneworld/country_code_list.htm).
+
+3. **other_output/**
+   - `ap_factors_monthly.parquet` and `ap_factors_daily.parquet` contain the returns of FF3 and HXZ4 factor portfolios for every country at monthly and daily frequencies, respectively.
+   - `market_returns.parquet` and `market_returns_daily.parquet` contain market-portfolio returns for every country at monthly and daily frequencies, respectively.
+   - `nyse_cutoffs.parquet` contains NYSE market-capitalization quantiles used for portfolio construction.
+   - `return_cutoffs.parquet` and `return_cutoffs_daily.parquet` contain return quantiles used as winsorization thresholds.
+
+4. **portfolios/**
+   - `pfs(_daily).parquet` contains portfolios formed at monthly (daily) frequency by sorting stocks into three groups based on non-microcap breakpoints. Portfolio 1 (3) includes stocks with the lowest (highest) value of the characteristic.
+   - `hml(_daily).parquet` contains long–short portfolios formed at monthly (daily) frequency that go long Portfolio 3 (high characteristic values) and short Portfolio 1 (low characteristic values) from `pfs.csv`.
+   - `lms(_daily).parquet` contains long–short portfolios formed at monthly (daily) frequency following the Jensen, Kelly, and Pedersen (2023) signing convention (e.g., long low-asset-growth, short high-asset-growth).
+   - `cmp(_daily).parquet` contains rank-weighted (characteristic-managed) portfolios formed at monthly (daily) frequency within mega, large, small, micro, and nano capitalization groups in the U.S.
+   - `country_factors(_daily)/` contains country-by-country `lms.parquet` files for easier use at monthly (daily) frequency. Files are named using [ISO Alpha-3 country codes](https://www.nationsonline.org/oneworld/country_code_list.htm).
+   - `regional_factors(_daily)/` contains regional factor portfolios based on `lms.parquet` at monthly (daily) frequency, constructed following Jensen, Kelly, and Pedersen (2023).
+   - `clusters(_daily).parquet` contains returns for cluster of factors organized into 13 themes.  
+   - `regional_clusters(_daily)/` contains regional cluster outputs.  
+   - `industry_gics.parquet` contains GICS industry-level returns.
+
+5. **return_data/**
+   - `world_dsf.parquet` contains daily stock-level returns for all securities in the database.
+   - `world_ret_monthly.parquet` contains monthly stock-level returns for all securities in the database.
+   - `daily_rets_by_country/` contains partitions of `world_dsf.parquet` by country (e.g., `GBR.parquet`, `USA.parquet`). Files are named using [ISO Alpha-3 country codes](https://www.nationsonline.org/oneworld/country_code_list.htm).
+
+The `jkp-data/data/processed/` directory also contains two additional subfolders, `raw/` and `interim/`, used by the code to store temporary data for computing stock-level characteristics.
+
+Function behavior in Python relative to the SAS/R portions is close to identical, with changes in `standardized_accounting_data` for more precise handling of duplicates. 
+
+There are slight divergences between outputs, the main sources of them are:
+
+- **Numerical precision:** Differences in floating-point handling between SAS and Python can alter inequality evaluations and calculated values.
+- **Data revisions:** Underlying data may have changed.
+- **Algorithmic adjustments:** Differences due to updates in `standardized_accounting_data` for improved duplicate handling.
+
+Next, we show a strong alignment between the characteristics and factors produced by the SAS/R code with those from the new Python code. 
+
+## Comparison of characteristics at stock level
+
+The data contains 402 stock-level characteristics. We start by computing the Spearman correlation between each characteristic from SAS/R and the corresponding characteristic from Python. The correlation is computed across all firms, dates, and countries where both versions have non-missing values (in reality the overlap is close to perfect).
+
+```{python}
+#| label: fig-comparison1
+#| fig-cap: "Histogram of Spearman rank correlations."
+
+import polars as pl
+from polars import col
+import numpy as np
+import matplotlib.pyplot as plt
+
+corr_df = pl.read_parquet('data/sas_vs_py_summ_stats.parquet')
+fig, ax = plt.subplots(figsize=(9, 5))
+
+# Histogram (capture counts and patches)
+n, bins, patches = ax.hist(
+    corr_df["spearman r-corr"],
+    bins=10,
+    density=False,
+    color="royalblue",
+    edgecolor="black",
+    linewidth=0.5,
+    alpha=0.8,
+)
+
+# X limits
+ax.set_xlim(0.994, 1.0005)
+
+# Labels & title
+ax.set_xlabel(r"$\rho$", fontsize=14)
+ax.set_ylabel("n", fontsize=14)
+ax.set_title("Distribution of Spearman rank correlations", pad=20, fontsize=16)
+
+# Mean line and label
+mean_r = corr_df["spearman r-corr"].mean()
+ax.axvline(
+    mean_r,
+    color="red",
+    linestyle="--",
+    linewidth=1.3,
+)
+
+# Put mean text *above* the tallest bar, horizontal
+max_count = n.max() if len(n) > 0 else 1
+ax.text(
+    mean_r,
+    max_count * 1.3,       # 30% above tallest bar
+    f"Mean = {mean_r:.3f}",
+    color="red",
+    ha="center",
+    va="bottom",
+    fontsize=9,
+)
+
+# Numbers on top of each bar
+for count, patch in zip(n, patches):
+    if count <= 0:
+        continue  # skip empty bins (log scale hates 0)
+    x = patch.get_x() + patch.get_width() / 2
+    y = patch.get_height()
+    ax.text(
+        x,
+        y * 1.05,          # slightly above bar
+        f"{int(count)}",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+    )
+
+# Light grid on y-axis
+ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+# Clean up spines
+for spine in ["top", "right"]:
+    ax.spines[spine].set_visible(False)
+
+# Log scale on y (Optional)
+# ax.set_yscale("log")
+
+fig.tight_layout()
+plt.show()
+```
+
+Figure @fig-comparison1 shows that the Spearman correlations are high, with the lowest correlation above 0.994, the average correlation at 0.999, and the majority of the correlations being effectively 1. 
+
+Moving to the Pearson correlations, two characteristics (`resff3_6_1` and `resff3_12_1`), have low correlations, but these low correlations are solely due to outliers. The 1st and 99th percentiles of the characteristics are effectively identical between SAS and Python. Beside these two characteristics, `sale_emp` and `bidaskhl_21d` have a Pearson correlation of 0.977 and 0.991, respectively, and all other characteristics have a Pearson correlation above 0.997. We provide a wide range of summary statistics to compare characteristics in SAS/R and Python in [`sas_vs_py_summ_stats.parquet`](data/sas_vs_py_summ_stats.parquet).^[In the new Python code, the 'div' and 'eqnpo' characteristics in the `market_chars_monthly` subroutine are coerced to 0 whenever their magnitude falls below 1e-5, in order to eliminate arithmetic noise. When comparing characteristics values, we have likewise set 'div' and 'eqnpo' to 0 in the SAS results whenever their magnitude is smaller than 1e-5. In the portfolio return comparisons, however, we use the original SAS/R output, that is, before applying the zero-floor adjustments to `div_*` and `eqnpo_*`.]
+
+## US factor comparison
+
+We next compute the Pearson correlations between the U.S. long–short factor-portfolio returns produced by SAS/R and Python. For each factor, we weight stocks using the same capped-value-weights as in Jensen, Kelly, and Pedersen (2023). Figure @fig-comparison2 shows that all correlations are close to 1. 
+
+```{python}
+#| label: fig-comparison2
+#| fig-cap: "Correlation of US factor portfolios produced by Python and SAS/R."
+
+import polars as pl
+from polars import col
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
+
+# Load data
+sas = pl.read_parquet('data/US_factors_SAS.parquet').rename({'date': 'eom'})
+py = pl.read_parquet('data/US_factors_py.parquet').sort(['characteristic', 'eom']).rename({'ret_vw_cap': 'ret'})
+
+labels = py['characteristic'].unique().to_list()
+label = labels[0]
+
+df_data = []
+for label in labels:
+    res = {}
+    data = (py.filter(col('characteristic') == label).select(['eom', 'ret'])
+              .join(
+                  sas.filter(col('name') == label).select(['eom', 'ret']),
+                  on = 'eom',
+                  how = 'inner',
+                  suffix = '_sas'
+              )
+           )
+    res['factor'] = label
+    res['corr'] = np.corrcoef(data['ret'], data['ret_sas'])[0][1]
+    res['mean_py'] = data['ret'].mean()
+    res['mean_sas'] = data['ret_sas'].mean()
+    res['std_py'] = data['ret'].std()
+    res['std_sas'] = data['ret_sas'].std()
+    df_data.append(res)
+
+df = pl.DataFrame(df_data).sort('corr')
+
+# --- Split into two halves ---
+half = len(df) // 2
+df_top = df[:half]
+df_bottom = df[half:]
+
+# --- Create figure with 2 rows (equal height) ---
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (9,10), height_ratios=[1, 1], constrained_layout=True)
+# --- Top Half ---
+ax1.bar(df_top["factor"], df_top["corr"], color="royalblue")
+ax1.axhline(y=0.90, color="red", linestyle="--", linewidth=2)
+ax1.set_ylabel("Correlation", fontsize=12)
+ax1.set_xticks(range(len(df_top["factor"])))
+ax1.set_xticklabels(df_top["factor"], rotation=60, ha="right", fontsize=6)
+ax1.grid(axis="y", linestyle="--", alpha=0.7)
+
+# --- Bottom Half ---
+ax2.bar(df_bottom["factor"], df_bottom["corr"], color="royalblue")
+ax2.axhline(y=0.90, color="red", linestyle="--", linewidth=2)
+ax2.set_ylabel("Correlation", fontsize=12)
+ax2.set_xticks(range(len(df_bottom["factor"])))
+ax2.set_xticklabels(df_bottom["factor"], rotation=60, ha="right", fontsize=6)
+ax2.grid(axis="y", linestyle="--", alpha=0.7)
+
+plt.show()
+```
+
+Next, we compare the mean returns and standard deviations of the factors. In the scatter plots below, the x-axis shows the statistic for SAS/R and the y-axis shows the corresponding statistic for Python. If the two versions match, the points should lie on a 45-degree line through the origin (slope 1, intercept 0). Figure @fig-comparison3 shows that the alignment is close to perfect.
+
+```{python}
+#| label: fig-comparison3
+#| fig-cap: "Comparison of mean and standard deviation of US factor portfolios produced by Python and SAS/R."
+# Dummy arrays for diagonal lines
+line_coords1 = df.sort('mean_sas')['mean_sas'].to_numpy().flatten()
+line_coords2 = df.sort('std_py')['std_py'].to_numpy().flatten()
+
+# Create figure with 1 row and 2 columns
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 5), constrained_layout=True)
+
+# --- Mean return comparison ---
+ax1.set_title("Mean return comparison", fontsize=16)
+ax1.plot(1.1 * line_coords1, 1.1 * line_coords1, '--', color='red', linewidth=1.5, alpha = 0.7)
+ax1.scatter(df['mean_sas'], df['mean_py'], marker='+', color='black', s=80, linewidth=1)
+ax1.set_xlabel('SAS/R E[R]', fontsize=14)
+ax1.set_ylabel('Python E[R]', fontsize=14)
+ax1.grid(True, linestyle='--', alpha=0.7)
+
+# --- Volatility comparison ---
+ax2.set_title("Standard deviation comparison", fontsize=16)
+ax2.plot(1.1 * line_coords2, 1.1 * line_coords2, '--', color='red', linewidth=1.5, alpha = 0.7)
+ax2.scatter(df['std_sas'], df['std_py'], marker='+', color='black', s=80, linewidth=1)
+ax2.set_xlabel('SAS/R SD[R]', fontsize=14)
+ax2.set_ylabel('Python SD[R]', fontsize=14)
+ax2.grid(True, linestyle='--', alpha=0.7)
+
+plt.show()
+
+```
+
+
+## World ex-US factor comparison
+
+We now repeat the comparison for the World ex-US region. Figure @fig-comparison4 shows that the return correlations are high, but lower than in the U.S. The differences mainly arise in earlier years where few stocks have a non-missing characteristic, and where small changes in which stocks are longed and shorted can have a big impact on the factor return. Figure @fig-comparison5, however, shows that the mean and standard deviation of the factors across the two datasets align closely.   
+```{python}
+#| label: fig-comparison4
+#| fig-cap: "Correlation of World ex-US factor portfolios produced by Python and SAS/R."
+
+import polars as pl
+from polars import col
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Load data
+sas = pl.read_parquet('data/WxUS_factors_SAS.parquet').rename({'date': 'eom'}).filter(col('location')=='world_ex_us')
+py = pl.read_parquet('data/WxUS_factors_py.parquet').sort(['characteristic', 'eom']).rename({'ret_vw_cap': 'ret'})
+
+labels = py['characteristic'].unique().to_list()
+label = labels[0]
+
+df_data = []
+for label in labels:
+    res = {}
+    data = (py.filter(col('characteristic') == label).select(['eom', 'ret'])
+              .join(
+                  sas.filter(col('name') == label).select(['eom', 'ret']),
+                  on = 'eom',
+                  how = 'inner',
+                  suffix = '_sas'
+              )
+           )
+    res['factor'] = label
+    res['corr'] = np.corrcoef(data['ret'], data['ret_sas'])[0][1]
+    res['mean_py'] = data['ret'].mean()
+    res['mean_sas'] = data['ret_sas'].mean()
+    res['std_py'] = data['ret'].std()
+    res['std_sas'] = data['ret_sas'].std()
+    df_data.append(res)
+
+df = pl.DataFrame(df_data).sort('corr')
+
+# --- Split into two halves ---
+half = len(df) // 2
+df_top = df[:half]
+df_bottom = df[half:]
+
+# --- Create figure with 2 rows (equal height) ---
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (9,10), height_ratios=[1, 1], constrained_layout=True)
+# --- Top Half ---
+ax1.bar(df_top["factor"], df_top["corr"], color="royalblue")
+ax1.axhline(y=0.90, color="red", linestyle="--", linewidth=2)
+ax1.set_ylabel("Correlation", fontsize=12)
+ax1.set_xticks(range(len(df_top["factor"])))
+ax1.set_xticklabels(df_top["factor"], rotation=60, ha="right", fontsize=6)
+ax1.grid(axis="y", linestyle="--", alpha=0.7)
+
+# --- Bottom Half ---
+ax2.bar(df_bottom["factor"], df_bottom["corr"], color="royalblue")
+ax2.axhline(y=0.90, color="red", linestyle="--", linewidth=2)
+ax2.set_ylabel("Correlation", fontsize=12)
+ax2.set_xticks(range(len(df_bottom["factor"])))
+ax2.set_xticklabels(df_bottom["factor"], rotation=60, ha="right", fontsize=6)
+ax2.grid(axis="y", linestyle="--", alpha=0.7)
+
+plt.show()
+```
+
+
+```{python}
+#| label: fig-comparison5
+#| fig-cap: "Comparison of mean and standard deviation of World ex-US factor portfolios produced by Python and SAS/R."
+# Dummy arrays for diagonal lines
+line_coords1 = df.sort('mean_sas')['mean_sas'].to_numpy().flatten()
+line_coords2 = df.sort('std_py')['std_py'].to_numpy().flatten()
+
+# Create figure with 1 row and 2 columns
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 5), constrained_layout=True)
+
+# --- Mean return comparison ---
+ax1.set_title("Mean return comparison", fontsize=16)
+ax1.plot(1.1 * line_coords1, 1.1 * line_coords1, '--', color='red', linewidth=1.5, alpha = 0.7)
+ax1.scatter(df['mean_sas'], df['mean_py'], marker='+', color='black', s=80, linewidth=1)
+ax1.set_xlabel('SAS/R E[R]', fontsize=14)
+ax1.set_ylabel('Python E[R]', fontsize=14)
+ax1.grid(True, linestyle='--', alpha=0.7)
+ax1.xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+
+# --- Volatility comparison ---
+ax2.set_title("Standard deviation comparison", fontsize=16)
+ax2.plot(1.1 * line_coords2, 1.1 * line_coords2, '--', color='red', linewidth=1.5, alpha = 0.7)
+ax2.scatter(df['std_sas'], df['std_py'], marker='+', color='black', s=80, linewidth=1)
+ax2.set_xlabel('SAS/R SD[R]', fontsize=14)
+ax2.set_ylabel('Python SD[R]', fontsize=14)
+ax2.grid(True, linestyle='--', alpha=0.7)
+
+plt.show()
+```
+
+Overall, the mean and standard deviation of the factor returns are close to those produced in SAS/R.
+
+## Correlation by factor-country
+
+Finally, we examine correlations at the factor–country level. Figure @fig-comparison6 summarizes these comparisons by plotting the inverse cumulative distribution of the correlations for each weighting scheme (equal-weights, value-weights, and capped-value-weights). The figure shows that the vast majority of factors across countries and weighting schemes achieve a correlation close to 1.
+
+```{python}
+#| label: fig-comparison6
+#| fig-cap: "Inverse CDF of return series correlation."
+
+import pandas as pd
+df = pd.read_parquet("data/lms_comparison.parquet")
+
+portfolios = [("EW", "ew"), ("VW", "vw"), ("VW_CAP", "vw_cap")]
+
+# Long form for correlations and mean/std differences
+records = []
+for label, suffix in portfolios:
+    records.append(
+        pd.DataFrame(
+            {
+                "portfolio": label,
+                "corr": df[f"corr_{suffix}"],
+                "mean_sas": df[f"mean_{suffix}_sas"],
+                "mean_py": df[f"mean_{suffix}_py"],
+                "std_sas": df[f"std_{suffix}_sas"],
+                "std_py": df[f"std_{suffix}_py"],
+                "n_common": df["n_common"],
+            }
+        )
+    )
+long = pd.concat(records, ignore_index=True)
+long["mean_diff"] = long["mean_py"] - long["mean_sas"]
+long["std_diff"] = long["std_py"] - long["std_sas"]
+
+# Inverse CDF: proportion on x, correlation on y
+inv_records = []
+for label, suffix in portfolios:
+    vals = df[f"corr_{suffix}"].dropna().sort_values().to_numpy()
+    n = len(vals)
+    prop = np.linspace(0, 1, n, endpoint=True)
+    inv_records.append(pd.DataFrame({"portfolio": label, "proportion": prop, "corr": vals}))
+inv = pd.concat(inv_records, ignore_index=True)
+
+plt.figure(figsize=(10, 6))
+for label in [p[0] for p in portfolios]:
+        sub = inv[inv["portfolio"] == label]
+        plt.step(sub["proportion"], sub["corr"], where="post", label=label)
+plt.axhline(1, color="k", linestyle="--", linewidth=1, alpha=0.6)
+plt.xlabel("Proportion", fontsize=14)
+plt.ylabel("Correlation (SAS vs Python)", fontsize=14)
+plt.title("Inverse CDF of correlations", fontsize=16)
+plt.xlim(0, 1)
+plt.ylim(-1, 1.1)
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.legend(title="Portfolio")
+plt.tight_layout()
+```
+
+## Conclusion
+We have completely migrated the JKP data codebase from SAS/R to Python, resulting in a more modular, faster, and user-friendly implementation. The new code produces outputs that closely align with those from the previous SAS/R codebase, ensuring continuity and reliability for users. Our hope is that migration to Python code will make it easier for people to use, modify, and contribute to the codebase. Please post any questions, concerns, or feedback in our [`GitHub repo`](https://github.com/bkelly-lab/jkp-data).
+

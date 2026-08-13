@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_CACHE_DIR: ~/.cache/uv
+
+jobs:
+  # ============================================================
+  # Job 1: Linting and Type Checking (fast, catches obvious errors)
+  # ============================================================
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: uv-lint-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-lint-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: uv sync --frozen --group lint --group test
+
+      - name: Check lockfile in sync with pyproject.toml
+        run: uv lock --check
+
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github src/jkp/data/ tests/
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/jkp/data/ tests/
+
+      - name: Type check (pyright)
+        continue-on-error: true  # Informational until type issues are resolved
+        run: uv run pyright src/jkp/data/
+
+  # ============================================================
+  # Job 2: Tests (unit + integration + property + golden)
+  # ============================================================
+  tests:
+    name: Tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: uv-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: uv sync --frozen --group test
+
+      - name: CLI smoke test
+        run: |
+          uv run jkp --help
+          uv run jkp build --help
+          uv run jkp portfolio --help
+          uv run jkp connect --help
+
+      - name: Run tests
+        run: |
+          uv run pytest tests/ \
+            -v --tb=short \
+            --junitxml=pytest.xml
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-reports-py${{ matrix.python-version }}
+          path: pytest.xml
+          retention-days: 7

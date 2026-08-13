@@ -1,0 +1,1812 @@
+"""
+Unit tests for rolling daily metric helpers in aux_functions.py.
+
+This module covers 16 rolling window functions: rvol, rmax, skew, prc_to_high,
+capm, ami, downbeta, mktrf_vol, capm_ext, ff3, hxz4, zero_trades, dolvol,
+turnover, mktcorr, and dimsonbeta.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import polars as pl
+import pytest
+from polars.testing import assert_frame_equal
+
+from jkp.data.aux_functions import (
+    ami,
+    apply_group_filter,
+    capm,
+    capm_ext,
+    dimsonbeta,
+    dolvol,
+    downbeta,
+    ff3,
+    hxz4,
+    mktcorr,
+    mktrf_vol,
+    prc_to_high,
+    rmax,
+    rvol,
+    skew,
+    turnover,
+    zero_trades,
+)
+
+GOLDEN_DIR = Path(__file__).parent.parent / "golden" / "fixtures"
+
+
+def _is_none_or_nan(value: float | None) -> bool:
+    """Return True when value is None or NaN-like."""
+    return value is None or (isinstance(value, float) and np.isnan(value))
+
+
+def _empty_df(schema: dict[str, Any]) -> pl.DataFrame:
+    """Build an empty DataFrame with explicit dtypes."""
+    return pl.DataFrame({k: pl.Series(name=k, values=[], dtype=v) for k, v in schema.items()})
+
+
+def _mktcorr_legacy(df, sfx, __min):
+    """Pre-change mktcorr body, kept in tests to assert equivalence on null-free input."""
+    return (
+        df.group_by(["id_int", "group_number"])
+        .agg(
+            [
+                pl.min_horizontal([pl.count("ret_exc_3l"), pl.count("mkt_exc_3l")]).alias("n"),
+                pl.corr("ret_exc_3l", "mkt_exc_3l").alias(f"corr{sfx}"),
+            ]
+        )
+        .filter(pl.col("n") >= __min)
+        .drop("n")
+    )
+
+
+class TestRvol:
+    """Tests for rvol() rolling volatility helper."""
+
+    def test_rvol_grouped_std_computation(self, tolerance):
+        """rvol should compute per-(id_int, group_number) sample std of ret_exc."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20, 10, 10, 10, 20, 20, 20],
+                "ret_exc": [1.0, 2.0, 3.0, 2.0, 4.0, 4.0, 3.0, 3.0, 3.0, -1.0, 0.0, 1.0],
+            }
+        )
+
+        result = rvol(df, "_21d", __min=15).sort(["id_int", "group_number"])
+
+        assert result.columns == ["id_int", "group_number", "rvol_21d"], (
+            f"Unexpected columns: {result.columns}"
+        )
+        assert len(result) == 4, f"Expected 4 grouped rows, got {len(result)}"
+
+        # Polars std() is sample std (ddof=1), so:
+        # (1,10): std([1,2,3]) = 1.0
+        # (1,20): std([2,4,4]) = sqrt(4/3)
+        # (2,10): std([3,3,3]) = 0.0
+        # (2,20): std([-1,0,1]) = 1.0
+        np.testing.assert_allclose(
+            result["rvol_21d"].to_list(),
+            [1.0, np.sqrt(4.0 / 3.0), 0.0, 1.0],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected rvol values: {result['rvol_21d'].to_list()}",
+        )
+
+    def test_rvol_uses_suffix_for_output_name(self):
+        """rvol output column name should include the provided suffix."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1],
+                "group_number": [1, 1],
+                "ret_exc": [0.1, 0.2],
+            }
+        )
+
+        result = rvol(df, "_252d", __min=120)
+
+        assert "rvol_252d" in result.columns, (
+            f"Expected output column 'rvol_252d', got {result.columns}"
+        )
+
+    def test_rvol_single_observation_group_returns_null(self):
+        """Sample std is undefined for 1 observation, so rvol should be null."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1],
+                "group_number": [99],
+                "ret_exc": [0.05],
+            }
+        )
+
+        result = rvol(df, "_21d", __min=15)
+
+        assert result["rvol_21d"][0] is None, (
+            f"Expected null std for single observation, got {result['rvol_21d'][0]}"
+        )
+
+    def test_rvol_does_not_apply_min_filter_parameter(self):
+        """rvol currently ignores __min and returns grouped output regardless of threshold."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 2, 2],
+                "group_number": [10, 10, 20, 20],
+                "ret_exc": [0.01, 0.02, 0.03, 0.04],
+            }
+        )
+
+        result = rvol(df, "_21d", __min=9999)
+        assert len(result) == 2, f"Expected both groups despite huge __min, got {len(result)}"
+
+    def test_rvol_empty_input_returns_empty(self):
+        df = _empty_df({"id_int": pl.Int64, "group_number": pl.Int64, "ret_exc": pl.Float64})
+        result = rvol(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestRmax:
+    """Tests for rmax() rolling extreme-return helpers."""
+
+    def test_rmax_grouped_top5_mean_and_max(self, tolerance):
+        """rmax should compute per-group top-5 mean and max from ret."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1] * 8 + [1] * 6 + [2] * 6,
+                "group_number": [10] * 8 + [20] * 6 + [10] * 6,
+                "ret": [
+                    -0.05,
+                    0.01,
+                    0.02,
+                    0.10,
+                    0.03,
+                    0.20,
+                    0.04,
+                    0.05,  # (1,10)
+                    0.00,
+                    -0.01,
+                    0.03,
+                    0.02,
+                    0.08,
+                    0.07,  # (1,20)
+                    -0.20,
+                    -0.10,
+                    0.00,
+                    0.10,
+                    0.15,
+                    0.20,  # (2,10)
+                ],
+            }
+        )
+
+        result = rmax(df, "_21d", __min=15).sort(["id_int", "group_number"])
+
+        assert result.columns == ["id_int", "group_number", "rmax5_21d", "rmax1_21d"], (
+            f"Unexpected columns: {result.columns}"
+        )
+        assert len(result) == 3, f"Expected 3 grouped rows, got {len(result)}"
+
+        # (1,10): sorted desc -> [0.20, 0.10, 0.05, 0.04, 0.03, 0.02, 0.01, -0.05]
+        # rmax5 = mean(top5) = (0.20+0.10+0.05+0.04+0.03)/5 = 0.084 ; rmax1=0.20
+        # (1,20): sorted desc -> [0.08,0.07,0.03,0.02,0.00,-0.01]
+        # rmax5 = (0.08+0.07+0.03+0.02+0.00)/5 = 0.04 ; rmax1=0.08
+        # (2,10): sorted desc -> [0.20,0.15,0.10,0.00,-0.10,-0.20]
+        # rmax5 = (0.20+0.15+0.10+0.00-0.10)/5 = 0.07 ; rmax1=0.20
+        np.testing.assert_allclose(
+            result["rmax5_21d"].to_list(),
+            [0.084, 0.04, 0.07],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected rmax5 values: {result['rmax5_21d'].to_list()}",
+        )
+        np.testing.assert_allclose(
+            result["rmax1_21d"].to_list(),
+            [0.20, 0.08, 0.20],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected rmax1 values: {result['rmax1_21d'].to_list()}",
+        )
+
+    def test_rmax_with_fewer_than_five_values_uses_available_values(self, tolerance):
+        """top_k(5) should average available rows when group size < 5."""
+        df = pl.DataFrame(
+            {
+                "id_int": [3, 3, 3, 3],
+                "group_number": [30, 30, 30, 30],
+                "ret": [0.01, 0.03, -0.02, 0.00],
+            }
+        )
+
+        result = rmax(df, "_252d", __min=120)
+
+        # top 5 of 4 values => all 4 values, mean = (0.01+0.03-0.02+0.00)/4 = 0.005
+        np.testing.assert_allclose(
+            result["rmax5_252d"][0],
+            0.005,
+            **tolerance.STANDARD,
+            err_msg=f"Expected rmax5_252d=0.005, got {result['rmax5_252d'][0]}",
+        )
+        np.testing.assert_allclose(
+            result["rmax1_252d"][0],
+            0.03,
+            **tolerance.STANDARD,
+            err_msg=f"Expected rmax1_252d=0.03, got {result['rmax1_252d'][0]}",
+        )
+
+    def test_rmax_handles_null_returns(self):
+        """Null returns should not crash grouped top-k/max aggregation."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10],
+                "ret": [0.01, None, 0.03, -0.02],
+            }
+        )
+        result = rmax(df, "_21d", __min=15)
+        assert "rmax5_21d" in result.columns and "rmax1_21d" in result.columns
+
+    def test_rmax_ignores_min_parameter(self):
+        """rmax currently ignores __min and should return same output for any threshold."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "ret": [0.01, 0.02, -0.01, 0.03, 0.04, 0.05],
+            }
+        )
+        low_min = rmax(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = rmax(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_rmax_empty_input_returns_empty(self):
+        df = _empty_df({"id_int": pl.Int64, "group_number": pl.Int64, "ret": pl.Float64})
+        result = rmax(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestSkew:
+    """Tests for skew() rolling skewness helper."""
+
+    def test_skew_symmetric_returns_zero(self, tolerance):
+        """A symmetric return distribution should have skew close to 0."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10],
+                "ret_exc": [-2.0, -1.0, 0.0, 1.0, 2.0],
+            }
+        )
+
+        result = skew(df, "_21d", __min=15)
+        np.testing.assert_allclose(
+            result["rskew_21d"][0],
+            0.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected skew ~0 for symmetric data, got {result['rskew_21d'][0]}",
+        )
+
+    def test_skew_constant_series_is_undefined(self):
+        """Skew on a constant series should be undefined (null/NaN)."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10],
+                "ret_exc": [0.5, 0.5, 0.5, 0.5],
+            }
+        )
+        result = skew(df, "_21d", __min=15)
+        assert _is_none_or_nan(result["rskew_21d"][0]), (
+            f"Expected undefined skew for constant series, got {result['rskew_21d'][0]}"
+        )
+
+    def test_skew_ignores_min_parameter(self):
+        """skew currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "ret_exc": [0.1, 0.2, -0.1, 0.3, 0.4, 0.1],
+            }
+        )
+        low_min = skew(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = skew(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_skew_empty_input_returns_empty(self):
+        df = _empty_df({"id_int": pl.Int64, "group_number": pl.Int64, "ret_exc": pl.Float64})
+        result = skew(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestPrcToHigh:
+    """Tests for prc_to_high() price-to-high helper."""
+
+    def test_prc_to_high_sorts_by_date_and_applies_min_filter(self, tolerance):
+        """Should use last price by date, divide by max price, and keep n >= __min groups."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2],
+                "group_number": [10, 10, 10, 20, 20],
+                "date": [
+                    date(2024, 1, 2),
+                    date(2024, 1, 1),
+                    date(2024, 1, 3),
+                    date(2024, 1, 1),
+                    date(2024, 1, 2),
+                ],
+                "prc_adj": [12.0, 10.0, 11.0, 20.0, 25.0],
+            }
+        )
+
+        result = prc_to_high(df, "_21d", __min=3).sort(["id_int", "group_number"])
+
+        # group (1,10): last by date = 11.0, max = 12.0 -> 11/12
+        # group (2,20): only 2 obs, should be filtered out by __min=3
+        assert len(result) == 1, f"Expected 1 group after min filter, got {len(result)}"
+        np.testing.assert_allclose(
+            result["prc_highprc_21d"][0],
+            11.0 / 12.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected prc_highprc_21d=11/12, got {result['prc_highprc_21d'][0]}",
+        )
+
+    def test_prc_to_high_zero_prices_yield_undefined_ratio(self):
+        """When both last and max price are zero, ratio is undefined (0/0)."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "date": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
+                "prc_adj": [0.0, 0.0, 0.0],
+            }
+        )
+        result = prc_to_high(df, "_21d", __min=1)
+        assert _is_none_or_nan(result["prc_highprc_21d"][0]), (
+            f"Expected undefined ratio for zero prices, got {result['prc_highprc_21d'][0]}"
+        )
+
+    def test_prc_to_high_empty_input_returns_empty(self):
+        df = _empty_df(
+            {"id_int": pl.Int64, "group_number": pl.Int64, "date": pl.Date, "prc_adj": pl.Float64}
+        )
+        result = prc_to_high(df, "_21d", __min=3)
+        assert len(result) == 0
+
+    def test_prc_to_high_within_group_date_order_parity(self, tolerance):
+        """Non-monotone row order within group should still yield last-by-date price."""
+        # Rows arrive out of date order; last by date is prc_adj=15.0 on 2024-01-05
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10],
+                "date": [
+                    date(2024, 1, 3),
+                    date(2024, 1, 5),
+                    date(2024, 1, 1),
+                    date(2024, 1, 4),
+                    date(2024, 1, 2),
+                ],
+                "prc_adj": [12.0, 15.0, 8.0, 20.0, 10.0],
+            }
+        )
+        result = prc_to_high(df, "_21d", __min=1)
+        # last by date = 15.0, max = 20.0 → 15/20 = 0.75
+        np.testing.assert_allclose(
+            result["prc_highprc_21d"][0],
+            15.0 / 20.0,
+            **tolerance.STANDARD,
+        )
+
+    def test_prc_to_high_filter_boundary(self):
+        """Group with exactly __min rows kept; group with __min-1 rows dropped."""
+        min_val = 5
+        # Group 1: exactly min_val rows → kept
+        df = pl.DataFrame(
+            {
+                "id_int": [1] * min_val + [2] * (min_val - 1),
+                "group_number": [10] * min_val + [20] * (min_val - 1),
+                "date": [date(2024, 1, i + 1) for i in range(min_val)]
+                + [date(2024, 1, i + 1) for i in range(min_val - 1)],
+                "prc_adj": [float(i + 1) for i in range(min_val)]
+                + [float(i + 1) for i in range(min_val - 1)],
+            }
+        )
+        result = prc_to_high(df, "_21d", __min=min_val)
+        assert len(result) == 1, f"Expected 1 group, got {len(result)}"
+        assert result["id_int"][0] == 1
+
+    def test_prc_to_high_golden_fixture(self):
+        """Lock prc_to_high output on a 500-id seeded synthetic fixture with unique
+        (id_int, group_number, date). rtol=1e-12 absorbs cross-platform float rounding.
+        """
+        from tests.golden.generate_rolling_golden import build_prc_to_high_input
+
+        golden = pl.read_parquet(GOLDEN_DIR / "prc_to_high_21d.parquet")
+        df = build_prc_to_high_input(seed=42)
+        result = prc_to_high(df.lazy(), "_21d", __min=10).collect().sort(["id_int", "group_number"])
+        assert_frame_equal(result, golden, check_exact=False, atol=0.0, rtol=1e-12)
+
+
+class TestCapm:
+    """Tests for capm() beta and idiosyncratic volatility helper."""
+
+    def test_capm_perfect_linear_relation(self, tolerance):
+        """If ret_exc = 2*mktrf, beta should be 2 and ivol should be 0."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10],
+                "mktrf": [1.0, 2.0, 3.0, 4.0],
+                "ret_exc": [2.0, 4.0, 6.0, 8.0],
+                "aux_date": [date(2020, 1, d) for d in (1, 2, 3, 4)],
+            }
+        )
+
+        result = capm(df, "_21d", __min=15)
+
+        np.testing.assert_allclose(
+            result["beta_21d"][0],
+            2.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected beta_21d=2.0, got {result['beta_21d'][0]}",
+        )
+        np.testing.assert_allclose(
+            result["ivol_capm_21d"][0],
+            0.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected ivol_capm_21d=0.0, got {result['ivol_capm_21d'][0]}",
+        )
+
+    def test_capm_constant_market_factor_is_undefined(self):
+        """CAPM beta/ivol are undefined when var(mktrf)=0."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10],
+                "mktrf": [2.0, 2.0, 2.0, 2.0],
+                "ret_exc": [1.0, 2.0, 3.0, 4.0],
+                "aux_date": [date(2020, 1, d) for d in (1, 2, 3, 4)],
+            }
+        )
+        result = capm(df, "_21d", __min=15)
+        assert _is_none_or_nan(result["beta_21d"][0])
+        assert _is_none_or_nan(result["ivol_capm_21d"][0])
+
+    def test_capm_ignores_min_parameter(self):
+        """capm currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 2, 2, 2, 2],
+                "group_number": [10, 10, 10, 10, 20, 20, 20, 20],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0],
+                "ret_exc": [2.0, 4.0, 6.0, 8.0, 1.0, 2.0, 3.0, 5.0],
+                "aux_date": [date(2020, 1, d) for d in (1, 2, 3, 4, 1, 2, 3, 4)],
+            }
+        )
+        low_min = capm(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = capm(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_capm_empty_input_returns_empty(self):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "mktrf": pl.Float64,
+                "ret_exc": pl.Float64,
+                "aux_date": pl.Date,
+            }
+        )
+        result = capm(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestAmi:
+    """Tests for ami() Amihud illiquidity helper."""
+
+    def test_ami_zero_dollar_volume_ignored_and_min_filter_applied(self, tolerance):
+        """dolvol_d == 0 should become null in ratio; groups keep only if n >= __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2],
+                "group_number": [10, 10, 10, 20, 20],
+                "ret": [0.10, -0.20, 0.05, 0.03, 0.04],
+                "dolvol_d": [1000.0, 0.0, 2000.0, 1000.0, 1200.0],
+            }
+        )
+
+        result = ami(df, "_21d", __min=3).sort(["id_int", "group_number"])
+
+        # group (1,10):
+        # abs(ret)/dolvol*1e6 -> [100, null, 25] -> mean = 62.5
+        # n = count(dolvol_d) = 3, passes
+        # group (2,20): n=2, filtered out
+        assert len(result) == 1, f"Expected 1 group after min filter, got {len(result)}"
+        np.testing.assert_allclose(
+            result["ami_21d"][0],
+            62.5,
+            **tolerance.STANDARD,
+            err_msg=f"Expected ami_21d=62.5, got {result['ami_21d'][0]}",
+        )
+
+    def test_ami_all_zero_dollar_volume_gives_null(self):
+        """If all dolvol_d are zero, the Amihud ratio should be undefined."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "ret": [0.01, -0.02, 0.03],
+                "dolvol_d": [0.0, 0.0, 0.0],
+            }
+        )
+        result = ami(df, "_21d", __min=1)
+        assert _is_none_or_nan(result["ami_21d"][0]), (
+            f"Expected undefined ami with zero dollar volume, got {result['ami_21d'][0]}"
+        )
+
+    def test_ami_empty_input_returns_empty(self):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "ret": pl.Float64,
+                "dolvol_d": pl.Float64,
+            }
+        )
+        result = ami(df, "_21d", __min=3)
+        assert len(result) == 0
+
+
+class TestDownbeta:
+    """Tests for downbeta() downside beta helper."""
+
+    def test_downbeta_uses_only_negative_market_days_and_threshold(self, tolerance):
+        """Should filter to mktrf < 0 and require n >= __min / 2 per group."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 2, 2, 2, 2],
+                "group_number": [10, 10, 10, 10, 20, 20, 20, 20],
+                "mktrf": [-1.0, -2.0, 1.0, -3.0, 1.0, -1.0, 2.0, 3.0],
+                "ret_exc": [-2.0, -4.0, 2.0, -6.0, 1.0, -2.0, 2.0, 3.0],
+            }
+        )
+
+        result = downbeta(df, "_21d", __min=4).sort(["id_int", "group_number"])
+
+        # __min/2 = 2. group (1,10) has 3 negative mktrf rows -> keep
+        # On those rows ret_exc = 2*mktrf -> downside beta = 2
+        # group (2,20) has 1 negative row -> drop
+        assert len(result) == 1, f"Expected 1 group after downside threshold, got {len(result)}"
+        np.testing.assert_allclose(
+            result["betadown_21d"][0],
+            2.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected betadown_21d=2.0, got {result['betadown_21d'][0]}",
+        )
+
+    def test_downbeta_no_negative_market_days_returns_empty(self):
+        """If no mktrf < 0 rows exist, downbeta should return no groups."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "mktrf": [0.0, 0.5, 1.0],
+                "ret_exc": [0.0, 1.0, 2.0],
+            }
+        )
+        result = downbeta(df, "_21d", __min=2)
+        assert len(result) == 0, f"Expected empty result when no downside days, got {len(result)}"
+
+    def test_downbeta_empty_input_returns_empty(self):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "mktrf": pl.Float64,
+                "ret_exc": pl.Float64,
+            }
+        )
+        result = downbeta(df, "_21d", __min=4)
+        assert len(result) == 0
+
+
+class TestMktrfVol:
+    """Tests for mktrf_vol() market-factor volatility helper."""
+
+    def test_mktrf_vol_grouped_std(self, tolerance):
+        """mktrf_vol should compute sample std of mktrf per group."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "mktrf": [1.0, 2.0, 3.0, 0.0, 0.0, 0.0],
+            }
+        )
+
+        result = mktrf_vol(df, "_21d", __min=15).sort(["id_int", "group_number"])
+
+        assert result.columns == ["id_int", "group_number", "__mktvol_21d"], (
+            f"Unexpected columns: {result.columns}"
+        )
+        np.testing.assert_allclose(
+            result["__mktvol_21d"].to_list(),
+            [1.0, 0.0],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected __mktvol_21d values: {result['__mktvol_21d'].to_list()}",
+        )
+
+    def test_mktrf_vol_single_observation_is_null(self):
+        """Sample std for one observation should be null."""
+        df = pl.DataFrame({"id_int": [1], "group_number": [10], "mktrf": [0.1]})
+        result = mktrf_vol(df, "_21d", __min=15)
+        assert result["__mktvol_21d"][0] is None
+
+    def test_mktrf_vol_ignores_min_parameter(self):
+        """mktrf_vol currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 4.0, 4.0],
+            }
+        )
+        low_min = mktrf_vol(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = mktrf_vol(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_mktrf_vol_empty_input_returns_empty(self):
+        df = _empty_df({"id_int": pl.Int64, "group_number": pl.Int64, "mktrf": pl.Float64})
+        result = mktrf_vol(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestCapmExt:
+    """Tests for capm_ext() extended CAPM diagnostics helper."""
+
+    def test_capm_ext_ivol_zero_when_ret_equals_market(self, tolerance):
+        """If ret_exc == mktrf exactly, residuals are zero so ivol should be zero."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "ret_exc": [1.0, 2.0, 3.0, 4.0, 5.0],
+            }
+        )
+
+        result = capm_ext(df, "_21d", __min=15)
+
+        np.testing.assert_allclose(
+            result["beta_21d"][0],
+            1.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected beta_21d=1.0, got {result['beta_21d'][0]}",
+        )
+        np.testing.assert_allclose(
+            result["ivol_capm_21d"][0],
+            0.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected ivol_capm_21d=0.0, got {result['ivol_capm_21d'][0]}",
+        )
+
+    def test_capm_ext_constant_market_has_undefined_outputs(self):
+        """With constant mktrf (var=0), regression diagnostics are undefined."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10],
+                "mktrf": [2.0, 2.0, 2.0, 2.0, 2.0],
+                "ret_exc": [1.0, 1.5, 2.0, 2.5, 3.0],
+            }
+        )
+
+        result = capm_ext(df, "_21d", __min=15)
+
+        # beta and downstream moments can be null or NaN when var(mktrf)=0.
+        beta = result["beta_21d"][0]
+        ivol = result["ivol_capm_21d"][0]
+        iskew = result["iskew_capm_21d"][0]
+        coskew = result["coskew_21d"][0]
+
+        assert beta is None or np.isnan(beta), f"Expected beta undefined, got {beta}"
+        assert ivol is None or np.isnan(ivol), f"Expected ivol undefined, got {ivol}"
+        assert iskew is None or np.isnan(iskew), f"Expected iskew undefined, got {iskew}"
+        assert coskew is None or np.isnan(coskew), f"Expected coskew undefined, got {coskew}"
+
+    def test_capm_ext_outputs_expected_columns_and_reasonable_values(self, tolerance):
+        """capm_ext should emit beta/ivol/iskew/coskew with finite non-null values."""
+        mktrf = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=float)
+        ret_exc = np.array([2.2, 3.9, 6.4, 7.8, 10.5], dtype=float)
+
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10],
+                "mktrf": mktrf,
+                "ret_exc": ret_exc,
+            }
+        )
+
+        result = capm_ext(df, "_21d", __min=15)
+
+        expected_cols = [
+            "id_int",
+            "group_number",
+            "beta_21d",
+            "ivol_capm_21d",
+            "iskew_capm_21d",
+            "coskew_21d",
+        ]
+        assert result.columns == expected_cols, f"Unexpected columns: {result.columns}"
+
+        expected_beta = np.cov(ret_exc, mktrf, ddof=1)[0, 1] / np.var(mktrf, ddof=1)
+        np.testing.assert_allclose(
+            result["beta_21d"][0],
+            expected_beta,
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected beta_21d: {result['beta_21d'][0]}",
+        )
+
+        assert result["ivol_capm_21d"][0] is not None, "ivol_capm_21d should not be null"
+        assert result["ivol_capm_21d"][0] > 0, (
+            f"ivol_capm_21d should be positive, got {result['ivol_capm_21d'][0]}"
+        )
+        assert np.isfinite(result["iskew_capm_21d"][0]), (
+            f"iskew_capm_21d should be finite, got {result['iskew_capm_21d'][0]}"
+        )
+        assert np.isfinite(result["coskew_21d"][0]), (
+            f"coskew_21d should be finite, got {result['coskew_21d'][0]}"
+        )
+
+    def test_capm_ext_single_observation_is_undefined(self):
+        """Extended CAPM moments are undefined for one-row groups."""
+        df = pl.DataFrame({"id_int": [1], "group_number": [10], "mktrf": [0.1], "ret_exc": [0.2]})
+        result = capm_ext(df, "_21d", __min=15)
+        assert _is_none_or_nan(result["beta_21d"][0])
+        assert _is_none_or_nan(result["ivol_capm_21d"][0])
+
+    def test_capm_ext_ignores_min_parameter(self):
+        """capm_ext currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "ret_exc": [2.2, 3.9, 6.4, 7.8, 10.5],
+            }
+        )
+        low_min = capm_ext(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = capm_ext(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_capm_ext_empty_input_returns_empty(self):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "mktrf": pl.Float64,
+                "ret_exc": pl.Float64,
+            }
+        )
+        result = capm_ext(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestFf3:
+    """Tests for ff3() FF3 residual diagnostics helper."""
+
+    def test_ff3_zero_residual_for_exact_linear_model(self, tolerance):
+        """Exact FF3 linear relation should produce near-zero residual volatility."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10, 10],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                "smb_ff": [0.5, 1.0, 1.5, 0.0, -0.5, 2.0],
+                "hml": [2.0, 1.0, 0.0, 3.0, 4.0, -1.0],
+            }
+        ).with_columns(
+            (1.0 + 2.0 * pl.col("mktrf") + 3.0 * pl.col("smb_ff") + 4.0 * pl.col("hml")).alias(
+                "ret_exc"
+            )
+        )
+
+        result = ff3(df, "_21d", __min=15)
+
+        np.testing.assert_allclose(
+            result["ivol_ff3_21d"][0],
+            0.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected ivol_ff3_21d near zero, got {result['ivol_ff3_21d'][0]}",
+        )
+
+    def test_ff3_drops_rows_with_missing_factors(self):
+        """Rows with null SMB/HML should be filtered before grouping."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "ret_exc": [1.0, 2.0, 3.0, 1.0, 2.0, 3.0],
+                "mktrf": [1.0, 2.0, 3.0, 1.0, 2.0, 3.0],
+                "smb_ff": [1.0, 1.0, 1.0, None, None, None],
+                "hml": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+
+        result = ff3(df, "_21d", __min=15).sort(["id_int", "group_number"])
+        assert len(result) == 1, f"Expected only one surviving group, got {len(result)}"
+        assert result["id_int"][0] == 1 and result["group_number"][0] == 10, (
+            f"Unexpected group(s) after factor filter: {result[['id_int', 'group_number']]}"
+        )
+
+    def test_ff3_all_rows_missing_factors_returns_empty(self):
+        """If every row misses SMB/HML, ff3 should return an empty frame."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1],
+                "group_number": [10, 10],
+                "ret_exc": [1.0, 2.0],
+                "mktrf": [1.0, 2.0],
+                "smb_ff": [None, None],
+                "hml": [1.0, 1.0],
+            }
+        )
+        result = ff3(df, "_21d", __min=15)
+        assert len(result) == 0
+
+    def test_ff3_ignores_min_parameter(self):
+        """ff3 currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10, 10],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                "smb_ff": [0.5, 1.0, 1.5, 0.0, -0.5, 2.0],
+                "hml": [2.0, 1.0, 0.0, 3.0, 4.0, -1.0],
+            }
+        ).with_columns(
+            (1.0 + 2.0 * pl.col("mktrf") + 3.0 * pl.col("smb_ff") + 4.0 * pl.col("hml")).alias(
+                "ret_exc"
+            )
+        )
+        low_min = ff3(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = ff3(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_ff3_empty_input_returns_empty(self):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "ret_exc": pl.Float64,
+                "mktrf": pl.Float64,
+                "smb_ff": pl.Float64,
+                "hml": pl.Float64,
+            }
+        )
+        result = ff3(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestHxz4:
+    """Tests for hxz4() HXZ4 residual diagnostics helper."""
+
+    def test_hxz4_zero_residual_for_exact_linear_model(self, tolerance):
+        """Exact HXZ4 linear relation should produce near-zero residual volatility."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10, 10, 10],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+                "smb_hxz": [0.5, 1.0, 1.5, 0.0, -0.5, 2.0, 1.0],
+                "roe": [2.0, 1.0, 0.0, 3.0, 4.0, -1.0, 2.0],
+                "inv": [0.0, 1.0, 0.5, 2.0, 1.5, -0.5, 1.0],
+            }
+        ).with_columns(
+            (
+                1.0
+                + 2.0 * pl.col("mktrf")
+                + 3.0 * pl.col("smb_hxz")
+                + 4.0 * pl.col("roe")
+                + 5.0 * pl.col("inv")
+            ).alias("ret_exc")
+        )
+
+        result = hxz4(df, "_21d", __min=15)
+
+        np.testing.assert_allclose(
+            result["ivol_hxz4_21d"][0],
+            0.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected ivol_hxz4_21d near zero, got {result['ivol_hxz4_21d'][0]}",
+        )
+
+    def test_hxz4_ignores_min_parameter(self):
+        """hxz4 currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10, 10, 10],
+                "mktrf": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+                "smb_hxz": [0.5, 1.0, 1.5, 0.0, -0.5, 2.0, 1.0],
+                "roe": [2.0, 1.0, 0.0, 3.0, 4.0, -1.0, 2.0],
+                "inv": [0.0, 1.0, 0.5, 2.0, 1.5, -0.5, 1.0],
+            }
+        ).with_columns(
+            (
+                1.0
+                + 2.0 * pl.col("mktrf")
+                + 3.0 * pl.col("smb_hxz")
+                + 4.0 * pl.col("roe")
+                + 5.0 * pl.col("inv")
+            ).alias("ret_exc")
+        )
+        low_min = hxz4(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = hxz4(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_hxz4_empty_input_returns_empty(self):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "ret_exc": pl.Float64,
+                "mktrf": pl.Float64,
+                "smb_hxz": pl.Float64,
+                "roe": pl.Float64,
+                "inv": pl.Float64,
+            }
+        )
+        result = hxz4(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestZeroTrades:
+    """Tests for zero_trades() turnover-adjusted zero-trade metric."""
+
+    def test_zero_trades_composite_rank_plus_zero_days(self, tolerance):
+        """Composite should equal zero-trade-days + turnover-rank adjustment."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 10, 10, 10],
+                "tvol": [0.0, 0.0, 10.0, 20.0, 20.0, 20.0],
+                "shares": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+
+        result = zero_trades(df, "_21d", __min=15).sort(["id_int", "group_number"])
+
+        # id=1: zero_trades = (2/3)*21 = 14.0, lower turnover so rank=2 of 2 => 2/2=1.0 => +0.01
+        # id=2: zero_trades = 0.0, higher turnover so rank=1 of 2 => 1/2=0.5 => +0.005
+        np.testing.assert_allclose(
+            result["zero_trades_21d"].to_list(),
+            [14.01, 0.005],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected zero_trades_21d values: {result['zero_trades_21d'].to_list()}",
+        )
+
+    def test_zero_trades_ignores_min_parameter(self):
+        """zero_trades currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 10, 10, 10],
+                "tvol": [0.0, 0.0, 10.0, 20.0, 20.0, 20.0],
+                "shares": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+        low_min = zero_trades(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = zero_trades(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_zero_trades_empty_input_returns_empty(self):
+        df = _empty_df(
+            {"id_int": pl.Int64, "group_number": pl.Int64, "tvol": pl.Float64, "shares": pl.Float64}
+        )
+        result = zero_trades(df, "_21d", __min=15)
+        assert len(result) == 0
+
+    def test_zero_trades_tied_turnover_ranks(self, tolerance):
+        """Two ids with equal mean turnover get average rank (1+2)/2=1.5; composite uses 1.5/2/100."""
+        # Both ids have identical tvol and shares → identical mean turnover → tied
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 10, 10, 10],
+                "tvol": [5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+                "shares": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+        result = zero_trades(df, "_21d", __min=15).sort(["id_int"])
+        # zero_trades_days = 0 for both; rank tie → average rank = 1.5; rank_frac = 1.5/2
+        # composite = 1.5/2/100 + 0 = 0.0075
+        np.testing.assert_allclose(
+            result["zero_trades_21d"].to_list(),
+            [0.0075, 0.0075],
+            **tolerance.STANDARD,
+        )
+
+    def test_zero_trades_shares_zero_skipped_in_mean(self, tolerance):
+        """Rows with shares==0 produce null turnover_d; mean skips nulls."""
+        # id=1: shares [1,0,1], tvol [6,999,12]; turnover_d = [6e-6, null, 12e-6] → mean=9e-6
+        # id=2: shares [1,1,1], tvol [9,9,9]; mean=9e-6 → same turnover → tied rank
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 10, 10, 10],
+                "tvol": [6.0, 999.0, 12.0, 9.0, 9.0, 9.0],
+                "shares": [1.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+        result = zero_trades(df, "_21d", __min=15).sort(["id_int"])
+        # Both have mean turnover_d = 9e-6; tied rank = 1.5/2; zero_trades_days = 0
+        np.testing.assert_allclose(
+            result["zero_trades_21d"].to_list(),
+            [0.0075, 0.0075],
+            **tolerance.STANDARD,
+        )
+
+    def test_zero_trades_all_shares_zero_null_composite(self):
+        """All shares==0 → scalar mean turnover is null → composite is null; row still present."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "tvol": [5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+                # id=1 in group 10: all shares=0 → null mean turnover → null composite
+                # id=2 in group 20: shares>0 → non-null composite
+                "shares": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            }
+        )
+        result = zero_trades(df, "_21d", __min=15).sort(["id_int"])
+        # Both rows kept (filter drops only null zero_trades, not null turnover means)
+        assert len(result) == 2
+        # id=1 gets null composite because mean turnover is null
+        assert result.filter(pl.col("id_int") == 1)["zero_trades_21d"][0] is None
+        # id=2 survives with valid composite
+        assert result.filter(pl.col("id_int") == 2)["zero_trades_21d"][0] is not None
+
+    def test_zero_trades_cross_group_rank_divisor(self, tolerance):
+        """Rank divisor pl.count('turnover') counts non-null turnover within group_number."""
+        # group_number=10: ids 1,2,3; id=3 has all shares=0 → null scalar mean → null turnover
+        # pl.count("turnover").over("group_number") = 2 (only ids 1,2 have non-null turnover)
+        # So rank_frac = rank / 2, not rank / 3
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2, 3, 3, 3],
+                "group_number": [10, 10, 10, 10, 10, 10, 10, 10, 10],
+                "tvol": [10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 5.0, 5.0, 5.0],
+                "shares": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+            }
+        )
+        result = zero_trades(df, "_21d", __min=15).sort(["id_int"])
+        # All 3 rows kept; id=3 has null composite
+        assert len(result) == 3
+        # id=1: lower turnover (10e-6) → descending rank=2 of 2 non-null → rank_frac=2/2=1.0
+        # composite = 1.0/100 + 0 = 0.01
+        # id=2: higher turnover (20e-6) → rank=1 → rank_frac=1/2=0.5 → composite=0.005
+        # id=3: null turnover → null composite
+        non_null = result.filter(pl.col("zero_trades_21d").is_not_null()).sort(["id_int"])
+        np.testing.assert_allclose(
+            non_null["zero_trades_21d"].to_list(),
+            [0.01, 0.005],
+            **tolerance.STANDARD,
+        )
+        assert result.filter(pl.col("id_int") == 3)["zero_trades_21d"][0] is None
+
+    def test_zero_trades_all_zero_tvol(self, tolerance):
+        """All tvol==0 → zero_trades=21, turnover=0; ties in rank → average rank."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 10, 10, 10],
+                "tvol": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "shares": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+        result = zero_trades(df, "_21d", __min=15).sort(["id_int"])
+        # zero_trades_days = 21 for both; turnover=0 both → tied rank=1.5; rank_frac=1.5/2
+        # composite = 1.5/2/100 + 21 = 21.0075
+        np.testing.assert_allclose(
+            result["zero_trades_21d"].to_list(),
+            [21.0075, 21.0075],
+            **tolerance.STANDARD,
+        )
+
+    def test_zero_trades_golden_fixture(self):
+        """Lock zero_trades output against golden parquet."""
+        from tests.golden.generate_rolling_golden import build_zero_trades_input
+
+        golden = pl.read_parquet(GOLDEN_DIR / "zero_trades_126d.parquet")
+        df = build_zero_trades_input(seed=44)
+        result = (
+            zero_trades(df.lazy(), "_126d", __min=20).collect().sort(["id_int", "group_number"])
+        )
+        assert_frame_equal(result, golden, check_exact=False, atol=0.0, rtol=1e-12)
+
+
+class TestDolvol:
+    """Tests for dolvol() dollar-volume level and variability helper."""
+
+    def test_dolvol_mean_and_variability(self, tolerance):
+        """dolvol should return group mean and std/mean variability."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "dolvol_d": [10.0, 20.0, 30.0, 0.0, 0.0, 0.0],
+            }
+        )
+
+        result = dolvol(df, "_21d", __min=15).sort(["id_int", "group_number"])
+
+        # group (1,10): mean=20, std=10 (sample), var ratio=0.5
+        # group (2,20): mean=0 => dolvol_var should be null by guard
+        np.testing.assert_allclose(
+            result["dolvol_21d"].to_list(),
+            [20.0, 0.0],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected dolvol_21d values: {result['dolvol_21d'].to_list()}",
+        )
+        np.testing.assert_allclose(
+            result["dolvol_var_21d"][0],
+            0.5,
+            **tolerance.STANDARD,
+            err_msg=f"Expected dolvol_var_21d=0.5, got {result['dolvol_var_21d'][0]}",
+        )
+        assert result["dolvol_var_21d"][1] is None, (
+            f"Expected null dolvol_var_21d when mean=0, got {result['dolvol_var_21d'][1]}"
+        )
+
+    def test_dolvol_single_observation_variability_is_null(self):
+        """Sample std-based variability is undefined for one observation."""
+        df = pl.DataFrame({"id_int": [1], "group_number": [10], "dolvol_d": [100.0]})
+        result = dolvol(df, "_21d", __min=15)
+        assert result["dolvol_21d"][0] == 100.0
+        assert result["dolvol_var_21d"][0] is None
+
+    def test_dolvol_ignores_min_parameter(self):
+        """dolvol currently ignores __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2, 2],
+                "group_number": [10, 10, 10, 20, 20, 20],
+                "dolvol_d": [10.0, 20.0, 30.0, 5.0, 5.0, 5.0],
+            }
+        )
+        low_min = dolvol(df, "_21d", __min=1).sort(["id_int", "group_number"])
+        high_min = dolvol(df, "_21d", __min=10_000).sort(["id_int", "group_number"])
+        assert low_min.equals(high_min), "Expected identical output regardless of __min"
+
+    def test_dolvol_empty_input_returns_empty(self):
+        df = _empty_df({"id_int": pl.Int64, "group_number": pl.Int64, "dolvol_d": pl.Float64})
+        result = dolvol(df, "_21d", __min=15)
+        assert len(result) == 0
+
+
+class TestTurnover:
+    """Tests for turnover() turnover level and variability helper."""
+
+    def test_turnover_computation_and_min_filter(self, tolerance):
+        """turnover should compute mean/std ratio and apply n >= __min filter."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2],
+                "group_number": [10, 10, 10, 20, 20],
+                "tvol": [10.0, 20.0, 30.0, 5.0, 15.0],
+                "shares": [1.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+
+        result = turnover(df, "_21d", __min=3).sort(["id_int", "group_number"])
+
+        # group (1,10) turnover_d: [10,20,30]/1e6 => mean=20e-6, std=10e-6 -> var=0.5
+        # group (2,20) has n=2 -> filtered out
+        assert len(result) == 1, f"Expected 1 group after __min filter, got {len(result)}"
+        np.testing.assert_allclose(
+            result["turnover_21d"][0],
+            20.0 / 1e6,
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected turnover_21d: {result['turnover_21d'][0]}",
+        )
+        np.testing.assert_allclose(
+            result["turnover_var_21d"][0],
+            0.5,
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected turnover_var_21d: {result['turnover_var_21d'][0]}",
+        )
+
+    def test_turnover_all_zero_shares_gives_null_metrics(self):
+        """All-zero shares make turnover undefined while n can still satisfy __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "tvol": [5.0, 10.0, 15.0],
+                "shares": [0.0, 0.0, 0.0],
+            }
+        )
+        result = turnover(df, "_21d", __min=3)
+        assert len(result) == 1
+        assert _is_none_or_nan(result["turnover_21d"][0])
+        assert _is_none_or_nan(result["turnover_var_21d"][0])
+
+    def test_turnover_empty_input_returns_empty(self):
+        df = _empty_df(
+            {"id_int": pl.Int64, "group_number": pl.Int64, "tvol": pl.Float64, "shares": pl.Float64}
+        )
+        result = turnover(df, "_21d", __min=3)
+        assert len(result) == 0
+
+    def test_turnover_hand_computed_mean_std(self, tolerance):
+        """[10,20,30]/1e6 → mean=20e-6, std=10e-6 (ddof=1), var=std/mean=0.5."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "tvol": [10.0, 20.0, 30.0],
+                "shares": [1.0, 1.0, 1.0],
+            }
+        )
+        result = turnover(df, "_21d", __min=3)
+        # mean must be bit-exact
+        np.testing.assert_allclose(result["turnover_21d"][0], 20.0 / 1e6, rtol=0, atol=0)
+        # std/mean = 0.5; std may accumulate float error
+        np.testing.assert_allclose(result["turnover_var_21d"][0], 0.5, rtol=1e-12, atol=0.0)
+
+    def test_turnover_float_order_sensitivity(self, tolerance):
+        """Mixed-magnitude tvol values agree with an independent NumPy reference."""
+        tvol_values = np.array([1e4, 1e-6, -1e4, 1e-6] + [1.0] * 16, dtype=np.float64)
+        share_values = np.array([1.0, 1.0, 1.0, 1.0] + [1.0] * 16, dtype=np.float64)
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1] + [1] * 16,
+                "group_number": [10, 10, 10, 10] + [10] * 16,
+                "tvol": tvol_values.tolist(),
+                "shares": share_values.tolist(),
+            }
+        )
+        result = turnover(df, "_21d", __min=20)
+
+        scaled_turnover = tvol_values / share_values / 1e6
+        expected_turnover = scaled_turnover.mean()
+        expected_turnover_var = scaled_turnover.std(ddof=1) / expected_turnover
+
+        np.testing.assert_allclose(
+            result["turnover_21d"][0], expected_turnover, rtol=1e-12, atol=0.0
+        )
+        np.testing.assert_allclose(
+            result["turnover_var_21d"][0], expected_turnover_var, rtol=1e-12, atol=0.0
+        )
+
+    def test_turnover_min_boundary(self):
+        """Group with exactly __min rows kept; group with __min-1 rows dropped."""
+        min_val = 5
+        df = pl.DataFrame(
+            {
+                "id_int": [1] * min_val + [2] * (min_val - 1),
+                "group_number": [10] * min_val + [20] * (min_val - 1),
+                "tvol": [float(i) for i in range(min_val)] + [float(i) for i in range(min_val - 1)],
+                "shares": [1.0] * (min_val + min_val - 1),
+            }
+        )
+        result = turnover(df, "_21d", __min=min_val)
+        assert len(result) == 1, f"Expected 1 group, got {len(result)}"
+        assert result["id_int"][0] == 1
+
+    def test_turnover_mixed_null_and_nonnull(self):
+        """Some shares==0 (null turnover_d); n counts total rows for __min, not non-null."""
+        # 3 rows total; 1 has shares==0 → null turnover_d; still 3 rows so n=3 passes __min=3
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "tvol": [10.0, 20.0, 30.0],
+                "shares": [1.0, 0.0, 1.0],
+            }
+        )
+        result = turnover(df, "_21d", __min=3)
+        # Row kept (n=3 satisfies __min=3)
+        assert len(result) == 1
+        # mean computed over non-null: (10e-6 + 30e-6)/2 = 20e-6
+        assert result["turnover_21d"][0] is not None
+
+    def test_turnover_golden_fixture(self):
+        """Lock turnover output against golden parquet."""
+        from tests.golden.generate_rolling_golden import build_turnover_input
+
+        golden = pl.read_parquet(GOLDEN_DIR / "turnover_126d.parquet")
+        df = build_turnover_input(seed=43)
+        result = turnover(df.lazy(), "_126d", __min=20).collect().sort(["id_int", "group_number"])
+        assert_frame_equal(result, golden, check_exact=False, atol=0.0, rtol=1e-12)
+
+
+class TestMktcorr:
+    """Tests for mktcorr() rolling correlation helper."""
+
+    @pytest.mark.parametrize("impl", [mktcorr, _mktcorr_legacy], ids=["new", "legacy"])
+    def test_mktcorr_computation_and_min_filter(self, tolerance, impl):
+        """Should compute correlation and keep only groups with n >= __min."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 2, 2],
+                "group_number": [10, 10, 10, 20, 20],
+                "ret_exc_3l": [1.0, 2.0, 3.0, 1.0, 2.0],
+                "mkt_exc_3l": [2.0, 4.0, 6.0, 2.0, 4.0],
+            }
+        )
+
+        result = impl(df, "_21d", __min=3).sort(["id_int", "group_number"])
+
+        assert len(result) == 1, f"Expected 1 group after __min filter, got {len(result)}"
+        np.testing.assert_allclose(
+            result["corr_21d"][0],
+            1.0,
+            **tolerance.STANDARD,
+            err_msg=f"Expected corr_21d=1.0, got {result['corr_21d'][0]}",
+        )
+
+    @pytest.mark.parametrize("impl", [mktcorr, _mktcorr_legacy], ids=["new", "legacy"])
+    def test_mktcorr_constant_series_is_undefined(self, impl):
+        """Correlation is undefined if one side is constant."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "ret_exc_3l": [1.0, 1.0, 1.0],
+                "mkt_exc_3l": [2.0, 4.0, 6.0],
+            }
+        )
+        result = impl(df, "_21d", __min=3)
+        assert _is_none_or_nan(result["corr_21d"][0])
+
+    @pytest.mark.parametrize("impl", [mktcorr, _mktcorr_legacy], ids=["new", "legacy"])
+    def test_mktcorr_empty_input_returns_empty(self, impl):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "ret_exc_3l": pl.Float64,
+                "mkt_exc_3l": pl.Float64,
+            }
+        )
+        result = impl(df, "_21d", __min=3)
+        assert len(result) == 0
+
+    @pytest.mark.parametrize("impl", [mktcorr, _mktcorr_legacy], ids=["new", "legacy"])
+    def test_mktcorr_multi_group_mixed_sizes(self, tolerance, impl):
+        """Groups with n > __min and n == __min survive; n < __min is dropped.
+
+        Group 1 (id_int=1): 5 obs, perfectly correlated → corr=1.0, survives __min=4.
+        Group 2 (id_int=2): 4 obs, perfectly anti-correlated → corr=-1.0, survives __min=4.
+        Group 3 (id_int=3): 3 obs, < __min=4, must be dropped.
+        """
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3],
+                "group_number": [10, 10, 10, 10, 10, 20, 20, 20, 20, 30, 30, 30],
+                "ret_exc_3l": [1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0],
+                "mkt_exc_3l": [2.0, 4.0, 6.0, 8.0, 10.0, 4.0, 3.0, 2.0, 1.0, 1.0, 2.0, 3.0],
+            }
+        )
+        result = impl(df, "_21d", __min=4).sort(["id_int", "group_number"])
+
+        assert len(result) == 2, f"Expected 2 groups, got {len(result)}"
+        assert list(result["id_int"]) == [1, 2]
+        np.testing.assert_allclose(
+            result["corr_21d"].to_list(),
+            [1.0, -1.0],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected correlations: {result['corr_21d'].to_list()}",
+        )
+
+    @pytest.mark.parametrize("impl", [mktcorr, _mktcorr_legacy], ids=["new", "legacy"])
+    def test_mktcorr_below_min_group_dropped(self, impl):
+        """A single group with n == __min - 1 must produce an empty result."""
+        __min = 5
+        df = pl.DataFrame(
+            {
+                "id_int": [1] * (__min - 1),
+                "group_number": [10] * (__min - 1),
+                "ret_exc_3l": [float(i) for i in range(__min - 1)],
+                "mkt_exc_3l": [float(i) * 2 for i in range(__min - 1)],
+            }
+        )
+        result = impl(df, "_21d", __min=__min)
+        assert len(result) == 0, f"Expected empty result, got {len(result)} rows"
+
+    def test_mktcorr_equivalence_null_free_input(self):
+        """Both impls must produce identical output on varied null-free input."""
+        rng = np.random.default_rng(42)
+        rows_per_group = [8, 6, 5, 7]
+        id_ints, group_numbers, ret_vals, mkt_vals = [], [], [], []
+        for g, n in enumerate(rows_per_group):
+            id_ints.extend([g + 1] * n)
+            group_numbers.extend([g * 10 + 10] * n)
+            ret_vals.extend(rng.standard_normal(n).tolist())
+            mkt_vals.extend(rng.standard_normal(n).tolist())
+
+        df = pl.DataFrame(
+            {
+                "id_int": id_ints,
+                "group_number": group_numbers,
+                "ret_exc_3l": ret_vals,
+                "mkt_exc_3l": mkt_vals,
+            }
+        )
+
+        result_new = mktcorr(df, "_21d", __min=5).sort(["id_int", "group_number"])
+        result_legacy = _mktcorr_legacy(df, "_21d", __min=5).sort(["id_int", "group_number"])
+
+        assert_frame_equal(result_new, result_legacy, check_exact=False, atol=1e-14)
+
+
+class TestDimsonbeta:
+    """Tests for dimsonbeta() lead-lag adjusted beta helper."""
+
+    def test_dimsonbeta_sums_market_coefficients(self, tolerance):
+        """Across multiple groups, beta_dimson should equal b1+b2+b3 per group."""
+        mktrf = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], dtype=float)
+        mktrf_ld1 = np.array([1.0, 0.0, 1.0, 0.0, 1.0, 0.0], dtype=float)
+        mktrf_lg1 = np.array([2.0, 1.0, 0.0, 1.0, 2.0, 3.0], dtype=float)
+
+        df = pl.concat(
+            [
+                # Group A: sum = 2 + 3 + 4 = 9
+                pl.DataFrame(
+                    {
+                        "id_int": [1] * len(mktrf),
+                        "group_number": [10] * len(mktrf),
+                        "mktrf": mktrf,
+                        "mktrf_ld1": mktrf_ld1,
+                        "mktrf_lg1": mktrf_lg1,
+                        "ret_exc": 1.0 + 2.0 * mktrf + 3.0 * mktrf_ld1 + 4.0 * mktrf_lg1,
+                    }
+                ),
+                # Group B: sum = 1 + 0 + 2 = 3
+                pl.DataFrame(
+                    {
+                        "id_int": [2] * len(mktrf),
+                        "group_number": [20] * len(mktrf),
+                        "mktrf": mktrf,
+                        "mktrf_ld1": mktrf_ld1,
+                        "mktrf_lg1": mktrf_lg1,
+                        "ret_exc": -2.0 + 1.0 * mktrf + 0.0 * mktrf_ld1 + 2.0 * mktrf_lg1,
+                    }
+                ),
+                # Group C: sum = 0.5 - 1 + 1.5 = 1
+                pl.DataFrame(
+                    {
+                        "id_int": [3] * len(mktrf),
+                        "group_number": [30] * len(mktrf),
+                        "mktrf": mktrf,
+                        "mktrf_ld1": mktrf_ld1,
+                        "mktrf_lg1": mktrf_lg1,
+                        "ret_exc": 0.7 + 0.5 * mktrf - 1.0 * mktrf_ld1 + 1.5 * mktrf_lg1,
+                    }
+                ),
+            ]
+        )
+
+        result = dimsonbeta(df, "_21d", __min=5).sort(["id_int", "group_number"])
+
+        np.testing.assert_allclose(
+            result["beta_dimson_21d"].to_list(),
+            [9.0, 3.0, 1.0],
+            **tolerance.STANDARD,
+            err_msg=f"Unexpected beta_dimson_21d values: {result['beta_dimson_21d'].to_list()}",
+        )
+
+    def test_dimsonbeta_enforces_min_parameter(self):
+        """apply_group_filter drops dimsonbeta groups with fewer than min_obs observations."""
+        df = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1, 1, 1],
+                "group_number": [10, 10, 10, 10, 10],
+                "eom": [date(2020, 1, 31)] * 5,
+                "mktrf": [0.0, 1.0, 2.0, 3.0, 4.0],
+                "mktrf_ld1": [1.0, 0.0, 1.0, 0.0, 1.0],
+                "mktrf_lg1": [0.0, 1.0, 0.0, 1.0, 0.0],
+                "ret_exc": [1.0, 2.0, 3.0, 4.0, 5.0],
+            }
+        )
+        filtered = apply_group_filter(df, "dimsonbeta", min_obs=10_000)
+        result = dimsonbeta(filtered, "_21d", __min=10_000)
+        assert len(result) == 0
+
+    def test_dimsonbeta_drops_undersized_via_apply_group_filter(self):
+        """apply_group_filter strips groups that are too small for dimsonbeta to evaluate."""
+        small = pl.DataFrame(
+            {
+                "id_int": [1, 1, 1],
+                "group_number": [10, 10, 10],
+                "eom": [date(2020, 1, 31)] * 3,
+                "mktrf": [0.0, 1.0, 2.0],
+                "mktrf_ld1": [1.0, 0.0, 1.0],
+                "mktrf_lg1": [0.0, 1.0, 0.0],
+                "ret_exc": [1.0, 2.0, 3.0],
+            }
+        )
+        rng = np.random.default_rng(0)
+        n_big = 10
+        mktrf = rng.standard_normal(n_big)
+        mktrf_ld1 = rng.standard_normal(n_big)
+        mktrf_lg1 = rng.standard_normal(n_big)
+        big = pl.DataFrame(
+            {
+                "id_int": [2] * n_big,
+                "group_number": [20] * n_big,
+                "eom": [date(2020, 1, 31)] * n_big,
+                "mktrf": mktrf,
+                "mktrf_ld1": mktrf_ld1,
+                "mktrf_lg1": mktrf_lg1,
+                "ret_exc": 1.0 + 0.5 * mktrf + 0.2 * mktrf_ld1 + 0.3 * mktrf_lg1,
+            }
+        )
+        df = pl.concat([small, big])
+        filtered = apply_group_filter(df, "dimsonbeta", min_obs=5)
+        result = dimsonbeta(filtered, "_21d", __min=5)
+        assert result["id_int"].to_list() == [2]
+        assert result["group_number"].to_list() == [20]
+
+    def test_dimsonbeta_empty_input_returns_empty(self):
+        df = _empty_df(
+            {
+                "id_int": pl.Int64,
+                "group_number": pl.Int64,
+                "mktrf": pl.Float64,
+                "mktrf_ld1": pl.Float64,
+                "mktrf_lg1": pl.Float64,
+                "ret_exc": pl.Float64,
+            }
+        )
+        result = dimsonbeta(df, "_21d", __min=15)
+        assert len(result) == 0
+
+    def test_dimsonbeta_handles_singular_design(self):
+        # Regression check: on a collinear design, dimsonbeta returns a finite
+        # beta (no NaN / null / crash). polars-ds's Cholesky path tolerates the
+        # near-singular X'X produced by these inputs via tiny numerical noise on
+        # the diagonal — locking this behavior here so future solver swaps don't
+        # silently regress callers that assume a finite return.
+        n = 20
+        mkt = np.linspace(-1.0, 1.0, n)
+        df = pl.DataFrame(
+            {
+                "id_int": [1] * n,
+                "group_number": [10] * n,
+                "mktrf": mkt,
+                "mktrf_ld1": 2.0 * mkt + 1.0,
+                "mktrf_lg1": -mkt + 0.5,
+                "ret_exc": 0.5 * mkt + 0.1,
+            }
+        )
+        result = dimsonbeta(df, "_21d", __min=15)
+        assert len(result) == 1
+        assert np.isfinite(result["beta_dimson_21d"].item())
+
+    def test_dimsonbeta_long_window_produces_output(self, tolerance):
+        """_126d window with min_obs=60 over a single eom yields one β per group."""
+        rng = np.random.default_rng(7)
+        n = 126
+        mkt = rng.standard_normal(n)
+        mkt_ld = rng.standard_normal(n)
+        mkt_lg = rng.standard_normal(n)
+        df = pl.DataFrame(
+            {
+                "id_int": [1] * n,
+                "group_number": [10] * n,
+                "eom": [date(2020, 6, 30)] * n,
+                "mktrf": mkt,
+                "mktrf_ld1": mkt_ld,
+                "mktrf_lg1": mkt_lg,
+                "ret_exc": 1.0
+                + 0.4 * mkt
+                + 0.3 * mkt_ld
+                + 0.2 * mkt_lg
+                + 0.1 * rng.standard_normal(n),
+            }
+        )
+        filtered = apply_group_filter(df, "dimsonbeta", min_obs=60)
+        result = dimsonbeta(filtered, "_126d", __min=60)
+        assert len(result) == 1
+        # Sum of true coefficients ~ 0.9 plus small OLS noise
+        np.testing.assert_allclose(
+            result["beta_dimson_126d"].to_list(),
+            [0.9],
+            atol=0.1,
+        )
+
+
+class TestPrepareDailyCorr:
+    """Regression tests for the corr_data.parquet written by prepare_daily().
+
+    Verifies that the filter removing null 3l-sums and Compustat zero_obs>=10 rows
+    is present in prepare_daily, guaranteeing null-free corr_data.parquet output.
+    CRSP rows with high zero_obs are kept (source-conditional gate).
+    """
+
+    def test_corr_data_null_free_and_zero_obs_filtered(self, test_paths):
+        """corr_data.parquet has zero nulls and no zero_obs column."""
+        from jkp.data.aux_functions import prepare_daily
+
+        # id "A": 5 consecutive days, all ret_exc non-null → all rows survive.
+        # id "B": day1 ret_exc null → 3l-sums on days 1-3 null → those days filtered.
+        # id "C": Compustat, zero_obs=10 → whole id filtered.
+        dates = [date(2020, 1, d) for d in range(2, 7)]
+        eom = date(2020, 1, 31)
+
+        def make_rows(stock_id, ret_exc_vals, ret_local_vals, source_crsp=1):
+            n = len(dates)
+            return {
+                "excntry": ["USA"] * n,
+                "id": [stock_id] * n,
+                "source_crsp": [source_crsp] * n,
+                "date": dates,
+                "eom": [eom] * n,
+                "prc": [10.0] * n,
+                "adjfct": [1.0] * n,
+                "ret": [0.01] * n,
+                "ret_exc": ret_exc_vals,
+                "dolvol": [1e6] * n,
+                "shares": [1000.0] * n,
+                "tvol": [100.0] * n,
+                "ret_lag_dif": [1] * n,
+                "ret_local": ret_local_vals,
+            }
+
+        df_a = pl.DataFrame(
+            make_rows("A", [0.01, 0.02, 0.03, 0.04, 0.05], [0.01, 0.02, 0.03, 0.04, 0.05])
+        )
+        # id "B": first ret_exc is null → 3l sums on days 0,1,2 will be null
+        df_b = pl.DataFrame(
+            make_rows("B", [None, 0.02, 0.03, 0.04, 0.05], [None, 0.02, 0.03, 0.04, 0.05])
+        )
+        # id "C": Compustat with all-zero ret_local → zero_obs=10 → filtered
+        dates_c = [date(2020, 1, d) for d in range(2, 12)]  # 10 days
+        eom_c_vals = [date(2020, 1, 31)] * 10
+        df_c = pl.DataFrame(
+            {
+                "excntry": ["USA"] * 10,
+                "id": ["C"] * 10,
+                "source_crsp": [0] * 10,
+                "date": dates_c,
+                "eom": eom_c_vals,
+                "prc": [10.0] * 10,
+                "adjfct": [1.0] * 10,
+                "ret": [0.0] * 10,
+                "ret_exc": [0.0] * 10,
+                "dolvol": [0.0] * 10,
+                "shares": [1000.0] * 10,
+                "tvol": [0.0] * 10,
+                "ret_lag_dif": [1] * 10,
+                "ret_local": [0.0] * 10,  # all zero → zero_obs=10 → Compustat filtered
+            }
+        )
+
+        dsf = pl.concat([df_a, df_b, df_c], how="diagonal")
+        dsf_path = test_paths.interim_dir / "dsf.parquet"
+        dsf.write_parquet(dsf_path)
+
+        # --- build synthetic factors parquet ---
+        all_dates = sorted(set(dates + dates_c))
+        fcts = pl.DataFrame(
+            {
+                "excntry": ["USA"] * len(all_dates),
+                "date": all_dates,
+                "mktrf": [0.005] * len(all_dates),
+                "smb": [0.001] * len(all_dates),
+                "hml": [0.001] * len(all_dates),
+            }
+        )
+        fcts_path = test_paths.interim_dir / "fcts.parquet"
+        fcts.write_parquet(fcts_path)
+
+        prepare_daily(test_paths, dsf_path, fcts_path)
+
+        corr = pl.read_parquet(test_paths.interim_dir / "corr_data.parquet")
+
+        # No nulls in ret_exc_3l or mkt_exc_3l
+        assert corr["ret_exc_3l"].null_count() == 0, "ret_exc_3l has nulls"
+        assert corr["mkt_exc_3l"].null_count() == 0, "mkt_exc_3l has nulls"
+
+        # zero_obs column must not be present (it is dropped in select)
+        assert "zero_obs" not in corr.columns, "zero_obs column should not be in corr_data"
+
+        # id "C" (Compustat, zero_obs=10) must not appear.
+        # id A: 5 rows, 3l non-null from row index 2 onwards → 3 rows survive.
+        # id B: 5 rows, first ret_exc null → 3l null on rows 0-2 → rows 3,4 survive → 2 rows.
+        # id C: all filtered by zero_obs gate → 0 rows.
+        assert len(corr) == 5, f"Expected 5 rows (3 from A + 2 from B), got {len(corr)}"
+
+    def test_corr_data_keeps_crsp_high_zero_obs(self, test_paths):
+        """CRSP months with all-zero ret_local still appear in corr_data."""
+        from jkp.data.aux_functions import prepare_daily
+
+        dates = [date(2020, 1, d) for d in range(2, 12)]  # 10 days → zero_obs=10
+        eom = date(2020, 1, 31)
+        dsf = pl.DataFrame(
+            {
+                "excntry": ["USA"] * 10,
+                "id": ["CRSP"] * 10,
+                "source_crsp": [1] * 10,
+                "date": dates,
+                "eom": [eom] * 10,
+                "prc": [10.0] * 10,
+                "adjfct": [1.0] * 10,
+                "ret": [0.0] * 10,
+                "ret_exc": [0.0] * 10,
+                "dolvol": [0.0] * 10,
+                "shares": [1000.0] * 10,
+                "tvol": [0.0] * 10,
+                "ret_lag_dif": [1] * 10,
+                "ret_local": [0.0] * 10,
+            }
+        )
+        dsf_path = test_paths.interim_dir / "dsf.parquet"
+        dsf.write_parquet(dsf_path)
+
+        fcts = pl.DataFrame(
+            {
+                "excntry": ["USA"] * 10,
+                "date": dates,
+                "mktrf": [0.005] * 10,
+                "smb": [0.001] * 10,
+                "hml": [0.001] * 10,
+            }
+        )
+        fcts_path = test_paths.interim_dir / "fcts.parquet"
+        fcts.write_parquet(fcts_path)
+
+        prepare_daily(test_paths, dsf_path, fcts_path)
+        corr = pl.read_parquet(test_paths.interim_dir / "corr_data.parquet")
+        # 10 days; 3l non-null from index 2 onwards → 8 rows
+        assert len(corr) == 8, f"Expected 8 CRSP corr rows, got {len(corr)}"
+
+    def test_prepare_daily_drops_null_mktrf_stock_days(self, test_paths):
+        """Stock days whose date has no mktrf are absent from dsf1."""
+        from jkp.data.aux_functions import prepare_daily
+
+        dsf = pl.DataFrame(
+            {
+                "excntry": ["USA", "USA"],
+                "id": ["A", "A"],
+                "source_crsp": [1, 1],
+                "date": [date(2020, 1, 2), date(2020, 1, 3)],
+                "eom": [date(2020, 1, 31), date(2020, 1, 31)],
+                "prc": [10.0, 10.0],
+                "adjfct": [1.0, 1.0],
+                "ret": [0.01, 0.01],
+                "ret_exc": [0.005, 0.005],
+                "dolvol": [1e6, 1e6],
+                "shares": [1000.0, 1000.0],
+                "tvol": [100.0, 100.0],
+                "ret_lag_dif": [1, 1],
+                "ret_local": [0.01, 0.01],
+            }
+        )
+        dsf_path = test_paths.interim_dir / "dsf.parquet"
+        dsf.write_parquet(dsf_path)
+
+        # Only 2020-01-02 has a factor row
+        fcts = pl.DataFrame(
+            {
+                "excntry": ["USA"],
+                "date": [date(2020, 1, 2)],
+                "mktrf": [0.005],
+                "smb": [0.001],
+                "hml": [0.001],
+            }
+        )
+        fcts_path = test_paths.interim_dir / "fcts.parquet"
+        fcts.write_parquet(fcts_path)
+
+        prepare_daily(test_paths, dsf_path, fcts_path)
+        dsf1 = pl.read_parquet(test_paths.interim_dir / "dsf1.parquet")
+        assert dsf1["date"].to_list() == [date(2020, 1, 2)]
+
+        mkt = pl.read_parquet(test_paths.interim_dir / "mkt_lead_lag.parquet")
+        assert mkt["mktrf"].null_count() == 0
+        assert len(mkt) == 1

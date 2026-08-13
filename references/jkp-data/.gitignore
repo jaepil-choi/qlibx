@@ -1,0 +1,117 @@
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.egg-info/
+build/
+dist/
+*.log
+*.tmp
+*.bak
+
+# Virtual environments
+.venv/
+venv/
+env/
+.conda/
+
+# ==========================================
+# Jupyter / VSCode
+# ==========================================
+.ipynb_checkpoints/
+.vscode/
+*.code-workspace
+
+# ==========================================
+# Data and Outputs
+# ==========================================
+*.parquet
+*.ddb
+!documentation/sas_to_python/data/*.parquet
+!tests/golden/fixtures/**/*.parquet
+*.csv
+*.xlsx
+*.xls
+*.gz
+*.zip
+*.rar
+*.h5
+*.db
+*.sqlite
+outputs/
+output/
+# ==========================================
+# OS-specific junk
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# HPC or system-specific
+# ==========================================
+*.slurm.out
+*.slurm.err
+*.out
+*.err
+*.txt
+*.txt~
+*~
+
+# macOS clutter
+.DS_Store
+
+# Local creds helpers
+.jkp_factors_user
+
+# Claude Code user-specific settings
+.claude/settings.local.json
+
+# Keyring files (plaintext/alt backends)
+.local/
+config/python_keyring/
+.local/share/python_keyring/
+.DS_Store
+build_database/.DS_Store
+*.ipynb
+
+# README Rendering helper files
+README_files/*
+README.html
+
+# ==========================================
+# Testing
+# ==========================================
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+pytest-*.xml
+*.pytest_cache
+tests/fixtures/generated/
+.hypothesis/
+
+# ==========================================
+# LaTeX auxiliary files
+# ==========================================
+documentation/**/*.aux
+documentation/**/*.bbl
+documentation/**/*.blg
+documentation/**/*.fdb_latexmk
+documentation/**/*.fls
+documentation/**/*.synctex.gz
+documentation/**/*.toc
+
+# Temporary test databases
+aux_*.ddb
+*.ddb.wal
+
+# Bundled package resources (override earlier exclusions)
+!src/jkp/data/resources/*
+
+# Rust plugin build artifacts
+jkp-plugin/target/
+jkp-plugin/Cargo.lock

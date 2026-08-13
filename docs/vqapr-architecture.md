@@ -624,6 +624,7 @@ StrategyModel은 여기에 실행 문맥을 더 받는다.
 class StrategyModelContext(Protocol):
     window: ModelWindow
     calendar: CalendarView
+    recorder: StrategyRecorder
     def account(self) -> AccountSnapshot: ...
     def account_history(self, requirement: HistoryRequirement) -> AccountHistory: ...
     def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
@@ -727,8 +728,9 @@ class StrategyModel(Model):
     def decide(self, context: StrategyModelContext) -> PortfolioIntent: ...
 ```
 
-- `StrategyModelContext`는 `window`, `event`, `universe`, `calendar`와 account 접근만 준다(§4.3).
-  Clock·Store·Exchange·mutable Account는 없다.
+- `StrategyModelContext`는 `window`, `event`, `universe`, `calendar`, account 접근과 strategy-specific evidence를
+  기록하는 write-only `recorder`만 준다(§4.3, §9). Clock·Store·Exchange·mutable Account는 없다.
+- `recorder`는 읽을 수 없으며 `memory`나 `PortfolioIntent`의 일부가 아니다.
 
 #### 실행을 건너뛸 수 없다
 
@@ -1647,6 +1649,26 @@ data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → E
 - artifact는 producer의 private class 없이 typed object로 읽히고 validation된다 → `UC-ARTIFACT-001`
 - report는 **intended / requested / dealt / committed / marked**를 나란히 보여준다 → `UC-REPORT-001`
 
+### 9.1 Strategy diagnostic recorder
+
+```python
+class StrategyRecorder(Protocol):
+    def append(self, table_id: str, row: Mapping[str, Scalar]) -> None: ...
+    def append_batch(self, table_id: str, rows: Rows) -> None: ...
+```
+
+StrategyModel은 run 시작 전에 고정된 `TableSpec`에 따라 diagnostic row 또는 batch를 write-only recorder에
+추가할 수 있다. schema는 portable scalar type으로 제한하며, Flow가 run·strategy·decision time과 sequence
+identity를 덧붙인다.
+
+한 `decide()`에서 기록한 row는 해당 invocation의 intent와 memory 검증이 성공한 뒤에만 정상 evidence로
+확정된다. artifact backend는 row 수 또는 buffer byte 한도에 도달하면 immutable chunk로 flush하고,
+finalize에서 chunk manifest와 metadata를 원자적으로 publish한다. staging chunk만 존재하는 incomplete table은
+reusable artifact로 보이지 않는다.
+
+buffer 크기와 compression은 storage tuning이며 경제적 run identity가 아니다. 예를 들어 10,000 rows 또는
+64 MiB 중 먼저 도달한 조건으로 flush할 수 있다. → `UC-REPORT-002`
+
 ---
 
 ## 10. Package layout
@@ -2387,7 +2409,7 @@ class RunDefinition(BaseModel):
 | `UC-EXEC-003`, `UC-MONITOR-001` | §8.1 (독립 MONITORING callback) |
 | `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.3 (`optimize`) + §5.4 (생성 시 검증) + §11.3 |
 | `UC-LOOKTHROUGH-001`~`003` | §5.3 (`optimize`의 `L`) + §11.5. StrategyModel이 만들고 패키지는 자동 확장하지 않음 |
-| `UC-ARTIFACT-001`~`003`, `UC-RESEARCH-001`, `UC-REPORT-001` | §9 |
+| `UC-ARTIFACT-001`~`003`, `UC-RESEARCH-001`, `UC-REPORT-001`, `UC-REPORT-002` | §9 |
 | `UC-EXTENSION-001`, `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10 |
 | `UC-CONFIG-001` | §12 |
 | `UC-ONBOARD-001` | `project/` + `resources/` |
@@ -2480,6 +2502,8 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] StrategyModel이 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
 - [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다
+- [ ] strategy diagnostic recorder는 write-only이고, staging chunk만 존재하는 incomplete table을 reusable artifact로
+  노출하지 않는다
 - [ ] fractional/lot 규칙이 `ListingRule`에 있고 `AccountMode`에는 없다
 - [ ] `Instrument`에 venue 정보(`exchange_id`)가 없다
 - [ ] 비용 정책이 종목 id가 아니라 종류에 걸린다

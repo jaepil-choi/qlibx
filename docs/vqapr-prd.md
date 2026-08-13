@@ -1674,6 +1674,15 @@ report는 최소한 다음을 구분해 보여준다.
 하나의 backtest result를 table, chart, machine-readable report로 표현한다. renderer가 달라도 return, cost,
 exposure, failure count의 underlying value와 lineage는 같아야 한다.
 
+#### UC-REPORT-002 — Strategy diagnostic table
+
+StrategyModel은 판단 과정에서 사용한 signal, 선택 여부, 원 weight와 사유 같은 strategy-specific 정보를
+user-declared typed schema에 따라 기록할 수 있다.
+
+기록된 값은 Model state나 Account authority가 아니며 StrategyModel이 다시 읽을 수 없다. run이 끝난 뒤에는
+producer를 재실행하지 않고 report와 분석에서 사용할 수 있는 versioned table artifact로 조회할 수 있어야 한다.
+실패하거나 중단된 publication의 일부 row를 complete result로 노출하지 않는다.
+
 #### UC-MONITOR-001 — Monitoring finding report
 
 actual-account finding을 daily report로 만든다. report는 breach와 missing input을 구분하고, **intended target을
@@ -2248,6 +2257,8 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - 실패와 retry history는 `UC-RESEARCH-001`처럼 queryable evidence로 남는다.
 - `UC-REPORT-001`, `UC-MONITOR-001`에서 stored result를 재실행 없이 report하고 actual과 intended state를
   구분한다.
+- `UC-REPORT-002`에서 strategy diagnostic row를 typed table artifact로 보존하고, StrategyModel 재실행 없이
+  report하며, 이를 Model state나 actual state로 취급하지 않는다.
 - `UC-EXTENSION-001`에서 agent가 만든 local transform의 compatibility를 package가 deterministic하게 판정한다.
 - `UC-EXTENSION-002`에서 local StrategyModel을 documented public contract로 검증·등록하고 user-selected exact
   version으로 실행하며 source drift와 implicit latest selection을 compute 전에 거부한다.
@@ -2344,7 +2355,7 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §7 | current |
 | `UC-LOOKTHROUGH-001` ~ `003` | §8.2 | current |
 | `UC-ARTIFACT-001` ~ `003`, `UC-RESEARCH-001` | §9 | current |
-| `UC-REPORT-001`, `UC-MONITOR-001` | §9.4 | current |
+| `UC-REPORT-001`, `UC-REPORT-002`, `UC-MONITOR-001` | §9.4 | current |
 | `UC-ERROR-001`, `UC-RETURN-001` | §10 | current |
 | `UC-AGENT-002` | §11.1 | current |
 | `UC-ONBOARD-001` | §11.3 | current |

@@ -168,15 +168,30 @@ instrument의 **속성**을 어디에 둘지는 위 규칙만으로 안 갈린�
 | 보통주/우선주 | ✗ | ✗ | **Instrument** |
 | `quantity_step` · `permitted_sides` | ✗ | ✅ | **ListingRule** |
 | 거래비용 요율 | 기간별 | ✅ | **CostRule** |
+| **거래 가능 여부 · 체결 가격** | **✅ 매 체결 시점** | **✅** | **체결 테이블** (§6.2) |
 | 업종 분류 | ✅ 재분류된다 | ✗ | **데이터** |
-| 거래정지 여부 | ✅ 매일 | ✗ | **데이터** |
-| 상장 여부 | ✅ | ✗ | **데이터** |
+| 투자 유니버스 편입 여부 | ✅ | ✗ | **데이터** |
 
 - **왜 이 축이 필요한가**: 업종 분류와 `kind`는 둘 다 "이 종목이 무엇인가"처럼 보이지만, 하나는
   **재분류될 수 있고** 하나는 아니다. 변하는 것을 정적 선언에 넣으면 과거 시점의 판단이 오늘의 분류로
   오염된다.
-- **없으면**: 거래정지 여부를 Instrument에 넣는 실수가 나온다. 그러면 PIT이 적용되지 않아 **어제의 판단이
+- **없으면**: 거래정지 여부를 Instrument에 넣는 실수가 나온다. 그러면 시점이 적용되지 않아 **어제의 판단이
   오늘의 정지 상태를 보게 된다.**
+
+#### venue가 아는 것은 넷이고 변화 속도만 다르다
+
+```text
+안 변함     ListingRule     수량 단위, 허용 방향
+기간별      CostRule        요율
+매 시점     체결 테이블      거래 가능 여부, 가격
+```
+
+**거래정지는 venue가 판단하는 것이다.** 같은 종목이 KRX에서 정지여도 academic venue에서는 거래 가능일 수
+있고, `UC-ACADEMIC-001`이 요구하는 explicit academic listing이 바로 그것이다. 시점에 따라 변한다는 이유만으로
+데이터 쪽에 두면 venue를 바꿀 때 따라오지 않는다.
+
+**투자 유니버스는 그 반대다.** "이 종목을 내 연구 대상으로 볼 것인가"는 venue와 무관하고 연구자가 정하므로
+보통의 데이터이며, 전략이 자기 requirement로 읽는다(§6.2).
 
 ---
 
@@ -204,7 +219,47 @@ DATA_AVAILABLE → DECISION → EXECUTION → FILL_COMMIT → VALUATION → MONI
 ```
 
 - 고정 순서 하나만 둔다. 설정 가능하게 만들지 않는다 → 재현성이 설정에 의존하지 않는다.
-- decision과 execution을 같은 timestamp에 두려면 가격 availability를 따로 증명해야 한다.
+
+#### `DATA_AVAILABLE`은 이벤트가 아니다
+
+**아무도 이것을 발화하지 않는다.** run 안에 이것을 만드는 주체가 없다 — DataModel materialization은
+`run()`이 아니라 별도 진입점이고(§4.4), 관측이 보이게 되는 것은 이벤트가 아니라 resolver의 필터다.
+
+이것은 **`available_at <= t`에서 등호가 성립한다는 것을 순서로 표현한 것**이다.
+
+```text
+available_at = 15:30 인 행은
+15:30에 일어나는 어떤 일보다도 먼저 보이게 된다
+```
+
+- **왜 적어두나**: 다른 이벤트들과 나란히 있으면 구현할 때 emit 주체를 찾게 된다. 찾을 것이 없다.
+
+#### decision과 execution이 같은 timestamp면
+
+전략이 **자기가 체결할 가격을 보고 판단한 것**이다.
+
+```text
+15:30 DECISION    창 상한 15:30  →  그날 종가가 이미 보인다
+15:30 EXECUTION   trade_at 15:30 →  그 종가로 체결
+```
+
+미래를 본 것이 아니므로 look-ahead는 아니다. 그러나 **현실에서 불가능하고 성과를 조용히 부풀린다** —
+종가를 확인한 순간 장은 끝나 있다.
+
+- 두 시각은 각각 선언된다. trigger가 판단 시각을(§3.4), `FillConvention`이 체결 시각을(§6.2) 정하므로
+  **preflight에서 비교할 수 있다**(§12).
+- 검사 대상은 `offset_sessions == 0`이 아니라 **시각이 같은 경우**다. 표준 daily-close 흐름이 이미
+  offset 0이다 — 04:00에 판단하고 같은 session 15:30에 체결한다.
+
+#### 참고 — 왜 우리에겐 "거래소를 먼저 갱신"이 없나
+
+nautilus와 vnpy는 데이터가 스트림으로 흐르며 거래소와 전략을 차례로 지나므로, **거래소의 시장 상태를 먼저
+갱신하는 순서를 손으로 정한다.** 거래소가 먼저 하는 것은 상태 갱신이지 체결이 아니고, 체결은 전략 다음이다.
+세 프레임워크가 같은 순서다.
+
+우리 Exchange는 스트림을 받지 않고 체결 시점에 그 시각의 행을 조회한다(§6.2). **조회가 곧 갱신이므로 미리
+갱신할 것이 없고, 갱신 순서라는 개념이 존재하지 않는다.** 저쪽의 두 단계가 우리의 `EXECUTION` 하나에
+합쳐져 있다.
 
 ### 3.3 표준 daily-close 타임라인
 
@@ -217,6 +272,9 @@ DATA_AVAILABLE → DECISION → EXECUTION → FILL_COMMIT → VALUATION → MONI
 
 - `03-05 04:00`에는 03-05 종가를 읽을 수 없다.
 - `03-06 04:00`에 데이터 행이 없어도 이벤트는 큐에 정상 진입한다.
+- **04:00은 Model의 `TriggerPolicy`가, 15:30은 Exchange의 `FillConvention`이 정한다**(§3.4, §6.2).
+  둘 다 선언이며 어느 쪽도 run script에 있지 않다. 이 예시에서 판단과 체결이 **같은 session**이라는 것도
+  선언의 결과다 — `offset_sessions = 0`.
 
 ### 3.4 Trigger는 Model이 소유한다
 
@@ -259,6 +317,22 @@ class LastSessionOfMonth(BaseModel):
 
 **월말이 언제인지는 calendar가 안다.** Flow가 `SessionCalendar`에서 해당 월의 마지막 eligible session을
 찾는다. 6월 30일이 휴장이면 6월의 마지막 거래일이 형성일이 된다. 데이터에서 유도하지 않는다.
+
+#### 체결 시각도 같은 방식으로 선언된다
+
+시점을 만드는 선언이 둘이고, 둘의 구조가 같다.
+
+```text
+Model      "매 세션 04:00에 판단한다"           TriggerPolicy      (이 절)
+Exchange   "그 session 15:30에 D열로 체결한다"   FillConvention     (§6.2)
+```
+
+- 둘 다 **선언**이고, 어느 쪽도 스스로 시간을 진행시키지 않는다. Flow가 `SessionCalendar`와 결합해
+  이벤트를 만든다.
+- 둘 다 **닫힌 집합**이다. 임의 표현이나 콜백을 받지 않는 이유가 같다 — cadence도 체결 시각도 경제적
+  의미이고 재현 가능해야 한다.
+- **왜 소유자가 다른가**: 언제 판단할지는 전략의 성질이고, 언제 체결되는지는 venue의 성질이다(§2.8).
+  같은 전략을 다른 venue에서 돌리면 판단 시각은 같고 체결 시각이 달라진다.
 
 ### 3.5 Warm-up — 판단할 준비가 되기 전의 candidate
 
@@ -327,28 +401,119 @@ bundled agent skill이 후보와 위험을 설명하고 user가 고른다. packa
 
 ## 4. Data
 
-### 4.1 Registration — 최소한만
+### 4.1 Registration — 두 층, 그리고 최소한만
+
+**결정.** 등록은 두 층이다. **물리 배치는 source가 알고, 의미는 dataset이 안다.**
 
 ```python
-class DatasetRegistration(BaseModel):
+class SourceSpec(BaseModel):                      # 물리 — 어디에 어떻게 쌓여 있나
+    source_id: str
+    path: Path                                     # 디렉터리면 하위 전부
+    field_partition: FieldPartition | None = None
+
+class FieldPartition(BaseModel):
+    key: str                                       # 파티션 키. 폴더 이름이 field 이름이 된다
+    value: str                                     # 파일 안의 값 컬럼
+
+class DatasetRegistration(BaseModel):             # 의미
     dataset_id: str
+    source: str
+    query: str | None = None
     instrument_field: str
     available_at: AvailabilityBinding
     key_fields: tuple[str, ...]
-    fields: tuple[str, ...]
-    source: SourceIdentity
+    fields: Mapping[str, str]                      # 프레임워크 이름 → 물리 위치
 ```
 
-- 이 여섯 개가 전부다. `fiscal_period`, `session_date`, `revision`, `horizon_end`는 **일반 column**이다.
+- 의미 층은 여전히 여섯 개가 전부다. `fiscal_period`, `session_date`, `revision`, `horizon_end`는
+  **일반 column**이다.
 - **종목 축이 없는 시계열도 같은 계약을 쓴다.** 지수 레벨, 금리, 환율처럼 instrument가 없어 보이는
   데이터는 상수 컬럼 하나를 두어 합성 instrument(`_KOSPI`, `_CD91`)로 등록한다.
   - **왜 예외를 만들지 않나**: 예외를 두면 `ModelWindow`가 두 모양을 갖게 되고, 소비자가 "이건 종목이
     있나 없나"로 분기해야 한다. `UC-ACADEMIC-001`이 tracking-only Index를 instrument로 인정하는 것과도
     일관된다.
-- **consumer-purpose alias 없음.** `execution_price` 같은 role을 등록에 새기지 않는다.
-  - **왜**: 같은 `close`를 StrategyModel·Exchange·Valuation이 각자 요구해야 누가 무엇을 읽었는지 lineage에 남는다.
-  - **없으면**: `UC-EXEC-002`의 "어떤 가격으로 체결했는가"가 등록 시점의 이름 선택에 숨는다.
-- **UC**: `UC-DATA-001`, `UC-AGENT-001`
+- **UC**: `UC-DATA-001`, `UC-DATA-003`, `UC-AGENT-001`
+
+#### `field_partition`은 source 성질이고 dataset 위로 올라가지 않는다
+
+field가 많고 성긴 데이터는 넓은 표가 낭비다. 재무 계정 500개를 컬럼으로 펴면 대부분 종목에서 대부분이
+비어 있다. 그때는 field를 **폴더로 올린다.**
+
+```text
+fundamentals/
+  item=BPS/     part-0.parquet     [available_at, ticker, value: double]
+  item=EPS/     part-0.parquet     [available_at, ticker, value: double]
+  item=SECTOR/  part-0.parquet     [available_at, ticker, value: string]
+```
+
+**소비자는 이 차이를 보지 않는다.** 넓은 표든 폴더든 `fields=("bps",)`라고 쓰고, resolver가 컬럼 선택으로
+번역할지 경로 선택으로 번역할지 정한다(§4.2).
+
+- **왜 dataset 위로 안 올리나**: 올리면 소비자가 "이건 폴더인가 컬럼인가"로 분기하게 되고, 나중에 재무를
+  넓은 표로 바꿀 때 dataset 정의와 소비자 코드가 같이 바뀐다. 배치는 성능 결정이고 의미가 아니다.
+- **언제 무엇을 쓰나**: field가 적고 조밀하면 넓은 표(일별 시세 OHLCV), 많고 성기면 폴더(재무 계정).
+
+#### 한 디렉터리 = 한 스키마
+
+폴더로 나누는 것의 핵심은 저장 크기가 아니라 **파티션 키가 스키마를 결정한다**는 것이다.
+
+`item`을 **컬럼으로** 두면 `value` 하나에 double과 string이 섞여 전부 문자열로 밀어 넣게 되고, 무엇을 읽든
+`WHERE item = ...`을 붙여야 하고, 이질적인 값이 한 컬럼에 모여 압축도 나빠진다. **폴더로 올리면 셋 다
+사라진다** — 폴더마다 자기 타입을 갖고, `item`은 컬럼이 아니라 경로라 파일 안에 저장되지도 않으며,
+조건이 평가되는 게 아니라 **파일을 안 연다.**
+
+> **Reference.** nautilus는 카탈로그를 `data/<data_class>/<identifier>/*.parquet`로 나눈다
+> (`ParquetDataCatalog._make_path`). `data/bar/` 안은 전부 Bar 스키마고 `data/quote_tick/` 안은 전부
+> QuoteTick 스키마라, 두 종류를 한 테이블에 섞어 값 컬럼 하나로 담는 일이 **구조적으로 불가능하다.**
+> 나누는 축만 다를 뿐 원리가 같다.
+>
+> **우리가 식별자 축으로는 안 나누는 이유**: nautilus는 종목 하나씩 스트림으로 재생하므로 종목별 분리가
+> 이득이다. 우리는 **횡단면 계산이 기본**이라 한 시점의 전 종목을 함께 읽는다. 종목으로 나누면 3,000개
+> 디렉터리를 열게 된다.
+
+#### 개명은 되고 role은 안 된다
+
+`fields`는 **프레임워크 이름 → 물리 위치** 매핑이다.
+
+```yaml
+fields:
+  open:   "당일시가(원)"       # 물리 컬럼
+  bps:    BPS                  # 또는 폴더 이름
+```
+
+물리 컬럼 이름이 SQL 식별자도 Python 인자도 될 수 없는 경우가 흔하므로 개명은 필요하다. 그러나 **role은
+여전히 금지다.**
+
+| | 예 | 왜 |
+|---|---|---|
+| **허용 — 개명** | `"당일시가(원)"` → `open` | 누가 읽을지 말하지 않는다. 안정적인 손잡이일 뿐 |
+| **금지 — role** | `"당일종가(원)"` → `execution_price` | **누가 읽을지를 등록이 미리 정한다** |
+
+- **왜**: 같은 `close`를 StrategyModel·Exchange·Valuation이 각자 요구해야 누가 무엇을 읽었는지 lineage에 남는다.
+- **없으면**: `UC-EXEC-002`의 "어떤 가격으로 체결했는가"가 등록 시점의 이름 선택에 숨는다.
+- **프레임워크는 여전히 `open`이 무슨 뜻인지 모른다.** 관례적인 이름을 제안하는 것은 agent의 일이고
+  (PRD §11.1), 사용자가 `px_o`라고 붙여도 된다.
+- `fields`가 **물리 컬럼일 필요가 없다**는 것이 `field_partition`을 가능하게 한다.
+
+#### 등록이 보장하는 것과 보장하지 않는 것
+
+**결정.** 등록 `query`가 만들어내는 값이 point-in-time으로 안전한지 package는 **판정하지 않는다.**
+
+```sql
+-- 이런 것을 막지 않는다
+select date, ticker,
+       avg(close) over (order by date rows between 10 preceding and 10 following) as ma
+from prices
+```
+
+- **왜 안 막나**: 사용자가 등록 query에 안 써도 **자기 ETL에서 미리 계산해 파일로 만들어 오면 똑같다.**
+  두 번째 길이 항상 열려 있으므로 첫 번째만 막는 것은 막은 것이 아니다.
+- **막으면 오히려 나쁜 이유**: "프레임워크가 검사한다"는 인상이 방심을 만든다. **반쪽 보장은 무보장보다
+  나쁘다.**
+- 이것은 PRD §3.2가 이미 정한 경계다 — *"vqapr가 보장하는 것은 **선언된 availability의 준수**다. source의
+  실제 경제적 공시 시점에 대한 최종 확인은 user가 내리고, bundled agent skill이 근거 있는 후보를 제시한다."*
+- **그래서 어디서 막나**: 이동평균·누적합·순위·시간축 집계 같은 패턴은 **bundled agent skill의 discouraged
+  목록**에서 다룬다. 등록 이전의 인터뷰가 그 자리다(PRD §11.1).
 
 ### 4.2 Requirement — 소비자가 선언한다
 
@@ -362,11 +527,42 @@ class DataRequirement(BaseModel):
 ```
 
 - **DataModel**은 계산 입력을, **StrategyModel**은 signal/benchmark/constituent field를,
-  OrderPlanner·Exchange는 price/tradability를, Valuation은 보유 종목 mark field를 각각 선언한다.
+  Valuation은 보유 종목 mark field를 각각 선언한다.
+  - **Exchange는 여기에 없다.** 체결에 필요한 가격과 거래 가능 여부는 `DataRequirement`가 아니라
+    체결 테이블 조회로 얻는다(§6.2). 창도 lookback도 거치지 않는다.
 - `lookback`은 **Store query까지 그대로 내려간다.** 전체 읽고 자르기 금지 → `UC-LOOKBACK-001`
 - **`Lookback`은 전부 과거 방향이다.** 미래 방향 타입이 존재하지 않으므로, 어떤 소비자도 미래 관측을
   당겨 읽을 수 없다. label처럼 미래가 필요해 보이는 계산은 값을 나중 시점에 기록하고 소비자가 시점을 맞춰
   읽는다(PRD §3.5).
+
+#### `fields`는 물리 배치에 따라 번역된다
+
+소비자가 쓰는 것은 언제나 프레임워크 이름이고, resolver가 §4.1의 배치를 보고 물리 접근으로 바꾼다.
+
+```text
+DataRequirement(dataset_id="fundamentals", fields=("bps",), lookback=RowsLookback(20))
+
+  넓은 표      →  컬럼 `BPS` 선택
+  field 폴더   →  경로 `item=BPS/` 선택          ← 조건 평가가 아니라 파일 선택
+                  + available_at <= evaluation_time
+                  + (instrument × field)별 최근 20행
+```
+
+**소비자 코드가 배치에 따라 달라지지 않는다.** 재무를 폴더에서 넓은 표로 바꿔도 이 선언은 그대로다.
+
+#### `RowsLookback`은 (instrument × field)별로 센다
+
+**결정.** `rows`가 세는 단위는 instrument가 아니라 **(instrument × field)**다.
+
+- **왜 이게 더 맞나**: 분기 재무는 항목마다 공시 시점이 다를 수 있다. *"각 항목의 최근 20개"*가
+  *"최근 20개 시점"*보다 정확하다.
+- **왜 규칙이 하나로 통일되나**: 넓은 표에서 모든 field가 같은 행에 있으면 두 해석의 결과가 같다. 그래서
+  배치와 무관하게 같은 규칙을 쓴다.
+- **없으면**: field 폴더에서 `RowsLookback(20)`이 field 5개일 때 field당 4행이 되고, PRD §3.5의
+  *"있는 만큼 반환한다"*에 걸려 **실패하지 않고 조용히 절반만 온다.** 넓은 표에서 폴더로 바꾸는 순간
+  모든 lookback이 줄어드는데 아무도 모른다.
+- `CalendarLookback`은 시간 경계라 field 수와 무관하다. 영향 없음.
+- **UC**: `UC-LOOKBACK-001`, `UC-DATA-003`
 
 #### vocabulary를 늘리지 않고 넓게 받아 거른다
 
@@ -418,6 +614,9 @@ class ModelWindow(Protocol):                      # 두 종류가 공유
 - **왜 이게 가능한가**: 계산식 DSL을 두지 않고 사각형을 통째로 넘기기 때문이다. DSL을 쓰면 rolling 연산자와
   횡단면 연산자를 따로 만들어야 하고, 그때 두 개념이 갈린다.
 - requirement가 여럿이면 dataset마다 사각형 하나씩이다.
+- **물리 배치는 여기까지 올라오지 않는다.** 넓은 표에서 왔든 field 폴더에서 왔든 창은 같은 사각형이다.
+  번역은 §4.2의 resolver가 끝냈다. §4.1이 종목 축 없는 시계열에 예외를 두지 않은 것과 같은 이유 —
+  **소비자에게 분기를 만들지 않는다.**
 
 StrategyModel은 여기에 실행 문맥을 더 받는다.
 
@@ -729,6 +928,35 @@ $$\text{s.t.}\quad \textstyle\sum w + c = 1,\quad l \le w \le u,\quad c_{lo} \le
 - **왜 자르지 않고 푸는가**: 자르면 남은 비중을 재분배해야 하고, 재분배하면 다른 종목이 다시 상한에 걸려
   반복이 생긴다. 그리고 무엇보다 **잘릴 것을 미리 알았다면 다른 종목을 다르게 잡았을** 기회가 사라진다.
 
+##### `c`가 결정 변수라는 것이 체결 시점 현금을 보장하지는 않는다
+
+`optimize`가 푸는 것은 **비중 공간이고 판단 시점**이다. 체결 가격을 모른다.
+
+그런데 **가격 변동 자체는 문제가 되지 않는다.** 체결 시점에 NAV를 그 시점 가격으로 다시 계산하고 weight를
+거기에 적용하므로,
+
+$$\sum_i(\text{매수 delta}) - \sum_i(\text{매도 delta}) \;=\; \sum_i w_i \cdot NAV - (NAV - cash) \;=\; cash - NAV \cdot c$$
+
+$$\textbf{순매수} \;=\; \textbf{현재 현금} - \textbf{목표 현금}$$
+
+전 종목이 갭 상승하면 NAV도 목표 금액도 보유 금액도 같은 비율로 오른다. 개별 종목이 서로 다르게 움직여도
+합 수준에서 상쇄된다. 목표 현금 $c \ge 0$ 이므로 **순매수가 현재 현금을 넘을 수 없다.**
+
+부족의 원인은 따로 있다.
+
+| 원인 | 크기 | 왜 항등식이 못 잡나 |
+|---|---|---|
+| **거래비용** | 매수액의 몇 bp | **주범이다.** 목표 금액 **위에** 얹히므로 항등식 밖이다 |
+| **매도 실패** | 클 수 있다 | 예상한 대금이 안 들어온다 |
+| **정수 반올림 잔차** | 종목당 1주 미만 | 매도 내림(손실)과 매수 내림(절약)이 대체로 상쇄 |
+
+첫 번째가 결정적이다. `cash_range=(0, 0)`이면 순매수 = 현재 현금이고 **비용만큼 반드시 부족하다.**
+그래서 `cash_range`의 하한은 예산 의미를 표현하는 수단이면서 동시에 **비용을 담을 자리**다(PRD §5.5).
+
+- **그래서 clipping은 예외 상황이 아니다.** 매 리밸런싱에 어느 정도 일어나는 것이 정상이고, §6.1이 규칙을
+  명시해야 하는 이유도 그것이다.
+- 이 항등식은 **weight target일 때만** 성립한다. quantity target은 §5.4를 본다.
+
 `weighting`과 `optimize`는 복잡도만 다른 같은 계열이다. 전자는 제약 없는 배분, 후자는 제약 하 배분이다.
 
 보조 함수 (결측을 **명시적으로** 다루기 위한 것):
@@ -802,6 +1030,9 @@ class PortfolioIntent(BaseModel):
 ```
 
 - `PortfolioTarget`은 weight **또는** quantity 중 정확히 하나. 둘 다 채우거나 비우면 validation error.
+- **두 종류는 가격 변동에 대한 성질이 다르다.** weight target은 체결 시점 NAV에 적용되므로 §5.3의 항등식이
+  성립하고 갭이 상쇄된다. **quantity target은 금액이 아니라 수량을 고정하므로 갭 노출이 남는다** — 가격이
+  오르면 더 많은 현금이 필요하다. 결함이 아니라 *"정확히 이만큼 보유하고 싶다"*는 그 target의 의미다.
 - **`cash_target`은 유도하지 않는다.** `1 - Σw`로 계산되는 값이 아니라 §5.3이 결정한 값이다.
   **의도된 현금 포지션**(무위험자산 보유)과 **배분하지 못한 잔여**는 선언한 현금 범위의 폭으로 구분된다
   (PRD §5.5).
@@ -843,18 +1074,95 @@ tz-aware 시각 · 유일 instrument · 유한 값 · lineage · profile directi
 
 ```python
 class OrderPlanner(Protocol):
-    def requirements(self, intent: PortfolioIntent) -> tuple[DataRequirement, ...]: ...
     def plan(self, intent, account: AccountSnapshot,
-             market: ExecutionView, rules: ExchangeRulesView) -> OrderBatch: ...
+             venue: ExecutionSnapshot, rules: ExchangeRulesView) -> OrderBatch: ...
 ```
 
-- decision time의 stale quantity를 **재사용하지 않는다.** execution 시점의 committed position/cash/price로
-  delta를 계산한다.
+- decision time의 stale quantity를 **재사용하지 않는다.** execution 시점의 committed position/cash와
+  체결 테이블의 그 시각 행으로 delta를 계산한다.
 - StrategyModel을 재호출하거나 intent를 재계산하지 않는다.
+- `ExecutionSnapshot`은 체결 테이블을 **집합 단위로 한 번** 조회한 결과다(§6.2). `DataRequirement`도
+  `ModelWindow`도 거치지 않는다.
 - 각 `OrderRequest`: instrument, side, quantity, 출처 intent/target, account version, 변환 가격,
   rounding/clipping/skip 진단.
-- MVP는 **batch-atomic**: 가격이나 listing이 하나라도 없으면 Exchange 호출 전에 전체 실패. 부분 성공은 future.
-- **UC**: `UC-EXEC-001`, `UC-COST-003`, `UC-CONSTRAINT-ADJUST-001`
+- **UC**: `UC-EXEC-001`, `UC-COST-003`, `UC-CONSTRAINT-ADJUST-001`, `UC-TRADABILITY-002`, `UC-SCALE-001`
+
+#### 두 종류의 실패는 급이 다르다
+
+체결 테이블 조회는 한 번이고, **그 한 번의 결과에서 셋이 갈린다.**
+
+| 상황 | 판정 | 왜 |
+|---|---|---|
+| 조회 결과에 행이 없다 | **zero-dealt + reason** | 그 시점 이 venue에 없다(상장 전/상폐 후). 시장 사실 |
+| `is_tradable = false` | **zero-dealt + reason** | 거래 불가. 시장 사실 |
+| `is_tradable = true` 인데 선언된 가격이 없거나 ≤ 0 | **batch 실패** | `is_tradable ⟹ price > 0` 불변식 위반. 데이터 계약 문제다 |
+
+- **왜 셋째만 batch 실패인가**: 앞 둘은 고칠 것이 없는 시장 사실이고, 셋째는 **거래할 수 있다고 선언해
+  놓고 가격을 주지 않은 것**이다. 연구자가 고칠 수 있고 고쳐야 한다.
+- **왜 앞 둘을 batch 실패로 묶으면 안 되나**: 3,000종목 × 250세션에서 정지와 상폐는 매일 나온다. 묶으면
+  run이 첫 주에 죽는다.
+- 셋째는 **preflight가 미리 검사**하므로(§12) 런타임에 오는 일이 드물다. 오면 그 사이에 데이터가 바뀐 것이다.
+- **종목별로 물어보면 앞 둘이 안 갈린다.** 하나씩 조회하면 *"없다"*로 똑같이 보인다. 집합으로 물어야
+  조회에 안 나온 것과 나왔는데 false인 것이 구분된다.
+- 따라서 **거래 가능 여부는 batch 단위 실행의 전제조건**이다. 없으면 정지 종목을 표현할 자리가 없다.
+
+#### `batch-atomic`이 뜻하는 것
+
+**전제조건은 all-or-nothing이고, 체결 결과는 종목별로 다를 수 있다.** 두 개는 다른 얘기다.
+
+```text
+호출 전    체결 테이블 조회 · listing · CostRule 매칭이 하나라도 안 되면 전체 실패
+호출 후    정지 zero-dealt, 현금 부족 미체결이 섞인 FillBatch 하나
+```
+
+- **없으면**: "부분 성공 없음"으로 읽혀 정지 종목 하나에 rebalance 전체가 실패한다.
+
+#### 체결 순서 — 매도 전량 → 매수
+
+**결정.** 매도를 먼저 처리하고 그 대금으로 매수한다. 각 side 안에서는 **delta 내림차순**, 동률은
+`instrument_id` 사전순.
+
+```text
+① 각 주문의 수량을 먼저 정한다        목표금액 / 체결가 → 정수 내림
+② 그 수량의 실제 소요액을 구한다      수량 × 가격 + 비용
+③ delta 큰 것부터 누적한다
+④ 현금을 넘는 지점 — 그 종목은 가능한 수량만큼, 이후는 0주
+```
+
+- **왜 ①이 ③보다 먼저인가**: 목표 금액으로 누적하면 **있는 현금을 못 쓴다.** 각 주문이 내림 때문에 목표보다
+  조금씩 적게 나가고, 100종목이면 그 잔여가 쌓여 실제 소요액이 목표 합보다 뚜렷하게 적다.
+- **왜 delta 기준인가**: 목표 10%인데 이미 9.9% 보유한 종목은 delta 0.1%다. 이미 잡고 있으므로 먼저 채워도
+  얻는 것이 없다. **실패했을 때 잃는 것은 delta로 잰다** — 목표 2%를 통째로 못 사면 2% 벗어난다.
+- **왜 동률 tie-break가 필요한가**: 균등가중 전략은 전 종목이 동률이다. 정하지 않으면 컨테이너 순서가
+  결과를 바꿔 §2.4의 deterministic replay가 깨진다.
+- **매도도 정렬한다.** 현재는 결과에 영향이 없지만(매도는 현금을 쓰지 않으므로 순서 무관) 진단과 로그
+  순서가 재현되고, 매도에 제약이 생기면 그때 순서가 의미를 갖는다.
+- **매도가 먼저인 두 번째 이유**: 인과가 남는다. *"A 매도 실패(정지) → 현금 부족 → C·D 매수 실패"*가
+  진단에 그대로 보인다. 한꺼번에 계산하면 *"현금이 부족했다"*만 남는다.
+
+#### 비례 축소를 쓰지 않는 이유
+
+모든 종목의 수량을 조금씩 깎는 방식은 쓰지 않는다.
+
+- **비례도 판단이다.** *"모든 종목을 똑같이 깎는다"*는 것도 경제적 선택이지 중립이 아니다. 중립적 선택이
+  없으므로 기준은 "편향 없음"이 아니라 **"의도를 얼마나 보존하는가"**여야 한다.
+- 비례는 **전부를 틀리게** 하고, delta 우선은 **대부분을 정확히** 만들고 일부만 포기한다.
+- 진단이 비교가 안 된다.
+  ```text
+  비례        "모든 종목이 목표의 98.7%만 체결됨"     ← 원인을 알 수 없다
+  delta 우선  "현금 부족으로 C·D·E 미체결"            ← 무엇을 잃었는지 보인다
+  ```
+
+#### 순차 의미론, 벡터 구현
+
+위 규칙은 **순서로 정의되지만 순차로 구현할 필요가 없다.**
+
+```text
+정렬 → 각자 정수 내림 → 실제 소요액 → 누적합 → 현금 초과 지점 찾기 → 경계 하나만 조정
+```
+
+누적합 한 번이면 끝난다. `UC-SCALE-001`의 3,000종목에서도 벡터 연산이다. **적어두지 않으면 구현할 때
+for 루프를 돈다.**
 
 ### 6.2 Exchange
 
@@ -862,10 +1170,201 @@ class OrderPlanner(Protocol):
 class Exchange(Protocol):
     exchange_id: str
     calendar: SessionCalendar
+    fill: FillConvention
     def rules(self, at, instruments) -> ExchangeRulesView: ...
-    def requirements(self, orders: OrderBatch) -> tuple[DataRequirement, ...]: ...
-    def execute(self, event, orders, account, market: ExecutionView) -> FillBatch: ...
+    def snapshot(self, at: datetime, instruments) -> ExecutionSnapshot: ...
+    def execute(self, event, orders, account, venue: ExecutionSnapshot) -> FillBatch: ...
 ```
+
+#### 체결 테이블 — venue가 그 시점에 아는 것
+
+**결정.** 거래 가능 여부와 체결 가격은 **Exchange가 소유하는 고정 스키마 테이블**이며, `DataRequirement`로
+읽는 dataset이 아니다.
+
+```text
+필수   trade_at        체결 시각 (tz-aware timestamp)
+       instrument
+       is_tradable     boolean 하나 — 방향을 가르지 않는다
+       <가격 컬럼>     하나 이상
+
+없음   available_at · lookback · DataRequirement 경로 · ModelWindow
+```
+
+##### 어떻게 정의되나 — 물리 층은 공유하고 의미 층은 쓰지 않는다
+
+체결 테이블도 결국 parquet에서 온다. 그래서 **§4.1의 물리 층(`SourceSpec`)은 그대로 재사용**하되
+의미 층(`DatasetRegistration`)은 쓰지 않는다.
+
+```python
+class ExecutionTableSpec(BaseModel):
+    source: str                       # §4.1의 SourceSpec
+    query: str | None = None
+    trade_at_field: str
+    instrument_field: str
+    is_tradable_field: str
+    price_fields: Mapping[str, str]   # 프레임워크 이름 → 물리 컬럼. 하나 이상
+```
+
+- **왜 `DatasetRegistration`을 안 쓰나**: 그 타입이 요구하는 `available_at`·`key_fields`·`fields`는 창 조회를
+  위한 것이고 여기엔 창이 없다. 억지로 끼워 맞추면 소비자가 "이 dataset은 창으로 읽나 점으로 읽나"를
+  구분해야 한다.
+- **왜 물리 층은 공유하나**: 경로·디렉터리·파티션은 저장 방식의 문제이지 의미의 문제가 아니다. 두 벌
+  만들면 hive 지원 같은 것을 두 번 구현하게 된다.
+- **거래 가능 여부의 유도가 여기서 일어난다.** 정지 이력이 없는 project는 `is_tradable_field`를 만드는
+  규칙을 `query`에 쓴다 — `"거래대금" > 0` 같은 것. 별도 DataModel도 별도 개념도 필요 없고, 선택된 규칙이
+  Exchange config에 남아 frozen input이 된다(PRD §4.5).
+
+##### 왜 `available_at`이 없나
+
+`available_at`이 존재하는 이유는 **관측자가 미래를 못 보게 하기 위해서**다. 체결 테이블에는 관측자가 없다.
+읽는 것은 Exchange 하나뿐이고, Exchange는 관측하는 것이 아니라 **그 순간을 만든다.** 15:30에 체결하는
+Exchange에게 15:30의 가격은 지연을 두고 알게 되는 관측이 아니라 venue 상태 그 자체다.
+
+그래서 접근 방식이 근본적으로 다르다.
+
+| | 관측 dataset | 체결 테이블 |
+|---|---|---|
+| 술어 | `available_at ≤ evaluation_time` — 범위 | `trade_at = execution_time` — 점 |
+| 결과 | 창. 여러 행 | 정확히 한 행 |
+| `available_at` | 필수 | 없음 |
+| lookback | 필수 선언 | 없음 |
+| 읽는 주체 | 선언한 누구나 | **Exchange 하나** |
+
+**부등호냐 등호냐가 두 세계를 가른다.** 등호면 딸려오는 것이 전부 없어진다.
+
+> nautilus는 모든 데이터가 `ts_event`/`ts_init` 두 시각을 갖고 예외가 없는데, 그것은 **거래소조차 스트림
+> 소비자**이기 때문이다. 우리는 소비 방식이 창 조회와 점 조회 둘이라 갈린다. 연구용과 실거래용의 구조적
+> 차이이지 어느 쪽의 결함이 아니다.
+
+##### StrategyModel과 DataModel은 접근 경로가 없다
+
+**결정.** Model은 체결 테이블을 읽을 수 없다. 규칙이 아니라 **경로가 없다** — §2.2가 Store 핸들을 아무 데도
+넘기지 않는 것과 같은 방식이고, §10.1의 import 계약으로 강제한다.
+
+- **왜**: 전략이 daily 데이터로 판단하면서 체결은 minutely로 하는 구성이 가능해야 한다. 같은 등록·조회
+  경로에 두면 `ModelWindow`가 두 granularity를 동시에 표현해야 하고, `RowsLookback(60)`이 minutely
+  테이블에서 무슨 뜻인지를 정해야 한다. **분리하면 그 질문이 생기지 않는다.**
+- **없으면**: 전략이 그 시점의 정지 여부를 미리 아는 경로가 생긴다. 어느 종목이 오늘 정지될지 아침에
+  아는 것이 된다.
+
+##### 전략이 알아야 할 거래 가능 여부는 따로 온다
+
+전략도 후보를 고르고 비중을 고정하려면 거래 가능 여부가 필요하다. 그것은 **보통의 dataset**으로 읽는다.
+
+```text
+체결 테이블      Exchange 전용. 그 시점 venue 상태
+투자 유니버스     전략이 구독. available_at이 붙는 보통의 dataset. DataModel로 만들어도 된다
+```
+
+- **선택이다.** 안 만들면 정지 종목에도 주문이 나가고 zero-dealt로 남는다. 전략이 몰랐고 시장이
+  알려준 것이니 정직한 기본값이다.
+- **두 개가 어긋날 수 있다.** 전략은 어제까지 알려진 것으로 판단했고 오늘 새로 정지가 걸렸다. 그
+  어긋남이 zero-dealt다. **하나로 합치면 "전략이 틀렸다"를 표현할 방법이 사라진다.**
+
+##### 행이 없으면 — 추측이 아니라 선언이다
+
+```text
+행 있고 is_tradable = false   →  상장돼 있는데 그 시점 거래 불가
+행 없음                        →  그 시점 이 venue에 없다 (상장 전 / 상폐 후)
+```
+
+둘 다 체결되지 않지만 `FillBatch`의 reason에서 구분한다(§6.4).
+
+qlib은 **가격 테이블**의 결측에서 정지를 유도해 정지·벤더누락·미상장·파일잘림 넷을 뭉갠다. 우리는
+**체결 테이블**의 행 유무를 본다. 표면은 비슷하지만 결정적으로 다르다 — 사용자가 이 테이블을 *"이것이
+이 venue의 완전한 상태"*라고 **선언**했으므로, 없는 것은 없는 것이다. PRD §10.2의 silent skip에 해당하지
+않는 이유가 이것이다.
+
+##### 조회는 집합 단위로 한 번
+
+```sql
+trade_at = <execution_time>  AND  instrument IN (<InstrumentSet>)
+```
+
+`is_tradable` 필터도 가격 결합도 비용률 매칭도 전부 컬럼 연산이다. 그리고 §6.1의 두 실패 등급이
+**이 한 번의 결과에서** 갈린다.
+
+#### FillConvention — 체결 시각과 체결가 선택
+
+```python
+class FillConvention(BaseModel):
+    offset_sessions: int = 0        # 판단 이벤트가 속한 session 기준
+    local_time: time
+    timezone: str
+    trade_price: str                # 체결 테이블의 어느 가격 컬럼
+```
+
+**결정.** 체결 시각과 어느 값으로 체결할지는 Exchange의 frozen config다. §3.4의 `TriggerPolicy`와 대칭이며,
+Flow가 `SessionCalendar`와 결합해 EXECUTION 이벤트를 만든다.
+
+- **`offset_sessions`의 기준은 판단 이벤트가 속한 session이다.** 표준 daily-close 흐름은 **0** — 04:00에
+  판단하고 같은 session 15:30에 체결한다(§3.3).
+- **`trade_price` 한 줄만 바꾸면 `UC-ALPHA-CHILD-001`이 성립한다.** next-close와 next-open 비교가 체결
+  테이블 재생성 없이 된다. 가격 컬럼이 하나 이상이어야 하는 이유가 이것이다.
+- **컬럼 이름에 의미가 없다.** 프레임워크는 그 컬럼이 시가인지 종가인지 모른다. `trade_price: "D"`도
+  성립한다.
+- **대체하지 않는다.** 선언한 컬럼이 없거나 값이 유한하지 않거나 양수가 아니면 **다른 컬럼으로 떨어지지
+  않고** 실패한다. qlib이 체결가가 NaN일 때 경고를 찍고 종가로 대체하는 것을 명시적으로 금지한다.
+  `UC-COST-004`가 비용에 대해 요구하는 것과 같다. → `UC-FILL-001`
+- **매수/매도에 다른 컬럼을 쓰고 싶으면** `trade_price`를 side별로 나눈다. 컬럼에 의미가 없으므로 공짜로
+  표현된다.
+
+##### 측정할 수 없는 것 — stale price
+
+`trade_at = 15:30`인 행의 컬럼이 실제로는 09:00 관측일 수 있다. 그러면 **6시간 전 가격으로 체결했다고
+주장하는 것**이고, 미래를 훔친 것이 아니라 지나간 가격을 붙잡은 것이다.
+
+**package는 이것을 알 수 없다.** 컬럼에 "이건 9시 가격입니다"라고 적혀 있지 않고, 프레임워크가 아는 것은
+`trade_at`뿐이다. 그래서 검사 대상이 아니라 **profile의 선언된 limitation**이고(§6.3), 컬럼 이름을 보고
+경고하는 것은 agent의 일이다(PRD §11.1).
+
+정직하게 표현하려면 **세션당 행을 둘 두면 된다.**
+
+| 하려는 것 | 체결 테이블 | `FillConvention` |
+|---|---|---|
+| 다음 종가 체결 | 세션당 한 행 `15:30` | `15:30`, `close` |
+| 시가 체결 (정직한 쪽) | 세션당 두 행 `09:00` `15:30` | `09:00`, `price` |
+| 시가 체결 (간편한 쪽) | 세션당 한 행 + `open` 컬럼 | `15:30`, `open` ← **stale** |
+| minutely 체결 | 분당 한 행 | `09:35`, `price` |
+
+**두 번째 줄이 네 번째 줄의 축소판**이다. 세션당 2행이나 390행이나 구조가 같아, intraday 확장에 새 개념이
+필요 없다.
+
+#### 체결 알고리즘은 Exchange 구현의 것이다
+
+**결정.** §6.1의 순서 규칙은 **계약이 아니라 KRX profile의 알고리즘**이다. profile 간에 공유하는 것은
+`OrderBatch`/`FillBatch` envelope뿐이다. §2.7의 "나눈다" 쪽이다.
+
+##### Academic — 구조적으로 현금 부족이 불가능하다
+
+$$q_i = \frac{w_i \cdot NAV}{P_i}, \qquad \sum_i q_i P_i = NAV \sum_i w_i \le NAV$$
+
+fractional이라 내림이 없고 비용이 0이므로 **정확히 맞아떨어진다.** 잔여도 부족도 없다.
+
+```text
+① is_tradable 필터
+② q = w × NAV / P
+③ 끝
+```
+
+**정렬도 누적합도 없다.** 3,000종목이 나눗셈 한 번이다.
+
+##### KRX — 두 경로, 결과는 같다
+
+```text
+빠른 경로   Σ목표매수 + Σ예상비용 ≤ 현금 + Σ예상매도대금   →  각 주문 독립 계산
+느린 경로   그 외                                          →  §6.1의 정렬 + 누적합
+```
+
+빠른 경로 판별이 안전한 이유는 **내림이 단조롭기 때문**이다.
+
+> 목표 금액 기준으로 여유가 있으면, 정수 내림 후 실제 소요액 기준으로도 **반드시** 여유가 있다.
+> 내림은 항상 소요액을 줄인다.
+
+그래서 빠른 경로 조건에서는 정렬을 해도 아무도 실패하지 않고, **두 경로의 관측 가능한 결과가 같다.**
+
+- **이것은 사용자가 고르는 모드가 아니다.** `AccountMode`처럼 선언되는 것이 아니라 구현 내부의 최적화다.
+- **성능 경로는 결과 동일성이 증명될 때만 둔다.** 적어두지 않으면 최적화가 결과를 바꾸는 사고가 난다.
 
 #### Instrument — `domain`에 있고 venue를 모른다
 
@@ -913,7 +1412,7 @@ class ListingRule(BaseModel):
 - **왜**: 같은 종목이 academic venue에서는 `step=0.000001`, KRX에서는 `1`일 수 있다. 계좌 성질이 아니라
   상장 성질이다.
 - **없으면**: "academic이니까 소수점"이라는 잘못된 결합이 생겨 profile을 늘릴 때마다 Account를 고쳐야 한다.
-- Exchange는 Store를 모른다. Flow가 resolve한 `ExecutionView`만 받는다.
+- Exchange는 Store를 모른다. 자기 체결 테이블을 `ExecutionSnapshot`으로 조회할 뿐이다.
 - **UC**: `UC-ACADEMIC-001`, `UC-PROFILE-001`
 
 #### listing의 소유자는 Exchange다
@@ -969,20 +1468,33 @@ class CostRule(BaseModel):
 |---|---|---|
 | direction | signed | long-only |
 | quantity | listing별 fractional 허용 | listing의 정수 step |
-| price | next eligible close의 exact PIT 가격 | next eligible close |
+| price | `FillConvention` 선언 (§6.2) | `FillConvention` 선언 (§6.2) |
 | fill | 전량 | 지원 order 전량 |
 | cost | fee/tax/slippage/impact/borrow = 0 | effective-dated fee/tax + cash clipping |
+| 체결 알고리즘 | 나눗셈 한 번. 부족 불가능 | 정렬 + 누적. 두 경로 |
 | 미모델링 | borrow/locate/margin/collateral | partial fill, volume impact, 실제 결제 |
+| 공통 미모델링 | **stale price** — 체결 시각보다 이른 관측을 체결가로 쓰면 그 가격엔 실제로 거래할 수 없다. package는 측정할 수 없다(§6.2) | |
 | realism | `hypothetical` | `simulation` |
 
 - 이름이 realism을 주장하지 않는다. **구현된 rule과 명시한 limitation만** 주장한다.
-- 두 profile 모두 `OrderBatch → FillBatch → commit → mark`를 그대로 따른다.
+- 두 profile 모두 `OrderBatch → FillBatch → commit → mark`를 그대로 따른다. **envelope은 공유하고 안을
+  채우는 알고리즘은 나눈다**(§6.2).
 
 ### 6.4 FillBatch
 
 - requested/dealt quantity, 가격, fee/tax, reason, 적용 listing rule, execution data lineage,
   exchange id, intent id, order batch id.
 - **zero-dealt와 rejected를 Fill로 가장하지 않는다.** → `UC-CLOSED-LOOP-001`
+- zero-dealt의 reason은 최소한 셋을 구분한다 → `UC-TRADABILITY-002`
+  ```text
+  체결 테이블에 행이 없음        그 시점 이 venue에 없다 (상장 전 / 상폐 후)
+  is_tradable = false           상장돼 있으나 거래 불가
+  현금 부족                      앞선 주문이 현금을 소진했다 (§6.1)
+  ```
+- **한 `FillBatch` 안에 세 경우와 정상 체결이 섞인다.** 그것이 §6.1의 `batch-atomic`이 전제조건에만
+  걸리는 이유다.
+- `is_tradable = true`인데 가격이 없는 경우는 여기 없다. **그것은 zero-dealt가 아니라 batch 실패**이므로
+  `FillBatch` 자체가 만들어지지 않는다(§6.1).
 
 ---
 
@@ -1143,7 +1655,7 @@ data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → E
 src/vqapr/
 ├── domain/                 # ID, money, Instrument(kind별 union), 공통 error
 ├── runtime/                # clock, events(priority), calendar
-├── data/                   # registration, requirements, store(port), window
+├── data/                   # source/dataset 정의, requirements, store(port), window
 ├── research/
 │   ├── model.py            # Model 공통 계약 + DataModel
 │   ├── schedule.py         # TriggerPolicy → 시점 목록 (두 종류가 공유)
@@ -1155,7 +1667,8 @@ src/vqapr/
 │   ├── construction.py     # PortfolioIntent 조립
 │   └── intent.py           # PortfolioIntent, PortfolioTarget, BudgetSemantics
 ├── orders/                 # OrderPlanner, OrderRequest/OrderBatch
-├── exchange/               # Exchange protocol, ListingRule, academic, krx_daily
+├── exchange/               # Exchange protocol, ListingRule, CostRule,
+│                           #   ExecutionTableSpec, FillConvention, academic, krx_daily
 ├── account/                # aggregate, mode, snapshot, history, journal
 ├── valuation/              # requirements → MarkBatch, performance
 ├── flow/                   # simulation, resolver, run(RunDefinition/RunResult)
@@ -1185,7 +1698,13 @@ flow + project  ←  public
     문서가 아니라 도구가 지킨다.
   - `strategy`는 `research`를 import한다 — 공통 계약이 거기 있기 때문이다. 반대 방향은 금지.
 - `strategy`는 `exchange`와 mutable `account`를 import하지 않는다.
-- `exchange`는 store를 import하지 않는다.
+- **`strategy`와 `research`는 체결 테이블에 접근하지 않는다.** `exchange`를 import하지 않는 것으로 이미
+  막히지만, 계약 이름을 따로 두어 실패 이유가 드러나게 한다.
+  - **왜**: 접근할 수 있으면 어느 종목이 그날 거래 불가가 될지를 판단 시점에 알게 된다. 그리고 판단이
+    일별 관측을 쓰면서 체결은 더 촘촘한 단위로 이루어지는 구성이 표현되지 않는다(§6.2).
+  - 판단에 필요한 거래 가능 여부는 등록된 dataset으로 읽는다. 그 경로는 `data`이므로 열려 있다.
+- `exchange`는 `data`의 물리 층(source 정의·store port)만 쓰고 `DataRequirement`·`ModelWindow`는 쓰지
+  않는다. 체결은 창 조회가 아니다(§6.2).
 - `account`는 StrategyModel/Exchange 구현을 import하지 않는다.
 
 ---
@@ -1603,8 +2122,8 @@ A를 5% 직접 들고 X를 10% 들면 **A 노출 = 0.05 + 0.10 × 0.5 = 0.10**�
 
 [dataset]     etf_constituents
               instrument_field = etf_id
-              key_fields       = (available_at, etf_id, constituent_id)
-              fields           = (weight,)          ← 추가 key axis (§4.1)
+              key_fields       = (available_at, etf_id, constituent_id)   ← 추가 key axis (§4.1)
+              fields           = {weight: "구성비중"}
 ```
 
 **ETF 매도세가 0인 것이 `kind="etf"` 하나로 나온다.** 종목마다 요율을 적지 않는다.
@@ -1643,6 +2162,125 @@ A를 5% 직접 들고 X를 10% 들면 **A 노출 = 0.05 + 0.10 × 0.5 = 0.10**�
 
 ---
 
+### 11.6 정지 데이터 없는 KRX daily project — 등록부터 체결까지
+
+앞의 walkthrough들은 **연구 구조**를 대입했다. 이 절은 **가장 흔한 출발점의 데이터 현실**을 대입한다 —
+일별 시세와 재무제표만 있고 거래소 calendar도 거래정지 이력도 없는 project다.
+
+검증 대상: `UC-DATA-001` · `UC-DATA-003` · `UC-TRADABILITY-001`~`002` · `UC-FILL-001` ·
+`UC-ALPHA-CHILD-001` · `UC-SCALE-001`
+
+#### ① 등록 — 두 데이터가 다른 모양으로 들어온다
+
+```text
+[source]  krx_daily/        year=2024/…      넓은 표. 6컬럼, 전 종목 전 날짜
+          fundamentals/     item=BPS/ item=EPS/ …    폴더. 계정 500개, 대부분 성김
+
+[dataset] price_daily    fields = {open: "당일시가(원)", close: "당일종가(원)", …}
+                         available_at = 일자 + 15:30 KST        ← user 선언 (§4.2)
+          fundamentals   fields = {bps: BPS, eps: EPS}
+                         available_at = 공시 timestamp
+```
+
+소비자는 배치를 모른다.
+
+```python
+DataRequirement("price_daily",  ("close",), RowsLookback(20))   # 컬럼 선택으로 번역
+DataRequirement("fundamentals", ("bps",),   RowsLookback(4))    # item=BPS/ 만 연다
+```
+
+- 컬럼 이름이 한글이고 단위가 붙어 있어도 **개명으로 흡수된다.** 프레임워크는 `close`가 종가인 줄 모른다.
+- 재무 lookback 4는 **(종목 × bps)별 4행**이다. 폴더를 넓은 표로 바꿔도 같은 수가 나온다(§4.2).
+
+#### ② 체결 테이블 — 정지 이력이 없다
+
+user가 규칙을 고른다. agent가 후보와 위험을 설명하고, package는 검증만 한다.
+
+```sql
+select 일자         as trade_at,      -- + 15:30 KST
+       종목코드      as instrument,
+       거래대금 > 0  as is_tradable,   -- ← 선택된 유도 규칙
+       "당일시가(원)" as open,
+       "당일종가(원)" as close          -- 가격 컬럼 둘. ⑤에서 쓴다
+from krx_daily
+```
+
+- **별도 DataModel이 필요 없다.** 유도가 Exchange config의 한 줄이 되고, 그 줄이 frozen input에 남는다.
+- **calendar도 같은 패턴으로 유도된다**(§3.6). 세 번째 인스턴스다 — availability(§4.2), calendar(§3.6),
+  거래 가능 여부(여기).
+- 전략이 판단 시점에 쓸 거래 가능 여부는 **별도 dataset**이다. 이 project는 만들지 않기로 한다.
+  정지 종목에 주문이 나가고 ④에서 zero-dealt로 남는다.
+
+#### ③ 정지 종목 — 합성하지 않는다
+
+거래정지된 종목은 원천 파일에 행 자체가 없다.
+
+```text
+조회 결과에 없음  →  zero-dealt, reason = "그 시점 venue에 없음"
+                     batch는 온전. 나머지 2,999종목은 정상 진행
+```
+
+- **직전 종가로 봉을 만들어내지 않는다.** 만들면 정지된 종목을 직전 종가에 사고팔 수 있게 되고,
+  PRD §10.2가 금지하는 것이 정확히 이것이다.
+- qlib이 가격 결측에서 정지를 유도하는 것과 표면이 비슷해 보이지만, 여기서는 user가 **이 테이블을
+  venue의 완전한 상태로 선언**했으므로 없는 것을 없다고 다루는 것이 선언을 따르는 것이다(§6.2).
+
+#### ④ 500매도 + 500매수 — 현금이 빠듯하다
+
+```text
+매도 500종목   delta 내림차순. 정지 3종목은 zero-dealt
+               → 예상보다 대금이 적게 들어온다
+매수 500종목   delta 내림차순
+               각자 정수 내림 → 실제 소요액 → 누적
+               → 497종목 목표대로, 1종목 부분, 2종목 0주
+```
+
+진단에 인과가 남는다.
+
+```text
+A 매도 실패(정지) → 현금 3,000만원 부족 → C 부분체결, D·E 미체결
+```
+
+- **정수 내림을 먼저 하지 않았다면** 목표 금액 합이 현금을 넘어 보여 필요 이상으로 실패했을 것이다.
+- 빠른 경로 판별식이 여기서는 성립하지 않으므로 느린 경로다. 그래도 **정렬 + 누적합 한 번**이다(§6.2).
+- 균등가중이라 delta 동률이 많다. `instrument_id` tie-break가 없으면 재현되지 않는다.
+
+#### ⑤ 체결 규약만 바꾼 child — 한 줄
+
+```text
+parent   trade_price: close
+child    trade_price: open      ← 이 한 줄
+```
+
+체결 테이블을 다시 만들지 않는다. alpha도 ensemble도 재실행하지 않는다. 두 child는 서로 다른 Exchange
+config를 가지므로 run identity가 다르고, 그 사실이 결과에 남는다. → `UC-ALPHA-CHILD-001`
+
+**그리고 child는 stale price를 쓰고 있다.** 15:30에 체결하면서 그날 09:00 값을 사용하므로 실제로는 그
+가격에 거래할 수 없다. package는 컬럼의 관측 시점을 모르므로 판정하지 못하고, agent가 경고하며 profile의
+한계로 남는다(§6.2). 정직하게 하려면 세션당 행을 둘 두고 `local_time: 09:00`으로 체결한다.
+
+#### 이 대입에서 고친 것
+
+**설계 두 곳이 어긋나 있었다.**
+
+- **§6.1과 §6.4의 실패 등급이 충돌했다.** §6.1은 *"조회 결과에 없으면 batch 실패"*라고 했는데 §6.4는
+  같은 경우를 zero-dealt reason으로 두고 있었다. ③을 대입하다 드러났다. **상폐·상장 전은 시장 사실이므로
+  zero-dealt가 맞고**, batch 실패는 `is_tradable = true`인데 가격이 없는 경우 — 즉 **불변식 위반**뿐이다.
+  §6.1을 셋으로 나누고 §6.4에 그 사실을 명시했다.
+- **체결 테이블을 어떻게 정의하는지가 없었다.** ②를 쓰려는데 적을 곳이 없었다. §4.1의 물리 층을 재사용하고
+  의미 층은 쓰지 않는 `ExecutionTableSpec`을 §6.2에 추가했다. 부수적으로 **거래 가능 여부의 유도가 query
+  한 줄이 되어** 별도 개념이 사라졌다.
+
+#### 한계
+
+- **정지 종목의 평가**는 여전히 열려 있다. 체결은 zero-dealt로 끝나지만 그 종목을 계속 보유 중이면
+  Valuation이 mark를 요구한다(§7.4). 직전가로 mark할지 다른 처리를 할지는 user가 명시해야 하며,
+  §11.2 확인 2에서 발견한 것과 같은 문제다.
+- **`거래대금 > 0` 규칙은 거래 부진과 정지를 구분하지 못한다.** 이 한계는 result에 남고, 더 정확한
+  판정을 원하면 정지 이력을 확보해야 한다.
+
+---
+
 ## 12. Run definition과 preflight
 
 ```python
@@ -1672,6 +2310,21 @@ class RunDefinition(BaseModel):
 - initial account 불변식
 - `initial_memory`가 strict JSON (§5.1.1)
 - schedule 결정성
+
+체결에 대해 넷을 더 본다(§6.2). **execution이 있는 run에만 적용된다** — DataModel 연구와 signal 분석은
+체결 테이블 없이 완결된다.
+
+- 체결 테이블이 선언되어 있고 `FillConvention.trade_price`가 가리키는 가격 컬럼이 존재함
+- schedule이 만드는 **모든 체결 시각**에 대해 `trade_at` 행이 존재함
+  - 세션 축으로만 확인한다. 종목별 결측은 체결 시점에 zero-dealt로 다뤄지는 정상 결과다(§6.1)
+- `is_tradable = true` 인 행의 선언된 가격이 **유한하고 양수**임
+  - **왜 미리 보나**: 이것이 §6.1의 유일한 batch 실패 조건이다. run 중간에 터지면 그때까지의 commit이
+    남지만, 여기서 걸리면 `FAILED_WITHOUT_MUTATION`으로 끝난다
+- **판단 시각과 체결 시각이 같지 않음** (§3.2)
+  - 같으면 전략이 자기가 체결할 가격을 보고 판단한 것이다. 명시적으로 선언한 경우에만 통과시키고
+    그 사실을 result limitation에 남긴다
+  - 검사 대상은 `offset_sessions == 0`이 아니라 **시각의 동일성**이다. 표준 daily-close 흐름이 이미
+    offset 0이다
 
 **동결 후 project config 변경은 이 run에 영향을 주지 않는다.** → `UC-CONFIG-001`
 
@@ -1709,8 +2362,10 @@ class RunDefinition(BaseModel):
 | UC | 설계 위치 |
 |---|---|
 | `UC-DATA-001`, `UC-AGENT-001` | §4.1 |
+| `UC-DATA-003` | §4.1 (`field_partition` · 한 디렉터리 = 한 스키마) + §4.2 (fields 번역 · field별 lookback) |
+| `UC-AGENT-002` | §4.1 (등록이 보장하지 않는 것) + §6.2 (stale price) — 나머지는 PRD §11.1과 skill |
 | `UC-DATA-002`, `UC-PIT-001`, `UC-ERROR-001` | §4.2 + §8.3 |
-| `UC-LOOKBACK-001` | §4.2 (lookback → Store query) |
+| `UC-LOOKBACK-001` | §4.2 (lookback → Store query, (instrument × field)별) |
 | `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger vocabulary · warm-up skip) |
 | `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
@@ -1722,6 +2377,9 @@ class RunDefinition(BaseModel):
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.2 (StrategyModel 체인 · 중첩 없음) + §5.4 + §11.4 |
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
 | `UC-EXEC-001`, `UC-EXEC-002` | §6.1 |
+| `UC-TRADABILITY-001` | §6.2 (`ExecutionTableSpec`의 유도 query) + §11.6 |
+| `UC-TRADABILITY-002` | §6.1 (세 실패 등급) + §6.4 (reason) + §11.6 ③ |
+| `UC-FILL-001` | §6.2 (`FillConvention` 대체 금지) + §12 (preflight) |
 | `UC-ACADEMIC-001` | §6.2 + §7.2 |
 | `UC-COST-001`~`004` | §6.2 (`Instrument.kind` + `CostRule` 선택자 + 정확히 하나) + §8.3 |
 | `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §6.4 + §7.1 |
@@ -1776,6 +2434,34 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - **multi-currency가 들어올 때.** KRW/USD를 각각 instrument로 두면 FX가 두 instrument의 교환으로 자연히
   떨어진다. 이때는 cash-as-instrument가 오히려 단순하다.
 
+### 15-3. 유도된 거래 가능 여부를 쓴 run을 어디까지 비교 가능으로 볼 것인가
+
+정지 이력이 없어 `거래대금 > 0` 같은 규칙으로 `is_tradable`을 유도한 run과, 실제 정지 이력을 쓴 run이
+있다. 둘은 같은 전략의 같은 기간을 다르게 체결한다.
+
+- 현재는 **선택된 규칙이 frozen input에 남고 한계가 result에 기록되는 것**까지만 정했다(§6.2, §11.6).
+- 미결: 그 이상으로 강제할 것이 있는가. 후보 — 아무것도 안 함(현재) / 두 run을 비교할 때 규칙 차이를
+  경고 / 유도 규칙을 쓴 run에 별도 realism label.
+
+**요건이 아직 드러나지 않았다.** 같은 전략을 두 데이터로 돌려 비교하려는 실제 사례가 나온 뒤에 정한다.
+성급히 label을 늘리면 §6.3의 `hypothetical`/`simulation` 축과 의미가 겹친다.
+
+### 15-4. field별 저장에서 `CoverageRequirement`가 field 축을 다루는 방식
+
+`RowsLookback`은 (instrument × field)별로 세기로 정했다(§4.2). `CoverageRequirement`도 같은 축을 가져야
+하는지는 정하지 않았다.
+
+```text
+"이 종목의 이 field가 이 구간에 N개 이상 있어야 한다"     ← field 축이 필요
+"이 종목이 이 구간에 N개 이상 있어야 한다"                ← 지금의 모양
+```
+
+- 재무처럼 항목마다 공시 주기가 다르면 전자가 필요해 보인다.
+- 그러나 **소비자가 창을 받아 직접 세도 된다.** §4.2의 *"vocabulary를 늘리지 않고 넓게 받아 거른다"*가
+  이쪽을 지지한다.
+- 미결. `CoverageRequirement`를 실제로 쓰는 Model이 나온 뒤에 정한다. 그전에 축을 늘리면 쓰지 않는
+  조합이 먼저 생긴다.
+
 ---
 
 ## 16. Acceptance checklist
@@ -1784,8 +2470,11 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] executable StrategyModel의 public 결과는 `PortfolioIntent` 하나뿐이다
 - [ ] 04:00 DECISION 이벤트가 데이터 행 없이 explicit calendar에서 생성된다
 - [ ] registration의 universal 시간 필드는 `available_at`뿐이다
-- [ ] StrategyModel·Exchange·Valuation이 각자 field requirement를 선언한다
+- [ ] StrategyModel·Valuation이 각자 field requirement를 선언한다
 - [ ] `lookback`이 Store query까지 도달한다 (전체 읽고 자르기 없음)
+- [ ] `RowsLookback(N)`이 field가 여럿일 때 field당 N행을 준다 (합쳐서 N행이 아니다)
+- [ ] 같은 dataset을 넓은 표에서 field별 폴더로 바꿔도 소비자의 requirement 선언이 변하지 않는다
+- [ ] 등록 정의에 window 함수를 써도 등록이 실패하지 않는다 (막지 않기로 한 것을 막고 있지 않다)
 - [ ] `portfolio.weighting`과 `portfolio.optimize`가 `domain`(+solver) 외 아무것도 import하지 않는다
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
 - [ ] StrategyModel이 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
@@ -1817,6 +2506,17 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] `PortfolioIntent` 생성 시 `Σw + cash = 1`과 상하한·현금 범위를 검증한다
 - [ ] execution 경로에 제약 평가가 없다
 - [ ] 거래 불가 종목이 제외가 아니라 현재 비중 고정으로 처리된다
+- [ ] `StrategyModel`·`DataModel`에서 체결 테이블에 도달하는 경로가 없다 (import linter)
+- [ ] 체결 테이블 조회가 `DataRequirement`·`ModelWindow`를 거치지 않는다
+- [ ] 체결 테이블에 `available_at`이 없고 `trade_at`이 체결 시각과 정확히 일치로 조회된다
+- [ ] 선언한 체결 가격이 없을 때 다른 컬럼으로 대체되지 않는다
+- [ ] 관측이 없는 시점의 행을 직전 값으로 합성하는 경로가 없다
+- [ ] 거래 불가와 관측 부재는 zero-dealt이고, `is_tradable=true`인데 가격이 없는 경우만 batch 실패다
+- [ ] 매도가 매수보다 먼저 처리되고, 각 side가 delta 내림차순 · `instrument_id` tie-break로 정렬된다
+- [ ] 정수 내림이 현금 누적보다 먼저 일어난다 (목표 금액으로 누적하지 않는다)
+- [ ] 현금 부족이 비례 축소가 아니라 경계 종목 부분 체결과 이후 미체결로 처리된다
+- [ ] KRX의 빠른 경로와 느린 경로가 같은 결과를 낸다
+- [ ] 판단 시각과 체결 시각이 같으면 preflight가 막는다
 - [ ] report가 intended / requested / dealt / committed / marked를 구분한다
 - [ ] source/package/import/CLI가 전부 `vqapr`다
 

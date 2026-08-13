@@ -484,8 +484,10 @@ session 집합이 재현된다. 규칙을 바꾸면 경제적으로 다른 run�
 historical data access는 선택한 operation이 선언한 **exact lookback**을 강제한다. current product contract는
 두 종류뿐이다.
 
-- **`rows`** — PIT gate를 통과한 행을 registered logical key로 결정적으로 정렬한 뒤 instrument별 최근 N행까지
-  반환한다.
+- **`rows`** — PIT gate를 통과한 행을 registered logical key로 결정적으로 정렬한 뒤 **instrument와 field의
+  조합별로** 최근 N행까지 반환한다. instrument별로만 세지 않는다. 같은 dataset의 field라도 관측 시점이 다를
+  수 있으므로 *"각 field의 최근 N개"*가 요청의 의미다. 모든 field가 같은 행에 실려 있으면 두 해석이 같은
+  결과를 만든다.
 - **`calendar`** — user가 명시한 timezone의 evaluation date에서 years/months/days를 달력 산술로 이동한 date의
   00:00부터 evaluation time까지 `available_at`이 포함되는 행을 반환한다. 거래일 수를 세는 `sessions`
   semantics가 **아니다.**
@@ -496,6 +498,9 @@ history를 먼저 읽은 뒤 StrategyModel code에서 자르는 경로를 bounde
 **두 종류 모두 과거 방향이다.** 미래 관측을 당겨 읽는 lookback은 없다. 미래 구간이 필요해 보이는 계산은
 값을 나중 시점에 기록하고 소비자가 시점을 맞춰 읽는 방식으로 표현한다 — 예를 들어 "$t$의 20일 후 수익률"은
 "$t{+}20$에 기록된 20일 수익률"과 같은 값이며, 후자는 미래를 읽지 않는다.
+
+**체결은 이 절의 대상이 아니다.** lookback은 관측을 읽는 규칙이고, 체결은 그 시점의 한 값을 조회하는
+것이다(§6.3). 창도 lookback도 거치지 않는다.
 
 `rows`보다 적은 행만 존재하면 있는 만큼 반환하고 requested/actual coverage를 access evidence에 기록한다.
 dataset 전체의 `available_at_min`만으로 instrument별 coverage를 추정하거나, 행이 전혀 없는 instrument를
@@ -550,10 +555,23 @@ field 이름은 강제하지 않는다. `ticker`, `symbol`, `종목코드` 중 �
 일반 column 또는 metadata다. 이를 필요로 하는 consumer가 명시적으로 요구하고 해석하며, 아직 선택하지 않은
 workflow 때문에 최초 등록을 막지 않는다.
 
-**consumer-purpose alias를 등록에 두지 않는다.** `research_close`, `execution_price`, `valuation_price` 같은
-role을 registration에 새기지 않는다. 같은 `close` field를 StrategyModel, execution, valuation이 각자 자기
-requirement로 선택한다. 그래야 하나의 field가 여러 목적으로 쓰일 때 어느 소비자가 실제로 무엇을 읽었는지
-lineage에 남는다.
+**field는 이름과 물리 위치의 binding이며, 물리 컬럼일 필요가 없다.** 등록은 소비자가 쓸 이름을 정하고 그
+이름이 source의 어디에 해당하는지를 잇는다. 한 파일의 컬럼일 수도 있고, field별로 나뉘어 저장된 여러
+파일일 수도 있다. **소비자는 이 차이를 보지 않으며**, 저장 방식을 바꿔도 소비자의 requirement 선언은
+변하지 않는다.
+
+**이름을 바꾸는 것은 되고 role을 새기는 것은 안 된다.** 물리 컬럼 이름이 길거나 단위를 포함하거나
+식별자로 쓸 수 없는 문자를 담는 것은 흔하므로, 등록이 안정적인 이름을 부여할 수 있어야 한다. 그러나
+`research_close`, `execution_price`, `valuation_price` 같은 **role**은 registration에 새기지 않는다. 이름은
+그 값이 무엇인지를 말하고 role은 누가 읽을지를 말하는데, 후자를 등록이 미리 정하면 같은 field를
+StrategyModel, execution, valuation이 각자 자기 requirement로 선택했다는 사실이 사라진다. 그래야 하나의
+field가 여러 목적으로 쓰일 때 어느 소비자가 실제로 무엇을 읽었는지 lineage에 남는다.
+
+**등록이 성공했다는 것은 선언된 availability를 지키겠다는 뜻이지 등록된 값이 point-in-time으로 안전하다는
+뜻이 아니다.** 등록 과정에서 만들어진 값이 미래 관측을 반영하고 있는지는 package가 판정하지 않는다.
+사용자가 등록 단계에서 그런 계산을 하지 않아도 자신의 데이터 준비 과정에서 미리 계산해 올 수 있으므로,
+한쪽만 검사하는 것은 검사가 아니며 **보장하지 않는 것을 보장하는 것처럼 보이게 만든다.** 이 경계는
+§3.2가 정한 것과 같다. 위험한 준비 방식을 걸러내는 것은 등록 이전의 agent 인터뷰가 담당한다(§11.1).
 
 #### 계산이 만든 데이터도 같은 계약을 따른다
 
@@ -653,16 +671,77 @@ agent skill이 base $b$와 변환 가정을 설명하고 user가 확정하며, �
 
 return-native fallback은 제공하지 않는다. 가격 축 없이 portfolio 수익률을 주장하는 경로는 §10.2가 금지한다.
 
+**어느 관측을 체결가로 쓸지는 명시적 선언이며 package가 대신 고르거나 대체하지 않는다.** 선언한 값이
+없거나 유효하지 않으면 다른 값으로 떨어지지 않고 실패한다. 값의 이름이 그 선택을 대신하지 않는 것도
+§4.1과 같은 이유다 — 이름이 시가처럼 보인다는 사실은 그것을 체결가로 쓰겠다는 선언이 아니다. 체결가가
+어디서 오고 무엇이 그것을 선언하는지는 §6.3이 정한다.
+
 ### 4.5 Universe, tradability와 market metadata는 필요할 때 요구한다
 
-universe와 tradability는 모든 dataset의 등록 조건이 아니다. 횡단면 비교, benchmark-relative construction, 실제
-주문 생성처럼 **필요한 operation이** 각자 coverage, membership time, tradability requirement를 선언한다.
-unknown을 자동으로 tradable 또는 non-member로 바꾸지 않고 해당 operation의 policy에 따라 fail, exclude,
-warn한다.
+universe와 tradability는 모든 dataset의 등록 조건이 아니다. 횡단면 비교, benchmark-relative construction처럼
+**필요한 operation이** 각자 coverage, membership time, tradability requirement를 선언한다.
 
-OHLCV, 상하한가, 거래정지, lot size, price source도 이를 사용하는 execution 또는 analysis profile에서
-요구한다. 단순 signal 연구가 사용하지 않는 market field 때문에 막혀서는 안 된다. 반대로 **실제 주문 생성은
-필요한 price, lot, tradability binding이 없는데도 추정 default로 진행해서는 안 된다.**
+OHLCV, 거래정지, lot size, price source도 이를 사용하는 execution 또는 analysis profile에서 요구한다. 단순
+signal 연구가 사용하지 않는 market field 때문에 막혀서는 안 된다. 반대로 **실제 주문 생성은 필요한 price,
+lot, tradability binding이 없는데도 추정 default로 진행해서는 안 된다.**
+
+#### 두 가지 tradability를 구분한다
+
+같은 말이 서로 다른 두 시점의 서로 다른 질문에 쓰인다.
+
+| 질문 | 언제 | 누가 | 어디서 |
+|---|---|---|---|
+| 이 종목을 후보로 볼 것인가 | 판단 시점 | StrategyModel | 등록된 dataset |
+| 이 종목의 비중을 바꿀 수 있는가 | 판단 시점 | StrategyModel | 등록된 dataset |
+| 이 주문이 실제로 체결되는가 | **체결 시점** | execution | §6.3의 체결 테이블 |
+
+세 번째가 나머지와 **다른 시각에 평가된다는 것**이 핵심이다. 판단과 체결 사이에 거래가 정지될 수 있고,
+그러면 전략이 알던 것과 체결이 아는 것이 어긋난다. **이것은 결함이 아니라 판단과 체결을 분리한 이유 그
+자체이며**, 그 어긋남은 체결되지 않은 수량과 사유로 남는다(§6.3).
+
+#### 투자 유니버스는 전략의 책임이고 선택이다
+
+연구 대상을 좁히는 것은 시장 사실이 아니라 경제적 판단이므로 StrategyModel이 소유한다. 매 판단마다
+계산해도 되고, 유동성 상위 100종목 같은 기준을 미리 계산해 저장한 뒤 그 결과를 소비해도 된다. 후자는
+§4.1의 등록 계약을 따르는 보통의 dataset이다.
+
+**만들지 않아도 된다.** 그 경우 거래 불가 종목에도 주문이 생성되고 체결되지 않은 채 사유와 함께 남는다.
+전략이 몰랐고 시장이 알려준 것이므로 이것도 정상적인 결과다. package가 투자 유니버스를 요구하거나
+대신 만들지 않는다.
+
+#### 모르는 것은 값이 아니다
+
+tradability는 **참/거짓 두 값**이며 "모름"이라는 세 번째 상태를 갖지 않는다. 방향에 따라 다른 값을 갖지도
+않는다 — 매수만 불가능하고 매도는 가능한 상태는 현재 범위 밖이다(§13.2).
+
+해당 시점과 종목에 대한 관측이 아예 없다면 그것은 값의 문제가 아니라 **coverage의 문제**이며, 그것을
+요구한 operation이 계산 전에 실패한다. package가 없는 관측을 tradable로도 non-tradable로도 해석하지
+않는다. 어느 쪽으로 다룰지는 경제적 판단이므로 user가 데이터를 채우거나 명시적으로 제외한다.
+
+#### 거래정지 데이터가 없는 경우
+
+정지 이력을 갖고 있지 않은 project가 일반적이다. 이때 package는 **추측하지 않고**, user가 §3.4의 calendar
+유도와 **같은 절차**로 유도 규칙을 선언한다. bundled agent skill이 후보와 각각의 위험을 설명하고, user가
+근거와 함께 고르며, package는 선택된 규칙을 deterministic하게 검증하고 frozen input과 result limitation에
+기록한다.
+
+| 규칙 | 위험 |
+|---|---|
+| 명시적 정지 이력 | 없음. 있으면 이것을 쓴다 |
+| 거래대금 또는 거래량이 0 | 거래 부진과 정지를 구분하지 못한다 |
+| 고가·저가·종가가 모두 같다 | 가격 제한 도달의 근사. 저유동성 종목에서 오탐 |
+| 관측 행이 아예 없다 | **정지·수집 누락·상장 전·자료 절단을 모두 뭉갠다.** 위험이 가장 크다 |
+
+마지막 규칙도 후보에 포함한다. 다른 자료가 없는 user가 실제로 도달하는 유일한 경로이므로 금지해도
+우회될 뿐이고, 선언된 규칙은 frozen input에 남아 재현되고 감사할 수 있다는 점에서 조용한 추측과 정반대다.
+
+#### UC-TRADABILITY-001 — 정지 데이터 없이 시작하는 project
+
+user가 일별 시세만 갖고 있고 거래정지 이력이 없다. package는 임의로 정지를 판정하지 않고, agent가 유도
+규칙 후보와 각각의 위험을 설명한다. user가 규칙을 선택하면 package는 그것을 검증하고 유도 방식과 한계를
+result에 기록한다. 같은 규칙과 같은 data에서 같은 판정이 재현되며, 규칙을 바꾸면 경제적으로 다른 run으로
+구분된다. 어떤 시점·종목에 대해 판정할 관측이 없으면 그것을 요구한 operation이 계산 전에 실패하고,
+package가 tradable 또는 non-tradable로 추정하지 않는다.
 
 ### 4.6 Dependency binding
 
@@ -968,6 +1047,20 @@ budget을 **weight를 만드는 연산이 스스로 결정하지 않는다.** �
 **의도된 cash는 범위를 좁게 선언한 것이고, 잔여는 넓게 두고 남은 것이다.** 그래서 결과만 봐도 어느 쪽인지
 알 수 있다. 그리고 현금은 **유도값이 아니라 결정된 값**이므로 결과에 그대로 남는다.
 
+#### 현금 하한은 거래비용이 들어갈 자리이기도 하다
+
+배분은 판단 시점에 비중으로 정해지고 체결은 나중에 수량과 금액으로 일어난다. 이때 **가격이 얼마나
+움직였는지는 문제가 되지 않는다** — 체결 시점의 자산 가치로 다시 계산하므로 보유분과 목표 금액이 함께
+움직여 상쇄된다.
+
+문제가 되는 것은 **거래비용**이다. 비용은 목표 금액 위에 얹히므로 현금 하한을 0으로 선언하면, 즉 전액을
+배분하겠다고 선언하면 **비용만큼은 반드시 모자란다.** 매도 실패와 수량 반올림도 같은 방향으로 작은 차이를
+만든다.
+
+그래서 현금 하한을 0보다 크게 두는 것은 예산 의미를 표현하는 동시에 **체결에서 생기는 차이를 흡수할 자리를
+만드는 것**이다. 이것을 하지 않은 결과로 일부 주문이 줄거나 체결되지 않는 것은 오류가 아니라 §6.3이 정한
+정상 동작이며, 어느 종목이 왜 줄었는지가 결과에 남는다.
+
 #### 실현된 budget은 의도한 budget과 다를 수 있다
 
 constraint 조정, lot rounding, cash clipping을 거치면 실현 gross/net이 의도한 값과 달라진다. 결과는 **의도한
@@ -1098,14 +1191,80 @@ intended portfolio를 만든다. 이후에는 같은 order conversion, fill, com
 ### 6.3 Order conversion은 execution time의 책임이다
 
 실제 주문을 만드는 단계는 frozen intended portfolio, **execution 시점의** committed holding/cash, instrument
-rule, price, tradability를 사용한다. decision time의 stale quantity를 재사용하지 않는다.
+rule, 그리고 그 시점의 체결 가격과 거래 가능 여부를 사용한다. decision time의 stale quantity를 재사용하지
+않는다.
 
-StrategyModel이 요구한 data와 execution profile이 요구한 data는 **각각 명시적으로 resolve**하며,
-purpose-specific registration alias를 통해 암묵적으로 선택하지 않는다. 필요한 binding이 없으면 §10의
+StrategyModel이 요구한 data와 execution이 사용하는 값은 **서로 다른 경로로 얻으며**, 어느 쪽도
+purpose-specific registration alias를 통해 암묵적으로 선택하지 않는다. 필요한 것이 없으면 §10의
 progressive error로 mutation 전에 멈춘다.
 
 instrument별로 fractional 허용, lot rounding, clipping, skip, rejection, requested/dealt quantity가 확인
 가능해야 한다.
+
+#### 체결 테이블
+
+체결에 필요한 **거래 가능 여부와 체결 가격**은 관측 data와 다른 성격을 가지며, 별도의 고정된 형태로
+선언한다. 여기에는 최소한 다음이 포함된다.
+
+```text
+체결 시각 · instrument · 거래 가능 여부(참/거짓) · 체결 가격(하나 이상)
+```
+
+**이것은 execution을 선택한 run의 전제조건**이며, 없으면 그 run은 시작 전에 실패한다. 반대로 execution을
+선택하지 않은 workflow — DataModel 연구, signal 분석 — 는 이것 없이 완결된다(`UC-MODEL-001`,
+`UC-CONSTRAINT-001`).
+
+##### 관측이 아니라 그 시점의 사실이다
+
+관측 data는 *"이 시각까지 알 수 있었던 것"*을 범위로 읽는다(§3.2). 체결은 다르다. **체결 시각의 값을
+정확히 하나 조회한다.** 지연을 두고 알게 되는 관측이 아니라 그 순간의 시장 상태이기 때문이다.
+
+그래서 체결 테이블에는 availability 경계도 lookback도 적용되지 않으며, §3.5의 대상이 아니다.
+
+##### StrategyModel과 DataModel은 이것을 읽지 못한다
+
+**결정.** 연구를 수행하는 어떤 계산도 체결 테이블에 접근하지 못한다.
+
+- **왜**: 접근할 수 있으면 어느 종목이 그날 정지될지를 판단 시점에 알게 된다. 그리고 판단이 일별 관측을
+  쓰면서 체결은 더 촘촘한 시간 단위로 이루어지는 구성이 표현되지 않는다.
+- 판단에 필요한 거래 가능 여부는 **등록된 data로 따로 소비한다**(§4.5). 두 값이 어긋날 수 있으며, 그
+  어긋남이 곧 체결되지 않은 수량이다.
+
+##### 관측이 없는 것과 거래할 수 없는 것을 구분한다
+
+```text
+조회됐고 거래 불가        상장돼 있으나 그 시점 거래할 수 없다
+조회 자체에 없음          그 시점 이 시장에 존재하지 않는다
+```
+
+둘 다 체결되지 않지만 **결과에서 사유가 구분되어야 한다.** 체결 테이블은 user가 그 시장의 완전한 상태로
+선언한 것이므로, 없는 것을 없다고 다루는 것은 추측이 아니라 선언을 따르는 것이다.
+
+##### 체결 시각과 체결 가격은 선언된다
+
+*"판단으로부터 언제 체결되는가"*와 *"그 시점의 어느 값으로 체결하는가"*는 execution profile이 선언하며,
+StrategyModel이나 run script가 정하지 않는다. 같은 판단을 다른 체결 규약으로 비교할 때 **연구를 다시
+실행하지 않아도 되어야 한다**(`UC-ALPHA-CHILD-001`).
+
+체결 가격으로 선언된 값이 그 시각의 실제 관측 시점보다 이르다면 — 예를 들어 장 종료 시점에 체결하면서
+개장 가격을 사용한다면 — 그것은 미래 정보를 쓰는 것이 아니라 **실제로 거래할 수 없는 가격을 사용하는
+것**이다. package는 값의 관측 시점을 알지 못하므로 이를 판정할 수 없고, 따라서 이것은 검증 대상이 아니라
+선택된 profile의 **한계로 기록**된다. 근거 있는 후보를 제시하고 이 한계를 설명하는 것은 agent의 몫이다(§11).
+
+#### UC-FILL-001 — 체결 가격의 명시 선언과 대체 금지
+
+execution profile이 어느 값으로 체결할지 선언한다. 그 시점에 그 값이 없거나 유효하지 않으면 package는
+**다른 값으로 대체하지 않고** order나 account mutation을 만들기 전에 실패한다. 매수와 매도에 서로 다른
+값을 선언한 경우 한쪽이 없다고 다른 쪽으로 채우지 않는다. 이것은 `UC-COST-004`가 비용 정책에 요구하는
+것과 같은 규칙이다.
+
+#### UC-TRADABILITY-002 — 판단 이후에 발생한 거래정지
+
+StrategyModel이 거래 가능하다고 알고 있던 종목이 체결 시점에는 거래할 수 없게 되었다. package는 그
+종목에 대해 **체결 수량 0과 사유**를 기록하고, 같은 결정에 포함된 나머지 종목의 체결은 정상적으로
+진행한다. 이 결과는 **판단하지 않음**, **판단해서 유지함**, **체결 수량 0**이 서로 구분되어야 한다는
+§6.7의 요구를 그대로 따른다. 반대로 체결 가격 자체를 얻을 수 없는 경우는 이와 다른 실패이며 그 결정의
+주문 집합 전체가 mutation 전에 중단된다.
 
 #### UC-EXEC-001 — Decision과 execution의 분리
 
@@ -1575,6 +1734,9 @@ resolution candidate와 user에게 물을 질문은 package의 고정 error sche
 - missing analysis dependency를 warning만 남기고 required output을 생략
 - unknown field, instrument, exposure axis를 임의로 제외
 - 비슷한 field, 이전 price, 다른 cost policy로의 silent fallback
+- **선언한 체결 가격이 없을 때 다른 값으로 대체** (§6.3)
+- **관측이 없는 시점의 행을 직전 관측으로 합성해 체결이나 평가에 사용** — 없는 관측을 만들어내는 것은
+  값을 대체하는 것보다 한 단계 더 나아간 것이며, 거래할 수 없었던 종목을 거래 가능한 것으로 보이게 한다
 - failed artifact publication을 complete로 표시
 - **explicit execution과 accounting을 거치지 않고 계산한 값을 portfolio return, NAV, PnL, turnover로 보고**
 
@@ -1628,6 +1790,59 @@ skill은 public error의 stage를 기준으로 version-matched guidance를 찾�
 
 agent-specific instruction file은 bundled skill과 installed documentation을 찾게 하는 **thin routing layer**다.
 product fact와 schema를 agent-specific file에 복제해 stale하게 만들지 않는다.
+
+#### skill은 error 이후가 아니라 등록 이전부터 개입한다
+
+위 목록은 package error에서 시작한다. 그러나 **등록할 것이 무엇인지 정하는 단계가 그 앞에 있고**, 그
+단계에 package는 관여하지 않는다. 임의 형태의 연구 데이터를 받아들이기로 한 이상 그 의미를 확인하는
+일이 남으며, 그것이 skill의 자리다.
+
+skill은 user가 제공한 데이터를 **먼저 읽어** 다음을 근거와 함께 제안한다: instrument와 시간 축의 후보,
+availability 규칙 후보(§4.2), 체결 시각과 체결 가격 후보(§6.3), 거래 가능 여부의 유도 규칙 후보(§4.5).
+제안은 project config로 착지하고 package가 deterministic하게 검증한다.
+
+#### 데이터가 증명하는 것과 이름으로만 아는 것을 구분한다
+
+제안의 근거는 두 종류이며, 확정 절차가 다르다.
+
+| | 예 | 처리 |
+|---|---|---|
+| **데이터가 증명한다** | 네 값 사이에 항상 성립하는 대소 관계 → 시세 구조 · 논리 key의 유일성 위반 → 추가 key axis 필요 · 낮은 카디널리티 문자열과 값의 쌍 → field별 저장 | agent가 확정해도 된다 |
+| **이름으로만 안다** | 넷 중 어느 것이 개장 가격인가 · 날짜가 관측일인가 공개 시각인가 · boolean이 정지인가 다른 상태인가 | **user 확정 필수** (§4.2) |
+
+아래쪽은 데이터로 반증되지 않는다 — 개장 가격과 종가를 뒤바꿔 제안해도 둘 다 고가·저가 사이에 있다.
+그래서 §4.2의 원칙이 그대로 적용된다: **근거가 확인되기 전에는 등록하지 않는다.**
+
+#### agent는 package가 원리적으로 검증할 수 없는 것을 경고한다
+
+§2.6은 package가 판정하고 skill이 대화한다고 정했다. 여기에 한 가지가 더해진다 — **package가 알 수 없는
+사실을 aware하게 만드는 것**이다.
+
+대표적인 예가 체결 가격의 관측 시점이다(§6.3). package가 아는 것은 체결 시각뿐이고 그 값이 실제로 언제
+관측되었는지는 데이터에 없으므로, 장 종료 시점에 개장 가격으로 체결하는 구성을 package는 통과시킨다.
+skill은 이름과 도메인 지식으로 그것을 알아보고 그 가격에 실제로 거래할 수 없다는 사실과 대안을 설명한다.
+
+이 경고의 결과물은 **새로운 검증이 아니라 result의 limitation**이다. package의 판정 범위를 넓히지 않으며,
+넓히려는 시도가 §4.1이 말한 "반쪽 보장"을 만든다.
+
+#### 등록에서 권장되지 않는 준비 방식은 skill이 다룬다
+
+이동평균, 누적합, 순위, 시간축 집계처럼 **어떤 시점의 값이 다른 시점의 관측에 의존하게 만드는 계산**은
+등록 단계에서 수행하지 않는 것이 원칙이다. 그러나 이것은 package가 강제하는 규칙이 아니다 — user가 자신의
+데이터 준비 과정에서 미리 계산해 올 수 있으므로 한쪽만 막는 것은 막는 것이 아니고, 막는 것처럼 보이면
+오히려 방심을 만든다(§4.1).
+
+따라서 이 구분은 **skill의 지침으로 유지**한다. skill은 등록 정의를 검토해 해당 패턴을 발견하면 그것이
+왜 위험한지와 DataModel로 표현하는 대안을 설명하고, user가 그대로 진행하기로 하면 그 선택이 result의
+limitation에 남는다.
+
+#### UC-AGENT-002 — 데이터를 읽고 등록을 제안한다
+
+user가 데이터 위치만 알려준다. agent는 파일을 읽어 축, availability, 체결 시각과 가격, 거래 가능 여부의
+후보를 근거와 함께 제시하고, **데이터로 확인되는 것과 user 확정이 필요한 것을 구분해** 보여준다. user가
+선택하면 agent는 project config를 작성하고 package validation을 호출한다. package가 검증할 수 없지만
+결과의 의미를 바꾸는 사실 — 체결 가격의 관측 시점, 유도된 거래 가능 여부의 한계 — 은 확인 대상으로
+제시되고 result의 limitation에 남는다. **agent의 제안이 package validation을 대체하거나 우회하지 않는다.**
 
 ### 11.2 Skill entrypoint — normative product contract
 
@@ -1820,6 +2035,9 @@ hypothetical signed evaluation을 지원한다.
 - prepared production decision, external OMS reconciliation, live account authority
 - direct broker connectivity, secret management, always-on OMS/scheduler, alert delivery
 - user가 제공하지 않은 availability, universe, shortability truth의 자동 추정
+- **방향별 거래 가능 여부** — 매수만 불가능하고 매도는 가능한 상태. 거래 가능 여부는 참/거짓 하나이며
+  방향을 가르지 않는다(§4.5). 아래 참고
+- **가격 제한(상하한가) 모델링** — 상한가·하한가 도달 여부의 판정과 그에 따른 체결 제약
 - merger, spin-off, delisting을 포함한 security-master event의 **원천 해석·변환**
 - unbounded autonomous strategy state mutation
 - **중첩 실행** — 하나의 판단 안에서 다른 판단 과정을 실행하는 것. 파라미터 후보를 각각 backtest해
@@ -1848,6 +2066,19 @@ executable short에 요구하는 것과 같은 조건이다.
 `UC-CASHFLOW-001`의 future 항목이다). 무위험자산 수익을 반영하려면 §4.4로 등록한 자산을 **포지션으로**
 보유한다. 그러면 무엇을 얼마나 들었는지가 result의 dependency로 남는다. package가 유휴자본에 조용히 수익을
 붙이지 않는다.
+
+#### 방향별 거래 가능 여부는 지정가 주문이 들어올 때 되살아난다
+
+방향을 가르는 이유가 서로 다른 여러 가지다. 상한가는 매수만, 하한가는 매도만, 공매도 금지 종목 지정은
+매도만 막고, 유동성 부족은 양쪽에 걸린다. 이것들을 참/거짓 두 개로 뭉치면 **왜 거래할 수 없는지가
+사라진다.** 그리고 상하한가를 제대로 다루려면 가격 제한 자체를 모델링해야 하므로 지금 하려는 것보다 훨씬
+크다.
+
+현재 필요한 것은 하나뿐이다 — **이 종목을 이번 체결에서 뺀다.**
+
+**이 질문은 지정가 주문이 범위에 들어올 때 되살아난다.** 현재는 지원되는 주문을 전량 체결하므로 매수와
+매도가 다른 가격 조건을 볼 일이 없다. 지정가 매칭이 생기면 매수 지정가는 저가와, 매도 지정가는 고가와
+비교해야 하고 그때 방향이 갈린다. 그 기능을 만들 때 이 항목을 함께 본다.
 
 #### 왜 중첩 실행을 범위 밖에 두는가
 
@@ -1936,9 +2167,13 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   `UC-CONFIG-001`)
 - `UC-PIT-001`처럼 파생 계산이 요구하는 binding이 없으면 계산 전에 실패하고 reusable success를 만들지 않는다.
 - `UC-LOOKBACK-001`의 exact lookback이 store query까지 강제되고 coverage가 evidence에 남는다. **모든 lookback은
-  과거 방향이며 미래 관측을 당겨 읽는 경로가 없다.**
+  과거 방향이며 미래 관측을 당겨 읽는 경로가 없다.** `rows`는 (instrument × field)별로 센다.
 - 계산이 만든 데이터도 원본과 같은 등록 계약으로 읽히고, 그 `available_at`은 **생산자가 아니라 package가
   정한다.**
+- `UC-DATA-003`처럼 field가 물리 컬럼인지 별도 저장 단위인지에 따라 소비자의 requirement 선언이 달라지지
+  않는다. 저장 방식을 바꿔도 소비자가 변하지 않는다.
+- 등록은 **선언된 availability의 준수만** 보장하며, 등록된 값이 point-in-time으로 안전한지는 판정하지
+  않는다. 그 확인은 `UC-AGENT-002`의 인터뷰가 담당하고 결과는 limitation으로 남는다.
 
 ### 14.2 Research composition
 
@@ -1994,6 +2229,13 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   이력 접근이 strategy state 보유 여부에 종속되지 않는다. 계좌 session 시계열과 instrument panel을 선택해
   구독할 수 있다.
 - `UC-EXEC-003`처럼 decision이 없는 evaluation time에도 monitoring finding을 만든다.
+- execution이 있는 run은 §6.3의 체결 테이블 없이 시작하지 못하고, execution이 없는 workflow는 그것 없이
+  완결된다. (`UC-MODEL-001`, `UC-CONSTRAINT-001`)
+- `UC-TRADABILITY-002`처럼 판단 이후 발생한 거래정지가 그 종목의 체결 수량 0과 사유로 남고 같은 결정의
+  나머지 종목 체결을 막지 않는다. 반대로 `UC-FILL-001`의 체결 가격 부재는 그 결정의 주문 집합 전체를
+  mutation 전에 중단시킨다. **두 실패는 같은 등급이 아니다.**
+- 어느 종목이 왜 줄었거나 체결되지 않았는지가 결과에서 확인된다. 남은 현금을 종목 전체에 나눠 조용히
+  줄이는 방식으로 처리하지 않는다.
 - unsupported short, lifecycle, cost policy를 다른 profile의 default로 조용히 대체하지 않는다.
 - partial fill, pending/cancel, 실제 settlement cycle, production OMS behavior를 current support로 표시하지 않는다.
 - portfolio return, NAV, PnL, turnover는 explicit execution/accounting 경로에서만 산출된다. (`UC-RETURN-001`)
@@ -2080,10 +2322,11 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-TIME-001` | §3.2 | current |
 | `UC-TRIGGER-001` | §3.3 | current |
 | `UC-LOOKBACK-001` | §3.5 | current |
-| `UC-DATA-001` | §4.1 | current |
+| `UC-DATA-001`, `UC-DATA-003` | §4.1 | current |
 | `UC-AGENT-001` | §4.2 | current |
 | `UC-DATA-002` | §4.3 | current |
 | `UC-PIT-001` | §4.3 | current |
+| `UC-TRADABILITY-001` | §4.5 | current |
 | `UC-CALENDAR-001` | §3.4 | current |
 | `UC-MODEL-001`, `UC-MODEL-002`, `UC-FACTOR-001` | §5.1 | current |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.2 | current |
@@ -2093,7 +2336,7 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001` | §5.6 | current |
 | `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.7 | current |
 | `UC-PORTFOLIO-001` | §6.2 | current |
-| `UC-EXEC-001`, `UC-EXEC-002` | §6.3 | current |
+| `UC-EXEC-001`, `UC-EXEC-002`, `UC-FILL-001`, `UC-TRADABILITY-002` | §6.3 | current |
 | `UC-PROFILE-001`, `UC-ACADEMIC-001` | §6.4 | current |
 | `UC-COST-001` ~ `UC-COST-004` | §6.5 | current |
 | `UC-ACCOUNT-HISTORY-001`, `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §6.6 | current |
@@ -2103,6 +2346,7 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-ARTIFACT-001` ~ `003`, `UC-RESEARCH-001` | §9 | current |
 | `UC-REPORT-001`, `UC-MONITOR-001` | §9.4 | current |
 | `UC-ERROR-001`, `UC-RETURN-001` | §10 | current |
+| `UC-AGENT-002` | §11.1 | current |
 | `UC-ONBOARD-001` | §11.3 | current |
 | `UC-CONFIG-001` | §12.1 | current |
 | `UC-EXTENSION-001`, `UC-EXTENSION-002` | §12.3 | current |
@@ -2211,3 +2455,44 @@ alpha → ensemble → enhanced index로 이어지는 체인을 대입하면서 
 
 두 오판 모두 **판정 기준을 계좌 접근으로 잡았기 때문**이다. execution 통과 여부로 잡으면 나오지 않는다.
 §8.1의 네 층이 같은 경계를 다른 각도에서 이미 말하고 있었다는 것도 뒤늦게 확인했다.
+
+### B.7 데이터 등록과 체결 — 관측과 체결은 다른 세계다
+
+거래정지 데이터가 없는 project와 "다음날 시가로 체결"을 대입하면서, **관측을 읽는 것과 체결하는 것이
+같은 계약을 쓸 수 있는가**를 확인했다.
+
+| 확인한 것 | 정해진 것 |
+|---|---|
+| 둘이 같은 등록·조회 경로를 쓸 수 있나 | **없다.** 관측은 `available_at ≤ t`로 범위를 읽고 체결은 그 시각의 값 하나를 조회한다. **부등호냐 등호냐가 두 세계를 가른다** |
+| 그럼 체결 대상에 availability가 필요한가 | **아니다.** availability는 관측자가 미래를 못 보게 하는 장치인데, 체결에는 관측자가 없다. 그 시각의 시장 상태 자체다 |
+| 전략이 그것을 읽어도 되나 | **안 된다.** 읽을 수 있으면 어느 종목이 그날 거래 불가가 될지를 판단 시점에 알게 된다. 판단이 일별 관측을 쓰면서 체결은 더 촘촘한 단위로 이루어지는 구성도 표현되지 않는다 |
+| 그럼 전략은 거래 가능 여부를 어떻게 아나 | **등록된 data로 따로 소비한다.** 그리고 그것은 **선택**이다. 만들지 않으면 거래 불가 종목에도 주문이 나가고 사유와 함께 남는다 |
+| 두 값이 어긋나면 | **그것이 판단과 체결을 나눈 이유 그 자체다.** 하나로 합치면 "전략이 틀렸다"를 표현할 방법이 사라진다 |
+| 거래 가능 여부는 몇 개의 값인가 | **참/거짓 하나.** 방향을 가르는 이유가 서로 다르므로 둘로 뭉치면 왜 거래할 수 없는지가 사라진다(§13.2) |
+| 관측이 없는 것은 어떤 값인가 | **값이 아니다.** coverage의 문제이며 요구한 operation이 계산 전에 실패한다 |
+| 체결 실패는 한 종류인가 | **아니다.** 거래 불가와 관측 부재는 시장 사실이므로 그 종목만 체결 수량 0이고, 거래 가능하다면서 가격이 없는 것은 계약 위반이므로 주문 집합 전체가 중단된다 |
+| 등록이 무엇을 보장하나 | **선언된 availability의 준수까지.** 등록된 값이 point-in-time으로 안전한지는 판정하지 않으며, 판정하는 척하면 안 된다 |
+
+**기록해 둘 오판 넷.**
+
+1. *"세로로 긴 표(항목·값 두 컬럼)가 유연해서 좋다"* — **좋은 것은 폴더로 나누는 쪽이고 스키마로 만드는
+   쪽이 아니다.** 값 컬럼 하나에 여러 타입이 섞이고 무엇을 읽든 조건이 붙는다. **파티션 키가 스키마를
+   결정하게** 하면 그 단점이 전부 사라진다.
+2. *"등록 단계에서 위험한 계산을 막을 수 있다"* — **한쪽 문만 잠그는 것.** user가 자신의 데이터 준비
+   과정에서 미리 계산해 오면 똑같다. 그리고 막는 것처럼 보이면 방심을 만든다 — **반쪽 보장은 무보장보다
+   나쁘다.** §3.2가 이미 정해 둔 경계였다.
+3. *"장 종료 시점에 개장 가격으로 체결하면 look-ahead다"* — **방향이 반대다.** 미래를 훔치는 것이 아니라
+   지나간 가격을 붙잡는 것이다. 그리고 **package는 값의 관측 시점을 알 수 없으므로 판정할 수 없다.**
+   검증이 아니라 limitation의 자리다.
+4. *"판단은 했는데 아직 체결되지 않은 것이 겹치면 문제"* — **다른 프레임워크의 문제를 우리 것으로 착각한
+   것.** 주문이 살아남는 구조에서는 관리 대상이지만, 여기서는 체결 시점에 전부 결정되고 다음으로 넘어가지
+   않는다. 겹친 판단은 그 시점의 실제 계좌를 정확히 읽었을 뿐이며 `UC-CLOSED-LOOP-001` 위반이 아니다.
+
+**참고한 것과 가져오지 않은 것.**
+
+- 기존 구현 하나는 관측이 없는 시점의 행을 **직전 값으로 합성**해 체결에 쓴다. 거래정지된 종목을 직전
+  가격에 사고팔 수 있게 되므로 §10.2 목록에 이 항목을 추가했다.
+- 다른 구현 하나는 예측값 전체를 전략에 넘기고 **관례로만** 시점 경계를 지킨다. §2.2가 *"접근 불가능성으로
+  강제해야 한다"*고 한 것의 실물 반례다.
+- 또 다른 구현은 데이터 타입을 고정해 등록이라는 개념 자체가 없다. 그러면 인터뷰도 없어지지만 임의 형태의
+  연구 데이터를 담지 못한다. **임의 등록을 고른 대가가 §11.1의 인터뷰**라는 것을 이 대비에서 확인했다.

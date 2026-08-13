@@ -250,12 +250,17 @@ factor return도 마찬가지로 구분한다.
 - cross-sectional regression coefficient나 statistical factor estimate는 **DataModel result**로 만들 수 있다.
 - 실제 factor portfolio의 return, NAV, PnL, turnover는 **execution spine을 거친 결과**여야 한다.
 
-### 2.4 Committed actual state만 authority다
+### 2.4 Committed runtime state만 authority다
 
 vqapr에는 서로 바꾸어 쓸 수 없는 두 개의 runtime authority가 있다.
 
 1. **Account authority** — committed fill과 mark가 만든 cash, position, cost, NAV와 그 이력
-2. **StrategyModel-state authority** — StrategyModel이 명시적으로 반환하고 commit한 bounded private state
+2. **Model-state authority** — DataModel 또는 StrategyModel이 명시적으로 commit한 bounded private
+   computational state
+
+Model state는 작은 strict-JSON `memory`와 선택적인 Model 고유 **private state payload**로 구성될 수 있지만,
+둘은 하나의 state identity로 함께 저장·복원된다. committed state만 다음 Model invocation의 정상 입력이며,
+working checkpoint, recorder, 임의의 로컬 파일은 authority가 아니다.
 
 나머지는 authority가 아니다. intended portfolio, requested order, constraint adjustment result, validation
 finding, monitoring finding, evidence는 **의도와 영수증**이다.
@@ -781,8 +786,9 @@ factor-return estimate를 만들 수 있다. 결과는 경제적 의미, axis, u
 
 - **§4.1의 dataset 계약을 그대로 따른다.** 소비자는 이것이 계산 결과인지 원본인지 몰라도 읽는다.
 - **`available_at`은 package가 정한다**(§4.1). DataModel이 자기 결과의 유효 시점을 주장하지 않는다.
-- **actual state를 소비하지 않으므로 path-dependent가 될 수 없다**(§2.3). 계좌·체결에 의존하는 판단은
-  StrategyModel의 영역이다.
+- **actual Account state를 소비할 수 없다**(§2.3). 계좌·체결에 의존하는 판단은 StrategyModel의 영역이다.
+  다만 이전 Model state를 소비하는 순차 계산은 가능하다. account-state dependency와 model-state dependency를
+  같은 `path-dependent` 표지 하나로 뭉개지 않는다.
 - **배분을 만들지 않는다.** signal, characteristic, 분류처럼 계좌 없이 정의되는 값까지가 이 역할이며,
   그 값을 weight로 바꾸는 것은 StrategyModel의 판단이다.
 - **execution을 거치지 않는다.** 체결될 것이 없기 때문이며, 그래서 DataModel run은 그 자체로 완결된다.
@@ -793,7 +799,9 @@ factor-return estimate를 만들 수 있다. 결과는 경제적 의미, axis, u
 적용되는 요구만 만족하면 된다.** 각 시점의 결과는 그 시점에 허용된 관측만 반영하고 자기 유효 시점을 갖는다.
 
 따라서 전체 기간을 한 번에 학습해 만든 결과가 섞여 들어갈 수 없다 — 어느 시점에서도 그 시점 이후의 관측이
-보이지 않기 때문이다. 이를 위해 별도의 재학습 이력이나 학습 구간 표시를 요구하지 않는다.
+보이지 않기 때문이다. epoch별 학습 이력을 public result로 만들 필요는 없지만, 각 예측 결과는 자신이 소비한
+committed Model state를 가리키고 그 state는 component/configuration과 training input/window identity를 보존해야
+한다.
 
 > **Architecture candidate — non-normative**
 >
@@ -828,6 +836,15 @@ DataModel은 이전 실행의 계산 상태를 다음 실행으로 이어갈 수
 이어가기를 선택하면 **결과가 순차 생성된다.** 시점 순서대로 만들어야 같은 값이 나오므로, 일부 구간만 다시
 만들거나 병렬로 만들 수 없다. 그 사실이 결과에 남아야 하며, 그렇지 않으면 나중에 구간을 다시 생성하려는
 시도가 조용히 다른 값을 만든다.
+
+#### UC-MODEL-003 — Rolling CNN DataModel
+
+DataModel이 직전 1,000거래일 residual로 CNN을 새로 학습하고 완료된 weight로 다음 125거래일의 종목별 score를
+만든다. 다음 training boundary에서는 이전 subperiod weight를 warm start하지 않고 새 모델을 학습하며, 최종
+DataModel result는 각 구간의 out-of-sample score를 시간축으로 연결한다. 같은 subperiod 안에서 중단된 학습은
+§5.7의 working checkpoint로 재개할 수 있지만, 이것을 다음 subperiod로 weight를 이어 학습하는 것으로 해석하지
+않는다. 각 score는 사용한 committed Model state를 가리키고 StrategyModel은 weight가 아니라 materialized score를
+소비한다.
 
 #### UC-MODEL-001 — Portfolio 없는 DataModel 연구
 
@@ -918,7 +935,7 @@ DataModel은 다시 실행하지 않아도 되고, 두 StrategyModel result는 �
 |---|---|
 | weight가 raw / active / benchmark-relative / physical 중 무엇인지 | 초과비중과 실제 보유비중을 섞게 된다 |
 | budget이 fixed인지 flexible인지 | 합이 0.4인 결과가 "의도한 40%"인지 "정규화 안 된 것"인지 모른다 |
-| actual state나 strategy state를 소비했는지 | 소비자가 "데이터만으로 재현되지 않는다"를 알 수 없다 |
+| actual Account state나 Model state를 소비했는지 | 소비자가 dependency 종류와 재현 시작점을 알 수 없다 |
 
 이 선언은 **결과를 만들 때 검증한다.** 선언과 실제 값이 어긋나면 — fixed gross 1.0을 선언했는데 합이
 다르거나, long-only를 선언했는데 음수가 있으면 — 결과를 만들기 전에 실패한다.
@@ -1127,22 +1144,36 @@ binding, fill dependency를 보존하고 parent result는 불변이다.
 Model은 이전 계산의 결과를 다음 계산으로 이어갈 수 있어야 한다. **이 절의 규칙은 두 종류 모두에
 적용된다** — StrategyModel은 이전 판단을, DataModel은 이전 계산 상태를 이어간다(§5.1).
 
-- **내용과 구조는 Model이 정하며 package는 이를 해석하지 않는다.**
-- **하나의 bounded value다.** Model이 임의의 이름으로 상태를 늘려갈 수 있는 표면을 제공하지 않는다.
-  package가 해석하지 않으면서도 durable·portable하려면 값의 **범위와 형식**이 정해져 있어야 한다.
-  범위가 없는 state는 저장할 수도, 다음 run에 넘길 수도, "무엇이 바뀌었는가"를 보일 수도 없다.
-- **portable format으로 표현 가능해야 한다.** 표현할 수 없는 값(비유한 수치, 문자열이 아닌 key, 임의의
-  in-memory 객체)은 계산 전에 거부한다. 저장 시점에 조용히 잘라내지 않는다.
+- **하나의 bounded state 표면이다.** Model이 임의의 이름으로 독립된 상태를 늘리지 않는다. `memory`와 선택적
+  `payload`는 서로 다른 authority가 아니라 하나의 state identity를 이룬다. 여기서 bounded는 byte 상한이 아니라
+  상태 표면이 하나로 닫혀 있다는 뜻이다.
+- **`memory`는 strict JSON이다.** 진행 위치, 최근 시점, 작은 계수처럼 구조적이고 portable한 값을 담는다.
+- **`payload`는 선택적인 Model 고유 private state다.** 신경망 weight처럼 JSON에 맞지 않는 상태를 담으며,
+  Model이 저장·복원 방법을 제공하고 package는 내부 의미를 해석하지 않는다. payload가 없는 Model은 기존
+  memory만 사용한다.
+- **상태는 compatible runtime 사이에서 위치와 process를 바꾸어 복원할 수 있어야 한다.** 로컬 payload 경로를
+  memory에 넣는 것은 state가 아니며, 경로가 바뀌어도 복원 가능한 framework-managed state reference를 사용한다.
 - **저장되는 값은 Model이 들고 있는 객체와 분리된다.** Model이 이후에 같은 객체를 계속 변경해도 이미
   기록된 state가 따라 바뀌어서는 안 된다. 그렇지 않으면 이력 전체가 마지막 값 하나로 붕괴한다.
 - durable하고 portable해야 하며, 한 run의 종료 state를 다음 run의 시작 state로 사용할 수 있어야 한다.
   production에서 하루 단위로 실행하며 전날 state를 이어받는 것이 기준 사례다.
 - **갱신은 execution이나 fill 발생 여부에 종속되지 않는다.** 주문이 없거나 dealt quantity가 0인 세션에도
   StrategyModel의 state는 이어지고, execution을 거치지 않는 DataModel도 마찬가지다.
-- state를 사용한 result는 그 사실을 드러내야 한다. 소비자가 "이 result는 data만으로 재현되지 않는다"를
-  알아야 하기 때문이다.
+- state를 사용한 result는 consumed Model state identity를 드러내야 한다. actual Account state dependency는
+  별도로 표시한다. 그래야 순차 계산과 계좌 경로 의존성을 구분할 수 있다.
 - **state는 최후 수단이다.** 같은 값을 bounded lookback이나 actual-state 이력(§6.6)이나 durable
   artifact로 표현할 수 있으면 그쪽이 재현 가능성이 높다.
+
+#### Working checkpoint와 committed state
+
+긴 Model invocation은 현재 memory와 payload를 working checkpoint로 저장할 수 있다. 이것은 같은 frozen
+operation을 중간부터 재시도하기 위한 staging state이지, 정상 inference나 downstream 소비에 쓰는 committed
+state가 아니다.
+
+1. working checkpoint는 정상 inference에 사용하지 않는다.
+2. 새 계산이 완료되기 전까지 기존 committed state를 유지한다.
+3. working checkpoint는 같은 frozen operation identity에서만 재개한다.
+4. 계산과 output validation이 완료된 후에만 새 state를 committed state로 교체한다.
 
 adaptive StrategyModel은 realized result나 new observation으로 belief, parameter, member weight를 갱신할 수 있다.
 특정 Bayesian class hierarchy를 요구하지 않고, update 전후의 state와 사용한 evidence를 비교 가능하게 보존한다.
@@ -1152,6 +1183,14 @@ adaptive StrategyModel은 realized result나 new observation으로 belief, param
 StrategyModel이 판단 결과를 state로 남긴다. 그 세션에 주문이 없거나 dealt quantity가 0이어도 state는 이어진다.
 run이 끝나면 최종 state를 결과로 얻을 수 있고, 다음 run의 시작 state로 **명시적으로 지정해** 이어서 실행할
 수 있다. 이때 이전 run의 state를 자동으로 선택하지 않는다.
+
+#### UC-STATE-002 — Payload checkpoint 재개
+
+CNN DataModel이 epoch 37까지 학습한 뒤 memory와 model weight, optimizer state, random-number-generator state,
+학습 규칙이 요구하는 이전 weight를 working checkpoint로 저장하고 process가 중단된다. 같은 Model implementation,
+configuration, training data/window, seed policy, operation identity로 다시 실행하면 저장된 payload를 복원해 epoch
+38부터 계속한다. 이 중 하나라도 다르면 checkpoint를 자동 재사용하지 않는다. 학습 완료 전 checkpoint는
+downstream inference에 보이지 않고, 완료와 output validation 뒤에만 새 committed Model state가 된다.
 
 #### UC-ALPHA-ADAPTIVE-001 — Fill 이후 ensemble belief 갱신
 
@@ -1454,7 +1493,7 @@ constraint monitoring은 StrategyModel decision cadence와 독립적으로 commi
 
 ### 6.9 Run 종료 결과
 
-run은 종료 시 최종 actual state와 최종 strategy state를 결과로 제공해야 하며, 그 결과만으로 이어지는 run을
+run은 종료 시 최종 actual state와 최종 Model state를 결과로 제공해야 하며, 그 결과만으로 이어지는 run을
 시작할 수 있어야 한다. 이것은 **중단된 run의 재개와 다르다.** 중단 복구는 current scope가 아니다(§13.2).
 
 ---
@@ -1716,6 +1755,11 @@ producer를 재실행하지 않고 report와 분석에서 사용할 수 있는 v
 complete result로 노출하지 않는다. 이 기록은 §5.3의 result category가 아니며 portfolio return의 출처가
 될 수 없다.
 
+epoch, loss, learning rate, checkpoint/state identity는 diagnostic으로 기록할 수 있다. 그러나 model weight,
+optimizer state, random-number-generator state처럼 학습 재개에 필요한 private payload를 recorder에 저장하거나
+recorder를 읽어 복원하지 않는다. recorder row가 남았다는 사실은 checkpoint나 Model invocation의 완료를
+증명하지 않는다.
+
 #### UC-MONITOR-001 — Monitoring finding report
 
 actual-account finding을 daily report로 만든다. report는 breach와 missing input을 구분하고, **intended target을
@@ -1801,6 +1845,8 @@ execution/accounting result에서만 나온다.
 - pre-commit 단계의 실패는 position, cash, version, journal을 **하나도** 바꾸지 않는다.
 - commit 이후의 publication 실패는 mutation 여부와 정확한 account version을 기록한다.
 - retry는 같은 operation identity와 expected account version에서만 idempotent해야 한다.
+- Model invocation의 working checkpoint는 기존 committed Model state를 바꾸지 않는다. 새 output과 state가
+  validation을 통과해야 새 state가 committed되고, 미완성 output은 reusable result로 노출되지 않는다.
 - **failure를 warning-and-skip으로 숨기지 않는다.**
 
 ### 10.4 Workflow completion status
@@ -1967,7 +2013,12 @@ agent는 instrument와 execution assumption 같은 environment decision을 한 �
 - **run은 시작 시점의 설정을 본다.** invocation 시작 후의 project 변경은 그 run의 identity를 바꾸지 않는다.
 
 환경변수, mutable global default, 실행 시점의 암묵적 file discovery는 frozen result identity 밖에 남지 않는다.
-누적 상태의 세션 간 persistence는 current requirement가 아니다.
+대화나 점진적 configuration을 package가 세션 사이에 암묵적으로 보존하는 것은 current requirement가 아니다.
+Model state 연속성은 §5.7의 명시적인 committed state 선택으로만 제공한다.
+
+working checkpoint를 재개할 때는 적어도 Model implementation, configuration, dataset binding과 cutoff, training
+window, random-seed policy, operation/subperiod identity가 동결된 값과 같아야 한다. 하나라도 다르면 같은 계산의
+재시도로 취급하지 않는다.
 
 #### UC-CONFIG-001 — 점진적 구성과 완전한 freeze
 
@@ -2011,13 +2062,13 @@ signal/alpha weight/ensemble/intended portfolio/artifact contract, DataModel res
 profile·actual-state result 사이의 compatibility, order conversion semantics와 clipping/failure diagnostics,
 constraint declaration·adjustment·validation·finding contract, signed alpha diagnostics와 long-only physical
 construction, instrument semantics와 execution-policy resolution, portable artifact envelope·lineage·catalog·
-reporting, trigger와 run 종료 evidence 확정, actual-account monitoring, agent-readable documentation과
-stage-based error.
+reporting, Model state reference와 working/committed 저장 lifecycle, trigger와 run 종료 evidence 확정,
+actual-account monitoring, agent-readable documentation과 stage-based error.
 
 **user project가 소유:** source data와 그 경제적 의미, availability·delivery lag·restatement 가정, universe·
 benchmark·sector·factor 정의, signal model과 alpha policy code, risk·cost·constraint·execution policy, constraint
 metric의 경제적 의미와 bound, compliance reference data의 applicability, project-local extension과 report
-composition, research objective와 promotion decision.
+composition, Model payload의 내용과 저장·복원 구현, research objective와 promotion decision.
 
 **external production runtime / OMS가 소유 (future boundary):** broker connectivity·authentication·secret,
 broker-specific identifier와 order type, order slicing·pacing·venue·retry·replace·cancel, always-on scheduling과
@@ -2039,6 +2090,7 @@ confirmed order·fill·reject reason·account snapshot publication.
 - requested/hypothetical state를 actual compliance monitoring state로 사용
 - compliance-only data를 undeclared strategy input으로 전달
 - pickle-only result를 portable public artifact라고 주장
+- private payload의 로컬 파일 경로를 memory에 넣어 durable Model state라고 주장
 - consumer-purpose alias를 dataset registration에 새기는 것
 - session calendar를 data coverage에서 유도하는 것
 
@@ -2053,6 +2105,7 @@ hypothetical signed evaluation을 지원한다.
 
 - cross-sectional signed signal과 alpha research
 - ML training/inference (model implementation은 project 소유)
+- 동일한 frozen Model invocation 안에서 private payload checkpoint를 저장하고 재개
 - stored signal/alpha reuse와 ensemble
 - 반복 재학습을 포함한 파생 데이터 생산과 재사용
 - long-only enhanced-index physical portfolio
@@ -2089,7 +2142,8 @@ hypothetical signed evaluation을 지원한다.
 - **actual state에 의존하는 model 학습** — 자기 매매 결과를 보고 정책을 갱신하는 방식(강화학습 계열).
   §2.3이 DataModel을 execution 경로 밖에 둘 수 있는 것은 학습이 계좌를 보지 않기 때문이며, 이 예외를 열면
   파생 데이터의 재사용 가능성이 무너진다
-- **중단된 run의 재개** — 실패하거나 중단된 run은 current scope에서 처음부터 다시 실행한다
+- **중단된 simulation run 전체의 재개** — event cursor, decision, fill, Account commit, publication을 포함한
+  run은 current scope에서 처음부터 다시 실행한다. §5.7의 단일 Model 학습 checkpoint 재개와는 다른 기능이다
 
 merger, spin-off, delisting처럼 instrument identity, tradability, reference state를 바꾸는 사건의 해석과 변환은
 vqapr가 아니라 **security master와 ETL pipeline의 책임**이다. vqapr는 향후에도 원천 corporate action을 자체
@@ -2172,7 +2226,8 @@ authoritative result로 들어온다. duplicate delivery는 같은 decision을 �
 
 process interruption 뒤 동일 frozen identity를 중복 decision/fill/state update 없이 재개하고, changed identity는
 mutation 전에 분기 요구로 실패한다. 장시간 run이나 production 연속 운영에서 재개 수요가 검증되면 별도 product
-decision으로 추가한다.
+decision으로 추가한다. 이 future use case는 event cursor와 Account/execution commit을 포함하며, 현재 지원하는
+`UC-STATE-002`의 단일 Model invocation checkpoint 재개를 포함 범위가 더 큰 것으로 바꾸지 않는다.
 
 #### UC-IMPACT-001 — Market impact
 
@@ -2223,8 +2278,11 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - `UC-SIGNAL-001`의 direct StrategyModel과 `UC-SIGNAL-002`의 stored model output 경로가 모두 동작한다.
 - `UC-MODEL-001`처럼 portfolio 없이 DataModel signal을 연구·평가·저장할 수 있다.
 - `UC-MODEL-002`에서 statistical factor-return estimate를 executed portfolio return/NAV로 표시하지 않는다.
-- DataModel이 actual state를 소비하지 않으며, 반복 재학습이 같은 DataModel의 여러 실행으로 표현된다. 이전 계산을
-  이어간 결과는 순차 생성임이 드러난다.
+- DataModel이 actual Account state를 소비하지 않으며, 반복 재학습이 같은 DataModel의 여러 실행으로 표현된다.
+  이전 Model state를 이어간 결과는 순차 생성임이 드러나고 actual-state dependency와 구분된다.
+- `UC-MODEL-003`에서 각 rolling window의 CNN을 fresh initialization하고 subperiod 사이에 weight를 warm start하지
+  않으며, 각 out-of-sample score가 사용한 committed Model state를 가리킨다. StrategyModel은 weight가 아니라
+  materialized score를 소비한다.
 - `UC-FACTOR-001`에서 characteristic과 membership을 재사용 가능한 result로 만들고, 같은 membership을 소비한
   여러 버킷 portfolio가 그 사실을 dependency로 증명하며, 버킷 조합 팩터와 직접 실행 팩터가 zero-friction
   profile에서 일치한다.
@@ -2235,8 +2293,13 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   실패하며, 종목을 빼고 재정규화하지 않는다. 제외된 종목은 호출자에게 값으로 반환되어 evidence에 남는다.
 - `UC-ALPHA-PATH-001`에서 path-dependent result를 producer rerun 없이 frozen member input으로 소비하고, source
   state identity와 반영 범위를 새 lineage에 보존하며 current-state recomputation으로 표시하지 않는다.
-- `UC-STATE-001`에서 체결이 없는 세션과 run 경계를 넘어 strategy state가 이어지고, 다음 run의 시작 state는
+- `UC-STATE-001`에서 체결이 없는 세션과 run 경계를 넘어 Model state가 이어지고, 다음 run의 시작 state는
   명시적으로 지정된다. state 갱신이 execution 발생 여부에 종속되지 않는다.
+- `UC-STATE-002`에서 JSON memory와 optional payload가 같은 state identity로 저장·복원되고, 같은 frozen
+  operation만 working checkpoint를 재개한다. 다른 identity는 거부되고, 새 계산이 완료되기 전에는 기존
+  committed state가 유지된다.
+- state reference는 Model이 기록한 로컬 payload 경로에 의존하지 않고 compatible process에서 memory와 payload를
+  함께 복원한다. payload가 없는 Model은 strict JSON memory만으로 같은 계약을 만족한다.
 - `UC-CALENDAR-001`에서 가격 데이터만 있는 project가 선언된 유도 규칙으로 frozen session calendar를 만들고,
   package는 규칙 없이 session을 추측하지 않으며, 유도 방식과 한계가 result에 남는다.
 - `UC-TRIGGER-001`에서 StrategyModel이 선언한 cadence와 local decision time을 frozen venue calendar와 결합한 판단
@@ -2294,6 +2357,7 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - `UC-REPORT-002`에서 DataModel과 StrategyModel의 diagnostic row를 typed table artifact로 보존하고, producer
   재실행 없이 report하며, 이를 Model state나 actual state로 취급하지 않는다. 각 행은 어느 run의 누가 어느
   시각에 남겼고 **그 시각이 어떤 종류인지**를 함께 갖고, producer가 그 값을 주장하지 못한다.
+- recorder는 Model payload나 checkpoint 저장소가 아니며, recorder만으로 중단된 학습을 복원할 수 없다.
 - diagnostic 기록은 §5.3의 result category가 아니며 portfolio return, NAV, PnL, turnover의 출처가 되지
   않는다.
 - `UC-EXTENSION-001`에서 agent가 만든 local transform의 compatibility를 package가 deterministic하게 판정한다.
@@ -2376,13 +2440,13 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-PIT-001` | §4.3 | current |
 | `UC-TRADABILITY-001` | §4.5 | current |
 | `UC-CALENDAR-001` | §3.4 | current |
-| `UC-MODEL-001`, `UC-MODEL-002`, `UC-FACTOR-001` | §5.1 | current |
+| `UC-MODEL-001`, `UC-MODEL-002`, `UC-MODEL-003`, `UC-FACTOR-001` | §5.1 | current |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.2 | current |
 | `UC-ENSEMBLE-001` | §5.4 | current |
 | `UC-ALPHA-BUDGET-001` | §5.5 | current |
 | `UC-BUILTIN-001` | §2.7 | current |
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001` | §5.6 | current |
-| `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.7 | current |
+| `UC-STATE-001`, `UC-STATE-002`, `UC-ALPHA-ADAPTIVE-001` | §5.7 | current |
 | `UC-PORTFOLIO-001` | §6.2 | current |
 | `UC-EXEC-001`, `UC-EXEC-002`, `UC-FILL-001`, `UC-TRADABILITY-002` | §6.3 | current |
 | `UC-PROFILE-001`, `UC-ACADEMIC-001` | §6.4 | current |

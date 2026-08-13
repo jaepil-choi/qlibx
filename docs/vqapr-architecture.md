@@ -50,6 +50,25 @@ flowchart LR
 
 `flow/`는 이 layer들을 조립하고 이벤트를 배달한다. **경제 규칙을 소유하지 않는다.**
 
+> **Reference — 세 프레임워크가 서로 다른 것으로 층을 갈랐다**
+>
+> ```text
+> nautilus   메시지의 역할    DataEngine이 받고 RiskEngine이 검사하고 ExecEngine이 보낸다
+> qlib       작업의 순서      data → model → strategy → backtest → workflow
+> vqapr      시간의 질문      위 표의 두 번째 열이 전부 물음표인 것이 그것이다
+> ```
+>
+> 층 이름 옆이 전부 질문이고 그 질문이 시간 순서인 것은 우연이 아니다. **PIT correctness가 중심
+> 요구(§3.2)이므로, 층을 정보 흐름으로 그으면 "그때 무엇을 알 수 있었나"가 층 경계에 드러난다.**
+>
+> 그리고 이것은 **판단 시점과 체결 시점이 갈라져 있기 때문에 가능한 선택**이다. 실거래에서는 그 간격이
+> 없어 질문 자체가 성립하지 않는다. §2.2·§2.3·§5.2·§6.1의 차이가 전부 여기서 나오므로, 그 자리에서는
+> 이 문단을 가리키기만 한다.
+>
+> 공통점도 있다. nautilus의 `model/`과 우리 `domain/`은 같은 자리다 — venue도 storage도 모르는 순수
+> 타입을 바닥에 둔다. qlib에는 이 층이 없고 `DataFrame`이 그 자리를 대신하므로, "이 표가 무엇인가"가
+> 컬럼 이름 관례로만 표현된다.
+
 ### 1.3 세 줄 규칙
 
 1. **아무도 Store를 직접 열지 않는다.** 소비자는 requirement를 선언하고 Flow가 bounded View를 준다.
@@ -80,14 +99,36 @@ flowchart LR
 - **없으면**: `store.query(...)` 한 줄이면 look-ahead가 가능하다. 리뷰로 막는 것은 확장되지 않는다.
 - **UC**: `UC-PIT-001`, `UC-LOOKBACK-001`, `UC-DATA-002`, `UC-TIME-001`
 
+> **Reference — 두 레퍼런스는 전략에게 넓게 연다**
+>
+> qlib의 전략은 `common_infra`로 exchange와 account를, `level_infra`로 executor와 calendar를 받는다
+> (`BaseStrategy.__init__`). nautilus의 `Strategy`는 `self.cache`로 캐시 전체를 본다.
+>
+> **그래도 되는 이유가 있다** — 실거래에서는 넓게 봐도 미래를 볼 수 없다. 아직 없기 때문이다.
+> 백테스트에서는 **접근할 수 있는 것이 곧 볼 수 있는 미래**라 같은 설계가 성립하지 않는다(§1.2).
+> 이 하나의 결정이 §6.1까지 파급된다.
+
 ### 2.3 Aggregate Root — Account
 
 **결정.** cash, position, cost, version, journal의 쓰기 권한은 `Account` 하나가 갖는다. 변경은
 `commit(fills, expected_version)`과 `mark(marks, expected_version)` 둘뿐이다.
 
-- **왜**: "committed actual state만 authority"(PRD §2.4)를 지키려면 authority가 **한 객체**여야 한다.
+- **왜**: committed Account state의 authority를 하나로 유지하려면 쓰기 권한이 **한 객체**에 있어야 한다
+  (PRD §2.4).
 - **없으면**: intended 값을 상태에 쓰는 경로가 생기고 `intended ≠ committed`가 무너진다.
 - **UC**: `UC-CLOSED-LOOP-001`, `UC-ACCOUNT-HISTORY-001`, `UC-CONSTRAINT-ADJUST-001`
+
+> **Reference — nautilus의 `Cache`와 우리 `Account`는 방향이 반대다**
+>
+> ```text
+> Cache     읽기를 모으고 쓰기를 분산한다      여러 엔진이 쓴다
+> Account   쓰기를 모으고 읽기를 좁힌다        스냅샷으로만 나간다
+> ```
+>
+> 둘 다 "하나의 중심"인데 범위가 반대다. 공유 캐시에 intended를 넣는 순간 §2.4의
+> `intended ≠ requested ≠ dealt ≠ committed`가 흐려진다. **그 네 단계를 구분해야 하는 쪽이 더 좁은
+> authority를 갖는다.** qlib은 아예 흩어져 있다 — Exchange가 시세를, Account가 포지션을 갖고 전략이
+> `common_infra`로 둘 다 만진다.
 
 ### 2.4 Functional Core / Imperative Shell
 
@@ -115,6 +156,15 @@ Flow를 만들지 않는다.
 - **왜**: `UC-FACADE-001`이 "package source를 열지 않고 완주"를 요구한다.
 - **없으면**: 사용자가 내부 import에 의존하면 리팩터가 breaking change가 된다.
 - **UC**: `UC-FACADE-001`, `UC-EXTENSION-002`
+
+> **Reference — qlib의 `contrib/`이 반면교사다**
+>
+> model·strategy·ops·report·evaluate·rolling·online이 전부 패키지 안 `contrib/`에 쌓인다. **확장 지점을
+> 패키지 안에 두면 사용자 코드가 패키지에 축적되고, 결국 그것을 읽어야 쓸 수 있게 된다.**
+> `UC-FACADE-001`이 요구하는 *"package source를 열지 않고 완주"*가 구조적으로 불가능해진다.
+>
+> nautilus는 `adapters/`를 1급 층으로 두는데, 그것은 venue 연결이라 패키지가 소유하는 것이 맞다.
+> **연구 로직은 다르다** — 그것이 §2.7이 project-local StrategyModel을 primary extension point로 둔 이유다.
 
 ### 2.7 DRY의 경계 — 무엇을 공유하고 무엇을 나누는가
 
@@ -663,11 +713,18 @@ class ModelWindow(Protocol):                      # 두 종류가 공유
   번역은 §4.2의 resolver가 끝냈다. §4.1이 종목 축 없는 시계열에 예외를 두지 않은 것과 같은 이유 —
   **소비자에게 분기를 만들지 않는다.**
 
-StrategyModel은 여기에 실행 문맥을 더 받는다.
+두 Model이 공유하는 invocation 문맥은 현재 state를 working checkpoint로 저장해 달라는 lifecycle 명령만
+제공한다. state 자체는 context에서 읽고 쓰지 않는다.
 
 ```python
-class StrategyModelContext(Protocol):
+class ModelContext(Protocol):
     window: ModelWindow
+    def checkpoint(self) -> None: ...
+
+class DataModelContext(ModelContext, Protocol):
+    pass
+
+class StrategyModelContext(ModelContext, Protocol):
     calendar: CalendarView
     def account(self) -> AccountSnapshot: ...
     def account_history(self, requirement: HistoryRequirement) -> AccountHistory: ...
@@ -675,9 +732,10 @@ class StrategyModelContext(Protocol):
 ```
 
 - **DataModel에는 `account`가 없다.** 있으면 결과가 그 run에 묶여 재사용할 수 없게 된다(PRD §2.3).
-- memory와 recorder는 창에도 context에도 없다. Flow가 시작 시 `model`에 넣어주므로 `self.memory`,
-  `self.recorder`로 쓴다(§5.1.1, §9.1). **읽고 쓰는 경로를 둘로 두지 않는다** — 두 종류가 공유하는
-  것이라 한쪽에만 있는 자리에 두면 다른 쪽이 다른 경로를 갖게 된다.
+- memory와 recorder는 창에도 context에도 없다. 공통 invocation 경계가 호출 전에 memory를 복원하고 payload가
+  있으면 `load_payload()`를 호출하며 recorder를 연결한다. Model은 `self.memory`, runtime payload,
+  `self.recorder`를 쓴다(§5.1.1, §9.1). `checkpoint()`는 state 값을 받거나 돌려주지 않고 현재 Model state의
+  staging 저장만 요청하므로 두 번째 상태 경로가 아니다.
 - 창은 실제 access를 기록해 lineage를 만든다. **읽지 않은 dataset은 dependency가 아니다.**
 - `account_history`가 `memory`와 **독립**인 것이 핵심 — `UC-ACCOUNT-HISTORY-001`은 state 없이
   stop-loss가 가능해야 한다고 요구한다.
@@ -691,14 +749,16 @@ class Model(ABC):                                        # 공통 부모
     def trigger(self) -> TriggerPolicy: ...
     def requirements(self) -> tuple[DataRequirement, ...]: ...
     def tables(self) -> tuple[TableSpec, ...]: ...       # 기록할 것을 미리 선언
+    def save_payload(self, target: BinaryIO) -> None: ... # 기본 구현은 no-op
+    def load_payload(self, source: BinaryIO) -> None: ... # payload가 있을 때만 호출
 
 class DataModel(Model):
-    def compute(self, window: ModelWindow) -> Rows: ...
+    def compute(self, context: DataModelContext) -> Rows: ...
 ```
 
 | | 공유 | DataModel | StrategyModel |
 |---|---|---|---|
-| `trigger()` · `requirements()` · `memory` · `recorder` | ✅ | | |
+| `trigger()` · `requirements()` · `memory` · payload · `recorder` · checkpoint | ✅ | | |
 | **execution 통과** | | **✗ 거치지 않는다** | **✅ 반드시 거친다** |
 | 출력 | | 값 (rows) | 배분 (`PortfolioIntent`) |
 | account 접근 | | ✗ | ✅ |
@@ -707,9 +767,9 @@ class DataModel(Model):
 **판정 기준은 execution 통과 여부다.** 아래 세 행은 그 결과다 — 배분은 체결될 수 있으므로 계좌가 필요하고,
 값은 체결될 것이 없으므로 계좌가 없다(PRD §2.3). **계좌 접근으로 두 역할을 가르면 틀린다.**
 
-**공유 항목의 해석 코드는 하나다.** `TriggerPolicy → 시점 목록` 변환과 memory 정규화·스냅샷은 각각 한
-군데에만 존재한다. 두 종류가 같은 선언을 하되 그것을 해석하는 코드를 두 벌 두면, 새 trigger를 추가할 때
-한쪽만 고치는 사고가 난다. StrategyModel 고유 부분은 §5.1에 있다.
+**공유 항목의 해석 코드는 하나다.** `TriggerPolicy → 시점 목록` 변환과 state 저장·복원은 각각 한 군데에만
+존재한다. 두 종류가 같은 선언을 하되 그것을 해석하는 코드를 두 벌 두면, 새 trigger나 payload 규칙을 추가할
+때 한쪽만 고치는 사고가 난다. StrategyModel 고유 부분은 §5.1에 있다.
 
 #### 왜 DataModel에도 recorder가 있나
 
@@ -725,8 +785,8 @@ class DataModel(Model):
 
 - **recorder는 출력이 아니다.** `compute()`가 반환한 `Rows`만 등록된 dataset이 되고, 기록은 별도 table로
   간다(§9.1). 둘을 섞으면 소비자가 진단 행까지 데이터로 읽는다.
-- **memory와 다르다.** memory는 다음 계산으로 이어지는 상태이고 recorder는 되읽을 수 없다. 그래서
-  recorder는 결과를 바꾸지 못하고, path-dependent 표시의 대상도 아니다.
+- **Model state와 다르다.** state는 다음 계산으로 이어지고 recorder는 되읽을 수 없다. 그래서 recorder는
+  결과를 바꾸거나 checkpoint를 복원할 수 없다.
 
 #### DataModel이 Data layer에 있는 이유
 
@@ -739,18 +799,39 @@ class DataModel(Model):
 - **없어도 된다.** StrategyModel이 같은 계산을 직접 수행해도 된다(PRD §2.3). DataModel은 공유와 절약을
   위한 선택이다.
 
+#### `materialize()` — DataModel을 dataset으로 만든다
+
+`compute()`는 한 trigger 시점의 값을 계산하고, `materialize(start, end)`는 기간 안의 trigger를 순회해
+`compute()` 결과를 검증·저장하고 registered dataset으로 publish하는 operation이다.
+
+```text
+trigger 시점 계산
+  → 첫 trigger 전에 initial committed Model state 복원
+  → PIT ModelWindow 구성
+  → DataModel.compute(context)
+       └── 필요하면 context.checkpoint()로 working state 저장
+  → Rows와 새 candidate Model state 검증
+  → 다음 trigger로 진행
+  → 완료된 dataset과 state snapshot들을 함께 publish
+```
+
+materialize는 checkpoint, recorder, execution의 다른 이름이 아니다. CNN 사례에서는 학습과 daily inference로
+만든 `(time, instrument, score)`를 한 dataset으로 만들기 때문에 StrategyModel이 weight를 읽거나 CNN을 다시
+학습하지 않고 score만 재사용할 수 있다. 각 trigger에는 그 시점의 PIT window만 주고 package가 `available_at`을
+붙인다.
+
 #### warm-up이 없다
 
 데이터가 부족하면 그 시점 행을 만들지 않으면 된다. StrategyModel과 달리 "판단하지 않았음"을 기록할 이벤트
 자체가 없고, 부족한 coverage는 그 결과를 읽는 쪽의 `CoverageRequirement`가 잡는다.
 
-#### memory를 쓰면 순차 생성이 된다
+#### Model state를 쓰면 순차 생성이 된다
 
-memory를 쓰는 DataModel은 **trigger 순서대로 호출되어야** 같은 값이 나온다. 따라서 병렬 계산과 부분
+Model state를 쓰는 DataModel은 **trigger 순서대로 호출되어야** 같은 값이 나온다. 따라서 병렬 계산과 부분
 재생성이 불가능해지고, **그 사실이 출력에 남아야 한다.** 남지 않으면 나중에 구간만 다시 만들려는 시도가
 조용히 다른 값을 만든다.
 
-memory를 쓰지 않으면 이 제약이 없다. 순서 무관이고 병렬 가능하다.
+Model state를 쓰지 않으면 이 제약이 없다. 순서 무관이고 병렬 가능하다.
 
 #### 성능 한계와 그 대응
 
@@ -819,10 +900,10 @@ class StrategyModel(Model):
 - **왜 Clock 자체를 주지 않나**: Clock을 주면 시간을 진행시킬 수 있다. §2.1의 IoC가 무너진다.
 - 미래 session을 어디까지 노출할지는 **§15-1 열린 결정**이다.
 
-### 5.1.1 Memory — 슬롯 하나, strict JSON
+### 5.1.1 Model state — JSON memory와 optional payload
 
-> **두 종류가 공유한다.** 이 절의 규칙은 StrategyModel과 DataModel에 똑같이 적용되며,
-> `normalize_memory`는 한 곳에만 존재한다.
+> **두 종류가 공유한다.** 이 절의 규칙은 StrategyModel과 DataModel에 똑같이 적용되며, state를 저장·복원하는
+> invocation 코드는 한 곳에만 존재한다.
 
 ```python
 ModelMemory: TypeAlias = (
@@ -830,31 +911,41 @@ ModelMemory: TypeAlias = (
 )
 ```
 
-**결정.** Model이 이어갈 수 있는 상태는 **`self.memory` 하나**다. `__init__` 이후에는 그 밖의 어떤
-attribute도 쓸 수 없다(`__setattr__` 가드).
+Model의 committed state는 논리적으로 하나이고 두 부분을 가질 수 있다.
 
-- **왜 슬롯 하나인가**: package가 내용을 해석하지 않으면서 durable·portable하려면 값의 **범위**가 정해져야
-  한다. `self.losses`, `self.cooldown`처럼 이름이 자유롭게 늘어나면 무엇을 저장하고 무엇을 다음 run에
-  넘길지 결정할 수 없다.
-- **왜 strict JSON인가**: numpy array나 DataFrame을 담을 수 있으면 "portable"이 거짓이 된다.
-  비유한 수치와 문자열 아닌 key도 거부한다.
-- **왜 `__init__`은 예외인가**: 전략 파라미터(`n`, `threshold`)는 **불변 config**다. 생성 후 변하지 않으므로
-  memory가 아니다.
-
-**Flow가 판단 직후 스냅샷한다.**
-
-```python
-snapshot = normalize_memory(model.memory)   # 검증 + detached deep copy
+```text
+Model state
+├── memory    strict JSON
+└── payload   optional private state
 ```
 
-- **왜 할당 시점이 아니라 스냅샷 시점인가**: `self.memory["cooldown"] = 5`는 in-place 변경이라
-  `__setattr__`을 거치지 않는다. 확실히 잡히는 유일한 지점은 Flow의 스냅샷이다.
-- **왜 detached copy인가**: 같은 dict를 계속 변경하면 모든 스냅샷이 같은 객체를 가리켜 **이력 전체가
-  마지막 값 하나로 붕괴한다.** normalize의 round-trip이 detach를 증명한다.
-- **왜 `StrategyStateUpdate` 같은 별도 타입이 없는가**: 매 판단마다 현재 값을 스냅샷하므로 memory를 건드리지
-  않으면 이전 값이 그대로 남는다. "갱신 안 함"이 저절로 표현된다.
-- 스냅샷은 fill 발생과 무관하게 항상 일어난다 → `UC-STATE-001`
-- `memory`가 `None`이 아니면 그 result는 **path-dependent**로 표시된다 → PRD §5.7
+- **memory**: 진행 위치, 최근 시점, 작은 계수처럼 구조적이고 사람이 검사할 수 있는 상태다.
+  `normalize_memory`가 비유한 수치와 문자열 아닌 key를 거부하고 detached deep copy를 만든다.
+- **payload**: 신경망 weight처럼 JSON으로 표현하기 부적합한 Model 고유 상태다. Model은 `save_payload()`와
+  `load_payload()`로 저장·복원하고 framework는 내용을 해석하지 않는다. payload가 없는 Model의 기본 hook은
+  no-op이다.
+- **state reference**: memory와 optional payload 전체를 가리킨다. payload의 로컬 파일 경로나 storage object
+  key를 Model memory에 노출하지 않는다.
+
+`self.network` 같은 runtime object는 허용한다. 다만 다음 invocation의 결과에 영향을 주는 mutable attribute는
+memory 또는 `save_payload()`가 만든 snapshot에 반드시 포함되어야 한다. 포함되지 않은 `self.losses`,
+`self.counter`를 숨은 durable state처럼 이어가는 것은 금지한다. Model을 새로 만들고 committed state를 복원해도
+같은 결과가 나와야 한다. 전략 파라미터(`n`, `threshold`)는 immutable configuration이므로 state가 아니다.
+
+**Model invocation이 성공하면 framework가 state를 스냅샷한다.**
+
+```python
+memory_snapshot = normalize_memory(model.memory)
+model.save_payload(payload_target)       # default no-op
+state_ref = state_store.commit(memory_snapshot, payload_target)
+```
+
+- detached memory와 저장된 payload는 이후 runtime object 변경에 따라 바뀌지 않는다.
+- `StrategyStateUpdate` 같은 별도 반환 타입은 없다. Model이 memory나 payload를 바꾸지 않으면 이전 state가
+  그대로 유지된다.
+- 스냅샷은 fill 발생과 무관하게 일어난다 → `UC-STATE-001`
+- result는 `model_state_ref`와 `actual_state_ref`를 분리한다. DataModel의 순차 계산을 Account 경로 의존성과
+  같은 boolean으로 표시하지 않는다 → PRD §5.1, §5.7
 
 #### 증분 계산 — 창 계약을 바꾸지 않아도 된다
 
@@ -876,16 +967,31 @@ memory = {"last_window_start": "2020-01-02", "coef": [...]}
 - 창 계약을 바꾸지 않으므로 **증분을 쓰지 않는 Model에는 아무 영향이 없다.**
 - 대가는 순차 생성이다(§4.4).
 
-#### memory에 담기 큰 값
+#### Working checkpoint — 같은 invocation의 staging state
 
-strict JSON에 담기 어려운 파라미터(신경망 가중치 등)는 **로컬에 dump하고 경로만 memory에 둔다.**
+긴 계산 중 Model이 `context.checkpoint()`를 호출하면 framework는 그 시점의 normalized memory와
+`save_payload()` 결과를 working state로 저장한다.
 
-- 그 파일은 **private state이지 공개 결과가 아니므로** PRD §12.5의 "pickle을 portable artifact로 주장"에
-  해당하지 않는다.
-- 실제로 잘 맞아떨어진다. 증분 갱신이 정확히 되는 계산(최소제곱, 공분산)은 파라미터가 작아 memory에 들어가고,
-  파라미터가 큰 모델은 애초에 증분 제거가 되지 않아 증분 대상이 아니다.
+```text
+committed state j
+    │
+    ├── 계산 중 → working checkpoint
+    │                 ├── 실패: committed state j 유지
+    │                 └── 같은 frozen operation만 load 후 재개
+    │
+    └── 계산 + output validation 성공 → committed state j+1
+```
 
-**UC**: `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001`, `UC-ALPHA-PATH-001`
+- working checkpoint는 inference나 downstream input으로 resolve되지 않는다.
+- Model implementation, configuration, dataset binding/cutoff, training window, seed policy,
+  operation/subperiod identity가 모두 같을 때만 복원한다.
+- CNN 학습 중에는 weight, optimizer, RNG, 필요한 이전 weight를 payload에 넣는다. 완료된 inference state에는
+  해당 Model이 추론에 필요하다고 정의한 값만 남긴다.
+- 이것은 한 Model invocation의 재개다. event cursor, fill, Account commit을 포함한 simulation run recovery는
+  §8.2와 PRD `UC-RECOVERY-001`의 future 범위다.
+
+**UC**: `UC-STATE-001`, `UC-STATE-002`, `UC-MODEL-003`, `UC-ALPHA-ADAPTIVE-001`,
+`UC-ALPHA-PATH-001`
 
 ### 5.2 StrategyModel 내부의 3단 — 강제하지 않는다
 
@@ -950,7 +1056,23 @@ StrategyModel이 자기 판단 안에서 다른 run을 실행하지 않는다. �
 **PIT도 바깥 쪽이 유리하다.** 후보 성과를 읽는 창이 `t`까지만 보므로 미래 성과를 볼 수 없다. 중첩에서는
 그 경계를 손으로 지켜야 한다.
 
+> **Reference — 같은 문제를 nautilus는 중첩 없이 푼다**
+>
+> qlib의 `NestedExecutor`는 핵심 기능이다. 일별 전략이 결정하면 그 안에서 분별 전략이 쪼갠다 —
+> `inner_executor`, `inner_strategy`를 들고 자기 안에서 시간을 진행시킨다.
+>
+> nautilus는 중첩을 쓰지 않는다. 주문 분할을 `ExecAlgorithm`이라는 **별도 컴포넌트**로 처리한다. 하나의
+> clock 안에서 컴포넌트가 하나 늘 뿐이다.
+>
+> **우리가 주문 분할을 지원하게 되면 nautilus 방식이 이 구조에 맞는다.** §13.2의 partial fill이 열릴 때
+> 이 관찰이 딸려 나와야 한다 — 그때 `NestedExecutor` 모양으로 가면 §2.1이 무너진다.
+
 ### 5.3 `portfolio/` — 순수 계산 leaf
+
+> **주의 — 이 이름은 nautilus와 반대 뜻이다.** nautilus의 `portfolio/`는 캐시에서 읽어 노출·마진·미실현
+> 손익을 집계하는 **State 쪽** 컴포넌트이고, 우리 `account/` + `valuation/`이 거기 해당한다. 우리
+> `portfolio/`는 값을 배분으로 바꾸는 **Decision 쪽** 순수 함수이며, nautilus에서 여기 대응하는 것은
+> 전략 안에 있다. 두 코드베이스를 오가면 반드시 걸리는 지점이다.
 
 값을 weight로 바꾸는 함수들이다. **전부 순수 함수**이고 같은 import 규칙을 받는다.
 
@@ -1098,7 +1220,7 @@ class PortfolioIntent(BaseModel):
     budget: BudgetSemantics          # 선언된 현금 범위 + direction
     source_refs: tuple[ArtifactRef, ...]
     account_version_seen: int
-    memory_ref: ArtifactRef | None   # 있으면 이 result는 path-dependent
+    model_state_ref: ModelStateRef | None  # 소비한 committed Model state
 ```
 
 - `PortfolioTarget`은 weight **또는** quantity 중 정확히 하나. 둘 다 채우거나 비우면 validation error.
@@ -1142,6 +1264,14 @@ tz-aware 시각 · 유일 instrument · 유한 값 · lineage · profile directi
 > 것이라 §2.4가 금지하기 때문이다. 수량 변환 때문에 뒤늦게 생긴 위반은 fill 진단에 남고 monitoring이
 > 잡는다(`UC-EXEC-003`).
 
+> **Reference — nautilus는 `RiskEngine`을 따로 둔다**
+>
+> 주문 제출 직전에 한 번 더 검사하는 층이다. 우리에게는 검증이 이미 셋 있다 — preflight(§12), intent
+> 생성 시(§5.4), commit 시(§7.2). 네 번째를 두면 중복이고, 무엇보다 **제약 평가는 경제적 판단이라 판단
+> 시점에 있어야 한다.** 그래서 `risk/` 층이 없다.
+
+
+
 ### 6.1 OrderPlanner — execution time의 책임
 
 ```python
@@ -1158,6 +1288,22 @@ class OrderPlanner(Protocol):
 - 각 `OrderRequest`: instrument, side, quantity, 출처 intent/target, account version, 변환 가격,
   rounding/clipping/skip 진단.
 - **UC**: `UC-EXEC-001`, `UC-COST-003`, `UC-CONSTRAINT-ADJUST-001`, `UC-TRADABILITY-002`, `UC-SCALE-001`
+
+> **Reference — 이 분리는 우리만의 것이 아니다. 강제되는 것이 다르다**
+>
+> qlib에도 있다. `WeightStrategyBase`가 목표 비중을 만들고 `order_generator`가 수량으로 바꾼다. Zipline의
+> `order_target_percent`도 같은 모양이다. **다만 qlib에서는 선택이다** — 어느 base class를 상속하느냐로
+> 갈리고, 나뉘더라도 전략 안에서 일어나며 그러려면 전략이 `trade_exchange`를 손에 들고 있어야 한다.
+>
+> 우리는 우회할 방법이 없다. `decide()`가 반환할 수 있는 것은 `PortfolioIntent` 하나이고, 전략이
+> Exchange를 볼 수 없으므로(§2.2) 변환할 재료가 없다. **§2.2의 결과이지 독립된 설계가 아니다.**
+>
+> **그리고 갈라놓은 대상은 비중이냐 수량이냐가 아니다.** 목표는 수량으로도 선언할 수 있다(§5.4).
+> 갈라놓은 것은 **델타를 언제 계산하는가**다 — 목표는 체결 시점의 포트폴리오에 대한 진술인데, 판단
+> 시점의 계좌는 이전 가격으로 평가되어 있다.
+>
+> nautilus는 분리하지 않는다. 판단과 제출 사이에 간격이 없고, 단위가 목표 포트폴리오가 아니라 **주문**이라
+> 100주에서 150주로 갈 때 전략이 50주 매수를 직접 만든다. 델타라는 파생값 자체가 없다.
 
 #### 두 종류의 실패는 급이 다르다
 
@@ -1579,6 +1725,20 @@ $$\frac{w \cdot NAV}{P} \times P = w \cdot NAV$$
   구조에 주는 부담이 크다.
 - **실제 주문 형태가 필요하면 기록으로 남긴다**(§9.1). 판단 시점에 아는 가격으로 수량을 계산해 진단
   table에 적고, 체결은 위 경로를 그대로 따른다. **기록된 수량은 체결이 아니다.**
+
+> **Reference — qlib은 반대 선택을 했다**
+>
+> 기본 order generator가 체결일 **이전** 가격으로 수량을 고정한다(`OrderGenWOInteract` — *"will only use
+> the price before the trade date"*). 다른 하나(`OrderGenWInteract`)는 체결일 가격을 쓴다. 둘을 갈라 둔
+> 것이다.
+>
+> ```text
+> qlib 기본값   앞선 가격에 수량을 고정한다     실제 운용을 재현한다
+> vqapr         체결 시점까지 수량을 미룬다     의도가 정확히 구현된다
+> ```
+>
+> 둘 다 defensible하며 **무엇을 재현하려는지가 다르다.** 다만 qlib이 이것을 위해 generator를 둘 만들어
+> 뒀다는 사실은 **그 구분이 이색적이지 않다는 증거**다. 나중에 이 가정을 열어야 한다면 이 선례를 먼저 본다.
 | realism | `hypothetical` | `simulation` |
 
 - 이름이 realism을 주장하지 않는다. **구현된 rule과 명시한 limitation만** 주장한다.
@@ -1706,10 +1866,16 @@ class SimulationFlow:
 ```
 
 책임: run 동결과 preflight · schedule 조립 · 이벤트 dispatch · requirement resolution과 View 생성 ·
-StrategyModel 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · memory 스냅샷 · evidence · finalize.
+StrategyModel 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · Model state 스냅샷 · evidence · finalize.
 
 - **Academic Flow와 KRX Flow를 따로 만들지 않는다.** Exchange, AccountMode, calendar, policy를 주입한다.
 - Clock은 StrategyModel나 Exchange의 의미를 모른다. callback을 부를 뿐이다.
+
+> **Reference — nautilus는 배달과 조립을 나눈다**
+>
+> `MessageBus`가 배달하고 `NautilusKernel`이 조립한다. 우리 `flow/`는 둘 다 하되 **경제 규칙을 소유하지
+> 않는다**는 제약이 붙는다(§1.2). flow가 경제 규칙을 가지면 profile마다 flow가 갈리고 §2.5의
+> *"같은 lifecycle에 다른 정책"*이 거짓이 된다. 나누는 것보다 **소유하지 않는 것**이 그 보장의 핵심이다.
 
 ### 8.2 State machine
 
@@ -1724,7 +1890,9 @@ commit 전 실패        → FAILED_WITHOUT_MUTATION
 commit 후 발행 실패   → FAILED_AFTER_COMMIT(account_version 기록)
 ```
 
-- 중단된 run의 재개는 **현재 범위 밖**(`UC-RECOVERY-001`). 실패하면 처음부터 다시 실행한다.
+- event cursor, decision, fill, Account commit까지 포함한 중단된 simulation run의 재개는 **현재 범위 밖**
+  (`UC-RECOVERY-001`). 실패하면 처음부터 다시 실행한다. 한 Model invocation 안의 `context.checkpoint()` 재개는
+  이 state machine을 복원하지 않는 별도 current capability다(§5.1.1).
 
 ### 8.3 Failure taxonomy
 
@@ -1742,6 +1910,15 @@ commit 후 발행 실패   → FAILED_AFTER_COMMIT(account_version 기록)
 ## 9. Evidence
 
 Evidence는 authority가 아니라 **영수증**이다.
+
+> **Reference — 다른 곳에서는 기록이 층이 아니다**
+>
+> nautilus는 `cache/`와 `persistence/`에 흩어져 있고 qlib은 `workflow/recorder`에 있다. 둘 다 기록이
+> **부산물**이기 때문이다.
+>
+> 우리에게 기록은 **다른 run이 소비하는 입력**이다(§2.5). §5.2의 체인(A → B → C)이 성립하려면 기록이
+> 층이어야 한다. 같은 이유로 `workflow/` 층이 **없다** — 실험 관리를 패키지가 소유하지 않는다. run은
+> 값이고 catalog는 evidence다.
 
 ```text
 data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → Exchange rules + inputs
@@ -1762,6 +1939,10 @@ class Recorder(Protocol):
 
 Model은 run 시작 전에 고정된 `TableSpec`에 따라 diagnostic row 또는 batch를 write-only recorder에 추가할 수
 있다. schema는 portable scalar type으로 제한한다. **두 종류가 공유하며** 경로는 `self.recorder`다(§4.4).
+
+epoch, loss, learning rate, checkpoint/state identity는 기록할 수 있다. model weight, optimizer state, RNG처럼
+재개에 필요한 private payload는 recorder에 넣지 않고 `save_payload()`로 working state에 저장한다. recorder는
+읽을 수 없으므로 `load_payload()`의 source가 아니며, diagnostic row만으로 checkpoint 완료를 주장하지 않는다.
 
 한 invocation에서 기록한 row는 그 invocation의 결과 검증이 성공한 뒤에만 정상 evidence로 확정된다.
 artifact backend는 row 수 또는 buffer byte 한도에 도달하면 immutable chunk로 flush하고, finalize에서 chunk
@@ -1895,9 +2076,9 @@ src/vqapr/
 ├── runtime/                # clock, events(priority), calendar
 ├── data/                   # source/dataset 정의, requirements, store(port), window
 ├── research/
-│   ├── model.py            # Model 공통 계약 + DataModel
+│   ├── model.py            # Model 공통 계약 + payload hook + DataModel
 │   ├── schedule.py         # TriggerPolicy → 시점 목록 (두 종류가 공유)
-│   └── materialize.py      # 시점마다 창을 만들어 compute 호출
+│   └── materialize.py      # 창 구성 + compute + checkpoint/state/result 확정
 ├── strategy/               # StrategyModel protocol, warmup, context
 ├── portfolio/
 │   ├── weighting.py        # 순수 leaf — signal_weight / equal_weight / proportional_weight
@@ -2679,6 +2860,57 @@ ETF 비중 6개 × 알파 반영배수 6개 × 앙상블 방식 6개. **각각 �
   찾아주지 않으므로(§8.2) 그 근사와 한계는 그 Model이 밝힌다.
 - 240 run은 §2.2의 직접적 비용이다. 대신 각 수익률이 어떤 체결·비용·계좌 상태에서 나왔는지가 남는다.
 
+### 11.8 Rolling CNN DataModel — payload checkpoint와 OOS score
+
+이 walkthrough는 `UC-MODEL-003`과 `UC-STATE-002`가 별도 ML runtime 없이 공통 Model 계약으로 흐르는지
+검증한다. residual dataset은 이미 PIT-safe하게 materialize되어 있다고 둔다.
+
+```text
+Residual DataModel result
+    ↓
+CNN Score DataModel.materialize()
+    ↓ (time, instrument, score, model_state_ref)
+Pair-Trading StrategyModel
+    ↓
+PortfolioIntent → execution spine
+```
+
+첫 예측일 `t`에서 CNN은 `t-1`까지의 직전 1,000거래일만 학습에 사용한다. 학습을 시작할 때 이전 subperiod의
+weight를 불러오지 않고 seed와 frozen configuration에서 새 model을 만든다.
+
+```text
+memory                         private payload
+phase = "training"             model weights
+subperiod = j                  optimizer state
+epoch = 37                     RNG state
+trained_through = t-1          friction 학습에 필요한 previous_weights
+```
+
+각 epoch가 끝나면 DataModel이 `context.checkpoint()`를 호출한다. epoch 37 뒤 process가 중단되면 같은 frozen
+operation은 `load_payload()` 후 epoch 38부터 계속한다. training window나 config가 바뀌면 그 checkpoint를
+사용하지 않는다. 이 동안 이전 committed state는 유지되고 epoch 37 모델은 inference에 노출되지 않는다.
+
+학습과 validation이 끝나면 payload를 다음 125거래일에 사용할 completed CNN weight로 저장하고 committed
+state로 바꾼다. materializer는 각 일자의 최신 PIT residual history와 그 committed state로 score를 계산한다.
+125일 뒤에는 이전 weight를 warm start하지 않고 다음 1,000일 window에서 다시 새 모델을 학습한다.
+
+```text
+fresh θ0 → OOS score block 0 ┐
+fresh θ1 → OOS score block 1 ├→ materialized score dataset
+fresh θ2 → OOS score block 2 ┘
+```
+
+이어 붙이는 것은 weight가 아니라 OOS score row다. StrategyModel은 CNN payload나 checkpoint를 읽지 않고
+registered score dataset만 읽는다. epoch/loss/state identity는 recorder에 남길 수 있지만 recorder는 학습
+재개의 source가 아니다.
+
+**확인된 경계**
+
+- DataModel은 Account를 보지 않지만 committed Model state를 쓰므로 trigger 순서대로 실행된다.
+- working checkpoint 재개는 한 학습 invocation에 국한되고 simulation event/fill recovery를 켜지 않는다.
+- 이전 subperiod weight를 warm start하면 이 walkthrough의 replication이 아니라 별도 online-learning 변형이다.
+- score의 `available_at`은 Model이 선언하지 않고 materializer가 실제 input cutoff와 trigger에서 계산한다.
+
 ---
 
 ## 12. Run definition과 preflight
@@ -2693,7 +2925,7 @@ class RunDefinition(BaseModel):
     start: datetime
     end: datetime
     initial_account: AccountSnapshot
-    initial_memory: ModelMemory
+    initial_state_ref: ModelStateRef | None
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
 ```
@@ -2708,8 +2940,13 @@ class RunDefinition(BaseModel):
 - intent가 다룰 수 있는 모든 instrument에 대해 Exchange가 listing을 갖고 있음 (§6.2)
 - 모든 (instrument 종류, 방향, 실행 시점)에 **정확히 하나의** `CostRule`이 매칭됨 (§6.2)
 - initial account 불변식
-- `initial_memory`가 strict JSON (§5.1.1)
+- `initial_state_ref`가 선택한 Model implementation과 compatible하고 committed 상태임 (§5.1.1)
 - schedule 결정성
+
+`initial_state_ref=None`은 fresh Model을 뜻한다. 이전 또는 latest state를 자동 탐색하지 않는다. state가 있으면
+framework가 memory를 복원하고 payload가 있을 때 `load_payload()`를 호출한다. 초기 belief나 hyperparameter는
+mutable state가 아니라 frozen Model configuration으로 준다. DataModel materialization도 같은 initial-state
+규칙을 사용한다.
 
 체결에 대해 넷을 더 본다(§6.2). **execution이 있는 run에만 적용된다** — DataModel 연구와 signal 분석은
 체결 테이블 없이 완결된다.
@@ -2770,10 +3007,11 @@ class RunDefinition(BaseModel):
 | `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
 | `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · execution 거치지 않음 · materialize 진입점) |
+| `UC-MODEL-003` | §4.4 (`materialize`) + §5.1.1 (payload) + §11.8 (rolling CNN) |
 | `UC-FACTOR-001` | §11.1 (패턴) + §11.2 (전체 규모 검증) |
 | `UC-BUILTIN-001` | §5.3 |
 | `UC-ALPHA-BUDGET-001` | §5.3 (`cash_range`) + §5.4 (생성 시 검증) |
-| `UC-STATE-001`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (`memory` 슬롯 + Flow 스냅샷) + §12 (`initial_memory`) |
+| `UC-STATE-001`, `UC-STATE-002`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (memory + payload, working/committed) + §12 (`initial_state_ref`) |
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.2 (StrategyModel 체인 · 중첩 없음) + §5.4 + §11.4 |
 | `UC-PORTFOLIO-001`, `UC-PROFILE-001` | §2.5 + §6.3 |
 | `UC-EXEC-001`, `UC-EXEC-002` | §6.1 |
@@ -2863,6 +3101,23 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - 미결. `CoverageRequirement`를 실제로 쓰는 Model이 나온 뒤에 정한다. 그전에 축을 늘리면 쓰지 않는
   조합이 먼저 생긴다.
 
+### 15-5. live로 확장하면 층을 가른 축이 약해진다
+
+§1.2가 층을 **시간의 질문**으로 갈랐고, §2.2(전략 시야)·§2.3(Account authority)·§5.2(중첩 금지)·
+§6.1(델타를 체결 시점에)의 선택이 전부 거기서 나온다. 그런데 그 축은 **판단 시점과 체결 시점이
+다르다**는 사실에 기대고 있다.
+
+live에서는 그 간격이 사라진다.
+
+- 미래가 없으므로 **접근 제한의 근거가 약해진다.** 두 레퍼런스가 전략에게 넓게 여는 이유가 그것이다(§2.2).
+- 판단과 주문이 같은 순간이 되므로 **델타를 미룰 이유도 없어진다**(§6.1).
+
+**미결.** 후보 — 층 구조를 그대로 두고 live에서도 좁게 유지 / nautilus의 `Environment` 주입처럼 환경별로
+다르게 / live를 영구히 범위 밖.
+
+**요건이 아직 없다**(PRD §13.2). 다만 live를 열 때 이 질문이 **먼저** 답해져야 한다. 층 구조를 유지한
+채로 live 어댑터만 붙이면, 근거가 사라진 제약이 이유 없는 불편으로 남는다.
+
 ---
 
 ## 16. Acceptance checklist
@@ -2878,11 +3133,18 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] 등록 정의에 window 함수를 써도 등록이 실패하지 않는다 (막지 않기로 한 것을 막고 있지 않다)
 - [ ] `portfolio.weighting`과 `portfolio.optimize`가 `domain`(+solver) 외 아무것도 import하지 않는다
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
-- [ ] StrategyModel이 `__init__` 이후 `memory` 외의 attribute를 쓰면 실패한다
+- [ ] Model을 새로 만들고 committed state를 복원해도 같은 다음 결과가 나온다 — 영향을 주는 mutable
+  attribute가 memory나 payload 밖에 숨지 않는다
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
-- [ ] 체결이 없는 세션에도 memory 스냅샷이 남는다
+- [ ] payload를 저장한 뒤 runtime tensor를 바꿔도 과거 committed payload가 바뀌지 않는다
+- [ ] 체결이 없는 세션에도 Model state 스냅샷이 남는다
+- [ ] payload가 없는 Model은 strict JSON memory만으로 기존과 같이 동작한다
+- [ ] working checkpoint는 같은 frozen operation에서만 복원되고 inference나 downstream input으로 resolve되지 않는다
+- [ ] 새 Model 계산 실패 시 이전 committed state가 유지된다
+- [ ] rolling CNN은 subperiod마다 fresh initialization하고 OOS score만 시간축으로 연결한다
 - [ ] diagnostic recorder는 write-only이고, staging chunk만 존재하는 incomplete table을 reusable artifact로
   노출하지 않는다
+- [ ] recorder만으로 Model payload나 working checkpoint를 복원할 수 없다
 - [ ] DataModel과 StrategyModel이 같은 `self.recorder` 경로를 쓴다
 - [ ] 기록된 모든 행에 `run_id`·`producer_id`·`stage`·`event_time`·`sequence`가 붙고 Model이 그것을 쓰지 못한다
 - [ ] `TableSpec`이 예약 컬럼 이름을 선언하면 run 시작 전에 실패한다
@@ -2905,8 +3167,8 @@ StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.
 - [ ] StrategyModel이 다른 StrategyModel의 저장된 결과를 `DataRequirement`로 읽는다
 - [ ] 미래 방향 `Lookback` 타입이 존재하지 않는다
 - [ ] 계산 결과의 `available_at`을 생산자가 적을 수 없다
-- [ ] memory를 쓴 DataModel의 출력에 순차 생성 표시가 남는다
-- [ ] `TriggerPolicy` 해석과 memory 정규화 코드가 각각 한 곳에만 있다
+- [ ] Model state를 쓴 DataModel의 출력에 순차 생성 표시와 consumed `model_state_ref`가 남는다
+- [ ] `TriggerPolicy` 해석과 Model state 저장·복원 코드가 각각 한 곳에만 있다
 - [ ] 같은 membership artifact를 소비한 버킷 run들이 그 사실을 lineage로 증명한다
 - [ ] 버킷 조합 팩터와 signed 직접 실행 팩터가 zero-friction profile에서 일치한다
 - [ ] `AccountMode`의 차이가 음수 position 유효성 하나뿐이다

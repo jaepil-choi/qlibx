@@ -483,10 +483,13 @@ calendar는 별도 파일에서 오지 않는다. **사용자가 이미 등록�
 그런데 그렇게 하면 `runtime/`이 데이터를 읽어야 하는 것처럼 보인다. 그렇지 않다. **둘로 가른다.**
 
 ```text
-읽기      등록된 dataset의 distinct 날짜를 뽑는다        data 경로 (`scan.py`)
-적용      날짜 집합 + 선언된 규칙 → frozen SessionCalendar   `runtime/calendar_derivation.py` — 순수
+읽기      등록된 dataset에서 그 field의 distinct 값을 뽑는다   dataset_id + framework 이름 (§4.6)
+적용      날짜 집합 + 선언된 규칙 → frozen SessionCalendar      `runtime/calendar_derivation.py` — 순수
 ```
 
+- **읽기도 등록된 경로를 탄다.** `scan.py`가 아니다 — 그것은 등록 **전** 물리 검증에만 열리고, 유도는
+  등록 **후**의 작업이다(§4.6). 원천을 물리 경로로 지목하면 calendar가 어느 dataset에서 나왔는지가
+  선언이 아니라 파일 경로로 표현되어, 그 dataset을 다시 등록해도 따라오지 않는다.
 - **`runtime/calendar_derivation.py`는 날짜를 인자로 받는다.** `transforms/`와 `portfolio/`가 panel을
   인자로 받는 것과 같은 규칙이다 — 직접 읽으면 그 접근이 declared requirement를 거치지 않아 어느
   dataset에서 calendar가 나왔는지 lineage에 남지 않는다.
@@ -505,22 +508,29 @@ vqapr data calendar  --from price_daily               ← 규칙과 session 시�
 vqapr materialize    ...                              그 frozen calendar를 쓴다
 ```
 
-- **§3.1의 금지를 그대로 지킨다.** 아무도 선언하지 않았는데 가격 coverage로 session이 만들어지는
-  경로는 없다 — 이 명령을 사용자가 규칙을 골라 실행해야만 calendar가 생긴다.
+- **§3.1의 금지를 그대로 지킨다.** 아무도 선언하지 않았는데 Flow가 가격 coverage로 session을
+  만들어내는 경로는 없다 — 이 명령을 사용자가 규칙을 골라 실행해야만 calendar가 생긴다. §3.1의 금지는
+  **package의 추측**을 향한 것이지 user의 선언을 향한 것이 아니었다.
 - **시각은 여기서도 유도되지 않는다.** `--session-close`가 필요하며, 그 값은 이미 등록의
   `available_at` 규칙이 담고 있으므로 같은 선언을 재사용할 수 있다.
-- 선택된 규칙과 원천 dataset이 frozen input에 남아, 나중에 "이 run의 session이 어디서 왔나"를
-  감사할 수 있다.
-
-- **여전히 금지되는 것**: 아무도 선언하지 않았는데 Flow가 가격 coverage로 session을 만들어내는 것.
-  §3.1의 금지는 **package의 추측**을 향한 것이지 user의 선언을 향한 것이 아니었다.
-- **왜 이 완화가 안전한가**: 유도 규칙이 frozen input에 남아 재현되고, 어떤 dataset의 어떤 규칙에서
-  나왔는지 감사할 수 있으며, result에 limitation으로 표시된다. 조용한 추측과 정반대다.
+- **왜 이 완화가 안전한가**: 선택된 규칙과 원천 dataset이 frozen input에 남아 재현되고, 어떤
+  dataset의 어떤 규칙에서 나왔는지 감사할 수 있으며, result에 limitation으로 표시된다. 조용한 추측과
+  정반대다.
 - **UC**: `UC-CALENDAR-001`
 
 ---
 
 ## 4. Data
+
+이 층에는 **독자가 둘**이고 보는 것이 전혀 다르다.
+
+```text
+등록하는 쪽   경로 · 파일 형식 · query · 물리 컬럼 이름 · 넓은 표인지 폴더인지    전부 다룬다
+소비하는 쪽   dataset_id · framework field 이름 · lookback · coverage           그것뿐
+```
+
+§4.1~§4.5는 전자를 정하고, **둘 사이의 경계는 §4.6이 정한다.** 아래를 읽으며 *"이건 누가 보는
+것인가"*를 계속 물어야 한다 — 등록 쪽 개념이 소비자에게 새는 것이 이 층에서 가장 흔한 설계 실수다.
 
 ### 4.1 Registration — 두 층, 그리고 최소한만
 
@@ -718,6 +728,8 @@ DataRequirement(dataset_id="fundamentals", fields=("bps",), lookback=RowsLookbac
 ```
 
 **소비자 코드가 배치에 따라 달라지지 않는다.** 재무를 폴더에서 넓은 표로 바꿔도 이 선언은 그대로다.
+
+이것은 더 넓은 규칙의 한 사례다 — 소비자는 배치뿐 아니라 경로·형식·query도 보지 못한다(§4.6).
 
 #### `RowsLookback`은 (instrument × field)별로 센다
 
@@ -941,6 +953,74 @@ $$available\_at = \max\big(\text{trigger 시각},\ \max(\text{창 안 } availabl
 - **금지 규칙을 쓰지 않아도 된다.** "전체 패널을 보지 마세요"라고 적을 필요가 없다 — 그렇게 하면 결과가
   쓸모없어지므로 아무도 하지 않는다.
 - 진짜로 마지막 날에나 알 수 있는 값(전 기간 통계 등)은 이 규칙이 **정확히 맞다.** 예외 처리가 필요 없다.
+
+### 4.6 소비자가 아는 것과 모르는 것
+
+**결정.** 등록 이후 모든 데이터 접근은 **config로만** 표현된다. 소비자는 그 값이 물리적으로 어디서
+왔는지도, 어떤 query를 거쳤는지도 **알 수 없다.**
+
+소비자의 어휘는 이것이 전부다.
+
+```text
+dataset_id      무엇을
+fields          프레임워크 이름으로 (등록이 부여한 안정적인 손잡이)
+lookback        얼마나 과거까지
+coverage        최소 몇 개가 있어야 하는가
+```
+
+**여기 없는 것**: 경로 · 파일 형식 · 물리 컬럼 이름 · SQL · 넓은 표인지 폴더인지 · 원본인지 계산
+결과인지 · 어느 store backend인지.
+
+#### 왜 이 정도로 막나
+
+- **배치를 바꿔도 소비자가 안 변한다.** 재무를 폴더에서 넓은 표로 옮겨도, csv를 parquet로 바꿔도,
+  store를 교체해도 `DataRequirement` 선언이 그대로다(`UC-DATA-003`).
+- **계산 결과와 원본이 구분되지 않는다.** DataModel이 만든 dataset을 읽는 것이 "그냥 데이터를 읽는
+  것"이 되려면 소비자 쪽에 *"원본이냐 파생이냐"* 분기가 없어야 한다(§4.2).
+- **query가 보이면 그것을 재현하려는 코드가 생긴다.** 소비자가 등록 query를 알면 그 query를 흉내
+  내거나 우회하는 경로가 만들어지고, 그 순간 PIT 처리가 두 곳이 된다.
+
+#### 감사 가능한 것과 보이는 것은 다르다
+
+```text
+frozen input   경로 · format · query · 유도 규칙 · store 선택   전부 기록된다.  감사 가능
+소비자 API     dataset_id · fields · lookback                   그것뿐.        불투명
+```
+
+기록하지 않는다는 뜻이 아니다. **기록은 전부 하되 소비자에게 주지 않는다.** 그래야 "이 결과가 어느
+파일의 어느 query에서 나왔나"를 나중에 답할 수 있으면서도, 그 답이 소비자 코드의 입력이 되지 않는다.
+
+#### 그래서 `query`를 바꾸면 다른 dataset이다
+
+등록의 `query`와 `path`는 frozen input의 일부이므로 **run identity에 들어간다.** 같은 `dataset_id`로
+등록을 조용히 고치면 이전 결과와 비교 가능하지 않은 데이터가 같은 이름으로 흐른다.
+
+- 소비자가 query를 볼 수 없다는 것이 *"바꿔도 티가 안 난다"*를 뜻하지 않는다. 오히려 **소비자가
+  알아챌 방법이 없으므로** identity로 잡아야 한다.
+- §4.1이 등록 query의 point-in-time 안전성을 판정하지 않기로 한 것과 짝을 이룬다 — 판정하지 않는
+  대신 **무엇을 썼는지는 남긴다.**
+- 실질적으로 이것은 새 dataset이다. 이전 결과와 나란히 두려면 다른 `dataset_id`로 등록한다.
+
+#### 등록 전과 후
+
+`SourceSpec`을 직접 여는 것은 **등록 검증 때뿐이다**(§4.1의 `scan.py`). 그때는 아직 dataset이 없으므로
+물리 컬럼을 이름으로 확인할 수밖에 없다.
+
+```text
+등록 전   scan(SourceSpec)          물리 컬럼 이름으로. 검증만
+등록 후   dataset_id + framework 이름   물리를 다시 볼 일이 없다
+```
+
+calendar 유도(§3.6)도 등록 **후**의 작업이므로 raw source가 아니라 등록된 dataset을 읽는다.
+
+#### 창 없는 조회는 Model에게 열려 있지 않다
+
+calendar 유도는 lookback 없이 dataset 전체의 distinct 날짜를 읽는다. 이것은 **창 조회가 아니므로**
+그 자체로 unbounded read다.
+
+- **CLI/유도 시점의 operation이지 소비자 API가 아니다.** Model이 받는 것은 `ModelWindow` 하나이고
+  거기에는 이 경로가 없다 — 규칙이 아니라 **경로의 부재**로 막힌다(§10.1).
+- 그래서 `decide()`나 `compute()` 안에서 "전체를 한 번 읽어보기"가 불가능하다.
 
 ---
 

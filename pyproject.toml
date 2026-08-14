@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-vqapr = "vqapr:main"
+vqapr = "vqapr.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
@@ -25,66 +25,16 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "import-linter>=2.13,<3",
     "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
 ]
 
-[tool.importlinter]
-root_package = "vqapr"
-include_external_packages = true
-
-[[tool.importlinter.contracts]]
-name = "domain does not depend on storage or concrete services"
-type = "forbidden"
-source_modules = ["vqapr.domain"]
-forbidden_modules = [
-    "vqapr.data",
-    "vqapr.exchange",
-    "vqapr.project",
-    "cvxpy",
-    "duckdb",
-    "pandas",
-    "pyarrow",
-    "yaml",
-]
-
-[[tool.importlinter.contracts]]
-name = "portfolio calculation is a pure leaf"
-type = "forbidden"
-source_modules = ["vqapr.portfolio.weighting", "vqapr.portfolio.optimize"]
-forbidden_modules = [
-    "vqapr.data",
-    "vqapr.account",
-    "vqapr.exchange",
-    "vqapr.runtime",
-    "vqapr.flow",
-    "vqapr.strategy",
-]
-
-[[tool.importlinter.contracts]]
-name = "research depends only on data and domain"
-type = "forbidden"
-source_modules = ["vqapr.research"]
-forbidden_modules = [
-    "vqapr.account",
-    "vqapr.exchange",
-    "vqapr.orders",
-    "vqapr.flow",
-    "vqapr.strategy",
-]
-
-[[tool.importlinter.contracts]]
-name = "strategy does not depend on execution state owners"
-type = "forbidden"
-source_modules = ["vqapr.strategy"]
-forbidden_modules = ["vqapr.account", "vqapr.exchange"]
-
-[[tool.importlinter.contracts]]
-name = "account does not depend on strategy or exchange implementations"
-type = "forbidden"
-source_modules = ["vqapr.account"]
-forbidden_modules = ["vqapr.strategy", "vqapr.exchange"]
+# Layer boundaries are not enforced by an import-linter contract. See
+# docs/vqapr-architecture.md §10.1 — module layout is non-normative (PRD §0.1), so a tool
+# contract must not drive type placement. Every boundary that matters is enforced by the
+# absence of a path (no account() on DataModelContext, no store handle outside flow/views,
+# pure functions that take their inputs as arguments), and a misplaced type surfaces as a
+# circular import, which Python reports without a tool.
 
 [tool.pytest.ini_options]
 minversion = "9.1"
@@ -94,6 +44,8 @@ strict_markers = true
 markers = [
     "real_data: requires an explicitly provisioned and versioned external dataset",
     "concurrency: exercises operating-system process, thread, or lock behavior",
+    "uc: the PRD use-case ID this test protects, e.g. uc('UC-EXEC-001')",
+    "slow: large-scale scenario such as UC-SCALE-001",
 ]
 
 [tool.ruff]

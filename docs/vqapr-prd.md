@@ -347,11 +347,16 @@ contract를 따르는 minimal working template, validation command, stage-specif
 vqapr가 reference component를 제공할 수는 있지만 **project-owned proprietary alpha를 package built-in에
 가두지 않는다.**
 
-#### Built-in weighting 함수는 순수하다
+#### Built-in 계산 helper는 순수하다
 
-연구 결과를 portfolio weight로 바꾸는 계산(균등 배분, 크기 비례 배분, 예산 재조정 등)은 자주 반복되므로
-built-in으로 제공한다. 이 built-in에는 다음 제약이 붙는다. 이것이 없으면 built-in은 편의 함수가 아니라
-**보이지 않는 곳에서 경제적 판단을 내리는 두 번째 StrategyModel**이 된다.
+두 종류가 자주 반복되므로 built-in으로 제공한다.
+
+- **signal transform** — 횡단면 순위·표준화·winsorize·분위 버킷, 노출 중립화, 창 안의 시계열 연산,
+  구성종목 데이터로부터의 노출 매핑
+- **weighting** — 균등 배분, 크기 비례 배분, 예산 재조정
+
+둘 다에 다음 제약이 붙는다. 이것이 없으면 built-in은 편의 함수가 아니라 **보이지 않는 곳에서 경제적
+판단을 내리는 두 번째 StrategyModel**이 된다.
 
 - registered data, account state, clock, execution profile에 **접근하지 않는다.** 필요한 값은 전부 인자로
   받는다. 크기 결정에 외부 panel(시가총액 등)이 필요하면 그 panel을 호출자가 넘긴다. 그래야 그 data가
@@ -965,6 +970,11 @@ statistical factor-return estimate는 regression specification과 input data를 
 portfolio의 return을 담은 materialized data는 **그것을 산출한 execution과 actual state를 dependency로** 갖는다.
 산출 경로 없이 portfolio return 시계열을 등록하지 않는다.
 
+> **`constraint-adjustment result`의 "adjustment"는 사후 조정을 뜻하지 않는다.** 이 category가 담는 것은
+> §7.1의 *"constraint 반영 구성"* — 제약을 반영해 만든 결과와 그 과정의 증거다. 제약 없이 만든 값을
+> 나중에 자르고 남은 것을 재분배하는 절차가 아니며, 그런 절차는 수렴 보장이 없고 **잘릴 것을 미리 알았다면
+> 다르게 구성했을 기회**를 없앤다. 이름은 안정 식별자(`UC-CONSTRAINT-ADJUST-001`)와 맞추기 위해 유지한다.
+
 #### 진단 기록은 result category가 아니다
 
 Model이 판단 과정에서 남긴 기록(§9.4)은 위 표의 어느 category도 아니다. **무엇이든 담을 수 있는 자유
@@ -1504,7 +1514,23 @@ constraint는 모든 research workflow의 선행 조건이 아니다. constraint
 actual-account monitoring을 **선택한 경우에만** 해당 operation이 metric, bound, evaluation scope, 필요한 data를
 요구한다.
 
-MVP가 지원하는 hard constraint는 두 개뿐이다.
+**constraint는 user가 작성할 수 있는 확장점이다**(§12.3). package가 목록을 닫아둘 근거가 없다 — constraint
+metric의 경제적 의미와 bound는 user project가 소유하기 때문이다(§12.4). package가 제공하는 것은 계약과
+그 계약을 지키는지에 대한 deterministic 판정이다.
+
+선언된 constraint는 두 방향으로 쓰이며, **같은 선언이 세 소비자에게 간다.**
+
+```text
+선언 ──►  판단 시점의 bound        (구성)
+선언 ──►  결과에 대한 독립 판정     (생산 검증)
+선언 ──►  committed state 판정      (monitoring, 별도 cadence)
+```
+
+따라서 constraint 선언은 자신이 요구하는 data를 스스로 선언해야 하고, 그 data가 없으면 **결과를 만들기
+전에 실패한다.** 어느 constraint가 어떤 값을 어떤 bound와 비교해 얼마나 초과했는지가 결과에 남아야 하므로,
+선언은 숫자 상하한이 아니라 **정체를 가진 것**이어야 한다.
+
+package가 built-in으로 제공하는 hard constraint는 두 개다.
 
 $$
 w_i(t) \ge 0
@@ -1518,7 +1544,9 @@ $$
 선택한 workflow가 명시적으로 구독한다. 종목이 benchmark 비구성종목임이 **확인되면** $w_i^{index}(t)=0$이지만,
 구성 여부나 weight data가 **누락되면 0으로 추정하지 않고 constraint evaluation을 실패시킨다.**
 
-sector, turnover, liquidity, leverage, gross/net exposure, override policy는 future work다.
+**package가 제공하는** sector, turnover, liquidity, leverage, gross/net exposure 정책과 blocking·severity·
+override policy는 future work다. user가 위 계약(요구 data 선언 → bound 투영 → 측정)으로 표현할 수 있는
+constraint를 직접 작성하는 것은 막지 않으며, 그 계약으로 표현되지 않는 것은 지금 범위 밖이다.
 
 ### 7.1 세 가지 서로 다른 결과
 
@@ -1731,8 +1759,15 @@ report는 최소한 다음을 구분해 보여준다.
 
 #### UC-REPORT-001 — 같은 result의 여러 renderer
 
-하나의 backtest result를 table, chart, machine-readable report로 표현한다. renderer가 달라도 return, cost,
-exposure, failure count의 underlying value와 lineage는 같아야 한다.
+하나의 backtest result를 여러 renderer로 표현한다. renderer가 달라도 return, cost, exposure, failure
+count의 **underlying value와 lineage는 같아야 한다.** 요구사항은 *값이 renderer와 독립*이라는 것이지
+vqapr가 특정 renderer를 출하한다는 것이 아니다.
+
+vqapr는 **table renderer와 machine-readable renderer를 제공하고 visualization은 제공하지 않는다.**
+chart는 같은 값 위에 user가 구성하는 renderer다(§12.4의 "report composition"). 이것이 가능한 이유는
+§9.1의 diagnostic table과 저장된 result가 다른 dataset과 **같은 방식으로 읽히기** 때문이다 — 시각화에
+필요한 값이 이미 조회 가능한 형태로 있다. agent가 first-class user이므로(§1.4) machine-readable 표현이
+우선순위를 갖는다.
 
 #### UC-REPORT-002 — Model diagnostic table
 
@@ -2032,6 +2067,25 @@ config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 
 ### 12.3 Local extension
 
+#### user가 작성할 수 있는 것은 넷이다
+
+| 확장점 | 무엇을 정하는가 | package built-in |
+|---|---|---|
+| **DataModel** | 어떤 값을 만드는가 | 없음 |
+| **StrategyModel** | 자본을 어떻게 나누는가 | **없음** — §2.7의 proprietary alpha 원칙 |
+| **Exchange** | 어느 venue에서 어떤 규칙으로 체결되는가 | 있음 (academic, physical) |
+| **Constraint** | 무엇을 지켜야 하는가 | 있음 (§7의 둘) |
+
+**user가 작성할 수 없는 것**: actual account authority와 그 상태 전이 유효성, valuation과 NAV 정의,
+intended→requested 변환, run lifecycle과 이벤트 순서, evidence 기록. 이들은 결과의 의미를 정의하므로
+project마다 달라지면 **두 run을 비교할 수 없게 된다.**
+
+**built-in과 project-local extension은 같은 등록·검증 경로를 통과한다.** package가 자기 built-in에만
+허용하는 내부 접근이 있으면 built-in은 §2.7이 약속한 executable example이 아니라 재현할 수 없는 예시가
+된다. built-in이 사용하는 capability는 project-local extension도 사용할 수 있어야 한다.
+
+#### 식별과 검증
+
 project-local extension은 user가 선택한 source, version, validated parameter로 명시적으로 식별할 수 있어야
 한다. **source를 찾거나 load할 수 있다는 사실만으로 compatibility가 증명되지 않는다.** vqapr는 allowed
 extension boundary, capability/type validation, semantic input/output binding, version과 source fingerprint,
@@ -2053,6 +2107,15 @@ fresh installed project에서 user가 documented public contract만 사용하는
 등록된다. 이후 research 또는 daily execution은 user가 선택한 **exact registered version**을 사용하고 실제
 dependency를 result에 남긴다. 등록 뒤 source나 contract가 바뀌면 이전 registration을 암묵적으로 latest code에
 연결하지 않고 **compute 전에 drift를 명시적으로 보고**해야 한다.
+
+#### UC-EXTENSION-003 — Project-local Exchange와 Constraint
+
+user가 자기 venue의 체결 규칙을 표현하는 local Exchange를, 그리고 자기 mandate를 표현하는 local
+Constraint를 작성한다. 둘 다 built-in과 **같은 계약, 같은 검증, 같은 등록 경로**를 사용하며, 등록 결과와
+frozen run input에서 built-in과 구분되지 않는다. local Constraint는 자신이 요구하는 data를 선언하고, 그
+data가 없으면 결과를 만들기 전에 실패한다. local Exchange는 자기 체결 테이블·수량 규칙·비용 규칙을
+선언하며, package는 그것이 §6.3의 불변식을 지키는지 deterministic하게 판정한다. **어느 쪽도 account
+authority, valuation, run lifecycle을 재정의할 수 없다.**
 
 ### 12.4 누가 무엇을 소유하는가
 
@@ -2362,7 +2425,15 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - recorder는 Model payload나 checkpoint 저장소가 아니며, recorder만으로 중단된 학습을 복원할 수 없다.
 - diagnostic 기록은 §5.3의 result category가 아니며 portfolio return, NAV, PnL, turnover의 출처가 되지
   않는다.
+- `UC-REPORT-001`의 renderer 독립성은 **값과 renderer가 분리되어 있다는 것**으로 판정한다. vqapr는 table과
+  machine-readable renderer를 제공하고 visualization은 제공하지 않으며, 그 부재가 결함이 아니라 §12.4의
+  소유권 경계다.
+- constraint 선언이 정체를 유지해 **어느 constraint가 얼마나 초과했는지**가 결과에 남고, 구성·생산 검증·
+  monitoring이 같은 선언을 소비한다. 선언이 요구한 data가 없으면 결과를 만들기 전에 실패한다.
+  (`UC-CONSTRAINT-002`, `UC-EXEC-003`)
 - `UC-EXTENSION-001`에서 agent가 만든 local transform의 compatibility를 package가 deterministic하게 판정한다.
+- `UC-EXTENSION-003`에서 local Exchange와 local Constraint가 built-in과 같은 경로로 등록되고, frozen run
+  input에서 built-in과 구분되지 않는다. built-in만 쓸 수 있는 내부 capability가 존재하지 않는다.
 - `UC-EXTENSION-002`에서 local StrategyModel을 documented public contract로 검증·등록하고 user-selected exact
   version으로 실행하며 source drift와 implicit latest selection을 compute 전에 거부한다.
 

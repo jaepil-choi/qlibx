@@ -20,7 +20,7 @@ flowchart LR
     Trig --> S
     Acc[(Account)] -->|snapshot| S
     S --> I[PortfolioIntent]
-    I --> P[OrderPlanner]
+    I --> P[plan_orders]
     Acc -->|snapshot| P
     ExecData[PIT Execution View] --> P
     P --> X[Exchange]
@@ -37,18 +37,27 @@ flowchart LR
 - StrategyModel의 결과도 dataset이 되므로 **다른 StrategyModel이 그것을 읽을 수 있다**(§5.2).
   그림의 마지막 화살표가 그것이다.
 
-### 1.2 여섯 layer
+### 1.2 일곱 layer
 
 | layer | 답하는 질문 | module |
 |---|---|---|
 | Runtime | 언제 호출하는가 | `runtime/` |
-| Data | 그때 무엇을 읽을 수 있는가 · 어떤 값을 만드는가 | `data/`, `research/` |
-| Decision | 무엇을 의도하는가 | `strategy/`, `portfolio/` |
-| Execution | 의도가 어떤 주문·체결이 되는가 | `orders/`, `exchange/` |
-| State | 실제 상태가 어떻게 바뀌는가 | `account/`, `valuation/` |
-| Evidence | 무엇을 읽었고 무엇이 일어났는가 | `evidence/` |
+| Data | 그때 무엇을 읽을 수 있는가 | `data/` |
+| Value | 어떤 값을 만드는가 | `models/`(DataModel) · `transforms/` |
+| Decision | 무엇을 의도하는가 | `models/`(StrategyModel) · `portfolio/` · `constraints/` |
+| Execution | 의도가 어떤 주문·체결이 되는가 | `orders/` · `exchange/` |
+| State | 실제 상태가 어떻게 바뀌는가 | `account/` · `valuation/` |
+| Evidence | 무엇을 읽었고 무엇이 일어났는가 | `evidence/` · `analysis/` |
+
+**`models/`가 두 층에 걸친다. 그게 우연이 아니라 사실의 표현이다** — 두 역할이 하나의 계약(`trigger` ·
+`requirements` · `memory` · payload · `recorder`)을 공유하고, 갈리는 것은 **execution을 통과하는가**
+하나뿐이다(§4.4). 계약을 두 패키지에 나눠 두면 그 공유가 코드에서 사라지고, 새 trigger나 state 규칙을
+추가할 때 한쪽만 고치는 사고가 난다.
 
 `flow/`는 이 layer들을 조립하고 이벤트를 배달한다. **경제 규칙을 소유하지 않는다.**
+
+`extension/` · `testing/` · `agent/` · `cli/` · `public.py`는 층이 아니라 **제품 표면**이다. 런타임
+정보 흐름에 참여하지 않고, 사용자와 agent가 이 시스템에 닿는 지점을 이룬다(§10.2~§10.4).
 
 > **Reference — 세 프레임워크가 서로 다른 것으로 층을 갈랐다**
 >
@@ -81,11 +90,15 @@ flowchart LR
 
 ### 2.1 IoC — Flow가 시간을 소유한다
 
-**결정.** Clock이 이벤트를 발화하고 Flow가 callback을 부른다. StrategyModel은 언제 판단할지 *선언*만 하고
-자신을 호출하거나 시간을 진행시키지 않는다.
+**결정.** 선언들이 preflight에서 **정렬된 frozen 이벤트 열**로 계산되고, Flow가 그것을 순회하며 callback을
+부른다. StrategyModel은 언제 판단할지 *선언*만 하고 자신을 호출하거나 시간을 진행시키지 않는다.
 
 - **왜**: decision, execution, valuation, monitoring이 서로 다른 cadence를 가져야 한다. cadence를
   component가 소유하면 조합이 불가능하다.
+- **왜 clock이 아니라 리스트인가**: 모든 시각이 선언에서 나오므로 — `SessionCalendar × TriggerPolicy`가
+  DECISION을, `FillConvention`이 EXECUTION을 만든다 — 데이터가 도착해서 시각이 생기는 일이 없다. 전체
+  열이 시작 전에 계산되고, 그래서 §12의 *"schedule 결정성"* 검사가 **두 리스트를 비교하는 일**이 된다.
+  `Clock`이라고 부르면 `now()`와 중간 삽입을 붙이고 싶어지는데, 그 둘이 재현성을 깨는 정확한 방법이다.
 - **없으면**: StrategyModel이 execution을 직접 부르는 순간 "decision time에 보이는 정보"와 "execution time에
   보이는 정보"가 같은 호출 스택에 섞여 PIT 경계가 코드로 표현되지 않는다.
 - **UC**: `UC-TRIGGER-001`, `UC-EXEC-001`, `UC-EXEC-003`, multi-frequency scenario
@@ -252,7 +265,7 @@ instrument의 **속성**을 어디에 둘지는 위 규칙만으로 안 갈린�
 | 축 | 소유자 | 비고 |
 |---|---|---|
 | session time | `SessionCalendar` (frozen run input) | venue 사실. 데이터에서 유도 금지 |
-| event time | `Clock` | **데이터에 행이 없어도 성립한다** |
+| event time | `Timeline` (frozen, preflight에서 확정) | **데이터에 행이 없어도 성립한다** |
 | availability time | `available_at` (registration) | 유일한 PIT 술어 |
 
 $$available\_at \le event.ts$$
@@ -729,6 +742,7 @@ class StrategyModelContext(ModelContext, Protocol):
     def account(self) -> AccountSnapshot: ...
     def account_history(self, requirement: HistoryRequirement) -> AccountHistory: ...
     def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
+    def constraint_bounds(self) -> Bounds: ...
 ```
 
 - **DataModel에는 `account`가 없다.** 있으면 결과가 그 run에 묶여 재사용할 수 없게 된다(PRD §2.3).
@@ -739,6 +753,9 @@ class StrategyModelContext(ModelContext, Protocol):
 - 창은 실제 access를 기록해 lineage를 만든다. **읽지 않은 dataset은 dependency가 아니다.**
 - `account_history`가 `memory`와 **독립**인 것이 핵심 — `UC-ACCOUNT-HISTORY-001`은 state 없이
   stop-loss가 가능해야 한다고 요구한다.
+- `constraint_bounds()`는 `RunDefinition`이 선언한 제약을 이 판단 시점에 투영한 결과다(§5.7). 제약이
+  요구한 data는 flow가 PIT로 풀며, **전략이 벤치마크 비중을 직접 읽지 않아도 cap이 적용된다.** 제약이
+  선언되지 않은 run에서는 무한 bound가 온다 → `UC-CONSTRAINT-001`.
 
 ### 4.4 Model 공통 계약과 DataModel
 
@@ -803,6 +820,11 @@ class DataModel(Model):
 
 `compute()`는 한 trigger 시점의 값을 계산하고, `materialize(start, end)`는 기간 안의 trigger를 순회해
 `compute()` 결과를 검증·저장하고 registered dataset으로 publish하는 operation이다.
+
+**`materialize`는 `flow/`에 산다**(§10). `compute`는 `models/`의 순수 계약이고 materialize는 state를
+commit하고 dataset을 publish하는 **부작용**이다 — §2.4의 Functional Core / Imperative Shell 경계가 정확히
+둘 사이를 지난다. 그리고 `run()`이 이미 Model state를 commit하므로, materialize를 다른 층에 두면 state
+store 접근이 **두 층에서** 일어나고 §16의 *"state 저장·복원 코드가 한 곳에만 있다"*가 깨진다.
 
 ```text
 trigger 시점 계산
@@ -873,8 +895,8 @@ class StrategyModel(Model):
     def decide(self, context: StrategyModelContext) -> PortfolioIntent: ...
 ```
 
-- `StrategyModelContext`는 `window`, `event`, `universe`, `calendar`와 account 접근만 준다(§4.3).
-  Clock·Store·Exchange·mutable Account는 없다.
+- `StrategyModelContext`는 `window`, `event`, `calendar`, account 접근, 그리고 투영된
+  `constraint_bounds()`만 준다(§4.3, §5.7). Timeline·Store·Exchange·mutable Account는 없다.
 - 기록은 context가 아니라 `self.recorder`로 한다(§4.4, §9.1). **두 종류가 공유하는 것이므로 StrategyModel
   쪽에만 있는 자리에 두지 않는다.**
 - `recorder`는 읽을 수 없으며 `memory`나 `PortfolioIntent`의 일부가 아니다.
@@ -897,7 +919,8 @@ class StrategyModel(Model):
 
 - **왜 필요한가**: trigger는 *언제 불릴지*만 정한다. *불린 시점이 어떤 날인지*는 알려주지 않는다.
   두 질문은 다르다.
-- **왜 Clock 자체를 주지 않나**: Clock을 주면 시간을 진행시킬 수 있다. §2.1의 IoC가 무너진다.
+- **왜 `Timeline` 자체를 주지 않나**: 이벤트 열 전체를 주면 **미래 session이 그대로 보인다.** calendar
+  view는 판단 시점의 성질만 답하고, 미래를 어디까지 노출할지는 §15-1이 정한다.
 - 미래 session을 어디까지 노출할지는 **§15-1 열린 결정**이다.
 
 ### 5.1.1 Model state — JSON memory와 optional payload
@@ -944,7 +967,7 @@ state_ref = state_store.commit(memory_snapshot, payload_target)
 `ModelStateRef`를 발행한다. 둘 다 port이므로 로컬 파일이든 객체 저장소든 바꿀 수 있다.
 
 - **Model은 이것을 import하지 않는다.** `save_payload(target)`이 받는 것은 열려 있는 대상일 뿐이고 그것이
-  어디에 쓰이는지 모른다. §10.1의 *"`research`는 `data`와 `domain`만 import한다"*가 그대로 유지된다.
+  어디에 쓰이는지 모른다. §10.1의 *"Model이 state를 자기가 commit하지 못한다"*가 그렇게 성립한다.
 - **왜 `evidence/`가 아닌가**: state는 영수증이 아니라 **authority**다(§2.4). evidence에 두면 그 구분이
   흐려지고, 기록을 지우면 state가 사라지는 것처럼 보인다.
 - **왜 `flow/`인가**: `save_payload()`를 부르는 것이 invocation 경계이고 그것이 flow다. 저장은 경제 규칙이
@@ -1163,18 +1186,29 @@ $$\textbf{순매수} \;=\; \textbf{현재 현금} - \textbf{목표 현금}$$
 
 `weighting`과 `optimize`는 복잡도만 다른 같은 계열이다. 전자는 제약 없는 배분, 후자는 제약 하 배분이다.
 
-보조 함수 (결측을 **명시적으로** 다루기 위한 것):
+결측을 **명시적으로** 해소하는 보조 함수는 `transforms/missing.py`에 있다(§5.6). weighting이 아니라
+transform인 이유는 다루는 대상이 weight가 아니라 signal이기 때문이다.
 
 ```python
 drop_missing(signal) -> tuple[Signal, frozenset[InstrumentId]]   # 무엇이 빠졌는지 반환
 require_complete(signal, universe) -> Signal                     # 불완전하면 실패
 ```
 
+#### `diagnostics.py` — 판단 시점의 배분 진단
+
+`optimize`가 만든 배분을 그대로 쓰기 전에 물어볼 값들이다 — gross/net, 집중도, 유효 종목 수, 그리고
+**의도 회전율** $\sum_i |w_i - w^0_i|$.
+
+- **`analysis/activity.py`의 실현 회전율과 의도적으로 분리한다.** 입력이 다르다 — 이쪽은 판단 시점의
+  weight 차이고 저쪽은 체결 기록이다. PRD §2.2가 경고하는 혼동이 정확히 여기라, 이름과 파일이 갈려 있어야
+  한다. 정수 변환과 미체결 때문에 두 값은 **당연히 다르다.**
+- 순수 함수이므로 같은 leaf 규칙을 받는다.
+
 불변식:
 
 - **`weighting`과 `optimize` 모두 `domain`(+ solver) 외에는 아무것도 import하지 않는다.** 아래는 전부 금지다.
   ```text
-  vqapr.data  vqapr.account  vqapr.exchange  vqapr.runtime  vqapr.flow  vqapr.strategy
+  vqapr.data  vqapr.account  vqapr.exchange  vqapr.runtime  vqapr.flow  vqapr.models
   ```
   시가총액이 필요하면 **인자로 받는다.** 여기서 직접 읽으면 그 data가 StrategyModel의 declared requirement를
   거치지 않아 §4.2의 lineage에 남지 않는다.
@@ -1191,28 +1225,18 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
   StrategyModel**이 된다. 특히 "결측 빼고 재정규화"는 PRD §10.2가 금지한 바로 그 행위다.
 - **UC**: `UC-BUILTIN-001`, `UC-ALPHA-BUDGET-001`
 
-#### 이 leaf 규칙은 두 층으로 지킨다
+#### 이 leaf 규칙은 시그니처가 지킨다
 
-문서만으로는 부족하고 도구만으로도 부족하다. 두 층은 시점이 다르다.
+**결정.** 도구 계약을 두지 않는다. 순수성은 **함수가 받는 것**으로 이미 강제된다.
 
-| 층 | 언제 | 역할 |
-|---|---|---|
-| 이 문서 §5.3 + `weighting.py` module docstring | 코드를 **쓰기 전** | 예방 — 애초에 안 쓰게 한다 |
-| import linter | CI | 포착 — 안 읽었으면 터뜨린다 |
-
-```toml
-[[tool.importlinter.contracts]]
-name = "weighting is a pure leaf"      # 계약 이름이 곧 실패 이유가 되게 짓는다
-type = "forbidden"
-source_modules = ["vqapr.portfolio.weighting", "vqapr.portfolio.optimize"]
-forbidden_modules = [
-  "vqapr.data", "vqapr.account", "vqapr.exchange",
-  "vqapr.runtime", "vqapr.flow", "vqapr.strategy",
-]
-```
-
-`weighting.py`의 module docstring에도 같은 금지와 그 이유(`UC-BUILTIN-001`)를 적는다. 파일을 여는 사람이
-가장 먼저 보는 곳이기 때문이다.
+- `signal_weight(signal, *, cash_range)`는 registered data도 account도 clock도 **인자로 받지 않는다.**
+  받지 않는 것을 쓰려면 import를 새로 써야 하고, 그 import는 리뷰에서 눈에 띈다. 시가총액이 필요하면
+  `proportional_weight(signal, sizes, …)`처럼 **호출자가 넘긴다** — 그래야 그 data가 StrategyModel의
+  declared requirement를 거쳐 §4.2의 lineage에 남는다.
+- `weighting.py`와 `optimize.py`의 module docstring 첫 줄에 같은 금지와 그 이유(`UC-BUILTIN-001`)를 적는다.
+  파일을 여는 사람이 가장 먼저 보는 곳이기 때문이다.
+- **왜 린터를 안 쓰나**: §10.1을 본다. PRD §0.1이 module layout을 normative가 아니라고 선언했는데 도구
+  계약이 존재하면 배치가 계약 문자열에 맞춰진다. 그리고 여기서 지킬 것은 이미 **인자 목록**이 지킨다.
 
 > **signal과 weights는 shape가 같고 의미가 다르다.** 타입이 경계를 지켜주지 못하므로, 위 함수를 통과했다는
 > 사실 자체가 전환이 의도되었다는 증거가 된다.
@@ -1260,15 +1284,142 @@ tz-aware 시각 · 유일 instrument · 유한 값 · lineage · profile directi
 ### 5.5 Hold도 `PortfolioIntent`다
 
 - 별도 action enum이나 `None`을 두지 않는다. 현재와 같은 완전한 target을 반환한다.
-- OrderPlanner가 delta 0인 `OrderBatch`를 만들고, no-trade diagnostic만 남는다.
+- `plan_orders`가 delta 0인 `OrderBatch`를 만들고, no-trade diagnostic만 남는다.
 - **왜**: "판단 안 함 / 판단해서 유지 / 주문했는데 dealt 0" 세 가지가 구분되어야 한다.
+
+### 5.6 `transforms/` — 값을 값으로
+
+**결정.** signal을 다루는 재사용 가능한 순수 함수를 `portfolio/`와 **같은 급의 leaf**로 제공한다.
+
+§5.2의 3단 중 가운데만 built-in이 있었다.
+
+```text
+research values  ──►  weights  ──►  PortfolioIntent
+  transforms/        portfolio/       portfolio/intents
+```
+
+- **왜 필요한가**: PRD §2.7이 *"자주 쓰는 signal transform"*을 built-in으로 약속했고, `UC-EXTENSION-001`은
+  *"built-in 예시를 참고해 agent가 project-local neutralization transform을 작성한다"*고 한다. 참고할
+  built-in이 없으면 그 use case가 성립하지 않는다.
+- **왜 `portfolio/`와 합치지 않나**: 다루는 대상이 다르다. transform은 signal을 signal로 바꾸고
+  weighting은 signal을 weight로 바꾼다. 합치면 *"weighting은 결측을 다루지 않는다"*(§5.3) 같은 경계가
+  같은 파일 안의 관례가 된다.
+
+| 파일 | 무엇 | 왜 이것인가 |
+|---|---|---|
+| `cross_section.py` | rank · zscore · demean · winsorize · **quantile_buckets** | 마지막 것이 §11.1의 independent double sort와 breakpoint 기록에 그대로 필요하다 |
+| `window.py` | 주어진 창 안에서만 도는 시계열 연산 | **창 밖을 건드릴 수 없음이 시그니처로 보장된다** — §4.4가 "causal primitive"라 부른 자리 |
+| `neutralize.py` | 노출을 회귀로 제거 | `UC-EXTENSION-001`이 지목한 원본 |
+| `lookthrough.py` | 구성종목 데이터 → 노출 매핑 $L$ | PRD §8.2가 *"패키지가 자동으로 켜지 않는다"*고 했다. **전략이 명시적으로 부를 때만 도는 함수**면 그 요구를 지키면서 built-in을 줄 수 있다 |
+| `missing.py` | `drop_missing` · `require_complete` | `fill_missing`은 **없다.** 0으로 채우기는 "포지션 없음"이라는 경제적 주장이다 |
+
+**leaf 규칙은 §5.3과 같다.** `domain` 외에는 import하지 않고 필요한 panel은 전부 인자로 받는다. 창을 직접
+읽으면 그 data가 declared requirement를 거치지 않아 lineage에 남지 않는다.
+
+- **UC**: `UC-EXTENSION-001`, `UC-FACTOR-001`, `UC-LOOKTHROUGH-001`~`003`, `UC-BUILTIN-001`
+
+### 5.7 `constraints/` — 선언 하나, 소비자 셋
+
+PRD §7.1이 제약의 결과를 셋으로 갈랐고, **셋이 같은 선언을 봐야 한다.**
+
+```text
+                     ┌── 판단 시점       projection → optimize의 bounds
+선언된 ConstraintSet ─┼── 결과 생성 시    evaluation(intended weights) → 독립 검증
+                     └── 별도 cadence    evaluation(actual holdings)  → monitoring finding
+```
+
+#### 벡터로는 안 된다 — 제약의 정체를 잃는다
+
+`optimize`가 받는 것은 종목별 `lower`/`upper` 숫자 벡터다. 그런데 PRD가 요구하는 것은 *"constraint별
+measured value, bound, excess, pass/fail, input lineage"*(§7.1)다.
+
+**`upper[i] = 0.10`을 보고 그것이 어느 제약에서 나왔는지 복원할 수 없다.** 그래서 제약은 정체를 가진
+선언이어야 하고, 벡터는 그 선언의 **투영 결과**여야 한다.
+
+> **용어 주의.** 여기서 "투영"은 *선언 → 종목별 bound 벡터*를 뜻한다. §11.7 ⑦의 "순차 투영"은 참조
+> 구현이 쓰는 **자르고 재분배하기를 반복하는 기법**의 이름이고 우리가 쓰지 않는 방법이다(§11.7 ⑥).
+> 같은 단어가 다른 것을 가리키므로 섞어 읽지 않는다.
+
+```python
+class Constraint(Protocol):
+    constraint_id: str
+    def requirements(self) -> tuple[DataRequirement, ...]: ...
+    def project(self, window, instruments) -> Bounds: ...
+    def measure(self, weights_or_holdings, window) -> ConstraintFinding: ...
+```
+
+**제약이 스스로 `DataRequirement`를 선언한다.** single-name cap의 $w^{index}(t)$가 time-varying PIT data라
+그렇게 될 수밖에 없다. 그리고 그 data가 없으면 **0으로 추정하지 않고 평가를 실패시킨다**(PRD §7).
+
+#### 어디에 선언하나 — StrategyModel이 아니라 `RunDefinition`이다
+
+**결정.** `RunDefinition`이 `ConstraintSet` 하나를 갖고, 판단·검증·monitoring 셋이 그것을 본다.
+
+- **왜 전략이 아닌가**: monitoring은 별도 cadence라 전략이 소유하면 **자기 사본을 따로 갖게 된다.** 둘이
+  갈라지면 `UC-EXEC-003`의 finding이 구성 때 지키려던 것과 대응하지 않는다.
+- **그리고 §7.1이 *"생산 검증이 독립적으로 판정한다"*를 요구한다.** 검증자가 전략이 준 bound를 쓰면 그것은
+  독립이 아니다. 선언이 전략 바깥에 있어야 독립이 성립한다.
+- 전략은 `context.constraint_bounds()`로 **투영된 결과만** 받는다. flow가 제약의 requirement를 PIT로 풀어
+  준다(§4.3).
+
+#### bounds는 두 출처에서 오고, 검증은 한쪽만 판정한다
+
+`optimize`가 받는 `lower`/`upper`는 **선언된 제약의 투영만이 아니다.** 전략 자신의 구성 선택도 같은
+벡터에 들어간다.
+
+```python
+bounds = context.constraint_bounds()          # no_short · single_name_cap  ← 선언된 것
+lower  = bounds.lower | {etf: e}              # ETF를 정확히 e에 고정        ← 전략의 선택
+upper  = bounds.upper | {etf: e}
+```
+
+§11.7 ④가 그 사례다 — `주식: max(10%, B)`는 mandate이고 `ETF: e`는 그 전략이 ETF 비중을 어떻게 쓸지 정한
+것이다. 둘을 합치는 것은 **전략의 일**이다.
+
+**그러나 생산 검증과 monitoring은 선언된 제약만 판정한다.**
+
+- **왜**: 구성 선택을 compliance로 판정하면 *"전략이 자기 규칙을 어겼다"*가 mandate 위반과 **같은 등급**이
+  된다. 그리고 전략 코드를 고칠 때마다 과거 compliance 판정의 의미가 달라진다.
+- **거래 불가 종목의 `frozen`도 같은 자리에 있다** — 아래 참고. 시장 사실도, 전략의 구성 선택도, mandate가
+  아니다.
+- 구성 선택 때문에 원하는 노출에 도달하지 못했다면 그것은 finding이 아니라 **해소되지 않은 잔여**이며
+  PRD §7.1의 *"원래 의도, 반영된 결과, 해소되지 않은 잔여"*로 남는다.
+
+#### 생산 검증과 monitoring은 같은 함수를 부른다
+
+```python
+evaluation.measure_all(constraints, intended_weights, window)   # §5.4 생성 시 검증
+evaluation.measure_all(constraints, actual_holdings,  window)   # monitoring
+```
+
+- **왜 같아야 하나**: 다르면 *"판단 시점엔 통과했는데 monitoring은 위반이라 한다"*가 제약 해석 차이인지
+  진짜 위반인지 구분되지 않는다. 같은 함수면 차이의 원인이 **입력뿐**이고, `UC-CONSTRAINT-ADJUST-001`이
+  말하는 정수 변환 오차가 정확히 그 차이로 드러난다.
+
+#### 현재 둘뿐이고, `frozen`은 여기 없다
+
+MVP가 지원하는 hard constraint는 `no_short`와 `single_name_cap` 둘이다(PRD §7). sector·turnover·
+liquidity·leverage·gross/net·override는 future work다.
+
+**거래 불가 종목의 `w_j = w⁰_j` 고정은 제약이 아니다.** 그것은 compliance가 아니라 전략이 등록 dataset에서
+읽은 시장 사실이고, `optimize`의 별도 인자로 남는다. 섞으면 *"제약을 위반했다"*와 *"거래할 수 없었다"*가
+같은 finding으로 나온다.
+
+#### 사용자가 만들 수 있다
+
+`Constraint`는 §10.2의 네 확장점 중 하나다. metric의 경제적 의미와 bound는 user project가 소유하므로
+(PRD §12.4) 패키지가 목록을 닫아둘 근거가 없다. `constraints/builtin/`의 둘은 다른 내장과 같은 지위다 —
+같은 문으로 들어오고 같은 conformance를 통과한다(§10.2).
+
+- **UC**: `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001`, `UC-EXEC-003`,
+  `UC-MONITOR-001`
 
 ---
 
 ## 6. Execution
 
-> **execution 경로에는 제약 평가가 없다.** OrderPlanner는 확정된 target을 수량으로 바꾸고 Exchange는
-> 체결시킨다. 제약 평가는 경제적 판단이므로 §5에 있다(PRD §7.1).
+> **execution 경로에는 제약 평가가 없다.** `plan_orders`는 확정된 target을 수량으로 바꾸고 Exchange는
+> 체결시킨다. 제약 평가는 경제적 판단이므로 §5.7에 있다(PRD §7.1).
 >
 > execution으로 미루면 그 시점에 할 수 있는 일이 **기록밖에 없다.** 다시 최적화하는 것은 판단을 되돌리는
 > 것이라 §2.4가 금지하기 때문이다. 수량 변환 때문에 뒤늦게 생긴 위반은 fill 진단에 남고 monitoring이
@@ -1282,13 +1433,16 @@ tz-aware 시각 · 유일 instrument · 유한 값 · lineage · profile directi
 
 
 
-### 6.1 OrderPlanner — execution time의 책임
+### 6.1 `plan_orders` — execution time의 책임
 
 ```python
-class OrderPlanner(Protocol):
-    def plan(self, intent, account: AccountSnapshot,
-             venue: ExecutionSnapshot, rules: ExchangeRulesView) -> OrderBatch: ...
+def plan_orders(intent, account: AccountSnapshot,
+                venue: ExecutionSnapshot, rules: ExchangeRulesView) -> OrderBatch: ...
 ```
+
+**Protocol이 아니라 함수다.** 구현이 하나이고 `orders/`가 닫힌 층이기 때문이다(§10.2). venue마다 달라지는
+것 — 수량 단위, 체결 순서, 현금 clipping — 은 전부 `ListingRule`과 Exchange 구현 안에 있고(§6.2), 여기
+남는 것은 델타 산술 하나다. **구현이 하나인데 Protocol을 두면 없는 확장점을 있는 것처럼 보이게 한다.**
 
 - decision time의 stale quantity를 **재사용하지 않는다.** execution 시점의 committed position/cash와
   체결 테이블의 그 시각 행으로 delta를 계산한다.
@@ -1705,7 +1859,13 @@ class CostRule(BaseModel):
 
 ### 6.3 두 fixture profile
 
-| | Academic | KRX daily |
+> **module 이름은 `krx`이지 `krx_daily`가 아니다.** venue가 소유하는 것 중 daily와 minutely 사이에서
+> 달라지는 것이 **하나도 없다** — `ListingRule`의 수량 단위도, `CostRule`의 요율도, 매도 우선 + delta
+> 내림차순 + 누적합 알고리즘도 같다. cadence는 전부 `FillConvention`(§6.2)과 체결 테이블의 행 밀도라는
+> **두 선언**에 있다. 이름에 cadence를 구우면 나중에 `krx_minutely`가 생겨 listing·cost·알고리즘을 통째로
+> 복제한다. 아래 표의 "daily"는 이 fixture가 들고 나오는 기본 `FillConvention`을 뜻한다.
+
+| | Academic | KRX (daily convention) |
 |---|---|---|
 | direction | signed | long-only |
 | quantity | listing별 fractional 허용 | listing의 정수 step |
@@ -1804,7 +1964,7 @@ commit 후 cash가 음수면 mutation 없이 실패한다. **모든 mode, 모든
 - **gross를 키우는 것과 차입은 다르다.** NAV 100에서 long 2.0 / short 1.0은 공매도 대금이 매수를
   조달하므로 cash가 정확히 0이 되고 **차입이 없다.** cash가 음수가 되는 것만 차입이다.
   BAB의 `+1.43 / -0.71`도 cash가 `+0.28`이라 차입이 아니다.
-- 이중 방어: OrderPlanner가 이미 cash clipping을 한다(`UC-COST-003`). 여기까지 오는 것은 intent가
+- 이중 방어: Exchange가 이미 cash clipping을 한다(§6.2, `UC-COST-003`). 여기까지 오는 것은 intent가
   명시적으로 과도한 gross를 요구한 경우뿐이고, 그건 조용히 넘어가면 안 된다.
 - **확장 지점**: margin이 범위에 들어오면 §15-2를 먼저 정한다.
 
@@ -1876,10 +2036,13 @@ class SimulationFlow:
 ```
 
 책임: run 동결과 preflight · schedule 조립 · 이벤트 dispatch · requirement resolution과 View 생성 ·
-StrategyModel 호출과 intent 발행 · OrderPlanner/Exchange 호출 · commit · Model state 스냅샷 · evidence · finalize.
+StrategyModel 호출과 intent 발행 · `plan_orders`/Exchange 호출 · commit · Model state 스냅샷 · evidence ·
+finalize.
 
 - **Academic Flow와 KRX Flow를 따로 만들지 않는다.** Exchange, AccountMode, calendar, policy를 주입한다.
-- Clock은 StrategyModel나 Exchange의 의미를 모른다. callback을 부를 뿐이다.
+- `Timeline`은 StrategyModel나 Exchange의 의미를 모른다. 정렬된 이벤트를 낼 뿐이다.
+- **monitoring도 여기서 dispatch만 한다.** 그 경제 규칙은 `constraints/evaluation.py`에 있다(§5.7).
+  flow에 두면 §1.2의 *"flow는 경제 규칙을 소유하지 않는다"*가 거짓이 된다.
 
 > **Reference — nautilus는 배달과 조립을 나눈다**
 >
@@ -2080,65 +2243,279 @@ NAV          마지막 mark 기준
 
 ## 10. Package layout
 
+#### 무엇으로 갈랐나 — 네 개의 판정 규칙
+
+이 절의 모든 경계는 아래 네 질문으로 정해졌다. 새 파일이나 패키지를 추가할 때 같은 질문에 답해야 한다.
+
+```text
+디렉터리   이 안의 파일들이 **같은 이유로** 바뀌는가? 아니면 그냥 같은 명사 근처인가?
+파일       이게 없으면 정확히 무엇이 안 되나? 옆 파일과 **다른 이유로** 바뀌나?
+이름       개념인가 패턴인가?  base · protocol · service · manager는 패턴이다
+단일 타입   타입 하나짜리 파일은 — 소비자가 하나면 합치고, 셋이면 남긴다
+```
+
+그리고 하나 더. **구현이 하나뿐이고 그 층이 닫혀 있으면 Protocol을 만들지 않는다.** 없는 확장점을 있는
+것처럼 보이게 하기 때문이다. `plan_orders`가 함수인 이유가 이것이고(§6.1), `Exchange`가 Protocol인 이유는
+그 반대다 — 사용자가 구현하는 계약이다(§10.2).
+
+#### 전체
+
 ```text
 src/vqapr/
-├── domain/                 # ID, money, Instrument(kind별 union), 공통 error
-├── runtime/                # clock, events(priority), calendar
-├── data/                   # source/dataset 정의, requirements, store(port), window
-├── research/
-│   ├── model.py            # Model 공통 계약 + payload hook + DataModel
-│   ├── schedule.py         # TriggerPolicy → 시점 목록 (두 종류가 공유)
-│   └── materialize.py      # 창 구성 + compute + checkpoint/state/result 확정
-├── strategy/               # StrategyModel protocol, warmup, context
-├── portfolio/
-│   ├── weighting.py        # 순수 leaf — signal_weight / equal_weight / proportional_weight
-│   ├── optimize.py         # 순수 leaf — 제약 하 배분, 현금은 결정 변수
-│   ├── construction.py     # PortfolioIntent 조립
-│   └── intent.py           # PortfolioIntent, PortfolioTarget, BudgetSemantics
-├── orders/                 # OrderPlanner, OrderRequest/OrderBatch
-├── exchange/               # Exchange protocol, ListingRule, CostRule,
-│                           #   ExecutionTableSpec, FillConvention, academic, krx_daily
-├── account/                # aggregate, mode, snapshot, history, journal
-├── valuation/              # requirements → MarkBatch, performance
-├── flow/                   # simulation, resolver, run(RunDefinition/RunResult),
-│                           #   model state store(port) — committed/working state와 ModelStateRef
-├── evidence/               # lineage, artifacts
-├── analysis/               # 저장된 result를 읽는 read model (execution 주장 없음)
-├── project/                # config, registry, assembly
-└── public.py               # Facade
+├── domain/          누구에게도 의존하지 않고 모두가 의존하는 어휘
+│   ├── identifiers.py     InstrumentId·DatasetId·RunId·IntentId·OrderBatchId·ExchangeId·ProducerId·TableId
+│   ├── references.py      ArtifactRef·ModelStateRef — 저장된 것을 가리키는 값(대상+버전+schema identity)
+│   ├── enums.py           Side · InstrumentKind
+│   ├── instruments.py     Stock/Etf discriminated union. exchange_id 없음, 거래 가능 여부 없음
+│   ├── timestamps.py      TzAware 검증 · at_local · shift_calendar. **감싸는 클래스 없음**
+│   ├── rows.py            Scalar · Rows — compute 반환·recorder 입력·publish 표현이 같은 타입
+│   └── errors.py          VqaprError(stage path·requirement·mutation·retry·correlation) · FailureFamily
+│
+├── runtime/         시간은 전부 선언에서 나온다
+│   ├── session_calendar.py    SessionCalendar. frozen. 데이터에서 만드는 함수가 존재하지 않는다
+│   ├── calendar_derivation.py user 선언 유도 규칙의 닫힌 집합과 검증 (§3.6)
+│   ├── events.py              Event · EventKind 고정 우선순위 (§3.2)
+│   └── timeline.py            선언 × calendar → **정렬된 frozen 이벤트 열**. clock이 아니다
+│
+├── data/            그때 무엇을 읽을 수 있는가
+│   ├── sources.py         SourceSpec · FieldPartition — 물리 배치
+│   ├── datasets.py        DatasetRegistration — 의미. role을 이름에 새기지 않는다
+│   ├── availability.py    AvailabilityBinding + 선언된 지연 규칙 (§4.2)
+│   ├── lookback.py        RowsLookback · CalendarLookback. **미래 방향 타입의 부재가 계약**
+│   ├── requirements.py    DataRequirement · CoverageRequirement
+│   ├── resolution.py      requirement → 물리 질의. lookback을 질의로 밀어 넣는다
+│   ├── store.py           ObservationStore 포트
+│   ├── windows.py         ModelWindow · ObservationBatch(Rows+coverage) · AccessRecord
+│   └── stores/            memory.py · duckdb.py
+│
+├── models/          두 확장점의 계약
+│   ├── model.py           Model ABC — trigger·requirements·tables·memory·recorder·save/load_payload
+│   ├── triggers.py        TriggerPolicy 어휘 + **시점 목록을 만드는 유일한 함수**
+│   ├── memory.py          ModelMemory · normalize_memory
+│   ├── contexts.py        ModelContext / DataModelContext / StrategyModelContext / CalendarView
+│   ├── data_model.py      DataModel — compute(ctx) -> Rows
+│   └── strategy_model.py  StrategyModel — Warmup · decide(ctx) -> PortfolioIntent
+│
+├── transforms/      순수 leaf. 값을 값으로 (§5.6)
+│   ├── cross_section.py   rank·zscore·demean·winsorize·quantile_buckets
+│   ├── window.py          주어진 창 안에서만 도는 시계열 연산
+│   ├── neutralize.py      노출 회귀 제거
+│   ├── lookthrough.py     구성종목 → 노출 매핑 L. 전략이 명시적으로 부를 때만 돈다
+│   └── missing.py         drop_missing · require_complete. fill_missing은 없다
+│
+├── portfolio/       순수 leaf. 값을 배분으로 (§5.3)
+│   ├── weighting.py       signal_weight · equal_weight · proportional_weight
+│   ├── optimize.py        제약 하 배분. 현금이 결정 변수
+│   ├── diagnostics.py     판단 시점 진단 — gross/net·집중도·**의도 회전율**
+│   └── intents.py         PortfolioIntent · from_weights · 생성 시 검증 (§5.4)
+│
+├── constraints/     선언 하나, 소비자 셋 (§5.7)
+│   ├── constraint.py      Constraint 프로토콜 — 사용자가 구현하는 계약
+│   ├── projection.py      선언 + PIT 관측 → Bounds. 누락 시 0 추정 없이 실패
+│   ├── evaluation.py      weights **또는** holdings → findings
+│   ├── findings.py        ConstraintFinding · ConstraintReport
+│   └── builtin/           no_short.py · single_name_cap.py
+│
+├── orders/          intended → requested 경계 (닫힘)
+│   ├── planning.py        plan_orders(...) **함수**
+│   └── batches.py         OrderRequest · OrderBatch + rounding/clipping/skip 진단
+│
+├── exchange/        확장점
+│   ├── venue.py           Exchange 프로토콜
+│   ├── listings.py        ListingRule · ExchangeRulesView
+│   ├── costs.py           CostRule + 정확히 하나 매칭 강제
+│   ├── execution_table.py ExecutionTableSpec + 집합 단위 점 조회
+│   ├── conventions.py     FillConvention. 소비자 셋(timeline·venue·preflight)
+│   ├── fills.py           Fill · FillBatch · ZeroDealtReason
+│   └── venues/            academic.py · krx.py   ← 이름에 cadence가 없다
+│
+├── account/         commit authority (닫힘)
+│   ├── account.py         Account + commit/mark/snapshot/history + AccountMode
+│   ├── snapshot.py        AccountSnapshot — 패키지 밖으로 나가는 유일한 것
+│   ├── history.py         고정 기록 집합 + HistoryRequirement 구독
+│   └── journal.py         append-only 전이 로그. 노출하지 않는다
+│
+├── valuation/       (닫힘)
+│   ├── marking.py         보유 전체 mark 선언 → MarkBatch
+│   └── marks.py           Mark · MarkBatch
+│
+├── flow/            조립·배달·동결. 경제 규칙 없음 (닫힘)
+│   ├── run.py             RunDefinition · RunResult(limitations 포함)
+│   ├── preflight.py       §12 검사 전부
+│   ├── simulation.py      6 callback dispatch
+│   ├── views.py           requirement → bounded ModelWindow
+│   ├── model_state.py     ModelStateStore 포트 · ModelStateRef 발행
+│   ├── materialize.py     DataModel 진입점. **available_at 부여**
+│   └── stamping.py        recorder 봉투 5개
+│
+├── evidence/        영수증 (닫힘)
+│   ├── tables.py          TableSpec + 예약 컬럼
+│   ├── recorder.py        Recorder — write-only
+│   ├── publication.py     staging → chunk flush → atomic visible
+│   ├── artifacts.py       봉투 + typed 직렬화 + 경계 validation
+│   ├── lineage.py         AccessRecord → dependency graph
+│   └── catalog.py         §9.6 reuse 판정
+│
+├── analysis/        저장된 것을 읽고 계산한다. **새 portfolio return을 만들지 않는다**
+│   ├── performance.py     저장된 mark → NAV·수익률·drawdown
+│   ├── activity.py        저장된 fill → **실현 회전율**·비용 분해
+│   ├── signal.py          저장된 signal + 실현값 → IC·RankIC·hit rate·decay
+│   ├── ledger.py          intended/requested/dealt/committed/marked 5열 (§9.4)
+│   ├── diagnostics.py     zero-dealt 사유·clipping·skip·constraint finding 집계
+│   └── renderers.py       값 → table / machine-readable. **plotting 의존성 없음**
+│
+├── extension/       네 확장점의 정문 (§10.2)
+│   ├── component.py       ComponentKind · ComponentRef(path+config+fingerprint)
+│   ├── loading.py         ref → 인스턴스. partial registration 방지
+│   ├── fingerprint.py     source 해시 + drift 거부
+│   ├── registration.py    submit — load → conformance → fingerprint → 기록
+│   ├── scaffold.py        템플릿 설치
+│   └── templates/         datamodel · strategy_model · exchange · constraint
+│
+├── agent/           agent 표면 (§10.4)
+│   ├── targets.py         Codex · Claude Code · custom root (PRD §11.2)
+│   ├── onboarding.py      preview / apply / update / remove
+│   ├── descriptors.py     error code·schema·계약을 패키지에서 **생성**
+│   ├── skill/             설치되는 SKILL.md + references
+│   └── sample/            PRD §11.4 sample journey
+│
+├── testing/         내장과 확장을 구분할 분기점이 없다 (§10.3)
+│   ├── conformance/       runner · datamodel · strategy_model · exchange · constraint
+│   ├── calendars.py · datasets.py · execution_tables.py · accounts.py
+│   └── components.py · asserts.py
+│
+├── cli/             **파일 목록 = 명령어 목록**
+│   └── main · new · check · register · data · run · report · agent
+│
+└── public.py        유일한 documented surface
 ```
 
-### 10.1 의존 방향
+`tests/`는 위 패키지를 1:1로 미러하고 둘이 더 붙는다.
 
-```text
-domain  ←  runtime · data · portfolio · orders · account
-domain + data  ←  research
-domain + ports  ←  strategy · exchange · valuation · analysis
-all ports  ←  flow
-flow + project  ←  public
+- `tests/spine/` — **여러 층을 지나야만 성립하는** 시나리오만. 단일 층에서 검증되는 UC는 그 층에 둔다.
+- `tests/boundaries/` — 없어야 하는 것이 없음을 증명한다. 미래 방향 `Lookback` 부재, Model에서 체결
+  테이블로 가는 경로 부재, plotting 의존성 부재, 미지원 semantics 거부, `public.py` export 고정.
+
+UC 추적은 디렉터리가 아니라 `@pytest.mark.uc("UC-…")` 마커로 한다. 그래야 테스트가 자기 층에 있어도
+§14가 기계로 검사된다.
+
+#### 만들지 않는 것
+
+| | 왜 |
+|---|---|
+| `utils/` | qlib `utils/`는 `data·exceptions·file·index_data·mod·objm·paral·pickle_utils·resam·serial·time` 열한 개다. scaffold 단계에서 만들면 반드시 도달하는 종착지다 |
+| `workflow/` | 실험 관리를 패키지가 소유하지 않는다(§9). run은 값이고 catalog는 evidence다 |
+| `contrib/` | §2.6의 반면교사. 확장 지점을 패키지 안에 두면 사용자 코드가 패키지에 쌓인다 |
+| `common/` | 그 자리는 `domain/`이다. 둘 다 있으면 무엇이 어디 가는지 기준이 사라진다 |
+| `config/` | config는 장소가 아니라 소유자 옆에 산다 — `DatasetRegistration`은 `data/`, `FillConvention`은 `exchange/`, `RunDefinition`은 `flow/`. 모으는 역할은 `public.py`가 이미 한다 |
+
+### 10.1 타입은 그것을 만드는 층에 산다
+
+**결정.** 배치 규칙은 하나다. 어떤 타입은 그것을 **생산하는 층**에 살고 소비자가 생산자를 import한다.
+`FillBatch`는 `exchange/`, `MarkBatch`는 `valuation/`, `AccountSnapshot`은 `account/`, `Recorder`는
+`evidence/`에 있다.
+
+- **왜 이 규칙 하나면 되나**: 이 규칙을 어기면 **순환 import**가 생기고, Python이 그 자리에서 알려준다.
+  도구가 필요 없는 검사다.
+- **파일 단위로 보면 순환이 없다.** `account.account → exchange.fills`와 `exchange.venue →
+  account.snapshot`은 모듈 수준에서 서로를 부르지 않는다. 순환이 생겼다면 그것은 린터가 화내는 것이
+  아니라 **타입을 잘못된 층에 둔 것**이다.
+
+#### import linter를 쓰지 않는다
+
+**결정.** 층 경계를 도구 계약으로 강제하지 않는다.
+
+- **왜**: PRD §0.1이 module path와 file layout을 normative가 아니라고 선언했다. 그런데 도구 계약이
+  존재하면 **타입 배치가 계약 문자열에 맞춰진다.** 인과가 거꾸로다 — 계약이 설계를 따라야지 설계가
+  계약을 따라서는 안 된다.
+- **없으면 무엇이 무너지나**: 아무것도. 아래에서 보듯 지켜야 할 경계는 전부 **경로의 부재**로 이미
+  강제된다. 린터는 그 위에 얹는 두 번째 표현이었고, 두 번째 표현은 첫 번째와 어긋날 수 있다.
+
+#### 진짜 경계는 전부 부재로 강제된다
+
+규칙은 잊히고 **없는 것은 부를 수 없다.** 아래 다섯이 이 설계가 지키는 경계 전부이며, 셋째 열이 그것을
+지키는 실제 장치다.
+
+| 경계 | 왜 | 무엇이 지키나 |
+|---|---|---|
+| Model이 체결 테이블에 닿지 못한다 | 어느 종목이 그날 정지될지 판단 시점에 알게 된다. 그리고 일별 판단 + 촘촘한 체결 구성이 표현되지 않는다(§6.2) | `ModelWindow`가 Model의 **유일한** 데이터 통로이고 `ExecutionSnapshot`은 Exchange만 만든다. 부를 것이 없다 |
+| DataModel이 account를 보지 못한다 | 보면 결과가 그 run에 묶여 재사용할 수 없다(PRD §2.3) | `DataModelContext`에 `account()`가 **없다** |
+| `weighting`·`optimize`가 data·state·clock을 보지 못한다 | 보면 그 data가 declared requirement를 거치지 않아 lineage에 안 남는다(`UC-BUILTIN-001`) | 두 함수가 **인자로만** 값을 받는다. 시그니처가 계약이다 |
+| Model이 state를 자기가 commit하지 못한다 | working/committed 경계가 무너진다(§5.7) | `save_payload(target)`이 받는 것은 **열려 있는 대상뿐**이고, 그것을 열고 `ModelStateRef`를 발행하는 것은 `flow/model_state.py`다 |
+| Store 핸들이 소비자에게 가지 않는다 | `store.query(...)` 한 줄이면 look-ahead다(§2.2) | 핸들을 갖는 것은 `flow/views.py` 하나이고, 소비자는 requirement를 선언할 뿐이다 |
+
+`exchange`가 `data`의 물리 층(`sources`·`store`)만 쓰고 `requirements`·`windows`를 쓰지 않는 것도 같은
+성질이다 — 체결은 창 조회가 아니라 점 조회이므로 애초에 필요한 타입이 다르다(§6.2).
+
+### 10.2 확장점은 넷이고 내장도 같은 문으로 들어온다
+
+**결정.** 사용자가 저작할 수 있는 컴포넌트는 넷이다. 넷 다 `ComponentRef`로 지목되고, 같은 conformance
+suite를 통과해야 등록되며, `vqapr new`가 템플릿을 깐다.
+
+| 확장점 | 계약 | 내장 | 왜 여는가 |
+|---|---|---|---|
+| **DataModel** | `models/data_model.py` | 없음 | 값을 만든다. 체결될 것이 없어 척추가 안 뚫린다 |
+| **StrategyModel** | `models/strategy_model.py` | **없음 — 의도적** | PRD §2.7: *"project-owned proprietary alpha를 package built-in에 가두지 않는다"* |
+| **Exchange** | `exchange/venue.py` | `exchange/venues/` | venue 규칙은 시장 사실이고 프로젝트마다 다르다 |
+| **Constraint** | `constraints/constraint.py` | `constraints/builtin/` | metric의 경제적 의미와 bound는 user 소유(PRD §12.4) |
+
+**닫힌 것**: `account` · `valuation` · `orders` · `flow` · `runtime` · `evidence`.
+
+| 닫힘 | 왜 |
+|---|---|
+| `account` | commit authority가 하나여야 한다(§2.3). 열면 `intended ≠ committed`가 사용자 코드에 달린다 |
+| `valuation` | NAV 정의가 run마다 다르면 두 run의 성과를 비교할 수 없다. mark 부재 시 추정 금지(§7.4)도 우회된다 |
+| `orders` | `intended → requested` 경계 그 자체. 열면 §2.4의 네 단계가 무너진다 |
+| `flow` · `runtime` | 시간 소유(§2.1)와 이벤트 순서(§3.2). 열면 PIT 경계가 사용자 코드로 내려간다 |
+| `evidence` | 영수증을 생산자가 쓰면 위조된다(§9.1) |
+
+**내장이 특권 API를 쓰면 예제가 아니라 거짓말이다.** `academic`과 `krx`는 `ComponentRef`로 주입되고
+preflight는 그것이 내장인지 사용자 것인지 **구분하지 않는다.** 이것이 PRD §2.7의 *"built-in은 계산
+기능이자 executable example"*의 실체이며, 검사 가능한 형태는 하나다 — **내장이 쓰는 API 집합 ⊆ public
+surface.**
+
+#### 사용자가 컴포넌트를 만드는 흐름
+
+```bash
+vqapr new strategy ./my_strategy      # 구현 파일 + yaml + 자기 conformance 테스트 + README
+cd my_strategy && pytest              # **처음엔 실패한다.** 통과 조건이 실행 가능한 형태로 온다
+vqapr check .                         # 같은 검사, 기계 판독 결과 (agent가 읽는 쪽)
+vqapr register . --project ../research   # fingerprint를 찍어 ComponentRef로 등록
 ```
 
-강제 규칙 (import linter로 검사):
+- **템플릿이 자기 테스트를 들고 나온다.** 계약이 문서가 아니라 실행되는 형태로 전달된다.
+- **`pytest`와 `vqapr check`와 `register`가 같은 검사를 부른다.** 갈리면 *"로컬에선 되는데 등록이 안
+  된다"*가 생긴다.
+- **`register`가 fingerprint를 찍는 순간이 계약의 시작점**이다. 이후 source가 바뀌면 compute 전에
+  drift로 거부된다(`UC-EXTENSION-002`).
 
-- `domain`은 storage/pandas/provider/concrete Exchange를 import하지 않는다.
-- `portfolio.weighting`과 `portfolio.optimize`는 **`domain`(+ solver)만** import한다.
-  view/store/clock/account/exchange 전부 금지.
-- **`research`는 `data`와 `domain`만** import한다. `account`·`exchange`·`orders`·`flow` 전부 금지.
-  - **state store도 여기 걸린다.** `save_payload()`/`load_payload()`는 열려 있는 대상만 받고, 그것을
-    열고 닫고 `ModelStateRef`를 발행하는 것은 `flow/`다(§5.1.1). Model이 store를 알면 state를 자기가
-    commit할 수 있게 되어 §5.7의 working/committed 경계가 무너진다.
-  - **왜**: DataModel이 account를 보면 결과가 그 run에 묶여 재사용할 수 없다(PRD §2.3). 그 경계를
-    문서가 아니라 도구가 지킨다.
-  - `strategy`는 `research`를 import한다 — 공통 계약이 거기 있기 때문이다. 반대 방향은 금지.
-- `strategy`는 `exchange`와 mutable `account`를 import하지 않는다.
-- **`strategy`와 `research`는 체결 테이블에 접근하지 않는다.** `exchange`를 import하지 않는 것으로 이미
-  막히지만, 계약 이름을 따로 두어 실패 이유가 드러나게 한다.
-  - **왜**: 접근할 수 있으면 어느 종목이 그날 거래 불가가 될지를 판단 시점에 알게 된다. 그리고 판단이
-    일별 관측을 쓰면서 체결은 더 촘촘한 단위로 이루어지는 구성이 표현되지 않는다(§6.2).
-  - 판단에 필요한 거래 가능 여부는 등록된 dataset으로 읽는다. 그 경로는 `data`이므로 열려 있다.
-- `exchange`는 `data`의 물리 층(source 정의·store port)만 쓰고 `DataRequirement`·`ModelWindow`는 쓰지
-  않는다. 체결은 창 조회가 아니다(§6.2).
-- `account`는 StrategyModel/Exchange 구현을 import하지 않는다.
+### 10.3 `testing/`은 패키지 안에 있다
+
+**결정.** 픽스처 빌더와 conformance suite를 패키지에 출하한다.
+
+- **왜**: `UC-EXTENSION-002`는 사용자가 local StrategyModel을 작성·검증하기를 요구하고 `UC-FACADE-001`은
+  그것을 **package source를 열지 않고** 하라고 요구한다. `decide()`를 한 번이라도 돌리려면
+  `StrategyModelContext`와 calendar와 창이 필요하다. 출하된 kit이 없으면 사용자는 내부를 import하는 수밖에
+  없고, **그것이 PRD §1.4가 "public product surface의 결함"이라고 부른 상황이다.**
+- **conformance suite의 입력은 `ComponentRef`다.** 내장이든 사용자 것이든 같은 타입으로 들어오므로
+  **차별할 분기점이 존재하지 않는다.** `academic`과 `krx`가 이 suite를 통과하는 첫 두 구현이다.
+- 우리 테스트가 같은 빌더를 쓰므로 픽스처가 dogfooding된다. `tests/testing/`이 suite 자체를 검증한다.
+
+> **Reference.** nautilus는 `test_kit/{stubs, mocks, strategies, providers}`를 패키지에 출하하고
+> `tests/unit_tests/test_kit/`에서 그것을 다시 테스트한다. qlib에는 이 층이 없고, 그래서 사용자가 자기
+> 전략을 검증하려면 `tests/`를 읽어야 한다.
+
+### 10.4 `agent/`는 호출되지 않는다
+
+**결정.** agent 표면은 독립 층이며, package의 deterministic 경로에서 **호출되지 않고** 반대 방향도 없다.
+
+- **왜**: PRD §2.6이 *"package의 deterministic behavior가 agent skill을 호출하거나 대화 상태를 소유하지
+  않는다"*고 못 박았다. `agent/`가 어딘가에서 import되는 순간 그 보장이 깨진다.
+- 이 층은 **파일을 만들어내는 생산자**이고 진입은 CLI로만 일어난다.
+- `descriptors.py`가 error code·requirement schema·컴포넌트 계약을 **패키지에서 생성**한다. 손으로 적으면
+  `domain/errors.py`와 어긋나므로, 생성하면 drift가 구조적으로 불가능하다.
+- **변경 이유가 독립적이다.** Codex나 Claude Code의 skill 프로토콜이 바뀔 때 바뀌고, portfolio 수학이
+  바뀔 때는 바뀌지 않는다. 그래서 데이터 폴더가 아니라 층이다.
 
 ---
 
@@ -2408,8 +2785,10 @@ long-only로 바꾸지 않는다.
 [run C]  enhanced index              account C
          window: B의 저장된 결과 + benchmark + 거래가능 여부
          account: 현재 physical 비중
-         → optimize(desired = bench + s·active, lower=0,
-                    upper=max(10%, bench), frozen=…, cash_range=…)
+         → bounds = context.constraint_bounds()      ← no_short + single_name_cap (§5.7)
+                    벤치마크 비중은 제약이 자기 requirement로 읽는다
+         → optimize(desired = bench + s·active,
+                    lower=bounds.lower, upper=bounds.upper, frozen=…, cash_range=…)
          → 생성 시 검증 (§5.4)
          → KRX Exchange → fill → commit
 ```
@@ -2428,13 +2807,14 @@ turnover-aware한 A가 자기 계좌를 볼 수 있다. **C는 B의 결과를 �
                    Σw + cash = 1 · 상하한 · 현금 범위 · frozen 불변
                    어기면 intent를 만들지 않는다 → 주문도 mutation도 없다
 
-[체결]     OrderPlanner → Exchange.  제약 평가 없음(§6)
+[체결]     plan_orders → Exchange.  제약 평가 없음(§6)
 
 [감시]     committed actual state 평가 → finding
 ```
 
-- **벤치마크가 없으면 판단 시점에 실패한다**(`UC-CONSTRAINT-002`). 관찰 결과는 "주문·mutation 없음"으로
-  같고, 실패 지점만 앞이다.
+- **벤치마크가 없으면 판단 시점에 실패한다**(`UC-CONSTRAINT-002`). 정확히는 `single_name_cap`이 자기
+  requirement를 투영하는 단계에서 실패하므로 `optimize`가 아예 호출되지 않는다(§5.7). 관찰 결과는
+  "주문·mutation 없음"으로 같고, 실패 지점만 앞이다.
 - **정수 수량 변환 때문에 실제 비중이 상한을 살짝 넘을 수 있다.** 판단 시점에는 알 수 없는 값이다.
   fill 진단에 남고 monitoring이 잡는다(`UC-CONSTRAINT-ADJUST-001`, `UC-EXEC-003`).
 
@@ -2579,7 +2959,7 @@ A를 5% 직접 들고 X를 10% 들면 **A 노출 = 0.05 + 0.10 × 0.5 = 0.10**�
 
 | | |
 |---|---|
-| `L`은 누가 만드나 | **StrategyModel.** 패키지는 ETF ticker로 구성종목을 자동 발견하지 않는다(PRD §8.2) |
+| `L`은 누가 만드나 | **StrategyModel.** `transforms/lookthrough`(§5.6)를 부를 수는 있지만 **부르는 것은 전략이다.** 패키지는 ETF ticker로 구성종목을 자동 발견하지 않는다(PRD §8.2) |
 | `L`은 어디에 쓰이나 | **목적함수에만.** 제약은 physical `w`에만 건다 |
 | 왜 제약이 physical인가 | 계좌에 남는 것이 physical이고 monitoring이 판정할 대상도 그것이다. 노출은 계산값이라 **매핑이 바뀌면 과거 판정까지 달라진다** |
 | 구성종목이 바뀌면 | dataset이라 `available_at`이 적용된다. 변경을 알 수 있게 된 시점 전에는 보이지 않는다(`UC-LOOKTHROUGH-002`) |
@@ -2787,6 +3167,9 @@ optimize(
     desired = B + m * Ã,                  # 노출 공간
     current = 지금 계좌의 실제 비중,        # ← ⑤가 여기 걸려 있다
     L       = ETF 열을 가진 매핑,           # StrategyModel이 만든다 (§8.2)
+    # bounds가 두 출처에서 온다 (§5.7)
+    #   주식 0 / max(10%, B)  ← 선언된 제약의 투영. 검증과 monitoring이 판정한다
+    #   ETF  e / e            ← 이 전략의 구성 선택. compliance가 아니다
     lower   = {주식: 0, ETF: e}, upper = {주식: max(10%, B), ETF: e},
     cash_range, cost, turnover_penalty,
 )
@@ -2882,7 +3265,7 @@ ETF 비중 6개 × 알파 반영배수 6개 × 앙상블 방식 6개. **각각 �
 ```text
 Residual DataModel result
     ↓
-CNN Score DataModel.materialize()
+materialize(CNN Score DataModel)        ← flow의 진입점이다 (§4.4, §10)
     ↓ (time, instrument, score, model_state_ref)
 Pair-Trading StrategyModel
     ↓
@@ -2942,7 +3325,12 @@ class RunDefinition(BaseModel):
     initial_state_ref: ModelStateRef | None
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
+    constraints: ConstraintSet | None = None      # 판단·검증·monitoring이 함께 본다 (§5.7)
+    monitoring: MonitoringPolicy | None = None    # TriggerPolicy. decision cadence와 독립 (§3.6)
 ```
+
+`strategy`·`exchange`와 마찬가지로 `constraints`의 각 항목도 `ComponentRef`로 지목된다. 내장
+(`no_short`·`single_name_cap`)과 project-local 구현이 preflight에서 구분되지 않는다(§10.2).
 
 시작 전 검사 후 동결:
 
@@ -2955,7 +3343,9 @@ class RunDefinition(BaseModel):
 - 모든 (instrument 종류, 방향, 실행 시점)에 **정확히 하나의** `CostRule`이 매칭됨 (§6.2)
 - initial account 불변식
 - `initial_state_ref`가 선택한 Model implementation과 compatible하고 committed 상태임 (§5.1.1)
-- schedule 결정성
+- schedule 결정성 — 같은 frozen input이 같은 `Timeline`을 만든다(§2.1). **두 리스트를 비교한다**
+- 선언된 각 `Constraint`의 `requirements()`가 등록된 dataset으로 충족 가능함 (§5.7)
+- `monitoring` cadence의 timezone ↔ calendar timezone
 
 `initial_state_ref=None`은 fresh Model을 뜻한다. 이전 또는 latest state를 자동 탐색하지 않는다. state가 있으면
 framework가 memory를 복원하고 payload가 있을 때 `load_payload()`를 호출한다. 초기 belief나 hyperparameter는
@@ -2988,20 +3378,29 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 
 기존 source를 조금씩 호환시키지 않는다. 아래 vertical slice로 다시 만든다.
 
-1. `domain` + `runtime` + explicit `SessionCalendar`
+1. `domain` + `runtime` — explicit `SessionCalendar` + frozen `Timeline`
 2. minimal `data` — registration / requirement / `ModelWindow`
-3. `research` — `Model` 공통 계약 + `DataModel` + materialize + `available_at` 부여
-4. `Account` aggregate + mode + history recording
-5. `portfolio.weighting` + `portfolio.optimize` (순수 함수 + 테이블 기반 테스트)
-6. `PortfolioIntent` + `OrderPlanner`
-7. `Exchange` protocol + Academic fixture
+3. `models` 전부 + `flow/materialize` — `Model` 공통 계약 · `DataModel` · `available_at` 부여
+4. `account` + `valuation`
+5. `transforms` + `portfolio` (순수 함수 + 테이블 기반 테스트)
+6. `constraints` + `PortfolioIntent` + `orders.plan_orders`
+7. `exchange` + `venues/academic`
 8. 하나의 `SimulationFlow` closed loop
-9. KRX daily profile
+9. `venues/krx`
 10. 세 showcase를 같은 public spine 위에서 (두 전략 + Fama-French)
-11. artifacts / reports / Facade / 외부 소비자 테스트
+11. `evidence` / `analysis` / `extension` / `agent` / `public.py` / 외부 소비자 테스트
 
 **3번을 4번보다 앞에 둔 이유**: `Model` 공통 계약(trigger·requirements·memory)이 `StrategyModel`의 상위이므로
 먼저 서야 한다. 그리고 DataModel은 account 없이 검증할 수 있어 execution 없이 닫힌다.
+
+**5번과 6번이 순수 함수인 이유**: `transforms`·`portfolio`·`constraints`는 Store도 Account도 Timeline도
+없이 검증된다. 그래서 execution이 서기 전에 완결되고, 나중에 값이 틀렸을 때 의심할 곳이 좁아진다.
+
+**6번이 5번 뒤인 이유**: `intents.py`의 생성 시 검증이 `constraints/evaluation.py`를 부른다(§5.4, §5.7).
+
+**`testing/`은 슬라이스마다 자란다.** 픽스처 빌더는 1번부터 필요하고, conformance suite는 각 확장점의
+계약이 선 직후에 붙는다 — `models`는 3번, `exchange`는 7번, `constraints`는 6번. 11번에서 `extension`이
+그것들을 `registration`으로 묶는다.
 
 중간 단계에서 **두 번째 Flow, legacy intent adapter, Account fork를 만들지 않는다.** 임시 adapter가
 불가피하면 public surface 밖에 두고 제거 조건과 테스트를 같은 implementation record에 적는다.
@@ -3023,7 +3422,7 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 | `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · execution 거치지 않음 · materialize 진입점) |
 | `UC-MODEL-003` | §4.4 (`materialize`) + §5.1.1 (payload) + §11.8 (rolling CNN) |
 | `UC-FACTOR-001` | §11.1 (패턴) + §11.2 (전체 규모 검증) |
-| `UC-BUILTIN-001` | §5.3 |
+| `UC-BUILTIN-001` | §5.3 (weighting 순수성) + §5.6 (`transforms/`도 같은 leaf 규칙) |
 | `UC-ALPHA-BUDGET-001` | §5.3 (`cash_range`) + §5.4 (생성 시 검증) |
 | `UC-STATE-001`, `UC-STATE-002`, `UC-ALPHA-ADAPTIVE-001` | §5.1.1 (memory + payload, working/committed) + §12 (`initial_state_ref`) |
 | `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`, `UC-ENSEMBLE-001` | §5.2 (StrategyModel 체인 · 중첩 없음) + §5.4 + §11.4 |
@@ -3036,15 +3435,16 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 | `UC-COST-001`~`004` | §6.2 (`Instrument.kind` + `CostRule` 선택자 + 정확히 하나) + §8.3 |
 | `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §6.4 + §7.1 |
 | `UC-ACCOUNT-HISTORY-001` | §7.3 |
-| `UC-EXEC-003`, `UC-MONITOR-001` | §8.1 (독립 MONITORING callback) |
-| `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.3 (`optimize`) + §5.4 (생성 시 검증) + §11.3 (패턴) + §11.7 (전체 규모) |
-| `UC-LOOKTHROUGH-001`~`003` | §5.3 (`optimize`의 `L`) + §11.5 (두 축) + §11.7 ④ (ETF 하한·상한이 physical 상하한에서 유도됨). StrategyModel이 만들고 패키지는 자동 확장하지 않음 |
+| `UC-EXEC-003`, `UC-MONITOR-001` | §5.7 (생산 검증과 같은 `evaluation`) + §8.1 (독립 MONITORING dispatch) |
+| `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.7 (선언·투영·평가) + §5.3 (`optimize`) + §5.4 (생성 시 검증) + §11.3 (패턴) + §11.7 (전체 규모) |
+| `UC-LOOKTHROUGH-001`~`003` | §5.3 (`optimize`의 `L`) + §5.6 (`transforms/lookthrough`) + §11.5 (두 축) + §11.7 ④. StrategyModel이 명시적으로 부르고 패키지는 자동 확장하지 않음 |
 | `UC-REPORT-002` | §9.1 (봉투 · 예약 컬럼 · 주문 형태 기록) + §11.7 ⑦ |
 | `UC-ARTIFACT-001`~`003`, `UC-RESEARCH-001`, `UC-REPORT-001`, `UC-REPORT-002` | §9 |
-| `UC-EXTENSION-001`, `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10 |
+| `UC-EXTENSION-001` | §5.6 (`transforms/neutralize`가 고쳐 쓸 원본) + §10.2 |
+| `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10.2 (네 확장점·`ComponentRef`·fingerprint) + §10.3 (`testing/` 없이는 검증이 불가능) |
 | `UC-CONFIG-001` | §12 |
-| `UC-ONBOARD-001` | `project/` + `resources/` |
-| `UC-RETURN-001` | §1.1 (`research/`는 척추에 들어오지 않는다) |
+| `UC-ONBOARD-001` | §10.4 (`agent/`) |
+| `UC-RETURN-001` | §1.1 (DataModel은 척추에 들어오지 않는다) + §10 (`analysis/`는 새 return을 만들지 않는다) |
 | future (`UC-FUTURE/PERP/CASHFLOW/SETTLEMENT/PROD/RECOVERY/IMPACT/REAL-SHORT-001`) | 현재 Exchange/Account가 미지원 semantics를 **명시적으로 거부**하는 것으로 경계만 보존 |
 
 ---
@@ -3174,7 +3574,8 @@ live에서는 그 간격이 사라진다.
 - [ ] warm-up 구간 candidate가 `DECISION_SKIPPED`로 기록되고, 그 이후의 결측은 실패한다
 - [ ] `LastSessionOfMonth(months=(6,))`가 휴장을 반영한 6월 마지막 거래일에 발화한다
 - [ ] 선언 없이 가격 coverage에서 session을 만들어내는 경로가 없다
-- [ ] `research`가 `account`/`exchange`/`orders`/`flow`를 import하지 않는다 (import linter)
+- [ ] `DataModelContext`에 `account` 접근이 존재하지 않는다 (경로의 부재로 강제)
+- [ ] 타입이 그것을 만드는 층에 있고, 패키지 사이에 순환 import가 없다
 - [ ] `decide()`가 반환한 intent가 예외 없이 execution을 통과한다
 - [ ] `decide()` 안에서 다른 run을 실행하는 경로가 없다
 - [ ] DataModel 결과가 execution을 거치지 않는다
@@ -3191,7 +3592,7 @@ live에서는 그 간격이 사라진다.
 - [ ] `PortfolioIntent` 생성 시 `Σw + cash = 1`과 상하한·현금 범위를 검증한다
 - [ ] execution 경로에 제약 평가가 없다
 - [ ] 거래 불가 종목이 제외가 아니라 현재 비중 고정으로 처리된다
-- [ ] `StrategyModel`·`DataModel`에서 체결 테이블에 도달하는 경로가 없다 (import linter)
+- [ ] `StrategyModel`·`DataModel`에서 체결 테이블에 도달하는 경로가 없다
 - [ ] 체결 테이블 조회가 `DataRequirement`·`ModelWindow`를 거치지 않는다
 - [ ] 체결 테이블에 `available_at`이 없고 `trade_at`이 체결 시각과 정확히 일치로 조회된다
 - [ ] 선언한 체결 가격이 없을 때 다른 컬럼으로 대체되지 않는다
@@ -3204,5 +3605,22 @@ live에서는 그 간격이 사라진다.
 - [ ] 판단 시각과 체결 시각이 같으면 preflight가 막는다
 - [ ] report가 intended / requested / dealt / committed / marked를 구분한다
 - [ ] source/package/import/CLI가 전부 `vqapr`다
+
+제약 · 확장점 · 표면:
+
+- [ ] `ConstraintSet` 없이 선언한 run이 정상 실행된다 (`UC-CONSTRAINT-001`)
+- [ ] 같은 `evaluation` 함수가 intended weights와 actual holdings 둘 다에 쓰인다
+- [ ] 제약이 요구한 PIT data가 없으면 **portfolio 결과를 만들기 전에** 실패한다
+- [ ] 거래 불가 종목의 비중 고정이 `ConstraintFinding`으로 보고되지 않는다 (제약이 아니라 시장 사실)
+- [ ] 내장 Exchange·Constraint가 쓰는 API 집합이 public surface 안에 있다
+- [ ] preflight가 내장 컴포넌트와 project-local 컴포넌트를 구분하지 않는다
+- [ ] `vqapr new`가 깐 템플릿이 **처음에는 conformance를 통과하지 못한다**
+- [ ] `pytest` · `vqapr check` · `vqapr register`가 같은 conformance 코드를 부른다
+- [ ] 등록 후 source가 바뀌면 compute 전에 drift로 거부된다
+- [ ] 사용자가 `vqapr.testing`만으로 자기 StrategyModel을 실행해볼 수 있다 (내부 import 없이)
+- [ ] `analysis/`가 가격 dataset을 읽어 수익률을 만드는 경로가 없다
+- [ ] 의존성 목록에 plotting 라이브러리가 없다
+- [ ] `Timeline`이 preflight에서 확정되고, 같은 frozen input이 같은 이벤트 열을 만든다
+- [ ] `utils/`·`workflow/`·`contrib/`·`common/`·`config/`가 존재하지 않는다
 
 이 체크리스트가 characterization test로 닫히기 전에는 rewrite가 끝났다고 하지 않는다.

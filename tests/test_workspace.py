@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.workspace import Workspace
 
@@ -22,11 +23,17 @@ def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistrati
     return DatasetRegistration.of(raw_id, "prices", **kwargs)
 
 
+def _source(**overrides) -> SourceSpec:
+    kwargs = {"hive_partitioned": True}
+    kwargs.update(overrides)
+    return SourceSpec.of("prices", "prepared/price_daily", **kwargs)
+
+
 def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
     expected = _registration()
     workspace = Workspace.create(tmp_path)
 
-    assert workspace.register_dataset(expected) is True
+    assert workspace.register_dataset(expected, _source()) is True
 
     reopened = Workspace.open(tmp_path)
     assert reopened.dataset("price_daily") == expected
@@ -37,8 +44,8 @@ def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
     second = _registration("price_adjusted", fields={"close": "adjusted_close"})
     workspace = Workspace.create(tmp_path)
 
-    workspace.register_dataset(first)
-    workspace.register_dataset(second)
+    workspace.register_dataset(first, _source())
+    workspace.register_dataset(second, _source())
 
     reopened = Workspace.open(tmp_path)
     assert {item.dataset_id: item for item in reopened.datasets} == {
@@ -50,21 +57,21 @@ def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
 def test_identical_reregistration_is_an_idempotent_noop(tmp_path: Path) -> None:
     registration = _registration()
     workspace = Workspace.create(tmp_path)
-    assert workspace.register_dataset(registration) is True
+    assert workspace.register_dataset(registration, _source()) is True
     before = workspace.path.read_bytes()
 
-    assert workspace.register_dataset(_registration()) is False
+    assert workspace.register_dataset(_registration(), _source()) is False
     assert workspace.path.read_bytes() == before
 
 
 def test_conflicting_reregistration_fails_without_mutation(tmp_path: Path) -> None:
     original = _registration()
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(original)
+    workspace.register_dataset(original, _source())
     before = workspace.path.read_bytes()
 
     with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(_registration(fields={"open": "open"}))
+        workspace.register_dataset(_registration(fields={"open": "open"}), _source())
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
@@ -104,10 +111,137 @@ def test_explicit_workspaces_do_not_share_declarations(tmp_path: Path) -> None:
     first = Workspace.create(first_root)
     second = Workspace.create(second_root)
 
-    first.register_dataset(_registration())
-    second.register_dataset(_registration("fundamentals"))
+    first.register_dataset(_registration(), _source())
+    second.register_dataset(_registration("fundamentals"), _source())
 
     assert [str(item.dataset_id) for item in Workspace.open(first_root).datasets] == ["price_daily"]
     assert [str(item.dataset_id) for item in Workspace.open(second_root).datasets] == [
         "fundamentals"
     ]
+
+
+def test_direct_construction_cannot_bypass_an_existing_workspace(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path)
+    workspace.register_dataset(_registration(), _source())
+    before = workspace.path.read_bytes()
+
+    with pytest.raises(TypeError, match=r"Workspace\.create.*Workspace\.open"):
+        Workspace(tmp_path, {})
+
+    assert workspace.path.read_bytes() == before
+
+
+def test_stale_instance_merges_with_current_durable_state(tmp_path: Path) -> None:
+    current = Workspace.create(tmp_path)
+    current.register_dataset(_registration("one"), _source())
+    stale = Workspace.open(tmp_path)
+
+    current.register_dataset(_registration("two"), _source())
+    stale.register_dataset(_registration("three"), _source())
+
+    assert [str(item.dataset_id) for item in Workspace.open(tmp_path).datasets] == [
+        "one",
+        "three",
+        "two",
+    ]
+
+
+def test_idempotent_registration_rechecks_that_workspace_still_exists(tmp_path: Path) -> None:
+    registration = _registration()
+    workspace = Workspace.create(tmp_path)
+    workspace.register_dataset(registration, _source())
+    workspace.path.unlink()
+
+    with pytest.raises(VqaprError) as caught:
+        workspace.register_dataset(registration, _source())
+
+    payload = caught.value.as_dict()
+    assert payload["mutation"] is False
+    assert payload["failures"][0]["code"] == "workspace.open.missing"
+    assert not workspace.path.exists()
+
+
+def test_source_spec_survives_reopening_the_workspace(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path)
+    source = _source()
+
+    workspace.register_dataset(_registration(), source)
+
+    assert Workspace.open(tmp_path).source("prices") == source
+
+
+def test_invalid_dataset_id_lookup_is_a_structured_failure(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path)
+
+    with pytest.raises(VqaprError) as caught:
+        workspace.dataset("bad id")
+
+    payload = caught.value.as_dict()
+    assert payload["stage"] == "workspace.dataset.lookup"
+    assert payload["mutation"] is False
+    assert payload["failures"][0]["code"] == "workspace.dataset.lookup.invalid"
+
+
+def test_missing_dataset_lookup_is_a_structured_failure(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path)
+
+    with pytest.raises(VqaprError) as caught:
+        workspace.dataset("missing")
+
+    payload = caught.value.as_dict()
+    assert payload["stage"] == "workspace.dataset.lookup"
+    assert payload["mutation"] is False
+    assert payload["failures"][0]["code"] == "workspace.dataset.lookup.missing"
+
+
+def test_registration_rejects_a_mismatched_source_without_mutation(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path)
+    before = workspace.path.read_bytes()
+
+    with pytest.raises(VqaprError) as caught:
+        workspace.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
+
+    payload = caught.value.as_dict()
+    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["mutation"] is False
+    assert payload["failures"][0]["code"] == "workspace.dataset.register.source_mismatch"
+    assert workspace.path.read_bytes() == before
+
+
+def test_conflicting_source_spec_fails_without_mutation(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path)
+    workspace.register_dataset(_registration(), _source())
+    before = workspace.path.read_bytes()
+
+    with pytest.raises(VqaprError) as caught:
+        workspace.register_dataset(
+            _registration("price_adjusted"),
+            _source(hive_partitioned=False),
+        )
+
+    payload = caught.value.as_dict()
+    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["mutation"] is False
+    assert payload["failures"][0]["code"] == "workspace.dataset.register.source_conflict"
+    assert workspace.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("raw_source_id", "code"),
+    [
+        ("bad id", "workspace.source.lookup.invalid"),
+        ("missing", "workspace.source.lookup.missing"),
+    ],
+)
+def test_source_lookup_failures_are_structured(
+    tmp_path: Path, raw_source_id: str, code: str
+) -> None:
+    workspace = Workspace.create(tmp_path)
+
+    with pytest.raises(VqaprError) as caught:
+        workspace.source(raw_source_id)
+
+    payload = caught.value.as_dict()
+    assert payload["stage"] == "workspace.source.lookup"
+    assert payload["mutation"] is False
+    assert payload["failures"][0]["code"] == code

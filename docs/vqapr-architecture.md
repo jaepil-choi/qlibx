@@ -459,11 +459,16 @@ daily OHLCV에는 `2024-03-05`만 있고 `15:30 KST`가 없다. 그런데 `avail
 
 ```text
 session 날짜   ← 선언된 유도 규칙으로 데이터에서
-open/close 시각 ← user 선언 (이미 PRD §4.2의 available_at 규칙이 담고 있다)
+open/close 시각 ← user가 calendar 유도 시점에 **따로 선언한다**
 ```
 
-**두 번째는 새로 요구하지 않는다.** "`DATE=2024-03-05`인 종가 행은 `2024-03-05 15:30 Asia/Seoul`에
-available해진다"는 선언에 이미 그 venue의 종가 시각이 들어 있다. 같은 선언을 재사용한다.
+**두 번째를 재사용할 곳이 없다.** `available_at`이 규칙이 아니라 user가 계산해 넣은 컬럼이므로(§4.1),
+config에는 *"종가는 15:30에 알 수 있게 된다"*는 규칙이 남아 있지 않다. 값만 있고 그 값을 만든 시각
+규약은 package가 갖고 있지 않다.
+
+그래서 calendar 유도가 session 시각을 **독립적으로 요구한다.** 같은 값을 두 번 말하게 되는 것처럼
+보이지만, 실제로는 한 번은 데이터 안에(컬럼 값) 한 번은 선언 안에(session 시각) 있는 것이고 **package가
+아는 것은 후자뿐**이다.
 
 #### 유도 규칙마다 위험이 다르다
 
@@ -511,8 +516,8 @@ vqapr materialize    ...                              그 frozen calendar를 쓴
 - **§3.1의 금지를 그대로 지킨다.** 아무도 선언하지 않았는데 Flow가 가격 coverage로 session을
   만들어내는 경로는 없다 — 이 명령을 사용자가 규칙을 골라 실행해야만 calendar가 생긴다. §3.1의 금지는
   **package의 추측**을 향한 것이지 user의 선언을 향한 것이 아니었다.
-- **시각은 여기서도 유도되지 않는다.** `--session-close`가 필요하며, 그 값은 이미 등록의
-  `available_at` 규칙이 담고 있으므로 같은 선언을 재사용할 수 있다.
+- **시각은 여기서도 유도되지 않는다.** `--session-close`가 필요하다. 등록에는 `available_at` **값**만
+  있고 그것을 만든 시각 규약은 없으므로 재사용할 것이 없다(위).
 - **왜 이 완화가 안전한가**: 선택된 규칙과 원천 dataset이 frozen input에 남아 재현되고, 어떤
   dataset의 어떤 규칙에서 나왔는지 감사할 수 있으며, result에 limitation으로 표시된다. 조용한 추측과
   정반대다.
@@ -522,15 +527,20 @@ vqapr materialize    ...                              그 frozen calendar를 쓴
 
 ## 4. Data
 
-이 층에는 **독자가 둘**이고 보는 것이 전혀 다르다.
+이 층에는 **독자가 셋**이고 보는 것이 전혀 다르다.
 
 ```text
-등록하는 쪽   경로 · 파일 형식 · query · 물리 컬럼 이름 · 넓은 표인지 폴더인지    전부 다룬다
-소비하는 쪽   dataset_id · framework field 이름 · lookback · coverage           그것뿐
+준비하는 쪽   xlsx · csv · DB → parquet + config          **우리 밖.** user와 그들의 agent
+등록하는 쪽   경로 · 파티션 · 물리 컬럼 이름                config를 쓰고 우리가 검증한다
+소비하는 쪽   dataset_id · framework field 이름 · lookback  그것뿐
 ```
 
-§4.1~§4.5는 전자를 정하고, **둘 사이의 경계는 §4.6이 정한다.** 아래를 읽으며 *"이건 누가 보는
-것인가"*를 계속 물어야 한다 — 등록 쪽 개념이 소비자에게 새는 것이 이 층에서 가장 흔한 설계 실수다.
+**첫 줄이 package 밖이라는 것이 이 층의 출발점이다**(PRD §4.0). 우리는 형식 변환도 스키마 추론도 하지
+않고, 완성된 parquet과 그것을 읽는 config를 받아 **계약을 만족하는지 판정**한다. 대신 그 계약을
+machine-readable하게 발행할 책임을 진다 — 그것이 없으면 user의 agent가 무엇을 만들지 알 수 없다.
+
+§4.1~§4.5는 둘째 줄을 정하고, **둘째와 셋째 사이의 경계는 §4.6이 정한다.** 아래를 읽으며 *"이건 누가
+보는 것인가"*를 계속 물어야 한다 — 등록 쪽 개념이 소비자에게 새는 것이 이 층에서 가장 흔한 설계 실수다.
 
 ### 4.1 Registration — 두 층, 그리고 최소한만
 
@@ -539,7 +549,8 @@ vqapr materialize    ...                              그 frozen calendar를 쓴
 ```python
 class SourceSpec(BaseModel):                      # 물리 — 어디에 어떻게 쌓여 있나
     source_id: str
-    path: Path                                     # 디렉터리면 하위 전부
+    path: Path                                     # 단일 parquet 또는 디렉터리
+    hive_partitioned: bool = False                 # 선언. 우리가 읽을 수 있으면 그만이다
     field_partition: FieldPartition | None = None
 
 class FieldPartition(BaseModel):
@@ -549,12 +560,30 @@ class FieldPartition(BaseModel):
 class DatasetRegistration(BaseModel):             # 의미
     dataset_id: str
     source: str
-    query: str | None = None
     instrument_field: str
-    available_at: AvailabilityBinding
+    available_at: str                              # tz-aware timestamp **컬럼 이름**
     key_fields: tuple[str, ...]
     fields: Mapping[str, str]                      # 프레임워크 이름 → 물리 위치
 ```
+
+**`available_at`은 컬럼 이름이지 규칙이 아니다.** user가 준비 단계에서 계산해 넣은 값이며(PRD §4.0),
+package는 그것이 어떤 가정에서 나왔는지 묻지도 평가하지도 기록하지도 않는다. 검증하는 것은 tz-aware
+인가, null이 없는가, logical key와 함께 유일한가뿐이다.
+
+- **없으면**: 규칙을 config로 받아 평가하는 경로가 생기고, 그 평가가 읽기마다 돌며, 같은 의미를
+  표현하는 방법이 둘(컬럼 vs 규칙)이 되어 소비자가 어느 쪽인지 알아야 한다.
+- **그래서 `data/availability.py`가 없다.** 남는 것이 스키마 검증뿐이라 `datasets.py`와 `scan.py`가 한다.
+
+#### `query`를 두지 않는다
+
+**결정.** 등록에 SQL을 두지 않는다.
+
+- **왜**: 준비가 전부 밖이라면(PRD §4.0) config 안의 query는 **숨은 두 번째 ETL**이다. 사용자는 "정리된
+  parquet을 준다"고 믿는데 실제로는 우리 config가 한 번 더 바꾸는 것이 된다.
+- **없으면 무엇이 아쉬운가**: 아무것도. 투영이나 필터가 필요하면 준비 단계에서 하면 되고, 그 결과가
+  곧 등록 대상이다.
+- **`ExecutionTableSpec.query`는 남는다**(§6.2). 그것은 ETL이 아니라 **venue 유도 규칙의 선언**이며
+  (`거래대금 > 0`), `UC-TRADABILITY-001`이 명시적으로 요구한다. 두 query는 하는 일이 다르다.
 
 - 의미 층은 여전히 여섯 개가 전부다. `fiscal_period`, `session_date`, `revision`, `horizon_end`는
   **일반 column**이다.
@@ -650,6 +679,26 @@ fundamentals/
 `scan.py`는 의미를 모른다. 어느 컬럼이 `available_at`인지, 어느 lookback이 몇 행인지는 각각
 `datasets.py`와 `resolution.py`가 이미 정했다.
 
+#### 파티션에는 축이 둘이고 하는 일이 다르다
+
+같은 hive 문법인데 목적이 다르다. 섞어 읽으면 안 된다.
+
+```text
+item=BPS/    파티션 키가 **field 이름이 된다**       스키마를 결정한다   `field_partition`
+year=2024/   파티션 키가 **가지치기에만 쓰인다**      성능              선언만 한다
+```
+
+- **첫째는 의미다.** 어느 폴더에서 왔는지가 그 값이 무엇인지를 말하므로 `field_partition`이 그 대응을
+  선언해야 한다(위).
+- **둘째는 성능이다.** 큰 dataset에서 권장되지만 **요구하지 않는다.** 단일 parquet이든 hive든 상관없고,
+  우리가 config로 읽을 수만 있으면 된다. `hive_partitioned` 선언은 읽는 방법을 알려주기 위한 것이지
+  품질 기준이 아니다.
+- **그래서 파티션 스킴이 결과를 바꾸지 않는다.** 같은 데이터를 단일 파일에서 연도 파티션으로 옮겨도
+  소비자 선언도 결과도 그대로다(§4.6). 달라지는 것은 얼마나 읽느냐뿐이다.
+
+> lookback pushdown(§4.2)이 실제로 덜 읽게 되는 것은 파티션과 row group 통계 덕이다. 파티션 없이 큰
+> dataset을 쓰면 느린 것이 결함이 아니라 **선택의 결과**이며, 그 선택은 준비하는 쪽에 있다.
+
 #### 개명은 되고 role은 안 된다
 
 `fields`는 **프레임워크 이름 → 물리 위치** 매핑이다.
@@ -676,18 +725,18 @@ fields:
 
 #### 등록이 보장하는 것과 보장하지 않는 것
 
-**결정.** 등록 `query`가 만들어내는 값이 point-in-time으로 안전한지 package는 **판정하지 않는다.**
+**결정.** 등록된 값이 point-in-time으로 안전한지 package는 **판정하지 않는다.**
 
 ```sql
--- 이런 것을 막지 않는다
+-- 사용자의 ETL이 이런 것을 만들어 와도 우리는 모른다
 select date, ticker,
        avg(close) over (order by date rows between 10 preceding and 10 following) as ma
 from prices
 ```
 
-- **왜 안 막나**: 사용자가 등록 query에 안 써도 **자기 ETL에서 미리 계산해 파일로 만들어 오면 똑같다.**
-  두 번째 길이 항상 열려 있으므로 첫 번째만 막는 것은 막은 것이 아니다.
-- **막으면 오히려 나쁜 이유**: "프레임워크가 검사한다"는 인상이 방심을 만든다. **반쪽 보장은 무보장보다
+- **왜 안 막나**: 준비가 전부 package 밖이므로(PRD §4.0) **막을 지점이 아예 없다.** 우리가 보는 것은
+  완성된 parquet뿐이고, 그 안의 값이 어떤 창을 보고 계산되었는지는 데이터에 적혀 있지 않다.
+- **막는 척하면 오히려 나쁘다**: "프레임워크가 검사한다"는 인상이 방심을 만든다. **반쪽 보장은 무보장보다
   나쁘다.**
 - 이것은 PRD §3.2가 이미 정한 경계다 — *"vqapr가 보장하는 것은 **선언된 availability의 준수**다. source의
   실제 경제적 공시 시점에 대한 최종 확인은 user가 내리고, bundled agent skill이 근거 있는 후보를 제시한다."*
@@ -729,7 +778,7 @@ DataRequirement(dataset_id="fundamentals", fields=("bps",), lookback=RowsLookbac
 
 **소비자 코드가 배치에 따라 달라지지 않는다.** 재무를 폴더에서 넓은 표로 바꿔도 이 선언은 그대로다.
 
-이것은 더 넓은 규칙의 한 사례다 — 소비자는 배치뿐 아니라 경로·형식·query도 보지 못한다(§4.6).
+이것은 더 넓은 규칙의 한 사례다 — 소비자는 배치뿐 아니라 경로도 파티션 스킴도 보지 못한다(§4.6).
 
 #### `RowsLookback`은 (instrument × field)별로 센다
 
@@ -957,7 +1006,7 @@ $$available\_at = \max\big(\text{trigger 시각},\ \max(\text{창 안 } availabl
 ### 4.6 소비자가 아는 것과 모르는 것
 
 **결정.** 등록 이후 모든 데이터 접근은 **config로만** 표현된다. 소비자는 그 값이 물리적으로 어디서
-왔는지도, 어떤 query를 거쳤는지도 **알 수 없다.**
+왔는지도, 어떻게 준비되었는지도 **알 수 없다.**
 
 소비자의 어휘는 이것이 전부다.
 
@@ -973,32 +1022,35 @@ coverage        최소 몇 개가 있어야 하는가
 
 #### 왜 이 정도로 막나
 
-- **배치를 바꿔도 소비자가 안 변한다.** 재무를 폴더에서 넓은 표로 옮겨도, csv를 parquet로 바꿔도,
-  store를 교체해도 `DataRequirement` 선언이 그대로다(`UC-DATA-003`).
+- **배치를 바꿔도 소비자가 안 변한다.** 재무를 폴더에서 넓은 표로 옮겨도, 단일 parquet을 연도
+  파티션으로 나눠도, store를 교체해도 `DataRequirement` 선언이 그대로다(`UC-DATA-003`).
 - **계산 결과와 원본이 구분되지 않는다.** DataModel이 만든 dataset을 읽는 것이 "그냥 데이터를 읽는
   것"이 되려면 소비자 쪽에 *"원본이냐 파생이냐"* 분기가 없어야 한다(§4.2).
-- **query가 보이면 그것을 재현하려는 코드가 생긴다.** 소비자가 등록 query를 알면 그 query를 흉내
-  내거나 우회하는 경로가 만들어지고, 그 순간 PIT 처리가 두 곳이 된다.
+- **준비 과정이 보이면 그것을 재현하거나 우회하려는 코드가 생긴다.** 소비자가 원천 배치와 준비 방식을
+  알면 그것을 흉내 내는 경로가 만들어지고, 그 순간 PIT 처리가 두 곳이 된다.
 
 #### 감사 가능한 것과 보이는 것은 다르다
 
 ```text
-frozen input   경로 · format · query · 유도 규칙 · store 선택   전부 기록된다.  감사 가능
-소비자 API     dataset_id · fields · lookback                   그것뿐.        불투명
+frozen input   경로 · 파티션 스킴 · 유도 규칙 · store 선택   전부 기록된다.  감사 가능
+소비자 API     dataset_id · fields · lookback                 그것뿐.        불투명
 ```
 
 기록하지 않는다는 뜻이 아니다. **기록은 전부 하되 소비자에게 주지 않는다.** 그래야 "이 결과가 어느
-파일의 어느 query에서 나왔나"를 나중에 답할 수 있으면서도, 그 답이 소비자 코드의 입력이 되지 않는다.
+파일에서 나왔나"를 나중에 답할 수 있으면서도, 그 답이 소비자 코드의 입력이 되지 않는다.
 
-#### 그래서 `query`를 바꾸면 다른 dataset이다
+#### 그래서 원천이 바뀌면 다른 dataset이다
 
-등록의 `query`와 `path`는 frozen input의 일부이므로 **run identity에 들어간다.** 같은 `dataset_id`로
-등록을 조용히 고치면 이전 결과와 비교 가능하지 않은 데이터가 같은 이름으로 흐른다.
+등록의 `path`와 그것이 가리키는 파일의 내용은 frozen input의 일부이므로 **run identity에 들어간다.**
+같은 `dataset_id`로 다른 parquet을 가리키게 하거나, 같은 경로의 파일을 다시 만들어 덮으면, 이전 결과와
+비교 가능하지 않은 데이터가 같은 이름으로 흐른다.
 
-- 소비자가 query를 볼 수 없다는 것이 *"바꿔도 티가 안 난다"*를 뜻하지 않는다. 오히려 **소비자가
+- 소비자가 원천을 볼 수 없다는 것이 *"바꿔도 티가 안 난다"*를 뜻하지 않는다. 오히려 **소비자가
   알아챌 방법이 없으므로** identity로 잡아야 한다.
-- §4.1이 등록 query의 point-in-time 안전성을 판정하지 않기로 한 것과 짝을 이룬다 — 판정하지 않는
-  대신 **무엇을 썼는지는 남긴다.**
+- §4.1이 준비된 값의 point-in-time 안전성을 판정하지 않기로 한 것과 짝을 이룬다 — 판정하지 않는
+  대신 **무엇을 읽었는지는 남긴다.**
+- 준비가 package 밖이므로(PRD §4.0) **파일은 우리 모르게 바뀔 수 있다.** 그래서 경로만이 아니라 그
+  시점의 내용을 가리키는 표시가 필요하다.
 - 실질적으로 이것은 새 dataset이다. 이전 결과와 나란히 두려면 다른 `dataset_id`로 등록한다.
 
 #### 등록 전과 후
@@ -2422,7 +2474,6 @@ src/vqapr/
 ├── data/            그때 무엇을 읽을 수 있는가
 │   ├── sources.py         SourceSpec · FieldPartition — 물리 배치
 │   ├── datasets.py        DatasetRegistration — 의미. role을 이름에 새기지 않는다
-│   ├── availability.py    AvailabilityBinding + 선언된 지연 규칙 (PRD §4.2)
 │   ├── lookback.py        RowsLookback · CalendarLookback. **미래 방향 타입의 부재가 계약**
 │   ├── requirements.py    DataRequirement · CoverageRequirement
 │   ├── resolution.py      requirement → 물리 질의. lookback을 질의로 밀어 넣는다
@@ -2910,8 +2961,9 @@ PRD §10.2 금지 목록의 첫 항목("tradable만 남기고 자동 재정규�
 
 - 이 규모(240 run)는 **모든 return이 execution을 거친다**는 §2.2의 직접적 비용이다. 벡터화 한 번으로
   끝내는 참조 구현과 대비된다. 대신 각 return이 어떤 체결·비용·계좌 상태에서 나왔는지가 남는다.
-- 참조 구현이 사용한 회계 정렬은 확정된 보고 지연 가정이며 실제 공시 시점이 아니다. 그 가정은 등록의
-  availability rule로 선언되고 결과의 limitation에 남는다(PRD §4.2).
+- 참조 구현이 사용한 회계 정렬은 확정된 보고 지연 가정이며 실제 공시 시점이 아니다. 그 가정은 user가
+  준비 단계에서 `available_at` 값으로 실현하며(PRD §4.0), package는 그것을 검증하지 않는다. 가정 자체는
+  결과의 limitation에 남는다(PRD §4.2).
 
 ---
 
@@ -3563,8 +3615,8 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 기존 source를 조금씩 호환시키지 않는다. 아래 vertical slice로 다시 만든다.
 
 1. `domain` + `runtime` — `SessionCalendar` + **`calendar_derivation`** + frozen `Timeline`
-2. minimal `data` — `scan` / registration / `availability` / `workspace` / requirement / `ModelWindow`
-   + calendar 유도의 **읽기 경로** 연결
+2. minimal `data` — `scan` / registration / `workspace` / requirement / `ModelWindow`
+   + calendar 유도의 **읽기 경로** 연결 + `agent/descriptors`의 **dataset 계약 발행**
 3. `models` 전부 + `flow/materialize` — `Model` 공통 계약 · `DataModel` · `available_at` 부여
 4. `account` + `valuation`
 5. `transforms` + `portfolio` (순수 함수 + 테이블 기반 테스트)
@@ -3587,13 +3639,17 @@ calendar 파일이 없다(§3.6). calendar가 없으면 trigger가 시점을 만
 등록이다. 그래서 등록 실패가 `domain/errors.py`의 machine-readable 계약을 처음으로 시험하는 자리이며,
 `scan`(물리 층을 여는 곳, §4.1)과 `workspace`(선언이 명령 사이에서 사는 곳, §10.5)가 여기서 필요해진다.
 
+**그리고 `agent/descriptors`의 최소 형태가 여기 있어야 한다.** 준비가 package 밖이므로(PRD §4.0) user의
+agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을 발행하지 않으면 등록 가능한 dataset을 아무도
+만들 수 없고, 그러면 2번을 검증할 입력이 없다. `agent/`의 나머지(onboarding·skill)는 11번 그대로다.
+
 **3번을 4번보다 앞에 둔 이유**: `Model` 공통 계약(trigger·requirements·memory)이 `StrategyModel`의 상위이므로
 먼저 서야 한다. 그리고 DataModel은 account 없이 검증할 수 있어 execution 없이 닫힌다.
 
 > **1~3번이 실데이터 milestone을 닫는다.**
 >
 > ```text
-> CSV 등록 → DataRequirement + lookback으로 창 조회 → stateless DataModel이 값 계산
+> parquet 등록 → DataRequirement + lookback으로 창 조회 → stateless DataModel이 값 계산
 >          → materialize가 결과를 쓰고 **같은 등록 계약으로** 다시 등록 → 창으로 되읽기
 > ```
 >
@@ -3757,13 +3813,18 @@ live에서는 그 간격이 사라진다.
 - [ ] `lookback`이 Store query까지 도달한다 (전체 읽고 자르기 없음)
 - [ ] `RowsLookback(N)`이 field가 여럿일 때 field당 N행을 준다 (합쳐서 N행이 아니다)
 - [ ] 같은 dataset을 넓은 표에서 field별 폴더로 바꿔도 소비자의 requirement 선언이 변하지 않는다
-- [ ] 등록 정의에 window 함수를 써도 등록이 실패하지 않는다 (막지 않기로 한 것을 막고 있지 않다)
-- [ ] 소비자 API에 경로·파일 형식·물리 컬럼 이름·`query`가 나타나지 않는다 (§4.6)
-- [ ] 같은 dataset을 csv에서 parquet로 바꿔도 소비자의 requirement 선언이 변하지 않는다
+- [ ] 미래를 반영한 값이 담긴 parquet을 등록해도 등록이 실패하지 않는다 (판정하지 않기로 한 것을
+  판정하고 있지 않다)
+- [ ] `available_at`이 **컬럼**이고, 규칙을 config로 받아 평가하는 경로가 없다
+- [ ] 등록에 `query`가 없다 — 준비는 전부 package 밖이다
+- [ ] xlsx·csv 같은 형식을 읽는 코드가 package에 없다
+- [ ] 등록 가능한 dataset의 계약이 machine-readable하게 발행된다 (PRD §4.0)
+- [ ] 소비자 API에 경로·파티션 스킴·물리 컬럼 이름이 나타나지 않는다 (§4.6)
+- [ ] 단일 parquet과 hive 파티션이 같은 결과를 내고 소비자 선언도 같다
 - [ ] 등록 **후** `SourceSpec`을 직접 여는 경로가 없다 — `scan`은 등록 검증에만 열린다
 - [ ] Model에서 창 없는(lookback 없는) 조회에 도달하는 경로가 없다
-- [ ] calendar 유도가 등록된 dataset을 읽고 raw source를 읽지 않는다
-- [ ] `query`나 `path`가 바뀐 등록이 이전 결과와 같은 identity를 갖지 않는다
+- [ ] calendar 유도가 등록된 dataset을 읽고 raw source를 읽지 않으며, session 시각을 독립적으로 요구한다
+- [ ] 원천 파일이 바뀐 등록이 이전 결과와 같은 identity를 갖지 않는다
 - [ ] `portfolio.weighting`과 `portfolio.optimize`가 `domain`(+solver) 외 아무것도 import하지 않는다
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
 - [ ] Model을 새로 만들고 committed state를 복원해도 같은 다음 결과가 나온다 — 영향을 주는 mutable

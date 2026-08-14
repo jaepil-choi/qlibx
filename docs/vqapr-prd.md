@@ -344,6 +344,10 @@ StrategyModel이 reusable intermediate data를 요구할 때 선택하는 option
 각 extension point마다 public input/output contract, machine-readable requirement와 schema, built-in과 같은
 contract를 따르는 minimal working template, validation command, stage-specific error를 제공한다.
 
+**dataset도 같은 대우를 받는다.** 등록 가능한 dataset이 만족해야 하는 조건 역시 machine-readable하게
+발행된다(§4.0). 확장점만 계약을 발행하고 data는 안 하면, user의 agent가 무엇을 만들어야 하는지 알 수
+없는 채로 준비를 시작하게 된다.
+
 vqapr가 reference component를 제공할 수는 있지만 **project-owned proprietary alpha를 package built-in에
 가두지 않는다.**
 
@@ -550,15 +554,41 @@ intraday event와 partial fill은 future work다.
 semantic binding만 먼저 확인하고, 실제 workflow component를 호출할 때 추가 requirement를 발견한다.
 **등록 성공은 모든 downstream workflow와의 호환성 보증이 아니다.**
 
+### 4.0 입력 계약 — 무엇을 읽고 무엇을 읽지 않는가
+
+vqapr는 **선언된 columnar dataset을 읽는다.** 원천이 무엇이든 — xlsx, csv, 데이터베이스 덤프, 벤더
+API — 그것을 읽을 수 있는 형태로 만드는 것은 **user project와 그 agent의 책임**이다(§12.4).
+
+package는 형식 변환, 스키마 추론, 인코딩 처리, 시트 구조 해석을 **하지 않는다.** 임의 형태의 연구
+데이터를 받아들인다는 것은 임의 형식을 읽는다는 뜻이 아니라 **의미를 강제하지 않는다**는 뜻이다.
+
+이것은 §4.4가 return→unit price 변환에 대해 이미 정한 것과 같은 경계다 — *"변환은 package operation이
+아니다. agent skill이 가정을 설명하고 user가 확정하며, 결과 dataset은 동일한 최소 등록 계약을 따른다."*
+
+#### 그래서 package는 계약을 발행해야 한다
+
+user의 agent가 무엇을 만들어야 하는지 알아야 한다. 따라서 package는 **등록 가능한 dataset이 만족해야
+하는 조건을 machine-readable하게 발행**한다. 이것은 error 이후가 아니라 **작업이 시작되기 전에** 필요하다.
+
+발행되는 계약은 최소한 다음을 말한다: 요구되는 파일 형태, `available_at`의 의미와 타입, instrument와
+logical key의 역할, field 선택 방식, 그리고 각 조건이 충족되지 않을 때의 stable error identity.
+
+**계약을 만족하는 산출물을 만드는 것은 user 쪽이고, 만족하는지 판정하는 것은 package다.** package가
+대신 만들어 주지 않으며, user가 판정을 대신하지도 않는다.
+
 ### 4.1 최소 등록
 
 logical dataset은 physical file과 구분되는 versioned reference다. 최초 등록은 다음 semantic role만 요구한다.
 
 1. instrument를 식별하는 field
-2. observation을 사용할 수 있게 된 시점을 뜻하는 `available_at` field 또는 user-confirmed availability rule
+2. observation을 사용할 수 있게 된 시점을 담은 **`available_at` 컬럼** (tz-aware)
 3. 해당 dataset의 logical row key
 4. 등록할 data field의 선택
-5. physical source identity와 provenance
+5. 선언된 physical source identity
+
+`available_at`은 **user가 준비 단계에서 계산해 넣은 컬럼**이다. package는 그 값이 어떤 가정에서 나왔는지
+묻지도, 규칙으로 받아 평가하지도, 별도로 기록하지도 않는다 — **그 판단은 전적으로 user의 것이다.**
+package가 하는 일은 명확한 디렉션을 주는 것과, 들어온 컬럼이 계약을 만족하는지 판정하는 것뿐이다.
 
 field 이름은 강제하지 않는다. `ticker`, `symbol`, `종목코드` 중 무엇이 instrument인지 user가 binding한다.
 기본 instrument-time panel에서는 `(available_at, instrument)`가 null 없이 해석 가능하고 유일한지 검사한다.
@@ -610,31 +640,41 @@ source인지 계산 결과인지 몰라도 **같은 방식으로 읽을 수 있�
 
 #### UC-DATA-001 — 최소 등록과 field-name 자율성
 
-`DATE`, `CODE`, `VALUE`, `FISCAL_PERIOD` 컬럼이 있는 file에서 user는 `CODE`를 instrument로, source rule로
-확정한 `DATE`를 `available_at`으로, `(DATE, CODE)`를 logical key로 binding하고 필요한 data field를 선택한다.
-daily close 행의 `DATE=2024-03-05`가 해당 session 종가를 뜻한다면 확정된 availability rule은
-`2024-03-05 15:30 Asia/Seoul`을 만든다. `FISCAL_PERIOD`는 StrategyModel이 필요할 때 요구하는 일반 column이다.
-package는 field 이름을 바꾸거나 universal observation timestamp를 추가하라고 요구하지 않는다. currency나
-universe metadata가 없다는 이유만으로 이 단계가 실패해서는 안 된다.
+원천에 `DATE`, `CODE`, `VALUE`, `FISCAL_PERIOD` 컬럼이 있다. user는 준비 단계에서 daily close 행의
+`DATE=2024-03-05`가 `2024-03-05 15:30 Asia/Seoul`에 알 수 있게 된다고 확정하고 **그 값을 `available_at`
+컬럼으로 계산해 넣는다.** 그 뒤 `CODE`를 instrument로, `available_at`을 시간 축으로, `(DATE, CODE)`를
+logical key로 binding하고 필요한 data field를 선택한다.
+
+`FISCAL_PERIOD`는 StrategyModel이 필요할 때 요구하는 일반 column이다. package는 field 이름을 바꾸거나
+universal observation timestamp를 추가하라고 요구하지 않는다. currency나 universe metadata가 없다는
+이유만으로 이 단계가 실패해서는 안 된다.
 
 ### 4.2 Availability는 추측하지 않는다
 
-`DATE`를 `available_at`으로 바로 binding할 수 있는 것은 **user가 그 값이 실제 공개 시각이라고 확인한
-경우뿐**이다. source date를 자동으로 00:00으로 해석하지 않는다.
+`available_at`은 **user가 준비 단계에서 계산해 넣는 컬럼**이며(§4.0), 그 값이 무엇이어야 하는지는
+package가 정하지 않는다. source date를 자동으로 00:00으로 해석하는 일도, 지연 규칙을 대신 고르는 일도
+없다.
 
-별도 availability field가 없으면 bundled agent skill이 data category, source 설명, 공개 관행을 근거로 하나
-이상의 지연 규칙 candidate를 제시하고 각 candidate의 가정과 look-ahead 영향을 설명한다. 일봉 종가는 `DATE`
-당일 장 종료 시각, 재무제표는 별도 공시 timestamp 또는 확인된 publication lag를 제안할 수 있다.
+**그러나 그 결정은 어렵고 look-ahead의 주된 원인이다.** 그래서 결정 자체는 user에게 남기되 bundled agent
+skill이 data category, source 설명, 공개 관행을 근거로 하나 이상의 candidate를 제시하고 각 candidate의
+가정과 look-ahead 영향을 설명한다. 일봉 종가는 `DATE` 당일 장 종료 시각, 재무제표는 별도 공시 timestamp
+또는 확인된 publication lag를 제안할 수 있다.
 
-이 candidate는 package default가 **아니며** user가 근거를 확인해 선택해야 한다. 선택된 규칙은 project config에
-명시하고 package가 형식, coverage, PIT consistency를 deterministic하게 validation한다.
+이 candidate는 package default가 **아니다.** user가 근거를 확인해 선택하고, **그 선택을 자신의 준비
+과정에서 컬럼 값으로 실현한다.** package는 그 규칙을 config로 받지 않으며 따라서 평가하지도 기록하지도
+않는다. package가 판정하는 것은 들어온 컬럼이 계약을 만족하는가 — tz-aware인가, null이 없는가, logical
+key와 함께 유일한가 — 뿐이다.
+
+이것이 §3.2가 정한 경계와 같다. **vqapr가 보장하는 것은 선언된 availability의 준수이지 그 선언이 옳다는
+것이 아니다.**
 
 #### UC-AGENT-001 — Availability 후보를 제시하는 질문
 
 등록하려는 `DATE`가 관측일인지 실제 공개 시각인지 불명확하다. agent는 미래 정보 사용이 성과를 부풀리는
 look-ahead 문제를 설명하고, 실제 release timestamp field 사용, source별 확인된 지연 규칙, data 보강 같은
-후보를 제시한다. user가 근거와 함께 binding을 선택한 뒤 package validation을 호출한다. **근거가 확인되기
-전에는 `DATE`를 `available_at`으로 간주해 등록하지 않는다.**
+후보를 제시한다. user가 근거와 함께 하나를 확정하면 agent는 그 값을 담은 `available_at` 컬럼을 만드는
+준비 작업을 돕고, 그 결과를 package validation에 넘긴다. **근거가 확인되기 전에는 `DATE`를 그대로
+`available_at`으로 삼지 않는다.**
 
 ### 4.3 Progressive requirement discovery
 
@@ -1921,9 +1961,16 @@ product fact와 schema를 agent-specific file에 복제해 stale하게 만들지
 단계에 package는 관여하지 않는다. 임의 형태의 연구 데이터를 받아들이기로 한 이상 그 의미를 확인하는
 일이 남으며, 그것이 skill의 자리다.
 
-skill은 user가 제공한 데이터를 **먼저 읽어** 다음을 근거와 함께 제안한다: instrument와 시간 축의 후보,
-availability 규칙 후보(§4.2), 체결 시각과 체결 가격 후보(§6.3), 거래 가능 여부의 유도 규칙 후보(§4.5).
-제안은 project config로 착지하고 package가 deterministic하게 검증한다.
+skill은 user가 가진 원천을 **먼저 읽어** 다음을 근거와 함께 제안한다: instrument와 시간 축의 후보,
+`available_at` 값의 후보(§4.2), 체결 시각과 체결 가격 후보(§6.3), 거래 가능 여부의 유도 규칙 후보(§4.5).
+
+**이때 읽는 것은 package가 아니라 agent 자신의 도구다.** 원천은 xlsx일 수도 csv일 수도 데이터베이스일
+수도 있고 그 안의 구조는 아무도 미리 모른다. package는 그런 형식을 읽지 않으며(§4.0), 그것을 읽어
+파악하는 일은 skill이 자기 환경에서 한다. **두 읽기를 같은 것으로 보면 package에 임의 형식 reader를
+넣게 된다.**
+
+제안은 두 곳으로 착지한다 — **준비된 dataset**(user의 agent가 만든다)과 그것을 읽는 **project config**.
+package는 후자를 받아 전자가 계약을 만족하는지 deterministic하게 검증한다.
 
 #### 데이터가 증명하는 것과 이름으로만 아는 것을 구분한다
 

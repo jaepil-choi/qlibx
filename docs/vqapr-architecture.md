@@ -443,9 +443,9 @@ class Warmup(BaseModel):
 
 **상황.** 사용자가 가진 것이 daily OHLCV뿐이고 거래소 calendar 파일이 없다. 이것이 일반적인 출발점이다.
 
-**결정.** `available_at` 유도(§4.2)와 **정확히 같은 패턴**을 쓴다.
+**결정.** `available_at` 유도(PRD §4.2)와 **정확히 같은 패턴**을 쓴다.
 
-| | availability (§4.2) | calendar (여기) |
+| | availability (PRD §4.2) | calendar (여기) |
 |---|---|---|
 | package | 추측하지 않는다 | 추측하지 않는다 |
 | user | 유도 규칙을 근거와 함께 선언 | 유도 규칙을 근거와 함께 선언 |
@@ -459,7 +459,7 @@ daily OHLCV에는 `2024-03-05`만 있고 `15:30 KST`가 없다. 그런데 `avail
 
 ```text
 session 날짜   ← 선언된 유도 규칙으로 데이터에서
-open/close 시각 ← user 선언 (이미 §4.2의 available_at 규칙이 담고 있다)
+open/close 시각 ← user 선언 (이미 PRD §4.2의 available_at 규칙이 담고 있다)
 ```
 
 **두 번째는 새로 요구하지 않는다.** "`DATE=2024-03-05`인 종가 행은 `2024-03-05 15:30 Asia/Seoul`에
@@ -2422,7 +2422,7 @@ src/vqapr/
 ├── data/            그때 무엇을 읽을 수 있는가
 │   ├── sources.py         SourceSpec · FieldPartition — 물리 배치
 │   ├── datasets.py        DatasetRegistration — 의미. role을 이름에 새기지 않는다
-│   ├── availability.py    AvailabilityBinding + 선언된 지연 규칙 (§4.2)
+│   ├── availability.py    AvailabilityBinding + 선언된 지연 규칙 (PRD §4.2)
 │   ├── lookback.py        RowsLookback · CalendarLookback. **미래 방향 타입의 부재가 계약**
 │   ├── requirements.py    DataRequirement · CoverageRequirement
 │   ├── resolution.py      requirement → 물리 질의. lookback을 질의로 밀어 넣는다
@@ -3174,7 +3174,7 @@ A를 5% 직접 들고 X를 10% 들면 **A 노출 = 0.05 + 0.10 × 0.5 = 0.10**�
           fundamentals/     item=BPS/ item=EPS/ …    폴더. 계정 500개, 대부분 성김
 
 [dataset] price_daily    fields = {open: "당일시가(원)", close: "당일종가(원)", …}
-                         available_at = 일자 + 15:30 KST        ← user 선언 (§4.2)
+                         available_at = 일자 + 15:30 KST        ← user 선언 (PRD §4.2)
           fundamentals   fields = {bps: BPS, eps: EPS}
                          available_at = 공시 timestamp
 ```
@@ -3203,7 +3203,7 @@ from krx_daily
 ```
 
 - **별도 DataModel이 필요 없다.** 유도가 Exchange config의 한 줄이 되고, 그 줄이 frozen input에 남는다.
-- **calendar도 같은 패턴으로 유도된다**(§3.6). 세 번째 인스턴스다 — availability(§4.2), calendar(§3.6),
+- **calendar도 같은 패턴으로 유도된다**(§3.6). 세 번째 인스턴스다 — availability(PRD §4.2), calendar(§3.6),
   거래 가능 여부(여기).
 - 전략이 판단 시점에 쓸 거래 가능 여부는 **별도 dataset**이다. 이 project는 만들지 않기로 한다.
   정지 종목에 주문이 나가고 ④에서 zero-dealt로 남는다.
@@ -3510,7 +3510,7 @@ class RunDefinition(BaseModel):
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
     constraints: ConstraintSet | None = None      # 판단·검증·monitoring이 함께 본다 (§5.7)
-    monitoring: MonitoringPolicy | None = None    # TriggerPolicy. decision cadence와 독립 (§3.6)
+    monitoring: MonitoringPolicy | None = None    # TriggerPolicy. decision cadence와 독립 (PRD §3.6)
 ```
 
 `strategy`·`exchange`와 마찬가지로 `constraints`의 각 항목도 `ComponentRef`로 지목된다. 내장
@@ -3563,7 +3563,8 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 기존 source를 조금씩 호환시키지 않는다. 아래 vertical slice로 다시 만든다.
 
 1. `domain` + `runtime` — `SessionCalendar` + **`calendar_derivation`** + frozen `Timeline`
-2. minimal `data` — `scan` / registration / `workspace` / requirement / `ModelWindow`
+2. minimal `data` — `scan` / registration / `availability` / `workspace` / requirement / `ModelWindow`
+   + calendar 유도의 **읽기 경로** 연결
 3. `models` 전부 + `flow/materialize` — `Model` 공통 계약 · `DataModel` · `available_at` 부여
 4. `account` + `valuation`
 5. `transforms` + `portfolio` (순수 함수 + 테이블 기반 테스트)
@@ -3576,7 +3577,11 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 
 **1번에 `calendar_derivation`이 있는 이유**: 실제 project의 일반적인 출발점은 daily 시세뿐이고 거래소
 calendar 파일이 없다(§3.6). calendar가 없으면 trigger가 시점을 만들 수 없어 **materialize가 아예
-시작되지 않으므로**, 유도가 explicit calendar와 같은 슬라이스에 서야 실데이터로 갈 수 있다.
+시작되지 않는다.**
+
+**그런데 유도는 두 슬라이스에 걸친다.** 규칙 적용은 순수 함수라 날짜 목록만 있으면 검증되므로 1번에
+서고, 그 날짜를 **등록된 dataset에서 읽어 오는 경로**는 registration이 있어야 하므로 2번이다(§3.6).
+1번에서는 손으로 만든 날짜 목록으로, 2번에서 실제 시세 파일로 같은 함수를 통과시킨다.
 
 **2번이 registration으로 시작하는 이유**: agent user가 이 package로 **가장 먼저 하는 일**이 data
 등록이다. 그래서 등록 실패가 `domain/errors.py`의 machine-readable 계약을 처음으로 시험하는 자리이며,
@@ -3753,6 +3758,12 @@ live에서는 그 간격이 사라진다.
 - [ ] `RowsLookback(N)`이 field가 여럿일 때 field당 N행을 준다 (합쳐서 N행이 아니다)
 - [ ] 같은 dataset을 넓은 표에서 field별 폴더로 바꿔도 소비자의 requirement 선언이 변하지 않는다
 - [ ] 등록 정의에 window 함수를 써도 등록이 실패하지 않는다 (막지 않기로 한 것을 막고 있지 않다)
+- [ ] 소비자 API에 경로·파일 형식·물리 컬럼 이름·`query`가 나타나지 않는다 (§4.6)
+- [ ] 같은 dataset을 csv에서 parquet로 바꿔도 소비자의 requirement 선언이 변하지 않는다
+- [ ] 등록 **후** `SourceSpec`을 직접 여는 경로가 없다 — `scan`은 등록 검증에만 열린다
+- [ ] Model에서 창 없는(lookback 없는) 조회에 도달하는 경로가 없다
+- [ ] calendar 유도가 등록된 dataset을 읽고 raw source를 읽지 않는다
+- [ ] `query`나 `path`가 바뀐 등록이 이전 결과와 같은 identity를 갖지 않는다
 - [ ] `portfolio.weighting`과 `portfolio.optimize`가 `domain`(+solver) 외 아무것도 import하지 않는다
 - [ ] weighting 함수가 결측 종목을 빼고 재정규화하지 않는다
 - [ ] Model을 새로 만들고 committed state를 복원해도 같은 다음 결과가 나온다 — 영향을 주는 mutable

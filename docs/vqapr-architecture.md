@@ -475,6 +475,43 @@ available해진다"는 선언에 이미 그 venue의 종가 시각이 들어 있
 
 bundled agent skill이 후보와 위험을 설명하고 user가 고른다. package는 고른 규칙을 검증하고 적용할 뿐이다.
 
+#### 유도의 입력은 **등록된 dataset**이고, 규칙 적용은 순수하다
+
+calendar는 별도 파일에서 오지 않는다. **사용자가 이미 등록한 데이터에서 나온다** — 일별 시세를
+등록했다면 그 dataset이 곧 calendar의 원천이다.
+
+그런데 그렇게 하면 `runtime/`이 데이터를 읽어야 하는 것처럼 보인다. 그렇지 않다. **둘로 가른다.**
+
+```text
+읽기      등록된 dataset의 distinct 날짜를 뽑는다        data 경로 (`scan.py`)
+적용      날짜 집합 + 선언된 규칙 → frozen SessionCalendar   `runtime/calendar_derivation.py` — 순수
+```
+
+- **`runtime/calendar_derivation.py`는 날짜를 인자로 받는다.** `transforms/`와 `portfolio/`가 panel을
+  인자로 받는 것과 같은 규칙이다 — 직접 읽으면 그 접근이 declared requirement를 거치지 않아 어느
+  dataset에서 calendar가 나왔는지 lineage에 남지 않는다.
+- **`runtime/`이 `data/`를 import하지 않는다.** 시간 층이 데이터 층을 알면 "cadence를 데이터에서
+  유도하지 않는다"(§3.1)를 코드 구조가 더 이상 말해주지 않는다.
+
+#### 유도된 calendar는 project 선언이 된다
+
+한 번 유도하고 매번 다시 만들지 않는다. 결과는 frozen `SessionCalendar`로 workspace에 남는다(§10.5).
+
+```text
+vqapr data register  ...                              일별 시세를 등록
+vqapr data calendar  --from price_daily               ← 규칙과 session 시각을 선언
+                     --rule all-instrument-date-union
+                     --session-close "15:30 Asia/Seoul"
+vqapr materialize    ...                              그 frozen calendar를 쓴다
+```
+
+- **§3.1의 금지를 그대로 지킨다.** 아무도 선언하지 않았는데 가격 coverage로 session이 만들어지는
+  경로는 없다 — 이 명령을 사용자가 규칙을 골라 실행해야만 calendar가 생긴다.
+- **시각은 여기서도 유도되지 않는다.** `--session-close`가 필요하며, 그 값은 이미 등록의
+  `available_at` 규칙이 담고 있으므로 같은 선언을 재사용할 수 있다.
+- 선택된 규칙과 원천 dataset이 frozen input에 남아, 나중에 "이 run의 session이 어디서 왔나"를
+  감사할 수 있다.
+
 - **여전히 금지되는 것**: 아무도 선언하지 않았는데 Flow가 가격 coverage로 session을 만들어내는 것.
   §3.1의 금지는 **package의 추측**을 향한 것이지 user의 선언을 향한 것이 아니었다.
 - **왜 이 완화가 안전한가**: 유도 규칙이 frozen input에 남아 재현되고, 어떤 dataset의 어떤 규칙에서
@@ -578,6 +615,30 @@ fundamentals/
 > **우리가 식별자 축으로는 안 나누는 이유**: nautilus는 종목 하나씩 스트림으로 재생하므로 종목별 분리가
 > 이득이다. 우리는 **횡단면 계산이 기본**이라 한 시점의 전 종목을 함께 읽는다. 종목으로 나누면 3,000개
 > 디렉터리를 열게 된다.
+
+#### 물리 층을 여는 것은 한 곳이다 — `scan.py`
+
+**결정.** `SourceSpec`을 실제로 열어 스캔 가능한 형태로 만드는 코드는 `data/scan.py` 하나다.
+등록 검증도, `ObservationStore` 구현도, 체결 테이블도 전부 그 위에 선다.
+
+**왜 별도 층인가**: 같은 물리 파일에 **서로 다른 모양의 질문 셋**이 온다.
+
+| 질문 | 누가 | 모양 | 어디 |
+|---|---|---|---|
+| 이 컬럼이 있나 · 이 key가 유일한가 | 등록 검증 | **스캔** | §4.1 |
+| `available_at <= t`인 최근 N행 | 소비자 | **창** | §4.2·§4.3 |
+| `trade_at = t`인 행 | Exchange | **점** | §6.2 |
+
+- **`sources.py`에 넣지 않는 이유**: 그것은 **선언(값)**이다. I/O를 붙이면 값이 아니게 되고, 등록
+  선언을 만드는 것만으로 파일이 열린다.
+- **`stores/duckdb.py`에 넣지 않는 이유**: 그러면 체결 테이블이 특정 backend를 import하게 되어
+  **venue가 storage 구현에 묶인다.** §6.2가 물리 층만 재사용하기로 한 것이 불가능해진다.
+- **없으면 무엇이 깨지나**: 등록 검증이 `ObservationStore`를 거쳐야 하는데 그것은 창 조회라
+  *"이 key가 전체에서 유일한가"*를 물을 수 없다. 억지로 물으려면 lookback 없는 전체 조회를
+  허용해야 하고, 그 구멍이 곧 look-ahead 경로가 된다.
+
+`scan.py`는 의미를 모른다. 어느 컬럼이 `available_at`인지, 어느 lookback이 몇 행인지는 각각
+`datasets.py`와 `resolution.py`가 이미 정했다.
 
 #### 개명은 되고 role은 안 된다
 
@@ -1574,8 +1635,9 @@ class Exchange(Protocol):
 
 ##### 어떻게 정의되나 — 물리 층은 공유하고 의미 층은 쓰지 않는다
 
-체결 테이블도 결국 parquet에서 온다. 그래서 **§4.1의 물리 층(`SourceSpec`)은 그대로 재사용**하되
-의미 층(`DatasetRegistration`)은 쓰지 않는다.
+체결 테이블도 결국 parquet에서 온다. 그래서 **§4.1의 물리 층(`SourceSpec`과 `scan.py`)은 그대로
+재사용**하되 의미 층(`DatasetRegistration`)은 쓰지 않는다. `scan.py`가 backend를 감추므로 venue가
+특정 storage 구현을 import하지 않는다.
 
 ```python
 class ExecutionTableSpec(BaseModel):
@@ -2273,7 +2335,7 @@ src/vqapr/
 │
 ├── runtime/         시간은 전부 선언에서 나온다
 │   ├── session_calendar.py    SessionCalendar. frozen. 데이터에서 만드는 함수가 존재하지 않는다
-│   ├── calendar_derivation.py user 선언 유도 규칙의 닫힌 집합과 검증 (§3.6)
+│   ├── calendar_derivation.py 유도 규칙의 닫힌 집합. **날짜를 인자로 받는다** — 읽지 않는다 (§3.6)
 │   ├── events.py              Event · EventKind 고정 우선순위 (§3.2)
 │   └── timeline.py            선언 × calendar → **정렬된 frozen 이벤트 열**. clock이 아니다
 │
@@ -2284,6 +2346,7 @@ src/vqapr/
 │   ├── lookback.py        RowsLookback · CalendarLookback. **미래 방향 타입의 부재가 계약**
 │   ├── requirements.py    DataRequirement · CoverageRequirement
 │   ├── resolution.py      requirement → 물리 질의. lookback을 질의로 밀어 넣는다
+│   ├── scan.py            SourceSpec을 여는 유일한 곳. 창도 점도 아닌 **스캔** (§4.1)
 │   ├── store.py           ObservationStore 포트
 │   ├── windows.py         ModelWindow · ObservationBatch(Rows+coverage) · AccessRecord
 │   └── stores/            memory.py · duckdb.py
@@ -2387,6 +2450,7 @@ src/vqapr/
 ├── cli/             **파일 목록 = 명령어 목록**
 │   └── main · new · check · register · data · run · report · agent
 │
+├── workspace.py     한 project의 선언 집합이 사는 곳 (§10.5)
 └── public.py        유일한 documented surface
 ```
 
@@ -2407,7 +2471,7 @@ UC 추적은 디렉터리가 아니라 `@pytest.mark.uc("UC-…")` 마커로 한
 | `workflow/` | 실험 관리를 패키지가 소유하지 않는다(§9). run은 값이고 catalog는 evidence다 |
 | `contrib/` | §2.6의 반면교사. 확장 지점을 패키지 안에 두면 사용자 코드가 패키지에 쌓인다 |
 | `common/` | 그 자리는 `domain/`이다. 둘 다 있으면 무엇이 어디 가는지 기준이 사라진다 |
-| `config/` | config는 장소가 아니라 소유자 옆에 산다 — `DatasetRegistration`은 `data/`, `FillConvention`은 `exchange/`, `RunDefinition`은 `flow/`. 모으는 역할은 `public.py`가 이미 한다 |
+| `config/` | config **타입**은 장소가 아니라 소유자 옆에 산다 — `DatasetRegistration`은 `data/`, `FillConvention`은 `exchange/`, `RunDefinition`은 `flow/`. 이름공간으로 모으는 역할은 `public.py`가 한다. 그 타입으로 만든 **인스턴스**를 project 단위로 보관하는 것은 별개의 일이며 `workspace.py`가 한다(§10.5) |
 
 ### 10.1 타입은 그것을 만드는 층에 산다
 
@@ -2516,6 +2580,46 @@ vqapr register . --project ../research   # fingerprint를 찍어 ComponentRef로
   `domain/errors.py`와 어긋나므로, 생성하면 drift가 구조적으로 불가능하다.
 - **변경 이유가 독립적이다.** Codex나 Claude Code의 skill 프로토콜이 바뀔 때 바뀌고, portfolio 수학이
   바뀔 때는 바뀌지 않는다. 그래서 데이터 폴더가 아니라 층이다.
+
+### 10.5 `workspace.py` — 선언이 명령 사이에서 사는 곳
+
+**결정.** 한 project가 축적한 **선언 집합**(등록된 dataset, 등록된 `ComponentRef`, Exchange config)은
+`workspace.py`가 보관하고 읽고 쓴다.
+
+- **왜 필요한가**: `vqapr data register`와 나중의 `vqapr run` 사이에 선언이 살아 있어야 한다.
+  `RunDefinition`의 `dataset_bindings`와 `ComponentRef`들이 **어디선가 와야 하는데** 그 어디가
+  없었다.
+- **`config/`를 만들지 않는다는 결정과 모순이 아니다.** 두 가지가 다른 일이다.
+
+  ```text
+  config/ (만들지 않음)   config **타입**을 모아 하나의 import 이름으로 노출   ← public.py가 한다
+  workspace.py            한 project의 config **인스턴스**를 보관             ← 아무도 안 하고 있었다
+  ```
+
+  타입은 소유자 옆에 살고(`DatasetRegistration`은 `data/`, `FillConvention`은 `exchange/`), 그
+  타입으로 만든 **값들**은 project마다 다르므로 project를 아는 곳에 산다.
+
+- **전역이 아니다.** 명시적으로 전달한다. qlib의 `qlib.init()` 같은 process-global provider는
+  PRD §12.5가 금지한 것이며, 그것이 있으면 동시 run이 서로의 설정을 본다.
+
+#### 점진적 구성을 표현할 수 있어야 한다
+
+PRD §12.1이 요구하는 것이 이것이다 — user나 agent는 instrument와 execution assumption 같은
+결정을 **한 번에 모두 입력하지 않고 점진적으로** 확정할 수 있어야 한다. agent가 *"어떤 종목을
+거래하나요"*, *"체결 가정은 무엇인가요"*를 하나씩 확인하는 대화 형태가 그것이다.
+
+> 거대한 spec 생성자를 한 번에 채우는 표면만 제공하면 그 대화를 표현할 수 없다.
+
+workspace는 그 축적을 담고, run은 **시작 시점의 것을 동결한다.** 동결 후 workspace가 바뀌어도 그
+run의 identity는 변하지 않는다(`UC-CONFIG-001`).
+
+```text
+workspace   변한다. 선언이 쌓인다
+RunDefinition   시작 시점에 동결된다. 이후 workspace 변경과 무관하다
+```
+
+**frozen input은 완전하다** — 실행과 재현에 workspace를 다시 읽을 필요가 없어야 한다. workspace를
+암묵적으로 다시 읽는 경로가 생기면 §12.1의 보장이 무너진다.
 
 ---
 
@@ -3378,8 +3482,8 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 
 기존 source를 조금씩 호환시키지 않는다. 아래 vertical slice로 다시 만든다.
 
-1. `domain` + `runtime` — explicit `SessionCalendar` + frozen `Timeline`
-2. minimal `data` — registration / requirement / `ModelWindow`
+1. `domain` + `runtime` — `SessionCalendar` + **`calendar_derivation`** + frozen `Timeline`
+2. minimal `data` — `scan` / registration / `workspace` / requirement / `ModelWindow`
 3. `models` 전부 + `flow/materialize` — `Model` 공통 계약 · `DataModel` · `available_at` 부여
 4. `account` + `valuation`
 5. `transforms` + `portfolio` (순수 함수 + 테이블 기반 테스트)
@@ -3390,8 +3494,31 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 10. 세 showcase를 같은 public spine 위에서 (두 전략 + Fama-French)
 11. `evidence` / `analysis` / `extension` / `agent` / `public.py` / 외부 소비자 테스트
 
+**1번에 `calendar_derivation`이 있는 이유**: 실제 project의 일반적인 출발점은 daily 시세뿐이고 거래소
+calendar 파일이 없다(§3.6). calendar가 없으면 trigger가 시점을 만들 수 없어 **materialize가 아예
+시작되지 않으므로**, 유도가 explicit calendar와 같은 슬라이스에 서야 실데이터로 갈 수 있다.
+
+**2번이 registration으로 시작하는 이유**: agent user가 이 package로 **가장 먼저 하는 일**이 data
+등록이다. 그래서 등록 실패가 `domain/errors.py`의 machine-readable 계약을 처음으로 시험하는 자리이며,
+`scan`(물리 층을 여는 곳, §4.1)과 `workspace`(선언이 명령 사이에서 사는 곳, §10.5)가 여기서 필요해진다.
+
 **3번을 4번보다 앞에 둔 이유**: `Model` 공통 계약(trigger·requirements·memory)이 `StrategyModel`의 상위이므로
 먼저 서야 한다. 그리고 DataModel은 account 없이 검증할 수 있어 execution 없이 닫힌다.
+
+> **1~3번이 실데이터 milestone을 닫는다.**
+>
+> ```text
+> CSV 등록 → DataRequirement + lookback으로 창 조회 → stateless DataModel이 값 계산
+>          → materialize가 결과를 쓰고 **같은 등록 계약으로** 다시 등록 → 창으로 되읽기
+> ```
+>
+> exchange · account · orders · portfolio · constraints · evidence · `SimulationFlow`를 **하나도
+> 건드리지 않고** 실제 데이터가 파이프를 통과한다.
+>
+> materialize 결과를 `evidence/`의 artifact·catalog 기계로 publish하지 않고 §4.1의 등록 경로로
+> 되돌리는 것이 핵심이다. PRD §4.1이 *"계산이 만든 데이터도 같은 등록 계약을 따른다"*고 이미 정했으므로
+> 설계를 어기는 것이 아니고, `evidence/` 전체와 `flow/model_state`(첫 DataModel을 stateless로 두면)를
+> 뒤로 미룰 수 있다.
 
 **5번과 6번이 순수 함수인 이유**: `transforms`·`portfolio`·`constraints`는 Store도 Account도 Timeline도
 없이 검증된다. 그래서 execution이 서기 전에 완결되고, 나중에 값이 틀렸을 때 의심할 곳이 좁아진다.
@@ -3442,7 +3569,8 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 | `UC-ARTIFACT-001`~`003`, `UC-RESEARCH-001`, `UC-REPORT-001`, `UC-REPORT-002` | §9 |
 | `UC-EXTENSION-001` | §5.6 (`transforms/neutralize`가 고쳐 쓸 원본) + §10.2 |
 | `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10.2 (네 확장점·`ComponentRef`·fingerprint) + §10.3 (`testing/` 없이는 검증이 불가능) |
-| `UC-CONFIG-001` | §12 |
+| `UC-CONFIG-001` | §10.5 (`workspace.py` — 점진적 구성이 쌓이는 곳) + §12 (동결) |
+| `UC-CALENDAR-001` 보강 | §3.6 (유도의 입력은 등록된 dataset · 규칙 적용은 순수 · 결과는 project 선언) |
 | `UC-ONBOARD-001` | §10.4 (`agent/`) |
 | `UC-RETURN-001` | §1.1 (DataModel은 척추에 들어오지 않는다) + §10 (`analysis/`는 새 return을 만들지 않는다) |
 | future (`UC-FUTURE/PERP/CASHFLOW/SETTLEMENT/PROD/RECOVERY/IMPACT/REAL-SHORT-001`) | 현재 Exchange/Account가 미지원 semantics를 **명시적으로 거부**하는 것으로 경계만 보존 |

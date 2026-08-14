@@ -15,4 +15,8 @@
 구현이 둘 이상이라 protocol이 정당하다
     `stores/memory.py`는 테스트가 duckdb 없이 도는 길이고 `stores/duckdb.py`가 실제 경로다.
     구현이 하나였다면 protocol을 두지 않았을 것이다(architecture §10).
+
+`scan.py` 위에 선다
+    물리 파일을 여는 것은 `scan.py` 하나이고, 이 포트는 그 위에서 **창 조회**를 담당한다.
+    등록 검증(스캔)과 체결 테이블(점 조회)은 같은 `scan.py`를 쓰되 이 포트를 거치지 않는다.
 """

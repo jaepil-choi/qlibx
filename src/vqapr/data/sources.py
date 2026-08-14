@@ -1,8 +1,16 @@
 """물리 배치 — 어디에 어떻게 쌓여 있나.
 
 구현할 것
-    SourceSpec       source_id, path(디렉터리면 하위 전부), 선택적 field_partition
+    SourceSpec       source_id, path(디렉터리면 하위 전부), format, 선택적 field_partition
     FieldPartition   key(파티션 키, 폴더 이름이 field 이름이 된다) + value(파일 안의 값 컬럼)
+
+format이 필요한 이유
+    실제 project는 csv로 시작한다. parquet만 전제하면 첫 등록부터 막힌다. 확장자로 추론하되
+    명시할 수 있어야 하며, **parquet 변환을 요구하지 않는다** — 사용자가 성능을 위해 미리 변환하는
+    것은 자유지만 package가 강제하면 "저장 방식은 소비자에게 안 보인다"가 거짓이 된다.
+
+**이것은 선언(값)이고 파일을 열지 않는다.**
+    여는 것은 `scan.py`다. 여기에 I/O를 붙이면 등록 선언을 만드는 것만으로 파일이 열린다.
 
 field_partition이 왜 source의 성질인가
     field가 많고 성긴 데이터(재무 계정 수백 개)는 넓은 표가 낭비다. 그때는 field를 폴더로

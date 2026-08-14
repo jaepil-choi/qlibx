@@ -167,6 +167,19 @@ def validate(
     없는 컬럼 때문에 전체를 스캔할 이유는 더더욱 없다.
     """
     started = time.perf_counter()
+    if registration.source != spec.source_id:
+        found = collector(SCHEMA_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                code=f"{SCHEMA_STAGE}.source_mismatch",
+                requirement="DatasetRegistration.source must match SourceSpec.source_id",
+                observed=(
+                    f"registration source={registration.source!r}, source spec={spec.source_id!r}"
+                ),
+            )
+        )
+        return found.done(retry=_RETRY), ValidationTiming(time.perf_counter() - started, None)
+
     columns = scan.describe(spec)
     schema = check_schema(registration, columns)
     schema_seconds = time.perf_counter() - started

@@ -110,6 +110,15 @@ def test_framework_names_may_not_contain_whitespace() -> None:
         _registration(fields={"close price": "close"})
 
 
+def test_source_id_mismatch_fails_before_opening_the_source(tmp_path: Path) -> None:
+    spec = SourceSpec.of("other", tmp_path / "does-not-exist")
+
+    diagnosis, timing = validate(_registration(), spec)
+
+    assert [failure.code for failure in diagnosis.failures] == [f"{SCHEMA_STAGE}.source_mismatch"]
+    assert timing.key_was_skipped is True
+
+
 @pytest.mark.real_data
 def test_dev_dataset_registration_is_valid(dev_dataset: Path) -> None:
     spec = SourceSpec.of("fng_prices", dev_dataset, hive_partitioned=True)

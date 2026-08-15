@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.data.datasets import DatasetRegistration, validate
+from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.exchange.conventions import FillConvention
@@ -17,15 +19,30 @@ from vqapr.exchange.execution_table import (
     ExecutionTableSpec,
     validate_execution_input,
 )
+from vqapr.extension.component import ComponentRef
+from vqapr.extension.registration import register_data_model
+from vqapr.flow.materialize import MaterializationResult, MaterializationSpec, materialize
+from vqapr.models.contexts import DataModelContext
+from vqapr.models.data_model import DataModel
 from vqapr.workspace import Workspace
 
 __all__ = (
+    "CalendarLookback",
+    "ComponentRef",
+    "DataModel",
+    "DataModelContext",
+    "DataRequirement",
     "DatasetRegistration",
     "ExecutionInputRegistration",
     "ExecutionTableSpec",
     "FillConvention",
+    "MaterializationResult",
+    "MaterializationSpec",
+    "RowsLookback",
     "SourceSpec",
     "VqaprError",
+    "materialize",
+    "register_data_model",
     "register_dataset",
     "register_execution_input",
 )

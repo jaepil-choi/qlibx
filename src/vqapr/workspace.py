@@ -18,15 +18,18 @@ from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
 from vqapr.domain.identifiers import (
+    ComponentId,
     DatasetId,
     ExecutionInputId,
     SourceId,
+    component_id,
     dataset_id,
     execution_input_id,
     source_id,
 )
 from vqapr.exchange.conventions import FillConvention
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.extension.component import ComponentKind, ComponentRef
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"
@@ -37,6 +40,8 @@ SOURCE_LOOKUP_STAGE = "workspace.source.lookup"
 WRITE_STAGE = "workspace.write"
 EXECUTION_REGISTER_STAGE = "workspace.execution_input.register"
 EXECUTION_LOOKUP_STAGE = "workspace.execution_input.lookup"
+COMPONENT_REGISTER_STAGE = "workspace.component.register"
+COMPONENT_LOOKUP_STAGE = "workspace.component.lookup"
 _CONSTRUCTION_TOKEN = object()
 
 
@@ -47,7 +52,7 @@ class Workspace:
     이후 run은 이 mutable workspace를 다시 읽지 않는 frozen input을 별도로 만들어야 한다.
     """
 
-    __slots__ = ("_datasets", "_execution_inputs", "_sources", "project_root")
+    __slots__ = ("_components", "_datasets", "_execution_inputs", "_sources", "project_root")
 
     def __init__(
         self,
@@ -55,6 +60,7 @@ class Workspace:
         datasets: Mapping[DatasetId, DatasetRegistration] | None = None,
         sources: Mapping[SourceId, SourceSpec] | None = None,
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration] | None = None,
+        components: Mapping[ComponentId, ComponentRef] | None = None,
         *,
         _token: object | None = None,
     ) -> None:
@@ -68,6 +74,9 @@ class Workspace:
         self._execution_inputs = {
             key: _detach_execution_input(value) for key, value in (execution_inputs or {}).items()
         }
+        self._components = {
+            key: _detach_component(value) for key, value in (components or {}).items()
+        }
 
     @classmethod
     def _from_state(
@@ -76,12 +85,14 @@ class Workspace:
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
+        components: Mapping[ComponentId, ComponentRef],
     ) -> Workspace:
         return cls(
             project_root,
             datasets,
             sources,
             execution_inputs,
+            components,
             _token=_CONSTRUCTION_TOKEN,
         )
 
@@ -92,18 +103,18 @@ class Workspace:
     @classmethod
     def create(cls, project_root: str | Path) -> Workspace:
         """새 project workspace를 만들거나 이미 있으면 그대로 연다."""
-        candidate = cls._from_state(project_root, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {})
         if candidate.path.exists():
             return cls.open(project_root)
-        candidate._write({}, {}, {})
+        candidate._write({}, {}, {}, {})
         return candidate
 
     @classmethod
     def open(cls, project_root: str | Path) -> Workspace:
         """기존 workspace 전체를 읽는다. 없거나 손상됐으면 일부 상태를 반환하지 않는다."""
-        candidate = cls._from_state(project_root, {}, {}, {})
-        datasets, sources, execution_inputs = candidate._read()
-        return cls._from_state(project_root, datasets, sources, execution_inputs)
+        candidate = cls._from_state(project_root, {}, {}, {}, {})
+        datasets, sources, execution_inputs, components = candidate._read()
+        return cls._from_state(project_root, datasets, sources, execution_inputs, components)
 
     @property
     def datasets(self) -> tuple[DatasetRegistration, ...]:
@@ -122,6 +133,11 @@ class Workspace:
             _detach_execution_input(self._execution_inputs[key])
             for key in sorted(self._execution_inputs)
         )
+
+    @property
+    def components(self) -> tuple[ComponentRef, ...]:
+        """component_id 순으로 정렬된 detached project-local component references."""
+        return tuple(_detach_component(self._components[key]) for key in sorted(self._components))
 
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
         """등록된 선언 하나를 조회한다."""
@@ -197,6 +213,31 @@ class Workspace:
                 family=FailureFamily.EXCHANGE,
             ) from error
 
+    def component(self, raw_component_id: str) -> ComponentRef:
+        """등록된 project-local component reference 하나를 조회한다."""
+        try:
+            key = component_id(raw_component_id)
+        except ValueError as error:
+            raise _workspace_error(
+                stage=COMPONENT_LOOKUP_STAGE,
+                code=f"{COMPONENT_LOOKUP_STAGE}.invalid",
+                requirement="component lookup requires a valid component_id",
+                observed=str(error),
+                retry="use a valid component_id, then retry",
+            ) from error
+        try:
+            return _detach_component(self._components[key])
+        except KeyError as error:
+            raise _workspace_error(
+                stage=COMPONENT_LOOKUP_STAGE,
+                code=f"{COMPONENT_LOOKUP_STAGE}.missing",
+                requirement=f"component {key!r} must be registered in this workspace",
+                observed=(
+                    f"registered components: {', '.join(sorted(self._components)) or '(none)'}"
+                ),
+                retry="register the component, then retry",
+            ) from error
+
     def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
         """물리·의미 선언을 보관한다. 새 dataset이면 True, 동일하면 False다.
 
@@ -214,7 +255,7 @@ class Workspace:
                 retry="bind the dataset and physical source to the same source_id, then retry",
             )
 
-        datasets, sources, execution_inputs = self._read()
+        datasets, sources, execution_inputs, components = self._read()
         key = registration.dataset_id
         source_key = source.source_id
         existing_source = sources.get(source_key)
@@ -230,7 +271,7 @@ class Workspace:
         existing = datasets.get(key)
         if existing is not None:
             if existing == registration and existing_source == source:
-                self._replace_state(datasets, sources, execution_inputs)
+                self._replace_state(datasets, sources, execution_inputs, components)
                 return False
             raise _workspace_error(
                 stage=REGISTER_STAGE,
@@ -246,8 +287,8 @@ class Workspace:
         merged_sources = dict(sources)
         merged_datasets[key] = _detach_registration(registration)
         merged_sources[source_key] = _detach_source(source)
-        self._write(merged_datasets, merged_sources, execution_inputs)
-        self._replace_state(merged_datasets, merged_sources, execution_inputs)
+        self._write(merged_datasets, merged_sources, execution_inputs, components)
+        self._replace_state(merged_datasets, merged_sources, execution_inputs, components)
         return True
 
     def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
@@ -255,7 +296,7 @@ class Workspace:
         if not isinstance(registration, ExecutionInputRegistration):
             raise TypeError("registration must be an ExecutionInputRegistration")
 
-        datasets, sources, execution_inputs = self._read()
+        datasets, sources, execution_inputs, components = self._read()
         key = registration.execution_input_id
         source = registration.table.source
         source_key = source.source_id
@@ -273,7 +314,7 @@ class Workspace:
         existing = execution_inputs.get(key)
         if existing is not None:
             if existing == registration and existing_source == source:
-                self._replace_state(datasets, sources, execution_inputs)
+                self._replace_state(datasets, sources, execution_inputs, components)
                 return False
             raise _workspace_error(
                 stage=EXECUTION_REGISTER_STAGE,
@@ -291,8 +332,35 @@ class Workspace:
         merged_inputs = dict(execution_inputs)
         merged_sources[source_key] = _detach_source(source)
         merged_inputs[key] = _detach_execution_input(registration)
-        self._write(datasets, merged_sources, merged_inputs)
-        self._replace_state(datasets, merged_sources, merged_inputs)
+        self._write(datasets, merged_sources, merged_inputs, components)
+        self._replace_state(datasets, merged_sources, merged_inputs, components)
+        return True
+
+    def register_component(self, ref: ComponentRef) -> bool:
+        """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다."""
+        if not isinstance(ref, ComponentRef):
+            raise TypeError("ref must be a ComponentRef")
+        datasets, sources, execution_inputs, components = self._read()
+        key = ref.component_id
+        existing = components.get(key)
+        if existing is not None:
+            if existing == ref:
+                self._replace_state(datasets, sources, execution_inputs, components)
+                return False
+            raise _workspace_error(
+                stage=COMPONENT_REGISTER_STAGE,
+                code=f"{COMPONENT_REGISTER_STAGE}.conflict",
+                requirement=(
+                    f"component_id {key!r} must keep its registered fingerprint or use a new "
+                    "identity"
+                ),
+                observed="a different ComponentRef is already registered",
+                retry="use the registered component or choose a new component_id",
+            )
+        merged = dict(components)
+        merged[key] = _detach_component(ref)
+        self._write(datasets, sources, execution_inputs, merged)
+        self._replace_state(datasets, sources, execution_inputs, merged)
         return True
 
     def _read(
@@ -301,6 +369,7 @@ class Workspace:
         dict[DatasetId, DatasetRegistration],
         dict[SourceId, SourceSpec],
         dict[ExecutionInputId, ExecutionInputRegistration],
+        dict[ComponentId, ComponentRef],
     ]:
         try:
             text = self.path.read_text(encoding="utf-8")
@@ -339,21 +408,24 @@ class Workspace:
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
+        components: Mapping[ComponentId, ComponentRef],
     ) -> None:
         self._datasets = {key: _detach_registration(value) for key, value in datasets.items()}
         self._sources = {key: _detach_source(value) for key, value in sources.items()}
         self._execution_inputs = {
             key: _detach_execution_input(value) for key, value in execution_inputs.items()
         }
+        self._components = {key: _detach_component(value) for key, value in components.items()}
 
     def _write(
         self,
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
+        components: Mapping[ComponentId, ComponentRef],
     ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = _encode(datasets, sources, execution_inputs)
+        payload = _encode(datasets, sources, execution_inputs, components)
         temporary: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -424,10 +496,22 @@ def _detach_execution_input(
     )
 
 
+def _detach_component(ref: ComponentRef) -> ComponentRef:
+    return ComponentRef.of(
+        str(ref.component_id),
+        ref.kind,
+        ref.path,
+        ref.object_name,
+        config=dict(ref.config),
+        fingerprint=ref.fingerprint,
+    )
+
+
 def _encode(
     datasets: Mapping[DatasetId, DatasetRegistration],
     sources: Mapping[SourceId, SourceSpec],
     execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
+    components: Mapping[ComponentId, ComponentRef],
 ) -> str:
     document = {
         "sources": {
@@ -463,6 +547,16 @@ def _encode(
             }
             for key, registration in sorted(execution_inputs.items(), key=lambda item: str(item[0]))
         },
+        "components": {
+            str(key): {
+                "kind": str(ref.kind),
+                "path": str(ref.path),
+                "object_name": ref.object_name,
+                "config": dict(ref.config),
+                "fingerprint": ref.fingerprint,
+            }
+            for key, ref in sorted(components.items(), key=lambda item: str(item[0]))
+        },
     }
     return yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
 
@@ -473,12 +567,19 @@ def _decode(
     dict[DatasetId, DatasetRegistration],
     dict[SourceId, SourceSpec],
     dict[ExecutionInputId, ExecutionInputRegistration],
+    dict[ComponentId, ComponentRef],
 ]:
     document = yaml.safe_load(text)
-    valid_roots = ({"sources", "datasets"}, {"sources", "datasets", "execution_inputs"})
-    if not isinstance(document, dict) or set(document) not in valid_roots:
+    required_roots = {"sources", "datasets"}
+    optional_roots = {"execution_inputs", "components"}
+    if (
+        not isinstance(document, dict)
+        or not required_roots.issubset(document)
+        or not set(document).issubset(required_roots | optional_roots)
+    ):
         raise ValueError(
-            "workspace root must contain sources and datasets, with optional execution_inputs"
+            "workspace root must contain sources and datasets, with optional execution_inputs "
+            "and components"
         )
 
     raw_sources = document["sources"]
@@ -621,7 +722,37 @@ def _decode(
             ),
         )
         decoded_execution_inputs[registration.execution_input_id] = registration
-    return decoded, decoded_sources, decoded_execution_inputs
+    raw_components = document.get("components", {})
+    if not isinstance(raw_components, dict):
+        raise TypeError("components must be a mapping")
+    decoded_components: dict[ComponentId, ComponentRef] = {}
+    expected_component = {"kind", "path", "object_name", "config", "fingerprint"}
+    for raw_id, raw_ref in raw_components.items():
+        if not isinstance(raw_id, str):
+            raise TypeError("every component_id must be a string")
+        if not isinstance(raw_ref, dict) or set(raw_ref) != expected_component:
+            raise ValueError(
+                f"component {raw_id!r} must contain exactly {sorted(expected_component)}"
+            )
+        kind = raw_ref["kind"]
+        path = raw_ref["path"]
+        object_name = raw_ref["object_name"]
+        config = raw_ref["config"]
+        fingerprint = raw_ref["fingerprint"]
+        if not all(isinstance(value, str) for value in (kind, path, object_name, fingerprint)):
+            raise TypeError(f"component {raw_id!r} scalar declarations must be strings")
+        if not isinstance(config, dict):
+            raise TypeError(f"component {raw_id!r} config must be a mapping")
+        ref = ComponentRef.of(
+            raw_id,
+            ComponentKind(kind),
+            path,
+            object_name,
+            config=config,
+            fingerprint=fingerprint,
+        )
+        decoded_components[ref.component_id] = ref
+    return decoded, decoded_sources, decoded_execution_inputs, decoded_components
 
 
 def _workspace_error(

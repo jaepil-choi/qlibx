@@ -79,6 +79,35 @@ def execution_parquet(tmp_path_factory, _con) -> Path:
 
 
 @pytest.fixture(scope="session")
+def model_price_parquet(tmp_path_factory, _con) -> Path:
+    """PIT window와 DataModel materialization용 sparse-field 가격 parquet."""
+    out = tmp_path_factory.mktemp("model-price") / "price_daily.parquet"
+    _con.execute(
+        f"""COPY (
+            SELECT * FROM (VALUES
+              (DATE '2024-03-05', TIMESTAMPTZ '2024-03-05 15:30:00+09',
+               'A', 100.0, 10.0),
+              (DATE '2024-03-06', TIMESTAMPTZ '2024-03-06 15:30:00+09',
+               'A', 103.0, NULL),
+              (DATE '2024-03-07', TIMESTAMPTZ '2024-03-07 15:30:00+09',
+               'A', 105.0, 12.0),
+              (DATE '2024-03-08', TIMESTAMPTZ '2024-03-08 15:30:00+09',
+               'A', 999.0, 99.0),
+              (DATE '2024-03-05', TIMESTAMPTZ '2024-03-05 15:30:00+09',
+               'B',  50.0, 20.0),
+              (DATE '2024-03-06', TIMESTAMPTZ '2024-03-06 15:30:00+09',
+               'B',  51.0, NULL),
+              (DATE '2024-03-07', TIMESTAMPTZ '2024-03-07 15:30:00+09',
+               'B',  53.0, 22.0),
+              (DATE '2024-03-08', TIMESTAMPTZ '2024-03-08 15:30:00+09',
+               'B', 999.0, 99.0)
+            ) AS t(session_date, available_at, instrument, close, volume)
+        ) TO '{out.as_posix()}' (FORMAT PARQUET)"""
+    )
+    return out
+
+
+@pytest.fixture(scope="session")
 def naive_parquet(tmp_path_factory, _con) -> Path:
     """available_at이 tz 없는 timestamp. 조용히 틀리는 경우를 재현한다."""
     out = tmp_path_factory.mktemp("naive") / "bad.parquet"

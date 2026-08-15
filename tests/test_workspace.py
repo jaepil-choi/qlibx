@@ -12,6 +12,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.exchange.conventions import FillConvention
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.workspace import Workspace
 
 
@@ -322,3 +323,29 @@ def test_legacy_workspace_without_execution_inputs_still_opens(tmp_path: Path) -
 
     assert workspace.datasets == ()
     assert workspace.execution_inputs == ()
+
+
+def test_datamodel_component_round_trips_through_workspace(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path)
+    expected = ComponentRef.of(
+        "reversal",
+        ComponentKind.DATA_MODEL,
+        tmp_path / "reversal.py",
+        "ReversalModel",
+        config={"window": 20},
+        fingerprint="a" * 64,
+    )
+
+    assert workspace.register_component(expected) is True
+    assert Workspace.open(tmp_path).component("reversal") == expected
+    assert Workspace.open(tmp_path).components == (expected,)
+
+
+def test_legacy_workspace_without_components_still_opens(tmp_path: Path) -> None:
+    workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
+    workspace_path.parent.mkdir(parents=True)
+    workspace_path.write_text("sources: {}\ndatasets: {}\nexecution_inputs: {}\n", encoding="utf-8")
+
+    workspace = Workspace.open(tmp_path)
+
+    assert workspace.components == ()

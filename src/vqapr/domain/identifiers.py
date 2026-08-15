@@ -8,6 +8,7 @@ DatasetId = NewType("DatasetId", str)
 SourceId = NewType("SourceId", str)
 InstrumentId = NewType("InstrumentId", str)
 ExecutionInputId = NewType("ExecutionInputId", str)
+ComponentId = NewType("ComponentId", str)
 
 
 def _clean(kind: str, raw: str) -> str:
@@ -42,6 +43,13 @@ def execution_input_id(raw: str) -> ExecutionInputId:
     if any(c.isspace() for c in value):
         raise ValueError(f"execution_input_id must not contain whitespace: {value!r}")
     return ExecutionInputId(value)
+
+
+def component_id(raw: str) -> ComponentId:
+    value = _clean("component_id", raw)
+    if any(c.isspace() for c in value):
+        raise ValueError(f"component_id must not contain whitespace: {value!r}")
+    return ComponentId(value)
 
 
 def instrument_id(raw: str) -> InstrumentId:

@@ -10,12 +10,22 @@ import pytest
 
 import vqapr.public as public
 from vqapr.public import (
+    CalendarLookback,
+    ComponentRef,
+    DataModel,
+    DataModelContext,
+    DataRequirement,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
+    MaterializationResult,
+    MaterializationSpec,
+    RowsLookback,
     SourceSpec,
     VqaprError,
+    materialize,
+    register_data_model,
     register_dataset,
     register_execution_input,
 )
@@ -34,13 +44,38 @@ def _registration(**overrides) -> DatasetRegistration:
 
 @pytest.mark.uc("UC-FACADE-001")
 def test_public_exports_are_fixed() -> None:
+    assert all(
+        value is getattr(public, value.__name__)
+        for value in (
+            CalendarLookback,
+            ComponentRef,
+            DataModel,
+            DataModelContext,
+            DataRequirement,
+            MaterializationResult,
+            MaterializationSpec,
+            RowsLookback,
+            materialize,
+            register_data_model,
+        )
+    )
     assert public.__all__ == (
+        "CalendarLookback",
+        "ComponentRef",
+        "DataModel",
+        "DataModelContext",
+        "DataRequirement",
         "DatasetRegistration",
         "ExecutionInputRegistration",
         "ExecutionTableSpec",
         "FillConvention",
+        "MaterializationResult",
+        "MaterializationSpec",
+        "RowsLookback",
         "SourceSpec",
         "VqaprError",
+        "materialize",
+        "register_data_model",
         "register_dataset",
         "register_execution_input",
     )

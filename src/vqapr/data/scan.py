@@ -121,6 +121,7 @@ def _relation(spec: SourceSpec) -> str:
     """
     path = spec.path
     target = (path / "**" / "*.parquet").as_posix() if path.is_dir() else path.as_posix()
+    target = target.replace("'", "''")
     hive = 1 if spec.hive_partitioned else 0
     return f"read_parquet('{target}', hive_partitioning={hive})"
 
@@ -289,3 +290,94 @@ def positive_finite_when_true(
     finally:
         con.close()
     return ConditionalPositiveCheck(invalid_rows=count, examples=examples)
+
+
+def observation_rows(
+    spec: SourceSpec,
+    *,
+    instrument_field: str,
+    available_at_field: str,
+    key_fields: Sequence[str],
+    fields: dict[str, str],
+    instruments: Sequence[str],
+    evaluation_time: object,
+    rows: int | None = None,
+    lower_bound: object | None = None,
+) -> tuple[dict[str, object], ...]:
+    """Execute one physical PIT observation query with its lookback pushed into SQL."""
+    if (rows is None) == (lower_bound is None):
+        raise ValueError("declare exactly one rows or calendar lower bound")
+    if not instruments:
+        raise ValueError("observation query requires at least one instrument")
+    if not fields:
+        raise ValueError("observation query requires at least one field")
+
+    instrument = _quote(instrument_field)
+    available = _quote(available_at_field)
+    ordering_fields = tuple(dict.fromkeys((available_at_field, *key_fields)))
+    ascending = ", ".join(_quote(field) for field in ordering_fields)
+    descending = ", ".join(f"{_quote(field)} DESC" for field in ordering_fields)
+    placeholders = ", ".join("?" for _ in instruments)
+    predicates = [f"{available} <= ?", f"{instrument} IN ({placeholders})"]
+    parameters: list[object] = [evaluation_time, *instruments]
+    if lower_bound is not None:
+        predicates.append(f"{available} >= ?")
+        parameters.append(lower_bound)
+    where = " AND ".join(predicates)
+
+    projections = [
+        f"{available} AS {_quote('available_at')}",
+        f"{instrument} AS {_quote('instrument')}",
+    ]
+    if rows is None:
+        projections.extend(
+            f"{_quote(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()
+        )
+        sql = (
+            f"SELECT {', '.join(projections)} FROM {_relation(spec)} WHERE {where} "
+            f"ORDER BY {ascending}"
+        )
+    else:
+        ranks: list[str] = []
+        keep: list[str] = []
+        for index, (semantic, physical) in enumerate(fields.items()):
+            column = _quote(physical)
+            rank = _quote(f"__vqapr_rank_{index}")
+            ranks.append(
+                f"count({column}) OVER (PARTITION BY {instrument} ORDER BY {descending} "
+                f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS {rank}"
+            )
+            selected = f"{column} IS NOT NULL AND {rank} <= {int(rows)}"
+            keep.append(f"({selected})")
+            projections.append(
+                f"CASE WHEN {selected} THEN {column} ELSE NULL END AS {_quote(semantic)}"
+            )
+        sql = (
+            f"WITH gated AS (SELECT *, {', '.join(ranks)} FROM {_relation(spec)} WHERE {where}) "
+            f"SELECT {', '.join(projections)} FROM gated WHERE {' OR '.join(keep)} "
+            f"ORDER BY {ascending}"
+        )
+
+    con = _open(spec)
+    try:
+        cursor = con.execute(sql, parameters)
+        names = tuple(description[0] for description in cursor.description)
+        return tuple(dict(zip(names, row, strict=True)) for row in cursor.fetchall())
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage="source.scan.observations",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="source.scan.observations.unreadable",
+                    requirement=(
+                        "the registered source and physical field bindings must be queryable"
+                    ),
+                    observed=str(exc).splitlines()[0],
+                )
+            ],
+            mutation=False,
+            retry_precondition="fix the registered source or fields, then retry",
+        ) from exc
+    finally:
+        con.close()

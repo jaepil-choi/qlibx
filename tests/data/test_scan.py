@@ -43,6 +43,16 @@ def test_flat_and_hive_expose_the_same_business_columns(
     assert all(flat[c] is hive[c] for c in flat)
 
 
+def test_distinct_values_is_a_sorted_physical_scan(flat_parquet: Path) -> None:
+    values = scan.distinct_values(SourceSpec.of("s", flat_parquet), "session_date")
+
+    assert [value.isoformat() for value in values] == [
+        "2024-01-02",
+        "2024-01-03",
+        "2025-01-02",
+    ]
+
+
 def test_key_check_passes_on_a_real_key(hive_parquet: Path) -> None:
     result = scan.key_check(
         SourceSpec.of("s", hive_parquet, hive_partitioned=True), ("session_date", "instrument")

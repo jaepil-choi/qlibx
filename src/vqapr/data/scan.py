@@ -148,6 +148,37 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
     return {name: _normalize(dtype) for name, dtype, *_ in rows}
 
 
+def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
+    """Read one physical column as sorted distinct values for a non-Model consumer.
+
+    This is a scan primitive, not an observation query. It does not apply PIT, lookback, or
+    dataset semantics; callers such as the execution-table boundary own those meanings.
+    """
+    if not isinstance(field, str) or not field.strip():
+        raise ValueError("field must be a non-empty column name")
+    quoted = '"' + field.replace('"', '""') + '"'
+    con = _open(spec)
+    try:
+        rows = con.execute(
+            f"SELECT DISTINCT {quoted} FROM {_relation(spec)} ORDER BY {quoted}"
+        ).fetchall()
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage="source.scan.distinct",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="source.scan.distinct.unreadable",
+                    requirement=f"field {field!r} must be readable from source '{spec.source_id}'",
+                    observed=str(exc).splitlines()[0],
+                )
+            ],
+        ) from exc
+    finally:
+        con.close()
+    return tuple(row[0] for row in rows)
+
+
 def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
     """logical key가 null 없이 유일한지 확인한다.
 

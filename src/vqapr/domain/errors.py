@@ -20,7 +20,6 @@ class FailureFamily(StrEnum):
     """어느 단계의 실패인가. 집합은 미리 닫아둔다 (architecture §8.3)."""
 
     DATA = "DATA"
-    CALENDAR = "CALENDAR"
     INTENT = "INTENT"
     ORDER = "ORDER"
     EXCHANGE = "EXCHANGE"

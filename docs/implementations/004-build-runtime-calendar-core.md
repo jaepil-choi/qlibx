@@ -1,5 +1,8 @@
 # Build runtime calendar core
 
+> **Superseded by implementation 005.** This remains historical evidence of the former approved
+> design. The canonical PRD now removes the standalone calendar and precomputed decision timeline.
+
 ## Why this change exists
 
 The package could register daily data but had no executable representation of venue sessions or

@@ -15,11 +15,12 @@
 flowchart LR
     Raw[(등록된 dataset)] --> DM[DataModel.compute]
     DM -->|값| Raw
-    Raw --> S[StrategyModel.decide]
-    Cal[SessionCalendar] --> Trig[TriggerPolicy]
-    Trig --> S
+    ExecData[(ExecutionTable)] --> Loop[Flow session loop]
+    Loop -->|current session callback| S[StrategyModel.on_session]
+    Raw -->|PIT View| S
     Acc[(Account)] -->|snapshot| S
-    S --> I[PortfolioIntent]
+    S -->|NoDecision| Loop
+    S -->|PortfolioIntent| I[PortfolioIntent]
     I --> P[plan_orders]
     Acc -->|snapshot| P
     ExecData[PIT Execution View] --> P
@@ -49,10 +50,10 @@ flowchart LR
 | State | 실제 상태가 어떻게 바뀌는가 | `account/` · `valuation/` |
 | Evidence | 무엇을 읽었고 무엇이 일어났는가 | `evidence/` · `analysis/` |
 
-**`models/`가 두 층에 걸친다. 그게 우연이 아니라 사실의 표현이다** — 두 역할이 하나의 계약(`trigger` ·
-`requirements` · `memory` · payload · `recorder`)을 공유하고, 갈리는 것은 **execution을 통과하는가**
-하나뿐이다(§4.4). 계약을 두 패키지에 나눠 두면 그 공유가 코드에서 사라지고, 새 trigger나 state 규칙을
-추가할 때 한쪽만 고치는 사고가 난다.
+**`models/`가 두 층에 걸친다. 그게 우연이 아니라 사실의 표현이다** — 두 역할이 state와 data 접근 계약
+(`requirements` · `memory` · payload · `recorder`)을 공유하고, 갈리는 것은 **execution을 통과하는가**
+하나뿐이다(§4.4). Strategy의 session callback과 decision cadence는 DataModel materialization 계약과 공유하지
+않는다.
 
 `flow/`는 이 layer들을 조립하고 이벤트를 배달한다. **경제 규칙을 소유하지 않는다.**
 
@@ -88,20 +89,23 @@ flowchart LR
 
 ## 2. 설계 원칙
 
-### 2.1 IoC — Flow가 시간을 소유한다
+### 2.1 IoC — Flow는 진행과 배달을, Strategy는 판단 cadence를 소유한다
 
-**결정.** 선언들이 preflight에서 **정렬된 frozen 이벤트 열**로 계산되고, Flow가 그것을 순회하며 callback을
-부른다. StrategyModel은 언제 판단할지 *선언*만 하고 자신을 호출하거나 시간을 진행시키지 않는다.
+**결정.** preflight는 frozen execution table과 initial Model state를 확정한다. Flow는 체결 테이블의 session을
+결정적 순서로 하나씩 진행하며 현재 session callback을 부른다. StrategyModel은 callback 안에서 committed
+memory를 갱신하고 `NoDecision` 또는 `PortfolioIntent`를 반환한다.
 
-- **왜**: decision, execution, valuation, monitoring이 서로 다른 cadence를 가져야 한다. cadence를
-  component가 소유하면 조합이 불가능하다.
-- **왜 clock이 아니라 리스트인가**: 모든 시각이 선언에서 나오므로 — `SessionCalendar × TriggerPolicy`가
-  DECISION을, `FillConvention`이 EXECUTION을 만든다 — 데이터가 도착해서 시각이 생기는 일이 없다. 전체
-  열이 시작 전에 계산되고, 그래서 §12의 *"schedule 결정성"* 검사가 **두 리스트를 비교하는 일**이 된다.
-  `Clock`이라고 부르면 `now()`와 중간 삽입을 붙이고 싶어지는데, 그 둘이 재현성을 깨는 정확한 방법이다.
-- **없으면**: StrategyModel이 execution을 직접 부르는 순간 "decision time에 보이는 정보"와 "execution time에
-  보이는 정보"가 같은 호출 스택에 섞여 PIT 경계가 코드로 표현되지 않는다.
-- **UC**: `UC-TRIGGER-001`, `UC-EXEC-001`, `UC-EXEC-003`, multi-frequency scenario
+- **Flow가 소유하는 것**: current session 선택, callback 순서, bounded View 주입, result validation, state
+  snapshot/commit, 유효한 intent 이후 execution spine 연결.
+- **Strategy가 소유하는 것**: N번째 session인지, warm-up/cooldown이 끝났는지, 지금 판단할지, 판단했다면 어떤
+  intent를 만들지.
+- **왜**: Flow가 `SessionCalendar × TriggerPolicy`로 DECISION을 미리 고르면 Strategy의 경제 규칙을 Flow가
+  실행한다. path-dependent state를 주면서 실제 cadence는 미래-visible schedule이 정하는 모순이 생긴다.
+- **결정성**: 같은 frozen execution table, observation cutoff, Strategy code/config와 initial state가 같은
+  callback result와 state transition trace를 만든다. 미리 계산된 DECISION 목록을 비교하지 않는다.
+- **없으면**: StrategyModel이 execution을 직접 부르거나 Flow가 Strategy trigger를 대신 계산해 decision-time과
+  execution-time authority가 섞인다.
+- **UC**: `UC-TRIGGER-001`, `UC-STATE-001`, `UC-EXEC-001`, `UC-EXEC-003`
 
 ### 2.2 Least authority — bounded View
 
@@ -264,21 +268,22 @@ instrument의 **속성**을 어디에 둘지는 위 규칙만으로 안 갈린�
 
 | 축 | 소유자 | 비고 |
 |---|---|---|
-| session time | `SessionCalendar` (frozen run input) | venue 사실. 데이터에서 유도 금지 |
-| event time | `Timeline` (frozen, preflight에서 확정) | **데이터에 행이 없어도 성립한다** |
+| executable session | `ExecutionTable` (frozen run input) | `trade_at` 집합이 session 순서를 공급 |
+| callback/event time | Flow의 current-session loop | 현재 session 하나만 전달. decision 여부는 미리 확정하지 않음 |
 | availability time | `available_at` (registration) | 유일한 PIT 술어 |
 
 $$available\_at \le event.ts$$
 
-- `SessionCalendar`는 명시적 session 목록, 승인된 provider의 결과, 또는 **user가 선언한 유도 규칙**의
-  결과만 받는다(§3.6).
-- **package가 알아서 추측하지 않는다.** 가격 coverage나 weekday로 calendar를 조용히 만들어내는 경로는 없다.
-  → `UC-TRIGGER-001`
+- 실행 session은 observation coverage나 weekday 추측이 아니라 user가 완전한 venue 상태로 선언한 체결 테이블의
+  `trade_at`에서만 온다(§6.2).
+- StrategyModel은 전체 집합을 받지 않는다. Flow가 전달한 현재 session identity와 evaluation time만 본다.
+- Strategy callback time은 Model 정의가 현재 session에 대해 선언한다. Flow는 그 시각을 적용해 callback을
+  전달할 뿐 session을 건너뛰거나 decision 여부를 계산하지 않는다. → `UC-TRIGGER-001`
 
 ### 3.2 동일 timestamp 우선순위
 
 ```text
-DATA_AVAILABLE → DECISION → EXECUTION → FILL_COMMIT → VALUATION → MONITORING → FINALIZE
+DATA_AVAILABLE → SESSION → DECISION → EXECUTION → FILL_COMMIT → VALUATION → MONITORING → FINALIZE
 ```
 
 - 고정 순서 하나만 둔다. 설정 가능하게 만들지 않는다 → 재현성이 설정에 의존하지 않는다.
@@ -297,6 +302,10 @@ available_at = 15:30 인 행은
 
 - **왜 적어두나**: 다른 이벤트들과 나란히 있으면 구현할 때 emit 주체를 찾게 된다. 찾을 것이 없다.
 
+`SESSION`은 StrategyModel callback이다. 성공 결과가 `NoDecision`이면 그 session에는 `DECISION`이 생기지 않고
+Model state snapshot 뒤 독립 valuation/monitoring으로 진행한다. 성공 결과가 `PortfolioIntent`이면 Flow가
+`DECISION` evidence를 만들고 execution spine을 이어간다.
+
 #### decision과 execution이 같은 timestamp면
 
 전략이 **자기가 체결할 가격을 보고 판단한 것**이다.
@@ -309,8 +318,8 @@ available_at = 15:30 인 행은
 미래를 본 것이 아니므로 look-ahead는 아니다. 그러나 **현실에서 불가능하고 성과를 조용히 부풀린다** —
 종가를 확인한 순간 장은 끝나 있다.
 
-- 두 시각은 각각 선언된다. trigger가 판단 시각을(§3.4), `FillConvention`이 체결 시각을(§6.2) 정하므로
-  **preflight에서 비교할 수 있다**(§12).
+- 두 시각은 각각 선언된다. Strategy callback evaluation time과 `FillConvention`의 체결 시각을 preflight에서
+  비교한다(§12). Strategy가 실제로 decision을 반환한 경우에만 해당 비교가 실행 trace에 적용된다.
 - 검사 대상은 `offset_sessions == 0`이 아니라 **시각이 같은 경우**다. 표준 daily-close 흐름이 이미
   offset 0이다 — 04:00에 판단하고 같은 session 15:30에 체결한다.
 
@@ -328,200 +337,100 @@ nautilus와 vnpy는 데이터가 스트림으로 흐르며 거래소와 전략�
 
 ```text
 03-05 15:30  close 행이 available해짐
-03-06 04:00  DECISION       — 보이는 것: available_at <= 04:00  → PortfolioIntent 동결
-03-06 15:30  EXECUTION      — 현재 Account + 현재 PIT 가격 → OrderBatch → FillBatch
+03-06 04:00  SESSION        — execution table의 현재 session을 Flow가 callback으로 전달
+              ├─ NoDecision  — state snapshot 후 decision 없이 진행
+              └─ DECISION    — available_at <= 04:00 View로 PortfolioIntent 동결
+03-06 15:30  EXECUTION      — decision이 있으면 현재 Account + 정확한 체결 행 → OrderBatch → FillBatch
              FILL_COMMIT / VALUATION
 ```
 
 - `03-05 04:00`에는 03-05 종가를 읽을 수 없다.
-- `03-06 04:00`에 데이터 행이 없어도 이벤트는 큐에 정상 진입한다.
-- **04:00은 Model의 `TriggerPolicy`가, 15:30은 Exchange의 `FillConvention`이 정한다**(§3.4, §6.2).
-  둘 다 선언이며 어느 쪽도 run script에 있지 않다. 이 예시에서 판단과 체결이 **같은 session**이라는 것도
-  선언의 결과다 — `offset_sessions = 0`.
+- `03-06 04:00`에 observation 행이 없어도 current-session callback은 정상 실행된다.
+- **04:00은 StrategyModel의 callback evaluation-time 선언이, 15:30은 Exchange의 `FillConvention`이 정한다**
+  (§3.4, §6.2). 어느 쪽도 run script가 임의로 덮지 않는다.
+- callback을 받았다는 사실과 decision을 만들었다는 사실은 다르다. 후자는 Strategy state가 결정한다.
 
-### 3.4 Trigger는 Model이 소유한다
-
-```python
-class EveryNSessions(BaseModel):
-    n: int
-    local_time: time = time(4, 0)
-    timezone: str = "Asia/Seoul"
-    anchor: date | None = None
-
-class LastSessionOfMonth(BaseModel):
-    months: tuple[int, ...] | None = None    # None이면 매월. (6,)이면 매년 6월
-    local_time: time = time(4, 0)
-    timezone: str = "Asia/Seoul"
-```
-
-**두 종류가 같은 vocabulary를 쓴다.** StrategyModel은 *언제 판단하는가*를, DataModel은 *어느 시점의 값을
-만드는가*를 선언한다. 질문은 다르지만 답의 모양은 같다 — calendar에서 어느 session을 고를 것인가.
-해석하는 코드도 하나다(§4.7).
-
-- Flow가 `SessionCalendar × TriggerPolicy`를 결합해 DECISION 이벤트를 만들고, materialization은 같은 결합으로
-  계산 시점을 만든다.
-- **왜 Model이 소유하나**: PRD §3.3 — "정의만 읽고 cadence를 알 수 있어야 한다". run script에 두면
-  같은 Model이 스크립트마다 다른 것이 된다.
-
-**vocabulary는 닫힌 집합으로 둔다.** 임의의 cron 표현이나 콜백을 받지 않는다.
-
-| trigger | 필요한 이유 |
-|---|---|
-| `EveryNSessions` | 세션 수로 세는 cadence. 매 세션, N 세션마다 |
-| `LastSessionOfMonth` | **달력 경계**로 세는 cadence. 월말 리밸런싱과 연 1회 형성(Fama-French 6월말)은 세션 수로 근사할 수 없다 — 매년 날짜가 밀린다 |
-
-- **왜 두 종류가 필요한가**: "N 세션마다"와 "매월 마지막 거래일"은 서로를 표현하지 못한다. 한 달의
-  거래일 수가 달마다 다르기 때문이다.
-- **왜 임의 표현을 안 받나**: cadence는 경제적 의미이고 재현 가능해야 한다. 임의 콜백은 데이터나 외부
-  상태를 읽을 수 있어 §3.1(데이터에서 cadence를 유도하지 않는다)을 우회한다.
-- **왜 StrategyModel이 "오늘 월말이야?"를 묻지 않나**: 물을 필요가 없다. `LastSessionOfMonth`를 선언했으면
-  **불려온 순간 그날이 월말이다.** 판단 시점의 다른 성질(형성일로부터 며칠째인가 등)이 필요하면 §5.1의
-  calendar view로 읽는다.
-
-#### trigger는 회전율을 말하지 않는다
-
-**`trigger`는 언제 불릴지만 정하고, 포트폴리오가 얼마나 자주 바뀌는지는 말하지 않는다.** 둘을 섞어 읽으면
-안 된다.
-
-```text
-EveryNSessions(1)   매 세션 판단한다
-                    대부분의 날 같은 목표가 나온다        ← 신호가 천천히 움직이면
-                    delta 0인 OrderBatch + no-trade 진단  ← §5.5
-```
-
-분기 재무를 쓰는 Model이 매 세션 판단하는 것은 낭비가 아니라 정상이다. **판단을 안 한 것이 아니라 판단
-결과가 같았던 것**이고, 그 둘은 §5.5가 구분하라고 요구하는 서로 다른 사실이다.
-
-- **보유기간·회전율·리밸런싱 주기는 선언이 아니라 결과다.** 그렇게 쌓인 체결 기록에서 사후에 계산된다.
-  *"평균 리밸런싱 주기 63거래일"* 같은 표현은 회전율에서 역산한 통계이지 cadence 선언이 아니다.
-- **거꾸로도 성립하지 않는다.** `EveryNSessions(20)`을 선언했다고 20세션마다 포트폴리오가 통째로 바뀌는
-  것이 아니다. 그날 판단해서 유지할 수도 있다.
-- 회전율을 **줄이고 싶다면** trigger를 늘리는 것이 아니라 §5.3의 `turnover_penalty`와 `cost` 항을 쓴다.
-  trigger를 늘리면 판단 자체를 안 하게 되어 그 사이의 정보를 버린다.
-
-**월말이 언제인지는 calendar가 안다.** Flow가 `SessionCalendar`에서 해당 월의 마지막 eligible session을
-찾는다. 6월 30일이 휴장이면 6월의 마지막 거래일이 형성일이 된다. 데이터에서 유도하지 않는다.
-
-#### 체결 시각도 같은 방식으로 선언된다
-
-시점을 만드는 선언이 둘이고, 둘의 구조가 같다.
-
-```text
-Model      "매 세션 04:00에 판단한다"           TriggerPolicy      (이 절)
-Exchange   "그 session 15:30에 D열로 체결한다"   FillConvention     (§6.2)
-```
-
-- 둘 다 **선언**이고, 어느 쪽도 스스로 시간을 진행시키지 않는다. Flow가 `SessionCalendar`와 결합해
-  이벤트를 만든다.
-- 둘 다 **닫힌 집합**이다. 임의 표현이나 콜백을 받지 않는 이유가 같다 — cadence도 체결 시각도 경제적
-  의미이고 재현 가능해야 한다.
-- **왜 소유자가 다른가**: 언제 판단할지는 전략의 성질이고, 언제 체결되는지는 venue의 성질이다(§2.8).
-  같은 전략을 다른 venue에서 돌리면 판단 시각은 같고 체결 시각이 달라진다.
-
-### 3.5 Warm-up — 판단할 준비가 되기 전의 candidate
-
-**결정.** StrategyModel이 `warmup(self) -> Warmup`(단위: session)을 **선언**한다. run start로부터 그만큼의
-eligible session이 지나기 전의 candidate는 `DECISION_SKIPPED(warmup)`으로 **기록하고** 넘어간다.
+### 3.4 StrategyModel은 stateful session callback을 소유한다
 
 ```python
-class Warmup(BaseModel):
-    sessions: int = 0
+class StrategyModel(Model):
+    def callback_time(self) -> LocalEvaluationTime: ...
+    def on_session(
+        self, context: StrategyModelContext
+    ) -> NoDecision | PortfolioIntent: ...
 ```
 
-- **왜 명시 선언인가**: "lookback을 못 채우면 알아서 건너뛴다"로 하면 run 중간의 진짜 결측(상장폐지, 데이터
-  누락)까지 조용히 skip된다. 그건 PRD §10.2가 금지하는 silent skip이다. **warm-up 구간의 결측은 예상된 것,
-  그 이후의 결측은 실패** — 이 구분이 선언으로만 가능하다.
-- **왜 run start 기준인가**: 데이터가 언제 시작되는지를 기준으로 삼으면 cadence가 데이터에서 유도된다.
-  §3.1이 금지하는 바로 그것이다. calendar와 run start만으로 결정되어야 재현된다.
-- **왜 lookback과 별도인가**: 같은 수가 아니다. 분기 재무제표를 `RowsLookback(4)`로 읽는 전략의 warm-up은
-  4 session이 아니라 약 252 session이다.
-- skip은 실패가 아니라 **기록된 정상 결과**다. run result에 어느 candidate가 왜 판단되지 않았는지 남는다.
-  → `UC-TRIGGER-001` "판단하지 않은 session은 실패가 아니라 재현 가능한 기록으로 남는다"
-- **기본값은 0이다.** warm-up이 필요 없는 전략은 아무것도 선언하지 않는다.
+`on_session()`은 StrategyModel의 공개 확장 callback이다. Flow가 부르지만 Flow는 구현 안의 counter, warm-up,
+cooldown, stop logic을 해석하지 않는다. 영향을 주는 mutable progression은 반드시 §5.1.1의 memory/payload에
+들어가므로 Model을 새로 만들고 committed state를 복원해도 같은 다음 결과가 나온다.
 
-### 3.6 Calendar를 유도해야 할 때
+`EveryNSessions`가 필요하면 Strategy code나 reusable Strategy-side helper로 표현한다.
 
-**상황.** 사용자가 가진 것이 daily OHLCV뿐이고 거래소 calendar 파일이 없다. 이것이 일반적인 출발점이다.
+```python
+def on_session(self, context):
+    count = int((self.memory or {}).get("session_count", 0)) + 1
+    self.memory = {**(self.memory or {}), "session_count": count}
+    if count % self.n:
+        return NoDecision(reason="cadence")
+    return self.make_intent(context)
+```
 
-**결정.** `available_at` 유도(PRD §4.2)와 **정확히 같은 패턴**을 쓴다.
+- **왜 Flow helper가 아닌가**: N은 Strategy의 경제 규칙이다. Flow가 N을 해석하면 서로 다른 Strategy가 같은
+  session stream을 받아 독립적으로 상태를 진행한다는 사실이 사라진다.
+- **왜 callback 하나인가**: `should_decide()`와 `decide()`를 별도 invocation으로 나누면 첫 호출의 counter는
+  저장됐는데 두 번째가 실패하거나 retry에서 counter가 두 번 증가할 수 있다. 한 callback의 result validation
+  뒤 state를 한 번 commit한다.
+- **왜 DataModel과 공유하지 않나**: DataModel materialization time과 Strategy decision cadence는 다른 제품
+  질문이다. 공통 timestamp-list vocabulary가 둘을 억지로 결합했다.
 
-| | availability (PRD §4.2) | calendar (여기) |
-|---|---|---|
-| package | 추측하지 않는다 | 추측하지 않는다 |
-| user | 유도 규칙을 근거와 함께 선언 | 유도 규칙을 근거와 함께 선언 |
-| package | 형식·coverage·일관성을 결정적으로 검증 | 동일 |
-| 기록 | 규칙이 frozen input에 남는다 | 동일 + result limitation |
-
-#### 날짜는 유도될 수 있고 시각은 유도될 수 없다
-
-daily OHLCV에는 `2024-03-05`만 있고 `15:30 KST`가 없다. 그런데 `available_at`도 execution 이벤트도 시각을
-요구한다. 그래서 답이 두 조각으로 갈린다.
+#### 판단하지 않음, hold, zero-dealt
 
 ```text
-session 날짜   ← 선언된 유도 규칙으로 데이터에서
-open/close 시각 ← user가 calendar 유도 시점에 **따로 선언한다**
+NoDecision        callback은 성공, decision 없음, progression state는 commit
+PortfolioIntent   decision 있음. explicit hold도 이 경계 안의 유효한 판단
+FillBatch dealt=0 decision과 order가 있었지만 venue에서 체결되지 않음
 ```
 
-**두 번째를 재사용할 곳이 없다.** `available_at`이 규칙이 아니라 user가 계산해 넣은 컬럼이므로(§4.1),
-config에는 *"종가는 15:30에 알 수 있게 된다"*는 규칙이 남아 있지 않다. 값만 있고 그 값을 만든 시각
-규약은 package가 갖고 있지 않다.
+셋은 서로 다른 evidence다. null 하나나 빈 batch 하나로 합치지 않는다(PRD §6.7).
 
-그래서 calendar 유도가 session 시각을 **독립적으로 요구한다.** 같은 값을 두 번 말하게 되는 것처럼
-보이지만, 실제로는 한 번은 데이터 안에(컬럼 값) 한 번은 선언 안에(session 시각) 있는 것이고 **package가
-아는 것은 후자뿐**이다.
+#### LastSessionOfMonth는 current capability가 아니다
 
-#### 유도 규칙마다 위험이 다르다
+현재 callback은 현재와 과거 state만 본다. 오늘 뒤에 같은 달의 session이 더 있는지 모르므로 현재 session이
+월말의 마지막인지 판정할 수 없다. Flow가 frozen 미래 session을 보고 대신 고르는 것도 Strategy trigger를 Flow로
+옮긴 것이므로 금지한다.
 
-| 규칙 | 위험 |
-|---|---|
-| 전 종목 날짜 **union** — 하루라도 거래된 날이 session | 한 종목의 결측·거래정지에 무너지지 않는다. 상대적으로 안전 |
-| 단일 기준 종목의 날짜 | 그 종목이 거래정지되면 **session이 사라진다.** 위험 |
-| 지수 시계열의 날짜 | 안전. 다만 지수 데이터가 있어야 한다 |
+다음 달 첫 callback에서 이전 session과 월이 달라졌음을 보고 지난달 종료를 판단하는 것은 가능하다. 다만
+그 decision과 execution은 **다음 달 첫 session**에 일어나며 지난달 마지막 session execution으로 기록하지 않는다.
 
-bundled agent skill이 후보와 위험을 설명하고 user가 고른다. package는 고른 규칙을 검증하고 적용할 뿐이다.
+### 3.5 Warm-up — Strategy state의 정상적인 NoDecision
 
-#### 유도의 입력은 **등록된 dataset**이고, 규칙 적용은 순수하다
+Warm-up도 Flow가 run start에서 session을 세어 skip하지 않는다. Strategy가 자신의 memory에 진행 상태를 남기고
+준비 전 callback에서 `NoDecision(reason="warmup")`을 반환한다.
 
-calendar는 별도 파일에서 오지 않는다. **사용자가 이미 등록한 데이터에서 나온다** — 일별 시세를
-등록했다면 그 dataset이 곧 calendar의 원천이다.
+- **왜**: run 경계가 warm-up counter를 초기화하면 하루 단위 production run에서 영원히 warm-up을 벗어나지
+  못한다. committed Model state가 기준이어야 한다.
+- **결측과 구분**: warm-up은 Strategy가 의도적으로 반환한 NoDecision이고, 준비가 끝난 뒤 required observation
+  누락은 정상 skip이 아니라 실패다.
+- **lookback과 별도**: 분기 재무 `RowsLookback(4)`와 252-session warm-up은 같은 수가 아니다.
 
-그런데 그렇게 하면 `runtime/`이 데이터를 읽어야 하는 것처럼 보인다. 그렇지 않다. **둘로 가른다.**
+### 3.6 별도 calendar artifact는 없다
+
+daily OHLCV만 있는 project는 package 밖에서 두 parquet을 별도로 준비한다.
 
 ```text
-읽기      등록된 dataset에서 그 field의 distinct 값을 뽑는다   dataset_id + framework 이름 (§4.6)
-적용      날짜 집합 + 선언된 규칙 → frozen SessionCalendar      `runtime/calendar_derivation.py` — 순수
+observation parquet   available_at 포함. ModelWindow용
+execution parquet     trade_at · instrument · is_tradable · price. Flow/Exchange용
 ```
 
-- **읽기도 등록된 경로를 탄다.** `scan.py`가 아니다 — 그것은 등록 **전** 물리 검증에만 열리고, 유도는
-  등록 **후**의 작업이다(§4.6). 원천을 물리 경로로 지목하면 calendar가 어느 dataset에서 나왔는지가
-  선언이 아니라 파일 경로로 표현되어, 그 dataset을 다시 등록해도 따라오지 않는다.
-- **`runtime/calendar_derivation.py`는 날짜를 인자로 받는다.** `transforms/`와 `portfolio/`가 panel을
-  인자로 받는 것과 같은 규칙이다 — 직접 읽으면 그 접근이 declared requirement를 거치지 않아 어느
-  dataset에서 calendar가 나왔는지 lineage에 남지 않는다.
-- **`runtime/`이 `data/`를 import하지 않는다.** 시간 층이 데이터 층을 알면 "cadence를 데이터에서
-  유도하지 않는다"(§3.1)를 코드 구조가 더 이상 말해주지 않는다.
+execution parquet의 `trade_at` 집합이 executable session을 이미 정의하므로 세 번째 calendar parquet을 만들지
+않는다. open/close 시각도 current runtime 입력으로 요구하지 않는다. user가 선택한 execution-table 준비 규칙과
+한계는 frozen Exchange config/result에 남는다.
 
-#### 유도된 calendar는 project 선언이 된다
-
-한 번 유도하고 매번 다시 만들지 않는다. 결과는 frozen `SessionCalendar`로 workspace에 남는다(§10.5).
-
-```text
-vqapr data register  ...                              일별 시세를 등록
-vqapr data calendar  --from price_daily               ← 규칙과 session 시각을 선언
-                     --rule all-instrument-date-union
-                     --session-close "15:30 Asia/Seoul"
-vqapr materialize    ...                              그 frozen calendar를 쓴다
-```
-
-- **§3.1의 금지를 그대로 지킨다.** 아무도 선언하지 않았는데 Flow가 가격 coverage로 session을
-  만들어내는 경로는 없다 — 이 명령을 사용자가 규칙을 골라 실행해야만 calendar가 생긴다. §3.1의 금지는
-  **package의 추측**을 향한 것이지 user의 선언을 향한 것이 아니었다.
-- **시각은 여기서도 유도되지 않는다.** `--session-close`가 필요하다. 등록에는 `available_at` **값**만
-  있고 그것을 만든 시각 규약은 없으므로 재사용할 것이 없다(위).
-- **왜 이 완화가 안전한가**: 선택된 규칙과 원천 dataset이 frozen input에 남아 재현되고, 어떤
-  dataset의 어떤 규칙에서 나왔는지 감사할 수 있으며, result에 limitation으로 표시된다. 조용한 추측과
-  정반대다.
-- **UC**: `UC-CALENDAR-001`
+- **관측과 실행은 합쳐지지 않는다**: 같은 raw OHLCV에서 준비할 수 있지만 서로 다른 parquet, schema, 소비
+  경로다.
+- **Model은 execution parquet을 읽지 않는다**: Strategy가 당일 정지나 미래 session을 미리 보는 경로를 막는다.
+- **Flow는 decision session을 고르지 않는다**: 모든 current executable session을 callback으로 전달한다.
+- **UC-CALENDAR-001**: retired. 별도 calendar capability를 뜻하는 새 코드나 CLI를 만들지 않는다.
 
 ---
 
@@ -860,7 +769,7 @@ class DataModelContext(ModelContext, Protocol):
     pass
 
 class StrategyModelContext(ModelContext, Protocol):
-    calendar: CalendarView
+    session: SessionEvent
     def account(self) -> AccountSnapshot: ...
     def account_history(self, requirement: HistoryRequirement) -> AccountHistory: ...
     def prior_feedback(self) -> tuple[ExecutionFeedback, ...]: ...
@@ -885,7 +794,6 @@ class StrategyModelContext(ModelContext, Protocol):
 class Model(ABC):                                        # 공통 부모
     memory: ModelMemory = None
     recorder: Recorder                                   # write-only (§9.1)
-    def trigger(self) -> TriggerPolicy: ...
     def requirements(self) -> tuple[DataRequirement, ...]: ...
     def tables(self) -> tuple[TableSpec, ...]: ...       # 기록할 것을 미리 선언
     def save_payload(self, target: BinaryIO) -> None: ... # 기본 구현은 no-op
@@ -897,18 +805,18 @@ class DataModel(Model):
 
 | | 공유 | DataModel | StrategyModel |
 |---|---|---|---|
-| `trigger()` · `requirements()` · `memory` · payload · `recorder` · checkpoint | ✅ | | |
+| `requirements()` · `memory` · payload · `recorder` · checkpoint | ✅ | | |
 | **execution 통과** | | **✗ 거치지 않는다** | **✅ 반드시 거친다** |
 | 출력 | | 값 (rows) | 배분 (`PortfolioIntent`) |
 | account 접근 | | ✗ | ✅ |
-| `warmup()` | | ✗ | ✅ |
+| session callback | | ✗ | ✅ `NoDecision | PortfolioIntent` |
 
 **판정 기준은 execution 통과 여부다.** 아래 세 행은 그 결과다 — 배분은 체결될 수 있으므로 계좌가 필요하고,
 값은 체결될 것이 없으므로 계좌가 없다(PRD §2.3). **계좌 접근으로 두 역할을 가르면 틀린다.**
 
-**공유 항목의 해석 코드는 하나다.** `TriggerPolicy → 시점 목록` 변환과 state 저장·복원은 각각 한 군데에만
-존재한다. 두 종류가 같은 선언을 하되 그것을 해석하는 코드를 두 벌 두면, 새 trigger나 payload 규칙을 추가할
-때 한쪽만 고치는 사고가 난다. StrategyModel 고유 부분은 §5.1에 있다.
+**공유 항목의 해석 코드는 하나다.** state 저장·복원과 requirement resolution은 각각 한 군데에만 존재한다.
+Strategy session callback은 DataModel materialization과 공유하지 않는다. 둘을 같은 timestamp-list 변환으로
+묶으면 Strategy의 stateful cadence를 Flow가 대신 계산하게 된다. StrategyModel 고유 부분은 §5.1에 있다.
 
 #### 왜 DataModel에도 recorder가 있나
 
@@ -940,8 +848,9 @@ class DataModel(Model):
 
 #### `materialize()` — DataModel을 dataset으로 만든다
 
-`compute()`는 한 trigger 시점의 값을 계산하고, `materialize(start, end)`는 기간 안의 trigger를 순회해
-`compute()` 결과를 검증·저장하고 registered dataset으로 publish하는 operation이다.
+`compute()`는 한 frozen evaluation time의 값을 계산하고, `materialize(evaluation_times)`는 caller가 명시한
+정렬된 evaluation time을 순회해 `compute()` 결과를 검증·저장하고 registered dataset으로 publish하는
+operation이다. Strategy session stream이나 decision trigger가 이 목록을 만들지 않는다.
 
 **`materialize`는 `flow/`에 산다**(§10). `compute`는 `models/`의 순수 계약이고 materialize는 state를
 commit하고 dataset을 publish하는 **부작용**이다 — §2.4의 Functional Core / Imperative Shell 경계가 정확히
@@ -949,19 +858,19 @@ commit하고 dataset을 publish하는 **부작용**이다 — §2.4의 Functiona
 store 접근이 **두 층에서** 일어나고 §16의 *"state 저장·복원 코드가 한 곳에만 있다"*가 깨진다.
 
 ```text
-trigger 시점 계산
-  → 첫 trigger 전에 initial committed Model state 복원
+frozen evaluation time 목록 검증
+  → 첫 evaluation 전에 initial committed Model state 복원
   → PIT ModelWindow 구성
   → DataModel.compute(context)
        └── 필요하면 context.checkpoint()로 working state 저장
   → Rows와 새 candidate Model state 검증
-  → 다음 trigger로 진행
+  → 다음 evaluation time으로 진행
   → 완료된 dataset과 state snapshot들을 함께 publish
 ```
 
 materialize는 checkpoint, recorder, execution의 다른 이름이 아니다. CNN 사례에서는 학습과 daily inference로
 만든 `(time, instrument, score)`를 한 dataset으로 만들기 때문에 StrategyModel이 weight를 읽거나 CNN을 다시
-학습하지 않고 score만 재사용할 수 있다. 각 trigger에는 그 시점의 PIT window만 주고 package가 `available_at`을
+학습하지 않고 score만 재사용할 수 있다. 각 evaluation에는 그 시점의 PIT window만 주고 package가 `available_at`을
 붙인다.
 
 #### warm-up이 없다
@@ -971,7 +880,7 @@ materialize는 checkpoint, recorder, execution의 다른 이름이 아니다. CN
 
 #### Model state를 쓰면 순차 생성이 된다
 
-Model state를 쓰는 DataModel은 **trigger 순서대로 호출되어야** 같은 값이 나온다. 따라서 병렬 계산과 부분
+Model state를 쓰는 DataModel은 **frozen evaluation-time 순서대로 호출되어야** 같은 값이 나온다. 따라서 병렬 계산과 부분
 재생성이 불가능해지고, **그 사실이 출력에 남아야 한다.** 남지 않으면 나중에 구간만 다시 만들려는 시도가
 조용히 다른 값을 만든다.
 
@@ -988,7 +897,7 @@ Model state를 쓰지 않으면 이 제약이 없다. 순서 무관이고 병렬
 
 ### 4.5 `available_at`은 package가 붙인다
 
-$$available\_at = \max\big(\text{trigger 시각},\ \max(\text{창 안 } available\_at)\big)$$
+$$available\_at = \max\big(\text{materialization evaluation time},\ \max(\text{창 안 } available\_at)\big)$$
 
 - **생산자가 주장하지 않는다.** 실제로 읽은 것에서 나오므로 위조할 수 없다.
 - **자기 행 시각보다 먼저 알 수는 없다.** 재무만 읽는 6월말 계산이 3월 공시를 썼더라도 `available_at`은
@@ -1085,16 +994,14 @@ point-in-time이 아니다.
 등록 후   dataset_id + framework 이름   물리를 다시 볼 일이 없다
 ```
 
-calendar 유도(§3.6)도 등록 **후**의 작업이므로 raw source가 아니라 등록된 dataset을 읽는다.
+execution table은 observation registration 뒤의 dataset 조회가 아니다. §6.2의 별도 `ExecutionTableSpec`으로
+동결되고 Flow/Exchange만 exact-time/session-source 경로로 읽는다.
 
 #### 창 없는 조회는 Model에게 열려 있지 않다
 
-calendar 유도는 lookback 없이 dataset 전체의 distinct 날짜를 읽는다. 이것은 **창 조회가 아니므로**
-그 자체로 unbounded read다.
-
-- **CLI/유도 시점의 operation이지 소비자 API가 아니다.** Model이 받는 것은 `ModelWindow` 하나이고
-  거기에는 이 경로가 없다 — 규칙이 아니라 **경로의 부재**로 막힌다(§10.1).
-- 그래서 `decide()`나 `compute()` 안에서 "전체를 한 번 읽어보기"가 불가능하다.
+- Model에는 lookback 없는 observation 조회나 execution session 목록 조회가 없다. Model이 받는 것은
+  `ModelWindow`와 Strategy의 current `SessionEvent`뿐이다 — 규칙이 아니라 **경로의 부재**로 막힌다(§10.1).
+- 그래서 `on_session()`이나 `compute()` 안에서 "전체를 한 번 읽어보기"가 불가능하다.
 
 ---
 
@@ -1102,24 +1009,27 @@ calendar 유도는 lookback 없이 dataset 전체의 distinct 날짜를 읽는�
 
 ### 5.1 StrategyModel
 
-공통 계약(`trigger`·`requirements`·`memory`)은 §4.4에 있다. 여기서는 StrategyModel 고유 부분만 다룬다.
+공통 계약(`requirements`·`memory`)은 §4.4에 있다. 여기서는 StrategyModel 고유 session callback만 다룬다.
 
 ```python
 class StrategyModel(Model):
-    def warmup(self) -> Warmup: ...      # 기본 0 (§3.5)
-    def decide(self, context: StrategyModelContext) -> PortfolioIntent: ...
+    def callback_time(self) -> LocalEvaluationTime: ...
+    def on_session(
+        self, context: StrategyModelContext
+    ) -> NoDecision | PortfolioIntent: ...
 ```
 
-- `StrategyModelContext`는 `window`, `event`, `calendar`, account 접근, 그리고 투영된
-  `constraint_bounds()`만 준다(§4.3, §5.7). Timeline·Store·Exchange·mutable Account는 없다.
+- `StrategyModelContext`는 `window`, **현재 `SessionEvent` 하나**, account 접근, 그리고 투영된
+  `constraint_bounds()`만 준다(§4.3, §5.7). future session stream·Store·Exchange·execution table·mutable
+  Account는 없다.
 - 기록은 context가 아니라 `self.recorder`로 한다(§4.4, §9.1). **두 종류가 공유하는 것이므로 StrategyModel
   쪽에만 있는 자리에 두지 않는다.**
 - `recorder`는 읽을 수 없으며 `memory`나 `PortfolioIntent`의 일부가 아니다.
 
 #### 실행을 건너뛸 수 없다
 
-`decide()`가 반환한 `PortfolioIntent`는 **반드시 §6의 execution을 통과한다.** 배분을 만들기만 하고 저장하는
-경로는 없다.
+`on_session()`이 반환한 `PortfolioIntent`는 **반드시 §6의 execution을 통과한다.** 배분을 만들기만 하고
+저장하는 경로는 없다. `NoDecision`은 intent가 아니므로 execution을 시작하지 않는다.
 
 - **왜**: 배분은 체결될 수 있고, 체결되면 return이 생긴다(PRD §2.2). 실행을 건너뛰면 그 return이 어떤
   체결·비용·계좌 상태에서 나왔는지 말할 수 없게 된다.
@@ -1129,14 +1039,14 @@ class StrategyModel(Model):
 - **hold도 통과한다**(§5.5). delta 0인 `OrderBatch`가 되고 no-trade 진단만 남는다.
 - 이것이 DataModel과의 판정 기준이다(§4.4).
 
-**calendar view.** Account snapshot과 같은 급의 읽기 전용 surface다. StrategyModel이 판단 시점의 **성질**을
-물을 수 있다 — 이번 달 몇 번째 거래일인가, 분기 첫 거래일인가, 직전 형성일로부터 몇 세션 지났는가.
+**현재 session만 보인다.** `context.session`은 현재 session identity와 evaluation time만 담는다. 몇 번째
+session인지, 직전 판단으로부터 몇 session 지났는지, month가 바뀌었는지는 Strategy가 memory의 과거 값과
+비교한다.
 
-- **왜 필요한가**: trigger는 *언제 불릴지*만 정한다. *불린 시점이 어떤 날인지*는 알려주지 않는다.
-  두 질문은 다르다.
-- **왜 `Timeline` 자체를 주지 않나**: 이벤트 열 전체를 주면 **미래 session이 그대로 보인다.** calendar
-  view는 판단 시점의 성질만 답하고, 미래를 어디까지 노출할지는 §15-1이 정한다.
-- 미래 session을 어디까지 노출할지는 **§15-1 열린 결정**이다.
+- 전체 Timeline이나 future session view는 없다. 경로의 부재로 미래 schedule 노출을 막는다.
+- `session_count`, `last_session`, `last_decision_session`처럼 다음 결과에 영향을 주는 값은 memory에 둔다.
+- 현재 session의 월이 직전 session과 다르면 **이전 달이 끝났음**은 알 수 있지만, 현재 session이 이번 달의
+  마지막인지는 알 수 없다.
 
 ### 5.1.1 Model state — JSON memory와 optional payload
 
@@ -1248,7 +1158,7 @@ research values  ──►  weights  ──►  PortfolioIntent
    (자유)            (built-in 가능)      (StrategyModel 책임)
 ```
 
-**결정.** 프레임워크는 `decide()`의 중간값 타입을 표준화하지 않는다. 대신 재사용 가능한 **순수 weighting
+**결정.** 프레임워크는 `on_session()`의 중간값 타입을 표준화하지 않는다. 대신 재사용 가능한 **순수 weighting
 함수**를 제공한다.
 
 - **왜**: peer momentum(랭크 기반)과 top-N(선택 기반)이 서로 다른 중간값을 쓴다. 하나로 표준화하면 한쪽이
@@ -1259,12 +1169,12 @@ research values  ──►  weights  ──►  PortfolioIntent
 - **UC**: `UC-SIGNAL-001`, `UC-SIGNAL-002`, `UC-PORTFOLIO-001`
 
 > built-in weighting 함수는 공통적으로 instrument별 signed 값을 받는다. 이는 **built-in을 부르는 StrategyModel만
-> 구속하는 사실**이며 `decide()`의 요구 shape가 아니다. built-in을 쓰지 않는 StrategyModel은 그런 중간값을 만들지
+> 구속하는 사실**이며 `on_session()`의 요구 shape가 아니다. built-in을 쓰지 않는 StrategyModel은 그런 중간값을 만들지
 > 않아도 된다.
 
 #### 3단 바깥 — StrategyModel이 StrategyModel의 결과를 읽는다
 
-위 3단은 **하나의 `decide()` 안**이다. 그 바깥에 체인이 있다.
+위 3단은 **하나의 `on_session()` 안**이다. 그 바깥에 체인이 있다.
 
 ```text
 [StrategyModel A]  research values → weights → Intent → 실행 → 저장된 결과
@@ -1284,7 +1194,7 @@ research values  ──►  weights  ──►  PortfolioIntent
 - **run은 각자 자기 계좌를 갖는다.** C는 B의 **결과**를 읽지 B의 **계좌**를 읽지 않는다. `UC-ALPHA-PATH-001`이
   account A와 account B를 구분하는 것이 이 뜻이다 — A의 배분이 계좌 A 기준으로 만들어졌고 계좌 C에서
   재계산된 것이 아님을 lineage가 보존해야 한다.
-- **왜 한 `decide()` 안에서 변환하지 않나**: PRD §2.1의 *"signed alpha를 덮어쓰지 않는다"*를 구조가 지킨다.
+- **왜 한 `on_session()` 안에서 변환하지 않나**: PRD §2.1의 *"signed alpha를 덮어쓰지 않는다"*를 구조가 지킨다.
   한 계산 안에서 long-short를 long-only로 바꾸면 원본이 중간값으로 사라지고, 그것을 보존하려면 별도 장치가
   필요해진다. 그리고 benchmark나 배분 강도를 바꿔볼 때 앞 단계를 다시 실행하지 않아도 된다.
 - **UC**: `UC-ENSEMBLE-001`, `UC-ALPHA-PATH-001`, `UC-ALPHA-CHILD-001`
@@ -1674,7 +1584,7 @@ def plan_orders(intent, account: AccountSnapshot,
 > `order_target_percent`도 같은 모양이다. **다만 qlib에서는 선택이다** — 어느 base class를 상속하느냐로
 > 갈리고, 나뉘더라도 전략 안에서 일어나며 그러려면 전략이 `trade_exchange`를 손에 들고 있어야 한다.
 >
-> 우리는 우회할 방법이 없다. `decide()`가 반환할 수 있는 것은 `PortfolioIntent` 하나이고, 전략이
+> 우리는 우회할 방법이 없다. `on_session()`에서 decision으로 반환할 수 있는 것은 `PortfolioIntent` 하나이고, 전략이
 > Exchange를 볼 수 없으므로(§2.2) 변환할 재료가 없다. **§2.2의 결과이지 독립된 설계가 아니다.**
 >
 > **그리고 갈라놓은 대상은 비중이냐 수량이냐가 아니다.** 목표는 수량으로도 선언할 수 있다(§5.4).
@@ -1766,7 +1676,6 @@ for 루프를 돈다.**
 ```python
 class Exchange(Protocol):
     exchange_id: str
-    calendar: SessionCalendar
     fill: FillConvention
     def rules(self, at, instruments) -> ExchangeRulesView: ...
     def snapshot(self, at: datetime, instruments) -> ExecutionSnapshot: ...
@@ -1786,6 +1695,10 @@ class Exchange(Protocol):
 
 없음   available_at · lookback · DataRequirement 경로 · ModelWindow
 ```
+
+이 테이블은 exact-time 체결 상태인 동시에 executable run의 **session source**다. Flow는 동결된 `trade_at`
+집합을 정렬하고 같은 시각의 instrument 행을 한 session으로 묶어 callback loop를 진행한다. 별도 calendar
+artifact나 open/close 표를 결합하지 않는다.
 
 ##### 어떻게 정의되나 — 물리 층은 공유하고 의미 층은 쓰지 않는다
 
@@ -1905,11 +1818,14 @@ class FillConvention(BaseModel):
     trade_price: str                # 체결 테이블의 어느 가격 컬럼
 ```
 
-**결정.** 체결 시각과 어느 값으로 체결할지는 Exchange의 frozen config다. §3.4의 `TriggerPolicy`와 대칭이며,
-Flow가 `SessionCalendar`와 결합해 EXECUTION 이벤트를 만든다.
+**결정.** 체결 시각과 어느 값으로 체결할지는 Exchange의 frozen config다. Flow는 유효한 decision이 생긴 뒤
+frozen execution-session sequence에서 `offset_sessions`에 해당하는 exact `trade_at`을 찾아 EXECUTION callback을
+만든다. 이것은 intent 이후의 기계적 실행 시점 선택이지 Strategy decision cadence가 아니다.
 
 - **`offset_sessions`의 기준은 판단 이벤트가 속한 session이다.** 표준 daily-close 흐름은 **0** — 04:00에
   판단하고 같은 session 15:30에 체결한다(§3.3).
+- future execution session을 찾는 것은 Flow/Exchange 내부 동작이며 StrategyModel context에는 그 목록이나 선택된
+  미래 행을 노출하지 않는다.
 - **`trade_price` 한 줄만 바꾸면 `UC-ALPHA-CHILD-001`이 성립한다.** next-close와 next-open 비교가 체결
   테이블 재생성 없이 된다. 가격 컬럼이 하나 이상이어야 하는 이유가 이것이다.
 - **컬럼 이름에 의미가 없다.** 프레임워크는 그 컬럼이 시가인지 종가인지 모른다. `trade_price: "D"`도
@@ -2243,6 +2159,7 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
 
 ```python
 class SimulationFlow:
+    def on_session(self, e: SessionEvent) -> None: ...
     def on_decision(self, e: DecisionEvent) -> None: ...
     def on_execution(self, e: ExecutionEvent) -> None: ...
     def on_fill_commit(self, e: FillCommitEvent) -> None: ...
@@ -2251,12 +2168,12 @@ class SimulationFlow:
     def on_finalize(self, e: FinalizeEvent) -> RunResult: ...
 ```
 
-책임: run 동결과 preflight · schedule 조립 · 이벤트 dispatch · requirement resolution과 View 생성 ·
-StrategyModel 호출과 intent 발행 · `plan_orders`/Exchange 호출 · commit · Model state 스냅샷 · evidence ·
-finalize.
+책임: run 동결과 preflight · execution session 순회 · 이벤트 dispatch · requirement resolution과 View 생성 ·
+StrategyModel session callback과 result validation · Model state 스냅샷 · decision일 때 intent 발행 ·
+`plan_orders`/Exchange 호출 · commit · evidence · finalize.
 
-- **Academic Flow와 KRX Flow를 따로 만들지 않는다.** Exchange, AccountMode, calendar, policy를 주입한다.
-- `Timeline`은 StrategyModel나 Exchange의 의미를 모른다. 정렬된 이벤트를 낼 뿐이다.
+- **Academic Flow와 KRX Flow를 따로 만들지 않는다.** Exchange, AccountMode, execution input, policy를 주입한다.
+- session loop는 StrategyModel의 cadence를 모른다. frozen execution input에서 현재 session을 하나씩 낼 뿐이다.
 - **monitoring도 여기서 dispatch만 한다.** 그 경제 규칙은 `constraints/evaluation.py`에 있다(§5.7).
   flow에 두면 §1.2의 *"flow는 경제 규칙을 소유하지 않는다"*가 거짓이 된다.
 
@@ -2270,12 +2187,14 @@ finalize.
 
 ```text
 CREATED → PREFLIGHTED → RUNNING
-    DECISION → DECISION_SKIPPED(warmup)          — 기록하고 다음 candidate로
-    DECISION → INTENT_FROZEN → EXECUTION_READY → FILLS_PRODUCED
+    SESSION_CALLBACK → NO_DECISION → MODEL_STATE_COMMITTED       — 다음 session으로
+    SESSION_CALLBACK → INTENT_VALIDATED → MODEL_STATE_COMMITTED
+                     → DECISION → INTENT_FROZEN → EXECUTION_READY → FILLS_PRODUCED
              → ACCOUNT_COMMITTED → MARKED → FEEDBACK_PUBLISHED → (반복)
   → FINALIZED
 
-commit 전 실패        → FAILED_WITHOUT_MUTATION
+callback result validation 전 실패 → 이전 Model state 유지
+Account commit 전 실패             → FAILED_WITHOUT_ACCOUNT_MUTATION
 commit 후 발행 실패   → FAILED_AFTER_COMMIT(account_version 기록)
 ```
 
@@ -2287,7 +2206,7 @@ commit 후 발행 실패   → FAILED_AFTER_COMMIT(account_version 기록)
 
 | family | mutation |
 |---|---|
-| `DATA_*`, `CALENDAR_*`, `INTENT_*`, `ORDER_*`, `EXCHANGE_*`, `ACCOUNT_*` | 없음 |
+| `DATA_*`, `INTENT_*`, `ORDER_*`, `EXCHANGE_*`, `ACCOUNT_*` | 없음 |
 | `VALUATION_*` | Fill commit 되었을 수 있음. exact version 기록 |
 | `PUBLICATION_*` | authority 변화 여부 기록 |
 
@@ -2310,7 +2229,7 @@ Evidence는 authority가 아니라 **영수증**이다.
 > 값이고 catalog는 evidence다.
 
 ```text
-data access → StrategyModel + trigger → PortfolioIntent → OrderBatch → Exchange rules + inputs
+execution session → StrategyModel.on_session → NoDecision 또는 PortfolioIntent → OrderBatch → Exchange rules + inputs
 → FillBatch → Account version before/after → MarkBatch → feedback / limitations
 ```
 
@@ -2359,14 +2278,15 @@ sequence      같은 (stage, event_time) 안의 순서
 
 ```text
 2024-03-06 04:00   판단한 시각
-2024-06-28 15:30   그 값이 유효해지는 시각        ← DataModel의 trigger
+2024-06-28 15:30   그 값이 유효해지는 시각        ← DataModel materialization evaluation
 ```
 
 **§3.1이 세 시간축을 분리한 것과 같은 문제다** — 어느 축인지 모르는 timestamp는 timestamp가 아니다.
-§3.4가 이미 두 종류의 질문이 다르다고 못 박아 놨다: StrategyModel은 *언제 판단하는가*를, DataModel은
-*어느 시점의 값을 만드는가*를 선언한다. 두 테이블의 timestamp를 같은 뜻으로 읽으면 틀린다.
+§3.4가 이미 두 종류의 질문을 갈랐다: StrategyModel은 current session callback에서 판단 여부를 정하고,
+DataModel은 별도 materialization operation의 evaluation time에 값을 만든다. 두 timestamp를 같은 뜻으로 읽으면
+틀린다.
 
-- **vocabulary는 §3.2를 그대로 쓴다.** `DATA_AVAILABLE → DECISION → EXECUTION → FILL_COMMIT → VALUATION
+- **simulation vocabulary는 §3.2를 그대로 쓴다.** `DATA_AVAILABLE → SESSION → DECISION → EXECUTION → FILL_COMMIT → VALUATION
   → MONITORING → FINALIZE`. 자유 문자열로 두면 `"strategy"`/`"STRATEGY"`/`"decide"`가 섞이고 읽는 쪽이
   정규화하게 된다.
 - 지금 실제로 나타나는 값은 둘이다. **집합을 미리 열어두되 기록 지점을 열지는 않는다** — 아래 참고.
@@ -2418,7 +2338,7 @@ NAV          마지막 mark 기준
 목표 배분     방금 계산했다
 ```
 
-`decide()` 끝에서 수량을 계산해 `self.recorder`에 적으면 된다. 봉투의 `stage = DECISION`이 이것이 판단
+`on_session()`의 decision 경로 끝에서 수량을 계산해 `self.recorder`에 적으면 된다. 봉투의 `stage = DECISION`이 이것이 판단
 시점의 기록임을 말해준다.
 
 ##### 기록된 수량은 체결이 아니다
@@ -2487,11 +2407,9 @@ src/vqapr/
 │   ├── rows.py            Scalar · Rows — compute 반환·recorder 입력·publish 표현이 같은 타입
 │   └── errors.py          VqaprError(stage path·requirement·mutation·retry·correlation) · FailureFamily
 │
-├── runtime/         시간은 전부 선언에서 나온다
-│   ├── session_calendar.py    SessionCalendar. frozen. 데이터에서 만드는 함수가 존재하지 않는다
-│   ├── calendar_derivation.py 유도 규칙의 닫힌 집합. **날짜를 인자로 받는다** — 읽지 않는다 (§3.6)
-│   ├── events.py              Event · EventKind 고정 우선순위 (§3.2)
-│   └── timeline.py            선언 × calendar → **정렬된 frozen 이벤트 열**. clock이 아니다
+├── runtime/         current session 진행과 고정 callback 순서
+│   ├── events.py              SessionEvent · downstream Event · EventKind 고정 우선순위 (§3.2)
+│   └── session_stream.py      frozen execution 시점 → 결정적 current-session iterator
 │
 ├── data/            그때 무엇을 읽을 수 있는가
 │   ├── sources.py         SourceSpec · FieldPartition — 물리 배치
@@ -2505,12 +2423,11 @@ src/vqapr/
 │   └── stores/            memory.py · duckdb.py
 │
 ├── models/          두 확장점의 계약
-│   ├── model.py           Model ABC — trigger·requirements·tables·memory·recorder·save/load_payload
-│   ├── triggers.py        TriggerPolicy 어휘 + **시점 목록을 만드는 유일한 함수**
+│   ├── model.py           Model ABC — requirements·tables·memory·recorder·save/load_payload
 │   ├── memory.py          ModelMemory · normalize_memory
-│   ├── contexts.py        ModelContext / DataModelContext / StrategyModelContext / CalendarView
+│   ├── contexts.py        ModelContext / DataModelContext / StrategyModelContext(current session)
 │   ├── data_model.py      DataModel — compute(ctx) -> Rows
-│   └── strategy_model.py  StrategyModel — Warmup · decide(ctx) -> PortfolioIntent
+│   └── strategy_model.py  StrategyModel.on_session + NoDecision
 │
 ├── transforms/      순수 leaf. 값을 값으로 (§5.6)
 │   ├── cross_section.py   rank·zscore·demean·winsorize·quantile_buckets
@@ -2541,7 +2458,7 @@ src/vqapr/
 │   ├── listings.py        ListingRule · ExchangeRulesView
 │   ├── costs.py           CostRule + 정확히 하나 매칭 강제
 │   ├── execution_table.py ExecutionTableSpec + 집합 단위 점 조회
-│   ├── conventions.py     FillConvention. 소비자 셋(timeline·venue·preflight)
+│   ├── conventions.py     FillConvention. 소비자 셋(session loop·venue·preflight)
 │   ├── fills.py           Fill · FillBatch · ZeroDealtReason
 │   └── venues/            academic.py · krx.py   ← 이름에 cadence가 없다
 │
@@ -2558,7 +2475,7 @@ src/vqapr/
 ├── flow/            조립·배달·동결. 경제 규칙 없음 (닫힘)
 │   ├── run.py             RunDefinition · RunResult(limitations 포함)
 │   ├── preflight.py       §12 검사 전부
-│   ├── simulation.py      6 callback dispatch
+│   ├── simulation.py      session부터 시작하는 7 callback dispatch
 │   ├── views.py           requirement → bounded ModelWindow
 │   ├── model_state.py     ModelStateStore 포트 · ModelStateRef 발행
 │   ├── materialize.py     DataModel 진입점. **available_at 부여**
@@ -2597,7 +2514,7 @@ src/vqapr/
 │
 ├── testing/         내장과 확장을 구분할 분기점이 없다 (§10.3)
 │   ├── conformance/       runner · datamodel · strategy_model · exchange · constraint
-│   ├── calendars.py · datasets.py · execution_tables.py · accounts.py
+│   ├── sessions.py · datasets.py · execution_tables.py · accounts.py
 │   └── components.py · asserts.py
 │
 ├── cli/             **파일 목록 = 명령어 목록**
@@ -2711,8 +2628,8 @@ vqapr register . --project ../research   # fingerprint를 찍어 ComponentRef로
 **결정.** 픽스처 빌더와 conformance suite를 패키지에 출하한다.
 
 - **왜**: `UC-EXTENSION-002`는 사용자가 local StrategyModel을 작성·검증하기를 요구하고 `UC-FACADE-001`은
-  그것을 **package source를 열지 않고** 하라고 요구한다. `decide()`를 한 번이라도 돌리려면
-  `StrategyModelContext`와 calendar와 창이 필요하다. 출하된 kit이 없으면 사용자는 내부를 import하는 수밖에
+  그것을 **package source를 열지 않고** 하라고 요구한다. `on_session()`을 한 번이라도 돌리려면
+  current `SessionEvent`, `StrategyModelContext`와 창이 필요하다. 출하된 kit이 없으면 사용자는 내부를 import하는 수밖에
   없고, **그것이 PRD §1.4가 "public product surface의 결함"이라고 부른 상황이다.**
 - **conformance suite의 입력은 `ComponentRef`다.** 내장이든 사용자 것이든 같은 타입으로 들어오므로
   **차별할 분기점이 존재하지 않는다.** `academic`과 `krx`가 이 suite를 통과하는 첫 두 구현이다.
@@ -2781,19 +2698,19 @@ RunDefinition   시작 시점에 동결된다. 이후 workspace 변경과 무관
 **Walkthrough는 예시가 아니라 검증 장치다.** PRD의 use case를 하나 골라 데이터가 실제로 어느 경로를
 지나는지 끝까지 따라가고, 흐르지 않는 곳과 마찰이 생기는 곳을 여기 남긴다.
 
-- **흐르지 않으면** 설계를 고친다. §3의 달력 경계 trigger와 §3.6의 calendar 유도가 이렇게 나왔다.
+- **흐르지 않으면** 설계를 고친다. §3의 stateful session callback과 execution-table session source가 이렇게 나왔다.
 - **흐르지만 마찰이 있으면** 그 마찰을 기록한다. 나중에 같은 것을 다시 발견하지 않기 위해서다.
 - 새 use case를 추가할 때는 §14 traceability에 절 번호를 적는 것으로 끝내지 않고, 필요하면 여기에
   경로를 남긴다.
 
 ### 11.0 공통 fixture — 두 전략
 
-공통 fixture: sessions 03-05/03-06, close available 15:30 KST, trigger 매 세션 04:00,
-decision 03-06 04:00, execution 03-06 15:30.
+공통 fixture: execution sessions 03-05/03-06, close available 15:30 KST, callback 매 세션 04:00,
+Strategy가 decision을 반환한 경우 execution 15:30.
 
 | 단계 | Peer momentum long-short | 5일 수익률 top-10 long-only |
 |---|---|---|
-| 0. warm-up | `Warmup(sessions=21)` — 그전 candidate는 skip 기록 | `Warmup(sessions=6)` |
+| 0. warm-up | memory count 21 전에는 `NoDecision(warmup)` | memory count 6 전에는 `NoDecision(warmup)` |
 | 1. read | peer group + 5일 수익률 | 5일 수익률 |
 | 2. research value | peer 상대 랭크 (signed) | 상위 10 선택 (양수만) |
 | 3. weights | `equal_weight(centered_signal, …)` → gross 1, net 0 | `equal_weight(top10, …)` → 각 10% |
@@ -2806,8 +2723,9 @@ decision 03-06 04:00, execution 03-06 15:30.
 **다른 것은 0·2·3·6·7의 정책뿐이다.** peer momentum이 반드시 Academic이어야 하는 것도 아니다 —
 호환되는 조합이면 같은 intent를 다른 profile에서 별도 run으로 비교할 수 있다(`UC-PORTFOLIO-001`).
 
-0단계의 차이가 두 전략의 첫 판단 시점을 가른다. 같은 `EveryNSessions(5)`를 선언해도 warm-up이 다르면
-첫 FIRE가 다른 session에서 일어나고, 그 사이의 candidate는 실패가 아니라 skip으로 기록된다.
+0단계의 차이가 두 전략의 첫 판단 시점을 가른다. 같은 5-session 규칙을 Strategy code로 사용해도 warm-up
+memory가 다르면 첫 decision이 다른 session에서 일어나고, 그 사이 callback은 실패가 아니라 `NoDecision`으로
+기록된다.
 
 ### 11.1 Fama-French 스타일 팩터 — independent double sort
 
@@ -2815,12 +2733,12 @@ decision 03-06 04:00, execution 03-06 15:30.
 분류**를 공유해야 하고, 그 공유를 증명할 수 있어야 한다.
 
 ```text
-[materialize]  DataModel 1  trigger = LastSessionOfMonth(months=(6,))
+[materialize]  DataModel 1  evaluation time = 6월 데이터가 available해진 뒤의 명시적 operation
                             읽음: 재무(CalendarLookback 3y) + 시총(RowsLookback 1)
                             만듦: BM · OPE/BE · asset growth · 시총
                                           │  등록된 dataset
                                           ▼
-[materialize]  DataModel 2  trigger = LastSessionOfMonth(months=(6,))
+[materialize]  DataModel 2  evaluation time = DataModel 1 publication 이후의 명시적 operation
                             읽음: 위 결과 + security master   ← artifact가 아니라 그냥 dataset
                             만듦: (ticker, bucket) + breakpoint 값
                                           │
@@ -2869,8 +2787,8 @@ $$w_{i,t} = \frac{P_{i,t}S_i}{\sum_j P_{j,t}S_j} \quad\text{— 보유만 해도
 사용자가 고르는 모델링 선택이다.
 
 - **왜 이것이 설계상 중요한가**: pandas로 짜면 이 차이가 `mean()`이냐 `sum/sum`이냐 한 줄에 숨는다.
-  우리 구조에서는 **trigger 선언**으로 드러날 수밖에 없다. 숨은 가정이 계약이 된다.
-- 같은 이유로 "형성 시점 시총 고정" vs "전일 시총" 같은 선택도 trigger와 intent의 선택으로 명시된다.
+  우리 구조에서는 **Strategy callback state와 intent**로 드러날 수밖에 없다. 숨은 가정이 계약이 된다.
+- 같은 이유로 "형성 시점 시총 고정" vs "전일 시총" 같은 선택도 callback 규칙과 intent로 명시된다.
 
 #### 한계
 
@@ -2886,7 +2804,7 @@ $$w_{i,t} = \frac{P_{i,t}S_i}{\sum_j P_{j,t}S_j} \quad\text{— 보유만 해도
 §11.1이 패턴이라면 이 절은 **실제 연구 하나를 통째로** 통과시킨 기록이다. 5개 팩터, 2개 주기, VW/EW,
 2×3과 5분위, 시장·무위험 수익률까지 포함한 국내 팩터 재현을 대입했다.
 
-검증 대상: `UC-FACTOR-001` · `UC-DATA-001` · `UC-CALENDAR-001` · `UC-PIT-001` · `UC-MODEL-001`
+검증 대상: `UC-FACTOR-001` · `UC-DATA-001` · `UC-TRIGGER-001` · `UC-PIT-001` · `UC-MODEL-001`
 
 #### 등록
 
@@ -2901,15 +2819,15 @@ $$w_{i,t} = \frac{P_{i,t}S_i}{\sum_j P_{j,t}S_j} \quad\text{— 보유만 해도
 #### DataModel 체인
 
 ```text
-일별시세 ─┬─► [D1] 월별수익률·월말시총    trigger = LastSessionOfMonth()
+일별시세 ─┬─► [D1] 월별수익률·월말시총    명시적 월별 materialization operation
           │
-          ├─► [D2] 회계 characteristic     trigger = LastSessionOfMonth(months=(6,))
+          ├─► [D2] 회계 characteristic     6월 데이터 available 이후 명시적 materialization
           │        읽음: 재무(3y) + 시세(1)
           │
-          └─► [D3] 시장·무위험 수익률      trigger = EveryNSessions(1)
+          └─► [D3] 시장·무위험 수익률      일별 materialization operation
                    읽음: 지수(2) + 금리(2)
 
-[D1] ─────► [D4] momentum signal           trigger = LastSessionOfMonth()
+[D1] ─────► [D4] momentum signal           D1 publication 이후 월별 materialization
                  읽음: [D1] RowsLookback(12)
                  씀:   lag 1~11 (직전 달은 건너뜀 — Model의 경제적 규칙)
 
@@ -2919,8 +2837,9 @@ $$w_{i,t} = \frac{P_{i,t}S_i}{\sum_j P_{j,t}S_j} \quad\text{— 보유만 해도
                  breakpoint 값과 기준 표본 크기를 컬럼으로 함께 기록
 ```
 
-`available_at`은 전부 §4.5 규칙으로 붙는다. **재무가 3월에 공표되어도 D2의 6월말 행은 6월말부터
-유효하다** — trigger 시각이 하한이기 때문이다.
+`available_at`은 전부 §4.5 규칙으로 붙는다. **재무가 3월에 공표되어도 D2의 6월 값은 선택한 6월
+materialization evaluation time부터 유효하다.** DataModel 시점은 Strategy trigger가 아니라 별도 frozen
+operation input이다.
 
 #### run
 
@@ -2936,7 +2855,7 @@ signed 직접 실행       5      ← authoritative
 
 ---
 
-#### 확인 1 — 재가중 주기가 trigger로 드러난다
+#### 확인 1 — 재가중 주기가 Strategy callback state로 드러난다
 
 참조 구현은 가중치를 이렇게 잡는다.
 
@@ -2949,13 +2868,13 @@ monthly : 전월말 시총으로 매월 재가중
 유상증자·소각이 있으면 시총은 변하는데 보유 수량은 변하지 않는다. 참조 구현은 그 차이를 매일(또는 매월)
 다시 반영한다.
 
-우리 구조에서는 그 선택이 **trigger 선언**이 된다.
+우리 구조에서는 그 선택이 **Strategy `on_session()` 규칙과 memory**로 드러난다.
 
-| 원하는 정의 | trigger |
+| 원하는 정의 | Strategy callback 규칙 |
 |---|---|
-| 형성 후 그대로 보유 | `LastSessionOfMonth(months=(6,))` |
-| 매일 시총 재가중 | `EveryNSessions(1)` |
-| 매월 시총 재가중 | `LastSessionOfMonth()` |
+| 7월 첫 session 형성 후 그대로 보유 | `formed_year`가 이미 현재 연도면 `NoDecision` |
+| 매일 시총 재가중 | every session에 decision 반환 |
+| 매월 시총 재가중 | memory의 직전 month와 current month가 다를 때 decision 반환 |
 
 zero-cost profile에서 숫자는 같게 나오면서 **turnover가 evidence에 남는다.** "정의상의 일간 시총가중
 팩터"가 실제로는 매일 전 종목 재조정을 함의한다는 사실이 결과에 드러나는 것이다. 벡터화 코드에서는
@@ -3028,7 +2947,7 @@ C  −2% →  0%   하한          현금 −2%
 
 #### alpha는 별도 run에서 온다
 
-enhanced index는 **저장된 배분을 구독하는 StrategyModel**이다(§5.2). 한 `decide()` 안에서 long-short를
+enhanced index는 **저장된 배분을 구독하는 StrategyModel**이다(§5.2). 한 `on_session()` 안에서 long-short를
 long-only로 바꾸지 않는다.
 
 ```text
@@ -3117,7 +3036,7 @@ turnover-aware한 A가 자기 계좌를 볼 수 있다. **C는 B의 결과를 �
              → NAV 시계열 + 배분을 남긴다
 
 [materialize] DataModel: 세 NAV를 읽어 시점별 "그때까지 최선인 후보" 라벨
-              trigger = 리밸런싱 주기
+              evaluation times = 명시적으로 동결된 비교 시점
               → 값이므로 계좌도 execution도 없다(§4.4)
 
 [run]        메타 StrategyModel
@@ -3150,7 +3069,7 @@ run으로 돌아간다. **path-independent 변형에서는 정확하고 path-dep
 
 #### 그리고 위험 하나
 
-`decide()` 안에서 후보별로 수익률을 곱해 누적하는 계산을 막을 수는 없다(설계상 내부 계산은 자유다).
+`on_session()` 안에서 후보별로 수익률을 곱해 누적하는 계산을 막을 수는 없다(설계상 내부 계산은 자유다).
 그러나 그 값은 **무비용·즉시체결·현금 무제한**을 암묵적으로 가정하므로, 그것으로 후보를 고르면
 **회전율이 높은 쪽으로 편향된다.**
 
@@ -3236,7 +3155,7 @@ A를 5% 직접 들고 X를 10% 들면 **A 노출 = 0.05 + 0.10 × 0.5 = 0.10**�
 ### 11.6 정지 데이터 없는 KRX daily project — 등록부터 체결까지
 
 앞의 walkthrough들은 **연구 구조**를 대입했다. 이 절은 **가장 흔한 출발점의 데이터 현실**을 대입한다 —
-일별 시세와 재무제표만 있고 거래소 calendar도 거래정지 이력도 없는 project다.
+일별 시세와 재무제표만 있고 별도 calendar도 거래정지 이력도 없는 project다.
 
 검증 대상: `UC-DATA-001` · `UC-DATA-003` · `UC-TRADABILITY-001`~`002` · `UC-FILL-001` ·
 `UC-ALPHA-CHILD-001` · `UC-SCALE-001`
@@ -3277,8 +3196,8 @@ from krx_daily
 ```
 
 - **별도 DataModel이 필요 없다.** 유도가 Exchange config의 한 줄이 되고, 그 줄이 frozen input에 남는다.
-- **calendar도 같은 패턴으로 유도된다**(§3.6). 세 번째 인스턴스다 — availability(PRD §4.2), calendar(§3.6),
-  거래 가능 여부(여기).
+- 이 execution table의 `trade_at` 집합이 session source다(§3.6). 같은 raw OHLCV에서 만들더라도 observation
+  parquet과 별도 파일·계약으로 준비한다.
 - 전략이 판단 시점에 쓸 거래 가능 여부는 **별도 dataset**이다. 이 project는 만들지 않기로 한다.
   정지 종목에 주문이 나가고 ④에서 zero-dealt로 남는다.
 
@@ -3388,13 +3307,13 @@ from adjusted_prices
 각 알파가 수익률을 주장하므로 **전부 StrategyModel run**이다(§2.2). Academic Exchange, 비용 0.
 
 ```text
-trigger    EveryNSessions(1)        매 세션 판단
+callback   every session에 decision 반환
 결과       대부분의 날 delta 0인 OrderBatch + no-trade 진단
 ```
 
 **§3.4의 사례가 여기 있다.** 재무 알파는 분기 데이터를 쓰므로 대부분의 날 같은 목표가 나오고, 그렇게
 쌓인 체결 기록에서 회전율이 계산된다. *"평균 리밸런싱 주기 63거래일"*은 그 회전율에서 역산한 통계이지
-trigger 선언이 아니다.
+Flow schedule이 아니다.
 
 15개가 독립이라 동시에 돌린다.
 
@@ -3433,7 +3352,7 @@ optimize(
 )
 ```
 
-BM 비중 조정($\tilde A$)은 `decide()` **안의 중간값**이다. 그 값으로 체결하지 않으므로 별도 run이 아니다(§5.2).
+BM 비중 조정($\tilde A$)은 `on_session()` **안의 중간값**이다. 그 값으로 체결하지 않으므로 별도 run이 아니다(§5.2).
 
 #### ⑤ 가짜 회전율 — 이 대입의 핵심
 
@@ -3561,10 +3480,10 @@ registered score dataset만 읽는다. epoch/loss/state identity는 recorder에 
 
 **확인된 경계**
 
-- DataModel은 Account를 보지 않지만 committed Model state를 쓰므로 trigger 순서대로 실행된다.
+- DataModel은 Account를 보지 않지만 committed Model state를 쓰므로 frozen evaluation-time 순서대로 실행된다.
 - working checkpoint 재개는 한 학습 invocation에 국한되고 simulation event/fill recovery를 켜지 않는다.
 - 이전 subperiod weight를 warm start하면 이 walkthrough의 replication이 아니라 별도 online-learning 변형이다.
-- score의 `available_at`은 Model이 선언하지 않고 materializer가 실제 input cutoff와 trigger에서 계산한다.
+- score의 `available_at`은 Model이 선언하지 않고 materializer가 실제 input cutoff와 evaluation time에서 계산한다.
 
 ---
 
@@ -3576,7 +3495,6 @@ class RunDefinition(BaseModel):
     strategy: ComponentRef
     exchange: ComponentRef
     account_mode: AccountMode
-    calendar: CalendarRef
     start: datetime
     end: datetime
     initial_account: AccountSnapshot
@@ -3584,7 +3502,7 @@ class RunDefinition(BaseModel):
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
     constraints: ConstraintSet | None = None      # 판단·검증·monitoring이 함께 본다 (§5.7)
-    monitoring: MonitoringPolicy | None = None    # TriggerPolicy. decision cadence와 독립 (PRD §3.6)
+    monitoring: MonitoringPolicy | None = None    # current-session monitoring 규칙. Strategy와 독립
 ```
 
 `strategy`·`exchange`와 마찬가지로 `constraints`의 각 항목도 `ComponentRef`로 지목된다. 내장
@@ -3592,7 +3510,7 @@ class RunDefinition(BaseModel):
 
 시작 전 검사 후 동결:
 
-- trigger timezone ↔ calendar timezone
+- Strategy callback timezone과 execution `trade_at` timezone의 일관성
 - intent direction ↔ Exchange permitted side
 - Exchange ↔ AccountMode
 - instrument listing과 quantity rule 존재
@@ -3601,9 +3519,9 @@ class RunDefinition(BaseModel):
 - 모든 (instrument 종류, 방향, 실행 시점)에 **정확히 하나의** `CostRule`이 매칭됨 (§6.2)
 - initial account 불변식
 - `initial_state_ref`가 선택한 Model implementation과 compatible하고 committed 상태임 (§5.1.1)
-- schedule 결정성 — 같은 frozen input이 같은 `Timeline`을 만든다(§2.1). **두 리스트를 비교한다**
+- session-stream 결정성 — 같은 frozen execution input이 같은 current-session 순서를 만든다(§2.1)
 - 선언된 각 `Constraint`의 `requirements()`가 등록된 dataset으로 충족 가능함 (§5.7)
-- `monitoring` cadence의 timezone ↔ calendar timezone
+- `monitoring` evaluation timezone과 execution session timezone의 일관성
 
 `initial_state_ref=None`은 fresh Model을 뜻한다. 이전 또는 latest state를 자동 탐색하지 않는다. state가 있으면
 framework가 memory를 복원하고 payload가 있을 때 `load_payload()`를 호출한다. 초기 belief나 hyperparameter는
@@ -3614,8 +3532,8 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 체결 테이블 없이 완결된다.
 
 - 체결 테이블이 선언되어 있고 `FillConvention.trade_price`가 가리키는 가격 컬럼이 존재함
-- schedule이 만드는 **모든 체결 시각**에 대해 `trade_at` 행이 존재함
-  - 세션 축으로만 확인한다. 종목별 결측은 체결 시점에 zero-dealt로 다뤄지는 정상 결과다(§6.1)
+- 체결 테이블의 distinct `trade_at`이 정렬 가능하고 중복 session snapshot이 결정적으로 묶임
+  - 종목별 결측은 체결 시점에 zero-dealt로 다뤄지는 정상 결과다(§6.1)
 - `is_tradable = true` 인 행의 선언된 가격이 **유한하고 양수**임
   - **왜 미리 보나**: 이것이 §6.1의 유일한 batch 실패 조건이다. run 중간에 터지면 그때까지의 commit이
     남지만, 여기서 걸리면 `FAILED_WITHOUT_MUTATION`으로 끝난다
@@ -3636,26 +3554,22 @@ mutable state가 아니라 frozen Model configuration으로 준다. DataModel ma
 
 기존 source를 조금씩 호환시키지 않는다. 아래 vertical slice로 다시 만든다.
 
-1. `domain` + `runtime` — `SessionCalendar` + **`calendar_derivation`** + frozen `Timeline`
+1. `domain` + `runtime` — current `SessionEvent` + 고정 event priority
 2. minimal `data` — `scan` / registration / `workspace` / requirement / `ModelWindow`
-   + calendar 유도의 **읽기 경로** 연결 + `agent/descriptors`의 **dataset 계약 발행**
-3. `models` 전부 + `flow/materialize` — `Model` 공통 계약 · `DataModel` · `available_at` 부여
+   + `agent/descriptors`의 **dataset 계약 발행**
+3. `models` 전부 + `flow/materialize` — `Model` 공통 state 계약 · `DataModel` · `available_at` 부여
 4. `account` + `valuation`
 5. `transforms` + `portfolio` (순수 함수 + 테이블 기반 테스트)
 6. `constraints` + `PortfolioIntent` + `orders.plan_orders`
-7. `exchange` + `venues/academic`
-8. 하나의 `SimulationFlow` closed loop
+7. `exchange` + execution-table session stream + `venues/academic`
+8. `StrategyModel.on_session`부터 시작하는 하나의 `SimulationFlow` closed loop
 9. `venues/krx`
 10. 세 showcase를 같은 public spine 위에서 (두 전략 + Fama-French)
 11. `evidence` / `analysis` / `extension` / `agent` / `public.py` / 외부 소비자 테스트
 
-**1번에 `calendar_derivation`이 있는 이유**: 실제 project의 일반적인 출발점은 daily 시세뿐이고 거래소
-calendar 파일이 없다(§3.6). calendar가 없으면 trigger가 시점을 만들 수 없어 **materialize가 아예
-시작되지 않는다.**
-
-**그런데 유도는 두 슬라이스에 걸친다.** 규칙 적용은 순수 함수라 날짜 목록만 있으면 검증되므로 1번에
-서고, 그 날짜를 **등록된 dataset에서 읽어 오는 경로**는 registration이 있어야 하므로 2번이다(§3.6).
-1번에서는 손으로 만든 날짜 목록으로, 2번에서 실제 시세 파일로 같은 함수를 통과시킨다.
+**execution session stream은 7번에서 선다.** runtime은 current event 값과 우선순위만 정의하고, 실제 session
+source는 Exchange가 동결한 execution table이다(§3.6, §6.2). DataModel materialization은 이 stream을
+전제조건으로 삼지 않는다.
 
 **2번이 registration으로 시작하는 이유**: agent user가 이 package로 **가장 먼저 하는 일**이 data
 등록이다. 그래서 등록 실패가 `domain/errors.py`의 machine-readable 계약을 처음으로 시험하는 자리이며,
@@ -3665,7 +3579,7 @@ calendar 파일이 없다(§3.6). calendar가 없으면 trigger가 시점을 만
 agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을 발행하지 않으면 등록 가능한 dataset을 아무도
 만들 수 없고, 그러면 2번을 검증할 입력이 없다. `agent/`의 나머지(onboarding·skill)는 11번 그대로다.
 
-**3번을 4번보다 앞에 둔 이유**: `Model` 공통 계약(trigger·requirements·memory)이 `StrategyModel`의 상위이므로
+**3번을 4번보다 앞에 둔 이유**: `Model` 공통 계약(requirements·memory)이 `StrategyModel`의 상위이므로
 먼저 서야 한다. 그리고 DataModel은 account 없이 검증할 수 있어 execution 없이 닫힌다.
 
 > **1~3번이 실데이터 milestone을 닫는다.**
@@ -3683,7 +3597,7 @@ agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을
 > 설계를 어기는 것이 아니고, `evidence/` 전체와 `flow/model_state`(첫 DataModel을 stateless로 두면)를
 > 뒤로 미룰 수 있다.
 
-**5번과 6번이 순수 함수인 이유**: `transforms`·`portfolio`·`constraints`는 Store도 Account도 Timeline도
+**5번과 6번이 순수 함수인 이유**: `transforms`·`portfolio`·`constraints`는 Store도 Account도 session stream도
 없이 검증된다. 그래서 execution이 서기 전에 완결되고, 나중에 값이 틀렸을 때 의심할 곳이 좁아진다.
 
 **6번이 5번 뒤인 이유**: `intents.py`의 생성 시 검증이 `constraints/evaluation.py`를 부른다(§5.4, §5.7).
@@ -3706,8 +3620,8 @@ agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을
 | `UC-AGENT-002` | §4.1 (등록이 보장하지 않는 것) + §6.2 (stale price) — 나머지는 PRD §11.1과 skill |
 | `UC-DATA-002`, `UC-PIT-001`, `UC-ERROR-001` | §4.2 + §8.3 |
 | `UC-LOOKBACK-001` | §4.2 (lookback → Store query, (instrument × field)별) |
-| `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · trigger vocabulary · warm-up skip) |
-| `UC-CALENDAR-001` | §3.6 (선언된 유도 규칙 · 날짜/시각 분리) |
+| `UC-TIME-001`, `UC-TRIGGER-001` | §3 (세 시간축 · stateful session callback · NoDecision warm-up) |
+| `UC-CALENDAR-001` | §3.6 (retired current requirement · execution table session source) |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.1–5.2 |
 | `UC-MODEL-001`, `UC-MODEL-002` | §4.4 (DataModel · execution 거치지 않음 · materialize 진입점) |
 | `UC-MODEL-003` | §4.4 (`materialize`) + §5.1.1 (payload) + §11.8 (rolling CNN) |
@@ -3733,7 +3647,7 @@ agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을
 | `UC-EXTENSION-001` | §5.6 (`transforms/neutralize`가 고쳐 쓸 원본) + §10.2 |
 | `UC-EXTENSION-002`, `UC-FACADE-001` | §2.6 + §10.2 (네 확장점·`ComponentRef`·fingerprint) + §10.3 (`testing/` 없이는 검증이 불가능) |
 | `UC-CONFIG-001` | §10.5 (`workspace.py` — 점진적 구성이 쌓이는 곳) + §12 (동결) |
-| `UC-CALENDAR-001` 보강 | §3.6 (유도의 입력은 등록된 dataset · 규칙 적용은 순수 · 결과는 project 선언) |
+| `UC-CALENDAR-001` retired | §3.6 (별도 calendar 제거 · execution table session source) |
 | `UC-ONBOARD-001` | §10.4 (`agent/`) |
 | `UC-RETURN-001` | §1.1 (DataModel은 척추에 들어오지 않는다) + §10 (`analysis/`는 새 return을 만들지 않는다) |
 | future (`UC-FUTURE/PERP/CASHFLOW/SETTLEMENT/PROD/RECOVERY/IMPACT/REAL-SHORT-001`) | 현재 Exchange/Account가 미지원 semantics를 **명시적으로 거부**하는 것으로 경계만 보존 |
@@ -3746,16 +3660,14 @@ agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을
 계약으로 읽고 첫 구현이 그 답을 조용히 확정해버린다. 열린 결정은 **어떤 미래 기능이 답을 바꾸는지와 함께**
 여기 적는다. 그 기능을 만들 때 이 질문이 딸려 나오게 하기 위해서다.
 
-### 15-1. Calendar view가 미래 session을 어디까지 보여주는가
+### 15-1. Resolved — StrategyModel은 미래 session을 보지 않는다
 
-StrategyModel이 `context.calendar`로 판단 시점의 성질을 묻는다(§5.1). "이번 달 마지막 거래일인가"를 답하려면
-그 달의 남은 session을 봐야 한다.
+이 결정은 더 이상 열려 있지 않다. `StrategyModelContext`는 현재 `SessionEvent` 하나만 제공하고, execution
+table과 전체 session stream으로 가는 경로가 없다(§5.1).
 
-- 예정된 휴장은 실제로 미리 공표되므로 보아도 look-ahead가 아니다.
-- 예기치 못한 폐쇄(재난, 시장 중단)까지 frozen calendar에 있으면 그것은 새는 것이다.
-
-**미결.** 다만 새는 것이 **데이터가 아니라 스케줄**이라 영향이 작다. 후보: 전체 노출 / 선언된 horizon까지만
-노출 / calendar에도 `available_at`을 적용. 실제 전략이 무엇을 묻는지 관측한 뒤 정한다.
+- `LastSessionOfMonth`는 current capability가 아니다.
+- 미래 venue schedule을 추가하려면 schedule availability와 예기치 못한 폐쇄의 처리까지 별도 UC로 승인한다.
+- Flow가 미래 session을 보고 Strategy 대신 decision date를 고르는 우회도 허용하지 않는다.
 
 ### 15-2. cash를 instrument로 볼 것인가
 
@@ -3828,8 +3740,8 @@ live에서는 그 간격이 사라진다.
 ## 16. Acceptance checklist
 
 - [ ] 두 showcase가 같은 `SimulationFlow`와 같은 이벤트 순서를 쓴다
-- [ ] executable StrategyModel의 public 결과는 `PortfolioIntent` 하나뿐이다
-- [ ] 04:00 DECISION 이벤트가 데이터 행 없이 explicit calendar에서 생성된다
+- [ ] executable StrategyModel callback 결과가 `NoDecision | PortfolioIntent`이고 둘이 구분된다
+- [ ] execution table의 current session이 04:00 callback을 만들고 observation 행이 없어도 호출된다
 - [ ] registration의 universal 시간 필드는 `available_at`뿐이다
 - [ ] StrategyModel·Valuation이 각자 field requirement를 선언한다
 - [ ] `lookback`이 Store query까지 도달한다 (전체 읽고 자르기 없음)
@@ -3845,7 +3757,7 @@ live에서는 그 간격이 사라진다.
 - [ ] 단일 parquet과 hive 파티션이 같은 결과를 내고 소비자 선언도 같다
 - [ ] 등록 **후** `SourceSpec`을 직접 여는 경로가 없다 — `scan`은 등록 검증에만 열린다
 - [ ] Model에서 창 없는(lookback 없는) 조회에 도달하는 경로가 없다
-- [ ] calendar 유도가 등록된 dataset을 읽고 raw source를 읽지 않으며, session 시각을 독립적으로 요구한다
+- [ ] 별도 calendar artifact·provider·derivation 경로가 없고 execution table이 session source다
 - [ ] 원천에 행이 append되어도 이전 evaluation time의 결과가 그대로 재현된다
 - [ ] dataset identity가 선언에서 나오고 파일 해시나 행 수에 의존하지 않는다
 - [ ] `portfolio.weighting`과 `portfolio.optimize`가 `domain`(+solver) 외 아무것도 import하지 않는다
@@ -3854,7 +3766,7 @@ live에서는 그 간격이 사라진다.
   attribute가 memory나 payload 밖에 숨지 않는다
 - [ ] memory 스냅샷이 detached copy다 — 이후 in-place 변경이 과거 스냅샷을 바꾸지 않는다
 - [ ] payload를 저장한 뒤 runtime tensor를 바꿔도 과거 committed payload가 바뀌지 않는다
-- [ ] 체결이 없는 세션에도 Model state 스냅샷이 남는다
+- [ ] `NoDecision` session에도 Model state 스냅샷이 남고 callback 실패에는 이전 state가 유지된다
 - [ ] payload가 없는 Model은 strict JSON memory만으로 기존과 같이 동작한다
 - [ ] working checkpoint는 같은 frozen operation에서만 복원되고 inference나 downstream input으로 resolve되지 않는다
 - [ ] 새 Model 계산 실패 시 이전 committed state가 유지된다
@@ -3874,19 +3786,19 @@ live에서는 그 간격이 사라진다.
 - [ ] 매칭되는 `CostRule`이 0개거나 2개 이상이면 실패한다
 - [ ] 제약이 physical 보유에만 걸리고 look-through 노출에는 걸리지 않는다
 - [ ] listing이 Exchange의 frozen config에 있고 `RunDefinition`에는 없다
-- [ ] warm-up 구간 candidate가 `DECISION_SKIPPED`로 기록되고, 그 이후의 결측은 실패한다
-- [ ] `LastSessionOfMonth(months=(6,))`가 휴장을 반영한 6월 마지막 거래일에 발화한다
-- [ ] 선언 없이 가격 coverage에서 session을 만들어내는 경로가 없다
+- [ ] warm-up callback이 Strategy state를 갱신한 `NoDecision(warmup)`으로 기록되고 이후 결측은 실패한다
+- [ ] `LastSessionOfMonth`가 current public surface에 없고 Strategy가 future session을 읽을 수 없다
+- [ ] observation coverage에서 session을 만들지 않고 frozen execution `trade_at`만 session source로 쓴다
 - [ ] `DataModelContext`에 `account` 접근이 존재하지 않는다 (경로의 부재로 강제)
 - [ ] 타입이 그것을 만드는 층에 있고, 패키지 사이에 순환 import가 없다
-- [ ] `decide()`가 반환한 intent가 예외 없이 execution을 통과한다
-- [ ] `decide()` 안에서 다른 run을 실행하는 경로가 없다
+- [ ] `on_session()`이 반환한 intent가 예외 없이 execution을 통과하고 `NoDecision`은 통과하지 않는다
+- [ ] `on_session()` 안에서 다른 run을 실행하는 경로가 없다
 - [ ] DataModel 결과가 execution을 거치지 않는다
 - [ ] StrategyModel이 다른 StrategyModel의 저장된 결과를 `DataRequirement`로 읽는다
 - [ ] 미래 방향 `Lookback` 타입이 존재하지 않는다
 - [ ] 계산 결과의 `available_at`을 생산자가 적을 수 없다
 - [ ] Model state를 쓴 DataModel의 출력에 순차 생성 표시와 consumed `model_state_ref`가 남는다
-- [ ] `TriggerPolicy` 해석과 Model state 저장·복원 코드가 각각 한 곳에만 있다
+- [ ] Flow에 Strategy cadence 해석 코드가 없고 Model state 저장·복원 코드는 한 곳에만 있다
 - [ ] 같은 membership artifact를 소비한 버킷 run들이 그 사실을 lineage로 증명한다
 - [ ] 버킷 조합 팩터와 signed 직접 실행 팩터가 zero-friction profile에서 일치한다
 - [ ] `AccountMode`의 차이가 음수 position 유효성 하나뿐이다
@@ -3923,7 +3835,7 @@ live에서는 그 간격이 사라진다.
 - [ ] 사용자가 `vqapr.testing`만으로 자기 StrategyModel을 실행해볼 수 있다 (내부 import 없이)
 - [ ] `analysis/`가 가격 dataset을 읽어 수익률을 만드는 경로가 없다
 - [ ] 의존성 목록에 plotting 라이브러리가 없다
-- [ ] `Timeline`이 preflight에서 확정되고, 같은 frozen input이 같은 이벤트 열을 만든다
+- [ ] 같은 frozen execution input과 initial Model state가 같은 session/callback/state trace를 만든다
 - [ ] `utils/`·`workflow/`·`contrib/`·`common/`·`config/`가 존재하지 않는다
 
 이 체크리스트가 characterization test로 닫히기 전에는 rewrite가 끝났다고 하지 않는다.

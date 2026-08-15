@@ -435,68 +435,77 @@ explicit dependency, availability cutoff, lineage를 가져야 한다.
 source timestamp와 session timezone이 명시되어야 하며, timezone이 없거나 서로 모순된 timestamp는 state
 mutation 전에 실패한다. naive datetime을 임의의 timezone으로 해석하지 않는다.
 
-### 3.3 Cadence는 Model 정의의 일부다
+### 3.3 Decision cadence는 StrategyModel의 상태 있는 규칙이다
 
-**user는 Model 정의만 읽고 그것이 언제 계산하는지 알 수 있어야 한다.** cadence를 확인하려고
-실행 스크립트나 orchestration 설정을 읽어야 한다면 그것은 결함이다.
+**user는 StrategyModel 정의만 읽고 그것이 어느 callback에서 판단하는지 알 수 있어야 한다.** cadence를
+확인하려고 실행 스크립트나 orchestration 설정을 읽어야 한다면 결함이다.
 
-이 절은 두 종류 모두에 적용된다. StrategyModel은 *언제 판단하는가*를, DataModel은 *어느 시점의 값을
-만드는가*를 선언하며, 선언하는 방식과 그것이 frozen calendar와 결합되는 방식은 같다.
+Flow는 §3.4의 frozen execution session을 시간순으로 하나씩 진행하며 각 현재 session에 대해 StrategyModel
+callback을 호출한다. Flow가 하는 일은 **현재 session 전달, PIT-bounded input 주입, callback 결과 검증과 state
+commit**이다. Flow는 N번째 session인지, warm-up이 끝났는지, cooldown 중인지, 지금 판단할지를 계산하지 않는다.
+그것들은 StrategyModel의 경제 규칙이며 §5.7의 committed Model state를 사용한다.
 
-이것은 strategy가 시간을 직접 진행시키거나 자기를 호출한다는 뜻이 **아니다.** strategy는 "어떤 session마다
-몇 시에 판단하는가"를 **선언**하고, run이 그 선언과 frozen calendar를 결합해 판단 시점을 만든다.
+StrategyModel은 시간을 직접 진행시키거나 자기를 호출하지 않는다. 대신 현재 session callback을 받아 다음 둘
+중 하나를 반환한다.
 
-invocation이 시작된 뒤 과거 cadence를 바꾸거나 시간을 소급해서는 안 되며, 실행 시점 선택에 사용하는
-정보는 그 시점에 관측 가능해야 한다.
+```text
+NoDecision        이번 session에는 판단하지 않았다
+PortfolioIntent   이번 session에 판단했고 frozen intent를 만들었다
+```
 
-**cadence는 판단 시점을 정할 뿐 포트폴리오가 얼마나 자주 바뀌는지를 말하지 않는다.** 매 session 판단하면서
-대부분의 시점에 같은 결정을 내리는 것은 정상이며, 그것은 판단하지 않은 것과 구분되어 기록된다(§6.7).
-따라서 **보유기간, 회전율, 리밸런싱 주기는 선언이 아니라 결과**이며 실행 기록에서 사후에 계산된다. 회전율을
-줄이는 것은 cadence를 늘리는 것이 아니라 판단 자체가 비용을 고려하는 것으로 표현한다.
+`NoDecision`도 성공한 Model invocation이다. callback이 state를 갱신했다면 output validation 뒤 새 state를
+commit한다. callback 실패나 invalid result에서는 이전 committed state를 유지한다. 따라서 run이 session 사이에서
+끝나더라도 마지막 committed state를 다음 run의 initial state로 명시해 cadence를 정확히 이어갈 수 있다.
 
-#### UC-TRIGGER-001 — 선언된 decision cadence
+같은 실행 가능한 session을 모두 전달받더라도 StrategyModel마다 다른 state와 규칙으로 서로 다른 decision
+cadence를 만들 수 있다. cadence는 **언제 판단하는가**이고, 보유기간·회전율·실제 리밸런싱 주기는 실행 결과에서
+사후 계산한다. 판단해서 유지한 것과 판단하지 않은 것은 §6.7에 따라 구분한다.
 
-StrategyModel 정의 안에서 "eligible session마다 04:00 Asia/Seoul에 판단한다" 또는 "5 eligible session마다 04:00에
-판단한다"를 선언한다. run 결과의 판단 시점은 그 선언과 frozen venue calendar의 교집합과 정확히 일치해야
-한다. 같은 StrategyModel을 다른 기간에 실행해도 정의만 읽으면 cadence와 local time을 알 수 있다.
+DataModel materialization은 이 Strategy callback 계약을 공유하지 않는다. DataModel은 frozen materialization
+operation이 지정한 현재 evaluation time에 계산하며, 그 시점 선택을 Strategy의 session counter나 execution
+session 해석으로 위장하지 않는다.
 
-daily close `2024-03-05` 행은 `2024-03-05 15:30 Asia/Seoul`에 available해진다. 따라서 `2024-03-06 04:00`
-decision은 그 행을 읽을 수 있고, 그 decision의 next eligible close execution은 `2024-03-06 15:30`이다.
-`2024-03-05 04:00` decision은 같은 행을 읽을 수 없다. 04:00 timestamp가 dataset에 행으로 존재할 필요는 없다.
-판단하지 않은 session은 실패가 아니라 정상적인 결과이며 재현 가능한 기록으로 남는다. cadence나 local time을
-바꾸면 **경제적으로 다른 run**으로 구분되어야 한다.
+#### UC-TRIGGER-001 — 상태 있는 decision cadence
 
-### 3.4 Session calendar는 venue fact다
+StrategyModel이 `session_count`를 committed memory에 보존하고 5번째 callback마다 판단한다. Flow는 frozen
+execution session을 빠짐없이 하나씩 전달할 뿐 5번째 session을 미리 선택하지 않는다. 첫 네 callback은
+`NoDecision`과 갱신된 state를, 다섯 번째 callback은 `PortfolioIntent`를 만든다. 두 session 뒤 run이 끝나고 그
+최종 state를 다음 run의 initial state로 명시하면 다음 run의 세 번째 callback에서 판단한다.
 
-판단 후보가 되는 session 목록과 open/close 시각은 **선택한 venue의 거래 calendar 사실**이어야 하고,
-StrategyModel나 data coverage에서 유도해서는 안 된다.
+daily close `2024-03-05` 행이 `2024-03-05 15:30 Asia/Seoul`에 available해지고 다음 execution session의 Strategy
+evaluation time이 `2024-03-06 04:00`이면 그 callback은 해당 행을 읽을 수 있다. `2024-03-05 04:00` callback은
+읽을 수 없다. evaluation timestamp가 observation dataset의 행으로 존재할 필요는 없다. 같은 frozen execution
+session, observation cutoff, StrategyModel code/config와 initial state에서는 callback 결과, state transition과
+decision trace가 같아야 한다.
 
-StrategyModel은 휴장일이나 session 자체를 만들어내지 않는다. run은 명시적으로 동결된 session calendar, 선택
-환경이 식별한 calendar provider의 결과, 또는 user가 근거와 함께 선언한 유도 규칙의 결과를 사용한다.
+### 3.4 Executable session은 execution input의 사실이다
 
-**금지되는 것은 package의 추측이다.** 특정 종목의 결측 때문에 후보 session이 사라지면 cadence 전체가
-미래 정보에 오염된다. 따라서 아무도 선언하지 않았는데 가격 행 coverage나 weekday 추정으로 session
-calendar를 만들어내는 경로는 두지 않는다.
+execution을 선택한 run의 session 순서는 §6.3의 **별도로 준비된 체결 테이블**이 공급한다. Flow는 동결된 체결
+테이블의 실행 시점을 결정적으로 정렬하고 같은 실행 시점의 instrument 행을 하나의 현재 session으로 묶어
+callback을 전달한다. 별도 session-calendar parquet, open/close 표, calendar provider를 실행 전제조건으로 요구하지
+않는다.
 
-#### Calendar 유도는 availability 유도와 같은 규칙을 따른다
+이것은 관측 data와 체결 data를 합친다는 뜻이 아니다.
 
-거래소 calendar 파일 없이 daily 가격 데이터만 가진 project는 흔하다. 이 경우 user는 §4.2와 **같은
-방식으로** 유도 규칙을 선언할 수 있다. package는 추측하지 않고, user가 근거와 함께 규칙을 고르며,
-package는 그 규칙을 deterministic하게 검증하고 frozen input에 기록한다.
+```text
+관측 dataset    available_at <= evaluation_time으로 StrategyModel/DataModel이 읽는다
+체결 테이블     trade_at = execution_time으로 Flow와 Exchange만 읽는다
+```
 
-**날짜는 유도될 수 있지만 시각은 유도될 수 없다.** daily 가격 행에는 날짜만 있고 개장·종가 시각이 없다.
-그 시각은 이미 `available_at` 규칙(§4.2)이 담고 있으므로 새로 요구하지 않고 같은 선언을 재사용한다.
+StrategyModel과 DataModel에는 체결 테이블이나 전체 session 목록으로 가는 접근 경로가 없다. Model이 보는 것은
+Flow가 전달한 **현재 session 하나**뿐이다. 따라서 package가 미래 session을 이용해 StrategyModel의 경제적
+trigger를 대신 계산할 수 없고, 특정 종목의 관측 결측으로 session을 조용히 만들거나 지우지도 않는다.
 
-유도 규칙마다 위험이 다르므로 bundled agent skill이 후보와 그 위험을 설명하고 user가 선택한다. 예를 들어
-전체 instrument의 날짜 union은 한 종목의 거래정지에 무너지지 않지만, 단일 기준 종목의 날짜를 쓰면 그 종목이
-멈출 때 session 자체가 사라진다. 선택된 규칙과 그 한계는 result에 남는다.
+체결 테이블은 user가 그 venue의 실행 가능한 상태를 완전하게 표현한다고 선언한 frozen input이다. 전체 실행
+시점이 없으면 그 session은 없는 것이고, 특정 instrument 행만 없으면 §6.3의 venue-absence 결과다. 이 한계와
+체결 테이블 identity는 result에 남는다.
 
-#### UC-CALENDAR-001 — 가격 데이터만 있는 project의 calendar
+#### UC-CALENDAR-001 — retired current requirement
 
-user가 daily OHLCV만 가지고 있고 거래소 calendar 파일이 없다. package는 임의로 session을 만들지 않고,
-agent가 유도 규칙 후보와 각각의 위험을 설명한다. user가 규칙을 선택하면 package는 그 규칙을 검증해
-frozen session calendar를 만들고, 유도 방식과 한계를 result에 기록한다. 같은 규칙과 같은 data에서 같은
-session 집합이 재현된다. 규칙을 바꾸면 경제적으로 다른 run으로 구분된다.
+이 ID는 재사용하지 않는다. 별도 frozen SessionCalendar를 daily 가격 coverage에서 만들어 executable run에
+주입하는 capability는 current product contract에서 제거되었다. current executable session은 체결 테이블이
+공급한다. 미래 venue calendar를 별도 capability로 추가하려면 미래 session의 availability와 Model 노출 경계를
+새 UC와 별도 승인으로 정의해야 한다.
 
 ### 3.5 Bounded lookback
 
@@ -535,14 +544,15 @@ set을 만든다.
 StrategyModel이 60 rows lookback을 선언하면 그 제한이 store query까지 전달되어야 하고, lookback을 선언하지 않은
 historical read는 실패해야 한다. access evidence에는 요청한 lookback과 실제 coverage 정보가 남는다.
 
-### 3.6 독립적인 clock
+### 3.6 독립적인 callback과 evaluation time
 
-observation, decision, execution, monitoring의 evaluation time은 같을 수도 다를 수도 있다. StrategyModel decision이
-없는 시점에도 actual account를 평가할 수 있고, execution은 decision과 분리된 PIT-safe 시점에 일어난다.
+observation availability, Strategy session callback, decision, execution, valuation, monitoring의 evaluation time은
+같을 수도 다를 수도 있다. StrategyModel이 `NoDecision`을 반환한 session에도 valuation과 monitoring callback은
+독립적으로 실행할 수 있고, execution은 유효한 decision이 있을 때 선택한 profile의 PIT-safe 시점에 일어난다.
 
-"독립 clock"은 별도의 clock object나 별도 runtime을 의무화한다는 뜻이 아니라, **monitoring cadence와 frozen
-evaluation time이 StrategyModel decision cadence에 종속되지 않는다**는 뜻이다. 각 result는 자신이 평가한 instant와
-permitted cutoff를 보존한다.
+"독립"은 별도의 clock object나 runtime을 의무화한다는 뜻이 아니다. Flow는 callback의 고정 순서와 현재
+evaluation time을 배달하지만, 각 component의 경제 규칙을 대신 계산하지 않는다. 각 result는 자신이 평가한
+instant와 permitted cutoff를 보존한다.
 
 intraday event와 partial fill은 future work다.
 
@@ -1207,8 +1217,9 @@ Model은 이전 계산의 결과를 다음 계산으로 이어갈 수 있어야 
   기록된 state가 따라 바뀌어서는 안 된다. 그렇지 않으면 이력 전체가 마지막 값 하나로 붕괴한다.
 - durable하고 portable해야 하며, 한 run의 종료 state를 다음 run의 시작 state로 사용할 수 있어야 한다.
   production에서 하루 단위로 실행하며 전날 state를 이어받는 것이 기준 사례다.
-- **갱신은 execution이나 fill 발생 여부에 종속되지 않는다.** 주문이 없거나 dealt quantity가 0인 세션에도
-  StrategyModel의 state는 이어지고, execution을 거치지 않는 DataModel도 마찬가지다.
+- **갱신은 decision, execution이나 fill 발생 여부에 종속되지 않는다.** 현재 session callback이 성공해
+  `NoDecision`을 반환한 경우에도 StrategyModel의 progression state는 commit된다. 판단했지만 주문이 없거나
+  dealt quantity가 0인 session에도 state는 이어지고, execution을 거치지 않는 DataModel도 마찬가지다.
 - state를 사용한 result는 consumed Model state identity를 드러내야 한다. actual Account state dependency는
   별도로 표시한다. 그래야 순차 계산과 계좌 경로 의존성을 구분할 수 있다.
 - **state는 최후 수단이다.** 같은 값을 bounded lookback이나 actual-state 이력(§6.6)이나 durable
@@ -1230,9 +1241,11 @@ adaptive StrategyModel은 realized result나 new observation으로 belief, param
 
 #### UC-STATE-001 — 체결 없는 세션과 run 경계를 넘는 state 연속성
 
-StrategyModel이 판단 결과를 state로 남긴다. 그 세션에 주문이 없거나 dealt quantity가 0이어도 state는 이어진다.
-run이 끝나면 최종 state를 결과로 얻을 수 있고, 다음 run의 시작 state로 **명시적으로 지정해** 이어서 실행할
-수 있다. 이때 이전 run의 state를 자동으로 선택하지 않는다.
+StrategyModel이 session callback 횟수와 판단 결과를 state로 남긴다. callback이 `NoDecision`을 반환하거나,
+판단한 session에 주문이 없거나 dealt quantity가 0이어도 성공한 invocation의 state는 이어진다. callback 실패나
+invalid output에서는 이전 committed state를 유지한다. run이 끝나면 최종 state를 결과로 얻을 수 있고, 다음
+run의 시작 state로 **명시적으로 지정해** 이어서 실행할 수 있다. 이때 이전 run의 state를 자동으로 선택하지
+않는다.
 
 #### UC-STATE-002 — Payload checkpoint 재개
 
@@ -1318,6 +1331,16 @@ instrument별로 fractional 허용, lot rounding, clipping, skip, rejection, req
 **이것은 execution을 선택한 run의 전제조건**이며, 없으면 그 run은 시작 전에 실패한다. 반대로 execution을
 선택하지 않은 workflow — DataModel 연구, signal 분석 — 는 이것 없이 완결된다(`UC-MODEL-001`,
 `UC-CONSTRAINT-001`).
+
+##### executable session의 원천이다
+
+Flow는 별도 calendar file이나 observation coverage가 아니라 이 frozen 체결 테이블의 실행 시점 집합으로
+executable session을 진행한다(§3.4). 같은 `trade_at`의 instrument 행은 하나의 session execution snapshot을
+이루며, 실행 시점의 결정적 정렬이 callback 순서를 정한다.
+
+Flow가 session stream을 구성할 수 있다는 사실은 StrategyModel에 체결 테이블을 노출한다는 뜻이 아니다.
+StrategyModel은 현재 session callback과 PIT-bounded 관측만 받고, 전체 실행 시점 집합이나 미래 session을 읽을
+수 없다. Flow도 그 미래 집합으로 N번째 session이나 월말을 미리 골라 decision callback으로 바꾸지 않는다.
 
 ##### 관측이 아니라 그 시점의 사실이다
 
@@ -1523,6 +1546,10 @@ equivalent single-name characterization의 경제적 결과가 일치해야 한�
 
 hold를 별도 action이나 "결과 없음"으로 표현하면 세 가지가 구분되지 않는다: **판단하지 않음**, **판단해서
 유지함**, **주문했지만 dealt 0**. 세 경우는 경제적 의미가 다르므로 결과에서 구분되어야 한다.
+
+session callback의 `NoDecision`만 **판단하지 않음**을 뜻한다. 명시적 hold는 유효한 StrategyModel decision이며
+execution spine을 통과하되 새 주문을 만들지 않는다. dealt 0은 유효한 decision과 order conversion 뒤 Exchange가
+만든 실행 결과다. 이 셋은 같은 null 값이나 빈 batch로 합치지 않는다.
 
 #### 금지 — 가짜 hold
 
@@ -2172,13 +2199,14 @@ signal/alpha weight/ensemble/intended portfolio/artifact contract, DataModel res
 profile·actual-state result 사이의 compatibility, order conversion semantics와 clipping/failure diagnostics,
 constraint declaration·adjustment·validation·finding contract, signed alpha diagnostics와 long-only physical
 construction, instrument semantics와 execution-policy resolution, portable artifact envelope·lineage·catalog·
-reporting, Model state reference와 working/committed 저장 lifecycle, trigger와 run 종료 evidence 확정,
-actual-account monitoring, agent-readable documentation과 stage-based error.
+  reporting, Model state reference와 working/committed 저장 lifecycle, deterministic session-callback 전달과 run
+  종료 evidence 확정, actual-account monitoring, agent-readable documentation과 stage-based error.
 
 **user project가 소유:** source data와 그 경제적 의미, availability·delivery lag·restatement 가정, universe·
 benchmark·sector·factor 정의, signal model과 alpha policy code, risk·cost·constraint·execution policy, constraint
-metric의 경제적 의미와 bound, compliance reference data의 applicability, project-local extension과 report
-composition, Model payload의 내용과 저장·복원 구현, research objective와 promotion decision.
+  metric의 경제적 의미와 bound, compliance reference data의 applicability, project-local extension과 report
+  composition, StrategyModel의 decision-trigger 규칙과 Model payload의 내용·저장·복원 구현, research objective와
+  promotion decision.
 
 **external production runtime / OMS가 소유 (future boundary):** broker connectivity·authentication·secret,
 broker-specific identifier와 order type, order slicing·pacing·venue·retry·replace·cancel, always-on scheduling과
@@ -2202,7 +2230,8 @@ confirmed order·fill·reject reason·account snapshot publication.
 - pickle-only result를 portable public artifact라고 주장
 - private payload의 로컬 파일 경로를 memory에 넣어 durable Model state라고 주장
 - consumer-purpose alias를 dataset registration에 새기는 것
-- session calendar를 data coverage에서 유도하는 것
+- observation coverage나 미래 session 목록으로 StrategyModel의 decision cadence를 Flow가 대신 계산하는 것
+- StrategyModel이나 DataModel에 체결 테이블 또는 미래 executable session 목록을 노출하는 것
 
 ---
 
@@ -2225,7 +2254,7 @@ hypothetical signed evaluation을 지원한다.
 - actual fill, marked state, bounded strategy state에 의존하는 path-dependent StrategyModel
 - 하나의 portfolio에서 여러 주식·ETF와 shared cash를 함께 처리하는 multi-instrument simulation
 - daily observation/valuation, 선택적 lower-frequency decision, 독립 monitoring을 결합하는 multi-frequency workflow
-- selective decision trigger, explicit hold, dense actual-account evidence
+- stateful session-callback decision trigger, explicit hold, dense actual-account evidence
 - standalone constraint adjustment, advisory pre-execution validation, independent monitoring artifact
 - MVP hard constraint: no-short와 time-varying single-name cap
 - **지원되는 order의 전량 체결과 주식·ETF cash의 즉시 결제를 가정한 simulation**
@@ -2251,6 +2280,9 @@ hypothetical signed evaluation을 지원한다.
 - **중첩 실행** — 하나의 판단 안에서 다른 판단 과정을 실행하는 것. 파라미터 후보를 각각 backtest해
   비교하는 것이 대표적이다. 같은 목적은 **각 후보를 별도 run으로 실행하고 그 결과를 조합하는 것**으로
   표현한다(§5.4)
+- **미래 session을 알아야 하는 Strategy trigger** — 현재 session에서 그 달의 마지막 executable session인지
+  판정하는 `LastSessionOfMonth` 같은 규칙. current StrategyModel은 현재와 과거 callback state만 보므로 지원하지
+  않는다. 다음 달 첫 session에서 이전 달 종료를 확인하는 규칙은 가능하지만 같은 경제적 의미가 아니다
 - **actual state에 의존하는 model 학습** — 자기 매매 결과를 보고 정책을 갱신하는 방식(강화학습 계열).
   §2.3이 DataModel을 execution 경로 밖에 둘 수 있는 것은 학습이 계좌를 보지 않기 때문이며, 이 예외를 열면
   파생 데이터의 재사용 가능성이 무너진다
@@ -2412,11 +2444,11 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
   committed state가 유지된다.
 - state reference는 Model이 기록한 로컬 payload 경로에 의존하지 않고 compatible process에서 memory와 payload를
   함께 복원한다. payload가 없는 Model은 strict JSON memory만으로 같은 계약을 만족한다.
-- `UC-CALENDAR-001`에서 가격 데이터만 있는 project가 선언된 유도 규칙으로 frozen session calendar를 만들고,
-  package는 규칙 없이 session을 추측하지 않으며, 유도 방식과 한계가 result에 남는다.
-- `UC-TRIGGER-001`에서 StrategyModel이 선언한 cadence와 local decision time을 frozen venue calendar와 결합한 판단
-  시점이 실행 결과와 일치한다. 해당 시각에 data row가 없어도 event는 성립하며, 판단하지 않은 session은 실패로
-  기록되지 않는다.
+- `UC-CALENDAR-001`은 retired current requirement로 남아 ID가 재사용되지 않는다. executable session은 별도로
+  준비된 frozen 체결 테이블에서 오며, 별도 calendar artifact를 요구하지 않는다.
+- `UC-TRIGGER-001`에서 Flow가 frozen execution session을 하나씩 전달하고 StrategyModel이 committed state로
+  cadence를 계산한다. 해당 evaluation time에 observation row가 없어도 callback은 성립하며, `NoDecision`은
+  실패가 아니라 state를 이어가는 정상 결과다.
 - `UC-ENSEMBLE-001`에서 기존 StrategyModel result를 member로 조합하고 ticker-level netting과 lineage를 확인할 수 있다.
 - `UC-ALPHA-CHILD-001`은 같은 exact parent intent를 StrategyModel/DataModel 재실행 없이 두 execution convention에서
   비교하며 parent result는 불변이다. adaptive scenario는 `UC-ALPHA-ADAPTIVE-001`의 state/evidence를 별도로
@@ -2531,7 +2563,8 @@ user decision으로 연결한다.
 제품이 보존해야 할 핵심은 다음과 같다.
 
 1. **`available_at <= evaluation_time`과 exact `rows`/`calendar` lookback의 PIT integrity**
-2. **event time과 data row time의 분리** — 판단 시각은 데이터가 아니라 venue calendar와 strategy 선언에서 온다
+2. **event time과 data row time의 분리** — executable session은 체결 테이블에서 오고, Strategy evaluation
+   time과 decision 여부는 Strategy 정의와 현재 committed state에서 온다
 3. direct StrategyModel, stored model output, ensemble StrategyModel의 선택 가능한 composition
 4. path-dependent StrategyModel, multi-instrument portfolio, multi-frequency workflow
 5. **portfolio return을 주장하는 모든 것은 하나의 execution spine을 통과한다**
@@ -2559,7 +2592,7 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-DATA-002` | §4.3 | current |
 | `UC-PIT-001` | §4.3 | current |
 | `UC-TRADABILITY-001` | §4.5 | current |
-| `UC-CALENDAR-001` | §3.4 | current |
+| `UC-CALENDAR-001` | §3.4 | retired — ID reserved, capability removed |
 | `UC-MODEL-001`, `UC-MODEL-002`, `UC-MODEL-003`, `UC-FACTOR-001` | §5.1 | current |
 | `UC-SIGNAL-001`, `UC-SIGNAL-002` | §5.2 | current |
 | `UC-ENSEMBLE-001` | §5.4 | current |
@@ -2599,14 +2632,14 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | 두 전략이 같은 lifecycle을 통과하는가 | 통과한다. 다른 것은 판단 로직과 profile 정책뿐 (§6.1) |
 | 등록에 목적별 role(`research_close` 같은)이 필요한가 | 필요 없다. 소비자가 각자 field를 요구한다 (§4.1) |
 | 체결 기록의 길이가 거래 횟수인가 | 아니다. dealt 0인 진단 레코드가 섞인다 → intended/requested/dealt/committed 4단 구분 (§2.4) |
-| lookback이 다른 두 전략의 첫 판단 시점 | warm-up을 선언으로 표현하고, 그 구간은 실패가 아니라 기록된 skip |
+| lookback이 다른 두 전략의 첫 판단 시점 | warm-up을 Strategy memory로 표현하고, 그 callback은 실패가 아니라 `NoDecision` |
 
 ### B.2 Fama-French 스타일 팩터 — independent double sort
 
 | 확인한 것 | 정해진 것 |
 |---|---|
-| "매년 6월 마지막 거래일" cadence를 표현할 수 있는가 | **표현할 수 없었다.** 세션 수로 세는 cadence로는 달력 경계를 근사할 수 없어 달력 기준 cadence를 추가 (§3.3) |
-| 거래소 calendar 파일 없이 시작할 수 있는가 | **없었다.** availability와 같은 방식의 선언된 유도 규칙을 허용 (`UC-CALENDAR-001`). 날짜는 유도되고 시각은 이미 `available_at` 선언에 있다 |
+| "매년 6월 마지막 거래일" cadence를 표현할 수 있는가 | current callback은 미래 session을 보지 않으므로 **지원하지 않는다.** 7월 첫 session 판단은 가능하지만 다른 경제적 규칙이다 (§3.3) |
+| 거래소 calendar 파일 없이 시작할 수 있는가 | 가능하다. 별도로 준비한 execution parquet의 `trade_at`이 executable session을 공급하며 calendar parquet은 만들지 않는다 (§3.4, §6.3) |
 | 여러 버킷 portfolio가 같은 분류를 썼음을 증명할 수 있는가 | 분류를 재사용 가능한 result로 만들면 dependency로 증명된다. 별도 grouping 개념은 만들지 않았다 (`UC-FACTOR-001`) |
 | 버킷별 구성종목 수를 어디서 얻는가 | 분류 result에 이미 있다. actual state에 물을 필요가 없다 |
 | 가중 방식과 리밸런싱 주기의 관계 | 시가총액 가중은 보유만 해도 유지되지만 균등 가중은 그렇지 않다. 따라서 cadence가 결과를 바꾸며 **어느 cadence도 정답이 아니다.** package가 대신 고르지 않는다 |

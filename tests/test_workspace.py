@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import time
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ import pytest
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
+from vqapr.exchange.conventions import FillConvention
+from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.workspace import Workspace
 
 
@@ -27,6 +30,27 @@ def _source(**overrides) -> SourceSpec:
     kwargs = {"hive_partitioned": True}
     kwargs.update(overrides)
     return SourceSpec.of("prices", "prepared/price_daily", **kwargs)
+
+
+def _execution(
+    path: Path, raw_id: str = "krx-daily", *, trade_price: str = "close"
+) -> ExecutionInputRegistration:
+    return ExecutionInputRegistration.of(
+        raw_id,
+        ExecutionTableSpec(
+            source=SourceSpec.of("krx-execution", path),
+            trade_at_field="trade_at",
+            instrument_field="instrument",
+            is_tradable_field="is_tradable",
+            price_fields={"open": "open", "close": "close"},
+        ),
+        FillConvention(
+            offset_sessions=0,
+            local_time=time(15, 30),
+            timezone="Asia/Seoul",
+            trade_price=trade_price,
+        ),
+    )
 
 
 def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
@@ -245,3 +269,56 @@ def test_source_lookup_failures_are_structured(
     assert payload["stage"] == "workspace.source.lookup"
     assert payload["mutation"] is False
     assert payload["failures"][0]["code"] == code
+
+
+def test_execution_input_round_trips_through_workspace(
+    tmp_path: Path, execution_parquet: Path
+) -> None:
+    workspace = Workspace.create(tmp_path)
+    expected = _execution(execution_parquet)
+
+    assert workspace.register_execution_input(expected) is True
+
+    reopened = Workspace.open(tmp_path)
+    assert reopened.execution_input("krx-daily") == expected
+    assert reopened.execution_inputs == (expected,)
+    assert reopened.source("krx-execution") == expected.table.source
+
+
+def test_execution_input_registration_is_idempotent(
+    tmp_path: Path, execution_parquet: Path
+) -> None:
+    workspace = Workspace.create(tmp_path)
+    registration = _execution(execution_parquet)
+
+    assert workspace.register_execution_input(registration) is True
+    before = workspace.path.read_bytes()
+    assert workspace.register_execution_input(registration) is False
+    assert workspace.path.read_bytes() == before
+
+
+def test_conflicting_execution_input_fails_without_mutation(
+    tmp_path: Path, execution_parquet: Path
+) -> None:
+    workspace = Workspace.create(tmp_path)
+    workspace.register_execution_input(_execution(execution_parquet))
+    before = workspace.path.read_bytes()
+
+    with pytest.raises(VqaprError) as caught:
+        workspace.register_execution_input(_execution(execution_parquet, trade_price="open"))
+
+    assert caught.value.stage == "workspace.execution_input.register"
+    assert caught.value.mutation is False
+    assert caught.value.failures[0].code == "workspace.execution_input.register.conflict"
+    assert workspace.path.read_bytes() == before
+
+
+def test_legacy_workspace_without_execution_inputs_still_opens(tmp_path: Path) -> None:
+    workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
+    workspace_path.parent.mkdir(parents=True)
+    workspace_path.write_text("sources: {}\ndatasets: {}\n", encoding="utf-8")
+
+    workspace = Workspace.open(tmp_path)
+
+    assert workspace.datasets == ()
+    assert workspace.execution_inputs == ()

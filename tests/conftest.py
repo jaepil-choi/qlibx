@@ -60,6 +60,25 @@ def flat_parquet(tmp_path_factory, _con) -> Path:
 
 
 @pytest.fixture(scope="session")
+def execution_parquet(tmp_path_factory, _con) -> Path:
+    """실제 execution 계약 모양의 2종목 x 3세션 parquet."""
+    out = tmp_path_factory.mktemp("execution") / "krx_daily.parquet"
+    _con.execute(
+        f"""COPY (
+            SELECT * FROM (VALUES
+              (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true,  99.0, 100.0),
+              (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B', true,  48.0,  50.0),
+              (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 101.0, 103.0),
+              (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'B', false, 51.0,  51.0),
+              (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'A', true, 104.0, 105.0),
+              (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'B', true,  52.0,  53.0)
+            ) AS t(trade_at, instrument, is_tradable, open, close)
+        ) TO '{out.as_posix()}' (FORMAT PARQUET)"""
+    )
+    return out
+
+
+@pytest.fixture(scope="session")
 def naive_parquet(tmp_path_factory, _con) -> Path:
     """available_at이 tz 없는 timestamp. 조용히 틀리는 경우를 재현한다."""
     out = tmp_path_factory.mktemp("naive") / "bad.parquet"

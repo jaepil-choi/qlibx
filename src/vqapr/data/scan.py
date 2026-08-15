@@ -96,6 +96,24 @@ class KeyCheck:
         return self.null_groups == 0 and self.duplicate_groups == 0
 
 
+@dataclass(frozen=True, slots=True)
+class ConditionalPositiveCheck:
+    """boolean field가 true일 때 numeric field가 유한한 양수인지의 bounded summary."""
+
+    invalid_rows: int
+    examples: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.invalid_rows == 0
+
+
+def _quote(field: str) -> str:
+    if not isinstance(field, str) or not field.strip():
+        raise ValueError("field must be a non-empty column name")
+    return '"' + field.replace('"', '""') + '"'
+
+
 def _relation(spec: SourceSpec) -> str:
     """SourceSpec을 duckdb가 읽을 수 있는 표현으로.
 
@@ -154,9 +172,7 @@ def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
     This is a scan primitive, not an observation query. It does not apply PIT, lookback, or
     dataset semantics; callers such as the execution-table boundary own those meanings.
     """
-    if not isinstance(field, str) or not field.strip():
-        raise ValueError("field must be a non-empty column name")
-    quoted = '"' + field.replace('"', '""') + '"'
+    quoted = _quote(field)
     con = _open(spec)
     try:
         rows = con.execute(
@@ -187,8 +203,8 @@ def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
     """
     if not fields:
         raise ValueError("key_check requires at least one field")
-    cols = ", ".join(f'"{f}"' for f in fields)
-    null_pred = " OR ".join(f'"{f}" IS NULL' for f in fields)
+    cols = ", ".join(_quote(field) for field in fields)
+    null_pred = " OR ".join(f"{_quote(field)} IS NULL" for field in fields)
     con = _open(spec)
     try:
         grouped = (
@@ -223,3 +239,53 @@ def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
         null_examples=null_examples,
         duplicate_examples=dup_examples,
     )
+
+
+def positive_finite_when_true(
+    spec: SourceSpec,
+    *,
+    value_field: str,
+    condition_field: str,
+    identity_fields: Sequence[str],
+) -> ConditionalPositiveCheck:
+    """조건이 true인 행의 선택 numeric value가 null/NaN/inf/비양수인지 센다."""
+    value = _quote(value_field)
+    condition = _quote(condition_field)
+    identities = tuple(identity_fields)
+    if not identities:
+        raise ValueError("identity_fields must not be empty")
+    identity_sql = ", ".join(_quote(field) for field in identities)
+    invalid = (
+        f"{condition} IS TRUE AND "
+        f"({value} IS NULL OR NOT isfinite(CAST({value} AS DOUBLE)) OR {value} <= 0)"
+    )
+    con = _open(spec)
+    try:
+        count = int(
+            con.execute(f"SELECT count(*) FROM {_relation(spec)} WHERE {invalid}").fetchone()[0]
+        )
+        examples: tuple[str, ...] = ()
+        if count:
+            rows = con.execute(
+                f"SELECT {identity_sql}, {value} FROM {_relation(spec)} "
+                f"WHERE {invalid} LIMIT {_EXAMPLE_LIMIT}"
+            ).fetchall()
+            examples = tuple(repr(row) for row in rows)
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage="source.scan.conditional_positive",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="source.scan.conditional_positive.unreadable",
+                    requirement=(
+                        f"fields {condition_field!r} and {value_field!r} must be readable "
+                        f"from source '{spec.source_id}'"
+                    ),
+                    observed=str(exc).splitlines()[0],
+                )
+            ],
+        ) from exc
+    finally:
+        con.close()
+    return ConditionalPositiveCheck(invalid_rows=count, examples=examples)

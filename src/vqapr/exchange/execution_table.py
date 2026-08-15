@@ -6,12 +6,20 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
+from zoneinfo import ZoneInfo
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import Diagnosis, Failure, FailureFamily, VqaprError, collector
+from vqapr.domain.identifiers import ExecutionInputId, execution_input_id
+from vqapr.exchange.conventions import FillConvention
 
 _STAGE = "execution_table.sessions"
+_REGISTER_SCHEMA = "execution_input.register.schema"
+_REGISTER_KEY = "execution_input.register.key"
+_REGISTER_PRICE = "execution_input.register.price"
+_REGISTER_TIME = "execution_input.register.time"
+_RETRY = "fix the prepared execution parquet or binding, then retry"
 
 
 def _field(value: str, *, name: str) -> str:
@@ -44,7 +52,35 @@ class ExecutionTableSpec:
         object.__setattr__(self, "price_fields", MappingProxyType(dict(self.price_fields)))
 
 
-def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
+@dataclass(frozen=True, slots=True)
+class ExecutionInputRegistration:
+    """Versionable workspace declaration for one exact-time execution input."""
+
+    execution_input_id: ExecutionInputId
+    table: ExecutionTableSpec
+    fill: FillConvention
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.table, ExecutionTableSpec):
+            raise TypeError("table must be an ExecutionTableSpec")
+        if not isinstance(self.fill, FillConvention):
+            raise TypeError("fill must be a FillConvention")
+        if self.fill.trade_price not in self.table.price_fields:
+            raise ValueError(
+                f"trade_price {self.fill.trade_price!r} must be declared in table.price_fields"
+            )
+
+    @classmethod
+    def of(
+        cls,
+        raw_execution_input_id: str,
+        table: ExecutionTableSpec,
+        fill: FillConvention,
+    ) -> ExecutionInputRegistration:
+        return cls(execution_input_id(raw_execution_input_id), table, fill)
+
+
+def _schema_failures(spec: ExecutionTableSpec, *, stage: str = _STAGE) -> tuple[Failure, ...]:
     columns = scan.describe(spec.source)
     expected = {
         spec.trade_at_field: scan.ColumnType.TIMESTAMP_TZ,
@@ -57,7 +93,7 @@ def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
         if observed is not wanted:
             failures.append(
                 Failure.bounded(
-                    code=f"{_STAGE}.field_type",
+                    code=f"{stage}.field_type",
                     requirement=f"execution field {field!r} must be {wanted}",
                     observed="missing" if observed is None else str(observed),
                 )
@@ -68,12 +104,122 @@ def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
         if observed not in numeric:
             failures.append(
                 Failure.bounded(
-                    code=f"{_STAGE}.price_type",
+                    code=f"{stage}.price_type",
                     requirement=f"execution price {semantic!r} field {field!r} must be numeric",
                     observed="missing" if observed is None else str(observed),
                 )
             )
     return tuple(failures)
+
+
+def _schema_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
+    return Diagnosis(
+        stage=_REGISTER_SCHEMA,
+        family=FailureFamily.EXCHANGE,
+        failures=_schema_failures(registration.table, stage=_REGISTER_SCHEMA),
+        retry_precondition=_RETRY,
+    )
+
+
+def _key_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
+    table = registration.table
+    result = scan.key_check(table.source, (table.trade_at_field, table.instrument_field))
+    found = collector(_REGISTER_KEY, FailureFamily.EXCHANGE)
+    identity = f"({table.trade_at_field}, {table.instrument_field})"
+    if result.null_groups:
+        found.add(
+            Failure.bounded(
+                code=f"{_REGISTER_KEY}.null",
+                requirement=f"execution identity {identity} must not contain nulls",
+                observed=f"{result.null_groups} key group(s) with a null",
+                examples=result.null_examples,
+                example_total=result.null_groups,
+            )
+        )
+    if result.duplicate_groups:
+        found.add(
+            Failure.bounded(
+                code=f"{_REGISTER_KEY}.duplicate",
+                requirement=f"execution identity {identity} must be unique",
+                observed=f"{result.duplicate_groups} duplicated key group(s)",
+                examples=result.duplicate_examples,
+                example_total=result.duplicate_groups,
+            )
+        )
+    return found.done(retry=_RETRY)
+
+
+def _price_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
+    table = registration.table
+    semantic = registration.fill.trade_price
+    physical = table.price_fields[semantic]
+    result = scan.positive_finite_when_true(
+        table.source,
+        value_field=physical,
+        condition_field=table.is_tradable_field,
+        identity_fields=(table.trade_at_field, table.instrument_field),
+    )
+    found = collector(_REGISTER_PRICE, FailureFamily.EXCHANGE)
+    if result.invalid_rows:
+        found.add(
+            Failure.bounded(
+                code=f"{_REGISTER_PRICE}.invalid",
+                requirement=(
+                    f"selected execution price {semantic!r} field {physical!r} must be finite and "
+                    "positive whenever is_tradable is true"
+                ),
+                observed=f"{result.invalid_rows} invalid tradable row(s)",
+                examples=result.examples,
+                example_total=result.invalid_rows,
+            )
+        )
+    return found.done(retry=_RETRY)
+
+
+def _time_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
+    table = registration.table
+    values = scan.distinct_values(table.source, table.trade_at_field)
+    found = collector(_REGISTER_TIME, FailureFamily.EXCHANGE)
+    if not values:
+        found.add(
+            Failure.bounded(
+                code=f"{_REGISTER_TIME}.empty",
+                requirement="execution table must contain at least one execution instant",
+            )
+        )
+        return found.done(retry=_RETRY)
+
+    zone = ZoneInfo(registration.fill.timezone)
+    mismatches = tuple(
+        value.isoformat()
+        for value in values
+        if value.astimezone(zone).time() != registration.fill.local_time
+    )
+    if mismatches:
+        found.add(
+            Failure.bounded(
+                code=f"{_REGISTER_TIME}.local_time_mismatch",
+                requirement=(
+                    f"every trade_at must occur at {registration.fill.local_time.isoformat()} "
+                    f"in {registration.fill.timezone}"
+                ),
+                observed=f"{len(mismatches)} distinct execution instant(s) at another local time",
+                examples=mismatches,
+                example_total=len(mismatches),
+            )
+        )
+    return found.done(retry=_RETRY)
+
+
+def validate_execution_input(registration: ExecutionInputRegistration) -> Diagnosis:
+    """Validate one prepared execution parquet before workspace mutation."""
+    if not isinstance(registration, ExecutionInputRegistration):
+        raise TypeError("registration must be an ExecutionInputRegistration")
+    for check in (_schema_diagnosis, _key_diagnosis, _price_diagnosis, _time_diagnosis):
+        diagnosis = check(registration)
+        if not diagnosis.ok:
+            return diagnosis
+    return Diagnosis(stage=_REGISTER_TIME, family=FailureFamily.EXCHANGE)
 
 
 def execution_session_times(spec: ExecutionTableSpec) -> tuple[datetime, ...]:

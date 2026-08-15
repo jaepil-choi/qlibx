@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import tempfile
 from collections.abc import Mapping
+from datetime import time
 from pathlib import Path
 
 import yaml
@@ -16,7 +17,16 @@ import yaml
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
-from vqapr.domain.identifiers import DatasetId, SourceId, dataset_id, source_id
+from vqapr.domain.identifiers import (
+    DatasetId,
+    ExecutionInputId,
+    SourceId,
+    dataset_id,
+    execution_input_id,
+    source_id,
+)
+from vqapr.exchange.conventions import FillConvention
+from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"
@@ -25,6 +35,8 @@ REGISTER_STAGE = "workspace.dataset.register"
 LOOKUP_STAGE = "workspace.dataset.lookup"
 SOURCE_LOOKUP_STAGE = "workspace.source.lookup"
 WRITE_STAGE = "workspace.write"
+EXECUTION_REGISTER_STAGE = "workspace.execution_input.register"
+EXECUTION_LOOKUP_STAGE = "workspace.execution_input.lookup"
 _CONSTRUCTION_TOKEN = object()
 
 
@@ -35,13 +47,14 @@ class Workspace:
     이후 run은 이 mutable workspace를 다시 읽지 않는 frozen input을 별도로 만들어야 한다.
     """
 
-    __slots__ = ("_datasets", "_sources", "project_root")
+    __slots__ = ("_datasets", "_execution_inputs", "_sources", "project_root")
 
     def __init__(
         self,
         project_root: str | Path,
         datasets: Mapping[DatasetId, DatasetRegistration] | None = None,
         sources: Mapping[SourceId, SourceSpec] | None = None,
+        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration] | None = None,
         *,
         _token: object | None = None,
     ) -> None:
@@ -52,6 +65,9 @@ class Workspace:
             key: _detach_registration(value) for key, value in (datasets or {}).items()
         }
         self._sources = {key: _detach_source(value) for key, value in (sources or {}).items()}
+        self._execution_inputs = {
+            key: _detach_execution_input(value) for key, value in (execution_inputs or {}).items()
+        }
 
     @classmethod
     def _from_state(
@@ -59,8 +75,15 @@ class Workspace:
         project_root: str | Path,
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
+        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
     ) -> Workspace:
-        return cls(project_root, datasets, sources, _token=_CONSTRUCTION_TOKEN)
+        return cls(
+            project_root,
+            datasets,
+            sources,
+            execution_inputs,
+            _token=_CONSTRUCTION_TOKEN,
+        )
 
     @property
     def path(self) -> Path:
@@ -69,18 +92,18 @@ class Workspace:
     @classmethod
     def create(cls, project_root: str | Path) -> Workspace:
         """새 project workspace를 만들거나 이미 있으면 그대로 연다."""
-        candidate = cls._from_state(project_root, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {})
         if candidate.path.exists():
             return cls.open(project_root)
-        candidate._write({}, {})
+        candidate._write({}, {}, {})
         return candidate
 
     @classmethod
     def open(cls, project_root: str | Path) -> Workspace:
         """기존 workspace 전체를 읽는다. 없거나 손상됐으면 일부 상태를 반환하지 않는다."""
-        candidate = cls._from_state(project_root, {}, {})
-        datasets, sources = candidate._read()
-        return cls._from_state(project_root, datasets, sources)
+        candidate = cls._from_state(project_root, {}, {}, {})
+        datasets, sources, execution_inputs = candidate._read()
+        return cls._from_state(project_root, datasets, sources, execution_inputs)
 
     @property
     def datasets(self) -> tuple[DatasetRegistration, ...]:
@@ -91,6 +114,14 @@ class Workspace:
     def sources(self) -> tuple[SourceSpec, ...]:
         """source_id 순으로 정렬된 detached 물리 선언들."""
         return tuple(_detach_source(self._sources[key]) for key in sorted(self._sources))
+
+    @property
+    def execution_inputs(self) -> tuple[ExecutionInputRegistration, ...]:
+        """execution_input_id 순으로 정렬된 detached Exchange 입력 선언들."""
+        return tuple(
+            _detach_execution_input(self._execution_inputs[key])
+            for key in sorted(self._execution_inputs)
+        )
 
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
         """등록된 선언 하나를 조회한다."""
@@ -135,7 +166,35 @@ class Workspace:
                 code=f"{SOURCE_LOOKUP_STAGE}.missing",
                 requirement=f"source {key!r} must be registered in this workspace",
                 observed=f"registered sources: {', '.join(sorted(self._sources)) or '(none)'}",
-                retry="register a dataset with that source, then retry",
+                retry="register a dataset or execution input with that source, then retry",
+            ) from error
+
+    def execution_input(self, raw_execution_input_id: str) -> ExecutionInputRegistration:
+        """등록된 execution input 하나를 조회한다."""
+        try:
+            key = execution_input_id(raw_execution_input_id)
+        except ValueError as error:
+            raise _workspace_error(
+                stage=EXECUTION_LOOKUP_STAGE,
+                code=f"{EXECUTION_LOOKUP_STAGE}.invalid",
+                requirement="execution input lookup requires a valid execution_input_id",
+                observed=str(error),
+                retry="use a valid execution_input_id, then retry",
+                family=FailureFamily.EXCHANGE,
+            ) from error
+        try:
+            return _detach_execution_input(self._execution_inputs[key])
+        except KeyError as error:
+            raise _workspace_error(
+                stage=EXECUTION_LOOKUP_STAGE,
+                code=f"{EXECUTION_LOOKUP_STAGE}.missing",
+                requirement=f"execution input {key!r} must be registered in this workspace",
+                observed=(
+                    "registered execution inputs: "
+                    f"{', '.join(sorted(self._execution_inputs)) or '(none)'}"
+                ),
+                retry="register the execution input, then retry",
+                family=FailureFamily.EXCHANGE,
             ) from error
 
     def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
@@ -155,7 +214,7 @@ class Workspace:
                 retry="bind the dataset and physical source to the same source_id, then retry",
             )
 
-        datasets, sources = self._read()
+        datasets, sources, execution_inputs = self._read()
         key = registration.dataset_id
         source_key = source.source_id
         existing_source = sources.get(source_key)
@@ -171,7 +230,7 @@ class Workspace:
         existing = datasets.get(key)
         if existing is not None:
             if existing == registration and existing_source == source:
-                self._replace_state(datasets, sources)
+                self._replace_state(datasets, sources, execution_inputs)
                 return False
             raise _workspace_error(
                 stage=REGISTER_STAGE,
@@ -187,13 +246,62 @@ class Workspace:
         merged_sources = dict(sources)
         merged_datasets[key] = _detach_registration(registration)
         merged_sources[source_key] = _detach_source(source)
-        self._write(merged_datasets, merged_sources)
-        self._replace_state(merged_datasets, merged_sources)
+        self._write(merged_datasets, merged_sources, execution_inputs)
+        self._replace_state(merged_datasets, merged_sources, execution_inputs)
+        return True
+
+    def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
+        """검증을 통과한 execution table + fill declaration을 원자적으로 보관한다."""
+        if not isinstance(registration, ExecutionInputRegistration):
+            raise TypeError("registration must be an ExecutionInputRegistration")
+
+        datasets, sources, execution_inputs = self._read()
+        key = registration.execution_input_id
+        source = registration.table.source
+        source_key = source.source_id
+        existing_source = sources.get(source_key)
+        if existing_source is not None and existing_source != source:
+            raise _workspace_error(
+                stage=EXECUTION_REGISTER_STAGE,
+                code=f"{EXECUTION_REGISTER_STAGE}.source_conflict",
+                requirement=f"source_id {source_key!r} must keep its existing physical declaration",
+                observed="a different SourceSpec is already registered",
+                retry="use the existing source declaration or choose a new source_id",
+                family=FailureFamily.EXCHANGE,
+            )
+
+        existing = execution_inputs.get(key)
+        if existing is not None:
+            if existing == registration and existing_source == source:
+                self._replace_state(datasets, sources, execution_inputs)
+                return False
+            raise _workspace_error(
+                stage=EXECUTION_REGISTER_STAGE,
+                code=f"{EXECUTION_REGISTER_STAGE}.conflict",
+                requirement=(
+                    f"execution_input_id {key!r} must keep its existing declaration or use a new "
+                    "identity"
+                ),
+                observed="a different execution input declaration is already registered",
+                retry="use the existing declaration or choose a new execution_input_id",
+                family=FailureFamily.EXCHANGE,
+            )
+
+        merged_sources = dict(sources)
+        merged_inputs = dict(execution_inputs)
+        merged_sources[source_key] = _detach_source(source)
+        merged_inputs[key] = _detach_execution_input(registration)
+        self._write(datasets, merged_sources, merged_inputs)
+        self._replace_state(datasets, merged_sources, merged_inputs)
         return True
 
     def _read(
         self,
-    ) -> tuple[dict[DatasetId, DatasetRegistration], dict[SourceId, SourceSpec]]:
+    ) -> tuple[
+        dict[DatasetId, DatasetRegistration],
+        dict[SourceId, SourceSpec],
+        dict[ExecutionInputId, ExecutionInputRegistration],
+    ]:
         try:
             text = self.path.read_text(encoding="utf-8")
         except FileNotFoundError as error:
@@ -230,17 +338,22 @@ class Workspace:
         self,
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
+        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
     ) -> None:
         self._datasets = {key: _detach_registration(value) for key, value in datasets.items()}
         self._sources = {key: _detach_source(value) for key, value in sources.items()}
+        self._execution_inputs = {
+            key: _detach_execution_input(value) for key, value in execution_inputs.items()
+        }
 
     def _write(
         self,
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
+        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
     ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = _encode(datasets, sources)
+        payload = _encode(datasets, sources, execution_inputs)
         temporary: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -288,9 +401,33 @@ def _detach_source(source: SourceSpec) -> SourceSpec:
     )
 
 
+def _detach_execution_input(
+    registration: ExecutionInputRegistration,
+) -> ExecutionInputRegistration:
+    table = registration.table
+    fill = registration.fill
+    return ExecutionInputRegistration.of(
+        str(registration.execution_input_id),
+        ExecutionTableSpec(
+            source=_detach_source(table.source),
+            trade_at_field=table.trade_at_field,
+            instrument_field=table.instrument_field,
+            is_tradable_field=table.is_tradable_field,
+            price_fields=dict(table.price_fields),
+        ),
+        FillConvention(
+            offset_sessions=fill.offset_sessions,
+            local_time=fill.local_time,
+            timezone=fill.timezone,
+            trade_price=fill.trade_price,
+        ),
+    )
+
+
 def _encode(
     datasets: Mapping[DatasetId, DatasetRegistration],
     sources: Mapping[SourceId, SourceSpec],
+    execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
 ) -> str:
     document = {
         "sources": {
@@ -310,16 +447,39 @@ def _encode(
             }
             for key, registration in sorted(datasets.items(), key=lambda item: str(item[0]))
         },
+        "execution_inputs": {
+            str(key): {
+                "source": str(registration.table.source.source_id),
+                "trade_at_field": registration.table.trade_at_field,
+                "instrument_field": registration.table.instrument_field,
+                "is_tradable_field": registration.table.is_tradable_field,
+                "price_fields": dict(registration.table.price_fields),
+                "fill": {
+                    "offset_sessions": registration.fill.offset_sessions,
+                    "local_time": registration.fill.local_time.isoformat(),
+                    "timezone": registration.fill.timezone,
+                    "trade_price": registration.fill.trade_price,
+                },
+            }
+            for key, registration in sorted(execution_inputs.items(), key=lambda item: str(item[0]))
+        },
     }
     return yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
 
 
 def _decode(
     text: str,
-) -> tuple[dict[DatasetId, DatasetRegistration], dict[SourceId, SourceSpec]]:
+) -> tuple[
+    dict[DatasetId, DatasetRegistration],
+    dict[SourceId, SourceSpec],
+    dict[ExecutionInputId, ExecutionInputRegistration],
+]:
     document = yaml.safe_load(text)
-    if not isinstance(document, dict) or set(document) != {"sources", "datasets"}:
-        raise ValueError("workspace root must contain exactly sources and datasets mappings")
+    valid_roots = ({"sources", "datasets"}, {"sources", "datasets", "execution_inputs"})
+    if not isinstance(document, dict) or set(document) not in valid_roots:
+        raise ValueError(
+            "workspace root must contain sources and datasets, with optional execution_inputs"
+        )
 
     raw_sources = document["sources"]
     if not isinstance(raw_sources, dict):
@@ -382,7 +542,86 @@ def _decode(
                 f"dataset {raw_id!r} references unregistered source {registration.source!r}"
             )
         decoded[registration.dataset_id] = registration
-    return decoded, decoded_sources
+    raw_execution_inputs = document.get("execution_inputs", {})
+    if not isinstance(raw_execution_inputs, dict):
+        raise TypeError("execution_inputs must be a mapping")
+
+    decoded_execution_inputs: dict[ExecutionInputId, ExecutionInputRegistration] = {}
+    expected_execution = {
+        "source",
+        "trade_at_field",
+        "instrument_field",
+        "is_tradable_field",
+        "price_fields",
+        "fill",
+    }
+    expected_fill = {"offset_sessions", "local_time", "timezone", "trade_price"}
+    for raw_id, raw_registration in raw_execution_inputs.items():
+        if not isinstance(raw_id, str):
+            raise TypeError("every execution_input_id must be a string")
+        if not isinstance(raw_registration, dict) or set(raw_registration) != expected_execution:
+            raise ValueError(
+                f"execution input {raw_id!r} must contain exactly {sorted(expected_execution)}"
+            )
+        raw_source = raw_registration["source"]
+        if not isinstance(raw_source, str):
+            raise TypeError(f"execution input {raw_id!r} source must be a string")
+        source_key = source_id(raw_source)
+        if source_key not in decoded_sources:
+            raise ValueError(
+                f"execution input {raw_id!r} references unregistered source {source_key!r}"
+            )
+        scalar_fields = (
+            raw_registration["trade_at_field"],
+            raw_registration["instrument_field"],
+            raw_registration["is_tradable_field"],
+        )
+        if not all(isinstance(value, str) for value in scalar_fields):
+            raise TypeError(f"execution input {raw_id!r} field declarations must be strings")
+        price_fields = raw_registration["price_fields"]
+        if not isinstance(price_fields, dict) or not all(
+            isinstance(name, str) and isinstance(column, str)
+            for name, column in price_fields.items()
+        ):
+            raise TypeError(f"execution input {raw_id!r} price_fields must map strings to strings")
+        raw_fill = raw_registration["fill"]
+        if not isinstance(raw_fill, dict) or set(raw_fill) != expected_fill:
+            raise ValueError(
+                f"execution input {raw_id!r} fill must contain exactly {sorted(expected_fill)}"
+            )
+        offset_sessions = raw_fill["offset_sessions"]
+        local_time = raw_fill["local_time"]
+        timezone = raw_fill["timezone"]
+        trade_price = raw_fill["trade_price"]
+        if not isinstance(offset_sessions, int) or isinstance(offset_sessions, bool):
+            raise TypeError(f"execution input {raw_id!r} offset_sessions must be an integer")
+        if not all(isinstance(value, str) for value in (local_time, timezone, trade_price)):
+            raise TypeError(f"execution input {raw_id!r} fill scalar values must be strings")
+        try:
+            parsed_time = time.fromisoformat(local_time)
+        except ValueError as error:
+            raise ValueError(
+                f"execution input {raw_id!r} local_time must be an ISO time"
+            ) from error
+
+        registration = ExecutionInputRegistration.of(
+            raw_id,
+            ExecutionTableSpec(
+                source=decoded_sources[source_key],
+                trade_at_field=scalar_fields[0],
+                instrument_field=scalar_fields[1],
+                is_tradable_field=scalar_fields[2],
+                price_fields=price_fields,
+            ),
+            FillConvention(
+                offset_sessions=offset_sessions,
+                local_time=parsed_time,
+                timezone=timezone,
+                trade_price=trade_price,
+            ),
+        )
+        decoded_execution_inputs[registration.execution_input_id] = registration
+    return decoded, decoded_sources, decoded_execution_inputs
 
 
 def _workspace_error(
@@ -392,10 +631,11 @@ def _workspace_error(
     requirement: str,
     observed: str,
     retry: str,
+    family: FailureFamily = FailureFamily.DATA,
 ) -> VqaprError:
     return VqaprError(
         stage=stage,
-        family=FailureFamily.DATA,
+        family=family,
         failures=[Failure.bounded(code, requirement, observed=observed)],
         mutation=False,
         retry_precondition=retry,

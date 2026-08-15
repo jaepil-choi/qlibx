@@ -11,13 +11,23 @@ from pathlib import Path
 from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
+from vqapr.exchange.conventions import FillConvention
+from vqapr.exchange.execution_table import (
+    ExecutionInputRegistration,
+    ExecutionTableSpec,
+    validate_execution_input,
+)
 from vqapr.workspace import Workspace
 
 __all__ = (
     "DatasetRegistration",
+    "ExecutionInputRegistration",
+    "ExecutionTableSpec",
+    "FillConvention",
     "SourceSpec",
     "VqaprError",
     "register_dataset",
+    "register_execution_input",
 )
 
 
@@ -34,3 +44,13 @@ def register_dataset(
     diagnosis, _ = validate(registration, source)
     diagnosis.raise_if_failed()
     return Workspace.create(project_root).register_dataset(registration, source)
+
+
+def register_execution_input(
+    project_root: str | Path,
+    registration: ExecutionInputRegistration,
+) -> bool:
+    """준비된 execution parquet과 fill binding을 검증하고 project에 등록한다."""
+    diagnosis = validate_execution_input(registration)
+    diagnosis.raise_if_failed()
+    return Workspace.create(project_root).register_execution_input(registration)

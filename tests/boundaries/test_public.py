@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import time
 from pathlib import Path
 
+import duckdb
 import pytest
 
 import vqapr.public as public
-from vqapr.public import DatasetRegistration, SourceSpec, VqaprError, register_dataset
+from vqapr.public import (
+    DatasetRegistration,
+    ExecutionInputRegistration,
+    ExecutionTableSpec,
+    FillConvention,
+    SourceSpec,
+    VqaprError,
+    register_dataset,
+    register_execution_input,
+)
 
 
 def _registration(**overrides) -> DatasetRegistration:
@@ -25,9 +36,13 @@ def _registration(**overrides) -> DatasetRegistration:
 def test_public_exports_are_fixed() -> None:
     assert public.__all__ == (
         "DatasetRegistration",
+        "ExecutionInputRegistration",
+        "ExecutionTableSpec",
+        "FillConvention",
         "SourceSpec",
         "VqaprError",
         "register_dataset",
+        "register_execution_input",
     )
 
 
@@ -99,4 +114,70 @@ def test_source_open_failure_does_not_create_a_workspace(tmp_path: Path) -> None
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
     assert payload["failures"][0]["code"] == "source.scan.path_missing"
+    assert not (tmp_path / ".vqapr").exists()
+
+
+@pytest.mark.uc("UC-EXEC-001")
+def test_public_facade_registers_a_valid_execution_input(
+    tmp_path: Path, execution_parquet: Path
+) -> None:
+    registration = ExecutionInputRegistration.of(
+        "krx-daily",
+        ExecutionTableSpec(
+            source=SourceSpec.of("execution", execution_parquet),
+            trade_at_field="trade_at",
+            instrument_field="instrument",
+            is_tradable_field="is_tradable",
+            price_fields={"close": "close"},
+        ),
+        FillConvention(
+            offset_sessions=0,
+            local_time=time(15, 30),
+            timezone="Asia/Seoul",
+            trade_price="close",
+        ),
+    )
+
+    assert register_execution_input(tmp_path, registration) is True
+    before = (tmp_path / ".vqapr" / "workspace.yaml").read_bytes()
+    assert register_execution_input(tmp_path, registration) is False
+    assert (tmp_path / ".vqapr" / "workspace.yaml").read_bytes() == before
+
+
+@pytest.mark.uc("UC-FILL-001")
+def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> None:
+    target = tmp_path / "bad-execution.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (
+                SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                       'A' AS instrument, true AS is_tradable,
+                       99.0 AS open, CAST('NaN' AS DOUBLE) AS close
+            ) TO '{target.as_posix()}' (FORMAT PARQUET)"""
+        )
+    finally:
+        con.close()
+    registration = ExecutionInputRegistration.of(
+        "krx-daily",
+        ExecutionTableSpec(
+            source=SourceSpec.of("execution", target),
+            trade_at_field="trade_at",
+            instrument_field="instrument",
+            is_tradable_field="is_tradable",
+            price_fields={"open": "open", "close": "close"},
+        ),
+        FillConvention(
+            offset_sessions=0,
+            local_time=time(15, 30),
+            timezone="Asia/Seoul",
+            trade_price="close",
+        ),
+    )
+
+    with pytest.raises(VqaprError) as caught:
+        register_execution_input(tmp_path, registration)
+
+    assert caught.value.mutation is False
+    assert caught.value.failures[0].code == "execution_input.register.price.invalid"
     assert not (tmp_path / ".vqapr").exists()

@@ -98,6 +98,7 @@ class RunDefinition:
     initial_account_snapshot: AccountSnapshot | None = None
     initial_account_mode: AccountMode | None = None
     initial_model_memory: ModelMemory = None
+    instruments: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.strategy, StrategyConfig):
@@ -141,6 +142,12 @@ class RunDefinition:
                 "initial_account_snapshot",
                 AccountSnapshot(snapshot.version, snapshot.cash, snapshot.positions),
             )
+        if not isinstance(self.instruments, tuple) or not self.instruments:
+            raise ValueError("instruments must be a non-empty tuple")
+        if any(not isinstance(value, str) or not value for value in self.instruments):
+            raise ValueError("instruments must contain non-empty strings")
+        if len(set(self.instruments)) != len(self.instruments):
+            raise ValueError("instruments must be unique")
         object.__setattr__(
             self, "initial_model_memory", normalize_memory(self.initial_model_memory)
         )
@@ -203,6 +210,9 @@ class FrozenRun:
     initial_model_memory: ModelMemory = None
     initial_payload: bytes = b""
     initial_model_state_ref: ModelStateRef = field(init=False)
+    instruments: tuple[str, ...] = ()
+    strategy_requirements: tuple[DataRequirement, ...] = ()
+    constraint_requirements: tuple[DataRequirement, ...] = ()
     requirements: tuple[DataRequirement, ...] = ()
     datasets: tuple[DatasetRegistration, ...] = ()
     sources: tuple[SourceSpec, ...] = ()
@@ -281,6 +291,20 @@ class FrozenRun:
             "initial_model_state_ref",
             _model_state_ref(memory, self.initial_payload),
         )
+        if not isinstance(self.instruments, tuple) or not self.instruments:
+            raise ValueError("instruments must be a non-empty tuple")
+        if any(not isinstance(value, str) or not value for value in self.instruments):
+            raise ValueError("instruments must contain non-empty strings")
+        if len(set(self.instruments)) != len(self.instruments):
+            raise ValueError("instruments must be unique")
+        for name, owner_requirements in (
+            ("strategy_requirements", self.strategy_requirements),
+            ("constraint_requirements", self.constraint_requirements),
+        ):
+            if not isinstance(owner_requirements, tuple) or not all(
+                isinstance(requirement, DataRequirement) for requirement in owner_requirements
+            ):
+                raise TypeError(f"{name} must be a tuple of DataRequirement values")
         if not isinstance(self.requirements, tuple) or not all(
             isinstance(requirement, DataRequirement) for requirement in self.requirements
         ):
@@ -412,6 +436,25 @@ class FrozenRun:
                 "initial_model_memory": self.initial_model_memory,
                 "initial_model_state_ref": (self.initial_model_state_ref.digest),
                 "initial_payload": self.initial_payload.hex(),
+                "instruments": self.instruments,
+                "strategy_requirements": [
+                    (
+                        requirement.consumer_id,
+                        requirement.dataset_id,
+                        requirement.fields,
+                        repr(requirement.lookback),
+                    )
+                    for requirement in self.strategy_requirements
+                ],
+                "constraint_requirements": [
+                    (
+                        requirement.consumer_id,
+                        requirement.dataset_id,
+                        requirement.fields,
+                        repr(requirement.lookback),
+                    )
+                    for requirement in self.constraint_requirements
+                ],
                 "requirements": [
                     (
                         requirement.consumer_id,

@@ -337,6 +337,9 @@ def test_public_run_uses_frozen_initial_model_memory(
         "constraints": SimpleNamespace(constraints=()),
         "datasets": (),
         "sources": (),
+        "instruments": ("A",),
+        "strategy_requirements": (),
+        "constraint_requirements": (),
     }.items():
         object.__setattr__(frozen, name, value)
     strategy = SimpleNamespace(
@@ -377,7 +380,7 @@ def test_public_run_uses_frozen_initial_model_memory(
     monkeypatch.setattr(public, "RunStateRepository", State)
     monkeypatch.setattr(public, "SimulationFlow", Flow)
 
-    assert public.run(tmp_path, frozen, instruments=()) == "result"
+    assert public.run(tmp_path, frozen) == "result"
     memory["carry"].append(2)
     assert observed == {
         "frozen": frozen,
@@ -388,7 +391,7 @@ def test_public_run_uses_frozen_initial_model_memory(
 
 def test_public_run_rejects_anything_other_than_a_frozen_run(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="frozen_run must be a FrozenRun"):
-        public.run(tmp_path, object(), instruments=())
+        public.run(tmp_path, object())
 
 
 @pytest.mark.uc("UC-FILL-001")

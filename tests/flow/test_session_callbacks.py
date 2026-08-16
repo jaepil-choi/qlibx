@@ -144,6 +144,7 @@ def _flow(
         end=occurrences[-1].evaluation_time,
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
+        instruments=("A",),
     )
     account = Account(mode=AccountMode.LONG_ONLY)
 

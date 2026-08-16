@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
+import vqapr.flow.simulation as simulation
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
@@ -26,10 +27,13 @@ from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
+    DueExecutionEvidence,
     FeedbackEvidence,
     MarkEvidence,
     SimulationFailure,
+    SimulationFailureFamily,
     SimulationFailureKind,
+    SimulationStage,
 )
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
@@ -194,6 +198,7 @@ def _frozen(
     datasets: tuple[DatasetRegistration, ...] = (),
     sources: tuple[SourceSpec, ...] = (),
     constraints: ConstraintSet | None = None,
+    strategy_requirements: tuple[DataRequirement, ...] = (),
 ) -> FrozenRun:
     strategy = StrategyConfig(
         _component("strategy", ComponentKind.STRATEGY_MODEL),
@@ -221,6 +226,11 @@ def _frozen(
         execution_input=execution,
         initial_account_snapshot=account,
         initial_account_mode=AccountMode.LONG_ONLY,
+        instruments=("A", "B"),
+        strategy_requirements=strategy_requirements,
+        constraint_requirements=(_requirement(),)
+        if constraints is None or constraints.constraints
+        else (),
         datasets=datasets,
         sources=sources,
         **bounds,
@@ -608,6 +618,7 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
         execution=execution,
         datasets=(registration,),
         sources=(source,),
+        strategy_requirements=(requirement,),
     )
 
     def flow(candidate: EconomicPortfolioIntent, state: RunStateRepository) -> SimulationFlow:
@@ -648,6 +659,47 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
         assert state.current.account == AccountState(_ACCOUNT)
         assert state.current.pending_accepted_intent is None
         assert state.current.lifecycle_trace == ()
+
+
+@pytest.mark.uc("UC-TIME-002")
+def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> None:
+    requirement = DataRequirement.of(
+        "strategy",
+        "prices",
+        fields=("close",),
+        lookback=RowsLookback(1),
+    )
+    registration = DatasetRegistration.of(
+        "prices",
+        "missing-source",
+        instrument_field="instrument",
+        available_at="available_at",
+        key_fields=("available_at", "instrument"),
+        fields={"close": "close"},
+    )
+    source = SourceSpec.of("missing-source", tmp_path / "unread.parquet")
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+
+    class PassiveStrategy(_Strategy):
+        def requirements(self) -> tuple[DataRequirement, ...]:
+            return (requirement,)
+
+    result = _flow(
+        _frozen(
+            (callback,),
+            end=callback,
+            datasets=(registration,),
+            sources=(source,),
+            strategy_requirements=(requirement,),
+        ),
+        PassiveStrategy((NoDecision("no observation read"),)),
+        _state(),
+    ).run()
+
+    assert result.final_state.lifecycle_trace[0].kind is LifecycleKind.NO_DECISION
+    evidence = result.final_state.lifecycle_trace[0].detail
+    assert evidence.strategy_accesses == ()
+    assert evidence.actual_source_refs == ()
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -866,7 +918,7 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
         1, Decimal("0"), {"A": Decimal("10")}
     )
     assert result.final_state.pending_accepted_intent is None
-    assert len(result.final_state.feedback) == 2
+    assert len(result.final_state.feedback) == 1
     assert [trace.kind for trace in result.final_state.lifecycle_trace] == [
         LifecycleKind.ACCEPTED_INTENT,
         LifecycleKind.ACCOUNT_COMMITTED,
@@ -882,6 +934,11 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert isinstance(commit_evidence, AccountCommitEvidence)
     assert isinstance(mark_evidence, MarkEvidence)
     assert isinstance(feedback_evidence, FeedbackEvidence)
+    due_evidence = result.final_state.feedback[0]
+    assert isinstance(due_evidence, DueExecutionEvidence)
+    assert due_evidence.commit == commit_evidence
+    assert due_evidence.mark == mark_evidence
+    assert due_evidence.feedback == feedback_evidence
     assert callback_evidence.run_identity == frozen.identity
     assert callback_evidence.agenda == frozen.strategy_agenda
     assert callback_evidence.occurrence.occurrence_id == "strategy-0"
@@ -1061,6 +1118,128 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(tmp_path: P
     assert failure.pending_id is None
     assert failure.correlation_id == failure.frozen_run_identity
     assert state.current.pending_accepted_intent is None
+
+
+@pytest.mark.uc("UC-TIME-002")
+@pytest.mark.parametrize(
+    ("boundary", "family", "stage", "after_commit", "root_version"),
+    (
+        ("data", SimulationFailureFamily.DATA, SimulationStage.DUE_SNAPSHOT, False, 1),
+        ("order", SimulationFailureFamily.ORDER, SimulationStage.DUE_ORDER_PLANNING, False, 1),
+        (
+            "exchange",
+            SimulationFailureFamily.EXCHANGE,
+            SimulationStage.DUE_EXCHANGE_EXECUTION,
+            False,
+            1,
+        ),
+        (
+            "account",
+            SimulationFailureFamily.ACCOUNT,
+            SimulationStage.DUE_ACCOUNT_PREPARATION,
+            False,
+            1,
+        ),
+        (
+            "valuation",
+            SimulationFailureFamily.VALUATION,
+            SimulationStage.DUE_VALUATION_SELECTION,
+            True,
+            2,
+        ),
+        (
+            "publication",
+            SimulationFailureFamily.PUBLICATION,
+            SimulationStage.DUE_FEEDBACK_PUBLICATION,
+            True,
+            3,
+        ),
+    ),
+)
+def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    family: SimulationFailureFamily,
+    stage: SimulationStage,
+    after_commit: bool,
+    root_version: int,
+) -> None:
+    registration = _execution(
+        _parquet(
+            tmp_path / f"{boundary}.parquet",
+            """
+            SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                   'A' AS instrument, true AS is_tradable, 10.0 AS close
+            """,
+        )
+    )
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+    target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
+    intent = EconomicPortfolioIntent(
+        UUID(int=10),
+        "strategy",
+        (PortfolioTarget("A", weight=Decimal("1")),),
+        Decimal("0"),
+        _BUDGET,
+        (),
+        0,
+        None,
+    )
+    frozen = _frozen((callback,), end=target, execution=registration)
+    state = _state()
+    flow = _flow(frozen, _Strategy((intent,)), state)
+
+    def fail(*_: object, **__: object) -> object:
+        raise RuntimeError(f"{boundary} fault")
+
+    if boundary == "data":
+        monkeypatch.setattr(simulation, "exact_execution_snapshot", fail)
+    elif boundary == "order":
+        monkeypatch.setattr(simulation, "plan_orders", fail)
+    elif boundary == "exchange":
+        monkeypatch.setattr(AcademicExchange, "execute", fail)
+    elif boundary == "account":
+        monkeypatch.setattr(flow._account, "prepare_fill", fail)
+    elif boundary == "publication":
+        monkeypatch.setattr(state, "prepare_feedback", fail)
+    else:
+        flow._marks_for_occurrence = fail
+
+    with pytest.raises(SimulationFailure) as raised:
+        flow.run()
+
+    failure = raised.value
+    assert failure.family is family
+    assert failure.stage is stage
+    assert failure.kind is (
+        SimulationFailureKind.FAILED_AFTER_COMMIT
+        if after_commit
+        else SimulationFailureKind.PRE_COMMIT
+    )
+    assert failure.mutation is after_commit
+    assert failure.retry_precondition.requires_replay_from_root is True
+    assert failure.pending_id == (None if after_commit else str(intent.intent_id))
+    assert failure.retry_precondition.required_pending_id == failure.pending_id
+    assert failure.root_version == state.current.version == root_version
+    assert failure.account_version == (1 if after_commit else 0)
+    if after_commit:
+        assert state.current.pending_accepted_intent is None
+    else:
+        assert state.current.pending_accepted_intent is not None
+
+    if boundary == "data":
+        assert failure.failed_requirement is registration
+    elif boundary == "order":
+        assert failure.failed_requirement is intent
+    elif boundary == "exchange":
+        assert failure.failed_requirement == frozen.exchange
+    elif boundary == "account":
+        assert failure.failed_requirement == AccountState(_ACCOUNT)
+    elif boundary == "valuation":
+        assert failure.failed_requirement is frozen.valuation
+    else:
+        assert isinstance(failure.failed_requirement, FeedbackEvidence)
 
 
 @pytest.mark.uc("UC-TIME-002")

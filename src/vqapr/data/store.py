@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
@@ -19,6 +21,18 @@ class DatasetCatalog(Protocol):
     def dataset(self, raw_dataset_id: str): ...
 
     def source(self, raw_source_id: str) -> SourceSpec: ...
+
+
+def _physical_digest(path: Path) -> str:
+    files = (path,) if path.is_file() else tuple(sorted(path.glob("**/*.parquet")))
+    if not files:
+        raise FileNotFoundError(f"source has no readable parquet bytes: {path}")
+    digest = hashlib.sha256()
+    for file_path in files:
+        with file_path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
 
 
 class DuckDbObservationStore:
@@ -41,6 +55,7 @@ class DuckDbObservationStore:
         require_tz_aware(evaluation_time, name="evaluation_time")
         registration = self.__catalog.dataset(str(requirement.dataset_id))
         source = self.__catalog.source(str(registration.source))
+        source_digest = _physical_digest(source.path)
         fields = resolve_fields(registration, requirement)
         lower_bound = None
         rows = None
@@ -79,6 +94,8 @@ class DuckDbObservationStore:
         access = AccessRecord(
             consumer_id=requirement.consumer_id,
             dataset_id=requirement.dataset_id,
+            source_id=str(source.source_id),
+            source_digest=source_digest,
             fields=requirement.fields,
             lookback=requirement.lookback,
             evaluation_time=evaluation_time,

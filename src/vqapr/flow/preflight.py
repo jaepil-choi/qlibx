@@ -237,13 +237,18 @@ def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
         for constraint in definition.constraints.constraints
     )
     frozen_constraints = type(definition.constraints)(constraints)
-    requirements.extend(loaded_strategy.requirements())
+    strategy_requirements = loaded_strategy.requirements()
+    requirements.extend(strategy_requirements)
     loaded_constraints: tuple[Constraint, ...] = tuple(
         load_constraint(constraint, project_root=workspace.project_root)
         for constraint in constraints
     )
-    for constraint in loaded_constraints:
-        requirements.extend(constraint.requirements())
+    constraint_requirements = tuple(
+        requirement
+        for constraint in loaded_constraints
+        for requirement in constraint.requirements()
+    )
+    requirements.extend(constraint_requirements)
 
     exchange = None
     execution_input = None
@@ -308,6 +313,9 @@ def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
         initial_account_mode=definition.initial_account_mode,
         initial_model_memory=definition.initial_model_memory,
         initial_payload=initial_payload,
+        instruments=definition.instruments,
+        strategy_requirements=strategy_requirements,
+        constraint_requirements=constraint_requirements,
         requirements=tuple(requirements),
         datasets=datasets,
         sources=sources,

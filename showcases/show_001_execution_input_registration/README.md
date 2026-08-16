@@ -10,8 +10,8 @@ modules, fingerprints them through `component_ref`, registers all declarations, 
 Evidence includes:
 
 - real pending intent → due execution → Account mark → monitoring feedback → finalization results;
-- an A/B public-run comparison: dense input has three extra non-selected 10:00 rows and canonical
-  input does not; their callback/due/account/feedback/finalization outcome signatures match;
+- an A/B comparison using the same `FrozenRun`: dense physical input has three extra non-selected
+  10:00 rows and canonical physical input does not; their complete, unmodified lifecycle traces match;
 - explicit finite Strategy, valuation, and monitoring agendas;
 - selected exact-time execution pricing and generated component source fingerprints;
 - invalid selected-price rejection without workspace mutation.

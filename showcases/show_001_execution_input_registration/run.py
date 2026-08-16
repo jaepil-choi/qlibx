@@ -5,7 +5,7 @@ import html
 import json
 import shutil
 import sys
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
@@ -304,29 +304,8 @@ modules use <code>vqapr.public</code>. The result comes from
 
 
 def _run_signature(result: Any) -> dict[str, Any]:
-    """Complete canonical lifecycle evidence, normalizing one declaration identity only."""
-    value = _json_value(result)
-
-    def normalize(item: Any) -> Any:
-        if isinstance(item, dict):
-            target_identity = {"target_at", "trade_price", "identity"}.issubset(item)
-            return {
-                key: (
-                    "execution-input-declaration"
-                    if key == "execution_input_id"
-                    else "frozen-run-identity"
-                    if key in {"run_identity", "frozen_run_identity", "correlation_id"}
-                    else "execution-target-declaration"
-                    if key == "identity" and target_identity
-                    else normalize(nested)
-                )
-                for key, nested in item.items()
-            }
-        if isinstance(item, list):
-            return [normalize(nested) for nested in item]
-        return item
-
-    return normalize(value)
+    """Complete, unmodified canonical lifecycle evidence."""
+    return _json_value(result)
 
 
 def _first_difference(left: Any, right: Any, path: str = "$") -> str:
@@ -366,10 +345,6 @@ def main() -> None:
     register_dataset(PROJECT, observation, SourceSpec.of("price-observation", observation_path))
     execution = _execution_registration("krx-daily", SourceSpec.of("krx-execution", execution_path))
     register_execution_input(PROJECT, execution)
-    canonical_execution = _execution_registration(
-        "krx-daily-canonical", SourceSpec.of("krx-canonical-execution", canonical_path)
-    )
-    register_execution_input(PROJECT, canonical_execution)
     strategy_ref = component_ref(
         "showcase-strategy", ComponentKind.STRATEGY_MODEL, strategy_path, "ShowcaseStrategy"
     )
@@ -411,13 +386,16 @@ def main() -> None:
         datetime(2024, 3, 7, 23, tzinfo=strategy_agenda.occurrences[0].evaluation_time.tzinfo),
         AccountSnapshot(0, Decimal("100"), {}),
         AccountMode.LONG_ONLY,
+        instruments=("A",),
     )
     frozen = preflight_run(PROJECT, definition)
-    canonical_frozen = preflight_run(
-        PROJECT, replace(definition, execution_input_id="krx-daily-canonical")
-    )
-    result = run(PROJECT, frozen, instruments=("A",))
-    canonical_result = run(PROJECT, canonical_frozen, instruments=("A",))
+    result = run(PROJECT, frozen)
+    dense_execution = execution_path.read_bytes()
+    shutil.copyfile(canonical_path, execution_path)
+    try:
+        canonical_result = run(PROJECT, frozen)
+    finally:
+        execution_path.write_bytes(dense_execution)
     workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
     before_invalid = workspace_path.read_bytes()
     try:
@@ -459,8 +437,7 @@ def main() -> None:
             path.name: _sha256(path) for path in (strategy_path, exchange_path, constraint_path)
         },
         "preflight": {
-            "dense": _json_value(frozen),
-            "canonical": _json_value(canonical_frozen),
+            "shared": _json_value(frozen),
         },
         "execution_rows": _json_value(rows),
         "run": dense_trace,
@@ -470,9 +447,8 @@ def main() -> None:
             "dense_signature": dense_signature,
             "canonical_signature": canonical_signature,
             "claim": (
-                "Two public runs differ only by three non-selected 10:00 execution rows. "
-                "The comparison retains complete callback/due/Account/feedback/finalization "
-                "lineage and normalizes only the execution-input declaration identity."
+                "Two runs use the same FrozenRun and differ only by three non-selected "
+                "10:00 physical rows. Their complete, unmodified lifecycle traces are equal."
             ),
         },
         "invalid_registration": {"workspace_unchanged": True, "error": invalid},

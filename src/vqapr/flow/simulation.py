@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
-from pathlib import Path
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountSnapshot, AccountState
@@ -21,9 +19,11 @@ from vqapr.constraints.evaluation import (
 )
 from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.errors import VqaprError
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
+    DueExecutionEvidence,
     FailureObservation,
     FeedbackEvidence,
     FinalizationEvidence,
@@ -31,6 +31,7 @@ from vqapr.evidence.artifacts import (
     MonitoringEvidence,
     RetryPrecondition,
     SimulationFailure,
+    SimulationFailureFamily,
     SimulationFailureKind,
     SimulationStage,
     ValuationEvidence,
@@ -63,19 +64,6 @@ from vqapr.runtime.events import DueExecutionEnvelope, OperationEnvelope
 from vqapr.valuation.configuration import ValuationConfig
 from vqapr.valuation.marking import SelectedMark, ValuationService
 from vqapr.valuation.marks import MarkBatch
-
-
-def _source_digest(path: Path) -> str:
-    """Hash the bytes available to a callback; this is provenance, not a byte freeze."""
-    files = (path,) if path.is_file() else tuple(sorted(path.glob("**/*.parquet")))
-    if not files:
-        raise ValueError(f"source path has no readable parquet bytes: {path}")
-    digest = hashlib.sha256()
-    for file_path in files:
-        with file_path.open("rb") as source:
-            for block in iter(lambda: source.read(1024 * 1024), b""):
-                digest.update(block)
-    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,7 +261,13 @@ class SimulationFlow:
         cutoff = self._frozen_run.start or self._frozen_run.end
         if cutoff is None:
             raise RuntimeError("simulation start requires a frozen boundary")
-        self._guard("simulation.start", cutoff, self._load_visible_strategy_state)
+        self._guard(
+            SimulationStage.START,
+            cutoff,
+            self._load_visible_strategy_state,
+            family=SimulationFailureFamily.DATA,
+            owner=self._frozen_run.strategy,
+        )
         traces: list[OccurrenceTrace | DueExecutionTrace] = []
         static = iter(OperationEnvelope(item) for item in self._frozen_run.static_occurrences)
         next_static = next(static, None)
@@ -285,9 +279,11 @@ class SimulationFlow:
             ):
                 traces.append(
                     self._guard(
-                        "simulation.due",
+                        SimulationStage.DUE_SNAPSHOT,
                         due.due_time,
                         lambda due=due: self._dispatch_due(due),
+                        family=SimulationFailureFamily.DATA,
+                        owner=self._frozen_run.execution_input,
                     )
                 )
                 continue
@@ -297,25 +293,31 @@ class SimulationFlow:
             if occurrence.role is OperationRole.STRATEGY_CALLBACK:
                 traces.append(
                     self._guard(
-                        "simulation.callback",
+                        SimulationStage.CALLBACK_PUBLICATION,
                         occurrence.evaluation_time,
                         lambda occurrence=occurrence: self._dispatch_callback(occurrence),
+                        family=SimulationFailureFamily.PUBLICATION,
+                        owner=self._frozen_run.strategy,
                     )
                 )
             elif occurrence.role is OperationRole.VALUATION:
                 traces.append(
                     self._guard(
-                        "simulation.valuation",
+                        SimulationStage.VALUATION,
                         occurrence.evaluation_time,
                         lambda occurrence=occurrence: self._dispatch_valuation(occurrence),
+                        family=SimulationFailureFamily.VALUATION,
+                        owner=self._frozen_run.valuation,
                     )
                 )
             elif occurrence.role is OperationRole.MONITORING:
                 traces.append(
                     self._guard(
-                        "simulation.monitoring",
+                        SimulationStage.MONITORING,
                         occurrence.evaluation_time,
                         lambda occurrence=occurrence: self._dispatch_monitoring(occurrence),
+                        family=SimulationFailureFamily.VALUATION,
+                        owner=self._frozen_run.monitoring_agenda,
                     )
                 )
             else:  # OperationRole is closed, but keep malformed values fail-closed.
@@ -336,16 +338,89 @@ class SimulationFlow:
             account=None if account is None else account.snapshot,
         )
         root = self._guard(
-            "simulation.finalize",
+            SimulationStage.FINALIZE,
             self._frozen_run.end,
             lambda: self._state.finalize(RunFinalization(finalization)),
+            family=SimulationFailureFamily.FINALIZATION,
+            owner=finalization,
         )
         return SimulationResult(tuple(traces), root)
 
     def _guard(
         self,
-        stage: str,
+        stage: SimulationStage,
         cutoff: datetime,
+        operation: Callable[[], object],
+        *,
+        family: SimulationFailureFamily,
+        owner: object,
+    ) -> object:
+        try:
+            return operation()
+        except SimulationFailure:
+            raise
+        except Exception as error:
+            raise self._failure(
+                stage=stage,
+                cutoff=cutoff,
+                owner=owner,
+                family=family,
+                cause=error,
+                kind=SimulationFailureKind.PRE_COMMIT,
+            ) from error
+
+    def _failure(
+        self,
+        *,
+        stage: SimulationStage,
+        cutoff: datetime,
+        owner: object,
+        family: SimulationFailureFamily,
+        cause: Exception,
+        kind: SimulationFailureKind,
+    ) -> SimulationFailure:
+        root = self._state.current
+        account = root.account
+        pending = root.pending_accepted_intent
+        failed_requirement: object = owner
+        if isinstance(cause, VqaprError):
+            family = SimulationFailureFamily(cause.family.value)
+            failed_requirement = cause.failures[0] if len(cause.failures) == 1 else cause.failures
+        failure_type = (
+            FailedAfterCommit
+            if kind is SimulationFailureKind.FAILED_AFTER_COMMIT
+            else SimulationFailure
+        )
+        return failure_type(
+            family=family,
+            stage=stage,
+            clock=cutoff,
+            failed_requirement=failed_requirement,
+            observed=FailureObservation(type(cause), tuple(cause.args)),
+            retry_precondition=RetryPrecondition(
+                requires_replay_from_root=True,
+                required_pending_id=getattr(pending, "pending_id", None),
+            ),
+            correlation_id=self._frozen_run.identity,
+            frozen_run_identity=self._frozen_run.identity,
+            cutoff=cutoff,
+            root_version=root.version,
+            model_version=root.model_state_commit_count,
+            model_state_ref=root.current_model_state_ref,
+            account_version=None if account is None else account.snapshot.version,
+            pending_id=getattr(pending, "pending_id", None),
+            cause=cause,
+            kind=kind,
+        )
+
+    def _due_boundary(
+        self,
+        *,
+        stage: SimulationStage,
+        cutoff: datetime,
+        owner: object,
+        family: SimulationFailureFamily,
+        kind: SimulationFailureKind,
         operation: Callable[[], object],
     ) -> object:
         try:
@@ -353,36 +428,14 @@ class SimulationFlow:
         except SimulationFailure:
             raise
         except Exception as error:
-            root = self._state.current
-            account = root.account
-            pending = root.pending_accepted_intent
-            after_commit = stage == "simulation.due" and account is not None and pending is None
-            failure_type = FailedAfterCommit if after_commit else SimulationFailure
-            failure = failure_type(
-                stage=SimulationStage(stage),
-                clock=cutoff,
-                failed_requirement=(self._frozen_run.valuation if after_commit else None),
-                observed=FailureObservation(type(error), tuple(error.args)),
-                retry_precondition=RetryPrecondition(
-                    requires_replay_from_root=True,
-                    required_pending_id=getattr(pending, "pending_id", None),
-                ),
-                correlation_id=self._frozen_run.identity,
-                frozen_run_identity=self._frozen_run.identity,
+            raise self._failure(
+                stage=stage,
                 cutoff=cutoff,
-                root_version=root.version,
-                model_version=root.model_state_commit_count,
-                model_state_ref=root.current_model_state_ref,
-                account_version=None if account is None else account.snapshot.version,
-                pending_id=getattr(pending, "pending_id", None),
+                owner=owner,
+                family=family,
                 cause=error,
-                kind=(
-                    SimulationFailureKind.FAILED_AFTER_COMMIT
-                    if after_commit
-                    else SimulationFailureKind.PRE_COMMIT
-                ),
-            )
-            raise failure from error
+                kind=kind,
+            ) from error
 
     def _pending_due(self) -> DueExecutionEnvelope | None:
         pending = self._state.current.pending_accepted_intent
@@ -420,18 +473,30 @@ class SimulationFlow:
         targets = pending.intent.targets
         target_instruments = tuple(target.instrument_id for target in targets)
         held_instruments = tuple(before.positions)
-        snapshot = exact_execution_snapshot(
-            execution_input.table,
-            target_at=pending.target.target_at,
-            target_instruments=target_instruments,
-            held_instruments=held_instruments,
-            trade_price=pending.target.trade_price,
-        )
-        if snapshot.missing_held_instruments:
-            missing_held = snapshot.missing_held_instruments
-            raise ValueError(
-                f"missing selected execution value for held instruments: {missing_held}"
+
+        def select_snapshot() -> object:
+            selected = exact_execution_snapshot(
+                execution_input.table,
+                target_at=pending.target.target_at,
+                target_instruments=target_instruments,
+                held_instruments=held_instruments,
+                trade_price=pending.target.trade_price,
             )
+            if selected.missing_held_instruments:
+                raise ValueError(
+                    "missing selected execution value for held instruments: "
+                    f"{selected.missing_held_instruments}"
+                )
+            return selected
+
+        snapshot = self._due_boundary(
+            stage=SimulationStage.DUE_SNAPSHOT,
+            cutoff=pending.target.target_at,
+            owner=execution_input,
+            family=SimulationFailureFamily.DATA,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=select_snapshot,
+        )
         prices = {row.instrument: row.price for row in snapshot.rows if row.price is not None}
         selected_prices = {
             instrument: price for instrument, price in prices.items() if price is not None
@@ -451,18 +516,39 @@ class SimulationFlow:
             for target in targets
             if target.quantity is not None
         }
-        orders = plan_orders(
-            account=before,
-            execution_time_nav=nav,
-            prices=selected_prices,
-            weight_targets=weights,
-            quantity_targets=quantities,
-            cash_target=pending.intent.cash_target,
-            budget=pending.intent.budget,
+        orders = self._due_boundary(
+            stage=SimulationStage.DUE_ORDER_PLANNING,
+            cutoff=pending.target.target_at,
+            owner=pending.intent,
+            family=SimulationFailureFamily.ORDER,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: plan_orders(
+                account=before,
+                execution_time_nav=nav,
+                prices=selected_prices,
+                weight_targets=weights,
+                quantity_targets=quantities,
+                cash_target=pending.intent.cash_target,
+                budget=pending.intent.budget,
+            ),
         )
-        fills = self._exchange.execute(orders, before, snapshot)
-        prepared_fill = self._account.prepare_fill(
-            account_state, fills, expected_version=before.version
+        fills = self._due_boundary(
+            stage=SimulationStage.DUE_EXCHANGE_EXECUTION,
+            cutoff=pending.target.target_at,
+            owner=self._frozen_run.exchange,
+            family=SimulationFailureFamily.EXCHANGE,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._exchange.execute(orders, before, snapshot),
+        )
+        prepared_fill = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_PREPARATION,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._account.prepare_fill(
+                account_state, fills, expected_version=before.version
+            ),
         )
         commit_evidence = AccountCommitEvidence(
             run_identity=self._frozen_run.identity,
@@ -485,35 +571,77 @@ class SimulationFlow:
             account_version_before=before.version,
             account_version_committed=prepared_fill.next_snapshot.version,
         )
-        prepared_commit = self._state.prepare_account_commit(
-            pending_id=pending.pending_id,
-            account=prepared_fill,
-            fill=fills,
-            evidence=commit_evidence,
+        prepared_commit = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_PREPARATION,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._state.prepare_account_commit(
+                pending_id=pending.pending_id,
+                account=prepared_fill,
+                fill=fills,
+                evidence=commit_evidence,
+            ),
         )
-        self._account.commit_fill(prepared_fill)
-        committed_root = self._state.publish_account_commit(prepared_commit)
-        if committed_root.account != self._account.state:
-            raise RuntimeError("Account commit root does not mirror Account authority")
-        selected_marks = self._marks_for_occurrence(
-            self._frozen_run.valuation,
-            pending.target.target_at,
-            prepared_fill.next_snapshot,
+        self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_COMMIT,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._account.commit_fill(prepared_fill),
         )
-        mark = self._valuation_service.mark(prepared_fill.next_snapshot, selected_marks)
-        prepared_account = self._account.prepare_mark(
-            prepared_fill,
-            mark,
-            provenance=ValuationEvidence(
-                run_identity=self._frozen_run.identity,
-                agenda=self._frozen_run.valuation_agenda,
-                occurrence=pending.occurrence,
-                root_version=committed_root.version,
-                cutoff=pending.target.target_at,
-                account=prepared_fill.next_snapshot,
-                marks=mark,
-                valuation_config=self._frozen_run.valuation,
-                account_version=prepared_fill.next_snapshot.version,
+        committed_root = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_COMMIT,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._publish_account_commit(prepared_commit),
+        )
+        selected_marks = self._due_boundary(
+            stage=SimulationStage.DUE_VALUATION_SELECTION,
+            cutoff=pending.target.target_at,
+            owner=self._frozen_run.valuation,
+            family=SimulationFailureFamily.VALUATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._marks_for_occurrence(
+                self._frozen_run.valuation,
+                pending.target.target_at,
+                prepared_fill.next_snapshot,
+            ),
+        )
+        mark = self._due_boundary(
+            stage=SimulationStage.DUE_VALUATION_MARK,
+            cutoff=pending.target.target_at,
+            owner=self._frozen_run.valuation,
+            family=SimulationFailureFamily.VALUATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._valuation_service.mark(
+                prepared_fill.next_snapshot, selected_marks
+            ),
+        )
+        prepared_account = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._account.prepare_mark(
+                prepared_fill,
+                mark,
+                provenance=ValuationEvidence(
+                    run_identity=self._frozen_run.identity,
+                    agenda=self._frozen_run.valuation_agenda,
+                    occurrence=pending.occurrence,
+                    root_version=committed_root.version,
+                    cutoff=pending.target.target_at,
+                    account=prepared_fill.next_snapshot,
+                    marks=mark,
+                    valuation_config=self._frozen_run.valuation,
+                    account_version=prepared_fill.next_snapshot.version,
+                ),
             ),
         )
         mark_evidence = MarkEvidence(
@@ -529,30 +657,76 @@ class SimulationFlow:
             root_version=committed_root.version,
             account_version=prepared_account.next_state.snapshot.version,
         )
-        prepared_marked = self._state.prepare_marked(
-            account=prepared_account,
-            mark=mark,
-            evidence=mark_evidence,
-        )
-        self._account.commit_mark(prepared_account)
-        marked_root = self._state.publish_marked(prepared_marked)
-        if marked_root.account != self._account.state:
-            raise RuntimeError("Account mark root does not mirror Account authority")
-        feedback_evidence = FeedbackEvidence(
-            run_identity=self._frozen_run.identity,
-            agenda=self._frozen_run.strategy_agenda,
-            occurrence=pending.occurrence,
+        prepared_marked = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
-            pending=pending,
-            candidates=(fills, mark),
-            root_version=marked_root.version,
-            account_version=marked_root.account.snapshot.version,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._state.prepare_marked(
+                account=prepared_account,
+                mark=mark,
+                evidence=mark_evidence,
+            ),
         )
-        root = self._state.publish_feedback(
-            self._state.prepare_feedback((fills, mark), evidence=feedback_evidence)
+        self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._account.commit_mark(prepared_account),
+        )
+        marked_root = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._publish_marked(prepared_marked),
+        )
+        feedback_evidence = self._due_boundary(
+            stage=SimulationStage.DUE_FEEDBACK_CANDIDATE,
+            cutoff=pending.target.target_at,
+            owner=pending,
+            family=SimulationFailureFamily.PUBLICATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: FeedbackEvidence(
+                run_identity=self._frozen_run.identity,
+                agenda=self._frozen_run.strategy_agenda,
+                occurrence=pending.occurrence,
+                cutoff=pending.target.target_at,
+                pending=pending,
+                candidates=(fills, mark),
+                root_version=marked_root.version,
+                account_version=marked_root.account.snapshot.version,
+            ),
+        )
+        due_evidence = DueExecutionEvidence(commit_evidence, mark_evidence, feedback_evidence)
+        root = self._due_boundary(
+            stage=SimulationStage.DUE_FEEDBACK_PUBLICATION,
+            cutoff=pending.target.target_at,
+            owner=feedback_evidence,
+            family=SimulationFailureFamily.PUBLICATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._state.publish_feedback(
+                self._state.prepare_feedback((due_evidence,), evidence=feedback_evidence)
+            ),
         )
         assert root.account is not None
-        return DueExecutionResult(pending.pending_id, root.account.snapshot.version, mark)
+        return DueExecutionResult(pending.pending_id, root.account.snapshot.version, due_evidence)
+
+    def _publish_account_commit(self, prepared: object) -> object:
+        root = self._state.publish_account_commit(prepared)
+        if root.account != self._account.state:
+            raise RuntimeError("Account commit root does not mirror Account authority")
+        return root
+
+    def _publish_marked(self, prepared: object) -> object:
+        root = self._state.publish_marked(prepared)
+        if root.account != self._account.state:
+            raise RuntimeError("Account mark root does not mirror Account authority")
+        return root
 
     def _dispatch_valuation(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         state = self._state.current.account
@@ -637,7 +811,6 @@ class SimulationFlow:
             window = self._strategy_window_for_occurrence(occurrence)
             if not isinstance(window, ModelWindow):
                 raise TypeError("strategy_window_for_occurrence must return a ModelWindow")
-            source_digests = self._source_digests_before_callback()
             state_account = self._state.current.account
             if not isinstance(state_account, AccountState):
                 raise RuntimeError("callback requires an AccountState root")
@@ -688,7 +861,7 @@ class SimulationFlow:
                     current_model_state_ref=current_ref,
                     committed_model_state_ref=committed_ref,
                     strategy_accesses=window.accesses,
-                    actual_source_refs=self._actual_source_refs(window, source_digests),
+                    actual_source_refs=self._actual_source_refs(window),
                     decision=result,
                     pending=None,
                     constraints=projected,
@@ -703,7 +876,7 @@ class SimulationFlow:
                 )
             else:
                 intent = validate_economic_intent(result)
-                self._validate_intent_authority(intent, account, window, source_digests)
+                self._validate_intent_authority(intent, account, window)
                 intended = validate_intended_constraints(self._constraints, intent, projected)
                 if any(not item.finding.passed for item in intended):
                     raise ValueError("economic intent violates projected constraints")
@@ -719,7 +892,7 @@ class SimulationFlow:
                     current_model_state_ref=current_ref,
                     committed_model_state_ref=committed_ref,
                     strategy_accesses=window.accesses,
-                    actual_source_refs=self._actual_source_refs(window, source_digests),
+                    actual_source_refs=self._actual_source_refs(window),
                     decision=accepted,
                     pending=accepted,
                     constraints=(*projected, *intended),
@@ -777,7 +950,6 @@ class SimulationFlow:
         intent: EconomicPortfolioIntent,
         account: AccountSnapshot,
         window: ModelWindow,
-        source_digests: Mapping[str, str],
     ) -> None:
         if intent.strategy_id != str(self._frozen_run.strategy.component.component_id):
             raise ValueError("intent strategy_id does not match the frozen Strategy component")
@@ -788,49 +960,29 @@ class SimulationFlow:
             raise ValueError("intent model_state_ref does not match the visible prior model state")
         if intent.account_version_seen != account.version:
             raise ValueError("intent account_version_seen does not match current AccountSnapshot")
-        actual_refs = self._actual_source_refs(window, source_digests)
+        actual_refs = self._actual_source_refs(window)
         if intent.source_refs != actual_refs:
             raise ValueError(
                 "intent source_refs do not exactly match sources read through ModelWindow"
             )
 
-    def _source_digests_before_callback(self) -> dict[str, str]:
-        """Capture source bytes immediately before Strategy reads them, without freezing bytes."""
-        dataset_by_id = {str(dataset.dataset_id): dataset for dataset in self._frozen_run.datasets}
-        source_by_id = {str(source.source_id): source for source in self._frozen_run.sources}
-        strategy_source_ids: set[str] = set()
-        for requirement in self._strategy.requirements():
-            dataset = dataset_by_id.get(str(requirement.dataset_id))
-            if dataset is None:
-                raise ValueError("Strategy requirement is absent from the FrozenRun")
-            strategy_source_ids.add(str(dataset.source))
-        return {
-            source_id: _source_digest(source_by_id[source_id].path)
-            for source_id in sorted(strategy_source_ids)
-        }
-
-    def _actual_source_refs(
-        self, window: ModelWindow, source_digests: Mapping[str, str]
-    ) -> tuple[IntentSourceRef, ...]:
+    def _actual_source_refs(self, window: ModelWindow) -> tuple[IntentSourceRef, ...]:
         datasets = {str(dataset.dataset_id): dataset for dataset in self._frozen_run.datasets}
         sources = {str(source.source_id): source for source in self._frozen_run.sources}
-        source_ids: list[str] = []
+        actual: dict[str, str] = {}
         for access in window.accesses:
             dataset = datasets.get(str(access.dataset_id))
             if dataset is None:
                 raise ValueError("ModelWindow read a dataset absent from the FrozenRun")
             source_id = str(dataset.source)
-            if source_id not in sources:
+            if source_id not in sources or access.source_id != source_id:
                 raise ValueError(
                     "FrozenRun dataset source is absent from frozen source declarations"
                 )
-            if source_id not in source_digests:
-                raise RuntimeError("missing source digest for ModelWindow access")
-            if source_id not in source_ids:
-                source_ids.append(source_id)
-        return tuple(
-            IntentSourceRef(source_id, source_digests[source_id]) for source_id in source_ids
-        )
+            previous = actual.setdefault(source_id, access.source_digest)
+            if previous != access.source_digest:
+                raise RuntimeError("one callback observed multiple byte digests for one source")
+        return tuple(IntentSourceRef(source_id, digest) for source_id, digest in actual.items())
 
     def _accept_intent(
         self, intent: EconomicPortfolioIntent, occurrence: OperationOccurrence

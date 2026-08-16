@@ -247,15 +247,10 @@ def _marks_for_occurrence(
 def run(
     project_root: str | Path,
     frozen_run: FrozenRun,
-    *,
-    instruments: tuple[str, ...],
 ) -> SimulationResult:
     """Execute exactly one simulation from a preflight-produced frozen authority."""
     if not isinstance(frozen_run, FrozenRun):
         raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
-    if not isinstance(instruments, tuple):
-        raise TypeError("instruments must be a tuple of instrument identifiers")
-
     root_path = Path(project_root)
     frozen = frozen_run
     if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None:
@@ -274,7 +269,11 @@ def run(
     catalog = _FrozenCatalog(frozen)
     store = DuckDbObservationStore(catalog)
     strategy_requirements = strategy.requirements()
+    if strategy_requirements != frozen.strategy_requirements:
+        raise ValueError("loaded Strategy requirements drifted from FrozenRun")
     constraint_requirements = declared_constraint_requirements(constraints)
+    if constraint_requirements != frozen.constraint_requirements:
+        raise ValueError("loaded Constraint requirements drifted from FrozenRun")
     root = AccountState(frozen.initial_account_snapshot)
     strategy.memory = normalize_memory(frozen.initial_model_memory)
     strategy.load_payload(BytesIO(frozen.initial_payload))
@@ -294,15 +293,15 @@ def run(
         state,
         strategy_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
-            instruments=instruments,
+            instruments=frozen.instruments,
             store=store,
-            allowed_requirements=strategy_requirements,
+            allowed_requirements=frozen.strategy_requirements,
         ),
         constraint_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
-            instruments=instruments,
+            instruments=frozen.instruments,
             store=store,
-            allowed_requirements=constraint_requirements,
+            allowed_requirements=frozen.constraint_requirements,
         ),
         account=Account(mode=frozen.initial_account_mode),
         exchange=exchange,

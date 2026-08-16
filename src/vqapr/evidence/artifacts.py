@@ -15,7 +15,14 @@ from vqapr.domain.timestamps import require_tz_aware
 class SimulationFailureFamily(StrEnum):
     """Closed ownership family for a failed simulation operation."""
 
-    SIMULATION = "SIMULATION"
+    DATA = "DATA"
+    INTENT = "INTENT"
+    ORDER = "ORDER"
+    EXCHANGE = "EXCHANGE"
+    ACCOUNT = "ACCOUNT"
+    VALUATION = "VALUATION"
+    PUBLICATION = "PUBLICATION"
+    FINALIZATION = "FINALIZATION"
 
 
 class SimulationFailureKind(StrEnum):
@@ -27,8 +34,20 @@ class SimulationFailureKind(StrEnum):
 
 class SimulationStage(StrEnum):
     START = "simulation.start"
-    CALLBACK = "simulation.callback"
-    DUE = "simulation.due"
+    CALLBACK_STATE = "simulation.callback.state"
+    CALLBACK_WINDOW = "simulation.callback.window"
+    CALLBACK_INTENT = "simulation.callback.intent"
+    CALLBACK_PUBLICATION = "simulation.callback.publication"
+    DUE_SNAPSHOT = "simulation.due.snapshot"
+    DUE_ORDER_PLANNING = "simulation.due.order_planning"
+    DUE_EXCHANGE_EXECUTION = "simulation.due.exchange_execution"
+    DUE_ACCOUNT_PREPARATION = "simulation.due.account_preparation"
+    DUE_ACCOUNT_COMMIT = "simulation.due.account_commit"
+    DUE_VALUATION_SELECTION = "simulation.due.valuation_selection"
+    DUE_VALUATION_MARK = "simulation.due.valuation_mark"
+    DUE_ACCOUNT_MARK = "simulation.due.account_mark"
+    DUE_FEEDBACK_CANDIDATE = "simulation.due.feedback_candidate"
+    DUE_FEEDBACK_PUBLICATION = "simulation.due.feedback_publication"
     VALUATION = "simulation.valuation"
     MONITORING = "simulation.monitoring"
     FINALIZE = "simulation.finalize"
@@ -59,6 +78,7 @@ class SimulationFailure(RuntimeError, ValueError):
     def __init__(
         self,
         *,
+        family: SimulationFailureFamily,
         stage: SimulationStage,
         clock: datetime,
         failed_requirement: object | None,
@@ -75,6 +95,8 @@ class SimulationFailure(RuntimeError, ValueError):
         pending_id: str | None,
         kind: SimulationFailureKind = _PRE_COMMIT,
     ) -> None:
+        if not isinstance(family, SimulationFailureFamily):
+            raise TypeError("family must be a SimulationFailureFamily")
         if not isinstance(stage, SimulationStage):
             raise TypeError("stage must be a SimulationStage")
         require_tz_aware(clock, name="clock")
@@ -83,10 +105,10 @@ class SimulationFailure(RuntimeError, ValueError):
             raise TypeError("cause must be an Exception")
         if not isinstance(kind, SimulationFailureKind):
             raise TypeError("kind must be a SimulationFailureKind")
-        if kind is _PRE_COMMIT and pending_id is None and stage is SimulationStage.DUE:
+        if kind is _PRE_COMMIT and pending_id is None and stage.name.startswith("DUE_"):
             # A due operation always has an accepted pending identity before its commit.
             raise ValueError("pre-commit due failures must retain their pending identity")
-        self.family = SimulationFailureFamily.SIMULATION
+        self.family = family
         self.kind = kind
         self.stage = stage
         self.clock = clock
@@ -198,6 +220,14 @@ class DueExecutionEvidence:
     commit: AccountCommitEvidence
     mark: MarkEvidence
     feedback: FeedbackEvidence
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.commit, AccountCommitEvidence):
+            raise TypeError("commit must be an AccountCommitEvidence")
+        if not isinstance(self.mark, MarkEvidence):
+            raise TypeError("mark must be a MarkEvidence")
+        if not isinstance(self.feedback, FeedbackEvidence):
+            raise TypeError("feedback must be a FeedbackEvidence")
 
 
 @dataclass(frozen=True, slots=True)

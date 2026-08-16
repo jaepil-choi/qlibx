@@ -20,7 +20,6 @@ from vqapr.valuation.marks import MarkBatch
 class LifecycleKind(StrEnum):
     NO_DECISION = "NO_DECISION"
     ACCEPTED_INTENT = "ACCEPTED_INTENT"
-    DUE_EXECUTED = "DUE_EXECUTED"
     ACCOUNT_COMMITTED = "ACCOUNT_COMMITTED"
     MARKED = "MARKED"
     FEEDBACK_PUBLISHED = "FEEDBACK_PUBLISHED"
@@ -403,85 +402,6 @@ class RunStateRepository:
                 lifecycle=LifecycleTrace(LifecycleKind.ACCEPTED_INTENT, detail),
                 recorder=recorder,
                 pending_accepted_intent=intent,
-            )
-        )
-
-    def prepare_due(
-        self,
-        *,
-        pending_id: str,
-        account: PreparedAccountTransition,
-        fill: object,
-        mark: object,
-        feedback: tuple[object, ...] = (),
-        evidence: object = None,
-    ) -> PreparedRunState:
-        """Prepare a complete due chain without changing the visible root."""
-        if not isinstance(pending_id, str) or not pending_id:
-            raise ValueError("pending_id must be a non-empty string")
-        if not isinstance(account, PreparedAccountTransition):
-            raise TypeError("account must be a PreparedAccountTransition")
-        if fill != account.fill.fill_batch:
-            raise ValueError("fill must be the prepared Account fill batch")
-        if not isinstance(mark, MarkBatch):
-            raise TypeError("mark must be a MarkBatch")
-        latest_mark = account.next_state.latest_mark
-        if latest_mark is None or mark != latest_mark.marks:
-            raise ValueError("mark must be the prepared Account mark batch")
-        if not isinstance(feedback, tuple):
-            raise TypeError("feedback must be a tuple")
-        root = self._root
-        if root.finalization is not None:
-            raise RuntimeError("cannot execute due work after finalization")
-        pending = root.pending_accepted_intent
-        if getattr(pending, "pending_id", None) != pending_id:
-            raise RuntimeError("due completion pending identity does not match current pending")
-        if root.account is None:
-            raise RuntimeError("due completion requires an Account root")
-        if account.fill.source != root.account:
-            raise RuntimeError("prepared account transition does not match current Account root")
-        if account.fill.expected_version != root.account.snapshot.version:
-            raise RuntimeError("prepared account transition has a stale Account version")
-        next_root = AcceptedRunState(
-            version=root.version + 1,
-            _model_states=root._model_states,
-            _payloads=root._payloads,
-            current_model_state_ref=root.current_model_state_ref,
-            account=account.next_state,
-            pending_accepted_intent=None,
-            lifecycle_trace=(
-                *root.lifecycle_trace,
-                LifecycleTrace(
-                    LifecycleKind.DUE_EXECUTED,
-                    {"pending_id": pending_id, "fill": fill, "mark": mark, "evidence": evidence},
-                ),
-            ),
-            recorder_manifests=root.recorder_manifests,
-            recorder_rows=root.recorder_rows,
-            feedback=(*root.feedback, *feedback),
-            finalization=root.finalization,
-            model_state_commit_count=root.model_state_commit_count,
-        )
-        return PreparedRunState(root.version, next_root)
-
-    def complete_due(
-        self,
-        *,
-        pending_id: str,
-        account: PreparedAccountTransition,
-        fill: object,
-        mark: object,
-        feedback: tuple[object, ...] = (),
-        evidence: object = None,
-    ) -> AcceptedRunState:
-        return self.publish(
-            self.prepare_due(
-                pending_id=pending_id,
-                account=account,
-                fill=fill,
-                mark=mark,
-                feedback=feedback,
-                evidence=evidence,
             )
         )
 

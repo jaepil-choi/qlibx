@@ -133,6 +133,7 @@ def _setup(root: Path, model_price_parquet: Path) -> tuple[Workspace, RunDefinit
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         initial_model_memory={"cadence": [1]},
+        instruments=("ABC",),
     )
 
 
@@ -217,6 +218,9 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
     ]
     assert frozen.constraints is not definition.constraints
     assert frozen.constraints.constraints[0].component_id == "limit"
+    assert frozen.instruments == definition.instruments
+    assert frozen.strategy_requirements == ()
+    assert frozen.constraint_requirements == ()
     assert (
         frozen.initial_model_state_ref
         == prepare_model_state(frozen.initial_model_memory, frozen.initial_payload).ref
@@ -422,6 +426,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         definition.monitoring,
         start=definition.start,
         end=definition.end,
+        instruments=definition.instruments,
     )
     with pytest.raises(VqaprError):
         preflight_run(workspace, invalid)
@@ -464,6 +469,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         definition.monitoring,
         start=definition.start,
         end=definition.end,
+        instruments=definition.instruments,
     )
     with pytest.raises(VqaprError):
         preflight_run(workspace, invalid_constraint)
@@ -475,6 +481,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
             definition.constraints,
             start=datetime(2024, 3, 5, 9),
             end=definition.end,
+            instruments=definition.instruments,
         )
     with pytest.raises(ValueError, match="start must not be after end"):
         RunDefinition(
@@ -483,6 +490,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
             definition.constraints,
             start=definition.end,
             end=definition.start,
+            instruments=definition.instruments,
         )
     with pytest.raises(ValueError, match="declared together"):
         RunDefinition(
@@ -492,6 +500,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
             start=definition.start,
             end=definition.end,
             initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
+            instruments=definition.instruments,
         )
     with pytest.raises(TypeError, match="Model memory"):
         RunDefinition(
@@ -501,4 +510,5 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
             start=definition.start,
             end=definition.end,
             initial_model_memory=("not-json",),  # type: ignore[arg-type]
+            instruments=definition.instruments,
         )

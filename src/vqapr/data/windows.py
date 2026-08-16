@@ -21,6 +21,8 @@ _STAGE = "model_window.requirement"
 class AccessRecord:
     consumer_id: str
     dataset_id: DatasetId
+    source_id: str
+    source_digest: str
     fields: tuple[str, ...]
     lookback: Lookback
     evaluation_time: datetime

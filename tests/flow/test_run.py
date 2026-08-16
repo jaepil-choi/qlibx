@@ -91,6 +91,7 @@ def test_run_definition_retains_one_shared_constraint_set() -> None:
         _valuation(),
         constraints,
         MonitoringPolicy(agenda_id("monitoring"), OperationRole.MONITORING),
+        instruments=("ABC",),
     )
 
     assert run.constraints is constraints

@@ -7,6 +7,8 @@ validates and combines them; it deliberately does not add a timestamp wrapper.
 from __future__ import annotations
 
 import calendar
+import re
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -66,6 +68,86 @@ def at_local(day: date, wall_time: time, timezone_name: str) -> datetime:
     if len(candidates) > 1:
         raise ValueError(f"local wall time {naive.isoformat()} is ambiguous in {timezone_name}")
     return candidates[0]
+
+
+_OFFSET = re.compile(r"(?P<sign>[+-])(?P<hour>\d{2}):(?P<minute>\d{2})\Z")
+
+
+def _parse_offset(value: str) -> timedelta:
+    if not isinstance(value, str):
+        raise TypeError("offset must be an ISO UTC offset string")
+    match = _OFFSET.fullmatch(value)
+    if match is None:
+        raise ValueError("offset must use ISO UTC offset format ±HH:MM")
+    hours = int(match["hour"])
+    minutes = int(match["minute"])
+    if hours > 14 or minutes > 59 or (hours == 14 and minutes != 0):
+        raise ValueError("offset must be within ±14:00")
+    amount = timedelta(hours=hours, minutes=minutes)
+    return -amount if match["sign"] == "-" else amount
+
+
+def _format_offset(value: timedelta) -> str:
+    seconds = int(value.total_seconds())
+    sign = "-" if seconds < 0 else "+"
+    hours, remainder = divmod(abs(seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if seconds:
+        raise ValueError("timezone offset must be expressible as ±HH:MM")
+    return f"{sign}{hours:02d}:{minutes:02d}"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalInstantDeclaration:
+    """A locally declared instant with enough proof to reproduce its UTC value."""
+
+    local_date: date
+    local_time: time
+    timezone: str
+    fold: int
+    offset: str
+
+    def __post_init__(self) -> None:
+        _require_date(self.local_date, name="local_date")
+        _require_wall_time(self.local_time, name="local_time")
+        if not isinstance(self.fold, int) or isinstance(self.fold, bool) or self.fold not in (0, 1):
+            raise ValueError("fold must be 0 or 1")
+        declared_offset = _parse_offset(self.offset)
+        zone = _zone(self.timezone)
+        naive = datetime.combine(self.local_date, self.local_time)
+        candidate = naive.replace(tzinfo=zone, fold=self.fold)
+        round_trip = candidate.astimezone(UTC).astimezone(zone)
+        if round_trip.replace(tzinfo=None) != naive or round_trip.fold != self.fold:
+            raise ValueError(
+                f"local wall time {naive.isoformat()} with fold {self.fold} "
+                f"does not exist in {self.timezone}"
+            )
+        computed_offset = candidate.utcoffset()
+        if computed_offset != declared_offset:
+            raise ValueError(
+                f"declared offset {self.offset} does not match "
+                f"{_format_offset(computed_offset or timedelta())} in {self.timezone}"
+            )
+
+    @property
+    def instant(self) -> datetime:
+        return datetime.combine(self.local_date, self.local_time).replace(
+            tzinfo=_zone(self.timezone),
+            fold=self.fold,
+        )
+
+    @property
+    def utc_instant(self) -> datetime:
+        return self.instant.astimezone(UTC)
+
+    def identity(self) -> tuple[str, str, str, int, str]:
+        return (
+            self.local_date.isoformat(),
+            self.local_time.isoformat(),
+            self.timezone,
+            self.fold,
+            self.offset,
+        )
 
 
 def shift_calendar(

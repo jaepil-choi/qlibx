@@ -283,6 +283,8 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
         load_exchange(exchange, project_root=workspace.project_root), AcademicExchange
     )
     assert preflight_run(workspace, compatible).exchange == exchange
+    with pytest.raises(VqaprError, match="unlisted_instrument"):
+        preflight_run(workspace, replace(compatible, instruments=("ABC", "MISSING")))
 
     duck_path = tmp_path / "duck.py"
     duck_path.write_text(

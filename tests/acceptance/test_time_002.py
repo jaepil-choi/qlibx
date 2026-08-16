@@ -703,6 +703,42 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
 
 
 @pytest.mark.uc("UC-TIME-002")
+def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> None:
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+    target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
+    execution = _execution(
+        _parquet(
+            tmp_path / "execution.parquet",
+            """
+            SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                   'C' AS instrument, true AS is_tradable, 10.0 AS close
+            """,
+        )
+    )
+    intent = EconomicPortfolioIntent(
+        UUID(int=99),
+        "strategy",
+        (PortfolioTarget("C", quantity=Decimal("1")),),
+        Decimal("1"),
+        _BUDGET,
+        (),
+        0,
+        None,
+    )
+    state = _state()
+
+    with pytest.raises(ValueError, match="frozen instrument universe"):
+        _flow(
+            _frozen((callback,), end=target, execution=execution),
+            _Strategy((intent,)),
+            state,
+        ).run()
+
+    assert state.current.pending_accepted_intent is None
+    assert state.current.lifecycle_trace == ()
+
+
+@pytest.mark.uc("UC-TIME-002")
 def test_fill_target_is_strictly_later_exact_and_uses_venue_local_date(tmp_path: Path) -> None:
     registration = _execution(
         _parquet(
@@ -1016,10 +1052,17 @@ def test_callback_payload_fault_does_not_publish_recorder_or_state() -> None:
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     state = _state()
     before_ref = state.current.current_model_state_ref
+    frozen = _frozen((callback,), end=callback)
 
-    with pytest.raises(RuntimeError, match="payload fault"):
-        _flow(_frozen((callback,), end=callback), _PayloadFaultStrategy(), state).run()
+    with pytest.raises(SimulationFailure, match="payload fault") as raised:
+        _flow(frozen, _PayloadFaultStrategy(), state).run()
 
+    failure = raised.value
+    assert failure.family is SimulationFailureFamily.DATA
+    assert failure.stage is SimulationStage.CALLBACK_STATE
+    assert failure.failed_requirement is frozen.strategy
+    assert failure.kind is SimulationFailureKind.PRE_COMMIT
+    assert failure.mutation is False
     assert state.current.account == AccountState(_ACCOUNT)
     assert state.current.current_model_state_ref == before_ref
     assert state.current.recorder_rows == {}

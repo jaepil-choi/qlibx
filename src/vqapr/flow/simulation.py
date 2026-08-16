@@ -291,15 +291,7 @@ class SimulationFlow:
             occurrence = next_static.occurrence
             next_static = next(static, None)
             if occurrence.role is OperationRole.STRATEGY_CALLBACK:
-                traces.append(
-                    self._guard(
-                        SimulationStage.CALLBACK_PUBLICATION,
-                        occurrence.evaluation_time,
-                        lambda occurrence=occurrence: self._dispatch_callback(occurrence),
-                        family=SimulationFailureFamily.PUBLICATION,
-                        owner=self._frozen_run.strategy,
-                    )
-                )
+                traces.append(self._dispatch_callback(occurrence))
             elif occurrence.role is OperationRole.VALUATION:
                 traces.append(
                     self._guard(
@@ -799,116 +791,162 @@ class SimulationFlow:
         )
 
     def _dispatch_callback(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
-        current_ref = self._state.current.current_model_state_ref
-        if current_ref is None:
-            raise RuntimeError("callback requires a current Strategy root")
-        before = self._state.load_model_state(current_ref)
-        payload_before = self._state.load_payload(current_ref)
+        current_ref, before, payload_before = self._guard(
+            SimulationStage.CALLBACK_STATE,
+            occurrence.evaluation_time,
+            self._visible_callback_state,
+            family=SimulationFailureFamily.DATA,
+            owner=self._frozen_run.strategy,
+        )
         previous_recorder = self._strategy.recorder
         try:
-            self._strategy.memory = before
-            self._strategy.load_payload(BytesIO(payload_before))
-            window = self._strategy_window_for_occurrence(occurrence)
-            if not isinstance(window, ModelWindow):
-                raise TypeError("strategy_window_for_occurrence must return a ModelWindow")
+            self._guard(
+                SimulationStage.CALLBACK_STATE,
+                occurrence.evaluation_time,
+                lambda: self._restore_callback_state(before, payload_before),
+                family=SimulationFailureFamily.DATA,
+                owner=self._frozen_run.strategy,
+            )
+            window = self._guard(
+                SimulationStage.CALLBACK_WINDOW,
+                occurrence.evaluation_time,
+                lambda: self._strategy_window(occurrence),
+                family=SimulationFailureFamily.DATA,
+                owner=self._frozen_run.strategy_requirements,
+            )
             state_account = self._state.current.account
             if not isinstance(state_account, AccountState):
-                raise RuntimeError("callback requires an AccountState root")
+                self._guard(
+                    SimulationStage.CALLBACK_STATE,
+                    occurrence.evaluation_time,
+                    lambda: self._raise_callback_account_state_error(),
+                    family=SimulationFailureFamily.DATA,
+                    owner=self._frozen_run.strategy,
+                )
             account = state_account.snapshot
-            tables = self._strategy.tables()
-            if not isinstance(tables, tuple) or not all(
-                isinstance(table, TableSpec) for table in tables
-            ):
-                raise TypeError("StrategyModel.tables must return a tuple of TableSpec")
-            recorder = InvocationRecorder(
-                tables,
-                run_id=self._frozen_run.identity,
-                producer_id=str(self._frozen_run.strategy.component.component_id),
-                stage=occurrence.role.value,
-                event_time=occurrence.evaluation_time,
+            recorder = self._callback_intent_boundary(
+                occurrence,
+                self._frozen_run.strategy,
+                lambda: self._callback_recorder(occurrence),
             )
-            self._strategy.recorder = recorder
+            self._guard(
+                SimulationStage.CALLBACK_PUBLICATION,
+                occurrence.evaluation_time,
+                lambda: self._set_callback_recorder(recorder),
+                family=SimulationFailureFamily.PUBLICATION,
+                owner=recorder,
+            )
             projected = ()
             if self._constraints:
-                constraint_window = self._constraint_window_for_occurrence(occurrence)
-                if not isinstance(constraint_window, ModelWindow):
-                    raise TypeError("constraint_window_for_occurrence must return a ModelWindow")
-                projected = project_constraints(self._constraints, constraint_window)
-            result = self._strategy.on_occurrence(
-                StrategyModelContext(
-                    occurrence=occurrence,
-                    window=window,
-                    account=account,
-                    constraint_bounds=merged_constraint_bounds(projected),
+                constraint_window = self._guard(
+                    SimulationStage.CALLBACK_WINDOW,
+                    occurrence.evaluation_time,
+                    lambda: self._constraint_window(occurrence),
+                    family=SimulationFailureFamily.DATA,
+                    owner=self._frozen_run.constraint_requirements,
                 )
-            )
-            candidate = normalize_memory(self._strategy.memory)
-            payload_candidate = BytesIO()
-            self._strategy.save_payload(payload_candidate)
-            committed_ref = prepare_model_state(candidate, payload_candidate.getvalue()).ref
-            self._validate_candidate_payload(
-                candidate, payload_candidate.getvalue(), before, payload_before
+                projected = self._guard(
+                    SimulationStage.CALLBACK_WINDOW,
+                    occurrence.evaluation_time,
+                    lambda: project_constraints(self._constraints, constraint_window),
+                    family=SimulationFailureFamily.DATA,
+                    owner=self._frozen_run.constraint_requirements,
+                )
+            result = self._callback_intent_boundary(
+                occurrence,
+                self._frozen_run.strategy,
+                lambda: self._strategy.on_occurrence(
+                    StrategyModelContext(
+                        occurrence=occurrence,
+                        window=window,
+                        account=account,
+                        constraint_bounds=merged_constraint_bounds(projected),
+                    )
+                ),
             )
             if isinstance(result, NoDecision):
-                evidence = CallbackEvidence(
-                    run_identity=self._frozen_run.identity,
-                    strategy=self._frozen_run.strategy,
-                    agenda=self._frozen_run.strategy_agenda,
-                    occurrence=occurrence,
-                    cutoff=occurrence.evaluation_time,
-                    root_version=self._state.current.version,
-                    account=account,
-                    current_model_state_ref=current_ref,
-                    committed_model_state_ref=committed_ref,
-                    strategy_accesses=window.accesses,
-                    actual_source_refs=self._actual_source_refs(window),
-                    decision=result,
-                    pending=None,
-                    constraints=projected,
-                )
-                root = self._state.publish(
-                    self._state.prepare_callback(
-                        candidate,
-                        payload_candidate.getvalue(),
-                        lifecycle=LifecycleTrace(LifecycleKind.NO_DECISION, evidence),
-                        recorder=recorder,
-                    )
-                )
+                accepted: NoDecision | AcceptedIntent = result
+                intended = ()
             else:
-                intent = validate_economic_intent(result)
-                self._validate_intent_authority(intent, account, window)
-                intended = validate_intended_constraints(self._constraints, intent, projected)
+                intent = self._callback_intent_boundary(
+                    occurrence, result, lambda: validate_economic_intent(result)
+                )
+                self._callback_intent_boundary(
+                    occurrence,
+                    intent,
+                    lambda: self._validate_intent_authority(intent, account, window),
+                )
+                intended = self._validate_callback_intended_constraints(
+                    occurrence, intent, projected
+                )
                 if any(not item.finding.passed for item in intended):
-                    raise ValueError("economic intent violates projected constraints")
-                accepted = self._accept_intent(intent, occurrence)
-                evidence = CallbackEvidence(
-                    run_identity=self._frozen_run.identity,
-                    strategy=self._frozen_run.strategy,
-                    agenda=self._frozen_run.strategy_agenda,
-                    occurrence=occurrence,
-                    cutoff=occurrence.evaluation_time,
-                    root_version=self._state.current.version,
-                    account=account,
-                    current_model_state_ref=current_ref,
-                    committed_model_state_ref=committed_ref,
-                    strategy_accesses=window.accesses,
-                    actual_source_refs=self._actual_source_refs(window),
-                    decision=accepted,
-                    pending=accepted,
-                    constraints=(*projected, *intended),
-                )
-                root = self._state.publish(
-                    self._state.prepare_callback(
-                        candidate,
-                        payload_candidate.getvalue(),
-                        lifecycle=LifecycleTrace(LifecycleKind.ACCEPTED_INTENT, evidence),
-                        recorder=recorder,
-                        pending_accepted_intent=accepted,
+                    failed = next(item for item in intended if not item.finding.passed)
+                    constraint = next(
+                        constraint
+                        for constraint in self._constraints
+                        if constraint.constraint_id == failed.constraint_id
                     )
+                    self._callback_intent_boundary(
+                        occurrence,
+                        constraint,
+                        lambda: self._raise_intended_constraint_failure(),
+                    )
+                accepted = self._callback_intent_boundary(
+                    occurrence,
+                    self._frozen_run.execution_input,
+                    lambda: self._accept_intent(intent, occurrence),
                 )
+            candidate, payload_candidate, committed_ref = self._guard(
+                SimulationStage.CALLBACK_STATE,
+                occurrence.evaluation_time,
+                lambda: self._candidate_callback_state(before, payload_before),
+                family=SimulationFailureFamily.DATA,
+                owner=self._frozen_run.strategy,
+            )
+            evidence, lifecycle = self._callback_intent_boundary(
+                occurrence,
+                accepted,
+                lambda: self._callback_evidence(
+                    occurrence,
+                    account,
+                    current_ref,
+                    committed_ref,
+                    window,
+                    accepted,
+                    projected,
+                    intended,
+                ),
+            )
+            prepared = self._guard(
+                SimulationStage.CALLBACK_PUBLICATION,
+                occurrence.evaluation_time,
+                lambda: self._state.prepare_callback(
+                    candidate,
+                    payload_candidate,
+                    lifecycle=lifecycle,
+                    recorder=recorder,
+                    pending_accepted_intent=(
+                        None if isinstance(accepted, NoDecision) else accepted
+                    ),
+                ),
+                family=SimulationFailureFamily.PUBLICATION,
+                owner=evidence,
+            )
+            root = self._guard(
+                SimulationStage.CALLBACK_PUBLICATION,
+                occurrence.evaluation_time,
+                lambda: self._state.publish(prepared),
+                family=SimulationFailureFamily.PUBLICATION,
+                owner=prepared,
+            )
         except Exception:
-            self._strategy.memory = before
-            self._strategy.load_payload(BytesIO(payload_before))
+            self._guard(
+                SimulationStage.CALLBACK_STATE,
+                occurrence.evaluation_time,
+                lambda: self._restore_callback_state(before, payload_before),
+                family=SimulationFailureFamily.DATA,
+                owner=self._frozen_run.strategy,
+            )
             raise
         finally:
             self._strategy.recorder = previous_recorder
@@ -921,6 +959,176 @@ class SimulationFlow:
             raise RuntimeError("run state has no current Strategy root")
         self._strategy.memory = self._state.load_model_state(current_ref)
         self._strategy.load_payload(BytesIO(self._state.load_payload(current_ref)))
+
+    def _callback_intent_boundary(
+        self,
+        occurrence: OperationOccurrence,
+        owner: object,
+        operation: Callable[[], object],
+    ) -> object:
+        """Keep callback data-access failures out of the intent boundary."""
+        try:
+            return operation()
+        except SimulationFailure:
+            raise
+        except VqaprError as error:
+            family = SimulationFailureFamily(error.family.value)
+            if family is SimulationFailureFamily.DATA:
+                raise self._failure(
+                    stage=SimulationStage.CALLBACK_WINDOW,
+                    cutoff=occurrence.evaluation_time,
+                    owner=self._frozen_run.strategy_requirements,
+                    family=SimulationFailureFamily.DATA,
+                    cause=error,
+                    kind=SimulationFailureKind.PRE_COMMIT,
+                ) from error
+            raise self._failure(
+                stage=SimulationStage.CALLBACK_INTENT,
+                cutoff=occurrence.evaluation_time,
+                owner=owner,
+                family=SimulationFailureFamily.INTENT,
+                cause=error,
+                kind=SimulationFailureKind.PRE_COMMIT,
+            ) from error
+        except Exception as error:
+            raise self._failure(
+                stage=SimulationStage.CALLBACK_INTENT,
+                cutoff=occurrence.evaluation_time,
+                owner=owner,
+                family=SimulationFailureFamily.INTENT,
+                cause=error,
+                kind=SimulationFailureKind.PRE_COMMIT,
+            ) from error
+
+    def _restore_callback_state(self, memory: object, payload: bytes) -> None:
+        self._strategy.memory = memory
+        self._strategy.load_payload(BytesIO(payload))
+
+    def _set_callback_recorder(self, recorder: InvocationRecorder | None) -> None:
+        self._strategy.recorder = recorder
+
+    def _visible_callback_state(self) -> tuple[object, object, bytes]:
+        current_ref = self._state.current.current_model_state_ref
+        if current_ref is None:
+            raise RuntimeError("callback requires a current Strategy root")
+        return (
+            current_ref,
+            self._state.load_model_state(current_ref),
+            self._state.load_payload(current_ref),
+        )
+
+    @staticmethod
+    def _raise_callback_account_state_error() -> None:
+        raise RuntimeError("callback requires an AccountState root")
+
+    def _strategy_window(self, occurrence: OperationOccurrence) -> ModelWindow:
+        window = self._strategy_window_for_occurrence(occurrence)
+        if not isinstance(window, ModelWindow):
+            raise TypeError("strategy_window_for_occurrence must return a ModelWindow")
+        return window
+
+    def _constraint_window(self, occurrence: OperationOccurrence) -> ModelWindow:
+        window = self._constraint_window_for_occurrence(occurrence)
+        if not isinstance(window, ModelWindow):
+            raise TypeError("constraint_window_for_occurrence must return a ModelWindow")
+        return window
+
+    def _callback_recorder(self, occurrence: OperationOccurrence) -> InvocationRecorder:
+        tables = self._strategy.tables()
+        if not isinstance(tables, tuple) or not all(
+            isinstance(table, TableSpec) for table in tables
+        ):
+            raise TypeError("StrategyModel.tables must return a tuple of TableSpec")
+        return InvocationRecorder(
+            tables,
+            run_id=self._frozen_run.identity,
+            producer_id=str(self._frozen_run.strategy.component.component_id),
+            stage=occurrence.role.value,
+            event_time=occurrence.evaluation_time,
+        )
+
+    def _validate_callback_intended_constraints(
+        self,
+        occurrence: OperationOccurrence,
+        intent: EconomicPortfolioIntent,
+        projected: tuple[object, ...],
+    ) -> tuple[object, ...]:
+        projected_by_id = {item.constraint_id: item for item in projected}
+        intended: list[object] = []
+        for constraint in self._constraints:
+            intended.extend(
+                self._callback_intent_boundary(
+                    occurrence,
+                    constraint,
+                    lambda constraint=constraint: validate_intended_constraints(
+                        (constraint,),
+                        intent,
+                        (projected_by_id[constraint.constraint_id],),
+                    ),
+                )
+            )
+        return tuple(intended)
+
+    def _candidate_callback_state(
+        self, before: object, payload_before: bytes
+    ) -> tuple[object, bytes, object]:
+        candidate = normalize_memory(self._strategy.memory)
+        payload_candidate = BytesIO()
+        self._strategy.save_payload(payload_candidate)
+        payload = payload_candidate.getvalue()
+        committed_ref = prepare_model_state(candidate, payload).ref
+        self._validate_candidate_payload(candidate, payload, before, payload_before)
+        return candidate, payload, committed_ref
+
+    def _callback_evidence(
+        self,
+        occurrence: OperationOccurrence,
+        account: AccountSnapshot,
+        current_ref: object,
+        committed_ref: object,
+        window: ModelWindow,
+        accepted: NoDecision | AcceptedIntent,
+        projected: tuple[object, ...],
+        intended: tuple[object, ...],
+    ) -> tuple[CallbackEvidence, LifecycleTrace]:
+        evidence = CallbackEvidence(
+            run_identity=self._frozen_run.identity,
+            strategy=self._frozen_run.strategy,
+            agenda=self._frozen_run.strategy_agenda,
+            occurrence=occurrence,
+            cutoff=occurrence.evaluation_time,
+            root_version=self._state.current.version,
+            account=account,
+            current_model_state_ref=current_ref,
+            committed_model_state_ref=committed_ref,
+            strategy_accesses=window.accesses,
+            actual_source_refs=self._callback_actual_source_refs(occurrence, window),
+            decision=accepted,
+            pending=None if isinstance(accepted, NoDecision) else accepted,
+            constraints=(*projected, *intended),
+        )
+        lifecycle = LifecycleTrace(
+            LifecycleKind.NO_DECISION
+            if isinstance(accepted, NoDecision)
+            else LifecycleKind.ACCEPTED_INTENT,
+            evidence,
+        )
+        return evidence, lifecycle
+
+    @staticmethod
+    def _raise_intended_constraint_failure() -> None:
+        raise ValueError("economic intent violates projected constraints")
+
+    def _callback_actual_source_refs(
+        self, occurrence: OperationOccurrence, window: ModelWindow
+    ) -> tuple[IntentSourceRef, ...]:
+        return self._guard(
+            SimulationStage.CALLBACK_WINDOW,
+            occurrence.evaluation_time,
+            lambda: self._actual_source_refs(window),
+            family=SimulationFailureFamily.DATA,
+            owner=self._frozen_run.strategy_requirements,
+        )
 
     def _validate_candidate_payload(
         self,
@@ -960,6 +1168,15 @@ class SimulationFlow:
             raise ValueError("intent model_state_ref does not match the visible prior model state")
         if intent.account_version_seen != account.version:
             raise ValueError("intent account_version_seen does not match current AccountSnapshot")
+        outside_universe = tuple(
+            target.instrument_id
+            for target in intent.targets
+            if target.instrument_id not in self._frozen_run.instruments
+        )
+        if outside_universe:
+            raise ValueError(
+                f"intent targets are outside the frozen instrument universe: {outside_universe}"
+            )
         actual_refs = self._actual_source_refs(window)
         if intent.source_refs != actual_refs:
             raise ValueError(

@@ -11,7 +11,7 @@ from vqapr.runtime.agendas import OperationOccurrence
 
 @dataclass(frozen=True, slots=True)
 class OperationEnvelope:
-    """Internal static agenda item for the later merged dispatcher."""
+    """Internal static agenda item for the deterministic merged dispatcher."""
 
     occurrence: OperationOccurrence
 

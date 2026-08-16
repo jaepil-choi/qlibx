@@ -192,15 +192,42 @@ def _validate_initial_account(
         )
 
 
-def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
+def _validate_instrument_universe(
+    instruments: tuple[str, ...],
+    exchange: AcademicExchange,
+) -> None:
+    missing = tuple(
+        instrument_id for instrument_id in instruments if instrument_id not in exchange.listings
+    )
+    if not missing:
+        return
+    raise VqaprError(
+        stage="preflight.universe",
+        family=FailureFamily.EXCHANGE,
+        failures=[
+            Failure.bounded(
+                code="preflight.universe.unlisted_instrument",
+                requirement="every frozen run instrument must have an Exchange listing",
+                observed=repr(missing),
+            )
+        ],
+        mutation=False,
+        retry_precondition="register complete listings or remove unlisted instruments, then retry",
+    )
+
+
+def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition) -> FrozenRun:
     """Freeze one workspace snapshot into a run-ready declaration.
 
     This resolves only declarations and the static agenda merge. In particular it does
     not inspect callback results or select execution targets, because those require the
     callback's Flow-stamped decision time.
     """
-    if not isinstance(workspace, Workspace):
-        raise TypeError("workspace must be a Workspace")
+    workspace = (
+        workspace_or_root
+        if isinstance(workspace_or_root, Workspace)
+        else Workspace.open(workspace_or_root)
+    )
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
     if definition.start is None or definition.end is None:
@@ -257,6 +284,7 @@ def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
         loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
         execution_input = workspace.execution_input(definition.execution_input_id or "")
         validate_execution_input(execution_input).raise_if_failed()
+        _validate_instrument_universe(definition.instruments, loaded_exchange)
         _validate_initial_account(
             definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
         )

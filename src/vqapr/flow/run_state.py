@@ -1,4 +1,4 @@
-"""Single-root atomic callback state for the future SessionFlow cutover."""
+"""Accepted callback state and staged Account lifecycle publication."""
 
 from __future__ import annotations
 

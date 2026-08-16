@@ -78,7 +78,9 @@ proxy acceptance tests를 blocker로 판정했다. 보완 구현은 다음을 �
 - `SimulationFailure`가 stage, mutation flag, cutoff, root/Account version과 pending identity를 보존한다.
 - `vqapr.public.run`이 caller가 명시적으로 preflight한 동일 `FrozenRun`만 소비하고 fingerprinted owners, initial
   authority와 bounded PIT providers를 load한다. universe와 owner-partitioned Strategy/Constraint requirements도
-  freeze identity에 포함되며 implicit re-preflight나 post-freeze argument는 없다.
+  freeze identity에 포함되고 Exchange listing과 대조되며 implicit re-preflight나 post-freeze argument는 없다.
+- callback state, PIT/data, intent/target/constraint와 root publication failure는 각각 closed owner family/stage와
+  failed requirement를 보존한다. due snapshot/order/Exchange/Account/valuation/feedback도 같은 taxonomy를 쓴다.
 - show_001이 generated public-only Strategy/Exchange/Constraint와 동일 `FrozenRun`으로 dense/canonical physical
   input을 각각 실행하고 unmodified callback·due·Account·feedback·finalization full trace를 비교한다.
 
@@ -120,7 +122,7 @@ Resolved 36 packages
 Installed pytz==2026.3.post1 and editable vqapr==0.1.0
 
 uv run pytest -q
-206 passed in 8.19s
+207 passed in 8.34s
 
 uv run ruff check src tests showcases/show_001_execution_input_registration
 All checks passed!

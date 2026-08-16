@@ -177,7 +177,7 @@ class AccountCommitEvidence:
     root_version: int
     account_version_before: int
     account_version_committed: int
-    mutation: bool = False
+    mutation: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,12 +195,12 @@ class MarkEvidence:
     account: AccountSnapshot
     root_version: int
     account_version: int
-    mutation: bool = False
+    mutation: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class FeedbackEvidence:
-    """Prepared feedback publication; no work remains after Account commit."""
+    """Published feedback transition; no fallible work follows Account commit."""
 
     run_identity: str
     agenda: object
@@ -210,7 +210,7 @@ class FeedbackEvidence:
     candidates: tuple[object, ...]
     root_version: int
     account_version: int
-    mutation: bool = False
+    mutation: bool = True
 
 
 @dataclass(frozen=True, slots=True)

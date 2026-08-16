@@ -77,9 +77,10 @@ proxy acceptance tests를 blocker로 판정했다. 보완 구현은 다음을 �
   frozen `ValuationConfig` binding으로 수행한다.
 - `SimulationFailure`가 stage, mutation flag, cutoff, root/Account version과 pending identity를 보존한다.
 - `vqapr.public.run`이 caller가 명시적으로 preflight한 동일 `FrozenRun`만 소비하고 fingerprinted owners, initial
-  authority와 bounded PIT providers를 load한다. implicit re-preflight는 없다.
-- show_001이 generated public-only Strategy/Exchange/Constraint를 실제 preflight/run하고 dense/canonical input의
-  callback·due·Account·feedback·finalization signature를 비교한다.
+  authority와 bounded PIT providers를 load한다. universe와 owner-partitioned Strategy/Constraint requirements도
+  freeze identity에 포함되며 implicit re-preflight나 post-freeze argument는 없다.
+- show_001이 generated public-only Strategy/Exchange/Constraint와 동일 `FrozenRun`으로 dense/canonical physical
+  input을 각각 실행하고 unmodified callback·due·Account·feedback·finalization full trace를 비교한다.
 
 ### Cutover
 
@@ -119,7 +120,7 @@ Resolved 36 packages
 Installed pytz==2026.3.post1 and editable vqapr==0.1.0
 
 uv run pytest -q
-201 passed in 6.69s
+206 passed in 8.19s
 
 uv run ruff check src tests showcases/show_001_execution_input_registration
 All checks passed!

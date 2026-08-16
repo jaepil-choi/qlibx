@@ -15,6 +15,7 @@ from pathlib import Path
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
+from vqapr.constraints.evaluation import constraint_requirements as declared_constraint_requirements
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, validate
@@ -245,35 +246,35 @@ def _marks_for_occurrence(
 
 def run(
     project_root: str | Path,
-    definition: RunDefinition,
+    frozen_run: FrozenRun,
     *,
     instruments: tuple[str, ...],
 ) -> SimulationResult:
-    """Execute one preflight-bound simulation from its frozen declarations."""
-    if not isinstance(definition, RunDefinition):
-        raise TypeError("definition must be a RunDefinition")
+    """Execute exactly one simulation from a preflight-produced frozen authority."""
+    if not isinstance(frozen_run, FrozenRun):
+        raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
     if not isinstance(instruments, tuple):
         raise TypeError("instruments must be a tuple of instrument identifiers")
 
-    workspace = Workspace.open(project_root)
-    frozen = preflight_run(workspace.project_root, definition)
+    root_path = Path(project_root)
+    frozen = frozen_run
     if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None:
         raise ValueError("public run requires frozen initial account authority")
     if frozen.exchange is None:
         raise ValueError("public run requires a frozen Exchange authority")
+    if frozen.execution_input is None:
+        raise ValueError("public run requires a frozen execution input")
+    validate_execution_input(frozen.execution_input).raise_if_failed()
 
-    strategy = load_strategy_model(frozen.strategy.component, project_root=workspace.project_root)
-    exchange = load_exchange(frozen.exchange, project_root=workspace.project_root)
+    strategy = load_strategy_model(frozen.strategy.component, project_root=root_path)
+    exchange = load_exchange(frozen.exchange, project_root=root_path)
     constraints = tuple(
-        load_constraint(ref, project_root=workspace.project_root)
-        for ref in frozen.constraints.constraints
+        load_constraint(ref, project_root=root_path) for ref in frozen.constraints.constraints
     )
     catalog = _FrozenCatalog(frozen)
     store = DuckDbObservationStore(catalog)
-    allowed_requirements = (
-        *strategy.requirements(),
-        *(requirement for constraint in constraints for requirement in constraint.requirements()),
-    )
+    strategy_requirements = strategy.requirements()
+    constraint_requirements = declared_constraint_requirements(constraints)
     root = AccountState(frozen.initial_account_snapshot)
     strategy.memory = normalize_memory(frozen.initial_model_memory)
     strategy.load_payload(BytesIO(frozen.initial_payload))
@@ -291,11 +292,17 @@ def run(
         frozen,
         strategy,
         state,
-        window_for_occurrence=lambda occurrence: ModelWindow(
+        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
             instruments=instruments,
             store=store,
-            allowed_requirements=allowed_requirements,
+            allowed_requirements=strategy_requirements,
+        ),
+        constraint_window_for_occurrence=lambda occurrence: ModelWindow(
+            evaluation_time=occurrence.evaluation_time,
+            instruments=instruments,
+            store=store,
+            allowed_requirements=constraint_requirements,
         ),
         account=Account(mode=frozen.initial_account_mode),
         exchange=exchange,

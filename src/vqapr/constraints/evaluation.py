@@ -172,17 +172,44 @@ def validate_intended_constraints(
 
 
 def evaluate_constraints(
-    constraints: tuple[Constraint, ...], account: AccountSnapshot, marks: MarkBatch
+    constraints: tuple[Constraint, ...],
+    window: ModelWindow | None,
+    account: AccountSnapshot,
+    marks: MarkBatch,
+    projected: tuple[ProjectedConstraintFinding, ...],
 ) -> ConstraintReport:
-    """Monitor every loaded Constraint against the same committed marked snapshot."""
+    """Monitor one marked account against bounds projected in its PIT window."""
     loaded = _loaded(constraints)
+    if window is None:
+        if loaded:
+            raise TypeError("window must be a ModelWindow when constraints are loaded")
+    elif not isinstance(window, ModelWindow):
+        raise TypeError("window must be a ModelWindow or None")
     if not isinstance(account, AccountSnapshot):
         raise TypeError("account must be an AccountSnapshot")
     if not isinstance(marks, MarkBatch):
         raise TypeError("marks must be a MarkBatch")
+    if not isinstance(projected, tuple) or not all(
+        isinstance(item, ProjectedConstraintFinding) for item in projected
+    ):
+        raise TypeError("projected must be a tuple of ProjectedConstraintFinding")
+    projection_by_id = {item.constraint_id: item for item in projected}
+    if len(projection_by_id) != len(projected) or tuple(projection_by_id) != tuple(
+        constraint.constraint_id for constraint in loaded
+    ):
+        raise ValueError("projected findings must exactly match the loaded constraint instances")
     findings = tuple(
         ActualConstraintFinding(
-            constraint.constraint_id, _finding(constraint, constraint.evaluate(account, marks))
+            constraint.constraint_id,
+            _finding(
+                constraint,
+                constraint.evaluate(
+                    window,
+                    account,
+                    marks,
+                    projection_by_id[constraint.constraint_id].bounds,
+                ),
+            ),
         )
         for constraint in loaded
     )

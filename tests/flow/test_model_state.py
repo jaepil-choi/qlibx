@@ -4,19 +4,20 @@ import math
 
 import pytest
 
-from vqapr.flow.model_state import InMemoryModelStateStore
+from vqapr.flow.model_state import prepare_model_state
 from vqapr.models.memory import normalize_memory
 
 
-def test_committed_memory_is_detached_from_the_strategy_object() -> None:
-    store = InMemoryModelStateStore()
+def test_prepared_memory_and_payload_are_detached_and_identity_bound() -> None:
     memory = {"count": 1, "recent": ["2024-03-05"]}
 
-    ref = store.commit(memory)
+    prepared = prepare_model_state(memory, b"first")
     memory["count"] = 999
     memory["recent"].append("2024-03-06")
 
-    assert store.load(ref) == {"count": 1, "recent": ["2024-03-05"]}
+    assert prepared.memory == {"count": 1, "recent": ["2024-03-05"]}
+    assert prepared.payload == b"first"
+    assert prepare_model_state(prepared.memory, b"second").ref != prepared.ref
 
 
 @pytest.mark.parametrize("value", [{1: "bad"}, ("tuple",), math.nan, math.inf])

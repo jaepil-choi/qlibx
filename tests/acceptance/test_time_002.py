@@ -23,6 +23,14 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.evidence.artifacts import (
+    AccountCommitEvidence,
+    CallbackEvidence,
+    FeedbackEvidence,
+    MarkEvidence,
+    SimulationFailure,
+    SimulationFailureKind,
+)
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
@@ -126,7 +134,7 @@ class _Constraint(Constraint):
         return "risk"
 
     def requirements(self) -> tuple[DataRequirement, ...]:
-        return ()
+        return (_requirement(),)
 
     def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
         return ConstraintBounds(
@@ -141,7 +149,13 @@ class _Constraint(Constraint):
             self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
         )
 
-    def evaluate(self, account: AccountSnapshot, marks: object) -> ConstraintFinding:
+    def evaluate(
+        self,
+        window: ModelWindow,
+        account: AccountSnapshot,
+        marks: object,
+        bounds: ConstraintBounds,
+    ) -> ConstraintFinding:
         return ConstraintFinding(
             self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
         )
@@ -179,6 +193,7 @@ def _frozen(
     account: AccountSnapshot = _ACCOUNT,
     datasets: tuple[DatasetRegistration, ...] = (),
     sources: tuple[SourceSpec, ...] = (),
+    constraints: ConstraintSet | None = None,
 ) -> FrozenRun:
     strategy = StrategyConfig(
         _component("strategy", ComponentKind.STRATEGY_MODEL),
@@ -195,7 +210,9 @@ def _frozen(
     return FrozenRun(
         strategy,
         valuation,
-        ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),)),
+        constraints
+        if constraints is not None
+        else ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),)),
         _agenda("strategy", OperationRole.STRATEGY_CALLBACK, *callbacks),
         _agenda("valuation", OperationRole.VALUATION, *valuations),
         monitor,
@@ -210,23 +227,38 @@ def _frozen(
     )
 
 
-def _flow(frozen: FrozenRun, strategy: StrategyModel, state: RunStateRepository) -> SimulationFlow:
+def _flow(
+    frozen: FrozenRun,
+    strategy: StrategyModel,
+    state: RunStateRepository,
+    constraints: tuple[Constraint, ...] = (_Constraint(),),
+    constraint_window_for_occurrence: object = None,
+    marks_for_occurrence: object = None,
+) -> SimulationFlow:
     return SimulationFlow(
         frozen,
         strategy,
         state,
-        window_for_occurrence=lambda occurrence: ModelWindow(
+        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
             instruments=("A",),
             store=DuckDbObservationStore(_Catalog()),
             allowed_requirements=(_requirement(),),
         ),
+        constraint_window_for_occurrence=constraint_window_for_occurrence
+        or (
+            lambda occurrence: ModelWindow(
+                evaluation_time=occurrence.evaluation_time,
+                instruments=("A",),
+                store=DuckDbObservationStore(_Catalog()),
+                allowed_requirements=(_requirement(),),
+            )
+        ),
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_exchange(),
-        constraints=(_Constraint(),),
-        marks_for_occurrence=lambda _, __, account: {
-            instrument: Decimal("10") for instrument in account.positions
-        },
+        constraints=constraints,
+        marks_for_occurrence=marks_for_occurrence
+        or (lambda _, __, account: {instrument: Decimal("10") for instrument in account.positions}),
     )
 
 
@@ -392,6 +424,98 @@ def test_callback_free_valuation_and_monitoring_are_independent_agendas() -> Non
 
 
 @pytest.mark.uc("UC-TIME-002")
+def test_empty_constraint_set_needs_no_constraint_window() -> None:
+    at = datetime(2024, 3, 5, 12, tzinfo=KST)
+    frozen = _frozen((at,), end=at, constraints=ConstraintSet(()))
+
+    def unexpected_constraint_window(_: OperationOccurrence) -> ModelWindow:
+        raise AssertionError("empty ConstraintSet must not request a constraint window")
+
+    result = _flow(
+        frozen,
+        _Strategy((NoDecision("unconstrained"),)),
+        _state(),
+        (),
+        unexpected_constraint_window,
+    ).run()
+
+    assert len(result.occurrences) == 1
+    assert result.final_state.pending_accepted_intent is None
+
+
+@pytest.mark.uc("UC-TIME-002")
+def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
+    tmp_path: Path,
+) -> None:
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+    monitoring = datetime(2024, 3, 5, 16, tzinfo=KST)
+
+    class RecordingConstraint(_Constraint):
+        def __init__(self) -> None:
+            self.projections: list[tuple[datetime, ConstraintBounds]] = []
+            self.intended_bounds: ConstraintBounds | None = None
+            self.actual: tuple[datetime, ConstraintBounds] | None = None
+
+        def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+            bounds = super().project(window, instruments)
+            self.projections.append((window.evaluation_time, bounds))
+            return bounds
+
+        def validate_intended(
+            self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
+        ) -> ConstraintFinding:
+            self.intended_bounds = bounds
+            return super().validate_intended(intent, bounds)
+
+        def evaluate(
+            self,
+            window: ModelWindow,
+            account: AccountSnapshot,
+            marks: object,
+            bounds: ConstraintBounds,
+        ) -> ConstraintFinding:
+            self.actual = (window.evaluation_time, bounds)
+            return ConstraintFinding(
+                self.constraint_id, False, Decimal("1"), Decimal("0"), Decimal("1"), {}
+            )
+
+    constraint = RecordingConstraint()
+    result = _flow(
+        _frozen(
+            (callback,),
+            monitoring=(monitoring,),
+            end=monitoring,
+            execution=_execution(
+                _parquet(
+                    tmp_path / "execution.parquet",
+                    """
+                    SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                           'A' AS instrument, true AS is_tradable, 10.0 AS close
+                    """,
+                )
+            ),
+        ),
+        _Strategy(
+            (
+                EconomicPortfolioIntent(
+                    UUID(int=3), "strategy", (), Decimal("1"), _BUDGET, (), 0, None
+                ),
+            )
+        ),
+        _state(),
+        (constraint,),
+    ).run()
+
+    assert [cutoff for cutoff, _ in constraint.projections] == [callback, monitoring]
+    assert constraint.intended_bounds is not None
+    assert constraint.intended_bounds == constraint.projections[0][1]
+    assert constraint.actual == (monitoring, constraint.projections[1][1])
+    assert result.occurrences[-1].result.report.passed is False
+    assert result.final_state.account is not None
+    assert result.final_state.account.snapshot.version == 1
+
+
+@pytest.mark.uc("UC-TIME-002")
 def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurrence() -> None:
     payload = EconomicPortfolioIntent(
         UUID(int=1), "strategy", (), Decimal("1"), _BUDGET, (_SOURCE,), 0, None
@@ -453,6 +577,9 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
         def __init__(self, intent: EconomicPortfolioIntent) -> None:
             self.intent = intent
 
+        def requirements(self) -> tuple[DataRequirement, ...]:
+            return (requirement,)
+
         def on_occurrence(self, context: object) -> EconomicPortfolioIntent:
             context.window.observations(requirement)
             return self.intent
@@ -488,11 +615,17 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
             frozen,
             ReadingStrategy(candidate),
             state,
-            window_for_occurrence=lambda occurrence: ModelWindow(
+            strategy_window_for_occurrence=lambda occurrence: ModelWindow(
                 evaluation_time=occurrence.evaluation_time,
                 instruments=("A",),
                 store=DuckDbObservationStore(workspace),
                 allowed_requirements=(requirement,),
+            ),
+            constraint_window_for_occurrence=lambda occurrence: ModelWindow(
+                evaluation_time=occurrence.evaluation_time,
+                instruments=("A",),
+                store=DuckDbObservationStore(workspace),
+                allowed_requirements=(_requirement(),),
             ),
             account=Account(mode=AccountMode.LONG_ONLY),
             exchange=_exchange(),
@@ -679,7 +812,8 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
             frozen,
             _Strategy((NoDecision("x"),)),
             _state(),
-            window_for_occurrence=lambda _: None,
+            strategy_window_for_occurrence=lambda _: None,
+            constraint_window_for_occurrence=lambda _: None,
             account=Account(mode=AccountMode.LONG_ONLY),
             exchange=_exchange(),
             constraints=(DifferentConstraint(),),
@@ -732,12 +866,40 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
         1, Decimal("0"), {"A": Decimal("10")}
     )
     assert result.final_state.pending_accepted_intent is None
-    assert len(result.final_state.feedback) == 1
+    assert len(result.final_state.feedback) == 2
     assert [trace.kind for trace in result.final_state.lifecycle_trace] == [
         LifecycleKind.ACCEPTED_INTENT,
-        LifecycleKind.DUE_EXECUTED,
+        LifecycleKind.ACCOUNT_COMMITTED,
+        LifecycleKind.MARKED,
+        LifecycleKind.FEEDBACK_PUBLISHED,
         LifecycleKind.NO_DECISION,
     ]
+    callback_evidence = result.final_state.lifecycle_trace[0].detail
+    commit_evidence = result.final_state.lifecycle_trace[1].detail
+    mark_evidence = result.final_state.lifecycle_trace[2].detail
+    feedback_evidence = result.final_state.lifecycle_trace[3].detail
+    assert isinstance(callback_evidence, CallbackEvidence)
+    assert isinstance(commit_evidence, AccountCommitEvidence)
+    assert isinstance(mark_evidence, MarkEvidence)
+    assert isinstance(feedback_evidence, FeedbackEvidence)
+    assert callback_evidence.run_identity == frozen.identity
+    assert callback_evidence.agenda == frozen.strategy_agenda
+    assert callback_evidence.occurrence.occurrence_id == "strategy-0"
+    assert callback_evidence.current_model_state_ref == frozen.initial_model_state_ref
+    assert callback_evidence.committed_model_state_ref != callback_evidence.current_model_state_ref
+    assert commit_evidence.execution_snapshot.missing_target_instruments == ()
+    assert commit_evidence.execution_snapshot.duplicate_instruments == ()
+    assert commit_evidence.fill_convention.declaration_identity == (
+        "SAME_DAY",
+        "15:30:00",
+        "Asia/Seoul",
+        "close",
+        None,
+        None,
+    )
+    assert commit_evidence.target.identity == commit_evidence.pending.target.identity
+    assert mark_evidence.run_identity == feedback_evidence.run_identity == frozen.identity
+    assert feedback_evidence.candidates == (commit_evidence.dealt_fills, mark_evidence.marks)
     assert result.final_state.finalization is not None
     assert strategy.seen[-1][2] == 1
 
@@ -749,7 +911,7 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_target_only_absence_rejects_an_unreconciled_cash_plan_before_fills(tmp_path: Path) -> None:
+def test_target_only_absence_publishes_typed_zero_dealt_fill(tmp_path: Path) -> None:
     registration = _execution(
         _parquet(
             tmp_path / "absent.parquet",
@@ -772,15 +934,24 @@ def test_target_only_absence_rejects_an_unreconciled_cash_plan_before_fills(tmp_
         None,
     )
     state = _state()
-    with pytest.raises(ValueError, match="complete desired positions"):
-        _flow(
-            _frozen((callback,), valuations=(target,), end=target, execution=registration),
-            _Strategy((intent,)),
-            state,
-        ).run()
+    result = _flow(
+        _frozen((callback,), valuations=(target,), end=target, execution=registration),
+        _Strategy((intent,)),
+        state,
+    ).run()
 
-    assert state.current.account == AccountState(_ACCOUNT)
-    assert state.current.pending_accepted_intent is not None
+    commit = next(
+        trace.detail
+        for trace in result.final_state.lifecycle_trace
+        if trace.kind is LifecycleKind.ACCOUNT_COMMITTED
+    )
+    assert isinstance(commit, AccountCommitEvidence)
+    fill = commit.dealt_fills.fills[0]
+    assert fill.dealt_quantity == 0
+    assert fill.reason.value == "absent"
+    assert result.final_state.account is not None
+    assert result.final_state.account.snapshot == AccountSnapshot(1, Decimal("100"), {})
+    assert result.final_state.pending_accepted_intent is None
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -824,7 +995,7 @@ def test_held_value_gap_blocks_due_execution_before_liquidation(tmp_path: Path) 
     )
     state = _state(initial)
 
-    with pytest.raises(ValueError, match="held instruments"):
+    with pytest.raises(SimulationFailure, match="held instruments") as raised:
         _flow(
             _frozen(
                 (callback,),
@@ -839,6 +1010,57 @@ def test_held_value_gap_blocks_due_execution_before_liquidation(tmp_path: Path) 
 
     assert state.current.account == AccountState(initial)
     assert state.current.pending_accepted_intent is not None
+    assert raised.value.kind is SimulationFailureKind.PRE_COMMIT
+    assert raised.value.mutation is False
+    assert raised.value.account_version == initial.version
+    assert raised.value.pending_id == str(intent.intent_id)
+
+
+@pytest.mark.uc("UC-TIME-002")
+def test_due_failures_preserve_pre_and_post_commit_authority_lineage(tmp_path: Path) -> None:
+    registration = _execution(
+        _parquet(
+            tmp_path / "failure-lineage.parquet",
+            """
+            SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                   'A' AS instrument, true AS is_tradable, 10.0 AS close
+            """,
+        )
+    )
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+    target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
+    intent = EconomicPortfolioIntent(
+        UUID(int=9),
+        "strategy",
+        (PortfolioTarget("A", weight=Decimal("1")),),
+        Decimal("0"),
+        _BUDGET,
+        (),
+        0,
+        None,
+    )
+    state = _state()
+
+    def required_valuation_failure(*_: object) -> object:
+        raise RuntimeError("required valuation unavailable")
+
+    with pytest.raises(SimulationFailure) as raised:
+        _flow(
+            _frozen((callback,), end=target, execution=registration),
+            _Strategy((intent,)),
+            state,
+            marks_for_occurrence=required_valuation_failure,
+        ).run()
+
+    failure = raised.value
+    assert failure.kind is SimulationFailureKind.FAILED_AFTER_COMMIT
+    assert failure.mutation is True
+    assert failure.root_version == state.current.version
+    assert failure.model_version == state.current.model_state_commit_count
+    assert failure.account_version == 1
+    assert failure.pending_id is None
+    assert failure.correlation_id == failure.frozen_run_identity
+    assert state.current.pending_accepted_intent is None
 
 
 @pytest.mark.uc("UC-TIME-002")

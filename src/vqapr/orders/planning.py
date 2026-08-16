@@ -54,8 +54,8 @@ def plan_orders(
 ) -> OrderBatch:
     """Plan a complete target portfolio against execution-time NAV.
 
-    Every desired position must have a selected execution price: a complete plan cannot
-    establish its declared post-trade cash fraction from an unresolved target.
+    Held positions always require a selected value. A target-only missing row remains an
+    unresolved request so the Exchange can publish typed ``ABSENT`` zero-dealt evidence.
     """
     if not isinstance(account, AccountSnapshot):
         raise TypeError("account must be an AccountSnapshot")
@@ -75,22 +75,26 @@ def plan_orders(
         raise ValueError("weight targets plus cash_target must equal one")
 
     instruments = set(account.positions).union(weights, quantities)
-    missing_prices = sorted(
-        instrument_id for instrument_id in instruments if instrument_id not in selected_prices
+    missing_held = sorted(
+        instrument_id
+        for instrument_id, quantity in account.positions.items()
+        if quantity != 0 and instrument_id not in selected_prices
     )
-    if missing_prices:
-        raise ValueError(
-            f"missing selected execution price for complete desired positions: {missing_prices}"
-        )
+    if missing_held:
+        raise ValueError(f"missing selected execution price for held instruments: {missing_held}")
 
     desired_quantities: dict[str, Decimal] = {}
+    unresolved_weights: dict[str, Decimal] = {}
     for instrument_id in instruments:
         if instrument_id in weights:
-            desired = weights[instrument_id] * nav / selected_prices[instrument_id]
+            price = selected_prices.get(instrument_id)
+            desired = Decimal(0) if price is None else weights[instrument_id] * nav / price
             allocation = weights[instrument_id]
+            if price is None:
+                unresolved_weights[instrument_id] = allocation
         elif instrument_id in quantities:
             desired = quantities[instrument_id]
-            allocation = desired * selected_prices[instrument_id] / nav
+            allocation = desired
         else:
             desired = Decimal(0)
             allocation = Decimal(0)
@@ -100,21 +104,23 @@ def plan_orders(
             raise ValueError("complete desired position is outside the declared budget bounds")
         desired_quantities[instrument_id] = desired
 
-    post_trade_cash = nav - sum(
-        (
-            desired_quantities[instrument_id] * selected_prices[instrument_id]
-            for instrument_id in instruments
-        ),
-        Decimal(0),
-    )
-    if quantities and post_trade_cash != nav * cash:
-        raise ValueError("complete desired positions do not produce the declared cash_target")
+    unresolved_targets = (set(weights) | set(quantities)).difference(selected_prices)
+    if quantities and not unresolved_targets:
+        post_trade_cash = nav - sum(
+            (
+                desired_quantities[instrument_id] * selected_prices[instrument_id]
+                for instrument_id in instruments
+            ),
+            Decimal(0),
+        )
+        if post_trade_cash != nav * cash:
+            raise ValueError("complete desired positions do not produce the declared cash_target")
 
     requests: list[OrderRequest] = []
     diagnostics: list[ZeroDeltaDiagnostic] = []
     for instrument_id in instruments:
         current = account.positions.get(instrument_id, Decimal(0))
-        price = selected_prices[instrument_id]
+        price = selected_prices.get(instrument_id)
         desired = desired_quantities[instrument_id]
         request = OrderRequest(
             instrument_id=instrument_id,
@@ -122,9 +128,10 @@ def plan_orders(
             desired_quantity=desired,
             delta_quantity=desired - current,
             execution_price=price,
+            unresolved_weight_target=unresolved_weights.get(instrument_id),
         )
         requests.append(request)
-        if request.delta_quantity == 0:
+        if request.delta_quantity == 0 and price is not None:
             diagnostics.append(
                 ZeroDeltaDiagnostic(
                     instrument_id=instrument_id,

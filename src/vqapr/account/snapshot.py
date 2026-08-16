@@ -87,9 +87,12 @@ class AccountState:
             if versions != tuple(sorted(set(versions))):
                 raise ValueError("mark history versions must be strictly increasing")
             latest = self.mark_history[-1]
-            if latest.account_version != self.snapshot.version:
-                raise ValueError("latest mark must belong to the current account version")
-            if latest.nav != self.snapshot.cash + latest.marks.total_value:
+            if latest.account_version > self.snapshot.version:
+                raise ValueError("latest mark cannot belong to a future Account snapshot")
+            if (
+                latest.account_version == self.snapshot.version
+                and latest.nav != self.snapshot.cash + latest.marks.total_value
+            ):
                 raise ValueError("latest mark NAV must match the current Account snapshot")
 
     @property

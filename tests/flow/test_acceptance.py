@@ -5,12 +5,14 @@ from decimal import Decimal
 
 import pytest
 
+import vqapr.flow.model_state as model_state
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.fills import Fill, FillBatch
 from vqapr.flow.run_state import (
+    AcceptedRunState,
     LifecycleKind,
     LifecycleTrace,
     RunFinalization,
@@ -50,22 +52,43 @@ def _due_candidate(repository: RunStateRepository):
 
 
 def test_prepared_state_is_not_visible_or_loadable_until_root_swap() -> None:
-    repository = RunStateRepository()
+    repository = RunStateRepository(initial_model_memory={"count": 1}, initial_payload=b"before")
+    before_ref = repository.root.current_model_state_ref
 
     prepared = repository.prepare_callback(
-        {"count": 1}, b"", lifecycle=LifecycleTrace(LifecycleKind.NO_DECISION)
+        {"count": 1}, b"after", lifecycle=LifecycleTrace(LifecycleKind.NO_DECISION)
     )
 
     assert repository.root.version == 0
     assert repository.root.model_state_commit_count == 0
+    assert prepared.root.current_model_state_ref != before_ref
     with pytest.raises(KeyError, match="unknown visible"):
         repository.load_model_state(prepared.root.current_model_state_ref)
+    with pytest.raises(KeyError, match="unknown visible"):
+        repository.load_payload(prepared.root.current_model_state_ref)
 
     accepted = repository.publish(prepared)
 
     assert accepted.version == 1
     assert accepted.model_state_commit_count == 1
     assert repository.load_model_state(accepted.current_model_state_ref) == {"count": 1}
+    assert repository.load_payload(accepted.current_model_state_ref) == b"after"
+
+
+def test_legacy_standalone_model_state_publisher_is_absent() -> None:
+    assert not hasattr(model_state, "InMemoryModelStateStore")
+
+
+def test_root_rejects_a_ref_paired_with_different_payload_bytes() -> None:
+    prepared = model_state.prepare_model_state({"count": 1}, b"before")
+
+    with pytest.raises(ValueError, match="exact memory and payload"):
+        AcceptedRunState(
+            version=0,
+            _model_states={prepared.ref: prepared.memory},
+            _payloads={prepared.ref: b"after"},
+            current_model_state_ref=prepared.ref,
+        )
 
 
 def test_visible_state_is_detached_from_candidate_and_loaded_values() -> None:
@@ -133,10 +156,15 @@ def test_prepare_and_before_swap_failures_leave_authority_and_live_memory_unchan
         model.memory["count"] = 99
         raise RuntimeError("injected")
 
-    failing = RunStateRepository(pending_accepted_intent="previous", before_swap=fail_before_swap)
+    failing = RunStateRepository(
+        initial_model_memory={"count": 1},
+        initial_payload=b"before",
+        pending_accepted_intent="previous",
+        before_swap=fail_before_swap,
+    )
     candidate = failing.prepare_callback(
         {"count": 2},
-        b"",
+        b"after",
         lifecycle=LifecycleTrace(LifecycleKind.NO_DECISION),
         recorder=_recorder(),
     )
@@ -149,6 +177,8 @@ def test_prepare_and_before_swap_failures_leave_authority_and_live_memory_unchan
     assert failing.root.model_state_commit_count == 0
     assert failing.root.pending_accepted_intent == "previous"
     assert not failing.root.recorder_rows
+    assert failing.load_model_state(failing.root.current_model_state_ref) == {"count": 1}
+    assert failing.load_payload(failing.root.current_model_state_ref) == b"before"
     assert model.memory == {"count": 1}
 
 

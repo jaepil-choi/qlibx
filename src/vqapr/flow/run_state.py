@@ -8,11 +8,11 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
-from vqapr.account.account import PreparedAccountTransition
+from vqapr.account.account import PreparedAccountFill, PreparedAccountTransition
 from vqapr.account.snapshot import AccountState
 from vqapr.domain.references import ModelStateRef
 from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
-from vqapr.flow.model_state import InMemoryModelStateStore
+from vqapr.flow.model_state import prepare_model_state
 from vqapr.models.memory import ModelMemory, normalize_memory
 from vqapr.valuation.marks import MarkBatch
 
@@ -21,6 +21,9 @@ class LifecycleKind(StrEnum):
     NO_DECISION = "NO_DECISION"
     ACCEPTED_INTENT = "ACCEPTED_INTENT"
     DUE_EXECUTED = "DUE_EXECUTED"
+    ACCOUNT_COMMITTED = "ACCOUNT_COMMITTED"
+    MARKED = "MARKED"
+    FEEDBACK_PUBLISHED = "FEEDBACK_PUBLISHED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +74,12 @@ class AcceptedRunState:
             raise ValueError("current_model_state_ref must be visible in this root")
         if set(self._payloads) != set(self._model_states):
             raise ValueError("payloads must be keyed by exactly the visible ModelStateRefs")
+        for ref, memory in self._model_states.items():
+            payload = self._payloads[ref]
+            if not isinstance(payload, bytes):
+                _invalid_payload(ref)
+            if prepare_model_state(memory, payload).ref != ref:
+                raise ValueError("ModelStateRef must identify its exact memory and payload")
         object.__setattr__(
             self,
             "_model_states",
@@ -148,14 +157,12 @@ class RunStateRepository:
         initial_payload: bytes = b"",
         pending_accepted_intent: object = None,
         before_swap: Callable[[PreparedRunState], None] | None = None,
-        state_store: InMemoryModelStateStore | None = None,
     ) -> None:
-        self._state_store = state_store or InMemoryModelStateStore()
         if not isinstance(initial_payload, bytes):
             raise TypeError("initial_payload must be bytes")
-        prepared = self._state_store.prepare(initial_model_memory)
+        prepared = prepare_model_state(initial_model_memory, initial_payload)
         states = {prepared.ref: prepared.memory}
-        payloads = {prepared.ref: bytes(initial_payload)}
+        payloads = {prepared.ref: prepared.payload}
         current_ref = prepared.ref
         self._root = AcceptedRunState(
             version=0,
@@ -203,11 +210,11 @@ class RunStateRepository:
         expected = root.version if expected_version is None else expected_version
         if expected != root.version:
             raise RuntimeError("run state optimistic conflict")
-        candidate = self._state_store.prepare(memory)
+        candidate = prepare_model_state(memory, payload)
         states = dict(root._model_states)
         states[candidate.ref] = candidate.memory
         payloads = dict(root._payloads)
-        payloads[candidate.ref] = bytes(payload)
+        payloads[candidate.ref] = candidate.payload
         rows = dict(root.recorder_rows)
         manifests = root.recorder_manifests
         if recorder is not None:
@@ -247,6 +254,121 @@ class RunStateRepository:
             self._before_swap(prepared)
         self._root = prepared.root
         return self._root
+
+    def _publish_infallible(self, prepared: PreparedRunState) -> AcceptedRunState:
+        """Publish a prevalidated post-Account candidate without callback hooks."""
+        if not isinstance(prepared, PreparedRunState):
+            raise TypeError("prepared must be a PreparedRunState")
+        if prepared.expected_version != self._root.version:
+            raise RuntimeError("run state optimistic conflict")
+        self._root = prepared.root
+        return self._root
+
+    def prepare_account_commit(
+        self,
+        *,
+        pending_id: str,
+        account: PreparedAccountFill,
+        fill: object,
+        evidence: object = None,
+    ) -> PreparedRunState:
+        """Prepare the root which consumes pending and mirrors the fill commit."""
+        root = self._root
+        if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
+            raise RuntimeError("due completion pending identity does not match current pending")
+        if root.account != account.source or fill != account.fill_batch:
+            raise RuntimeError("prepared Account fill does not match current root")
+        committed = AccountState(
+            snapshot=account.next_snapshot,
+            mark_history=account.source.mark_history,
+            fill_history=(*account.source.fill_history, *account.journal_entries),
+        )
+        return PreparedRunState(
+            root.version,
+            AcceptedRunState(
+                version=root.version + 1,
+                _model_states=root._model_states,
+                _payloads=root._payloads,
+                current_model_state_ref=root.current_model_state_ref,
+                account=committed,
+                pending_accepted_intent=None,
+                lifecycle_trace=(
+                    *root.lifecycle_trace,
+                    LifecycleTrace(LifecycleKind.ACCOUNT_COMMITTED, evidence),
+                ),
+                recorder_manifests=root.recorder_manifests,
+                recorder_rows=root.recorder_rows,
+                feedback=root.feedback,
+                finalization=root.finalization,
+                model_state_commit_count=root.model_state_commit_count,
+            ),
+        )
+
+    def publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:
+        return self._publish_infallible(prepared)
+
+    def prepare_marked(
+        self, *, account: PreparedAccountTransition, mark: MarkBatch, evidence: object = None
+    ) -> PreparedRunState:
+        root = self._root
+        if root.account is None or root.account.snapshot != account.fill.next_snapshot:
+            raise RuntimeError("prepared Account mark does not match current root")
+        if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
+            raise ValueError("mark must be the prepared Account mark batch")
+        return PreparedRunState(
+            root.version,
+            AcceptedRunState(
+                version=root.version + 1,
+                _model_states=root._model_states,
+                _payloads=root._payloads,
+                current_model_state_ref=root.current_model_state_ref,
+                account=account.next_state,
+                pending_accepted_intent=None,
+                lifecycle_trace=(
+                    *root.lifecycle_trace,
+                    LifecycleTrace(LifecycleKind.MARKED, evidence),
+                ),
+                recorder_manifests=root.recorder_manifests,
+                recorder_rows=root.recorder_rows,
+                feedback=root.feedback,
+                finalization=root.finalization,
+                model_state_commit_count=root.model_state_commit_count,
+            ),
+        )
+
+    def publish_marked(self, prepared: PreparedRunState) -> AcceptedRunState:
+        return self._publish_infallible(prepared)
+
+    def prepare_feedback(
+        self, feedback: tuple[object, ...], *, evidence: object = None
+    ) -> PreparedRunState:
+        if not isinstance(feedback, tuple):
+            raise TypeError("feedback must be a tuple")
+        root = self._root
+        return PreparedRunState(
+            root.version,
+            AcceptedRunState(
+                version=root.version + 1,
+                _model_states=root._model_states,
+                _payloads=root._payloads,
+                current_model_state_ref=root.current_model_state_ref,
+                account=root.account,
+                pending_accepted_intent=None,
+                lifecycle_trace=(
+                    *root.lifecycle_trace,
+                    LifecycleTrace(LifecycleKind.FEEDBACK_PUBLISHED, evidence),
+                ),
+                recorder_manifests=root.recorder_manifests,
+                recorder_rows=root.recorder_rows,
+                feedback=(*root.feedback, *feedback),
+                finalization=root.finalization,
+                model_state_commit_count=root.model_state_commit_count,
+            ),
+        )
+
+    def publish_feedback(self, prepared: PreparedRunState) -> AcceptedRunState:
+        """Publish already-prepared feedback without running an external hook."""
+        return self._publish_infallible(prepared)
 
     def accept_no_decision(
         self,

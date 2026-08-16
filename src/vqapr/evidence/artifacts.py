@@ -1,154 +1,239 @@
-"""Typed, immutable evidence emitted by the simulation Flow."""
+"""Canonical, immutable lineage emitted by the simulation Flow."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from enum import StrEnum
+from typing import Final
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import require_tz_aware
-from vqapr.valuation.marks import MarkBatch
+
+
+class SimulationFailureFamily(StrEnum):
+    """Closed ownership family for a failed simulation operation."""
+
+    SIMULATION = "SIMULATION"
+
+
+class SimulationFailureKind(StrEnum):
+    """Closed mutation taxonomy; retry behaviour is determined from this value."""
+
+    PRE_COMMIT = "PRE_COMMIT"
+    FAILED_AFTER_COMMIT = "FAILED_AFTER_COMMIT"
+
+
+class SimulationStage(StrEnum):
+    START = "simulation.start"
+    CALLBACK = "simulation.callback"
+    DUE = "simulation.due"
+    VALUATION = "simulation.valuation"
+    MONITORING = "simulation.monitoring"
+    FINALIZE = "simulation.finalize"
+
+
+_PRE_COMMIT: Final = SimulationFailureKind.PRE_COMMIT
+
+
+@dataclass(frozen=True, slots=True)
+class FailureObservation:
+    """Exact exception type and immutable arguments observed at the boundary."""
+
+    exception_type: type[Exception]
+    arguments: tuple[object, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RetryPrecondition:
+    """Typed retry boundary rather than an advisory string."""
+
+    requires_replay_from_root: bool
+    required_pending_id: str | None
 
 
 class SimulationFailure(RuntimeError, ValueError):
-    """Typed fail-closed runtime error with exact visible authority versions."""
+    """Typed failure containing the complete visible replay boundary."""
 
     def __init__(
         self,
         *,
-        stage: str,
+        stage: SimulationStage,
+        clock: datetime,
+        failed_requirement: object | None,
+        observed: object,
+        cause: Exception,
+        retry_precondition: object,
+        correlation_id: str,
+        frozen_run_identity: str,
         cutoff: datetime,
         root_version: int,
+        model_version: int,
+        model_state_ref: ModelStateRef | None,
         account_version: int | None,
         pending_id: str | None,
-        cause: Exception,
+        kind: SimulationFailureKind = _PRE_COMMIT,
     ) -> None:
-        if not isinstance(stage, str) or not stage:
-            raise ValueError("stage must be a non-empty string")
+        if not isinstance(stage, SimulationStage):
+            raise TypeError("stage must be a SimulationStage")
+        require_tz_aware(clock, name="clock")
         require_tz_aware(cutoff, name="cutoff")
-        if isinstance(root_version, bool) or not isinstance(root_version, int):
-            raise TypeError("root_version must be an integer")
-        if account_version is not None and (
-            isinstance(account_version, bool) or not isinstance(account_version, int)
-        ):
-            raise TypeError("account_version must be an integer or None")
-        if pending_id is not None and (not isinstance(pending_id, str) or not pending_id):
-            raise ValueError("pending_id must be a non-empty string or None")
         if not isinstance(cause, Exception):
             raise TypeError("cause must be an Exception")
+        if not isinstance(kind, SimulationFailureKind):
+            raise TypeError("kind must be a SimulationFailureKind")
+        if kind is _PRE_COMMIT and pending_id is None and stage is SimulationStage.DUE:
+            # A due operation always has an accepted pending identity before its commit.
+            raise ValueError("pre-commit due failures must retain their pending identity")
+        self.family = SimulationFailureFamily.SIMULATION
+        self.kind = kind
         self.stage = stage
-        self.mutation = False
+        self.clock = clock
+        self.mutation = kind is SimulationFailureKind.FAILED_AFTER_COMMIT
+        self.failed_requirement = failed_requirement
+        self.observed = observed
+        self.cause = cause
+        self.retry_precondition = retry_precondition
+        self.correlation_id = correlation_id
+        self.frozen_run_identity = frozen_run_identity
         self.cutoff = cutoff
         self.root_version = root_version
+        self.model_version = model_version
+        self.model_state_ref = model_state_ref
         self.account_version = account_version
         self.pending_id = pending_id
-        self.cause_type = type(cause).__name__
-        self.detail = str(cause)
-        super().__init__(f"{stage}: {cause}")
+        super().__init__(f"{stage.value}: {cause}")
 
 
 @dataclass(frozen=True, slots=True)
 class CallbackEvidence:
-    stage: str
-    mutation: bool
-    root_version: int
+    """Pre-publication callback authority, inputs, decision, and candidate output."""
+
+    run_identity: str
+    strategy: object
+    agenda: object
+    occurrence: object
     cutoff: datetime
+    root_version: int
     account: AccountSnapshot
-    pending_id: str | None
+    current_model_state_ref: ModelStateRef
+    committed_model_state_ref: ModelStateRef
+    strategy_accesses: tuple[object, ...]
+    actual_source_refs: tuple[object, ...]
     decision: object
+    pending: object | None
     constraints: tuple[object, ...]
+    mutation: bool = False
 
     def __post_init__(self) -> None:
-        _common(self.stage, self.mutation, self.root_version, self.cutoff, self.account)
-        if self.pending_id is not None and (
-            not isinstance(self.pending_id, str) or not self.pending_id
-        ):
-            raise ValueError("pending_id must be a non-empty string or None")
-        if not isinstance(self.constraints, tuple):
-            raise TypeError("constraints must be a tuple")
+        if self.mutation:
+            raise ValueError("callback evidence must precede publication")
+        require_tz_aware(self.cutoff, name="cutoff")
+
+
+@dataclass(frozen=True, slots=True)
+class AccountCommitEvidence:
+    """All exact inputs and committed values for the irreversible Account fill."""
+
+    run_identity: str
+    agenda: object
+    occurrence: object
+    cutoff: datetime
+    pending: object
+    target: object
+    fill_convention: object
+    execution_snapshot: object
+    planning_nav: object
+    planning_cash_target: object
+    planning_budget: object
+    intended_targets: tuple[object, ...]
+    requested_orders: object
+    dealt_fills: object
+    before: AccountSnapshot
+    committed: AccountSnapshot
+    root_version: int
+    account_version_before: int
+    account_version_committed: int
+    mutation: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MarkEvidence:
+    """Valuation declaration, selected marks, and post-mark Account authority."""
+
+    run_identity: str
+    agenda: object
+    occurrence: object
+    cutoff: datetime
+    valuation_config: object
+    selected_marks: object
+    marks: object
+    limitations: tuple[object, ...]
+    account: AccountSnapshot
+    root_version: int
+    account_version: int
+    mutation: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackEvidence:
+    """Prepared feedback publication; no work remains after Account commit."""
+
+    run_identity: str
+    agenda: object
+    occurrence: object
+    cutoff: datetime
+    pending: object
+    candidates: tuple[object, ...]
+    root_version: int
+    account_version: int
+    mutation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class DueExecutionEvidence:
-    stage: str
-    mutation: bool
-    root_version: int
-    cutoff: datetime
-    pending_id: str
-    before: AccountSnapshot
-    after: AccountSnapshot
-    nav: Decimal
-    marks: MarkBatch
-    orders: object
-    fills: object
-    constraints: tuple[object, ...]
+    """Complete due lifecycle lineage, including commit, marking, and feedback."""
 
-    def __post_init__(self) -> None:
-        _common(self.stage, self.mutation, self.root_version, self.cutoff, self.after)
-        if not isinstance(self.pending_id, str) or not self.pending_id:
-            raise ValueError("pending_id must be a non-empty string")
-        if not isinstance(self.before, AccountSnapshot):
-            raise TypeError("before must be an AccountSnapshot")
-        if not isinstance(self.nav, Decimal) or not self.nav.is_finite():
-            raise ValueError("nav must be a finite Decimal")
-        if not isinstance(self.marks, MarkBatch):
-            raise TypeError("marks must be a MarkBatch")
-        if not isinstance(self.constraints, tuple):
-            raise TypeError("constraints must be a tuple")
+    commit: AccountCommitEvidence
+    mark: MarkEvidence
+    feedback: FeedbackEvidence
 
 
 @dataclass(frozen=True, slots=True)
 class ValuationEvidence:
-    stage: str
-    mutation: bool
+    run_identity: str
+    agenda: object
+    occurrence: object
+    cutoff: datetime
+    valuation_config: object
+    account: AccountSnapshot
+    marks: object
     root_version: int
+    account_version: int
+    mutation: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MonitoringEvidence:
+    run_identity: str
+    agenda: object
+    occurrence: object
     cutoff: datetime
     account: AccountSnapshot
-    nav: Decimal
-    marks: MarkBatch
-
-    def __post_init__(self) -> None:
-        _common(self.stage, self.mutation, self.root_version, self.cutoff, self.account)
-        if not isinstance(self.nav, Decimal) or not self.nav.is_finite():
-            raise ValueError("nav must be a finite Decimal")
-        if not isinstance(self.marks, MarkBatch):
-            raise TypeError("marks must be a MarkBatch")
+    valuation: ValuationEvidence
+    report: object
+    root_version: int
+    mutation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class FinalizationEvidence:
-    stage: str
-    mutation: bool
-    root_version: int
+    run_identity: str
+    strategy_agenda: object
+    valuation_agenda: object
+    monitoring_agenda: object | None
     cutoff: datetime
     account: AccountSnapshot | None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.stage, str) or not self.stage:
-            raise ValueError("stage must be a non-empty string")
-        if self.mutation is not False:
-            raise ValueError("evidence must be prepared before mutation")
-        if (
-            isinstance(self.root_version, bool)
-            or not isinstance(self.root_version, int)
-            or self.root_version < 0
-        ):
-            raise ValueError("root_version must be a non-negative integer")
-        require_tz_aware(self.cutoff, name="cutoff")
-        if self.account is not None and not isinstance(self.account, AccountSnapshot):
-            raise TypeError("account must be an AccountSnapshot or None")
-
-
-def _common(
-    stage: str, mutation: bool, root_version: int, cutoff: datetime, account: AccountSnapshot
-) -> None:
-    if not isinstance(stage, str) or not stage:
-        raise ValueError("stage must be a non-empty string")
-    if mutation is not False:
-        raise ValueError("evidence must be prepared before mutation")
-    if isinstance(root_version, bool) or not isinstance(root_version, int) or root_version < 0:
-        raise ValueError("root_version must be a non-negative integer")
-    require_tz_aware(cutoff, name="cutoff")
-    if not isinstance(account, AccountSnapshot):
-        raise TypeError("account must be an AccountSnapshot")
+    root_version: int
+    mutation: bool = False

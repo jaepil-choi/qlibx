@@ -19,7 +19,7 @@ from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.model_state import InMemoryModelStateStore
+from vqapr.flow.model_state import prepare_model_state
 from vqapr.models.memory import ModelMemory, normalize_memory
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
@@ -38,8 +38,8 @@ def _identity(payload: object) -> str:
     ).hexdigest()
 
 
-def _model_state_ref(memory: ModelMemory) -> ModelStateRef:
-    return InMemoryModelStateStore().prepare(memory).ref
+def _model_state_ref(memory: ModelMemory, payload: bytes) -> ModelStateRef:
+    return prepare_model_state(memory, payload).ref
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,10 +273,14 @@ class FrozenRun:
             )
         memory = normalize_memory(self.initial_model_memory)
         object.__setattr__(self, "initial_model_memory", memory)
-        object.__setattr__(self, "initial_model_state_ref", _model_state_ref(memory))
         if not isinstance(self.initial_payload, bytes):
             raise TypeError("initial_payload must be bytes")
         object.__setattr__(self, "initial_payload", bytes(self.initial_payload))
+        object.__setattr__(
+            self,
+            "initial_model_state_ref",
+            _model_state_ref(memory, self.initial_payload),
+        )
         if not isinstance(self.requirements, tuple) or not all(
             isinstance(requirement, DataRequirement) for requirement in self.requirements
         ):
@@ -328,9 +332,6 @@ class FrozenRun:
             raise TypeError("static_occurrences must be a tuple of OperationOccurrence values")
         if self.static_occurrences and self.static_occurrences != merged:
             raise ValueError("static_occurrences must be the deterministic agenda merge")
-        occurrence_ids = [occurrence.occurrence_id for occurrence in merged]
-        if len(set(occurrence_ids)) != len(occurrence_ids):
-            raise ValueError("static occurrence IDs must be unique across agendas")
         object.__setattr__(self, "static_occurrences", merged)
 
     @property

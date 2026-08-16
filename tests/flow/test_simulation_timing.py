@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
-from vqapr.constraints.evaluation import evaluate_constraints
+from vqapr.constraints.evaluation import evaluate_constraints, project_constraints
 from vqapr.constraints.findings import ConstraintFinding
+from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
+from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.portfolio.intents import EconomicPortfolioIntent, PortfolioTarget
 from vqapr.valuation.marking import ValuationService
@@ -44,7 +47,13 @@ class _Constraint(Constraint):
             input_lineage={},
         )
 
-    def evaluate(self, account: AccountSnapshot, marks: object) -> ConstraintFinding:
+    def evaluate(
+        self,
+        window: ModelWindow,
+        account: AccountSnapshot,
+        marks: object,
+        bounds: ConstraintBounds,
+    ) -> ConstraintFinding:
         return ConstraintFinding(
             constraint_id=self.constraint_id,
             passed=self.passed,
@@ -53,6 +62,14 @@ class _Constraint(Constraint):
             excess=Decimal("0") if self.passed else Decimal("1"),
             input_lineage={"account_version": account.version, "mark_count": len(marks.marks)},
         )
+
+
+class _Catalog:
+    def dataset(self, _dataset_id: str) -> object:
+        raise AssertionError("constraint fixture must not query data")
+
+    def source(self, _source_id: str) -> object:
+        raise AssertionError("constraint fixture must not query data")
 
 
 def test_portfolio_target_requires_one_complete_economic_target() -> None:
@@ -66,10 +83,22 @@ def test_portfolio_target_requires_one_complete_economic_target() -> None:
 def test_closed_constraint_evaluation_preserves_pass_and_violation_without_mutation() -> None:
     account = AccountSnapshot(4, Decimal("10"), {"ABC": Decimal("2")})
     marks = ValuationService().mark(account, {"ABC": Decimal("3")})
-
-    report = evaluate_constraints(
-        (_Constraint("pass", True), _Constraint("violation", False)), account, marks
+    requirement = DataRequirement.of(
+        "constraint",
+        "prices",
+        fields=("close",),
+        lookback=RowsLookback(1),
     )
+    window = ModelWindow(
+        evaluation_time=datetime(2024, 1, 1, tzinfo=UTC),
+        instruments=("ABC",),
+        store=DuckDbObservationStore(_Catalog()),
+        allowed_requirements=(requirement,),
+    )
+    constraints = (_Constraint("pass", True), _Constraint("violation", False))
+    projected = project_constraints(constraints, window)
+
+    report = evaluate_constraints(constraints, window, account, marks, projected)
 
     assert report.account_version == 4
     assert [finding.passed for finding in report.findings] == [True, False]

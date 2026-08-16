@@ -82,5 +82,11 @@ class Constraint(ABC):
         """Measure the frozen intended economic payload against this projection."""
 
     @abstractmethod
-    def evaluate(self, account: AccountSnapshot, marks: MarkBatch) -> ConstraintFinding:
-        """Measure one immutable, fully marked committed account snapshot."""
+    def evaluate(
+        self,
+        window: ModelWindow,
+        account: AccountSnapshot,
+        marks: MarkBatch,
+        bounds: ConstraintBounds,
+    ) -> ConstraintFinding:
+        """Measure one marked account against bounds projected at this monitoring cutoff."""

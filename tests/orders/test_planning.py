@@ -19,6 +19,9 @@ def decimal(value: str) -> Decimal:
 _BUDGET = Budget(
     PortfolioDirection.LONG_ONLY, decimal("0"), decimal("1"), decimal("0"), decimal("1")
 )
+_QUANTITY_BUDGET = Budget(
+    PortfolioDirection.LONG_ONLY, decimal("0"), decimal("1"), decimal("0"), decimal("10")
+)
 
 
 def snapshot(
@@ -73,7 +76,7 @@ def test_quantity_target_is_fixed_across_execution_nav_and_price_changes() -> No
         weight_targets={},
         quantity_targets={"A": decimal("7")},
         cash_target=decimal("0.3"),
-        budget=_BUDGET,
+        budget=_QUANTITY_BUDGET,
     )
 
     assert batch.requests[0].desired_quantity == decimal("7")
@@ -89,7 +92,7 @@ def test_quantity_target_requires_its_exact_declared_post_trade_cash_fraction() 
             weight_targets={},
             quantity_targets={"A": decimal("7")},
             cash_target=decimal("0.31"),
-            budget=_BUDGET,
+            budget=_QUANTITY_BUDGET,
         )
 
 
@@ -128,25 +131,34 @@ def test_complete_desired_positions_enforce_budget_direction_and_bounds() -> Non
         )
 
 
-def test_missing_price_rejects_a_complete_weight_or_quantity_plan() -> None:
-    for weights, quantities, cash in (
-        ({"A": decimal("0.25")}, {}, decimal("0.75")),
-        ({}, {"A": decimal("3")}, decimal("0.7")),
-    ):
-        with pytest.raises(ValueError, match="complete desired positions"):
-            plan_orders(
-                account=snapshot(),
-                execution_time_nav=decimal("100"),
-                prices={},
-                weight_targets=weights,
-                quantity_targets=quantities,
-                cash_target=cash,
-                budget=_BUDGET,
-            )
+def test_missing_target_only_price_remains_an_unresolved_exchange_request() -> None:
+    weight = plan_orders(
+        account=snapshot(),
+        execution_time_nav=decimal("100"),
+        prices={},
+        weight_targets={"A": decimal("0.25")},
+        quantity_targets={},
+        cash_target=decimal("0.75"),
+        budget=_BUDGET,
+    )
+    quantity = plan_orders(
+        account=snapshot(),
+        execution_time_nav=decimal("100"),
+        prices={},
+        weight_targets={},
+        quantity_targets={"A": decimal("3")},
+        cash_target=decimal("0.7"),
+        budget=_QUANTITY_BUDGET,
+    )
+
+    assert weight.requests[0].execution_price is None
+    assert weight.requests[0].unresolved_weight_target == decimal("0.25")
+    assert quantity.requests[0].execution_price is None
+    assert quantity.requests[0].desired_quantity == decimal("3")
 
 
 def test_missing_selected_value_for_a_nonzero_holding_fails_before_planning() -> None:
-    with pytest.raises(ValueError, match="complete desired positions"):
+    with pytest.raises(ValueError, match="held instruments"):
         plan_orders(
             account=snapshot(positions={"HELD": "1"}),
             execution_time_nav=decimal("100"),

@@ -203,7 +203,7 @@ class ShowcaseConstraint(Constraint):
             {},
         )
 
-    def evaluate(self, account, marks):
+    def evaluate(self, window, account, marks, bounds):
         return ConstraintFinding(
             self.constraint_id,
             True,
@@ -304,23 +304,51 @@ modules use <code>vqapr.public</code>. The result comes from
 
 
 def _run_signature(result: Any) -> dict[str, Any]:
-    return {
-        "events": [
-            {
-                "occurrence_id": item.occurrence.occurrence_id
-                if hasattr(item, "occurrence")
-                else item.due.pending_id,
-                "role": item.occurrence.role.value
-                if hasattr(item, "occurrence")
-                else "due_execution",
-                "result_type": type(item.result).__name__,
+    """Complete canonical lifecycle evidence, normalizing one declaration identity only."""
+    value = _json_value(result)
+
+    def normalize(item: Any) -> Any:
+        if isinstance(item, dict):
+            target_identity = {"target_at", "trade_price", "identity"}.issubset(item)
+            return {
+                key: (
+                    "execution-input-declaration"
+                    if key == "execution_input_id"
+                    else "frozen-run-identity"
+                    if key in {"run_identity", "frozen_run_identity", "correlation_id"}
+                    else "execution-target-declaration"
+                    if key == "identity" and target_identity
+                    else normalize(nested)
+                )
+                for key, nested in item.items()
             }
-            for item in result.occurrences
-        ],
-        "account": _json_value(result.final_state.account.snapshot),
-        "feedback_types": [type(item).__name__ for item in result.final_state.feedback],
-        "finalization_type": type(result.final_state.finalization).__name__,
-    }
+        if isinstance(item, list):
+            return [normalize(nested) for nested in item]
+        return item
+
+    return normalize(value)
+
+
+def _first_difference(left: Any, right: Any, path: str = "$") -> str:
+    if type(left) is not type(right):
+        return f"{path}: {type(left).__name__} != {type(right).__name__}"
+    if isinstance(left, dict):
+        if left.keys() != right.keys():
+            return f"{path}: keys {tuple(left)} != {tuple(right)}"
+        for key in left:
+            difference = _first_difference(left[key], right[key], f"{path}.{key}")
+            if difference:
+                return difference
+        return ""
+    if isinstance(left, list):
+        if len(left) != len(right):
+            return f"{path}: length {len(left)} != {len(right)}"
+        for index, (left_item, right_item) in enumerate(zip(left, right, strict=True)):
+            difference = _first_difference(left_item, right_item, f"{path}[{index}]")
+            if difference:
+                return difference
+        return ""
+    return "" if left == right else f"{path}: {left!r} != {right!r}"
 
 
 def main() -> None:
@@ -385,10 +413,11 @@ def main() -> None:
         AccountMode.LONG_ONLY,
     )
     frozen = preflight_run(PROJECT, definition)
-    result = run(PROJECT, definition, instruments=("A",))
-    canonical_result = run(
-        PROJECT, replace(definition, execution_input_id="krx-daily-canonical"), instruments=("A",)
+    canonical_frozen = preflight_run(
+        PROJECT, replace(definition, execution_input_id="krx-daily-canonical")
     )
+    result = run(PROJECT, frozen, instruments=("A",))
+    canonical_result = run(PROJECT, canonical_frozen, instruments=("A",))
     workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
     before_invalid = workspace_path.read_bytes()
     try:
@@ -420,7 +449,8 @@ def main() -> None:
     dense_signature = _run_signature(result)
     canonical_signature = _run_signature(canonical_result)
     if dense_signature != canonical_signature:
-        raise AssertionError("non-selected execution row density changed the public run outcome")
+        difference = _first_difference(dense_signature, canonical_signature)
+        raise AssertionError(f"non-selected execution row density changed outcome: {difference}")
     trace = {
         "status": "current",
         "verified_against": VERIFIED_AGAINST,
@@ -428,7 +458,10 @@ def main() -> None:
         "component_sources": {
             path.name: _sha256(path) for path in (strategy_path, exchange_path, constraint_path)
         },
-        "preflight": _json_value(frozen),
+        "preflight": {
+            "dense": _json_value(frozen),
+            "canonical": _json_value(canonical_frozen),
+        },
         "execution_rows": _json_value(rows),
         "run": dense_trace,
         "density_invariance": {
@@ -438,7 +471,8 @@ def main() -> None:
             "canonical_signature": canonical_signature,
             "claim": (
                 "Two public runs differ only by three non-selected 10:00 execution rows. "
-                "Their callback/due/Account/feedback/finalization signatures are equal."
+                "The comparison retains complete callback/due/Account/feedback/finalization "
+                "lineage and normalizes only the execution-input declaration identity."
             ),
         },
         "invalid_registration": {"workspace_unchanged": True, "error": invalid},

@@ -64,8 +64,8 @@ class ModelWindow:
         if not isinstance(store, DuckDbObservationStore):
             raise TypeError("store must be a DuckDbObservationStore")
         allowed = tuple(allowed_requirements)
-        if not allowed or not all(isinstance(item, DataRequirement) for item in allowed):
-            raise ValueError("ModelWindow requires declared DataRequirement values")
+        if not all(isinstance(item, DataRequirement) for item in allowed):
+            raise ValueError("allowed_requirements must contain only DataRequirement values")
         self.instruments = selected
         self.__store = store
         self.__allowed = allowed

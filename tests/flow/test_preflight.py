@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import duckdb
 import pytest
 
 from vqapr.account.account import AccountMode
@@ -23,7 +24,7 @@ from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
-from vqapr.flow.model_state import InMemoryModelStateStore
+from vqapr.flow.model_state import prepare_model_state
 from vqapr.flow.preflight import preflight_run
 from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
@@ -167,10 +168,22 @@ def _execution_exchange(
         ),
     )
     workspace.register_component(component)
+    execution_path = root / "execution.parquet"
+    if register_input:
+        connection = duckdb.connect()
+        try:
+            connection.execute(
+                f"""COPY (
+                    SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                           'ABC' AS instrument, true AS is_tradable, 10.0 AS close
+                ) TO '{execution_path.as_posix()}' (FORMAT PARQUET)"""
+            )
+        finally:
+            connection.close()
     execution = ExecutionInputRegistration.of(
         "execution",
         ExecutionTableSpec(
-            SourceSpec.of("execution-source", root / "execution.parquet"),
+            SourceSpec.of("execution-source", execution_path),
             "trade_at",
             "instrument",
             "is_tradable",
@@ -206,7 +219,7 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
     assert frozen.constraints.constraints[0].component_id == "limit"
     assert (
         frozen.initial_model_state_ref
-        == InMemoryModelStateStore().prepare(frozen.initial_model_memory).ref
+        == prepare_model_state(frozen.initial_model_memory, frozen.initial_payload).ref
     )
     assert frozen.identity == preflight_run(workspace, definition).identity
     changed_account = replace(

@@ -22,10 +22,17 @@ from vqapr.constraints.evaluation import (
 from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.windows import ModelWindow
 from vqapr.evidence.artifacts import (
+    AccountCommitEvidence,
     CallbackEvidence,
-    DueExecutionEvidence,
+    FailureObservation,
+    FeedbackEvidence,
     FinalizationEvidence,
+    MarkEvidence,
+    MonitoringEvidence,
+    RetryPrecondition,
     SimulationFailure,
+    SimulationFailureKind,
+    SimulationStage,
     ValuationEvidence,
 )
 from vqapr.evidence.recorder import InvocationRecorder
@@ -33,6 +40,7 @@ from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget
 from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.exchange.venue import Exchange
+from vqapr.flow.model_state import prepare_model_state
 from vqapr.flow.run import FrozenRun
 from vqapr.flow.run_state import (
     AcceptedRunState,
@@ -134,6 +142,10 @@ class DueExecutionResult:
             raise ValueError("account_version must be non-negative")
 
 
+class FailedAfterCommit(SimulationFailure):
+    """A due-chain failure after the Account authority has advanced."""
+
+
 @dataclass(frozen=True, slots=True)
 class PlanningEvidence:
     """Execution-time economic inputs checked before submitting orders."""
@@ -159,6 +171,7 @@ class ValuationResult:
 
     account: AccountSnapshot
     marks: MarkBatch
+    evidence: ValuationEvidence
 
     def __post_init__(self) -> None:
         if not isinstance(self.account, AccountSnapshot):
@@ -173,6 +186,7 @@ class MonitoringResult:
 
     valuation: ValuationResult
     report: ConstraintReport
+    evidence: MonitoringEvidence
 
     def __post_init__(self) -> None:
         if not isinstance(self.valuation, ValuationResult):
@@ -195,7 +209,8 @@ class SimulationFlow:
         strategy: StrategyModel,
         state: RunStateRepository,
         *,
-        window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
+        strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
+        constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         account: Account,
         exchange: Exchange,
         constraints: tuple[Constraint, ...],
@@ -211,8 +226,10 @@ class SimulationFlow:
             raise TypeError("strategy must be a StrategyModel")
         if not isinstance(state, RunStateRepository):
             raise TypeError("state must be a RunStateRepository")
-        if not callable(window_for_occurrence):
-            raise TypeError("window_for_occurrence must be callable")
+        if not callable(strategy_window_for_occurrence):
+            raise TypeError("strategy_window_for_occurrence must be callable")
+        if not callable(constraint_window_for_occurrence):
+            raise TypeError("constraint_window_for_occurrence must be callable")
         if not isinstance(account, Account):
             raise TypeError("account must be an Account")
         if not callable(getattr(exchange, "execute", None)):
@@ -221,8 +238,6 @@ class SimulationFlow:
             isinstance(constraint, Constraint) for constraint in constraints
         ):
             raise TypeError("constraints must be a tuple of Constraint implementations")
-        if not constraints:
-            raise ValueError("SimulationFlow requires one shared non-empty constraint set")
         declared = frozen_run.constraints.constraints
         if len(constraints) != len(declared):
             raise ValueError("loaded constraints must exactly match FrozenRun ConstraintSet")
@@ -237,7 +252,8 @@ class SimulationFlow:
         self._frozen_run = frozen_run
         self._strategy = strategy
         self._state = state
-        self._window_for_occurrence = window_for_occurrence
+        self._strategy_window_for_occurrence = strategy_window_for_occurrence
+        self._constraint_window_for_occurrence = constraint_window_for_occurrence
         self._account = account
         self._exchange = exchange
         self._constraints = constraints
@@ -250,14 +266,14 @@ class SimulationFlow:
             raise ValueError("state AccountState must match FrozenRun initial account snapshot")
         if frozen_run.initial_account_mode != account.mode:
             raise ValueError("Account mode must match FrozenRun initial account mode")
+        account.bind(initial)
 
     def run(self) -> SimulationResult:
         """Synchronously process the static merge and all due items in its horizon."""
-        current_ref = self._state.current.current_model_state_ref
-        if current_ref is None:
-            raise RuntimeError("run state has no current Strategy root")
-        self._strategy.memory = self._state.load_model_state(current_ref)
-        self._strategy.load_payload(BytesIO(self._state.load_payload(current_ref)))
+        cutoff = self._frozen_run.start or self._frozen_run.end
+        if cutoff is None:
+            raise RuntimeError("simulation start requires a frozen boundary")
+        self._guard("simulation.start", cutoff, self._load_visible_strategy_state)
         traces: list[OccurrenceTrace | DueExecutionTrace] = []
         static = iter(OperationEnvelope(item) for item in self._frozen_run.static_occurrences)
         next_static = next(static, None)
@@ -311,8 +327,10 @@ class SimulationFlow:
             raise RuntimeError("simulation finalization requires a frozen end")
         account = self._state.current.account
         finalization = FinalizationEvidence(
-            stage="simulation.finalize",
-            mutation=False,
+            run_identity=self._frozen_run.identity,
+            strategy_agenda=self._frozen_run.strategy_agenda,
+            valuation_agenda=self._frozen_run.valuation_agenda,
+            monitoring_agenda=self._frozen_run.monitoring_agenda,
             root_version=self._state.current.version,
             cutoff=self._frozen_run.end,
             account=None if account is None else account.snapshot,
@@ -338,14 +356,33 @@ class SimulationFlow:
             root = self._state.current
             account = root.account
             pending = root.pending_accepted_intent
-            raise SimulationFailure(
-                stage=stage,
+            after_commit = stage == "simulation.due" and account is not None and pending is None
+            failure_type = FailedAfterCommit if after_commit else SimulationFailure
+            failure = failure_type(
+                stage=SimulationStage(stage),
+                clock=cutoff,
+                failed_requirement=(self._frozen_run.valuation if after_commit else None),
+                observed=FailureObservation(type(error), tuple(error.args)),
+                retry_precondition=RetryPrecondition(
+                    requires_replay_from_root=True,
+                    required_pending_id=getattr(pending, "pending_id", None),
+                ),
+                correlation_id=self._frozen_run.identity,
+                frozen_run_identity=self._frozen_run.identity,
                 cutoff=cutoff,
                 root_version=root.version,
+                model_version=root.model_state_commit_count,
+                model_state_ref=root.current_model_state_ref,
                 account_version=None if account is None else account.snapshot.version,
                 pending_id=getattr(pending, "pending_id", None),
                 cause=error,
-            ) from error
+                kind=(
+                    SimulationFailureKind.FAILED_AFTER_COMMIT
+                    if after_commit
+                    else SimulationFailureKind.PRE_COMMIT
+                ),
+            )
+            raise failure from error
 
     def _pending_due(self) -> DueExecutionEnvelope | None:
         pending = self._state.current.pending_accepted_intent
@@ -427,6 +464,37 @@ class SimulationFlow:
         prepared_fill = self._account.prepare_fill(
             account_state, fills, expected_version=before.version
         )
+        commit_evidence = AccountCommitEvidence(
+            run_identity=self._frozen_run.identity,
+            agenda=self._frozen_run.strategy_agenda,
+            occurrence=pending.occurrence,
+            cutoff=pending.target.target_at,
+            pending=pending,
+            target=pending.target,
+            fill_convention=execution_input.fill,
+            execution_snapshot=snapshot,
+            planning_nav=nav,
+            planning_cash_target=pending.intent.cash_target,
+            planning_budget=pending.intent.budget,
+            intended_targets=pending.intent.targets,
+            requested_orders=orders,
+            dealt_fills=fills,
+            before=before,
+            committed=prepared_fill.next_snapshot,
+            root_version=self._state.current.version,
+            account_version_before=before.version,
+            account_version_committed=prepared_fill.next_snapshot.version,
+        )
+        prepared_commit = self._state.prepare_account_commit(
+            pending_id=pending.pending_id,
+            account=prepared_fill,
+            fill=fills,
+            evidence=commit_evidence,
+        )
+        self._account.commit_fill(prepared_fill)
+        committed_root = self._state.publish_account_commit(prepared_commit)
+        if committed_root.account != self._account.state:
+            raise RuntimeError("Account commit root does not mirror Account authority")
         selected_marks = self._marks_for_occurrence(
             self._frozen_run.valuation,
             pending.target.target_at,
@@ -437,42 +505,51 @@ class SimulationFlow:
             prepared_fill,
             mark,
             provenance=ValuationEvidence(
-                stage="simulation.due.valuation",
-                mutation=False,
-                root_version=self._state.current.version,
+                run_identity=self._frozen_run.identity,
+                agenda=self._frozen_run.valuation_agenda,
+                occurrence=pending.occurrence,
+                root_version=committed_root.version,
                 cutoff=pending.target.target_at,
                 account=prepared_fill.next_snapshot,
-                nav=prepared_fill.next_snapshot.cash + mark.total_value,
                 marks=mark,
+                valuation_config=self._frozen_run.valuation,
+                account_version=prepared_fill.next_snapshot.version,
             ),
         )
-        actual_constraints = evaluate_constraints(
-            self._constraints, prepared_account.next_state.snapshot, mark
-        )
-        evidence = DueExecutionEvidence(
-            stage="simulation.due",
-            mutation=False,
-            root_version=self._state.current.version,
+        mark_evidence = MarkEvidence(
+            run_identity=self._frozen_run.identity,
+            agenda=self._frozen_run.valuation_agenda,
+            occurrence=pending.occurrence,
             cutoff=pending.target.target_at,
-            pending_id=pending.pending_id,
-            before=before,
-            after=prepared_account.next_state.snapshot,
-            nav=prepared_account.next_state.latest_mark.nav,
+            valuation_config=self._frozen_run.valuation,
+            selected_marks=selected_marks,
             marks=mark,
-            orders=orders,
-            fills=fills,
-            constraints=(
-                actual_constraints,
-                PlanningEvidence(nav, pending.intent.cash_target, pending.intent.source_refs),
-            ),
+            limitations=(),
+            account=prepared_account.next_state.snapshot,
+            root_version=committed_root.version,
+            account_version=prepared_account.next_state.snapshot.version,
         )
-        root = self._state.complete_due(
-            pending_id=pending.pending_id,
+        prepared_marked = self._state.prepare_marked(
             account=prepared_account,
-            fill=fills,
             mark=mark,
-            feedback=(actual_constraints,),
-            evidence=evidence,
+            evidence=mark_evidence,
+        )
+        self._account.commit_mark(prepared_account)
+        marked_root = self._state.publish_marked(prepared_marked)
+        if marked_root.account != self._account.state:
+            raise RuntimeError("Account mark root does not mirror Account authority")
+        feedback_evidence = FeedbackEvidence(
+            run_identity=self._frozen_run.identity,
+            agenda=self._frozen_run.strategy_agenda,
+            occurrence=pending.occurrence,
+            cutoff=pending.target.target_at,
+            pending=pending,
+            candidates=(fills, mark),
+            root_version=marked_root.version,
+            account_version=marked_root.account.snapshot.version,
+        )
+        root = self._state.publish_feedback(
+            self._state.prepare_feedback((fills, mark), evidence=feedback_evidence)
         )
         assert root.account is not None
         return DueExecutionResult(pending.pending_id, root.account.snapshot.version, mark)
@@ -488,7 +565,18 @@ class SimulationFlow:
             account,
         )
         marks = self._valuation_service.mark(account, selected_marks)
-        valuation = ValuationResult(account, marks)
+        evidence = ValuationEvidence(
+            run_identity=self._frozen_run.identity,
+            agenda=self._frozen_run.valuation_agenda,
+            occurrence=occurrence,
+            cutoff=occurrence.evaluation_time,
+            valuation_config=self._frozen_run.valuation,
+            account=account,
+            marks=marks,
+            root_version=self._state.current.version,
+            account_version=account.version,
+        )
+        valuation = ValuationResult(account, marks, evidence)
         return OccurrenceTrace(occurrence, valuation, self._state.current)
 
     def _dispatch_monitoring(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
@@ -496,15 +584,45 @@ class SimulationFlow:
         if not isinstance(state, AccountState):
             raise RuntimeError("monitoring requires an AccountState root")
         current = state.snapshot
+        window = None
+        projected = ()
+        if self._constraints:
+            window = self._constraint_window_for_occurrence(occurrence)
+            if not isinstance(window, ModelWindow):
+                raise TypeError("constraint_window_for_occurrence must return a ModelWindow")
+            projected = project_constraints(self._constraints, window)
         selected_marks = self._marks_for_occurrence(
             self._frozen_run.valuation,
             occurrence.evaluation_time,
             current,
         )
         marks = self._valuation_service.mark(current, selected_marks)
-        valuation = ValuationResult(current, marks)
-        report = evaluate_constraints(self._constraints, current, marks)
-        return OccurrenceTrace(occurrence, MonitoringResult(valuation, report), self._state.current)
+        valuation_evidence = ValuationEvidence(
+            run_identity=self._frozen_run.identity,
+            agenda=self._frozen_run.monitoring_agenda,
+            occurrence=occurrence,
+            cutoff=occurrence.evaluation_time,
+            valuation_config=self._frozen_run.valuation,
+            account=current,
+            marks=marks,
+            root_version=self._state.current.version,
+            account_version=current.version,
+        )
+        valuation = ValuationResult(current, marks, valuation_evidence)
+        report = evaluate_constraints(self._constraints, window, current, marks, projected)
+        evidence = MonitoringEvidence(
+            run_identity=self._frozen_run.identity,
+            agenda=self._frozen_run.monitoring_agenda,
+            occurrence=occurrence,
+            cutoff=occurrence.evaluation_time,
+            account=current,
+            valuation=valuation_evidence,
+            report=report,
+            root_version=self._state.current.version,
+        )
+        return OccurrenceTrace(
+            occurrence, MonitoringResult(valuation, report, evidence), self._state.current
+        )
 
     def _dispatch_callback(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         current_ref = self._state.current.current_model_state_ref
@@ -516,9 +634,9 @@ class SimulationFlow:
         try:
             self._strategy.memory = before
             self._strategy.load_payload(BytesIO(payload_before))
-            window = self._window_for_occurrence(occurrence)
+            window = self._strategy_window_for_occurrence(occurrence)
             if not isinstance(window, ModelWindow):
-                raise TypeError("window_for_occurrence must return a ModelWindow")
+                raise TypeError("strategy_window_for_occurrence must return a ModelWindow")
             source_digests = self._source_digests_before_callback()
             state_account = self._state.current.account
             if not isinstance(state_account, AccountState):
@@ -537,7 +655,12 @@ class SimulationFlow:
                 event_time=occurrence.evaluation_time,
             )
             self._strategy.recorder = recorder
-            projected = project_constraints(self._constraints, window)
+            projected = ()
+            if self._constraints:
+                constraint_window = self._constraint_window_for_occurrence(occurrence)
+                if not isinstance(constraint_window, ModelWindow):
+                    raise TypeError("constraint_window_for_occurrence must return a ModelWindow")
+                projected = project_constraints(self._constraints, constraint_window)
             result = self._strategy.on_occurrence(
                 StrategyModelContext(
                     occurrence=occurrence,
@@ -549,15 +672,25 @@ class SimulationFlow:
             candidate = normalize_memory(self._strategy.memory)
             payload_candidate = BytesIO()
             self._strategy.save_payload(payload_candidate)
+            committed_ref = prepare_model_state(candidate, payload_candidate.getvalue()).ref
+            self._validate_candidate_payload(
+                candidate, payload_candidate.getvalue(), before, payload_before
+            )
             if isinstance(result, NoDecision):
                 evidence = CallbackEvidence(
-                    stage="simulation.callback",
-                    mutation=False,
-                    root_version=self._state.current.version,
+                    run_identity=self._frozen_run.identity,
+                    strategy=self._frozen_run.strategy,
+                    agenda=self._frozen_run.strategy_agenda,
+                    occurrence=occurrence,
                     cutoff=occurrence.evaluation_time,
+                    root_version=self._state.current.version,
                     account=account,
-                    pending_id=None,
+                    current_model_state_ref=current_ref,
+                    committed_model_state_ref=committed_ref,
+                    strategy_accesses=window.accesses,
+                    actual_source_refs=self._actual_source_refs(window, source_digests),
                     decision=result,
+                    pending=None,
                     constraints=projected,
                 )
                 root = self._state.publish(
@@ -576,13 +709,19 @@ class SimulationFlow:
                     raise ValueError("economic intent violates projected constraints")
                 accepted = self._accept_intent(intent, occurrence)
                 evidence = CallbackEvidence(
-                    stage="simulation.callback",
-                    mutation=False,
-                    root_version=self._state.current.version,
+                    run_identity=self._frozen_run.identity,
+                    strategy=self._frozen_run.strategy,
+                    agenda=self._frozen_run.strategy_agenda,
+                    occurrence=occurrence,
                     cutoff=occurrence.evaluation_time,
+                    root_version=self._state.current.version,
                     account=account,
-                    pending_id=accepted.pending_id,
+                    current_model_state_ref=current_ref,
+                    committed_model_state_ref=committed_ref,
+                    strategy_accesses=window.accesses,
+                    actual_source_refs=self._actual_source_refs(window, source_digests),
                     decision=accepted,
+                    pending=accepted,
                     constraints=(*projected, *intended),
                 )
                 root = self._state.publish(
@@ -600,11 +739,38 @@ class SimulationFlow:
             raise
         finally:
             self._strategy.recorder = previous_recorder
-        if root.current_model_state_ref is None:
-            raise RuntimeError("successful callback did not commit model state")
-        self._strategy.memory = root.load_model_state(root.current_model_state_ref)
-        self._strategy.load_payload(BytesIO(root.load_payload(root.current_model_state_ref)))
         return OccurrenceTrace(occurrence, result, root)
+
+    def _load_visible_strategy_state(self) -> None:
+        """Load the sole visible Strategy pair before any callback mutation."""
+        current_ref = self._state.current.current_model_state_ref
+        if current_ref is None:
+            raise RuntimeError("run state has no current Strategy root")
+        self._strategy.memory = self._state.load_model_state(current_ref)
+        self._strategy.load_payload(BytesIO(self._state.load_payload(current_ref)))
+
+    def _validate_candidate_payload(
+        self,
+        candidate: object,
+        payload_candidate: bytes,
+        before: object,
+        payload_before: bytes,
+    ) -> None:
+        """Prove the live Strategy can load and reproduce its candidate before root swap."""
+        try:
+            self._strategy.memory = normalize_memory(candidate)
+            self._strategy.load_payload(BytesIO(payload_candidate))
+            round_trip = BytesIO()
+            self._strategy.save_payload(round_trip)
+            if round_trip.getvalue() != payload_candidate:
+                raise ValueError(
+                    "StrategyModel payload load/save round-trip changed candidate bytes"
+                )
+            self._strategy.memory = normalize_memory(candidate)
+        except Exception:
+            self._strategy.memory = before
+            self._strategy.load_payload(BytesIO(payload_before))
+            raise
 
     def _validate_intent_authority(
         self,
@@ -630,9 +796,17 @@ class SimulationFlow:
 
     def _source_digests_before_callback(self) -> dict[str, str]:
         """Capture source bytes immediately before Strategy reads them, without freezing bytes."""
+        dataset_by_id = {str(dataset.dataset_id): dataset for dataset in self._frozen_run.datasets}
+        source_by_id = {str(source.source_id): source for source in self._frozen_run.sources}
+        strategy_source_ids: set[str] = set()
+        for requirement in self._strategy.requirements():
+            dataset = dataset_by_id.get(str(requirement.dataset_id))
+            if dataset is None:
+                raise ValueError("Strategy requirement is absent from the FrozenRun")
+            strategy_source_ids.add(str(dataset.source))
         return {
-            str(source.source_id): _source_digest(source.path)
-            for source in self._frozen_run.sources
+            source_id: _source_digest(source_by_id[source_id].path)
+            for source_id in sorted(strategy_source_ids)
         }
 
     def _actual_source_refs(

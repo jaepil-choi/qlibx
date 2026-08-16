@@ -13,6 +13,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
 from vqapr.domain.timestamps import require_tz_aware
+from vqapr.exchange.execution_table import validate_execution_input
 from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
@@ -250,6 +251,7 @@ def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
         exchange = _validate_component(workspace, definition.exchange)
         loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
         execution_input = workspace.execution_input(definition.execution_input_id or "")
+        validate_execution_input(execution_input).raise_if_failed()
         _validate_initial_account(
             definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
         )

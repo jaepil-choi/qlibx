@@ -94,10 +94,26 @@ class Account:
         if not isinstance(mode, AccountMode):
             raise TypeError("mode must be an AccountMode")
         self._mode = mode
+        self._state: AccountState | None = None
 
     @property
     def mode(self) -> AccountMode:
         return self._mode
+
+    @property
+    def state(self) -> AccountState:
+        """Return the immutable committed authority, never a mutable backing store."""
+        if self._state is None:
+            raise RuntimeError("Account has not been bound to an initial state")
+        return self._state
+
+    def bind(self, state: AccountState) -> None:
+        """Bind this Account to the sole initial state before execution begins."""
+        if not isinstance(state, AccountState):
+            raise TypeError("state must be an AccountState")
+        if self._state is not None:
+            raise RuntimeError("Account is already bound")
+        self._state = state
 
     def prepare_fill(
         self, state: AccountState, fill_batch: FillBatch, *, expected_version: int
@@ -176,3 +192,27 @@ class Account:
                 fill_history=(*fill.source.fill_history, *fill.journal_entries),
             ),
         )
+
+    def commit_fill(self, prepared: PreparedAccountFill) -> AccountState:
+        """Infallibly install a previously validated fill after optimistic checking."""
+        if not isinstance(prepared, PreparedAccountFill):
+            raise TypeError("prepared must be a PreparedAccountFill")
+        if self.state != prepared.source:
+            raise RuntimeError("Account optimistic conflict")
+        self._state = AccountState(
+            snapshot=prepared.next_snapshot,
+            mark_history=prepared.source.mark_history,
+            fill_history=(*prepared.source.fill_history, *prepared.journal_entries),
+        )
+        return self._state
+
+    def commit_mark(self, prepared: PreparedAccountTransition) -> AccountState:
+        """Infallibly install a previously validated valuation after optimistic checking."""
+        if not isinstance(prepared, PreparedAccountTransition):
+            raise TypeError("prepared must be a PreparedAccountTransition")
+        if self.state.snapshot != prepared.fill.next_snapshot:
+            raise RuntimeError("Account optimistic conflict")
+        if self.state.fill_history != prepared.next_state.fill_history:
+            raise RuntimeError("Account optimistic conflict")
+        self._state = prepared.next_state
+        return self._state

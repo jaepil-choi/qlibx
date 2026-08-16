@@ -324,18 +324,21 @@ def test_public_run_uses_frozen_initial_model_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     memory = {"carry": [1]}
-    frozen = SimpleNamespace(
-        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
-        initial_account_mode=AccountMode.LONG_ONLY,
-        initial_model_memory=memory,
-        initial_model_state_ref="frozen-memory-ref",
-        initial_payload=b"",
-        exchange=object(),
-        strategy=SimpleNamespace(component=object()),
-        constraints=SimpleNamespace(constraints=()),
-        datasets=(),
-        sources=(),
-    )
+    frozen = object.__new__(FrozenRun)
+    for name, value in {
+        "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
+        "initial_account_mode": AccountMode.LONG_ONLY,
+        "initial_model_memory": memory,
+        "initial_model_state_ref": "frozen-memory-ref",
+        "initial_payload": b"",
+        "exchange": object(),
+        "execution_input": object(),
+        "strategy": SimpleNamespace(component=object()),
+        "constraints": SimpleNamespace(constraints=()),
+        "datasets": (),
+        "sources": (),
+    }.items():
+        object.__setattr__(frozen, name, value)
     strategy = SimpleNamespace(
         memory={"default": True},
         requirements=lambda: (),
@@ -345,6 +348,7 @@ def test_public_run_uses_frozen_initial_model_memory(
 
     class Flow:
         def __init__(self, _frozen, loaded_strategy, state, **_kwargs) -> None:
+            observed["frozen"] = _frozen
             observed["memory"] = loaded_strategy.memory
             observed["ref"] = state.root.current_model_state_ref
 
@@ -359,39 +363,32 @@ def test_public_run_uses_frozen_initial_model_memory(
             return b""
 
     monkeypatch.setattr(
-        public.Workspace, "open", lambda _root: SimpleNamespace(project_root=tmp_path)
+        public,
+        "preflight_run",
+        lambda *_args: pytest.fail("run must not preflight a FrozenRun"),
     )
-    monkeypatch.setattr(public, "preflight_run", lambda _workspace, _definition: frozen)
     monkeypatch.setattr(public, "load_strategy_model", lambda *_args, **_kwargs: strategy)
     monkeypatch.setattr(public, "load_exchange", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        public,
+        "validate_execution_input",
+        lambda _registration: SimpleNamespace(raise_if_failed=lambda: None),
+    )
     monkeypatch.setattr(public, "RunStateRepository", State)
     monkeypatch.setattr(public, "SimulationFlow", Flow)
 
-    definition = RunDefinition(
-        public.StrategyConfig(
-            ComponentRef.of(
-                "strategy",
-                ComponentKind.STRATEGY_MODEL,
-                tmp_path / "strategy.py",
-                "Strategy",
-                fingerprint="0" * 64,
-            ),
-            "strategy",
-            OperationRole.STRATEGY_CALLBACK,
-        ),
-        public.ValuationConfig(
-            "valuation",
-            OperationRole.VALUATION,
-            DataRequirement.of("valuation", "prices", fields=("close",), lookback=RowsLookback(1)),
-        ),
-        ConstraintSet(()),
-    )
-    assert public.run(tmp_path, definition, instruments=()) == "result"
+    assert public.run(tmp_path, frozen, instruments=()) == "result"
     memory["carry"].append(2)
     assert observed == {
+        "frozen": frozen,
         "memory": {"carry": [1]},
         "ref": frozen.initial_model_state_ref,
     }
+
+
+def test_public_run_rejects_anything_other_than_a_frozen_run(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="frozen_run must be a FrozenRun"):
+        public.run(tmp_path, object(), instruments=())
 
 
 @pytest.mark.uc("UC-FILL-001")

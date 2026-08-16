@@ -1,4 +1,4 @@
-"""Committed Model-memory storage used by the Flow invocation boundary."""
+"""Canonical detached Model state candidates owned by the run-state root."""
 
 from __future__ import annotations
 
@@ -16,49 +16,29 @@ class PreparedModelState:
 
     ref: ModelStateRef
     memory: ModelMemory
+    payload: bytes
 
 
-class InMemoryModelStateStore:
-    """Deterministic test/local store; committed snapshots are detached from Model objects."""
-
-    def __init__(self) -> None:
-        self._states: dict[ModelStateRef, ModelMemory] = {}
-        self._commit_count = 0
-
-    @property
-    def commit_count(self) -> int:
-        return self._commit_count
-
-    def prepare(self, memory: object) -> PreparedModelState:
-        """Serialize and detach state without making its reference loadable."""
-        normalized = normalize_memory(memory)
-        encoded = json.dumps(
-            normalized,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        ref = ModelStateRef(hashlib.sha256(encoded).hexdigest())
-        return PreparedModelState(ref=ref, memory=normalized)
-
-    def publish(self, candidate: PreparedModelState) -> ModelStateRef:
-        """Publish a previously prepared state for the legacy standalone store."""
-        if not isinstance(candidate, PreparedModelState):
-            raise TypeError("candidate must be a PreparedModelState")
-        self._states[candidate.ref] = normalize_memory(candidate.memory)
-        self._commit_count += 1
-        return candidate.ref
-
-    def commit(self, memory: object) -> ModelStateRef:
-        """Prepare then publish for existing non-atomic callers."""
-        return self.publish(self.prepare(memory))
-
-    def load(self, ref: ModelStateRef) -> ModelMemory:
-        if not isinstance(ref, ModelStateRef):
-            raise TypeError("ref must be a ModelStateRef")
-        try:
-            memory = self._states[ref]
-        except KeyError as exc:
-            raise KeyError(f"unknown ModelStateRef: {ref.digest}") from exc
-        return normalize_memory(memory)
+def prepare_model_state(memory: object, payload: bytes) -> PreparedModelState:
+    """Detach one exact memory/payload envelope without making it visible."""
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    normalized = normalize_memory(memory)
+    memory_bytes = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    envelope = (
+        len(memory_bytes).to_bytes(8, "big")
+        + memory_bytes
+        + len(payload).to_bytes(8, "big")
+        + payload
+    )
+    return PreparedModelState(
+        ref=ModelStateRef(hashlib.sha256(envelope).hexdigest()),
+        memory=normalized,
+        payload=bytes(payload),
+    )

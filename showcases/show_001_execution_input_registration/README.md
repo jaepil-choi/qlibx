@@ -1,20 +1,20 @@
-# VQAPR execution input registration
+# VQAPR public execution run
 
 Status: current
 
-This showcase demonstrates execution-input registration plus the finite operation-agenda contract
-superseding implementation record 006:
+This showcase proves the public register → configure → preflight → run spine using only
+`vqapr.public` imports. It generates project-local Strategy, Academic Exchange, and Constraint
+modules, fingerprints them through `component_ref`, registers all declarations, then runs a typed
+`RunDefinition` with an `AccountSnapshot` and `AccountMode`.
 
-- observation parquet registration through `vqapr.public.register_dataset`;
-- execution parquet registration through `vqapr.public.register_execution_input`;
-- separate observation and exact-time execution contracts;
-- independent Strategy, valuation, and monitoring agenda registration;
-- callback occurrences supplied only by explicit finite agendas;
-- passive execution rows that do not manufacture callback occurrences;
-- selected execution-price validation without fallback;
-- failed invalid-price registration without workspace mutation.
+Evidence includes:
 
-It does **not** demonstrate orders, fills, Account mutation, valuation, or portfolio performance.
+- real pending intent → due execution → Account mark → monitoring feedback → finalization results;
+- an A/B public-run comparison: dense input has three extra non-selected 10:00 rows and canonical
+  input does not; their callback/due/account/feedback/finalization outcome signatures match;
+- explicit finite Strategy, valuation, and monitoring agendas;
+- selected exact-time execution pricing and generated component source fingerprints;
+- invalid selected-price rejection without workspace mutation.
 
 ## Reproduce
 
@@ -26,12 +26,11 @@ uv run python showcases/show_001_execution_input_registration/run.py
 
 Inspect:
 
-- `outputs/report.html` — human-readable evidence;
-- `outputs/trace.json` — machine-readable outcomes;
+- `outputs/report.html` — reader-facing run and invariance evidence;
+- `outputs/trace.json` — complete public preflight/run values and comparison signatures;
+- `outputs/project/components/` — generated public-only component sources;
 - `outputs/workspace.yaml` — persisted declarations;
-- `outputs/observation_price_daily.parquet` — PIT observation fixture;
-- `outputs/execution_krx_daily.parquet` — exact-time execution fixture;
-- `outputs/invalid_execution_price.parquet` — rejected price fixture.
+- `outputs/*.parquet` — dense, canonical, and invalid input fixtures.
 
 Environment assumptions: repository `uv` environment, Python 3.12+, DuckDB 1.5+.
 

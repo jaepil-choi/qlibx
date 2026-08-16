@@ -309,6 +309,45 @@ def test_execution_input_round_trips_through_workspace(
     assert reopened.source("krx-execution") == expected.table.source
 
 
+def test_execution_input_round_trips_fill_dst_proof(
+    tmp_path: Path, execution_parquet: Path
+) -> None:
+    workspace = Workspace.create(tmp_path)
+    base = _execution(execution_parquet)
+    expected = ExecutionInputRegistration.of(
+        str(base.execution_input_id),
+        base.table,
+        FillConvention(
+            selector=base.fill.selector,
+            local_time=base.fill.local_time,
+            timezone=base.fill.timezone,
+            trade_price=base.fill.trade_price,
+            fold=1,
+            offset="+09:00",
+        ),
+    )
+
+    assert workspace.register_execution_input(expected) is True
+    assert Workspace.open(tmp_path).execution_input("krx-daily") == expected
+
+
+def test_workspace_rejects_old_fill_schema_without_dst_proof(
+    tmp_path: Path, execution_parquet: Path
+) -> None:
+    workspace = Workspace.create(tmp_path)
+    workspace.register_execution_input(_execution(execution_parquet))
+    path = workspace.path
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        .replace("      fold: null\n", "")
+        .replace("      offset: null\n", ""),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VqaprError, match="old fill schema"):
+        Workspace.open(tmp_path)
+
+
 def test_execution_input_registration_is_idempotent(
     tmp_path: Path, execution_parquet: Path
 ) -> None:

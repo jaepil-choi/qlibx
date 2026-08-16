@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.constraints.constraint import ConstraintBounds
 from vqapr.data.windows import ModelWindow
 from vqapr.runtime.agendas import OperationOccurrence
 
@@ -25,6 +26,7 @@ class StrategyModelContext:
     occurrence: OperationOccurrence
     window: ModelWindow
     account: AccountSnapshot
+    constraint_bounds: ConstraintBounds = field(default_factory=lambda: ConstraintBounds({}, {}))
 
     def __post_init__(self) -> None:
         if not isinstance(self.occurrence, OperationOccurrence):
@@ -33,3 +35,15 @@ class StrategyModelContext:
             raise TypeError("window must be a ModelWindow")
         if not isinstance(self.account, AccountSnapshot):
             raise TypeError("account must be an AccountSnapshot")
+        if not isinstance(self.constraint_bounds, ConstraintBounds):
+            raise TypeError("constraint_bounds must be a ConstraintBounds")
+        object.__setattr__(
+            self,
+            "account",
+            AccountSnapshot(
+                version=self.account.version,
+                cash=self.account.cash,
+                positions=self.account.positions,
+            ),
+        )
+        object.__setattr__(self, "constraint_bounds", self.constraint_bounds.detached())

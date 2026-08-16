@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.orders.batches import OrderBatch, OrderRequest, ZeroDeltaDiagnostic
+from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 
 def _decimal(value: object, *, name: str, positive: bool = False) -> Decimal:
@@ -48,65 +49,73 @@ def plan_orders(
     prices: Mapping[str, Decimal],
     weight_targets: Mapping[str, Decimal],
     quantity_targets: Mapping[str, Decimal],
+    cash_target: Decimal,
+    budget: Budget,
 ) -> OrderBatch:
-    """Plan every targeted or held position using the supplied execution-time NAV.
+    """Plan a complete target portfolio against execution-time NAV.
 
-    Weight targets are converted at the selected execution price. Quantity targets are
-    already complete desired quantities and therefore never depend on NAV or price gaps.
+    Every desired position must have a selected execution price: a complete plan cannot
+    establish its declared post-trade cash fraction from an unresolved target.
     """
     if not isinstance(account, AccountSnapshot):
         raise TypeError("account must be an AccountSnapshot")
-    nav = _decimal(execution_time_nav, name="execution_time_nav")
-    if nav < 0:
-        raise ValueError("execution_time_nav must be non-negative")
+    nav = _decimal(execution_time_nav, name="execution_time_nav", positive=True)
+    cash = _decimal(cash_target, name="cash_target")
+    if not isinstance(budget, Budget):
+        raise TypeError("budget must be a Budget")
+    if not budget.validates_cash(cash):
+        raise ValueError("cash_target is outside the declared budget")
     selected_prices = _prices(prices)
     weights = _targets(weight_targets, name="weight_targets")
     quantities = _targets(quantity_targets, name="quantity_targets")
     overlap = set(weights).intersection(quantities)
     if overlap:
         raise ValueError("an instrument may have either a weight target or a quantity target")
-
-    missing_held = sorted(
-        instrument_id
-        for instrument_id, quantity in account.positions.items()
-        if quantity != 0 and instrument_id not in selected_prices
-    )
-    if missing_held:
-        raise ValueError(f"missing selected execution price for held instruments: {missing_held}")
+    if not quantities and sum(weights.values(), Decimal(0)) + cash != 1:
+        raise ValueError("weight targets plus cash_target must equal one")
 
     instruments = set(account.positions).union(weights, quantities)
+    missing_prices = sorted(
+        instrument_id for instrument_id in instruments if instrument_id not in selected_prices
+    )
+    if missing_prices:
+        raise ValueError(
+            f"missing selected execution price for complete desired positions: {missing_prices}"
+        )
+
+    desired_quantities: dict[str, Decimal] = {}
+    for instrument_id in instruments:
+        if instrument_id in weights:
+            desired = weights[instrument_id] * nav / selected_prices[instrument_id]
+            allocation = weights[instrument_id]
+        elif instrument_id in quantities:
+            desired = quantities[instrument_id]
+            allocation = desired * selected_prices[instrument_id] / nav
+        else:
+            desired = Decimal(0)
+            allocation = Decimal(0)
+        if budget.direction is PortfolioDirection.LONG_ONLY and desired < 0:
+            raise ValueError("long_only budget forbids negative desired positions")
+        if not budget.validates_target(allocation):
+            raise ValueError("complete desired position is outside the declared budget bounds")
+        desired_quantities[instrument_id] = desired
+
+    post_trade_cash = nav - sum(
+        (
+            desired_quantities[instrument_id] * selected_prices[instrument_id]
+            for instrument_id in instruments
+        ),
+        Decimal(0),
+    )
+    if quantities and post_trade_cash != nav * cash:
+        raise ValueError("complete desired positions do not produce the declared cash_target")
+
     requests: list[OrderRequest] = []
     diagnostics: list[ZeroDeltaDiagnostic] = []
     for instrument_id in instruments:
         current = account.positions.get(instrument_id, Decimal(0))
-        price = selected_prices.get(instrument_id)
-        if price is None:
-            if instrument_id in weights:
-                request = OrderRequest(
-                    instrument_id=instrument_id,
-                    current_quantity=current,
-                    desired_quantity=Decimal(0),
-                    delta_quantity=Decimal(0),
-                    execution_price=None,
-                    unresolved_weight_target=weights[instrument_id],
-                )
-            else:
-                desired = quantities[instrument_id]
-                request = OrderRequest(
-                    instrument_id=instrument_id,
-                    current_quantity=current,
-                    desired_quantity=desired,
-                    delta_quantity=desired - current,
-                    execution_price=None,
-                )
-            requests.append(request)
-            continue
-        if instrument_id in weights:
-            desired = weights[instrument_id] * nav / price
-        elif instrument_id in quantities:
-            desired = quantities[instrument_id]
-        else:
-            desired = Decimal(0)
+        price = selected_prices[instrument_id]
+        desired = desired_quantities[instrument_id]
         request = OrderRequest(
             instrument_id=instrument_id,
             current_quantity=current,

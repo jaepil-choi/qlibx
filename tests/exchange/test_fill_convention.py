@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from vqapr.data.sources import SourceSpec
 from vqapr.exchange.conventions import FillConvention, FillSelector
@@ -111,6 +112,84 @@ def test_next_eligible_and_strict_bounds_have_no_fallback(tmp_path: Path) -> Non
         )
         is None
     )
+
+
+def test_dst_target_requires_matching_fold_and_offset_proof(tmp_path: Path) -> None:
+    registration = ExecutionInputRegistration.of(
+        "input",
+        ExecutionTableSpec(
+            source=SourceSpec.of(
+                "execution",
+                _write(
+                    tmp_path / "dst.parquet",
+                    """
+                    SELECT * FROM (VALUES
+                      (TIMESTAMPTZ '2024-11-03 01:30:00-04', 'A', true, 99.0, 100.0),
+                      (TIMESTAMPTZ '2024-11-03 01:30:00-05', 'A', true, 101.0, 102.0)
+                    ) AS t(trade_at, instrument, is_tradable, open, close)
+                    """,
+                ),
+            ),
+            trade_at_field="trade_at",
+            instrument_field="instrument",
+            is_tradable_field="is_tradable",
+            price_fields={"close": "close"},
+        ),
+        FillConvention(FillSelector.NEXT_ELIGIBLE, time(1, 30), "America/New_York", "close"),
+    )
+    decision = datetime.fromisoformat("2024-11-03T04:00:00+00:00")
+    end = datetime.fromisoformat("2024-11-03T07:00:00+00:00")
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        registration.fill.select_target(registration, decision_time=decision, end_time=end)
+    wrong = FillConvention(
+        FillSelector.NEXT_ELIGIBLE, time(1, 30), "America/New_York", "close", 0, "-05:00"
+    )
+    with pytest.raises(ValueError, match="does not resolve"):
+        wrong.select_target(registration, decision_time=decision, end_time=end)
+
+    proven = FillConvention(
+        FillSelector.NEXT_ELIGIBLE, time(1, 30), "America/New_York", "close", 1, "-05:00"
+    )
+    target = proven.select_target(
+        ExecutionInputRegistration(registration.execution_input_id, registration.table, proven),
+        decision_time=decision,
+        end_time=end,
+    )
+    assert target is not None
+    assert target.target_at == datetime.fromisoformat("2024-11-03T06:30:00+00:00")
+    assert proven.declaration_identity != registration.fill.declaration_identity
+
+
+def test_nonexistent_dst_target_is_rejected_instead_of_skipped(tmp_path: Path) -> None:
+    registration = ExecutionInputRegistration.of(
+        "input",
+        ExecutionTableSpec(
+            source=SourceSpec.of(
+                "execution",
+                _write(
+                    tmp_path / "gap.parquet",
+                    """
+                    SELECT * FROM (VALUES
+                      (TIMESTAMPTZ '2024-03-10 03:30:00-04', 'A', true, 99.0, 100.0)
+                    ) AS t(trade_at, instrument, is_tradable, open, close)
+                    """,
+                ),
+            ),
+            trade_at_field="trade_at",
+            instrument_field="instrument",
+            is_tradable_field="is_tradable",
+            price_fields={"close": "close"},
+        ),
+        FillConvention(FillSelector.NEXT_ELIGIBLE, time(2, 30), "America/New_York", "close"),
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        registration.fill.select_target(
+            registration,
+            decision_time=datetime.fromisoformat("2024-03-10T05:00:00+00:00"),
+            end_time=datetime.fromisoformat("2024-03-10T08:00:00+00:00"),
+        )
 
 
 def test_exact_snapshot_preserves_missing_and_duplicate_partitions(tmp_path: Path) -> None:

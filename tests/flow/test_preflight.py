@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, time
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from vqapr.account.account import AccountMode
+from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
@@ -13,8 +17,13 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
+from vqapr.extension.loading import load_exchange
+from vqapr.flow.model_state import InMemoryModelStateStore
 from vqapr.flow.preflight import preflight_run
 from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
@@ -44,7 +53,32 @@ def _agenda(identifier: str, role: OperationRole, *hours: int) -> OperationAgend
 
 def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef:
     path = root / f"{identifier}.py"
-    path.write_text(f"class {identifier.title().replace('-', '')}:\n    pass\n", encoding="utf-8")
+    source = (
+        f"from vqapr.models.strategy_model import NoDecision, StrategyModel\n"
+        f"class {identifier.title().replace('-', '')}(StrategyModel):\n"
+        "    def requirements(self):\n"
+        "        return ()\n"
+        "    def on_occurrence(self, context):\n"
+        "        return NoDecision('fixture')\n"
+        if kind is ComponentKind.STRATEGY_MODEL
+        else "from vqapr.constraints.constraint import Constraint\n"
+        f"class {identifier.title().replace('-', '')}(Constraint):\n"
+        "    @property\n"
+        "    def constraint_id(self):\n"
+        "        return 'fixture'\n"
+        "    def requirements(self):\n"
+        "        return ()\n"
+        "    def project(self, window, instruments):\n"
+        "        return None\n"
+        "    def validate_intended(self, intent, bounds):\n"
+        "        return None\n"
+        "    def evaluate(self, account, marks):\n"
+        "        return None\n"
+    )
+    path.write_text(
+        source,
+        encoding="utf-8",
+    )
     return ComponentRef.of(
         identifier,
         kind,
@@ -95,9 +129,58 @@ def _setup(root: Path, model_price_parquet: Path) -> tuple[Workspace, RunDefinit
         monitoring,
         start=datetime(2024, 3, 5, 9, tzinfo=_ZONE),
         end=datetime(2024, 3, 5, 10, tzinfo=_ZONE),
-        initial_account={"cash": 100},
-        initial_model_state={"version": "fresh"},
+        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
+        initial_model_memory={"cadence": [1]},
     )
+
+
+def _execution_exchange(
+    workspace: Workspace,
+    root: Path,
+    *,
+    identifier: str = "exchange",
+    permitted_sides: str = "frozenset((Side.BUY, Side.SELL))",
+    step: str = "Decimal('1')",
+    minimum: str = "Decimal('1')",
+    fractional: str = "False",
+    register_input: bool = True,
+) -> ComponentRef:
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"{identifier}.py"
+    path.write_text(
+        "from decimal import Decimal\n"
+        "from vqapr.exchange.venue import AcademicExchange, ListingRule, Side\n"
+        "class Exchange(AcademicExchange):\n"
+        "    def __init__(self):\n"
+        "        super().__init__({'ABC': ListingRule('ABC', "
+        f"{step}, {minimum}, {fractional}, {permitted_sides})}})\n",
+        encoding="utf-8",
+    )
+    component = ComponentRef.of(
+        identifier,
+        ComponentKind.EXCHANGE,
+        path,
+        "Exchange",
+        fingerprint=fingerprint_component(
+            path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+        ),
+    )
+    workspace.register_component(component)
+    execution = ExecutionInputRegistration.of(
+        "execution",
+        ExecutionTableSpec(
+            SourceSpec.of("execution-source", root / "execution.parquet"),
+            "trade_at",
+            "instrument",
+            "is_tradable",
+            {"close": "close"},
+        ),
+        FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
+    )
+    if register_input:
+        workspace.register_execution_input(execution)
+    return component
 
 
 def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
@@ -121,10 +204,154 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
     ]
     assert frozen.constraints is not definition.constraints
     assert frozen.constraints.constraints[0].component_id == "limit"
+    assert (
+        frozen.initial_model_state_ref
+        == InMemoryModelStateStore().prepare(frozen.initial_model_memory).ref
+    )
     assert frozen.identity == preflight_run(workspace, definition).identity
+    changed_account = replace(
+        frozen,
+        initial_account_snapshot=AccountSnapshot(0, Decimal("101"), {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
+    )
+    changed_model_state = replace(frozen, initial_model_memory={"cadence": [2]})
+    changed_source = replace(
+        frozen,
+        sources=(SourceSpec.of("prices-source", tmp_path / "changed.parquet"),),
+    )
+    exchange = _component(tmp_path, "exchange", ComponentKind.EXCHANGE)
+    execution = ExecutionInputRegistration.of(
+        "execution",
+        ExecutionTableSpec(
+            SourceSpec.of("execution-source", tmp_path / "execution.parquet"),
+            "trade_at",
+            "instrument",
+            "is_tradable",
+            {"close": "close"},
+        ),
+        FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
+    )
+    frozen_execution = replace(frozen, exchange=exchange, execution_input=execution)
+    changed_fill = replace(
+        frozen_execution,
+        execution_input=ExecutionInputRegistration(
+            execution.execution_input_id,
+            execution.table,
+            FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), "Asia/Seoul", "close"),
+        ),
+    )
+    assert changed_account.identity != frozen.identity
+    assert changed_model_state.identity != frozen.identity
+    assert changed_source.identity != frozen.identity
+    assert changed_fill.identity != frozen_execution.identity
     assert (
         frozen.physical_source_guarantee
         == "Configuration and declaration objects are frozen; physical source bytes are not."
+    )
+
+
+def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    workspace, definition = _setup(tmp_path, model_price_parquet)
+    exchange = _execution_exchange(workspace, tmp_path)
+    compatible = replace(
+        definition,
+        exchange=exchange,
+        execution_input_id="execution",
+        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("2")}),
+    )
+
+    assert isinstance(
+        load_exchange(exchange, project_root=workspace.project_root), AcademicExchange
+    )
+    assert preflight_run(workspace, compatible).exchange == exchange
+
+    duck_path = tmp_path / "duck.py"
+    duck_path.write_text(
+        "class Duck:\n"
+        "    exchange_id = 'duck'\n"
+        "    def requirements(self):\n"
+        "        return ()\n"
+        "    def execute(self, orders, account, snapshot):\n"
+        "        return None\n",
+        encoding="utf-8",
+    )
+    duck = ComponentRef.of(
+        "duck",
+        ComponentKind.EXCHANGE,
+        duck_path,
+        "Duck",
+        fingerprint=fingerprint_component(
+            duck_path, kind=ComponentKind.EXCHANGE, object_name="Duck"
+        ),
+    )
+    workspace.register_component(duck)
+    with pytest.raises(VqaprError, match="wrong_type"):
+        preflight_run(workspace, replace(compatible, exchange=duck))
+
+    cases = (
+        (
+            "unlisted",
+            AccountSnapshot(0, Decimal("100"), {"MISSING": Decimal("2")}),
+            "unlisted_holding",
+        ),
+        (
+            "minimum",
+            AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("0.5")}),
+            "minimum_quantity",
+        ),
+        (
+            "step",
+            AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("1.5")}),
+            "quantity_step",
+        ),
+    )
+    for _name, snapshot, code in cases:
+        with pytest.raises(VqaprError, match=code):
+            preflight_run(workspace, replace(compatible, initial_account_snapshot=snapshot))
+
+    no_sell = _execution_exchange(
+        workspace,
+        tmp_path / "no-sell",
+        identifier="no-sell",
+        permitted_sides="frozenset((Side.BUY,))",
+        register_input=False,
+    )
+    with pytest.raises(VqaprError, match="close_side_missing"):
+        preflight_run(workspace, replace(compatible, exchange=no_sell))
+
+    fractional = _execution_exchange(
+        workspace,
+        tmp_path / "fractional",
+        identifier="fractional",
+        step="Decimal('0.1')",
+        fractional="False",
+        register_input=False,
+    )
+    with pytest.raises(VqaprError, match="fractional_quantity"):
+        preflight_run(
+            workspace,
+            replace(
+                compatible,
+                exchange=fractional,
+                initial_account_snapshot=AccountSnapshot(
+                    0, Decimal("100"), {"ABC": Decimal("1.5")}
+                ),
+            ),
+        )
+
+    signed = replace(
+        compatible,
+        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("-2")}),
+    )
+    with pytest.raises(VqaprError, match="mode"):
+        preflight_run(workspace, signed)
+    assert (
+        preflight_run(
+            workspace, replace(signed, initial_account_mode=AccountMode.SIGNED)
+        ).initial_account_mode
+        is AccountMode.SIGNED
     )
 
 
@@ -139,12 +366,30 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     with pytest.raises(ValueError, match="strategy configuration reference drift"):
         preflight_run(workspace, definition)
 
+    memory = {"nested": [1]}
+    workspace, definition = _setup(tmp_path / "memory", model_price_parquet)
+    definition = replace(definition, initial_model_memory=memory)
+    frozen = preflight_run(workspace, definition)
+    memory["nested"].append(2)
+    assert definition.initial_model_memory == {"nested": [1]}
+    assert frozen.initial_model_memory == {"nested": [1]}
+
     workspace, definition = _setup(tmp_path / "drift", model_price_parquet)
     (tmp_path / "drift" / "strategy.py").write_text(
         "class Strategy:\n    changed = True\n", encoding="utf-8"
     )
-    with pytest.raises(ValueError, match="fingerprint drift"):
+    with pytest.raises(VqaprError, match="fingerprint_drift"):
         preflight_run(workspace, definition)
+
+    workspace, definition = _setup(tmp_path / "config-drift", model_price_parquet)
+    registered = workspace._components["strategy"]
+    registered.config["changed"] = True
+    drifted_strategy = StrategyConfig(
+        registered, definition.strategy.agenda_id, definition.strategy.agenda_role
+    )
+    workspace._strategy_configs[drifted_strategy.agenda_id] = drifted_strategy
+    with pytest.raises(VqaprError, match="fingerprint_drift"):
+        preflight_run(workspace, replace(definition, strategy=drifted_strategy))
 
 
 def test_preflight_rejects_missing_requirement_and_invalid_bounds(
@@ -167,6 +412,49 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     )
     with pytest.raises(VqaprError):
         preflight_run(workspace, invalid)
+
+    workspace, definition = _setup(tmp_path / "constraint-requirement", model_price_parquet)
+    constraint_path = tmp_path / "constraint-requirement" / "limit.py"
+    constraint_path.write_text(
+        "from vqapr.constraints.constraint import Constraint\n"
+        "from vqapr.data.lookback import RowsLookback\n"
+        "from vqapr.data.requirements import DataRequirement\n"
+        "class Limit(Constraint):\n"
+        "    @property\n"
+        "    def constraint_id(self):\n"
+        "        return 'limit'\n"
+        "    def requirements(self):\n"
+        "        return (DataRequirement.of('limit', 'absent', fields=('close',), "
+        "lookback=RowsLookback(1)),)\n"
+        "    def project(self, window, instruments):\n"
+        "        return None\n"
+        "    def validate_intended(self, intent, bounds):\n"
+        "        return None\n"
+        "    def evaluate(self, account, marks):\n"
+        "        return None\n",
+        encoding="utf-8",
+    )
+    constraint = ComponentRef.of(
+        "limit",
+        ComponentKind.CONSTRAINT,
+        constraint_path,
+        "Limit",
+        fingerprint=fingerprint_component(
+            constraint_path, kind=ComponentKind.CONSTRAINT, object_name="Limit"
+        ),
+    )
+    workspace._components[constraint.component_id] = constraint
+    invalid_constraint = RunDefinition(
+        definition.strategy,
+        definition.valuation,
+        ConstraintSet((constraint,)),
+        definition.monitoring,
+        start=definition.start,
+        end=definition.end,
+    )
+    with pytest.raises(VqaprError):
+        preflight_run(workspace, invalid_constraint)
+
     with pytest.raises(ValueError, match="timezone-aware"):
         RunDefinition(
             definition.strategy,
@@ -182,4 +470,22 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
             definition.constraints,
             start=definition.end,
             end=definition.start,
+        )
+    with pytest.raises(ValueError, match="declared together"):
+        RunDefinition(
+            definition.strategy,
+            definition.valuation,
+            definition.constraints,
+            start=definition.start,
+            end=definition.end,
+            initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
+        )
+    with pytest.raises(TypeError, match="Model memory"):
+        RunDefinition(
+            definition.strategy,
+            definition.valuation,
+            definition.constraints,
+            start=definition.start,
+            end=definition.end,
+            initial_model_memory=("not-json",),  # type: ignore[arg-type]
         )

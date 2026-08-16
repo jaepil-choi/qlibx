@@ -3,41 +3,30 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
+from decimal import Decimal
+from io import BytesIO
 
+from vqapr.account.account import AccountMode
+from vqapr.account.snapshot import AccountSnapshot
+from vqapr.constraints.constraint import Constraint
+from vqapr.data.requirements import DataRequirement
+from vqapr.data.sources import SourceSpec
+from vqapr.domain.errors import Failure, FailureFamily, VqaprError
 from vqapr.domain.timestamps import require_tz_aware
+from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
 from vqapr.extension.component import ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
+from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
 from vqapr.flow.run import FrozenAgenda, FrozenRun, RunDefinition
+from vqapr.models.strategy_model import StrategyModel
 from vqapr.runtime.agendas import OperationAgenda
 from vqapr.workspace import Workspace
 
 
-def _component_path(workspace: Workspace, component: ComponentRef) -> Path:
-    path = component.path
-    return path if path.is_absolute() else workspace.project_root / path
-
-
 def _validate_component(workspace: Workspace, component: ComponentRef) -> ComponentRef:
-    """Resolve one registered reference and reject source/configuration drift."""
+    """Reject a declaration that is not the workspace's registered component."""
     registered = workspace.component(str(component.component_id))
     if registered != component:
         raise ValueError(f"component reference drift for {component.component_id!r}")
-
-    path = _component_path(workspace, registered)
-    try:
-        actual = fingerprint_component(
-            path,
-            kind=registered.kind,
-            object_name=registered.object_name,
-            config=registered.config,
-        )
-    except OSError as error:
-        raise ValueError(
-            f"component source for {registered.component_id!r} cannot be fingerprinted"
-        ) from error
-    if actual != registered.fingerprint:
-        raise ValueError(f"component fingerprint drift for {registered.component_id!r}")
     return registered
 
 
@@ -72,17 +61,133 @@ def _freeze_agenda(
     )
 
 
-def _validate_requirement(workspace: Workspace, requirement: object) -> None:
+def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSpec:
     """Check declared valuation input availability without reading physical source bytes."""
     dataset_id = getattr(requirement, "dataset_id", None)
     fields = getattr(requirement, "fields", None)
-    if not isinstance(dataset_id, str) or not isinstance(fields, tuple):
+    if not isinstance(requirement, DataRequirement):
         raise TypeError("requirement must be a DataRequirement")
     registration = workspace.dataset(dataset_id)
     missing = tuple(field for field in fields if field not in registration.fields)
     if missing:
         raise ValueError(
             f"dataset {dataset_id!r} does not provide required fields: {', '.join(missing)}"
+        )
+    return workspace.source(str(registration.source))
+
+
+def _freeze_sources(
+    workspace: Workspace, requirements: tuple[DataRequirement, ...], execution: SourceSpec | None
+) -> tuple[SourceSpec, ...]:
+    sources = [_validate_requirement(workspace, requirement) for requirement in requirements]
+    if execution is not None:
+        registered = workspace.source(str(execution.source_id))
+        if registered != execution:
+            raise ValueError(f"execution source declaration drift for {execution.source_id!r}")
+        sources.append(registered)
+    by_id = {source.source_id: source for source in sources}
+    return tuple(by_id[source_id] for source_id in sorted(by_id))
+
+
+def _validate_initial_model_state(
+    workspace: Workspace,
+    component: ComponentRef,
+    strategy: StrategyModel,
+    memory: object,
+) -> bytes:
+    """Stage and round-trip the Flow-owned initial Strategy payload."""
+    try:
+        strategy.memory = memory
+        payload = BytesIO()
+        strategy.save_payload(payload)
+        frozen_payload = payload.getvalue()
+        restored = load_strategy_model(component, project_root=workspace.project_root)
+        restored.memory = memory
+        restored.load_payload(BytesIO(frozen_payload))
+        round_trip = BytesIO()
+        restored.save_payload(round_trip)
+        if round_trip.getvalue() != frozen_payload:
+            raise ValueError("payload round-trip changed its bytes")
+    except Exception as error:
+        raise ValueError(
+            f"strategy initial payload for {component.component_id!r} cannot be staged"
+        ) from error
+    return frozen_payload
+
+
+def _validate_initial_account(
+    snapshot: AccountSnapshot | None,
+    mode: AccountMode | None,
+    exchange: AcademicExchange,
+) -> None:
+    """Prove existing holdings can be closed by the loaded Academic venue."""
+    if snapshot is None or mode is None:
+        return
+
+    failures: list[Failure] = []
+    for instrument_id, quantity in sorted(snapshot.positions.items()):
+        rule = exchange.listings.get(instrument_id)
+        if rule is None:
+            failures.append(
+                Failure.bounded(
+                    "preflight.account.unlisted_holding",
+                    "every initial holding must have an AcademicExchange listing",
+                    observed=instrument_id,
+                )
+            )
+            continue
+        assert isinstance(rule, ListingRule)
+        close_side = Side.SELL if quantity > 0 else Side.BUY
+        if close_side not in rule.permitted_sides:
+            failures.append(
+                Failure.bounded(
+                    "preflight.account.close_side_missing",
+                    "each initial holding must be closable by a permitted listing side",
+                    observed=f"{instrument_id}: {close_side.value}",
+                )
+            )
+        absolute = abs(quantity)
+        if absolute < rule.minimum_quantity:
+            failures.append(
+                Failure.bounded(
+                    "preflight.account.minimum_quantity",
+                    "each initial holding must meet its listing minimum_quantity",
+                    observed=f"{instrument_id}: {absolute}",
+                )
+            )
+        if (absolute / rule.quantity_step).to_integral_value() != absolute / rule.quantity_step:
+            failures.append(
+                Failure.bounded(
+                    "preflight.account.quantity_step",
+                    "each initial holding must align to its listing quantity_step",
+                    observed=f"{instrument_id}: {absolute}",
+                )
+            )
+        if not rule.fractional_allowed and absolute != absolute.to_integral_value():
+            failures.append(
+                Failure.bounded(
+                    "preflight.account.fractional_quantity",
+                    "each initial holding must satisfy its listing fractional quantity rule",
+                    observed=f"{instrument_id}: {absolute}",
+                )
+            )
+        if mode is AccountMode.LONG_ONLY and quantity < Decimal("0"):
+            failures.append(
+                Failure.bounded(
+                    "preflight.account.mode",
+                    "a long-only initial account must not contain short holdings",
+                    observed=f"{instrument_id}: {quantity}",
+                )
+            )
+    if failures:
+        raise VqaprError(
+            stage="preflight.account",
+            family=FailureFamily.EXCHANGE,
+            failures=failures,
+            mutation=False,
+            retry_precondition=(
+                "correct the initial account or AcademicExchange listing, then retry"
+            ),
         )
 
 
@@ -110,11 +215,15 @@ def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
     strategy = type(strategy)(
         _validate_component(workspace, strategy.component), strategy.agenda_id, strategy.agenda_role
     )
+    loaded_strategy = load_strategy_model(strategy.component, project_root=workspace.project_root)
+    initial_payload = _validate_initial_model_state(
+        workspace, strategy.component, loaded_strategy, definition.initial_model_memory
+    )
 
     valuation = workspace.valuation_config(definition.valuation.agenda_id)
     if valuation != definition.valuation:
         raise ValueError("valuation configuration reference drift")
-    _validate_requirement(workspace, valuation.mark_requirement)
+    requirements = [valuation.mark_requirement]
 
     monitoring = None
     if definition.monitoring is not None:
@@ -127,12 +236,33 @@ def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
         for constraint in definition.constraints.constraints
     )
     frozen_constraints = type(definition.constraints)(constraints)
+    requirements.extend(loaded_strategy.requirements())
+    loaded_constraints: tuple[Constraint, ...] = tuple(
+        load_constraint(constraint, project_root=workspace.project_root)
+        for constraint in constraints
+    )
+    for constraint in loaded_constraints:
+        requirements.extend(constraint.requirements())
 
     exchange = None
     execution_input = None
     if definition.exchange is not None:
         exchange = _validate_component(workspace, definition.exchange)
+        loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
         execution_input = workspace.execution_input(definition.execution_input_id or "")
+        _validate_initial_account(
+            definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
+        )
+    sources = _freeze_sources(
+        workspace,
+        tuple(requirements),
+        execution_input.table.source if execution_input is not None else None,
+    )
+    datasets_by_id = {
+        requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
+        for requirement in requirements
+    }
+    datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
 
     strategy_agenda = _freeze_agenda(
         workspace,
@@ -172,8 +302,13 @@ def preflight_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
         execution_input=execution_input,
         start=start,
         end=end,
-        initial_account=definition.initial_account,
-        initial_model_state=definition.initial_model_state,
+        initial_account_snapshot=definition.initial_account_snapshot,
+        initial_account_mode=definition.initial_account_mode,
+        initial_model_memory=definition.initial_model_memory,
+        initial_payload=initial_payload,
+        requirements=tuple(requirements),
+        datasets=datasets,
+        sources=sources,
     )
 
 

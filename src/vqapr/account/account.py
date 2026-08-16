@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.exchange.fills import Fill, FillBatch
+from vqapr.valuation.marks import MarkBatch
 
 
 class AccountMode(StrEnum):
@@ -26,10 +27,12 @@ class JournalEntry:
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedAccountCommit:
-    """A fully validated transition that has not yet been published."""
+class PreparedAccountFill:
+    """A validated fill candidate that is not an Account mutation."""
 
     expected_version: int
+    source: AccountState
+    fill_batch: FillBatch
     next_snapshot: AccountSnapshot
     journal_entries: tuple[JournalEntry, ...]
 
@@ -38,6 +41,14 @@ class PreparedAccountCommit:
             raise TypeError("expected_version must be an integer")
         if self.expected_version < 0:
             raise ValueError("expected_version must be non-negative")
+        if not isinstance(self.source, AccountState):
+            raise TypeError("source must be an AccountState")
+        if self.source.snapshot.version != self.expected_version:
+            raise ValueError("source version must match expected_version")
+        if not isinstance(self.fill_batch, FillBatch):
+            raise TypeError("fill_batch must be a FillBatch")
+        if self.fill_batch.account_version_seen != self.expected_version:
+            raise ValueError("fill_batch version must match expected_version")
         if not isinstance(self.next_snapshot, AccountSnapshot):
             raise TypeError("next_snapshot must be an AccountSnapshot")
         if self.next_snapshot.version != self.expected_version + 1:
@@ -50,46 +61,55 @@ class PreparedAccountCommit:
             raise ValueError("journal entries must have the committed version")
 
 
-class Account:
-    """Owns validation and atomic publication of fill-driven state transitions."""
+@dataclass(frozen=True, slots=True)
+class PreparedAccountTransition:
+    """A complete fill-and-mark candidate suitable for one root publication."""
 
-    def __init__(self, snapshot: AccountSnapshot, *, mode: AccountMode) -> None:
-        if not isinstance(snapshot, AccountSnapshot):
-            raise TypeError("snapshot must be an AccountSnapshot")
+    fill: PreparedAccountFill
+    next_state: AccountState
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.fill, PreparedAccountFill):
+            raise TypeError("fill must be a PreparedAccountFill")
+        if not isinstance(self.next_state, AccountState):
+            raise TypeError("next_state must be an AccountState")
+        if self.next_state.snapshot != self.fill.next_snapshot:
+            raise ValueError("next_state must publish the prepared fill snapshot")
+        if self.next_state.fill_history != (
+            *self.fill.source.fill_history,
+            *self.fill.journal_entries,
+        ):
+            raise ValueError("next_state must contain exactly the prepared fill history")
+        if self.next_state.mark_history[:-1] != self.fill.source.mark_history:
+            raise ValueError("next_state must preserve the published mark history")
+        latest_mark = self.next_state.latest_mark
+        if latest_mark is None or latest_mark.account_version != self.fill.next_snapshot.version:
+            raise ValueError("next_state must append a mark for the prepared snapshot")
+
+
+class Account:
+    """Owns Account transition validation; AcceptedRunState owns publication."""
+
+    def __init__(self, *, mode: AccountMode) -> None:
         if not isinstance(mode, AccountMode):
             raise TypeError("mode must be an AccountMode")
         self._mode = mode
-        self._snapshot = AccountSnapshot(snapshot.version, snapshot.cash, snapshot.positions)
-        self._journal: list[JournalEntry] = []
-        self._history: list[AccountSnapshot] = [self.snapshot()]
-        self._prepared: PreparedAccountCommit | None = None
 
     @property
     def mode(self) -> AccountMode:
         return self._mode
 
-    @property
-    def journal(self) -> tuple[JournalEntry, ...]:
-        return tuple(self._journal)
-
-    @property
-    def history(self) -> tuple[AccountSnapshot, ...]:
-        return tuple(self._history)
-
-    def snapshot(self) -> AccountSnapshot:
-        """Return a fresh detached immutable value, never internal Account state."""
-        current = self._snapshot
-        return AccountSnapshot(current.version, current.cash, current.positions)
-
-    def prepare_commit(
-        self, fill_batch: FillBatch, *, expected_version: int
-    ) -> PreparedAccountCommit:
-        """Validate a complete fill batch without mutating the Account."""
+    def prepare_fill(
+        self, state: AccountState, fill_batch: FillBatch, *, expected_version: int
+    ) -> PreparedAccountFill:
+        """Validate a complete fill candidate without retaining mutable Account state."""
+        if not isinstance(state, AccountState):
+            raise TypeError("state must be an AccountState")
         if not isinstance(fill_batch, FillBatch):
             raise TypeError("fill_batch must be a FillBatch")
         if isinstance(expected_version, bool) or not isinstance(expected_version, int):
             raise TypeError("expected_version must be an integer")
-        current = self._snapshot
+        current = state.snapshot
         if expected_version != current.version:
             raise ValueError("expected_version does not match the current account version")
         if fill_batch.account_version_seen != expected_version:
@@ -121,35 +141,38 @@ class Account:
             cash=next_cash,
             positions=next_positions,
         )
-        prepared = PreparedAccountCommit(
+        return PreparedAccountFill(
             expected_version=expected_version,
+            source=state,
+            fill_batch=fill_batch,
             next_snapshot=next_snapshot,
             journal_entries=tuple(
                 JournalEntry(version=next_snapshot.version, fill=fill) for fill in fill_batch.fills
             ),
         )
-        self._prepared = prepared
-        return prepared
 
-    def commit(self, prepared: PreparedAccountCommit) -> AccountSnapshot:
-        """Publish exactly the transition produced by the latest successful preparation."""
-        if not isinstance(prepared, PreparedAccountCommit):
-            raise TypeError("prepared must be a PreparedAccountCommit")
-        if prepared is not self._prepared:
-            raise ValueError(
-                "prepared commit was not produced by this Account or is no longer current"
-            )
-        if prepared.expected_version != self._snapshot.version:
-            raise ValueError("prepared commit is stale")
-
-        # All objects have been constructed and validated before publication.
-        published = AccountSnapshot(
-            prepared.next_snapshot.version,
-            prepared.next_snapshot.cash,
-            prepared.next_snapshot.positions,
+    def prepare_mark(
+        self, fill: PreparedAccountFill, marks: MarkBatch, *, provenance: object
+    ) -> PreparedAccountTransition:
+        """Validate the required post-fill valuation before any root is published."""
+        if not isinstance(fill, PreparedAccountFill):
+            raise TypeError("fill must be a PreparedAccountFill")
+        if not isinstance(marks, MarkBatch):
+            raise TypeError("marks must be a MarkBatch")
+        marked_positions = marks.quantities()
+        if marked_positions != dict(fill.next_snapshot.positions):
+            raise ValueError("marks must exactly cover the filled account positions")
+        mark = AccountMark(
+            account_version=fill.next_snapshot.version,
+            marks=marks,
+            nav=fill.next_snapshot.cash + marks.total_value,
+            provenance=provenance,
         )
-        self._snapshot = published
-        self._journal.extend(prepared.journal_entries)
-        self._history.append(self.snapshot())
-        self._prepared = None
-        return self.snapshot()
+        return PreparedAccountTransition(
+            fill=fill,
+            next_state=AccountState(
+                snapshot=fill.next_snapshot,
+                mark_history=(*fill.source.mark_history, mark),
+                fill_history=(*fill.source.fill_history, *fill.journal_entries),
+            ),
+        )

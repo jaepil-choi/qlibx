@@ -54,3 +54,7 @@ class MarkBatch:
             raise ValueError("a MarkBatch may contain each instrument only once")
         if self.total_value != sum((mark.value for mark in self.marks), Decimal("0")):
             raise ValueError("total_value must equal the sum of marks")
+
+    def quantities(self) -> dict[str, Decimal]:
+        """Return the complete immutable batch's explicitly marked quantities."""
+        return {mark.instrument_id: mark.quantity for mark in self.marks}

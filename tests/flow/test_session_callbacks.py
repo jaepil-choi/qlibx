@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, time
 from decimal import Decimal
 from pathlib import Path
@@ -9,7 +8,9 @@ from uuid import UUID
 import pytest
 
 from vqapr.account.account import Account, AccountMode
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.constraints.constraint import Constraint, ConstraintBounds
+from vqapr.constraints.findings import ConstraintFinding
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
@@ -20,25 +21,26 @@ from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfi
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
 from vqapr.models.strategy_model import NoDecision, StrategyModel, StrategyModelContext
+from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
 
+_BUDGET = Budget(
+    PortfolioDirection.LONG_ONLY, Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")
+)
+_SOURCE = IntentSourceRef("strategy-source", "0" * 64)
 
-@dataclass(frozen=True)
-class Intent:
-    occurrence_number: int
-    intent_id: UUID
-    strategy_id: str
-    targets: tuple[object, ...]
-    cash_target: Decimal
-    budget: object
-    source_refs: tuple[object, ...]
-    account_version_seen: int
-    model_state_ref: None = None
+
+def _state(*, memory: object = None) -> RunStateRepository:
+    return RunStateRepository(
+        initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})),
+        initial_model_memory=memory,
+    )
 
 
 class EveryThreeOccurrences(StrategyModel):
-    def on_occurrence(self, context: StrategyModelContext) -> NoDecision | Intent:
+    def on_occurrence(self, context: StrategyModelContext) -> NoDecision | EconomicPortfolioIntent:
         assert not hasattr(context, "sessions")
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
@@ -48,15 +50,15 @@ class EveryThreeOccurrences(StrategyModel):
         self.memory = {**memory, "occurrence_count": count}
         if count % 3:
             return NoDecision(reason="cadence")
-        return Intent(
-            occurrence_number=count,
+        return EconomicPortfolioIntent(
             intent_id=UUID(int=count),
             strategy_id="every-three",
             targets=(),
             cash_target=Decimal(1),
-            budget="fixture",
-            source_refs=(),
+            budget=_BUDGET,
+            source_refs=(_SOURCE,),
             account_version_seen=context.account.version,
+            model_state_ref=None,
         )
 
 
@@ -71,6 +73,33 @@ class _Catalog:
 class _Exchange:
     def execute(self, *args: object) -> object:
         raise AssertionError("NoDecision callbacks must not execute orders")
+
+
+class _Constraint(Constraint):
+    @property
+    def constraint_id(self) -> str:
+        return "constraint"
+
+    def requirements(self) -> tuple[DataRequirement, ...]:
+        return ()
+
+    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+        return ConstraintBounds(
+            {instrument: Decimal("0") for instrument in instruments},
+            {instrument: Decimal("1") for instrument in instruments},
+        )
+
+    def validate_intended(
+        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
+    ) -> ConstraintFinding:
+        return ConstraintFinding(
+            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
+        )
+
+    def evaluate(self, account: AccountSnapshot, marks: object) -> ConstraintFinding:
+        return ConstraintFinding(
+            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
+        )
 
 
 def _occurrence(number: int) -> OperationOccurrence:
@@ -108,11 +137,15 @@ def _flow(
             OperationRole.STRATEGY_CALLBACK,
         ),
         valuation=ValuationConfig("valuation", OperationRole.VALUATION, requirement),
-        constraints=ConstraintSet(()),
+        constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
         strategy_agenda=strategy_agenda,
         valuation_agenda=valuation_agenda,
+        start=occurrences[0].evaluation_time,
+        end=occurrences[-1].evaluation_time,
+        initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
     )
-    account = Account(AccountSnapshot(0, Decimal(1), {}), mode=AccountMode.LONG_ONLY)
+    account = Account(mode=AccountMode.LONG_ONLY)
 
     def window_for_occurrence(occurrence: OperationOccurrence) -> ModelWindow:
         return ModelWindow(
@@ -129,13 +162,13 @@ def _flow(
         window_for_occurrence=window_for_occurrence,
         account=account,
         exchange=_Exchange(),
-        constraints=(),
+        constraints=(_Constraint(),),
         marks_for_occurrence=lambda *_: {},
     )
 
 
 def test_cadence_is_strategy_memory_over_explicit_current_occurrences() -> None:
-    state = RunStateRepository()
+    state = _state()
 
     result = _flow(EveryThreeOccurrences(), state, (_occurrence(1), _occurrence(2))).run()
 
@@ -150,9 +183,7 @@ def test_cadence_is_strategy_memory_over_explicit_current_occurrences() -> None:
 
 
 def test_no_decision_state_continues_across_explicit_agenda_boundaries() -> None:
-    state = RunStateRepository()
-    _flow(EveryThreeOccurrences(), state, (_occurrence(1),)).run()
-
+    state = _state(memory={"occurrence_count": 1})
     result = _flow(EveryThreeOccurrences(), state, (_occurrence(2),)).run()
 
     assert isinstance(result.occurrences[0].result, NoDecision)
@@ -162,30 +193,29 @@ def test_no_decision_state_continues_across_explicit_agenda_boundaries() -> None
 
 
 class TimingOverrideStrategy(EveryThreeOccurrences):
-    def on_occurrence(self, context: StrategyModelContext) -> Intent:
+    def on_occurrence(self, context: StrategyModelContext) -> EconomicPortfolioIntent:
         self.memory = {"occurrence_count": 999}
-        intent = Intent(
-            occurrence_number=1,
+        return EconomicPortfolioIntent(
             intent_id=UUID(int=1),
-            strategy_id="timing-override",
+            strategy_id="strategy",
             targets=(),
             cash_target=Decimal(1),
-            budget="fixture",
+            budget=_BUDGET,
             source_refs=(),
             account_version_seen=context.account.version,
+            model_state_ref=None,
         )
-        object.__setattr__(intent, "decision_time", context.occurrence.evaluation_time)
-        return intent
 
 
-def test_strategy_intent_cannot_override_flow_timing() -> None:
-    state = RunStateRepository()
+def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
+    state = _state()
     strategy = TimingOverrideStrategy()
+    before_ref = state.current.current_model_state_ref
 
-    with pytest.raises(ValueError, match="must not declare decision_time"):
+    with pytest.raises(ValueError, match="requires frozen execution input"):
         _flow(strategy, state, (_occurrence(1),)).run()
 
-    assert state.current.current_model_state_ref is None
+    assert state.current.current_model_state_ref == before_ref
     assert strategy.memory is None
 
 
@@ -196,7 +226,7 @@ class FailingStrategy(EveryThreeOccurrences):
 
 
 def test_callback_failure_rolls_back_live_memory_and_state() -> None:
-    state = RunStateRepository(initial_model_memory={"occurrence_count": 1})
+    state = _state(memory={"occurrence_count": 1})
     strategy = FailingStrategy()
 
     with pytest.raises(RuntimeError, match="strategy bug"):

@@ -765,9 +765,13 @@ class Workspace:
         try:
             return _decode(text)
         except (TypeError, ValueError, yaml.YAMLError) as error:
+            message = str(error)
             requirement = (
-                str(error)
-                if "offset_sessions is no longer supported" in str(error)
+                message
+                if (
+                    "offset_sessions is no longer supported" in message
+                    or "old fill schema" in message
+                )
                 else "workspace YAML must contain valid physical sources and dataset declarations"
             )
             raise _workspace_error(
@@ -894,6 +898,8 @@ def _detach_execution_input(
             local_time=fill.local_time,
             timezone=fill.timezone,
             trade_price=fill.trade_price,
+            fold=fill.fold,
+            offset=fill.offset,
         ),
     )
 
@@ -1000,6 +1006,8 @@ def _encode(
                     "local_time": registration.fill.local_time.isoformat(),
                     "timezone": registration.fill.timezone,
                     "trade_price": registration.fill.trade_price,
+                    "fold": registration.fill.fold,
+                    "offset": registration.fill.offset,
                 },
             }
             for key, registration in sorted(execution_inputs.items(), key=lambda item: str(item[0]))
@@ -1166,7 +1174,8 @@ def _decode(
         "price_fields",
         "fill",
     }
-    expected_fill = {"selector", "local_time", "timezone", "trade_price"}
+    expected_fill = {"selector", "local_time", "timezone", "trade_price", "fold", "offset"}
+    legacy_fill = {"selector", "local_time", "timezone", "trade_price"}
     for raw_id, raw_registration in raw_execution_inputs.items():
         if not isinstance(raw_id, str):
             raise TypeError("every execution_input_id must be a string")
@@ -1202,6 +1211,10 @@ def _decode(
             raise ValueError(
                 f"execution input {raw_id!r} fill offset_sessions is no longer supported"
             )
+        if set(raw_fill) == legacy_fill:
+            raise ValueError(
+                f"execution input {raw_id!r} uses the old fill schema without fold and offset proof"
+            )
         if set(raw_fill) != expected_fill:
             raise ValueError(
                 f"execution input {raw_id!r} fill must contain exactly {sorted(expected_fill)}"
@@ -1210,10 +1223,16 @@ def _decode(
         local_time = raw_fill["local_time"]
         timezone = raw_fill["timezone"]
         trade_price = raw_fill["trade_price"]
+        fold = raw_fill["fold"]
+        offset = raw_fill["offset"]
         if not all(
             isinstance(value, str) for value in (selector, local_time, timezone, trade_price)
         ):
             raise TypeError(f"execution input {raw_id!r} fill scalar values must be strings")
+        if fold is not None and (not isinstance(fold, int) or isinstance(fold, bool)):
+            raise TypeError(f"execution input {raw_id!r} fill fold must be an integer or null")
+        if offset is not None and not isinstance(offset, str):
+            raise TypeError(f"execution input {raw_id!r} fill offset must be a string or null")
         try:
             parsed_selector = FillSelector(selector)
         except ValueError as error:
@@ -1241,6 +1260,8 @@ def _decode(
                 local_time=parsed_time,
                 timezone=timezone,
                 trade_price=trade_price,
+                fold=fold,
+                offset=offset,
             ),
         )
         decoded_execution_inputs[registration.execution_input_id] = registration

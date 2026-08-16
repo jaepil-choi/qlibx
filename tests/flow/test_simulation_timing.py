@@ -5,16 +5,44 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.evaluation import evaluate_constraints
 from vqapr.constraints.findings import ConstraintFinding
-from vqapr.portfolio.intents import PortfolioTarget
+from vqapr.data.requirements import DataRequirement
+from vqapr.data.windows import ModelWindow
+from vqapr.portfolio.intents import EconomicPortfolioIntent, PortfolioTarget
 from vqapr.valuation.marking import ValuationService
 
 
-class _Constraint:
+class _Constraint(Constraint):
     def __init__(self, constraint_id: str, passed: bool) -> None:
-        self.constraint_id = constraint_id
+        self._constraint_id = constraint_id
         self.passed = passed
+
+    @property
+    def constraint_id(self) -> str:
+        return self._constraint_id
+
+    def requirements(self) -> tuple[DataRequirement, ...]:
+        return ()
+
+    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+        return ConstraintBounds(
+            {instrument: Decimal("0") for instrument in instruments},
+            {instrument: Decimal("1") for instrument in instruments},
+        )
+
+    def validate_intended(
+        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
+    ) -> ConstraintFinding:
+        return ConstraintFinding(
+            constraint_id=self.constraint_id,
+            passed=self.passed,
+            measured=Decimal("2"),
+            bound=Decimal("1"),
+            excess=Decimal("0") if self.passed else Decimal("1"),
+            input_lineage={},
+        )
 
     def evaluate(self, account: AccountSnapshot, marks: object) -> ConstraintFinding:
         return ConstraintFinding(

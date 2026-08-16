@@ -6,28 +6,48 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from datetime import datetime
+from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 
+from vqapr.account.account import Account, AccountMode
+from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.constraints.constraint import Constraint, ConstraintBounds
+from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
+from vqapr.data.store import DuckDbObservationStore
+from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     ExecutionTableSpec,
     validate_execution_input,
 )
+from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.extension.fingerprint import fingerprint_component
+from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
 from vqapr.extension.registration import register_data_model
 from vqapr.flow.materialize import MaterializationResult, MaterializationSpec, materialize
-from vqapr.flow.preflight import preflight_run
+from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
-from vqapr.models.contexts import DataModelContext
+from vqapr.flow.run_state import RunStateRepository
+from vqapr.flow.simulation import SimulationFlow, SimulationResult
+from vqapr.models.contexts import DataModelContext, StrategyModelContext
 from vqapr.models.data_model import DataModel
+from vqapr.models.memory import normalize_memory
+from vqapr.models.strategy_model import NoDecision, StrategyModel
+from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef, PortfolioTarget
 from vqapr.runtime.agendas import (
     OperationAgenda,
     OperationOccurrence,
@@ -37,14 +57,23 @@ from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 __all__ = (
+    "AcademicExchange",
+    "AccountMode",
+    "AccountSnapshot",
+    "Budget",
     "CalendarLookback",
     "ComponentKind",
     "ComponentRef",
+    "Constraint",
+    "ConstraintBounds",
+    "ConstraintFinding",
+    "ConstraintReport",
     "ConstraintSet",
     "DataModel",
     "DataModelContext",
     "DataRequirement",
     "DatasetRegistration",
+    "EconomicPortfolioIntent",
     "ExactExecutionTarget",
     "ExecutionInputRegistration",
     "ExecutionTableSpec",
@@ -52,19 +81,30 @@ __all__ = (
     "FillSelector",
     "FrozenAgenda",
     "FrozenRun",
+    "IntentSourceRef",
+    "ListingRule",
     "LocalInstantDeclaration",
     "MaterializationResult",
     "MaterializationSpec",
     "MonitoringPolicy",
+    "NoDecision",
     "OperationAgenda",
     "OperationOccurrence",
     "OperationRole",
+    "PortfolioDirection",
+    "PortfolioTarget",
     "RowsLookback",
     "RunDefinition",
+    "Side",
+    "SimulationFailure",
+    "SimulationResult",
     "SourceSpec",
     "StrategyConfig",
+    "StrategyModel",
+    "StrategyModelContext",
     "ValuationConfig",
     "VqaprError",
+    "component_ref",
     "materialize",
     "preflight_run",
     "register_agenda",
@@ -75,6 +115,7 @@ __all__ = (
     "register_monitoring_policy",
     "register_strategy_config",
     "register_valuation_config",
+    "run",
 )
 
 
@@ -91,6 +132,31 @@ def register_dataset(
     diagnosis, _ = validate(registration, source)
     diagnosis.raise_if_failed()
     return Workspace.create(project_root).register_dataset(registration, source)
+
+
+def component_ref(
+    component_id: str,
+    kind: ComponentKind,
+    path: str | Path,
+    object_name: str,
+    *,
+    config: dict[str, object] | None = None,
+) -> ComponentRef:
+    """Build a source-fingerprinted component declaration for registration."""
+    fingerprint = fingerprint_component(
+        path,
+        kind=kind,
+        object_name=object_name,
+        config=config,
+    )
+    return ComponentRef.of(
+        component_id,
+        kind,
+        path,
+        object_name,
+        config=config,
+        fingerprint=fingerprint,
+    )
 
 
 def register_execution_input(
@@ -122,3 +188,120 @@ def register_valuation_config(project_root: str | Path, config: ValuationConfig)
 
 def register_monitoring_policy(project_root: str | Path, policy: MonitoringPolicy) -> bool:
     return Workspace.create(project_root).register_monitoring_policy(policy)
+
+
+def preflight_run(project_root: str | Path, definition: RunDefinition) -> FrozenRun:
+    """Resolve a run definition against registered declarations without running it."""
+    if not isinstance(definition, RunDefinition):
+        raise TypeError("definition must be a RunDefinition")
+    return _preflight_run(Workspace.open(project_root), definition)
+
+
+class _FrozenCatalog:
+    """Read-only data declarations captured by preflight, never a mutable workspace."""
+
+    def __init__(self, frozen: FrozenRun) -> None:
+        self._datasets = {str(dataset.dataset_id): dataset for dataset in frozen.datasets}
+        self._sources = {str(source.source_id): source for source in frozen.sources}
+
+    def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
+        return self._datasets[raw_dataset_id]
+
+    def source(self, raw_source_id: str) -> SourceSpec:
+        return self._sources[raw_source_id]
+
+
+def _marks_for_occurrence(
+    store: DuckDbObservationStore,
+    frozen: FrozenRun,
+    cutoff: datetime,
+    account: object,
+) -> Mapping[str, Decimal]:
+    from vqapr.account.snapshot import AccountSnapshot
+
+    if not isinstance(account, AccountSnapshot):
+        raise TypeError("mark provider requires an AccountSnapshot")
+    held = tuple(
+        sorted(instrument for instrument, quantity in account.positions.items() if quantity)
+    )
+    if not held:
+        return {}
+    requirement = frozen.valuation.mark_requirement
+    batch = store.query(
+        requirement,
+        evaluation_time=cutoff,
+        instruments=held,
+    )
+    field = requirement.fields[0]
+    marks: dict[str, Decimal] = {}
+    for row in batch.rows:
+        value = row[field]
+        if value is not None:
+            if not isinstance(value, Decimal):
+                raise TypeError("valuation mark field must contain Decimal values")
+            marks[row["instrument"]] = value
+    return marks
+
+
+def run(
+    project_root: str | Path,
+    definition: RunDefinition,
+    *,
+    instruments: tuple[str, ...],
+) -> SimulationResult:
+    """Execute one preflight-bound simulation from its frozen declarations."""
+    if not isinstance(definition, RunDefinition):
+        raise TypeError("definition must be a RunDefinition")
+    if not isinstance(instruments, tuple):
+        raise TypeError("instruments must be a tuple of instrument identifiers")
+
+    workspace = Workspace.open(project_root)
+    frozen = preflight_run(workspace.project_root, definition)
+    if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None:
+        raise ValueError("public run requires frozen initial account authority")
+    if frozen.exchange is None:
+        raise ValueError("public run requires a frozen Exchange authority")
+
+    strategy = load_strategy_model(frozen.strategy.component, project_root=workspace.project_root)
+    exchange = load_exchange(frozen.exchange, project_root=workspace.project_root)
+    constraints = tuple(
+        load_constraint(ref, project_root=workspace.project_root)
+        for ref in frozen.constraints.constraints
+    )
+    catalog = _FrozenCatalog(frozen)
+    store = DuckDbObservationStore(catalog)
+    allowed_requirements = (
+        *strategy.requirements(),
+        *(requirement for constraint in constraints for requirement in constraint.requirements()),
+    )
+    root = AccountState(frozen.initial_account_snapshot)
+    strategy.memory = normalize_memory(frozen.initial_model_memory)
+    strategy.load_payload(BytesIO(frozen.initial_payload))
+    state = RunStateRepository(
+        initial_account=root,
+        initial_model_memory=frozen.initial_model_memory,
+        initial_payload=frozen.initial_payload,
+    )
+    if state.root.current_model_state_ref != frozen.initial_model_state_ref:
+        raise RuntimeError("initial Model state does not match frozen run authority")
+    initial_ref = state.root.current_model_state_ref
+    if initial_ref is None or state.load_payload(initial_ref) != frozen.initial_payload:
+        raise RuntimeError("initial Strategy payload does not match frozen run authority")
+    flow = SimulationFlow(
+        frozen,
+        strategy,
+        state,
+        window_for_occurrence=lambda occurrence: ModelWindow(
+            evaluation_time=occurrence.evaluation_time,
+            instruments=instruments,
+            store=store,
+            allowed_requirements=allowed_requirements,
+        ),
+        account=Account(mode=frozen.initial_account_mode),
+        exchange=exchange,
+        constraints=constraints,
+        marks_for_occurrence=lambda valuation, cutoff, account: _marks_for_occurrence(
+            store, frozen, cutoff, account
+        ),
+    )
+    return flow.run()

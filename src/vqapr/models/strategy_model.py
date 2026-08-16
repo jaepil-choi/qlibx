@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import BinaryIO
 
+from vqapr.evidence.recorder import InvocationRecorder
+from vqapr.evidence.tables import TableSpec
 from vqapr.models.contexts import StrategyModelContext
 from vqapr.models.memory import ModelMemory
 from vqapr.models.model import Model
@@ -26,6 +29,17 @@ class StrategyModel(Model, ABC):
     """User extension whose memory owns cadence and other path-dependent rules."""
 
     memory: ModelMemory = None
+    recorder: InvocationRecorder | None = None
+
+    def tables(self) -> tuple[TableSpec, ...]:
+        """Declare diagnostic tables available during one callback invocation."""
+        return ()
+
+    def save_payload(self, target: BinaryIO) -> None:
+        """Persist private callback state into Flow-owned staging."""
+
+    def load_payload(self, source: BinaryIO) -> None:
+        """Restore private callback state from Flow-owned staging."""
 
     @abstractmethod
     def on_occurrence(self, context: StrategyModelContext) -> NoDecision | EconomicPortfolioIntent:

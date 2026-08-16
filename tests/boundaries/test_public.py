@@ -3,37 +3,58 @@
 from __future__ import annotations
 
 from datetime import date, time
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import duckdb
 import pytest
 
 import vqapr.public as public
 from vqapr.public import (
+    AcademicExchange,
+    AccountMode,
+    AccountSnapshot,
+    Budget,
     CalendarLookback,
     ComponentKind,
     ComponentRef,
+    Constraint,
+    ConstraintBounds,
+    ConstraintFinding,
+    ConstraintReport,
     ConstraintSet,
     DataModel,
     DataModelContext,
     DataRequirement,
     DatasetRegistration,
+    EconomicPortfolioIntent,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
     FrozenAgenda,
     FrozenRun,
+    IntentSourceRef,
+    ListingRule,
     LocalInstantDeclaration,
     MaterializationResult,
     MaterializationSpec,
     MonitoringPolicy,
+    NoDecision,
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
+    PortfolioDirection,
+    PortfolioTarget,
     RowsLookback,
     RunDefinition,
+    Side,
+    SimulationFailure,
+    SimulationResult,
     SourceSpec,
+    StrategyModel,
+    StrategyModelContext,
     VqaprError,
     materialize,
     preflight_run,
@@ -45,6 +66,7 @@ from vqapr.public import (
     register_monitoring_policy,
     register_strategy_config,
     register_valuation_config,
+    run,
 )
 
 
@@ -64,24 +86,43 @@ def test_public_exports_are_fixed() -> None:
     assert all(
         value is getattr(public, value.__name__)
         for value in (
+            AcademicExchange,
+            AccountMode,
+            AccountSnapshot,
+            Budget,
             CalendarLookback,
             ComponentKind,
             ComponentRef,
+            Constraint,
+            ConstraintBounds,
+            ConstraintFinding,
+            ConstraintReport,
             ConstraintSet,
             DataModel,
             DataModelContext,
             DataRequirement,
+            EconomicPortfolioIntent,
             FrozenAgenda,
             FrozenRun,
+            IntentSourceRef,
+            ListingRule,
             LocalInstantDeclaration,
             MaterializationResult,
             MaterializationSpec,
             MonitoringPolicy,
+            NoDecision,
             OperationAgenda,
             OperationOccurrence,
             OperationRole,
+            PortfolioDirection,
+            PortfolioTarget,
             RowsLookback,
             RunDefinition,
+            SimulationFailure,
+            SimulationResult,
+            Side,
+            StrategyModel,
+            StrategyModelContext,
             materialize,
             preflight_run,
             register_agenda,
@@ -90,17 +131,27 @@ def test_public_exports_are_fixed() -> None:
             register_monitoring_policy,
             register_strategy_config,
             register_valuation_config,
+            run,
         )
     )
     assert public.__all__ == (
+        "AcademicExchange",
+        "AccountMode",
+        "AccountSnapshot",
+        "Budget",
         "CalendarLookback",
         "ComponentKind",
         "ComponentRef",
+        "Constraint",
+        "ConstraintBounds",
+        "ConstraintFinding",
+        "ConstraintReport",
         "ConstraintSet",
         "DataModel",
         "DataModelContext",
         "DataRequirement",
         "DatasetRegistration",
+        "EconomicPortfolioIntent",
         "ExactExecutionTarget",
         "ExecutionInputRegistration",
         "ExecutionTableSpec",
@@ -108,19 +159,30 @@ def test_public_exports_are_fixed() -> None:
         "FillSelector",
         "FrozenAgenda",
         "FrozenRun",
+        "IntentSourceRef",
+        "ListingRule",
         "LocalInstantDeclaration",
         "MaterializationResult",
         "MaterializationSpec",
         "MonitoringPolicy",
+        "NoDecision",
         "OperationAgenda",
         "OperationOccurrence",
         "OperationRole",
+        "PortfolioDirection",
+        "PortfolioTarget",
         "RowsLookback",
         "RunDefinition",
+        "Side",
+        "SimulationFailure",
+        "SimulationResult",
         "SourceSpec",
         "StrategyConfig",
+        "StrategyModel",
+        "StrategyModelContext",
         "ValuationConfig",
         "VqaprError",
+        "component_ref",
         "materialize",
         "preflight_run",
         "register_agenda",
@@ -131,7 +193,14 @@ def test_public_exports_are_fixed() -> None:
         "register_monitoring_policy",
         "register_strategy_config",
         "register_valuation_config",
+        "run",
     )
+    assert "Workspace" not in public.__all__
+    assert "SimulationFlow" not in public.__all__
+    assert "DuckDbObservationStore" not in public.__all__
+    assert "RunStateRepository" not in public.__all__
+    assert "AccountState" not in public.__all__
+    assert "Dispatcher" not in public.__all__
 
 
 @pytest.mark.uc("UC-FACADE-001")
@@ -249,6 +318,80 @@ def test_public_facade_registers_an_operation_agenda(tmp_path: Path) -> None:
 
     assert register_agenda(tmp_path, agenda) is True
     assert register_agenda(tmp_path, agenda) is False
+
+
+def test_public_run_uses_frozen_initial_model_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory = {"carry": [1]}
+    frozen = SimpleNamespace(
+        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
+        initial_model_memory=memory,
+        initial_model_state_ref="frozen-memory-ref",
+        initial_payload=b"",
+        exchange=object(),
+        strategy=SimpleNamespace(component=object()),
+        constraints=SimpleNamespace(constraints=()),
+        datasets=(),
+        sources=(),
+    )
+    strategy = SimpleNamespace(
+        memory={"default": True},
+        requirements=lambda: (),
+        load_payload=lambda _source: None,
+    )
+    observed: dict[str, object] = {}
+
+    class Flow:
+        def __init__(self, _frozen, loaded_strategy, state, **_kwargs) -> None:
+            observed["memory"] = loaded_strategy.memory
+            observed["ref"] = state.root.current_model_state_ref
+
+        def run(self) -> object:
+            return "result"
+
+    class State:
+        def __init__(self, **_kwargs) -> None:
+            self.root = SimpleNamespace(current_model_state_ref="frozen-memory-ref")
+
+        def load_payload(self, _ref: object) -> bytes:
+            return b""
+
+    monkeypatch.setattr(
+        public.Workspace, "open", lambda _root: SimpleNamespace(project_root=tmp_path)
+    )
+    monkeypatch.setattr(public, "preflight_run", lambda _workspace, _definition: frozen)
+    monkeypatch.setattr(public, "load_strategy_model", lambda *_args, **_kwargs: strategy)
+    monkeypatch.setattr(public, "load_exchange", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(public, "RunStateRepository", State)
+    monkeypatch.setattr(public, "SimulationFlow", Flow)
+
+    definition = RunDefinition(
+        public.StrategyConfig(
+            ComponentRef.of(
+                "strategy",
+                ComponentKind.STRATEGY_MODEL,
+                tmp_path / "strategy.py",
+                "Strategy",
+                fingerprint="0" * 64,
+            ),
+            "strategy",
+            OperationRole.STRATEGY_CALLBACK,
+        ),
+        public.ValuationConfig(
+            "valuation",
+            OperationRole.VALUATION,
+            DataRequirement.of("valuation", "prices", fields=("close",), lookback=RowsLookback(1)),
+        ),
+        ConstraintSet(()),
+    )
+    assert public.run(tmp_path, definition, instruments=()) == "result"
+    memory["carry"].append(2)
+    assert observed == {
+        "memory": {"carry": [1]},
+        "ref": frozen.initial_model_state_ref,
+    }
 
 
 @pytest.mark.uc("UC-FILL-001")

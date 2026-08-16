@@ -5,13 +5,20 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.account import Account, AccountMode
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.orders.planning import plan_orders
+from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.valuation.marking import ValuationService
 
 
 def decimal(value: str) -> Decimal:
     return Decimal(value)
+
+
+_BUDGET = Budget(
+    PortfolioDirection.LONG_ONLY, decimal("0"), decimal("1"), decimal("0"), decimal("1")
+)
 
 
 def snapshot(
@@ -31,6 +38,8 @@ def test_weight_target_uses_execution_time_nav_after_a_price_gap() -> None:
         prices={"A": decimal("40")},
         weight_targets={"A": decimal("0.5")},
         quantity_targets={},
+        cash_target=decimal("0.5"),
+        budget=_BUDGET,
     )
 
     assert batch.requests[0].desired_quantity == decimal("2.5")
@@ -44,6 +53,8 @@ def test_omitted_holding_is_a_zero_target_and_sells_precede_buys() -> None:
         prices={"Z": decimal("10"), "A": decimal("10"), "B": decimal("10")},
         weight_targets={"B": decimal("0.2")},
         quantity_targets={"A": decimal("1")},
+        cash_target=decimal("0.7"),
+        budget=_BUDGET,
     )
 
     assert [(order.instrument_id, order.delta_quantity) for order in batch.requests] == [
@@ -57,102 +68,134 @@ def test_omitted_holding_is_a_zero_target_and_sells_precede_buys() -> None:
 def test_quantity_target_is_fixed_across_execution_nav_and_price_changes() -> None:
     batch = plan_orders(
         account=snapshot(positions={"A": "2"}),
-        execution_time_nav=decimal("999"),
-        prices={"A": decimal("37")},
+        execution_time_nav=decimal("100"),
+        prices={"A": decimal("10")},
         weight_targets={},
         quantity_targets={"A": decimal("7")},
+        cash_target=decimal("0.3"),
+        budget=_BUDGET,
     )
 
     assert batch.requests[0].desired_quantity == decimal("7")
     assert batch.requests[0].delta_quantity == decimal("5")
 
 
-def test_absent_target_only_weight_preserves_weight_without_inventing_a_price() -> None:
-    batch = plan_orders(
-        account=snapshot(),
-        execution_time_nav=decimal("100"),
-        prices={},
-        weight_targets={"A": decimal("0.25")},
-        quantity_targets={},
-    )
-
-    request = batch.requests[0]
-    assert request.instrument_id == "A"
-    assert request.current_quantity == decimal("0")
-    assert request.desired_quantity == decimal("0")
-    assert request.delta_quantity == decimal("0")
-    assert request.execution_price is None
-    assert request.unresolved_weight_target == decimal("0.25")
+def test_quantity_target_requires_its_exact_declared_post_trade_cash_fraction() -> None:
+    with pytest.raises(ValueError, match="cash_target"):
+        plan_orders(
+            account=snapshot(),
+            execution_time_nav=decimal("100"),
+            prices={"A": decimal("10")},
+            weight_targets={},
+            quantity_targets={"A": decimal("7")},
+            cash_target=decimal("0.31"),
+            budget=_BUDGET,
+        )
 
 
-def test_absent_target_only_quantity_preserves_requested_quantity_and_delta() -> None:
-    batch = plan_orders(
-        account=snapshot(),
-        execution_time_nav=decimal("100"),
-        prices={},
-        weight_targets={},
-        quantity_targets={"A": decimal("3")},
-    )
+def test_complete_desired_positions_enforce_budget_direction_and_bounds() -> None:
+    with pytest.raises(ValueError, match="long_only"):
+        plan_orders(
+            account=snapshot(),
+            execution_time_nav=decimal("100"),
+            prices={"A": decimal("10")},
+            weight_targets={},
+            quantity_targets={"A": decimal("-1")},
+            cash_target=decimal("1.1"),
+            budget=Budget(
+                PortfolioDirection.LONG_ONLY,
+                decimal("0"),
+                decimal("2"),
+                decimal("0"),
+                decimal("1"),
+            ),
+        )
+    with pytest.raises(ValueError, match="budget bounds"):
+        plan_orders(
+            account=snapshot(),
+            execution_time_nav=decimal("100"),
+            prices={"A": decimal("10")},
+            weight_targets={},
+            quantity_targets={"A": decimal("7")},
+            cash_target=decimal("0.3"),
+            budget=Budget(
+                PortfolioDirection.LONG_ONLY,
+                decimal("0"),
+                decimal("1"),
+                decimal("0"),
+                decimal("0.6"),
+            ),
+        )
 
-    request = batch.requests[0]
-    assert request.desired_quantity == decimal("3")
-    assert request.delta_quantity == decimal("3")
-    assert request.execution_price is None
-    assert request.unresolved_weight_target is None
+
+def test_missing_price_rejects_a_complete_weight_or_quantity_plan() -> None:
+    for weights, quantities, cash in (
+        ({"A": decimal("0.25")}, {}, decimal("0.75")),
+        ({}, {"A": decimal("3")}, decimal("0.7")),
+    ):
+        with pytest.raises(ValueError, match="complete desired positions"):
+            plan_orders(
+                account=snapshot(),
+                execution_time_nav=decimal("100"),
+                prices={},
+                weight_targets=weights,
+                quantity_targets=quantities,
+                cash_target=cash,
+                budget=_BUDGET,
+            )
 
 
 def test_missing_selected_value_for_a_nonzero_holding_fails_before_planning() -> None:
-    with pytest.raises(ValueError, match="held instruments"):
+    with pytest.raises(ValueError, match="complete desired positions"):
         plan_orders(
             account=snapshot(positions={"HELD": "1"}),
             execution_time_nav=decimal("100"),
             prices={},
             weight_targets={"TARGET": decimal("0.25")},
             quantity_targets={},
+            cash_target=decimal("0.75"),
+            budget=_BUDGET,
         )
 
 
 def test_equal_side_orders_use_instrument_tie_break() -> None:
     batch = plan_orders(
         account=snapshot(positions={"Z": "1", "A": "1"}),
-        execution_time_nav=decimal("0"),
+        execution_time_nav=decimal("100"),
         prices={"Z": decimal("1"), "A": decimal("1"), "B": decimal("1")},
         weight_targets={"B": decimal("1")},
         quantity_targets={},
+        cash_target=decimal("0"),
+        budget=_BUDGET,
     )
 
     assert [order.instrument_id for order in batch.requests] == ["A", "Z", "B"]
 
 
-def test_account_failures_do_not_mutate_and_snapshot_is_detached() -> None:
-    account = Account(snapshot(positions={"A": "1"}), mode=AccountMode.LONG_ONLY)
-    detached = account.snapshot()
-    source = {"A": decimal("1")}
-    copied = AccountSnapshot(3, decimal("100"), source)
-    source["A"] = decimal("9")
+def test_account_transition_validation_does_not_mutate_the_root() -> None:
+    account = Account(mode=AccountMode.LONG_ONLY)
+    mutable_positions = {"A": decimal("1")}
+    copied = AccountSnapshot(3, decimal("100"), mutable_positions)
+    mutable_positions["A"] = decimal("9")
     assert copied.positions["A"] == decimal("1")
     with pytest.raises(TypeError):
-        detached.positions["A"] = decimal("2")  # type: ignore[index]
+        copied.positions["A"] = decimal("2")  # type: ignore[index]
 
-    before = account.snapshot()
+    root = AccountState(snapshot(positions={"A": "1"}))
     short = FillBatch((Fill("A", decimal("-2"), decimal("-2"), decimal("10")),), 3)
     with pytest.raises(ValueError, match="short"):
-        account.prepare_commit(short, expected_version=3)
+        account.prepare_fill(root, short, expected_version=3)
     unaffordable = FillBatch((Fill("B", decimal("11"), decimal("11"), decimal("10")),), 3)
     with pytest.raises(ValueError, match="cash"):
-        account.prepare_commit(unaffordable, expected_version=3)
+        account.prepare_fill(root, unaffordable, expected_version=3)
     with pytest.raises(ValueError, match="expected_version"):
-        account.prepare_commit(
-            FillBatch((Fill("A", decimal("-1"), decimal("-1"), decimal("10")),), 3),
-            expected_version=2,
-        )
-    assert account.snapshot() == before
-    assert account.journal == ()
-    assert account.history == (before,)
+        account.prepare_fill(root, short, expected_version=2)
+    assert root == AccountState(snapshot(positions={"A": "1"}))
 
 
-def test_account_commits_fill_cash_positions_journal_and_history_atomically() -> None:
-    account = Account(snapshot(cash="10"), mode=AccountMode.SIGNED)
+def test_account_prepares_a_complete_fill_and_mark_transition() -> None:
+    root = AccountState(snapshot(cash="10"))
+    account = Account(mode=AccountMode.SIGNED)
     fills = FillBatch(
         (
             Fill("A", decimal("1"), decimal("1"), decimal("4")),
@@ -161,20 +204,23 @@ def test_account_commits_fill_cash_positions_journal_and_history_atomically() ->
         3,
     )
 
-    prepared = account.prepare_commit(fills, expected_version=3)
-    assert account.snapshot().version == 3
-    committed = account.commit(prepared)
+    prepared_fill = account.prepare_fill(root, fills, expected_version=3)
+    transition = account.prepare_mark(
+        prepared_fill,
+        ValuationService().mark(prepared_fill.next_snapshot, {"A": decimal("4")}),
+        provenance="test",
+    )
 
-    assert committed == AccountSnapshot(4, decimal("6"), {"A": decimal("1")})
-    assert len(account.journal) == 2
-    assert account.history == (snapshot(cash="10"), committed)
-    with pytest.raises(ValueError, match="no longer current"):
-        account.commit(prepared)
+    assert transition.next_state.snapshot == AccountSnapshot(4, decimal("6"), {"A": decimal("1")})
+    assert len(transition.next_state.fill_history) == 2
+    assert transition.next_state.latest_mark is not None
+    assert root == AccountState(snapshot(cash="10"))
 
 
-def test_zero_dealt_fills_do_not_change_account_cash_or_positions() -> None:
-    account = Account(snapshot(cash="10", positions={"HELD": "2"}), mode=AccountMode.LONG_ONLY)
-    before = account.snapshot()
+def test_zero_dealt_fills_prepare_an_unchanged_account_snapshot() -> None:
+    root = AccountState(snapshot(cash="10", positions={"HELD": "2"}))
+    account = Account(mode=AccountMode.LONG_ONLY)
+    before = root.snapshot
     fills = FillBatch(
         (
             Fill("TARGET", decimal("3"), Decimal(0), None, ZeroDealtReason.ABSENT),
@@ -183,7 +229,7 @@ def test_zero_dealt_fills_do_not_change_account_cash_or_positions() -> None:
         before.version,
     )
 
-    committed = account.commit(account.prepare_commit(fills, expected_version=before.version))
+    prepared = account.prepare_fill(root, fills, expected_version=before.version)
 
-    assert committed.cash == before.cash
-    assert committed.positions == before.positions
+    assert prepared.next_snapshot.cash == before.cash
+    assert prepared.next_snapshot.positions == before.positions

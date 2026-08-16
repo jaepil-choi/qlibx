@@ -14,8 +14,6 @@ from typing import Any
 
 import duckdb
 
-sys.dont_write_bytecode = True
-
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
@@ -49,6 +47,8 @@ from vqapr.public import (
     register_valuation_config,
     run,
 )
+
+sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"

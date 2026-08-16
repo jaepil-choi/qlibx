@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -194,6 +194,90 @@ def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
     finally:
         con.close()
     return tuple(row[0] for row in rows)
+
+
+def candidate_instants(
+    spec: SourceSpec,
+    *,
+    trade_at_field: str,
+    decision_time: object,
+    end_time: object,
+) -> tuple[object, ...]:
+    """Return only distinct candidate execution instants in the causal run interval."""
+
+    trade_at = _quote(trade_at_field)
+    con = _open(spec)
+    try:
+        rows = con.execute(
+            f"SELECT DISTINCT {trade_at} FROM {_relation(spec)} "
+            f"WHERE {trade_at} > ? AND {trade_at} <= ? ORDER BY {trade_at}",
+            [decision_time, end_time],
+        ).fetchall()
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage="source.scan.execution_candidates",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="source.scan.execution_candidates.unreadable",
+                    requirement="the execution instant field must be queryable",
+                    observed=str(exc).splitlines()[0],
+                )
+            ],
+            mutation=False,
+        ) from exc
+    finally:
+        con.close()
+    return tuple(row[0] for row in rows)
+
+
+def exact_snapshot_rows(
+    spec: SourceSpec,
+    *,
+    trade_at_field: str,
+    instrument_field: str,
+    target_at: object,
+    instruments: Sequence[str],
+    fields: Mapping[str, str],
+) -> tuple[dict[str, object], ...]:
+    """Read one exact execution snapshot; never substitutes a nearby row or price."""
+
+    if not instruments:
+        return ()
+    if not fields:
+        raise ValueError("exact snapshot requires at least one field")
+    trade_at = _quote(trade_at_field)
+    instrument = _quote(instrument_field)
+    placeholders = ", ".join("?" for _ in instruments)
+    projections = [
+        f"{trade_at} AS {_quote('trade_at')}",
+        f"{instrument} AS {_quote('instrument')}",
+        *(f"{_quote(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
+    ]
+    con = _open(spec)
+    try:
+        cursor = con.execute(
+            f"SELECT {', '.join(projections)} FROM {_relation(spec)} "
+            f"WHERE {trade_at} = ? AND {instrument} IN ({placeholders}) ORDER BY {instrument}",
+            [target_at, *instruments],
+        )
+        names = tuple(description[0] for description in cursor.description)
+        return tuple(dict(zip(names, row, strict=True)) for row in cursor.fetchall())
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage="source.scan.execution_snapshot",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="source.scan.execution_snapshot.unreadable",
+                    requirement="the exact execution snapshot fields must be queryable",
+                    observed=str(exc).splitlines()[0],
+                )
+            ],
+            mutation=False,
+        ) from exc
+    finally:
+        con.close()
 
 
 def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:

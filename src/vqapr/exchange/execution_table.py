@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
@@ -263,3 +264,107 @@ def execution_session_times(spec: ExecutionTableSpec) -> tuple[datetime, ...]:
             mutation=False,
         )
     return tuple(value.astimezone(UTC) for value in values)
+
+
+@dataclass(frozen=True, slots=True)
+class ExactExecutionRow:
+    """One requested instrument at an exact selected instant."""
+
+    trade_at: datetime
+    instrument: str
+    is_tradable: bool
+    price: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExactExecutionSnapshot:
+    """Exact rows plus explicit absence partitions for execution and later NAV checks."""
+
+    target_at: datetime
+    rows: tuple[ExactExecutionRow, ...]
+    duplicate_instruments: tuple[str, ...]
+    missing_target_instruments: tuple[str, ...]
+    missing_held_instruments: tuple[str, ...]
+
+
+def candidate_execution_instants(
+    spec: ExecutionTableSpec, *, decision_time: datetime, end_time: datetime
+) -> tuple[datetime, ...]:
+    """Bound candidate scans to the strict causal interval used by target selection."""
+
+    if not isinstance(spec, ExecutionTableSpec):
+        raise TypeError("spec must be an ExecutionTableSpec")
+    if decision_time.tzinfo is None or end_time.tzinfo is None:
+        raise ValueError("decision_time and end_time must be timezone-aware")
+    if decision_time > end_time:
+        raise ValueError("decision_time must not be after end_time")
+    return tuple(
+        value.astimezone(UTC)
+        for value in scan.candidate_instants(
+            spec.source,
+            trade_at_field=spec.trade_at_field,
+            decision_time=decision_time,
+            end_time=end_time,
+        )
+    )
+
+
+def exact_execution_snapshot(
+    spec: ExecutionTableSpec,
+    *,
+    target_at: datetime,
+    target_instruments: Sequence[str],
+    held_instruments: Sequence[str],
+    trade_price: str,
+) -> ExactExecutionSnapshot:
+    """Fetch the exact price field for the target/held union without any fallback."""
+
+    if not isinstance(spec, ExecutionTableSpec):
+        raise TypeError("spec must be an ExecutionTableSpec")
+    if target_at.tzinfo is None:
+        raise ValueError("target_at must be timezone-aware")
+    if trade_price not in spec.price_fields:
+        raise ValueError(f"unknown execution price {trade_price!r}")
+    target = tuple(dict.fromkeys(target_instruments))
+    held = tuple(dict.fromkeys(held_instruments))
+    if any(not isinstance(instrument, str) or not instrument for instrument in (*target, *held)):
+        raise ValueError("instruments must be non-empty strings")
+    requested = tuple(dict.fromkeys((*target, *held)))
+    rows = scan.exact_snapshot_rows(
+        spec.source,
+        trade_at_field=spec.trade_at_field,
+        instrument_field=spec.instrument_field,
+        target_at=target_at,
+        instruments=requested,
+        fields={
+            "is_tradable": spec.is_tradable_field,
+            "price": spec.price_fields[trade_price],
+        },
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        instrument = str(row["instrument"])
+        counts[instrument] = counts.get(instrument, 0) + 1
+    present = set(counts)
+    exact_rows = tuple(
+        ExactExecutionRow(
+            trade_at=row["trade_at"].astimezone(UTC),
+            instrument=str(row["instrument"]),
+            is_tradable=bool(row["is_tradable"]),
+            price=None if row["price"] is None else Decimal(str(row["price"])),
+        )
+        for row in rows
+    )
+    return ExactExecutionSnapshot(
+        target_at=target_at.astimezone(UTC),
+        rows=exact_rows,
+        duplicate_instruments=tuple(
+            instrument for instrument in requested if counts.get(instrument, 0) > 1
+        ),
+        missing_target_instruments=tuple(
+            instrument for instrument in target if instrument not in present
+        ),
+        missing_held_instruments=tuple(
+            instrument for instrument in held if instrument not in present
+        ),
+    )

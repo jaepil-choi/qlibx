@@ -132,3 +132,31 @@ def test_prepare_and_before_swap_failures_leave_authority_and_live_memory_unchan
 def test_reserved_flow_envelope_fields_are_rejected_at_declaration() -> None:
     with pytest.raises(ValueError, match="reserved"):
         TableSpec("diagnostics", ("event_time",))
+
+
+def test_due_completion_consumes_only_the_current_pending_identity() -> None:
+    pending = type("Pending", (), {"pending_id": "intent-1"})()
+    repository = RunStateRepository(pending_accepted_intent=pending)
+
+    with pytest.raises(RuntimeError, match="identity"):
+        repository.complete_due(
+            pending_id="other",
+            account_declaration={"version": 1},
+            account_version=1,
+            fill="fills",
+            mark="marks",
+        )
+
+    accepted = repository.complete_due(
+        pending_id="intent-1",
+        account_declaration={"version": 1},
+        account_version=1,
+        fill="fills",
+        mark="marks",
+        feedback=("feedback",),
+        evidence={"target": "exact"},
+    )
+    assert accepted.pending_accepted_intent is None
+    assert accepted.account_version == 1
+    assert accepted.feedback == ("feedback",)
+    assert accepted.lifecycle_trace[-1].kind is LifecycleKind.DUE_EXECUTED

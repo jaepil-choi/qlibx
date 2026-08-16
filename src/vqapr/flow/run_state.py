@@ -17,6 +17,7 @@ from vqapr.models.memory import ModelMemory, normalize_memory
 class LifecycleKind(StrEnum):
     NO_DECISION = "NO_DECISION"
     ACCEPTED_INTENT = "ACCEPTED_INTENT"
+    DUE_EXECUTED = "DUE_EXECUTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +225,91 @@ class RunStateRepository:
                 pending_accepted_intent=intent,
             )
         )
+
+    def complete_due(
+        self,
+        *,
+        pending_id: str,
+        account_declaration: object,
+        account_version: int,
+        fill: object,
+        mark: object,
+        feedback: tuple[object, ...] = (),
+        evidence: object = None,
+    ) -> AcceptedRunState:
+        """Atomically publish a completed due chain and consume its exact pending identity."""
+        if not isinstance(pending_id, str) or not pending_id:
+            raise ValueError("pending_id must be a non-empty string")
+        if isinstance(account_version, bool) or not isinstance(account_version, int):
+            raise TypeError("account_version must be an integer")
+        if account_version < 0:
+            raise ValueError("account_version must be non-negative")
+        if not isinstance(feedback, tuple):
+            raise TypeError("feedback must be a tuple")
+        root = self._root
+        pending = root.pending_accepted_intent
+        if getattr(pending, "pending_id", None) != pending_id:
+            raise RuntimeError("due completion pending identity does not match current pending")
+        next_root = AcceptedRunState(
+            version=root.version + 1,
+            _model_states=root._model_states,
+            current_model_state_ref=root.current_model_state_ref,
+            account_declaration=account_declaration,
+            account_version=account_version,
+            pending_accepted_intent=None,
+            lifecycle_trace=(
+                *root.lifecycle_trace,
+                LifecycleTrace(
+                    LifecycleKind.DUE_EXECUTED,
+                    {"pending_id": pending_id, "fill": fill, "mark": mark, "evidence": evidence},
+                ),
+            ),
+            recorder_manifests=root.recorder_manifests,
+            recorder_rows=root.recorder_rows,
+            feedback=(*root.feedback, *feedback),
+            finalization=root.finalization,
+            model_state_commit_count=root.model_state_commit_count,
+        )
+        return self.publish(PreparedRunState(root.version, next_root))
+
+    def record_post_account_failure(
+        self,
+        *,
+        pending_id: str,
+        account_declaration: object,
+        account_version: int,
+        fill: object,
+        error: object,
+    ) -> AcceptedRunState:
+        """Publish the irreversible Account mutation and its failed post-commit stage."""
+        if not isinstance(pending_id, str) or not pending_id:
+            raise ValueError("pending_id must be a non-empty string")
+        root = self._root
+        if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
+            raise RuntimeError(
+                "post-account failure pending identity does not match current pending"
+            )
+        next_root = AcceptedRunState(
+            version=root.version + 1,
+            _model_states=root._model_states,
+            current_model_state_ref=root.current_model_state_ref,
+            account_declaration=account_declaration,
+            account_version=account_version,
+            pending_accepted_intent=root.pending_accepted_intent,
+            lifecycle_trace=(
+                *root.lifecycle_trace,
+                LifecycleTrace(
+                    LifecycleKind.DUE_EXECUTED,
+                    {"pending_id": pending_id, "fill": fill, "post_account_failure": error},
+                ),
+            ),
+            recorder_manifests=root.recorder_manifests,
+            recorder_rows=root.recorder_rows,
+            feedback=root.feedback,
+            finalization=root.finalization,
+            model_state_commit_count=root.model_state_commit_count,
+        )
+        return self.publish(PreparedRunState(root.version, next_root))
 
 
 def capture_live_memory(memory: object) -> ModelMemory:

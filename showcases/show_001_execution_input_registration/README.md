@@ -2,12 +2,15 @@
 
 Status: current
 
-This showcase demonstrates production behavior introduced by implementation record 006:
+This showcase demonstrates execution-input registration plus the finite operation-agenda contract
+superseding implementation record 006:
 
 - observation parquet registration through `vqapr.public.register_dataset`;
 - execution parquet registration through `vqapr.public.register_execution_input`;
 - separate observation and exact-time execution contracts;
-- deterministic sessions from the registered execution table;
+- independent Strategy, valuation, and monitoring agenda registration;
+- callback occurrences supplied only by explicit finite agendas;
+- passive execution rows that do not manufacture callback occurrences;
 - selected execution-price validation without fallback;
 - failed invalid-price registration without workspace mutation.
 
@@ -32,6 +35,6 @@ Inspect:
 
 Environment assumptions: repository `uv` environment, Python 3.12+, DuckDB 1.5+.
 
-Last verified at: 2026-08-15
+Last verified at: 2026-08-16
 
-Verified against: `vqapr-0.1.0+implementation-006-working-tree`
+Verified against: `vqapr-0.1.0+implementation-008-working-tree`

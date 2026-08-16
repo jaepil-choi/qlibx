@@ -14,43 +14,61 @@ from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
-from vqapr.exchange.conventions import FillConvention
+from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     ExecutionTableSpec,
     validate_execution_input,
 )
-from vqapr.extension.component import ComponentRef
+from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.registration import register_data_model
 from vqapr.flow.materialize import MaterializationResult, MaterializationSpec, materialize
-from vqapr.flow.run import StrategyConfig
+from vqapr.flow.preflight import preflight_run
+from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
 from vqapr.models.contexts import DataModelContext
 from vqapr.models.data_model import DataModel
-from vqapr.runtime.agendas import OperationAgenda
+from vqapr.runtime.agendas import (
+    OperationAgenda,
+    OperationOccurrence,
+    OperationRole,
+)
 from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 __all__ = (
     "CalendarLookback",
+    "ComponentKind",
     "ComponentRef",
+    "ConstraintSet",
     "DataModel",
     "DataModelContext",
     "DataRequirement",
     "DatasetRegistration",
+    "ExactExecutionTarget",
     "ExecutionInputRegistration",
     "ExecutionTableSpec",
     "FillConvention",
+    "FillSelector",
+    "FrozenAgenda",
+    "FrozenRun",
+    "LocalInstantDeclaration",
     "MaterializationResult",
     "MaterializationSpec",
     "MonitoringPolicy",
     "OperationAgenda",
+    "OperationOccurrence",
+    "OperationRole",
     "RowsLookback",
+    "RunDefinition",
     "SourceSpec",
     "StrategyConfig",
     "ValuationConfig",
     "VqaprError",
     "materialize",
+    "preflight_run",
     "register_agenda",
+    "register_component",
     "register_data_model",
     "register_dataset",
     "register_execution_input",
@@ -87,6 +105,11 @@ def register_execution_input(
 
 def register_agenda(project_root: str | Path, agenda: OperationAgenda) -> bool:
     return Workspace.create(project_root).register_agenda(agenda)
+
+
+def register_component(project_root: str | Path, component: ComponentRef) -> bool:
+    """Register one validated extension component reference."""
+    return Workspace.create(project_root).register_component(component)
 
 
 def register_strategy_config(project_root: str | Path, config: StrategyConfig) -> bool:

@@ -22,22 +22,38 @@ def _instrument(value: str, *, name: str = "instrument_id") -> None:
 
 @dataclass(frozen=True, slots=True)
 class OrderRequest:
-    """The complete desired position and its execution-time delta for one instrument."""
+    """A complete desired position or an explicitly unresolved target-only absence."""
 
     instrument_id: str
     current_quantity: Decimal
     desired_quantity: Decimal
     delta_quantity: Decimal
-    execution_price: Decimal
+    execution_price: Decimal | None
+    unresolved_weight_target: Decimal | None = None
 
     def __post_init__(self) -> None:
         _instrument(self.instrument_id)
         _decimal(self.current_quantity, name="current_quantity")
         _decimal(self.desired_quantity, name="desired_quantity")
         _decimal(self.delta_quantity, name="delta_quantity")
-        _decimal(self.execution_price, name="execution_price", positive=True)
         if self.delta_quantity != self.desired_quantity - self.current_quantity:
             raise ValueError("delta_quantity must equal desired_quantity - current_quantity")
+        if self.execution_price is None:
+            if self.current_quantity != 0:
+                raise ValueError("an unresolved request must be target-only")
+            if self.unresolved_weight_target is not None:
+                _decimal(
+                    self.unresolved_weight_target,
+                    name="unresolved_weight_target",
+                )
+                if self.desired_quantity != 0 or self.delta_quantity != 0:
+                    raise ValueError(
+                        "an unresolved weight request cannot invent a desired quantity"
+                    )
+            return
+        _decimal(self.execution_price, name="execution_price", positive=True)
+        if self.unresolved_weight_target is not None:
+            raise ValueError("a priced request cannot have an unresolved weight target")
 
 
 @dataclass(frozen=True, slots=True)

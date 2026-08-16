@@ -66,15 +66,41 @@ def plan_orders(
     if overlap:
         raise ValueError("an instrument may have either a weight target or a quantity target")
 
+    missing_held = sorted(
+        instrument_id
+        for instrument_id, quantity in account.positions.items()
+        if quantity != 0 and instrument_id not in selected_prices
+    )
+    if missing_held:
+        raise ValueError(f"missing selected execution price for held instruments: {missing_held}")
+
     instruments = set(account.positions).union(weights, quantities)
     requests: list[OrderRequest] = []
     diagnostics: list[ZeroDeltaDiagnostic] = []
     for instrument_id in instruments:
-        try:
-            price = selected_prices[instrument_id]
-        except KeyError as error:
-            raise ValueError(f"missing selected execution price for {instrument_id!r}") from error
         current = account.positions.get(instrument_id, Decimal(0))
+        price = selected_prices.get(instrument_id)
+        if price is None:
+            if instrument_id in weights:
+                request = OrderRequest(
+                    instrument_id=instrument_id,
+                    current_quantity=current,
+                    desired_quantity=Decimal(0),
+                    delta_quantity=Decimal(0),
+                    execution_price=None,
+                    unresolved_weight_target=weights[instrument_id],
+                )
+            else:
+                desired = quantities[instrument_id]
+                request = OrderRequest(
+                    instrument_id=instrument_id,
+                    current_quantity=current,
+                    desired_quantity=desired,
+                    delta_quantity=desired - current,
+                    execution_price=None,
+                )
+            requests.append(request)
+            continue
         if instrument_id in weights:
             desired = weights[instrument_id] * nav / price
         elif instrument_id in quantities:

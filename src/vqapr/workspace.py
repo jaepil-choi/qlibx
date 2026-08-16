@@ -31,7 +31,7 @@ from vqapr.domain.identifiers import (
     source_id,
 )
 from vqapr.domain.timestamps import LocalInstantDeclaration
-from vqapr.exchange.conventions import FillConvention
+from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import StrategyConfig
@@ -765,12 +765,15 @@ class Workspace:
         try:
             return _decode(text)
         except (TypeError, ValueError, yaml.YAMLError) as error:
+            requirement = (
+                str(error)
+                if "offset_sessions is no longer supported" in str(error)
+                else "workspace YAML must contain valid physical sources and dataset declarations"
+            )
             raise _workspace_error(
                 stage=OPEN_STAGE,
                 code=f"{OPEN_STAGE}.invalid",
-                requirement=(
-                    "workspace YAML must contain valid physical sources and dataset declarations"
-                ),
+                requirement=requirement,
                 observed=str(error),
                 retry="fix or recreate the workspace, then retry",
             ) from error
@@ -887,7 +890,7 @@ def _detach_execution_input(
             price_fields=dict(table.price_fields),
         ),
         FillConvention(
-            offset_sessions=fill.offset_sessions,
+            selector=fill.selector,
             local_time=fill.local_time,
             timezone=fill.timezone,
             trade_price=fill.trade_price,
@@ -993,7 +996,7 @@ def _encode(
                 "is_tradable_field": registration.table.is_tradable_field,
                 "price_fields": dict(registration.table.price_fields),
                 "fill": {
-                    "offset_sessions": registration.fill.offset_sessions,
+                    "selector": registration.fill.selector.value,
                     "local_time": registration.fill.local_time.isoformat(),
                     "timezone": registration.fill.timezone,
                     "trade_price": registration.fill.trade_price,
@@ -1163,7 +1166,7 @@ def _decode(
         "price_fields",
         "fill",
     }
-    expected_fill = {"offset_sessions", "local_time", "timezone", "trade_price"}
+    expected_fill = {"selector", "local_time", "timezone", "trade_price"}
     for raw_id, raw_registration in raw_execution_inputs.items():
         if not isinstance(raw_id, str):
             raise TypeError("every execution_input_id must be a string")
@@ -1193,18 +1196,30 @@ def _decode(
         ):
             raise TypeError(f"execution input {raw_id!r} price_fields must map strings to strings")
         raw_fill = raw_registration["fill"]
-        if not isinstance(raw_fill, dict) or set(raw_fill) != expected_fill:
+        if not isinstance(raw_fill, dict):
+            raise ValueError(f"execution input {raw_id!r} fill must be a mapping")
+        if "offset_sessions" in raw_fill:
+            raise ValueError(
+                f"execution input {raw_id!r} fill offset_sessions is no longer supported"
+            )
+        if set(raw_fill) != expected_fill:
             raise ValueError(
                 f"execution input {raw_id!r} fill must contain exactly {sorted(expected_fill)}"
             )
-        offset_sessions = raw_fill["offset_sessions"]
+        selector = raw_fill["selector"]
         local_time = raw_fill["local_time"]
         timezone = raw_fill["timezone"]
         trade_price = raw_fill["trade_price"]
-        if not isinstance(offset_sessions, int) or isinstance(offset_sessions, bool):
-            raise TypeError(f"execution input {raw_id!r} offset_sessions must be an integer")
-        if not all(isinstance(value, str) for value in (local_time, timezone, trade_price)):
+        if not all(
+            isinstance(value, str) for value in (selector, local_time, timezone, trade_price)
+        ):
             raise TypeError(f"execution input {raw_id!r} fill scalar values must be strings")
+        try:
+            parsed_selector = FillSelector(selector)
+        except ValueError as error:
+            raise ValueError(
+                f"execution input {raw_id!r} selector must be a FillSelector value"
+            ) from error
         try:
             parsed_time = time.fromisoformat(local_time)
         except ValueError as error:
@@ -1222,7 +1237,7 @@ def _decode(
                 price_fields=price_fields,
             ),
             FillConvention(
-                offset_sessions=offset_sessions,
+                selector=parsed_selector,
                 local_time=parsed_time,
                 timezone=timezone,
                 trade_price=trade_price,

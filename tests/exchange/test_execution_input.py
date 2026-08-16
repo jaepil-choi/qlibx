@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from datetime import time
+from datetime import datetime, time
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillConvention
+from vqapr.domain.errors import VqaprError
+from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     ExecutionTableSpec,
     validate_execution_input,
 )
+from vqapr.workspace import Workspace
 
 
 def _write(path: Path, rows: str) -> Path:
@@ -34,7 +37,7 @@ def _registration(path: Path, *, local_time: time = time(15, 30)) -> ExecutionIn
             price_fields={"open": "open", "close": "close"},
         ),
         FillConvention(
-            offset_sessions=0,
+            selector=FillSelector.SAME_DAY,
             local_time=local_time,
             timezone="Asia/Seoul",
             trade_price="close",
@@ -98,7 +101,7 @@ def test_duplicate_execution_identity_is_rejected(tmp_path: Path) -> None:
     ]
 
 
-def test_fill_local_time_must_match_every_execution_instant(tmp_path: Path) -> None:
+def test_execution_rows_are_passive_to_fill_local_time_validation(tmp_path: Path) -> None:
     target = _write(
         tmp_path / "wrong-time.parquet",
         """
@@ -109,7 +112,52 @@ def test_fill_local_time_must_match_every_execution_instant(tmp_path: Path) -> N
 
     diagnosis = validate_execution_input(_registration(target, local_time=time(9)))
 
-    assert not diagnosis.ok
-    assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.register.time.local_time_mismatch"
-    ]
+    assert diagnosis.ok
+
+
+def test_fill_selects_one_exact_same_day_target_with_stable_identity(tmp_path: Path) -> None:
+    target = _write(
+        tmp_path / "targets.parquet",
+        """
+        SELECT * FROM (VALUES
+          (TIMESTAMPTZ '2024-03-05 09:00:00+09', 'A', true, 99.0, 100.0),
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 101.0, 102.0),
+          (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 103.0, 104.0)
+        ) AS t(trade_at, instrument, is_tradable, open, close)
+        """,
+    )
+    registration = _registration(target)
+    decision_time = datetime.fromisoformat("2024-03-05T04:00:00+09:00")
+    end_time = datetime.fromisoformat("2024-03-06T16:00:00+09:00")
+
+    selected = registration.fill.select_target(
+        registration, decision_time=decision_time, end_time=end_time
+    )
+
+    assert selected is not None
+    assert selected.target_at == datetime.fromisoformat("2024-03-05T06:30:00+00:00")
+    assert selected.selector is FillSelector.SAME_DAY
+    assert selected.trade_price == "close"
+    assert selected == registration.fill.select_target(
+        registration, decision_time=decision_time, end_time=end_time
+    )
+
+
+def test_workspace_fill_round_trip_is_idempotent_and_rejects_offset_sessions(
+    tmp_path: Path,
+) -> None:
+    registration = _registration(tmp_path / "execution.parquet")
+    workspace = Workspace.create(tmp_path)
+
+    assert workspace.register_execution_input(registration)
+    assert not workspace.register_execution_input(registration)
+    assert Workspace.open(tmp_path).execution_input("krx-daily") == registration
+
+    document = workspace.path.read_text(encoding="utf-8")
+    workspace.path.write_text(
+        document.replace("selector: SAME_DAY", "offset_sessions: 0"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VqaprError, match="offset_sessions is no longer supported"):
+        Workspace.open(tmp_path)

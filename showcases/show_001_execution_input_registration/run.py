@@ -4,31 +4,45 @@ import hashlib
 import html
 import json
 import shutil
-from datetime import time
+from datetime import date, time
 from decimal import Decimal
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import duckdb
 
-from vqapr.exchange.execution_table import execution_session_times
 from vqapr.public import (
+    ComponentKind,
+    ComponentRef,
+    DataRequirement,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
+    FillSelector,
+    LocalInstantDeclaration,
+    MonitoringPolicy,
+    OperationAgenda,
+    OperationOccurrence,
+    OperationRole,
+    RowsLookback,
     SourceSpec,
+    StrategyConfig,
+    ValuationConfig,
     VqaprError,
+    register_agenda,
+    register_component,
     register_dataset,
     register_execution_input,
+    register_monitoring_policy,
+    register_strategy_config,
+    register_valuation_config,
 )
 
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-VERIFIED_AGAINST = "vqapr-0.1.0+implementation-006-working-tree"
-LAST_VERIFIED_AT = "2026-08-15"
-KST = ZoneInfo("Asia/Seoul")
+VERIFIED_AGAINST = "vqapr-0.1.0+implementation-008-working-tree"
+LAST_VERIFIED_AT = "2026-08-16"
 
 
 def _reset_outputs() -> None:
@@ -58,10 +72,16 @@ def _write_parquets() -> tuple[Path, Path, Path]:
         con.execute(
             f"""COPY (
                 SELECT * FROM (VALUES
+                  (TIMESTAMPTZ '2024-03-05 10:00:00+09', 'A', true,  98.0,  99.0),
+                  (TIMESTAMPTZ '2024-03-05 10:00:00+09', 'B', true,  47.0,  48.0),
                   (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true,  99.0, 100.0),
                   (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B', true,  48.0,  50.0),
+                  (TIMESTAMPTZ '2024-03-06 10:00:00+09', 'A', true, 100.0, 101.0),
+                  (TIMESTAMPTZ '2024-03-06 10:00:00+09', 'B', true,  50.0,  50.0),
                   (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 101.0, 103.0),
                   (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'B', false, 51.0,  51.0),
+                  (TIMESTAMPTZ '2024-03-07 10:00:00+09', 'A', true, 103.0, 104.0),
+                  (TIMESTAMPTZ '2024-03-07 10:00:00+09', 'B', true,  51.0,  52.0),
                   (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'A', true, 104.0, 105.0),
                   (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'B', true,  52.0,  53.0)
                 ) AS t(trade_at, instrument, is_tradable, open, close)
@@ -95,7 +115,7 @@ def _execution_registration(
             price_fields={"open": "open", "close": "close"},
         ),
         FillConvention(
-            offset_sessions=0,
+            selector=FillSelector.NEXT_ELIGIBLE,
             local_time=time(15, 30),
             timezone="Asia/Seoul",
             trade_price=trade_price,
@@ -140,6 +160,37 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _agenda(agenda_id: str, role: OperationRole, local_time: time) -> OperationAgenda:
+    return OperationAgenda.from_occurrences(
+        agenda_id=agenda_id,
+        role=role,
+        timezone="Asia/Seoul",
+        occurrences=tuple(
+            OperationOccurrence(
+                f"{agenda_id}-{day}",
+                role,
+                LocalInstantDeclaration(date(2024, 3, day), local_time, "Asia/Seoul", 0, "+09:00"),
+            )
+            for day in (5, 6, 7)
+        ),
+        provenance="show_001 explicit finite agenda",
+    )
+
+
+def _strategy_config() -> StrategyConfig:
+    return StrategyConfig(
+        ComponentRef.of(
+            "showcase-strategy",
+            ComponentKind.STRATEGY_MODEL,
+            "strategy.py",
+            "ShowcaseStrategy",
+            fingerprint="0" * 64,
+        ),
+        "showcase-strategy",
+        OperationRole.STRATEGY_CALLBACK,
+    )
+
+
 def _table(rows: list[dict[str, object]]) -> str:
     if not rows:
         return "<p>No rows.</p>"
@@ -162,7 +213,7 @@ def _report(trace: dict[str, object], workspace_text: str) -> str:
     execution_rows = trace["execution_rows"]
     close_rows = trace["close_binding_rows"]
     open_rows = trace["open_binding_rows"]
-    sessions = trace["sessions"]
+    agendas = trace["agendas"]
     invalid = trace["invalid_registration"]
     return f"""<!doctype html>
 <html lang="ko">
@@ -221,8 +272,12 @@ th {{ background: #edf2f7; }}
 <h2>2. Separate execution parquet</h2>{_table(execution_rows)}
 </section>
 <section class="card">
-<h2>3. Sessions from distinct trade_at</h2>
-<pre>{html.escape(json.dumps(sessions, indent=2, ensure_ascii=False))}</pre>
+<h2>3. Explicit operation agendas</h2>
+<p>
+Strategy, valuation, and monitoring occurrences are finite declarations. The
+10:00 rows remain non-selected execution input density; they do not create callbacks.
+</p>
+<pre>{html.escape(json.dumps(agendas, indent=2, ensure_ascii=False))}</pre>
 </section>
 <section class="card">
 <h2>4. Selected close binding</h2>{_table(close_rows)}
@@ -278,6 +333,29 @@ def main() -> None:
     close_created = register_execution_input(PROJECT, close_registration)
     open_created = register_execution_input(PROJECT, open_registration)
     close_retry = register_execution_input(PROJECT, close_registration)
+    strategy_agenda = _agenda("showcase-strategy", OperationRole.STRATEGY_CALLBACK, time(4, 0))
+    valuation_agenda = _agenda("showcase-valuation", OperationRole.VALUATION, time(16, 0))
+    monitoring_agenda = _agenda("showcase-monitoring", OperationRole.MONITORING, time(17, 0))
+    strategy_config = _strategy_config()
+    valuation_config = ValuationConfig(
+        "showcase-valuation",
+        OperationRole.VALUATION,
+        DataRequirement.of(
+            "showcase-valuation",
+            "price_daily",
+            fields=("close",),
+            lookback=RowsLookback(1),
+        ),
+    )
+    monitoring_policy = MonitoringPolicy("showcase-monitoring", OperationRole.MONITORING)
+    agenda_created = {
+        agenda.agenda_id: register_agenda(PROJECT, agenda)
+        for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda)
+    }
+    register_component(PROJECT, strategy_config.component)
+    strategy_config_created = register_strategy_config(PROJECT, strategy_config)
+    valuation_config_created = register_valuation_config(PROJECT, valuation_config)
+    monitoring_policy_created = register_monitoring_policy(PROJECT, monitoring_policy)
 
     workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
     workspace_before_invalid = workspace_path.read_bytes()
@@ -297,13 +375,17 @@ def main() -> None:
     if not workspace_unchanged:
         raise AssertionError("failed execution registration mutated the workspace")
 
-    sessions = [
-        {
-            "execution_time_utc": instant.isoformat(),
-            "session_asia_seoul": instant.astimezone(KST).date().isoformat(),
-        }
-        for instant in execution_session_times(close_registration.table)
-    ]
+    agendas = {
+        agenda.agenda_id: [
+            {
+                "occurrence_id": occurrence.occurrence_id,
+                "role": occurrence.role.value,
+                "evaluation_time": occurrence.evaluation_time.isoformat(),
+            }
+            for occurrence in agenda.occurrences
+        ]
+        for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda)
+    }
     workspace_text = workspace_path.read_text(encoding="utf-8")
     shutil.copyfile(workspace_path, OUTPUTS / "workspace.yaml")
 
@@ -316,6 +398,10 @@ def main() -> None:
             "close_execution_created": close_created,
             "open_execution_created": open_created,
             "identical_close_retry_created": close_retry,
+            "agendas_created": agenda_created,
+            "strategy_config_created": strategy_config_created,
+            "valuation_config_created": valuation_config_created,
+            "monitoring_policy_created": monitoring_policy_created,
         },
         "source_sha256": {
             observation_path.name: _sha256(observation_path),
@@ -326,7 +412,7 @@ def main() -> None:
         "execution_rows": _normalized(_rows(execution_path)),
         "close_binding_rows": _normalized(_rows(execution_path, selected="close")),
         "open_binding_rows": _normalized(_rows(execution_path, selected="open")),
-        "sessions": sessions,
+        "agendas": agendas,
         "invalid_registration": {
             "workspace_unchanged": workspace_unchanged,
             "error": invalid_error,

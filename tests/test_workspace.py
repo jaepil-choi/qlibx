@@ -14,7 +14,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
-from vqapr.exchange.conventions import FillConvention
+from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import StrategyConfig
@@ -53,7 +53,7 @@ def _execution(
             price_fields={"open": "open", "close": "close"},
         ),
         FillConvention(
-            offset_sessions=0,
+            selector=FillSelector.NEXT_ELIGIBLE,
             local_time=time(15, 30),
             timezone="Asia/Seoul",
             trade_price=trade_price,

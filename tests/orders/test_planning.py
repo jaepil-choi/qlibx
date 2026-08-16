@@ -67,6 +67,51 @@ def test_quantity_target_is_fixed_across_execution_nav_and_price_changes() -> No
     assert batch.requests[0].delta_quantity == decimal("5")
 
 
+def test_absent_target_only_weight_preserves_weight_without_inventing_a_price() -> None:
+    batch = plan_orders(
+        account=snapshot(),
+        execution_time_nav=decimal("100"),
+        prices={},
+        weight_targets={"A": decimal("0.25")},
+        quantity_targets={},
+    )
+
+    request = batch.requests[0]
+    assert request.instrument_id == "A"
+    assert request.current_quantity == decimal("0")
+    assert request.desired_quantity == decimal("0")
+    assert request.delta_quantity == decimal("0")
+    assert request.execution_price is None
+    assert request.unresolved_weight_target == decimal("0.25")
+
+
+def test_absent_target_only_quantity_preserves_requested_quantity_and_delta() -> None:
+    batch = plan_orders(
+        account=snapshot(),
+        execution_time_nav=decimal("100"),
+        prices={},
+        weight_targets={},
+        quantity_targets={"A": decimal("3")},
+    )
+
+    request = batch.requests[0]
+    assert request.desired_quantity == decimal("3")
+    assert request.delta_quantity == decimal("3")
+    assert request.execution_price is None
+    assert request.unresolved_weight_target is None
+
+
+def test_missing_selected_value_for_a_nonzero_holding_fails_before_planning() -> None:
+    with pytest.raises(ValueError, match="held instruments"):
+        plan_orders(
+            account=snapshot(positions={"HELD": "1"}),
+            execution_time_nav=decimal("100"),
+            prices={},
+            weight_targets={"TARGET": decimal("0.25")},
+            quantity_targets={},
+        )
+
+
 def test_equal_side_orders_use_instrument_tie_break() -> None:
     batch = plan_orders(
         account=snapshot(positions={"Z": "1", "A": "1"}),
@@ -125,3 +170,20 @@ def test_account_commits_fill_cash_positions_journal_and_history_atomically() ->
     assert account.history == (snapshot(cash="10"), committed)
     with pytest.raises(ValueError, match="no longer current"):
         account.commit(prepared)
+
+
+def test_zero_dealt_fills_do_not_change_account_cash_or_positions() -> None:
+    account = Account(snapshot(cash="10", positions={"HELD": "2"}), mode=AccountMode.LONG_ONLY)
+    before = account.snapshot()
+    fills = FillBatch(
+        (
+            Fill("TARGET", decimal("3"), Decimal(0), None, ZeroDealtReason.ABSENT),
+            Fill("PAUSED", decimal("-1"), Decimal(0), None, ZeroDealtReason.NONTRADABLE),
+        ),
+        before.version,
+    )
+
+    committed = account.commit(account.prepare_commit(fills, expected_version=before.version))
+
+    assert committed.cash == before.cash
+    assert committed.positions == before.positions

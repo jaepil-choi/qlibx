@@ -104,22 +104,11 @@ class AcademicExchange:
         requests = tuple(sorted(orders.requests, key=lambda request: request.instrument_id))
         if len({request.instrument_id for request in requests}) != len(requests):
             raise ValueError("an OrderBatch may contain each instrument only once")
-        self._validate_rules(requests)
         rows = self._validate_snapshot(snapshot, requests)
+        self._validate_rules(requests, rows)
 
         fills: list[Fill] = []
         for request in requests:
-            if request.delta_quantity == 0:
-                fills.append(
-                    Fill(
-                        request.instrument_id,
-                        Decimal("0"),
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.NO_TRADE,
-                    )
-                )
-                continue
             row = rows.get(request.instrument_id)
             if row is None:
                 fills.append(
@@ -131,7 +120,19 @@ class AcademicExchange:
                         ZeroDealtReason.ABSENT,
                     )
                 )
-            elif not row.is_tradable:
+                continue
+            if request.delta_quantity == 0:
+                fills.append(
+                    Fill(
+                        request.instrument_id,
+                        Decimal("0"),
+                        Decimal("0"),
+                        None,
+                        ZeroDealtReason.NO_TRADE,
+                    )
+                )
+                continue
+            if not row.is_tradable:
                 fills.append(
                     Fill(
                         request.instrument_id,
@@ -152,22 +153,31 @@ class AcademicExchange:
                 )
         return FillBatch(tuple(fills), account.version)
 
-    def _validate_rules(self, requests: tuple[OrderRequest, ...]) -> None:
+    def _validate_rules(
+        self,
+        requests: tuple[OrderRequest, ...],
+        rows: Mapping[str, ExactExecutionRow],
+    ) -> None:
         for request in requests:
             if (
                 not isinstance(request.delta_quantity, Decimal)
                 or not request.delta_quantity.is_finite()
             ):
                 raise ValueError(f"invalid requested quantity for {request.instrument_id!r}")
-            if (
-                not isinstance(request.execution_price, Decimal)
-                or not request.execution_price.is_finite()
-                or request.execution_price <= 0
-            ):
-                raise ValueError(f"invalid selected price for {request.instrument_id!r}")
             rule = self.listings.get(request.instrument_id)
             if rule is None:
                 raise ValueError(f"no academic listing for {request.instrument_id!r}")
+            row = rows.get(request.instrument_id)
+            if (
+                row is not None
+                and row.is_tradable
+                and (
+                    not isinstance(request.execution_price, Decimal)
+                    or not request.execution_price.is_finite()
+                    or request.execution_price <= 0
+                )
+            ):
+                raise ValueError(f"invalid selected price for {request.instrument_id!r}")
             side = _side(request.delta_quantity)
             if side is None:
                 continue
@@ -187,7 +197,7 @@ class AcademicExchange:
     def _validate_snapshot(
         snapshot: ExactExecutionSnapshot, requests: tuple[OrderRequest, ...]
     ) -> dict[str, ExactExecutionRow]:
-        requested = {request.instrument_id for request in requests if request.delta_quantity != 0}
+        requested = {request.instrument_id for request in requests}
         if set(snapshot.duplicate_instruments) & requested:
             raise ValueError("execution snapshot has duplicate requested instruments")
         rows: dict[str, ExactExecutionRow] = {}

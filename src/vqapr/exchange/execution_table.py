@@ -1,4 +1,4 @@
-"""Exact-time execution input and the authoritative executable-session source."""
+"""Passive exact-time execution input for target selection and venue snapshots."""
 
 from __future__ import annotations
 
@@ -7,19 +7,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import MappingProxyType
-from zoneinfo import ZoneInfo
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import Diagnosis, Failure, FailureFamily, VqaprError, collector
+from vqapr.domain.errors import Diagnosis, Failure, FailureFamily, collector
 from vqapr.domain.identifiers import ExecutionInputId, execution_input_id
 from vqapr.exchange.conventions import FillConvention
 
-_STAGE = "execution_table.sessions"
 _REGISTER_SCHEMA = "execution_input.register.schema"
 _REGISTER_KEY = "execution_input.register.key"
 _REGISTER_PRICE = "execution_input.register.price"
-_REGISTER_TIME = "execution_input.register.time"
 _RETRY = "fix the prepared execution parquet or binding, then retry"
 
 
@@ -81,7 +78,11 @@ class ExecutionInputRegistration:
         return cls(execution_input_id(raw_execution_input_id), table, fill)
 
 
-def _schema_failures(spec: ExecutionTableSpec, *, stage: str = _STAGE) -> tuple[Failure, ...]:
+def _schema_failures(
+    spec: ExecutionTableSpec,
+    *,
+    stage: str = _REGISTER_SCHEMA,
+) -> tuple[Failure, ...]:
     columns = scan.describe(spec.source)
     expected = {
         spec.trade_at_field: scan.ColumnType.TIMESTAMP_TZ,
@@ -177,93 +178,15 @@ def _price_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
     return found.done(retry=_RETRY)
 
 
-def _time_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
-    table = registration.table
-    values = scan.distinct_values(table.source, table.trade_at_field)
-    found = collector(_REGISTER_TIME, FailureFamily.EXCHANGE)
-    if not values:
-        found.add(
-            Failure.bounded(
-                code=f"{_REGISTER_TIME}.empty",
-                requirement="execution table must contain at least one execution instant",
-            )
-        )
-        return found.done(retry=_RETRY)
-
-    zone = ZoneInfo(registration.fill.timezone)
-    mismatches = tuple(
-        value.isoformat()
-        for value in values
-        if value.astimezone(zone).time() != registration.fill.local_time
-    )
-    if mismatches:
-        found.add(
-            Failure.bounded(
-                code=f"{_REGISTER_TIME}.local_time_mismatch",
-                requirement=(
-                    f"every trade_at must occur at {registration.fill.local_time.isoformat()} "
-                    f"in {registration.fill.timezone}"
-                ),
-                observed=f"{len(mismatches)} distinct execution instant(s) at another local time",
-                examples=mismatches,
-                example_total=len(mismatches),
-            )
-        )
-    return found.done(retry=_RETRY)
-
-
 def validate_execution_input(registration: ExecutionInputRegistration) -> Diagnosis:
     """Validate one prepared execution parquet before workspace mutation."""
     if not isinstance(registration, ExecutionInputRegistration):
         raise TypeError("registration must be an ExecutionInputRegistration")
-    for check in (_schema_diagnosis, _key_diagnosis, _price_diagnosis, _time_diagnosis):
+    for check in (_schema_diagnosis, _key_diagnosis, _price_diagnosis):
         diagnosis = check(registration)
         if not diagnosis.ok:
             return diagnosis
-    return Diagnosis(stage=_REGISTER_TIME, family=FailureFamily.EXCHANGE)
-
-
-def execution_session_times(spec: ExecutionTableSpec) -> tuple[datetime, ...]:
-    """Return sorted distinct execution instants without exposing rows to a Model."""
-
-    if not isinstance(spec, ExecutionTableSpec):
-        raise TypeError("spec must be an ExecutionTableSpec")
-    failures = _schema_failures(spec)
-    if failures:
-        raise VqaprError(
-            stage=_STAGE,
-            family=FailureFamily.EXCHANGE,
-            failures=failures,
-            mutation=False,
-            retry_precondition="fix the execution table binding or parquet, then retry",
-        )
-
-    values = scan.distinct_values(spec.source, spec.trade_at_field)
-    if any(value is None for value in values):
-        raise VqaprError(
-            stage=_STAGE,
-            family=FailureFamily.EXCHANGE,
-            failures=(
-                Failure.bounded(
-                    code=f"{_STAGE}.trade_at_null",
-                    requirement="trade_at must be non-null for every execution row",
-                ),
-            ),
-            mutation=False,
-        )
-    if not values:
-        raise VqaprError(
-            stage=_STAGE,
-            family=FailureFamily.EXCHANGE,
-            failures=(
-                Failure.bounded(
-                    code=f"{_STAGE}.empty",
-                    requirement="execution table must contain at least one session",
-                ),
-            ),
-            mutation=False,
-        )
-    return tuple(value.astimezone(UTC) for value in values)
+    return Diagnosis(stage=_REGISTER_PRICE, family=FailureFamily.EXCHANGE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,28 +208,6 @@ class ExactExecutionSnapshot:
     duplicate_instruments: tuple[str, ...]
     missing_target_instruments: tuple[str, ...]
     missing_held_instruments: tuple[str, ...]
-
-
-def candidate_execution_instants(
-    spec: ExecutionTableSpec, *, decision_time: datetime, end_time: datetime
-) -> tuple[datetime, ...]:
-    """Bound candidate scans to the strict causal interval used by target selection."""
-
-    if not isinstance(spec, ExecutionTableSpec):
-        raise TypeError("spec must be an ExecutionTableSpec")
-    if decision_time.tzinfo is None or end_time.tzinfo is None:
-        raise ValueError("decision_time and end_time must be timezone-aware")
-    if decision_time > end_time:
-        raise ValueError("decision_time must not be after end_time")
-    return tuple(
-        value.astimezone(UTC)
-        for value in scan.candidate_instants(
-            spec.source,
-            trade_at_field=spec.trade_at_field,
-            decision_time=decision_time,
-            end_time=end_time,
-        )
-    )
 
 
 def exact_execution_snapshot(

@@ -1,28 +1,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import date, time
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 import pytest
 
-from vqapr.flow.model_state import InMemoryModelStateStore
+from vqapr.account.account import Account, AccountMode
+from vqapr.account.snapshot import AccountSnapshot
+from vqapr.data.lookback import RowsLookback
+from vqapr.data.requirements import DataRequirement
+from vqapr.data.store import DuckDbObservationStore
+from vqapr.data.windows import ModelWindow
+from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
+from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
 from vqapr.models.strategy_model import NoDecision, StrategyModel, StrategyModelContext
-from vqapr.runtime.events import LocalEvaluationTime
-
-KST = ZoneInfo("Asia/Seoul")
+from vqapr.runtime.agendas import OperationOccurrence, OperationRole
+from vqapr.valuation.configuration import ValuationConfig
 
 
 @dataclass(frozen=True)
 class Intent:
-    session_number: int
+    occurrence_number: int
     intent_id: UUID
     strategy_id: str
-    decision_time: datetime
-    effective_after: datetime
     targets: tuple[object, ...]
     cash_target: Decimal
     budget: object
@@ -31,113 +37,170 @@ class Intent:
     model_state_ref: None = None
 
 
-class EveryThreeSessions(StrategyModel):
-    def callback_time(self) -> LocalEvaluationTime:
-        return LocalEvaluationTime(time(4, 0), "Asia/Seoul")
-
-    def on_session(self, context: StrategyModelContext) -> NoDecision | Intent:
-        assert not hasattr(context, "future_sessions")
+class EveryThreeOccurrences(StrategyModel):
+    def on_occurrence(self, context: StrategyModelContext) -> NoDecision | Intent:
+        assert not hasattr(context, "sessions")
+        assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
-        assert not hasattr(context, "calendar")
+        assert context.occurrence.role is OperationRole.STRATEGY_CALLBACK
         memory = dict(self.memory or {})
-        count = int(memory.get("session_count", 0)) + 1
-        self.memory = {**memory, "session_count": count}
+        count = int(memory.get("occurrence_count", 0)) + 1
+        self.memory = {**memory, "occurrence_count": count}
         if count % 3:
             return NoDecision(reason="cadence")
         return Intent(
-            session_number=count,
+            occurrence_number=count,
             intent_id=UUID(int=count),
             strategy_id="every-three",
-            decision_time=context.session.evaluation_time,
-            effective_after=context.session.execution_time,
             targets=(),
             cash_target=Decimal(1),
             budget="fixture",
             source_refs=(),
-            account_version_seen=0,
+            account_version_seen=context.account.version,
         )
 
 
-def _execution_times(*days: int) -> tuple[datetime, ...]:
-    return tuple(datetime(2024, 3, day, 15, 30, tzinfo=KST) for day in days)
+class _Catalog:
+    def dataset(self, raw_dataset_id: str) -> object:
+        raise AssertionError(f"unexpected dataset read: {raw_dataset_id}")
+
+    def source(self, raw_source_id: str) -> object:
+        raise AssertionError(f"unexpected source read: {raw_source_id}")
 
 
-def test_every_n_is_strategy_memory_not_a_flow_schedule() -> None:
-    state_store = InMemoryModelStateStore()
-    result = SimulationFlow(EveryThreeSessions(), state_store).run(_execution_times(5, 6, 7))
+class _Exchange:
+    def execute(self, *args: object) -> object:
+        raise AssertionError("NoDecision callbacks must not execute orders")
 
-    assert [type(trace.result) for trace in result.sessions] == [
-        NoDecision,
-        NoDecision,
-        Intent,
+
+def _occurrence(number: int) -> OperationOccurrence:
+    return OperationOccurrence(
+        f"strategy-{number}",
+        OperationRole.STRATEGY_CALLBACK,
+        LocalInstantDeclaration(date(2024, 3, number + 4), time(4, 0), "Asia/Seoul", 0, "+09:00"),
+    )
+
+
+def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
+    return ComponentRef.of(
+        raw_id,
+        kind,
+        Path("component.py"),
+        "Component",
+        fingerprint="0" * 64,
+    )
+
+
+def _flow(
+    strategy: StrategyModel,
+    state: RunStateRepository,
+    occurrences: tuple[OperationOccurrence, ...],
+) -> SimulationFlow:
+    strategy_agenda = FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences)
+    valuation_agenda = FrozenAgenda("valuation", OperationRole.VALUATION, ())
+    requirement = DataRequirement.of(
+        "valuation", "prices", fields=("close",), lookback=RowsLookback(1)
+    )
+    frozen = FrozenRun(
+        strategy=StrategyConfig(
+            _component("strategy", ComponentKind.STRATEGY_MODEL),
+            "strategy",
+            OperationRole.STRATEGY_CALLBACK,
+        ),
+        valuation=ValuationConfig("valuation", OperationRole.VALUATION, requirement),
+        constraints=ConstraintSet(()),
+        strategy_agenda=strategy_agenda,
+        valuation_agenda=valuation_agenda,
+    )
+    account = Account(AccountSnapshot(0, Decimal(1), {}), mode=AccountMode.LONG_ONLY)
+
+    def window_for_occurrence(occurrence: OperationOccurrence) -> ModelWindow:
+        return ModelWindow(
+            evaluation_time=occurrence.evaluation_time,
+            instruments=("A",),
+            store=DuckDbObservationStore(_Catalog()),
+            allowed_requirements=(requirement,),
+        )
+
+    return SimulationFlow(
+        frozen,
+        strategy,
+        state,
+        window_for_occurrence=window_for_occurrence,
+        account=account,
+        exchange=_Exchange(),
+        constraints=(),
+        marks_for_occurrence=lambda *_: {},
+    )
+
+
+def test_cadence_is_strategy_memory_over_explicit_current_occurrences() -> None:
+    state = RunStateRepository()
+
+    result = _flow(EveryThreeOccurrences(), state, (_occurrence(1), _occurrence(2))).run()
+
+    assert [type(trace.result) for trace in result.occurrences] == [NoDecision, NoDecision]
+    assert [trace.occurrence.occurrence_id for trace in result.occurrences] == [
+        "strategy-1",
+        "strategy-2",
     ]
-    assert [trace.committed_memory["session_count"] for trace in result.sessions] == [1, 2, 3]
-    assert state_store.load(result.final_state_ref) == {"session_count": 3}
+    assert state.load_model_state(result.final_state.current_model_state_ref) == {
+        "occurrence_count": 2
+    }
 
 
-def test_no_decision_state_continues_across_an_explicit_run_boundary() -> None:
-    state_store = InMemoryModelStateStore()
-    first = SimulationFlow(EveryThreeSessions(), state_store).run(_execution_times(5, 6))
+def test_no_decision_state_continues_across_explicit_agenda_boundaries() -> None:
+    state = RunStateRepository()
+    _flow(EveryThreeOccurrences(), state, (_occurrence(1),)).run()
 
-    second = SimulationFlow(
-        EveryThreeSessions(),
-        state_store,
-        initial_state_ref=first.final_state_ref,
-    ).run(_execution_times(7))
+    result = _flow(EveryThreeOccurrences(), state, (_occurrence(2),)).run()
 
-    assert isinstance(second.sessions[0].result, Intent)
-    assert second.sessions[0].result.session_number == 3
-    assert second.sessions[0].committed_memory == {"session_count": 3}
+    assert isinstance(result.occurrences[0].result, NoDecision)
+    assert state.load_model_state(result.final_state.current_model_state_ref) == {
+        "occurrence_count": 2
+    }
 
 
-class FailingStrategy(EveryThreeSessions):
-    def on_session(self, context: StrategyModelContext) -> NoDecision | Intent:
-        self.memory = {"session_count": 999}
+class TimingOverrideStrategy(EveryThreeOccurrences):
+    def on_occurrence(self, context: StrategyModelContext) -> Intent:
+        self.memory = {"occurrence_count": 999}
+        intent = Intent(
+            occurrence_number=1,
+            intent_id=UUID(int=1),
+            strategy_id="timing-override",
+            targets=(),
+            cash_target=Decimal(1),
+            budget="fixture",
+            source_refs=(),
+            account_version_seen=context.account.version,
+        )
+        object.__setattr__(intent, "decision_time", context.occurrence.evaluation_time)
+        return intent
+
+
+def test_strategy_intent_cannot_override_flow_timing() -> None:
+    state = RunStateRepository()
+    strategy = TimingOverrideStrategy()
+
+    with pytest.raises(ValueError, match="must not declare decision_time"):
+        _flow(strategy, state, (_occurrence(1),)).run()
+
+    assert state.current.current_model_state_ref is None
+    assert strategy.memory is None
+
+
+class FailingStrategy(EveryThreeOccurrences):
+    def on_occurrence(self, context: StrategyModelContext) -> NoDecision:
+        self.memory = {"occurrence_count": 999}
         raise RuntimeError("strategy bug")
 
 
-def test_failed_callback_keeps_previous_committed_state() -> None:
-    state_store = InMemoryModelStateStore()
-    first = SimulationFlow(EveryThreeSessions(), state_store).run(_execution_times(5))
+def test_callback_failure_rolls_back_live_memory_and_state() -> None:
+    state = RunStateRepository(initial_model_memory={"occurrence_count": 1})
     strategy = FailingStrategy()
-    flow = SimulationFlow(strategy, state_store, initial_state_ref=first.final_state_ref)
 
     with pytest.raises(RuntimeError, match="strategy bug"):
-        flow.run(_execution_times(6))
+        _flow(strategy, state, (_occurrence(2),)).run()
 
-    assert state_store.load(first.final_state_ref) == {"session_count": 1}
-    assert strategy.memory == {"session_count": 1}
-
-
-class InvalidStrategy(EveryThreeSessions):
-    def on_session(self, context: StrategyModelContext):
-        self.memory = {"session_count": 999}
-        return None
-
-
-def test_invalid_callback_result_is_not_committed() -> None:
-    state_store = InMemoryModelStateStore()
-    strategy = InvalidStrategy()
-
-    with pytest.raises(TypeError, match="NoDecision or an intent"):
-        SimulationFlow(strategy, state_store).run(_execution_times(5))
-
-    assert state_store.commit_count == 0
-    assert strategy.memory is None
-
-
-class WrongTypeStrategy(EveryThreeSessions):
-    def on_session(self, context: StrategyModelContext):
-        self.memory = {"session_count": 999}
-        return "not-an-intent"
-
-
-def test_non_intent_callback_result_is_not_committed() -> None:
-    state_store = InMemoryModelStateStore()
-    strategy = WrongTypeStrategy()
-
-    with pytest.raises(TypeError, match="NoDecision or an intent"):
-        SimulationFlow(strategy, state_store).run(_execution_times(5))
-
-    assert state_store.commit_count == 0
-    assert strategy.memory is None
+    assert state.load_model_state(state.current.current_model_state_ref) == {"occurrence_count": 1}
+    assert strategy.memory == {"occurrence_count": 1}

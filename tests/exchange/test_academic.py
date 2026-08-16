@@ -23,14 +23,16 @@ def _orders(*requests: OrderRequest) -> OrderBatch:
     return OrderBatch(requests=requests, account_version=7)
 
 
-def _request(instrument_id: str, delta: str) -> OrderRequest:
+def _request(
+    instrument_id: str, delta: str, *, execution_price: Decimal | None = Decimal("10")
+) -> OrderRequest:
     quantity = Decimal(delta)
     return OrderRequest(
         instrument_id=instrument_id,
         current_quantity=Decimal("0"),
         desired_quantity=quantity,
         delta_quantity=quantity,
-        execution_price=Decimal("10"),
+        execution_price=execution_price,
     )
 
 
@@ -72,9 +74,12 @@ def test_academic_full_fills_are_fractional_and_deterministic() -> None:
 
 def test_absent_and_nontradable_orders_are_distinct_typed_zero_dealt_fills() -> None:
     fills = _venue().execute(
-        _orders(_request("A", "1"), _request("B", "1")),
+        _orders(
+            _request("A", "1", execution_price=None),
+            _request("B", "1", execution_price=None),
+        ),
         _account(),
-        _snapshot(ExactExecutionRow(_AT, "B", False, Decimal("10")), missing=("A",)),
+        _snapshot(ExactExecutionRow(_AT, "B", False, None), missing=("A",)),
     )
 
     assert [(fill.instrument_id, fill.reason) for fill in fills.fills] == [
@@ -82,6 +87,18 @@ def test_absent_and_nontradable_orders_are_distinct_typed_zero_dealt_fills() -> 
         ("B", ZeroDealtReason.NONTRADABLE),
     ]
     assert all(fill.dealt_quantity == Decimal("0") for fill in fills.fills)
+
+
+def test_absence_precedes_selected_price_validation_even_for_a_zero_delta_request() -> None:
+    fills = _venue().execute(
+        _orders(_request("A", "0", execution_price=None)),
+        _account(),
+        _snapshot(missing=("A",)),
+    )
+
+    assert fills.fills[0].requested_quantity == Decimal("0")
+    assert fills.fills[0].dealt_quantity == Decimal("0")
+    assert fills.fills[0].reason is ZeroDealtReason.ABSENT
 
 
 def test_invalid_tradable_price_rejects_the_entire_batch() -> None:
@@ -92,6 +109,18 @@ def test_invalid_tradable_price_rejects_the_entire_batch() -> None:
             _snapshot(
                 ExactExecutionRow(_AT, "A", True, Decimal("10")),
                 ExactExecutionRow(_AT, "B", True, Decimal("0")),
+            ),
+        )
+
+
+def test_duplicate_present_rows_reject_the_entire_batch() -> None:
+    with pytest.raises(ValueError, match="duplicate"):
+        _venue().execute(
+            _orders(_request("A", "1")),
+            _account(),
+            _snapshot(
+                ExactExecutionRow(_AT, "A", True, Decimal("10")),
+                ExactExecutionRow(_AT, "A", True, Decimal("10")),
             ),
         )
 

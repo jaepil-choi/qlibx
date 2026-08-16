@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import shutil
+import sys
 from dataclasses import fields, is_dataclass, replace
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -12,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+
+sys.dont_write_bytecode = True
 
 from vqapr.public import (
     AccountMode,

@@ -21,8 +21,8 @@
 - final `FillConvention`이 venue-local same-day/next-eligible semantics로 strictly-later exact target을 고른다.
 - 한 Strategy/Account의 latest pending intent 하나만 유지한다. 새 intent는 complete validation 뒤 교체되고
   실패한 replacement와 `NoDecision`은 기존 pending authority를 보존한다.
-- callback state, decision evidence, recorder rows와 pending pointer는 immutable `AcceptedRunState` root의 한
-  optimistic pointer swap으로 publish된다.
+- callback state, private Model payload, decision evidence, recorder rows와 pending pointer는 immutable
+  `AcceptedRunState` root의 한 optimistic pointer swap으로 publish된다.
 - prior due execution은 같은 instant의 callback보다 먼저 exact snapshot → execution-time NAV → order planning →
   Academic Exchange → Account commit → required valuation → feedback chain을 완료한다.
 - weight targets는 prior mark가 아니라 current-position/complete-target union의 selected-time values로 계산한
@@ -54,9 +54,27 @@ selected snapshot에서 target-only instrument가 없으면 typed `ABSENT` zero-
 execution-time NAV를 계산할 수 없으므로 planning과 Account mutation 전에 실패한다.
 
 Academic execution은 deterministic sell-before-buy planning, declared listing/side rules, zero cost와 full fill만
-지원한다. Account는 expected version, cash, mode, positions와 journal/history를 한 transition으로 commit한다.
-post-Account valuation/publication failure는 rollback으로 가장하지 않고 mutation과 exact versions를 evidence에
-남긴다.
+지원한다. Account는 expected version, cash, mode, positions, marks/NAV와 journal/history의 immutable candidate를
+준비하고, callback state와 동일한 `AcceptedRunState` root swap이 이를 publish한다. 별도 mutable Account commit이
+없으므로 valuation·serialization·root fault는 모두 publish 전 실패하며 consumed pending이나 partial Account
+authority를 남기지 않는다.
+
+### 품질 게이트 보완
+
+첫 strict Cleaner/Architecture/QA cohort가 split Account/root authority, private payload 비가시성, target-only
+absence 차단, monitoring mark cache, 불완전한 constraint/intent provenance, DST selector proof, public run spine와
+proxy acceptance tests를 blocker로 판정했다. 보완 구현은 다음을 추가했다.
+
+- initial memory/payload와 callback memory/payload를 동일한 visible ModelStateRef에 결합했다.
+- Strategy projection, intended validation과 actual monitoring이 같은 loaded `Constraint` tuple을 사용한다.
+- intent의 Strategy/Account/Model/source-byte actual-read provenance와 Budget/cash economics를 publish 전에
+  검증한다.
+- required due valuation은 independent valuation agenda occurrence를 요구하지 않고 exact target cutoff에서
+  frozen `ValuationConfig` binding으로 수행한다.
+- `SimulationFailure`가 stage, mutation flag, cutoff, root/Account version과 pending identity를 보존한다.
+- `vqapr.public.run`이 fingerprinted frozen owners, initial authority와 bounded PIT providers만 load한다.
+- show_001이 generated public-only Strategy/Exchange/Constraint를 실제 preflight/run하고 dense/canonical input의
+  callback·due·Account·feedback·finalization signature를 비교한다.
 
 ### Cutover
 
@@ -78,7 +96,7 @@ Flow와 모든 source/test/showcase callsites는 한 cutover commit에서 교체
 
 ## 직접 영향을 받은 surface
 
-- `vqapr.public`의 agenda/config/register/preflight declarations
+- `vqapr.public`의 agenda/config/register/preflight/run 및 component-author declarations
 - workspace YAML agenda/config/fill schema
 - Strategy callback과 Flow runtime
 - execution input registration과 exact snapshot reads
@@ -96,7 +114,7 @@ Resolved 36 packages
 Installed pytz==2026.3.post1 and editable vqapr==0.1.0
 
 uv run pytest -q
-182 passed in 5.15s
+195 passed in 6.39s
 
 uv run ruff check src tests showcases/show_001_execution_input_registration
 All checks passed!
@@ -115,11 +133,11 @@ git diff --check
 exit 0
 ```
 
-Showcase를 clean generation으로 두 번 실행하고 7개 output artifact의 SHA-256 manifest를 비교했다.
+Showcase를 clean generation으로 두 번 실행하고 11개 output artifact의 SHA-256 manifest를 비교했다.
 
 ```text
 uv run python showcases/show_001_execution_input_registration/run.py
-showcase-determinism: passed (7 artifacts)
+showcase-determinism: passed (11 artifacts)
 ```
 
 최종 tracked source/tests/showcase 검색에서 다음 obsolete active symbols는 0건이었다.

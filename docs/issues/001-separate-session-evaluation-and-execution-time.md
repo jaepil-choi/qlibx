@@ -187,23 +187,23 @@ intent가 없다. Pending intent를 다음 run으로 이월하지 않는다.
 
 ### Runtime implementation acceptance — 별도 작업, 미완료
 
-- [ ] daily observation + intraday callbacks와 minutely observation + daily callback이 같은 contract로 실행된다.
-- [ ] execution row density가 callback occurrence 집합·시각·순서를 바꾸지 않는다.
-- [ ] callback 없는 시각에도 valuation과 monitoring이 발생한다.
-- [ ] observation row가 callback timestamp에 없어도 callback이 발생하고 PIT equality/microsecond 경계가 맞다.
-- [ ] 서로 다른 IANA zone의 같은 instant가 UTC ordering에서 일치하고 venue-local date selector는 UTC date가
+- [x] daily observation + intraday callbacks와 minutely observation + daily callback이 같은 contract로 실행된다.
+- [x] execution row density가 callback occurrence 집합·시각·순서를 바꾸지 않는다.
+- [x] callback 없는 시각에도 valuation과 monitoring이 발생한다.
+- [x] observation row가 callback timestamp에 없어도 callback이 발생하고 PIT equality/microsecond 경계가 맞다.
+- [x] 서로 다른 IANA zone의 같은 instant가 UTC ordering에서 일치하고 venue-local date selector는 UTC date가
       다른 경계에서도 올바른 local date를 사용한다.
-- [ ] DST ambiguous/nonexistent local time은 explicit offset/fold 없이 artifact 생성 전에 거부된다.
-- [ ] Strategy에는 current occurrence만 보이고 execution/future agenda 접근 경로가 없다.
-- [ ] Flow가 accepted-intent/evidence decision time을 stamp하고 Strategy timing override를 거부한다.
-- [ ] FillConvention이 strictly-later in-range exact target 하나만 선택한다.
-- [ ] no-target, equality, after-end와 invalid provenance가 callback 전체를 atomic하게 rollback한다.
-- [ ] accepted replacement, failed replacement, `NoDecision` pending 유지가 각각 계약대로 동작한다.
-- [ ] same-instant due execution과 feedback이 later callback보다 먼저 commit된다.
-- [ ] successful finalization에는 pending intent가 없다.
-- [ ] agenda/slice, occurrence/evaluation time, Flow-stamped decision time/cutoff, intent identity, selected target,
+- [x] DST ambiguous/nonexistent local time은 explicit offset/fold 없이 artifact 생성 전에 거부된다.
+- [x] Strategy에는 current occurrence만 보이고 execution/future agenda 접근 경로가 없다.
+- [x] Flow가 accepted-intent/evidence decision time을 stamp하고 Strategy timing override를 거부한다.
+- [x] FillConvention이 strictly-later in-range exact target 하나만 선택한다.
+- [x] no-target, equality, after-end와 invalid provenance가 callback 전체를 atomic하게 rollback한다.
+- [x] accepted replacement, failed replacement, `NoDecision` pending 유지가 각각 계약대로 동작한다.
+- [x] same-instant due execution과 feedback이 later callback보다 먼저 commit된다.
+- [x] successful finalization에는 pending intent가 없다.
+- [x] agenda/slice, occurrence/evaluation time, Flow-stamped decision time/cutoff, intent identity, selected target,
       FillConvention/snapshot, consumed pending identity와 Account versions가 evidence에 남는다.
-- [ ] complete frozen inputs가 같으면 full trace가 같고, row-density 비교는 selector-relevant inputs가 같은
+- [x] complete frozen inputs가 같으면 full trace가 같고, row-density 비교는 selector-relevant inputs가 같은
       controlled case에서만 full-trace equivalence를 요구한다.
 
 ## 비목표

@@ -913,6 +913,65 @@ def test_no_equal_or_after_end_target_is_not_accepted(tmp_path: Path) -> None:
 
 
 @pytest.mark.uc("UC-TIME-002")
+@pytest.mark.parametrize(
+    ("callback", "end"),
+    (
+        (
+            datetime(2024, 3, 5, 15, 30, tzinfo=KST),
+            datetime(2024, 3, 5, 15, 30, tzinfo=KST),
+        ),
+        (
+            datetime(2024, 3, 5, 4, tzinfo=KST),
+            datetime(2024, 3, 5, 15, tzinfo=KST),
+        ),
+    ),
+)
+def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
+    tmp_path: Path,
+    callback: datetime,
+    end: datetime,
+) -> None:
+    registration = _execution(
+        _parquet(
+            tmp_path / f"no-target-{callback.hour}.parquet",
+            """
+            SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                   'A' AS instrument, true AS is_tradable, 10.0 AS close
+            """,
+        )
+    )
+    intent = EconomicPortfolioIntent(
+        UUID(int=102),
+        "strategy",
+        (),
+        Decimal("1"),
+        _BUDGET,
+        (),
+        0,
+        None,
+    )
+    prior = type("PriorPending", (), {"pending_id": "prior"})()
+    state = RunStateRepository(
+        initial_account=AccountState(_ACCOUNT),
+        pending_accepted_intent=prior,
+    )
+    frozen = _frozen((callback,), end=end, execution=registration)
+    flow = _flow(frozen, _Strategy((intent,)), state)
+    before = state.current
+
+    with pytest.raises(SimulationFailure, match="no exact execution target") as raised:
+        flow._dispatch_callback(frozen.strategy_agenda.occurrences[0])
+
+    failure = raised.value
+    assert failure.family is SimulationFailureFamily.INTENT
+    assert failure.stage is SimulationStage.CALLBACK_INTENT
+    assert failure.failed_requirement is frozen.execution_input
+    assert failure.mutation is False
+    assert state.current is before
+    assert state.current.pending_accepted_intent is prior
+
+
+@pytest.mark.uc("UC-TIME-002")
 def test_execution_snapshot_never_silently_omits_held_values_or_falls_back_for_nav(
     tmp_path: Path,
 ) -> None:

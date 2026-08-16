@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 
 import duckdb
 import pytest
 
 import vqapr.public as public
+from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.public import (
     CalendarLookback,
     ComponentRef,
@@ -21,14 +22,21 @@ from vqapr.public import (
     FillConvention,
     MaterializationResult,
     MaterializationSpec,
+    MonitoringPolicy,
+    OperationAgenda,
     RowsLookback,
     SourceSpec,
     VqaprError,
     materialize,
+    register_agenda,
     register_data_model,
     register_dataset,
     register_execution_input,
+    register_monitoring_policy,
+    register_strategy_config,
+    register_valuation_config,
 )
+from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 
 
 def _registration(**overrides) -> DatasetRegistration:
@@ -54,9 +62,15 @@ def test_public_exports_are_fixed() -> None:
             DataRequirement,
             MaterializationResult,
             MaterializationSpec,
+            MonitoringPolicy,
+            OperationAgenda,
             RowsLookback,
             materialize,
+            register_agenda,
             register_data_model,
+            register_monitoring_policy,
+            register_strategy_config,
+            register_valuation_config,
         )
     )
     assert public.__all__ == (
@@ -71,13 +85,21 @@ def test_public_exports_are_fixed() -> None:
         "FillConvention",
         "MaterializationResult",
         "MaterializationSpec",
+        "MonitoringPolicy",
+        "OperationAgenda",
         "RowsLookback",
         "SourceSpec",
+        "StrategyConfig",
+        "ValuationConfig",
         "VqaprError",
         "materialize",
+        "register_agenda",
         "register_data_model",
         "register_dataset",
         "register_execution_input",
+        "register_monitoring_policy",
+        "register_strategy_config",
+        "register_valuation_config",
     )
 
 
@@ -177,6 +199,25 @@ def test_public_facade_registers_a_valid_execution_input(
     before = (tmp_path / ".vqapr" / "workspace.yaml").read_bytes()
     assert register_execution_input(tmp_path, registration) is False
     assert (tmp_path / ".vqapr" / "workspace.yaml").read_bytes() == before
+
+
+def test_public_facade_registers_an_operation_agenda(tmp_path: Path) -> None:
+    agenda = OperationAgenda.from_occurrences(
+        agenda_id="strategy-agenda",
+        role=OperationRole.STRATEGY_CALLBACK,
+        timezone="Asia/Seoul",
+        occurrences=(
+            OperationOccurrence(
+                "first",
+                OperationRole.STRATEGY_CALLBACK,
+                LocalInstantDeclaration(date(2024, 3, 5), time(15, 30), "Asia/Seoul", 0, "+09:00"),
+            ),
+        ),
+        provenance="facade test",
+    )
+
+    assert register_agenda(tmp_path, agenda) is True
+    assert register_agenda(tmp_path, agenda) is False
 
 
 @pytest.mark.uc("UC-FILL-001")

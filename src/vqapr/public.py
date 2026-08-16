@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -22,8 +23,11 @@ from vqapr.exchange.execution_table import (
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.registration import register_data_model
 from vqapr.flow.materialize import MaterializationResult, MaterializationSpec, materialize
+from vqapr.flow.run import StrategyConfig
 from vqapr.models.contexts import DataModelContext
 from vqapr.models.data_model import DataModel
+from vqapr.runtime.agendas import OperationAgenda
+from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 __all__ = (
@@ -38,13 +42,21 @@ __all__ = (
     "FillConvention",
     "MaterializationResult",
     "MaterializationSpec",
+    "MonitoringPolicy",
+    "OperationAgenda",
     "RowsLookback",
     "SourceSpec",
+    "StrategyConfig",
+    "ValuationConfig",
     "VqaprError",
     "materialize",
+    "register_agenda",
     "register_data_model",
     "register_dataset",
     "register_execution_input",
+    "register_monitoring_policy",
+    "register_strategy_config",
+    "register_valuation_config",
 )
 
 
@@ -71,3 +83,19 @@ def register_execution_input(
     diagnosis = validate_execution_input(registration)
     diagnosis.raise_if_failed()
     return Workspace.create(project_root).register_execution_input(registration)
+
+
+def register_agenda(project_root: str | Path, agenda: OperationAgenda) -> bool:
+    return Workspace.create(project_root).register_agenda(agenda)
+
+
+def register_strategy_config(project_root: str | Path, config: StrategyConfig) -> bool:
+    return Workspace.create(project_root).register_strategy_config(config)
+
+
+def register_valuation_config(project_root: str | Path, config: ValuationConfig) -> bool:
+    return Workspace.create(project_root).register_valuation_config(config)
+
+
+def register_monitoring_policy(project_root: str | Path, policy: MonitoringPolicy) -> bool:
+    return Workspace.create(project_root).register_monitoring_policy(policy)

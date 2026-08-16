@@ -122,7 +122,7 @@ Resolved 36 packages
 Installed pytz==2026.3.post1 and editable vqapr==0.1.0
 
 uv run pytest -q
-207 passed in 8.34s
+211 passed in 8.16s
 
 uv run ruff check src tests showcases/show_001_execution_input_registration
 All checks passed!

@@ -243,17 +243,21 @@ def _flow(
     state: RunStateRepository,
     constraints: tuple[Constraint, ...] = (_Constraint(),),
     constraint_window_for_occurrence: object = None,
+    strategy_window_for_occurrence: object = None,
     marks_for_occurrence: object = None,
 ) -> SimulationFlow:
     return SimulationFlow(
         frozen,
         strategy,
         state,
-        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
-            instruments=("A",),
-            store=DuckDbObservationStore(_Catalog()),
-            allowed_requirements=(_requirement(),),
+        strategy_window_for_occurrence=strategy_window_for_occurrence
+        or (
+            lambda occurrence: ModelWindow(
+                evaluation_time=occurrence.evaluation_time,
+                instruments=("A",),
+                store=DuckDbObservationStore(_Catalog()),
+                allowed_requirements=frozen.strategy_requirements,
+            )
         ),
         constraint_window_for_occurrence=constraint_window_for_occurrence
         or (
@@ -703,6 +707,70 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
 
 
 @pytest.mark.uc("UC-TIME-002")
+def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Path) -> None:
+    requirement = DataRequirement.of(
+        "strategy",
+        "prices",
+        fields=("close",),
+        lookback=RowsLookback(1),
+    )
+    registration = DatasetRegistration.of(
+        "prices",
+        "missing-source",
+        instrument_field="instrument",
+        available_at="available_at",
+        key_fields=("available_at", "instrument"),
+        fields={"close": "close"},
+    )
+    source = SourceSpec.of("missing-source", tmp_path / "missing.parquet")
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+
+    class ReadingStrategy(_Strategy):
+        def requirements(self) -> tuple[DataRequirement, ...]:
+            return (requirement,)
+
+        def on_occurrence(self, context: object) -> NoDecision:
+            context.window.observations(requirement)
+            return NoDecision("unreachable")
+
+    class MissingCatalog:
+        def dataset(self, _dataset_id: str) -> DatasetRegistration:
+            return registration
+
+        def source(self, _source_id: str) -> SourceSpec:
+            return source
+
+    frozen = _frozen(
+        (callback,),
+        end=callback,
+        datasets=(registration,),
+        sources=(source,),
+        strategy_requirements=(requirement,),
+    )
+    state = _state()
+
+    with pytest.raises(SimulationFailure, match=r"missing\.parquet") as raised:
+        _flow(
+            frozen,
+            ReadingStrategy(()),
+            state,
+            strategy_window_for_occurrence=lambda occurrence: ModelWindow(
+                evaluation_time=occurrence.evaluation_time,
+                instruments=("A",),
+                store=DuckDbObservationStore(MissingCatalog()),
+                allowed_requirements=(requirement,),
+            ),
+        ).run()
+
+    failure = raised.value
+    assert failure.family is SimulationFailureFamily.DATA
+    assert failure.stage is SimulationStage.CALLBACK_WINDOW
+    assert failure.failed_requirement == frozen.strategy_requirements
+    assert failure.mutation is False
+    assert state.current.lifecycle_trace == ()
+
+
+@pytest.mark.uc("UC-TIME-002")
 def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> None:
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
@@ -727,14 +795,69 @@ def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> No
     )
     state = _state()
 
-    with pytest.raises(ValueError, match="frozen instrument universe"):
+    with pytest.raises(SimulationFailure, match="frozen instrument universe") as raised:
         _flow(
             _frozen((callback,), end=target, execution=execution),
             _Strategy((intent,)),
             state,
         ).run()
 
+    failure = raised.value
+    assert failure.family is SimulationFailureFamily.INTENT
+    assert failure.stage is SimulationStage.CALLBACK_INTENT
+    assert failure.failed_requirement is intent
+    assert failure.mutation is False
     assert state.current.pending_accepted_intent is None
+    assert state.current.lifecycle_trace == ()
+
+
+@pytest.mark.uc("UC-TIME-002")
+def test_constraint_projection_failure_retains_constraint_owner() -> None:
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+
+    class FailingConstraint(_Constraint):
+        def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+            raise RuntimeError("constraint projection fault")
+
+    constraint = FailingConstraint()
+    state = _state()
+    with pytest.raises(SimulationFailure, match="constraint projection fault") as raised:
+        _flow(
+            _frozen((callback,), end=callback),
+            _Strategy((NoDecision("unreachable"),)),
+            state,
+            constraints=(constraint,),
+        ).run()
+
+    failure = raised.value
+    assert failure.family is SimulationFailureFamily.INTENT
+    assert failure.stage is SimulationStage.CALLBACK_INTENT
+    assert failure.failed_requirement is constraint
+    assert failure.mutation is False
+    assert state.current.lifecycle_trace == ()
+
+
+@pytest.mark.uc("UC-TIME-002")
+def test_callback_publication_failure_is_not_classified_as_intent() -> None:
+    callback = datetime(2024, 3, 5, 9, tzinfo=KST)
+    state = RunStateRepository(
+        initial_account=AccountState(_ACCOUNT),
+        before_swap=lambda _candidate: (_ for _ in ()).throw(
+            RuntimeError("callback publication fault")
+        ),
+    )
+
+    with pytest.raises(SimulationFailure, match="callback publication fault") as raised:
+        _flow(
+            _frozen((callback,), end=callback),
+            _Strategy((NoDecision("no decision"),)),
+            state,
+        ).run()
+
+    failure = raised.value
+    assert failure.family is SimulationFailureFamily.PUBLICATION
+    assert failure.stage is SimulationStage.CALLBACK_PUBLICATION
+    assert failure.mutation is False
     assert state.current.lifecycle_trace == ()
 
 
@@ -1001,6 +1124,49 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert [trace.kind for trace in replay.final_state.lifecycle_trace] == [
         trace.kind for trace in result.final_state.lifecycle_trace
     ]
+
+
+@pytest.mark.uc("UC-TIME-002")
+def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> None:
+    first = datetime(2024, 3, 5, 9, tzinfo=KST)
+    second = datetime(2024, 3, 5, 10, tzinfo=KST)
+    target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
+    registration = _execution(
+        _parquet(
+            tmp_path / "execution.parquet",
+            """
+            SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
+                   'A' AS instrument, true AS is_tradable, 10.0 AS close
+            """,
+        )
+    )
+    intent = EconomicPortfolioIntent(
+        UUID(int=101),
+        "strategy",
+        (PortfolioTarget("A", weight=Decimal("1")),),
+        Decimal("0"),
+        _BUDGET,
+        (),
+        0,
+        None,
+    )
+
+    result = _flow(
+        _frozen((first, second), valuations=(target,), end=target, execution=registration),
+        _Strategy((intent, NoDecision("keep pending"))),
+        _state(),
+    ).run()
+
+    assert [trace.kind for trace in result.final_state.lifecycle_trace] == [
+        LifecycleKind.ACCEPTED_INTENT,
+        LifecycleKind.NO_DECISION,
+        LifecycleKind.ACCOUNT_COMMITTED,
+        LifecycleKind.MARKED,
+        LifecycleKind.FEEDBACK_PUBLISHED,
+    ]
+    commit = result.final_state.lifecycle_trace[2].detail
+    assert commit.pending.intent.intent_id == intent.intent_id
+    assert result.final_state.pending_accepted_intent is None
 
 
 @pytest.mark.uc("UC-TIME-002")

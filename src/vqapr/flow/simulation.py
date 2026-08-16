@@ -845,13 +845,21 @@ class SimulationFlow:
                     family=SimulationFailureFamily.DATA,
                     owner=self._frozen_run.constraint_requirements,
                 )
-                projected = self._guard(
-                    SimulationStage.CALLBACK_WINDOW,
-                    occurrence.evaluation_time,
-                    lambda: project_constraints(self._constraints, constraint_window),
-                    family=SimulationFailureFamily.DATA,
-                    owner=self._frozen_run.constraint_requirements,
+                projected = tuple(
+                    self._callback_intent_boundary(
+                        occurrence,
+                        constraint,
+                        lambda constraint=constraint: project_constraints(
+                            (constraint,), constraint_window
+                        )[0],
+                    )
+                    for constraint in self._constraints
                 )
+            constraint_bounds = self._callback_intent_boundary(
+                occurrence,
+                projected,
+                lambda: merged_constraint_bounds(projected),
+            )
             result = self._callback_intent_boundary(
                 occurrence,
                 self._frozen_run.strategy,
@@ -860,9 +868,10 @@ class SimulationFlow:
                         occurrence=occurrence,
                         window=window,
                         account=account,
-                        constraint_bounds=merged_constraint_bounds(projected),
+                        constraint_bounds=constraint_bounds,
                     )
                 ),
+                data_owner=self._frozen_run.strategy_requirements,
             )
             if isinstance(result, NoDecision):
                 accepted: NoDecision | AcceptedIntent = result
@@ -920,14 +929,12 @@ class SimulationFlow:
             prepared = self._guard(
                 SimulationStage.CALLBACK_PUBLICATION,
                 occurrence.evaluation_time,
-                lambda: self._state.prepare_callback(
+                lambda: self._prepare_callback_publication(
                     candidate,
                     payload_candidate,
-                    lifecycle=lifecycle,
-                    recorder=recorder,
-                    pending_accepted_intent=(
-                        None if isinstance(accepted, NoDecision) else accepted
-                    ),
+                    lifecycle,
+                    recorder,
+                    accepted,
                 ),
                 family=SimulationFailureFamily.PUBLICATION,
                 owner=evidence,
@@ -965,6 +972,8 @@ class SimulationFlow:
         occurrence: OperationOccurrence,
         owner: object,
         operation: Callable[[], object],
+        *,
+        data_owner: object | None = None,
     ) -> object:
         """Keep callback data-access failures out of the intent boundary."""
         try:
@@ -990,6 +999,15 @@ class SimulationFlow:
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
             ) from error
+        except OSError as error:
+            raise self._failure(
+                stage=SimulationStage.CALLBACK_WINDOW,
+                cutoff=occurrence.evaluation_time,
+                owner=owner if data_owner is None else data_owner,
+                family=SimulationFailureFamily.DATA,
+                cause=error,
+                kind=SimulationFailureKind.PRE_COMMIT,
+            ) from error
         except Exception as error:
             raise self._failure(
                 stage=SimulationStage.CALLBACK_INTENT,
@@ -999,6 +1017,29 @@ class SimulationFlow:
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
             ) from error
+
+    def _prepare_callback_publication(
+        self,
+        memory: object,
+        payload: bytes,
+        lifecycle: LifecycleTrace,
+        recorder: InvocationRecorder,
+        accepted: NoDecision | AcceptedIntent,
+    ) -> object:
+        if isinstance(accepted, NoDecision):
+            return self._state.prepare_callback(
+                memory,
+                payload,
+                lifecycle=lifecycle,
+                recorder=recorder,
+            )
+        return self._state.prepare_callback(
+            memory,
+            payload,
+            lifecycle=lifecycle,
+            recorder=recorder,
+            pending_accepted_intent=accepted,
+        )
 
     def _restore_callback_state(self, memory: object, payload: bytes) -> None:
         self._strategy.memory = memory

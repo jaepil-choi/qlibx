@@ -17,8 +17,14 @@ from uuid import UUID
 import duckdb
 import pytest
 
-from vqapr.constraints.builtin import NoShort
+from vqapr.constraints.builtin import NoShort, SingleNameCap
 from vqapr.constraints.constraint import ConstraintBounds
+from vqapr.constraints.evaluation import merged_constraint_bounds, project_constraints
+from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.requirements import DataRequirement
+from vqapr.data.sources import SourceSpec
+from vqapr.data.store import DuckDbObservationStore
+from vqapr.data.windows import ModelWindow
 from vqapr.flow.materialize import AllocationPublicationSpec, publish_run_allocation
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
@@ -101,21 +107,60 @@ def active(manifest: dict[str, object]) -> dict[datetime, dict[str, Decimal]]:
     return panel
 
 
-def _bounds(benchmark: dict[str, Decimal], tolerance: Decimal) -> ConstraintBounds:
-    """Intersect the shipped constraint set's projections over one session.
+class _Catalog:
+    def __init__(self, registration: DatasetRegistration, source: SourceSpec) -> None:
+        self._registration = registration
+        self._source = source
 
-    The intersection is elementwise, exactly as ``merged_constraint_bounds`` composes them; the
-    composition machinery itself is covered in the builtin constraint tests.
+    def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
+        return self._registration
+
+    def source(self, raw_source_id: str) -> SourceSpec:
+        return self._source
+
+
+def _window(
+    manifest: dict[str, object],
+    instruments: tuple[str, ...],
+    requirement: DataRequirement,
+    cutoff: datetime,
+) -> ModelWindow:
+    registration = DatasetRegistration.of(
+        "benchmark_weight_daily",
+        "benchmark-source",
+        instrument_field="instrument",
+        available_at="available_at",
+        key_fields=("available_at", "instrument"),
+        fields={"benchmark_weight": "benchmark_weight"},
+    )
+    source = SourceSpec.of("benchmark-source", FIXTURE / str(manifest["benchmark_path"]))
+    return ModelWindow(
+        evaluation_time=cutoff,
+        instruments=instruments,
+        store=DuckDbObservationStore(_Catalog(registration, source)),
+        allowed_requirements=(requirement,),
+    )
+
+
+def _bounds(
+    manifest: dict[str, object],
+    benchmark: dict[str, Decimal],
+    cutoff: datetime,
+    tolerance: Decimal,
+) -> ConstraintBounds:
+    """Project and intersect the **shipped** constraint set through a real point-in-time window.
+
+    Reimplementing the cap here would let a regression in `SingleNameCap` leave this suite green,
+    which would make criterion 4 prove nothing about the code that actually ships.
     """
     instruments = tuple(sorted(benchmark))
-    no_short = NoShort().project(None, instruments)  # type: ignore[arg-type]
-    caps = {
-        instrument: max(CAP, benchmark[instrument]).quantize(QUANTUM) for instrument in instruments
-    }
-    return ConstraintBounds(
-        {i: max(no_short.lower[i], Decimal("0")) for i in instruments},
-        {i: min(no_short.upper[i], caps[i]) for i in instruments},
+    cap = SingleNameCap(
+        cap=str(CAP),
+        benchmark_dataset_id="benchmark_weight_daily",
+        tolerance=str(tolerance),
     )
+    window = _window(manifest, instruments, cap.requirements()[0], cutoff)
+    return merged_constraint_bounds(project_constraints((NoShort(), cap), window))
 
 
 @dataclass(frozen=True)
@@ -132,14 +177,19 @@ class _Evidence:
 
 
 def _construct(
-    benchmark: dict[str, Decimal], active: dict[str, Decimal], scale: Decimal, tolerance: Decimal
+    manifest: dict[str, object],
+    benchmark: dict[str, Decimal],
+    active: dict[str, Decimal],
+    scale: Decimal,
+    tolerance: Decimal,
+    cutoff: datetime,
 ):
     """The canonical construction: desired = bench + s * active, then project."""
     desired = {
         instrument: (weight + scale * active.get(instrument, Decimal(0))).quantize(QUANTUM)
         for instrument, weight in benchmark.items()
     }
-    bounds = _bounds(benchmark, tolerance)
+    bounds = _bounds(manifest, benchmark, cutoff, tolerance)
     return optimize(
         desired=desired,
         current={},
@@ -166,15 +216,17 @@ def test_criterion_4_scale_zero_reproduces_the_benchmark_exactly(
     active: dict[datetime, dict[str, Decimal]],
     sessions: list[datetime],
     tolerance: Decimal,
+    manifest: dict[str, object],
 ) -> None:
     """s = 0 must return the index itself, compared by Decimal equality across a grid change.
 
-    Three sessions rather than all twenty-two: each one projects the shipped constraint set through
-    a real point-in-time window, and the property is per-session, so a bounded sweep proves it
-    without turning the acceptance suite into a benchmark.
+    Every committed session, each projecting the shipped constraint set through its own
+    point-in-time window, so the identity is proved against real data rather than a sample of it.
     """
-    for session in (sessions[0], sessions[len(sessions) // 2], sessions[-1]):
-        result = _construct(benchmark[session], active.get(session, {}), Decimal(0), tolerance)
+    for session in sessions:
+        result = _construct(
+            manifest, benchmark[session], active.get(session, {}), Decimal(0), tolerance, session
+        )
         for instrument, weight in benchmark[session].items():
             assert result.weights[instrument] == weight
         assert sum(result.weights.values()) + result.cash == Decimal(1)
@@ -185,14 +237,15 @@ def test_criterion_4_a_signed_tilt_stays_feasible_under_the_constraint_set(
     active: dict[datetime, dict[str, Decimal]],
     sessions: list[datetime],
     tolerance: Decimal,
+    manifest: dict[str, object],
 ) -> None:
     """A signed active view enters unchanged; long-only emerges from the constraints."""
     session = sessions[0]
     tilt = active[session]
     assert min(tilt.values()) < 0, "the active view must actually be signed"
 
-    bounds = _bounds(benchmark[session], tolerance)
-    result = _construct(benchmark[session], tilt, Decimal("0.5"), tolerance)
+    bounds = _bounds(manifest, benchmark[session], session, tolerance)
+    result = _construct(manifest, benchmark[session], tilt, Decimal("0.5"), tolerance, session)
 
     for instrument, weight in result.weights.items():
         assert weight >= bounds.lower[instrument] >= Decimal(0)
@@ -222,17 +275,24 @@ def test_criterion_5_the_solve_is_deterministic_and_uses_no_solver(
     active: dict[datetime, dict[str, Decimal]],
     sessions: list[datetime],
     tolerance: Decimal,
+    manifest: dict[str, object],
 ) -> None:
     session = sessions[0]
-    first = _construct(benchmark[session], active[session], Decimal("0.5"), tolerance)
-    second = _construct(benchmark[session], active[session], Decimal("0.5"), tolerance)
+    first = _construct(
+        manifest, benchmark[session], active[session], Decimal("0.5"), tolerance, session
+    )
+    second = _construct(
+        manifest, benchmark[session], active[session], Decimal("0.5"), tolerance, session
+    )
 
     assert first.weights == second.weights
     assert first.cash == second.cash
     assert first.multiplier == second.multiplier
     # cvxpy is a declared project dependency for other work, so the meaningful claim is that this
-    # solve path never reaches for it, not that the project has no solver at all.
-    assert "cvxpy" not in sys.modules
+    # solve path never reaches for it, not that the project has no solver at all. The other three
+    # are kept because a future contributor reaching for any of them would be caught here.
+    for module in ("cvxpy", "osqp", "quadprog", "scipy.optimize"):
+        assert module not in sys.modules
 
 
 def test_criterion_1_and_6_publish_round_trip_and_point_in_time(
@@ -241,11 +301,14 @@ def test_criterion_1_and_6_publish_round_trip_and_point_in_time(
     active: dict[datetime, dict[str, Decimal]],
     sessions: list[datetime],
     tolerance: Decimal,
+    manifest: dict[str, object],
 ) -> None:
     """Publish a real constructed allocation, then read it back exactly and check PIT."""
     Workspace.create(tmp_path)
     session = sessions[0]
-    result = _construct(benchmark[session], active[session], Decimal("0.5"), tolerance)
+    result = _construct(
+        manifest, benchmark[session], active[session], Decimal("0.5"), tolerance, session
+    )
 
     intent = EconomicPortfolioIntent(
         UUID(int=21),
@@ -294,14 +357,17 @@ def test_criterion_1_and_6_publish_round_trip_and_point_in_time(
 
 
 def test_criterion_7_a_frozen_holding_survives_into_a_validated_intent(
-    benchmark: dict[datetime, dict[str, Decimal]], sessions: list[datetime], tolerance: Decimal
+    benchmark: dict[datetime, dict[str, Decimal]],
+    sessions: list[datetime],
+    tolerance: Decimal,
+    manifest: dict[str, object],
 ) -> None:
     """The reviewer-mandated check, run in the ambient context outside any localcontext."""
     session = sessions[0]
     weights = benchmark[session]
     held = next(iter(sorted(weights)))
     holding = Decimal("0.099700000000")
-    bounds = _bounds(weights, tolerance)
+    bounds = _bounds(manifest, weights, session, tolerance)
 
     result = optimize(
         desired={k: v for k, v in weights.items()},
@@ -335,12 +401,15 @@ def test_criterion_7_a_frozen_holding_survives_into_a_validated_intent(
 
 
 def test_a_frozen_holding_finer_than_the_grid_is_refused(
-    benchmark: dict[datetime, dict[str, Decimal]], sessions: list[datetime], tolerance: Decimal
+    benchmark: dict[datetime, dict[str, Decimal]],
+    sessions: list[datetime],
+    tolerance: Decimal,
+    manifest: dict[str, object],
 ) -> None:
     session = sessions[0]
     weights = benchmark[session]
     held = next(iter(sorted(weights)))
-    bounds = _bounds(weights, tolerance)
+    bounds = _bounds(manifest, weights, session, tolerance)
 
     with pytest.raises(OptimizeRefusal, match="finer than the canonical grid"):
         optimize(

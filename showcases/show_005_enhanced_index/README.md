@@ -36,9 +36,9 @@ smaller one that does not.
   `tests/flow/test_publish_allocation.py` and `tests/acceptance/test_enhanced_index.py`.
 - **The cap is inlined here, not the shipped `SingleNameCap`.** `NoShort` is the real shipped
   constraint; the per-name ceiling is recomputed locally because this script has no point-in-time
-  window to project through. The acceptance suite does drive the shipped constraint for real, via
-  `project_constraints` and `merged_constraint_bounds`, so the criteria are not proved against this
-  stand-in.
+  window to project through. The acceptance suite drives the shipped constraint for real, projecting `NoShort` and
+  `SingleNameCap` through a point-in-time window and intersecting them with `merged_constraint_bounds`,
+  so the criteria are not proved against this stand-in.
 - **The cash replay is a consistency check, not independent verification.** It recomputes cash from
   the same journal the same loop wrote, so it catches bookkeeping drift within the script and
   nothing more. `show_003` performs the genuinely independent replay against a committed Account.

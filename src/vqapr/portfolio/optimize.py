@@ -59,6 +59,11 @@ class OptimizeResult:
     weights: Mapping[str, Decimal]
     cash: Decimal
     multiplier: Decimal
+    """The solved multiplier, quantized onto the canonical grid for reporting.
+
+    It is a diagnostic, not a recomputation handle: the exact lambda is rational, so recomputing
+    ``clip(desired - multiplier, l, u)`` from this rounded value can disagree with ``weights``.
+    """
     binding_lower: tuple[str, ...]
     binding_upper: tuple[str, ...]
 

@@ -201,7 +201,12 @@ def _publish_alpha(project: Path, alpha: dict[datetime, dict[str, Decimal]]) -> 
 
 
 def _replay(fills: list[tuple[str, Decimal, Decimal]], opening: Decimal) -> Decimal:
-    """Recompute cash from the fill journal alone, independently of the Account."""
+    """Recompute cash from the journal alone.
+
+    This is a consistency check, not independent verification: the journal is written by the same
+    loop, so it catches bookkeeping drift within this script and nothing more. `show_003` performs
+    the genuinely independent replay against a committed Account.
+    """
     cash = opening
     for _, quantity, price in fills:
         cash -= quantity * price
@@ -338,7 +343,7 @@ def main() -> None:
     print(f"freeze released     : {released} (holding drifted outside its cap)")
     print(f"fills               : {len(journal)} (whole shares)")
     print(f"closing cash        : {cash}")
-    print(f"replayed cash       : {replayed} (independent, exact match)")
+    print(f"replayed cash       : {replayed} (consistency check)")
     print(f"active-weight norm  : {rows[0]['active_norm']} .. {rows[-1]['active_norm']}")
     print(f"artifacts           : {json.dumps(digests, indent=2, sort_keys=True)}")
 

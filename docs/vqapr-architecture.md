@@ -1214,7 +1214,7 @@ def optimize(
     *, desired, current, lower, upper, frozen,
     cash_range, cost, turnover_penalty,
     L=None,                      # 노출 매핑. 기본은 항등(= look-through 없음)
-) -> tuple[Weights, Decimal, Diagnostics]: ...
+) -> OptimizeResult: ...   # weights · cash · multiplier · 결속된 상하한
 ```
 
 $$\min_{w,\,c}\ \underbrace{\|Lw - x^{desired}\|^2}_{\text{원하는 노출과의 거리}}
@@ -2522,7 +2522,7 @@ src/vqapr/
 │   ├── simulation.py      component occurrence slices + dynamic due execution의 deterministic merge/dispatch
 │   ├── views.py           requirement → bounded ModelWindow
 │   ├── model_state.py     ModelStateStore 포트 · ModelStateRef 발행
-│   ├── materialize.py     DataModel 진입점. **available_at 부여**
+│   ├── materialize.py     파생 dataset 발행 authority — DataModel 결과와 run 배분이 같은 문을 쓴다. **available_at 부여**
 │   └── stamping.py        recorder 봉투 5개
 │
 ├── evidence/        영수증 (닫힘)

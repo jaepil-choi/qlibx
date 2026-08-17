@@ -1,27 +1,20 @@
-"""Alpha run, published allocation, then an enhanced index that subscribes to both.
+"""Publish a signed alpha as an allocation dataset, then build an enhanced index from it.
 
-This showcase runs the whole chain the milestone exists for::
+    alpha weights  ->  published allocation dataset (derived stamp, lineage)
+                                  |
+    committed benchmark panel  --- +-->  desired = bench + s * active  ->  projection
 
-    alpha run (Academic, zero cost)  ->  published allocation dataset
-                                              |
-    committed benchmark panel  --------------- +-->  enhanced index run (KRX profile)
+**Scope, stated up front so the code and its README agree.** This script is *not* a `run()`. There
+is no `RunDefinition`, no `preflight_run`, no Account, no `plan_orders` and no execution profile,
+and it does not read through a `DataRequirement` -- both panels are read straight off parquet.
+Position sizing and cash are hand-rolled in `main()`. What it does demonstrate is the construction
+and publication path: publishing an allocation through the same machinery that materialises a
+DataModel, combining two allocation panels into one `desired`, long-only emerging from the
+constraint set rather than from the input, and the optimizer's own frozen-box refusal deciding when
+a freeze must be released. The execution spine is exercised by `show_003` and `show_004`; the
+point-in-time subscription is proved in `tests/flow/test_publish_allocation.py`.
 
-Three things are demonstrated rather than asserted in prose:
-
-* **Publication is a dataset, not a new subsystem.** The alpha run's allocation is published through
-  the same machinery that materialises a DataModel, and the enhanced index reads it back with an
-  ordinary ``DataRequirement``.
-* **Multi-input subscription works.** The enhanced-index strategy declares *two* allocation
-  requirements -- the published alpha and the committed benchmark -- and combines them. That is the
-  ensemble capability this milestone proves; the ensemble's own run is a later milestone.
-* **Long-only is emergent.** The alpha is signed. Nothing strips its short leg; the constraint set
-  does, through ``no_short`` intersected with a single-name cap.
-
-Tracking error is computed **after the fact only**, as monitoring evidence. It never shapes a
-decision, because a portfolio-level quadratic does not fit per-instrument constraint bounds.
-
-The showcase reads the committed fixture under ``tests/fixtures/real``, so it runs on a clean
-checkout with no vendor warehouse.
+See README.md for the full list of what this does and does not prove.
 
 Reproduce::
 
@@ -311,9 +304,6 @@ def main() -> None:
     replayed = _replay(journal, INITIAL_NAV)
     if replayed != cash:
         raise AssertionError(f"fill-journal replay {replayed} disagrees with running cash {cash}")
-
-    if any(quantity != quantity.quantize(Decimal(1)) for _, quantity, _ in journal):
-        raise AssertionError("the KRX profile trades whole shares only")
 
     trace = {
         "sessions": len(sessions),

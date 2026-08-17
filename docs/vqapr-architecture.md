@@ -1306,6 +1306,28 @@ require_complete(signal, universe) -> Signal                     # 불완전하�
 `frozen` 종목은 quantize하지 않고 그대로 내보낸다(§8.2 frozen invariance). 대신 **입구에서** 그리드보다 세밀한
 `current[j]`를 typed refusal로 거부한다. 방향이 반대다 — 나가는 것을 고치는 게 아니라 들어오는 것을 제한한다.
 
+#### `allocation.py` — 배분 입력 계약
+
+배분 입력은 **출처가 아니라 선언된 invariant로 규정된다.** 등록된 PIT 데이터와 발행된 run 결과는
+invariant를 만족하는 한 같은 종류의 입력이며, 그래서 benchmark는 합성 run이 필요 없고 alpha 결과는
+전용 reader가 필요 없다. 둘 다 평범한 `DataRequirement`로 소비된다.
+
+```python
+AllocationInvariants(sign, weight_sum_upper, tolerance, required_coverage)
+validate_allocation(weights, invariants, *, label) -> ValidatedAllocation
+```
+
+두 가지가 하중을 받는다.
+
+- **검증은 소비 시점에 한다.** 등록 시점도 preflight도 아니다. PIT 의미가 살아있는 유일한 지점이라
+  구성종목 변경이 등록을 무효화하지 않고 자연스럽게 흡수되며, 소비자가 실제로 볼 수 있는 행만 판정한다.
+- **weight sum invariant는 coverage-scoped다.** 200종목 지수의 4종목 슬라이스는 합이 약 `0.549`다.
+  1을 요구하면 진짜 벤더 데이터가 거부되고, 정규화하면 벤더가 말하지 않은 숫자를 벤더 이름으로 저장하게
+  된다. 덮이지 않은 나머지는 누락이 아니라 **현금**이다.
+
+`tolerance`는 package 상수가 아니라 호출자가 fixture manifest에서 읽어 넘긴다. 원본 데이터를 더 정밀한
+구간으로 재생성하면 허용치가 **좁아진다** — 고정 상수였다면 진짜 오차를 통과시켰을 자리다.
+
 #### `diagnostics.py` — 판단 시점의 배분 진단
 
 `optimize`가 만든 배분을 그대로 쓰기 전에 물어볼 값들이다 — gross/net, 집중도, 유효 종목 수, 그리고

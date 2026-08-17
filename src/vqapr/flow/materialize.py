@@ -24,6 +24,7 @@ from vqapr.domain.identifiers import DatasetId, dataset_id, instrument_id
 from vqapr.domain.rows import Row, Rows, normalize_rows
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.extension.loading import load_data_model
+from vqapr.evidence.artifacts import CallbackEvidence
 from vqapr.flow.stamping import derived_available_at
 from vqapr.flow.views import data_model_window
 from vqapr.models.contexts import DataModelContext
@@ -481,7 +482,7 @@ def _stage_and_publish(
 def publish_run_allocation(
     project_root: str | Path,
     spec: AllocationPublicationSpec,
-    evidences: Sequence[object],
+    evidences: Sequence[CallbackEvidence],
 ) -> AllocationPublicationResult:
     """Publish a completed run's allocations as an ordinary registered dataset.
 

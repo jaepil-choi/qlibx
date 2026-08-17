@@ -274,3 +274,63 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
         requirements=(requirement,),
     )
     assert hidden.observations(requirement).rows == ()
+
+
+def test_publishing_from_a_real_callback_evidence(tmp_path: Path) -> None:
+    """Prove the writer against the run spine's own type, not a duck-typed stand-in.
+
+    Every other test here builds a local stub. That is fine for exercising branches, but it means a
+    rename of `CallbackEvidence.strategy_accesses` would leave the whole suite green while the
+    shipped path broke. This test constructs the real class so the field names are load-bearing.
+    """
+    from vqapr.account.snapshot import AccountSnapshot
+    from vqapr.data.lookback import RowsLookback
+    from vqapr.data.windows import AccessRecord
+    from vqapr.domain.identifiers import dataset_id
+    from vqapr.domain.references import ModelStateRef
+    from vqapr.evidence.artifacts import CallbackEvidence
+
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+    weights = {"A": Decimal("0.400000000000"), "B": Decimal("0.100000000000")}
+    state = ModelStateRef("0" * 64)
+
+    evidence = CallbackEvidence(
+        run_identity="real-run",
+        strategy=None,
+        agenda=None,
+        occurrence=None,
+        cutoff=cutoff,
+        root_version=0,
+        account=AccountSnapshot(0, Decimal("1000"), {}),
+        current_model_state_ref=state,
+        committed_model_state_ref=state,
+        strategy_accesses=(
+            AccessRecord(
+                consumer_id="alpha",
+                dataset_id=dataset_id("price_daily"),
+                source_id="prices",
+                source_digest="0" * 64,
+                fields=("close",),
+                lookback=RowsLookback(1),
+                evaluation_time=cutoff,
+                instruments=("A", "B"),
+                lower_bound=None,
+                actual_rows={},
+                max_available_at=cutoff,
+            ),
+        ),
+        actual_source_refs=(),
+        decision=_Intent(tuple(_Target(n, w) for n, w in sorted(weights.items()))),
+        pending=None,
+        constraints=(),
+    )
+
+    result = publish_run_allocation(
+        tmp_path, AllocationPublicationSpec.of("real_allocation"), [evidence]
+    )
+
+    rows = dict((row[1], row[2]) for row in _published(result.output_path))
+    assert rows == weights
+    lineage = json.loads(result.lineage_path.read_text(encoding="utf-8"))
+    assert lineage["run"]["run_identity"] == ["real-run"]

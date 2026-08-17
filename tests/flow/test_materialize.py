@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -232,3 +233,46 @@ def test_materialize_rejects_invalid_evaluation_times_before_output(
     assert caught.value.stage == "materialize.input"
     assert caught.value.mutation is False
     assert Workspace.open(tmp_path).path.read_bytes() == before
+
+
+def test_materialize_lineage_payload_keys_are_pinned(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """The mirror of the allocation payload assertion.
+
+    `_stage_and_publish` and the lineage envelope split were extracted so two callers could share
+    one publication authority. Nothing pinned the DataModel side of that payload afterwards, so a
+    key added, dropped or renamed during a later refactor would pass unnoticed. This is the guard.
+    """
+    _register_prices(tmp_path, model_price_parquet)
+    component_path = _component_source(tmp_path / "models.py")
+    register_data_model(tmp_path, "reversal", component_path, "ReversalModel")
+
+    result = materialize(
+        tmp_path,
+        "reversal",
+        MaterializationSpec.of("reversal_2d", value_fields=("score",)),
+        evaluation_times=_times(),
+        instruments=("A", "B"),
+    )
+
+    payload = json.loads(result.lineage_path.read_text(encoding="utf-8"))
+
+    assert set(payload) == {
+        "schema_version",
+        "operation",
+        "component",
+        "output",
+        "instruments",
+        "invocations",
+    }
+    assert payload["operation"] == "datamodel.materialize"
+    assert set(payload["component"]) == {"component_id", "fingerprint"}
+    assert set(payload["output"]) == {"dataset_id", "source_id", "value_fields"}
+    assert set(payload["invocations"][0]) == {
+        "evaluation_time",
+        "output_available_at",
+        "row_count",
+        "accesses",
+    }
+    assert "run" not in payload, "the DataModel operation must not carry run provenance"

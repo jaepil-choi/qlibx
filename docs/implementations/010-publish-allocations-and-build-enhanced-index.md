@@ -94,13 +94,39 @@ code. The ensemble's own run is a later milestone; this one proves multi-input s
 
 ## Validation
 
-- `uv run pytest -q` — 279 passed (from 226 at the start of the milestone).
-- `uv run ruff check src tests scripts showcases` and `ruff format` — clean.
-- `uv run python showcases/show_005_enhanced_index/run.py` — 22 sessions, two subscribed allocation
-  inputs, alpha minimum weight `-0.02`, 21 frozen occurrences returned verbatim, 40 whole-share
-  fills, fill-journal replay matching running cash exactly, tracking error 1.045% → 0.642%, and two
+- `uv run pytest -q` — **288 passed** (from 226 at the milestone start).
+- `uv run ruff check src tests scripts showcases` and `ruff format` — clean. Package imports.
+- `uv run python showcases/show_005_enhanced_index/run.py` — 22 sessions, two allocation panels
+  combined, alpha minimum weight `-0.02`, **20 frozen occurrences returned verbatim and 1 freeze
+  released** when price drift pushed a holding past its cap, **41 whole-unit position changes**,
+  journal replay matching running cash exactly, **active-weight L2 norm 1.045% → 0.926%**, and two
   clean runs producing identical SHA-256 manifests.
-- Known open findings from the boundary review are recorded in the Ultragoal ledger and are not
-  closed by this record; see the milestone's review blockers.
 - Acceptance criteria are discharged in `tests/acceptance/test_enhanced_index.py`, each test naming
-  the criterion it proves, all reading committed real market data.
+  the criterion it proves, projecting the **shipped** `NoShort` and `SingleNameCap` through a real
+  point-in-time window, and reading committed real market data.
+
+## What story 8 did not ship
+
+The brief asked the showcase to run the enhanced index **through the execution spine** on the KRX
+profile, to prove multi-input subscription **through `DataRequirement`**, and to replay the fill
+journal **independently against a committed Account**. None of those shipped. The showcase
+hand-rolls position sizing and cash, reads both panels straight off parquet, and its replay is a
+consistency check over the journal its own loop wrote.
+
+This is recorded here rather than left in the showcase's disclaimer because the delta between brief
+and delivery belongs on the record. What was proved instead, and proved properly, is the
+construction and publication path: the publish round-trip including the read half through a real
+`DataRequirement` inside a point-in-time window (`tests/flow/test_publish_allocation.py`), and the
+construction under the shipped constraint set across all 22 committed sessions.
+
+## Open follow-ups
+
+- The showcase's execution-spine segment, subscription through `DataRequirement`, and an independent
+  Account replay — the three story-8 deliverables above.
+- The coverage-scoped weight-sum tolerance never binds against the committed fixture, so its
+  allowance is asserted only by restating its own formula.
+- A caller passing `cash_range=(0, 1)` can be refused on a problem whose exact answer is `cash = 0`,
+  because of a quantization residual at the lower edge. The inset the docstring asks for is needed
+  at both edges.
+- `frozen` currently models both "cannot trade" and "caller pinned this"; refusing the whole solve
+  is right for the second and arguable for the first. Worth splitting.

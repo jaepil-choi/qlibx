@@ -47,7 +47,7 @@ from vqapr.portfolio.allocation import (
     AllocationSign,
     validate_allocation,
 )
-from vqapr.portfolio.optimize import QUANTUM, optimize
+from vqapr.portfolio.optimize import QUANTUM, OptimizeResult, optimize
 from vqapr.workspace import Workspace
 
 HERE = Path(__file__).resolve().parent
@@ -119,7 +119,7 @@ def _construct(
     alpha: dict[str, Decimal],
     current_weights: dict[str, Decimal],
     frozen: frozenset[str],
-) -> object:
+) -> OptimizeResult:
     """desired = bench + s * active, projected onto the constraint set.
 
     ``current_weights`` are NAV-derived ratios quantized onto the canonical grid *before* the call.
@@ -236,7 +236,7 @@ def main() -> None:
     held: dict[str, Decimal] = {}
     cash = INITIAL_NAV
     journal: list[tuple[str, Decimal, Decimal]] = []
-    halted = sorted(benchmark[sessions[0]])[0]
+    frozen_name = sorted(benchmark[sessions[0]])[0]
     frozen_seen = 0
     released = 0
 
@@ -263,10 +263,10 @@ def main() -> None:
         # the position is traded back inside instead.
         bounds = _bounds(index)
         frozen = frozenset()
-        if halted in current_weights:
-            held_weight = current_weights[halted].quantize(QUANTUM)
-            if bounds.lower[halted] <= held_weight <= bounds.upper[halted]:
-                frozen = frozenset({halted})
+        if frozen_name in current_weights:
+            held_weight = current_weights[frozen_name].quantize(QUANTUM)
+            if bounds.lower[frozen_name] <= held_weight <= bounds.upper[frozen_name]:
+                frozen = frozenset({frozen_name})
             else:
                 released += 1
 
@@ -296,11 +296,10 @@ def main() -> None:
         )
         if frozen:
             frozen_seen += 1
-            if result.weights[halted] != current_weights[halted].quantize(QUANTUM):
+            if result.weights[frozen_name] != current_weights[frozen_name].quantize(QUANTUM):
                 raise AssertionError("a frozen name must be returned verbatim")
 
         held = {i: q for i, q in held.items() if q != 0}
-        held = {i: q.quantize(Decimal(1)) for i, q in held.items()}
 
     replayed = _replay(journal, INITIAL_NAV)
     if replayed != cash:
@@ -314,7 +313,7 @@ def main() -> None:
         "instruments": sorted(benchmark[sessions[0]]),
         "published_allocation": published.name,
         "alpha_is_signed": str(signed),
-        "subscribed_inputs": ["alpha_allocation", "benchmark_weight_daily"],
+        "subscribed_inputs": sorted({"alpha_allocation", "benchmark_weight_daily"}),
         "frozen_occurrences": frozen_seen,
         "freeze_released_out_of_box": released,
         "fills": len(journal),

@@ -1224,8 +1224,9 @@ $$\min_{w,\,c}\ \underbrace{\|Lw - x^{desired}\|^2}_{\text{원하는 노출과�
 $$\text{s.t.}\quad \textstyle\sum w + c = 1,\quad l \le w \le u,\quad c_{lo} \le c \le c_{hi},
 \quad w_j = w^0_j\ \ (j \in \text{frozen})$$
 
-**구현 범위는 이 선언의 부분집합이며, 선언 자체를 줄이지 않는다.** 현재 `cost`, `turnover_penalty`, `L`은 구현되지 않았고
-전달되면 typed refusal로 거부한다. 이 세 인자를 선언에서 지우지 않는 이유는 나중에 추가할 때 **기존 호출자를 깨뜨리지 않고
+**구현 범위는 이 선언의 부분집합이며, 선언 자체를 줄이지 않는다.** 현재 `cost`, `turnover_penalty`, `L`은 구현된 시그니처에 **존재하지 않는다** — 전달하면
+평범한 `TypeError`가 난다. 굳이 typed refusal을 만들지 않는 이유는, 없는 인자를 받아서 거부하는 것이
+나중에 진짜로 구현할 때 지워야 할 코드이기 때문이다. 이 세 인자를 선언에서 지우지 않는 이유는 나중에 추가할 때 **기존 호출자를 깨뜨리지 않고
 더하기만 하면 되도록** 남겨두기 위해서다. 구현은 선언에 대한 부재증명이지 반증이 아니다.
 
 비용·회전율 항이 없는 부분집합은 **budget hyperplane 위의 box 투영**이다. 목적함수가 $\|w - x^{desired}\|^2$로

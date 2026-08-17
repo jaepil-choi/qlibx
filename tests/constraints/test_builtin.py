@@ -8,6 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
+import duckdb
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
@@ -86,6 +87,27 @@ def _cap(manifest: dict[str, object], cap: str = "0.10") -> SingleNameCap:
         benchmark_dataset_id="benchmark_weight_daily",
         tolerance=str(manifest["weight_tolerance"]),
     )
+
+
+def _latest_benchmark(
+    manifest: dict[str, object], instruments: tuple[str, ...]
+) -> dict[str, Decimal]:
+    """Read the benchmark weights the projection should be derived from, independently."""
+    path = FIXTURE / str(manifest["benchmark_path"])
+    con = duckdb.connect()
+    try:
+        session = con.execute(
+            f"SELECT max(available_at) FROM read_parquet('{path.as_posix()}')"
+        ).fetchone()[0]
+        rows = con.execute(
+            f"SELECT instrument, benchmark_weight FROM read_parquet('{path.as_posix()}')"
+            " WHERE available_at = ?",
+            [session],
+        ).fetchall()
+    finally:
+        con.close()
+    weights = dict(rows)
+    return {instrument: weights.get(instrument, Decimal(0)) for instrument in instruments}
 
 
 def _intent(weights: dict[str, Decimal]) -> EconomicPortfolioIntent:
@@ -265,9 +287,20 @@ def test_long_only_emerges_from_intersecting_the_two_builtins(
     projected = project_constraints((NoShort(), cap), window)
     merged = merged_constraint_bounds(projected)
 
+    # Independently read the benchmark rather than restating the merged bound on both sides of the
+    # equality: the expectation has to come from the data, or the assertion cannot fail.
+    expected = _latest_benchmark(manifest, instruments)
+    above = [name for name in instruments if expected[name] > cap.cap]
+    below = [name for name in instruments if expected[name] <= cap.cap]
+    assert above and below, "the real slice must straddle the cap for this test to mean anything"
+
     assert all(value == Decimal("0") for value in merged.lower.values())
-    for instrument in instruments:
-        assert merged.upper[instrument] == min(Decimal("1"), max(cap.cap, merged.upper[instrument]))
+    for instrument in above:
+        assert merged.upper[instrument] == expected[instrument], (
+            "a name already heavier than the cap keeps its index weight as its ceiling"
+        )
+    for instrument in below:
+        assert merged.upper[instrument] == cap.cap
     assert isinstance(merged, ConstraintBounds)
 
 

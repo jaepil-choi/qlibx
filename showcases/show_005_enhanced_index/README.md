@@ -34,9 +34,11 @@ smaller one that does not.
   registered in the workspace, but this script reads the parquet directly rather than through a
   point-in-time window, so nothing here proves PIT enforcement. That is proved in
   `tests/flow/test_publish_allocation.py` and `tests/acceptance/test_enhanced_index.py`.
-- **The cap is inlined, not the shipped `SingleNameCap`.** `NoShort` is the real shipped constraint;
-  the per-name ceiling is recomputed locally. The shipped constraint's own projection and benchmark
-  validation are covered in `tests/constraints/test_builtin.py`.
+- **The cap is inlined here, not the shipped `SingleNameCap`.** `NoShort` is the real shipped
+  constraint; the per-name ceiling is recomputed locally because this script has no point-in-time
+  window to project through. The acceptance suite does drive the shipped constraint for real, via
+  `project_constraints` and `merged_constraint_bounds`, so the criteria are not proved against this
+  stand-in.
 - **The cash replay is a consistency check, not independent verification.** It recomputes cash from
   the same journal the same loop wrote, so it catches bookkeeping drift within the script and
   nothing more. `show_003` performs the genuinely independent replay against a committed Account.

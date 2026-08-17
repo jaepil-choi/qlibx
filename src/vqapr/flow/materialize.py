@@ -27,6 +27,7 @@ from vqapr.extension.loading import load_data_model
 from vqapr.flow.stamping import derived_available_at
 from vqapr.flow.views import data_model_window
 from vqapr.models.contexts import DataModelContext
+from vqapr.models.strategy_model import NoDecision
 from vqapr.workspace import Workspace
 
 _INPUT_STAGE = "materialize.input"
@@ -495,6 +496,23 @@ def publish_run_allocation(
     if not isinstance(spec, AllocationPublicationSpec):
         raise TypeError("spec must be an AllocationPublicationSpec")
     collected = tuple(evidences)
+    for evidence in collected:
+        missing = [
+            name
+            for name in ("run_identity", "cutoff", "strategy_accesses", "decision")
+            if not hasattr(evidence, name)
+        ]
+        if missing:
+            # Refuse a wrong-typed input here rather than letting it fall through the decline path,
+            # where it would surface as "every occurrence declined to allocate" and point the
+            # operator at strategy behaviour instead of at the caller's own contract violation.
+            raise _error(
+                _INPUT_STAGE,
+                f"{_INPUT_STAGE}.evidence_invalid",
+                "every published evidence must carry callback authority, inputs, and a decision",
+                f"{type(evidence).__name__} is missing {missing}",
+                retry="publish from the run's callback evidence, then retry",
+            )
     if not collected:
         raise _error(
             _INPUT_STAGE,
@@ -519,12 +537,20 @@ def publish_run_allocation(
     run_identities: set[str] = set()
     occurrences = 0
     for evidence in collected:
-        decision = getattr(evidence, "decision", None)
+        decision = evidence.decision
+        if isinstance(decision, NoDecision):
+            # An occurrence that declined to allocate has no allocation, and inventing an empty one
+            # would misrepresent the run.
+            continue
         targets = getattr(decision, "targets", None)
         if targets is None:
-            # NoDecision publishes nothing: an occurrence that declined to allocate has no
-            # allocation, and inventing an empty one would misrepresent the run.
-            continue
+            raise _error(
+                _OUTPUT_STAGE,
+                f"{_OUTPUT_STAGE}.decision_invalid",
+                "a callback decision must be NoDecision or an economic intent",
+                type(decision).__name__,
+                retry="publish from a strategy that emits economic intents, then retry",
+            )
         available_at = derived_available_at(evidence.cutoff, tuple(evidence.strategy_accesses))
         run_identities.add(str(evidence.run_identity))
         occurrences += 1

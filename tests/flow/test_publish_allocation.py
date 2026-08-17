@@ -12,8 +12,12 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
+from vqapr.data.lookback import RowsLookback
+from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import VqaprError
 from vqapr.flow.materialize import AllocationPublicationSpec, publish_run_allocation
+from vqapr.flow.views import data_model_window
+from vqapr.models.strategy_model import NoDecision
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -158,12 +162,35 @@ def test_declining_occurrences_publish_nothing_rather_than_an_empty_allocation(
 ) -> None:
     Workspace.create(tmp_path)
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
-    no_decision = _Evidence("run-1", cutoff, (_Access(cutoff),), object())
+    no_decision = _Evidence("run-1", cutoff, (_Access(cutoff),), NoDecision("no signal"))
 
     with pytest.raises(VqaprError, match="at least one row"):
         publish_run_allocation(
             tmp_path, AllocationPublicationSpec.of("alpha_allocation"), [no_decision]
         )
+
+
+def test_a_wrong_typed_evidence_is_refused_rather_than_counted_as_a_decline(
+    tmp_path: Path,
+) -> None:
+    """A caller contract violation must not masquerade as strategy behaviour."""
+    Workspace.create(tmp_path)
+
+    with pytest.raises(VqaprError, match="callback authority"):
+        publish_run_allocation(
+            tmp_path, AllocationPublicationSpec.of("alpha_allocation"), [object()]
+        )
+
+
+def test_a_decision_that_is_neither_no_decision_nor_an_intent_is_refused(
+    tmp_path: Path,
+) -> None:
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+    bogus = _Evidence("run-1", cutoff, (_Access(cutoff),), object())
+
+    with pytest.raises(VqaprError, match="NoDecision or an economic intent"):
+        publish_run_allocation(tmp_path, AllocationPublicationSpec.of("alpha_allocation"), [bogus])
 
 
 def test_quantity_economics_cannot_publish_an_allocation(tmp_path: Path) -> None:
@@ -202,3 +229,49 @@ def test_empty_evidence_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(VqaprError, match="at least one callback evidence"):
         publish_run_allocation(tmp_path, AllocationPublicationSpec.of("d"), [])
+
+
+def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement(
+    tmp_path: Path,
+) -> None:
+    """The read half of the round trip: subscribe to the publication, not to the file.
+
+    Reading the parquet directly proves the writer serialised something. It does not prove a later
+    run can *subscribe* to it, which is the milestone's actual claim: the registered dataset must be
+    reachable through a `DataRequirement` inside a point-in-time window, with Decimal fidelity
+    preserved across the store boundary.
+    """
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+    weights = {"A": Decimal("0.326800000000"), "B": Decimal("0.180600000000")}
+
+    published = publish_run_allocation(
+        tmp_path,
+        AllocationPublicationSpec.of("alpha_allocation"),
+        [_evidence(cutoff=cutoff, read_at=cutoff, weights={k: str(v) for k, v in weights.items()})],
+    )
+    assert published.registration.dataset_id is not None
+
+    workspace = Workspace.open(tmp_path)
+    requirement = DataRequirement.of(
+        "subscriber", "alpha_allocation", fields=("weight",), lookback=RowsLookback(1)
+    )
+
+    visible = data_model_window(
+        workspace,
+        evaluation_time=cutoff,
+        instruments=tuple(sorted(weights)),
+        requirements=(requirement,),
+    )
+    rows = visible.observations(requirement).rows
+    subscribed = {row["instrument"]: row["weight"] for row in rows}
+
+    assert subscribed == weights, "Decimal fidelity must survive the store boundary"
+
+    hidden = data_model_window(
+        workspace,
+        evaluation_time=cutoff - timedelta(seconds=1),
+        instruments=tuple(sorted(weights)),
+        requirements=(requirement,),
+    )
+    assert hidden.observations(requirement).rows == ()

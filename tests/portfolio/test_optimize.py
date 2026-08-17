@@ -1,0 +1,282 @@
+"""The projection must be exact, not approximately exact.
+
+Every assertion here is about a property the milestone actually promises: the budget identity holds
+under the caller's own decimal context, frozen names survive bit for bit, cash is the only residual
+sink, and precision finer than the canonical grid is refused rather than silently rounded.
+"""
+
+from __future__ import annotations
+
+import json
+from decimal import Decimal, localcontext
+from pathlib import Path
+from uuid import UUID
+
+import pytest
+
+from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.portfolio.intents import (
+    EconomicPortfolioIntent,
+    PortfolioTarget,
+    validate_economic_intent,
+)
+from vqapr.portfolio.optimize import (
+    QUANTIZATION_EXPONENT,
+    QUANTUM,
+    OptimizeRefusal,
+    optimize,
+)
+
+FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
+
+
+@pytest.fixture(scope="module")
+def benchmark() -> dict[str, Decimal]:
+    """One real session of committed index weights."""
+    import duckdb
+
+    manifest = json.loads((FIXTURE / "fixture.json").read_text(encoding="utf-8"))
+    path = FIXTURE / str(manifest["benchmark_path"])
+    con = duckdb.connect()
+    try:
+        session = con.execute(
+            f"SELECT min(available_at) FROM read_parquet('{path.as_posix()}')"
+        ).fetchone()[0]
+        rows = con.execute(
+            f"""
+            SELECT instrument, benchmark_weight FROM read_parquet('{path.as_posix()}')
+            WHERE available_at = ? ORDER BY instrument
+            """,
+            [session],
+        ).fetchall()
+    finally:
+        con.close()
+    return {row[0]: row[1] for row in rows}
+
+
+def _bounds(names, low: str, high: str) -> tuple[dict, dict]:
+    return {n: Decimal(low) for n in names}, {n: Decimal(high) for n in names}
+
+
+def test_scale_zero_reproduces_the_benchmark_exactly(benchmark: dict[str, Decimal]) -> None:
+    """With s = 0 the desired portfolio is the benchmark, so nothing may move."""
+    lower, upper = _bounds(benchmark, "0", "1")
+    result = optimize(
+        desired=benchmark,
+        current={},
+        lower=lower,
+        upper=upper,
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    for instrument, weight in benchmark.items():
+        # Decimal equality, deliberately: the benchmark is committed at the vendor scale while the
+        # result lands on the canonical grid, so the two agree in value and differ in str().
+        assert result.weights[instrument] == weight
+    assert sum(result.weights.values()) + result.cash == Decimal(1)
+    assert result.binding_lower == ()
+    assert result.binding_upper == ()
+
+
+def test_cash_absorbs_a_binding_cap_rather_than_another_instrument(
+    benchmark: dict[str, Decimal],
+) -> None:
+    cap = Decimal("0.25")
+    lower, upper = _bounds(benchmark, "0", str(cap))
+    unaffected = {name for name, weight in benchmark.items() if weight < cap}
+
+    result = optimize(
+        desired=benchmark,
+        current={},
+        lower=lower,
+        upper=upper,
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    assert set(result.binding_upper) == {name for name, w in benchmark.items() if w >= cap}
+    for name in unaffected:
+        assert result.weights[name] == benchmark[name], "clipping must not redistribute"
+    assert all(weight <= cap for weight in result.weights.values())
+    assert sum(result.weights.values()) + result.cash == Decimal(1)
+
+
+def test_a_fully_invested_book_solves_for_a_nonzero_multiplier() -> None:
+    desired = {"A": Decimal("0.6"), "B": Decimal("0.6")}
+    lower, upper = _bounds(desired, "0", "1")
+
+    result = optimize(
+        desired=desired,
+        current={},
+        lower=lower,
+        upper=upper,
+        cash_range=(Decimal("0"), Decimal("0")),
+    )
+
+    assert result.multiplier == Decimal("0.1")
+    assert result.weights == {"A": Decimal("0.5"), "B": Decimal("0.5")}
+    assert result.cash == 0
+    assert sum(result.weights.values()) + result.cash == Decimal(1)
+
+
+def test_frozen_weight_is_returned_verbatim() -> None:
+    held = Decimal("0.123456789012")
+    result = optimize(
+        desired={"A": Decimal("0.5"), "B": Decimal("0.5")},
+        current={"B": held},
+        lower={"A": Decimal("0"), "B": Decimal("0")},
+        upper={"A": Decimal("1"), "B": Decimal("1")},
+        frozen=frozenset({"B"}),
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    assert result.weights["B"] == held
+    assert result.weights["B"].as_tuple() == held.as_tuple(), "frozen must survive bit for bit"
+
+
+def test_the_budget_identity_holds_in_the_callers_own_context() -> None:
+    """The reviewer-mandated check: the identity is verified where the validator actually runs.
+
+    ``optimize`` assembles under its own working precision, but ``validate_economic_intent`` runs in
+    whatever context the caller happens to be in. Asserting inside a ``localcontext`` would prove
+    nothing, so this constructs a real intent in the ambient context.
+    """
+    held = Decimal("0.099700000000")
+    result = optimize(
+        desired={"A": Decimal("0.4"), "B": Decimal("0.4"), "C": Decimal("0.4")},
+        current={"C": held},
+        lower={"A": Decimal("0"), "B": Decimal("0"), "C": Decimal("0")},
+        upper={"A": Decimal("1"), "B": Decimal("1"), "C": Decimal("1")},
+        frozen=frozenset({"C"}),
+        cash_range=(Decimal("0"), Decimal("0.5")),
+    )
+
+    targets = tuple(
+        PortfolioTarget(name, weight=weight) for name, weight in sorted(result.weights.items())
+    )
+    intent = EconomicPortfolioIntent(
+        UUID(int=7),
+        "strategy",
+        targets,
+        result.cash,
+        Budget(
+            PortfolioDirection.LONG_ONLY,
+            Decimal("0"),
+            Decimal("1"),
+            Decimal("0"),
+            Decimal("1"),
+        ),
+        (),
+        0,
+        None,
+    )
+
+    # No localcontext here on purpose.
+    assert validate_economic_intent(intent) is intent
+
+
+def test_every_returned_weight_lands_on_the_canonical_grid() -> None:
+    result = optimize(
+        desired={"A": Decimal("0.333333333333333"), "B": Decimal("0.5")},
+        current={},
+        lower={"A": Decimal("0"), "B": Decimal("0")},
+        upper={"A": Decimal("1"), "B": Decimal("1")},
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    for weight in result.weights.values():
+        assert weight.as_tuple().exponent >= QUANTIZATION_EXPONENT
+    assert result.cash.as_tuple().exponent >= QUANTIZATION_EXPONENT
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    [
+        ("lower", {"lower": {"A": Decimal("0.0000000000001")}}),
+        ("upper", {"upper": {"A": Decimal("0.9999999999999")}}),
+        ("cash_range", {"cash_range": (Decimal("0.0000000000001"), Decimal("1"))}),
+    ],
+)
+def test_inputs_finer_than_the_grid_are_refused_by_name(field: str, kwargs: dict) -> None:
+    base = {
+        "desired": {"A": Decimal("0.5")},
+        "current": {},
+        "lower": {"A": Decimal("0")},
+        "upper": {"A": Decimal("1")},
+        "cash_range": (Decimal("0"), Decimal("1")),
+    }
+    with pytest.raises(OptimizeRefusal, match="finer than the canonical grid"):
+        optimize(**{**base, **kwargs})
+
+
+def test_a_frozen_holding_finer_than_the_grid_is_refused_at_the_entrance() -> None:
+    """Guard the input rather than rounding the output, so frozen invariance stays exact."""
+    with pytest.raises(OptimizeRefusal, match=r"current\['B'\]"):
+        optimize(
+            desired={"A": Decimal("0.5"), "B": Decimal("0.5")},
+            current={"B": Decimal("0.0997000000000001")},
+            lower={"A": Decimal("0"), "B": Decimal("0")},
+            upper={"A": Decimal("1"), "B": Decimal("1")},
+            frozen=frozenset({"B"}),
+            cash_range=(Decimal("0"), Decimal("1")),
+        )
+
+
+def test_an_unreachable_budget_is_refused_before_any_result() -> None:
+    with pytest.raises(OptimizeRefusal, match="infeasible"):
+        optimize(
+            desired={"A": Decimal("0.5")},
+            current={},
+            lower={"A": Decimal("0")},
+            upper={"A": Decimal("0.1")},
+            cash_range=(Decimal("0"), Decimal("0")),
+        )
+
+
+def test_the_solve_is_deterministic_and_order_independent() -> None:
+    desired = {"A": Decimal("0.4"), "B": Decimal("0.35"), "C": Decimal("0.3")}
+    lower, upper = _bounds(desired, "0", "0.38")
+    kwargs = {
+        "current": {},
+        "lower": lower,
+        "upper": upper,
+        "cash_range": (Decimal("0"), Decimal("0.05")),
+    }
+
+    first = optimize(desired=desired, **kwargs)
+    reversed_input = dict(reversed(list(desired.items())))
+    second = optimize(desired=reversed_input, **kwargs)
+
+    assert first.weights == second.weights
+    assert first.cash == second.cash
+    assert first.multiplier == second.multiplier
+
+
+def test_no_solver_package_is_imported() -> None:
+    import sys
+
+    optimize(
+        desired={"A": Decimal("0.6"), "B": Decimal("0.6")},
+        current={},
+        lower={"A": Decimal("0"), "B": Decimal("0")},
+        upper={"A": Decimal("1"), "B": Decimal("1")},
+        cash_range=(Decimal("0"), Decimal("0")),
+    )
+
+    for module in ("cvxpy", "osqp", "quadprog", "scipy.optimize"):
+        assert module not in sys.modules, f"{module} must not be needed for a closed-form solve"
+    assert Decimal("1E-12") == QUANTUM
+
+
+def test_the_working_precision_does_not_leak_to_the_caller() -> None:
+    """The declared precision owns assembly inside optimize only (Architecture 5.3)."""
+    with localcontext() as context:
+        context.prec = 9
+        before = context.prec
+        optimize(
+            desired={"A": Decimal("0.5"), "B": Decimal("0.5")},
+            current={},
+            lower={"A": Decimal("0"), "B": Decimal("0")},
+            upper={"A": Decimal("1"), "B": Decimal("1")},
+            cash_range=(Decimal("0"), Decimal("1")),
+        )
+        assert context.prec == before

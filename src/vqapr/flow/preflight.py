@@ -156,7 +156,10 @@ def _validate_initial_account(
                     observed=f"{instrument_id}: {absolute}",
                 )
             )
-        if (absolute / rule.quantity_step).to_integral_value() != absolute / rule.quantity_step:
+        if (
+            not rule.fractional_allowed
+            and (absolute / rule.quantity_step).to_integral_value() != absolute / rule.quantity_step
+        ):
             failures.append(
                 Failure.bounded(
                     "preflight.account.quantity_step",

@@ -184,11 +184,15 @@ class AcademicExchange:
             if side not in rule.permitted_sides:
                 raise ValueError(f"{side.value} is not permitted for {request.instrument_id!r}")
             quantity = abs(request.delta_quantity)
-            if quantity < rule.minimum_quantity or not _is_step_aligned(
-                quantity, rule.quantity_step
-            ):
+            if quantity < rule.minimum_quantity:
                 raise ValueError(f"quantity violates listing rule for {request.instrument_id!r}")
-            if not rule.fractional_allowed and quantity != quantity.to_integral_value():
+            if rule.fractional_allowed:
+                # A fractional listing declares divisibility itself, so an arbitrary-precision
+                # signed quantity is the supported quantity rule and fills in full.
+                continue
+            if not _is_step_aligned(quantity, rule.quantity_step):
+                raise ValueError(f"quantity violates listing rule for {request.instrument_id!r}")
+            if quantity != quantity.to_integral_value():
                 raise ValueError(
                     f"fractional quantity is not permitted for {request.instrument_id!r}"
                 )

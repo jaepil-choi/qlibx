@@ -138,7 +138,7 @@ class Account:
             if fill.dealt_quantity == 0:
                 continue
             assert fill.price is not None
-            next_cash -= fill.dealt_quantity * fill.price
+            next_cash += fill.cash_delta
             quantity = next_positions.get(fill.instrument_id, Decimal(0)) + fill.dealt_quantity
             if quantity == 0:
                 next_positions.pop(fill.instrument_id, None)

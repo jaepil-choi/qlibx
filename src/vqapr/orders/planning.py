@@ -1,11 +1,13 @@
-"""Deterministic execution-time conversion from complete targets to Academic orders."""
+"""Deterministic execution-time conversion from complete targets to venue orders."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.enums import Side
+from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.orders.batches import OrderBatch, OrderRequest, ZeroDeltaDiagnostic
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
@@ -42,6 +44,68 @@ def _prices(values: Mapping[str, Decimal]) -> dict[str, Decimal]:
     return result
 
 
+def _apply_venue_rules(
+    *,
+    rules: ExchangeRulesView,
+    account: AccountSnapshot,
+    prices: Mapping[str, Decimal],
+    desired: Mapping[str, Decimal],
+    instruments: Iterable[str],
+) -> dict[str, Decimal]:
+    """Convert intended positions into positions the venue can actually trade.
+
+    Deltas are rounded toward zero onto the listing unit. If the rounded buys cannot be paid for
+    out of current cash plus the rounded sell proceeds, buys are clipped in a deterministic order
+    until they fit. Nothing is ever rounded up and no order is invented.
+    """
+    ordered = sorted(instruments)
+    resolved: dict[str, Decimal] = {}
+    for instrument_id in ordered:
+        current = account.positions.get(instrument_id, Decimal(0))
+        if instrument_id not in prices:
+            resolved[instrument_id] = desired[instrument_id]
+            continue
+        delta = rules.quantize(instrument_id, desired[instrument_id] - current)
+        resolved[instrument_id] = current + delta
+
+    def _delta(instrument_id: str) -> Decimal:
+        return resolved[instrument_id] - account.positions.get(instrument_id, Decimal(0))
+
+    available = account.cash
+    for instrument_id in ordered:
+        delta = _delta(instrument_id)
+        if delta >= 0 or instrument_id not in prices:
+            continue
+        notional = abs(delta) * prices[instrument_id]
+        available += notional - rules.charge(Side.SELL, notional).total
+
+    for instrument_id in ordered:
+        delta = _delta(instrument_id)
+        if delta <= 0 or instrument_id not in prices:
+            continue
+        price = prices[instrument_id]
+        notional = delta * price
+        required = notional + rules.charge(Side.BUY, notional).total
+        if required <= available:
+            available -= required
+            continue
+        affordable = rules.quantize(instrument_id, available / price)
+        while affordable > 0:
+            notional = affordable * price
+            required = notional + rules.charge(Side.BUY, notional).total
+            if required <= available:
+                break
+            affordable = rules.quantize(
+                instrument_id, affordable - rules.listing(instrument_id).quantity_step
+            )
+        if affordable <= 0:
+            resolved[instrument_id] = account.positions.get(instrument_id, Decimal(0))
+            continue
+        available -= required
+        resolved[instrument_id] = account.positions.get(instrument_id, Decimal(0)) + affordable
+    return resolved
+
+
 def plan_orders(
     *,
     account: AccountSnapshot,
@@ -51,6 +115,7 @@ def plan_orders(
     quantity_targets: Mapping[str, Decimal],
     cash_target: Decimal,
     budget: Budget,
+    rules: ExchangeRulesView | None = None,
 ) -> OrderBatch:
     """Plan a complete target portfolio against execution-time NAV.
 
@@ -115,6 +180,15 @@ def plan_orders(
         )
         if post_trade_cash != nav * cash:
             raise ValueError("complete desired positions do not produce the declared cash_target")
+
+    if rules is not None:
+        desired_quantities = _apply_venue_rules(
+            rules=rules,
+            account=account,
+            prices=selected_prices,
+            desired=desired_quantities,
+            instruments=instruments,
+        )
 
     requests: list[OrderRequest] = []
     diagnostics: list[ZeroDeltaDiagnostic] = []

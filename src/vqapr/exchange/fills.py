@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
+
+from vqapr.exchange.costs import FillCost
 
 
 class ZeroDealtReason(StrEnum):
@@ -31,12 +33,15 @@ class Fill:
     dealt_quantity: Decimal
     price: Decimal | None
     reason: ZeroDealtReason | None = None
+    cost: FillCost = field(default_factory=FillCost)
 
     def __post_init__(self) -> None:
         if not isinstance(self.instrument_id, str) or not self.instrument_id:
             raise ValueError("instrument_id must be a non-empty string")
         _decimal(self.requested_quantity, name="requested_quantity")
         _decimal(self.dealt_quantity, name="dealt_quantity")
+        if not isinstance(self.cost, FillCost):
+            raise TypeError("cost must be a FillCost")
         if self.price is not None:
             _decimal(self.price, name="price")
             if self.price <= 0:
@@ -46,6 +51,8 @@ class Fill:
                 raise ValueError("a zero-dealt fill must have a ZeroDealtReason")
             if self.price is not None:
                 raise ValueError("a zero-dealt fill must not have a price")
+            if self.cost.total != 0:
+                raise ValueError("a zero-dealt fill must not charge a cost")
             return
         if self.reason is not None:
             raise ValueError("a dealt fill must not have a zero-dealt reason")
@@ -57,6 +64,20 @@ class Fill:
             raise ValueError("dealt_quantity must have the requested quantity's sign")
         if abs(self.dealt_quantity) > abs(self.requested_quantity):
             raise ValueError("dealt_quantity cannot exceed requested_quantity")
+
+    @property
+    def notional(self) -> Decimal:
+        """The absolute traded value before cost."""
+        if self.price is None:
+            return Decimal("0")
+        return abs(self.dealt_quantity) * self.price
+
+    @property
+    def cash_delta(self) -> Decimal:
+        """The exact signed cash movement this fill causes, cost included."""
+        if self.price is None:
+            return Decimal("0")
+        return -(self.dealt_quantity * self.price) - self.cost.total
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,3 +101,11 @@ class FillBatch:
         instruments = tuple(fill.instrument_id for fill in self.fills)
         if len(instruments) != len(set(instruments)):
             raise ValueError("a FillBatch may contain each instrument only once")
+
+    @property
+    def total_commission(self) -> Decimal:
+        return sum((fill.cost.commission for fill in self.fills), Decimal("0"))
+
+    @property
+    def total_tax(self) -> Decimal:
+        return sum((fill.cost.tax for fill in self.fills), Decimal("0"))

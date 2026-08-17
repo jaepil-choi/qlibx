@@ -5,47 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import StrEnum
 from typing import Protocol
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.enums import Side, side_of
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
+from vqapr.exchange.listings import ListingRule
 from vqapr.orders.batches import OrderBatch, OrderRequest
-
-
-class Side(StrEnum):
-    BUY = "buy"
-    SELL = "sell"
-
-
-@dataclass(frozen=True, slots=True)
-class ListingRule:
-    """A venue-owned rule for one listed instrument."""
-
-    instrument_id: str
-    quantity_step: Decimal
-    minimum_quantity: Decimal
-    fractional_allowed: bool
-    permitted_sides: frozenset[Side]
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.instrument_id, str) or not self.instrument_id:
-            raise ValueError("instrument_id must be a non-empty string")
-        for name, value in (
-            ("quantity_step", self.quantity_step),
-            ("minimum_quantity", self.minimum_quantity),
-        ):
-            if not isinstance(value, Decimal):
-                raise TypeError(f"{name} must be a Decimal")
-            if not value.is_finite() or value <= 0:
-                raise ValueError(f"{name} must be finite and positive")
-        if not isinstance(self.fractional_allowed, bool):
-            raise TypeError("fractional_allowed must be a bool")
-        if not isinstance(self.permitted_sides, frozenset) or not self.permitted_sides:
-            raise ValueError("permitted_sides must be a non-empty frozenset")
-        if any(not isinstance(side, Side) for side in self.permitted_sides):
-            raise TypeError("permitted_sides must contain Side values")
 
 
 class Exchange(Protocol):
@@ -59,11 +26,7 @@ class Exchange(Protocol):
 
 
 def _side(quantity: Decimal) -> Side | None:
-    if quantity > 0:
-        return Side.BUY
-    if quantity < 0:
-        return Side.SELL
-    return None
+    return side_of(quantity)
 
 
 def _is_step_aligned(quantity: Decimal, step: Decimal) -> bool:

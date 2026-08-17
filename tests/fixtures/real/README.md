@@ -8,11 +8,15 @@ local `data/DW` warehouse.
 
 | File | Rows | Meaning |
 |---|---|---|
-| `observation_price_daily.parquet` | 88 | `available_at`, `instrument`, `close`, `volume` at the venue close |
+| `observation_price_daily.parquet` | 88 | `available_at`, `instrument`, `close`, `volume`, `is_supervised` at the venue close |
 | `execution_krx_daily.parquet` | 88 | `trade_at`, `instrument`, `is_tradable`, `close` at the venue close |
 | `fixture.json` | — | exact provenance: spec, universe, session counts, flag counts |
 
 Scope: 4 KOSPI 200 constituents, 22 real trading sessions, 2026-04-01 to 2026-04-30.
+
+`is_supervised` is published as **observable data**, not as a venue rule: whether to hold a
+supervised name is the Strategy's economic judgement. Trading halts are the opposite — they are a
+venue fact and appear as `is_tradable` on the execution input.
 
 ## Provenance and regeneration
 

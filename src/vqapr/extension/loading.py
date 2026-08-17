@@ -9,7 +9,9 @@ from pathlib import Path
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
-from vqapr.exchange.venue import AcademicExchange
+from vqapr.exchange.listings import ExchangeRulesView
+from vqapr.exchange.venue import AcademicExchange, Exchange
+from vqapr.exchange.venues.krx import KrxExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.models.data_model import DataModel
@@ -156,18 +158,37 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
     return constraint
 
 
-def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) -> AcademicExchange:
+SHIPPED_EXECUTION_PROFILES: tuple[type, ...] = (AcademicExchange, KrxExchange)
+"""The execution profiles this package implements end to end.
+
+A run may only execute through a profile whose venue semantics are implemented and documented
+here. A user subclass may add listings and costs, but it may not silently replace ``execute`` with
+its own matching behaviour, because the resulting realism claim would be unverified.
+"""
+
+
+def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) -> Exchange:
     exchange = _load(ref, kind=ComponentKind.EXCHANGE, project_root=project_root)
-    if not isinstance(exchange, AcademicExchange):
+    profile = next(
+        (base for base in SHIPPED_EXECUTION_PROFILES if isinstance(exchange, base)), None
+    )
+    if profile is None:
+        names = ", ".join(base.__name__ for base in SHIPPED_EXECUTION_PROFILES)
         raise _failure(
             f"{_STAGE}.wrong_type",
-            "registered Exchange object must be an AcademicExchange",
+            f"registered Exchange object must be one of the shipped profiles: {names}",
             type(exchange).__name__,
         )
-    if type(exchange).execute is not AcademicExchange.execute:
+    if type(exchange).execute is not profile.execute:
         raise _failure(
             f"{_STAGE}.execution_profile_invalid",
-            "AcademicExchange subclasses must retain AcademicExchange.execute() semantics",
+            f"{profile.__name__} subclasses must retain {profile.__name__}.execute() semantics",
+            type(exchange).__name__,
+        )
+    if not isinstance(getattr(exchange, "rules", None), ExchangeRulesView):
+        raise _failure(
+            f"{_STAGE}.execution_profile_invalid",
+            "an Exchange must expose its own ExchangeRulesView",
             type(exchange).__name__,
         )
     _requirements(exchange, label="Exchange", required=False)

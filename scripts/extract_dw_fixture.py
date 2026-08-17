@@ -151,7 +151,8 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
                        AT TIME ZONE '{VENUE_ZONE}' AS available_at,
                      instrument,
                      close,
-                     volume
+                     volume,
+                     (admin_flag <> '1') AS is_supervised
               FROM dw_slice
               ORDER BY available_at, instrument
             ) TO '{observation_path.as_posix()}' (FORMAT PARQUET)
@@ -175,6 +176,8 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
         supervised = con.execute(
             "SELECT count(*) FROM dw_slice WHERE admin_flag <> '1'"
         ).fetchone()[0]
+        # Supervision is published as observable data because deciding whether to hold a
+        # supervised name is the Strategy's economic judgement, not a venue rule.
         rows = con.execute("SELECT count(*) FROM dw_slice").fetchone()[0]
     finally:
         con.close()

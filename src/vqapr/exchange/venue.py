@@ -11,7 +11,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side, side_of
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.exchange.listings import ListingRule
+from vqapr.exchange.listings import ExchangeRulesView, ListingRule
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
 
@@ -19,6 +19,11 @@ class Exchange(Protocol):
     """The deliberately small execution extension boundary."""
 
     exchange_id: str
+
+    @property
+    def rules(self) -> ExchangeRulesView:
+        """The venue's own quantity and cost rules, read by order planning."""
+        ...
 
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
@@ -50,6 +55,11 @@ class AcademicExchange:
             if not isinstance(rule, ListingRule) or instrument_id != rule.instrument_id:
                 raise ValueError("each listing key must match its ListingRule instrument_id")
         object.__setattr__(self, "listings", copied)
+
+    @property
+    def rules(self) -> ExchangeRulesView:
+        """Academic listings with no declared cost band: this profile charges nothing."""
+        return ExchangeRulesView(self.exchange_id, self.listings, ())
 
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot

@@ -11,10 +11,12 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.enums import Side
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.exchange.execution_table import validate_execution_input
-from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
+from vqapr.exchange.listings import ListingRule
+from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
 from vqapr.flow.run import FrozenAgenda, FrozenRun, RunDefinition
@@ -119,9 +121,9 @@ def _validate_initial_model_state(
 def _validate_initial_account(
     snapshot: AccountSnapshot | None,
     mode: AccountMode | None,
-    exchange: AcademicExchange,
+    exchange: Exchange,
 ) -> None:
-    """Prove existing holdings can be closed by the loaded Academic venue."""
+    """Prove existing holdings can be closed by the loaded venue."""
     if snapshot is None or mode is None:
         return
 
@@ -132,7 +134,7 @@ def _validate_initial_account(
             failures.append(
                 Failure.bounded(
                     "preflight.account.unlisted_holding",
-                    "every initial holding must have an AcademicExchange listing",
+                    "every initial holding must have a listing on the selected Exchange",
                     observed=instrument_id,
                 )
             )
@@ -189,15 +191,13 @@ def _validate_initial_account(
             family=FailureFamily.EXCHANGE,
             failures=failures,
             mutation=False,
-            retry_precondition=(
-                "correct the initial account or AcademicExchange listing, then retry"
-            ),
+            retry_precondition=("correct the initial account or Exchange listing, then retry"),
         )
 
 
 def _validate_instrument_universe(
     instruments: tuple[str, ...],
-    exchange: AcademicExchange,
+    exchange: Exchange,
 ) -> None:
     missing = tuple(
         instrument_id for instrument_id in instruments if instrument_id not in exchange.listings

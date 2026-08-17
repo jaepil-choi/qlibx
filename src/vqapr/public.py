@@ -28,12 +28,15 @@ from vqapr.domain.errors import VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
+from vqapr.exchange.costs import CostRule, FillCost
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     ExecutionTableSpec,
     validate_execution_input,
 )
-from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
+from vqapr.exchange.listings import ExchangeRulesView, ListingRule
+from vqapr.exchange.venue import AcademicExchange, Side
+from vqapr.exchange.venues.krx import KrxExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
@@ -70,19 +73,23 @@ __all__ = (
     "ConstraintFinding",
     "ConstraintReport",
     "ConstraintSet",
+    "CostRule",
     "DataModel",
     "DataModelContext",
     "DataRequirement",
     "DatasetRegistration",
     "EconomicPortfolioIntent",
     "ExactExecutionTarget",
+    "ExchangeRulesView",
     "ExecutionInputRegistration",
     "ExecutionTableSpec",
     "FillConvention",
+    "FillCost",
     "FillSelector",
     "FrozenAgenda",
     "FrozenRun",
     "IntentSourceRef",
+    "KrxExchange",
     "ListingRule",
     "LocalInstantDeclaration",
     "MaterializationResult",

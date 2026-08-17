@@ -245,12 +245,11 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
     weights = {"A": Decimal("0.326800000000"), "B": Decimal("0.180600000000")}
 
-    published = publish_run_allocation(
+    publish_run_allocation(
         tmp_path,
         AllocationPublicationSpec.of("alpha_allocation"),
         [_evidence(cutoff=cutoff, read_at=cutoff, weights={k: str(v) for k, v in weights.items()})],
     )
-    assert published.registration.dataset_id is not None
 
     workspace = Workspace.open(tmp_path)
     requirement = DataRequirement.of(

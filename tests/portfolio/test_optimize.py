@@ -332,7 +332,12 @@ def test_a_frozen_holding_outside_its_own_bound_is_refused() -> None:
 
 
 def test_every_free_name_stays_inside_its_box_across_many_shapes() -> None:
-    """Property sweep over the shapes the fuzz lane exercised."""
+    """Property sweep: every shape that solves must respect its own box and the budget.
+
+    The success counter matters: without it a regression that refused every shape would leave this
+    test green with zero assertions executed, which is the exact failure mode it exists to catch.
+    """
+    solved = 0
     for size in range(1, 6):
         for cap in ("0.2", "0.35", "1"):
             names = [f"n{index}" for index in range(size)]
@@ -350,6 +355,11 @@ def test_every_free_name_stays_inside_its_box_across_many_shapes() -> None:
                 )
             except OptimizeRefusal:
                 continue
+            solved += 1
             for name in names:
                 assert lower[name] <= result.weights[name] <= upper[name]
             assert sum(result.weights.values()) + result.cash == Decimal(1)
+    # Fourteen of the fifteen shapes are feasible; the remaining one cannot reach its budget
+    # under its own cap. Pinning the exact count means a regression that refused everything, or that
+    # started accepting the infeasible shape, both fail here.
+    assert solved == 14

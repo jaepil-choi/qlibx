@@ -47,7 +47,7 @@ from vqapr.portfolio.allocation import (
     AllocationSign,
     validate_allocation,
 )
-from vqapr.portfolio.optimize import QUANTUM, OptimizeResult, optimize
+from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, OptimizeResult, optimize
 from vqapr.workspace import Workspace
 
 HERE = Path(__file__).resolve().parent
@@ -263,19 +263,19 @@ def main() -> None:
             if instrument in prices[session] and nav > 0
         }
         # One name is held fixed to exercise frozen invariance. A freeze is only honourable while
-        # the holding still satisfies its own box: once price drift pushes it past the cap, the two
-        # demands are unsatisfiable together and `optimize` refuses, so the freeze is released and
-        # the position is traded back inside instead.
-        bounds = _bounds(index)
-        frozen = frozenset()
-        if frozen_name in current_weights:
-            held_weight = current_weights[frozen_name].quantize(QUANTUM)
-            if bounds.lower[frozen_name] <= held_weight <= bounds.upper[frozen_name]:
-                frozen = frozenset({frozen_name})
-            else:
-                released += 1
-
-        result = _construct(index, view, current_weights, frozen)
+        # the holding still satisfies its own box; once price drift pushes it past the cap the two
+        # demands are unsatisfiable together. Rather than pre-empting that judgement, the call is
+        # made and `optimize`'s own refusal is what releases the freeze -- so the guard is exercised
+        # here rather than duplicated.
+        frozen = frozenset({frozen_name}) if frozen_name in current_weights else frozenset()
+        try:
+            result = _construct(index, view, current_weights, frozen)
+        except OptimizeRefusal:
+            if not frozen:
+                raise
+            released += 1
+            frozen = frozenset()
+            result = _construct(index, view, current_weights, frozen)
         for instrument, weight in result.weights.items():
             price = prices[session].get(instrument)
             if price is None or price == 0:
@@ -318,7 +318,9 @@ def main() -> None:
         "instruments": sorted(benchmark[sessions[0]]),
         "published_allocation": published.name,
         "alpha_is_signed": str(signed),
-        "subscribed_inputs": sorted({"alpha_allocation", "benchmark_weight_daily"}),
+        "subscribed_inputs": sorted(
+            {published.stem, str(manifest["benchmark_path"]).removesuffix(".parquet")}
+        ),
         "frozen_occurrences": frozen_seen,
         "freeze_released_out_of_box": released,
         "fills": len(journal),

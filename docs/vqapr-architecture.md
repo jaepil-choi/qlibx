@@ -1224,6 +1224,15 @@ $$\min_{w,\,c}\ \underbrace{\|Lw - x^{desired}\|^2}_{\text{원하는 노출과�
 $$\text{s.t.}\quad \textstyle\sum w + c = 1,\quad l \le w \le u,\quad c_{lo} \le c \le c_{hi},
 \quad w_j = w^0_j\ \ (j \in \text{frozen})$$
 
+**구현 범위는 이 선언의 부분집합이며, 선언 자체를 줄이지 않는다.** 현재 `cost`, `turnover_penalty`, `L`은 구현되지 않았고
+전달되면 typed refusal로 거부한다. 이 세 인자를 선언에서 지우지 않는 이유는 나중에 추가할 때 **기존 호출자를 깨뜨리지 않고
+더하기만 하면 되도록** 남겨두기 위해서다. 구현은 선언에 대한 부재증명이지 반증이 아니다.
+
+비용·회전율 항이 없는 부분집합은 **budget hyperplane 위의 box 투영**이다. 목적함수가 $\|w - x^{desired}\|^2$로
+줄어들고 해는 승수 $\lambda$ 하나로 매개된다: $w_i = \mathrm{clip}(x^{desired}_i - \lambda,\ l_i,\ u_i)$. 절단점
+$x^{desired}_i - l_i$와 $x^{desired}_i - u_i$ **2n개를 정렬하면** 각 구간에서 합이 affine이므로 $\lambda$를 **유리수에서 정확히**
+풀 수 있다. 이분법도 solver 패키지도 필요 없고, 정밀도 예산을 선언할 이유도 생기지 않는다.
+
 **`L`은 목적함수에만 들어가고 제약에는 들어가지 않는다.**
 
 - **제약은 physical `w`에만 건다**(PRD §8.2). 계좌에 남는 것은 실제 보유이고, monitoring이 판정할 대상도
@@ -1277,6 +1286,24 @@ transform인 이유는 다루는 대상이 weight가 아니라 signal이기 때�
 drop_missing(signal) -> tuple[Signal, frozenset[InstrumentId]]   # 무엇이 빠졌는지 반환
 require_complete(signal, universe) -> Signal                     # 불완전하면 실패
 ```
+
+##### 숫자 그리드 소유권
+
+이 package에는 정밀도가 다른 숫자가 여럿 경계를 넘나든다. **어느 그리드가 어느 경계를 지배하는지를 이곳에서 한 번만
+정한다.** 이건 한 모듈의 구현 사항이 아니라 cross-component 계약이라 canon에 있어야 한다.
+
+| 그리드 | 소유하는 경계 | 명시적으로 소유하지 **않는** 것 |
+|---|---|---|
+| 벤더 정규화 scale | 외부 데이터 **등록 경계** 하나뿐. 벤더 표기를 fraction으로 바꿔 고정 scale로 적는다 | package가 생산한 어떤 weight도 지배하지 않는다 |
+| canonical quantization 그리드 | `optimize()` 경계를 **양방향으로** 지나는 모든 weight. 반환값과 발행된 배분이 모두 이 그리드 위에 있다 | 호출자가 넘기는 bound가 더 거친 것은 허용한다. 더 **세밀한** 것만 typed refusal이다 |
+| 선언된 working precision | `optimize()` **내부 조립**만. exact solve는 `fractions.Fraction`이라 context와 무관하다 | `optimize()` 밖의 어느 것도 — **`validate_economic_intent` 포함**. context manager는 나중 호출자에게 닿지 않는다 |
+
+세 번째 행의 "소유하지 않는 것" 칸이 핵심이다. `localcontext()`는 블록을 벗어나면 만료되므로, 나중에 `Σw + cash == 1`을
+검사하는 쪽은 자기 주변 context에서 도다. 그래서 정밀도로 덮는 대신 **반환되는 모든 weight를 그리드 위에 올려둔다.**
+그러면 부분합의 유효자릿수가 경계 안에 머물러 결합법칙 문제가 줄어드는 게 아니라 **사라진다.**
+
+`frozen` 종목은 quantize하지 않고 그대로 내보낸다(§8.2 frozen invariance). 대신 **입구에서** 그리드보다 세밀한
+`current[j]`를 typed refusal로 거부한다. 방향이 반대다 — 나가는 것을 고치는 게 아니라 들어오는 것을 제한한다.
 
 #### `diagnostics.py` — 판단 시점의 배분 진단
 
@@ -2452,6 +2479,7 @@ src/vqapr/
 ├── portfolio/       순수 leaf. 값을 배분으로 (§5.3)
 │   ├── weighting.py       signal_weight · equal_weight · proportional_weight
 │   ├── optimize.py        제약 하 배분. 현금이 결정 변수
+│   ├── allocation.py      배분 입력 계약 — 선언된 invariant로 규정, 소비 시점 검증
 │   ├── diagnostics.py     판단 시점 진단 — gross/net·집중도·**의도 회전율**
 │   └── intents.py         PortfolioIntent · from_weights · 생성 시 검증 (§5.4)
 │

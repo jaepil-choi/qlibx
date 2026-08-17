@@ -33,7 +33,8 @@ smaller one that does not.
 - **Reads are raw file reads, not `DataRequirement` subscriptions.** The published dataset is
   registered in the workspace, but this script reads the parquet directly rather than through a
   point-in-time window, so nothing here proves PIT enforcement. That is proved in
-  `tests/flow/test_publish_allocation.py` and `tests/acceptance/test_enhanced_index.py`.
+  `tests/flow/test_publish_allocation.py`, which reads a published allocation back through a real
+  `DataRequirement` inside a point-in-time window.
 - **The cap is inlined here, not the shipped `SingleNameCap`.** `NoShort` is the real shipped
   constraint; the per-name ceiling is recomputed locally because this script has no point-in-time
   window to project through. The acceptance suite drives the shipped constraint for real, projecting `NoShort` and

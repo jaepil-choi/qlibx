@@ -359,7 +359,9 @@ def test_every_free_name_stays_inside_its_box_across_many_shapes() -> None:
             for name in names:
                 assert lower[name] <= result.weights[name] <= upper[name]
             assert sum(result.weights.values()) + result.cash == Decimal(1)
-    # Fourteen of the fifteen shapes are feasible; the remaining one cannot reach its budget
-    # under its own cap. Pinning the exact count means a regression that refused everything, or that
-    # started accepting the infeasible shape, both fail here.
+    # Fourteen of fifteen solve. The refused one (size 4, cap 0.35) is not infeasible -- its exact
+    # optimum reaches the budget precisely at lam = 23/60 -- but each repeating third rounds up at
+    # twelve decimals, so the quantized total overshoots by 1e-12 and cash lands just below its
+    # declared floor. Pinning the count means a regression that refuses everything, or that starts
+    # accepting this one, both fail here.
     assert solved == 14

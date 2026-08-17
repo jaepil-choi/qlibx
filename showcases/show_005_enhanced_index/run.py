@@ -270,8 +270,10 @@ def main() -> None:
         frozen = frozenset({frozen_name}) if frozen_name in current_weights else frozenset()
         try:
             result = _construct(index, view, current_weights, frozen)
-        except OptimizeRefusal:
-            if not frozen:
+        except OptimizeRefusal as error:
+            # Only a frozen-box conflict is grounds to release. Any other refusal is a real failure
+            # and must not be reported as price drift.
+            if not frozen or "outside its declared bound" not in str(error):
                 raise
             released += 1
             frozen = frozenset()

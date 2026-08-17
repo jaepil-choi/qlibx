@@ -198,17 +198,22 @@ def optimize(
             free_total += quantized
         frozen_total = sum(frozen_weights.values(), Decimal(0))
         cash = (Decimal(1) - frozen_total - free_total).quantize(QUANTUM, rounding=_ROUNDING)
+        # Converting the exact multiplier belongs inside the working precision too: quantizing it
+        # to the grid needs a twelve-digit coefficient, which a caller running at a tighter
+        # precision could not represent, turning a valid answer into a raw arithmetic error.
+        resolved = (Decimal(multiplier.numerator) / Decimal(multiplier.denominator)).quantize(
+            QUANTUM, rounding=_ROUNDING
+        )
 
     weights.update(frozen_weights)
     if not cash_lower <= cash <= cash_upper:
         raise OptimizeRefusal(
             f"cash {cash} falls outside the declared range [{cash_lower}, {cash_upper}]"
         )
-    resolved = Decimal(multiplier.numerator) / Decimal(multiplier.denominator)
     return OptimizeResult(
         weights={name: weights[name] for name in instruments},
         cash=cash,
-        multiplier=resolved.quantize(QUANTUM, rounding=_ROUNDING),
+        multiplier=resolved,
         binding_lower=tuple(binding_lower),
         binding_upper=tuple(binding_upper),
     )

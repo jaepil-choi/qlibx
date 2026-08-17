@@ -272,13 +272,17 @@ def test_the_working_precision_does_not_leak_to_the_caller() -> None:
     with localcontext() as context:
         context.prec = 9
         before = context.prec
-        optimize(
-            desired={"A": Decimal("0.5"), "B": Decimal("0.5")},
+        # A non-zero multiplier is essential here: quantizing zero needs one digit, so an input
+        # that solves at lam = 0 would leave this test inert against the very leak it pins.
+        result = optimize(
+            desired={"A": Decimal("0.6"), "B": Decimal("0.6")},
             current={},
             lower={"A": Decimal("0"), "B": Decimal("0")},
             upper={"A": Decimal("1"), "B": Decimal("1")},
-            cash_range=(Decimal("0"), Decimal("1")),
+            cash_range=(Decimal("0"), Decimal("0")),
         )
+        assert result.multiplier == Decimal("0.1")
+        assert sum(result.weights.values()) + result.cash == Decimal(1)
         assert context.prec == before
 
 

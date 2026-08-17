@@ -45,8 +45,9 @@ advertise a decision earlier than the inputs that justified it.
 exposure mapping, the problem is a box projection onto a budget hyperplane, parameterised by one
 multiplier: `w_i = clip(desired_i - lam, l_i, u_i)`. Sorting the `2n` breakpoints locates the
 bracketing segment where the clipped sum is affine, so the multiplier is solved exactly in
-`fractions.Fraction`. There is no iteration, so no precision budget and no tolerance to tune, and no
-solver package is needed.
+`fractions.Fraction`. There is no iteration, so no precision budget and no tolerance to tune. The solve path imports no
+solver package; note that `cvxpy` is already a declared project dependency for other work, so the
+claim is that this path does not use one, not that the project has none.
 
 **The weight-sum invariant is coverage-scoped.** A four-name slice of a two-hundred-name index sums
 to roughly `0.549`. Requiring `1` would reject genuine vendor data; renormalising would restate the
@@ -99,5 +100,7 @@ code. The ensemble's own run is a later milestone; this one proves multi-input s
   inputs, alpha minimum weight `-0.02`, 21 frozen occurrences returned verbatim, 40 whole-share
   fills, fill-journal replay matching running cash exactly, tracking error 1.045% → 0.642%, and two
   clean runs producing identical SHA-256 manifests.
+- Known open findings from the boundary review are recorded in the Ultragoal ledger and are not
+  closed by this record; see the milestone's review blockers.
 - Acceptance criteria are discharged in `tests/acceptance/test_enhanced_index.py`, each test naming
   the criterion it proves, all reading committed real market data.

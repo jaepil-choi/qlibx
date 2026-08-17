@@ -10,13 +10,28 @@ local `data/DW` warehouse.
 |---|---|---|
 | `observation_price_daily.parquet` | 88 | `available_at`, `instrument`, `close`, `volume`, `is_supervised` at the venue close |
 | `execution_krx_daily.parquet` | 88 | `trade_at`, `instrument`, `is_tradable`, `close` at the venue close |
-| `fixture.json` | — | exact provenance: spec, universe, session counts, flag counts |
+| `benchmark_weight_daily.parquet` | 88 | `available_at`, `instrument`, `benchmark_weight` as a dated index weight panel |
+| `fixture.json` | — | exact provenance: spec, universe, session counts, flag counts, weight unit/scale/quantum/tolerance |
 
 Scope: 4 KOSPI 200 constituents, 22 real trading sessions, 2026-04-01 to 2026-04-30.
 
 `is_supervised` is published as **observable data**, not as a venue rule: whether to hold a
 supervised name is the Strategy's economic judgement. Trading halts are the opposite — they are a
 venue fact and appear as `is_tradable` on the execution input.
+
+## Benchmark weights are a proper subset, deliberately
+
+The benchmark panel carries the vendor's index weights for these four constituents only, so its
+per-date sum is roughly `0.549`, not `1`. That is not a defect to normalise away: a weight-sum
+invariant over an allocation input is **coverage-scoped**, and the uncovered remainder flows to
+cash. A fixture that summed to one would have hidden this.
+
+Weights are stored as fractions at a single declared scale (`weight_scale`), converted once from
+the vendor's percent notation. The extractor refuses rather than rounds when a value would need
+more precision than that scale. `weight_quantum` records the coarsest step the vendor actually
+resolves in this slice, and `weight_tolerance` is derived from it as `coverage x quantum` rather
+than pinned to a constant, so regenerating over a finer-published window tightens the tolerance
+instead of leaving a stale allowance.
 
 ## Provenance and regeneration
 

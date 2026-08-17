@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import duckdb
@@ -41,6 +42,19 @@ MEMBER_WEIGHT = "지수내비중"
 OBSERVATION_LOCAL_TIME = "15:30:00"
 EXECUTION_LOCAL_TIME = "15:30:00"
 VENUE_ZONE = "Asia/Seoul"
+
+WEIGHT_UNIT = "fraction"
+"""The vendor publishes index weights in percent; the fixture stores fractions."""
+
+WEIGHT_SCALE = 8
+"""One declared fraction scale for every committed benchmark weight.
+
+The vendor file is format-heterogeneous across its own date range: some blocks carry two decimal
+places in percent and others carry five. Preserving those digits verbatim would make the committed
+Decimal exponent a function of which window the extractor last ran over, which defeats byte-exact
+round-trips and manifest determinism. Eight fraction decimals cover every observed vendor format
+(2dp percent maps to 4dp fraction, 5dp percent maps to 7dp fraction) with one stable exponent.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +110,44 @@ def _universe(con: duckdb.DuckDBPyConnection, spec: FixtureSpec) -> list[dict[st
     ]
 
 
+def _fraction(raw: str) -> Decimal:
+    """Convert one vendor percent weight to a fraction at the declared scale.
+
+    Refuses rather than rounds. A vendor value whose exact fraction needs more precision than the
+    declared scale is an information-losing conversion, and silently dropping digits would put an
+    unannounced approximation into a committed fixture.
+    """
+    try:
+        percent = Decimal(raw.strip())
+    except InvalidOperation as error:
+        raise ValueError(f"index weight is not a decimal: {raw!r}") from error
+    if not percent.is_finite() or percent < 0:
+        raise ValueError(f"index weight must be finite and non-negative: {raw!r}")
+    exact = percent / Decimal(100)
+    if exact.quantize(Decimal(1).scaleb(-WEIGHT_SCALE)) != exact:
+        raise ValueError(
+            f"index weight {raw!r} needs more than {WEIGHT_SCALE} fraction decimals; "
+            "raise WEIGHT_SCALE rather than rounding a committed fixture"
+        )
+    # The exact value is returned, not the padded one: the declared scale governs storage, while
+    # the observed exponent is what the vendor resolves and what the tolerance derives from.
+    return exact
+
+
+def _quantum(weights: list[Decimal]) -> Decimal:
+    """The coarsest step the observed slice actually resolves.
+
+    Measured from the exact converted values rather than from the storage scale, so it reflects what
+    the vendor published rather than how the fixture pads it. The invariant tolerance derives from
+    this rather than from a pinned constant, so regenerating over a window the vendor publishes at
+    finer precision tightens the tolerance instead of leaving a stale allowance that would admit a
+    real error.
+    """
+    if not weights:
+        raise ValueError("benchmark slice has no weights to derive a quantum from")
+    return max(Decimal(1).scaleb(value.as_tuple().exponent) for value in weights)
+
+
 def _literal(value: str) -> str:
     """Only alphanumeric warehouse identifiers reach SQL text."""
     if not value.isalnum():
@@ -129,6 +181,7 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     observation_path = out_dir / "observation_price_daily.parquet"
     execution_path = out_dir / "execution_krx_daily.parquet"
+    benchmark_path = out_dir / "benchmark_weight_daily.parquet"
     manifest_path = out_dir / "fixture.json"
 
     con = duckdb.connect()
@@ -172,6 +225,49 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
             """
         )
 
+        raw_benchmark = con.execute(
+            f"""
+            SELECT strptime(m."{MEMBER_DATE}", '%Y%m%d') AS session_date,
+                   m."{MEMBER_TICKER}" AS instrument,
+                   m."{MEMBER_WEIGHT}" AS raw_weight
+            FROM {_csv(MEMBERS)} m
+            WHERE m."{MEMBER_TICKER}" IN ({", ".join(_literal(t) for t in tickers)})
+              AND m."{MEMBER_DATE}" BETWEEN {_literal(spec.start)} AND {_literal(spec.end)}
+              AND strptime(m."{MEMBER_DATE}", '%Y%m%d')
+                  IN (SELECT DISTINCT session_date FROM dw_slice)
+            ORDER BY session_date, instrument
+            """
+        ).fetchall()
+        if not raw_benchmark:
+            raise ValueError("no index membership rows cover the requested trading sessions")
+
+        benchmark = [
+            (session, instrument, _fraction(str(raw))) for session, instrument, raw in raw_benchmark
+        ]
+        weight_quantum = _quantum([weight for _, _, weight in benchmark])
+        coverage = len({instrument for _, instrument, _ in benchmark})
+        # A per-name rounding error is bounded by the quantum, so the worst case across the covered
+        # universe is coverage * quantum. Doubling is unnecessary: the bound is already worst-case.
+        weight_tolerance = weight_quantum * coverage
+
+        con.execute(
+            "CREATE OR REPLACE TEMP TABLE dw_benchmark (session_date TIMESTAMP,"
+            f" instrument VARCHAR, benchmark_weight DECIMAL(18, {WEIGHT_SCALE}))"
+        )
+        con.executemany("INSERT INTO dw_benchmark VALUES (?, ?, ?)", benchmark)
+        con.execute(
+            f"""
+            COPY (
+              SELECT (session_date + INTERVAL '{OBSERVATION_LOCAL_TIME}')
+                       AT TIME ZONE '{VENUE_ZONE}' AS available_at,
+                     instrument,
+                     benchmark_weight
+              FROM dw_benchmark
+              ORDER BY available_at, instrument
+            ) TO '{benchmark_path.as_posix()}' (FORMAT PARQUET)
+            """
+        )
+
         halted = con.execute("SELECT count(*) FROM dw_slice WHERE halt_flag <> '0'").fetchone()[0]
         supervised = con.execute(
             "SELECT count(*) FROM dw_slice WHERE admin_flag <> '1'"
@@ -197,8 +293,15 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
         "last_session": str(sessions[2]),
         "halted_rows": halted,
         "supervised_rows": supervised,
+        "benchmark_rows": len(benchmark),
+        "benchmark_coverage": coverage,
+        "weight_unit": WEIGHT_UNIT,
+        "weight_scale": WEIGHT_SCALE,
+        "weight_quantum": str(weight_quantum),
+        "weight_tolerance": str(weight_tolerance),
         "observation_path": observation_path.name,
         "execution_path": execution_path.name,
+        "benchmark_path": benchmark_path.name,
         "observation_local_time": OBSERVATION_LOCAL_TIME,
         "execution_local_time": EXECUTION_LOCAL_TIME,
         "venue_zone": VENUE_ZONE,

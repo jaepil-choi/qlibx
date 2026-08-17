@@ -60,6 +60,11 @@ def instruments(manifest: dict[str, object]) -> tuple[str, ...]:
     return tuple(str(row["ticker"]) for row in manifest["universe"])
 
 
+@pytest.fixture(scope="module")
+def benchmark_path(manifest: dict[str, object]) -> Path:
+    return FIXTURE / str(manifest["benchmark_path"])
+
+
 class _Catalog:
     def __init__(self, registration: DatasetRegistration, source: SourceSpec) -> None:
         self._registration = registration
@@ -154,12 +159,57 @@ def test_committed_fixture_still_matches_the_warehouse(
     assert regenerated["universe"] == manifest["universe"]
     assert regenerated["rows"] == manifest["rows"]
     assert regenerated["sessions"] == manifest["sessions"]
+    assert regenerated["benchmark_rows"] == manifest["benchmark_rows"]
+    assert regenerated["weight_quantum"] == manifest["weight_quantum"]
+    assert regenerated["weight_tolerance"] == manifest["weight_tolerance"]
+    # Rows are compared as parsed values, not bytes, so a vendor padding change is distinguishable
+    # from a data change: the former leaves these equal, the latter does not.
     assert _rows(tmp_path / str(regenerated["observation_path"]), "1, 2") == _rows(
         observation_path, "1, 2"
     )
     assert _rows(tmp_path / str(regenerated["execution_path"]), "1, 2") == _rows(
         execution_path, "1, 2"
     )
+    assert _rows(tmp_path / str(regenerated["benchmark_path"]), "1, 2") == _rows(
+        FIXTURE / str(manifest["benchmark_path"]), "1, 2"
+    )
+
+
+def test_committed_benchmark_is_a_dated_coverage_scoped_panel(
+    manifest: dict[str, object], benchmark_path: Path, instruments: tuple[str, ...]
+) -> None:
+    """The benchmark is real vendor data, and its subset sum is deliberately not one."""
+    assert manifest["weight_unit"] == "fraction"
+    assert manifest["benchmark_coverage"] == len(instruments)
+
+    tolerance = Decimal(str(manifest["weight_tolerance"]))
+    quantum = Decimal(str(manifest["weight_quantum"]))
+    assert tolerance == quantum * len(instruments)
+
+    con = duckdb.connect()
+    try:
+        table = f"read_parquet('{benchmark_path.as_posix()}')"
+        totals = con.execute(
+            f"SELECT available_at, sum(benchmark_weight) FROM {table} GROUP BY 1 ORDER BY 1"
+        ).fetchall()
+        names = {
+            row[0] for row in con.execute(f"SELECT DISTINCT instrument FROM {table}").fetchall()
+        }
+        negatives = con.execute(
+            f"SELECT count(*) FROM {table} WHERE benchmark_weight < 0"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert names == set(instruments)
+    assert negatives[0] == 0
+    assert len(totals) == manifest["sessions"]
+    for _, total in totals:
+        assert isinstance(total, Decimal)
+        assert Decimal("0") < total < Decimal("1") - tolerance, (
+            "a four-name slice of a 200-name index must not sum to one; "
+            "the weight-sum invariant has to be coverage-scoped"
+        )
 
 
 def test_real_observations_stay_point_in_time(

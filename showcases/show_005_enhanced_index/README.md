@@ -1,12 +1,7 @@
 # show_005 — enhanced index over a published alpha
 
-Runs the whole chain this milestone exists for, on committed real market data:
-
-```
-alpha run (signed, zero cost)  ->  published allocation dataset
-                                          |
-committed benchmark panel  --------------- +-->  enhanced index (whole-share execution)
-```
+Publishes a signed alpha as an allocation dataset, then constructs a benchmark-relative enhanced
+index that consumes both the published alpha and the committed benchmark panel.
 
 Reproduce:
 
@@ -16,30 +11,51 @@ uv run python showcases/show_005_enhanced_index/run.py
 
 It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor warehouse.
 
-## What it demonstrates
+## What this actually demonstrates
 
 | Claim | How it is shown |
 |---|---|
-| Publication is a dataset, not a new subsystem | The alpha allocation is published through the same machinery that materialises a DataModel, then read back as an ordinary panel |
-| Multi-input subscription works | The enhanced index consumes **two** allocation inputs — the published alpha and the committed benchmark — and combines them |
-| Long-only is emergent | The alpha's minimum weight is `-0.02`. Nothing strips the short leg; `no_short` intersected with a single-name cap does |
-| Frozen names survive exactly | 21 of 22 sessions freeze a held name; each is returned verbatim, asserted against the quantized input |
-| The guard is exercised, not dodged | `current` is a NAV-derived ratio quantized onto the canonical grid before the call — the raw ratio would be refused |
-| Accounting is independently checkable | Cash is replayed from the fill journal alone and must match the running balance exactly |
+| Publication is a dataset, not a new subsystem | The alpha allocation is published through `publish_run_allocation`, which shares the staging, atomic-exposure and registration body with `materialize` |
+| Two allocation inputs combine into one construction | The construction reads the published alpha panel **and** the committed benchmark panel each session and forms `desired = bench + s · active` |
+| Long-only is emergent | The alpha's minimum weight is `-0.02`. Nothing strips the short leg; `no_short` intersected with a per-name cap does |
+| Frozen names survive exactly, or the freeze is refused | 20 of 22 sessions freeze a held name and get it back verbatim. On one session price drift pushed the holding past its cap, so `optimize` refused the freeze and the position was traded back inside instead |
 | Output is deterministic | Two clean runs produce identical SHA-256 manifests |
+
+## What this does NOT demonstrate
+
+This matters more than the table above, because a showcase that overstates itself is worse than a
+smaller one that does not.
+
+- **This is not a `run()`.** There is no `RunDefinition`, no `preflight_run`, no Account, no
+  `plan_orders`, and no execution profile. Position sizing and cash are hand-rolled in `main()`. The
+  execution spine is exercised by `show_003` and `show_004`; this showcase exercises the
+  **construction and publication** path only.
+- **Reads are raw file reads, not `DataRequirement` subscriptions.** The published dataset is
+  registered in the workspace, but this script reads the parquet directly rather than through a
+  point-in-time window, so nothing here proves PIT enforcement. That is proved in
+  `tests/flow/test_publish_allocation.py` and `tests/acceptance/test_enhanced_index.py`.
+- **The cap is inlined, not the shipped `SingleNameCap`.** `NoShort` is the real shipped constraint;
+  the per-name ceiling is recomputed locally. The shipped constraint's own projection and benchmark
+  validation are covered in `tests/constraints/test_builtin.py`.
+- **The cash replay is a consistency check, not independent verification.** It recomputes cash from
+  the same journal the same loop wrote, so it catches bookkeeping drift within the script and
+  nothing more. `show_003` performs the genuinely independent replay against a committed Account.
+- **`tracking_error` here is the L2 norm of active weights**, not a realised or forecast tracking
+  error. It is recorded as monitoring evidence only and never re-enters the construction.
 
 ## Results
 
 | Metric | Value |
 |---|---|
 | sessions | 22 |
-| subscribed inputs | `alpha_allocation` + `benchmark_weight_daily` |
+| allocation inputs combined | published `alpha_allocation` + committed `benchmark_weight_daily` |
 | alpha minimum weight | −0.020000000000 |
-| frozen occurrences | 21 |
-| fills | 40 (whole shares) |
-| closing cash | 486,629,800.0000 |
-| replayed cash | 486,629,800.0000 (exact match) |
-| tracking error | 1.045% → 0.642% |
+| frozen occurrences | 20 |
+| freeze released (holding drifted past its cap) | 1 |
+| position changes | 41 (whole units) |
+| closing cash | 499,080,100.0000 |
+| replayed cash | 499,080,100.0000 (consistency check) |
+| active-weight norm | 1.045% → 0.926% |
 
 ## Reading the numbers honestly
 
@@ -47,12 +63,12 @@ The active view is **dollar-neutral by construction** and scaled to a 4% gross a
 moves weight between names without changing the total. That is what makes it an *active* view rather
 than a second allocation competing with the benchmark.
 
-Tracking error is computed **after** each decision and recorded as monitoring evidence only. It never
-enters the construction, because a portfolio-level quadratic has no representation in per-instrument
-constraint bounds. Constraining it ex ante is deliberately out of scope for this milestone.
-
 The benchmark covers four constituents of a two-hundred-name index, so its weights sum to roughly
 `0.549`, not `1`. The uncovered remainder is cash, not an error — the weight-sum invariant is
 coverage-scoped for exactly this reason.
+
+`current` is quantized onto the canonical grid before `optimize` is called, which is what a caller
+must do: a raw NAV-derived ratio carries 28 significant digits and the bound-exponent guard refuses
+it. The refusal itself is proved in `tests/portfolio/test_optimize.py`, not here.
 
 `outputs/` is gitignored.

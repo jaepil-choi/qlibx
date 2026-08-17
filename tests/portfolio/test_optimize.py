@@ -280,3 +280,72 @@ def test_the_working_precision_does_not_leak_to_the_caller() -> None:
             cash_range=(Decimal("0"), Decimal("1")),
         )
         assert context.prec == before
+
+
+def test_the_solve_targets_the_near_band_edge_not_the_far_one() -> None:
+    """Regression: targeting the far edge still balances the budget but is not the minimiser."""
+    desired = {"A": Decimal("0.40"), "B": Decimal("0.35"), "C": Decimal("0.30")}
+    lower, upper = _bounds(desired, "0", "0.38")
+
+    result = optimize(
+        desired=desired,
+        current={},
+        lower=lower,
+        upper=upper,
+        cash_range=(Decimal("0"), Decimal("0.05")),
+    )
+
+    objective = sum((result.weights[name] - desired[name]) ** 2 for name in desired)
+    assert objective == Decimal("0.000850000000000000000000")
+    assert sum(result.weights.values()) + result.cash == Decimal(1)
+
+
+def test_a_feasible_problem_inside_a_widened_cash_range_is_not_refused() -> None:
+    """Regression: the far-edge target made this feasible input raise a false refusal."""
+    result = optimize(
+        desired={"A": Decimal("0.6"), "B": Decimal("0.6")},
+        current={},
+        lower={"A": Decimal("0.48"), "B": Decimal("0.48")},
+        upper={"A": Decimal("1"), "B": Decimal("1")},
+        cash_range=(Decimal("0"), Decimal("0.05")),
+    )
+
+    assert result.weights == {"A": Decimal("0.5"), "B": Decimal("0.5")}
+    assert sum(result.weights.values()) + result.cash == Decimal(1)
+
+
+def test_a_frozen_holding_outside_its_own_bound_is_refused() -> None:
+    """A freeze and a box are a conjunction; a holding that breaks the box cannot be honoured."""
+    with pytest.raises(OptimizeRefusal, match="outside its declared bound"):
+        optimize(
+            desired={"A": Decimal("0"), "B": Decimal("0")},
+            current={"B": Decimal("0.83")},
+            lower={"A": Decimal("-1"), "B": Decimal("-0.93")},
+            upper={"A": Decimal("1"), "B": Decimal("0.29")},
+            frozen=frozenset({"B"}),
+            cash_range=(Decimal("-1"), Decimal("1")),
+        )
+
+
+def test_every_free_name_stays_inside_its_box_across_many_shapes() -> None:
+    """Property sweep over the shapes the fuzz lane exercised."""
+    for size in range(1, 6):
+        for cap in ("0.2", "0.35", "1"):
+            names = [f"n{index}" for index in range(size)]
+            desired = {
+                name: Decimal("0.5") + Decimal(index) / 10 for index, name in enumerate(names)
+            }
+            lower, upper = _bounds(names, "0", cap)
+            try:
+                result = optimize(
+                    desired=desired,
+                    current={},
+                    lower=lower,
+                    upper=upper,
+                    cash_range=(Decimal("0"), Decimal("1")),
+                )
+            except OptimizeRefusal:
+                continue
+            for name in names:
+                assert lower[name] <= result.weights[name] <= upper[name]
+            assert sum(result.weights.values()) + result.cash == Decimal(1)

@@ -141,8 +141,11 @@ def _construct(
     )
 
 
-def _tracking_error(weights: dict[str, Decimal], benchmark: dict[str, Decimal]) -> Decimal:
-    """Post-hoc monitoring only. This never shapes a decision."""
+def _active_norm(weights: dict[str, Decimal], benchmark: dict[str, Decimal]) -> Decimal:
+    """L2 norm of the active weights, recorded post hoc as monitoring evidence only.
+
+    This is not a realised or forecast tracking error; it never re-enters the construction.
+    """
     active = [
         weights.get(instrument, Decimal(0)) - benchmark.get(instrument, Decimal(0))
         for instrument in set(weights) | set(benchmark)
@@ -235,6 +238,7 @@ def main() -> None:
     journal: list[tuple[str, Decimal, Decimal]] = []
     halted = sorted(benchmark[sessions[0]])[0]
     frozen_seen = 0
+    released = 0
 
     for session in sessions:
         index = benchmark[session]
@@ -253,8 +257,18 @@ def main() -> None:
             for instrument, units in held.items()
             if instrument in prices[session] and nav > 0
         }
-        # One name is held fixed to exercise frozen invariance and the entrance guard together.
-        frozen = frozenset({halted}) if halted in current_weights else frozenset()
+        # One name is held fixed to exercise frozen invariance. A freeze is only honourable while
+        # the holding still satisfies its own box: once price drift pushes it past the cap, the two
+        # demands are unsatisfiable together and `optimize` refuses, so the freeze is released and
+        # the position is traded back inside instead.
+        bounds = _bounds(index)
+        frozen = frozenset()
+        if halted in current_weights:
+            held_weight = current_weights[halted].quantize(QUANTUM)
+            if bounds.lower[halted] <= held_weight <= bounds.upper[halted]:
+                frozen = frozenset({halted})
+            else:
+                released += 1
 
         result = _construct(index, view, current_weights, frozen)
         for instrument, weight in result.weights.items():
@@ -276,7 +290,7 @@ def main() -> None:
                 "cash_weight": str(result.cash),
                 "multiplier": str(result.multiplier),
                 # Monitoring evidence, recorded after the decision and never fed back into it.
-                "tracking_error": str(_tracking_error(dict(result.weights), index)),
+                "active_norm": str(_active_norm(dict(result.weights), index)),
                 "frozen": sorted(frozen),
             }
         )
@@ -302,6 +316,7 @@ def main() -> None:
         "alpha_is_signed": str(signed),
         "subscribed_inputs": ["alpha_allocation", "benchmark_weight_daily"],
         "frozen_occurrences": frozen_seen,
+        "freeze_released_out_of_box": released,
         "fills": len(journal),
         "closing_cash": str(cash),
         "replayed_cash": str(replayed),
@@ -321,10 +336,11 @@ def main() -> None:
     print("subscribed inputs   : alpha_allocation + benchmark_weight_daily")
     print(f"alpha minimum weight: {signed} (signed, never stripped by the input)")
     print(f"frozen occurrences  : {frozen_seen} (returned verbatim)")
+    print(f"freeze released     : {released} (holding drifted outside its cap)")
     print(f"fills               : {len(journal)} (whole shares)")
     print(f"closing cash        : {cash}")
     print(f"replayed cash       : {replayed} (independent, exact match)")
-    print(f"tracking error range: {rows[0]['tracking_error']} .. {rows[-1]['tracking_error']}")
+    print(f"active-weight norm  : {rows[0]['active_norm']} .. {rows[-1]['active_norm']}")
     print(f"artifacts           : {json.dumps(digests, indent=2, sort_keys=True)}")
 
 

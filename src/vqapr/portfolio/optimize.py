@@ -137,7 +137,18 @@ def optimize(
             raise OptimizeRefusal(f"frozen instrument {instrument!r} is absent from current")
         # Guarded on entry, emitted verbatim on exit: the value itself is never rounded, so frozen
         # invariance is exact rather than approximate.
-        frozen_weights[instrument] = _on_grid(current[instrument], name=f"current[{instrument!r}]")
+        held_weight = _on_grid(current[instrument], name=f"current[{instrument!r}]")
+        # A frozen name still has to satisfy its own box. The declaration in Architecture 5.3 is a
+        # conjunction -- l <= w <= u *and* w_j = w0_j -- so a holding outside its declared bound is
+        # an unsatisfiable pair of demands, not a fact that quietly overrides the bound. Refusing
+        # here keeps a constraint violation from riding a frozen name into an accepted intent.
+        if not lower[instrument] <= held_weight <= upper[instrument]:
+            raise OptimizeRefusal(
+                f"frozen current[{instrument!r}] is {held_weight}, outside its declared bound "
+                f"[{lower[instrument]}, {upper[instrument]}]; a frozen holding cannot satisfy "
+                "both the freeze and the box, so the caller must widen the bound or release it"
+            )
+        frozen_weights[instrument] = held_weight
 
     free = tuple(name for name in instruments if name not in frozen)
     held = sum((_fraction(value) for value in frozen_weights.values()), Fraction(0))
@@ -242,7 +253,11 @@ def _solve_multiplier(
     if band_low <= zero <= band_high:
         return Fraction(0)
 
-    target = band_low if zero > band_high else band_high
+    # The clipped sum is non-increasing in lam, so the feasible point nearest the unconstrained
+    # projection is the band edge on the side the sum overshot: too large means come down to
+    # band_high, too small means come up to band_low. Targeting the far edge would still satisfy
+    # the budget while moving every weight further from desired than necessary.
+    target = band_high if zero > band_high else band_low
 
     breakpoints = sorted(
         {_fraction(desired[name]) - _fraction(lower[name]) for name in free}

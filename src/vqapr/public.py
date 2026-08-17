@@ -41,7 +41,14 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
 from vqapr.extension.registration import register_data_model
-from vqapr.flow.materialize import MaterializationResult, MaterializationSpec, materialize
+from vqapr.flow.materialize import (
+    AllocationPublicationResult,
+    AllocationPublicationSpec,
+    MaterializationResult,
+    MaterializationSpec,
+    materialize,
+    publish_run_allocation,
+)
 from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
@@ -64,6 +71,8 @@ __all__ = (
     "AcademicExchange",
     "AccountMode",
     "AccountSnapshot",
+    "AllocationPublicationResult",
+    "AllocationPublicationSpec",
     "Budget",
     "CalendarLookback",
     "ComponentKind",
@@ -115,6 +124,7 @@ __all__ = (
     "component_ref",
     "materialize",
     "preflight_run",
+    "publish_run_allocation",
     "register_agenda",
     "register_component",
     "register_data_model",

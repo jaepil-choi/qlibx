@@ -1,0 +1,46 @@
+{
+  "source": "data/DW (local vendor warehouse; not redistributed)",
+  "spec": {
+    "asof": "20260331",
+    "start": "20260401",
+    "end": "20260430",
+    "universe_size": 4
+  },
+  "universe": [
+    {
+      "ticker": "A005930",
+      "name": "삼성전자보통주",
+      "index_weight": 31.5,
+      "membership_date": "20260331"
+    },
+    {
+      "ticker": "A000660",
+      "name": "에스케이하이닉스보통주",
+      "index_weight": 17.84,
+      "membership_date": "20260331"
+    },
+    {
+      "ticker": "A005380",
+      "name": "현대자동차보통주",
+      "index_weight": 2.43,
+      "membership_date": "20260331"
+    },
+    {
+      "ticker": "A105560",
+      "name": "KB금융지주 보통주",
+      "index_weight": 1.81,
+      "membership_date": "20260331"
+    }
+  ],
+  "rows": 88,
+  "sessions": 22,
+  "first_session": "2026-04-01 00:00:00",
+  "last_session": "2026-04-30 00:00:00",
+  "halted_rows": 0,
+  "supervised_rows": 0,
+  "observation_path": "observation_price_daily.parquet",
+  "execution_path": "execution_krx_daily.parquet",
+  "observation_local_time": "15:30:00",
+  "execution_local_time": "15:30:00",
+  "venue_zone": "Asia/Seoul"
+}

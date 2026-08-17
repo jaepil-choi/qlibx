@@ -111,6 +111,7 @@ class KrxExchange:
             raise ValueError("an OrderBatch may contain each instrument only once")
         rows = self._rows(snapshot, requests)
         self._validate(requests, rows, account)
+        rules = self._rules.at(snapshot.target_at)
 
         fills: list[Fill] = []
         for request in requests:
@@ -157,7 +158,7 @@ class KrxExchange:
                     request.delta_quantity,
                     request.delta_quantity,
                     row.price,
-                    cost=self._rules.charge(side, notional),
+                    cost=rules.charge(side, notional, snapshot.target_at),
                 )
             )
         return FillBatch(tuple(fills), account.version)

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from vqapr.domain.enums import Side
+from vqapr.domain.timestamps import require_tz_aware
 
 
 def _rate(value: Decimal, *, name: str) -> Decimal:
@@ -49,6 +51,8 @@ class CostRule:
     side: Side
     commission_rate: Decimal
     tax_rate: Decimal
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.rule_id, str) or not self.rule_id:
@@ -57,6 +61,40 @@ class CostRule:
             raise TypeError("side must be a Side")
         _rate(self.commission_rate, name="commission_rate")
         _rate(self.tax_rate, name="tax_rate")
+        for name, value in (
+            ("effective_from", self.effective_from),
+            ("effective_to", self.effective_to),
+        ):
+            if value is not None:
+                require_tz_aware(value, name=name)
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_from >= self.effective_to
+        ):
+            raise ValueError("effective_from must precede effective_to")
+
+    @property
+    def always_effective(self) -> bool:
+        return self.effective_from is None and self.effective_to is None
+
+    def effective_at(self, at: datetime | None) -> bool:
+        """Half-open ``[effective_from, effective_to)`` membership.
+
+        A rule with no declared window is always effective. A dated rule can only be selected
+        against an actual instant, so an undated query never matches it.
+        """
+        if self.always_effective:
+            return True
+        if at is None:
+            return False
+        require_tz_aware(at, name="at")
+        if self.effective_from is not None and at < self.effective_from:
+            return False
+        return not (self.effective_to is not None and at >= self.effective_to)
+
+    def matches(self, side: Side, at: datetime | None = None) -> bool:
+        return self.side is side and self.effective_at(at)
 
     def charge(self, notional: Decimal) -> FillCost:
         """Charge this rule against a positive traded notional."""
@@ -70,22 +108,38 @@ class CostRule:
         )
 
     @property
-    def declaration_identity(self) -> tuple[str, str, str, str]:
-        return (self.rule_id, self.side.value, str(self.commission_rate), str(self.tax_rate))
+    def declaration_identity(self) -> tuple[str, ...]:
+        return (
+            self.rule_id,
+            self.side.value,
+            str(self.commission_rate),
+            str(self.tax_rate),
+            "" if self.effective_from is None else self.effective_from.isoformat(),
+            "" if self.effective_to is None else self.effective_to.isoformat(),
+        )
 
 
-def select_cost_rule(rules: Sequence[CostRule], side: Side) -> CostRule:
-    """Return the single rule declared for ``side`` or fail with the observed match count."""
+def select_cost_rule(rules: Sequence[CostRule], side: Side, at: datetime | None = None) -> CostRule:
+    """Return the single rule effective for ``side`` at ``at`` or fail with the match count."""
     if not isinstance(side, Side):
         raise TypeError("side must be a Side")
-    matched = [rule for rule in rules if rule.side is side]
+    matched = [rule for rule in rules if rule.matches(side, at)]
     if len(matched) != 1:
+        moment = "any instant" if at is None else at.isoformat()
         raise ValueError(
-            f"exactly one CostRule must match side {side.value!r}; matched {len(matched)}"
+            f"exactly one CostRule must match side {side.value!r} at {moment}; "
+            f"matched {len(matched)}"
         )
     return matched[0]
 
 
-def charge_fill(rules: Sequence[CostRule], side: Side, notional: Decimal) -> FillCost:
-    """Resolve the one matching rule and charge it."""
-    return select_cost_rule(rules, side).charge(notional)
+def effective_rules(rules: Sequence[CostRule], at: datetime | None) -> tuple[CostRule, ...]:
+    """Narrow a declaration to the rules effective at one instant."""
+    return tuple(rule for rule in rules if rule.effective_at(at))
+
+
+def charge_fill(
+    rules: Sequence[CostRule], side: Side, notional: Decimal, at: datetime | None = None
+) -> FillCost:
+    """Resolve the one effective rule and charge it."""
+    return select_cost_rule(rules, side, at).charge(notional)

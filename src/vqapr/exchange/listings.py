@@ -9,11 +9,12 @@ requested conversion can round and clip with the venue's own numbers instead of 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 from decimal import Decimal
 
 from vqapr.domain.enums import Side
-from vqapr.exchange.costs import CostRule, FillCost, charge_fill
+from vqapr.exchange.costs import CostRule, FillCost, charge_fill, effective_rules
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,11 +100,22 @@ class ExchangeRulesView:
     def quantize(self, instrument_id: str, quantity: Decimal) -> Decimal:
         return self.listing(instrument_id).quantize(quantity)
 
-    def charge(self, side: Side, notional: Decimal) -> FillCost:
-        """Charge the single declared rule for ``side``; an undeclared venue charges nothing."""
+    def at(self, instant: datetime) -> ExchangeRulesView:
+        """Bind this declaration to one execution instant.
+
+        Flat rates are already instant-independent and return an equivalent view. A venue that
+        declares effective-dated bands is narrowed here, so everything downstream keeps charging
+        against a single unambiguous rule per side.
+        """
+        if not self.costs or all(rule.always_effective for rule in self.costs):
+            return self
+        return replace(self, costs=effective_rules(self.costs, instant))
+
+    def charge(self, side: Side, notional: Decimal, at: datetime | None = None) -> FillCost:
+        """Charge the single effective rule for ``side``; an undeclared venue charges nothing."""
         if not self.costs:
             return FillCost()
-        return charge_fill(self.costs, side, notional)
+        return charge_fill(self.costs, side, notional, at)
 
     @property
     def declaration_identity(self) -> tuple[object, ...]:

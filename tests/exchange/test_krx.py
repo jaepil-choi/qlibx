@@ -7,7 +7,7 @@ Every price used here is a real KRX close from ``tests/fixtures/real``. The decl
 from __future__ import annotations
 
 import json
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -21,6 +21,7 @@ from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.costs import CostRule, FillCost, charge_fill, select_cost_rule
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
+from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.venues.krx import COMMISSION_RATE, SALE_TAX_RATE, KrxExchange
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
@@ -93,6 +94,33 @@ def test_exactly_one_cost_rule_must_match_a_side() -> None:
         select_cost_rule(duplicated, Side.BUY)
     with pytest.raises(ValueError, match="exactly one CostRule"):
         charge_fill(duplicated, Side.SELL, Decimal("1"))
+
+
+def test_cost_bands_may_be_effective_dated_without_changing_flat_venues(real_close) -> None:
+    """KRX ships flat rates, but a venue may declare dated bands and stay unambiguous."""
+    at, _ = real_close
+    switch = LocalInstantDeclaration(at.date(), time(0, 0), VENUE, 0, "+09:00").instant
+    listing = KrxExchange(["A005930"]).rules.listing("A005930")
+    dated = ExchangeRulesView(
+        "krx",
+        {"A005930": listing},
+        (
+            CostRule("sell-old", Side.SELL, COMMISSION_RATE, Decimal("0.0023"), None, switch),
+            CostRule("sell-new", Side.SELL, COMMISSION_RATE, SALE_TAX_RATE, switch, None),
+        ),
+    )
+
+    before = switch - timedelta(days=1)
+    assert dated.at(before).charge(Side.SELL, Decimal("1000000"), before).tax == Decimal(
+        "2300.0000"
+    )
+    assert dated.at(at).charge(Side.SELL, Decimal("1000000"), at).tax == Decimal("2000.000")
+
+    with pytest.raises(ValueError, match="exactly one CostRule"):
+        dated.charge(Side.SELL, Decimal("1000000"))
+
+    flat = KrxExchange(["A005930"]).rules
+    assert flat.at(at) is flat, "a flat venue needs no narrowing"
 
 
 def test_real_prices_produce_whole_share_orders_that_fit_cash(real_close) -> None:

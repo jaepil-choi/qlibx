@@ -522,7 +522,7 @@ class SimulationFlow:
                 quantity_targets=quantities,
                 cash_target=pending.intent.cash_target,
                 budget=pending.intent.budget,
-                rules=self._exchange.rules,
+                rules=self._exchange.rules.at(pending.target.target_at),
             ),
         )
         fills = self._due_boundary(

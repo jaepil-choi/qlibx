@@ -62,8 +62,20 @@ nautilus도 같은 구조다. `Instrument.make_qty(value, round_down=True)`가 v
 ### 미구현이며 주장하지 않는 것
 
 호가단위, 상하한가, 동시호가 미시구조, 호가잔량, 유동성/참여율 기반 부분체결, 차입·대차, 증거금, 장중
-행동. 비용은 선언된 수수료·세금 외에 **없는 것이지 0으로 측정된 것이 아니다.** 세율의 effective-dating도
-아직 없다(§6.3 표의 "effective-dated fee/tax" 대비 현재는 고정 요율).
+행동. 비용은 선언된 수수료·세금 외에 **없는 것이지 0으로 측정된 것이 아니다.**
+
+### 요율은 고정이되 effective-dating은 실제로 동작한다
+
+KRX profile이 들고 나오는 기본 요율은 고정이다. 그러나 `CostRule`은 `effective_from`/`effective_to`
+반열림 구간을 선언할 수 있고 `ExchangeRulesView.at(instant)`가 그 시각의 band로 좁힌다. 미사용 인자를 둔
+것이 아니라 **동작하는 기능**이며 테스트가 이를 확인한다.
+
+- 고정 요율만 선언한 venue는 `at()`이 자기 자신을 그대로 돌려주므로 비용이 없다.
+- dated band를 선언하면 시각별로 다른 세율이 적용된다(예: 23bp → 20bp 전환).
+- dated band를 instant 없이 조회하면 매칭 0으로 **실패한다.** 시점을 모르면 요율을 고를 수 없다는 것이
+  묵시적 기본값보다 낫다.
+
+실제 세율 이력 데이터를 등록해 쓰려면 `CostRule` 튜플을 그 이력으로 만들어 주면 되고, 계약 변경은 없다.
 
 ### 확장점 경계
 
@@ -79,7 +91,7 @@ listing과 cost는 사용자가 선언할 수 있지만 체결 의미를 조용�
 
 ```text
 uv run pytest -q
-225 passed
+226 passed
 
 uv run ruff check src tests scripts showcases
 All checks passed!
@@ -115,7 +127,8 @@ uv run ruff format --check src tests scripts showcases
 
 ## 한계와 후속
 
-- 세율 effective-dating이 없다. 과거 구간을 정확히 재현하려면 `CostRule`에 유효 기간이 필요하다.
+- KRX 기본 요율은 고정값이다. 실제 한국 세율 이력을 반영하려면 그 이력을 `CostRule` band로 선언해야
+  하며, 이 package는 그 이력 데이터를 들고 있지 않다.
 - fully-invested weight book(`cash_target = 0`)은 Decimal 유한 정밀도에서 NAV를 미세하게 초과할 수 있어
   mutation 전에 거부된다. 이는 올바른 fail-closed 동작이며 show_004는 2% 현금 버퍼를 둔다.
 - `plan_orders`의 clipping은 §6.2가 말한 빠른 경로/느린 경로를 하나의 결정적 경로로 구현했다. 결과는

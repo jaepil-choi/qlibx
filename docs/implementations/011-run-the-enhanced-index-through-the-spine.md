@@ -62,6 +62,20 @@ local reimplementation.
 and compared to the committed `AccountSnapshot`. The two are separate records of the same history;
 a mismatch aborts.
 
+**Monitoring is read back, not assumed.** Registering a constraint set proves nothing by itself. The
+set is enforced at the decision -- an intent failing its projected bounds stops the run, so 21
+completed rebalances are 21 compliant intents -- while monitoring is evidence over each marked
+account version and never gates anything. Reading it back is what turned an implicit claim into a
+result: on 10 of 21 monitored occurrences the marked book sits above its single-name ceiling.
+
+That is a property of the constraint, not a defect. `single_name_cap` is defined relative to the
+index, and the index moves: the book is built at 09:00 against the previous session's weight and
+marked at 16:30 against the current one. On 2026-04-02 the marked weight is `0.32670` -- the
+previous session's ceiling `0.32680` less whole-share rounding -- against that day's `0.32300`. A
+benchmark-relative cap is held at each decision, not continuously between them. `no_short` has no
+moving reference, so a marked short position would mean the long-only account authority failed;
+that case aborts, and it never fired.
+
 ## Trade-offs
 
 **The pinned name is the least-slack holding.** Freezing the alphabetically first name froze a name
@@ -87,17 +101,24 @@ runs use the existing four roles and the existing `SAME_DAY` fill convention.
 
 ## Validation
 
-- `uv run pytest -q` — **292 passed** (from 288 at the milestone start; +4 covering the accessor,
-  the accepted-intent shape and the widened export list).
+- `uv run pytest -q` — **292 passed** (from 288 at the milestone start). The four new tests cover
+  the accessor's ordering and its refusal, its hand-off into publication, and the real
+  accepted-intent shape; the widened export list is pinned by the existing boundary test, which was
+  extended rather than added to.
 - `uv run ruff check src tests scripts showcases` and `ruff format --check` — clean, 188 files.
 - `uv run python showcases/show_005_enhanced_index/run.py` — 22 sessions, 21 callbacks, 21 published
   alpha occurrences, two subscribed allocation inputs, **10 freezes returned verbatim and 10
-  released** by the optimizer's own refusal, **67 whole-share fills**, commission 227,197.80 and
-  sale tax 276,818.20, journal replay equal to the committed Account at 518,988,184.00, final NAV
-  1,168,772,684.00, and two replicates producing identical SHA-256 digests.
+  released** by the optimizer's own refusal, 21 monitored occurrences with **0 marked short
+  positions and 10 cap-drift findings** (worst excess 0.0078 over a 0.3212 ceiling), **67
+  whole-share fills**, commission 227,197.80 and sale tax 276,818.20, journal replay equal to the
+  committed Account at 518,988,184.00, final NAV 1,168,772,684.00, and two replicates producing
+  identical SHA-256 digests.
 
 ## What is still open
 
+- A benchmark-relative cap cannot be held between rebalances while the benchmark moves. Whether the
+  ceiling should be pinned at the decision, re-based at each mark, or given an explicit drift
+  allowance is a product decision, not a code fix, and nothing here makes it.
 - The coverage-scoped weight-sum tolerance never binds against the committed fixture, so its
   allowance is still asserted only by restating its own formula.
 - A caller passing `cash_range=(0, 1)` can be refused on a problem whose exact answer is `cash = 0`,

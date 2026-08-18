@@ -532,6 +532,56 @@ def _replay(result: Any) -> dict[str, Any]:
     }
 
 
+def _monitoring(result: Any) -> dict[str, Any]:
+    """Read back the monitoring verdict the run produced over every marked account version.
+
+    Registering a constraint set proves nothing by itself. The set is *enforced* at the decision:
+    an intent that fails its projected bounds is refused and the run stops, so 21 completed
+    rebalances are 21 compliant intents. Monitoring is the other half, and it is evidence rather
+    than a gate -- a failing finding does not stop anything, so it has to be read to exist.
+
+    A drift finding here is not a defect. `single_name_cap` is defined relative to the index, and
+    the index moves: the book is built at 09:00 against the previous session's weight and marked at
+    16:30 against the current one, so a position sized exactly to yesterday's ceiling sits above
+    today's. That is a property of benchmark-relative caps between rebalances, and it is reported
+    rather than smoothed away.
+
+    `no_short` is different. It has no moving reference, and a marked short position in a long-only
+    account would mean the account authority itself failed, so that one aborts.
+    """
+    reports = [
+        occurrence.result.report
+        for occurrence in result.occurrences
+        if getattr(getattr(occurrence, "result", None), "report", None) is not None
+    ]
+    if not reports:
+        raise AssertionError("the run produced no monitoring evidence")
+
+    breaches = 0
+    drift: dict[str, tuple[Decimal, Decimal, Decimal]] = {}
+    for report in reports:
+        for finding in report.findings:
+            if finding.passed:
+                continue
+            if finding.constraint_id == "no-short":
+                raise AssertionError(
+                    "a long-only account marked a short position: "
+                    f"{finding.measured} against {finding.bound}"
+                )
+            breaches += 1
+            seen = drift.get(finding.constraint_id)
+            if seen is None or finding.excess > seen[0]:
+                drift[finding.constraint_id] = (finding.excess, finding.measured, finding.bound)
+    return {
+        "monitoring_occurrences": len(reports),
+        "monitoring_drift_findings": breaches,
+        "worst_drift": {
+            name: f"{measured} against {bound}, excess {excess}"
+            for name, (excess, measured, bound) in sorted(drift.items())
+        },
+    }
+
+
 def _memory(result: Any) -> dict[str, Any]:
     state = result.final_state
     return dict(state.load_model_state(state.current_model_state_ref) or {})
@@ -705,6 +755,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     alpha_memory = _memory(alpha_result)
     index_memory = _memory(index_result)
     index_replay = _replay(index_result)
+    index_monitoring = _monitoring(index_result)
 
     if not index_replay["whole_shares_only"]:
         raise AssertionError("the KRX profile must hold whole shares only")
@@ -750,6 +801,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "frozen_occurrences": index_memory.get("frozen_occurrences"),
             "freezes_released": index_memory.get("freezes_released"),
             "final_active_norm": index_memory.get("active_norm"),
+            **index_monitoring,
             **index_replay,
         },
     }
@@ -787,6 +839,11 @@ def main() -> None:
     print(f"shipped constraints     : {', '.join(index['shipped_constraints'])}")
     print(f"rebalances              : {index['rebalances']}")
     print(f"frozen / released       : {index['frozen_occurrences']} / {index['freezes_released']}")
+    print(
+        f"monitored occurrences   : {index['monitoring_occurrences']} "
+        f"({index['monitoring_drift_findings']} cap-drift findings, 0 short positions)"
+    )
+    print(f"worst drift             : {json.dumps(index['worst_drift'], sort_keys=True)}")
     print(f"dealt fills             : {index['dealt_fills']} (whole shares)")
     print(f"commission / sale tax   : {index['commission']} / {index['sale_tax']}")
     print(f"replayed == committed   : {index['replayed_cash']} == {index['committed_cash']}")

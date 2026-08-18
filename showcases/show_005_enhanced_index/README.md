@@ -22,6 +22,7 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
 | Long-only is emergent | The alpha is signed and dollar-neutral. Nothing strips the short leg; the registered `no_short` intersected with `single_name_cap` does |
 | The bounds are the shipped constraint set's own | `optimize` is called with `context.constraint_bounds` — what the registered `NoShort` and `SingleNameCap` projected for that occurrence — not with a local copy of the same rule |
 | Frozen names survive exactly, or the freeze is refused | Each callback pins the holding with the least slack against its own upper bound. 10 callbacks got that holding back verbatim; on 10 others overnight drift had pushed it past its cap, and `optimize`'s own refusal is what released the freeze |
+| The constraint set is enforced, and monitored separately | 21 completed rebalances are 21 intents that passed their projected bounds — a failing intended finding stops the run. The marked account is then read back at every monitoring occurrence, and its findings are reported rather than assumed |
 | The account is verified against its own journal | Cash and every position are rebuilt from the committed fill journal and compared to the committed `AccountSnapshot`; a mismatch aborts the run |
 | Output is deterministic | The whole pipeline runs twice into separate projects, and both the reported outcome and the SHA-256 artifact digests must match |
 
@@ -51,6 +52,9 @@ KRX slice (22 sessions, 21 callbacks, 4 instruments).
 | rebalances | 21 |
 | freezes returned verbatim | 10 |
 | freezes released as out of box | 10 |
+| monitored occurrences | 21 |
+| marked short positions | 0 |
+| cap-drift findings between rebalances | 10 (worst excess 0.0078 over a 0.3212 ceiling) |
 | dealt fills | 67 (whole shares) |
 | commission / sale tax | 227,197.80 / 276,818.20 |
 | replayed cash == committed cash | 518,988,184.00 |
@@ -70,5 +74,15 @@ refuses it. The refusal itself is proved in `tests/portfolio/test_optimize.py`, 
 The subscribed alpha is validated at consumption time as a signed allocation summing to zero within
 a declared neutrality tolerance. No constraint owns that input, so the consuming Strategy checks it
 before a single weight moves.
+
+**The cap-drift findings are the honest result, not a defect.** `single_name_cap` is defined
+relative to the index, and the index moves. The book is built at 09:00 against the previous
+session's weight and marked at 16:30 against the current one, so a position sized exactly to
+yesterday's ceiling sits above today's. On 2026-04-02 the marked weight is `0.32670`, which is
+yesterday's ceiling `0.32680` less whole-share rounding, against today's `0.32300`. A
+benchmark-relative cap is held at each decision, not continuously between them, and this showcase
+reports that rather than smoothing it away. `no_short` has no moving reference, so a marked short
+position would mean the long-only account authority failed — that one aborts the run, and it never
+fired.
 
 `outputs/` is gitignored, and each replicate builds its own project under it.

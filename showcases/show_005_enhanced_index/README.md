@@ -1,7 +1,8 @@
 # show_005 — enhanced index over a published alpha
 
-Publishes a signed alpha as an allocation dataset, then constructs a benchmark-relative enhanced
-index that consumes both the published alpha and the committed benchmark panel.
+An alpha run publishes its allocation as an ordinary dataset; a second run subscribes to that
+dataset **and** to the committed benchmark panel and builds a benchmark-relative enhanced index on
+the KRX execution profile. Both halves are real runs on the public spine.
 
 Reproduce:
 
@@ -11,67 +12,63 @@ uv run python showcases/show_005_enhanced_index/run.py
 
 It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor warehouse.
 
-## What this actually demonstrates
+## What this demonstrates
 
 | Claim | How it is shown |
 |---|---|
-| Publication is a dataset, not a new subsystem | The alpha allocation is published through `publish_run_allocation`, which shares the staging, atomic-exposure and registration body with `materialize` |
-| Two allocation panels combine into one construction | The construction reads the published alpha panel **and** the committed benchmark panel each session and forms `desired = bench + s · active` |
-| Long-only is emergent | The alpha's minimum weight is `-0.02`. Nothing strips the short leg; `no_short` intersected with a per-name cap does |
-| Frozen names survive exactly, or the freeze is refused | 20 of 22 sessions freeze a held name and get it back verbatim. On one session price drift pushed the holding past its cap; the call is made anyway and `optimize`'s own refusal is what releases the freeze, so the guard is exercised rather than duplicated |
-| Output is deterministic | Two clean runs produce identical SHA-256 manifests |
+| Publication is a dataset, not a new subsystem | The alpha run's callback evidence goes straight to `publish_run_allocation`, which shares the staging, atomic-exposure and registration body with `materialize` |
+| A run subscribes to two allocation inputs | `EnhancedIndex.requirements()` declares `benchmark_weight_daily` and the published `alpha_allocation` as ordinary `DataRequirement`s; both arrive through the same point-in-time window, so the combination happens on the subscription path |
+| The stamp is derived, so the chain is honest | The alpha's `available_at` comes from its own reads; the index callback runs at 09:00, after the 08:30 alpha decision it consumes |
+| Long-only is emergent | The alpha is signed and dollar-neutral. Nothing strips the short leg; the registered `no_short` intersected with `single_name_cap` does |
+| The bounds are the shipped constraint set's own | `optimize` is called with `context.constraint_bounds` — what the registered `NoShort` and `SingleNameCap` projected for that occurrence — not with a local copy of the same rule |
+| Frozen names survive exactly, or the freeze is refused | Each callback pins the holding with the least slack against its own upper bound. 10 callbacks got that holding back verbatim; on 10 others overnight drift had pushed it past its cap, and `optimize`'s own refusal is what released the freeze |
+| The account is verified against its own journal | Cash and every position are rebuilt from the committed fill journal and compared to the committed `AccountSnapshot`; a mismatch aborts the run |
+| Output is deterministic | The whole pipeline runs twice into separate projects, and both the reported outcome and the SHA-256 artifact digests must match |
 
 ## What this does NOT demonstrate
 
-This matters more than the table above, because a showcase that overstates itself is worse than a
-smaller one that does not.
-
-- **This is not a `run()`.** There is no `RunDefinition`, no `preflight_run`, no Account, no
-  `plan_orders`, and no execution profile. Position sizing and cash are hand-rolled in `main()`. The
-  execution spine is exercised by `show_003` and `show_004`; this showcase exercises the
-  **construction and publication** path only.
-- **Reads are raw file reads, not `DataRequirement` subscriptions.** The published dataset is
-  registered in the workspace, but this script reads the parquet directly rather than through a
-  point-in-time window, so nothing here proves PIT enforcement. That is proved in
-  `tests/flow/test_publish_allocation.py`, which reads a published allocation back through a real
-  `DataRequirement` inside a point-in-time window.
-- **The cap is inlined here, not the shipped `SingleNameCap`.** `NoShort` is the real shipped
-  constraint; the per-name ceiling is recomputed locally because this script has no point-in-time
-  window to project through. The acceptance suite drives the shipped constraint for real, projecting `NoShort` and
-  `SingleNameCap` through a point-in-time window and intersecting them with `merged_constraint_bounds`,
-  so the criteria are not proved against this stand-in.
-- **The cash replay is a consistency check, not independent verification.** It recomputes cash from
-  the same journal the same loop wrote, so it catches bookkeeping drift within the script and
-  nothing more. `show_003` performs the genuinely independent replay against a committed Account.
-- **`tracking_error` here is the L2 norm of active weights**, not a realised or forecast tracking
-  error. It is recorded as monitoring evidence only and never re-enters the construction.
+- **No cost model beyond the declared KRX profile.** 3bp commission both sides and 20bp sale tax on
+  sells, whole shares, long only. No ticks, price limits, queue position, liquidity or borrow.
+- **`active_norm` is the L2 norm of active weights**, not a realised or forecast tracking error. It
+  is recorded after the decision and never re-enters the construction.
+- **No ex-ante tracking-error constraint.** A portfolio quadratic has no representation in
+  per-instrument bounds, so it is monitoring only.
+- **Four names are not an index.** The benchmark is a four-constituent slice of a two-hundred-name
+  index, so its weights sum to roughly `0.56`, not `1`. The uncovered remainder is cash.
+- **The alpha is a demonstration signal**, a demeaned cross-sectional cheapness tilt scaled to a 4%
+  gross active budget. It exists to be signed and dollar-neutral, not to be profitable.
 
 ## Results
 
+Last verified 2026-08-18 against `vqapr-0.1.0+show-005-working-tree`, on the committed April 2026
+KRX slice (22 sessions, 21 callbacks, 4 instruments).
+
 | Metric | Value |
 |---|---|
-| sessions | 22 |
-| allocation inputs combined | published `alpha_allocation` + committed `benchmark_weight_daily` |
-| alpha minimum weight | −0.020000000000 |
-| frozen occurrences | 20 |
-| freeze released (holding drifted past its cap) | 1 |
-| position changes | 41 (whole units) |
-| closing cash | 499,080,100.0000 |
-| replayed cash | 499,080,100.0000 (consistency check) |
-| active-weight norm | 1.045% → 0.926% |
+| alpha occurrences published | 21 |
+| allocation inputs subscribed | `alpha_allocation` + `benchmark_weight_daily` |
+| shipped constraints registered | `no_short`, `single_name_cap` (cap 0.10 above index weight) |
+| rebalances | 21 |
+| freezes returned verbatim | 10 |
+| freezes released as out of box | 10 |
+| dealt fills | 67 (whole shares) |
+| commission / sale tax | 227,197.80 / 276,818.20 |
+| replayed cash == committed cash | 518,988,184.00 |
+| final NAV | 1,168,772,684.00 (from 1,000,000,000) |
+| final active-weight L2 norm | 0.0118 |
+
+The NAV gain is what the committed April 2026 slice did: `A000660` closed +44.0% and `A005930`
++16.3% over the window. Roughly 56% of the book is invested, so most of the move is the index slice
+itself, not the tilt.
 
 ## Reading the numbers honestly
 
-The active view is **dollar-neutral by construction** and scaled to a 4% gross active budget, so it
-moves weight between names without changing the total. That is what makes it an *active* view rather
-than a second allocation competing with the benchmark.
-
-The benchmark covers four constituents of a two-hundred-name index, so its weights sum to roughly
-`0.549`, not `1`. The uncovered remainder is cash, not an error — the weight-sum invariant is
-coverage-scoped for exactly this reason.
-
 `current` is quantized onto the canonical grid before `optimize` is called, which is what a caller
-must do: a raw NAV-derived ratio carries 28 significant digits and the bound-exponent guard refuses
-it. The refusal itself is proved in `tests/portfolio/test_optimize.py`, not here.
+must do: a raw NAV-derived ratio carries far more digits than the grid and the bound-exponent guard
+refuses it. The refusal itself is proved in `tests/portfolio/test_optimize.py`, not here.
 
-`outputs/` is gitignored.
+The subscribed alpha is validated at consumption time as a signed allocation summing to zero within
+a declared neutrality tolerance. No constraint owns that input, so the consuming Strategy checks it
+before a single weight moves.
+
+`outputs/` is gitignored, and each replicate builds its own project under it.

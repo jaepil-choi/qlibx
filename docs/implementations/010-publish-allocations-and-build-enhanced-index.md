@@ -96,7 +96,9 @@ code. The ensemble's own run is a later milestone; this one proves multi-input c
 
 - `uv run pytest -q` — **288 passed** (from 226 at the milestone start).
 - `uv run ruff check src tests scripts showcases` and `ruff format` — clean. Package imports.
-- `uv run python showcases/show_005_enhanced_index/run.py` — 22 sessions, two allocation panels
+- `uv run python showcases/show_005_enhanced_index/run.py` (historical: the showcase was rebuilt on
+  the run spine in record 011, so these figures are not reproducible from the current tree) — 22
+  sessions, two allocation panels
   combined, alpha minimum weight `-0.02`, **20 frozen occurrences returned verbatim and 1 freeze
   released** when price drift pushed a holding past its cap, **41 whole-unit position changes**,
   journal replay matching running cash exactly, **active-weight L2 norm 1.045% → 0.926%**, and two
@@ -119,10 +121,13 @@ construction and publication path: the publish round-trip including the read hal
 `DataRequirement` inside a point-in-time window (`tests/flow/test_publish_allocation.py`), and the
 construction under the shipped constraint set across all 22 committed sessions.
 
+All three were delivered afterwards in record 011, which also records the defect the first real run
+through the spine exposed: the publish writer could not consume a real callback's evidence.
+
 ## Open follow-ups
 
-- The showcase's execution-spine segment, subscription through `DataRequirement`, and an independent
-  Account replay — the three story-8 deliverables above.
+- ~~The showcase's execution-spine segment, subscription through `DataRequirement`, and an
+  independent Account replay — the three story-8 deliverables above.~~ Closed by record 011.
 - The coverage-scoped weight-sum tolerance never binds against the committed fixture, so its
   allowance is asserted only by restating its own formula.
 - A caller passing `cash_range=(0, 1)` can be refused on a problem whose exact answer is `cash = 0`,

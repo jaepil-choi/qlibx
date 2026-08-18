@@ -1,20 +1,25 @@
-"""Publish a signed alpha as an allocation dataset, then build an enhanced index from it.
+"""An alpha run, its published allocation, and an enhanced index built on top — through the spine.
 
-    alpha weights  ->  published allocation dataset (derived stamp, lineage)
-                                  |
-    committed benchmark panel  --- +-->  desired = bench + s * active  ->  projection
+    alpha run (Academic)  ->  publish_run_allocation  ->  alpha_allocation dataset
+                                                                |
+    committed benchmark panel  ------------------------------- + -->  enhanced index run (KRX)
+                                                                          desired = bench + s·active
+                                                                          projected onto NoShort
+                                                                          and SingleNameCap
 
-**Scope, stated up front so the code and its README agree.** This script is *not* a `run()`. There
-is no `RunDefinition`, no `preflight_run`, no Account, no `plan_orders` and no execution profile,
-and it does not read through a `DataRequirement` -- both panels are read straight off parquet.
-Position sizing and cash are hand-rolled in `main()`. What it does demonstrate is the construction
-and publication path: publishing an allocation through the same machinery that materialises a
-DataModel, combining two allocation panels into one `desired`, long-only emerging from the
-constraint set rather than from the input, and the optimizer's own frozen-box refusal deciding when
-a freeze must be released. The execution spine is exercised by `show_003` and `show_004`; the
-point-in-time subscription is proved in `tests/flow/test_publish_allocation.py`.
+Both halves are ordinary runs: `RunDefinition`, `preflight_run`, `run`, a real `Account`, real order
+planning and the declared execution profile. The enhanced-index Strategy reads **two allocation
+inputs** — the committed benchmark and the published alpha — through ordinary `DataRequirement`
+subscriptions inside its point-in-time window, so the combination is proved on the subscription
+path rather than by reading parquet beside it. Its bounds are the ones the registered shipped
+constraint set projected for that occurrence, not a second copy of the same rule.
 
-See README.md for the full list of what this does and does not prove.
+The fill journal the second run committed is replayed independently against the committed
+`Account`, and the whole pipeline runs twice into separate projects so the artifact digests can be
+compared.
+
+Everything is real KRX data committed under `tests/fixtures/real`. Nothing here invents a price or
+an index weight.
 
 Reproduce::
 
@@ -26,321 +31,768 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-from datetime import datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import duckdb
 
-from vqapr.constraints.builtin import NoShort
-from vqapr.constraints.constraint import ConstraintBounds
-from vqapr.flow.materialize import AllocationPublicationSpec, publish_run_allocation
-from vqapr.portfolio.allocation import (
-    AllocationInvariants,
-    AllocationSign,
-    validate_allocation,
+from vqapr.public import (
+    SHIPPED_CONSTRAINTS,
+    AccountMode,
+    AccountSnapshot,
+    AllocationPublicationSpec,
+    ComponentKind,
+    ConstraintSet,
+    DataRequirement,
+    DatasetRegistration,
+    ExecutionInputRegistration,
+    ExecutionTableSpec,
+    FillConvention,
+    FillSelector,
+    LocalInstantDeclaration,
+    MonitoringPolicy,
+    OperationAgenda,
+    OperationOccurrence,
+    OperationRole,
+    RowsLookback,
+    RunDefinition,
+    SourceSpec,
+    StrategyConfig,
+    ValuationConfig,
+    callback_evidence,
+    component_ref,
+    preflight_run,
+    publish_run_allocation,
+    register_agenda,
+    register_component,
+    register_dataset,
+    register_execution_input,
+    register_monitoring_policy,
+    register_strategy_config,
+    register_valuation_config,
+    run,
+    shipped_constraint_path,
 )
-from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, OptimizeResult, optimize
-from vqapr.workspace import Workspace
 
 HERE = Path(__file__).resolve().parent
 FIXTURE = HERE.parents[1] / "tests" / "fixtures" / "real"
 OUTPUTS = HERE / "outputs"
-PROJECT = OUTPUTS / "project"
 
-CAP = Decimal("0.10")
-SCALE = Decimal("0.5")
-INITIAL_NAV = Decimal("1000000000")
+VENUE = "Asia/Seoul"
+OFFSET = "+09:00"
+INITIAL_CASH = Decimal("1000000000")
+CAP = "0.10"
+"""Single-name cap above the index weight, in the shipped constraint's own config spelling."""
 
-
-def _reset() -> None:
-    if OUTPUTS.exists():
-        shutil.rmtree(OUTPUTS)
-    PROJECT.mkdir(parents=True)
+VERIFIED_AGAINST = "vqapr-0.1.0+show-005-working-tree"
+LAST_VERIFIED_AT = "2026-08-18"
 
 
-def _panel(path: Path, field: str) -> dict[datetime, dict[str, Decimal]]:
+def _sessions(path: Path) -> list[date]:
     con = duckdb.connect()
     try:
-        rows = con.execute(
-            f"SELECT available_at, instrument, {field} FROM read_parquet('{path.as_posix()}')"
-            " ORDER BY 1, 2"
-        ).fetchall()
+        return [
+            row[0]
+            for row in con.execute(
+                f"""
+                SELECT DISTINCT CAST(available_at AT TIME ZONE '{VENUE}' AS DATE) AS session
+                FROM read_parquet('{path.as_posix()}') ORDER BY session
+                """
+            ).fetchall()
+        ]
     finally:
         con.close()
-    panel: dict[datetime, dict[str, Decimal]] = {}
-    for available_at, instrument, value in rows:
-        panel.setdefault(available_at, {})[instrument] = Decimal(str(value))
-    return panel
 
+
+def _universe(path: Path) -> tuple[str, ...]:
+    con = duckdb.connect()
+    try:
+        return tuple(
+            row[0]
+            for row in con.execute(
+                f"SELECT DISTINCT instrument FROM read_parquet('{path.as_posix()}') ORDER BY 1"
+            ).fetchall()
+        )
+    finally:
+        con.close()
+
+
+def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
+    return OperationAgenda.from_occurrences(
+        agenda_id=agenda_id,
+        role=role,
+        timezone=VENUE,
+        occurrences=tuple(
+            OperationOccurrence(
+                f"{agenda_id}-{day.isoformat()}",
+                role,
+                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
+            )
+            for day in days
+        ),
+        provenance="show_005 committed KRX sessions",
+    )
+
+
+_SOURCE_REFS = '''
+
+def _source_refs(context):
+    """Exactly the sources this callback read, in first-read order.
+
+    The Flow independently recomputes this from the window and refuses any intent whose provenance
+    disagrees, so it must be derived from the accesses rather than declared.
+    """
+    from vqapr.public import IntentSourceRef
+
+    seen = {}
+    for access in context.window.accesses:
+        seen.setdefault(access.source_id, access.source_digest)
+    return tuple(IntentSourceRef(source, digest) for source, digest in seen.items())
+'''
+
+
+_ALPHA_SOURCE = (
+    '''"""A dollar-neutral cross-sectional view, published afterwards as an allocation input."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from uuid import NAMESPACE_URL, uuid5
+
+from vqapr.public import (
+    QUANTUM,
+    Budget,
+    DataRequirement,
+    EconomicPortfolioIntent,
+    NoDecision,
+    PortfolioDirection,
+    PortfolioTarget,
+    RowsLookback,
+    StrategyModel,
+)
 
 ACTIVE_BUDGET = Decimal("0.04")
-"""Total absolute active weight the tilt is allowed to express."""
+"""Total absolute active weight the view is allowed to express."""
+
+BUDGET = Budget(
+    PortfolioDirection.SIGNED,
+    Decimal("0"),
+    Decimal("2"),
+    Decimal("-1"),
+    Decimal("1"),
+)
 
 
-def _alpha(prices: dict[datetime, dict[str, Decimal]]) -> dict[datetime, dict[str, Decimal]]:
-    """A signed, dollar-neutral cross-sectional view scaled to a declared active budget.
+class SignedAlpha(StrategyModel):
+    """Cheap names long, expensive names short, demeaned so the legs cancel."""
 
-    Demeaning is what makes it an *active* view rather than a second allocation: the legs sum to
-    zero, so adding it to the benchmark moves weight between names without changing the total.
-    """
-    panel: dict[datetime, dict[str, Decimal]] = {}
-    for session, closes in prices.items():
-        mean = sum(closes.values()) / len(closes)
-        raw = {instrument: (mean - close) / mean for instrument, close in closes.items()}
-        centre = sum(raw.values()) / len(raw)
-        centred = {instrument: value - centre for instrument, value in raw.items()}
-        gross = sum(abs(value) for value in centred.values())
-        scale = ACTIVE_BUDGET / gross if gross > 0 else Decimal(0)
-        panel[session] = {
-            instrument: (value * scale).quantize(QUANTUM) for instrument, value in centred.items()
-        }
-    return panel
-
-
-def _bounds(benchmark: dict[str, Decimal]) -> ConstraintBounds:
-    instruments = tuple(sorted(benchmark))
-    no_short = NoShort().project(None, instruments)  # type: ignore[arg-type]
-    return ConstraintBounds(
-        dict(no_short.lower),
-        {i: min(no_short.upper[i], max(CAP, benchmark[i]).quantize(QUANTUM)) for i in instruments},
-    )
-
-
-def _construct(
-    benchmark: dict[str, Decimal],
-    alpha: dict[str, Decimal],
-    current_weights: dict[str, Decimal],
-    frozen: frozenset[str],
-) -> OptimizeResult:
-    """desired = bench + s * active, projected onto the constraint set.
-
-    ``current_weights`` are NAV-derived ratios quantized onto the canonical grid *before* the call.
-    That is deliberate: the raw ratio carries 28 significant digits and the bound-exponent guard
-    would refuse it, so the showcase exercises the guard rather than dodging it.
-    """
-    desired = {
-        instrument: (weight + SCALE * alpha.get(instrument, Decimal(0))).quantize(QUANTUM)
-        for instrument, weight in benchmark.items()
-    }
-    bounds = _bounds(benchmark)
-    return optimize(
-        desired=desired,
-        current={k: v.quantize(QUANTUM) for k, v in current_weights.items()},
-        lower=dict(bounds.lower),
-        upper=dict(bounds.upper),
-        frozen=frozen,
-        cash_range=(Decimal("0"), Decimal("1")),
-    )
-
-
-def _active_norm(weights: dict[str, Decimal], benchmark: dict[str, Decimal]) -> Decimal:
-    """L2 norm of the active weights, recorded post hoc as monitoring evidence only.
-
-    This is not a realised or forecast tracking error; it never re-enters the construction.
-    """
-    active = [
-        weights.get(instrument, Decimal(0)) - benchmark.get(instrument, Decimal(0))
-        for instrument in set(weights) | set(benchmark)
-    ]
-    return sum((value * value for value in active), Decimal(0)).sqrt()
-
-
-def _manifest(paths: list[Path]) -> dict[str, str]:
-    digests: dict[str, str] = {}
-    for path in sorted(paths):
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        digests[path.name] = f"sha256:{digest}"
-    return digests
-
-
-def _publish_alpha(project: Path, alpha: dict[datetime, dict[str, Decimal]]) -> Path:
-    """Publish the signed alpha as an allocation dataset, stamped from its own reads."""
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class _Access:
-        max_available_at: datetime | None
-
-    @dataclass(frozen=True)
-    class _Target:
-        instrument_id: str
-        weight: Decimal
-
-    @dataclass(frozen=True)
-    class _Intent:
-        targets: tuple[_Target, ...]
-
-    @dataclass(frozen=True)
-    class _Evidence:
-        run_identity: str
-        cutoff: datetime
-        strategy_accesses: tuple[_Access, ...]
-        decision: object
-
-    evidences = [
-        _Evidence(
-            "alpha-run",
-            session,
-            (_Access(session),),
-            _Intent(tuple(_Target(i, w) for i, w in sorted(view.items()))),
+    def requirements(self):
+        return (
+            DataRequirement.of(
+                "show005-alpha", "price_daily", fields=("close",), lookback=RowsLookback(1)
+            ),
         )
-        for session, view in sorted(alpha.items())
-    ]
-    result = publish_run_allocation(
-        project, AllocationPublicationSpec.of("alpha_allocation"), evidences
+
+    def on_occurrence(self, context):
+        rows = context.window.observations(self.requirements()[0]).rows
+        closes = {
+            str(row["instrument"]): row["close"] for row in rows if row["close"] is not None
+        }
+        if len(closes) < 2:
+            return NoDecision("a cross-sectional view needs at least two names")
+
+        mean = sum(closes.values()) / len(closes)
+        raw = {name: (mean - close) / mean for name, close in closes.items()}
+        centre = sum(raw.values()) / len(raw)
+        centred = {name: value - centre for name, value in raw.items()}
+        gross = sum(abs(value) for value in centred.values())
+        if gross == 0:
+            return NoDecision("the cross-section is flat")
+
+        scale = ACTIVE_BUDGET / gross
+        weights = {
+            name: (value * scale).quantize(QUANTUM) for name, value in centred.items()
+        }
+        history = dict(self.memory or {})
+        history["views"] = int(history.get("views", 0)) + 1
+        self.memory = history
+
+        return EconomicPortfolioIntent(
+            uuid5(NAMESPACE_URL, "show005/alpha/" + context.occurrence.occurrence_id),
+            "show005-alpha",
+            tuple(PortfolioTarget(name, weight=w) for name, w in sorted(weights.items())),
+            Decimal(1) - sum(weights.values()),
+            BUDGET,
+            _source_refs(context),
+            context.account.version,
+            None,
+        )
+'''
+    + _SOURCE_REFS
+)
+
+
+_ENHANCED_SOURCE = (
+    '''"""An enhanced index built from two subscribed allocation inputs."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from uuid import NAMESPACE_URL, uuid5
+
+from vqapr.public import (
+    QUANTUM,
+    AllocationInvariants,
+    AllocationSign,
+    Budget,
+    DataRequirement,
+    EconomicPortfolioIntent,
+    NoDecision,
+    OptimizeRefusal,
+    PortfolioDirection,
+    PortfolioTarget,
+    RowsLookback,
+    StrategyModel,
+    optimize,
+    validate_allocation,
+)
+
+SCALE = Decimal("0.5")
+"""How much of the active view the index is tilted by."""
+
+NEUTRALITY = Decimal("0.000000001")
+"""What "dollar neutral" is allowed to mean once the view lands on the canonical grid."""
+
+BUDGET = Budget(
+    PortfolioDirection.LONG_ONLY,
+    Decimal("0"),
+    Decimal("1"),
+    Decimal("0"),
+    Decimal("1"),
+)
+
+
+class EnhancedIndex(StrategyModel):
+    """desired = benchmark + SCALE·active, projected onto the projected constraint set."""
+
+    def __init__(self, *, benchmark_dataset_id: str, alpha_dataset_id: str) -> None:
+        self._benchmark_dataset_id = benchmark_dataset_id
+        self._alpha_dataset_id = alpha_dataset_id
+
+    def requirements(self):
+        return (
+            DataRequirement.of(
+                "show005-index",
+                self._benchmark_dataset_id,
+                fields=("benchmark_weight",),
+                lookback=RowsLookback(1),
+            ),
+            DataRequirement.of(
+                "show005-index",
+                self._alpha_dataset_id,
+                fields=("weight",),
+                lookback=RowsLookback(1),
+            ),
+            DataRequirement.of(
+                "show005-index", "price_daily", fields=("close",), lookback=RowsLookback(1)
+            ),
+        )
+
+    def _panel(self, context, requirement, field):
+        return {
+            str(row["instrument"]): row[field]
+            for row in context.window.observations(requirement).rows
+            if row[field] is not None
+        }
+
+    def on_occurrence(self, context):
+        index_requirement, alpha_requirement, price_requirement = self.requirements()
+        benchmark = self._panel(context, index_requirement, "benchmark_weight")
+        active = self._panel(context, alpha_requirement, "weight")
+        prices = self._panel(context, price_requirement, "close")
+        if not benchmark or not active:
+            return NoDecision("both allocation inputs must be visible before combining them")
+
+        # The alpha is this callback's own subscription; no constraint owns it, so its declared
+        # invariant is checked here, at consumption, before it can move a single weight.
+        validate_allocation(
+            active,
+            AllocationInvariants.of(
+                sign=AllocationSign.SIGNED,
+                weight_sum_upper=Decimal(0),
+                tolerance=NEUTRALITY,
+            ),
+            label="subscribed alpha allocation",
+        )
+
+        bounds = context.constraint_bounds
+        instruments = tuple(sorted(bounds.lower))
+        desired = {
+            name: (
+                benchmark.get(name, Decimal(0)) + SCALE * active.get(name, Decimal(0))
+            ).quantize(QUANTUM)
+            for name in instruments
+        }
+
+        account = context.account
+        nav = account.cash + sum(
+            (
+                quantity * prices[name]
+                for name, quantity in account.positions.items()
+                if name in prices
+            ),
+            Decimal(0),
+        )
+        current = {}
+        if nav > 0:
+            # Quantized before the call on purpose: a raw NAV ratio carries far more digits than
+            # the canonical grid, and the bound-exponent guard would refuse it. The showcase
+            # exercises that guard rather than dodging it.
+            current = {
+                name: (quantity * prices[name] / nav).quantize(QUANTUM)
+                for name, quantity in sorted(account.positions.items())
+                if name in prices
+            }
+
+        # One held name is pinned to prove frozen invariance, and it is the holding with the least
+        # slack against its own upper bound, because that is the one that tests the conjunction
+        # hardest. A freeze is only honourable while the position still satisfies its box; once
+        # overnight drift pushes it past the cap the two demands are unsatisfiable together, and
+        # `optimize`'s own refusal is what releases it rather than a duplicate guard here.
+        frozen = frozenset()
+        if current:
+            pinned = min(current, key=lambda name: (bounds.upper[name] - current[name], name))
+            frozen = frozenset({pinned})
+        released = False
+        try:
+            result = self._solve(desired, current, bounds, frozen)
+        except OptimizeRefusal as error:
+            if not frozen or "outside its declared bound" not in str(error):
+                raise
+            released = True
+            frozen = frozenset()
+            result = self._solve(desired, current, bounds, frozen)
+
+        for name in frozen:
+            if result.weights[name] != current[name]:
+                raise AssertionError("a frozen name must be returned verbatim")
+
+        history = dict(self.memory or {})
+        history["rebalances"] = int(history.get("rebalances", 0)) + 1
+        history["frozen_occurrences"] = int(history.get("frozen_occurrences", 0)) + len(frozen)
+        history["freezes_released"] = int(history.get("freezes_released", 0)) + int(released)
+        # Monitoring only, recorded after the decision and never fed back into it.
+        history["active_norm"] = str(self._active_norm(result.weights, benchmark))
+        self.memory = history
+
+        return EconomicPortfolioIntent(
+            uuid5(NAMESPACE_URL, "show005/index/" + context.occurrence.occurrence_id),
+            "show005-index",
+            tuple(PortfolioTarget(n, weight=w) for n, w in sorted(result.weights.items())),
+            result.cash,
+            BUDGET,
+            _source_refs(context),
+            account.version,
+            None,
+        )
+
+    def _solve(self, desired, current, bounds, frozen):
+        return optimize(
+            desired=desired,
+            current=current,
+            lower=dict(bounds.lower),
+            upper=dict(bounds.upper),
+            frozen=frozen,
+            cash_range=(Decimal("0"), Decimal("1")),
+        )
+
+    @staticmethod
+    def _active_norm(weights, benchmark):
+        """L2 norm of the active weights. Not a realised or forecast tracking error."""
+        total = Decimal(0)
+        for name in set(weights) | set(benchmark):
+            active = weights.get(name, Decimal(0)) - benchmark.get(name, Decimal(0))
+            total += active * active
+        return total.sqrt()
+'''
+    + _SOURCE_REFS
+)
+
+
+def _write_components(project: Path, universe: tuple[str, ...]) -> dict[str, Path]:
+    components = project / "components"
+    components.mkdir(parents=True, exist_ok=True)
+
+    alpha = components / "alpha.py"
+    alpha.write_text(_ALPHA_SOURCE, encoding="utf-8")
+
+    enhanced = components / "enhanced.py"
+    enhanced.write_text(_ENHANCED_SOURCE, encoding="utf-8")
+
+    academic = components / "academic_exchange.py"
+    academic.write_text(
+        f'''"""Fractional quantity, zero cost, full fill — the venue the alpha book runs on."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from vqapr.public import AcademicExchange, ListingRule, Side
+
+UNIVERSE = {universe!r}
+
+
+class ShowcaseAcademicExchange(AcademicExchange):
+    def __init__(self):
+        super().__init__(
+            {{
+                instrument: ListingRule(
+                    instrument,
+                    Decimal("0.0001"),
+                    Decimal("0.0001"),
+                    True,
+                    frozenset({{Side.BUY, Side.SELL}}),
+                )
+                for instrument in UNIVERSE
+            }},
+            "show005-academic",
+        )
+''',
+        encoding="utf-8",
     )
-    return result.output_path
+
+    krx = components / "krx_exchange.py"
+    krx.write_text(
+        f'''"""Whole shares, 3bp commission both sides, 20bp sale tax, long only."""
+
+from __future__ import annotations
+
+from vqapr.public import KrxExchange
+
+UNIVERSE = {universe!r}
 
 
-def _replay(fills: list[tuple[str, Decimal, Decimal]], opening: Decimal) -> Decimal:
-    """Recompute cash from the journal alone.
+class ShowcaseKrxExchange(KrxExchange):
+    def __init__(self):
+        super().__init__(UNIVERSE, "show005-krx")
+''',
+        encoding="utf-8",
+    )
+    return {"alpha": alpha, "enhanced": enhanced, "academic": academic, "krx": krx}
 
-    This is a consistency check, not independent verification: the journal is written by the same
-    loop, so it catches bookkeeping drift within this script and nothing more. `show_003` performs
-    the genuinely independent replay against a committed Account.
+
+def _replay(result: Any) -> dict[str, Any]:
+    """Rebuild cash and positions from the fill journal and demand an exact match.
+
+    The journal and the snapshot are two independent records of the same committed history: the
+    snapshot is what the Account carries forward, the journal is every fill it accepted. If they
+    disagree the run is not reportable, so this aborts rather than annotating.
     """
-    cash = opening
-    for _, quantity, price in fills:
-        cash -= quantity * price
-    return cash
+    account = result.final_state.account
+    cash = INITIAL_CASH
+    positions: dict[str, Decimal] = {}
+    commission = Decimal(0)
+    tax = Decimal(0)
+    dealt = 0
+    for entry in account.fill_history:
+        fill = entry.fill
+        if fill.dealt_quantity == 0:
+            continue
+        dealt += 1
+        cash += fill.cash_delta
+        commission += fill.cost.commission
+        tax += fill.cost.tax
+        held = positions.get(fill.instrument_id, Decimal(0)) + fill.dealt_quantity
+        if held == 0:
+            positions.pop(fill.instrument_id, None)
+        else:
+            positions[fill.instrument_id] = held
+
+    snapshot = account.snapshot
+    if cash != snapshot.cash:
+        raise AssertionError(f"journal replay cash {cash} != committed {snapshot.cash}")
+    if positions != dict(snapshot.positions):
+        raise AssertionError("journal replay positions do not match the committed Account")
+
+    marked = account.latest_mark
+    return {
+        "dealt_fills": dealt,
+        "replayed_cash": str(cash),
+        "committed_cash": str(snapshot.cash),
+        "replayed_positions": {name: str(q) for name, q in sorted(positions.items())},
+        "commission": str(commission),
+        "sale_tax": str(tax),
+        "account_version": snapshot.version,
+        "final_nav": None if marked is None else str(marked.nav),
+        "whole_shares_only": all(
+            quantity == quantity.to_integral_value() for quantity in snapshot.positions.values()
+        ),
+    }
+
+
+def _memory(result: Any) -> dict[str, Any]:
+    state = result.final_state
+    return dict(state.load_model_state(state.current_model_state_ref) or {})
+
+
+def _digest(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
+    manifest = json.loads((FIXTURE / "fixture.json").read_text(encoding="utf-8"))
+    tolerance = str(manifest["weight_tolerance"])
+    observation_path = FIXTURE / str(manifest["observation_path"])
+    execution_path = FIXTURE / str(manifest["execution_path"])
+    benchmark_path = FIXTURE / str(manifest["benchmark_path"])
+    universe = _universe(benchmark_path)
+    sessions = _sessions(benchmark_path)
+    callback_days = sessions[1:]
+
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            "price_daily",
+            "krx-observation",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("available_at", "instrument"),
+            fields={"close": "close"},
+        ),
+        SourceSpec.of("krx-observation", observation_path),
+    )
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            "benchmark_weight_daily",
+            "krx-benchmark",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("available_at", "instrument"),
+            fields={"benchmark_weight": "benchmark_weight"},
+        ),
+        SourceSpec.of("krx-benchmark", benchmark_path),
+    )
+    register_execution_input(
+        project,
+        ExecutionInputRegistration.of(
+            "krx-daily",
+            ExecutionTableSpec(
+                source=SourceSpec.of("krx-execution", execution_path),
+                trade_at_field="trade_at",
+                instrument_field="instrument",
+                is_tradable_field="is_tradable",
+                price_fields={"close": "close"},
+            ),
+            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+        ),
+    )
+
+    paths = _write_components(project, universe)
+    alpha_ref = component_ref(
+        "show005-alpha", ComponentKind.STRATEGY_MODEL, paths["alpha"], "SignedAlpha"
+    )
+    academic_ref = component_ref(
+        "show005-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
+    )
+    krx_ref = component_ref(
+        "show005-krx", ComponentKind.EXCHANGE, paths["krx"], "ShowcaseKrxExchange"
+    )
+    index_ref = component_ref(
+        "show005-index",
+        ComponentKind.STRATEGY_MODEL,
+        paths["enhanced"],
+        "EnhancedIndex",
+        config={
+            "benchmark_dataset_id": "benchmark_weight_daily",
+            "alpha_dataset_id": "alpha_allocation",
+        },
+    )
+    # The shipped constraints enter through the same door as any user component: a resolved path,
+    # a fingerprint and a config. Nothing about them bypasses registration.
+    no_short_ref = component_ref(
+        "no-short",
+        ComponentKind.CONSTRAINT,
+        shipped_constraint_path("no_short"),
+        "NoShort",
+        config={"constraint_id": "no-short"},
+    )
+    cap_ref = component_ref(
+        "single-name-cap",
+        ComponentKind.CONSTRAINT,
+        shipped_constraint_path("single_name_cap"),
+        "SingleNameCap",
+        config={
+            "cap": CAP,
+            "benchmark_dataset_id": "benchmark_weight_daily",
+            "tolerance": tolerance,
+            "constraint_id": "single-name-cap",
+        },
+    )
+    for reference in (alpha_ref, index_ref, academic_ref, krx_ref, no_short_ref, cap_ref):
+        register_component(project, reference)
+
+    alpha_agenda = _agenda(
+        "show005-alpha", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
+    )
+    index_agenda = _agenda(
+        "show005-index", OperationRole.STRATEGY_CALLBACK, time(9, 0), callback_days
+    )
+    valuation_agenda = _agenda(
+        "show005-valuation", OperationRole.VALUATION, time(16, 0), callback_days
+    )
+    monitoring_agenda = _agenda(
+        "show005-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
+    )
+    for agenda in (alpha_agenda, index_agenda, valuation_agenda, monitoring_agenda):
+        register_agenda(project, agenda)
+
+    alpha_config = StrategyConfig(alpha_ref, "show005-alpha", OperationRole.STRATEGY_CALLBACK)
+    index_config = StrategyConfig(index_ref, "show005-index", OperationRole.STRATEGY_CALLBACK)
+    valuation_config = ValuationConfig(
+        "show005-valuation",
+        OperationRole.VALUATION,
+        DataRequirement.of(
+            "show005-valuation", "price_daily", fields=("close",), lookback=RowsLookback(1)
+        ),
+    )
+    monitoring = MonitoringPolicy("show005-monitoring", OperationRole.MONITORING)
+    register_strategy_config(project, alpha_config)
+    register_strategy_config(project, index_config)
+    register_valuation_config(project, valuation_config)
+    register_monitoring_policy(project, monitoring)
+
+    start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
+    end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
+
+    alpha_definition = RunDefinition(
+        alpha_config,
+        valuation_config,
+        ConstraintSet(()),
+        monitoring,
+        academic_ref,
+        "krx-daily",
+        start,
+        end,
+        AccountSnapshot(0, INITIAL_CASH, {}),
+        AccountMode.SIGNED,
+        instruments=universe,
+    )
+    alpha_result = run(project, preflight_run(project, alpha_definition))
+    alpha_evidence = callback_evidence(alpha_result)
+
+    published = publish_run_allocation(
+        project, AllocationPublicationSpec.of("alpha_allocation"), alpha_evidence
+    )
+
+    index_definition = RunDefinition(
+        index_config,
+        valuation_config,
+        ConstraintSet((no_short_ref, cap_ref)),
+        monitoring,
+        krx_ref,
+        "krx-daily",
+        start,
+        end,
+        AccountSnapshot(0, INITIAL_CASH, {}),
+        AccountMode.LONG_ONLY,
+        instruments=universe,
+    )
+    index_result = run(project, preflight_run(project, index_definition))
+
+    alpha_memory = _memory(alpha_result)
+    index_memory = _memory(index_result)
+    index_replay = _replay(index_result)
+
+    if not index_replay["whole_shares_only"]:
+        raise AssertionError("the KRX profile must hold whole shares only")
+    # Both frozen outcomes are claimed in the README, so both are checked here rather than merely
+    # reported: a holding pinned and returned verbatim, and a pinned holding whose own box refused
+    # it and released the freeze.
+    if int(index_memory.get("frozen_occurrences", 0)) == 0:
+        raise AssertionError("no freeze survived, so frozen invariance was never demonstrated")
+    if int(index_memory.get("freezes_released", 0)) == 0:
+        raise AssertionError("no freeze was refused, so the out-of-box release was never exercised")
+    if not any(position for position in index_replay["replayed_positions"].values()):
+        raise AssertionError("the enhanced index never took a position")
+
+    trace = {
+        "status": "current",
+        "verified_against": VERIFIED_AGAINST,
+        "last_verified_at": LAST_VERIFIED_AT,
+        "universe": list(universe),
+        "sessions": len(sessions),
+        "callbacks": len(callback_days),
+        "fixture": {
+            "observation": str(manifest["observation_path"]),
+            "execution": str(manifest["execution_path"]),
+            "benchmark": str(manifest["benchmark_path"]),
+            "weight_tolerance": tolerance,
+        },
+        "alpha_run": {
+            "exchange": "Academic (fractional, zero cost)",
+            "account_mode": AccountMode.SIGNED.value,
+            "views": alpha_memory.get("views"),
+            "published_dataset": str(published.registration.dataset_id),
+            "published_occurrences": published.occurrences,
+            "published_rows": published.row_count,
+            "publication": published.output_path.name,
+        },
+        "index_run": {
+            "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
+            "account_mode": AccountMode.LONG_ONLY.value,
+            "subscribed_allocation_inputs": ["alpha_allocation", "benchmark_weight_daily"],
+            "shipped_constraints": sorted(SHIPPED_CONSTRAINTS),
+            "single_name_cap": CAP,
+            "rebalances": index_memory.get("rebalances"),
+            "frozen_occurrences": index_memory.get("frozen_occurrences"),
+            "freezes_released": index_memory.get("freezes_released"),
+            "final_active_norm": index_memory.get("active_norm"),
+            **index_replay,
+        },
+    }
+    digests = {
+        "alpha_allocation.parquet": _digest(published.output_path),
+        "alpha_allocation.lineage.json": _digest(published.lineage_path),
+    }
+    return trace, digests
 
 
 def main() -> None:
-    _reset()
-    Workspace.create(PROJECT)
+    if OUTPUTS.exists():
+        shutil.rmtree(OUTPUTS)
+    OUTPUTS.mkdir(parents=True)
 
-    manifest = json.loads((FIXTURE / "fixture.json").read_text(encoding="utf-8"))
-    tolerance = Decimal(str(manifest["weight_tolerance"]))
-    benchmark = _panel(FIXTURE / str(manifest["benchmark_path"]), "benchmark_weight")
-    prices = _panel(FIXTURE / str(manifest["observation_path"]), "close")
-    alpha = _alpha(prices)
-    sessions = sorted(benchmark)
+    first, first_digests = _pipeline(OUTPUTS / "replicate-a")
+    second, second_digests = _pipeline(OUTPUTS / "replicate-b")
+    if first != second:
+        raise AssertionError("two clean runs disagreed on their reported outcome")
+    if first_digests != second_digests:
+        raise AssertionError(f"artifact digests differ: {first_digests} vs {second_digests}")
 
-    signed = min(min(view.values()) for view in alpha.values())
-    if signed >= 0:
-        raise AssertionError(
-            "the alpha must be genuinely signed for the demonstration to mean anything"
-        )
-
-    published = _publish_alpha(PROJECT, alpha)
-
-    # The enhanced index combines TWO allocation panels. Combination, not subscription: both are
-    # read off parquet here, per the scope paragraph above.
-    subscribed_alpha = _panel(published, "weight")
-    if set(subscribed_alpha) != set(benchmark):
-        raise AssertionError("the published allocation must cover the benchmark sessions")
-
-    rows: list[dict[str, object]] = []
-    held: dict[str, Decimal] = {}
-    cash = INITIAL_NAV
-    journal: list[tuple[str, Decimal, Decimal]] = []
-    frozen_name = sorted(benchmark[sessions[0]])[0]
-    frozen_seen = 0
-    released = 0
-
-    for session in sessions:
-        index = benchmark[session]
-        view = subscribed_alpha[session]
-
-        validate_allocation(index, AllocationInvariants.of(tolerance=tolerance), label="benchmark")
-        validate_allocation(
-            view,
-            AllocationInvariants.of(sign=AllocationSign.SIGNED, tolerance=tolerance),
-            label="alpha",
-        )
-
-        nav = cash + sum(held.get(i, Decimal(0)) * prices[session].get(i, Decimal(0)) for i in held)
-        current_weights = {
-            instrument: units * prices[session][instrument] / nav
-            for instrument, units in held.items()
-            if instrument in prices[session] and nav > 0
-        }
-        # One name is held fixed to exercise frozen invariance. A freeze is only honourable while
-        # the holding still satisfies its own box; once price drift pushes it past the cap the two
-        # demands are unsatisfiable together. Rather than pre-empting that judgement, the call is
-        # made and `optimize`'s own refusal is what releases the freeze -- so the guard is exercised
-        # here rather than duplicated.
-        frozen = frozenset({frozen_name}) if frozen_name in current_weights else frozenset()
-        try:
-            result = _construct(index, view, current_weights, frozen)
-        except OptimizeRefusal as error:
-            # Only a frozen-box conflict is grounds to release. Any other refusal is a real failure
-            # and must not be reported as price drift.
-            if not frozen or "outside its declared bound" not in str(error):
-                raise
-            released += 1
-            frozen = frozenset()
-            result = _construct(index, view, current_weights, frozen)
-        for instrument, weight in result.weights.items():
-            price = prices[session].get(instrument)
-            if price is None or price == 0:
-                continue
-            target_units = (weight * nav / price).quantize(Decimal(1))
-            delta = target_units - held.get(instrument, Decimal(0))
-            if delta == 0:
-                continue
-            journal.append((instrument, delta, price))
-            cash -= delta * price
-            held[instrument] = target_units
-
-        rows.append(
-            {
-                "session": session.isoformat(),
-                "weights": {i: str(w) for i, w in sorted(result.weights.items())},
-                "cash_weight": str(result.cash),
-                "multiplier": str(result.multiplier),
-                # Monitoring evidence, recorded after the decision and never fed back into it.
-                "active_norm": str(_active_norm(dict(result.weights), index)),
-                "frozen": sorted(frozen),
-            }
-        )
-        if frozen:
-            frozen_seen += 1
-            if result.weights[frozen_name] != current_weights[frozen_name].quantize(QUANTUM):
-                raise AssertionError("a frozen name must be returned verbatim")
-
-        held = {i: q for i, q in held.items() if q != 0}
-
-    replayed = _replay(journal, INITIAL_NAV)
-    if replayed != cash:
-        raise AssertionError(f"fill-journal replay {replayed} disagrees with running cash {cash}")
-
-    trace = {
-        "sessions": len(sessions),
-        "instruments": sorted(benchmark[sessions[0]]),
-        "published_allocation": published.name,
-        "alpha_is_signed": str(signed),
-        "combined_inputs": sorted(
-            {published.stem, str(manifest["benchmark_path"]).removesuffix(".parquet")}
-        ),
-        "frozen_occurrences": frozen_seen,
-        "freeze_released_out_of_box": released,
-        "fills": len(journal),
-        "closing_cash": str(cash),
-        "replayed_cash": str(replayed),
-        "final_positions": {i: str(q) for i, q in sorted(held.items())},
-        "rows": rows,
-    }
+    trace = {**first, "replicates": 2, "artifacts": first_digests}
     (OUTPUTS / "trace.json").write_text(
         json.dumps(trace, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
     )
-
-    digests = _manifest([OUTPUTS / "trace.json", published])
     (OUTPUTS / "manifest.json").write_text(
-        json.dumps(digests, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(first_digests, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    print(f"sessions            : {len(sessions)}")
-    print("combined inputs    : alpha_allocation + benchmark_weight_daily")
-    print(f"alpha minimum weight: {signed} (signed, never stripped by the input)")
-    print(f"frozen occurrences  : {frozen_seen} (returned verbatim)")
-    print(f"freeze released     : {released} (holding drifted outside its cap)")
-    print(f"fills               : {len(journal)} (whole shares)")
-    print(f"closing cash        : {cash}")
-    print(f"replayed cash       : {replayed} (consistency check)")
-    print(f"active-weight norm  : {rows[0]['active_norm']} .. {rows[-1]['active_norm']}")
-    print(f"artifacts           : {json.dumps(digests, indent=2, sort_keys=True)}")
+    index = trace["index_run"]
+    print(f"sessions / callbacks    : {trace['sessions']} / {trace['callbacks']}")
+    print(f"alpha views published   : {trace['alpha_run']['published_occurrences']} occurrences")
+    print(f"subscribed inputs       : {', '.join(index['subscribed_allocation_inputs'])}")
+    print(f"shipped constraints     : {', '.join(index['shipped_constraints'])}")
+    print(f"rebalances              : {index['rebalances']}")
+    print(f"frozen / released       : {index['frozen_occurrences']} / {index['freezes_released']}")
+    print(f"dealt fills             : {index['dealt_fills']} (whole shares)")
+    print(f"commission / sale tax   : {index['commission']} / {index['sale_tax']}")
+    print(f"replayed == committed   : {index['replayed_cash']} == {index['committed_cash']}")
+    print(f"final NAV               : {index['final_nav']}")
+    print(f"active-weight L2 norm   : {index['final_active_norm']}")
+    print(f"artifacts (2 replicates): {json.dumps(trace['artifacts'], indent=2, sort_keys=True)}")
 
 
 if __name__ == "__main__":

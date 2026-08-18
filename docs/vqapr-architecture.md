@@ -2480,7 +2480,8 @@ execution code에도 recorder를 주지 않는다.
 |---|---|---|
 | weighting 전 최종 signal | Strategy가 `TableSpec`으로 선언 | 선언 |
 | 종목별 최종 weight | package | **기본** |
-| NAV 변화 | package | **기본** |
+| 결정 시점 계좌 상태(현금·버전) | package | **기본** |
+| NAV 시계열 | package | 미구현 — 아래 주해 참조 |
 | 종목별 실현손익 (비용 전/후) | package | 선언 — 아래 주해 참조 |
 
 종목별 실현손익을 기본에서 벌리는 이유는 계산이 어려워서가 아니라 **경제적 정의가 없어서**다. 커밋된
@@ -2495,11 +2496,15 @@ execution code에도 recorder를 주지 않는다.
 
 weight와 NAV는 accepted intent와 committed Account에서 **package가 계산한다.** 이걸 Strategy 선언에
 걸면 package 사실이 사용자 opt-in에 종속된다. 그래서 `vqapr.` **예약 접두사** 아래의 package 소유
-테이블(`vqapr.weight`, `vqapr.nav`)로 나가며, 사용자 `TableSpec`은 이 접두사를 쓸 수 없다. 이것은
+테이블(`vqapr.weight`, `vqapr.account`)로 나가며, 사용자 `TableSpec`은 이 접두사를 쓸 수 없다. 이것은
 `FLOW_ENVELOPE_FIELDS`와 예약 컴럼이 **컬럼 수준**에서 하는 일을 **table id 수준**에서 하는 것이다.
 
-**NAV는 두 번째 성과 authority가 아니다.** NAV 행은 marking·Account 척추에서 복사되며 strategy가 준 숫자에서
-오지 않는다. §9.1이 금지한 것은 **진단 값으로 성과를 주장하는 것**이지 실행 결과를 package가 복사해
+**성과 시계열은 아직 기본에 없다.** callback이 보는 것은 version·cash·positions를 가진 계좌 스냅샷이고
+**mark가 없다** — marking은 due-execution 경로에서 일어난다. 그래서 결정 시점에는 복사할 NAV가 존재하지 않는다.
+현금을 NAV라는 이름으로 적는 것은 **참인 이름 아래 틀린 숫자**를 두는 것이라 아무것도 안 적는 것보다 나쁘다.
+§5.2가 요구하는 NAV 시계열은 mark 시점에 스탬프되어야 하므로 mark가 있는 자리의 recorder가 필요하고, 이 표가
+조용히 근사하는 대신 **명시된 follow-up**으로 남는다. 그것이 만들어질 때 NAV 행은 marking·Account 척추에서
+복사되며 strategy가 준 숫자에서 오지 않는다. §9.1이 금지한 것은 **진단 값으로 성과를 주장하는 것**이지 실행 결과를 package가 복사해
 기록하는 것이 아니다. 이미 accepted weight를 그대로 다시 발행하는 것과 같은 구분이다.
 
 #### 발행 계약
@@ -2513,7 +2518,7 @@ weight와 NAV는 accepted intent와 committed Account에서 **package가 계산�
 | `available_at` | **항상 유도**되며 선언할 수 없다. 예약 필드 가드가 그대로 적용된다 |
 | 타임스\ud0¬의 출처 | **테이블별**로 정한다. 결정 시점 테이블은 해당 callback이 읽은 것에서 유도하고, **성과 시계열은 그 값을 만든 mark 시점**이다(§5.2) |
 | 키 모양 | `(available_at, instrument)` 하나로 유지한다. 한 occurrence·한 종목당 **한 행**이고, 단계가 여럿이면 행이 아니라 **컴럼**으로 나눈다 |
-| 종목 축이 없는 시계열 | §11.2의 합성 identity 관례를 따른다. `vqapr.nav`는 계좌용 합성 identity를 갖는다 |
+| 종목 축이 없는 시계열 | §11.2의 합성 identity 관례를 따른다. `vqapr.account`는 계좌용 합성 identity를 갖는다 |
 | 봉투 컬럼 | recorder가 찍는 다섯은 선언된 **value field**로 함께 발행된다. 없으면 PRD §9.4의 *어느 run·누가·언제*를 버리게 된다 |
 | 봉투가 없는 행 | Flow가 만든 기본 행은 recorder 봉투가 없으므로, 동등한 행 identity(run identity·producer identity·account version·mark 시점)를 value field로 가진다 |
 | 두 시계 | `event_time`과 `available_at`을 **합치지 않는다**(PRD §9.4). 둘 다 별도 컴럼으로 살아남는다 |

@@ -238,21 +238,34 @@ def test_a_strategy_declaring_the_reserved_prefix_is_refused() -> None:
     from vqapr.flow.simulation import DEFAULT_TABLE_PREFIX, SimulationFlow
     from vqapr.public import TableSpec
 
-    class _Shadowing:
-        def tables(self):
-            return (TableSpec(f"{DEFAULT_TABLE_PREFIX}nav", ("instrument", "nav")),)
+    # A raw startswith let the first two of these through, so a spoofed table sat beside the real
+    # one in the same recorder and a reader had no way to tell which was authoritative.
+    for spelling in (
+        f"{DEFAULT_TABLE_PREFIX}account",
+        "VQAPR.account",
+        f" {DEFAULT_TABLE_PREFIX}account",
+        f"{DEFAULT_TABLE_PREFIX}account_extra",
+    ):
 
-    flow = SimulationFlow.__new__(SimulationFlow)
-    flow._strategy = _Shadowing()
+        class _Shadowing:
+            def tables(self, table_id=spelling):
+                return (TableSpec(table_id, ("instrument", "cash")),)
 
-    with pytest.raises(ValueError, match="package-owned"):
-        flow._callback_recorder(object())
+        flow = SimulationFlow.__new__(SimulationFlow)
+        flow._strategy = _Shadowing()
+
+        with pytest.raises(ValueError, match="package-owned"):
+            flow._callback_recorder(object())
 
 
 def test_the_defaults_need_no_declaration() -> None:
     """Both default tables are package-owned specs, not something a Strategy supplies."""
     from vqapr.flow.simulation import DEFAULT_TABLES
 
-    assert {spec.table_id for spec in DEFAULT_TABLES} == {"vqapr.weight", "vqapr.nav"}
+    assert {spec.table_id for spec in DEFAULT_TABLES} == {"vqapr.weight", "vqapr.account"}
     for spec in DEFAULT_TABLES:
         assert "instrument" in spec.fields, "every default row is keyed by instrument"
+    # Decision-time state, not a performance series: a callback has no marks, so there is no NAV
+    # to copy and none is claimed. Recording cash under the name NAV would be a wrong number under
+    # a true-sounding name.
+    assert not any("nav" in field for spec in DEFAULT_TABLES for field in spec.fields)

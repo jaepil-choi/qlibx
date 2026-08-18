@@ -831,13 +831,11 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # Canon 9.2 makes weight and NAV defaults: no Strategy in this showcase declares them, and
     # every run records them anyway. A default that needed asking for would not be a default.
     default_weight = alpha_result.final_state.recorder_rows.get("vqapr.weight", ())
-    default_nav = alpha_result.final_state.recorder_rows.get("vqapr.nav", ())
-    if not default_weight or not default_nav:
+    default_account = alpha_result.final_state.recorder_rows.get("vqapr.account", ())
+    if not default_weight or not default_account:
         raise AssertionError("the package-owned default records are missing from a real run")
-    if len(default_nav) != len(callback_days):
-        raise AssertionError(
-            f"expected one NAV row per occurrence, saw {len(default_nav)} for {len(callback_days)}"
-        )
+    if len(default_account) != len(callback_days):
+        raise AssertionError(f"expected one account row per occurrence, saw {len(default_account)}")
 
     envelope = {"run_id", "producer_id", "stage", "event_time", "sequence"}
     if not envelope <= set(signal_rows[0]):
@@ -872,13 +870,17 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "observation": str(manifest["observation_path"]),
             "execution": str(manifest["execution_path"]),
             "halt": {"instrument": halted_instrument, "sessions": list(halt_days)},
+            "benchmark": str(manifest["benchmark_path"]),
+            "weight_tolerance": tolerance,
         },
         "recorder": {
             "table": "alpha.signal",
             "rows": len(signal_rows),
             "envelope": sorted(envelope),
-            "benchmark": str(manifest["benchmark_path"]),
-            "weight_tolerance": tolerance,
+            "defaults": {
+                "weight": len(default_weight),
+                "account": len(default_account),
+            },
         },
         "alpha_run": {
             "exchange": "Academic (fractional, zero cost)",

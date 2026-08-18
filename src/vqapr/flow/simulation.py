@@ -211,17 +211,20 @@ DEFAULT_TABLE_PREFIX = "vqapr."
 
 DEFAULT_TABLES = (
     TableSpec(f"{DEFAULT_TABLE_PREFIX}weight", ("instrument", "weight")),
-    TableSpec(f"{DEFAULT_TABLE_PREFIX}nav", ("instrument", "nav", "cash", "account_version")),
+    TableSpec(f"{DEFAULT_TABLE_PREFIX}account", ("instrument", "cash", "account_version")),
 )
 """What every run records without the Strategy asking.
 
-Canon 9.2 makes these defaults rather than opt-in because both are package-computed from the
-accepted intent and the committed Account. Requiring a declaration would make a package fact
-contingent on user opt-in, and would leave the input an adaptive ensemble needs behind a switch.
+Canon 9.2 makes these defaults rather than opt-in because both are package-computed -- the weights
+from the accepted intent, the account state from the committed Account. Requiring a declaration
+would make a package fact contingent on user opt-in.
 
-NAV is copied from the marking and Account spine, never from a strategy-supplied number, so it is
-not a second performance authority -- the same distinction that already lets accepted weights be
-republished.
+**This is decision-time state, not a performance series.** A callback sees an `AccountSnapshot`,
+which carries version, cash and positions but no marks: marking happens on the due-execution path,
+so at callback time there is no NAV to copy. Recording cash under the name NAV would put a wrong
+number under a true-sounding name, which is worse than recording nothing. The NAV series canon 5.2
+requires -- stamped at its mark instant -- needs a recorder where marks exist, and is a named
+follow-up rather than something this table quietly approximates.
 """
 
 
@@ -1111,12 +1114,11 @@ class SimulationFlow:
                 {"instrument": target.instrument_id, "weight": str(weight)},
             )
         recorder.append(
-            f"{DEFAULT_TABLE_PREFIX}nav",
+            f"{DEFAULT_TABLE_PREFIX}account",
             {
                 # Account-level, so it carries the synthetic identity canon fixes for series with
                 # no instrument axis rather than inventing a second key shape.
                 "instrument": _ACCOUNT_IDENTITY,
-                "nav": str(account.cash),
                 "cash": str(account.cash),
                 "account_version": account.version,
             },
@@ -1158,7 +1160,12 @@ class SimulationFlow:
         ):
             raise TypeError("StrategyModel.tables must return a tuple of TableSpec")
         declared = {table.table_id for table in tables}
-        shadowed = sorted(name for name in declared if name.startswith(DEFAULT_TABLE_PREFIX))
+        # Normalise before comparing. A raw startswith let `VQAPR.nav` and a leading-space
+        # ` vqapr.nav` through, so the spoofed table sat beside the real one in the same recorder
+        # and a reader had no way to tell which was authoritative.
+        shadowed = sorted(
+            name for name in declared if name.strip().casefold().startswith(DEFAULT_TABLE_PREFIX)
+        )
         if shadowed:
             # The prefix is reserved in canon so a Strategy cannot collide with or shadow a package
             # record. This is the table-id level of the guard the envelope fields already apply at

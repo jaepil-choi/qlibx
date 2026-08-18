@@ -32,7 +32,7 @@ already described: **a run records what a later run will need to reuse it.**
 | Per-ticker netting measurement | `src/vqapr/portfolio/diagnostics.py` |
 | Package-attested provenance and state path on the allocation envelope | `src/vqapr/flow/materialize.py` |
 | Run-record publication, the third caller of the shared authority | `src/vqapr/flow/materialize.py` |
-| Weight and NAV recorded by default under a reserved prefix | `src/vqapr/flow/simulation.py` |
+| Weight and decision-time account state recorded by default | `src/vqapr/flow/simulation.py` |
 | Ensemble scenario, three real runs | `showcases/show_006_ensemble_netting/` |
 | Acceptance suite | `tests/acceptance/test_ensemble_netting.py` |
 
@@ -57,11 +57,14 @@ declared value fields; and several stages of one measurement are columns on one 
 rows, because the shared authority keys on `(available_at, instrument)` and refuses a duplicate
 before exposure.
 
-**Weight and NAV are defaults.** Both are package-computed, so requiring a declaration would make a
+**Weight and decision-time account state are defaults.** Both are package-computed, so requiring a declaration would make a
 package fact contingent on user opt-in. They land under a reserved `vqapr.` table-id prefix that a
 Strategy cannot shadow — the table-id level of the guard the envelope fields already apply at the
-column level. NAV is copied from the marking and Account spine, never from a strategy-supplied
-number, so it is not a second performance authority.
+column level. The account table carries cash and the account
+version, **not NAV**: a callback sees a snapshot with no marks, because marking happens on the
+due-execution path, so there is no NAV to copy at decision time. Recording cash under the name NAV
+would have put a wrong number under a true-sounding name. The boundary review caught exactly that in
+the first draft of this milestone, roughly four percent wrong on the committed fixture.
 
 ## Trade-offs
 

@@ -17,19 +17,25 @@ over, and they are written to fail rather than to reassure:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import duckdb
 import pytest
 
 from vqapr.public import (
     QUANTUM,
+    RunRecordSpec,
     WeightingRefusal,
     equal_weight,
     net_members,
+    publish_run_record,
     rescale,
 )
+from vqapr.workspace import Workspace  # scaffolding only; deliberately not a public name
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
 SHOWCASE = Path(__file__).resolve().parents[2] / "showcases" / "show_006_ensemble_netting"
@@ -170,26 +176,80 @@ def test_criterion_9_equal_weight_combination_is_the_strategys_choice(
 
 
 def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
-    manifest: dict[str, object],
+    tmp_path: Path, manifest: dict[str, object]
 ) -> None:
-    """Import-boundary test: reach the record only through the public surface.
+    """Publish a member's record, then reach it back the way a later ensemble would.
 
-    What this proves and what it does not, stated plainly. With 22 committed sessions and 21
+    The boundary is the point. Every package name this test uses to **publish, reach and weight**
+    the record comes from ``vqapr.public``; only workspace creation, which is scaffolding a real
+    project already has, reaches past it. So if the recorded surface were insufficient for member
+    weighting, the only way to make this pass would be to import something else. The record is
+    reached by **dataset id**, never by touching the producing run's objects, which is what makes
+    it reusable after the run is gone.
+
+    What it proves and what it does not, stated plainly. With 22 committed sessions and 21
     callbacks a twenty-day moving return yields one, at most two points per member. That is enough
-    to prove the **record is sufficient** — which is this criterion's purpose — and not enough for
+    to prove the **record is sufficient**, which is this criterion's purpose, and not enough for
     the weighting to vary economically. This tests record sufficiency, not economic behaviour.
     """
-    import vqapr.public as public
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=ZoneInfo("Asia/Seoul"))
 
-    # The surface a later ensemble is allowed to use. If the recorded surface were insufficient,
-    # the only way to make member weighting work would be to import something outside this set.
-    assert {"RunRecordSpec", "publish_run_record", "net_members", "rescale"} <= set(public.__all__)
+    recorded = {
+        "vqapr.account": tuple(
+            {
+                "instrument": "_ACCOUNT",
+                "cash": str(Decimal("1000") + index),
+                "account_version": index,
+                "run_id": "member-1",
+                "producer_id": "reversal",
+                "stage": "STRATEGY_CALLBACK",
+                "event_time": cutoff + timedelta(days=index),
+                "sequence": 0,
+            }
+            for index in range(3)
+        )
+    }
+    result = type("_R", (), {"final_state": type("_S", (), {"recorder_rows": recorded})()})()
+
+    published = publish_run_record(
+        tmp_path,
+        RunRecordSpec.of(
+            "member_account",
+            table_id="vqapr.account",
+            value_fields=("cash", "account_version", "run_id", "event_time"),
+        ),
+        result,
+    )
+
+    assert str(published.registration.dataset_id) == "member_account"
+    assert published.row_count == 3
+
+    # Read back from the published dataset alone. Nothing here holds the producing run.
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            f"SELECT cash, run_id FROM read_parquet('{published.output_path.as_posix()}')"
+            " ORDER BY available_at"
+        ).fetchall()
+    finally:
+        con.close()
+
+    series = [Decimal(str(row[0])) for row in rows]
+    assert series == [Decimal("1000"), Decimal("1001"), Decimal("1002")]
+    assert {row[1] for row in rows} == {"member-1"}, "the record says which run produced it"
+
+    # A moving return over that series is the whole input member weighting needs.
+    returns = [later / earlier - 1 for earlier, later in pairwise(series)]
+    assert len(returns) == 2
+    assert all(value > 0 for value in returns), "a return is computable from the record alone"
 
     sessions = int(manifest["sessions"])
     assert sessions >= 21, "a twenty-day window must fit the committed fixture"
     points = sessions - 20
-    assert points >= 1, "at least one moving-return point per member"
-    assert points <= 2, "the horizon proves record sufficiency, not economic variation, and says so"
+    assert 1 <= points <= 2, (
+        "the horizon proves record sufficiency, not economic variation, and says so"
+    )
 
 
 def test_criterion_12_a_flexible_budget_is_not_silently_made_fixed(

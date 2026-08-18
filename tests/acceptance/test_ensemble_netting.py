@@ -144,28 +144,52 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     instruments = tuple(sorted(recomputed))
     desired = {name: active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments}
 
+    # The shipped bounds bind. show_006 runs under `no_short` and `single_name_cap`, so the short
+    # leg the members produced is removed by projection rather than by pre-filtering. Replaying
+    # under wide bounds would make `optimize` an identity and the assertion would then hold just as
+    # well against a projection that ignored its bounds entirely.
+    lower = dict.fromkeys(instruments, Decimal("0"))
+    upper = dict.fromkeys(instruments, Decimal("0.35"))
     projected = optimize(
         desired=desired,
         current={},
-        lower=dict.fromkeys(instruments, Decimal("-1")),
-        upper=dict.fromkeys(instruments, Decimal("1")),
+        lower=lower,
+        upper=upper,
         frozen=frozenset(),
         cash_range=(Decimal("0"), Decimal("1")),
     )
 
-    # Replaying the recorded net through the recorded transform reproduces the constructed weights.
-    # A stage that dropped a member's contribution after the netting record would diverge here.
-    assert projected.weights == desired, (
-        "the recorded net, put back through the recorded transform, reproduces the final weights"
+    assert any(value < 0 for value in desired.values()), (
+        "the members must hand the projection a short leg for the lower bound to bite"
     )
+    assert projected.binding_lower, "the no-short bound must genuinely bind on the replayed net"
+    for name, value in projected.weights.items():
+        assert lower[name] <= value <= upper[name], (
+            "the projection respects the bounds it was given"
+        )
 
+    # Long-only is emergent: the short leg is gone after projection, never before it.
+    assert all(value >= 0 for value in projected.weights.values())
+
+    # An ensemble that quietly used one member after recording the honest net must diverge, and it
+    # must still diverge after the projection, not only before it.
     dropped = {name: reversal.get(name, Decimal(0)) for name in instruments}
     dropped_active = rescale(equal_weight(dropped), long=budget, short=-budget)
     dropped_desired = {
         name: dropped_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
     }
-    assert dropped_desired != desired, (
-        "an ensemble that dropped a member after the netting record must not reproduce these"
+    assert dropped_desired != desired
+
+    dropped_projected = optimize(
+        desired=dropped_desired,
+        current={},
+        lower=lower,
+        upper=upper,
+        frozen=frozenset(),
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+    assert dropped_projected.weights != projected.weights, (
+        "the divergence must survive the projection, or the replay proves nothing about it"
     )
 
     replayed = rescale(recomputed, long=Decimal("1"), short=Decimal("-1"))

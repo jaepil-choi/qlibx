@@ -144,7 +144,10 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     instruments = tuple(sorted(recomputed))
     desired = {name: active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments}
 
-    # The shipped bounds bind. show_006 runs under `no_short` and `single_name_cap`, so the short
+    # `no_short` is the bound that bites here. The cap is carried for shape -- at a 0.04 budget no
+    # long can approach it -- so it is present but inert, and only the lower bound is asserted to
+    # bind. Replaying under wide bounds would make `optimize` an identity, and the assertion would
+    # then hold just as well against a projection that ignored its bounds entirely. show_006
     # leg the members produced is removed by projection rather than by pre-filtering. Replaying
     # under wide bounds would make `optimize` an identity and the assertion would then hold just as
     # well against a projection that ignored its bounds entirely.
@@ -162,6 +165,10 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     shorts = {name for name, value in desired.items() if value < 0}
     longs = {name for name, value in desired.items() if value > 0}
     assert shorts and longs, "the members must hand the projection both legs"
+    # The correspondence below needs every name to be strictly signed: `optimize` reports a name
+    # sitting exactly on its lower bound as binding, so an exactly-zero net would land in
+    # `binding_lower` while belonging to neither set.
+    assert not any(value == 0 for value in desired.values())
 
     # Exactly the short names bind low and land *on* the bound. An all-zero book would satisfy
     # "within bounds" and "non-negative" too, so this correspondence is what discriminates.

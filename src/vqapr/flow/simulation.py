@@ -231,7 +231,7 @@ _ACCOUNT_IDENTITY = "_ACCOUNT"
 """Synthetic instrument identity for the account-level series (canon 11.2 precedent)."""
 
 DEFAULT_TABLE_PREFIX = "vqapr."
-"""Table ids the package owns. A Strategy declaring one is refused before the run starts."""
+"""Table ids the package owns. A Strategy declaring one is refused when the recorder is built."""
 
 DEFAULT_TABLES = (
     TableSpec(f"{DEFAULT_TABLE_PREFIX}weight", ("instrument", "weight")),

@@ -307,10 +307,11 @@ def test_the_namespace_predicate_is_precise_in_both_directions() -> None:
     )
 
 
-def test_an_invisible_character_cannot_hide_inside_a_table_id() -> None:
+def test_an_invisible_character_cannot_hide_inside_a_name() -> None:
     """Closed at construction, not at each consumer.
 
-    A table id is a name a human reads back later, so an invisible codepoint cannot help a reader
+    A table id and a field name are both names a human reads back later, so an invisible
+    codepoint cannot help a reader
     and can only disguise one name as another -- including as a package-owned name. Control and
     format characters are therefore refused where the id is built, which spares every consumer from
     normalising defensively and closes the disguise for names that have nothing to do with the

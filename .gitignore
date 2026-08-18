@@ -39,3 +39,4 @@ showcases/show_*/outputs/
 
 # GJC workflow state is per-session local scratch, never shared.
 /.gjc/
+/.gjc-evidence/

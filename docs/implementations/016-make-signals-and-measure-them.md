@@ -150,7 +150,7 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
 
 ## Validation
 
-- `uv run pytest -q` — 475 passed, from 356 at the milestone start.
+- `uv run pytest -q` — 476 passed, from 356 at the milestone start.
 - `uv run ruff check` and `ruff format --check` clean; package imports with 115 pinned exports,
   including `Mark` and `MarkBatch` so the showcase and the analysis tests reach them through the
   public surface rather than through `vqapr.valuation.marks`.

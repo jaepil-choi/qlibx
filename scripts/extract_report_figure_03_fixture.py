@@ -161,6 +161,10 @@ def _contract(
         "market_demeaned_sharpe": _information_ratio(demeaned_return),
         "baseline_mean_absolute_beta": float(baseline_beta.abs().mean()),
         "market_demeaned_mean_absolute_beta": float(demeaned_beta.abs().mean()),
+        # Signed as well as absolute. An absolute mean is sign-invariant, so a systematically
+        # sign-flipped beta would reproduce every absolute figure exactly and stay invisible.
+        "baseline_mean_beta": float(baseline_beta.mean()),
+        "market_demeaned_mean_beta": float(demeaned_beta.mean()),
         "beta_window": BETA_WINDOW,
     }
 

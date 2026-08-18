@@ -36,7 +36,12 @@ def _dot(left: dict[str, Decimal], right: dict[str, Decimal]) -> Fraction:
     return sum((Fraction(left[name]) * Fraction(right[name]) for name in left), Fraction(0))
 
 
-def _orthogonal(residual: dict[str, Decimal], column: dict[str, Decimal]) -> bool:
+def _orthogonal(
+    residual: dict[str, Decimal],
+    column: dict[str, Decimal],
+    *,
+    weights: dict[str, Decimal] | None = None,
+) -> bool:
     """Orthogonal to within the quantum the returned values carry.
 
     The solve is exact and the residual is exactly orthogonal before it is returned, but the
@@ -47,11 +52,15 @@ def _orthogonal(residual: dict[str, Decimal], column: dict[str, Decimal]) -> boo
     This is still a real falsifier: an identity transform misses by orders of magnitude, not by a
     rounding step.
     """
-    largest = max((abs(Fraction(value)) for value in column.values()), default=Fraction(1))
-    return abs(_dot(residual, column)) <= Fraction(len(residual)) * Fraction(1, 10**12) * largest
+    if weights is None:
+        loading = dict(column)
+    else:
+        loading = {name: column[name] * weights[name] for name in residual}
+    largest = max((abs(Fraction(value)) for value in loading.values()), default=Fraction(1))
+    return abs(_dot(residual, loading)) <= Fraction(len(residual)) * Fraction(1, 10**12) * largest
 
 
-def test_the_residual_is_exactly_orthogonal_to_a_single_exposure() -> None:
+def test_the_residual_is_orthogonal_to_a_single_exposure() -> None:
     """Agreement at the returned quantum, which is what a caller can actually observe."""
     signal = _values(A="10", B="20", C="30", D="45")
 
@@ -113,7 +122,7 @@ def test_weights_change_the_answer_and_the_orthogonality_follows_them() -> None:
     weighted = neutralize(signal, exposures={"market": market}, weights=weights)
 
     assert weighted != unweighted
-    assert sum((Fraction(weights[n]) * Fraction(weighted[n]) for n in signal), Fraction(0)) == 0
+    assert _orthogonal(weighted, _ones(signal), weights=weights)
 
 
 def test_a_dependent_exposure_is_refused_by_name() -> None:

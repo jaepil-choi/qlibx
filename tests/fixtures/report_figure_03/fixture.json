@@ -33,6 +33,8 @@
     "market_demeaned_sharpe": 1.271617235859395,
     "baseline_mean_absolute_beta": 0.4619282295531416,
     "market_demeaned_mean_absolute_beta": 0.10832567004708715,
+    "baseline_mean_beta": 0.46170000377430714,
+    "market_demeaned_mean_beta": 0.04586147858940902,
     "beta_window": 60
   },
   "sources_sha256": {

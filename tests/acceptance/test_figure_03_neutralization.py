@@ -22,6 +22,7 @@ numbers, and this file says so rather than implying otherwise.
 from __future__ import annotations
 
 import json
+import sys
 from decimal import Decimal
 from pathlib import Path
 
@@ -32,6 +33,16 @@ import pytest
 from vqapr.public import demean, neutralize
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "report_figure_03"
+
+# The generator owns the reference recipe, including the three reconciliations the upstream
+# operation carries. Importing it rather than re-typing it means those guards run on every
+# invocation of this test, and removes the possibility of two copies drifting apart -- which is
+# exactly what happened once, when the guards were restored in one place and not the other.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from extract_report_figure_03_fixture import (  # noqa: E402
+    market_demean_preserving_gross as _market_demean_preserving_gross,
+)
+from extract_report_figure_03_fixture import rolling_beta as _rolling_beta  # noqa: E402
 
 RETURN_CEILING = 1e-3
 """Annualised-return agreement, in return units. The claimed gap is roughly 1875 bp, so this sits
@@ -57,24 +68,6 @@ def panels() -> dict[str, pd.DataFrame]:
         name: pd.read_parquet(FIXTURE / f"{name}.parquet")
         for name in ("baseline_weight", "universe_mask", "benchmark_weight", "realized_return")
     }
-
-
-def _market_demean_preserving_gross(baseline: pd.DataFrame, universe: pd.DataFrame) -> pd.DataFrame:
-    masked = baseline.where(universe)
-    demeaned = masked.sub(masked.mean(axis=1), axis=0).fillna(0.0)
-    baseline_gross = baseline.abs().sum(axis=1)
-    demeaned_gross = demeaned.abs().sum(axis=1)
-    scale = baseline_gross.div(demeaned_gross.replace(0.0, np.nan)).fillna(0.0)
-    return demeaned.mul(scale, axis=0).astype("float64")
-
-
-def _rolling_beta(values: pd.Series, benchmark: pd.Series, *, window: int) -> pd.Series:
-    aligned = pd.concat([values.rename("values"), benchmark.rename("benchmark")], axis=1).fillna(
-        0.0
-    )
-    variance = aligned["benchmark"].rolling(window, min_periods=window).var()
-    covariance = aligned["values"].rolling(window, min_periods=window).cov(aligned["benchmark"])
-    return covariance.div(variance.where(variance.abs().gt(1e-18)))
 
 
 def _annual_mean(series: pd.Series) -> float:
@@ -107,7 +100,31 @@ def _diagnostic(panels: dict[str, pd.DataFrame], *, demeaned: pd.DataFrame | Non
         "market_demeaned_mean_absolute_beta": float(
             _rolling_beta(demeaned_return, benchmark_return, window=BETA_WINDOW).abs().mean()
         ),
+        "baseline_mean_beta": float(
+            _rolling_beta(baseline_return, benchmark_return, window=BETA_WINDOW).mean()
+        ),
+        "market_demeaned_mean_beta": float(
+            _rolling_beta(demeaned_return, benchmark_return, window=BETA_WINDOW).mean()
+        ),
     }
+
+
+def test_the_sign_of_the_beta_is_pinned(contract: dict, panels: dict) -> None:
+    """An absolute mean cannot see a sign flip, so the signed mean is asserted too.
+
+    Every other beta assertion in this file consumes the series through `.abs().mean()`, which is
+    sign-invariant: a systematically negated implementation reproduces all of them exactly and
+    stays invisible. The contract records the signed mean as well, and this pins it.
+    """
+    observed = _diagnostic(panels)
+
+    for quantity in ("baseline_mean_beta", "market_demeaned_mean_beta"):
+        assert abs(observed[quantity] - contract[quantity]) < RATIO_CEILING
+
+    assert contract["baseline_mean_beta"] > 0, (
+        "a long book measured against its own benchmark carries positive beta; a negative value "
+        "here would mean the sign convention had inverted"
+    )
 
 
 def test_vqapr_reproduces_the_reference_demean_instrument_by_instrument(
@@ -322,6 +339,11 @@ def test_an_identity_demean_fails_the_beta_clause(contract: dict, panels: dict) 
     """
     identity = _diagnostic(panels, demeaned=panels["baseline_weight"])
 
+    # Note what this one does and does not prove. Under the identity substitution the demeaned
+    # return is the same expression as the baseline return, so this inequality is `not (a < a)` and
+    # holds for any beta implementation at all. It is kept because it still catches a `_diagnostic`
+    # that ignored its own `demeaned=` override, and for nothing else. The assertion below is the
+    # one that makes the clause falsifiable.
     strictly_lower = (
         identity["market_demeaned_mean_absolute_beta"] < identity["baseline_mean_absolute_beta"]
     )
@@ -352,9 +374,13 @@ def test_perturbing_the_benchmark_turns_each_beta_red(
     neither annualised return — so this isolates exactly the half of the claim the identity case
     alone could never certify.
     """
+    # Sorted, not parquet order, for the same reason the return gate is: which names move must not
+    # depend on how the panel happened to be written. Measured headroom under this permutation is
+    # 18.8 ceilings on the baseline beta and 5.1 on the demeaned one, so demanding three is a real
+    # margin rather than a hopeful one.
     shifted = panels["benchmark_weight"].copy()
-    reversed_columns = list(shifted.columns)[::-1]
-    shifted[list(shifted.columns)] = shifted[reversed_columns].to_numpy()
+    reversed_columns = sorted(shifted.columns)[::-1]
+    shifted[sorted(shifted.columns)] = shifted[reversed_columns].to_numpy()
 
     tampered = dict(panels)
     tampered["benchmark_weight"] = shifted
@@ -362,8 +388,8 @@ def test_perturbing_the_benchmark_turns_each_beta_red(
     observed = _diagnostic(tampered)
     unperturbed = _diagnostic(panels)
 
-    assert abs(observed[quantity] - contract[quantity]) >= RATIO_CEILING, (
-        f"reversing the benchmark weights did not move {quantity} outside its ceiling"
+    assert abs(observed[quantity] - contract[quantity]) >= RATIO_CEILING * 3, (
+        f"reversing the benchmark weights did not move {quantity} clear of its ceiling"
     )
     assert abs(unperturbed[quantity] - contract[quantity]) < RATIO_CEILING, (
         f"the unperturbed run must still reproduce {quantity}"

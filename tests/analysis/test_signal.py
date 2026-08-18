@@ -120,6 +120,33 @@ def test_decay_reports_one_value_per_horizon_in_order(realized: dict) -> None:
     assert produced[0] == 1 and produced[1] == -1
 
 
+def test_the_square_root_branch_lands_on_an_exact_hand_computed_value() -> None:
+    """The one path every other anchor here misses.
+
+    Every plus or minus one anchor short-circuits on the exact-rational branch, so the square root
+    was covered only by inequalities — the same shape as the beta-sign defect this milestone found:
+    a real function certified by assertions that cannot tell it from a constant.
+
+    These inputs are chosen so the branch is taken *and* the answer is still exact. Centred, the
+    signal is (-1, 0, 1) and the outcome (1, -1, 0): covariance -1, each spread 2, so the product
+    is 4, a perfect square that leaves the correlation at exactly -1/2 with no rounding to tolerate.
+    Because covariance squared is 1 and the product is 4, the short circuit does not fire.
+    """
+    signal = _values(A="1", B="2", C="3")
+    falling = _values(A="2", B="0", C="1")
+    rising = _values(A="0", B="2", C="1")
+
+    # Exact values, not bounds: a constant, a rounded, or a sign-flipped implementation all die.
+    assert information_coefficient(signal, falling) == Decimal("-0.5")
+    assert information_coefficient(signal, rising) == Decimal("0.5")
+
+    # And the sign is the covariance's, mirrored across the two directions.
+    assert information_coefficient(signal, falling) == -information_coefficient(signal, rising)
+
+    # The rank form takes the same branch and owes the same number on these orderings.
+    assert rank_information_coefficient(signal, falling) == Decimal("-0.5")
+
+
 def test_a_flat_side_is_refused_rather_than_reported_as_zero() -> None:
     flat = _values(A="1", B="1", C="1")
     varied = _values(A="1", B="2", C="3")

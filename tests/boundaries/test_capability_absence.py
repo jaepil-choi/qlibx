@@ -19,6 +19,8 @@ import sys
 from decimal import Decimal
 from inspect import signature
 
+import pytest
+
 from vqapr.transforms import window
 
 # Canon's own list of what a leaf must not reach for, plus the two this milestone adds
@@ -36,7 +38,19 @@ FORBIDDEN = (
     "duckdb",
 )
 
-LEAF_MODULES = ("vqapr.transforms.window",)
+# Every leaf canon names, not just the one whose signature this file also checks. A probe that
+# covers one module of five certifies one module of five: the other four could acquire a forbidden
+# import and the boundary suite would stay green. The alphas of the next milestone import all of
+# them, so the coverage has to precede the code that leans on it.
+LEAF_MODULES = (
+    "vqapr.transforms.window",
+    "vqapr.transforms.cross_section",
+    "vqapr.transforms.missing",
+    "vqapr.transforms.lookthrough",
+    "vqapr.transforms.neutralize",
+    "vqapr.analysis.signal",
+    "vqapr.analysis.performance",
+)
 
 
 def test_a_leaf_receives_its_values_and_cannot_go_looking_for_them() -> None:
@@ -62,12 +76,16 @@ def test_a_leaf_receives_its_values_and_cannot_go_looking_for_them() -> None:
     assert all(isinstance(value, Decimal) for entry in seen for inner in entry for value in inner)
 
 
-def test_importing_a_leaf_pulls_in_no_capability_it_should_not_have() -> None:
-    """Run in a clean subprocess, because this process already holds every name under test."""
+@pytest.mark.parametrize("leaf", LEAF_MODULES)
+def test_importing_a_leaf_pulls_in_no_capability_it_should_not_have(leaf: str) -> None:
+    """Run in a clean subprocess, because this process already holds every name under test.
+
+    One subprocess per leaf, so a breach names the module that caused it. Importing them together
+    would prove only that *some* leaf reached a layer, which is not a fact anyone can act on.
+    """
     probe = (
         "import sys\n"
-        f"for name in {LEAF_MODULES!r}:\n"
-        "    __import__(name)\n"
+        f"__import__({leaf!r})\n"
         f"present = sorted(n for n in {FORBIDDEN!r} if n in sys.modules)\n"
         "print(';'.join(present))\n"
     )
@@ -82,7 +100,7 @@ def test_importing_a_leaf_pulls_in_no_capability_it_should_not_have() -> None:
 
     assert completed.returncode == 0, completed.stderr
     reached = [name for name in completed.stdout.strip().split(";") if name]
-    assert reached == [], f"importing a leaf reached {reached}"
+    assert reached == [], f"importing {leaf} reached {reached}"
 
 
 def test_the_probe_itself_can_fail() -> None:

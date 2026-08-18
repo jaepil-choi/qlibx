@@ -1,0 +1,112 @@
+{
+  "purpose": "A de-minimis KOSPI 200 cross-section with industry codes, carrying at least one single-name industry so a structurally rank deficient exposure matrix can be built from real classifications rather than from an invented one.",
+  "provenance": "Vendor-derived excerpt from the local warehouse, not a redistribution of the source. Classification is month-end only in the vendor data, which is why the dates are month-ends rather than a continuous window.",
+  "classification_dates": [
+    "2026-02-27",
+    "2026-03-31",
+    "2026-04-29"
+  ],
+  "rows": 600,
+  "instruments": 200,
+  "industries": 46,
+  "return_rows": 8600,
+  "single_name_industries": [
+    {
+      "date": "2026-02-27",
+      "industry_code": 201020
+    },
+    {
+      "date": "2026-02-27",
+      "industry_code": 201070
+    },
+    {
+      "date": "2026-02-27",
+      "industry_code": 302030
+    },
+    {
+      "date": "2026-02-27",
+      "industry_code": 351010
+    },
+    {
+      "date": "2026-02-27",
+      "industry_code": 452050
+    },
+    {
+      "date": "2026-02-27",
+      "industry_code": 454010
+    },
+    {
+      "date": "2026-02-27",
+      "industry_code": 551020
+    },
+    {
+      "date": "2026-03-31",
+      "industry_code": 201020
+    },
+    {
+      "date": "2026-03-31",
+      "industry_code": 201070
+    },
+    {
+      "date": "2026-03-31",
+      "industry_code": 302030
+    },
+    {
+      "date": "2026-03-31",
+      "industry_code": 351010
+    },
+    {
+      "date": "2026-03-31",
+      "industry_code": 452050
+    },
+    {
+      "date": "2026-03-31",
+      "industry_code": 454010
+    },
+    {
+      "date": "2026-03-31",
+      "industry_code": 551020
+    },
+    {
+      "date": "2026-04-29",
+      "industry_code": 201020
+    },
+    {
+      "date": "2026-04-29",
+      "industry_code": 201070
+    },
+    {
+      "date": "2026-04-29",
+      "industry_code": 302030
+    },
+    {
+      "date": "2026-04-29",
+      "industry_code": 351010
+    },
+    {
+      "date": "2026-04-29",
+      "industry_code": 452050
+    },
+    {
+      "date": "2026-04-29",
+      "industry_code": 454010
+    },
+    {
+      "date": "2026-04-29",
+      "industry_code": 551020
+    }
+  ],
+  "sources_sha256": {
+    "k200_members": "c31e8cfaad30132fee9531ef2fdf9f80003cb34841cef196ba7b4a9913f9e424",
+    "sector_classification": "b46b6cb2dfb740cb8475ce127225b38c45a688de3cef8bdf732428b07bb8ad68",
+    "adjusted_prices": "63a4321aaecbaf28a06aef3a25ccbcfa110b46381b06c0ce0818bd41e8e284c8"
+  },
+  "committed_sha256": {
+    "cross_section.parquet": "ef36a50d4fd166a2074292dd1fc7f6180c83643d13306780005881ca6683e6ea",
+    "returns.parquet": "585834588bb5b19108e898bb1f36ee6e5d4106dc72e1a527cfeb0fb907e975b0"
+  },
+  "committed_bytes": {
+    "cross_section.parquet": 5495,
+    "returns.parquet": 70279
+  }
+}

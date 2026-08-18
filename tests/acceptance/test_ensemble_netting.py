@@ -235,12 +235,14 @@ def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
 ) -> None:
     """Publish a member's record, then reach it back the way a later ensemble would.
 
-    The boundary is the point. Every package name this test uses to **publish, reach and weight**
-    the record comes from ``vqapr.public``; only workspace creation, which is scaffolding a real
-    project already has, reaches past it. So if the recorded surface were insufficient for member
-    weighting, the only way to make this pass would be to import something else. The record is
-    reached by **dataset id**, never by touching the producing run's objects, which is what makes
-    it reusable after the run is gone.
+    What it does: publishes a member's recorded account table, then reads it back from the
+    published parquet and computes a moving return from the recovered series. Nothing here holds
+    the producing run, which is what makes the record reusable after that run is gone. The package
+    names used to publish and weight come from ``vqapr.public``; workspace creation and the parquet
+    read reach past it, the first because a real project already has a workspace and the second
+    because reading a published artifact is what a subscriber's own machinery does. The real-run
+    version, published and read back through the spine, is in
+    ``showcases/show_006_ensemble_netting``.
 
     What it proves and what it does not, stated plainly. With 22 committed sessions and 21
     callbacks a twenty-day moving return yields one, at most two points per member. That is enough

@@ -992,6 +992,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "reversal_allocation.lineage.json": _digest(reversal_published.lineage_path),
         "momentum_allocation.parquet": _digest(momentum_published.output_path),
         "momentum_allocation.lineage.json": _digest(momentum_published.lineage_path),
+        "reversal_account.parquet": _digest(account_published.output_path),
+        "reversal_account.lineage.json": _digest(account_published.lineage_path),
     }
     return trace, digests
 

@@ -13,6 +13,7 @@ import duckdb
 import pytest
 
 from vqapr.domain.errors import VqaprError
+from vqapr.evidence.tables import FLOW_ENVELOPE_FIELDS
 from vqapr.public import RunRecordSpec, TableSpec, publish_run_record
 from vqapr.workspace import Workspace
 
@@ -375,3 +376,21 @@ def test_an_invisible_character_cannot_hide_inside_a_name() -> None:
     # Honest ids, including non-Latin ones, are untouched.
     for honest in ("alpha.signal", "\ud559\uc2b5.\uc2e0\ud638", "my.vqapr.audit"):
         TableSpec(honest, ("instrument",))
+
+
+def test_a_record_omitting_the_flow_envelope_is_refused() -> None:
+    """Canon makes the five Flow-stamped columns an obligation, so the spec enforces it.
+
+    Without this the guard would be unfalsifiable: every spec in the repository declares all five,
+    so deleting the check would leave the suite green. A record missing them drops PRD 9.4's
+    which-run, whose and at-what-time obligation, which is the reason to publish it at all.
+    """
+    for omitted in FLOW_ENVELOPE_FIELDS:
+        declared = (*sorted(FLOW_ENVELOPE_FIELDS - {omitted}), "signal")
+        with pytest.raises(ValueError, match="Flow envelope fields"):
+            RunRecordSpec.of("d", table_id="alpha.signal", value_fields=declared)
+
+    # Declaring all five alongside a value column is accepted.
+    RunRecordSpec.of(
+        "d", table_id="alpha.signal", value_fields=(*sorted(FLOW_ENVELOPE_FIELDS), "signal")
+    )

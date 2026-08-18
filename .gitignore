@@ -36,3 +36,6 @@ showcases/show_*/outputs/
 !/.agent/plans/active/.gitkeep
 !/.agent/plans/completed/
 !/.agent/plans/completed/.gitkeep
+
+# GJC workflow state is per-session local scratch, never shared.
+/.gjc/

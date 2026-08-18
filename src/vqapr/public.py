@@ -94,6 +94,7 @@ from vqapr.transforms.cross_section import (
 )
 from vqapr.transforms.lookthrough import InstrumentExposure, look_through
 from vqapr.transforms.missing import drop_missing, require_complete
+from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
 from vqapr.transforms.window import (
     apply_causal,
     window_beta,
@@ -148,6 +149,7 @@ __all__ = (
     "MaterializationResult",
     "MaterializationSpec",
     "MonitoringPolicy",
+    "NeutralizationRefusal",
     "NoDecision",
     "OperationAgenda",
     "OperationOccurrence",
@@ -182,6 +184,7 @@ __all__ = (
     "look_through",
     "materialize",
     "net_members",
+    "neutralize",
     "optimize",
     "preflight_run",
     "proportional_weight",

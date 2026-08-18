@@ -13,7 +13,7 @@ import duckdb
 import pytest
 
 from vqapr.domain.errors import VqaprError
-from vqapr.public import RunRecordSpec, publish_run_record
+from vqapr.public import RunRecordSpec, TableSpec, publish_run_record
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -247,8 +247,6 @@ def test_a_strategy_declaring_the_reserved_prefix_is_refused() -> None:
         f" {DEFAULT_TABLE_PREFIX}account",
         f"{DEFAULT_TABLE_PREFIX}account_extra",
         "\uff56\uff51\uff41\uff50\uff52\uff0eaccount",
-        "\u200bvqapr.account",
-        "\u00advqapr.account",
     ):
 
         class _Shadowing:
@@ -289,10 +287,6 @@ def test_the_namespace_predicate_is_precise_in_both_directions() -> None:
         " vqapr.account",
         "vqapr.anything_at_all",
         "\uff56\uff51\uff41\uff50\uff52\uff0eaccount",  # full-width
-        "\u200bvqapr.account",  # zero-width space
-        "vq\u200dapr.account",  # zero-width joiner
-        "\u00advqapr.account",  # soft hyphen
-        "\u2060vqapr.account",  # word joiner
     ):
         assert _shadows_package_table(spelling), f"{spelling!r} lays claim to the reserved prefix"
 
@@ -306,3 +300,23 @@ def test_the_namespace_predicate_is_precise_in_both_directions() -> None:
         "vq\u0430pr.account",  # Cyrillic lookalike: out of scope by design, and documented
     ):
         assert not _shadows_package_table(spelling), f"{spelling!r} is an honest table id"
+
+
+def test_an_invisible_character_cannot_hide_inside_a_table_id() -> None:
+    """Closed at construction, not at each consumer.
+
+    A table id is a name a human reads back later, so an invisible codepoint cannot help a reader
+    and can only disguise one name as another -- including as a package-owned name. Control and
+    format characters are therefore refused where the id is built, which spares every consumer from
+    normalising defensively and closes the disguise for names that have nothing to do with the
+    reserved namespace.
+    """
+    for hidden in ("\x00", "\x1b", "\u200b", "\u200d", "\u00ad", "\u2060", "\ufeff"):
+        with pytest.raises(ValueError, match="control or format characters"):
+            TableSpec(f"{hidden}vqapr.account", ("instrument", "cash"))
+        with pytest.raises(ValueError, match="control or format characters"):
+            TableSpec(f"alpha{hidden}.signal", ("instrument",))
+
+    # Honest ids, including non-Latin ones, are untouched.
+    for honest in ("alpha.signal", "\ud559\uc2b5.\uc2e0\ud638", "my.vqapr.audit"):
+        assert TableSpec(honest, ("instrument",)).table_id == honest

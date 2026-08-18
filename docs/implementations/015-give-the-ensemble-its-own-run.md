@@ -134,7 +134,7 @@ and account state — while the realised performance series it would ultimately 
 
 ## Validation
 
-- `uv run pytest -q` — 355 passed, from 322 at the milestone start.
+- `uv run pytest -q` — 356 passed, from 322 at the milestone start.
 - `uv run ruff check` and `ruff format --check` clean; package imports.
 - `uv run python showcases/show_006_ensemble_netting/run.py` — three real runs, reversal published
   over 16 occurrences with `state_path` moved, momentum over 11 with `state_path` constant, both

@@ -166,12 +166,21 @@ def test_negative_or_empty_weights_are_refused() -> None:
         )
 
 
-def test_a_real_thin_industry_makes_the_matrix_singular_and_it_is_named() -> None:
-    """The rank-deficiency case, on real classifications rather than an invented matrix.
+def test_a_dependent_exposure_set_from_real_classifications_is_refused_by_name() -> None:
+    """Rank deficiency on real classifications rather than an invented matrix — and only that.
 
-    A single-name industry gives a dummy column that is linearly dependent once a market column is
-    present: the market column already carries that instrument's only loading. The refusal must
-    name the industry rather than reporting an unusable number.
+    An earlier version of this test claimed the single-name industry was what made the matrix
+    singular. It is not, and the test could not have told the difference: the exposure set it built
+    was a market column plus a complete partition into two dummies, and a complete partition sums
+    to the market column for **any** widths, so it would have passed identically with a fifty-name
+    industry. The claim was unfalsifiable and the mechanism was wrong.
+
+    What is actually true is asserted below in both directions: a complete dummy set alongside a
+    market column is exactly dependent and is refused by name, while the same single-name industry
+    on its own is accepted, because `{market, thin}` has determinant `n - 1` rather than zero.
+
+    `neutralize` performs no within-group centring, which is the operation that would make a
+    one-member group vanish, so nothing in the shipped code makes thinness special.
     """
     manifest = json.loads((FIXTURE / "fixture.json").read_text(encoding="utf-8"))
     thin = manifest["single_name_industries"][0]
@@ -193,22 +202,31 @@ def test_a_real_thin_industry_makes_the_matrix_singular_and_it_is_named() -> Non
     lonely = thin["industry_code"]
     assert sum(1 for code in members.values() if code == lonely) == 1
 
-    # Keep the lonely name and enough others that the refusal is about dependence rather than
-    # about having fewer instruments than exposures.
     others = [name for name, code in members.items() if code != lonely][:8]
-    only = next(name for name, code in members.items() if code == lonely)
-    chosen = [only, *others]
+    only = next(name for name, code in members.items() if code != lonely)
+    single = next(name for name, code in members.items() if code == lonely)
+    chosen = [single, *others]
 
     signal = {name: Decimal(index + 1) for index, name in enumerate(chosen)}
     market = _ones(signal)
     lonely_dummy = {name: Decimal(1 if members[name] == lonely else 0) for name in chosen}
     other_dummy = {name: Decimal(1 if members[name] != lonely else 0) for name in chosen}
 
+    # A market column plus a complete set of industry dummies is the classic dummy trap: the
+    # dummies sum to the market column exactly, so the set is dependent and must be refused.
     with pytest.raises(NeutralizationRefusal, match="linearly dependent"):
         neutralize(
             signal,
             exposures={"market": market, "thin": lonely_dummy, "rest": other_dummy},
         )
+
+    # And now the part that keeps the claim honest. Thinness is **not** what causes the refusal.
+    # Dropping the complement leaves {market, thin}, whose normal matrix has determinant
+    # len(chosen) - 1, so a genuine single-name industry is accepted rather than refused.
+    accepted = neutralize(signal, exposures={"market": market, "thin": lonely_dummy})
+    assert _orthogonal(accepted, market)
+    assert _orthogonal(accepted, lonely_dummy)
+    assert only != single
 
 
 def test_neutralisation_never_grows_a_constraint_shape() -> None:

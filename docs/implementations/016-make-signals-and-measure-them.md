@@ -118,8 +118,8 @@ report assets — those are later milestones, and `renderers.py`, `activity.py`,
 
 - **Signal construction**: rank, zscore, demean, winsorize, buckets, and a causal driver that
   already carries the two-series form beta needs.
-- **Neutralisation**: exact, weighted, with a named refusal on rank deficiency and a real thin
-  industry committed to exercise it.
+- **Neutralisation**: exact, weighted, with a named refusal on rank deficiency, exercised against a
+  dependent exposure set built from real classifications.
 - **Measurement**: information coefficient and its rank form, hit rate, decay, and performance
   statistics that read stored marks.
 - **A worked real-spine example**: `show_007` publishes recorded signal and account tables and
@@ -136,8 +136,25 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
   instead. Any later criterion whose *value* depends on an exposure matrix must commit those panels
   and establish their authority first.
 - **The published figure-3 window is unrecoverable here.** If the reference cache is ever
-  regenerated over the full range, the generator's hash gate will refuse and the retarget can be
-  revisited.
+  regenerated over the full range, the drift shows up as a failing `--check` — which compares the
+  recomputed contract and span against the committed ones — and the retarget can be revisited. Note
+  that the generator does not gate on the source hashes; it records them. The committed panels are
+  protected by `test_every_committed_panel_matches_its_recorded_hash`, not by the generator.
+- **Thinness is not what makes the exposure matrix singular, and an earlier version of this record
+  said it was.** The refusal is caused by a complete dummy set summing to a market column, which is
+  true for any industry widths. A genuine single-name industry alongside a market column is
+  *accepted*, because that pair has determinant `n - 1`. The test now asserts both directions and
+  the fixture's stated purpose is corrected. The claim was unfalsifiable as written, and the review
+  lanes' own earlier framing of it was wrong in the same way.
+- **The beta half of the headline claim runs no vqapr code.** `rolling_beta` is the reference
+  recipe throughout; `window_beta` and `apply_causal` never touch the acceptance panels. The return
+  half does exercise `demean` and `neutralize`, and the beta half is pinned against the contract,
+  its sign, its window and an input perturbation — but it is a reproduction, not a product test.
+- **The orthogonality falsifier asserts a derived quantum budget**, `n × 1e-12 × max|loading|`,
+  rather than exact rational zero as the milestone originally specified. The residual is exactly
+  orthogonal before it is returned; the return is quantised, and a red-team lane measured deviations
+  up to 3e-12 on the returned values. The budget is derived from the quantum rather than tuned, and
+  the departure is recorded here rather than left in the gap between the constraint and the code.
 - **The beta window is pinned by the fixture, not by the tolerance.** A red-team sweep measured
   that any rolling window from 57 to 63 sessions reproduces the published beta figures inside the
   ratio ceiling, so the tolerance cannot separate a seven-session band around the true 60. The

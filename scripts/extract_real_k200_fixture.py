@@ -1,10 +1,15 @@
 """Extract a de-minimis KOSPI 200 cross-section with industry codes.
 
 This fixture exists for one thing the wide figure-3 panels cannot provide: a **structurally rank
-deficient** exposure matrix built from real classifications. Industry membership in the vendor data
-is uneven, and a single-name industry produces a dummy column that vanishes under within-group
-centring — an exact singularity rather than an ill-conditioned one, which is the case a regression
-must refuse by naming the column instead of returning a number.
+deficient** exposure matrix built from real classifications. A market column alongside a complete
+set of industry dummies is exactly dependent, because the dummies sum to the market column, and
+that exact singularity is the case a regression must refuse by naming the column rather than
+returning a number.
+
+Uneven industry membership, including the single-name industries recorded below, is what makes this
+a realistic classification rather than a contrived one. It is **not** what causes the singularity:
+`neutralize` performs no within-group centring, so a one-member group is not special to it. The
+test that consumes this asserts both directions rather than implying otherwise.
 
 Scope is deliberately small. This is vendor-derived, so it is an excerpt rather than a
 redistribution: a few month-end classification dates, the KOSPI 200 members on them, their industry

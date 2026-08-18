@@ -28,6 +28,7 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.evidence.artifacts import SimulationFailure
+from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.costs import CostRule, FillCost
 from vqapr.exchange.execution_table import (
@@ -142,6 +143,7 @@ __all__ = (
     "StrategyConfig",
     "StrategyModel",
     "StrategyModelContext",
+    "TableSpec",
     "ValuationConfig",
     "VqaprError",
     "WeightingRefusal",

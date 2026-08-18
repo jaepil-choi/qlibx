@@ -221,6 +221,7 @@ def test_public_exports_are_fixed() -> None:
         "StrategyConfig",
         "StrategyModel",
         "StrategyModelContext",
+        "TableSpec",
         "ValuationConfig",
         "VqaprError",
         "WeightingRefusal",

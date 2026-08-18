@@ -173,6 +173,7 @@ from vqapr.public import (
     PortfolioTarget,
     RowsLookback,
     StrategyModel,
+    TableSpec,
 )
 
 ACTIVE_BUDGET = Decimal("0.04")
@@ -189,6 +190,14 @@ BUDGET = Budget(
 
 class SignedAlpha(StrategyModel):
     """Cheap names long, expensive names short, demeaned so the legs cancel."""
+
+    def tables(self):
+        """The signal, before weighting, so a later run can see what this view actually thought.
+
+        This is the recorder's first real use on the spine: no StrategyModel in this repository had
+        declared a table before, so the path existed and had never carried a row from `run()`.
+        """
+        return (TableSpec("alpha.signal", ("instrument", "signal")),)
 
     def requirements(self):
         return (
@@ -217,6 +226,10 @@ class SignedAlpha(StrategyModel):
         weights = {
             name: (value * scale).quantize(QUANTUM) for name, value in centred.items()
         }
+        # The signal before weighting, recorded so a later run can reuse this view.
+        for name, value in sorted(centred.items()):
+            self.recorder.append("alpha.signal", {"instrument": name, "signal": str(value)})
+
         history = dict(self.memory or {})
         history["views"] = int(history.get("views", 0)) + 1
         self.memory = history
@@ -807,6 +820,18 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # outside its own box, which is what keeps this run clear of the known intent-boundary gap.
     if int(index_memory.get("frozen_occurrences", 0)) == 0:
         raise AssertionError("no freeze survived, so frozen invariance was never demonstrated")
+    # The recorder's first real-spine evidence: rows that a run() actually produced, not rows a
+    # test constructed against the state object. Nothing in this repository had proved this before.
+    signal_rows = alpha_result.final_state.recorder_rows.get("alpha.signal", ())
+    if len(signal_rows) != len(callback_days) * len(universe):
+        raise AssertionError(
+            f"expected {len(callback_days) * len(universe)} recorded signal rows, "
+            f"saw {len(signal_rows)}"
+        )
+    envelope = {"run_id", "producer_id", "stage", "event_time", "sequence"}
+    if not envelope <= set(signal_rows[0]):
+        raise AssertionError("the Flow envelope is missing from a recorded row")
+
     if int(index_memory.get("frozen_outside_box", 0)) != 0:
         raise AssertionError(
             "a frozen holding drifted outside its box; the intent boundary cannot carry that yet"
@@ -836,6 +861,11 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "observation": str(manifest["observation_path"]),
             "execution": str(manifest["execution_path"]),
             "halt": {"instrument": halted_instrument, "sessions": list(halt_days)},
+        },
+        "recorder": {
+            "table": "alpha.signal",
+            "rows": len(signal_rows),
+            "envelope": sorted(envelope),
             "benchmark": str(manifest["benchmark_path"]),
             "weight_tolerance": tolerance,
         },
@@ -892,6 +922,7 @@ def main() -> None:
     index = trace["index_run"]
     print(f"sessions / callbacks    : {trace['sessions']} / {trace['callbacks']}")
     print(f"alpha views published   : {trace['alpha_run']['published_occurrences']} occurrences")
+    print(f"recorded signal rows    : {trace['recorder']['rows']} (first real-spine recorder use)")
     print(f"subscribed inputs       : {', '.join(index['subscribed_allocation_inputs'])}")
     print(f"shipped constraints     : {', '.join(index['shipped_constraints'])}")
     print(f"rebalances              : {index['rebalances']}")

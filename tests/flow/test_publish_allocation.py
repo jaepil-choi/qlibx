@@ -53,15 +53,31 @@ class _Intent:
 
 
 @dataclass(frozen=True)
+class _SourceRef:
+    source_id: str
+
+
+@dataclass(frozen=True)
 class _Evidence:
     run_identity: str
     cutoff: datetime
     strategy_accesses: tuple[_Access, ...]
     decision: object
+    # The writer reads these for the provenance section and the state path, so the stub carries
+    # them. A stub that omitted them used to publish empty sections; the input guard now refuses.
+    actual_source_refs: tuple[_SourceRef, ...] = ()
+    current_model_state_ref: object = None
+    committed_model_state_ref: object = None
 
 
 def _evidence(
-    *, cutoff: datetime, read_at: datetime, weights: dict[str, str], run: str = "run-1"
+    *,
+    cutoff: datetime,
+    read_at: datetime,
+    weights: dict[str, str],
+    run: str = "run-1",
+    sources: tuple[str, ...] = ("price_daily",),
+    state_moved: bool = False,
 ) -> _Evidence:
     return _Evidence(
         run_identity=run,
@@ -70,6 +86,9 @@ def _evidence(
         decision=_Intent(
             tuple(_Target(name, Decimal(value)) for name, value in sorted(weights.items()))
         ),
+        actual_source_refs=tuple(_SourceRef(source) for source in sources),
+        current_model_state_ref="before",
+        committed_model_state_ref="after" if state_moved else "before",
     )
 
 
@@ -441,3 +460,84 @@ def test_publishing_from_a_real_callback_evidence(tmp_path: Path) -> None:
     assert rows == weights
     lineage = json.loads(result.lineage_path.read_text(encoding="utf-8"))
     assert lineage["run"]["run_identity"] == ["real-run"]
+
+
+def test_the_sources_section_comes_from_what_the_flow_observed(tmp_path: Path) -> None:
+    """Provenance is package-attested, never intent-asserted.
+
+    An intent's own refs are every source the window served, so publishing those would name an
+    observation dataset a member. The section therefore reports what the Flow recorded, and a
+    reader identifies members one hop out by whether a source's own envelope records an allocation
+    operation -- not by its presence in this list.
+    """
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+
+    result = publish_run_allocation(
+        tmp_path,
+        AllocationPublicationSpec.of("alpha_allocation"),
+        [
+            _evidence(
+                cutoff=cutoff,
+                read_at=cutoff,
+                weights={"A": "0.5"},
+                sources=("price_daily", "alpha_allocation"),
+            )
+        ],
+    )
+
+    payload = json.loads(result.lineage_path.read_text(encoding="utf-8"))
+
+    assert payload["run"]["sources"] == ["alpha_allocation", "price_daily"]
+    assert "price_daily" in payload["run"]["sources"], (
+        "an observation source is recorded as a source, and is not thereby a member"
+    )
+
+
+def test_the_state_path_attests_movement_across_the_callback(tmp_path: Path) -> None:
+    """Necessary but not sufficient for path dependence, exactly as canon 9.2 frames it."""
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+
+    still = publish_run_allocation(
+        tmp_path,
+        AllocationPublicationSpec.of("constant_allocation"),
+        [_evidence(cutoff=cutoff, read_at=cutoff, weights={"A": "0.5"}, state_moved=False)],
+    )
+    moved = publish_run_allocation(
+        tmp_path,
+        AllocationPublicationSpec.of("moving_allocation"),
+        [_evidence(cutoff=cutoff, read_at=cutoff, weights={"A": "0.5"}, state_moved=True)],
+    )
+
+    assert json.loads(still.lineage_path.read_text(encoding="utf-8"))["run"]["state_path"] == [
+        "constant"
+    ]
+    assert json.loads(moved.lineage_path.read_text(encoding="utf-8"))["run"]["state_path"] == [
+        "moved"
+    ]
+
+
+def test_evidence_missing_the_newly_read_attributes_is_refused(tmp_path: Path) -> None:
+    """The guard covers what the writer reads, so a stub cannot publish empty provenance."""
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+
+    @dataclass(frozen=True)
+    class _Partial:
+        run_identity: str
+        cutoff: datetime
+        strategy_accesses: tuple[_Access, ...]
+        decision: object
+
+    partial = _Partial(
+        run_identity="run-1",
+        cutoff=cutoff,
+        strategy_accesses=(_Access(cutoff),),
+        decision=_Intent((_Target("A", Decimal("0.5")),)),
+    )
+
+    with pytest.raises(VqaprError, match="callback authority"):
+        publish_run_allocation(
+            tmp_path, AllocationPublicationSpec.of("alpha_allocation"), [partial]
+        )

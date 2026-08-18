@@ -501,7 +501,17 @@ def publish_run_allocation(
     for evidence in collected:
         missing = [
             name
-            for name in ("run_identity", "cutoff", "strategy_accesses", "decision")
+            for name in (
+                "run_identity",
+                "cutoff",
+                "strategy_accesses",
+                "decision",
+                # Read below for the sources section and the state path. Guarding them
+                # here keeps a wrong-shaped caller from publishing an empty provenance
+                # section instead of failing at the input stage.
+                "actual_source_refs",
+                "committed_model_state_ref",
+            )
             if not hasattr(evidence, name)
         ]
         if missing:
@@ -589,6 +599,28 @@ def publish_run_allocation(
             retry="publish a run that produced at least one intent, then retry",
         )
 
+    # Provenance comes from what the Flow observed, never from what the intent claimed. An intent's
+    # own refs are every source the window served, so emitting those would name an observation
+    # dataset a member. A reader identifies members one hop out instead, by whether a source's own
+    # envelope records an allocation operation.
+    sources = sorted(
+        {
+            str(getattr(ref, "source_id", ref))
+            for evidence in collected
+            for ref in evidence.actual_source_refs
+        }
+    )
+    # State movement across the callback body, package-computed and unforgeable. It attests that
+    # state moved -- necessary but not sufficient for path dependence, per canon 9.2.
+    state_path = sorted(
+        {
+            "moved"
+            if evidence.committed_model_state_ref != evidence.current_model_state_ref
+            else "constant"
+            for evidence in collected
+        }
+    )
+
     source_id = f"allocation-{spec.dataset_id}"
     payload = _lineage_envelope(
         operation="strategy.allocation",
@@ -601,6 +633,8 @@ def publish_run_allocation(
         "run_identity": sorted(run_identities),
         "occurrences": occurrences,
         "row_count": len(rows),
+        "sources": sources,
+        "state_path": state_path,
     }
     registration, output_path, lineage_path = _stage_and_publish(
         workspace=workspace,

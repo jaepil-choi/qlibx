@@ -169,11 +169,20 @@ class _Access:
 
 
 @dataclass(frozen=True)
+class _SourceRef:
+    source_id: str
+
+
+@dataclass(frozen=True)
 class _Evidence:
     run_identity: str
     cutoff: datetime
     strategy_accesses: tuple[_Access, ...]
     decision: object
+    # Carried because the writer reads them for the provenance section and the state path.
+    actual_source_refs: tuple[_SourceRef, ...] = (_SourceRef("price_daily"),)
+    current_model_state_ref: object = "before"
+    committed_model_state_ref: object = "before"
 
 
 def _construct(

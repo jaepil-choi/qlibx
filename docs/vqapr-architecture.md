@@ -2464,6 +2464,75 @@ execution code에도 recorder를 주지 않는다.
 `TableSpec` 위반은 **조용히 행을 버리는 것이 아니라 run 실패**다. 기록이 결과를 바꾸면 안 되지만 schema
 위반은 드러나야 하고, 결정적이므로 재현에 문제가 없다.
 
+### 9.2 Run record — run을 재사용 가능하게 만드는 것
+
+§9.1은 기록하는 방법을 정했고, 이 절은 **무엇을 왜** 기록하는지를 정한다.
+
+> **run은 나중의 run이 그걸 재사용하려면 필요한 것을 기록한다.**
+
+이것은 편의 기능이 아니라 §5.2가 이미 부과한 의무다. §5.2는 저장된 run 결과에 성과 시계열이 포함되며
+*"member의 실현 성과로 가중을 정하는 ensemble이 그것을 요구한다"*, *"별도 장치가 필요 없다"*고 적어둔다.
+§11.7 ③가 변동성 역가중 ensemble이 member run의 NAV 시계열을 읽는 경우를 이름으로 든다.
+
+#### 기록할 수 있는 표면
+
+| 무엇 | 소유 | 기본 여부 |
+|---|---|---|
+| weighting 전 최종 signal | Strategy가 `TableSpec`으로 선언 | 선언 |
+| 종목별 최종 weight | package | **기본** |
+| NAV 변화 | package | **기본** |
+| 종목별 실현손익 (비용 전/후) | package | 선언 — 아래 주해 참조 |
+
+종목별 실현손익을 기본에서 벌리는 이유는 계산이 어려워서가 아니라 **경제적 정의가 없어서**다. 커밋된
+전이는 수량과 현금만 계산하고 매수단가 개념이 없다. 두 단가에 새 물량을 부분 매도했을 때 이익이 얼마인가는
+평균단가인지 선입선출인지, 비용을 단가에 넣는지, 부분매도와 부호 전환을 어떻게 처리하는지에 따라 달라진다.
+§7.3이 `avg_entry_price`와 `realized_pnl`을 account history record set에 적어둔 것은 평균단가 쪽으로
+기울어져 있지만 나머지를 정하지 않았고, **그 절이 근거로 든** *"위 값들은 commit을 수행하려면 어찌피
+구해야 한다"*는 현재 구현과 어긋난다. 이 불일치는 기록된 결함이며, 해당 capability를 여는 마일스톤이
+귀속받는 것이 아니라 **정리해야 한다.**
+
+#### 기본 기록은 선언을 요구하지 않는다
+
+weight와 NAV는 accepted intent와 committed Account에서 **package가 계산한다.** 이걸 Strategy 선언에
+걸면 package 사실이 사용자 opt-in에 종속된다. 그래서 `vqapr.` **예약 접두사** 아래의 package 소유
+테이블(`vqapr.weight`, `vqapr.nav`)로 나가며, 사용자 `TableSpec`은 이 접두사를 쓸 수 없다. 이것은
+`FLOW_ENVELOPE_FIELDS`와 예약 컴럼이 **컬럼 수준**에서 하는 일을 **table id 수준**에서 하는 것이다.
+
+**NAV는 두 번째 성과 authority가 아니다.** NAV 행은 marking·Account 척추에서 복사되며 strategy가 준 숫자에서
+오지 않는다. §9.1이 금지한 것은 **진단 값으로 성과를 주장하는 것**이지 실행 결과를 package가 복사해
+기록하는 것이 아니다. 이미 accepted weight를 그대로 다시 발행하는 것과 같은 구분이다.
+
+#### 발행 계약
+
+기록된 테이블은 **평범한 등록 dataset으로 발행**되며, 생산한 run의 객체가 사라진 뒤에도
+`DataRequirement`로 읽힌다. 발행 권위는 **하나**다 — 기존 공유 발행 경로의 세 번째 호출자이며 두 번째
+권위가 아니다.
+
+| 사항 | 규칙 |
+|---|---|
+| `available_at` | **항상 유도**되며 선언할 수 없다. 예약 필드 가드가 그대로 적용된다 |
+| 타임스\ud0¬의 출처 | **테이블별**로 정한다. 결정 시점 테이블은 해당 callback이 읽은 것에서 유도하고, **성과 시계열은 그 값을 만든 mark 시점**이다(§5.2) |
+| 키 모양 | `(available_at, instrument)` 하나로 유지한다. 한 occurrence·한 종목당 **한 행**이고, 단계가 여럿이면 행이 아니라 **컴럼**으로 나눈다 |
+| 종목 축이 없는 시계열 | §11.2의 합성 identity 관례를 따른다. `vqapr.nav`는 계좌용 합성 identity를 갖는다 |
+| 봉투 컬럼 | recorder가 찍는 다섯은 선언된 **value field**로 함께 발행된다. 없으면 PRD §9.4의 *어느 run·누가·언제*를 버리게 된다 |
+| 봉투가 없는 행 | Flow가 만든 기본 행은 recorder 봉투가 없으므로, 동등한 행 identity(run identity·producer identity·account version·mark 시점)를 value field로 가진다 |
+| 두 시계 | `event_time`과 `available_at`을 **합치지 않는다**(PRD §9.4). 둘 다 별도 컴럼으로 살아남는다 |
+
+#### 경로 의존은 필요조건이지 충분조건이 아니다
+
+callback 본문 뒤에 package가 계산하는 committed model-state ref를 직전 ref와 나란히 보면 한 occurrence의
+**전/후 쌍**이 된다. 생산자가 주장하지 않으므로 위조할 수 없다.
+
+다만 이것은 **state가 움직였다**는 사실만 증명하며, PRD §5.6의 경로 의존에 대해 **필요조건일 뿐
+충분조건이 아니다.** 판단에 들어가지 않는 카운터를 올려도 움직인 것으로 나오며, 이 저장소의 전략
+템플릿이 전부 그런데 그것들은 §5.6 기준으로 경로 **무관**이다. 두 잔여를 한계로 명시한다.
+
+- 판단과 무관한 메모리 변경이 **과잉 보고**된다.
+- 자기 보유에 대한 의존은 **감지되지 않는다**(§5.6 / `UC-ALPHA-PATH-001`).
+
+그래서 조합 결과는 각 member의 actual-state identity와 반영 범위(account version 범위·occurrence 범위·cutoff)를
+보존해야 하며, 그래야 근사의 크기가 boolean이 아니라 **확인 가능한 값**으로 남는다.
+
 ---
 
 ## 10. Package layout
@@ -2570,7 +2639,7 @@ src/vqapr/
 │   ├── simulation.py      component occurrence slices + dynamic due execution의 deterministic merge/dispatch
 │   ├── views.py           requirement → bounded ModelWindow
 │   ├── model_state.py     ModelStateStore 포트 · ModelStateRef 발행
-│   ├── materialize.py     파생 dataset 발행 authority — DataModel 결과와 run 배분이 같은 문을 쓴다. **available_at 부여**
+│   ├── materialize.py     파생 dataset 발행 authority — DataModel 결과·run 배분·run record가 같은 문을 쓴다. **available_at 부여**
 │   └── stamping.py        recorder 봉투 5개
 │
 ├── evidence/        영수증 (닫힘)

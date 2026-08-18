@@ -1137,6 +1137,15 @@ member의 realized outcome을 볼 수 있다(`UC-ALPHA-ADAPTIVE-001`).
 value와 momentum StrategyModel의 signed weight를 저장한 뒤 ensemble이 두 result를 읽어 ticker-level netting을 한다.
 한 member의 long과 다른 member의 short가 상쇄된 수량, 최종 signed weight, member lineage가 확인 가능해야 한다.
 
+**상쇄된 수량은 weight 공간에서 읽는다.** 발행되는 배분은 weight economics만 허용하므로 수량으로 표현할
+자리가 없고, 기록된 수량을 체결로 읽는 것은 §9.4가 금지한다. 상쇄는 **예산을 맞추기 전** 단계에서
+기록하며, ensemble이 예산을 맞췄다면 맞춘 다음 단계도 함께 남긴다. 둘은 같은 행의 다른 **컴럼**이다 —
+두 행으로 나누면 발행 키가 중복된다(아키텍처 §9.2).
+
+**member lineage는 한 칸 건너서 따라간다.** ensemble의 발행물은 자기가 읽은 source를 기록하고, 그중
+어느 것이 member인지는 그 source의 발행 envelope가 배분 operation이었는지로 정해진다. 그래야 관측
+데이터셋이 member로 둔갓해지지 않는다.
+
 ### 5.5 Budget semantics
 
 **fixed budget**은 선언한 gross/net budget을 채우는 것을 목표로 한다. **flexible budget**은 약한 signal, 높은

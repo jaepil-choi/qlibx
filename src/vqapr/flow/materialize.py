@@ -25,6 +25,7 @@ from vqapr.domain.rows import Row, Rows, normalize_rows
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.evidence.artifacts import CallbackEvidence
 from vqapr.extension.loading import load_data_model
+from vqapr.flow.simulation import AcceptedIntent
 from vqapr.flow.stamping import derived_available_at
 from vqapr.flow.views import data_model_window
 from vqapr.models.contexts import DataModelContext
@@ -543,7 +544,12 @@ def publish_run_allocation(
             # An occurrence that declined to allocate has no allocation, and inventing an empty one
             # would misrepresent the run.
             continue
-        targets = getattr(decision, "targets", None)
+        # A run records its decision as the Flow's accepted pending item, which carries the intent
+        # alongside the execution target it was bound to. Unwrapping here is what lets a real run
+        # publish; reading `.targets` off the wrapper would refuse every genuine callback and admit
+        # only a hand-built stand-in.
+        intent = decision.intent if isinstance(decision, AcceptedIntent) else decision
+        targets = getattr(intent, "targets", None)
         if targets is None:
             raise _error(
                 _OUTPUT_STAGE,

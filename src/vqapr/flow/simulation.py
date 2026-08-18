@@ -113,6 +113,24 @@ class SimulationResult:
     final_state: AcceptedRunState
 
 
+def callback_evidence(result: SimulationResult) -> tuple[CallbackEvidence, ...]:
+    """Every Strategy callback evidence a finished run published, in lifecycle order.
+
+    A run's decisions are reachable only through its state root, and reconstructing them from
+    ``occurrences`` would mean re-deriving what the Flow already stamped. This is the read half of
+    the publication contract: what ``publish_run_allocation`` consumes, taken from where the Flow
+    put it. Declining callbacks are included, because whether a decline publishes nothing is the
+    publisher's rule to apply, not this accessor's.
+    """
+    if not isinstance(result, SimulationResult):
+        raise TypeError("result must be a SimulationResult returned by run()")
+    return tuple(
+        trace.detail
+        for trace in result.final_state.lifecycle_trace
+        if isinstance(trace.detail, CallbackEvidence)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DueExecutionResult:
     """Evidence returned only after the complete post-decision account chain."""

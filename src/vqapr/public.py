@@ -14,6 +14,7 @@ from pathlib import Path
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.evaluation import constraint_requirements as declared_constraint_requirements
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
@@ -52,13 +53,20 @@ from vqapr.flow.materialize import (
 from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import SimulationFlow, SimulationResult
+from vqapr.flow.simulation import SimulationFlow, SimulationResult, callback_evidence
 from vqapr.models.contexts import DataModelContext, StrategyModelContext
 from vqapr.models.data_model import DataModel
 from vqapr.models.memory import normalize_memory
 from vqapr.models.strategy_model import NoDecision, StrategyModel
+from vqapr.portfolio.allocation import (
+    AllocationInvariants,
+    AllocationSign,
+    AllocationViolation,
+    validate_allocation,
+)
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef, PortfolioTarget
+from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, OptimizeResult, optimize
 from vqapr.runtime.agendas import (
     OperationAgenda,
     OperationOccurrence,
@@ -68,11 +76,16 @@ from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 __all__ = (
+    "QUANTUM",
+    "SHIPPED_CONSTRAINTS",
     "AcademicExchange",
     "AccountMode",
     "AccountSnapshot",
+    "AllocationInvariants",
     "AllocationPublicationResult",
     "AllocationPublicationSpec",
+    "AllocationSign",
+    "AllocationViolation",
     "Budget",
     "CalendarLookback",
     "ComponentKind",
@@ -108,6 +121,8 @@ __all__ = (
     "OperationAgenda",
     "OperationOccurrence",
     "OperationRole",
+    "OptimizeRefusal",
+    "OptimizeResult",
     "PortfolioDirection",
     "PortfolioTarget",
     "RowsLookback",
@@ -121,8 +136,10 @@ __all__ = (
     "StrategyModelContext",
     "ValuationConfig",
     "VqaprError",
+    "callback_evidence",
     "component_ref",
     "materialize",
+    "optimize",
     "preflight_run",
     "publish_run_allocation",
     "register_agenda",
@@ -134,6 +151,8 @@ __all__ = (
     "register_strategy_config",
     "register_valuation_config",
     "run",
+    "shipped_constraint_path",
+    "validate_allocation",
 )
 
 

@@ -24,6 +24,7 @@ from vqapr.domain.identifiers import DatasetId, dataset_id, instrument_id
 from vqapr.domain.rows import Row, Rows, normalize_rows
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.evidence.artifacts import CallbackEvidence
+from vqapr.evidence.tables import FLOW_ENVELOPE_FIELDS
 from vqapr.extension.loading import load_data_model
 from vqapr.flow.simulation import AcceptedIntent
 from vqapr.flow.stamping import derived_available_at
@@ -128,6 +129,13 @@ class RunRecordSpec:
             # available_at would let a producer choose its own stamp on the one publication path
             # that exists to prove it did not.
             raise ValueError(f"value_fields are package-owned: {reserved}")
+        missing = sorted(FLOW_ENVELOPE_FIELDS - set(value_fields))
+        if missing:
+            # Canon states the five Flow-stamped columns ride as declared value fields, because a
+            # record without them drops the which-run, whose and at-what-time obligation that is
+            # the reason to publish it at all. Requiring them here keeps the contract enforced
+            # rather than merely written down.
+            raise ValueError(f"a run record must declare the Flow envelope fields: {missing}")
         return cls(dataset_id(raw_dataset_id), table_id.strip(), value_fields)
 
 

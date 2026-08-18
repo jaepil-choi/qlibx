@@ -3,11 +3,13 @@
 Each test names the criterion it proves. Two of them are the ones the review lanes fought hardest
 over, and they are written to fail rather than to reassure:
 
-* **Criterion 11** is an *import-boundary* test. It proves the recorded surface is sufficient for
-  member weighting by reaching the record only through the public surface and a published dataset
-  id. The constraint is mechanical: if the recorded surface were insufficient, the test could only
-  be made to pass by importing something else, and the assertion on its own import surface would
-  catch that.
+* **Criterion 11** proves the recorded surface is sufficient for member weighting: a record is
+  published, read back from the published artifact after the producing run's objects are gone, and
+  a moving return computed from it. Every package name it uses to publish, reach and weight comes
+  from ``vqapr.public``; only workspace creation, which a real project already has, reaches past
+  that. The end-to-end version of this -- a real ``run()`` publishing and reading back through the
+  spine -- lives in ``showcases/show_006_ensemble_netting``, which is where the round trip is
+  proved on a real run rather than on a constructed result.
 * **Criterion 4** replays the recorded construction transform. Asserting that an intended and a
   realised value were both *recorded* does not constrain the realised one to be a correct function
   of the intended one; a construction stage that dropped a member's contribution after the netting
@@ -144,13 +146,11 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     instruments = tuple(sorted(recomputed))
     desired = {name: active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments}
 
-    # `no_short` is the bound that bites here. The cap is carried for shape -- at a 0.04 budget no
+    # `no_short` is the bound that bites here, removing the short leg the members produced by
+    # projection rather than by pre-filtering. The cap is carried for shape -- at a 0.04 budget no
     # long can approach it -- so it is present but inert, and only the lower bound is asserted to
     # bind. Replaying under wide bounds would make `optimize` an identity, and the assertion would
-    # then hold just as well against a projection that ignored its bounds entirely. show_006
-    # leg the members produced is removed by projection rather than by pre-filtering. Replaying
-    # under wide bounds would make `optimize` an identity and the assertion would then hold just as
-    # well against a projection that ignored its bounds entirely.
+    # then hold just as well against a projection that ignored its bounds entirely.
     lower = dict.fromkeys(instruments, Decimal("0"))
     upper = dict.fromkeys(instruments, Decimal("0.35"))
     projected = optimize(
@@ -189,12 +189,6 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     # any sign would survive. Comparing nets keeps the falsification sensitive to magnitude.
     dropped_net = {name: reversal.get(name, Decimal(0)) for name in instruments}
     assert dropped_net != recomputed, "dropping a member must change the net it recorded"
-
-    # A magnitude-only divergence is the case a sign-based comparison would miss, so the net is
-    # where this is checked. It is deliberately not carried further: `equal_weight` keeps only
-    # signs, so a construction-level comparison downstream could not see it either and asserting
-    # there would report a false guarantee.
-    assert any(dropped_net[name] != recomputed[name] for name in instruments)
 
     replayed = rescale(recomputed, long=Decimal("1"), short=Decimal("-1"))
 
@@ -278,7 +272,15 @@ def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
         RunRecordSpec.of(
             "member_account",
             table_id="vqapr.account",
-            value_fields=("cash", "account_version", "run_id", "event_time"),
+            value_fields=(
+                "cash",
+                "account_version",
+                "run_id",
+                "producer_id",
+                "stage",
+                "event_time",
+                "sequence",
+            ),
         ),
         result,
     )

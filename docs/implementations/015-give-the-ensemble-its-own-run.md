@@ -110,6 +110,13 @@ record set as including `avg_entry_price` and `realized_pnl`, and justifies that
 computes next cash and next positions and tracks no basis at all. The milestone that opens this
 capability must **reconcile that**, not inherit it.
 
+**R5 — the approximation's size, not its presence.** Canon requires the combination result to
+preserve each member's actual-state identity and reflected scope — account-version range, occurrence
+range, cutoff — so the turnover approximation is a value a reader can weigh rather than a flag. What
+ships is `state_path ∈ {moved, constant}` per run plus the source id list, which is the boolean canon
+calls insufficient. The terminal critic caught that this was neither delivered nor named; it is named
+here.
+
 **R4 — the mark-time NAV series.** Architecture §5.2 requires a stored performance series stamped
 at its mark instant, and §11.7③ names the volatility-inverse ensemble that reads it. This milestone
 deliberately does **not** ship it: a callback sees an account snapshot with no marks, so the only
@@ -127,13 +134,15 @@ and account state — while the realised performance series it would ultimately 
 
 ## Validation
 
-- `uv run pytest -q` — 353 passed, from 322 at the milestone start.
+- `uv run pytest -q` — 355 passed, from 322 at the milestone start.
 - `uv run ruff check` and `ruff format --check` clean; package imports.
 - `uv run python showcases/show_006_ensemble_netting/run.py` — three real runs, reversal published
   over 16 occurrences with `state_path` moved, momentum over 11 with `state_path` constant, both
   subscribed by dataset id, 11 crossing occurrences with a maximum ticker offset of `0.04`, 9
   rebalances, 14 whole-share fills on the KRX profile, no surviving short, the fill journal
   replaying to the committed Account exactly at `960679501.45`, and identical SHA-256 manifests
-  across two clean runs.
+  across two clean runs. It also publishes the account series a member recorded without being
+  asked and reads it back row for row from the published artifact — 21 rows — which is the reuse
+  half of the capability proved on a real run rather than on a constructed result.
 - `uv run python showcases/show_005_enhanced_index/run.py` — still green, now also reporting 84
   recorded signal rows and asserting the default records are present.

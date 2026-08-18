@@ -71,6 +71,7 @@ from vqapr.public import (
     OperationRole,
     RowsLookback,
     RunDefinition,
+    RunRecordSpec,
     SourceSpec,
     StrategyConfig,
     ValuationConfig,
@@ -78,6 +79,7 @@ from vqapr.public import (
     component_ref,
     preflight_run,
     publish_run_allocation,
+    publish_run_record,
     register_agenda,
     register_component,
     register_dataset,
@@ -113,6 +115,19 @@ MOMENTUM_LOOKBACK = 11
 
 VERIFIED_AGAINST = "vqapr-0.1.0+show-006-working-tree"
 LAST_VERIFIED_AT = "2026-08-18"
+
+
+def _read_published(path: Path) -> list[dict[str, object]]:
+    """Read a published dataset back with no reference to the run that produced it."""
+    con = duckdb.connect()
+    try:
+        cursor = con.execute(
+            f"SELECT * FROM read_parquet('{path.as_posix()}') ORDER BY available_at, instrument"
+        )
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    finally:
+        con.close()
 
 
 def _sessions(path: Path) -> list[date]:
@@ -811,6 +826,39 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         project, AllocationPublicationSpec.of("momentum_allocation"), momentum_evidence
     )
 
+    # The reuse half of "a run records what a later run will need to reuse it", proved on a real
+    # run rather than a constructed result. The account series a member recorded without being
+    # asked is published as an ordinary dataset and read back after the producing run's objects
+    # are gone -- which is the round trip that would have caught cash being recorded as NAV.
+    account_published = publish_run_record(
+        project,
+        RunRecordSpec.of(
+            "reversal_account",
+            table_id="vqapr.account",
+            value_fields=(
+                "cash",
+                "account_version",
+                "run_id",
+                "producer_id",
+                "stage",
+                "event_time",
+                "sequence",
+            ),
+        ),
+        reversal_result,
+    )
+    recorded_account = reversal_result.final_state.recorder_rows["vqapr.account"]
+    if account_published.row_count != len(recorded_account):
+        raise AssertionError(
+            f"published {account_published.row_count} account rows from "
+            f"{len(recorded_account)} recorded"
+        )
+    replayed_account = _read_published(account_published.output_path)
+    if len(replayed_account) != len(recorded_account):
+        raise AssertionError("the published account series does not read back row for row")
+    if [row["cash"] for row in replayed_account] != [str(row["cash"]) for row in recorded_account]:
+        raise AssertionError("the published cash series differs from what the run recorded")
+
     ensemble_definition = RunDefinition(
         ensemble_config,
         valuation_config,
@@ -905,6 +953,11 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "universe": list(universe),
         "sessions": len(sessions),
         "callbacks": len(callback_days),
+        "run_record": {
+            "dataset": "reversal_account",
+            "rows": account_published.row_count,
+            "read_back": len(replayed_account),
+        },
         "crossing_occurrences": crossing_occurrences,
         "max_offset_weight": str(max_offset),
         "reversal_member": {
@@ -974,6 +1027,10 @@ def main() -> None:
         f"momentum published          : "
         f"{trace['momentum_member']['published_occurrences']} occurrences, "
         f"state_path={trace['momentum_member']['state_path']}"
+    )
+    print(
+        f"run record round trip       : {trace['run_record']['rows']} account rows published "
+        f"and read back from a real run"
     )
     print(f"subscribed inputs           : {', '.join(ensemble['subscribed_allocation_inputs'])}")
     print(f"crossing occurrences        : {trace['crossing_occurrences']}")

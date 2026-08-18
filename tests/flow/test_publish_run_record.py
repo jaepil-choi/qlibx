@@ -96,7 +96,16 @@ def test_the_two_clocks_stay_two_columns(tmp_path: Path) -> None:
     result = publish_run_record(
         tmp_path,
         RunRecordSpec.of(
-            "alpha_signal", table_id="alpha.signal", value_fields=("signal", "event_time")
+            "alpha_signal",
+            table_id="alpha.signal",
+            value_fields=(
+                "signal",
+                "run_id",
+                "producer_id",
+                "stage",
+                "event_time",
+                "sequence",
+            ),
         ),
         _result(cutoff),
     )
@@ -146,12 +155,28 @@ def test_a_package_owned_column_cannot_be_declared() -> None:
     """
     for field in ("available_at", "instrument"):
         with pytest.raises(ValueError, match="package-owned"):
-            RunRecordSpec.of("d", table_id="t", value_fields=("signal", field))
+            RunRecordSpec.of(
+                "d",
+                table_id="t",
+                value_fields=(
+                    "signal",
+                    field,
+                    "run_id",
+                    "producer_id",
+                    "stage",
+                    "event_time",
+                    "sequence",
+                ),
+            )
 
 
 def test_publishing_needs_a_run_result_and_a_recorded_table(tmp_path: Path) -> None:
     Workspace.create(tmp_path)
-    spec = RunRecordSpec.of("alpha_signal", table_id="alpha.signal", value_fields=("signal",))
+    spec = RunRecordSpec.of(
+        "alpha_signal",
+        table_id="alpha.signal",
+        value_fields=("signal", "run_id", "producer_id", "stage", "event_time", "sequence"),
+    )
 
     with pytest.raises(VqaprError, match="recorder rows"):
         publish_run_record(tmp_path, spec, object())
@@ -168,7 +193,17 @@ def test_a_declared_field_absent_from_a_row_is_refused(tmp_path: Path) -> None:
         publish_run_record(
             tmp_path,
             RunRecordSpec.of(
-                "alpha_signal", table_id="alpha.signal", value_fields=("signal", "absent")
+                "alpha_signal",
+                table_id="alpha.signal",
+                value_fields=(
+                    "signal",
+                    "absent",
+                    "run_id",
+                    "producer_id",
+                    "stage",
+                    "event_time",
+                    "sequence",
+                ),
             ),
             _result(cutoff),
         )
@@ -196,7 +231,11 @@ def test_one_row_per_key_so_stages_must_be_columns(tmp_path: Path) -> None:
     with pytest.raises(VqaprError):
         publish_run_record(
             tmp_path,
-            RunRecordSpec.of("alpha_signal", table_id="alpha.signal", value_fields=("signal",)),
+            RunRecordSpec.of(
+                "alpha_signal",
+                table_id="alpha.signal",
+                value_fields=("signal", "run_id", "producer_id", "stage", "event_time", "sequence"),
+            ),
             duplicated,
         )
 
@@ -218,7 +257,11 @@ def test_distinct_occurrences_publish_distinct_rows(tmp_path: Path) -> None:
 
     result = publish_run_record(
         tmp_path,
-        RunRecordSpec.of("alpha_signal", table_id="alpha.signal", value_fields=("signal",)),
+        RunRecordSpec.of(
+            "alpha_signal",
+            table_id="alpha.signal",
+            value_fields=("signal", "run_id", "producer_id", "stage", "event_time", "sequence"),
+        ),
         across,
     )
 

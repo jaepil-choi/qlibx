@@ -318,17 +318,40 @@ def test_a_feasible_problem_inside_a_widened_cash_range_is_not_refused() -> None
     assert sum(result.weights.values()) + result.cash == Decimal(1)
 
 
-def test_a_frozen_holding_outside_its_own_bound_is_refused() -> None:
-    """A freeze and a box are a conjunction; a holding that breaks the box cannot be honoured."""
-    with pytest.raises(OptimizeRefusal, match="outside its declared bound"):
-        optimize(
-            desired={"A": Decimal("0"), "B": Decimal("0")},
-            current={"B": Decimal("0.83")},
-            lower={"A": Decimal("-1"), "B": Decimal("-0.93")},
-            upper={"A": Decimal("1"), "B": Decimal("0.29")},
-            frozen=frozenset({"B"}),
-            cash_range=(Decimal("-1"), Decimal("1")),
-        )
+def test_a_frozen_holding_outside_its_box_is_reported_not_refused() -> None:
+    """A holding you cannot trade is a market fact, so the projection works around it.
+
+    Architecture 5.3 is explicit that a frozen weight is not a compliance rule: it is what the
+    Strategy read from a registered dataset. Refusing here would turn "could not trade" into
+    "violated a constraint" and would stop the whole rebalance over one untradable name. The
+    projection honours the holding, still balances the budget, and reports the fact; monitoring
+    judges the committed account separately.
+    """
+    result = optimize(
+        desired={"A": Decimal("0"), "B": Decimal("0")},
+        current={"B": Decimal("0.83")},
+        lower={"A": Decimal("-1"), "B": Decimal("-0.93")},
+        upper={"A": Decimal("1"), "B": Decimal("0.29")},
+        frozen=frozenset({"B"}),
+        cash_range=(Decimal("-1"), Decimal("1")),
+    )
+
+    assert result.weights["B"] == Decimal("0.83"), "the untradable holding is unchanged"
+    assert result.frozen_outside_box == ("B",), "and the fact is reported"
+    assert sum(result.weights.values()) + result.cash == Decimal(1)
+
+
+def test_a_frozen_holding_inside_its_box_reports_nothing() -> None:
+    result = optimize(
+        desired={"A": Decimal("0.5"), "B": Decimal("0.5")},
+        current={"B": Decimal("0.100000000000")},
+        lower={"A": Decimal("0"), "B": Decimal("0")},
+        upper={"A": Decimal("1"), "B": Decimal("1")},
+        frozen=frozenset({"B"}),
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    assert result.frozen_outside_box == ()
 
 
 def test_every_free_name_stays_inside_its_box_across_many_shapes() -> None:

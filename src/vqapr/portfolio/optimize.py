@@ -66,6 +66,13 @@ class OptimizeResult:
     """
     binding_lower: tuple[str, ...]
     binding_upper: tuple[str, ...]
+    frozen_outside_box: tuple[str, ...] = ()
+    """Frozen instruments whose untradable holding lies outside its declared box.
+
+    A diagnostic, not a violation. The holding is a market fact the Strategy could not change, so
+    the projection honours it and says so. Whether that constitutes a breach is monitoring's call,
+    made against the committed account rather than against this intent.
+    """
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "weights", dict(self.weights))
@@ -137,22 +144,21 @@ def optimize(
         _decimal(desired[instrument], name=f"desired[{instrument!r}]")
 
     frozen_weights: dict[str, Decimal] = {}
+    outside_box: list[str] = []
     for instrument in sorted(frozen):
         if instrument not in current:
             raise OptimizeRefusal(f"frozen instrument {instrument!r} is absent from current")
         # Guarded on entry, emitted verbatim on exit: the value itself is never rounded, so frozen
         # invariance is exact rather than approximate.
         held_weight = _on_grid(current[instrument], name=f"current[{instrument!r}]")
-        # A frozen name still has to satisfy its own box. The declaration in Architecture 5.3 is a
-        # conjunction -- l <= w <= u *and* w_j = w0_j -- so a holding outside its declared bound is
-        # an unsatisfiable pair of demands, not a fact that quietly overrides the bound. Refusing
-        # here keeps a constraint violation from riding a frozen name into an accepted intent.
+        # A frozen holding is a market fact the Strategy read, not a compliance rule (Architecture
+        # 5.3). Projection is best effort: it works around what it cannot trade rather than refusing
+        # to produce an allocation at all. A holding outside its declared box is reported as a
+        # diagnostic, never raised -- refusing here would turn "could not trade" into "violated a
+        # constraint", which is exactly the conflation canon forbids. Monitoring is the objective
+        # judge, and it reads the committed account rather than this projection.
         if not lower[instrument] <= held_weight <= upper[instrument]:
-            raise OptimizeRefusal(
-                f"frozen current[{instrument!r}] is {held_weight}, outside its declared bound "
-                f"[{lower[instrument]}, {upper[instrument]}]; a frozen holding cannot satisfy "
-                "both the freeze and the box, so the caller must widen the bound or release it"
-            )
+            outside_box.append(instrument)
         frozen_weights[instrument] = held_weight
 
     free = tuple(name for name in instruments if name not in frozen)
@@ -231,6 +237,7 @@ def optimize(
     return OptimizeResult(
         weights={name: weights[name] for name in instruments},
         cash=cash,
+        frozen_outside_box=tuple(outside_box),
         multiplier=resolved,
         binding_lower=tuple(binding_lower),
         binding_upper=tuple(binding_upper),

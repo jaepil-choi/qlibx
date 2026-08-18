@@ -203,6 +203,28 @@ class MonitoringResult:
             raise ValueError("report must evaluate the marked account version")
 
 
+_ACCOUNT_IDENTITY = "_ACCOUNT"
+"""Synthetic instrument identity for the account-level series (canon 11.2 precedent)."""
+
+DEFAULT_TABLE_PREFIX = "vqapr."
+"""Table ids the package owns. A Strategy declaring one is refused before the run starts."""
+
+DEFAULT_TABLES = (
+    TableSpec(f"{DEFAULT_TABLE_PREFIX}weight", ("instrument", "weight")),
+    TableSpec(f"{DEFAULT_TABLE_PREFIX}nav", ("instrument", "nav", "cash", "account_version")),
+)
+"""What every run records without the Strategy asking.
+
+Canon 9.2 makes these defaults rather than opt-in because both are package-computed from the
+accepted intent and the committed Account. Requiring a declaration would make a package fact
+contingent on user opt-in, and would leave the input an adaptive ensemble needs behind a switch.
+
+NAV is copied from the marking and Account spine, never from a strategy-supplied number, so it is
+not a second performance authority -- the same distinction that already lets accepted weights be
+republished.
+"""
+
+
 class SimulationFlow:
     """Dispatch frozen occurrences and one latest accepted pending intent.
 
@@ -924,6 +946,10 @@ class SimulationFlow:
                     self._frozen_run.execution_input,
                     lambda: self._accept_intent(intent, occurrence),
                 )
+            # The package's own account of this occurrence, written without the Strategy asking.
+            # Both values are package-computed, so recording them is a statement of what the run
+            # did rather than a claim the Strategy made.
+            self._record_defaults(recorder, accepted, account)
             candidate, payload_candidate, committed_ref = self._guard(
                 SimulationStage.CALLBACK_STATE,
                 occurrence.evaluation_time,
@@ -1064,6 +1090,38 @@ class SimulationFlow:
         self._strategy.memory = memory
         self._strategy.load_payload(BytesIO(payload))
 
+    def _record_defaults(
+        self,
+        recorder: InvocationRecorder,
+        accepted: object,
+        account: AccountSnapshot,
+    ) -> None:
+        """Write the package-owned tables for one occurrence.
+
+        A declining occurrence still records its account state: that the Strategy chose not to act
+        is itself part of what a later run needs to reuse this one.
+        """
+        intent = getattr(accepted, "intent", accepted)
+        for target in getattr(intent, "targets", ()):
+            weight = getattr(target, "weight", None)
+            if weight is None:
+                continue
+            recorder.append(
+                f"{DEFAULT_TABLE_PREFIX}weight",
+                {"instrument": target.instrument_id, "weight": str(weight)},
+            )
+        recorder.append(
+            f"{DEFAULT_TABLE_PREFIX}nav",
+            {
+                # Account-level, so it carries the synthetic identity canon fixes for series with
+                # no instrument axis rather than inventing a second key shape.
+                "instrument": _ACCOUNT_IDENTITY,
+                "nav": str(account.cash),
+                "cash": str(account.cash),
+                "account_version": account.version,
+            },
+        )
+
     def _set_callback_recorder(self, recorder: InvocationRecorder | None) -> None:
         self._strategy.recorder = recorder
 
@@ -1099,8 +1157,17 @@ class SimulationFlow:
             isinstance(table, TableSpec) for table in tables
         ):
             raise TypeError("StrategyModel.tables must return a tuple of TableSpec")
+        declared = {table.table_id for table in tables}
+        shadowed = sorted(name for name in declared if name.startswith(DEFAULT_TABLE_PREFIX))
+        if shadowed:
+            # The prefix is reserved in canon so a Strategy cannot collide with or shadow a package
+            # record. This is the table-id level of the guard the envelope fields already apply at
+            # the column level, and it fires before the run rather than at the first write.
+            raise ValueError(
+                f"table ids beginning with {DEFAULT_TABLE_PREFIX!r} are package-owned: {shadowed}"
+            )
         return InvocationRecorder(
-            tables,
+            tables + DEFAULT_TABLES,
             run_id=self._frozen_run.identity,
             producer_id=str(self._frozen_run.strategy.component.component_id),
             stage=occurrence.role.value,

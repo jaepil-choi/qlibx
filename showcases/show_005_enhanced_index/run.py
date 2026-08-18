@@ -828,6 +828,17 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             f"expected {len(callback_days) * len(universe)} recorded signal rows, "
             f"saw {len(signal_rows)}"
         )
+    # Canon 9.2 makes weight and NAV defaults: no Strategy in this showcase declares them, and
+    # every run records them anyway. A default that needed asking for would not be a default.
+    default_weight = alpha_result.final_state.recorder_rows.get("vqapr.weight", ())
+    default_nav = alpha_result.final_state.recorder_rows.get("vqapr.nav", ())
+    if not default_weight or not default_nav:
+        raise AssertionError("the package-owned default records are missing from a real run")
+    if len(default_nav) != len(callback_days):
+        raise AssertionError(
+            f"expected one NAV row per occurrence, saw {len(default_nav)} for {len(callback_days)}"
+        )
+
     envelope = {"run_id", "producer_id", "stage", "event_time", "sequence"}
     if not envelope <= set(signal_rows[0]):
         raise AssertionError("the Flow envelope is missing from a recorded row")

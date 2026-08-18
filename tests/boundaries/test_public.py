@@ -229,6 +229,7 @@ def test_public_exports_are_fixed() -> None:
         "VqaprError",
         "WeightingRefusal",
         "ZeroDealtReason",
+        "apply_causal",
         "callback_evidence",
         "component_ref",
         "equal_weight",
@@ -252,6 +253,11 @@ def test_public_exports_are_fixed() -> None:
         "shipped_constraint_path",
         "signal_weight",
         "validate_allocation",
+        "window_beta",
+        "window_maximum",
+        "window_mean",
+        "window_skewness",
+        "window_stdev",
     )
     assert "Workspace" not in public.__all__
     assert "SimulationFlow" not in public.__all__

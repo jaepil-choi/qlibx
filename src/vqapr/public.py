@@ -85,6 +85,14 @@ from vqapr.runtime.agendas import (
     OperationOccurrence,
     OperationRole,
 )
+from vqapr.transforms.window import (
+    apply_causal,
+    window_beta,
+    window_maximum,
+    window_mean,
+    window_skewness,
+    window_stdev,
+)
 from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
@@ -155,6 +163,7 @@ __all__ = (
     "VqaprError",
     "WeightingRefusal",
     "ZeroDealtReason",
+    "apply_causal",
     "callback_evidence",
     "component_ref",
     "equal_weight",
@@ -178,6 +187,11 @@ __all__ = (
     "shipped_constraint_path",
     "signal_weight",
     "validate_allocation",
+    "window_beta",
+    "window_maximum",
+    "window_mean",
+    "window_skewness",
+    "window_stdev",
 )
 
 

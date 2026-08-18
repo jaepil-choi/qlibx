@@ -39,20 +39,23 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
 - **The alpha is a demonstration signal**, a demeaned cross-sectional cheapness tilt scaled to a 4%
   gross active budget. It exists to be signed and dollar-neutral, not to be profitable.
 
-## Known gap — an untradable holding that drifts past its cap
+## An unpredictable halt does not stop a rebalance
 
-`optimize` treats a frozen holding as a **market fact**, not a compliance rule, exactly as
-Architecture 5.3 requires: it works around what the run cannot trade, still balances the budget, and
-reports the name in `frozen_outside_box` rather than refusing.
+Tradability is an **execution-time** fact. At 08:30 the Strategy cannot know whether a name will be
+halted at 15:30, so it never freezes for it — it keeps targeting the weight it wants, every session.
 
-The **intent boundary** has not caught up. If that holding sits above its cap, the resulting weight
-is judged a constraint violation and the whole callback fails — so one halted stock can stop a
-rebalance that had nothing else wrong with it. That is precisely the conflation canon warns about:
-*"섞으면 '제약을 위반했다'와 '거래할 수 없었다'가 같은 finding으로 나온다."*
+This run halts one name for six sessions and asserts the whole loop:
 
-This run pins the holding with the **most** slack so it never drifts out, which keeps the showcase
-clear of the gap while still demonstrating frozen invariance. It is not a fix, and the showcase says
-so rather than quietly choosing a safe input.
+- the Strategy kept ordering that name throughout, because it had no way to know,
+- the venue refused **exactly six** fills with `ZeroDealtReason.NONTRADABLE`,
+- the position simply stayed put and the rest of the book traded normally,
+- monitoring kept reporting the resulting breach against the committed account,
+- and the next session tried again.
+
+If a position is already over its cap when the halt lifts, the next rebalance resolves it. While the
+halt lasts, there is nothing to do and nothing pretends otherwise. A holding you cannot trade is a
+market fact, not a compliance failure — `optimize` reports it in `frozen_outside_box` rather than
+refusing, and monitoring judges the account separately.
 
 ## Results
 

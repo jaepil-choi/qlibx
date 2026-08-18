@@ -62,6 +62,7 @@ from vqapr.public import (
     SourceSpec,
     StrategyConfig,
     ValuationConfig,
+    ZeroDealtReason,
     callback_evidence,
     component_ref,
     preflight_run,
@@ -491,9 +492,14 @@ def _replay(result: Any) -> dict[str, Any]:
     commission = Decimal(0)
     tax = Decimal(0)
     dealt = 0
+    refused: dict[str, int] = {}
     for entry in account.fill_history:
         fill = entry.fill
         if fill.dealt_quantity == 0:
+            # An order was planned and the venue would not fill it. The Strategy could not have
+            # known: tradability is an execution-time fact. The position simply stays put.
+            if fill.reason is ZeroDealtReason.NONTRADABLE and fill.requested_quantity != 0:
+                refused[fill.instrument_id] = refused.get(fill.instrument_id, 0) + 1
             continue
         dealt += 1
         cash += fill.cash_delta
@@ -514,6 +520,7 @@ def _replay(result: Any) -> dict[str, Any]:
     marked = account.latest_mark
     return {
         "dealt_fills": dealt,
+        "refused_fills": dict(sorted(refused.items())),
         "replayed_cash": str(cash),
         "committed_cash": str(snapshot.cash),
         "replayed_positions": {name: str(q) for name, q in sorted(positions.items())},
@@ -586,6 +593,36 @@ def _digest(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _inject_halt(source: Path, target: Path, instrument: str, days: list[date]) -> tuple[str, ...]:
+    """Copy the committed execution input with one instrument halted over a window.
+
+    The fixture records no halts, so a halt has to be constructed to exercise the path. The values
+    themselves are untouched; only `is_tradable` flips, which is exactly the venue fact the
+    Strategy cannot see in advance.
+    """
+    stamps = tuple(day.isoformat() for day in days)
+    if target.exists():
+        return stamps
+    quoted = ", ".join(f"DATE '{stamp}'" for stamp in stamps)
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT trade_at, instrument,
+                     CASE WHEN instrument = '{instrument}'
+                           AND CAST(trade_at AS DATE) IN ({quoted})
+                          THEN FALSE ELSE is_tradable END AS is_tradable,
+                     close
+              FROM read_parquet('{source.as_posix()}')
+            ) TO '{target.as_posix()}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        con.close()
+    return stamps
+
+
 def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     manifest = json.loads((FIXTURE / "fixture.json").read_text(encoding="utf-8"))
     tolerance = str(manifest["weight_tolerance"])
@@ -620,12 +657,21 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         ),
         SourceSpec.of("krx-benchmark", benchmark_path),
     )
+    # A halt the Strategy could not have predicted. Tradability is only knowable at execution
+    # time, so the Strategy never freezes for it: it keeps targeting the weight it wants, the
+    # Exchange refuses the fill while the halt lasts, the position stays put, monitoring keeps
+    # reporting, and the next occurrence tries again. That loop is asserted below.
+    # Written once and shared by both replicates: a fresh parquet per run would change the
+    # registered source digest and make the determinism check fail on our own scaffolding.
+    halted_path = OUTPUTS / "execution_with_halt.parquet"
+    halt_days = _inject_halt(execution_path, halted_path, universe[0], sessions[6:12])
+
     register_execution_input(
         project,
         ExecutionInputRegistration.of(
             "krx-daily",
             ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
+                source=SourceSpec.of("krx-execution", halted_path),
                 trade_at_field="trade_at",
                 instrument_field="instrument",
                 is_tradable_field="is_tradable",
@@ -634,6 +680,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
         ),
     )
+
+    halted_instrument = universe[0]
 
     paths = _write_components(project, universe)
     alpha_ref = component_ref(
@@ -766,6 +814,17 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     if not any(position for position in index_replay["replayed_positions"].values()):
         raise AssertionError("the enhanced index never took a position")
 
+    # The halt loop, asserted rather than narrated: the Strategy never froze for the halt because
+    # it could not have known, it kept ordering, and the venue refused exactly the sessions the
+    # halt covered. The run completed regardless -- one untradable name does not stop a rebalance.
+    refusals = index_replay["refused_fills"].get(halted_instrument, 0)
+    if refusals != len(halt_days):
+        raise AssertionError(
+            f"expected {len(halt_days)} refused fills for the halted name, saw {refusals}"
+        )
+    if index_replay["dealt_fills"] == 0:
+        raise AssertionError("the halt must not stop the rest of the book from trading")
+
     trace = {
         "status": "current",
         "verified_against": VERIFIED_AGAINST,
@@ -776,6 +835,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "fixture": {
             "observation": str(manifest["observation_path"]),
             "execution": str(manifest["execution_path"]),
+            "halt": {"instrument": halted_instrument, "sessions": list(halt_days)},
             "benchmark": str(manifest["benchmark_path"]),
             "weight_tolerance": tolerance,
         },

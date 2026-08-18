@@ -223,6 +223,7 @@ def test_public_exports_are_fixed() -> None:
         "StrategyModelContext",
         "ValuationConfig",
         "VqaprError",
+        "ZeroDealtReason",
         "callback_evidence",
         "component_ref",
         "materialize",

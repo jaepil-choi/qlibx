@@ -35,6 +35,7 @@ from vqapr.exchange.execution_table import (
     ExecutionTableSpec,
     validate_execution_input,
 )
+from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingRule
 from vqapr.exchange.venue import AcademicExchange, Side
 from vqapr.exchange.venues.krx import KrxExchange
@@ -136,6 +137,7 @@ __all__ = (
     "StrategyModelContext",
     "ValuationConfig",
     "VqaprError",
+    "ZeroDealtReason",
     "callback_evidence",
     "component_ref",
     "materialize",

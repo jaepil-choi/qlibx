@@ -49,8 +49,11 @@ from vqapr.flow.materialize import (
     AllocationPublicationSpec,
     MaterializationResult,
     MaterializationSpec,
+    RunRecordResult,
+    RunRecordSpec,
     materialize,
     publish_run_allocation,
+    publish_run_record,
 )
 from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
@@ -137,6 +140,8 @@ __all__ = (
     "PortfolioTarget",
     "RowsLookback",
     "RunDefinition",
+    "RunRecordResult",
+    "RunRecordSpec",
     "Side",
     "SimulationFailure",
     "SimulationResult",
@@ -159,6 +164,7 @@ __all__ = (
     "preflight_run",
     "proportional_weight",
     "publish_run_allocation",
+    "publish_run_record",
     "register_agenda",
     "register_component",
     "register_data_model",

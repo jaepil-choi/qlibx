@@ -90,6 +90,58 @@ class AllocationPublicationSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class RunRecordSpec:
+    """Where a run's recorded table is published and under which value fields.
+
+    A recorded table is a run's own account of what it did, published so a later run can reuse it
+    (canon 9.2). The five Flow-stamped envelope columns ride as ordinary declared value fields:
+    without them the publication would drop the which-run, whose and at-what-time obligation that
+    PRD 9.4 places on a stored record, which is the whole reason to publish it.
+
+    ``available_at`` and ``instrument`` stay package-owned, exactly as they do for the other two
+    specs. The envelope fields are a *different* reserved set and are deliberately declarable here:
+    they name the row's provenance rather than its position, and the two sets are disjoint.
+    """
+
+    dataset_id: DatasetId
+    table_id: str
+    value_fields: tuple[str, ...]
+
+    @classmethod
+    def of(
+        cls, raw_dataset_id: str, *, table_id: str, value_fields: tuple[str, ...]
+    ) -> RunRecordSpec:
+        if not isinstance(table_id, str) or not table_id.strip():
+            raise ValueError("table_id must be a non-empty string")
+        if not isinstance(value_fields, tuple) or not value_fields:
+            raise ValueError("value_fields must be a non-empty tuple")
+        if any(
+            not isinstance(field, str) or not field or any(c.isspace() for c in field)
+            for field in value_fields
+        ):
+            raise ValueError("value_fields must be non-empty strings without whitespace")
+        if len(set(value_fields)) != len(value_fields):
+            raise ValueError("value_fields must be unique")
+        reserved = sorted(set(value_fields) & _RESERVED_FIELDS)
+        if reserved:
+            # The same guard the other two specs apply. A record that could name its own
+            # available_at would let a producer choose its own stamp on the one publication path
+            # that exists to prove it did not.
+            raise ValueError(f"value_fields are package-owned: {reserved}")
+        return cls(dataset_id(raw_dataset_id), table_id.strip(), value_fields)
+
+
+@dataclass(frozen=True, slots=True)
+class RunRecordResult:
+    """The registered dataset a later run subscribes to, plus its lineage receipt."""
+
+    registration: object
+    output_path: Path
+    lineage_path: Path
+    row_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class AllocationPublicationResult:
     """The registered dataset a later run subscribes to, plus its lineage receipt."""
 
@@ -650,6 +702,113 @@ def publish_run_allocation(
         output_path=output_path,
         lineage_path=lineage_path,
         occurrences=occurrences,
+        row_count=len(rows),
+    )
+
+
+def publish_run_record(
+    project_root: str | Path,
+    spec: RunRecordSpec,
+    result: object,
+    *,
+    instrument_field: str = "instrument",
+) -> RunRecordResult:
+    """Publish one recorded table from a finished run as an ordinary registered dataset.
+
+    This is the **third caller** of the one shared publication authority, alongside ``materialize``
+    and ``publish_run_allocation`` -- not a second authority. Canon 9.2 fixes what it preserves:
+
+    * ``available_at`` is derived, never declared, so a producer cannot advertise its record
+      earlier than the occurrence that justified it.
+    * ``event_time`` and ``available_at`` are **two clocks and stay two columns**. The first is the
+      occurrence the row was written at, the second is when the row becomes visible; PRD 9.4
+      forbids collapsing them.
+    * The five Flow-stamped envelope columns ride as declared value fields, carrying which run,
+      whose, and at what time.
+    * One row per key. Several stages of one measurement are distinct **columns** on one row, never
+      repeated rows, because the shared authority keys on ``(available_at, instrument)`` and
+      refuses a duplicate before exposure.
+    """
+    project = Path(project_root)
+    workspace = Workspace.open(project)
+    if not isinstance(spec, RunRecordSpec):
+        raise TypeError("spec must be a RunRecordSpec")
+
+    recorded = getattr(getattr(result, "final_state", None), "recorder_rows", None)
+    if recorded is None:
+        raise _error(
+            _INPUT_STAGE,
+            f"{_INPUT_STAGE}.result_invalid",
+            "publishing a run record requires a run result carrying recorder rows",
+            f"{type(result).__name__} exposes no final_state.recorder_rows",
+            retry="publish from the value run() returned, then retry",
+        )
+    source_rows = tuple(recorded.get(spec.table_id, ()))
+    if not source_rows:
+        raise _error(
+            _INPUT_STAGE,
+            f"{_INPUT_STAGE}.empty",
+            "the run recorded no rows for this table",
+            f"table {spec.table_id!r} is absent or empty",
+            retry="declare the table on the Strategy and record rows, then retry",
+        )
+
+    rows: list[dict[str, object]] = []
+    instruments: set[str] = set()
+    for row in source_rows:
+        for required in (instrument_field, "event_time"):
+            if required not in row:
+                raise _error(
+                    _INPUT_STAGE,
+                    f"{_INPUT_STAGE}.fields_invalid",
+                    "every recorded row must carry the instrument column and the Flow envelope",
+                    f"row is missing {required!r}",
+                    retry="declare the instrument column on the table, then retry",
+                )
+        instrument = str(row[instrument_field])
+        instruments.add(instrument)
+        published: dict[str, object] = {
+            "available_at": row["event_time"],
+            "instrument": instrument,
+        }
+        for field in spec.value_fields:
+            if field not in row:
+                raise _error(
+                    _INPUT_STAGE,
+                    f"{_INPUT_STAGE}.fields_invalid",
+                    "every declared value field must be present on every recorded row",
+                    f"row is missing {field!r}",
+                    retry="record the declared fields on every row, then retry",
+                )
+            published[field] = row[field]
+        rows.append(published)
+
+    source_id = f"record-{spec.dataset_id}"
+    payload = _lineage_envelope(
+        operation="run.record",
+        dataset_id=str(spec.dataset_id),
+        source_id=source_id,
+        value_fields=spec.value_fields,
+        instruments=sorted(instruments),
+    )
+    payload["record"] = {
+        "table_id": spec.table_id,
+        "row_count": len(rows),
+        "run_identity": sorted({str(row["run_id"]) for row in source_rows if "run_id" in row}),
+    }
+    registration, output_path, lineage_path = _stage_and_publish(
+        workspace=workspace,
+        project_root=project,
+        dataset_id=str(spec.dataset_id),
+        source_id=source_id,
+        value_fields=spec.value_fields,
+        rows=sorted(rows, key=lambda row: (row["available_at"], row["instrument"])),
+        payload=payload,
+    )
+    return RunRecordResult(
+        registration=registration,
+        output_path=output_path,
+        lineage_path=lineage_path,
         row_count=len(rows),
     )
 

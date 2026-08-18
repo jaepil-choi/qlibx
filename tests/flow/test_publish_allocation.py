@@ -4,20 +4,31 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import duckdb
 import pytest
 
+from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
+from vqapr.data.windows import AccessRecord
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.identifiers import dataset_id, execution_input_id
+from vqapr.domain.references import ModelStateRef
+from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.evidence.artifacts import CallbackEvidence
+from vqapr.exchange.conventions import ExactExecutionTarget, FillSelector
 from vqapr.flow.materialize import AllocationPublicationSpec, publish_run_allocation
+from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
+from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evidence
 from vqapr.flow.views import data_model_window
 from vqapr.models.strategy_model import NoDecision
+from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -276,14 +287,15 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
     assert hidden.observations(requirement).rows == ()
 
 
-def _real_evidence(*, cutoff: datetime, weights: dict[str, Decimal], run: str = "real-run"):
-    """Build the Flow's own evidence type so field names stay load-bearing."""
-    from vqapr.account.snapshot import AccountSnapshot
-    from vqapr.data.windows import AccessRecord
-    from vqapr.domain.identifiers import dataset_id
-    from vqapr.domain.references import ModelStateRef
-    from vqapr.evidence.artifacts import CallbackEvidence
+def _real_evidence(
+    *, cutoff: datetime, weights: dict[str, Decimal], run: str = "real-run"
+) -> CallbackEvidence:
+    """Build the Flow's own evidence type so field names stay load-bearing.
 
+    Every other helper here builds a duck-typed stub, which is fine for exercising branches but
+    would let a rename of `CallbackEvidence.strategy_accesses` leave the suite green while the
+    shipped path broke. There is exactly one builder of the real class so the two cannot drift.
+    """
     state = ModelStateRef("0" * 64)
     return CallbackEvidence(
         run_identity=run,
@@ -317,11 +329,8 @@ def _real_evidence(*, cutoff: datetime, weights: dict[str, Decimal], run: str = 
     )
 
 
-def _finished_run(traces: list[tuple[object, object]]):
+def _finished_run(traces: list[tuple[LifecycleKind, object]]) -> SimulationResult:
     """Drive a real RunStateRepository so the accessor reads the root the Flow publishes."""
-    from vqapr.flow.run_state import LifecycleTrace, RunStateRepository
-    from vqapr.flow.simulation import SimulationResult
-
     repository = RunStateRepository()
     for index, (kind, detail) in enumerate(traces):
         repository.publish(
@@ -334,9 +343,6 @@ def _finished_run(traces: list[tuple[object, object]]):
 
 def test_callback_evidence_returns_every_callback_in_lifecycle_order() -> None:
     """The accessor reports what the run decided, declines included, in the order decided."""
-    from vqapr.flow.run_state import LifecycleKind
-    from vqapr.flow.simulation import callback_evidence
-
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
     first = _real_evidence(cutoff=cutoff, weights={"A": Decimal("0.5")}, run="run-a")
     declined = _real_evidence(cutoff=cutoff, weights={"B": Decimal("0.25")}, run="run-b")
@@ -354,9 +360,6 @@ def test_callback_evidence_returns_every_callback_in_lifecycle_order() -> None:
 
 def test_callback_evidence_feeds_publication_without_a_hand_built_stand_in(tmp_path: Path) -> None:
     """The read half of the publication contract: run output goes straight to the writer."""
-    from vqapr.flow.run_state import LifecycleKind
-    from vqapr.flow.simulation import callback_evidence
-
     Workspace.create(tmp_path)
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
     weights = {"A": Decimal("0.326800000000"), "B": Decimal("0.180600000000")}
@@ -371,17 +374,8 @@ def test_callback_evidence_feeds_publication_without_a_hand_built_stand_in(tmp_p
     assert dict((row[1], row[2]) for row in _published(published.output_path)) == weights
 
 
-def _accepted(intent: object, *, cutoff: datetime):
+def _accepted(intent: object, *, cutoff: datetime) -> AcceptedIntent:
     """Wrap an intent exactly as the Flow does before it reaches callback evidence."""
-    from datetime import time
-    from uuid import UUID
-
-    from vqapr.domain.identifiers import execution_input_id
-    from vqapr.domain.timestamps import LocalInstantDeclaration
-    from vqapr.exchange.conventions import ExactExecutionTarget, FillSelector
-    from vqapr.flow.simulation import AcceptedIntent
-    from vqapr.runtime.agendas import OperationOccurrence, OperationRole
-
     occurrence = OperationOccurrence(
         "occurrence-1",
         OperationRole.STRATEGY_CALLBACK,
@@ -428,61 +422,16 @@ def test_publishing_accepts_the_wrapper_a_real_callback_records(tmp_path: Path) 
 
 
 def test_callback_evidence_refuses_anything_other_than_a_run_result() -> None:
-    from vqapr.flow.simulation import callback_evidence
-
     with pytest.raises(TypeError, match="must be a SimulationResult"):
         callback_evidence(object())
 
 
 def test_publishing_from_a_real_callback_evidence(tmp_path: Path) -> None:
-    """Prove the writer against the run spine's own type, not a duck-typed stand-in.
-
-    Every other test here builds a local stub. That is fine for exercising branches, but it means a
-    rename of `CallbackEvidence.strategy_accesses` would leave the whole suite green while the
-    shipped path broke. This test constructs the real class so the field names are load-bearing.
-    """
-    from vqapr.account.snapshot import AccountSnapshot
-    from vqapr.data.lookback import RowsLookback
-    from vqapr.data.windows import AccessRecord
-    from vqapr.domain.identifiers import dataset_id
-    from vqapr.domain.references import ModelStateRef
-    from vqapr.evidence.artifacts import CallbackEvidence
-
+    """Prove the writer against the run spine's own type, not a duck-typed stand-in."""
     Workspace.create(tmp_path)
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
     weights = {"A": Decimal("0.400000000000"), "B": Decimal("0.100000000000")}
-    state = ModelStateRef("0" * 64)
-
-    evidence = CallbackEvidence(
-        run_identity="real-run",
-        strategy=None,
-        agenda=None,
-        occurrence=None,
-        cutoff=cutoff,
-        root_version=0,
-        account=AccountSnapshot(0, Decimal("1000"), {}),
-        current_model_state_ref=state,
-        committed_model_state_ref=state,
-        strategy_accesses=(
-            AccessRecord(
-                consumer_id="alpha",
-                dataset_id=dataset_id("price_daily"),
-                source_id="prices",
-                source_digest="0" * 64,
-                fields=("close",),
-                lookback=RowsLookback(1),
-                evaluation_time=cutoff,
-                instruments=("A", "B"),
-                lower_bound=None,
-                actual_rows={},
-                max_available_at=cutoff,
-            ),
-        ),
-        actual_source_refs=(),
-        decision=_Intent(tuple(_Target(n, w) for n, w in sorted(weights.items()))),
-        pending=None,
-        constraints=(),
-    )
+    evidence = _real_evidence(cutoff=cutoff, weights=weights)
 
     result = publish_run_allocation(
         tmp_path, AllocationPublicationSpec.of("real_allocation"), [evidence]

@@ -15,7 +15,8 @@ path rather than by reading parquet beside it. Its bounds are the ones the regis
 constraint set projected for that occurrence, not a second copy of the same rule.
 
 The fill journal the second run committed is replayed independently against the committed
-`Account`, and the whole pipeline runs twice into separate projects so the artifact digests can be
+`Account`, the monitoring findings over every marked account version are read back rather than
+assumed, and the whole pipeline runs twice into separate projects so the artifact digests can be
 compared.
 
 Everything is real KRX data committed under `tests/fixtures/real`. Nothing here invents a price or
@@ -557,7 +558,7 @@ def _monitoring(result: Any) -> dict[str, Any]:
     if not reports:
         raise AssertionError("the run produced no monitoring evidence")
 
-    breaches = 0
+    drift_findings = 0
     drift: dict[str, tuple[Decimal, Decimal, Decimal]] = {}
     for report in reports:
         for finding in report.findings:
@@ -568,13 +569,13 @@ def _monitoring(result: Any) -> dict[str, Any]:
                     "a long-only account marked a short position: "
                     f"{finding.measured} against {finding.bound}"
                 )
-            breaches += 1
+            drift_findings += 1
             seen = drift.get(finding.constraint_id)
             if seen is None or finding.excess > seen[0]:
                 drift[finding.constraint_id] = (finding.excess, finding.measured, finding.bound)
     return {
         "monitoring_occurrences": len(reports),
-        "monitoring_drift_findings": breaches,
+        "monitoring_drift_findings": drift_findings,
         "worst_drift": {
             name: f"{measured} against {bound}, excess {excess}"
             for name, (excess, measured, bound) in sorted(drift.items())

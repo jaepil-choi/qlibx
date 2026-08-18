@@ -121,8 +121,7 @@ runs use the existing four roles and the existing `SAME_DAY` fill convention.
   allowance is a product decision, not a code fix, and nothing here makes it.
 - The coverage-scoped weight-sum tolerance never binds against the committed fixture, so its
   allowance is still asserted only by restating its own formula.
-- A caller passing `cash_range=(0, 1)` can be refused on a problem whose exact answer is `cash = 0`,
-  because of a quantization residual at the lower edge. The inset the docstring asks for is needed
-  at both edges.
+- ~~A caller passing `cash_range=(0, 1)` can be refused on a problem whose exact answer is
+  `cash = 0`, because of a quantization residual at the lower edge.~~ Closed by record 012.
 - `frozen` still models both "cannot trade" and "caller pinned this"; refusing the whole solve is
   right for the second and arguable for the first.

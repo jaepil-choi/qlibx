@@ -16,7 +16,7 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
 | Claim | How it is shown |
 |---|---|
 | Publication is a dataset, not a new subsystem | The alpha allocation is published through `publish_run_allocation`, which shares the staging, atomic-exposure and registration body with `materialize` |
-| Two allocation inputs combine into one construction | The construction reads the published alpha panel **and** the committed benchmark panel each session and forms `desired = bench + s · active` |
+| Two allocation panels combine into one construction | The construction reads the published alpha panel **and** the committed benchmark panel each session and forms `desired = bench + s · active` |
 | Long-only is emergent | The alpha's minimum weight is `-0.02`. Nothing strips the short leg; `no_short` intersected with a per-name cap does |
 | Frozen names survive exactly, or the freeze is refused | 20 of 22 sessions freeze a held name and get it back verbatim. On one session price drift pushed the holding past its cap; the call is made anyway and `optimize`'s own refusal is what releases the freeze, so the guard is exercised rather than duplicated |
 | Output is deterministic | Two clean runs produce identical SHA-256 manifests |

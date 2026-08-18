@@ -225,7 +225,8 @@ def main() -> None:
 
     published = _publish_alpha(PROJECT, alpha)
 
-    # The enhanced index subscribes to TWO allocation inputs and combines them.
+    # The enhanced index combines TWO allocation panels. Combination, not subscription: both are
+    # read off parquet here, per the scope paragraph above.
     subscribed_alpha = _panel(published, "weight")
     if set(subscribed_alpha) != set(benchmark):
         raise AssertionError("the published allocation must cover the benchmark sessions")
@@ -310,7 +311,7 @@ def main() -> None:
         "instruments": sorted(benchmark[sessions[0]]),
         "published_allocation": published.name,
         "alpha_is_signed": str(signed),
-        "subscribed_inputs": sorted(
+        "combined_inputs": sorted(
             {published.stem, str(manifest["benchmark_path"]).removesuffix(".parquet")}
         ),
         "frozen_occurrences": frozen_seen,
@@ -331,7 +332,7 @@ def main() -> None:
     )
 
     print(f"sessions            : {len(sessions)}")
-    print("subscribed inputs   : alpha_allocation + benchmark_weight_daily")
+    print("combined inputs    : alpha_allocation + benchmark_weight_daily")
     print(f"alpha minimum weight: {signed} (signed, never stripped by the input)")
     print(f"frozen occurrences  : {frozen_seen} (returned verbatim)")
     print(f"freeze released     : {released} (holding drifted outside its cap)")

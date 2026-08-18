@@ -90,7 +90,7 @@ would create two ways to state one allocation. No ex-ante tracking-error constra
 quadratic has no representation in per-instrument bounds, so tracking error is recorded post hoc by
 monitoring only. No cost, turnover penalty or look-through in `optimize`. No package-supplied
 ensemble combination helper — equal weighting, IC weighting and risk parity belong to user strategy
-code. The ensemble's own run is a later milestone; this one proves multi-input subscription.
+code. The ensemble's own run is a later milestone; this one proves multi-input combination.
 
 ## Validation
 

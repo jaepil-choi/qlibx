@@ -204,9 +204,6 @@ class MonitoringResult:
             raise ValueError("report must evaluate the marked account version")
 
 
-_ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff"))
-
-
 def _shadows_package_table(table_id: str) -> bool:
     """Whether a declared table id lays claim to the package's reserved namespace.
 
@@ -217,13 +214,18 @@ def _shadows_package_table(table_id: str) -> bool:
     key, and a reader had no way to tell which was authoritative -- which is precisely what the
     reservation exists to prevent.
 
-    Compatibility folding plus zero-width removal covers spellings that *are* the reserved prefix
-    written differently. It does not chase homoglyphs from other scripts: a Cyrillic lookalike is a
-    different string by any normalisation, and defeating it needs a confusables skeleton, which is
-    disproportionate for a namespace guard and would start rejecting legitimate non-Latin ids.
+    Compatibility folding plus removal of every invisible format character covers the spellings
+    that *are* the reserved prefix written differently. Enumerating zero-width codepoints missed
+    the neighbours -- soft hyphen, word joiner, the bidi controls -- so the filter is the Unicode
+    category itself, which is both shorter and complete for that class.
+
+    It does not chase homoglyphs from other scripts: a Cyrillic lookalike is a different string by
+    any normalisation, and defeating it needs a confusables skeleton, which is disproportionate for
+    a namespace guard and would start rejecting legitimate non-Latin ids.
     """
-    folded = unicodedata.normalize("NFKC", table_id).translate(_ZERO_WIDTH).strip().casefold()
-    return folded.startswith(DEFAULT_TABLE_PREFIX)
+    normalised = unicodedata.normalize("NFKC", table_id)
+    visible = "".join(ch for ch in normalised if unicodedata.category(ch) != "Cf")
+    return visible.strip().casefold().startswith(DEFAULT_TABLE_PREFIX)
 
 
 _ACCOUNT_IDENTITY = "_ACCOUNT"

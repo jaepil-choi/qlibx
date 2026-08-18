@@ -171,15 +171,22 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     # Long-only is emergent: the short leg is gone after projection, never before it.
     assert all(value >= 0 for value in projected.weights.values())
 
-    # An ensemble that quietly used one member after recording the honest net must diverge, and it
-    # must still diverge after the projection, not only before it.
-    dropped = {name: reversal.get(name, Decimal(0)) for name in instruments}
-    dropped_active = rescale(equal_weight(dropped), long=budget, short=-budget)
+    # An ensemble that quietly used one member after recording the honest net must diverge.
+    #
+    # The comparison is on the **net**, not on the constructed weights. `equal_weight` keeps only
+    # signs, so comparing constructed vectors would reduce to "some name crossed zero" -- which
+    # criterion 2 already asserts and which a member contributing large magnitude without flipping
+    # any sign would survive. Comparing nets keeps the falsification sensitive to magnitude.
+    dropped_net = {name: reversal.get(name, Decimal(0)) for name in instruments}
+    assert dropped_net != recomputed, "dropping a member must change the net it recorded"
+
+    divergence = max(abs(dropped_net[name] - recomputed[name]) for name in instruments)
+    assert divergence > 0, "the dropped member contributed something the net would have carried"
+
+    dropped_active = rescale(equal_weight(dropped_net), long=budget, short=-budget)
     dropped_desired = {
         name: dropped_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
     }
-    assert dropped_desired != desired
-
     dropped_projected = optimize(
         desired=dropped_desired,
         current={},

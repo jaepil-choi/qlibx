@@ -232,24 +232,23 @@ def test_a_strategy_declaring_the_reserved_prefix_is_refused() -> None:
     """A Strategy cannot shadow a package record.
 
     Canon 9.2 reserves the prefix at table-id level for the same reason the envelope fields are
-    reserved at column level: without it a Strategy could declare `vqapr.nav` and hide the real
-    one. The guard runs while the recorder is built, before any row is written.
+    reserved at column level: without it a Strategy could declare `vqapr.account` and hide the
+    real one. The guard runs while the recorder is built, before any row is written.
     """
     from vqapr.flow.simulation import DEFAULT_TABLE_PREFIX, SimulationFlow
     from vqapr.public import TableSpec
 
-    # A raw startswith let the first two of these through, so a spoofed table sat beside the real
-    # one in the same recorder and a reader had no way to tell which was authoritative.
+    # Every spelling below defeated an earlier form of this guard. A plain startswith missed the
+    # uppercase and whitespace forms; adding casefold still missed the ones that only NFKC and
+    # format-character removal catch. In each case the spoofed table sat beside the real one.
     for spelling in (
         f"{DEFAULT_TABLE_PREFIX}account",
         "VQAPR.account",
         f" {DEFAULT_TABLE_PREFIX}account",
         f"{DEFAULT_TABLE_PREFIX}account_extra",
-        # Spellings that *are* the reserved prefix written differently. A casefold-only guard let
-        # every one of these through, so the spoofed table sat beside the real one.
         "\uff56\uff51\uff41\uff50\uff52\uff0eaccount",
         "\u200bvqapr.account",
-        "vq\u200dapr.account",
+        "\u00advqapr.account",
     ):
 
         class _Shadowing:
@@ -274,3 +273,36 @@ def test_the_defaults_need_no_declaration() -> None:
     # to copy and none is claimed. Recording cash under the name NAV would be a wrong number under
     # a true-sounding name.
     assert not any("nav" in field for spec in DEFAULT_TABLES for field in spec.fields)
+
+
+def test_the_namespace_predicate_is_precise_in_both_directions() -> None:
+    """The guard must refuse spellings of the reserved prefix without rejecting honest ids.
+
+    An over-broad guard would be the worse defect: rejecting a legitimate Korean or Japanese table
+    id to catch a spoof trades a real capability for a hypothetical one.
+    """
+    from vqapr.flow.simulation import _shadows_package_table
+
+    for spelling in (
+        "vqapr.account",
+        "VQAPR.account",
+        " vqapr.account",
+        "vqapr.anything_at_all",
+        "\uff56\uff51\uff41\uff50\uff52\uff0eaccount",  # full-width
+        "\u200bvqapr.account",  # zero-width space
+        "vq\u200dapr.account",  # zero-width joiner
+        "\u00advqapr.account",  # soft hyphen
+        "\u2060vqapr.account",  # word joiner
+    ):
+        assert _shadows_package_table(spelling), f"{spelling!r} lays claim to the reserved prefix"
+
+    for spelling in (
+        "alpha.signal",
+        "my.vqapr.audit",
+        "reports_vqapr.summary",
+        "vqapr_custom.table",
+        "\ud559\uc2b5.\uc2e0\ud638",
+        "\u30c7\u30fc\u30bf.\u4fe1\u53f7",
+        "vq\u0430pr.account",  # Cyrillic lookalike: out of scope by design, and documented
+    ):
+        assert not _shadows_package_table(spelling), f"{spelling!r} is an honest table id"

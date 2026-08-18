@@ -14,6 +14,13 @@ from pathlib import Path
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.analysis.performance import drawdown, nav_series, returns
+from vqapr.analysis.signal import (
+    decay,
+    hit_rate,
+    information_coefficient,
+    rank_information_coefficient,
+)
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.evaluation import constraint_requirements as declared_constraint_requirements
@@ -178,11 +185,16 @@ __all__ = (
     "apply_causal",
     "callback_evidence",
     "component_ref",
+    "decay",
     "demean",
+    "drawdown",
     "drop_missing",
     "equal_weight",
+    "hit_rate",
+    "information_coefficient",
     "look_through",
     "materialize",
+    "nav_series",
     "net_members",
     "neutralize",
     "optimize",
@@ -192,6 +204,7 @@ __all__ = (
     "publish_run_record",
     "quantile_buckets",
     "rank",
+    "rank_information_coefficient",
     "register_agenda",
     "register_component",
     "register_data_model",
@@ -202,6 +215,7 @@ __all__ = (
     "register_valuation_config",
     "require_complete",
     "rescale",
+    "returns",
     "run",
     "shipped_constraint_path",
     "signal_weight",

@@ -67,6 +67,7 @@ from vqapr.portfolio.allocation import (
     validate_allocation,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.portfolio.diagnostics import TickerNetting, net_members
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef, PortfolioTarget
 from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, OptimizeResult, optimize
 from vqapr.portfolio.weighting import (
@@ -144,6 +145,7 @@ __all__ = (
     "StrategyModel",
     "StrategyModelContext",
     "TableSpec",
+    "TickerNetting",
     "ValuationConfig",
     "VqaprError",
     "WeightingRefusal",
@@ -152,6 +154,7 @@ __all__ = (
     "component_ref",
     "equal_weight",
     "materialize",
+    "net_members",
     "optimize",
     "preflight_run",
     "proportional_weight",

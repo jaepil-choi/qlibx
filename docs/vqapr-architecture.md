@@ -2520,7 +2520,7 @@ weight와 계좌 상태는 accepted intent와 committed Account에서 **package�
 | 키 모양 | `(available_at, instrument)` 하나로 유지한다. 한 occurrence·한 종목당 **한 행**이고, 단계가 여럿이면 행이 아니라 **컴럼**으로 나눈다 |
 | 종목 축이 없는 시계열 | §11.2의 합성 identity 관례를 따른다. `vqapr.account`는 계좌용 합성 identity를 갖는다 |
 | 봉투 컬럼 | recorder가 찍는 다섯은 선언된 **value field**로 함께 발행된다. 없으면 PRD §9.4의 *어느 run·누가·언제*를 버리게 된다 |
-| 봉투가 없는 행 | Flow가 만든 기본 행은 recorder 봉투가 없으므로, 동등한 행 identity(run identity·producer identity·account version·mark 시점)를 value field로 가진다 |
+| 기본 행의 봉투 | Flow가 만든 기본 행도 recorder를 거치므로 다섯 봉투 컴럼을 그대로 받는다. 발행 시에는 그 다섯을 **선언된 value field로 요구한다** — 빠뜨릴 수 있게 두면 PRD §9.4의 *어느 run·누가·언제*를 잃는다 |
 | 두 시계 | `event_time`과 `available_at`을 **합치지 않는다**(PRD §9.4). 둘 다 별도 컴럼으로 살아남는다 |
 
 #### 경로 의존은 필요조건이지 충분조건이 아니다
@@ -2537,6 +2537,11 @@ callback 본문 뒤에 package가 계산하는 committed model-state ref를 직�
 
 그래서 조합 결과는 각 member의 actual-state identity와 반영 범위(account version 범위·occurrence 범위·cutoff)를
 보존해야 하며, 그래야 근사의 크기가 boolean이 아니라 **확인 가능한 값**으로 남는다.
+
+> **반영 범위는 아직 미구현이다.** 현재 발행되는 것은 run당 `state_path ∈ {moved, constant}`와
+> source id 목록뿐이며, 그것은 이 절이 불충분하다고 말한 바로 그 boolean이다. account version 범위·
+> occurrence 범위·cutoff를 실제로 나르는 것은 구현 기록 015의 follow-up R5로 남아 있다. 이 문단을
+> 이미 이행된 요구로 읽지 말 것.
 
 ---
 

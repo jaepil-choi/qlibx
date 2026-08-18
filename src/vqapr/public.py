@@ -92,6 +92,7 @@ from vqapr.transforms.cross_section import (
     winsorize,
     zscore,
 )
+from vqapr.transforms.lookthrough import InstrumentExposure, look_through
 from vqapr.transforms.missing import drop_missing, require_complete
 from vqapr.transforms.window import (
     apply_causal,
@@ -139,6 +140,7 @@ __all__ = (
     "FillSelector",
     "FrozenAgenda",
     "FrozenRun",
+    "InstrumentExposure",
     "IntentSourceRef",
     "KrxExchange",
     "ListingRule",
@@ -177,6 +179,7 @@ __all__ = (
     "demean",
     "drop_missing",
     "equal_weight",
+    "look_through",
     "materialize",
     "net_members",
     "optimize",

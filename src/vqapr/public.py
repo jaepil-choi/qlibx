@@ -85,6 +85,14 @@ from vqapr.runtime.agendas import (
     OperationOccurrence,
     OperationRole,
 )
+from vqapr.transforms.cross_section import (
+    demean,
+    quantile_buckets,
+    rank,
+    winsorize,
+    zscore,
+)
+from vqapr.transforms.missing import drop_missing, require_complete
 from vqapr.transforms.window import (
     apply_causal,
     window_beta,
@@ -166,6 +174,8 @@ __all__ = (
     "apply_causal",
     "callback_evidence",
     "component_ref",
+    "demean",
+    "drop_missing",
     "equal_weight",
     "materialize",
     "net_members",
@@ -174,6 +184,8 @@ __all__ = (
     "proportional_weight",
     "publish_run_allocation",
     "publish_run_record",
+    "quantile_buckets",
+    "rank",
     "register_agenda",
     "register_component",
     "register_data_model",
@@ -182,6 +194,7 @@ __all__ = (
     "register_monitoring_policy",
     "register_strategy_config",
     "register_valuation_config",
+    "require_complete",
     "rescale",
     "run",
     "shipped_constraint_path",
@@ -192,6 +205,8 @@ __all__ = (
     "window_mean",
     "window_skewness",
     "window_stdev",
+    "winsorize",
+    "zscore",
 )
 
 

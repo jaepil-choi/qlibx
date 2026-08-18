@@ -232,6 +232,8 @@ def test_public_exports_are_fixed() -> None:
         "apply_causal",
         "callback_evidence",
         "component_ref",
+        "demean",
+        "drop_missing",
         "equal_weight",
         "materialize",
         "net_members",
@@ -240,6 +242,8 @@ def test_public_exports_are_fixed() -> None:
         "proportional_weight",
         "publish_run_allocation",
         "publish_run_record",
+        "quantile_buckets",
+        "rank",
         "register_agenda",
         "register_component",
         "register_data_model",
@@ -248,6 +252,7 @@ def test_public_exports_are_fixed() -> None:
         "register_monitoring_policy",
         "register_strategy_config",
         "register_valuation_config",
+        "require_complete",
         "rescale",
         "run",
         "shipped_constraint_path",
@@ -258,6 +263,8 @@ def test_public_exports_are_fixed() -> None:
         "window_mean",
         "window_skewness",
         "window_stdev",
+        "winsorize",
+        "zscore",
     )
     assert "Workspace" not in public.__all__
     assert "SimulationFlow" not in public.__all__

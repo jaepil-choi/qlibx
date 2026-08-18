@@ -828,8 +828,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             f"expected {len(callback_days) * len(universe)} recorded signal rows, "
             f"saw {len(signal_rows)}"
         )
-    # Canon 9.2 makes weight and NAV defaults: no Strategy in this showcase declares them, and
-    # every run records them anyway. A default that needed asking for would not be a default.
+    # Canon 9.2 makes weight and decision-time account state defaults: no Strategy here
+    # declares them and every run records them anyway. A default that needed asking for
+    # would not be a default.
     default_weight = alpha_result.final_state.recorder_rows.get("vqapr.weight", ())
     default_account = alpha_result.final_state.recorder_rows.get("vqapr.account", ())
     if not default_weight or not default_account:

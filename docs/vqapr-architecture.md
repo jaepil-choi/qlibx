@@ -2494,7 +2494,7 @@ execution code에도 recorder를 주지 않는다.
 
 #### 기본 기록은 선언을 요구하지 않는다
 
-weight와 NAV는 accepted intent와 committed Account에서 **package가 계산한다.** 이걸 Strategy 선언에
+weight와 계좌 상태는 accepted intent와 committed Account에서 **package가 계산한다.** 이걸 Strategy 선언에
 걸면 package 사실이 사용자 opt-in에 종속된다. 그래서 `vqapr.` **예약 접두사** 아래의 package 소유
 테이블(`vqapr.weight`, `vqapr.account`)로 나가며, 사용자 `TableSpec`은 이 접두사를 쓸 수 없다. 이것은
 `FLOW_ENVELOPE_FIELDS`와 예약 컴럼이 **컬럼 수준**에서 하는 일을 **table id 수준**에서 하는 것이다.

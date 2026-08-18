@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -201,6 +202,28 @@ class MonitoringResult:
             raise TypeError("report must be a ConstraintReport")
         if self.report.account_version != self.valuation.account.version:
             raise ValueError("report must evaluate the marked account version")
+
+
+_ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff"))
+
+
+def _shadows_package_table(table_id: str) -> bool:
+    """Whether a declared table id lays claim to the package's reserved namespace.
+
+    Comparison is normalised because a raw ``startswith`` is trivially defeated. A plain
+    case-sensitive check let ``VQAPR.account`` and a leading-space `` vqapr.account`` through;
+    adding ``casefold`` alone still let the full-width rendering and zero-width insertions through.
+    In every case the spoofed table sat beside the real one in the same recorder under a distinct
+    key, and a reader had no way to tell which was authoritative -- which is precisely what the
+    reservation exists to prevent.
+
+    Compatibility folding plus zero-width removal covers spellings that *are* the reserved prefix
+    written differently. It does not chase homoglyphs from other scripts: a Cyrillic lookalike is a
+    different string by any normalisation, and defeating it needs a confusables skeleton, which is
+    disproportionate for a namespace guard and would start rejecting legitimate non-Latin ids.
+    """
+    folded = unicodedata.normalize("NFKC", table_id).translate(_ZERO_WIDTH).strip().casefold()
+    return folded.startswith(DEFAULT_TABLE_PREFIX)
 
 
 _ACCOUNT_IDENTITY = "_ACCOUNT"
@@ -1160,12 +1183,7 @@ class SimulationFlow:
         ):
             raise TypeError("StrategyModel.tables must return a tuple of TableSpec")
         declared = {table.table_id for table in tables}
-        # Normalise before comparing. A raw startswith let `VQAPR.nav` and a leading-space
-        # ` vqapr.nav` through, so the spoofed table sat beside the real one in the same recorder
-        # and a reader had no way to tell which was authoritative.
-        shadowed = sorted(
-            name for name in declared if name.strip().casefold().startswith(DEFAULT_TABLE_PREFIX)
-        )
+        shadowed = sorted(name for name in declared if _shadows_package_table(name))
         if shadowed:
             # The prefix is reserved in canon so a Strategy cannot collide with or shadow a package
             # record. This is the table-id level of the guard the envelope fields already apply at

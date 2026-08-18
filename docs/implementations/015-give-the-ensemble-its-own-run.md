@@ -110,10 +110,20 @@ record set as including `avg_entry_price` and `realized_pnl`, and justifies that
 computes next cash and next positions and tracks no basis at all. The milestone that opens this
 capability must **reconcile that**, not inherit it.
 
+**R4 — the mark-time NAV series.** Architecture §5.2 requires a stored performance series stamped
+at its mark instant, and §11.7③ names the volatility-inverse ensemble that reads it. This milestone
+deliberately does **not** ship it: a callback sees an account snapshot with no marks, so the only
+honest decision-time record is cash. The series needs a recorder where marks exist, on the
+due-execution path, stamped through the derived-availability rule rather than copied from the
+callback clock. The boundary review caught the first draft recording cash under the name NAV — about
+four percent wrong on the committed fixture — which is why this is a named follow-up rather than an
+approximation the account table quietly carries.
+
 **R3 — own-realised-performance feedback.** `UC-ALPHA-ADAPTIVE-001` remains deferred on its original
 basis: PRD §5.4 routes it to §6.6 account history and §5.7 model state, and `account/history.py` is
-a zero-byte file. That deferral is unchanged and is narrower than it was — member-level weighting
-from recorded member outcomes is delivered here.
+a zero-byte file. That deferral is unchanged and is narrower than it was: member-level
+weighting from *recorded member outcomes* is delivered here for the decision-time surface — weights
+and account state — while the realised performance series it would ultimately prefer waits on R4.
 
 ## Validation
 

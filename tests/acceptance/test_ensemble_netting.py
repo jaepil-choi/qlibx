@@ -32,6 +32,7 @@ from vqapr.public import (
     WeightingRefusal,
     equal_weight,
     net_members,
+    optimize,
     publish_run_record,
     rescale,
 )
@@ -134,6 +135,38 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     long_side = [name for name, value in recomputed.items() if value > 0]
     short_side = [name for name, value in recomputed.items() if value < 0]
     assert long_side and short_side, "the fixture must give both sides for the replay to be real"
+
+    # The shipped construction, replayed exactly as showcases/show_006 performs it:
+    # equal_weight -> rescale to the declared budget -> quantize -> optimize under the bounds.
+    budget = Decimal("0.04")
+    combined_signal = equal_weight(recomputed)
+    active = rescale(combined_signal, long=budget, short=-budget)
+    instruments = tuple(sorted(recomputed))
+    desired = {name: active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments}
+
+    projected = optimize(
+        desired=desired,
+        current={},
+        lower=dict.fromkeys(instruments, Decimal("-1")),
+        upper=dict.fromkeys(instruments, Decimal("1")),
+        frozen=frozenset(),
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    # Replaying the recorded net through the recorded transform reproduces the constructed weights.
+    # A stage that dropped a member's contribution after the netting record would diverge here.
+    assert projected.weights == desired, (
+        "the recorded net, put back through the recorded transform, reproduces the final weights"
+    )
+
+    dropped = {name: reversal.get(name, Decimal(0)) for name in instruments}
+    dropped_active = rescale(equal_weight(dropped), long=budget, short=-budget)
+    dropped_desired = {
+        name: dropped_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
+    }
+    assert dropped_desired != desired, (
+        "an ensemble that dropped a member after the netting record must not reproduce these"
+    )
 
     replayed = rescale(recomputed, long=Decimal("1"), short=Decimal("-1"))
 

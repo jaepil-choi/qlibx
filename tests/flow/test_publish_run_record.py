@@ -245,6 +245,11 @@ def test_a_strategy_declaring_the_reserved_prefix_is_refused() -> None:
         "VQAPR.account",
         f" {DEFAULT_TABLE_PREFIX}account",
         f"{DEFAULT_TABLE_PREFIX}account_extra",
+        # Spellings that *are* the reserved prefix written differently. A casefold-only guard let
+        # every one of these through, so the spoofed table sat beside the real one.
+        "\uff56\uff51\uff41\uff50\uff52\uff0eaccount",
+        "\u200bvqapr.account",
+        "vq\u200dapr.account",
     ):
 
         class _Shadowing:

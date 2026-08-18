@@ -65,12 +65,26 @@ def market_demean_preserving_gross(baseline: pd.DataFrame, universe: pd.DataFram
     Demean across the cross-section, then rescale each date so the gross book is the size it was
     before. Names outside the universe are missing rather than zero, so they do not enter the mean.
     """
+    if not baseline.index.equals(universe.index) or not baseline.columns.equals(universe.columns):
+        raise ValueError("baseline weight and neutralisation universe axes must match")
     masked = baseline.where(universe)
     demeaned = masked.sub(masked.mean(axis=1), axis=0).fillna(0.0)
     baseline_gross = baseline.abs().sum(axis=1)
     demeaned_gross = demeaned.abs().sum(axis=1)
     scale = baseline_gross.div(demeaned_gross.replace(0.0, np.nan)).fillna(0.0)
-    return demeaned.mul(scale, axis=0).astype("float64")
+    matched = demeaned.mul(scale, axis=0).astype("float64")
+
+    # The upstream operation carries two reconciliations, and dropping them would leave nothing
+    # checking the gross-preservation step: the acceptance test deliberately divides it out to
+    # compare the demean itself.
+    erased = baseline_gross.gt(0.0) & matched.abs().sum(axis=1).eq(0.0)
+    if erased.any():
+        dates = [str(value)[:10] for value in matched.index[erased][:3]]
+        raise ValueError(f"the market demean erased non-zero weight on {dates}")
+    gross_error = matched.abs().sum(axis=1).sub(baseline_gross).abs().max()
+    if float(gross_error) > 1e-10:
+        raise ValueError(f"gross reconciliation failed by {float(gross_error)}")
+    return matched
 
 
 def rolling_beta(values: pd.Series, benchmark: pd.Series, *, window: int) -> pd.Series:

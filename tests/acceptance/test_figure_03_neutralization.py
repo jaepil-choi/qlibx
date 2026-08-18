@@ -120,8 +120,11 @@ def test_vqapr_reproduces_the_reference_demean_instrument_by_instrument(
     circle: it runs vqapr's own `demean` on the same real cross-sections and requires it to agree
     with the reference operation instrument by instrument.
 
-    If `demean` were wrong, or an identity, or off by a scale factor, this fails while every
-    downstream comparison would still pass.
+    An identity, a wrong centre, a median instead of a mean, or an additive offset all fail here
+    while every downstream comparison would still pass. A pure positive rescale does **not** fail,
+    because both sides are divided by their own gross before comparing — that is deliberate, since
+    the reference operation rescales to preserve gross and this test is about which values get
+    centred rather than how large they end up. Scale is pinned by the equivalence test below.
     """
     baseline = panels["baseline_weight"]
     universe = panels["universe_mask"].astype(bool) | baseline.ne(0.0)
@@ -159,7 +162,8 @@ def test_vqapr_reproduces_the_reference_demean_instrument_by_instrument(
 def test_vqapr_neutralisation_matches_a_market_demean(panels: dict) -> None:
     """`neutralize` against a column of ones is the demean, so the two products must agree.
 
-    This is a second, independent route into the same claim: the figure's operation is a market
+    A second route into the same claim, sharing no code with the first: the figure's operation is
+    a market
     demean, and vqapr expresses it two ways. If they disagreed, one of them is wrong.
     """
     baseline = panels["baseline_weight"]
@@ -268,16 +272,25 @@ def test_perturbing_an_input_turns_each_asserted_quantity_red(
     ceiling = RETURN_CEILING if "return" in quantity else RATIO_CEILING
 
     shifted = panels["realized_return"].copy()
-    half = list(shifted.columns)[::2]
-    shifted[half] = shifted[half] + 0.001
+    # Sorted rather than parquet order, so which names are perturbed does not depend on how the
+    # panel happened to be written.
+    #
+    # Fifty basis points, sized by measurement rather than by feel. The demeaned book sums to
+    # roughly zero by construction, so a shift applied to half the cross-section largely cancels
+    # against itself: at 10 bp the demeaned return moved only 1.6 ceilings while the baseline moved
+    # 54. At 50 bp the smallest of the four headrooms is 7.8 ceilings, which is why the assertion
+    # below can demand three and still be describing a real margin.
+    half = sorted(shifted.columns)[::2]
+    shifted[half] = shifted[half] + 0.005
 
     tampered = dict(panels)
     tampered["realized_return"] = shifted
 
     observed = _diagnostic(tampered)
 
-    assert abs(observed[quantity] - contract[quantity]) >= ceiling, (
-        f"a five percent shift in the return panel did not move {quantity} outside its ceiling"
+    assert abs(observed[quantity] - contract[quantity]) >= ceiling * 3, (
+        f"a 50 bp additive shift on half the cross-section did not move {quantity} "
+        "clear of its ceiling"
     )
 
 
@@ -295,20 +308,66 @@ def test_an_unperturbed_run_stays_inside_every_ceiling(contract: dict, panels: d
         assert abs(observed[quantity] - contract[quantity]) < ceiling
 
 
-def test_an_identity_demean_fails_the_beta_clause(panels: dict) -> None:
-    """The beta mutation, in its own units.
+def test_an_identity_demean_fails_the_beta_clause(contract: dict, panels: dict) -> None:
+    """Run the *published* beta clause against an identity demean and require it to fail.
 
-    A return-unit perturbation applied to a dimensionless beta would fail to turn this red rather
-    than merely being mis-denominated, so the mutation is magnitude-free: substitute the baseline
-    book for the demeaned one and the two beta series become identical, which the strict inequality
-    must reject.
+    An earlier version of this test asserted that the two beta series were equal under an identity
+    substitution. That is `a == a`: the substitution makes the demeaned return the same expression
+    as the baseline return, so the assertion held for any beta implementation at all, including a
+    constant stub. It certified nothing.
+
+    What is asserted now is the clause the milestone actually claims — the demeaned book's mean
+    absolute beta is strictly below the baseline's and close to zero — evaluated against the
+    identity diagnostic, with the requirement that it **does not hold**.
     """
     identity = _diagnostic(panels, demeaned=panels["baseline_weight"])
 
-    assert identity["market_demeaned_mean_absolute_beta"] == identity["baseline_mean_absolute_beta"]
-    assert not (
+    strictly_lower = (
         identity["market_demeaned_mean_absolute_beta"] < identity["baseline_mean_absolute_beta"]
-    ), "an identity demean must fail the beta clause"
+    )
+    matches_contract = (
+        abs(
+            identity["market_demeaned_mean_absolute_beta"]
+            - contract["market_demeaned_mean_absolute_beta"]
+        )
+        < RATIO_CEILING
+    )
+
+    assert not strictly_lower, "an identity demean must fail the strict beta inequality"
+    assert not matches_contract, "an identity demean must not reproduce the demeaned beta"
+
+
+@pytest.mark.parametrize(
+    "quantity",
+    ["baseline_mean_absolute_beta", "market_demeaned_mean_absolute_beta"],
+)
+def test_perturbing_the_benchmark_turns_each_beta_red(
+    contract: dict, panels: dict, quantity: str
+) -> None:
+    """Beta needs its own input perturbation, and the benchmark is the one that moves it.
+
+    Perturbing the return panel moves the returns and the betas together, so it cannot show that
+    the beta numbers are live independently. The benchmark weight enters only through the benchmark
+    return series, which is the denominator and the covariance partner of both betas and touches
+    neither annualised return — so this isolates exactly the half of the claim the identity case
+    alone could never certify.
+    """
+    shifted = panels["benchmark_weight"].copy()
+    reversed_columns = list(shifted.columns)[::-1]
+    shifted[list(shifted.columns)] = shifted[reversed_columns].to_numpy()
+
+    tampered = dict(panels)
+    tampered["benchmark_weight"] = shifted
+
+    observed = _diagnostic(tampered)
+    unperturbed = _diagnostic(panels)
+
+    assert abs(observed[quantity] - contract[quantity]) >= RATIO_CEILING, (
+        f"reversing the benchmark weights did not move {quantity} outside its ceiling"
+    )
+    assert abs(unperturbed[quantity] - contract[quantity]) < RATIO_CEILING, (
+        f"the unperturbed run must still reproduce {quantity}"
+    )
 
 
 def test_an_identity_demean_fails_the_return_clause(contract: dict, panels: dict) -> None:

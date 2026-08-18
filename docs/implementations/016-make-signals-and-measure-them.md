@@ -138,12 +138,19 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
 - **The published figure-3 window is unrecoverable here.** If the reference cache is ever
   regenerated over the full range, the generator's hash gate will refuse and the retarget can be
   revisited.
+- **`quantile_buckets` records no breakpoints.** Canon gives breakpoint recording as part of why
+  the function exists, and the shipped version returns assignments only. Nothing in M1 consumes
+  them, and canon assigns the recording itself to the membership DataModel, so this is a capability
+  gap rather than a broken contract.
+- **The showcase does not call `apply_causal` or any `analysis/` function.** The causal guarantee is
+  structural and unit-tested rather than integration-dependent, and the mark re-hydration seam is
+  proved field-for-field, but no analysis value has yet been computed from a run inside a showcase.
 - **`scripts/evidence_calendar.py` imports modules that do not exist** (`runtime/calendar_derivation.py`
   and `runtime/timeline.py` are absent). Pre-existing, outside this milestone, and untouched.
 
 ## Validation
 
-- `uv run pytest -q` — 473 passed, from 356 at the milestone start.
+- `uv run pytest -q` — 475 passed, from 356 at the milestone start.
 - `uv run ruff check` and `ruff format --check` clean; package imports with 115 pinned exports,
   including `Mark` and `MarkBatch` so the showcase and the analysis tests reach them through the
   public surface rather than through `vqapr.valuation.marks`.

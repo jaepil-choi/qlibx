@@ -8,8 +8,11 @@ The information coefficient is the cross-sectional correlation between a signal 
 followed it. Its rank form uses the ordering instead of the values, which is what a researcher
 usually wants, because a single extreme name can otherwise carry the whole number.
 
-Everything is exact. These functions take realised values as arguments and never open a store, so
-a caller cannot accidentally measure against data the strategy could not have seen.
+The sums run in exact rationals so a perfect correlation is recognised as such rather than reported
+as a rounded near-one; where the answer needs a square root, it carries the ambient ``Decimal``
+context's precision like any other Decimal arithmetic. These functions take realised values as
+arguments and never open a store, so a caller cannot accidentally measure against data the strategy
+could not have seen.
 """
 
 from __future__ import annotations

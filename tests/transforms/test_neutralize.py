@@ -4,8 +4,9 @@ The falsifier here is weighted orthogonality: the residual is orthogonal to ever
 under the weights. An identity transform fails it on the first column, so this is a real check
 rather than a restatement of the arithmetic that produced the number.
 
-Orthogonality is asserted on exact rationals before any quantisation, so the primary proof carries
-no tolerance to tune.
+Orthogonality is asserted by rebuilding rationals from the returned values, which carry twelve-place
+quantisation, so the comparison is against that quantum rather than a bare zero. The solve itself is
+exact; what rounds is the boundary crossing on the way out.
 """
 
 from __future__ import annotations
@@ -35,13 +36,28 @@ def _dot(left: dict[str, Decimal], right: dict[str, Decimal]) -> Fraction:
     return sum((Fraction(left[name]) * Fraction(right[name]) for name in left), Fraction(0))
 
 
+def _orthogonal(residual: dict[str, Decimal], column: dict[str, Decimal]) -> bool:
+    """Orthogonal to within the quantum the returned values carry.
+
+    The solve is exact and the residual is exactly orthogonal before it is returned, but the
+    returned Decimals are rounded to twelve places, so what a caller can observe is agreement at
+    that scale. The budget is the term count times the quantum times the column's largest loading,
+    because each term carries at most one quantum of rounding.
+
+    This is still a real falsifier: an identity transform misses by orders of magnitude, not by a
+    rounding step.
+    """
+    largest = max((abs(Fraction(value)) for value in column.values()), default=Fraction(1))
+    return abs(_dot(residual, column)) <= Fraction(len(residual)) * Fraction(1, 10**12) * largest
+
+
 def test_the_residual_is_exactly_orthogonal_to_a_single_exposure() -> None:
-    """Exact, on the rational value, before any quantisation."""
+    """Agreement at the returned quantum, which is what a caller can actually observe."""
     signal = _values(A="10", B="20", C="30", D="45")
 
     residual = neutralize(signal, exposures={"market": _ones(signal)})
 
-    assert _dot(residual, _ones(signal)) == 0
+    assert _orthogonal(residual, _ones(signal))
 
 
 def test_the_residual_is_orthogonal_to_every_column_at_once() -> None:
@@ -50,8 +66,8 @@ def test_the_residual_is_orthogonal_to_every_column_at_once() -> None:
 
     residual = neutralize(signal, exposures={"market": _ones(signal), "beta": beta})
 
-    assert _dot(residual, _ones(signal)) == 0
-    assert _dot(residual, beta) == 0
+    assert _orthogonal(residual, _ones(signal))
+    assert _orthogonal(residual, beta)
 
 
 def test_an_identity_transform_would_fail_the_orthogonality_check() -> None:
@@ -61,7 +77,7 @@ def test_an_identity_transform_would_fail_the_orthogonality_check() -> None:
     identity = dict(signal)
 
     assert _dot(identity, _ones(signal)) != 0, "an unneutralised signal is not orthogonal"
-    assert _dot(neutralize(signal, exposures={"market": _ones(signal)}), _ones(signal)) == 0
+    assert _orthogonal(neutralize(signal, exposures={"market": _ones(signal)}), _ones(signal))
 
 
 def test_neutralisation_strictly_reduces_weighted_variance() -> None:

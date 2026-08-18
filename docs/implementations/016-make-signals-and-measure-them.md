@@ -132,7 +132,7 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
 - **The report's industry exposure panels were not committed.** The approved plan made them
   mandatory members of the figure-3 fixture so the orthogonality falsifier could run against the
   report's own exposure matrix. They are not in the shipped fixture, so that falsifier runs against
-  constructed exposures and against the real single-name industry in `tests/fixtures/real_k200`
+  constructed exposures and against the real classifications in `tests/fixtures/real_k200`
   instead. Any later criterion whose *value* depends on an exposure matrix must commit those panels
   and establish their authority first.
 - **The published figure-3 window is unrecoverable here.** If the reference cache is ever

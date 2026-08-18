@@ -203,7 +203,6 @@ def test_a_dependent_exposure_set_from_real_classifications_is_refused_by_name()
     assert sum(1 for code in members.values() if code == lonely) == 1
 
     others = [name for name, code in members.items() if code != lonely][:8]
-    only = next(name for name, code in members.items() if code != lonely)
     single = next(name for name, code in members.items() if code == lonely)
     chosen = [single, *others]
 
@@ -226,7 +225,6 @@ def test_a_dependent_exposure_set_from_real_classifications_is_refused_by_name()
     accepted = neutralize(signal, exposures={"market": market, "thin": lonely_dummy})
     assert _orthogonal(accepted, market)
     assert _orthogonal(accepted, lonely_dummy)
-    assert only != single
 
 
 def test_neutralisation_never_grows_a_constraint_shape() -> None:

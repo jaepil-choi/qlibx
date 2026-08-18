@@ -105,9 +105,11 @@ def _extract(connection: duckdb.DuckDBPyConnection) -> dict[str, object]:
 
     return {
         "purpose": (
-            "A de-minimis KOSPI 200 cross-section with industry codes, carrying at least one "
-            "single-name industry so a structurally rank deficient exposure matrix can be built "
-            "from real classifications rather than from an invented one."
+            "A de-minimis KOSPI 200 cross-section with industry codes, so a structurally rank "
+            "deficient exposure matrix can be built from real classifications rather than an "
+            "invented one. The singularity comes from a complete dummy set summing to a market "
+            "column, not from the single-name industries recorded here; those make the "
+            "classification realistic and are asserted to be accepted rather than refused."
         ),
         "provenance": (
             "Vendor-derived excerpt from the local warehouse, not a redistribution of the source. "

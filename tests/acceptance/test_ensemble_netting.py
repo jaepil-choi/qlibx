@@ -159,17 +159,20 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
         cash_range=(Decimal("0"), Decimal("1")),
     )
 
-    assert any(value < 0 for value in desired.values()), (
-        "the members must hand the projection a short leg for the lower bound to bite"
-    )
-    assert projected.binding_lower, "the no-short bound must genuinely bind on the replayed net"
-    for name, value in projected.weights.items():
-        assert lower[name] <= value <= upper[name], (
-            "the projection respects the bounds it was given"
-        )
+    shorts = {name for name, value in desired.items() if value < 0}
+    longs = {name for name, value in desired.items() if value > 0}
+    assert shorts and longs, "the members must hand the projection both legs"
 
-    # Long-only is emergent: the short leg is gone after projection, never before it.
-    assert all(value >= 0 for value in projected.weights.values())
+    # Exactly the short names bind low and land *on* the bound. An all-zero book would satisfy
+    # "within bounds" and "non-negative" too, so this correspondence is what discriminates.
+    assert set(projected.binding_lower) == shorts
+    assert all(projected.weights[name] == Decimal(0) for name in shorts)
+
+    # The long leg survives untouched because nothing bound it. Together with the line above, this
+    # is what "the short leg is removed by projection, not before it" actually means.
+    assert all(projected.weights[name] == desired[name] for name in longs)
+    for name, value in projected.weights.items():
+        assert lower[name] <= value <= upper[name]
 
     # An ensemble that quietly used one member after recording the honest net must diverge.
     #
@@ -180,24 +183,11 @@ def test_criterion_4_the_recorded_transform_reproduces_the_final_weight(
     dropped_net = {name: reversal.get(name, Decimal(0)) for name in instruments}
     assert dropped_net != recomputed, "dropping a member must change the net it recorded"
 
-    divergence = max(abs(dropped_net[name] - recomputed[name]) for name in instruments)
-    assert divergence > 0, "the dropped member contributed something the net would have carried"
-
-    dropped_active = rescale(equal_weight(dropped_net), long=budget, short=-budget)
-    dropped_desired = {
-        name: dropped_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
-    }
-    dropped_projected = optimize(
-        desired=dropped_desired,
-        current={},
-        lower=lower,
-        upper=upper,
-        frozen=frozenset(),
-        cash_range=(Decimal("0"), Decimal("1")),
-    )
-    assert dropped_projected.weights != projected.weights, (
-        "the divergence must survive the projection, or the replay proves nothing about it"
-    )
+    # A magnitude-only divergence is the case a sign-based comparison would miss, so the net is
+    # where this is checked. It is deliberately not carried further: `equal_weight` keeps only
+    # signs, so a construction-level comparison downstream could not see it either and asserting
+    # there would report a false guarantee.
+    assert any(dropped_net[name] != recomputed[name] for name in instruments)
 
     replayed = rescale(recomputed, long=Decimal("1"), short=Decimal("-1"))
 

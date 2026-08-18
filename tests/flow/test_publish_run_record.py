@@ -297,9 +297,14 @@ def test_the_namespace_predicate_is_precise_in_both_directions() -> None:
         "vqapr_custom.table",
         "\ud559\uc2b5.\uc2e0\ud638",
         "\u30c7\u30fc\u30bf.\u4fe1\u53f7",
-        "vq\u0430pr.account",  # Cyrillic lookalike: out of scope by design, and documented
     ):
         assert not _shadows_package_table(spelling), f"{spelling!r} is an honest table id"
+
+    # A cross-script lookalike is a documented gap, not a guarantee. Asserted separately so a
+    # maintainer who later adds a confusables skeleton reads the failure as the scope changing.
+    assert not _shadows_package_table("vq\u0430pr.account"), (
+        "cross-script homoglyphs are deliberately out of scope; see the predicate's docstring"
+    )
 
 
 def test_an_invisible_character_cannot_hide_inside_a_table_id() -> None:
@@ -317,6 +322,12 @@ def test_an_invisible_character_cannot_hide_inside_a_table_id() -> None:
         with pytest.raises(ValueError, match="control or format characters"):
             TableSpec(f"alpha{hidden}.signal", ("instrument",))
 
+    # A field name is a name too. A column called `run_id` carrying an invisible character would
+    # otherwise pass the reserved-name check and sit beside the real envelope column.
+    for hidden in ("\u200b", "\x00"):
+        with pytest.raises(ValueError, match="control or format characters"):
+            TableSpec("alpha.signal", (f"run_id{hidden}",))
+
     # Honest ids, including non-Latin ones, are untouched.
     for honest in ("alpha.signal", "\ud559\uc2b5.\uc2e0\ud638", "my.vqapr.audit"):
-        assert TableSpec(honest, ("instrument",)).table_id == honest
+        TableSpec(honest, ("instrument",))

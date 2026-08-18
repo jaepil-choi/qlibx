@@ -18,16 +18,6 @@ class TableSpec:
     def __post_init__(self) -> None:
         if not isinstance(self.table_id, str) or not self.table_id.strip():
             raise ValueError("table_id must be a non-empty string")
-        # A table id is a name a human reads back later. Control and format characters are
-        # invisible, so they cannot help a reader and can only disguise one name as another --
-        # including as a package-owned name. Rejecting them here closes that at the validation
-        # boundary rather than leaving each consumer to normalise defensively.
-        hidden = sorted({ch for ch in self.table_id if unicodedata.category(ch) in {"Cc", "Cf"}})
-        if hidden:
-            raise ValueError(
-                "table_id must not contain control or format characters: "
-                f"{[hex(ord(ch)) for ch in hidden]}"
-            )
         if not isinstance(self.fields, tuple):
             raise TypeError("fields must be a tuple of field names")
         if not self.fields:
@@ -36,6 +26,25 @@ class TableSpec:
             raise ValueError("fields must contain non-empty strings")
         if len(set(self.fields)) != len(self.fields):
             raise ValueError("fields must be unique")
+        # These are names a human reads back later. Control and format characters are invisible, so
+        # they cannot help a reader and can only disguise one name as another -- including as a
+        # package-owned one. A field called `run_id` carrying a zero-width character would slip past
+        # the reserved-name check below and sit beside the real envelope column; the same disguise
+        # one level down from the table id. Refusing both here closes it at the validation boundary
+        # instead of leaving every consumer to normalise defensively.
+        hidden = sorted(
+            {
+                ch
+                for name in (self.table_id, *self.fields)
+                for ch in name
+                if unicodedata.category(ch) in {"Cc", "Cf"}
+            }
+        )
+        if hidden:
+            raise ValueError(
+                "table_id and fields must not contain control or format characters: "
+                f"{[hex(ord(ch)) for ch in hidden]}"
+            )
         reserved = sorted(set(self.fields) & FLOW_ENVELOPE_FIELDS)
         if reserved:
             raise ValueError(f"Flow envelope fields are reserved: {reserved}")

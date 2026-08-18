@@ -13,8 +13,9 @@ import json
 from datetime import date, time
 
 from vqapr.runtime.calendar_derivation import CalendarDerivationRule, derive_calendar
-from vqapr.runtime.events import Event, EventKind
 from vqapr.runtime.timeline import Timeline
+
+from vqapr.runtime.events import Event, EventKind
 
 
 def main() -> None:

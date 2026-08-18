@@ -1,0 +1,60 @@
+{
+  "purpose": "Input to the figure-3 neutralisation acceptance test. The target is recomputed for the window that exists, not quoted from the published report.",
+  "retarget": {
+    "published_range": {
+      "start": "2018-01-02",
+      "end": "2026-07-28",
+      "observations": 2102
+    },
+    "published_contract": {
+      "baseline_annualized_return": 0.14042999799281802,
+      "baseline_sharpe": 0.547398798563331,
+      "market_demeaned_annualized_return": 0.06501825970332753,
+      "market_demeaned_sharpe": 0.4033130871259885
+    },
+    "reason": "The build cache that produced the published figures no longer exists. Every panel in the reference project now spans a shorter window, all three recorded source hashes fail against what is on disk, and they fail against the older manifest's hashes too, so the cache is a third state rather than a recoverable earlier one. Retargeting to the available window was the user's decision, taken over weakening the criterion.",
+    "authority": "None upstream. Because the target is recomputed, the report manifest does not authenticate it and the panels are pinned by their own hashes. Any later criterion whose value depends on these panels must establish its own authority.",
+    "method": "The report's own recipe, transcribed unchanged from build_report_assets.py: market_demean_preserving_gross, rolling_beta over 60 sessions, annual mean at 252 sessions, information ratio as annual mean over annual volatility.",
+    "upstream_manifest_sha256": "8cb1316e44a7d8aba6f376e5e460bbdc50949abba2682cd3c3ae3f0e474800c9"
+  },
+  "span": {
+    "start": "2020-01-03",
+    "end": "2026-05-22",
+    "observations": 1562,
+    "instruments": 283
+  },
+  "figure_03_contract": {
+    "alpha": "open_close_rebound",
+    "before": "baseline_without_neutralization",
+    "after": "market_demean_with_daily_gross_preserved",
+    "baseline_annualized_return": 0.43622712680471226,
+    "baseline_sharpe": 1.4675457501384483,
+    "market_demeaned_annualized_return": 0.248747922086263,
+    "market_demeaned_sharpe": 1.271617235859395,
+    "baseline_mean_absolute_beta": 0.4619282295531416,
+    "market_demeaned_mean_absolute_beta": 0.10832567004708715,
+    "beta_window": 60
+  },
+  "sources_sha256": {
+    "desired_weight": "1fa0f34a4e82e86b25ca941332785c9c451be470d57ca778f03703923f4abca1",
+    "universe_mask": "f4bf70d822e0e2993d0796af8d9787d819c6f905532bf0e725153b82b70ff703",
+    "benchmark_weight": "787813aa3c734c27a91caf5edb683503cc6c29310bd5803f1641b1d62d8a5289"
+  },
+  "return_source": {
+    "path": "data\\preprocessed\\adjusted_prices.parquet",
+    "sha256": "63a4321aaecbaf28a06aef3a25ccbcfa110b46381b06c0ce0818bd41e8e284c8",
+    "note": "vqapr's own preprocessed prices, the same file the reference project derives its adjusted return from."
+  },
+  "committed_sha256": {
+    "baseline_weight.parquet": "043300e67a34816fbade02ffe90c580a65229254064346f7d425541f8a7f003d",
+    "benchmark_weight.parquet": "4bf590469746d6ceab0e3502b6dc498f0771db9a3034e718c53794b239cf7bf0",
+    "realized_return.parquet": "a6e610260e2af90331e68cd6ad7133c5427fcc1de86ff04c5deb1ce78aaf5dad",
+    "universe_mask.parquet": "159ad13df52c6e5105d751baaa021524b0c29003deb51c76744252a727d8a563"
+  },
+  "committed_bytes": {
+    "baseline_weight.parquet": 406402,
+    "benchmark_weight.parquet": 1431145,
+    "realized_return.parquet": 3727003,
+    "universe_mask.parquet": 146705
+  }
+}

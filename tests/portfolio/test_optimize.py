@@ -359,9 +359,66 @@ def test_every_free_name_stays_inside_its_box_across_many_shapes() -> None:
             for name in names:
                 assert lower[name] <= result.weights[name] <= upper[name]
             assert sum(result.weights.values()) + result.cash == Decimal(1)
-    # Fourteen of fifteen solve. The refused one (size 4, cap 0.35) is not infeasible -- its exact
-    # optimum reaches the budget precisely at lam = 23/60 -- but each repeating third rounds up at
-    # twelve decimals, so the quantized total overshoots by 1e-12 and cash lands just below its
-    # declared floor. Pinning the count means a regression that refuses everything, or that starts
-    # accepting this one, both fail here.
-    assert solved == 14
+    # All fifteen solve. The one that used to be refused (size 4, cap 0.35) reaches its budget
+    # exactly at lam = 23/60, but each repeating third rounds up at twelve decimals, so the
+    # quantized total overshot by 1e-12 and cash fell just under its declared floor. That was our
+    # grid making a solvable problem look infeasible, and the residual is now absorbed. Pinning the
+    # count means a regression that refuses any of them fails here.
+    assert solved == 15
+
+
+def test_a_grid_residual_at_the_cash_floor_is_absorbed_not_refused() -> None:
+    """A caller passing the natural cash_range must not be refused by our own rounding.
+
+    This shape's exact optimum reaches the budget precisely, so `cash = 0` is feasible. Rounding
+    four repeating thirds up at twelve decimals pushed the total over by 1e-12 and cash under its
+    floor. That infeasibility was manufactured by the grid, not posed by the caller.
+    """
+    names = [f"n{index}" for index in range(4)]
+    desired = {name: Decimal("0.5") + Decimal(index) / 10 for index, name in enumerate(names)}
+    lower, upper = _bounds(names, "0", "0.35")
+
+    result = optimize(
+        desired=desired,
+        current={},
+        lower=lower,
+        upper=upper,
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    assert result.cash == Decimal("0")
+    assert sum(result.weights.values()) + result.cash == Decimal(1)
+    for name in names:
+        assert lower[name] <= result.weights[name] <= upper[name]
+
+
+def test_the_absorbed_residual_never_lands_on_a_name_resting_at_a_bound() -> None:
+    """The repair must not push a capped name past the cap it was just clipped to."""
+    names = [f"n{index}" for index in range(4)]
+    desired = {name: Decimal("0.5") + Decimal(index) / 10 for index, name in enumerate(names)}
+    lower, upper = _bounds(names, "0", "0.35")
+
+    result = optimize(
+        desired=desired,
+        current={},
+        lower=lower,
+        upper=upper,
+        cash_range=(Decimal("0"), Decimal("1")),
+    )
+
+    for name in result.binding_upper:
+        assert result.weights[name] == upper[name], "a capped name must stay exactly at its cap"
+    for name in result.binding_lower:
+        assert result.weights[name] == lower[name]
+
+
+def test_a_shortfall_larger_than_the_grid_budget_is_still_refused() -> None:
+    """Absorption is for rounding residue only; a genuinely unreachable budget still refuses."""
+    with pytest.raises(OptimizeRefusal, match="infeasible"):
+        optimize(
+            desired={"A": Decimal("0.5")},
+            current={},
+            lower={"A": Decimal("0")},
+            upper={"A": Decimal("0.1")},
+            cash_range=(Decimal("0"), Decimal("0")),
+        )

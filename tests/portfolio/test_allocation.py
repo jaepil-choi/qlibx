@@ -129,3 +129,33 @@ def test_non_decimal_weights_are_refused(invariants: AllocationInvariants) -> No
 def test_an_empty_allocation_is_refused(invariants: AllocationInvariants) -> None:
     with pytest.raises(AllocationViolation, match="non-empty"):
         validate_allocation({}, invariants)
+
+
+def test_the_tolerance_binds_exactly_at_its_declared_edge(manifest: dict[str, object]) -> None:
+    """Pin the allowance itself, not the formula that produced it.
+
+    The committed slice sums near 0.549 against a ceiling of 1 + tolerance, so nothing in the real
+    fixture ever approaches the edge. Without this test the tolerance could be any value at all and
+    every other assertion would still pass.
+    """
+    tolerance = Decimal(str(manifest["weight_tolerance"]))
+    invariants = AllocationInvariants.of(tolerance=tolerance)
+    quantum = Decimal(str(manifest["weight_quantum"]))
+
+    at_edge = {"A": Decimal("0.5"), "B": Decimal("0.5") + tolerance}
+    validated = validate_allocation(at_edge, invariants)
+    assert validated.total == Decimal(1) + tolerance, "exactly at the ceiling must be accepted"
+
+    just_past = {"A": Decimal("0.5"), "B": Decimal("0.5") + tolerance + quantum}
+    with pytest.raises(AllocationViolation, match="above the declared"):
+        validate_allocation(just_past, invariants)
+
+
+def test_a_zero_tolerance_admits_nothing_above_the_declared_sum() -> None:
+    """The allowance is a declared choice, so declaring none must mean none."""
+    invariants = AllocationInvariants.of(tolerance=Decimal("0"))
+
+    assert validate_allocation({"A": Decimal("1")}, invariants).uncovered == Decimal("0")
+
+    with pytest.raises(AllocationViolation):
+        validate_allocation({"A": Decimal("1"), "B": Decimal("1E-12")}, invariants)

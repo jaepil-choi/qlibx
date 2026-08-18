@@ -210,11 +210,24 @@ def optimize(
             QUANTUM, rounding=_ROUNDING
         )
 
-    weights.update(frozen_weights)
     if not cash_lower <= cash <= cash_upper:
-        raise OptimizeRefusal(
-            f"cash {cash} falls outside the declared range [{cash_lower}, {cash_upper}]"
+        cash, repaired = _absorb_grid_residual(
+            cash=cash,
+            cash_lower=cash_lower,
+            cash_upper=cash_upper,
+            weights=weights,
+            free=free,
+            lower=lower,
+            upper=upper,
+            binding_lower=binding_lower,
+            binding_upper=binding_upper,
         )
+        if not repaired:
+            raise OptimizeRefusal(
+                f"cash {cash} falls outside the declared range [{cash_lower}, {cash_upper}]"
+            )
+
+    weights.update(frozen_weights)
     return OptimizeResult(
         weights={name: weights[name] for name in instruments},
         cash=cash,
@@ -222,6 +235,65 @@ def optimize(
         binding_lower=tuple(binding_lower),
         binding_upper=tuple(binding_upper),
     )
+
+
+def _absorb_grid_residual(
+    *,
+    cash: Decimal,
+    cash_lower: Decimal,
+    cash_upper: Decimal,
+    weights: dict[str, Decimal],
+    free: tuple[str, ...],
+    lower: Mapping[str, Decimal],
+    upper: Mapping[str, Decimal],
+    binding_lower: list[str],
+    binding_upper: list[str],
+) -> tuple[Decimal, bool]:
+    """Move a sub-quantum rounding residual out of cash and back into an interior weight.
+
+    The exact optimum satisfies ``cash_range`` by construction -- the feasibility check established
+    that before the solve. Quantization is this function's own artifact, so a result that lands a
+    few multiples of the grid outside the declared range describes a problem we made infeasible,
+    not one the caller posed. Refusing there would hand back a false refusal on a solvable problem,
+    which is exactly what a caller passing the natural ``cash_range=(0, 1)`` would hit whenever the
+    exact answer is ``cash = 0``.
+
+    The residual is moved into a single **interior** free weight, never one already resting on a
+    bound, so the box every caller was promised still holds and the reported binding sets stay
+    accurate. ``sum(w) + cash`` stays exactly one because the same amount leaves one side and
+    arrives at the other. Selection is by sorted instrument order, so the repair is permutation
+    invariant like the solve it corrects.
+    """
+    budget = QUANTUM * max(len(free), 1)
+    if cash < cash_lower:
+        shortfall = cash_lower - cash
+
+        # Cash is short, so a weight must give some back: it needs slack above its own floor.
+        def slack(name: str) -> Decimal:
+            return weights[name] - lower[name]
+
+        direction = Decimal(-1)
+        target = cash_lower
+    else:
+        shortfall = cash - cash_upper
+
+        # Cash is over, so a weight must take some on: it needs headroom below its own ceiling.
+        def slack(name: str) -> Decimal:
+            return upper[name] - weights[name]
+
+        direction = Decimal(1)
+        target = cash_upper
+
+    if shortfall > budget:
+        return cash, False
+
+    resting = set(binding_lower) | set(binding_upper)
+    for name in sorted(free):
+        if name in resting or slack(name) < shortfall:
+            continue
+        weights[name] += direction * shortfall
+        return target, True
+    return cash, False
 
 
 def _clipped_sum(

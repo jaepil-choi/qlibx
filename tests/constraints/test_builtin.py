@@ -383,3 +383,63 @@ def test_requirements_name_the_configured_benchmark_dataset(
     assert requirement.fields == ("benchmark_weight",)
     assert requirement.lookback == RowsLookback(1)
     assert NoShort().requirements() == ()
+
+
+def test_single_name_cap_enforces_its_declared_tolerance_on_the_real_projection(
+    manifest: dict[str, object], tmp_path: Path
+) -> None:
+    """The tolerance must bind where it is actually consulted, not only in the helper.
+
+    `validate_allocation` is unit-tested directly, but the shipped constraint is what a run calls.
+    This drives a benchmark inflated past the declared allowance through a real point-in-time window
+    and asserts `project()` itself refuses, so the allowance cannot quietly stop being enforced on
+    the path that matters.
+    """
+    import duckdb
+
+    instruments = tuple(sorted(str(row["ticker"]) for row in manifest["universe"]))
+    tolerance = Decimal(str(manifest["weight_tolerance"]))
+    inflated = tmp_path / "inflated_benchmark.parquet"
+    source = FIXTURE / str(manifest["benchmark_path"])
+
+    con = duckdb.connect()
+    try:
+        # Scale the real panel so its per-date sum clears 1 + tolerance by a wide margin.
+        con.execute(
+            f"""
+            COPY (
+              SELECT available_at, instrument, benchmark_weight * 4 AS benchmark_weight
+              FROM read_parquet('{source.as_posix()}')
+            ) TO '{inflated.as_posix()}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        con.close()
+
+    constraint = _cap(manifest)
+    requirement = constraint.requirements()[0]
+    registration = DatasetRegistration.of(
+        "benchmark_weight_daily",
+        "benchmark-source",
+        instrument_field="instrument",
+        available_at="available_at",
+        key_fields=("available_at", "instrument"),
+        fields={"benchmark_weight": "benchmark_weight"},
+    )
+    session = datetime.fromisoformat(str(manifest["last_session"])).date()
+    window = ModelWindow(
+        evaluation_time=LocalInstantDeclaration(session, time(16, 0), VENUE, 0, "+09:00").instant,
+        instruments=instruments,
+        store=DuckDbObservationStore(
+            _Catalog(registration, SourceSpec.of("benchmark-source", inflated))
+        ),
+        allowed_requirements=(requirement,),
+    )
+
+    with pytest.raises(AllocationViolation, match="above the declared"):
+        constraint.project(window, instruments)
+
+    # The unmodified panel, well under the ceiling, still projects cleanly.
+    assert tolerance > 0
+    clean = _benchmark_window(manifest, instruments, requirement)
+    assert constraint.project(clean, instruments).upper

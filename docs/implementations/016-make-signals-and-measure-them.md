@@ -138,6 +138,21 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
 - **The published figure-3 window is unrecoverable here.** If the reference cache is ever
   regenerated over the full range, the generator's hash gate will refuse and the retarget can be
   revisited.
+- **The beta window is pinned by the fixture, not by the tolerance.** A red-team sweep measured
+  that any rolling window from 57 to 63 sessions reproduces the published beta figures inside the
+  ratio ceiling, so the tolerance cannot separate a seven-session band around the true 60. The
+  window is recorded in the fixture contract instead. Tightening a ceiling sized for float
+  accumulation would not be the right fix.
+- **A pipeline that ignored its benchmark argument would defeat the benchmark perturbation.** The
+  gate proves the beta numbers are live given that the argument is consumed; it does not itself
+  prove consumption. Named here rather than left for a later reader to discover.
+- **`analysis/signal.py`'s general correlation path has no value-level assertion.** Every plus or
+  minus one anchor lands on the exact-rational short circuit, so the square-root branch is covered
+  only by an inequality. This is the same shape as the beta sign defect the red-team lane found:
+  a real function whose answer space is certified by assertions that cannot distinguish it from a
+  constant.
+- **The capability probe covers one of five leaves.** `cross_section`, `missing`, `lookthrough` and
+  `neutralize` could acquire a forbidden import without the boundary suite noticing.
 - **`quantile_buckets` records no breakpoints.** Canon gives breakpoint recording as part of why
   the function exists, and the shipped version returns assignments only. Nothing in M1 consumes
   them, and canon assigns the recording itself to the membership DataModel, so this is a capability
@@ -150,7 +165,7 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
 
 ## Validation
 
-- `uv run pytest -q` — 476 passed, from 356 at the milestone start.
+- `uv run pytest -q` — 478 passed, from 356 at the milestone start.
 - `uv run ruff check` and `ruff format --check` clean; package imports with 115 pinned exports,
   including `Mark` and `MarkBatch` so the showcase and the analysis tests reach them through the
   public surface rather than through `vqapr.valuation.marks`.

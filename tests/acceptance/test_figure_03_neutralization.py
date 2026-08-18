@@ -34,10 +34,15 @@ from vqapr.public import demean, neutralize
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "report_figure_03"
 
-# The generator owns the reference recipe, including the three reconciliations the upstream
-# operation carries. Importing it rather than re-typing it means those guards run on every
-# invocation of this test, and removes the possibility of two copies drifting apart -- which is
-# exactly what happened once, when the guards were restored in one place and not the other.
+# The generator owns the two recipe functions that carry reconciliations. Importing them rather
+# than re-typing them means those guards run on every invocation of this test, and removes the
+# possibility of two copies drifting apart -- which is exactly what happened once, when the guards
+# were restored in one place and not the other.
+#
+# The annualisation helpers below are still written out here. That duplication is safe in a way the
+# guard duplication was not: the contract is minted with the generator's version, so any drift in
+# them surfaces immediately as a failed reproduction, whereas a dropped guard was silent precisely
+# because both copies produced identical numbers.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from extract_report_figure_03_fixture import (  # noqa: E402
     market_demean_preserving_gross as _market_demean_preserving_gross,
@@ -179,9 +184,12 @@ def test_vqapr_reproduces_the_reference_demean_instrument_by_instrument(
 def test_vqapr_neutralisation_matches_a_market_demean(panels: dict) -> None:
     """`neutralize` against a column of ones is the demean, so the two products must agree.
 
-    A second route into the same claim, sharing no code with the first: the figure's operation is
-    a market
-    demean, and vqapr expresses it two ways. If they disagreed, one of them is wrong.
+    A second route through the product: `neutralize` against a column of ones must reduce to
+    `demean`. The two share no implementation — mean subtraction against an exact-rational
+    normal-equation solve — so agreement pins both. Both are vqapr, so this corroborates the two
+    against each other rather than against the reference; what it adds is the scale the test above
+    deliberately normalises away, and it is the only place the solver runs on a real 283-name
+    cross-section. If they disagreed, one of them is wrong.
     """
     baseline = panels["baseline_weight"]
     universe = panels["universe_mask"].astype(bool) | baseline.ne(0.0)
@@ -361,7 +369,12 @@ def test_an_identity_demean_fails_the_beta_clause(contract: dict, panels: dict) 
 
 @pytest.mark.parametrize(
     "quantity",
-    ["baseline_mean_absolute_beta", "market_demeaned_mean_absolute_beta"],
+    [
+        "baseline_mean_absolute_beta",
+        "market_demeaned_mean_absolute_beta",
+        "baseline_mean_beta",
+        "market_demeaned_mean_beta",
+    ],
 )
 def test_perturbing_the_benchmark_turns_each_beta_red(
     contract: dict, panels: dict, quantity: str

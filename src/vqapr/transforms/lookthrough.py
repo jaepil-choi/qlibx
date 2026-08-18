@@ -16,9 +16,15 @@ how large a passive sleeve should be, or whether a vehicle is worth its tracking
 strategy's economic judgement, and canon is explicit that the package never expands a holding into
 its constituents on its own — a strategy calls this function or no look-through happens.
 
-Both panels arrive as arguments. There is no discovery path, no ticker convention, and no default
-composition: a vehicle the caller did not describe is refused by name rather than silently treated
-as opaque, because treating it as opaque would understate exposure exactly where it matters most.
+Both panels arrive as arguments. There is no discovery path, no ticker convention and no default
+composition, so an instrument the caller did not describe is held outright rather than expanded.
+That is canon's rule and not a shortcut: the package cannot know a holding is a vehicle, and
+guessing from a ticker would be the auto-expansion canon forbids. Describing a vehicle with an
+empty constituent mapping *is* refused, because that is a caller naming something a vehicle and
+then declining to say what is in it.
+
+Only one level is resolved. A vehicle whose constituents are themselves vehicles needs its own
+matrix, which is the caller's economic definition to make.
 """
 
 from __future__ import annotations
@@ -112,14 +118,6 @@ def look_through(
                 raise ValueError(f"composition[{vehicle!r}][{instrument!r}] must be finite")
             entry[instrument] = weight
         vehicles[vehicle] = entry
-
-    # Refuse before computing. A vehicle held but not described would otherwise pass through as if
-    # it were an ordinary instrument, understating exposure precisely where look-through matters.
-    undescribed = sorted(
-        instrument for instrument in checked if instrument in vehicles and not vehicles[instrument]
-    )
-    if undescribed:
-        raise ValueError(f"held vehicles have no constituents: {undescribed}")
 
     direct: dict[str, Decimal] = {}
     indirect: dict[str, Decimal] = {}

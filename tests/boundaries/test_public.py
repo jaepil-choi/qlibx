@@ -202,6 +202,8 @@ def test_public_exports_are_fixed() -> None:
         "KrxExchange",
         "ListingRule",
         "LocalInstantDeclaration",
+        "Mark",
+        "MarkBatch",
         "MaterializationResult",
         "MaterializationSpec",
         "MonitoringPolicy",

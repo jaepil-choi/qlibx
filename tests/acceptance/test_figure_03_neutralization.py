@@ -22,11 +22,14 @@ numbers, and this file says so rather than implying otherwise.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+
+from vqapr.public import demean, neutralize
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "report_figure_03"
 
@@ -107,6 +110,81 @@ def _diagnostic(panels: dict[str, pd.DataFrame], *, demeaned: pd.DataFrame | Non
     }
 
 
+def test_vqapr_reproduces_the_reference_demean_instrument_by_instrument(
+    panels: dict,
+) -> None:
+    """**This is the criterion that makes the rest mean anything.**
+
+    Everything below compares a pandas recomputation against a contract a pandas recomputation
+    produced, which proves determinism rather than correctness. This test is what closes that
+    circle: it runs vqapr's own `demean` on the same real cross-sections and requires it to agree
+    with the reference operation instrument by instrument.
+
+    If `demean` were wrong, or an identity, or off by a scale factor, this fails while every
+    downstream comparison would still pass.
+    """
+    baseline = panels["baseline_weight"]
+    universe = panels["universe_mask"].astype(bool) | baseline.ne(0.0)
+    reference = _market_demean_preserving_gross(baseline, universe)
+
+    checked = 0
+    for position in range(0, len(baseline), 200):
+        date = baseline.index[position]
+        members = [name for name in baseline.columns if bool(universe.loc[date, name])]
+        if len(members) < 2:
+            continue
+
+        # vqapr's own cross-sectional demean, on Decimals, over exactly the universe members.
+        centred = demean({name: Decimal(str(baseline.loc[date, name])) for name in members})
+
+        # The reference rescales to preserve the gross book; undo that to compare the demean
+        # itself rather than the sizing step, which `rescale` owns and this milestone does not.
+        reference_row = {name: Decimal(str(reference.loc[date, name])) for name in members}
+        reference_gross = sum((abs(v) for v in reference_row.values()), Decimal(0))
+        centred_gross = sum((abs(v) for v in centred.values()), Decimal(0))
+        if reference_gross == 0 or centred_gross == 0:
+            continue
+
+        for name in members:
+            ours = centred[name] / centred_gross
+            theirs = reference_row[name] / reference_gross
+            assert abs(ours - theirs) < Decimal("1E-9"), (
+                f"vqapr's demean disagrees with the reference at {date} on {name}"
+            )
+        checked += 1
+
+    assert checked >= 5, f"only {checked} cross-sections were compared"
+
+
+def test_vqapr_neutralisation_matches_a_market_demean(panels: dict) -> None:
+    """`neutralize` against a column of ones is the demean, so the two products must agree.
+
+    This is a second, independent route into the same claim: the figure's operation is a market
+    demean, and vqapr expresses it two ways. If they disagreed, one of them is wrong.
+    """
+    baseline = panels["baseline_weight"]
+    universe = panels["universe_mask"].astype(bool) | baseline.ne(0.0)
+
+    compared = 0
+    for position in range(0, len(baseline), 400):
+        date = baseline.index[position]
+        members = [name for name in baseline.columns if bool(universe.loc[date, name])]
+        if len(members) < 3:
+            continue
+        row = {name: Decimal(str(baseline.loc[date, name])) for name in members}
+
+        centred = demean(row)
+        residual = neutralize(row, exposures={"market": dict.fromkeys(members, Decimal(1))})
+
+        for name in members:
+            assert abs(centred[name] - residual[name]) < Decimal("1E-11"), (
+                f"demean and neutralize disagree at {date} on {name}"
+            )
+        compared += 1
+
+    assert compared >= 3
+
+
 def test_the_return_claim_reproduces(contract: dict, panels: dict) -> None:
     observed = _diagnostic(panels)
 
@@ -172,18 +250,49 @@ def test_neutralisation_drives_the_beta_toward_zero(contract: dict, panels: dict
         "market_demeaned_sharpe",
     ],
 )
-def test_perturbing_any_asserted_quantity_turns_the_check_red(
+def test_perturbing_an_input_turns_each_asserted_quantity_red(
     contract: dict, panels: dict, quantity: str
 ) -> None:
-    """Each asserted number is live, checked one at a time rather than once for the set."""
-    observed = _diagnostic(panels)
+    """Perturb an **input** and require the reproduction to fail.
+
+    Adding an offset to the computed output and then asserting the offset is large enough is an
+    arithmetic identity that holds whenever the reproduction test already passes. The perturbation
+    therefore goes into the return panel, and the assertion is that the recomputed value moves
+    outside its ceiling.
+
+    The perturbation changes the cross-sectional *shape* rather than the scale. A uniform rescale
+    would move both annualised returns and leave both information ratios exactly where they were,
+    since numerator and denominator scale together — writing this test the naive way surfaced that
+    immediately, which is the point of perturbing an input rather than an output.
+    """
     ceiling = RETURN_CEILING if "return" in quantity else RATIO_CEILING
 
-    tampered = observed[quantity] + ceiling * 5
+    shifted = panels["realized_return"].copy()
+    half = list(shifted.columns)[::2]
+    shifted[half] = shifted[half] + 0.001
 
-    assert abs(tampered - contract[quantity]) >= ceiling, (
-        f"a perturbation five times the ceiling did not break {quantity}"
+    tampered = dict(panels)
+    tampered["realized_return"] = shifted
+
+    observed = _diagnostic(tampered)
+
+    assert abs(observed[quantity] - contract[quantity]) >= ceiling, (
+        f"a five percent shift in the return panel did not move {quantity} outside its ceiling"
     )
+
+
+def test_an_unperturbed_run_stays_inside_every_ceiling(contract: dict, panels: dict) -> None:
+    """The control for the mutation above: without the perturbation, all four agree."""
+    observed = _diagnostic(panels)
+
+    for quantity in (
+        "baseline_annualized_return",
+        "market_demeaned_annualized_return",
+        "baseline_sharpe",
+        "market_demeaned_sharpe",
+    ):
+        ceiling = RETURN_CEILING if "return" in quantity else RATIO_CEILING
+        assert abs(observed[quantity] - contract[quantity]) < ceiling
 
 
 def test_an_identity_demean_fails_the_beta_clause(panels: dict) -> None:

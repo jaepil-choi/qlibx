@@ -111,6 +111,7 @@ from vqapr.transforms.window import (
     window_stdev,
 )
 from vqapr.valuation.configuration import ValuationConfig
+from vqapr.valuation.marks import Mark, MarkBatch
 from vqapr.workspace import Workspace
 
 __all__ = (
@@ -153,6 +154,8 @@ __all__ = (
     "KrxExchange",
     "ListingRule",
     "LocalInstantDeclaration",
+    "Mark",
+    "MarkBatch",
     "MaterializationResult",
     "MaterializationSpec",
     "MonitoringPolicy",

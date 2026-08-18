@@ -32,7 +32,9 @@ class NeutralizationRefusal(ValueError):
     """Raised when a residual cannot be computed honestly.
 
     Carries the reason in the message, and for a rank deficient exposure the name of the column
-    that made it so, because "the matrix is singular" tells a researcher nothing they can act on.
+    whose pivot vanished, because "the matrix is singular" tells a researcher nothing they can act
+    on. With several mutually dependent columns the named one is whichever eliminated last, so it
+    points at the dependency rather than identifying a unique culprit.
     """
 
 
@@ -57,10 +59,12 @@ def neutralize(
     regression per instrument, which is how a market-capitalisation-weighted neutralisation is
     expressed; absent, every instrument counts equally.
 
-    The result is the weighted least squares residual. It is orthogonal to every exposure column
-    under the weights, exactly, and that orthogonality is the property worth testing: it fails
-    immediately for an identity transform, which is what makes it a real check rather than a
-    restatement.
+    The result is the weighted least squares residual. The solve is exact, so the residual is
+    orthogonal to every exposure column under the weights **exactly, before the return value is
+    quantised** to twelve places; the returned Decimals carry that rounding, so a caller re-checking
+    orthogonality on them sees agreement at that scale rather than a bare zero. Orthogonality on
+    the rational residual is still the property worth testing, because it fails immediately for an
+    identity transform, which is what makes it a real check rather than a restatement.
 
     Instruments missing from an exposure column are refused rather than treated as zero loading,
     because a zero loading is a claim that the instrument genuinely has none.

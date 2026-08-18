@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 from vqapr.analysis.performance import drawdown, nav_series, returns
-from vqapr.valuation.marks import Mark, MarkBatch
+from vqapr.public import Mark, MarkBatch
 
 
 def _batch(**pairs: str) -> MarkBatch:

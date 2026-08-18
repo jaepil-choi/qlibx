@@ -129,9 +129,12 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
 
 ## Follow-ups
 
-- **The exposure files carry a self-hash with no upstream authority.** They are absent from the
-  report manifest's hash set, so any later criterion whose value depends on the exposure matrix must
-  establish that authority first.
+- **The report's industry exposure panels were not committed.** The approved plan made them
+  mandatory members of the figure-3 fixture so the orthogonality falsifier could run against the
+  report's own exposure matrix. They are not in the shipped fixture, so that falsifier runs against
+  constructed exposures and against the real single-name industry in `tests/fixtures/real_k200`
+  instead. Any later criterion whose *value* depends on an exposure matrix must commit those panels
+  and establish their authority first.
 - **The published figure-3 window is unrecoverable here.** If the reference cache is ever
   regenerated over the full range, the generator's hash gate will refuse and the retarget can be
   revisited.
@@ -140,8 +143,10 @@ M2 therefore adds alpha definitions and a family ensemble, not infrastructure.
 
 ## Validation
 
-- `uv run pytest -q` — 470 passed, from 356 at the milestone start.
-- `uv run ruff check` and `ruff format --check` clean; package imports with 113 pinned exports.
+- `uv run pytest -q` — 473 passed, from 356 at the milestone start.
+- `uv run ruff check` and `ruff format --check` clean; package imports with 115 pinned exports,
+  including `Mark` and `MarkBatch` so the showcase and the analysis tests reach them through the
+  public surface rather than through `vqapr.valuation.marks`.
 - `uv run python showcases/show_007_signal_measurement/run.py` — one real run, 64 published and
   re-read signal rows, 21 account rows, 60 marks re-hydrated across 15 account versions all
   field-for-field equal to the committed ones, fill-journal replay matching exactly, identical

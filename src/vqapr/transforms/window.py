@@ -13,8 +13,11 @@ it, and it never is.
 That is what canon calls a causal primitive: a pure function where not reaching outside the window
 is guaranteed by the implementation rather than promised by a docstring.
 
-Everything here is exact. No sample is dropped, no window is padded, and no missing value is
-invented — a step that cannot be computed reports ``None`` rather than a number that looks real.
+No sample is dropped, no window is padded, and no missing value is invented: a step that cannot be
+computed reports ``None`` rather than a number that looks real. The slicing and the alignment are
+exact; the statistics divide and take roots under the ambient ``Decimal`` context, so they carry
+that context's precision. What this module guarantees exactly is *which values a step sees*, which
+is the property it exists for.
 """
 
 from __future__ import annotations

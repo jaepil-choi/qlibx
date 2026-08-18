@@ -145,7 +145,8 @@ def quantile_buckets(values: Mapping[str, Decimal], *, buckets: int) -> dict[str
         assigned[instrument] = min(buckets, position * buckets // len(ordered) + 1)
 
     # Ties share a rank, so they must share a bucket even when the count boundary falls between
-    # them. The later assignment wins, keeping groups whole at the cost of unequal counts.
+    # them. The scan runs in ascending order and the first bucket seen for a rank is kept, so a
+    # straddling tie group settles into the lower bucket — whole, at the cost of unequal counts.
     by_rank: dict[Decimal, int] = {}
     for instrument, bucket in assigned.items():
         by_rank.setdefault(ranked[instrument], bucket)

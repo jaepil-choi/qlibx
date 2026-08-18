@@ -63,6 +63,8 @@ from vqapr.public import (
     FillConvention,
     FillSelector,
     LocalInstantDeclaration,
+    Mark,
+    MarkBatch,
     MonitoringPolicy,
     OperationAgenda,
     OperationOccurrence,
@@ -86,7 +88,6 @@ from vqapr.public import (
     register_valuation_config,
     run,
 )
-from vqapr.valuation.marks import Mark, MarkBatch
 
 HERE = Path(__file__).resolve().parent
 FIXTURE = HERE.parents[1] / "tests" / "fixtures" / "real"

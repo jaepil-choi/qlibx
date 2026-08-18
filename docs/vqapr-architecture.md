@@ -1199,11 +1199,37 @@ StrategyModel이 자기 판단 안에서 다른 run을 실행하지 않는다. �
 
 | 함수 | 크기 | 외부 입력 |
 |---|---|---|
-| `signal_weight(signal, *, cash_range)` | `\|signal\|`에 비례 | 없음 |
-| `equal_weight(signal, *, cash_range)` | 균등 | 없음 |
-| `proportional_weight(signal, sizes, *, cash_range)` | `sizes`에 비례 | 크기 panel |
+| `signal_weight(signal)` | `\|signal\|`에 비례 | 없음 |
+| `equal_weight(signal)` | 균등 | 없음 |
+| `proportional_weight(signal, sizes)` | `sizes`에 비례 | 크기 panel |
 
-예산은 **현금 범위**로 선언한다(PRD §5.5). `cash_range=(0, 0)`이면 전부 배분하고, 넓게 두면 남길 수 있다.
+셋 다 **총노출 1로 정규화된** 비중을 낸다(`Σ\|w\| = 1`). 이건 예산 선언이 아니라 **단위**다 — 정규화하지
+않으면 그건 비중이 아니라 그냥 signal이다.
+
+##### 만들기와 맞추기는 분리한다
+
+**예산은 만드는 연산이 정하지 않는다**(PRD §5.5). 그래서 예산을 맞추는 일은 별도 함수다.
+
+```python
+rescale(weights, *, long, short) -> Weights
+```
+
+long 쪽 합을 `long`으로, short 쪽 합을 `short`로 **각각** 맞춘다. 달러 중립은 `long=1, short=-1`이고,
+전액투자 롱온리는 `long=1, short=0`이다.
+
+둘을 나눈 이유는 PRD §5.5의 금지 때문이다. fixed budget과 flexible budget은 **둘 다 정상**이고 패키지가
+몰래 바꾸면 안 된다. 만드는 함수가 알아서 정규화하면 flexible이 조용히 fixed가 된다. 그래서:
+
+- **fixed budget** — `rescale`을 호출한다. 신호가 약해도 선언한 만큼 채운다(집중된다).
+- **flexible budget** — 호출하지 않는다. 총노출 1 단위 그대로 두거나 자기 규칙으로 줄인다.
+
+코드만 봐도 어느 쪽인지 보인다. 이것이 §5.5가 요구하는 구분이다.
+
+**`rescale`은 채우지 않고 맞춘다.** 없는 쪽을 만들어내지 않는다 — long이 하나도 없는데 `long=1`을
+요구하면 거부한다. short이 있는데 `short=0`을 요구해도 거부한다. 그건 재조정이 아니라 포지션 삭제다.
+
+현금은 여기 나오지 않는다. 현금은 `optimize`의 **결정 변수**이고(§5.3 `optimize.py`), weighting은 목표
+비중까지만 만든다.
 
 #### `optimize.py` — 제약 하 배분
 

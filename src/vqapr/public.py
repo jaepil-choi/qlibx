@@ -68,6 +68,13 @@ from vqapr.portfolio.allocation import (
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef, PortfolioTarget
 from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, OptimizeResult, optimize
+from vqapr.portfolio.weighting import (
+    WeightingRefusal,
+    equal_weight,
+    proportional_weight,
+    rescale,
+    signal_weight,
+)
 from vqapr.runtime.agendas import (
     OperationAgenda,
     OperationOccurrence,
@@ -137,12 +144,15 @@ __all__ = (
     "StrategyModelContext",
     "ValuationConfig",
     "VqaprError",
+    "WeightingRefusal",
     "ZeroDealtReason",
     "callback_evidence",
     "component_ref",
+    "equal_weight",
     "materialize",
     "optimize",
     "preflight_run",
+    "proportional_weight",
     "publish_run_allocation",
     "register_agenda",
     "register_component",
@@ -152,8 +162,10 @@ __all__ = (
     "register_monitoring_policy",
     "register_strategy_config",
     "register_valuation_config",
+    "rescale",
     "run",
     "shipped_constraint_path",
+    "signal_weight",
     "validate_allocation",
 )
 

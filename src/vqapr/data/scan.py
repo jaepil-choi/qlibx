@@ -127,6 +127,19 @@ def _relation(spec: SourceSpec) -> str:
 
 
 def _open(spec: SourceSpec) -> duckdb.DuckDBPyConnection:
+    _require_path(spec)
+    con = duckdb.connect()
+    con.execute("SET preserve_insertion_order=false")
+    return con
+
+
+def _require_path(spec: SourceSpec) -> None:
+    """경로 존재를 typed failure로 확인한다.
+
+    `_open`에서 분리한 이유: 세션이 커넥션을 재사용해도 이 검사는 **조회마다** 돌아야 한다.
+    검사를 커넥션 생성에 묶어두면 재사용 경로에서 조용히 사라지고, 그때 에러 메시지가
+    typed failure에서 duckdb 내부 예외로 바뀐다.
+    """
     if not spec.path.exists():
         raise VqaprError(
             stage="source.scan.open",
@@ -140,9 +153,67 @@ def _open(spec: SourceSpec) -> duckdb.DuckDBPyConnection:
             ],
             retry_precondition="create the path, then retry the same operation",
         )
-    con = duckdb.connect()
-    con.execute("SET preserve_insertion_order=false")
-    return con
+
+
+class ScanSession:
+    """한 run 동안 살아 있는 물리 층 핸들.
+
+    duckdb 커넥션은 **이 모듈 밖으로 나가지 않는다**. 모듈 docstring이 선언한 "물리 층을 여는
+    유일한 곳"이라는 경계가 수명을 늘린다고 깨지면 안 되므로, 소유권은 `scan.py` 안에 남는다.
+    호출부는 세션을 들고 다니되 커넥션은 만지지 않는다.
+
+    커넥션을 재사용하는 이유는 고정비(연결 셋업)만이 아니다. duckdb는 커넥션 수명 동안
+    parquet 메타데이터(footer, row-group 통계)를 캐시하는데, 조회마다 닫으면 그 캐시가
+    매번 버려진다.
+    """
+
+    __slots__ = ("_connections",)
+
+    def __init__(self) -> None:
+        self._connections: dict[str, duckdb.DuckDBPyConnection] = {}
+
+    def connection(self, spec: SourceSpec) -> duckdb.DuckDBPyConnection:
+        _require_path(spec)
+        key = spec.path.as_posix()
+        con = self._connections.get(key)
+        if con is None:
+            con = duckdb.connect()
+            con.execute("SET preserve_insertion_order=false")
+            self._connections[key] = con
+        return con
+
+    def close(self) -> None:
+        while self._connections:
+            _, con = self._connections.popitem()
+            con.close()
+
+    def __enter__(self) -> ScanSession:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+
+class _Borrowed:
+    """세션 커넥션은 빌리고, 자기 커넥션은 닫는다.
+
+    각 스캔 함수의 `finally: con.close()`를 그대로 두면 세션 커넥션까지 닫힌다. 이 래퍼가
+    소유권을 표현해서 호출부 구조를 바꾸지 않고도 두 경로를 하나로 유지한다.
+    """
+
+    __slots__ = ("_owned", "connection")
+
+    def __init__(self, spec: SourceSpec, session: ScanSession | None) -> None:
+        if session is None:
+            self.connection = _open(spec)
+            self._owned = True
+        else:
+            self.connection = session.connection(spec)
+            self._owned = False
+
+    def close(self) -> None:
+        if self._owned:
+            self.connection.close()
 
 
 def describe(spec: SourceSpec) -> dict[str, ColumnType]:
@@ -202,13 +273,14 @@ def candidate_instants(
     trade_at_field: str,
     decision_time: object,
     end_time: object,
+    session: ScanSession | None = None,
 ) -> tuple[object, ...]:
     """Return only distinct candidate execution instants in the causal run interval."""
 
     trade_at = _quote(trade_at_field)
-    con = _open(spec)
+    borrowed = _Borrowed(spec, session)
     try:
-        rows = con.execute(
+        rows = borrowed.connection.execute(
             f"SELECT DISTINCT {trade_at} FROM {_relation(spec)} "
             f"WHERE {trade_at} > ? AND {trade_at} <= ? ORDER BY {trade_at}",
             [decision_time, end_time],
@@ -227,7 +299,7 @@ def candidate_instants(
             mutation=False,
         ) from exc
     finally:
-        con.close()
+        borrowed.close()
     return tuple(row[0] for row in rows)
 
 
@@ -239,6 +311,7 @@ def exact_snapshot_rows(
     target_at: object,
     instruments: Sequence[str],
     fields: Mapping[str, str],
+    session: ScanSession | None = None,
 ) -> tuple[dict[str, object], ...]:
     """Read one exact execution snapshot; never substitutes a nearby row or price."""
 
@@ -254,9 +327,9 @@ def exact_snapshot_rows(
         f"{instrument} AS {_quote('instrument')}",
         *(f"{_quote(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
     ]
-    con = _open(spec)
+    borrowed = _Borrowed(spec, session)
     try:
-        cursor = con.execute(
+        cursor = borrowed.connection.execute(
             f"SELECT {', '.join(projections)} FROM {_relation(spec)} "
             f"WHERE {trade_at} = ? AND {instrument} IN ({placeholders}) ORDER BY {instrument}",
             [target_at, *instruments],
@@ -277,7 +350,7 @@ def exact_snapshot_rows(
             mutation=False,
         ) from exc
     finally:
-        con.close()
+        borrowed.close()
 
 
 def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
@@ -387,6 +460,7 @@ def observation_rows(
     evaluation_time: object,
     rows: int | None = None,
     lower_bound: object | None = None,
+    session: ScanSession | None = None,
 ) -> tuple[dict[str, object], ...]:
     """Execute one physical PIT observation query with its lookback pushed into SQL."""
     if (rows is None) == (lower_bound is None):
@@ -442,9 +516,9 @@ def observation_rows(
             f"ORDER BY {ascending}"
         )
 
-    con = _open(spec)
+    borrowed = _Borrowed(spec, session)
     try:
-        cursor = con.execute(sql, parameters)
+        cursor = borrowed.connection.execute(sql, parameters)
         names = tuple(description[0] for description in cursor.description)
         return tuple(dict(zip(names, row, strict=True)) for row in cursor.fetchall())
     except duckdb.Error as exc:
@@ -464,4 +538,4 @@ def observation_rows(
             retry_precondition="fix the registered source or fields, then retry",
         ) from exc
     finally:
-        con.close()
+        borrowed.close()

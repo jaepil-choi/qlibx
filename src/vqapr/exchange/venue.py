@@ -58,7 +58,11 @@ class AcademicExchange:
 
     @property
     def rules(self) -> ExchangeRulesView:
-        """Academic listings with no declared cost band: this profile charges nothing."""
+        """Academic listings with no declared cost band, so this profile charges nothing.
+
+        A subclass may declare one. `execute` charges whatever this returns, so a subclass that
+        adds a cost band gets it applied without replacing any matching behaviour.
+        """
         return ExchangeRulesView(self.exchange_id, self.listings, ())
 
     def execute(
@@ -78,6 +82,7 @@ class AcademicExchange:
         if len({request.instrument_id for request in requests}) != len(requests):
             raise ValueError("an OrderBatch may contain each instrument only once")
         rows = self._validate_snapshot(snapshot, requests)
+        rules = self.rules
         self._validate_rules(requests, rows)
 
         fills: list[Fill] = []
@@ -116,12 +121,19 @@ class AcademicExchange:
                     )
                 )
             else:
+                side = side_of(request.delta_quantity)
+                assert side is not None
                 fills.append(
                     Fill(
                         request.instrument_id,
                         request.delta_quantity,
                         request.delta_quantity,
                         row.price,
+                        cost=rules.charge(
+                            side,
+                            abs(request.delta_quantity) * row.price,
+                            snapshot.target_at,
+                        ),
                     )
                 )
         return FillBatch(tuple(fills), account.version)

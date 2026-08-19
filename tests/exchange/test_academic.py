@@ -6,8 +6,10 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.exchange.costs import CostRule
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
+from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
 from vqapr.orders.batches import OrderBatch, OrderRequest
 from vqapr.valuation.marking import ValuationService
@@ -152,3 +154,55 @@ def test_a_holding_with_no_price_is_left_out_of_nav_rather_than_ending_the_run()
     assert marks.total_value == Decimal("12")
     # The unpriced holding is still held.
     assert account.positions["B"] == Decimal("-2")
+
+
+class _CostedAcademic(AcademicExchange):
+    """A subclass that declares a cost band and changes nothing else."""
+
+    @property
+    def rules(self) -> ExchangeRulesView:
+        return ExchangeRulesView(
+            self.exchange_id,
+            self.listings,
+            (
+                CostRule("buy", Side.BUY, Decimal("0.0003"), Decimal("0")),
+                CostRule("sell", Side.SELL, Decimal("0.0003"), Decimal("0.0020")),
+            ),
+        )
+
+
+def test_a_declared_cost_band_is_charged_without_replacing_execute() -> None:
+    """A profile may add costs, and adding them must not require overriding the matching.
+
+    `load_exchange` refuses a subclass that replaces `execute`, because an unverified matching
+    rule carries an unverified realism claim. Charging what `rules` declares is therefore the
+    only way a subclass can price a trade at all.
+    """
+    venue = _CostedAcademic(_venue().listings)
+
+    fills = venue.execute(
+        _orders(_request("A", "10"), _request("B", "-10")),
+        _account(positions={"B": Decimal("10")}),
+        _snapshot(
+            ExactExecutionRow(_AT, "A", True, Decimal("100")),
+            ExactExecutionRow(_AT, "B", True, Decimal("100")),
+        ),
+    )
+
+    charged = {fill.instrument_id: fill.cost for fill in fills.fills}
+    # 1000 of notional each way: 3bp to buy, 3bp plus 20bp of tax to sell.
+    assert charged["A"].commission == Decimal("0.3000")
+    assert charged["A"].tax == Decimal("0")
+    assert charged["B"].commission == Decimal("0.3000")
+    assert charged["B"].tax == Decimal("2.0000")
+
+
+def test_an_undeclared_cost_band_still_charges_nothing() -> None:
+    fills = _venue().execute(
+        _orders(_request("A", "10")),
+        _account(),
+        _snapshot(ExactExecutionRow(_AT, "A", True, Decimal("100"))),
+    )
+
+    assert fills.fills[0].cost.commission == Decimal("0")
+    assert fills.fills[0].cost.tax == Decimal("0")

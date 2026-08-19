@@ -1,0 +1,137 @@
+"""Registering a Strategy must prove its declaration before a run depends on it."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from vqapr.domain.errors import VqaprError
+from vqapr.extension.component import ComponentKind
+from vqapr.extension.registration import register_strategy_model
+from vqapr.extension.scaffold import render
+
+_HEAD = """from __future__ import annotations
+
+from vqapr.data.lookback import RowsLookback
+from vqapr.data.requirements import DataRequirement
+from vqapr.models.strategy_model import NoDecision, StrategyModel
+
+
+class S(StrategyModel):
+    def requirements(self):
+        return (
+            DataRequirement.of(
+                "s", "px", fields=("close",), lookback=RowsLookback(rows=6)
+            ),
+        )
+"""
+
+
+def _write(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / f"{name}.py"
+    path.write_text(_HEAD + body, encoding="utf-8")
+    return path
+
+
+def _codes(error: VqaprError) -> set[str]:
+    return {failure.code for failure in error.failures}
+
+
+def test_a_syntax_error_is_refused_at_registration(tmp_path: Path) -> None:
+    """A broken file must fail here, not at the first callback of a long run."""
+    path = tmp_path / "broken.py"
+    path.write_text("class S:\n    def __init__(self)\n        pass\n", encoding="utf-8")
+    with pytest.raises(VqaprError) as raised:
+        register_strategy_model(tmp_path, "broken", path, "S")
+    assert _codes(raised.value) == {"component.load.construction_failed"}
+    assert "SyntaxError" in (raised.value.failures[0].observed or "")
+
+
+def test_an_object_outside_the_contract_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "plain.py"
+    path.write_text("class S:\n    pass\n", encoding="utf-8")
+    with pytest.raises(VqaprError) as raised:
+        register_strategy_model(tmp_path, "plain", path, "S")
+    assert _codes(raised.value) == {"component.load.wrong_type"}
+
+
+def test_a_renamed_callback_parameter_is_refused(tmp_path: Path) -> None:
+    """Flow calls the callback positionally, so the parameter list is the contract."""
+    path = _write(
+        tmp_path,
+        "renamed",
+        "    def on_occurrence(self, ctx):\n        return NoDecision(reason='x')\n",
+    )
+    with pytest.raises(VqaprError) as raised:
+        register_strategy_model(tmp_path, "renamed", path, "S")
+    assert _codes(raised.value) == {"component.load.signature_invalid"}
+
+
+def test_an_extra_required_parameter_is_refused(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "extra",
+        "    def on_occurrence(self, context, extra):\n        return NoDecision(reason='x')\n",
+    )
+    with pytest.raises(VqaprError) as raised:
+        register_strategy_model(tmp_path, "extra", path, "S")
+    assert _codes(raised.value) == {"component.load.signature_invalid"}
+
+
+def test_an_unannotated_callback_is_accepted(tmp_path: Path) -> None:
+    """Annotations are not the contract; the overwhelming convention omits them."""
+    path = _write(
+        tmp_path,
+        "bare",
+        "    def on_occurrence(self, context):\n        return NoDecision(reason='x')\n",
+    )
+    ref = register_strategy_model(tmp_path, "bare", path, "S")
+    assert ref.kind is ComponentKind.STRATEGY_MODEL
+
+
+def test_a_narrower_return_annotation_is_accepted(tmp_path: Path) -> None:
+    """A Strategy that always declines may say so; that is more precise, not wrong."""
+    path = _write(
+        tmp_path,
+        "narrow",
+        "    def on_occurrence(self, context) -> NoDecision:\n"
+        "        return NoDecision(reason='x')\n",
+    )
+    assert register_strategy_model(tmp_path, "narrow", path, "S") is not None
+
+
+def test_a_requirements_declaration_of_the_wrong_shape_is_refused(tmp_path: Path) -> None:
+    """Declaring requirements is optional, but declaring them wrongly is not."""
+    path = tmp_path / "badreq.py"
+    path.write_text(
+        "from vqapr.models.strategy_model import NoDecision, StrategyModel\n\n\n"
+        "class S(StrategyModel):\n"
+        "    def requirements(self):\n"
+        "        return ['not-a-requirement']\n\n"
+        "    def on_occurrence(self, context):\n"
+        "        return NoDecision(reason='x')\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(VqaprError) as raised:
+        register_strategy_model(tmp_path, "badreq", path, "S")
+    assert _codes(raised.value) == {"component.load.requirements_invalid"}
+
+
+@pytest.mark.parametrize(
+    ("kind", "object_name"),
+    [(ComponentKind.STRATEGY_MODEL, "Sample"), (ComponentKind.DATA_MODEL, "Sample")],
+)
+def test_a_generated_template_registers_unedited(
+    tmp_path: Path, kind: ComponentKind, object_name: str
+) -> None:
+    """`new` must emit something that already runs, not a stub that raises."""
+    source = render(kind, "sample", dataset_id="px")
+    path = tmp_path / "sample.py"
+    path.write_text(source, encoding="utf-8")
+    if kind is ComponentKind.STRATEGY_MODEL:
+        assert register_strategy_model(tmp_path, "sample", path, object_name) is not None
+    else:
+        from vqapr.extension.registration import register_data_model
+
+        assert register_data_model(tmp_path, "sample", path, object_name) is not None

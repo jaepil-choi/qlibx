@@ -8,8 +8,12 @@ from enum import StrEnum
 from typing import Final
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.errors import VqaprError
 from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import require_tz_aware
+
+MAX_OBSERVED_CHARS = 500
+"""Upper bound for one serialized observation. The unbounded body belongs in a dump file."""
 
 
 class SimulationFailureFamily(StrEnum):
@@ -126,6 +130,57 @@ class SimulationFailure(RuntimeError, ValueError):
         self.account_version = account_version
         self.pending_id = pending_id
         super().__init__(f"{stage.value}: {cause}")
+
+    def as_dict(self) -> dict[str, object]:
+        """The agent-readable form; ``str(err)`` remains the human one.
+
+        Top-level keys match ``VqaprError.as_dict()`` so a caller can serialize either failure
+        through one path instead of branching on the exception type. Only bounded scalars are
+        included: the replay coordinates collect into ``at``, while unbounded owner objects and
+        the traceback stay out and belong in a dump file.
+        """
+        cause = self.cause
+        if isinstance(cause, VqaprError):
+            failures = cause.as_dict()["failures"]
+        else:
+            observed = str(cause)
+            if len(observed) > MAX_OBSERVED_CHARS:
+                observed = observed[:MAX_OBSERVED_CHARS] + "..."
+            failures = [
+                {
+                    "code": f"{self.stage.value}.{type(cause).__name__}",
+                    "requirement": "the guarded boundary must complete without raising",
+                    "observed": observed,
+                    "examples": [],
+                    "example_total": 0,
+                }
+            ]
+        retry = self.retry_precondition
+        return {
+            "stage": str(self.stage),
+            "family": str(self.family),
+            "kind": str(self.kind),
+            "mutation": self.mutation,
+            "retry_precondition": (
+                {
+                    "requires_replay_from_root": retry.requires_replay_from_root,
+                    "required_pending_id": retry.required_pending_id,
+                }
+                if isinstance(retry, RetryPrecondition)
+                else None
+            ),
+            "correlation_id": self.correlation_id,
+            "failures": failures,
+            "at": {
+                "frozen_run_identity": self.frozen_run_identity,
+                "clock": self.clock.isoformat(),
+                "cutoff": self.cutoff.isoformat(),
+                "root_version": self.root_version,
+                "model_version": self.model_version,
+                "account_version": self.account_version,
+                "pending_id": self.pending_id,
+            },
+        }
 
 
 @dataclass(frozen=True, slots=True)

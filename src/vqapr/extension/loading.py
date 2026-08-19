@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import sys
 from pathlib import Path
 
@@ -85,6 +86,25 @@ def _load(
         ) from error
 
 
+def _validate_callback_signature(component: object, *, base: type, method_name: str) -> None:
+    """Reject a callback whose declared parameters cannot receive the contract's call.
+
+    Only the parameter list is checked. Flow calls the callback positionally, so a renamed or
+    extra required parameter is a genuine break, while an annotation is not: a Strategy that
+    always returns an intent may legitimately narrow its return to ``EconomicPortfolioIntent``,
+    and most components declare no annotation at all. Whether the callback produces a usable
+    intent for real data is only knowable during a run.
+    """
+    expected = tuple(inspect.signature(getattr(base, method_name)).parameters)
+    observed = tuple(inspect.signature(getattr(type(component), method_name)).parameters)
+    if observed != expected:
+        raise _failure(
+            f"{_STAGE}.signature_invalid",
+            f"{base.__name__}.{method_name}() must declare parameters {expected}",
+            str(observed),
+        )
+
+
 def _requirements(component: object, *, label: str, required: bool) -> tuple[DataRequirement, ...]:
     declaration = getattr(component, "requirements", None)
     if declaration is None:
@@ -142,6 +162,7 @@ def load_strategy_model(
             "registered StrategyModel object must implement the public StrategyModel contract",
             type(strategy).__name__,
         )
+    _validate_callback_signature(strategy, base=StrategyModel, method_name="on_occurrence")
     _requirements(strategy, label="StrategyModel", required=True)
     return strategy
 

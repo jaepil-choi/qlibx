@@ -205,7 +205,7 @@ def _frozen(
         "strategy",
         OperationRole.STRATEGY_CALLBACK,
     )
-    valuation = ValuationConfig("valuation", OperationRole.VALUATION, _requirement())
+    valuation = ValuationConfig("valuation", OperationRole.VALUATION)
     monitor = MonitoringPolicy("monitoring", OperationRole.MONITORING) if monitoring else None
     bounds = (
         {"start": callbacks[0] if callbacks else (valuations + monitoring)[0], "end": end}
@@ -244,7 +244,7 @@ def _flow(
     constraints: tuple[Constraint, ...] = (_Constraint(),),
     constraint_window_for_occurrence: object = None,
     strategy_window_for_occurrence: object = None,
-    marks_for_occurrence: object = None,
+
 ) -> SimulationFlow:
     return SimulationFlow(
         frozen,
@@ -271,8 +271,6 @@ def _flow(
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_exchange(),
         constraints=constraints,
-        marks_for_occurrence=marks_for_occurrence
-        or (lambda _, __, account: {instrument: Decimal("10") for instrument in account.positions}),
     )
 
 
@@ -645,9 +643,6 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
             account=Account(mode=AccountMode.LONG_ONLY),
             exchange=_exchange(),
             constraints=(_Constraint(),),
-            marks_for_occurrence=lambda _, __, account: {
-                instrument: Decimal("10") for instrument in account.positions
-            },
         )
 
     assert flow(intent(), _state()).run().final_state.pending_accepted_intent is None
@@ -1087,7 +1082,6 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
             account=Account(mode=AccountMode.LONG_ONLY),
             exchange=_exchange(),
             constraints=(DifferentConstraint(),),
-            marks_for_occurrence=lambda *_: {},
         )
     assert frozen.constraints.constraints == (_component("risk", ComponentKind.CONSTRAINT),)
     assert ConstraintSet((constraint,)).constraints == (constraint,)
@@ -1344,7 +1338,9 @@ def test_a_held_instrument_absent_from_the_venue_is_carried_not_refused(tmp_path
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_due_failures_preserve_pre_and_post_commit_authority_lineage(tmp_path: Path) -> None:
+def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     registration = _execution(
         _parquet(
             tmp_path / "failure-lineage.parquet",
@@ -1368,15 +1364,17 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(tmp_path: P
     )
     state = _state()
 
-    def required_valuation_failure(*_: object) -> object:
+    def required_valuation_failure(*_: object, **__: object) -> object:
         raise RuntimeError("required valuation unavailable")
 
+    # Valuation is no longer a separate subscription: the book is valued from the execution
+    # snapshot the fill was priced against, so that reader is the seam that can fail after commit.
+    monkeypatch.setattr(simulation, "_marks_from_execution_snapshot", required_valuation_failure)
     with pytest.raises(SimulationFailure) as raised:
         _flow(
             _frozen((callback,), end=target, execution=registration),
             _Strategy((intent,)),
             state,
-            marks_for_occurrence=required_valuation_failure,
         ).run()
 
     failure = raised.value
@@ -1474,7 +1472,9 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     elif boundary == "publication":
         monkeypatch.setattr(state, "prepare_feedback", fail)
     else:
-        flow._marks_for_occurrence = fail
+        # Valuation now reads the execution snapshot the fill was priced from, so the seam that
+        # can fault is that reader rather than a separate observation subscription.
+        monkeypatch.setattr(simulation, "_marks_from_execution_snapshot", fail)
 
     with pytest.raises(SimulationFailure) as raised:
         flow.run()

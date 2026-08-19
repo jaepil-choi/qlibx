@@ -13,8 +13,6 @@ from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
@@ -117,7 +115,6 @@ def _setup(root: Path, model_price_parquet: Path) -> tuple[Workspace, RunDefinit
     valuation = ValuationConfig(
         "valuation",
         OperationRole.VALUATION,
-        DataRequirement.of("valuation", "prices", fields=("close",), lookback=RowsLookback(1)),
     )
     monitoring = MonitoringPolicy("monitoring", OperationRole.MONITORING)
     workspace.register_strategy_config(strategy)
@@ -414,25 +411,8 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
 def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    workspace, definition = _setup(tmp_path, model_price_parquet)
-    missing = ValuationConfig(
-        "valuation",
-        OperationRole.VALUATION,
-        DataRequirement.of("valuation", "absent", fields=("close",), lookback=RowsLookback(1)),
-    )
-    workspace._valuation_configs["valuation"] = missing
-    invalid = RunDefinition(
-        definition.strategy,
-        missing,
-        definition.constraints,
-        definition.monitoring,
-        start=definition.start,
-        end=definition.end,
-        instruments=definition.instruments,
-    )
-    with pytest.raises(VqaprError):
-        preflight_run(workspace, invalid)
-
+    # Valuation no longer declares a requirement -- it reads the execution table -- so the
+    # missing-requirement contract is proved by a consumer that still has one: a Constraint.
     workspace, definition = _setup(tmp_path / "constraint-requirement", model_price_parquet)
     constraint_path = tmp_path / "constraint-requirement" / "limit.py"
     constraint_path.write_text(

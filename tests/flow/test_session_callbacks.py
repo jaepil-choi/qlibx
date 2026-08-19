@@ -136,7 +136,7 @@ def _flow(
             "strategy",
             OperationRole.STRATEGY_CALLBACK,
         ),
-        valuation=ValuationConfig("valuation", OperationRole.VALUATION, requirement),
+        valuation=ValuationConfig("valuation", OperationRole.VALUATION),
         constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
         strategy_agenda=strategy_agenda,
         valuation_agenda=valuation_agenda,
@@ -165,7 +165,6 @@ def _flow(
         account=account,
         exchange=_Exchange(),
         constraints=(_Constraint(),),
-        marks_for_occurrence=lambda *_: {},
     )
 
 

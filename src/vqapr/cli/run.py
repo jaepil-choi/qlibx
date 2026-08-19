@@ -20,10 +20,8 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ConstraintSet,
-    DataRequirement,
     MonitoringPolicy,
     OperationRole,
-    RowsLookback,
     RunDefinition,
     StrategyConfig,
     ValuationConfig,
@@ -58,26 +56,22 @@ def _strategy(document: dict[str, Any], workspace: Workspace) -> StrategyConfig:
 
 
 def _valuation(document: dict[str, Any]) -> ValuationConfig:
-    """Build the valuation declaration, including the requirement used to mark holdings.
+    """Build the valuation declaration.
 
-    ``mark_requirement`` is a full `DataRequirement` rather than a field name because marking
-    reads observations under the same PIT rules as any other consumer.
+    Valuation declares no mark source. The book is valued from the prices the venue published as
+    executable at the execution instant, which the run already reads to fill against.
     """
     declared = document["valuation"]
     if not isinstance(declared, dict):
         raise TypeError("valuation must be a mapping")
-    mark = declared["mark"]
-    if not isinstance(mark, dict):
-        raise TypeError("valuation.mark must be a mapping")
+    if "mark" in declared:
+        raise ValueError(
+            "valuation.mark no longer exists: the book is valued from the execution table, "
+            "so remove the mark declaration"
+        )
     return ValuationConfig(
         agenda_id=str(declared["agenda_id"]),
         agenda_role=OperationRole.VALUATION,
-        mark_requirement=DataRequirement.of(
-            str(mark.get("consumer_id", "valuation")),
-            str(mark["dataset"]),
-            fields=tuple(str(name) for name in mark["fields"]),
-            lookback=RowsLookback(int(mark.get("lookback", 1))),
-        ),
     )
 
 

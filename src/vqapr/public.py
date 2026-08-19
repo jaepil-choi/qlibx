@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 
@@ -28,6 +26,7 @@ from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
+from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
@@ -110,7 +109,6 @@ from vqapr.transforms.window import (
     window_stdev,
 )
 from vqapr.valuation.configuration import ValuationConfig
-from vqapr.valuation.marking import SelectedMark
 from vqapr.valuation.marks import Mark, MarkBatch
 from vqapr.workspace import Workspace
 
@@ -326,50 +324,6 @@ class _FrozenCatalog:
         return self._sources[raw_source_id]
 
 
-def _marks_for_occurrence(
-    store: DuckDbObservationStore,
-    frozen: FrozenRun,
-    cutoff: datetime,
-    account: object,
-) -> tuple[SelectedMark, ...]:
-    """Mark every held position from the newest observation at or before the cutoff.
-
-    The query already returns the latest row up to the cutoff, so a halted or delisted holding
-    is marked at the last price the venue published for it rather than being written down. The
-    row's own ``available_at`` rides along on each mark: valuation states which price it used
-    and when that price was observed, and leaves what the gap means to reporting.
-    """
-    from vqapr.account.snapshot import AccountSnapshot
-
-    if not isinstance(account, AccountSnapshot):
-        raise TypeError("mark provider requires an AccountSnapshot")
-    held = tuple(
-        sorted(instrument for instrument, quantity in account.positions.items() if quantity)
-    )
-    if not held:
-        return ()
-    requirement = frozen.valuation.mark_requirement
-    batch = store.query(
-        requirement,
-        evaluation_time=cutoff,
-        instruments=held,
-    )
-    field = requirement.fields[0]
-    marks: dict[str, SelectedMark] = {}
-    for row in batch.rows:
-        value = row[field]
-        if value is None:
-            continue
-        if not isinstance(value, Decimal):
-            raise TypeError("valuation mark field must contain Decimal values")
-        instrument = str(row["instrument"])
-        observed_at = row["available_at"]
-        previous = marks.get(instrument)
-        if previous is None or observed_at > previous.observed_at:
-            marks[instrument] = SelectedMark(instrument, value, observed_at)
-    return tuple(marks[instrument] for instrument in sorted(marks))
-
-
 def run(
     project_root: str | Path,
     frozen_run: FrozenRun,
@@ -393,7 +347,10 @@ def run(
         load_constraint(ref, project_root=root_path) for ref in frozen.constraints.constraints
     )
     catalog = _FrozenCatalog(frozen)
-    store = DuckDbObservationStore(catalog)
+    # One physical handle for the whole run. duckdb caches parquet metadata for a connection's
+    # lifetime, and closing per query threw that away on every observation.
+    session = ScanSession()
+    store = DuckDbObservationStore(catalog, session=session)
     strategy_requirements = strategy.requirements()
     if strategy_requirements != frozen.strategy_requirements:
         raise ValueError("loaded Strategy requirements drifted from FrozenRun")
@@ -432,8 +389,8 @@ def run(
         account=Account(mode=frozen.initial_account_mode),
         exchange=exchange,
         constraints=constraints,
-        marks_for_occurrence=lambda valuation, cutoff, account: _marks_for_occurrence(
-            store, frozen, cutoff, account
-        ),
     )
-    return flow.run()
+    try:
+        return flow.run()
+    finally:
+        session.close()

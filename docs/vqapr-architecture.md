@@ -93,8 +93,8 @@ flowchart LR
 
 ### 2.1 IoC — Component는 occurrence를, Flow는 진행과 배달을, Strategy는 판단을 소유한다
 
-**결정.** StrategyModel, Valuation, MonitoringPolicy configuration은 각자 immutable finite
-`OperationAgenda`를 참조한다. preflight는 agenda identities와 inclusive run slice, execution input, initial
+**결정.** StrategyModel과 MonitoringPolicy configuration은 각자 immutable finite `OperationAgenda`를
+참조한다. Valuation은 자기 cadence를 갖지 않는다 — 장부는 체결하는 자리에서 평가된다(§7.4). preflight는 agenda identities와 inclusive run slice, execution input, initial
 Model state를 freeze한다. Flow는 closed roles를 deterministic merge하고 current occurrence만 전달한다.
 
 - **Component configuration이 소유하는 것**: 자기 operation agenda reference와 경제적 cadence.
@@ -376,8 +376,15 @@ writes를 전부 버린다. 이전 pending intent, committed authority와 immuta
 
 ### 3.6 Frequency independence와 calendar 경계
 
-observation, Strategy callback, execution, valuation, monitoring frequency는 독립적이다. 같은 날짜에 zero, one,
-many callbacks가 가능하고 callback 없는 시각에 valuation·monitoring을 실행할 수 있다.
+observation, Strategy callback, execution, monitoring frequency는 독립적이다. 같은 날짜에 zero, one,
+many callbacks가 가능하고 callback 없는 시각에 monitoring을 실행할 수 있다.
+
+**valuation은 독립적이지 않다.** 장부는 **체결하는 자리에서** 평가된다(§7.4). callback이 `NoDecision`을
+반환해도 execution 단계를 거치고, 그 시점에 venue가 공표한 가격으로 평가가 갱신된다. 두 체결 시각 사이에는
+평가를 바꿀 새 가격이 존재하지 않으므로 따로 평가할 것도 없다.
+
+결과로 따라오는 제약 하나: **판단보다 자주 평가할 수 없다.** 일별 NAV를 원하면 callback도 일별이어야 한다.
+`NoDecision`은 즉시 반환이므로 이것은 비용이 아니라 **스케줄 선언**의 문제다.
 
 execution row density가 바뀌어도 frozen callback occurrence 집합·evaluation time·stable-ID order는 바뀌지
 않는다. Full downstream trace equivalence는 selector-relevant target candidates, selected target/snapshot,
@@ -1841,16 +1848,23 @@ Exchange에게 15:30의 가격은 지연을 두고 알게 되는 관측이 아�
 
 ##### 거래 불가와 평가 불가는 다르다
 
-**정지되어도 가격은 존재한다.** 그리고 평가와 체결은 애초에 다른 경로로 온다.
+**정지되어도 가격은 존재한다.** 그리고 그 둘은 **같은 행의 다른 컬럼**이다.
 
 ```text
-평가   Valuation이 등록된 관측에서 읽는다 (§7.4)     ← 관측은 있다
-체결   Exchange가 체결 테이블에서 읽는다             ← 거래는 불가능하다
+한 조회   trade_at = <execution_time> AND instrument IN (<target ∪ held>)
+
+  price = 190, is_tradable = false   →  체결 0주, 평가 190원
+  price = 190, is_tradable = true    →  체결 가능, 평가 190원
+  행 없음                             →  체결 0주, 직전 마크 유지 (§7.4)
 ```
 
-정지 종목은 **관측은 있고 거래는 불가능하므로** 두 경로가 다른 답을 주는 것이 정상이다. 체결은 0주로
-끝나고 평가는 그대로 이루어진다. 불변식 `is_tradable = true ⟹ 가격 > 0`은 **한 방향**이라 정지 종목이
-가격을 갖는 것을 막지 않는다.
+**호가 거부와 체결 거부는 다른 사실이다.** venue가 가격을 공표했다면 그것이 그 보유분의 가치에 대한
+가장 좋은 진술이고, 그 시점에 팔 수 없다는 것은 별개의 사실이다. 그래서 `is_tradable = false`는 체결을
+막고 평가를 막지 않는다. 불변식 `is_tradable = true ⟹ 가격 > 0`은 **한 방향**이라 정지 종목이 가격을
+갖는 것을 막지 않는다.
+
+예전에는 평가가 등록된 관측을 따로 구독했다. 그러면 한 run이 자기 장부의 가치에 대해 **답을 둘** 갖게
+된다 — 체결한 가격과 종가. 그리고 관측가로 매긴 답은 그 run이 실제로는 체결할 수 없었던 가격이다.
 
 qlib은 **가격 테이블**의 결측에서 정지를 유도해 정지·벤더누락·미상장·파일잘림 넷을 뭉갠다. 우리는
 **체결 테이블**의 행 유무를 본다. 표면은 비슷하지만 결정적으로 다르다 — 사용자가 이 테이블을 *"이것이
@@ -2217,8 +2231,34 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
 
 ### 7.4 Valuation
 
-- `ValuationService.requirements(snapshot)`가 **보유 종목 전체**의 mark field를 선언한다.
-- 하나라도 mark가 없으면 NAV를 추정하지 않고 `MarkBatch` commit 전에 실패.
+**결정.** valuation은 아무것도 구독하지 않는다. 장부는 **venue가 그 시점에 체결 가능하다고 공표한
+가격**으로 평가된다 — run이 이미 체결하려고 읽는 바로 그 스냅샷이다(§6.2).
+
+`ValuationConfig`는 agenda 하나만 갖는다. `mark_requirement`는 없다.
+
+```text
+ execution snapshot (target ∪ held, 한 번의 조회)
+   행 있고 가격 있음   →  그 가격으로 마크.  observed_at = 체결 시각
+   행 없음/가격 없음   →  직전 마크를 승계.  observed_at = 원래 관측 시각 그대로
+   승계할 직전도 없음  →  마크 없음. NAV 분모에서 빠지고 수량은 계좌에 남는다
+```
+
+**세 규칙이 각각 막는 것.**
+
+| 규칙 | 안 지키면 |
+|---|---|
+| 정지 종목은 직전 마크를 승계한다 | 정지 기간 동안 NAV가 실제보다 작아진다 |
+| 승계할 때 `observed_at`을 다시 찍지 않는다 | 1년 정지된 종목이 매 occurrence마다 갓 평가된 것처럼 보인다 |
+| 값을 못 매기는 보유분은 분모에서 빠진다 | 지어낸 가격이 이후 모든 weight의 환산 기준이 된다 |
+
+마크의 정체성은 **찍힌 시각**이지 account version이 아니다. 체결 없는 occurrence도 장부를 평가하므로
+한 version에 마크가 여럿 붙는다. `mark_history`의 순서는 `marked_at`이 지킨다.
+
+- NAV는 **지금 값을 매길 수 있는 것**을 평가한다. 못 매기는 보유분은 stale quote로 가격을 지어내는 대신
+  분모에 안 들어간다. 포지션 자체는 snapshot에 그대로 남으므로 **장부에서 사라지는 것이 아니라 평가에서만
+  빠진다.**
+- 정지와 상폐는 cutoff 시점에 동일하며, 다시 거래되는지로만 갈린다 — 그건 미래의 사실이다. valuation은
+  `observed_at`이라는 **사실**을 기록하고 그 간격의 **의미**는 reporting에 맡긴다(§9).
 - `VALUATION_*` failure는 **Fill이 이미 commit된 뒤**일 수 있는 유일한 실패다 → 정확한 account version을 기록.
 
 ---
@@ -2265,7 +2305,8 @@ CREATED → PREFLIGHTED → RUNNING
                         → MODEL_STATE + DECISION_EVIDENCE + LATEST_PENDING COMMITTED
     DUE_EXECUTION → ORDERS_PLANNED → FILLS_PRODUCED
                   → ACCOUNT_COMMITTED → MARKED → FEEDBACK_PUBLISHED → (agenda 계속)
-    INDEPENDENT_VALUATION / MONITORING
+    DUE_VALUATION → MARKED (계좌 불변, version 그대로)          ← NoDecision이 도착하는 곳
+    MONITORING
   → FINALIZED
 
 callback acceptance 전 실패       → 이전 Model state·pending 유지
@@ -2275,7 +2316,13 @@ commit 후 발행 실패   → FAILED_AFTER_COMMIT(account_version 기록)
 
 - target 없음, `target <= decision_time`, target after `end`, invalid timestamp/intent/provenance는 callback staged
   writes를 모두 폐기한다.
-- `NoDecision`은 Model state를 commit하고 existing pending을 유지한다.
+- `NoDecision`은 Model state를 commit한다. **대기 중인 pending이 없으면** 자기 execution 시각을 잡아
+  그 시점 가격으로 장부를 평가한다(`DUE_VALUATION`). 대기 중인 accepted intent가 있으면 그것을 그대로
+  두는데, 그 intent의 due execution이 이미 평가를 수행하기 때문이다 — 덮어쓰면 Strategy가 이미 내린
+  결정과 일어날 예정이던 체결을 조용히 잃는다.
+- `DUE_VALUATION`은 fill이 없으므로 journal entry도 없고 account version도 올리지 않는다.
+  `account_version`은 "계좌가 바뀌었다"를 뜻해야 하고, venue·Flow·monitoring의 낙관적 동시성 검사
+  셋이 그 의미에 기댄다.
 - 새 accepted intent는 target resolution 뒤 latest pending pointer를 교체한다. 이전 decision trace는 유지하며
   별도 `SUPERSEDED` artifact를 만들지 않는다.
 - inclusive `end`의 due chain을 완료하고 pending이 없을 때만 successful finalization이다.

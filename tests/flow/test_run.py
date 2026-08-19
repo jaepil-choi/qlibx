@@ -6,8 +6,6 @@ from pathlib import Path
 import pytest
 
 from vqapr.constraints.monitoring import MonitoringPolicy
-from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
 from vqapr.domain.identifiers import agenda_id
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig
@@ -29,12 +27,6 @@ def _valuation() -> ValuationConfig:
     return ValuationConfig(
         agenda_id("valuation"),
         OperationRole.VALUATION,
-        DataRequirement.of(
-            "valuation",
-            "prices",
-            fields=("close",),
-            lookback=RowsLookback(1),
-        ),
     )
 
 
@@ -53,27 +45,19 @@ def test_owner_configs_require_their_agenda_roles() -> None:
     with pytest.raises(ValueError, match="strategy agenda_role"):
         StrategyConfig(strategy, agenda_id("strategy"), OperationRole.VALUATION)
     with pytest.raises(ValueError, match="valuation agenda_role"):
-        ValuationConfig(
-            agenda_id("valuation"),
-            OperationRole.MONITORING,
-            _valuation().mark_requirement,
-        )
+        ValuationConfig(agenda_id("valuation"), OperationRole.MONITORING)
     with pytest.raises(ValueError, match="monitoring agenda_role"):
         MonitoringPolicy(agenda_id("monitoring"), OperationRole.VALUATION)
 
 
-def test_valuation_requires_one_explicit_mark_field() -> None:
-    with pytest.raises(ValueError, match="exactly one mark field"):
-        ValuationConfig(
-            agenda_id("valuation"),
-            OperationRole.VALUATION,
-            DataRequirement.of(
-                "valuation",
-                "prices",
-                fields=("open", "close"),
-                lookback=RowsLookback(1),
-            ),
-        )
+def test_valuation_declares_no_data_requirement() -> None:
+    """Valuation subscribes to nothing.
+
+    The book is valued from the prices the venue published as executable at the execution
+    instant, which the run already reads to fill against. A second price source would give one
+    run two answers for what its own book is worth.
+    """
+    assert [field.name for field in fields(ValuationConfig)] == ["agenda_id", "agenda_role"]
 
 
 def test_monitoring_policy_cannot_select_constraints() -> None:

@@ -10,7 +10,7 @@ from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnap
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
 from vqapr.orders.batches import OrderBatch, OrderRequest
-from vqapr.valuation.marking import ValuationError, ValuationService
+from vqapr.valuation.marking import ValuationService
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
 
@@ -125,7 +125,7 @@ def test_duplicate_present_rows_reject_the_entire_batch() -> None:
         )
 
 
-def test_valuation_marks_every_residual_holding_or_retains_committed_version_on_failure() -> None:
+def test_valuation_marks_every_residual_holding_it_has_a_price_for() -> None:
     account = _account(positions={"B": Decimal("-2"), "A": Decimal("3"), "ZERO": Decimal("0")})
 
     marks = ValuationService().mark(account, {"A": Decimal("4"), "B": Decimal("5")})
@@ -135,6 +135,20 @@ def test_valuation_marks_every_residual_holding_or_retains_committed_version_on_
         ("B", Decimal("-2"), Decimal("-10")),
     ]
     assert marks.total_value == Decimal("2")
-    with pytest.raises(ValuationError) as failure:
-        ValuationService().mark(account, {"A": Decimal("4")})
-    assert failure.value.account_version == 7
+
+
+def test_a_holding_with_no_price_is_left_out_of_nav_rather_than_ending_the_run() -> None:
+    """NAV values what can be priced at this instant.
+
+    A holding the venue published no price for contributes nothing to the denominator instead of
+    being priced from a stale quote or ending the run. The position is dropped from the valuation,
+    never from the book: it keeps its quantity in the AccountSnapshot.
+    """
+    account = _account(positions={"B": Decimal("-2"), "A": Decimal("3")})
+
+    marks = ValuationService().mark(account, {"A": Decimal("4")})
+
+    assert [mark.instrument_id for mark in marks.marks] == ["A"]
+    assert marks.total_value == Decimal("12")
+    # The unpriced holding is still held.
+    assert account.positions["B"] == Decimal("-2")

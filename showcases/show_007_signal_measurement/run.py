@@ -56,7 +56,6 @@ from vqapr.public import (
     AccountSnapshot,
     ComponentKind,
     ConstraintSet,
-    DataRequirement,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -69,7 +68,6 @@ from vqapr.public import (
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
-    RowsLookback,
     RunDefinition,
     RunRecordSpec,
     SourceSpec,
@@ -513,9 +511,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     valuation_config = ValuationConfig(
         "show007-valuation",
         OperationRole.VALUATION,
-        DataRequirement.of(
-            "show007-valuation", "price_daily", fields=("close",), lookback=RowsLookback(1)
-        ),
     )
     monitoring = MonitoringPolicy("show007-monitoring", OperationRole.MONITORING)
     register_strategy_config(project, signal_config)

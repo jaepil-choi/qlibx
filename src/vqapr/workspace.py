@@ -624,10 +624,6 @@ class Workspace:
         self._require_agenda(
             state[4], config.agenda_id, config.agenda_role, VALUATION_REGISTER_STAGE
         )
-        if config.mark_requirement.dataset_id not in state[0]:
-            raise self._reference_error(
-                VALUATION_REGISTER_STAGE, "valuation mark dataset must be registered"
-            )
         return self._register_declaration(
             config.agenda_id,
             config,
@@ -943,23 +939,7 @@ def _detach_strategy_config(config: StrategyConfig) -> StrategyConfig:
 
 
 def _detach_valuation_config(config: ValuationConfig) -> ValuationConfig:
-    requirement = config.mark_requirement
-    lookback = requirement.lookback
-    detached_lookback = (
-        RowsLookback(lookback.rows)
-        if isinstance(lookback, RowsLookback)
-        else CalendarLookback(lookback.years, lookback.months, lookback.days, lookback.timezone)
-    )
-    return ValuationConfig(
-        config.agenda_id,
-        config.agenda_role,
-        DataRequirement.of(
-            requirement.consumer_id,
-            str(requirement.dataset_id),
-            fields=requirement.fields,
-            lookback=detached_lookback,
-        ),
-    )
+    return ValuationConfig(config.agenda_id, config.agenda_role)
 
 
 def _detach_monitoring_policy(policy: MonitoringPolicy) -> MonitoringPolicy:
@@ -1053,7 +1033,6 @@ def _encode(
         "valuation_configs": {
             key: {
                 "agenda_role": str(config.agenda_role),
-                "mark_requirement": _encode_requirement(config.mark_requirement),
             }
             for key, config in sorted(valuation_configs.items())
         },
@@ -1413,24 +1392,25 @@ def _decode(
         decoded_strategy_configs[raw_id] = config
     decoded_valuation_configs: dict[str, ValuationConfig] = {}
     for raw_id, raw_config in raw_valuation_configs.items():
-        if (
-            not isinstance(raw_id, str)
-            or not isinstance(raw_config, dict)
-            or set(raw_config) != {"agenda_role", "mark_requirement"}
-        ):
+        if not isinstance(raw_id, str) or not isinstance(raw_config, dict):
+            raise ValueError("valuation config must contain an agenda_id and agenda_role")
+        if "mark_requirement" in raw_config:
+            # Refuse rather than ignore. A workspace written before valuation moved to the
+            # execution table declares a price subscription this run would silently not use, and
+            # its NAV would differ from what that declaration says it should be.
             raise ValueError(
-                "valuation config must contain an agenda_id and exactly "
-                "agenda_role and mark_requirement"
+                f"valuation config {raw_id!r} declares mark_requirement, which no longer exists: "
+                "valuation reads the execution table, so re-register the valuation config "
+                "without it"
             )
+        if set(raw_config) != {"agenda_role"}:
+            raise ValueError("valuation config must contain exactly agenda_role")
         role = raw_config["agenda_role"]
         if not isinstance(role, str):
             raise TypeError("valuation config agenda_role must be a string")
-        config = ValuationConfig(
-            raw_id, OperationRole(role), _decode_requirement(raw_config["mark_requirement"])
-        )
+        config = ValuationConfig(raw_id, OperationRole(role))
         if (
-            config.mark_requirement.dataset_id not in decoded
-            or decoded_agendas.get(raw_id) is None
+            decoded_agendas.get(raw_id) is None
             or decoded_agendas[raw_id].role is not config.agenda_role
         ):
             raise ValueError(f"valuation config {raw_id!r} references an absent declaration")

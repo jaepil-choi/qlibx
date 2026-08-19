@@ -20,7 +20,6 @@ from vqapr.public import (
     ComponentKind,
     ComponentRef,
     ConstraintSet,
-    DataRequirement,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -31,7 +30,6 @@ from vqapr.public import (
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
-    RowsLookback,
     RunDefinition,
     SourceSpec,
     StrategyConfig,
@@ -108,9 +106,6 @@ def _valuation() -> ValuationConfig:
     return ValuationConfig(
         VALUATION_AGENDA,
         OperationRole.VALUATION,
-        DataRequirement.of(
-            "sample-valuation", DATASET_ID, fields=("close",), lookback=RowsLookback(1)
-        ),
     )
 
 

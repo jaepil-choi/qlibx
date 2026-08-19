@@ -254,7 +254,9 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     valuation = workspace.valuation_config(definition.valuation.agenda_id)
     if valuation != definition.valuation:
         raise ValueError("valuation configuration reference drift")
-    requirements = [valuation.mark_requirement]
+    # Valuation subscribes to nothing: it reads the prices the venue already published to fill
+    # against, so it contributes no DataRequirement to the frozen run.
+    requirements: list[DataRequirement] = []
 
     monitoring = None
     if definition.monitoring is not None:

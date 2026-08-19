@@ -93,9 +93,11 @@ class ValuationService:
                 )
             price = prices.get(instrument)
             if price is None:
-                raise ValuationError(
-                    f"missing selected mark for {instrument!r}", account_version=account.version
-                )
+                # The venue published no price for this holding at this instant. NAV values what
+                # can be priced; an unpriceable holding contributes nothing to the denominator
+                # rather than being priced from a stale quote. The position keeps its quantity in
+                # the snapshot, so it is dropped from the valuation and not from the book.
+                continue
             marks.append(Mark(instrument, quantity, price, quantity * price))
         return MarkBatch(tuple(marks), sum((mark.value for mark in marks), Decimal("0")))
 

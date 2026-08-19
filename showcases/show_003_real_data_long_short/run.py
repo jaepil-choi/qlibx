@@ -35,7 +35,6 @@ from vqapr.public import (
     AccountSnapshot,
     ComponentKind,
     ConstraintSet,
-    DataRequirement,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -47,7 +46,6 @@ from vqapr.public import (
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
-    RowsLookback,
     RunDefinition,
     SourceSpec,
     StrategyConfig,
@@ -496,9 +494,6 @@ def main() -> None:
     valuation_config = ValuationConfig(
         "showcase-valuation",
         OperationRole.VALUATION,
-        DataRequirement.of(
-            "showcase-valuation", "price_daily", fields=("close",), lookback=RowsLookback(1)
-        ),
     )
     monitoring = MonitoringPolicy("showcase-monitoring", OperationRole.MONITORING)
     register_strategy_config(PROJECT, strategy_config)

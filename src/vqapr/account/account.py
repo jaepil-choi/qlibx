@@ -87,6 +87,63 @@ class PreparedAccountTransition:
             raise ValueError("next_state must append a mark for the prepared snapshot")
 
 
+def _require_marks_within(marks: MarkBatch, snapshot: AccountSnapshot) -> None:
+    """Marks must be a subset of the held positions, at the held quantities.
+
+    Not an exact cover. A holding the venue cannot price at this instant carries no mark and
+    contributes nothing to NAV, which is the position record 020 already took for the execution
+    path: valuing it from a stale quote would put an invented number in the denominator every
+    later weight is converted against. The position itself stays in the snapshot, so it is never
+    silently dropped from the book -- only from the valuation.
+    """
+    marked = marks.quantities()
+    held = dict(snapshot.positions)
+    unknown = tuple(sorted(set(marked) - set(held)))
+    if unknown:
+        raise ValueError(f"marks contain instruments the account does not hold: {unknown}")
+    mismatched = tuple(
+        sorted(
+            instrument for instrument, quantity in marked.items() if held[instrument] != quantity
+        )
+    )
+    if mismatched:
+        raise ValueError(f"marks must value the held quantity for {mismatched}")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedAccountValuation:
+    """A mark-only candidate: the book is valued and nothing about it changes.
+
+    An occurrence that requests no orders still values the book. There is no fill, so there is no
+    journal entry and no reason to advance the account version -- `account_version` means "the
+    account changed", and the optimistic-concurrency checks in the venue, the Flow and monitoring
+    all rely on that meaning.
+    """
+
+    expected_version: int
+    source: AccountState
+    next_state: AccountState
+
+    def __post_init__(self) -> None:
+        if isinstance(self.expected_version, bool) or not isinstance(self.expected_version, int):
+            raise TypeError("expected_version must be an integer")
+        if not isinstance(self.source, AccountState):
+            raise TypeError("source must be an AccountState")
+        if not isinstance(self.next_state, AccountState):
+            raise TypeError("next_state must be an AccountState")
+        if self.source.snapshot.version != self.expected_version:
+            raise ValueError("source version must match expected_version")
+        if self.next_state.snapshot != self.source.snapshot:
+            raise ValueError("a mark-only transition must not change the Account snapshot")
+        if self.next_state.fill_history != self.source.fill_history:
+            raise ValueError("a mark-only transition must not change the fill history")
+        if self.next_state.mark_history[:-1] != self.source.mark_history:
+            raise ValueError("next_state must append exactly one mark")
+        latest_mark = self.next_state.latest_mark
+        if latest_mark is None or latest_mark.account_version != self.source.snapshot.version:
+            raise ValueError("next_state must append a mark for the current snapshot")
+
+
 class Account:
     """Owns Account transition validation; AcceptedRunState owns publication."""
 
@@ -168,21 +225,27 @@ class Account:
         )
 
     def prepare_mark(
-        self, fill: PreparedAccountFill, marks: MarkBatch, *, provenance: object
+        self,
+        fill: PreparedAccountFill,
+        marks: MarkBatch,
+        *,
+        provenance: object,
+        marked_at: object = None,
+        observed_at: object = None,
     ) -> PreparedAccountTransition:
         """Validate the required post-fill valuation before any root is published."""
         if not isinstance(fill, PreparedAccountFill):
             raise TypeError("fill must be a PreparedAccountFill")
         if not isinstance(marks, MarkBatch):
             raise TypeError("marks must be a MarkBatch")
-        marked_positions = marks.quantities()
-        if marked_positions != dict(fill.next_snapshot.positions):
-            raise ValueError("marks must exactly cover the filled account positions")
+        _require_marks_within(marks, fill.next_snapshot)
         mark = AccountMark(
             account_version=fill.next_snapshot.version,
             marks=marks,
             nav=fill.next_snapshot.cash + marks.total_value,
             provenance=provenance,
+            marked_at=marked_at,
+            observed_at_by_instrument=observed_at,
         )
         return PreparedAccountTransition(
             fill=fill,
@@ -192,6 +255,56 @@ class Account:
                 fill_history=(*fill.source.fill_history, *fill.journal_entries),
             ),
         )
+
+    def prepare_valuation(
+        self,
+        state: AccountState,
+        marks: MarkBatch,
+        *,
+        expected_version: int,
+        provenance: object,
+        marked_at: object = None,
+        observed_at: object = None,
+    ) -> PreparedAccountValuation:
+        """Validate a mark taken without any fill. The Account does not change."""
+        if not isinstance(state, AccountState):
+            raise TypeError("state must be an AccountState")
+        if not isinstance(marks, MarkBatch):
+            raise TypeError("marks must be a MarkBatch")
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int):
+            raise TypeError("expected_version must be an integer")
+        current = state.snapshot
+        if expected_version != current.version:
+            raise ValueError("expected_version does not match the current account version")
+        _require_marks_within(marks, current)
+        mark = AccountMark(
+            account_version=current.version,
+            marks=marks,
+            nav=current.cash + marks.total_value,
+            provenance=provenance,
+            marked_at=marked_at,
+            observed_at_by_instrument=observed_at,
+        )
+        return PreparedAccountValuation(
+            expected_version=expected_version,
+            source=state,
+            next_state=AccountState(
+                snapshot=current,
+                mark_history=(*state.mark_history, mark),
+                fill_history=state.fill_history,
+            ),
+        )
+
+    def commit_valuation(self, prepared: PreparedAccountValuation) -> AccountState:
+        """Infallibly install a previously validated mark-only transition."""
+        if not isinstance(prepared, PreparedAccountValuation):
+            raise TypeError("prepared must be a PreparedAccountValuation")
+        if self.state.snapshot != prepared.source.snapshot:
+            raise RuntimeError("Account optimistic conflict")
+        if self.state.fill_history != prepared.source.fill_history:
+            raise RuntimeError("Account optimistic conflict")
+        self._state = prepared.next_state
+        return self._state
 
     def commit_fill(self, prepared: PreparedAccountFill) -> AccountState:
         """Infallibly install a previously validated fill after optimistic checking."""

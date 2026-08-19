@@ -9,8 +9,6 @@ import pytest
 
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
@@ -433,7 +431,6 @@ def test_operation_declarations_round_trip_with_registered_references(tmp_path: 
     valuation = ValuationConfig(
         valuation_agenda.agenda_id,
         OperationRole.VALUATION,
-        DataRequirement.of("valuation", "price_daily", fields=("close",), lookback=RowsLookback(1)),
     )
     monitoring = MonitoringPolicy(monitoring_agenda.agenda_id, OperationRole.MONITORING)
 

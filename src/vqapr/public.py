@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
@@ -50,7 +49,7 @@ from vqapr.exchange.venues.krx import KrxExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
-from vqapr.extension.registration import register_data_model
+from vqapr.extension.registration import register_data_model, register_strategy_model
 from vqapr.flow.materialize import (
     AllocationPublicationResult,
     AllocationPublicationSpec,
@@ -111,6 +110,7 @@ from vqapr.transforms.window import (
     window_stdev,
 )
 from vqapr.valuation.configuration import ValuationConfig
+from vqapr.valuation.marking import SelectedMark
 from vqapr.valuation.marks import Mark, MarkBatch
 from vqapr.workspace import Workspace
 
@@ -215,6 +215,7 @@ __all__ = (
     "register_execution_input",
     "register_monitoring_policy",
     "register_strategy_config",
+    "register_strategy_model",
     "register_valuation_config",
     "require_complete",
     "rescale",
@@ -330,7 +331,14 @@ def _marks_for_occurrence(
     frozen: FrozenRun,
     cutoff: datetime,
     account: object,
-) -> Mapping[str, Decimal]:
+) -> tuple[SelectedMark, ...]:
+    """Mark every held position from the newest observation at or before the cutoff.
+
+    The query already returns the latest row up to the cutoff, so a halted or delisted holding
+    is marked at the last price the venue published for it rather than being written down. The
+    row's own ``available_at`` rides along on each mark: valuation states which price it used
+    and when that price was observed, and leaves what the gap means to reporting.
+    """
     from vqapr.account.snapshot import AccountSnapshot
 
     if not isinstance(account, AccountSnapshot):
@@ -339,7 +347,7 @@ def _marks_for_occurrence(
         sorted(instrument for instrument, quantity in account.positions.items() if quantity)
     )
     if not held:
-        return {}
+        return ()
     requirement = frozen.valuation.mark_requirement
     batch = store.query(
         requirement,
@@ -347,14 +355,19 @@ def _marks_for_occurrence(
         instruments=held,
     )
     field = requirement.fields[0]
-    marks: dict[str, Decimal] = {}
+    marks: dict[str, SelectedMark] = {}
     for row in batch.rows:
         value = row[field]
-        if value is not None:
-            if not isinstance(value, Decimal):
-                raise TypeError("valuation mark field must contain Decimal values")
-            marks[row["instrument"]] = value
-    return marks
+        if value is None:
+            continue
+        if not isinstance(value, Decimal):
+            raise TypeError("valuation mark field must contain Decimal values")
+        instrument = str(row["instrument"])
+        observed_at = row["available_at"]
+        previous = marks.get(instrument)
+        if previous is None or observed_at > previous.observed_at:
+            marks[instrument] = SelectedMark(instrument, value, observed_at)
+    return tuple(marks[instrument] for instrument in sorted(marks))
 
 
 def run(

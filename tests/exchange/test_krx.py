@@ -134,7 +134,6 @@ def test_real_prices_produce_whole_share_orders_that_fit_cash(real_close) -> Non
         execution_time_nav=account.cash,
         prices=prices,
         weight_targets=dict.fromkeys(sorted(prices), weight),
-        quantity_targets={},
         cash_target=Decimal("0"),
         budget=LONG_ONLY,
         rules=exchange.rules,
@@ -165,13 +164,13 @@ def test_sells_pay_commission_and_sale_tax_on_real_prices(real_close) -> None:
     held = Decimal("100")
     account = AccountSnapshot(3, Decimal("5000000"), {instrument: held})
 
+    nav = account.cash + held * price
     batch = plan_orders(
         account=account,
-        execution_time_nav=account.cash + held * price,
+        execution_time_nav=nav,
         prices={instrument: price},
-        weight_targets={},
-        quantity_targets={instrument: Decimal("40")},
-        cash_target=(account.cash + Decimal("60") * price) / (account.cash + held * price),
+        weight_targets={instrument: Decimal("40") * price / nav},
+        cash_target=(account.cash + Decimal("60") * price) / nav,
         budget=LONG_ONLY_SHARES,
         rules=exchange.rules,
     )
@@ -203,8 +202,7 @@ def test_krx_refuses_to_open_a_short_position(real_close) -> None:
         account=account,
         execution_time_nav=Decimal("1000000"),
         prices={instrument: price},
-        weight_targets={},
-        quantity_targets={instrument: Decimal("-10")},
+        weight_targets={instrument: Decimal("-10") * price / Decimal("1000000")},
         cash_target=(Decimal("1000000") + Decimal("10") * price) / Decimal("1000000"),
         budget=SIGNED_SHARES,
         rules=exchange.rules,
@@ -225,7 +223,6 @@ def test_halted_real_instrument_is_zero_dealt_and_free(real_close) -> None:
         execution_time_nav=account.cash,
         prices={instrument: price},
         weight_targets={instrument: Decimal("1")},
-        quantity_targets={},
         cash_target=Decimal("0"),
         budget=LONG_ONLY,
         rules=exchange.rules,
@@ -253,7 +250,6 @@ def test_rounding_residual_stays_visible_against_the_intended_position(real_clos
         execution_time_nav=account.cash,
         prices={instrument: price},
         weight_targets={instrument: Decimal("1")},
-        quantity_targets={},
         cash_target=Decimal("0"),
         budget=LONG_ONLY,
         rules=exchange.rules,

@@ -12,20 +12,21 @@ from vqapr.portfolio.budgets import Budget
 
 @dataclass(frozen=True, slots=True)
 class PortfolioTarget:
-    """One complete desired position expressed in exactly one economic unit."""
+    """One complete desired position, expressed as a fraction of execution-time NAV.
+
+    A target is a weight and never a quantity. The callback cannot see the execution price or
+    NAV, so a quantity it named would have to be derived from an earlier price; ``plan_orders``
+    exists precisely to do that conversion later, at the price the fill actually uses.
+    """
 
     instrument_id: str
-    weight: Decimal | None = None
-    quantity: Decimal | None = None
+    weight: Decimal
 
     def __post_init__(self) -> None:
         if not isinstance(self.instrument_id, str) or not self.instrument_id:
             raise ValueError("instrument_id must be a non-empty string")
-        if (self.weight is None) == (self.quantity is None):
-            raise ValueError("exactly one of weight or quantity must be set")
-        value = self.weight if self.weight is not None else self.quantity
-        if not isinstance(value, Decimal) or not value.is_finite():
-            raise ValueError("target value must be a finite Decimal")
+        if not isinstance(self.weight, Decimal) or not self.weight.is_finite():
+            raise ValueError("weight must be a finite Decimal")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,20 +93,10 @@ def validate_economic_intent(intent: object) -> EconomicPortfolioIntent:
     if not intent.budget.validates_cash(intent.cash_target):
         raise ValueError("cash_target is outside the declared budget")
     if intent.targets:
-        target_kind = "weight" if intent.targets[0].weight is not None else "quantity"
-        if any(
-            (target.weight is not None) != (target_kind == "weight") for target in intent.targets
-        ):
-            raise ValueError("targets must not mix weight and quantity economics")
-        target_values = tuple(
-            target.weight if target_kind == "weight" else target.quantity
-            for target in intent.targets
-        )
-        if any(
-            value is None or not intent.budget.validates_target(value) for value in target_values
-        ):
+        target_values = tuple(target.weight for target in intent.targets)
+        if any(not intent.budget.validates_target(value) for value in target_values):
             raise ValueError("target is outside the declared budget bounds")
-        if target_kind == "weight" and sum(target_values, Decimal("0")) + intent.cash_target != 1:
+        if sum(target_values, Decimal("0")) + intent.cash_target != 1:
             raise ValueError("weight targets plus cash_target must equal one")
     elif intent.cash_target != 1:
         raise ValueError("an empty complete position set requires cash_target equal to one")

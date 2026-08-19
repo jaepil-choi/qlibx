@@ -534,19 +534,18 @@ class SimulationFlow:
         held_instruments = tuple(before.positions)
 
         def select_snapshot() -> object:
-            selected = exact_execution_snapshot(
+            # A held instrument absent from the table is a market fact, not a data-contract
+            # breach: it delisted, or it has not listed yet. Canon 6.1 assigns that case to
+            # zero-dealt evidence, and the Exchange publishes it as ABSENT. Refusing here would
+            # end the run on the first delisting, which in a 3,000-name universe is the first
+            # week.
+            return exact_execution_snapshot(
                 execution_input.table,
                 target_at=pending.target.target_at,
                 target_instruments=target_instruments,
                 held_instruments=held_instruments,
                 trade_price=pending.target.trade_price,
             )
-            if selected.missing_held_instruments:
-                raise ValueError(
-                    "missing selected execution value for held instruments: "
-                    f"{selected.missing_held_instruments}"
-                )
-            return selected
 
         snapshot = self._due_boundary(
             stage=SimulationStage.DUE_SNAPSHOT,
@@ -560,21 +559,19 @@ class SimulationFlow:
         selected_prices = {
             instrument: price for instrument, price in prices.items() if price is not None
         }
+        # NAV values what can be priced at this instant. A holding with no row carries no
+        # selected value, so it contributes nothing here and stays in the account untouched;
+        # pricing it from a stale quote would put an invented number in the denominator every
+        # later weight is converted against.
         nav = before.cash + sum(
             (
                 before.positions[instrument] * selected_prices[instrument]
                 for instrument in held_instruments
+                if instrument in selected_prices
             ),
             Decimal("0"),
         )
-        weights = {
-            target.instrument_id: target.weight for target in targets if target.weight is not None
-        }
-        quantities = {
-            target.instrument_id: target.quantity
-            for target in targets
-            if target.quantity is not None
-        }
+        weights = {target.instrument_id: target.weight for target in targets}
         orders = self._due_boundary(
             stage=SimulationStage.DUE_ORDER_PLANNING,
             cutoff=pending.target.target_at,
@@ -586,7 +583,6 @@ class SimulationFlow:
                 execution_time_nav=nav,
                 prices=selected_prices,
                 weight_targets=weights,
-                quantity_targets=quantities,
                 cash_target=pending.intent.cash_target,
                 budget=pending.intent.budget,
                 rules=self._exchange.rules.at(pending.target.target_at),

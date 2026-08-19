@@ -72,12 +72,15 @@ class _Catalog:
         raise AssertionError("constraint fixture must not query data")
 
 
-def test_portfolio_target_requires_one_complete_economic_target() -> None:
-    with pytest.raises(ValueError, match="exactly one"):
-        PortfolioTarget("ABC")
-    with pytest.raises(ValueError, match="exactly one"):
-        PortfolioTarget("ABC", weight=Decimal("1"), quantity=Decimal("1"))
-    assert PortfolioTarget("ABC", quantity=Decimal("0")).quantity == Decimal("0")
+def test_portfolio_target_is_a_weight_and_never_a_quantity() -> None:
+    """A callback cannot see the execution price, so it may not name a share count."""
+    with pytest.raises(TypeError):
+        PortfolioTarget("ABC")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        PortfolioTarget("ABC", quantity=Decimal("1"))  # type: ignore[call-arg]
+    with pytest.raises(ValueError, match="weight must be a finite Decimal"):
+        PortfolioTarget("ABC", weight=Decimal("NaN"))
+    assert PortfolioTarget("ABC", weight=Decimal("0")).weight == Decimal("0")
 
 
 def test_closed_constraint_evaluation_preserves_pass_and_violation_without_mutation() -> None:

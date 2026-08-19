@@ -22,7 +22,14 @@ def _instrument(value: str, *, name: str = "instrument_id") -> None:
 
 @dataclass(frozen=True, slots=True)
 class OrderRequest:
-    """A complete desired position or an explicitly unresolved target-only absence."""
+    """A complete desired position, or an unresolved request the venue could not price.
+
+    An unresolved request carries no execution price. That happens two ways: a target for an
+    instrument absent from the venue at this instant, and a holding whose instrument has left it
+    -- a delisting. The second keeps its quantity and asks for no trade, because a position that
+    cannot be priced also cannot be sold, and inventing a price to close it would fabricate the
+    proceeds.
+    """
 
     instrument_id: str
     current_quantity: Decimal
@@ -39,14 +46,17 @@ class OrderRequest:
         if self.delta_quantity != self.desired_quantity - self.current_quantity:
             raise ValueError("delta_quantity must equal desired_quantity - current_quantity")
         if self.execution_price is None:
-            if self.current_quantity != 0:
-                raise ValueError("an unresolved request must be target-only")
+            # An unpriced target may still be requested: the venue answers with typed ABSENT
+            # evidence. What it may not do is move an existing holding, because settling a
+            # position needs a price and inventing one would fabricate the proceeds.
+            if self.current_quantity != 0 and self.desired_quantity != self.current_quantity:
+                raise ValueError("an unresolved request cannot settle an existing holding")
             if self.unresolved_weight_target is not None:
                 _decimal(
                     self.unresolved_weight_target,
                     name="unresolved_weight_target",
                 )
-                if self.desired_quantity != 0 or self.delta_quantity != 0:
+                if self.desired_quantity != self.current_quantity:
                     raise ValueError(
                         "an unresolved weight request cannot invent a desired quantity"
                     )

@@ -112,12 +112,15 @@ def plan_orders(
     execution_time_nav: Decimal,
     prices: Mapping[str, Decimal],
     weight_targets: Mapping[str, Decimal],
-    quantity_targets: Mapping[str, Decimal],
     cash_target: Decimal,
     budget: Budget,
     rules: ExchangeRulesView | None = None,
 ) -> OrderBatch:
-    """Plan a complete target portfolio against execution-time NAV.
+    """Convert a weight target into the delta that reaches it at execution-time prices.
+
+    This is the only place a weight becomes a quantity. The Strategy declared its target one
+    evaluation earlier against prices that have since moved, so the conversion belongs here,
+    where the execution price and NAV are both known.
 
     Held positions always require a selected value. A target-only missing row remains an
     unresolved request so the Exchange can publish typed ``ABSENT`` zero-dealt evidence.
@@ -132,34 +135,27 @@ def plan_orders(
         raise ValueError("cash_target is outside the declared budget")
     selected_prices = _prices(prices)
     weights = _targets(weight_targets, name="weight_targets")
-    quantities = _targets(quantity_targets, name="quantity_targets")
-    overlap = set(weights).intersection(quantities)
-    if overlap:
-        raise ValueError("an instrument may have either a weight target or a quantity target")
-    if not quantities and sum(weights.values(), Decimal(0)) + cash != 1:
+    if sum(weights.values(), Decimal(0)) + cash != 1:
         raise ValueError("weight targets plus cash_target must equal one")
 
-    instruments = set(account.positions).union(weights, quantities)
-    missing_held = sorted(
-        instrument_id
-        for instrument_id, quantity in account.positions.items()
-        if quantity != 0 and instrument_id not in selected_prices
-    )
-    if missing_held:
-        raise ValueError(f"missing selected execution price for held instruments: {missing_held}")
+    instruments = set(account.positions).union(weights)
 
     desired_quantities: dict[str, Decimal] = {}
     unresolved_weights: dict[str, Decimal] = {}
     for instrument_id in instruments:
-        if instrument_id in weights:
-            price = selected_prices.get(instrument_id)
-            desired = Decimal(0) if price is None else weights[instrument_id] * nav / price
-            allocation = weights[instrument_id]
-            if price is None:
+        price = selected_prices.get(instrument_id)
+        held = account.positions.get(instrument_id, Decimal(0))
+        if price is None:
+            # The venue cannot price this instrument now. A holding stays exactly where it is --
+            # an unpriceable position cannot be sold, and closing it at an invented price would
+            # fabricate the proceeds -- and the Exchange publishes typed ABSENT evidence for it.
+            desired = held
+            allocation = weights.get(instrument_id, Decimal(0))
+            if instrument_id in weights:
                 unresolved_weights[instrument_id] = allocation
-        elif instrument_id in quantities:
-            desired = quantities[instrument_id]
-            allocation = desired
+        elif instrument_id in weights:
+            desired = weights[instrument_id] * nav / price
+            allocation = weights[instrument_id]
         else:
             desired = Decimal(0)
             allocation = Decimal(0)
@@ -168,18 +164,6 @@ def plan_orders(
         if not budget.validates_target(allocation):
             raise ValueError("complete desired position is outside the declared budget bounds")
         desired_quantities[instrument_id] = desired
-
-    unresolved_targets = (set(weights) | set(quantities)).difference(selected_prices)
-    if quantities and not unresolved_targets:
-        post_trade_cash = nav - sum(
-            (
-                desired_quantities[instrument_id] * selected_prices[instrument_id]
-                for instrument_id in instruments
-            ),
-            Decimal(0),
-        )
-        if post_trade_cash != nav * cash:
-            raise ValueError("complete desired positions do not produce the declared cash_target")
 
     if rules is not None:
         desired_quantities = _apply_venue_rules(

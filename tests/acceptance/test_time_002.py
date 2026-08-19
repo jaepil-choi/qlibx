@@ -786,7 +786,7 @@ def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> No
     intent = EconomicPortfolioIntent(
         UUID(int=99),
         "strategy",
-        (PortfolioTarget("C", quantity=Decimal("1")),),
+        (PortfolioTarget("C", weight=Decimal("0")),),
         Decimal("1"),
         _BUDGET,
         (),
@@ -1244,7 +1244,7 @@ def test_target_only_absence_publishes_typed_zero_dealt_fill(tmp_path: Path) -> 
     intent = EconomicPortfolioIntent(
         UUID(int=2),
         "strategy",
-        (PortfolioTarget("B", quantity=Decimal("1")),),
+        (PortfolioTarget("B", weight=Decimal("0")),),
         Decimal("1"),
         _BUDGET,
         (),
@@ -1295,7 +1295,13 @@ def test_callback_payload_fault_does_not_publish_recorder_or_state() -> None:
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_held_value_gap_blocks_due_execution_before_liquidation(tmp_path: Path) -> None:
+def test_a_held_instrument_absent_from_the_venue_is_carried_not_refused(tmp_path: Path) -> None:
+    """A delisting is a market fact, so the run continues and the position stays put.
+
+    Canon 6.1 splits the one snapshot three ways, and an absent row belongs to zero-dealt
+    evidence rather than batch failure. Refusing instead would end any real run in its first
+    week, because delistings arrive constantly in a large universe.
+    """
     registration = _execution(
         _parquet(
             tmp_path / "held-gap.parquet",
@@ -1311,7 +1317,7 @@ def test_held_value_gap_blocks_due_execution_before_liquidation(tmp_path: Path) 
     intent = EconomicPortfolioIntent(
         UUID(int=3),
         "strategy",
-        (PortfolioTarget("B", quantity=Decimal("1")),),
+        (PortfolioTarget("B", weight=Decimal("0")),),
         Decimal("1"),
         _BUDGET,
         (),
@@ -1320,25 +1326,21 @@ def test_held_value_gap_blocks_due_execution_before_liquidation(tmp_path: Path) 
     )
     state = _state(initial)
 
-    with pytest.raises(SimulationFailure, match="held instruments") as raised:
-        _flow(
-            _frozen(
-                (callback,),
-                valuations=(target,),
-                end=target,
-                execution=registration,
-                account=initial,
-            ),
-            _Strategy((intent,)),
-            state,
-        ).run()
+    _flow(
+        _frozen(
+            (callback,),
+            valuations=(target,),
+            end=target,
+            execution=registration,
+            account=initial,
+        ),
+        _Strategy((intent,)),
+        state,
+    ).run()
 
-    assert state.current.account == AccountState(initial)
-    assert state.current.pending_accepted_intent is not None
-    assert raised.value.kind is SimulationFailureKind.PRE_COMMIT
-    assert raised.value.mutation is False
-    assert raised.value.account_version == initial.version
-    assert raised.value.pending_id == str(intent.intent_id)
+    # The unpriceable holding survives the due execution untouched.
+    assert state.current.account.snapshot.positions["A"] == Decimal("1")
+    assert state.current.pending_accepted_intent is None
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -1529,7 +1531,7 @@ def test_omitted_holding_is_liquidated_through_the_due_flow(tmp_path: Path) -> N
     intent = EconomicPortfolioIntent(
         UUID(int=4),
         "strategy",
-        (PortfolioTarget("B", quantity=Decimal("1")),),
+        (PortfolioTarget("B", weight=Decimal("0.1")),),
         Decimal("0.9"),
         _BUDGET,
         (),

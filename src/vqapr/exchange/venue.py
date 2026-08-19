@@ -16,7 +16,13 @@ from vqapr.orders.batches import OrderBatch, OrderRequest
 
 
 class Exchange(Protocol):
-    """The deliberately small execution extension boundary."""
+    """The deliberately small execution extension boundary.
+
+    Before changing a profile, read `docs/issues/002-execution-profiles-share-no-base.md`. The two
+    shipped profiles duplicate their snapshot validation byte for byte, and neither sequences a
+    batch: sells do not fund buys, charged costs do not consume the cash the plan allocated, and
+    no profile can produce a partial fill when the money runs out mid-batch.
+    """
 
     exchange_id: str
 

@@ -211,6 +211,7 @@ class FrozenRun:
     initial_payload: bytes = b""
     initial_model_state_ref: ModelStateRef = field(init=False)
     instruments: tuple[str, ...] = ()
+    instrument_set: frozenset[str] = field(init=False, repr=False, compare=False)
     strategy_requirements: tuple[DataRequirement, ...] = ()
     constraint_requirements: tuple[DataRequirement, ...] = ()
     requirements: tuple[DataRequirement, ...] = ()
@@ -295,8 +296,12 @@ class FrozenRun:
             raise ValueError("instruments must be a non-empty tuple")
         if any(not isinstance(value, str) or not value for value in self.instruments):
             raise ValueError("instruments must contain non-empty strings")
-        if len(set(self.instruments)) != len(self.instruments):
+        # The uniqueness check needs this set anyway; keeping it turns per-callback universe
+        # membership from a linear tuple scan into a hash lookup.
+        unique_instruments = frozenset(self.instruments)
+        if len(unique_instruments) != len(self.instruments):
             raise ValueError("instruments must be unique")
+        object.__setattr__(self, "instrument_set", unique_instruments)
         for name, owner_requirements in (
             ("strategy_requirements", self.strategy_requirements),
             ("constraint_requirements", self.constraint_requirements),
@@ -367,12 +372,9 @@ class FrozenRun:
                     self.strategy.component.component_id,
                     self.strategy.component.fingerprint,
                 ),
-                "valuation": (
-                    self.valuation.mark_requirement.consumer_id,
-                    self.valuation.mark_requirement.dataset_id,
-                    self.valuation.mark_requirement.fields,
-                    repr(self.valuation.mark_requirement.lookback),
-                ),
+                # Valuation declares no data requirement: it reads the execution table the run
+                # already fills against. Its agenda identity is carried in the agenda block below.
+                "valuation": (self.valuation.agenda_id, str(self.valuation.agenda_role)),
                 "constraints": [
                     (constraint.component_id, constraint.fingerprint)
                     for constraint in self.constraints.constraints

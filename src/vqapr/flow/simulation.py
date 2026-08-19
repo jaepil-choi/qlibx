@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
+from uuid import UUID, uuid5
 
 from vqapr.account.account import Account
-from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.constraints.constraint import Constraint
 from vqapr.constraints.evaluation import (
     evaluate_constraints,
@@ -39,7 +40,7 @@ from vqapr.evidence.artifacts import (
 )
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
-from vqapr.exchange.conventions import ExactExecutionTarget
+from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.exchange.venue import Exchange
 from vqapr.flow.model_state import prepare_model_state
@@ -62,7 +63,6 @@ from vqapr.portfolio.intents import (
 )
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.runtime.events import DueExecutionEnvelope, OperationEnvelope
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.valuation.marking import SelectedMark, ValuationService
 from vqapr.valuation.marks import MarkBatch
 
@@ -92,6 +92,88 @@ class AcceptedIntent:
     @property
     def pending_id(self) -> str:
         return str(self.intent.intent_id)
+
+
+def _marks_from_execution_snapshot(
+    snapshot: object,
+    target_at: datetime,
+    *,
+    previous: AccountMark | None = None,
+    held: Mapping[str, Decimal] | None = None,
+) -> tuple[SelectedMark, ...]:
+    """Value the book from the prices the venue published as executable at this instant.
+
+    A row with a price marks the name, **including when `is_tradable` is false**: the venue
+    published a price, and refusing to trade is a different fact from refusing to quote.
+
+    A name the venue published nothing for **carries its previous mark forward, keeping the
+    instant that mark was originally observed at**. A halt is not a reason to write a holding
+    down, and it is not a reason to drop it out of NAV either; it is a reason for its price to
+    stop moving. `SelectedMark.staleness(cutoff)` is what makes the gap visible afterwards.
+
+    A name with no row and no previous mark produces nothing. That is a position the venue has
+    never priced, so there is no honest number to put in the denominator.
+    """
+    marks: dict[str, SelectedMark] = {}
+    for row in getattr(snapshot, "rows", ()):
+        price = row.price
+        if price is None or price <= 0:
+            continue
+        marks[row.instrument] = SelectedMark(row.instrument, price, target_at)
+    if previous is not None and held is not None:
+        for carried in previous.marks.marks:
+            if carried.instrument_id in marks or carried.instrument_id not in held:
+                continue
+            observed_at = _observed_at(previous, carried.instrument_id)
+            if observed_at is None:
+                continue
+            marks[carried.instrument_id] = SelectedMark(
+                carried.instrument_id, carried.price, observed_at
+            )
+    return tuple(marks[instrument] for instrument in sorted(marks))
+
+
+def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
+    """When the carried price was actually observed, not when it was carried.
+
+    A mark taken before this design carries no instant; it cannot claim one retroactively.
+    """
+    selected = mark.observed_at_by_instrument
+    if selected is not None:
+        return selected.get(instrument, mark.marked_at)
+    return mark.marked_at
+
+
+@dataclass(frozen=True, slots=True)
+class PendingValuation:
+    """An occurrence that requested no orders but still values the book.
+
+    A `NoDecision` is not "nothing happened". The venue still publishes prices at the execution
+    instant, and the book is still worth something there. This carries the selected target so the
+    occurrence reaches the execution snapshot, without carrying an intent -- an empty
+    `EconomicPortfolioIntent` would mean "hold no positions", which is the opposite of holding.
+    """
+
+    occurrence: OperationOccurrence
+    decision_time: datetime
+    target: ExactExecutionTarget
+    valuation_id: UUID
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.occurrence, OperationOccurrence):
+            raise TypeError("occurrence must be an OperationOccurrence")
+        if self.decision_time != self.occurrence.evaluation_time:
+            raise ValueError("decision_time must be the current occurrence evaluation_time")
+        if self.decision_time.tzinfo is None:
+            raise ValueError("decision_time must be timezone-aware")
+        if not isinstance(self.target, ExactExecutionTarget):
+            raise TypeError("target must be an ExactExecutionTarget")
+        if self.target.target_at.astimezone(UTC) <= self.decision_time.astimezone(UTC):
+            raise ValueError("execution target must be strictly later than decision_time")
+
+    @property
+    def pending_id(self) -> str:
+        return str(self.valuation_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +309,9 @@ def _shadows_package_table(table_id: str) -> bool:
     return folded.startswith(DEFAULT_TABLE_PREFIX)
 
 
+_VALUATION_NAMESPACE = UUID("3f1c9a7e-1d4b-4f52-9c8a-6b2e7d0a5f31")
+"""Namespace for the pending identity a no-order occurrence carries into execution."""
+
 _ACCOUNT_IDENTITY = "_ACCOUNT"
 """Synthetic instrument identity for the account-level series (canon 11.2 precedent)."""
 
@@ -269,10 +354,6 @@ class SimulationFlow:
         account: Account,
         exchange: Exchange,
         constraints: tuple[Constraint, ...],
-        marks_for_occurrence: Callable[
-            [ValuationConfig, datetime, AccountSnapshot],
-            Mapping[str, Decimal] | tuple[SelectedMark, ...],
-        ],
         valuation_service: ValuationService | None = None,
     ) -> None:
         if not isinstance(frozen_run, FrozenRun):
@@ -300,8 +381,6 @@ class SimulationFlow:
             str(component.component_id) for component in declared
         ):
             raise ValueError("loaded constraints must preserve FrozenRun ConstraintSet identity")
-        if not callable(marks_for_occurrence):
-            raise TypeError("marks_for_occurrence must be callable")
         if valuation_service is not None and not isinstance(valuation_service, ValuationService):
             raise TypeError("valuation_service must be a ValuationService or None")
         self._frozen_run = frozen_run
@@ -312,8 +391,8 @@ class SimulationFlow:
         self._account = account
         self._exchange = exchange
         self._constraints = constraints
-        self._marks_for_occurrence = marks_for_occurrence
         self._valuation_service = valuation_service or ValuationService()
+        self._horizon: ExecutionHorizon | None = None
         initial = state.current.account
         if not isinstance(initial, AccountState):
             raise ValueError("state must begin with the frozen AccountState root")
@@ -500,18 +579,133 @@ class SimulationFlow:
         pending = self._state.current.pending_accepted_intent
         if pending is None:
             return None
-        if not isinstance(pending, AcceptedIntent):
-            raise TypeError("run state pending intent must be an AcceptedIntent")
+        if not isinstance(pending, (AcceptedIntent, PendingValuation)):
+            raise TypeError("run state pending must be an AcceptedIntent or PendingValuation")
         return DueExecutionEnvelope(pending.target.target_at, pending.pending_id)
 
     def _dispatch_due(self, due: DueExecutionEnvelope) -> DueExecutionTrace:
         pending = self._state.current.pending_accepted_intent
-        if not isinstance(pending, AcceptedIntent) or pending.pending_id != due.pending_id:
+        if (
+            not isinstance(pending, (AcceptedIntent, PendingValuation))
+            or pending.pending_id != due.pending_id
+        ):
             raise RuntimeError("pending intent changed while dispatching due execution")
-        result = self._execute_due(pending)
+        if isinstance(pending, PendingValuation):
+            result: object = self._value_due(pending)
+        else:
+            result = self._execute_due(pending)
         if self._state.current.pending_accepted_intent is not None:
             raise RuntimeError("due execution failed to consume its pending identity")
         return DueExecutionTrace(due, result, self._state.current)
+
+    def _value_due(self, pending: PendingValuation) -> object:
+        """Value the book at an execution instant that carried no orders.
+
+        Same instant, same snapshot, same prices an order would have been filled at -- only
+        without an order. The Account is not changed, so no version is consumed.
+        """
+        execution_input = self._frozen_run.execution_input
+        if execution_input is None:
+            raise RuntimeError("due valuation requires frozen execution input")
+        account_state = self._state.current.account
+        if not isinstance(account_state, AccountState):
+            raise RuntimeError("due valuation requires an AccountState root")
+        before = account_state.snapshot
+        held_instruments = tuple(before.positions)
+
+        snapshot = self._due_boundary(
+            stage=SimulationStage.DUE_SNAPSHOT,
+            cutoff=pending.target.target_at,
+            owner=execution_input,
+            family=SimulationFailureFamily.DATA,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: exact_execution_snapshot(
+                execution_input.table,
+                target_at=pending.target.target_at,
+                target_instruments=(),
+                held_instruments=held_instruments,
+                trade_price=pending.target.trade_price,
+            ),
+        )
+        selected_marks = self._due_boundary(
+            stage=SimulationStage.DUE_VALUATION_SELECTION,
+            cutoff=pending.target.target_at,
+            owner=self._frozen_run.valuation,
+            family=SimulationFailureFamily.VALUATION,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: _marks_from_execution_snapshot(
+                snapshot,
+                pending.target.target_at,
+                previous=account_state.latest_mark,
+                held=before.positions,
+            ),
+        )
+        mark = self._due_boundary(
+            stage=SimulationStage.DUE_VALUATION_MARK,
+            cutoff=pending.target.target_at,
+            owner=self._frozen_run.valuation,
+            family=SimulationFailureFamily.VALUATION,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._valuation_service.mark(before, selected_marks),
+        )
+        evidence = ValuationEvidence(
+            run_identity=self._frozen_run.identity,
+            agenda=self._frozen_run.strategy_agenda,
+            occurrence=pending.occurrence,
+            cutoff=pending.target.target_at,
+            valuation_config=self._frozen_run.valuation,
+            account=before,
+            marks=mark,
+            root_version=self._state.current.version,
+            account_version=before.version,
+        )
+        prepared_account = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._account.prepare_valuation(
+                account_state,
+                mark,
+                expected_version=before.version,
+                provenance=evidence,
+                marked_at=pending.target.target_at,
+                observed_at={
+                    selected.instrument_id: selected.observed_at for selected in selected_marks
+                },
+            ),
+        )
+        prepared_root = self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._state.prepare_valuation_only(
+                pending_id=pending.pending_id,
+                account=prepared_account,
+                mark=mark,
+                evidence=evidence,
+            ),
+        )
+        self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._account.commit_valuation(prepared_account),
+        )
+        self._due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._state.publish_valuation_only(prepared_root),
+        )
+        return evidence
 
     def _execute_due(self, pending: AcceptedIntent) -> DueExecutionResult:
         execution_input = self._frozen_run.execution_input
@@ -662,10 +856,13 @@ class SimulationFlow:
             owner=self._frozen_run.valuation,
             family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-            operation=lambda: self._marks_for_occurrence(
-                self._frozen_run.valuation,
+            # The venue already published these prices to fill against. Valuing the book at the
+            # same instant from the same rows is what makes the mark and the fill agree.
+            operation=lambda: _marks_from_execution_snapshot(
+                snapshot,
                 pending.target.target_at,
-                prepared_fill.next_snapshot,
+                previous=account_state.latest_mark,
+                held=prepared_fill.next_snapshot.positions,
             ),
         )
         mark = self._due_boundary(
@@ -687,6 +884,10 @@ class SimulationFlow:
             operation=lambda: self._account.prepare_mark(
                 prepared_fill,
                 mark,
+                marked_at=pending.target.target_at,
+                observed_at={
+                    selected.instrument_id: selected.observed_at for selected in selected_marks
+                },
                 provenance=ValuationEvidence(
                     run_identity=self._frozen_run.identity,
                     agenda=self._frozen_run.valuation_agenda,
@@ -784,17 +985,26 @@ class SimulationFlow:
             raise RuntimeError("Account mark root does not mirror Account authority")
         return root
 
+    def _committed_marks(self, state: AccountState) -> MarkBatch:
+        """The valuation the Account already committed, or an empty one before the first mark.
+
+        A run values its book where it executes. Between execution instants nothing about the
+        valuation can have changed, because no new price has been published to change it.
+        """
+        latest = state.latest_mark
+        if latest is None:
+            return self._valuation_service.mark(state.snapshot, ())
+        return latest.marks
+
     def _dispatch_valuation(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         state = self._state.current.account
         if not isinstance(state, AccountState):
             raise RuntimeError("valuation requires an AccountState root")
         account = state.snapshot
-        selected_marks = self._marks_for_occurrence(
-            self._frozen_run.valuation,
-            occurrence.evaluation_time,
-            account,
-        )
-        marks = self._valuation_service.mark(account, selected_marks)
+        # The book is valued where it is executed. A valuation occurrence reports the mark the
+        # Account already committed at the most recent execution instant rather than deriving a
+        # second valuation from a different price source, which would give one run two answers.
+        marks = self._committed_marks(state)
         evidence = ValuationEvidence(
             run_identity=self._frozen_run.identity,
             agenda=self._frozen_run.valuation_agenda,
@@ -821,12 +1031,9 @@ class SimulationFlow:
             if not isinstance(window, ModelWindow):
                 raise TypeError("constraint_window_for_occurrence must return a ModelWindow")
             projected = project_constraints(self._constraints, window)
-        selected_marks = self._marks_for_occurrence(
-            self._frozen_run.valuation,
-            occurrence.evaluation_time,
-            current,
-        )
-        marks = self._valuation_service.mark(current, selected_marks)
+        # Monitoring judges the account the run actually committed, so it reads the committed
+        # mark rather than valuing the book a second time.
+        marks = self._committed_marks(state)
         valuation_evidence = ValuationEvidence(
             run_identity=self._frozen_run.identity,
             agenda=self._frozen_run.monitoring_agenda,
@@ -937,9 +1144,17 @@ class SimulationFlow:
                 ),
                 data_owner=self._frozen_run.strategy_requirements,
             )
+            pending_valuation: PendingValuation | None = None
             if isinstance(result, NoDecision):
                 accepted: NoDecision | AcceptedIntent = result
                 intended = ()
+                # A NoDecision still reaches the execution instant, because the book is still
+                # worth something there and the venue still publishes prices for it.
+                pending_valuation = self._callback_intent_boundary(
+                    occurrence,
+                    self._frozen_run.execution_input,
+                    lambda: self._accept_valuation(occurrence),
+                )
             else:
                 intent = self._callback_intent_boundary(
                     occurrence, result, lambda: validate_economic_intent(result)
@@ -1003,6 +1218,7 @@ class SimulationFlow:
                     lifecycle,
                     recorder,
                     accepted,
+                    pending_valuation,
                 ),
                 family=SimulationFailureFamily.PUBLICATION,
                 owner=evidence,
@@ -1093,13 +1309,25 @@ class SimulationFlow:
         lifecycle: LifecycleTrace,
         recorder: InvocationRecorder,
         accepted: NoDecision | AcceptedIntent,
+        pending_valuation: PendingValuation | None = None,
     ) -> object:
         if isinstance(accepted, NoDecision):
+            if pending_valuation is None:
+                # Nothing to take: leave whatever the root already had pending untouched.
+                return self._state.prepare_callback(
+                    memory,
+                    payload,
+                    lifecycle=lifecycle,
+                    recorder=recorder,
+                )
+            # A NoDecision still carries a pending identity when an execution instant remains,
+            # so the occurrence reaches the venue's prices and values the book there.
             return self._state.prepare_callback(
                 memory,
                 payload,
                 lifecycle=lifecycle,
                 recorder=recorder,
+                pending_accepted_intent=pending_valuation,
             )
         return self._state.prepare_callback(
             memory,
@@ -1319,7 +1547,7 @@ class SimulationFlow:
         outside_universe = tuple(
             target.instrument_id
             for target in intent.targets
-            if target.instrument_id not in self._frozen_run.instruments
+            if target.instrument_id not in self._frozen_run.instrument_set
         )
         if outside_universe:
             raise ValueError(
@@ -1349,6 +1577,67 @@ class SimulationFlow:
                 raise RuntimeError("one callback observed multiple byte digests for one source")
         return tuple(IntentSourceRef(source_id, digest) for source_id, digest in actual.items())
 
+    def _execution_horizon(self, execution_input: object) -> ExecutionHorizon:
+        """Read the run's candidate execution instants once, not once per callback.
+
+        Built lazily so constructing a SimulationFlow still opens no physical source. The lower
+        bound is the frozen run start, which no decision can precede.
+        """
+        if self._horizon is None:
+            frozen = self._frozen_run
+            if frozen.end is None:
+                raise ValueError("an execution horizon requires a frozen run end")
+            start = frozen.start
+            if start is None:
+                raise ValueError("an execution horizon requires a frozen run start")
+            self._horizon = execution_input.fill.build_horizon(  # type: ignore[attr-defined]
+                execution_input,
+                start_time=start,
+                end_time=frozen.end,
+            )
+        return self._horizon
+
+    def _accept_valuation(self, occurrence: OperationOccurrence) -> PendingValuation | None:
+        """Bind a no-order occurrence to the execution instant it would have traded at.
+
+        Returns None when this occurrence must not take one, in which case the root's existing
+        pending is left exactly as it was:
+
+        - **An accepted intent is already pending.** It is waiting for its own due execution, and
+          that execution will value the book. Replacing it here would silently discard a decision
+          the Strategy already made and a fill that was going to happen.
+        - **The run declared no execution authority.** A research run that only exercises
+          callbacks never values against venue prices, so a NoDecision in it stays what it was.
+        - **No execution instant remains in the horizon.** There is nothing left to value
+          against, and a run ending on a NoDecision must still finalize.
+        """
+        if self._state.current.pending_accepted_intent is not None:
+            return None
+        frozen = self._frozen_run
+        execution_input = frozen.execution_input
+        if execution_input is None or frozen.end is None or frozen.start is None:
+            # A run declared without execution authority never values against venue prices. That
+            # is a legitimate configuration -- a research run that only exercises callbacks -- and
+            # a NoDecision in it stays exactly what it was.
+            return None
+        target = execution_input.fill.select_target(
+            execution_input,
+            decision_time=occurrence.evaluation_time,
+            end_time=self._frozen_run.end,
+            horizon=self._execution_horizon(execution_input),
+        )
+        if target is None:
+            return None
+        return PendingValuation(
+            occurrence=occurrence,
+            decision_time=occurrence.evaluation_time,
+            target=target,
+            valuation_id=uuid5(
+                _VALUATION_NAMESPACE,
+                f"{self._frozen_run.identity}|{occurrence.evaluation_time.isoformat()}",
+            ),
+        )
+
     def _accept_intent(
         self, intent: EconomicPortfolioIntent, occurrence: OperationOccurrence
     ) -> AcceptedIntent:
@@ -1359,6 +1648,7 @@ class SimulationFlow:
             execution_input,
             decision_time=occurrence.evaluation_time,
             end_time=self._frozen_run.end,
+            horizon=self._execution_horizon(execution_input),
         )
         if target is None:
             raise ValueError("no exact execution target exists within the run horizon")

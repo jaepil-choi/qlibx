@@ -5,10 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import chain
 from types import MappingProxyType
 from typing import Any
 
-from vqapr.account.account import PreparedAccountFill, PreparedAccountTransition
+from vqapr.account.account import (
+    PreparedAccountFill,
+    PreparedAccountTransition,
+    PreparedAccountValuation,
+)
 from vqapr.account.snapshot import AccountState
 from vqapr.domain.references import ModelStateRef
 from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
@@ -54,10 +59,20 @@ class AcceptedRunState:
     pending_accepted_intent: object = None
     lifecycle_trace: tuple[LifecycleTrace, ...] = ()
     recorder_manifests: tuple[RecorderManifest, ...] = ()
-    recorder_rows: Mapping[str, tuple[Mapping[str, object], ...]] = MappingProxyType({})
+    # Per table, the chunks appended by each accepted callback. Appending a chunk is O(new rows);
+    # re-wrapping the whole accumulated history on every root was O(all rows so far), which made
+    # total cost quadratic in run length. Readers see the flattened view through `recorder_rows`.
+    _recorder_chunks: Mapping[str, tuple[tuple[Mapping[str, object], ...], ...]] = MappingProxyType(
+        {}
+    )
     feedback: tuple[object, ...] = ()
     finalization: object = None
     model_state_commit_count: int = 0
+    # Refs a previous root already proved. A ModelStateRef is only ever minted by
+    # prepare_model_state, so re-deriving it for an already-proved ref re-proves nothing; it just
+    # re-serialises and re-hashes the entire accumulated history on every root. Defaulting to
+    # empty means a root built from outside this module is still verified in full.
+    _verified: frozenset[ModelStateRef] = frozenset()
 
     def __post_init__(self) -> None:
         if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 0:
@@ -73,7 +88,9 @@ class AcceptedRunState:
             raise ValueError("current_model_state_ref must be visible in this root")
         if set(self._payloads) != set(self._model_states):
             raise ValueError("payloads must be keyed by exactly the visible ModelStateRefs")
-        for ref, memory in self._model_states.items():
+        unverified = frozenset(self._model_states) - self._verified
+        for ref in unverified:
+            memory = self._model_states[ref]
             payload = self._payloads[ref]
             if not isinstance(payload, bytes):
                 _invalid_payload(ref)
@@ -83,7 +100,10 @@ class AcceptedRunState:
             self,
             "_model_states",
             MappingProxyType(
-                {ref: normalize_memory(memory) for ref, memory in self._model_states.items()}
+                {
+                    ref: memory if ref in self._verified else normalize_memory(memory)
+                    for ref, memory in self._model_states.items()
+                }
             ),
         )
         object.__setattr__(
@@ -96,15 +116,30 @@ class AcceptedRunState:
                 }
             ),
         )
+        # Everything visible in this root has now been proved, either by an earlier root or by
+        # the loop above.
+        object.__setattr__(self, "_verified", frozenset(self._model_states))
         object.__setattr__(
             self,
-            "recorder_rows",
+            "_recorder_chunks",
             MappingProxyType(
-                {
-                    name: tuple(MappingProxyType(dict(row)) for row in rows)
-                    for name, rows in self.recorder_rows.items()
-                }
+                {name: tuple(chunks) for name, chunks in self._recorder_chunks.items()}
             ),
+        )
+
+    @property
+    def recorder_rows(self) -> Mapping[str, tuple[Mapping[str, object], ...]]:
+        """The flattened rows every reader has always seen.
+
+        Rows are wrapped read-only once, where the chunk is appended, so flattening here only
+        concatenates references. The sole in-run consumer is `publish_run_record`, after the run;
+        everything else reads this in tests and showcases.
+        """
+        return MappingProxyType(
+            {
+                name: tuple(chain.from_iterable(chunks))
+                for name, chunks in self._recorder_chunks.items()
+            }
         )
 
     @property
@@ -214,19 +249,25 @@ class RunStateRepository:
         states[candidate.ref] = candidate.memory
         payloads = dict(root._payloads)
         payloads[candidate.ref] = candidate.payload
-        rows = dict(root.recorder_rows)
+        chunks = dict(root._recorder_chunks)
         manifests = root.recorder_manifests
         if recorder is not None:
             if not isinstance(recorder, InvocationRecorder):
                 raise TypeError("recorder must be an InvocationRecorder")
             staged_rows = recorder.staged_rows()
             for table_id, table_rows in staged_rows.items():
-                rows[table_id] = rows.get(table_id, ()) + table_rows
+                # staged_rows() already returned detached, normalized rows. Wrapping read-only
+                # happens once, here, instead of on every subsequent root.
+                chunk = tuple(MappingProxyType(row) for row in table_rows)
+                chunks[table_id] = (*chunks.get(table_id, ()), chunk)
             manifests = manifests + recorder.manifests()
         next_root = AcceptedRunState(
             version=root.version + 1,
             _model_states=states,
             _payloads=payloads,
+            # `candidate` came straight out of prepare_model_state, so its ref is proved by
+            # construction; the rest were proved by the root we are extending.
+            _verified=root._verified | {candidate.ref},
             current_model_state_ref=candidate.ref,
             account=root.account,
             pending_accepted_intent=(
@@ -236,7 +277,7 @@ class RunStateRepository:
             ),
             lifecycle_trace=(*root.lifecycle_trace, lifecycle),
             recorder_manifests=manifests,
-            recorder_rows=rows,
+            _recorder_chunks=chunks,
             feedback=root.feedback,
             finalization=root.finalization,
             model_state_commit_count=root.model_state_commit_count + 1,
@@ -288,6 +329,7 @@ class RunStateRepository:
                 version=root.version + 1,
                 _model_states=root._model_states,
                 _payloads=root._payloads,
+                _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
                 account=committed,
                 pending_accepted_intent=None,
@@ -296,7 +338,7 @@ class RunStateRepository:
                     LifecycleTrace(LifecycleKind.ACCOUNT_COMMITTED, evidence),
                 ),
                 recorder_manifests=root.recorder_manifests,
-                recorder_rows=root.recorder_rows,
+                _recorder_chunks=root._recorder_chunks,
                 feedback=root.feedback,
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
@@ -320,6 +362,7 @@ class RunStateRepository:
                 version=root.version + 1,
                 _model_states=root._model_states,
                 _payloads=root._payloads,
+                _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
                 account=account.next_state,
                 pending_accepted_intent=None,
@@ -328,7 +371,7 @@ class RunStateRepository:
                     LifecycleTrace(LifecycleKind.MARKED, evidence),
                 ),
                 recorder_manifests=root.recorder_manifests,
-                recorder_rows=root.recorder_rows,
+                _recorder_chunks=root._recorder_chunks,
                 feedback=root.feedback,
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
@@ -336,6 +379,51 @@ class RunStateRepository:
         )
 
     def publish_marked(self, prepared: PreparedRunState) -> AcceptedRunState:
+        return self._publish_infallible(prepared)
+
+    def prepare_valuation_only(
+        self,
+        *,
+        pending_id: str,
+        account: PreparedAccountValuation,
+        mark: MarkBatch,
+        evidence: object = None,
+    ) -> PreparedRunState:
+        """Publish a mark taken by an occurrence that requested no orders.
+
+        The Account did not change, so this consumes the pending identity and appends a mark
+        without an ACCOUNT_COMMITTED step. There is no fill to commit.
+        """
+        root = self._root
+        if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
+            raise RuntimeError("due completion pending identity does not match current pending")
+        if root.account is None or root.account != account.source:
+            raise RuntimeError("prepared Account valuation does not match current root")
+        if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
+            raise ValueError("mark must be the prepared Account mark batch")
+        return PreparedRunState(
+            root.version,
+            AcceptedRunState(
+                version=root.version + 1,
+                _model_states=root._model_states,
+                _payloads=root._payloads,
+                _verified=root._verified,
+                current_model_state_ref=root.current_model_state_ref,
+                account=account.next_state,
+                pending_accepted_intent=None,
+                lifecycle_trace=(
+                    *root.lifecycle_trace,
+                    LifecycleTrace(LifecycleKind.MARKED, evidence),
+                ),
+                recorder_manifests=root.recorder_manifests,
+                _recorder_chunks=root._recorder_chunks,
+                feedback=root.feedback,
+                finalization=root.finalization,
+                model_state_commit_count=root.model_state_commit_count,
+            ),
+        )
+
+    def publish_valuation_only(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
     def prepare_feedback(
@@ -350,6 +438,7 @@ class RunStateRepository:
                 version=root.version + 1,
                 _model_states=root._model_states,
                 _payloads=root._payloads,
+                _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
                 account=root.account,
                 pending_accepted_intent=None,
@@ -358,7 +447,7 @@ class RunStateRepository:
                     LifecycleTrace(LifecycleKind.FEEDBACK_PUBLISHED, evidence),
                 ),
                 recorder_manifests=root.recorder_manifests,
-                recorder_rows=root.recorder_rows,
+                _recorder_chunks=root._recorder_chunks,
                 feedback=(*root.feedback, *feedback),
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
@@ -420,12 +509,13 @@ class RunStateRepository:
                 version=root.version + 1,
                 _model_states=root._model_states,
                 _payloads=root._payloads,
+                _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
                 account=root.account,
                 pending_accepted_intent=None,
                 lifecycle_trace=root.lifecycle_trace,
                 recorder_manifests=root.recorder_manifests,
-                recorder_rows=root.recorder_rows,
+                _recorder_chunks=root._recorder_chunks,
                 feedback=root.feedback,
                 finalization=finalization,
                 model_state_commit_count=root.model_state_commit_count,

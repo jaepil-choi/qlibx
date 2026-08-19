@@ -1,6 +1,6 @@
 [project]
 name = "vqapr"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Point-in-time quantitative research and portfolio execution framework"
 readme = "README.md"
 authors = [

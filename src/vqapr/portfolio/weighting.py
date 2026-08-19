@@ -2,11 +2,15 @@
 
 Every function here is pure: same input, same output, no clock, no account, no I/O.
 
-**The sign always comes from the input; only the source of the magnitude differs.**
-``signal_weight`` sizes by ``|signal|``, ``equal_weight`` sizes everything the same, and
-``proportional_weight`` sizes by a supplied panel. All three return weights normalised to
-**gross one**. That is a unit, not a budget: without it the output is not a weight at all, just
-the signal again.
+**The sign always comes from the signal; only the magnitude differs.** ``signal_weight`` sizes by
+``|signal|``, ``proportional_weight`` scales that strength by a supplied panel, and
+``equal_weight`` discards the strength so every selected name is the same size. All three return
+weights normalised to **gross one**. That is a unit, not a budget: without it the output is not a
+weight at all, just the signal again.
+
+``proportional_weight`` is therefore ``signal_weight`` with a panel, and reduces to it when the
+panel is uniform. A caller who wants direction only reduces the signal to its sign first; making
+the function do that silently would have made it a second ``equal_weight``.
 
 The two halves guarantee different things, and they cannot both be exact when a division does not
 terminate:
@@ -115,7 +119,12 @@ def equal_weight(signal: Mapping[str, Decimal]) -> Weights:
 
 
 def proportional_weight(signal: Mapping[str, Decimal], sizes: Mapping[str, Decimal]) -> Weights:
-    """Size each position by a supplied magnitude panel, taking direction from the signal.
+    """Size each position by its signal **scaled by** a supplied magnitude panel.
+
+    This is ``signal_weight`` with a panel: a signal twice as strong still gets twice the weight,
+    and the panel scales that strength. Discarding the signal's magnitude here would collapse the
+    function onto ``equal_weight`` whenever the panel is uniform, and a caller who wants direction
+    only can say so explicitly by passing a sign-reduced signal.
 
     ``sizes`` is a magnitude such as market capitalisation, so it must be positive. Its own sign is
     never consulted; mixing a negative size with a signal sign would make the direction ambiguous.
@@ -133,8 +142,7 @@ def proportional_weight(signal: Mapping[str, Decimal], sizes: Mapping[str, Decim
             )
 
     sized = {
-        instrument: magnitudes[instrument].copy_sign(value) if value != 0 else Decimal(0)
-        for instrument, value in checked.items()
+        instrument: value * magnitudes[instrument] for instrument, value in checked.items()
     }
     return _normalise(sized, name="signal")
 

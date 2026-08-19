@@ -39,6 +39,10 @@ written.
 `proportional_weight` sizes by a supplied magnitude panel. All three take the **sign from the
 signal** and return gross one.
 
+> **Superseded by record 018.** "All three take the sign from the signal" was read as *only* the
+> sign, and `proportional_weight` was built that way — which made it identical to `equal_weight`
+> whenever the panel was uniform. It now scales the signal's strength by the panel.
+
 Two guarantees cannot both be exact when a division does not terminate, so they are split
 deliberately:
 

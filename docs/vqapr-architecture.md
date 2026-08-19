@@ -1195,13 +1195,17 @@ StrategyModel이 자기 판단 안에서 다른 run을 실행하지 않는다. �
 
 #### `weighting.py` — 배분
 
-부호는 항상 입력에서 오고, **크기의 출처**만 다르다.
+부호는 항상 signal에서 오고, **크기**만 다르다.
 
 | 함수 | 크기 | 외부 입력 |
 |---|---|---|
 | `signal_weight(signal)` | `\|signal\|`에 비례 | 없음 |
-| `equal_weight(signal)` | 균등 | 없음 |
-| `proportional_weight(signal, sizes)` | `sizes`에 비례 | 크기 panel |
+| `proportional_weight(signal, sizes)` | `signal × sizes`에 비례 | 크기 panel |
+| `equal_weight(signal)` | 균등 (크기를 버린다) | 없음 |
+
+`proportional_weight`는 **panel을 받는 `signal_weight`**이고, panel이 균일하면 `signal_weight`로
+환원된다. 방향만 쓰고 싶으면 signal을 부호로 먼저 줄여서 넘긴다 — 함수가 그걸 몰래 하면
+`equal_weight`가 두 개가 된다.
 
 셋 다 **총노출 1로 정규화된** 비중을 낸다(`Σ\|w\| = 1`). 이건 예산 선언이 아니라 **단위**다 — 정규화하지
 않으면 그건 비중이 아니라 그냥 signal이다.
@@ -1302,7 +1306,7 @@ $$\textbf{순매수} \;=\; \textbf{현재 현금} - \textbf{목표 현금}$$
 
 - **그래서 clipping은 예외 상황이 아니다.** 매 리밸런싱에 어느 정도 일어나는 것이 정상이고, §6.1이 규칙을
   명시해야 하는 이유도 그것이다.
-- 이 항등식은 **weight target일 때만** 성립한다. quantity target은 §5.4를 본다.
+- 목표는 언제나 weight이므로 이 항등식은 모든 intent에 성립한다(§5.4).
 
 `weighting`과 `optimize`는 복잡도만 다른 같은 계열이다. 전자는 제약 없는 배분, 후자는 제약 하 배분이다.
 
@@ -1431,10 +1435,13 @@ class PortfolioIntent(BaseModel):
 이 표는 의미를 고정할 뿐 public class를 둘로 만들라는 요구가 아니다. 이후 “accepted intent”와 “pending
 intent”는 두 번째 phase를 뜻한다.
 
-- `PortfolioTarget`은 weight **또는** quantity 중 정확히 하나. 둘 다 채우거나 비우면 validation error.
-- **두 종류는 가격 변동에 대한 성질이 다르다.** weight target은 체결 시점 NAV에 적용되므로 §5.3의 항등식이
-  성립하고 갭이 상쇄된다. **quantity target은 금액이 아니라 수량을 고정하므로 갭 노출이 남는다** — 가격이
-  오르면 더 많은 현금이 필요하다. 결함이 아니라 *"정확히 이만큼 보유하고 싶다"*는 그 target의 의미다.
+- `PortfolioTarget`은 **weight 하나뿐이다.** 수량으로는 선언할 수 없다.
+- **왜 수량이 없나**: callback은 체결 가격도 NAV도 볼 수 없다(§2.2, `StrategyModelContext`는 `occurrence`,
+  `window`, `account`, `constraint_bounds`만 준다). 그래서 전략이 수량을 말하려면 **이전 시점 가격으로**
+  환산해야 하는데, 그 수량은 체결 시점에 이미 틀린 값이다. 목표를 수량으로 고정하면 `cash_target`도
+  `수량 × 체결가 / NAV`와 정확히 일치해야 하므로, 가격이 조금만 움직여도 batch 전체가 거부된다.
+  **비중은 그 문제가 없다** — 체결 시점 NAV에 적용되므로 §5.3의 항등식이 성립하고 갭이 상쇄된다.
+- 수량 환산은 `plan_orders`가 체결 가격으로 **한 번만** 한다(§6.1). 그것이 그 함수의 존재 이유다.
 - **`cash_target`은 유도하지 않는다.** `1 - Σw`로 계산되는 값이 아니라 §5.3이 결정한 값이다.
   **의도된 현금 포지션**(무위험자산 보유)과 **배분하지 못한 잔여**는 선언한 현금 범위의 폭으로 구분된다
   (PRD §5.5).
@@ -1637,9 +1644,10 @@ def plan_orders(intent, account: AccountSnapshot,
 > 우리는 우회할 방법이 없다. Strategy callback에서 decision으로 반환할 수 있는 것은 `PortfolioIntent` 하나이고, 전략이
 > Exchange를 볼 수 없으므로(§2.2) 변환할 재료가 없다. **§2.2의 결과이지 독립된 설계가 아니다.**
 >
-> **그리고 갈라놓은 대상은 비중이냐 수량이냐가 아니다.** 목표는 수량으로도 선언할 수 있다(§5.4).
-> 갈라놓은 것은 **델타를 언제 계산하는가**다 — 목표는 체결 시점의 포트폴리오에 대한 진술인데, 판단
-> 시점의 계좌는 이전 가격으로 평가되어 있다.
+> **갈라놓은 것은 델타를 언제 계산하는가다.** 목표는 체결 시점의 포트폴리오에 대한 진술인데, 판단
+> 시점의 계좌는 이전 가격으로 평가되어 있다. 그래서 전략은 **비중으로만** 말하고(§5.4), 그 비중이
+> 몇 주인지는 체결 가격이 정해진 뒤 `plan_orders`가 계산한다. 전략이 수량을 직접 말하게 하면 이 분리가
+> 무너진다 — 이전 가격으로 계산한 수량을 체결 시점에 그대로 쓰는 것이기 때문이다.
 >
 > nautilus는 분리하지 않는다. 판단과 제출 사이에 간격이 없고, 단위가 목표 포트폴리오가 아니라 **주문**이라
 > 100주에서 150주로 갈 때 전략이 50주 매수를 직접 만든다. 델타라는 파생값 자체가 없다.

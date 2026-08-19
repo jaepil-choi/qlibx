@@ -103,6 +103,47 @@ def test_proportional_weight_takes_direction_from_the_signal_not_the_panel(
         assert (weights[name] > 0) is (index % 2 == 0)
 
 
+def test_proportional_weight_keeps_the_signal_strength(closes: dict[str, Decimal]) -> None:
+    """A signal twice as strong gets twice the weight for the same panel entry."""
+    names = sorted(closes)[:2]
+    panel = dict.fromkeys(names, Decimal("100"))
+    weights = proportional_weight({names[0]: Decimal("3"), names[1]: Decimal("1")}, panel)
+
+    assert weights[names[0]] == weights[names[1]] * 3
+
+
+def test_proportional_weight_reduces_to_signal_weight_on_a_uniform_panel(
+    closes: dict[str, Decimal],
+) -> None:
+    """The panel scales the signal; it does not replace it.
+
+    Collapsing onto ``equal_weight`` here would make the function a duplicate of one that
+    already exists, and would silently discard the strength the caller supplied.
+    """
+    signal = {"A": Decimal("3"), "B": Decimal("-1"), "C": Decimal("1")}
+    uniform = dict.fromkeys(signal, Decimal("100"))
+
+    assert proportional_weight(signal, uniform) == signal_weight(signal)
+
+
+def test_proportional_weight_takes_direction_only_from_a_sign_reduced_signal(
+    closes: dict[str, Decimal],
+) -> None:
+    """Direction-only sizing stays available by composing, not by a hidden rule."""
+    signal = {"A": Decimal("3"), "B": Decimal("-1"), "C": Decimal("1")}
+    panel = {"A": Decimal("300"), "B": Decimal("100"), "C": Decimal("50")}
+    sign_only = {
+        name: (Decimal(0) if value == 0 else Decimal(1).copy_sign(value))
+        for name, value in signal.items()
+    }
+
+    weights = proportional_weight(sign_only, panel)
+
+    gross = sum(panel.values(), Decimal(0))
+    assert weights["A"] == panel["A"] / gross
+    assert weights["B"] == -panel["B"] / gross
+
+
 def test_proportional_weight_refuses_a_panel_that_carries_direction() -> None:
     with pytest.raises(WeightingRefusal, match="must be positive"):
         proportional_weight({"A": Decimal("1")}, {"A": Decimal("-100")})

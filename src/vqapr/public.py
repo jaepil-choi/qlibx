@@ -96,6 +96,7 @@ from vqapr.runtime.agendas import (
     OperationOccurrence,
     OperationRole,
 )
+from vqapr.testing.conformance import conformance
 from vqapr.transforms.cross_section import (
     demean,
     quantile_buckets,
@@ -192,6 +193,7 @@ __all__ = (
     "apply_causal",
     "callback_evidence",
     "component_ref",
+    "conformance",
     "decay",
     "declare_local_instant",
     "demean",

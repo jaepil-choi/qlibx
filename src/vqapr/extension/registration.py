@@ -4,25 +4,25 @@
 is named by a `ComponentRef`, checked, and registered the same way whichever kind it is. That is
 one function here, specialised per kind by which loader proves it.
 
-The load is the point. Recording a fingerprint alone lets a broken component register cleanly and
+The check is the point. Recording a fingerprint alone lets a broken component register cleanly and
 fail in the middle of a run, where the reported stage names the run rather than the registration
 that actually caused it.
+
+**Registration runs the conformance suite, it does not reimplement it.** Canon 10.2 requires
+`pytest`, `vqapr check` and `vqapr register` to call the same conformance code, so there is one
+implementation in `testing/conformance/` and this is one of its entrances. A component cannot pass
+here and fail there.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.extension.loading import (
-    load_constraint,
-    load_data_model,
-    load_exchange,
-    load_strategy_model,
-)
+from vqapr.testing.conformance import conformance
 from vqapr.workspace import Workspace
 
 _STAGE = "component.register"
@@ -52,13 +52,12 @@ def _register(
     *,
     kind: ComponentKind,
     label: str,
-    load: Callable[[ComponentRef], object],
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
-    """Fingerprint the source, prove the object loads, then persist the reference.
+    """Fingerprint the source, prove the component conforms, then persist the reference.
 
-    Nothing is written until the load succeeds, so a workspace never holds a reference to a
-    component that cannot be constructed.
+    Nothing is written until conformance passes, so a workspace never holds a reference to a
+    component Flow could not call.
     """
     target = Path(path).resolve()
     try:
@@ -78,7 +77,7 @@ def _register(
         config=config,
         fingerprint=fingerprint,
     )
-    load(ref)
+    conformance(ref, project_root=project_root).raise_if_failed()
     Workspace.create(project_root).register_component(ref)
     return ref
 
@@ -99,7 +98,6 @@ def register_data_model(
         object_name,
         kind=ComponentKind.DATA_MODEL,
         label="DataModel",
-        load=load_data_model,
         config=config,
     )
 
@@ -120,7 +118,6 @@ def register_strategy_model(
         object_name,
         kind=ComponentKind.STRATEGY_MODEL,
         label="StrategyModel",
-        load=load_strategy_model,
         config=config,
     )
 
@@ -146,7 +143,6 @@ def register_constraint(
         object_name,
         kind=ComponentKind.CONSTRAINT,
         label="Constraint",
-        load=load_constraint,
         config=config,
     )
 
@@ -173,6 +169,5 @@ def register_exchange(
         object_name,
         kind=ComponentKind.EXCHANGE,
         label="Exchange",
-        load=load_exchange,
         config=config,
     )

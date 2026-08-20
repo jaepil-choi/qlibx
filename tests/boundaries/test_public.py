@@ -238,6 +238,7 @@ def test_public_exports_are_fixed() -> None:
         "apply_causal",
         "callback_evidence",
         "component_ref",
+        "conformance",
         "decay",
         "declare_local_instant",
         "demean",

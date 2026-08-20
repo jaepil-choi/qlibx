@@ -71,7 +71,7 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         "        return None\n"
         "    def validate_intended(self, intent, bounds):\n"
         "        return None\n"
-        "    def evaluate(self, account, marks):\n"
+        "    def evaluate(self, window, account, marks, bounds):\n"
         "        return None\n"
     )
     path.write_text(
@@ -501,7 +501,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         "        return None\n"
         "    def validate_intended(self, intent, bounds):\n"
         "        return None\n"
-        "    def evaluate(self, account, marks):\n"
+        "    def evaluate(self, window, account, marks, bounds):\n"
         "        return None\n",
         encoding="utf-8",
     )

@@ -308,7 +308,11 @@ def test_the_defaults_need_no_declaration() -> None:
     """Both default tables are package-owned specs, not something a Strategy supplies."""
     from vqapr.flow.simulation import DEFAULT_TABLES
 
-    assert {spec.table_id for spec in DEFAULT_TABLES} == {"vqapr.weight", "vqapr.account"}
+    assert {spec.table_id for spec in DEFAULT_TABLES} == {
+        "vqapr.weight",
+        "vqapr.account",
+        "vqapr.fill",
+    }
     for spec in DEFAULT_TABLES:
         assert "instrument" in spec.fields, "every default row is keyed by instrument"
     # The account table carries the valuation the Account already committed, not one invented at

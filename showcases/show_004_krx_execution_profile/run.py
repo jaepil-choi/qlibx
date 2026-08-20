@@ -370,27 +370,28 @@ def _profile_outcome(result: Any) -> dict[str, Any]:
     tax = Decimal("0")
     dealt = 0
     traded_notional = Decimal("0")
-    for entry in account.fill_history:
-        fill = entry.fill
-        if fill.dealt_quantity == 0:
+    for row in _recorded_fills(result):
+        if Decimal(row["dealt_quantity"]) == 0:
             continue
         dealt += 1
-        commission += fill.cost.commission
-        tax += fill.cost.tax
-        traded_notional += fill.notional
+        commission += Decimal(row["commission"] or 0)
+        tax += Decimal(row["tax"] or 0)
+        # Notional is a derived value, so the record carries its two factors instead.
+        traded_notional += abs(Decimal(row["dealt_quantity"])) * Decimal(row["price"])
 
     replay_cash = INITIAL_CASH
     replay_positions: dict[str, Decimal] = {}
-    for entry in account.fill_history:
-        fill = entry.fill
-        if fill.dealt_quantity == 0:
+    for row in _recorded_fills(result):
+        if Decimal(row["dealt_quantity"]) == 0:
             continue
-        replay_cash += fill.cash_delta
-        held = replay_positions.get(fill.instrument_id, Decimal("0")) + fill.dealt_quantity
+        replay_cash += Decimal(row["cash_delta"])
+        held = replay_positions.get(str(row["instrument"]), Decimal("0")) + Decimal(
+            row["dealt_quantity"]
+        )
         if held == 0:
-            replay_positions.pop(fill.instrument_id, None)
+            replay_positions.pop(str(row["instrument"]), None)
         else:
-            replay_positions[fill.instrument_id] = held
+            replay_positions[str(row["instrument"])] = held
     if replay_cash != account.snapshot.cash:
         raise AssertionError(f"cash replay {replay_cash} != committed {account.snapshot.cash}")
     if replay_positions != dict(account.snapshot.positions):
@@ -451,6 +452,16 @@ differ only by the registered Exchange component.</p>
 sides, 20bp sale tax on sells, trades whole shares only and refuses short positions. Neither
 profile models price ticks, price limits, queue position, liquidity or borrow.</p>
 <p>Verified against {VERIFIED_AGAINST}; last verified {LAST_VERIFIED_AT}.</p>"""
+
+
+def _recorded_fills(result: Any) -> list[dict[str, Any]]:
+    """Every committed fill, from the run's own published record.
+
+    The Account no longer carries the whole journal -- it is published to ``vqapr.fill`` and
+    dropped -- so replaying its arithmetic reads the record. Rows arrive in commit order, which is
+    the order the Account applied them.
+    """
+    return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
 
 
 def main() -> None:

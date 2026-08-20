@@ -75,10 +75,10 @@ class PreparedAccountTransition:
             raise TypeError("next_state must be an AccountState")
         if self.next_state.snapshot != self.fill.next_snapshot:
             raise ValueError("next_state must publish the prepared fill snapshot")
-        if self.next_state.fill_history != (
-            *self.fill.source.fill_history,
-            *self.fill.journal_entries,
-        ):
+        # The journal is published to vqapr.fill and then dropped, so a committed state carries
+        # the entries this commit produced rather than every entry the run ever made. What must
+        # hold is that it carries exactly those and nothing invented.
+        if tuple(self.next_state.fill_history) != tuple(self.fill.journal_entries):
             raise ValueError("next_state must contain exactly the prepared fill history")
         if not _appends_one_mark(self.fill.source.mark_history, self.next_state.mark_history):
             raise ValueError("next_state must preserve the published mark history")
@@ -273,7 +273,7 @@ class Account:
             next_state=AccountState(
                 snapshot=fill.next_snapshot,
                 mark_history=(*fill.source.mark_history, mark)[-self._retained_marks :],
-                fill_history=(*fill.source.fill_history, *fill.journal_entries),
+                fill_history=tuple(fill.journal_entries),
             ),
         )
 
@@ -336,7 +336,7 @@ class Account:
         self._state = AccountState(
             snapshot=prepared.next_snapshot,
             mark_history=prepared.source.mark_history,
-            fill_history=(*prepared.source.fill_history, *prepared.journal_entries),
+            fill_history=tuple(prepared.journal_entries),
         )
         return self._state
 

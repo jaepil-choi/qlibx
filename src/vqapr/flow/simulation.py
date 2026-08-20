@@ -326,6 +326,20 @@ DEFAULT_TABLES = (
         f"{DEFAULT_TABLE_PREFIX}account",
         ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
     ),
+    TableSpec(
+        f"{DEFAULT_TABLE_PREFIX}fill",
+        (
+            "instrument",
+            "account_version",
+            "requested_quantity",
+            "dealt_quantity",
+            "price",
+            "cash_delta",
+            "commission",
+            "tax",
+            "reason",
+        ),
+    ),
 )
 """What every run records without the Strategy asking.
 

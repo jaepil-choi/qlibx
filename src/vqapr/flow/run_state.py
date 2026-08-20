@@ -175,6 +175,43 @@ class PreparedRunState:
 
 _UNSET = object()
 
+_FILL_TABLE = "vqapr.fill"
+"""Package-owned, fixed-schema record of every committed fill.
+
+Canon 9.1 forbids a *free-form* recorder at the execution stage, because two ways to state the
+same fact leaves a reader not knowing which to trust. This is the opposite: one fixed schema the
+package writes itself, from the journal entries the Account already committed. It exists so the
+fill journal can be published and then dropped from memory rather than carried for the whole run.
+"""
+
+
+def _fill_rows(entries: tuple[object, ...]) -> tuple[Mapping[str, object], ...]:
+    """One row per committed fill, including zero-dealt ones.
+
+    A refused fill is a market fact the run has to be able to show afterwards, so it is recorded
+    with its reason rather than filtered out here.
+    """
+    rows = []
+    for entry in entries:
+        fill = entry.fill
+        cost = fill.cost
+        rows.append(
+            MappingProxyType(
+                {
+                    "instrument": str(fill.instrument_id),
+                    "account_version": int(entry.version),
+                    "requested_quantity": str(fill.requested_quantity),
+                    "dealt_quantity": str(fill.dealt_quantity),
+                    "price": None if fill.price is None else str(fill.price),
+                    "cash_delta": str(fill.cash_delta),
+                    "commission": None if cost is None else str(cost.commission),
+                    "tax": None if cost is None else str(cost.tax),
+                    "reason": None if fill.reason is None else str(fill.reason),
+                }
+            )
+        )
+    return tuple(rows)
+
 
 def _invalid_payload(ref: ModelStateRef) -> bytes:
     raise TypeError(f"payload for {ref.digest} must be bytes")
@@ -320,9 +357,16 @@ class RunStateRepository:
             raise RuntimeError("prepared Account fill does not match current root")
         committed = AccountState(
             snapshot=account.next_snapshot,
+            # Published, not retained. The journal entries this commit produced go into the
+            # vqapr.fill chunk below and the account keeps only them, so fill_history stops
+            # growing for the life of the run while every fill still reaches parquet.
             mark_history=account.source.mark_history,
-            fill_history=(*account.source.fill_history, *account.journal_entries),
+            fill_history=tuple(account.journal_entries),
         )
+        chunks = dict(root._recorder_chunks)
+        rows = _fill_rows(account.journal_entries)
+        if rows:
+            chunks[_FILL_TABLE] = (*chunks.get(_FILL_TABLE, ()), rows)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -338,7 +382,7 @@ class RunStateRepository:
                     LifecycleTrace(LifecycleKind.ACCOUNT_COMMITTED, evidence),
                 ),
                 recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=root._recorder_chunks,
+                _recorder_chunks=chunks,
                 feedback=root.feedback,
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,

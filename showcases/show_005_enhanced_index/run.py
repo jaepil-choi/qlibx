@@ -504,23 +504,25 @@ def _replay(result: Any) -> dict[str, Any]:
     tax = Decimal(0)
     dealt = 0
     refused: dict[str, int] = {}
-    for entry in account.fill_history:
-        fill = entry.fill
-        if fill.dealt_quantity == 0:
+    for row in _recorded_fills(result):
+        if Decimal(row["dealt_quantity"]) == 0:
             # An order was planned and the venue would not fill it. The Strategy could not have
             # known: tradability is an execution-time fact. The position simply stays put.
-            if fill.reason is ZeroDealtReason.NONTRADABLE and fill.requested_quantity != 0:
-                refused[fill.instrument_id] = refused.get(fill.instrument_id, 0) + 1
+            if (
+                row["reason"] == str(ZeroDealtReason.NONTRADABLE)
+                and Decimal(row["requested_quantity"]) != 0
+            ):
+                refused[str(row["instrument"])] = refused.get(str(row["instrument"]), 0) + 1
             continue
         dealt += 1
-        cash += fill.cash_delta
-        commission += fill.cost.commission
-        tax += fill.cost.tax
-        held = positions.get(fill.instrument_id, Decimal(0)) + fill.dealt_quantity
+        cash += Decimal(row["cash_delta"])
+        commission += Decimal(row["commission"] or 0)
+        tax += Decimal(row["tax"] or 0)
+        held = positions.get(str(row["instrument"]), Decimal(0)) + Decimal(row["dealt_quantity"])
         if held == 0:
-            positions.pop(fill.instrument_id, None)
+            positions.pop(str(row["instrument"]), None)
         else:
-            positions[fill.instrument_id] = held
+            positions[str(row["instrument"])] = held
 
     snapshot = account.snapshot
     if cash != snapshot.cash:
@@ -598,6 +600,16 @@ def _monitoring(result: Any) -> dict[str, Any]:
 def _memory(result: Any) -> dict[str, Any]:
     state = result.final_state
     return dict(state.load_model_state(state.current_model_state_ref) or {})
+
+
+def _recorded_fills(result: Any) -> list[dict[str, Any]]:
+    """Every committed fill, from the run's own published record.
+
+    The Account no longer carries the whole journal -- it is published to ``vqapr.fill`` and
+    dropped -- so replaying its arithmetic reads the record. Rows arrive in commit order, which is
+    the order the Account applied them.
+    """
+    return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
 
 
 def _digest(path: Path) -> str:

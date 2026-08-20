@@ -405,6 +405,16 @@ td:first-child,th:first-child{{text-align:left}}
 <p>Verified against {VERIFIED_AGAINST}; last verified {LAST_VERIFIED_AT}.</p>"""
 
 
+def _recorded_fills(result: Any) -> list[dict[str, Any]]:
+    """Every committed fill, from the run's own published record.
+
+    The Account no longer carries the whole journal -- it is published to ``vqapr.fill`` and
+    dropped -- so replaying its arithmetic reads the record. Rows arrive in commit order, which is
+    the order the Account applied them.
+    """
+    return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
+
+
 def main() -> None:
     _reset_outputs()
     fixture = extract(SPEC, INPUTS)
@@ -524,17 +534,16 @@ def main() -> None:
         lifecycle[entry.kind.value] = lifecycle.get(entry.kind.value, 0) + 1
 
     dealt: list[dict[str, Any]] = []
-    for entry in account.fill_history:
-        fill = entry.fill
-        if fill.dealt_quantity == 0:
+    for row in _recorded_fills(result):
+        if Decimal(row["dealt_quantity"]) == 0:
             continue
         dealt.append(
             {
-                "account_version": entry.version,
-                "instrument": fill.instrument_id,
-                "dealt_quantity": str(fill.dealt_quantity),
-                "price": str(fill.price),
-                "side": "BUY" if fill.dealt_quantity > 0 else "SELL",
+                "account_version": int(row["account_version"]),
+                "instrument": str(row["instrument"]),
+                "dealt_quantity": str(Decimal(row["dealt_quantity"])),
+                "price": str(Decimal(row["price"])),
+                "side": "BUY" if Decimal(row["dealt_quantity"]) > 0 else "SELL",
             }
         )
 
@@ -557,16 +566,17 @@ def main() -> None:
     # Independent replay of Account arithmetic from the published fill journal alone.
     replay_cash = Decimal("1000000000")
     replay_positions: dict[str, Decimal] = {}
-    for entry in account.fill_history:
-        fill = entry.fill
-        if fill.dealt_quantity == 0:
+    for row in _recorded_fills(result):
+        if Decimal(row["dealt_quantity"]) == 0:
             continue
-        replay_cash -= fill.dealt_quantity * fill.price
-        held = replay_positions.get(fill.instrument_id, Decimal("0")) + fill.dealt_quantity
+        replay_cash -= Decimal(row["dealt_quantity"]) * Decimal(row["price"])
+        held = replay_positions.get(str(row["instrument"]), Decimal("0")) + Decimal(
+            row["dealt_quantity"]
+        )
         if held == 0:
-            replay_positions.pop(fill.instrument_id, None)
+            replay_positions.pop(str(row["instrument"]), None)
         else:
-            replay_positions[fill.instrument_id] = held
+            replay_positions[str(row["instrument"])] = held
     if replay_cash != account.snapshot.cash:
         raise AssertionError(f"cash replay {replay_cash} != committed {account.snapshot.cash}")
     if replay_positions != dict(account.snapshot.positions):

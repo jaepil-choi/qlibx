@@ -150,6 +150,54 @@ class LocalInstantDeclaration:
         )
 
 
+def declare_local_instant(
+    local_date: date, local_time: time, timezone: str
+) -> LocalInstantDeclaration:
+    """Resolve a wall time in a zone into a declaration, deriving its fold and offset.
+
+    `LocalInstantDeclaration` requires `fold` and `offset` because a wall time alone does not
+    identify an instant: on a DST fall-back day the same clock reading happens twice. Requiring
+    them is right for a stored declaration, whose whole purpose is to reproduce one instant.
+
+    It is wrong as something a caller types. A caller writing `0` and `"+09:00"` by hand is
+    stating a fact about a zone rather than looking it up, and that is correct until the venue
+    observes DST -- after which it is wrong twice a year and the declaration still validates on
+    every other day.
+
+    So this derives them, and refuses what cannot be derived:
+
+    - a wall time that **does not exist** (spring forward) has no instant to name
+    - a wall time that happens **twice** (fall back) needs the caller to say which, because
+      guessing would silently pick one
+    """
+    zone = _zone(timezone)
+    naive = datetime.combine(local_date, local_time)
+    resolved = []
+    for fold in (0, 1):
+        candidate = naive.replace(tzinfo=zone, fold=fold)
+        round_trip = candidate.astimezone(UTC).astimezone(zone)
+        if round_trip.replace(tzinfo=None) == naive and round_trip.fold == fold:
+            resolved.append(candidate)
+    if not resolved:
+        raise ValueError(
+            f"local wall time {naive.isoformat()} does not exist in {timezone}; "
+            "the clock skips it"
+        )
+    if len(resolved) > 1:
+        raise ValueError(
+            f"local wall time {naive.isoformat()} occurs twice in {timezone}; "
+            "declare the LocalInstantDeclaration directly with the fold you mean"
+        )
+    candidate = resolved[0]
+    return LocalInstantDeclaration(
+        local_date,
+        local_time,
+        timezone,
+        candidate.fold,
+        _format_offset(candidate.utcoffset() or timedelta()),
+    )
+
+
 def shift_calendar(
     value: datetime,
     *,

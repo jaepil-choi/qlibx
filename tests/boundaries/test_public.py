@@ -239,6 +239,7 @@ def test_public_exports_are_fixed() -> None:
         "callback_evidence",
         "component_ref",
         "decay",
+        "declare_local_instant",
         "demean",
         "drawdown",
         "drop_missing",

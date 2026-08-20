@@ -11,12 +11,16 @@ import hashlib
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.domain.identifiers import AgendaId, OccurrenceId
-from vqapr.domain.timestamps import LocalInstantDeclaration, require_tz_aware
+from vqapr.domain.timestamps import (
+    LocalInstantDeclaration,
+    declare_local_instant,
+    require_tz_aware,
+)
 
 
 class OperationRole(StrEnum):
@@ -186,4 +190,78 @@ class OperationAgenda:
             timezone=timezone,
             occurrences=tuple(occurrences),
             provenance=provenance,
+        )
+
+    @classmethod
+    def daily(
+        cls,
+        *,
+        agenda_id: AgendaId,
+        role: OperationRole,
+        sessions: Iterable[datetime | date],
+        at: time,
+        timezone: str,
+        provenance: str | None = None,
+    ) -> OperationAgenda:
+        """One occurrence per session, at the same venue-local wall time.
+
+        `from_occurrences` is the constructor for an agenda whose occurrences are already known.
+        The common case is not a list -- it is "every session this registered dataset has, at
+        08:00 local", and turning one into the other is mechanical work that was being written by
+        hand at every call site.
+
+        Three things stop being the caller's to get right:
+
+        - **The occurrence id.** Derived as ``{agenda_id}-{date}``. Two call sites inventing
+          slightly different id schemes produce different identities for the same session, and a
+          replay stops being comparable to the run it replays.
+        - **fold and offset.** Derived from the zone rather than typed as constants. A hand-written
+          ``0`` and ``"+09:00"`` is correct until the venue observes DST, after which it is wrong
+          twice a year and right on every day anyone tests.
+        - **Duplicate sessions.** A dataset can carry several rows for one day; the agenda takes
+          the day once.
+
+        `sessions` accepts datetimes, so the sessions a dataset actually has can be passed
+        straight through from ``Workspace.evaluation_times``. Only their venue-local date is used:
+        the time of day comes from ``at``, because when a row became available and when a decision
+        is made are different facts.
+
+        A wall time that does not exist, or happens twice, on any session is refused rather than
+        resolved by guess. Declare those days through `from_occurrences`.
+        """
+        zone = ZoneInfo(timezone)
+        days: list[date] = []
+        seen: set[date] = set()
+        for session in sessions:
+            if isinstance(session, datetime):
+                day = (
+                    session.astimezone(zone).date()
+                    if session.tzinfo is not None
+                    else session.date()
+                )
+            elif isinstance(session, date):
+                day = session
+            else:
+                raise TypeError("sessions must contain datetime or date values")
+            if day not in seen:
+                seen.add(day)
+                days.append(day)
+        occurrences = tuple(
+            OperationOccurrence(
+                f"{agenda_id}-{day.isoformat()}",
+                role,
+                declare_local_instant(day, at, timezone),
+            )
+            for day in sorted(days)
+        )
+        return cls(
+            agenda_id=agenda_id,
+            role=role,
+            timezone=timezone,
+            occurrences=occurrences,
+            provenance=(
+                provenance
+                if provenance is not None
+                else f"{len(occurrences)} sessions at {at.isoformat()} {timezone}"
+            ),
         )

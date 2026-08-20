@@ -32,7 +32,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.timestamps import LocalInstantDeclaration, declare_local_instant
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
@@ -193,6 +193,7 @@ __all__ = (
     "callback_evidence",
     "component_ref",
     "decay",
+    "declare_local_instant",
     "demean",
     "drawdown",
     "drop_missing",

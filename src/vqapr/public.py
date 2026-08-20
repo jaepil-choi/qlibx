@@ -49,7 +49,12 @@ from vqapr.exchange.venues.krx import KrxExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
-from vqapr.extension.registration import register_data_model, register_strategy_model
+from vqapr.extension.registration import (
+    register_constraint,
+    register_data_model,
+    register_exchange,
+    register_strategy_model,
+)
 from vqapr.flow.materialize import (
     AllocationPublicationResult,
     AllocationPublicationSpec,
@@ -209,8 +214,10 @@ __all__ = (
     "rank_information_coefficient",
     "register_agenda",
     "register_component",
+    "register_constraint",
     "register_data_model",
     "register_dataset",
+    "register_exchange",
     "register_execution_input",
     "register_monitoring_policy",
     "register_strategy_config",

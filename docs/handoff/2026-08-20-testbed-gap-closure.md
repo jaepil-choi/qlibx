@@ -1,14 +1,34 @@
 # Handoff — closing the gaps the testbed exposed
 
 Status: in_progress
-Branch: `jaepil-develop` · last commit `43ca56f` · **tree is green: 584 passed, ruff clean**
-**Nothing is uncommitted.** B7 and A3 are done; the next person starts at B8.
+Branch: `jaepil-develop` · last commit `85649a5` · **tree is green: 586 passed, ruff clean**
+**Nothing is uncommitted.** B7, A3 and B8 are closed. **B8 was withdrawn as a false finding** —
+read the correction below before acting on any earlier copy of it.
 
 Written because the session kept dropping mid-task. Everything below is verified, not remembered.
 
 ---
 
-## Read this first: two review claims are false
+## Read this first: three false claims, and one of them was mine
+
+**B8 — "a registered dataset cannot be used as an execution table … 3,302,492 rows duplicated on
+disk. Largest single waste left." This was wrong, and I wrote it.** The duplication is the design,
+not waste.
+
+The column renaming is not the reason for the copy. `ExecutionTableSpec` takes every physical
+column name as a mapping — `trade_at_field`, `instrument_field`, `price_fields` can all point at
+whatever the observation parquet already calls them. Only `is_tradable_field` needs a column that
+is genuinely absent, which is what forces a second file.
+
+And it should force one. **`trade_at` is a different instant from `available_at`.** Sharing one
+physical file makes the moment a price was *observable* and the moment it was *executable* the same
+value by construction, which is exactly the conflation the framework exists to prevent. Making
+`is_tradable_field` optional was considered and **rejected**: it would leave a user with no way to
+declare a halt at all, against record 013.
+
+What the investigation did turn up is a real defect, now fixed in `85649a5` — see below.
+
+## Two review claims are also false
 
 A review agent's report drives this work. Two of its findings are wrong, and acting on them means
 being told to use things that do not exist.
@@ -70,6 +90,7 @@ framework; `rescale` simply does not know it.
 | `55ee610` | workspace write serialisation | 8 real processes: **lock off 3/8 survived, lock on 8/8** |
 | `6c74f4e` | `OperationAgenda.daily()` | DST derived, not typed: NY is `-05:00` in March and `-04:00` in April |
 | `e5ce32e` | `rescale(..., grid=)` | the bug is reproduced in-test: three equal names quantized after rescaling sum to `0.99`, with `grid=` they sum to `1.00` and stay on the grid |
+| `85649a5` | B8 investigation — `preflight.execution.missing` | preflight promised a "run-ready" `FrozenRun` that `run()` always rejects; `_validate_instrument_universe` and `_validate_initial_account` were **skipped entirely** when no exchange was declared |
 | `43ca56f` | A3 — CLI answers in one shape, and `run` is proven to run | `vqapr run spec.yaml` completes: `occurrences=12, account_version=7`. Two defects found by walking it: argparse escaping the envelope, and `run` checking 3 of the 8 keys it needs |
 
 Earlier in the same session: `f2f4013`…`c11d2e3` (hot-path performance, execution-priced valuation,
@@ -106,10 +127,6 @@ for five more kinds, so it is the owner's call, not a fix to ride along.
 
 ## Remaining work, in the order I would take it
 
-**B8 — a registered dataset cannot be used as an execution table.**
-`step3_run_alpha.py:104` reads the already-registered `k200-prices`, renames columns, and writes a
-separate parquet: **3,302,492 rows duplicated on disk.** Largest single waste left.
-
 **`register --dry-run` does not exist.** `dry-run`/`dry_run` appears **0 times** in `src/`
 (re-verified at `43ca56f`). If it is wanted it is new work, and it belongs after the conformance
 suite, which is what a dry run would check beyond the fingerprint.
@@ -134,7 +151,7 @@ numbers do not move.
 ## How to verify anything here
 
 ```
-uv run pytest -q                      # 584 passed
+uv run pytest -q                      # 586 passed
 uv run ruff check src/ tests/         # clean
 uv run python showcases/show_00N_*/run.py    # all eight run; 005 and 007 are the sharp ones
 ```

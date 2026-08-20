@@ -14,7 +14,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import FailureFamily, VqaprError
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
@@ -89,7 +89,15 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
     )
 
 
-def _setup(root: Path, model_price_parquet: Path) -> tuple[Workspace, RunDefinition]:
+def _setup(
+    root: Path, model_price_parquet: Path, *, with_execution: bool = True
+) -> tuple[Workspace, RunDefinition]:
+    """A registered workspace and a declaration for it.
+
+    `with_execution` defaults to True because an execution price is mandatory: preflight refuses a
+    declaration without one, so a definition lacking it is not a run a caller could ever have.
+    Tests that assert the refusal itself pass False.
+    """
     workspace = Workspace.create(root)
     strategy_component = _component(root, "strategy", ComponentKind.STRATEGY_MODEL)
     constraint_component = _component(root, "limit", ComponentKind.CONSTRAINT)
@@ -120,11 +128,20 @@ def _setup(root: Path, model_price_parquet: Path) -> tuple[Workspace, RunDefinit
     workspace.register_strategy_config(strategy)
     workspace.register_valuation_config(valuation)
     workspace.register_monitoring_policy(monitoring)
+    # Same root as the tests' own `_execution_exchange` calls, so the shared
+    # `execution-source` declaration stays byte-identical rather than conflicting.
+    exchange_component = (
+        _execution_exchange(workspace, root, identifier="setup-exchange")
+        if with_execution
+        else None
+    )
     return workspace, RunDefinition(
         strategy,
         valuation,
         ConstraintSet((constraint_component,)),
         monitoring,
+        exchange=exchange_component,
+        execution_input_id="execution" if with_execution else None,
         start=datetime(2024, 3, 5, 9, tzinfo=_ZONE),
         end=datetime(2024, 3, 5, 10, tzinfo=_ZONE),
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
@@ -406,6 +423,60 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     workspace._strategy_configs[drifted_strategy.agenda_id] = drifted_strategy
     with pytest.raises(VqaprError, match="fingerprint_drift"):
         preflight_run(workspace, replace(definition, strategy=drifted_strategy))
+
+
+def test_preflight_refuses_a_run_that_declares_no_execution_price(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """An observation dataset is optional; an execution price is not.
+
+    A Strategy may declare no requirement and decide nothing, and running it is still a run. But
+    every run values its book and fills against prices a venue published, so the execution input
+    is the one registration that is mandatory from the start.
+
+    This was refused only inside `run()`, as a bare `ValueError`, *after* `preflight_run` had
+    already returned a `FrozenRun` it called run-ready. Two consequences: the CLI reported it as
+    `stage: "unhandled"` (the framework looking broken rather than the declaration being
+    incomplete), and the universe and account checks below were skipped entirely.
+    """
+    workspace, definition = _setup(
+        tmp_path / "no-execution", model_price_parquet, with_execution=False
+    )
+
+    with pytest.raises(VqaprError, match=r"preflight\.execution\.missing") as failure:
+        preflight_run(workspace, definition)
+
+    error = failure.value
+    assert error.stage == "preflight.execution"
+    assert error.family is FailureFamily.EXCHANGE
+    assert error.mutation is False
+    # Typed, so an agent parses a verdict instead of reading a traceback.
+    assert error.as_dict()["failures"][0]["code"] == "preflight.execution.missing"
+    assert "register an execution input" in error.retry_precondition
+
+
+def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """`preflight_run` promises a *run-ready* declaration, so it must not hand back a reject.
+
+    Freezing first and refusing in `run()` meant the two checks below never ran: a definition
+    naming an instrument the Exchange does not list could be frozen and only fail later.
+    """
+    workspace, definition = _setup(
+        tmp_path / "unlisted", model_price_parquet, with_execution=False
+    )
+    unlisted = replace(definition, instruments=("NOT-LISTED",))
+
+    # The execution refusal comes first, and it is the reason the universe check is reachable
+    # at all once an execution input is supplied.
+    with pytest.raises(VqaprError, match=r"preflight\.execution\.missing"):
+        preflight_run(workspace, unlisted)
+
+    workspace, definition = _setup(tmp_path / "listed", model_price_parquet)
+
+    with pytest.raises(VqaprError, match=r"preflight\.universe\.unlisted_instrument"):
+        preflight_run(workspace, replace(definition, instruments=("NOT-LISTED",)))
 
 
 def test_preflight_rejects_missing_requirement_and_invalid_bounds(

@@ -219,12 +219,55 @@ def _validate_instrument_universe(
     )
 
 
+def _require_execution_authority(definition: RunDefinition) -> None:
+    """Refuse a run that declares no execution price.
+
+    An observation dataset is optional: a Strategy may declare no requirement and decide nothing,
+    and a run of it is still a run. **An execution price is not optional.** Every run values its
+    book and fills against the prices a venue published, so the execution input is the one
+    registration that is mandatory from the start.
+
+    It is refused here rather than in `RunDefinition`, which is a pure value object built by
+    callers who supply the pairing another way, and rather than in `run()`, which is far too late:
+    this function promises a *run-ready* declaration, so returning a `FrozenRun` that `run()` will
+    reject contradicts its own contract. Late refusal also left
+    `_validate_instrument_universe` and `_validate_initial_account` skipped entirely, so a run
+    could freeze with unlisted instruments and never be told.
+    """
+    if definition.exchange is not None and definition.execution_input_id is not None:
+        return
+    raise VqaprError(
+        stage="preflight.execution",
+        family=FailureFamily.EXCHANGE,
+        failures=[
+            Failure.bounded(
+                code="preflight.execution.missing",
+                requirement=(
+                    "a run must declare an Exchange and an execution input; the execution price "
+                    "is required even when the Strategy reads no observation dataset"
+                ),
+                observed=(
+                    f"exchange={definition.exchange!r}, "
+                    f"execution_input_id={definition.execution_input_id!r}"
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition=(
+            "register an execution input and declare it with its Exchange, then retry"
+        ),
+    )
+
+
 def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition) -> FrozenRun:
     """Freeze one workspace snapshot into a run-ready declaration.
 
     This resolves only declarations and the static agenda merge. In particular it does
     not inspect callback results or select execution targets, because those require the
     callback's Flow-stamped decision time.
+
+    *Run-ready* is the promise, so a declaration carrying no execution price is refused here
+    rather than frozen and rejected later by `run()`.
     """
     workspace = (
         workspace_or_root
@@ -233,6 +276,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     )
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
+    _require_execution_authority(definition)
     if definition.start is None or definition.end is None:
         raise ValueError("preflight requires aware start and end bounds")
     start = require_tz_aware(definition.start, name="start")
@@ -282,22 +326,17 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     )
     requirements.extend(constraint_requirements)
 
-    exchange = None
-    execution_input = None
-    if definition.exchange is not None:
-        exchange = _validate_component(workspace, definition.exchange)
-        loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
-        execution_input = workspace.execution_input(definition.execution_input_id or "")
-        validate_execution_input(execution_input).raise_if_failed()
-        _validate_instrument_universe(definition.instruments, loaded_exchange)
-        _validate_initial_account(
-            definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
-        )
-    sources = _freeze_sources(
-        workspace,
-        tuple(requirements),
-        execution_input.table.source if execution_input is not None else None,
+    # Unconditional: `_require_execution_authority` has already refused a definition without
+    # them, so the universe and account checks below can no longer be skipped by omission.
+    exchange = _validate_component(workspace, definition.exchange)
+    loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
+    execution_input = workspace.execution_input(definition.execution_input_id or "")
+    validate_execution_input(execution_input).raise_if_failed()
+    _validate_instrument_universe(definition.instruments, loaded_exchange)
+    _validate_initial_account(
+        definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
     )
+    sources = _freeze_sources(workspace, tuple(requirements), execution_input.table.source)
     datasets_by_id = {
         requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
         for requirement in requirements

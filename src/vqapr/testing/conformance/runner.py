@@ -13,23 +13,30 @@ stage names the run rather than the component that caused it.
 
 **The suite is a superset of the load, never a copy of it.** `conformance()` calls the same
 `load_*` function registration calls, then checks what loading does not: that every method the
-contract declares is present, callable, and declares the parameters Flow will pass positionally.
-That is why canon requires `pytest`, `vqapr check` and `vqapr register` to *"call the same
-conformance code"* — there is one implementation and three entrances, so a component cannot pass
-one and fail another.
+contract declares is present, callable, and **accepts the positional call Flow will make**.
+There is one implementation and two entrances — `pytest` and `vqapr register` — so a component
+cannot pass one and fail another. There is deliberately no `vqapr check`: registration already
+calls this code, and a component that is not registered is not yet anything Flow can run.
 
 Its input is a `ComponentRef` (canon §10.3), which is the same type a shipped component and a
 user-authored one both arrive as. There is deliberately no branch that can tell them apart, and
 `academic` and `krx` are the first two implementations to pass it.
 
-What it cannot check is deliberately absent. Whether a callback returns a *useful* intent for real
-data is only knowable during a run against real observations, so this suite makes no claim about
-it. It answers exactly one question: will Flow be able to call this component at all.
+What it cannot check is deliberately absent, and the boundary is sharper than it looks. Whether a
+callback returns the *declared type* is not knowable here either: an annotation can lie and most
+components carry none, so the only honest verdict comes from the value itself at the call site.
+The Flow already takes that verdict — `validate_economic_intent` for an intent, `_validated_output`
+for computed rows, an `isinstance` gate for projected bounds — and it belongs there, where the
+returned object exists.
+
+So this suite answers exactly one question: **will Flow be able to call this component at all.**
+Arity is decidable before a run; the returned value is not. Checking the first here and the second
+there is the whole division of labour, and widening either one into the other's territory would
+trade a real verdict for a guess.
 """
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from typing import Any
 
@@ -38,10 +45,12 @@ from vqapr.domain.errors import Diagnosis, Failure, FailureFamily, collector
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import (
+    accepts_contract_call,
     load_constraint,
     load_data_model,
     load_exchange,
     load_strategy_model,
+    positional_arity,
 )
 from vqapr.models.data_model import DataModel
 from vqapr.models.strategy_model import StrategyModel
@@ -82,19 +91,17 @@ _LOADERS = {
 }
 
 
-def _parameters(target: Any) -> tuple[str, ...] | None:
-    try:
-        return tuple(inspect.signature(target).parameters)
-    except (TypeError, ValueError):
-        return None
-
-
 def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
-    """Every contract method must exist, be callable, and take the declared parameters.
+    """Every contract method must exist, be callable, and accept the call Flow will make.
 
-    Flow calls these positionally, so a renamed or added required parameter is a real break.
+    Flow calls these **positionally**, so the question is arity, not spelling. A component that
+    renames `context` to `ctx` is called identically and passes; one that adds a required
+    parameter, or drops one, cannot receive the call and fails.
+
     Annotations are not compared: narrowing a return type is legitimate, and most components
-    declare no annotation at all.
+    declare no annotation at all. Whether a callback returns the *right type* is not decidable
+    here — an annotation can lie — so the Flow enforces it at the call site instead
+    (`validate_economic_intent`, `_validated_output`, `Constraint.project`'s isinstance check).
     """
     for base, name in _CONTRACT_METHODS[kind]:
         implementation = getattr(type(component), name, None)
@@ -119,15 +126,22 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
             continue
         if isinstance(implementation, property):
             continue
-        expected = _parameters(getattr(base, name, None))
-        observed = _parameters(implementation)
-        if expected is None or observed is None or observed == expected:
+        contract = getattr(base, name, None)
+        if contract is None or accepts_contract_call(implementation, contract):
+            continue
+        wanted = positional_arity(contract)
+        observed = positional_arity(implementation)
+        if wanted is None or observed is None:
             continue
         found.add(
             Failure.bounded(
                 f"{STAGE}.signature_invalid",
-                f"{base.__name__}.{name}() must declare parameters {expected}",
-                observed=f"{type(component).__name__}.{name}{observed}",
+                f"{base.__name__}.{name}() must accept {wanted[1]} positional arguments",
+                observed=(
+                    f"{type(component).__name__}.{name} takes "
+                    f"{'any number' if observed[1] == -1 else observed[1]}"
+                    f" ({observed[0]} required)"
+                ),
             )
         )
 

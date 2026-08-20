@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.domain.errors import VqaprError
+from vqapr.extension.component import ComponentKind
+from vqapr.extension.scaffold import render
 from vqapr.public import (
     Workspace,
     register_constraint,
@@ -165,3 +167,27 @@ def test_every_door_refuses_a_source_that_cannot_be_imported(
         register(tmp_path, "broken", path, object_name)
 
     assert _is_absent(tmp_path, "broken")
+
+
+@pytest.mark.parametrize(
+    "kind,register,object_name",
+    [
+        (ComponentKind.STRATEGY_MODEL, register_strategy_model, "MyAlpha"),
+        (ComponentKind.DATA_MODEL, register_data_model, "MyAlpha"),
+    ],
+)
+def test_the_scaffold_registers_as_written(tmp_path: Path, kind, register, object_name) -> None:
+    """What `vqapr new` emits must pass the door it is emitted for.
+
+    Canon 16 once asked for the opposite -- that a fresh template *fail* conformance so the user
+    knew they were not done. That was withdrawn (`docs/issues/004`): conformance answers whether
+    Flow can call a component, and a template that cannot be called teaches nothing on the first
+    command a user types. The "not done yet" signal is the marked line in the source, not a
+    manufactured failure. This test is what keeps the two from drifting apart again.
+    """
+    source = render(kind, "my-alpha", dataset_id="prices")
+    path = _write(tmp_path, "my_alpha.py", source.replace("class MyAlpha", f"class {object_name}"))
+
+    register(tmp_path, "my-alpha", path, object_name)
+
+    assert not _is_absent(tmp_path, "my-alpha")

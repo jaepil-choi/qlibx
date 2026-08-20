@@ -86,23 +86,71 @@ def _load(
         ) from error
 
 
-def _validate_callback_signature(component: object, *, base: type, method_name: str) -> None:
-    """Reject a callback whose declared parameters cannot receive the contract's call.
+def positional_arity(target: object) -> tuple[int, int] | None:
+    """How many positional arguments `target` requires, and how many it can absorb.
 
-    Only the parameter list is checked. Flow calls the callback positionally, so a renamed or
-    extra required parameter is a genuine break, while an annotation is not: a Strategy that
-    always returns an intent may legitimately narrow its return to ``EconomicPortfolioIntent``,
-    and most components declare no annotation at all. Whether the callback produces a usable
-    intent for real data is only knowable during a run.
+    Returns `(required, capacity)`, where capacity is `-1` for a `*args` target because it can
+    take any number. Keyword-only parameters are excluded: Flow never passes one, so a component
+    is free to add one with a default.
+
+    This is the single definition of "can Flow call this", shared with the conformance suite so
+    the load door and the suite cannot disagree about the same component.
     """
-    expected = tuple(inspect.signature(getattr(base, method_name)).parameters)
-    observed = tuple(inspect.signature(getattr(type(component), method_name)).parameters)
-    if observed != expected:
-        raise _failure(
-            f"{_STAGE}.signature_invalid",
-            f"{base.__name__}.{method_name}() must declare parameters {expected}",
-            str(observed),
-        )
+    try:
+        parameters = inspect.signature(target).parameters.values()  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    required = 0
+    capacity = 0
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            return (required, -1)
+        if parameter.kind not in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            continue
+        capacity += 1
+        if parameter.default is inspect.Parameter.empty:
+            required += 1
+    return (required, capacity)
+
+
+def accepts_contract_call(implementation: object, contract: object) -> bool:
+    """Whether `implementation` can receive the positional call `contract` declares."""
+    expected = positional_arity(contract)
+    observed = positional_arity(implementation)
+    if expected is None or observed is None:
+        return True
+    wanted = expected[1]
+    required, capacity = observed
+    return required <= wanted and (capacity == -1 or capacity >= wanted)
+
+
+def _validate_callback_signature(component: object, *, base: type, method_name: str) -> None:
+    """Reject a callback that cannot receive the call the contract declares.
+
+    Flow calls the callback **positionally**, so the question is arity, not spelling. Renaming
+    `context` to `ctx` produces an identical call and is allowed; adding a required parameter, or
+    dropping one, means Flow's call cannot land and is refused.
+
+    Annotations are not checked: a Strategy that always returns an intent may legitimately narrow
+    its return type, and most components declare no annotation at all. Whether the callback
+    returns the right *value* is decided at the call site during a run, where the value exists.
+    """
+    contract = getattr(base, method_name)
+    implementation = getattr(type(component), method_name)
+    if accepts_contract_call(implementation, contract):
+        return
+    wanted = positional_arity(contract)
+    observed = positional_arity(implementation)
+    if wanted is None or observed is None:  # pragma: no cover - the check above already passed
+        return
+    raise _failure(
+        f"{_STAGE}.signature_invalid",
+        f"{base.__name__}.{method_name}() must accept {wanted[1]} positional arguments",
+        f"takes {'any number' if observed[1] == -1 else observed[1]} ({observed[0]} required)",
+    )
 
 
 def _requirements(component: object, *, label: str, required: bool) -> tuple[DataRequirement, ...]:

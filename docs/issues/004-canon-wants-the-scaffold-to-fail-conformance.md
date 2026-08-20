@@ -1,7 +1,9 @@
 # 004 — Canon wants the scaffold to fail conformance; the scaffold is built to pass
 
-**Status:** open, needs an owner decision. Found 2026-08-20 while building the conformance suite
-(record 031).
+**Status:** **Closed 2026-08-20.** Owner decided: the template must pass. Canon line 4129 was
+withdrawn and the check it exposed was wrong in both directions — see record
+`docs/implementations/032-arity-is-the-contract-not-spelling.md`.
+Found 2026-08-20 while building the conformance suite (record 031).
 **Touches:** `docs/vqapr-architecture.md` line 4129, `src/vqapr/extension/scaffold.py`,
 `src/vqapr/testing/conformance/runner.py`
 
@@ -62,3 +64,41 @@ holds, line 4130 should name two entrances rather than three.
 needs the fixture builders canon §10.3 lists beside the suite — `agendas.py`, `datasets.py`,
 `execution_tables.py`, `accounts.py`, `components.py`, `asserts.py`. Record 031 shipped the suite
 only. Running a Strategy needs a context, and a context needs those builders.
+
+---
+
+## Resolution (2026-08-20)
+
+**Owner decision: canon was wrong. The template must pass conformance — "do nothing" is enough.**
+
+Conformance means *"the component returns the expected output type"*. Little of that is decidable
+before a run, so a template that returns a valid `NoDecision` is conformant and canon line 4129 is
+withdrawn.
+
+Measuring the suite against that definition found it was answering neither question correctly:
+
+```
+component     conformance            Flow can call it?
+do_nothing    PASS                   yes -> NoDecision      correct
+renamed       FAIL signature_invalid yes -> NoDecision      FALSE POSITIVE
+wrong_arity   FAIL signature_invalid NO (TypeError)         correct, by accident
+wrong_return  PASS                   yes -> dict            FALSE NEGATIVE
+```
+
+It refused working code and accepted the exact mistake the definition names. The same
+name-comparison also existed a second time in `extension/loading.py`, so the two entrances canon
+requires to agree were two independent implementations.
+
+Resolved by making arity the contract, defining it once in `loading.py`, and letting the Flow judge
+the returned value at the call site where it exists. `vqapr check` is **not** built: `register`
+already calls `conformance()`, and the return-type question is runtime-only. Canon line 4130 now
+names two entrances.
+
+`tests/extension/test_all_four_doors.py::test_the_scaffold_registers_as_written` keeps canon and
+`scaffold.py` from drifting apart again.
+
+## Still open from this file, moved out of scope
+
+Line 4132 (*"사용자가 `vqapr.testing`만으로 자기 StrategyModel을 실행해볼 수 있다"*) is still false and needs
+the fixture builders canon §10.3 lists — `agendas.py`, `datasets.py`, `execution_tables.py`,
+`accounts.py`, `components.py`, `asserts.py`. That is a separate build, not part of this decision.

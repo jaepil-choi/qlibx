@@ -2856,14 +2856,20 @@ surface.**
 
 ```bash
 vqapr new strategy ./my_strategy      # 구현 파일 + yaml + 자기 conformance 테스트 + README
-cd my_strategy && pytest              # **처음엔 실패한다.** 통과 조건이 실행 가능한 형태로 온다
-vqapr check .                         # 같은 검사, 기계 판독 결과 (agent가 읽는 쪽)
-vqapr register . --project ../research   # fingerprint를 찍어 ComponentRef로 등록
+cd my_strategy && pytest              # **처음부터 통과한다.** 템플릿은 그대로 실행되는 예제다
+vqapr register . --project ../research   # 같은 conformance를 부르고, fingerprint를 찍어 등록
 ```
 
 - **템플릿이 자기 테스트를 들고 나온다.** 계약이 문서가 아니라 실행되는 형태로 전달된다.
-- **`pytest`와 `vqapr check`와 `register`가 같은 검사를 부른다.** 갈리면 *"로컬에선 되는데 등록이 안
-  된다"*가 생긴다.
+- **`pytest`와 `register`가 같은 검사를 부른다.** 갈리면 *"로컬에선 되는데 등록이 안 된다"*가 생긴다.
+  입구는 **둘**이다. `vqapr check`는 짓지 않는다 — `register`가 이미 같은 `conformance()`를 부르고,
+  등록되지 않은 컴포넌트는 아직 Flow가 실행할 수 있는 대상이 아니다. 세 번째 입구는 같은 답을 다른
+  이름으로 한 번 더 주는 것뿐이다.
+- **conformance가 판정하는 것은 "Flow가 이 컴포넌트를 호출할 수 있는가" 하나다.** Flow는 콜백을
+  **위치로** 부르므로 계약은 arity이고 파라미터 *이름*이 아니다. `context`를 `ctx`로 바꾼 구현은
+  동일한 호출을 받으므로 통과한다. 반환 *타입*은 여기서 판정할 수 없다 — 어노테이션은 거짓말할 수
+  있고 대부분 달지 않는다 — 그래서 값이 실제로 존재하는 호출 지점에서 Flow가 강제한다
+  (`validate_economic_intent`, `_validated_output`, `Constraint.project`의 isinstance 게이트).
 - **`register`가 fingerprint를 찍는 순간이 계약의 시작점**이다. 이후 source가 바뀌면 compute 전에
   drift로 거부된다(`UC-EXTENSION-002`).
 
@@ -4126,8 +4132,13 @@ live에서는 그 간격이 사라진다.
 - [ ] 거래 불가 종목의 비중 고정이 `ConstraintFinding`으로 보고되지 않는다 (제약이 아니라 시장 사실)
 - [ ] 내장 Exchange·Constraint가 쓰는 API 집합이 public surface 안에 있다
 - [ ] preflight가 내장 컴포넌트와 project-local 컴포넌트를 구분하지 않는다
-- [ ] `vqapr new`가 깐 템플릿이 **처음에는 conformance를 통과하지 못한다**
-- [ ] `pytest` · `vqapr check` · `vqapr register`가 같은 conformance 코드를 부른다
+- [x] `vqapr new`가 깐 템플릿이 **처음부터 conformance를 통과한다** (2026-08-20 철회·역전:
+      원래 항목은 "통과하지 못한다"였다. `docs/issues/004` 참조 — conformance는 "Flow가 부를 수
+      있는가"를 판정하고, 부를 수 없는 템플릿은 사용자가 처음 치는 명령에서 잘못된 것을 가르친다.
+      "아직 안 끝났다"는 신호는 소스의 표시된 줄이 이미 하고 있다.
+      `tests/extension/test_all_four_doors.py::test_the_scaffold_registers_as_written`이 고정한다)
+- [x] `pytest` · `vqapr register`가 같은 conformance 코드를 부른다 (입구는 **둘**이다;
+      `vqapr check`는 짓지 않기로 결정했다 — §10.2 참조)
 - [ ] 등록 후 source가 바뀌면 compute 전에 drift로 거부된다
 - [ ] 사용자가 `vqapr.testing`만으로 자기 StrategyModel을 실행해볼 수 있다 (내부 import 없이)
 - [ ] `analysis/`가 가격 dataset을 읽어 수익률을 만드는 경로가 없다

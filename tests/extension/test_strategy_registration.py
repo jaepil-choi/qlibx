@@ -56,16 +56,20 @@ def test_an_object_outside_the_contract_is_refused(tmp_path: Path) -> None:
     assert _codes(raised.value) == {"component.load.wrong_type"}
 
 
-def test_a_renamed_callback_parameter_is_refused(tmp_path: Path) -> None:
-    """Flow calls the callback positionally, so the parameter list is the contract."""
+def test_a_renamed_callback_parameter_is_accepted(tmp_path: Path) -> None:
+    """Flow calls the callback positionally, so arity is the contract and spelling is not.
+
+    This once asserted the opposite. It was wrong: `on_occurrence(self, ctx)` receives exactly
+    the call `on_occurrence(self, context)` receives, and refusing it punished a legal rename
+    while `wrong_return`-shaped mistakes passed. The check now measures what Flow actually does.
+    """
     path = _write(
         tmp_path,
         "renamed",
         "    def on_occurrence(self, ctx):\n        return NoDecision(reason='x')\n",
     )
-    with pytest.raises(VqaprError) as raised:
-        register_strategy_model(tmp_path, "renamed", path, "S")
-    assert _codes(raised.value) == {"component.load.signature_invalid"}
+
+    register_strategy_model(tmp_path, "renamed", path, "S")
 
 
 def test_an_extra_required_parameter_is_refused(tmp_path: Path) -> None:

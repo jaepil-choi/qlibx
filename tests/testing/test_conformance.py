@@ -83,8 +83,45 @@ def test_a_stale_callback_signature_is_caught_though_it_constructs(tmp_path: Pat
     assert not diagnosis.ok
     failure = diagnosis.failures[0]
     assert failure.code == f"{STAGE}.signature_invalid"
-    assert "evaluate() must declare parameters" in failure.requirement
-    assert "'window'" in failure.requirement and "'bounds'" in failure.requirement
+    assert "evaluate() must accept 5 positional arguments" in failure.requirement
+
+
+def test_a_renamed_parameter_passes_because_flow_calls_positionally(tmp_path: Path) -> None:
+    """Spelling is not a contract. Arity is.
+
+    Flow calls `project(window, instruments)` positionally, so a component that names them
+    `w` and `names` receives exactly the same call. Failing it would punish a legal rename and
+    teach that the contract is about words rather than the shape of the call.
+    """
+    source = GOOD_CONSTRAINT.replace(
+        "def project(self, window, instruments):", "def project(self, w, names):"
+    )
+
+    assert conformance(_ref(tmp_path, source)).ok
+
+
+def test_a_star_args_component_passes_and_a_short_one_does_not(tmp_path: Path) -> None:
+    """`*args` can absorb the call; a method one parameter short cannot."""
+    absorbing = GOOD_CONSTRAINT.replace(
+        "def evaluate(self, window, account, marks, bounds):", "def evaluate(self, *args):"
+    )
+    assert conformance(_ref(tmp_path, absorbing)).ok
+
+    short = GOOD_CONSTRAINT.replace(
+        "def evaluate(self, window, account, marks, bounds):",
+        "def evaluate(self, window, account, marks):",
+    )
+    assert not conformance(_ref(tmp_path, short)).ok
+
+
+def test_an_optional_extra_parameter_passes(tmp_path: Path) -> None:
+    """A default-valued extra is not a break: Flow's call still lands."""
+    source = GOOD_CONSTRAINT.replace(
+        "def project(self, window, instruments):",
+        "def project(self, window, instruments, scale=1):",
+    )
+
+    assert conformance(_ref(tmp_path, source)).ok
 
 
 def test_a_missing_contract_method_is_named(tmp_path: Path) -> None:
@@ -101,8 +138,8 @@ def test_a_missing_contract_method_is_named(tmp_path: Path) -> None:
 def test_every_problem_is_reported_at_once(tmp_path: Path) -> None:
     """An agent fixes its component once, not once per run."""
     source = GOOD_CONSTRAINT.replace(
-        "def validate_intended(self, intent, bounds):", "def validate_intended(self, intent):"
-    ).replace("def evaluate(self, window, account, marks, bounds):", "def evaluate(self, account):")
+        "def validate_intended(self, intent, bounds):", "def validate_intended(self):"
+    ).replace("def evaluate(self, window, account, marks, bounds):", "def evaluate(self):")
 
     diagnosis = conformance(_ref(tmp_path, source))
 
@@ -151,9 +188,9 @@ def test_the_shipped_profiles_are_the_first_two_implementations_to_pass(tmp_path
 
 
 def test_registration_calls_this_suite_rather_than_its_own_checks(tmp_path: Path) -> None:
-    """Canon §10.2: `pytest`, `vqapr check` and `vqapr register` call the same conformance code.
+    """Canon §10.2: `pytest` and `vqapr register` call the same conformance code.
 
-    One implementation with three entrances means a component cannot pass one and fail another.
+    One implementation with two entrances means a component cannot pass one and fail another.
     """
     path = tmp_path / "stale.py"
     path.write_text(STALE_EVALUATE, encoding="utf-8")

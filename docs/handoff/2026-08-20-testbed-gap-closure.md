@@ -1,7 +1,8 @@
 # Handoff — closing the gaps the testbed exposed
 
 Status: in_progress
-Branch: `jaepil-develop` · last commit `6c74f4e` · **tree is green: 567 passed, ruff clean**
+Branch: `jaepil-develop` · last commit `e5ce32e` · **tree is green: 577 passed, ruff clean**
+**Nothing is uncommitted.** B7 is done; the next person starts at B8.
 
 Written because the session kept dropping mid-task. Everything below is verified, not remembered.
 
@@ -25,21 +26,23 @@ Everything else in the review checks out.
 
 ---
 
-## Immediate state: one uncommitted edit
+## B7 is finished — `e5ce32e`
 
-`src/vqapr/portfolio/weighting.py` — `_settle` now takes `grid: Decimal | None = None` and
-quantizes members before settling the residual. Backward compatible (default `None`), which is why
-567 still pass with the work half done.
+`rescale(weights, *, long, short, grid=None)`. The version was **not** bumped, as asked.
 
-**Remaining, ~15 minutes:**
+What landed beyond the four steps this handoff originally listed: two refusals the grid makes
+necessary. A budget not itself on the grid (weights on `0.01` cannot sum to `1.005`, and the
+residual would silently land off-grid — the exact property the argument exists to guarantee), and a
+grid finer than `QUANTUM`, which `optimize` already refuses for the same reason. Quantization pins
+`ROUND_HALF_EVEN` instead of reading the ambient decimal context, so the module stays context
+independent like the rest of `weighting.py`.
 
-1. Add `grid: Decimal | None = None` to `rescale`'s keyword-only parameters.
-2. Pass it through both `_settle` calls at the end of `rescale` (weighting.py:207-208).
-3. Tests: a gridded dollar-neutral book sums to exactly zero; the residual lands on the largest
-   member; the result is order independent; `grid=None` is unchanged from today.
-4. Commit. **Do not bump the version** — the user asked to hold it until the testbed round finishes.
+Ten tests. The load-bearing one is
+`test_quantizing_after_rescale_is_what_the_grid_argument_replaces`: it reproduces the caller-side
+bug — the total falling to `0.99` after quantizing — then shows the same call with `grid=` holding
+both properties at once. Full reasoning in `docs/implementations/028-a-gridded-book-still-adds-up.md`.
 
-### What B7 actually is, because the review misdescribes it
+### What B7 actually was, because the review misdescribed it
 
 The review says the user invented `_settle` because the framework lacked it. Not so: `weighting.py`
 **already has** `_settle` and `rescale` already calls it once per side. Both the framework and the
@@ -66,6 +69,7 @@ framework; `rescale` simply does not know it.
 | `28d64b8` | `context.source_refs()` / `context.intent(...)` | test pins the helper equals `SimulationFlow._actual_source_refs` |
 | `55ee610` | workspace write serialisation | 8 real processes: **lock off 3/8 survived, lock on 8/8** |
 | `6c74f4e` | `OperationAgenda.daily()` | DST derived, not typed: NY is `-05:00` in March and `-04:00` in April |
+| `e5ce32e` | `rescale(..., grid=)` | the bug is reproduced in-test: three equal names quantized after rescaling sum to `0.99`, with `grid=` they sum to `1.00` and stay on the grid |
 
 Earlier in the same session: `f2f4013`…`c11d2e3` (hot-path performance, execution-priced valuation,
 account history retention, fill-journal publication). Those are described in
@@ -109,10 +113,22 @@ numbers do not move.
 ## How to verify anything here
 
 ```
-uv run pytest -q                      # 567 passed
+uv run pytest -q                      # 577 passed
 uv run ruff check src/ tests/         # clean
 uv run python showcases/show_00N_*/run.py    # all eight run; 005 and 007 are the sharp ones
 ```
 
 G-4 style result invariance: `.agent/tmp/g4_check.py` compares show_005 against
-`.agent/tmp/g4-snapshot/trace-baseline.json`.
+`.agent/tmp/g4-snapshot/trace-baseline.json`. Currently **64 fields identical**.
+
+**The G-4 baseline was stale and has been re-cut.** It was captured before `c11d2e3` and had been
+failing on `recorder.defaults.account` (`21` → `101`) ever since — not a regression, but the
+documented widening from record 026: one row per held instrument per occurrence instead of one row
+per occurrence. It was re-cut from the committed tree *before* the B7 change, so the pass above is
+real evidence that `grid=None` moves nothing, not a reset. A known-false failure in a check this
+handoff tells you to run is worse than no check.
+
+**Two `ruff` gates, not one.** `ruff check src/ tests/` is the declared gate and is clean.
+`ruff format --check` reports one pre-existing block in `weighting.py:155` (`sized = {...}`) that is
+also unformatted on `HEAD~`. Left alone deliberately: it is nobody's change, and reformatting it
+would put an unrelated hunk in a behaviour commit.

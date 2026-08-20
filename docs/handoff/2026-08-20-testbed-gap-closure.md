@@ -1,8 +1,8 @@
 # Handoff — closing the gaps the testbed exposed
 
 Status: in_progress
-Branch: `jaepil-develop` · last commit `e5ce32e` · **tree is green: 577 passed, ruff clean**
-**Nothing is uncommitted.** B7 is done; the next person starts at B8.
+Branch: `jaepil-develop` · last commit `43ca56f` · **tree is green: 584 passed, ruff clean**
+**Nothing is uncommitted.** B7 and A3 are done; the next person starts at B8.
 
 Written because the session kept dropping mid-task. Everything below is verified, not remembered.
 
@@ -70,10 +70,37 @@ framework; `rescale` simply does not know it.
 | `55ee610` | workspace write serialisation | 8 real processes: **lock off 3/8 survived, lock on 8/8** |
 | `6c74f4e` | `OperationAgenda.daily()` | DST derived, not typed: NY is `-05:00` in March and `-04:00` in April |
 | `e5ce32e` | `rescale(..., grid=)` | the bug is reproduced in-test: three equal names quantized after rescaling sum to `0.99`, with `grid=` they sum to `1.00` and stay on the grid |
+| `43ca56f` | A3 — CLI answers in one shape, and `run` is proven to run | `vqapr run spec.yaml` completes: `occurrences=12, account_version=7`. Two defects found by walking it: argparse escaping the envelope, and `run` checking 3 of the 8 keys it needs |
 
 Earlier in the same session: `f2f4013`…`c11d2e3` (hot-path performance, execution-priced valuation,
 account history retention, fill-journal publication). Those are described in
 `docs/implementations/021`–`027`.
+
+---
+
+## A3 is finished — `43ca56f`
+
+The answer to *"are we actually registering and running like a real user?"* was **no**, and now it
+is yes for the CLI: `tests/cli/test_commands.py` drives `new` → `register` → `list` → `run` through
+`main(argv)` and reads the JSON an agent would get. `run` completes with `occurrences=12,
+account_version=7` — both pinned, because `> 0` is also true of a run that did nothing.
+
+Walking it found two real defects, described in `docs/implementations/029-the-cli-answers-in-one-shape.md`:
+
+1. **argparse bypassed the envelope.** `parse_args` raises `SystemExit`, a `BaseException`, so it
+   passed through `except Exception`. Every mistyped command answered `exit=2` with an **empty
+   stdout** — the one reply an agent cannot parse.
+2. **`run` checked 3 of the 8 keys it cannot run without.** The other five surfaced from inside the
+   framework as `stage: "unhandled"`, which reads as "the framework broke" when the truth was "your
+   spec is incomplete".
+
+### Still open on the CLI, and it is a surface decision, not a bug
+
+**`register` takes 2 kinds; `list` reads 8.** A user can register `datamodel|strategy` and nothing
+else — datasets, sources, agendas, execution inputs and the three configs have no CLI path at all.
+So a runnable workspace **cannot be reached through the CLI alone**; the e2e fixture registers them
+through the library, which is precisely the gap. Closing it means designing a declaration surface
+for five more kinds, so it is the owner's call, not a fix to ride along.
 
 ---
 
@@ -83,15 +110,9 @@ account history retention, fill-journal publication). Those are described in
 `step3_run_alpha.py:104` reads the already-registered `k200-prices`, renames columns, and writes a
 separate parquet: **3,302,492 rows duplicated on disk.** Largest single waste left.
 
-**A3 — the `vqapr run` CLI is unverified.**
-`cli/run.py` already does spec.yaml → `RunDefinition` → `preflight_run` → `run`, but the testbed
-assembles `RunDefinition` by hand in two 302-line workers and never invokes the CLI. The user's
-question — *"are we actually registering and running like a real user?"* — answers **no**: the
-testbed uses the library API, so the CLI surface has no coverage at all.
-
-**`register --dry-run` does not exist.** `dry-run`/`dry_run` appears **0 times** in `src/`. If it is
-wanted it is new work, and it belongs after the conformance suite, which is what a dry run would
-check beyond the fingerprint.
+**`register --dry-run` does not exist.** `dry-run`/`dry_run` appears **0 times** in `src/`
+(re-verified at `43ca56f`). If it is wanted it is new work, and it belongs after the conformance
+suite, which is what a dry run would check beyond the fingerprint.
 
 **`testing/` conformance suite.** Canon §10.2 says a component *"must pass the same conformance
 suite to be registered"*. No such suite exists. This is a broken promise rather than dead scaffold,
@@ -113,7 +134,7 @@ numbers do not move.
 ## How to verify anything here
 
 ```
-uv run pytest -q                      # 577 passed
+uv run pytest -q                      # 584 passed
 uv run ruff check src/ tests/         # clean
 uv run python showcases/show_00N_*/run.py    # all eight run; 005 and 007 are the sharp ones
 ```

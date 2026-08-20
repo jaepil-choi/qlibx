@@ -6,9 +6,11 @@ workspace는 선언을 보관하고 조회할 뿐 검증하지 않는다. datase
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
-from collections.abc import Mapping
+import time as _time
+from collections.abc import Iterator, Mapping
 from datetime import date, datetime, time
 from pathlib import Path
 
@@ -41,6 +43,26 @@ from vqapr.valuation.configuration import ValuationConfig
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"
+WORKSPACE_LOCK_FILENAME = ".workspace.lock"
+"""Serialises the read-modify-write cycle a registration performs.
+
+The write itself is already atomic -- a temporary file replaced into place -- but atomic writing
+only guarantees a reader never sees half a file. It does not stop two processes from each reading
+the same state, each adding their own declaration, and the second write erasing the first. Nothing
+fails; a declaration is simply gone.
+
+Running strategies in parallel is the normal case, not an edge one, so this belongs to the
+framework. A user should not have to discover the failure and invent a lock protocol, and two
+users inventing slightly different ones do not protect each other.
+"""
+
+WORKSPACE_LOCK_TIMEOUT = 30.0
+WORKSPACE_LOCK_STALE_AFTER = 120.0
+"""A lock older than this is assumed to belong to a process that died holding it.
+
+Without this a crash leaves the workspace permanently unwritable, and the recovery step is
+"delete a file we never told you about".
+"""
 OPEN_STAGE = "workspace.open"
 REGISTER_STAGE = "workspace.dataset.register"
 LOOKUP_STAGE = "workspace.dataset.lookup"
@@ -412,285 +434,299 @@ class Workspace:
                 retry="bind the dataset and physical source to the same source_id, then retry",
             )
 
-        (
-            datasets,
-            sources,
-            execution_inputs,
-            components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        ) = self._read()
-        key = registration.dataset_id
-        source_key = source.source_id
-        existing_source = sources.get(source_key)
-        if existing_source is not None and existing_source != source:
-            raise _workspace_error(
-                stage=REGISTER_STAGE,
-                code=f"{REGISTER_STAGE}.source_conflict",
-                requirement=f"source_id {source_key!r} must keep its existing physical declaration",
-                observed="a different SourceSpec is already registered",
-                retry="use the existing source declaration or choose a new source_id",
-            )
-
-        existing = datasets.get(key)
-        if existing is not None:
-            if existing == registration and existing_source == source:
-                self._replace_state(
-                    datasets,
-                    sources,
-                    execution_inputs,
-                    components,
-                    agendas,
-                    strategy_configs,
-                    valuation_configs,
-                    monitoring_policies,
+        with self._exclusive():
+            (
+                datasets,
+                sources,
+                execution_inputs,
+                components,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            ) = self._read()
+            key = registration.dataset_id
+            source_key = source.source_id
+            existing_source = sources.get(source_key)
+            if existing_source is not None and existing_source != source:
+                raise _workspace_error(
+                    stage=REGISTER_STAGE,
+                    code=f"{REGISTER_STAGE}.source_conflict",
+                    requirement=(
+                        f"source_id {source_key!r} must keep its existing "
+                        "physical declaration"
+                    ),
+                    observed="a different SourceSpec is already registered",
+                    retry="use the existing source declaration or choose a new source_id",
                 )
-                return False
-            raise _workspace_error(
-                stage=REGISTER_STAGE,
-                code=f"{REGISTER_STAGE}.conflict",
-                requirement=(
-                    f"dataset_id {key!r} must keep its existing declaration or use a new identity"
-                ),
-                observed="a different declaration is already registered",
-                retry="use the existing declaration or choose a new dataset_id",
-            )
 
-        merged_datasets = dict(datasets)
-        merged_sources = dict(sources)
-        merged_datasets[key] = _detach_registration(registration)
-        merged_sources[source_key] = _detach_source(source)
-        self._write(
-            merged_datasets,
-            merged_sources,
-            execution_inputs,
-            components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        )
-        self._replace_state(
-            merged_datasets,
-            merged_sources,
-            execution_inputs,
-            components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        )
-        return True
+            existing = datasets.get(key)
+            if existing is not None:
+                if existing == registration and existing_source == source:
+                    self._replace_state(
+                        datasets,
+                        sources,
+                        execution_inputs,
+                        components,
+                        agendas,
+                        strategy_configs,
+                        valuation_configs,
+                        monitoring_policies,
+                    )
+                    return False
+                raise _workspace_error(
+                    stage=REGISTER_STAGE,
+                    code=f"{REGISTER_STAGE}.conflict",
+                    requirement=(
+                        f"dataset_id {key!r} must keep its existing declaration "
+                        "or use a new identity"
+                    ),
+                    observed="a different declaration is already registered",
+                    retry="use the existing declaration or choose a new dataset_id",
+                )
+
+            merged_datasets = dict(datasets)
+            merged_sources = dict(sources)
+            merged_datasets[key] = _detach_registration(registration)
+            merged_sources[source_key] = _detach_source(source)
+            self._write(
+                merged_datasets,
+                merged_sources,
+                execution_inputs,
+                components,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            )
+            self._replace_state(
+                merged_datasets,
+                merged_sources,
+                execution_inputs,
+                components,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            )
+            return True
 
     def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
         """검증을 통과한 execution table + fill declaration을 원자적으로 보관한다."""
         if not isinstance(registration, ExecutionInputRegistration):
             raise TypeError("registration must be an ExecutionInputRegistration")
 
-        (
-            datasets,
-            sources,
-            execution_inputs,
-            components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        ) = self._read()
-        key = registration.execution_input_id
-        source = registration.table.source
-        source_key = source.source_id
-        existing_source = sources.get(source_key)
-        if existing_source is not None and existing_source != source:
-            raise _workspace_error(
-                stage=EXECUTION_REGISTER_STAGE,
-                code=f"{EXECUTION_REGISTER_STAGE}.source_conflict",
-                requirement=f"source_id {source_key!r} must keep its existing physical declaration",
-                observed="a different SourceSpec is already registered",
-                retry="use the existing source declaration or choose a new source_id",
-                family=FailureFamily.EXCHANGE,
-            )
-
-        existing = execution_inputs.get(key)
-        if existing is not None:
-            if existing == registration and existing_source == source:
-                self._replace_state(
-                    datasets,
-                    sources,
-                    execution_inputs,
-                    components,
-                    agendas,
-                    strategy_configs,
-                    valuation_configs,
-                    monitoring_policies,
+        with self._exclusive():
+            (
+                datasets,
+                sources,
+                execution_inputs,
+                components,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            ) = self._read()
+            key = registration.execution_input_id
+            source = registration.table.source
+            source_key = source.source_id
+            existing_source = sources.get(source_key)
+            if existing_source is not None and existing_source != source:
+                raise _workspace_error(
+                    stage=EXECUTION_REGISTER_STAGE,
+                    code=f"{EXECUTION_REGISTER_STAGE}.source_conflict",
+                    requirement=(
+                        f"source_id {source_key!r} must keep its existing "
+                        "physical declaration"
+                    ),
+                    observed="a different SourceSpec is already registered",
+                    retry="use the existing source declaration or choose a new source_id",
+                    family=FailureFamily.EXCHANGE,
                 )
-                return False
-            raise _workspace_error(
-                stage=EXECUTION_REGISTER_STAGE,
-                code=f"{EXECUTION_REGISTER_STAGE}.conflict",
-                requirement=(
-                    f"execution_input_id {key!r} must keep its existing declaration or use a new "
-                    "identity"
-                ),
-                observed="a different execution input declaration is already registered",
-                retry="use the existing declaration or choose a new execution_input_id",
-                family=FailureFamily.EXCHANGE,
-            )
 
-        merged_sources = dict(sources)
-        merged_inputs = dict(execution_inputs)
-        merged_sources[source_key] = _detach_source(source)
-        merged_inputs[key] = _detach_execution_input(registration)
-        self._write(
-            datasets,
-            merged_sources,
-            merged_inputs,
-            components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        )
-        self._replace_state(
-            datasets,
-            merged_sources,
-            merged_inputs,
-            components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        )
-        return True
+            existing = execution_inputs.get(key)
+            if existing is not None:
+                if existing == registration and existing_source == source:
+                    self._replace_state(
+                        datasets,
+                        sources,
+                        execution_inputs,
+                        components,
+                        agendas,
+                        strategy_configs,
+                        valuation_configs,
+                        monitoring_policies,
+                    )
+                    return False
+                raise _workspace_error(
+                    stage=EXECUTION_REGISTER_STAGE,
+                    code=f"{EXECUTION_REGISTER_STAGE}.conflict",
+                    requirement=(
+                        f"execution_input_id {key!r} must keep its existing "
+                        "declaration or use a new identity"
+                    ),
+                    observed="a different execution input declaration is already registered",
+                    retry="use the existing declaration or choose a new execution_input_id",
+                    family=FailureFamily.EXCHANGE,
+                )
+
+            merged_sources = dict(sources)
+            merged_inputs = dict(execution_inputs)
+            merged_sources[source_key] = _detach_source(source)
+            merged_inputs[key] = _detach_execution_input(registration)
+            self._write(
+                datasets,
+                merged_sources,
+                merged_inputs,
+                components,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            )
+            self._replace_state(
+                datasets,
+                merged_sources,
+                merged_inputs,
+                components,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            )
+            return True
 
     def register_component(self, ref: ComponentRef) -> bool:
         """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다."""
         if not isinstance(ref, ComponentRef):
             raise TypeError("ref must be a ComponentRef")
-        (
-            datasets,
-            sources,
-            execution_inputs,
-            components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        ) = self._read()
-        key = ref.component_id
-        existing = components.get(key)
-        if existing is not None:
-            if existing == ref:
-                self._replace_state(
-                    datasets,
-                    sources,
-                    execution_inputs,
-                    components,
-                    agendas,
-                    strategy_configs,
-                    valuation_configs,
-                    monitoring_policies,
+        with self._exclusive():
+            (
+                datasets,
+                sources,
+                execution_inputs,
+                components,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            ) = self._read()
+            key = ref.component_id
+            existing = components.get(key)
+            if existing is not None:
+                if existing == ref:
+                    self._replace_state(
+                        datasets,
+                        sources,
+                        execution_inputs,
+                        components,
+                        agendas,
+                        strategy_configs,
+                        valuation_configs,
+                        monitoring_policies,
+                    )
+                    return False
+                raise _workspace_error(
+                    stage=COMPONENT_REGISTER_STAGE,
+                    code=f"{COMPONENT_REGISTER_STAGE}.conflict",
+                    requirement=(
+                        f"component_id {key!r} must keep its registered fingerprint or use a new "
+                        "identity"
+                    ),
+                    observed="a different ComponentRef is already registered",
+                    retry="use the registered component or choose a new component_id",
                 )
-                return False
-            raise _workspace_error(
-                stage=COMPONENT_REGISTER_STAGE,
-                code=f"{COMPONENT_REGISTER_STAGE}.conflict",
-                requirement=(
-                    f"component_id {key!r} must keep its registered fingerprint or use a new "
-                    "identity"
-                ),
-                observed="a different ComponentRef is already registered",
-                retry="use the registered component or choose a new component_id",
+            merged = dict(components)
+            merged[key] = _detach_component(ref)
+            self._write(
+                datasets,
+                sources,
+                execution_inputs,
+                merged,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
             )
-        merged = dict(components)
-        merged[key] = _detach_component(ref)
-        self._write(
-            datasets,
-            sources,
-            execution_inputs,
-            merged,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        )
-        self._replace_state(
-            datasets,
-            sources,
-            execution_inputs,
-            merged,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
-        )
-        return True
+            self._replace_state(
+                datasets,
+                sources,
+                execution_inputs,
+                merged,
+                agendas,
+                strategy_configs,
+                valuation_configs,
+                monitoring_policies,
+            )
+            return True
 
     def register_agenda(self, agenda: OperationAgenda) -> bool:
         if not isinstance(agenda, OperationAgenda):
             raise TypeError("agenda must be an OperationAgenda")
-        state = self._read()
-        agendas = state[4]
-        return self._register_declaration(
-            agenda.agenda_id, agenda, agendas, _detach_agenda, AGENDA_REGISTER_STAGE, state, 4
-        )
+        with self._exclusive():
+            state = self._read()
+            agendas = state[4]
+            return self._register_declaration(
+                agenda.agenda_id, agenda, agendas, _detach_agenda, AGENDA_REGISTER_STAGE, state, 4
+            )
 
     def register_strategy_config(self, config: StrategyConfig) -> bool:
         if not isinstance(config, StrategyConfig):
             raise TypeError("config must be a StrategyConfig")
-        state = self._read()
-        self._require_agenda(
-            state[4], config.agenda_id, config.agenda_role, STRATEGY_REGISTER_STAGE
-        )
-        if state[3].get(config.component.component_id) != config.component:
-            raise self._reference_error(
-                STRATEGY_REGISTER_STAGE, "strategy component must be registered"
+        with self._exclusive():
+            state = self._read()
+            self._require_agenda(
+                state[4], config.agenda_id, config.agenda_role, STRATEGY_REGISTER_STAGE
             )
-        return self._register_declaration(
-            config.agenda_id,
-            config,
-            state[5],
-            _detach_strategy_config,
-            STRATEGY_REGISTER_STAGE,
-            state,
-            5,
-        )
+            if state[3].get(config.component.component_id) != config.component:
+                raise self._reference_error(
+                    STRATEGY_REGISTER_STAGE, "strategy component must be registered"
+                )
+            return self._register_declaration(
+                config.agenda_id,
+                config,
+                state[5],
+                _detach_strategy_config,
+                STRATEGY_REGISTER_STAGE,
+                state,
+                5,
+            )
 
     def register_valuation_config(self, config: ValuationConfig) -> bool:
         if not isinstance(config, ValuationConfig):
             raise TypeError("config must be a ValuationConfig")
-        state = self._read()
-        self._require_agenda(
-            state[4], config.agenda_id, config.agenda_role, VALUATION_REGISTER_STAGE
-        )
-        return self._register_declaration(
-            config.agenda_id,
-            config,
-            state[6],
-            _detach_valuation_config,
-            VALUATION_REGISTER_STAGE,
-            state,
-            6,
-        )
+        with self._exclusive():
+            state = self._read()
+            self._require_agenda(
+                state[4], config.agenda_id, config.agenda_role, VALUATION_REGISTER_STAGE
+            )
+            return self._register_declaration(
+                config.agenda_id,
+                config,
+                state[6],
+                _detach_valuation_config,
+                VALUATION_REGISTER_STAGE,
+                state,
+                6,
+            )
 
     def register_monitoring_policy(self, policy: MonitoringPolicy) -> bool:
         if not isinstance(policy, MonitoringPolicy):
             raise TypeError("policy must be a MonitoringPolicy")
-        state = self._read()
-        self._require_agenda(
-            state[4], policy.agenda_id, policy.agenda_role, MONITORING_REGISTER_STAGE
-        )
-        return self._register_declaration(
-            policy.agenda_id,
-            policy,
-            state[7],
-            _detach_monitoring_policy,
-            MONITORING_REGISTER_STAGE,
-            state,
-            7,
-        )
+        with self._exclusive():
+            state = self._read()
+            self._require_agenda(
+                state[4], policy.agenda_id, policy.agenda_role, MONITORING_REGISTER_STAGE
+            )
+            return self._register_declaration(
+                policy.agenda_id,
+                policy,
+                state[7],
+                _detach_monitoring_policy,
+                MONITORING_REGISTER_STAGE,
+                state,
+                7,
+            )
 
     def _config_lookup(
         self, key: str, declarations: Mapping[str, object], detach: object, stage: str, label: str
@@ -735,6 +771,59 @@ class Workspace:
             observed="referenced declaration is absent or differs from the registered declaration",
             retry="register matching referenced declarations before retrying",
         )
+
+    @contextlib.contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Hold the workspace for one read-modify-write cycle.
+
+        `O_CREAT | O_EXCL` is the portable primitive here: creating the file succeeds for exactly
+        one process and fails for every other, on Windows and POSIX alike. `fcntl`/`msvcrt` locks
+        would need two implementations and neither survives an NFS mount well.
+
+        The waiting caller retries rather than blocking in the kernel, so it can give up with a
+        typed failure instead of hanging forever behind a holder that will never finish.
+        """
+        lock = self.path.parent / WORKSPACE_LOCK_FILENAME
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        deadline = _time.monotonic() + WORKSPACE_LOCK_TIMEOUT
+        handle: int | None = None
+        while True:
+            try:
+                handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            except FileExistsError:
+                age = _stale_lock_age(lock)
+                if age is not None and age > WORKSPACE_LOCK_STALE_AFTER:
+                    # The holder is gone. Removing the lock races with another waiter doing the
+                    # same thing, which is harmless: whoever loses simply keeps waiting.
+                    with contextlib.suppress(OSError):
+                        lock.unlink()
+                    continue
+                if _time.monotonic() >= deadline:
+                    raise _workspace_error(
+                        stage=WRITE_STAGE,
+                        code=f"{WRITE_STAGE}.locked",
+                        requirement=(
+                            f"workspace at {self.path} must be writable within "
+                            f"{WORKSPACE_LOCK_TIMEOUT:.0f}s"
+                        ),
+                        observed=f"another process has held {lock} for the whole timeout",
+                        retry=(
+                            "wait for the other writer to finish; if none is running, delete "
+                            f"{lock}"
+                        ),
+                    ) from None
+                _time.sleep(0.02)
+        try:
+            os.write(handle, str(os.getpid()).encode("utf-8"))
+            os.close(handle)
+            handle = None
+            yield
+        finally:
+            if handle is not None:
+                os.close(handle)
+            with contextlib.suppress(OSError):
+                lock.unlink()
 
     def _register_declaration(
         self,
@@ -895,6 +984,14 @@ class Workspace:
                 observed=str(error),
                 retry="make the workspace directory writable, then retry",
             ) from error
+
+
+def _stale_lock_age(lock: Path) -> float | None:
+    """Seconds since the lock was created, or None if it just disappeared."""
+    try:
+        return max(0.0, _time.time() - lock.stat().st_mtime)
+    except OSError:
+        return None
 
 
 def _detach_registration(registration: DatasetRegistration) -> DatasetRegistration:

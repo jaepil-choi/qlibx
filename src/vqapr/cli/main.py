@@ -11,10 +11,10 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from vqapr.cli import list_, new, register, run
-from vqapr.cli.envelope import emit, failure
+from vqapr.cli.envelope import UsageError, emit, failure
 
 _COMMANDS: dict[str, Any] = {
     "new": new,
@@ -24,8 +24,24 @@ _COMMANDS: dict[str, Any] = {
 }
 
 
+class _Parser(argparse.ArgumentParser):
+    """An `ArgumentParser` that refuses through the envelope instead of around it.
+
+    The default `error()` writes prose to stderr and raises `SystemExit`, which is a
+    `BaseException` and so passes straight through the handler's `except Exception`. An agent
+    calling a command wrong therefore got an empty stdout and a bare exit code, which is the one
+    thing `envelope.py` promises cannot happen.
+
+    `--help` and `--version` leave through `exit()` rather than `error()`, so they keep argparse's
+    own behaviour untouched.
+    """
+
+    def error(self, message: str) -> NoReturn:
+        raise UsageError(message, prog=self.prog)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="vqapr")
+    parser = _Parser(prog="vqapr")
     parser.add_argument(
         "--project-root",
         type=Path,
@@ -42,7 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except UsageError as error:
+        # The command line never reached a handler, so there is no project root to dump beside.
+        return emit(failure(error))
     project_root = Path(args.project_root)
     handler: Callable[..., dict[str, Any]] = args.handler
     try:

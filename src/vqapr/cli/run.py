@@ -30,7 +30,25 @@ from vqapr.public import (
 )
 from vqapr.public import run as execute_run
 
-_REQUIRED = ("strategy", "valuation", "instruments")
+_REQUIRED = (
+    "strategy",
+    "valuation",
+    "instruments",
+    "start",
+    "end",
+    "exchange",
+    "execution_input",
+    "initial_account",
+)
+"""Every key this command cannot execute without.
+
+`RunDefinition` permits `start`, `end`, `exchange`, `execution_input` and the initial account to be
+absent, because a definition is also built in-process by callers who supply them another way. This
+command always continues into `preflight_run` and then `run`, and both refuse without them. Listing
+only three keys here meant the other five surfaced from deep inside the framework as
+`stage: "unhandled"` — which tells an agent the framework broke, when the truth is its spec was
+incomplete. Checking them here names all of the missing keys at once instead.
+"""
 
 
 def _timestamp(value: object, *, name: str) -> datetime | None:
@@ -98,15 +116,25 @@ def _account(document: dict[str, Any]) -> tuple[AccountSnapshot | None, AccountM
     return snapshot, AccountMode[str(declared["mode"]).upper()]
 
 
+def require_declared_keys(document: dict[str, Any]) -> None:
+    """Reject an incomplete spec before anything is opened.
+
+    This reads only the user's own file, so it runs first. Checking it after `Workspace.open`
+    meant an incomplete spec in an uninitialised directory reported the missing workspace and
+    said nothing about the spec, sending the user to fix the wrong file.
+    """
+    missing = [key for key in _REQUIRED if key not in document]
+    if missing:
+        raise ValueError(f"run spec is missing required keys: {', '.join(missing)}")
+
+
 def definition_from_document(document: dict[str, Any], workspace: Workspace) -> RunDefinition:
     """Build a `RunDefinition` without re-implementing its invariants.
 
     Pairing rules (exchange with execution input, start with end, snapshot with mode) are
     enforced by `RunDefinition.__post_init__`, so this function only shapes values.
     """
-    missing = [key for key in _REQUIRED if key not in document]
-    if missing:
-        raise ValueError(f"run spec is missing required keys: {', '.join(missing)}")
+    require_declared_keys(document)
     exchange = document.get("exchange")
     snapshot, mode = _account(document)
     return RunDefinition(
@@ -142,6 +170,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     document = yaml.safe_load(args.spec.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
         raise TypeError("a run spec must be a YAML mapping")
+    require_declared_keys(document)
     workspace = Workspace.open(project_root)
     frozen = preflight_run(project_root, definition_from_document(document, workspace))
     result = execute_run(project_root, frozen)

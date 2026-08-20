@@ -36,7 +36,9 @@ means the strategy's own source code shows which one it chose.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
+
+from vqapr.portfolio.optimize import QUANTUM
 
 Weights = dict[str, Decimal]
 
@@ -63,18 +65,27 @@ def _panel(values: Mapping[str, Decimal], *, name: str) -> dict[str, Decimal]:
     return checked
 
 
-def _settle(weights: Weights, members: list[str], target: Decimal) -> None:
+def _settle(
+    weights: Weights, members: list[str], target: Decimal, grid: Decimal | None = None
+) -> None:
     """Place the division residual so the side reaches its target exactly.
 
     Dividing three ways leaves ``0.999...``, which would make the function report a total it did not
     produce. PRD 5.5 treats a declared total that does not match the actual weights as a failure, so
     the shortfall is settled rather than reported away.
 
-    It lands on the **largest** member of that side, where it is the smallest relative distortion,
-    with ties broken by instrument name so the result is order independent.
+    With a `grid`, every member is quantized first and the residual is settled afterwards. That
+    order is the whole point: quantizing after settling re-breaks the sum settling just fixed,
+    which is why a caller doing this outside has to settle a second time by hand.
+
+    The residual lands on the **largest** member of that side, where it is the smallest relative
+    distortion, with ties broken by instrument name so the result is order independent.
     """
     if not members:
         return
+    if grid is not None:
+        for name in members:
+            weights[name] = weights[name].quantize(grid, rounding=ROUND_HALF_EVEN)
     total = sum((weights[name] for name in members), Decimal(0))
     residual = target - total
     if residual == 0:
@@ -147,7 +158,13 @@ def proportional_weight(signal: Mapping[str, Decimal], sizes: Mapping[str, Decim
     return _normalise(sized, name="signal")
 
 
-def rescale(weights: Mapping[str, Decimal], *, long: Decimal, short: Decimal) -> Weights:
+def rescale(
+    weights: Mapping[str, Decimal],
+    *,
+    long: Decimal,
+    short: Decimal,
+    grid: Decimal | None = None,
+) -> Weights:
     """Match a declared budget by scaling each side independently.
 
     ``rescale(w, long=1, short=-1)`` is dollar neutral; ``rescale(w, long=1, short=0)`` is a
@@ -157,6 +174,16 @@ def rescale(weights: Mapping[str, Decimal], *, long: Decimal, short: Decimal) ->
     It matches, it never invents. Asking for a long side out of a book with no longs is refused,
     and so is asking for a zero short side out of a book that holds shorts — that is deleting
     positions, not rescaling them.
+
+    Without ``grid`` the result is an exact ratio, which is what a caller wants when the weights
+    feed further arithmetic. Pass ``grid`` — normally :data:`~vqapr.portfolio.optimize.QUANTUM` —
+    when the book has to be **both** on a grid and exactly on budget. Quantizing afterwards cannot
+    give you that: it re-breaks the total this function just matched, which forces a second settle
+    by hand. Doing it here keeps the order right, quantize first and settle second, so the residual
+    lands on the largest member of the side and stays on the grid.
+
+    ``grid`` must divide both side targets, because a total that is not itself on the grid cannot
+    be reached by weights that are.
     """
     checked = _panel(weights, name="weights")
     for name, target in (("long", long), ("short", short)):
@@ -168,6 +195,23 @@ def rescale(weights: Mapping[str, Decimal], *, long: Decimal, short: Decimal) ->
         raise WeightingRefusal("long must not be negative; it is the size of the long side")
     if short > 0:
         raise WeightingRefusal("short must not be positive; it is the size of the short side")
+
+    if grid is not None:
+        if not isinstance(grid, Decimal):
+            raise WeightingRefusal(f"grid must be a Decimal; got {type(grid).__name__}")
+        if not grid.is_finite() or grid <= 0:
+            raise WeightingRefusal(f"grid must be a positive finite step; got {grid}")
+        if grid.as_tuple().exponent < QUANTUM.as_tuple().exponent:
+            raise WeightingRefusal(
+                f"grid {grid} is finer than the canonical grid {QUANTUM}; "
+                "coarser steps are accepted, finer ones are not"
+            )
+        for name, target in (("long", long), ("short", short)):
+            if target % grid != 0:
+                raise WeightingRefusal(
+                    f"{name} target {target} is not a multiple of grid {grid}; "
+                    "weights on that grid cannot sum to it"
+                )
 
     long_gross = sum((value for value in checked.values() if value > 0), Decimal(0))
     short_gross = sum((value for value in checked.values() if value < 0), Decimal(0))
@@ -195,8 +239,8 @@ def rescale(weights: Mapping[str, Decimal], *, long: Decimal, short: Decimal) ->
         else:
             scaled[instrument] = Decimal(0)
 
-    _settle(scaled, [name for name, value in scaled.items() if value > 0], long)
-    _settle(scaled, [name for name, value in scaled.items() if value < 0], short)
+    _settle(scaled, [name for name, value in scaled.items() if value > 0], long, grid)
+    _settle(scaled, [name for name, value in scaled.items() if value < 0], short, grid)
     return scaled
 
 

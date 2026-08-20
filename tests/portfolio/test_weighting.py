@@ -9,6 +9,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from vqapr.portfolio.optimize import QUANTUM
 from vqapr.portfolio.weighting import (
     WeightingRefusal,
     equal_weight,
@@ -194,6 +195,116 @@ def test_rescale_accepts_already_scaled_long_short_weights() -> None:
     assert sum(value for value in weights.values() if value > 0) == Decimal("1.5")
     assert sum(value for value in weights.values() if value < 0) == Decimal("-1.5")
     assert weights["A"] / weights["B"] == Decimal("0.6") / Decimal("0.4")
+
+
+GRID = Decimal("0.01")
+
+
+def _on_grid(value: Decimal, grid: Decimal = GRID) -> bool:
+    return value == value.quantize(grid)
+
+
+def test_rescale_on_a_grid_is_both_on_the_grid_and_exactly_on_budget() -> None:
+    """The pair is the point: either alone is already available, both together were not."""
+    signal = {name: Decimal("1") for name in "ABC"} | {name: Decimal("-1") for name in "DEF"}
+    raw = equal_weight(signal)
+
+    weights = rescale(raw, long=Decimal("1"), short=Decimal("-1"), grid=GRID)
+
+    assert sum(value for value in weights.values() if value > 0) == Decimal("1")
+    assert sum(value for value in weights.values() if value < 0) == Decimal("-1")
+    assert sum(weights.values()) == 0
+    for name, value in weights.items():
+        assert _on_grid(value), f"{name} is off the grid at {value}"
+
+
+def test_quantizing_after_rescale_is_what_the_grid_argument_replaces() -> None:
+    """Quantizing afterwards re-breaks the total rescale just matched.
+
+    That is the whole reason the argument exists: a caller who quantizes the returned weights has
+    to settle a second time by hand to get the declared budget back.
+    """
+    raw = equal_weight({name: Decimal("1") for name in "ABC"})
+
+    exact = rescale(raw, long=Decimal("1"), short=Decimal("0"))
+    quantized_afterwards = {name: value.quantize(GRID) for name, value in exact.items()}
+
+    assert sum(exact.values()) == Decimal("1"), "the exact result is on budget"
+    assert sum(quantized_afterwards.values()) == Decimal("0.99"), "quantizing broke it again"
+
+    on_grid = rescale(raw, long=Decimal("1"), short=Decimal("0"), grid=GRID)
+
+    assert sum(on_grid.values()) == Decimal("1")
+    assert all(_on_grid(value) for value in on_grid.values())
+
+
+def test_rescale_on_a_grid_settles_the_residual_on_the_largest_member() -> None:
+    raw = signal_weight({"A": Decimal("3"), "B": Decimal("1"), "C": Decimal("1")})
+
+    weights = rescale(raw, long=Decimal("1"), short=Decimal("0"), grid=GRID)
+
+    # 0.6, 0.2, 0.2 land on the grid exactly, so a residual only appears where division does not
+    # terminate; the coarse grid below makes one.
+    coarse = rescale(
+        equal_weight({"A": Decimal("1"), "B": Decimal("1"), "C": Decimal("1")}),
+        long=Decimal("1"),
+        short=Decimal("0"),
+        grid=GRID,
+    )
+
+    assert weights == {"A": Decimal("0.60"), "B": Decimal("0.20"), "C": Decimal("0.20")}
+    # Every member quantizes to 0.33, so the tie is broken by name and the last one carries it.
+    assert coarse == {"A": Decimal("0.33"), "B": Decimal("0.33"), "C": Decimal("0.34")}
+
+
+def test_rescale_on_a_grid_is_order_independent() -> None:
+    forwards = {"A": Decimal("1"), "B": Decimal("1"), "C": Decimal("1")}
+    backwards = {"C": Decimal("1"), "B": Decimal("1"), "A": Decimal("1")}
+
+    assert rescale(
+        equal_weight(forwards), long=Decimal("1"), short=Decimal("0"), grid=GRID
+    ) == rescale(equal_weight(backwards), long=Decimal("1"), short=Decimal("0"), grid=GRID)
+
+
+def test_rescale_without_a_grid_keeps_the_exact_ratio() -> None:
+    """Not passing a grid still returns ratios, not rounded weights."""
+    raw = equal_weight({"A": Decimal("1"), "B": Decimal("1"), "C": Decimal("1")})
+
+    weights = rescale(raw, long=Decimal("1"), short=Decimal("0"))
+
+    assert weights["A"] == Decimal(1) / Decimal(3), "the ratio survives, unrounded"
+    assert not _on_grid(weights["A"]), "which means it is not on any coarse grid"
+    assert sum(weights.values()) == Decimal("1")
+
+
+def test_rescale_refuses_a_grid_finer_than_the_canonical_one() -> None:
+    raw = equal_weight({"A": Decimal("1"), "B": Decimal("1")})
+
+    with pytest.raises(WeightingRefusal, match="finer than the canonical grid"):
+        rescale(raw, long=Decimal("1"), short=Decimal("0"), grid=QUANTUM.scaleb(-1))
+
+
+def test_rescale_refuses_a_budget_that_is_not_on_the_grid() -> None:
+    """Weights on a grid cannot sum to a total that is not."""
+    raw = equal_weight({"A": Decimal("1"), "B": Decimal("1")})
+
+    with pytest.raises(WeightingRefusal, match="not a multiple of grid"):
+        rescale(raw, long=Decimal("1.005"), short=Decimal("0"), grid=GRID)
+
+
+@pytest.mark.parametrize("grid", [Decimal("0"), Decimal("-0.01")])
+def test_rescale_refuses_a_grid_that_is_not_a_positive_step(grid: Decimal) -> None:
+    raw = equal_weight({"A": Decimal("1"), "B": Decimal("1")})
+
+    with pytest.raises(WeightingRefusal, match="positive finite step"):
+        rescale(raw, long=Decimal("1"), short=Decimal("0"), grid=grid)
+
+
+def test_rescale_refuses_a_float_grid() -> None:
+    raw = equal_weight({"A": Decimal("1"), "B": Decimal("1")})
+
+    with pytest.raises(WeightingRefusal, match="grid must be a Decimal"):
+        rescale(raw, long=Decimal("1"), short=Decimal("0"), grid=0.01)
 
 
 def test_rescale_refuses_to_invent_a_side_that_does_not_exist() -> None:

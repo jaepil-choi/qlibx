@@ -3,6 +3,11 @@
 A profile declares its costs as an ordered tuple of :class:`CostRule`. Exactly one rule must match
 a given side; zero matches and several matches are both failures. Nothing here guesses a default
 rate, and no rule silently applies to a side it did not declare.
+
+A band matches on side alone, so every instrument on a venue pays the same rate. That is not
+enough for a venue whose tax treatment differs by instrument -- KRX exempts ETFs from the sale tax
+stocks pay -- and it is why an enhanced-index sleeve cannot currently be priced. See
+`docs/issues/003-a-cost-band-cannot-name-an-instrument.md` before extending this module.
 """
 
 from __future__ import annotations

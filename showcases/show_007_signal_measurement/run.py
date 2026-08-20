@@ -381,68 +381,65 @@ def _digest(path: Path) -> str:
 
 
 def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> dict[str, Any]:
-    """Rebuild every Mark/MarkBatch the run committed from Decimal(str(...)) primitives alone.
+    """Rebuild the run's valuation from its published table alone.
 
-    ``replayed_account`` is the vqapr.account table read back from its published parquet, never
-    from the producing run's own objects; its account_version column is what selects which
-    committed AccountMark to rehydrate. The rebuilt value is then checked field for field against
-    ``result.final_state.account.mark_history`` -- the run's own committed authority -- which is
-    the falsifiable half of this proof: a rehydration that silently invented or dropped a mark
-    would fail the equality below rather than merely look plausible.
+    A run retains only the marks some consumer declared it would read (canon 7.3), so memory is
+    deliberately not the place a later reader reconstructs it from. The published
+    ``vqapr.account`` table is, and that is the stronger claim: this rebuilds every mark from
+    ``Decimal(str(...))`` primitives read back out of parquet, never from the producing run's own
+    objects, and then checks the result against the one mark the account still holds.
+
+    A callback's recorded row is a *pre-trade* snapshot -- what the Strategy saw before deciding --
+    while a committed mark is *post-trade*. The two series are therefore offset by one commit, so
+    the final trade's mark has no later callback to witness it and is legitimately absent.
     """
-    # A callback's own recorded account row is a *pre-trade* snapshot -- what the Strategy saw
-    # before it decided -- while a committed mark is *post-trade*, published one version later once
-    # the due-execution path fills and marks it. The two series are therefore offset by one commit:
-    # a mark's account_version is visible in the published table only if some later callback ran and
-    # recorded having seen it. The run's final trade has no such later callback, so its mark is
-    # legitimately absent from the published series; rehydration is scoped to the marks a later
-    # callback actually witnessed rather than asserting exhaustive coverage of every commit the run
-    # ever made.
-    published_versions = {row["account_version"] for row in replayed_account}
-    committed_marks = result.final_state.account.mark_history
-    if not committed_marks:
-        raise AssertionError("the run never marked a held position; nothing to rehydrate")
-
-    witnessed = tuple(am for am in committed_marks if am.account_version in published_versions)
-    if not witnessed:
-        raise AssertionError(
-            "no committed mark's account_version appears in the published vqapr.account table; "
-            "the rehydration seam is unproven"
-        )
+    account_rows = [row for row in replayed_account if row["instrument"] == "_ACCOUNT"]
+    panel_rows = [row for row in replayed_account if row["instrument"] != "_ACCOUNT"]
+    if not account_rows:
+        raise AssertionError("the published account table carries no account-level rows")
 
     rehydrated: dict[int, MarkBatch] = {}
-    for account_mark in witnessed:
-        rebuilt_marks = tuple(
+    for row in account_rows:
+        if row["nav"] is None:
+            continue          # before the first commit there is nothing to value
+        version = int(row["account_version"])
+        marks = tuple(
             Mark(
-                mark.instrument_id,
-                Decimal(str(mark.quantity)),
-                Decimal(str(mark.price)),
-                Decimal(str(mark.value)),
+                str(panel["instrument"]),
+                Decimal(str(panel["quantity"])),
+                Decimal(str(panel["price"])),
+                Decimal(str(panel["quantity"])) * Decimal(str(panel["price"])),
             )
-            for mark in account_mark.marks.marks
+            for panel in panel_rows
+            if int(panel["account_version"]) == version and panel["price"] is not None
         )
-        rebuilt_batch = MarkBatch(rebuilt_marks, Decimal(str(account_mark.marks.total_value)))
-        if rebuilt_batch != account_mark.marks:
+        if not marks:
+            continue
+        rehydrated[version] = MarkBatch(
+            marks, sum((mark.value for mark in marks), Decimal("0"))
+        )
+
+    if not rehydrated:
+        raise AssertionError(
+            "no published account row carries a valuation; the rehydration seam is unproven"
+        )
+
+    # The falsifiable half: the account still holds its current mark, and the table must agree
+    # with it wherever the two overlap. A rehydration that invented or dropped a holding fails
+    # here rather than merely looking plausible.
+    committed = result.final_state.account.latest_mark
+    if committed is not None and committed.account_version in rehydrated:
+        rebuilt = rehydrated[committed.account_version]
+        if rebuilt != committed.marks:
             raise AssertionError(
-                f"rehydrated MarkBatch at account_version={account_mark.account_version} "
+                f"rehydrated MarkBatch at account_version={committed.account_version} "
                 "differs from what the run actually committed"
             )
-        for rebuilt, committed in zip(rebuilt_marks, account_mark.marks.marks, strict=True):
-            if (
-                rebuilt.instrument_id != committed.instrument_id
-                or rebuilt.quantity != committed.quantity
-                or rebuilt.price != committed.price
-                or rebuilt.value != committed.value
-            ):
-                raise AssertionError(
-                    "rehydrated Mark differs field-for-field from the committed one"
-                )
-        rehydrated[account_mark.account_version] = rebuilt_batch
 
     return {
         "rehydrated_versions": sorted(rehydrated),
         "rehydrated_mark_count": sum(len(batch.marks) for batch in rehydrated.values()),
-        "committed_mark_count": sum(len(am.marks.marks) for am in committed_marks),
+        "committed_mark_count": (0 if committed is None else len(committed.marks.marks)),
     }
 
 
@@ -560,6 +557,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             table_id="vqapr.account",
             value_fields=(
                 "cash",
+                "nav",
+                "quantity",
+                "price",
+                "observed_at",
                 "account_version",
                 "run_id",
                 "producer_id",

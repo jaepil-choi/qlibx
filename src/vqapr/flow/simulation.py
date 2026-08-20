@@ -11,6 +11,7 @@ from io import BytesIO
 from uuid import UUID, uuid5
 
 from vqapr.account.account import Account
+from vqapr.account.history import AccountHistory, AccountRequirement
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.constraints.constraint import Constraint
 from vqapr.constraints.evaluation import (
@@ -20,6 +21,7 @@ from vqapr.constraints.evaluation import (
     validate_intended_constraints,
 )
 from vqapr.constraints.findings import ConstraintReport
+from vqapr.data.lookback import RowsLookback
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.evidence.artifacts import (
@@ -320,7 +322,10 @@ DEFAULT_TABLE_PREFIX = "vqapr."
 
 DEFAULT_TABLES = (
     TableSpec(f"{DEFAULT_TABLE_PREFIX}weight", ("instrument", "weight")),
-    TableSpec(f"{DEFAULT_TABLE_PREFIX}account", ("instrument", "cash", "account_version")),
+    TableSpec(
+        f"{DEFAULT_TABLE_PREFIX}account",
+        ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
+    ),
 )
 """What every run records without the Strategy asking.
 
@@ -392,6 +397,22 @@ class SimulationFlow:
         self._exchange = exchange
         self._constraints = constraints
         self._valuation_service = valuation_service or ValuationService()
+        declared = tuple(getattr(strategy, "account_requirements", tuple)())
+        if any(not isinstance(item, AccountRequirement) for item in declared):
+            raise TypeError("account_requirements must return AccountRequirement values")
+        if len({item.consumer_id for item in declared}) != len(declared):
+            raise ValueError("account requirements must not repeat a consumer_id")
+        # One projection per callback, so a single merged declaration is what the run reads and
+        # what it retains. Separate consumers would each need their own window; there is one.
+        self._account_requirement = (
+            AccountRequirement(
+                "strategy",
+                tuple(dict.fromkeys(field for item in declared for field in item.fields)),
+                RowsLookback(max(item.lookback.rows for item in declared)),
+            )
+            if declared
+            else None
+        )
         self._horizon: ExecutionHorizon | None = None
         initial = state.current.account
         if not isinstance(initial, AccountState):
@@ -985,6 +1006,16 @@ class SimulationFlow:
             raise RuntimeError("Account mark root does not mirror Account authority")
         return root
 
+    def _account_history(self) -> AccountHistory:
+        """The Strategy's declared window onto marks the Account already committed.
+
+        Bounded by the declaration, so this copies the declared window rather than the run so
+        far. A Strategy that declared nothing gets an empty projection that refuses every read.
+        """
+        state = self._state.current.account
+        marks = state.mark_history if isinstance(state, AccountState) else ()
+        return AccountHistory(marks, self._account_requirement)
+
     def _committed_marks(self, state: AccountState) -> MarkBatch:
         """The valuation the Account already committed, or an empty one before the first mark.
 
@@ -1140,6 +1171,7 @@ class SimulationFlow:
                         window=window,
                         account=account,
                         constraint_bounds=constraint_bounds,
+                        account_history=self._account_history(),
                     )
                 ),
                 data_owner=self._frozen_run.strategy_requirements,
@@ -1361,6 +1393,14 @@ class SimulationFlow:
                 f"{DEFAULT_TABLE_PREFIX}weight",
                 {"instrument": target.instrument_id, "weight": str(weight)},
             )
+        # The account's own record, published rather than retained. A run keeps only the marks
+        # somebody declared they would read (canon 7.3), so this table -- not memory -- is what a
+        # later reader reconstructs the run's valuation from. Recording the *committed* mark, not
+        # a live one, is why the series is offset one commit behind the callback that writes it:
+        # a callback reports the account it saw before deciding.
+        mark = self._committed_mark()
+        prices = {} if mark is None else {m.instrument_id: m for m in mark.marks.marks}
+        observed = {} if mark is None else (mark.observed_at_by_instrument or {})
         recorder.append(
             f"{DEFAULT_TABLE_PREFIX}account",
             {
@@ -1368,9 +1408,31 @@ class SimulationFlow:
                 # no instrument axis rather than inventing a second key shape.
                 "instrument": _ACCOUNT_IDENTITY,
                 "cash": str(account.cash),
+                "nav": None if mark is None else str(mark.nav),
+                "quantity": None,
+                "price": None,
+                "observed_at": None,
                 "account_version": account.version,
             },
         )
+        for instrument in sorted(account.positions):
+            valued = prices.get(instrument)
+            recorder.append(
+                f"{DEFAULT_TABLE_PREFIX}account",
+                {
+                    "instrument": instrument,
+                    "cash": None,
+                    "nav": None,
+                    "quantity": str(account.positions[instrument]),
+                    "price": None if valued is None else str(valued.price),
+                    "observed_at": observed.get(instrument),
+                    "account_version": account.version,
+                },
+            )
+
+    def _committed_mark(self) -> object | None:
+        state = self._state.current.account
+        return state.latest_mark if isinstance(state, AccountState) else None
 
     def _set_callback_recorder(self, recorder: InvocationRecorder | None) -> None:
         self._strategy.recorder = recorder

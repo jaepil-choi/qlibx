@@ -10,6 +10,7 @@ from io import BytesIO
 from pathlib import Path
 
 from vqapr.account.account import Account, AccountMode
+from vqapr.account.history import retained_marks
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.analysis.performance import drawdown, nav_series, returns
 from vqapr.analysis.signal import (
@@ -386,7 +387,14 @@ def run(
             store=store,
             allowed_requirements=frozen.constraint_requirements,
         ),
-        account=Account(mode=frozen.initial_account_mode),
+        # A run retains exactly the marks somebody declared they would read. Declaring nothing
+        # keeps one, so a Strategy that never looks at its own path costs nothing to carry it.
+        account=Account(
+            mode=frozen.initial_account_mode,
+            retained_marks=retained_marks(
+                tuple(getattr(strategy, "account_requirements", tuple)())
+            ),
+        ),
         exchange=exchange,
         constraints=constraints,
     )

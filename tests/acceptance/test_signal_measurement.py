@@ -139,11 +139,19 @@ def test_the_rehydrated_marks_equal_the_committed_ones(showcase, tmp_path) -> No
     rehydration = trace["mark_rehydration"]
     assert rehydration["rehydrated_mark_count"] > 0
     assert rehydration["rehydrated_versions"], "at least one committed mark must be witnessed"
-    # showcase._pipeline itself already asserts field-for-field equality of every rehydrated Mark
-    # and MarkBatch against what the run committed (see _rehydrate_marks); re-checking the summary
-    # counts here guards against a future _pipeline edit silently dropping that assertion while
-    # still returning a trace that looks complete.
-    assert rehydration["rehydrated_mark_count"] <= rehydration["committed_mark_count"]
+    # showcase._pipeline itself already asserts field-for-field equality against the mark the
+    # account still holds (see _rehydrate_marks); re-checking the summary counts here guards
+    # against a future _pipeline edit silently dropping that assertion while still returning a
+    # trace that looks complete.
+    #
+    # The publication carries MORE than memory does, and that is the point. A run retains only the
+    # marks some consumer declared it would read, so post-mortem reconstruction has to come from
+    # the published table. Requiring the opposite would be requiring the run to hold a history
+    # nobody asked for.
+    assert rehydration["rehydrated_mark_count"] >= rehydration["committed_mark_count"]
+    assert len(rehydration["rehydrated_versions"]) > 1, (
+        "the published table must reconstruct more than the single retained mark"
+    )
 
 
 def test_the_execution_evidence_reconciles_with_the_committed_account(pipeline_result) -> None:

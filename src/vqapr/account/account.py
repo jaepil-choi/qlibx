@@ -80,11 +80,25 @@ class PreparedAccountTransition:
             *self.fill.journal_entries,
         ):
             raise ValueError("next_state must contain exactly the prepared fill history")
-        if self.next_state.mark_history[:-1] != self.fill.source.mark_history:
+        if not _appends_one_mark(self.fill.source.mark_history, self.next_state.mark_history):
             raise ValueError("next_state must preserve the published mark history")
         latest_mark = self.next_state.latest_mark
         if latest_mark is None or latest_mark.account_version != self.fill.next_snapshot.version:
             raise ValueError("next_state must append a mark for the prepared snapshot")
+
+
+def _appends_one_mark(source: tuple[object, ...], nxt: tuple[object, ...]) -> bool:
+    """Did `nxt` extend `source` by exactly one mark, allowing for retention?
+
+    A run keeps only as many marks as some consumer declared it would read, so the new history is
+    the tail of `source + (mark,)` rather than all of it. Comparing against that tail keeps the
+    'exactly one appended' guarantee intact while letting the oldest marks fall off the front:
+    what must never happen is a mark being altered, reordered or silently dropped from the middle.
+    """
+    if not nxt:
+        return False
+    kept = len(nxt) - 1
+    return nxt[:-1] == source[len(source) - kept :] if kept else True
 
 
 def _require_marks_within(marks: MarkBatch, snapshot: AccountSnapshot) -> None:
@@ -137,7 +151,7 @@ class PreparedAccountValuation:
             raise ValueError("a mark-only transition must not change the Account snapshot")
         if self.next_state.fill_history != self.source.fill_history:
             raise ValueError("a mark-only transition must not change the fill history")
-        if self.next_state.mark_history[:-1] != self.source.mark_history:
+        if not _appends_one_mark(self.source.mark_history, self.next_state.mark_history):
             raise ValueError("next_state must append exactly one mark")
         latest_mark = self.next_state.latest_mark
         if latest_mark is None or latest_mark.account_version != self.source.snapshot.version:
@@ -147,10 +161,17 @@ class PreparedAccountValuation:
 class Account:
     """Owns Account transition validation; AcceptedRunState owns publication."""
 
-    def __init__(self, *, mode: AccountMode) -> None:
+    def __init__(self, *, mode: AccountMode, retained_marks: int = 1) -> None:
         if not isinstance(mode, AccountMode):
             raise TypeError("mode must be an AccountMode")
+        if isinstance(retained_marks, bool) or not isinstance(retained_marks, int):
+            raise TypeError("retained_marks must be an integer")
+        if retained_marks < 1:
+            raise ValueError("an Account must retain at least its current mark")
         self._mode = mode
+        # How many marks stay resident. One unless a consumer declared it reads more: a run does
+        # not pay to carry a history nobody asked for. The full record goes to the recorder.
+        self._retained_marks = retained_marks
         self._state: AccountState | None = None
 
     @property
@@ -251,7 +272,7 @@ class Account:
             fill=fill,
             next_state=AccountState(
                 snapshot=fill.next_snapshot,
-                mark_history=(*fill.source.mark_history, mark),
+                mark_history=(*fill.source.mark_history, mark)[-self._retained_marks :],
                 fill_history=(*fill.source.fill_history, *fill.journal_entries),
             ),
         )
@@ -290,7 +311,7 @@ class Account:
             source=state,
             next_state=AccountState(
                 snapshot=current,
-                mark_history=(*state.mark_history, mark),
+                mark_history=(*state.mark_history, mark)[-self._retained_marks :],
                 fill_history=state.fill_history,
             ),
         )

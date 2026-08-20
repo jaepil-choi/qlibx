@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import BinaryIO
 
+from vqapr.account.history import AccountRequirement
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.models.contexts import StrategyModelContext
@@ -33,6 +34,14 @@ class StrategyModel(Model, ABC):
 
     def tables(self) -> tuple[TableSpec, ...]:
         """Declare diagnostic tables available during one callback invocation."""
+        return ()
+
+    def account_requirements(self) -> tuple[AccountRequirement, ...]:
+        """Declare which of the Account's own committed values this Strategy reads.
+
+        Declaring nothing means the run keeps only its current mark, so a Strategy that does not
+        look at its realised path costs nothing to carry one.
+        """
         return ()
 
     def save_payload(self, target: BinaryIO) -> None:

@@ -311,10 +311,21 @@ def test_the_defaults_need_no_declaration() -> None:
     assert {spec.table_id for spec in DEFAULT_TABLES} == {"vqapr.weight", "vqapr.account"}
     for spec in DEFAULT_TABLES:
         assert "instrument" in spec.fields, "every default row is keyed by instrument"
-    # Decision-time state, not a performance series: a callback has no marks, so there is no NAV
-    # to copy and none is claimed. Recording cash under the name NAV would be a wrong number under
-    # a true-sounding name.
-    assert not any("nav" in field for spec in DEFAULT_TABLES for field in spec.fields)
+    # The account table carries the valuation the Account already committed, not one invented at
+    # decision time. A callback has no marks of its own, so the NAV recorded here is the previous
+    # commit's -- the number the Strategy actually saw. This is what makes the run reconstructable
+    # from its publication rather than from memory, which retains only what someone declared they
+    # would read.
+    account = next(spec for spec in DEFAULT_TABLES if spec.table_id == "vqapr.account")
+    assert set(account.fields) == {
+        "instrument",
+        "cash",
+        "nav",
+        "quantity",
+        "price",
+        "observed_at",
+        "account_version",
+    }
 
 
 def test_the_namespace_predicate_is_precise_in_both_directions() -> None:

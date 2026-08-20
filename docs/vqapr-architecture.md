@@ -2224,8 +2224,14 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
   3,000종목 × 250세션도 무겁지 않다. 설정 가능하게 만들면 **얻는 것 없이 run identity에 필드만 하나 는다.**
 - **왜 고정 집합인가**: 집합이 고정이어야 "집합 밖 항목 요구 → 계산 전 실패"가 성립한다.
   추정 금지(PRD §6.6)를 지키는 데 필요한 건 *선언*이 아니라 *경계*다.
-- 소비자(StrategyModel/Monitor)는 `HistoryRequirement`로 **읽을 항목과 범위를 좁혀** 요구한다 — data 접근과 같은 원칙.
-- raw journal은 노출하지 않는다. immutable projection만 준다.
+- 소비자(StrategyModel/Monitor)는 `AccountRequirement`로 **읽을 항목과 범위를 좁혀** 요구한다 — data 접근과
+  같은 원칙이고 `RowsLookback`을 그대로 쓴다. `dataset_id`가 없는 것은 run에 계좌가 하나뿐이라 고를 것이
+  없기 때문이고, `scope`가 없는 것은 **필드 이름이 이미 스코프**이기 때문이다(`nav`는 시점당 하나,
+  `quantity`는 종목마다). lookback은 **필수** — 없으면 콜백당 O(전체 이력)이 되어 run당 제곱이 된다.
+- **선언이 보존도 정한다.** run은 누군가 읽겠다고 선언한 만큼만 마크를 들고 있고, 선언이 없으면 현재
+  마크 하나만 남는다. 전체 기록은 `vqapr.account`로 **발행**되므로 사후 재구성은 메모리가 아니라 발행물에서
+  한다. 쓰지 않는 기능 때문에 성능을 내주지 않는다.
+- raw journal은 노출하지 않는다. `JournalEntry`는 `account.py` 안에 있고 `fill_history`로만 보인다.
 - **왜 `memory`와 분리되어 있나**: `UC-ACCOUNT-HISTORY-001`은 strategy state 없이 stop-loss/cooldown이 표현
   가능해야 한다고 요구한다. history를 memory 위에 얹으면 research-only StrategyModel이 그 규칙을 쓸 수 없다.
 
@@ -2685,17 +2691,17 @@ src/vqapr/
 │   ├── execution_table.py ExecutionTableSpec + 집합 단위 점 조회
 │   ├── conventions.py     FillConvention. 소비자 셋(runtime agenda·venue·preflight)
 │   ├── fills.py           Fill · FillBatch · ZeroDealtReason
-│   └── venues/            academic.py · krx.py   ← 이름에 cadence가 없다
+│   ├── venue.py           Exchange protocol + AcademicExchange
+│   └── venues/            krx.py   ← 이름에 cadence가 없다
 │
 ├── account/         commit authority (닫힘)
-│   ├── account.py         Account + commit/mark/snapshot/history + AccountMode
-│   ├── snapshot.py        AccountSnapshot — 패키지 밖으로 나가는 유일한 것
-│   ├── history.py         고정 기록 집합 + HistoryRequirement 구독
-│   └── journal.py         append-only 전이 로그. 노출하지 않는다
+│   ├── account.py         Account + commit/mark + JournalEntry + AccountMode
+│   ├── snapshot.py        AccountSnapshot · AccountMark · AccountState
+│   └── history.py         고정 기록 집합 + AccountRequirement 구독 (§7.3)
 │
 ├── valuation/       (닫힘)
 │   ├── configuration.py   ValuationConfig + agenda reference
-│   ├── marking.py         보유 전체 mark 선언 → MarkBatch
+│   ├── marking.py         체결 스냅샷 가격 → MarkBatch
 │   └── marks.py           Mark · MarkBatch
 │
 ├── flow/            조립·배달·동결. 경제 규칙 없음 (닫힘)

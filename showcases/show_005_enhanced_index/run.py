@@ -830,8 +830,16 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     default_account = alpha_result.final_state.recorder_rows.get("vqapr.account", ())
     if not default_weight or not default_account:
         raise AssertionError("the package-owned default records are missing from a real run")
-    if len(default_account) != len(callback_days):
-        raise AssertionError(f"expected one account row per occurrence, saw {len(default_account)}")
+    # One account-level row per occurrence, plus one row per held instrument. The panel rows are
+    # what a later reader rebuilds the run's valuation from, since the run itself retains only the
+    # marks somebody declared they would read (canon 7.3).
+    account_level = [row for row in default_account if row["instrument"] == "_ACCOUNT"]
+    if len(account_level) != len(callback_days):
+        raise AssertionError(
+            f"expected one account-level row per occurrence, saw {len(account_level)}"
+        )
+    if len(default_account) <= len(account_level):
+        raise AssertionError("the account table carries no instrument panel rows")
 
     envelope = {"run_id", "producer_id", "stage", "event_time", "sequence"}
     if not envelope <= set(signal_rows[0]):

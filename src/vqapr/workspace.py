@@ -9,12 +9,13 @@ from __future__ import annotations
 import os
 import tempfile
 from collections.abc import Mapping
-from datetime import date, time
+from datetime import date, datetime, time
 from pathlib import Path
 
 import yaml
 
 from vqapr.constraints.monitoring import MonitoringPolicy
+from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -30,7 +31,7 @@ from vqapr.domain.identifiers import (
     execution_input_id,
     source_id,
 )
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.timestamps import LocalInstantDeclaration, require_tz_aware
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
@@ -230,6 +231,46 @@ class Workspace:
                 observed=f"registered datasets: {', '.join(sorted(self._datasets)) or '(none)'}",
                 retry="register the dataset, then retry",
             ) from error
+
+    def instruments(self, raw_dataset_id: str) -> tuple[str, ...]:
+        """Every instrument the registered dataset carries, sorted.
+
+        Reading a registered dataset must not require knowing where it is stored or in what
+        format. Without this, a caller resolves the dataset to a source, the source to a path,
+        and the path to parquet -- binding its own code to a storage decision the framework
+        declares is not part of its contract.
+        """
+        registration = self.dataset(raw_dataset_id)
+        spec = self.source(str(registration.source))
+        return tuple(
+            str(value)
+            for value in scan.distinct_values(spec, registration.instrument_field)
+            if value is not None
+        )
+
+    def evaluation_times(self, raw_dataset_id: str) -> tuple[datetime, ...]:
+        """Every distinct ``available_at`` the registered dataset carries, sorted.
+
+        This is what a caller needs to build an agenda from the sessions a dataset actually has,
+        rather than assuming a calendar the data may not match.
+        """
+        registration = self.dataset(raw_dataset_id)
+        spec = self.source(str(registration.source))
+        values = scan.distinct_values(spec, registration.available_at)
+        instants: list[datetime] = []
+        for value in values:
+            if value is None:
+                continue
+            if not isinstance(value, datetime):
+                raise _workspace_error(
+                    stage=LOOKUP_STAGE,
+                    code=f"{LOOKUP_STAGE}.invalid",
+                    requirement=f"dataset {raw_dataset_id!r} available_at must be a timestamp",
+                    observed=type(value).__name__,
+                    retry="register the dataset with a timestamp available_at, then retry",
+                )
+            instants.append(require_tz_aware(value, name="available_at"))
+        return tuple(sorted(instants))
 
     def source(self, raw_source_id: str) -> SourceSpec:
         """등록된 물리 source 선언 하나를 조회한다."""

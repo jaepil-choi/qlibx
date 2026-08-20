@@ -43,6 +43,19 @@ class ObservationBatch:
             raise TypeError("access must be an AccessRecord")
         object.__setattr__(self, "access", access)
 
+    @classmethod
+    def _trusted(cls, rows: Rows, access: AccessRecord) -> ObservationBatch:
+        """Build from rows this module already normalized.
+
+        The public constructor validates every cell because it accepts outside input. Rows taken
+        from a batch this module produced have passed that check once already, and checking them
+        again costs the same as the query that produced them.
+        """
+        batch = cls.__new__(cls)
+        object.__setattr__(batch, "rows", rows)
+        object.__setattr__(batch, "access", access)
+        return batch
+
 
 class ModelWindow:
     """One evaluation time, declared instruments, and only declared requirements."""
@@ -101,3 +114,34 @@ class ModelWindow:
         )
         self._accesses.append(batch.access)
         return batch
+
+    def snapshot(self, requirement: DataRequirement) -> ObservationBatch:
+        """The newest cross-section only: rows at the latest ``available_at`` per instrument.
+
+        A lookback returns a window, not a line. Even ``RowsLookback(1)`` returns each
+        instrument's own most recent row, and those rows do not share a date -- a name that
+        stopped publishing carries a row from whenever it last did. Reading that window as if it
+        were one moment silently mixes dates.
+
+        That is not hypothetical. A benchmark built this way summed above 1.0 because names that
+        had left the index contributed their final positive weight alongside current members.
+
+        Rows keep their own ``available_at``, so a caller can still see that one instrument's
+        newest observation is older than another's. What this removes is the need to find that
+        edge for oneself.
+        """
+        batch = self.observations(requirement)
+        newest: datetime | None = None
+        for row in batch.rows:
+            available_at = row["available_at"]
+            if not isinstance(available_at, datetime):
+                raise TypeError("registered available_at values must be datetimes")
+            if newest is None or available_at > newest:
+                newest = available_at
+        # One instant across the batch, not one per instrument. Taking each instrument's own
+        # newest row is exactly the window this method exists to collapse: it is what leaves a
+        # departed name's final value sitting beside current ones.
+        rows = tuple(row for row in batch.rows if row["available_at"] == newest)
+        return ObservationBatch._trusted(
+            tuple(sorted(rows, key=lambda row: str(row["instrument"]))), batch.access
+        )

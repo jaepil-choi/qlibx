@@ -86,9 +86,12 @@ class AcceptedRunState:
             and self.current_model_state_ref not in self._model_states
         ):
             raise ValueError("current_model_state_ref must be visible in this root")
-        if set(self._payloads) != set(self._model_states):
+        # Key views compare as sets without building two of them. The visible refs grow by one
+        # per callback and are never pruned, so anything that allocates per root here is a term
+        # that grows with run length.
+        if self._payloads.keys() != self._model_states.keys():
             raise ValueError("payloads must be keyed by exactly the visible ModelStateRefs")
-        unverified = frozenset(self._model_states) - self._verified
+        unverified = [ref for ref in self._model_states if ref not in self._verified]
         for ref in unverified:
             memory = self._model_states[ref]
             payload = self._payloads[ref]
@@ -96,26 +99,16 @@ class AcceptedRunState:
                 _invalid_payload(ref)
             if prepare_model_state(memory, payload).ref != ref:
                 raise ValueError("ModelStateRef must identify its exact memory and payload")
-        object.__setattr__(
-            self,
-            "_model_states",
-            MappingProxyType(
-                {
-                    ref: memory if ref in self._verified else normalize_memory(memory)
-                    for ref, memory in self._model_states.items()
-                }
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_payloads",
-            MappingProxyType(
-                {
-                    ref: bytes(payload) if isinstance(payload, bytes) else _invalid_payload(ref)
-                    for ref, payload in self._payloads.items()
-                }
-            ),
-        )
+        # Detach by copying -- an externally supplied mapping must not stay reachable for
+        # mutation -- but normalize and re-check only the refs no earlier root proved. The copy
+        # itself runs in C; the per-entry work does not, so it is the part worth narrowing.
+        states = dict(self._model_states)
+        payloads = dict(self._payloads)
+        for ref in unverified:
+            states[ref] = normalize_memory(states[ref])
+            payloads[ref] = bytes(payloads[ref])
+        object.__setattr__(self, "_model_states", MappingProxyType(states))
+        object.__setattr__(self, "_payloads", MappingProxyType(payloads))
         # Everything visible in this root has now been proved, either by an earlier root or by
         # the loop above.
         object.__setattr__(self, "_verified", frozenset(self._model_states))

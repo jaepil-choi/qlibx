@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -167,25 +168,77 @@ class ScanSession:
     매번 버려진다.
     """
 
-    __slots__ = ("_connections",)
+    __slots__ = ("_connections", "_database", "_grids", "_sizes")
 
     def __init__(self) -> None:
+        self._database: duckdb.DuckDBPyConnection | None = None
         self._connections: dict[str, duckdb.DuckDBPyConnection] = {}
+        self._grids: dict[tuple[str, str], tuple[object, ...]] = {}
+        self._sizes: dict[str, int] = {}
 
     def connection(self, spec: SourceSpec) -> duckdb.DuckDBPyConnection:
         _require_path(spec)
         key = spec.path.as_posix()
         con = self._connections.get(key)
         if con is None:
-            con = duckdb.connect()
+            # One database for the run, one cursor per source. `duckdb.connect()` with no path
+            # builds a whole in-memory database -- its own buffer pool, its own thread pool --
+            # so opening one per source made a run's sources compete for memory instead of
+            # sharing it. A cursor is an independent connection to the same database, so a
+            # statement running against one source still does not touch another's.
+            database = self._database
+            if database is None:
+                database = self._database = duckdb.connect()
+            con = database.cursor()
             con.execute("SET preserve_insertion_order=false")
             self._connections[key] = con
         return con
 
+    def instant_grid(self, spec: SourceSpec, available_at_field: str) -> tuple[object, ...]:
+        """Every distinct availability instant in one source, ascending, read once per run.
+
+        A source is frozen for the life of a run, so this grid is too. It exists to turn "how far
+        back must a query reach for N rows" into arithmetic instead of a query: without it every
+        `RowsLookback` callback would pay a scan just to guess its own lower bound.
+
+        Deliberately not filtered by instrument. The grid is a *guess* -- the caller re-reads
+        whatever the guess came up short on -- and an unfiltered grid is a superset, so the guess
+        it produces is at worst tighter than necessary, never wider than the data supports.
+        """
+        key = (spec.path.as_posix(), available_at_field)
+        grid = self._grids.get(key)
+        if grid is None:
+            column = _quote(available_at_field)
+            rows = (
+                self.connection(spec)
+                .execute(
+                    f"SELECT DISTINCT {column} FROM {_relation(spec)} "
+                    f"WHERE {column} IS NOT NULL ORDER BY {column}"
+                )
+                .fetchall()
+            )
+            grid = self._grids[key] = tuple(row[0] for row in rows)
+        return grid
+
+    def source_bytes(self, spec: SourceSpec) -> int:
+        """Total parquet bytes behind one source, measured once per run."""
+        key = spec.path.as_posix()
+        size = self._sizes.get(key)
+        if size is None:
+            path = spec.path
+            files = (path,) if path.is_file() else path.glob("**/*.parquet")
+            size = self._sizes[key] = sum(item.stat().st_size for item in files)
+        return size
+
     def close(self) -> None:
+        self._grids.clear()
+        self._sizes.clear()
         while self._connections:
             _, con = self._connections.popitem()
             con.close()
+        if self._database is not None:
+            self._database.close()
+            self._database = None
 
     def __enter__(self) -> ScanSession:
         return self
@@ -449,6 +502,94 @@ def positive_finite_when_true(
     return ConditionalPositiveCheck(invalid_rows=count, examples=examples)
 
 
+_ROWS_BOUND_FACTOR = 3
+"""How many times the declared row count the first lower-bound guess reaches back.
+
+The guess is counted in *instants*; the declaration is counted in *rows*, and an instrument does
+not publish on every instant. Three is deliberately loose. A guess that is too tight is not wrong
+-- the second stage re-reads every instrument that came up short -- it only costs an extra query,
+while a guess that is too loose merely gives back part of the saving.
+"""
+
+ROWS_BOUND_MIN_BYTES = 16 * 1024 * 1024
+"""Below this much parquet, a `RowsLookback` query is read without estimating a bound.
+
+Estimating costs one extra statement per query -- the check that says which instruments the bound
+would have changed the answer for. On a real warehouse that check is worth it: 210 MB of daily
+prices went from 165 ms to 88 ms per query. On a small source it is pure overhead, because duckdb
+reads the whole thing in less time than the extra round trip takes; measured on a 200 KB fixture
+panel, estimating made a 2,940-occurrence run 28% *slower*. So the estimate is gated on the only
+thing that decides which regime a source is in, and the gate is measured once per run.
+"""
+
+
+def _rows_lower_bound(
+    spec: SourceSpec,
+    *,
+    instrument_field: str,
+    available_at_field: str,
+    physical_fields: tuple[str, ...],
+    instruments: Sequence[str],
+    evaluation_time: object,
+    rows: int,
+    session: ScanSession,
+) -> tuple[object | None, tuple[str, ...]]:
+    """A lower bound for a `RowsLookback` query, plus the instruments it is not safe for.
+
+    A `RowsLookback` declares a count, not a span, so there is no bound to push down and the
+    window is evaluated over the whole history of the source on every callback. Applied naively a
+    bound silently corrupts the result: a halted or delisted name whose last observation predates
+    the bound simply disappears, and the run values that holding from a price that is no longer
+    there. No error is raised; the number just changes.
+
+    So the bound is a guess and the guess is checked. An instrument that already has `rows`
+    non-null values of *every* declared field inside the bound is provably unaffected by it --
+    its newest `rows` values all lie above the bound, which is exactly what the window keeps.
+    Every other instrument, including one that published nothing in the window at all, is
+    returned here and read without a bound.
+
+    Returns `(None, ())` when there is not enough history to bound, or when the source is small
+    enough that reading all of it is cheaper than deciding not to.
+    """
+    if session.source_bytes(spec) < ROWS_BOUND_MIN_BYTES:
+        return None, ()
+    grid = session.instant_grid(spec, available_at_field)
+    wanted = rows * _ROWS_BOUND_FACTOR
+    if len(grid) <= wanted:
+        return None, ()
+    try:
+        cut = bisect_right(grid, evaluation_time)  # type: ignore[type-var]
+    except TypeError:
+        # A naive availability column against an aware evaluation time, or vice versa. The
+        # unbounded query lets duckdb resolve that; guessing here must not be what raises.
+        return None, ()
+    if cut <= wanted:
+        return None, ()
+    lower = grid[cut - wanted]
+
+    instrument = _quote(instrument_field)
+    available = _quote(available_at_field)
+    counts = ", ".join(f"count({_quote(physical)})" for physical in physical_fields)
+    placeholders = ", ".join("?" for _ in instruments)
+    observed = {
+        row[0]: row[1:]
+        for row in session.connection(spec)
+        .execute(
+            f"SELECT {instrument}, {counts} FROM {_relation(spec)} "
+            f"WHERE {available} <= ? AND {available} >= ? AND {instrument} IN ({placeholders}) "
+            f"GROUP BY {instrument}",
+            [evaluation_time, lower, *instruments],
+        )
+        .fetchall()
+    }
+    unbounded = tuple(
+        name
+        for name in instruments
+        if name not in observed or any(count < rows for count in observed[name])
+    )
+    return lower, unbounded
+
+
 def observation_rows(
     spec: SourceSpec,
     *,
@@ -481,6 +622,32 @@ def observation_rows(
     if lower_bound is not None:
         predicates.append(f"{available} >= ?")
         parameters.append(lower_bound)
+    elif rows is not None and session is not None:
+        # A RowsLookback carries no bound of its own, so without this the window below is
+        # evaluated over the source's entire history on every callback. `_rows_lower_bound`
+        # returns a bound together with the instruments it would have changed the answer for;
+        # those are read with no bound at all, in the same statement, so the result is the one
+        # the unbounded query would have produced. The estimate needs a session because it is
+        # only worth making when the grid it reads can be kept for the rest of the run.
+        estimated, unbounded_instruments = _rows_lower_bound(
+            spec,
+            instrument_field=instrument_field,
+            available_at_field=available_at_field,
+            physical_fields=tuple(dict.fromkeys(fields.values())),
+            instruments=instruments,
+            evaluation_time=evaluation_time,
+            rows=rows,
+            session=session,
+        )
+        if estimated is not None and len(unbounded_instruments) < len(instruments):
+            if unbounded_instruments:
+                exempt = ", ".join("?" for _ in unbounded_instruments)
+                predicates.append(f"({available} >= ? OR {instrument} IN ({exempt}))")
+                parameters.append(estimated)
+                parameters.extend(unbounded_instruments)
+            else:
+                predicates.append(f"{available} >= ?")
+                parameters.append(estimated)
     where = " AND ".join(predicates)
 
     projections = [

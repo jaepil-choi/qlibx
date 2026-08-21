@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 FLOW_ENVELOPE_FIELDS = frozenset({"run_id", "producer_id", "stage", "event_time", "sequence"})
 
@@ -14,6 +14,13 @@ class TableSpec:
 
     table_id: str
     fields: tuple[str, ...]
+    field_set: frozenset[str] = field(default=frozenset(), init=False, compare=False, repr=False)
+    """`fields` as a set, so the recorder does not rebuild one per appended row.
+
+    A callback appends one row per target, and the row-shape check compares two sets. Building the
+    declared side once per spec instead of once per row removes an allocation from the innermost
+    recorder loop.
+    """
 
     def __post_init__(self) -> None:
         if not isinstance(self.table_id, str) or not self.table_id.strip():
@@ -45,6 +52,8 @@ class TableSpec:
                 "table_id and fields must not contain control or format characters: "
                 f"{[hex(ord(ch)) for ch in hidden]}"
             )
-        reserved = sorted(set(self.fields) & FLOW_ENVELOPE_FIELDS)
+        declared = frozenset(self.fields)
+        reserved = sorted(declared & FLOW_ENVELOPE_FIELDS)
         if reserved:
             raise ValueError(f"Flow envelope fields are reserved: {reserved}")
+        object.__setattr__(self, "field_set", declared)

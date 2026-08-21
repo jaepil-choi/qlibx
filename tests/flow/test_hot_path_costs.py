@@ -10,7 +10,7 @@ See `docs/code-review/2026-08-19-vqapr-performance.md` sections 6 and 8.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -285,3 +285,160 @@ def test_an_externally_built_root_is_still_verified_in_full() -> None:
             _payloads={prepared.ref: prepared.payload},
             current_model_state_ref=prepared.ref,
         )
+
+
+# --------------------------------------------------------------------------------------
+# G-1: a RowsLookback lower bound must not change what a query returns
+# --------------------------------------------------------------------------------------
+
+_BOUND_SESSIONS = tuple(
+    datetime(2024, 1, 1, 6, 30, tzinfo=UTC) + timedelta(days=day) for day in range(400)
+)
+
+
+@pytest.fixture
+def halted_source(tmp_path: Path) -> SourceSpec:
+    """A panel whose third name stopped publishing long before the evaluation time.
+
+    This is the case a naive SQL lower bound corrupts in silence: HALTED's last observation is
+    340 sessions old, so any bound tight enough to be worth pushing down excludes every row it
+    has, and the name vanishes from a result that used to carry its final price.
+    """
+    rows = [
+        {"available_at": stamp, "instrument": name, "close": Decimal(100 + index), "volume": index}
+        for index, stamp in enumerate(_BOUND_SESSIONS)
+        for name in ("AAA", "BBB")
+    ]
+    rows.extend(
+        {
+            "available_at": stamp,
+            "instrument": "HALTED",
+            "close": Decimal(50 + index),
+            "volume": index,
+        }
+        for index, stamp in enumerate(_BOUND_SESSIONS[:60])
+    )
+    # A name that lists late has plenty of recent history but less than the declared window.
+    rows.extend(
+        {
+            "available_at": stamp,
+            "instrument": "LATE",
+            "close": Decimal(70 + index),
+            "volume": index,
+        }
+        for index, stamp in enumerate(_BOUND_SESSIONS[-5:])
+    )
+    source = tmp_path / "halted.parquet"
+    pq.write_table(
+        pa.Table.from_pylist(
+            rows,
+            schema=pa.schema(
+                [
+                    ("available_at", pa.timestamp("us", tz="UTC")),
+                    ("instrument", pa.string()),
+                    ("close", pa.decimal128(18, 4)),
+                    ("volume", pa.int64()),
+                ]
+            ),
+        ),
+        source,
+    )
+    return SourceSpec.of("halted-source", source)
+
+
+@pytest.fixture
+def bound_every_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the estimate apply to a fixture-sized source.
+
+    The production gate keeps small sources on the unbounded path, so without this every G-1
+    assertion below would pass by never exercising the bound it exists to guard.
+    """
+    monkeypatch.setattr(scan, "ROWS_BOUND_MIN_BYTES", 0)
+
+
+def _observation_rows(spec: SourceSpec, *, rows: int, session: scan.ScanSession | None):
+    return scan.observation_rows(
+        spec,
+        instrument_field="instrument",
+        available_at_field="available_at",
+        key_fields=("available_at", "instrument"),
+        fields={"close": "close", "volume": "volume"},
+        instruments=("AAA", "BBB", "HALTED", "LATE"),
+        evaluation_time=_BOUND_SESSIONS[-1],
+        rows=rows,
+        session=session,
+    )
+
+
+@pytest.mark.parametrize("rows", [1, 5, 60, 120])
+def test_a_bounded_rows_lookback_returns_the_unbounded_result(
+    halted_source: SourceSpec, bound_every_source: None, rows: int
+) -> None:
+    """G-1. The bound is an optimisation, so the answer may not depend on it.
+
+    Without a session there is no grid to estimate from and the query stays unbounded, which
+    makes the sessionless call the reference the bounded one has to reproduce exactly -- rows,
+    values and order.
+    """
+    reference = _observation_rows(halted_source, rows=rows, session=None)
+    with scan.ScanSession() as session:
+        bounded = _observation_rows(halted_source, rows=rows, session=session)
+    assert bounded == reference
+    assert {str(row["instrument"]) for row in reference} == {"AAA", "BBB", "HALTED", "LATE"}
+
+
+def test_a_bounded_rows_lookback_still_carries_the_halted_name(
+    halted_source: SourceSpec, bound_every_source: None
+) -> None:
+    """The specific corruption the two-stage form exists to prevent.
+
+    HALTED's newest close is what a run marks that holding at. A bound that dropped it would not
+    fail; the run would simply value the book differently.
+    """
+    with scan.ScanSession() as session:
+        bounded = _observation_rows(halted_source, rows=5, session=session)
+    halted = [row for row in bounded if str(row["instrument"]) == "HALTED"]
+    assert len(halted) == 5
+    assert halted[-1]["available_at"] == _BOUND_SESSIONS[59]
+    assert halted[-1]["close"] == Decimal("109.0000")
+
+
+def test_the_instant_grid_is_read_once_per_source_for_the_whole_run(
+    halted_source: SourceSpec, bound_every_source: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The estimate is only worth making if its input is not re-read per callback."""
+    with scan.ScanSession() as session:
+        grids = 0
+        original = scan.ScanSession.instant_grid
+
+        def counting(self, spec, available_at_field):  # type: ignore[no-untyped-def]
+            nonlocal grids
+            before = dict(self._grids)
+            result = original(self, spec, available_at_field)
+            if len(self._grids) != len(before):
+                grids += 1
+            return result
+
+        monkeypatch.setattr(scan.ScanSession, "instant_grid", counting)
+        for _ in range(8):
+            _observation_rows(halted_source, rows=5, session=session)
+        assert grids == 1
+
+
+def test_a_small_source_is_never_probed_for_a_lower_bound(halted_source: SourceSpec) -> None:
+    """The gate, not the estimate. An extra statement per query is a loss on a small source."""
+    calls = 0
+    original = scan._rows_lower_bound
+
+    def counting(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    with scan.ScanSession() as session:
+        assert session.source_bytes(halted_source) < scan.ROWS_BOUND_MIN_BYTES
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(scan, "_rows_lower_bound", counting)
+            _observation_rows(halted_source, rows=5, session=session)
+        assert calls == 1
+        assert session._grids == {}, "a gated-out source must not pay for a grid"

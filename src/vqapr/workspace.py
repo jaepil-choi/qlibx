@@ -7,6 +7,7 @@ workspace는 선언을 보관하고 조회할 뿐 검증하지 않는다. datase
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import tempfile
 import time as _time
@@ -58,6 +59,28 @@ users inventing slightly different ones do not protect each other.
 
 WORKSPACE_LOCK_TIMEOUT = 30.0
 WORKSPACE_LOCK_STALE_AFTER = 120.0
+
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+"""libyaml when the installed PyYAML was built with it, the pure-Python classes otherwise.
+
+The workspace holds every agenda occurrence, so the file grows with run length rather than with
+the number of declarations: a three-year daily agenda set is roughly 750 KB. Parsing that with
+PyYAML's pure-Python loader costs about 1.1 s and emitting it about 0.5 s, against 0.24 s and
+0.14 s through libyaml, and a registration pays both. The emitted bytes are identical between the
+two dumpers for every document this module writes, which `tests/test_workspace.py` pins.
+"""
+
+_DECODE_CACHE_LIMIT = 8
+_decode_cache: dict[str, tuple[dict, ...]] = {}
+"""Decoded workspaces keyed by the sha256 of their exact text.
+
+Every registration reads the file twice -- once through `Workspace.create`, once inside the
+exclusive lock -- and a process usually makes several registrations in a row against a file that
+only grows by one declaration each time. Keying on content rather than on path or mtime means a
+hit is only possible for bytes that were already decoded, so no writer, in this process or
+another, can be served a stale workspace.
+"""
 """A lock older than this is assumed to belong to a process that died holding it.
 
 Without this a crash leaves the workspace permanently unwritable, and the recovery step is
@@ -889,7 +912,7 @@ class Workspace:
             ) from error
 
         try:
-            return _decode(text)
+            return _decode_cached(text)  # type: ignore[return-value]
         except (TypeError, ValueError, yaml.YAMLError) as error:
             message = str(error)
             requirement = (
@@ -1182,7 +1205,24 @@ def _encode(
     for section in ("agendas", "strategy_configs", "valuation_configs", "monitoring_policies"):
         if not document[section]:
             del document[section]
-    return yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
+    return yaml.dump(document, Dumper=_YAML_DUMPER, allow_unicode=True, sort_keys=False)
+
+
+def _decode_cached(text: str) -> tuple[dict, ...]:
+    """`_decode`, memoized on the exact bytes, returning mappings the caller may keep.
+
+    Callers merge a declaration into copies rather than mutating what they were handed, but the
+    copies are handed out anyway: a cached section is a shared object, and one caller mutating it
+    would silently rewrite another caller's view of the workspace.
+    """
+    key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    cached = _decode_cache.get(key)
+    if cached is None:
+        cached = _decode(text)
+        if len(_decode_cache) >= _DECODE_CACHE_LIMIT:
+            _decode_cache.clear()
+        _decode_cache[key] = cached
+    return tuple(dict(section) for section in cached)
 
 
 def _decode(
@@ -1197,7 +1237,7 @@ def _decode(
     dict[str, ValuationConfig],
     dict[str, MonitoringPolicy],
 ]:
-    document = yaml.safe_load(text)
+    document = yaml.load(text, Loader=_YAML_LOADER)
     required_roots = {"sources", "datasets"}
     optional_roots = {
         "execution_inputs",

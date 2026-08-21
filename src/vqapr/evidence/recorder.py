@@ -61,13 +61,17 @@ class InvocationRecorder:
         except KeyError as exc:
             raise KeyError(f"undeclared recorder table: {table_id}") from exc
         normalized = normalize_rows(rows)
+        declared = spec.field_set
+        staged = self._rows[table_id]
         for row in normalized:
-            if set(row) != set(spec.fields):
+            # Key views compare and intersect as sets without allocating one per row. Both checks
+            # keep their original order, so the failure a malformed row raises is unchanged.
+            if row.keys() != declared:
                 raise ValueError(f"row fields for {table_id} must exactly match declared fields")
-            if FLOW_ENVELOPE_FIELDS & set(row):
+            if not FLOW_ENVELOPE_FIELDS.isdisjoint(row.keys()):
                 raise ValueError("Flow envelope fields are reserved")
-            sequence = len(self._rows[table_id])
-            self._rows[table_id].append(
+            sequence = len(staged)
+            staged.append(
                 {
                     **row,
                     "run_id": self._run_id,
@@ -79,9 +83,14 @@ class InvocationRecorder:
             )
 
     def staged_rows(self) -> Mapping[str, Rows]:
-        """Return detached rows for a candidate root; this never publishes them."""
+        """Return detached rows for a candidate root; this never publishes them.
+
+        Detached, not re-validated. Every row here was normalized by `append_batch` and has been
+        owned by this recorder ever since, so a second `normalize_rows` pass would re-check values
+        this class produced -- once per callback, over every row the callback appended.
+        """
         return MappingProxyType(
-            {table_id: normalize_rows(rows) for table_id, rows in self._rows.items()}
+            {table_id: tuple(dict(row) for row in rows) for table_id, rows in self._rows.items()}
         )
 
     def manifests(self) -> tuple[RecorderManifest, ...]:

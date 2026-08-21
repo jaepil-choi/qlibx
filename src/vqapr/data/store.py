@@ -91,15 +91,17 @@ class DuckDbObservationStore:
             session=self.__session,
         )
         normalized = normalize_rows(raw_rows)
-        actual = {
-            instrument: {field: 0 for field in requirement.fields} for instrument in instruments
-        }
+        # One dict lookup per row instead of one per row and field, and `dict.fromkeys` instead of
+        # a comprehension per instrument. The counts and the failure on an unknown instrument are
+        # what they were.
+        declared_fields = requirement.fields
+        actual = {instrument: dict.fromkeys(declared_fields, 0) for instrument in instruments}
         max_available_at: datetime | None = None
         for row in normalized:
-            instrument = str(row["instrument"])
-            for field in requirement.fields:
+            counts = actual[str(row["instrument"])]
+            for field in declared_fields:
                 if row[field] is not None:
-                    actual[instrument][field] += 1
+                    counts[field] += 1
             available_at = row["available_at"]
             if not isinstance(available_at, datetime):
                 raise TypeError("registered available_at values must be datetimes")
@@ -118,4 +120,7 @@ class DuckDbObservationStore:
             actual_rows=actual,
             max_available_at=max_available_at,
         )
-        return ObservationBatch(normalized, access)
+        # `normalized` came out of `normalize_rows` three statements ago. The public constructor
+        # would validate every cell again, which costs about as much as the query that produced
+        # them, so take the same trusted door `ModelWindow.snapshot` already uses.
+        return ObservationBatch._trusted(normalized, access)

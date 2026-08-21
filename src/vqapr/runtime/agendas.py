@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -76,6 +76,15 @@ class OperationOccurrence:
     occurrence_id: OccurrenceId
     role: OperationRole
     local_instant: LocalInstantDeclaration
+    _content_identity: str = field(default="", init=False, repr=False, compare=False)
+    """Memo for `content_identity`, which is derived from frozen fields and cannot change.
+
+    Deriving it costs a json encode and a sha256. `FrozenRun.identity` re-derives it for every
+    occurrence of every agenda on each access, and a run reads that identity about sixteen times
+    per callback, so recomputing made the run quadratic in its own length. Kept lazy rather than
+    computed in `__post_init__` because decoding a workspace builds every occurrence and never
+    asks any of them for an identity.
+    """
 
     def __post_init__(self) -> None:
         _require_identifier(self.occurrence_id, name="occurrence_id")
@@ -94,13 +103,19 @@ class OperationOccurrence:
 
     @property
     def content_identity(self) -> str:
-        return _identity(
-            {
-                "occurrence_id": self.occurrence_id,
-                "role": self.role,
-                "local_instant": self.local_instant.identity(),
-            }
-        )
+        if not self._content_identity:
+            object.__setattr__(
+                self,
+                "_content_identity",
+                _identity(
+                    {
+                        "occurrence_id": self.occurrence_id,
+                        "role": self.role,
+                        "local_instant": self.local_instant.identity(),
+                    }
+                ),
+            )
+        return self._content_identity
 
     def sort_key(self) -> tuple[datetime, int, str]:
         return (
@@ -117,6 +132,13 @@ class OperationAgenda:
     timezone: str
     occurrences: tuple[OperationOccurrence, ...]
     provenance: str
+    _content_identity: str = field(default="", init=False, repr=False, compare=False)
+    _provenance_identity: str = field(default="", init=False, repr=False, compare=False)
+    """Memos for the two derived identities. See `OperationOccurrence._content_identity`.
+
+    `provenance_identity` is derived from `content_identity`, so leaving both uncached meant one
+    provenance read re-hashed every occurrence twice.
+    """
 
     def __post_init__(self) -> None:
         _require_identifier(self.agenda_id, name="agenda_id")
@@ -143,23 +165,37 @@ class OperationAgenda:
 
     @property
     def content_identity(self) -> str:
-        return _identity(
-            {
-                "role": self.role,
-                "timezone": self.timezone,
-                "occurrences": [occurrence.content_identity for occurrence in self.occurrences],
-            }
-        )
+        if not self._content_identity:
+            object.__setattr__(
+                self,
+                "_content_identity",
+                _identity(
+                    {
+                        "role": self.role,
+                        "timezone": self.timezone,
+                        "occurrences": [
+                            occurrence.content_identity for occurrence in self.occurrences
+                        ],
+                    }
+                ),
+            )
+        return self._content_identity
 
     @property
     def provenance_identity(self) -> str:
-        return _identity(
-            {
-                "agenda_id": self.agenda_id,
-                "provenance": self.provenance,
-                "content_identity": self.content_identity,
-            }
-        )
+        if not self._provenance_identity:
+            object.__setattr__(
+                self,
+                "_provenance_identity",
+                _identity(
+                    {
+                        "agenda_id": self.agenda_id,
+                        "provenance": self.provenance,
+                        "content_identity": self.content_identity,
+                    }
+                ),
+            )
+        return self._provenance_identity
 
     def inclusive_slice(self, start: datetime, end: datetime) -> tuple[OperationOccurrence, ...]:
         require_tz_aware(start, name="start")

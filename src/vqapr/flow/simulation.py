@@ -1684,6 +1684,10 @@ class SimulationFlow:
                 execution_input,
                 start_time=start,
                 end_time=frozen.end,
+                # The run owns a scan session; the horizon is the one query that reads every
+                # distinct instant in the execution table, so it is the last one that should be
+                # opening a connection of its own.
+                session=self._scan_session,
             )
         return self._horizon
 

@@ -218,6 +218,13 @@ class FrozenRun:
     datasets: tuple[DatasetRegistration, ...] = ()
     sources: tuple[SourceSpec, ...] = ()
     static_occurrences: tuple[OperationOccurrence, ...] = ()
+    _identity: str = field(default="", init=False, repr=False, compare=False)
+    """Memo for `identity`, which every frozen field already determines.
+
+    A run reads this about sixteen times per callback, and deriving it walks every occurrence of
+    every agenda. Recomputing therefore cost O(occurrences) per callback -- quadratic in run
+    length -- to produce a string that cannot change once `__post_init__` returns.
+    """
 
     def __post_init__(self) -> None:
         if not isinstance(self.strategy, StrategyConfig):
@@ -366,6 +373,11 @@ class FrozenRun:
     @property
     def identity(self) -> str:
         """Canonical identity of frozen declarations and static dispatch order."""
+        if not self._identity:
+            object.__setattr__(self, "_identity", self._derive_identity())
+        return self._identity
+
+    def _derive_identity(self) -> str:
         return _identity(
             {
                 "strategy": (

@@ -5,10 +5,10 @@ Mentioning is not running: before this file, no test invoked `new`, `register`, 
 so the whole `spec.yaml -> RunDefinition -> preflight_run -> run` path was unexecuted. These tests
 call `main(argv)` and read the JSON it emits, which is exactly what an agent gets.
 
-Datasets, sources, agendas, execution inputs and configs are registered through the library,
-because the CLI has no command that registers them (`register` takes `datamodel|strategy`, while
-`list` reads eight kinds). That asymmetry is a finding, recorded in the handoff, not a thing this
-file works around silently.
+Datasets, sources, agendas, execution inputs and configs are declared through `vqapr declare`,
+which is the command that closed that gap. This file previously reached past the CLI into the
+library for all seven, under a docstring admitting the CLI could not register them; the workspace
+below is now reachable by typing `vqapr` commands only, which is the property that matters.
 """
 
 from __future__ import annotations
@@ -23,28 +23,10 @@ import pytest
 
 from vqapr.cli.main import main
 from vqapr.public import (
-    ComponentKind,
-    DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     LocalInstantDeclaration,
-    MonitoringPolicy,
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
-    SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
-    component_ref,
-    register_agenda,
-    register_component,
-    register_dataset,
-    register_execution_input,
-    register_monitoring_policy,
-    register_strategy_config,
-    register_valuation_config,
 )
 
 _ZONE = ZoneInfo("Asia/Seoul")
@@ -115,40 +97,66 @@ def _exchange_component(root: Path) -> Path:
     return path
 
 
+def _declaration(root: Path, observation: Path, execution: Path) -> Path:
+    """The whole non-component workspace as one file, exactly as a user would write it."""
+    path = root / "workspace.yaml"
+    path.write_text(
+        f"""
+datasets:
+  prices:
+    source_id: price-source
+    path: {observation.as_posix()}
+    instrument_field: instrument
+    available_at: available_at
+    key_fields: [available_at, instrument]
+    fields: {{close: close}}
+
+execution_inputs:
+  venue-daily:
+    table:
+      source_id: venue-source
+      path: {execution.as_posix()}
+      trade_at_field: trade_at
+      instrument_field: instrument
+      is_tradable_field: is_tradable
+      price_fields: {{close: close}}
+    fill:
+      selector: next_eligible
+      at: "15:30"
+      timezone: Asia/Seoul
+      trade_price: close
+
+agendas:
+  alpha:
+    role: strategy_callback
+    from_dataset: prices
+    at: "04:00"
+    timezone: Asia/Seoul
+  valuing:
+    role: valuation
+    from_dataset: prices
+    at: "16:00"
+    timezone: Asia/Seoul
+  watching:
+    role: monitoring
+    from_dataset: prices
+    at: "17:00"
+    timezone: Asia/Seoul
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _workspace_for_run(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Everything `run` needs that the CLI itself cannot register."""
+    """Everything `run` needs, reached through the CLI alone."""
     observation, execution = _parquets(root)
-    register_dataset(
-        root,
-        DatasetRegistration.of(
-            "prices",
-            "price-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            key_fields=("available_at", "instrument"),
-            fields={"close": "close"},
-        ),
-        SourceSpec.of("price-source", observation),
+
+    code, payload = _cli(
+        capsys, "--project-root", str(root),
+        "declare", str(_declaration(root, observation, execution)),
     )
-    register_execution_input(
-        root,
-        ExecutionInputRegistration.of(
-            "venue-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("venue-source", execution),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), "Asia/Seoul", "close"),
-        ),
-    )
-    strategy_agenda = _agenda("alpha", OperationRole.STRATEGY_CALLBACK, time(4))
-    valuation_agenda = _agenda("valuing", OperationRole.VALUATION, time(16))
-    monitoring_agenda = _agenda("watching", OperationRole.MONITORING, time(17))
-    for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(root, agenda)
+    assert code == 0, payload
 
     code, payload = _cli(
         capsys, "--project-root", str(root), "new", "strategy", "my-alpha",
@@ -161,24 +169,29 @@ def _workspace_for_run(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
     )
     assert code == 0, registered
 
-    register_component(
-        root, component_ref("venue", ComponentKind.EXCHANGE, _exchange_component(root), "Venue")
+    code, venue = _cli(
+        capsys, "--project-root", str(root), "register", "exchange", "venue",
+        str(_exchange_component(root)), "Venue",
     )
-    register_strategy_config(
-        root,
-        StrategyConfig(
-            component_ref(
-                "my-alpha",
-                ComponentKind.STRATEGY_MODEL,
-                Path(registered["path"]),
-                "MyAlpha",
-            ),
-            "alpha",
-            OperationRole.STRATEGY_CALLBACK,
-        ),
+    assert code == 0, venue
+
+    configs = root / "configs.yaml"
+    configs.write_text(
+        """
+strategy_configs:
+  my-alpha:
+    agenda_id: alpha
+valuation_configs:
+  valuing:
+    agenda_id: valuing
+monitoring_policies:
+  watching:
+    agenda_id: watching
+""",
+        encoding="utf-8",
     )
-    register_valuation_config(root, ValuationConfig("valuing", OperationRole.VALUATION))
-    register_monitoring_policy(root, MonitoringPolicy("watching", OperationRole.MONITORING))
+    code, payload = _cli(capsys, "--project-root", str(root), "declare", str(configs))
+    assert code == 0, payload
 
 
 def _spec(root: Path, **overrides: object) -> Path:

@@ -134,6 +134,32 @@ def test_a_scan_session_serves_one_connection_per_source(priced_workspace: Works
     session.close()
 
 
+def test_the_execution_table_reuses_the_run_connection(priced_workspace: Workspace) -> None:
+    """The fill path opened its own duckdb handle on every selected instant.
+
+    A run already opens one connection for observations, but `exact_execution_snapshot` took no
+    session, so every fill paid a fresh open and close. Measured on the sample journey that is
+    27% of the whole run -- 91.7s to 66.6s -- and it grows with the number of fills, which is the
+    axis a 2,096-session backtest scales along.
+    """
+    spec = priced_workspace.source("prices-source")
+    session = scan.ScanSession()
+    borrowed = session.connection(spec)
+
+    # Whatever else changes, a session hands back the same physical handle rather than reopening.
+    assert session.connection(spec) is borrowed
+
+    # And the execution-table reader accepts one, which is what closes the gap.
+    import inspect
+
+    from vqapr.exchange.execution_table import exact_execution_snapshot
+
+    assert "session" in inspect.signature(exact_execution_snapshot).parameters, (
+        "the execution table must be able to borrow the run's connection"
+    )
+    session.close()
+
+
 def test_a_scan_session_still_refuses_a_missing_path_on_every_lookup(tmp_path: Path) -> None:
     """The typed failure must not be lost to connection reuse.
 

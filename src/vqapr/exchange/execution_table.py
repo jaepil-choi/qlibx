@@ -226,6 +226,7 @@ def exact_execution_snapshot(
     held_instruments: Sequence[str],
     trade_price: str,
     reference_price: str | None = None,
+    session: scan.ScanSession | None = None,
 ) -> ExactExecutionSnapshot:
     """Fetch the exact price field for the target/held union without any fallback.
 
@@ -253,6 +254,7 @@ def exact_execution_snapshot(
         instrument_field=spec.instrument_field,
         target_at=target_at,
         instruments=requested,
+        session=session,
         fields={
             "is_tradable": spec.is_tradable_field,
             "price": spec.price_fields[trade_price],

@@ -374,6 +374,7 @@ class SimulationFlow:
         exchange: Exchange,
         constraints: tuple[Constraint, ...],
         valuation_service: ValuationService | None = None,
+        scan_session: object | None = None,
     ) -> None:
         if not isinstance(frozen_run, FrozenRun):
             raise TypeError("frozen_run must be a FrozenRun")
@@ -418,6 +419,9 @@ class SimulationFlow:
         self._reference_price = next(iter(prices), None)
         self._constraints = constraints
         self._valuation_service = valuation_service or ValuationService()
+        # The run already opens one duckdb handle for observations; the execution table was
+        # opening and closing its own on every fill, which is where the time went.
+        self._scan_session = scan_session
         declared = tuple(getattr(strategy, "account_requirements", tuple)())
         if any(not isinstance(item, AccountRequirement) for item in declared):
             raise TypeError("account_requirements must return AccountRequirement values")
@@ -667,6 +671,7 @@ class SimulationFlow:
                 target_instruments=(),
                 held_instruments=held_instruments,
                 trade_price=pending.target.trade_price,
+                session=self._scan_session,
             ),
         )
         selected_marks = self._due_boundary(
@@ -782,6 +787,7 @@ class SimulationFlow:
                 held_instruments=held_instruments,
                 trade_price=pending.target.trade_price,
                 reference_price=self._reference_price,
+                session=self._scan_session,
             )
 
         snapshot = self._due_boundary(

@@ -438,6 +438,7 @@ def run(
         ),
         exchange=exchange,
         constraints=constraints,
+        scan_session=session,
     )
     try:
         return flow.run()

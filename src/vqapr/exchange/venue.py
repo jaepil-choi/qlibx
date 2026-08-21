@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Protocol
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side, side_of
+from vqapr.domain.instruments import Instrument
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.exchange.listings import ExchangeRulesView, ListingRule
+from vqapr.exchange.listings import ExchangeRulesView, TradeRule
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
 
@@ -40,16 +41,13 @@ def _side(quantity: Decimal) -> Side | None:
     return side_of(quantity)
 
 
-def _is_step_aligned(quantity: Decimal, step: Decimal) -> bool:
-    return (abs(quantity) / step).to_integral_value() == abs(quantity) / step
-
-
 @dataclass(frozen=True, slots=True)
 class AcademicExchange:
     """Zero-friction, full-fill execution for declared academic listings."""
 
-    listings: Mapping[str, ListingRule]
+    listings: Mapping[str, TradeRule]
     exchange_id: str = "academic"
+    instruments: Mapping[str, Instrument] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.exchange_id, str) or not self.exchange_id:
@@ -58,18 +56,20 @@ class AcademicExchange:
             raise TypeError("listings must be a mapping")
         copied = dict(self.listings)
         for instrument_id, rule in copied.items():
-            if not isinstance(rule, ListingRule) or instrument_id != rule.instrument_id:
-                raise ValueError("each listing key must match its ListingRule instrument_id")
+            if not isinstance(rule, TradeRule) or instrument_id != rule.instrument_id:
+                raise ValueError("each listing key must match its TradeRule instrument_id")
         object.__setattr__(self, "listings", copied)
+        object.__setattr__(self, "instruments", dict(self.instruments))
 
     @property
     def rules(self) -> ExchangeRulesView:
         """Academic listings with no declared cost band, so this profile charges nothing.
 
         A subclass may declare one. `execute` charges whatever this returns, so a subclass that
-        adds a cost band gets it applied without replacing any matching behaviour.
+        adds a cost band -- and the instruments whose categories it selects on -- gets it applied
+        without replacing any matching behaviour.
         """
-        return ExchangeRulesView(self.exchange_id, self.listings, ())
+        return ExchangeRulesView(self.exchange_id, self.listings, dict(self.instruments))
 
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
@@ -89,7 +89,7 @@ class AcademicExchange:
             raise ValueError("an OrderBatch may contain each instrument only once")
         rows = self._validate_snapshot(snapshot, requests)
         rules = self.rules
-        self._validate_rules(requests, rows)
+        self._validate_rules(requests, rows, account)
 
         fills: list[Fill] = []
         for request in requests:
@@ -137,8 +137,10 @@ class AcademicExchange:
                         row.price,
                         cost=rules.charge(
                             side,
-                            abs(request.delta_quantity) * row.price,
-                            snapshot.target_at,
+                            rules.notional(
+                                request.instrument_id, request.delta_quantity, row.price
+                            ),
+                            request.instrument_id,
                         ),
                     )
                 )
@@ -148,6 +150,7 @@ class AcademicExchange:
         self,
         requests: tuple[OrderRequest, ...],
         rows: Mapping[str, ExactExecutionRow],
+        account: AccountSnapshot,
     ) -> None:
         for request in requests:
             if (
@@ -172,21 +175,14 @@ class AcademicExchange:
             side = _side(request.delta_quantity)
             if side is None:
                 continue
-            if side not in rule.permitted_sides:
-                raise ValueError(f"{side.value} is not permitted for {request.instrument_id!r}")
-            quantity = abs(request.delta_quantity)
-            if quantity < rule.minimum_quantity:
-                raise ValueError(f"quantity violates listing rule for {request.instrument_id!r}")
-            if rule.fractional_allowed:
-                # A fractional listing declares divisibility itself, so an arbitrary-precision
-                # signed quantity is the supported quantity rule and fills in full.
-                continue
-            if not _is_step_aligned(quantity, rule.quantity_step):
-                raise ValueError(f"quantity violates listing rule for {request.instrument_id!r}")
-            if quantity != quantity.to_integral_value():
+            held = account.positions.get(request.instrument_id, Decimal("0"))
+            if not rule.permits_position(held, request.delta_quantity):
                 raise ValueError(
-                    f"fractional quantity is not permitted for {request.instrument_id!r}"
+                    f"{rule.access.value} listing does not permit this position change for "
+                    f"{request.instrument_id!r}"
                 )
+            if not rule.permits_quantity(abs(request.delta_quantity)):
+                raise ValueError(f"quantity violates listing rule for {request.instrument_id!r}")
 
     @staticmethod
     def _validate_snapshot(

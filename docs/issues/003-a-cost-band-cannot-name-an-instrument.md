@@ -1,9 +1,23 @@
 # 003 — A cost band cannot name an instrument
 
-**Status:** open. Found 2026-08-20 reproducing an enhanced-index fund that holds an index ETF
-alongside its direct stock book.
+**Status:** closed 2026-08-21 by `docs/implementations/035-a-cost-band-names-a-category.md`.
+Found 2026-08-20 reproducing an enhanced-index fund that holds an index ETF alongside its direct
+stock book.
 **Touches:** `src/vqapr/exchange/costs.py`, `src/vqapr/exchange/listings.py`,
-`src/vqapr/exchange/venue.py`, `src/vqapr/exchange/venues/krx.py`
+`src/vqapr/exchange/venue.py`, `src/vqapr/exchange/venues/krx.py`,
+`src/vqapr/domain/instruments.py`, `src/vqapr/orders/planning.py`
+
+> **Resolved differently than proposed below.** The fix does *not* put a `costs` tuple on
+> `ListingRule`. That hangs a rate on a ticker, so a tax change edits three thousand lines, and it
+> contradicts canon 2.8, which makes `kind` a venue-independent fact. Canon 6.2 had already
+> specified the selector — `(kind, side, 적용 기간)` — and the reason it was unimplementable was
+> that `Instrument` and `InstrumentKind` had never been built. They now exist in
+> `vqapr.domain.instruments`, `CostRule` carries `kinds`, and `ExchangeRulesView` joins listings to
+> instruments by id. A venue declares `krx_cost_rules_by_kind()` to get the real ETF exemption.
+>
+> Fixing this also uncovered a second, latent defect: `ExchangeRulesView.at()` discarded the
+> instant it bound, so a venue with **effective-dated** bands could not be planned at all. See the
+> implementation record.
 
 ## What is missing
 

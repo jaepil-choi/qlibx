@@ -156,17 +156,17 @@ class ShowcaseStrategy(StrategyModel):
     )
     exchange.write_text(
         """from decimal import Decimal
-from vqapr.public import AcademicExchange, ListingRule, Side
+from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
 
 class ShowcaseExchange(AcademicExchange):
     def __init__(self):
-        listing = ListingRule(
+        listing = TradeRule(
             "A",
             Decimal("0.1"),
             Decimal("0.1"),
             True,
-            frozenset({Side.BUY, Side.SELL}),
+            ListingAccess.SIGNED,
         )
         super().__init__({"A": listing}, "showcase-exchange")
 """,

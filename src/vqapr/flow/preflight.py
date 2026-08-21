@@ -11,11 +11,10 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.enums import Side
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.exchange.execution_table import validate_execution_input
-from vqapr.exchange.listings import ListingRule
+from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
@@ -139,14 +138,13 @@ def _validate_initial_account(
                 )
             )
             continue
-        assert isinstance(rule, ListingRule)
-        close_side = Side.SELL if quantity > 0 else Side.BUY
-        if close_side not in rule.permitted_sides:
+        assert isinstance(rule, TradeRule)
+        if not rule.permits_position(quantity, -quantity):
             failures.append(
                 Failure.bounded(
-                    "preflight.account.close_side_missing",
-                    "each initial holding must be closable by a permitted listing side",
-                    observed=f"{instrument_id}: {close_side.value}",
+                    "preflight.account.holding_not_closable",
+                    "each initial holding must be closable on the selected Exchange",
+                    observed=f"{instrument_id}: {rule.access.value}",
                 )
             )
         absolute = abs(quantity)
@@ -195,25 +193,91 @@ def _validate_initial_account(
         )
 
 
-def _validate_instrument_universe(
-    instruments: tuple[str, ...],
-    exchange: Exchange,
-) -> None:
+def _validate_execution_requirements(exchange: Exchange, execution_input: object) -> None:
+    """Prove the venue's declared regimes have the execution prices they need.
+
+    A venue computes its own regimes -- a KRX price limit is the base price times a declared rate
+    -- so it needs a number the user registered, never a conclusion the user derived. When that
+    number is absent the run is refused *before* it starts, and the message names the feature to
+    switch off rather than only the missing column. Running with the regime silently inert would
+    produce a result that looks like a limit-aware backtest and is not one.
+    """
+    requirements = tuple(getattr(exchange, "execution_requirements", tuple)())
+    if not requirements:
+        return
+    declared = set(execution_input.table.price_fields)
     missing = tuple(
-        instrument_id for instrument_id in instruments if instrument_id not in exchange.listings
+        requirement for requirement in requirements if requirement.price not in declared
     )
     if not missing:
         return
     raise VqaprError(
-        stage="preflight.universe",
+        stage="preflight.execution",
         family=FailureFamily.EXCHANGE,
         failures=[
+            Failure.bounded(
+                code="preflight.execution.requirement_missing",
+                requirement=(
+                    "the execution input must declare every price the Exchange requires, "
+                    "or the feature that needs it must be switched off"
+                ),
+                observed=", ".join(
+                    f"{item.feature} needs price {item.price!r}" for item in missing
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition=(
+            "register the required execution price, or construct the Exchange with that "
+            "feature disabled, then retry"
+        ),
+    )
+
+
+def _validate_instrument_universe(
+    instruments: tuple[str, ...],
+    exchange: Exchange,
+) -> None:
+    """Prove every instrument the run will trade can be filled by the selected venue.
+
+    Two different problems are separated. An *unlisted* instrument is a missing registration and
+    the fix is to register it. A listed instrument the venue permits **no side** on is a venue
+    judgement -- it publishes the instrument but will not fill it -- and the fix is to remove it
+    from the traded universe and read it as data instead. Reporting both as "unlisted" would invite
+    someone to register a listing that already exists.
+    """
+    listings = exchange.listings
+    missing = tuple(
+        instrument_id for instrument_id in instruments if instrument_id not in listings
+    )
+    untradable = tuple(
+        instrument_id
+        for instrument_id in instruments
+        if instrument_id in listings and not listings[instrument_id].tradable
+    )
+    if not missing and not untradable:
+        return
+    failures: list[Failure] = []
+    if missing:
+        failures.append(
             Failure.bounded(
                 code="preflight.universe.unlisted_instrument",
                 requirement="every frozen run instrument must have an Exchange listing",
                 observed=repr(missing),
             )
-        ],
+        )
+    if untradable:
+        failures.append(
+            Failure.bounded(
+                code="preflight.universe.untradable_listing",
+                requirement="the Exchange must permit a side for every traded instrument",
+                observed=repr(untradable),
+            )
+        )
+    raise VqaprError(
+        stage="preflight.universe",
+        family=FailureFamily.EXCHANGE,
+        failures=failures,
         mutation=False,
         retry_precondition="register complete listings or remove unlisted instruments, then retry",
     )
@@ -332,6 +396,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
     execution_input = workspace.execution_input(definition.execution_input_id or "")
     validate_execution_input(execution_input).raise_if_failed()
+    _validate_execution_requirements(loaded_exchange, execution_input)
     _validate_instrument_universe(definition.instruments, loaded_exchange)
     _validate_initial_account(
         definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange

@@ -1,24 +1,32 @@
-"""Venue-owned execution cost rules.
+"""What one fill costs.
 
-A profile declares its costs as an ordered tuple of :class:`CostRule`. Exactly one rule must match
-a given side; zero matches and several matches are both failures. Nothing here guesses a default
-rate, and no rule silently applies to a side it did not declare.
+A venue charges per side, and the two sides are genuinely different numbers: KRX takes a
+commission on both and a securities transaction tax only on sells. So a rate is declared as a pair
+of :class:`SideCost` on the instrument's own :class:`~vqapr.exchange.listings.TradeRule`, which is
+the same shape the research declares:
 
-A band matches on side alone, so every instrument on a venue pays the same rate. That is not
-enough for a venue whose tax treatment differs by instrument -- KRX exempts ETFs from the sale tax
-stocks pay -- and it is why an enhanced-index sleeve cannot currently be priced. See
-`docs/issues/003-a-cost-band-cannot-name-an-instrument.md` before extending this module.
+```yaml
+stock:  buy_bps: 3.0   sell_bps: 23.0
+etf:    buy_bps: 3.0   sell_bps: 3.0
+```
+
+**There is no rule-matching engine here, deliberately.** Rates used to be a tuple of selectable
+bands keyed by ``(kind, side, effective window)``, resolved at charge time and guarded against
+matching zero or several. Every part of that existed to support effective-dated rates, and nothing
+ever declared one -- both shipped KRX declarations were flat, and the dated path was in fact
+*broken* until it was measured, because a venue with dated bands could not be planned at all.
+Machinery whose only user is its own test is not a feature.
+
+A side's rate is now reached by a dictionary lookup on ``instrument_id``, so zero matches and
+several matches are not failure modes that can occur. If effective-dated rates are needed later,
+they belong above this: a venue expanding a different set of ``TradeRule`` for a different period,
+not a matcher underneath every charge.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
-
-from vqapr.domain.enums import Side
-from vqapr.domain.timestamps import require_tz_aware
 
 
 def _rate(value: Decimal, *, name: str) -> Decimal:
@@ -49,60 +57,27 @@ class FillCost:
 
 
 @dataclass(frozen=True, slots=True)
-class CostRule:
-    """One declared cost band for one side of a venue."""
+class SideCost:
+    """What one side of a trade costs, as rates on traded notional.
 
-    rule_id: str
-    side: Side
-    commission_rate: Decimal
-    tax_rate: Decimal
-    effective_from: datetime | None = None
-    effective_to: datetime | None = None
+    Commission and tax stay separate because they are separate facts: a venue may exempt a
+    category from the tax while charging it the same commission, and reporting has to be able to
+    say which of the two a book actually paid.
+    """
+
+    commission_rate: Decimal = Decimal("0")
+    tax_rate: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
-        if not isinstance(self.rule_id, str) or not self.rule_id:
-            raise ValueError("rule_id must be a non-empty string")
-        if not isinstance(self.side, Side):
-            raise TypeError("side must be a Side")
         _rate(self.commission_rate, name="commission_rate")
         _rate(self.tax_rate, name="tax_rate")
-        for name, value in (
-            ("effective_from", self.effective_from),
-            ("effective_to", self.effective_to),
-        ):
-            if value is not None:
-                require_tz_aware(value, name=name)
-        if (
-            self.effective_from is not None
-            and self.effective_to is not None
-            and self.effective_from >= self.effective_to
-        ):
-            raise ValueError("effective_from must precede effective_to")
 
     @property
-    def always_effective(self) -> bool:
-        return self.effective_from is None and self.effective_to is None
-
-    def effective_at(self, at: datetime | None) -> bool:
-        """Half-open ``[effective_from, effective_to)`` membership.
-
-        A rule with no declared window is always effective. A dated rule can only be selected
-        against an actual instant, so an undated query never matches it.
-        """
-        if self.always_effective:
-            return True
-        if at is None:
-            return False
-        require_tz_aware(at, name="at")
-        if self.effective_from is not None and at < self.effective_from:
-            return False
-        return not (self.effective_to is not None and at >= self.effective_to)
-
-    def matches(self, side: Side, at: datetime | None = None) -> bool:
-        return self.side is side and self.effective_at(at)
+    def free(self) -> bool:
+        return not self.commission_rate and not self.tax_rate
 
     def charge(self, notional: Decimal) -> FillCost:
-        """Charge this rule against a positive traded notional."""
+        """Charge this side against a non-negative traded notional."""
         if not isinstance(notional, Decimal):
             raise TypeError("notional must be a Decimal")
         if not notional.is_finite() or notional < 0:
@@ -113,38 +88,9 @@ class CostRule:
         )
 
     @property
-    def declaration_identity(self) -> tuple[str, ...]:
-        return (
-            self.rule_id,
-            self.side.value,
-            str(self.commission_rate),
-            str(self.tax_rate),
-            "" if self.effective_from is None else self.effective_from.isoformat(),
-            "" if self.effective_to is None else self.effective_to.isoformat(),
-        )
+    def declaration_identity(self) -> tuple[str, str]:
+        return (str(self.commission_rate), str(self.tax_rate))
 
 
-def select_cost_rule(rules: Sequence[CostRule], side: Side, at: datetime | None = None) -> CostRule:
-    """Return the single rule effective for ``side`` at ``at`` or fail with the match count."""
-    if not isinstance(side, Side):
-        raise TypeError("side must be a Side")
-    matched = [rule for rule in rules if rule.matches(side, at)]
-    if len(matched) != 1:
-        moment = "any instant" if at is None else at.isoformat()
-        raise ValueError(
-            f"exactly one CostRule must match side {side.value!r} at {moment}; "
-            f"matched {len(matched)}"
-        )
-    return matched[0]
-
-
-def effective_rules(rules: Sequence[CostRule], at: datetime | None) -> tuple[CostRule, ...]:
-    """Narrow a declaration to the rules effective at one instant."""
-    return tuple(rule for rule in rules if rule.effective_at(at))
-
-
-def charge_fill(
-    rules: Sequence[CostRule], side: Side, notional: Decimal, at: datetime | None = None
-) -> FillCost:
-    """Resolve the one effective rule and charge it."""
-    return select_cost_rule(rules, side, at).charge(notional)
+FREE = SideCost()
+"""A side that costs nothing, which is what an academic venue declares."""

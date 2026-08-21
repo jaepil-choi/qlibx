@@ -4,9 +4,10 @@ This profile implements a declared, deliberately partial set of KRX rules. It cl
 it implements and nothing else (PRD 6.3):
 
 Implemented
-    whole-share quantity unit, brokerage commission on both sides, sale tax on sells only, halted
-    instruments producing typed zero-dealt results, refusal of any order that would open or deepen
-    a short position, and full execution of the remainder at the exact selected price.
+    whole-share quantity unit, brokerage commission on both sides, sale tax on sells only and only
+    for the categories that owe it, halted instruments producing typed zero-dealt results, refusal
+    of any order that would open or deepen a short position, and full execution of the remainder at
+    the exact selected price.
 
 Not implemented, and therefore not claimed
     price ticks, daily price limits, auction microstructure, queue position, partial fills from
@@ -17,14 +18,24 @@ Not implemented, and therefore not claimed
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side, side_of
-from vqapr.exchange.costs import CostRule
+from vqapr.domain.instruments import Instrument, InstrumentKind
+from vqapr.domain.instruments import instruments as build_instruments
+from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.exchange.listings import ExchangeRulesView, ListingRule
+from vqapr.exchange.listings import (
+    ExchangeRulesView,
+    ExecutionFieldRequirement,
+    ListingAccess,
+    TradeRule,
+    TradeTerms,
+    trade_rules_by_kind,
+)
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
 COMMISSION_RATE = Decimal("0.0003")
@@ -37,26 +48,146 @@ SHARE_UNIT = Decimal("1")
 """KRX equities trade in whole shares."""
 
 
-def krx_cost_rules(
+PRICE_LIMIT_RATE = Decimal("0.30")
+"""KRX applies one rate to every listed share and ETF: the base price plus or minus 30%."""
+
+BASE_PRICE = "base"
+"""The semantic execution price a price-limit venue requires: the session's base price."""
+
+
+@dataclass(frozen=True, slots=True)
+class KrxTradeRule(TradeRule):
+    """A KRX rule, which carries one regime the base rule has no field for.
+
+    ``price_limit_rate`` is the band width as a fraction of the session base price. ``None`` means
+    the venue is not applying limits to this instrument -- an explicit off, which is a different
+    declaration from a venue that has no concept of limits at all, and both appear in the
+    fingerprint.
+
+    The rate lives on the *rule* rather than the venue because it is per-instrument in practice:
+    KRX applies one rate today, but a managed-issue regime narrows it for named issues, and China
+    runs 10% on the main boards against 20% on ChiNext and STAR. A venue-level constant could not
+    express either.
+    """
+
+    price_limit_rate: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        # `slots=True` rebuilds the class, so the zero-argument `super()` closure cell points at
+        # the pre-slots class and raises. The explicit form is required for a slotted subclass.
+        TradeRule.__post_init__(self)
+        rate = self.price_limit_rate
+        if rate is None:
+            return
+        if not isinstance(rate, Decimal):
+            raise TypeError("price_limit_rate must be a Decimal or None")
+        if not rate.is_finite() or not (0 < rate < 1):
+            raise ValueError("price_limit_rate must be a finite fraction between 0 and 1")
+
+    def limit_band(self, base: Decimal) -> tuple[Decimal, Decimal] | None:
+        """The inclusive ``(lower, upper)`` prices this instrument may trade at today."""
+        if self.price_limit_rate is None:
+            return None
+        return (
+            base * (Decimal("1") - self.price_limit_rate),
+            base * (Decimal("1") + self.price_limit_rate),
+        )
+
+    def permits_side_at(self, side: Side, price: Decimal, base: Decimal | None) -> bool:
+        """Whether this side may trade at ``price`` given today's base price.
+
+        At the upper limit there is no seller left, so a buy cannot fill; at the lower limit there
+        is no buyer, so a sell cannot. The position rule is unchanged -- this is a market fact for
+        one session, not a standing venue permission.
+        """
+        if self.price_limit_rate is None or base is None:
+            return True
+        lower, upper = self.limit_band(base)
+        if side is Side.BUY:
+            return price < upper
+        return price > lower
+
+
+def krx_stock_terms(
     commission_rate: Decimal = COMMISSION_RATE,
     sale_tax_rate: Decimal = SALE_TAX_RATE,
-) -> tuple[CostRule, ...]:
-    """The two declared cost bands, one per side."""
-    return (
-        CostRule("krx-buy", Side.BUY, commission_rate, Decimal("0")),
-        CostRule("krx-sell", Side.SELL, commission_rate, sale_tax_rate),
-    )
+) -> TradeTerms:
+    """Whole shares, commission both sides, securities transaction tax on sells.
 
-
-def krx_listing(instrument_id: str) -> ListingRule:
-    """A whole-share KRX listing that permits both directions of a long position."""
-    return ListingRule(
-        instrument_id=instrument_id,
+    ``LONG_ONLY`` is this profile's own claim, not a market fact: KRX has a regulated short-sale
+    regime, and modelling it needs borrow, locate and recall, none of which this profile
+    implements. Declaring ``SIGNED`` here would claim a realism it has not shown.
+    """
+    return TradeTerms(
         quantity_step=SHARE_UNIT,
         minimum_quantity=SHARE_UNIT,
         fractional_allowed=False,
-        permitted_sides=frozenset({Side.BUY, Side.SELL}),
+        access=ListingAccess.LONG_ONLY,
+        buy=SideCost(commission_rate, Decimal("0")),
+        sell=SideCost(commission_rate, sale_tax_rate),
     )
+
+
+def krx_etf_terms(commission_rate: Decimal = COMMISSION_RATE) -> TradeTerms:
+    """Whole units, commission both sides, and **no sale tax** -- KRX exempts ETFs.
+
+    The exemption is real and material. An enhanced-index fund holds an ETF sleeve precisely to
+    track the index cheaply, and charging that sleeve the share tax overstates its cost by the
+    full tax rate on every unit of sleeve turnover.
+    """
+    return TradeTerms(
+        quantity_step=SHARE_UNIT,
+        minimum_quantity=SHARE_UNIT,
+        fractional_allowed=False,
+        access=ListingAccess.LONG_ONLY,
+        buy=SideCost(commission_rate, Decimal("0")),
+        sell=SideCost(commission_rate, Decimal("0")),
+    )
+
+
+KRX_TERMS: Mapping[InstrumentKind, TradeTerms] = {
+    InstrumentKind.STOCK: krx_stock_terms(),
+    InstrumentKind.ETF: krx_etf_terms(),
+}
+"""The two categories KRX trades. A factor or an index is simply not listed here."""
+
+
+def krx_rules(
+    universe: Mapping[str, InstrumentKind | str],
+    *,
+    price_limits: bool = True,
+) -> tuple[dict[str, TradeRule], dict[str, Instrument]]:
+    """Build a KRX roster from ``instrument_id -> kind``, with each category's own terms.
+
+    The one call that gets the ETF exemption right: a stock pays the sale tax, an ETF does not,
+    and neither is named individually.
+
+    ``price_limits=False`` switches off the limit-up/limit-down regime, which is how a user whose
+    execution table carries only a trade price still runs here. The choice is recorded in every
+    rule's declaration identity, so a run states which of the two it measured.
+    """
+    declared = build_instruments(universe)
+    rate = PRICE_LIMIT_RATE if price_limits else None
+    base = trade_rules_by_kind(declared, KRX_TERMS)
+    rules = {
+        instrument_id: KrxTradeRule(
+            rule.instrument_id,
+            rule.quantity_step,
+            rule.minimum_quantity,
+            rule.fractional_allowed,
+            rule.access,
+            rule.buy,
+            rule.sell,
+            price_limit_rate=rate,
+        )
+        for instrument_id, rule in base.items()
+    }
+    return rules, declared
+
+
+def krx_listing(instrument_id: str) -> TradeRule:
+    """A whole-share KRX stock rule: buy, sell what you hold, never go short."""
+    return KRX_TERMS[InstrumentKind.STOCK].for_instrument(instrument_id)
 
 
 class KrxExchange:
@@ -66,24 +197,52 @@ class KrxExchange:
 
     def __init__(
         self,
-        listings: Mapping[str, ListingRule] | Sequence[str],
+        listings: Mapping[str, TradeRule] | Sequence[str],
         exchange_id: str = "krx",
-        costs: Sequence[CostRule] | None = None,
+        instruments: Mapping[str, Instrument] | Mapping[str, InstrumentKind | str] | None = None,
     ) -> None:
-        resolved: Mapping[str, ListingRule]
+        """Declare what this venue trades.
+
+        ``listings`` may be a bare sequence of ids, which get the stock terms, or explicit
+        ``TradeRule`` values. ``instruments`` accepts built instruments or a plain
+        ``instrument_id -> kind`` declaration; :func:`krx_rules` builds both together and is the
+        way to get the ETF exemption applied.
+        """
+        resolved: Mapping[str, TradeRule]
         if isinstance(listings, Mapping):
             resolved = dict(listings)
         else:
             resolved = {instrument: krx_listing(instrument) for instrument in listings}
         for instrument_id, rule in resolved.items():
-            if not isinstance(rule, ListingRule) or instrument_id != rule.instrument_id:
-                raise ValueError("each listing key must match its ListingRule instrument_id")
+            if not isinstance(rule, TradeRule) or instrument_id != rule.instrument_id:
+                raise ValueError("each listing key must match its TradeRule instrument_id")
             if rule.fractional_allowed:
                 raise ValueError(f"KRX listing {instrument_id!r} must not be fractional")
+        declared: dict[str, Instrument] = {}
+        if instruments:
+            declared = {
+                instrument_id: value
+                if isinstance(value, Instrument)
+                else build_instruments({instrument_id: value})[instrument_id]
+                for instrument_id, value in instruments.items()
+            }
         self.exchange_id = exchange_id
-        self._rules = ExchangeRulesView(
-            exchange_id, resolved, tuple(krx_cost_rules() if costs is None else costs)
-        )
+        self._rules = ExchangeRulesView(exchange_id, resolved, declared)
+
+    def execution_requirements(self) -> tuple[ExecutionFieldRequirement, ...]:
+        """The execution-table prices this venue needs, given what its rules actually declare.
+
+        A requirement appears only when some listed instrument declares a price limit. A venue that
+        switched limits off, or never declared a rate, asks for nothing and runs against a table
+        carrying only its trade price -- which is the whole point of the switch: a user with close
+        prices alone can still execute here.
+        """
+        if any(
+            isinstance(rule, KrxTradeRule) and rule.price_limit_rate is not None
+            for rule in self._rules.listings.values()
+        ):
+            return (ExecutionFieldRequirement(BASE_PRICE, "price_limit"),)
+        return ()
 
     @property
     def rules(self) -> ExchangeRulesView:
@@ -91,8 +250,12 @@ class KrxExchange:
         return self._rules
 
     @property
-    def listings(self) -> Mapping[str, ListingRule]:
+    def listings(self) -> Mapping[str, TradeRule]:
         return self._rules.listings
+
+    @property
+    def instruments(self) -> Mapping[str, Instrument]:
+        return self._rules.instruments
 
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
@@ -111,7 +274,7 @@ class KrxExchange:
             raise ValueError("an OrderBatch may contain each instrument only once")
         rows = self._rows(snapshot, requests)
         self._validate(requests, rows, account)
-        rules = self._rules.at(snapshot.target_at)
+        rules = self._rules
 
         fills: list[Fill] = []
         for request in requests:
@@ -151,14 +314,30 @@ class KrxExchange:
                 continue
             side = side_of(request.delta_quantity)
             assert side is not None
-            notional = abs(request.delta_quantity) * row.price
+            rule = rules.listing(request.instrument_id)
+            if isinstance(rule, KrxTradeRule) and not rule.permits_side_at(
+                side, row.price, row.reference
+            ):
+                # Limit-up leaves no seller, limit-down no buyer. A market fact for one session,
+                # so it is typed zero-dealt evidence rather than a refusal of the batch.
+                fills.append(
+                    Fill(
+                        request.instrument_id,
+                        request.delta_quantity,
+                        Decimal("0"),
+                        None,
+                        ZeroDealtReason.NONTRADABLE,
+                    )
+                )
+                continue
+            notional = rules.notional(request.instrument_id, request.delta_quantity, row.price)
             fills.append(
                 Fill(
                     request.instrument_id,
                     request.delta_quantity,
                     request.delta_quantity,
                     row.price,
-                    cost=rules.charge(side, notional, snapshot.target_at),
+                    cost=rules.charge(side, notional, request.instrument_id),
                 )
             )
         return FillBatch(tuple(fills), account.version)
@@ -190,15 +369,15 @@ class KrxExchange:
             side = side_of(request.delta_quantity)
             if side is None:
                 continue
-            if not rule.permits(side):
-                raise ValueError(f"{side.value} is not permitted for {request.instrument_id!r}")
             quantity = abs(request.delta_quantity)
-            if quantity != rule.quantize(quantity):
+            if not rule.permits_quantity(quantity):
                 raise ValueError(
                     f"quantity {quantity} is not a whole share for {request.instrument_id!r}"
                 )
             held = account.positions.get(request.instrument_id, Decimal("0"))
-            if held + request.delta_quantity < 0:
+            if not rule.permits_position(held, request.delta_quantity):
+                # The listing's own declaration, not a rule bolted onto this profile: selling a
+                # held position is always fine, and only a resulting short is refused.
                 raise ValueError(
                     f"KRX profile does not support short selling {request.instrument_id!r}"
                 )

@@ -2,7 +2,7 @@
 
 Exchange — 어느 venue에서 어떤 규칙으로 체결되는가.
 
-채워야 할 것: 체결 테이블 선언 · `ListingRule` · `CostRule` · `FillConvention` · `execute()`.
+채워야 할 것: 체결 테이블 선언 · `TradeRule` (수량 단위·access·비용) · `FillConvention` · `execute()`.
 
 통과 조건: `is_tradable=true`면 가격이 유한하고 양수다 · 세 zero-dealt 사유를 구분한다 · batch-atomic 전제조건을 지킨다 · 선언한 가격 컬럼을 대체하지 않는다.
 

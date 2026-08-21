@@ -67,13 +67,13 @@ class Limit(Constraint):
 
 GOOD_EXCHANGE = """
 from decimal import Decimal
-from vqapr.public import AcademicExchange, ListingRule, Side
+from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
 class MyVenue(AcademicExchange):
     def __init__(self):
         super().__init__(
-            {"A": ListingRule("A", Decimal("1"), Decimal("1"), False,
-                              frozenset({Side.BUY, Side.SELL}))}
+            {"A": TradeRule("A", Decimal("1"), Decimal("1"), False,
+                              ListingAccess.SIGNED)}
         )
 """
 
@@ -84,13 +84,13 @@ class Limit:
 
 EXCHANGE_THAT_REPLACES_EXECUTE = """
 from decimal import Decimal
-from vqapr.public import AcademicExchange, ListingRule, Side
+from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
 class MyVenue(AcademicExchange):
     def __init__(self):
         super().__init__(
-            {"A": ListingRule("A", Decimal("1"), Decimal("1"), False,
-                              frozenset({Side.BUY, Side.SELL}))}
+            {"A": TradeRule("A", Decimal("1"), Decimal("1"), False,
+                              ListingAccess.SIGNED)}
         )
 
     def execute(self, orders, account, snapshot):

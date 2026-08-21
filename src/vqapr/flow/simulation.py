@@ -409,6 +409,13 @@ class SimulationFlow:
         self._constraint_window_for_occurrence = constraint_window_for_occurrence
         self._account = account
         self._exchange = exchange
+        # The venue names the extra execution price its own regimes need, once per run. A venue
+        # that declares none is read exactly as before.
+        requirements = tuple(getattr(exchange, "execution_requirements", tuple)())
+        prices = {requirement.price for requirement in requirements}
+        if len(prices) > 1:
+            raise ValueError("an Exchange may require at most one reference execution price")
+        self._reference_price = next(iter(prices), None)
         self._constraints = constraints
         self._valuation_service = valuation_service or ValuationService()
         declared = tuple(getattr(strategy, "account_requirements", tuple)())
@@ -774,6 +781,7 @@ class SimulationFlow:
                 target_instruments=target_instruments,
                 held_instruments=held_instruments,
                 trade_price=pending.target.trade_price,
+                reference_price=self._reference_price,
             )
 
         snapshot = self._due_boundary(
@@ -814,7 +822,7 @@ class SimulationFlow:
                 weight_targets=weights,
                 cash_target=pending.intent.cash_target,
                 budget=pending.intent.budget,
-                rules=self._exchange.rules.at(pending.target.target_at),
+                rules=self._exchange.rules,
             ),
         )
         fills = self._due_boundary(

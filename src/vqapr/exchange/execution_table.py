@@ -191,12 +191,20 @@ def validate_execution_input(registration: ExecutionInputRegistration) -> Diagno
 
 @dataclass(frozen=True, slots=True)
 class ExactExecutionRow:
-    """One requested instrument at an exact selected instant."""
+    """One requested instrument at an exact selected instant.
+
+    ``reference`` is a second declared price the venue asked for, and is ``None`` when the venue
+    asked for none. It exists because some venue regimes are computed rather than supplied: a KRX
+    price limit is the previous close times a declared rate, so the venue needs that number but
+    the user must not be asked to work out what it implies. The user registers a column; the venue
+    owns the rule.
+    """
 
     trade_at: datetime
     instrument: str
     is_tradable: bool
     price: Decimal | None
+    reference: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,8 +225,14 @@ def exact_execution_snapshot(
     target_instruments: Sequence[str],
     held_instruments: Sequence[str],
     trade_price: str,
+    reference_price: str | None = None,
 ) -> ExactExecutionSnapshot:
-    """Fetch the exact price field for the target/held union without any fallback."""
+    """Fetch the exact price field for the target/held union without any fallback.
+
+    ``reference_price`` names a second declared price the venue requires. It is read in the same
+    exact query, so it is the same row at the same instant -- a reference read separately could
+    come from a different session and silently move a venue's limit band.
+    """
 
     if not isinstance(spec, ExecutionTableSpec):
         raise TypeError("spec must be an ExecutionTableSpec")
@@ -226,6 +240,8 @@ def exact_execution_snapshot(
         raise ValueError("target_at must be timezone-aware")
     if trade_price not in spec.price_fields:
         raise ValueError(f"unknown execution price {trade_price!r}")
+    if reference_price is not None and reference_price not in spec.price_fields:
+        raise ValueError(f"unknown reference price {reference_price!r}")
     target = tuple(dict.fromkeys(target_instruments))
     held = tuple(dict.fromkeys(held_instruments))
     if any(not isinstance(instrument, str) or not instrument for instrument in (*target, *held)):
@@ -240,6 +256,11 @@ def exact_execution_snapshot(
         fields={
             "is_tradable": spec.is_tradable_field,
             "price": spec.price_fields[trade_price],
+            **(
+                {"reference": spec.price_fields[reference_price]}
+                if reference_price is not None
+                else {}
+            ),
         },
     )
     counts: dict[str, int] = {}
@@ -253,6 +274,11 @@ def exact_execution_snapshot(
             instrument=str(row["instrument"]),
             is_tradable=bool(row["is_tradable"]),
             price=None if row["price"] is None else Decimal(str(row["price"])),
+            reference=(
+                None
+                if row.get("reference") is None
+                else Decimal(str(row["reference"]))
+            ),
         )
         for row in rows
     )

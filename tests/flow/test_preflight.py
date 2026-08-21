@@ -156,7 +156,7 @@ def _execution_exchange(
     root: Path,
     *,
     identifier: str = "exchange",
-    permitted_sides: str = "frozenset((Side.BUY, Side.SELL))",
+    access: str = "ListingAccess.SIGNED",
     step: str = "Decimal('1')",
     minimum: str = "Decimal('1')",
     fractional: str = "False",
@@ -166,11 +166,12 @@ def _execution_exchange(
     path = root / f"{identifier}.py"
     path.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, ListingRule, Side\n"
+        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.exchange.listings import ListingAccess\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
-        "        super().__init__({'ABC': ListingRule('ABC', "
-        f"{step}, {minimum}, {fractional}, {permitted_sides})}})\n",
+        "        super().__init__({'ABC': TradeRule('ABC', "
+        f"{step}, {minimum}, {fractional}, {access})}})\n",
         encoding="utf-8",
     )
     component = ComponentRef.of(
@@ -344,15 +345,47 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
         with pytest.raises(VqaprError, match=code):
             preflight_run(workspace, replace(compatible, initial_account_snapshot=snapshot))
 
-    no_sell = _execution_exchange(
-        workspace,
-        tmp_path / "no-sell",
-        identifier="no-sell",
-        permitted_sides="frozenset((Side.BUY,))",
-        register_input=False,
+    # A holding the venue will never fill, in an instrument the run does not trade -- the
+    # money is stuck in something unsellable and preflight says so before the run starts.
+    # Closing a *short* on a long-only listing is permitted (buying back to zero), so only
+    # `NONE` is genuinely unclosable.
+    no_sell_path = tmp_path / "no-sell" / "no_sell.py"
+    no_sell_path.parent.mkdir(parents=True, exist_ok=True)
+    no_sell_path.write_text(
+        "from decimal import Decimal\n"
+        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.exchange.listings import ListingAccess\n"
+        "class Exchange(AcademicExchange):\n"
+        "    def __init__(self):\n"
+        "        super().__init__({\n"
+        "            'ABC': TradeRule('ABC', Decimal('1'), Decimal('1'), False,"
+        " ListingAccess.SIGNED),\n"
+        "            'STUCK': TradeRule('STUCK', Decimal('1'), Decimal('1'), False,"
+        " ListingAccess.NONE),\n"
+        "        })\n",
+        encoding="utf-8",
     )
-    with pytest.raises(VqaprError, match="close_side_missing"):
-        preflight_run(workspace, replace(compatible, exchange=no_sell))
+    no_sell = ComponentRef.of(
+        "no-sell",
+        ComponentKind.EXCHANGE,
+        no_sell_path,
+        "Exchange",
+        fingerprint=fingerprint_component(
+            no_sell_path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+        ),
+    )
+    workspace.register_component(no_sell)
+    with pytest.raises(VqaprError, match="holding_not_closable"):
+        preflight_run(
+            workspace,
+            replace(
+                compatible,
+                exchange=no_sell,
+                initial_account_snapshot=AccountSnapshot(
+                    0, Decimal("100"), {"STUCK": Decimal("1")}
+                ),
+            ),
+        )
 
     fractional = _execution_exchange(
         workspace,
@@ -477,6 +510,118 @@ def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
 
     with pytest.raises(VqaprError, match=r"preflight\.universe\.unlisted_instrument"):
         preflight_run(workspace, replace(definition, instruments=("NOT-LISTED",)))
+
+
+def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """The third state must not exist: regime declared, data absent, run proceeding anyway.
+
+    A KRX price limit is computed from the session base price. If the registered execution input
+    does not carry one, the run would produce numbers that look limit-aware and are not. Preflight
+    refuses, and names the feature to switch off rather than only the missing column.
+    """
+    root = tmp_path / "regime"
+    workspace, definition = _setup(root, model_price_parquet)
+    path = root / "limited.py"
+    path.write_text(
+        "from vqapr.exchange.venues.krx import KrxExchange, krx_rules\n"
+        "class Exchange(KrxExchange):\n"
+        "    def __init__(self):\n"
+        "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=True)\n"
+        "        super().__init__(listings, instruments=instruments)\n",
+        encoding="utf-8",
+    )
+    component = ComponentRef.of(
+        "limited",
+        ComponentKind.EXCHANGE,
+        path,
+        "Exchange",
+        fingerprint=fingerprint_component(
+            path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+        ),
+    )
+    workspace.register_component(component)
+
+    with pytest.raises(VqaprError, match=r"preflight\.execution\.requirement_missing") as error:
+        preflight_run(workspace, replace(definition, exchange=component))
+    failure = error.value.as_dict()["failures"][0]
+    assert "price_limit" in failure["observed"], "the message names the feature to switch off"
+    assert "switched off" in failure["requirement"]
+
+    # The same venue with the regime off needs nothing extra and freezes cleanly.
+    off_path = root / "unlimited.py"
+    off_path.write_text(
+        "from vqapr.exchange.venues.krx import KrxExchange, krx_rules\n"
+        "class Exchange(KrxExchange):\n"
+        "    def __init__(self):\n"
+        "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=False)\n"
+        "        super().__init__(listings, instruments=instruments)\n",
+        encoding="utf-8",
+    )
+    off = ComponentRef.of(
+        "unlimited",
+        ComponentKind.EXCHANGE,
+        off_path,
+        "Exchange",
+        fingerprint=fingerprint_component(
+            off_path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+        ),
+    )
+    workspace.register_component(off)
+    assert preflight_run(workspace, replace(definition, exchange=off)).exchange == off
+
+
+def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """A published benchmark in the traded universe is not a missing registration.
+
+    The venue lists `KOSPI200` so it can be quoted, and permits no side on it. Reporting that as
+    `unlisted` invites someone to register a listing that already exists.
+    """
+    root = tmp_path / "untradable"
+    workspace, definition = _setup(root, model_price_parquet)
+    path = root / "tracked.py"
+    path.write_text(
+        "from decimal import Decimal\n"
+        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.domain.instruments import IndexInstrument, StockInstrument\n"
+        "class Exchange(AcademicExchange):\n"
+        "    def __init__(self):\n"
+        "        super().__init__(\n"
+        "            {'ABC': TradeRule('ABC', Decimal('1'), Decimal('1'), False,"
+        " ListingAccess.SIGNED),\n"
+        "             'KOSPI200': TradeRule('KOSPI200', Decimal('1'), Decimal('1'), False,"
+        " ListingAccess.NONE)},\n"
+        "            'academic',\n"
+        "            {'ABC': StockInstrument('ABC'),"
+        " 'KOSPI200': IndexInstrument('KOSPI200')},\n"
+        "        )\n",
+        encoding="utf-8",
+    )
+    component = ComponentRef.of(
+        "tracked",
+        ComponentKind.EXCHANGE,
+        path,
+        "Exchange",
+        fingerprint=fingerprint_component(
+            path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+        ),
+    )
+    workspace.register_component(component)
+    tracked = replace(definition, exchange=component)
+
+    # Publishing it is fine; the run simply does not trade it.
+    assert preflight_run(workspace, tracked).exchange == component
+
+    with pytest.raises(VqaprError, match=r"preflight\.universe\.untradable_listing") as e:
+        preflight_run(workspace, replace(tracked, instruments=("ABC", "KOSPI200")))
+    codes = [failure["code"] for failure in e.value.as_dict()["failures"]]
+    assert codes == ["preflight.universe.untradable_listing"], (
+        "a listed instrument must not also be reported as unlisted"
+    )
 
 
 def test_preflight_rejects_missing_requirement_and_invalid_bounds(

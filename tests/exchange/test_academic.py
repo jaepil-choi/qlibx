@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.exchange.costs import CostRule
+from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
-from vqapr.exchange.listings import ExchangeRulesView
-from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
+from vqapr.exchange.listings import ExchangeRulesView, ListingAccess
+from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.orders.batches import OrderBatch, OrderRequest
 from vqapr.valuation.marking import ValuationService
 
@@ -41,12 +42,12 @@ def _request(
 def _venue() -> AcademicExchange:
     return AcademicExchange(
         {
-            instrument: ListingRule(
+            instrument: TradeRule(
                 instrument_id=instrument,
                 quantity_step=Decimal("0.001"),
                 minimum_quantity=Decimal("0.001"),
                 fractional_allowed=True,
-                permitted_sides=frozenset({Side.BUY, Side.SELL}),
+                access=ListingAccess.SIGNED,
             )
             for instrument in ("A", "B", "C")
         }
@@ -156,18 +157,25 @@ def test_a_holding_with_no_price_is_left_out_of_nav_rather_than_ending_the_run()
     assert account.positions["B"] == Decimal("-2")
 
 
+BUY_COST = SideCost(Decimal("0.0003"), Decimal("0"))
+SELL_COST = SideCost(Decimal("0.0003"), Decimal("0.0020"))
+
+
 class _CostedAcademic(AcademicExchange):
-    """A subclass that declares a cost band and changes nothing else."""
+    """A subclass that declares a cost and changes nothing else.
+
+    The cost now lives on each instrument's own rule rather than in a separate band tuple, so
+    "declaring a cost" and "declaring a listing" are one declaration.
+    """
 
     @property
     def rules(self) -> ExchangeRulesView:
         return ExchangeRulesView(
             self.exchange_id,
-            self.listings,
-            (
-                CostRule("buy", Side.BUY, Decimal("0.0003"), Decimal("0")),
-                CostRule("sell", Side.SELL, Decimal("0.0003"), Decimal("0.0020")),
-            ),
+            {
+                name: replace(rule, buy=BUY_COST, sell=SELL_COST)
+                for name, rule in self.listings.items()
+            },
         )
 
 

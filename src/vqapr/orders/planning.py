@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side
+from vqapr.domain.instruments import base_quantity_for
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.orders.batches import OrderBatch, OrderRequest, ZeroDeltaDiagnostic
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
@@ -57,6 +58,10 @@ def _apply_venue_rules(
     Deltas are rounded toward zero onto the listing unit. If the rounded buys cannot be paid for
     out of current cash plus the rounded sell proceeds, buys are clipped in a deterministic order
     until they fit. Nothing is ever rounded up and no order is invented.
+
+    Every charge here names its instrument, so the cash reserved for a buy and released by a sell
+    is charged by the same band the venue will charge at the fill. A tax-exempt sleeve that were
+    priced venue-wide here would have its buys clipped against money it never owed.
     """
     ordered = sorted(instruments)
     resolved: dict[str, Decimal] = {}
@@ -65,6 +70,13 @@ def _apply_venue_rules(
         if instrument_id not in prices:
             resolved[instrument_id] = desired[instrument_id]
             continue
+        if not rules.tradable(instrument_id) and desired[instrument_id] != current:
+            # The venue lists it but permits no side. Refuse here, where the target that asked
+            # for it is still visible; the venue would otherwise refuse the whole batch and the
+            # message would name a side rather than the instruction that produced it.
+            raise ValueError(
+                f"{instrument_id!r} permits no side on {rules.exchange_id!r} and cannot be traded"
+            )
         delta = rules.quantize(instrument_id, desired[instrument_id] - current)
         resolved[instrument_id] = current + delta
 
@@ -76,23 +88,25 @@ def _apply_venue_rules(
         delta = _delta(instrument_id)
         if delta >= 0 or instrument_id not in prices:
             continue
-        notional = abs(delta) * prices[instrument_id]
-        available += notional - rules.charge(Side.SELL, notional).total
+        notional = rules.notional(instrument_id, delta, prices[instrument_id])
+        available += notional - rules.charge(Side.SELL, notional, instrument_id).total
 
     for instrument_id in ordered:
         delta = _delta(instrument_id)
         if delta <= 0 or instrument_id not in prices:
             continue
         price = prices[instrument_id]
-        notional = delta * price
-        required = notional + rules.charge(Side.BUY, notional).total
+        notional = rules.notional(instrument_id, delta, price)
+        required = notional + rules.charge(Side.BUY, notional, instrument_id).total
         if required <= available:
             available -= required
             continue
-        affordable = rules.quantize(instrument_id, available / price)
+        affordable = rules.quantize(
+            instrument_id, rules.quantity_for(instrument_id, available, price)
+        )
         while affordable > 0:
-            notional = affordable * price
-            required = notional + rules.charge(Side.BUY, notional).total
+            notional = rules.notional(instrument_id, affordable, price)
+            required = notional + rules.charge(Side.BUY, notional, instrument_id).total
             if required <= available:
                 break
             affordable = rules.quantize(
@@ -154,7 +168,14 @@ def plan_orders(
             if instrument_id in weights:
                 unresolved_weights[instrument_id] = allocation
         elif instrument_id in weights:
-            desired = weights[instrument_id] * nav / price
+            # The one place a weight becomes a quantity. Routed through the venue so a category
+            # whose contract is not one unit of the quoted price sizes correctly here too.
+            exposure = weights[instrument_id] * nav
+            desired = (
+                base_quantity_for(exposure, price)
+                if rules is None
+                else rules.quantity_for(instrument_id, exposure, price)
+            )
             allocation = weights[instrument_id]
         else:
             desired = Decimal(0)

@@ -87,11 +87,12 @@ def _exchange_component(root: Path) -> Path:
     path = root / "venue.py"
     path.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, ListingRule, Side\n"
+        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.exchange.listings import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
-        "        super().__init__({'A': ListingRule('A', Decimal('1'), Decimal('1'), False,\n"
-        "            frozenset((Side.BUY, Side.SELL)))})\n",
+        "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,\n"
+        "            ListingAccess.SIGNED)})\n",
         encoding="utf-8",
     )
     return path

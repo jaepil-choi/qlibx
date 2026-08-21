@@ -42,7 +42,8 @@ from vqapr.exchange.execution_table import (
     exact_execution_snapshot,
     validate_execution_input,
 )
-from vqapr.exchange.venue import AcademicExchange, ListingRule, Side
+from vqapr.exchange.listings import ListingAccess
+from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
@@ -175,12 +176,12 @@ def _state(account: AccountSnapshot = _ACCOUNT) -> RunStateRepository:
 def _exchange() -> AcademicExchange:
     return AcademicExchange(
         {
-            instrument: ListingRule(
+            instrument: TradeRule(
                 instrument,
                 Decimal("0.001"),
                 Decimal("0.001"),
                 True,
-                frozenset({Side.BUY, Side.SELL}),
+                ListingAccess.SIGNED,
             )
             for instrument in ("A", "B")
         }

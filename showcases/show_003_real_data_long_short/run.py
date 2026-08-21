@@ -258,7 +258,7 @@ class ReversalLongShort(StrategyModel):
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingRule, Side
+from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
 UNIVERSE = __UNIVERSE__
 
@@ -268,12 +268,12 @@ class ShowcaseExchange(AcademicExchange):
 
     def __init__(self):
         listings = {
-            instrument: ListingRule(
+            instrument: TradeRule(
                 instrument,
                 Decimal("0.0001"),
                 Decimal("0.0001"),
                 True,
-                frozenset({Side.BUY, Side.SELL}),
+                ListingAccess.SIGNED,
             )
             for instrument in UNIVERSE
         }

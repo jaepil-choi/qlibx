@@ -167,11 +167,11 @@ def test_the_shipped_profiles_are_the_first_two_implementations_to_pass(tmp_path
         path = tmp_path / f"{name}_venue.py"
         path.write_text(
             "from decimal import Decimal\n"
-            f"from vqapr.public import {base}, ListingRule, Side\n"
+            f"from vqapr.public import {base}, ListingAccess, TradeRule\n"
             f"class Venue({base}):\n"
             "    def __init__(self):\n"
-            "        super().__init__({'A': ListingRule('A', Decimal('1'), Decimal('1'), False,\n"
-            "            frozenset((Side.BUY, Side.SELL)))})\n",
+            "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,\n"
+            "            ListingAccess.SIGNED)})\n",
             encoding="utf-8",
         )
         ref = ComponentRef.of(

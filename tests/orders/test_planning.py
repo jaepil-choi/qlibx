@@ -7,6 +7,7 @@ import pytest
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
+from vqapr.domain.enums import Side
 from vqapr.exchange.costs import SideCost
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule, rules_view
 from vqapr.orders.planning import plan_orders
@@ -395,3 +396,92 @@ def test_a_halted_sale_does_not_fund_a_buy() -> None:
 
     # A caller that knows nothing about halts is unchanged.
     assert plan(None) == open_market
+
+
+def test_a_fully_invested_batch_is_payable_under_the_accounts_own_arithmetic() -> None:
+    """Planning reserves term by term; the account charges fill by fill. Both must agree.
+
+    The two sums are algebraically identical and not identical in ``Decimal``: a notional on a
+    real book already uses all 28 significant digits, so the same money summed in a different
+    order can differ in the last one. A book that keeps cash absorbs that silently. One that
+    declares ``cash_target = 0`` -- which is what an enhanced index holding its ETF sleeve as a
+    position declares -- lands within an ulp of zero, and ``prepare_fill`` refuses **any**
+    negative, ending the run.
+
+    The values below are the real rebalance that found it: session 8 of a KOSPI 200 enhanced
+    index, reduced to the three largest positions, which still reproduces. Without the payability
+    settle the projection is ``-2.99E-18``.
+    """
+    step = decimal("0.000001")
+    prices = {
+        "A005930": decimal("48200.0000"),
+        "A000660": decimal("74400.0000"),
+        "K200-TRACKER": decimal("10817.0000"),
+    }
+    held = {
+        "A005930": decimal("534290.4127971083679300140730"),
+        "A000660": decimal("109205.0987494961376609962325"),
+        "K200-TRACKER": decimal("1842789.116226514734919544650"),
+    }
+    targets = {
+        "A005930": decimal("0.719393548162"),
+        "A000660": decimal("0.080606451838"),
+        "K200-TRACKER": decimal("0.200000000000"),
+    }
+    assert sum(targets.values(), Decimal(0)) == 1, "fully invested: no cash to absorb rounding"
+
+    rules = rules_view(
+        "v",
+        {
+            name: TradeRule(
+                name,
+                step,
+                step,
+                True,
+                ListingAccess.SIGNED,
+                SideCost(commission_rate=decimal("0.0003")),
+                SideCost(commission_rate=decimal("0.0003"), tax_rate=decimal("0.002")),
+            )
+            for name in prices
+        },
+    )
+    account = AccountSnapshot(0, decimal("0.000000000000000003516"), held)
+    nav = account.cash + sum(
+        (quantity * prices[name] for name, quantity in held.items()), Decimal(0)
+    )
+
+    batch = plan_orders(
+        account=account,
+        execution_time_nav=nav,
+        prices=prices,
+        weight_targets=targets,
+        cash_target=decimal("0"),
+        budget=_BUDGET,
+        rules=rules,
+    )
+
+    # Exactly what Account.prepare_fill accumulates, in the order it accumulates it.
+    cash = account.cash
+    for request in sorted(batch.requests, key=lambda item: item.instrument_id):
+        if request.delta_quantity == 0:
+            continue
+        price = prices[request.instrument_id]
+        notional = abs(request.delta_quantity) * price
+        side = Side.BUY if request.delta_quantity > 0 else Side.SELL
+        cash -= request.delta_quantity * price + rules.charge(
+            side, notional, request.instrument_id
+        ).total
+    assert cash >= 0, f"planned batch overdraws the account by {-cash}"
+
+    # And the shave is one lot, not a retreat. What the book gives up is the cost of trading,
+    # not the settle: rotating this much of the account through a 3/23bp band is ~6bp, and the
+    # payability shave is a millionth of a share on top of it.
+    invested = sum(
+        (
+            (held.get(request.instrument_id, Decimal(0)) + request.delta_quantity)
+            * prices[request.instrument_id]
+            for request in batch.requests
+        ),
+        Decimal(0),
+    )
+    assert invested / nav > decimal("0.999")

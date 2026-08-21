@@ -35,9 +35,34 @@ def test_minimum_quantity_is_checked_even_when_the_instrument_is_divisible() -> 
     assert FRACTIONAL.permits_quantity(Decimal("0.1")) is True, "exactly the minimum is allowed"
     assert FRACTIONAL.permits_quantity(Decimal("0.05")) is False, "below the declared minimum"
 
-    # The round-trip spelling that hid it: it agrees for a lot instrument and disagrees here.
-    assert FRACTIONAL.quantize(Decimal("0.05")) == Decimal("0.05"), "quantize cannot see a minimum"
-    assert LOT.quantize(Decimal("50")) == Decimal("0")
+
+def test_quantize_and_permits_quantity_agree_about_the_floor() -> None:
+    """The two must answer the same way, or planning emits an order validation refuses.
+
+    ``quantize`` used to return a sub-minimum fractional quantity unchanged. Planning quantizes a
+    delta and the venue then validates it, so a divisible listing produced requests it refused
+    outright -- ``quantity violates listing rule``, which ends the run. It is not a caller error
+    either: a held position sits wherever the last fills left it, so ``desired - held`` is an
+    arbitrary real number and falls under the floor whenever a target barely moves.
+
+    Rounding *toward zero* is what both spellings already mean. Below the floor, zero is the
+    correctly rounded size, and the grid stays a separate question -- which is what record 039
+    established and this extends to the fractional branch.
+    """
+    for rule, under, at_least in (
+        (FRACTIONAL, Decimal("0.05"), Decimal("0.1")),
+        (LOT, Decimal("50"), Decimal("100")),
+    ):
+        assert rule.quantize(under) == Decimal("0"), "below the floor rounds to no order"
+        assert rule.quantize(-under) == Decimal("0"), "and the sign does not change that"
+        assert rule.quantize(at_least) == at_least, "exactly the floor is a real order"
+        assert rule.permits_quantity(abs(rule.quantize(under))) is False or rule.quantize(
+            under
+        ) == Decimal("0")
+
+    # A fractional listing still keeps everything above its floor exactly as given: its own
+    # divisibility is the grid, so nothing is snapped away.
+    assert FRACTIONAL.quantize(Decimal("0.123456789")) == Decimal("0.123456789")
 
 
 def test_step_and_minimum_are_separate_questions() -> None:

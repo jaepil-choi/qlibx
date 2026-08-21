@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
@@ -185,7 +185,117 @@ def _apply_venue_rules(
         available -= notional + rules.charge(Side.BUY, notional, instrument_id).total
         resolved[instrument_id] = account.positions.get(instrument_id, Decimal(0)) + affordable
 
-    return resolved
+    return _settle_payable(
+        rules=rules,
+        account=account,
+        prices=prices,
+        resolved=resolved,
+        ordered=ordered,
+        fillable=_fillable,
+    )
+
+
+def _projected_cash(
+    *,
+    rules: ExchangeRulesView,
+    account: AccountSnapshot,
+    prices: Mapping[str, Decimal],
+    resolved: Mapping[str, Decimal],
+    ordered: Sequence[str],
+    fillable: Callable[[str], bool],
+) -> Decimal:
+    """The cash the account will hold once this batch is charged, in the account's own order.
+
+    ``Account.prepare_fill`` accumulates ``Fill.cash_delta`` over fills sorted by instrument. This
+    walks the same sequence with the same terms, so the number it returns is the number the
+    account will compute -- including where ``Decimal`` rounds.
+    """
+    cash = account.cash
+    for instrument_id in ordered:
+        delta = resolved[instrument_id] - account.positions.get(instrument_id, Decimal(0))
+        if delta == 0 or instrument_id not in prices or not fillable(instrument_id):
+            continue
+        price = prices[instrument_id]
+        notional = rules.notional(instrument_id, delta, price)
+        side = Side.BUY if delta > 0 else Side.SELL
+        cash -= delta * price + rules.charge(side, notional, instrument_id).total
+    return cash
+
+
+def _settle_payable(
+    *,
+    rules: ExchangeRulesView,
+    account: AccountSnapshot,
+    prices: Mapping[str, Decimal],
+    resolved: dict[str, Decimal],
+    ordered: Sequence[str],
+    fillable: Callable[[str], bool],
+) -> dict[str, Decimal]:
+    """Guarantee the batch is payable under the arithmetic the account will actually use.
+
+    The clip above reserves cash term by term and the account charges fill by fill. Those two sums
+    are algebraically identical and **not** identical in ``Decimal``: a notional here already uses
+    all 28 significant digits, so the same money summed in a different order can differ in the
+    last one. A book that leaves cash never notices. A fully-invested book -- ``cash_target = 0``,
+    which is what an enhanced index holding its sleeve as a position declares -- lands within one
+    ulp of zero, and ``Account.prepare_fill`` refuses *any* negative:
+
+        cash before     3.516E-18
+        sell proceeds   1333510283.370090515324773564
+        buy required    1333510283.370090515324773570
+        projected      -2E-18                          <- run over
+
+    So the planner checks its own batch the way the account will, and shaves the largest buy by
+    whole lots until it is payable. Shaving the largest is deliberate: it is the position least
+    disturbed in relative terms, and it is deterministic, which a batch that must replay exactly
+    requires.
+    """
+    for _ in range(MAX_AFFORDABILITY_STEPS):
+        projected = _projected_cash(
+            rules=rules,
+            account=account,
+            prices=prices,
+            resolved=resolved,
+            ordered=ordered,
+            fillable=fillable,
+        )
+        if projected >= 0:
+            return resolved
+        buys = [
+            instrument_id
+            for instrument_id in ordered
+            if instrument_id in prices
+            and fillable(instrument_id)
+            and resolved[instrument_id]
+            > account.positions.get(instrument_id, Decimal(0))
+        ]
+        if not buys:
+            # Nothing was bought, so the shortfall is not this batch's to fix: an account that
+            # cannot pay for its own sales is a venue charging more than it declared.
+            raise ValueError(
+                f"a sell-only batch on {rules.exchange_id!r} would still overdraw the account by "
+                f"{-projected}; the venue charges more than its declared band"
+            )
+        largest = max(
+            buys,
+            key=lambda instrument_id: (
+                rules.notional(
+                    instrument_id,
+                    resolved[instrument_id]
+                    - account.positions.get(instrument_id, Decimal(0)),
+                    prices[instrument_id],
+                ),
+                instrument_id,
+            ),
+        )
+        step = rules.listing(largest).quantity_step
+        held = account.positions.get(largest, Decimal(0))
+        shaved = rules.quantize(largest, resolved[largest] - held - step)
+        resolved[largest] = held + max(shaved, Decimal(0))
+    raise ValueError(
+        f"batch on {rules.exchange_id!r} could not be made payable within "
+        f"{MAX_AFFORDABILITY_STEPS} lots; planning and the account disagree by more than rounding"
+    )
 
 
 def plan_orders(

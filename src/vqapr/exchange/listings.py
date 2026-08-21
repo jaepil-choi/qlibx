@@ -110,16 +110,29 @@ class TradeRule:
     def quantize(self, quantity: Decimal) -> Decimal:
         """Round one signed quantity toward zero onto this rule's tradable unit.
 
-        A divisible instrument is already on its own unit and is returned unchanged. A lot
-        instrument floors the magnitude onto ``quantity_step`` and returns exactly zero when the
-        remaining magnitude cannot reach ``minimum_quantity``.
+        A divisible instrument is already on its own unit, so only its **floor** applies: a size
+        below ``minimum_quantity`` is not a smaller order, it is no order, and returning it
+        unchanged produced a request the venue then refused outright --
+
+            quantity violates listing rule for 'A267250'   delta 3.76E-7, minimum 1E-6
+
+        which ends a run. That delta is not a mistake by the caller: a held position sits wherever
+        the last fills left it, so ``desired - held`` is an arbitrary real number and lands under
+        the floor whenever a target barely moves. Record 039 separated the floor from the grid in
+        :meth:`permits_quantity` and this method was left checking neither for a fractional
+        listing, so planning and validation disagreed about the same order.
+
+        A lot instrument floors the magnitude onto ``quantity_step`` and likewise returns exactly
+        zero when what remains cannot reach ``minimum_quantity``.
         """
         if not isinstance(quantity, Decimal):
             raise TypeError("quantity must be a Decimal")
         if not quantity.is_finite():
             raise ValueError("quantity must be finite")
-        if self.fractional_allowed or quantity == 0:
+        if quantity == 0:
             return quantity
+        if self.fractional_allowed:
+            return quantity if abs(quantity) >= self.minimum_quantity else Decimal("0")
         magnitude = abs(quantity)
         steps = (magnitude / self.quantity_step).to_integral_value(rounding="ROUND_FLOOR")
         quantized = steps * self.quantity_step

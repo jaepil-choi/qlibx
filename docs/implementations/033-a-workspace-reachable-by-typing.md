@@ -1,5 +1,11 @@
 # 033 — A workspace reachable by typing
 
+> **Superseded in part by record 034.** The gap this record closed was real and stayed closed, but
+> the shape was wrong: it added `vqapr declare` beside `vqapr register`, giving one workspace two
+> doors. `declare` is deleted; `register` now takes the declaration file. Read 034 for the current
+> command surface. The reasoning below about *why* these seven things needed a CLI path, and why a
+> file beats flags, still holds.
+
 ## Why this exists
 
 `register` took all four extension points after `5449ad0`. Seven other things a run needs had **no

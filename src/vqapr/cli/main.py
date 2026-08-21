@@ -13,13 +13,12 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
-from vqapr.cli import declare, list_, new, register, run
+from vqapr.cli import list_, new, register, run
 from vqapr.cli.envelope import UsageError, emit, failure
 
 _COMMANDS: dict[str, Any] = {
     "new": new,
     "register": register,
-    "declare": declare,
     "run": run,
     "list": list_,
 }

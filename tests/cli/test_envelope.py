@@ -92,7 +92,7 @@ def test_the_declared_entry_point_builds_every_command() -> None:
     actions = build_parser()._subparsers
     assert actions is not None
     rendered = build_parser().format_help()
-    for command in ("new", "register", "declare", "run", "list"):
+    for command in ("new", "register", "run", "list"):
         assert command in rendered
 
 

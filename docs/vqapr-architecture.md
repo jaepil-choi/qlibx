@@ -2855,10 +2855,21 @@ surface.**
 #### 사용자가 컴포넌트를 만드는 흐름
 
 ```bash
-vqapr new strategy ./my_strategy      # 구현 파일 + yaml + 자기 conformance 테스트 + README
-cd my_strategy && pytest              # **처음부터 통과한다.** 템플릿은 그대로 실행되는 예제다
-vqapr register . --project ../research   # 같은 conformance를 부르고, fingerprint를 찍어 등록
+vqapr register workspace.yaml         # dataset·execution input·agenda — 검증하고 등록한다
+vqapr new strategy my-alpha --dataset prices   # 구현 파일 + 그 옆에 등록 가능한 yaml
+vqapr register my_alpha.yaml          # 같은 conformance를 부르고, fingerprint를 찍어 등록
+vqapr run spec.yaml
 ```
+
+- **workspace로 들어가는 문은 `register` 하나다.** 코드(strategy·datamodel·constraint·exchange)와
+  세상에 대한 사실(dataset·execution input·agenda·config)이 같은 파일 형식으로 같은 문을 지난다.
+  둘 다 검증을 통과해야 기록되므로 *"등록은 됐는데 쓸 수 없는 것"*이 남지 않는다.
+- **컴포넌트는 argv만으로 등록할 수 없다.** `register strategy my-alpha ./alpha.py MyAlpha`는
+  완전해 보이지만 그 컴포넌트가 읽을 dataset도, 돌 cadence도 없이 등록한다 — 어떤 run도 쓸 수 없는
+  컴포넌트다. 그래서 등록의 단위는 컴포넌트가 아니라 **선언 파일**이고, `new`가 그 선언을 컴포넌트
+  옆에 같이 깐다.
+- **상대 경로는 선언 파일이 있는 디렉터리 기준으로 푼다** — 코드든 데이터든 같은 규칙이다. 그래야
+  선언 파일과 컴포넌트를 함께 옮길 수 있다.
 
 - **템플릿이 자기 테스트를 들고 나온다.** 계약이 문서가 아니라 실행되는 형태로 전달된다.
 - **`pytest`와 `register`가 같은 검사를 부른다.** 갈리면 *"로컬에선 되는데 등록이 안 된다"*가 생긴다.

@@ -154,7 +154,7 @@ def _workspace_for_run(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
 
     code, payload = _cli(
         capsys, "--project-root", str(root),
-        "declare", str(_declaration(root, observation, execution)),
+        "register", str(_declaration(root, observation, execution)),
     )
     assert code == 0, payload
 
@@ -164,20 +164,18 @@ def _workspace_for_run(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
     )
     assert code == 0, payload
     code, registered = _cli(
-        capsys, "--project-root", str(root), "register", "strategy", "my-alpha",
-        payload["path"], payload["object_name"],
+        capsys, "--project-root", str(root), "register", payload["declaration"],
     )
     assert code == 0, registered
 
-    code, venue = _cli(
-        capsys, "--project-root", str(root), "register", "exchange", "venue",
-        str(_exchange_component(root)), "Venue",
-    )
-    assert code == 0, venue
-
     configs = root / "configs.yaml"
     configs.write_text(
-        """
+        f"""
+components:
+  venue:
+    kind: exchange
+    path: {_exchange_component(root).as_posix()}
+    object_name: Venue
 strategy_configs:
   my-alpha:
     agenda_id: alpha
@@ -190,7 +188,7 @@ monitoring_policies:
 """,
         encoding="utf-8",
     )
-    code, payload = _cli(capsys, "--project-root", str(root), "declare", str(configs))
+    code, payload = _cli(capsys, "--project-root", str(root), "register", str(configs))
     assert code == 0, payload
 
 
@@ -224,13 +222,16 @@ def test_new_register_and_list_are_one_working_path(
     assert created["stage"] == "component.new"
     assert Path(created["path"]).exists()
 
+    # `new` emits the declaration `register` requires, so the two compose without the user
+    # writing YAML from documentation on their first command.
+    assert Path(created["declaration"]).exists()
+
     code, registered = _cli(
-        capsys, "--project-root", str(tmp_path), "register", "strategy", "my-alpha",
-        created["path"], created["object_name"],
+        capsys, "--project-root", str(tmp_path), "register", created["declaration"],
     )
-    assert code == 0
-    assert registered["stage"] == "component.register"
-    assert len(registered["fingerprint"]) == 64
+    assert code == 0, registered
+    assert registered["stage"] == "workspace.register"
+    assert registered["registered"]["components"] == ["my-alpha"]
 
     code, listed = _cli(capsys, "--project-root", str(tmp_path), "list", "components")
     assert code == 0
@@ -297,9 +298,7 @@ def test_a_rejected_command_line_still_answers_in_the_envelope(
     The agent's only parsing contract is one JSON line, so a mistyped command that answered with
     an empty stdout and a bare exit code was the single shape it could not read.
     """
-    code, payload = _cli(
-        capsys, "--project-root", str(tmp_path), "register", "dataset", "x", "y.parquet", "Z"
-    )
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "new", "dataset", "x")
 
     assert code == 1
     assert payload["ok"] is False

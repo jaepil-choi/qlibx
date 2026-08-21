@@ -802,6 +802,9 @@ class SimulationFlow:
         selected_prices = {
             instrument: price for instrument, price in prices.items() if price is not None
         }
+        # A halted row still carries a price, because a halt suspends trading and not valuation.
+        # Planning has to know the difference or it funds buys from sales the venue will refuse.
+        tradable = {row.instrument: row.is_tradable for row in snapshot.rows}
         # NAV values what can be priced at this instant. A holding with no row carries no
         # selected value, so it contributes nothing here and stays in the account untouched;
         # pricing it from a stale quote would put an invented number in the denominator every
@@ -829,6 +832,7 @@ class SimulationFlow:
                 cash_target=pending.intent.cash_target,
                 budget=pending.intent.budget,
                 rules=self._exchange.rules,
+                tradable=tradable,
             ),
         )
         fills = self._due_boundary(

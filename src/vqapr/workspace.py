@@ -60,6 +60,27 @@ users inventing slightly different ones do not protect each other.
 WORKSPACE_LOCK_TIMEOUT = 30.0
 WORKSPACE_LOCK_STALE_AFTER = 120.0
 
+WORKSPACE_SWAP_ATTEMPTS = 10
+WORKSPACE_SWAP_BACKOFF = 0.02
+"""Retries for the two file operations a concurrent reader can make fail on Windows.
+
+POSIX ``rename`` is unconditional, so a reader holding the old inode is simply left holding it and
+the swap succeeds. Windows refuses instead: ``os.replace`` onto a path another process currently
+has open fails with ``WinError 5``, and the reader's own ``open`` can fail with a sharing
+violation for the moment the swap takes. Both surface as ``OSError``.
+
+The workspace lock does not cover this. It serialises *writers* against each other, which is what
+stops a lost update -- but a **reader** takes no lock, deliberately: a run reads the workspace on
+every callback, and serialising that behind every registration would be a far worse trade. So a
+writer can hold the lock, be the only writer, and still be refused by a reader that arrived
+between its own read and its write.
+
+Measured on this repository before the retry: 1 run in 10 with eight processes registering at
+once, on both the read and the write side. The condition is a swap that completes in microseconds,
+so outlasting it is the proportionate fix -- and a real permission problem still fails, because it
+outlasts the retries.
+"""
+
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 """libyaml when the installed PyYAML was built with it, the pure-Python classes otherwise.
@@ -892,24 +913,32 @@ class Workspace:
         dict[str, ValuationConfig],
         dict[str, MonitoringPolicy],
     ]:
-        try:
-            text = self.path.read_text(encoding="utf-8")
-        except FileNotFoundError as error:
-            raise _workspace_error(
-                stage=OPEN_STAGE,
-                code=f"{OPEN_STAGE}.missing",
-                requirement=f"workspace must exist at {self.path}",
-                observed="path does not exist",
-                retry="create the workspace, then retry",
-            ) from error
-        except OSError as error:
-            raise _workspace_error(
-                stage=OPEN_STAGE,
-                code=f"{OPEN_STAGE}.unreadable",
-                requirement=f"workspace must be readable at {self.path}",
-                observed=str(error),
-                retry="make the workspace readable, then retry",
-            ) from error
+        text: str | None = None
+        for attempt in range(WORKSPACE_SWAP_ATTEMPTS):
+            try:
+                text = self.path.read_text(encoding="utf-8")
+                break
+            except FileNotFoundError as error:
+                raise _workspace_error(
+                    stage=OPEN_STAGE,
+                    code=f"{OPEN_STAGE}.missing",
+                    requirement=f"workspace must exist at {self.path}",
+                    observed="path does not exist",
+                    retry="create the workspace, then retry",
+                ) from error
+            except OSError as error:
+                # A concurrent atomic replace, not an unreadable workspace. Distinguished by
+                # outlasting it: a swap completes, a permission problem does not.
+                if attempt + 1 == WORKSPACE_SWAP_ATTEMPTS:
+                    raise _workspace_error(
+                        stage=OPEN_STAGE,
+                        code=f"{OPEN_STAGE}.unreadable",
+                        requirement=f"workspace must be readable at {self.path}",
+                        observed=str(error),
+                        retry="make the workspace readable, then retry",
+                    ) from error
+                _time.sleep(WORKSPACE_SWAP_BACKOFF * (attempt + 1))
+        assert text is not None
 
         try:
             return _decode_cached(text)  # type: ignore[return-value]
@@ -996,7 +1025,16 @@ class Workspace:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
+            for attempt in range(WORKSPACE_SWAP_ATTEMPTS):
+                try:
+                    os.replace(temporary, self.path)
+                    break
+                except OSError:
+                    # A reader has the target open. Windows refuses the swap rather than letting
+                    # the reader keep the old file, and the reader is gone microseconds later.
+                    if attempt + 1 == WORKSPACE_SWAP_ATTEMPTS:
+                        raise
+                    _time.sleep(WORKSPACE_SWAP_BACKOFF * (attempt + 1))
         except OSError as error:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)

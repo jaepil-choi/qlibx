@@ -339,3 +339,59 @@ def test_a_venue_whose_cost_outruns_the_lot_is_refused_rather_than_searched() ->
             budget=_BUDGET,
             rules=Runaway("runaway", {"A": rule}),
         )
+
+
+def test_a_halted_sale_does_not_fund_a_buy() -> None:
+    """A halt suspends trading, not valuation, so its price must not become spending money.
+
+    The venue publishes a halted sell as typed ``NONTRADABLE`` zero-dealt evidence. If planning
+    counted its proceeds, the buys it funded still fill and the account is overdrawn -- which
+    `Account.prepare_fill` catches only at the last moment, ending the run. A book with cash slack
+    absorbs it silently; a fully-invested one dies on its first halted holding, and on the KOSPI
+    200 panel every one of 2,485 sessions carries halted-but-priced rows.
+
+    Only the funding arithmetic changes. The sell is still requested, because the refusal is the
+    evidence that the fund tried and the market would not let it.
+    """
+    price = decimal("10000")
+    account = AccountSnapshot(0, decimal("0"), {"HALTED": decimal("100")})
+    rules = rules_view(
+        "v",
+        {
+            name: TradeRule(
+                name,
+                decimal("0.000001"),
+                decimal("0.000001"),
+                True,
+                ListingAccess.SIGNED,
+                SideCost(commission_rate=decimal("0.0003")),
+                SideCost(commission_rate=decimal("0.0003"), tax_rate=decimal("0.002")),
+            )
+            for name in ("HALTED", "BUYME")
+        },
+    )
+
+    def plan(tradable: dict[str, bool] | None) -> dict[str, Decimal]:
+        batch = plan_orders(
+            account=account,
+            execution_time_nav=decimal("1000000"),
+            prices={"HALTED": price, "BUYME": price},
+            weight_targets={"BUYME": decimal("1")},
+            cash_target=decimal("0"),
+            budget=_BUDGET,
+            rules=rules,
+            tradable=tradable,
+        )
+        return {request.instrument_id: request.delta_quantity for request in batch.requests}
+
+    halted = plan({"HALTED": False, "BUYME": True})
+    assert halted["HALTED"] == decimal("-100"), "the sell is still requested, and still refused"
+    assert halted["BUYME"] == decimal("0"), "nothing is bought with money that will not arrive"
+
+    # The same batch with the halt lifted is funded by the sale, which is the point of the netting.
+    open_market = plan({"HALTED": True, "BUYME": True})
+    assert open_market["HALTED"] == decimal("-100")
+    assert open_market["BUYME"] > decimal("99")
+
+    # A caller that knows nothing about halts is unchanged.
+    assert plan(None) == open_market

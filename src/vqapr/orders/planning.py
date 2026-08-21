@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
@@ -111,6 +111,7 @@ def _apply_venue_rules(
     prices: Mapping[str, Decimal],
     desired: Mapping[str, Decimal],
     instruments: Iterable[str],
+    tradable: Mapping[str, bool],
 ) -> dict[str, Decimal]:
     """Convert intended positions into positions the venue can actually trade.
 
@@ -121,7 +122,21 @@ def _apply_venue_rules(
     Every charge here names its instrument, so the cash reserved for a buy and released by a sell
     is charged by the same band the venue will charge at the fill. A tax-exempt sleeve that were
     priced venue-wide here would have its buys clipped against money it never owed.
+
+    ``tradable`` is **this instant's** tradability, which is not the same question as
+    ``rules.tradable()``. That one is the venue's standing declaration -- listed, never fillable.
+    This one is the execution row: a halted name still carries a price, because a halt suspends
+    trading and not valuation, and canon 6.1 marks a position from exactly such a row. Funding a
+    buy from its sale reserves money that is never going to arrive, and the account is overdrawn
+    the moment the venue publishes the refusal as typed ``NONTRADABLE`` evidence.
+
+    The order is still emitted. The refusal is the evidence that the fund tried and the market
+    would not let it; only the funding arithmetic declines to count on it.
     """
+
+    def _fillable(instrument_id: str) -> bool:
+        return tradable.get(instrument_id, True)
+
     ordered = sorted(instruments)
     resolved: dict[str, Decimal] = {}
     for instrument_id in ordered:
@@ -145,14 +160,14 @@ def _apply_venue_rules(
     available = account.cash
     for instrument_id in ordered:
         delta = _delta(instrument_id)
-        if delta >= 0 or instrument_id not in prices:
+        if delta >= 0 or instrument_id not in prices or not _fillable(instrument_id):
             continue
         notional = rules.notional(instrument_id, delta, prices[instrument_id])
         available += notional - rules.charge(Side.SELL, notional, instrument_id).total
 
     for instrument_id in ordered:
         delta = _delta(instrument_id)
-        if delta <= 0 or instrument_id not in prices:
+        if delta <= 0 or instrument_id not in prices or not _fillable(instrument_id):
             continue
         price = prices[instrument_id]
         notional = rules.notional(instrument_id, delta, price)
@@ -169,6 +184,7 @@ def _apply_venue_rules(
         notional = rules.notional(instrument_id, affordable, price)
         available -= notional + rules.charge(Side.BUY, notional, instrument_id).total
         resolved[instrument_id] = account.positions.get(instrument_id, Decimal(0)) + affordable
+
     return resolved
 
 
@@ -181,6 +197,7 @@ def plan_orders(
     cash_target: Decimal,
     budget: Budget,
     rules: ExchangeRulesView | None = None,
+    tradable: Mapping[str, bool] | None = None,
 ) -> OrderBatch:
     """Convert a weight target into the delta that reaches it at execution-time prices.
 
@@ -190,6 +207,11 @@ def plan_orders(
 
     Held positions always require a selected value. A target-only missing row remains an
     unresolved request so the Exchange can publish typed ``ABSENT`` zero-dealt evidence.
+
+    ``tradable`` carries the execution row's own ``is_tradable`` per instrument. An instrument
+    absent from it is assumed fillable, which keeps every caller that does not know about halts
+    working exactly as before; a caller that passes it stops funding buys from sales the venue is
+    going to refuse.
     """
     if not isinstance(account, AccountSnapshot):
         raise TypeError("account must be an AccountSnapshot")
@@ -245,6 +267,7 @@ def plan_orders(
             prices=selected_prices,
             desired=desired_quantities,
             instruments=instruments,
+            tradable=dict(tradable or {}),
         )
 
     requests: list[OrderRequest] = []

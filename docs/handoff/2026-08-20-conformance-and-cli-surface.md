@@ -1,7 +1,7 @@
 # Handoff — conformance decided, and the CLI declaration surface closed
 
 Status: in_progress
-Branch: `jaepil-develop` · last commit `e2cdbb0` · **tree is green: 605 passed, ruff clean**
+Branch: `jaepil-develop` · last commit `469de4e` · **tree is green: 609 passed, ruff clean**
 **Nothing is uncommitted.** Version is `0.1.0a8`.
 
 Supersedes `2026-08-20-testbed-gap-closure.md`, which is fully closed.
@@ -63,7 +63,33 @@ Arity is now the contract, defined once in `loading.py` (`positional_arity`,
 `vqapr check` is **not** built and canon now names two entrances, not three: `register` already
 calls `conformance()`, and the remaining question is runtime-only.
 
-### Item 2: a workspace is reachable by typing
+### The CLI surface: one door, `register`
+
+The user rejected the two-verb split record 033 shipped, on the right grounds — *"register가 애초에
+필요한 yaml을 같이 요구해야 하는거고 그게 없으면 아예 register를 거부해야 해."* That is what canon
+§10.2 already drew.
+
+```
+vqapr register <declaration.yaml>     # 7 sections: datasets, execution_inputs, agendas,
+                                      #   components, strategy_configs, valuation_configs,
+                                      #   monitoring_policies
+vqapr new strategy my-alpha --dataset prices   # emits my_alpha.py AND my_alpha.yaml
+vqapr run <spec.yaml>
+vqapr list <kind>
+```
+
+`declare` is deleted. **A component cannot be registered from argv alone** without registering
+something no run can use — no dataset it reads, no cadence it runs on. So the unit of registration
+is the declaration file, and `new` emits one beside what it scaffolds. Record `034`.
+
+Verified as a first-time user types it, no library import anywhere: empty directory →
+`register workspace.yaml` → `new strategy` → `register my_alpha.yaml` → `register rest.yaml` →
+`run spec.yaml` → `occurrences=9, account_version=9`.
+
+The PK validation the user asked about **already existed and is now reachable**: a duplicated
+`(available_at, instrument)` is refused with the offending group as evidence and nothing written.
+
+### Superseded: item 2's first shape
 
 `vqapr declare <file.yaml>` covers all seven declarations that had no CLI path — datasets (with
 their sources), execution inputs, agendas, and the three configs. One command taking one file
@@ -77,14 +103,15 @@ measure of the gap that existed.
 | commit | what |
 |---|---|
 | `a6af89d` | arity is the contract, not spelling — record `032`, issue `004` closed |
-| `e2cdbb0` | `vqapr declare` — record `033` |
+| `e2cdbb0` | the seven declarations reached a CLI path — record `033` (shape superseded) |
+| `469de4e` | `register` is the one door; `declare` deleted — record `034` |
 
 ---
 
 ## How to verify anything here
 
 ```
-uv run pytest -q                      # 605 passed
+uv run pytest -q                      # 609 passed
 uv run ruff check src/ tests/         # clean
 uv run python showcases/show_00N_*/run.py    # all eight run; 005 and 007 are the sharp ones
 ```
@@ -113,4 +140,14 @@ above and is the fastest way to re-measure that the check still points the right
 context needs those builders. This is the natural next build and it is now the only thing standing
 between a user and testing their own component without a workspace.
 
-**`declare` cannot remove a declaration.** It declares. Removing one is not reachable from the CLI.
+**`register` cannot remove a declaration.** Removing one is not reachable from the CLI.
+
+**`.vqapr/workspace.yaml` is an unguarded output.** The user raised tamper-detection — a digest the
+system remembers so a hand-edit invalidates the workspace — then judged the responsibility not
+obviously worth it, and nothing was built. Nothing currently says the file must not be hand-edited,
+which is the cheap half of that decision if it is ever wanted.
+
+**A flake to watch, not caused by this work.** `tests/test_workspace_concurrency.py::
+test_parallel_registrations_all_survive` failed once with `workspace.open.unreadable` during a full
+run, then passed 6/6 in isolation on the stashed tree and 3/3 in full runs afterwards. It touches no
+CLI code. If it recurs, it is a real cross-process read race and not a test artefact.

@@ -45,6 +45,65 @@ def _prices(values: Mapping[str, Decimal]) -> dict[str, Decimal]:
     return result
 
 
+MAX_AFFORDABILITY_STEPS = 8
+"""Corrective lots allowed after the closed-form guess, before the planner refuses.
+
+The guess is exact whenever a venue charges a rate on notional, which every shipped cost band
+does, so zero corrective steps is the normal case. A venue whose ``notional`` is genuinely
+non-linear in quantity may need a few; one that needs more than this is not merely non-linear but
+non-monotone, and walking further would be searching rather than correcting.
+"""
+
+
+def _affordable_quantity(
+    *,
+    rules: ExchangeRulesView,
+    instrument_id: str,
+    price: Decimal,
+    available: Decimal,
+) -> Decimal:
+    """The largest quantity of ``instrument_id`` that ``available`` cash actually pays for.
+
+    Solved, not searched. A buy costs ``notional(q) + charge(notional(q))``, and a cost band is a
+    rate on notional, so
+
+        required(q) = notional(q) * (1 + commission_rate + tax_rate)
+
+    and the affordable notional is ``available / (1 + rate)``. The conversion back to a quantity
+    goes through the venue, so a category whose contract is not one unit of the quoted price -- a
+    future with a multiplier -- keeps working.
+
+    The previous implementation guessed ``available / price``, which ignores the commission and so
+    always overshoots by the charge on itself, then removed the overshoot **one quantity_step at a
+    time**. That walk is ``affordable * rate / step`` iterations: 55 on a whole-share venue with
+    10bn of cash to spend, and 55,226,256 for the same cash on a venue whose step is 1e-6. Both
+    shipped KRX profiles trade whole shares, which is why nothing exercised it -- and a fractional
+    academic venue, which is what alpha research runs on, could not finish a single session.
+
+    The bounded loop below corrects the guess for ``quantize`` flooring; it does not search. It
+    refuses rather than return a quantity the account cannot pay for.
+    """
+    cost = rules.listing(instrument_id).cost(Side.BUY)
+    rate = Decimal(1) + cost.commission_rate + cost.tax_rate
+    affordable = rules.quantize(
+        instrument_id, rules.quantity_for(instrument_id, available / rate, price)
+    )
+    for _ in range(MAX_AFFORDABILITY_STEPS):
+        if affordable <= 0:
+            return Decimal(0)
+        notional = rules.notional(instrument_id, affordable, price)
+        if notional + rules.charge(Side.BUY, notional, instrument_id).total <= available:
+            return affordable
+        affordable = rules.quantize(
+            instrument_id, affordable - rules.listing(instrument_id).quantity_step
+        )
+    raise ValueError(
+        f"affordable quantity for {instrument_id!r} on {rules.exchange_id!r} did not converge "
+        f"within {MAX_AFFORDABILITY_STEPS} lots of the closed-form estimate; the venue's notional "
+        "or cost is not monotone in quantity"
+    )
+
+
 def _apply_venue_rules(
     *,
     rules: ExchangeRulesView,
@@ -101,21 +160,14 @@ def _apply_venue_rules(
         if required <= available:
             available -= required
             continue
-        affordable = rules.quantize(
-            instrument_id, rules.quantity_for(instrument_id, available, price)
+        affordable = _affordable_quantity(
+            rules=rules, instrument_id=instrument_id, price=price, available=available
         )
-        while affordable > 0:
-            notional = rules.notional(instrument_id, affordable, price)
-            required = notional + rules.charge(Side.BUY, notional, instrument_id).total
-            if required <= available:
-                break
-            affordable = rules.quantize(
-                instrument_id, affordable - rules.listing(instrument_id).quantity_step
-            )
         if affordable <= 0:
             resolved[instrument_id] = account.positions.get(instrument_id, Decimal(0))
             continue
-        available -= required
+        notional = rules.notional(instrument_id, affordable, price)
+        available -= notional + rules.charge(Side.BUY, notional, instrument_id).total
         resolved[instrument_id] = account.positions.get(instrument_id, Decimal(0)) + affordable
     return resolved
 

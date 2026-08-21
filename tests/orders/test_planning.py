@@ -7,6 +7,8 @@ import pytest
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
+from vqapr.exchange.costs import SideCost
+from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule, rules_view
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.valuation.marking import ValuationService
@@ -243,3 +245,97 @@ def test_zero_dealt_fills_prepare_an_unchanged_account_snapshot() -> None:
 
     assert prepared.next_snapshot.cash == before.cash
     assert prepared.next_snapshot.positions == before.positions
+
+
+def _fractional_venue(instrument_id: str, *, step: str, commission: str) -> ExchangeRulesView:
+    """An academic venue whose lot is as fine as the caller says, charging one rate on buys."""
+    rule = TradeRule(
+        instrument_id,
+        decimal(step),
+        decimal(step),
+        True,
+        ListingAccess.LONG_ONLY,
+        SideCost(commission_rate=decimal(commission)),
+        SideCost(),
+    )
+    return rules_view("fractional", {instrument_id: rule})
+
+
+def test_an_unaffordable_buy_is_clipped_by_arithmetic_not_by_walking_lots() -> None:
+    """The clip is solved, not searched, so a fine lot does not cost proportionally more.
+
+    A buy that overruns the cash available is reduced to what the cash pays for. That quantity has
+    a closed form, because a cost band is a rate on notional. The previous implementation instead
+    walked down one ``quantity_step`` per iteration from a guess that ignored the commission --
+    ``affordable * rate / step`` iterations, which is 55 for the whole-share venues that ship and
+    55,226,256 for the same money on the 1e-6 lot a fractional academic profile declares. A run on
+    such a venue could not finish a session.
+
+    Asserted as behaviour rather than as a timing: the same book planned on three lot sizes
+    spanning six orders of magnitude must be payable, must leave less than one lot unspent, and
+    must not shrink as the lot gets finer.
+    """
+    price = decimal("54321.9876")
+    commission = decimal("0.0003")
+    cash = decimal("10000000000")
+
+    planned: dict[str, Decimal] = {}
+    for step in ("1", "0.001", "0.000001"):
+        batch = plan_orders(
+            account=AccountSnapshot(0, cash, {}),
+            execution_time_nav=cash,
+            prices={"A": price},
+            weight_targets={"A": decimal("1")},
+            cash_target=decimal("0"),
+            budget=_BUDGET,
+            rules=_fractional_venue("A", step=step, commission=str(commission)),
+        )
+        quantity = batch.requests[0].delta_quantity
+        planned[step] = quantity
+
+        charged = quantity * price * (Decimal(1) + commission)
+        assert charged <= cash, f"step {step} planned a buy the account cannot pay for"
+        over = (quantity + decimal(step)) * price * (Decimal(1) + commission)
+        assert over > cash, f"step {step} left a whole lot of affordable cash unspent"
+
+    assert planned["0.000001"] >= planned["0.001"] >= planned["1"], (
+        "a finer lot must reach at least as much of the budget as a coarser one"
+    )
+    assert planned["1"] * price >= cash * decimal("0.999"), (
+        "the clip must land near the budget, not far below it"
+    )
+
+
+def test_a_venue_whose_cost_outruns_the_lot_is_refused_rather_than_searched() -> None:
+    """The correction after the closed form is bounded, so a strange venue fails loudly.
+
+    The guess is exact for a rate on notional. Keeping a few corrective lots after it means an
+    unusual venue still plans correctly; refusing past that means one can never turn back into the
+    unbounded walk this replaced.
+    """
+
+    class Runaway(ExchangeRulesView):
+        """Charges far more than it quotes, so no lot the guess reaches is ever affordable."""
+
+        def charge(self, side, notional, instrument_id):  # type: ignore[override]
+            return SideCost(commission_rate=decimal("1000")).charge(notional)
+
+    rule = TradeRule(
+        "A",
+        decimal("0.001"),
+        decimal("0.001"),
+        True,
+        ListingAccess.LONG_ONLY,
+        SideCost(commission_rate=decimal("0.0003")),
+        SideCost(),
+    )
+    with pytest.raises(ValueError, match="did not converge"):
+        plan_orders(
+            account=AccountSnapshot(0, decimal("1000000"), {}),
+            execution_time_nav=decimal("1000000"),
+            prices={"A": decimal("54321.9876")},
+            weight_targets={"A": decimal("1")},
+            cash_target=decimal("0"),
+            budget=_BUDGET,
+            rules=Runaway("runaway", {"A": rule}),
+        )

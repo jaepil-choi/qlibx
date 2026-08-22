@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
+from vqapr.domain.instruments import InstrumentKind
 from vqapr.exchange.costs import FillCost
 
 
@@ -34,10 +35,20 @@ class Fill:
     price: Decimal | None
     reason: ZeroDealtReason | None = None
     cost: FillCost = field(default_factory=FillCost)
+    kind: InstrumentKind | None = None
+    """The category this fill was charged as, or ``None`` when the venue declared none.
+
+    Carried on the fill rather than looked up afterwards because a fill is *evidence*: it records
+    what the venue actually charged it as, and a roster edited later must not change what a past
+    fill says it paid. It is also what lets a consumer that has no ``ExchangeRulesView`` -- a run
+    record, a report -- separate an ETF sleeve's cost from the direct book's.
+    """
 
     def __post_init__(self) -> None:
         if not isinstance(self.instrument_id, str) or not self.instrument_id:
             raise ValueError("instrument_id must be a non-empty string")
+        if self.kind is not None and not isinstance(self.kind, InstrumentKind):
+            raise TypeError("kind must be an InstrumentKind or None")
         _decimal(self.requested_quantity, name="requested_quantity")
         _decimal(self.dealt_quantity, name="dealt_quantity")
         if not isinstance(self.cost, FillCost):
@@ -109,3 +120,22 @@ class FillBatch:
     @property
     def total_tax(self) -> Decimal:
         return sum((fill.cost.tax for fill in self.fills), Decimal("0"))
+
+    def cost_by_kind(self) -> dict[InstrumentKind | None, FillCost]:
+        """What each instrument category paid, which is the number the split exists to produce.
+
+        Charging an ETF sleeve at the share rate overstates cost by the full tax on every unit of
+        sleeve turnover; separating the rates is only half the job, because a batch that reports
+        one total cannot show that the exemption was applied. Categories the venue did not declare
+        collect under ``None`` rather than being dropped or guessed.
+        """
+        totals: dict[InstrumentKind | None, FillCost] = {}
+        for fill in self.fills:
+            if not fill.cost:
+                continue
+            running = totals.get(fill.kind, FillCost())
+            totals[fill.kind] = FillCost(
+                commission=running.commission + fill.cost.commission,
+                tax=running.tax + fill.cost.tax,
+            )
+        return totals

@@ -11,7 +11,7 @@ listings so the two categories are compared at an identical price and size.
 from __future__ import annotations
 
 import json
-from datetime import datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -40,6 +40,7 @@ from vqapr.exchange.venues.krx import (
     krx_listing,
     krx_rules,
 )
+from vqapr.orders.batches import OrderBatch, OrderRequest
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
@@ -285,6 +286,67 @@ def test_a_category_with_no_terms_is_simply_not_listed() -> None:
 
     mixed = build({"A005930": "stock", "HML": "factor"})
     assert sorted(trade_rules_by_kind(mixed, KRX_TERMS)) == ["A005930"]
+
+
+@pytest.mark.uc("UC-COST-004")
+def test_a_batch_reports_what_each_category_paid(real_close) -> None:
+    """Separating the rates is only half the job: the batch has to be able to show it.
+
+    An enhanced-index fund holds an ETF sleeve to track the index cheaply, and the number that
+    justifies the sleeve is what the sleeve cost. A batch reporting one total cannot produce it,
+    so a consumer would have to re-derive each fill's category from a venue it may not hold.
+    """
+    at, prices = real_close
+    stock, etf = sorted(prices)[:2]
+    price = prices[stock]
+    venue = _two_category_venue(stock, etf)
+    held = Decimal("100")
+    account = AccountSnapshot(0, Decimal("0"), {stock: held, etf: held})
+    batch = OrderBatch(
+        0,
+        tuple(
+            OrderRequest(name, held, Decimal("40"), Decimal("-60"), price, None)
+            for name in (stock, etf)
+        ),
+    )
+    rows = tuple(ExactExecutionRow(at, name, True, price) for name in (stock, etf))
+    fills = venue.execute(batch, account, ExactExecutionSnapshot(at, rows, (), (), ()))
+
+    by_kind = fills.cost_by_kind()
+    notional = Decimal("60") * price
+    assert by_kind[InstrumentKind.STOCK].tax == notional * SALE_TAX_RATE
+    assert by_kind[InstrumentKind.ETF].tax == Decimal("0"), "the sleeve owes no share tax"
+    assert by_kind[InstrumentKind.STOCK].commission == notional * COMMISSION_RATE
+    assert by_kind[InstrumentKind.ETF].commission == notional * COMMISSION_RATE
+
+    # The split has to reconcile with the batch total, or it is a second set of books.
+    assert sum(c.commission for c in by_kind.values()) == fills.total_commission
+    assert sum(c.tax for c in by_kind.values()) == fills.total_tax
+
+    # Each fill carries the category it was charged as, so evidence survives a roster edit.
+    assert {f.instrument_id: f.kind for f in fills.fills} == {
+        stock: InstrumentKind.STOCK,
+        etf: InstrumentKind.ETF,
+    }
+
+
+def test_a_venue_declaring_no_categories_collects_under_none() -> None:
+    """Not dropped and not guessed: an undeclared category is reported as one."""
+    venue = KrxExchange(["A005930"])
+    at = datetime(2026, 8, 22, 6, 30, tzinfo=UTC)
+    price = Decimal("70000")
+    account = AccountSnapshot(0, Decimal("0"), {"A005930": Decimal("100")})
+    batch = OrderBatch(
+        0, (OrderRequest("A005930", Decimal("100"), Decimal("40"), Decimal("-60"), price, None),)
+    )
+    snapshot = ExactExecutionSnapshot(
+        at, (ExactExecutionRow(at, "A005930", True, price),), (), (), ()
+    )
+    fills = venue.execute(batch, account, snapshot)
+
+    by_kind = fills.cost_by_kind()
+    assert list(by_kind) == [None]
+    assert by_kind[None].tax == Decimal("60") * price * SALE_TAX_RATE
 
 
 def test_a_bare_universe_gets_stock_terms() -> None:

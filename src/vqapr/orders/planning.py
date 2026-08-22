@@ -104,6 +104,48 @@ def _affordable_quantity(
     )
 
 
+def _buy_order(
+    ordered: Sequence[str],
+    *,
+    prices: Mapping[str, Decimal],
+    rules: ExchangeRulesView,
+    delta_of: Callable[[str], Decimal],
+    fillable: Callable[[str], bool],
+) -> tuple[str, ...]:
+    """The order buys are funded in: largest delta first, ``instrument_id`` to break a tie.
+
+    Canon 6.3, and the reason is economic rather than aesthetic. When cash runs out somebody goes
+    unfilled, and **what that costs is measured by delta**: a name already at 9.9% of a 10% target
+    loses 0.1% if it is refused, while a name at 0% of a 2% target loses the whole 2%. Filling the
+    largest delta first leaves the shortfall on the position that misses its target by least.
+
+    Sorting by ``instrument_id`` instead -- which is what this did -- makes the loser depend on
+    ticker spelling. An ETF sleeve listed as ``A069500`` sorts behind most of a KRX universe and
+    was clipped for that reason alone.
+
+    Delta is compared in **money**, not share count: one share of a 900,000 KRW name and one share
+    of a 9,000 KRW name are not the same intent, and cash is what is being rationed.
+    """
+    candidates = [
+        instrument_id
+        for instrument_id in ordered
+        if instrument_id in prices
+        and fillable(instrument_id)
+        and delta_of(instrument_id) > 0
+    ]
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda instrument_id: (
+                -rules.notional(
+                    instrument_id, delta_of(instrument_id), prices[instrument_id]
+                ),
+                instrument_id,
+            ),
+        )
+    )
+
+
 def _apply_venue_rules(
     *,
     rules: ExchangeRulesView,
@@ -157,6 +199,7 @@ def _apply_venue_rules(
     def _delta(instrument_id: str) -> Decimal:
         return resolved[instrument_id] - account.positions.get(instrument_id, Decimal(0))
 
+
     available = account.cash
     for instrument_id in ordered:
         delta = _delta(instrument_id)
@@ -165,10 +208,10 @@ def _apply_venue_rules(
         notional = rules.notional(instrument_id, delta, prices[instrument_id])
         available += notional - rules.charge(Side.SELL, notional, instrument_id).total
 
-    for instrument_id in ordered:
+    for instrument_id in _buy_order(
+        ordered, prices=prices, rules=rules, delta_of=_delta, fillable=_fillable
+    ):
         delta = _delta(instrument_id)
-        if delta <= 0 or instrument_id not in prices or not _fillable(instrument_id):
-            continue
         price = prices[instrument_id]
         notional = rules.notional(instrument_id, delta, price)
         required = notional + rules.charge(Side.BUY, notional, instrument_id).total

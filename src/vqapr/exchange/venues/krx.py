@@ -338,6 +338,7 @@ class KrxExchange:
                     request.delta_quantity,
                     row.price,
                     cost=rules.charge(side, notional, request.instrument_id),
+                    kind=rules.kind(request.instrument_id),
                 )
             )
         return FillBatch(tuple(fills), account.version)

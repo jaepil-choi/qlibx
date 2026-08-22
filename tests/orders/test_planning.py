@@ -262,6 +262,82 @@ def _fractional_venue(instrument_id: str, *, step: str, commission: str) -> Exch
     return rules_view("fractional", {instrument_id: rule})
 
 
+def test_buys_are_funded_largest_delta_first_not_in_ticker_order() -> None:
+    """Canon 6.3. What a refused buy costs is measured by its delta, so the largest is funded
+    first and the shortfall lands on the position that misses its target by least.
+
+    Ordering by ``instrument_id`` made the loser depend on ticker spelling: an ETF sleeve listed
+    as ``A069500`` sorts behind most of a KRX universe and was clipped for that reason alone.
+    """
+    small, big = "A000001", "Z999999"          # the big target sorts last alphabetically
+    # A commission is what makes the plan overrun its cash, so somebody has to be clipped.
+    rules = rules_view(
+        "whole",
+        {
+            name: TradeRule(
+                name,
+                decimal("1"),
+                decimal("1"),
+                False,
+                ListingAccess.LONG_ONLY,
+                SideCost(commission_rate=decimal("0.0003")),
+                SideCost(),
+            )
+            for name in (small, big)
+        },
+    )
+    nav = decimal("1000000")
+    batch = plan_orders(
+        account=snapshot(cash="1000000"),
+        execution_time_nav=nav,
+        prices={small: decimal("10000"), big: decimal("10000")},
+        weight_targets={small: decimal("0.1"), big: decimal("0.9")},
+        cash_target=decimal("0"),
+        budget=_BUDGET,
+        rules=rules,
+    )
+    planned = {request.instrument_id: request.delta_quantity for request in batch.requests}
+
+    assert planned[big] == decimal("90"), "the largest delta is funded in full"
+    assert planned[small] == decimal("9"), "the shortfall lands on the smallest delta"
+
+
+def test_buy_order_compares_money_rather_than_share_count() -> None:
+    """One share of a 900,000 name and one of a 9,000 name are not the same intent."""
+    cheap, dear = "AAA", "ZZZ"
+    rules = rules_view(
+        "whole",
+        {
+            name: TradeRule(
+                name,
+                decimal("1"),
+                decimal("1"),
+                False,
+                ListingAccess.LONG_ONLY,
+                SideCost(commission_rate=decimal("0.0003")),
+                SideCost(),
+            )
+            for name in (cheap, dear)
+        },
+    )
+    nav = decimal("1000000")
+    # `cheap` wants far more shares; `dear` wants far more money and must be funded first.
+    batch = plan_orders(
+        account=snapshot(cash="1000000"),
+        execution_time_nav=nav,
+        prices={cheap: decimal("1000"), dear: decimal("300000")},
+        weight_targets={cheap: decimal("0.1"), dear: decimal("0.9")},
+        cash_target=decimal("0"),
+        budget=_BUDGET,
+        rules=rules,
+    )
+    planned = {request.instrument_id: request.delta_quantity for request in batch.requests}
+
+    # `dear` sorts last alphabetically and wants only 3 shares, but it is 900,000 of intent.
+    assert planned[dear] == decimal("3"), "900,000 of intent is funded before 100,000 of it"
+    assert planned[cheap] == decimal("99"), "the shortfall lands on the smaller money line"
+
+
 def test_an_unaffordable_buy_is_clipped_by_arithmetic_not_by_walking_lots() -> None:
     """The clip is solved, not searched, so a fine lot does not cost proportionally more.
 

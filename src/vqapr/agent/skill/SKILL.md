@@ -47,6 +47,36 @@ registered and passes validation.
 **Stop condition:** `vqapr list` shows all required elements and `register` accepted every
 declaration without failures.
 
+#### Before registering: settle what `available_at` means
+
+**This is the decision to raise before the first `register`, not after it fails.** The framework
+validates schema, keys and duplicates. It cannot detect a look-ahead, because a timestamp that is
+wrong in meaning is still perfectly well-formed.
+
+`available_at` is **when the row could first have been known**, not when the event it describes
+happened. Those differ, and the gap is where look-ahead enters:
+
+- A daily close observed at the session close is available at that close, not at midnight of the
+  same date.
+- An accounting fact for a fiscal quarter is available when it was *published*, which is weeks or
+  months after the period it covers. A fixed lag applied to a period end is an approximation, and
+  whether it is a safe one is a judgement about the data, not about vqapr.
+- A revised or restated value is available at the revision, not at the original observation.
+
+Ask, and do not answer on the user's behalf:
+
+1. Is this column an observation, a publication, or a revision?
+2. What timezone is the timestamp in, and is it the event instant or a date?
+3. If it is a date, what instant within that date is defensible?
+
+If the answer is not in the data or its documentation, say that it is unknown and let the user
+decide. **Do not infer a convention from a column name.** A column called `date` proves nothing
+about availability, and a registration built on that guess produces results that look correct.
+
+The same care applies to query patterns written at registration time. Moving averages, cumulative
+sums and ranks can each reach across rows in a way that pulls future information into a past row;
+flag them and explain what would have to be true for the pattern to be safe.
+
 ### Rung 2 — Materialization and run
 
 **Goal:** a completed simulation run that produces a result.

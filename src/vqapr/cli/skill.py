@@ -192,6 +192,9 @@ def _list(root: Path) -> dict[str, Any]:
     )
 
 
+_INTO_HELP = "install into this directory instead of the auto-detected .git root"
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest="skill_action", required=True, metavar="ACTION")
 
@@ -202,12 +205,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default="both",
         help="which skill directory to target (default: both)",
     )
-    install_parser.add_argument(
-        "--into",
-        type=Path,
-        default=None,
-        help="override the auto-detected project root",
-    )
+    install_parser.add_argument("--into", type=Path, default=None, help=_INTO_HELP)
     install_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -215,19 +213,20 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
     remove_parser = sub.add_parser("remove", help="remove the installed agent skill")
-    remove_parser.add_argument(
-        "--into",
-        type=Path,
-        default=None,
-        help="override the auto-detected project root",
-    )
+    remove_parser.add_argument("--into", type=Path, default=None, help=_INTO_HELP)
     remove_parser.add_argument(
         "--force",
         action="store_true",
         help="remove even if files have been modified since install",
     )
 
-    sub.add_parser("list", help="show whether the skill is installed and which files are present")
+    # `--into` is accepted by all three. `list` is the action most likely to be asked about a
+    # directory other than the current one ("is it installed over there?"), and an option that
+    # works on two of three sibling actions reads as a bug rather than as a boundary.
+    list_parser = sub.add_parser(
+        "list", help="show whether the skill is installed and which files are present"
+    )
+    list_parser.add_argument("--into", type=Path, default=None, help=_INTO_HELP)
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:

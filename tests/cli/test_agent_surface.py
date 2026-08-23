@@ -127,6 +127,65 @@ def test_module_entrypoint_matches_the_console_script() -> None:
     assert b"usage: vqapr" in result.stdout
 
 
+@pytest.mark.parametrize("action", ("install", "remove", "list"))
+def test_every_skill_action_accepts_the_same_root_override(action: str) -> None:
+    """An option that works on two of three sibling actions reads as a bug, not as a boundary.
+
+    `list` was the one that refused `--into`, and it is the action most likely to be asked about
+    somewhere other than the current directory.
+    """
+    result = _run("skill", action, "--help")
+
+    assert result.returncode == 0
+    assert b"--into" in result.stdout, f"skill {action} does not accept --into"
+
+
+def test_skill_install_is_inspectable_before_it_writes(tmp_path: Path) -> None:
+    """An agent must be able to see where a mutating command would write before it runs."""
+    (tmp_path / ".git").mkdir()
+
+    result = _run("--project-root", str(tmp_path), "skill", "install", "--dry-run")
+    payload = json.loads(result.stdout.decode("utf-8").strip().splitlines()[-1])
+
+    assert payload["ok"] is True
+    assert str(tmp_path) in payload["paths"]["agents"]
+    assert not (tmp_path / ".agents").exists(), "a dry run wrote to disk"
+
+
+def test_installing_then_removing_leaves_nothing_behind(tmp_path: Path) -> None:
+    """The install must be reversible, or a testbed cannot be reset between measurements."""
+    (tmp_path / ".git").mkdir()
+
+    installed = json.loads(
+        _run("--project-root", str(tmp_path), "skill", "install")
+        .stdout.decode("utf-8")
+        .strip()
+        .splitlines()[-1]
+    )
+    assert installed["ok"] is True
+    assert (tmp_path / ".agents/skills/vqapr/SKILL.md").exists()
+
+    _run("--project-root", str(tmp_path), "skill", "remove")
+
+    assert not (tmp_path / ".agents/skills/vqapr/SKILL.md").exists()
+    assert not (tmp_path / ".claude/skills/vqapr-skill/SKILL.md").exists()
+
+
+def test_the_maintainer_readme_is_not_installed_as_agent_guidance(tmp_path: Path) -> None:
+    """`agent/skill/README.md` addresses whoever maintains that directory.
+
+    Shipping it into the install would give an agent a second document to treat as authority, and
+    that document talks about what the directory should contain rather than about using vqapr.
+    """
+    (tmp_path / ".git").mkdir()
+
+    _run("--project-root", str(tmp_path), "skill", "install")
+
+    installed = {path.name for path in (tmp_path / ".agents/skills/vqapr").iterdir()}
+    assert "SKILL.md" in installed
+    assert "README.md" not in installed
+
+
 def test_list_succeeds_before_a_workspace_exists(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

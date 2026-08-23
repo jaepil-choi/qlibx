@@ -40,7 +40,22 @@ def _dump(project_root: Path, correlation_id: str, text: str) -> str | None:
     return str(path)
 
 
-class UsageError(Exception):
+class BoundedRefusal(Exception):
+    """입력이 package 단계에 도달하기 전에 거부된 경우.
+
+    이런 실패의 본문은 이미 유계다 — 요구한 것과 관찰한 것이 전부이고, 그것을 만든 프레임은 증거가
+    아니라 잡음이다. 특히 `raise ... from error`로 원인을 붙이면 traceback이 두 배로 길어져
+    `MAX_INLINE_TRACEBACK_LINES`를 넘고, 그러면 **읽기만 하는 명령이 dump 파일을 쓰려고**
+    `.vqapr/`를 만든다. 거부가 부작용을 남기는 것은 거부가 아니다.
+
+    `failure()`는 이 타입을 본문만 실어 내보낸다.
+    """
+
+    def as_dict(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+
+class UsageError(BoundedRefusal):
     """명령줄 자체가 거부된 경우. package에는 도달하지 못했다.
 
     argparse는 기본적으로 stderr에 사람이 읽는 문구를 쓰고 `SystemExit`으로 나간다. 그러면 agent는
@@ -87,9 +102,9 @@ def failure(error: BaseException, *, project_root: Path | None = None) -> dict[s
     ``as_dict()`` 를 가진 package 실패는 그 본문을 그대로 쓴다. 그 외 예외는 stage를 알 수 없으므로
     ``unhandled`` 로 표시해 agent가 "framework가 거부한 것"과 "예상 못 한 것"을 구분할 수 있게 한다.
     """
-    if isinstance(error, UsageError):
-        # 본문이 이미 한 줄로 유계다. argparse 내부 프레임은 증거가 아니라 잡음이고, 증거는
-        # 사용자가 친 명령줄 그 자체다.
+    if isinstance(error, BoundedRefusal):
+        # 본문이 이미 유계다. argparse 내부 프레임이나 chained OSError 프레임은 증거가 아니라
+        # 잡음이고, 증거는 사용자가 친 명령줄과 그가 준 경로 그 자체다.
         return {"ok": False, **error.as_dict(), "error": f"{type(error).__name__}: {error}"}
 
     text = "".join(traceback.format_exception(type(error), error, error.__traceback__))

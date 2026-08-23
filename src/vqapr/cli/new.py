@@ -1,11 +1,15 @@
-"""`vqapr new <kind> <id>` — emit a component that runs, and the declaration that registers it.
+"""`vqapr new <kind> [<id>]` — emit a component that runs, or a template spec.
 
-Two files, because `register` takes a declaration and a component alone cannot be registered. A
-scaffold that emitted only the `.py` would leave the user to write that YAML from documentation on
-their first command, which is where a first-time user is least able to guess field names.
+Two modes:
 
-The emitted declaration is complete and immediately registrable: `vqapr new` then `vqapr register`
-is the whole path from nothing to a registered component.
+- `vqapr new datamodel|strategy <id> --dataset <d>` emits a component `.py` and its registrable
+  declaration `.yaml`. Both files are complete: `vqapr new` then `vqapr register` is the whole
+  path from nothing to a registered component.
+
+- `vqapr new run-spec --out <path>` emits a YAML template with every required key, inline
+  comments explaining each one, and placeholder values that need replacing. An agent that reads
+  this file knows exactly what `vqapr run` expects, without opening documentation or guessing
+  field names.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from typing import Any
 import yaml
 
 from vqapr.cli.envelope import success
+from vqapr.cli.inputs import InputError, refuse_existing
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.scaffold import render
 
@@ -26,6 +31,40 @@ _DECLARATION_KIND = {
     ComponentKind.DATA_MODEL: "datamodel",
     ComponentKind.STRATEGY_MODEL: "strategy",
 }
+
+_RUN_SPEC_TEMPLATE = """\
+# Run spec — every required key is shown. Replace the placeholder values.
+# Write this file, then execute: vqapr run <this-file.yaml>
+
+strategy:
+  component: my-alpha          # component_id of a registered StrategyModel
+  agenda_id: daily-rebalance   # agenda_id of the operation agenda to drive the strategy
+
+valuation:
+  agenda_id: daily-valuation   # agenda_id for end-of-day valuation
+
+instruments:                   # the universe this run trades
+  - INSTRUMENT_A
+  - INSTRUMENT_B
+
+start: "2024-01-02"            # ISO-8601 date or datetime, inclusive
+end: "2024-12-31"              # ISO-8601 date or datetime, inclusive
+
+exchange: my-venue             # component_id of a registered Exchange
+
+execution_input: my-exec       # execution_input_id of a registered execution input
+
+initial_account:
+  cash: "1000000"              # quoted to preserve precision (parsed as Decimal)
+  mode: LONG_ONLY              # LONG_ONLY or LONG_SHORT
+  positions: {}                # mapping of instrument -> quantity, or empty
+
+# Optional sections (uncomment to use):
+# constraints:
+#   - constraint-component-id
+# monitoring:
+#   agenda_id: monitoring-agenda
+"""
 
 
 def _declaration(component_id: str, kind: ComponentKind, source: Path, object_name: str) -> str:
@@ -48,15 +87,50 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("kind", choices=tuple(_KINDS))
-    parser.add_argument("component_id")
-    parser.add_argument("--dataset", required=True, help="dataset_id the component reads")
-    parser.add_argument("--field", default="close")
-    parser.add_argument("--lookback", type=int, default=6)
-    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "kind",
+        choices=(*_KINDS, "run-spec"),
+        help="'datamodel' or 'strategy' scaffolds a component; 'run-spec' emits a template",
+    )
+    parser.add_argument(
+        "component_id",
+        nargs="?",
+        default=None,
+        help="identity of the new component (required for datamodel/strategy, unused for run-spec)",
+    )
+    parser.add_argument(
+        "--dataset",
+        default=None,
+        help="dataset_id the component reads (required for datamodel/strategy)",
+    )
+    parser.add_argument("--field", default="close", help="price field the scaffold references")
+    parser.add_argument(
+        "--lookback", type=int, default=6, help="rows of history each name needs"
+    )
+    parser.add_argument("--out", type=Path, default=None, help="output path for the emitted file")
 
 
-def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+def _run_spec(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    target = args.out or project_root / "run-spec.yaml"
+    refuse_existing(target, what="run spec template")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_RUN_SPEC_TEMPLATE, encoding="utf-8")
+    return success("template.new", kind="run-spec", path=str(target))
+
+
+def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    if not args.component_id:
+        raise InputError(
+            "cli.input.keys_missing",
+            requirement="datamodel and strategy require a positional component_id",
+            observed="no component_id given",
+        )
+    if not args.dataset:
+        raise InputError(
+            "cli.input.keys_missing",
+            requirement="datamodel and strategy require --dataset",
+            observed="--dataset not given",
+        )
     kind = _KINDS[args.kind]
     source = render(
         kind,
@@ -67,9 +141,8 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
     declaration = target.with_suffix(".yaml")
-    for path in (target, declaration):
-        if path.exists():
-            raise FileExistsError(f"refusing to overwrite {path}")
+    refuse_existing(target, what="component file")
+    refuse_existing(declaration, what="declaration file")
 
     object_name = source.split("class ", 1)[1].split("(", 1)[0]
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -85,3 +158,9 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         declaration=str(declaration),
         object_name=object_name,
     )
+
+
+def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    if args.kind == "run-spec":
+        return _run_spec(args, project_root)
+    return _component(args, project_root)

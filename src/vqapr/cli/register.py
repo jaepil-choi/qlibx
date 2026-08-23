@@ -41,9 +41,8 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from vqapr.cli.envelope import success
+from vqapr.cli.inputs import read_yaml_mapping
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import (
     register_constraint,
@@ -347,14 +346,16 @@ def apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[s
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("declaration", type=Path)
+    parser.add_argument(
+        "declaration",
+        type=Path,
+        help="path to the declaration YAML to validate and register",
+    )
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     declaration = Path(args.declaration)
-    document = yaml.safe_load(declaration.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise TypeError("a declaration must be a YAML mapping")
+    document = read_yaml_mapping(declaration, what="a declaration")
     return success(
         "workspace.register",
         registered=apply(document, project_root, base=declaration.parent),

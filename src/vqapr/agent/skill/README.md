@@ -1,13 +1,27 @@
 # `agent/skill/` — 설치되는 skill 원본
 
-`vqapr agent install`이 이 디렉터리의 내용을 target의 skill directory로 복사한다
-(`agent/targets.py`가 정한 normative path).
+`vqapr skill install`이 이 디렉터리의 `SKILL.md`를 프로젝트의 skill directory로 복사한다.
+설치 경로는 `.agents/skills/vqapr/`이고, `--target claude|both`면 `.claude/skills/vqapr-skill/`에
+본문을 가리키는 thin adapter를 추가로 놓는다. 루트는 가장 가까운 `.git` 조상이며 `--into`로
+덮어쓴다.
 
-## 담아야 하는 것
+이 README는 **설치되지 않는다**. 여기를 유지보수하는 사람에게 하는 말이지 skill을 읽는 agent에게
+하는 말이 아니고, 설치본에 섞이면 agent가 자기 대상이 아닌 문서를 권위로 읽는다.
+
+## 현재 담고 있는 것
+
+| 파일 | 역할 | 상태 |
+|---|---|---|
+| `SKILL.md` | required entrypoint. PRD §11.2가 정한 이름 | 있음 |
+
+## 아직 없는 것
+
+아래는 계획이지 현재 동작이 아니다. **없는 것을 현재형으로 쓰지 않는다** — 그것이 FRICTION
+F-001의 실제 원인이었다. 문서가 현재형으로 서술한 명령을 찾다가 없다는 것을 알아내는 비용은
+읽는 사람마다 똑같이 다시 든다.
 
 | 파일 | 역할 |
 |---|---|
-| `SKILL.md` | required entrypoint. PRD §11.2가 정한 이름 |
 | `references/` | availability 유도 규칙 후보, calendar 유도 규칙 후보, discouraged 준비 방식 |
 | `examples/` | 최소 등록 예시, 최소 run 예시 |
 

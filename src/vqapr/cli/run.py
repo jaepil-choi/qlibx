@@ -13,9 +13,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from vqapr.cli.envelope import success
+from vqapr.cli.inputs import INCOMPLETE, InputError, read_yaml_mapping
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
@@ -125,7 +124,13 @@ def require_declared_keys(document: dict[str, Any]) -> None:
     """
     missing = [key for key in _REQUIRED if key not in document]
     if missing:
-        raise ValueError(f"run spec is missing required keys: {', '.join(missing)}")
+        raise InputError(
+            INCOMPLETE,
+            requirement=f"a run spec must declare: {', '.join(_REQUIRED)}",
+            observed=f"missing {len(missing)} of {len(_REQUIRED)}: {', '.join(missing)}",
+            retry="add the missing keys, then retry",
+            examples=missing,
+        )
 
 
 def definition_from_document(document: dict[str, Any], workspace: Workspace) -> RunDefinition:
@@ -163,13 +168,15 @@ def definition_from_document(document: dict[str, Any], workspace: Workspace) -> 
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("spec", type=Path)
+    parser.add_argument(
+        "spec",
+        type=Path,
+        help="path to the run spec YAML (write one with `vqapr new run-spec --out`)",
+    )
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
-    document = yaml.safe_load(args.spec.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise TypeError("a run spec must be a YAML mapping")
+    document = read_yaml_mapping(Path(args.spec), what="a run spec")
     require_declared_keys(document)
     workspace = Workspace.open(project_root)
     frozen = preflight_run(project_root, definition_from_document(document, workspace))

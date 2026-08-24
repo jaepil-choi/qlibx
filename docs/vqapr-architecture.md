@@ -1329,13 +1329,9 @@ $$\textbf{순매수} \;=\; \textbf{현재 현금} - \textbf{목표 현금}$$
 
 `weighting`과 `optimize`는 복잡도만 다른 같은 계열이다. 전자는 제약 없는 배분, 후자는 제약 하 배분이다.
 
-결측을 **명시적으로** 해소하는 보조 함수는 `transforms/missing.py`에 있다(§5.6). weighting이 아니라
-transform인 이유는 다루는 대상이 weight가 아니라 signal이기 때문이다.
-
-```python
-drop_missing(signal) -> tuple[Signal, frozenset[InstrumentId]]   # 무엇이 빠졌는지 반환
-require_complete(signal, universe) -> Signal                     # 불완전하면 실패
-```
+결측은 StrategyModel/DataModel이 자신의 방법론에 맞춰 명시적으로 처리한다. 0으로 채우기는 "포지션 없음" 또는
+"수익률 0"이라는 경제적 주장이라 package가 generic helper로 숨기지 않는다. drop은 Python comprehension,
+complete 검사는 set difference로 직접 표현한다.
 
 ##### 숫자 그리드 소유권
 
@@ -1499,25 +1495,23 @@ research values  ──►  weights  ──►  PortfolioIntent
   transforms/        portfolio/       portfolio/intents
 ```
 
-- **왜 필요한가**: PRD §2.7이 *"자주 쓰는 signal transform"*을 built-in으로 약속했고, `UC-EXTENSION-001`은
-  *"built-in 예시를 참고해 agent가 project-local neutralization transform을 작성한다"*고 한다. 참고할
-  built-in이 없으면 그 use case가 성립하지 않는다.
+- **왜 필요한가**: PRD §2.7은 구현이 어렵거나 방법론상 틀리기 쉬운 transform만 built-in으로 둔다.
+  `UC-EXTENSION-001`의 exact neutralization과 Fama-French reference-market breakpoint가 그 기준을 충족한다.
 - **왜 `portfolio/`와 합치지 않나**: 다루는 대상이 다르다. transform은 signal을 signal로 바꾸고
   weighting은 signal을 weight로 바꾼다. 합치면 *"weighting은 결측을 다루지 않는다"*(§5.3) 같은 경계가
   같은 파일 안의 관례가 된다.
 
 | 파일 | 무엇 | 왜 이것인가 |
 |---|---|---|
-| `cross_section.py` | rank · zscore · demean · winsorize · **quantile_buckets** | 마지막 것이 §11.1의 independent double sort와 breakpoint 기록에 그대로 필요하다 |
-| `window.py` | 주어진 창 안에서만 도는 시계열 연산 | **창 밖을 건드릴 수 없음이 시그니처로 보장된다** — §4.4가 "causal primitive"라 부른 자리 |
+| `cross_section.py` | tie-aware Decimal rank | pandas 변환 없이 exact Decimal tie rank가 필요할 때 쓴다 |
+| `fama_french.py` | reference-market cut points · full-universe assignment | §11.1의 KOSPI/NYSE 기준 breakpoint를 equal-count quantile과 혼동하지 않게 방법론 이름으로 제공한다 |
 | `neutralize.py` | 노출을 회귀로 제거 | `UC-EXTENSION-001`이 지목한 원본 |
-| `lookthrough.py` | 구성종목 데이터 → 노출 매핑 $L$ | PRD §8.2가 *"패키지가 자동으로 켜지 않는다"*고 했다. **전략이 명시적으로 부를 때만 도는 함수**면 그 요구를 지키면서 built-in을 줄 수 있다 |
-| `missing.py` | `drop_missing` · `require_complete` | `fill_missing`은 **없다.** 0으로 채우기는 "포지션 없음"이라는 경제적 주장이다 |
 
-**leaf 규칙은 §5.3과 같다.** `domain` 외에는 import하지 않고 필요한 panel은 전부 인자로 받는다. 창을 직접
-읽으면 그 data가 declared requirement를 거치지 않아 lineage에 남지 않는다.
+demean, zscore, winsorize, rolling mean/stdev/max와 결측 drop은 pandas·numpy·stdlib 또는 직접 산술로
+표현한다. ETF look-through는 PRD §8.2대로 StrategyModel이 $L_t p_t$를 직접 계산하며 package helper가
+semantics를 소유하지 않는다.
 
-- **UC**: `UC-EXTENSION-001`, `UC-FACTOR-001`, `UC-LOOKTHROUGH-001`~`003`, `UC-BUILTIN-001`
+- **UC**: `UC-EXTENSION-001`, `UC-FACTOR-001`, `UC-BUILTIN-001`
 
 ### 5.7 `constraints/` — 선언 하나, 소비자 셋
 
@@ -2671,11 +2665,9 @@ src/vqapr/
 │   └── strategy_model.py  StrategyModel callback contract + NoDecision
 │
 ├── transforms/      순수 leaf. 값을 값으로 (§5.6)
-│   ├── cross_section.py   rank·zscore·demean·winsorize·quantile_buckets
-│   ├── window.py          주어진 창 안에서만 도는 시계열 연산
-│   ├── neutralize.py      노출 회귀 제거
-│   ├── lookthrough.py     구성종목 → 노출 매핑 L. 전략이 명시적으로 부를 때만 돈다
-│   └── missing.py         drop_missing · require_complete. fill_missing은 없다
+│   ├── cross_section.py   tie-aware Decimal rank
+│   ├── fama_french.py     reference-market cut points · full-universe assignment
+│   └── neutralize.py      exact 노출 회귀 제거
 │
 ├── portfolio/       순수 leaf. 값을 배분으로 (§5.3)
 │   ├── weighting.py       signal_weight · equal_weight · proportional_weight

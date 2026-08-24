@@ -22,9 +22,9 @@ happens to work in pairs. With three, `offset_weight = min(long, |short|)` stops
 of "the two disagreed": a name can be long in two members and short in one.
 
 The low-volatility member is the reason this is a new showcase rather than an edit to show_006. It
-is the first alpha in the tree whose signal is a **rolling time-series statistic**, so it is the
-first that must be computed through `apply_causal`. Record 016 left two follow-ups open — the
-showcase called neither `apply_causal` nor any `analysis/` function — and both close here.
+is the first alpha in the tree whose signal is a rolling time-series statistic. Only its latest
+trailing window is consumed, so the member computes that statistic directly with
+`statistics.stdev` instead of wrapping it in a second rolling API.
 
 ## Results on the committed KRX fixture
 
@@ -78,10 +78,9 @@ gates were rewritten until all six were killed.
 Recorded because each was a real defect in this showcase, caught by its own mutation battery rather
 than by review.
 
-1. **`apply_causal` was decorative.** With `VOL_WINDOW = LOOKBACK - 1` the driver produced exactly
-   one step, and that step equals the standard deviation of the whole series. Removing the causal
-   primitive changed nothing, so nothing about it was under test. `VOL_WINDOW` is now 5 against ten
-   available returns, so the driver walks six trailing windows and the last is a genuine slice.
+1. **The original rolling helper was decorative.** The member consumed only the last result after
+   computing and discarding every earlier rolling step. The direct trailing slice produces the
+   same statistic with less code and work.
 
 2. **The orientation oracle had a lookahead.** It compared published weights against volatility
    computed from closes up to *and including* the session — a close the member could not have seen
@@ -99,8 +98,8 @@ does not lock project-owned proprietary alpha into package built-ins, and the mo
 StrategyModel built-ins as **없음** for that reason. All three members are project-local component
 files written by the run, exactly as show_006 does it.
 
-What the package supplies is the pure helper canon does allow: `apply_causal`, `window_stdev`,
-`equal_weight`, `rescale`, `net_members`, `information_coefficient`. Nothing in `src/vqapr/` learns
-what a low-volatility alpha is.
+What the package supplies is the non-trivial portfolio and analysis surface: `equal_weight`,
+`rescale`, `net_members`, and `information_coefficient`. Nothing in `src/vqapr/` learns what a
+low-volatility alpha is.
 
 `outputs/` is gitignored, and each replicate builds its own project under it.

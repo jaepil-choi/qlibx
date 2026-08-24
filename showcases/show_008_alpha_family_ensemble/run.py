@@ -19,19 +19,16 @@ is no longer a restatement of "the two disagreed" — a name can be long in two 
 one, and the offset has to report what actually cancelled.
 
 **The low-volatility member is the reason this showcase exists rather than an edit to show_006.**
-It is the first alpha in the tree whose signal is a *rolling time-series statistic*, so it is the
-first one that must be computed with `apply_causal`. Record 016 left "the showcase does not call
-`apply_causal` or any `analysis/` function" as an open follow-up: the causal guarantee was
-structural and unit-tested but had never run on the spine. Both halves close here — the member
-computes realised volatility through `apply_causal(..., fn=window_stdev)`, and the pipeline
-measures the published signal against the return that followed it with `information_coefficient`.
+It is the first alpha in the tree whose signal is a rolling time-series statistic. The member
+computes the statistic directly with the standard library, while the pipeline measures the
+published signal against the return that followed it with `information_coefficient`.
 
 Canon decides where the alphas live. PRD §2.7 says vqapr may ship reference components but does not
 lock project-owned proprietary alpha into package built-ins, and the module map gives StrategyModel
 built-ins as **없음** for exactly that reason. So all three members are written as project-local
 component files, like show_006's, and nothing in `src/vqapr/` learns what a low-volatility alpha is.
-What the package supplies is the pure helper — `apply_causal`, `window_stdev`, `equal_weight`,
-`rescale`, `net_members`, `information_coefficient` — which is precisely the built-in canon allows.
+What the package supplies is the non-trivial portfolio and analysis surface: `equal_weight`,
+`rescale`, `net_members`, and `information_coefficient`.
 
 The fill journal the ensemble committed is replayed independently against the committed `Account`,
 and the whole pipeline runs twice into separate projects so the artifact digests can be compared.
@@ -53,6 +50,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
+from statistics import stdev
 from typing import Any
 
 import duckdb
@@ -79,7 +77,6 @@ from vqapr.public import (
     SourceSpec,
     StrategyConfig,
     ValuationConfig,
-    apply_causal,
     callback_evidence,
     component_ref,
     information_coefficient,
@@ -95,7 +92,6 @@ from vqapr.public import (
     register_valuation_config,
     run,
     shipped_constraint_path,
-    window_stdev,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -131,8 +127,8 @@ member that has history against one that does not.
 LOWVOL_VOL_WINDOW = 5
 """The realised-volatility window, in returns.
 
-Shorter than the ten returns the lookback yields, so `apply_causal` walks six trailing windows and
-the last one is a genuine slice rather than the whole series. See the member's own note.
+Shorter than the ten returns the lookback yields, so the direct trailing slice differs from using
+the whole history.
 """
 
 VERIFIED_AGAINST = "vqapr-0.1.0+show-008-working-tree"
@@ -360,17 +356,11 @@ _MOMENTUM_SOURCE = _return_member_source(
 
 
 _LOWVOL_SOURCE = (
-    f'''"""A low-volatility tilt: the first member in this tree whose signal is causal by primitive.
+    f'''"""A low-volatility tilt using a direct trailing-window statistic.
 
-Realised volatility is a rolling time-series statistic, so it is the first alpha here that can
-reach outside its own window by accident. `apply_causal` makes that structurally impossible: it
-slices each trailing window itself and hands `window_stdev` values only — no index, no dates, no
-sequences. The member could not read ahead if it wanted to, because there is nothing to read with.
-
-Only the final step is used. Every earlier step is computed and discarded, which is deliberate:
-calling `apply_causal` for one number would work, but driving the whole series and taking the last
-is what a researcher does, and it exercises the warm-up contract (`None` before the first full
-window) on the spine rather than in a unit test.
+Only the final trailing window is used, so computing and discarding every earlier rolling step
+would add work without changing the result. The requested history is longer than the volatility
+window, and the slice makes the economic choice explicit.
 
 The sign is negative: low volatility is the *preferred* side, so the raw signal is the negated
 volatility and the cross-sectional demean decides who ends up long.
@@ -379,6 +369,7 @@ volatility and the cross-sectional demean decides who ends up long.
 from __future__ import annotations
 
 from decimal import Decimal
+from statistics import stdev
 from uuid import NAMESPACE_URL, uuid5
 
 from vqapr.public import (
@@ -390,24 +381,15 @@ from vqapr.public import (
     PortfolioTarget,
     RowsLookback,
     StrategyModel,
-    apply_causal,
     equal_weight,
     rescale,
-    window_stdev,
 )
 
 LOOKBACK = {LOWVOL_LOOKBACK}
 """Closes requested. Ten simple returns fall out of eleven closes."""
 
 VOL_WINDOW = {LOWVOL_VOL_WINDOW}
-"""The realised-volatility window, in returns — deliberately shorter than the history requested.
-
-If this equalled the number of available returns, `apply_causal` would produce exactly one step and
-that step would equal the standard deviation of the whole series. The causal driver would then be
-decorative: removing it would change nothing, so nothing about it would be under test. Asking for
-more history than the statistic consumes is what makes the trailing-window slice a real choice, and
-it is what lets a mutation that bypasses the driver be caught.
-"""
+"""The realised-volatility window, deliberately shorter than the requested return history."""
 
 ACTIVE_BUDGET = Decimal("{MEMBER_BUDGET}")
 
@@ -452,13 +434,7 @@ class LowVolMember(StrategyModel):
                 values[index] / values[index - 1] - Decimal(1)
                 for index in range(1, len(values))
             )
-            # The causal driver owns the slicing. `window_stdev` receives values and nothing else.
-            steps = apply_causal((returns,), length=VOL_WINDOW, fn=window_stdev)
-            latest = steps[-1]
-            if latest is None:
-                # Warm-up, reported as absence rather than as a number from a short window.
-                continue
-            volatility[name] = latest
+            volatility[name] = stdev(returns[-VOL_WINDOW:])
 
         if len(volatility) < 2:
             return NoDecision("a low-volatility view needs at least two names with a full window")
@@ -932,9 +908,7 @@ def _check_lowvol_orientation(
             returns = tuple(
                 window[index] / window[index - 1] - Decimal(1) for index in range(1, len(window))
             )
-            steps = apply_causal((returns,), length=LOWVOL_VOL_WINDOW, fn=window_stdev)
-            if steps[-1] is not None:
-                volatility[instrument] = steps[-1]
+            volatility[instrument] = stdev(returns[-LOWVOL_VOL_WINDOW:])
 
         shared = sorted(set(weights) & set(volatility))
         if len(shared) < 2:

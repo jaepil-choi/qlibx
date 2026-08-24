@@ -353,10 +353,11 @@ vqapr가 reference component를 제공할 수는 있지만 **project-owned propr
 
 #### Built-in 계산 helper는 순수하다
 
-두 종류가 자주 반복되므로 built-in으로 제공한다.
+구현이 어렵거나 실수하기 쉬운 계산만 built-in으로 제공한다. pandas·numpy·Python standard library로
+명확하게 표현되는 one-liner를 package API로 다시 감싸지 않는다.
 
-- **signal transform** — 횡단면 순위·표준화·winsorize·분위 버킷, 노출 중립화, 창 안의 시계열 연산,
-  구성종목 데이터로부터의 노출 매핑
+- **signal transform** — tie-aware Decimal rank, exact weighted neutralization, 그리고 reference market에서
+  threshold를 계산해 전체 universe에 적용하는 명시적 Fama-French breakpoint
 - **weighting** — 균등 배분, 크기 비례 배분, 예산 재조정
 
 둘 다에 다음 제약이 붙는다. 이것이 없으면 built-in은 편의 함수가 아니라 **보이지 않는 곳에서 경제적

@@ -16,12 +16,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from decimal import Decimal
-from inspect import signature
 
 import pytest
-
-from vqapr.transforms import window
 
 # Canon's own list of what a leaf must not reach for, plus the two this milestone adds
 # deliberately: `evidence` because a leaf that could write provenance is no longer a leaf, and
@@ -43,37 +39,12 @@ FORBIDDEN = (
 # import and the boundary suite would stay green. The alphas of the next milestone import all of
 # them, so the coverage has to precede the code that leans on it.
 LEAF_MODULES = (
-    "vqapr.transforms.window",
     "vqapr.transforms.cross_section",
-    "vqapr.transforms.missing",
-    "vqapr.transforms.lookthrough",
+    "vqapr.transforms.fama_french",
     "vqapr.transforms.neutralize",
     "vqapr.analysis.signal",
     "vqapr.analysis.performance",
 )
-
-
-def test_a_leaf_receives_its_values_and_cannot_go_looking_for_them() -> None:
-    """The signature is the contract. Every input arrives as an argument."""
-    parameters = signature(window.apply_causal).parameters
-
-    assert list(parameters) == ["series", "length", "fn"]
-    assert parameters["length"].kind is parameters["length"].KEYWORD_ONLY
-    assert parameters["fn"].kind is parameters["fn"].KEYWORD_ONLY
-
-    # No date, no index, no panel, and no store handle: there is nothing here to reach with.
-    forbidden_names = {"window", "store", "view", "index", "dates", "panel", "requirement"}
-    assert not forbidden_names & set(parameters)
-
-    # The callable is handed values only, so it cannot ask for a position it was not given.
-    seen: list[object] = []
-    window.apply_causal(
-        ((Decimal(1), Decimal(2), Decimal(3)),),
-        length=2,
-        fn=lambda windows: (seen.append(windows), Decimal(0))[1],
-    )
-    assert all(isinstance(entry, tuple) for entry in seen)
-    assert all(isinstance(value, Decimal) for entry in seen for inner in entry for value in inner)
 
 
 @pytest.mark.parametrize("leaf", LEAF_MODULES)

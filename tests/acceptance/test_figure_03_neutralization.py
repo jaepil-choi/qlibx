@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from vqapr.public import demean, neutralize
+from vqapr.public import neutralize
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "report_figure_03"
 
@@ -132,65 +132,8 @@ def test_the_sign_of_the_beta_is_pinned(contract: dict, panels: dict) -> None:
     )
 
 
-def test_vqapr_reproduces_the_reference_demean_instrument_by_instrument(
-    panels: dict,
-) -> None:
-    """**This is the criterion that makes the rest mean anything.**
-
-    Everything below compares a pandas recomputation against a contract a pandas recomputation
-    produced, which proves determinism rather than correctness. This test is what closes that
-    circle: it runs vqapr's own `demean` on the same real cross-sections and requires it to agree
-    with the reference operation instrument by instrument.
-
-    An identity, a wrong centre, a median instead of a mean, or an additive offset all fail here
-    while every downstream comparison would still pass. A pure positive rescale does **not** fail,
-    because both sides are divided by their own gross before comparing — that is deliberate, since
-    the reference operation rescales to preserve gross and this test is about which values get
-    centred rather than how large they end up. Scale is pinned by the equivalence test below.
-    """
-    baseline = panels["baseline_weight"]
-    universe = panels["universe_mask"].astype(bool) | baseline.ne(0.0)
-    reference = _market_demean_preserving_gross(baseline, universe)
-
-    checked = 0
-    for position in range(0, len(baseline), 200):
-        date = baseline.index[position]
-        members = [name for name in baseline.columns if bool(universe.loc[date, name])]
-        if len(members) < 2:
-            continue
-
-        # vqapr's own cross-sectional demean, on Decimals, over exactly the universe members.
-        centred = demean({name: Decimal(str(baseline.loc[date, name])) for name in members})
-
-        # The reference rescales to preserve the gross book; undo that to compare the demean
-        # itself rather than the sizing step, which `rescale` owns and this milestone does not.
-        reference_row = {name: Decimal(str(reference.loc[date, name])) for name in members}
-        reference_gross = sum((abs(v) for v in reference_row.values()), Decimal(0))
-        centred_gross = sum((abs(v) for v in centred.values()), Decimal(0))
-        if reference_gross == 0 or centred_gross == 0:
-            continue
-
-        for name in members:
-            ours = centred[name] / centred_gross
-            theirs = reference_row[name] / reference_gross
-            assert abs(ours - theirs) < Decimal("1E-9"), (
-                f"vqapr's demean disagrees with the reference at {date} on {name}"
-            )
-        checked += 1
-
-    assert checked >= 5, f"only {checked} cross-sections were compared"
-
-
 def test_vqapr_neutralisation_matches_a_market_demean(panels: dict) -> None:
-    """`neutralize` against a column of ones is the demean, so the two products must agree.
-
-    A second route through the product: `neutralize` against a column of ones must reduce to
-    `demean`. The two share no implementation — mean subtraction against an exact-rational
-    normal-equation solve — so agreement pins both. Both are vqapr, so this corroborates the two
-    against each other rather than against the reference; what it adds is the scale the test above
-    deliberately normalises away, and it is the only place the solver runs on a real 283-name
-    cross-section. If they disagreed, one of them is wrong.
-    """
+    """Neutralizing against a column of ones equals direct mean subtraction."""
     baseline = panels["baseline_weight"]
     universe = panels["universe_mask"].astype(bool) | baseline.ne(0.0)
 
@@ -202,7 +145,8 @@ def test_vqapr_neutralisation_matches_a_market_demean(panels: dict) -> None:
             continue
         row = {name: Decimal(str(baseline.loc[date, name])) for name in members}
 
-        centred = demean(row)
+        centre = sum(row.values(), Decimal(0)) / len(row)
+        centred = {name: value - centre for name, value in row.items()}
         residual = neutralize(row, exposures={"market": dict.fromkeys(members, Decimal(1))})
 
         for name in members:

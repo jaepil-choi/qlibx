@@ -113,12 +113,20 @@ or
 **`ok`** — did the command succeed?
 **`stage`** — which processing stage produced this result (e.g. `workspace.register`,
 `run.complete`, `cli.input`)
-**`failures`** — an array of structured diagnostics, each with `code`, `requirement`,
-`observed`, `examples`
+**`failures`** — an array of structured diagnostics. Every entry carries `code`, `requirement`
+and `observed`; `examples` and `example_total` are present but **may be empty**
 **`error`** — the Python exception as a string, for traceability
 
-When `ok` is false, read the `failures` array first. Each failure tells you what was required,
-what was observed, and gives bounded examples. Fix the inputs and retry.
+When `ok` is false, read the `failures` array first. `requirement` says what was needed and
+`observed` says what was found; those two are always populated and are usually enough to act on.
+
+**`examples` is empty for structural checks, and that is not a bug.** A check on a column's
+*type* has no offending row to quote, so it reports `"examples": [], "example_total": 0`. A check
+on row *contents* — a duplicated key, a null in a key field — quotes up to five offending values
+and `example_total` says how many there were before truncation. An empty `examples` next to a
+non-zero `example_total` never happens; if you see one, that is worth reporting.
+
+Fix the inputs and retry.
 
 ## CLI reference
 

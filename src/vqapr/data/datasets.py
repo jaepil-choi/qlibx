@@ -104,7 +104,10 @@ def check_schema(registration: DatasetRegistration, columns: Mapping[str, Column
                 code=f"{SCHEMA_STAGE}.available_at_{suffix}",
                 requirement=(
                     f"available_at column {registration.available_at!r} must be a "
-                    f"timezone-aware timestamp"
+                    f"timezone-aware timestamp. Localize it while preparing the source, at the "
+                    f"instant the row became knowable: a daily close is available at that "
+                    f"session's close in the venue's timezone, not at midnight. Registration "
+                    f"does not convert it, because only you know which instant the value means"
                 ),
                 observed=str(actual),
             )

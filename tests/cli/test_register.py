@@ -251,7 +251,12 @@ def test_an_unknown_section_is_named_rather_than_ignored(
 def test_an_agenda_must_declare_exactly_one_source_of_sessions(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Both, or neither, is a question the command must not answer by guessing."""
+    """Both, or neither, is a question the command must not answer by guessing.
+
+    Pinned as a *structured* failure, not merely a non-zero exit. This was an unhandled
+    `ValueError`: it reached the envelope with `family: null`, an empty `failures[]`, and a
+    traceback file, so the only machine-readable thing about it was the exit code.
+    """
     document = _write(
         tmp_path,
         "w.yaml",
@@ -270,7 +275,100 @@ agendas:
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert "exactly one of from_dataset or sessions" in payload["error"]
+    assert payload["stage"] == "declaration.read"
+    assert payload["family"] == "DATA"
+    failure = payload["failures"][0]
+    assert failure["code"] == "declaration.read.key_missing"
+    assert "exactly one of from_dataset or sessions" in failure["requirement"]
+    # Which of the two mistakes was made, since the requirement covers both.
+    assert failure["observed"] == "agendas.alpha declares both"
+
+
+def test_one_refusal_names_every_key_an_agenda_is_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Four round trips to assemble one agenda is the friction this closes.
+
+    Measured on a first-time reader: `role` missing, then `role` wrong, then the
+    from_dataset/sessions pair, then `timezone` -- one refusal each, four register/edit/retry
+    cycles, with no way to see the required set whole. `_DATASET_KEYS` had already solved exactly
+    this for datasets; agendas were missed.
+
+    The session source is checked here too, because it is the one an agenda template cannot
+    express as a required key and therefore the one most likely to be discovered last.
+    """
+    document = _write(tmp_path, "w.yaml", 'agendas:\n  alpha:\n    at: "04:00"\n')
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "declaration.read"
+    requirements = [failure["requirement"] for failure in payload["failures"]]
+    assert len(requirements) == 3, requirements
+    assert any("must declare role" in text for text in requirements)
+    assert any("must declare timezone" in text for text in requirements)
+    assert any("exactly one of from_dataset or sessions" in text for text in requirements)
+    # A missing `role` names its own vocabulary; the reader's next guess is otherwise "strategy".
+    role_requirement = next(text for text in requirements if "must declare role" in text)
+    assert "strategy_callback" in role_requirement
+    assert "valuation" in role_requirement
+    assert "monitoring" in role_requirement
+    # What the declaration did carry, so the reader can see the gap rather than infer it.
+    assert all("declares: at" in failure["observed"] for failure in payload["failures"])
+
+
+def test_a_malformed_agenda_blames_the_file_not_the_missing_workspace(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty directory is where `register` is first typed, so the first refusal must be true.
+
+    `apply` opens the workspace lazily for exactly this reason. Passing `workspace()` rather than
+    `workspace` into the agenda builder defeated it: Python evaluates the argument first, so a
+    declaration with a bad agenda reported `workspace.open.missing` and sent the reader to inspect
+    a directory that was fine.
+    """
+    document = _write(tmp_path, "w.yaml", 'agendas:\n  alpha:\n    at: "04:00"\n')
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "declaration.read", "the file is what is wrong, not the workspace"
+
+
+def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`kind: model` is the obvious guess and it was an unhandled `ValueError`."""
+    document = _write(tmp_path, "w.yaml", "components:\n  x:\n    kind: model\n    path: x.py\n")
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "declaration.read"
+    failure = payload["failures"][0]
+    assert failure["code"] == "declaration.read.value_not_permitted"
+    assert failure["observed"] == "model"
+    assert set(failure["examples"]) == {"datamodel", "strategy", "constraint", "exchange"}
+
+
+def test_a_sessions_list_that_is_not_a_list_is_refused_with_a_stage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One date, written without brackets, is the easiest version of this mistake to make."""
+    document = _write(
+        tmp_path,
+        "w.yaml",
+        'agendas:\n  alpha:\n    role: valuation\n    sessions: "2024-03-05"\n'
+        '    at: "04:00"\n    timezone: Asia/Seoul\n',
+    )
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "declaration.read"
+    failure = payload["failures"][0]
+    assert failure["code"] == "declaration.read.value_invalid"
+    assert "non-empty list of dates" in failure["requirement"]
 
 
 def test_every_section_is_optional(

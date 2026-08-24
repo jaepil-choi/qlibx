@@ -37,7 +37,7 @@ of how the user happened to type it.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, time
 from enum import Enum
 from pathlib import Path
@@ -255,21 +255,36 @@ def _execution_input(input_id: str, declared: object, *, base: Path) -> Executio
     )
 
 
-def _sessions(body: dict[str, Any], workspace: Workspace, *, name: str) -> list[datetime | date]:
+def _sessions(
+    body: dict[str, Any], workspace: Callable[[], Workspace], *, name: str
+) -> list[datetime | date]:
     """Where an agenda's days come from: a dataset it follows, or an explicit list.
 
     `from_dataset` is the common case and the one worth making short. A cadence usually follows
     the data it reads, and `Workspace.evaluation_times` already knows those days exactly, so
     restating them by hand is a chance to disagree with the dataset for no benefit.
+
+    `_require_agenda_keys` has already proven exactly one of the two is present, so the guard here
+    is the same kind of fallback `_required` is: reached only through a path that skipped the
+    pre-check, and typed rather than bare so it cannot land in the envelope as `stage:"unhandled"`.
     """
     dataset_id = body.get("from_dataset")
     declared = body.get("sessions")
     if (dataset_id is None) == (declared is None):
-        raise ValueError(f"{name} must declare exactly one of from_dataset or sessions")
+        _refuse_agenda_source(body, name=name)
     if dataset_id is not None:
-        return list(workspace.evaluation_times(str(dataset_id)))
+        return list(workspace().evaluation_times(str(dataset_id)))
     if not isinstance(declared, list) or not declared:
-        raise TypeError(f"{name}.sessions must be a non-empty list of dates")
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.value_invalid",
+                requirement=f"{name}.sessions must be a non-empty list of dates",
+                observed=f"{type(declared).__name__}: {declared!r}"[:200],
+                examples=["sessions: ['2024-01-02', '2024-01-03']"],
+            )
+        )
+        found.done().raise_if_failed()
     return [
         value if isinstance(value, (datetime, date)) else date.fromisoformat(str(value))
         for value in declared
@@ -311,7 +326,85 @@ def _role(value: object, *, name: str) -> OperationRole:
     return _enum(OperationRole, value, name=f"{name}.role")
 
 
-def _agenda(agenda_id: str, declared: object, workspace: Workspace) -> OperationAgenda:
+_AGENDA_KEYS = ("role", "at", "timezone")
+"""Every key an agenda declaration must carry outright.
+
+Its session source is not here because it is a choice of two keys rather than one required key;
+`_require_agenda_keys` checks both together so a reader still sees one refusal.
+"""
+
+
+def _refuse_agenda_source(body: dict[str, Any], *, name: str) -> None:
+    """Refuse an agenda that names neither session source, or both."""
+    declares_both = "from_dataset" in body and "sessions" in body
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    found.add(
+        Failure.bounded(
+            f"{DECLARE_STAGE}.key_missing",
+            requirement=(
+                f"{name} must declare exactly one of from_dataset or sessions: "
+                "from_dataset follows a registered dataset's own days, "
+                "sessions lists them literally"
+            ),
+            observed=(
+                f"{name} declares both"
+                if declares_both
+                else f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}"
+            ),
+            examples=["from_dataset: krx_adjusted_prices", "sessions: ['2024-01-02']"],
+        )
+    )
+    found.done().raise_if_failed()
+
+
+def _require_agenda_keys(body: dict[str, Any], *, name: str) -> None:
+    """Name everything one agenda declaration is missing, in a single refusal.
+
+    `_require_keys` alone is not enough here: an agenda's session source is `from_dataset` **or**
+    `sessions`, which no required-key list can express, so checking the two separately produces a
+    reader who fixes `role`, re-runs, and only then learns about the pair.
+
+    Measured, before this: a first-time reader assembling one agenda by hand took **four**
+    register/edit/retry round trips, one per key, each refusal naming exactly one problem
+    (`role`, then a wrong role value, then the from_dataset/sessions pair, then `timezone`).
+    `_DATASET_KEYS` had already fixed this shape for datasets; agendas were simply missed.
+    """
+    missing = [key for key in _AGENDA_KEYS if key not in body]
+    has_source = ("from_dataset" in body) != ("sessions" in body)
+    if not missing:
+        if not has_source:
+            _refuse_agenda_source(body, name=name)
+        return
+
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    declares = f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}"
+    for key in missing:
+        requirement = f"{name} must declare {key}"
+        if key == "role":
+            permitted = ", ".join(member.name.lower() for member in OperationRole)
+            requirement = f"{requirement}, one of: {permitted}"
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.key_missing", requirement=requirement, observed=declares
+            )
+        )
+    if not has_source:
+        declares_both = "from_dataset" in body and "sessions" in body
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.key_missing",
+                requirement=(
+                    f"{name} must declare exactly one of from_dataset or sessions"
+                ),
+                observed=f"{name} declares both" if declares_both else declares,
+            )
+        )
+    found.done().raise_if_failed()
+
+
+def _agenda(
+    agenda_id: str, declared: object, workspace: Callable[[], Workspace]
+) -> OperationAgenda:
     """Build one agenda through `daily()`, which owns the rules a hand-built one gets wrong.
 
     `OperationAgenda.daily` derives the occurrence id scheme, the fold, and the offset from the
@@ -319,6 +412,7 @@ def _agenda(agenda_id: str, declared: object, workspace: Workspace) -> Operation
     """
     name = f"agendas.{agenda_id}"
     body = _mapping(declared, name=name)
+    _require_agenda_keys(body, name=name)
     return OperationAgenda.daily(
         agenda_id=agenda_id,
         role=_role(_required(body, "role", name=name), name=name),
@@ -340,12 +434,32 @@ def _component(component_id: str, declared: object, project_root: Path, *, base:
     body = _mapping(declared, name=name)
     raw_kind = str(_required(body, "kind", name=name))
     if raw_kind not in _COMPONENT_KINDS:
+        # Named like `_enum` does, for the same reason: a bare raise reaches the envelope as
+        # `stage:"unhandled"` with an empty `failures[]`, and a reader who cannot see the member
+        # list guesses at it.
         permitted = ", ".join(_COMPONENT_KINDS)
-        raise ValueError(f"{name}.kind must be one of: {permitted}")
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.value_not_permitted",
+                requirement=f"{name}.kind must be one of: {permitted}",
+                observed=raw_kind,
+                examples=list(_COMPONENT_KINDS),
+            )
+        )
+        found.done().raise_if_failed()
     _, register = _COMPONENT_KINDS[raw_kind]
     config = body.get("config")
     if config is not None and not isinstance(config, dict):
-        raise TypeError(f"{name}.config must be a mapping")
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.value_invalid",
+                requirement=f"{name}.config must be a mapping of constructor keywords",
+                observed=f"{type(config).__name__}: {config!r}"[:200],
+            )
+        )
+        found.done().raise_if_failed()
     declared_path = Path(str(_required(body, "path", name=name)))
     ref = register(
         project_root,
@@ -411,7 +525,12 @@ def apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[s
         registered.setdefault("execution_inputs", []).append(str(input_id))
 
     for agenda_id, body in section("agendas").items():
-        register_agenda(project_root, _agenda(str(agenda_id), body, workspace()))
+        # `workspace` is passed unopened. Evaluating `workspace()` here instead would open it
+        # before the agenda body is validated, so a malformed agenda in a fresh directory reports
+        # `workspace.open.missing` -- sending the reader to fix a directory when the file on
+        # their disk is what needs editing, which is the exact substitution the lazy accessor
+        # exists to prevent.
+        register_agenda(project_root, _agenda(str(agenda_id), body, workspace))
         registered.setdefault("agendas", []).append(str(agenda_id))
 
     for component_id, body in section("components").items():

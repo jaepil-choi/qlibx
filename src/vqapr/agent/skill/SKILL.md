@@ -37,12 +37,15 @@ Work with vqapr follows three rungs. Each rung depends on the previous one succe
 **Goal:** a workspace where every dataset, source, component, execution input, and agenda is
 registered and passes validation.
 
-1. `vqapr list datasets` — see what exists (returns empty on a fresh workspace, that is fine)
-2. `vqapr new datamodel <id> --dataset <d>` or `vqapr new strategy <id> --dataset <d>` —
+1. `vqapr list datasets` -- see what exists (returns empty on a fresh workspace, that is fine)
+2. `vqapr new datamodel <id> --dataset <d>` or `vqapr new strategy <id> --dataset <d>` --
    scaffold a component and its declaration
-3. Write a declaration YAML for datasets, sources, agendas, and other workspace elements
-4. `vqapr register <declaration.yaml>` — validate and add to the workspace
-5. `vqapr list <kind>` — confirm what was registered
+3. `vqapr new dataset --out d.yaml` -- get a dataset template with every required key
+4. `vqapr new execution-input --out ei.yaml` -- get a venue-table template
+5. `vqapr new agendas --out agendas.yaml` -- get agendas, strategy_configs, and valuation_configs
+   together (a config binds a role to an agenda, so neither half is usable alone)
+6. Fill in the placeholders and `vqapr register <declaration.yaml>` for each
+7. `vqapr list <kind>` -- confirm what was registered
 
 **Stop condition:** `vqapr list` shows all required elements and `register` accepted every
 declaration without failures.

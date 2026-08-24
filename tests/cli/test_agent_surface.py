@@ -22,9 +22,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from vqapr.cli.main import _COMMANDS, _DESCRIPTIONS, _SUMMARIES, main
+
+
+def _parquet(root: Path, name: str, rows: str) -> Path:
+    path = root / name
+    con = duckdb.connect()
+    try:
+        con.execute(f"COPY ({rows}) TO '{path.as_posix()}' (FORMAT PARQUET)")
+    finally:
+        con.close()
+    return path
 
 _VERBS = tuple(_COMMANDS)
 
@@ -484,6 +495,100 @@ def test_an_execution_input_template_emits_a_valid_selector(tmp_path: Path) -> N
     document = yaml.safe_load(target.read_text(encoding="utf-8"))
     declared = next(iter(document["execution_inputs"].values()))
     assert declared["fill"]["selector"].upper() in FillSelector.__members__
+
+
+def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
+    """`vqapr new`'s choice list is the de-facto index of what a declaration may contain.
+
+    A reader who scaffolds every kind offered, fills them in, and runs must not then meet a
+    section no template ever named. That is what happened: `strategy_configs` was reachable only
+    by knowing in advance that it existed, and the run failed at
+    `workspace.strategy_config.register.missing` after every visible step had succeeded.
+
+    This test fails if `register` learns a section a run needs and `new` is not taught to emit it.
+    """
+    from vqapr.cli.new import _AGENDAS_TEMPLATE, _DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE
+
+    emitted = "\n".join((_DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _AGENDAS_TEMPLATE))
+
+    for section in (
+        "datasets",
+        "execution_inputs",
+        "agendas",
+        "strategy_configs",
+        "valuation_configs",
+    ):
+        assert f"{section}:" in emitted, f"no template emits a {section} section"
+
+
+def test_an_agendas_template_registers_after_its_placeholders_are_filled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The template must be a working document, not a shape to be corrected.
+
+    Registered against a real dataset so the `from_dataset` path is exercised: an agenda that
+    follows a dataset's own days is the common case and the one the template leads with.
+    """
+    import yaml
+
+    prices = _parquet(
+        tmp_path,
+        "prices.parquet",
+        """SELECT * FROM (VALUES
+             (TIMESTAMPTZ '2024-03-05 06:30:00+09', 'A', 100.0),
+             (TIMESTAMPTZ '2024-03-06 06:30:00+09', 'A', 101.0)
+           ) AS t(available_at, instrument, close)""",
+    )
+    dataset = tmp_path / "d.yaml"
+    dataset.write_text(
+        "datasets:\n  krx:\n"
+        "    source_id: krx-source\n"
+        f"    path: {prices.as_posix()}\n"
+        "    instrument_field: instrument\n"
+        "    available_at: available_at\n"
+        "    key_fields: [available_at, instrument]\n"
+        "    fields: {close: close}\n",
+        encoding="utf-8",
+    )
+    assert _envelope(capsys, "--project-root", str(tmp_path), "register", str(dataset))[0] == 0
+
+    target = tmp_path / "agendas.yaml"
+    code, _ = _envelope(
+        capsys, "--project-root", str(tmp_path), "new", "agendas", "--out", str(target)
+    )
+    assert code == 0
+
+    # The two placeholders the template tells the reader to replace. `strategy_configs` names a
+    # component that does not exist in this test, so it is dropped rather than filled -- the
+    # agendas and the valuation binding are what this asserts.
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    document.pop("strategy_configs")
+    for agenda in document["agendas"].values():
+        agenda["from_dataset"] = "krx"
+    target.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(target))
+
+    assert code == 0, payload
+    assert sorted(payload["registered"]["agendas"]) == ["daily-rebalance", "daily-valuation"]
+    assert payload["registered"]["valuation_configs"] == ["daily-valuation"]
+
+
+def test_the_run_spec_template_says_naming_an_agenda_is_not_binding_it(tmp_path: Path) -> None:
+    """The template's own header claimed completeness it did not have.
+
+    It read "every required key is shown" while omitting that the components it names must also
+    be bound by a registered config. Every key of the run spec *was* present -- the sentence was
+    true about this file and false about what running it needs, which is the harder kind of wrong
+    to catch, because nothing about the emitted file looks incomplete.
+    """
+    target = tmp_path / "spec.yaml"
+    main(["--project-root", str(tmp_path), "new", "run-spec", "--out", str(target)])
+
+    text = target.read_text(encoding="utf-8")
+
+    assert "vqapr new agendas" in text, "the template does not say where the binding comes from"
+    assert "not a binding" in text or "does not register or bind" in text
 
 
 def test_a_scaffolded_component_is_always_a_loadable_module(

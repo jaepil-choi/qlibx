@@ -53,6 +53,8 @@ _DESCRIPTIONS: dict[str, str] = {
         "      writes a dataset declaration template with every required key commented.\n"
         "  vqapr new execution-input --out <path>\n"
         "      writes the venue-table declaration a run fills against.\n"
+        "  vqapr new agendas --out <path>\n"
+        "      writes the cadences a run fires on, plus the configs that bind roles to them.\n"
         "  vqapr new run-spec --out <path>\n"
         "      writes a run spec template with every required key, each one commented.\n\n"
         "Nothing is registered by this command. Pass the emitted .yaml to `vqapr register`."

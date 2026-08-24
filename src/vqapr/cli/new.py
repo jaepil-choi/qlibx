@@ -6,10 +6,24 @@ Two modes:
   declaration `.yaml`. Both files are complete: `vqapr new` then `vqapr register` is the whole
   path from nothing to a registered component.
 
-- `vqapr new run-spec --out <path>` emits a YAML template with every required key, inline
-  comments explaining each one, and placeholder values that need replacing. An agent that reads
-  this file knows exactly what `vqapr run` expects, without opening documentation or guessing
-  field names.
+- `vqapr new dataset|execution-input|agendas|run-spec --out <path>` emits a YAML template with
+  every required key, inline comments explaining each one, and placeholder values that need
+  replacing. An agent that reads this file knows exactly what `vqapr register` or `vqapr run`
+  expects, without opening documentation or guessing field names.
+
+## Every declaration kind a run needs has a template
+
+`register` understands seven sections, and a run needs five of them. Before `agendas` was added
+here, three of those five had a template and the rest had to be known to exist: a reader who
+scaffolded all four available kinds, filled them in, and ran got
+`workspace.strategy_config.register.missing` -- a section no template had ever named. The gap was
+not documentation, it was that `vqapr new`'s own choice list was the de-facto index of what a
+declaration could contain, and it was incomplete.
+
+`agendas` therefore emits `agendas` + `strategy_configs` + `valuation_configs` in one file rather
+than three: a config binds a role to an agenda, so neither half is usable without the other, and
+splitting them would recreate the same "which other file was I supposed to write" question one
+level down.
 """
 
 from __future__ import annotations
@@ -91,9 +105,55 @@ execution_inputs:
       trade_price: close            # which key from price_fields above the fill uses
 """
 
+_AGENDAS_TEMPLATE = """\
+# Agendas and the configs that bind roles to them - register with `vqapr register <this-file>`
+#
+# An agenda is a cadence: the days a thing happens on, and the local time of day. A config binds
+# a role to one agenda. Both live here because neither is usable alone -- an agenda nothing is
+# bound to never fires, and a config naming an unregistered agenda is refused.
+#
+# A run spec names these by id (`strategy.agenda_id`, `valuation.agenda_id`). Naming an agenda
+# there does NOT bind it; the binding is the `strategy_configs`/`valuation_configs` entry below.
+# A run whose components are registered but unbound fails preflight with
+# `workspace.strategy_config.register.missing`.
+
+agendas:
+  daily-rebalance:                  # your chosen identity, named by a run spec's agenda_id
+    role: strategy_callback         # one of: strategy_callback, valuation, monitoring
+    from_dataset: DATASET_ID        # follow this registered dataset's own days
+    # sessions:                     # ...or list the days literally. Declare exactly ONE of
+    #   - "2024-01-02"              #    from_dataset or sessions, never both.
+    #   - "2024-01-03"
+    at: "15:30"                     # local time of day the occurrence fires at
+    timezone: Asia/Seoul            # zone `at` is expressed in; DST is derived from it
+
+  daily-valuation:                  # valuation usually runs on the same days as the strategy
+    role: valuation
+    from_dataset: DATASET_ID
+    at: "15:30"
+    timezone: Asia/Seoul
+
+strategy_configs:
+  COMPONENT_ID:                     # component_id of a registered StrategyModel
+    agenda_id: daily-rebalance      # the agenda above whose occurrences drive it
+
+valuation_configs:
+  daily-valuation:                  # any identity; the agenda it names is what matters
+    agenda_id: daily-valuation
+
+# monitoring_policies:              # optional; only if the run spec declares `monitoring`
+#   default:
+#     agenda_id: daily-monitoring
+"""
+
 _RUN_SPEC_TEMPLATE = """\
-# Run spec — every required key is shown. Replace the placeholder values.
+# Run spec — every required key of THIS file is shown. Replace the placeholder values.
 # Write this file, then execute: vqapr run <this-file.yaml>
+#
+# This file names components and agendas; it does not register or bind them. Before `run`
+# succeeds, the ids below must already exist in the workspace, and the strategy and valuation
+# must each be BOUND to their agenda by a registered config -- see `vqapr new agendas`, which
+# emits the agendas and both configs together. Naming an agenda_id here is not a binding.
 
 strategy:
   component: my-alpha          # component_id of a registered StrategyModel
@@ -148,8 +208,11 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "kind",
-        choices=(*_KINDS, "dataset", "execution-input", "run-spec"),
-        help="scaffold a component (datamodel/strategy) or emit a template (dataset/run-spec)",
+        choices=(*_KINDS, "dataset", "execution-input", "agendas", "run-spec"),
+        help=(
+            "scaffold a component (datamodel/strategy) or emit a template "
+            "(dataset/execution-input/agendas/run-spec)"
+        ),
     )
     parser.add_argument(
         "component_id",
@@ -242,11 +305,21 @@ def _execution_input_template(args: argparse.Namespace, project_root: Path) -> d
     return success("template.new", kind="execution-input", path=str(target))
 
 
+def _agendas_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    target = args.out or project_root / "agendas.yaml"
+    refuse_existing(target, what="agendas template")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_AGENDAS_TEMPLATE, encoding="utf-8")
+    return success("template.new", kind="agendas", path=str(target))
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     if args.kind == "dataset":
         return _dataset_template(args, project_root)
     if args.kind == "execution-input":
         return _execution_input_template(args, project_root)
+    if args.kind == "agendas":
+        return _agendas_template(args, project_root)
     if args.kind == "run-spec":
         return _run_spec(args, project_root)
     return _component(args, project_root)

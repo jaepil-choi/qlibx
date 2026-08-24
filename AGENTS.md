@@ -104,6 +104,35 @@ Keep commit messages concise. Keep detailed reasoning in the implementation reco
 commit, push, or publish unless the task or user explicitly authorizes that action. Do not mix
 unrelated user changes into a commit.
 
+## Non-ASCII host profile hygiene
+
+Apply this section whenever the host home directory, user profile, or working path contains
+non-ASCII characters. Under that condition non-ASCII text enters the model context continuously
+through paths nobody chose, and a tool call serialized with `\uXXXX` escapes instead of literal
+UTF-8 is rejected by the agent runtime, spends its bounded retry budget, and ends the turn with
+`Managed fallback retried the escaped non-ASCII tool-call turn 2 times`. One observed session lost
+12 turns and 8.7 percent of its spend to this with zero output produced. Upstream report:
+https://github.com/Yeachan-Heo/gajae-code/issues/4881
+
+- Write non-ASCII characters in tool arguments as literal UTF-8, never as hand-spelled `\uXXXX`.
+  This includes JSON serialized into a string field, so do not emit `ensure_ascii`-style output
+  there. Escapes that are the intended source syntax of the file being written are unaffected.
+- Address files by repository-relative path, or by a `~`-prefixed path outside the repository. Do
+  not expand an absolute home path into a tool argument when a shorter form answers the same need.
+- Prefer a command form whose output does not echo the account name. Use `ls` rather than `ls -l`,
+  and name a specific path rather than listing a home directory, when the owner column is not the
+  question being asked.
+- Set `PYTHONUTF8=1` for Python commands whose output may contain interpreter, virtualenv, or
+  traceback paths. Without it a legacy code page can replace the profile name with mojibake, which
+  is both unreadable and a fresh source of non-ASCII context.
+- Keep this file, and every other always-loaded context file, ASCII-only. A non-ASCII example
+  placed in a file that loads on every session raises the base rate this section exists to lower;
+  describe the characters instead of embedding them.
+- If a turn fails on the escaped-non-ASCII guard, re-issue the same call with literal characters
+  rather than repeating the escaped spelling, and confirm the active model is still the selected
+  one before continuing. The exhaustion path has been observed advancing the fallback chain and
+  silently downgrading the model mid-session.
+
 ## Environment and safety
 
 - Detect capabilities and concrete failure conditions; do not infer company ownership from a

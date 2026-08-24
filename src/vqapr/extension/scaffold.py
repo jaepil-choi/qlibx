@@ -73,7 +73,11 @@ class {class_name}(StrategyModel):
         for row in rows:
             value = row["{field}"]
             if value is not None:
-                history.setdefault(str(row["instrument"]), []).append(value)
+                # `Decimal(str(v))` rather than `Decimal(v)`: a parquet float64 column arrives as
+                # `float`, and money compared or subtracted across `float` and `Decimal` raises.
+                # Going through `str` also avoids inheriting the binary float's exact expansion,
+                # so 0.1 stays 0.1 instead of becoming 0.1000000000000000055511151231257827.
+                history.setdefault(str(row["instrument"]), []).append(Decimal(str(value)))
 
         # A name is eligible when the declared lookback is fully present. A newly listed name has
         # too few rows and a delisted name stops appearing, so both leave the cross-section here
@@ -155,7 +159,11 @@ class {class_name}(DataModel):
         for row in rows:
             value = row["{field}"]
             if value is not None:
-                history.setdefault(str(row["instrument"]), []).append(value)
+                # `Decimal(str(v))` rather than `Decimal(v)`: a parquet float64 column arrives as
+                # `float`, and money compared or subtracted across `float` and `Decimal` raises.
+                # Going through `str` also avoids inheriting the binary float's exact expansion,
+                # so 0.1 stays 0.1 instead of becoming 0.1000000000000000055511151231257827.
+                history.setdefault(str(row["instrument"]), []).append(Decimal(str(value)))
 
         # ---- the one line to change -------------------------------------------------------
         # Trailing return over the declared lookback.

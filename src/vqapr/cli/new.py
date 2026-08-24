@@ -44,10 +44,16 @@ datasets:
     path: relative/path/to/data.parquet  # resolved relative to this YAML file
     instrument_field: instrument      # column that identifies each instrument / name / ticker
     available_at: timestamp           # column that says WHEN this row could first have been known
-    # ^ This is the critical field. It is NOT when the event happened — it is when the
-    #   observation was available. A daily close is available at the session close; an
-    #   accounting fact is available at publication, weeks after the period it covers.
-    #   Getting this wrong is a look-ahead the framework cannot detect for you.
+    # ^ This is the critical field, and it has two separate requirements.
+    #
+    #   MEANING: it is NOT when the event happened — it is when the observation was
+    #   available. A daily close is available at the session close; an accounting fact is
+    #   available at publication, weeks after the period it covers. Getting this wrong is a
+    #   look-ahead the framework cannot detect for you.
+    #
+    #   TYPE: the column must already be a TIMEZONE-AWARE timestamp in the parquet. A naive
+    #   timestamp is refused, because '2024-01-02 15:30' does not say which market close it
+    #   is. Localize it while preparing the data; registration does not convert it for you.
     key_fields:                       # columns that together uniquely identify each row
       - timestamp
       - instrument

@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "brief": "Approved plan: `.gjc/_session-01a031f9-aa43-703c-b219-d0e2d7a27a4d/plans/ralplan/01a031f9-aa43-703c-b219-d0e2d7a27a4d/pending-approval.md`. Preserve all locked intent, explicit economics, hard-removal, candidate-catalog CAS, crash-safe publication, identity, stateless callback, public algebra, cross-repo parity, and no-commit/no-push constraints. qlibx is sibling `../qlibx`; consumer is `vqapr-testbed-2`.\n\n@goal: Freeze baseline and public contract\nCapture the current qlibx/testbed export inventory, canonical input/declaration/schedule/output manifests, normalized trace/row hash contracts, parity commands, performance protocol, and exact new public declaration algebra in tests/fixtures/docs before behavioral migration. Keep product working and run focused baseline tests.\n\n@goal: Implement authoring contracts and internal authority boundary\nAdd exact capability namespaces and immutable declaration/model contracts, named inputs, typed observations, semantic Hold/Rebalance/StrategyResult, bounded account/history/constraint/diagnostic types, versioned identity bytes, fresh callback instances, and physically relocate retained authority beneath `vqapr._internal` while preserving current behavior through internal adapters. Run focused unit/boundary tests.\n\n@goal: Implement Project transactions and atomic publication\nImplement non-mutating `open`, closed ProjectDeclaration registration, candidate-catalog validation/preflight and generation-CAS commit, Project materialize/run, one callback root for decision/state/diagnostics/evidence, content-addressed allocation/record staging and one catalog visibility swap, orphan recovery, conflict/crash/failure tests, and CompletedRun atomic Publication. Run focused integration tests.\n\n@goal: Dogfood and hard-remove the old qlibx API\nMigrate shipped venues, constraints, CLI, scaffolds, skills, docs, README, every showcase and test to the capability namespaces and Project workflow. Delete `vqapr.public` and former qualified lifecycle/storage/Flow/evidence routes without redirects or aliases. Prove exact exports and forbidden import failure. Keep qlibx tests, ruff, build, isolated wheel and showcases green.\n\n@goal: Migrate the factor testbed and prove scientific parity\nMigrate the whole `vqapr-testbed-2` pipeline including register.py, models, materialization, simulation and atomic publication; retire or replace measure_session_effect public-path diagnostics. Use only supported namespaces, one root, one run and one publish per factor while retaining every explicit economic declaration. Run complete factor rebuild/comparison and exact normalized manifest/trace/row/parity/performance checks; update PRD/architecture/implementation/handoff records. Do not git add, commit, push or publish; stop for owner review after the full Ultragoal cohort and terminal critic gates.",
+  "gjcGoalMode": "aggregate",
+  "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+  "goals": [
+    {
+      "id": "G001",
+      "title": "Freeze baseline and public contract",
+      "objective": "Capture the current qlibx/testbed export inventory, canonical input/declaration/schedule/output manifests, normalized trace/row hash contracts, parity commands, performance protocol, and exact new public declaration algebra in tests/fixtures/docs before behavioral migration. Keep product working and run focused baseline tests.",
+      "status": "complete",
+      "createdAt": "2026-08-24T08:00:14.760Z",
+      "updatedAt": "2026-08-24T08:57:39.280Z",
+      "startedAt": "2026-08-24T08:00:20.732Z",
+      "completedAt": "2026-08-24T08:57:39.280Z",
+      "evidence": "T0 canonical harness implemented; 8 tests passed; ruff clean; CLI help passed; current workspace captured and self-compared identical; five-process performance baseline recorded. A timed-out initial full-envelope capture was terminated and replaced with bounded semantic row projection.",
+      "completionVerification": {
+        "schemaVersion": 1,
+        "receiptId": "cc16fbed-6024-4937-aeef-b30a101aec6a",
+        "verifiedAt": "2026-08-24T08:57:39.280Z",
+        "goalId": "G001",
+        "receiptKind": "per-goal",
+        "goalStatusBeforeCheckpoint": "active",
+        "gjcGoalMode": "aggregate",
+        "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+        "qualityGateHash": "ec0c2d00f07ac601a802813e36d06c8e74284faeaed8862c340694c441300c3a",
+        "planGeneration": "63471cbd7eb03b4683a26a5dab96bf5d57ec29f1c391053013d079b4a47e7c3e",
+        "basis": {
+          "planHashBeforeCheckpoint": "812db0fee2b085b5d35ee3295f3a3baa9b350839de32fe91ecca7701d8bde60f",
+          "latestRelevantLedgerEventIdBeforeCheckpoint": "40d6fb56-3119-4171-be38-025be23c32e1",
+          "goalUpdatedAtBeforeCheckpoint": "2026-08-24T08:57:39.280Z",
+          "relevantGoalIdsBeforeCheckpoint": [
+            "G001"
+          ],
+          "requiredGoalSetHashBeforeCheckpoint": "dc8f353886f28ecf563760953d2ba9609d2df02a40277cdd615e02ca35d542cb"
+        },
+        "checkpointLedgerEventId": "6e38aa78-f274-445e-9856-2c04e6d8c8bf"
+      }
+    },
+    {
+      "id": "G002",
+      "title": "Implement authoring contracts and internal authority boundary",
+      "objective": "Add exact capability namespaces and immutable declaration/model contracts, named inputs, typed observations, semantic Hold/Rebalance/StrategyResult, bounded account/history/constraint/diagnostic types, versioned identity bytes, fresh callback instances, and physically relocate retained authority beneath `vqapr._internal` while preserving current behavior through internal adapters. Run focused unit/boundary tests.",
+      "status": "active",
+      "createdAt": "2026-08-24T08:00:14.760Z",
+      "updatedAt": "2026-08-24T08:57:39.344Z",
+      "startedAt": "2026-08-24T08:57:39.344Z"
+    },
+    {
+      "id": "G003",
+      "title": "Implement Project transactions and atomic publication",
+      "objective": "Implement non-mutating `open`, closed ProjectDeclaration registration, candidate-catalog validation/preflight and generation-CAS commit, Project materialize/run, one callback root for decision/state/diagnostics/evidence, content-addressed allocation/record staging and one catalog visibility swap, orphan recovery, conflict/crash/failure tests, and CompletedRun atomic Publication. Run focused integration tests.",
+      "status": "pending",
+      "createdAt": "2026-08-24T08:00:14.760Z",
+      "updatedAt": "2026-08-24T08:00:14.760Z"
+    },
+    {
+      "id": "G004",
+      "title": "Dogfood and hard-remove the old qlibx API",
+      "objective": "Migrate shipped venues, constraints, CLI, scaffolds, skills, docs, README, every showcase and test to the capability namespaces and Project workflow. Delete `vqapr.public` and former qualified lifecycle/storage/Flow/evidence routes without redirects or aliases. Prove exact exports and forbidden import failure. Keep qlibx tests, ruff, build, isolated wheel and showcases green.",
+      "status": "pending",
+      "createdAt": "2026-08-24T08:00:14.760Z",
+      "updatedAt": "2026-08-24T08:00:14.760Z"
+    },
+    {
+      "id": "G005",
+      "title": "Migrate the factor testbed and prove scientific parity",
+      "objective": "Migrate the whole `vqapr-testbed-2` pipeline including register.py, models, materialization, simulation and atomic publication; retire or replace measure_session_effect public-path diagnostics. Use only supported namespaces, one root, one run and one publish per factor while retaining every explicit economic declaration. Run complete factor rebuild/comparison and exact normalized manifest/trace/row/parity/performance checks; update PRD/architecture/implementation/handoff records. Do not git add, commit, push or publish; stop for owner review after the full Ultragoal cohort and terminal critic gates.",
+      "status": "pending",
+      "createdAt": "2026-08-24T08:00:14.760Z",
+      "updatedAt": "2026-08-24T08:00:14.760Z"
+    }
+  ],
+  "createdAt": "2026-08-24T08:00:14.760Z",
+  "updatedAt": "2026-08-24T08:57:39.344Z",
+  "repositoryBinding": {
+    "schema": "gjc.repository_binding.v1",
+    "worktreeRoot": "D:\\chljeffreyz\\DevProjects\\kwam-enhanced-index",
+    "commonDir": "D:\\chljeffreyz\\DevProjects\\kwam-enhanced-index\\.git",
+    "displayPath": "D:\\chljeffreyz\\DevProjects\\kwam-enhanced-index",
+    "head": "d77a374bd266923d9262c7f8b0a141f58687e8e5",
+    "branch": "develop"
+  },
+  "state_revision": 4
+}

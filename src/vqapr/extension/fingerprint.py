@@ -1,39 +1,13 @@
-"""Deterministic project-local component source fingerprinting."""
+"""Temporary forwarding adapter for `vqapr.extension.fingerprint`.
+
+Internal-transition: the implementation now lives in `vqapr._internal.extensions.fingerprint`.
+This module re-exports it unchanged so existing `vqapr.extension.fingerprint` imports keep
+working exactly as before. It carries no logic of its own and will be deleted in G004; do not
+add deprecation warnings, fallbacks, or new behaviour here.
+"""
 
 from __future__ import annotations
 
-import hashlib
-import json
-from collections.abc import Mapping
-from pathlib import Path
+from vqapr._internal.extensions.fingerprint import fingerprint_component
 
-from vqapr.extension.component import ComponentKind
-from vqapr.models.memory import normalize_memory
-
-
-def fingerprint_component(
-    path: str | Path,
-    *,
-    kind: ComponentKind,
-    object_name: str,
-    config: Mapping[str, object] | None = None,
-) -> str:
-    target = Path(path)
-    source = target.read_bytes()
-    normalized = normalize_memory(dict(config or {}))
-    metadata = json.dumps(
-        {
-            "kind": str(kind),
-            "object_name": object_name,
-            "config": normalized,
-        },
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    digest = hashlib.sha256()
-    digest.update(metadata)
-    digest.update(b"\0")
-    digest.update(source)
-    return digest.hexdigest()
+__all__ = ["fingerprint_component"]

@@ -322,6 +322,104 @@ def test_an_incomplete_spec_names_every_missing_key_at_once(
         assert key in detail["observed"], f"{key} was not named"
 
 
+def test_a_dataset_template_covers_every_required_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F-003: there was no dataset scaffold, and register --help named no required keys.
+
+    The template must declare every key that `register` requires so that a first-time reader
+    discovers the schema by reading a file, not by collecting one ValueError per retry.
+    """
+    import yaml
+
+    target = tmp_path / "ds.yaml"
+    code, payload = _envelope(
+        capsys, "--project-root", str(tmp_path), "new", "dataset", "--out", str(target)
+    )
+
+    assert code == 0 and payload["ok"] is True
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    dataset = next(iter(document["datasets"].values()))
+    for key in ("source_id", "path", "instrument_field", "available_at", "key_fields", "fields"):
+        assert key in dataset, f"template does not declare {key}"
+
+
+def test_a_dataset_template_explains_available_at(tmp_path: Path) -> None:
+    """The critical field must not be a bare placeholder.
+
+    Getting `available_at` wrong is a look-ahead the framework cannot detect, so the template
+    must explain what it means rather than hoping the reader already knows.
+    """
+    main(["--project-root", str(tmp_path), "new", "dataset", "--out", str(tmp_path / "ds.yaml")])
+
+    text = (tmp_path / "ds.yaml").read_text(encoding="utf-8")
+    assert "available" in text.lower()
+    assert "look-ahead" in text.lower() or "when" in text.lower()
+
+
+def test_missing_declaration_keys_arrive_as_typed_failures_not_unhandled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F-005: a missing required key produced stage:unhandled with empty failures[].
+
+    The installed SKILL.md instructs agents to read `failures` first, so an empty failures array
+    on the most common mistake actively misleads.
+    """
+    spec = tmp_path / "ds.yaml"
+    spec.write_text(
+        "datasets:\n  prices:\n    instrument_field: ticker\n", encoding="utf-8"
+    )
+
+    code, payload = _envelope(
+        capsys, "--project-root", str(tmp_path), "register", str(spec)
+    )
+
+    assert code == 1
+    assert payload["stage"] != "unhandled", "should be a typed refusal, not unhandled"
+    assert payload["failures"], "failures must not be empty"
+    missing_codes = [f["code"] for f in payload["failures"]]
+    assert all("key_missing" in c for c in missing_codes)
+    # All missing keys in one refusal, not one per round trip.
+    assert len(payload["failures"]) >= 3, (
+        f"expected all missing keys at once, got {len(payload['failures'])}"
+    )
+
+
+def test_unknown_section_sources_explains_inline_declaration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F-007: register demanded source_id then rejected the sources: section it implied.
+
+    The refusal must explain where a source actually goes.
+    """
+    spec = tmp_path / "ds.yaml"
+    spec.write_text(
+        "datasets:\n  p: {source_id: s, path: x, instrument_field: i,"
+        " available_at: t, key_fields: [t,i], fields: {c: c}}\n"
+        "sources:\n  s: {path: x}\n",
+        encoding="utf-8",
+    )
+
+    code, payload = _envelope(
+        capsys, "--project-root", str(tmp_path), "register", str(spec)
+    )
+
+    assert code == 1
+    assert payload["stage"] == "declaration.read"
+    observed = payload["failures"][0]["observed"]
+    assert "inline" in observed.lower() or "pair" in observed.lower()
+
+
+def test_project_root_after_subcommand_explains_position(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """F-004: --project-root after the subcommand was rejected with no explanation."""
+    code, payload = _envelope(capsys, "list", "datasets", "--project-root", "/tmp")
+
+    assert code == 1
+    assert "before the subcommand" in payload["error"]
+
+
 def test_a_spec_that_is_not_a_mapping_says_what_it_parsed_as(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -31,7 +31,7 @@ _COMMANDS: dict[str, Any] = {
 }
 
 _SUMMARIES: dict[str, str] = {
-    "new": "scaffold a component and its declaration, or emit a run-spec template",
+    "new": "scaffold a component, or emit a dataset/run-spec declaration template",
     "register": "validate a declaration and add what it declares to the workspace",
     "run": "freeze a run spec, preflight it, and execute the simulation",
     "list": "show what the workspace already holds",
@@ -49,6 +49,8 @@ _DESCRIPTIONS: dict[str, str] = {
         "Emit a starting point.\n\n"
         "  vqapr new datamodel|strategy <id> --dataset <d>\n"
         "      writes a component .py that runs as written, plus the .yaml that registers it.\n"
+        "  vqapr new dataset --out <path>\n"
+        "      writes a dataset declaration template with every required key commented.\n"
         "  vqapr new run-spec --out <path>\n"
         "      writes a run spec template with every required key, each one commented.\n\n"
         "Nothing is registered by this command. Pass the emitted .yaml to `vqapr register`."
@@ -100,6 +102,12 @@ class _Parser(argparse.ArgumentParser):
     """
 
     def error(self, message: str) -> NoReturn:
+        if "--project-root" in message and "unrecognized" in message:
+            message = (
+                "--project-root must come before the subcommand: "
+                "vqapr --project-root <dir> <command>. "
+                "The current directory is the default when omitted."
+            )
         raise UsageError(message, prog=self.prog)
 
     def _print_message(self, message: str, file: Any = None) -> None:

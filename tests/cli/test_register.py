@@ -242,7 +242,10 @@ def test_an_unknown_section_is_named_rather_than_ignored(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert "unknown section(s): dataset" in payload["error"]
+    assert payload["ok"] is False
+    assert payload["stage"] == "declaration.read"
+    assert payload["failures"][0]["code"] == "declaration.read.unknown_section"
+    assert "dataset" in payload["failures"][0]["observed"]
 
 
 def test_an_agenda_must_declare_exactly_one_source_of_sessions(

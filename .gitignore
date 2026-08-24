@@ -40,3 +40,10 @@ showcases/show_*/outputs/
 # GJC workflow state is per-session local scratch, never shared.
 /.gjc/
 /.gjc-evidence/
+
+# Agent tooling scratch. This is a Python package: a node dependency tree here belongs to the
+# harness that drove a session, never to the distribution, and `git add -A` will otherwise sweep
+# 101MB of it into a commit.
+/node_modules/
+/package.json
+/bun.lock

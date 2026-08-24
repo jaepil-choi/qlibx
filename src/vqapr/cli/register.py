@@ -37,12 +37,14 @@ of how the user happened to type it.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import read_yaml_mapping
+from vqapr.domain.errors import Failure, FailureFamily, collector
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import (
     register_constraint,
@@ -83,6 +85,15 @@ _COMPONENT_KINDS = {
 `execute()`를 갈아치운 것은 거기서 거부된다. CLI가 kind 목록으로 막을 일이 아니다.
 """
 
+DECLARE_STAGE = "declaration.read"
+"""Reading the user's declaration document, before any workspace work begins.
+
+Separate from `workspace.dataset.register` on purpose: that stage means the workspace refused a
+well-formed declaration, while this one means the document itself is incomplete. Reporting the
+second as the first sends a reader to inspect their workspace when the file on their disk is what
+needs editing.
+"""
+
 SECTIONS = (
     "datasets",
     "execution_inputs",
@@ -115,14 +126,41 @@ def _time(value: object, *, name: str) -> time:
     return time.fromisoformat(value)
 
 
-def _required(body: dict[str, Any], key: str, *, name: str) -> Any:
-    """Read a declared key, naming the section rather than raising a bare `KeyError`.
+def _require_keys(body: dict[str, Any], keys: Sequence[str], *, name: str) -> None:
+    """Name every key this declaration is missing, in one refusal.
 
-    A missing key reported as `KeyError: 'available_at'` tells the user a dictionary lookup
-    failed. Naming the section tells them which declaration to open.
+    Raising on the first absent key costs one round trip per key: a reader fixes `fields`, re-runs,
+    is told about `source_id`, re-runs, and learns the required set one exception at a time with no
+    way to see it whole. Measured on a first-time reader, that pattern produced three failed
+    attempts at the same command before they stopped.
+
+    This is the same reason `Diagnosis` carries a tuple of `Failure` rather than one: an agent
+    fixing its own declaration must receive the problems together.
+    """
+    missing = [key for key in keys if key not in body]
+    if not missing:
+        return
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    for key in missing:
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.key_missing",
+                requirement=f"{name} must declare {key}",
+                observed=f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}",
+            )
+        )
+    found.done().raise_if_failed()
+
+
+def _required(body: dict[str, Any], key: str, *, name: str) -> Any:
+    """Read a key that `_require_keys` has already proven present.
+
+    The typed refusal is raised by `_require_keys` so that every missing key in a declaration is
+    named at once. This still refuses rather than trusting the caller, because a builder reached
+    through a path that forgot to pre-check must not read a `KeyError` into the envelope.
     """
     if key not in body:
-        raise ValueError(f"{name} must declare {key}")
+        _require_keys(body, (key,), name=name)
     return body[key]
 
 
@@ -140,6 +178,28 @@ def _source(body: dict[str, Any], *, name: str, base: Path) -> SourceSpec:
     )
 
 
+_DATASET_KEYS = (
+    "source_id",
+    "path",
+    "instrument_field",
+    "available_at",
+    "key_fields",
+    "fields",
+)
+"""Every key a dataset declaration must carry.
+
+This tuple is used twice: once to pre-check the full set so that every missing key is named in a
+single refusal, and once by `_required` as a fallback guard. The pre-check is why Agent A's
+two-blocker run should not recur: where it previously took three round trips to discover five keys
+one at a time, a single refusal now names all of them.
+
+`source_id` and `path` live inline under the dataset because a dataset and its physical file
+register together — `register_dataset(registration, source)` takes them as a pair. There is no
+separate `sources:` section; the error that formerly said just ``must declare source_id`` without
+saying where a source goes was the direct cause of FRICTION F-007.
+"""
+
+
 def _dataset(
     dataset_id: str, declared: object, *, base: Path
 ) -> tuple[DatasetRegistration, SourceSpec]:
@@ -151,6 +211,7 @@ def _dataset(
     """
     name = f"datasets.{dataset_id}"
     body = _mapping(declared, name=name)
+    _require_keys(body, _DATASET_KEYS, name=name)
     fields = _mapping(_required(body, "fields", name=name), name=f"{name}.fields")
     return (
         DatasetRegistration.of(
@@ -276,10 +337,25 @@ def apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[s
     """
     unknown = sorted(set(document) - set(SECTIONS))
     if unknown:
-        raise ValueError(
-            f"unknown section(s): {', '.join(unknown)}; this command registers "
-            f"{', '.join(SECTIONS)}"
+        hint = ""
+        if "sources" in unknown:
+            hint = (
+                ". Note: there is no top-level sources: section. A source is declared "
+                "inline under its dataset (source_id + path), because a dataset and its "
+                "file register as a pair"
+            )
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.unknown_section",
+                requirement=(
+                    f"a declaration may contain: {', '.join(SECTIONS)}"
+                ),
+                observed=f"unknown: {', '.join(unknown)}{hint}",
+                examples=unknown,
+            )
         )
+        found.done().raise_if_failed()
     opened: Workspace | None = None
 
     def workspace() -> Workspace:

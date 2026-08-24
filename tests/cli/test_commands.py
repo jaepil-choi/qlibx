@@ -299,7 +299,7 @@ def test_a_rejected_command_line_still_answers_in_the_envelope(
     The agent's only parsing contract is one JSON line, so a mistyped command that answered with
     an empty stdout and a bare exit code was the single shape it could not read.
     """
-    code, payload = _cli(capsys, "--project-root", str(tmp_path), "new", "dataset", "x")
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "new", "bogus", "x")
 
     assert code == 1
     assert payload["ok"] is False

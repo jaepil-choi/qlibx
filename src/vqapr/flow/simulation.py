@@ -1443,7 +1443,15 @@ class SimulationFlow:
                 "nav": None if mark is None else str(mark.nav),
                 "quantity": None,
                 "price": None,
-                "observed_at": None,
+                # When the nav on this row was measured, which is not when the row was written --
+                # those are two clocks and canon keeps them two columns. Without it the row
+                # holding the nav does not say what instant the nav belongs to, and a reader has
+                # to join back to this callback's instrument rows to find out. That join has
+                # nothing to join to across any span where the book held no positions, and a
+                # reader who skips it dates the series by the callback instead: the record is one
+                # commit behind, so every value lands one occurrence late. Measured once, that
+                # mislabelling took a factor correlation from 0.93 to 0.02.
+                "observed_at": None if mark is None else mark.marked_at,
                 "account_version": account.version,
             },
         )

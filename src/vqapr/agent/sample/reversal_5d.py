@@ -59,7 +59,11 @@ class SampleReversal5d(StrategyModel):
         closes: dict[str, list[Decimal]] = {}
         for row in rows:
             if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(row["close"])
+                # `Decimal(str(v))` rather than the raw cell: this file is copied against the
+                # reader's own dataset, and a parquet float64 column arrives as `float`, which
+                # raises on the `values[-1] / values[0] - Decimal(1)` below. The sample panel is
+                # decimal128, so the bug is invisible here and appears only after the copy.
+                closes.setdefault(str(row["instrument"]), []).append(Decimal(str(row["close"])))
 
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < SELECTED:

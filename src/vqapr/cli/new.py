@@ -63,6 +63,34 @@ datasets:
     # hive_partitioned: false         # uncomment if the source is a hive-partitioned directory
 """
 
+_EXECUTION_INPUT_TEMPLATE = """\
+# Execution input declaration - register with `vqapr register <this-file.yaml>`
+#
+# This declares the venue table a run fills against: where executable prices live,
+# and the rule that picks which snapshot an order is filled at.
+#
+# Like a dataset, the source file is declared inline (source_id + path). There is no
+# separate `sources:` section.
+
+execution_inputs:
+  EXECUTION_INPUT_ID:               # your chosen identity, named by a run spec's execution_input
+    table:
+      source_id: EXECUTION_INPUT_ID-source  # identifies the physical file
+      path: relative/path/to/venue.parquet  # resolved relative to this YAML file
+      trade_at_field: trade_at      # column holding the instant an execution is available at
+      instrument_field: instrument  # column identifying each instrument
+      is_tradable_field: is_tradable  # boolean column: was this name executable at that instant
+      price_fields:                 # executable prices, mapping name -> column
+        close: close
+    fill:
+      selector: same_day            # SCHEDULING rule, not a price choice. One of:
+      #   same_day       fill at the instant selected within the same session
+      #   next_eligible  fill at the next session where the name is tradable
+      at: "15:30"                   # local time of the execution instant
+      timezone: Asia/Seoul          # venue timezone that `at` is expressed in
+      trade_price: close            # which key from price_fields above the fill uses
+"""
+
 _RUN_SPEC_TEMPLATE = """\
 # Run spec — every required key is shown. Replace the placeholder values.
 # Write this file, then execute: vqapr run <this-file.yaml>
@@ -120,7 +148,7 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "kind",
-        choices=(*_KINDS, "dataset", "run-spec"),
+        choices=(*_KINDS, "dataset", "execution-input", "run-spec"),
         help="scaffold a component (datamodel/strategy) or emit a template (dataset/run-spec)",
     )
     parser.add_argument(
@@ -171,6 +199,13 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
         lookback=args.lookback,
     )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
+    if target.suffix != ".py":
+        # A component is imported by `register`, so it must be a loadable module. Writing an
+        # extensionless file here reports success and then fails one command later, where the
+        # refusal names the module loader rather than the flag that caused it. The default path
+        # already appends `.py`; an explicit --out is held to the same rule instead of being
+        # taken verbatim.
+        target = target.with_suffix(".py")
     declaration = target.with_suffix(".yaml")
     refuse_existing(target, what="component file")
     refuse_existing(declaration, what="declaration file")
@@ -199,9 +234,19 @@ def _dataset_template(args: argparse.Namespace, project_root: Path) -> dict[str,
     return success("template.new", kind="dataset", path=str(target))
 
 
+def _execution_input_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    target = args.out or project_root / "execution-input.yaml"
+    refuse_existing(target, what="execution input template")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_EXECUTION_INPUT_TEMPLATE, encoding="utf-8")
+    return success("template.new", kind="execution-input", path=str(target))
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     if args.kind == "dataset":
         return _dataset_template(args, project_root)
+    if args.kind == "execution-input":
+        return _execution_input_template(args, project_root)
     if args.kind == "run-spec":
         return _run_spec(args, project_root)
     return _component(args, project_root)

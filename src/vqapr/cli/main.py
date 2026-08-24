@@ -51,6 +51,8 @@ _DESCRIPTIONS: dict[str, str] = {
         "      writes a component .py that runs as written, plus the .yaml that registers it.\n"
         "  vqapr new dataset --out <path>\n"
         "      writes a dataset declaration template with every required key commented.\n"
+        "  vqapr new execution-input --out <path>\n"
+        "      writes the venue-table declaration a run fills against.\n"
         "  vqapr new run-spec --out <path>\n"
         "      writes a run spec template with every required key, each one commented.\n\n"
         "Nothing is registered by this command. Pass the emitted .yaml to `vqapr register`."

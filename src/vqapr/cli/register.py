@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 from datetime import date, datetime, time
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -242,7 +243,11 @@ def _execution_input(input_id: str, declared: object, *, base: Path) -> Executio
             price_fields={str(key): str(column) for key, column in prices.items()},
         ),
         FillConvention(
-            FillSelector[str(_required(fill, "selector", name=f"{name}.fill")).upper()],
+            _enum(
+                FillSelector,
+                _required(fill, "selector", name=f"{name}.fill"),
+                name=f"{name}.fill.selector",
+            ),
             _time(_required(fill, "at", name=f"{name}.fill"), name=f"{name}.fill.at"),
             str(_required(fill, "timezone", name=f"{name}.fill")),
             str(_required(fill, "trade_price", name=f"{name}.fill")),
@@ -271,12 +276,39 @@ def _sessions(body: dict[str, Any], workspace: Workspace, *, name: str) -> list[
     ]
 
 
-def _role(value: object, *, name: str) -> OperationRole:
+def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
+    """Read a declared enum value, or refuse by naming every member.
+
+    A bare `Kind[value.upper()]` raises `KeyError`, which reaches the envelope as
+    `stage:"unhandled"` with an empty `failures[]` and a traceback file. A reader who cannot see
+    the member list then guesses, and guessing converges only when the field name happens to
+    suggest the right vocabulary.
+
+    Measured: `fill.selector` was a raw lookup, and a reader spent six consecutive attempts on
+    `close, market, close_price, last, vwap, next_open` — every one a *price* word, because
+    "selector" alongside `trade_price` reads as "which price". The members are `SAME_DAY` and
+    `NEXT_ELIGIBLE`, which are *scheduling* words. No number of guesses reaches a vocabulary the
+    field name argues against, so the refusal has to carry the list.
+    """
     try:
-        return OperationRole[str(value).upper()]
+        return kind[str(value).upper()]
     except KeyError:
-        permitted = ", ".join(role.name.lower() for role in OperationRole)
-        raise ValueError(f"{name}.role must be one of: {permitted}") from None
+        permitted = ", ".join(member.name.lower() for member in kind)
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.value_not_permitted",
+                requirement=f"{name} must be one of: {permitted}",
+                observed=str(value),
+                examples=[member.name.lower() for member in kind],
+            )
+        )
+        found.done().raise_if_failed()
+        raise  # unreachable: raise_if_failed always raises here
+
+
+def _role(value: object, *, name: str) -> OperationRole:
+    return _enum(OperationRole, value, name=f"{name}.role")
 
 
 def _agenda(agenda_id: str, declared: object, workspace: Workspace) -> OperationAgenda:

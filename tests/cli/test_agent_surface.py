@@ -410,6 +410,109 @@ def test_unknown_section_sources_explains_inline_declaration(
     assert "inline" in observed.lower() or "pair" in observed.lower()
 
 
+def test_a_rejected_enum_value_names_every_permitted_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A bad enum value must not arrive as an unhandled KeyError.
+
+    `fill.selector` was a raw `FillSelector[value.upper()]` lookup, so a wrong value crashed with
+    a traceback instead of a refusal. Measured: a reader spent six consecutive attempts on
+    price vocabulary (close, market, vwap, next_open) because the field name reads as "which
+    price" while the members are scheduling words. Guessing cannot converge on a vocabulary the
+    field name argues against, so the refusal has to carry the list.
+    """
+    spec = tmp_path / "ei.yaml"
+    spec.write_text(
+        "execution_inputs:\n  krx:\n    table:\n      source_id: s\n      path: x.parquet\n"
+        "      trade_at_field: t\n      instrument_field: i\n      is_tradable_field: ok\n"
+        "      price_fields: {close: close}\n    fill:\n      selector: next_open\n"
+        '      at: "15:30"\n      timezone: Asia/Seoul\n      trade_price: close\n',
+        encoding="utf-8",
+    )
+
+    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(spec))
+
+    assert code == 1
+    assert payload["stage"] != "unhandled"
+    assert payload["failures"], "a bad enum value produced no structured failure"
+    failure = payload["failures"][0]
+    assert failure["code"] == "declaration.read.value_not_permitted"
+    for member in ("same_day", "next_eligible"):
+        assert member in failure["requirement"], f"{member} was not named"
+    assert failure["examples"], "permitted values must ride as examples"
+
+
+def test_an_execution_input_template_covers_every_required_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No scaffold existed for this kind, and it is the deepest nesting `register` accepts.
+
+    Measured: ten required keys across two nested blocks, discovered one refusal at a time.
+    """
+    import yaml
+
+    target = tmp_path / "ei.yaml"
+    code, _ = _envelope(
+        capsys, "--project-root", str(tmp_path), "new", "execution-input", "--out", str(target)
+    )
+
+    assert code == 0
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    declared = next(iter(document["execution_inputs"].values()))
+    for key in (
+        "source_id",
+        "path",
+        "trade_at_field",
+        "instrument_field",
+        "is_tradable_field",
+        "price_fields",
+    ):
+        assert key in declared["table"], f"table does not declare {key}"
+    for key in ("selector", "at", "timezone", "trade_price"):
+        assert key in declared["fill"], f"fill does not declare {key}"
+
+
+def test_an_execution_input_template_emits_a_valid_selector(tmp_path: Path) -> None:
+    """The emitted value must be one the validator accepts, not a placeholder to guess at."""
+    import yaml
+
+    from vqapr.exchange.conventions import FillSelector
+
+    target = tmp_path / "ei.yaml"
+    main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(target)])
+
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    declared = next(iter(document["execution_inputs"].values()))
+    assert declared["fill"]["selector"].upper() in FillSelector.__members__
+
+
+def test_a_scaffolded_component_is_always_a_loadable_module(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`register` imports the component, so an extensionless --out fails one command later.
+
+    Reporting success and then refusing the file at the next command puts the failure where the
+    flag that caused it is no longer visible.
+    """
+    code, payload = _envelope(
+        capsys,
+        "--project-root",
+        str(tmp_path),
+        "new",
+        "datamodel",
+        "alpha",
+        "--dataset",
+        "prices",
+        "--out",
+        str(tmp_path / "comp"),
+    )
+
+    assert code == 0
+    assert payload["path"].endswith(".py"), payload["path"]
+    assert (tmp_path / "comp.py").exists()
+    assert (tmp_path / "comp.yaml").exists()
+
+
 def test_project_root_after_subcommand_explains_position(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

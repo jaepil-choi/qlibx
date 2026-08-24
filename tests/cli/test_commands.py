@@ -261,6 +261,49 @@ def test_run_executes_a_declared_spec_end_to_end(
     assert payload["account_version"] == 7
 
 
+def test_run_refuses_a_date_boundary_as_structured_cli_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The old template promised dates, then preflight crashed on the naive datetime."""
+    _workspace_for_run(tmp_path, capsys)
+
+    code, payload = _cli(
+        capsys,
+        "--project-root",
+        str(tmp_path),
+        "run",
+        str(_spec(tmp_path, start="2024-03-05", end="2024-03-07")),
+    )
+
+    assert code == 1
+    assert payload["stage"] == "cli.input"
+    failure = payload["failures"][0]
+    assert failure["code"] == "cli.input.value_invalid"
+    assert "UTC offset" in failure["requirement"]
+    assert failure["examples"] == ["2024-01-02T00:00:00+09:00"]
+
+
+def test_strategy_config_list_exposes_and_filters_by_component_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Registration keys a strategy config by component id, so list must show that identity."""
+    _workspace_for_run(tmp_path, capsys)
+
+    code, payload = _cli(
+        capsys,
+        "--project-root",
+        str(tmp_path),
+        "list",
+        "strategy-configs",
+        "--id",
+        "my-alpha",
+    )
+
+    assert code == 0
+    assert payload["count"] == 1
+    assert payload["items"] == [{"component_id": "my-alpha", "agenda_id": "alpha"}]
+
+
 def test_an_incomplete_spec_names_every_missing_key_at_once(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

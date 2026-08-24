@@ -51,6 +51,9 @@ _DATASET_TEMPLATE = """\
 #
 # A dataset and its source file register together. There is no separate `sources:`
 # section; source_id and path are declared here, inline under the dataset.
+#
+# Registrations are immutable. During disposable first-run setup, correct this YAML and rebuild
+# the project-local workspace; after a run matters, preserve provenance by registering a new id.
 
 datasets:
   DATASET_ID:                         # your chosen identity for this dataset
@@ -91,6 +94,9 @@ _EXECUTION_INPUT_TEMPLATE = """\
 #
 # Like a dataset, the source file is declared inline (source_id + path). There is no
 # separate `sources:` section.
+#
+# Registrations are immutable. During disposable first-run setup, correct this YAML and rebuild
+# the project-local workspace; after a run matters, preserve provenance by registering a new id.
 
 execution_inputs:
   EXECUTION_INPUT_ID:               # your chosen identity, named by a run spec's execution_input
@@ -106,7 +112,7 @@ execution_inputs:
       selector: same_day            # SCHEDULING rule, not a price choice. One of:
       #   same_day       fill at the instant selected within the same session
       #   next_eligible  fill at the next session where the name is tradable
-      at: "15:30"                   # local time of the execution instant
+      at: "15:30"                   # execution must be STRICTLY LATER than the strategy callback
       timezone: Asia/Seoul          # venue timezone that `at` is expressed in
       trade_price: close            # which key from price_fields above the fill uses
 """
@@ -122,6 +128,9 @@ _AGENDAS_TEMPLATE = """\
 # there does NOT bind it; the binding is the `strategy_configs`/`valuation_configs` entry below.
 # A run whose components are registered but unbound fails preflight with
 # `workspace.strategy_config.register.missing`.
+#
+# Registrations are immutable. During disposable first-run setup, correct this YAML and rebuild
+# the project-local workspace; after a run matters, preserve provenance by registering new ids.
 
 agendas:
   daily-rebalance:                  # your chosen identity, named by a run spec's agenda_id
@@ -130,13 +139,13 @@ agendas:
     # sessions:                     # ...or list the days literally. Declare exactly ONE of
     #   - "2024-01-02"              #    from_dataset or sessions, never both.
     #   - "2024-01-03"
-    at: "15:30"                     # local time of day the occurrence fires at
+    at: "15:29"                     # strictly before the execution template's 15:30 target
     timezone: Asia/Seoul            # zone `at` is expressed in; DST is derived from it
 
   daily-valuation:                  # valuation usually runs on the same days as the strategy
     role: valuation
     from_dataset: DATASET_ID
-    at: "15:30"
+    at: "15:29"                     # a NoDecision can still value at the later 15:30 snapshot
     timezone: Asia/Seoul
 
 strategy_configs:
@@ -172,8 +181,8 @@ instruments:                   # the universe this run trades
   - INSTRUMENT_A
   - INSTRUMENT_B
 
-start: "2024-01-02"            # ISO-8601 date or datetime, inclusive
-end: "2024-12-31"              # ISO-8601 date or datetime, inclusive
+start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
+end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
 
 exchange: my-venue             # component_id of a registered Exchange
 

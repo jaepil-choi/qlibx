@@ -51,6 +51,13 @@ _IDENTITY_FIELDS = (
 def _summarize(item: object) -> dict[str, Any]:
     """Reduce one declaration to the fields an agent needs to act on it."""
     summary: dict[str, Any] = {}
+    component = getattr(item, "component", None)
+    component_id = getattr(component, "component_id", None)
+    if component_id is not None:
+        # StrategyConfig owns a ComponentRef rather than duplicating its id. Omitting the nested
+        # identity made `list strategy-configs --id <component>` return zero rows even though
+        # `register` reports and keys that config by component id.
+        summary["component_id"] = str(component_id)
     for field in _IDENTITY_FIELDS:
         value = getattr(item, field, None)
         if value is not None:

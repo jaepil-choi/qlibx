@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import INCOMPLETE, InputError, read_yaml_mapping
+from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
@@ -54,10 +54,38 @@ def _timestamp(value: object, *, name: str) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        raise TypeError(f"{name} must be an ISO-8601 timestamp string")
-    return datetime.fromisoformat(value)
+        parsed = value
+    elif not isinstance(value, str):
+        raise InputError(
+            VALUE_INVALID,
+            requirement=f"{name} must be an ISO-8601 timezone-aware datetime",
+            observed=f"{type(value).__name__}: {value!r}",
+            retry=f"write {name} with an explicit UTC offset, then retry",
+            examples=["2024-01-02T00:00:00+09:00"],
+        )
+    else:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as error:
+            raise InputError(
+                VALUE_INVALID,
+                requirement=f"{name} must be an ISO-8601 timezone-aware datetime",
+                observed=f"{name}={value!r}",
+                retry=f"write {name} with an explicit UTC offset, then retry",
+                examples=["2024-01-02T00:00:00+09:00"],
+            ) from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise InputError(
+            VALUE_INVALID,
+            requirement=(
+                f"{name} must include a UTC offset; a date or naive datetime does not identify "
+                "one instant"
+            ),
+            observed=f"{name}={parsed.isoformat()!r}",
+            retry=f"write {name} with an explicit UTC offset, then retry",
+            examples=["2024-01-02T00:00:00+09:00"],
+        )
+    return parsed
 
 
 def _strategy(document: dict[str, Any], workspace: Workspace) -> StrategyConfig:

@@ -32,6 +32,7 @@ UNREADABLE = f"{INPUT_STAGE}.file_unreadable"
 NOT_A_MAPPING = f"{INPUT_STAGE}.not_a_mapping"
 EXISTS = f"{INPUT_STAGE}.file_exists"
 INCOMPLETE = f"{INPUT_STAGE}.keys_missing"
+VALUE_INVALID = f"{INPUT_STAGE}.value_invalid"
 
 
 class InputError(BoundedRefusal):

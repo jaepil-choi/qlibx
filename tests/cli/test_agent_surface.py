@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, time
 from pathlib import Path
 
 import duckdb
@@ -610,6 +611,52 @@ def test_the_run_spec_template_says_naming_an_agenda_is_not_binding_it(tmp_path:
 
     assert "vqapr new agendas" in text, "the template does not say where the binding comes from"
     assert "not a binding" in text or "does not register or bind" in text
+
+
+def test_generated_schedule_and_execution_defaults_are_causally_compatible(
+    tmp_path: Path,
+) -> None:
+    """Independent templates must not put a decision and its fill at the same instant."""
+    import yaml
+
+    agendas = tmp_path / "agendas.yaml"
+    execution = tmp_path / "execution.yaml"
+    main(["--project-root", str(tmp_path), "new", "agendas", "--out", str(agendas)])
+    main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(execution)])
+
+    agenda_document = yaml.safe_load(agendas.read_text(encoding="utf-8"))
+    execution_document = yaml.safe_load(execution.read_text(encoding="utf-8"))
+    strategy_at = time.fromisoformat(agenda_document["agendas"]["daily-rebalance"]["at"])
+    fill = next(iter(execution_document["execution_inputs"].values()))["fill"]
+    fill_at = time.fromisoformat(fill["at"])
+
+    assert strategy_at < fill_at
+    assert "STRICTLY LATER" in execution.read_text(encoding="utf-8")
+
+
+def test_generated_run_boundaries_name_actual_instants(tmp_path: Path) -> None:
+    """A bare date is not an instant and was rejected by the runner the template fed it to."""
+    import yaml
+
+    target = tmp_path / "spec.yaml"
+    main(["--project-root", str(tmp_path), "new", "run-spec", "--out", str(target)])
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+
+    for key in ("start", "end"):
+        boundary = datetime.fromisoformat(document[key])
+        assert boundary.utcoffset() is not None, f"{key} is not timezone-aware"
+
+
+def test_the_skill_names_launcher_and_immutable_setup_recovery(tmp_path: Path) -> None:
+    """The first command and first correction must not require source or prior uv knowledge."""
+    (tmp_path / ".git").mkdir()
+    main(["--project-root", str(tmp_path), "skill", "install"])
+    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+
+    assert "uv run vqapr --help" in text
+    assert "Registrations are immutable identities" in text
+    assert "project-local" in text and "`.vqapr/`" in text
+    assert "obtain approval for the destructive reset" in text
 
 
 def test_a_scaffolded_component_is_always_a_loadable_module(

@@ -28,6 +28,17 @@ This skill **never**:
 - Guesses missing semantics
 - Confirms a binding before evidence exists
 
+## Invoke the CLI through the active environment
+
+Installing a console script into a virtual environment does not put it on the global shell PATH.
+Use one launcher consistently:
+
+- activated environment: `vqapr --help`
+- uv-managed project: `uv run vqapr --help`
+
+If bare `vqapr` is not found but `uv run vqapr` works, the package is installed; the environment
+is simply not activated. Apply the same prefix to every command below.
+
 ## The mission path — three rungs
 
 Work with vqapr follows three rungs. Each rung depends on the previous one succeeding.
@@ -49,6 +60,18 @@ registered and passes validation.
 
 **Stop condition:** `vqapr list` shows all required elements and `register` accepted every
 declaration without failures.
+
+#### Correcting a registration during setup
+
+Registrations are immutable identities, not editable configuration rows. Re-registering changed
+content under the same id is refused because an old run may depend on the original declaration.
+
+- If a run or result already matters, register the corrected declaration under a new id and update
+  its dependent configs/specs. This preserves provenance.
+- If this is a disposable first-run workspace with no result to preserve, keep the authored YAML
+  and component files, obtain approval for the destructive reset, remove only the project-local
+  `.vqapr/` workspace state, then register the corrected declarations from scratch. Never delete
+  source data or authored declarations as part of that reset.
 
 #### Before registering: settle what `available_at` means
 

@@ -371,9 +371,10 @@ def _validate_execution_targets(
             Failure.bounded(
                 code="preflight.execution.target_outside_horizon",
                 requirement=(
-                    "every strategy occurrence must have an exact execution target inside the "
-                    "run horizon; extend end through the required execution snapshot, or choose "
-                    "a fill selector whose target exists after that decision"
+                    "every strategy occurrence must have an exact execution target strictly "
+                    "later than the occurrence and inside the run horizon; extend end through "
+                    "the required execution snapshot, or choose a fill selector whose target "
+                    "exists after that decision"
                 ),
                 observed=(
                     f"selector={selector}, end={end.isoformat()}, "

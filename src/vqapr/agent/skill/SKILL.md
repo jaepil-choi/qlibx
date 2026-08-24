@@ -76,6 +76,23 @@ If the answer is not in the data or its documentation, say that it is unknown an
 decide. **Do not infer a convention from a column name.** A column called `date` proves nothing
 about availability, and a registration built on that guess produces results that look correct.
 
+#### Prove the timezone conversion on one known instant
+
+Naming the right zone is not enough. A schema-valid, timezone-aware column can still hold the
+wrong instant. Before preparing the whole dataset:
+
+1. Pick one row whose local wall time and UTC equivalent are known.
+2. Run that row through the exact preparation code.
+3. Assert the local date, local time, UTC offset, and UTC conversion.
+4. Convert it back to the venue zone and assert the original wall time is recovered.
+
+This catches a common pyarrow footgun: casting a timezone-naive timestamp to
+`timestamp(..., tz="Asia/Seoul")` preserves the underlying epoch value and changes how it is
+displayed; it does **not** mean "interpret this wall clock as Seoul time." For that operation use
+an explicit localization operation such as `pyarrow.compute.assume_timezone`, then prove the
+round-trip. A daily row shifted by nine hours still has a valid timezone-aware schema, so
+`vqapr register` cannot distinguish it from an intentional timestamp.
+
 The same care applies to query patterns written at registration time. Moving averages, cumulative
 sums and ranks can each reach across rows in a way that pulls future information into a past row;
 flag them and explain what would have to be true for the pattern to be safe.

@@ -68,6 +68,12 @@ datasets:
     #   TYPE: the column must already be a TIMEZONE-AWARE timestamp in the parquet. A naive
     #   timestamp is refused, because '2024-01-02 15:30' does not say which market close it
     #   is. Localize it while preparing the data; registration does not convert it for you.
+    #
+    #   PROOF: before converting the full file, round-trip one known local wall time through
+    #   your exact preparation code and assert its date, time, UTC offset, and UTC instant.
+    #   Merely casting a naive pyarrow timestamp to timestamp(..., tz=...) preserves the
+    #   underlying epoch value; it does not localize the wall clock. Use an explicit localization
+    #   operation such as pyarrow.compute.assume_timezone, then prove the round-trip.
     key_fields:                       # columns that together uniquely identify each row
       - timestamp
       - instrument

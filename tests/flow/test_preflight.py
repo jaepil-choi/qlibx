@@ -32,11 +32,13 @@ from vqapr.workspace import Workspace
 _ZONE = ZoneInfo("Asia/Seoul")
 
 
-def _occurrence(identifier: str, role: OperationRole, hour: int) -> OperationOccurrence:
+def _occurrence(
+    identifier: str, role: OperationRole, local_time: time
+) -> OperationOccurrence:
     return OperationOccurrence(
         identifier,
         role,
-        LocalInstantDeclaration(date(2024, 3, 5), time(hour), "Asia/Seoul", 0, "+09:00"),
+        LocalInstantDeclaration(date(2024, 3, 5), local_time, "Asia/Seoul", 0, "+09:00"),
     )
 
 
@@ -45,7 +47,9 @@ def _agenda(identifier: str, role: OperationRole, *hours: int) -> OperationAgend
         agenda_id=identifier,
         role=role,
         timezone="Asia/Seoul",
-        occurrences=tuple(_occurrence(f"{identifier}-{hour}", role, hour) for hour in hours),
+        occurrences=tuple(
+            _occurrence(f"{identifier}-{hour}", role, time(hour)) for hour in hours
+        ),
         provenance="test fixture",
     )
 
@@ -90,7 +94,12 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
 
 
 def _setup(
-    root: Path, model_price_parquet: Path, *, with_execution: bool = True
+    root: Path,
+    model_price_parquet: Path,
+    *,
+    with_execution: bool = True,
+    selector: FillSelector = FillSelector.SAME_DAY,
+    strategy_times: tuple[time, ...] = (time(9), time(10)),
 ) -> tuple[Workspace, RunDefinition]:
     """A registered workspace and a declaration for it.
 
@@ -114,9 +123,26 @@ def _setup(
         ),
         SourceSpec.of("prices-source", model_price_parquet),
     )
-    strategy_agenda = _agenda("strategy", OperationRole.STRATEGY_CALLBACK, 9, 10)
+    strategy_agenda = OperationAgenda.from_occurrences(
+        agenda_id="strategy",
+        role=OperationRole.STRATEGY_CALLBACK,
+        timezone="Asia/Seoul",
+        occurrences=tuple(
+            _occurrence(
+                (
+                    f"strategy-{instant.hour}"
+                    if instant.minute == 0
+                    else f"strategy-{instant.strftime('%H%M')}"
+                ),
+                OperationRole.STRATEGY_CALLBACK,
+                instant,
+            )
+            for instant in strategy_times
+        ),
+        provenance="test fixture",
+    )
     valuation_agenda = _agenda("valuation", OperationRole.VALUATION, 9)
-    monitoring_agenda = _agenda("monitoring", OperationRole.MONITORING, 11)
+    monitoring_agenda = _agenda("monitoring", OperationRole.MONITORING, 16)
     for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
         workspace.register_agenda(agenda)
     strategy = StrategyConfig(strategy_component, "strategy", OperationRole.STRATEGY_CALLBACK)
@@ -131,7 +157,12 @@ def _setup(
     # Same root as the tests' own `_execution_exchange` calls, so the shared
     # `execution-source` declaration stays byte-identical rather than conflicting.
     exchange_component = (
-        _execution_exchange(workspace, root, identifier="setup-exchange")
+        _execution_exchange(
+            workspace,
+            root,
+            identifier="setup-exchange",
+            selector=selector,
+        )
         if with_execution
         else None
     )
@@ -143,7 +174,10 @@ def _setup(
         exchange=exchange_component,
         execution_input_id="execution" if with_execution else None,
         start=datetime(2024, 3, 5, 9, tzinfo=_ZONE),
-        end=datetime(2024, 3, 5, 10, tzinfo=_ZONE),
+        # The execution fixture fills at 15:30. Keeping end at 10:00 made every supposedly
+        # run-ready definition in this file physically impossible: an intent from either
+        # strategy callback had no target inside its frozen horizon.
+        end=datetime(2024, 3, 5, 15, 30, tzinfo=_ZONE),
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         initial_model_memory={"cadence": [1]},
@@ -161,6 +195,7 @@ def _execution_exchange(
     minimum: str = "Decimal('1')",
     fractional: str = "False",
     register_input: bool = True,
+    selector: FillSelector = FillSelector.SAME_DAY,
 ) -> ComponentRef:
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{identifier}.py"
@@ -190,8 +225,10 @@ def _execution_exchange(
         try:
             connection.execute(
                 f"""COPY (
-                    SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
-                           'ABC' AS instrument, true AS is_tradable, 10.0 AS close
+                    SELECT * FROM (VALUES
+                        (TIMESTAMPTZ '2024-03-05 09:30:00+09', 'ABC', true, 9.0),
+                        (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'ABC', true, 10.0)
+                    ) AS t(trade_at, instrument, is_tradable, close)
                 ) TO '{execution_path.as_posix()}' (FORMAT PARQUET)"""
             )
         finally:
@@ -205,7 +242,7 @@ def _execution_exchange(
             "is_tradable",
             {"close": "close"},
         ),
-        FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
+        FillConvention(selector, time(15, 30), "Asia/Seoul", "close"),
     )
     if register_input:
         workspace.register_execution_input(execution)
@@ -280,6 +317,39 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
         frozen.physical_source_guarantee
         == "Configuration and declaration objects are frozen; physical source bytes are not."
     )
+
+
+def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """A finite `next_eligible` run must not fail only after earlier callbacks mutate state.
+
+    The first callback at 10:00 resolves to the 15:30 snapshot. The last callback fires exactly at
+    15:30, so `next_eligible` needs a later snapshot, but `end` is also 15:30.
+    Before this check, preflight returned a supposedly run-ready declaration and the simulation
+    raised a bare `ValueError` only if the last callback produced an intent.
+    """
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        selector=FillSelector.NEXT_ELIGIBLE,
+        strategy_times=(time(10), time(15, 30)),
+    )
+
+    with pytest.raises(VqaprError) as caught:
+        preflight_run(workspace, definition)
+
+    error = caught.value
+    assert error.stage == "preflight.execution"
+    assert error.family is FailureFamily.EXCHANGE
+    assert error.mutation is False
+    failure = error.failures[0]
+    assert failure.code == "preflight.execution.target_outside_horizon"
+    assert failure.example_total == 1
+    assert failure.examples == ("strategy-1530: 2024-03-05T15:30:00+09:00",)
+    assert "selector=next_eligible" in (failure.observed or "")
+    assert "end=2024-03-05T15:30:00+09:00" in (failure.observed or "")
+    assert "extend end" in failure.requirement
 
 
 def test_preflight_requires_academic_exchange_and_initial_account_compatibility(

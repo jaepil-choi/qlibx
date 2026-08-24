@@ -366,6 +366,27 @@ def test_a_dataset_template_explains_available_at(tmp_path: Path) -> None:
     text = (tmp_path / "ds.yaml").read_text(encoding="utf-8")
     assert "available" in text.lower()
     assert "look-ahead" in text.lower() or "when" in text.lower()
+    assert "round-trip" in text
+    assert "assume_timezone" in text
+
+
+def test_the_installed_skill_requires_proof_of_timezone_localization(tmp_path: Path) -> None:
+    """A timezone-aware schema can still carry a confidently wrong instant.
+
+    A pyarrow cast from naive to timezone-aware preserves the epoch value rather than interpreting
+    the wall clock in that zone. Registration cannot diagnose the meaning of a valid timestamp,
+    so the skill must make one known-instant round-trip part of preparation, not an optional
+    debugging trick learned after a failed run.
+    """
+    (tmp_path / ".git").mkdir()
+    main(["--project-root", str(tmp_path), "skill", "install"])
+
+    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+
+    assert "known instant" in text
+    assert "round-trip" in text
+    assert "assume_timezone" in text
+    assert "does **not** mean" in text
 
 
 def test_missing_declaration_keys_arrive_as_typed_failures_not_unhandled(

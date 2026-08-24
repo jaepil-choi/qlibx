@@ -13,7 +13,10 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import Failure, FailureFamily, VqaprError
 from vqapr.domain.timestamps import require_tz_aware
-from vqapr.exchange.execution_table import validate_execution_input
+from vqapr.exchange.execution_table import (
+    ExecutionInputRegistration,
+    validate_execution_input,
+)
 from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
@@ -323,12 +326,81 @@ def _require_execution_authority(definition: RunDefinition) -> None:
     )
 
 
+def _validate_execution_targets(
+    execution_input: ExecutionInputRegistration,
+    strategy_agenda: FrozenAgenda,
+    *,
+    start: datetime,
+    end: datetime,
+) -> None:
+    """Prove every strategy callback can bind an accepted intent before the run starts.
+
+    A callback may return ``NoDecision``, but preflight cannot assume that it will. If an
+    occurrence has no exact target under the declared fill convention, an intent accepted there
+    would fail only after every earlier callback had already mutated account state. The horizon,
+    selector, and callback instants are all frozen facts, so that refusal belongs here.
+
+    The horizon is read once. Calling ``select_target`` without it would rescan the execution
+    table once per occurrence -- both slower and vulnerable to observing different bytes while
+    preflight is supposed to be proving one run.
+    """
+    horizon = execution_input.fill.build_horizon(
+        execution_input,
+        start_time=start,
+        end_time=end,
+    )
+    missing = tuple(
+        occurrence
+        for occurrence in strategy_agenda.occurrences
+        if execution_input.fill.select_target(
+            execution_input,
+            decision_time=occurrence.evaluation_time,
+            end_time=end,
+            horizon=horizon,
+        )
+        is None
+    )
+    if not missing:
+        return
+
+    selector = execution_input.fill.selector.value.lower()
+    raise VqaprError(
+        stage="preflight.execution",
+        family=FailureFamily.EXCHANGE,
+        failures=[
+            Failure.bounded(
+                code="preflight.execution.target_outside_horizon",
+                requirement=(
+                    "every strategy occurrence must have an exact execution target inside the "
+                    "run horizon; extend end through the required execution snapshot, or choose "
+                    "a fill selector whose target exists after that decision"
+                ),
+                observed=(
+                    f"selector={selector}, end={end.isoformat()}, "
+                    f"unresolved={len(missing)}"
+                ),
+                examples=[
+                    f"{occurrence.occurrence_id}: "
+                    f"{occurrence.evaluation_time.isoformat()}"
+                    for occurrence in missing
+                ],
+                example_total=len(missing),
+            )
+        ],
+        mutation=False,
+        retry_precondition=(
+            "extend the run end through the missing execution snapshot, correct the execution "
+            "table, or choose a fill selector that resolves inside the horizon, then retry"
+        ),
+    )
+
+
 def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition) -> FrozenRun:
     """Freeze one workspace snapshot into a run-ready declaration.
 
-    This resolves only declarations and the static agenda merge. In particular it does
-    not inspect callback results or select execution targets, because those require the
-    callback's Flow-stamped decision time.
+    This resolves declarations, the static agenda merge, and each strategy occurrence's exact
+    execution target. It does not inspect callback results; instead it proves that an intent the
+    callback may return has somewhere to execute before any callback mutates account state.
 
     *Run-ready* is the promise, so a declaration carrying no execution price is refused here
     rather than frozen and rejected later by `run()`.
@@ -432,6 +504,12 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         )
         if monitoring is not None
         else None
+    )
+    _validate_execution_targets(
+        execution_input,
+        strategy_agenda,
+        start=start,
+        end=end,
     )
 
     return FrozenRun(

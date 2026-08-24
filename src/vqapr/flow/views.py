@@ -17,11 +17,19 @@ def data_model_window(
     evaluation_time: datetime,
     instruments: Sequence[str],
     requirements: Sequence[DataRequirement],
+    store: DuckDbObservationStore | None = None,
 ) -> ModelWindow:
-    """Build the sole observation capability exposed for one DataModel invocation."""
+    """Build the sole observation capability exposed for one DataModel invocation.
+
+    A caller driving many evaluation times in sequence passes one ``store`` for the whole
+    sequence, as ``public.run()`` does for a simulation. Building one per evaluation is correct
+    but pays twice: it re-hashes the source for its digest, and it denies
+    ``scan.observation_rows`` the session it needs before it will bound a ``RowsLookback`` -- so
+    without one, every evaluation ranks a window function across the source's whole history.
+    """
     return ModelWindow(
         evaluation_time=evaluation_time,
         instruments=instruments,
-        store=DuckDbObservationStore(workspace),
+        store=DuckDbObservationStore(workspace) if store is None else store,
         allowed_requirements=requirements,
     )

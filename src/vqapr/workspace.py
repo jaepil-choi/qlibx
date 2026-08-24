@@ -670,6 +670,10 @@ class Workspace:
                         monitoring_policies,
                     )
                     return False
+                # Name the identity that would work. Editing a registered component is the
+                # ordinary development loop, and "use a new identity" without saying which one
+                # leaves every user to invent the same fingerprint-suffix scheme by hand.
+                suggested = f"{key}-{ref.fingerprint[:12]}"
                 raise _workspace_error(
                     stage=COMPONENT_REGISTER_STAGE,
                     code=f"{COMPONENT_REGISTER_STAGE}.conflict",
@@ -677,8 +681,14 @@ class Workspace:
                         f"component_id {key!r} must keep its registered fingerprint or use a new "
                         "identity"
                     ),
-                    observed="a different ComponentRef is already registered",
-                    retry="use the registered component or choose a new component_id",
+                    observed=(
+                        f"registered fingerprint {existing.fingerprint[:12]}..., "
+                        f"supplied {ref.fingerprint[:12]}..."
+                    ),
+                    retry=(
+                        f"the source changed, so register it under a new component_id such as "
+                        f"{suggested!r}, or restore the registered source"
+                    ),
                 )
             merged = dict(components)
             merged[key] = _detach_component(ref)

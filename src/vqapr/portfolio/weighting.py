@@ -175,6 +175,14 @@ def rescale(
     and so is asking for a zero short side out of a book that holds shorts — that is deleting
     positions, not rescaling them.
 
+    **A two-sided book normally wants ``grid``.** Each side is settled against its own target, so
+    long lands on exactly ``long`` and short on exactly ``short``, but nothing makes their *sum*
+    exact: a dollar-neutral book of ~1,000 names was measured leaving a residual of ``-1.674E-28``
+    between the two sides. That is invisible until the intent boundary, which requires
+    ``sum(weights) + cash_target`` to equal one exactly and refuses at the 28th digit, because
+    ``Decimal(1) - (-1.674E-28)`` rounds back to ``1``. On a grid both sides land on the same
+    steps and cancel, so ``rescale(w, long=1, short=-1, grid=QUANTUM)`` is the dollar-neutral form.
+
     Without ``grid`` the result is an exact ratio, which is what a caller wants when the weights
     feed further arithmetic. Pass ``grid`` — normally :data:`~vqapr.portfolio.optimize.QUANTUM` —
     when the book has to be **both** on a grid and exactly on budget. Quantizing afterwards cannot

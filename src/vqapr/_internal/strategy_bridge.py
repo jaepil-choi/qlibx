@@ -39,10 +39,13 @@ def _source_refs(context: Any) -> tuple:
     """The provenance of everything this callback actually read."""
     from vqapr.public import IntentSourceRef
 
+    # First-read order, not sorted: the Flow rebuilds this from the same accesses and
+    # compares the tuples exactly, so imposing an order here makes provenance disagree
+    # with what the callback actually read.
     seen: dict[str, str] = {}
     for access in context.window.accesses:
         seen.setdefault(access.source_id, access.source_digest)
-    return tuple(IntentSourceRef(source, digest) for source, digest in sorted(seen.items()))
+    return tuple(IntentSourceRef(source, digest) for source, digest in seen.items())
 
 
 

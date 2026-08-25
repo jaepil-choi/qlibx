@@ -695,7 +695,12 @@ class Project:
         )
 
     def simulate(
-        self, *, definition, strategy: type | None = None, run_id: str = "run"
+        self,
+        *,
+        definition,
+        strategy: type | None = None,
+        run_id: str = "run",
+        strategy_config: Mapping[str, object] | None = None,
     ) -> SimulationSummary:
         """Preflight and execute one run through the retained engine.
 
@@ -716,7 +721,9 @@ class Project:
                     "a public Simulation needs the StrategyModel class to run; pass "
                     "strategy=<YourStrategyModel>"
                 )
-            definition = self._engine_definition(definition, strategy, run_id)
+            definition = self._engine_definition(
+                definition, strategy, run_id, strategy_config
+            )
         elif not isinstance(definition, RunDefinition):
             raise TypeError(
                 "definition must be a vqapr.simulation.Simulation or a RunDefinition"
@@ -726,7 +733,12 @@ class Project:
         return summarize(result)
 
     def run_completed(
-        self, *, definition, strategy: type | None = None, run_id: str = "run"
+        self,
+        *,
+        definition,
+        strategy: type | None = None,
+        run_id: str = "run",
+        strategy_config: Mapping[str, object] | None = None,
     ):
         """Execute one run and return its readable result.
 
@@ -745,7 +757,9 @@ class Project:
                     "a public Simulation needs the StrategyModel class to run; pass "
                     "strategy=<YourStrategyModel>"
                 )
-            definition = self._engine_definition(definition, strategy, run_id)
+            definition = self._engine_definition(
+                definition, strategy, run_id, strategy_config
+            )
         elif not isinstance(definition, RunDefinition):
             raise TypeError(
                 "definition must be a vqapr.simulation.Simulation or a RunDefinition"
@@ -822,7 +836,13 @@ class Project:
             ExecutionInputRegistration.of(execution.input.input_id, table, fill),
         )
 
-    def _engine_definition(self, simulation, strategy: type, run_id: str):
+    def _engine_definition(
+        self,
+        simulation,
+        strategy: type,
+        run_id: str,
+        strategy_config: Mapping[str, object] | None = None,
+    ):
         """Register a public Simulation's parts and return the engine's RunDefinition.
 
         Every translation goes through the bridge that already owns it, so a public
@@ -860,7 +880,9 @@ class Project:
         strategy_ref = component_ref_for(
             AdaptedStrategy,
             component_id=f"{run_id}-strategy",
-            config=adapter_config(strategy, strategy_id=f"{run_id}-strategy"),
+            config=adapter_config(
+                strategy, strategy_id=f"{run_id}-strategy", config=strategy_config
+            ),
             kind=ComponentKind.STRATEGY_MODEL,
         )
         register_component(self._root, strategy_ref)

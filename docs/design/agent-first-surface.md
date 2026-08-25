@@ -109,38 +109,104 @@ declined, and that reason belongs in the record.
 must learn — prose fails at the callback boundary. This was found by running, not reading,
 in both the scaffold templates and a migrated showcase.
 
-## What is not yet decided
+## Principle 5 — YAML declares and installs; Python authors and runs
 
-These need a ruling before more surface is built.
+**Ruled by the owner.** The division is by what the thing *is*, not by convenience:
 
-### a. How much must a `Simulation` say at once?
+- `DataModel`, `StrategyModel` and later `Exchange` are pluggable modules. They are code,
+  so they are **Python**.
+- Datasets, execution inputs and the installation of an authored model are explicit
+  declarations. The agent writes **YAML** and installs it with the **CLI**.
 
-It currently declares nine fields together. An agent cannot express "run this roughly and
-show me something" — there is no partial form. Explicit declaration is right for economics
-that change results, but the entry cost is high and there is no cheap first step.
+Writing a strategy is Python. Registering the strategy you just wrote is CLI.
 
-*Recommendation:* keep economics explicit, but consider whether schedule and account have
-honest defaults that are stated rather than inferred.
+### Why `Simulation` grew to nine fields
 
-### b. Which is the primary path — Python or YAML?
+Measured, not inferred. `Project._engine_definition` is 104 lines of which 15 are
+registration calls, and it performs five registrations **on every run**:
+`register_execution_input`, `register_agenda`, `register_component` for the strategy,
+`register_component` per constraint, `register_component` for the exchange, plus the
+catalog dataset bridge.
 
-`Project` is Python. `cli/run.py` reads a YAML run spec naming pre-registered components.
-Maintaining both means two surfaces, which is the condition that produced the current
-problem.
+So `Simulation` is large because it conflates two different times:
 
-*Recommendation:* Python primary, CLI a thin layer over it. Not yet verified against how
-the owner actually drives it.
+| decided once, at registration | decided per run |
+|---|---|
+| where the execution table lives, and its field names | the period |
+| the venue | the account it starts from |
+| which class the strategy is | which constraints apply |
+| the datasets | the instruments |
 
-### c. Are the seven `_internal/*_bridge.py` adapters right, or an artifact of bottom-up work?
+Every run re-declares and re-registers the registration-time half. The field count is a
+symptom; the cause is that a run is being asked to describe a workspace.
+
+`cli/register.py` already understands exactly the sections this needs — `datasets`,
+`execution_inputs`, `agendas`, `components`, `strategy_configs`, `valuation_configs`,
+`monitoring_policies`. The declaration path exists; `Simulation` duplicates it.
+
+Under the split, a run references registered names instead of restating them:
+
+```python
+Simulation(
+    period=...,        # when
+    account=...,       # from what
+    constraints=(...), # under what rules
+    instruments=(...), # over what
+)
+```
+
+**This also dissolves most of the bridges**, because there is far less left for
+`_engine_definition` to assemble.
+
+## Principle 6 — bridges are a smell, not an architecture
+
+**Ruled by the owner:** proliferating `_internal/*_bridge.py` is not a good pattern. That
+is correct, and the seven of them are an artifact of having worked outward from the engine
+rather than inward from the caller.
 
 They exist because nine engine/authoring type pairs had nothing joining them:
 `EconomicPortfolioIntent`/`Rebalance`, the two `ConstraintFinding`s, `ConstraintBounds`
 `lower`/`upper` versus `lower_weights`/`upper_weights`, `DataRequirement`/`DatasetInput`,
 `AccountSnapshot`/`EconomicAccountView`, and four more.
 
-That is an unfinished adapter rather than a layering violation — which is why every fix
-landed in a bridge and none touched the engine. But the bridges were written by translating
-outward from the engine. Designed from the caller inward, some may be the wrong shape.
+Sorted by what they become under Principle 5:
+
+- `registration_bridge`, `schedule_bridge`, `venue_bridge` — largely **dissolve**. They
+  translate registration-time declarations that move to the CLI path.
+- `strategy_bridge`, `constraint_bridge` — the real seam, at the callback boundary. These
+  should be a **contract implementation**, not an adapter: the authoring types are the
+  contract and the engine consumes them, rather than two type systems being translated.
+- `run_bridge`, `pit_bridge` — readback and point-in-time reads, which are genuine
+  capabilities rather than translation. They belong on the surface under their own names.
+
+The test for any survivor: if it exists to convert type A into type B, one of the two
+types is in the wrong place.
+
+## Principle 7 — an Exchange must be adjustable until it is pluggable
+
+**Ruled by the owner:** exchange friction is inherent, and the answer is to make `Exchange`
+pluggable later. Until then `Academic` and `KRX` must be **maximally adjustable**.
+
+This reframes the `fractional_allowed` defect. It was not one missing field — it was an
+adjustability gap, and the same gap will produce the next one. `venues.Academic` currently
+carries five knobs: `listings`, `quantity_step`, `price_step`, `costs`,
+`fractional_allowed`. A scenario needing `minimum_quantity`, a price band, or the
+ETF/stock tax-exemption split still cannot be expressed.
+
+The near-term requirement is therefore not "add the field a showcase needed" but "make
+every economic term these two venues model reachable from their declaration".
+
+## What is still open
+
+### Where does strategy config live?
+
+A model may take constructor arguments — `FactorPortfolio(factor="HML")`. If config goes
+in the YAML, five factors need five registrations of the same class. If it goes in Python
+at run time, the registration/execution boundary blurs again.
+
+*Working answer, pending confirmation:* YAML registers the class under a name; config is
+supplied **per run**, because running one registered model under five configurations is
+exactly the factor testbed's real usage pattern.
 
 ## What the structure permits
 

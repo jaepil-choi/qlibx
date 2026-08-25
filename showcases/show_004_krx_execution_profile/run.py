@@ -3,11 +3,31 @@
 One frozen strategy, one real KRX price history, two execution profiles::
 
     Academic   fractional quantity, zero cost, full fill
-    KRX        whole shares, 3bp commission both sides, 20bp sale tax on sells, long only
+    KRX-shaped whole shares, 3bp commission both sides, 20bp sale tax on sells, long only
 
-The two runs differ **only** by the registered Exchange component. Everything downstream — the
-derived score, the callback agenda, the execution input, the account authority — is identical, so
-the difference in outcome is exactly the declared venue friction.
+The two runs differ **only** by the declared ``venues.Academic`` venue -- everything else
+(the derived score, the strategy, the execution input) is byte-identical, so the
+difference in outcome is exactly the declared venue friction.
+
+Migrated from the legacy engine-registration spine (``preflight_run``/``run``/
+``register_component``, imported from the deprecated public-adapter module) onto the supported
+``Project``/``vqapr.simulation``/``vqapr.authoring`` surface.
+
+**No ``venues.Krx`` exists on the supported surface.** ``Simulation.exchange`` is strictly
+typed to ``venues.Academic``. The KRX economics this showcase measures (whole shares, 3bp
+commission both sides, 20bp sale tax on sells, long only) are reproduced *on* ``Academic``
+(``quantity_step=1``, matching buy/sell ``VenueCost``, ``ListingAccess.LONG_ONLY``) --
+this reproduces the shipped ``KrxExchange``'s declared rates exactly but not its
+KRX-specific mechanics (price-limit bands, the ETF/stock tax-exemption split) that
+``Academic`` has no field for. This fixture trades stocks only and never exercises a
+price limit, so the substitution is exact for what this showcase actually measures; see
+`show_008`'s module docstring for the same documented substitution.
+
+The dataset-store split that once forced this showcase to keep a legacy
+``register_dataset`` call is fixed: ``Project.simulate()`` bridges catalog-registered
+datasets into the store preflight reads, so a plain ``Project.register(DatasetDeclaration)``
+is now sufficient. ``completed.fills()`` replaces the old ``recorder_rows`` reach-through
+for the account/cost readback this showcase's whole comparison is built from.
 
 Reproduce::
 
@@ -21,7 +41,6 @@ import json
 import shutil
 import sys
 from collections.abc import Mapping
-from dataclasses import replace
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -29,39 +48,27 @@ from typing import Any
 
 import duckdb
 
-from vqapr.public import (
+# The showcase's own directory is not guaranteed to be on sys.path - an acceptance
+# test importing this module runs from the repo root. Locate it explicitly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import show004_models as models
+
+import vqapr
+from vqapr.project import DatasetDeclaration
+from vqapr.simulation import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
-    ConstraintSet,
-    DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
+    Cadence,
+    Execution,
+    ExecutionInput,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MaterializationSpec,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    RunDefinition,
-    SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
-    component_ref,
-    materialize,
-    preflight_run,
-    register_agenda,
-    register_component,
-    register_data_model,
-    register_dataset,
-    register_execution_input,
-    register_monitoring_policy,
-    register_strategy_config,
-    register_valuation_config,
-    run,
+    InitialAccount,
+    Schedule,
+    Simulation,
 )
+from vqapr.venues import Academic, Listing, ListingAccess, VenueCost
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from extract_dw_fixture import FixtureSpec, extract
@@ -74,7 +81,13 @@ VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
 VERIFIED_AGAINST = "vqapr-0.1.0+show-004-working-tree"
-LAST_VERIFIED_AT = "2026-08-17"
+LAST_VERIFIED_AT = "2026-08-25"
+
+KRX_COMMISSION_RATE = Decimal("0.0003")
+"""Brokerage commission charged on both sides -- matches vqapr.exchange.venues.krx."""
+
+KRX_SALE_TAX_RATE = Decimal("0.002")
+"""Securities transaction tax charged on sells only -- matches vqapr.exchange.venues.krx."""
 
 SPEC = FixtureSpec(asof="20260331", start="20260401", end="20260529", universe_size=6)
 
@@ -101,276 +114,99 @@ def _sessions(path: Path) -> list[date]:
         con.close()
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
+def _simulation(*, universe: tuple[str, ...], execution_path: Path, exchange: Academic,
+                 callback_days: list[date]) -> Simulation:
+    start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
+    end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
+    return Simulation(
+        schedule=Schedule(
+            strategy=Cadence(sessions=tuple(callback_days), at=time(8, 30), timezone=VENUE),
+            valuation=Cadence(sessions=tuple(callback_days), at=time(16, 0), timezone=VENUE),
+            monitoring=None,
+            start=start,
+            end=end,
         ),
-        provenance="show_004 real KRX trading sessions",
+        execution=Execution(
+            input=ExecutionInput(
+                input_id="krx-daily",
+                path=execution_path,
+                hive_partitioned=False,
+                trade_at_field="trade_at",
+                instrument_field="instrument",
+                is_tradable_field="is_tradable",
+                price_fields={"close": "close"},
+            ),
+            fill=FillConvention(
+                selector=FillSelector.SAME_DAY, at=time(15, 30), timezone=VENUE, trade_price="close"
+            ),
+        ),
+        exchange=exchange,
+        account=InitialAccount(
+            snapshot=AccountSnapshot(version=0, cash=INITIAL_CASH, positions={}),
+            mode=AccountMode.LONG_ONLY,
+        ),
+        constraints=(),
+        instruments=universe,
+        initial_strategy_state=None,
     )
 
 
-def _write_components(universe: tuple[str, ...]) -> dict[str, Path]:
-    components = PROJECT / "components"
-    components.mkdir(parents=True, exist_ok=True)
+def _register_momentum_score(project: Any) -> None:
+    """Re-register the materialized momentum score as a physical dataset.
 
-    model = components / "model.py"
-    model.write_text(
-        '''from __future__ import annotations
-
-from vqapr.public import DataModel, DataRequirement, RowsLookback
-
-LOOKBACK = 6
-
-
-class MomentumModel(DataModel):
-    """5-session momentum on real closes, skipping supervised names."""
-
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                "showcase-model",
-                "price_daily",
-                fields=("close", "is_supervised"),
-                lookback=RowsLookback(LOOKBACK),
-            ),
+    ``Project.simulate()``/``run_completed()`` resolve a Strategy's declared inputs
+    through the legacy Workspace-backed store, while ``Project.materialize`` persists
+    into the transactional catalog only; a materialized ("derived") dataset is invisible
+    to a Simulation unless it is also written out as an ordinary physical parquet and
+    registered as such -- the same bridge show_008 uses for its members.
+    """
+    rows = project.read_output("momentum_score__derived")
+    out_path = PROJECT / "momentum_score.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            "CREATE TABLE t (available_at TIMESTAMPTZ, instrument VARCHAR, "
+            "score VARCHAR, eligible BOOLEAN)"
         )
-
-    def compute(self, context):
-        observations = context.window.observations(self.requirements()[0]).rows
-        closes: dict[str, list[float]] = {}
-        supervised: dict[str, bool] = {}
-        for row in observations:
-            instrument = str(row["instrument"])
-            if row["close"] is not None:
-                closes.setdefault(instrument, []).append(float(row["close"]))
-            supervised[instrument] = bool(row["is_supervised"])
-        return tuple(
-            {
-                "instrument": instrument,
-                "score": values[-1] / values[0] - 1.0,
-                "eligible": not supervised.get(instrument, False),
-            }
-            for instrument, values in sorted(closes.items())
-            if len(values) == LOOKBACK and values[0] > 0.0
-        )
-''',
-        encoding="utf-8",
-    )
-
-    strategy = components / "strategy.py"
-    strategy.write_text(
-        '''from __future__ import annotations
-
-from decimal import Decimal
-from uuid import NAMESPACE_URL, uuid5
-
-from vqapr.public import (
-    Budget,
-    DataRequirement,
-    EconomicPortfolioIntent,
-    IntentSourceRef,
-    NoDecision,
-    PortfolioDirection,
-    PortfolioTarget,
-    RowsLookback,
-    StrategyModel,
-)
-
-BOOK = 2
-INVESTED = Decimal("0.98")
-CASH_TARGET = Decimal("1") - INVESTED
-BUDGET = Budget(
-    PortfolioDirection.LONG_ONLY,
-    Decimal("0"),
-    Decimal("1"),
-    Decimal("0"),
-    Decimal("1"),
-)
-
-
-class MomentumLongOnly(StrategyModel):
-    """Equal-weight top-2 momentum book, long only so both profiles can execute it."""
-
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                "showcase-strategy",
-                "momentum_score",
-                fields=("score", "eligible"),
-                lookback=RowsLookback(1),
-            ),
-        )
-
-    def on_occurrence(self, context):
-        batch = context.window.observations(self.requirements()[0])
-        latest = {
-            str(row["instrument"]): float(row["score"])
-            for row in batch.rows
-            if row["score"] is not None and bool(row["eligible"])
-        }
-        if len(latest) < BOOK:
-            return NoDecision("not enough eligible names to fill the book")
-
-        ranked = sorted(latest.items(), key=lambda item: (-item[1], item[0]))
-        chosen = {instrument for instrument, _ in ranked[:BOOK]}
-        weight = INVESTED / Decimal(BOOK)
-        targets = tuple(
-            PortfolioTarget(
-                instrument, weight=weight if instrument in chosen else Decimal("0")
+        for row in rows:
+            con.execute(
+                "INSERT INTO t VALUES (?, ?, ?, ?)",
+                [
+                    row["evaluation_time"],
+                    row["instrument_id"],
+                    str(row["values"]["score"]),
+                    bool(row["values"]["eligible"]),
+                ],
             )
-            for instrument in sorted(latest)
+        con.execute(
+            "COPY (SELECT available_at, instrument, CAST(score AS DOUBLE) AS score, eligible "
+            f"FROM t) TO '{out_path.as_posix()}' (FORMAT PARQUET)"
         )
+    finally:
+        con.close()
 
-        source_refs = []
-        seen = set()
-        for access in context.window.accesses:
-            if access.source_id in seen:
-                continue
-            seen.add(access.source_id)
-            source_refs.append(IntentSourceRef(access.source_id, access.source_digest))
-
-        history = dict(self.memory or {})
-        history["rebalances"] = int(history.get("rebalances", 0)) + 1
-        self.memory = history
-
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, f"show004/{context.occurrence.occurrence_id}"),
-            "showcase-strategy",
-            targets,
-            CASH_TARGET,
-            BUDGET,
-            tuple(source_refs),
-            context.account.version,
-            None,
+    project.register(
+        DatasetDeclaration(
+            dataset_id="momentum_score",
+            path=out_path,
+            hive_partitioned=False,
+            instrument_field="instrument",
+            available_at_field="available_at",
+            key_fields=("available_at", "instrument"),
+            fields={"score": "score", "eligible": "eligible"},
         )
-''',
-        encoding="utf-8",
     )
 
-    academic = components / "academic_exchange.py"
-    academic.write_text(
-        f'''from __future__ import annotations
 
-from decimal import Decimal
-
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
-
-UNIVERSE = {universe!r}
-
-
-class ShowcaseAcademicExchange(AcademicExchange):
-    """Fractional quantity, zero cost, full fill."""
-
-    def __init__(self):
-        super().__init__(
-            {{
-                instrument: TradeRule(
-                    instrument,
-                    Decimal("0.0001"),
-                    Decimal("0.0001"),
-                    True,
-                    ListingAccess.SIGNED,
-                )
-                for instrument in UNIVERSE
-            }},
-            "showcase-academic",
-        )
-''',
-        encoding="utf-8",
-    )
-
-    krx = components / "krx_exchange.py"
-    krx.write_text(
-        f'''from __future__ import annotations
-
-from vqapr.public import KrxExchange
-
-UNIVERSE = {universe!r}
-
-
-class ShowcaseKrxExchange(KrxExchange):
-    """Whole shares, 3bp commission on both sides, 20bp sale tax, long only."""
-
-    def __init__(self):
-        super().__init__(UNIVERSE, "showcase-krx")
-''',
-        encoding="utf-8",
-    )
-
-    constraint = components / "constraint.py"
-    constraint.write_text(
-        """from __future__ import annotations
-
-from decimal import Decimal
-
-from vqapr.public import Constraint, ConstraintBounds, ConstraintFinding
-
-CAP = Decimal("0.75")
-
-
-class SingleNameCap(Constraint):
-    def __init__(self, constraint_id="showcase-constraint"):
-        self._constraint_id = constraint_id
-
-    @property
-    def constraint_id(self):
-        return self._constraint_id
-
-    def requirements(self):
-        return ()
-
-    def project(self, window, instruments):
-        return ConstraintBounds(
-            {instrument: Decimal("0") for instrument in instruments},
-            {instrument: CAP for instrument in instruments},
-        )
-
-    def validate_intended(self, intent, bounds):
-        measured = max(
-            (abs(t.weight) for t in intent.targets if t.weight is not None),
-            default=Decimal("0"),
-        )
-        return ConstraintFinding(
-            self.constraint_id, measured <= CAP, measured, CAP, Decimal("0"), {}
-        )
-
-    def evaluate(self, window, account, marks, bounds):
-        nav = marks.total_value + account.cash
-        measured = Decimal("0")
-        if nav > 0:
-            measured = max((abs(m.value) / nav for m in marks.marks), default=Decimal("0"))
-        return ConstraintFinding(
-            self.constraint_id, measured <= CAP, measured, CAP, Decimal("0"), {}
-        )
-""",
-        encoding="utf-8",
-    )
-    return {
-        "model": model,
-        "strategy": strategy,
-        "academic": academic,
-        "krx": krx,
-        "constraint": constraint,
-    }
-
-
-def _profile_outcome(result: Any) -> dict[str, Any]:
-    account = result.final_state.account
-    marked = account.latest_mark
+def _profile_outcome(completed: Any) -> dict[str, Any]:
+    """The KRX/Academic comparison, built from ``completed.account``/``completed.fills()`` --
+    the public run readback -- rather than from engine internals."""
+    account = completed.account
     commission = Decimal("0")
     tax = Decimal("0")
     dealt = 0
     traded_notional = Decimal("0")
-    for row in _recorded_fills(result):
+    for row in completed.fills():
         if Decimal(row["dealt_quantity"]) == 0:
             continue
         dealt += 1
@@ -381,7 +217,7 @@ def _profile_outcome(result: Any) -> dict[str, Any]:
 
     replay_cash = INITIAL_CASH
     replay_positions: dict[str, Decimal] = {}
-    for row in _recorded_fills(result):
+    for row in completed.fills():
         if Decimal(row["dealt_quantity"]) == 0:
             continue
         replay_cash += Decimal(row["cash_delta"])
@@ -392,24 +228,40 @@ def _profile_outcome(result: Any) -> dict[str, Any]:
             replay_positions.pop(str(row["instrument"]), None)
         else:
             replay_positions[str(row["instrument"])] = held
-    if replay_cash != account.snapshot.cash:
-        raise AssertionError(f"cash replay {replay_cash} != committed {account.snapshot.cash}")
-    if replay_positions != dict(account.snapshot.positions):
+    if replay_cash != account.cash:
+        raise AssertionError(f"cash replay {replay_cash} != committed {account.cash}")
+    if replay_positions != dict(account.positions):
         raise AssertionError("position replay does not match the committed Account")
 
     whole_shares = all(
-        quantity == quantity.to_integral_value() for quantity in account.snapshot.positions.values()
+        quantity == quantity.to_integral_value() for quantity in account.positions.values()
     )
+    # `run_completed()` exposes cash/positions but no committed NAV -- unlike the legacy
+    # engine's `Account.latest_mark`, `RunAccount` carries no valuation. NAV is therefore
+    # reported as cash + the mark-to-close value of every held position, valued at each
+    # instrument's own last dealt fill price -- the same close the run itself last traded
+    # at, not a second independently-fetched price.
+    last_price: dict[str, Decimal] = {}
+    for row in completed.fills():
+        if row["price"] is not None:
+            last_price[str(row["instrument"])] = Decimal(row["price"])
+    marked_value = sum(
+        (quantity * last_price[instrument] for instrument, quantity in account.positions.items()
+         if instrument in last_price),
+        Decimal("0"),
+    )
+    final_nav = account.cash + marked_value
+
     return {
-        "final_nav": None if marked is None else marked.nav,
-        "final_cash": account.snapshot.cash,
-        "positions": {k: str(v) for k, v in sorted(account.snapshot.positions.items())},
+        "final_nav": final_nav,
+        "final_cash": account.cash,
+        "positions": {k: str(v) for k, v in sorted(account.positions.items())},
         "dealt_fills": dealt,
         "traded_notional": traded_notional,
         "commission": commission,
         "tax": tax,
         "total_cost": commission + tax,
-        "account_version": account.snapshot.version,
+        "account_version": account.version,
         "whole_share_positions": whole_shares,
         "replay_matches_account": True,
     }
@@ -444,24 +296,15 @@ td:first-child,th:first-child{{text-align:left}}
 </style>
 <h1>One real signal, two execution profiles</h1>
 <p>Both runs use the same frozen strategy, the same real KRX closes and the same agendas. They
-differ only by the registered Exchange component.</p>
+differ only by the declared <code>venues.Academic</code> venue.</p>
 <h2>Universe</h2>{universe}
 <h2>Outcome</h2>{comparison}
 <h2>Cost drag attributable to the KRX profile</h2><pre>{drag}</pre>
-<p>Academic charges nothing and trades fractional quantity. KRX charges 3bp commission on both
-sides, 20bp sale tax on sells, trades whole shares only and refuses short positions. Neither
-profile models price ticks, price limits, queue position, liquidity or borrow.</p>
+<p>Academic charges nothing and trades fractional quantity. The KRX-shaped profile charges 3bp
+commission on both sides, 20bp sale tax on sells, trades whole shares only and refuses short
+positions. Neither profile models price ticks, price limits, queue position, liquidity or
+borrow.</p>
 <p>Verified against {VERIFIED_AGAINST}; last verified {LAST_VERIFIED_AT}.</p>"""
-
-
-def _recorded_fills(result: Any) -> list[dict[str, Any]]:
-    """Every committed fill, from the run's own published record.
-
-    The Account no longer carries the whole journal -- it is published to ``vqapr.fill`` and
-    dropped -- so replaying its arithmetic reads the record. Rows arrive in commit order, which is
-    the order the Account applied them.
-    """
-    return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
 
 
 def main() -> None:
@@ -474,102 +317,80 @@ def main() -> None:
     score_days = sessions[5:-1]
     callback_days = sessions[6:]
 
-    register_dataset(
-        PROJECT,
-        DatasetRegistration.of(
-            "price_daily",
-            "krx-observation",
+    project = vqapr.open(PROJECT)
+    project.register(
+        DatasetDeclaration(
+            dataset_id="price_daily",
+            path=observation_path,
+            hive_partitioned=False,
             instrument_field="instrument",
-            available_at="available_at",
+            available_at_field="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "is_supervised": "is_supervised"},
-        ),
-        SourceSpec.of("krx-observation", observation_path),
+        )
     )
-    register_execution_input(
-        PROJECT,
-        ExecutionInputRegistration.of(
-            "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
+
+    resolver = project.resolver(instruments=universe)
+    evaluation_times = tuple(
+        datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
+    )
+    project.materialize(
+        model=models.MomentumModel,
+        config={},
+        evaluation_times=evaluation_times,
+        resolver=resolver,
+        output_dataset_id="momentum_score__derived",
+    )
+    _register_momentum_score(project)
+
+    academic_exchange = Academic(
+        listings=tuple(
+            Listing(instrument_id=instrument, access=ListingAccess.SIGNED)
+            for instrument in universe
+        ),
+        quantity_step=Decimal("0.00000001"),
+        price_step=Decimal("0.01"),
+        costs=(),
+        # Declared rather than approximated by a tiny step: an academic venue trades
+        # unquantized, which is what the legacy hand-written exchange expressed.
+        fractional_allowed=True,
+    )
+    krx_shaped_exchange = Academic(
+        listings=tuple(
+            Listing(instrument_id=instrument, access=ListingAccess.LONG_ONLY)
+            for instrument in universe
+        ),
+        quantity_step=Decimal("1"),
+        price_step=Decimal("0.01"),
+        costs=(
+            VenueCost(
+                side="buy", commission_rate=KRX_COMMISSION_RATE, tax_rate=Decimal("0")
             ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            VenueCost(
+                side="sell", commission_rate=KRX_COMMISSION_RATE, tax_rate=KRX_SALE_TAX_RATE
+            ),
         ),
     )
 
-    paths = _write_components(universe)
-    register_data_model(PROJECT, "showcase-model", paths["model"], "MomentumModel")
-    materialize(
-        PROJECT,
-        "showcase-model",
-        MaterializationSpec.of("momentum_score", value_fields=("score", "eligible")),
-        evaluation_times=tuple(
-            datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
-        ),
-        instruments=universe,
+    academic_simulation = _simulation(
+        universe=universe, execution_path=execution_path, exchange=academic_exchange,
+        callback_days=callback_days,
+    )
+    krx_simulation = _simulation(
+        universe=universe, execution_path=execution_path, exchange=krx_shaped_exchange,
+        callback_days=callback_days,
     )
 
-    strategy_ref = component_ref(
-        "showcase-strategy", ComponentKind.STRATEGY_MODEL, paths["strategy"], "MomentumLongOnly"
+    academic = _profile_outcome(
+        project.run_completed(
+            definition=academic_simulation, strategy=models.MomentumLongOnly, run_id="academic"
+        )
     )
-    academic_ref = component_ref(
-        "showcase-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
+    krx = _profile_outcome(
+        project.run_completed(
+            definition=krx_simulation, strategy=models.MomentumLongOnly, run_id="krx"
+        )
     )
-    krx_ref = component_ref(
-        "showcase-krx", ComponentKind.EXCHANGE, paths["krx"], "ShowcaseKrxExchange"
-    )
-    constraint_ref = component_ref(
-        "showcase-constraint", ComponentKind.CONSTRAINT, paths["constraint"], "SingleNameCap"
-    )
-    for reference in (strategy_ref, academic_ref, krx_ref, constraint_ref):
-        register_component(PROJECT, reference)
-
-    strategy_agenda = _agenda(
-        "showcase-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    valuation_agenda = _agenda(
-        "showcase-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "showcase-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(PROJECT, agenda)
-
-    strategy_config = StrategyConfig(
-        strategy_ref, "showcase-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig(
-        "showcase-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("showcase-monitoring", OperationRole.MONITORING)
-    register_strategy_config(PROJECT, strategy_config)
-    register_valuation_config(PROJECT, valuation_config)
-    register_monitoring_policy(PROJECT, monitoring)
-
-    definition = RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet((constraint_ref,)),
-        monitoring,
-        academic_ref,
-        "krx-daily",
-        datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
-        datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.LONG_ONLY,
-        instruments=universe,
-    )
-
-    academic_frozen = preflight_run(PROJECT, definition)
-    krx_frozen = preflight_run(PROJECT, replace(definition, exchange=krx_ref))
-    academic = _profile_outcome(run(PROJECT, academic_frozen))
-    krx = _profile_outcome(run(PROJECT, krx_frozen))
 
     if not krx["whole_share_positions"]:
         raise AssertionError("the KRX profile must hold whole shares only")
@@ -618,13 +439,20 @@ def main() -> None:
             if krx["traded_notional"]
             else None,
             "claim": (
-                "The two runs share one frozen strategy, dataset, agenda set and execution input. "
-                "The NAV gap therefore combines the declared KRX cost with the whole-share "
-                "rounding residual; it is not a separate signal."
+                "The two runs share one frozen strategy, dataset and execution input. The NAV "
+                "gap therefore combines the declared KRX cost with the whole-share rounding "
+                "residual; it is not a separate signal."
             ),
         },
         "academic": {k: str(v) for k, v in academic.items()},
         "krx": {k: str(v) for k, v in krx.items()},
+        "exchange_surface_note": (
+            "No venues.Krx exists on the supported surface; Simulation.exchange is strictly "
+            "venues.Academic. The KRX economics measured here (whole shares, 3bp commission "
+            "both sides, 20bp sale tax on sells, long only) are reproduced on Academic's own "
+            "fields, which is exact for this fixture (stocks only, no price limit exercised) "
+            "but is a documented substitution, not the real KrxExchange engine class."
+        ),
     }
 
     (OUTPUTS / "trace.json").write_text(

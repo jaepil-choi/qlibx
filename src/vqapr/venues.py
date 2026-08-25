@@ -152,8 +152,18 @@ class Academic:
     quantity_step: Decimal
     price_step: Decimal
     costs: tuple[VenueCost, ...]
+    fractional_allowed: bool = False
+    """Whether a quantity finer than ``quantity_step`` may trade.
+
+    False is the real-venue default: a share is indivisible, and a step of one means one.
+    An academic study that wants unquantized weights sets it True explicitly, because a
+    venue silently deciding whether fractions exist would change measured economics
+    without appearing in any declaration.
+    """
 
     def __post_init__(self) -> None:
+        if not isinstance(self.fractional_allowed, bool):
+            raise TypeError("fractional_allowed must be a bool")
         if not isinstance(self.listings, tuple) or any(
             not isinstance(listing, Listing) for listing in self.listings
         ):

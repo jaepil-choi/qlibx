@@ -24,6 +24,7 @@ from datetime import datetime
 from types import MappingProxyType
 
 from vqapr.authoring import (
+    AccountHistoryInput,
     ConstraintBounds,
     DataCall,
     DataModel,
@@ -44,6 +45,7 @@ from vqapr.models.memory import ModelMemory, normalize_memory
 
 __all__ = (
     "AccessToken",
+    "AccountHistoryResolver",
     "ObservationResolver",
     "PreparedDataInvocation",
     "PreparedStrategyInvocation",
@@ -84,6 +86,15 @@ type ObservationResolver = Callable[[str, DatasetInput, datetime], tuple[Observa
 
 The caller-supplied resolver is the sole authority for turning a declared alias into
 observations; this module never resolves PIT data itself.
+"""
+
+
+type AccountHistoryResolver = Callable[[AccountHistoryInput], DeclaredAccountHistory]
+"""Injected committed-account-history resolver: `declaration -> bounded view`.
+
+Called only when the StrategyModel declares an `AccountHistoryInput`. A Strategy that
+declares `None` receives an empty `DeclaredAccountHistory`, so every accessor raises:
+undeclared history is unreadable rather than silently empty.
 """
 
 
@@ -353,15 +364,73 @@ def _validated_diagnostics(
     return result_diagnostics
 
 
+def _resolved_account_history(
+    declaration: object, history_resolver: AccountHistoryResolver | None
+) -> DeclaredAccountHistory:
+    """Turn one `account_history()` declaration into its bounded view.
+
+    `None` declares that no committed history is read, and yields an empty view whose
+    accessors all raise. A declaration requires a resolver: the framework, not the
+    author, owns the committed history, so a declared read with nothing to serve it is
+    a wiring error rather than an empty result.
+    """
+    if declaration is None:
+        return DeclaredAccountHistory()
+    if not isinstance(declaration, AccountHistoryInput):
+        raise TypeError("account_history() must return an AccountHistoryInput or None")
+    if history_resolver is None:
+        raise ValueError(
+            "this StrategyModel declared an AccountHistoryInput but no history_resolver "
+            "was supplied to serve it"
+        )
+    history = history_resolver(declaration)
+    if not isinstance(history, DeclaredAccountHistory):
+        raise TypeError("history_resolver must return an authoring.DeclaredAccountHistory")
+    if set(history.fields) != set(declaration.fields):
+        raise ValueError(
+            "history_resolver returned fields that do not match the declaration: "
+            f"declared {sorted(declaration.fields)}, served {sorted(history.fields)}"
+        )
+    if history.lookback != declaration.lookback:
+        raise ValueError(
+            "history_resolver returned a lookback that does not match the declaration"
+        )
+    return history
+
+
+def _validated_bounds_cover(bounds: ConstraintBounds, instruments: tuple[str, ...]) -> None:
+    """A callback's bounds must cover exactly the universe passed to that callback."""
+    universe = _unique_instruments(instruments)
+    lower = set(bounds.lower_weights)
+    upper = set(bounds.upper_weights)
+    if lower != universe or upper != universe:
+        missing = sorted(universe - (lower & upper))
+        extra = sorted((lower | upper) - universe)
+        raise ValueError(
+            "constraint_bounds must cover exactly the callback universe; "
+            f"missing {missing}, unexpected {extra}"
+        )
+
+
+def _unique_instruments(instruments: object) -> set[str]:
+    if not isinstance(instruments, tuple):
+        raise TypeError("instruments must be a tuple of instrument_id")
+    checked = tuple(_identifier(item, name="instrument_id") for item in instruments)
+    if len(set(checked)) != len(checked):
+        raise ValueError("instruments must not repeat an instrument_id")
+    return set(checked)
+
+
 def prepare_strategy_invocation(
     model_class: type[StrategyModel],
     config: Mapping[str, object],
     *,
     evaluation_time: datetime,
     account: EconomicAccountView,
+    instruments: tuple[str, ...],
+    constraint_bounds: ConstraintBounds,
     previous_state: object = None,
-    account_history: DeclaredAccountHistory | None = None,
-    constraint_bounds: ConstraintBounds | None = None,
+    history_resolver: AccountHistoryResolver | None = None,
     resolver: ObservationResolver,
 ) -> PreparedStrategyInvocation:
     """Instantiate `model_class` exactly once, read only declared aliases, and validate
@@ -369,6 +438,10 @@ def prepare_strategy_invocation(
     `Hold`/`Rebalance` are already validated by `authoring`; this re-affirms those
     invariants at the boundary. Any exception raised by `inputs()`, `account_history()`,
     `diagnostics()`, or `decide()` propagates unchanged.
+
+    `instruments` and `constraint_bounds` are required: the plan's economic-explicitness
+    rule means a callback's bound set is declared, never defaulted to an empty one that
+    would silently constrain nothing.
     """
     if not isinstance(model_class, type) or not issubclass(model_class, StrategyModel):
         raise TypeError("model_class must be a subclass of vqapr.authoring.StrategyModel")
@@ -376,26 +449,20 @@ def prepare_strategy_invocation(
         raise TypeError("evaluation_time must be a datetime")
     if not isinstance(account, EconomicAccountView):
         raise TypeError("account must be an authoring.EconomicAccountView")
+    if not isinstance(constraint_bounds, ConstraintBounds):
+        raise TypeError("constraint_bounds must be an authoring.ConstraintBounds")
     if not callable(resolver):
         raise TypeError("resolver must be callable")
-    resolved_history = (
-        account_history if account_history is not None else DeclaredAccountHistory()
-    )
-    if not isinstance(resolved_history, DeclaredAccountHistory):
-        raise TypeError("account_history must be a DeclaredAccountHistory or None")
-    resolved_bounds = (
-        constraint_bounds
-        if constraint_bounds is not None
-        else ConstraintBounds(lower_weights={}, upper_weights={})
-    )
-    if not isinstance(resolved_bounds, ConstraintBounds):
-        raise TypeError("constraint_bounds must be an authoring.ConstraintBounds or None")
+    if history_resolver is not None and not callable(history_resolver):
+        raise TypeError("history_resolver must be callable or None")
+    _validated_bounds_cover(constraint_bounds, instruments)
 
     instance = _fresh_instance(model_class, config)
     if not isinstance(instance, StrategyModel):
         raise TypeError("model_class must construct a vqapr.authoring.StrategyModel instance")
 
     inputs = _validated_inputs(instance.inputs())
+    resolved_history = _resolved_account_history(instance.account_history(), history_resolver)
     tables_by_id = _validated_diagnostic_tables(instance.diagnostics())
 
     call = _PrivateStrategyCall(
@@ -403,7 +470,7 @@ def prepare_strategy_invocation(
         account=account,
         previous_state=normalize_memory(previous_state),
         account_history=resolved_history,
-        constraint_bounds=resolved_bounds,
+        constraint_bounds=constraint_bounds,
         inputs=inputs,
         resolver=resolver,
     )

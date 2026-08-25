@@ -1,0 +1,298 @@
+{
+  "version": 1,
+  "brief": "Resume the vqapr Agent-First Python API migration. This continues gjc session\n01a031f9-aa43-703c-b219-d0e2d7a27a4d, whose state is preserved in this repo at\n`gjc-handoff/session-state/` and in the sibling repo at `../qlibx/gjc-handoff/`.\n\n## Repositories\n\n- `../qlibx` — branch `jaepil-develop`, package `vqapr` version `0.1.0a16`. The framework itself.\n  Most implementation work happens here.\n- `vqapr-testbed-2/` (this repo) — the consumer. Kimchi FF5+MOM factor construction.\n  Depends on qlibx as an editable sibling via `[tool.uv.sources] vqapr = { path = \"../../qlibx\" }`.\n\n## The plan under re-review\n\n`gjc-handoff/session-state/plans/ralplan/01a031f9-aa43-703c-b219-d0e2d7a27a4d/pending-approval.md`\nis a 963-line consensus plan that is still PENDING APPROVAL. It authorizes no source mutation.\nIt was authored and reviewed end to end by `gpt-5.6-sol`, not by the model the owner had selected;\nthe owner's intended `claude-opus-5` profile never applied because unattended ultragoal execution\nnever produced a user turn boundary. The plan has therefore never been reviewed by the intended model.\nRe-reviewing it is the first goal and gates everything after it.\n\n## Verified state as of this session (not inherited claims)\n\n- `../qlibx`: 846 tests pass, ruff clean, `uv run --no-sync pytest -q` in 64.51s.\n- `../qlibx/src/vqapr/_internal/models/agent_first.py` exists, is 422 lines, imports cleanly,\n  and passes ruff — but NOTHING imports it and NO test covers it. It is orphaned dead code.\n  The 846 green tests say nothing about its correctness.\n- That file imports `ModelMemory` / `normalize_memory` from `vqapr.models.memory`, a route the plan\n  requires to move under `_internal`, and uses `ModelMemory` as the type of `next_state`.\n  Whether that is consistent with the plan's `StrategyResult.next_state` contract is unresolved.\n- `../qlibx/src/vqapr/public.py` still exists (15004 bytes). Hard removal is planned for T4.\n- `vqapr-testbed-2/baselines/` DOES NOT EXIST on this machine. It is gitignored, so the T0 canonical\n  baseline captured on the other machine was never transferred. The capture/compare/benchmark\n  harness itself IS committed and present.\n- Prior session's G001 was checkpointed \"complete\" on the strength of a test run that predated the\n  tree state it claimed to verify.\n\n## Standing constraints\n\n- Do NOT run `git add`, `git commit`, `git push`, tag, or publish. Stop for owner review.\n  This is required by both `AGENTS.md` and the plan's own approval state.\n- Never checkpoint a goal on evidence older than the current working tree. Re-run the check.\n- Before judging that a delegated worker made no progress, re-check the filesystem. The prior\n  session cancelled a worker that had already saved its output three minutes earlier.\n- Keep delegated slices small and file-scoped. Large slices caused repeated worker stalls.\n- Preserve every locked intent ID from the plan: `artifact:api-spec`, `surface:project-workflow`,\n  `surface:model-authoring`, `integration:runtime-internals`, `constraint:agent-first`,\n  `constraint:economic-explicitness`, `constraint:hard-removal`.\n- Scientific parity is the non-negotiable outcome: SMB .971509, HML .972553, RMW .941883,\n  CMA .917683, MOM .984659; HML exactly 2,096 callbacks / 97 formations / 110,919 rows.\n\n@goal: Re-review the pending plan against verified repo state\nRead the full 963-line pending-approval plan and judge it independently rather than inheriting its\nconclusions. Verify its factual claims against both repositories instead of trusting them: confirm\nthe stated current version, the modules it says exist or must be deleted, the testbed imports it\nsays must change, and whether its performance thresholds and deletion targets are grounded.\nAssess at minimum: whether the T0 baseline premise still holds now that `baselines/` is absent on\nthis machine; whether recomputing a SHA-256 fingerprint of module bytes plus constructing a fresh\nmodel instance before every callback is viable against the plan's own median 1.10x / p95 1.25x\nbudget at HML's 2,096 callbacks; whether goal granularity is realistic given that the prior session\nstalled repeatedly on oversized slices and tried to split its own G002; whether deleting\n`measure_session_effect.py` on the claim its premise is obsolete is actually justified; and whether\nthe plan's cross-repo release pairing and annotation-closure test are sound. Produce an explicit\nverdict per finding: accept as-is, revise, or reject. Record the verdict and its evidence in the\nledger. If the plan needs structural repair beyond localized revision, escalate to ralplan rather\nthan patching it inline. Do not mutate product source in this goal.\n\n@goal: Re-establish the T0 canonical baseline on this machine\nThe committed harness (`capture_agent_first_baseline.py`, `compare_agent_first_baseline.py`,\n`benchmark_agent_first_shape.py`, `_agent_first_baseline.py`) exists but its captured output does\nnot. Every downstream parity proof in the plan depends on a T0 baseline that is currently absent\nhere, so re-capture it before any behavioral change. Run the capture, prove byte and semantic\nself-comparison, re-record the five-process same-shape performance baseline after one discarded\nwarmup, and confirm the external factor correlations and exact HML counts. Confirm the harness\nstill runs against the current tree rather than assuming the other machine's result transfers.\nRecord the manifest facts (qlibx SHA, testbed SHA, vqapr version, lock hashes, source digests) in\nthe ledger so later parity claims are anchored to something real on this machine.\n\n@goal: Resolve the orphaned model runtime adapter and close the authoring boundary\n`_internal/models/agent_first.py` is the prior session's unfinished work: 422 lines, zero imports,\nzero tests, saved by a worker immediately before cancellation. Decide on evidence whether it is\nsalvageable or should be rewritten, rather than assuming either. Verify its fresh-invocation,\nnamed-alias-read, and state/diagnostic prepared-root behavior actually matches the `StrategyCall`,\n`StrategyResult`, `Hold`/`Rebalance` contracts in the approved plan, and resolve whether its\ndependence on `vqapr.models.memory.ModelMemory` for `next_state` is consistent with the planned\ncontract or a leftover from the old surface. Write the missing tests, wire it into the runtime so\nit is genuinely reachable, and prove replay/state/evidence parity. Keep the full qlibx suite green\nand ruff clean. This goal closes the prior session's deliberately un-checkpointed G002.\n\n@goal: Implement Project transactions and atomic publication\nImplement non-mutating `open`, closed ProjectDeclaration registration, candidate-catalog\nvalidation/preflight with generation-CAS commit, Project materialize/run, one callback root for\ndecision/state/diagnostics/evidence, content-addressed allocation/record staging with a single\ncatalog visibility swap, orphan recovery, and CompletedRun atomic Publication. Prove the\ntransactional claims adversarially, not just on the happy path: two-process writer contention,\npreflight failure after multiple staged declarations, and subprocess hard-kill both before and\nafter the root swap. Run focused integration tests.\n\n@goal: Dogfood and hard-remove the old qlibx API\nMigrate shipped venues, constraints, CLI, scaffolds, skills, docs, README, and every showcase and\ntest onto the capability namespaces and Project workflow. Delete `vqapr.public` and the former\nqualified lifecycle/storage/Flow/evidence routes outright, with no redirects, aliases, or\ncompatibility shims. Prove the exact export surface and prove the removed imports actually fail in\na clean process. Keep qlibx tests, ruff, build, the isolated wheel, and showcases green.\n\n@goal: Migrate the factor testbed and prove scientific parity\nMigrate the whole `vqapr-testbed-2` pipeline: `register.py`, models, materialization, simulation,\nand atomic publication. Retire or replace the `measure_session_effect.py` diagnostics per the\nverdict reached in the re-review goal. Use only supported namespaces, with one root, one run, and\none publish per factor, while retaining every explicit economic declaration. Run the complete factor\nrebuild and comparison, and prove exact normalized manifest/trace/row parity plus the performance\nthresholds against the baseline re-established earlier in this run. Update the PRD, architecture,\nimplementation, and handoff records. Do not git add, commit, push, or publish; stop for owner\nreview after the full cohort and terminal critic gates.",
+  "gjcGoalMode": "aggregate",
+  "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+  "goals": [
+    {
+      "id": "G001",
+      "title": "Re-review the pending plan against verified repo state",
+      "objective": "Read the full 963-line pending-approval plan and judge it independently rather than inheriting its\nconclusions. Verify its factual claims against both repositories instead of trusting them: confirm\nthe stated current version, the modules it says exist or must be deleted, the testbed imports it\nsays must change, and whether its performance thresholds and deletion targets are grounded.\nAssess at minimum: whether the T0 baseline premise still holds now that `baselines/` is absent on\nthis machine; whether recomputing a SHA-256 fingerprint of module bytes plus constructing a fresh\nmodel instance before every callback is viable against the plan's own median 1.10x / p95 1.25x\nbudget at HML's 2,096 callbacks; whether goal granularity is realistic given that the prior session\nstalled repeatedly on oversized slices and tried to split its own G002; whether deleting\n`measure_session_effect.py` on the claim its premise is obsolete is actually justified; and whether\nthe plan's cross-repo release pairing and annotation-closure test are sound. Produce an explicit\nverdict per finding: accept as-is, revise, or reject. Record the verdict and its evidence in the\nledger. If the plan needs structural repair beyond localized revision, escalate to ralplan rather\nthan patching it inline. Do not mutate product source in this goal.",
+      "status": "complete",
+      "createdAt": "2026-08-24T16:01:33.846Z",
+      "updatedAt": "2026-08-24T16:05:35.130Z",
+      "startedAt": "2026-08-24T16:01:38.162Z",
+      "completedAt": "2026-08-24T16:05:35.130Z",
+      "evidence": "Re-reviewed the 963-line pending-approval plan against verified state in both repos. Verdicts: ACCEPT the per-callback fingerprint drift check (measured 85-106 us/callback, ~220ms across 2096 HML callbacks, negligible vs the 1.10x median budget); REVISE for the absent T0 baseline (vqapr-testbed-2/baselines/ is gitignored and never transferred to this machine, leaving all downstream parity proofs unanchored - sequenced as G002 ahead of implementation); REVISE for a material plan gap where models/factors.py FactorPortfolio holds path-dependent monthly cadence in self.memory (written :259, read :241) that the plan's fresh-instance-per-callback rule destroys without ever naming the required memory-to-state translation - G006 reworded to require it with exact 2096/97/110919 parity assertions. Also established that _internal/models/agent_first.py is orphaned dead code (422 lines, zero importers, zero coverage, next_state typed as legacy ModelMemory) so the 846 passing tests prove nothing about it. Two structural steers applied: G005 split into T3 dogfooding and T4 hard-removal because it authorized deletion before the parity evidence the plan's own escalation gate demands, and pending goals reordered so deletion follows testbed parity. ralplan escalation considered and rejected - three localized revisions, not structural repair. No product source mutated.",
+      "completionVerification": {
+        "schemaVersion": 1,
+        "receiptId": "0afed94f-a22e-426e-9566-9660e13d5595",
+        "verifiedAt": "2026-08-24T16:05:35.130Z",
+        "goalId": "G001",
+        "receiptKind": "per-goal",
+        "goalStatusBeforeCheckpoint": "active",
+        "gjcGoalMode": "aggregate",
+        "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+        "qualityGateHash": "16b9dc533b1cda3ffa2f4a44bddf594d5c0ea0693494128bdc509f831759764b",
+        "planGeneration": "9a6498cf4fe7c32115687555c85f3d59f1d10657207d0a0c06af8068f367b8f6",
+        "basis": {
+          "planHashBeforeCheckpoint": "4effc6ca45cf926afb62287575fae5a561b409e1a8c89fafff83169b8270a88f",
+          "latestRelevantLedgerEventIdBeforeCheckpoint": "6431a2e6-d3c3-45e5-8277-83aa16d3874e",
+          "goalUpdatedAtBeforeCheckpoint": "2026-08-24T16:05:35.130Z",
+          "relevantGoalIdsBeforeCheckpoint": [
+            "G001"
+          ],
+          "requiredGoalSetHashBeforeCheckpoint": "d771e2e77a6daa6f894bb9e2fc97fc4e19b26835bd9f650ab70dff52d4fed939"
+        },
+        "checkpointLedgerEventId": "daf23ff6-9470-4c34-ba6d-bc30e08b4bf7"
+      }
+    },
+    {
+      "id": "G002",
+      "title": "Re-establish the T0 canonical baseline on this machine",
+      "objective": "The committed harness (`capture_agent_first_baseline.py`, `compare_agent_first_baseline.py`,\n`benchmark_agent_first_shape.py`, `_agent_first_baseline.py`) exists but its captured output does\nnot. Every downstream parity proof in the plan depends on a T0 baseline that is currently absent\nhere, so re-capture it before any behavioral change. Run the capture, prove byte and semantic\nself-comparison, re-record the five-process same-shape performance baseline after one discarded\nwarmup, and confirm the external factor correlations and exact HML counts. Confirm the harness\nstill runs against the current tree rather than assuming the other machine's result transfers.\nRecord the manifest facts (qlibx SHA, testbed SHA, vqapr version, lock hashes, source digests) in\nthe ledger so later parity claims are anchored to something real on this machine.",
+      "status": "complete",
+      "createdAt": "2026-08-24T16:01:33.846Z",
+      "updatedAt": "2026-08-24T16:32:03.732Z",
+      "startedAt": "2026-08-24T16:05:35.184Z",
+      "completedAt": "2026-08-24T16:32:03.732Z",
+      "evidence": "T0 canonical baseline re-established on this machine. Provisioned the unsynced testbed venv (tzdata missing broke config.py import), confirmed all six canonical inputs resolve under ../kaist-thesis, and reproduced the full pipeline in documented order: prepare 7.865s, register 0.798s, characteristics 174.217s, factors 1102.173s, compare 1.895s. Locked parity facts confirmed exactly - HML 2096 callback_days / 97 formations / 110,919 membership_rows - and all five Kimchi correlations match to six decimals (SMB 0.971509, HML 0.972553, RMW 0.941883, CMA 0.917683, MOM 0.984659). Captured baselines/agent-first-v1 (~522MB across manifest, declarations, materialization rows, publication rows 646,804, simulation trace 10,480) and proved the comparator detects identity via self-comparison returning 'identical'. Baseline anchored to qlibx d23ca034 / testbed 356430b5 / vqapr 0.1.0a16. Recorded rather than hid a scope gap: the benchmark harness measures only compare_factors.py (~2.14s median), not the materialize/run/publish phases the plan's thresholds govern, so per-phase wall clock was captured as the real n=1 phase baseline and the deficiency was bound into G006's objective. No product source mutated; no git add/commit/push.",
+      "completionVerification": {
+        "schemaVersion": 1,
+        "receiptId": "844946ce-1ee2-438e-8e53-cbf3c4a8ebee",
+        "verifiedAt": "2026-08-24T16:32:03.732Z",
+        "goalId": "G002",
+        "receiptKind": "per-goal",
+        "goalStatusBeforeCheckpoint": "active",
+        "gjcGoalMode": "aggregate",
+        "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+        "qualityGateHash": "d286c58d30a1bac195296afb3354ebee62c62d10e29bf92876c7affdf3102a44",
+        "planGeneration": "a80c9e91aeb60cacdf62065e76387af6e7e995f3d2c20967d6243177a234edc0",
+        "basis": {
+          "planHashBeforeCheckpoint": "b1620772a259927d01c62cf8144519afaf27244b264ae786446c158fdac509f9",
+          "latestRelevantLedgerEventIdBeforeCheckpoint": "0d1e686a-6e3e-4a80-9588-d39d9119a5ce",
+          "goalUpdatedAtBeforeCheckpoint": "2026-08-24T16:32:03.732Z",
+          "relevantGoalIdsBeforeCheckpoint": [
+            "G002"
+          ],
+          "requiredGoalSetHashBeforeCheckpoint": "923f5dc74054a16eb48b2dc32985ec8ecc191cd8063b6b1ecaaa5e999b4b53f6"
+        },
+        "checkpointLedgerEventId": "c2419b5e-c70b-4c79-8197-6b95c8906fbf"
+      }
+    },
+    {
+      "id": "G003",
+      "title": "Resolve the orphaned model runtime adapter and close the authoring boundary",
+      "objective": "`_internal/models/agent_first.py` is the prior session's unfinished work: 422 lines, zero imports,\nzero tests, saved by a worker immediately before cancellation. Decide on evidence whether it is\nsalvageable or should be rewritten, rather than assuming either. Verify its fresh-invocation,\nnamed-alias-read, and state/diagnostic prepared-root behavior actually matches the `StrategyCall`,\n`StrategyResult`, `Hold`/`Rebalance` contracts in the approved plan, and resolve whether its\ndependence on `vqapr.models.memory.ModelMemory` for `next_state` is consistent with the planned\ncontract or a leftover from the old surface. Write the missing tests, wire it into the runtime so\nit is genuinely reachable, and prove replay/state/evidence parity. Keep the full qlibx suite green\nand ruff clean. This goal closes the prior session's deliberately un-checkpointed G002.",
+      "status": "complete",
+      "createdAt": "2026-08-24T16:01:33.846Z",
+      "updatedAt": "2026-08-24T16:49:36.609Z",
+      "startedAt": "2026-08-24T16:32:03.786Z",
+      "completedAt": "2026-08-24T16:49:36.609Z",
+      "evidence": "Resolved the orphaned adapter: SALVAGEABLE, not rewrite. Closed the handoff's ModelMemory question as a non-defect (normalize_memory IS the plan's strict JSON state codec). Fixed three real defects: the dead account_history() contract now resolves through an injected AccountHistoryResolver with declaration matching; the implicit account_history and constraint_bounds defaults that violated constraint:economic-explicitness are gone, both now required; and a universe coverage check now enforces that bounds cover exactly the callback instruments. Added tests/models/test_agent_first_invocation.py with 22 tests, and proved the suite can fail by mutating _fresh_instance to reuse instances - the fresh-instance sentinel failed 'assert 1 == 2', then the mutant was reverted and verified clean. Suite 846 -> 868 passed, ruff clean across src and tests, with the 846 baseline re-run against the current tree before any edit per the brief's anti-stale-evidence rule. The 'wire into the runtime' deliverable is NOT met and was steered into G004 with evidence rather than dropped: the live path invokes on_occurrence against the legacy mutable-memory protocol while the adapter drives decide() -> StrategyResult, and bridging needs the Project facade and relocated Flow that do not exist yet - which the approved plan orders as step 5, inside G004. No git add/commit/push.",
+      "completionVerification": {
+        "schemaVersion": 1,
+        "receiptId": "5863d58a-c060-4be0-bcb3-30a7863174f3",
+        "verifiedAt": "2026-08-24T16:49:36.609Z",
+        "goalId": "G003",
+        "receiptKind": "per-goal",
+        "goalStatusBeforeCheckpoint": "active",
+        "gjcGoalMode": "aggregate",
+        "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+        "qualityGateHash": "473fe1f1d510b2f6d032c254869ce76479c475e00a725584281c304058334b9d",
+        "planGeneration": "f56279b9b2e6de8dd501e9d89c699131f6d983d9e5d02d1998c3fb6145282ac2",
+        "basis": {
+          "planHashBeforeCheckpoint": "7e1489a27cd31ae914f58b092a1c6cf20527323095ed2781303c24967848b3ec",
+          "latestRelevantLedgerEventIdBeforeCheckpoint": "52e6802a-d1df-4eef-8f35-6f033fe5cace",
+          "goalUpdatedAtBeforeCheckpoint": "2026-08-24T16:49:36.609Z",
+          "relevantGoalIdsBeforeCheckpoint": [
+            "G003"
+          ],
+          "requiredGoalSetHashBeforeCheckpoint": "ca576323b19f4ba46183f88e7b194c41060b170c80490157c6bc5a32304b061e"
+        },
+        "checkpointLedgerEventId": "8e15ea5b-e0a6-4996-ae5d-c63416a31e80"
+      }
+    },
+    {
+      "id": "G004",
+      "title": "Implement Project transactions, atomic publication, and wire the invocation adapter into the runtime",
+      "objective": "Implement non-mutating open, closed ProjectDeclaration registration, candidate-catalog validation/preflight with generation-CAS commit, Project materialize/run, one callback root for decision/state/diagnostics/evidence, content-addressed allocation/record staging with a single catalog visibility swap, orphan recovery, and CompletedRun atomic Publication. CARRIED FROM G003 because the approved plan sequences it here as step 5 'Implement semantic authoring/runtime adapters', after step 3 internal foundations and step 4 candidate preparation: wire vqapr._internal.models.agent_first into the live runtime so prepare_data_model_invocation and prepare_strategy_invocation are genuinely reachable in a real run rather than only from tests. This requires reconciling two currently disjoint protocols - the live path at src/vqapr/flow/simulation.py:1200 invokes self._strategy.on_occurrence(context) against src/vqapr/models/strategy_model.py using mutable self.memory plus an InvocationRecorder and returning NoDecision|EconomicPortfolioIntent, whereas the adapter drives StrategyModel.decide(call) -> StrategyResult with previous_state/next_state. Relocate flow/ beneath _internal as the plan's relocation table requires, and supply the AccountHistoryResolver the adapter now expects from committed account history. Prove the transactional claims adversarially rather than on the happy path: two-process writer contention on the same generation, preflight failure after multiple staged declarations leaving a byte-identical root and object reference set, and subprocess hard-kill both before and after the root swap with reopen proving old-complete or new-complete state and never partial. Keep the qlibx suite green and ruff clean.",
+      "status": "complete",
+      "createdAt": "2026-08-24T16:01:33.846Z",
+      "updatedAt": "2026-08-24T17:23:40.889Z",
+      "steering": {
+        "kind": "revise_pending_wording",
+        "evidence": "Verified this session: src/vqapr/project.py does not exist; only _internal/extensions and _internal/models are populated while src/vqapr/flow/ has not been relocated; the live invocation site is flow/simulation.py:1200 on_occurrence; models/strategy_model.py:32-33 declares 'memory: ModelMemory = None' and 'recorder: InvocationRecorder | None = None'. The adapter's decide()/StrategyResult protocol is disjoint from that, so no local edit can bridge them without the Project/Flow machinery this goal builds.",
+        "rationale": "Placing the runtime wiring in the goal that builds the machinery it depends on keeps the deliverable owned and sequenced per the plan's own ordered steps, instead of leaving it silently unmet in a goal that cannot satisfy it.",
+        "changedFields": [
+          "title",
+          "objective"
+        ]
+      },
+      "startedAt": "2026-08-24T16:49:36.663Z",
+      "completedAt": "2026-08-24T17:23:40.889Z",
+      "evidence": "Implemented the plan's T2 transactional spine: _internal/catalog.py, _internal/catalog_store.py (generation+digest CAS), _internal/objects.py (content-addressed, fsync + pre-install verification + atomic replace), _internal/publication.py (verified objects first, then ONE root swap as sole visibility authority), project.py (declaration algebra, register/register_all/materialize/run, CompletedRun.publish), and a real __init__.py exporting vqapr.open. Closed the G003 runtime-wiring deliverable: Project.materialize/run now call prepare_data_model_invocation and prepare_strategy_invocation, so agent_first is reachable from the supported surface. Verified end to end through public API only: open creates nothing, register reaches generation 1, materialize yields 2 rows over 2 evaluations, run yields ['formed','held','formed'], publish makes both outputs visible together at generation 2. Adversarial evidence: real two-process contention captured one COMMITTED and one CatalogConflict; real subprocess hard kills before and after the root swap proved old-root-complete and new-root-complete; a losing publisher makes no output visible and its orphans never block a retry. Five mutations applied and reverted to prove the tests fail when the invariant breaks, including removing state threading which reproduced the exact spurious-extra-formation drift that would break HML's 97-formation count. Found and fixed two real defects my delegated workers missed: a failed first commit stranding an empty .vqapr/ directory, and a completely empty __init__.py; then found and fixed the boundary regression my own __init__ fix introduced. Ten of eleven deliverables verified; the flow/ physical relocation was steered to G008 because the plan places it at T4 and relocating now would destroy the legacy baseline G006's parity comparison depends on. Suite 846 -> 941 passed, ruff clean. No git add/commit/push.",
+      "completionVerification": {
+        "schemaVersion": 1,
+        "receiptId": "fd978e05-411e-4ea1-9fb4-4f6e83479b35",
+        "verifiedAt": "2026-08-24T17:23:40.889Z",
+        "goalId": "G004",
+        "receiptKind": "per-goal",
+        "goalStatusBeforeCheckpoint": "active",
+        "gjcGoalMode": "aggregate",
+        "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+        "qualityGateHash": "3e94c5aa47226b4047d469d74b60ec3a83ec398df61dd3a78707ae44ca82781a",
+        "planGeneration": "29da6db8b5271f20e614ed6ce31dd40b107484dcd515b68f2c9ec4f0c95cd244",
+        "basis": {
+          "planHashBeforeCheckpoint": "cbb9b48fa8417ebcedd2bfd0d1287015f6aa1a839ac14615c810d75bc0af38ee",
+          "latestRelevantLedgerEventIdBeforeCheckpoint": "6572c6ba-585c-4f51-b453-c17a667cd8aa",
+          "goalUpdatedAtBeforeCheckpoint": "2026-08-24T17:23:40.889Z",
+          "relevantGoalIdsBeforeCheckpoint": [
+            "G004"
+          ],
+          "requiredGoalSetHashBeforeCheckpoint": "288aa94267f4f6282a1513a1b2f6a570396d700e1ae3ef32fe10cb481b77f98e"
+        },
+        "checkpointLedgerEventId": "5466ceb5-2421-411f-9e9b-44ff40a96d7d"
+      }
+    },
+    {
+      "id": "G005",
+      "title": "Dogfood and hard-remove the old qlibx API",
+      "objective": "Migrate shipped venues, constraints, CLI, scaffolds, skills, docs, README, and every showcase and\ntest onto the capability namespaces and Project workflow. Delete `vqapr.public` and the former\nqualified lifecycle/storage/Flow/evidence routes outright, with no redirects, aliases, or\ncompatibility shims. Prove the exact export surface and prove the removed imports actually fail in\na clean process. Keep qlibx tests, ruff, build, the isolated wheel, and showcases green.",
+      "status": "superseded",
+      "createdAt": "2026-08-24T16:01:33.846Z",
+      "updatedAt": "2026-08-24T16:04:20.750Z",
+      "evidence": "The approved plan's escalation gate states: Do not begin T4 deletion/build Q unless all hold: ... whole testbed - including register.py - passes T0 trace/row comparator. The plan also orders its own steps 7 (dogfood package surfaces) and 8 (migrate testbed) before step 9 (cut over physically). G005 as written bundled T3 dogfooding together with T4 hard-removal and was sequenced before the testbed migration goal, so it would have authorized deletion before the parity evidence that gates deletion exists. This inversion was inherited from the prior session's handoff goals G004/G005.",
+      "steering": {
+        "kind": "split_subgoal",
+        "evidence": "The approved plan's escalation gate states: Do not begin T4 deletion/build Q unless all hold: ... whole testbed - including register.py - passes T0 trace/row comparator. The plan also orders its own steps 7 (dogfood package surfaces) and 8 (migrate testbed) before step 9 (cut over physically). G005 as written bundled T3 dogfooding together with T4 hard-removal and was sequenced before the testbed migration goal, so it would have authorized deletion before the parity evidence that gates deletion exists. This inversion was inherited from the prior session's handoff goals G004/G005.",
+        "rationale": "Splitting dogfooding from deletion restores the plan's own T3-before-T4 ordering and keeps the irreversible step behind the parity gate that authorizes it, without changing the aggregate objective.",
+        "replacementGoalIds": [
+          "G007",
+          "G008"
+        ]
+      }
+    },
+    {
+      "id": "G007",
+      "title": "Dogfood the package surfaces onto the new API",
+      "objective": "Migrate qlibx shipped venues, constraints, CLI, scaffolds, skills, agent samples, docs, README, and every showcase onto the capability namespaces and Project workflow, so the package uses its own supported surface. Fresh-project and generated-model e2e must use supported imports only. Keep qlibx tests, ruff, and showcases green. This is the T3 dogfooding step and it performs NO deletion of the old routes.",
+      "status": "superseded",
+      "createdAt": "2026-08-24T16:04:20.750Z",
+      "updatedAt": "2026-08-24T17:57:05.916Z",
+      "steering": {
+        "kind": "mark_blocked_superseded",
+        "evidence": "G007's scope is carried forward in full by G010, whose objective names the same 6 source files and 9 showcases and the same no-deletion constraint. Its blocker - Project.materialize not persisting its output and Project.simulate not existing - was resolved by G009, checkpointed complete this turn.",
+        "rationale": "Superseding the blocked goal whose scope now lives in a schedulable one prevents it from blocking final completion while keeping the work itself owned.",
+        "noReplacementRequired": true
+      },
+      "startedAt": "2026-08-24T17:23:40.940Z",
+      "evidence": "G007's scope is carried forward in full by G010, whose objective names the same 6 source files and 9 showcases and the same no-deletion constraint. Its blocker - Project.materialize not persisting its output and Project.simulate not existing - was resolved by G009, checkpointed complete this turn."
+    },
+    {
+      "id": "G006",
+      "title": "Migrate the factor testbed, translate model memory to declared state, and prove parity",
+      "objective": "Migrate the whole vqapr-testbed-2 pipeline: register.py, models, materialization, simulation, and atomic publication. REQUIRED and called out explicitly because the approved plan omits it: FactorPortfolio in models/factors.py carries path-dependent monthly cadence in self.memory (last_formed_month written at models/factors.py:259, read at :241), and its own docstring states the Model's memory owns cadence because deriving it from the occurrence date alone would re-form on the first session of every month when a run resumes mid-month. Under the plan's fresh-instance-per-callback rule this state must be translated to the previous_state/next_state channel with identical semantics, preserving the cheap cadence gate that short-circuits before any observation read on non-formation days. Assert the translation exactly against the T0 baseline captured in this run: HML must retain 2,096 callback_days, 97 formations, and 110,919 membership_rows, and the formation month sequence must be identical. Full locked set to hold: SMB 2096/97/173358, HML 2096/97/110919, RMW 2096/85/93788, CMA 2096/97/112691, MOM 2096/102/145568, with Kimchi correlations SMB 0.971509, HML 0.972553, RMW 0.941883, CMA 0.917683, MOM 0.984659 to six decimals. PERFORMANCE GATE FIX: the committed benchmark harness measures only compare_factors.py (~2.14s median), which does not exercise the materialize/run/publish phases the plan's 1.10x median / 1.25x p95 thresholds actually govern. Before claiming any performance verdict, either re-point the benchmark at the phases under test or run the phase comparison against the recorded T0 per-phase wall clock (run:HML 124.495s, run:SMB 149.622s, run:RMW 282.927s, run:CMA 201.910s, run:MOM 248.789s, characteristics 174.217s, factors total 1102.173s); do not let the 2-second proxy stand in for the phase gate. Retire or replace measure_session_effect.py per the verdict from the re-review goal. Use only supported namespaces, with one root, one run, and one publish per factor, retaining every explicit economic declaration. Update the PRD, architecture, implementation, and handoff records. Do not git add, commit, push, or publish; stop for owner review after the full cohort and terminal critic gates.",
+      "status": "superseded",
+      "createdAt": "2026-08-24T16:01:33.846Z",
+      "updatedAt": "2026-08-24T17:57:06.450Z",
+      "steering": {
+        "kind": "mark_blocked_superseded",
+        "evidence": "G006's scope is carried forward in full by G010, whose objective repeats the memory-to-state translation requirement, the exact locked parity facts (HML 2096/97/110919 and the full five-factor set), the six-decimal Kimchi correlations, and the per-phase performance baseline that must not be replaced by the compare_factors.py proxy. Its blocker - no execution/valuation path through the supported surface - was resolved by G009.",
+        "rationale": "Same supersession, keeping the parity requirements verbatim so nothing is weakened in the carry-forward.",
+        "noReplacementRequired": true
+      },
+      "startedAt": "2026-08-24T17:33:38.374Z",
+      "evidence": "G006's scope is carried forward in full by G010, whose objective repeats the memory-to-state translation requirement, the exact locked parity facts (HML 2096/97/110919 and the full five-factor set), the six-decimal Kimchi correlations, and the per-phase performance baseline that must not be replaced by the compare_factors.py proxy. Its blocker - no execution/valuation path through the supported surface - was resolved by G009."
+    },
+    {
+      "id": "G009",
+      "title": "Connect Project.run to the retained execution and valuation engine",
+      "objective": "PARTIALLY DONE. The materialization-persistence half is complete and verified: Project.materialize now takes an explicit output_dataset_id that stages derived rows as one content-addressed object via _internal/objects.stage_object and binds it into the catalog, with rows framework-stamped by evaluation_time and a both-or-neither coupling between output_dataset_id and digest; 5 tests cover it and the show_002 blocker is closed. WHAT REMAINS is the larger half and the single biggest remaining piece of work in the whole plan: Project.run currently drives only the strategy callback loop, while the retained engine in src/vqapr/flow/run.py owns execution inputs, fill conventions, account snapshots, order generation and valuation - measured 43 execution/fill/valuation references there against 19 in project.py that are mostly declaration types. Add the private adapters that let Project.run drive those retained mechanics while preserving the fresh-instance callback boundary, the prepared-callback-root commit discipline, and the StoreResolver PIT bridge already built and verified against real KRX data. Prove a real long-short run end to end through the supported surface against the testbed workspace, not a fixture. Keep the qlibx suite and ruff green. Until this lands, showcases 003-008 and the factor testbed cannot migrate, so G007 stays blocked and G006 cannot start.",
+      "status": "complete",
+      "createdAt": "2026-08-24T17:32:44.185Z",
+      "updatedAt": "2026-08-24T17:55:44.993Z",
+      "steering": {
+        "kind": "revise_pending_wording",
+        "evidence": "Verified this session: Project.materialize with output_dataset_id produces a durable object (has_object True), a catalog binding carrying the digest, and a persisted payload whose rows carry the framework-stamped evaluation_time; suite 953 -> 958 passed. Separately verified that flow/run.py carries 43 execution/fill/valuation references while project.py carries 19 mostly-declaration ones, and that showcases 003-008 exercise real long-short runs, KRX execution profiles, enhanced index and ensemble netting.",
+        "rationale": "Splitting the goal's stated status between the verified half and the open half prevents the next session from either redoing the persistence work or assuming the execution engine is already connected.",
+        "changedFields": [
+          "title",
+          "objective"
+        ]
+      },
+      "startedAt": "2026-08-24T17:55:27.189Z",
+      "completedAt": "2026-08-24T17:55:44.993Z",
+      "evidence": "Both halves done. Materialization: Project.materialize takes an explicit output_dataset_id that stages derived rows as one content-addressed object and binds it into the catalog, framework-stamped by evaluation_time, opt-in so nothing is written implicitly. Execution: new _internal/run_bridge.py plus a thin Project.simulate seam make the retained execution/valuation engine reachable from the supported surface, wrapping preflight_run and run unchanged rather than rewriting mature machinery. Flow/workspace imports are lazy, verified in a clean subprocess and mutation-confirmed by making one eager. FOUND AND FIXED A REAL BUG IN THE DELEGATED WORK by driving the actual show_003 showcase over real KRX data instead of trusting its unit tests: summarize counted accepted intents via isinstance(trace.result, AcceptedIntent) and returned accepted_intents=0 alongside executions=34, which cannot both be true. OccurrenceTrace.result is annotated object and carries a decision only for STRATEGY_CALLBACK dispatches. Fixed to read final_state.lifecycle_trace on LifecycleKind.ACCEPTED_INTENT. After the fix the summary reports occurrences=136, accepted_intents=34, executions=34, final_account_version=34, and all three cross-checks against the engine's own trace.json match exactly. Corrected the worker's test that had asserted the buggy value and added a regression test. Suite 958 -> 966 passed, ruff clean. No git add/commit/push.",
+      "completionVerification": {
+        "schemaVersion": 1,
+        "receiptId": "346196ed-cf79-4a41-843f-7bb7cb23ae25",
+        "verifiedAt": "2026-08-24T17:55:44.993Z",
+        "goalId": "G009",
+        "receiptKind": "per-goal",
+        "goalStatusBeforeCheckpoint": "active",
+        "gjcGoalMode": "aggregate",
+        "gjcObjective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+        "qualityGateHash": "8742d5db80f7eb94d86dbfb8bdeddc6effa283e6948f669cf504d619cbb44b04",
+        "planGeneration": "7242c6f1dad5070d1194f0b5d9f059cd3062fbbb8e8bc9563475171d8d763128",
+        "basis": {
+          "planHashBeforeCheckpoint": "84e4ff294731adb6fa4c587f6c16ab4fe84dfb03c764761b58b1bd350ab5c8be",
+          "latestRelevantLedgerEventIdBeforeCheckpoint": "d40ed1d1-2875-4b60-aea9-fcf8cd3f569d",
+          "goalUpdatedAtBeforeCheckpoint": "2026-08-24T17:55:44.993Z",
+          "relevantGoalIdsBeforeCheckpoint": [
+            "G009"
+          ],
+          "requiredGoalSetHashBeforeCheckpoint": "c25dfe4c4523973fe63ab5e5071f6abe779d304f357570ccc5e174d668a6fe51"
+        },
+        "checkpointLedgerEventId": "55940b4a-9aee-46ce-809e-5b26dbecc86f"
+      }
+    },
+    {
+      "id": "G008",
+      "title": "Hard-remove the old qlibx API, relocate retained authority, and seal the release pair",
+      "objective": "Only after the whole testbed passes the T0 trace/row comparator. This is the plan's T4 hard cutover, and it now correctly owns the PHYSICAL RELOCATION that a prior steer had wrongly placed in G004: the plan's transition table states T4 is where you 'physically move retained authorities to _internal, delete every old public/qualified route, update all qlibx/testbed references, and produce version 0.2.0a1 candidate', while T2 explicitly keeps the legacy path alive 'solely for baseline comparison'. Relocate src/vqapr/{flow,data,account,evidence,orders,valuation,constraints} beneath vqapr._internal - measured this session at 38 files and 8,139 lines with 70 files carrying inbound references - and rewrite every import to the private paths. Then delete vqapr.public and the former qualified lifecycle/storage/Flow/evidence routes outright, with no redirects, aliases, or compatibility shims. Prove the exact export surface and prove removed imports actually fail in a clean process, including vqapr.workspace, vqapr.flow.preflight, vqapr.flow.simulation, vqapr.data.store, vqapr.data.scan, vqapr.extension.loading, vqapr.extension.registration, vqapr.account.account, vqapr.evidence.recorder, and vqapr.public. Keep tests/boundaries/test_capability_absence.py green throughout: it enforces that importing a leaf capability does not drag heavier layers behind it, and it already caught one eager-import regression this session. Run source/docs/template scans for former paths. Build the 0.2.0a1 wheel, migrate the testbed to a non-editable dependency, resolve the lock from that wheel, and verify the Q/T/wheel/lock receipt agrees. Keep qlibx tests, ruff, build, isolated wheel, and showcases green. Do not tag, publish, or push.",
+      "status": "blocked",
+      "createdAt": "2026-08-24T16:04:20.750Z",
+      "updatedAt": "2026-08-24T17:57:26.780Z",
+      "steering": {
+        "kind": "revise_pending_wording",
+        "evidence": "The approved plan's transition states place physical relocation at T4 ('T4 - hard cutover: physically move retained authorities to _internal'), not at T2 ('T2 - transactional spine: ... Legacy path still exists solely for baseline comparison'). G004 is the T2 spine and is complete without the relocation; the live legacy flow/ path must survive until the testbed parity comparison in G006 has run against it. Measured scope: flow 9 files/4437 lines, data 9/1353, account 4/639, evidence 4/483, orders 3/583, valuation 4/235, constraints 5/409; 70 files hold inbound references.",
+        "rationale": "Correcting my own earlier mis-scoping against the plan's stated transition boundaries: relocating before the parity comparison would destroy the legacy baseline the comparison depends on, and the relocation is the same operation as the T4 deletion it is sequenced with.",
+        "changedFields": [
+          "title",
+          "objective"
+        ]
+      },
+      "startedAt": "2026-08-24T17:55:45.061Z",
+      "evidence": "Scheduler-activated ahead of its own prerequisite and ahead of owner approval. TWO independent reasons this cannot proceed now. (1) PLAN GATE: the approved plan's escalation gate states 'Do not begin T4 deletion/build Q unless all hold: ... whole testbed - including register.py - passes T0 trace/row comparator.' That comparator run is G010's deliverable and has not happened. Beginning T4 now would also destroy the legacy path that the parity comparison must run against, since T2 explicitly keeps it alive 'solely for baseline comparison'. (2) OWNER APPROVAL: this goal deletes vqapr.public, physically relocates 8,139 lines across 38 files with 70 inbound references, and cuts a breaking 0.2.0a1 whose rollback is a whole-cutover revert. Everything else in this run is reversible per the plan's stated rollback boundaries; this is not. The plan additionally contradicts itself on authority - its Approval State says it 'authorizes no source mutation' while its ordered step 10 says 'stop pending approval before commit/tag/push/release' after all ten implementation steps - and the terminal critic ruled step 10 controlling on the basis that the owner's standing constraints forbid exactly five git operations and that the owner committed d23ca03 rather than reverting it. That reading was cheap to act on for reversible work and is not cheap here. Blocking so G010's reversible dogfooding and parity work proceeds first; G008 resumes when the comparator passes AND the owner rules on the contradiction. No work was attempted or claimed under G008."
+    },
+    {
+      "id": "G010",
+      "title": "Resume dogfooding and testbed parity now that Project.simulate exists",
+      "objective": "G007 and G006 were both checkpointed blocked on a prerequisite that G009 has now delivered, so their blockers are resolved and the work is schedulable again. This sub-goal carries their combined remaining scope. FIRST, dogfood the package surfaces (former G007): migrate the 6 source files that import vqapr.public (agent/sample/{exchange,journey,reversal_5d}.py, cli/{register,run}.py, extension/scaffold.py) and the 9 showcase run.py files onto Project.register / Project.materialize with output_dataset_id / Project.simulate. show_002 is now unblocked because materialize persists and binds its output; showcases 003-008 are unblocked because Project.simulate reaches the execution and valuation engine. Perform NO deletion of old routes - that is T4 and belongs to G008. SECOND, migrate the factor testbed and prove parity (former G006): migrate register.py, models, materialization, simulation and atomic publication, and translate FactorPortfolio's self.memory monthly cadence (written models/factors.py:259, read :241) onto the previous_state/next_state channel, preserving the cheap cadence gate that short-circuits before any observation read on non-formation days. Assert against the T0 baseline captured this session: HML exactly 2,096 callback_days / 97 formations / 110,919 membership_rows; full locked set SMB 2096/97/173358, HML 2096/97/110919, RMW 2096/85/93788, CMA 2096/97/112691, MOM 2096/102/145568; Kimchi correlations SMB 0.971509, HML 0.972553, RMW 0.941883, CMA 0.917683, MOM 0.984659 to six decimals. Do not let the committed benchmark harness's compare_factors.py proxy (~2.14s) stand in for the plan's materialize/run/publish phase thresholds; compare against the recorded per-phase wall clock (run:HML 124.495s, run:SMB 149.622s, run:RMW 282.927s, run:CMA 201.910s, run:MOM 248.789s, factors total 1102.173s). Keep qlibx tests and ruff green. Do not git add, commit, push, or publish.",
+      "status": "active",
+      "createdAt": "2026-08-24T17:56:55.662Z",
+      "updatedAt": "2026-08-24T17:57:27.321Z",
+      "steering": {
+        "kind": "add_subgoal",
+        "evidence": "G009 was checkpointed complete this turn with a real 136-occurrence show_003 run whose summary cross-checks exactly against the engine's own trace.json (accepted_intents 34, occurrences 136, account version 34), and with Project.materialize output persistence verified to produce a durable digest-bound catalog entry. Those were the two named blockers on G007 and G006 respectively.",
+        "rationale": "Blocked goals stay unschedulable and would otherwise block final completion, while the scheduler had jumped to the irreversible T4 cutover. Carrying their resolved scope forward keeps the reversible work ahead of the approval-gated deletion."
+      },
+      "startedAt": "2026-08-24T17:57:27.321Z"
+    },
+    {
+      "id": "G011",
+      "title": "Settle the agent-first surface design before migrating further callers",
+      "objective": "Answer the three open questions in docs/design/agent-first-surface.md with the owner - how much a Simulation must declare at once, whether Python or YAML is the primary agent path, and whether the seven _internal bridges are the right shape - then migrate the remaining 6 src legacy consumers and 5 showcases against the settled design.",
+      "status": "pending",
+      "createdAt": "2026-08-25T05:52:09.276Z",
+      "updatedAt": "2026-08-25T05:52:09.276Z",
+      "steering": {
+        "kind": "add_subgoal",
+        "evidence": "G010 bundles two halves with different states, which is why pausing it whole was refused. TESTBED PARITY IS COMPLETE AND PROVEN: the migrated factor model reproduces the legacy model exactly on real data - 2,096 callback days and correct formation counts for all five factors, 636,324 individual weights equal decimal for decimal, and all five Kimchi correlations to six places (SMB .971509, HML .972553, RMW .941883, CMA .917683, MOM .984659) from datasets built entirely through the supported Project surface. The memory-to-state cadence translation the approved plan never named is implemented, mutation-verified and committed. DOGFOODING IS NOT COMPLETE and is blocked on a decision the owner reserved: 3 of 8 showcases migrated (001, 002, 004), 6 src legacy consumers remaining - agent/sample/exchange.py, agent/sample/journey.py, cli/register.py, cli/run.py, extension/scaffold.py, project.py. The owner stopped this work to redesign the surface from the caller inward rather than keep migrating callers onto a shape under active reconsideration. Answering the three questions first prevents migrating six more consumers onto a surface that then changes.",
+        "rationale": "Splitting G010 because its testbed-parity half is proven complete while its dogfooding half is blocked on a surface-design decision the owner explicitly reserved."
+      }
+    }
+  ],
+  "createdAt": "2026-08-24T16:01:33.846Z",
+  "updatedAt": "2026-08-25T05:52:09.276Z",
+  "repositoryBinding": {
+    "schema": "gjc.repository_binding.v1",
+    "worktreeRoot": "C:\\Users\\chlje\\DevProjects\\kwam-enhanced-index",
+    "commonDir": "C:\\Users\\chlje\\DevProjects\\kwam-enhanced-index\\.git",
+    "displayPath": "C:\\Users\\chlje\\DevProjects\\kwam-enhanced-index",
+    "head": "356430b59b9496a93508b116f6157ad00d8f2e71",
+    "branch": "develop"
+  },
+  "state_revision": 32
+}

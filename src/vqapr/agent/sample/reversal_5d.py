@@ -10,19 +10,16 @@ has stopped trading without either being a special case.
 from __future__ import annotations
 
 from decimal import Decimal
-from uuid import NAMESPACE_URL, uuid5
 
-from vqapr.public import (
-    Budget,
-    DataRequirement,
-    EconomicPortfolioIntent,
-    IntentSourceRef,
-    NoDecision,
-    PortfolioDirection,
-    PortfolioTarget,
+from vqapr.authoring import (
+    DatasetInput,
+    Hold,
+    Rebalance,
     RowsLookback,
     StrategyModel,
+    StrategyResult,
 )
+from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 STRATEGY_ID = "sample-reversal-5d"
 DATASET_ID = "sample-prices"
@@ -44,30 +41,35 @@ BUDGET = Budget(
 class SampleReversal5d(StrategyModel):
     """Buys the weakest recent performers in equal weight."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                STRATEGY_ID,
-                DATASET_ID,
+    def inputs(self):
+        return {
+            "prices": DatasetInput(
+                dataset_id=DATASET_ID,
                 fields=("close",),
-                lookback=RowsLookback(LOOKBACK),
+                lookback=RowsLookback(rows=LOOKBACK),
             ),
-        )
+        }
 
-    def on_occurrence(self, context):
-        rows = context.window.observations(self.requirements()[0]).rows
+    def decide(self, call):
+        rows = call.read("prices")
         closes: dict[str, list[Decimal]] = {}
         for row in rows:
-            if row["close"] is not None:
+            if row.values["close"] is not None:
                 # `Decimal(str(v))` rather than the raw cell: this file is copied against the
                 # reader's own dataset, and a parquet float64 column arrives as `float`, which
                 # raises on the `values[-1] / values[0] - Decimal(1)` below. The sample panel is
                 # decimal128, so the bug is invisible here and appears only after the copy.
-                closes.setdefault(str(row["instrument"]), []).append(Decimal(str(row["close"])))
+                closes.setdefault(row.instrument_id, []).append(
+                    Decimal(str(row.values["close"]))
+                )
 
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < SELECTED:
-            return NoDecision(f"fewer than {SELECTED} names carry the full lookback")
+            return StrategyResult(
+                decision=Hold(reason="incomplete-lookback"),
+                next_state=None,
+                diagnostics={},
+            )
 
         returns = {
             name: values[-1] / values[0] - Decimal(1) for name, values in eligible.items()
@@ -75,22 +77,15 @@ class SampleReversal5d(StrategyModel):
         weakest = sorted(returns, key=lambda name: (returns[name], name))[:SELECTED]
 
         weight = INVESTED / Decimal(SELECTED)
-        targets = tuple(PortfolioTarget(name, weight=weight) for name in sorted(weakest))
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, f"{STRATEGY_ID}/{context.occurrence.occurrence_id}"),
-            STRATEGY_ID,
-            targets,
-            Decimal(1) - weight * Decimal(SELECTED),
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        # Only the economics. The intent id, strategy id, source references and account
+        # version are framework facts: an author who minted them could get them wrong, and
+        # this file is the one a reader copies against their own dataset.
+        return StrategyResult(
+            decision=Rebalance(
+                target_weights={name: weight for name in sorted(weakest)},
+                cash_weight=Decimal(1) - weight * Decimal(SELECTED),
+                budget=BUDGET,
+            ),
+            next_state=None,
+            diagnostics={},
         )
-
-
-def _source_refs(context):
-    """Exactly the sources this callback read, in first-read order."""
-    seen: dict[str, str] = {}
-    for access in context.window.accesses:
-        seen.setdefault(access.source_id, access.source_digest)
-    return tuple(IntentSourceRef(source, digest) for source, digest in seen.items())

@@ -133,6 +133,53 @@ class CompletedRun:
     summary: SimulationSummary
     account: RunAccount | None
     tables: Mapping[str, tuple[Mapping[str, object], ...]]
+    # The engine result, retained so a run's allocation can be published without the
+    # caller reaching for it. It is deliberately not part of the readable surface: every
+    # value a caller needs is projected above, and handing back the raw result would make
+    # the bounded projection pointless.
+    _result: object = None
+
+    def publish_allocation(self, root, dataset_id: str, *, value_field: str = "weight"):
+        """Publish this run's accepted allocations as a readable dataset.
+
+        A run that cannot publish what it decided is not usable for research: the whole
+        point of the factor pipeline is that one run's allocation becomes the next run's
+        input. The evidence travels from the result rather than from the caller, so a
+        publication can only ever describe a run that actually happened.
+        """
+        from vqapr.public import AllocationPublicationSpec, publish_run_allocation
+
+        if self._result is None:
+            raise ValueError(
+                "this CompletedRun carries no result to publish; it was built for "
+                "readback only"
+            )
+        return publish_run_allocation(
+            root,
+            AllocationPublicationSpec.of(dataset_id, value_field=value_field),
+            self._result,
+        )
+
+    def publish_record(
+        self, root, dataset_id: str, *, table_id: str, value_fields: tuple[str, ...]
+    ):
+        """Publish one of this run's recorder tables as a readable dataset.
+
+        The same reasoning as `publish_allocation`: a recorded table that cannot be read
+        back is evidence nobody can check.
+        """
+        from vqapr.public import RunRecordSpec, publish_run_record
+
+        if self._result is None:
+            raise ValueError(
+                "this CompletedRun carries no result to publish; it was built for "
+                "readback only"
+            )
+        return publish_run_record(
+            root,
+            RunRecordSpec.of(dataset_id, table_id=table_id, value_fields=value_fields),
+            self._result,
+        )
 
     def table(self, table_id: str) -> tuple[Mapping[str, object], ...]:
         """One recorder table's rows. Raises for a table this run never recorded."""
@@ -166,4 +213,5 @@ def complete(result: object) -> CompletedRun:
         summary=summarize(result),
         account=account,
         tables=MappingProxyType(tables),
+        _result=result,
     )

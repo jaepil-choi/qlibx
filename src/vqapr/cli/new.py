@@ -29,6 +29,7 @@ level down.
 from __future__ import annotations
 
 import argparse
+from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ from vqapr.cli.envelope import success
 from vqapr.cli.inputs import InputError, refuse_existing
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.scaffold import render
+from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {"datamodel": ComponentKind.DATA_MODEL, "strategy": ComponentKind.STRATEGY_MODEL}
 
@@ -223,7 +225,7 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "kind",
-        choices=(*_KINDS, "dataset", "execution-input", "agendas", "run-spec"),
+        choices=(*_KINDS, "dataset", "execution-input", "agendas", "exchange", "run-spec"),
         help=(
             "scaffold a component (datamodel/strategy) or emit a template "
             "(dataset/execution-input/agendas/run-spec)"
@@ -234,6 +236,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         default=None,
         help="identity of the new component (required for datamodel/strategy, unused for run-spec)",
+    )
+    parser.add_argument(
+        "--instruments",
+        nargs="*",
+        default=None,
+        help="instrument ids to list on a new exchange (defaults to two placeholders)",
     )
     parser.add_argument(
         "--dataset",
@@ -268,6 +276,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
             requirement="datamodel and strategy require --dataset",
             observed="--dataset not given",
         )
+    _require_registered_dataset(args.dataset, project_root)
     kind = _KINDS[args.kind]
     source = render(
         kind,
@@ -304,6 +313,46 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     )
 
 
+def _require_registered_dataset(dataset_id: str, project_root: Path) -> None:
+    """Refuse to scaffold against a dataset that is not registered, BEFORE writing anything.
+
+    The scaffold's whole promise is that it runs as written. A component naming a dataset nobody
+    registered does not: it emits successfully, and then fails at `register` or `check` with a
+    refusal that names the component's requirement rather than the flag that caused it. The reader
+    is left holding two files they now have to delete.
+
+    An ABSENT workspace is not a refusal: `new` is the command typed in an empty directory, and
+    demanding a workspace before the first scaffold would make the first command fail. A CORRUPT
+    or unreadable one is a different thing entirely, and catching both together turned the loudest
+    case into the quietest -- the scaffold would be written against an unchecked dataset in exactly
+    the state that most needs a loud failure, and the user would meet a later refusal from
+    `register` naming the component's requirement rather than the flag that caused it.
+
+    `list_.py` faces the same choice and decides it the same way, for the reason recorded there: a
+    corrupt workspace must keep failing loudly. Existence is tested rather than inferred from an
+    exception, so the two cases stay distinguishable.
+    """
+    if not (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists():
+        return
+    registered = {str(item.dataset_id) for item in Workspace.open(project_root).datasets}
+
+    if dataset_id in registered:
+        return
+
+    known = ", ".join(sorted(registered)) or "(none registered)"
+    close = get_close_matches(dataset_id, sorted(registered), n=1)
+    raise InputError(
+        "cli.input.value_invalid",
+        requirement="--dataset must name a dataset this workspace has registered",
+        observed=f"{dataset_id!r}; registered: {known}",
+        retry=(
+            f"scaffold against {close[0]!r} instead"
+            if close
+            else "register the dataset first, then scaffold against it"
+        ),
+    )
+
+
 def _dataset_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     target = args.out or project_root / "dataset.yaml"
     refuse_existing(target, what="dataset declaration template")
@@ -328,6 +377,92 @@ def _agendas_template(args: argparse.Namespace, project_root: Path) -> dict[str,
     return success("template.new", kind="agendas", path=str(target))
 
 
+_EXCHANGE_TEMPLATE = '''"""A zero-friction Exchange listing the instruments this run may trade.
+
+Every instrument in a run's universe needs a listing here, or preflight refuses it by name. Edit
+the listing set below; the trade rule itself is usually the same for every name.
+"""
+
+from decimal import Decimal
+
+from vqapr.public import AcademicExchange, TradeRule
+
+
+def _rule(instrument_id: str) -> TradeRule:
+    """One instrument's trading regime.
+
+    `quantity_step` is the smallest tradable increment and `minimum_quantity` the smallest order.
+    Whole shares on most venues; set `fractional_allowed=True` and a fractional step if yours
+    permits fractions.
+    """
+    return TradeRule(
+        instrument_id=instrument_id,
+        quantity_step=Decimal(1),
+        minimum_quantity=Decimal(1),
+        fractional_allowed=False,
+    )
+
+
+class Venue(AcademicExchange):
+    """Fills every order completely at the venue price, with no cost or slippage.
+
+    `AcademicExchange` and `KrxExchange` are the only two profiles a registered Exchange may be.
+    This one is for research where execution friction is deliberately not being modelled.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(listings={{
+{listings}
+        }})
+'''
+
+_EXCHANGE_DECLARATION = """\
+# Registers the Exchange scaffolded beside this file:
+#   vqapr register <this file>
+components:
+  {component_id}:
+    kind: exchange
+    path: {path}
+    object_name: Venue
+"""
+
+
+def _exchange_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    """Emit a runnable Exchange plus the declaration that registers it.
+
+    This template exists because a first-time-user journey stalled here and could not finish.
+    Five of the six things a run needs had a scaffold; the Exchange did not, even though the
+    run-spec template names `exchange:` as required. The author had to discover from refusals that
+    only two profiles are permitted, then guess the shape of `listings` -- a mapping keyed by
+    instrument id whose values are `TradeRule`, a type no template, help text or skill section
+    ever named. Six consecutive guesses returned the identical error.
+
+    A Python file rather than YAML alone, because a `TradeRule` is a typed value with a Decimal
+    quantity step: expressing it in YAML would mean inventing a second spelling for something the
+    package already has one spelling for.
+    """
+    target = args.out or project_root / "exchange.py"
+    refuse_existing(target, what="exchange scaffold")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    instruments = getattr(args, "instruments", None) or ["A005930", "A000660"]
+    listed = "\n".join(
+        f'        "{name}": _rule("{name}"),' for name in instruments
+    )
+    target.write_text(_EXCHANGE_TEMPLATE.format(listings=listed), encoding="utf-8")
+
+    declaration = target.with_suffix(".yaml")
+    refuse_existing(declaration, what="exchange declaration")
+    declaration.write_text(
+        _EXCHANGE_DECLARATION.format(
+            component_id=args.component_id or "venue", path=target.name
+        ),
+        encoding="utf-8",
+    )
+    return success(
+        "template.new", kind="exchange", path=str(target), declaration=str(declaration)
+    )
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     if args.kind == "dataset":
         return _dataset_template(args, project_root)
@@ -335,6 +470,8 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         return _execution_input_template(args, project_root)
     if args.kind == "agendas":
         return _agendas_template(args, project_root)
+    if args.kind == "exchange":
+        return _exchange_template(args, project_root)
     if args.kind == "run-spec":
         return _run_spec(args, project_root)
     return _component(args, project_root)

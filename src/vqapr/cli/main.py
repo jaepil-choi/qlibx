@@ -19,22 +19,26 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
-from vqapr.cli import list_, new, register, run, skill
+from vqapr.cli import check, list_, new, register, run, show, skill
 from vqapr.cli.envelope import UsageError, emit, failure
 
 _COMMANDS: dict[str, Any] = {
     "new": new,
     "register": register,
+    "check": check,
     "run": run,
     "list": list_,
+    "show": show,
     "skill": skill,
 }
 
 _SUMMARIES: dict[str, str] = {
     "new": "scaffold a component, or emit a dataset/run-spec declaration template",
     "register": "validate a declaration and add what it declares to the workspace",
+    "check": "prove a run spec is ready, reporting every problem at once, without running it",
     "run": "freeze a run spec, preflight it, and execute the simulation",
     "list": "show what the workspace already holds",
+    "show": "answer questions about one finished run, from its frozen record",
     "skill": "install the agent skill into this project, or remove and inspect it",
 }
 """One line per verb, shown in `vqapr --help`.
@@ -67,16 +71,38 @@ _DESCRIPTIONS: dict[str, str] = {
         "This command mutates the workspace. It refuses with structured evidence rather than "
         "registering something partially."
     ),
+    "check": (
+        "Prove a run spec is ready, without running it.\n\n"
+        "Reports every INDEPENDENT problem at once rather than stopping at the first, so a "
+        "declaration can be repaired in one pass instead of one round trip per defect. A check "
+        "that could not run because an earlier one failed is reported as blocked, naming what "
+        "blocked it, so a partial report never looks complete.\n\n"
+        "vqapr writes nothing during a check. Note that judging a component means importing it, "
+        "and an imported module is user code that can do as it pleases; the guarantee is about "
+        "this package, not a sandbox."
+    ),
     "run": (
         "Freeze a run spec, preflight it, and execute the simulation.\n\n"
         "The spec names already-registered components by id; it does not redeclare them. "
         "Preflight refuses any drift between the spec and what is registered.\n\n"
-        "Write a starting spec with `vqapr new run-spec --out spec.yaml`."
+        "Write a starting spec with `vqapr new run-spec --out spec.yaml`, and prove it with "
+        "`vqapr check spec.yaml` before running it."
     ),
     "list": (
         "Show what the workspace already holds.\n\n"
         "Each row carries the identifiers needed as arguments to the next command. "
-        "An empty or uninitialised directory reports zero items and succeeds."
+        "An empty or uninitialised directory reports zero items and succeeds.\n\n"
+        "`list runs` reads finished run records rather than the workspace document, and finds "
+        "them by scanning: no index file means no shared target for concurrent runs to lose "
+        "each other's entries on."
+    ),
+    "show": (
+        "Answer questions about one finished run.\n\n"
+        "Reads the record the run froze to disk, so it answers from any process -- including "
+        "one started after the run ended, and including one that never saw the run at all. "
+        "Nothing is recomputed; re-running to answer a question about a run would be a "
+        "different run.\n\n"
+        "Use `vqapr list runs` to see which ids this store holds."
     ),
     "skill": (
         "Install the agent skill into this project, or remove and inspect it.\n\n"

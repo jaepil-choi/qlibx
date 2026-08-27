@@ -32,7 +32,20 @@
       "membership_date": "20260331"
     }
   ],
-  "rows": 88,
+  "etf_sleeve": [
+    {
+      "ticker": "A069500",
+      "name": "KODEX 200"
+    }
+  ],
+  "instrument_kinds": {
+    "A005930": "stock",
+    "A000660": "stock",
+    "A005380": "stock",
+    "A105560": "stock",
+    "A069500": "etf"
+  },
+  "rows": 110,
   "sessions": 22,
   "first_session": "2026-04-01 00:00:00",
   "last_session": "2026-04-30 00:00:00",

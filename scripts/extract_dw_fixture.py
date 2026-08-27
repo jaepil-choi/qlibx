@@ -46,6 +46,25 @@ VENUE_ZONE = "Asia/Seoul"
 WEIGHT_UNIT = "fraction"
 """The vendor publishes index weights in percent; the fixture stores fractions."""
 
+ETF_SLEEVE: tuple[tuple[str, str], ...] = (
+    ("A069500", "KODEX 200"),
+)
+"""Index ETFs added to the traded slice but never to the benchmark.
+
+The warehouse price file cannot tell a share from an ETF -- its sixteen columns are all price,
+volume and status, and `상장구분` is a listing-status code rather than a category. So the fixture
+cannot discover its own ETFs; it has to be told, and this tuple is where it is told.
+
+**These names join the traded slice and never the benchmark.** An index ETF tracks the index, it
+is not a constituent of it, so a weight row for one would make the fixture assert something the
+vendor never published. `dw_slice` therefore carries the sleeve while the benchmark query stays
+bound to the membership file.
+
+One name is enough and more would not buy anything. What the sleeve exists to prove is that a
+venue charges an ETF differently from a share -- KRX exempts the sale tax a share pays -- and a
+second ETF exercises the identical branch. Sized to the question, not to the asset class.
+"""
+
 WEIGHT_SCALE = 8
 """One declared fraction scale for every committed benchmark weight.
 
@@ -187,8 +206,25 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
     con = duckdb.connect()
     try:
         universe = _universe(con, spec)
-        tickers = [str(row["ticker"]) for row in universe]
+        members = [str(row["ticker"]) for row in universe]
+        sleeve = [ticker for ticker, _ in ETF_SLEEVE]
+        # The traded slice is members plus the sleeve; the benchmark below stays members-only.
+        tickers = members + sleeve
         _slice(con, spec, tickers)
+
+        missing = [
+            ticker
+            for ticker in sleeve
+            if con.execute(
+                "SELECT count(*) FROM dw_slice WHERE instrument = ?", [ticker]
+            ).fetchone()[0]
+            == 0
+        ]
+        if missing:
+            raise ValueError(
+                f"ETF sleeve {missing} has no price rows in {spec.start}..{spec.end}; "
+                "a sleeve the window cannot price would ship an ETF that never trades"
+            )
 
         sessions = con.execute(
             "SELECT count(DISTINCT session_date), min(session_date), max(session_date)"
@@ -231,7 +267,7 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
                    m."{MEMBER_TICKER}" AS instrument,
                    m."{MEMBER_WEIGHT}" AS raw_weight
             FROM {_csv(MEMBERS)} m
-            WHERE m."{MEMBER_TICKER}" IN ({", ".join(_literal(t) for t in tickers)})
+            WHERE m."{MEMBER_TICKER}" IN ({", ".join(_literal(t) for t in members)})
               AND m."{MEMBER_DATE}" BETWEEN {_literal(spec.start)} AND {_literal(spec.end)}
               AND strptime(m."{MEMBER_DATE}", '%Y%m%d')
                   IN (SELECT DISTINCT session_date FROM dw_slice)
@@ -287,6 +323,14 @@ def extract(spec: FixtureSpec, out_dir: Path) -> dict[str, object]:
             "universe_size": spec.universe_size,
         },
         "universe": universe,
+        # The one place the fixture states a category. Nothing downstream can re-derive this from
+        # the parquet: an ETF's rows are shaped exactly like a share's, which is the defect the
+        # sleeve exists to exercise. A consumer that needs kinds reads them here.
+        "etf_sleeve": [{"ticker": ticker, "name": name} for ticker, name in ETF_SLEEVE],
+        "instrument_kinds": {
+            **{str(row["ticker"]): "stock" for row in universe},
+            **{ticker: "etf" for ticker, _ in ETF_SLEEVE},
+        },
         "rows": rows,
         "sessions": sessions[0],
         "first_session": str(sessions[1]),

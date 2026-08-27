@@ -327,7 +327,12 @@ def test_criterion_12_a_flexible_budget_is_not_silently_made_fixed(
     gross = sum(abs(value) for value in combined.values())
     narrowed = {name: value / 2 for name, value in combined.items()}
 
-    assert sum(abs(v) for v in narrowed.values()) == gross / 2, (
+    # Compared within a quantum rather than exactly. `sum(x / 2)` and `sum(x) / 2` are the same
+    # number and not the same Decimal: dividing each weight first resolves a digit the summed form
+    # never reaches, so the two drift by ~1e-29 once the universe is large enough to expose it.
+    # Pinning exact equality would make this test a function of how many names the fixture holds,
+    # which is not what it is measuring.
+    assert abs(sum(abs(v) for v in narrowed.values()) - gross / 2) < Decimal("1e-24"), (
         "a Strategy that narrows its own book keeps the narrowing"
     )
 

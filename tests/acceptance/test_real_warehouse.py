@@ -113,9 +113,16 @@ def _instant(day: date, at: time) -> datetime:
 def test_committed_fixture_carries_only_genuine_sessions(
     manifest: dict[str, object], observation_path: Path
 ) -> None:
-    assert manifest["rows"] == 88
+    # 5 instruments x 22 sessions: 4 index members plus the ETF sleeve. The sleeve trades and is
+    # observed, so it is in these rows; it is not an index constituent, so it is absent from the
+    # benchmark, which is why benchmark_rows stays at the members-only 88.
+    assert manifest["rows"] == 110
     assert manifest["sessions"] == 22
     assert manifest["halted_rows"] == 0
+    assert manifest["benchmark_rows"] == 88
+    assert manifest["benchmark_coverage"] == 4
+    assert manifest["instrument_kinds"]["A069500"] == "etf"
+    assert sum(1 for kind in manifest["instrument_kinds"].values() if kind == "etf") == 1
 
     con = duckdb.connect()
     try:

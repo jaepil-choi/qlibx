@@ -41,6 +41,13 @@ showcases/show_*/outputs/
 /.gjc/
 /.gjc-evidence/
 
+# The installed-package testbed is a MEASUREMENT workspace, not source: a generated .vqapr/
+# catalog, parquet fixtures, a run record, and scaffolds emitted by the CLI under test. Its whole
+# point is to be rebuilt from scratch by a first-time user, so a committed copy would be a stale
+# answer to a question the next run has to ask again. Only its rules file is worth keeping.
+/testbed/**
+!/testbed/AGENTS.md
+
 # Agent tooling scratch. This is a Python package: a node dependency tree here belongs to the
 # harness that drove a session, never to the distribution, and `git add -A` will otherwise sweep
 # 101MB of it into a commit.

@@ -1,0 +1,311 @@
+"""Adversarial attack on claim 4: run records survive their process, and races are refused.
+
+Three attacks, each stronger than what `tests/flow/test_run_records.py` already covers:
+
+1. A run killed mid-write, via `subprocess` + `terminate()` rather than a hand-written partial
+   record -- a real killed process leaves rows and no `record.json`, and `run_ids` must not list
+   it.
+2. Five processes racing to write the SAME run id concurrently -- the collision must be refused
+   (one writer wins, four raise `FileExistsError`), never interleaved into a record that belongs
+   to neither.
+3. A `record.json` deliberately corrupted after a successful `finish()` -- truncated to invalid
+   JSON, and separately, valid JSON that is not a mapping -- and `read_record` must fail loudly
+   rather than return a half-answer or silently coerce.
+
+`multiprocessing.spawn` needs picklable top-level functions on Windows, so the killed-process and
+racing-processes attacks each drive a standalone script via `subprocess.Popen` instead of
+`multiprocessing.Process` with a lambda or closure.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from vqapr.flow.run_records import RECORD_FILENAME, RunRecordWriter, read_record, run_ids
+
+pytestmark = pytest.mark.concurrency
+
+_KILL_SCRIPT = """
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, {src!r})
+from vqapr.flow.run_records import RunRecordWriter
+
+
+def main() -> None:
+    root, run_id = sys.argv[1], sys.argv[2]
+    writer = RunRecordWriter(Path(root), run_id)
+    writer.open()
+    for i in range(2000):
+        writer.append("vqapr.account", [{{"instrument": "_ACCOUNT", "nav": str(1000 + i)}}])
+        time.sleep(0.02)
+    writer.finish({{"account": {{"version": 2000}}}})
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+_RACE_SCRIPT = """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, {src!r})
+from vqapr.flow.run_records import RunRecordWriter
+
+
+def main() -> None:
+    root, run_id, index = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    writer = RunRecordWriter(Path(root), run_id)
+    try:
+        writer.open()
+    except FileExistsError:
+        print("REFUSED")
+        return
+    writer.append("vqapr.account", [{{"instrument": "_ACCOUNT", "nav": str(index)}}])
+    writer.finish({{"account": {{"version": index}}}})
+    print("SUCCEEDED")
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+@pytest.fixture
+def _src_root() -> str:
+    return str(Path(__file__).resolve().parents[2] / "src")
+
+
+def _write_script(tmp_path: Path, name: str, template: str, src_root: str) -> Path:
+    script = tmp_path / name
+    script.write_text(template.format(src=src_root), encoding="utf-8")
+    return script
+
+
+def test_a_process_killed_mid_write_leaves_rows_and_no_record(
+    tmp_path: Path, _src_root: str
+) -> None:
+    """A real `terminate()`, not a hand-authored partial record.
+
+    `tests/flow/test_run_records.py::test_an_unfinished_run_is_not_listed_as_a_finished_one`
+    writes rows and then simply never calls `finish()` in the same process -- it never actually
+    kills anything. This drives a genuinely separate OS process and kills it externally, which is
+    the scenario `finish()`'s "atomic replace, last" design is actually defending against.
+    """
+    store = tmp_path / "store"
+    store.mkdir()
+    script = _write_script(tmp_path, "kill_probe.py", _KILL_SCRIPT, _src_root)
+
+    proc = subprocess.Popen([sys.executable, str(script), str(store), "killed-run"])
+    time.sleep(0.6)
+    proc.terminate()
+    proc.wait(timeout=180)
+
+    assert run_ids(store) == (), "a killed run must not be listed as finished"
+    assert not (store / "runs" / "killed-run" / RECORD_FILENAME).exists()
+    tables_dir = store / "runs" / "killed-run" / "tables"
+    assert tables_dir.exists() and any(tables_dir.glob("*.jsonl")), (
+        "the rows written before the kill should still be on disk -- append-as-you-go, not "
+        "flush-at-the-end, is the whole point of the layout"
+    )
+
+
+def test_five_processes_racing_the_same_run_id_refuse_rather_than_interleave(
+    tmp_path: Path, _src_root: str
+) -> None:
+    """Five independent OS processes contend for one run id. Exactly one may win.
+
+    `tests/flow/test_run_records.py` only ever exercises DISTINCT run ids in parallel (AC-R4) or
+    a same-process double-`open()` (which proves the check exists, not that it holds under real
+    contention). This launches five real processes at the same shared id and checks that the
+    result is a clean single winner, never a record whose fields came from more than one writer.
+    """
+    store = tmp_path / "store"
+    store.mkdir()
+    script = _write_script(tmp_path, "race_probe.py", _RACE_SCRIPT, _src_root)
+
+    processes = [
+        subprocess.Popen(
+            [sys.executable, str(script), str(store), "shared-id", str(index)],
+            stdout=subprocess.PIPE,
+            # stderr too, so a crashing child reports its own cause. Without it the assertion
+            # below can only say a writer crashed, and the traceback that would explain WHY is
+            # discarded -- which is how this failure stayed unexplained across several runs.
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        for index in range(5)
+    ]
+    # 180s, matching the sibling race test below, not because a race takes that long -- it takes
+    # milliseconds -- but because five Python interpreters STARTING can exceed a tight budget when
+    # the full suite is already loading the machine. Measured: this passed 10/10 in isolation and
+    # failed once inside a full run at 30s, which is a harness timeout wearing a product defect's
+    # error message.
+    outputs = [proc.communicate(timeout=180)[0].strip() for proc in processes]
+    for proc, output in zip(processes, outputs, strict=True):
+        assert proc.returncode == 0, (
+            f"a racing writer crashed instead of refusing cleanly:\n{output}"
+        )
+
+    # KNOWN FLAKE, measured rather than assumed: roughly 1 run in 12 sees TWO winners, because a
+    # peer can observe the directory after another process created it but before that process
+    # wrote its lock, conclude the id is abandoned, and take it too.
+    #
+    # It is asserted rather than tolerated because the property is real and the failure is the
+    # signal. Two attempts to close the window -- replacing the stale lock atomically, then
+    # reordering so the lock precedes the directory -- each made it MORE frequent (9/12 and 12/12
+    # failures) and were reverted. `src/vqapr/flow/run_records.py` documents the window at the
+    # recovery branch. Closing it properly needs a single atomic create-and-claim, which this
+    # filesystem does not offer directly.
+    succeeded = [line for line in outputs if line == "SUCCEEDED"]
+    refused = [line for line in outputs if line == "REFUSED"]
+    assert len(succeeded) == 1, f"expected exactly one winner, got {outputs}"
+    assert len(refused) == 4, f"expected four refusals, got {outputs}"
+
+    assert run_ids(store) == ("shared-id",)
+    record = read_record(store, "shared-id")
+    # The record's own version must be a single consistent integer 0-4, not some corrupted mix.
+    assert record["account"]["version"] in range(5)
+
+
+def test_a_truncated_record_json_fails_loudly_rather_than_partially(tmp_path: Path) -> None:
+    """A `record.json` truncated after a successful write -- e.g. disk full, or a copy that was
+    itself interrupted -- must not be silently read as a partial or default record.
+    """
+    writer = RunRecordWriter(tmp_path, "truncated-run")
+    writer.open()
+    writer.append("vqapr.account", [{"instrument": "_ACCOUNT", "nav": "1000"}])
+    writer.finish({"account": {"version": 1}})
+
+    record_path = tmp_path / "runs" / "truncated-run" / RECORD_FILENAME
+    whole = record_path.read_text(encoding="utf-8")
+    record_path.write_text(whole[: len(whole) // 2], encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        read_record(tmp_path, "truncated-run")
+
+
+def test_valid_json_that_is_not_a_mapping_is_not_silently_treated_as_a_record(
+    tmp_path: Path,
+) -> None:
+    """A `record.json` that parses as JSON but is not the expected shape -- a list, say.
+
+    `read_record` is `json.loads(path.read_text(...))` with no shape validation at all: this pins
+    exactly what happens (a list is returned as-is, not refused), so a caller relying on
+    `record["account"]` gets a `TypeError` two frames away from the actual defect rather than a
+    refusal naming the corrupted file. Not asserted as BROKEN outright -- `read_record`'s own
+    docstring only promises "one run's frozen facts, exactly as they were written" and never
+    promises shape validation -- but the absence of a check here is exactly the kind of thing a
+    QA lane should make visible rather than assume.
+    """
+    writer = RunRecordWriter(tmp_path, "shape-run")
+    writer.open()
+    writer.finish({"account": {"version": 1}})
+
+    record_path = tmp_path / "runs" / "shape-run" / RECORD_FILENAME
+    record_path.write_text(json.dumps(["not", "a", "mapping"]), encoding="utf-8")
+
+    result = read_record(tmp_path, "shape-run")
+    assert result == ["not", "a", "mapping"], (
+        "read_record silently accepted a non-mapping payload with no shape check; if this "
+        "assertion ever fails because a check was added, that is an improvement, update this pin"
+    )
+    with pytest.raises(TypeError):
+        _ = result["account"]  # type: ignore[call-overload]
+
+
+def test_concurrent_force_runs_never_blend_two_runs_into_one_record(tmp_path: Path) -> None:
+    """`--force` may be won several times; it must never produce a record that is neither run.
+
+    Multiple winners are correct here rather than a defect: each `--force` legitimately re-claims
+    an id the previous holder released, which is what forcing means. "Exactly one winner" is the
+    wrong invariant to assert of it.
+
+    The right one is that whatever survives is ONE run's. The implementation this replaced --
+    remove-then-create behind the flag -- failed exactly that, and looked fine because the flag was
+    assumed to be single-writer. Measured before the fix: blended records plus raw OSError and
+    PermissionError escaping as `stage: "unhandled"`.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    from vqapr.flow.run_records import read_table
+
+    runner = tmp_path / "forcer.py"
+    runner.write_text(
+        textwrap.dedent(
+            """
+            import sys, pathlib, time
+            from vqapr.flow.run_records import (
+                RunRecordExists,
+                RunRecordLive,
+                RunRecordTaken,
+                RunRecordWriter,
+            )
+            root, run_id, nav = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+            # Converge before racing: interpreter startup is seconds, the contended window is
+            # microseconds, so without a barrier these arrive one at a time and never collide.
+            gate = pathlib.Path(sys.argv[4])
+            while not gate.exists():
+                time.sleep(0.002)
+            try:
+                writer = RunRecordWriter(root, run_id)
+                writer.open(replace=True)
+                writer.append("vqapr.account", [{"nav": nav}])
+                writer.finish({"account": {"version": int(nav)}})
+                print("SUCCEEDED")
+            except (RunRecordExists, RunRecordLive, RunRecordTaken):
+                print("REFUSED")
+            except OSError as error:
+                # A raw OSError here is the defect: it escapes the CLI as stage "unhandled",
+                # telling an agent the framework broke when two runs simply competed for one id.
+                print(f"LEAKED:{type(error).__name__}")
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    store = tmp_path / "store"
+    gate = tmp_path / "GO"
+    seed = RunRecordWriter(store, "shared")
+    seed.open()
+    seed.finish({"account": {"version": 0}})
+
+    processes = [
+        subprocess.Popen(
+            [sys.executable, str(runner), str(store), "shared", str(index + 1), str(gate)],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        for index in range(5)
+    ]
+    # Let every process reach the gate, then release them together. Interpreter startup is
+    # seconds and the contended window is microseconds, so without this they arrive one at a
+    # time and never actually race.
+    time.sleep(2.0)
+    gate.write_text("go", encoding="utf-8")
+    outcomes = [process.communicate(timeout=180)[0].strip() for process in processes]
+
+    # Every outcome is a decision, not a crash. This is the reliably-detectable half: the
+    # implementation this replaced leaked a raw OSError or PermissionError in 19 of 20 measured
+    # races, where an actual blend appeared in only 2 of 20.
+    leaked = [outcome for outcome in outcomes if outcome.startswith("LEAKED:")]
+    assert leaked == [], f"a racing --force crashed instead of refusing: {leaked}"
+
+    rows = [row["nav"] for row in read_table(store, "shared", "vqapr.account")]
+    version = read_record(store, "shared")["account"]["version"]
+    assert len(rows) == 1, f"the record holds rows from more than one run: {rows}"
+    assert rows[0] == str(version), (
+        f"the record's rows ({rows}) and its own account version ({version}) came from different "
+        "runs, so this is a blend rather than one run's record"
+    )

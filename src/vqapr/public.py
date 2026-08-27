@@ -19,6 +19,7 @@ from vqapr.analysis.signal import (
     information_coefficient,
     rank_information_coefficient,
 )
+from vqapr.authoring import DatasetInput, Hold, Rebalance, StrategyResult
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.evaluation import constraint_requirements as declared_constraint_requirements
@@ -85,6 +86,7 @@ from vqapr.flow.materialize import (
 )
 from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
+from vqapr.flow.run_records import RECORD_FIELDS, RunRecordWriter
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow, SimulationResult, callback_evidence
 from vqapr.models.contexts import DataModelContext, StrategyModelContext
@@ -144,6 +146,7 @@ __all__ = (
     "DataModel",
     "DataModelContext",
     "DataRequirement",
+    "DatasetInput",
     "DatasetRegistration",
     "EconomicPortfolioIntent",
     "EtfInstrument",
@@ -158,6 +161,7 @@ __all__ = (
     "FillSelector",
     "FrozenAgenda",
     "FrozenRun",
+    "Hold",
     "IndexInstrument",
     "Instrument",
     "InstrumentKind",
@@ -180,6 +184,7 @@ __all__ = (
     "OptimizeResult",
     "PortfolioDirection",
     "PortfolioTarget",
+    "Rebalance",
     "RowsLookback",
     "RunDefinition",
     "RunRecordResult",
@@ -193,6 +198,7 @@ __all__ = (
     "StrategyConfig",
     "StrategyModel",
     "StrategyModelContext",
+    "StrategyResult",
     "TableSpec",
     "TickerNetting",
     "TradeRule",
@@ -257,9 +263,12 @@ def register_dataset(
     새 등록이면 ``True``, 디스크에 이미 같은 선언이 있으면 ``False``다. 검증이나 persistence가
     실패하면 ``VqaprError``를 발생시키며, 검증 실패는 workspace를 만들거나 바꾸지 않는다.
     """
-    diagnosis, _ = validate(registration, source)
+    diagnosis, _, measured = validate(registration, source)
     diagnosis.raise_if_failed()
-    return Workspace.create(project_root).register_dataset(registration, source)
+    # `measured` is the registration with its span filled in from the scan validation just ran.
+    # Registering the caller's copy instead would persist a declaration missing the one fact only
+    # a full read can establish, and the next reader would have to read the file again to get it.
+    return Workspace.create(project_root).register_dataset(measured, source)
 
 
 def component_ref(
@@ -342,8 +351,19 @@ class _FrozenCatalog:
 def run(
     project_root: str | Path,
     frozen_run: FrozenRun,
+    *,
+    store_root: str | Path | None = None,
+    run_id: str | None = None,
+    replace_record: bool = False,
 ) -> SimulationResult:
-    """Execute exactly one simulation from a preflight-produced frozen authority."""
+    """Execute exactly one simulation from a preflight-produced frozen authority.
+
+    When `store_root` is given the run freezes its own record beneath it, which is what makes the
+    result readable by any later process -- including `show run` from a cold one, and including the
+    other four of five concurrent runs. Omitted, the run keeps its results in memory exactly as
+    before: an in-process caller that already holds the result should not be made to write it to
+    disk to get it.
+    """
     if not isinstance(frozen_run, FrozenRun):
         raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
     root_path = Path(project_root)
@@ -385,6 +405,10 @@ def run(
     initial_ref = state.root.current_model_state_ref
     if initial_ref is None or state.load_payload(initial_ref) != frozen.initial_payload:
         raise RuntimeError("initial Strategy payload does not match frozen run authority")
+    writer = None
+    if store_root is not None:
+        writer = RunRecordWriter(Path(store_root), run_id or str(frozen.identity))
+        writer.open(replace=replace_record)
     flow = SimulationFlow(
         frozen,
         strategy,
@@ -412,8 +436,133 @@ def run(
         exchange=exchange,
         constraints=constraints,
         scan_session=session,
+        # The run's liveness signal. Without it the record's lock is stamped once at `open` and
+        # never touched again until the run ends -- so any run longer than `LOCK_STALE_AFTER`
+        # reads as dead WHILE STILL EXECUTING, and a peer takes its id and deletes its tables. A
+        # factor run here takes three to six minutes against a two-minute window, so that is every
+        # real run, not an edge case.
+        on_progress=writer.heartbeat if writer is not None else None,
     )
     try:
-        return flow.run()
+        result = flow.run()
+        if writer is not None:
+            _freeze_record(writer, result, frozen)
+    except BaseException:
+        # A run that died still holds its id. Releasing here turns a crash into an ordinary
+        # retry instead of stranding the id until the lock goes stale. `_freeze_record` is inside
+        # the guard for the same reason: a failure while writing the record is still a failure
+        # that must not keep the id.
+        if writer is not None:
+            writer.release()
+        raise
     finally:
         session.close()
+    return result
+
+
+def _freeze_record(writer: RunRecordWriter, result: SimulationResult, frozen: FrozenRun) -> None:
+    """Write the run's rows and its own facts, so a later process can answer questions about it.
+
+    The rows go first and the record last, because `record.json` existing is what marks the record
+    complete. A reader that finds one knows the run reached its end; a run killed midway leaves its
+    rows and no record, which `run_ids` correctly declines to list as a finished run.
+    """
+    recorded = result.final_state.recorder_rows
+    for table_id, rows in sorted(recorded.items()):
+        writer.append(table_id, rows)
+
+    account = result.final_state.account
+    snapshot = None if account is None else account.snapshot
+
+    # AC-R3's five: the facts a later reader cannot reconstruct from the rows alone. Each is built
+    # by the function `RECORD_FIELDS` names, so the field set is genuinely ONE list rather than two
+    # with a comparison between them -- a field added here without a builder is a KeyError at the
+    # comprehension below, not a drift that reaches disk and waits to be noticed.
+    builders = {
+        "account": lambda: None
+        if snapshot is None
+        else {
+            "version": snapshot.version,
+            "cash": snapshot.cash,
+            "positions": dict(snapshot.positions),
+        },
+        "tables": lambda: {
+            table_id: {
+                "rows": len(rows),
+                # Formations, not just rows: a diagnostic table's row count says how much was
+                # written, and the distinct event_time count says how often. Research asks the
+                # second question and the first cannot answer it.
+                "formations": len({str(row.get("event_time")) for row in rows}),
+            }
+            for table_id, rows in sorted(recorded.items())
+        },
+        "contract": lambda: _contract_report(result),
+        "source_digest": lambda: str(frozen.identity),
+        "period": lambda: {
+            "start": frozen.start,
+            "end": frozen.end,
+            "occurrences": len(result.occurrences),
+        },
+    }
+
+    # `run_id` is stamped by the writer itself, so it is the one field this does not supply.
+    writer.finish({field: builders[field]() for field in RECORD_FIELDS if field != "run_id"})
+
+
+def _contract_report(result: SimulationResult) -> dict[str, object]:
+    """What the run's constraints promised, and how often each was actually checked.
+
+    `held` and `checked` are two different numbers, and conflating them hides the case that matters
+    most: a declaration checked zero times is not a declaration that held. It is one nobody asked
+    about, and reporting that as `ok` would be the strongest false assurance this record could
+    carry. So a constraint with `checked == 0` reports `ok: false` with a `cause` saying exactly
+    that.
+
+    Scope, stated rather than implied: this reports the CONSTRAINTS a run declared. AC-R6 also
+    names `weights`/`forms`/`records`, which are the authoring contract's declarations -- they do
+    not exist yet, and inventing entries for them here would report a promise nobody made. They
+    join this block when that contract lands.
+    """
+    from vqapr.flow.run_state import LifecycleKind
+
+    findings: dict[str, dict[str, int]] = {}
+    for entry in getattr(result.final_state, "lifecycle_trace", ()):
+        evidence = getattr(entry, "evidence", None)
+        for item in getattr(evidence, "intended", ()) or ():
+            finding = getattr(item, "finding", None)
+            constraint_id = str(getattr(finding, "constraint_id", "") or "")
+            if not constraint_id:
+                continue
+            counts = findings.setdefault(constraint_id, {"held": 0, "checked": 0})
+            counts["checked"] += 1
+            if getattr(finding, "passed", False):
+                counts["held"] += 1
+
+    accepted = sum(
+        1
+        for entry in getattr(result.final_state, "lifecycle_trace", ())
+        if getattr(entry, "kind", None) is LifecycleKind.ACCEPTED_INTENT
+    )
+    report: dict[str, object] = {}
+    for constraint_id, counts in sorted(findings.items()):
+        violations = counts["checked"] - counts["held"]
+        entry: dict[str, object] = {
+            "held": counts["held"],
+            "checked": counts["checked"],
+            "ok": violations == 0 and counts["checked"] > 0,
+        }
+        if violations:
+            entry["cause"] = f"{violations} of {counts['checked']} check(s) did not hold"
+            entry["fix"] = (
+                f"loosen {constraint_id} to a bound the strategy can meet, or change the "
+                "strategy so its intents satisfy it"
+            )
+        elif counts["checked"] == 0:
+            entry["cause"] = "declared but never checked, so nothing was proven about it"
+            entry["fix"] = "remove the declaration, or run over a period where it is exercised"
+        report[constraint_id] = entry
+
+    # A run that accepted intents while checking no constraint is not a clean run; it is a run
+    # nobody constrained. Saying so is the point of reporting counts rather than a verdict.
+    report["accepted_intents"] = accepted
+    return report

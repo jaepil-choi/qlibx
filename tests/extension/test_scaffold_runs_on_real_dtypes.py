@@ -47,7 +47,7 @@ from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model, load_strategy_model
 from vqapr.extension.scaffold import render
 from vqapr.models.contexts import DataModelContext, StrategyModelContext
-from vqapr.public import Workspace, register_data_model, register_strategy_model
+from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 
 KST = ZoneInfo("Asia/Seoul")
@@ -91,8 +91,9 @@ def float_price_parquet(tmp_path_factory) -> Path:
 
 
 def _workspace(project: Path, prices: Path) -> Workspace:
-    workspace = Workspace.create(project)
-    workspace.register_dataset(
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(
+        project,
         DatasetRegistration.of(
             "price_daily",
             "prices",
@@ -103,7 +104,7 @@ def _workspace(project: Path, prices: Path) -> Workspace:
         ),
         SourceSpec.of("prices", prices),
     )
-    return workspace
+    return Workspace.open(project)
 
 
 def _window(workspace: Workspace, requirement: DataRequirement) -> ModelWindow:

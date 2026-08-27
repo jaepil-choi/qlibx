@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.domain.timestamps import at_local, require_tz_aware, shift_calendar
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.portfolio.optimize import QUANTUM
 
 __all__ = (
     "AccountHistoryInput",
@@ -565,6 +566,49 @@ class Hold:
         object.__setattr__(self, "reason", _identifier(self.reason, name="reason"))
 
 
+def _as_decimal(value: Decimal | int | float | str, *, name: str) -> Decimal:
+    """One conviction as an exact Decimal.
+
+    `Decimal(str(v))` for a float rather than `Decimal(v)`: a float64 `0.1` is not one tenth, and
+    binding the binary expansion here would put the error into every weight downstream.
+    """
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise TypeError(f"{name} must be a Decimal, int, float, or string")
+    try:
+        return Decimal(str(value))
+    except ArithmeticError as invalid:
+        raise ValueError(f"{name} must be a finite number; got {value!r}") from invalid
+
+
+def _relative_side(
+    declared: Mapping[str, Decimal | int | float | str] | None, *, name: str
+) -> dict[str, Decimal]:
+    """One side of the book as positive relative convictions.
+
+    A short is declared by WHICH MAPPING it appears in, never by its sign, so `short={"A": 2}`
+    means twice as short rather than half as long. Accepting a negative here would give one
+    intention two spellings that disagree.
+    """
+    if declared is None:
+        return {}
+    if not isinstance(declared, Mapping):
+        raise TypeError(f"{name} must be a mapping of instrument to relative weight")
+    side: dict[str, Decimal] = {}
+    for instrument, raw in declared.items():
+        conviction = _as_decimal(raw, name=f"{name}[{instrument!r}]")
+        if not conviction.is_finite():
+            raise ValueError(f"{name}[{instrument!r}] must be finite")
+        if conviction <= 0:
+            raise ValueError(
+                f"{name}[{instrument!r}] must be positive: a side is chosen by which mapping the "
+                f"name appears in, not by the sign of its weight"
+            )
+        side[_identifier(instrument, name="instrument")] = conviction
+    return side
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Rebalance:
     """A Strategy decision naming one complete desired portfolio."""
@@ -572,6 +616,128 @@ class Rebalance:
     target_weights: Mapping[str, Decimal]
     cash_weight: Decimal
     budget: Budget
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        long: Mapping[str, Decimal | int | float | str] | None = None,
+        short: Mapping[str, Decimal | int | float | str] | None = None,
+        invested: Decimal | int | float | str = 1,
+    ) -> Rebalance:
+        """Build a portfolio from RELATIVE conviction, letting the package do the arithmetic.
+
+        The author says which names they like and how much they like them relative to each other.
+        Everything that follows -- normalising each side, splitting the invested fraction between
+        the sides, rounding onto the canonical grid, and making the whole thing add up with cash
+        -- is arithmetic with exactly one right answer, and a research author who does it by hand
+        is spending attention on bookkeeping instead of on the signal.
+
+        `invested` is GROSS exposure, so a dollar-neutral long/short book at `invested=1` puts the
+        whole book to work and still nets to zero; its cash is 1. A short-only book's cash exceeds
+        1, because selling short raises cash. Cash is always the NET residual, never
+        `1 - invested`.
+
+        Two sides are currently split evenly, so a 130/30 cannot be expressed through this
+        constructor. Stated rather than implied, because the even split is a choice and not a
+        law.
+
+        Doing it by hand is also where the errors live: the sum must land on one EXACTLY, and a
+        weight that misses by a single ulp is refused by the same invariant that catches a real
+        mistake. Relative weights cannot make that error, because the author never states a total.
+
+        `invested` is the fraction of NAV to put to work; the remainder stays in cash. Passing a
+        short book implies a signed budget, and a long-only book keeps `LONG_ONLY`, so the budget
+        follows from what was actually asked for rather than being declared a second time.
+        """
+        longs = _relative_side(long, name="long")
+        shorts = _relative_side(short, name="short")
+        if not longs and not shorts:
+            raise ValueError("a Rebalance needs at least one long or short name")
+
+        # A name on both sides is a contradiction, not a netting instruction. Silently letting the
+        # short overwrite the long drops a leg the author wrote, and the resulting book is not
+        # what either mapping asked for.
+        both = sorted(set(longs) & set(shorts))
+        if both:
+            raise ValueError(
+                f"cannot be long and short the same name: {', '.join(both)}. "
+                "Net them yourself and declare the side you actually want"
+            )
+
+        share = _as_decimal(invested, name="invested")
+        if not 0 < share <= 1:
+            raise ValueError("invested must be greater than zero and no greater than one")
+
+        # Both sides present means the book is signed and each side takes half the invested
+        # fraction. One side alone takes all of it.
+        sides = (bool(longs), bool(shorts))
+        per_side = share / 2 if all(sides) else share
+        weights: dict[str, Decimal] = {}
+        for names, sign in ((longs, Decimal(1)), (shorts, Decimal(-1))):
+            if not names:
+                continue
+            total = sum(names.values(), Decimal(0))
+            for instrument, conviction in names.items():
+                weights[instrument] = sign * per_side * conviction / total
+
+        # Round onto the canonical grid, then settle the rounding residual ON THE BOOK rather than
+        # in cash.
+        #
+        # Cash looks like the natural place for it -- it is the line nobody expressed a view about
+        # -- and that is wrong here for a measurable reason. A dollar-neutral signed book nets to
+        # zero, so cash is 1; three shorts at -0.5/3 do not divide evenly, and the leftover
+        # -1e-12 pushes cash to 1.000000000001, one crumb ABOVE the fully-uninvested bound. The
+        # book is arithmetically fine and the declaration is refused.
+        #
+        # So the residual goes back to the largest position by absolute size, where it is a
+        # relatively smaller perturbation than anywhere else and where it cannot move cash across
+        # a bound. `invested` is then honoured exactly, which is what the author actually asked
+        # for.
+        quantised = {
+            instrument: value.quantize(QUANTUM) for instrument, value in sorted(weights.items())
+        }
+
+        # Cash is what the book does NOT hold net, and for a signed book that is not
+        # `1 - invested`. `invested` is GROSS exposure: a dollar-neutral long/short book puts the
+        # whole invested fraction to work and still nets to zero, so its cash is 1. Computing cash
+        # from the gross fraction produced a residual of ~1 and a refusal on a book that is
+        # arithmetically perfect.
+        #
+        # So cash is the net residual, and the rounding crumb is settled on the largest position
+        # rather than in cash -- where, for that same neutral book, a -1e-12 leftover would push
+        # cash one step past fully-uninvested and be refused for a rounding artifact.
+        exact = sum(weights.values(), Decimal(0))
+        cash = (Decimal(1) - exact).quantize(QUANTUM)
+        residual = Decimal(1) - cash - sum(quantised.values(), Decimal(0))
+        if residual and quantised:
+            anchor = max(quantised, key=lambda name: (abs(quantised[name]), name))
+            quantised[anchor] += residual
+        if shorts:
+            direction = PortfolioDirection.SIGNED
+            bounds = (Decimal(-1), Decimal(1))
+            # Cash can exceed 1 on a signed book, and pinning the upper bound at 1 made every
+            # SHORT-ONLY book refuse -- 100% of them, with a message naming cash when the real
+            # problem was a bound that cannot represent short-sale proceeds. Selling short raises
+            # cash: a book that is only short holds MORE than its NAV in cash by exactly the
+            # amount it shorted. The bound is widened to admit that rather than the arithmetic
+            # being bent to fit a bound that was wrong.
+            cash_bounds = (Decimal(-1), Decimal(2))
+        else:
+            direction = PortfolioDirection.LONG_ONLY
+            bounds = (Decimal(0), Decimal(1))
+            cash_bounds = (Decimal(0), Decimal(1))
+        return cls(
+            target_weights=quantised,
+            cash_weight=cash,
+            budget=Budget(
+                direction=direction,
+                cash_lower=cash_bounds[0],
+                cash_upper=cash_bounds[1],
+                target_lower=bounds[0],
+                target_upper=bounds[1],
+            ),
+        )
 
     def __post_init__(self) -> None:
         weights = _copy_weights(self.target_weights, name="target_weights")
@@ -597,11 +763,18 @@ class Rebalance:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class StrategyResult:
-    """A StrategyModel's complete, immutable callback result."""
+    """A StrategyModel's complete, immutable callback result.
+
+    `next_state` and `diagnostics` default to the empty case, because most strategies carry no
+    cross-callback state and emit no diagnostic tables, and requiring them made every author write
+    `next_state=None, diagnostics={}` on every return. A default that matches the common case is
+    not a shortcut here: a strategy that DOES carry state still has to say so, and saying so is
+    what makes the cadence rule replayable.
+    """
 
     decision: Hold | Rebalance
-    next_state: object
-    diagnostics: Mapping[str, tuple[Mapping[str, object], ...]]
+    next_state: object = None
+    diagnostics: Mapping[str, tuple[Mapping[str, object], ...]] = MappingProxyType({})
 
     def __post_init__(self) -> None:
         if not isinstance(self.decision, (Hold, Rebalance)):

@@ -1,7 +1,10 @@
 # 007 — An undeclared instrument is silently a share
 
-**Status:** open. Found 2026-08-27 reviewing the agent-first surface after G009, by asking what a
-venue would do with a price file holding stocks and ETFs mixed under one `instrument_field`.
+**Status:** open, planned. Found 2026-08-27 reviewing the agent-first surface after G009, by asking
+what a venue would do with a price file holding stocks and ETFs mixed under one `instrument_field`.
+A consensus planning pass ran 2026-08-27 and reached Architect `WATCH`/`COMMENT` with zero carryover
+plus Critic `OKAY`. **See "What planning found" at the end of this file — it corrects four claims
+made above, two of them load-bearing.**
 **Touches:** `src/vqapr/exchange/venue.py`, `src/vqapr/exchange/venues/krx.py`,
 `src/vqapr/exchange/listings.py`, `src/vqapr/cli/new.py`, `src/vqapr/agent/skill/SKILL.md`
 
@@ -263,10 +266,132 @@ declares unimplemented and which belong to the account, not to this issue.
 
 ## To measure when this is picked up
 
-Item 2 changes the type every shipped venue constructs. Nine showcases and both testbeds build an
-exchange and none passes `instruments`, so all of them migrate.
+**Migration inventory, counted 2026-08-27.** Item 2 changes a constructor every venue in the tree
+calls: **61 construction sites across 36 files**, of which **3 already pass `instruments`**
+(`tests/exchange/test_instrument_cost_bands.py:90,263`, `tests/exchange/test_price_limits.py:41` —
+these are the sites that already exercise the correct path, and they are the model for the rest).
+
+Roughly half of the files are **generated, not authored**: everything under
+`showcases/show_*/outputs/**/components/*.py` is written by its showcase's `run.py`, so editing the
+template string in five `run.py` files regenerates sixteen. What is hand-written is 5 showcase
+runners, 13 test modules, and 2-3 files in the two testbeds. Counting them as 36 hand edits
+overstates the work by about half; counting them as 5 understates it by the tests.
 
 The FF5 testbed trades factors. Under this change its venue declares `factor` explicitly where it
 declares nothing today, and today's fallback happens to be right for a factor. The count and value
 gates should therefore be **unchanged**, and that is a prediction to verify rather than assume: a
 gate that moves here means the fallback was load-bearing somewhere it was not expected to be.
+
+---
+
+# What planning found
+
+A consensus planning pass ran 2026-08-27 (ralplan, deliberate mode, two review passes). It reached
+**Architect `WATCH` / `COMMENT` with zero carryover blockers, and Critic `OKAY`**. Both lanes
+verified each other's findings against code rather than concurring on assertion.
+
+The plan artifacts live under
+`.gjc/_session-01a03bd1-70a1-71ba-bd91-98aee8d3b3c6/plans/ralplan/01a03bd1-70a1-71ba-bd91-98aee8d3b3c6/`,
+ending in `pending-approval.md`. **Nothing was executed.** This section is written so a fresh
+session can pick the work up from this file alone.
+
+## Four claims above did not survive verification
+
+This issue was treated as the requirements source, which is exactly why it matters that four of its
+own claims were wrong. Two are load-bearing.
+
+**1. The subset rule is unreachable as written above (CRITICAL).** `ExchangeRulesView.__post_init__`
+at `listings.py:332-336` already refuses an instrument declared *without* a listing -- the exact
+inverse of this issue's own stated invariant. Adding the check proposed in item 2 on top of it
+yields set **equality**, which is precisely what "subset, not equality" exists to prevent.
+Reproduced before accepting:
+
+```
+listings, instruments = krx_rules({"A005930": "stock", "HML": "factor"})
+KrxExchange(listings, instruments=instruments)
+# ValueError: instrument 'HML' is declared on 'krx' without a listing
+```
+
+So the design in item 2 cannot be built without editing `listings.py`. The in-tree tell was already
+there: `tests/exchange/test_instrument_cost_bands.py:287-288` exercises exactly this mixed roster
+via `trade_rules_by_kind` and pointedly never builds a venue from it.
+
+**2. Item 3's scaffold cannot load (CRITICAL).** `_load` constructs by *calling* the registered
+object -- `candidate(**dict(ref.config))` at `loading.py:107-109`, unconditional, with no `isclass`
+branch. A module-level `VENUE` **instance** is not callable, so it raises `TypeError` and surfaces
+as `component.load.construction_failed` **before** `load_exchange`'s three gates ever run. The
+claim that those three gates admit a bare instance is true -- they are simply never reached.
+`conformance` loads through the same path, so `vqapr check` fails identically.
+
+**3. The template inventory is wrong.** Not 5 templates producing 16 files: **8 template strings
+across 5 `run.py` files, producing 15 files.** `show_007` emits an academic venue only, no KRX,
+which is why the count is odd rather than a clean 8x2. `show_004` generates no exchange component
+at all and is correctly out of scope.
+
+**4. `venue_bridge` is refused by this issue's own predicate, and is absent from the inventory
+above.** `venue_bridge.py:178,215` pass non-empty listings with no roster, so the proposed check
+fires unconditionally on live product surface -- six-plus passing tests. And `venues.Listing`
+carries only `instrument_id` and `access`, so there is no field to migrate with.
+
+## Two scope decisions, taken by the owner
+
+Both were needed because the four items as written could not be built. Both were put to the owner
+explicitly and approved.
+
+**Amendment 1 -- `src/vqapr/exchange/listings.py` comes in scope.** APPROVED, with a binding
+condition: **the `listings.py` edit lands as its own commit**, so the contradiction removal is
+attributable on its own. Delete the reverse check at `listings.py:332-336`; put the forward check
+-- every listing must appear in `instruments` -- there in its place. This is not scope creep; that
+check contradicts this issue's stated invariant, so removing it is removing a contradiction.
+
+**Amendment 2 -- `kind` is added to the public `venues.Listing`.** APPROVED, option (a). The
+alternatives were rejected with reasons worth keeping: exempting the bridge reopens the hole at the
+one path guaranteed to be live, and defaulting the bridge to stock **is the defect itself**,
+written down rather than inferred -- worse than the status quo, because it looks like a
+declaration. Option (a) opens no new declaration kind, no CLI verb, no workspace store, and
+`InstrumentKind` stays closed; but it is a real growth of public surface this issue did not
+sanction, which is why it is recorded here rather than buried in a file table.
+
+## Five open items the next session inherits
+
+All non-blocking, all verified independently by both review lanes.
+
+1. **The blast-radius analysis for Amendment 1 is wrong by 7x.** It asked "would the *deletion*
+   change this site?", which is trivially "no" everywhere -- a deletion only removes a raise. The
+   **insertion** is what refuses. Eight sites change status, not one:
+   `test_trade_rule_contract.py:140,141` and `test_planning.py:262,274,308,435,509`. Note that
+   `tests/orders/test_planning.py` appears in no inventory in this file.
+
+2. **The rewritten scaffold stalls the journey it exists to unblock.** `krx_rules` defaults
+   `price_limits=True` (`krx.py:167`), so `execution_requirements()` demands `BASE_PRICE = "base"`,
+   while `testbed/ei.yaml` declares only `close`. Already pinned by a passing test at
+   `test_preflight.py:589`. Fix: `krx_rules(UNIVERSE, price_limits=False)` in the template with a
+   comment naming the switch -- that switch's documented purpose (`krx.py:163-166`).
+
+3. **Amendment 2's blast radius is understated about 4x.** 20 `Listing(...)` construction sites
+   across 6 files, not one. Semantic collision worth care:
+   `test_agent_first_run_values.py:209-210` is named for pinning that **`access`** has no default;
+   after a required `kind` it still raises, for the wrong reason, and can never fail again.
+
+4. **`rules_view`'s optional roster becomes a door that only slams** (`listings.py:406-411`). Under
+   the forward check its `None` default is reachable only when `listings` is also empty. One-line
+   fix, and those sites are already being touched under item 1 above.
+
+5. **A census of construction sites passes vacuously in a clean checkout.** The 15 generated
+   components are not merely gitignored, they are **untracked** -- a fresh clone walks an empty
+   tree, enumerates zero sites, and passes. It needs a non-vacuity floor, the way
+   `tests/characterization/test_fix_is_not_a_restatement.py:108-111` already does.
+
+## The execution order consensus settled on
+
+Not this file's 1-2-3-4. Item 1 removes the bypass that makes item 2's check enforceable, and
+item 2 is 61 sites whose predicate is both the thing that matters and the thing that gets skimmed.
+So: item 1, then item 2's predicate **alone**, then a review gate, then the 61 sites, then the
+generated files, then items 3 and 4. Reviewing the predicate before 61 sites encode it is the point
+of the split.
+
+The largest risk named in planning is worth repeating here, because it is the one a mechanical
+migration walks straight into: assigning `stock` to every name to make 61 sites compile would pass
+every test in the tree, and would write the defect down as an author's declaration rather than
+leaving it inferred. That is strictly worse than today. The rule adopted was: **if a site can be
+migrated without knowing what its instruments are, it is being migrated wrongly.**

@@ -1626,10 +1626,17 @@ class SimulationFlow:
             # each real return with a spurious zero one.
             #
             # The test is identity of the mark, not the mere existence of a valuation agenda.
-            # Valuation and strategy cadences are independent session tuples, so a run may
-            # legitimately declare a valuation clock SPARSER than its decisions; on a session
-            # that clock does not cover, this replayed row is still the only record of the
-            # book's value and dropping it would reintroduce the very gap this step closes.
+            # Keying on the agenda's existence was measured losing 8 of 10 measurements
+            # (`docs/implementations/056`), which is why the narrow condition is here.
+            #
+            # DIRECTION, because the wording below has misled a reader before: the case this
+            # protects is a valuation clock SPARSER than the decision clock, and that is the
+            # UNUSUAL one. The normal research shape is the opposite -- value daily, trade
+            # monthly -- and a valuation clock that fires only when a decision does is the exact
+            # defect 056 was written to remove: a NAV series that moves only when a trade does.
+            # Nothing forbids the sparse declaration, no in-tree run makes it, and this branch
+            # exists so that if someone does, the session their clock skips still has a record
+            # rather than a hole. Read it as "not forbidden", never as "recommended".
             mark = None
         prices = {} if mark is None else {m.instrument_id: m for m in mark.marks.marks}
         observed = {} if mark is None else (mark.observed_at_by_instrument or {})

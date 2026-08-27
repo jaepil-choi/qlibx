@@ -309,6 +309,46 @@ originating callback과 execution이 같은 timestamp인 configuration은 허용
 `execution_time > decision_time == occurrence.evaluation_time`이 항상 성립한다. 이전 pending execution이 later
 callback과 같은 instant이면 execution chain을 먼저 완료하므로 callback은 committed actual state를 본다.
 
+### 3.2.1 네 개의 시계와 NAV — 읽는 사람이 반복해서 틀리는 지점
+
+이 절은 새로운 규칙을 세우지 않는다. 위의 3.1 표와 3.2 merge order가 이미 authority이고, 여기서는
+그것이 **실제로 무엇을 뜻하는지**를 적는다. 아래 네 가지는 리뷰에서 실제로 잘못 읽힌 것들이다.
+
+**시계는 넷이고, 그중 하나만 자기 agenda를 갖지 않는다.**
+
+| 시계 | 무엇을 정하나 | 언제 도나 |
+|---|---|---|
+| strategy callback | 결정을 내리는 날 | `strategy_agenda` 선언 |
+| due execution | 체결이 일어나는 시각 | callback이 만든 intent의 `target_at`에 도달했을 때 |
+| valuation | 장부를 재는 날 | `valuation_agenda` 선언 |
+| monitoring | 제약을 점검하는 날 | `monitoring_agenda` 선언 |
+
+due execution만 agenda가 없다. callback이 intent를 만들면 그것이 `target_at`을 들고 대기하고, merge
+loop가 그 시각에 도달할 때 체결된다. 그래서 **결정과 체결은 서로 다른 occurrence이다.**
+
+**valuation은 fill commit에 종속되지 않는다.** 네 시계는 독립이고 시각 순서로만 병합된다. 흔한
+오독은 "체결이 commit된 다음이 valuation 시점"인데, 그렇게 구현되어 있다면 **거래가 없는 날에는
+valuation이 돌지 않게 되고, 그것이 정확히 `implementations/056`이 제거한 결함이다** — 거래가 있을
+때만 움직이는 NAV 시계열. 순서가 대체로 그렇게 보이는 이유는 종속이 아니라
+`_valuation_instant`가 `at_or_before`로 "그 시각 이전의 마지막 체결 instant"를 고르기 때문이다.
+(`select_target`의 strictly-later를 쓰면 16:00 valuation이 *내일* 체결에 묶여 NAV 전체가 한 칸
+밀린다.)
+
+**정상 방향은 valuation이 결정보다 촘촘한 쪽이다.** 매일 평가하고 한 달에 한 번 거래하는 것이
+연구의 표준 형태다. 두 시계의 관계를 강제하는 코드는 없고 in-tree run은 전부 같은 날짜 튜플을
+재사용하지만, **드문 valuation clock은 "금지되지 않은 것"이지 권장되는 사용법이 아니다.**
+
+**NAV는 보유분 전체를 평가하며, 정지 종목을 떨어뜨리지 않는다.** 그날 거래한 종목만 평가하는 것이
+아니다. 그리고 venue가 오늘 가격을 발표하지 않은 보유분은 `_marks_from_execution_snapshot`이
+**직전 마크의 가격을 그대로 carry forward** 한다 — 다만 `observed_at`은 캐리하지 않고 그 가격이
+원래 관측된 instant를 유지하므로, 행은 자기가 며칠 된 값인지 정직하게 말한다. 사흘 정지된 보유분은
+사흘 내내 마지막 가격으로 NAV에 남는다.
+
+`valuation/marking.py`에서 가격이 없어 `continue`하는 분기를 **정지 종목의 처리로 읽으면 안 된다.**
+그 분기에 도달했다는 것은 carry forward가 이미 시도되었고 캐리할 직전 마크가 없었다는 뜻이므로,
+그것은 venue가 **한 번도 값을 매긴 적 없는** 보유분이다. 수량은 스냅샷에 남으므로 장부가 아니라
+평가에서만 빠진다.
+
 ### 3.3 표준 daily-close fixture
 
 ```text

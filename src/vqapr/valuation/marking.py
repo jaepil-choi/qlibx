@@ -93,10 +93,20 @@ class ValuationService:
                 )
             price = prices.get(instrument)
             if price is None:
-                # The venue published no price for this holding at this instant. NAV values what
-                # can be priced; an unpriceable holding contributes nothing to the denominator
-                # rather than being priced from a stale quote. The position keeps its quantity in
-                # the snapshot, so it is dropped from the valuation and not from the book.
+                # NOT the halt case. Read this with `_marks_from_execution_snapshot`
+                # (`flow/simulation.py`), which runs FIRST and carries a held name's previous
+                # mark forward when the venue published no row for it. By the time a price is
+                # missing here, the carry has already been tried and had nothing to carry -- so
+                # this is a position the venue has *never* priced, not one that stopped trading.
+                #
+                # A halted holding therefore keeps its last price and stays in NAV, stamped with
+                # the instant that price was actually observed. Reading this branch alone invites
+                # the opposite conclusion, that a three-day halt drops a position out of the
+                # denominator and takes NAV down by its full value. It does not, and no caller
+                # should be changed on the belief that it does.
+                #
+                # What is dropped here has no honest number to contribute: the position keeps its
+                # quantity in the snapshot, so it leaves the valuation and not the book.
                 continue
             marks.append(Mark(instrument, quantity, price, quantity * price))
         return MarkBatch(tuple(marks), sum((mark.value for mark in marks), Decimal("0")))

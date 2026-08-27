@@ -1,0 +1,746 @@
+{
+  "coverage_gap": [
+    "check.dataset.unregistered",
+    "check.execution.not_after_decision",
+    "check.field.absent",
+    "check.lookback.uncovered",
+    "check.period.uncovered",
+    "check.universe.absent",
+    "check.weights.mode_conflict",
+    "check.weights.venue_conflict",
+    "component.conformance.load_failed",
+    "component.conformance.method_missing",
+    "component.conformance.method_not_callable",
+    "component.load.execution_profile_invalid",
+    "component.load.fingerprint_drift",
+    "component.load.module_invalid",
+    "component.load.requirements_failed",
+    "component.load.requirements_invalid",
+    "component.load.requirements_missing",
+    "component.load.signature_invalid",
+    "component.load.source_unreadable",
+    "dataset.register.schema.available_at_not_a_timestamp",
+    "dataset.register.span.absent",
+    "dataset.register.span.empty",
+    "materialize.compute.failed",
+    "materialize.input.dataset_exists",
+    "materialize.input.empty",
+    "materialize.input.evaluation_times_invalid",
+    "materialize.input.evidence_invalid",
+    "materialize.input.fields_invalid",
+    "materialize.input.instruments_invalid",
+    "materialize.input.result_invalid",
+    "materialize.output.available_at_owned",
+    "materialize.output.decision_invalid",
+    "materialize.output.empty",
+    "materialize.output.fields_invalid",
+    "materialize.output.instrument_duplicate",
+    "materialize.output.instrument_invalid",
+    "materialize.output.instrument_unrequested",
+    "materialize.output.not_weighted",
+    "materialize.output.rows_invalid",
+    "materialize.publish.file_failed",
+    "materialize.publish.path_exists",
+    "materialize.publish.staging_failed",
+    "observation_store.resolve.field_missing",
+    "preflight.account.fractional_quantity",
+    "preflight.account.holding_not_closable",
+    "preflight.account.minimum_quantity",
+    "preflight.account.mode",
+    "preflight.account.quantity_step",
+    "preflight.account.unlisted_holding",
+    "preflight.execution.missing",
+    "preflight.execution.requirement_missing",
+    "preflight.execution.target_outside_horizon",
+    "preflight.universe.unlisted_instrument",
+    "preflight.universe.untradable_listing",
+    "run.check.declaration_invalid",
+    "run.check.preflight_refused",
+    "source.scan.conditional_positive.unreadable",
+    "source.scan.distinct.unreadable",
+    "source.scan.execution_candidates.unreadable",
+    "source.scan.execution_snapshot.unreadable",
+    "source.scan.observations.unreadable",
+    "source.scan.unreadable",
+    "workspace.agenda.lookup.invalid",
+    "workspace.agenda.lookup.missing",
+    "workspace.agenda.register.conflict",
+    "workspace.component.lookup.invalid",
+    "workspace.component.lookup.missing",
+    "workspace.component.register.conflict",
+    "workspace.dataset.register.source_mismatch",
+    "workspace.execution_input.lookup.invalid",
+    "workspace.execution_input.lookup.missing",
+    "workspace.execution_input.register.conflict",
+    "workspace.execution_input.register.source_conflict",
+    "workspace.monitoring_policy.register.conflict",
+    "workspace.monitoring_policy.register.invalid",
+    "workspace.monitoring_policy.register.missing",
+    "workspace.monitoring_policy.register.reference",
+    "workspace.open.invalid",
+    "workspace.open.missing",
+    "workspace.open.unreadable",
+    "workspace.source.lookup.invalid",
+    "workspace.source.lookup.missing",
+    "workspace.strategy_config.register.conflict",
+    "workspace.strategy_config.register.invalid",
+    "workspace.strategy_config.register.reference",
+    "workspace.valuation_config.register.conflict",
+    "workspace.valuation_config.register.invalid",
+    "workspace.valuation_config.register.missing",
+    "workspace.valuation_config.register.reference",
+    "workspace.write.failed",
+    "workspace.write.locked"
+  ],
+  "runtime_codes": [
+    "component.conformance.signature_invalid",
+    "component.load.construction_failed",
+    "component.load.wrong_type",
+    "component.register.source_unreadable",
+    "dataset.register.key.duplicate",
+    "dataset.register.key.null",
+    "dataset.register.schema.available_at_not_tz",
+    "dataset.register.schema.field_missing",
+    "dataset.register.schema.source_mismatch",
+    "declaration.read.key_missing",
+    "declaration.read.unknown_section",
+    "declaration.read.value_invalid",
+    "declaration.read.value_not_permitted",
+    "execution_input.register.key.duplicate",
+    "execution_input.register.key.null",
+    "execution_input.register.price.invalid",
+    "execution_input.register.schema.field_type",
+    "execution_input.register.schema.price_type",
+    "model_window.requirement.undeclared",
+    "source.scan.path_missing",
+    "workspace.dataset.lookup.invalid",
+    "workspace.dataset.lookup.missing",
+    "workspace.dataset.register.conflict",
+    "workspace.dataset.register.source_conflict",
+    "workspace.strategy_config.register.missing"
+  ],
+  "schema": "vqapr.refusal_codes.v1",
+  "static_codes": [
+    {
+      "code": "check.dataset.unregistered",
+      "file": "src/vqapr/cli/check.py",
+      "line": 422
+    },
+    {
+      "code": "check.execution.not_after_decision",
+      "file": "src/vqapr/cli/check.py",
+      "line": 362
+    },
+    {
+      "code": "check.field.absent",
+      "file": "src/vqapr/cli/check.py",
+      "line": 441
+    },
+    {
+      "code": "check.lookback.uncovered",
+      "file": "src/vqapr/cli/check.py",
+      "line": 466
+    },
+    {
+      "code": "check.period.uncovered",
+      "file": "src/vqapr/cli/check.py",
+      "line": 284
+    },
+    {
+      "code": "check.period.uncovered",
+      "file": "src/vqapr/cli/check.py",
+      "line": 301
+    },
+    {
+      "code": "check.period.uncovered",
+      "file": "src/vqapr/cli/check.py",
+      "line": 315
+    },
+    {
+      "code": "check.universe.absent",
+      "file": "src/vqapr/cli/check.py",
+      "line": 246
+    },
+    {
+      "code": "check.weights.mode_conflict",
+      "file": "src/vqapr/cli/check.py",
+      "line": 507
+    },
+    {
+      "code": "check.weights.venue_conflict",
+      "file": "src/vqapr/cli/check.py",
+      "line": 565
+    },
+    {
+      "code": "component.conformance.load_failed",
+      "file": "src/vqapr/testing/conformance/runner.py",
+      "line": 201
+    },
+    {
+      "code": "component.conformance.method_missing",
+      "file": "src/vqapr/testing/conformance/runner.py",
+      "line": 129
+    },
+    {
+      "code": "component.conformance.method_not_callable",
+      "file": "src/vqapr/testing/conformance/runner.py",
+      "line": 141
+    },
+    {
+      "code": "component.conformance.signature_invalid",
+      "file": "src/vqapr/testing/conformance/runner.py",
+      "line": 160
+    },
+    {
+      "code": "component.load.construction_failed",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.execution_profile_invalid",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.fingerprint_drift",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.module_invalid",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.requirements_failed",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.requirements_invalid",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.requirements_missing",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.signature_invalid",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.source_unreadable",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.load.wrong_type",
+      "file": "src/vqapr/_internal/extensions/loading.py",
+      "line": 43
+    },
+    {
+      "code": "component.register.source_unreadable",
+      "file": "src/vqapr/_internal/extensions/registration.py",
+      "line": 41
+    },
+    {
+      "code": "dataset.register.key.duplicate",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 190
+    },
+    {
+      "code": "dataset.register.key.null",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 174
+    },
+    {
+      "code": "dataset.register.schema.available_at_not_a_timestamp",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 144
+    },
+    {
+      "code": "dataset.register.schema.available_at_not_tz",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 144
+    },
+    {
+      "code": "dataset.register.schema.field_missing",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 127
+    },
+    {
+      "code": "dataset.register.schema.source_mismatch",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 298
+    },
+    {
+      "code": "dataset.register.span.absent",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "dataset.register.span.empty",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 233
+    },
+    {
+      "code": "dataset.register.span.empty",
+      "file": "src/vqapr/data/datasets.py",
+      "line": 246
+    },
+    {
+      "code": "declaration.read.key_missing",
+      "file": "src/vqapr/cli/register.py",
+      "line": 201
+    },
+    {
+      "code": "declaration.read.key_missing",
+      "file": "src/vqapr/cli/register.py",
+      "line": 411
+    },
+    {
+      "code": "declaration.read.key_missing",
+      "file": "src/vqapr/cli/register.py",
+      "line": 463
+    },
+    {
+      "code": "declaration.read.key_missing",
+      "file": "src/vqapr/cli/register.py",
+      "line": 475
+    },
+    {
+      "code": "declaration.read.unknown_section",
+      "file": "src/vqapr/cli/register.py",
+      "line": 607
+    },
+    {
+      "code": "declaration.read.value_invalid",
+      "file": "src/vqapr/cli/register.py",
+      "line": 337
+    },
+    {
+      "code": "declaration.read.value_invalid",
+      "file": "src/vqapr/cli/register.py",
+      "line": 547
+    },
+    {
+      "code": "declaration.read.value_not_permitted",
+      "file": "src/vqapr/cli/register.py",
+      "line": 377
+    },
+    {
+      "code": "declaration.read.value_not_permitted",
+      "file": "src/vqapr/cli/register.py",
+      "line": 531
+    },
+    {
+      "code": "execution_input.register.key.duplicate",
+      "file": "src/vqapr/exchange/execution_table.py",
+      "line": 177
+    },
+    {
+      "code": "execution_input.register.key.null",
+      "file": "src/vqapr/exchange/execution_table.py",
+      "line": 161
+    },
+    {
+      "code": "execution_input.register.price.invalid",
+      "file": "src/vqapr/exchange/execution_table.py",
+      "line": 207
+    },
+    {
+      "code": "execution_input.register.schema.field_type",
+      "file": "src/vqapr/exchange/execution_table.py",
+      "line": 105
+    },
+    {
+      "code": "execution_input.register.schema.price_type",
+      "file": "src/vqapr/exchange/execution_table.py",
+      "line": 126
+    },
+    {
+      "code": "materialize.compute.failed",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.input.dataset_exists",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.input.empty",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.input.evaluation_times_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.input.evidence_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.input.fields_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.input.instruments_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.input.result_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.available_at_owned",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.decision_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.empty",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.fields_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.instrument_duplicate",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.instrument_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.instrument_unrequested",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.not_weighted",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.output.rows_invalid",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.publish.file_failed",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.publish.path_exists",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "materialize.publish.staging_failed",
+      "file": "src/vqapr/flow/materialize.py",
+      "line": 229
+    },
+    {
+      "code": "model_window.requirement.undeclared",
+      "file": "src/vqapr/data/windows.py",
+      "line": 100
+    },
+    {
+      "code": "observation_store.resolve.field_missing",
+      "file": "src/vqapr/data/resolution.py",
+      "line": 22
+    },
+    {
+      "code": "preflight.account.fractional_quantity",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 214
+    },
+    {
+      "code": "preflight.account.holding_not_closable",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 158
+    },
+    {
+      "code": "preflight.account.minimum_quantity",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 172
+    },
+    {
+      "code": "preflight.account.mode",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 227
+    },
+    {
+      "code": "preflight.account.quantity_step",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 201
+    },
+    {
+      "code": "preflight.account.unlisted_holding",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 143
+    },
+    {
+      "code": "preflight.execution.missing",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 374
+    },
+    {
+      "code": "preflight.execution.requirement_missing",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 270
+    },
+    {
+      "code": "preflight.execution.target_outside_horizon",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 440
+    },
+    {
+      "code": "preflight.universe.unlisted_instrument",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 320
+    },
+    {
+      "code": "preflight.universe.untradable_listing",
+      "file": "src/vqapr/flow/preflight.py",
+      "line": 333
+    },
+    {
+      "code": "run.check.declaration_invalid",
+      "file": "src/vqapr/cli/check.py",
+      "line": 653
+    },
+    {
+      "code": "run.check.preflight_refused",
+      "file": "src/vqapr/cli/check.py",
+      "line": 661
+    },
+    {
+      "code": "source.scan.conditional_positive.unreadable",
+      "file": "src/vqapr/data/scan.py",
+      "line": 565
+    },
+    {
+      "code": "source.scan.distinct.unreadable",
+      "file": "src/vqapr/data/scan.py",
+      "line": 343
+    },
+    {
+      "code": "source.scan.execution_candidates.unreadable",
+      "file": "src/vqapr/data/scan.py",
+      "line": 384
+    },
+    {
+      "code": "source.scan.execution_snapshot.unreadable",
+      "file": "src/vqapr/data/scan.py",
+      "line": 441
+    },
+    {
+      "code": "source.scan.observations.unreadable",
+      "file": "src/vqapr/data/scan.py",
+      "line": 777
+    },
+    {
+      "code": "source.scan.path_missing",
+      "file": "src/vqapr/data/scan.py",
+      "line": 169
+    },
+    {
+      "code": "source.scan.unreadable",
+      "file": "src/vqapr/data/scan.py",
+      "line": 308
+    },
+    {
+      "code": "workspace.agenda.lookup.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.agenda.lookup.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.agenda.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.component.lookup.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.component.lookup.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.component.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.dataset.lookup.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.dataset.lookup.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.dataset.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.dataset.register.source_conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.dataset.register.source_mismatch",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.execution_input.lookup.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.execution_input.lookup.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.execution_input.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.execution_input.register.source_conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.monitoring_policy.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.monitoring_policy.register.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.monitoring_policy.register.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.monitoring_policy.register.reference",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.open.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.open.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.open.unreadable",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.source.lookup.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.source.lookup.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.strategy_config.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.strategy_config.register.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.strategy_config.register.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.strategy_config.register.reference",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.valuation_config.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.valuation_config.register.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.valuation_config.register.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.valuation_config.register.reference",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.write.failed",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    },
+    {
+      "code": "workspace.write.locked",
+      "file": "src/vqapr/workspace.py",
+      "line": 2016
+    }
+  ],
+  "unresolved": []
+}

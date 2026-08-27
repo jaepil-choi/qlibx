@@ -1,8 +1,9 @@
 # 010 — Two writers share one account table
 
 **Status: CLOSED 2026-08-28** by `docs/implementations/066-the-account-table-carries-measurements-only.md`.
-Option 1 was taken: the decision-time row moved to `vqapr.decision_account` and `vqapr.account`
-carries measurements only. The sparse-valuation-clock row stayed, because removing it cost 8 of 10
+Effectively option 3, arrived at through option 1: the decision-time row moved to its own table
+first, and that table was then removed after measurement showed it duplicated `vqapr.account`
+offset by one commit, with no reader. `vqapr.account` carries measurements only. The sparse-valuation-clock row stayed, because removing it cost 8 of 10
 measurements exactly as 056 recorded -- `test_valuation_clock.py` caught that on the first attempt.
 No run's numbers moved; `show_005` is bit-identical across the change.
 

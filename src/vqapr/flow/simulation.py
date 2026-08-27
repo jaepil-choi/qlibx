@@ -326,10 +326,7 @@ DEFAULT_TABLES = (
         f"{DEFAULT_TABLE_PREFIX}account",
         ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
     ),
-    TableSpec(
-        f"{DEFAULT_TABLE_PREFIX}decision_account",
-        ("instrument", "cash", "quantity", "account_version"),
-    ),
+
     TableSpec(
         f"{DEFAULT_TABLE_PREFIX}fill",
         (
@@ -1670,40 +1667,19 @@ class SimulationFlow:
                     },
                 )
 
-        # The account as the DECISION saw it -- a different fact from what the book was worth,
-        # and now in a table whose name says so.
+        # Nothing else is written here. A `vqapr.decision_account` table briefly stood at this
+        # point, holding the cash and positions a callback saw before deciding, on the argument
+        # that this is a different fact from what the book was worth.
         #
-        # These two questions shared one table and one of them answered with a null column. A
-        # consumer reading a NAV series had to know to filter `nav is not None`, and one who
-        # forgot paired every real value with a spurious zero. Separating the facts rather than
-        # the writers is what makes a naive read correct: every row in `vqapr.account` now carries
-        # a nav, and every row here carries a cash position that no measurement claim competes
-        # with.
-        recorder.append(
-            f"{DEFAULT_TABLE_PREFIX}decision_account",
-            {
-                # Account-level, so it carries the synthetic identity canon fixes for series with
-                # no instrument axis rather than inventing a second key shape.
-                "instrument": _ACCOUNT_IDENTITY,
-                "cash": str(account.cash),
-                "quantity": None,
-                "account_version": account.version,
-            },
-        )
-        # No `observed_at` and no `price` on this table, deliberately. Those columns answer "when
-        # was this measured", and nothing here measures anything -- it reports the positions a
-        # callback saw before deciding. Carrying them would invite a reader to date a series by a
-        # column that is structurally empty.
-        for instrument in sorted(account.positions):
-            recorder.append(
-                f"{DEFAULT_TABLE_PREFIX}decision_account",
-                {
-                    "instrument": instrument,
-                    "cash": None,
-                    "quantity": str(account.positions[instrument]),
-                    "account_version": account.version,
-                },
-            )
+        # Measured, it was not a different fact. Matched on `account_version`, its rows were
+        # IDENTICAL to `vqapr.account`'s on every version the two shared -- the same series offset
+        # by one commit, because a callback reports the account it saw and a valuation reports the
+        # account it valued. The only genuinely unique row was version 0, the initial account,
+        # which `FrozenRun.initial_account_snapshot` already carries. Nothing read it.
+        #
+        # Removed under this package's own rule: machinery whose only user is its own test is not
+        # a feature. If a decision-time account series is ever wanted, it should be designed with
+        # the consumer that wants it, which will also say whether it needs to be a table at all.
 
     def _bound_rules(self) -> object:
         """The venue's rules with the project's roster bound in, or its rules unchanged.

@@ -25,15 +25,9 @@ column.**
 
 ## What changed
 
-**Separate the facts, not the writers.** `vqapr.decision_account` is a new default table carrying
-what the account looked like when a decision was made: `instrument`, `cash`, `quantity`,
-`account_version`. `vqapr.account` keeps `nav`, `price` and `observed_at` and now carries
-measurements only.
-
-The decision table deliberately has **no** `nav`, `price` or `observed_at`. Those columns answer
-"what was this worth, and when was that measured", and nothing on that path measures anything.
-Carrying them would invite a reader to date a series by a structurally empty column — the same
-defect from the other direction.
+**`vqapr.account` carries measurements only.** The row a callback wrote when a valuation had
+already recorded that measurement is gone. It held `nav=None` and competed with a real value in
+the same table, which is the null-pairing 056 measured.
 
 **The property `056` bought is kept.** A valuation clock sparser than the decision clock leaves
 sessions its own occurrences never reach, and on those the mark a callback replays is the only
@@ -45,6 +39,23 @@ genuine measurement nobody else will write. What is gone is the row written when
 mark was *taken*, not the occurrences that wrote them, because a callback replays a committed mark
 and the two clocks differ — comparing occurrences would never match and the duplicate would go out
 under a later `available_at`.
+
+## The second table, and why it did not survive
+
+The first version of this change moved the callback's decision-time facts into a new
+`vqapr.decision_account`, on the argument that "what did the account look like when the decision
+was made" is a different question from "what was the book worth".
+
+Measured against the run, it was not a different question. Matched on `account_version`, its rows
+were **identical to `vqapr.account`'s on every version the two shared** — the same series offset by
+one commit, because a callback reports the account it saw and a valuation reports the account it
+valued. Its only genuinely unique row was version 0, the initial account, which
+`FrozenRun.initial_account_snapshot` already carries. Nothing read it.
+
+So it was removed under this package's own rule: *machinery whose only user is its own test is not
+a feature*. Recording the argument here because the argument sounded right and the measurement
+disagreed; if a decision-time account series is ever wanted, it should be designed alongside the
+consumer that wants it, which will also say whether it needs to be a table at all.
 
 ## What this cost, and what it did not
 
@@ -66,11 +77,11 @@ writer" and had to be.
 - **The naive read is correct.** Measured on `show_005`: `vqapr.account` holds 21 account-level
   rows, **all 21 carrying a nav**, across 21 distinct dates — one value per date, no filter. It
   was 42 rows with 21 nulls.
+- **The package still owns exactly three default tables**, pinned by
+  `tests/flow/test_account_table_is_measurement_only.py`.
 - **No run's numbers moved.** `show_005` against this change and against `HEAD` is bit-identical:
   commission `225511.46100000`, sale tax `264798.6000000`, final NAV `1169325979.93900000`, active
   weight L2 `0.01065555767675562865938491427`. This is a record-shape change, not an accounting
   one — the same adjudication 056 applied.
 - `show_005`'s assertion was written to fail here and did. It pinned two account rows per
   occurrence and named this issue; it now pins one, plus the absence of any null nav.
-- `tests/flow/test_account_table_is_measurement_only.py` pins the table shapes directly, including
-  that the decision table carries no measurement column.

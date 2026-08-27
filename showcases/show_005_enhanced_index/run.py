@@ -917,13 +917,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         raise AssertionError(
             f"{len(unmeasured)} account rows carry no nav; vqapr.account is measurement-only"
         )
-    # The decision-time account is its own table now, and says so in its name.
-    decision_account = alpha_result.final_state.recorder_rows.get("vqapr.decision_account", ())
-    decision_level = [row for row in decision_account if row["instrument"] == "_ACCOUNT"]
-    if len(decision_level) != len(callback_days):
-        raise AssertionError(
-            f"expected one decision-time account row per occurrence, saw {len(decision_level)}"
-        )
     if len(default_account) <= len(account_level):
         raise AssertionError("the account table carries no instrument panel rows")
 

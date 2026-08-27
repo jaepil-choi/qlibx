@@ -1,0 +1,86 @@
+# Run record on-disk layout
+
+A reviewable decision, written before the code, because it constrains Step 6's `store.root` and
+because getting it wrong is expensive to undo once records exist on disk.
+
+## The problem
+
+`recorder_rows` lives in memory for the whole run (`flow/run_state.py:65`). A run that crashes
+leaves nothing; a run that finishes leaves nothing a later process can read. That makes two things
+impossible rather than merely inconvenient:
+
+- **Parallel execution.** Five processes running five factors cannot each keep their results in
+  their own memory and have anyone read all five afterwards.
+- **`show run <id>`.** There is nothing to show. The only way to answer a question about a finished
+  run is to run it again.
+
+## The layout
+
+```
+<store.root>/runs/
+  <run-id>/
+    record.json            the run's own facts: account, contract report, source digest, period
+    tables/
+      vqapr.account.jsonl  one file per recorded table, appended in chunks as the run proceeds
+      vqapr.weight.jsonl
+      factor.membership.jsonl
+```
+
+One directory per run id. One file per table. Rows appended as chunks arrive.
+
+## Why a directory scan, not an index file
+
+The obvious design is `runs/index.json` listing every run. It is wrong here, and the reason is the
+same one `WORKSPACE_LOCK_FILENAME` exists for.
+
+`workspace.py:53-55` documents the failure precisely: atomic replacement stops a reader seeing half
+a file, but it does not stop two processes each reading the state, each adding their own entry, and
+the second write erasing the first. Nothing fails. An entry is simply gone.
+
+An index file puts all five concurrent writers on exactly that target. Every run would have to take
+the workspace lock to record its own existence, serialising the one thing AC-R4 asks to be
+parallel. A directory scan has no shared mutable target at all: each run creates its own directory
+and writes only inside it, so `list runs` is `iterdir()` and two runs cannot collide by
+construction.
+
+The cost is that listing is O(runs) rather than O(1). At the scale this serves — one directory per
+research run — that is not a cost worth buying a lost-update bug to avoid.
+
+## Why the writer appends in chunks
+
+`append` takes a chunk at a time and never rewrites what it already wrote, so a caller that streams
+rows as it produces them gets crash survival and bounded memory for free: a killed run keeps
+everything up to its last chunk, and peak memory is one chunk rather than a whole run.
+
+**The product does not stream yet.** `public.run` hands `recorder_rows` over once, after the run
+returns, so today's records are written in a single pass at the end and the two properties above
+are latent rather than delivered. This section describes what the layout makes possible and what
+the writer supports; it is not a description of current run behaviour. Recording it the other way
+round would make the layout look like it had solved a problem that is still open.
+
+## Why JSONL
+
+Append-only, one row per line, no framing to rewrite. A parquet file would have to be rewritten or
+partitioned per append; a JSON array would need its closing bracket moved. Both make an append a
+read-modify-write, which is what this layout exists to avoid.
+
+The published *dataset* a run produces is still parquet — that is Step 6's `store.tables`. This is
+the run's own record, which is a different artifact with a different reader.
+
+## What `record.json` holds
+
+AC-R3 names five things, and they are the five a later reader cannot reconstruct:
+
+- **account** — the committed final snapshot.
+- **tables** — row counts and formation counts per table, so `show run` answers without reading
+  every row.
+- **contract report** — `held`/`checked` per declaration (AC-R6).
+- **source digest** — including the import closure, so two runs that claim the same code can be
+  compared.
+- **derived period** — what the run actually covered, which is not always what was declared.
+
+## What this constrains in Step 6
+
+`store.root` becomes the parent of `runs/`. That is the whole coupling, and it is why this document
+exists before Step 6 rather than during it: a layout chosen inside the `store.root` change would be
+chosen to fit that change rather than to survive concurrent writers.

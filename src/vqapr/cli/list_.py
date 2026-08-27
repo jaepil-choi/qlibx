@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
+from vqapr.flow.run_records import read_record, run_ids
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 KINDS = (
@@ -26,6 +27,7 @@ KINDS = (
     "strategy-configs",
     "valuation-configs",
     "monitoring-policies",
+    "runs",
 )
 
 _ACCESSORS = {
@@ -83,9 +85,46 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="substring filter applied to the declaration identity",
     )
+    parser.add_argument(
+        "--store-root",
+        dest="store_root",
+        type=Path,
+        default=None,
+        help="where run records live, when `runs` were written outside the workspace directory",
+    )
+
+
+def _runs(project_root: Path, store_root: Path | None) -> list[dict[str, Any]]:
+    """Every finished run, found by scanning rather than read from an index.
+
+    An index file would put every concurrent writer on one atomic-replace target, which is the
+    lost-update the workspace lock exists for -- and it would serialise exactly the thing five
+    parallel runs need not to be. Scanning has no shared target, so this is O(runs) on purpose.
+    """
+    root = store_root or project_root / WORKSPACE_DIRECTORY
+    rows: list[dict[str, Any]] = []
+    for run_id in run_ids(root):
+        record = read_record(root, run_id)
+        account = record.get("account") or {}
+        rows.append(
+            {
+                "run_id": run_id,
+                "account_version": account.get("version"),
+                "tables": sorted(record.get("tables") or {}),
+                "period": record.get("period"),
+            }
+        )
+    return rows
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    if args.kind == "runs":
+        # Runs live under `store.root`, not in the workspace document, so this path does not open
+        # the workspace at all. An uninitialised directory holds zero runs, which is an answer.
+        rows = _runs(project_root, getattr(args, "store_root", None))
+        if args.identifier:
+            rows = [row for row in rows if args.identifier in str(row["run_id"])]
+        return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
     if not (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists():
         # 없는 workspace는 빈 workspace다. 존재 여부만 보고 통과시키는 이유는, 손상된 workspace는
         # 계속 시끄럽게 실패해야 하기 때문이다 — `Workspace.open`을 넓게 catch하면 그 구분이

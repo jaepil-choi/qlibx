@@ -45,7 +45,6 @@ from vqapr._internal.run_bridge import (
 
 __all__ = (
     "CatalogConflict",
-    "CompletedRun",
     "DatasetDeclaration",
     "Diagnostic",
     "ExecutionInputDeclaration",
@@ -57,6 +56,7 @@ __all__ = (
     "RegistrationReceipt",
     "RegistrationTiming",
     "SimulationSummary",
+    "StrategyReplay",
     "open",
 )
 
@@ -350,8 +350,19 @@ class MaterializationResult:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class CompletedRun:
-    """A finished run, publishable exactly once as one atomic transaction."""
+class StrategyReplay:
+    """A StrategyModel driven across occurrences, publishable once as one atomic transaction.
+
+    Renamed out of `CompletedRun`, which it shared with `_internal/run_bridge.py`'s readable
+    projection while being a different thing entirely: that one is what `run_completed` returns and
+    what a reader consumes as `completed.tables`; this one is a publication transaction handle
+    carrying a root, access tokens and a `publish()`. Two shapes under one name in one package is
+    a coin-flip for the reader, and the readable projection is overwhelmingly the one they meet.
+
+    The capability is unchanged -- `publish()` still stages and verifies every output and makes
+    them visible through a single catalog-root CAS, which is what `test_publication_atomicity.py`
+    proves and what Step 6 depends on for `store.tables`.
+    """
 
     root: Path
     decisions: tuple[object, ...]
@@ -653,7 +664,7 @@ class Project:
         resolver: ObservationResolver,
         initial_strategy_state: object = None,
         history_resolver=None,
-    ) -> CompletedRun:
+    ) -> StrategyReplay:
         """Drive one StrategyModel across occurrences, threading state explicitly.
 
         `previous_state` for each occurrence is the `next_state` the prior accepted
@@ -686,7 +697,7 @@ class Project:
             access.extend(prepared.access_tokens)
             state = prepared.next_state
 
-        return CompletedRun(
+        return StrategyReplay(
             root=self._root,
             decisions=tuple(decisions),
             diagnostics=tuple(diagnostics),

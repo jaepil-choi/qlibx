@@ -375,6 +375,7 @@ class SimulationFlow:
         constraints: tuple[Constraint, ...],
         valuation_service: ValuationService | None = None,
         scan_session: object | None = None,
+        on_progress: Callable[[], None] | None = None,
     ) -> None:
         if not isinstance(frozen_run, FrozenRun):
             raise TypeError("frozen_run must be a FrozenRun")
@@ -422,6 +423,7 @@ class SimulationFlow:
         # The run already opens one duckdb handle for observations; the execution table was
         # opening and closing its own on every fill, which is where the time went.
         self._scan_session = scan_session
+        self._on_progress = on_progress
         declared = tuple(getattr(strategy, "account_requirements", tuple)())
         if any(not isinstance(item, AccountRequirement) for item in declared):
             raise TypeError("account_requirements must return AccountRequirement values")
@@ -439,6 +441,13 @@ class SimulationFlow:
             else None
         )
         self._horizon: ExecutionHorizon | None = None
+        self._recorded_valuation_instants: set[datetime] = set()
+        """Instants a valuation occurrence already wrote an account row for.
+
+        Read by the callback path to tell a duplicate of a measurement it would replay from a
+        session the valuation clock never covered. The two cadences are independent, so presence
+        of a valuation agenda proves nothing about coverage of any particular session.
+        """
         initial = state.current.account
         if not isinstance(initial, AccountState):
             raise ValueError("state must begin with the frozen AccountState root")
@@ -465,6 +474,11 @@ class SimulationFlow:
         next_static = next(static, None)
 
         while next_static is not None or self._pending_due() is not None:
+            # One call per occurrence, for a caller that needs to prove it is still alive while
+            # the run is executing. A run's only other outward sign is its result, which arrives
+            # minutes later -- long after anything watching would have concluded it had died.
+            if self._on_progress is not None:
+                self._on_progress()
             due = self._pending_due()
             if due is not None and (
                 next_static is None or due.sort_key() <= next_static.sort_key()
@@ -1059,15 +1073,81 @@ class SimulationFlow:
             return self._valuation_service.mark(state.snapshot, ())
         return latest.marks
 
+    def _valuation_instant(self, occurrence: OperationOccurrence) -> datetime | None:
+        """The execution instant a standalone valuation marks at, or `None` when none exists.
+
+        Valuation resolution is (valuation clock) intersected with (execution `trade_at` set). The
+        valuation clock says *when the run wants to know* what the book is worth; the execution
+        table says *when the venue published a price* that could answer. Only their intersection
+        is a moment where an honest number exists.
+
+        This deliberately does not reuse `select_target`. That selects the first **strictly-later**
+        eligible instant, which is right for an intent -- a decision cannot fill in a print that
+        already happened -- and wrong here by exactly one instant: on the shipped cadence (decide
+        08:00, fill 15:30, value 16:00) a 16:00 valuation would bind *tomorrow's* fill rather than
+        the 15:30 close that just happened, stamping NAV one execution instant late along its
+        entire length.
+        """
+        execution_input = self._frozen_run.execution_input
+        if execution_input is None or self._frozen_run.end is None:
+            # A run declared without execution authority never values against venue prices.
+            return None
+        return self._execution_horizon(execution_input).at_or_before(occurrence.evaluation_time)
+
+    def _standalone_marks(
+        self, state: AccountState, valuation_at: datetime
+    ) -> tuple[SelectedMark, ...]:
+        """Value the held book from the prices the venue published at `valuation_at`.
+
+        This is the same mark path a due execution uses -- `exact_execution_snapshot` feeding
+        `_marks_from_execution_snapshot` -- so a standalone valuation and a fill-time valuation
+        cannot disagree about what a price means. Reaching that path was the whole point of the
+        change; only the instant it is asked about is different.
+        """
+        execution_input = self._frozen_run.execution_input
+        if execution_input is None:
+            return ()
+        held = state.snapshot.positions
+        if not held:
+            return ()
+        snapshot = exact_execution_snapshot(
+            execution_input.table,
+            target_at=valuation_at,
+            target_instruments=(),
+            held_instruments=tuple(held),
+            trade_price=execution_input.fill.trade_price,
+            session=self._scan_session,
+        )
+        return _marks_from_execution_snapshot(
+            snapshot,
+            valuation_at,
+            previous=state.latest_mark,
+            held=held,
+        )
+
     def _dispatch_valuation(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         state = self._state.current.account
         if not isinstance(state, AccountState):
             raise RuntimeError("valuation requires an AccountState root")
         account = state.snapshot
-        # The book is valued where it is executed. A valuation occurrence reports the mark the
-        # Account already committed at the most recent execution instant rather than deriving a
-        # second valuation from a different price source, which would give one run two answers.
-        marks = self._committed_marks(state)
+        # A valuation occurrence marks at its OWN instant. It used to replay whatever mark the
+        # Account last committed, which made the NAV series inherit the decision cadence: a
+        # monthly-rebalancing strategy reported a monthly NAV even though the venue published a
+        # price every session and the book was worth something on every one of them.
+        #
+        # The pending slot is never touched here. `pending_accepted_intent` holds a single
+        # occupant (`run_state.py:59`), so routing a daily valuation through it would overwrite
+        # accepted decisions on most days. Marking synchronously sidesteps that entirely, which
+        # is the decisive reason this is done here rather than through the pending lifecycle.
+        valuation_at = self._valuation_instant(occurrence)
+        if valuation_at is None:
+            # The venue published no price at or before this instant, so no value exists. That is
+            # a fact about the venue, not a failure, and it is reported as the empty mark rather
+            # than as a stale number carried forward from somewhere else.
+            selected: tuple[SelectedMark, ...] = ()
+        else:
+            selected = self._standalone_marks(state, valuation_at)
+        marks = self._valuation_service.mark(account, selected)
         evidence = ValuationEvidence(
             run_identity=self._frozen_run.identity,
             agenda=self._frozen_run.valuation_agenda,
@@ -1080,7 +1160,113 @@ class SimulationFlow:
             account_version=account.version,
         )
         valuation = ValuationResult(account, marks, evidence)
+        if self._standalone_valuation_adds_a_measurement(state, occurrence):
+            self._commit_standalone_valuation(occurrence, state, marks, selected, evidence)
         return OccurrenceTrace(occurrence, valuation, self._state.current)
+
+    def _standalone_valuation_adds_a_measurement(
+        self, state: AccountState, occurrence: OperationOccurrence
+    ) -> bool:
+        """Whether this occurrence has something new to record, or the book is already valued.
+
+        Mark history is strictly increasing in instant (`account/snapshot.py:118-122`), and it is
+        that way because two marks at one instant are two answers to the same question. A fill
+        already marks the book at its own execution instant, so a valuation occurrence landing on
+        an instant already marked has nothing to add -- recording anyway would not merely
+        duplicate a row, it would break the invariant.
+
+        The value of the book is unchanged either way. What is skipped is a redundant restatement
+        of it, not a measurement.
+        """
+        latest = state.latest_mark
+        if latest is None or latest.marked_at is None:
+            return True
+        return occurrence.evaluation_time > latest.marked_at
+
+    def _commit_standalone_valuation(
+        self,
+        occurrence: OperationOccurrence,
+        state: AccountState,
+        marks: MarkBatch,
+        selected: tuple[SelectedMark, ...],
+        evidence: ValuationEvidence,
+    ) -> None:
+        """Commit the mark and write the NAV it measured into the package's own account table.
+
+        Marking without recording would leave the change invisible. `vqapr.account` is what a
+        later reader reconstructs the series from (canon 7.3), and it was written **only** from
+        the strategy-callback path, so the series resolution silently followed the DECISION clock:
+        a monthly-rebalancing strategy left a monthly NAV series no matter how often the run
+        valued the book. Recording here is what makes the valuation clock's independence
+        observable rather than merely internal.
+
+        The Account does not change -- there is no fill -- so this goes through the mark-only
+        transition rather than an account commit, and the pending slot is still never touched.
+
+        `observed_at` carries the instant each price was measured at, which is not the instant
+        this row was written. Keeping them two columns is what lets a reader date the series by
+        the measurement rather than by the occurrence; mislabelling one for the other was measured
+        moving a factor correlation from 0.93 to 0.02.
+        """
+        observed_at = {mark.instrument_id: mark.observed_at for mark in selected}
+        prepared_account = self._account.prepare_valuation(
+            state,
+            marks,
+            expected_version=state.snapshot.version,
+            provenance=evidence,
+            marked_at=occurrence.evaluation_time,
+            observed_at=observed_at,
+        )
+        mark = prepared_account.next_state.latest_mark
+        account = state.snapshot
+
+        recorder = InvocationRecorder(
+            DEFAULT_TABLES,
+            run_id=self._frozen_run.identity,
+            producer_id=str(self._frozen_run.strategy.component.component_id),
+            stage=occurrence.role.value,
+            event_time=occurrence.evaluation_time,
+        )
+        priced = {selection.instrument_id: selection for selection in selected}
+        recorder.append(
+            f"{DEFAULT_TABLE_PREFIX}account",
+            {
+                "instrument": _ACCOUNT_IDENTITY,
+                "cash": str(account.cash),
+                "nav": str(mark.nav),
+                "quantity": None,
+                "price": None,
+                "observed_at": mark.marked_at,
+                "account_version": account.version,
+            },
+        )
+        for instrument in sorted(account.positions):
+            selection = priced.get(instrument)
+            recorder.append(
+                f"{DEFAULT_TABLE_PREFIX}account",
+                {
+                    "instrument": instrument,
+                    "cash": None,
+                    "nav": None,
+                    "quantity": str(account.positions[instrument]),
+                    "price": None if selection is None else str(selection.price),
+                    "observed_at": None if selection is None else selection.observed_at,
+                    "account_version": account.version,
+                },
+            )
+
+        self._account.commit_valuation(prepared_account)
+        self._state.publish_standalone_valuation(
+            self._state.prepare_standalone_valuation(
+                account=prepared_account,
+                mark=marks,
+                recorder=recorder,
+                evidence=evidence,
+            )
+        )
+        # Remembered so a later callback can tell a duplicate of this measurement from a session
+        # this clock never covered.
+        self._recorded_valuation_instants.add(occurrence.evaluation_time)
 
     def _dispatch_monitoring(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         state = self._state.current.account
@@ -1431,6 +1617,20 @@ class SimulationFlow:
         # a live one, is why the series is offset one commit behind the callback that writes it:
         # a callback reports the account it saw before deciding.
         mark = self._committed_mark()
+        if mark is not None and self._valuation_already_recorded(mark):
+            # A valuation occurrence already recorded THIS EXACT measurement at the instant it
+            # was taken. Replaying it here would write the same nav a second time under a later
+            # `available_at`, and a reader dating the series by the measurement then finds two
+            # rows per date. Measured directly on the factor testbed, that duplication took the
+            # HML correlation from 0.9726 to 0.6877 -- not by moving a number, but by pairing
+            # each real return with a spurious zero one.
+            #
+            # The test is identity of the mark, not the mere existence of a valuation agenda.
+            # Valuation and strategy cadences are independent session tuples, so a run may
+            # legitimately declare a valuation clock SPARSER than its decisions; on a session
+            # that clock does not cover, this replayed row is still the only record of the
+            # book's value and dropping it would reintroduce the very gap this step closes.
+            mark = None
         prices = {} if mark is None else {m.instrument_id: m for m in mark.marks.marks}
         observed = {} if mark is None else (mark.observed_at_by_instrument or {})
         recorder.append(
@@ -1473,6 +1673,17 @@ class SimulationFlow:
     def _committed_mark(self) -> object | None:
         state = self._state.current.account
         return state.latest_mark if isinstance(state, AccountState) else None
+
+    def _valuation_already_recorded(self, mark: object) -> bool:
+        """Whether a valuation occurrence already wrote this exact mark to the account table.
+
+        Identity is the measurement instant, which is what `vqapr.account` is keyed on for a
+        reader dating the series. Comparing instants rather than asking whether a valuation
+        agenda exists is the difference between skipping a duplicate and losing a measurement:
+        the agenda's mere presence says nothing about whether its clock covers THIS session.
+        """
+        marked_at = getattr(mark, "marked_at", None)
+        return marked_at is not None and marked_at in self._recorded_valuation_instants
 
     def _set_callback_recorder(self, recorder: InvocationRecorder | None) -> None:
         self._strategy.recorder = recorder
@@ -1738,11 +1949,21 @@ class SimulationFlow:
             occurrence=occurrence,
             decision_time=occurrence.evaluation_time,
             target=target,
-            valuation_id=uuid5(
-                _VALUATION_NAMESPACE,
-                f"{self._frozen_run.identity}|{occurrence.evaluation_time.isoformat()}",
+            valuation_id=self._pending_valuation_key(
+                self._frozen_run.identity, occurrence.role.value, occurrence.evaluation_time
             ),
         )
+
+    @staticmethod
+    def _pending_valuation_key(identity: object, role: str, instant: datetime) -> UUID:
+        """The pending identity for a valuation, discriminated by role as well as instant.
+
+        The role belongs in the key. Without it, occurrences differing only in role mint the SAME
+        uuid5 at one instant in one run, and `pending_id` is the token that proves a completion
+        matches its own preparation (`run_state.py:346-348`, `:434-436`). Two identical ids would
+        degrade that invariant from a proof to a coincidence.
+        """
+        return uuid5(_VALUATION_NAMESPACE, f"{identity}|{role}|{instant.isoformat()}")
 
     def _accept_intent(
         self, intent: EconomicPortfolioIntent, occurrence: OperationOccurrence

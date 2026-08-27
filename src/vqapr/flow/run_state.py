@@ -463,6 +463,67 @@ class RunStateRepository:
     def publish_valuation_only(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
+    def prepare_standalone_valuation(
+        self,
+        *,
+        account: PreparedAccountValuation,
+        mark: MarkBatch,
+        recorder: InvocationRecorder,
+        evidence: object = None,
+    ) -> PreparedRunState:
+        """Publish a mark taken by a valuation occurrence that no decision prepared.
+
+        This is `prepare_valuation_only`'s sibling for the independent valuation clock, and the
+        difference between them is the pending slot. `prepare_valuation_only` CONSUMES a pending
+        identity, because a NoDecision minted one and the mark is that pending's completion. A
+        standalone valuation never minted one: it is its own occurrence on its own clock, so
+        there is no identity to match and none to clear. Touching the slot here is precisely what
+        must not happen -- it holds at most one occupant, so a daily valuation passing through it
+        would evict accepted decisions on most sessions.
+
+        The Account does not change, so there is no ACCOUNT_COMMITTED step. The recorder rows are
+        staged the same way a callback's are, because the NAV series has to be readable from the
+        same table whichever clock measured it.
+        """
+        if not isinstance(recorder, InvocationRecorder):
+            raise TypeError("recorder must be an InvocationRecorder")
+        root = self._root
+        if root.account is None or root.account != account.source:
+            raise RuntimeError("prepared Account valuation does not match current root")
+        if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
+            raise ValueError("mark must be the prepared Account mark batch")
+
+        chunks = dict(root._recorder_chunks)
+        for table_id, table_rows in recorder.staged_rows().items():
+            chunk = tuple(MappingProxyType(row) for row in table_rows)
+            chunks[table_id] = (*chunks.get(table_id, ()), chunk)
+
+        return PreparedRunState(
+            root.version,
+            AcceptedRunState(
+                version=root.version + 1,
+                _model_states=root._model_states,
+                _payloads=root._payloads,
+                _verified=root._verified,
+                current_model_state_ref=root.current_model_state_ref,
+                account=account.next_state,
+                # Left exactly as found. A standalone valuation neither takes nor releases it.
+                pending_accepted_intent=root.pending_accepted_intent,
+                lifecycle_trace=(
+                    *root.lifecycle_trace,
+                    LifecycleTrace(LifecycleKind.MARKED, evidence),
+                ),
+                recorder_manifests=root.recorder_manifests + recorder.manifests(),
+                _recorder_chunks=chunks,
+                feedback=root.feedback,
+                finalization=root.finalization,
+                model_state_commit_count=root.model_state_commit_count,
+            ),
+        )
+
+    def publish_standalone_valuation(self, prepared: PreparedRunState) -> AcceptedRunState:
+        return self._publish_infallible(prepared)
+
     def prepare_feedback(
         self, feedback: tuple[object, ...], *, evidence: object = None
     ) -> PreparedRunState:

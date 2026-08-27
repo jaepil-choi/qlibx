@@ -305,12 +305,16 @@ def test_a_strategy_declaring_the_reserved_prefix_is_refused() -> None:
 
 
 def test_the_defaults_need_no_declaration() -> None:
-    """Both default tables are package-owned specs, not something a Strategy supplies."""
+    """Every default table is a package-owned spec, not something a Strategy supplies."""
     from vqapr.flow.simulation import DEFAULT_TABLES
 
     assert {spec.table_id for spec in DEFAULT_TABLES} == {
         "vqapr.weight",
         "vqapr.account",
+        # What the account looked like when a decision was made, which is a different question
+        # from what the book was worth. They shared `vqapr.account` until issue 010, and one of
+        # them answered with a null column.
+        "vqapr.decision_account",
         "vqapr.fill",
     }
     for spec in DEFAULT_TABLES:

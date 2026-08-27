@@ -898,36 +898,31 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     default_account = alpha_result.final_state.recorder_rows.get("vqapr.account", ())
     if not default_weight or not default_account:
         raise AssertionError("the package-owned default records are missing from a real run")
-    # TWO account-level rows per occurrence, because two clocks write this table and they are
-    # not interchangeable:
+    # ONE account-level row per occurrence, and every one of them carries a nav.
     #
-    #   valuation occurrence  -> carries a nav; this is the measurement
-    #   strategy callback     -> nav is None here, because the valuation above already recorded
-    #                            this exact mark and the callback declines to restate it
-    #
-    # Counting only the total would pass while either half silently disappeared, so each half is
-    # pinned separately. Writing them into one table is a known wart -- see issue 010 -- and if
-    # that is ever resolved this assertion is the thing that should fail and say so.
+    # This pinned two rows per occurrence while `vqapr.account` had two writers -- a measurement
+    # and a null-nav restatement from the callback path. Issue 010 separated the two facts into
+    # two tables, so the naive read of this one is now correct: no filter, no nulls, one value
+    # per date. A null appearing here again would mean a non-measuring writer came back.
     #
     # The panel rows are what a later reader rebuilds the run's valuation from, since the run
     # itself retains only the marks somebody declared they would read (canon 7.3).
     account_level = [row for row in default_account if row["instrument"] == "_ACCOUNT"]
-    measured = [row for row in account_level if row["nav"] is not None]
-    restated = [row for row in account_level if row["nav"] is None]
-    if len(measured) != len(callback_days):
+    if len(account_level) != len(callback_days):
         raise AssertionError(
-            f"expected one valuation-written account row per occurrence, saw {len(measured)}"
+            f"expected one account-level row per occurrence, saw {len(account_level)}"
         )
-    if len(restated) != len(callback_days):
+    unmeasured = [row for row in account_level if row["nav"] is None]
+    if unmeasured:
         raise AssertionError(
-            f"expected one callback-written account row per occurrence, saw {len(restated)}"
+            f"{len(unmeasured)} account rows carry no nav; vqapr.account is measurement-only"
         )
-    # Both clocks are daily here, so every callback row must have been suppressed. A nav
-    # appearing on this side would mean the duplicate-suppression stopped working, which is the
-    # defect that took HML's correlation from 0.9726 to 0.6877 (implementations/056).
-    if len(account_level) != 2 * len(callback_days):
+    # The decision-time account is its own table now, and says so in its name.
+    decision_account = alpha_result.final_state.recorder_rows.get("vqapr.decision_account", ())
+    decision_level = [row for row in decision_account if row["instrument"] == "_ACCOUNT"]
+    if len(decision_level) != len(callback_days):
         raise AssertionError(
-            f"expected two account-level rows per occurrence, saw {len(account_level)}"
+            f"expected one decision-time account row per occurrence, saw {len(decision_level)}"
         )
     if len(default_account) <= len(account_level):
         raise AssertionError("the account table carries no instrument panel rows")

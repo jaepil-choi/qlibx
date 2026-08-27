@@ -1,7 +1,13 @@
 # 010 — Two writers share one account table
 
-**Status:** open. Found 2026-08-27 while diagnosing why `show_005` failed, by asking what wrote
-the 42 account-level rows a 21-occurrence run produced.
+**Status: CLOSED 2026-08-28** by `docs/implementations/066-the-account-table-carries-measurements-only.md`.
+Option 1 was taken: the decision-time row moved to `vqapr.decision_account` and `vqapr.account`
+carries measurements only. The sparse-valuation-clock row stayed, because removing it cost 8 of 10
+measurements exactly as 056 recorded -- `test_valuation_clock.py` caught that on the first attempt.
+No run's numbers moved; `show_005` is bit-identical across the change.
+
+Found 2026-08-27 while diagnosing why `show_005` failed, by asking what wrote the 42
+account-level rows a 21-occurrence run produced.
 **Touches:** `src/vqapr/flow/simulation.py`, `showcases/show_005_enhanced_index/run.py`,
 `docs/vqapr-architecture.md`
 

@@ -327,6 +327,10 @@ DEFAULT_TABLES = (
         ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
     ),
     TableSpec(
+        f"{DEFAULT_TABLE_PREFIX}decision_account",
+        ("instrument", "cash", "quantity", "account_version"),
+    ),
+    TableSpec(
         f"{DEFAULT_TABLE_PREFIX}fill",
         (
             "instrument",
@@ -446,12 +450,12 @@ class SimulationFlow:
             else None
         )
         self._horizon: ExecutionHorizon | None = None
-        self._recorded_valuation_instants: set[datetime] = set()
-        """Instants a valuation occurrence already wrote an account row for.
+        self._recorded_measurements: set[object] = set()
+        """Measurement instants already written to `vqapr.account`, by whichever path wrote them.
 
-        Read by the callback path to tell a duplicate of a measurement it would replay from a
-        session the valuation clock never covered. The two cadences are independent, so presence
-        of a valuation agenda proves nothing about coverage of any particular session.
+        Keyed on the instant a mark was TAKEN, not on the occurrence that wrote it, because that
+        is the axis a reader dates the series by. Two rows for one instant pair a real value with
+        a duplicate; 056 measured that as HML 0.9726 -> 0.6877.
         """
         initial = state.current.account
         if not isinstance(initial, AccountState):
@@ -1269,9 +1273,13 @@ class SimulationFlow:
                 evidence=evidence,
             )
         )
-        # Remembered so a later callback can tell a duplicate of this measurement from a session
-        # this clock never covered.
-        self._recorded_valuation_instants.add(occurrence.evaluation_time)
+        # Recorded so a later callback does not write this same measurement a second time. Keyed
+        # on the instant the mark was TAKEN rather than on this occurrence, because a callback
+        # replays a committed mark and the two clocks differ -- comparing occurrences would never
+        # match, and the duplicate would go out under a later `available_at`.
+        recorded_at = getattr(mark, "marked_at", None)
+        if recorded_at is not None:
+            self._recorded_measurements.add(recorded_at)
 
     def _dispatch_monitoring(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         state = self._state.current.account
@@ -1616,68 +1624,83 @@ class SimulationFlow:
                 f"{DEFAULT_TABLE_PREFIX}weight",
                 {"instrument": target.instrument_id, "weight": str(weight)},
             )
-        # The account's own record, published rather than retained. A run keeps only the marks
-        # somebody declared they would read (canon 7.3), so this table -- not memory -- is what a
-        # later reader reconstructs the run's valuation from. Recording the *committed* mark, not
-        # a live one, is why the series is offset one commit behind the callback that writes it:
-        # a callback reports the account it saw before deciding.
+        # `vqapr.account` carries measurements only, and this path contributes one just in the
+        # case where nobody else will: a valuation clock SPARSER than the decision clock leaves
+        # sessions its own occurrences never reach, and on those the mark a callback replays is
+        # the only record of the book's value there is. 056 measured what dropping it costs --
+        # 8 of 10 measurements lost -- so the row survives for exactly that case.
+        #
+        # What is gone is the row written when a valuation ALREADY recorded this measurement.
+        # That one carried `nav=None` and competed with a real value in the same table, which is
+        # the null-pairing 056 measured as HML 0.9726 -> 0.6877. A row with nothing to add is now
+        # simply not written here; the decision-time facts it also carried moved to their own
+        # table below, where no measurement claim competes with them. See `docs/issues/010`.
         mark = self._committed_mark()
-        if mark is not None and self._valuation_already_recorded(mark):
-            # A valuation occurrence already recorded THIS EXACT measurement at the instant it
-            # was taken. Replaying it here would write the same nav a second time under a later
-            # `available_at`, and a reader dating the series by the measurement then finds two
-            # rows per date. Measured directly on the factor testbed, that duplication took the
-            # HML correlation from 0.9726 to 0.6877 -- not by moving a number, but by pairing
-            # each real return with a spurious zero one.
-            #
-            # The test is identity of the mark, not the mere existence of a valuation agenda.
-            # Keying on the agenda's existence was measured losing 8 of 10 measurements
-            # (`docs/implementations/056`), which is why the narrow condition is here.
-            #
-            # DIRECTION, because the wording below has misled a reader before: the case this
-            # protects is a valuation clock SPARSER than the decision clock, and that is the
-            # UNUSUAL one. The normal research shape is the opposite -- value daily, trade
-            # monthly -- and a valuation clock that fires only when a decision does is the exact
-            # defect 056 was written to remove: a NAV series that moves only when a trade does.
-            # Nothing forbids the sparse declaration, no in-tree run makes it, and this branch
-            # exists so that if someone does, the session their clock skips still has a record
-            # rather than a hole. Read it as "not forbidden", never as "recommended".
-            mark = None
-        prices = {} if mark is None else {m.instrument_id: m for m in mark.marks.marks}
-        observed = {} if mark is None else (mark.observed_at_by_instrument or {})
+        marked_at = getattr(mark, "marked_at", None)
+        if mark is not None and marked_at is not None and marked_at not in self._recorded_measurements:
+            prices = {m.instrument_id: m for m in mark.marks.marks}
+            observed = mark.observed_at_by_instrument or {}
+            recorder.append(
+                f"{DEFAULT_TABLE_PREFIX}account",
+                {
+                    "instrument": _ACCOUNT_IDENTITY,
+                    "cash": str(account.cash),
+                    "nav": str(mark.nav),
+                    "quantity": None,
+                    "price": None,
+                    # When the nav was MEASURED, which is not when this row was written. Dating
+                    # the series by the occurrence instead puts every value one commit late;
+                    # measured once, that mislabelling took a correlation from 0.93 to 0.02.
+                    "observed_at": marked_at,
+                    "account_version": account.version,
+                },
+            )
+            for instrument in sorted(account.positions):
+                valued = prices.get(instrument)
+                recorder.append(
+                    f"{DEFAULT_TABLE_PREFIX}account",
+                    {
+                        "instrument": instrument,
+                        "cash": None,
+                        "nav": None,
+                        "quantity": str(account.positions[instrument]),
+                        "price": None if valued is None else str(valued.price),
+                        "observed_at": observed.get(instrument),
+                        "account_version": account.version,
+                    },
+                )
+
+        # The account as the DECISION saw it -- a different fact from what the book was worth,
+        # and now in a table whose name says so.
+        #
+        # These two questions shared one table and one of them answered with a null column. A
+        # consumer reading a NAV series had to know to filter `nav is not None`, and one who
+        # forgot paired every real value with a spurious zero. Separating the facts rather than
+        # the writers is what makes a naive read correct: every row in `vqapr.account` now carries
+        # a nav, and every row here carries a cash position that no measurement claim competes
+        # with.
         recorder.append(
-            f"{DEFAULT_TABLE_PREFIX}account",
+            f"{DEFAULT_TABLE_PREFIX}decision_account",
             {
                 # Account-level, so it carries the synthetic identity canon fixes for series with
                 # no instrument axis rather than inventing a second key shape.
                 "instrument": _ACCOUNT_IDENTITY,
                 "cash": str(account.cash),
-                "nav": None if mark is None else str(mark.nav),
                 "quantity": None,
-                "price": None,
-                # When the nav on this row was measured, which is not when the row was written --
-                # those are two clocks and canon keeps them two columns. Without it the row
-                # holding the nav does not say what instant the nav belongs to, and a reader has
-                # to join back to this callback's instrument rows to find out. That join has
-                # nothing to join to across any span where the book held no positions, and a
-                # reader who skips it dates the series by the callback instead: the record is one
-                # commit behind, so every value lands one occurrence late. Measured once, that
-                # mislabelling took a factor correlation from 0.93 to 0.02.
-                "observed_at": None if mark is None else mark.marked_at,
                 "account_version": account.version,
             },
         )
+        # No `observed_at` and no `price` on this table, deliberately. Those columns answer "when
+        # was this measured", and nothing here measures anything -- it reports the positions a
+        # callback saw before deciding. Carrying them would invite a reader to date a series by a
+        # column that is structurally empty.
         for instrument in sorted(account.positions):
-            valued = prices.get(instrument)
             recorder.append(
-                f"{DEFAULT_TABLE_PREFIX}account",
+                f"{DEFAULT_TABLE_PREFIX}decision_account",
                 {
                     "instrument": instrument,
                     "cash": None,
-                    "nav": None,
                     "quantity": str(account.positions[instrument]),
-                    "price": None if valued is None else str(valued.price),
-                    "observed_at": observed.get(instrument),
                     "account_version": account.version,
                 },
             )
@@ -1701,17 +1724,6 @@ class SimulationFlow:
     def _committed_mark(self) -> object | None:
         state = self._state.current.account
         return state.latest_mark if isinstance(state, AccountState) else None
-
-    def _valuation_already_recorded(self, mark: object) -> bool:
-        """Whether a valuation occurrence already wrote this exact mark to the account table.
-
-        Identity is the measurement instant, which is what `vqapr.account` is keyed on for a
-        reader dating the series. Comparing instants rather than asking whether a valuation
-        agenda exists is the difference between skipping a duplicate and losing a measurement:
-        the agenda's mere presence says nothing about whether its clock covers THIS session.
-        """
-        marked_at = getattr(mark, "marked_at", None)
-        return marked_at is not None and marked_at in self._recorded_valuation_instants
 
     def _set_callback_recorder(self, recorder: InvocationRecorder | None) -> None:
         self._strategy.recorder = recorder

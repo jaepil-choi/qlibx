@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 from vqapr.data.datasets import DatasetRegistration, validate
@@ -29,6 +30,11 @@ def registration(raw_id: str = "price_daily", *, close: str = "종가") -> Datas
         available_at="available_at",
         key_fields=("거래일자", "종목약코드"),
         fields={"close": close, "session_date": "거래일자"},
+    ).with_span(
+        # These scripts exercise workspace persistence against a fixed declaration rather than a
+        # real scan, so the span is supplied instead of measured. Persistence requires one.
+        datetime(2024, 1, 2, 15, 30, tzinfo=UTC),
+        datetime(2025, 1, 2, 15, 30, tzinfo=UTC),
     )
 
 
@@ -167,7 +173,7 @@ def main() -> int:
         return 1
 
     heading(1, "실데이터 선언을 먼저 검증한다")
-    diagnosis, timing = validate(registration(), source())
+    diagnosis, timing, _measured = validate(registration(), source())
     diagnosis.raise_if_failed()
     print(
         f"ok={diagnosis.ok}  schema={timing.schema_seconds:.2f}s  "

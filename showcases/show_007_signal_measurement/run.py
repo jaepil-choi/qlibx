@@ -407,11 +407,17 @@ def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> 
     if not account_rows:
         raise AssertionError("the published account table carries no account-level rows")
 
+    # Keyed by (version, event_time) rather than by version alone. The account version is no
+    # longer unique per mark: a valuation occurrence measures the book on its own clock without
+    # trading, so several marks legitimately share one version and are told apart only by the
+    # occurrence that took them. Grouping by version alone re-collects every instrument once per
+    # valuation and builds a batch holding the same name several times.
     rehydrated: dict[int, MarkBatch] = {}
     for row in account_rows:
         if row["nav"] is None:
             continue  # before the first commit there is nothing to value
         version = int(row["account_version"])
+        event_time = row["event_time"]
         marks = tuple(
             Mark(
                 str(panel["instrument"]),
@@ -420,10 +426,14 @@ def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> 
                 Decimal(str(panel["quantity"])) * Decimal(str(panel["price"])),
             )
             for panel in panel_rows
-            if int(panel["account_version"]) == version and panel["price"] is not None
+            if int(panel["account_version"]) == version
+            and panel["event_time"] == event_time
+            and panel["price"] is not None
         )
         if not marks:
             continue
+        # The latest occurrence at a version wins, so the retained batch is the most recent
+        # measurement of that book rather than the first one taken of it.
         rehydrated[version] = MarkBatch(marks, sum((mark.value for mark in marks), Decimal("0")))
 
     if not rehydrated:

@@ -25,7 +25,13 @@ from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.flow import model_state as model_state_module
 from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
-from vqapr.public import DatasetRegistration, RowsLookback, SourceSpec, Workspace
+from vqapr.public import (
+    DatasetRegistration,
+    RowsLookback,
+    SourceSpec,
+    Workspace,
+    register_dataset,
+)
 
 NOW = datetime(2024, 3, 5, 4, tzinfo=UTC)
 SESSIONS = tuple(datetime(2024, 1, day, 6, 30, tzinfo=UTC) for day in range(1, 11))
@@ -52,8 +58,9 @@ def priced_workspace(tmp_path: Path) -> Workspace:
         ),
         source,
     )
-    space = Workspace.create(tmp_path)
-    space.register_dataset(
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(
+        tmp_path,
         DatasetRegistration.of(
             "prices",
             "prices-source",
@@ -64,7 +71,7 @@ def priced_workspace(tmp_path: Path) -> Workspace:
         ),
         SourceSpec.of("prices-source", source),
     )
-    return space
+    return Workspace.open(tmp_path)
 
 
 # --------------------------------------------------------------------------------------

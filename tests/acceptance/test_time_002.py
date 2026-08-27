@@ -56,6 +56,7 @@ from vqapr.portfolio.intents import (
     PortfolioTarget,
     validate_economic_intent,
 )
+from vqapr.public import register_dataset
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
@@ -327,8 +328,9 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
         ) AS t(available_at, instrument, close)
     """,
     )
-    workspace = Workspace.create(tmp_path / "workspace")
-    workspace.register_dataset(
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(
+        tmp_path / "workspace",
         DatasetRegistration.of(
             "prices",
             "source",
@@ -339,6 +341,7 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
         ),
         SourceSpec.of("source", source),
     )
+    workspace = Workspace.open(tmp_path / "workspace")
     requirement = DataRequirement.of(
         "strategy", "prices", fields=("close",), lookback=RowsLookback(3)
     )
@@ -380,8 +383,9 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
         ) AS t(available_at, instrument, close)
     """,
     )
-    workspace = Workspace.create(tmp_path / "workspace")
-    workspace.register_dataset(
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(
+        tmp_path / "workspace",
         DatasetRegistration.of(
             "prices",
             "source",
@@ -392,6 +396,7 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
         ),
         SourceSpec.of("source", source),
     )
+    workspace = Workspace.open(tmp_path / "workspace")
     requirement = DataRequirement.of(
         "strategy", "prices", fields=("close",), lookback=RowsLookback(2)
     )
@@ -559,7 +564,6 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
                'A' AS instrument, 10.0 AS close
         """,
     )
-    workspace = Workspace.create(tmp_path / "workspace")
     registration = DatasetRegistration.of(
         "prices",
         "source",
@@ -569,7 +573,8 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
         fields={"close": "close"},
     )
     source = SourceSpec.of("source", source_path)
-    workspace.register_dataset(registration, source)
+    register_dataset(tmp_path / "workspace", registration, source)
+    workspace = Workspace.open(tmp_path / "workspace")
     requirement = DataRequirement.of(
         "strategy", "prices", fields=("close",), lookback=RowsLookback(1)
     )

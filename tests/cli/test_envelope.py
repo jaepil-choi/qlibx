@@ -8,14 +8,29 @@ import sys
 from pathlib import Path
 
 from vqapr.cli.envelope import MAX_INLINE_TRACEBACK_LINES, failure, success
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import (
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    FailureSource,
+    VqaprError,
+)
 
 
 def _error() -> VqaprError:
     return VqaprError(
         stage="component.load",
         family=FailureFamily.DATA,
-        failures=[Failure.bounded("component.load.wrong_type", "must implement", observed="S")],
+        failures=[
+            Failure.bounded(
+                "component.load.wrong_type",
+                "must implement",
+                observed="S",
+                source=FailureSource(file="strategies.py", key_path="UserStrategy", line=12),
+                fix="subclass StrategyModel, then register the component again",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
+            )
+        ],
         mutation=False,
         retry_precondition="fix and register the component again, then retry",
     )
@@ -38,6 +53,57 @@ def test_failure_preserves_the_package_verdict_verbatim() -> None:
     assert payload["family"] == "DATA"
     assert payload["failures"][0]["code"] == "component.load.wrong_type"
     assert payload["retry_precondition"] == "fix and register the component again, then retry"
+
+
+def test_every_envelope_field_survives_a_json_round_trip() -> None:
+    """The envelope is the agent's only parsing contract, so it must survive serialization whole.
+
+    A field that renders but does not round-trip is worse than a missing one: it reads correctly
+    in a log and arrives as something else in the consumer. `source` is the field at risk, because
+    it is the only nested structure in the payload.
+    """
+    payload = failure(_error())
+    restored = json.loads(json.dumps(payload))
+
+    assert restored == payload, "the envelope did not survive a JSON round trip unchanged"
+
+    entry = restored["failures"][0]
+    assert entry["fix"] == "subclass StrategyModel, then register the component again"
+    assert entry["explain"] == "component-contract"
+    # `source` stays a structure. Flattening it to "strategies.py:12" would force every consumer to
+    # write a regex, and that regex would break silently the day the format changed.
+    assert entry["source"] == {"file": "strategies.py", "key_path": "UserStrategy", "line": 12}
+
+
+def test_a_refusal_carries_all_six_envelope_fields() -> None:
+    """An agent parses these by name, so every one of them must be present and populated."""
+    entry = failure(_error())["failures"][0]
+
+    for field in ("code", "source", "requirement", "observed", "fix", "explain"):
+        assert field in entry, f"the envelope lost {field!r}"
+    for field in ("code", "requirement", "fix", "explain"):
+        assert entry[field], f"{field!r} is present but empty, which tells the reader nothing"
+
+
+def test_an_absent_location_says_so_rather_than_inventing_one() -> None:
+    """Not every refusal has a file or a line, and guessing one would send the reader somewhere."""
+    unlocated = VqaprError(
+        stage="preflight.account",
+        family=FailureFamily.ACCOUNT,
+        failures=[
+            Failure.bounded(
+                "preflight.account.mode",
+                "a long-only account must not hold a short",
+                observed="A005930: -10",
+                fix="drop the short holding, or declare the account SIGNED",
+                explain=ExplainTopic.RUN_PRECONDITION,
+            )
+        ],
+    )
+
+    source = failure(unlocated)["failures"][0]["source"]
+
+    assert source == {"file": None, "key_path": None, "line": None}
 
 
 def test_a_short_traceback_stays_inline(tmp_path: Path) -> None:

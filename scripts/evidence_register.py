@@ -22,7 +22,8 @@ def head(n: int, title: str) -> None:
     print(f"\n{'=' * 78}\n[{n}] {title}\n{'=' * 78}")
 
 
-def report(diagnosis, timing) -> None:
+def report(diagnosis, timing, measured=None) -> None:
+    """`validate` returns the registration with its measured span third; splats land it here."""
     stages = f"1단계 {timing.schema_seconds:.2f}s"
     stages += "  2단계 건너뜀" if timing.key_was_skipped else f"  2단계 {timing.key_seconds:.2f}s"
     print(f"    ok={diagnosis.ok}   stage={diagnosis.stage}   ({stages})")
@@ -67,7 +68,7 @@ def main() -> int:
         key_fields=("거래일자", "종목약코드"),
         fields={"close": "종가2", "volume": "거래량"},
     )
-    diagnosis, timing = validate(both, spec)
+    diagnosis, timing, _measured = validate(both, spec)
     report(diagnosis, timing)
     print("    -> 왕복 한 번에 고칠 것을 전부 받았다")
 
@@ -123,7 +124,7 @@ def main() -> int:
         key_fields=("거래일자", "상장구분"),
         fields={"close": "종가"},
     )
-    diagnosis, timing = validate(nulled, spec)
+    diagnosis, timing, _measured = validate(nulled, spec)
     report(diagnosis, timing)
 
     head(7, "agent가 읽는 형태")

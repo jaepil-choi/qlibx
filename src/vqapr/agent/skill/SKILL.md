@@ -49,14 +49,29 @@ Work with vqapr follows three rungs. Each rung depends on the previous one succe
 registered and passes validation.
 
 1. `vqapr list datasets` -- see what exists (returns empty on a fresh workspace, that is fine)
-2. `vqapr new datamodel <id> --dataset <d>` or `vqapr new strategy <id> --dataset <d>` --
-   scaffold a component and its declaration
-3. `vqapr new dataset --out d.yaml` -- get a dataset template with every required key
-4. `vqapr new execution-input --out ei.yaml` -- get a venue-table template
-5. `vqapr new agendas --out agendas.yaml` -- get agendas, strategy_configs, and valuation_configs
+2. `vqapr new strategy <id> --dataset <d>` or `vqapr new datamodel <id> --dataset <d>` --
+   scaffold a runnable `.py` plus a matching `.yaml`. You can register either one: the YAML with
+   `vqapr register <file.yaml>`, or the source directly with `vqapr register strategy <id>
+   <file.py>`, which needs no YAML at all.
+3. `vqapr register strategy <id> <file.py>` -- register it by naming the kind, the id and the
+   file. The file must define exactly one `StrategyModel` subclass; zero and two are both
+   refused, and the refusal says which.
+4. `vqapr new dataset --out d.yaml` -- get a dataset template with every required key
+5. `vqapr new execution-input --out ei.yaml` -- get a venue-table template
+6. `vqapr new exchange <id> --instruments A005930 A000660 --out venue.py` -- get a runnable
+   Exchange plus the declaration that registers it. **Every instrument the run trades needs a
+   listing here**, or preflight refuses it by name. `AcademicExchange` and `KrxExchange` are the
+   only two profiles a registered Exchange may be; the scaffold uses the first.
+7. `vqapr new agendas --out agendas.yaml` -- get agendas, strategy_configs, and valuation_configs
    together (a config binds a role to an agenda, so neither half is usable alone)
-6. Fill in the placeholders and `vqapr register <declaration.yaml>` for each
-7. `vqapr list <kind>` -- confirm what was registered
+8. Fill in the placeholders and `vqapr register <declaration.yaml>` for each. Datasets, sources
+   and agendas stay in YAML because they ARE declarations -- there is no code to point at.
+9. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
+   component declares it reads, decides, forms, weights and records
+
+**A run needs five declarations**: a dataset, an execution input, an exchange, agendas with their
+configs, and at least one component. Each has a `vqapr new` scaffold; if you are hand-writing one
+of them, check for the template first.
 
 **Stop condition:** `vqapr list` shows all required elements and `register` accepted every
 declaration without failures.
@@ -126,10 +141,37 @@ flag them and explain what would have to be true for the pattern to be safe.
 
 1. `vqapr new run-spec --out spec.yaml` — get a template with every required key explained
 2. Fill in the template with registered component IDs, agenda IDs, instruments, and dates
-3. `vqapr run spec.yaml` — preflight, freeze, and execute the simulation
+3. `vqapr check spec.yaml` — prove it before spending a run. `check` makes eight independent
+   judgments and reports **all** of them in one call, so a spec with four defects costs one
+   command rather than four. It writes nothing.
+4. `vqapr run spec.yaml` — preflight, freeze, and execute the simulation
 
-**Stop condition:** `vqapr run` returns `ok:true` with an `occurrences` count and
-`account_version`.
+**Stop condition:** `vqapr check` returns `ok:true`, then `vqapr run` returns `ok:true` with an
+`occurrences` count and `account_version`.
+
+## Writing a strategy
+
+A strategy is a Python file. It declares what it reads and returns what it wants; identity,
+provenance and the account version are the framework's, and an author never writes them.
+
+```python
+def inputs(self):
+    read = DatasetInput(dataset_id="prices", fields=("close",), lookback=RowsLookback(rows=20))
+    return {"prices": read}
+
+def decide(self, call):
+    ...
+    return StrategyResult(decision=Rebalance.of(long={"A": 2, "B": 1}, invested="0.9"))
+```
+
+`Rebalance.of` takes **relative** conviction. `long={"A": 2, "B": 1}` means A is liked twice as
+much as B; normalising, rounding onto the canonical grid and balancing against cash is the
+package's arithmetic, not yours. You never make weights sum to one by hand.
+
+A short is declared by **which mapping** a name appears in, never by a negative number:
+`short={"A": 2}` means twice as short. Passing both sides makes the book signed automatically.
+
+Return `Hold(reason="...")` to decline. The reason is one token, no spaces.
 
 ### Rung 3 — Measurement
 
@@ -156,12 +198,20 @@ or
 **`ok`** — did the command succeed?
 **`stage`** — which processing stage produced this result (e.g. `workspace.register`,
 `run.complete`, `cli.input`)
-**`failures`** — an array of structured diagnostics. Every entry carries `code`, `requirement`
-and `observed`; `examples` and `example_total` are present but **may be empty**
+**`failures`** — an array of structured diagnostics. Every entry carries `code`, `source`,
+`requirement`, `observed`, `fix` and `explain`; `examples` and `example_total` are present but
+**may be empty**
 **`error`** — the Python exception as a string, for traceability
 
-When `ok` is false, read the `failures` array first. `requirement` says what was needed and
-`observed` says what was found; those two are always populated and are usually enough to act on.
+When `ok` is false, read `fix` first. It is the sentence that fixes *this* occurrence, written as
+an action you can take. `requirement` says what was needed and `observed` says what was found;
+`source` says where — it is an object with `file`, `key_path` and `line`, any of which may be
+`null` when the failure does not have that kind of location. Read `source` as structure, never by
+parsing a formatted string out of the other fields.
+
+`explain` names the section of this skill that explains why the whole class of failure happens and
+how to stop causing it. The set of topic ids is closed and every one of them resolves to a
+"Recovering from…" section below.
 
 **`examples` is empty for structural checks, and that is not a bug.** A check on a column's
 *type* has no offending row to quote, so it reports `"examples": [], "example_total": 0`. A check
@@ -170,6 +220,97 @@ and `example_total` says how many there were before truncation. An empty `exampl
 non-zero `example_total` never happens; if you see one, that is worth reporting.
 
 Fix the inputs and retry.
+
+## Recovering from a refusal
+
+Every refusal carries an `explain` topic. There are seven, and each names one of the sections
+below. `fix` tells you what to do about the single failure in front of you; these sections tell
+you what the failure means and how to stop hitting it.
+
+### Recovering from: declaration-shape
+
+The declaration document does not have the shape the contract requires — a missing key, a value
+of the wrong type, a value outside the permitted set, or a section vqapr does not recognise.
+
+vqapr never guesses a missing key and never coerces a value. Read `source.key_path`: it names the
+exact position in the document, so you can go straight there rather than re-reading the file.
+`observed` shows what was found at that position. When a value must come from a fixed set, the
+`requirement` lists that set.
+
+Generate a fresh template with `vqapr new` when a document has drifted far from the contract;
+editing a correct template is faster than repairing a wrong one.
+
+### Recovering from: dataset-preparation
+
+The declaration is well-formed but the parquet behind it does not satisfy what registration
+requires: a declared column is absent, the logical key is not unique or contains nulls,
+`available_at` is not timezone-aware, or the dataset carries no dated row at all.
+
+These are all fixed while *preparing* the source, not while registering it. vqapr deliberately
+does not convert a naive timestamp for you: only you know which instant a value means, and a
+wrong localisation is a silent point-in-time leak rather than an error. Localize at the instant
+the row became knowable — a daily close is knowable at that session's close in the venue's
+timezone, not at midnight.
+
+For key failures, `examples` quotes up to five offending values and `example_total` says how many
+there were, so you can tell a typo from a systematic duplicate.
+
+### Recovering from: source-access
+
+The declaration is right and the data may be fine, but the path cannot be reached or read: the
+file is not there, it is not readable parquet, or a specific field cannot be queried from it.
+
+Check `source.file` first — it is the path vqapr actually resolved, which is often the surprise.
+A relative path is resolved against the declaration's own directory, so a path that looks right
+in the document can still resolve somewhere you did not expect.
+
+### Recovering from: component-contract
+
+User code does not have the shape the framework can call: a required method is missing or is not
+callable, a signature does not accept the arguments the framework passes, the module fails to
+import, or a Model read a `DataRequirement` it never declared.
+
+The contract is checked before the run so that a component fails at registration rather than
+halfway through a simulation. Declare every requirement before compute — reading an undeclared
+one is refused deliberately, because a requirement that is not declared is not point-in-time
+bounded.
+
+### Recovering from: run-precondition
+
+Something a run needs was not in place before it started: a holding with no listing on the
+selected Exchange, a holding that cannot be closed, a quantity below a listing minimum or off its
+step, a short in a long-only account, an execution input that does not declare a price the
+Exchange requires, or a strategy occurrence with no execution instant inside the horizon.
+
+Every one of these is a fact about the declared run rather than about the data. Fix the
+declaration — the Exchange listing set, the initial account, the execution input, or the horizon —
+and re-run preflight. Preflight exists so these fail in seconds instead of after a long run.
+
+### Recovering from: workspace-state
+
+What is already registered in the workspace conflicts with what is being registered now: an id
+bound to a different declaration or a different source, a lookup for something never registered,
+or a registration written before a contract the current version requires.
+
+vqapr never silently redefines a registered id, because a later reader would have no way to know
+which definition produced an earlier result. Either keep the existing declaration or register the
+new one under a new id. When a registration predates a required field, the refusal names the
+exact command that repairs it, and repairing one id does not disturb the others.
+
+A workspace can also refuse because another process holds its lock. Registration takes an
+exclusive lock so two concurrent writers cannot lose each other's declarations; the refusal means
+something else is registering right now, not that anything is corrupt. Wait for the other command
+to finish and retry. If nothing else is running, a lock file was left behind by a process that
+died, and removing it is safe once you have confirmed no vqapr command is live.
+
+### Recovering from: publication
+
+A step that writes an artifact refused: the output path already exists, or the workspace file
+could not be written back to disk.
+
+vqapr refuses to overwrite a published artifact. One producer owns one output, so a repeated run
+to the same result name is a conflict rather than an update — choose a new result name, or remove
+the existing artifact deliberately if it is genuinely obsolete.
 
 ## CLI reference
 

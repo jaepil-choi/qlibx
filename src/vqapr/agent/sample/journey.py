@@ -76,6 +76,15 @@ OPENING_CASH = Decimal("100000000")
 class SampleResult:
     panel: SamplePanel
     occurrences: int
+    run_state_version: int
+    """How many times the run published state, which is not the Account's version.
+
+    These were conflated while every state publication came from a callback. They are two
+    different counters: the Account advances only when a fill commits, while the run state also
+    advances when a valuation records a mark without trading. Naming this one for the Account
+    made a valuation-clock change look like an accounting change.
+    """
+
     account_version: int
 
 
@@ -197,7 +206,12 @@ def execute(project_root: Path, panel: SamplePanel) -> SampleResult:
         instruments=panel.instruments,
     )
     result = run(project_root, preflight_run(project_root, definition))
-    return SampleResult(panel, len(result.occurrences), result.final_state.version)
+    return SampleResult(
+        panel,
+        len(result.occurrences),
+        result.final_state.version,
+        result.final_state.account.snapshot.version,
+    )
 
 
 __all__ = ["SampleResult", "execute", "install"]

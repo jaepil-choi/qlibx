@@ -183,13 +183,33 @@ def _list(root: Path) -> dict[str, Any]:
         return success("skill.list", installed=False, root=str(root))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     files = list(manifest.get("files", {}).keys())
-    return success(
-        "skill.list",
-        installed=True,
-        root=str(root),
-        package_version=manifest.get("package_version", "unknown"),
-        files=files,
-    )
+
+    # Whether the installed copy still matches the package's own skill.
+    #
+    # Reporting only `installed: true` was how a stale skill went unnoticed: the package had been
+    # upgraded, the installed SKILL.md still described the older surface, and nothing anywhere
+    # said so. An agent reads the installed copy, so a stale one silently teaches a surface that
+    # no longer exists -- which is worse than no skill at all, because it is confidently wrong.
+    # Resolved the same way `_install` resolves it, rather than by walking `__file__`. Two
+    # mechanisms for one fact is how they drift, and the path form raises under a zipimport or
+    # non-extracted install -- turning `skill list` into a traceback instead of the single-line
+    # envelope the skill itself promises.
+    shipped = _collect_skill_files()["SKILL.md"]
+    installed_path = skill_dir / "SKILL.md"
+    current = installed_path.is_file() and installed_path.read_bytes() == shipped
+    body: dict[str, Any] = {
+        "installed": True,
+        "root": str(root),
+        "package_version": manifest.get("package_version", "unknown"),
+        "files": files,
+        "current": current,
+    }
+    if not current:
+        body["stale"] = (
+            "the installed skill differs from the one this package ships; "
+            "run `vqapr skill install --force` to update it"
+        )
+    return success("skill.list", **body)
 
 
 _INTO_HELP = "install into this directory instead of the auto-detected .git root"

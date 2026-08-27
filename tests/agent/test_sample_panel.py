@@ -107,4 +107,10 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
 
     # The numbers the journey produced before the migration, unchanged.
     assert result.occurrences == 2940
-    assert result.account_version == 2929
+    # The Account is what the economics live in, and an independent valuation clock must not
+    # touch it: a mark taken without a fill values the book, it does not trade it.
+    assert result.account_version == 729
+    # The run state advances on every publication, so it also counts the marks a valuation
+    # records without trading. It is pinned separately precisely because it is the counter the
+    # valuation clock is allowed to move.
+    assert result.run_state_version == 3664

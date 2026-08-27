@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 
 import pytest
 
 from vqapr.constraints.monitoring import MonitoringPolicy
+from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
@@ -20,6 +21,15 @@ from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, Operatio
 from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
+# A span these tests supply directly. Persistence requires one, because the span is measured
+# during validation and a stored registration missing it would force the next reader to re-read
+# the whole source. These cases exercise the metadata write in isolation against a path that
+# deliberately does not exist, so they attach the measurement rather than perform it.
+_SPAN = (
+    datetime(2024, 1, 2, 15, 30, tzinfo=UTC),
+    datetime(2025, 1, 2, 15, 30, tzinfo=UTC),
+)
+
 
 def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistration:
     kwargs = {
@@ -29,7 +39,7 @@ def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistrati
         "fields": {"close": "close", "session_date": "session_date"},
     }
     kwargs.update(overrides)
-    return DatasetRegistration.of(raw_id, "prices", **kwargs)
+    return DatasetRegistration.of(raw_id, "prices", **kwargs).with_span(*_SPAN)
 
 
 def _source(**overrides) -> SourceSpec:
@@ -476,3 +486,168 @@ def test_agenda_conflict_and_invalid_persisted_identity_leave_workspace_unchange
     with pytest.raises(VqaprError) as invalid:
         Workspace.open(tmp_path)
     assert invalid.value.failures[0].code == "workspace.open.invalid"
+
+
+def _make_legacy(workspace: Workspace, count: int) -> None:
+    """Rewrite the first `count` registrations into the exact shape they had before spans.
+
+    The `span:` key and its two quoted ISO entries are removed and nothing else, so the result is
+    valid YAML carrying exactly the five legacy keys -- a genuinely old document rather than a
+    corrupt one.
+    """
+    kept: list[str] = []
+    dropping = False
+    stripped = 0
+    for line in workspace.path.read_text(encoding="utf-8").splitlines():
+        if line.strip() == "span:" and stripped < count:
+            dropping = True
+            stripped += 1
+            continue
+        if dropping:
+            if line.lstrip().startswith("- '"):
+                continue
+            dropping = False
+        kept.append(line)
+    assert stripped == count, "the fixture did not strip the spans it meant to"
+    workspace.path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def test_a_workspace_holding_a_pre_span_registration_still_opens(tmp_path: Path) -> None:
+    """The migration path must not take the workspace offline to repair the workspace.
+
+    Decode enforces exact key-set equality across the whole document, and `open` and `create`
+    both read before they write. A refusal here would therefore block `list` from reporting what
+    needs fixing AND block `register` from fixing it -- the refusal would be advertising a
+    command it had itself disabled. Stale entries are quarantined instead.
+    """
+    workspace = Workspace.create(tmp_path)
+    for name in ("alpha", "beta", "gamma"):
+        workspace.register_dataset(_registration(name), _source())
+    _make_legacy(workspace, 2)
+
+    reopened = Workspace.open(tmp_path)
+
+    assert sorted(str(item.dataset_id) for item in reopened.datasets) == [
+        "alpha",
+        "beta",
+        "gamma",
+    ], "a quarantined registration must still be enumerable, or nothing can report it"
+
+
+def test_using_a_quarantined_registration_names_the_command_that_repairs_it(
+    tmp_path: Path,
+) -> None:
+    """Admitted at decode, refused at use. Nothing may consume a registration without a span."""
+    workspace = Workspace.create(tmp_path)
+    for name in ("alpha", "gamma"):
+        workspace.register_dataset(_registration(name), _source())
+    _make_legacy(workspace, 1)
+    reopened = Workspace.open(tmp_path)
+
+    with pytest.raises(VqaprError) as refused:
+        reopened.dataset("alpha")
+
+    failure = refused.value.failures[0]
+    assert failure.code == "dataset.register.span.absent"
+    assert "alpha" in (failure.observed or "")
+    assert "vqapr register <declaration.yaml>" in (refused.value.retry_precondition or "")
+
+    # The healthy registration is untouched by its neighbour's quarantine.
+    assert reopened.span("gamma") == _SPAN
+
+
+def test_the_advertised_repair_command_actually_runs(tmp_path: Path) -> None:
+    """The property the whole quarantine design exists for.
+
+    A refusal naming a repair that its own refusal blocks is worse than no message at all: it
+    sends the reader in a circle. This drives the repair for real, one dataset at a time, and
+    checks the others survive it -- `register_dataset` rewrites the entire document, so a
+    neighbour's missing span must not fail the write.
+    """
+    workspace = Workspace.create(tmp_path)
+    for name in ("alpha", "beta", "gamma"):
+        workspace.register_dataset(_registration(name), _source())
+    _make_legacy(workspace, 2)
+
+    Workspace.open(tmp_path).register_dataset(_registration("alpha"), _source())
+
+    repaired = Workspace.open(tmp_path)
+    assert repaired.span("alpha") == _SPAN
+    assert repaired.span("gamma") == _SPAN, "repairing one dataset disturbed a healthy one"
+    with pytest.raises(VqaprError) as still_stale:
+        repaired.dataset("beta")
+    assert still_stale.value.failures[0].code == "dataset.register.span.absent"
+
+    Workspace.open(tmp_path).register_dataset(_registration("beta"), _source())
+    final = Workspace.open(tmp_path)
+    assert all(final.span(name) == _SPAN for name in ("alpha", "beta", "gamma"))
+
+
+def test_repairing_a_quarantined_registration_may_not_change_its_declaration(
+    tmp_path: Path,
+) -> None:
+    """Adding the measurement is a repair; changing what the dataset means is a new dataset.
+
+    The conflict check compares whole registrations, so it has to ignore the span to let a repair
+    through. Ignoring the rest along with it would let a re-registration silently redefine the
+    dataset under cover of the migration.
+    """
+    workspace = Workspace.create(tmp_path)
+    workspace.register_dataset(_registration("alpha"), _source())
+    _make_legacy(workspace, 1)
+
+    with pytest.raises(VqaprError) as refused:
+        Workspace.open(tmp_path).register_dataset(
+            _registration("alpha", key_fields=("instrument",)), _source()
+        )
+
+    assert refused.value.failures[0].code == "workspace.dataset.register.conflict"
+
+
+def test_reading_a_span_does_not_touch_the_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reason the span is persisted at all.
+
+    `evaluation_times` answers a neighbouring question by scanning the source. If reading two
+    endpoints also required a scan, persisting them would have bought nothing. The registered
+    path here does not exist, but absence alone is weak evidence -- a future implementation could
+    open the file only when some cache missed. So the scan entry points are replaced with traps:
+    reaching one is the failure, not merely being slow.
+    """
+    workspace = Workspace.create(tmp_path)
+    workspace.register_dataset(_registration(), _source())
+
+    def _trap(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("reading a persisted span must not open the source")
+
+    for name in ("span_check", "distinct_values", "describe", "key_check"):
+        monkeypatch.setattr(scan, name, _trap)
+
+    assert Workspace.open(tmp_path).span("price_daily") == _SPAN
+
+
+def test_persistence_refuses_a_registration_whose_span_was_never_measured(
+    tmp_path: Path,
+) -> None:
+    """Storing a span-less registration would oblige the decoder to accept one forever.
+
+    The refusal names the entry point that measures it rather than measuring here: this method is
+    a metadata write and opens no source, and re-measuring would be a second read of a file
+    validation already read end to end.
+    """
+    workspace = Workspace.create(tmp_path)
+    unmeasured = DatasetRegistration.of(
+        "price_daily",
+        "prices",
+        instrument_field="instrument",
+        available_at="available_at",
+        key_fields=("session_date", "instrument"),
+        fields={"close": "close"},
+    )
+
+    with pytest.raises(VqaprError) as refused:
+        workspace.register_dataset(unmeasured, _source())
+
+    assert refused.value.failures[0].code == "dataset.register.span.absent"
+    assert "register_dataset" in (refused.value.retry_precondition or "")

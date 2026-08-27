@@ -12,18 +12,20 @@ import os
 import tempfile
 import time as _time
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from datetime import date, datetime, time
 from pathlib import Path
 
 import yaml
 
 from vqapr.constraints.monitoring import MonitoringPolicy
+from vqapr.data import datasets as datasets_module
 from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.domain.identifiers import (
     ComponentId,
     DatasetId,
@@ -110,6 +112,14 @@ Without this a crash leaves the workspace permanently unwritable, and the recove
 OPEN_STAGE = "workspace.open"
 REGISTER_STAGE = "workspace.dataset.register"
 LOOKUP_STAGE = "workspace.dataset.lookup"
+SPAN_STAGE = "dataset.register.span"
+"""Deliberately the same string `data.datasets` declares, asserted below rather than imported.
+
+A module-level literal is what lets the refusal-code inventory fold `f"{SPAN_STAGE}.absent"`
+statically; an alias to another module's constant is opaque to that pass and the code would drop
+out of the inventory silently. The assert keeps the two from drifting.
+"""
+assert SPAN_STAGE == datasets_module.SPAN_STAGE
 SOURCE_LOOKUP_STAGE = "workspace.source.lookup"
 WRITE_STAGE = "workspace.write"
 EXECUTION_REGISTER_STAGE = "workspace.execution_input.register"
@@ -285,18 +295,44 @@ class Workspace:
                 code=f"{LOOKUP_STAGE}.invalid",
                 requirement="dataset lookup requires a valid dataset_id",
                 observed=str(error),
+                fix="pass a valid dataset_id string to Workspace.dataset()",
+                explain=ExplainTopic.DECLARATION_SHAPE,
                 retry="use a valid dataset_id, then retry",
             ) from error
         try:
-            return _detach_registration(self._datasets[key])
+            registration = self._datasets[key]
         except KeyError as error:
             raise _workspace_error(
                 stage=LOOKUP_STAGE,
                 code=f"{LOOKUP_STAGE}.missing",
                 requirement=f"dataset {key!r} must be registered in this workspace",
                 observed=f"registered datasets: {', '.join(sorted(self._datasets)) or '(none)'}",
+                fix=(
+                    f"register dataset {key!r}, or look up one of the registered datasets "
+                    "listed above"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
                 retry="register the dataset, then retry",
             ) from error
+        # Point of use, which is where a quarantined registration is refused. Decode admits it so
+        # the workspace stays enumerable and repairable; USING it is what must not happen, since
+        # every consumer downstream of here treats a registration as complete.
+        _require_span(str(key), registration)
+        return _detach_registration(registration)
+
+    def span(self, raw_dataset_id: str) -> tuple[datetime, datetime]:
+        """The first and last instant the registered dataset carries.
+
+        Reads the registration, never the file. `evaluation_times` above answers a neighbouring
+        question by scanning, which is right when a caller needs every session; a caller that only
+        needs the endpoints should not pay for a full read to learn two values registration
+        already measured. That is the whole reason the span is persisted rather than derived.
+        """
+        # `dataset` already refuses a quarantined registration, so reaching the return means the
+        # span is present.
+        span = self.dataset(raw_dataset_id).span
+        assert span is not None
+        return span
 
     def instruments(self, raw_dataset_id: str) -> tuple[str, ...]:
         """Every instrument the registered dataset carries, sorted.
@@ -333,6 +369,8 @@ class Workspace:
                     code=f"{LOOKUP_STAGE}.invalid",
                     requirement=f"dataset {raw_dataset_id!r} available_at must be a timestamp",
                     observed=type(value).__name__,
+                    fix="re-register the dataset with a timestamp-typed available_at column",
+                    explain=ExplainTopic.DATASET_PREPARATION,
                     retry="register the dataset with a timestamp available_at, then retry",
                 )
             instants.append(require_tz_aware(value, name="available_at"))
@@ -348,6 +386,8 @@ class Workspace:
                 code=f"{SOURCE_LOOKUP_STAGE}.invalid",
                 requirement="source lookup requires a valid source_id",
                 observed=str(error),
+                fix="pass a valid source_id string to Workspace.source()",
+                explain=ExplainTopic.DECLARATION_SHAPE,
                 retry="use a valid source_id, then retry",
             ) from error
         try:
@@ -358,6 +398,8 @@ class Workspace:
                 code=f"{SOURCE_LOOKUP_STAGE}.missing",
                 requirement=f"source {key!r} must be registered in this workspace",
                 observed=f"registered sources: {', '.join(sorted(self._sources)) or '(none)'}",
+                fix=f"register a dataset or execution input against source_id {key!r} first",
+                explain=ExplainTopic.WORKSPACE_STATE,
                 retry="register a dataset or execution input with that source, then retry",
             ) from error
 
@@ -371,6 +413,8 @@ class Workspace:
                 code=f"{EXECUTION_LOOKUP_STAGE}.invalid",
                 requirement="execution input lookup requires a valid execution_input_id",
                 observed=str(error),
+                fix="pass a valid execution_input_id string to Workspace.execution_input()",
+                explain=ExplainTopic.DECLARATION_SHAPE,
                 retry="use a valid execution_input_id, then retry",
                 family=FailureFamily.EXCHANGE,
             ) from error
@@ -385,6 +429,8 @@ class Workspace:
                     "registered execution inputs: "
                     f"{', '.join(sorted(self._execution_inputs)) or '(none)'}"
                 ),
+                fix=f"register execution input {key!r}, or use one of the ids listed above",
+                explain=ExplainTopic.WORKSPACE_STATE,
                 retry="register the execution input, then retry",
                 family=FailureFamily.EXCHANGE,
             ) from error
@@ -399,6 +445,8 @@ class Workspace:
                 code=f"{COMPONENT_LOOKUP_STAGE}.invalid",
                 requirement="component lookup requires a valid component_id",
                 observed=str(error),
+                fix="pass a valid component_id string to Workspace.component()",
+                explain=ExplainTopic.DECLARATION_SHAPE,
                 retry="use a valid component_id, then retry",
             ) from error
         try:
@@ -411,6 +459,8 @@ class Workspace:
                 observed=(
                     f"registered components: {', '.join(sorted(self._components)) or '(none)'}"
                 ),
+                fix=f"register component {key!r}, or use one of the ids listed above",
+                explain=ExplainTopic.WORKSPACE_STATE,
                 retry="register the component, then retry",
             ) from error
 
@@ -421,6 +471,8 @@ class Workspace:
                 code=f"{AGENDA_LOOKUP_STAGE}.invalid",
                 requirement="agenda lookup requires a valid agenda_id",
                 observed=repr(raw_agenda_id),
+                fix="pass a non-empty agenda_id string to Workspace.agenda()",
+                explain=ExplainTopic.DECLARATION_SHAPE,
                 retry="use a valid agenda_id, then retry",
             )
         try:
@@ -431,6 +483,8 @@ class Workspace:
                 code=f"{AGENDA_LOOKUP_STAGE}.missing",
                 requirement=f"agenda {raw_agenda_id!r} must be registered in this workspace",
                 observed=f"registered agendas: {', '.join(sorted(self._agendas)) or '(none)'}",
+                fix=f"register agenda {raw_agenda_id!r}, or use one of the ids listed above",
+                explain=ExplainTopic.WORKSPACE_STATE,
                 retry="register the agenda, then retry",
             ) from error
 
@@ -475,7 +529,34 @@ class Workspace:
                 observed=(
                     f"registration source={registration.source!r}, source spec={source.source_id!r}"
                 ),
+                fix="pass a DatasetRegistration and SourceSpec that name the same source_id",
+                explain=ExplainTopic.DECLARATION_SHAPE,
                 retry="bind the dataset and physical source to the same source_id, then retry",
+            )
+
+        if registration.span is None:
+            # Refused, not measured here. This method is a metadata write and opens no source; the
+            # span comes from the full read `validate` already performs, so measuring again would
+            # be a second scan of the same file and would turn persistence into an I/O operation.
+            raise _workspace_error(
+                stage=REGISTER_STAGE,
+                code="dataset.register.span.absent",
+                requirement="every registration must carry a span measured while it validated",
+                observed=f"dataset {str(registration.dataset_id)!r} carries no measured span",
+                fix=(
+                    "call vqapr.public.register_dataset instead of "
+                    "Workspace.register_dataset directly"
+                ),
+                # WORKSPACE_STATE, not RUN_PRECONDITION: this fires on a direct
+                # `Workspace.register_dataset` before any run exists, so it is a fact about what
+                # the workspace already holds rather than about a declared run. The sibling
+                # refusal for the same code decides the same way, and one code carrying two
+                # topics would break the closed-set classification the enum exists to provide.
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry=(
+                    "register through vqapr.public.register_dataset, which validates the source "
+                    "which measures the span while it validates"
+                ),
             )
 
         with self._exclusive():
@@ -501,10 +582,42 @@ class Workspace:
                         "physical declaration"
                     ),
                     observed="a different SourceSpec is already registered",
+                    fix=(
+                        f"reuse the registered SourceSpec for {source_key!r}, or register "
+                        "under a new source_id"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
                     retry="use the existing source declaration or choose a new source_id",
                 )
 
             existing = datasets.get(key)
+            if existing is not None and existing.span is None:
+                # A quarantined registration is being repaired. It differs from its replacement in
+                # exactly one way -- it has no span -- so the conflict check below would read that
+                # as a changed declaration and refuse the repair it advertises. Compare on the
+                # declared half, and let the measurement be the thing that changes.
+                if replace(existing, span=registration.span) != registration:
+                    raise _workspace_error(
+                        stage=REGISTER_STAGE,
+                        code=f"{REGISTER_STAGE}.conflict",
+                        requirement=(
+                            f"dataset_id {key!r} must keep its existing declaration "
+                            "or use a new identity"
+                        ),
+                        observed=(
+                            "a different declaration is already registered; repairing a "
+                            "span-less registration may add the span but must not change "
+                            "anything else"
+                        ),
+                        fix=(
+                            f"match the quarantined declaration for {key!r} exactly, or "
+                            "register under a new dataset_id"
+                        ),
+                        explain=ExplainTopic.WORKSPACE_STATE,
+                        retry="use the existing declaration or choose a new dataset_id",
+                    )
+                existing = None
+
             if existing is not None:
                 if existing == registration and existing_source == source:
                     self._replace_state(
@@ -526,6 +639,11 @@ class Workspace:
                         "or use a new identity"
                     ),
                     observed="a different declaration is already registered",
+                    fix=(
+                        f"keep the registered declaration for {key!r} unchanged, or "
+                        "choose a new dataset_id"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
                     retry="use the existing declaration or choose a new dataset_id",
                 )
 
@@ -584,6 +702,11 @@ class Workspace:
                         "physical declaration"
                     ),
                     observed="a different SourceSpec is already registered",
+                    fix=(
+                        f"reuse the registered SourceSpec for {source_key!r}, or register "
+                        "under a new source_id"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
                     retry="use the existing source declaration or choose a new source_id",
                     family=FailureFamily.EXCHANGE,
                 )
@@ -610,6 +733,11 @@ class Workspace:
                         "declaration or use a new identity"
                     ),
                     observed="a different execution input declaration is already registered",
+                    fix=(
+                        f"keep the registered declaration for {key!r} unchanged, or "
+                        "choose a new execution_input_id"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
                     retry="use the existing declaration or choose a new execution_input_id",
                     family=FailureFamily.EXCHANGE,
                 )
@@ -685,6 +813,11 @@ class Workspace:
                         f"registered fingerprint {existing.fingerprint[:12]}..., "
                         f"supplied {ref.fingerprint[:12]}..."
                     ),
+                    fix=(
+                        f"register the changed source under a new component_id such as "
+                        f"{suggested!r}"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
                     retry=(
                         f"the source changed, so register it under a new component_id such as "
                         f"{suggested!r}, or restore the registered source"
@@ -734,7 +867,9 @@ class Workspace:
             )
             if state[3].get(config.component.component_id) != config.component:
                 raise self._reference_error(
-                    STRATEGY_REGISTER_STAGE, "strategy component must be registered"
+                    STRATEGY_REGISTER_STAGE,
+                    "strategy component must be registered",
+                    fix="register the strategy's component before registering the StrategyConfig",
                 )
             return self._register_declaration(
                 config.agenda_id,
@@ -791,6 +926,8 @@ class Workspace:
                 code=f"{stage}.invalid",
                 requirement=f"{label} lookup requires a valid agenda_id",
                 observed=repr(key),
+                fix="pass a non-empty agenda_id string to look up this configuration",
+                explain=ExplainTopic.DECLARATION_SHAPE,
                 retry="use a valid agenda_id, then retry",
             )
         try:
@@ -801,6 +938,8 @@ class Workspace:
                 code=f"{stage}.missing",
                 requirement=f"{label} for agenda {key!r} must be registered",
                 observed=f"registered {label}s: {', '.join(sorted(declarations)) or '(none)'}",
+                fix=f"register a {label} for agenda {key!r}, or use one of the ids listed above",
+                explain=ExplainTopic.WORKSPACE_STATE,
                 retry=f"register the {label}, then retry",
             ) from error
 
@@ -813,16 +952,34 @@ class Workspace:
     ) -> None:
         agenda = agendas.get(agenda_id)
         if agenda is None or agenda.role is not role:
+            # Two different repairs hide behind one condition: the agenda may be absent, or it
+            # may exist under a role this configuration cannot use. Saying which one it is costs
+            # nothing here -- both values are parameters -- and saves the reader from checking.
+            missing = agenda is None
+            wanted = role.value.lower()
             raise self._reference_error(
-                stage, "declared agenda must be registered with the matching role"
+                stage,
+                "declared agenda must be registered with the matching role",
+                fix=(
+                    f"register agenda {agenda_id!r} with role {wanted} before registering this "
+                    "configuration"
+                    if missing
+                    else (
+                        f"agenda {agenda_id!r} is registered as "
+                        f"{agenda.role.value.lower()}; register it as {wanted}, or point this "
+                        "configuration at an agenda that already has that role"
+                    )
+                ),
             )
 
-    def _reference_error(self, stage: str, requirement: str) -> VqaprError:
+    def _reference_error(self, stage: str, requirement: str, *, fix: str) -> VqaprError:
         return _workspace_error(
             stage=stage,
             code=f"{stage}.reference",
             requirement=requirement,
             observed="referenced declaration is absent or differs from the registered declaration",
+            fix=fix,
+            explain=ExplainTopic.WORKSPACE_STATE,
             retry="register matching referenced declarations before retrying",
         )
 
@@ -862,6 +1019,12 @@ class Workspace:
                             f"{WORKSPACE_LOCK_TIMEOUT:.0f}s"
                         ),
                         observed=f"another process has held {lock} for the whole timeout",
+                        fix=(
+                            f"wait for the other writer to finish, or delete {lock} if no writer "
+                            "is actually running"
+                        ),
+                        explain=ExplainTopic.WORKSPACE_STATE,
+                        source=FailureSource(file=str(lock)),
                         retry=(
                             "wait for the other writer to finish; if none is running, delete "
                             f"{lock}"
@@ -901,6 +1064,11 @@ class Workspace:
                     f"agenda_id {key!r} must keep its existing declaration or use a new identity"
                 ),
                 observed="a different declaration is already registered",
+                fix=(
+                    f"keep the registered declaration for {key!r} unchanged, or choose "
+                    "a new agenda_id"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
                 retry="use the existing declaration or choose a new agenda_id",
             )
         merged = list(state)
@@ -934,6 +1102,9 @@ class Workspace:
                     code=f"{OPEN_STAGE}.missing",
                     requirement=f"workspace must exist at {self.path}",
                     observed="path does not exist",
+                    fix="call Workspace.create() to initialize the workspace before opening it",
+                    explain=ExplainTopic.WORKSPACE_STATE,
+                    source=FailureSource(file=str(self.path)),
                     retry="create the workspace, then retry",
                 ) from error
             except OSError as error:
@@ -945,6 +1116,9 @@ class Workspace:
                         code=f"{OPEN_STAGE}.unreadable",
                         requirement=f"workspace must be readable at {self.path}",
                         observed=str(error),
+                        fix="fix filesystem permissions on the workspace file, then retry",
+                        explain=ExplainTopic.WORKSPACE_STATE,
+                        source=FailureSource(file=str(self.path)),
                         retry="make the workspace readable, then retry",
                     ) from error
                 _time.sleep(WORKSPACE_SWAP_BACKOFF * (attempt + 1))
@@ -967,6 +1141,9 @@ class Workspace:
                 code=f"{OPEN_STAGE}.invalid",
                 requirement=requirement,
                 observed=str(error),
+                fix="hand-edit or recreate the workspace YAML to match the current schema",
+                explain=ExplainTopic.WORKSPACE_STATE,
+                source=FailureSource(file=str(self.path)),
                 retry="fix or recreate the workspace, then retry",
             ) from error
 
@@ -1053,6 +1230,9 @@ class Workspace:
                 code=f"{WRITE_STAGE}.failed",
                 requirement=f"workspace must be written at {self.path}",
                 observed=str(error),
+                fix="make the workspace directory writable, then retry",
+                explain=ExplainTopic.PUBLICATION,
+                source=FailureSource(file=str(self.path)),
                 retry="make the workspace directory writable, then retry",
             ) from error
 
@@ -1066,7 +1246,7 @@ def _stale_lock_age(lock: Path) -> float | None:
 
 
 def _detach_registration(registration: DatasetRegistration) -> DatasetRegistration:
-    return DatasetRegistration.of(
+    detached = DatasetRegistration.of(
         str(registration.dataset_id),
         str(registration.source),
         instrument_field=registration.instrument_field,
@@ -1074,6 +1254,10 @@ def _detach_registration(registration: DatasetRegistration) -> DatasetRegistrati
         key_fields=registration.key_fields,
         fields=dict(registration.fields),
     )
+    # `of` does not take a span, because a span is measured rather than declared. Detaching must
+    # still carry the measurement across, or every read would hand back a registration that had
+    # silently forgotten it.
+    return detached if registration.span is None else detached.with_span(*registration.span)
 
 
 def _detach_source(source: SourceSpec) -> SourceSpec:
@@ -1155,6 +1339,60 @@ def _detach_monitoring_policy(policy: MonitoringPolicy) -> MonitoringPolicy:
     return MonitoringPolicy(policy.agenda_id, policy.agenda_role)
 
 
+def _require_span(dataset_id: str, registration: DatasetRegistration) -> None:
+    """Refuse a registration that predates span persistence, naming the command that repairs it.
+
+    Raised at the point of USE rather than at decode. Decode admits a span-less registration so
+    the workspace stays enumerable and rewritable -- otherwise the refusal would block `list` from
+    reporting what needs fixing and block `register` from fixing it, which is a deadlock whose
+    only exit is hand-editing YAML.
+    """
+    if registration.span is not None:
+        return
+    raise _workspace_error(
+        stage=SPAN_STAGE,
+        code=f"{SPAN_STAGE}.absent",
+        requirement="every registration must carry a span measured while it validated",
+        observed=f"{dataset_id} was registered before span persistence",
+        # The real invocation. `vqapr register` takes one positional argument, the declaration
+        # YAML that names the dataset and its source; there is no `data` subcommand and no
+        # parquet path goes on this command line.
+        fix=(
+            f"re-register {dataset_id} by running: vqapr register <declaration.yaml>, where that "
+            "document declares this dataset and the source it reads"
+        ),
+        explain=ExplainTopic.WORKSPACE_STATE,
+        retry=(
+            f"re-register {dataset_id} by running: vqapr register <declaration.yaml>, where that "
+            "document declares this dataset and the source it reads"
+        ),
+    )
+
+
+def _encoded_dataset(registration: DatasetRegistration) -> dict[str, object]:
+    """One registration as it is written back.
+
+    A quarantined registration -- one decoded from a document written before spans existed -- is
+    written back in the SAME legacy shape it was read in, without a span. This is what makes the
+    repair incremental: `register_dataset` rewrites the whole document, so inventing a span for
+    the other stale entries would either fabricate a measurement nobody took or refuse the write
+    and block the repair of the one dataset the caller actually fixed.
+
+    A span-less registration that never came from disk cannot reach here: `register_dataset`
+    refuses it before the document is assembled.
+    """
+    body: dict[str, object] = {
+        "source": str(registration.source),
+        "instrument_field": registration.instrument_field,
+        "available_at": registration.available_at,
+        "key_fields": list(registration.key_fields),
+        "fields": dict(registration.fields),
+    }
+    if registration.span is not None:
+        body["span"] = [registration.span[0].isoformat(), registration.span[1].isoformat()]
+    return body
+
+
 def _encode(
     datasets: Mapping[DatasetId, DatasetRegistration],
     sources: Mapping[SourceId, SourceSpec],
@@ -1174,13 +1412,7 @@ def _encode(
             for key, source in sorted(sources.items(), key=lambda item: str(item[0]))
         },
         "datasets": {
-            str(key): {
-                "source": str(registration.source),
-                "instrument_field": registration.instrument_field,
-                "available_at": registration.available_at,
-                "key_fields": list(registration.key_fields),
-                "fields": dict(registration.fields),
-            }
+            str(key): _encoded_dataset(registration)
             for key, registration in sorted(datasets.items(), key=lambda item: str(item[0]))
         },
         "execution_inputs": {
@@ -1330,11 +1562,34 @@ def _decode(
         raise TypeError("datasets must be a mapping")
 
     decoded: dict[DatasetId, DatasetRegistration] = {}
-    expected = {"source", "instrument_field", "available_at", "key_fields", "fields"}
+    expected = {"source", "instrument_field", "available_at", "key_fields", "fields", "span"}
+    legacy = expected - {"span"}
+
+    # A registration written before spans existed is QUARANTINED, not rejected: it decodes into a
+    # registration whose `span` is None, and the refusal is deferred to the moment somebody
+    # actually reads it.
+    #
+    # Refusing here instead would deadlock the repair. The generic exact-set check below is
+    # all-or-nothing across the whole document, and `Workspace.open` and `create` both read
+    # before they write -- so a document-scoped refusal takes `list` offline (it cannot enumerate
+    # what needs fixing) AND takes `register` offline (it must open before it can rewrite). The
+    # refusal would be advertising a repair command that the refusal itself blocks, whose only
+    # real exit is hand-editing YAML no message describes.
+    #
+    # Quarantine keeps the workspace readable and repairable while still tolerating nothing: a
+    # span-less registration cannot be used (`dataset()` and `span()` refuse it) and cannot be
+    # re-persisted with a span it never had.
+    quarantined: set[str] = set()
+
     for raw_id, raw_registration in raw_datasets.items():
         if not isinstance(raw_id, str):
             raise TypeError("every dataset_id must be a string")
-        if not isinstance(raw_registration, dict) or set(raw_registration) != expected:
+        if not isinstance(raw_registration, dict):
+            raise ValueError(f"dataset {raw_id!r} must contain exactly {sorted(expected)}")
+        present = set(raw_registration)
+        if present == legacy:
+            quarantined.add(raw_id)
+        elif present != expected:
             raise ValueError(f"dataset {raw_id!r} must contain exactly {sorted(expected)}")
 
         source = raw_registration["source"]
@@ -1352,7 +1607,6 @@ def _decode(
             isinstance(name, str) and isinstance(column, str) for name, column in fields.items()
         ):
             raise TypeError(f"dataset {raw_id!r} fields must map strings to strings")
-
         registration = DatasetRegistration.of(
             raw_id,
             source,
@@ -1361,6 +1615,17 @@ def _decode(
             key_fields=key_fields,
             fields=fields,
         )
+        if raw_id not in quarantined:
+            raw_span = raw_registration["span"]
+            if (
+                not isinstance(raw_span, list)
+                or len(raw_span) != 2
+                or not all(isinstance(value, str) for value in raw_span)
+            ):
+                raise TypeError(f"dataset {raw_id!r} span must be a pair of ISO-8601 strings")
+            registration = registration.with_span(
+                *(datetime.fromisoformat(value) for value in raw_span)
+            )
         if registration.source not in decoded_sources:
             raise ValueError(
                 f"dataset {raw_id!r} references unregistered source {registration.source!r}"
@@ -1738,12 +2003,19 @@ def _workspace_error(
     requirement: str,
     observed: str,
     retry: str,
+    fix: str,
+    explain: ExplainTopic,
     family: FailureFamily = FailureFamily.DATA,
+    source: FailureSource | None = None,
 ) -> VqaprError:
     return VqaprError(
         stage=stage,
         family=family,
-        failures=[Failure.bounded(code, requirement, observed=observed)],
+        failures=[
+            Failure.bounded(
+                code, requirement, observed=observed, fix=fix, explain=explain, source=source
+            )
+        ],
         mutation=False,
         retry_precondition=retry,
     )

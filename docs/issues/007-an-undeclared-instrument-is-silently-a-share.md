@@ -1,10 +1,16 @@
 # 007 — An undeclared instrument is silently a share
 
-**Status:** open, planned. Found 2026-08-27 reviewing the agent-first surface after G009, by asking
-what a venue would do with a price file holding stocks and ETFs mixed under one `instrument_field`.
-A consensus planning pass ran 2026-08-27 and reached Architect `WATCH`/`COMMENT` with zero carryover
-plus Critic `OKAY`. **See "What planning found" at the end of this file — it corrects four claims
-made above, two of them load-bearing.**
+**Status: SUPERSEDED 2026-08-27 by `docs/issues/008-an-instrument-is-not-the-venues-to-own.md`.**
+The diagnosis below stands — an undeclared instrument silently gets share treatment — but the
+prescription put the roster inside the venue, and the plan's entire cost followed from that. **Do
+not answer the `WIDE`/`NARROW` question; it does not survive 008.** Read 008 first, then this file
+for the diagnosis and for "What planning found", which remains accurate about the code at HEAD.
+
+Found 2026-08-27 reviewing the agent-first surface after G009, by asking what a venue would do with
+a price file holding stocks and ETFs mixed under one `instrument_field`. A consensus planning pass
+ran 2026-08-27 and reached Architect `WATCH`/`COMMENT` with zero carryover plus Critic `OKAY`.
+**See "What planning found" at the end of this file — it corrects four claims made above, two of
+them load-bearing.**
 **Touches:** `src/vqapr/exchange/venue.py`, `src/vqapr/exchange/venues/krx.py`,
 `src/vqapr/exchange/listings.py`, `src/vqapr/cli/new.py`, `src/vqapr/agent/skill/SKILL.md`
 

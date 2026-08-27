@@ -11,7 +11,12 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import (
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    VqaprError,
+)
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
@@ -138,6 +143,11 @@ def _validate_initial_account(
                     "preflight.account.unlisted_holding",
                     "every initial holding must have a listing on the selected Exchange",
                     observed=instrument_id,
+                    fix=(
+                        f"add a listing for {instrument_id} to the Exchange, or drop it from "
+                        "the initial account"
+                    ),
+                    explain=ExplainTopic.RUN_PRECONDITION,
                 )
             )
             continue
@@ -148,6 +158,11 @@ def _validate_initial_account(
                     "preflight.account.holding_not_closable",
                     "each initial holding must be closable on the selected Exchange",
                     observed=f"{instrument_id}: {rule.access.value}",
+                    fix=(
+                        f"permit closing access for {instrument_id} on the Exchange, or drop "
+                        "the holding from the initial account"
+                    ),
+                    explain=ExplainTopic.RUN_PRECONDITION,
                 )
             )
         absolute = abs(quantity)
@@ -157,17 +172,40 @@ def _validate_initial_account(
                     "preflight.account.minimum_quantity",
                     "each initial holding must meet its listing minimum_quantity",
                     observed=f"{instrument_id}: {absolute}",
+                    fix=(
+                        f"raise the {instrument_id} holding to at least the listing "
+                        f"minimum_quantity ({rule.minimum_quantity}), or drop it from the "
+                        "initial account"
+                    ),
+                    explain=ExplainTopic.RUN_PRECONDITION,
                 )
             )
         if (
             not rule.fractional_allowed
             and (absolute / rule.quantity_step).to_integral_value() != absolute / rule.quantity_step
         ):
+            nearest_step = (absolute / rule.quantity_step).to_integral_value() * rule.quantity_step
+            # ROUND_HALF_EVEN sends anything below half a step to zero, and "round to 0" reads as
+            # a rounding instruction while actually meaning delete the holding. Name the smallest
+            # real position instead, and say the other option out loud.
+            nearest_hint = (
+                f"nearest valid quantity is {nearest_step}"
+                if nearest_step != 0
+                else (
+                    f"the smallest valid position is {rule.quantity_step}; "
+                    "drop the holding if that is more than you meant to hold"
+                )
+            )
             failures.append(
                 Failure.bounded(
                     "preflight.account.quantity_step",
                     "each initial holding must align to its listing quantity_step",
                     observed=f"{instrument_id}: {absolute}",
+                    fix=(
+                        f"round the {instrument_id} holding to a multiple of the listing "
+                        f"quantity_step ({rule.quantity_step}); {nearest_hint}"
+                    ),
+                    explain=ExplainTopic.RUN_PRECONDITION,
                 )
             )
         if not rule.fractional_allowed and absolute != absolute.to_integral_value():
@@ -176,6 +214,11 @@ def _validate_initial_account(
                     "preflight.account.fractional_quantity",
                     "each initial holding must satisfy its listing fractional quantity rule",
                     observed=f"{instrument_id}: {absolute}",
+                    fix=(
+                        f"round the {instrument_id} holding to a whole quantity, or set the "
+                        "listing's fractional_allowed to permit fractional holdings"
+                    ),
+                    explain=ExplainTopic.RUN_PRECONDITION,
                 )
             )
         if mode is AccountMode.LONG_ONLY and quantity < Decimal("0"):
@@ -184,6 +227,11 @@ def _validate_initial_account(
                     "preflight.account.mode",
                     "a long-only initial account must not contain short holdings",
                     observed=f"{instrument_id}: {quantity}",
+                    fix=(
+                        f"remove the short {instrument_id} holding from the initial account, "
+                        "or declare the account mode as not long-only"
+                    ),
+                    explain=ExplainTopic.RUN_PRECONDITION,
                 )
             )
     if failures:
@@ -227,6 +275,11 @@ def _validate_execution_requirements(exchange: Exchange, execution_input: object
                 observed=", ".join(
                     f"{item.feature} needs price {item.price!r}" for item in missing
                 ),
+                fix=(
+                    "register the missing price fields on the execution input, or construct "
+                    "the Exchange with the features that need them disabled"
+                ),
+                explain=ExplainTopic.RUN_PRECONDITION,
             )
         ],
         mutation=False,
@@ -267,6 +320,11 @@ def _validate_instrument_universe(
                 code="preflight.universe.unlisted_instrument",
                 requirement="every frozen run instrument must have an Exchange listing",
                 observed=repr(missing),
+                fix=(
+                    "add an Exchange listing for each missing instrument, or remove it from "
+                    "the run's traded instrument universe"
+                ),
+                explain=ExplainTopic.RUN_PRECONDITION,
             )
         )
     if untradable:
@@ -275,6 +333,11 @@ def _validate_instrument_universe(
                 code="preflight.universe.untradable_listing",
                 requirement="the Exchange must permit a side for every traded instrument",
                 observed=repr(untradable),
+                fix=(
+                    "remove each untradable instrument from the traded universe and read it "
+                    "as data instead, or update the Exchange listing to permit a side"
+                ),
+                explain=ExplainTopic.RUN_PRECONDITION,
             )
         )
     raise VqaprError(
@@ -317,6 +380,11 @@ def _require_execution_authority(definition: RunDefinition) -> None:
                     f"exchange={definition.exchange!r}, "
                     f"execution_input_id={definition.execution_input_id!r}"
                 ),
+                fix=(
+                    "declare both an Exchange and an execution input on the RunDefinition "
+                    "before calling preflight_run"
+                ),
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         ],
         mutation=False,
@@ -386,6 +454,12 @@ def _validate_execution_targets(
                     for occurrence in missing
                 ],
                 example_total=len(missing),
+                fix=(
+                    f"widen the run end past {end.isoformat()} to cover the required "
+                    f"execution snapshot, or choose a fill selector other than {selector!r} "
+                    "whose target resolves inside the horizon"
+                ),
+                explain=ExplainTopic.RUN_PRECONDITION,
             )
         ],
         mutation=False,

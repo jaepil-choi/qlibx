@@ -37,15 +37,24 @@ of how the user happened to type it.
 from __future__ import annotations
 
 import argparse
+import ast
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from datetime import date, datetime, time
+from difflib import get_close_matches
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import read_yaml_mapping
-from vqapr.domain.errors import Failure, FailureFamily, collector
+from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
+from vqapr.domain.errors import (
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    FailureSource,
+    collector,
+)
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import (
     register_constraint,
@@ -127,6 +136,50 @@ def _time(value: object, *, name: str) -> time:
     return time.fromisoformat(value)
 
 
+_declaration_path: ContextVar[Path | None] = ContextVar("_declaration_path", default=None)
+"""The declaration file the current `apply` is reading, for `FailureSource.file`.
+
+Every refusal in this module already knows its `key_path` -- the parser threads a `name` through
+the eleven small helpers below. What it did not know was WHICH document that key lives in, and
+that is the one thing a reader needs to open the right file. Threading a twelfth parameter through
+all of them to carry a value that is constant for the whole call would be noise at every signature
+for a fact that changes once.
+
+A ContextVar rather than a module global because it is set and reset around one call, so a nested
+or concurrent `apply` cannot see another's document.
+"""
+
+
+def _nearest_hint(written: str, permitted: Sequence[str], key_path: str) -> str:
+    """What to write instead, naming the closest legal value when the written one is a near miss.
+
+    A refusal that repeats the permitted set has told the reader nothing new -- `requirement`
+    already listed it. What the reader cannot see is which of those values they were reaching for,
+    and a one-character typo is invisible precisely to the person who typed it.
+    """
+    close = get_close_matches(written.lower(), [value.lower() for value in permitted], n=1)
+    if close:
+        return (
+            f"set {key_path} to {close[0]!r}, which is the closest permitted value "
+            f"to {written!r}"
+        )
+    return f"replace {written!r} at {key_path} with one of: {', '.join(permitted)}"
+
+
+def _at(key_path: str) -> FailureSource:
+    """Where a refusal points: the current declaration file, at this key.
+
+    `line` stays absent on purpose. `yaml.safe_load` discards position information, so a line
+    number here would have to be invented, and a wrong line is worse than none -- it sends the
+    reader confidently to the wrong place.
+    """
+    declaration = _declaration_path.get()
+    return FailureSource(
+        file=None if declaration is None else str(declaration),
+        key_path=key_path,
+    )
+
+
 def _require_keys(body: dict[str, Any], keys: Sequence[str], *, name: str) -> None:
     """Name every key this declaration is missing, in one refusal.
 
@@ -148,6 +201,9 @@ def _require_keys(body: dict[str, Any], keys: Sequence[str], *, name: str) -> No
                 f"{DECLARE_STAGE}.key_missing",
                 requirement=f"{name} must declare {key}",
                 observed=f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}",
+                source=_at(name),
+                fix=f"add {key} under {name} in the declaration YAML",
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
     found.done().raise_if_failed()
@@ -282,6 +338,12 @@ def _sessions(
                 requirement=f"{name}.sessions must be a non-empty list of dates",
                 observed=f"{type(declared).__name__}: {declared!r}"[:200],
                 examples=["sessions: ['2024-01-02', '2024-01-03']"],
+                source=_at(f"{name}.sessions"),
+                fix=(
+                    f"set {name}.sessions to a non-empty list of ISO dates, "
+                    "or use from_dataset instead"
+                ),
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done().raise_if_failed()
@@ -316,6 +378,12 @@ def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
                 requirement=f"{name} must be one of: {permitted}",
                 observed=str(value),
                 examples=[member.name.lower() for member in kind],
+                source=_at(name),
+                # Names the value actually written and the nearest legal one. Repeating the
+                # permitted set with the verb swapped would say nothing `requirement` has not
+                # already said, and a near-miss is usually a typo the reader cannot see.
+                fix=_nearest_hint(str(value), [member.name.lower() for member in kind], name),
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done().raise_if_failed()
@@ -352,6 +420,13 @@ def _refuse_agenda_source(body: dict[str, Any], *, name: str) -> None:
                 else f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}"
             ),
             examples=["from_dataset: krx_adjusted_prices", "sessions: ['2024-01-02']"],
+            source=_at(name),
+            fix=(
+                f"remove one of from_dataset/sessions from {name}"
+                if declares_both
+                else f"add either from_dataset or sessions under {name}"
+            ),
+            explain=ExplainTopic.DECLARATION_SHAPE,
         )
     )
     found.done().raise_if_failed()
@@ -385,7 +460,12 @@ def _require_agenda_keys(body: dict[str, Any], *, name: str) -> None:
             requirement = f"{requirement}, one of: {permitted}"
         found.add(
             Failure.bounded(
-                f"{DECLARE_STAGE}.key_missing", requirement=requirement, observed=declares
+                f"{DECLARE_STAGE}.key_missing",
+                requirement=requirement,
+                observed=declares,
+                source=_at(f"{name}.{key}"),
+                fix=f"add {key} under {name} in the declaration YAML",
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
     if not has_source:
@@ -397,6 +477,13 @@ def _require_agenda_keys(body: dict[str, Any], *, name: str) -> None:
                     f"{name} must declare exactly one of from_dataset or sessions"
                 ),
                 observed=f"{name} declares both" if declares_both else declares,
+                source=_at(name),
+                fix=(
+                    f"remove one of from_dataset/sessions from {name}"
+                    if declares_both
+                    else f"add either from_dataset or sessions under {name}"
+                ),
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
     found.done().raise_if_failed()
@@ -445,6 +532,9 @@ def _component(component_id: str, declared: object, project_root: Path, *, base:
                 requirement=f"{name}.kind must be one of: {permitted}",
                 observed=raw_kind,
                 examples=list(_COMPONENT_KINDS),
+                source=_at(f"{name}.kind"),
+                fix=_nearest_hint(str(raw_kind), list(_COMPONENT_KINDS), f"{name}.kind"),
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done().raise_if_failed()
@@ -457,6 +547,9 @@ def _component(component_id: str, declared: object, project_root: Path, *, base:
                 f"{DECLARE_STAGE}.value_invalid",
                 requirement=f"{name}.config must be a mapping of constructor keywords",
                 observed=f"{type(config).__name__}: {config!r}"[:200],
+                source=_at(f"{name}.config"),
+                fix=f"rewrite {name}.config as a mapping of constructor keyword arguments",
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done().raise_if_failed()
@@ -471,7 +564,13 @@ def _component(component_id: str, declared: object, project_root: Path, *, base:
     return str(ref.component_id)
 
 
-def apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[str, list[str]]:
+def apply(
+    document: dict[str, Any],
+    project_root: Path,
+    *,
+    base: Path,
+    declaration: Path | None = None,
+) -> dict[str, list[str]]:
     """Apply every section the document declares, in dependency order.
 
     Returns what was registered per section, so the reply states facts rather than a count.
@@ -480,7 +579,19 @@ def apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[s
     command typed in an empty directory and the registrars create the workspace on the way in;
     opening it up front made a valid first declaration fail with `workspace.open.missing`, which
     sends the user to fix a directory when their file was correct.
+
+    `declaration` is the document's own path, and it is what every refusal below reports as
+    `source.file`. It is optional because a caller may hold a parsed document with no file behind
+    it; when it is absent the refusals say so rather than naming a path that does not exist.
     """
+    token = _declaration_path.set(declaration)
+    try:
+        return _apply(document, project_root, base=base)
+    finally:
+        _declaration_path.reset(token)
+
+
+def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[str, list[str]]:
     unknown = sorted(set(document) - set(SECTIONS))
     if unknown:
         hint = ""
@@ -499,6 +610,8 @@ def apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[s
                 ),
                 observed=f"unknown: {', '.join(unknown)}{hint}",
                 examples=unknown,
+                fix=f"remove or rename the unrecognized section(s): {', '.join(unknown)}",
+                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done().raise_if_failed()
@@ -572,18 +685,177 @@ def apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[s
     return registered
 
 
+def _register_authored(
+    kind: str, component_id: str | None, source: Path | None, project_root: Path
+) -> dict[str, Any]:
+    """Register one Python-authored component by naming its kind, id and file.
+
+    The declaration form still exists and still owns datasets, sources, agendas and configs. What
+    this removes is the YAML wrapper around a COMPONENT, whose entire content was the three facts
+    already on this command line -- and which stood between an author writing a strategy in Python
+    and registering it.
+    """
+    if component_id is None or source is None:
+        raise InputError(
+            INCOMPLETE,
+            requirement=f"register {kind} needs a component id and a path to its .py",
+            observed=f"register {kind}"
+            + (f" {component_id}" if component_id else " <id> <file.py>"),
+            retry=f"run `vqapr register {kind} <component-id> <file.py>`",
+        )
+
+    path = Path(source)
+    if not path.is_file():
+        raise InputError(
+            VALUE_INVALID,
+            requirement="the component source must be a file that exists",
+            observed=f"no file at {path.resolve()}",
+            retry=f"write one with `vqapr new {kind} {component_id}`, then register it",
+            source=FailureSource(file=str(path)),
+        )
+
+    expected = AUTHORED_KINDS[kind]
+    # Found by parsing before the register call, so "two strategies in one file" is refused as
+    # that, rather than surfacing as whatever the loader happens to say about an ambiguous import.
+    object_name = _sole_subclass(path, expected, component_id)
+    _COMPONENT_KINDS[kind][1](project_root, component_id, path, object_name)
+    return success(
+        "workspace.register",
+        registered={"components": [component_id]},
+        component={"id": component_id, "kind": kind, "object": object_name, "source": str(path)},
+    )
+
+
+def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
+    """The one authored class in this file, refusing zero and refusing several.
+
+    AC-A4. Both refusals state the COUNT, because "which class did you mean" and "you wrote none"
+    are different mistakes with different repairs, and a reader who is told only that the file is
+    invalid has to guess which one they made. Found by parsing rather than importing: a file with
+    two strategies should be refused for having two, not for whatever its import happens to do.
+    """
+    base = {
+        ComponentKind.STRATEGY_MODEL: "StrategyModel",
+        ComponentKind.DATA_MODEL: "DataModel",
+    }[kind]
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError) as broken:
+        raise InputError(
+            VALUE_INVALID,
+            requirement="the component source must be readable Python",
+            observed=f"{path}: {broken}",
+            retry="fix the syntax error, then register again",
+            source=FailureSource(file=str(path)),
+        ) from broken
+
+    # Local names that refer to the authoring base, including aliases. `import StrategyModel as
+    # SM` used to produce a false "defines 0" about a file that defines exactly one -- and since
+    # the COUNT is the evidence AC-A4 rests on, a wrong count is the specific thing that criterion
+    # forbids.
+    aliases = {base}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for imported in node.names:
+                if imported.name == base:
+                    aliases.add(imported.asname or imported.name)
+
+    # Walk the whole tree, not just the module body: a class defined inside an `if` or a `try` is
+    # still a class the file defines, and reporting zero for it sends the author to write one they
+    # already wrote.
+    classes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+
+    def _names(node: ast.ClassDef) -> set[str]:
+        return {
+            b.id if isinstance(b, ast.Name) else b.attr
+            for b in node.bases
+            if isinstance(b, (ast.Name, ast.Attribute))
+        }
+
+    # Follow the inheritance chain. `class Base(StrategyModel)` plus `class Mine(Base)` used to
+    # match only Base, which counts as one and registers the WRONG class -- the run then executes
+    # Base while the author believes Mine ran. Both are subclasses; the LEAF is the one meant.
+    subclasses: dict[str, ast.ClassDef] = {}
+    pending = True
+    while pending:
+        pending = False
+        for node in classes:
+            if node.name not in subclasses and _names(node) & (aliases | set(subclasses)):
+                subclasses[node.name] = node
+                pending = True
+
+    # A class that something else in this file inherits from is scaffolding for the leaf, not the
+    # component itself.
+    inherited = {name for node in classes for name in _names(node)}
+    found = [name for name in subclasses if name not in inherited]
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        raise InputError(
+            VALUE_INVALID,
+            requirement=f"the file must define exactly one {base} subclass",
+            observed=f"{path} defines 0",
+            retry=f"add a `class {component_id.title().replace('-', '')}({base}):` to {path.name}",
+            source=FailureSource(file=str(path)),
+        )
+    raise InputError(
+        VALUE_INVALID,
+        requirement=f"the file must define exactly one {base} subclass",
+        observed=f"{path} defines {len(found)}: {', '.join(found)}",
+        retry=(
+            f"keep one {base} in {path.name} and move the others to their own files, "
+            "each registered under its own component id"
+        ),
+        examples=found,
+        source=FailureSource(file=str(path)),
+    )
+
+
+AUTHORED_KINDS = {"strategy": ComponentKind.STRATEGY_MODEL, "datamodel": ComponentKind.DATA_MODEL}
+"""The component kinds an author writes as a `.py` and registers directly.
+
+Everything else -- datasets, sources, agendas, configs -- stays in the YAML declaration, because
+those ARE declarations: there is no code to point at. A component is different. Its identity is
+its source file, and requiring a YAML wrapper to say so made the author write the same fact twice
+and kept a Python-authored strategy from being registered by naming it.
+"""
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "declaration",
         type=Path,
-        help="path to the declaration YAML to validate and register",
+        help=(
+            "path to the declaration YAML, or the component kind "
+            f"({', '.join(sorted(AUTHORED_KINDS))}) when registering a .py directly"
+        ),
+    )
+    parser.add_argument(
+        "component_id",
+        nargs="?",
+        default=None,
+        help="component id, when the first argument is a component kind",
+    )
+    parser.add_argument(
+        "source",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="path to the .py, when the first argument is a component kind",
     )
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    kind = str(args.declaration)
+    if kind in AUTHORED_KINDS:
+        return _register_authored(
+            kind, getattr(args, "component_id", None), getattr(args, "source", None), project_root
+        )
     declaration = Path(args.declaration)
     document = read_yaml_mapping(declaration, what="a declaration")
     return success(
         "workspace.register",
-        registered=apply(document, project_root, base=declaration.parent),
+        registered=apply(
+            document, project_root, base=declaration.parent, declaration=declaration
+        ),
     )

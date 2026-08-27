@@ -25,14 +25,14 @@ from pathlib import Path
 
 from vqapr._internal.extensions.component import ComponentKind, ComponentRef
 from vqapr._internal.extensions.fingerprint import fingerprint_component
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.testing.conformance import conformance
 from vqapr.workspace import Workspace
 
 _STAGE = "component.register"
 
 
-def _unreadable(kind_label: str, error: OSError) -> VqaprError:
+def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError:
     return VqaprError(
         stage=_STAGE,
         family=FailureFamily.DATA,
@@ -41,6 +41,12 @@ def _unreadable(kind_label: str, error: OSError) -> VqaprError:
                 f"{_STAGE}.source_unreadable",
                 f"{kind_label} source must be a readable Python file",
                 observed=str(error),
+                # SOURCE_ACCESS, not COMPONENT_CONTRACT: fingerprinting failed on an OSError while
+                # reading the file at `path` -- the declared path and kind are already fine, only
+                # the filesystem read failed, which is exactly what SOURCE_ACCESS describes.
+                fix=f"create or fix permissions on the {kind_label} source file at {path}",
+                explain=ExplainTopic.SOURCE_ACCESS,
+                source=FailureSource(file=str(path)),
             )
         ],
         mutation=False,
@@ -72,7 +78,7 @@ def _register(
             config=config,
         )
     except OSError as error:
-        raise _unreadable(label, error) from error
+        raise _unreadable(label, error, target) from error
     ref = ComponentRef.of(
         raw_component_id,
         kind,

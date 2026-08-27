@@ -8,7 +8,7 @@ import duckdb
 import pytest
 
 from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.conventions import ExecutionHorizon, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -221,3 +221,55 @@ def test_exact_snapshot_preserves_missing_and_duplicate_partitions(tmp_path: Pat
     assert snapshot.duplicate_instruments == ("A",)
     assert snapshot.missing_target_instruments == ("MISSING",)
     assert snapshot.missing_held_instruments == ("HELD_MISSING",)
+
+
+def _horizon(*iso: str) -> ExecutionHorizon:
+    return ExecutionHorizon(tuple(datetime.fromisoformat(moment) for moment in iso))
+
+
+def test_at_or_before_selects_the_latest_candidate_not_the_next_one() -> None:
+    """The valuation direction, and deliberately not `after`'s mirror image.
+
+    `after` selects the first STRICTLY-LATER instant because a decision cannot fill in a print
+    that already happened. A valuation asks the opposite question -- what was the book worth at a
+    moment that has already arrived -- so it must bind the most recent print at or before it.
+    Getting this backwards stamps the whole NAV series one execution instant late.
+    """
+    horizon = _horizon(
+        "2024-03-04T06:30:00+00:00",
+        "2024-03-05T06:30:00+00:00",
+        "2024-03-06T06:30:00+00:00",
+    )
+
+    between = datetime.fromisoformat("2024-03-05T07:00:00+00:00")
+    assert horizon.at_or_before(between) == datetime.fromisoformat("2024-03-05T06:30:00+00:00")
+    assert horizon.after(between) == (datetime.fromisoformat("2024-03-06T06:30:00+00:00"),)
+
+
+def test_at_or_before_includes_an_exact_match() -> None:
+    """The boundary the name promises: `at` or before, so an exact instant selects itself."""
+    horizon = _horizon("2024-03-04T06:30:00+00:00", "2024-03-05T06:30:00+00:00")
+
+    exact = datetime.fromisoformat("2024-03-05T06:30:00+00:00")
+    assert horizon.at_or_before(exact) == exact
+    # `after` excludes it, which is what makes the two directions complementary rather than
+    # redundant.
+    assert horizon.after(exact) == ()
+
+
+def test_at_or_before_reports_no_candidate_rather_than_guessing() -> None:
+    """`None` is a real answer: the venue published nothing, so no value exists to report.
+
+    That is a different fact from the book being worth zero, and it must not be filled in with a
+    later price the run could not have known.
+    """
+    horizon = _horizon("2024-03-05T06:30:00+00:00")
+
+    assert horizon.at_or_before(datetime.fromisoformat("2024-03-04T00:00:00+00:00")) is None
+    assert _horizon().at_or_before(datetime.fromisoformat("2024-03-05T06:30:00+00:00")) is None
+
+
+def test_at_or_before_refuses_a_naive_instant() -> None:
+    """A naive instant has no venue, so it cannot be compared to one."""
+    with pytest.raises(ValueError, match="timezone-aware"):
+        _horizon("2024-03-05T06:30:00+00:00").at_or_before(datetime(2024, 3, 5, 6, 30))

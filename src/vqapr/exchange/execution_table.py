@@ -10,7 +10,14 @@ from types import MappingProxyType
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import Diagnosis, Failure, FailureFamily, collector
+from vqapr.domain.errors import (
+    Diagnosis,
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    FailureSource,
+    collector,
+)
 from vqapr.domain.identifiers import ExecutionInputId, execution_input_id
 from vqapr.exchange.conventions import FillConvention
 
@@ -98,6 +105,16 @@ def _schema_failures(
                     code=f"{stage}.field_type",
                     requirement=f"execution field {field!r} must be {wanted}",
                     observed="missing" if observed is None else str(observed),
+                    fix=(
+                        f"add column {field!r} to the execution source with type {wanted}, or "
+                        "point the field at a column that already has it"
+                    ),
+                    explain=(
+                        ExplainTopic.DECLARATION_SHAPE
+                        if observed is None
+                        else ExplainTopic.DATASET_PREPARATION
+                    ),
+                    source=FailureSource(file=str(spec.source.path), key_path=field),
                 )
             )
     numeric = {scan.ColumnType.INTEGER, scan.ColumnType.DOUBLE}
@@ -109,6 +126,16 @@ def _schema_failures(
                     code=f"{stage}.price_type",
                     requirement=f"execution price {semantic!r} field {field!r} must be numeric",
                     observed="missing" if observed is None else str(observed),
+                    fix=(
+                        f"add numeric column {field!r} to the execution source, or point price "
+                        f"{semantic!r} at a column that already carries a numeric price"
+                    ),
+                    explain=(
+                        ExplainTopic.DECLARATION_SHAPE
+                        if observed is None
+                        else ExplainTopic.DATASET_PREPARATION
+                    ),
+                    source=FailureSource(file=str(spec.source.path), key_path=field),
                 )
             )
     return tuple(failures)
@@ -136,6 +163,12 @@ def _key_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
                 observed=f"{result.null_groups} key group(s) with a null",
                 examples=result.null_examples,
                 example_total=result.null_groups,
+                source=FailureSource(file=str(table.source.path), key_path=identity),
+                fix=(
+                    f"drop or repair the rows whose {identity} is null, or declare an identity "
+                    "whose columns are always present"
+                ),
+                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
     if result.duplicate_groups:
@@ -146,6 +179,12 @@ def _key_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
                 observed=f"{result.duplicate_groups} duplicated key group(s)",
                 examples=result.duplicate_examples,
                 example_total=result.duplicate_groups,
+                source=FailureSource(file=str(table.source.path), key_path=identity),
+                fix=(
+                    f"deduplicate the source on {identity}, or widen the identity until it "
+                    "identifies one row"
+                ),
+                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
     return found.done(retry=_RETRY)
@@ -173,6 +212,12 @@ def _price_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
                 observed=f"{result.invalid_rows} invalid tradable row(s)",
                 examples=result.examples,
                 example_total=result.invalid_rows,
+                source=FailureSource(file=str(table.source.path), key_path=physical),
+                fix=(
+                    f"repair {physical!r} to be finite and positive on every row where "
+                    f"{table.is_tradable_field!r} is true, or exclude those rows from the source"
+                ),
+                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
     return found.done(retry=_RETRY)

@@ -25,6 +25,7 @@ from vqapr.extension.loading import load_exchange
 from vqapr.flow.model_state import prepare_model_state
 from vqapr.flow.preflight import preflight_run
 from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig
+from vqapr.public import register_dataset
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
@@ -112,7 +113,9 @@ def _setup(
     constraint_component = _component(root, "limit", ComponentKind.CONSTRAINT)
     for component in (strategy_component, constraint_component):
         workspace.register_component(component)
-    workspace.register_dataset(
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(
+        root,
         DatasetRegistration.of(
             "prices",
             "prices-source",
@@ -123,6 +126,7 @@ def _setup(
         ),
         SourceSpec.of("prices-source", model_price_parquet),
     )
+    workspace = Workspace.open(root)
     strategy_agenda = OperationAgenda.from_occurrences(
         agenda_id="strategy",
         role=OperationRole.STRATEGY_CALLBACK,

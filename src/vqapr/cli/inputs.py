@@ -23,7 +23,7 @@ from typing import Any
 import yaml
 
 from vqapr.cli.envelope import BoundedRefusal
-from vqapr.domain.errors import MAX_EXAMPLES
+from vqapr.domain.errors import MAX_EXAMPLES, ExplainTopic, FailureSource
 
 INPUT_STAGE = "cli.input"
 
@@ -46,11 +46,21 @@ class InputError(BoundedRefusal):
         observed: str,
         retry: str | None = None,
         examples: Sequence[str] = (),
+        source: FailureSource | None = None,
+        fix: str | None = None,
+        explain: ExplainTopic = ExplainTopic.DECLARATION_SHAPE,
     ) -> None:
         self.code = code
         self.requirement = requirement
         self.observed = observed
         self.retry = retry
+        self.source = source if source is not None else FailureSource()
+        # `retry` and `fix` answer the same question at two scales -- what to do about this
+        # refusal -- and this class had `retry` before the envelope existed. Falling back to it
+        # keeps every existing call site emitting a real `fix` instead of an empty one, rather
+        # than requiring sixteen edits to say what the site already says.
+        self.fix = fix or retry or "correct the input named above, then retry"
+        self.explain = explain
         # 상한은 `Failure.bounded`와 같은 이유로 둔다. 잘린 뒤에도 전체 개수는 남긴다.
         self.examples = tuple(str(item) for item in examples[:MAX_EXAMPLES])
         self.example_total = len(examples)
@@ -65,9 +75,16 @@ class InputError(BoundedRefusal):
             "correlation_id": None,
             "failures": [
                 {
+                    # The same six fields a package refusal carries. A reader parses these by
+                    # name, and a CLI-level refusal that shipped four of them made the envelope
+                    # conditional on which layer happened to refuse -- which is precisely what a
+                    # single documented shape exists to prevent.
                     "code": self.code,
+                    "source": self.source.as_dict(),
                     "requirement": self.requirement,
                     "observed": self.observed,
+                    "fix": self.fix,
+                    "explain": str(self.explain),
                     "examples": list(self.examples),
                     "example_total": self.example_total,
                 }
@@ -88,6 +105,7 @@ def read_yaml_mapping(path: Path, *, what: str) -> dict[str, Any]:
             MISSING,
             requirement=f"{what} must exist at the given path",
             observed=f"no file at {path}",
+            source=FailureSource(file=str(path)),
             retry="create the file, then retry",
         ) from error
     except OSError as error:
@@ -95,6 +113,7 @@ def read_yaml_mapping(path: Path, *, what: str) -> dict[str, Any]:
             UNREADABLE,
             requirement=f"{what} must be readable",
             observed=f"{path}: {error.strerror or error}",
+            source=FailureSource(file=str(path)),
         ) from error
 
     try:
@@ -112,6 +131,7 @@ def read_yaml_mapping(path: Path, *, what: str) -> dict[str, Any]:
             NOT_A_MAPPING,
             requirement=f"{what} must be a YAML mapping",
             observed=f"{path} parsed as {type(document).__name__}",
+            source=FailureSource(file=str(path)),
         )
     return document
 
@@ -127,5 +147,6 @@ def refuse_existing(path: Path, *, what: str) -> None:
             EXISTS,
             requirement=f"{what} must not already exist",
             observed=f"{path} already exists",
+            source=FailureSource(file=str(path)),
             retry="remove it or pass a different --out, then retry",
         )

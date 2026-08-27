@@ -30,6 +30,7 @@ from vqapr.public import (
     RowsLookback,
     SourceSpec,
     Workspace,
+    register_dataset,
 )
 
 SESSIONS = tuple(datetime(2024, 1, day, 6, 30, tzinfo=UTC) for day in range(1, 6))
@@ -59,8 +60,9 @@ def workspace(tmp_path: Path) -> Workspace:
         ),
         source,
     )
-    space = Workspace.create(tmp_path)
-    space.register_dataset(
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(
+        tmp_path,
         DatasetRegistration.of(
             "benchmark",
             "benchmark-source",
@@ -71,7 +73,7 @@ def workspace(tmp_path: Path) -> Workspace:
         ),
         SourceSpec.of("benchmark-source", source),
     )
-    return space
+    return Workspace.open(tmp_path)
 
 
 def _window(space: Workspace, requirement: DataRequirement, at: datetime) -> ModelWindow:

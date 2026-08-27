@@ -33,6 +33,7 @@ from vqapr.public import (
     RowsLookback,
     SourceSpec,
     Workspace,
+    register_dataset,
 )
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 
@@ -62,8 +63,9 @@ def workspace(tmp_path: Path) -> Workspace:
         ),
         source,
     )
-    space = Workspace.create(tmp_path)
-    space.register_dataset(
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(
+        tmp_path,
         DatasetRegistration.of(
             "prices",
             "prices-source",
@@ -74,7 +76,7 @@ def workspace(tmp_path: Path) -> Workspace:
         ),
         SourceSpec.of("prices-source", source),
     )
-    return space
+    return Workspace.open(tmp_path)
 
 
 def _context(space: Workspace) -> StrategyModelContext:

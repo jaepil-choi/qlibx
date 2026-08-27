@@ -9,7 +9,7 @@ from datetime import datetime
 from vqapr.data.lookback import Lookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
 from vqapr.domain.identifiers import DatasetId, instrument_id
 from vqapr.domain.rows import Rows, normalize_rows
 from vqapr.domain.timestamps import require_tz_aware
@@ -102,6 +102,14 @@ class ModelWindow:
                             "a Model may read only a DataRequirement declared before compute"
                         ),
                         observed=repr(requirement),
+                        # Names what the AUTHOR can change. `allowed_requirements` is a
+                        # ModelWindow constructor parameter the framework supplies; a reader sent
+                        # looking for it finds no callsite of their own to edit.
+                        fix=(
+                            "return this DataRequirement from the component's requirements() so "
+                            "it is declared before compute"
+                        ),
+                        explain=ExplainTopic.COMPONENT_CONTRACT,
                     )
                 ],
                 mutation=False,

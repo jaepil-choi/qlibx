@@ -13,13 +13,13 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
+from vqapr.public import register_dataset
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 
 
 def _workspace(tmp_path: Path, model_price_parquet: Path) -> Workspace:
-    workspace = Workspace.create(tmp_path)
     source = SourceSpec.of("prices", model_price_parquet)
     registration = DatasetRegistration.of(
         "price_daily",
@@ -29,8 +29,9 @@ def _workspace(tmp_path: Path, model_price_parquet: Path) -> Workspace:
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "volume": "volume"},
     )
-    workspace.register_dataset(registration, source)
-    return workspace
+    # Registered through the public entry point, which measures the span persistence requires.
+    register_dataset(tmp_path, registration, source)
+    return Workspace.open(tmp_path)
 
 
 def test_rows_window_is_pit_bounded_and_counts_per_instrument_and_field(

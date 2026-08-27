@@ -16,7 +16,7 @@ from vqapr._internal.extensions.component import ComponentKind, ComponentRef
 from vqapr._internal.extensions.fingerprint import fingerprint_component
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.requirements import DataRequirement
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.venue import AcademicExchange, Exchange
 from vqapr.exchange.venues.krx import KrxExchange
@@ -26,11 +26,23 @@ from vqapr.models.strategy_model import StrategyModel
 _STAGE = "component.load"
 
 
-def _failure(code: str, requirement: str, observed: str) -> VqaprError:
+def _failure(
+    code: str,
+    requirement: str,
+    observed: str,
+    *,
+    fix: str,
+    explain: ExplainTopic,
+    source: FailureSource | None = None,
+) -> VqaprError:
     return VqaprError(
         stage=_STAGE,
         family=FailureFamily.DATA,
-        failures=[Failure.bounded(code, requirement, observed=observed)],
+        failures=[
+            Failure.bounded(
+                code, requirement, observed=observed, fix=fix, explain=explain, source=source
+            )
+        ],
         mutation=False,
         retry_precondition="fix and register the component again, then retry",
     )
@@ -61,12 +73,21 @@ def _load(
             f"{_STAGE}.source_unreadable",
             f"component source must remain readable at {path}",
             str(error),
+            fix=f"restore or fix permissions on the component source at {path}",
+            explain=ExplainTopic.SOURCE_ACCESS,
+            source=FailureSource(file=str(path)),
         ) from error
     if current != ref.fingerprint:
         raise _failure(
             f"{_STAGE}.fingerprint_drift",
             "component source and config must match the registered fingerprint",
             f"registered={ref.fingerprint}, current={current}",
+            fix=(
+                "re-register the component so its fingerprint matches the current source "
+                "and config"
+            ),
+            explain=ExplainTopic.WORKSPACE_STATE,
+            source=FailureSource(file=str(path)),
         )
 
     module_name = f"_vqapr_component_{ref.fingerprint}"
@@ -76,6 +97,9 @@ def _load(
             f"{_STAGE}.module_invalid",
             "component path must identify a loadable Python module",
             str(path),
+            fix=f"point the component reference at a loadable .py file, not {path}",
+            explain=ExplainTopic.DECLARATION_SHAPE,
+            source=FailureSource(file=str(path)),
         )
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -88,6 +112,12 @@ def _load(
             f"{_STAGE}.construction_failed",
             "component object must load and construct from its registered config",
             f"{type(error).__name__}: {error}",
+            fix=(
+                "fix the exception raised while constructing the component from its "
+                "registered config"
+            ),
+            explain=ExplainTopic.COMPONENT_CONTRACT,
+            source=FailureSource(file=str(path)),
         ) from error
 
 
@@ -155,6 +185,11 @@ def _validate_callback_signature(component: object, *, base: type, method_name: 
         f"{_STAGE}.signature_invalid",
         f"{base.__name__}.{method_name}() must accept {wanted[1]} positional arguments",
         f"takes {'any number' if observed[1] == -1 else observed[1]} ({observed[0]} required)",
+        fix=(
+            f"change {method_name}()'s parameters so it accepts exactly {wanted[1]} "
+            "positional arguments"
+        ),
+        explain=ExplainTopic.COMPONENT_CONTRACT,
     )
 
 
@@ -167,6 +202,8 @@ def _requirements(component: object, *, label: str, required: bool) -> tuple[Dat
             f"{_STAGE}.requirements_missing",
             f"{label}.requirements() must be declared before run",
             type(component).__name__,
+            fix=f"implement {label}.requirements() so it declares the component's data needs",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     try:
         requirements = declaration()
@@ -175,6 +212,8 @@ def _requirements(component: object, *, label: str, required: bool) -> tuple[Dat
             f"{_STAGE}.requirements_failed",
             f"{label}.requirements() must complete before run",
             f"{type(error).__name__}: {error}",
+            fix=f"fix the exception raised inside {label}.requirements()",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         ) from error
     if not isinstance(requirements, tuple) or not all(
         isinstance(item, DataRequirement) for item in requirements
@@ -183,6 +222,8 @@ def _requirements(component: object, *, label: str, required: bool) -> tuple[Dat
             f"{_STAGE}.requirements_invalid",
             f"{label}.requirements() must return a tuple of DataRequirement values",
             repr(requirements),
+            fix=f"return a tuple of DataRequirement values from {label}.requirements()",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     return requirements
 
@@ -194,6 +235,8 @@ def load_data_model(ref: ComponentRef, *, project_root: str | Path | None = None
             f"{_STAGE}.wrong_type",
             "registered DataModel object must implement the public DataModel contract",
             type(model).__name__,
+            fix="make the registered object a subclass of vqapr.models.data_model.DataModel",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     requirements = _requirements(model, label="DataModel", required=True)
     if not requirements:
@@ -201,6 +244,8 @@ def load_data_model(ref: ComponentRef, *, project_root: str | Path | None = None
             f"{_STAGE}.requirements_invalid",
             "DataModel.requirements() must return a non-empty tuple of DataRequirement values",
             repr(requirements),
+            fix="return at least one DataRequirement from DataModel.requirements()",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     return model
 
@@ -216,6 +261,11 @@ def load_strategy_model(
             f"{_STAGE}.wrong_type",
             "registered StrategyModel object must implement the public StrategyModel contract",
             type(strategy).__name__,
+            fix=(
+                "make the registered object a subclass of "
+                "vqapr.models.strategy_model.StrategyModel"
+            ),
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     _validate_callback_signature(strategy, base=StrategyModel, method_name="on_occurrence")
     _requirements(strategy, label="StrategyModel", required=True)
@@ -260,6 +310,8 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
             f"{_STAGE}.wrong_type",
             "registered Constraint object must implement the public Constraint contract",
             type(constraint).__name__,
+            fix="make the registered object a subclass of vqapr.constraints.constraint.Constraint",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     _requirements(constraint, label="Constraint", required=True)
     return constraint
@@ -285,18 +337,27 @@ def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) 
             f"{_STAGE}.wrong_type",
             f"registered Exchange object must be one of the shipped profiles: {names}",
             type(exchange).__name__,
+            fix=f"subclass one of the shipped profiles ({names}) instead of Exchange directly",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     if type(exchange).execute is not profile.execute:
         raise _failure(
             f"{_STAGE}.execution_profile_invalid",
             f"{profile.__name__} subclasses must retain {profile.__name__}.execute() semantics",
             type(exchange).__name__,
+            fix=(
+                f"remove the override of execute() and inherit {profile.__name__}.execute() "
+                "unchanged"
+            ),
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     if not isinstance(getattr(exchange, "rules", None), ExchangeRulesView):
         raise _failure(
             f"{_STAGE}.execution_profile_invalid",
             "an Exchange must expose its own ExchangeRulesView",
             type(exchange).__name__,
+            fix="expose a `rules` attribute that is an ExchangeRulesView on the Exchange subclass",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     _requirements(exchange, label="Exchange", required=False)
     return exchange

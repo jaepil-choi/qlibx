@@ -41,7 +41,13 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.constraints.constraint import Constraint
-from vqapr.domain.errors import Diagnosis, Failure, FailureFamily, collector
+from vqapr.domain.errors import (
+    Diagnosis,
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    collector,
+)
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import (
@@ -91,6 +97,18 @@ _LOADERS = {
 }
 
 
+def _signature_hint(arity: int) -> str:
+    """The parameter list for a method of this arity, so the refusal shows the signature.
+
+    `self` is always first; the rest are positional placeholders meant to be renamed. Only the
+    count is checked -- the names are a template, and saying so beats making the reader translate
+    a number back into a signature.
+    """
+    if arity <= 0:
+        return ""
+    return ", ".join(["self", *(f"arg{index}" for index in range(1, arity))])
+
+
 def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
     """Every contract method must exist, be callable, and accept the call Flow will make.
 
@@ -111,6 +129,8 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
                     f"{STAGE}.method_missing",
                     f"{base.__name__}.{name}() must be implemented",
                     observed=type(component).__name__,
+                    fix=f"implement {name}() on the component so it satisfies {base.__name__}",
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
                 )
             )
             continue
@@ -121,6 +141,8 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
                     f"{STAGE}.method_not_callable",
                     f"{base.__name__}.{name} must be a method, not a value",
                     observed=f"{type(component).__name__}.{name} is {actual}",
+                    fix=f"define {name} as a method on the component, not as a {actual} attribute",
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
                 )
             )
             continue
@@ -142,6 +164,14 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
                     f"{'any number' if observed[1] == -1 else observed[1]}"
                     f" ({observed[0]} required)"
                 ),
+                # Emits the signature to write rather than the arity to satisfy. The code already
+                # knows the shape, so making the reader translate a count back into parameters is
+                # work the refusal can do for them.
+                fix=(
+                    f"define it as {name}({_signature_hint(wanted[1])}) so it accepts "
+                    f"exactly {wanted[1]} positional arguments"
+                ),
+                explain=ExplainTopic.COMPONENT_CONTRACT,
             )
         )
 
@@ -171,6 +201,11 @@ def conformance(ref: ComponentRef, *, project_root: str | Path | None = None) ->
                     f"{STAGE}.load_failed",
                     "component must load before its contract can be judged",
                     observed=f"{type(error).__name__}: {error}",
+                    fix=(
+                        "fix the exception raised while loading the component, then "
+                        "register it again"
+                    ),
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
                 )
             )
         return found.done(retry=_RETRY)

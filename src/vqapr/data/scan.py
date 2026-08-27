@@ -12,12 +12,13 @@ from __future__ import annotations
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 import duckdb
 
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 
 _EXAMPLE_LIMIT = 5
 
@@ -98,6 +99,24 @@ class KeyCheck:
 
 
 @dataclass(frozen=True, slots=True)
+class SpanCheck:
+    """The first and last instant a dataset carries, and how many rows it carries at all.
+
+    `rows` is what tells an empty dataset apart from one whose availability column is entirely
+    null. Both leave `first`/`last` as `None`, and they are different problems: the first has
+    nothing to register, the second has rows nobody can date.
+    """
+
+    rows: int
+    first: datetime | None
+    last: datetime | None
+
+    @property
+    def measured(self) -> bool:
+        return self.first is not None and self.last is not None
+
+
+@dataclass(frozen=True, slots=True)
 class ConditionalPositiveCheck:
     """boolean field가 true일 때 numeric field가 유한한 양수인지의 bounded summary."""
 
@@ -150,6 +169,12 @@ def _require_path(spec: SourceSpec) -> None:
                     code="source.scan.path_missing",
                     requirement=f"source '{spec.source_id}' must point at an existing path",
                     observed=str(spec.path),
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"check the path declared for source '{spec.source_id}', then create "
+                        "or restore the file or directory at it"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
             retry_precondition="create the path, then retry the same operation",
@@ -283,6 +308,12 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
                     code="source.scan.unreadable",
                     requirement=f"source '{spec.source_id}' must be readable parquet",
                     observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"open '{spec.path}' with duckdb directly to see the underlying error, "
+                        "then repair or re-export the parquet at that path"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
         ) from exc
@@ -312,6 +343,12 @@ def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
                     code="source.scan.distinct.unreadable",
                     requirement=f"field {field!r} must be readable from source '{spec.source_id}'",
                     observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path), key_path=field),
+                    fix=(
+                        f"confirm column {field!r} exists with that exact name in "
+                        f"'{spec.path}', then retry"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
         ) from exc
@@ -347,6 +384,12 @@ def candidate_instants(
                     code="source.scan.execution_candidates.unreadable",
                     requirement="the execution instant field must be queryable",
                     observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path), key_path=trade_at_field),
+                    fix=(
+                        f"confirm column {trade_at_field!r} exists with that exact name in "
+                        f"'{spec.path}', then retry"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
             mutation=False,
@@ -398,6 +441,12 @@ def exact_snapshot_rows(
                     code="source.scan.execution_snapshot.unreadable",
                     requirement="the exact execution snapshot fields must be queryable",
                     observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"confirm {trade_at_field!r}, {instrument_field!r}, and the requested "
+                        f"fields all exist with those exact names in '{spec.path}', then retry"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
             mutation=False,
@@ -452,6 +501,31 @@ def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
     )
 
 
+def span_check(spec: SourceSpec, available_at: str) -> SpanCheck:
+    """The first and last instant the availability column carries, plus the row count.
+
+    This is a SECOND aggregate over the source, not a free rider on the key scan, and it is worth
+    naming rather than glossing: measured on the 7.5M-row testbed source it cost 0.055s against
+    the key check's 0.209s, so roughly a quarter more registration time. It is a separate query
+    because the two answer differently-shaped questions -- the key check groups by the logical
+    key, and folding min/max into that grouping would compute per-group extrema nobody wants,
+    then need a second pass to collapse them anyway.
+
+    What it buys is that the span is measured ONCE, at registration, instead of on every later
+    read: `Workspace.span` then answers from the stored declaration without opening the file at
+    all. Paying a quarter of one registration to make every subsequent lookup free is the trade.
+    """
+    column = _quote(available_at)
+    con = _open(spec)
+    try:
+        rows, first, last = con.execute(
+            f"SELECT count(*), min({column}), max({column}) FROM {_relation(spec)}"
+        ).fetchone()
+    finally:
+        con.close()
+    return SpanCheck(rows=int(rows), first=first, last=last)
+
+
 def positive_finite_when_true(
     spec: SourceSpec,
     *,
@@ -494,6 +568,12 @@ def positive_finite_when_true(
                         f"from source '{spec.source_id}'"
                     ),
                     observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"confirm {condition_field!r} and {value_field!r} exist with those "
+                        f"exact names in '{spec.path}', then retry"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
         ) from exc
@@ -699,6 +779,12 @@ def observation_rows(
                         "the registered source and physical field bindings must be queryable"
                     ),
                     observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"confirm every registered physical field name still exists in "
+                        f"'{spec.path}', then re-register or fix the source"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
             mutation=False,

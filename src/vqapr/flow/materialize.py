@@ -21,7 +21,7 @@ from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import AccessRecord
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.domain.identifiers import DatasetId, dataset_id, instrument_id
 from vqapr.domain.rows import Row, Rows, normalize_rows
 from vqapr.domain.timestamps import require_tz_aware
@@ -109,10 +109,33 @@ class RunRecordSpec:
     dataset_id: DatasetId
     table_id: str
     value_fields: tuple[str, ...]
+    availability_field: str = "event_time"
+    """Which column says when this table's rows became knowable. **Per table, not per package.**
+
+    The two candidates mean different things and only one is right for a given table:
+
+    ``observed_at`` is a MEASUREMENT clock -- when the value was seen. `vqapr.account` declares it,
+    because a NAV is a measurement of a book at an instant, and dating that series by anything else
+    labels every value by when it was written rather than when it was true. Measured once, that
+    mislabelling took a factor correlation from 0.93 to 0.02 (F-009).
+
+    ``event_time`` is a DECISION clock -- when the row happened. `allocation` and `vqapr.weight`
+    declare no `observed_at` at all, because the row IS the decision; there is nothing separate to
+    have observed.
+
+    So this is declared rather than hardcoded. `publish_run_record` is generic over any recorded
+    table (`materialize.py:797`), and a package-wide column would be right for one table and wrong
+    for the next -- silently, because both produce a plausible date.
+    """
 
     @classmethod
     def of(
-        cls, raw_dataset_id: str, *, table_id: str, value_fields: tuple[str, ...]
+        cls,
+        raw_dataset_id: str,
+        *,
+        table_id: str,
+        value_fields: tuple[str, ...],
+        availability_field: str = "event_time",
     ) -> RunRecordSpec:
         if not isinstance(table_id, str) or not table_id.strip():
             raise ValueError("table_id must be a non-empty string")
@@ -138,7 +161,15 @@ class RunRecordSpec:
             # the reason to publish it at all. Requiring them here keeps the contract enforced
             # rather than merely written down.
             raise ValueError(f"a run record must declare the Flow envelope fields: {missing}")
-        return cls(dataset_id(raw_dataset_id), table_id.strip(), value_fields)
+        clock = availability_field.strip()
+        if clock not in value_fields:
+            # The column that dates the series has to be one the record actually carries, or the
+            # publication would stamp from a field nobody wrote.
+            raise ValueError(
+                f"availability_field {clock!r} must be one of the declared value fields: "
+                f"{', '.join(sorted(value_fields))}"
+            )
+        return cls(dataset_id(raw_dataset_id), table_id.strip(), value_fields, clock)
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,13 +215,20 @@ def _error(
     requirement: str,
     observed: str,
     *,
+    fix: str,
+    explain: ExplainTopic,
     family: FailureFamily = FailureFamily.DATA,
     retry: str,
+    source: FailureSource | None = None,
 ) -> VqaprError:
     return VqaprError(
         stage=stage,
         family=family,
-        failures=[Failure.bounded(code, requirement, observed=observed)],
+        failures=[
+            Failure.bounded(
+                code, requirement, observed=observed, fix=fix, explain=explain, source=source
+            )
+        ],
         mutation=False,
         retry_precondition=retry,
     )
@@ -205,6 +243,11 @@ def _evaluation_times(values: Sequence[datetime]) -> tuple[datetime, ...]:
             f"{_INPUT_STAGE}.evaluation_times_invalid",
             "evaluation_times must be a finite sequence",
             f"{type(error).__name__}: {error}",
+            fix=(
+                "pass a concrete sequence (list/tuple) of evaluation times, not an "
+                "unbounded iterator"
+            ),
+            explain=ExplainTopic.DECLARATION_SHAPE,
             retry="provide sorted unique timezone-aware evaluation times, then retry",
         ) from error
     try:
@@ -216,6 +259,8 @@ def _evaluation_times(values: Sequence[datetime]) -> tuple[datetime, ...]:
             f"{_INPUT_STAGE}.evaluation_times_invalid",
             "every evaluation time must be timezone-aware",
             str(error),
+            fix="localize every evaluation_time to a timezone before calling materialize",
+            explain=ExplainTopic.DECLARATION_SHAPE,
             retry="provide sorted unique timezone-aware evaluation times, then retry",
         ) from error
     if not selected or len(set(selected)) != len(selected) or selected != tuple(sorted(selected)):
@@ -224,6 +269,8 @@ def _evaluation_times(values: Sequence[datetime]) -> tuple[datetime, ...]:
             f"{_INPUT_STAGE}.evaluation_times_invalid",
             "evaluation_times must be non-empty, strictly increasing, and unique",
             repr(selected),
+            fix="sort and deduplicate evaluation_times before calling materialize",
+            explain=ExplainTopic.DECLARATION_SHAPE,
             retry="provide sorted unique timezone-aware evaluation times, then retry",
         )
     return selected
@@ -238,6 +285,8 @@ def _instruments(values: Sequence[str]) -> tuple[str, ...]:
             f"{_INPUT_STAGE}.instruments_invalid",
             "instruments must contain valid identities",
             str(error),
+            fix="pass only valid instrument identities in the instruments list",
+            explain=ExplainTopic.DECLARATION_SHAPE,
             retry="provide a non-empty unique instrument list, then retry",
         ) from error
     if not selected or len(set(selected)) != len(selected):
@@ -246,6 +295,8 @@ def _instruments(values: Sequence[str]) -> tuple[str, ...]:
             f"{_INPUT_STAGE}.instruments_invalid",
             "instruments must be non-empty and unique",
             repr(selected),
+            fix="deduplicate instruments and pass at least one, then retry",
+            explain=ExplainTopic.DECLARATION_SHAPE,
             retry="provide a non-empty unique instrument list, then retry",
         )
     return selected
@@ -265,6 +316,11 @@ def _validated_output(
             f"{_OUTPUT_STAGE}.rows_invalid",
             "DataModel output must contain portable finite scalar rows",
             f"{type(error).__name__}: {error}",
+            fix=(
+                "return only finite scalar values (no NaN/inf, no nested objects) from "
+                "DataModel.compute"
+            ),
+            explain=ExplainTopic.COMPONENT_CONTRACT,
             retry="fix DataModel.compute output, register the component again, then retry",
         ) from error
 
@@ -278,6 +334,8 @@ def _validated_output(
                 f"{_OUTPUT_STAGE}.available_at_owned",
                 "DataModel output must not set package-owned available_at",
                 f"row {index} fields={sorted(actual)}",
+                fix="drop available_at from the row dict returned by DataModel.compute",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="remove available_at from DataModel output, then retry",
             )
         if actual != expected:
@@ -286,6 +344,8 @@ def _validated_output(
                 f"{_OUTPUT_STAGE}.fields_invalid",
                 f"every output row must contain exactly {sorted(expected)}",
                 f"row {index} fields={sorted(actual)}",
+                fix=f"return exactly {sorted(expected)} on every row from DataModel.compute",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="return exactly the declared output fields, then retry",
             )
         try:
@@ -296,6 +356,8 @@ def _validated_output(
                 f"{_OUTPUT_STAGE}.instrument_invalid",
                 "every output row must identify one valid requested instrument",
                 f"row {index}: {error}",
+                fix="return only valid instrument identities from DataModel.compute",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="return valid requested instrument identities, then retry",
             ) from error
         if instrument not in selected_instruments:
@@ -304,6 +366,8 @@ def _validated_output(
                 f"{_OUTPUT_STAGE}.instrument_unrequested",
                 "DataModel output instruments must come from the invocation input",
                 instrument,
+                fix="only emit rows for instruments passed into materialize's instruments argument",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="return values only for requested instruments, then retry",
             )
         if instrument in seen:
@@ -312,6 +376,8 @@ def _validated_output(
                 f"{_OUTPUT_STAGE}.instrument_duplicate",
                 "DataModel output must contain at most one row per instrument per evaluation",
                 instrument,
+                fix="emit at most one row per instrument per evaluation from DataModel.compute",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="deduplicate DataModel output, then retry",
             )
         seen.add(instrument)
@@ -431,6 +497,9 @@ def _publish_new(staged: Path, target: Path) -> None:
             f"{_PUBLISH_STAGE}.path_exists",
             "materialization must not overwrite an existing physical output",
             str(target),
+            fix="choose a new dataset_id, or delete the orphaned file at the reported path",
+            explain=ExplainTopic.PUBLICATION,
+            source=FailureSource(file=str(target)),
             family=FailureFamily.PUBLICATION,
             retry="choose a new output dataset_id or recover the orphaned file, then retry",
         ) from error
@@ -440,8 +509,16 @@ def _publish_new(staged: Path, target: Path) -> None:
             f"{_PUBLISH_STAGE}.file_failed",
             "staged materialization files must publish on the project filesystem",
             f"{type(error).__name__}: {error}",
+            fix=(
+                f"check filesystem permissions and free space for {target}; the write failed "
+                "after the staged output was built, so nothing was published"
+            ),
+            explain=ExplainTopic.PUBLICATION,
             family=FailureFamily.PUBLICATION,
             retry="repair project filesystem access, then retry",
+            # The sibling FileExistsError branch above already names the target; a permissions or
+            # disk-space failure is exactly as much about that path, so it says so too.
+            source=FailureSource(file=str(target)),
         ) from error
 
 
@@ -471,6 +548,9 @@ def _stage_and_publish(
             f"{_PUBLISH_STAGE}.path_exists",
             "materialization must not overwrite an existing physical output",
             f"output={output_path.exists()}, lineage={lineage_path.exists()}",
+            fix="choose a new output dataset_id, or delete the orphaned output/lineage files",
+            explain=ExplainTopic.PUBLICATION,
+            source=FailureSource(file=str(output_path)),
             family=FailureFamily.PUBLICATION,
             retry="choose a new output dataset_id or recover the orphaned files, then retry",
         )
@@ -506,6 +586,11 @@ def _stage_and_publish(
                 f"{_PUBLISH_STAGE}.staging_failed",
                 "derived rows and lineage must serialize to staged artifacts",
                 f"{type(error).__name__}: {error}",
+                fix=(
+                    "return only JSON/Arrow-serializable scalar values, and check "
+                    "filesystem access"
+                ),
+                explain=ExplainTopic.PUBLICATION,
                 family=FailureFamily.PUBLICATION,
                 retry="fix output scalar compatibility or filesystem access, then retry",
             ) from error
@@ -519,7 +604,7 @@ def _stage_and_publish(
             fields={field: field for field in value_fields},
         )
         candidate_source = SourceSpec.of(source_id, temporary_output)
-        diagnosis, _ = validate(candidate_registration, candidate_source)
+        diagnosis, _, candidate_registration = validate(candidate_registration, candidate_source)
         diagnosis.raise_if_failed()
 
         output_directory.mkdir(parents=True, exist_ok=True)
@@ -594,6 +679,8 @@ def publish_run_allocation(
                 f"{_INPUT_STAGE}.evidence_invalid",
                 "every published evidence must carry callback authority, inputs, and a decision",
                 f"{type(evidence).__name__} is missing {missing}",
+                fix="publish CallbackEvidence objects from run()'s own result, not hand-built ones",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="publish from the run's callback evidence, then retry",
             )
     if not collected:
@@ -602,6 +689,8 @@ def publish_run_allocation(
             f"{_INPUT_STAGE}.empty",
             "publishing a run allocation requires at least one callback evidence",
             "no evidence supplied",
+            fix="run the strategy to completion before calling publish_run_allocation",
+            explain=ExplainTopic.RUN_PRECONDITION,
             retry="run the strategy first, then publish its result",
         )
 
@@ -612,6 +701,16 @@ def publish_run_allocation(
             f"{_INPUT_STAGE}.dataset_exists",
             "published allocation dataset_id must be new",
             str(spec.dataset_id),
+            # Deliberately does NOT name `vqapr run --force`. That flag replaces a RUN RECORD, not
+            # a registration: it recursively removes `<store_root>/runs/<run_id>/` and leaves this
+            # dataset exactly where it is. Naming it here would send a reader to delete the wrong
+            # artifact and then meet this same refusal again -- and SKILL.md tells agents to act
+            # on `fix` first, so the instruction would be followed before it was doubted.
+            fix=(
+                f"publish under a dataset_id that is not registered, or remove the existing "
+                f"{spec.dataset_id} registration from the workspace first"
+            ),
+            explain=ExplainTopic.WORKSPACE_STATE,
             retry="choose a new output dataset_id, then retry",
         )
 
@@ -637,6 +736,8 @@ def publish_run_allocation(
                 f"{_OUTPUT_STAGE}.decision_invalid",
                 "a callback decision must be NoDecision or an economic intent",
                 type(decision).__name__,
+                fix="return NoDecision or an economic intent from the strategy's on_occurrence",
+                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="publish from a strategy that emits economic intents, then retry",
             )
         available_at = derived_available_at(evidence.cutoff, tuple(evidence.strategy_accesses))
@@ -650,6 +751,11 @@ def publish_run_allocation(
                     f"{_OUTPUT_STAGE}.not_weighted",
                     "only weight-economics intents can publish an allocation",
                     f"{target.instrument_id} carries a quantity",
+                    fix=(
+                        "switch the strategy to weight economics, or publish quantities "
+                        "another way"
+                    ),
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
                     retry="publish from a weight-economics strategy, then retry",
                 )
             instruments.add(str(target.instrument_id))
@@ -667,6 +773,8 @@ def publish_run_allocation(
             f"{_OUTPUT_STAGE}.empty",
             "publishing a run allocation must produce at least one row",
             "every occurrence declined to allocate",
+            fix="rerun the strategy with inputs that produce at least one allocation decision",
+            explain=ExplainTopic.RUN_PRECONDITION,
             retry="publish a run that produced at least one intent, then retry",
         )
 
@@ -760,6 +868,8 @@ def publish_run_record(
             f"{_INPUT_STAGE}.result_invalid",
             "publishing a run record requires a run result carrying recorder rows",
             f"{type(result).__name__} exposes no final_state.recorder_rows",
+            fix="pass the object run() returned, not a hand-built or partial result",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
             retry="publish from the value run() returned, then retry",
         )
     source_rows = tuple(recorded.get(spec.table_id, ()))
@@ -769,6 +879,11 @@ def publish_run_record(
             f"{_INPUT_STAGE}.empty",
             "the run recorded no rows for this table",
             f"table {spec.table_id!r} is absent or empty",
+            fix=(
+                f"have the strategy record at least one row to table {spec.table_id!r} "
+                "during the run"
+            ),
+            explain=ExplainTopic.RUN_PRECONDITION,
             retry="declare the table on the Strategy and record rows, then retry",
         )
 
@@ -782,12 +897,50 @@ def publish_run_record(
                     f"{_INPUT_STAGE}.fields_invalid",
                     "every recorded row must carry the instrument column and the Flow envelope",
                     f"row is missing {required!r}",
+                    fix=f"record {required!r} on every row written to table {spec.table_id!r}",
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
                     retry="declare the instrument column on the table, then retry",
                 )
         instrument = str(row[instrument_field])
         instruments.add(instrument)
+        # Per table, from the spec's declared clock. `vqapr.account` dates by `observed_at`
+        # because a NAV is a measurement; `allocation` dates by `event_time` because the row is
+        # the decision. Hardcoding either is right for one table and silently wrong for the next.
+        if spec.availability_field not in row:
+            raise _error(
+                _INPUT_STAGE,
+                f"{_INPUT_STAGE}.fields_invalid",
+                (
+                    f"table {spec.table_id!r} declares {spec.availability_field!r} as the column "
+                    "that says when its rows became knowable, so every row must carry it"
+                ),
+                f"a row has no {spec.availability_field!r} column at all",
+                fix=(
+                    f"record {spec.availability_field!r} on every row of {spec.table_id!r}, or "
+                    "declare a different availability_field on the RunRecordSpec"
+                ),
+                explain=ExplainTopic.COMPONENT_CONTRACT,
+                retry="record the declared availability column on every row, then retry",
+            )
+
+        # A NULL measurement clock is a real state, not a malformed row, and the distinction is
+        # the whole reason this is not simply `row[field] or row["event_time"]`.
+        #
+        # `observed_at` is null on an occurrence that took no mark -- a session where the venue
+        # published no price at or before the instant, so the book was genuinely not measured.
+        # Measured on the real factor table: 2,368,704 of 4,738,842 rows. Refusing them would
+        # make the per-table clock unusable on `vqapr.account`, which is the one table it exists
+        # for; publishing them undated would be worse.
+        #
+        # So a row that was never measured is dated by when it happened. That is not a silent
+        # substitution of one clock for the other: it is the honest answer for a row whose
+        # measurement clock has nothing to say, and it applies only where the declared clock is
+        # explicitly null rather than absent.
+        knowable = row[spec.availability_field]
+        if knowable is None:
+            knowable = row["event_time"]
         published: dict[str, object] = {
-            "available_at": row["event_time"],
+            "available_at": knowable,
             "instrument": instrument,
         }
         for field in spec.value_fields:
@@ -797,6 +950,8 @@ def publish_run_record(
                     f"{_INPUT_STAGE}.fields_invalid",
                     "every declared value field must be present on every recorded row",
                     f"row is missing {field!r}",
+                    fix=f"record {field!r} on every row written to table {spec.table_id!r}",
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
                     retry="record the declared fields on every row, then retry",
                 )
             published[field] = row[field]
@@ -852,6 +1007,13 @@ def materialize(
             f"{_INPUT_STAGE}.dataset_exists",
             "materialization output dataset_id must be new",
             str(spec.dataset_id),
+            # See the sibling refusal above: `vqapr run --force` replaces a run record, not a
+            # registration, so naming it here would be an instruction to delete the wrong thing.
+            fix=(
+                f"materialize to a dataset_id that is not registered, or remove the existing "
+                f"{spec.dataset_id} registration from the workspace first"
+            ),
+            explain=ExplainTopic.WORKSPACE_STATE,
             retry="choose a new output dataset_id, then retry",
         )
 
@@ -887,6 +1049,8 @@ def materialize(
                     f"{_COMPUTE_STAGE}.failed",
                     "DataModel.compute must complete for every evaluation before publication",
                     f"{type(error).__name__}: {error}",
+                    fix="fix the exception raised inside DataModel.compute for this evaluation",
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
                     retry="fix the DataModel or its declared input sufficiency, then retry",
                 ) from error
             rows = _validated_output(
@@ -919,6 +1083,11 @@ def materialize(
             f"{_OUTPUT_STAGE}.empty",
             "materialization must produce at least one output row",
             "all invocations returned zero rows",
+            fix=(
+                "widen the requested instruments/evaluation_times, or fix "
+                "DataModel.compute to emit rows"
+            ),
+            explain=ExplainTopic.RUN_PRECONDITION,
             retry="fix input coverage or DataModel output, then retry",
         )
 

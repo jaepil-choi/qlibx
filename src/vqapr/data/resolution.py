@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
-from vqapr.domain.errors import Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
 
 _STAGE = "observation_store.resolve"
 
@@ -26,6 +26,12 @@ def resolve_fields(
                         "field"
                     ),
                     observed=f"missing={list(missing)!r}; exposed={sorted(registration.fields)!r}",
+                    fix=(
+                        f"register the missing field(s) on dataset {registration.dataset_id!r} "
+                        "under `fields`, or change the DataRequirement to only ask for fields "
+                        "it already exposes"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
                 )
             ],
             mutation=False,

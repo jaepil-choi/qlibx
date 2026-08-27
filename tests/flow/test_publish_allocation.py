@@ -26,6 +26,7 @@ from vqapr.exchange.conventions import ExactExecutionTarget, FillSelector
 from vqapr.flow.materialize import AllocationPublicationSpec, publish_run_allocation
 from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
 from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evidence
+from vqapr.flow.stamping import LookAheadDetected
 from vqapr.flow.views import data_model_window
 from vqapr.models.strategy_model import NoDecision
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
@@ -124,19 +125,58 @@ def test_published_weights_round_trip_exactly(tmp_path: Path) -> None:
 
 
 def test_the_stamp_is_derived_from_reads_not_chosen_by_the_producer(tmp_path: Path) -> None:
-    """A producer must not be able to advertise a decision earlier than its own inputs."""
+    """A producer must not be able to advertise a decision earlier than its own inputs.
+
+    The stamp is `evaluation_time`, and the property holds because a read cannot return anything
+    newer than the instant that read it -- every observation query binds
+    `available_at <= evaluation_time` (`scan.py:579,620`). So the producer has nothing to choose:
+    its inputs are bounded by its own cutoff.
+
+    This used to be checked by feeding a read from two hours AFTER the cutoff and asserting the
+    stamp followed it forward. That input cannot occur: it is precisely the look-ahead the PIT
+    bound prevents, and `derived_available_at` now refuses it rather than silently stamping with
+    it. Constructing an impossible input to prove a property makes the test pass on a package that
+    leaks -- which is the direction that matters, because look-ahead improves correlations and no
+    downstream gate would catch it.
+    """
     Workspace.create(tmp_path)
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
-    late_read = cutoff + timedelta(hours=2)
+    read_at = cutoff - timedelta(hours=2)
 
     result = publish_run_allocation(
         tmp_path,
         AllocationPublicationSpec.of("alpha_allocation"),
-        [_evidence(cutoff=cutoff, read_at=late_read, weights={"A": "0.5"})],
+        [_evidence(cutoff=cutoff, read_at=read_at, weights={"A": "0.5"})],
     )
 
     stamped = _published(result.output_path)[0][0]
-    assert stamped == late_read, "the stamp must not precede the input that justified it"
+    assert stamped == cutoff, (
+        "the stamp must be the instant the decision was made, not the older read behind it"
+    )
+
+
+def test_a_read_newer_than_its_own_cutoff_is_refused_rather_than_stamped(tmp_path: Path) -> None:
+    """The other direction, and the one that would otherwise be silent.
+
+    A read returning a row newer than the instant that read it is look-ahead. It makes every
+    downstream number look BETTER, so the count gate passes and `compare_factors.py` passes; the
+    only thing that can catch it is a refusal at the point it happens.
+    """
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+
+    with pytest.raises(LookAheadDetected):
+        publish_run_allocation(
+            tmp_path,
+            AllocationPublicationSpec.of("alpha_allocation"),
+            [
+                _evidence(
+                    cutoff=cutoff,
+                    read_at=cutoff + timedelta(hours=2),
+                    weights={"A": "0.5"},
+                )
+            ],
+        )
 
 
 def test_a_consumer_evaluating_before_the_stamp_sees_nothing(tmp_path: Path) -> None:

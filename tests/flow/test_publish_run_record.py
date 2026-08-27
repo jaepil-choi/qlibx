@@ -409,3 +409,197 @@ def test_a_record_omitting_the_flow_envelope_is_refused() -> None:
     RunRecordSpec.of(
         "d", table_id="alpha.signal", value_fields=(*sorted(FLOW_ENVELOPE_FIELDS), "signal")
     )
+
+
+_NAV_FIELDS = (
+    "nav",
+    "observed_at",
+    "run_id",
+    "producer_id",
+    "stage",
+    "event_time",
+    "sequence",
+)
+
+
+def _nav_row(*, event_time: datetime, observed_at: datetime, nav: str) -> dict[str, object]:
+    """A `vqapr.account` row: two clocks, deliberately at different instants.
+
+    `event_time` is when the row was written; `observed_at` is when the NAV it carries was
+    measured. On the shipped cadence they are hours apart, which is exactly why dating the series
+    by the wrong one is invisible rather than obviously broken.
+    """
+    return {
+        "instrument": "_ACCOUNT",
+        "nav": nav,
+        "observed_at": observed_at,
+        "run_id": "run-1",
+        "producer_id": "alpha",
+        "stage": "VALUATION",
+        "event_time": event_time,
+        "sequence": 0,
+    }
+
+
+def _stamps(path: Path) -> set[object]:
+    con = duckdb.connect()
+    try:
+        return {
+            row[0]
+            for row in con.execute(
+                f"SELECT DISTINCT available_at FROM read_parquet('{path.as_posix()}')"
+            ).fetchall()
+        }
+    finally:
+        con.close()
+
+
+def test_an_account_table_dates_by_the_instant_its_nav_was_measured(tmp_path: Path) -> None:
+    """AC-P7, and the F-009 collapse.
+
+    A NAV is a MEASUREMENT of a book at an instant. Dating that series by `event_time` labels every
+    value by when the row was written rather than when it was true, and because the record is one
+    commit behind the callback that writes it, every value lands one occurrence late. Measured
+    directly, that mislabelling took a factor correlation from 0.929 to 0.017 -- no error was
+    raised anywhere; the series was simply wrong.
+    """
+    Workspace.create(tmp_path)
+    written = datetime(2026, 4, 2, 8, 0, tzinfo=KST)
+    measured = datetime(2026, 4, 1, 16, 0, tzinfo=KST)
+
+    result = publish_run_record(
+        tmp_path,
+        RunRecordSpec.of(
+            "factor_nav",
+            table_id="vqapr.account",
+            value_fields=_NAV_FIELDS,
+            availability_field="observed_at",
+        ),
+        _Result(
+            _State(
+                {"vqapr.account": (_nav_row(event_time=written, observed_at=measured, nav="1000"),)}
+            )
+        ),
+    )
+
+    assert _stamps(result.output_path) == {measured}, (
+        "the NAV series is dated by when the row was written, not by when the NAV was measured"
+    )
+
+
+def test_a_decision_table_dates_by_the_occurrence_that_decided(tmp_path: Path) -> None:
+    """The other shape, and why the column cannot be hardcoded.
+
+    `allocation` and `vqapr.weight` declare no `observed_at` at all: the row IS the decision, so
+    there is nothing separate to have observed. A package-wide `observed_at` would be right for
+    `vqapr.account` and would fail outright here.
+    """
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+
+    result = publish_run_record(
+        tmp_path,
+        RunRecordSpec.of(
+            "alpha_signal",
+            table_id="alpha.signal",
+            value_fields=("signal", "run_id", "producer_id", "stage", "event_time", "sequence"),
+        ),
+        _result(cutoff),
+    )
+
+    assert _stamps(result.output_path) == {cutoff}
+
+
+def test_a_declared_clock_absent_from_a_row_is_refused(tmp_path: Path) -> None:
+    """A row with no such COLUMN would be dated from a field nobody wrote."""
+    Workspace.create(tmp_path)
+    cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
+    row = _nav_row(event_time=cutoff, observed_at=cutoff, nav="1000")
+    del row["observed_at"]
+
+    with pytest.raises(VqaprError, match="fields_invalid"):
+        publish_run_record(
+            tmp_path,
+            RunRecordSpec.of(
+                "factor_nav",
+                table_id="vqapr.account",
+                value_fields=_NAV_FIELDS,
+                availability_field="observed_at",
+            ),
+            _Result(_State({"vqapr.account": (row,)})),
+        )
+
+
+def test_an_unmeasured_occurrence_is_dated_by_when_it_happened(tmp_path: Path) -> None:
+    """A NULL measurement clock is a real state, and refusing it made the feature unusable.
+
+    An occurrence that took no mark -- the venue published no price at or before the instant --
+    writes `observed_at=None`. On the real factor table that is 2,368,704 of 4,738,842 rows, so a
+    refusal here would reject `vqapr.account` outright: the one table the per-table clock exists
+    for. This case was invisible until a cohort review ran it against a real run, because every
+    earlier test built its rows by hand.
+
+    A row that was never measured is dated by when it happened. That is the honest answer for a
+    clock with nothing to say, and it fires only where the column is explicitly null -- an absent
+    column is still refused by the test above.
+    """
+    Workspace.create(tmp_path)
+    measured_at = datetime(2026, 4, 1, 16, 0, tzinfo=KST)
+    written_at = datetime(2026, 4, 2, 8, 0, tzinfo=KST)
+    unmeasured = _nav_row(event_time=written_at, observed_at=measured_at, nav="1000")
+    unmeasured["observed_at"] = None
+
+    result = publish_run_record(
+        tmp_path,
+        RunRecordSpec.of(
+            "factor_nav",
+            table_id="vqapr.account",
+            value_fields=_NAV_FIELDS,
+            availability_field="observed_at",
+        ),
+        _Result(
+            _State(
+                {
+                    "vqapr.account": (
+                        _nav_row(event_time=written_at, observed_at=measured_at, nav="1000"),
+                        unmeasured,
+                    )
+                }
+            )
+        ),
+    )
+
+    # The measured row keeps its measurement instant; the unmeasured one falls back to its own
+    # event_time. Both are dated, and neither is dated by the other's clock.
+    assert _stamps(result.output_path) == {measured_at, written_at}
+
+    # And the fallback is TRANSPARENT rather than silent, which is what separates it from the
+    # substitution this field exists to prevent: both clocks ride as published columns, so a
+    # reader sees `observed_at IS NULL` and knows that row was dated by when it happened. Without
+    # this the two cases would be indistinguishable after publication and the fallback would be
+    # exactly the quiet wrong answer the batch refuses everywhere else.
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            "SELECT available_at, observed_at, event_time "
+            f"FROM read_parquet('{result.output_path.as_posix()}') ORDER BY available_at"
+        ).fetchall()
+    finally:
+        con.close()
+
+    unmeasured = [row for row in rows if row[1] is None]
+    assert len(unmeasured) == 1, "the unmeasured row must stay identifiable after publication"
+    assert unmeasured[0][0] == unmeasured[0][2], (
+        "an unmeasured row must be dated by its own event_time, visibly so"
+    )
+
+
+def test_the_availability_field_must_be_one_the_record_carries() -> None:
+    """Declaring a clock the table does not publish would stamp from a column nobody wrote."""
+    with pytest.raises(ValueError, match="availability_field"):
+        RunRecordSpec.of(
+            "d",
+            table_id="alpha.signal",
+            value_fields=(*sorted(FLOW_ENVELOPE_FIELDS), "signal"),
+            availability_field="observed_at",
+        )

@@ -15,6 +15,8 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
+from vqapr.flow.run_records import RunRecordExists, RunRecordLive
+from vqapr.flow.store_spec import StoreSpec
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
@@ -28,6 +30,7 @@ from vqapr.public import (
     preflight_run,
 )
 from vqapr.public import run as execute_run
+from vqapr.workspace import WORKSPACE_DIRECTORY
 
 _REQUIRED = (
     "strategy",
@@ -197,6 +200,25 @@ def definition_from_document(document: dict[str, Any], workspace: Workspace) -> 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--force",
+        action="store_true",
+        # Says what the flag DOES, which is not what it said. It replaces this run's frozen
+        # record under the same --run-id; it does not touch a published dataset or a registration.
+        # The two dataset-exists refusals were corrected to stop naming this flag, and leaving the
+        # claim alive in --help would send an agent here to read the version that was disproved.
+        help=(
+            "replace this run id's existing run record instead of refusing. Refusing is the "
+            "default because a repeated run under the same --run-id is far more often a retry "
+            "than an intended overwrite. This does not remove a published dataset"
+        ),
+    )
+    parser.add_argument(
+        "--run-id",
+        dest="run_id",
+        default=None,
+        help="identity for this run's frozen record (defaults to the spec's filename)",
+    )
+    parser.add_argument(
         "spec",
         type=Path,
         help="path to the run spec YAML (write one with `vqapr new run-spec --out`)",
@@ -204,13 +226,71 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
-    document = read_yaml_mapping(Path(args.spec), what="a run spec")
+    spec_path = Path(args.spec)
+    document = read_yaml_mapping(spec_path, what="a run spec")
     require_declared_keys(document)
     workspace = Workspace.open(project_root)
+    # One parser owns the `store` keys, and this is its only reader in the CLI. A second place
+    # reading `document["store"]` directly is how `root` becomes optional in one path and required
+    # in another, with neither wrong on its own.
+    store = StoreSpec.of(document.get("store"), base=spec_path.parent)
     frozen = preflight_run(project_root, definition_from_document(document, workspace))
-    result = execute_run(project_root, frozen)
+    run_id = getattr(args, "run_id", None) or spec_path.stem
+    try:
+        result = execute_run(
+            project_root,
+            frozen,
+            store_root=store.resolve(project_root, WORKSPACE_DIRECTORY),
+            run_id=run_id,
+            replace_record=bool(getattr(args, "force", False)),
+        )
+    except RunRecordLive as running:
+        # A different remedy from RunRecordExists, and naming the wrong one here would be
+        # destructive: `--force` against a live run destroys the rows it is still writing.
+        raise InputError(
+            VALUE_INVALID,
+            requirement="a run id must not already be executing",
+            observed=f"{run_id!r} is running now at {running.directory} (pid {running.holder})",
+            retry=(
+                "wait for that run to finish, or run with --run-id <new-id>. Do NOT use --force: "
+                "it would destroy the rows that run is still writing"
+            ),
+        ) from running
+    except RunRecordExists as existing:
+        # Choosing a run id twice is a mistake the reader can fix in one flag. Letting the bare
+        # FileExistsError escape renders it as `stage: "unhandled"`, which says the framework
+        # broke rather than naming the id and the remedy.
+        raise InputError(
+            VALUE_INVALID,
+            requirement="each run must have a run id no record has already been written under",
+            observed=f"{run_id!r} already has a record at {existing.directory}",
+            retry=(
+                f"run with --run-id <new-id>, or replace the existing record deliberately: "
+                f"vqapr run {spec_path} --force"
+            ),
+        ) from existing
     return success(
         "run.complete",
         occurrences=len(result.occurrences),
-        account_version=result.final_state.version,
+        # Two counters, reported as two fields. The run state advances on every publication,
+        # including a valuation that records a mark without trading; the Account advances only
+        # when a fill commits. Reporting the former under the latter's name made an independent
+        # valuation clock look like it was moving the books.
+        run_state_version=result.final_state.version,
+        account_version=result.final_state.account.snapshot.version,
+        store_root=str(store.resolve(project_root, WORKSPACE_DIRECTORY)),
+        # No `publishes`-shaped field is reported here, and that is deliberate.
+        #
+        # `store.tables` parses, validates and resolves correctly, but nothing yet turns a
+        # declared table into a registered dataset -- `publish_run_record` is the only function
+        # that does, and this path does not call it. Echoing a `publishes` claim would be a
+        # machine-readable claim that a dataset exists when `list datasets` shows none, and the
+        # first reader of this envelope is an agent that would believe it.
+        #
+        # The batch's own precedent is `_contract_report`, which declines to report
+        # weights/forms/records because inventing entries would report a promise nobody made. The
+        # same rule applies to a promise the code has not yet kept: AC-P3's parsing half is
+        # delivered and tested, its publication half is not, and the envelope says only what is
+        # true today.
+        tables_declared=list(store.tables),
     )

@@ -513,13 +513,18 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     memory["nested"].append(2)
     assert definition.initial_model_memory == {"nested": [1]}
     assert frozen.initial_model_memory == {"nested": [1]}
-
     workspace, definition = _setup(tmp_path / "drift", model_price_parquet)
     (tmp_path / "drift" / "strategy.py").write_text(
         "class Strategy:\n    changed = True\n", encoding="utf-8"
     )
-    with pytest.raises(VqaprError, match="fingerprint_drift"):
+    # An edited SOURCE no longer refuses AS DRIFT: that gate became a receipt (issue 009), so
+    # the edited file is loaded and judged on its merits. This replacement is not a StrategyModel,
+    # so it is refused for what it actually is -- a contract violation -- rather than for having
+    # changed. The distinction is the point: editing a registered component is the ordinary
+    # development loop, and only a component that cannot do its job should stop a run.
+    with pytest.raises(VqaprError, match="component.load.wrong_type"):
         preflight_run(workspace, definition)
+
 
     workspace, definition = _setup(tmp_path / "config-drift", model_price_parquet)
     registered = workspace._components["strategy"]
@@ -528,7 +533,10 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
         registered, definition.strategy.agenda_id, definition.strategy.agenda_role
     )
     workspace._strategy_configs[drifted_strategy.agenda_id] = drifted_strategy
-    with pytest.raises(VqaprError, match="fingerprint_drift"):
+    # A mutated CONFIG is likewise no longer refused as drift. It reaches the component, which
+    # cannot construct from a key it does not declare, so the refusal names that instead. Same
+    # principle as the source edit above: judged on whether it works, not on whether it moved.
+    with pytest.raises(VqaprError, match="component.load.construction_failed"):
         preflight_run(workspace, replace(definition, strategy=drifted_strategy))
 
 
@@ -603,7 +611,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
         "class Exchange(KrxExchange):\n"
         "    def __init__(self):\n"
         "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=True)\n"
-        "        super().__init__(listings, instruments=instruments)\n",
+        "        super().__init__(listings)\n",
         encoding="utf-8",
     )
     component = ComponentRef.of(
@@ -630,7 +638,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
         "class Exchange(KrxExchange):\n"
         "    def __init__(self):\n"
         "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=False)\n"
-        "        super().__init__(listings, instruments=instruments)\n",
+        "        super().__init__(listings)\n",
         encoding="utf-8",
     )
     off = ComponentRef.of(
@@ -661,7 +669,6 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
         "from vqapr.exchange.listings import ListingAccess\n"
-        "from vqapr.domain.instruments import IndexInstrument, StockInstrument\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__(\n"
@@ -670,8 +677,6 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
         "             'KOSPI200': TradeRule('KOSPI200', Decimal('1'), Decimal('1'), False,"
         " ListingAccess.NONE)},\n"
         "            'academic',\n"
-        "            {'ABC': StockInstrument('ABC'),"
-        " 'KOSPI200': IndexInstrument('KOSPI200')},\n"
         "        )\n",
         encoding="utf-8",
     )

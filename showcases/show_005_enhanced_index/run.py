@@ -29,15 +29,20 @@ Reproduce::
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import shutil
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import duckdb
+
+from vqapr.cli.register import run as register_cli
+from vqapr.public import export_roster
 
 from vqapr.public import (
     SHIPPED_CONSTRAINTS,
@@ -428,9 +433,14 @@ class EnhancedIndex(StrategyModel):
 )
 
 
-def _write_components(project: Path, universe: tuple[str, ...]) -> dict[str, Path]:
+def _write_components(
+    project: Path, universe: tuple[str, ...], kinds: Mapping[str, str]
+) -> dict[str, Path]:
     components = project / "components"
     components.mkdir(parents=True, exist_ok=True)
+    # What KRX needs to charge correctly: one category per traded name, in the emitted source, so
+    # the component declares it rather than inheriting a default nobody chose.
+    kinds_for_universe = {name: kinds[name] for name in universe}
 
     alpha = components / "alpha.py"
     alpha.write_text(_ALPHA_SOURCE, encoding="utf-8")
@@ -472,18 +482,35 @@ class ShowcaseAcademicExchange(AcademicExchange):
 
     krx = components / "krx_exchange.py"
     krx.write_text(
-        f'''"""Whole shares, 3bp commission both sides, 20bp sale tax, long only."""
+        f'''"""Whole shares, 3bp commission both sides, 20bp sale tax on shares only, long only.
+
+Built from `krx_rules({{instrument_id: kind}})` rather than from a bare sequence of ids. The
+bare form is shorter and silently wrong for this book: it gives every name the STOCK terms, so
+the ETF sleeve would pay the securities transaction tax KRX exempts it from. Nothing downstream
+would notice, because the category is consumed when the venue is built and the charge is a
+dictionary lookup afterwards -- the wrong rate is frozen in at construction.
+"""
 
 from __future__ import annotations
 
-from vqapr.public import KrxExchange
+from vqapr.public import KrxExchange, krx_rules
 
-UNIVERSE = {universe!r}
+UNIVERSE = {kinds_for_universe!r}
 
 
 class ShowcaseKrxExchange(KrxExchange):
     def __init__(self):
-        super().__init__(UNIVERSE, "show005-krx")
+        # price_limits=False because this fixture's execution table publishes a close and no
+        # session base price. Left on, `execution_requirements()` would demand that column and
+        # preflight would refuse the run -- correctly, since a limit band computed from a missing
+        # base would produce numbers that look limit-aware and are not.
+        #
+        # `krx_rules` still takes the universe's categories, because KRX's TERMS are per-category:
+        # a share pays the sale tax and an ETF does not. What it no longer does is tell the venue
+        # what each instrument IS -- that comes from the project's registered roster, bound in by
+        # the Flow at run assembly. Terms are the venue's; identity is the project's.
+        listings, _ = krx_rules(UNIVERSE, price_limits=False)
+        super().__init__(listings, "show005-krx")
 ''',
         encoding="utf-8",
     )
@@ -652,7 +679,21 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     observation_path = FIXTURE / str(manifest["observation_path"])
     execution_path = FIXTURE / str(manifest["execution_path"])
     benchmark_path = FIXTURE / str(manifest["benchmark_path"])
-    universe = _universe(benchmark_path)
+    # The index constituents, from the benchmark. An index ETF tracks the index rather than
+    # belonging to it, so the sleeve is deliberately absent from that file and is read from the
+    # fixture manifest instead -- the one place the fixture states a category, because an ETF's
+    # price rows are shaped exactly like a share's and nothing downstream can tell them apart.
+    members = _universe(benchmark_path)
+    kinds: dict[str, str] = dict(manifest["instrument_kinds"])
+    sleeve = tuple(str(entry["ticker"]) for entry in manifest["etf_sleeve"])
+    # An enhanced-index book is constituents plus an ETF sleeve: that is the shape issue 003 was
+    # closed to deliver, and holding one is what makes the KRX sale-tax exemption observable at
+    # all. Without the sleeve every name is a share and the exemption never executes here.
+    universe = tuple(sorted(set(members) | set(sleeve)))
+    if not sleeve:
+        raise AssertionError("the fixture declares no ETF sleeve, so the exemption is untestable")
+    if any(kinds.get(name) != "etf" for name in sleeve):
+        raise AssertionError("the sleeve must be declared etf in the fixture manifest")
     sessions = _sessions(benchmark_path)
     callback_days = sessions[1:]
 
@@ -704,9 +745,24 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         ),
     )
 
+    # The project declares what each id IS, once, before anything trades. A venue borrows this;
+    # it does not own it -- `kind` does not vary by venue, so the fact was never the venue's to
+    # state. The Flow binds this roster into the venue's view at run assembly.
+    written = export_roster({name: kinds[name] for name in universe}, project)
+    declaration = project / "instruments.yaml"
+    declaration.write_text(
+        "instruments:\n  show005:\n    tables:\n"
+        + "".join(f"      {kind}: {path.name}\n" for kind, path in sorted(written.items())),
+        encoding="utf-8",
+    )
+    # Registered through the CLI's own entry point, which is what a user runs. Reaching past it
+    # would let this showcase pass while `vqapr register` was broken.
+    register_cli(argparse.Namespace(declaration=str(declaration)), project_root=project)
+
+
     halted_instrument = universe[0]
 
-    paths = _write_components(project, universe)
+    paths = _write_components(project, universe, kinds)
     alpha_ref = component_ref(
         "show005-alpha", ComponentKind.STRATEGY_MODEL, paths["alpha"], "SignedAlpha"
     )
@@ -842,13 +898,36 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     default_account = alpha_result.final_state.recorder_rows.get("vqapr.account", ())
     if not default_weight or not default_account:
         raise AssertionError("the package-owned default records are missing from a real run")
-    # One account-level row per occurrence, plus one row per held instrument. The panel rows are
-    # what a later reader rebuilds the run's valuation from, since the run itself retains only the
-    # marks somebody declared they would read (canon 7.3).
+    # TWO account-level rows per occurrence, because two clocks write this table and they are
+    # not interchangeable:
+    #
+    #   valuation occurrence  -> carries a nav; this is the measurement
+    #   strategy callback     -> nav is None here, because the valuation above already recorded
+    #                            this exact mark and the callback declines to restate it
+    #
+    # Counting only the total would pass while either half silently disappeared, so each half is
+    # pinned separately. Writing them into one table is a known wart -- see issue 010 -- and if
+    # that is ever resolved this assertion is the thing that should fail and say so.
+    #
+    # The panel rows are what a later reader rebuilds the run's valuation from, since the run
+    # itself retains only the marks somebody declared they would read (canon 7.3).
     account_level = [row for row in default_account if row["instrument"] == "_ACCOUNT"]
-    if len(account_level) != len(callback_days):
+    measured = [row for row in account_level if row["nav"] is not None]
+    restated = [row for row in account_level if row["nav"] is None]
+    if len(measured) != len(callback_days):
         raise AssertionError(
-            f"expected one account-level row per occurrence, saw {len(account_level)}"
+            f"expected one valuation-written account row per occurrence, saw {len(measured)}"
+        )
+    if len(restated) != len(callback_days):
+        raise AssertionError(
+            f"expected one callback-written account row per occurrence, saw {len(restated)}"
+        )
+    # Both clocks are daily here, so every callback row must have been suppressed. A nav
+    # appearing on this side would mean the duplicate-suppression stopped working, which is the
+    # defect that took HML's correlation from 0.9726 to 0.6877 (implementations/056).
+    if len(account_level) != 2 * len(callback_days):
+        raise AssertionError(
+            f"expected two account-level rows per occurrence, saw {len(account_level)}"
         )
     if len(default_account) <= len(account_level):
         raise AssertionError("the account table carries no instrument panel rows")

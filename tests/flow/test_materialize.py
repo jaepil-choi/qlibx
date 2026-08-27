@@ -176,9 +176,19 @@ def test_mid_run_compute_failure_publishes_nothing(
     assert not (tmp_path / ".vqapr" / "materialized" / "partial.parquet").exists()
 
 
-def test_component_source_drift_is_rejected_before_compute(
+def test_an_edited_component_computes_instead_of_being_refused(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
+    """Editing a registered component and re-running is the ordinary development loop.
+
+    This previously pinned the opposite: an edit was refused at load with
+    `component.load.fingerprint_drift`, whose stated repair was "re-register the component" --
+    which `register_component` then refused, demanding a new identity. The two pointed at each
+    other (`docs/implementations/057`), so the gate was removed (issue 009) and the fingerprint
+    became a receipt: still computed, and the run record states what actually loaded.
+
+    What must still hold is that materialize does not mutate the workspace.
+    """
     _register_prices(tmp_path, model_price_parquet)
     component_path = _component_source(tmp_path / "models.py")
     register_data_model(tmp_path, "reversal", component_path, "ReversalModel")
@@ -188,19 +198,19 @@ def test_component_source_drift_is_rejected_before_compute(
         encoding="utf-8",
     )
 
-    with pytest.raises(VqaprError) as caught:
-        materialize(
-            tmp_path,
-            "reversal",
-            MaterializationSpec.of("drifted", value_fields=("score",)),
-            evaluation_times=_times(),
-            instruments=("A", "B"),
-        )
+    materialize(
+        tmp_path,
+        "reversal",
+        MaterializationSpec.of("drifted", value_fields=("score",)),
+        evaluation_times=_times(),
+        instruments=("A", "B"),
+    )
 
-    assert caught.value.stage == "component.load"
-    assert caught.value.mutation is False
-    assert Workspace.open(tmp_path).path.read_bytes() == before
-
+    # One component id, before and after. The edit neither refuses nor mints a second identity,
+    # which is the whole difference this milestone makes.
+    after = Workspace.open(tmp_path)
+    assert len(after.components) == 1, "an edit must not mint a second component id"
+    assert [str(ref.component_id) for ref in after.components] == ["reversal"]
 
 @pytest.mark.parametrize(
     "evaluation_times",

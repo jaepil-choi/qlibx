@@ -157,10 +157,15 @@ def krx_rules(
     *,
     price_limits: bool = True,
 ) -> tuple[dict[str, TradeRule], dict[str, Instrument]]:
-    """Build a KRX roster from ``instrument_id -> kind``, with each category's own terms.
+    """Build KRX's per-instrument terms from ``instrument_id -> kind``.
 
     The one call that gets the ETF exemption right: a stock pays the sale tax, an ETF does not,
     and neither is named individually.
+
+    Still returns the built instruments as its second element, but a venue no longer accepts them
+    -- identity now comes from the project's registered roster. The pair is kept because a caller
+    assembling a universe usually wants both, and because discarding it here would silently change
+    what nine in-tree call sites unpack.
 
     ``price_limits=False`` switches off the limit-up/limit-down regime, which is how a user whose
     execution table carries only a trade price still runs here. The choice is recorded in every
@@ -199,14 +204,21 @@ class KrxExchange:
         self,
         listings: Mapping[str, TradeRule] | Sequence[str],
         exchange_id: str = "krx",
-        instruments: Mapping[str, Instrument] | Mapping[str, InstrumentKind | str] | None = None,
     ) -> None:
-        """Declare what this venue trades.
+        """Declare what this venue trades -- which ids, and on what terms.
 
         ``listings`` may be a bare sequence of ids, which get the stock terms, or explicit
-        ``TradeRule`` values. ``instruments`` accepts built instruments or a plain
-        ``instrument_id -> kind`` declaration; :func:`krx_rules` builds both together and is the
-        way to get the ETF exemption applied.
+        ``TradeRule`` values.
+
+        **It no longer accepts `instruments`.** What an id IS belongs to the project, not to a
+        venue: `kind` does not vary by venue, so a venue declaring it was declaring a fact that
+        was never its own (issue 008). Removing the parameter removes the channel -- there is now
+        no way for a venue author to state a category, correctly or otherwise.
+
+        The bare-sequence form is consequently no longer a bypass. It used to give every name the
+        STOCK terms *and* record no category, so an ETF quietly paid a tax KRX exempts. Now it
+        says only "these are the ids I trade", the categories come from the roster, and
+        :func:`krx_rules` is about per-category TERMS rather than about identity.
         """
         resolved: Mapping[str, TradeRule]
         if isinstance(listings, Mapping):
@@ -218,16 +230,8 @@ class KrxExchange:
                 raise ValueError("each listing key must match its TradeRule instrument_id")
             if rule.fractional_allowed:
                 raise ValueError(f"KRX listing {instrument_id!r} must not be fractional")
-        declared: dict[str, Instrument] = {}
-        if instruments:
-            declared = {
-                instrument_id: value
-                if isinstance(value, Instrument)
-                else build_instruments({instrument_id: value})[instrument_id]
-                for instrument_id, value in instruments.items()
-            }
         self.exchange_id = exchange_id
-        self._rules = ExchangeRulesView(exchange_id, resolved, declared)
+        self._rules = ExchangeRulesView(exchange_id, resolved)
 
     def execution_requirements(self) -> tuple[ExecutionFieldRequirement, ...]:
         """The execution-table prices this venue needs, given what its rules actually declare.
@@ -252,10 +256,6 @@ class KrxExchange:
     @property
     def listings(self) -> Mapping[str, TradeRule]:
         return self._rules.listings
-
-    @property
-    def instruments(self) -> Mapping[str, Instrument]:
-        return self._rules.instruments
 
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
@@ -338,7 +338,7 @@ class KrxExchange:
                     request.delta_quantity,
                     row.price,
                     cost=rules.charge(side, notional, request.instrument_id),
-                    kind=rules.kind(request.instrument_id),
+                    kind=rules.stamped_kind(request.instrument_id),
                 )
             )
         return FillBatch(tuple(fills), account.version)

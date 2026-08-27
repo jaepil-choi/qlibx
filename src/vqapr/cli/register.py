@@ -105,6 +105,7 @@ needs editing.
 """
 
 SECTIONS = (
+    "instruments",
     "datasets",
     "execution_inputs",
     "agendas",
@@ -255,6 +256,83 @@ register together — `register_dataset(registration, source)` takes them as a p
 separate `sources:` section; the error that formerly said just ``must declare source_id`` without
 saying where a source goes was the direct cause of FRICTION F-007.
 """
+
+
+def _instruments(bodies: dict[str, Any], project_root: Path, *, base: Path) -> dict[str, Any]:
+    """Register the project's instrument roster from its kind-keyed tables.
+
+    **Validates what the file actually contains, not what the exporter promised.** A roster
+    parquet may have been written by `instruments.py`, by hand, or by a script that got the schema
+    wrong, and all three arrive here identically. Producing a clean file is the user's
+    responsibility; refusing a dirty one is this function's -- the same split `available_at`
+    already states.
+
+    Returns a per-category receipt. That receipt is the one MECHANICAL guard against a mechanical
+    sweep, and it works because it fires on the success path: an author who declared 2,143 names
+    and is shown `{"stock": 2143}` has been told at registration that their universe is uniform,
+    rather than discovering it in a later refusal. A uniform universe is a legitimate answer; this
+    only makes it impossible to give without seeing it.
+    """
+    import hashlib
+
+    from vqapr.domain.roster import build_roster
+    from vqapr.domain.roster_export import read_roster_table
+    from vqapr.workspace import Workspace
+
+    if len(bodies) != 1:
+        # Several rosters would require asking which one knows an id, and that is a matcher --
+        # the thing this package removed from the charge path on purpose.
+        raise InputError(
+            VALUE_INVALID,
+            requirement="a project declares exactly one instrument roster",
+            observed=f"{len(bodies)} rosters declared: {', '.join(sorted(bodies))}",
+            fix="merge the tables into one `instruments:` entry",
+            explain=ExplainTopic.DECLARATION_SHAPE,
+        )
+    roster_id, declared = next(iter(bodies.items()))
+    name = f"instruments.{roster_id}"
+    body = _mapping(declared, name=name)
+    tables = _mapping(_required(body, "tables", name=name), name=f"{name}.tables")
+
+    resolved: dict[str, Path] = {}
+    rows: dict[str, dict[str, str]] = {}
+    digest = hashlib.sha256()
+    for kind, raw_path in sorted(tables.items()):
+        path = (base / str(raw_path)).resolve()
+        try:
+            rows[str(kind)] = read_roster_table(path)
+        except (FileNotFoundError, ValueError) as error:
+            raise InputError(
+                VALUE_INVALID,
+                requirement=f"{name}.tables.{kind} must name a readable instrument table",
+                observed=str(error),
+                fix=f"write {path.name} with instrument_id and kind columns, then re-register",
+                explain=ExplainTopic.DECLARATION_SHAPE,
+                source=FailureSource(file=str(path)),
+            ) from error
+        resolved[str(kind)] = path
+        # Digested over the file bytes, the same discipline `fingerprint_component` uses for a
+        # user-authored component. Stated in the run record, never compared against it.
+        digest.update(path.read_bytes())
+
+    try:
+        roster = build_roster(rows)
+    except ValueError as error:
+        raise InputError(
+            VALUE_INVALID,
+            requirement=f"{name} must describe every instrument exactly once, under its own kind",
+            observed=str(error),
+            fix="correct the instrument tables so each id appears once under a declared kind",
+            explain=ExplainTopic.DECLARATION_SHAPE,
+        ) from error
+
+    workspace = Workspace.open(project_root)
+    workspace.register_instruments(resolved, digest=digest.hexdigest())
+    return {
+        "roster_id": str(roster_id),
+        "instruments": len(roster),
+        "by_kind": roster.histogram,
+    }
 
 
 def _dataset(
@@ -627,6 +705,11 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
 
     def section(key: str) -> dict[str, Any]:
         return _mapping(document.get(key) or {}, name=key)
+
+    instrument_bodies = section("instruments")
+    if instrument_bodies:
+        receipt = _instruments(instrument_bodies, project_root, base=base)
+        registered.setdefault("instruments", []).append(receipt)
 
     for dataset_id, body in section("datasets").items():
         registration, source = _dataset(str(dataset_id), body, base=base)

@@ -35,7 +35,6 @@ from vqapr._internal.models.agent_first import (
     prepare_data_model_invocation,
     prepare_strategy_invocation,
 )
-from vqapr._internal.publication import PublishedOutput, publish_outputs
 from vqapr._internal.run_bridge import (
     SimulationSummary,
     execute_frozen_run,
@@ -52,26 +51,13 @@ __all__ = (
     "MaterializationResult",
     "Project",
     "ProjectDeclaration",
-    "PublicationConflict",
     "RegistrationReceipt",
     "RegistrationTiming",
     "SimulationSummary",
-    "StrategyReplay",
+    "StrategyDrive",
     "open",
 )
 
-
-class PublicationConflict(Exception):
-    """A publication lost the catalog-root CAS; no output became visible."""
-
-    def __init__(self, expected_generation: int, observed_generation: int):
-        super().__init__(
-            f"publication conflict: expected generation {expected_generation}, "
-            f"observed {observed_generation}"
-        )
-        self.expected_generation = expected_generation
-        self.observed_generation = observed_generation
-        self.mutation = False
 
 
 def _identifier(value: object, *, name: str) -> str:
@@ -349,19 +335,18 @@ class MaterializationResult:
             raise ValueError("output_dataset_id and digest must both be set or both be None")
 
 
+
 @dataclass(frozen=True, slots=True, kw_only=True)
-class StrategyReplay:
-    """A StrategyModel driven across occurrences, publishable once as one atomic transaction.
+class StrategyDrive:
+    """A StrategyModel driven across occurrences: the decisions, and the state they threaded.
 
-    Renamed out of `CompletedRun`, which it shared with `_internal/run_bridge.py`'s readable
-    projection while being a different thing entirely: that one is what `run_completed` returns and
-    what a reader consumes as `completed.tables`; this one is a publication transaction handle
-    carrying a root, access tokens and a `publish()`. Two shapes under one name in one package is
-    a coin-flip for the reader, and the readable projection is overwhelmingly the one they meet.
+    Formerly `StrategyReplay`, which additionally carried a `publish()` onto a content-addressed
+    object store. That publication half was removed because nothing ever called it -- see issue
+    009, Decision 4 -- and what remains is the half every caller actually uses: what the strategy
+    decided, and the state each decision handed the next one.
 
-    The capability is unchanged -- `publish()` still stages and verifies every output and makes
-    them visible through a single catalog-root CAS, which is what `test_publication_atomicity.py`
-    proves and what Step 6 depends on for `store.tables`.
+    `root` is retained because a caller that drove a strategy inside a project usually needs to
+    say which project it was.
     """
 
     root: Path
@@ -369,20 +354,6 @@ class StrategyReplay:
     diagnostics: tuple[Mapping[str, object], ...]
     access_tokens: tuple[object, ...]
     final_state: object
-
-    def publish(self, outputs: Mapping[str, bytes]) -> object:
-        """Make every named output visible together, or none of them.
-
-        Delegates to the publication transaction: objects are staged and verified first,
-        and a single catalog-root CAS is the only visibility step.
-        """
-        if not isinstance(outputs, Mapping) or not outputs:
-            raise ValueError("outputs must be a non-empty mapping of output_id to bytes")
-        staged = [
-            PublishedOutput(output_id=output_id, payload=payload, metadata={})
-            for output_id, payload in sorted(outputs.items())
-        ]
-        return publish_outputs(self.root, staged)
 
 
 class Project:
@@ -664,7 +635,7 @@ class Project:
         resolver: ObservationResolver,
         initial_strategy_state: object = None,
         history_resolver=None,
-    ) -> StrategyReplay:
+    ) -> StrategyDrive:
         """Drive one StrategyModel across occurrences, threading state explicitly.
 
         `previous_state` for each occurrence is the `next_state` the prior accepted
@@ -697,7 +668,7 @@ class Project:
             access.extend(prepared.access_tokens)
             state = prepared.next_state
 
-        return StrategyReplay(
+        return StrategyDrive(
             root=self._root,
             decisions=tuple(decisions),
             diagnostics=tuple(diagnostics),

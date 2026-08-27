@@ -47,7 +47,6 @@ class AcademicExchange:
 
     listings: Mapping[str, TradeRule]
     exchange_id: str = "academic"
-    instruments: Mapping[str, Instrument] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.exchange_id, str) or not self.exchange_id:
@@ -59,17 +58,19 @@ class AcademicExchange:
             if not isinstance(rule, TradeRule) or instrument_id != rule.instrument_id:
                 raise ValueError("each listing key must match its TradeRule instrument_id")
         object.__setattr__(self, "listings", copied)
-        object.__setattr__(self, "instruments", dict(self.instruments))
 
     @property
     def rules(self) -> ExchangeRulesView:
         """Academic listings with no declared cost band, so this profile charges nothing.
 
         A subclass may declare one. `execute` charges whatever this returns, so a subclass that
-        adds a cost band -- and the instruments whose categories it selects on -- gets it applied
-        without replacing any matching behaviour.
+        adds a cost band gets it applied without replacing any matching behaviour.
+
+        The view is built WITHOUT a roster, and that is deliberate: a venue has no business
+        declaring what an instrument is. The Flow binds the project's roster in at run assembly
+        via `with_registry`, which is the only seam a category enters through.
         """
-        return ExchangeRulesView(self.exchange_id, self.listings, dict(self.instruments))
+        return ExchangeRulesView(self.exchange_id, self.listings)
 
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
@@ -142,7 +143,7 @@ class AcademicExchange:
                             ),
                             request.instrument_id,
                         ),
-                        kind=rules.kind(request.instrument_id),
+                        kind=rules.stamped_kind(request.instrument_id),
                     )
                 )
         return FillBatch(tuple(fills), account.version)

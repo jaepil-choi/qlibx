@@ -21,6 +21,7 @@ import pytest
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.domain.enums import Side
+from vqapr.domain.roster import InstrumentRoster
 from vqapr.domain.instruments import (
     EtfInstrument,
     Instrument,
@@ -87,7 +88,10 @@ def _snapshot(at: datetime, prices: dict[str, Decimal]) -> ExactExecutionSnapsho
 
 def _two_category_venue(stock: str, etf: str) -> KrxExchange:
     listings, instruments = krx_rules({stock: "stock", etf: "etf"})
-    return KrxExchange(listings, instruments=instruments)
+    # The venue declares terms; the roster declares identity, bound the way the Flow binds it.
+    venue = KrxExchange(listings)
+    venue._rules = venue.rules.with_registry(InstrumentRoster(instruments))
+    return venue
 
 
 def test_kind_is_a_venue_independent_fact_with_a_declared_extension_path() -> None:
@@ -260,7 +264,8 @@ def test_a_listed_instrument_has_exactly_one_rate_per_side() -> None:
     on the instrument's own rule, reached by dictionary lookup.
     """
     listings, instruments = krx_rules({"A005930": "stock", "A069500": "etf"})
-    venue = KrxExchange(listings, instruments=instruments)
+    venue = KrxExchange(listings)
+    venue._rules = venue.rules.with_registry(InstrumentRoster(instruments))
     notional = Decimal("1000000")
 
     for name, expected_tax in (("A005930", notional * SALE_TAX_RATE), ("A069500", Decimal("0"))):
@@ -350,15 +355,27 @@ def test_a_venue_declaring_no_categories_collects_under_none() -> None:
 
 
 def test_a_bare_universe_gets_stock_terms() -> None:
-    """Every venue that existed before this keeps charging exactly what it charged."""
+    """A bare universe still gets the stock TERMS -- but no longer claims to know what it holds.
+
+    The bare-sequence form was the bypass issue 007 named: it gave every name stock terms AND
+    recorded no category, so an ETF quietly paid a tax KRX exempts. Half of that is now gone. The
+    terms remain (a venue may absolutely charge one flat rate), while the identity claim is
+    refused rather than silently answered.
+    """
     flat = KrxExchange(["A005930"]).rules
     notional = Decimal("1000000")
     assert flat.charge(Side.BUY, notional, "A005930").total == notional * COMMISSION_RATE
     assert flat.charge(Side.SELL, notional, "A005930").total == notional * (
         COMMISSION_RATE + SALE_TAX_RATE
     )
-    assert flat.instrument("A005930") is None, "a bare universe declares no category"
-    assert flat.kind("A005930") is None
+    # Identity is no longer the venue's to answer. It used to return `None` here, and every
+    # caller decided for itself what that meant -- which is how an ETF came to pay a share's
+    # sale tax. Now the question is refused, and the answer comes from the project's roster.
+    with pytest.raises(ValueError, match="no instrument roster reached"):
+        flat.kind("A005930")
+    # Sizing still works unbound, because no shipped category overrides the base conversion, so
+    # the declared answer and this one are the same number. `_sizing_is_uniform` retires that the
+    # moment a category with its own contract size arrives.
     assert flat.notional("A005930", Decimal("-3"), Decimal("100")) == Decimal("300")
 
     # A cost travels with the rule now, so a venue reusing KRX's rule inherits KRX's rates --
@@ -371,4 +388,5 @@ def test_a_bare_universe_gets_stock_terms() -> None:
         {"A005930": TradeRule("A005930", Decimal("1"), Decimal("1"), False)}
     )
     assert free.rules.charge(Side.SELL, notional, "A005930").total == Decimal("0")
-    assert free.rules.instruments == {}
+    # A venue holds no roster at all now: identity is the project's, handed in at assembly.
+    assert free.rules.registry is None

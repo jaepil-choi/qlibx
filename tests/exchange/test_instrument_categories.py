@@ -148,7 +148,7 @@ def test_a_factor_fills_fractionally_through_the_ordinary_path() -> None:
     name = "HML"
     listing = _fractional(name)
     fut = FactorInstrument(name)
-    venue = AcademicExchange({name: listing}, "academic", {name: fut})
+    venue = _bound(AcademicExchange({name: listing}, "academic"), {name: fut})
 
     price = Decimal("1.0500")  # a synthetic unit series the user registered
     nav = Decimal("1000000")
@@ -179,14 +179,17 @@ def test_a_factor_fills_fractionally_through_the_ordinary_path() -> None:
 
 def test_a_mixed_academic_venue_declares_all_four() -> None:
     """The `UC-ACADEMIC-001` roster: three fillable categories plus a published index."""
-    venue = AcademicExchange(
+    venue = _bound(
+        AcademicExchange(
         {
             "A005930": _fractional("A005930"),
             "A069500": _fractional("A069500"),
             "HML": _fractional("HML"),
             "KOSPI200": _fractional("KOSPI200", NO_SIDE),
         },
-        "academic",
+            "academic",
+        ),
+
         {
             "A005930": StockInstrument("A005930"),
             "A069500": EtfInstrument("A069500"),
@@ -211,3 +214,33 @@ def test_krx_style_whole_share_and_factor_quantise_differently() -> None:
 
     assert whole.quantize("A005930", Decimal("10.7")) == Decimal("10")
     assert fine.quantize("HML", Decimal("10.7")) == Decimal("10.7")
+
+
+def _bound(venue, roster):
+    """A venue whose view carries the project's roster, as the Flow binds it at run assembly.
+
+    Venues no longer accept a roster, so a test does what production does: build the venue, then
+    hand its view the identity it borrows. There is deliberately no public way for a venue to
+    acquire one itself.
+    """
+    from vqapr.domain.roster import InstrumentRoster
+
+    return _WithRoster(venue, venue.rules.with_registry(InstrumentRoster(roster)))
+
+
+class _WithRoster:
+    """Delegates everything to the venue except `rules`, which serves the bound view."""
+
+    def __init__(self, venue, rules):
+        self._venue = venue
+        self._bound = rules
+
+    @property
+    def rules(self):
+        return self._bound
+
+    def execute(self, *args, **kwargs):
+        return self._venue.execute(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._venue, name)

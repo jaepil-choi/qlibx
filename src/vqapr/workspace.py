@@ -131,6 +131,7 @@ AGENDA_LOOKUP_STAGE = "workspace.agenda.lookup"
 STRATEGY_REGISTER_STAGE = "workspace.strategy_config.register"
 VALUATION_REGISTER_STAGE = "workspace.valuation_config.register"
 MONITORING_REGISTER_STAGE = "workspace.monitoring_policy.register"
+REMOVE_STAGE = "workspace.remove"
 _CONSTRUCTION_TOKEN = object()
 
 
@@ -768,10 +769,26 @@ class Workspace:
             )
             return True
 
-    def register_component(self, ref: ComponentRef) -> bool:
-        """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다."""
+    def register_component(self, ref: ComponentRef, *, force: bool = False) -> bool:
+        """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다.
+
+        ``force=True`` replaces an existing registration whose source has changed, in place and
+        under the same ``component_id``.
+
+        Without it, editing a registered component and re-registering is refused, and the refusal
+        names a new identity as the repair. That instruction contradicts the one `loading.py`
+        prints when the same edit is loaded rather than registered -- it says *re-register the
+        component*, which this method then declined. A reader following either message arrives at
+        the other, which `docs/implementations/057` names as worse than a generic error.
+
+        Replacing does not lose provenance: a finished run pins the fingerprint it ran under in
+        its own record, so what a past run used is testified to by that run and not by whichever
+        registration currently holds the id.
+        """
         if not isinstance(ref, ComponentRef):
             raise TypeError("ref must be a ComponentRef")
+        if not isinstance(force, bool):
+            raise TypeError("force must be a bool")
         with self._exclusive():
             (
                 datasets,
@@ -798,31 +815,26 @@ class Workspace:
                         monitoring_policies,
                     )
                     return False
-                # Name the identity that would work. Editing a registered component is the
-                # ordinary development loop, and "use a new identity" without saying which one
-                # leaves every user to invent the same fingerprint-suffix scheme by hand.
-                suggested = f"{key}-{ref.fingerprint[:12]}"
-                raise _workspace_error(
-                    stage=COMPONENT_REGISTER_STAGE,
-                    code=f"{COMPONENT_REGISTER_STAGE}.conflict",
-                    requirement=(
-                        f"component_id {key!r} must keep its registered fingerprint or use a new "
-                        "identity"
-                    ),
-                    observed=(
-                        f"registered fingerprint {existing.fingerprint[:12]}..., "
-                        f"supplied {ref.fingerprint[:12]}..."
-                    ),
-                    fix=(
-                        f"register the changed source under a new component_id such as "
-                        f"{suggested!r}"
-                    ),
-                    explain=ExplainTopic.WORKSPACE_STATE,
-                    retry=(
-                        f"the source changed, so register it under a new component_id such as "
-                        f"{suggested!r}, or restore the registered source"
-                    ),
-                )
+                # An edited source replaces its registration in place, under the same id.
+                #
+                # This used to refuse and name a NEW component_id as the repair, while
+                # `loading.py` -- meeting the same edit -- said "re-register the component", which
+                # is what this refused. The two pointed at each other, and
+                # `docs/implementations/057` names that shape as worse than a generic error.
+                #
+                # The real cost was never one command: a new id needed a new strategy_configs
+                # binding and a spec edit, four steps for a one-line change, and the workspace
+                # accumulated `mom`, `mom-eb04...`, `mom-91c7...` for one strategy. Keeping the id
+                # also makes "this strategy ran 47 times across 12 fingerprints" countable, which
+                # a new id per edit scatters across twelve ids where nothing counts it.
+                #
+                # Provenance is not weakened. A finished run pins the fingerprint it ran under in
+                # its own frozen record, so what a past run used is testified to by that run, not
+                # by whichever registration currently holds the id.
+                #
+                # `force` is retained as an explicit spelling for callers that want to say they
+                # meant it, but it no longer gates anything: replacement is the default.
+                _ = force
             merged = dict(components)
             merged[key] = _detach_component(ref)
             self._write(
@@ -916,6 +928,183 @@ class Workspace:
                 state,
                 7,
             )
+
+    @property
+    def roster_path(self) -> Path:
+        """Where the registered instrument roster's pointer lives.
+
+        A sidecar beside `workspace.yaml` rather than a section inside it. Every `register_*`
+        performs a read-modify-write of the whole document under an exclusive lock, so a
+        three-thousand-entry roster living in that document would be rewritten on every unrelated
+        registration and would make each diff unreadable. It also keeps the roster out of the
+        8-tuple every workspace signature threads, which is a change nobody reading a diff of
+        this file would want to audit.
+        """
+        return self.path.parent / "instruments.json"
+
+    def register_instruments(
+        self, tables: Mapping[str, Path | str], *, digest: str
+    ) -> dict[str, object]:
+        """Record which files declare this project's instruments, and what they hashed to.
+
+        Stores a POINTER plus a digest, never a frozen copy. Issue 009 settles why: a roster grows
+        as a matter of course -- a daily batch lists new tickers, issuers delist, a name is
+        reclassified -- so a run is never refused for reading a roster that differs from the one
+        recorded. The digest is STATED in the run record and compared against nothing.
+
+        Re-registration is ordinary, unlike a dataset's. A dataset registration is immutable
+        because changing it would rewrite provenance; a roster correction is a statement about the
+        world ("069500 is an ETF"), and what a past run treated an instrument as is testified to
+        by that run's own fills.
+        """
+        import json
+
+        if not isinstance(tables, Mapping) or not tables:
+            raise ValueError("instrument registration requires at least one table")
+        if not isinstance(digest, str) or not digest:
+            raise ValueError("digest must be a non-empty string")
+        payload = {
+            "schema": "vqapr.instruments/v1",
+            "tables": {str(kind): str(Path(path)) for kind, path in sorted(tables.items())},
+            "digest": digest,
+        }
+        with self._exclusive():
+            self.roster_path.write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        return payload
+
+    def registered_instruments(self) -> dict[str, object] | None:
+        """The roster pointer, or `None` when this project has registered no instruments.
+
+        `None` rather than an empty mapping: a project with no roster and a project whose roster
+        is empty are different states, and only the first is ordinary.
+        """
+        import json
+
+        if not self.roster_path.is_file():
+            return None
+        return json.loads(self.roster_path.read_text(encoding="utf-8"))
+
+    def remove(self, kind: str, identity: str) -> bool:
+        """Withdraw one registration, refusing while anything live still names it.
+
+        Returns True when something was removed and False when the id was already absent, which
+        makes a repeated removal idempotent rather than an error.
+
+        **Refuses on live declarations only, never on past run records.** A finished run pins the
+        component id and fingerprint it used inside its own frozen record, so its provenance does
+        not depend on the workspace still holding that registration. Refusing here on run history
+        would make the workspace un-prunable the moment it was used once, which is immutability by
+        the back door -- the thing issue 009 removes. A record whose component was later withdrawn
+        still reports what it ran; it simply cannot be enriched from a registration that is gone.
+        """
+        blockers = self.references_to(kind, identity)
+        if blockers:
+            raise _workspace_error(
+                stage=REMOVE_STAGE,
+                code=f"{REMOVE_STAGE}.referenced",
+                requirement=f"a {kind} may be removed only when nothing live still names it",
+                observed=f"{identity!r} is referenced by " + ", ".join(blockers),
+                fix=(
+                    f"remove {', '.join(blockers)} first, or keep {identity!r} registered"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry="withdraw the referencing declarations, then retry",
+            )
+        position = {
+            "component": 3,
+            "agenda": 4,
+            "strategy_config": 5,
+            "valuation_config": 6,
+            "monitoring_policy": 7,
+        }[kind]
+        with self._exclusive():
+            state = self._read()
+            declarations = dict(state[position])
+            if identity not in declarations:
+                self._replace_state(*state)
+                return False
+            del declarations[identity]
+            merged = list(state)
+            merged[position] = declarations
+            self._write(*merged)
+            self._replace_state(*merged)
+            return True
+
+    def references_to(self, kind: str, identity: str) -> tuple[str, ...]:
+        """Every live declaration that still names ``identity``, as human-readable labels.
+
+        The workspace validates references in the FORWARD direction only, and it does so while
+        decoding: a strategy config naming a component that must already exist. Withdrawing a
+        registration asks the opposite question -- given this id, what still points at it -- and
+        no index answers it, so this walk builds one. It is deliberately a walk rather than a
+        maintained index: the workspace document is small, it is already fully in memory by the
+        time this is called, and a second structure to keep in sync is how the two disagree.
+
+        Returns labels rather than objects because the only consumer is a refusal that has to
+        NAME what blocks it. A refusal that says "something still references this" sends the
+        reader looking, which is the failure `docs/implementations/057` is about.
+        """
+        state = self._read()
+        components, agendas, strategy_configs, valuation_configs, monitoring_policies = (
+            state[3],
+            state[4],
+            state[5],
+            state[6],
+            state[7],
+        )
+        blockers: list[str] = []
+        if kind == "component":
+            for config_id, config in strategy_configs.items():
+                if str(config.component.component_id) == identity:
+                    blockers.append(f"strategy config {config_id!r}")
+        elif kind == "agenda":
+            for config_id, config in strategy_configs.items():
+                if config.agenda_id == identity:
+                    blockers.append(f"strategy config {config_id!r}")
+            for config_id in valuation_configs:
+                if config_id == identity:
+                    blockers.append(f"valuation config {config_id!r}")
+            for policy_id in monitoring_policies:
+                if policy_id == identity:
+                    blockers.append(f"monitoring policy {policy_id!r}")
+        elif kind == "dataset":
+            # A dataset is named by a component's declared requirements rather than by the
+            # workspace document, so nothing here can claim to know every reader of one. Said
+            # plainly instead of returning an empty tuple that would read as "safe to remove".
+            raise _workspace_error(
+                stage=REMOVE_STAGE,
+                code=f"{REMOVE_STAGE}.unsupported_kind",
+                requirement="removable kinds are component, agenda, and their configs",
+                observed=repr(kind),
+                fix=(
+                    "a dataset's readers are declared inside component requirements, which this "
+                    "workspace does not index; rebuild the workspace instead of removing one"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry="remove a component, agenda, or config instead",
+            )
+        elif kind in ("strategy_config", "valuation_config", "monitoring_policy"):
+            # Leaf declarations: a run definition names them, and a run definition is not a
+            # workspace registration. Nothing inside the workspace points at these.
+            return ()
+        else:
+            raise _workspace_error(
+                stage=REMOVE_STAGE,
+                code=f"{REMOVE_STAGE}.unsupported_kind",
+                requirement="kind must be one this workspace stores",
+                observed=repr(kind),
+                fix="use one of: component, agenda, strategy_config, valuation_config, "
+                "monitoring_policy",
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry="retry with a kind this workspace stores",
+            )
+        if kind == "component" and identity not in components:
+            return ()
+        if kind == "agenda" and identity not in agendas:
+            return ()
+        return tuple(sorted(blockers))
 
     def _config_lookup(
         self, key: str, declarations: Mapping[str, object], detach: object, stage: str, label: str

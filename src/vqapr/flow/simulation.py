@@ -376,6 +376,7 @@ class SimulationFlow:
         valuation_service: ValuationService | None = None,
         scan_session: object | None = None,
         on_progress: Callable[[], None] | None = None,
+        registry: object | None = None,
     ) -> None:
         if not isinstance(frozen_run, FrozenRun):
             raise TypeError("frozen_run must be a FrozenRun")
@@ -424,6 +425,10 @@ class SimulationFlow:
         # opening and closing its own on every fill, which is where the time went.
         self._scan_session = scan_session
         self._on_progress = on_progress
+        # The project's instrument roster, bound into the venue's view at the one seam a category
+        # enters through. Optional so a flow assembled without one still constructs; what it
+        # cannot then do is answer what an instrument is, which it refuses rather than guesses.
+        self._registry = registry
         declared = tuple(getattr(strategy, "account_requirements", tuple)())
         if any(not isinstance(item, AccountRequirement) for item in declared):
             raise TypeError("account_requirements must return AccountRequirement values")
@@ -845,7 +850,7 @@ class SimulationFlow:
                 weight_targets=weights,
                 cash_target=pending.intent.cash_target,
                 budget=pending.intent.budget,
-                rules=self._exchange.rules,
+                rules=self._bound_rules(),
                 tradable=tradable,
             ),
         )
@@ -1676,6 +1681,22 @@ class SimulationFlow:
                     "account_version": account.version,
                 },
             )
+
+    def _bound_rules(self) -> object:
+        """The venue's rules with the project's roster bound in, or its rules unchanged.
+
+        Read through the `rules` PROPERTY rather than off any cached field, because a subclass may
+        override that property to attach cost bands -- `_CostedAcademic` does exactly that -- and
+        reading around it would silently drop those costs and fill at zero.
+
+        A run assembled without a registry gets the unbound view, which constructs happily and
+        refuses the moment anything asks it what an instrument is. That refusal is the point: an
+        id nobody described has no category, and inventing one is the defect.
+        """
+        rules = self._exchange.rules
+        if self._registry is None:
+            return rules
+        return rules.with_registry(self._registry)
 
     def _committed_mark(self) -> object | None:
         state = self._state.current.account

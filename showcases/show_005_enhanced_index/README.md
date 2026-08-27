@@ -36,6 +36,18 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
   per-instrument bounds, so it is monitoring only.
 - **Four names are not an index.** The benchmark is a four-constituent slice of a two-hundred-name
   index, so its weights sum to roughly `0.56`, not `1`. The uncovered remainder is cash.
+- **The book is the four constituents plus an index-ETF sleeve** (`A069500`, KODEX 200). The ETF
+  tracks the index rather than belonging to it, so it is absent from the benchmark weights and
+  present in what the book may hold — which is what an enhanced-index fund actually looks like,
+  and what issue 003 was closed to deliver.
+- **The sleeve is what makes the KRX sale-tax exemption observable.** A share pays 20bp on sale
+  and an ETF does not, so the venue is built from `krx_rules({id: kind})` rather than from a bare
+  sequence of ids. The bare form is shorter and silently wrong here: it gives every name the stock
+  terms, and the ETF would pay a tax the venue exempts it from. The category is consumed when the
+  venue is built, so that wrong rate would be frozen in with nothing downstream able to notice.
+- **Price limits are switched off explicitly.** This fixture's execution table publishes a close
+  and no session base price, so the limit-up/limit-down regime has nothing to compute from and
+  preflight would refuse the run rather than produce numbers that look limit-aware and are not.
 - **The alpha is a demonstration signal**, a demeaned cross-sectional cheapness tilt scaled to a 4%
   gross active budget. It exists to be signed and dollar-neutral, not to be profitable.
 

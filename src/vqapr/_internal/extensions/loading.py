@@ -77,20 +77,21 @@ def _load(
             explain=ExplainTopic.SOURCE_ACCESS,
             source=FailureSource(file=str(path)),
         ) from error
-    if current != ref.fingerprint:
-        raise _failure(
-            f"{_STAGE}.fingerprint_drift",
-            "component source and config must match the registered fingerprint",
-            f"registered={ref.fingerprint}, current={current}",
-            fix=(
-                "re-register the component so its fingerprint matches the current source "
-                "and config"
-            ),
-            explain=ExplainTopic.WORKSPACE_STATE,
-            source=FailureSource(file=str(path)),
-        )
-
-    module_name = f"_vqapr_component_{ref.fingerprint}"
+    # The drift refusal that stood here is gone. It refused a run whose source had been edited
+    # since registration and named "re-register the component" as the repair -- which
+    # `register_component` then refused, demanding a new identity instead. A reader following
+    # either message arrived at the other (`docs/implementations/057`). Editing a registered
+    # component is the ordinary development loop and must not cost four steps.
+    #
+    # Nothing is lost by letting the edited source load: the fingerprint is still computed here,
+    # and the run record stamps the digest of what was ACTUALLY loaded, so a run still states
+    # which bytes produced it. The gate became a receipt (issue 009).
+    #
+    # Keyed on `current` rather than on `ref.fingerprint`, because those now differ whenever the
+    # source moved. Keying on the registered value would map two different sources onto one
+    # module name, and `sys.modules` would hand back the first one loaded -- an edit that appeared
+    # to have no effect, which is worse than the refusal this replaced.
+    module_name = f"_vqapr_component_{current}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise _failure(
@@ -117,6 +118,42 @@ def _load(
                 "registered config"
             ),
             explain=ExplainTopic.COMPONENT_CONTRACT,
+            source=FailureSource(file=str(path)),
+        ) from error
+
+
+def as_loaded_fingerprint(
+    ref: ComponentRef, *, project_root: str | Path | None = None
+) -> str:
+    """The fingerprint of the source on disk NOW, which may differ from the registered one.
+
+    Since the drift refusal was removed (issue 009), an edited component loads and runs. The run
+    record must therefore state what it actually ran rather than what was registered, or a run
+    whose source moved would carry a digest describing bytes it never executed -- a stale receipt,
+    which is worse than the gate it replaced because it looks authoritative.
+
+    Separate from `_load` so the loaders' return types stay what their callers expect. The read
+    is one file and one sha256, which `check` already performs per component.
+    """
+    path = (
+        ref.path
+        if ref.path.is_absolute() or project_root is None
+        else Path(project_root) / ref.path
+    )
+    try:
+        return fingerprint_component(
+            path,
+            kind=ref.kind,
+            object_name=ref.object_name,
+            config=ref.config,
+        )
+    except OSError as error:
+        raise _failure(
+            f"{_STAGE}.source_unreadable",
+            f"component source must remain readable at {path}",
+            str(error),
+            fix=f"restore or fix permissions on the component source at {path}",
+            explain=ExplainTopic.SOURCE_ACCESS,
             source=FailureSource(file=str(path)),
         ) from error
 

@@ -399,7 +399,7 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
         "class Exchange(KrxExchange):\n"
         "    def __init__(self):\n"
         "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=True)\n"
-        "        super().__init__(listings, instruments=instruments)\n",
+        "        super().__init__(listings)\n",
         encoding="utf-8",
     )
     space.register_component(

@@ -142,9 +142,12 @@ def test_the_supported_lifecycle_runs_end_to_end(tmp_path: Path):
         initial_strategy_state=None,
     )
 
-    published = completed.publish({"allocation": b"alloc", "records": b"records"})
-    assert set(published.output_ids) == {"allocation", "records"}
-    assert "allocation" in vqapr.open(root).catalog()._catalog.publications
+    # The drive returns what the strategy decided and the state it threaded. It no longer
+    # publishes: that half went with the object-store publication layer (issue 009, Decision 4),
+    # which had no caller outside its own test.
+    assert len(completed.decisions) == 3
+    assert completed.final_state is not None
+    assert not hasattr(completed, "publish")
 
 
 def test_monthly_cadence_survives_only_through_returned_state(tmp_path: Path):
@@ -223,21 +226,6 @@ def test_materialize_refuses_an_empty_evaluation_set(tmp_path: Path):
     project = vqapr.open(tmp_path)
     with pytest.raises(ValueError, match="non-empty"):
         project.materialize(model=_Signal, config={}, evaluation_times=(), resolver=_resolver)
-
-
-def test_publish_refuses_an_empty_output_set(tmp_path: Path):
-    project = vqapr.open(tmp_path)
-    completed = project.run(
-        strategy=_MonthlyCadence,
-        config={},
-        occurrences=(datetime(2024, 3, 1, 16, tzinfo=UTC),),
-        account=_account(),
-        instruments=(INSTRUMENT,),
-        constraint_bounds=_bounds(),
-        resolver=_resolver,
-    )
-    with pytest.raises(ValueError, match="non-empty"):
-        completed.publish({})
 
 
 # --- materialization output persistence ---------------------------------------------------

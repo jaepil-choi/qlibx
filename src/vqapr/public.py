@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from io import BytesIO
 from pathlib import Path
 
@@ -33,6 +34,8 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.roster import InstrumentRoster, build_roster
+from vqapr.domain.roster_export import export_roster
 from vqapr.domain.instruments import (
     EtfInstrument,
     FactorInstrument,
@@ -66,6 +69,10 @@ from vqapr.exchange.venue import AcademicExchange, Side
 from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
+# `as_loaded_fingerprint` is imported from `_internal` directly rather than through
+# `vqapr.extension.loading`, which is a transitional forwarding shim slated for deletion in G004
+# and explicitly not to be grown.
+from vqapr._internal.extensions.loading import as_loaded_fingerprint
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
 from vqapr.extension.registration import (
     register_constraint,
@@ -220,6 +227,9 @@ __all__ = (
     "information_coefficient",
     "instrument",
     "instruments",
+    "InstrumentRoster",
+    "build_roster",
+    "export_roster",
     "krx_rules",
     "materialize",
     "nav_series",
@@ -381,6 +391,17 @@ def run(
     constraints = tuple(
         load_constraint(ref, project_root=root_path) for ref in frozen.constraints.constraints
     )
+    # What was ACTUALLY loaded, computed beside the loads that read it.
+    #
+    # Since the drift refusal went (issue 009), an edited component runs instead of being
+    # refused, so `frozen.identity` -- fixed at preflight from the REGISTERED fingerprints -- can
+    # describe bytes this run never executed. Recording only that would leave a receipt that
+    # looks authoritative and is stale, which is worse than the gate it replaced.
+    #
+    # Derived here rather than inside `_load` because the loaders' return types are what their
+    # callers expect, and here is where the consumer that records it lives.
+    as_loaded = _as_loaded_identity(frozen, root_path)
+    registry = _registered_roster(root_path)
     catalog = _FrozenCatalog(frozen)
     # One physical handle for the whole run. duckdb caches parquet metadata for a connection's
     # lifetime, and closing per query threw that away on every observation.
@@ -442,11 +463,12 @@ def run(
         # factor run here takes three to six minutes against a two-minute window, so that is every
         # real run, not an edge case.
         on_progress=writer.heartbeat if writer is not None else None,
+        registry=registry,
     )
     try:
         result = flow.run()
         if writer is not None:
-            _freeze_record(writer, result, frozen)
+            _freeze_record(writer, result, frozen, as_loaded, _roster_digest(root_path))
     except BaseException:
         # A run that died still holds its id. Releasing here turns a crash into an ordinary
         # retry instead of stranding the id until the lock goes stale. `_freeze_record` is inside
@@ -460,7 +482,84 @@ def run(
     return result
 
 
-def _freeze_record(writer: RunRecordWriter, result: SimulationResult, frozen: FrozenRun) -> None:
+def _registered_roster(root_path: Path | None) -> object | None:
+    """The project's instrument roster, read FRESH at run start, or `None` when none is registered.
+
+    Read rather than frozen, and its digest is stated in the run record rather than compared
+    against a recorded one. A roster grows as a matter of course -- a daily batch lists new
+    tickers, issuers delist, a name is reclassified -- so a gate here would refuse every morning,
+    including on runs that never touch the new name (issue 009).
+
+    This is the first workspace read on the `run` path, which until now consumed only `frozen.*`.
+    It is one small JSON file plus the tables it points at, done once per run.
+    """
+    if root_path is None:
+        return None
+    from vqapr.domain.roster import build_roster
+    from vqapr.domain.roster_export import read_roster_table
+    from vqapr.workspace import Workspace
+
+    try:
+        pointer = Workspace.open(root_path).registered_instruments()
+    except Exception:
+        # A run assembled outside a workspace has no roster to find, and saying so by returning
+        # `None` is honest. The refusal, when it comes, belongs at the point something asks what
+        # an instrument is -- not here, where nothing has been asked yet.
+        return None
+    if pointer is None:
+        return None
+    tables = {
+        str(kind): read_roster_table(Path(str(path)))
+        for kind, path in dict(pointer["tables"]).items()
+    }
+    return build_roster(tables)
+
+
+def _as_loaded_identity(frozen: FrozenRun, root_path: Path | None) -> str:
+    """One digest over every component this run actually loaded, in a fixed order.
+
+    Folded the same way `frozen.identity` folds the registered fingerprints, so the two are
+    comparable: equal when nothing was edited between registration and the run, different exactly
+    when something was.
+    """
+    # Only refs that carry a real source are folded. A FrozenRun assembled in-process may hold a
+    # stub in place of a registered component -- `tests/boundaries` does exactly that -- and such
+    # a thing has no bytes on disk to fingerprint. Skipping it keeps the digest a statement about
+    # what was loaded from source, rather than raising on a run that is otherwise valid.
+    candidates = [frozen.strategy.component, frozen.exchange]
+    candidates.extend(frozen.constraints.constraints)
+    parts = [
+        (
+            str(ref.component_id),
+            as_loaded_fingerprint(ref, project_root=root_path),
+        )
+        for ref in candidates
+        if isinstance(ref, ComponentRef)
+    ]
+    payload = "|".join(f"{name}={digest}" for name, digest in sorted(parts))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _roster_digest(root_path: Path | None) -> str | None:
+    """The digest recorded when the roster was registered, or `None` when none is."""
+    if root_path is None:
+        return None
+    from vqapr.workspace import Workspace
+
+    try:
+        pointer = Workspace.open(root_path).registered_instruments()
+    except Exception:
+        return None
+    return None if pointer is None else str(pointer["digest"])
+
+
+def _freeze_record(
+    writer: RunRecordWriter,
+    result: SimulationResult,
+    frozen: FrozenRun,
+    as_loaded: str,
+    roster_digest: str | None,
+) -> None:
     """Write the run's rows and its own facts, so a later process can answer questions about it.
 
     The rows go first and the record last, because `record.json` existing is what marks the record
@@ -497,7 +596,19 @@ def _freeze_record(writer: RunRecordWriter, result: SimulationResult, frozen: Fr
             for table_id, rows in sorted(recorded.items())
         },
         "contract": lambda: _contract_report(result),
-        "source_digest": lambda: str(frozen.identity),
+        # What ran, not what was registered. These agree unless a component was edited after
+        # registration, and that difference is the whole signal: a strategy that ran 47 times
+        # across 12 distinct `source_digest` values was edited 11 times, which is a direct
+        # overfitting tell that a new component_id per edit would have scattered.
+        "source_digest": lambda: as_loaded,
+        # The declaration this run froze against, kept so the pair stays legible: equal to
+        # `source_digest` when nothing moved, different exactly when it did.
+        "declared_digest": lambda: str(frozen.identity),
+        # Which roster this run read. STATED, never compared -- a roster grows as a matter of
+        # course, so a run refused for reading a different one than yesterday would be refused
+        # every morning. What a run treated each instrument as is testified to per fill by
+        # `Fill.kind`; this says which declaration produced those categories.
+        "roster_digest": lambda: roster_digest,
         "period": lambda: {
             "start": frozen.start,
             "end": frozen.end,

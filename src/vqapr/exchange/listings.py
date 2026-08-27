@@ -30,7 +30,13 @@ from decimal import Decimal
 from enum import StrEnum
 
 from vqapr.domain.enums import Side
-from vqapr.domain.instruments import Instrument, InstrumentKind, base_notional, base_quantity_for
+from vqapr.domain.instruments import (
+    INSTRUMENT_TYPES,
+    Instrument,
+    InstrumentKind,
+    base_notional,
+    base_quantity_for,
+)
 from vqapr.exchange.costs import FREE, FillCost, SideCost
 
 
@@ -314,7 +320,24 @@ class ExchangeRulesView:
 
     exchange_id: str
     listings: Mapping[str, TradeRule]
-    instruments: Mapping[str, Instrument] = field(default_factory=dict)
+    registry: object | None = None
+    """The project's instrument roster, handed in at run assembly. ACCESS, never ownership.
+
+    A venue reading what an instrument is, is right; a venue DECLARING it is the defect issue 008
+    removes. `kind` answers no to both axes canon 2.8 splits an instrument's facts along -- a
+    stock does not become an ETF, and it is a stock on every venue -- so the fact belongs to the
+    project and the venue borrows it.
+
+    The distinction is not cosmetic. The venues themselves no longer take an `instruments`
+    parameter at all, so a venue author has no channel through which to declare a category, and
+    the only way one arrives is `with_registry` at run assembly. A constructor field on the venue
+    would quietly recreate exactly what was removed.
+
+    `None` is legal to CONSTRUCT and refuses to RESOLVE. `loading.py` type-checks `rules` before
+    the registry is injected, so a registry-less view must be constructible; and every method that
+    needs a category raises rather than falling back, because a fallback here is the silent
+    default this whole design exists to eliminate.
+    """
 
     def __post_init__(self) -> None:
         if not isinstance(self.exchange_id, str) or not self.exchange_id:
@@ -324,18 +347,46 @@ class ExchangeRulesView:
         for instrument_id, rule in self.listings.items():
             if not isinstance(rule, TradeRule) or instrument_id != rule.instrument_id:
                 raise ValueError("each listing key must match its TradeRule instrument_id")
-        if not isinstance(self.instruments, Mapping):
-            raise TypeError("instruments must be a mapping")
-        for instrument_id, declared in self.instruments.items():
-            if not isinstance(declared, Instrument) or instrument_id != declared.instrument_id:
-                raise ValueError("each instrument key must match its Instrument instrument_id")
-            if instrument_id not in self.listings:
-                raise ValueError(
-                    f"instrument {instrument_id!r} is declared on {self.exchange_id!r} "
-                    "without a listing"
-                )
         object.__setattr__(self, "listings", dict(self.listings))
-        object.__setattr__(self, "instruments", dict(self.instruments))
+        object.__setattr__(self, "registry", self._as_registry(self.registry))
+
+    @staticmethod
+    def _as_registry(registry: object) -> object:
+        """Accept a roster, or a plain `{instrument_id: Instrument}` meaning the same thing.
+
+        A mapping is the honest minimum this view needs -- it only ever asks "what is this id" --
+        and refusing one would force every caller that already holds instruments to wrap it for no
+        gain. The roster type is what registration produces; a mapping is what a test or an
+        in-process assembly naturally has.
+        """
+        if registry is None or hasattr(registry, "instrument"):
+            return registry
+        if isinstance(registry, Mapping):
+            from vqapr.domain.roster import InstrumentRoster
+
+            return InstrumentRoster(registry)
+        raise TypeError("registry must expose instrument(id), or be a mapping of them")
+
+    def with_registry(self, registry: object) -> ExchangeRulesView:
+        """This view, bound to the project's roster. The one seam a category enters through.
+
+        Returns a new view rather than mutating: a venue instance may be shared, and a run binding
+        its registry into somebody else's venue would be a side effect nobody declared.
+        """
+        return ExchangeRulesView(self.exchange_id, self.listings, self._as_registry(registry))
+
+    def _declared(self, instrument_id: str) -> Instrument:
+        """The instrument's declared identity, refusing rather than guessing.
+
+        Both refusals name what to do, because a run stopped here is a run whose author has not
+        yet said what they are trading -- and that is a repair, not a defect.
+        """
+        if self.registry is None:
+            raise ValueError(
+                f"no instrument roster reached {self.exchange_id!r}, so {instrument_id!r} "
+                "cannot be identified; register instruments and run through the Flow"
+            )
+        return self.registry.instrument(instrument_id)
 
     def listing(self, instrument_id: str) -> TradeRule:
         try:
@@ -343,13 +394,38 @@ class ExchangeRulesView:
         except KeyError as error:
             raise ValueError(f"no listing for {instrument_id!r} on {self.exchange_id!r}") from error
 
-    def instrument(self, instrument_id: str) -> Instrument | None:
-        """The declared instrument, or ``None`` when this venue declares no category for it."""
-        return self.instruments.get(instrument_id)
+    def instrument(self, instrument_id: str) -> Instrument:
+        """The declared instrument, refusing an id the project never described."""
+        return self._declared(instrument_id)
 
-    def kind(self, instrument_id: str) -> InstrumentKind | None:
-        declared = self.instruments.get(instrument_id)
-        return None if declared is None else declared.kind
+    def kind(self, instrument_id: str) -> InstrumentKind:
+        """The instrument's category, refusing an id the project never described.
+
+        Raising rather than returning `None` is what closes issue 007. It returned `None` for an
+        undescribed id, and every caller then decided for itself what that meant -- which is how
+        an ETF came to pay the sale tax KRX exempts it from.
+
+        Use `stamped_kind` where an answer is merely being RECORDED rather than acted on.
+        """
+        return self._declared(instrument_id).kind
+
+    def stamped_kind(self, instrument_id: str) -> InstrumentKind | None:
+        """The category to record on a fill, or `None` when the project described none.
+
+        Separate from `kind` because stamping and charging ask different questions. Charging asks
+        "what rate applies", which has no honest answer for an undescribed id, so it refuses.
+        Stamping asks "what should this fill say it was", and `None` IS the honest answer there:
+        the run genuinely did not know, and recording that is more truthful than refusing to
+        record anything.
+
+        Keeping them apart is what lets a run with no roster still execute on a venue that charges
+        one flat rate, while a venue whose rate depends on the category still refuses. The
+        difference is visible in the record afterwards: a fill stamped `None` says the category
+        was never declared.
+        """
+        if self.registry is None or not self.registry.declares(instrument_id):
+            return None
+        return self.registry.instrument(instrument_id).kind
 
     def tradable(self, instrument_id: str) -> bool:
         """Whether this venue will fill this instrument in any direction."""
@@ -365,18 +441,32 @@ class ExchangeRulesView:
         Routed through the instrument so a category whose contract is not one unit of the quoted
         price -- a future with a multiplier -- changes this number by overriding one method,
         without order planning or any venue learning what a multiplier is.
+
+        **Falls back to the base conversion only when no roster reached this view, and only
+        because no shipped category overrides it.** All four -- stock, etf, index, factor -- use
+        `base_notional` unchanged, so for every category that exists today the fallback and the
+        declared answer are the same number. Refusing here would stop a run to compute a value it
+        would have computed identically.
+
+        That is a statement about today, and it has an expiry. The first category that overrides
+        this pair -- a future with a contract multiplier is the obvious one -- makes the fallback
+        wrong by exactly that multiplier, silently, on the order-sizing path. `_sizing_is_uniform`
+        below is what makes that moment loud instead: it fails the moment an override appears, so
+        this branch cannot outlive the assumption it rests on.
+
+        Charging is different and refuses immediately, because a category's RATE differs today:
+        KRX exempts an ETF from the sale tax a share pays. That is the defect issue 007 found, and
+        it is closed by `kind` raising rather than returning `None`.
         """
-        declared = self.instruments.get(instrument_id)
-        if declared is None:
+        if self.registry is None and _sizing_is_uniform():
             return base_notional(quantity, price)
-        return declared.notional(quantity, price)
+        return self._declared(instrument_id).notional(quantity, price)
 
     def quantity_for(self, instrument_id: str, value: Decimal, price: Decimal) -> Decimal:
         """The signed quantity reaching ``value`` of exposure, the inverse of :meth:`notional`."""
-        declared = self.instruments.get(instrument_id)
-        if declared is None:
+        if self.registry is None and _sizing_is_uniform():
             return base_quantity_for(value, price)
-        return declared.quantity_for(value, price)
+        return self._declared(instrument_id).quantity_for(value, price)
 
     def charge(self, side: Side, notional: Decimal, instrument_id: str) -> FillCost:
         """Charge the instrument's own rate for ``side``.
@@ -388,24 +478,52 @@ class ExchangeRulesView:
 
     @property
     def declaration_identity(self) -> tuple[object, ...]:
+        """What this venue declares, which no longer includes the roster.
+
+        The roster was folded in here, so adding one never-traded instrument to a universe changed
+        a venue's fingerprint while its behaviour did not move -- a re-registration conflict
+        manufactured out of nothing. A roster belongs in no fingerprint: what a past run treated
+        an instrument as is testified to by that run's own fills.
+        """
         return (
             self.exchange_id,
             tuple(
                 rule.declaration_identity
                 for rule in sorted(self.listings.values(), key=lambda item: item.instrument_id)
             ),
-            tuple(
-                declared.declaration_identity
-                for declared in sorted(
-                    self.instruments.values(), key=lambda item: item.instrument_id
-                )
-            ),
         )
+
+
+def _sizing_is_uniform() -> bool:
+    """Whether every shipped category still sizes the same way the base conversion does.
+
+    True today: `notional`/`quantity_for` are declared on `Instrument` and no subclass overrides
+    them, so a stock, an ETF, an index and a factor all convert money to quantity identically.
+    While that holds, sizing an instrument the roster never described produces the same number the
+    roster would have produced, and refusing would buy nothing.
+
+    It stops holding the moment a category with its own contract size is added -- a future, an
+    option -- and this returns False at exactly that moment, which turns the fallback above off
+    without anybody having to remember it exists. That is the point: the assumption is checked by
+    the code that depends on it, not by a comment asking a future reader to be careful.
+
+    Computed per call rather than cached, because `INSTRUMENT_TYPES` is the registry a new
+    category is added to and a cached answer would be stale exactly when it mattered.
+    """
+    return not any(
+        "notional" in category.__dict__ or "quantity_for" in category.__dict__
+        for category in INSTRUMENT_TYPES.values()
+    )
 
 
 def rules_view(
     exchange_id: str,
     listings: Mapping[str, TradeRule],
-    instruments: Mapping[str, Instrument] | None = None,
+    registry: object | None = None,
 ) -> ExchangeRulesView:
-    return ExchangeRulesView(exchange_id, listings, dict(instruments or {}))
+    """A view over one venue's listings, optionally already bound to a roster.
+
+    The roster stays optional here because construction must succeed without one: `loading.py`
+    type-checks a venue's `rules` before any registry exists to inject.
+    """
+    return ExchangeRulesView(exchange_id, listings, registry)

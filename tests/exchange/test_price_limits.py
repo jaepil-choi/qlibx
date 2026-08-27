@@ -20,6 +20,7 @@ import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side
+from vqapr.domain.roster import InstrumentRoster
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.venues.krx import (
@@ -38,7 +39,9 @@ AT = datetime(2026, 8, 21, 6, 30, tzinfo=UTC)
 
 def _venue(*, price_limits: bool = True) -> KrxExchange:
     listings, instruments = krx_rules({NAME: "stock"}, price_limits=price_limits)
-    return KrxExchange(listings, instruments=instruments)
+    venue = KrxExchange(listings)
+    venue._rules = venue.rules.with_registry(InstrumentRoster(instruments))
+    return venue
 
 
 def _snapshot(price: Decimal, reference: Decimal | None) -> ExactExecutionSnapshot:

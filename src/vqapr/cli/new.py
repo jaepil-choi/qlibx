@@ -225,7 +225,15 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "kind",
-        choices=(*_KINDS, "dataset", "execution-input", "agendas", "exchange", "run-spec"),
+        choices=(
+            *_KINDS,
+            "instruments",
+            "dataset",
+            "execution-input",
+            "agendas",
+            "exchange",
+            "run-spec",
+        ),
         help=(
             "scaffold a component (datamodel/strategy) or emit a template "
             "(dataset/execution-input/agendas/run-spec)"
@@ -463,7 +471,139 @@ def _exchange_template(args: argparse.Namespace, project_root: Path) -> dict[str
     )
 
 
+_INSTRUMENTS_TEMPLATE = '''"""Declare what each instrument in your universe IS, then export the tables.
+
+Run this yourself, once, whenever the universe changes:
+
+    uv run python {script_name}
+    vqapr register {declaration_name}
+
+**This file is your tool, not a registered component.** vqapr never reads it, never imports it and
+never fingerprints it -- it only ever sees the parquet files you export. That is the same boundary
+`available_at` already states: preparing a clean file is yours, refusing a dirty one is the
+package's. Registration re-validates everything below, so a hand-written table is equally welcome.
+
+Why a script rather than a mapping in the YAML: a real universe is generated rather than typed, and
+an instrument's category is often not a column at all. A name like "2603 expiry Samsung call"
+carries its right and expiry inside a string, and no declaration syntax parses that -- a few lines
+of your own Python do.
+
+The four categories vqapr ships. It is a closed set, and nothing else is accepted:
+
+    stock   a common share
+    etf     an exchange-traded fund, exempt from the sale tax a share pays on some venues
+    index   an index level, referenced rather than held
+    factor  a factor held against a synthetic unit price
+
+WHY THIS MATTERS, in one line: on a KRX-shaped venue a share pays a sale tax an ETF does not, and
+the category is consumed when the venue is built. Declare an ETF as a share and the wrong rate is
+frozen in with nothing downstream able to notice.
+"""
+
+from pathlib import Path
+
+from vqapr.public import export_roster
+
+HERE = Path(__file__).parent
+
+# Replace this with your own universe. Read your data however you like -- pandas, duckdb, a csv --
+# and end with one mapping of instrument_id to category.
+#
+# If your source carries a classification column, map it here rather than by hand:
+#
+#     import duckdb
+#     rows = duckdb.sql("SELECT ticker, sec_type FROM 'raw.parquet'").fetchall()
+#     LOOKUP = {{"common": "stock", "preferred": "stock", "ETF": "etf"}}
+#     UNIVERSE = {{ticker: LOOKUP[sec_type] for ticker, sec_type in rows}}
+#
+# Declaring every name a share is a legitimate answer. What is not legitimate is arriving at it
+# without looking: registration prints a count per category, so a universe that is uniform will
+# say so on the success path.
+UNIVERSE = {universe!r}
+
+
+if __name__ == "__main__":
+    written = export_roster(UNIVERSE, HERE)
+    for kind, path in sorted(written.items()):
+        print(f"{{kind:>8}}  {{path.name}}")
+    print()
+    print("now register them:")
+    print(f"    vqapr register {declaration_name}")
+'''
+
+
+_INSTRUMENTS_DECLARATION = """\
+# Instrument roster declaration - register with `vqapr register <this-file.yaml>`
+#
+# Points at the parquet tables `{script_name}` exported. One file per category: a parquet
+# carries exactly one schema, so a single table would need a nullable column for every attribute
+# any category might have, and a null would then mean both "not applicable" and "omitted".
+#
+# The `kind` column inside each file repeats the key below on purpose. Registration checks the two
+# against each other, which catches a table pointed at the wrong key before it charges the wrong
+# rate for the life of the project.
+#
+# Unlike a dataset, re-registering this is ORDINARY. A roster grows as a matter of course -- a
+# daily batch lists new tickers, issuers delist, a name is reclassified -- so correcting it is a
+# statement about the world, not a rewrite of provenance. What a past run treated an instrument as
+# is testified to by that run's own fills.
+
+instruments:
+  {roster_id}:
+    tables:
+{tables}
+"""
+
+
+def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    """Emit the roster script and the declaration that registers what it writes.
+
+    Two files, following `new exchange`: the runnable thing and the declaration that points at its
+    output. Emitting only the YAML would leave the author to discover the four category names from
+    a refusal, which is exactly the stall `new exchange` was built to remove -- an author guessed
+    six times at a type no template, help text or skill section ever named.
+    """
+    target = args.out or project_root / "instruments.py"
+    refuse_existing(target, what="instrument roster script")
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    declaration = target.with_suffix(".yaml")
+    refuse_existing(declaration, what="instrument declaration")
+    roster_id = args.component_id or "universe"
+    instruments = getattr(args, "instruments", None) or ["A005930", "A000660"]
+    universe = {name: "stock" for name in instruments}
+
+    target.write_text(
+        _INSTRUMENTS_TEMPLATE.format(
+            script_name=target.name,
+            declaration_name=declaration.name,
+            universe=universe,
+        ),
+        encoding="utf-8",
+    )
+    # Every shipped category gets a line, commented except the ones this universe uses, so the
+    # author sees the whole vocabulary without having to look it up.
+    used = sorted({kind for kind in universe.values()})
+    lines = []
+    for kind in ("stock", "etf", "index", "factor"):
+        prefix = "      " if kind in used else "      # "
+        lines.append(f"{prefix}{kind}: {target.stem}_{kind}.parquet")
+    declaration.write_text(
+        _INSTRUMENTS_DECLARATION.format(
+            script_name=target.name,
+            roster_id=roster_id,
+            tables="\n".join(lines),
+        ),
+        encoding="utf-8",
+    )
+    return success(
+        "template.new", kind="instruments", path=str(target), declaration=str(declaration)
+    )
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    if args.kind == "instruments":
+        return _instruments_template(args, project_root)
     if args.kind == "dataset":
         return _dataset_template(args, project_root)
     if args.kind == "execution-input":

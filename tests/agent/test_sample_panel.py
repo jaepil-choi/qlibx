@@ -30,6 +30,12 @@ _REASON = f"warehouse {WAREHOUSE} is not provisioned"
 
 @pytest.fixture(scope="module")
 def panel(tmp_path_factory: pytest.TempPathFactory):
+    """Built once per module. The build is ~36s; the tests reading it are milliseconds each.
+
+    Marked `slow` at the tests rather than here, because a fixture cannot deselect itself: pytest
+    resolves markers on the test, so a fixture this expensive only costs anything when a selected
+    test asks for it.
+    """
     if _MISSING:
         pytest.skip(_REASON)
     return build(tmp_path_factory.mktemp("sample"))
@@ -41,11 +47,13 @@ def _rows(path: Path, instrument: str, field: str) -> list:
     )
 
 
+@pytest.mark.slow
 def test_the_panel_holds_ten_named_instruments(panel) -> None:
     assert len(panel.instruments) == 10
     assert len(set(panel.instruments)) == 10
 
 
+@pytest.mark.slow
 def test_one_instrument_lists_after_the_window_opens(panel) -> None:
     """A late lister has no rows at the start, which is what removes it from early sessions."""
     observed = _rows(panel.observations, panel.late_listed, "available_at")
@@ -55,11 +63,13 @@ def test_one_instrument_lists_after_the_window_opens(panel) -> None:
     )
 
 
+@pytest.mark.slow
 def test_one_instrument_stops_before_the_window_closes(panel) -> None:
     observed = _rows(panel.observations, panel.delisted, "available_at")
     assert len(observed) == len(panel.sessions) - DEAD_SESSIONS
 
 
+@pytest.mark.slow
 def test_the_delisted_name_keeps_a_tradable_tail(panel) -> None:
     """A position is closed after the Strategy drops the name, and that fill needs a price."""
     observed = _rows(panel.observations, panel.delisted, "available_at")
@@ -68,12 +78,14 @@ def test_the_delisted_name_keeps_a_tradable_tail(panel) -> None:
     assert max(tradable) > max(observed)
 
 
+@pytest.mark.slow
 def test_prices_are_exact(panel) -> None:
     """Row scalars keep their source type, so a float source would make the callback inexact."""
     row = pq.read_table(panel.observations).to_pylist()[0]
     assert isinstance(row["close"], Decimal)
 
 
+@pytest.mark.slow
 def test_the_strategy_declares_the_lookback_it_reads(panel) -> None:
     declared = SampleReversal5d().inputs()["prices"]
     assert declared.lookback.rows == LOOKBACK
@@ -89,6 +101,7 @@ def test_the_strategy_never_inspects_listing_status() -> None:
         assert forbidden not in body
 
 
+@pytest.mark.slow
 def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
     """The reference journey an agent copies must actually run.
 

@@ -42,6 +42,13 @@ minversion = "9.1"
 testpaths = ["tests"]
 strict_config = true
 strict_markers = true
+# `slow` is deselected by default. Thirteen end-to-end journeys were 83% of a 452s suite while
+# the other ~1,300 tests were 151s combined, which made the edit-check loop cost minutes and made
+# people run the suite less often -- the opposite of what a suite is for.
+#
+# Nothing is deleted and nothing is skipped conditionally: `-m slow` runs exactly those, and
+# `-m ""` runs everything. CI and any pre-release check should use the latter.
+addopts = "-m 'not slow'"
 markers = [
     "real_data: requires an explicitly provisioned and versioned external dataset",
     "concurrency: exercises operating-system process, thread, or lock behavior",

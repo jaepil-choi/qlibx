@@ -53,3 +53,21 @@ def test_the_account_table_carries_what_dates_a_measurement() -> None:
 def test_every_default_row_is_keyed_by_instrument() -> None:
     for spec in DEFAULT_TABLES:
         assert "instrument" in spec.fields
+
+
+def test_the_fill_table_records_the_category_it_charged() -> None:
+    """`Fill.kind` reaches the record, because nothing downstream can re-derive it.
+
+    The column was missing from the spec, so the value was computed at fill time and dropped at
+    the recorder. Every fill in a testbed run reported no category even with a correctly
+    registered roster in the workspace -- which made `FillBatch.cost_by_kind()` collapse to one
+    unlabelled bucket, and made registering a roster produce no observable difference anywhere.
+
+    `None` remains legal: a venue charging one flat rate needs no category, and a zero-dealt
+    refusal was never charged at all.
+    """
+    fields = set(_spec(f"{DEFAULT_TABLE_PREFIX}fill").fields)
+
+    assert "kind" in fields, (
+        "the category a fill was charged under must be recorded; it cannot be recovered later"
+    )

@@ -183,6 +183,17 @@ def _fill_rows(entries: tuple[object, ...]) -> tuple[Mapping[str, object], ...]:
 
     A refused fill is a market fact the run has to be able to show afterwards, so it is recorded
     with its reason rather than filtered out here.
+
+    `kind` is the category the venue charged this fill under, and it is written here because this
+    is the only place a later reader can recover it: the charge is a dictionary lookup at fill
+    time and nothing downstream re-derives it. It was computed and then dropped, so every fill in
+    a run reported no category even when the project had registered one -- which made
+    `FillBatch.cost_by_kind()` collapse to a single unlabelled bucket, and made registering a
+    roster produce no observable difference anywhere.
+
+    `None` stays legal and means the run genuinely did not know: no roster reached the venue, or
+    the roster described no category for this id. That is a fact worth recording rather than a
+    reason to refuse, because a venue charging one flat rate does not need a category at all.
     """
     rows = []
     for entry in entries:
@@ -192,6 +203,7 @@ def _fill_rows(entries: tuple[object, ...]) -> tuple[Mapping[str, object], ...]:
             MappingProxyType(
                 {
                     "instrument": str(fill.instrument_id),
+                    "kind": None if fill.kind is None else str(fill.kind),
                     "account_version": int(entry.version),
                     "requested_quantity": str(fill.requested_quantity),
                     "dealt_quantity": str(fill.dealt_quantity),

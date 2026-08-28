@@ -331,6 +331,10 @@ DEFAULT_TABLES = (
         f"{DEFAULT_TABLE_PREFIX}fill",
         (
             "instrument",
+            # The category this fill was charged under. Declared here because the charge is a
+            # lookup at fill time and nothing downstream can re-derive it; without the column the
+            # value is computed and then dropped, and `cost_by_kind` has one unlabelled bucket.
+            "kind",
             "account_version",
             "requested_quantity",
             "dealt_quantity",
@@ -430,6 +434,10 @@ class SimulationFlow:
         # enters through. Optional so a flow assembled without one still constructs; what it
         # cannot then do is answer what an instrument is, which it refuses rather than guesses.
         self._registry = registry
+        # Bound onto the venue now, not per occurrence: `execute` reads the venue's own rules and
+        # never receives one passed down, so binding only at the call site left every `Fill.kind`
+        # null while a registered roster sat unused in the workspace.
+        self._bind_registry_to_venue()
         declared = tuple(getattr(strategy, "account_requirements", tuple)())
         if any(not isinstance(item, AccountRequirement) for item in declared):
             raise TypeError("account_requirements must return AccountRequirement values")
@@ -1681,17 +1689,41 @@ class SimulationFlow:
         # a feature. If a decision-time account series is ever wanted, it should be designed with
         # the consumer that wants it, which will also say whether it needs to be a table at all.
 
-    def _bound_rules(self) -> object:
-        """The venue's rules with the project's roster bound in, or its rules unchanged.
+    def _bind_registry_to_venue(self) -> None:
+        """Bind the roster onto the venue itself, so every reader of its rules sees it.
 
-        Read through the `rules` PROPERTY rather than off any cached field, because a subclass may
-        override that property to attach cost bands -- `_CostedAcademic` does exactly that -- and
-        reading around it would silently drop those costs and fill at zero.
+        Handing a bound view to `plan_orders` alone was not enough, and a testbed journey proved
+        it: `execute` never receives that view. It reads the venue's OWN rules -- `venue.py` off
+        the `rules` property, `krx.py` off the cached `_rules` field -- so `Fill.kind` asked an
+        unbound view and every fill in a 599-fill run recorded `None`, with a correctly registered
+        roster sitting in the workspace. Registering a roster changed nothing observable, which
+        made the whole step unfalsifiable from outside.
 
-        A run assembled without a registry gets the unbound view, which constructs happily and
-        refuses the moment anything asks it what an instrument is. That refusal is the point: an
-        id nobody described has no category, and inventing one is the defect.
+        Binding here rather than passing it down because `execute`'s signature is not ours to
+        change: `load_exchange` refuses a subclass that overrides `execute`, so the profile's own
+        signature is the contract, and a new parameter would break every registered venue.
+
+        Set on the venue rather than on a view it built, because the two profiles hold their rules
+        differently: `AcademicExchange.rules` REBUILDS a view on every access, so a view written
+        back to it is discarded, while `KrxExchange` serves a cached `_rules` field. Giving both a
+        `_registry` to read is the one form that reaches each of them, and it leaves a subclass's
+        overridden `rules` property in charge of everything else it adds.
+
+        `object.__setattr__` because `AcademicExchange` is a frozen dataclass.
         """
+        if self._registry is None:
+            return
+        object.__setattr__(self._exchange, "_registry", self._registry)
+        cached = getattr(self._exchange, "_rules", None)
+        if cached is not None:
+            # KRX built its view once at construction; rebind that instance too, since its
+            # `rules` property serves the cached object rather than rebuilding.
+            object.__setattr__(
+                self._exchange, "_rules", cached.with_registry(self._registry)
+            )
+
+    def _bound_rules(self) -> object:
+        """The rules order planning consumes, with the roster bound if a run has one."""
         rules = self._exchange.rules
         if self._registry is None:
             return rules

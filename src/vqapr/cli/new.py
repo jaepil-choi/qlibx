@@ -523,7 +523,10 @@ UNIVERSE = {universe!r}
 
 
 if __name__ == "__main__":
-    written = export_roster(UNIVERSE, HERE)
+    # `stem` is this file's own name, so the tables land where the emitted .yaml says they will.
+    # Left at its default the exporter always writes `instruments_*.parquet`, which silently
+    # disagreed with a declaration emitted under any other `--out` name.
+    written = export_roster(UNIVERSE, HERE, stem=Path(__file__).stem)
     for kind, path in sorted(written.items()):
         print(f"{{kind:>8}}  {{path.name}}")
     print()

@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 import pytest
 
 from vqapr.cli.new import run as new_run
@@ -145,3 +147,29 @@ def test_the_emitted_declaration_is_valid_yaml(tmp_path: Path) -> None:
         "only the categories this universe uses may be live; the rest stay commented"
     )
     assert json.dumps(document)  # round-trips cleanly
+
+
+def test_the_emitted_halves_agree_under_a_custom_out_name(tmp_path: Path) -> None:
+    """The script must write the tables the declaration beside it names.
+
+    They agreed only while `--out` was left at its default: the declaration derived its table
+    names from the script's stem while the exporter always wrote `instruments_*.parquet`, so any
+    other name emitted two halves that could not work together. A testbed journey hit it
+    immediately, because `--out` is offered on the same command.
+    """
+    Workspace.create(tmp_path)
+    emitted = _emit(tmp_path, out=tmp_path / "roster.py")
+
+    completed = subprocess.run(
+        [sys.executable, emitted["path"]], capture_output=True, text=True, cwd=tmp_path
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    declared = yaml.safe_load(Path(emitted["declaration"]).read_text(encoding="utf-8"))
+    for name in declared["instruments"]["universe"]["tables"].values():
+        assert (tmp_path / name).is_file(), f"declaration names {name}, which the script did not write"
+
+    registered = register_run(
+        argparse.Namespace(declaration=emitted["declaration"]), project_root=tmp_path
+    )
+    assert registered["registered"]["instruments"][0]["by_kind"] == {"stock": 2}

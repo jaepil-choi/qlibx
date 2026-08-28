@@ -66,11 +66,16 @@ class AcademicExchange:
         A subclass may declare one. `execute` charges whatever this returns, so a subclass that
         adds a cost band gets it applied without replacing any matching behaviour.
 
-        The view is built WITHOUT a roster, and that is deliberate: a venue has no business
-        declaring what an instrument is. The Flow binds the project's roster in at run assembly
-        via `with_registry`, which is the only seam a category enters through.
+        The venue never DECLARES a roster -- there is no constructor parameter for one, so an
+        author has no channel to state a category. What it may hold is one handed to it at run
+        assembly, which `_registry` carries and this view borrows.
+
+        Rebuilt per access rather than cached because a subclass overriding this property is how a
+        cost band is added, and a cached view would freeze the base profile's answer.
         """
-        return ExchangeRulesView(self.exchange_id, self.listings)
+        return ExchangeRulesView(
+            self.exchange_id, self.listings, getattr(self, "_registry", None)
+        )
 
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot

@@ -1,6 +1,27 @@
 # 014 — A shipped cap disagrees with itself about a short
 
-**Status:** open. Found 2026-08-28 by the cleaner lane of the Slice B completion gate, while
+**Status: CLOSED 2026-08-29** by
+`docs/implementations/080-a-cap-bounds-size-and-says-nothing-about-sign.md`.
+
+Option 1 was taken — a pure size cap — and the reason it was not a coin toss is that `NoShort`'s
+docstring already claimed to be *the* projection that removes the short leg, which a second
+constraint quietly removing it makes false. `project` returns a symmetric box mirrored against the
+ceiling, and `_worst` measures `abs`, so all three members give one answer.
+
+The benchmark asymmetry this file flagged as the reason a symmetric version was non-mechanical
+resolved the same way: the floor mirrors `max(cap, benchmark)` rather than `cap`, on the same
+reasoning that sets the ceiling.
+
+Long-only behaviour is unchanged, verified against `merged_constraint_bounds`:
+`NoShort ∩ symmetric cap` is `(0, ceiling)`, identical to before. `show_005` registers both, so it
+is untouched. What is new is that a signed book with a size cap is expressible at all.
+
+The original report follows unchanged.
+
+---
+
+**Status when filed:** open. Found 2026-08-28 by the cleaner lane of the Slice B completion gate,
+while
 checking whether a new scaffold's docstring cited its precedent accurately. It did not, and the
 reason is that the precedent has the defect the scaffold was just corrected for.
 **Touches:** `src/vqapr/constraints/builtin/single_name_cap.py`.

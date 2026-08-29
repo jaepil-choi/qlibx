@@ -53,7 +53,14 @@ def _decimal_config(value: object, *, name: str) -> Decimal:
 
 
 class SingleNameCap(Constraint):
-    """Cap each instrument at ``max(cap, benchmark_weight)``."""
+    """Cap each instrument's SIZE at ``max(cap, benchmark_weight)``, long or short.
+
+    Size only. It says nothing about sign: shorting within the cap is permitted here, and
+    forbidding it is `NoShort`'s job. Constraints intersect -- lower bounds take the max, upper
+    bounds the min -- so declaring both gives long-only-with-a-cap without either rule knowing
+    about the other, which is what makes long-only an emergent property of the set rather than
+    something two constraints each half-enforce.
+    """
 
     def __init__(
         self,
@@ -118,24 +125,49 @@ class SingleNameCap(Constraint):
         return {instrument: latest.get(instrument, Decimal(0)) for instrument in instruments}
 
     def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+        """The symmetric box: no name may be more than its ceiling, long or short.
+
+        The lower bound mirrors the upper rather than flooring at zero. Flooring made this cap
+        forbid a short outright, which is `NoShort`'s job -- and `NoShort`'s own docstring claims
+        to be *the* projection that removes the short leg, a claim a second constraint quietly
+        removing it makes false. It also made a signed book with a cap inexpressible: every
+        constraint set containing this one was long-only whether or not anyone asked.
+
+        Mirrored against the CEILING, not against `cap`. The ceiling is `max(cap, benchmark)`
+        because a benchmark heavier than the cap is allowed to be held at its benchmark weight;
+        the same reasoning applied to the other side gives the same magnitude with the other sign.
+
+        Intersecting with `NoShort` yields `(0, ceiling)` exactly, so a long-only set is unchanged
+        by this -- verified against `merged_constraint_bounds`, which takes the max of lower bounds
+        and the min of uppers.
+        """
         benchmark = self._benchmark(window, instruments)
-        return ConstraintBounds(
-            {instrument: Decimal(0) for instrument in instruments},
-            {instrument: max(self._cap, benchmark[instrument]) for instrument in instruments},
-        )
+        ceilings = {
+            instrument: max(self._cap, benchmark[instrument]) for instrument in instruments
+        }
+        return ConstraintBounds({name: -ceiling for name, ceiling in ceilings.items()}, ceilings)
 
     def _worst(
         self, weights: Mapping[str, Decimal], bounds: ConstraintBounds
     ) -> tuple[Decimal, Decimal, tuple[str, ...]]:
+        """The largest exposure and what bounded it, measured on SIZE.
+
+        `abs` here, in the one place both judgments come through, is what makes them agree. This
+        took the signed weight from `validate_intended` and the absolute one from `evaluate`, so a
+        proposed `-0.30` passed the gate that runs before execution and was reported as a violation
+        by the check that runs after it -- while the projection above had forbidden it outright.
+        One rule, one book, three answers.
+        """
         measured = Decimal(0)
         bound = self._cap
         offenders: list[str] = []
         for instrument, weight in sorted(weights.items()):
             ceiling = bounds.upper.get(instrument, self._cap)
-            if weight > ceiling:
+            size = abs(weight)
+            if size > ceiling:
                 offenders.append(instrument)
-            if weight > measured:
-                measured, bound = weight, ceiling
+            if size > measured:
+                measured, bound = size, ceiling
         return measured, bound, tuple(offenders)
 
     def validate_intended(

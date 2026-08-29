@@ -135,10 +135,11 @@ FLOOR = Decimal("0")
 # long. It says nothing about sign: shorting within the cap is permitted here, and forbidding it
 # is a separate rule.
 #
-# One rule, one question, is what keeps the three members below agreeing with each other. The
-# shipped `NoShort` is the model for that -- it tests the sign and nothing else. Constraints
-# intersect (lower bounds take the max, upper bounds the min), so declaring `no-short` alongside
-# this cap gives long-only-with-a-cap without either rule knowing about the other.
+# One rule, one question, is what keeps the three members below agreeing with each other. That is
+# how the shipped pair divides them: `SingleNameCap` bounds size and measures on absolute weight,
+# `NoShort` tests the sign and nothing else. Constraints intersect (lower bounds take the max,
+# upper bounds the min), so declaring `no-short` alongside this cap gives long-only-with-a-cap
+# without either rule knowing about the other.
 
 
 class {class_name}(Constraint):

@@ -294,7 +294,19 @@ def test_long_only_emerges_from_intersecting_the_two_builtins(
     below = [name for name in instruments if expected[name] <= cap.cap]
     assert above and below, "the real slice must straddle the cap for this test to mean anything"
 
-    assert all(value == Decimal("0") for value in merged.lower.values())
+    assert all(value == Decimal("0") for value in merged.lower.values()), (
+        "the floor comes from NoShort alone: the cap projects a symmetric box, and the max of the "
+        "two lower bounds is zero"
+    )
+    # And the cap on its own does NOT floor at zero, or the line above would hold whether or not
+    # NoShort were in the set -- which is what made `NoShort`'s claim to be *the* projection that
+    # removes the short leg false (issue 014).
+    cap_alone = merged_constraint_bounds(project_constraints((cap,), window))
+    assert all(value < Decimal("0") for value in cap_alone.lower.values())
+    for instrument in instruments:
+        assert cap_alone.lower[instrument] == -cap_alone.upper[instrument], (
+            "the cap bounds size, so its floor mirrors its ceiling rather than flooring at zero"
+        )
     for instrument in above:
         assert merged.upper[instrument] == expected[instrument], (
             "a name already heavier than the cap keeps its index weight as its ceiling"
@@ -302,6 +314,37 @@ def test_long_only_emerges_from_intersecting_the_two_builtins(
     for instrument in below:
         assert merged.upper[instrument] == cap.cap
     assert isinstance(merged, ConstraintBounds)
+
+
+def test_the_cap_gives_one_answer_about_a_short_across_all_three_members(
+    manifest: dict[str, object], instruments: tuple[str, ...]
+) -> None:
+    """One rule, one book, one answer -- which took three (issue 014).
+
+    `project` floored at zero and forbade a short outright; `validate_intended` measured the signed
+    weight and permitted it; `evaluate` measured the absolute one and reported it. So a signed
+    intent passed the gate that runs BEFORE execution and was reported as a violation by the check
+    that runs AFTER it, while the box handed to the optimiser had excluded it in the first place.
+
+    The scaffold `vqapr new constraint` emits was corrected first; this pins the shipped constraint
+    it was citing as its precedent.
+    """
+    cap = _cap(manifest)
+    window = _benchmark_window(manifest, instruments, cap.requirements()[0])
+    bounds = merged_constraint_bounds(project_constraints((cap,), window))
+    name = instruments[0]
+    ceiling = bounds.upper[name]
+
+    for size, expected in ((ceiling * 2, False), (ceiling / 2, True)):
+        short = {name: -size}
+        inside = bounds.lower[name] <= short[name] <= bounds.upper[name]
+        intended = cap.validate_intended(_intent(short), bounds).passed
+        # What `evaluate` feeds `_worst`: the marked weight as a magnitude.
+        _, _, offenders = cap._worst({name: size}, bounds)
+
+        assert inside is expected, f"project disagreed at {size}"
+        assert intended is expected, f"validate_intended disagreed at {size}"
+        assert (not offenders) is expected, f"evaluate disagreed at {size}"
 
 
 def test_a_project_local_constraint_still_loads_alongside_a_builtin(tmp_path: Path) -> None:

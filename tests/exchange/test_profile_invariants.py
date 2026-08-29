@@ -179,8 +179,113 @@ def test_a_fill_shares_its_requests_sign_and_never_exceeds_it(profile: str) -> N
         if fill.dealt_quantity != 0:
             assert fill.dealt_quantity * fill.requested_quantity > 0, "sign must be shared"
 
-    # And today it is an equality on both, which is the fact a partial fill would change. Stated
-    # so the day it changes is visible here rather than silently absorbed by the `<=` above.
-    assert all(
-        fill.dealt_quantity == fill.requested_quantity for fill in fills.fills
-    ), "no profile produces a partial fill yet"
+    # With cash to spare it is still an equality on both. What makes it an inequality is cash
+    # exhaustion, and only on a whole-share profile -- see
+    # `test_a_venue_fills_what_the_account_can_pay_for` below.
+    assert all(fill.dealt_quantity == fill.requested_quantity for fill in fills.fills)
+
+
+def test_the_academic_profile_cannot_produce_a_partial_fill() -> None:
+    """Not a policy this profile chose -- there is no cause for one to arise from.
+
+    Fractional listings mean a plan sizes exactly to the cash it has, so no rounding residual is
+    left for the money to run out against. Cash exhaustion mid-batch needs whole-share rounding and
+    charged costs disagreeing with the plan's arithmetic, and this profile has neither: it charges
+    nothing and its steps are fractional.
+
+    Pinned so that "the academic profile fills everything" is recorded as a consequence rather than
+    as a preference someone could later decide to revisit.
+    """
+    venue = _academic()
+    name = _NAMES[0]
+
+    # No cash at all, and it still fills: nothing here consults the purse, because nothing here
+    # can leave one short.
+    fills = venue.execute(
+        _orders(_request(name, "1000000")),
+        AccountSnapshot(0, Decimal("0"), {}),
+        _snapshot(ExactExecutionRow(_AT, name, True, _PRICE)),
+    )
+
+    assert fills.fills[0].dealt_quantity == Decimal("1000000")
+    assert fills.fills[0].cost.total == Decimal("0")
+
+
+def test_a_venue_fills_what_the_account_can_pay_for() -> None:
+    """Issue `002`'s unmodelled half: sells settle first, and a buy is clipped to the purse.
+
+    Before this, both profiles filled every order independently at the selected price with no
+    budget carried between them. On a costed whole-share venue that produces a batch the account
+    cannot pay: `plan_orders` sizes against NAV while the commission is charged at the fill, so a
+    batch that exactly spends its cash ends overdrawn once charged -- and nothing noticed.
+
+    Measured on this fixture before the change: cash 20,000, required 20,006, ending -6.
+    """
+    venue = _krx()
+    first, second = sorted(_NAMES)
+    price, shares = _PRICE, Decimal("100")
+    # Exactly the notional of both buys and not one won more, so the commission is what breaks it.
+    cash = shares * price * 2
+
+    fills = venue.execute(
+        _orders(_request(first, "100"), _request(second, "100")),
+        AccountSnapshot(0, cash, {}),
+        _snapshot(*(ExactExecutionRow(_AT, name, True, price) for name in _NAMES)),
+    )
+
+    spent = sum(-fill.cash_delta for fill in fills.fills)
+    assert spent <= cash, "the venue must not fill what the account cannot pay for"
+
+    dealt = {fill.instrument_id: fill.dealt_quantity for fill in fills.fills}
+    assert dealt[first] == shares, "the first buy is affordable in full"
+    assert dealt[second] < shares, "the second is clipped to what is left"
+    assert dealt[second] > 0, "and clipped, not dropped"
+    # Whole shares, because that is what this venue lists.
+    assert dealt[second] == dealt[second].to_integral_value()
+    # Order is restored for the record even though settlement ran sells-then-buys.
+    assert [fill.instrument_id for fill in fills.fills] == sorted(_NAMES)
+
+
+def test_a_sale_funds_the_purchase_it_pays_for() -> None:
+    """Sells settle before buys, so a rotation is judged on the cash it actually raises.
+
+    Filling in instrument order instead judges a batch unaffordable that a desk would have executed
+    comfortably: the proceeds are there, they just had not arrived yet.
+    """
+    venue = _krx()
+    sell, buy = sorted(_NAMES)
+    held = Decimal("100")
+
+    fills = venue.execute(
+        _orders(_request(sell, "-100", held="100"), _request(buy, "100")),
+        # No cash: the buy is payable only out of the sale.
+        AccountSnapshot(0, Decimal("0"), {sell: held}),
+        _snapshot(*(ExactExecutionRow(_AT, name, True, _PRICE) for name in _NAMES)),
+    )
+
+    dealt = {fill.instrument_id: fill.dealt_quantity for fill in fills.fills}
+    assert dealt[sell] == -held, "the sale fills in full; it raises cash rather than spending it"
+    assert dealt[buy] > 0, "and the proceeds funded the purchase"
+    assert sum(-fill.cash_delta for fill in fills.fills) <= Decimal("0")
+
+
+def test_a_buy_with_no_money_behind_it_is_unfunded_rather_than_absent() -> None:
+    """A zero-dealt order says which fact stopped it, and an empty purse is not a market fact.
+
+    `ABSENT`, `NONTRADABLE` and `NO_TRADE` are things the venue observed. `UNFUNDED` is a thing the
+    ACCOUNT did, and conflating them would let a reader asking "what did the market refuse me"
+    count their own shortfall in the answer.
+    """
+    venue = _krx()
+    name = _NAMES[0]
+
+    fills = venue.execute(
+        _orders(_request(name, "100")),
+        AccountSnapshot(0, Decimal("0"), {}),
+        _snapshot(ExactExecutionRow(_AT, name, True, _PRICE)),
+    )
+
+    fill = fills.fills[0]
+    assert fill.dealt_quantity == 0
+    assert fill.reason is ZeroDealtReason.UNFUNDED
+    assert fill.requested_quantity == Decimal("100"), "the ask survives on the record"

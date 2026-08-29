@@ -1,6 +1,36 @@
 # 002 — Execution profiles share no base, and fill ordering is unmodelled
 
-**Status:** open, deliberately deferred. Raised 2026-08-19 while costing a long-short family.
+**Status: CLOSED 2026-08-29** by
+`docs/implementations/082-one-copy-of-the-contract-both-profiles-check.md` (the duplication and the
+five invariants) and
+`docs/implementations/083-a-venue-fills-what-the-account-can-pay-for.md` (the fill ordering).
+
+Both halves were re-measured before being acted on, ten days after this was filed. The duplication
+was still exactly as described — twenty lines byte for byte under two names, plus the eleven-line
+preamble — and both lifted to functions in `execution_table.py`, not to a base class, for the
+reasons this file gives. The `rules.at(target_at)` row in the "what genuinely differs" table had
+gone stale: no such call exists any more.
+
+The unmodelled half is now modelled on the venue profile: sells settle first and fund the batch, a
+buy is clipped to the purse with commission inside the affordability test, and the remainder is a
+partial fill with a typed `UNFUNDED` reason. The overdraw this file predicted was reproduced first
+— cash 20,000, required 20,006 — and closed.
+
+**One correction to the recommendation.** This file says the academic profile *should* keep filling
+everything, as a design preference. It is narrower than that: a partial fill **cannot arise**
+there. Cash exhaustion needs whole-share rounding to leave a residual and charged costs to disagree
+with the plan's arithmetic, and that profile has neither. Recorded as a consequence rather than a
+choice, so nobody revisits it as one.
+
+Invariant 5 is written as the inequality this file asked for, and is now exercised rather than
+merely permitted.
+
+The original report follows unchanged.
+
+---
+
+**Status when filed:** open, deliberately deferred. Raised 2026-08-19 while costing a long-short
+family.
 **Touches:** `src/vqapr/exchange/venue.py`, `src/vqapr/exchange/venues/krx.py`
 
 Read this before changing either execution profile.

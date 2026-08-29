@@ -11,11 +11,24 @@ from vqapr.exchange.costs import FillCost
 
 
 class ZeroDealtReason(StrEnum):
-    """Market facts that result in an accepted order with no execution."""
+    """Facts that result in an accepted order with no execution.
+
+    The first three are facts about the MARKET: the venue published no row, published one saying
+    the name could not trade, or the plan asked for no change. `UNFUNDED` is a fact about the
+    ACCOUNT, and it is named separately for that reason -- a reader summing zero-dealt orders to
+    ask "what did the market refuse me" must not have their own empty purse counted in the answer.
+    """
 
     ABSENT = "absent"
     NONTRADABLE = "nontradable"
     NO_TRADE = "no_trade"
+    UNFUNDED = "unfunded"
+    """The batch ran out of cash before reaching this buy.
+
+    Only a venue profile that charges and rounds to whole units can produce this. A fractional
+    profile sizes exactly to the cash it has, so there is no residual for the money to run out
+    against.
+    """
 
 
 def _decimal(value: Decimal, *, name: str) -> None:

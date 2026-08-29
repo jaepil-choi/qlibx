@@ -25,7 +25,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side, side_of
 from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
-from vqapr.exchange.costs import SideCost
+from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
     ExactExecutionRow,
     ExactExecutionSnapshot,
@@ -315,9 +315,22 @@ class KrxExchange:
         rows = requested_rows(snapshot, requests)
         self._validate(requests, rows, account)
         rules = self._rules
-
+        # Sells settle before buys, and the cash they raise is carried across the batch. A desk
+        # funds a rotation from the sleeve it is rotating out of; filling in instrument order
+        # instead judges a batch unaffordable that would have executed comfortably.
+        #
+        # Costs are charged out of the same purse. `plan_orders` sizes against NAV and the
+        # commission is charged at the fill, so a batch that exactly spends its cash ends
+        # overdrawn once charged -- issue `002`. What is left when the money runs out is a partial
+        # fill: `Fill` already carries `requested_quantity` apart from `dealt_quantity`, so the
+        # shape exists and nothing downstream has to learn a new one.
+        #
+        # KRX only, and structurally so. This needs whole-share rounding to leave a residual the
+        # plan could not size away; the academic profile is fractional, sizes exactly to its cash,
+        # and has no cause to model.
+        purse = account.cash
         fills: list[Fill] = []
-        for request in requests:
+        for request in sorted(requests, key=self._settlement_order):
             row = rows.get(request.instrument_id)
             if row is None:
                 fills.append(
@@ -370,18 +383,78 @@ class KrxExchange:
                     )
                 )
                 continue
-            notional = rules.notional(request.instrument_id, request.delta_quantity, row.price)
-            fills.append(
-                Fill(
-                    request.instrument_id,
-                    request.delta_quantity,
-                    request.delta_quantity,
-                    row.price,
-                    cost=rules.charge(side, notional, request.instrument_id),
-                    kind=rules.stamped_kind(request.instrument_id),
+            # The notional is no longer computed here: `_affordable` decides the quantity first,
+            # and charging the requested size rather than the dealt one is what a partial fill
+            # must not do.
+            dealt, cost = self._affordable(request, row, side, purse, rules)
+            if dealt == 0:
+                fills.append(
+                    Fill(
+                        request.instrument_id,
+                        request.delta_quantity,
+                        Decimal("0"),
+                        None,
+                        ZeroDealtReason.UNFUNDED,
+                    )
                 )
+                continue
+            fill = Fill(
+                request.instrument_id,
+                request.delta_quantity,
+                dealt,
+                row.price,
+                cost=cost,
+                kind=rules.stamped_kind(request.instrument_id),
             )
+            purse += fill.cash_delta
+            fills.append(fill)
+        # Back into identity order. Settlement order is an execution detail; the fill table is
+        # read by run records and comparisons that depend on a stable order (invariant 1).
+        fills.sort(key=lambda fill: fill.instrument_id)
         return FillBatch(tuple(fills), account.version)
+
+    @staticmethod
+    def _settlement_order(request: OrderRequest) -> tuple[int, str]:
+        """Sells first, then buys, each group in identity order.
+
+        Deterministic within each group, so a batch executes identically on every replay -- the
+        ordering decides which buy goes unfunded when the money runs out, and a run that answered
+        differently on a rerun would make the shortfall unreproducible.
+        """
+        return (0 if request.delta_quantity < 0 else 1, request.instrument_id)
+
+    def _affordable(
+        self,
+        request: OrderRequest,
+        row: ExactExecutionRow,
+        side: Side,
+        purse: Decimal,
+        rules: ExchangeRulesView,
+    ) -> tuple[Decimal, FillCost]:
+        """How much of this request the account can pay for, and what that costs.
+
+        A sale always fills in full: it RAISES cash, and its own commission and tax come out of the
+        proceeds rather than out of the balance.
+
+        A buy is clipped to what the purse holds, in whole shares, with the commission included in
+        the affordability test rather than charged afterwards. Solved by shrinking rather than by
+        dividing, because the rate applies to the notional and the notional depends on the
+        quantity: `q * price * (1 + rate) <= purse` gives the bound directly, and the quantity step
+        then rounds it down to something the listing permits.
+        """
+        requested = abs(request.delta_quantity)
+        if side is Side.SELL:
+            return request.delta_quantity, rules.charge(
+                side, requested * row.price, request.instrument_id
+            )
+
+        rate = rules.charge(side, row.price, request.instrument_id).total / row.price
+        step = rules.listing(request.instrument_id).quantity_step
+        affordable = purse / (row.price * (Decimal(1) + rate))
+        capped = min(requested, (affordable // step) * step)
+        if capped <= 0:
+            return Decimal("0"), rules.charge(side, Decimal("0"), request.instrument_id)
+        return capped, rules.charge(side, capped * row.price, request.instrument_id)
 
     def _validate(
         self,

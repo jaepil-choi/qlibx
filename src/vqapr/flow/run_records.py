@@ -47,7 +47,16 @@ TABLES_DIRECTORY = "tables"
 
 SCHEMA = "vqapr-run-record/v1"
 
-RECORD_FIELDS = ("run_id", "account", "tables", "contract", "source_digest", "period")
+RECORD_FIELDS = (
+    "run_id",
+    "account",
+    "tables",
+    "contract",
+    "source_digest",
+    "declared_digest",
+    "roster",
+    "period",
+)
 """The field set a run record carries, named once and read by both the writer and every reader.
 
 AC-R5 asks that `show run`'s output and the frozen record carry the same fields. This lives here,
@@ -56,6 +65,22 @@ the CLI is one of its readers, so the CLI importing this is the right direction 
 package importing from the CLI was not.
 
 `schema` is deliberately absent: it is the record's own metadata, not one of its answers.
+
+`declared_digest` and `roster_digest` had builders in `_freeze_record` and were absent from this
+tuple, so the writer's comprehension never called them: two facts computed on every run and
+dropped before they reached disk. Same shape as the `Fill.kind` column record `067` added -- the
+object was right and the record did not carry it.
+
+`roster` is the successor to that `roster_digest`, not the same field renamed: it carries a mapping
+with the declared tables and the per-category counts, and `null` when the run read no roster at
+all. Only `declared_digest` is the original builder, wired up.
+
+**`roster` is `null` here and `{"known": false, "note": ...}` in the run's success envelope, and
+that difference is deliberate.** This tuple guarantees the key exists, so `null` cannot be read as
+"this version does not report one" -- the ambiguity the envelope has to defend against, since a
+JSON envelope carries no schema with it. The envelope also carries a note naming the consequence
+and the remedy, which belongs where someone is about to act and not in an archive of what a past
+run did.
 """
 
 
@@ -500,10 +525,29 @@ def read_table(root: Path, run_id: str, table_id: str) -> Iterator[dict[str, Any
     if not path.is_file():
         return
     with path.open(encoding="utf-8") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, start=1):
             stripped = line.strip()
-            if stripped:
-                yield json.loads(stripped)
+            if not stripped:
+                continue
+            try:
+                row = json.loads(stripped)
+                if not isinstance(row, dict):
+                    # Valid JSON of the wrong shape is damage too. Yielding it would break this
+                    # function's own `Iterator[dict[str, Any]]` contract and hand every caller a
+                    # bare number where it expects a row.
+                    raise ValueError(f"expected a JSON object, found {type(row).__name__}")
+                yield row
+            except json.JSONDecodeError as damaged:
+                # A damaged row is reported, never skipped. Skipping would let `show run --table`
+                # return a short table that looks complete, and a reader comparing it against the
+                # record's own row count would find two numbers disagreeing with no reason given.
+                # An empty file is a different thing and stays legal: a run may record a table and
+                # write nothing to it.
+                raise ValueError(
+                    f"{path} line {number} is not one JSON row: {damaged}. The recorder wrote "
+                    "this file, so a line that does not parse means it was edited or truncated; "
+                    "restore it, or re-run under a new run id"
+                ) from damaged
 
 
 def table_ids(root: Path, run_id: str) -> tuple[str, ...]:

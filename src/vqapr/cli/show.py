@@ -22,7 +22,7 @@ from vqapr.cli.envelope import success
 from vqapr.cli.inputs import InputError
 from vqapr.domain.errors import VqaprError
 from vqapr.flow.run_records import RECORD_FIELDS as _RECORD_FIELDS
-from vqapr.flow.run_records import read_record, run_ids
+from vqapr.flow.run_records import read_record, read_table, run_ids, table_ids
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 KINDS = ("run", "model")
@@ -47,6 +47,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=None,
         help="where run records live, when they were written outside the workspace directory",
+    )
+    parser.add_argument(
+        "--table",
+        dest="table",
+        default=None,
+        help=(
+            "read one of the run's recorded tables back instead of its record "
+            "(vqapr.account, vqapr.fill, vqapr.weight, or a table the model formed)"
+        ),
+    )
+    parser.add_argument(
+        "--limit",
+        dest="limit",
+        type=int,
+        default=100,
+        help="rows to return when --table is given; 0 returns every row",
     )
 
 
@@ -115,4 +131,57 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 "run `vqapr list runs` to see what this store holds, then show one of those ids"
             ),
         )
-    return success("run.show", **record_view(read_record(root, args.identifier)))
+    table = getattr(args, "table", None)
+    if table is None:
+        return success("run.show", **record_view(read_record(root, args.identifier)))
+
+    # The rows a run wrote, which the record only counts. `record["tables"]` reports how many rows
+    # and how many formations each table holds, and nothing could read one back -- so the evidence
+    # tables `RunRecorder` writes on every run were reachable only by knowing the on-disk layout
+    # and opening the .jsonl by hand. That is the file this surface should not require a reader to
+    # know about, the same rule `list instruments` answers for the roster sidecar.
+    known_tables = table_ids(root, args.identifier)
+    if table not in known_tables:
+        raise InputError(
+            "cli.input.value_invalid",
+            requirement="--table names one of the tables this run recorded",
+            observed=f"{table!r}; this run recorded: {', '.join(known_tables) or '(none)'}",
+            retry=(
+                f"choose one of the tables above, or drop --table to see the record; "
+                f"`vqapr show run {args.identifier}` reports each table's row count"
+            ),
+        )
+    limit = max(int(getattr(args, "limit", 100) or 0), 0)
+    rows: list[dict[str, Any]] = []
+    total = 0
+    try:
+        for row in read_table(root, args.identifier, table):
+            total += 1
+            if limit == 0 or len(rows) < limit:
+                rows.append(row)
+    except ValueError as damaged:
+        # A damaged row is reported here rather than skipped in the reader. Skipping would return
+        # a short table that looks complete, and a reader comparing it against the record's own
+        # count would find two numbers disagreeing with no reason given. An empty table file stays
+        # legal and returns zero rows: a run may record a table and write nothing to it.
+        raise InputError(
+            "cli.input.value_invalid",
+            requirement=f"every line of {table!r} must be one JSON row",
+            observed=str(damaged),
+            retry=(
+                f"restore the file, or re-run to write a fresh record; "
+                f"`vqapr show run {args.identifier}` still reports what the record itself holds"
+            ),
+        ) from damaged
+    return success(
+        "run.table",
+        run_id=args.identifier,
+        table=table,
+        # Two numbers, because a truncated read that reported only `len(rows)` would let a reader
+        # conclude the run wrote 100 rows when it wrote 40,000. `rows_total` is what the table
+        # holds; `rows` is what this call returned.
+        rows_total=total,
+        returned=len(rows),
+        tables=list(known_tables),
+        items=rows,
+    )

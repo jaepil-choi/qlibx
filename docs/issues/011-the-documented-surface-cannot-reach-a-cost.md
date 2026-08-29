@@ -1,7 +1,33 @@
 # 011 — The documented surface cannot reach a cost, or a roster
 
-**Status:** open. Found 2026-08-28 by two independent first-time-user journeys in `testbed/` and
-`testbed-claude/`, run against the installed package with no access to `src/`, `tests/` or `docs/`.
+**Status: CLOSED 2026-08-29.** All nine open items are fixed, each verified by driving the CLI
+rather than by reading the change:
+
+| item | fixed by |
+|---|---|
+| 011.1 per-trade cost unreachable | `072` — `vqapr new exchange --profile krx`, built from `krx_rules` |
+| 011.2 roster unreachable and unlistable | `071` — `vqapr list instruments`; roster named in the skill |
+| 011.3 a run with no roster completes silently | `070` — the envelope and the frozen record both state the roster |
+| 011.4 `roster_id` echoed and discarded | `069` — removed; the old shape is refused, not shimmed |
+| 011.5 a partly-commented declaration drops a category | `070` — an undeclared table beside the declared ones is named in the receipt |
+| 011.6 constraints advertised and undocumented | `073` — `vqapr new constraint`, with `project`'s contract stated |
+| 011.7 `KeyError: 'component'` as a refusal | `074` — the nested key is named, with a populated `source.key_path` |
+| 011.8 the fix named a Python API | `074` — it names `vqapr register`, which creates a workspace as it registers |
+| 011.9 the 15:29 callback cannot see the 15:30 close | `074` — the agendas template explains it and moves valuation to 15:31 |
+
+The three defects this closure did **not** fix are filed separately rather than folded in, because
+each needs a contract moved that the closing work was forbidden to move: `012` (`check` refuses a
+spec `run` completes), `013` (a fill can say one category and be charged as another) and `014` (a
+shipped cap disagrees with itself about a short). `013` in particular is the residue of 011.1 — the
+cost is now reachable, and what a fill is *charged* as can still disagree with what it *says* it is.
+
+The original report follows unchanged.
+
+---
+
+**Status when filed:** open. Found 2026-08-28 by two independent first-time-user journeys in
+`testbed/` and `testbed-claude/`, run against the installed package with no access to `src/`,
+`tests/` or `docs/`.
 
 Both journeys **completed** — `check` and `run` both returned `ok:true`. Everything below is a gap
 between what the package can do and what its documented surface says it can do, which is the more

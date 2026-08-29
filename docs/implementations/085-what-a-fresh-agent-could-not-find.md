@@ -75,17 +75,32 @@ registered dataset, not only a materialized one.
 semantics. It answers *what is in this file*, not *what would a model have seen* — conflating the
 two would make an inspection command quietly disagree with the windows a run reads.
 
-## Findings recorded and not acted on
+## One more, fixed after the record was first written
 
-- **`vqapr new` takes `datamodel`; `list` and `show` report `data_model`.** One spelling on the way
-  in, another on the way out.
+**`vqapr new` and `register` take `datamodel`; `list` and `show` reported `data_model`.** One
+spelling on the way in, another on the way out, and the one coming out is a string a reader cannot
+type at any verb.
+
+That is the T0 ruling applied backwards. The CLI is the product, so what it reports should be what
+it accepts. `cli_kind()` derives the spelling from `AUTHORED_KINDS` rather than restating it, so the
+two cannot disagree, and a kind with no CLI spelling -- `exchange`, registered through a declaration
+rather than by naming a kind -- falls back to the enum's own value, which is what it is called
+everywhere else.
+
+Used at the three sites that emitted it: `show model`, `list`'s summary, and `check`'s
+`component_wrong_kind` refusal, which was telling a reader their component is registered as
+something they could not have typed.
+
+## Findings recorded and not acted on
 - **No `vqapr new` scaffold for a materialization spec.** The skill's literal example was enough —
   the retest agent hand-wrote the file from it on the first attempt — but every other declaration
   kind has a scaffold.
 - **`check` passing gives no signal that a constraint will refuse the run.** Correct as designed:
   `check` cannot know what weights a strategy will propose. Worth documenting rather than changing.
-- **`show run` reports table row counts but not ending NAV or cash**, so reporting them means
-  filtering `vqapr.account` client-side.
+- **`show run` reports ending cash and positions but not NAV**, so reporting NAV means filtering
+  `vqapr.account` client-side. Left alone deliberately: the record's `account` block holds the
+  facts a reader **cannot** reconstruct from the rows, and NAV is in the rows. Adding it would put
+  one fact in two places, which is the defect class records `079` and `080` exist to remove.
 
 ## Validation
 

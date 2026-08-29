@@ -37,6 +37,7 @@ from typing import Any
 from vqapr._internal.extensions.loading import load_exchange, load_strategy_model
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import InputError, read_yaml_mapping
+from vqapr.cli.register import cli_kind
 from vqapr.cli.run import (
     MATERIALIZATION,
     definition_from_document,
@@ -315,7 +316,7 @@ def _materialization_judgments(
         refuse(
             "component_wrong_kind",
             "a materialization runs a DataModel",
-            f"{component_id!r} is registered as {ref.kind.value}",
+            f"{component_id!r} is registered as {cli_kind(ref.kind)}",
             f"name a registered datamodel, or declare `strategy: {component_id}` to simulate",
             MATERIALIZATION,
         )

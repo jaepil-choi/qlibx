@@ -137,97 +137,97 @@
     {
       "code": "check.dataset.unregistered",
       "file": "src/vqapr/cli/check.py",
-      "line": 692
+      "line": 693
     },
     {
       "code": "check.execution.not_after_decision",
       "file": "src/vqapr/cli/check.py",
-      "line": 632
+      "line": 633
     },
     {
       "code": "check.field.absent",
       "file": "src/vqapr/cli/check.py",
-      "line": 711
+      "line": 712
     },
     {
       "code": "check.lookback.uncovered",
       "file": "src/vqapr/cli/check.py",
-      "line": 747
+      "line": 748
     },
     {
       "code": "check.materialize.component_unloadable",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.component_unregistered",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.component_wrong_kind",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.evaluation_instant_invalid",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.lookback_uncovered",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.no_evaluation_instants",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.no_instruments",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.output_registered",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.materialize.requirement_unregistered",
       "file": "src/vqapr/cli/check.py",
-      "line": 293
+      "line": 294
     },
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/cli/check.py",
-      "line": 554
+      "line": 555
     },
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/cli/check.py",
-      "line": 571
+      "line": 572
     },
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/cli/check.py",
-      "line": 585
+      "line": 586
     },
     {
       "code": "check.universe.absent",
       "file": "src/vqapr/cli/check.py",
-      "line": 516
+      "line": 517
     },
     {
       "code": "check.weights.mode_conflict",
       "file": "src/vqapr/cli/check.py",
-      "line": 816
+      "line": 817
     },
     {
       "code": "check.weights.venue_conflict",
       "file": "src/vqapr/cli/check.py",
-      "line": 874
+      "line": 875
     },
     {
       "code": "component.conformance.load_failed",
@@ -597,12 +597,12 @@
     {
       "code": "run.check.declaration_invalid",
       "file": "src/vqapr/cli/check.py",
-      "line": 971
+      "line": 972
     },
     {
       "code": "run.check.preflight_refused",
       "file": "src/vqapr/cli/check.py",
-      "line": 979
+      "line": 980
     },
     {
       "code": "run.roster.unreadable",

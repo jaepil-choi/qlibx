@@ -20,6 +20,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import InputError
+from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
 from vqapr.flow.run_records import RECORD_FIELDS as _RECORD_FIELDS
 from vqapr.flow.run_records import read_record, read_table, run_ids, table_ids
@@ -108,7 +109,9 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     history = getattr(model, "_authored_history", None)
     return {
         "component_id": component_id,
-        "kind": str(getattr(ref, "kind", "")),
+        # Spelled the way `new` and `register` accept it, not as the domain enum's value: a
+        # reader cannot type `data_model` anywhere.
+        "kind": cli_kind(getattr(ref, "kind", None)),
         "reads": {
             alias: {
                 "dataset_id": str(declared.dataset_id),

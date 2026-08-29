@@ -436,7 +436,15 @@ def test_show_model_describes_a_datamodel_and_not_only_a_strategy(
 
     assert code == 0, described
     assert described["component_id"] == "derived"
-    assert described["kind"] == "data_model", "the kind is reported, not assumed"
+    # Spelled the way `new` and `register` accept it. It reported the domain enum's `data_model`,
+    # which is a string a reader cannot type at any verb -- one spelling in, another out.
+    assert described["kind"] == "datamodel"
+    code, listed = _cli(capsys, "--project-root", str(tmp_path), "list", "components")
+    assert {row["component_id"]: row["kind"] for row in listed["items"]}["derived"] == "datamodel"
+    assert all(
+        row["kind"] in {"strategy", "datamodel", "constraint", "exchange"}
+        for row in listed["items"]
+    ), "every reported kind must be one the CLI accepts, or the enum value where it takes none"
     # What it reads is the question a reader opens this command to answer.
     assert described["decides"] == ["prices"]
 

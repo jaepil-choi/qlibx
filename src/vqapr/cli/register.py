@@ -1027,6 +1027,23 @@ AUTHORED_KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
     "constraint": ComponentKind.CONSTRAINT,
 }
+
+
+def cli_kind(kind: object) -> str:
+    """A component kind spelled the way this surface accepts it.
+
+    `new` and `register` take `datamodel`; `show` and `list` reported `data_model`, which is the
+    domain enum's value and a string a reader cannot type anywhere. A first-time-user journey hit
+    that: one spelling on the way in, another on the way out.
+
+    Derived from `AUTHORED_KINDS` rather than restated, so the two cannot disagree. A kind with no
+    CLI spelling -- `exchange`, which is registered through a declaration rather than by naming a
+    kind -- falls back to the enum's own value, which is what it is called everywhere else.
+    """
+    for spelling, authored in AUTHORED_KINDS.items():
+        if authored is kind:
+            return spelling
+    return str(getattr(kind, "value", kind))
 """The component kinds an author writes as a `.py` and registers directly.
 
 Everything else -- datasets, sources, agendas, configs -- stays in the YAML declaration, because

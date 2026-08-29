@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
+from vqapr.cli.register import cli_kind
 from vqapr.flow.run_records import read_record, run_ids
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
@@ -71,8 +72,11 @@ def _summarize(item: object) -> dict[str, Any]:
             summary[field] = str(value)
     for field in ("kind", "fingerprint", "object_name", "role", "timezone"):
         value = getattr(item, field, None)
-        if value is not None:
-            summary[field] = str(value)
+        if value is None:
+            continue
+        # `kind` is spelled the way `new` and `register` accept it. Reporting the domain enum's
+        # value gave a reader `data_model`, which they cannot type at any verb.
+        summary[field] = cli_kind(value) if field == "kind" else str(value)
     if not summary:
         summary["repr"] = repr(item)
     return summary

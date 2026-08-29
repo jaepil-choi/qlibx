@@ -110,11 +110,22 @@ def test_it_refuses_to_overwrite_either_file(tmp_path: Path) -> None:
         _emit(tmp_path)
 
 
-def test_the_roster_id_is_the_authors_to_choose(tmp_path: Path) -> None:
+def test_the_emitted_declaration_names_no_roster_id(tmp_path: Path) -> None:
+    """There is nothing to name, so the template stops inviting a name.
+
+    It used to emit `instruments: {<component-id>: {tables: ...}}`, and the id went nowhere:
+    `.vqapr/instruments.json` stores `schema`, `tables` and `digest`, so the declared name was
+    echoed back in the receipt and dropped, and registering a second roster under a different name
+    silently replaced the first. `tables:` now sits directly under `instruments:`.
+    """
     emitted = _emit(tmp_path, component_id="krx-universe")
 
     body = Path(emitted["declaration"]).read_text(encoding="utf-8")
-    assert "krx-universe:" in body
+    assert "krx-universe" not in body, "--component-id must no longer name the roster"
+    assert "instruments:\n  tables:\n" in body
+    # The template says why there is no name, so the absence reads as a decision rather than an
+    # omission the author should fill in.
+    assert "A project has ONE roster" in body
 
 
 def test_a_supplied_universe_reaches_the_emitted_script(tmp_path: Path) -> None:
@@ -142,7 +153,7 @@ def test_the_emitted_declaration_is_valid_yaml(tmp_path: Path) -> None:
     document = yaml.safe_load(Path(emitted["declaration"]).read_text(encoding="utf-8"))
 
     assert list(document) == ["instruments"]
-    tables = document["instruments"]["universe"]["tables"]
+    tables = document["instruments"]["tables"]
     assert tables == {"stock": "instruments_stock.parquet"}, (
         "only the categories this universe uses may be live; the rest stay commented"
     )
@@ -166,7 +177,7 @@ def test_the_emitted_halves_agree_under_a_custom_out_name(tmp_path: Path) -> Non
     assert completed.returncode == 0, completed.stderr
 
     declared = yaml.safe_load(Path(emitted["declaration"]).read_text(encoding="utf-8"))
-    for name in declared["instruments"]["universe"]["tables"].values():
+    for name in declared["instruments"]["tables"].values():
         assert (tmp_path / name).is_file(), f"declaration names {name}, which the script did not write"
 
     registered = register_run(

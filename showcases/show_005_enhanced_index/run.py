@@ -750,9 +750,12 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # state. The Flow binds this roster into the venue's view at run assembly.
     written = export_roster({name: kinds[name] for name in universe}, project)
     declaration = project / "instruments.yaml"
+    # `tables:` sits directly under `instruments:`. There is no id above it: a project holds one
+    # roster slot and each registration replaces it, so the name this used to carry was echoed
+    # back in the receipt and discarded.
     declaration.write_text(
-        "instruments:\n  show005:\n    tables:\n"
-        + "".join(f"      {kind}: {path.name}\n" for kind, path in sorted(written.items())),
+        "instruments:\n  tables:\n"
+        + "".join(f"    {kind}: {path.name}\n" for kind, path in sorted(written.items())),
         encoding="utf-8",
     )
     # Registered through the CLI's own entry point, which is what a user runs. Reaching past it

@@ -36,17 +36,28 @@ from typing import Any
 import yaml
 
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import InputError, refuse_existing
+from vqapr.cli.inputs import VALUE_INVALID, InputError, refuse_existing
 from vqapr.extension.component import ComponentKind
-from vqapr.extension.scaffold import render
+from vqapr.extension.scaffold import _class_name, render
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
-_KINDS = {"datamodel": ComponentKind.DATA_MODEL, "strategy": ComponentKind.STRATEGY_MODEL}
+_KINDS = {
+    "datamodel": ComponentKind.DATA_MODEL,
+    "strategy": ComponentKind.STRATEGY_MODEL,
+    "constraint": ComponentKind.CONSTRAINT,
+}
 
 _DECLARATION_KIND = {
     ComponentKind.DATA_MODEL: "datamodel",
     ComponentKind.STRATEGY_MODEL: "strategy",
+    ComponentKind.CONSTRAINT: "constraint",
 }
+"""The declaration spelling for each authored kind.
+
+Keyed by `ComponentKind` and read while emitting the companion `.yaml`, so a kind added to
+`_KINDS` and forgotten here surfaces as a bare `KeyError` -- `stage: "unhandled"` -- which is the
+failure shape this slice exists to remove. The three tables are the same three kinds.
+"""
 
 _DATASET_TEMPLATE = """\
 # Dataset declaration — register with `vqapr register <this-file.yaml>`
@@ -144,10 +155,20 @@ agendas:
     at: "15:29"                     # strictly before the execution template's 15:30 target
     timezone: Asia/Seoul            # zone `at` is expressed in; DST is derived from it
 
+  # A callback at 15:29 sees only data whose `available_at` is strictly before 15:29. For a
+  # dataset published at the 15:30 close, that means a strategy firing at 15:29 on session N
+  # decides on session N-1's data -- which is correct, and is the point: it cannot see the close
+  # it is about to trade into.
+  #
+  # Applied to VALUATION the same instant is usually wrong. A mark taken at 15:29 values the book
+  # at the previous session's close, so the daily NAV series lags by one session for no stated
+  # reason. Put valuation AFTER the execution instant instead -- 15:31 below -- so the first NAV
+  # equals the initial cash exactly and each later one marks the close the run just filled at.
+
   daily-valuation:                  # valuation usually runs on the same days as the strategy
     role: valuation
     from_dataset: DATASET_ID
-    at: "15:29"                     # a NoDecision can still value at the later 15:30 snapshot
+    at: "15:31"                     # after the 15:30 execution instant, not before it
     timezone: Asia/Seoul
 
 strategy_configs:
@@ -203,6 +224,23 @@ initial_account:
 """
 
 
+def _emitted_class_name(source: str) -> str:
+    """The class a template emitted, found by parsing rather than by splitting on `"class "`.
+
+    The string split this replaces took the first occurrence of `"class "` anywhere in the file,
+    including inside a docstring: a template whose prose contained "subclass and" yielded an
+    `object_name` of half a paragraph, which registered and then failed at import with an
+    `AttributeError` naming that paragraph. `register.py` already parses its equivalent with `ast`
+    for exactly this reason, and this is the same fact about the same file.
+    """
+    import ast
+
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.ClassDef):
+            return node.name
+    raise ValueError("the emitted template declares no class")
+
+
 def _declaration(component_id: str, kind: ComponentKind, source: Path, object_name: str) -> str:
     """The registrable declaration for what was just scaffolded.
 
@@ -235,8 +273,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "run-spec",
         ),
         help=(
-            "scaffold a component (datamodel/strategy) or emit a template "
-            "(dataset/execution-input/agendas/run-spec)"
+            "scaffold a component (datamodel/strategy/constraint) or emit a template "
+            "(instruments/dataset/execution-input/agendas/exchange/run-spec). Component and "
+            "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
+            "that registers it. Every kind reports the file to hand `vqapr register` as "
+            "`declaration`"
         ),
     )
     parser.add_argument(
@@ -252,6 +293,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="instrument ids to list on a new exchange (defaults to two placeholders)",
     )
     parser.add_argument(
+        "--profile",
+        choices=("academic", "krx"),
+        default="academic",
+        help=(
+            "which execution profile a new exchange is: academic fills free, "
+            "krx charges KRX commission and sale tax including the ETF exemption"
+        ),
+    )
+    parser.add_argument(
         "--dataset",
         default=None,
         help="dataset_id the component reads (required for datamodel/strategy)",
@@ -259,6 +309,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--field", default="close", help="price field the scaffold references")
     parser.add_argument(
         "--lookback", type=int, default=6, help="rows of history each name needs"
+    )
+    parser.add_argument(
+        "--cap",
+        default="0.2",
+        help="largest share of the book any one name may be (constraint scaffold)",
     )
     parser.add_argument("--out", type=Path, default=None, help="output path for the emitted file")
 
@@ -278,21 +333,41 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
             requirement="datamodel and strategy require a positional component_id",
             observed="no component_id given",
         )
-    if not args.dataset:
-        raise InputError(
-            "cli.input.keys_missing",
-            requirement="datamodel and strategy require --dataset",
-            observed="--dataset not given",
-        )
-    _require_registered_dataset(args.dataset, project_root)
     kind = _KINDS[args.kind]
-    source = render(
-        kind,
-        args.component_id,
-        dataset_id=args.dataset,
-        field=args.field,
-        lookback=args.lookback,
-    )
+    # `render` refuses an id that cannot become a Python class name. Caught here rather than left
+    # to escape, because a bare `ValueError` reaches the envelope as `stage: "unhandled"` -- and
+    # it did: `vqapr new constraint '123-bad!'` emitted an unparseable file and then failed on
+    # re-reading it, reporting a SyntaxError about the framework's own output.
+    try:
+        _class_name(args.component_id)
+    except ValueError as unusable:
+        raise InputError(
+            VALUE_INVALID,
+            requirement="a component id must be able to name the class the scaffold declares",
+            observed=str(unusable),
+            retry="choose an id like `position-cap`, then retry",
+        ) from unusable
+    # Per kind, not per command. A DataModel and a StrategyModel are defined by what they read; a
+    # Constraint is a rule about weights and reads nothing -- the shipped `NoShort` returns an
+    # empty `requirements()`. Demanding `--dataset` from all three would make an author invent a
+    # dataset to scaffold a rule that never opens one.
+    if kind is ComponentKind.CONSTRAINT:
+        source = render(kind, args.component_id, cap=str(getattr(args, "cap", "0.2")))
+    else:
+        if not args.dataset:
+            raise InputError(
+                "cli.input.keys_missing",
+                requirement="datamodel and strategy require --dataset",
+                observed="--dataset not given",
+            )
+        _require_registered_dataset(args.dataset, project_root)
+        source = render(
+            kind,
+            args.component_id,
+            dataset_id=args.dataset,
+            field=args.field,
+            lookback=args.lookback,
+        )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
     if target.suffix != ".py":
         # A component is imported by `register`, so it must be a loadable module. Writing an
@@ -305,7 +380,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     refuse_existing(target, what="component file")
     refuse_existing(declaration, what="declaration file")
 
-    object_name = source.split("class ", 1)[1].split("(", 1)[0]
+    object_name = _emitted_class_name(source)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source, encoding="utf-8")
     declaration.write_text(
@@ -402,6 +477,20 @@ def _rule(instrument_id: str) -> TradeRule:
     `quantity_step` is the smallest tradable increment and `minimum_quantity` the smallest order.
     Whole shares on most venues; set `fractional_allowed=True` and a fractional step if yours
     permits fractions.
+
+    **This venue charges nothing.** `buy` and `sell` default to `FREE`, which is what makes it
+    academic. They are the channel for cost, and they are the two fields left out below -- so if
+    you copy this shape onto a costed venue you get a venue that fills for free and refuses
+    nothing. To charge here, uncomment them:
+
+        from vqapr.public import SideCost
+
+        buy=SideCost(commission_rate=Decimal("0.0003")),
+        sell=SideCost(commission_rate=Decimal("0.0003"), tax_rate=Decimal("0.002")),
+
+    For real KRX terms -- including the ETF sale-tax exemption, which depends on what each
+    instrument IS -- do not hand-write the rates. Run `vqapr new exchange <id> --profile krx`,
+    which builds them from `krx_rules`.
     """
     return TradeRule(
         instrument_id=instrument_id,
@@ -422,6 +511,55 @@ class Venue(AcademicExchange):
         super().__init__(listings={{
 {listings}
         }})
+'''
+
+_KRX_EXCHANGE_TEMPLATE = '''"""A KRX Exchange that charges what KRX charges.
+
+Commission and sale tax come from `krx_rules`, which is the one call that gets the ETF exemption
+right: a stock pays the sale tax, an ETF does not, and neither is named individually.
+
+**The category is not decoration.** `krx_rules` reads it to pick each instrument's terms, so an
+ETF listed here as `"stock"` pays a sale tax it is exempt from -- silently, on every sale, for the
+life of the project. Passing a bare list of ids instead of this mapping has the same effect: every
+name would get stock terms.
+
+The categories below must agree with the project's registered instrument roster, which is what
+`vqapr run` states and what stamps `kind` on every fill. Declare the roster with
+`vqapr new instruments`, and keep the two in step.
+"""
+
+from vqapr.public import KrxExchange, krx_rules
+
+# instrument id -> category. `stock`, `etf`, `index`, `factor` are the four the package knows.
+UNIVERSE = {{
+{universe}
+}}
+
+
+class Venue(KrxExchange):
+    """Whole-share KRX execution: declared commission and sale tax, long positions only.
+
+    `AcademicExchange` and `KrxExchange` are the only two profiles a registered Exchange may be.
+    This one charges; the academic one does not.
+    """
+
+    def __init__(self) -> None:
+        # Costs are on. The limit-up/limit-down band is not, and that is the one thing here you
+        # may want to change.
+        #
+        # `price_limits=True` models KRX's daily band, computed from the session base price, and
+        # it REQUIRES your execution input to carry that price. Preflight refuses the run by name
+        # if it does not -- it will not quietly produce limit-unaware numbers. The execution-input
+        # template `vqapr new execution-input` emits carries a trade price only, so this scaffold
+        # ships with the band off in order to run as emitted rather than refusing on first use.
+        #
+        # To switch it on: add the session base price to your execution table's `price_fields`,
+        # then set this to True. The setting lives in THIS FILE, which the run record fingerprints
+        # as `source_digest` -- so which of the two a past run measured is recoverable by reading
+        # the venue at that digest. It is not a field in the record; do not expect to see it in
+        # `vqapr show run`.
+        rules, _declared = krx_rules(UNIVERSE, price_limits=False)
+        super().__init__(rules)
 '''
 
 _EXCHANGE_DECLARATION = """\
@@ -453,10 +591,16 @@ def _exchange_template(args: argparse.Namespace, project_root: Path) -> dict[str
     refuse_existing(target, what="exchange scaffold")
     target.parent.mkdir(parents=True, exist_ok=True)
     instruments = getattr(args, "instruments", None) or ["A005930", "A000660"]
-    listed = "\n".join(
-        f'        "{name}": _rule("{name}"),' for name in instruments
-    )
-    target.write_text(_EXCHANGE_TEMPLATE.format(listings=listed), encoding="utf-8")
+    if getattr(args, "profile", "academic") == "krx":
+        # Every id defaults to `stock`, the same way `new instruments` does, because the CLI knows
+        # the ids and not what they are. The docstring says what a wrong category costs, which is
+        # the part a default cannot decide.
+        universe = "\n".join(f'    "{name}": "stock",' for name in instruments)
+        body = _KRX_EXCHANGE_TEMPLATE.format(universe=universe)
+    else:
+        listed = "\n".join(f'        "{name}": _rule("{name}"),' for name in instruments)
+        body = _EXCHANGE_TEMPLATE.format(listings=listed)
+    target.write_text(body, encoding="utf-8")
 
     declaration = target.with_suffix(".yaml")
     refuse_existing(declaration, what="exchange declaration")
@@ -538,9 +682,15 @@ if __name__ == "__main__":
 _INSTRUMENTS_DECLARATION = """\
 # Instrument roster declaration - register with `vqapr register <this-file.yaml>`
 #
-# Points at the parquet tables `{script_name}` exported. One file per category: a parquet
+# Points at the parquet tables that `{script_name}` exports. One file per category: a parquet
 # carries exactly one schema, so a single table would need a nullable column for every attribute
 # any category might have, and a null would then mean both "not applicable" and "omitted".
+#
+# Each table needs exactly two columns: `instrument_id` and `kind`. `instrument_id` is the same
+# id the dataset, the execution input and the fill table use. `kind` is one of `stock`, `etf`,
+# `index`, `factor` -- the closed set the package knows, because a category a venue has no terms
+# for cannot be charged or sized. Registration refuses anything else and names the offending
+# instrument and file, so a hand-written table is a legitimate input rather than a trap.
 #
 # The `kind` column inside each file repeats the key below on purpose. Registration checks the two
 # against each other, which catches a table pointed at the wrong key before it charges the wrong
@@ -550,10 +700,14 @@ _INSTRUMENTS_DECLARATION = """\
 # daily batch lists new tickers, issuers delist, a name is reclassified -- so correcting it is a
 # statement about the world, not a rewrite of provenance. What a past run treated an instrument as
 # is testified to by that run's own fills.
+#
+# A project has ONE roster. There is no name to give it: registering again replaces the whole
+# slot, and `vqapr run` states the digest of whichever roster it read. The declaration used to
+# carry an id here, which invited naming a second roster the workspace had nowhere to put -- it
+# was echoed back and discarded.
 
 instruments:
-  {roster_id}:
-    tables:
+  tables:
 {tables}
 """
 
@@ -572,7 +726,6 @@ def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[
 
     declaration = target.with_suffix(".yaml")
     refuse_existing(declaration, what="instrument declaration")
-    roster_id = args.component_id or "universe"
     instruments = getattr(args, "instruments", None) or ["A005930", "A000660"]
     universe = {name: "stock" for name in instruments}
 
@@ -588,13 +741,20 @@ def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[
     # author sees the whole vocabulary without having to look it up.
     used = sorted({kind for kind in universe.values()})
     lines = []
-    for kind in ("stock", "etf", "index", "factor"):
-        prefix = "      " if kind in used else "      # "
+    # From the enum, not a literal tuple. `InstrumentKind` is the closed vocabulary registration
+    # judges against, so a category added there and forgotten here would be registrable, would
+    # appear in the refusal text derived from the enum, and would be silently missing from the
+    # emitted declaration -- landing an author in exactly the undeclared-table case this same
+    # command's receipt reports after the fact.
+    from vqapr.domain.instruments import InstrumentKind
+
+    for member in InstrumentKind:
+        kind = str(member)
+        prefix = "    " if kind in used else "    # "
         lines.append(f"{prefix}{kind}: {target.stem}_{kind}.parquet")
     declaration.write_text(
         _INSTRUMENTS_DECLARATION.format(
             script_name=target.name,
-            roster_id=roster_id,
             tables="\n".join(lines),
         ),
         encoding="utf-8",

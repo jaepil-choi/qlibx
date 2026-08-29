@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import argparse
 import ast
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
 from datetime import date, datetime, time
 from difflib import get_close_matches
@@ -48,6 +48,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
+from vqapr.domain import identifiers
 from vqapr.domain.errors import (
     ExplainTopic,
     Failure,
@@ -279,20 +280,27 @@ def _instruments(bodies: dict[str, Any], project_root: Path, *, base: Path) -> d
     from vqapr.domain.roster_export import read_roster_table
     from vqapr.workspace import Workspace
 
-    if len(bodies) != 1:
-        # Several rosters would require asking which one knows an id, and that is a matcher --
-        # the thing this package removed from the charge path on purpose.
+    name = "instruments"
+    if "tables" not in bodies:
+        # The old shape named the roster: `instruments: {<id>: {tables: ...}}`. The workspace has
+        # one roster slot and stores no id, so that id was echoed back and discarded -- a
+        # declaration syntax inviting something the product cannot hold. Refused outright rather
+        # than accepted-and-ignored, because accepting it would be a compatibility shim for a
+        # statement that was never true.
+        named = ", ".join(sorted(str(key) for key in bodies)) or "nothing"
         raise InputError(
             VALUE_INVALID,
-            requirement="a project declares exactly one instrument roster",
-            observed=f"{len(bodies)} rosters declared: {', '.join(sorted(bodies))}",
-            fix="merge the tables into one `instruments:` entry",
+            requirement=(
+                "`instruments:` declares one roster's tables directly, with no id above them"
+            ),
+            observed=f"`instruments:` maps to {named} rather than to `tables`",
+            fix=(
+                "remove the id line under `instruments:` and lift `tables:` up one level; a "
+                "project holds one roster and each registration replaces it, so it has no name"
+            ),
             explain=ExplainTopic.DECLARATION_SHAPE,
         )
-    roster_id, declared = next(iter(bodies.items()))
-    name = f"instruments.{roster_id}"
-    body = _mapping(declared, name=name)
-    tables = _mapping(_required(body, "tables", name=name), name=f"{name}.tables")
+    tables = _mapping(_required(bodies, "tables", name=name), name=f"{name}.tables")
 
     resolved: dict[str, Path] = {}
     rows: dict[str, dict[str, str]] = {}
@@ -318,21 +326,80 @@ def _instruments(bodies: dict[str, Any], project_root: Path, *, base: Path) -> d
     try:
         roster = build_roster(rows)
     except ValueError as error:
+        # The declared tables, so a reader knows WHICH file to open. The exporter guarantees a
+        # clean table; a hand-written or hand-edited one is a legitimate input and arrives here
+        # identically, and that is the case this refusal is for -- an unsupported `kind` in a row
+        # never comes from `instruments.py`, only from editing its output or writing the parquet
+        # directly. `build_roster` names the instrument; this names the files it came from.
+        declared_files = ", ".join(
+            f"{kind}={path.name}" for kind, path in sorted(resolved.items())
+        )
         raise InputError(
             VALUE_INVALID,
             requirement=f"{name} must describe every instrument exactly once, under its own kind",
-            observed=str(error),
-            fix="correct the instrument tables so each id appears once under a declared kind",
+            observed=f"{error} (declared tables: {declared_files})",
+            fix=(
+                "correct the instrument tables so each id appears once under a declared kind; "
+                "re-running the emitted instruments.py produces a table that satisfies this"
+            ),
             explain=ExplainTopic.DECLARATION_SHAPE,
         ) from error
 
     workspace = Workspace.open(project_root)
     workspace.register_instruments(resolved, digest=digest.hexdigest())
-    return {
-        "roster_id": str(roster_id),
+    # No `roster_id`: the workspace stores `schema`, `tables` and `digest` and no id, so echoing
+    # one back would report an identity nothing kept. The digest is the roster's actual handle,
+    # and it is what `run` states.
+    receipt: dict[str, object] = {
         "instruments": len(roster),
         "by_kind": roster.histogram,
+        "digest": digest.hexdigest(),
     }
+    undeclared = _undeclared_roster_tables(resolved)
+    if undeclared:
+        receipt["undeclared"] = undeclared
+    return receipt
+
+
+def _undeclared_roster_tables(resolved: Mapping[str, Path]) -> list[str]:
+    """Roster tables sitting beside the declared ones that the declaration did not name.
+
+    The emitted `instruments.yaml` ships `stock:` live and `etf:`, `index:` and `factor:`
+    commented. An author who exports twelve names across two categories and registers the template
+    unchanged registers **ten**, and the ETF table sits beside it undeclared. The per-category
+    receipt made that legible -- `{"stock": 10}` against a universe of twelve -- but only to a
+    reader who noticed a number.
+
+    Reported, not refused. Declaring a subset is legitimate: a project may export every category
+    its exporter knows and trade only equities. What is not legitimate is doing it by accident, so
+    this names the file rather than deciding for the author.
+
+    Matched by the exporter's own `<stem>_<kind>.parquet` convention, derived from the declared
+    files rather than assumed, so a hand-written roster under any other naming reports nothing
+    instead of reporting noise.
+
+    The candidates are the four known categories by name, not a `{prefix}_*.parquet` glob. A glob
+    accepts any suffix, so a project with `universe_stock.parquet` beside an unrelated
+    `universe_prices.parquet` would have the second reported as an undeclared roster table -- a
+    false line in a success receipt, which is the one thing a receipt read on the success path
+    must not carry.
+    """
+    from vqapr.domain.instruments import InstrumentKind
+
+    declared = {path.resolve() for path in resolved.values()}
+    prefixes: set[tuple[Path, str]] = set()
+    for kind, path in resolved.items():
+        stem = path.stem
+        suffix = f"_{kind}"
+        if stem.endswith(suffix):
+            prefixes.add((path.parent, stem[: -len(suffix)]))
+    found: set[str] = set()
+    for parent, prefix in prefixes:
+        for known in InstrumentKind:
+            candidate = parent / f"{prefix}_{known}.parquet"
+            if candidate.is_file() and candidate.resolve() not in declared:
+                found.add(candidate.name)
+    return sorted(found)
 
 
 def _dataset(
@@ -588,6 +655,64 @@ def _agenda(
     )
 
 
+_DECLARED_IDS = {
+    "datasets": ("dataset id", identifiers.dataset_id),
+    "execution_inputs": ("execution input id", identifiers.execution_input_id),
+    "agendas": ("agenda id", identifiers.agenda_id),
+    "components": ("component id", identifiers.component_id),
+    "strategy_configs": ("component id", identifiers.component_id),
+}
+"""Sections whose KEY becomes a typed identifier, and the constructor that judges it.
+
+Every one of these refuses an empty string, one with surrounding whitespace, or one containing any
+-- with a bare `ValueError`. For four of the five nothing caught it, so a blank or padded key in a
+declaration reached the envelope as `stage:"unhandled"` with an empty `failures[]`: the framework
+reporting itself broken over a fat-fingered YAML key. `strategy_configs` is the exception --
+`Workspace.component()` already converted that `ValueError` into a structured refusal -- and it is
+here so the rule stays one rule: the key of every section listed becomes a typed identifier, and
+every one of them is judged in the same place, at the same time, with the same refusal naming the
+section it came from.
+
+One table rather than a check inside each section handler, because the first fix here covered only
+`components` and red-teaming immediately found `datasets` and `execution_inputs` still crashing.
+A per-handler check is a list you can be one short of; this is the list.
+"""
+
+
+def _require_declared_ids(section: Any) -> None:
+    """Refuse every unusable declaration key at once, before anything is registered.
+
+    Up front rather than per section: registration mutates the workspace, and validating as each
+    loop reaches it would let a bad key in `components` land after `datasets` had already been
+    written. Collected rather than stopping at the first, for the reason the whole surface
+    collects -- a document with three bad keys should cost one command, not three.
+    """
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    for key, (label, judge) in _DECLARED_IDS.items():
+        for declared in section(key):
+            raw = str(declared)
+            try:
+                judge(raw)
+            except (TypeError, ValueError) as invalid:
+                found.add(
+                    Failure.bounded(
+                        f"{DECLARE_STAGE}.value_invalid",
+                        requirement=(
+                            f"a {label} must be a non-empty string with no whitespace inside it "
+                            "and none around it"
+                        ),
+                        observed=f"{raw!r}: {invalid}",
+                        source=_at(key),
+                        fix=(
+                            f"rename the key under `{key}:` to a non-empty identifier without "
+                            "spaces, such as `daily-prices`"
+                        ),
+                        explain=ExplainTopic.DECLARATION_SHAPE,
+                    )
+                )
+    found.done().raise_if_failed()
+
+
 def _component(component_id: str, declared: object, project_root: Path, *, base: Path) -> str:
     """Register one authored component through the door its kind declares.
 
@@ -706,6 +831,8 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
     def section(key: str) -> dict[str, Any]:
         return _mapping(document.get(key) or {}, name=key)
 
+    _require_declared_ids(section)
+
     instrument_bodies = section("instruments")
     if instrument_bodies:
         receipt = _instruments(instrument_bodies, project_root, base=base)
@@ -820,6 +947,7 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
     base = {
         ComponentKind.STRATEGY_MODEL: "StrategyModel",
         ComponentKind.DATA_MODEL: "DataModel",
+        ComponentKind.CONSTRAINT: "Constraint",
     }[kind]
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -894,7 +1022,11 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
     )
 
 
-AUTHORED_KINDS = {"strategy": ComponentKind.STRATEGY_MODEL, "datamodel": ComponentKind.DATA_MODEL}
+AUTHORED_KINDS = {
+    "strategy": ComponentKind.STRATEGY_MODEL,
+    "datamodel": ComponentKind.DATA_MODEL,
+    "constraint": ComponentKind.CONSTRAINT,
+}
 """The component kinds an author writes as a `.py` and registers directly.
 
 Everything else -- datasets, sources, agendas, configs -- stays in the YAML declaration, because

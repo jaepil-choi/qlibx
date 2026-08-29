@@ -216,6 +216,207 @@ def test_a_component_that_cannot_receive_the_call_is_refused(
     assert payload["failures"][0]["code"] == "component.conformance.signature_invalid"
 
 
+def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A fat-fingered YAML key must not read as the framework breaking.
+
+    Every section here turns its key into a typed identifier, and each of those constructors
+    refuses an empty or whitespace-bearing string with a bare `ValueError`. Nothing caught **four
+    of the five**, so the envelope said `stage:"unhandled"` with an empty `failures[]` — the same
+    shape, and the same lie, as the constraint-identity crash this slice exists to remove.
+    `strategy_configs` is the exception, for the reason noted beside its entry below.
+
+    Driven per section because the first fix covered only `components:` and red-teaming found
+    `datasets:` and `execution_inputs:` still crashing. A per-handler check is a list you can be
+    one short of — and the first version of this test was one short of the table that replaced it.
+    """
+    (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
+    sections = {
+        "datasets": (
+            "datasets:\n  {key}:\n    source_id: s\n    path: x.parquet\n"
+            "    instrument_field: instrument\n    available_at: available_at\n"
+            "    key_fields: [available_at, instrument]\n    fields: {{close: close}}\n"
+        ),
+        "execution_inputs": "execution_inputs:\n  {key}:\n    dataset_id: prices\n",
+        "agendas": (
+            "agendas:\n  {key}:\n    role: strategy_callback\n"
+            '    at: "09:00"\n    timezone: Asia/Seoul\n'
+        ),
+        "components": (
+            "components:\n  {key}:\n    kind: constraint\n"
+            "    path: limit.py\n    object_name: Limit\n"
+        ),
+        # The fifth entry, and the one whose behaviour actually changed. For the four above, a
+        # blank key used to reach the envelope as `stage:"unhandled"`. This one did not --
+        # `Workspace.component()` already caught the `ValueError` and raised a structured
+        # `workspace.component.lookup.invalid`. The pre-pass changes WHICH structured refusal
+        # fires, to one that names the declaration key path and collects with its siblings.
+        # Omitting it would leave the test one short of the table the table exists to close.
+        "strategy_configs": "strategy_configs:\n  {key}:\n    agenda_id: alpha\n",
+    }
+    for section, template in sections.items():
+        for spelling in ('"   "', '""', '" limit "'):
+            document = _write(
+                tmp_path, f"{section}.yaml", template.format(key=spelling)
+            )
+            code, payload = _cli(
+                capsys, "--project-root", str(tmp_path), "register", document
+            )
+            assert code == 1, (section, spelling, payload)
+            assert payload["stage"] == "declaration.read", (section, spelling)
+            assert [failure["code"] for failure in payload["failures"]] == [
+                "declaration.read.value_invalid"
+            ], (section, spelling)
+            assert payload["failures"][0]["source"]["key_path"] == section
+
+    # Collected, not stopped at the first: two bad keys in two sections cost one command.
+    document = _write(
+        tmp_path,
+        "both.yaml",
+        'datasets:\n  " ":\n    source_id: s\n    path: x.parquet\n'
+        "    instrument_field: i\n    available_at: a\n    key_fields: [a]\n"
+        "    fields: {c: c}\n"
+        'components:\n  "":\n    kind: constraint\n    path: limit.py\n'
+        "    object_name: Limit\n",
+    )
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert len(payload["failures"]) == 2, payload
+    assert {failure["source"]["key_path"] for failure in payload["failures"]} == {
+        "datasets",
+        "components",
+    }
+
+
+def _constraint_source(returns: str) -> str:
+    return (
+        "from vqapr.public import Constraint, ConstraintBounds\n"
+        "class Limit(Constraint):\n"
+        "    @property\n"
+        "    def constraint_id(self):\n"
+        f"        return {returns}\n"
+        "    def requirements(self):\n"
+        "        return ()\n"
+        "    def project(self, window, instruments):\n"
+        "        return ConstraintBounds({}, {})\n"
+        "    def validate_intended(self, intent, bounds):\n"
+        "        return None\n"
+        "    def evaluate(self, window, account, marks, bounds):\n"
+        "        return None\n"
+    )
+
+
+def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The crash `check` could not see, moved to the door that can.
+
+    `SimulationFlow` has always required the loaded constraints to carry exactly the ids the run
+    froze, and enforced it with a bare `ValueError`. Nothing before it looked, so `check` returned
+    `ok:true` on all five phases and `run` then died with `stage: "unhandled"` and an empty
+    `failures` list -- the framework reporting itself broken when the registration was wrong.
+
+    A refusal here is worth more than a refusal at `check`, because it costs the user nothing: the
+    mismatch cannot enter the workspace, so no spec can be written against it.
+    """
+    (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
+    document = _write(
+        tmp_path,
+        "w.yaml",
+        "components:\n  position-cap:\n    kind: constraint\n"
+        "    path: limit.py\n    object_name: Limit\n",
+    )
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    failure = payload["failures"][0]
+    assert failure["code"] == "component.load.constraint_id_mismatch"
+    # Both strings, in the refusal itself. A reader must not have to open the file to learn which
+    # two ids disagreed.
+    assert "'position-cap'" in failure["observed"]
+    assert "'limit'" in failure["observed"]
+    assert "'limit'" in failure["fix"] and "'position-cap'" in failure["fix"]
+    # Refused before anything was written: the workspace never learned this component.
+    assert not (tmp_path / ".vqapr" / "workspace.yaml").exists() or "position-cap" not in (
+        tmp_path / ".vqapr" / "workspace.yaml"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_constraint_id_computed_at_runtime_is_still_checked(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The loaded object is asked, not the source text.
+
+    A `constraint_id` assembled at runtime is invisible to any static read of the file, so a check
+    that parsed the source would pass this and leave the crash exactly where it was. Asking the
+    constructed object is what makes the guard total rather than merely usual.
+    """
+    (tmp_path / "limit.py").write_text(
+        _constraint_source("'-'.join(['position', 'cap'])"), encoding="utf-8"
+    )
+    document = _write(
+        tmp_path,
+        "w.yaml",
+        "components:\n  limit:\n    kind: constraint\n"
+        "    path: limit.py\n    object_name: Limit\n",
+    )
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    failure = payload["failures"][0]
+    assert failure["code"] == "component.load.constraint_id_mismatch"
+    assert "'position-cap'" in failure["observed"], "the computed id must be reported as computed"
+
+
+def test_the_shipped_no_short_registers_under_the_id_it_answers_to(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The reported case, both halves, plus the third remedy the refusal names.
+
+    Registering `NoShort` as `noshort` crashed the run and registering the identical file as
+    `no-short` ran clean, with nothing anywhere saying why. `NoShort` takes its id as a constructor
+    argument defaulting to `no-short`, so config is a real third repair and the refusal says so.
+    """
+    from vqapr.constraints.builtin import shipped_constraint_path
+
+    source = shipped_constraint_path("no_short").as_posix()
+
+    refused = _write(
+        tmp_path,
+        "bad.yaml",
+        f"components:\n  noshort:\n    kind: constraint\n"
+        f"    path: {source}\n    object_name: NoShort\n",
+    )
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", refused)
+    assert code == 1
+    assert payload["failures"][0]["code"] == "component.load.constraint_id_mismatch"
+
+    accepted = _write(
+        tmp_path,
+        "good.yaml",
+        f"components:\n  no-short:\n    kind: constraint\n"
+        f"    path: {source}\n    object_name: NoShort\n",
+    )
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", accepted)
+    assert code == 0, payload
+    assert payload["registered"]["components"] == ["no-short"]
+
+    configured = _write(
+        tmp_path,
+        "configured.yaml",
+        f"components:\n  noshort:\n    kind: constraint\n"
+        f"    path: {source}\n    object_name: NoShort\n"
+        f"    config:\n      constraint_id: noshort\n",
+    )
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", configured)
+    assert code == 0, payload
+    assert payload["registered"]["components"] == ["noshort"]
+
+
 def test_a_missing_key_names_the_section_rather_than_raising_a_bare_keyerror(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

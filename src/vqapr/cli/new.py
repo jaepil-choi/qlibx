@@ -515,25 +515,24 @@ class Venue(AcademicExchange):
 
 _KRX_EXCHANGE_TEMPLATE = '''"""A KRX Exchange that charges what KRX charges.
 
-Commission and sale tax come from `krx_rules`, which is the one call that gets the ETF exemption
-right: a stock pays the sale tax, an ETF does not, and neither is named individually.
+Commission and sale tax are resolved per fill from the project's registered instrument roster: a
+stock pays the sale tax, an ETF does not, and **this file names no categories at all**.
 
-**The category is not decoration.** `krx_rules` reads it to pick each instrument's terms, so an
-ETF listed here as `"stock"` pays a sale tax it is exempt from -- silently, on every sale, for the
-life of the project. Passing a bare list of ids instead of this mapping has the same effect: every
-name would get stock terms.
+That is deliberate. What an instrument IS belongs to the project, not to a venue -- a stock does
+not become an ETF, and it is a stock on every venue. Declare it once with `vqapr new instruments`
+and register it. A venue that kept its own copy could disagree with the roster, and a fill would
+then say one category and be charged as another.
 
-The categories below must agree with the project's registered instrument roster, which is what
-`vqapr run` states and what stamps `kind` on every fill. Declare the roster with
-`vqapr new instruments`, and keep the two in step.
+A run with no registered roster is refused here rather than charged one flat rate, because there
+is no honest answer for an instrument nobody described.
 """
 
-from vqapr.public import KrxExchange, krx_rules
+from vqapr.public import KrxExchange, krx_listings
 
-# instrument id -> category. `stock`, `etf`, `index`, `factor` are the four the package knows.
-UNIVERSE = {{
+# The ids this venue trades. What each one IS comes from the roster.
+INSTRUMENTS = (
 {universe}
-}}
+)
 
 
 class Venue(KrxExchange):
@@ -558,8 +557,7 @@ class Venue(KrxExchange):
         # as `source_digest` -- so which of the two a past run measured is recoverable by reading
         # the venue at that digest. It is not a field in the record; do not expect to see it in
         # `vqapr show run`.
-        rules, _declared = krx_rules(UNIVERSE, price_limits=False)
-        super().__init__(rules)
+        super().__init__(krx_listings(INSTRUMENTS, price_limits=False))
 '''
 
 _EXCHANGE_DECLARATION = """\
@@ -592,10 +590,10 @@ def _exchange_template(args: argparse.Namespace, project_root: Path) -> dict[str
     target.parent.mkdir(parents=True, exist_ok=True)
     instruments = getattr(args, "instruments", None) or ["A005930", "A000660"]
     if getattr(args, "profile", "academic") == "krx":
-        # Every id defaults to `stock`, the same way `new instruments` does, because the CLI knows
-        # the ids and not what they are. The docstring says what a wrong category costs, which is
-        # the part a default cannot decide.
-        universe = "\n".join(f'    "{name}": "stock",' for name in instruments)
+        # Ids only. The CLI knows the ids and not what they are -- and neither does the venue,
+        # which is the point: the categories come from the registered roster at fill time, so
+        # there is no category here to default wrongly.
+        universe = "\n".join(f'    "{name}",' for name in instruments)
         body = _KRX_EXCHANGE_TEMPLATE.format(universe=universe)
     else:
         listed = "\n".join(f'        "{name}": _rule("{name}"),' for name in instruments)

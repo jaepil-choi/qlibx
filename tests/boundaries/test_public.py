@@ -278,6 +278,7 @@ def test_public_exports_are_fixed() -> None:
         "InstrumentRoster",
         "build_roster",
         "export_roster",
+        "krx_listings",
         "krx_rules",
         "materialize",
         "nav_series",

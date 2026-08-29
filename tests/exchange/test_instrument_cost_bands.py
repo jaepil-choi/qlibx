@@ -94,6 +94,21 @@ def _two_category_venue(stock: str, etf: str) -> KrxExchange:
     return venue
 
 
+def _venue_under_roster(kinds: dict[str, str]) -> KrxExchange:
+    """One venue built from ids alone, bound to whatever the roster says they are.
+
+    The contrast these tests draw used to be "a venue that declares categories" against "a venue
+    that does not", because a bare id list charged everything the stock terms. There is no such
+    pair any more: a venue names no category, and what varies is the ROSTER. So the same venue is
+    built once and bound twice, which is the comparison that now matters.
+    """
+    venue = KrxExchange(list(kinds))
+    venue._rules = venue.rules.with_registry(
+        InstrumentRoster({name: instrument(name, kind) for name, kind in kinds.items()})
+    )
+    return venue
+
+
 def test_kind_is_a_venue_independent_fact_with_a_declared_extension_path() -> None:
     assert instrument("A005930", "stock") == StockInstrument("A005930")
     assert instrument("A069500", InstrumentKind.ETF).kind is InstrumentKind.ETF
@@ -142,9 +157,15 @@ def test_an_etf_is_exempt_from_the_share_sale_tax_at_the_same_price(real_close) 
     assert stock_sell.commission == etf_sell.commission == notional * COMMISSION_RATE
     assert stock_sell.total - etf_sell.total == notional * SALE_TAX_RATE
 
-    # A venue-wide declaration cannot express this: both categories pay the share tax.
-    flat = KrxExchange([stock, etf]).rules
-    assert flat.charge(Side.SELL, notional, etf).tax == notional * SALE_TAX_RATE
+    # A venue built from bare ids expresses it identically, because neither venue holds a
+    # category: both read the roster. This line used to assert the opposite -- that a venue-wide
+    # declaration could not express the exemption and charged the ETF the share tax -- which was
+    # true only because `charge` read the rule the venue was constructed with (issue 013).
+    from_ids = KrxExchange([stock, etf]).rules.with_registry(
+        InstrumentRoster({stock: instrument(stock, "stock"), etf: instrument(etf, "etf")})
+    )
+    assert from_ids.charge(Side.SELL, notional, etf).tax == Decimal("0")
+    assert from_ids.charge(Side.SELL, notional, stock).tax == notional * SALE_TAX_RATE
 
 
 @pytest.mark.uc("UC-COST-004")
@@ -226,13 +247,15 @@ def test_the_exempt_sleeve_funds_more_of_the_buy_it_pays_for(real_close) -> None
         )
         return {request.instrument_id: request.delta_quantity for request in batch.requests}
 
-    exempt = rotate(_two_category_venue(stock, etf).rules)
-    venue_wide = rotate(KrxExchange([stock, etf]).rules)
+    # The same venue, twice, under two rosters. What the sleeve IS decides what its sale costs,
+    # and therefore how much of the buy that sale funds -- and the venue has no say in it.
+    exempt = rotate(_venue_under_roster({stock: "stock", etf: "etf"}).rules)
+    taxed = rotate(_venue_under_roster({stock: "stock", etf: "stock"}).rules)
 
-    assert exempt[etf] == venue_wide[etf] == -held, "the whole sleeve is sold either way"
+    assert exempt[etf] == taxed[etf] == -held, "the whole sleeve is sold either way"
     assert exempt[stock] == Decimal("1213")
-    assert venue_wide[stock] == Decimal("1211")
-    assert exempt[stock] > venue_wide[stock], (
+    assert taxed[stock] == Decimal("1211")
+    assert exempt[stock] > taxed[stock], (
         "an exempt sleeve leaves the tax in the account, and that money buys shares"
     )
 
@@ -335,9 +358,17 @@ def test_a_batch_reports_what_each_category_paid(real_close) -> None:
     }
 
 
-def test_a_venue_declaring_no_categories_collects_under_none() -> None:
-    """Not dropped and not guessed: an undeclared category is reported as one."""
-    venue = KrxExchange(["A005930"])
+def test_a_rosterless_run_is_refused_by_a_categorised_venue_and_served_by_a_flat_one() -> None:
+    """The split `stamped_kind`'s docstring promises, now delivered on the charging side too.
+
+    It states the rule: a run with no roster still executes on a venue that charges one flat rate,
+    while a venue whose rate depends on the category refuses. Charging was the half that did not
+    follow -- KRX went on billing everything the stock terms, so a rosterless run completed and
+    collected the share sale tax under `None`, which is the outcome issue 011.3 named and this now
+    forecloses.
+
+    `None` in `cost_by_kind()` is still the honest bucket for a venue that never needed a category.
+    """
     at = datetime(2026, 8, 22, 6, 30, tzinfo=UTC)
     price = Decimal("70000")
     account = AccountSnapshot(0, Decimal("0"), {"A005930": Decimal("100")})
@@ -347,32 +378,50 @@ def test_a_venue_declaring_no_categories_collects_under_none() -> None:
     snapshot = ExactExecutionSnapshot(
         at, (ExactExecutionRow(at, "A005930", True, price),), (), (), ()
     )
-    fills = venue.execute(batch, account, snapshot)
 
-    by_kind = fills.cost_by_kind()
-    assert list(by_kind) == [None]
-    assert by_kind[None].tax == Decimal("60") * price * SALE_TAX_RATE
+    with pytest.raises(ValueError, match="no instrument roster reached"):
+        KrxExchange(["A005930"]).execute(batch, account, snapshot)
+
+    # A venue whose rate does not vary by category answers unbound, because it never needed to
+    # ask. That is the other half of the same rule, and it is why refusing above is a statement
+    # about KRX rather than a new precondition on every venue.
+    free = AcademicExchange(
+        {"A005930": TradeRule("A005930", Decimal("1"), Decimal("1"), False)}
+    ).rules
+    assert free.registry is None
+    assert free.charge(Side.SELL, Decimal("1000000"), "A005930").total == Decimal("0")
 
 
-def test_a_bare_universe_gets_stock_terms() -> None:
-    """A bare universe still gets the stock TERMS -- but no longer claims to know what it holds.
+def test_an_unbound_krx_venue_refuses_to_charge_rather_than_assuming_a_share() -> None:
+    """The other half of the bypass issue 007 named, now also gone.
 
-    The bare-sequence form was the bypass issue 007 named: it gave every name stock terms AND
-    recorded no category, so an ETF quietly paid a tax KRX exempts. Half of that is now gone. The
-    terms remain (a venue may absolutely charge one flat rate), while the identity claim is
-    refused rather than silently answered.
+    It gave every name stock terms AND recorded no category, so an ETF quietly paid a tax KRX
+    exempts. The identity claim was refused first; this pins the charge, which went on answering
+    from the rule the venue was constructed with while `stamped_kind` answered from the roster --
+    so a fill could say one category and be charged as another (issue 013).
+
+    A KRX rate depends on what the instrument IS, and for an instrument nobody described there is
+    no honest answer. Charging one anyway is the silent default this design exists to remove, so
+    an unbound venue refuses on BOTH questions rather than on one of them.
     """
     flat = KrxExchange(["A005930"]).rules
     notional = Decimal("1000000")
-    assert flat.charge(Side.BUY, notional, "A005930").total == notional * COMMISSION_RATE
-    assert flat.charge(Side.SELL, notional, "A005930").total == notional * (
-        COMMISSION_RATE + SALE_TAX_RATE
-    )
-    # Identity is no longer the venue's to answer. It used to return `None` here, and every
-    # caller decided for itself what that meant -- which is how an ETF came to pay a share's
-    # sale tax. Now the question is refused, and the answer comes from the project's roster.
+    for side in (Side.BUY, Side.SELL):
+        with pytest.raises(ValueError, match="no instrument roster reached"):
+            flat.charge(side, notional, "A005930")
     with pytest.raises(ValueError, match="no instrument roster reached"):
         flat.kind("A005930")
+
+    # Bound, it charges what the ROSTER says -- and the venue named no category to disagree with.
+    bound = flat.with_registry(InstrumentRoster({"A005930": instrument("A005930", "stock")}))
+    assert bound.charge(Side.BUY, notional, "A005930").total == notional * COMMISSION_RATE
+    assert bound.charge(Side.SELL, notional, "A005930").total == notional * (
+        COMMISSION_RATE + SALE_TAX_RATE
+    )
+    exempt = flat.with_registry(InstrumentRoster({"A005930": instrument("A005930", "etf")}))
+    assert exempt.charge(Side.SELL, notional, "A005930").tax == Decimal("0"), (
+        "the same venue, the same id, a different roster: the category is the project's answer"
+    )
     # Sizing still works unbound, because no shipped category overrides the base conversion, so
     # the declared answer and this one are the same number. `_sizing_is_uniform` retires that the
     # moment a category with its own contract size arrives.

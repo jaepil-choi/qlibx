@@ -66,7 +66,7 @@ from vqapr.exchange.listings import (
     trade_rules_by_kind,
 )
 from vqapr.exchange.venue import AcademicExchange, Side
-from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_rules
+from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_listings, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 # `as_loaded_fingerprint` is imported from `_internal` directly rather than through
@@ -230,6 +230,7 @@ __all__ = (
     "InstrumentRoster",
     "build_roster",
     "export_roster",
+    "krx_listings",
     "krx_rules",
     "materialize",
     "nav_series",

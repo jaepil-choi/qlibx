@@ -205,11 +205,18 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, emitted
     source = Path(emitted["path"])
     body = source.read_text(encoding="utf-8")
-    assert "krx_rules" in body, "the krx profile must build its terms from krx_rules"
-    # Edited exactly where the emitted docstring says to: the category of the ETF. Every id is
-    # scaffolded as `stock`, because the CLI knows the ids and not what they are.
-    assert f'"{ETF}": "stock"' in body
-    source.write_text(body.replace(f'"{ETF}": "stock"', f'"{ETF}": "etf"'), encoding="utf-8")
+    assert "krx_listings" in body, "the krx profile builds its trading facts from ids alone"
+    # THE POINT: the emitted venue names no category anywhere. What each instrument is comes from
+    # the registered roster at fill time, so there is nothing here to edit and nothing to keep in
+    # step. A venue holding its own copy could disagree with the roster, and a fill would then say
+    # one category and be charged as another (issue 013).
+    for category in ("stock", "etf", "index", "factor"):
+        assert f'"{category}"' not in body, (
+            f"the scaffold declares {category!r}; a venue that names a category can disagree "
+            "with the roster"
+        )
+    assert ETF in body and STOCK in body, "both ids are listed, as ids"
+    # Run it exactly as emitted. No edit at all, which the previous version of this test needed.
     code, payload = _cli(
         capsys, "--project-root", str(tmp_path), "register", emitted["declaration"]
     )

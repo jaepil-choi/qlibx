@@ -17,6 +17,8 @@ import pytest
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.domain.enums import Side
+from vqapr.domain.instruments import instrument
+from vqapr.domain.roster import InstrumentRoster
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.costs import FillCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
@@ -74,10 +76,27 @@ def _snapshot(
     return ExactExecutionSnapshot(at, rows, (), (), ())
 
 
+def _krx(instrument_ids) -> KrxExchange:
+    """A KRX venue bound to a roster that calls every id a stock.
+
+    KRX's rate depends on what an instrument IS, so an unbound venue refuses to charge rather than
+    assuming a share (issue 013). These tests are about order mechanics -- whole shares, halts,
+    rounding, the short refusal -- and each needs a category only because a charge is computed
+    along the way. Stating it here is what the Flow does at run assembly, and it makes the
+    assumption these tests were already relying on visible.
+    """
+    ids = list(instrument_ids)
+    venue = KrxExchange(ids)
+    venue._rules = venue.rules.with_registry(
+        InstrumentRoster({name: instrument(name, "stock") for name in ids})
+    )
+    return venue
+
+
 def test_declared_cost_bands_match_the_agreed_rates() -> None:
     assert Decimal("0.0003") == COMMISSION_RATE
     assert Decimal("0.002") == SALE_TAX_RATE
-    rules = KrxExchange(["A005930"]).rules
+    rules = _krx(["A005930"]).rules
     buy = rules.charge(Side.BUY, Decimal("1000000"), "A005930")
     sell = rules.charge(Side.SELL, Decimal("1000000"), "A005930")
     assert buy == FillCost(Decimal("300.0000"), Decimal("0"))
@@ -86,7 +105,7 @@ def test_declared_cost_bands_match_the_agreed_rates() -> None:
 
 def test_real_prices_produce_whole_share_orders_that_fit_cash(real_close) -> None:
     at, prices = real_close
-    exchange = KrxExchange(sorted(prices))
+    exchange = _krx(sorted(prices))
     account = AccountSnapshot(0, Decimal("1000000000"), {})
     weight = Decimal(1) / Decimal(len(prices))
 
@@ -121,7 +140,7 @@ def test_sells_pay_commission_and_sale_tax_on_real_prices(real_close) -> None:
     at, prices = real_close
     instrument = sorted(prices)[0]
     price = prices[instrument]
-    exchange = KrxExchange([instrument])
+    exchange = _krx([instrument])
     held = Decimal("100")
     account = AccountSnapshot(3, Decimal("5000000"), {instrument: held})
 
@@ -156,7 +175,7 @@ def test_krx_refuses_to_open_a_short_position(real_close) -> None:
     at, prices = real_close
     instrument = sorted(prices)[0]
     price = prices[instrument]
-    exchange = KrxExchange([instrument])
+    exchange = _krx([instrument])
     account = AccountSnapshot(0, Decimal("1000000"), {})
 
     batch = plan_orders(
@@ -176,7 +195,7 @@ def test_halted_real_instrument_is_zero_dealt_and_free(real_close) -> None:
     at, prices = real_close
     instrument = sorted(prices)[0]
     price = prices[instrument]
-    exchange = KrxExchange([instrument])
+    exchange = _krx([instrument])
     account = AccountSnapshot(0, Decimal("1000000000"), {})
 
     batch = plan_orders(
@@ -202,7 +221,7 @@ def test_rounding_residual_stays_visible_against_the_intended_position(real_clos
     at, prices = real_close
     instrument = sorted(prices)[0]
     price = prices[instrument]
-    exchange = KrxExchange([instrument])
+    exchange = _krx([instrument])
     account = AccountSnapshot(0, Decimal("1000000000"), {})
 
     intended = account.cash / price

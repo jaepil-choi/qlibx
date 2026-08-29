@@ -152,6 +152,42 @@ KRX_TERMS: Mapping[InstrumentKind, TradeTerms] = {
 """The two categories KRX trades. A factor or an index is simply not listed here."""
 
 
+def krx_listings(
+    instrument_ids: Sequence[str],
+    *,
+    price_limits: bool = True,
+) -> dict[str, TradeRule]:
+    """KRX's trading facts for a set of ids, needing no categories at all.
+
+    A rule says how an instrument TRADES: whole shares, a minimum of one, long-only, and whether
+    the limit-up/limit-down band applies. Those are the venue's own facts and they are identical
+    across every category KRX lists -- `KRX_TERMS`' two entries differ only in `buy`/`sell`.
+
+    What an instrument COSTS is therefore not built here. It is resolved per fill from `KRX_TERMS`
+    against the category the project's registered roster declares, so this function has no reason
+    to ask which instrument is which, and a venue built from it holds no category to disagree with
+    the roster (issue 013).
+
+    This is what :func:`krx_rules` should have been. That function still exists for callers holding
+    a `{id: kind}` mapping already, but its categories no longer decide anything a run charges.
+    """
+    rate = PRICE_LIMIT_RATE if price_limits else None
+    base = KRX_TERMS[InstrumentKind.STOCK]
+    return {
+        str(instrument_id): KrxTradeRule(
+            str(instrument_id),
+            base.quantity_step,
+            base.minimum_quantity,
+            base.fractional_allowed,
+            base.access,
+            base.buy,
+            base.sell,
+            price_limit_rate=rate,
+        )
+        for instrument_id in instrument_ids
+    }
+
+
 def krx_rules(
     universe: Mapping[str, InstrumentKind | str],
     *,
@@ -168,8 +204,12 @@ def krx_rules(
     what nine in-tree call sites unpack.
 
     ``price_limits=False`` switches off the limit-up/limit-down regime, which is how a user whose
-    execution table carries only a trade price still runs here. The choice is recorded in every
-    rule's declaration identity, so a run states which of the two it measured.
+    execution table carries only a trade price still runs here.
+
+    **The categories it takes no longer decide what a run charges.** `ExchangeRulesView.charge`
+    resolves the rate from the registered roster, so the per-kind `buy`/`sell` baked into these
+    rules is inert. Prefer :func:`krx_listings`, which asks for ids alone; this is kept for callers
+    that already hold a `{id: kind}` mapping and want the built instruments back.
     """
     declared = build_instruments(universe)
     rate = PRICE_LIMIT_RATE if price_limits else None
@@ -215,10 +255,16 @@ class KrxExchange:
         was never its own (issue 008). Removing the parameter removes the channel -- there is now
         no way for a venue author to state a category, correctly or otherwise.
 
-        The bare-sequence form is consequently no longer a bypass. It used to give every name the
-        STOCK terms *and* record no category, so an ETF quietly paid a tax KRX exempts. Now it
-        says only "these are the ids I trade", the categories come from the roster, and
-        :func:`krx_rules` is about per-category TERMS rather than about identity.
+        The bare-sequence form is consequently no longer a bypass. It says only "these are the ids
+        I trade", and **the categories come from the roster** -- which this class now delivers
+        rather than merely promises. It used to build every listing from the STOCK terms and charge
+        from that rule, so an ETF quietly paid a tax KRX exempts while its fill correctly recorded
+        `kind: etf` (issue 013).
+
+        The listings still carry a rule each, because a rule says how an instrument TRADES -- whole
+        shares, a minimum, a price band -- and those are the venue's own facts. What it COSTS is
+        resolved per fill from `KRX_TERMS` against the roster's category, so this venue holds no
+        category of its own and has nothing to disagree with.
         """
         resolved: Mapping[str, TradeRule]
         if isinstance(listings, Mapping):
@@ -231,7 +277,7 @@ class KrxExchange:
             if rule.fractional_allowed:
                 raise ValueError(f"KRX listing {instrument_id!r} must not be fractional")
         self.exchange_id = exchange_id
-        self._rules = ExchangeRulesView(exchange_id, resolved)
+        self._rules = ExchangeRulesView(exchange_id, resolved, terms_by_kind=KRX_TERMS)
 
     def execution_requirements(self) -> tuple[ExecutionFieldRequirement, ...]:
         """The execution-table prices this venue needs, given what its rules actually declare.

@@ -321,6 +321,23 @@ class ExchangeRulesView:
     exchange_id: str
     listings: Mapping[str, TradeRule]
     registry: object | None = None
+    terms_by_kind: Mapping[object, object] | None = None
+    """Per-category terms, for a venue whose rate depends on what an instrument IS.
+
+    Present, the charge is resolved from the ROSTER at fill time rather than from the rule the
+    venue was constructed with. That is the difference between a venue that reads a category and
+    one that declares it: the first borrows the project's answer, the second keeps its own and can
+    disagree with it.
+
+    Absent, the listing's own `buy`/`sell` are charged, which is right for a venue whose rate does
+    not vary by category -- the academic profile charges nothing, and a flat-rate venue charges the
+    same thing to everything.
+
+    Keeping the terms here rather than on each `TradeRule` is what removes the duplication. A rule
+    still says how an instrument TRADES -- its step, its minimum, its price band -- and those are
+    the venue's own facts. What it COSTS depends on a category the project owns, so it is resolved
+    where the project's answer is available and nowhere else.
+    """
     """The project's instrument roster, handed in at run assembly. ACCESS, never ownership.
 
     A venue reading what an instrument is, is right; a venue DECLARING it is the defect issue 008
@@ -373,7 +390,12 @@ class ExchangeRulesView:
         Returns a new view rather than mutating: a venue instance may be shared, and a run binding
         its registry into somebody else's venue would be a side effect nobody declared.
         """
-        return ExchangeRulesView(self.exchange_id, self.listings, self._as_registry(registry))
+        return ExchangeRulesView(
+            self.exchange_id,
+            self.listings,
+            self._as_registry(registry),
+            self.terms_by_kind,
+        )
 
     def _declared(self, instrument_id: str) -> Instrument:
         """The instrument's declared identity, refusing rather than guessing.
@@ -469,11 +491,33 @@ class ExchangeRulesView:
         return self._declared(instrument_id).quantity_for(value, price)
 
     def charge(self, side: Side, notional: Decimal, instrument_id: str) -> FillCost:
-        """Charge the instrument's own rate for ``side``.
+        """Charge the rate that applies to this instrument on this side.
 
-        A dictionary lookup, not a match: an instrument the venue lists has exactly one rule, so
-        charging zero bands or several is not a failure mode that exists.
+        When the venue declares per-category terms, the category comes from the ROSTER, through
+        `_declared` -- the same source `stamped_kind` reads. Before this, `charge` read the rule
+        the venue was constructed with while `stamped_kind` read the registry, so a fill could say
+        one category and be charged as another, silently, on a run that completed `ok:true`
+        (issue 013).
+
+        `_declared` refuses rather than defaulting when no roster reached the venue. That is the
+        correct failure for a venue whose rate depends on the category: there is no honest answer
+        for an undescribed id, and charging one rate anyway is the silent default this design
+        exists to remove. A venue with flat terms still runs without a roster, because it takes the
+        branch below.
         """
+        if self.terms_by_kind is not None:
+            # `listing` first, so an id this venue does not trade is refused as that rather than as
+            # a category problem.
+            self.listing(instrument_id)
+            terms = self.terms_by_kind.get(self._declared(instrument_id).kind)
+            if terms is None:
+                raise ValueError(
+                    f"{self.exchange_id!r} declares no terms for "
+                    f"{self._declared(instrument_id).kind}, which is what the registered roster "
+                    f"says {instrument_id!r} is; list it under a category this venue trades, or "
+                    f"correct the roster"
+                )
+            return terms.for_instrument(instrument_id).charge(side, notional)
         return self.listing(instrument_id).charge(side, notional)
 
     @property

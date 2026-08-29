@@ -607,7 +607,7 @@
     {
       "code": "run.roster.unreadable",
       "file": "src/vqapr/public.py",
-      "line": 534
+      "line": 535
     },
     {
       "code": "source.scan.conditional_positive.unreadable",

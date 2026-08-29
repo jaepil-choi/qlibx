@@ -69,6 +69,36 @@ registered and passes validation.
 9. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
    component declares it reads, decides, forms, weights and records
 
+**A DataModel derives a column, and `run` executes it.** A StrategyModel decides what to hold; a
+DataModel computes a new dataset from the ones you registered. Both are authored the same way and
+both are described by `vqapr show model <id>`.
+
+A materialization spec names `datamodel:` where a simulation names `strategy:`, and that is what
+tells `run` which it is holding — declare both, or neither, and it refuses rather than guessing:
+
+```yaml
+datamodel: my-derived            # the registered component to run
+instruments: [A005930, A000660]  # what to evaluate over
+output:
+  dataset_id: my-derived-values  # must NOT already be registered
+  value_fields: [value]          # the columns it writes
+evaluate_at:                     # when to evaluate; timezone-aware, one entry minimum
+  - "2024-03-06T04:00:00+09:00"
+```
+
+Then `vqapr check <spec>` and `vqapr run <spec>` exactly as for a simulation. It registers a
+dataset rather than writing a run record, so `vqapr list datasets` shows it arrived and
+`vqapr show dataset <id>` reads back what it computed. The output is readable by any component
+that declares it — which is the point: one model's output is the next model's input.
+
+**`vqapr show dataset <id> [--limit N]`** works for any registered dataset, not just a
+materialized one. It reports the registration's own facts — source, path, declared fields, span —
+alongside the rows, and reports `rows_total` separately from `returned` so a truncated page never
+reads as a short dataset. `--limit 0` returns every row.
+
+`--run-id` and `--force` are refused here. Both are defined in terms of a run record and a
+materialization writes none; to replace an output, remove its dataset registration first.
+
 **Reading a finished run.** `vqapr show run <id>` gives the record: the account, the period, the
 roster it read, and per-table row counts. `vqapr show run <id> --table <name>` gives the rows
 themselves, with `--limit` (0 for all). It reports `rows_total` and `returned` separately, so a

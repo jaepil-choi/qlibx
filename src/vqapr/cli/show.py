@@ -25,7 +25,7 @@ from vqapr.flow.run_records import RECORD_FIELDS as _RECORD_FIELDS
 from vqapr.flow.run_records import read_record, read_table, run_ids, table_ids
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
-KINDS = ("run", "model")
+KINDS = ("run", "model", "dataset")
 
 
 # Imported, not redefined. The record is the artifact and this is one of its readers, so the field
@@ -75,7 +75,8 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     head. Read by loading the component rather than by parsing it, so what is reported is what the
     framework will actually act on.
     """
-    from vqapr._internal.extensions.loading import load_strategy_model
+    from vqapr._internal.extensions.component import ComponentKind
+    from vqapr._internal.extensions.loading import load_data_model, load_strategy_model
 
     space = Workspace.open(project_root)
     try:
@@ -89,7 +90,16 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             retry="run `vqapr list components` to see what this workspace holds",
         ) from None
 
-    model = load_strategy_model(ref, project_root=project_root)
+    # Both authored kinds, because both declare the same things. `show model` loaded only a
+    # StrategyModel and refused a DataModel with a message about the wrong kind -- so the one
+    # component whose whole job is to DERIVE a column could be scaffolded and registered and never
+    # described. A first-time-user journey reported that as a blocker while trying to find out
+    # what a DataModel is for.
+    kind = getattr(ref, "kind", None)
+    if kind is ComponentKind.DATA_MODEL:
+        model = load_data_model(ref, project_root=project_root)
+    else:
+        model = load_strategy_model(ref, project_root=project_root)
     # An authored model arrives wrapped in the adapter that stamps identity and provenance, so the
     # declarations live on the adapter under its own names. Reading the loaded object rather than
     # re-parsing the file means this reports what the framework will actually act on.
@@ -117,9 +127,54 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     }
 
 
+def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
+    """What a registered dataset actually holds, not merely that it exists.
+
+    `list datasets` proves a registration. Nothing could read a row back, so a reader who
+    materialized a DataModel and wanted to see what it computed had to build a second complete
+    run -- execution input, exchange, strategy, agendas, spec -- purely to observe the values, or
+    open the parquet by hand. A first-time-user journey did both.
+
+    Exactly the gap `show run --table` closed one artifact over: the record reported per-table row
+    counts and nothing could read a row. The same rule applies here, so the same answer does.
+    """
+    from vqapr.data import scan
+
+    space = Workspace.open(project_root)
+    registered = {str(item.dataset_id): item for item in space.datasets}
+    item = registered.get(dataset_id)
+    if item is None:
+        raise InputError(
+            "cli.input.value_invalid",
+            requirement="show dataset requires the id of a registered dataset",
+            observed=f"{dataset_id!r}; registered: {', '.join(sorted(registered)) or '(none)'}",
+            retry="run `vqapr list datasets` to see what this workspace holds",
+        )
+
+    source = space.source(str(item.source))
+    rows = scan.head(source, limit=limit)
+    return {
+        "dataset_id": dataset_id,
+        "source_id": str(source.source_id),
+        "path": str(source.path),
+        "fields": dict(item.fields),
+        "instrument_field": item.instrument_field,
+        "available_at": item.available_at,
+        "span": [str(value) for value in (item.span or ())] or None,
+        # Two numbers for the same reason `show run --table` reports two: a page that reported
+        # only what it returned would let a reader conclude a dataset holds ten rows.
+        "rows_total": scan.row_count(source),
+        "returned": len(rows),
+        "items": rows,
+    }
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     if args.kind == "model":
         return success("model.show", **_model(args.identifier, project_root))
+    if args.kind == "dataset":
+        limit = max(int(getattr(args, "limit", 100) or 0), 0)
+        return success("dataset.show", **_dataset(args.identifier, project_root, limit))
     root = args.store_root or project_root / WORKSPACE_DIRECTORY
     known = run_ids(root)
     if args.identifier not in known:

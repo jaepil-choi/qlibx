@@ -13,6 +13,7 @@ from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 
 import duckdb
@@ -320,6 +321,39 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
     finally:
         con.close()
     return {name: _normalize(dtype) for name, dtype, *_ in rows}
+
+
+def row_count(spec: SourceSpec) -> int:
+    """How many rows the source holds, without reading them."""
+    con = _open(spec)
+    try:
+        return int(con.execute(f"SELECT count(*) FROM {_relation(spec)}").fetchone()[0])
+    finally:
+        con.close()
+
+
+def head(spec: SourceSpec, *, limit: int = 100) -> list[dict[str, object]]:
+    """The first rows of a source, as plain dicts. `limit=0` reads every row.
+
+    A scan primitive for a reader, not an observation query: no point-in-time cutoff, no lookback,
+    no dataset semantics. `show dataset` is the caller, and what it answers is "what is in this
+    file" rather than "what would a model have seen" -- conflating the two would make an inspection
+    command quietly disagree with the windows a run actually reads.
+    """
+    con = _open(spec)
+    try:
+        sql = f"SELECT * FROM {_relation(spec)}"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        cursor = con.execute(sql)
+        names = [column[0] for column in cursor.description]
+        return [
+            {name: (str(value) if isinstance(value, Decimal) else value)
+             for name, value in zip(names, row, strict=True)}
+            for row in cursor.fetchall()
+        ]
+    finally:
+        con.close()
 
 
 def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:

@@ -612,37 +612,37 @@
     {
       "code": "source.scan.conditional_positive.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 565
+      "line": 599
     },
     {
       "code": "source.scan.distinct.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 343
+      "line": 377
     },
     {
       "code": "source.scan.execution_candidates.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 384
+      "line": 418
     },
     {
       "code": "source.scan.execution_snapshot.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 441
+      "line": 475
     },
     {
       "code": "source.scan.observations.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 777
+      "line": 811
     },
     {
       "code": "source.scan.path_missing",
       "file": "src/vqapr/data/scan.py",
-      "line": 169
+      "line": 170
     },
     {
       "code": "source.scan.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 308
+      "line": 309
     },
     {
       "code": "workspace.agenda.lookup.invalid",

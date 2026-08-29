@@ -373,6 +373,74 @@ def test_an_empty_recorded_table_reads_back_as_empty_not_as_broken(
     assert page["rows_total"] == 0 and page["items"] == []
 
 
+def test_show_dataset_reads_back_what_a_dataset_holds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`list datasets` proves a registration; nothing could read a row.
+
+    A first-time-user journey materialized a DataModel, wanted to see what it had computed, and
+    had to build a SECOND complete run -- execution input, exchange, strategy, agendas, spec --
+    purely to observe the values, then fell back to opening the parquet by hand anyway.
+
+    The same gap `show run --table` closed one artifact over, and the same answer.
+    """
+    _workspace_for_run(tmp_path, capsys)
+
+    code, shown = _cli(
+        capsys, "--project-root", str(tmp_path), "show", "dataset", "prices", "--limit", "2"
+    )
+
+    assert code == 0, shown
+    assert shown["dataset_id"] == "prices"
+    # Two numbers, for the same reason the table readback reports two: a page reporting only what
+    # it returned would let a reader conclude the dataset holds two rows.
+    assert shown["returned"] == 2 and shown["rows_total"] == 3
+    assert len(shown["items"]) == 2
+    assert "close" in shown["items"][0], "the declared field must be present in the rows"
+    # The registration's own facts come back with the rows, so one call answers both what this
+    # dataset IS and what it holds.
+    assert shown["fields"] == {"close": "close"}
+    assert shown["span"] is not None
+
+    code, everything = _cli(
+        capsys, "--project-root", str(tmp_path), "show", "dataset", "prices", "--limit", "0"
+    )
+    assert everything["returned"] == everything["rows_total"] == 3, "--limit 0 reads every row"
+
+    code, refused = _cli(capsys, "--project-root", str(tmp_path), "show", "dataset", "nope")
+    assert code == 1
+    assert refused["stage"] != "unhandled"
+    assert "prices" in refused["failures"][0]["observed"], "the refusal names what is registered"
+
+
+def test_show_model_describes_a_datamodel_and_not_only_a_strategy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both authored kinds declare the same things, so both are describable.
+
+    `show model` loaded only a StrategyModel and refused a DataModel with a message about the
+    wrong kind, so the one component whose whole job is to derive a column could be scaffolded and
+    registered and never described. A first-time-user journey reported that as a blocker while
+    trying to work out what a DataModel is for -- with `show model` refusing and the skill silent,
+    the surface offered no way to find out.
+    """
+    _workspace_for_run(tmp_path, capsys)
+    code, emitted = _cli(
+        capsys, "--project-root", str(tmp_path), "new", "datamodel", "derived",
+        "--dataset", "prices", "--lookback", "1",
+    )
+    assert code == 0, emitted
+    _cli(capsys, "--project-root", str(tmp_path), "register", emitted["declaration"])
+
+    code, described = _cli(capsys, "--project-root", str(tmp_path), "show", "model", "derived")
+
+    assert code == 0, described
+    assert described["component_id"] == "derived"
+    assert described["kind"] == "data_model", "the kind is reported, not assumed"
+    # What it reads is the question a reader opens this command to answer.
+    assert described["decides"] == ["prices"]
+
+
 def test_a_registered_datamodel_is_runnable_through_run(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

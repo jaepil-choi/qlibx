@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import MappingProxyType
+from typing import Any
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
@@ -342,3 +343,69 @@ def exact_execution_snapshot(
             instrument for instrument in held if instrument not in present
         ),
     )
+
+
+def requested_rows(
+    snapshot: ExactExecutionSnapshot, requests: Sequence[Any]
+) -> dict[str, ExactExecutionRow]:
+    """The snapshot rows a batch asked about, checked against the snapshot's own contract.
+
+    Lifted here from both execution profiles, where it stood twice byte for byte under two names
+    (`AcademicExchange._validate_snapshot` and `KrxExchange._rows`). Two copies of one contract
+    check drift the first time only one is edited, and issue `002` named that as the thing most
+    likely to go wrong between the profiles.
+
+    A FUNCTION rather than a shared base class, deliberately. What this checks is a property of
+    `ExactExecutionSnapshot` -- no duplicate requested instrument, a boolean tradability, a
+    positive finite price when tradable -- and none of it is venue policy. The profiles genuinely
+    differ on quantity, cost, shorting and account access, and a base class inviting those to be
+    shared is what issue `002` warns against. `load_exchange` also refuses a subclass whose
+    `execute` is not its profile's, so a shared `execute` would blur which semantics a subclass
+    claims.
+    """
+    requested = {request.instrument_id for request in requests}
+    if set(snapshot.duplicate_instruments) & requested:
+        raise ValueError("execution snapshot has duplicate requested instruments")
+    rows: dict[str, ExactExecutionRow] = {}
+    for row in snapshot.rows:
+        if row.instrument not in requested:
+            continue
+        if row.instrument in rows:
+            raise ValueError("execution snapshot has duplicate requested instruments")
+        if not isinstance(row.is_tradable, bool):
+            raise ValueError(f"invalid tradability for {row.instrument!r}")
+        if row.is_tradable and (
+            not isinstance(row.price, Decimal) or not row.price.is_finite() or row.price <= 0
+        ):
+            raise ValueError(f"invalid tradable price for {row.instrument!r}")
+        rows[row.instrument] = row
+    return rows
+
+
+def accepted_requests(orders: Any, account: Any, snapshot: Any) -> tuple[Any, ...]:
+    """The batch's requests in stable identity order, after the checks every profile makes.
+
+    The other half of the duplication issue `002` measured: eleven lines standing byte for byte in
+    both profiles' `execute`. Types, the account-version match, and one request per instrument are
+    preconditions on the CALL rather than decisions about a venue, so they belong beside the types
+    they check.
+
+    Returns the sorted requests instead of validating in place, because sorting is the last of the
+    shared steps and every caller needs its result -- returning it is what stops the sort itself
+    from being the twelfth duplicated line.
+    """
+    from vqapr.account.snapshot import AccountSnapshot
+    from vqapr.orders.batches import OrderBatch
+
+    if not isinstance(orders, OrderBatch):
+        raise TypeError("orders must be an OrderBatch")
+    if not isinstance(account, AccountSnapshot):
+        raise TypeError("account must be an AccountSnapshot")
+    if not isinstance(snapshot, ExactExecutionSnapshot):
+        raise TypeError("snapshot must be an ExactExecutionSnapshot")
+    if orders.account_version != account.version:
+        raise ValueError("OrderBatch account_version does not match AccountSnapshot version")
+    requests = tuple(sorted(orders.requests, key=lambda request: request.instrument_id))
+    if len({request.instrument_id for request in requests}) != len(requests):
+        raise ValueError("an OrderBatch may contain each instrument only once")
+    return requests

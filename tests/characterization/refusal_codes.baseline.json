@@ -402,27 +402,27 @@
     {
       "code": "execution_input.register.key.duplicate",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 177
+      "line": 178
     },
     {
       "code": "execution_input.register.key.null",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 161
+      "line": 162
     },
     {
       "code": "execution_input.register.price.invalid",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 207
+      "line": 208
     },
     {
       "code": "execution_input.register.schema.field_type",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 105
+      "line": 106
     },
     {
       "code": "execution_input.register.schema.price_type",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 126
+      "line": 127
     },
     {
       "code": "materialize.compute.failed",

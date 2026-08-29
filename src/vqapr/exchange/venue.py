@@ -10,7 +10,12 @@ from typing import ClassVar, Protocol
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side, side_of
 from vqapr.domain.instruments import Instrument
-from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
+from vqapr.exchange.execution_table import (
+    ExactExecutionRow,
+    ExactExecutionSnapshot,
+    accepted_requests,
+    requested_rows,
+)
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, TradeRule
 from vqapr.orders.batches import OrderBatch, OrderRequest
@@ -101,19 +106,8 @@ class AcademicExchange:
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
     ) -> FillBatch:
         """Validate global prerequisites, then return every order in stable identity order."""
-        if not isinstance(orders, OrderBatch):
-            raise TypeError("orders must be an OrderBatch")
-        if not isinstance(account, AccountSnapshot):
-            raise TypeError("account must be an AccountSnapshot")
-        if not isinstance(snapshot, ExactExecutionSnapshot):
-            raise TypeError("snapshot must be an ExactExecutionSnapshot")
-        if orders.account_version != account.version:
-            raise ValueError("OrderBatch account_version does not match AccountSnapshot version")
-
-        requests = tuple(sorted(orders.requests, key=lambda request: request.instrument_id))
-        if len({request.instrument_id for request in requests}) != len(requests):
-            raise ValueError("an OrderBatch may contain each instrument only once")
-        rows = self._validate_snapshot(snapshot, requests)
+        requests = accepted_requests(orders, account, snapshot)
+        rows = requested_rows(snapshot, requests)
         rules = self.rules
         self._validate_rules(requests, rows, account)
 
@@ -211,24 +205,4 @@ class AcademicExchange:
             if not rule.permits_quantity(abs(request.delta_quantity)):
                 raise ValueError(f"quantity violates listing rule for {request.instrument_id!r}")
 
-    @staticmethod
-    def _validate_snapshot(
-        snapshot: ExactExecutionSnapshot, requests: tuple[OrderRequest, ...]
-    ) -> dict[str, ExactExecutionRow]:
-        requested = {request.instrument_id for request in requests}
-        if set(snapshot.duplicate_instruments) & requested:
-            raise ValueError("execution snapshot has duplicate requested instruments")
-        rows: dict[str, ExactExecutionRow] = {}
-        for row in snapshot.rows:
-            if row.instrument not in requested:
-                continue
-            if row.instrument in rows:
-                raise ValueError("execution snapshot has duplicate requested instruments")
-            if not isinstance(row.is_tradable, bool):
-                raise ValueError(f"invalid tradability for {row.instrument!r}")
-            if row.is_tradable and (
-                not isinstance(row.price, Decimal) or not row.price.is_finite() or row.price <= 0
-            ):
-                raise ValueError(f"invalid tradable price for {row.instrument!r}")
-            rows[row.instrument] = row
-        return rows
+

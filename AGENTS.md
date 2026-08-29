@@ -15,8 +15,8 @@ Project-specific facts belong in `.agent/project.yaml`, not in this file.
 When a task's working directory, target, or requested output is under `testbed/`, treat that
 directory as an independent first-time user project rather than as part of this package repository.
 
-- Begin from the premise that the user has already run `uv add qlibx`. Treat onboarding as starting
-  immediately after that installation step; do not install or bootstrap qlibx on the user's behalf.
+- Begin from the premise that the user has already run `uv add vqapr`. Treat onboarding as starting
+  immediately after that installation step; do not install or bootstrap vqapr on the user's behalf.
 - Read and prioritize `testbed/AGENTS.md` before taking any testbed action. Its rules override this
   file for the entire testbed task.
 - Use only skills installed below `testbed/.agents/skills/`. Do not load or apply skills from this

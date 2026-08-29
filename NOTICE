@@ -1,11 +1,11 @@
-qlibx includes arithmetic derived in part from Microsoft Qlib.
+vqapr includes arithmetic derived in part from Microsoft Qlib.
 
 Microsoft Qlib
 Copyright (c) Microsoft Corporation
 Licensed under the MIT License.
 
 The Qlib-derived execution arithmetic is adapted from qlib/backtest/exchange.py in the vendored
-snapshot main@79633dd. qlibx changes the implementation to immutable batch inputs, exact
+snapshot main@79633dd. vqapr changes the implementation to immutable batch inputs, exact
 product/side/effective-time cost selection, and structured per-instrument diagnostics.
 
 The full MIT license text for the referenced snapshot is preserved at references/qlib/LICENSE.

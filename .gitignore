@@ -9,8 +9,10 @@ wheels/
 
 # Virtual environments
 .venv
-.qlibx/
-qlibx-research/
+
+# The workspace directory the CLI writes: catalog, object store, materialized frames. It is
+# derived state rebuilt from declarations, so a committed copy is a stale answer.
+.vqapr/
 
 /data/
 outputs/

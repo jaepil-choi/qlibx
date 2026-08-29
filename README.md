@@ -1,14 +1,51 @@
-# qlibx → vqapr transition
+# vqapr
 
-The second qlibx implementation is frozen under
-[`attempts/attempt-2/`](attempts/attempt-2/). The first implementation remains under
-[`attempts/attempt-1/`](attempts/attempt-1/).
+**v**ibe **q**uant **a**sset **p**ricing / **a**lpha **p**ortfolio **r**esearch — a reusable alpha
+research framework that owns its own research and execution capability.
 
-The next library is being designed as **vqapr**. Its current product and architecture documents are:
+- Product authority: [`docs/vqapr-prd.md`](docs/vqapr-prd.md)
+- Structure: [`docs/vqapr-architecture.md`](docs/vqapr-architecture.md)
 
-- [`docs/vqapr-prd.md`](docs/vqapr-prd.md)
-- [`docs/vqapr-architecture.md`](docs/vqapr-architecture.md)
+## Install
 
-This commit is an archival transition point. The repository root is not expected to provide a
-working package until the subsequent vqapr rename/rebuild updates package metadata, source, tests,
-and public commands together.
+```
+uv add vqapr
+```
+
+## Commands
+
+`vqapr` is one CLI over a workspace directory. Every verb reads declarations and writes derived
+state under `.vqapr/`, which is rebuildable and never committed.
+
+| command | what it does |
+|---|---|
+| `new` | scaffold a component, or emit a dataset/run-spec declaration template |
+| `register` | validate a declaration and add what it declares to the workspace |
+| `check` | prove a run spec is ready, reporting every problem at once, without running it |
+| `run` | freeze a run spec, preflight it, and execute the simulation |
+| `list` | show what the workspace already holds |
+| `show` | answer questions about one finished run, from its frozen record |
+| `skill` | install the agent skill into this project, or remove and inspect it |
+
+Run `vqapr <command> --help` for the arguments of any verb.
+
+## Repository layout
+
+| path | contents |
+|---|---|
+| `src/vqapr/` | the package |
+| `tests/` | the test suite |
+| `docs/` | PRD, architecture, implementation records, handoffs |
+| `showcases/` | end-to-end demonstrations |
+| `scripts/` | evidence and fixture-preparation scripts, not part of the distribution |
+| `testbed/` | a measurement workspace treated as a first-time user's project, not as source |
+| `references/` | vendored upstream snapshots — non-authoritative unless the project manifest promotes a file |
+| `attempts/` | frozen earlier implementations, kept for their record and not maintained |
+
+## Prior implementations
+
+This package was previously named `qlibx`. Its first and second implementations are frozen under
+[`attempts/attempt-1/`](attempts/attempt-1/) and [`attempts/attempt-2/`](attempts/attempt-2/), and
+are archives rather than supported code.
+
+Attribution for third-party arithmetic is in [`NOTICE`](NOTICE).

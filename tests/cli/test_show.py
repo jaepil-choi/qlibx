@@ -29,6 +29,16 @@ _RECORD = {
     "tables": {"vqapr.account": {"rows": 12, "formations": 6}},
     "contract": {"accepted_intents": 7},
     "source_digest": "digest-abc",
+    "declared_digest": "digest-abc",
+    # What this run knew each instrument to be. `None` is the other legal value and says the run
+    # never knew -- every fill then records `kind: None`, which is the state that used to be
+    # indistinguishable from a categorised run.
+    "roster": {
+        "digest": "roster-digest-abc",
+        "tables": ["etf", "stock"],
+        "by_kind": {"stock": 10, "etf": 2},
+        "instruments": 12,
+    },
     "period": {"start": "2024-01-01", "end": "2024-12-31", "occurrences": 12},
 }
 
@@ -98,6 +108,11 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
         "tables",
         "contract",
         "source_digest",
+        # Both had builders in `_freeze_record` and were absent from `RECORD_FIELDS`, so the
+        # writer's comprehension never called them: computed on every run and dropped before
+        # reaching disk.
+        "declared_digest",
+        "roster",
         "period",
     }
     assert set(record_view({})) == set(RECORD_FIELDS), (

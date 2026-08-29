@@ -152,7 +152,17 @@ def build_roster(declared: Mapping[str, Mapping[str, str]]) -> InstrumentRoster:
         if not isinstance(rows, Mapping) or not rows:
             raise ValueError(f"instrument table {declared_kind!r} declares no instruments")
         for instrument_id, row_kind in rows.items():
-            if _kind(row_kind) is not expected:
+            # Named with its instrument, not just its value. `_kind` alone reports "unknown
+            # instrument kind 'crypto'", which tells an author of a three-thousand-row roster what
+            # is wrong and not which row -- and a roster is exactly the artifact where finding the
+            # row by hand is the expensive part. The four legal kinds still come from `_kind`.
+            try:
+                actual = _kind(row_kind)
+            except ValueError as unknown:
+                raise ValueError(
+                    f"instrument {instrument_id!r} in the {declared_kind!r} table: {unknown}"
+                ) from unknown
+            if actual is not expected:
                 raise ValueError(
                     f"instrument {instrument_id!r} sits in the {declared_kind!r} table but "
                     f"declares kind {row_kind!r}; the table key and the column must agree"

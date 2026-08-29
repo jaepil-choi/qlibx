@@ -23,10 +23,12 @@ from vqapr.workspace import Workspace
 UNIVERSE = {"A005930": "stock", "A000660": "stock", "A069500": "etf"}
 
 
-def _declare(root: Path, tables: dict[str, Path], roster_id: str = "krx") -> Path:
-    lines = ["instruments:", f"  {roster_id}:", "    tables:"]
+def _declare(root: Path, tables: dict[str, Path]) -> Path:
+    # No id above `tables:`. A project holds one roster slot and stores no id, so the level that
+    # used to sit here declared an identity nothing kept.
+    lines = ["instruments:", "  tables:"]
     for kind, path in sorted(tables.items()):
-        lines.append(f"      {kind}: {path.relative_to(root).as_posix()}")
+        lines.append(f"    {kind}: {path.relative_to(root).as_posix()}")
     declaration = root / "instruments.yaml"
     declaration.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return declaration
@@ -197,32 +199,109 @@ def test_registration_refuses_a_table_it_cannot_read(tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
     declaration = tmp_path / "instruments.yaml"
     declaration.write_text(
-        "instruments:\n  krx:\n    tables:\n      stock: data/absent.parquet\n", encoding="utf-8"
+        "instruments:\n  tables:\n    stock: data/absent.parquet\n", encoding="utf-8"
     )
 
     with pytest.raises(InputError, match="readable instrument table"):
         _register(tmp_path, declaration)
 
 
-def test_registration_refuses_a_second_roster(tmp_path: Path) -> None:
-    """One roster per project, while instrument ids do not collide.
+def test_an_unsupported_kind_in_a_hand_written_table_is_refused_by_instrument_and_file(
+    tmp_path: Path,
+) -> None:
+    """`instruments.py` cannot produce this; a hand-written or hand-edited parquet can.
 
-    Several would require asking *which roster knows this id*, and that is a matcher -- the thing
-    this package deliberately removed from the charge path.
+    The exporter only ever writes the four package-owned kinds, so an unsupported one arrives
+    exactly one way: someone wrote the parquet directly, or edited the exporter's output. That is a
+    legitimate input -- producing a clean table is the author's job, refusing a dirty one is
+    registration's -- and it must not reach a run, because `InstrumentKind` is closed and a venue
+    has no terms for a category outside it.
+
+    What matters here is that the refusal is findable. Reporting only `unknown instrument kind
+    'crypto'` tells an author of a three-thousand-row roster what is wrong and not where, and a
+    roster is precisely the artifact where locating the row by hand is the expensive part.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    Workspace.create(tmp_path)
+    (tmp_path / "data").mkdir()
+    table = tmp_path / "data" / "instruments_stock.parquet"
+    pq.write_table(
+        pa.table({"instrument_id": ["A005930", "BTCUSD"], "kind": ["stock", "crypto"]}), table
+    )
+    declaration = _declare(tmp_path, {"stock": table})
+
+    with pytest.raises(InputError) as refused:
+        _register(tmp_path, declaration)
+
+    observed = refused.value.observed
+    assert "BTCUSD" in observed, "the offending instrument must be named, not just its kind"
+    assert "crypto" in observed
+    assert "etf, factor, index, stock" in observed, "the legal vocabulary must be listed"
+    assert table.name in observed, "the file to open must be named"
+    # The remedy names the tool that cannot produce this input, which is the shortest route back
+    # to a clean table for an author who edited one by hand.
+    assert "instruments.py" in refused.value.fix
+
+
+def test_registration_names_a_table_sitting_beside_the_declaration_and_undeclared(
+    tmp_path: Path,
+) -> None:
+    """The emitted template ships one category live and the rest commented.
+
+    An author who exports twelve names across two categories and registers it unchanged registers
+    ten, silently, with the ETF table sitting beside the declaration undeclared. The per-category
+    receipt made that legible only to a reader who noticed that `{"stock": 10}` was short of a
+    universe of twelve.
+
+    Reported rather than refused: declaring a subset is legitimate -- a project may export every
+    category its exporter knows and trade only equities -- so this names the file and leaves the
+    decision with the author.
+    """
+    Workspace.create(tmp_path)
+    written = export_roster(UNIVERSE, tmp_path / "data")
+    assert set(written) == {"stock", "etf"}, "the fixture universe must span two categories"
+
+    declaration = _declare(tmp_path, {"stock": written["stock"]})
+    receipt = _register(tmp_path, declaration)["registered"]["instruments"][0]
+
+    assert receipt["by_kind"] == {"stock": 2}
+    assert receipt["undeclared"] == [written["etf"].name]
+    assert "etf" in written["etf"].name, "the receipt must name the file, not the category alone"
+
+    # Declaring both leaves nothing to report, so the field is absent rather than empty: a reader
+    # testing for it should not have to distinguish "none found" from "not looked for".
+    complete = _register(tmp_path, _declare(tmp_path, written))["registered"]["instruments"][0]
+    assert "undeclared" not in complete
+    assert complete["by_kind"] == {"stock": 2, "etf": 1}
+
+
+def test_registration_refuses_the_old_id_keyed_declaration(tmp_path: Path) -> None:
+    """One roster per project, and now no name for it either.
+
+    The old shape put an id above `tables:`. The workspace stores `schema`, `tables` and `digest`
+    and no id, so that name was echoed back in the receipt and discarded -- and declaring a second
+    one silently replaced the first. Two rosters would also require asking *which roster knows this
+    id*, which is a matcher, the thing this package removed from the charge path on purpose.
+
+    Refused outright rather than accepted with the id ignored: accepting it would be a
+    compatibility shim for a statement that was never true.
     """
     Workspace.create(tmp_path)
     written = export_roster(UNIVERSE, tmp_path / "data")
     declaration = tmp_path / "instruments.yaml"
-    body = ["instruments:"]
-    for roster_id in ("krx", "nyse"):
-        body.append(f"  {roster_id}:")
-        body.append("    tables:")
-        for kind, path in sorted(written.items()):
-            body.append(f"      {kind}: {path.relative_to(tmp_path).as_posix()}")
+    body = ["instruments:", "  krx:", "    tables:"]
+    for kind, path in sorted(written.items()):
+        body.append(f"      {kind}: {path.relative_to(tmp_path).as_posix()}")
     declaration.write_text("\n".join(body) + "\n", encoding="utf-8")
 
-    with pytest.raises(InputError, match="exactly one instrument roster"):
+    with pytest.raises(InputError, match="no id above them") as error:
         _register(tmp_path, declaration)
+    # Names what was found and what to do, so a reader does not have to diff against a re-emitted
+    # template to see that one line must go.
+    assert "krx" in error.value.observed
+    assert "lift `tables:` up one level" in error.value.fix
 
 
 def test_a_table_missing_its_columns_is_refused_by_name(tmp_path: Path) -> None:
@@ -236,7 +315,7 @@ def test_a_table_missing_its_columns_is_refused_by_name(tmp_path: Path) -> None:
     pq.write_table(pa.table({"ticker": ["A005930"]}), path)
     declaration = tmp_path / "instruments.yaml"
     declaration.write_text(
-        "instruments:\n  krx:\n    tables:\n      stock: data/wrong.parquet\n", encoding="utf-8"
+        "instruments:\n  tables:\n    stock: data/wrong.parquet\n", encoding="utf-8"
     )
 
     with pytest.raises(InputError) as error:

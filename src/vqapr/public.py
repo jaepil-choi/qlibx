@@ -33,7 +33,7 @@ from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
 from vqapr.domain.roster import InstrumentRoster, build_roster
 from vqapr.domain.roster_export import export_roster
 from vqapr.domain.instruments import (
@@ -468,7 +468,7 @@ def run(
     try:
         result = flow.run()
         if writer is not None:
-            _freeze_record(writer, result, frozen, as_loaded, _roster_digest(root_path))
+            _freeze_record(writer, result, frozen, as_loaded, roster_report(root_path, registry))
     except BaseException:
         # A run that died still holds its id. Releasing here turns a crash into an ordinary
         # retry instead of stranding the id until the lock goes stale. `_freeze_record` is inside
@@ -508,11 +508,46 @@ def _registered_roster(root_path: Path | None) -> object | None:
         return None
     if pointer is None:
         return None
-    tables = {
-        str(kind): read_roster_table(Path(str(path)))
-        for kind, path in dict(pointer["tables"]).items()
-    }
-    return build_roster(tables)
+    # A REGISTERED roster that cannot be read is refused, not degraded. `list instruments` reports
+    # the same failure as `unreadable` and carries on, because it is an orientation command and a
+    # moved table should not remove the answer it can still give. A run is the opposite: it is
+    # about to charge and size every fill, and continuing without the categories would produce a
+    # complete, reproducible book computed as if nothing had a category -- silently, since a run
+    # with no roster at all is legal. That is the failure this slice exists to make impossible.
+    #
+    # Bare exceptions were reaching the envelope as `stage: "unhandled"` here.
+    try:
+        tables = {
+            str(kind): read_roster_table(Path(str(path)))
+            for kind, path in dict(pointer["tables"]).items()
+        }
+        return build_roster(tables)
+    except (OSError, ValueError, KeyError, TypeError) as unreadable:
+        declared = ", ".join(
+            f"{kind}={path}" for kind, path in sorted(dict(pointer["tables"]).items())
+        )
+        raise VqaprError(
+            stage="run.roster",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="run.roster.unreadable",
+                    requirement=(
+                        "a registered instrument roster must be readable at run start, because "
+                        "every fill is charged and sized against the category it declares"
+                    ),
+                    observed=f"{unreadable} (declared tables: {declared})",
+                    fix=(
+                        "restore the roster tables at the paths above, or re-register the roster "
+                        "with `vqapr register <instruments>.yaml`; `vqapr list instruments` shows "
+                        "what this project has registered"
+                    ),
+                    explain=ExplainTopic.RUN_PRECONDITION,
+                )
+            ],
+            mutation=False,
+            retry_precondition="restore or re-register the roster tables, then retry",
+        ) from unreadable
 
 
 def _as_loaded_identity(frozen: FrozenRun, root_path: Path | None) -> str:
@@ -540,8 +575,19 @@ def _as_loaded_identity(frozen: FrozenRun, root_path: Path | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _roster_digest(root_path: Path | None) -> str | None:
-    """The digest recorded when the roster was registered, or `None` when none is."""
+def roster_report(root_path: Path | None, registry: object | None) -> dict[str, object] | None:
+    """Which roster a run read, and what it said, or `None` when none was registered.
+
+    `None` is the answer that matters. A run with no roster completes with every fill recording
+    `kind: None`, and before this it did so in silence: nothing in the success envelope or the
+    frozen record distinguished it from a run whose categories were known. On an academic venue
+    that is harmless; on a KRX-shaped venue every name is then charged identically while
+    `cost_by_kind()` collapses to one unlabelled bucket -- the report that would expose it is the
+    one the gap erases.
+
+    The per-category counts come from the roster already loaded for this run rather than from a
+    second read, so what is reported is what was bound to the venue, not what the file says now.
+    """
     if root_path is None:
         return None
     from vqapr.workspace import Workspace
@@ -550,7 +596,17 @@ def _roster_digest(root_path: Path | None) -> str | None:
         pointer = Workspace.open(root_path).registered_instruments()
     except Exception:
         return None
-    return None if pointer is None else str(pointer["digest"])
+    if pointer is None:
+        return None
+    report: dict[str, object] = {
+        "digest": str(pointer["digest"]),
+        "tables": sorted(str(kind) for kind in dict(pointer["tables"])),
+    }
+    histogram = getattr(registry, "histogram", None)
+    if histogram is not None:
+        report["by_kind"] = dict(histogram)
+        report["instruments"] = sum(dict(histogram).values())
+    return report
 
 
 def _freeze_record(
@@ -558,7 +614,7 @@ def _freeze_record(
     result: SimulationResult,
     frozen: FrozenRun,
     as_loaded: str,
-    roster_digest: str | None,
+    roster: dict[str, object] | None,
 ) -> None:
     """Write the run's rows and its own facts, so a later process can answer questions about it.
 
@@ -604,11 +660,12 @@ def _freeze_record(
         # The declaration this run froze against, kept so the pair stays legible: equal to
         # `source_digest` when nothing moved, different exactly when it did.
         "declared_digest": lambda: str(frozen.identity),
-        # Which roster this run read. STATED, never compared -- a roster grows as a matter of
-        # course, so a run refused for reading a different one than yesterday would be refused
-        # every morning. What a run treated each instrument as is testified to per fill by
-        # `Fill.kind`; this says which declaration produced those categories.
-        "roster_digest": lambda: roster_digest,
+        # Which roster this run read, and `None` when it read none. STATED, never compared -- a
+        # roster grows as a matter of course, so a run refused for reading a different one than
+        # yesterday would be refused every morning. What a run treated each instrument as is
+        # testified to per fill by `Fill.kind`; this says which declaration produced those
+        # categories, and `None` says the run never knew them.
+        "roster": lambda: roster,
         "period": lambda: {
             "start": frozen.start,
             "end": frozen.end,

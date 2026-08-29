@@ -99,8 +99,13 @@ def test_the_record_and_show_run_cannot_drift_apart(tmp_path: Path) -> None:
 
     # The assertions that can actually fail: every surfaced field carries a real value, so a
     # builder that silently returned nothing is caught rather than counted.
-    for field in set(RECORD_FIELDS) - {"contract"}:
+    for field in set(RECORD_FIELDS) - {"contract", "roster"}:
         assert frozen[field] is not None, f"{field} was surfaced empty"
+    # `roster` is the one field whose `None` is an answer rather than an omission: this project
+    # registers no instrument roster, so the run genuinely did not know what its instruments were,
+    # and every fill it wrote records `kind: None`. Pinned as exactly that instead of excluded, so
+    # a builder that started returning nothing here would still be caught.
+    assert frozen["roster"] is None
     assert frozen["period"]["occurrences"] > 0
     assert frozen["tables"], "a real run recorded no tables at all"
 

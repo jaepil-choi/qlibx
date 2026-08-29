@@ -37,13 +37,18 @@ from typing import Any
 from vqapr._internal.extensions.loading import load_exchange, load_strategy_model
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import InputError, read_yaml_mapping
-from vqapr.cli.run import definition_from_document, require_declared_keys
+from vqapr.cli.run import (
+    MATERIALIZATION,
+    definition_from_document,
+    require_declared_keys,
+    spec_kind,
+)
 from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 from vqapr.public import Workspace, preflight_run
 
 STAGE = "run.check"
 
-CODES = (
+SIMULATION_CODES = (
     "check.execution.not_after_decision",
     "check.period.uncovered",
     "check.lookback.uncovered",
@@ -52,19 +57,54 @@ CODES = (
     "check.weights.mode_conflict",
     "check.weights.venue_conflict",
     "check.universe.absent",
+)
+"""The eight judgments this verb makes about a SIMULATION spec.
+
+Each is a question a run must answer YES to before it starts, and each is asked independently of
+the others so a declaration with four defects reports four refusals rather than the first one four
+times.
+
+Eight, and adding a ninth is a decision rather than a detail. That is why the materialization
+judgments below are a separate tuple instead of an extension of this one: they are not more
+questions about a simulation, they are the questions a different kind of run has to answer.
+"""
+
+MATERIALIZATION_CODES = (
+    "check.materialize.component_unregistered",
+    "check.materialize.component_wrong_kind",
+    "check.materialize.component_unloadable",
+    "check.materialize.output_registered",
+    "check.materialize.no_evaluation_instants",
+    "check.materialize.no_instruments",
+    "check.materialize.requirement_unregistered",
+    "check.materialize.lookback_uncovered",
+    "check.materialize.evaluation_instant_invalid",
+)
+"""The judgments this verb makes about a MATERIALIZATION spec.
+
+Every one is a refusal `materialize()` raises later, hoisted to where it costs nothing. A verb that
+certifies a spec the next command rejects is worse than no verb, because it teaches the reader to
+stop trusting it -- `docs/issues/012` records that divergence still open on the simulation side,
+and extending `run` without extending `check` would have opened a second one in the task meant to
+close a door.
+
+Separately namespaced so the eight above stay a statement about simulations. A reader counting the
+judgments a simulation settles gets eight whether or not this tuple ever grows.
+"""
+
+CODES = (
+    *SIMULATION_CODES,
+    *MATERIALIZATION_CODES,
     f"{STAGE}.declaration_invalid",
     f"{STAGE}.preflight_refused",
 )
-"""The eight judgments this verb makes, plus two for framework invariants with no code of their own.
+"""Everything this verb can emit: both judgment sets, plus two framework-invariant codes.
 
-The eight are the point of the verb. Each is a question a run must answer YES to before it starts,
-and each is asked independently of the others so a declaration with four defects reports four
-refusals rather than the first one four times.
-
-The two `run.check.*` codes are different in kind: they name a bare `TypeError`/`ValueError` from
-a framework invariant, which has no structured body of its own and would otherwise surface as
-`stage: unhandled` -- telling an agent the framework broke when its spec was wrong. Refusals that
-DO have a code keep it; `check` is not a second name for a defect that already has one.
+The two `run.check.*` codes are different in kind from either set: they name a bare
+`TypeError`/`ValueError` from a framework invariant, which has no structured body of its own and
+would otherwise surface as `stage: unhandled` -- telling an agent the framework broke when its spec
+was wrong. Refusals that DO have a code keep it; `check` is not a second name for a defect that
+already has one.
 """
 
 
@@ -90,6 +130,37 @@ _PHASES = (
 what else failed, which is what makes collecting possible at all.
 """
 
+_MATERIALIZATION_PHASES = (
+    _Phase("spec"),
+    _Phase("workspace"),
+    _Phase("judgments", needs=("spec", "workspace")),
+)
+"""The same order, minus the two phases that are `RunDefinition`-shaped.
+
+`declaration` builds a `RunDefinition` and `preflight` freezes one, and a materialization has
+neither -- no venue, no execution table, no account, no trading period. Running them anyway is not
+a near miss: `_judge_period` returns `check.period.uncovered` for any spec without `start`/`end`,
+and `ok` is `not failures and not blocked`, so `check` would refuse every valid materialization
+spec ever written. That is the mirror of the defect this slice opened with -- a verb refusing what
+`run` would accept -- and it is the reason the fork is here rather than at the readers.
+"""
+
+
+def phases_for(document: dict[str, Any] | None) -> tuple[_Phase, ...]:
+    """Which phases answer questions about this spec.
+
+    Falls back to the simulation tuple when the document could not be read at all, so a spec that
+    fails at the `spec` phase still reports the phases it was measured against.
+    """
+    if document is None:
+        return _PHASES
+    try:
+        return _MATERIALIZATION_PHASES if spec_kind(document) == MATERIALIZATION else _PHASES
+    except InputError:
+        # Which kind it is, is itself the refusal. The `spec` phase reports it; this only has to
+        # pick a tuple to name in `checked`.
+        return _PHASES
+
 
 
 
@@ -113,7 +184,17 @@ def check(spec: Path, project_root: Path) -> dict[str, Any]:
     workspace: Workspace | None = None
     definition: object | None = None
 
-    for phase in _PHASES:
+    # Read before the loop, because which phases apply depends on what the spec declares and the
+    # loop cannot be iterating a tuple it has not chosen yet. Failures are left to the `spec`
+    # phase below, which re-reads and reports them properly -- this only picks the tuple.
+    try:
+        document = read_yaml_mapping(spec, what="a run spec")
+    except Exception:
+        document = None
+    phases = phases_for(document)
+    document = None
+
+    for phase in phases:
         unmet = [need for need in phase.needs if need not in done]
         if unmet:
             blocked.append({"check": phase.name, "blocked_by": ", ".join(unmet)})
@@ -128,6 +209,14 @@ def check(spec: Path, project_root: Path) -> dict[str, Any]:
                 workspace = Workspace.open(project_root)
             elif phase.name == "judgments":
                 assert document is not None and workspace is not None
+                if phases is _MATERIALIZATION_PHASES:
+                    judged = _materialization_judgments(document, workspace, project_root)
+                    failures.extend(_render(failure, spec) for failure in judged)
+                    if judged:
+                        continue
+                    done.add(phase.name)
+                    passed.append(phase.name)
+                    continue
                 # The only phase that collects rather than raises. Each judgment is independent,
                 # so a spec with four defects must report four refusals -- reporting the first
                 # would make the reader fix one thing per round trip, which is the friction this
@@ -174,11 +263,192 @@ def check(spec: Path, project_root: Path) -> dict[str, Any]:
         # unanswered judgment is not something this verb can vouch for.
         "ok": not failures and not blocked,
         "stage": STAGE,
-        "checked": [phase.name for phase in _PHASES],
+        "checked": [phase.name for phase in phases],
         "passed": passed,
         "blocked": blocked,
         "failures": failures,
     }
+
+
+def _materialization_judgments(
+    document: dict[str, Any], workspace: Workspace, project_root: Path
+) -> list[Failure]:
+    """What must hold before a materialization is worth starting.
+
+    Every one of these is a refusal `materialize()` would raise later, hoisted to where it costs
+    nothing. That is the whole point of the verb: `check` certifying a spec that `run` then
+    refuses is the defect this slice opened with, and extending `run` without extending `check`
+    would have re-committed it in the task meant to close a door.
+
+    Raised in the `check.materialize.*` namespace, so `tests/cli/test_check.py`'s pinned count of
+    the eight `check.*` judgments a simulation settles stays a statement about simulations.
+    """
+    from vqapr._internal.extensions.component import ComponentKind
+
+    found: list[Failure] = []
+
+    def refuse(code: str, requirement: str, observed: str, fix: str, key: str) -> None:
+        found.append(
+            Failure.bounded(
+                code=f"check.materialize.{code}",
+                requirement=requirement,
+                observed=observed,
+                fix=fix,
+                explain=ExplainTopic.DECLARATION_SHAPE,
+                source=FailureSource(key_path=key),
+            )
+        )
+
+    component_id = str(document.get(MATERIALIZATION) or "")
+    try:
+        ref = workspace.component(component_id)
+    except Exception as unknown:
+        refuse(
+            "component_unregistered",
+            "the named component must be registered in this workspace",
+            f"{component_id!r}: {unknown}",
+            f"register it with `vqapr register datamodel {component_id} <file>.py`",
+            MATERIALIZATION,
+        )
+        ref = None
+    if ref is not None and ref.kind is not ComponentKind.DATA_MODEL:
+        refuse(
+            "component_wrong_kind",
+            "a materialization runs a DataModel",
+            f"{component_id!r} is registered as {ref.kind.value}",
+            f"name a registered datamodel, or declare `strategy: {component_id}` to simulate",
+            MATERIALIZATION,
+        )
+
+    # The refusal `materialize()` raises at `materialize.input.dataset_exists`, asked here instead.
+    # Without this, `check` returns ok:true and `run` refuses -- exactly the shape T1 removed.
+    output = document.get("output")
+    declared_output = str(output.get("dataset_id", "")) if isinstance(output, dict) else ""
+    if declared_output and any(
+        str(item.dataset_id) == declared_output for item in workspace.datasets
+    ):
+        refuse(
+            "output_registered",
+            "a materialization writes a dataset that does not exist yet",
+            f"{declared_output!r} is already registered",
+            f"choose a new dataset_id, or remove the existing {declared_output} registration",
+            "output.dataset_id",
+        )
+
+    declared_instants = document.get("evaluate_at") or ()
+    if not declared_instants:
+        refuse(
+            "no_evaluation_instants",
+            "a materialization must say when to evaluate",
+            "`evaluate_at:` is empty",
+            "list at least one timezone-aware instant under `evaluate_at:`",
+            "evaluate_at",
+        )
+    else:
+        # The ninth judgment, added deliberately. `_instant` returns None for anything it cannot
+        # read -- including a naive datetime -- and the judgments below simply skipped those, so a
+        # spec with a naive `evaluate_at` passed `check` with ok:true and was then refused by
+        # `run`. That is the check-certifies-what-run-refuses divergence this slice exists to
+        # close, found by the boundary gate inside the task meant to close it.
+        unreadable = [
+            str(value) for value in declared_instants if _instant(value) is None
+        ]
+        if unreadable:
+            refuse(
+                "evaluation_instant_invalid",
+                "every `evaluate_at:` entry must be a timezone-aware instant",
+                f"cannot read as an instant: {', '.join(unreadable)}",
+                (
+                    "write each instant with an explicit offset, like "
+                    "2024-03-06T04:00:00+09:00; a naive datetime is refused rather than assumed "
+                    "to be in any particular zone"
+                ),
+                "evaluate_at",
+            )
+    if not (document.get("instruments") or ()):
+        refuse(
+            "no_instruments",
+            "a materialization must say what to evaluate over",
+            "`instruments:` is empty",
+            "list at least one instrument id under `instruments:`",
+            "instruments",
+        )
+
+    # What the model says it reads must be registered, or the first evaluation refuses on data the
+    # author could have been told about before the run started.
+    if ref is not None and ref.kind is ComponentKind.DATA_MODEL:
+        from vqapr._internal.extensions.loading import load_data_model
+
+        by_id = {str(item.dataset_id): item for item in workspace.datasets}
+        # Scoped to the two calls the refusal describes. Wrapping the judgments below in it too
+        # reported a malformed `evaluate_at` entry as `component_unloadable` -- sending the reader
+        # to a component that loaded fine -- and let a spec carry `lookback_uncovered` alongside a
+        # contradictory `component_unloadable`. `_judgments` avoids the same shape deliberately.
+        try:
+            requirements = tuple(load_data_model(ref, project_root=project_root).requirements())
+        except Exception as unloadable:
+            refuse(
+                "component_unloadable",
+                "the named DataModel must load before its requirements can be judged",
+                str(unloadable),
+                "fix the component so it loads, then check again",
+                MATERIALIZATION,
+            )
+            requirements = ()
+        if requirements:
+            absent = sorted(
+                {
+                    str(requirement.dataset_id)
+                    for requirement in requirements
+                    if str(requirement.dataset_id) not in by_id
+                }
+            )
+            if absent:
+                refuse(
+                    "requirement_unregistered",
+                    "every dataset the model declares it reads must be registered",
+                    f"unregistered: {', '.join(absent)}",
+                    "register the missing datasets, then check again",
+                    MATERIALIZATION,
+                )
+            # The judgment that keeps this verb honest. Without it `check` returns ok:true and
+            # `materialize` refuses with `materialize.output.empty` after doing the work -- which
+            # is `check` certifying what `run` refuses, the defect this slice opened with,
+            # re-committed by the task meant to close a door. Measured at the EARLIEST evaluation
+            # instant, because that is the window that can be short.
+            declared_times = sorted(
+                moment
+                for moment in (
+                    _instant(value) for value in (document.get("evaluate_at") or ())
+                )
+                if moment is not None
+            )
+            earliest = declared_times[0] if declared_times else None
+            for requirement in requirements:
+                registration = by_id.get(str(requirement.dataset_id))
+                rows = getattr(getattr(requirement, "lookback", None), "rows", None)
+                span = getattr(registration, "span", None) if registration else None
+                begins = _instant(span[0]) if span else None
+                if not rows or earliest is None or begins is None or begins <= earliest:
+                    continue
+                refuse(
+                    "lookback_uncovered",
+                    (
+                        f"dataset {requirement.dataset_id!r} must carry history reaching back "
+                        "past the earliest evaluation, or that evaluation reads a short window "
+                        "and produces nothing"
+                    ),
+                    (
+                        f"dataset begins {span[0]}, earliest evaluation {earliest.isoformat()}, "
+                        f"lookback {rows} row(s)"
+                    ),
+                    (
+                        f"evaluate at or after {span[0]}, or prepare the dataset with history "
+                        "reaching further back"
+                    ),
+                    "evaluate_at",
+                )
+    return found
 
 
 def _judgments(
@@ -620,7 +890,16 @@ def _from_input(error: InputError, spec: Path) -> dict[str, Any]:
     # getattr-with-default on a known type is the exact idiom that left three judgments
     # permanently dead one generation ago.
     carried = error.source
-    source = FailureSource(file=str(spec)) if carried.file is None else carried
+    # MERGED, not replaced. The previous form swapped the whole source out whenever `file` was
+    # absent -- which is exactly the case where the error carries a `key_path` and no file, so the
+    # one field this function cannot know was the one it discarded. That contradicted the comment
+    # above it, and it is why a refusal naming `strategy.component` still reported
+    # `key_path: null`.
+    source = FailureSource(
+        file=carried.file or str(spec),
+        key_path=carried.key_path,
+        line=carried.line,
+    )
     return {
         "code": error.code,
         "source": source.as_dict(),

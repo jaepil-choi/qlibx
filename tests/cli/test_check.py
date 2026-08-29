@@ -473,13 +473,32 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
     )
 
     assert len(set(CODES)) == len(CODES)
-    # Two namespaces on purpose. `check.*` are the eight judgments this verb makes itself;
-    # `run.check.*` name a framework invariant that has no code of its own, and exist only so it
-    # cannot surface as `stage: unhandled`.
+    # Namespaces on purpose. `check.*` are the judgments this verb makes itself; `run.check.*`
+    # name a framework invariant that has no code of its own, and exist only so it cannot surface
+    # as `stage: unhandled`.
     for code in CODES:
         assert code.startswith(("check.", "run.check.")), (
             f"{code} is not in this verb's namespace"
         )
-    assert sum(1 for code in CODES if not code.startswith("run.check.")) == 8, (
-        "the spec settles exactly eight judgments; adding a ninth is a decision, not a detail"
+
+    from vqapr.cli.check import MATERIALIZATION_CODES, SIMULATION_CODES
+
+    # Two counted sets, because there are two kinds of run and they answer different questions.
+    # Counting them together would let a materialization judgment silently take the place of a
+    # simulation one.
+    assert len(SIMULATION_CODES) == 8, (
+        "a simulation spec settles exactly eight judgments; adding a ninth is a decision, not a "
+        "detail"
     )
+    assert len(MATERIALIZATION_CODES) == 9, (
+        "a materialization spec settles exactly nine judgments; adding a tenth is a decision, "
+        "not a detail"
+    )
+    assert not set(SIMULATION_CODES) & set(MATERIALIZATION_CODES)
+    assert set(CODES) == set(SIMULATION_CODES) | set(MATERIALIZATION_CODES) | {
+        "run.check.declaration_invalid",
+        "run.check.preflight_refused",
+    }, "CODES must be exactly the two judgment sets plus the two framework-invariant codes"
+    # `check.spec.kind_ambiguous` is deliberately absent: it is an InputError about WHICH spec is
+    # being held, not a judgment about a spec that was read.
+    assert "check.spec.kind_ambiguous" not in CODES

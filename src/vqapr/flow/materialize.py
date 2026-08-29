@@ -1018,7 +1018,11 @@ def materialize(
         )
 
     ref = workspace.component(raw_component_id)
-    model = load_data_model(ref)
+    # `project_root`, because a registered `ref.path` may be relative: `_load` resolves a relative
+    # path against the process CWD when no root is given, so omitting it made a run depend on where
+    # it was invoked from. Every other loader on the run path passes it -- `preflight_run` for each
+    # kind, and `check`'s dataset judgment -- and this was the one that did not.
+    model = load_data_model(ref, project_root=Path(project_root))
     requirements = model.requirements()
     stamped_rows: list[Row] = []
     invocation_records: list[MaterializationInvocation] = []
@@ -1078,14 +1082,30 @@ def materialize(
         session.close()
 
     if not stamped_rows:
+        # The declared lookbacks, named. `check` proves what registered metadata can prove -- that
+        # a dataset's span reaches back past the earliest evaluation -- and cannot prove that the
+        # span holds ENOUGH rows, because a registration records a span and not a count. So the
+        # short-window case arrives here, and it is by far the most common reason every invocation
+        # returns nothing. A fix that says only "widen the instruments/evaluation_times" sends the
+        # reader to the two things that are usually already right.
+        declared = ", ".join(
+            f"{requirement.dataset_id}: {rows} row(s)"
+            for requirement in requirements
+            if (rows := getattr(getattr(requirement, "lookback", None), "rows", None))
+        )
         raise _error(
             _OUTPUT_STAGE,
             f"{_OUTPUT_STAGE}.empty",
             "materialization must produce at least one output row",
-            "all invocations returned zero rows",
+            (
+                f"all {len(invocation_records)} invocation(s) returned zero rows"
+                + (f"; the model declares a lookback of {declared}" if declared else "")
+            ),
             fix=(
-                "widen the requested instruments/evaluation_times, or fix "
-                "DataModel.compute to emit rows"
+                "a lookback longer than the available history makes every window short and every "
+                "evaluation empty: check that each input dataset holds at least that many rows "
+                "before the earliest evaluation instant. Otherwise widen the requested "
+                "instruments/evaluation_times, or fix DataModel.compute to emit rows"
             ),
             explain=ExplainTopic.RUN_PRECONDITION,
             retry="fix input coverage or DataModel output, then retry",

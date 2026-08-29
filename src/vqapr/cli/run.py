@@ -15,6 +15,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
+from vqapr.domain.errors import FailureSource
 from vqapr.flow.run_records import RunRecordExists, RunRecordLive
 from vqapr.flow.store_spec import StoreSpec
 from vqapr.public import (
@@ -32,16 +33,46 @@ from vqapr.public import (
 from vqapr.public import run as execute_run
 from vqapr.workspace import WORKSPACE_DIRECTORY
 
-_REQUIRED = (
-    "strategy",
-    "valuation",
-    "instruments",
-    "start",
-    "end",
-    "exchange",
-    "execution_input",
-    "initial_account",
-)
+SIMULATION = "strategy"
+MATERIALIZATION = "datamodel"
+
+_REQUIRED_BY_KIND = {
+    SIMULATION: (
+        "strategy",
+        "valuation",
+        "instruments",
+        "start",
+        "end",
+        "exchange",
+        "execution_input",
+        "initial_account",
+    ),
+    MATERIALIZATION: (
+        "datamodel",
+        "instruments",
+        "output",
+        "evaluate_at",
+    ),
+}
+"""What each run kind cannot execute without, keyed by the component section that names it.
+
+Two kinds, discriminated by which component the spec declares rather than by a `kind:` key of its
+own. Every existing spec already says `strategy:`, so none needs an edit, and a spec cannot
+disagree with itself about what it is -- a separate `kind:` could name one thing while the
+component section named another.
+
+Of the simulation's eight, `instruments` is shared and `strategy` is what `datamodel` replaces, so
+**six do not apply**: `valuation`, `start`, `end`, `exchange`, `execution_input` and
+`initial_account`. A materialization has no venue, no execution table, no account, no valuation and
+no trading period -- `materialize()` takes evaluation instants and instruments and nothing else.
+Forcing one required set on both would make an author declare six keys that mean nothing for their
+run, which is the failure this tuple's own history warns about.
+
+The six are enumerated rather than counted, because a bare number here is a claim no reader can
+check without deriving it from both tuples — and the first version of this sentence said five.
+"""
+
+_REQUIRED = _REQUIRED_BY_KIND[SIMULATION]
 """Every key this command cannot execute without.
 
 `RunDefinition` permits `start`, `end`, `exchange`, `execution_input` and the initial account to be
@@ -146,6 +177,37 @@ def _account(document: dict[str, Any]) -> tuple[AccountSnapshot | None, AccountM
     return snapshot, AccountMode[str(declared["mode"]).upper()]
 
 
+def spec_kind(document: dict[str, Any]) -> str:
+    """Which run this spec declares, from the component section it names.
+
+    Refused rather than guessed when the answer is not exactly one. A spec naming both would have
+    to be resolved by precedence, and a precedence rule is a thing a reader has to know before
+    they can predict what their own file does.
+
+    Raised as an `InputError` rather than added to `check`'s `CODES`: that inventory is the eight
+    judgments the verb settles about a spec it could read, and this is the question of which spec
+    it is holding. `_from_input` passes an `InputError` through with its own code, so the refusal
+    is fully structured either way.
+    """
+    declared = [kind for kind in _REQUIRED_BY_KIND if kind in document]
+    if len(declared) == 1:
+        return declared[0]
+    raise InputError(
+        "check.spec.kind_ambiguous",
+        requirement=(
+            f"a run spec declares exactly one of `{SIMULATION}:` or `{MATERIALIZATION}:`, "
+            "which is what says whether it simulates or materializes"
+        ),
+        observed=(
+            f"declares {', '.join(declared)}" if declared else "declares neither"
+        ),
+        retry=(
+            f"keep the one this spec is for and remove the other; `vqapr new run-spec` emits a "
+            f"`{SIMULATION}:` template"
+        ),
+    )
+
+
 def require_declared_keys(document: dict[str, Any]) -> None:
     """Reject an incomplete spec before anything is opened.
 
@@ -153,15 +215,62 @@ def require_declared_keys(document: dict[str, Any]) -> None:
     meant an incomplete spec in an uninitialised directory reported the missing workspace and
     said nothing about the spec, sending the user to fix the wrong file.
     """
-    missing = [key for key in _REQUIRED if key not in document]
+    required = _REQUIRED_BY_KIND[spec_kind(document)]
+    missing = [key for key in required if key not in document]
     if missing:
         raise InputError(
             INCOMPLETE,
-            requirement=f"a run spec must declare: {', '.join(_REQUIRED)}",
-            observed=f"missing {len(missing)} of {len(_REQUIRED)}: {', '.join(missing)}",
+            requirement=f"a run spec must declare: {', '.join(required)}",
+            observed=f"missing {len(missing)} of {len(required)}: {', '.join(missing)}",
             retry="add the missing keys, then retry",
             examples=missing,
         )
+    _require_nested_keys(document)
+
+
+_NESTED_REQUIRED = {
+    "strategy": ("component", "agenda_id"),
+    "valuation": ("agenda_id",),
+}
+"""Keys inside a declared section that the readers index directly.
+
+The top-level check above cannot see them, so writing `component_id:` where the template says
+`component:` used to pass it and then surface from the declaration phase as
+`observed: "KeyError: 'component'"` with a null `source.key_path` -- a raw Python exception as the
+observed value, and a fix naming no cause. It cost a first-time user about four minutes of diffing
+against a re-emitted template to find one word.
+"""
+
+
+def _require_nested_keys(document: dict[str, Any]) -> None:
+    """Name a missing nested key as a missing key, before the phase that would raise on it.
+
+    Collected across sections, like every other refusal on this surface: a spec wrong in two
+    places should cost one command.
+    """
+    missing: list[str] = []
+    for section, keys in _NESTED_REQUIRED.items():
+        if section not in document:
+            continue
+        declared = document.get(section)
+        if not isinstance(declared, dict):
+            # Shape rather than absence, and the readers already refuse it with a typed message.
+            continue
+        missing.extend(f"{section}.{key}" for key in keys if key not in declared)
+    if not missing:
+        return
+    first = missing[0]
+    raise InputError(
+        INCOMPLETE,
+        requirement=f"a run spec must declare: {', '.join(sorted(missing))}",
+        observed=f"missing {len(missing)}: {', '.join(sorted(missing))}",
+        retry=(
+            "add the missing keys, then retry; `vqapr new run-spec` emits a template naming "
+            "every required key"
+        ),
+        examples=sorted(missing),
+        source=FailureSource(file=None, key_path=first),
+    )
 
 
 def definition_from_document(document: dict[str, Any], workspace: Workspace) -> RunDefinition:
@@ -225,10 +334,97 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _materialize(
+    args: argparse.Namespace, document: dict[str, Any], project_root: Path
+) -> dict[str, Any]:
+    """Run a registered DataModel, through the verb that already exists.
+
+    A DataModel could be scaffolded, registered and described, and nothing would ever run it:
+    `flow/materialize.py` held a real entry point no CLI command called. It is reached here rather
+    than through a `materialize` verb of its own, because registration is already symmetric --
+    `register.py` maps `datamodel` beside `strategy` -- and a second top-level verb would add an
+    asymmetry rather than remove one.
+
+    `--run-id` and `--force` are refused rather than ignored. Both are defined entirely in terms
+    of a run record, and a materialization writes none: it registers a dataset. Accepting a flag
+    that cannot do what its name says is how a user learns the wrong model of a command.
+    """
+    from vqapr.public import MaterializationSpec, materialize
+
+    for flag, value in (("--run-id", getattr(args, "run_id", None)),
+                        ("--force", getattr(args, "force", False))):
+        if value:
+            raise InputError(
+                VALUE_INVALID,
+                requirement=f"{flag} applies to a simulation, which writes a run record",
+                observed=f"this spec declares `{MATERIALIZATION}:`, so it registers a dataset",
+                retry=f"drop {flag}; to replace the output, remove its dataset registration first",
+            )
+
+    output = document["output"]
+    if not isinstance(output, dict):
+        raise InputError(
+            VALUE_INVALID,
+            requirement="`output:` must be a mapping declaring dataset_id and value_fields",
+            observed=f"found {type(output).__name__}",
+            retry="write `output:` with `dataset_id:` and `value_fields:` beneath it",
+            source=FailureSource(file=None, key_path="output"),
+        )
+    missing = [key for key in ("dataset_id", "value_fields") if key not in output]
+    if missing:
+        raise InputError(
+            INCOMPLETE,
+            requirement="`output:` must declare dataset_id and value_fields",
+            observed=f"missing {', '.join(missing)}",
+            retry="add the missing keys under `output:`, then retry",
+            examples=missing,
+            source=FailureSource(file=None, key_path=f"output.{missing[0]}"),
+        )
+    try:
+        spec = MaterializationSpec.of(
+            str(output["dataset_id"]),
+            value_fields=[str(field) for field in output["value_fields"]],
+        )
+    except (TypeError, ValueError) as invalid:
+        raise InputError(
+            VALUE_INVALID,
+            requirement="`output:` must describe a materialization this package can write",
+            observed=str(invalid),
+            retry="correct `output:`, then retry",
+            source=FailureSource(file=None, key_path="output"),
+        ) from invalid
+
+    times = tuple(
+        _timestamp(value, name=f"evaluate_at[{index}]")
+        for index, value in enumerate(document["evaluate_at"] or ())
+    )
+    result = materialize(
+        project_root,
+        str(document[MATERIALIZATION]),
+        spec,
+        evaluation_times=[moment for moment in times if moment is not None],
+        instruments=[str(name) for name in document["instruments"]],
+    )
+    # Named from what `MaterializationResult` actually carries. It has `registration`,
+    # `output_path`, `lineage_path` and `invocations` -- and no row count: rows are per evaluation
+    # on `MaterializationInvocation`, so the total is a sum and is reported under a name that says
+    # so rather than as an unqualified "row count".
+    return success(
+        "materialize.complete",
+        dataset_id=str(spec.dataset_id),
+        output_path=str(result.output_path),
+        lineage_path=str(result.lineage_path),
+        evaluations=len(result.invocations),
+        rows_total=sum(invocation.row_count for invocation in result.invocations),
+    )
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     spec_path = Path(args.spec)
     document = read_yaml_mapping(spec_path, what="a run spec")
     require_declared_keys(document)
+    if spec_kind(document) == MATERIALIZATION:
+        return _materialize(args, document, project_root)
     workspace = Workspace.open(project_root)
     # One parser owns the `store` keys, and this is its only reader in the CLI. A second place
     # reading `document["store"]` directly is how `root` becomes optional in one path and required
@@ -293,4 +489,66 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # delivered and tested, its publication half is not, and the envelope says only what is
         # true today.
         tables_declared=list(store.tables),
+        # What this run knew each instrument to be, or that it knew nothing. A run with no
+        # registered roster completes with every fill recording `kind: None`, and it used to do so
+        # in silence -- no refusal, no warning, nothing in the success envelope. On an academic
+        # venue that is harmless; on a KRX-shaped venue it means every name was charged
+        # identically while the record says the categories were never known, and `cost_by_kind()`
+        # collapses to one unlabelled bucket. Reported on the SUCCESS path on purpose: the run is
+        # legitimate, and the thing worth saying is what it was computed against.
+        roster=_roster_envelope(project_root),
     )
+
+
+def _roster_envelope(project_root: Path) -> dict[str, object]:
+    """The roster clause of the success envelope, present whether or not one is registered.
+
+    A mapping in every case, including failure, because a reader testing `payload["roster"]` for
+    absence should not have to distinguish "no roster" from "this version does not report one".
+    `known` is the field that answers the question.
+
+    **This runs after the run completed and its record is on disk.** `_registered_roster` refuses a
+    registered-but-unreadable roster, which is right at run START -- nothing has been computed yet
+    and the run must not proceed without categories. Here it would be wrong: the tables can become
+    unreadable in the minutes a real run takes, and letting that refusal escape would report exit 1
+    for a run whose record `run_ids` already lists. The record and the command would disagree about
+    whether the run happened.
+    """
+    from vqapr.domain.errors import VqaprError
+    from vqapr.public import roster_report
+
+    try:
+        report = roster_report(project_root, _registered_roster_for_report(project_root))
+    except VqaprError as vanished:
+        # `known: True`, because the run DID know. `_registered_roster` refuses an unreadable
+        # roster at run start, so any run reaching this envelope read its roster successfully:
+        # its fills carry real `kind` values and the frozen record carries the digest and counts,
+        # computed while the tables were readable. Reporting `False` here would give the field the
+        # same value as a genuinely rosterless run -- whose note says every fill records
+        # `kind: None` -- and a reader testing `roster["known"]` would conclude the opposite of
+        # the truth. `stale` is the fact that actually differs: the counts could not be re-read.
+        return {
+            "known": True,
+            "stale": True,
+            "note": (
+                "this run read a registered roster, and the roster became unreadable before the "
+                "envelope was written, so the per-category counts could not be re-read; the "
+                f"frozen record states what the run actually used. {vanished}"
+            ),
+        }
+    if report is None:
+        return {
+            "known": False,
+            "note": (
+                "no instrument roster is registered, so every fill records kind: None and "
+                "cost_by_kind() collapses to one unlabelled bucket; register one with "
+                "`vqapr register <instruments>.yaml`"
+            ),
+        }
+    return {"known": True, **report}
+
+
+def _registered_roster_for_report(project_root: Path) -> object | None:
+    from vqapr.public import _registered_roster
+
+    return _registered_roster(project_root)

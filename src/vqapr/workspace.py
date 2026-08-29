@@ -984,7 +984,39 @@ class Workspace:
 
         if not self.roster_path.is_file():
             return None
-        return json.loads(self.roster_path.read_text(encoding="utf-8"))
+        raw = self.roster_path.read_text(encoding="utf-8")
+        try:
+            pointer = json.loads(raw)
+            # Shape as well as syntax. Guarding only the parse left every reader indexing
+            # `pointer["tables"]` and `pointer["digest"]` on a dict that might not have them, so
+            # valid-but-incomplete JSON moved the crash one layer down instead of removing it.
+            # Checked here, at the one door both `list` and `run` come through.
+            if not isinstance(pointer, dict):
+                raise TypeError(f"expected a JSON object, found {type(pointer).__name__}")
+            absent = [key for key in ("tables", "digest") if key not in pointer]
+            if absent:
+                raise KeyError(f"missing {', '.join(absent)}")
+            if not isinstance(pointer["tables"], dict) or not pointer["tables"]:
+                raise TypeError("`tables` must be a non-empty JSON object")
+            return pointer
+        except (json.JSONDecodeError, TypeError, KeyError) as broken:
+            # A corrupt pointer is a corrupt workspace, and this file says so rather than letting
+            # a raw `JSONDecodeError` reach the envelope as `stage: "unhandled"`. Reported, never
+            # repaired and never treated as absent: "no roster" and "a roster whose record is
+            # damaged" are different states, and only the first is ordinary.
+            raise _workspace_error(
+                stage="workspace.instruments",
+                code="workspace.instruments.unreadable",
+                requirement="the registered instrument roster pointer must be readable JSON",
+                observed=f"{self.roster_path.name}: {broken}",
+                fix=(
+                    "re-register the roster with `vqapr register <instruments>.yaml`, which "
+                    "rewrites this file"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                source=FailureSource(file=str(self.roster_path)),
+                retry="re-register the instrument roster, then retry",
+            ) from broken
 
     def remove(self, kind: str, identity: str) -> bool:
         """Withdraw one registration, refusing while anything live still names it.
@@ -1291,7 +1323,16 @@ class Workspace:
                     code=f"{OPEN_STAGE}.missing",
                     requirement=f"workspace must exist at {self.path}",
                     observed="path does not exist",
-                    fix="call Workspace.create() to initialize the workspace before opening it",
+                    # A CLI path, because the reader who reaches this has only ever typed
+                    # commands: `register` is the door into a workspace, and it creates one where
+                    # none exists. Naming `Workspace.create()` sent a user who had never written
+                    # a line of Python to look for a Python call, which is the same substitution
+                    # `declaration.read` avoids by naming the file rather than the dict lookup.
+                    fix=(
+                        "run `vqapr register <declaration>.yaml` in this directory, which "
+                        "creates the workspace as it registers; or `vqapr new run-spec` to "
+                        "start from a template"
+                    ),
                     explain=ExplainTopic.WORKSPACE_STATE,
                     source=FailureSource(file=str(self.path)),
                     retry="create the workspace, then retry",

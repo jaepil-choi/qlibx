@@ -69,9 +69,56 @@ registered and passes validation.
 9. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
    component declares it reads, decides, forms, weights and records
 
+**Reading a finished run.** `vqapr show run <id>` gives the record: the account, the period, the
+roster it read, and per-table row counts. `vqapr show run <id> --table <name>` gives the rows
+themselves, with `--limit` (0 for all). It reports `rows_total` and `returned` separately, so a
+truncated page never reads as a short run.
+
+Every run records three tables, plus any the model formed:
+
+- **`vqapr.account`** -- the book over time. `instrument` (`_ACCOUNT` on the cash and NAV row),
+  `account_version`, `cash`, `quantity`, `price`, `nav`, `observed_at`. `observed_at` is declared
+  by this table alone and is not the same clock as the envelope's `event_time`: one is when the
+  fact was seen, the other when it happened.
+- **`vqapr.fill`** -- what was traded and what it cost. `instrument`, `kind` (the category the
+  registered roster gave it, or null when none was registered), `requested_quantity`,
+  `dealt_quantity` (negative on a sale), `price`, `commission`, `tax`, `cash_delta`, `reason`,
+  `account_version`. **This is the table cost questions are asked of** -- commission and tax are
+  per fill and per side, so a category's true cost is a sum over this table, not a rate you can
+  read off a venue.
+- **`vqapr.weight`** -- the intended allocation per evaluation, before execution. `instrument`,
+  `weight`.
+
+Every row of every table also carries the same five envelope fields: `run_id`, `producer_id`,
+`stage`, `event_time` and `sequence` -- which run wrote it, what wrote it, at what point, when the
+fact happened, and in what order. A table cannot declare one of these as a column of its own.
+
+A fill's `kind` is what the ROSTER said. What it was CHARGED as comes from the venue's own terms.
+Those are two statements and nothing compares them (`docs/issues/013`), so keep a venue's declared
+categories in step with the registered roster.
+
 **A run needs five declarations**: a dataset, an execution input, an exchange, agendas with their
 configs, and at least one component. Each has a `vqapr new` scaffold; if you are hand-writing one
 of them, check for the template first.
+
+**And it wants a sixth: the instrument roster.** `vqapr new instruments` scaffolds the exporter and
+its declaration. It is not in the five because a run without one still completes -- but every fill
+then records `kind: None`, `cost_by_kind()` collapses to one unlabelled bucket, and on a costed
+venue every name is charged as if it were the same thing. `vqapr run` states which roster it read,
+or that it read none, and `vqapr list instruments` shows what is registered.
+
+**Costs.** `vqapr new exchange <id> --profile krx` emits a venue that charges what KRX charges,
+built from `krx_rules` -- the one call that gets the ETF sale-tax exemption right, since a stock
+pays it and an ETF does not. The default `--profile academic` fills free, which is what makes it
+academic; its scaffold names `buy=`/`sell=` `SideCost` as the fields it deliberately leaves out.
+Passing a bare list of ids to `KrxExchange` gives every name stock terms, which charges an ETF a
+tax it is exempt from.
+
+**Constraints.** The run spec's optional `constraints:` list names registered components of kind
+`constraint`. `vqapr new constraint <id> --cap 0.2` scaffolds a single-name position cap that
+registers and runs unedited. Of its five members, `project` is the one worth reading before you
+write your own: it returns the lower AND upper weight bound for every instrument -- the box the
+optimiser must stay inside -- not the offenders and not a correction.
 
 **Stop condition:** `vqapr list` shows all required elements and `register` accepted every
 declaration without failures.
@@ -141,9 +188,14 @@ flag them and explain what would have to be true for the pattern to be safe.
 
 1. `vqapr new run-spec --out spec.yaml` — get a template with every required key explained
 2. Fill in the template with registered component IDs, agenda IDs, instruments, and dates
-3. `vqapr check spec.yaml` — prove it before spending a run. `check` makes eight independent
-   judgments and reports **all** of them in one call, so a spec with four defects costs one
-   command rather than four. It writes nothing.
+3. `vqapr check spec.yaml` — prove it before spending a run. `check` runs **five phases** and
+   makes **eight independent judgments**, and reports all of them in one call, so a spec with four
+   defects costs one command rather than four. It writes nothing.
+
+   The two numbers are different things and the envelope shows the first: `checked` lists the five
+   phases — `spec`, `workspace`, `judgments`, `declaration`, `preflight` — and the phase named
+   `judgments` is where the eight are made. Counting the envelope's list and expecting eight is
+   the obvious mistake; it is five, and nothing is missing.
 4. `vqapr run spec.yaml` — preflight, freeze, and execute the simulation
 
 **Stop condition:** `vqapr check` returns `ok:true`, then `vqapr run` returns `ok:true` with an

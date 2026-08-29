@@ -172,7 +172,14 @@ Flow를 만들지 않는다.
 
 ### 2.6 Facade — 단일 public 진입점
 
-**결정.** `vqapr.public`이 유일한 documented surface. 내부 module 경로는 계약이 아니다.
+**결정 (2026-08-28 개정).** 문서화된 표면은 **CLI**이고, `vqapr.public`이 그것이 서 있는 지원되는
+구현 표면이다. 내부 module 경로는 계약이 아니다.
+
+> **이 절은 더 이상 판정의 출처가 아니다.** 두 번째 facade — `vqapr/project.py`와 `vqapr.open` —
+> 가 존재하며 **미출하·동결** 상태다. 확정 판정과 그 측정 근거, 그리고 `vqapr.public` 삭제(G008)가
+> 충족해야 할 조건은 `docs/design/agent-first-surface.md`의 "The ruling — 2026-08-28" 절에 있다.
+> 이 표면을 건드리기 전에 그 절을 읽는다. 이 문서는 `.agent/project.yaml`의
+> `canonical_documents`에 없다.
 
 - **왜**: `UC-FACADE-001`이 "package source를 열지 않고 완주"를 요구한다.
 - **없으면**: 사용자가 내부 import에 의존하면 리팩터가 breaking change가 된다.
@@ -2797,8 +2804,12 @@ src/vqapr/
 │   └── main · new · check · register · data · run · report · agent
 │
 ├── workspace.py     한 project의 선언 집합이 사는 곳 (§10.5)
-└── public.py        유일한 documented surface
+└── public.py        CLI가 서 있는 지원 구현 표면 (§2.6)
 ```
+
+> `project.py` · `simulation.py` · `materialization.py` · `venues.py` · `_internal/*_bridge.py`는
+> 위 트리에 있으나 **어떤 CLI 명령도 실행하지 않는다**(측정: CLI journey 0줄). 미출하·동결이며,
+> 판정과 G008 조건은 `docs/design/agent-first-surface.md`의 "The ruling — 2026-08-28" 절에 있다.
 
 `tests/`는 위 패키지를 1:1로 미러하고 둘이 더 붙는다.
 

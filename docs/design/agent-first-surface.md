@@ -223,3 +223,169 @@ consumer per dogfooding migration, and if removing one breaks something unrelate
 the coupling signal worth stopping for.
 
 The breaking release stays a separate final step. Deletion is revertible; a release is not.
+
+---
+
+# The ruling — 2026-08-28
+
+Everything above this line was written from the caller inward, before anything measured which
+facade the product actually runs on. This section is that measurement, and the decision it forces.
+Where the two disagree, this section wins.
+
+## Which facade ships
+
+**The CLI is the product. `vqapr.public` is its supported implementation surface.
+`vqapr/project.py` and `vqapr.open` are unshipped and frozen.**
+
+Not a preference — a tracer result. A PEP 669 line-level trace of a complete first-user CLI
+journey (`list` · `new` · `register` · `check` · `run` · `show`, all kinds, two runs completing
+`ok:true`), intersected with the 1309-test suite:
+
+| module | executable lines | ran in the CLI journey | ran in the test suite |
+|---|---:|---:|---:|
+| `vqapr/project.py` | 619 | **0** | 464 |
+| `vqapr/simulation.py` | 327 | **0** | 283 |
+| `vqapr/_internal/constraint_bridge.py` | 177 | **0** | 100 |
+| `vqapr/_internal/extensions/identity.py` | 168 | **0** | 159 |
+| `vqapr/_internal/catalog_store.py` | 159 | **0** | 130 |
+| `vqapr/_internal/catalog.py` | 158 | **0** | 145 |
+| `vqapr/_internal/run_bridge.py` | 118 | **0** | 73 |
+| `vqapr/_internal/venue_bridge.py` | 117 | **0** | 54 |
+| `vqapr/venues.py` | 109 | **0** | 93 |
+| `vqapr/materialization.py` | 82 | **0** | 75 |
+| `vqapr/_internal/objects.py` | 71 | **0** | 66 |
+| `vqapr/_internal/registration_bridge.py` | 69 | **0** | 58 |
+| `vqapr/_internal/schedule_bridge.py` | 34 | **0** | 34 |
+
+These modules are not under-exercised. They are exercised thoroughly, and **only by the tests
+written for them**. `vqapr/project.py` has exactly one importer — `vqapr.open()` — and the CLI
+never calls it. Outside `tests/`, the whole cluster has three consumers, and all three are
+showcases: `show_001`, `show_002`, `show_004`.
+
+So the layer the design document above calls "legacy" is the one the shipped product stands on, and
+the layer it calls the destination is the one no shipped command reaches. That inversion is the
+reason this ruling exists.
+
+## What frozen means
+
+- **No new callers.** Nothing in `src/` may add an import of `vqapr/project.py`, `vqapr.open`,
+  `vqapr/simulation.py`, `vqapr/materialization.py`, or `vqapr/venues.py`.
+- **No growth.** Do not extend these modules to serve a new requirement. If a CLI verb needs a
+  capability that lives there, reach it through `vqapr.public` or lift the capability out.
+- **No deletion, either.** Removing them is `G008`, and its conditions are below.
+- Scaffolds keep emitting `from vqapr.public import ...`, because that is what the shipped product
+  runs on. An emitted import is the most-copied artifact in the package; it must name the surface
+  that will still exist after this ruling, and that surface is `vqapr.public`.
+
+## The tripwire
+
+The earlier count of "15 `src/` files import `vqapr.public`" conflated three different populations:
+modules with a real `import` statement; files where the string sits inside **emitted template text**
+(`cli/new.py:396`, `:505`; `extension/scaffold.py:62`); and **user-facing refusal strings**
+(`workspace.py:548`, `:558`). Work in this very slice edits the template and string sites, so a
+string count moves for reasons that have nothing to do with what it measures.
+
+**Definition.** The tripwire is the count of modules under `src/` containing a real `import`
+statement for `vqapr.public`, excluding every occurrence inside a string literal. An AST walk is
+what makes that exclusion real: template text and refusal strings are `Constant` nodes and are
+structurally invisible to it.
+
+**Verified value: 12.** Confirmed by running the command below on 2026-08-28.
+
+```
+PYTHONUTF8=1 uv run python -c "import ast,pathlib; print(sum(1 for p in pathlib.Path('src').rglob('*.py') if any(isinstance(n,ast.ImportFrom) and (n.module or '')=='vqapr.public' or isinstance(n,ast.Import) and any(a.name=='vqapr.public' for a in n.names) for n in ast.walk(ast.parse(p.read_text(encoding='utf-8'))))))"
+```
+
+The twelve, so a later count can be diffed rather than merely compared:
+
+```
+_internal/constraint_bridge.py   _internal/registration_bridge.py   _internal/run_bridge.py
+_internal/schedule_bridge.py     _internal/strategy_bridge.py       _internal/venue_bridge.py
+agent/sample/exchange.py         agent/sample/journey.py            cli/check.py
+cli/register.py                  cli/run.py                         project.py
+```
+
+`cli/new.py` and `extension/scaffold.py` are deliberately **not** in this list. `new.py`'s real
+imports are at `:38-42` and `scaffold.py`'s sole import is at `:15`; neither imports `vqapr.public`
+at all, and their occurrences are inside the templates they emit.
+
+For completeness and to stop the earlier error being inherited silently: the number **15** that was
+circulating is the count of **files under `src/` containing the string `vqapr.public` anywhere**,
+measured before this ruling was written. It is neither an importer count nor an occurrence count —
+raw occurrences are roughly twice that, since `project.py` alone carries seven. Do not use it as the
+tripwire.
+
+It has already moved, inside the very change that wrote this section: the `src/vqapr/__init__.py`
+docstring above now mentions `vqapr.public`, so the file count is **16** while the importer count is
+unchanged at 12. That is the failure mode this section exists to describe, demonstrating itself.
+
+## What the tripwire does not watch
+
+**The tripwire counts importers of `vqapr.public`, which is not one of the five frozen modules.**
+"What frozen means" prohibits adding imports of `project.py`, `vqapr.open`, `simulation.py`,
+`materialization.py` and `venues.py`; the number 12 says nothing about any of them. A reader who
+runs the only command given here, sees 12, and concludes the whole freeze is intact would be
+reading a number that never looked.
+
+The current state of the five, measured on 2026-08-28 so a later count is a diff rather than a
+guess:
+
+- `project.py` — exactly one importer in `src/`, `vqapr/__init__.py`, which is `vqapr.open()`.
+- `venues.py` — imported by `_internal/venue_bridge.py`, which is itself inside the frozen cluster.
+- `simulation.py` — imported only by `project.py`.
+- `materialization.py` — **no `import` statement anywhere in `src/`**; reachable only as a lazily
+  resolved capability name in `__init__.py`'s `_CAPABILITIES`.
+- `vqapr.open` — called by no shipped command.
+
+The prohibition is on **adding**, so those existing edges are legal; they are recorded here so a
+later reader can tell an inherited edge from a new one.
+
+## The G008 admission conditions
+
+`G008` — delete `vqapr.public`, relocate the retained authorities, and cut the breaking release —
+is **blocked**, and this ruling does not unblock it. `gjc-handoff/session-03/goals.json` records
+two independent gates verbatim, and both are still shut:
+
+**Gate 1 — PLAN GATE.** The approved plan's escalation gate states: *"Do not begin T4
+deletion/build Q unless all hold: … whole testbed — including `register.py` — passes T0 trace/row
+comparator."* That comparator run was `G010`'s deliverable and **has not happened**. Beginning the
+deletion now would also destroy the legacy path the parity comparison must run against, because T2
+keeps it alive *"solely for baseline comparison"*.
+
+**Gate 2 — OWNER APPROVAL.** The goal deletes `vqapr.public`, physically relocates **8,139** lines
+across **38** files with **70** inbound references, and cuts a breaking **`0.2.0a1`** whose
+rollback is a whole-cutover revert. Deletion is revertible; a release is not.
+
+So a future session may open `G008` only when both hold: the T0 trace/row comparator has been run
+over the whole testbed including `register.py` and its result is recorded, **and** the owner has
+explicitly approved the deletion and the breaking release. Neither is implied by this ruling, and
+writing these conditions down is not approval of them.
+
+What it would cost, so the approval is an informed one: three showcases (`show_001`, `show_002`,
+`show_004`) move back or are dropped, and roughly 2,200 executable lines plus 4,529 test lines
+across 14 test files retire with the cluster.
+
+## Why this is written here and not only in a handoff
+
+It was written once already. `gjc-handoff/README.md` was correct and complete on 2026-08-25 — it
+counted the legacy consumers file by file and recorded `G008`'s blockers. The next twenty commits
+added three more `vqapr.public` importers, two of them in the newest and most deliberately designed
+CLI code in the tree, because the knowledge lived in one handoff file the canonical document set
+contradicted.
+
+`.agent/project.yaml` names this file as `surface_design`, so a session reading its canonical
+documents reaches this ruling. `docs/vqapr-architecture.md` is **not** in `canonical_documents`,
+and its §2.6 and its module map now point here rather than asserting a sole documented surface.
+
+## Where the evidence for this ruling lives
+
+`testbed-claude/` holds the first-time-user journey that produced the measurement above — its
+`REPORT.md`, `JOURNAL.md` and `FRICTION.md`, and the three observer documents `CODE-MAP.md`,
+`AGENT-REVIEW.md` and `WHAT-GJC-THINKS.md` that the tracer numbers, the two-facade finding and the
+scaffold-propagation finding all come from.
+
+**It stays untracked and untouched, by owner ruling.** Nothing is `git add`ed out of it, no file is
+relocated into `docs/`, and it is not committed. This ruling and
+`docs/issues/011-the-documented-surface-cannot-reach-a-cost.md` cite it by path, which is the
+intended durability: the conclusions are carried by tracked documents, and the raw journey stays
+where a later run can regenerate or replace it without a repository decision.

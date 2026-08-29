@@ -44,25 +44,46 @@ That decision is not Slice B's to make.
 
 ## What the fix has to decide
 
-Not a repair to specify blind. The open question is **which statement wins**, and there are three
-defensible answers:
+## The framing this file shipped with was too generous
 
-1. **The roster wins, and the venue stops declaring categories.** Consistent with the direction of
-   `docs/issues/008` — identity moved to the project, and venues lost their `instruments`
-   parameter for that reason. But `krx_rules` needs a category to build terms at construction
-   time, before any roster is bound, so this requires the terms to be resolved later than they
-   are now.
-2. **The venue wins for cost and the roster for identity, stated as such.** Cheapest, and it makes
-   the split explicit rather than accidental — but it leaves `kind` and the charge disagreeing by
-   design, which is the thing that reads as a defect.
-3. **They must agree, and a disagreement is refused.** A new judgment at `check`, comparing the
-   registered roster against every registered venue's declared categories. Catches it before a run
-   is spent, and costs the ninth code.
+It first offered three defensible answers and asked which statement should win. A later question
+collapsed them — *why does a venue have a universe at all?* — and the measurement that answers it
+was already in this file without being followed through.
 
-The measurement that argues for doing something: `ExchangeRulesView.charge` is a lookup in the
-construction-time `listings` mapping and never reads `self.registry`, while `stamped_kind` reads
-only the registry. The two paths are deliberately separate — that separation is documented and
-correct for what each is for — and nothing joins them.
+**The venue does not need a universe.** At the moment `charge` runs, the roster is already on the
+same object:
+
+- `flow/simulation.py`'s `_bind_registry_to_venue` binds the roster onto the venue itself, and says
+  why in its own docstring: *"so every reader of its rules sees it"*. Handing a bound view to
+  `plan_orders` alone was not enough, and a testbed journey proved it.
+- `ExchangeRulesView.stamped_kind` reads `self.registry` and gets the category right.
+- `ExchangeRulesView.charge` sits on that same object, in that same moment, and reads the
+  construction-time `listings` mapping instead.
+
+So the two sources are not two places the design needs; they are one place that reads from two.
+`krx_rules` resolves per-kind terms **eagerly**, at construction, because `TradeRule` carries
+`buy`/`sell` `SideCost` as values — and at construction no roster is bound, so the categories have
+to come from the author. Resolve them lazily, from the registry the venue already holds, and the
+author states the categories once, in the roster, where `008` already put them.
+
+That makes the remaining question narrower and duller than "which statement wins": it is *where
+KRX's terms get resolved*, and the answer that agrees with `008` is now known to be structurally
+reachable rather than blocked by construction order.
+
+The two alternatives are recorded because they were considered, not because they are equal:
+
+- **The venue wins for cost, the roster for identity, stated as such.** Cheapest, and it makes the
+  split explicit rather than accidental — but it leaves `kind` and the charge disagreeing by
+  design, on the record `067` established as the statement of what a fill was charged as.
+- **They must agree, and a disagreement is refused.** A cross-check at `check`, costing a ninth
+  simulation judgment. This is a guard against a duplication that would not exist once the venue
+  stops holding categories, so it is a second-best if the first is rejected, not an independent
+  option.
+
+**The scaffold propagated the duplication rather than questioning it.** `vqapr new exchange
+--profile krx` emits a `UNIVERSE` mapping because that is what `krx_rules` takes, and its docstring
+warns the author to keep it in step with the registered roster. A scaffold needing that warning is
+the signal the shape is wrong; the warning was written and the signal was not read.
 
 ## Reproduction
 

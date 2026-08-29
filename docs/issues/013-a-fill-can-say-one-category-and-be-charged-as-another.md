@@ -1,7 +1,25 @@
 # 013 — A fill can say one category and be charged as another
 
-**Status:** open. Found 2026-08-28 by the red-team lane of the Slice B completion gate, while
-attacking `vqapr new exchange --profile krx`. Demonstrated with a real run, not reasoned about.
+**Status: PARTLY CLOSED 2026-08-29** by
+`docs/implementations/079-a-venue-borrows-a-category-it-does-not-own.md`.
+
+The reported defect is fixed for every shipped venue. `ExchangeRulesView.charge` resolves the
+category from the registered roster through `_declared` -- the same door `stamped_kind` uses -- so
+a fill can no longer say one category and be charged as another. `KrxExchange` holds no category
+at all, and `vqapr new exchange --profile krx` emits ids alone. An unbound KRX venue refuses to
+charge rather than assuming a share.
+
+**What keeps this open:** nothing compares a *user-authored* venue's terms against the roster. A
+venue that resolves cost from its construction-time rules can still charge on a basis the roster
+does not share, and `check` has no judgment for it. That is a smaller and different problem than
+the one filed -- it is now about extension authors rather than about the package's own venues -- so
+the original report is kept below rather than rewritten.
+
+---
+
+**Status when filed:** open. Found 2026-08-28 by the red-team lane of the Slice B completion gate,
+while attacking `vqapr new exchange --profile krx`. Demonstrated with a real run, not reasoned
+about.
 **Touches:** `src/vqapr/exchange/venues/krx.py`, `src/vqapr/exchange/listings.py`,
 `src/vqapr/cli/check.py`, `src/vqapr/flow/preflight.py`.
 

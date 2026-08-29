@@ -3,14 +3,18 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import ClassVar
 
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.enums import Side
+from vqapr.domain.instruments import InstrumentKind, instrument
+from vqapr.domain.roster import InstrumentRoster
 from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
-from vqapr.exchange.listings import ExchangeRulesView, ListingAccess
+from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.orders.batches import OrderBatch, OrderRequest
 from vqapr.valuation.marking import ValuationService
@@ -177,6 +181,57 @@ class _CostedAcademic(AcademicExchange):
                 for name, rule in self.listings.items()
             },
         )
+
+
+class _CategoryPricedAcademic(AcademicExchange):
+    """A subclass whose rate follows what the instrument IS, declared the supported way.
+
+    The sibling above prices per instrument, which is right for a genuinely per-instrument fee.
+    This one prices per CATEGORY, and states it as `terms_by_kind` rather than baking a rate into
+    each rule -- so it keeps no copy of a fact the project owns and cannot disagree with the
+    roster (issue 013).
+    """
+
+    terms_by_kind: ClassVar[dict[InstrumentKind, TradeTerms]] = {
+        InstrumentKind.STOCK: TradeTerms(
+            Decimal(1), Decimal(1), False, buy=BUY_COST, sell=SELL_COST
+        ),
+        InstrumentKind.ETF: TradeTerms(Decimal(1), Decimal(1), False, buy=BUY_COST),
+    }
+
+
+def test_a_subclass_prices_by_category_from_the_roster_and_not_from_its_own_copy() -> None:
+    """The channel an extension author needs, so the duplication has an alternative.
+
+    `AcademicExchange.rules` promised that "a subclass may declare one", and the only way to do it
+    was a rate per `TradeRule`. For a venue whose schedule follows the category that means holding
+    a second copy of what the roster declares, which is how a fill comes to record one category
+    and be charged as another. Nothing can detect that from outside -- per-instrument rates are
+    legitimate when they are not standing in for a category -- so the defence is a reachable
+    correct channel, and this is it.
+    """
+    venue = _CategoryPricedAcademic(_venue().listings)
+    notional = Decimal("1000")
+
+    as_declared = venue.rules.with_registry(
+        InstrumentRoster({"A": instrument("A", "stock"), "B": instrument("B", "etf")})
+    )
+    assert as_declared.charge(Side.SELL, notional, "A").tax == notional * SELL_COST.tax_rate
+    assert as_declared.charge(Side.SELL, notional, "B").tax == Decimal("0")
+
+    # The same venue under a different roster charges differently, because the venue holds no
+    # category of its own to override it with.
+    flipped = venue.rules.with_registry(
+        InstrumentRoster({"A": instrument("A", "etf"), "B": instrument("B", "stock")})
+    )
+    assert flipped.charge(Side.SELL, notional, "A").tax == Decimal("0")
+    assert flipped.charge(Side.SELL, notional, "B").tax == notional * SELL_COST.tax_rate
+
+    # And the base profile is untouched: no `terms_by_kind`, so it charges its listings and still
+    # answers without a roster.
+    plain = _venue().rules
+    assert plain.registry is None
+    assert plain.charge(Side.SELL, notional, "A").total == Decimal("0")
 
 
 def test_a_declared_cost_band_is_charged_without_replacing_execute() -> None:

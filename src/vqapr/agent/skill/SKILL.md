@@ -111,8 +111,22 @@ or that it read none, and `vqapr list instruments` shows what is registered.
 built from `krx_rules` -- the one call that gets the ETF sale-tax exemption right, since a stock
 pays it and an ETF does not. The default `--profile academic` fills free, which is what makes it
 academic; its scaffold names `buy=`/`sell=` `SideCost` as the fields it deliberately leaves out.
-Passing a bare list of ids to `KrxExchange` gives every name stock terms, which charges an ETF a
-tax it is exempt from.
+A venue names no categories at all: `KrxExchange` takes ids, and what each one IS comes from the
+registered roster at fill time. A KRX venue run without a roster refuses to charge rather than
+assuming a share.
+
+**Writing your own costed venue.** Subclass `AcademicExchange` and declare the cost one of two
+ways, and the choice matters:
+
+- **A per-instrument fee** — give each listing its own `buy`/`sell` `SideCost`. Right when the rate
+  genuinely belongs to the instrument.
+- **A rate that follows the category** — set the class attribute `terms_by_kind`, a mapping of
+  `InstrumentKind` to `TradeTerms`. The charge is then resolved per fill from the roster.
+
+Do not express a category-driven rate as per-instrument costs. That keeps a second copy of what the
+roster already declares, and the two can disagree — the fill records the roster's category while
+the money follows yours. Nothing detects it, because per-instrument rates are legitimate when they
+are not standing in for a category.
 
 **Constraints.** The run spec's optional `constraints:` list names registered components of kind
 `constraint`. `vqapr new constraint <id> --cap 0.2` scaffolds a single-name position cap that

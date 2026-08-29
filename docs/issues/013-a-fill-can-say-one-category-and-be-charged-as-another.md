@@ -1,6 +1,27 @@
 # 013 — A fill can say one category and be charged as another
 
-**Status: PARTLY CLOSED 2026-08-29** by
+**Status: CLOSED 2026-08-29** by
+`docs/implementations/079-a-venue-borrows-a-category-it-does-not-own.md` and
+`docs/implementations/081-a-category-driven-rate-has-a-channel-to-go-through.md`.
+
+`079` removed the venue's copy of the roster's categories for every venue this package ships.
+`081` closed the remainder, which was the same defect available to anyone writing their own — and
+not by the `check` judgment this file proposed.
+
+**That judgment cannot work, and the reason belongs on the record.** A per-instrument rate is
+legitimate when it is not standing in for a category. A venue may charge one name more than another
+because of a genuine instrument-specific fee, and nothing outside can tell that apart from a
+category schedule written out by hand. A judgment would have to guess the author's intent and would
+be wrong whichever way it guessed. The defence is a reachable correct channel: `terms_by_kind`,
+which existed for `KrxExchange` and was reachable by nobody else, is now on `rules_view` and on
+`AcademicExchange` — the documented base for a user-authored venue — and `SKILL.md` states which of
+the two ways to declare a cost applies when.
+
+The original report and the superseded three-option framing follow unchanged.
+
+---
+
+**Superseded status (2026-08-29, partial):** closed for shipped venues by
 `docs/implementations/079-a-venue-borrows-a-category-it-does-not-own.md`.
 
 The reported defect is fixed for every shipped venue. `ExchangeRulesView.charge` resolves the

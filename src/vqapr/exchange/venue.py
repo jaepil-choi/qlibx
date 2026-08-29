@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side, side_of
@@ -59,12 +59,29 @@ class AcademicExchange:
                 raise ValueError("each listing key must match its TradeRule instrument_id")
         object.__setattr__(self, "listings", copied)
 
+    terms_by_kind: ClassVar[Mapping[object, object] | None] = None
+    """Per-category terms, for a subclass whose rate depends on WHAT an instrument is.
+
+    Declare it and the charge is resolved per fill from the project's registered roster, the same
+    way `KrxExchange` does. Leave it `None` -- the default, and what the academic profile is -- and
+    each listing's own `buy`/`sell` are charged.
+
+    This is the channel a category-driven venue should use instead of baking a rate into each
+    `TradeRule`. Baking it in means holding a second copy of a fact the project owns, and the two
+    can then disagree: a fill records the category the roster declared while the money follows the
+    venue's own idea of it (issue 013). A class attribute rather than a constructor parameter,
+    because it is a property of the VENUE TYPE -- what KRX charges an ETF is not something one
+    instance of a KRX venue decides differently from another.
+    """
+
     @property
     def rules(self) -> ExchangeRulesView:
         """Academic listings with no declared cost band, so this profile charges nothing.
 
-        A subclass may declare one. `execute` charges whatever this returns, so a subclass that
-        adds a cost band gets it applied without replacing any matching behaviour.
+        A subclass may declare one, either by giving each listing its own `buy`/`sell` or -- when
+        the rate follows the category -- by setting `terms_by_kind`. `execute` charges whatever
+        this returns, so a subclass that adds a cost band gets it applied without replacing any
+        matching behaviour.
 
         The venue never DECLARES a roster -- there is no constructor parameter for one, so an
         author has no channel to state a category. What it may hold is one handed to it at run
@@ -74,7 +91,10 @@ class AcademicExchange:
         cost band is added, and a cached view would freeze the base profile's answer.
         """
         return ExchangeRulesView(
-            self.exchange_id, self.listings, getattr(self, "_registry", None)
+            self.exchange_id,
+            self.listings,
+            getattr(self, "_registry", None),
+            type(self).terms_by_kind,
         )
 
     def execute(

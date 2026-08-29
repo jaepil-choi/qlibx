@@ -42,8 +42,8 @@ minversion = "9.1"
 testpaths = ["tests"]
 strict_config = true
 strict_markers = true
-# `slow` is deselected by default. Thirteen end-to-end journeys were 83% of a 452s suite while
-# the other ~1,300 tests were 151s combined, which made the edit-check loop cost minutes and made
+# `slow` is deselected by default. Fourteen end-to-end journeys are ~80% of a 420s suite while
+# the other ~1,300 tests are ~88s combined, which made the edit-check loop cost minutes and made
 # people run the suite less often -- the opposite of what a suite is for.
 #
 # Nothing is deleted and nothing is skipped conditionally: `-m slow` runs exactly those, and

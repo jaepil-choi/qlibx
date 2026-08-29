@@ -20,7 +20,7 @@ commands:
   import: uv run python -c "import vqapr"
   build: uv build
   # Iteration check. Deselects `slow` by default via pyproject's addopts: thirteen end-to-end
-  # journeys were 83% of a 452s suite while the other ~1,300 tests took 80s combined.
+  # journeys are 77% of a 466s suite while the other ~1,300 tests take 106s combined.
   test: uv run pytest tests/ -q
   # Everything, including those thirteen. Required before handoff, release, or any change to
   # run assembly, the record shape, or the scaffolds -- that is what the slow set covers.

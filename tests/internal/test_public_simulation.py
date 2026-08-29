@@ -595,4 +595,10 @@ def test_a_binding_constraint_actually_refuses_the_intent(workspace):
         "a 0.10 cap must refuse a 0.5 target; the run succeeded instead:\n"
         + result.stdout
     )
-    assert "violates projected constraints" in result.stdout + result.stderr
+    # The refusal names which constraint, what it measured, and the bound it measured against.
+    # It used to say only "economic intent violates projected constraints", which told a reader
+    # their run stopped and nothing they could act on.
+    message = result.stdout + result.stderr
+    assert "probe-cap" in message, "which constraint refused"
+    assert "0.5" in message, "what it measured"
+    assert "0.10" in message, "and the bound it measured against"

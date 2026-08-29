@@ -432,6 +432,17 @@ def test_show_model_describes_a_datamodel_and_not_only_a_strategy(
     assert code == 0, emitted
     _cli(capsys, "--project-root", str(tmp_path), "register", emitted["declaration"])
 
+    # And a constraint, which fell through to the StrategyModel loader and raised a bare TypeError
+    # as `stage: "unhandled"` -- so the component a reader most needs to inspect before trusting it
+    # could not be inspected at all. Found by a journey whose run a cap had just refused.
+    code, cap = _cli(capsys, "--project-root", str(tmp_path), "new", "constraint", "cap20")
+    _cli(capsys, "--project-root", str(tmp_path), "register", cap["declaration"])
+    code, rule = _cli(capsys, "--project-root", str(tmp_path), "show", "model", "cap20")
+    assert code == 0, rule
+    assert rule["kind"] == "constraint"
+    assert rule["constraint_id"] == "cap20"
+    assert "weight" in rule["decides"], "what a constraint decides is stated, not left blank"
+
     code, described = _cli(capsys, "--project-root", str(tmp_path), "show", "model", "derived")
 
     assert code == 0, described
@@ -653,16 +664,23 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     assert code == 1
     assert mismatched["failures"][0]["code"] == "component.load.constraint_id_mismatch"
 
-    # The rule BITES. This workspace holds one instrument, so the scaffold strategy proposes 100%
-    # of the book in it, which a 20% cap forbids. The run refuses by name rather than crashing --
-    # a constraint that could not stop anything would be the more worrying result.
+    # The rule BITES, and says what breached it. This workspace holds one instrument, so the
+    # scaffold strategy proposes 100% of the book in it, which a 20% cap forbids.
     code, refused = _cli(
         capsys, "--project-root", str(tmp_path), "run",
         str(_spec(tmp_path, constraints=["cap20"])), "--run-id", "capped",
     )
     assert code == 1
-    assert "constraint" in json.dumps(refused).lower()
     assert refused["stage"] != "unhandled", "a bound constraint is a decision, not a crash"
+    # The refusal said only "economic intent violates projected constraints" -- which constraint,
+    # which name, and by how much were all discarded one frame below where they were computed. A
+    # first-time-user journey had to re-run WITHOUT the constraint and read the weight table to
+    # reconstruct the breach, then open the scaffold's source.
+    message = json.dumps(refused)
+    assert "cap20" in message, "the refusal names which constraint refused"
+    assert "A" in refused["error"], "and which instrument breached it"
+    assert "0.2" in message, "and the bound it measured against"
+    assert "excess" in message, "and by how much"
 
     # And it PERMITS. `--cap` is the marked place to change, exposed as a flag the way `--lookback`
     # is for a strategy, so the same scaffold runs clean where the book satisfies it. Without this

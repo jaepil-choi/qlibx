@@ -20,7 +20,7 @@ from vqapr.constraints.evaluation import (
     project_constraints,
     validate_intended_constraints,
 )
-from vqapr.constraints.findings import ConstraintReport
+from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
@@ -1488,7 +1488,7 @@ class SimulationFlow:
                     self._callback_intent_boundary(
                         occurrence,
                         constraint,
-                        lambda: self._raise_intended_constraint_failure(),
+                        lambda: self._raise_intended_constraint_failure(failed.finding),
                     )
                 accepted = self._callback_intent_boundary(
                     occurrence,
@@ -1896,8 +1896,29 @@ class SimulationFlow:
         return evidence, lifecycle
 
     @staticmethod
-    def _raise_intended_constraint_failure() -> None:
-        raise ValueError("economic intent violates projected constraints")
+    def _raise_intended_constraint_failure(finding: ConstraintFinding) -> None:
+        """Refuse the intent, naming which constraint, which names, and by how much.
+
+        The message was `"economic intent violates projected constraints"` and nothing else, so a
+        reader whose run stopped here could not tell WHICH name breached WHICH bound. The finding
+        already carries all of it -- the constraint's id, what it measured, the bound it measured
+        against, and an `offenders` tuple in its evidence -- and every part was discarded one frame
+        below where it was computed.
+
+        A first-time-user journey hit this on a 20% cap and had to reconstruct the breach by
+        running the strategy again WITHOUT the constraint and reading the weight table, then
+        opening the scaffold's source. That is a diagnosis the refusal owed them.
+        """
+        offenders = tuple(finding.input_lineage.get("offenders") or ())
+        named = ", ".join(str(name) for name in offenders[:5])
+        if len(offenders) > 5:
+            named += f", and {len(offenders) - 5} more"
+        raise ValueError(
+            f"economic intent violates {finding.constraint_id!r}: "
+            + (f"{named} " if named else "")
+            + f"measured {finding.measured} against a bound of {finding.bound}"
+            + (f" (excess {finding.excess})" if finding.excess else "")
+        )
 
     def _callback_actual_source_refs(
         self, occurrence: OperationOccurrence, window: ModelWindow

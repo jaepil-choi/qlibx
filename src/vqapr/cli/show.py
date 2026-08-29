@@ -97,6 +97,33 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     # described. A first-time-user journey reported that as a blocker while trying to find out
     # what a DataModel is for.
     kind = getattr(ref, "kind", None)
+    if kind is ComponentKind.CONSTRAINT:
+        # A constraint declares what it reads and answers to an id, so it is describable in the
+        # same terms -- it simply forms nothing and produces no weights. Falling through to the
+        # StrategyModel loader raised a bare `TypeError` as `stage: "unhandled"`, so the one
+        # component a reader most needs to inspect before trusting it could not be inspected at
+        # all. Found by a first-time-user journey after a cap refused its run.
+        from vqapr._internal.extensions.loading import load_constraint
+
+        rule = load_constraint(ref, project_root=project_root)
+        return {
+            "component_id": component_id,
+            "kind": cli_kind(kind),
+            "constraint_id": str(rule.constraint_id),
+            "reads": {
+                str(requirement.dataset_id): {
+                    "fields": list(requirement.fields),
+                    "lookback": str(requirement.lookback),
+                }
+                for requirement in rule.requirements()
+            },
+            # Named rather than left absent, because "reads nothing" is the ordinary answer for a
+            # rule about weights and an empty mapping alone does not say so.
+            "decides": "the feasible set every instrument's weight must lie in",
+            "forms": [],
+            "weights": "bounds only; a constraint narrows weights and never proposes them",
+            "records": [],
+        }
     if kind is ComponentKind.DATA_MODEL:
         model = load_data_model(ref, project_root=project_root)
     else:

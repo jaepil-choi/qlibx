@@ -1,10 +1,21 @@
 # 008 — An instrument is not the venue's to own
 
-**Status:** open, **planning halted 2026-08-27 by the owner and corrected by
-`docs/issues/009-a-fingerprint-is-a-receipt-not-a-gate.md`.** Read 009 first. The planning pass that
-was running on this file was deliberating FREEZE vs IMPORT for the registry; that comparison is void
-— both options rest on a premise 009 refutes — and this file's section on it has been rewritten.
-009 also adds the `--force` and `remove` commands this issue depends on.
+**Status: CLOSED 2026-08-28** by
+`docs/implementations/065-an-instrument-is-the-projects-to-declare.md`, with the roster-injection
+defect it exposed closed by
+`docs/implementations/067-a-fill-records-what-it-was-charged-as.md`.
+The roster left the venue: venues lost the `instruments` parameter entirely, so a venue author has
+no channel to declare a category, and the Flow binds the project's roster in at run assembly. Record
+`065`'s claim that *"a partial injection — one route bound, the other not — cannot happen"* was
+false, which is what `067` had to fix; that correction is part of this issue's closure, not a
+separate defect.
+
+**Planning was halted 2026-08-27 by the owner and corrected by
+`docs/issues/009-a-fingerprint-is-a-receipt-not-a-gate.md`.** Read 009 first if you are reading this
+file for its history. The planning pass that was running on it was deliberating FREEZE vs IMPORT for
+the registry; that comparison is void — both options rest on a premise 009 refutes — and this file's
+section on it has been rewritten. 009 also adds the `--force` and `remove` commands this issue
+depended on.
 
 Written 2026-08-27 after owner review of 007's plan.
 **Supersedes:** `docs/issues/007-an-undeclared-instrument-is-silently-a-share.md`. 007's diagnosis

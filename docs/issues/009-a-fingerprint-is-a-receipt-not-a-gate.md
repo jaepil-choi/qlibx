@@ -1,9 +1,19 @@
 # 009 — A fingerprint is a receipt, not a gate
 
-**Status:** open. Written 2026-08-27 from an owner audit of every digest in the package, prompted by
-asking what a daily batch that lists one new ticker would do to a registered roster.
-**Blocks 008.** The plan in progress for 008 is deliberating a comparison this file voids. **Read
-"Stop the 008 comparison" first, before resuming any planning.**
+**Status: CLOSED 2026-08-28** by
+`docs/implementations/064-a-fingerprint-stops-refusing-and-starts-reporting.md`.
+The two component-fingerprint refusals that pointed at each other are gone: editing a registered
+component and re-registering now replaces it in place, and the run record states what actually
+loaded. The gate became a receipt.
+
+**Two errors in this file's own decisions were found and amended in place before it was executed**,
+and both would have broken the product if followed literally. Decision 4 named the object store as
+dead; it is the path `Project.materialize` writes through. Decision 2 asked whether the package
+version belongs in a preimage that gates nothing; the gating preimage never carried one.
+
+Written 2026-08-27 from an owner audit of every digest in the package, prompted by asking what a
+daily batch that lists one new ticker would do to a registered roster. **It blocked 008**, whose
+in-progress plan was deliberating a comparison this file voids; both are now closed.
 **Touches:** `src/vqapr/_internal/extensions/loading.py`, `src/vqapr/workspace.py`,
 `src/vqapr/_internal/extensions/identity.py`, `src/vqapr/data/store.py`,
 `src/vqapr/_internal/{objects,catalog,catalog_store,publication}.py`, `src/vqapr/project.py`,

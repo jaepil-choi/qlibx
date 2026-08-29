@@ -27,6 +27,11 @@ KINDS = (
     "strategy-configs",
     "valuation-configs",
     "monitoring-policies",
+    # The roster was registrable and unlistable: `list` covered eight kinds and not this one, so a
+    # registered roster could not be inspected from the CLI at all. Both first-time-user journeys
+    # ended up opening `.vqapr/instruments.json` by hand, which is a file this surface should
+    # never require a reader to know about.
+    "instruments",
     "runs",
 )
 
@@ -117,7 +122,59 @@ def _runs(project_root: Path, store_root: Path | None) -> list[dict[str, Any]]:
     return rows
 
 
+def _instruments(project_root: Path) -> list[dict[str, Any]]:
+    """The registered roster, as at most one row, or none when the project has no roster.
+
+    A sidecar rather than a workspace section, so this does not go through `_ACCESSORS`: the
+    pointer lives in `.vqapr/instruments.json` beside `workspace.yaml` (see
+    `Workspace.roster_path` for why it is not inside the document).
+
+    The pointer stores `schema`, `tables` and `digest` and no counts, so the per-category numbers
+    are read from the tables it points at. That read can fail for reasons that are not this
+    command's business -- a table moved, a disk unmounted -- and `list` is the command an agent
+    runs FIRST to orient itself. So the counts are best-effort: the digest and the declared tables
+    are always reported, and `unreadable` says so when the tables could not be opened, rather than
+    turning an orientation command into a failure.
+    """
+    if not (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists():
+        return []
+    pointer = Workspace.open(project_root).registered_instruments()
+    if pointer is None:
+        return []
+    row: dict[str, Any] = {
+        "digest": str(pointer["digest"]),
+        "tables": {str(kind): str(path) for kind, path in sorted(dict(pointer["tables"]).items())},
+    }
+    # Imported outside the try. They perform no I/O, so an ImportError from either is a packaging
+    # defect and must fail loudly rather than be reported as `unreadable: No module named ...` on
+    # a row that otherwise looks healthy -- a framework problem wearing a data-availability label.
+    from vqapr.domain.roster import build_roster
+    from vqapr.domain.roster_export import read_roster_table
+
+    try:
+        roster = build_roster(
+            {
+                str(kind): read_roster_table(Path(str(path)))
+                for kind, path in dict(pointer["tables"]).items()
+            }
+        )
+    except Exception as unreadable:
+        row["unreadable"] = str(unreadable)
+        return [row]
+    row["by_kind"] = roster.histogram
+    row["instruments"] = sum(roster.histogram.values())
+    return [row]
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    if args.kind == "instruments":
+        # `count` is the number of rows, as it is for every other kind: a project holds one roster
+        # or none. How many instruments it describes is `items[0]["instruments"]`, which is a
+        # different question and gets its own field rather than overloading this one.
+        rows = _instruments(project_root)
+        if args.identifier:
+            rows = [row for row in rows if args.identifier in row["digest"]]
+        return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
     if args.kind == "runs":
         # Runs live under `store.root`, not in the workspace document, so this path does not open
         # the workspace at all. An uninitialised directory holds zero runs, which is an answer.

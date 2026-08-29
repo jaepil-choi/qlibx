@@ -106,34 +106,215 @@ class {class_name}(DataModel):
         ]
 '''
 
+_CONSTRAINT_TEMPLATE = '''"""A Constraint capping how much of the book any one name may be.
+
+The run spec offers a `constraints:` list and nothing said what went in it. `Constraint` has five
+abstract members and had no scaffold, so the only way to learn their shapes was to register an
+empty subclass and read the `TypeError` -- and `project` is a semantic contract that cannot be
+guessed from a signature. Guessing it wrong produces a backtest that looks correct and is not.
+
+Edit `CAP`. Everything else runs as written.
+"""
+
+from decimal import Decimal
+
+from vqapr.public import (
+    AccountSnapshot,
+    Constraint,
+    ConstraintBounds,
+    ConstraintFinding,
+    EconomicPortfolioIntent,
+    MarkBatch,
+    ModelWindow,
+)
+
+CAP = Decimal("{cap}")  # THE RULE. No single name may exceed this share of the book.
+FLOOR = Decimal("0")
+
+# A cap on SIZE, measured on absolute weight, so a -0.30 short is as much a violation as a +0.30
+# long. It says nothing about sign: shorting within the cap is permitted here, and forbidding it
+# is a separate rule.
+#
+# One rule, one question, is what keeps the three members below agreeing with each other. The
+# shipped `NoShort` is the model for that -- it tests the sign and nothing else. Constraints
+# intersect (lower bounds take the max, upper bounds the min), so declaring `no-short` alongside
+# this cap gives long-only-with-a-cap without either rule knowing about the other.
+
+
+class {class_name}(Constraint):
+    """No single instrument may exceed `CAP` of the book, long or short.
+
+    Size only. Declare the shipped `no-short` alongside it in the run spec's `constraints:` list
+    if you also want the sign rule; constraints intersect, so the pair gives
+    long-only-with-a-cap.
+    """
+
+    @property
+    def constraint_id(self) -> str:
+        """The id this constraint answers to.
+
+        It must equal the id you register it under, character for character. Registration refuses
+        a mismatch, so this is fixed to the id `vqapr new` was given rather than left as a string
+        to keep in step by hand.
+        """
+        return "{component_id}"
+
+    def requirements(self) -> tuple:
+        """What this constraint needs to read. Nothing: the rule is a property of the weight.
+
+        A constraint that compared against a benchmark would return a `DataRequirement` here, and
+        the framework would hand it a window over that dataset.
+        """
+        return ()
+
+    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+        """**The feasible set.** Project the proposed book onto what this rule permits.
+
+        This is the member that cannot be guessed, so state it plainly: return the lower and upper
+        weight bound for EVERY instrument in `instruments`. Not the offenders, not a correction --
+        the box the optimiser must stay inside.
+
+        Both bounds are mandatory for every name. A lower-only projection is inexpressible: the
+        evaluator rejects a projection that does not cover every window instrument on both sides,
+        because a missing bound would silently widen the feasible set rather than fail.
+        """
+        return ConstraintBounds(
+            {{instrument: -CAP for instrument in instruments}},
+            {{instrument: CAP for instrument in instruments}},
+        )
+
+    def validate_intended(
+        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
+    ) -> ConstraintFinding:
+        """Judge the weights a Strategy proposed, before anything is executed."""
+        # `abs`, matching `project`'s symmetric bounds and `evaluate` below. Measuring the signed
+        # weight here would let a -0.30 pass a 0.2 cap that the projection forbids and that the
+        # monitoring check then reports -- three members of one rule disagreeing about the same
+        # book.
+        offenders = tuple(
+            sorted(
+                target.instrument_id
+                for target in intent.targets
+                if target.weight is not None and abs(target.weight) > CAP
+            )
+        )
+        worst = max(
+            (abs(target.weight) for target in intent.targets if target.weight is not None),
+            default=FLOOR,
+        )
+        return ConstraintFinding(
+            self.constraint_id,
+            not offenders,
+            worst,
+            CAP,
+            max(worst - CAP, FLOOR),
+            {{"stage": "intended", "offenders": offenders}},
+        )
+
+    def evaluate(
+        self,
+        window: ModelWindow,
+        account: AccountSnapshot,
+        marks: MarkBatch,
+        bounds: ConstraintBounds,
+    ) -> ConstraintFinding:
+        """Judge the book that was actually committed, after it was marked.
+
+        `validate_intended` asks whether the decision was permissible; this asks whether the
+        result is. They differ whenever execution does not fill what was intended.
+        """
+        # NAV is the marked book plus the cash beside it. `mark.value` is already the marked
+        # value of the held quantity, so the weight is that over NAV.
+        nav = marks.total_value + account.cash
+        weights = (
+            {{mark.instrument_id: abs(mark.value) / nav for mark in marks.marks}}
+            if nav > FLOOR
+            else {{}}
+        )
+        offenders = tuple(sorted(name for name, weight in weights.items() if weight > CAP))
+        worst = max(weights.values(), default=FLOOR)
+        return ConstraintFinding(
+            self.constraint_id,
+            not offenders,
+            worst,
+            CAP,
+            max(worst - CAP, FLOOR),
+            {{
+                "stage": "monitoring",
+                "account_version": account.version,
+                "offenders": offenders,
+            }},
+        )
+'''
+
 _TEMPLATES = {
     ComponentKind.STRATEGY_MODEL: _STRATEGY_TEMPLATE,
     ComponentKind.DATA_MODEL: _DATA_MODEL_TEMPLATE,
+    ComponentKind.CONSTRAINT: _CONSTRAINT_TEMPLATE,
 }
 
 
 def _class_name(component_id: str) -> str:
+    """The class a scaffold declares, or a refusal naming what an id may contain.
+
+    Title-casing the hyphen-separated parts is not enough on its own: it accepted ids that cannot
+    be Python identifiers -- a leading digit, punctuation -- and emitted them verbatim into the
+    source, where the file failed to parse and surfaced as `stage: "unhandled"` with a raw
+    `SyntaxError`. The id is checked here, before anything is written, because this is the one
+    place that knows what it has to become.
+    """
     parts = [part for part in component_id.replace("_", "-").split("-") if part]
     if not parts:
         raise ValueError("component_id must contain at least one alphanumeric part")
-    return "".join(part[:1].upper() + part[1:] for part in parts)
+    import keyword
+
+    candidate = "".join(part[:1].upper() + part[1:] for part in parts)
+    # `isidentifier()` is lexical shape only and returns True for keywords. `None`, `True` and
+    # `False` are already title-case, so the transformation leaves them untouched and they reach
+    # the emitted source as a class name that will not parse. Lowercase keywords are safe only by
+    # accident -- `class` becomes `Class` -- which is not a property to rely on.
+    if not candidate.isidentifier() or keyword.iskeyword(candidate):
+        raise ValueError(
+            f"component_id {component_id!r} cannot name a Python class: it becomes "
+            f"{candidate!r}, which is not a usable identifier. Use letters, digits, hyphens and "
+            f"underscores, starting with a letter, and avoid Python keywords -- for example "
+            f"'position-cap'"
+        )
+    return candidate
 
 
 def render(
     kind: ComponentKind,
     component_id: str,
     *,
-    dataset_id: str,
+    dataset_id: str | None = None,
     field: str = "close",
     lookback: int = 6,
     invested: str = "0.9",
     output_field: str = "value",
+    cap: str = "0.2",
 ) -> str:
-    """Return a runnable component source for `kind`."""
+    """Return a runnable component source for `kind`.
+
+    `dataset_id` is optional because not every authored kind reads one. A DataModel and a
+    StrategyModel are defined by what they read; a Constraint is a rule about weights, and the
+    shipped `NoShort` returns an empty `requirements()` for exactly that reason. Requiring a
+    dataset here would make the caller invent one to scaffold a rule that never opens it.
+    """
     if kind not in _TEMPLATES:
-        raise ValueError(f"no template for {kind}; user authoring covers datamodel and strategy")
+        raise ValueError(
+            f"no template for {kind}; user authoring covers datamodel, strategy and constraint"
+        )
     if lookback <= 0:
         raise ValueError("lookback must be positive")
+    if kind is ComponentKind.CONSTRAINT:
+        return _TEMPLATES[kind].format(
+            component_id=component_id,
+            class_name=_class_name(component_id),
+            cap=cap,
+        )
+    if dataset_id is None:
+        raise ValueError(f"{kind.value} reads a dataset, so dataset_id is required")
     return _TEMPLATES[kind].format(
         component_id=component_id,
         class_name=_class_name(component_id),

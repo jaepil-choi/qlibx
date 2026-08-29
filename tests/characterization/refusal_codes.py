@@ -592,11 +592,20 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     missing = good.replace("def project(self, window, instruments):", "def unused(self):")
     broken = "class Limit:\n    pass\n"
 
-    def _ref(source: str, name: str) -> ComponentRef:
+    def _ref(source: str, name: str, *, component_id: str | None = None) -> ComponentRef:
+        # The filename and the registered id are separate arguments on purpose. `load_constraint`
+        # refuses a Constraint registered under an id its own `constraint_id` does not return, and
+        # every source below derives from `good`, whose `constraint_id` is `limit`. Registering
+        # them as `stale`/`missing` would trip that identity refusal FIRST, and because
+        # `conformance` folds a loader exception into its collector and returns before
+        # `_check_methods` runs, the defect each fixture exists to provoke would never be reached.
+        # This harness's output is the oracle, so a fixture that silently stops provoking its own
+        # defect rewrites the ground truth rather than failing -- exactly what `regenerate`'s
+        # docstring forbids.
         path = tmp_path / f"{name}.py"
         path.write_text(source, encoding="utf-8")
         return ComponentRef.of(
-            name,
+            component_id or name,
             ComponentKind.CONSTRAINT,
             path,
             "Limit",
@@ -605,8 +614,16 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
             ),
         )
 
-    for source, name in ((stale, "stale"), (missing, "missing"), (broken, "broken")):
-        diagnosis = conformance(_ref(source, name))
+    for source, name, component_id in (
+        (stale, "stale", "limit"),
+        (missing, "missing", "limit"),
+        (broken, "broken", None),
+        # And one that IS the identity mismatch, so the refusal is characterized rather than only
+        # declared. `good` answers to `limit`; registering it as `mislabelled` is the reported
+        # defect in one line.
+        (good, "mislabelled", None),
+    ):
+        diagnosis = conformance(_ref(source, name, component_id=component_id))
         codes.extend(failure.code for failure in diagnosis.failures)
 
     try:

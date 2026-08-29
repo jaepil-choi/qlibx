@@ -195,8 +195,11 @@ def test_registration_calls_this_suite_rather_than_its_own_checks(tmp_path: Path
     path = tmp_path / "stale.py"
     path.write_text(STALE_EVALUATE, encoding="utf-8")
 
+    # Registered as `limit`, which is what this `Limit` answers to. The stale `evaluate` signature
+    # is the one defect under test; registering it under `stale` would add an id mismatch that
+    # `load_constraint` refuses first, and this test is about which suite runs, not about ids.
     with pytest.raises(Exception) as failure:
-        register_constraint(tmp_path, "stale", path, "Limit")
+        register_constraint(tmp_path, "limit", path, "Limit")
 
     error = failure.value
     assert getattr(error, "stage", None) == STAGE, "registration must report the conformance stage"

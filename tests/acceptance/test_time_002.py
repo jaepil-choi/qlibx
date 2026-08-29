@@ -22,6 +22,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.errors import VqaprError
 from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
@@ -1078,7 +1079,10 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
 
     constraint = _component("risk", ComponentKind.CONSTRAINT)
     frozen = _frozen((datetime(2024, 3, 5, 9, tzinfo=KST),))
-    with pytest.raises(ValueError, match="ConstraintSet identity"):
+    # A structured refusal, not a bare `ValueError`. The guard used to raise one, which carries no
+    # body, so it surfaced through the CLI as `stage: "unhandled"` with an empty `failures` list --
+    # the framework announcing its own breakage when a component was registered under the wrong id.
+    with pytest.raises(VqaprError) as caught:
         SimulationFlow(
             frozen,
             _Strategy((NoDecision("x"),)),
@@ -1089,6 +1093,12 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
             exchange=_exchange(),
             constraints=(DifferentConstraint(),),
         )
+    assert [failure.code for failure in caught.value.failures] == [
+        "run.assembly.constraint_identity"
+    ]
+    # The refusal names both sides, so a reader does not have to diff two ids by eye.
+    assert "'other'" in caught.value.failures[0].observed
+    assert "'risk'" in caught.value.failures[0].observed
     assert frozen.constraints.constraints == (_component("risk", ComponentKind.CONSTRAINT),)
     assert ConstraintSet((constraint,)).constraints == (constraint,)
 

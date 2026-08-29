@@ -351,7 +351,52 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     _requirements(constraint, label="Constraint", required=True)
+    _constraint_identity(ref, constraint)
     return constraint
+
+
+def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
+    """Refuse a Constraint registered under an id it does not answer to.
+
+    `SimulationFlow` requires the loaded constraints to carry exactly the ids the FrozenRun
+    declared, and it enforced that with a bare `ValueError` at assembly. Nothing before it looked,
+    so `check` returned `ok:true` on all five phases and `run` then died with `stage: unhandled`
+    and an empty `failures` list -- the framework reporting itself broken when the registration was
+    wrong. Registering `NoShort` as `noshort` crashed; the same file as `no-short` ran clean, and
+    nothing said so.
+
+    This is the one place that can answer the question for every caller. `conformance` dispatches
+    here for `ComponentKind.CONSTRAINT`, so `vqapr register` refuses at registration; `preflight`
+    loads constraints through here, so `vqapr check` refuses before a run is spent and `vqapr run`
+    refuses before assembly. Checking the LOADED object rather than the source is what catches a
+    `constraint_id` computed at runtime, which no static read of the file can see.
+
+    It cannot be the ONLY place, because it can only ask once per load. A `constraint_id` that
+    returns a different string on each access satisfies this check at registration and again at
+    `check`, and still disagrees by run assembly; `_require_constraint_identity` in
+    `flow/simulation.py` is what catches that, and red-teaming confirmed the path is live.
+    """
+    declared = str(ref.component_id)
+    answered = constraint.constraint_id
+    if answered == declared:
+        return
+    raise _failure(
+        f"{_STAGE}.constraint_id_mismatch",
+        "a Constraint must be registered under the id its own constraint_id returns",
+        f"registered as {declared!r}, constraint_id returns {answered!r}",
+        # Three remedies, because which one is right depends on the component. A class with a
+        # hardcoded id has two; one that takes its id as a constructor argument -- as the shipped
+        # `NoShort` does -- has a third, and omitting it would send that user to edit a file the
+        # package ships.
+        fix=(
+            f"register the component as {answered!r}; or change the class's constraint_id to "
+            f"return {declared!r}; or, if the class takes its id as a constructor argument "
+            f"(the shipped NoShort takes `constraint_id`), pass {declared!r} to it through the "
+            f"registration's config mapping"
+        ),
+        explain=ExplainTopic.COMPONENT_CONTRACT,
+        source=FailureSource(file=str(ref.path)),
+    )
 
 
 SHIPPED_EXECUTION_PROFILES: tuple[type, ...] = (AcademicExchange, KrxExchange)

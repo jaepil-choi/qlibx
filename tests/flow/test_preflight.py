@@ -69,7 +69,12 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         f"class {identifier.title().replace('-', '')}(Constraint):\n"
         "    @property\n"
         "    def constraint_id(self):\n"
-        "        return 'fixture'\n"
+        # The id the component is REGISTERED under, not a fixed string. A Constraint must answer
+        # to its own component id -- `SimulationFlow` has always required it and `load_constraint`
+        # now refuses the mismatch -- so a helper that hardcoded `'fixture'` built components that
+        # could never have run. These fixtures never assembled a Flow, which is the only reason
+        # the invariant went unnoticed here.
+        f"        return {identifier!r}\n"
         "    def requirements(self):\n"
         "        return ()\n"
         "    def project(self, window, instruments):\n"
@@ -789,3 +794,57 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
             initial_model_memory=("not-json",),  # type: ignore[arg-type]
             instruments=definition.instruments,
         )
+
+
+def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """`vqapr check` runs this phase, so refusing here is refusing before a run is spent.
+
+    `register` now refuses the mismatch outright, so this is the case that door does not cover: a
+    workspace populated directly, which is what every fixture here does and what a caller using the
+    Python surface does. Preflight is the last gate before `SimulationFlow.__init__`, where the
+    same disagreement used to surface as `stage: "unhandled"` with an empty `failures` list.
+
+    The check is on the loaded object, so a `constraint_id` assembled at runtime is caught too.
+    """
+    root = tmp_path / "mismatch"
+    workspace, definition = _setup(root, model_price_parquet)
+    path = root / "drifted.py"
+    path.write_text(
+        "from vqapr.constraints.constraint import Constraint\n"
+        "class Drifted(Constraint):\n"
+        "    @property\n"
+        "    def constraint_id(self):\n"
+        "        return '-'.join(['position', 'cap'])\n"
+        "    def requirements(self):\n"
+        "        return ()\n"
+        "    def project(self, window, instruments):\n"
+        "        return None\n"
+        "    def validate_intended(self, intent, bounds):\n"
+        "        return None\n"
+        "    def evaluate(self, window, account, marks, bounds):\n"
+        "        return None\n",
+        encoding="utf-8",
+    )
+    drifted = ComponentRef.of(
+        "limit",
+        ComponentKind.CONSTRAINT,
+        path,
+        "Drifted",
+        fingerprint=fingerprint_component(
+            path, kind=ComponentKind.CONSTRAINT, object_name="Drifted"
+        ),
+    )
+    workspace.register_component(drifted)
+
+    with pytest.raises(VqaprError) as caught:
+        preflight_run(workspace, replace(definition, constraints=ConstraintSet((drifted,))))
+
+    error = caught.value
+    assert error.stage == "component.load"
+    assert [failure.code for failure in error.failures] == [
+        "component.load.constraint_id_mismatch"
+    ]
+    assert "'limit'" in error.failures[0].observed
+    assert "'position-cap'" in error.failures[0].observed

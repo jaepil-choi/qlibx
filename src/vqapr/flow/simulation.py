@@ -23,7 +23,7 @@ from vqapr.constraints.evaluation import (
 from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
@@ -361,6 +361,54 @@ follow-up rather than something this table quietly approximates.
 """
 
 
+def _require_constraint_identity(
+    constraints: tuple[Constraint, ...], declared: tuple[object, ...]
+) -> None:
+    """Refuse an assembly whose loaded constraints are not the ones the run froze.
+
+    Both halves were bare `ValueError`s, and a bare exception here has no structured body, so it
+    surfaced as `stage: "unhandled"` with an empty `failures` list -- the framework announcing its
+    own breakage when the real cause was a component registered under the wrong id.
+
+    `load_constraint` refuses a mismatch at registration, so a constraint with a STABLE id can no
+    longer reach here from the CLI. A constraint whose `constraint_id` is **volatile** — one that
+    returns a different string on each access — still can, and does: it matches on the access
+    `register` makes, matches again under `check`, and disagrees by the time the run is assembled.
+    Red-teaming found exactly that, so this is a live gate rather than defence in depth, and it is
+    the last place the disagreement can be caught.
+
+    It says what it found because an invariant nobody can read is indistinguishable from a crash,
+    which is the defect this whole change is about.
+    """
+    loaded_ids = tuple(constraint.constraint_id for constraint in constraints)
+    declared_ids = tuple(str(component.component_id) for component in declared)
+    if loaded_ids == declared_ids:
+        return
+    requirement = (
+        "the constraints handed to a run must be exactly the ones its FrozenRun declared, "
+        "in the same order and answering to the same ids"
+    )
+    observed = f"loaded {loaded_ids!r}, FrozenRun declared {declared_ids!r}"
+    raise VqaprError(
+        stage="run.assembly",
+        family=FailureFamily.DATA,
+        failures=[
+            Failure.bounded(
+                code="run.assembly.constraint_identity",
+                requirement=requirement,
+                observed=observed,
+                fix=(
+                    "register each Constraint under the id its own constraint_id returns, then "
+                    "re-run; vqapr check reports this before a run is spent"
+                ),
+                explain=ExplainTopic.COMPONENT_CONTRACT,
+            )
+        ],
+        mutation=False,
+        retry_precondition="re-register the mismatched Constraint, then retry",
+    )
+
+
 class SimulationFlow:
     """Dispatch frozen occurrences and one latest accepted pending intent.
 
@@ -402,12 +450,7 @@ class SimulationFlow:
         ):
             raise TypeError("constraints must be a tuple of Constraint implementations")
         declared = frozen_run.constraints.constraints
-        if len(constraints) != len(declared):
-            raise ValueError("loaded constraints must exactly match FrozenRun ConstraintSet")
-        if tuple(constraint.constraint_id for constraint in constraints) != tuple(
-            str(component.component_id) for component in declared
-        ):
-            raise ValueError("loaded constraints must preserve FrozenRun ConstraintSet identity")
+        _require_constraint_identity(constraints, declared)
         if valuation_service is not None and not isinstance(valuation_service, ValuationService):
             raise TypeError("valuation_service must be a ValuationService or None")
         self._frozen_run = frozen_run

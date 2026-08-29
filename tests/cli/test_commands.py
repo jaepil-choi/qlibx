@@ -825,23 +825,23 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     assert code == 0, registered
     assert registered["registered"]["components"] == ["no-short"]
 
-    # Compared against the identical spec WITHOUT the constraint, rather than against `ok:true`.
-    # This fixture's spec already fails `check` on `check.lookback.uncovered` while `run` completes
-    # -- a pre-existing check/run divergence reproduced at HEAD 7ae3d3af and recorded as a
-    # follow-up, not introduced here. Asserting `ok:true` would be asserting something false about
-    # the fixture; asserting that the constraint adds no refusal is the property under test.
-    _, without = _cli(capsys, "--project-root", str(tmp_path), "check", str(_spec(tmp_path)))
-
+    # `ok:true` outright, which this test could not assert until issue 012 was closed: the fixture
+    # spec used to fail `check` on `check.lookback.uncovered` while `run` completed it, so this
+    # compared against the unconstrained spec's failures instead and said so. The judgment now
+    # measures at the first decision rather than at `start`, the two verbs agree, and the weaker
+    # comparison is gone with the defect it worked around.
     spec = str(_spec(tmp_path, constraints=["no-short"]))
 
     code, checked = _cli(capsys, "--project-root", str(tmp_path), "check", spec)
-    assert [failure["code"] for failure in checked["failures"]] == [
-        failure["code"] for failure in without["failures"]
-    ], "naming a correctly-registered constraint must add no refusal of its own"
-    assert checked["blocked"] == without["blocked"]
-    assert "component.load.constraint_id_mismatch" not in [
-        failure["code"] for failure in checked["failures"]
-    ]
+    assert code == 0, checked
+    assert checked["ok"] is True, (
+        "naming a correctly-registered constraint must add no refusal of its own"
+    )
+    assert checked.get("failures", []) == []
+    assert checked["blocked"] == []
+    assert checked["passed"] == checked["checked"], "every phase answered, none skipped"
+    # `ok:true` with no failures already says the mismatch refusal did not fire; asserting its
+    # absence separately would restate the line above.
 
     code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", spec)
     assert code == 0, ran

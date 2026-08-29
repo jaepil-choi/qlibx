@@ -152,7 +152,7 @@
     {
       "code": "check.lookback.uncovered",
       "file": "src/vqapr/cli/check.py",
-      "line": 736
+      "line": 747
     },
     {
       "code": "check.materialize.component_unloadable",
@@ -222,12 +222,12 @@
     {
       "code": "check.weights.mode_conflict",
       "file": "src/vqapr/cli/check.py",
-      "line": 777
+      "line": 816
     },
     {
       "code": "check.weights.venue_conflict",
       "file": "src/vqapr/cli/check.py",
-      "line": 835
+      "line": 874
     },
     {
       "code": "component.conformance.load_failed",
@@ -597,12 +597,12 @@
     {
       "code": "run.check.declaration_invalid",
       "file": "src/vqapr/cli/check.py",
-      "line": 932
+      "line": 971
     },
     {
       "code": "run.check.preflight_refused",
       "file": "src/vqapr/cli/check.py",
-      "line": 940
+      "line": 979
     },
     {
       "code": "run.roster.unreadable",

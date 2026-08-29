@@ -1,6 +1,36 @@
 # 012 — `check` refuses a spec that `run` completes
 
-**Status:** open. Found 2026-08-28 by the red-team lane of Slice A's completion gate, while writing
+**Status: CLOSED 2026-08-29** by
+`docs/implementations/084-a-lookback-is-measured-where-something-reads.md`.
+
+This file asked which side was wrong and refused to guess. Measured: the run's first occurrence
+produced **no weight at all** — one row was visible, the strategy could not fill its declared
+lookback, and it returned `Hold`. Nothing was computed on a short window, so the judgment was the
+strict one.
+
+`start` is not an instant anything reads at; it bounds the horizon, and the strategy reads at the
+occurrences its agenda generates inside it. Comparing the dataset's first observation against
+`start` refused every spec whose data begins after midnight. The judgment measures at the first
+decision now, and still refuses a decision that genuinely lands before the data — verified with a
+literal `sessions:` agenda, which is the only way to reach that case, since a `from_dataset` agenda
+generates occurrences only on days the dataset has.
+
+Noted for whoever reads this next: T5B had already made the same correction on the materialization
+side (`docs/implementations/076`), which measures at the earliest `evaluate_at`. The simulation
+path was left on the older comparison, and the two were written a day apart.
+
+`SIMULATION_CODES` is unchanged at eight. This moved a reference point, not the inventory, so the
+pin this issue was blocked on never had to move.
+
+The workaround in `test_a_constraint_registered_under_the_id_it_answers_to_still_runs` is removed
+with the defect it worked around.
+
+The original report follows unchanged.
+
+---
+
+**Status when filed:** open. Found 2026-08-28 by the red-team lane of Slice A's completion gate,
+while writing
 a test that assumed `check` and `run` agree. Reproduced at HEAD `7ae3d3af` with every change from
 that slice stashed, so it predates the work that found it.
 **Touches:** `src/vqapr/cli/check.py` (`_judge_datasets_and_fields` and the lookback judgment),

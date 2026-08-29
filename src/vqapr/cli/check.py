@@ -728,29 +728,68 @@ def _judge_datasets_and_fields(
         lookback = getattr(requirement, "lookback", None)
         rows = getattr(lookback, "rows", None)
         span = getattr(registration, "span", None)
-        starts = _instant(document.get("start"))
+        # Measured against the first instant that actually READS, not against the run's `start`.
+        #
+        # Nothing reads at `start`: it bounds the horizon, and the strategy reads at the
+        # occurrences its agenda generates inside that horizon. Comparing against it refused specs
+        # that run correctly whenever a dataset's first observation lands after midnight -- which
+        # is every intraday-stamped dataset, so the fixture this package ships was itself refused
+        # by its own verb while `run` completed it (issue 012).
+        #
+        # Worse than a false positive on its own: `check` exists to prove a spec before a run is
+        # spent, so a reader who trusts it stops and starts editing something that already worked.
+        # The mirror of `068`, and the same Principle 5.
+        first_read = _first_decision(document, workspace)
         begins = _instant(span[0]) if span is not None else None
-        if rows and begins is not None and starts is not None and begins > starts:
+        if rows and begins is not None and first_read is not None and begins > first_read:
             found.append(
                     Failure.bounded(
                         "check.lookback.uncovered",
                         (
                             f"dataset {dataset_id!r} must carry history reaching back past the "
-                            "run start, or the first callbacks read a short window"
+                            "first decision, or that decision reads a short window"
                         ),
                         observed=(
-                            f"dataset begins {span[0]}, run starts {document['start']}, "
-                            f"lookback {rows} row(s)"
+                            f"dataset begins {span[0]}, first decision "
+                            f"{first_read.isoformat()}, lookback {rows} row(s)"
                         ),
                         fix=(
-                            f"start the run at or after {span[0]}, or prepare the dataset with "
-                            "history reaching further back"
+                            f"start the run late enough that its first decision falls at or after "
+                            f"{span[0]}, or prepare the dataset with history reaching further back"
                         ),
                         explain=ExplainTopic.DATASET_PREPARATION,
                         source=replace(at, key_path="start"),
                     )
                 )
     return found
+
+
+def _first_decision(document: dict[str, Any], workspace: Workspace) -> datetime | None:
+    """When the strategy first reads, or `None` when that cannot be answered here.
+
+    The earliest occurrence its agenda generates inside the declared horizon. `None` whenever the
+    agenda, the horizon or the ids are missing or unresolvable -- those are other judgments'
+    refusals to make, and answering them here would report one defect twice.
+    """
+    strategy = document.get("strategy")
+    if not isinstance(strategy, dict):
+        return None
+    agenda_id = strategy.get("agenda_id")
+    start, end = _instant(document.get("start")), _instant(document.get("end"))
+    if agenda_id is None or start is None or end is None:
+        return None
+    try:
+        agenda = workspace.agenda(str(agenda_id))
+    except VqaprError:
+        return None
+    inside = [
+        moment
+        for moment in (
+            occurrence.local_instant.instant for occurrence in agenda.occurrences
+        )
+        if start <= moment <= end
+    ]
+    return min(inside) if inside else None
 
 
 def _judge_weights(

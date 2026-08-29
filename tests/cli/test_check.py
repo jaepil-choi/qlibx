@@ -351,8 +351,76 @@ def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> N
     assert _judge(tmp_path, {"strategy": {"component": "model"}}) == ["check.field.absent"]
 
 
-def test_a_run_starting_before_its_data_begins_is_named(tmp_path: Path) -> None:
-    """`check.lookback.uncovered`: the first callbacks would read a short window."""
+def _agenda_deciding_on(root: Path, agenda_id: str, sessions: tuple[str, ...]) -> None:
+    """Register a strategy agenda that decides on exactly these days, at 04:00."""
+    from vqapr.cli.register import apply
+
+    apply(
+        {
+            "agendas": {
+                agenda_id: {
+                    "role": "strategy_callback",
+                    "sessions": list(sessions),
+                    "at": "04:00",
+                    "timezone": "UTC",
+                }
+            }
+        },
+        root,
+        base=root,
+        declaration=root / "agenda.yaml",
+    )
+
+
+def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -> None:
+    """`check.lookback.uncovered`, measured at the first instant that actually READS.
+
+    Not at the run's `start`. Nothing reads there -- `start` bounds the horizon, and the strategy
+    reads at the occurrences its agenda generates inside it. Measuring at `start` refused any spec
+    whose dataset's first observation landed after midnight, which is every intraday-stamped
+    dataset: this package's own end-to-end fixture was refused by its own verb while `run`
+    completed it (issue 012).
+    """
+    space = Workspace.create(tmp_path)
+    space.register_dataset(
+        DatasetRegistration.of(
+            "prices",
+            "prices-source",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("instrument",),
+            fields={"close": "close"},
+        ).with_span(*_SPAN),
+        SourceSpec.of("prices-source", "prepared/prices"),
+    )
+    _strategy_reading(tmp_path, "prices", "close")
+    begins = _SPAN[0]
+
+    # Deciding a day BEFORE the data begins: the window really is short, and it is named.
+    early = (begins.date().replace(day=1)).isoformat()
+    _agenda_deciding_on(tmp_path, "early", (early,))
+    spec = {
+        "strategy": {"component": "model", "agenda_id": "early"},
+        "start": f"{early}T00:00:00+00:00",
+        "end": _SPAN[1].isoformat(),
+    }
+    assert _judge(tmp_path, spec) == ["check.lookback.uncovered"]
+
+    # The same spec, deciding on a day the data covers, is not refused -- even though `start` is
+    # still earlier than the dataset's first observation. That difference is the whole fix.
+    later = _SPAN[1].date().isoformat()
+    _agenda_deciding_on(tmp_path, "later", (later,))
+    covered = {**spec, "strategy": {"component": "model", "agenda_id": "later"}}
+    assert _judge(tmp_path, covered) == []
+
+
+def test_the_lookback_judgment_stays_silent_when_it_cannot_answer(tmp_path: Path) -> None:
+    """No agenda, no horizon, no answer -- and no guess.
+
+    Those are other judgments' refusals to make. Answering here too would report one defect twice,
+    and guessing an instant would put this verb back in the business of refusing what `run`
+    accepts.
+    """
     space = Workspace.create(tmp_path)
     space.register_dataset(
         DatasetRegistration.of(
@@ -367,14 +435,15 @@ def test_a_run_starting_before_its_data_begins_is_named(tmp_path: Path) -> None:
     )
     _strategy_reading(tmp_path, "prices", "close")
 
-    codes = _judge(
-        tmp_path,
-        # tz-aware: a naive start names no venue, and `_instant` refuses it rather than
-        # comparing it against an aware span and getting a plausible-looking answer.
-        {"strategy": {"component": "model"}, "start": "2020-06-01T00:00:00+00:00"},
-    )
-
-    assert codes == ["check.lookback.uncovered"]
+    for spec in (
+        {"strategy": {"component": "model"}},
+        {
+            "strategy": {"component": "model", "agenda_id": "absent"},
+            "start": "2020-06-01T00:00:00+00:00",
+        },
+        {"strategy": {"component": "model", "agenda_id": "early"}},
+    ):
+        assert "check.lookback.uncovered" not in _judge(tmp_path, spec)
 
 
 def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) -> None:

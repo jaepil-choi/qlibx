@@ -33,8 +33,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vqapr.cli import check as check_module
 from vqapr.cli.check import check
+from vqapr.flow import judgments as judgments_module
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.timestamps import LocalInstantDeclaration
@@ -185,12 +185,12 @@ def test_an_unexpected_exception_type_inside_one_judgment_is_reported_as_blocked
     def _boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("a judgment's own dependency broke in a way check does not catch")
 
-    original = check_module._judge_universe
-    check_module._judge_universe = _boom
+    original = judgments_module._judge_universe
+    judgments_module._judge_universe = _boom
     try:
         body = check(spec_path, workspace)
     finally:
-        check_module._judge_universe = original
+        judgments_module._judge_universe = original
 
     # Reported, not raised, and not silently swallowed either. A judgment that could not look did
     # not pass, so `ok` is false and the reason names the exception -- the third answer this

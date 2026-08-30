@@ -209,8 +209,8 @@ def test_a_boundary_that_cannot_be_compared_is_reported_not_skipped(workspace: P
     the case the string comparison happened to get right, and nothing failed. A judgment that
     cannot compare must say so -- reporting nothing is indistinguishable from reporting fine.
     """
-    from vqapr.cli.check import _judge_period
     from vqapr.domain.errors import FailureSource
+    from vqapr.flow.judgments import _judge_period
 
     at = FailureSource(file="spec.yaml")
     naive = _judge_period({"start": "2024-01-01T00:00:00", "end": "2024-06-01T00:00:00+00:00"}, at)
@@ -233,8 +233,8 @@ def test_a_valid_period_across_two_offsets_is_accepted(workspace: Path) -> None:
     five hours earlier as an instant. Compared as text, `check` refused a period `run` accepts --
     a gate contradicting the thing it gates.
     """
-    from vqapr.cli.check import _judge_period
     from vqapr.domain.errors import FailureSource
+    from vqapr.flow.judgments import _judge_period
 
     judged = _judge_period(
         {"start": "2024-01-02T00:00:00+09:00", "end": "2024-01-01T20:00:00+00:00"},
@@ -251,16 +251,16 @@ def test_a_blocked_judgment_names_its_error_type_separately(workspace: Path) -> 
     `KeyError` -- which almost certainly means this verb is wrong -- looks exactly like a
     `VqaprError`, which means the framework declined to answer.
     """
-    import vqapr.cli.check as check_module
+    import vqapr.flow.judgments as judgments_module
 
-    original = check_module._judge_universe
-    check_module._judge_universe = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+    original = judgments_module._judge_universe
+    judgments_module._judge_universe = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         KeyError("a judgment read a key nobody wrote")
     )
     try:
         body = check(_spec(workspace), workspace)
     finally:
-        check_module._judge_universe = original
+        judgments_module._judge_universe = original
 
     entry = next(item for item in body["blocked"] if item["check"] == "universe")
     assert entry["error_type"] == "KeyError"
@@ -299,7 +299,7 @@ def _strategy_reading(root: Path, dataset_id: str, field: str) -> None:
 
 
 def _judge(root: Path, document: dict[str, object]) -> list[str]:
-    from vqapr.cli.check import _judge_datasets_and_fields
+    from vqapr.flow.judgments import _judge_datasets_and_fields
     from vqapr.domain.errors import FailureSource
 
     space = Workspace.open(root)
@@ -456,7 +456,7 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
 
     A judgment that cannot fail is not a judgment, so this pins the profile that broke it twice.
     """
-    from vqapr.cli.check import _judge_weights
+    from vqapr.flow.judgments import _judge_weights
     from vqapr.domain.errors import FailureSource
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component

@@ -17,6 +17,7 @@ from vqapr.cli.envelope import success
 from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
 from vqapr.domain.errors import FailureSource
 from vqapr.flow.run_records import RunRecordExists, RunRecordLive
+from vqapr.flow.run_spec import _REQUIRED_BY_KIND, MATERIALIZATION, SIMULATION
 from vqapr.flow.store_spec import StoreSpec
 from vqapr.public import (
     AccountMode,
@@ -33,44 +34,6 @@ from vqapr.public import (
 from vqapr.public import run as execute_run
 from vqapr.workspace import WORKSPACE_DIRECTORY
 
-SIMULATION = "strategy"
-MATERIALIZATION = "datamodel"
-
-_REQUIRED_BY_KIND = {
-    SIMULATION: (
-        "strategy",
-        "valuation",
-        "instruments",
-        "start",
-        "end",
-        "exchange",
-        "execution_input",
-        "initial_account",
-    ),
-    MATERIALIZATION: (
-        "datamodel",
-        "instruments",
-        "output",
-        "evaluate_at",
-    ),
-}
-"""What each run kind cannot execute without, keyed by the component section that names it.
-
-Two kinds, discriminated by which component the spec declares rather than by a `kind:` key of its
-own. Every existing spec already says `strategy:`, so none needs an edit, and a spec cannot
-disagree with itself about what it is -- a separate `kind:` could name one thing while the
-component section named another.
-
-Of the simulation's eight, `instruments` is shared and `strategy` is what `datamodel` replaces, so
-**six do not apply**: `valuation`, `start`, `end`, `exchange`, `execution_input` and
-`initial_account`. A materialization has no venue, no execution table, no account, no valuation and
-no trading period -- `materialize()` takes evaluation instants and instruments and nothing else.
-Forcing one required set on both would make an author declare six keys that mean nothing for their
-run, which is the failure this tuple's own history warns about.
-
-The six are enumerated rather than counted, because a bare number here is a claim no reader can
-check without deriving it from both tuples — and the first version of this sentence said five.
-"""
 
 _REQUIRED = _REQUIRED_BY_KIND[SIMULATION]
 """Every key this command cannot execute without.

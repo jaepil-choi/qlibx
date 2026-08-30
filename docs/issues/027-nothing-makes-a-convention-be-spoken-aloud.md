@@ -1,5 +1,11 @@
 # 027 — Nothing in the tooling makes a point-in-time convention be spoken aloud
 
+**Status:** **HELD, not scheduled.** Reviewed during the 015-027 campaign and deliberately not
+implemented. It is a proposal about `register`'s success envelope, the reporter marked it
+*"Attributable to vqapr? **No**"*, and it needs a product decision before anything is built: whether
+the envelope should restate point-in-time field meanings back at the author, one sentence per field.
+Nothing in this campaign forecloses it.
+
 **Status when filed:** open, and **it is a proposal rather than a defect**. Found 2026-08-30 by the
 final first-time-user journey in `kwam-enhanced-index/vqapr-final-testbed/`, against
 `vqapr-0.2.0a1`. Recorded there as **P-001** and marked *"Attributable to vqapr? **No**"* — it is

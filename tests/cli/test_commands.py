@@ -584,6 +584,96 @@ def test_a_materialization_spec_refuses_what_it_cannot_honour(
     ]
 
 
+def test_run_refuses_a_materialization_check_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The materialization half of `docs/issues/015`, which nothing was driving.
+
+    The test above proves `check` refuses these specs. It calls only `check`, so the refusal
+    `run` gained for the SAME specs was unreachable: deleting the judgment call from
+    `_materialize` left the whole suite green. That is the shape of `docs/issues/028` again --
+    a real invariant whose verification lived in a docstring -- and it is the one spec kind where
+    `run` reaches its judgments by a different path, opening the workspace inside `_materialize`
+    rather than before `preflight_run`.
+
+    So this drives `run` itself, and asserts the two verbs agree rather than that either is
+    merely unhappy.
+    """
+    _workspace_for_run(tmp_path, capsys)
+    _, emitted = _cli(
+        capsys, "--project-root", str(tmp_path), "new", "datamodel", "derived",
+        "--dataset", "prices", "--lookback", "1",
+    )
+    _cli(capsys, "--project-root", str(tmp_path), "register", emitted["declaration"])
+
+    spec = tmp_path / "refused.yaml"
+    spec.write_text(
+        json.dumps(
+            {
+                "datamodel": "absent-model",
+                "instruments": ["A"],
+                "output": {"dataset_id": "out", "value_fields": ["value"]},
+                "evaluate_at": ["2024-03-06T04:00:00+09:00"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checked_code, checked = _cli(
+        capsys, "--project-root", str(tmp_path), "check", str(spec)
+    )
+    ran_code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", str(spec))
+
+    assert checked_code == 1 and checked["ok"] is False, checked
+    assert ran_code == 1, f"run executed a materialization check refuses: {ran}"
+
+    checked_codes = {failure["code"] for failure in checked["failures"]}
+    ran_codes = {failure["code"] for failure in ran["failures"]}
+
+    assert "check.materialize.component_unregistered" in checked_codes, checked_codes
+    assert checked_codes == ran_codes, (
+        f"the two verbs refuse the same spec for different reasons: "
+        f"check={sorted(checked_codes)} run={sorted(ran_codes)}"
+    )
+
+
+def test_a_materialization_check_refuses_registers_no_dataset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refused materialization must leave the workspace exactly as it found it.
+
+    The simulation half of 015 is proven by `list runs` being unchanged across a refusal. A
+    materialization writes no run record -- it registers a dataset -- so the equivalent proof is
+    that `list datasets` does not move.
+    """
+    _workspace_for_run(tmp_path, capsys)
+    _, emitted = _cli(
+        capsys, "--project-root", str(tmp_path), "new", "datamodel", "derived",
+        "--dataset", "prices", "--lookback", "1",
+    )
+    _cli(capsys, "--project-root", str(tmp_path), "register", emitted["declaration"])
+
+    _, before = _cli(capsys, "--project-root", str(tmp_path), "list", "datasets")
+
+    spec = tmp_path / "refused_output.yaml"
+    spec.write_text(
+        json.dumps(
+            {
+                "datamodel": "absent-model",
+                "instruments": ["A"],
+                "output": {"dataset_id": "out", "value_fields": ["value"]},
+                "evaluate_at": ["2024-03-06T04:00:00+09:00"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, _ = _cli(capsys, "--project-root", str(tmp_path), "run", str(spec))
+    assert code == 1
+
+    _, after = _cli(capsys, "--project-root", str(tmp_path), "list", "datasets")
+    assert after == before, "a refused materialization changed the registered datasets"
+
+
 def test_a_materialization_refuses_the_flags_that_belong_to_a_run_record(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

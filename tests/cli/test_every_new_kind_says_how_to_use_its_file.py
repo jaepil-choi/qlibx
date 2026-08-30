@@ -12,8 +12,9 @@ four *cannot honestly emit it*: a run spec is not registrable. `vqapr register` 
 `declaration.read.unknown_section`, because a spec names components rather than declaring any.
 `vqapr run` is what takes it.
 
-So the envelope now answers the question the caller actually has -- *what do I do with this file?* --
-with `declaration` where the answer is `register`, and `registrable: false` where it is not.
+So the envelope now answers the question the caller actually has -- *what do I do with this
+file?* -- with `declaration` where the answer is `register`, and `registrable: false` where it is
+not.
 """
 
 from __future__ import annotations
@@ -54,9 +55,10 @@ def _new(root: Path, kind: str, extra: tuple[str, ...]) -> dict:
 
 
 def test_all_nine_kinds_are_covered_by_this_test() -> None:
-    """If a tenth kind is added, this test must be told about it rather than silently skipping it."""
-    from vqapr.cli.new import add_arguments
+    """A tenth kind must be declared here rather than silently skipping coverage."""
     import argparse
+
+    from vqapr.cli.new import add_arguments
 
     parser = argparse.ArgumentParser()
     add_arguments(parser)

@@ -76,7 +76,7 @@ def test_the_named_command_is_accepted_and_updates_the_install(
         f"{result.stdout}{result.stderr}"
     )
 
-    code, body = _cli(capsys, tmp_path, "skill", "list")
+    _, body = _cli(capsys, tmp_path, "skill", "list")
     assert body["current"] is True, (
         "the command the message named ran, but the install is still stale"
     )

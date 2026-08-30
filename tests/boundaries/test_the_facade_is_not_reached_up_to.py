@@ -7,7 +7,8 @@ twelve. It also gives the AST command to re-measure it.
 
 What it did not have was a test. `docs/issues/028` is what that cost: `fix/015a-extract-judgments`
 moved the judgments below the CLI and let them keep importing the facade, taking the count to 13,
-and the whole 1,400-test suite stayed green because the tripwire lived in a document nobody executes.
+and the whole 1,400-test suite stayed green, because the tripwire lived in a document nobody
+executes.
 The regression was found by an owner-requested audit, not by the mechanism meant to catch it.
 
 `vqapr.public` is the CLI's supported implementation surface and sits **above** `flow/`, `domain/`,
@@ -58,11 +59,13 @@ def _importers() -> set[str]:
     for path in pathlib.Path("src").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "") == "vqapr.public":
-                found.add(path.as_posix())
-            elif isinstance(node, ast.Import) and any(
+            imported_from = (
+                isinstance(node, ast.ImportFrom) and (node.module or "") == "vqapr.public"
+            )
+            imported = isinstance(node, ast.Import) and any(
                 alias.name == "vqapr.public" for alias in node.names
-            ):
+            )
+            if imported_from or imported:
                 found.add(path.as_posix())
     return found
 

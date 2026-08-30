@@ -16,6 +16,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
+
 # `register` owns the CLI spelling of a component kind and imports nothing from this module, so
 # naming it here adds no cycle. The judgments take it as a callable rather than importing it
 # themselves, which is what keeps `flow/` free of `cli`.
@@ -45,7 +46,6 @@ from vqapr.public import (
 )
 from vqapr.public import run as execute_run
 from vqapr.workspace import WORKSPACE_DIRECTORY
-
 
 _REQUIRED = _REQUIRED_BY_KIND[SIMULATION]
 """Every key this command cannot execute without.

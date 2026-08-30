@@ -215,7 +215,9 @@ class SimulationFailure(RuntimeError, ValueError):
                     "requirement": _requirement_for(self.stage),
                     "observed": observed,
                     "fix": _fix_for(self.stage, cause),
-                    "explain": str(_EXPLAIN_BY_STAGE.get(self.stage, ExplainTopic.RUN_PRECONDITION)),
+                    "explain": str(
+                        _EXPLAIN_BY_STAGE.get(self.stage, ExplainTopic.RUN_PRECONDITION)
+                    ),
                     "examples": [],
                     "example_total": 0,
                 }

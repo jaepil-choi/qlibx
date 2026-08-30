@@ -23,12 +23,14 @@ from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
+from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
+
 # Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/029`).
 from vqapr.extension.loading import load_exchange, load_strategy_model
-from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 from vqapr.flow.run_spec import MATERIALIZATION
+
 # `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
 # this layer; a module under `flow/` importing it reaches back up through the thing it is supposed
 # to sit beneath. `flow/preflight.py` takes the same class from the same place, and the boundary

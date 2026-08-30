@@ -34,7 +34,6 @@ import pytest
 import yaml
 
 from vqapr.cli.check import check
-from vqapr.flow import judgments as judgments_module
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.timestamps import LocalInstantDeclaration
@@ -42,6 +41,7 @@ from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
+from vqapr.flow import judgments as judgments_module
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.workspace import Workspace
 

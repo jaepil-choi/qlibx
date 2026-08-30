@@ -69,3 +69,35 @@ nobody has checked.
 
 Baseline regeneration was a pure line shift: same file, same codes, moved by the added import
 comments.
+
+## Follow-up from the boundary review
+
+The completion-gate architect lane found a second instance of the same class, and it is recorded
+here rather than deferred because it is the class this record exists about.
+
+**`run`'s materialization refusal had no test.** `test_commands.py`'s materialization test asserts
+that `check` refuses four malformed specs, but its `codes()` helper calls only `check`. The refusal
+`run` gained for those same specs in `fix/015b` was therefore unreachable: **deleting the judgment
+call from `_materialize` left all 1,419 tests green.** A real invariant, verified by a docstring —
+structurally identical to the facade tripwire above.
+
+It matters more than the count suggests, because materialization is the one spec kind where `run`
+reaches its judgments by a different path: the workspace is opened inside `_materialize`, after the
+`--run-id`/`--force` refusals, rather than before `preflight_run`.
+
+Two tests now cover it:
+
+- `test_run_refuses_a_materialization_check_refuses` drives **both verbs** against one spec and
+  asserts their refusal code sets are **equal**, rather than that either is merely unhappy.
+- `test_a_materialization_check_refuses_registers_no_dataset` is the materialization analogue of
+  "a refused run writes no record": a materialization registers a dataset rather than writing a run
+  record, so the equivalent proof is that `vqapr list datasets` does not move.
+
+**Proven to fail on the defect.** The refusal block was temporarily removed from `_materialize`; the
+first test failed with `run` reporting `workspace.component.lookup.missing` where `check` reports
+`check.materialize.component_unregistered` — the two verbs diverging, which is issue 015 in
+miniature. Then restored, and the full suite re-run at **1421 passed**.
+
+Lint was also brought to parity: every ruff finding this campaign introduced is fixed. The 14
+findings that predate `develop@8d040b9e` are left alone, and `git blame` confirms the three in files
+the campaign touched are pre-existing lines.

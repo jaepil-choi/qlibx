@@ -299,8 +299,8 @@ def _strategy_reading(root: Path, dataset_id: str, field: str) -> None:
 
 
 def _judge(root: Path, document: dict[str, object]) -> list[str]:
-    from vqapr.flow.judgments import _judge_datasets_and_fields
     from vqapr.domain.errors import FailureSource
+    from vqapr.flow.judgments import _judge_datasets_and_fields
 
     space = Workspace.open(root)
     registered = {str(item.dataset_id): item for item in space.datasets}
@@ -456,10 +456,10 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
 
     A judgment that cannot fail is not a judgment, so this pins the profile that broke it twice.
     """
-    from vqapr.flow.judgments import _judge_weights
     from vqapr.domain.errors import FailureSource
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
+    from vqapr.flow.judgments import _judge_weights
 
     space = Workspace.create(tmp_path)
     source = tmp_path / "limited.py"

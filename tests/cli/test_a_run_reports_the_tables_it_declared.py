@@ -16,6 +16,7 @@ is portfolio vocabulary for a counter applied to every table.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from vqapr.cli.run import _FRAMEWORK_TABLES, _tables_declared
@@ -78,8 +79,7 @@ def test_the_counter_is_named_for_what_it_counts() -> None:
     """
     from vqapr import public
 
-    source = public.__dict__["__file__"]
-    text = open(source, encoding="utf-8").read()
+    text = Path(public.__dict__["__file__"]).read_text(encoding="utf-8")
 
     assert '"instants": len({str(row.get("event_time")) for row in rows})' in text
     assert '"formations":' not in text, "the old name is still emitted somewhere"

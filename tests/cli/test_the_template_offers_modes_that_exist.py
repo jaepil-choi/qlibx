@@ -53,7 +53,7 @@ def test_the_offered_list_is_derived_from_the_enum_not_restated() -> None:
 
     A hand-written list is a second definition of a closed set, and this issue is what that costs.
     """
-    assert _ACCOUNT_MODES == " or ".join(mode.name for mode in AccountMode)
+    assert " or ".join(mode.name for mode in AccountMode) == _ACCOUNT_MODES
     assert _ACCOUNT_MODES in _RUN_SPEC_TEMPLATE
 
 

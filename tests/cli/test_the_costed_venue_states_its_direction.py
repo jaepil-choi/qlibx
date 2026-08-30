@@ -82,6 +82,6 @@ def test_the_template_still_derives_its_mode_list() -> None:
     from vqapr.account.account import AccountMode
     from vqapr.cli.new import _ACCOUNT_MODES
 
-    assert _ACCOUNT_MODES == " or ".join(mode.name for mode in AccountMode)
+    assert " or ".join(mode.name for mode in AccountMode) == _ACCOUNT_MODES
     assert _ACCOUNT_MODES in _RUN_SPEC_TEMPLATE
     assert "LONG_SHORT" not in _RUN_SPEC_TEMPLATE

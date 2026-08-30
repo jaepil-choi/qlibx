@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from test_commands import _cli, _spec, _workspace_for_run
 
 from vqapr.cli.check import check

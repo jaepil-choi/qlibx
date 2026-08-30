@@ -449,7 +449,7 @@ def test_fills_carry_the_cost_fields_research_needs(workspace):
 
 
 def test_fills_carry_the_five_envelope_fields_every_table_carries(workspace):
-    """`docs/issues/022`: `vqapr.fill` carried none of the five, and it is the table that needs them.
+    """`docs/issues/022`: `vqapr.fill` carried none of the five, and needs them most.
 
     The skill guarantees every row of every table carries `run_id`, `producer_id`, `stage`,
     `event_time` and `sequence`. `vqapr.account` had all five and `vqapr.fill` had none, because

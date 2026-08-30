@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from decimal import Decimal
+from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
@@ -133,6 +134,54 @@ def _constraints(document: dict[str, Any], workspace: Workspace) -> ConstraintSe
     return ConstraintSet(tuple(workspace.component(str(name)) for name in declared))
 
 
+def _nearest_spec_value(written: str, permitted: list[str], key_path: str) -> str:
+    """What to write instead, in the case this file's parser accepts.
+
+    `register._nearest_hint` answers the same question and is deliberately not reused here: it
+    lowercases its suggestion, which is right for a declaration (`kind: strategy`) and wrong for a
+    run spec, which is parsed by member NAME. Suggesting `long_only` to a reader whose file must
+    say `LONG_ONLY` swaps one unusable value for another -- the exact failure this issue is about.
+
+    A near miss is named because a one-character typo is invisible to whoever typed it. Repeating
+    the permitted set instead would say nothing `requirement` has not already said.
+    """
+    close = get_close_matches(written.upper(), permitted, n=1)
+    if close:
+        return (
+            f"set {key_path} to {close[0]!r}, which is the closest permitted value to {written!r}"
+        )
+    return f"replace {written!r} at {key_path} with one of: {', '.join(permitted)}"
+
+
+def _closed_set_member(enum: type[Any], value: object, *, key_path: str) -> Any:
+    """One member of a closed set, or a refusal that names the set.
+
+    `AccountMode[...]` raises a bare `KeyError`, and the envelope reported it as
+    `observed: "KeyError: 'LONG_SHORT'"` -- an exception repr where the permitted values belong.
+    The reader is told their value was rejected and left to find the legal ones themselves, which
+    for this journey meant reading the enum in installed source (`docs/issues/017`).
+
+    A closed set is the one case where a refusal can always be complete: the alternatives are
+    known, finite, and cheap to print. `register.py` already learned this the expensive way -- a
+    reader spent six consecutive guesses on `fill.selector` because the field name argued for a
+    vocabulary the members do not use -- and this is the same remedy applied on the `run` side.
+    """
+    try:
+        return enum[str(value).upper()]
+    except KeyError:
+        pass
+
+    permitted = [member.name for member in enum]
+    raise InputError(
+        VALUE_INVALID,
+        requirement=f"{key_path} must be one of: {', '.join(permitted)}",
+        observed=f"{key_path}={value!r}",
+        retry=_nearest_spec_value(str(value), permitted, key_path),
+        examples=permitted,
+        source=FailureSource(file=None, key_path=key_path),
+    )
+
+
 def _account(document: dict[str, Any]) -> tuple[AccountSnapshot | None, AccountMode | None]:
     declared = document.get("initial_account")
     if declared is None:
@@ -148,7 +197,9 @@ def _account(document: dict[str, Any]) -> tuple[AccountSnapshot | None, AccountM
         cash=Decimal(str(declared["cash"])),
         positions=positions,
     )
-    return snapshot, AccountMode[str(declared["mode"]).upper()]
+    return snapshot, _closed_set_member(
+        AccountMode, declared["mode"], key_path="initial_account.mode"
+    )
 
 
 def spec_kind(document: dict[str, Any]) -> str:

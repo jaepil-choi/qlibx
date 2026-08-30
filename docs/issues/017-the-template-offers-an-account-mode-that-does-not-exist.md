@@ -1,6 +1,11 @@
 # 017 — The run-spec template offers an account mode that does not exist
 
-**Status:** template half **closed** by
+**Status:** **closed**, both halves. Template half:
+`docs/implementations/091-the-template-offers-modes-that-exist.md`. Message half:
+`docs/implementations/092-a-closed-set-refusal-names-the-set.md` - a mistyped closed-set value now
+names the permitted set with `key_path`, and no exception repr reaches `observed`.
+
+**Superseded status line:** template half closed by
 `docs/implementations/091-the-template-offers-modes-that-exist.md` (branch
 `fix/017-template-account-mode`) - the offered list is now derived from `AccountMode` rather than
 restated, so it cannot drift again. The message half (a mistyped closed-set enum surfacing as a

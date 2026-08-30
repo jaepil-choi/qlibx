@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "kind": "cli-black-box-api-test-report",
+  "title": "Ultragoal completion QA/red-team, vqapr 015-027 fix campaign",
+  "sourceHash": "sha256:fd4d37dddedd4f191b9d88965783ac416859849dcadcfc18ef906675b2acf56d",
+  "surface": "cli",
+  "harness": "real temp workspaces driven through the installed vqapr CLI entrypoint; no repository files modified",
+  "generations": [
+    {
+      "generation": 1,
+      "sourceHash": "sha256:c6c19a7357df6d468af422c478011a13f468926aec4044432408c4f93481de8e",
+      "verdict": "passed",
+      "defects": 0,
+      "claimsExercised": [
+        {
+          "claim": "015: run performs check's judgments and refuses; no escape flag; a refused run writes no record",
+          "verdict": "passed",
+          "evidence": "Every check-refusal reproduced identically by run with the same check.* codes and exit 1, across a look-ahead spec (decision at 17:00 vs fill at 15:30), an unlisted-instrument spec, a naive-date spec, and two materialization specs. `vqapr list runs` count unchanged across every refusal. No --force bypass exists for judgments; --force only replaces an existing record id and did not create a bad record."
+        },
+        {
+          "claim": "022: vqapr.fill carries run_id, producer_id, stage, event_time, sequence",
+          "verdict": "passed",
+          "evidence": "Read .vqapr/runs/<id>/tables/vqapr.fill.jsonl after a real run. Both rows carry all five. event_time=2024-03-06T06:30:00+00:00 = 15:30 Asia/Seoul = the execution instant, NOT the 04:00 decision instant, confirming the execution-clock claim."
+        },
+        {
+          "claim": "024: tables reported from both declaration surfaces; formations renamed instants",
+          "verdict": "passed",
+          "evidence": "run.complete emitted tables_declared:[] for a model declaring no diagnostic tables, correctly excluding the three framework tables. show run emitted {instants, rows} per table, never 'formations'. vqapr.fill instants=2 (distinct event_times), not collapsed to 1."
+        },
+        {
+          "claim": "025: the stale-skill message names a command that runs; no no-op --force added to install",
+          "verdict": "passed",
+          "evidence": "Tampered with an installed SKILL.md; skill list reported stale and named `vqapr skill install`; running it flipped current false->true. `skill install --force` rejected with UsageError: unrecognized arguments: --force."
+        },
+        {
+          "claim": "026: every new kind emits declaration or registrable:false; no KeyError",
+          "verdict": "passed",
+          "evidence": "Scripted loop over all nine kinds. Eight returned a valid declaration path; run-spec returned registrable:false and no declaration key. Single-key-read loop completed with no KeyError."
+        },
+        {
+          "claim": "017: template offers only real account modes; mistyped closed-set value names the permitted set",
+          "verdict": "passed",
+          "evidence": "Template shows 'LONG_ONLY or SIGNED', matching AccountMode exactly. check and run both refuse mode: LONG_SHORT with requirement='initial_account.mode must be one of: LONG_ONLY, SIGNED', examples=['LONG_ONLY','SIGNED'], and a nearest-match fix naming 'LONG_ONLY'. No exception repr anywhere in observed."
+        }
+      ],
+      "adversarialCases": [
+        "materialization spec refused by check (output already registered + lookback uncovered): run refused identically, no dataset created",
+        "double-run of the same run_id without --force: refused with RunRecordExists, list runs unchanged",
+        "decision-after-fill look-ahead: both verbs refused with check.execution.not_after_decision, run wrote no record",
+        "naive/date-only start: both verbs refused with check.period.uncovered"
+      ]
+    },
+    {
+      "generation": 2,
+      "sourceHash": "sha256:fd4d37dddedd4f191b9d88965783ac416859849dcadcfc18ef906675b2acf56d",
+      "verdict": "passed",
+      "defects": 0,
+      "deltaReviewed": "ad38957d",
+      "claimsExercised": [
+        {
+          "claim": "check/run refusal-code equality holds across every materialization failure mode",
+          "verdict": "passed",
+          "evidence": "Seven distinct malformed materialization specs driven through the real CLI entrypoint: unregistered component, wrong-kind component, output already registered, empty evaluate_at, naive evaluate_at, no instruments, and kind-ambiguous. All seven produced EQUAL refusal code sets from check and run. This exceeds the single case the committed test drives."
+        },
+        {
+          "claim": "a refused materialization registers no dataset",
+          "verdict": "passed",
+          "evidence": "vqapr list datasets compared as JSON before and after each of the seven refusals; before == after in every case."
+        },
+        {
+          "claim": "--run-id and --force are refused, not ignored, on a materialization spec",
+          "verdict": "passed",
+          "evidence": "Both produced code=1, stage=cli.input, with the flag name present in the refusal body."
+        },
+        {
+          "claim": "the rewrapped explain expression in evidence/artifacts.py is behaviour-identical",
+          "verdict": "passed",
+          "evidence": "Constructed SimulationFailure(stage=CALLBACK_STATE, cause=RuntimeError) and read as_dict(): explain == 'component-contract' == str(_EXPLAIN_BY_STAGE[stage]); code == 'simulation.callback.state.RuntimeError'."
+        },
+        {
+          "claim": "the import re-ordering introduced no circular import or load failure",
+          "verdict": "passed",
+          "evidence": "Purged sys.modules of vqapr.* and imported vqapr.flow.judgments, vqapr.cli.run, vqapr.evidence.artifacts in a forced order; no exception. judgments.__all__ unchanged at ['judgments','materialization_judgments']."
+        }
+      ]
+    }
+  ],
+  "suite": {
+    "command": "uv run pytest tests/ -q -m \"\"",
+    "baseline": {"ref": "develop@8d040b9e", "passed": 1350, "failed": 0, "slowMarksRan": 14, "slowMarksSkipped": 0},
+    "final": {"ref": "develop@ad38957d", "passed": 1421, "failed": 0, "slowMarksRan": 14, "slowMarksSkipped": 0},
+    "note": "Identical slow ran/skip profile, so the 1350 -> 1421 comparison is between two measurements of the same population. The real_data warehouse is provisioned on this host, so both numbers are the strong sense of green."
+  },
+  "overallVerdict": "passed",
+  "defectsFound": 0
+}

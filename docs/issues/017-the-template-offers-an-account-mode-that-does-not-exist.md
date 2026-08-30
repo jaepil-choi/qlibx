@@ -1,5 +1,11 @@
 # 017 — The run-spec template offers an account mode that does not exist
 
+**Status:** template half **closed** by
+`docs/implementations/091-the-template-offers-modes-that-exist.md` (branch
+`fix/017-template-account-mode`) - the offered list is now derived from `AccountMode` rather than
+restated, so it cannot drift again. The message half (a mistyped closed-set enum surfacing as a
+`KeyError` repr instead of the permitted set) is `fix/017-closed-set-refusal`, tracked separately.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-005**,
 severity `slowed` for this reporter and *"`blocked` for a first-time user without the enum already

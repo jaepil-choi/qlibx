@@ -8,12 +8,59 @@ from enum import StrEnum
 from typing import Final
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import ExplainTopic, FailureSource, VqaprError
 from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import require_tz_aware
 
 MAX_OBSERVED_CHARS = 500
 """Upper bound for one serialized observation. The unbounded body belongs in a dump file."""
+
+
+_CALLBACK_STAGES: Final = frozenset(
+    {
+        "simulation.callback.state",
+        "simulation.callback.window",
+        "simulation.callback.intent",
+        "simulation.callback.publication",
+    }
+)
+"""The four stages whose code is the author's own, so their advice points at the author's file.
+
+Held as strings rather than `SimulationStage` members because `SimulationStage` is declared below,
+and a set of members would have to be built after the class rather than beside the two helpers that
+read it.
+"""
+
+
+def _requirement_for(stage: StrEnum) -> str:
+    """What was required of the code that raised, in terms of what its author controls.
+
+    "The guarded boundary must complete without raising" -- the sentence this replaces for callback
+    stages -- is a statement about this package's own plumbing. A reader who has just been handed a
+    `ValueError` from their own `decide()` learns nothing from it about what they did.
+    """
+    if str(stage) in _CALLBACK_STAGES:
+        return "the strategy callback must return without raising"
+    return "the guarded boundary must complete without raising"
+
+
+def _fix_for(stage: StrEnum, cause: BaseException) -> str:
+    """The sentence the skill tells a reader to read FIRST, and which used to be absent entirely.
+
+    A raised exception carries no repair advice of its own, so the best available instruction is
+    where to look: the author's callback for a callback stage, and the run's own record otherwise.
+    Naming the exception type keeps it concrete without pretending to know the specific cause.
+    """
+    kind = type(cause).__name__
+    if str(stage) in _CALLBACK_STAGES:
+        return (
+            f"your callback raised {kind}; read `observed` for the message it carried, fix the "
+            "component, and re-run -- registration replaces in place, so no new id is needed"
+        )
+    return (
+        f"the framework raised {kind} at {stage}; read `observed`, and if the message names "
+        "something you declared, correct it and re-run"
+    )
 
 
 class SimulationFailureFamily(StrEnum):
@@ -58,6 +105,21 @@ class SimulationStage(StrEnum):
 
 
 _PRE_COMMIT: Final = SimulationFailureKind.PRE_COMMIT
+
+_EXPLAIN_BY_STAGE: Final[dict[SimulationStage, ExplainTopic]] = {
+    SimulationStage.CALLBACK_STATE: ExplainTopic.COMPONENT_CONTRACT,
+    SimulationStage.CALLBACK_WINDOW: ExplainTopic.COMPONENT_CONTRACT,
+    SimulationStage.CALLBACK_INTENT: ExplainTopic.COMPONENT_CONTRACT,
+    SimulationStage.CALLBACK_PUBLICATION: ExplainTopic.PUBLICATION,
+}
+"""Which recovery section answers a raise at each stage.
+
+Only existing topics are used. Every one of these already resolves to a `### Recovering from:`
+section in `SKILL.md`, and `tests/characterization/test_explain_topics.py` pins that correspondence
+in both directions -- so adding a topic here without writing its section, or writing a section with
+no topic, fails the suite. Stages absent from this map fall back to `run-precondition`, which is
+the topic for "a precondition of the run did not hold".
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,8 +211,11 @@ class SimulationFailure(RuntimeError, ValueError):
             failures = [
                 {
                     "code": f"{self.stage.value}.{type(cause).__name__}",
-                    "requirement": "the guarded boundary must complete without raising",
+                    "source": FailureSource(file=None).as_dict(),
+                    "requirement": _requirement_for(self.stage),
                     "observed": observed,
+                    "fix": _fix_for(self.stage, cause),
+                    "explain": str(_EXPLAIN_BY_STAGE.get(self.stage, ExplainTopic.RUN_PRECONDITION)),
                     "examples": [],
                     "example_total": 0,
                 }

@@ -34,6 +34,46 @@ class AccessRecord:
 
 @dataclass(frozen=True, slots=True)
 class ObservationBatch:
+    """What one declared requirement returned, and the record of how it was read.
+
+    This is the only shape a Model ever receives data in, and until 2026-08-30 it was not
+    importable from `vqapr.public` and had no docstring -- so an author could read its name in
+    `observations()`'s signature and had no way to learn what it holds without opening installed
+    source. One journey answered the questions below by registering a throwaway DataModel that
+    reported `sorted(rows[0].keys())`, which is a full register-materialize-show cycle spent on one
+    type's field names (`docs/issues/031`).
+
+    **`rows` is a flat tuple of dicts, one per (instant, instrument) observation.** Every row
+    carries:
+
+    * `available_at` -- a timezone-aware `datetime`, the row's OWN point-in-time stamp rather than
+      the window's evaluation time. Rows do not share one instant, so this is what a cross-section
+      is built on.
+    * `instrument` -- the instrument id, as a string.
+    * one key per field named in the requirement, under the SEMANTIC alias the requirement
+      declared, not the physical column name. A value is `None` where the source has no value; a
+      `RowsLookback` also nulls a field on rows outside that field's own last-N (see
+      `RowsLookback`).
+
+    **A value keeps the parquet column's own type.** A `DOUBLE` column arrives as `float` and a
+    `DECIMAL` column as `Decimal`; nothing here converts between them, because a conversion either
+    way would be this package deciding how precise somebody else's measurement is. So a model must
+    not assume either: `Decimal(str(value))` is correct for both and is what the scaffolds emit,
+    while `Decimal(value)` on a float inherits the binary expansion and mixing the two in one
+    arithmetic expression raises.
+
+    **Ordering is guaranteed: ascending `available_at`, then the dataset's registered key fields.**
+    It is pushed into SQL (`scan.observation_rows`) rather than applied afterwards, so it holds for
+    every lookback and every instrument count, and `tests/data/test_observation_batch_shape.py`
+    pins it. Instruments therefore INTERLEAVE within an instant rather than being grouped by name:
+    a per-instrument series is built by the reader, and a cross-section is `rows` filtered on one
+    `available_at`. `ModelWindow.snapshot` returns the newest cross-section directly.
+
+    `access` is the `AccessRecord` the framework stamps -- source digest, declared fields, the
+    lookback, the bound it resolved, per-instrument non-null counts. It is provenance, not data,
+    and a Model normally reads only `rows`.
+    """
+
     rows: Rows
     access: AccessRecord
 
@@ -91,6 +131,15 @@ class ModelWindow:
         return tuple(self._accesses)
 
     def observations(self, requirement: DataRequirement) -> ObservationBatch:
+        """Every row this requirement's lookback admits, at or before the evaluation time.
+
+        The whole window, ordered by `available_at` then the dataset's key fields -- see
+        `ObservationBatch` for the row shape and the ordering guarantee, which a cross-sectional
+        model depends on. `snapshot` is the same read collapsed to the newest instant.
+
+        Refuses a requirement the component did not declare before compute: an undeclared read is
+        not point-in-time bounded, and being bounded is what the declaration buys.
+        """
         if requirement not in self.__allowed:
             raise VqaprError(
                 stage=_STAGE,

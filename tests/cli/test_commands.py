@@ -267,6 +267,21 @@ def test_run_executes_a_declared_spec_end_to_end(
     # The run state advances further than the Account: once per published mark, plus the
     # intents and fills a trading strategy now produces.
     assert payload["run_state_version"] == 14
+    # What the orders DID (`docs/issues/039`). `ok: true` says the simulation executed; it does
+    # not say the declared book is the held book, and in the run that filed the issue those
+    # differed by nine percent of NAV because 3.1% of fills dealt nothing. Pinned rather than
+    # `>= 0`, which a run that placed no orders would also satisfy.
+    #
+    # Two orders across the run: the first buys the single instrument, the second asks for no
+    # change and the venue answers `no_trade`. Both are visible now; before this, the envelope
+    # reported neither.
+    assert payload["fills"] == {
+        "orders": 2,
+        "dealt": 1,
+        "partial": 0,
+        "zero_dealt": 1,
+        "reasons": {"no_trade": 1},
+    }
 
 
 def test_show_run_reads_back_the_tables_a_run_recorded(

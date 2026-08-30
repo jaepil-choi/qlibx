@@ -1,5 +1,11 @@
 # 024 — `run.complete` reports `tables_declared: []` for a run that declared and wrote one
 
+*Correction, 2026-08-31:* the fix below **did not reach production**. `_tables_declared` read
+`result.tables`, and `SimulationResult` has no such attribute, so the component-declared half
+reported nothing while its unit test passed against a stand-in that did have one. Found while
+wiring `docs/issues/039`, filed as `docs/issues/041`, fixed by
+`docs/implementations/102-a-run-says-what-its-orders-did.md`.
+
 **Status:** **closed** by `docs/implementations/094-a-run-reports-the-tables-it-declared.md`
 (branch `fix/024-tables-declared-and-counter`). Decision R1: the field STAYS and now reports both
 declaration surfaces - `store.tables` and `StrategyModel.diagnostics()`. The empty list was not

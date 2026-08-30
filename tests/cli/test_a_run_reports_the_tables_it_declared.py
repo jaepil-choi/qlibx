@@ -24,8 +24,18 @@ from vqapr.flow.store_spec import StoreSpec
 
 
 def _result(*table_ids: str) -> SimpleNamespace:
-    """A stand-in carrying only what `_tables_declared` reads: the recorded table ids."""
-    return SimpleNamespace(tables={table_id: () for table_id in table_ids})
+    """A stand-in carrying only what `_tables_declared` reads: the recorded table ids.
+
+    **Corrected 2026-08-31.** This used to expose them as `result.tables`, and `SimulationResult`
+    has no such attribute -- its fields are `occurrences` and `final_state`. So `_tables_declared`
+    read `{}` on every real run while these assertions passed against the double, and the
+    component-declared half of `docs/issues/024` reported nothing for a week. The rows live at
+    `final_state.recorder_rows`, and `tests/cli/test_the_run_reports_what_its_orders_did.py` pins
+    that path against the real types so the double cannot drift away from them again.
+    """
+    return SimpleNamespace(
+        final_state=SimpleNamespace(recorder_rows={table_id: () for table_id in table_ids})
+    )
 
 
 def test_a_table_declared_on_the_component_is_reported() -> None:

@@ -1,8 +1,12 @@
 """Validate, fingerprint, and persist project-local extension references.
 
-Internal-transition: this is the physical home of the component registration authority as of
-G002. `vqapr.extension.registration` is a temporary forwarding adapter over this module until
-G004 hard deletion; do not add new logic to the adapter.
+Internal-transition: this is the physical home of the component registration authority.
+`vqapr.extension.registration` is a temporary forwarding adapter over this module and is the ONLY
+door callers in `src/` use to reach it; do not add new logic to the adapter, and do not import this
+module directly from outside `_internal/`. Both halves of that rule, and the conditions the hard
+deletion is admitted under, are in `docs/design/agent-first-surface.md`. Stated by document rather
+than by goal id: this note pinned the deletion to a goal id until 2026-08-30, by which time that
+id named a different, completed goal (`docs/issues/029`).
 
 **The four extension points enter through one door.** Canon 10.2 says a user-authored component
 is named by a `ComponentRef`, checked, and registered the same way whichever kind it is. That is

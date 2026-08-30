@@ -76,8 +76,8 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     head. Read by loading the component rather than by parsing it, so what is reported is what the
     framework will actually act on.
     """
-    from vqapr._internal.extensions.component import ComponentKind
-    from vqapr._internal.extensions.loading import load_data_model, load_strategy_model
+    from vqapr.extension.component import ComponentKind
+    from vqapr.extension.loading import load_data_model, load_strategy_model
 
     space = Workspace.open(project_root)
     try:
@@ -103,7 +103,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         # StrategyModel loader raised a bare `TypeError` as `stage: "unhandled"`, so the one
         # component a reader most needs to inspect before trusting it could not be inspected at
         # all. Found by a first-time-user journey after a cap refused its run.
-        from vqapr._internal.extensions.loading import load_constraint
+        from vqapr.extension.loading import load_constraint
 
         rule = load_constraint(ref, project_root=project_root)
         return {

@@ -61,6 +61,10 @@ def test_fingerprint_adapter_forwards_the_same_function() -> None:
         "positional_arity",
         "accepts_contract_call",
         "SHIPPED_EXECUTION_PROFILES",
+        # Added 2026-08-30. It was the one loading name the adapter did not forward, so
+        # `public.py` reached it through `_internal` while importing its neighbours from here --
+        # the two-doors defect `docs/issues/029` records.
+        "as_loaded_fingerprint",
     ],
 )
 def test_loading_adapter_forwards_the_same_objects(name: str) -> None:
@@ -158,6 +162,7 @@ def test_old_adapters_carry_no_duplicate_implementation_logic() -> None:
             {
                 "SHIPPED_EXECUTION_PROFILES",
                 "accepts_contract_call",
+                "as_loaded_fingerprint",
                 "load_constraint",
                 "load_data_model",
                 "load_exchange",

@@ -1,8 +1,12 @@
 """Deterministic project-local component source fingerprinting.
 
-Internal-transition: this is the physical home of the component fingerprint authority as of
-G002. `vqapr.extension.fingerprint` is a temporary forwarding adapter over this module until G004
-hard deletion; do not add new logic to the adapter.
+Internal-transition: this is the physical home of the component fingerprint authority.
+`vqapr.extension.fingerprint` is a temporary forwarding adapter over this module and is the ONLY
+door callers in `src/` use to reach it; do not add new logic to the adapter, and do not import this
+module directly from outside `_internal/`. Both halves of that rule, and the conditions the hard
+deletion is admitted under, are in `docs/design/agent-first-surface.md`. Stated by document rather
+than by goal id: this note pinned the deletion to a goal id until 2026-08-30, by which time that
+id named a different, completed goal (`docs/issues/029`).
 """
 
 from __future__ import annotations

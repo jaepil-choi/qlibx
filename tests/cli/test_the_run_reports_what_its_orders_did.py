@@ -1,0 +1,146 @@
+"""`run.complete` says what the orders did, not only that the simulation executed.
+
+`docs/issues/039`. A market-neutral run returned `{"ok": true, "occurrences": 732,
+"account_version": 244}`. Its long side landed on 0.500 at every rebalance; its short side never
+did, and by December the book carried **+9.1% of NAV in unintended net long exposure** -- a strategy
+whose whole premise is neutrality running a material directional bet.
+
+The cause was faithful market friction: names not tradable at the fill instant, skewed toward what a
+reversal signal wants to short. It was correctly modelled and correctly labelled -- 1,481 of 47,318
+fill rows carried `reason: nontradable`. **Nothing aggregated them.** The reporter's own summary:
+
+> `ok: true` on this run means "the simulation executed", and I had been reading it as "the book I
+> declared is the book that was held". Those differ by nine percent of NAV.
+
+The follow-up made the case stronger rather than weaker. Most of the gap turned out to be a bug in
+the reporter's own model, and the signal that would have exposed it on day one was a 3.1% zero-dealt
+rate against a 1.2% baseline -- a comparison nobody could make, because no number was reported.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from types import SimpleNamespace
+
+from vqapr.cli.run import _fill_summary, _recorded, _tables_declared
+from vqapr.flow.run_state import AcceptedRunState
+from vqapr.flow.simulation import SimulationResult
+from vqapr.flow.store_spec import StoreSpec
+
+
+def _result(*tables: tuple[str, tuple[dict[str, object], ...]]) -> SimpleNamespace:
+    """A stand-in shaped like the real thing: rows hang off `final_state.recorder_rows`."""
+    return SimpleNamespace(final_state=SimpleNamespace(recorder_rows=dict(tables)))
+
+
+def _fill(
+    *, requested: str, dealt: str, reason: str | None = None
+) -> dict[str, object]:
+    return {
+        "instrument": "A005930",
+        "requested_quantity": requested,
+        "dealt_quantity": dealt,
+        "reason": reason,
+    }
+
+
+def test_the_reporters_run_would_have_named_its_own_cause() -> None:
+    """The shape of the run that filed this issue, in miniature."""
+    rows = (
+        *(_fill(requested="10", dealt="10") for _ in range(6)),
+        *(_fill(requested="-10", dealt="0", reason="nontradable") for _ in range(3)),
+        _fill(requested="5", dealt="0", reason="no_trade"),
+    )
+
+    summary = _fill_summary(_result(("vqapr.fill", rows)))
+
+    assert summary == {
+        "orders": 10,
+        "dealt": 6,
+        "partial": 0,
+        "zero_dealt": 4,
+        "reasons": {"no_trade": 1, "nontradable": 3},
+    }
+
+
+def test_a_short_fill_is_counted_as_partial_rather_than_dealt_and_forgotten() -> None:
+    """1,404 of that run's short requests were under-filled: the same gap, one degree quieter."""
+    rows = (
+        _fill(requested="100", dealt="100"),
+        _fill(requested="-100", dealt="-40"),
+        _fill(requested="50", dealt="0", reason="unfunded"),
+    )
+
+    summary = _fill_summary(_result(("vqapr.fill", rows)))
+
+    assert summary["dealt"] == 2, "a partial fill did deal something, so it counts as dealt"
+    assert summary["partial"] == 1, "and it is also named, because it did not deal what was asked"
+    assert summary["zero_dealt"] == 1
+    assert summary["reasons"] == {"unfunded": 1}
+
+
+def test_reasons_stay_separate_because_they_are_not_one_fact() -> None:
+    """`unfunded` is the account's own doing; the other three are the market's.
+
+    A reader asking what the market refused them must not be handed their own empty purse in the
+    same number -- which is why `ZeroDealtReason` names it separately in the first place.
+    """
+    rows = (
+        _fill(requested="1", dealt="0", reason="absent"),
+        _fill(requested="1", dealt="0", reason="nontradable"),
+        _fill(requested="1", dealt="0", reason="unfunded"),
+    )
+
+    summary = _fill_summary(_result(("vqapr.fill", rows)))
+
+    assert summary["reasons"] == {"absent": 1, "nontradable": 1, "unfunded": 1}
+
+
+def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
+    """A run with no fill rows is an answer, not an absent field."""
+    assert _fill_summary(_result()) == {
+        "orders": 0,
+        "dealt": 0,
+        "partial": 0,
+        "zero_dealt": 0,
+        "reasons": {},
+    }
+
+
+def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
+    """The bug this file's helper was written to stop repeating.
+
+    `_tables_declared` used to read `result.tables`. `SimulationResult` has no such attribute -- it
+    has `occurrences` and `final_state` -- so the component-declared half of `docs/issues/024`
+    reported nothing in production, while its unit test passed a `SimpleNamespace(tables=...)` and
+    stayed green for a week. Both envelope fields now read one helper, and this pins the path that
+    helper walks against the real types.
+    """
+    fields = {field.name for field in dataclasses.fields(SimulationResult)}
+
+    assert "final_state" in fields
+    assert "tables" not in fields, (
+        "if SimulationResult ever grows a `tables` attribute, re-read `_recorded` before trusting "
+        "either envelope field again"
+    )
+    assert isinstance(AcceptedRunState.recorder_rows, property), (
+        "the rows live on the run state; a rename here silently empties both fields"
+    )
+
+
+def test_a_table_the_model_declared_and_formed_is_reported_again() -> None:
+    """`docs/issues/024`'s own case, now driven through the attribute the real object has."""
+    result = _result(
+        ("vqapr.account", ()),
+        ("vqapr.fill", ()),
+        ("vqapr.weight", ()),
+        ("ff3.formation", ()),
+    )
+
+    assert _tables_declared(StoreSpec(root=None, tables=()), result) == ["ff3.formation"]
+
+
+def test_the_helper_returns_an_empty_mapping_for_a_result_that_recorded_nothing() -> None:
+    """No rows is not a crash, and not a `None` the callers would have to test for."""
+    assert _recorded(SimpleNamespace()) == {}
+    assert _recorded(SimpleNamespace(final_state=SimpleNamespace())) == {}

@@ -57,10 +57,14 @@ which fields and how briefly. Nothing in this campaign forecloses it.
 
 ## What is still open beyond the holds
 
-- **029's other three call sites.** `flow/preflight.py`, `flow/materialize.py` and `cli/register.py`
-  reach `_internal` through the `extension/` adapters; `cli/show.py:79-80,106` and `public.py:75`
-  still go direct. The adapters' own docstrings promise deletion "in G004", which has passed. That
-  promise is stale and the issue is explicitly only partly closed.
+- ~~**029's other two call sites.**~~ **Closed 2026-08-30** by
+  `docs/implementations/098-one-door-into-internal.md` (branch `fix/029-one-door-into-internal`).
+  `cli/show.py:79-80,106` and `public.py:75` now reach `_internal` through the `extension/`
+  adapters, `extension/loading.py` re-exports `as_loaded_fingerprint` so the last bypass had a door,
+  and the eight docstrings cite `docs/design/agent-first-surface.md` rather than the expired goal id.
+  `tests/boundaries/test_internal_has_one_door.py` enforces it, including function-local imports -
+  which is what the bypasses were. The adapters themselves still stand: their deletion is `G008` and
+  both gates remain shut.
 - **Five frozen modules whose no-new-callers rule is still prose.**
   `docs/design/agent-first-surface.md:322-341` names them under "What the tripwire does not watch".
   Re-measured during the boundary review: all five still hold. The invariant is true; only its

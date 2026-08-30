@@ -335,12 +335,21 @@ def _judge_period(document: dict[str, Any], at: FailureSource) -> list[Failure]:
         return [
             Failure.bounded(
                 "check.period.uncovered",
-                "start and end must be timezone-aware instants so the period can be compared",
+                (
+                    f"{uncomparable} must include a UTC offset; a date or naive datetime does "
+                    "not identify an instant, so the period cannot be compared"
+                ),
                 observed=f"{uncomparable}={document.get(uncomparable)!r}",
                 fix=(
                     f"write {uncomparable} as an ISO-8601 timestamp with an explicit offset, "
-                    "for example 2024-01-01T00:00:00+09:00"
+                    "then retry"
                 ),
+                # Carried deliberately. Before `run` made these judgments, a naive boundary
+                # reached `_timestamp` in `cli/run.py`, which named the missing offset and showed
+                # a well-formed instant. This judgment now answers first, so without these the
+                # parity `run` gained would have been paid for with a vaguer message than the one
+                # it replaced -- an improvement that quietly costs a diagnostic.
+                examples=["2024-01-02T00:00:00+09:00"],
                 explain=ExplainTopic.RUN_PRECONDITION,
                 source=replace(at, key_path=uncomparable),
             )

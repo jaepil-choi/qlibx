@@ -633,14 +633,26 @@ class Rebalance:
         -- is arithmetic with exactly one right answer, and a research author who does it by hand
         is spending attention on bookkeeping instead of on the signal.
 
-        `invested` is GROSS exposure, so a dollar-neutral long/short book at `invested=1` puts the
-        whole book to work and still nets to zero; its cash is 1. A short-only book's cash exceeds
-        1, because selling short raises cash. Cash is always the NET residual, never
-        `1 - invested`.
+        `invested` is GROSS exposure **bounded to `0 < invested <= 1`**, so a dollar-neutral
+        long/short book at `invested=1` puts the whole book to work and still nets to zero; its
+        cash is 1. A short-only book's cash exceeds 1, because selling short raises cash. Cash is
+        always the NET residual, never `1 - invested`.
+
+        **The bound and the even split compose, and together they set the ceiling.** Two sides
+        each take `invested / 2`, so `invested=1` on a signed book is 0.5 long and 0.5 short --
+        not 1.0 and -1.0. The most this constructor can express is therefore half of a textbook
+        $1-long/$1-short book, and a published SMB or HML series quoted at that scale is twice
+        what comes out of here. Read a factor return built this way as half-scale, or double it
+        before comparing.
+
+        Neither the bound nor the split is an accounting invariant. A `Rebalance` with weights
+        `+1/-1` and cash 1 satisfies every downstream invariant -- the signed budget admits
+        positions in `[-1, 1]` and cash in `[-1, 2]` -- so the ceiling is this constructor's, not
+        the account's. Build the `Rebalance` directly to go past it.
 
         Two sides are currently split evenly, so a 130/30 cannot be expressed through this
-        constructor. Stated rather than implied, because the even split is a choice and not a
-        law.
+        constructor either. Stated rather than implied, because the even split is a choice and not
+        a law.
 
         Doing it by hand is also where the errors live: the sum must land on one EXACTLY, and a
         weight that misses by a single ulp is refused by the same invariant that catches a real
@@ -667,7 +679,13 @@ class Rebalance:
 
         share = _as_decimal(invested, name="invested")
         if not 0 < share <= 1:
-            raise ValueError("invested must be greater than zero and no greater than one")
+            raise ValueError(
+                f"invested must be greater than zero and no greater than one; got {share}. "
+                "It is GROSS exposure and both sides split it evenly, so the most a signed book "
+                "can reach through this constructor is 0.5 long and 0.5 short. A textbook "
+                "$1-long/$1-short book is twice that and cannot be expressed here -- build the "
+                "Rebalance directly if you need it."
+            )
 
         # Both sides present means the book is signed and each side takes half the invested
         # fraction. One side alone takes all of it.

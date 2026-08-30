@@ -205,9 +205,18 @@ def _list(root: Path) -> dict[str, Any]:
         "current": current,
     }
     if not current:
+        # Names the command that exists and works. This sentence used to say
+        # `vqapr skill install --force`, and `--force` is not an `install` option -- it belongs to
+        # the sibling `remove` verb, where it means something else entirely. A reader who followed
+        # the instruction got `unrecognized arguments: --force` from the tool that had just told
+        # them to run it (`docs/issues/025`).
+        #
+        # No flag was added to satisfy the sentence. Plain `install` already overwrites a stale
+        # copy and `skill list` then reports `current: true`, so a `--force` on `install` would be
+        # a no-op that exists only to make an incorrect message correct.
         body["stale"] = (
             "the installed skill differs from the one this package ships; "
-            "run `vqapr skill install --force` to update it"
+            "run `vqapr skill install` to update it"
         )
     return success("skill.list", **body)
 

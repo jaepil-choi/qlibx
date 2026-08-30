@@ -2,8 +2,15 @@
 
 **Status:** **partly closed** by `docs/implementations/097-the-facade-boundary-is-a-test.md`.
 The `flow/judgments.py` row is fixed - it now reaches `_internal` through the `extension/`
-adapters like its siblings. The other three call sites (`flow/preflight.py`, `flow/materialize.py`,
-`cli/register.py`) and the expired G004 deletion promise are NOT addressed and remain open.
+adapters like its siblings. **Two bypass sites remain open: `src/vqapr/cli/show.py:79,80,106` and
+`src/vqapr/public.py:75`**, as does the expired G004 deletion promise in all eight docstrings.
+
+*Correction, 2026-08-30:* the first version of this status line named `flow/preflight.py`,
+`flow/materialize.py` and `cli/register.py` as the sites left open. Those three are the **control
+rows** of the table below - they already go through the adapters and are what "correct" looks like.
+The bypasses are the bolded rows. Verified by grep against `develop` after 097 landed: the only
+`from vqapr._internal` statements in `src/` outside `_internal/` itself are the four adapters at
+`extension/*.py:11`, the frozen cluster inside `project.py`, and the two named above.
 
 **Status when filed:** open. Found 2026-08-30 by the same owner-requested boundary audit that filed
 `docs/issues/028`, against `develop@ad4565f9`. Not a journey finding, and not a defect a user can
@@ -25,15 +32,17 @@ Four modules under `extension/` carry no logic. Each is a forwarding adapter ove
 The adapters are used, heavily — roughly 25 references in `src/` and 36 in `tests/`. That is fine;
 that is what an adapter is for. The problem is that three call sites skip them and import
 `_internal` directly, so the same four authorities are reached by two different names depending on
-which file you are in:
+which file you are in. **The `door` column is the point of this table; the first three rows are the
+control group, not the defect:**
 
-| caller | `load_exchange` / `ComponentKind` via |
-|---|---|
-| `flow/preflight.py:27-28` | `vqapr.extension.loading`, `vqapr.extension.component` |
-| `flow/materialize.py:30` | `vqapr.extension.loading` |
-| `cli/register.py:59-60` | `vqapr.extension.component`, `vqapr.extension.registration` |
-| **`flow/judgments.py:26,51,145`** | **`vqapr._internal.extensions.loading`, `.component`** |
-| **`cli/show.py:79-80,106`** | **`vqapr._internal.extensions.loading`, `.component`** |
+| caller | door | reached as |
+|---|---|---|
+| `flow/preflight.py:27-28` | adapter ✔ | `vqapr.extension.loading`, `vqapr.extension.component` |
+| `flow/materialize.py:30` | adapter ✔ | `vqapr.extension.loading` |
+| `cli/register.py:59-60` | adapter ✔ | `vqapr.extension.component`, `vqapr.extension.registration` |
+| `flow/judgments.py:26,51,145` | ~~bypass~~ → adapter ✔ | fixed by record 097 |
+| **`cli/show.py:79,80,106`** | **bypass ✘** | `vqapr._internal.extensions.loading`, `.component` |
+| **`public.py:75`** | **bypass ✘** | `vqapr._internal.extensions.loading` |
 
 `flow/preflight.py` and `flow/judgments.py` are siblings in the same layer, written within days of
 each other, calling the same functions by two different paths. Nothing in the tree says which is
@@ -91,9 +100,15 @@ a boundary that is documented in prose and enforced by nothing.
 ## What closes it
 
 1. **One door.** Pick a spelling and make all of `src/` use it. Through the adapters is the smaller
-   edit (three call sites move) and keeps the eventual `G008` deletion mechanical. Direct to
-   `_internal` is defensible too, but then the adapters exist only for `tests/` and external callers,
-   and that should be said out loud in their docstrings rather than left as a shrug.
+   edit and keeps the eventual `G008` deletion mechanical. Direct to `_internal` is defensible too,
+   but then the adapters exist only for `tests/` and external callers, and that should be said out
+   loud in their docstrings rather than left as a shrug.
+
+   **After record 097 this is two sites, not three:** `cli/show.py:79,80,106` — three imports, all
+   function-local inside `_model` (`show.py:70`), the third in its `ComponentKind.CONSTRAINT`
+   branch — and `public.py:75`. `flow/judgments.py` already moved. Do not touch `flow/preflight.py`,
+   `flow/materialize.py` or `cli/register.py`: they are already on the adapter side and are the
+   shape the other two should match.
 2. **Re-label or unlabel.** Replace `G004` in all eight docstrings with `G008`, or drop the goal
    reference entirely and cite `docs/design/agent-first-surface.md` instead — a document that will
    still be findable after the next renumbering. Prefer the document: goal ids in source comments

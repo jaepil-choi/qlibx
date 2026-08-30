@@ -35,6 +35,7 @@ from typing import Any
 
 import yaml
 
+from vqapr.account.account import AccountMode
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import VALUE_INVALID, InputError, refuse_existing
 from vqapr.extension.component import ComponentKind
@@ -184,7 +185,20 @@ valuation_configs:
 #     agenda_id: daily-monitoring
 """
 
-_RUN_SPEC_TEMPLATE = """\
+_ACCOUNT_MODES = " or ".join(mode.name for mode in AccountMode)
+"""The account modes spelled the way the spec parser accepts them, derived rather than restated.
+
+The template used to say `LONG_ONLY or LONG_SHORT` in a hand-written comment. `LONG_SHORT` does not
+exist and never did -- the members are `LONG_ONLY` and `SIGNED` -- so the template handed a
+first-time author a value that cannot work, and the refusal it produced named a `KeyError` rather
+than the permitted set. Deriving the list from the enum means the comment cannot drift from it
+again: adding or renaming a member updates the template in the same edit.
+
+`.name` rather than `.value`, because the spec is parsed by member NAME (`LONG_ONLY`), while
+`.value` is the lowercase `long_only` a reader must not type here.
+"""
+
+_RUN_SPEC_TEMPLATE = f"""\
 # Run spec — every required key of THIS file is shown. Replace the placeholder values.
 # Write this file, then execute: vqapr run <this-file.yaml>
 #
@@ -213,8 +227,8 @@ execution_input: my-exec       # execution_input_id of a registered execution in
 
 initial_account:
   cash: "1000000"              # quoted to preserve precision (parsed as Decimal)
-  mode: LONG_ONLY              # LONG_ONLY or LONG_SHORT
-  positions: {}                # mapping of instrument -> quantity, or empty
+  mode: LONG_ONLY              # {_ACCOUNT_MODES}
+  positions: {{}}                # mapping of instrument -> quantity, or empty
 
 # Optional sections (uncomment to use):
 # constraints:

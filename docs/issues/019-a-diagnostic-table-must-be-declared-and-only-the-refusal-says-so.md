@@ -1,5 +1,10 @@
 # 019 — A diagnostic table must be declared, and only the refusal says so
 
+**Status:** **closed** by `docs/implementations/089-a-diagnostic-table-says-it-must-be-declared.md`
+(branch `fix/019-declare-diagnostics`). The refusal now names `StrategyModel.diagnostics()` and lists
+what is currently declared; the scaffold mentions the rule before a run is spent; the skill says
+declared AND formed.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-007**,
 `slowed`, and it cost a wasted run.

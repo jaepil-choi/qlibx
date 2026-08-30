@@ -51,6 +51,9 @@ class {class_name}(va.StrategyModel):
             return va.StrategyResult(decision=va.Hold(reason="no-name-scored-above-zero"))
         # Relative conviction: the package normalises, rounds and balances against cash.
         return va.StrategyResult(decision=va.Rebalance.of(long=chosen, invested="{invested}"))
+
+    # A table of your own must be DECLARED before decide() may emit it: return it from
+    # `diagnostics()` as `va.DiagnosticTable(table_id=..., semantic_fields=(...))`.
 '''
 
 _DATA_MODEL_TEMPLATE = '''"""A DataModel that derives one column from declared observations."""

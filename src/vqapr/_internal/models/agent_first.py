@@ -353,7 +353,17 @@ def _validated_diagnostics(
 ) -> Mapping[str, tuple[Mapping[str, object], ...]]:
     unknown_tables = sorted(set(result_diagnostics) - set(tables_by_id))
     if unknown_tables:
-        raise ValueError(f"decide() emitted undeclared diagnostic tables: {unknown_tables}")
+        # Naming the repair, not just the breach. `diagnostics` reads as a convenience on
+        # `StrategyResult` -- its docstring introduces it as saving typing for the common case --
+        # so an author who emits a table reasonably expects it to be recorded. It must be declared
+        # first, and nothing said so until the run had already been spent.
+        declared = sorted(tables_by_id)
+        raise ValueError(
+            f"decide() emitted undeclared diagnostic tables: {unknown_tables}. "
+            f"Declare each one by returning it from StrategyModel.diagnostics(), which currently "
+            f"declares {declared or 'nothing'}; a table must be declared there before decide() "
+            f"may emit it."
+        )
     for table_id, rows in result_diagnostics.items():
         expected_fields = set(tables_by_id[table_id].semantic_fields)
         for row in rows:

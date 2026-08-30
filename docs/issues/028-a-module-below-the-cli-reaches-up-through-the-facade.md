@@ -1,5 +1,10 @@
 # 028 — A module below the CLI reaches up through the facade, and no test counted it
 
+**Status:** **closed** by `docs/implementations/097-the-facade-boundary-is-a-test.md`.
+`flow/judgments.py` now imports `Workspace` from `vqapr.workspace`, returning the count to the
+ruling's verified 12, and `tests/boundaries/test_the_facade_is_not_reached_up_to.py` makes the
+tripwire executable - proven to fail on this exact regression before being kept.
+
 **Status when filed:** open. Found 2026-08-30 by an owner-requested boundary audit of `src/`,
 against `develop@ad4565f9`, while the 015–027 campaign was still running. **Not a journey
 finding** — no first-time user could see this. It is a regression introduced by this campaign's own

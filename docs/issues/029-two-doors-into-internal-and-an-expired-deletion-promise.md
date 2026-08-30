@@ -1,5 +1,10 @@
 # 029 — `_internal` has two doors, and the note promising to close one names a goal that has expired
 
+**Status:** **partly closed** by `docs/implementations/097-the-facade-boundary-is-a-test.md`.
+The `flow/judgments.py` row is fixed - it now reaches `_internal` through the `extension/`
+adapters like its siblings. The other three call sites (`flow/preflight.py`, `flow/materialize.py`,
+`cli/register.py`) and the expired G004 deletion promise are NOT addressed and remain open.
+
 **Status when filed:** open. Found 2026-08-30 by the same owner-requested boundary audit that filed
 `docs/issues/028`, against `develop@ad4565f9`. Not a journey finding, and not a defect a user can
 observe — it is a maintenance hazard that will surface as a mass edit the first time anyone acts on

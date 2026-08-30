@@ -23,10 +23,17 @@ from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
-from vqapr._internal.extensions.loading import load_exchange, load_strategy_model
+# Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
+# `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
+# adapters misses a caller (`docs/issues/029`).
+from vqapr.extension.loading import load_exchange, load_strategy_model
 from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 from vqapr.flow.run_spec import MATERIALIZATION
-from vqapr.public import Workspace
+# `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
+# this layer; a module under `flow/` importing it reaches back up through the thing it is supposed
+# to sit beneath. `flow/preflight.py` takes the same class from the same place, and the boundary
+# tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
+from vqapr.workspace import Workspace
 
 __all__ = ["judgments", "materialization_judgments"]
 
@@ -48,7 +55,7 @@ def materialization_judgments(
     Raised in the `check.materialize.*` namespace, so `tests/cli/test_check.py`'s pinned count of
     the eight `check.*` judgments a simulation settles stays a statement about simulations.
     """
-    from vqapr._internal.extensions.component import ComponentKind
+    from vqapr.extension.component import ComponentKind
 
     found: list[Failure] = []
 
@@ -142,7 +149,7 @@ def materialization_judgments(
     # What the model says it reads must be registered, or the first evaluation refuses on data the
     # author could have been told about before the run started.
     if ref is not None and ref.kind is ComponentKind.DATA_MODEL:
-        from vqapr._internal.extensions.loading import load_data_model
+        from vqapr.extension.loading import load_data_model
 
         by_id = {str(item.dataset_id): item for item in workspace.datasets}
         # Scoped to the two calls the refusal describes. Wrapping the judgments below in it too

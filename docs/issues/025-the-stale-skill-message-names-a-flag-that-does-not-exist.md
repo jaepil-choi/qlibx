@@ -1,5 +1,11 @@
 # 025 — The stale-skill message names a flag that does not exist
 
+**Status:** **closed** by
+`docs/implementations/095-the-stale-skill-message-names-a-real-command.md` (branch
+`fix/025-stale-skill-message`). The message now names `vqapr skill install`, which already
+overwrites a stale copy. No `--force` was added to `install`: it would have been a no-op existing
+only to make an incorrect sentence correct, and a test now keeps it rejected.
+
 **Status when filed:** open. Found 2026-08-30 while installing the package and the skill for the
 final first-time-user journey in `kwam-enhanced-index/vqapr-final-testbed/`, before the run started.
 Recorded there as **S-001**, `papercut`, ~1 minute. The evaluator's, not the agent's.

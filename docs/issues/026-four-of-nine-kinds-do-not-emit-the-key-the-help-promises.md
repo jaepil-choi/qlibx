@@ -1,5 +1,12 @@
 # 026 — `new --help` promises a `declaration` key that four of nine kinds do not emit
 
+**Status:** **closed** by
+`docs/implementations/096-every-new-kind-says-how-to-use-its-file.md` (branch
+`fix/026-declaration-key-on-every-kind`). `dataset`, `agendas` and `execution-input` now emit
+`declaration`. `run-spec` emits `registrable: false` instead, because a run spec genuinely cannot
+be registered - `vqapr register` refuses it with `declaration.read.unknown_section`. The help was
+overpromising rather than the envelopes underdelivering, and it now states what is true.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-001**,
 `papercut`, ~2 minutes.

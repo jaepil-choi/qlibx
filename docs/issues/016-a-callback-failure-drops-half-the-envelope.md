@@ -1,5 +1,10 @@
 # 016 — A callback failure drops half the envelope the skill guarantees
 
+**Status:** **closed** by `docs/implementations/088-a-callback-failure-carries-the-whole-envelope.md`
+(branch `fix/016-callback-envelope`). A callback failure now carries all six fields; `requirement`
+describes the author's callback rather than the framework's guard, and `fix` names where to look.
+No new `ExplainTopic` was needed - the existing `component-contract` and `publication` topics cover it.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. This is the cross-cutting half
 of **F-005**, **F-006** and **F-007** in that log — the reporter's own words: *"Three further

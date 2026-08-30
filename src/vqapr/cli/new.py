@@ -292,8 +292,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "scaffold a component (datamodel/strategy/constraint) or emit a template "
             "(instruments/dataset/execution-input/agendas/exchange/run-spec). Component and "
             "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
-            "that registers it. Every kind reports the file to hand `vqapr register` as "
-            "`declaration`"
+            "that registers it. Every registrable kind reports the file to hand "
+            "`vqapr register` as `declaration`; `run-spec` reports `registrable: false` "
+            "instead, because a run spec is handed to `vqapr run` rather than registered"
         ),
     )
     parser.add_argument(
@@ -339,7 +340,16 @@ def _run_spec(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     refuse_existing(target, what="run spec template")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(_RUN_SPEC_TEMPLATE, encoding="utf-8")
-    return success("template.new", kind="run-spec", path=str(target))
+    # No `declaration` here, and this is the one kind where its absence is the honest answer: a
+    # run spec is not registrable. `vqapr register` refuses it with
+    # `declaration.read.unknown_section`, because a spec names components rather than declaring
+    # any. `vqapr run` is what takes this file.
+    #
+    # `new --help` promised the key for EVERY kind, which was wrong in both directions -- four
+    # kinds did not emit it, and one of those four could not honestly emit it. The help now says
+    # what is true, and `registrable` says it in the envelope so a caller can branch on a field
+    # rather than on a list of kind names it has to keep in sync (`docs/issues/026`).
+    return success("template.new", kind="run-spec", path=str(target), registrable=False)
 
 
 def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
@@ -457,7 +467,13 @@ def _dataset_template(args: argparse.Namespace, project_root: Path) -> dict[str,
     refuse_existing(target, what="dataset declaration template")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(_DATASET_TEMPLATE, encoding="utf-8")
-    return success("template.new", kind="dataset", path=str(target))
+    # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
+    # EVERY kind. For a single-file kind the template IS the declaration, so it equals
+    # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
+    # instead of branching on which of them happen to write two files (`docs/issues/026`).
+    return success(
+        "template.new", kind="dataset", path=str(target), declaration=str(target)
+    )
 
 
 def _execution_input_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
@@ -465,7 +481,16 @@ def _execution_input_template(args: argparse.Namespace, project_root: Path) -> d
     refuse_existing(target, what="execution input template")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(_EXECUTION_INPUT_TEMPLATE, encoding="utf-8")
-    return success("template.new", kind="execution-input", path=str(target))
+    # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
+    # EVERY kind. For a single-file kind the template IS the declaration, so it equals
+    # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
+    # instead of branching on which of them happen to write two files (`docs/issues/026`).
+    return success(
+        "template.new",
+        kind="execution-input",
+        path=str(target),
+        declaration=str(target),
+    )
 
 
 def _agendas_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
@@ -473,7 +498,13 @@ def _agendas_template(args: argparse.Namespace, project_root: Path) -> dict[str,
     refuse_existing(target, what="agendas template")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(_AGENDAS_TEMPLATE, encoding="utf-8")
-    return success("template.new", kind="agendas", path=str(target))
+    # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
+    # EVERY kind. For a single-file kind the template IS the declaration, so it equals
+    # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
+    # instead of branching on which of them happen to write two files (`docs/issues/026`).
+    return success(
+        "template.new", kind="agendas", path=str(target), declaration=str(target)
+    )
 
 
 _EXCHANGE_TEMPLATE = '''"""A zero-friction Exchange listing the instruments this run may trade.

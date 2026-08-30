@@ -147,6 +147,16 @@ A venue names no categories at all: `KrxExchange` takes ids, and what each one I
 registered roster at fill time. A KRX venue run without a roster refuses to charge rather than
 assuming a share.
 
+**The `krx` profile is long-only, and the venue has to agree with the account.** `krx_listings`
+sets `access=ListingAccess.LONG_ONLY` on every rule it builds, so `--profile krx` cannot hold a
+short. Pairing it with `initial_account.mode: SIGNED` is a combination nothing refuses at scaffold
+time and that cannot hold a position -- the account permits the short and the venue declines it.
+
+**So a costed long/short book needs a venue you write.** There is no shipped SIGNED costed profile.
+Set `access=ListingAccess.SIGNED` on your own listings, which is the `ListingAccess` member for a
+rule that may be held either way, and declare the costs as below. `--profile krx` is the right
+starting point for a long-only book and the wrong one for a signed book.
+
 **Writing your own costed venue.** Subclass `AcademicExchange` and declare the cost one of two
 ways, and the choice matters:
 

@@ -645,10 +645,16 @@ def _freeze_record(
         "tables": lambda: {
             table_id: {
                 "rows": len(rows),
-                # Formations, not just rows: a diagnostic table's row count says how much was
-                # written, and the distinct event_time count says how often. Research asks the
-                # second question and the first cannot answer it.
-                "formations": len({str(row.get("event_time")) for row in rows}),
+                # Instants, not just rows: a table's row count says how much was written, and the
+                # distinct `event_time` count says how often. Research asks the second question
+                # and the first cannot answer it.
+                #
+                # Named `instants` rather than `formations`. "Formation" is portfolio vocabulary,
+                # and this counter is applied to every table -- including `vqapr.fill`, where a
+                # formation is not a thing that happens. A reader who could not work out what it
+                # counted said so (`docs/issues/024`), and the honest answer is the one in the
+                # expression: how many distinct instants this table has rows for.
+                "instants": len({str(row.get("event_time")) for row in rows}),
             }
             for table_id, rows in sorted(recorded.items())
         },

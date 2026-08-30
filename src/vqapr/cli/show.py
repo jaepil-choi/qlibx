@@ -221,7 +221,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         return success("run.show", **record_view(read_record(root, args.identifier)))
 
     # The rows a run wrote, which the record only counts. `record["tables"]` reports how many rows
-    # and how many formations each table holds, and nothing could read one back -- so the evidence
+    # and how many instants each table holds, and nothing could read one back -- so the evidence
     # tables `RunRecorder` writes on every run were reachable only by knowing the on-disk layout
     # and opening the .jsonl by hand. That is the file this surface should not require a reader to
     # know about, the same rule `list instruments` answers for the roster sidecar.

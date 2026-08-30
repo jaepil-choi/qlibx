@@ -603,7 +603,7 @@
     {
       "code": "run.check.judgment_blocked",
       "file": "src/vqapr/cli/run.py",
-      "line": 400
+      "line": 440
     },
     {
       "code": "run.check.preflight_refused",

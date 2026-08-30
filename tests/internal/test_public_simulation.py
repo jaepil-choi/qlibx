@@ -448,6 +448,28 @@ def test_fills_carry_the_cost_fields_research_needs(workspace):
         assert required in fields[0], f"{required} missing from {fields[0]}"
 
 
+def test_fills_carry_the_five_envelope_fields_every_table_carries(workspace):
+    """`docs/issues/022`: `vqapr.fill` carried none of the five, and it is the table that needs them.
+
+    The skill guarantees every row of every table carries `run_id`, `producer_id`, `stage`,
+    `event_time` and `sequence`. `vqapr.account` had all five and `vqapr.fill` had none, because
+    fill rows are staged straight into the run-state chunks and never pass through the recorder
+    that stamps them.
+
+    `event_time` is the one that costs a reader an answer: it is the table cost questions are asked
+    of, and without a clock no cost question with a date in it can be answered from it at all.
+    """
+    stdout = _run_readback(workspace, "Buyer")
+    fields = [ln for ln in stdout.splitlines() if ln.startswith("FIELDS|")]
+    assert fields, stdout
+
+    for required in ("run_id", "producer_id", "stage", "event_time", "sequence"):
+        assert required in fields[0], (
+            f"{required} missing from vqapr.fill; a fill row still cannot say "
+            f"{'when it happened' if required == 'event_time' else 'which run wrote it'}"
+        )
+
+
 def test_reading_a_table_the_run_never_recorded_raises(workspace):
     """An absent table is an error, not an empty tuple that looks like no activity."""
     from vqapr._internal.run_bridge import CompletedRun, RunAccount, SimulationSummary

@@ -956,6 +956,18 @@ class SimulationFlow:
                 account=prepared_fill,
                 fill=fills,
                 evidence=commit_evidence,
+                # The same five fields `InvocationRecorder` stamps on every other table. These
+                # rows never pass through one, which is why they used to carry none of them.
+                # `event_time` is when the fill happened -- the execution target -- not when the
+                # decision that caused it was made.
+                envelope={
+                    "run_id": self._frozen_run.identity,
+                    "producer_id": str(
+                        self._frozen_run.strategy.component.component_id
+                    ),
+                    "stage": pending.occurrence.role.value,
+                    "event_time": pending.target.target_at,
+                },
             ),
         )
         self._due_boundary(

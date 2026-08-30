@@ -227,6 +227,8 @@ execution_input: my-exec       # execution_input_id of a registered execution in
 
 initial_account:
   cash: "1000000"              # quoted to preserve precision (parsed as Decimal)
+  # The venue must permit the direction too: `--profile krx` is long-only and cannot hold a
+  # SIGNED book. A costed long/short book needs a venue whose listings set access=SIGNED.
   mode: LONG_ONLY              # {_ACCOUNT_MODES}
   positions: {{}}                # mapping of instrument -> quantity, or empty
 

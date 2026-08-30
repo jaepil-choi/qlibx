@@ -1,5 +1,12 @@
 # 020 — The only costed venue profile is long-only, and nothing says so where it matters
 
+**Status:** **closed** by `fix/020-krx-is-long-only` (docs and one scaffold comment; no behaviour
+change, so no implementation record). The skill's Costs section now states that `--profile krx` is
+long-only, names `ListingAccess`, warns that pairing it with `mode: SIGNED` is accepted at scaffold
+time and cannot hold a position, and says a costed long/short book needs a venue whose listings set
+`access=SIGNED`. The product question - whether a costed SIGNED profile should ship - remains open
+and out of scope; what is now stated is what is true today.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-003**,
 `slowed`, ~10 minutes *"most of it spent re-reading the skill's two cost sections looking for the

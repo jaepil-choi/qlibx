@@ -63,7 +63,7 @@ So nothing needed rewriting. A `fix/028-facade-boundary` branch was available at
 source-bearing commits went onto `develop` unbranched and unmerged.**
 
 The honest statement of the constraint is therefore: **one issue, one branch, merged `--no-ff` held
-for the fifteen planned stories and was not followed for these two.** The engineering in both is
+for all fourteen branch-bearing stories and was not followed for these two.** The engineering in both is
 reviewed and tested; the process deviation is real, and the earlier justification for it was a claim
 that contradicted inspectable evidence — which is precisely the Principle 5 failure this campaign
 kept finding elsewhere, committed in the record that exists to be honest about the deviation.

@@ -3,8 +3,8 @@
 Companion to `2026-08-30-final-testbed-findings.md`, which filed them. This is what happened to each,
 what is still open, and what the two deferred product questions need from a human.
 
-Branch `develop`, ending at `ad38957d`. **Nothing was pushed** — `origin/develop` is still at
-`630b63a6 Release 0.2.0a1`, and `develop` is 34 commits ahead of it.
+Branch `develop`. **Nothing was pushed** — `origin/develop` is still at
+`630b63a6 Release 0.2.0a1`, and `develop` is ahead of it by the whole campaign.
 
 ## What closed
 
@@ -90,8 +90,9 @@ files) rather than by directory name — the campaign's first planning error was
 ## The process deviation, stated plainly
 
 The user's constraint was one issue, one branch cut fresh from `develop`, committed, merged back
-`--no-ff` before the next. **That held for the fifteen planned stories — fourteen merge commits, no
-squash, no batching.** It was **not** followed for two commits:
+`--no-ff` before the next. **That held for every branch-bearing story — fourteen branches, fourteen
+`--no-ff` merges, no squash, no batching.** (The plan's sixteen steps include step zero, a decision
+point and this closure, none of which carries a branch.) It was **not** followed for two commits:
 
 - `c0a1c75d` — the 028 fix, its boundary test, record 097, and the regenerated baseline.
 - `ad38957d` — the completion-gate fix: the materialization refusal tests and lint parity.

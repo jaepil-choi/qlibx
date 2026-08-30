@@ -952,7 +952,17 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
 def test_run_refuses_a_date_boundary_as_structured_cli_input(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The old template promised dates, then preflight crashed on the naive datetime."""
+    """The old template promised dates, then preflight crashed on the naive datetime.
+
+    The refusal now comes from the period judgment rather than from `_timestamp`, because `run`
+    makes the judgments `check` makes and they answer before the definition is built. That is the
+    point of the change: both verbs refuse this spec with `check.period.uncovered`, so a red `run`
+    and a red `check` name the same defect.
+
+    What must NOT change is how much the reader is told. The judgment carries the missing offset
+    and a well-formed example, exactly as `_timestamp` did -- parity that cost a diagnostic would
+    be a bad trade.
+    """
     _workspace_for_run(tmp_path, capsys)
 
     code, payload = _cli(
@@ -964,9 +974,9 @@ def test_run_refuses_a_date_boundary_as_structured_cli_input(
     )
 
     assert code == 1
-    assert payload["stage"] == "cli.input"
+    assert payload["stage"] == "run.judgments"
     failure = payload["failures"][0]
-    assert failure["code"] == "cli.input.value_invalid"
+    assert failure["code"] == "check.period.uncovered"
     assert "UTC offset" in failure["requirement"]
     assert failure["examples"] == ["2024-01-02T00:00:00+09:00"]
 

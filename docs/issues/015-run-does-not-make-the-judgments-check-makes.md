@@ -1,5 +1,12 @@
 # 015 — `run` does not make the judgments `check` makes
 
+**Status:** **closed** by `docs/implementations/087-run-makes-the-judgments-check-makes.md`
+(branches `fix/015a-extract-judgments` and `fix/015b-run-refuses`). The user chose **option 1**:
+`run` performs the judgments and refuses, with no escape flag and no verdict recorded on the
+artifact — under unconditional refusal no invalid record can be produced, so nothing is left needing
+a field to admit it might be one. The judgments moved to `src/vqapr/flow/judgments.py`, below both
+verbs, and both now refuse in the same codes.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/` — a Fama-French 3-factor replication over 2,251 KRX
 instruments, 2019-07 to 2026-07, against the built wheel `vqapr-0.2.0a1`. Recorded there as

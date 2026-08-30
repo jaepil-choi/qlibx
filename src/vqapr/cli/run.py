@@ -15,7 +15,18 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
-from vqapr.domain.errors import FailureSource
+# `register` owns the CLI spelling of a component kind and imports nothing from this module, so
+# naming it here adds no cycle. The judgments take it as a callable rather than importing it
+# themselves, which is what keeps `flow/` free of `cli`.
+from vqapr.cli.register import cli_kind
+from vqapr.domain.errors import (
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    FailureSource,
+    VqaprError,
+)
+from vqapr.flow.judgments import judgments, materialization_judgments
 from vqapr.flow.run_records import RunRecordExists, RunRecordLive
 from vqapr.flow.run_spec import _REQUIRED_BY_KIND, MATERIALIZATION, SIMULATION
 from vqapr.flow.store_spec import StoreSpec
@@ -297,10 +308,69 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+JUDGMENT_STAGE = "run.judgments"
+
+
+def _refuse_if_judged(
+    failures: list[Failure], blocked: list[dict[str, str]], spec: Path
+) -> None:
+    """Refuse the run when a judgment refused, or when one could not answer.
+
+    `check` asked these questions and `run` did not, so a spec with a real look-ahead -- a fill at
+    15:30 with decisions at or after it -- was refused by one verb and executed by the other. The
+    run then wrote a permanent record that `vqapr list runs` shows beside legitimate runs with
+    nothing marking it, and there is no command that deletes a run. A reader cannot tell.
+
+    Refusing outright, with no flag to bypass, is the decision recorded in
+    `docs/implementations/087`. It is what makes `tables_declared`-style provenance unnecessary
+    here: when no invalid run can be produced, no record needs a field admitting it might be one.
+    `docs/issues/009` argues against exactly the shape the alternative would have had -- a refusal
+    the caller passes a flag to get around, on an event that is ordinary.
+
+    **Blocked counts as refused.** `_judgments` returns questions it could not ANSWER separately
+    from questions it answered no to, and `check` treats both as not-ok (`ok` is
+    `not failures and not blocked`). Refusing only on the answered-no list would let a spec nothing
+    was proven about run to completion -- issue 015's own divergence, reproduced inside its fix.
+
+    The refusals are re-raised in the codes `check` already publishes, not re-coded into a `run.*`
+    namespace. A reader who has handling for `check.execution.not_after_decision` gets the same
+    code from both verbs, which is the property this closes: a green `run` means what a green
+    `check` means, and a red one refuses for the same stated reason.
+    """
+    if not failures and not blocked:
+        return
+    reported = list(failures)
+    for entry in blocked:
+        # A blocked judgment has no code of its own -- it is the absence of an answer, not an
+        # answer. It gets one here so the refusal is still a six-field envelope rather than a
+        # shape the reader has to special-case.
+        reported.append(
+            Failure.bounded(
+                "run.check.judgment_blocked",
+                "every judgment must be answerable before the run starts",
+                observed=(
+                    f"the {entry.get('check')} judgment could not answer: "
+                    f"{entry.get('blocked_by')}"
+                ),
+                fix=(
+                    "run `vqapr check` on this spec to see the full report, then fix what stopped "
+                    "the judgment from answering"
+                ),
+                explain=ExplainTopic.RUN_PRECONDITION,
+                source=FailureSource(file=str(spec)),
+            )
+        )
+    raise VqaprError(
+        stage=JUDGMENT_STAGE,
+        family=FailureFamily.INTENT,
+        failures=reported,
+    )
+
+
 def _materialize(
     args: argparse.Namespace, document: dict[str, Any], project_root: Path
 ) -> dict[str, Any]:
-    """Run a registered DataModel, through the verb that already exists.
+    """Run a registered DataModel, through the verb that already exists."
 
     A DataModel could be scaffolded, registered and described, and nothing would ever run it:
     `flow/materialize.py` held a real entry point no CLI command called. It is reached here rather
@@ -343,6 +413,26 @@ def _materialize(
             examples=missing,
             source=FailureSource(file=None, key_path=f"output.{missing[0]}"),
         )
+    # The materialization path gets its own insertion point rather than sharing the simulation's.
+    # `run()` returns here before `Workspace.open` is ever reached, and these judgments need a
+    # workspace -- so one is opened here, AFTER the `--run-id`/`--force` refusals above. Hoisting
+    # the open to the top of `run()` instead would report an unopenable workspace ahead of a
+    # misused flag, inverting an order those refusals were deliberately given.
+    #
+    # A materialization has no `RunDefinition`, so it has no declaration or preflight phase to sit
+    # before -- `check` skips both for this kind. Judged here, immediately before the spec it would
+    # otherwise build and run.
+    _refuse_if_judged(
+        materialization_judgments(
+            document,
+            Workspace.open(project_root),
+            project_root,
+            kind_spelling=cli_kind,
+        ),
+        [],
+        Path(getattr(args, "spec", "")),
+    )
+
     try:
         spec = MaterializationSpec.of(
             str(output["dataset_id"]),
@@ -393,6 +483,11 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     # reading `document["store"]` directly is how `root` becomes optional in one path and required
     # in another, with neither wrong on its own.
     store = StoreSpec.of(document.get("store"), base=spec_path.parent)
+    # Before the freeze, because the refusal is about the spec rather than about the definition
+    # built from it, and because this is the order `check` asks them in: judgments precede
+    # declaration and preflight (`cli/check.py`'s `_PHASES`). A spec that cannot pass these has
+    # nothing to gain from being frozen first.
+    _refuse_if_judged(*judgments(document, workspace, spec_path), spec_path)
     frozen = preflight_run(project_root, definition_from_document(document, workspace))
     run_id = getattr(args, "run_id", None) or spec_path.stem
     try:

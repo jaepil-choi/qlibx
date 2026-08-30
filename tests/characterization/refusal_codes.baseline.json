@@ -64,6 +64,7 @@
     "preflight.universe.untradable_listing",
     "run.assembly.constraint_identity",
     "run.check.declaration_invalid",
+    "run.check.judgment_blocked",
     "run.check.preflight_refused",
     "run.roster.unreadable",
     "source.scan.conditional_positive.unreadable",
@@ -137,22 +138,22 @@
     {
       "code": "check.dataset.unregistered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 458
+      "line": 467
     },
     {
       "code": "check.execution.not_after_decision",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 398
+      "line": 407
     },
     {
       "code": "check.field.absent",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 477
+      "line": 486
     },
     {
       "code": "check.lookback.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 513
+      "line": 522
     },
     {
       "code": "check.materialize.component_unloadable",
@@ -212,7 +213,7 @@
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 351
+      "line": 360
     },
     {
       "code": "check.universe.absent",
@@ -222,12 +223,12 @@
     {
       "code": "check.weights.mode_conflict",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 582
+      "line": 591
     },
     {
       "code": "check.weights.venue_conflict",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 640
+      "line": 649
     },
     {
       "code": "component.conformance.load_failed",
@@ -598,6 +599,11 @@
       "code": "run.check.declaration_invalid",
       "file": "src/vqapr/cli/check.py",
       "line": 357
+    },
+    {
+      "code": "run.check.judgment_blocked",
+      "file": "src/vqapr/cli/run.py",
+      "line": 349
     },
     {
       "code": "run.check.preflight_refused",

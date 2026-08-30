@@ -82,11 +82,14 @@ _DESCRIPTIONS: dict[str, str] = {
         "this package, not a sandbox."
     ),
     "run": (
-        "Freeze a run spec, preflight it, and execute the simulation.\n\n"
+        "Judge a run spec, freeze it, preflight it, and execute the simulation.\n\n"
         "The spec names already-registered components by id; it does not redeclare them. "
-        "Preflight refuses any drift between the spec and what is registered.\n\n"
-        "Write a starting spec with `vqapr new run-spec --out spec.yaml`, and prove it with "
-        "`vqapr check spec.yaml` before running it."
+        "Preflight refuses any drift between the spec and what is registered, and the same "
+        "judgments `vqapr check` makes are made here before the spec is frozen: a run that would "
+        "fail `check` is refused rather than executed.\n\n"
+        "`check` is still the cheaper way to see every problem at once -- it collects them, while "
+        "a run refuses on the first set it finds. Write a starting spec with "
+        "`vqapr new run-spec --out spec.yaml`, and prove it with `vqapr check spec.yaml`."
     ),
     "list": (
         "Show what the workspace already holds.\n\n"

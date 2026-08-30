@@ -178,4 +178,88 @@ out-parameter did.
 
 ## What changed — `fix/015b-run-refuses` (the refusal)
 
-_To be completed when that branch lands._
+- **`_refuse_if_judged` in `src/vqapr/cli/run.py` (new).** Raises `VqaprError` at a new stage
+  `run.judgments`, family `INTENT`, carrying the judgments' own `Failure` objects. Because the
+  envelope is built from `VqaprError.as_dict`, every entry in `failures[]` already carries the six
+  fields; nothing new had to be invented to satisfy that criterion.
+- **The codes are `check`'s, not new ones.** A reader with handling for
+  `check.execution.not_after_decision` gets the same code from both verbs. Re-coding into a `run.*`
+  namespace would have renamed a defect the reader may already handle, which is the opposite of the
+  parity being delivered.
+- **Blocked counts as refused.** `judgments()` returns questions it could not ANSWER separately from
+  questions it answered no to, and `check` treats both as not-ok. Refusing only on the answered-no
+  list would have let a spec nothing was proven about run to completion — issue 015's divergence
+  reproduced inside its own fix. A blocked judgment has no code of its own, so it gets
+  **`run.check.judgment_blocked`**, in the existing `run.check.*` namespace, naming which judgment
+  could not answer and why.
+- **Two insertion points, not one.**
+  - Simulation: after `StoreSpec.of`, before `preflight_run`. The refusal is about the spec rather
+    than about the definition built from it, and it matches the order `check` asks in — judgments
+    precede declaration and preflight.
+  - Materialization: inside `_materialize`, **after** the `--run-id`/`--force` refusals. `run()`
+    returns for this kind before `Workspace.open` is reached, and these judgments need a workspace,
+    so one is opened there. Hoisting the open to the top of `run()` would have reported an
+    unopenable workspace ahead of a misused flag, inverting an order those refusals were
+    deliberately given. A materialization has no `RunDefinition`, so there is no declaration or
+    preflight phase for it to sit before.
+- **`cli_kind` is passed in** from `cli/run.py`. `cli/register.py` imports nothing from `cli/run.py`,
+  so naming it there adds no cycle, and the judgments stay free of `cli`.
+- **`_judge_period` enriched** (`flow/judgments.py`). A naive boundary used to reach `_timestamp` in
+  `cli/run.py`, which named the missing UTC offset and showed a well-formed instant. The judgment
+  now answers first, so it carries the same `examples` and the same "must include a UTC offset"
+  requirement. Without this, the parity `run` gained would have been paid for with a vaguer message
+  than the one it replaced.
+- **`run --help`** (`cli/main.py`) now says `run` judges before it freezes, and points at `check` as
+  the verb that collects every problem at once rather than refusing on the first set.
+
+### One test changed, and why it is not a weakened gate
+
+`tests/cli/test_commands.py::test_run_refuses_a_date_boundary_as_structured_cli_input` asserted
+`stage == "cli.input"` and `code == "cli.input.value_invalid"`. It now asserts
+`stage == "run.judgments"` and `code == "check.period.uncovered"`.
+
+This is the change being delivered, not an accommodation to it: the same spec is now refused by the
+same judgment `check` uses, which is the entire point. The assertions that protect the *reader* are
+unchanged and still pass — `"UTC offset" in requirement`, and
+`examples == ["2024-01-02T00:00:00+09:00"]`. The refusal moved; the information did not shrink.
+
+## Validation — `fix/015b-run-refuses`
+
+**Gate:** fast suite (load-bearing `tests/cli/test_commands.py`) plus the five named files, plus
+`test_all` for the two slow tests that reach `cli/run.py:run()`.
+
+| check | result |
+|---|---|
+| the six named gate files | 63 passed |
+| `tests/cli/test_run_makes_the_judgments_check_makes.py` (new) | 6 passed |
+| `tests/characterization/test_refusal_codes.py` | 6 passed after regeneration |
+| **full suite, all marks** | **1357 passed, 0 failed**, 532.03s |
+| slow-only | **14 passed**, 1343 deselected, 446.23s |
+| `test_krx_cost_journey.py` + `test_scaffold_runs_unedited.py` | 2 passed |
+
+**Triage of newly-refusing tests, as D3 requires: there are none.** The baseline was 1350 passed;
+this is 1357, and the difference is exactly the six new acceptance tests plus the one existing test
+whose stage/code assertions were updated above. **No journey newly refuses.** The escalation gate in
+the plan — stop and report if more than a couple of journeys refuse — was never approached, which
+matches what the plan predicted from reading the fixtures: the two CLI-reaching slow tests pass the
+judgments by construction, one asserting `check` ok is True on the identical spec immediately before
+running it, the other using an agenda at 04:00 against a fill at 15:30.
+
+**The slow ran/skip profile matches step zero**: 14 of 14 ran, none skipped, so the 1350 → 1357
+comparison is between two measurements of the same thing.
+
+### What the acceptance tests actually prove
+
+`tests/cli/test_run_makes_the_judgments_check_makes.py` asserts the six properties the decision
+requires, each as an observable result rather than an intention:
+
+1. A spec `check` refuses is **not executed** by `run`, and the two refuse with overlapping codes.
+2. The refusal carries all six envelope fields, in a `check.*` code, with `explain: run-precondition`.
+3. A judgment that could not answer refuses the run, via `run.check.judgment_blocked`, naming the
+   judgment and the exception type.
+4. Independence survives: a spec with several defects yields several refusals in one call.
+5. **A refused run writes no record** — `list runs` is byte-identical before and after. This is the
+   one that matters most, because the permanent indistinguishable artifact was issue 015's actual
+   harm.
+6. **A spec `check` passes still runs.** Without this, a gate that refused everything would satisfy
+   all five assertions above and destroy the product.

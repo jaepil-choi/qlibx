@@ -32,7 +32,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.windows import ModelWindow, ObservationBatch
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
 from vqapr.domain.roster import InstrumentRoster, build_roster
 from vqapr.domain.roster_export import export_roster
@@ -69,11 +69,21 @@ from vqapr.exchange.venue import AcademicExchange, Side
 from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_listings, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-# `as_loaded_fingerprint` is imported from `_internal` directly rather than through
-# `vqapr.extension.loading`, which is a transitional forwarding shim slated for deletion in G004
-# and explicitly not to be grown.
-from vqapr._internal.extensions.loading import as_loaded_fingerprint
-from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
+# One door into the extension authorities: `vqapr.extension.*`, never `vqapr._internal.*`.
+# The adapters below are transitional and scheduled for deletion, and that is the reason to use
+# them rather than a reason to route around them -- a deletion whose callers all name one path is
+# four files removed and imports breaking loudly, while one reached by two paths has to be found
+# by grep. `as_loaded_fingerprint` was the exception that proved it: this file imported it from
+# `_internal` and the three names below from the adapter, and two later modules copied the
+# bypass without the reasoning (`docs/issues/029`; the rule is in
+# `docs/design/agent-first-surface.md`, and `tests/boundaries/test_internal_has_one_door.py`
+# enforces it).
+from vqapr.extension.loading import (
+    as_loaded_fingerprint,
+    load_constraint,
+    load_exchange,
+    load_strategy_model,
+)
 from vqapr.extension.registration import (
     register_constraint,
     register_data_model,
@@ -181,9 +191,16 @@ __all__ = (
     "MarkBatch",
     "MaterializationResult",
     "MaterializationSpec",
+    "ModelWindow",
     "MonitoringPolicy",
     "NeutralizationRefusal",
     "NoDecision",
+    # The two halves of what a Model is handed. `ObservationBatch` is the return type of the one
+    # method a DataModel author can call, and it was reachable only by opening installed source:
+    # not in `__all__`, absent from the skill, and with no docstring naming its row keys or
+    # ordering (`docs/issues/031`). `ModelWindow` was importable but undeclared, while the
+    # constraint scaffold has always emitted `from vqapr.public import ... ModelWindow`.
+    "ObservationBatch",
     "OperationAgenda",
     "OperationOccurrence",
     "OperationRole",
@@ -501,12 +518,21 @@ def _registered_roster(root_path: Path | None) -> object | None:
     from vqapr.workspace import Workspace
 
     try:
-        pointer = Workspace.open(root_path).registered_instruments()
+        space = Workspace.open(root_path)
     except Exception:
         # A run assembled outside a workspace has no roster to find, and saying so by returning
         # `None` is honest. The refusal, when it comes, belongs at the point something asks what
         # an instrument is -- not here, where nothing has been asked yet.
         return None
+    # OUTSIDE the guard above, deliberately. `registered_instruments()` raises a typed
+    # `workspace.instruments.unreadable` for a roster whose POINTER is damaged, and its docstring
+    # states why: "'no roster' and 'a roster whose record is damaged' are different states, and
+    # only the first is ordinary." Catching it here collapsed them -- a truncated
+    # `.vqapr/instruments.json` made a registered roster read as absent, so the run completed with
+    # every fill recording `kind: None` and a KRX-shaped venue charged the ETF sleeve at the share
+    # rate, which is `docs/issues/007` returning silently. Found by the structural audit in
+    # `docs/refactoring/`, C1.
+    pointer = space.registered_instruments()
     if pointer is None:
         return None
     # A REGISTERED roster that cannot be read is refused, not degraded. `list instruments` reports
@@ -594,9 +620,15 @@ def roster_report(root_path: Path | None, registry: object | None) -> dict[str, 
     from vqapr.workspace import Workspace
 
     try:
-        pointer = Workspace.open(root_path).registered_instruments()
+        space = Workspace.open(root_path)
     except Exception:
         return None
+    # Same split as `_registered_roster`: an absent workspace is `None`, a DAMAGED roster pointer
+    # is the typed refusal. `cli/run.py`'s `_roster_envelope` already catches that refusal and
+    # reports `known: true, stale: true` -- the honest answer for a run that read its roster and
+    # then lost the record of it. Swallowing it here produced `known: false` instead, which is the
+    # same envelope a genuinely rosterless run gets and the opposite of the truth.
+    pointer = space.registered_instruments()
     if pointer is None:
         return None
     report: dict[str, object] = {

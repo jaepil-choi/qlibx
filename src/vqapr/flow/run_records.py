@@ -157,41 +157,80 @@ abandoned.
 """
 
 
-def _lock_holder(lock: Path) -> int | None:
-    """The pid holding this run id, or `None` if nobody live does.
+@dataclass(frozen=True, slots=True)
+class LockClaim:
+    """A run lock still inside its heartbeat window, and how long since it was last touched.
+
+    `age` is carried out of the read rather than recomputed by the caller, because it is the one
+    fact that separates the two states this claim cannot tell apart: a run that is executing, and a
+    run whose process died in the last `LOCK_STALE_AFTER` seconds. Both present as a fresh lock;
+    only the age says how long the operator would have to wait to find out (`docs/issues/037`).
+    """
+
+    pid: int
+    age: float
+
+    @property
+    def releases_in(self) -> float:
+        """Seconds until an unrefreshed lock is treated as abandoned, floored at zero."""
+        return max(LOCK_STALE_AFTER - self.age, 0.0)
+
+
+def _lock_claim(lock: Path) -> LockClaim | None:
+    """The claim on this run id, or `None` if nobody live holds one.
 
     A lock file older than `LOCK_STALE_AFTER` is treated as abandoned: its process died without
     releasing, and refusing forever on a dead holder would make a crash unrecoverable.
+
+    **What this can and cannot know.** A fresh lock means the file was touched recently, which is
+    not the same as the pid inside it being alive -- nothing here interrogates that pid, by design,
+    because a pid is not portable liveness evidence and a recycled one is worse than none. Callers
+    that render this to a user must say "holds a lock, last refreshed Ns ago" rather than "is
+    running now"; a reporter who checked the pid, found nothing, and concluded the package lies is
+    what `docs/issues/037` records.
     """
     try:
-        age = _time.time() - lock.stat().st_mtime
+        # Clamped at zero. A lock written microseconds ago can carry an `st_mtime` marginally
+        # ahead of `time.time()` -- filesystem and clock resolution differ -- and the difference
+        # is an artifact, not information. Unclamped it reaches the operator as "-0s ago".
+        age = max(_time.time() - lock.stat().st_mtime, 0.0)
     except OSError:
         return None
     if age > LOCK_STALE_AFTER:
         return None
     try:
-        return int(lock.read_text(encoding="ascii").strip() or "-1")
+        return LockClaim(int(lock.read_text(encoding="ascii").strip() or "-1"), age)
     except (OSError, ValueError):
         # Present and fresh but unreadable: still a live claim, just an anonymous one. Reporting
         # it as free would be the destructive answer.
-        return -1
+        return LockClaim(-1, age)
 
 
 class RunRecordLive(FileExistsError):
-    """A run is executing under this id right now.
+    """A run id is held by a lock that is still inside its heartbeat window.
 
     Distinct from `RunRecordExists` because the remedy is opposite: an existing RECORD is replaced
-    with `--force`, while a LIVE run must not be, and telling an operator to force it would destroy
-    the very rows they are waiting on.
+    with `--force`, while a claim that may be live must not be, and telling an operator to force it
+    would destroy the very rows they are waiting on.
+
+    **Stated as a claim, not as liveness.** The old message said the run "is already running" and
+    printed a pid nothing had interrogated. Inside the heartbeat window a killed run and an
+    executing one are indistinguishable by construction, and that window is exactly when an
+    operator retries after a Ctrl-C, a CI timeout or an OOM kill. So the message says what is
+    known -- a lock, its age, and when it releases itself -- and `releases_in` is carried so the
+    remedy that actually costs nothing can be named (`docs/issues/037`).
     """
 
-    def __init__(self, run_id: str, directory: Path, holder: int) -> None:
+    def __init__(self, run_id: str, directory: Path, claim: LockClaim) -> None:
         self.run_id = run_id
         self.directory = directory
-        self.holder = holder
+        self.claim = claim
+        self.holder = claim.pid
         super().__init__(
-            f"run {run_id!r} is already running at {directory} (pid {holder}); "
-            "wait for it to finish, or use a different --run-id"
+            f"run {run_id!r} holds a lock at {directory} last refreshed {claim.age:.0f}s ago "
+            f"(pid {claim.pid}); a live run refreshes it continuously, and an abandoned one is "
+            f"released automatically about {claim.releases_in:.0f}s from now. Wait, or use a "
+            "different --run-id"
         )
 
 
@@ -317,10 +356,10 @@ class RunRecordWriter:
                 # is the more useful refusal anyway. No holder means the directory is simply not
                 # writable, and reporting that as a taken id would advertise remedies -- another
                 # id, or `--force` -- that cannot fix an ACL.
-                holder = _lock_holder(directory / LOCK_FILENAME)
-                if holder is None:
+                claim = _lock_claim(directory / LOCK_FILENAME)
+                if claim is None:
                     raise
-                raise RunRecordLive(self.run_id, directory, holder) from failure
+                raise RunRecordLive(self.run_id, directory, claim) from failure
             raise RunRecordExists(self.run_id, directory) from failure
 
     def _open(self, directory: Path, *, replace: bool) -> None:
@@ -334,12 +373,13 @@ class RunRecordWriter:
         try:
             (directory / TABLES_DIRECTORY).mkdir(parents=True)
         except FileExistsError as taken:
-            holder = _lock_holder(directory / LOCK_FILENAME)
-            if holder is not None:
-                # Someone is running under this id right now. `--force` does not override this:
-                # forcing a live run destroys the rows it is still writing and blends both into
-                # one record, which is unrecoverable, while waiting costs nothing.
-                raise RunRecordLive(self.run_id, directory, holder) from taken
+            claim = _lock_claim(directory / LOCK_FILENAME)
+            if claim is not None:
+                # Somebody may be running under this id right now. `--force` does not override
+                # this: forcing a live run destroys the rows it is still writing and blends both
+                # into one record, which is unrecoverable, while waiting costs nothing -- at most
+                # `claim.releases_in` seconds, after which a dead claim clears itself.
+                raise RunRecordLive(self.run_id, directory, claim) from taken
 
             # Nobody live holds it. A COMPLETE record is a real conflict and still needs `--force`
             # -- replacing a finished result must stay deliberate. Abandoned leftovers are not:
@@ -358,7 +398,7 @@ class RunRecordWriter:
             #
             # Stated precisely, because the stronger claim is tempting and false: this serialises
             # against every process that has not yet passed its own liveness read, NOT against all
-            # of them. A peer whose `_lock_holder` read landed before this run's `_claim` can still
+            # of them. A peer whose `_lock_claim` read landed before this run's `_claim` can still
             # take the id too. The window is microseconds wide and needs two processes reclaiming
             # the SAME id at once.
             #

@@ -1,6 +1,12 @@
 # 027 — Nothing in the tooling makes a point-in-time convention be spoken aloud
 
-**Status:** **HELD, not scheduled.** Reviewed during the 015-027 campaign and deliberately not
+**Status:** **REOPENED 2026-08-31 by the owner**, who asked why nothing puts the `available_at`
+question to them at registration time. That is this file's proposal, so it is scheduled rather than
+held. It composes with `docs/issues/034`: this makes the convention be spoken at the moment it is
+declared, and 034 records which convention a run actually executed under. Neither substitutes for
+the other.
+
+**Superseded status (2026-08-30):** HELD, not scheduled.** Reviewed during the 015-027 campaign and deliberately not
 implemented. It is a proposal about `register`'s success envelope, the reporter marked it
 *"Attributable to vqapr? **No**"*, and it needs a product decision before anything is built: whether
 the envelope should restate point-in-time field meanings back at the author, one sentence per field.

@@ -11,6 +11,31 @@ from vqapr.domain.timestamps import at_local, require_tz_aware, shift_calendar
 
 @dataclass(frozen=True, slots=True)
 class RowsLookback:
+    """The last `rows` observations of **each instrument independently**.
+
+    Per name, per field, counting only non-null values: a field's rank is computed inside its own
+    instrument's partition, so a name that reports twice a week and one that reports daily both
+    return `rows` values, from different dates.
+
+    **The batch's calendar span is therefore set by the sparsest instrument, and is unbounded
+    above.** On a balanced panel this is invisible -- `rows=5` over three liquid names returns five
+    sessions, which is what makes the wrong reading ("rows means sessions") so easy to reach. On a
+    real one it is not: a 1,637-name universe with `rows=313` returned rows spanning **1,865
+    distinct sessions**, back to 2016, because a name that delisted in 2019 still gets its own last
+    313 rows (`docs/issues/033`).
+
+    So a per-instrument reduction -- accumulate values per name, take the last N -- is safe here
+    and a **cross-sectional** model is not. Building a 2024 correlation matrix from this mixes a
+    liquid name's 2023-24 returns with a dead name's 2016-19 returns, and the result is well
+    formed, non-null, passes every check, and is wrong.
+
+    Use this when the question is per instrument: a trailing return, a moving average, an N-bar
+    signal. Use `CalendarLookback` when the question is about a period -- a covariance matrix, a
+    factor regression, anything that needs the names aligned on dates. Measured on the same
+    evaluation, the calendar form was also ~10% faster, because the row form loaded rows the model
+    then discarded.
+    """
+
     rows: int
 
     def __post_init__(self) -> None:
@@ -22,6 +47,21 @@ class RowsLookback:
 
 @dataclass(frozen=True, slots=True)
 class CalendarLookback:
+    """Every observation from a calendar bound back to the evaluation time, for every instrument.
+
+    The bound is the local calendar date at 00:00 in `timezone`, shifted back by the declared
+    amount -- so the window is one period, identical for every name, and a sparse instrument simply
+    contributes fewer rows inside it rather than reaching further back than everyone else.
+
+    This is the member a cross-sectional model wants, and the one nothing steered anybody towards:
+    `RowsLookback` is what `vqapr new datamodel --lookback` emitted, and until 2026-08-30 neither
+    class had a docstring and neither was named in the skill (`docs/issues/033`). Pass
+    `--calendar-lookback DAYS` to scaffold this one.
+
+    Calendar days, not sessions: `days=7` spans one week including the weekend, so a lookback that
+    must guarantee N trading days needs the padding for holidays that any calendar bound implies.
+    """
+
     years: int = 0
     months: int = 0
     days: int = 0

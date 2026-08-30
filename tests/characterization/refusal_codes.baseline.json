@@ -253,57 +253,57 @@
     {
       "code": "component.load.constraint_id_mismatch",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.construction_failed",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.execution_profile_invalid",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.module_invalid",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.requirements_failed",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.requirements_invalid",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.requirements_missing",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.signature_invalid",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.source_unreadable",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.load.wrong_type",
       "file": "src/vqapr/_internal/extensions/loading.py",
-      "line": 43
+      "line": 48
     },
     {
       "code": "component.register.source_unreadable",
       "file": "src/vqapr/_internal/extensions/registration.py",
-      "line": 41
+      "line": 45
     },
     {
       "code": "dataset.register.key.duplicate",
@@ -528,7 +528,7 @@
     {
       "code": "model_window.requirement.undeclared",
       "file": "src/vqapr/data/windows.py",
-      "line": 100
+      "line": 149
     },
     {
       "code": "observation_store.resolve.field_missing",
@@ -603,7 +603,7 @@
     {
       "code": "run.check.judgment_blocked",
       "file": "src/vqapr/cli/run.py",
-      "line": 440
+      "line": 505
     },
     {
       "code": "run.check.preflight_refused",
@@ -613,7 +613,7 @@
     {
       "code": "run.roster.unreadable",
       "file": "src/vqapr/public.py",
-      "line": 535
+      "line": 561
     },
     {
       "code": "source.scan.conditional_positive.unreadable",

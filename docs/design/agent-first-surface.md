@@ -340,6 +340,49 @@ guess:
 The prohibition is on **adding**, so those existing edges are legal; they are recorded here so a
 later reader can tell an inherited edge from a new one.
 
+## The second boundary: one door into `_internal/extensions`
+
+The tripwire above watches modules reaching **up** to `vqapr.public`. This section watches the
+other end: modules reaching **past** the four forwarding adapters under `extension/` into
+`_internal/extensions/`, which is the same failure — a boundary documented in prose and enforced by
+nothing — measured at the bottom of the package instead of the top. `docs/issues/029` is the file
+that found it.
+
+**The rule.** `vqapr.extension.component`, `.fingerprint`, `.loading` and `.registration` are the
+only door. No module under `src/` outside `_internal/` may import `vqapr._internal.extensions.*`
+directly, and a name the adapter does not yet forward is added to the adapter rather than routed
+around it. Keeping the forwarding surface complete is maintenance of a transitional module, not
+growth of it; the prohibition on growth is about logic, fallbacks and deprecation warnings.
+
+**Why the door is the adapter and not `_internal`.** The adapters are scheduled for deletion, and
+the intuitive reading — do not add callers to a module that is going away — is backwards. A deletion
+whose callers all name one path is four files removed with every stale import breaking loudly at
+import time. A deletion reached by two paths is found by grep and is complete when somebody says it
+is. The one-door rule is what keeps that cutover mechanical.
+
+**Permitted importers of `vqapr._internal` outside `_internal/` itself, verified 2026-08-30:**
+
+```
+extension/component.py   extension/fingerprint.py   extension/loading.py
+extension/registration.py   project.py
+```
+
+The first four are the adapters; naming `_internal` is their entire content. `project.py` is in the
+frozen cluster above — unshipped, no new callers, no growth — so its `_internal` imports are
+inherited edges recorded here rather than an example to copy.
+
+`tests/boundaries/test_internal_has_one_door.py` enforces this list by AST walk, including
+function-local imports, because the three bypasses `docs/issues/029` found were all inside function
+bodies and a header-only check would have called those files clean. `tests/` are deliberately out of
+scope: they may reach the physical home directly, and
+`tests/extension/test_agent_first_internal_routes.py` exists to do exactly that.
+
+**The deletion itself is not scheduled here.** It belongs to `G008` and its conditions are below.
+Until 2026-08-30 all eight modules pinned it to `G004` instead, an id that had by then been
+reassigned to a different, completed goal, so a reader who looked it up found evidence the deletion
+had already happened. Those notes now cite this document, which is in `.agent/project.yaml`'s
+canonical set and survives renumbering.
+
 ## The G008 admission conditions
 
 `G008` — delete `vqapr.public`, relocate the retained authorities, and cut the breaking release —

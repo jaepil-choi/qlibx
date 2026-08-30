@@ -1,9 +1,17 @@
 # 029 — `_internal` has two doors, and the note promising to close one names a goal that has expired
 
-**Status:** **partly closed** by `docs/implementations/097-the-facade-boundary-is-a-test.md`.
-The `flow/judgments.py` row is fixed - it now reaches `_internal` through the `extension/`
-adapters like its siblings. **Two bypass sites remain open: `src/vqapr/cli/show.py:79,80,106` and
-`src/vqapr/public.py:75`**, as does the expired G004 deletion promise in all eight docstrings.
+**Status:** **CLOSED 2026-08-30** by `docs/implementations/098-one-door-into-internal.md`
+(branch `fix/029-one-door-into-internal`), which finished what
+`docs/implementations/097-the-facade-boundary-is-a-test.md` started on the `flow/judgments.py` row.
+Both remaining bypasses now go through the adapters, `extension/loading.py` re-exports
+`as_loaded_fingerprint` so `public.py` had a door to use, all eight docstrings cite
+`docs/design/agent-first-surface.md` instead of a goal id, and that document gained the one-door
+ruling the docstrings point at. `tests/boundaries/test_internal_has_one_door.py` makes it
+executable - proven to fail on the exact bypass before being kept.
+
+**Not closed here, deliberately:** the adapters still exist. Deleting them is `G008` and both of its
+admission gates are still shut. What this bought is that the deletion is now four files removed with
+every stale import breaking loudly, rather than a grep.
 
 *Correction, 2026-08-30:* the first version of this status line named `flow/preflight.py`,
 `flow/materialize.py` and `cli/register.py` as the sites left open. Those three are the **control

@@ -62,11 +62,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import DataModel, DataRequirement, RowsLookback
+from vqapr.public import DataModel, DataRequirement, {lookback_class}
 
 MODEL_ID = "{component_id}"
 DATASET_ID = "{dataset_id}"
-LOOKBACK = {lookback}
+{lookback_declaration}
 
 
 class {class_name}(DataModel):
@@ -78,20 +78,25 @@ class {class_name}(DataModel):
                 MODEL_ID,
                 DATASET_ID,
                 fields=("{field}",),
-                lookback=RowsLookback(rows=LOOKBACK),
+                lookback={lookback_expression},
             ),
         )
 
     def compute(self, context):
+        # `rows` is flat and ordered by `available_at`, then by the dataset's key fields --
+        # instruments INTERLEAVE within an instant rather than arriving grouped by name. Every row
+        # carries its own `available_at` and `instrument` alongside the fields declared above.
+{lookback_note}
         rows = context.window.observations(self.requirements()[0]).rows
         history: dict[str, list[Decimal]] = {{}}
         for row in rows:
             value = row["{field}"]
             if value is not None:
-                # `Decimal(str(v))` rather than `Decimal(v)`: a parquet float64 column arrives as
-                # `float`, and money compared or subtracted across `float` and `Decimal` raises.
-                # Going through `str` also avoids inheriting the binary float's exact expansion,
-                # so 0.1 stays 0.1 instead of becoming 0.1000000000000000055511151231257827.
+                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
+                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
+                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
+                # binary float's expansion, so 0.1 stays 0.1 rather than becoming
+                # 0.1000000000000000055511151231257827.
                 history.setdefault(str(row["instrument"]), []).append(Decimal(str(value)))
 
         # ---- the one line to change -------------------------------------------------------
@@ -99,7 +104,7 @@ class {class_name}(DataModel):
         derived = {{
             name: values[-1] / values[0] - Decimal(1)
             for name, values in history.items()
-            if len(values) == LOOKBACK
+            if {completeness_guard}
         }}
         # -----------------------------------------------------------------------------------
 
@@ -108,6 +113,51 @@ class {class_name}(DataModel):
             for name, value in sorted(derived.items())
         ]
 '''
+
+_ROWS_LOOKBACK_NOTE = """\
+        #
+        # This model declares a ROWS lookback, so the window is each name's own last N
+        # observations: on an unbalanced panel a sparse name reaches further back than a liquid
+        # one, and the batch's calendar span is set by the sparsest of them. That is why the
+        # reduction below is per instrument. A CROSS-SECTIONAL model -- a covariance matrix, a
+        # factor regression, anything comparing names to each other on the same dates -- must not
+        # be written this way: scaffold it with `--calendar-lookback DAYS` instead, which gives
+        # every name the same window."""
+
+_CALENDAR_LOOKBACK_NOTE = """\
+        #
+        # This model declares a CALENDAR lookback, so every name is read over the same date range
+        # and a sparse name simply contributes fewer rows inside it. That is what makes a
+        # cross-section safe to build: group rows by `available_at` to get one date's observations
+        # across the universe. The reduction below is still per instrument, because a trailing
+        # return is a per-name question; the guard is on having two observations rather than on a
+        # row count, since a calendar window does not promise one."""
+
+_LOOKBACK_FLAVOURS = {
+    "rows": {
+        "lookback_class": "RowsLookback",
+        "lookback_declaration": "LOOKBACK = {lookback}  # observations per name, per field",
+        "lookback_expression": "RowsLookback(rows=LOOKBACK)",
+        "completeness_guard": "len(values) == LOOKBACK",
+        "lookback_note": _ROWS_LOOKBACK_NOTE,
+    },
+    "calendar": {
+        "lookback_class": "CalendarLookback",
+        "lookback_declaration": (
+            'LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n'
+            'TIMEZONE = "Asia/Seoul"  # where the day boundary falls; use the venue\'s zone'
+        ),
+        "lookback_expression": "CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
+        "completeness_guard": "len(values) >= 2",
+        "lookback_note": _CALENDAR_LOOKBACK_NOTE,
+    },
+}
+"""The two lookback members, and the four places in the template that differ between them.
+
+One template rather than two files, because everything else about the two scaffolds is identical
+and a second copy would drift. What differs is exactly what an author has to understand: which
+class, what the number means, and which completeness guard follows from it (`docs/issues/033`).
+"""
 
 _CONSTRAINT_TEMPLATE = '''"""A Constraint capping how much of the book any one name may be.
 
@@ -294,6 +344,7 @@ def render(
     dataset_id: str | None = None,
     field: str = "close",
     lookback: int = 6,
+    lookback_kind: str = "rows",
     invested: str = "0.9",
     output_field: str = "value",
     cap: str = "0.2",
@@ -304,6 +355,12 @@ def render(
     StrategyModel are defined by what they read; a Constraint is a rule about weights, and the
     shipped `NoShort` returns an empty `requirements()` for exactly that reason. Requiring a
     dataset here would make the caller invent one to scaffold a rule that never opens it.
+
+    `lookback_kind` selects which member of the lookback pair a DataModel declares. `rows` is the
+    default because it is what this scaffold always emitted; `calendar` exists because the default
+    is the wrong member for every cross-sectional model and there was no way to ask for the other
+    one (`docs/issues/033`). The StrategyModel template takes `rows` only: its body counts
+    observations per name, so a calendar window would leave the emitted guard meaningless.
     """
     if kind not in _TEMPLATES:
         raise ValueError(
@@ -311,6 +368,8 @@ def render(
         )
     if lookback <= 0:
         raise ValueError("lookback must be positive")
+    if lookback_kind not in _LOOKBACK_FLAVOURS:
+        raise ValueError(f"lookback_kind must be one of: {', '.join(_LOOKBACK_FLAVOURS)}")
     if kind is ComponentKind.CONSTRAINT:
         return _TEMPLATES[kind].format(
             component_id=component_id,
@@ -319,12 +378,33 @@ def render(
         )
     if dataset_id is None:
         raise ValueError(f"{kind.value} reads a dataset, so dataset_id is required")
+    if kind is ComponentKind.STRATEGY_MODEL:
+        if lookback_kind != "rows":
+            raise ValueError(
+                "the strategy scaffold declares a rows lookback: its signal counts observations "
+                "per name. Scaffold it with the default and edit the requirement if you want a "
+                "calendar window"
+            )
+        return _TEMPLATES[kind].format(
+            component_id=component_id,
+            class_name=_class_name(component_id),
+            dataset_id=dataset_id,
+            field=field,
+            lookback=lookback,
+            invested=invested,
+            output_field=output_field,
+        )
+    flavour = _LOOKBACK_FLAVOURS[lookback_kind]
     return _TEMPLATES[kind].format(
         component_id=component_id,
         class_name=_class_name(component_id),
         dataset_id=dataset_id,
         field=field,
-        lookback=lookback,
         invested=invested,
         output_field=output_field,
+        lookback_class=flavour["lookback_class"],
+        lookback_declaration=flavour["lookback_declaration"].format(lookback=lookback),
+        lookback_expression=flavour["lookback_expression"],
+        completeness_guard=flavour["completeness_guard"],
+        lookback_note=flavour["lookback_note"],
     )

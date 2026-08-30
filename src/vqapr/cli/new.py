@@ -48,6 +48,13 @@ _KINDS = {
     "constraint": ComponentKind.CONSTRAINT,
 }
 
+_LOOKBACK_DEFAULT = 6
+"""Rows of history the scaffolds declare when no lookback flag is given.
+
+Named rather than repeated, because `_lookback_arguments` compares against it to tell "the user
+asked for rows" from "the user left the default alone and asked for calendar days".
+"""
+
 _DECLARATION_KIND = {
     ComponentKind.DATA_MODEL: "datamodel",
     ComponentKind.STRATEGY_MODEL: "strategy",
@@ -325,7 +332,31 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--field", default="close", help="price field the scaffold references")
     parser.add_argument(
-        "--lookback", type=int, default=6, help="rows of history each name needs"
+        "--lookback",
+        type=int,
+        # `None`, not `_LOOKBACK_DEFAULT`, so "was this flag given" is answered by presence rather
+        # than by value. Defaulting to 6 made `--lookback 6 --calendar-lookback 30` -- both flags,
+        # one of them at the default -- indistinguishable from "only --calendar-lookback", so the
+        # conflict refusal below silently ignored `--lookback` in exactly the case it exists to
+        # refuse. Found by the structural audit in `docs/refactoring/`, C3.
+        default=None,
+        help=(
+            "rows of history each name needs, counted per instrument and per field. On an "
+            "unbalanced panel the batch then spans whatever the sparsest name reaches back to; "
+            "use --calendar-lookback for a window every name shares"
+        ),
+    )
+    parser.add_argument(
+        "--calendar-lookback",
+        dest="calendar_lookback",
+        type=int,
+        default=None,
+        help=(
+            "scaffold a datamodel that reads a CALENDAR window of this many days instead of "
+            "--lookback rows per name. Use it for anything cross-sectional: a rows lookback "
+            "gives each name its own last N observations, so on an unbalanced panel the batch "
+            "spans whatever the sparsest name reaches back to"
+        ),
     )
     parser.add_argument(
         "--cap",
@@ -392,7 +423,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
             args.component_id,
             dataset_id=args.dataset,
             field=args.field,
-            lookback=args.lookback,
+            **_lookback_arguments(args, kind),
         )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
     if target.suffix != ".py":
@@ -420,6 +451,55 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
         declaration=str(declaration),
         object_name=object_name,
     )
+
+
+def _lookback_arguments(args: argparse.Namespace, kind: ComponentKind) -> dict[str, Any]:
+    """Which lookback the scaffold declares, and how much of it.
+
+    Two flags rather than one with a unit suffix, because the two are different questions -- N rows
+    per name, or N calendar days for everyone -- and a single `--lookback 313` cannot say which was
+    meant. Giving both is refused rather than resolved by precedence: a reader should not have to
+    know which flag wins to predict what their own command emits.
+
+    The strategy scaffold takes rows only, and says so here rather than emitting a file whose
+    `len(values) >= LOOKBACK` guard counts observations against a number of days
+    (`docs/issues/033`).
+    """
+    rows = getattr(args, "lookback", None)
+    calendar = getattr(args, "calendar_lookback", None)
+    if calendar is None:
+        return {
+            "lookback": _LOOKBACK_DEFAULT if rows is None else rows,
+            "lookback_kind": "rows",
+        }
+    if rows is not None:
+        raise InputError(
+            VALUE_INVALID,
+            requirement="--lookback and --calendar-lookback declare two different windows",
+            observed=f"--lookback {rows} and --calendar-lookback {calendar}",
+            retry=(
+                "keep --lookback for N observations per name, or --calendar-lookback for a window "
+                "of N days every name shares; drop the other"
+            ),
+        )
+    if calendar <= 0:
+        raise InputError(
+            VALUE_INVALID,
+            requirement="--calendar-lookback must be a positive number of days",
+            observed=f"--calendar-lookback {calendar}",
+            retry="pass a positive number of calendar days, then retry",
+        )
+    if kind is not ComponentKind.DATA_MODEL:
+        raise InputError(
+            VALUE_INVALID,
+            requirement="--calendar-lookback applies to the datamodel scaffold",
+            observed=f"--calendar-lookback given for kind {_DECLARATION_KIND[kind]}",
+            retry=(
+                "scaffold the strategy with --lookback, whose signal counts observations per "
+                "name, and edit its DatasetInput if you want a calendar window"
+            ),
+        )
+    return {"lookback": calendar, "lookback_kind": "calendar"}
 
 
 def _require_registered_dataset(dataset_id: str, project_root: Path) -> None:

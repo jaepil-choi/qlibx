@@ -73,6 +73,28 @@ registered and passes validation.
 DataModel computes a new dataset from the ones you registered. Both are authored the same way and
 both are described by `vqapr show model <id>`.
 
+**What a DataModel is handed.** `context.window.observations(requirement)` returns an
+`ObservationBatch` -- importable from `vqapr.public` -- and `.rows` is the only data an author ever
+sees. It is a **flat tuple of dicts**, one per (instant, instrument):
+
+- every row carries its own `available_at` (timezone-aware) and `instrument`, plus one key per
+  declared field under the alias the requirement declared;
+- rows are ordered by `available_at`, then by the dataset's registered key fields, so instruments
+  **interleave** within an instant rather than arriving grouped by name. A cross-section is the
+  rows sharing one `available_at`; `window.snapshot(requirement)` returns the newest one directly;
+- a value keeps its parquet column's type -- `float` from a DOUBLE column, `Decimal` from a DECIMAL
+  one -- so write `Decimal(str(value))` and never `Decimal(value)`.
+
+**Choose the lookback member deliberately; they are a pair.** `RowsLookback(rows=N)` gives each name
+its **own** last N observations, so on an unbalanced panel the batch's calendar span is set by the
+sparsest name and is unbounded above: a real 1,637-name universe asking for 313 rows got rows
+spanning 1,865 sessions, back eight years. That is right for a per-name question -- a trailing
+return, a moving average -- and silently wrong for a cross-sectional one, where a correlation matrix
+would mix a live name's recent returns with a delisted name's decade-old ones and pass every check.
+`CalendarLookback(days=N, timezone=...)` gives every name the same window and is the member a
+covariance matrix, a factor regression or any date-aligned model wants. Scaffold the first with
+`vqapr new datamodel --lookback N` and the second with `--calendar-lookback DAYS`.
+
 A materialization spec names `datamodel:` where a simulation names `strategy:`, and that is what
 tells `run` which it is holding — declare both, or neither, and it refuses rather than guessing:
 
@@ -176,8 +198,23 @@ registers and runs unedited. Of its five members, `project` is the one worth rea
 write your own: it returns the lower AND upper weight bound for every instrument -- the box the
 optimiser must stay inside -- not the offenders and not a correction.
 
-**Stop condition:** `vqapr list` shows all required elements and `register` accepted every
-declaration without failures.
+**Stop condition:** `register` accepted every declaration without failures, and each kind you
+registered lists what you expect. `list` takes exactly one kind per call and `kind` is a required
+positional -- there is no all-kinds form, and bare `vqapr list` is refused with
+`cli.usage.rejected` -- so checking a Rung 1 setup is one call per kind:
+
+```
+vqapr list datasets
+vqapr list sources
+vqapr list components
+vqapr list agendas
+vqapr list execution-inputs
+vqapr list strategy-configs
+vqapr list instruments
+```
+
+The remaining three kinds are `valuation-configs`, `monitoring-policies` and `runs`. A kind you
+registered nothing under returns `count: 0`, which is an answer rather than a failure.
 
 #### Correcting a registration during setup
 
@@ -453,6 +490,19 @@ exclusive lock so two concurrent writers cannot lose each other's declarations; 
 something else is registering right now, not that anything is corrupt. Wait for the other command
 to finish and retry. If nothing else is running, a lock file was left behind by a process that
 died, and removing it is safe once you have confirmed no vqapr command is live.
+
+**A run id refuses on the same principle, with a different clock and no file to remove.** `vqapr
+run` claims its id with a lock it refreshes as it writes, so a refusal that the id is `held by a
+lock inside its heartbeat window` means the lock was touched in the last 120 seconds -- **not**
+that the holder is provably alive. The pid in that message is copied out of the lock file, never
+interrogated. A run killed by Ctrl-C, a CI timeout or an OOM kill leaves exactly this state, and
+inside the window nothing can tell it from a run that is executing.
+
+That lock releases itself 120 seconds after its last refresh, and the refusal states how many
+seconds are left; re-running the same command after that reclaims the id with no flag and no
+cleanup. Waiting is the answer that is safe under both readings. `--run-id <new-id>` is the
+immediate one, at the cost of leaving the abandoned directory behind. `--force` is neither, and
+against a run that really is live it destroys the rows that run is still writing.
 
 ### Recovering from: publication
 

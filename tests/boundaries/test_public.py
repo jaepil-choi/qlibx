@@ -229,9 +229,13 @@ def test_public_exports_are_fixed() -> None:
         "MarkBatch",
         "MaterializationResult",
         "MaterializationSpec",
+        "ModelWindow",
         "MonitoringPolicy",
         "NeutralizationRefusal",
         "NoDecision",
+        # `docs/issues/031`: the return type of `ModelWindow.observations`, which is the only
+        # method a DataModel author can call, and which could not be imported from the facade.
+        "ObservationBatch",
         "OperationAgenda",
         "OperationOccurrence",
         "OperationRole",

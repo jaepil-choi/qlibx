@@ -1,5 +1,7 @@
 # 021 — The package ships Fama-French sorting helpers and nothing points at them
 
+**Status:** **closed** by `fix/021-skill-names-public` (docs-only, no implementation record). The skill now names `vqapr.public`, shows how to enumerate it, and names the three helper families.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-002**,
 `slowed` — and it is the finding with the largest gap between what the distribution contains and

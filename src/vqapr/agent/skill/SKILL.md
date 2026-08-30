@@ -269,6 +269,38 @@ A short is declared by **which mapping** a name appears in, never by a negative 
 
 Return `Hold(reason="...")` to decline. The reason is one token, no spaces.
 
+### Before you hand-roll it: `vqapr.public`
+
+`vqapr.public` exports about 160 names, and **the CLI help does not list them**. Check it before
+writing portfolio arithmetic of your own — a first-time journey hand-rolled 30/70 breakpoints and a
+bucket assignment that were already in the package, and four of that journey's findings turned out
+to be answerable from this one module.
+
+```python
+import vqapr.public as public
+[name for name in dir(public) if not name.startswith("_")]
+```
+
+Three families are worth knowing by name.
+
+**Fama-French sorting.** `fama_french_cut_points(values, reference=..., fractions=...)` returns the
+quantile thresholds estimated from the reference subset only; `fama_french_assign(values,
+thresholds=..., labels=...)` maps names onto buckets. `fractions=(Decimal("0.3"), Decimal("0.7"))`
+is the standard 2x3 sort. Interpolation is explicit because it moves portfolio membership:
+`linear` is the pandas/numpy default and matches the validated Korean replication behind these
+helpers; `nearest` is the alternative.
+
+**Weighting and neutralization.** `equal_weight`, `proportional_weight`, `signal_weight`,
+`neutralize`, `optimize`, `rescale`, `net_members`. Each has a matching typed refusal —
+`WeightingRefusal`, `NeutralizationRefusal`, `OptimizeRefusal` — so a book that cannot be built
+says why rather than returning something plausible.
+
+**Measurement.** `information_coefficient`, `rank_information_coefficient`, `rank`, `nav_series`,
+`returns`, `drawdown`, `hit_rate`, `decay`.
+
+These are library calls, not CLI verbs. Use them inside `decide()`, or in your own preparation code
+before a run.
+
 ### Rung 3 — Measurement
 
 **Goal:** verify that the simulation produced the expected results and that measurements are

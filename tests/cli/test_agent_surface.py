@@ -26,6 +26,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from vqapr import public
 from vqapr.cli.main import _COMMANDS, _DESCRIPTIONS, _SUMMARIES, main
 
 
@@ -388,6 +389,39 @@ def test_the_installed_skill_requires_proof_of_timezone_localization(tmp_path: P
     assert "round-trip" in text
     assert "assume_timezone" in text
     assert "does **not** mean" in text
+
+
+def test_the_installed_skill_points_at_the_public_library_surface(tmp_path: Path) -> None:
+    """The distribution ships ~160 helpers and the skill never said so.
+
+    A first-time journey set out to hand-roll Fama-French 30/70 breakpoints and a bucket
+    assignment, both of which the package already exports, and found them only by running
+    `dir(vqapr.public)` out of habit. Four of that journey's findings were answerable from this one
+    module. The CLI help is authoritative for verbs, but it lists no library surface at all, so
+    nothing pointed an agent here.
+
+    Asserted on the INSTALLED skill rather than the source, because that is the text an agent
+    actually reads.
+    """
+    (tmp_path / ".git").mkdir()
+    main(["--project-root", str(tmp_path), "skill", "install"])
+
+    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+
+    assert "vqapr.public" in text, "the skill still never names the library surface"
+    assert "dir(public)" in text or "dir(vqapr.public)" in text, (
+        "the skill must show how to enumerate the surface, since the CLI help does not list it"
+    )
+
+    # The three families, each by a name that is really exported.
+    for symbol in (
+        "fama_french_cut_points",
+        "fama_french_assign",
+        "neutralize",
+        "information_coefficient",
+    ):
+        assert symbol in text, f"the skill does not name {symbol}"
+        assert hasattr(public, symbol), f"the skill names {symbol}, which is not exported"
 
 
 def test_missing_declaration_keys_arrive_as_typed_failures_not_unhandled(

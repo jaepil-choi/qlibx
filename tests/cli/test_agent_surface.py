@@ -688,7 +688,13 @@ def test_the_skill_names_launcher_and_immutable_setup_recovery(tmp_path: Path) -
     text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
 
     assert "uv run vqapr --help" in text
+    # Updated, not deleted, by `fix/023-narrow-the-provenance-promise`. The sentence still exists
+    # and still says one id means one declaration -- what changed is that it no longer claims
+    # re-registering CHANGED CONTENT under the same id is refused, which `docs/issues/009`
+    # deliberately made false and `tests/flow/test_edit_loop.py` proves is false.
     assert "Registrations are immutable identities" in text
+    assert "register a *different* declaration" not in text
+    assert "--force` to replace it in place" in text
     assert "project-local" in text and "`.vqapr/`" in text
     assert "obtain approval for the destructive reset" in text
 

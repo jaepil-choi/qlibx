@@ -1,5 +1,16 @@
 # 023 — A registered component's source can be edited underneath its digest
 
+**Status:** docs half **closed** by `fix/023-narrow-the-provenance-promise` (docs-only, no
+implementation record). The skill no longer claims re-registering changed content under the same id
+is refused - `docs/issues/009` removed that gate deliberately and `tests/flow/test_edit_loop.py`
+proves it is gone. It now names the two-command edit loop, calls `source_digest` a receipt that
+nothing re-checks, and keeps the one-id-one-declaration rule 009 explicitly retained.
+
+**HELD, not scheduled: 023p** - the `matches`/`differs`/`absent` read-back in `show run`. It remains
+undecided, and the narrowed text is tested NOT to imply it exists. If 023p is ever taken up,
+`tests/cli/test_the_skill_states_provenance_without_promising_a_gate.py` is where the change lands.
+It must never become a gate: `docs/issues/009`'s "What not to do" applies verbatim.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-009**,
 `slowed` — *"the finding with the largest gap between what the documentation promises and what the

@@ -181,11 +181,22 @@ declaration without failures.
 
 #### Correcting a registration during setup
 
-Registrations are immutable identities, not editable configuration rows. Re-registering changed
-content under the same id is refused because an old run may depend on the original declaration.
+Registrations are immutable identities in the sense that one id means one declaration -- registering
+a *different* declaration under an id that is already taken is refused, because that is a genuine
+mistake rather than an edit. Correcting the thing you already registered is not that, and it is the
+ordinary loop: edit the file and `vqapr register <file> --force` to replace it in place. The id
+stays, dependent configs and specs keep working, and the run record carries a new `source_digest`
+for whatever ran.
 
-- If a run or result already matters, register the corrected declaration under a new id and update
-  its dependent configs/specs. This preserves provenance.
+That digest is the provenance, and it is a **receipt rather than a gate**: it records what ran, and
+nothing re-checks it afterwards. Two runs of edited code carry two different digests, which is what
+makes an edit visible in the record.
+
+- **Editing a component you registered:** change the file and re-register with `--force`. No new id,
+  no config edit, no spec edit.
+- **Withdrawing one:** `vqapr remove <kind> <id>` refuses while something still references it, and
+  names what does.
+- **A genuinely different declaration:** give it its own id, so one id never means two things.
 - If this is a disposable first-run workspace with no result to preserve, keep the authored YAML
   and component files, obtain approval for the destructive reset, remove only the project-local
   `.vqapr/` workspace state, then register the corrected declarations from scratch. Never delete

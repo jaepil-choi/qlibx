@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 1,
+  "kind": "cli-transcript",
+  "surface": "cli",
+  "runtime": "python 3.12.13 via `python -m vqapr`",
+  "note": "Real subprocess invocations of the vqapr CLI in a temp workspace. The gate's executable argv replay is limited to the pinned Bun runtime; this package is a Python CLI, so a Bun replay could not exercise it and would prove nothing. This transcript is the honest equivalent: the actual commands, their actual exit codes, and the actual envelope bodies.",
+  "steps": [
+    {
+      "argv": [
+        "vqapr",
+        "run",
+        "--help"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "usage: vqapr run [-h] [--force] [--run-id RUN_ID] spec\n\nJudge a run spec, freeze it, preflight it, and execute the simulation.\n\nThe spec names already-registered components by id; it does not redeclare them. Preflight refuses any drift between the spec and what is registered, and the same judgments `vqapr check` makes are made here before the spec is frozen: a run that would fail `check` is refused rather than executed.\n\n`check` is still the cheaper way to see every problem at once -- it collects them, while a run refuses on the first set it finds. Write a starting spec with `vqapr new run-spe",
+      "assertion": "names judgments as part of what run refuses on",
+      "holds": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "datamodel",
+        "dm",
+        "--dataset",
+        "prices",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\datamodel.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\datamodel.yaml\", \"id\": \"dm\", \"kind\": \"data_model\", \"object_name\": \"Dm\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\datamodel.py\", \"stage\": \"component.new\"}",
+      "stage": "component.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "strategy",
+        "st",
+        "--dataset",
+        "prices",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\strategy.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\strategy.yaml\", \"id\": \"st\", \"kind\": \"strategy_model\", \"object_name\": \"St\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\strategy.py\", \"stage\": \"component.new\"}",
+      "stage": "component.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "constraint",
+        "c",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\constraint.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\constraint.yaml\", \"id\": \"c\", \"kind\": \"constraint\", \"object_name\": \"C\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\constraint.py\", \"stage\": \"component.new\"}",
+      "stage": "component.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "exchange",
+        "ex",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\exchange.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\exchange.yaml\", \"kind\": \"exchange\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\exchange.out\", \"stage\": \"template.new\"}",
+      "stage": "template.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "instruments",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\instruments.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\instruments.yaml\", \"kind\": \"instruments\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\instruments.out\", \"stage\": \"template.new\"}",
+      "stage": "template.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "dataset",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\dataset.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\dataset.out\", \"kind\": \"dataset\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\dataset.out\", \"stage\": \"template.new\"}",
+      "stage": "template.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "run-spec",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\run-spec.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"kind\": \"run-spec\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\run-spec.out\", \"registrable\": false, \"stage\": \"template.new\"}",
+      "stage": "template.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "agendas",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\agendas.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\agendas.out\", \"kind\": \"agendas\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\agendas.out\", \"stage\": \"template.new\"}",
+      "stage": "template.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "new",
+        "execution-input",
+        "--out",
+        "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-transcript-drbqpppy\\execution-input.out"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"declaration\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\execution-input.out\", \"kind\": \"execution-input\", \"ok\": true, \"path\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\execution-input.out\", \"stage\": \"template.new\"}",
+      "stage": "template.new",
+      "ok": true
+    },
+    {
+      "argv": [
+        "<scripted loop over all nine `vqapr new` kinds>"
+      ],
+      "assertion": "a single-key read across every kind raises no KeyError (docs/issues/026)",
+      "registrableKinds": 8,
+      "totalKinds": 9,
+      "holds": true
+    },
+    {
+      "argv": [
+        "<read the emitted run-spec template>"
+      ],
+      "assertion": "the offered account modes all exist in AccountMode (docs/issues/017)",
+      "modeLine": "mode: LONG_ONLY              # LONG_ONLY or SIGNED",
+      "holds": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "skill",
+        "install"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"files\": [\"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\.agents\\\\skills\\\\vqapr\\\\SKILL.md\", \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\.claude\\\\skills\\\\vqapr-skill\\\\SKILL.md\"], \"manifest\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\.agents\\\\skills\\\\vqapr\\\\.vqapr-skill.json\", \"ok\": true, \"root\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\", \"stage\": \"skill.install\"}",
+      "stage": "skill.install",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "skill",
+        "list"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"current\": false, \"files\": [\"SKILL.md\"], \"installed\": true, \"ok\": true, \"package_version\": \"0.2.0a1\", \"root\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\", \"stage\": \"skill.list\", \"stale\": \"the installed skill differs from the one this package ships; run `vqapr skill install` to update it\"}",
+      "stage": "skill.list",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "skill",
+        "install"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"files\": [\"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\.agents\\\\skills\\\\vqapr\\\\SKILL.md\", \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\.claude\\\\skills\\\\vqapr-skill\\\\SKILL.md\"], \"manifest\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\\\\.agents\\\\skills\\\\vqapr\\\\.vqapr-skill.json\", \"ok\": true, \"root\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\", \"stage\": \"skill.install\"}",
+      "stage": "skill.install",
+      "ok": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "--project-root",
+        "<tmp>",
+        "skill",
+        "list"
+      ],
+      "exitCode": 0,
+      "stdoutTail": "{\"current\": true, \"files\": [\"SKILL.md\"], \"installed\": true, \"ok\": true, \"package_version\": \"0.2.0a1\", \"root\": \"C:\\\\Users\\\\chlje\\\\AppData\\\\Local\\\\Temp\\\\vqapr-transcript-drbqpppy\", \"stage\": \"skill.list\"}",
+      "stage": "skill.list",
+      "ok": true
+    },
+    {
+      "argv": [
+        "<tamper with the installed skill, then follow its own instruction>"
+      ],
+      "assertion": "the stale message names a command that runs and fixes the staleness (docs/issues/025)",
+      "staleMessage": "the installed skill differs from the one this package ships; run `vqapr skill install` to update it",
+      "currentAfterFollowingIt": true,
+      "holds": true
+    },
+    {
+      "argv": [
+        "vqapr",
+        "skill",
+        "install",
+        "--force"
+      ],
+      "exitCode": 1,
+      "stdoutTail": "\": \"UsageError: unrecognized arguments: --force\", \"failures\": [{\"code\": \"cli.usage.rejected\", \"example_total\": 0, \"examples\": [], \"observed\": \"vqapr\", \"requirement\": \"unrecognized arguments: --force\"}], \"family\": null, \"mutation\": false, \"ok\": false, \"retry_precondition\": null, \"stage\": \"cli.usage\"}",
+      "assertion": "no no-op --force was added to install to justify the old message",
+      "holds": true
+    }
+  ],
+  "allHold": true
+}

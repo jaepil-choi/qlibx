@@ -1,0 +1,109 @@
+[1;4mvqapr CLI transcript[0m
+captured on this workstation against the frozen campaign source
+
+[1;32m$[0m [1mvqapr run --help[0m
+usage: vqapr run [-h] [--force] [--run-id RUN_ID] spec
+
+Judge a run spec, freeze it, preflight it, and execute the simulation.
+
+The spec names already-registered components by id; it does not redeclare them. Preflight refuses any drift between the spec and what is registered, and the same judgments `vqapr check` makes are made here before the spec is frozen: a run that would fail `check` is refused rather than executed.
+
+`check` is still the cheaper way to see every problem at once -- it collects them, while a run refuses on the first set it finds. Write a starting spec with `vqapr new run-spec --out spec.yaml`, and prove it with `vqapr check spec.yaml`.
+
+positional arguments:
+  spec             path to the run spec YAML (write one with `vqapr new run-
+                   spec --out`)
+
+options:
+  -h, --help       show this help message and exit
+  --force          replace this run id's existing run record instead of
+                   refusing. Refusing is the default because a repeated run
+                   under the same --run-id is far more often a retry than an
+                   intended overwrite. This does not remove a published
+                   dataset
+  --run-id RUN_ID  identity for this run's frozen record (defaults to the
+                   spec's filename)
+[2m[exit 0] 015b: run --help now names judgments as part of what it refuses on[0m
+
+[1;32m$[0m [1mvqapr new --help[0m
+usage: vqapr new [-h] [--instruments [INSTRUMENTS ...]]
+                 [--profile {academic,krx}] [--dataset DATASET]
+                 [--field FIELD] [--lookback LOOKBACK] [--cap CAP] [--out OUT]
+                 {datamodel,strategy,constraint,instruments,dataset,execution-input,agendas,exchange,run-spec}
+                 [component_id]
+
+Emit a starting point.
+
+  vqapr new datamodel|strategy <id> --dataset <d>
+      writes a component .py that runs as written, plus the .yaml that registers it.
+  vqapr new dataset --out <path>
+      writes a dataset declaration template with every required key commented.
+  vqapr new execution-input --out <path>
+      writes the venue-table declaration a run fills against.
+  vqapr new agendas --out <path>
+      writes the cadences a run fires on, plus the configs that bind roles to them.
+  vqapr new run-spec --out <path>
+      writes a run spec template with every required key, each one commented.
+
+Nothing is registered by this command. Pass the emitted .yaml to `vqapr register`.
+
+positional arguments:
+  {datamodel,strategy,constraint,instruments,dataset,execution-input,agendas,exchange,run-spec}
+                        scaffold a component (datamodel/strategy/constraint)
+                        or emit a template (instruments/dataset/execution-
+                        input/agendas/exchange/run-spec). Component and
+                        exchange kinds write TWO files: the .py named by
+                        --out, and the .yaml beside it that registers it.
+                        Every registrable kind reports the file to hand `vqapr
+                        register` as `declaration`; `run-spec` reports
+                        `registrable: false` instead, because a run spec is
+                        handed to `vqapr run` rather than registered
+  component_id          identity of the new component (required for
+                        datamodel/strategy, unused for run-spec)
+
+options:
+  -h, --help            show this help message and exit
+  --instruments [INSTRUMENTS ...]
+                        instrument ids to list on a new exchange (defaults to
+                        two placeholders)
+  --profile {academic,krx}
+                        which execution profile a new exchange is: academic
+                        fills free, krx charges KRX commission and sale tax
+                        including the ETF exemption
+  --dataset DATASET     dataset_id the component reads (required for
+                        datamodel/strategy)
+  --field FIELD         price field the scaffold references
+  --lookback LOOKBACK   rows of history each name needs
+  --cap CAP             largest share of the book any one name may be
+                        (constraint scaffold)
+  --out OUT             output path for the emitted file
+[2m[exit 0] 026: new --help no longer promises `declaration` for every kind[0m
+
+[1;32m$[0m [1mvqapr --project-root C:\Users\chlje\AppData\Local\Temp\vqapr-pty-ipauukic new run-spec --out C:\Users\chlje\AppData\Local\Temp\vqapr-pty-ipauukic\spec.yaml[0m
+{"kind": "run-spec", "ok": true, "path": "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic\\spec.yaml", "registrable": false, "stage": "template.new"}
+[2m[exit 0] 017: emit the run-spec template[0m
+
+[1;32m$[0m [1mgrep '^  mode:' spec.yaml[0m
+  mode: LONG_ONLY              # LONG_ONLY or SIGNED
+[2m[exit 0] 017: LONG_SHORT is gone; both offered values exist in AccountMode[0m
+
+[1;32m$[0m [1mvqapr --project-root C:\Users\chlje\AppData\Local\Temp\vqapr-pty-ipauukic skill install[0m
+{"files": ["C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic\\.agents\\skills\\vqapr\\SKILL.md", "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic\\.claude\\skills\\vqapr-skill\\SKILL.md"], "manifest": "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic\\.agents\\skills\\vqapr\\.vqapr-skill.json", "ok": true, "root": "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic", "stage": "skill.install"}
+[2m[exit 0] 025: install the skill[0m
+
+[1;32m$[0m [1mvqapr --project-root C:\Users\chlje\AppData\Local\Temp\vqapr-pty-ipauukic skill list[0m
+{"current": false, "files": ["SKILL.md"], "installed": true, "ok": true, "package_version": "0.2.0a1", "root": "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic", "stage": "skill.list", "stale": "the installed skill differs from the one this package ships; run `vqapr skill install` to update it"}
+[2m[exit 0] 025: the stale message names a command that runs[0m
+
+[1;32m$[0m [1mvqapr --project-root C:\Users\chlje\AppData\Local\Temp\vqapr-pty-ipauukic skill install[0m
+{"files": ["C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic\\.agents\\skills\\vqapr\\SKILL.md", "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic\\.claude\\skills\\vqapr-skill\\SKILL.md"], "manifest": "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic\\.agents\\skills\\vqapr\\.vqapr-skill.json", "ok": true, "root": "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic", "stage": "skill.install"}
+[2m[exit 0] 025: follow it verbatim[0m
+
+[1;32m$[0m [1mvqapr --project-root C:\Users\chlje\AppData\Local\Temp\vqapr-pty-ipauukic skill list[0m
+{"current": true, "files": ["SKILL.md"], "installed": true, "ok": true, "package_version": "0.2.0a1", "root": "C:\\Users\\chlje\\AppData\\Local\\Temp\\vqapr-pty-ipauukic", "stage": "skill.list"}
+[2m[exit 0] 025: current again[0m
+
+[1;32m$[0m [1mvqapr --project-root C:\Users\chlje\AppData\Local\Temp\vqapr-pty-ipauukic skill install --force[0m
+{"correlation_id": null, "error": "UsageError: unrecognized arguments: --force", "failures": [{"code": "cli.usage.rejected", "example_total": 0, "examples": [], "observed": "vqapr", "requirement": "unrecognized arguments: --force"}], "family": null, "mutation": false, "ok": false, "retry_precondition": null, "stage": "cli.usage"}
+[2m[exit 1] 025: and no no-op --force was added to justify the old message[0m
+

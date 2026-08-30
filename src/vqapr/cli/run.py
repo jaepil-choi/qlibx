@@ -153,6 +153,46 @@ def _nearest_spec_value(written: str, permitted: list[str], key_path: str) -> st
     return f"replace {written!r} at {key_path} with one of: {', '.join(permitted)}"
 
 
+_FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.weight")
+"""The three tables every run records, which nobody declares and which are not news.
+
+Excluded from `tables_declared` so the field answers *what did THIS run declare* rather than
+restating a constant. A reader comparing two runs learns nothing from three ids that are always
+present.
+"""
+
+
+def _tables_declared(store: StoreSpec, result: object) -> list[str]:
+    """Every table this run declared, from both surfaces that can declare one.
+
+    `tables_declared` read `store.tables` alone and reported `[]` for a run that declared
+    `ff3.formation` and wrote 42 rows to it (`docs/issues/024`). The empty list was not wrong about
+    what it measured -- it was measuring one of two surfaces:
+
+    * `store.tables`, declared in the run spec's `store:` section; and
+    * `StrategyModel.diagnostics()`, declared on the component itself.
+
+    The journey declared through the second and read the first. So the field is kept and taught to
+    report both, rather than removed: a reader asking what a run declared has nowhere else to look,
+    and `show run`'s `tables` answers a different question -- what was RECORDED, which is empty for
+    a table declared but never formed.
+
+    This does not re-open what the comment at the call site closed. That refusal is about a
+    `publishes`-shaped claim: asserting a DATASET exists when `list datasets` shows none. Naming a
+    declared diagnostic table is not that claim, and nothing here says a dataset was registered.
+    """
+    declared = set(store.tables)
+    # What the model declared and formed. A table declared on the component but never written is
+    # invisible here, which is the honest limit of reading it back from the result: the run record
+    # holds what was recorded, not the component's declaration list.
+    declared.update(
+        table_id
+        for table_id in getattr(result, "tables", {})
+        if table_id not in _FRAMEWORK_TABLES
+    )
+    return sorted(declared)
+
+
 def _closed_set_member(enum: type[Any], value: object, *, key_path: str) -> Any:
     """One member of a closed set, or a refusal that names the set.
 
@@ -597,7 +637,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # same rule applies to a promise the code has not yet kept: AC-P3's parsing half is
         # delivered and tested, its publication half is not, and the envelope says only what is
         # true today.
-        tables_declared=list(store.tables),
+        tables_declared=_tables_declared(store, result),
         # What this run knew each instrument to be, or that it knew nothing. A run with no
         # registered roster completes with every fill recording `kind: None`, and it used to do so
         # in silence -- no refusal, no warning, nothing in the success envelope. On an academic

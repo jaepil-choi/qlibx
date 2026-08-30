@@ -26,7 +26,7 @@ from vqapr.flow.run_records import RunRecordWriter, read_record
 
 _RECORD = {
     "account": {"version": 7, "cash": "1000", "positions": {"A005930": "5"}},
-    "tables": {"vqapr.account": {"rows": 12, "formations": 6}},
+    "tables": {"vqapr.account": {"rows": 12, "instants": 6}},
     "contract": {"accepted_intents": 7},
     "source_digest": "digest-abc",
     "declared_digest": "digest-abc",
@@ -61,7 +61,7 @@ def test_show_answers_every_question_the_record_holds(store: Path) -> None:
 
     assert payload["ok"] is True
     assert payload["account"]["version"] == 7
-    assert payload["tables"]["vqapr.account"] == {"rows": 12, "formations": 6}
+    assert payload["tables"]["vqapr.account"] == {"rows": 12, "instants": 6}
     assert payload["contract"] == {"accepted_intents": 7}
     assert payload["source_digest"] == "digest-abc"
     assert payload["period"]["occurrences"] == 12

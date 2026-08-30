@@ -1,5 +1,12 @@
 # 024 — `run.complete` reports `tables_declared: []` for a run that declared and wrote one
 
+**Status:** **closed** by `docs/implementations/094-a-run-reports-the-tables-it-declared.md`
+(branch `fix/024-tables-declared-and-counter`). Decision R1: the field STAYS and now reports both
+declaration surfaces - `store.tables` and `StrategyModel.diagnostics()`. The empty list was not
+wrong about what it measured; it measured one of two surfaces. The counter is renamed
+`formations` -> `instants`, which is what its expression counts, and its `vqapr.fill` value became
+meaningful when `docs/issues/022` gave fills a clock.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-008**,
 `papercut`, and half of it left `unresolved`.

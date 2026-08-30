@@ -48,7 +48,7 @@ def _write(root: str, run_id: str, rows: int) -> None:
     writer.finish(
         {
             "account": {"version": rows, "cash": "1000", "positions": {}},
-            "tables": {"vqapr.account": {"rows": rows, "formations": rows}},
+            "tables": {"vqapr.account": {"rows": rows, "instants": rows}},
             "contract": {"accepted_intents": rows},
             "source_digest": f"digest-{run_id}",
             "period": {"start": "2024-01-01", "end": "2024-12-31", "occurrences": rows},

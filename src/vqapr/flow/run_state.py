@@ -178,8 +178,22 @@ fill journal can be published and then dropped from memory rather than carried f
 """
 
 
-def _fill_rows(entries: tuple[object, ...]) -> tuple[Mapping[str, object], ...]:
+def _fill_rows(
+    entries: tuple[object, ...], *, envelope: Mapping[str, object] | None = None
+) -> tuple[Mapping[str, object], ...]:
     """One row per committed fill, including zero-dealt ones.
+
+    The five envelope fields are stamped here rather than by `InvocationRecorder`, because these
+    rows are staged straight into the run-state chunks and never pass through a recorder. That is
+    why they carried none of them while `vqapr.account` -- which does go through one -- carried all
+    five (`docs/issues/022`).
+
+    `sequence` is per call, matching the recorder's own contract: it numbers rows within one
+    staged batch, and `account_version` is what orders batches against each other.
+
+    The parameter is optional because a caller with no occurrence in hand -- the direct
+    `AccountState` constructors in the test suite -- has nothing truthful to stamp, and inventing
+    an `event_time` would be worse than omitting it. Production always supplies it.
 
     A refused fill is a market fact the run has to be able to show afterwards, so it is recorded
     with its reason rather than filtered out here.
@@ -196,7 +210,8 @@ def _fill_rows(entries: tuple[object, ...]) -> tuple[Mapping[str, object], ...]:
     reason to refuse, because a venue charging one flat rate does not need a category at all.
     """
     rows = []
-    for entry in entries:
+    stamp = dict(envelope or {})
+    for sequence, entry in enumerate(entries):
         fill = entry.fill
         cost = fill.cost
         rows.append(
@@ -212,6 +227,8 @@ def _fill_rows(entries: tuple[object, ...]) -> tuple[Mapping[str, object], ...]:
                     "commission": None if cost is None else str(cost.commission),
                     "tax": None if cost is None else str(cost.tax),
                     "reason": None if fill.reason is None else str(fill.reason),
+                    **stamp,
+                    **({"sequence": sequence} if stamp else {}),
                 }
             )
         )
@@ -353,6 +370,7 @@ class RunStateRepository:
         account: PreparedAccountFill,
         fill: object,
         evidence: object = None,
+        envelope: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
         """Prepare the root which consumes pending and mirrors the fill commit."""
         root = self._root
@@ -369,7 +387,7 @@ class RunStateRepository:
             fill_history=tuple(account.journal_entries),
         )
         chunks = dict(root._recorder_chunks)
-        rows = _fill_rows(account.journal_entries)
+        rows = _fill_rows(account.journal_entries, envelope=envelope)
         if rows:
             chunks[_FILL_TABLE] = (*chunks.get(_FILL_TABLE, ()), rows)
         return PreparedRunState(

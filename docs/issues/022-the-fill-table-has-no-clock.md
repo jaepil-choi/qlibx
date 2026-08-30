@@ -1,5 +1,12 @@
 # 022 — `vqapr.fill` carries none of the five envelope fields the skill guarantees
 
+**Status:** **closed** by `docs/implementations/093-the-fill-table-has-a-clock.md`
+(branch `fix/022-fill-envelope`). Fill rows now carry all five envelope fields. The cause was
+structural: these rows stage straight into the run-state chunks and never pass through the
+`InvocationRecorder` that stamps every other table. This also resolves `docs/issues/024`'s
+unexplained `formations: 1`, with no change to `public.py` - the counter was right, its data was
+missing.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-011**,
 `slowed`.

@@ -1,5 +1,11 @@
 # 018 — `invested` is gross exposure with an undocumented ceiling of 1
 
+**Status:** **closed** by `docs/implementations/090-invested-states-its-ceiling.md`
+(branch `fix/018-invested-bound`). The open question is SETTLED: the ceiling is not an accounting
+invariant. A `+1/-1` book with cash 1 satisfies every downstream invariant, so the cap belongs to
+`Rebalance.of` alone and building the `Rebalance` directly is the documented way past it. Behaviour
+unchanged; the refusal and docstring now state the bound, the halving, and what the halving costs.
+
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-006**
 (`slowed`) with **U-001** (`urge`) as its consequence.

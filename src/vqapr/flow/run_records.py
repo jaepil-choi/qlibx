@@ -31,7 +31,6 @@ import errno
 import json
 import os
 import shutil
-import tempfile
 import time as _time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
@@ -40,6 +39,8 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+from vqapr._internal import atomic
 
 RUNS_DIRECTORY = "runs"
 RECORD_FILENAME = "record.json"
@@ -497,24 +498,23 @@ class RunRecordWriter:
             indent=2,
             sort_keys=True,
         )
-        try:
-            handle, staged = tempfile.mkstemp(dir=directory, prefix=".record.", suffix=".json")
-        except OSError as gone:
+
+        def taken(gone: OSError) -> BaseException:
             # The directory is no longer there, or no longer ours. Another run took this id while
             # this one was executing -- only possible when someone forced an id already in use --
             # and this run's rows went with it. Saying so beats an unhandled OSError that reads
             # like the framework broke.
-            raise RunRecordTaken(self.run_id, directory) from gone
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                stream.write(payload + "\n")
-            os.replace(staged, directory / RECORD_FILENAME)
-        except OSError as gone:
-            Path(staged).unlink(missing_ok=True)
-            raise RunRecordTaken(self.run_id, directory) from gone
-        except BaseException:
-            Path(staged).unlink(missing_ok=True)
-            raise
+            return RunRecordTaken(self.run_id, directory)
+
+        # `create_parent=False` is load-bearing: the directory's ABSENCE is how this detects a
+        # stolen run id. Recreating it would turn the detection into a silent re-claim of state
+        # another run now owns.
+        atomic.write_atomically(
+            directory / RECORD_FILENAME,
+            payload + "\n",
+            on_error=taken,
+            create_parent=False,
+        )
         # The run is over, so it is no longer live. Released after the record lands, never before:
         # a reader that sees a complete record must never also see a live claim on it.
         self.release()

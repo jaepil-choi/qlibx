@@ -39,48 +39,98 @@ PERMITTED: frozenset[str] = frozenset(
         # Frozen by `docs/design/agent-first-surface.md`: unshipped, no new callers, and not to be
         # edited to serve a new requirement. Its `_internal` imports are inherited, not new.
         "src/vqapr/project.py",
-        # `_internal/filelock.py`, added by record `106`. A deliberate exception, on a distinction
-        # this list has to make explicitly or it stops meaning anything.
-        #
-        # This rule exists so that DELETING the four extension adapters stays mechanical: a
-        # deletion whose callers all name one path is four files removed and every stale import
-        # breaking loudly. `filelock` is not an extension authority and is not scheduled for
-        # deletion -- it is a shared primitive, and the structural audit's own target structure
-        # names `_internal/filelock.py` as the single home for the exclusive lock. `workspace.py`
-        # importing it costs the adapter deletion nothing.
-        #
-        # What this entry does NOT license is a second door to the extension authorities. If a
-        # future `_internal` import here is of `_internal/extensions/*`, it belongs behind the
-        # adapters no matter what this comment says.
-        "src/vqapr/workspace.py",
     }
 )
 
+SHARED_PRIMITIVES: frozenset[str] = frozenset(
+    {
+        # Not extension authorities, and not scheduled for deletion. These are the modules the
+        # structural refactoring is consolidating INTO: one exclusive mutex (record `106`) and one
+        # durable write (record `107`), each replacing several copies that had drifted apart.
+        "vqapr._internal.filelock",
+        "vqapr._internal.atomic",
+    }
+)
+"""`_internal` modules any layer may import directly.
 
-def _internal_importers() -> set[str]:
-    """Every module under `src/`, outside `_internal/` itself, with a real `vqapr._internal` import.
+**Why this list exists, and why it is not a hole in the rule.** The one-door rule is about the
+extension *authorities*: `_internal/extensions/*` must be reached through `extension/*` so that
+deleting the four adapters stays mechanical -- four files removed and every stale import breaking
+loudly, rather than a grep. When record `098` wrote it, the only `_internal` importers outside
+`_internal/` were those adapters and `project.py`, so "imports `_internal`" and "reaches an
+extension authority" were the same set and the test could check the cheaper one.
+
+They stopped being the same set the moment the refactoring started extracting shared primitives
+into `_internal/`. Checking the broad property would have meant appending an exception per step,
+and a rule with a growing exception list is one nobody can state. So the test now checks what the
+rule always meant, and this list is the other half of it -- enumerated, not a wildcard, so adding
+a third shared primitive is still a decision somebody takes on purpose.
+"""
+
+
+def _internal_imports() -> set[tuple[str, str]]:
+    """Every `(importer, module)` edge from outside `_internal/` into it.
 
     An AST walk for the same reason the facade tripwire uses one: the string `vqapr._internal`
     appears in docstrings and refusal text, and a text count would move when a sentence is edited.
     Function-local imports count -- `cli/show.py` reached `_internal` from inside a function body,
     and a check that only read module headers would have called that file clean.
     """
-    found: set[str] = set()
+    found: set[tuple[str, str]] = set()
     for path in pathlib.Path("src").rglob("*.py"):
         posix = path.as_posix()
         if posix.startswith(INTERNAL_ROOT):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            imported_from = isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
                 "vqapr._internal"
-            )
-            imported = isinstance(node, ast.Import) and any(
-                alias.name.startswith("vqapr._internal") for alias in node.names
-            )
-            if imported_from or imported:
-                found.add(posix)
+            ):
+                module = node.module or ""
+                if module == "vqapr._internal":
+                    # `from vqapr._internal import atomic, filelock` names the package, and the
+                    # submodule is the alias. Resolving it is what lets a shared primitive be
+                    # distinguished from an authority at all, since both spell their package the
+                    # same way.
+                    for alias in node.names:
+                        found.add((posix, f"{module}.{alias.name}"))
+                else:
+                    found.add((posix, module))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("vqapr._internal"):
+                        found.add((posix, alias.name))
     return found
+
+
+def _internal_importers() -> set[str]:
+    """Importers of anything in `_internal/` except the enumerated shared primitives."""
+    return {
+        importer
+        for importer, module in _internal_imports()
+        if module not in SHARED_PRIMITIVES
+    }
+
+
+def test_a_shared_primitive_is_reached_directly_and_an_authority_is_not() -> None:
+    """The distinction the rule rests on, asserted so it cannot be blurred by a later entry.
+
+    A shared primitive may be imported from anywhere. An extension authority may not, ever, no
+    matter which module wants it -- including the modules on this list.
+    """
+    authority_edges = sorted(
+        (importer, module)
+        for importer, module in _internal_imports()
+        if module.startswith("vqapr._internal.extensions")
+        and importer not in PERMITTED
+    )
+
+    assert not authority_edges, (
+        "these modules reach an extension authority directly:\n  "
+        + "\n  ".join(f"{importer} -> {module}" for importer, module in authority_edges)
+        + "\n\nNo shared-primitive allowance covers `_internal.extensions.*`. Reach it through "
+        "`vqapr.extension.component`, `.fingerprint`, `.loading` or `.registration`."
+    )
 
 
 def test_only_the_adapters_reach_internal_extensions() -> None:

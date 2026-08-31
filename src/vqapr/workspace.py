@@ -7,8 +7,6 @@ workspace는 선언을 보관하고 조회할 뿐 검증하지 않는다. datase
 from __future__ import annotations
 
 import hashlib
-import os
-import tempfile
 import time as _time
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
@@ -18,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from vqapr._internal import filelock
+from vqapr._internal import atomic, filelock
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data import scan
@@ -1404,34 +1402,14 @@ class Workspace:
             valuation_configs,
             monitoring_policies,
         )
-        temporary: Path | None = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                newline="\n",
-                prefix=f".{WORKSPACE_FILENAME}.",
-                suffix=".tmp",
-                dir=self.path.parent,
-                delete=False,
-            ) as stream:
-                temporary = Path(stream.name)
-                stream.write(payload)
-                stream.flush()
-                os.fsync(stream.fileno())
-            for attempt in range(WORKSPACE_SWAP_ATTEMPTS):
-                try:
-                    os.replace(temporary, self.path)
-                    break
-                except OSError:
-                    # A reader has the target open. Windows refuses the swap rather than letting
-                    # the reader keep the old file, and the reader is gone microseconds later.
-                    if attempt + 1 == WORKSPACE_SWAP_ATTEMPTS:
-                        raise
-                    _time.sleep(WORKSPACE_SWAP_BACKOFF * (attempt + 1))
+            atomic.write_atomically(
+                self.path,
+                payload,
+                attempts=WORKSPACE_SWAP_ATTEMPTS,
+                backoff=WORKSPACE_SWAP_BACKOFF,
+            )
         except OSError as error:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
             raise _workspace_error(
                 stage=WRITE_STAGE,
                 code=f"{WRITE_STAGE}.failed",

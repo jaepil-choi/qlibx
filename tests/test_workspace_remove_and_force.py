@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from vqapr._internal.extensions.component import ComponentKind
-from vqapr._internal.extensions.fingerprint import fingerprint_component
-from vqapr._internal.extensions.registration import ComponentRef
 from vqapr.domain.errors import VqaprError
+from vqapr.extension.component import ComponentKind
+from vqapr.extension.fingerprint import fingerprint_component
+from vqapr.extension.registration import ComponentRef
 from vqapr.public import (
     LocalInstantDeclaration,
     OperationAgenda,

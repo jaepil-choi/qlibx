@@ -13,9 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import yaml
-
 import pytest
+import yaml
 
 from vqapr.cli.new import run as new_run
 from vqapr.cli.register import run as register_run

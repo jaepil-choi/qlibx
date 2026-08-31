@@ -835,11 +835,11 @@ class Project:
             AdaptedConstraint,
             constraint_adapter_config,
         )
-        from vqapr._internal.extensions.component import ComponentKind
         from vqapr._internal.registration_bridge import component_ref_for
         from vqapr._internal.schedule_bridge import agendas_for_schedule
         from vqapr._internal.strategy_bridge import AdaptedStrategy, adapter_config
         from vqapr._internal.venue_bridge import exchange_component_ref
+        from vqapr.extension.component import ComponentKind
         from vqapr.flow.run import (
             ConstraintSet,
             RunDefinition,

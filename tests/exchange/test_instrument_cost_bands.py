@@ -21,7 +21,6 @@ import pytest
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.domain.enums import Side
-from vqapr.domain.roster import InstrumentRoster
 from vqapr.domain.instruments import (
     EtfInstrument,
     Instrument,
@@ -30,6 +29,7 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
+from vqapr.domain.roster import InstrumentRoster
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import TradeRule

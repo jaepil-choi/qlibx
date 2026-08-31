@@ -13,9 +13,9 @@ import textwrap
 
 import pytest
 
-from vqapr._internal.extensions.identity import ExtensionKind
 from vqapr._internal.registration_bridge import component_ref_for, extension_kind_for
 from vqapr.authoring import Constraint
+from vqapr.extension.identity import ExtensionKind
 
 MODULE_SOURCE = textwrap.dedent(
     '''

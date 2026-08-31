@@ -25,8 +25,8 @@ __all__ = ("component_ref_for", "extension_kind_for", "register_extension")
 
 def extension_kind_for(cls: type) -> Any:
     """Classify an authored class by which authoring contract it implements."""
-    from vqapr._internal.extensions.identity import ExtensionKind
     from vqapr.authoring import Constraint, DataModel, StrategyModel
+    from vqapr.extension.identity import ExtensionKind
 
     if issubclass(cls, StrategyModel):
         return ExtensionKind.STRATEGY_MODEL
@@ -79,8 +79,8 @@ def component_ref_for(
     kind explicitly rather than defeating the check that exists to catch a genuinely
     unregisterable class.
     """
-    from vqapr._internal.extensions.component import ComponentKind, ComponentRef
-    from vqapr._internal.extensions.fingerprint import fingerprint_component
+    from vqapr.extension.component import ComponentKind, ComponentRef
+    from vqapr.extension.fingerprint import fingerprint_component
 
     if not isinstance(cls, type):
         raise TypeError("cls must be a class")

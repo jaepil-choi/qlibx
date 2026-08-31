@@ -1,4 +1,4 @@
-"""`vqapr._internal.extensions.identity` — the `v1` fingerprint and canonical config schemas.
+"""`vqapr.extension.identity` — the `v1` fingerprint and canonical config schemas.
 
 This is pure internal identity plumbing: it does not touch registration, loading, or any current
 public behavior. Every assertion is about the byte preimage, the canonical config encoding, and
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr._internal.extensions.identity import (
+from vqapr.extension.identity import (
     ExtensionIdentity,
     ExtensionKind,
     authority_id,

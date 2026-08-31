@@ -73,6 +73,20 @@ class UsageError(BoundedRefusal):
                     # 경쟁하는 두 번째 권위가 된다.
                     "requirement": self.message,
                     "observed": self.prog,
+                    # `docs/issues/030`, second half, settled by record `114`: this refusal used to
+                    # carry three of the six fields `SKILL.md` guarantees, on THE FIRST REFUSAL A
+                    # NEW USER EVER SEES. A guarantee with an unwritten exception at the most
+                    # common entry point is not a guarantee, so the answer is that `cli.usage` is
+                    # INSIDE it -- and the three missing keys are added rather than excused.
+                    #
+                    # `fix` is real and actionable, which is the field the document tells a reader
+                    # to read first. `source` and `explain` are null because this failure has
+                    # neither: argparse rejected the command line, so there is no file to point at
+                    # and no package concept to explain. `SKILL.md` already says a `source` field
+                    # may be null when the failure has no such location; this is that case.
+                    "fix": f"run `{self.prog} --help` to see the arguments this command accepts",
+                    "source": None,
+                    "explain": None,
                     "examples": [],
                     "example_total": 0,
                 }

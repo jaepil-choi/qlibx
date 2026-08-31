@@ -8,13 +8,13 @@ here would let the file drift from the registered components, and preflight reje
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
+from vqapr.analysis.execution import fill_summary
 from vqapr.cli.envelope import success
 
 # `register` owns the CLI spelling of a component kind and imports nothing from this module, so
@@ -29,6 +29,7 @@ from vqapr.domain.errors import (
     VqaprError,
 )
 from vqapr.flow.judgments import judgments, materialization_judgments
+from vqapr.flow.reporting import FILL_TABLE, recorded, tables_declared
 from vqapr.flow.run_records import RunRecordExists, RunRecordLive
 from vqapr.flow.run_spec import _REQUIRED_BY_KIND, MATERIALIZATION, SIMULATION
 from vqapr.flow.store_spec import StoreSpec
@@ -154,108 +155,14 @@ def _nearest_spec_value(written: str, permitted: list[str], key_path: str) -> st
     return f"replace {written!r} at {key_path} with one of: {', '.join(permitted)}"
 
 
-_FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.weight")
-"""The three tables every run records, which nobody declares and which are not news.
-
-Excluded from `tables_declared` so the field answers *what did THIS run declare* rather than
-restating a constant. A reader comparing two runs learns nothing from three ids that are always
-present.
-"""
 
 
-_FILL_TABLE = "vqapr.fill"
 
 
-def _recorded(result: object) -> Mapping[str, tuple[Mapping[str, object], ...]]:
-    """Every row this run recorded, read from where a `SimulationResult` actually holds them.
-
-    One reader for both envelope fields below, because they had drifted apart. `_tables_declared`
-    read `result.tables`, and **`SimulationResult` has no such attribute** -- its two fields are
-    `occurrences` and `final_state`. The unit test that verified it passed a stand-in carrying
-    `.tables`, so the component-declared half of `docs/issues/024` reported nothing in production
-    while its test stayed green. A test double that does not have the real object's shape proves
-    the code works against the double.
-    """
-    return getattr(getattr(result, "final_state", None), "recorder_rows", None) or {}
 
 
-def _fill_summary(result: object) -> dict[str, object]:
-    """What this run's orders actually did, which `ok: true` says nothing about.
-
-    `docs/issues/039`. A market-neutral run reported `{"ok": true, "occurrences": 732,
-    "account_version": 244}`. Its long side landed on 0.500 every time and its short side never
-    did, drifting to **9.1% of NAV in unintended net long exposure** by December -- because 3.1% of
-    fills dealt nothing, mostly names that were not tradable at the fill instant.
-
-    The behaviour was right and correctly labelled: every one of those fills carries a
-    `ZeroDealtReason` in `vqapr.fill`. **Nothing aggregated them**, so the one signal that would
-    have exposed the cause -- a 3.1% zero-dealt rate against a 1.2% baseline -- was reachable only
-    by reading 47,318 rows by hand. The reporter found it by accident two hours later.
-
-    So this counts what the run already wrote. `partial` is here for the same reason `zero_dealt`
-    is: an order filled short of its request is the same declared-versus-realised gap, one degree
-    quieter, and it was 1,404 of that run's short requests.
-
-    Reported on the SUCCESS path deliberately. The run is legitimate; what is worth saying is what
-    it managed to trade.
-    """
-    rows = _recorded(result).get(_FILL_TABLE, ())
-    dealt = 0
-    partial = 0
-    zero_dealt = 0
-    reasons: dict[str, int] = {}
-    for row in rows:
-        reason = row.get("reason")
-        if reason is not None:
-            zero_dealt += 1
-            reasons[str(reason)] = reasons.get(str(reason), 0) + 1
-            continue
-        dealt += 1
-        requested = abs(Decimal(str(row.get("requested_quantity") or "0")))
-        filled = abs(Decimal(str(row.get("dealt_quantity") or "0")))
-        if filled < requested:
-            partial += 1
-    return {
-        # Every order the venue answered, so the three counts below are readable as shares of it.
-        "orders": len(rows),
-        "dealt": dealt,
-        "partial": partial,
-        "zero_dealt": zero_dealt,
-        # Named reasons rather than a total, because they are not one fact: `absent`,
-        # `nontradable` and `no_trade` are facts about the MARKET, and `unfunded` is a fact about
-        # the account. A reader asking what the market refused them must not be handed their own
-        # empty purse in the same number.
-        "reasons": dict(sorted(reasons.items())),
-    }
 
 
-def _tables_declared(store: StoreSpec, result: object) -> list[str]:
-    """Every table this run declared, from both surfaces that can declare one.
-
-    `tables_declared` read `store.tables` alone and reported `[]` for a run that declared
-    `ff3.formation` and wrote 42 rows to it (`docs/issues/024`). The empty list was not wrong about
-    what it measured -- it was measuring one of two surfaces:
-
-    * `store.tables`, declared in the run spec's `store:` section; and
-    * `StrategyModel.diagnostics()`, declared on the component itself.
-
-    The journey declared through the second and read the first. So the field is kept and taught to
-    report both, rather than removed: a reader asking what a run declared has nowhere else to look,
-    and `show run`'s `tables` answers a different question -- what was RECORDED, which is empty for
-    a table declared but never formed.
-
-    This does not re-open what the comment at the call site closed. That refusal is about a
-    `publishes`-shaped claim: asserting a DATASET exists when `list datasets` shows none. Naming a
-    declared diagnostic table is not that claim, and nothing here says a dataset was registered.
-    """
-    declared = set(store.tables)
-    # What the model declared and formed. A table declared on the component but never written is
-    # invisible here, which is the honest limit of reading it back from the result: the run record
-    # holds what was recorded, not the component's declaration list.
-    declared.update(
-        table_id for table_id in _recorded(result) if table_id not in _FRAMEWORK_TABLES
-    )
-    return sorted(declared)
 
 
 def _closed_set_member(enum: type[Any], value: object, *, key_path: str) -> Any:
@@ -692,11 +599,13 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # same rule applies to a promise the code has not yet kept: AC-P3's parsing half is
         # delivered and tested, its publication half is not, and the envelope says only what is
         # true today.
-        tables_declared=_tables_declared(store, result),
+        tables_declared=tables_declared(store, result),
         # What the orders did, not only that they were placed. `ok: true` means the simulation
         # executed; it does not mean the book that was declared is the book that was held, and
         # those differed by nine percent of NAV in the run that filed `docs/issues/039`.
-        fills=_fill_summary(result),
+        # The surface renders; the aggregate is computed in `analysis/`, over the rows
+        # `flow/reporting.py` reads back. Record `114`.
+        fills=fill_summary(recorded(result).get(FILL_TABLE, ())),
         # What this run knew each instrument to be, or that it knew nothing. A run with no
         # registered roster completes with every fill recording `kind: None`, and it used to do so
         # in silence -- no refusal, no warning, nothing in the success envelope. On an academic

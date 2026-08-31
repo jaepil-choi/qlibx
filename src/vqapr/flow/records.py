@@ -1,7 +1,7 @@
 """Freeze what a run did into its durable record, and report the contract it honoured.
 
 **Moved out of `vqapr.public` by record `111`, and from `evidence/` to `flow/` by record `113`.**
-It lands beside `flow/run_records.py`, which owns `RECORD_FIELDS` and `RunRecordWriter` -- the two
+It lands beside `flow/run_records.py`, which owns `record_fields` and `RunRecordWriter` -- the two
 things it builds against. Under `evidence/` it imported three `flow` modules, which is a layer
 inversion: `evidence/` is spine, `flow/` is the dispatch loop above it. A run record is a flow
 artifact, and this is where it belongs. These build the run record's blocks from a
@@ -16,7 +16,7 @@ module-level API, and `flow/orchestration.py` is their caller.
 from __future__ import annotations
 
 from vqapr.flow.run import FrozenRun
-from vqapr.flow.run_records import RECORD_FIELDS, RunRecordWriter
+from vqapr.flow.run_records import RUN_KIND, RunRecordWriter, record_fields
 from vqapr.flow.run_state import LifecycleKind
 from vqapr.flow.simulation import SimulationResult
 
@@ -42,7 +42,7 @@ def freeze_record(
     snapshot = None if account is None else account.snapshot
 
     # AC-R3's five: the facts a later reader cannot reconstruct from the rows alone. Each is built
-    # by the function `RECORD_FIELDS` names, so the field set is genuinely ONE list rather than two
+    # by the function `record_fields` names, so the field set is genuinely ONE list rather than two
     # with a comparison between them -- a field added here without a builder is a KeyError at the
     # comprehension below, not a drift that reaches disk and waits to be noticed.
     builders = {
@@ -92,7 +92,9 @@ def freeze_record(
     }
 
     # `run_id` is stamped by the writer itself, so it is the one field this does not supply.
-    writer.finish({field: builders[field]() for field in RECORD_FIELDS if field != "run_id"})
+    writer.finish(
+        {field: builders[field]() for field in record_fields(RUN_KIND) if field != "run_id"}
+    )
 
 
 def contract_report(result: SimulationResult) -> dict[str, object]:

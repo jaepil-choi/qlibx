@@ -140,12 +140,6 @@ def record_fields(kind: str) -> tuple[str, ...]:
         ) from None
 
 
-RECORD_FIELDS = _RUN_FIELDS
-"""The field set a run record carries, named once and read by both the writer and every reader.
-
-Kept as a name because every existing reader means the run kind by it. New code should call
-`record_fields(kind)`; this is the run kind's answer to that call.
-"""
 
 
 

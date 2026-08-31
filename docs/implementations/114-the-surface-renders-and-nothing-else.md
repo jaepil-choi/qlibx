@@ -30,7 +30,7 @@ number of days (`docs/issues/033`). It now takes `kind`, `rows` and `calendar` r
 `Namespace`, so a second surface that scaffolds a component can apply the same rule without building
 an argparse object to do it.
 
-`cli/run.py` 806 → 712. `cli/new.py` 906 → 866.
+`cli/run.py` 806 → 715. `cli/new.py` 906 → 867.
 
 ## Part two — `cli.usage` is inside the six-field guarantee
 
@@ -69,8 +69,8 @@ present, that `fix` is non-empty, names an action, and differs from `requirement
 
 | check | result |
 |---|---|
-| `cli/run.py` | 806 → **712 lines** |
-| `cli/new.py` | 906 → **866 lines** |
+| `cli/run.py` | 806 → **715 lines** |
+| `cli/new.py` | 906 → **867 lines** |
 | `tests/qa/test_refusal_envelope_six_fields.py` | 9 passed |
 | fast suite | **1475 passed**, 14 deselected |
 | **`-m slow -rs`** | **14 of 14 passed**, no skip lines |
@@ -80,3 +80,16 @@ present, that `fix` is non-empty, names an action, and differs from `requirement
 The baseline not moving is worth stating: three functions changed module and the refusal inventory
 did not, because the refusals in them are raised as `InputError`, which the static pass folds by
 call site rather than by defining module. `fill_summary` and `tables_declared` raise nothing.
+
+## Correction, record `115` follow-up
+
+This record originally stated `cli/run.py` 806 → **712** and `cli/new.py` 906 → **866**. Both
+were wrong: the measured values are **715** and **867**, verified by
+`git show 7b5f9591:<path> | wc -l` against `git show d6d3ae51:<path> | wc -l`. Three lines and
+one line, and in the direction that made the reduction look slightly larger than it was.
+
+Small, and worth correcting anyway. The house rule is measured numbers rather than estimates,
+and a wrong exact number is worse than a rounded one because it invites the trust an exact
+number earns. Found by the AI-slop lane of the VB002 cohort gate, which recomputed every
+numeric claim in records `111`–`115` against git history; these two were the only ones that
+did not match.

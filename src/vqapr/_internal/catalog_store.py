@@ -15,19 +15,35 @@ import json
 import os
 import tempfile
 import time as _time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 
+from vqapr._internal import filelock
 from vqapr._internal.catalog import Catalog, canonical_bytes, root_digest
+from vqapr.domain.errors import (
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    FailureSource,
+    VqaprError,
+)
 
 CATALOG_DIRECTORY = ".vqapr"
 CATALOG_FILENAME = "catalog.json"
 CATALOG_LOCK_FILENAME = ".catalog.lock"
 OBJECTS_DIRECTORY = ("objects", "sha256")
 
-CATALOG_LOCK_TIMEOUT = 30.0
-CATALOG_LOCK_STALE_AFTER = 120.0
+WRITE_STAGE = "catalog.write"
+"""A module-level literal so the refusal-code inventory can fold `f"{WRITE_STAGE}.locked"`
+statically. An alias to another module's constant is opaque to that pass, and the code would drop
+out of the inventory silently."""
+
+CATALOG_LOCK_TIMEOUT = filelock.LOCK_TIMEOUT
+CATALOG_LOCK_STALE_AFTER = filelock.LOCK_STALE_AFTER
+"""Aliases, not second copies. `30.0` and `120.0` were written out in both this module and
+`workspace.py`, free to be tuned in one and not the other; they now have one definition in
+`_internal/filelock.py`. The names stay because callers and tests refer to them."""
 
 __all__ = [
     "CatalogConflict",
@@ -111,58 +127,69 @@ def read_catalog(root: Path) -> Catalog:
     return _catalog_from_document(document)
 
 
-def _stale_lock_age(lock: Path) -> float | None:
-    """Seconds since the lock was created, or `None` if it disappeared while checking."""
-    try:
-        return _time.time() - lock.stat().st_mtime
-    except OSError:
-        return None
+def _locked_refusal(catalog_dir: Path) -> Callable[[Path, float], VqaprError]:
+    """The refusal a waiter gets when another writer held the catalog for the whole timeout.
+
+    **This used to be a bare `TimeoutError`**, and that was audit finding C4. `cli/main.py`'s
+    outermost `except Exception` renders an untyped exception as `stage: "unhandled"`, which to an
+    agent reading the envelope is the signal for *"the framework is broken"* -- so a contended
+    catalog, an ordinary and recoverable condition, told the reader to go and suspect the package.
+    `Workspace._exclusive` refused the identical situation with six readable fields. Two writers of
+    the same shape, one readable and one not, differing only in which file was edited later.
+    """
+
+    def build(lock: Path, timeout: float) -> VqaprError:
+        return VqaprError(
+            stage=WRITE_STAGE,
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    f"{WRITE_STAGE}.locked",
+                    f"catalog at {catalog_dir} must be writable within {timeout:.0f}s",
+                    observed=f"another process has held {lock} for the whole timeout",
+                    fix=(
+                        f"wait for the other writer to finish, or delete {lock} if no writer "
+                        "is actually running"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
+                    source=FailureSource(file=str(lock)),
+                )
+            ],
+            mutation=False,
+            retry_precondition=(
+                f"wait for the other writer to finish; if none is running, delete {lock}"
+            ),
+        )
+
+    return build
 
 
 @contextlib.contextmanager
 def _exclusive(catalog_dir: Path) -> Iterator[None]:
     """Hold the catalog directory's writer lock for one read-modify-write cycle.
 
-    Modeled directly on `Workspace._exclusive`: `O_CREAT | O_EXCL` is the portable primitive,
-    succeeding for exactly one process and failing for every other on Windows and POSIX alike.
+    The lock itself is `_internal/filelock.exclusive`, shared with `Workspace` since record `106`.
+    This module's copy of it was labelled *"Modeled directly on `Workspace._exclusive`"* -- a
+    knowing copy, which had since drifted from its original in the failure type it raised and in
+    whether it clamped a negative lock age.
 
-    Taking the lock has to create the catalog directory, so this records whether the directory
-    already existed. A cycle that creates the directory and then commits nothing - the failed
-    first registration the plan calls out - must leave the root exactly as it found it, or
-    `Project.open()` would no longer be safe to call before a first successful commit.
+    What remains here is the part that was never about locking. Taking the lock has to create the
+    catalog directory, so this records whether the directory already existed. A cycle that creates
+    the directory and then commits nothing - the failed first registration the plan calls out -
+    must leave the root exactly as it found it, or `Project.open()` would no longer be safe to call
+    before a first successful commit.
     """
     preexisting = catalog_dir.is_dir()
     catalog_dir.mkdir(parents=True, exist_ok=True)
-    lock = catalog_dir / CATALOG_LOCK_FILENAME
-    deadline = _time.monotonic() + CATALOG_LOCK_TIMEOUT
-    handle: int | None = None
-    while True:
-        try:
-            handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            break
-        except FileExistsError:
-            age = _stale_lock_age(lock)
-            if age is not None and age > CATALOG_LOCK_STALE_AFTER:
-                with contextlib.suppress(OSError):
-                    lock.unlink()
-                continue
-            if _time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"catalog at {catalog_dir} must be writable within "
-                    f"{CATALOG_LOCK_TIMEOUT:.0f}s; another process has held {lock} "
-                    "for the whole timeout"
-                ) from None
-            _time.sleep(0.02)
     try:
-        os.write(handle, str(os.getpid()).encode("utf-8"))
-        os.close(handle)
-        handle = None
-        yield
+        with filelock.exclusive(
+            catalog_dir / CATALOG_LOCK_FILENAME,
+            on_timeout=_locked_refusal(catalog_dir),
+            timeout=CATALOG_LOCK_TIMEOUT,
+            stale_after=CATALOG_LOCK_STALE_AFTER,
+        ):
+            yield
     finally:
-        if handle is not None:
-            os.close(handle)
-        with contextlib.suppress(OSError):
-            lock.unlink()
         if not preexisting:
             # Only an empty directory is removed: once a catalog or object landed, the
             # directory is real state and never swept away by an unwinding writer.

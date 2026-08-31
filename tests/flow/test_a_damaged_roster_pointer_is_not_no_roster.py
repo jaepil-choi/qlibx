@@ -7,7 +7,9 @@
 damaged pointer, and says why in its own docstring: *"'no roster' and 'a roster whose record is
 damaged' are different states, and only the first is ordinary."*
 
-Two callers on the run path caught `Exception` around it and returned `None`. `None` means **no
+Two callers on the run path caught `Exception` around it and returned `None`. (Both lived in
+`vqapr.public` as `_registered_roster` and `roster_report` until record `111` moved them to
+`vqapr.flow.roster` and made the first one public; the defect and its fix are unchanged.) `None` means **no
 roster registered** -- a legal, ordinary state -- so a truncated `.vqapr/instruments.json` made a
 run complete with `ok: true`, `roster: null`, and every fill recording `kind: None`. On a KRX-shaped
 venue that charges the ETF sleeve at the share rate, which is exactly the defect `docs/issues/007`
@@ -27,7 +29,7 @@ import pytest
 
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.roster_export import export_roster
-from vqapr.public import _registered_roster, roster_report
+from vqapr.public import registered_roster, roster_report
 from vqapr.workspace import Workspace
 
 
@@ -48,7 +50,7 @@ def test_an_absent_workspace_is_still_no_roster(tmp_path: Path) -> None:
     A run assembled outside a workspace has no roster to find, and saying so by returning `None`
     is honest -- the refusal belongs where something asks what an instrument is.
     """
-    assert _registered_roster(tmp_path / "nowhere") is None
+    assert registered_roster(tmp_path / "nowhere") is None
     assert roster_report(tmp_path / "nowhere", None) is None
 
 
@@ -56,7 +58,7 @@ def test_a_registered_roster_still_loads(tmp_path: Path) -> None:
     """Guard the guard: a healthy roster must not be caught by the narrowed exception."""
     project = _project_with_a_roster(tmp_path)
 
-    roster = _registered_roster(project)
+    roster = registered_roster(project)
 
     assert roster is not None
     assert dict(roster.histogram) == {"stock": 1, "etf": 1}
@@ -78,7 +80,7 @@ def test_a_damaged_pointer_refuses_rather_than_reading_as_absent(
     pointer.write_text(damage, encoding="utf-8")
 
     with pytest.raises(VqaprError) as refused:
-        _registered_roster(project)
+        registered_roster(project)
 
     assert refused.value.failures[0].code.startswith("workspace.instruments"), (
         "the typed refusal must reach the caller instead of becoming `no roster`"
@@ -97,7 +99,7 @@ def test_a_run_that_never_registered_one_is_unaffected(tmp_path: Path) -> None:
     Workspace.create(tmp_path)
     assert not (tmp_path / ".vqapr" / "instruments.json").exists()
 
-    assert _registered_roster(tmp_path) is None
+    assert registered_roster(tmp_path) is None
     assert roster_report(tmp_path, None) is None
 
 

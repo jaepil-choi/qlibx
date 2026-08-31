@@ -759,7 +759,7 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
     absence should not have to distinguish "no roster" from "this version does not report one".
     `known` is the field that answers the question.
 
-    **This runs after the run completed and its record is on disk.** `_registered_roster` refuses a
+    **This runs after the run completed and its record is on disk.** `registered_roster` refuses a
     registered-but-unreadable roster, which is right at run START -- nothing has been computed yet
     and the run must not proceed without categories. Here it would be wrong: the tables can become
     unreadable in the minutes a real run takes, and letting that refusal escape would report exit 1
@@ -772,7 +772,7 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
     try:
         report = roster_report(project_root, _registered_roster_for_report(project_root))
     except VqaprError as vanished:
-        # `known: True`, because the run DID know. `_registered_roster` refuses an unreadable
+        # `known: True`, because the run DID know. `registered_roster` refuses an unreadable
         # roster at run start, so any run reaching this envelope read its roster successfully:
         # its fills carry real `kind` values and the frozen record carries the digest and counts,
         # computed while the tables were readable. Reporting `False` here would give the field the
@@ -801,6 +801,6 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
 
 
 def _registered_roster_for_report(project_root: Path) -> object | None:
-    from vqapr.public import _registered_roster
+    from vqapr.flow.roster import registered_roster
 
-    return _registered_roster(project_root)
+    return registered_roster(project_root)

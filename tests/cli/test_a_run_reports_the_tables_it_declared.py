@@ -87,9 +87,11 @@ def test_the_counter_is_named_for_what_it_counts() -> None:
     The counter is applied to every table, including `vqapr.fill`, where a formation is not a
     thing that happens. Its expression counts distinct `event_time`, and the name now says so.
     """
-    from vqapr import public
+    # Record `111` moved `freeze_record` out of the facade into the layer that owns evidence
+    # production; the counter travelled with it.
+    from vqapr.evidence import records
 
-    text = Path(public.__dict__["__file__"]).read_text(encoding="utf-8")
+    text = Path(records.__dict__["__file__"]).read_text(encoding="utf-8")
 
     assert '"instants": len({str(row.get("event_time")) for row in rows})' in text
     assert '"formations":' not in text, "the old name is still emitted somewhere"

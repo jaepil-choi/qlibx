@@ -618,8 +618,8 @@
     },
     {
       "code": "run.roster.unreadable",
-      "file": "src/vqapr/public.py",
-      "line": 562
+      "file": "src/vqapr/flow/roster.py",
+      "line": 82
     },
     {
       "code": "source.scan.conditional_positive.unreadable",

@@ -1,19 +1,52 @@
-"""Temporary forwarding adapter for `vqapr.extension.fingerprint`.
+"""Content fingerprints for project-local extension components.
 
-Internal-transition: the implementation now lives in `vqapr._internal.extensions.fingerprint`.
-This module re-exports it unchanged so existing `vqapr.extension.fingerprint` imports keep
-working exactly as before. It carries no logic of its own and will be deleted when the
-internal-transition closes; do not add deprecation warnings, fallbacks, or new behaviour here.
+This module is the extension fingerprint authority, and `vqapr.extension.fingerprint` is where
+it lives.
 
-**This module is the only door.** Every caller in `src/` reaches the fingerprint authority through
-here rather than through `_internal`. The rule and the deletion's admission conditions are in
-`docs/design/agent-first-surface.md`; `tests/boundaries/test_internal_has_one_door.py` enforces the
-first. Cited by document rather than by goal id: this note named a goal id until 2026-08-30, and
-that id had been reassigned twice by then (`docs/issues/029`).
+**It was not always.** Until record `110` the implementation sat in
+`vqapr._internal.extensions.fingerprint`
+with a four-line forwarding shim at this path, whose docstring promised deletion "when the
+internal-transition closes". That promise was made in a file marked temporary and was still true six
+months later, by which point a boundary test pinned the shim's existence. Record `110` discharged it
+the other way: the shim's path became the real module's path, so no caller changed a line and the
+temporary file stopped existing rather than being renewed. See
+`docs/design/agent-first-surface.md` for the surface ruling this serves.
 """
 
 from __future__ import annotations
 
-from vqapr._internal.extensions.fingerprint import fingerprint_component
+import hashlib
+import json
+from collections.abc import Mapping
+from pathlib import Path
 
-__all__ = ["fingerprint_component"]
+from vqapr.extension.component import ComponentKind
+from vqapr.models.memory import normalize_memory
+
+
+def fingerprint_component(
+    path: str | Path,
+    *,
+    kind: ComponentKind,
+    object_name: str,
+    config: Mapping[str, object] | None = None,
+) -> str:
+    target = Path(path)
+    source = target.read_bytes()
+    normalized = normalize_memory(dict(config or {}))
+    metadata = json.dumps(
+        {
+            "kind": str(kind),
+            "object_name": object_name,
+            "config": normalized,
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256()
+    digest.update(metadata)
+    digest.update(b"\0")
+    digest.update(source)
+    return digest.hexdigest()

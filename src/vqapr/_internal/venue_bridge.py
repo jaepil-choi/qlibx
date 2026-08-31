@@ -41,8 +41,8 @@ def exchange_component_ref(academic: Any, *, component_id: str) -> Any:
     fingerprint then covers the shipped exchange's bytes plus that config, so changing
     either changes identity, which is the property the contract actually needs.
     """
-    from vqapr._internal.extensions.component import ComponentKind, ComponentRef
-    from vqapr._internal.extensions.fingerprint import fingerprint_component
+    from vqapr.extension.component import ComponentKind, ComponentRef
+    from vqapr.extension.fingerprint import fingerprint_component
     from vqapr.venues import Academic
 
     if not isinstance(academic, Academic):
@@ -85,7 +85,7 @@ def exchange_component_ref(academic: Any, *, component_id: str) -> Any:
 
 
 def _package_version() -> str:
-    from vqapr._internal.extensions.identity import installed_package_version
+    from vqapr.extension.identity import installed_package_version
 
     return installed_package_version()
 

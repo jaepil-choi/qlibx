@@ -109,7 +109,7 @@ def test_a_removal_and_a_registration_cannot_produce_an_unopenable_workspace(
                     OperationRole.STRATEGY_CALLBACK,
                 )
             )
-        except BaseException as error:  # noqa: BLE001 - surfaced by the assertion below
+        except BaseException as error:
             failed.append(error)
         finally:
             interfered.set()

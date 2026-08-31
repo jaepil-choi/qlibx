@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -28,6 +29,7 @@ from vqapr.domain.timestamps import require_tz_aware
 from vqapr.evidence.artifacts import CallbackEvidence
 from vqapr.evidence.tables import FLOW_ENVELOPE_FIELDS
 from vqapr.extension.loading import load_data_model
+from vqapr.flow.run_records import MATERIALIZATION_KIND, RunRecordWriter, record_fields
 from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evidence
 from vqapr.flow.stamping import derived_available_at
 from vqapr.flow.views import data_model_window
@@ -207,6 +209,13 @@ class MaterializationResult:
     output_path: Path
     lineage_path: Path
     invocations: tuple[MaterializationInvocation, ...]
+    record_path: Path | None = None
+    """The run record this materialization wrote, since record `116`.
+
+    Optional so a caller constructing one for a test does not have to invent a path. The product
+    path always sets it: a materialization that produced a dataset and no record would be the
+    invisibility this field exists to end.
+    """
 
 
 def _error(
@@ -470,16 +479,111 @@ def _lineage_payload(
         instruments=instruments,
     )
     payload["component"] = {"component_id": component_id, "fingerprint": fingerprint}
-    payload["invocations"] = [
-        {
-            "evaluation_time": invocation.evaluation_time.isoformat(),
-            "output_available_at": invocation.output_available_at.isoformat(),
-            "row_count": invocation.row_count,
-            "accesses": [_access_payload(access) for access in invocation.accesses],
-        }
-        for invocation in invocations
-    ]
+    # A PROJECTION of the run record's `period` block, not a second computation of it. Record `116`
+    # made the run record the authority: `.lineage.json` is still written for one release, and the
+    # two cannot drift because this reads the same structure the record carries.
+    payload["invocations"] = list(
+        _materialization_period(invocations)["invocations"]  # type: ignore[index]
+    )
     return payload
+
+
+def _materialization_period(
+    invocations: tuple[MaterializationInvocation, ...],
+) -> Mapping[str, object]:
+    """The per-invocation facts, in the shape the run record's `period` block carries.
+
+    One structure with two readers. `.lineage.json` used to build this itself, so the run record
+    and the lineage file were two computations of the same facts and free to diverge -- which is
+    precisely the shape record `112` argues against, and the reason `docs/issues/012` exists.
+    """
+    return {
+        "invocations": [
+            {
+                "evaluation_time": invocation.evaluation_time.isoformat(),
+                "output_available_at": invocation.output_available_at.isoformat(),
+                "row_count": invocation.row_count,
+                "accesses": [_access_payload(access) for access in invocation.accesses],
+            }
+            for invocation in invocations
+        ],
+        "occurrences": len(invocations),
+    }
+
+
+def _materialization_run_id(
+    dataset: str, invocations: tuple[MaterializationInvocation, ...]
+) -> str:
+    """A run id for a materialization, derived from what it produced rather than from a clock.
+
+    Two materializations of the same dataset at the same evaluation times ARE the same run, and
+    giving them the same id is what makes a re-run visible as a replacement instead of as a second
+    history. A wall-clock id would make every invocation unique and turn `list runs` into a log.
+
+    The last evaluation time is in the id because that is what a reader scanning ids wants to sort
+    by -- which materialization is the newest -- and it is stable across re-runs of the same window.
+    """
+    latest = max((i.evaluation_time for i in invocations), default=None)
+    stamp = latest.strftime("%Y%m%dT%H%M%SZ") if latest is not None else "empty"
+    return f"materialize-{_safe_stem(dataset)}-{stamp}"
+
+
+def _write_materialization_record(
+    *,
+    project_root: Path,
+    registration: DatasetRegistration,
+    source_id: str,
+    component_fingerprint: str,
+    invocations: tuple[MaterializationInvocation, ...],
+) -> Path | None:
+    """Record this materialization as a run of `kind: materialization`.
+
+    **Owner ruling, record `116`.** A materialization already produced exactly the facts a run
+    record carries -- which declarations produced it, how many rows, over what window -- and wrote
+    them to `.lineage.json`, a file that `list runs` does not index and `show run` cannot read. So
+    the same question had two answers in two formats and one of them was invisible to both
+    commands. It is one kind of record now, and the fields are the ones record `115` declared for
+    this kind a story before its producer existed.
+
+    A failure to write the record does not fail the materialization. The dataset is registered and
+    the parquet is on disk by the time this runs; refusing here would discard a completed
+    materialization over its own bookkeeping, which is the defect record `113` fixed on the run
+    path (R1) and must not be reintroduced on this one.
+    """
+    run_id = _materialization_run_id(str(registration.dataset_id), invocations)
+    period = _materialization_period(invocations)
+    rows = sum(invocation.row_count for invocation in invocations)
+    times = [i.evaluation_time for i in invocations]
+    span = (
+        {"first": min(times).isoformat(), "last": max(times).isoformat()} if times else None
+    )
+
+    answers: dict[str, object] = {
+        "dataset_id": str(registration.dataset_id),
+        "source_digest": source_id,
+        "declared_digest": component_fingerprint,
+        "rows": rows,
+        "span": span,
+        "period": period,
+    }
+    # The same guarantee the run kind gets: a field named without a builder, or a builder without a
+    # field, fails here rather than producing a record quietly missing an answer.
+    expected = {field for field in record_fields(MATERIALIZATION_KIND) if field != "run_id"}
+    missing = expected - set(answers)
+    if missing:
+        raise KeyError(
+            f"materialization record is missing {sorted(missing)}; "
+            f"record_fields({MATERIALIZATION_KIND!r}) names them"
+        )
+
+    writer = RunRecordWriter(project_root, run_id)
+    try:
+        writer.open()
+        return writer.finish(answers, kind=MATERIALIZATION_KIND)
+    except (OSError, VqaprError):
+        with contextlib.suppress(Exception):
+            writer.release()
+        return None
 
 
 def _safe_stem(value: str) -> str:
@@ -1130,9 +1234,22 @@ def materialize(
         ),
     )
 
+    # Written HERE rather than in the CLI's `_materialize`, so a public-API caller -- the showcases,
+    # a notebook, `vqapr.materialize` -- gets a record too. Record `116`: today the same question
+    # has two answers in two formats and one of them is invisible to both `list runs` and
+    # `show run`, because `.lineage.json` is a file nothing indexes.
+    record_path = _write_materialization_record(
+        project_root=Path(project_root),
+        registration=candidate_registration,
+        source_id=source_id,
+        component_fingerprint=ref.fingerprint,
+        invocations=invocations,
+    )
+
     return MaterializationResult(
         registration=candidate_registration,
         output_path=output_path,
         lineage_path=lineage_path,
         invocations=invocations,
+        record_path=record_path,
     )

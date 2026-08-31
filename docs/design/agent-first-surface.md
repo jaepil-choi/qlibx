@@ -290,7 +290,12 @@ statement for `vqapr.public`, excluding every occurrence inside a string literal
 what makes that exclusion real: template text and refusal strings are `Constant` nodes and are
 structurally invisible to it.
 
-**Verified value: 12.** Confirmed by running the command below on 2026-08-28.
+**Verified value: 11.** Confirmed on 2026-08-31 by `tests/boundaries/test_the_facade_is_not_reached_up_to.py`, which asserts it.
+
+It was **12** until `docs/implementations/112-registration-without-the-cli.md` moved
+`cli/register.py`'s declaration parsing into `vqapr/declarations.py`. That module reaches the
+owning modules directly rather than the facade, so the verb stopped being an importer. The
+original count was confirmed by running the command below on 2026-08-28.
 
 ```
 PYTHONUTF8=1 uv run python -c "import ast,pathlib; print(sum(1 for p in pathlib.Path('src').rglob('*.py') if any(isinstance(n,ast.ImportFrom) and (n.module or '')=='vqapr.public' or isinstance(n,ast.Import) and any(a.name=='vqapr.public' for a in n.names) for n in ast.walk(ast.parse(p.read_text(encoding='utf-8'))))))"
@@ -302,7 +307,7 @@ The twelve, so a later count can be diffed rather than merely compared:
 _internal/constraint_bridge.py   _internal/registration_bridge.py   _internal/run_bridge.py
 _internal/schedule_bridge.py     _internal/strategy_bridge.py       _internal/venue_bridge.py
 agent/sample/exchange.py         agent/sample/journey.py            cli/check.py
-cli/register.py                  cli/run.py                         project.py
+cli/run.py                       project.py
 ```
 
 `cli/new.py` and `extension/scaffold.py` are deliberately **not** in this list. `new.py`'s real

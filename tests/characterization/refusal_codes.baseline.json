@@ -358,53 +358,53 @@
     },
     {
       "code": "declaration.read.key_missing",
-      "file": "src/vqapr/cli/register.py",
-      "line": 203
+      "file": "src/vqapr/declarations.py",
+      "line": 233
     },
     {
       "code": "declaration.read.key_missing",
-      "file": "src/vqapr/cli/register.py",
-      "line": 556
+      "file": "src/vqapr/declarations.py",
+      "line": 600
     },
     {
       "code": "declaration.read.key_missing",
-      "file": "src/vqapr/cli/register.py",
-      "line": 608
+      "file": "src/vqapr/declarations.py",
+      "line": 652
     },
     {
       "code": "declaration.read.key_missing",
-      "file": "src/vqapr/cli/register.py",
-      "line": 620
+      "file": "src/vqapr/declarations.py",
+      "line": 664
     },
     {
       "code": "declaration.read.unknown_section",
-      "file": "src/vqapr/cli/register.py",
-      "line": 810
+      "file": "src/vqapr/declarations.py",
+      "line": 854
     },
     {
       "code": "declaration.read.value_invalid",
-      "file": "src/vqapr/cli/register.py",
-      "line": 482
+      "file": "src/vqapr/declarations.py",
+      "line": 526
     },
     {
       "code": "declaration.read.value_invalid",
-      "file": "src/vqapr/cli/register.py",
-      "line": 699
+      "file": "src/vqapr/declarations.py",
+      "line": 743
     },
     {
       "code": "declaration.read.value_invalid",
-      "file": "src/vqapr/cli/register.py",
-      "line": 750
+      "file": "src/vqapr/declarations.py",
+      "line": 794
     },
     {
       "code": "declaration.read.value_not_permitted",
-      "file": "src/vqapr/cli/register.py",
-      "line": 522
+      "file": "src/vqapr/declarations.py",
+      "line": 566
     },
     {
       "code": "declaration.read.value_not_permitted",
-      "file": "src/vqapr/cli/register.py",
-      "line": 734
+      "file": "src/vqapr/declarations.py",
+      "line": 778
     },
     {
       "code": "execution_input.register.key.duplicate",

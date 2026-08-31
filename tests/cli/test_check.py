@@ -353,7 +353,7 @@ def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> N
 
 def _agenda_deciding_on(root: Path, agenda_id: str, sessions: tuple[str, ...]) -> None:
     """Register a strategy agenda that decides on exactly these days, at 04:00."""
-    from vqapr.cli.register import apply
+    from vqapr.declarations import apply
 
     apply(
         {

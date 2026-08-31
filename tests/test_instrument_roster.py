@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.cli.inputs import InputError
 from vqapr.cli.register import run as register_run
 from vqapr.domain.instruments import InstrumentKind
 from vqapr.domain.roster import build_roster
 from vqapr.domain.roster_export import export_roster, read_roster_table
+from vqapr.inputs import InputError
 from vqapr.workspace import Workspace
 
 UNIVERSE = {"A005930": "stock", "A000660": "stock", "A069500": "etf"}

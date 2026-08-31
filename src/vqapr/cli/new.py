@@ -37,9 +37,9 @@ import yaml
 
 from vqapr.account.account import AccountMode
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import VALUE_INVALID, InputError, refuse_existing
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.scaffold import _class_name, render
+from vqapr.inputs import VALUE_INVALID, InputError, refuse_existing
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {

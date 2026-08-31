@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import InputError, read_yaml_mapping
 from vqapr.cli.register import cli_kind
 from vqapr.cli.run import (
     definition_from_document,
@@ -42,6 +41,7 @@ from vqapr.cli.run import (
 from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 from vqapr.flow.judgments import judgments, materialization_judgments
 from vqapr.flow.run_spec import MATERIALIZATION
+from vqapr.inputs import InputError, read_yaml_mapping
 from vqapr.public import Workspace, preflight_run
 
 STAGE = "run.check"

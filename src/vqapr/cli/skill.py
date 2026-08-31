@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import InputError
+from vqapr.inputs import InputError
 
 _SKILL_PACKAGE = "vqapr.agent.skill"
 

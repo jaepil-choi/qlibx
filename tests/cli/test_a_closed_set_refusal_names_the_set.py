@@ -21,8 +21,8 @@ from enum import StrEnum
 import pytest
 
 from vqapr.account.account import AccountMode
-from vqapr.cli.inputs import InputError
 from vqapr.cli.run import _account, _closed_set_member
+from vqapr.inputs import InputError
 
 
 class _Selector(StrEnum):

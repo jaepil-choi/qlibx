@@ -39,7 +39,9 @@ PERMITTED: frozenset[str] = frozenset(
         "src/vqapr/agent/sample/journey.py",
         # The CLI itself, which is the product the facade exists for.
         "src/vqapr/cli/check.py",
-        "src/vqapr/cli/register.py",
+        # `cli/register.py` left this list in record `112`: its declaration parsing moved to
+        # `vqapr/declarations.py`, which imports the owning modules directly rather than the
+        # facade. That is the count moving for the reason the trajectory predicted.
         "src/vqapr/cli/run.py",
         # Unshipped and frozen by the same ruling.
         "src/vqapr/project.py",
@@ -102,7 +104,9 @@ def test_the_count_still_matches_the_ruling() -> None:
     **The trajectory, recorded but deliberately not asserted.** The structural plan takes this count
     12 -> 10 -> 6, and none of that is an assertion here:
 
-    * **12 today.** Six `_internal/*_bridge.py`, two shipped samples, three CLI verbs, `project.py`.
+    * **11 today.** Six `_internal/*_bridge.py`, two shipped samples, two CLI verbs, `project.py`.
+      It was 12 until record `112` moved `cli/register.py`'s declaration parsing into
+      `vqapr/declarations.py`, which reaches the owning modules directly.
     * **10 after the authoring-convergence step**, which removes the facade import from the two
       bridges on the shipped path (`strategy_bridge`, `pit_bridge`). The other four bridges are
       reachable only from frozen `project.py` and cannot move before `G008`.
@@ -115,7 +119,7 @@ def test_the_count_still_matches_the_ruling() -> None:
     stop the earlier error being inherited silently"). The step that actually moves the number is
     the step that updates this assertion and the ruling's list together, in one commit.
     """
-    assert len(_importers()) == 12
+    assert len(_importers()) == 11
 
 
 @pytest.mark.parametrize(

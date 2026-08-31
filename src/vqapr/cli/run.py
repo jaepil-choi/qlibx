@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
 
 # `register` owns the CLI spelling of a component kind and imports nothing from this module, so
 # naming it here adds no cycle. The judgments take it as a callable rather than importing it
@@ -33,6 +32,7 @@ from vqapr.flow.judgments import judgments, materialization_judgments
 from vqapr.flow.run_records import RunRecordExists, RunRecordLive
 from vqapr.flow.run_spec import _REQUIRED_BY_KIND, MATERIALIZATION, SIMULATION
 from vqapr.flow.store_spec import StoreSpec
+from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,

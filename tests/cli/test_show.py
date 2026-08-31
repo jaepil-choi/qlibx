@@ -115,8 +115,14 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
         "roster",
         "period",
     }
-    assert set(record_view({})) == set(RECORD_FIELDS), (
+    # `kind` is the discriminator record `115` added. It is projected in addition to the field set,
+    # not as a member of it: a record's kind decides WHICH field set applies, so putting it inside
+    # one of them would make it a fact about runs rather than about records.
+    assert set(record_view({})) == {*RECORD_FIELDS, "kind"}, (
         "the reader projects a different field set than the one both sides are built from"
+    )
+    assert record_view({})["kind"] == "run", (
+        "a record with no discriminator predates one, and every such record is a run"
     )
 
 

@@ -5,11 +5,10 @@ It lands beside `flow/run_records.py`, which owns `RECORD_FIELDS` and `RunRecord
 things it builds against. Under `evidence/` it imported three `flow` modules, which is a layer
 inversion: `evidence/` is spine, `flow/` is the dispatch loop above it. A run record is a flow
 artifact, and this is where it belongs. These build the run record's blocks from a
-`FrozenRun` and a `SimulationResult`; they are evidence production, which is what `evidence/`
-holds, and they were sitting in the package's documented surface only because that surface had
-grown an orchestrator.
+`FrozenRun` and a `SimulationResult`. They were sitting in the package's documented surface only
+because that surface had grown an orchestrator.
 
-Renamed from `freeze_record` and `contract_report` on the way. They were private because a
+Renamed from `_freeze_record` and `_contract_report` on the way. They were private because a
 facade should not have had public functions doing this; in their own layer they are ordinary
 module-level API, and `flow/orchestration.py` is their caller.
 """
@@ -18,6 +17,7 @@ from __future__ import annotations
 
 from vqapr.flow.run import FrozenRun
 from vqapr.flow.run_records import RECORD_FIELDS, RunRecordWriter
+from vqapr.flow.run_state import LifecycleKind
 from vqapr.flow.simulation import SimulationResult
 
 
@@ -109,7 +109,6 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     not exist yet, and inventing entries for them here would report a promise nobody made. They
     join this block when that contract lands.
     """
-    from vqapr.flow.run_state import LifecycleKind
 
     findings: dict[str, dict[str, int]] = {}
     for entry in getattr(result.final_state, "lifecycle_trace", ()):

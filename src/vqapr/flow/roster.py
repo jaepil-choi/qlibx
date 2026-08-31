@@ -20,6 +20,16 @@ from vqapr.domain.errors import (
     VqaprError,
 )
 
+# Hoisted from four function-local imports by record `115`. They were deferred inside
+# `vqapr.public`, where the facade sits above everything and importing eagerly would have been
+# a cycle. That justification did not travel with the code: this module is in `flow/`, and
+# `flow/orchestration.py` already imports `vqapr.workspace` at module scope. An architecture
+# review of VB002 found them being carried at full weight against a ratchet whose stated point
+# is that lowering it is the goal.
+from vqapr.domain.roster import build_roster
+from vqapr.domain.roster_export import read_roster_table
+from vqapr.workspace import Workspace
+
 
 def registered_roster(root_path: Path | None) -> object | None:
     """The project's instrument roster, read FRESH at run start, or `None` when none is registered.
@@ -34,9 +44,6 @@ def registered_roster(root_path: Path | None) -> object | None:
     """
     if root_path is None:
         return None
-    from vqapr.domain.roster import build_roster
-    from vqapr.domain.roster_export import read_roster_table
-    from vqapr.workspace import Workspace
 
     try:
         space = Workspace.open(root_path)
@@ -113,7 +120,6 @@ def roster_report(root_path: Path | None, registry: object | None) -> dict[str, 
     """
     if root_path is None:
         return None
-    from vqapr.workspace import Workspace
 
     try:
         space = Workspace.open(root_path)

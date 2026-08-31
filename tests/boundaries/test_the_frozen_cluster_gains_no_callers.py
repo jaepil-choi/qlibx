@@ -49,6 +49,14 @@ PERMITTED_EDGES: frozenset[tuple[str, str]] = frozenset(
         ("src/vqapr/_internal/venue_bridge.py", "vqapr.venues"),
         # simulation.py is imported only by project.py.
         ("src/vqapr/project.py", "vqapr.simulation"),
+        # `simulation.py:30` reads `from vqapr import authoring, venues`. An INHERITED edge, and
+        # one this gate could not see until record `115` taught it the `from vqapr import X` form:
+        # `node.module` is `vqapr` there and the frozen name is an alias, so nothing matched.
+        # Both ends are inside the frozen cluster, which is why it was never a new caller -- but
+        # it was also not in the list this file claims is the record of them, and
+        # `docs/design/agent-first-surface.md` still says venues.py is imported only by
+        # `_internal/venue_bridge.py`. Found by an architecture review of VB002.
+        ("src/vqapr/simulation.py", "vqapr.venues"),
     }
 )
 
@@ -65,8 +73,20 @@ def _edges() -> set[tuple[str, str]]:
     for path in pathlib.Path("src").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "") in FROZEN_MODULES:
-                found.add((path.as_posix(), node.module))
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module in FROZEN_MODULES:
+                    found.add((path.as_posix(), module))
+                elif module == "vqapr":
+                    # `from vqapr import venues` names the PACKAGE, with the frozen module as the
+                    # alias. Missed entirely until record `115`, which is how a live edge
+                    # (`simulation.py` -> `venues`) sat unrecorded while this file claimed to be
+                    # the record of every one. The sibling gate in
+                    # `test_internal_holds_no_extension_authority.py` already resolved this form.
+                    for alias in node.names:
+                        candidate = f"vqapr.{alias.name}"
+                        if candidate in FROZEN_MODULES:
+                            found.add((path.as_posix(), candidate))
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name in FROZEN_MODULES:

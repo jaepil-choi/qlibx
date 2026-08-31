@@ -94,45 +94,10 @@ file order would make a valid document fail because of the order the user typed 
 """
 
 
-_COMPONENT_KINDS = {
-    "datamodel": (ComponentKind.DATA_MODEL, register_data_model),
-    "strategy": (ComponentKind.STRATEGY_MODEL, register_strategy_model),
-    "constraint": (ComponentKind.CONSTRAINT, register_constraint),
-    "exchange": (ComponentKind.EXCHANGE, register_exchange),
-}
-"""확장점 넷 전부. canon §10.2가 닫아두지 말라고 한 목록이다.
-
-무엇이 실제로 좁은 문인지는 `load_exchange`가 정한다 — shipped profile을 상속하지 않거나
-`execute()`를 갈아치운 것은 거기서 거부된다. CLI가 kind 목록으로 막을 일이 아니다.
-"""
 
 
-DECLARE_STAGE = "declaration.read"
-"""Reading the user's declaration document, before any workspace work begins.
-
-Separate from `workspace.dataset.register` on purpose: that stage means the workspace refused a
-well-formed declaration, while this one means the document itself is incomplete. Reporting the
-second as the first sends a reader to inspect their workspace when the file on their disk is what
-needs editing.
-"""
 
 
-SECTIONS = (
-    "instruments",
-    "datasets",
-    "execution_inputs",
-    "agendas",
-    "components",
-    "strategy_configs",
-    "valuation_configs",
-    "monitoring_policies",
-)
-"""Every section this command understands, in dependency order.
-
-The order is a dependency order, not a preference: an agenda may read a dataset's sessions, and a
-strategy config names both a component and an agenda that must already exist. Applying them in
-file order would make a valid document fail because of the order the user typed it in.
-"""
 
 
 # Moved here from `vqapr.public` by record `112`, and re-exported there. Unlike the other
@@ -1076,6 +1041,13 @@ AUTHORED_KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
     "constraint": ComponentKind.CONSTRAINT,
 }
+"""The component kinds an author writes as a `.py` and registers directly.
+
+Everything else -- datasets, sources, agendas, configs -- stays in the YAML declaration, because
+those ARE declarations: there is no code to point at. A component is different. Its identity is
+its source file, and requiring a YAML wrapper to say so made the author write the same fact twice
+and kept a Python-authored strategy from being registered by naming it.
+"""
 
 
 def cli_kind(kind: object) -> str:

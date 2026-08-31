@@ -34,8 +34,6 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow, ObservationBatch
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
-from vqapr.domain.roster import InstrumentRoster, build_roster
-from vqapr.domain.roster_export import export_roster
 from vqapr.domain.instruments import (
     EtfInstrument,
     FactorInstrument,
@@ -46,6 +44,8 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
+from vqapr.domain.roster import InstrumentRoster, build_roster
+from vqapr.domain.roster_export import export_roster
 from vqapr.domain.timestamps import LocalInstantDeclaration, declare_local_instant
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.evidence.tables import TableSpec
@@ -69,6 +69,7 @@ from vqapr.exchange.venue import AcademicExchange, Side
 from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_listings, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
+
 # One door into the extension authorities: `vqapr.extension.*`, never `vqapr._internal.*`.
 # The adapters below are transitional and scheduled for deletion, and that is the reason to use
 # them rather than a reason to route around them -- a deletion whose callers all name one path is
@@ -182,6 +183,7 @@ __all__ = (
     "IndexInstrument",
     "Instrument",
     "InstrumentKind",
+    "InstrumentRoster",
     "IntentSourceRef",
     "KrxExchange",
     "KrxTradeRule",
@@ -231,6 +233,7 @@ __all__ = (
     "VqaprError",
     "WeightingRefusal",
     "ZeroDealtReason",
+    "build_roster",
     "callback_evidence",
     "component_ref",
     "conformance",
@@ -238,15 +241,13 @@ __all__ = (
     "declare_local_instant",
     "drawdown",
     "equal_weight",
+    "export_roster",
     "fama_french_assign",
     "fama_french_cut_points",
     "hit_rate",
     "information_coefficient",
     "instrument",
     "instruments",
-    "InstrumentRoster",
-    "build_roster",
-    "export_roster",
     "krx_listings",
     "krx_rules",
     "materialize",

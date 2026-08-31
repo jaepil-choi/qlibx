@@ -25,6 +25,10 @@ commands:
   # Everything, including those thirteen. Required before handoff, release, or any change to
   # run assembly, the record shape, or the scaffolds -- that is what the slow set covers.
   test_all: uv run pytest tests/ -q -m ""
+  # `pyproject.toml` selects E, F, I, UP, B, SIM and RUF, and the tree did not pass them: seven
+  # findings stood while no declared command ran the check. A configured gate nobody invokes is
+  # not a gate, so it is declared here and the tree is clean as of record 105.
+  lint: uv run ruff check src/
 
 workflow:
   experiment_root: experiments

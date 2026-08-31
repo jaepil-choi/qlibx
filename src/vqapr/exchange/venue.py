@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import ClassVar, Protocol
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.enums import Side, side_of
-from vqapr.domain.instruments import Instrument
 from vqapr.exchange.execution_table import (
     ExactExecutionRow,
     ExactExecutionSnapshot,

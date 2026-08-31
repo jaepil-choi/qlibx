@@ -98,6 +98,22 @@ def test_the_count_still_matches_the_ruling() -> None:
 
     Held separately from the membership test so a failure says which question is wrong: the count,
     or which modules make it up.
+
+    **The trajectory, recorded but deliberately not asserted.** The structural plan takes this count
+    12 -> 10 -> 6, and none of that is an assertion here:
+
+    * **12 today.** Six `_internal/*_bridge.py`, two shipped samples, three CLI verbs, `project.py`.
+    * **10 after the authoring-convergence step**, which removes the facade import from the two
+      bridges on the shipped path (`strategy_bridge`, `pit_bridge`). The other four bridges are
+      reachable only from frozen `project.py` and cannot move before `G008`.
+    * **6 only at `G008`**, when the frozen cluster goes. The floor is the CLI and its shipped
+      samples calling the product's own supported surface, which is not a violation of anything.
+
+    A note, not a gate. Encoding 6 as an acceptance would fail this suite for every commit between
+    here and `G008` — and `0` was never reachable at all: it came from a *string* count of 18 that
+    the ruling itself repudiates (`docs/design/agent-first-surface.md`, "For completeness and to
+    stop the earlier error being inherited silently"). The step that actually moves the number is
+    the step that updates this assertion and the ruling's list together, in one commit.
     """
     assert len(_importers()) == 12
 

@@ -1030,28 +1030,34 @@ class Workspace:
         the back door -- the thing issue 009 removes. A record whose component was later withdrawn
         still reports what it ran; it simply cannot be enriched from a registration that is gone.
         """
-        blockers = self.references_to(kind, identity)
-        if blockers:
-            raise _workspace_error(
-                stage=REMOVE_STAGE,
-                code=f"{REMOVE_STAGE}.referenced",
-                requirement=f"a {kind} may be removed only when nothing live still names it",
-                observed=f"{identity!r} is referenced by " + ", ".join(blockers),
-                fix=(
-                    f"remove {', '.join(blockers)} first, or keep {identity!r} registered"
-                ),
-                explain=ExplainTopic.WORKSPACE_STATE,
-                retry="withdraw the referencing declarations, then retry",
-            )
-        position = {
-            "component": 3,
-            "agenda": 4,
-            "strategy_config": 5,
-            "valuation_config": 6,
-            "monitoring_policy": 7,
-        }[kind]
         with self._exclusive():
             state = self._read()
+            # The reference check runs HERE, against the state the lock already read, rather than
+            # before the lock against a state that can be stale by the time the write lands.
+            # `docs/issues/043`: it was two reads with no lock across them, and the consequence is
+            # worse than a lost update -- `_decode` validates forward references, so a document
+            # holding a config whose component was removed makes `Workspace.open()` raise and every
+            # command in the project fail until the file is hand-repaired.
+            blockers = self._references_in(state, kind, identity)
+            if blockers:
+                raise _workspace_error(
+                    stage=REMOVE_STAGE,
+                    code=f"{REMOVE_STAGE}.referenced",
+                    requirement=f"a {kind} may be removed only when nothing live still names it",
+                    observed=f"{identity!r} is referenced by " + ", ".join(blockers),
+                    fix=f"remove {', '.join(blockers)} first, or keep {identity!r} registered",
+                    explain=ExplainTopic.WORKSPACE_STATE,
+                    retry="withdraw the referencing declarations, then retry",
+                )
+            # Looked up after the reference check, so an unsupported kind still gets the typed
+            # refusal `_references_in` raises rather than a bare `KeyError` from this dict.
+            position = {
+                "component": 3,
+                "agenda": 4,
+                "strategy_config": 5,
+                "valuation_config": 6,
+                "monitoring_policy": 7,
+            }[kind]
             declarations = dict(state[position])
             if identity not in declarations:
                 self._replace_state(*state)
@@ -1076,8 +1082,23 @@ class Workspace:
         Returns labels rather than objects because the only consumer is a refusal that has to
         NAME what blocks it. A refusal that says "something still references this" sends the
         reader looking, which is the failure `docs/implementations/057` is about.
+
+        Reads the workspace itself, for callers outside a write cycle. `remove` does NOT use this:
+        it holds the lock and must evaluate against the state that lock already read, which is
+        `_references_in` below (`docs/issues/043`).
         """
-        state = self._read()
+        return self._references_in(self._read(), kind, identity)
+
+    def _references_in(
+        self, state: tuple[object, ...], kind: str, identity: str
+    ) -> tuple[str, ...]:
+        """The same question asked of a state already in hand.
+
+        Split out so the check and the write can see ONE snapshot. When this walked its own read,
+        `remove` performed two reads with no lock across them and a competing registration could
+        land between them -- and because `_decode` validates forward references, the result was a
+        workspace `Workspace.open()` refuses rather than merely a stale answer.
+        """
         components, agendas, strategy_configs, valuation_configs, monitoring_policies = (
             state[3],
             state[4],

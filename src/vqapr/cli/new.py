@@ -740,7 +740,8 @@ def _exchange_template(args: argparse.Namespace, project_root: Path) -> dict[str
     )
 
 
-_INSTRUMENTS_TEMPLATE = '''"""Declare what each instrument in your universe IS, then export the tables.
+_INSTRUMENTS_TEMPLATE = '''\
+"""Declare what each instrument in your universe IS, then export the tables.
 
 Run this yourself, once, whenever the universe changes:
 

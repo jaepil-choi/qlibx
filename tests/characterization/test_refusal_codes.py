@@ -33,12 +33,28 @@ def test_regenerating_is_opt_in_only(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_inventory_matches_the_committed_baseline() -> None:
     """The standing gate. A code added, removed, or renamed at a `Failure.bounded` call site must
     surface here as a readable diff, not as a silent drift the later migration step cannot trust.
+
+    **Keyed on `(code, file)`, not `(code, file, line)`.** The line number is the one component
+    that moves for reasons which have nothing to do with what this gate measures: a docstring
+    edited three functions above a `Failure.bounded` call shifts it. Measured cost of the stricter
+    key: the baseline was regenerated four times in one week, and every one of those diffs was a
+    pure line shift with no code added, removed or renamed. A gate that fires that often on
+    non-events is one people learn to regenerate past, which is the opposite of a gate.
+
+    What the loosened key still catches is everything the gate exists for: a code added, a code
+    removed, a code renamed, and a code that **moved to a different file** -- the last being the
+    one that matters during a refactoring that relocates call sites between modules. Only movement
+    *within* one file stops failing.
+
+    Line drift is not discarded. It stays in the JSON, it is reported by
+    `test_line_drift_is_reported_and_not_fatal` below, and `python -m tests.characterization.refusal_codes`
+    still records exact positions for a reader who wants the call site.
     """
     committed = _load_baseline()
     regenerated = rc.build_report()
 
-    committed_static = {(e["code"], e["file"], e["line"]) for e in committed["static_codes"]}
-    regenerated_static = {(e["code"], e["file"], e["line"]) for e in regenerated["static_codes"]}
+    committed_static = {(e["code"], e["file"]) for e in committed["static_codes"]}
+    regenerated_static = {(e["code"], e["file"]) for e in regenerated["static_codes"]}
     added = sorted(regenerated_static - committed_static)
     removed = sorted(committed_static - regenerated_static)
     assert not added and not removed, (
@@ -69,6 +85,38 @@ def test_the_inventory_matches_the_committed_baseline() -> None:
         f"added: {sorted(regenerated_unresolved - committed_unresolved)}\n"
         f"removed: {sorted(committed_unresolved - regenerated_unresolved)}"
     )
+
+
+def test_line_drift_is_reported_and_not_fatal(capsys: pytest.CaptureFixture[str]) -> None:
+    """Where a code sits in its file is reported, never asserted.
+
+    The standing gate above is keyed on `(code, file)`, so a call site that slid up or down inside
+    its own module no longer fails anything. That information is still worth having during a
+    refactoring -- it is how a reviewer sees that a step moved fifty call sites rather than two --
+    so it is printed here instead of thrown away.
+
+    This test asserts only that the comparison is computable and that a drifted line does not fail
+    the suite. It has no assertion on the drift itself, deliberately: the moment it acquires one it
+    becomes the line-keyed gate this step exists to remove.
+    """
+    committed = {
+        (e["code"], e["file"]): e["line"] for e in _load_baseline()["static_codes"]
+    }
+    regenerated = {
+        (e["code"], e["file"]): e["line"] for e in rc.build_report()["static_codes"]
+    }
+
+    drifted = sorted(
+        (code, file, committed[(code, file)], line)
+        for (code, file), line in regenerated.items()
+        if (code, file) in committed and committed[(code, file)] != line
+    )
+    if drifted:
+        print(f"\nrefusal-code line drift ({len(drifted)} call site(s), not a failure):")
+        for code, file, was, now in drifted:
+            print(f"  {file}:{was} -> {now}  {code}")
+
+    assert isinstance(drifted, list)
 
 
 def test_dynamically_composed_codes_are_resolved_not_missed() -> None:

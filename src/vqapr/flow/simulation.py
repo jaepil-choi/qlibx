@@ -1697,7 +1697,11 @@ class SimulationFlow:
         # table below, where no measurement claim competes with them. See `docs/issues/010`.
         mark = self._committed_mark()
         marked_at = getattr(mark, "marked_at", None)
-        if mark is not None and marked_at is not None and marked_at not in self._recorded_measurements:
+        if (
+            mark is not None
+            and marked_at is not None
+            and marked_at not in self._recorded_measurements
+        ):
             prices = {m.instrument_id: m for m in mark.marks.marks}
             observed = mark.observed_at_by_instrument or {}
             recorder.append(

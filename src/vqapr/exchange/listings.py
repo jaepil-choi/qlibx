@@ -25,7 +25,7 @@ per-instrument, because some venues genuinely do (HKEX board lots differ by inst
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 

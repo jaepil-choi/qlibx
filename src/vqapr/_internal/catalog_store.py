@@ -12,14 +12,12 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
-import tempfile
 import time as _time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 
-from vqapr._internal import filelock
+from vqapr._internal import atomic, filelock
 from vqapr._internal.catalog import Catalog, canonical_bytes, root_digest
 from vqapr.domain.errors import (
     ExplainTopic,
@@ -199,18 +197,7 @@ def _exclusive(catalog_dir: Path) -> Iterator[None]:
 
 def _write_catalog(catalog_dir: Path, catalog: Catalog) -> None:
     catalog_dir.mkdir(parents=True, exist_ok=True)
-    path = catalog_dir / CATALOG_FILENAME
-    fd, tmp_name = tempfile.mkstemp(dir=catalog_dir, prefix=".catalog-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(canonical_bytes(catalog))
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise
+    atomic.write_atomically(catalog_dir / CATALOG_FILENAME, canonical_bytes(catalog))
 
 
 def commit_catalog(

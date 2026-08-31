@@ -11,11 +11,11 @@ crash mid-write never leaves a corrupt or partial object at a final digest path.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
-import tempfile
 from collections.abc import Sequence
 from pathlib import Path
+
+from vqapr._internal import atomic
 
 OBJECT_SCHEMA = "vqapr.objects/v1"
 
@@ -82,36 +82,23 @@ def stage_object(root: Path, payload: bytes) -> str:
         return digest
 
     directory.mkdir(parents=True, exist_ok=True)
-    # `delete=False` is required: the file has to outlive its handle so it can be atomically
-    # renamed into place. The handle is closed by the `with` below, so SIM115 does not apply.
-    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115
-        dir=directory,
-        prefix=f".{digest}.",
-        suffix=".tmp",
-        delete=False,
-    )
-    temporary_path = Path(handle.name)
-    try:
-        with handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        # Re-read what actually landed on disk and verify before installing: this is the
-        # crash-safety boundary. Anything that goes wrong before this point leaves only an
-        # orphaned temp file, never a corrupt object at the final digest path.
-        written = temporary_path.read_bytes()
+
+    def verify(written: bytes) -> None:
+        """Re-read what actually landed on disk and check it before installing.
+
+        This is the crash-safety boundary of a content-addressed store: anything that goes wrong
+        before this point leaves only an orphaned temp file, never a corrupt object at the final
+        digest path. It is this store's invariant rather than a property of writing files, which
+        is why the shared writer takes it as a hook instead of charging every caller for it.
+        """
         observed = hashlib.sha256(written).hexdigest()
         if observed != digest:
             raise ValueError(
                 f"staged object failed verification before install: expected digest {digest}, "
                 f"observed {observed}"
             )
-        os.replace(temporary_path, final_path)
-    finally:
-        # os.replace already removed the temp file on success; this only cleans up leftovers
-        # from a verification failure or an exception raised while writing.
-        if temporary_path.exists():
-            temporary_path.unlink()
+
+    atomic.write_atomically(final_path, payload, verify=verify)
     return digest
 
 

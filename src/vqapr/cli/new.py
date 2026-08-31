@@ -36,6 +36,7 @@ from typing import Any
 import yaml
 
 from vqapr.account.account import AccountMode
+from vqapr.authoring_lookback import lookback_declaration
 from vqapr.cli.envelope import success
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.scaffold import _class_name, render
@@ -51,7 +52,8 @@ _KINDS = {
 _LOOKBACK_DEFAULT = 6
 """Rows of history the scaffolds declare when no lookback flag is given.
 
-Named rather than repeated, because `_lookback_arguments` compares against it to tell "the user
+Named rather than repeated, because `authoring_lookback.lookback_declaration` compares against it
+to tell "the user
 asked for rows" from "the user left the default alone and asked for calendar days".
 """
 
@@ -423,7 +425,13 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
             args.component_id,
             dataset_id=args.dataset,
             field=args.field,
-            **_lookback_arguments(args, kind),
+            # The surface reads the flags; the rule about which window a kind may declare
+            # lives in `vqapr/authoring_lookback.py`. Record `114`.
+            **lookback_declaration(
+                kind,
+                rows=getattr(args, "lookback", None),
+                calendar=getattr(args, "calendar_lookback", None),
+            ),
         )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
     if target.suffix != ".py":
@@ -453,53 +461,6 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     )
 
 
-def _lookback_arguments(args: argparse.Namespace, kind: ComponentKind) -> dict[str, Any]:
-    """Which lookback the scaffold declares, and how much of it.
-
-    Two flags rather than one with a unit suffix, because the two are different questions -- N rows
-    per name, or N calendar days for everyone -- and a single `--lookback 313` cannot say which was
-    meant. Giving both is refused rather than resolved by precedence: a reader should not have to
-    know which flag wins to predict what their own command emits.
-
-    The strategy scaffold takes rows only, and says so here rather than emitting a file whose
-    `len(values) >= LOOKBACK` guard counts observations against a number of days
-    (`docs/issues/033`).
-    """
-    rows = getattr(args, "lookback", None)
-    calendar = getattr(args, "calendar_lookback", None)
-    if calendar is None:
-        return {
-            "lookback": _LOOKBACK_DEFAULT if rows is None else rows,
-            "lookback_kind": "rows",
-        }
-    if rows is not None:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="--lookback and --calendar-lookback declare two different windows",
-            observed=f"--lookback {rows} and --calendar-lookback {calendar}",
-            retry=(
-                "keep --lookback for N observations per name, or --calendar-lookback for a window "
-                "of N days every name shares; drop the other"
-            ),
-        )
-    if calendar <= 0:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="--calendar-lookback must be a positive number of days",
-            observed=f"--calendar-lookback {calendar}",
-            retry="pass a positive number of calendar days, then retry",
-        )
-    if kind is not ComponentKind.DATA_MODEL:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="--calendar-lookback applies to the datamodel scaffold",
-            observed=f"--calendar-lookback given for kind {_DECLARATION_KIND[kind]}",
-            retry=(
-                "scaffold the strategy with --lookback, whose signal counts observations per "
-                "name, and edit its DatasetInput if you want a calendar window"
-            ),
-        )
-    return {"lookback": calendar, "lookback_kind": "calendar"}
 
 
 def _require_registered_dataset(dataset_id: str, project_root: Path) -> None:

@@ -22,7 +22,8 @@ from __future__ import annotations
 import dataclasses
 from types import SimpleNamespace
 
-from vqapr.cli.run import _fill_summary, _recorded, _tables_declared
+from vqapr.analysis.execution import fill_summary
+from vqapr.flow.reporting import recorded, tables_declared
 from vqapr.flow.run_state import AcceptedRunState
 from vqapr.flow.simulation import SimulationResult
 from vqapr.flow.store_spec import StoreSpec
@@ -52,7 +53,7 @@ def test_the_reporters_run_would_have_named_its_own_cause() -> None:
         _fill(requested="5", dealt="0", reason="no_trade"),
     )
 
-    summary = _fill_summary(_result(("vqapr.fill", rows)))
+    summary = fill_summary(rows)
 
     assert summary == {
         "orders": 10,
@@ -71,7 +72,7 @@ def test_a_short_fill_is_counted_as_partial_rather_than_dealt_and_forgotten() ->
         _fill(requested="50", dealt="0", reason="unfunded"),
     )
 
-    summary = _fill_summary(_result(("vqapr.fill", rows)))
+    summary = fill_summary(rows)
 
     assert summary["dealt"] == 2, "a partial fill did deal something, so it counts as dealt"
     assert summary["partial"] == 1, "and it is also named, because it did not deal what was asked"
@@ -91,14 +92,14 @@ def test_reasons_stay_separate_because_they_are_not_one_fact() -> None:
         _fill(requested="1", dealt="0", reason="unfunded"),
     )
 
-    summary = _fill_summary(_result(("vqapr.fill", rows)))
+    summary = fill_summary(rows)
 
     assert summary["reasons"] == {"absent": 1, "nontradable": 1, "unfunded": 1}
 
 
 def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
     """A run with no fill rows is an answer, not an absent field."""
-    assert _fill_summary(_result()) == {
+    assert fill_summary(()) == {
         "orders": 0,
         "dealt": 0,
         "partial": 0,
@@ -110,7 +111,7 @@ def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
 def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
     """The bug this file's helper was written to stop repeating.
 
-    `_tables_declared` used to read `result.tables`. `SimulationResult` has no such attribute -- it
+    `tables_declared` used to read `result.tables`. `SimulationResult` has no such attribute -- it
     has `occurrences` and `final_state` -- so the component-declared half of `docs/issues/024`
     reported nothing in production, while its unit test passed a `SimpleNamespace(tables=...)` and
     stayed green for a week. Both envelope fields now read one helper, and this pins the path that
@@ -120,7 +121,7 @@ def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
 
     assert "final_state" in fields
     assert "tables" not in fields, (
-        "if SimulationResult ever grows a `tables` attribute, re-read `_recorded` before trusting "
+        "if SimulationResult ever grows a `tables` attribute, re-read `recorded` before trusting "
         "either envelope field again"
     )
     assert isinstance(AcceptedRunState.recorder_rows, property), (
@@ -137,10 +138,10 @@ def test_a_table_the_model_declared_and_formed_is_reported_again() -> None:
         ("ff3.formation", ()),
     )
 
-    assert _tables_declared(StoreSpec(root=None, tables=()), result) == ["ff3.formation"]
+    assert tables_declared(StoreSpec(root=None, tables=()), result) == ["ff3.formation"]
 
 
 def test_the_helper_returns_an_empty_mapping_for_a_result_that_recorded_nothing() -> None:
     """No rows is not a crash, and not a `None` the callers would have to test for."""
-    assert _recorded(SimpleNamespace()) == {}
-    assert _recorded(SimpleNamespace(final_state=SimpleNamespace())) == {}
+    assert recorded(SimpleNamespace()) == {}
+    assert recorded(SimpleNamespace(final_state=SimpleNamespace())) == {}

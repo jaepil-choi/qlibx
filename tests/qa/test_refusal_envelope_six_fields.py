@@ -215,20 +215,43 @@ datasets:
     assert entry["fix"].strip() != entry["requirement"].strip()
 
 
-def test_list_unknown_kind_is_a_usage_shape_with_no_failure_fields_by_design(
+def test_a_usage_rejection_carries_the_six_fields_too(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A usage error (bad argparse choice) is rendered through a wholly different shape --
-    `cli.usage.rejected` -- with no `family` and a single `error` string, not a `Failure` list at
-    all. This is by design (`vqapr.cli.envelope.UsageError`) and is asserted here so claim 8's
-    scope is pinned precisely: it applies to `Failure`-shaped and `InputError`-shaped refusals,
-    not to usage rejections, which never claimed the six-field contract in the first place.
+    """`docs/issues/030`, second half, settled by record `114` — and this test used to assert the
+    opposite.
+
+    It asserted `fix`, `source` and `explain` were absent "by design", on the reasoning that usage
+    rejections "never claimed the six-field contract in the first place". **That reasoning was
+    checkable and false.** `SKILL.md` claims it unconditionally — *"Every entry carries `code`,
+    `source`, `requirement`, `observed`, `fix` and `explain`"* — and then tells the reader to read
+    `fix` first. So the document and this test disagreed, which is exactly what issue 030 reopened
+    for a ruling rather than leaving to whichever a reader happened to find.
+
+    **The ruling is that `cli.usage` is inside the guarantee.** A bad argument is the first refusal
+    a new user ever sees, and it was the one refusal with no `fix` to read. An exception carved at
+    the most common entry point is not an exception, it is the guarantee not holding. The three
+    keys cost nothing to add and `fix` is genuinely actionable.
+
+    `source` and `explain` are `null`, not absent: argparse rejected the command line, so there is
+    no file to point at and no package concept to explain. `SKILL.md` already permitted a null
+    location and now names this case.
     """
     code, payload = _cli(capsys, tmp_path, "list", "nonsense-kind")
     assert code == 1
     assert payload["stage"] == "cli.usage"
+
     entry = payload["failures"][0]
     assert entry["code"] == "cli.usage.rejected"
-    assert "fix" not in entry
-    assert "source" not in entry
-    assert "explain" not in entry
+    for field in ("code", "source", "requirement", "observed", "fix", "explain"):
+        assert field in entry, f"the six-field guarantee is missing {field!r} on a usage refusal"
+
+    assert entry["fix"], "the field SKILL.md tells a reader to read first must not be empty"
+    assert "--help" in entry["fix"], "the fix must name an action, not restate the problem"
+    assert entry["fix"] != entry["requirement"]
+    assert entry["source"] is None, "a rejected command line has no file to point at"
+    assert entry["explain"] is None, "and no package concept to explain"
+
+    # `family` stays None, which is a different question and unchanged: FailureFamily is a closed
+    # set of PACKAGE stages, and this failure reached none of them.
+    assert payload["family"] is None

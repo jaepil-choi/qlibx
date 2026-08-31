@@ -19,15 +19,15 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from vqapr.cli.run import _FRAMEWORK_TABLES, _tables_declared
+from vqapr.flow.reporting import FRAMEWORK_TABLES, tables_declared
 from vqapr.flow.store_spec import StoreSpec
 
 
 def _result(*table_ids: str) -> SimpleNamespace:
-    """A stand-in carrying only what `_tables_declared` reads: the recorded table ids.
+    """A stand-in carrying only what `tables_declared` reads: the recorded table ids.
 
     **Corrected 2026-08-31.** This used to expose them as `result.tables`, and `SimulationResult`
-    has no such attribute -- its fields are `occurrences` and `final_state`. So `_tables_declared`
+    has no such attribute -- its fields are `occurrences` and `final_state`. So `tables_declared`
     read `{}` on every real run while these assertions passed against the double, and the
     component-declared half of `docs/issues/024` reported nothing for a week. The rows live at
     `final_state.recorder_rows`, and `tests/cli/test_the_run_reports_what_its_orders_did.py` pins
@@ -40,7 +40,7 @@ def _result(*table_ids: str) -> SimpleNamespace:
 
 def test_a_table_declared_on_the_component_is_reported() -> None:
     """The journey's own case: declared via `diagnostics()`, written, and reported as nothing."""
-    declared = _tables_declared(
+    declared = tables_declared(
         StoreSpec(root=None, tables=()),
         _result("vqapr.account", "vqapr.fill", "vqapr.weight", "ff3.formation"),
     )
@@ -52,7 +52,7 @@ def test_a_table_declared_on_the_component_is_reported() -> None:
 
 def test_a_table_declared_in_the_spec_is_still_reported() -> None:
     """The surface that already worked must keep working."""
-    declared = _tables_declared(
+    declared = tables_declared(
         StoreSpec(root=None, tables=("spec.declared",)),
         _result("vqapr.account"),
     )
@@ -62,7 +62,7 @@ def test_a_table_declared_in_the_spec_is_still_reported() -> None:
 
 def test_both_surfaces_are_merged_without_duplication() -> None:
     """A table declared in the spec AND formed by the model is one table, not two."""
-    declared = _tables_declared(
+    declared = tables_declared(
         StoreSpec(root=None, tables=("shared", "spec.only")),
         _result("shared", "model.only", "vqapr.fill"),
     )
@@ -76,7 +76,7 @@ def test_the_three_framework_tables_are_not_reported_as_declared() -> None:
     `vqapr.account`, `vqapr.fill` and `vqapr.weight` are always present, so restating them would
     make the field useless for the comparison it exists to serve.
     """
-    declared = _tables_declared(StoreSpec(root=None, tables=()), _result(*_FRAMEWORK_TABLES))
+    declared = tables_declared(StoreSpec(root=None, tables=()), _result(*FRAMEWORK_TABLES))
 
     assert declared == []
 

@@ -388,7 +388,9 @@ or
 `run.complete`, `cli.input`)
 **`failures`** — an array of structured diagnostics. Every entry carries `code`, `source`,
 `requirement`, `observed`, `fix` and `explain`; `examples` and `example_total` are present but
-**may be empty**
+**may be empty**. The six keys are always present, including on a `cli.usage` refusal from the
+argument parser; `source` and `explain` are `null` there, because a rejected command line has no
+file to point at and no package concept to explain, but `fix` is always a sentence you can act on
 **`error`** — the Python exception as a string, for traceability
 
 When `ok` is false, read `fix` first. It is the sentence that fixes *this* occurrence, written as

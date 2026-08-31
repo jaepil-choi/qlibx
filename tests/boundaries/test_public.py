@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import duckdb
 import pytest
 
+import vqapr.flow.orchestration as orchestration
 import vqapr.public as public
 from vqapr.public import (
     QUANTUM,
@@ -485,19 +486,21 @@ def test_public_run_uses_frozen_initial_model_memory(
             return b""
 
     monkeypatch.setattr(
-        public,
+        orchestration,
         "preflight_run",
         lambda *_args: pytest.fail("run must not preflight a FrozenRun"),
     )
-    monkeypatch.setattr(public, "load_strategy_model", lambda *_args, **_kwargs: strategy)
-    monkeypatch.setattr(public, "load_exchange", lambda *_args, **_kwargs: object())
+    # `run` lives in `vqapr.flow.orchestration` since record `111`, so the loader it calls is
+    # patched there. `vqapr.public.run` is the same function object, re-exported.
+    monkeypatch.setattr(orchestration, "load_strategy_model", lambda *_a, **_k: strategy)
+    monkeypatch.setattr(orchestration, "load_exchange", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
-        public,
+        orchestration,
         "validate_execution_input",
         lambda _registration: SimpleNamespace(raise_if_failed=lambda: None),
     )
-    monkeypatch.setattr(public, "RunStateRepository", State)
-    monkeypatch.setattr(public, "SimulationFlow", Flow)
+    monkeypatch.setattr(orchestration, "RunStateRepository", State)
+    monkeypatch.setattr(orchestration, "SimulationFlow", Flow)
 
     assert public.run(tmp_path, frozen) == "result"
     memory["carry"].append(2)

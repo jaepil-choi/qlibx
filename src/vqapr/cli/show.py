@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.inputs import InputError
 from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
 from vqapr.flow.run_records import RECORD_FIELDS as _RECORD_FIELDS
 from vqapr.flow.run_records import read_record, read_table, run_ids, table_ids
+from vqapr.inputs import InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 KINDS = ("run", "model", "dataset")

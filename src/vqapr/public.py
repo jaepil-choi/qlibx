@@ -22,11 +22,13 @@ from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_pa
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
 from vqapr.constraints.monitoring import MonitoringPolicy
-from vqapr.data.datasets import DatasetRegistration, validate
+from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.windows import ModelWindow, ObservationBatch
+from vqapr.declarations import register_dataset as register_dataset
+from vqapr.declarations import register_execution_input as register_execution_input
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.instruments import (
     EtfInstrument,
@@ -55,7 +57,6 @@ from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     ExecutionTableSpec,
-    validate_execution_input,
 )
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import (
@@ -277,22 +278,6 @@ __all__ = (
 )
 
 
-def register_dataset(
-    project_root: str | Path,
-    registration: DatasetRegistration,
-    source: SourceSpec,
-) -> bool:
-    """준비된 parquet을 검증하고 project workspace에 등록한다.
-
-    새 등록이면 ``True``, 디스크에 이미 같은 선언이 있으면 ``False``다. 검증이나 persistence가
-    실패하면 ``VqaprError``를 발생시키며, 검증 실패는 workspace를 만들거나 바꾸지 않는다.
-    """
-    diagnosis, _, measured = validate(registration, source)
-    diagnosis.raise_if_failed()
-    # `measured` is the registration with its span filled in from the scan validation just ran.
-    # Registering the caller's copy instead would persist a declaration missing the one fact only
-    # a full read can establish, and the next reader would have to read the file again to get it.
-    return Workspace.create(project_root).register_dataset(measured, source)
 
 
 def component_ref(
@@ -320,14 +305,6 @@ def component_ref(
     )
 
 
-def register_execution_input(
-    project_root: str | Path,
-    registration: ExecutionInputRegistration,
-) -> bool:
-    """준비된 execution parquet과 fill binding을 검증하고 project에 등록한다."""
-    diagnosis = validate_execution_input(registration)
-    diagnosis.raise_if_failed()
-    return Workspace.create(project_root).register_execution_input(registration)
 
 
 def register_agenda(project_root: str | Path, agenda: OperationAgenda) -> bool:

@@ -10,6 +10,7 @@
 | **판정 기준** | `docs/vqapr-prd.md` (product authority) → `docs/vqapr-architecture.md` (design authority) → `docs/design/agent-first-surface.md` (표면 재설계 확정 결정) |
 | **수정 여부** | **코드 수정 없음.** 이 문서는 진단과 목표 구조만 담는다. |
 | **동반 문서** | 같은 패스에서 나온 correctness 결함은 §6 |
+| **후속 문서** | `docs/refactoring/2026-08-31-post-step-07-review.md` — Step 0–7 실행 후 재감사, 이 문서가 잡지 못한 10건 (R1–R10) |
 
 > **읽는 법.** 각 smell은 `증거 → 왜 문제인가 → 목표 → 이동 단위` 순서다. 측정으로 뒷받침되지
 > 않는 항목은 넣지 않았다. 명령 한 줄로 재현되는 것은 그 명령을 붙였다.

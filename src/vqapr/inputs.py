@@ -22,7 +22,6 @@ from typing import Any
 
 import yaml
 
-from vqapr.cli.envelope import BoundedRefusal
 from vqapr.domain.errors import MAX_EXAMPLES, ExplainTopic, FailureSource
 
 INPUT_STAGE = "cli.input"
@@ -33,6 +32,27 @@ NOT_A_MAPPING = f"{INPUT_STAGE}.not_a_mapping"
 EXISTS = f"{INPUT_STAGE}.file_exists"
 INCOMPLETE = f"{INPUT_STAGE}.keys_missing"
 VALUE_INVALID = f"{INPUT_STAGE}.value_invalid"
+
+
+
+# `BoundedRefusal` moved here from `cli/envelope.py` by record `112`. It is the base type for a
+# refusal whose body is already bounded, and layers below the CLI raise it -- `flow/run_spec.py`
+# and `vqapr/declarations.py` both do. Leaving it in the CLI meant a layer importing its own
+# refusal vocabulary closed an import cycle through every verb module. `cli/envelope.py` still
+# renders it; it no longer owns it.
+class BoundedRefusal(Exception):
+    """입력이 package 단계에 도달하기 전에 거부된 경우.
+
+    이런 실패의 본문은 이미 유계다 — 요구한 것과 관찰한 것이 전부이고, 그것을 만든 프레임은 증거가
+    아니라 잡음이다. 특히 `raise ... from error`로 원인을 붙이면 traceback이 두 배로 길어져
+    `MAX_INLINE_TRACEBACK_LINES`를 넘고, 그러면 **읽기만 하는 명령이 dump 파일을 쓰려고**
+    `.vqapr/`를 만든다. 거부가 부작용을 남기는 것은 거부가 아니다.
+
+    `failure()`는 이 타입을 본문만 실어 내보낸다.
+    """
+
+    def as_dict(self) -> dict[str, Any]:
+        raise NotImplementedError
 
 
 class InputError(BoundedRefusal):

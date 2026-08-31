@@ -637,7 +637,7 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
 
 
 def _runtime_declaration_read(tmp_path: Path) -> list[str]:
-    from vqapr.cli.register import apply
+    from vqapr.declarations import apply
     from vqapr.domain.errors import VqaprError
 
     scenarios: list[dict] = [

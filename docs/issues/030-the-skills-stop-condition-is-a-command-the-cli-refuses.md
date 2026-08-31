@@ -1,6 +1,14 @@
 # 030 — The skill's Rung 1 stop condition is a command shape the CLI refuses
 
-**Status:** **half closed 2026-08-31** by
+**Status: CLOSED 2026-09-01, both items.** Item 2 is closed by
+`docs/implementations/114-the-surface-renders-and-nothing-else.md` (Step 9 of the structural plan).
+**The ruling: `cli.usage` is inside the six-field envelope guarantee** — the exception the old test
+asserted is carved at the most common entry point, so it is removed rather than documented, and
+`tests/qa/test_refusal_envelope_six_fields.py` now covers usage refusals. The half-closure below is
+kept as filed, because the two halves were decided ten days and one campaign apart and the record of
+which was which is the point.
+
+**Superseded status:** **half closed 2026-08-31** by
 `docs/implementations/101-both-members-of-the-lookback-pair-are-reachable.md` (branch
 `fix/033-the-lookback-pair-is-reachable`). Item 1 is done: the Rung 1 stop condition now names one
 `vqapr list <kind>` call per kind, names the remaining three, and says there is no all-kinds form so

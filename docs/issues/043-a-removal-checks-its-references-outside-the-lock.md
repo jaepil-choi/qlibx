@@ -1,5 +1,12 @@
 # 043 — `Workspace.remove()` checks references outside the lock, so a race can leave a workspace that will not open
 
+**Status: CLOSED 2026-09-01** by
+`docs/implementations/108-a-removal-and-its-check-see-one-snapshot.md` (Step 4 of the structural
+plan). `references_to` now evaluates inside `_exclusive()` against the state the lock already read,
+so the removal and its check see one snapshot. The plan's acceptance was deliberately the strongest
+in the campaign and was not weakened: **a concurrency test that fails on the pre-fix tree first**,
+then passes.
+
 **Status when filed:** open. Found 2026-08-31 by the structural audit recorded in
 `docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` (§6, C2). Filed unfixed: the repair is
 small, but it moves a read inside the exclusive section and this repository has measured that

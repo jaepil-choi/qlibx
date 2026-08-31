@@ -69,6 +69,26 @@ registered and passes validation.
 9. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
    component declares it reads, decides, forms, weights and records
 
+**What a dataset's shape costs, priced before you commit to it.** Both numbers are measured, and
+they are on opposite sides of the ledger.
+
+- **Registration** reads the file once per declared logical key: the cost scales with
+  `rows x key width` and not with file size, at roughly 50M row-keys per second. A 37.8M-row
+  warehouse registered on six key fields takes seconds, and that is the whole of it -- paid once
+  per workspace.
+- **Reading** costs far more, and scales with the **cells a requirement's window admits**, not with
+  the rows a model keeps. A long / EAV registration -- one row per (name, date, account_code) --
+  multiplies those cells by its key width, and every one of them is read, boxed into a dict and
+  handed across the boundary even when the model discards it in its first three lines.
+
+Registering at the vendor's grain is still the right default: which of a name's many rows on one
+date a research question means is a research decision, and collapsing it upstream hides that
+decision in an ETL step nobody reviews. **But it is not free, and the bill arrives on every
+evaluation rather than once.** If a long dataset is read on a hot path, register a second, narrow
+dataset beside the faithful one on purpose -- deriving it with a DataModel keeps the collapsing
+decision reviewable instead of burying it. `docs/issues/049` measures one such pair at 614x with
+byte-identical output.
+
 **A DataModel derives a column, and `run` executes it.** A StrategyModel decides what to hold; a
 DataModel computes a new dataset from the ones you registered. Both are authored the same way and
 both are described by `vqapr show model <id>`.

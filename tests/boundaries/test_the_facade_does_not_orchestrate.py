@@ -24,12 +24,25 @@ import pathlib
 
 PUBLIC = pathlib.Path("src/vqapr/public.py")
 
-MAX_LINES = 420
-"""`public.py` was 776 and is now 351. The ceiling is deliberately loose.
+MAX_LINES = 328
+"""The exact current size. A ratchet, not a budget.
 
-This is not a golf score: the file is mostly imports and a 132-name `__all__`, both of which grow
-legitimately when the package gains a public type. What it may not do is regrow a body of work, and
-`MAX_BODY_STATEMENTS` below is the assertion that actually says so.
+**This was 420 and that was wrong.** Step 7's acceptance said "under 250 lines", the file came out
+at 351, and the ceiling meant to police that was set 69 lines ABOVE the actual value and 170 above
+the target -- so the next step could have added 69 lines to the documented surface and stayed green.
+A configured gate that is open is not a gate, which is the finding record `105` opened this campaign
+with. Caught by an external review of Step 7 (`docs/refactoring/2026-08-31-post-step-07-review.md`,
+R8) and corrected in record `113`.
+
+**Why the 250 target was not reachable, measured rather than argued.** Of the 328 lines here,
+115 are imports and 139 are `__all__` -- 254 lines of pure surface declaration for the 132 names
+this module exists to export. The remaining ~74 are the module docstring, blank lines, and
+eight thin `register_*` delegations. Reaching 250 would have required dropping public names, which
+is a different decision from moving orchestration out, and one nobody took. Record `111` states
+this as an amendment to the acceptance rather than letting this constant hide it.
+
+Lower it whenever the real number drops; raise it only in a commit that adds a public name and says
+so.
 """
 
 MAX_BODY_STATEMENTS = 6
@@ -72,9 +85,9 @@ def test_the_facade_stays_a_surface_rather_than_a_module() -> None:
     total = len(PUBLIC.read_text(encoding="utf-8").splitlines())
 
     assert total <= MAX_LINES, (
-        f"`public.py` is {total} lines, above the {MAX_LINES} ceiling. It was 776 before record "
-        "111 and 351 after; if the growth is a new public name, raise the ceiling in the same "
-        "commit. If it is a function body, move it."
+        f"`public.py` is {total} lines, above the {MAX_LINES} ceiling. It was 776 before record 111. "
+        "If the growth is a new public name, raise the ceiling in the same commit and say which "
+        "name. If it is a function body, move it to the layer that owns it."
     )
 
 

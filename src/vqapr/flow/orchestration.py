@@ -28,7 +28,7 @@ from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.evidence.records import freeze_record
+from vqapr.domain.errors import VqaprError
 from vqapr.exchange.execution_table import validate_execution_input
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
@@ -38,6 +38,7 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.preflight import preflight_run as _preflight_run
+from vqapr.flow.records import freeze_record
 from vqapr.flow.roster import registered_roster, roster_report
 from vqapr.flow.run import FrozenRun, RunDefinition
 from vqapr.flow.run_records import RunRecordWriter
@@ -178,7 +179,29 @@ def run(
     try:
         result = flow.run()
         if writer is not None:
-            freeze_record(writer, result, frozen, as_loaded, roster_report(root_path, registry))
+            # `roster_report` is evaluated HERE, after the run returned and outside the argument
+            # list, and its failure is absorbed. It re-reads the roster pointer, so a pointer that
+            # became unreadable during the run -- a crash mid-write, a concurrent `vqapr register`,
+            # a hand edit -- makes it raise `workspace.instruments.unreadable`, which
+            # `tests/flow/test_a_damaged_roster_pointer_is_not_no_roster.py` asserts it does.
+            #
+            # Evaluated as an argument inside the `try`, that refusal skipped `freeze_record`
+            # entirely: no rows, no `record.json`, the id released for a peer to take, exit 1 --
+            # **a completed multi-hour run discarded because one small JSON file went bad after it
+            # finished**. `cli/run.py` already wrote the defence for exactly this case ("the tables
+            # can become unreadable in the minutes a real run takes, and letting that refusal
+            # escape would report exit 1 for a run that completed"), but that guard runs after
+            # `run()` returns and so never covered this line.
+            #
+            # The report is decoration on a record; the record is the run. Losing the decoration is
+            # the cheaper failure, and it is reported as absent rather than as "no roster".
+            freeze_record(
+                writer,
+                result,
+                frozen,
+                as_loaded,
+                _roster_report_or_none(root_path, registry),
+            )
     except BaseException:
         # A run that died still holds its id. Releasing here turns a crash into an ordinary
         # retry instead of stranding the id until the lock goes stale. `freeze_record` is inside
@@ -190,6 +213,19 @@ def run(
     finally:
         session.close()
     return result
+
+
+def _roster_report_or_none(root_path: Path | None, registry: object | None) -> object | None:
+    """The roster block for the record, or `None` when it cannot be read at record time.
+
+    Narrow on purpose: it catches `VqaprError` only, so a bug in report construction still fails
+    loudly. What it absorbs is the one thing that legitimately changes underneath a long run --
+    the roster pointer on disk -- and the alternative is discarding a finished run over it.
+    """
+    try:
+        return roster_report(root_path, registry)
+    except VqaprError:
+        return None
 
 
 def _as_loaded_identity(frozen: FrozenRun, root_path: Path | None) -> str:

@@ -1,6 +1,10 @@
 """Freeze what a run did into its durable record, and report the contract it honoured.
 
-**Moved out of `vqapr.public` by record `111`.** These build the run record's blocks from a
+**Moved out of `vqapr.public` by record `111`, and from `evidence/` to `flow/` by record `113`.**
+It lands beside `flow/run_records.py`, which owns `RECORD_FIELDS` and `RunRecordWriter` -- the two
+things it builds against. Under `evidence/` it imported three `flow` modules, which is a layer
+inversion: `evidence/` is spine, `flow/` is the dispatch loop above it. A run record is a flow
+artifact, and this is where it belongs. These build the run record's blocks from a
 `FrozenRun` and a `SimulationResult`; they are evidence production, which is what `evidence/`
 holds, and they were sitting in the package's documented surface only because that surface had
 grown an orchestrator.

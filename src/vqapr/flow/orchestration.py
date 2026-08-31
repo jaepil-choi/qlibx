@@ -194,13 +194,14 @@ def run(
             # `run()` returns and so never covered this line.
             #
             # The report is decoration on a record; the record is the run. Losing the decoration is
-            # the cheaper failure, and it is reported as absent rather than as "no roster".
+            # the cheaper failure, and it is recorded as a stale marker rather than as `null`,
+            # which this record's own contract defines as "no roster was ever read".
             freeze_record(
                 writer,
                 result,
                 frozen,
                 as_loaded,
-                _roster_report_or_none(root_path, registry),
+                _roster_report_or_stale(root_path, registry),
             )
     except BaseException:
         # A run that died still holds its id. Releasing here turns a crash into an ordinary
@@ -215,17 +216,37 @@ def run(
     return result
 
 
-def _roster_report_or_none(root_path: Path | None, registry: object | None) -> object | None:
-    """The roster block for the record, or `None` when it cannot be read at record time.
+def _roster_report_or_stale(root_path: Path | None, registry: object | None) -> object | None:
+    """The roster block for the record, or a STALE MARKER when it cannot be read at record time.
 
     Narrow on purpose: it catches `VqaprError` only, so a bug in report construction still fails
     loudly. What it absorbs is the one thing that legitimately changes underneath a long run --
     the roster pointer on disk -- and the alternative is discarding a finished run over it.
+
+    **Not `None`, and that distinction is the whole point.** `flow/records.py` and
+    `flow/run_records.py` both define `roster: null` in a record as *"the run never knew the
+    categories"*. But `run` calls `registered_roster` before `flow.run()` and that refuses an
+    unreadable pointer outright, so **any run that reaches this line did read its roster**.
+    Returning `None` here would write a falsehood into the frozen artifact a later cold process
+    reads -- the exact collapse `flow/roster.py` calls "the opposite of the truth" and that
+    `docs/issues/042` exists to stop.
+
+    So the marker says what actually happened: the run knew its categories, and the record could
+    not re-read them at the end. `cli/run.py`'s `_roster_envelope` reaches the same shape for the
+    same reason on the envelope side; this is the record side of it.
     """
     try:
         return roster_report(root_path, registry)
-    except VqaprError:
-        return None
+    except VqaprError as unreadable:
+        return {
+            "known": True,
+            "stale": True,
+            "note": (
+                "the run read its instrument roster at start, and the roster pointer could not be "
+                "re-read when this record was written; the categories the run used are not "
+                f"recoverable from this record ({unreadable})"
+            ),
+        }
 
 
 def _as_loaded_identity(frozen: FrozenRun, root_path: Path | None) -> str:

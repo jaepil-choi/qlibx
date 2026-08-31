@@ -43,10 +43,21 @@ out in full:
 That guard runs *after* `run()` returns, so it never covered the line inside it. The person who
 wrote the defence and the place that needed it never saw each other.
 
-**Fixed** by evaluating the report outside the argument list through `_roster_report_or_none`, which
-catches `VqaprError` **only** — a bug in report construction still fails loudly. The report is
-decoration on a record; the record is the run. Two tests: one that a damaged pointer no longer costs
-the record, one that a `TypeError` still escapes.
+**Fixed** by evaluating the report outside the argument list, which catches `VqaprError` **only** —
+a bug in report construction still fails loudly. The report is decoration on a record; the record is
+the run.
+
+> **CORRECTION, record `115`.** This paragraph originally ended "Two tests: one that a damaged
+> pointer no longer costs the record, one that a `TypeError` still escapes", and the table below
+> claimed `7 passed (was 5; +2 for R1)`. **Both were false.** The heredoc meant to append those
+> tests failed with `Bad file descriptor`; the file's pre-existing parametrised count of 7 was
+> mistaken for evidence they had landed; and this fix — the most severe finding of the review —
+> shipped entirely unexercised. Found by an independent architecture review of VB002. The tests now
+> exist in `tests/flow/test_a_completed_run_survives_a_broken_roster.py`.
+>
+> Record `115` also corrects the fix itself: absorbing the failure as `None` wrote a falsehood,
+> because `roster: null` is defined by this record's own contract as "the run never knew the
+> categories" and any run reaching that line had read its roster. It is a stale marker now.
 
 ## R2 — `evidence/` imported `flow/`, which is backwards
 
@@ -89,7 +100,7 @@ so is better than a loose constant that lets both look fine.
 |---|---|
 | `evidence/` → `flow/` imports | **3 → 0** |
 | `MAX_LINES` | 420 → **328**, equal to the real value |
-| `tests/flow/test_a_damaged_roster_pointer_is_not_no_roster.py` | 7 passed (was 5; +2 for R1) |
+| `tests/flow/test_a_damaged_roster_pointer_is_not_no_roster.py` | 7 passed — **but unchanged by this record; see the correction above. R1 had no tests until record `115`.** |
 | `tests/boundaries/` | 37 passed |
 | fast suite | **1475 passed**, 14 deselected |
 | **`-m slow -rs`** | **14 of 14 passed**, no skip lines |

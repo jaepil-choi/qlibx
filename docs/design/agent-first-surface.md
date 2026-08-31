@@ -336,7 +336,12 @@ The current state of the five, measured on 2026-08-28 so a later count is a diff
 guess:
 
 - `project.py` — exactly one importer in `src/`, `vqapr/__init__.py`, which is `vqapr.open()`.
-- `venues.py` — imported by `_internal/venue_bridge.py`, which is itself inside the frozen cluster.
+- `venues.py` — imported by `_internal/venue_bridge.py`, which is itself inside the frozen cluster,
+  and by `simulation.py:30` (`from vqapr import authoring, venues`), which is also inside it. The
+  second edge was missing from this list until `docs/implementations/115-*.md`: the boundary test
+  written to hold this record could not see the `from vqapr import X` spelling, so an inherited
+  edge between two frozen modules went unrecorded in both places at once. Neither end is a new
+  caller, which is why nothing was violated — but the list was not the record it claimed to be.
 - `simulation.py` — imported only by `project.py`.
 - `materialization.py` — **no `import` statement anywhere in `src/`**; reachable only as a lazily
   resolved capability name in `__init__.py`'s `_CAPABILITIES`.

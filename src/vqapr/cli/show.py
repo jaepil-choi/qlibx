@@ -22,7 +22,15 @@ from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
 from vqapr.flow.run_records import RECORD_FIELDS as _RECORD_FIELDS
-from vqapr.flow.run_records import read_record, read_table, run_ids, table_ids
+from vqapr.flow.run_records import (
+    RECORD_FIELDS_BY_KIND,
+    RUN_KIND,
+    read_record,
+    read_table,
+    record_fields,
+    run_ids,
+    table_ids,
+)
 from vqapr.inputs import InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
@@ -35,8 +43,20 @@ RECORD_FIELDS = _RECORD_FIELDS
 
 
 def record_view(record: dict[str, Any]) -> dict[str, Any]:
-    """The record's answers, in the field set both sides read from `RECORD_FIELDS`."""
-    return {field: record.get(field) for field in RECORD_FIELDS}
+    """The record's answers, in the field set for the kind of record this is.
+
+    **Reads `kind` and branches on it since record `115`.** A flat field set could describe one kind
+    of record; with two, projecting a materialization through a run's field list would render six
+    nulls and drop everything it actually answers.
+
+    `kind` is surfaced rather than treated as metadata the way `schema` is. `schema` says how to
+    parse the file, which is this reader's problem and not its caller's; `kind` says what the file
+    is about, which the caller has to know to read the rest. One `show run` covers both kinds only
+    if it says which one it just showed.
+    """
+    kind = record.get("kind", RUN_KIND)
+    fields = record_fields(kind) if kind in RECORD_FIELDS_BY_KIND else RECORD_FIELDS
+    return {"kind": kind, **{field: record.get(field) for field in fields}}
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

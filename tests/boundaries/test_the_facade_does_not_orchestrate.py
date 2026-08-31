@@ -55,20 +55,40 @@ delegation. It does not leave room for a run loop.
 
 
 def _functions() -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every function in the module, including methods.
+
+    `ast.walk`, not `tree.body`. Reading only top-level definitions meant a class body was invisible
+    to the statement cap -- and `_FrozenCatalog`, one of the things record `111` moved OUT, is a
+    class. Re-adding it with a large method would have passed the gate that exists to stop exactly
+    that. Found by an architecture review of VB002.
+    """
     tree = ast.parse(PUBLIC.read_text(encoding="utf-8"))
     return [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     ]
+
+
+def _statements(node: ast.AST) -> int:
+    """Statements in a body, counted THROUGH compound statements rather than across the top.
+
+    `len(node.body)` counts a `for` loop as one statement no matter what is inside it, so a run loop
+    -- the thing `MAX_BODY_STATEMENTS`'s docstring says it leaves no room for -- scored 1. Counting
+    recursively is what makes the number mean what the docstring claims.
+    """
+    return sum(
+        1
+        for child in ast.walk(node)
+        if isinstance(child, ast.stmt) and child is not node
+        and not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    )
 
 
 def test_no_function_in_the_facade_holds_a_body_of_work() -> None:
     """The assertion that matters. A facade delegates; it does not compute."""
     heavy = [
-        (node.name, len(node.body))
+        (node.name, _statements(node))
         for node in _functions()
-        if len(node.body) > MAX_BODY_STATEMENTS
+        if _statements(node) > MAX_BODY_STATEMENTS
     ]
 
     assert not heavy, (
@@ -84,6 +104,13 @@ def test_the_facade_stays_a_surface_rather_than_a_module() -> None:
     """A crude ceiling, so a slow accumulation of anything is visible."""
     total = len(PUBLIC.read_text(encoding="utf-8").splitlines())
 
+    assert total == MAX_LINES, (
+        f"`public.py` is {total} lines and MAX_LINES says {MAX_LINES}. This is an exact ratchet, "
+        "like its sibling in test_a_deferred_import_states_its_reason.py: a ceiling that sits "
+        "above the real value is slack the next commit can fill, which is the defect record 113 "
+        "corrected once already. Lower it when the file shrinks; raise it only in a commit that "
+        "adds a public name and says which."
+    )
     assert total <= MAX_LINES, (
         f"`public.py` is {total} lines, above the {MAX_LINES} ceiling. It was 776 before record 111. "
         "If the growth is a new public name, raise the ceiling in the same commit and say which "

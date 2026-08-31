@@ -46,9 +46,26 @@ RUNS_DIRECTORY = "runs"
 RECORD_FILENAME = "record.json"
 TABLES_DIRECTORY = "tables"
 
-SCHEMA = "vqapr-run-record/v1"
+SCHEMA = "vqapr-run-record/v2"
+"""Bumped from `v1` by record `115`, when the record gained a `kind` discriminator.
 
-RECORD_FIELDS = (
+A reader is now entitled to branch on this. `read_record` refuses a major version it does not know
+instead of handing back a mapping whose fields mean something else -- see `_require_known_schema`.
+"""
+
+RUN_KIND = "run"
+"""A simulation: the only kind `v1` could describe, and still the only kind written today."""
+
+MATERIALIZATION_KIND = "materialization"
+"""A dataset materialization. Declared here in record `115` and WRITTEN by record `116`.
+
+Named one story before it is produced on purpose. `115` changes the record's shape and `116` adds
+the second producer; splitting them means the shape change lands with the reader-side check that
+protects it, rather than arriving in the same commit as a new writer and being tested only through
+that writer.
+"""
+
+_RUN_FIELDS = (
     "run_id",
     "account",
     "tables",
@@ -83,6 +100,53 @@ JSON envelope carries no schema with it. The envelope also carries a note naming
 and the remedy, which belongs where someone is about to act and not in an archive of what a past
 run did.
 """
+
+_MATERIALIZATION_FIELDS = (
+    "run_id",
+    "dataset_id",
+    "source_digest",
+    "declared_digest",
+    "rows",
+    "span",
+    "period",
+)
+"""What a materialization answers. Written by record `116`; declared here so the discriminator has
+two real branches rather than one and a promise.
+
+`run_id`, `source_digest`, `declared_digest` and `period` are deliberately the same names a run
+uses: the two kinds answer some of the same questions, and a reader that wants "which declarations
+produced this" should not need to know which kind it is holding to ask.
+"""
+
+RECORD_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
+    RUN_KIND: _RUN_FIELDS,
+    MATERIALIZATION_KIND: _MATERIALIZATION_FIELDS,
+}
+
+
+def record_fields(kind: str) -> tuple[str, ...]:
+    """The field set for one record kind, refusing an unknown kind rather than guessing.
+
+    A `KeyError` here is the same deliberate guarantee the flat tuple gave: a builder named without
+    a field, or a field named without a builder, fails at the write rather than producing a record
+    that is quietly missing an answer.
+    """
+    try:
+        return RECORD_FIELDS_BY_KIND[kind]
+    except KeyError:
+        raise KeyError(
+            f"unknown run-record kind {kind!r}; known kinds are "
+            f"{', '.join(sorted(RECORD_FIELDS_BY_KIND))}"
+        ) from None
+
+
+RECORD_FIELDS = _RUN_FIELDS
+"""The field set a run record carries, named once and read by both the writer and every reader.
+
+Kept as a name because every existing reader means the run kind by it. New code should call
+`record_fields(kind)`; this is the run kind's answer to that call.
+"""
+
 
 
 def _encode(value: object) -> object:
@@ -485,16 +549,32 @@ class RunRecordWriter:
             for row in rows:
                 handle.write(json.dumps(_encode(row), sort_keys=True) + "\n")
 
-    def finish(self, record: Mapping[str, object]) -> Path:
+    def finish(self, record: Mapping[str, object], *, kind: str = RUN_KIND) -> Path:
         """Write the run's own facts, last, by atomic replace.
 
         Last because `record.json` existing is what makes the record complete: a reader that finds
         one knows the run reached its end. Atomically because a half-written record read by a cold
         process is indistinguishable from a run that recorded half its facts.
+
+        `kind` defaults to `RUN_KIND` because every caller today writes a run. Record `116` passes
+        `MATERIALIZATION_KIND`; the default is what lets `115` change the shape without touching a
+        single call site, so the reader-side check lands before the second producer exists.
         """
+        if kind not in RECORD_FIELDS_BY_KIND:
+            raise KeyError(
+                f"unknown run-record kind {kind!r}; known kinds are "
+                f"{', '.join(sorted(RECORD_FIELDS_BY_KIND))}"
+            )
         directory = self.directory
         payload = json.dumps(
-            {"schema": SCHEMA, "run_id": self.run_id, **_encode(dict(record))},
+            {
+                "schema": SCHEMA,
+                # The discriminator, written before the answers so a reader scanning the head of
+                # the file knows what it is holding. Record `115`.
+                "kind": kind,
+                "run_id": self.run_id,
+                **_encode(dict(record)),
+            },
             indent=2,
             sort_keys=True,
         )
@@ -544,6 +624,41 @@ def run_ids(root: Path) -> tuple[str, ...]:
     )
 
 
+def _require_known_schema(record: Mapping[str, Any], path: Path) -> None:
+    """Refuse a record written by a future version, loudly, before anything reads its fields.
+
+    **This did not exist, and its absence made a documented property untrue.** `read_record`
+    returned `json.loads` with no schema branch, and `cli/show.py` reads every field with
+    `record.get(field)`. So a reverted reader handed a new-shape record did not refuse -- it
+    rendered the fields it recognised and silently dropped the rest; and a new reader handed an old
+    record rendered the new fields as `null`, indistinguishable from "this run genuinely had none".
+    "A reverted reader refuses loudly" was assumed rather than implemented.
+
+    Compares the MAJOR version only. A minor bump is for additive change a `.get` reader survives
+    by design; a major bump means a field it thinks it understands may now mean something else,
+    which is the case worth stopping for.
+    """
+    written = record.get("schema")
+    if written == SCHEMA:
+        return
+
+    family, _, version = str(written or "").rpartition("/")
+    expected_family, _, expected_version = SCHEMA.rpartition("/")
+    if family == expected_family:
+        major = version.lstrip("v").split(".")[0]
+        expected_major = expected_version.lstrip("v").split(".")[0]
+        if major.isdigit() and expected_major.isdigit() and int(major) <= int(expected_major):
+            # An older major this reader still understands. `v1` records predate the `kind`
+            # discriminator and are read as runs, which is what they are.
+            return
+
+    raise ValueError(
+        f"run record at {path} declares schema {written!r}, which this version of vqapr does not "
+        f"understand; it reads {SCHEMA!r} and older. Upgrade vqapr to read this record rather than "
+        "reading it with a version that would render its unknown fields as null."
+    )
+
+
 def read_record(root: Path, run_id: str) -> dict[str, Any]:
     """One run's frozen facts, exactly as they were written."""
     path = record_path(root, run_id)
@@ -552,7 +667,22 @@ def read_record(root: Path, run_id: str) -> dict[str, Any]:
             f"no complete run record for {run_id!r} at {path}; "
             f"known runs: {', '.join(run_ids(root)) or '(none)'}"
         )
-    return json.loads(path.read_text(encoding="utf-8"))
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(record, dict):
+        # A file that parses as JSON but is not a mapping. Previously returned as-is, so a caller
+        # doing `record["account"]` got a `TypeError` two frames from the corrupted file with
+        # nothing naming it. `tests/qa/test_run_records_survive_and_race.py` pinned that behaviour
+        # and said in the pin that adding a check would be an improvement. Record `115` adds it,
+        # because the schema check below cannot run on a payload with no keys to read.
+        raise ValueError(
+            f"run record at {path} is valid JSON but not a mapping (found "
+            f"{type(record).__name__}); the file is corrupt and must be regenerated or removed"
+        )
+    _require_known_schema(record, path)
+    # `v1` records carry no discriminator and are runs by construction, so a reader can branch on
+    # `kind` unconditionally without every call site re-deriving that.
+    record.setdefault("kind", RUN_KIND)
+    return record
 
 
 def read_table(root: Path, run_id: str, table_id: str) -> Iterator[dict[str, Any]]:

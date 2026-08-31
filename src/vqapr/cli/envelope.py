@@ -85,7 +85,12 @@ class UsageError(BoundedRefusal):
                     # and no package concept to explain. `SKILL.md` already says a `source` field
                     # may be null when the failure has no such location; this is that case.
                     "fix": f"run `{self.prog} --help` to see the arguments this command accepts",
-                    "source": None,
+                    # The OBJECT shape, not a bare null. Every other refusal emits an object,
+                    # so a reader doing `failure["source"]["file"]` would hit a TypeError on
+                    # this one refusal alone. Its three members are null because a rejected
+                    # command line has no location -- which is exactly the case SKILL.md's
+                    # "any of which may be null" paragraph already describes.
+                    "source": {"file": None, "key_path": None, "line": None},
                     "explain": None,
                     "examples": [],
                     "example_total": 0,

@@ -45,14 +45,6 @@ from vqapr.declarations import AUTHORED_KINDS, apply, register_authored
 from vqapr.declarations import cli_kind as cli_kind  # re-export: cli/check.py, run.py, list_.py
 from vqapr.inputs import read_yaml_mapping
 
-"""The component kinds an author writes as a `.py` and registers directly.
-
-Everything else -- datasets, sources, agendas, configs -- stays in the YAML declaration, because
-those ARE declarations: there is no code to point at. A component is different. Its identity is
-its source file, and requiring a YAML wrapper to say so made the author write the same fact twice
-and kept a Python-authored strategy from being registered by naming it.
-"""
-
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(

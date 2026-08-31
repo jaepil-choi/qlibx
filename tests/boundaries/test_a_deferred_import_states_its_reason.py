@@ -23,8 +23,14 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 104
-"""Measured at `develop@2521f9b7`: 111 in total, less the 7 in `JUSTIFIED` below.
+CEILING = 99
+"""Measured at record `115`: 106 in total, less the 7 in `JUSTIFIED` below.
+
+Was 104. Record `115` hoisted five function-local imports out of `flow/roster.py` and
+`flow/records.py` that had been deferred inside `vqapr.public`, where the facade sits above
+everything; that justification did not travel when the code moved to `flow/`, and
+`flow/orchestration.py` already imports `vqapr.workspace` eagerly. Lowering the constant in the
+same commit is what this ratchet is for.
 
 This number may go DOWN freely; it may not go up.
 

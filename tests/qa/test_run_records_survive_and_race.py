@@ -214,13 +214,15 @@ def test_valid_json_that_is_not_a_mapping_is_not_silently_treated_as_a_record(
     record_path = tmp_path / "runs" / "shape-run" / RECORD_FILENAME
     record_path.write_text(json.dumps(["not", "a", "mapping"]), encoding="utf-8")
 
-    result = read_record(tmp_path, "shape-run")
-    assert result == ["not", "a", "mapping"], (
-        "read_record silently accepted a non-mapping payload with no shape check; if this "
-        "assertion ever fails because a check was added, that is an improvement, update this pin"
-    )
-    with pytest.raises(TypeError):
-        _ = result["account"]  # type: ignore[call-overload]
+    # The pin above said adding a check would be an improvement and to update this when it landed.
+    # Record `115` added it: the reader-side schema check cannot read a payload with no keys, so
+    # the shape is verified first and refused by name.
+    with pytest.raises(ValueError, match="not a mapping") as refused:
+        read_record(tmp_path, "shape-run")
+
+    message = str(refused.value)
+    assert str(record_path) in message, "the refusal must name the corrupted file"
+    assert "list" in message, "and what it found instead, so the reader knows what to look at"
 
 
 def test_concurrent_force_runs_never_blend_two_runs_into_one_record(tmp_path: Path) -> None:

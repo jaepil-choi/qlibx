@@ -1,24 +1,22 @@
-"""Adversarial attack on claim 8: every refusal carries `code, source, requirement, observed,
-fix, explain`, and `fix` is not the `requirement` restated.
+"""Every CLI refusal carries all six fields an agent is told to read.
 
-`tests/characterization/test_fix_is_not_a_restatement.py` already sweeps every `Failure.bounded`
-CALL SITE statically via AST -- but that sweep only ever looks at `Failure.bounded(...)`
-constructions. It cannot see what actually reaches stdout through a DIFFERENT refusal type. This
-file provokes real refusals through the live CLI (`new`, `register`, `check`, `run`, `list`,
-`show`) and asserts the six-field contract on what an agent actually parses.
+**This docstring described a live defect that is now fixed, and said so in the present tense.** It
+read: *"`InputError.as_dict()` renders exactly four fields per failure entry [...] and never
+`source`, `fix`, or `explain`"*, and it cited the type at `src/vqapr/cli/inputs.py`. Both statements
+are false against the current tree — `inputs.py` renders all six with a `fix` fallback, and record
+`112` moved the module to `src/vqapr/inputs.py` when the refusal vocabulary went below the CLI. An
+architecture review of VB002 caught the prose still arguing for a defect the assertions below no
+longer find.
 
-**held: every CLI refusal now carries all six.** `InputError`
-(`src/vqapr/cli/inputs.py`) is the type every one of `new`,
-`register`, `run`, and `show`'s own-file input refusals raise (missing file, non-YAML, already
-exists, missing required key, invalid value). `InputError.as_dict()` renders exactly four fields
-per failure entry -- `code`, `requirement`, `observed`, `examples`/`example_total` -- and never
-`source`, `fix`, or `explain`. Only `vqapr.cli.check._from_input` re-wraps an `InputError` into
-the full six-field shape, and it does so ONLY for the `check` verb. Every other command's own-file
-refusals ship claim 8's advertised envelope with half the fields missing.
+What the file checks now, all of it holding:
 
-This is confirmed against the package's OWN failures (`VqaprError`, raised from `register`/`run`
-once past the file-reading stage) which DO carry all six fields -- so the gap is specifically
-`InputError`'s rendering, not a general envelope problem.
+* every `InputError`-shaped refusal renders `code`, `source`, `requirement`, `observed`, `fix` and
+  `explain`, with `fix` distinct from `requirement` rather than restating it;
+* `VqaprError`-shaped package refusals do the same, which they always did;
+* `check`'s own wrapper does not regress the contract it re-wraps into; and
+* a `cli.usage` refusal from the argument parser carries the six as well, which record `114` ruled
+  it must — see `test_a_usage_rejection_carries_the_six_fields_too` for why that reversed an
+  earlier decision.
 """
 
 from __future__ import annotations
@@ -54,8 +52,11 @@ def _six_field_gaps(entry: dict[str, Any]) -> list[str]:
 def test_new_missing_component_id_refusal_carries_all_six_fields(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """BROKEN: `new strategy` with no positional id raises InputError; the envelope entry is
-    missing `source`, `fix`, and `explain` entirely.
+    """`new strategy` with no positional id raises `InputError`, and the entry carries all six.
+
+    Titled "BROKEN" while its body asserted `gaps == []`, which is the shape of a test written
+    against a defect and never retitled when the defect was fixed. The assertion was always the
+    truth; only the heading disagreed with it.
     """
     code, payload = _cli(capsys, tmp_path, "new", "strategy")
     assert code == 1
@@ -249,7 +250,13 @@ def test_a_usage_rejection_carries_the_six_fields_too(
     assert entry["fix"], "the field SKILL.md tells a reader to read first must not be empty"
     assert "--help" in entry["fix"], "the fix must name an action, not restate the problem"
     assert entry["fix"] != entry["requirement"]
-    assert entry["source"] is None, "a rejected command line has no file to point at"
+    # An OBJECT with null members, not a bare null. Every other refusal emits an object, so a
+    # reader doing `failure["source"]["file"]` would hit a TypeError on this refusal alone --
+    # which is the field-type uniformity an architecture review of VB002 caught being broken.
+    assert entry["source"] == {"file": None, "key_path": None, "line": None}, (
+        "a rejected command line has no location, but it must say so in the shape every other "
+        "refusal uses"
+    )
     assert entry["explain"] is None, "and no package concept to explain"
 
     # `family` stays None, which is a different question and unchanged: FailureFamily is a closed

@@ -94,8 +94,12 @@ def test_the_record_and_show_run_cannot_drift_apart(tmp_path: Path) -> None:
     )
 
     frozen = read_record(store, "paired")
-    # `schema` is the record's own metadata; every other key must be one `show run` surfaces.
-    assert set(frozen) - {"schema"} == set(RECORD_FIELDS)
+    # `schema` and `kind` are the record's own metadata; every other key must be one `show run`
+    # surfaces. `kind` joined them in record `115`: it is not an answer the run computed, it is
+    # what decides WHICH field set the answers are drawn from, so it sits outside the set rather
+    # than inside it. `show run` does surface it, alongside the fields rather than among them.
+    assert set(frozen) - {"schema", "kind"} == set(RECORD_FIELDS)
+    assert frozen["kind"] == "run", "a simulation records itself as a run"
 
     # The assertions that can actually fail: every surfaced field carries a real value, so a
     # builder that silently returned nothing is caught rather than counted.

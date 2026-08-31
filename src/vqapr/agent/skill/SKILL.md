@@ -401,7 +401,9 @@ parsing a formatted string out of the other fields.
 
 `explain` names the section of this skill that explains why the whole class of failure happens and
 how to stop causing it. The set of topic ids is closed and every one of them resolves to a
-"Recovering from…" section below.
+"Recovering from…" section below. It is `null` on a `cli.usage` refusal, and only there: the
+argument parser rejected the command line before any package concept was involved, so there is no
+class of failure to explain — `fix` carries the whole answer.
 
 **`examples` is empty for structural checks, and that is not a bug.** A check on a column's
 *type* has no offending row to quote, so it reports `"examples": [], "example_total": 0`. A check

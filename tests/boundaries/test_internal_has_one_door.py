@@ -39,6 +39,20 @@ PERMITTED: frozenset[str] = frozenset(
         # Frozen by `docs/design/agent-first-surface.md`: unshipped, no new callers, and not to be
         # edited to serve a new requirement. Its `_internal` imports are inherited, not new.
         "src/vqapr/project.py",
+        # `_internal/filelock.py`, added by record `106`. A deliberate exception, on a distinction
+        # this list has to make explicitly or it stops meaning anything.
+        #
+        # This rule exists so that DELETING the four extension adapters stays mechanical: a
+        # deletion whose callers all name one path is four files removed and every stale import
+        # breaking loudly. `filelock` is not an extension authority and is not scheduled for
+        # deletion -- it is a shared primitive, and the structural audit's own target structure
+        # names `_internal/filelock.py` as the single home for the exclusive lock. `workspace.py`
+        # importing it costs the adapter deletion nothing.
+        #
+        # What this entry does NOT license is a second door to the extension authorities. If a
+        # future `_internal` import here is of `_internal/extensions/*`, it belongs behind the
+        # adapters no matter what this comment says.
+        "src/vqapr/workspace.py",
     }
 )
 

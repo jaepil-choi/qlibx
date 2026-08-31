@@ -4,14 +4,14 @@
 `materialization.py`, `venues.py` and `vqapr.open` — on three counts: **no new callers**, no growth,
 no deletion. It then says, in a section titled "What the tripwire does not watch":
 
-> **The tripwire counts importers of `vqapr.public`, which is not one of the five frozen modules.**
-> [...] A reader who runs the only command given here, sees 12, and concludes the whole freeze is
-> intact would be reading a number that never looked.
+> **The tripwire counts importers of `vqapr.public`, which is not one of the five frozen
+> modules.** [...] A reader who runs the only command given here, sees 12, and concludes the whole
+> freeze is intact would be reading a number that never looked.
 
 That is exactly what shipped: `test_the_facade_is_not_reached_up_to.py` watches the facade, and
-**nothing watched the five**. The document records their state on 2026-08-28 and says the numbers are
-written down "so a later reader can tell an inherited edge from a new one" — a comparison no test
-performed.
+**nothing watched the five**. The document records their state on 2026-08-28 and says the numbers
+are written down "so a later reader can tell an inherited edge from a new one" — a comparison no
+test performed.
 
 This file performs it. It pins the inherited edges and fails on a new one, which is the prohibition
 as written: adding is forbidden, and the existing edges are legal precisely because they are

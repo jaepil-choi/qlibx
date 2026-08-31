@@ -6,18 +6,19 @@ workspace는 선언을 보관하고 조회할 뿐 검증하지 않는다. datase
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import os
 import tempfile
 import time as _time
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from dataclasses import replace
 from datetime import date, datetime, time
 from pathlib import Path
 
 import yaml
 
+from vqapr._internal import filelock
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data import scan
@@ -1204,64 +1205,40 @@ class Workspace:
             retry="register matching referenced declarations before retrying",
         )
 
-    @contextlib.contextmanager
-    def _exclusive(self) -> Iterator[None]:
+    def _locked_refusal(self, lock: Path, timeout: float) -> VqaprError:
+        """The refusal a waiter gets when another writer held the workspace for the whole timeout.
+
+        Passed to `filelock.exclusive` rather than raised by it: the shared mutex knows it timed
+        out, and this knows what a workspace is, what a reader should do about it, and which
+        `explain` topic answers the follow-up question.
+        """
+        return _workspace_error(
+            stage=WRITE_STAGE,
+            code=f"{WRITE_STAGE}.locked",
+            requirement=f"workspace at {self.path} must be writable within {timeout:.0f}s",
+            observed=f"another process has held {lock} for the whole timeout",
+            fix=(
+                f"wait for the other writer to finish, or delete {lock} if no writer "
+                "is actually running"
+            ),
+            explain=ExplainTopic.WORKSPACE_STATE,
+            source=FailureSource(file=str(lock)),
+            retry=f"wait for the other writer to finish; if none is running, delete {lock}",
+        )
+
+    def _exclusive(self) -> AbstractContextManager[None]:
         """Hold the workspace for one read-modify-write cycle.
 
-        `O_CREAT | O_EXCL` is the portable primitive here: creating the file succeeds for exactly
-        one process and fails for every other, on Windows and POSIX alike. `fcntl`/`msvcrt` locks
-        would need two implementations and neither survives an NFS mount well.
-
-        The waiting caller retries rather than blocking in the kernel, so it can give up with a
-        typed failure instead of hanging forever behind a holder that will never finish.
+        The mechanism is `_internal/filelock.exclusive`, shared with the catalog store since
+        record `106`. What stays here is the part that is about workspaces rather than about
+        locking: which file, and what a waiter is told when the wait runs out.
         """
-        lock = self.path.parent / WORKSPACE_LOCK_FILENAME
-        lock.parent.mkdir(parents=True, exist_ok=True)
-        deadline = _time.monotonic() + WORKSPACE_LOCK_TIMEOUT
-        handle: int | None = None
-        while True:
-            try:
-                handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                break
-            except FileExistsError:
-                age = _stale_lock_age(lock)
-                if age is not None and age > WORKSPACE_LOCK_STALE_AFTER:
-                    # The holder is gone. Removing the lock races with another waiter doing the
-                    # same thing, which is harmless: whoever loses simply keeps waiting.
-                    with contextlib.suppress(OSError):
-                        lock.unlink()
-                    continue
-                if _time.monotonic() >= deadline:
-                    raise _workspace_error(
-                        stage=WRITE_STAGE,
-                        code=f"{WRITE_STAGE}.locked",
-                        requirement=(
-                            f"workspace at {self.path} must be writable within "
-                            f"{WORKSPACE_LOCK_TIMEOUT:.0f}s"
-                        ),
-                        observed=f"another process has held {lock} for the whole timeout",
-                        fix=(
-                            f"wait for the other writer to finish, or delete {lock} if no writer "
-                            "is actually running"
-                        ),
-                        explain=ExplainTopic.WORKSPACE_STATE,
-                        source=FailureSource(file=str(lock)),
-                        retry=(
-                            "wait for the other writer to finish; if none is running, delete "
-                            f"{lock}"
-                        ),
-                    ) from None
-                _time.sleep(0.02)
-        try:
-            os.write(handle, str(os.getpid()).encode("utf-8"))
-            os.close(handle)
-            handle = None
-            yield
-        finally:
-            if handle is not None:
-                os.close(handle)
-            with contextlib.suppress(OSError):
-                lock.unlink()
+        return filelock.exclusive(
+            self.path.parent / WORKSPACE_LOCK_FILENAME,
+            on_timeout=self._locked_refusal,
+            timeout=WORKSPACE_LOCK_TIMEOUT,
+            stale_after=WORKSPACE_LOCK_STALE_AFTER,
+        )
 
     def _register_declaration(
         self,

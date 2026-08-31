@@ -362,12 +362,41 @@ flowchart TB
 **지금과 다른 점 네 가지.**
 
 1. `public.py`가 없다. `project.py` 하나가 facade다.
-2. `_internal/*_bridge.py`가 없다. `authoring.*`가 곧 engine protocol이다.
+2. `_internal/*_bridge.py`가 없다. `authoring.*`가 곲 engine protocol이다.
 3. `.vqapr/`에 저장소가 하나다.
 4. `flow/`에서 위로 올라가는 화살표(`flow → workspace`, `flow → public`)가 없다.
 
 **층 자체는 architecture §1.2를 그대로 유지한다.** 일곱 layer의 정의와 "시간의 질문으로 층을
-긋는다"는 판단은 이 리팩터링이 건드리는 대상이 아니다. 옮기는 것은 표면과 상태뿐이다.
+긋는다"는 판단은 이 리팩터링이 건드리는 대상이 아니다. 옆기는 것은 표면과 상태뿐이다.
+
+---
+
+> ## ERRATUM — 2026-08-31: 위 목표의 1번은 효력이 없다
+>
+> **무엇이 틀렸나.** 이 절의 다이어그램과 목록 1번은 *"`public.py`가 없다. `project.py`
+> 하나가 facade다"* 라고 적는다. 그 목표는 **도달 불가능하며, canonical ruling을 위반한다.**
+> `docs/implementations/104-which-facade-survives.md`가 이를 측정값으로 뒤집었다.
+>
+> **근거, 요약.** `docs/design/agent-first-surface.md:240-241`의 tracer table은 완전한 CLI
+> 여정에서 `project.py`가 619줄 중 **0줄** 실행된다고 측정한다. `project.py`는 `src/` 내
+> importer가 `vqapr/__init__.py:38` 단 하나다. 반면 `public.py`는 세 verb의 일곱 지점에서
+> import된다(`cli/check.py:45`, `cli/register.py:66`, `cli/run.py:36,48,541,770,804`). 그리고
+> 같은 canonical 문서의 freeze는 양면이다 — *"no new callers"*와 *"no growth"*(`:271-275`).
+> 동작하는 제품을 동결된 모듈로 이사시키는 것은 그 둘을 동시에 깨는다. `public.py`를 지금
+> 지우는 것은 `G008`이고, 두 admission gate가 모두 닫혀 있다.
+>
+> **대신 무엇을 하는가.** 출하된 `vqapr.public`이 살아남고, 그 안의 orchestration 450줄이
+> `flow/`와 `evidence/`로 내려가 진짜로 얇은 export 표면만 남는다(단계 7).
+> `project.py`는 동결된 채로 `G008`에서 예정대로 죽는다. 나머지 세 항목(2–4번)은 유효하다.
+>
+> **왜 승인이 아니라 erratum인가.** 이 문서는 `.agent/project.yaml:canonical_documents`에
+> 없다(그 집합은 `docs/vqapr-prd.md`, `docs/design/agent-first-surface.md`,
+> `gjc-handoff/README.md`). 따라서 canonical 문서는 하나도 바뀌지 않았고 owner 승인도 필요하지
+> 않았다. 반대로 이 결정을 뒤집으려면 `agent-first-surface.md`의 "Which facade ships"와
+> "What frozen means"를 고쳐야 하고, 그것은 **owner만** 승인할 수 있다.
+>
+> 이 절의 나머지 부분은 그대로 둔다 — 틀렸던 결론을 지우는 대신 왜 틀렸는지를 남기는 것이
+> 이 저장소의 방식이기 때문이다.
 
 ---
 

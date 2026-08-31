@@ -130,7 +130,12 @@ def test_a_removed_edge_is_reported_rather_than_blocked() -> None:
             print(f"  {importer} -> {module}")
         print("update PERMITTED_EDGES in the same commit that removed them.")
 
-    assert isinstance(removed, list)
+    # No assertion on `removed` itself: a removal is legitimate and this test exists to report
+    # it, not to gate it. `assert isinstance(removed, list)` stood here and was vacuous --
+    # `sorted()` always returns a list. What is worth asserting is that the comparison ran
+    # against a real, non-empty record of inherited edges, so an emptied PERMITTED_EDGES
+    # cannot make this pass by having nothing to compare.
+    assert PERMITTED_EDGES, "the inherited-edge record must not be empty"
 
 
 def test_materialization_still_has_no_importer_at_all() -> None:

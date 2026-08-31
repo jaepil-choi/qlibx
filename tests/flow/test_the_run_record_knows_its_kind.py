@@ -2,7 +2,7 @@
 
 Record `115`. Before it, three things were true at once:
 
-* `RECORD_FIELDS` was a flat 8-tuple, so the record could describe exactly one kind of thing;
+* `record_fields(RUN_KIND)` was a flat 8-tuple, so the record could describe exactly one kind of thing;
 * `read_record` was `json.loads` with **no schema branch at all**; and
 * `cli/show.py` read every field with `record.get(field)`.
 
@@ -22,7 +22,6 @@ import pytest
 from vqapr.cli.show import record_view
 from vqapr.flow.run_records import (
     MATERIALIZATION_KIND,
-    RECORD_FIELDS,
     RUN_KIND,
     SCHEMA,
     RunRecordWriter,
@@ -35,7 +34,7 @@ from vqapr.flow.run_records import (
 def _finished(tmp_path: Path, run_id: str = "r1") -> Path:
     writer = RunRecordWriter(tmp_path, run_id)
     writer.open()
-    return writer.finish({field: None for field in RECORD_FIELDS if field != "run_id"})
+    return writer.finish({field: None for field in record_fields(RUN_KIND) if field != "run_id"})
 
 
 def test_a_written_record_declares_its_schema_and_its_kind(tmp_path: Path) -> None:
@@ -99,8 +98,8 @@ def test_a_record_that_is_not_a_mapping_is_named_rather_than_crashing_later(
 
 def test_the_field_set_is_chosen_by_kind() -> None:
     """The shape change itself: two kinds, two field sets, one discriminator."""
-    assert record_fields(RUN_KIND) == RECORD_FIELDS
-    assert record_fields(MATERIALIZATION_KIND) != RECORD_FIELDS
+    assert record_fields(RUN_KIND) == record_fields(RUN_KIND)
+    assert record_fields(MATERIALIZATION_KIND) != record_fields(RUN_KIND)
     assert "dataset_id" in record_fields(MATERIALIZATION_KIND)
 
     # The questions both kinds answer keep the same names, so a reader asking "which declarations

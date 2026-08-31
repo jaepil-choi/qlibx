@@ -21,7 +21,6 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
-from vqapr.flow.run_records import RECORD_FIELDS as _RECORD_FIELDS
 from vqapr.flow.run_records import (
     RECORD_FIELDS_BY_KIND,
     RUN_KIND,
@@ -39,7 +38,7 @@ KINDS = ("run", "model", "dataset")
 
 # Imported, not redefined. The record is the artifact and this is one of its readers, so the field
 # set lives beside the record in `flow/run_records.py` and the CLI reads it from there.
-RECORD_FIELDS = _RECORD_FIELDS
+RECORD_FIELDS = record_fields(RUN_KIND)
 
 
 def record_view(record: dict[str, Any]) -> dict[str, Any]:

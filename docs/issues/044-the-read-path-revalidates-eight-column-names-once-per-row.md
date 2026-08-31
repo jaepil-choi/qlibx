@@ -12,6 +12,11 @@ attributed it to `normalize_scalar` — "per-cell revalidation", 2.9M calls — 
 carefully about what that per-cell check buys and why removing it without relocating the finiteness
 check would trade 1.6s for a silent NaN. That reasoning is right about the check it examined.
 
+**Severity is filed separately.** This is one surface of the gap measured in
+[049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md): the identical model
+on a reshaped source is 614x faster with byte-identical output. Ranked alone this reads as a
+moderate optimisation, which is exactly the mis-triage 049 exists to prevent.
+
 **It is about the smaller half.** Inside `normalize_rows`, roughly three quarters of the time is not
 the value check at all. It is the *key* check, which asks the same question of the same eight
 strings once per row.

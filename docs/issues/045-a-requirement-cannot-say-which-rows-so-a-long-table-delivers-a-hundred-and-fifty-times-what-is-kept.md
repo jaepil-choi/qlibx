@@ -1,4 +1,4 @@
-# 045 — A `DataRequirement` can name columns and a window but not which rows, so a long-format dataset delivers 410 rows for every one the model keeps
+# 045 — A `DataRequirement` can name columns and a window but not which rows, so a long-format dataset delivers 153 rows for every one the model keeps
 
 **Status when filed:** open. Found 2026-08-31 by a profiling pass in
 `kwam-enhanced-index/vqapr-performance-testbed/`, against `vqapr-0.2.0a2` (built wheel).
@@ -9,6 +9,9 @@ nothing else); `src/vqapr/data/windows.py` (`AccessRecord`).
 Sibling to [038](038-one-instrument-list-filters-every-requirement.md), which reports that the one
 filter a requirement *does* get is the wrong shape for a second dataset. This reports the filter it
 does not get at all.
+
+**Severity is filed separately.** This is one surface of the gap measured in [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md): the identical model on a reshaped source is 614x faster with byte-identical output. Ranked alone this reads as a moderate optimisation, which is exactly the mis-triage 049 exists to prevent.
+
 
 ## What a requirement can say
 
@@ -35,10 +38,10 @@ instruments:
 ```
 window rows delivered                                          553,560
 after the model's scope + settlement-type test                  36,524   (6.6%)
-after its account-code test as well                              1,350   (0.24%)
+after its account-code test as well — 12 codes for 9 items       3,617   (0.65%)
 ```
 
-**410 rows are read, boxed into a dict, validated, counted, and handed across the boundary for every
+**153 rows are read, boxed into a dict, validated, counted, and handed across the boundary for every
 one the model keeps.** The discarding happens in the first three lines of `compute`:
 
 ```python
@@ -101,12 +104,51 @@ Three properties worth holding to:
 
 ## What to expect, stated honestly
 
-Rows drop 410x. Wall clock will not. The Python passes (about half of the measured window cost —
-see [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md)) fall with the row
-count; the SQL still has to touch the file, and how much duckdb prunes depends on whether
+Rows drop 153x. Wall clock will not fall as far. The Python passes (about half of the measured
+window cost — see [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md)) fall with
+the row count; the SQL still has to touch the file, and how much duckdb prunes depends on whether
 `account_code` and `statement_scope` have usable row-group statistics in the registered parquet. A
-defensible estimate is **4-6x on this model** — 493s becoming 80-120s — with the real number
-knowable only by implementing it and re-running the same ladder.
+defensible estimate is **4-6x on this model**, with the real number knowable only by implementing it
+and re-running the same ladder.
+
+**The upper bound was measured rather than estimated.** The same model logic — its later steps
+called into rather than re-typed — was run against a source whose account axis is pivoted into
+columns and whose scope and settlement tests are pre-applied. Same evaluation instants, same
+instruments, same output fields, same workspace, back to back in one process:
+
+```
+1,600 instruments x 4 evaluations
+
+              wall     per eval    emitted    where it went
+long        806.61s     201.65s      5,098    normalize=428.06s  sql=319.65s  query=43.10s
+wide          1.31s       0.33s      5,098    compute=0.36s  normalize=0.30s  sql=0.22s
+                                                                             614x
+
+output diff, all eight value fields, both directions:  0 rows only in long, 0 only in wide
+source: 84.0 MB -> 0.79 MB     registration: 5.88s -> 0.10s
+```
+
+Identical output, checked before the timing was read: a materialization that is 600x faster and
+slightly different is a different model rather than a faster one.
+
+**That 614x bundles two changes, and only one of them is what this issue asks for:**
+
+| | rows | cells |
+|---|---|---|
+| long, as registered today | 553,560 | 4,428,480 |
+| **predicate pushed down, still long** | **3,617** | 28,936 |
+| pivoted as well | 225 | 3,375 |
+
+A predicate removes the rows the model discards — 153x. The pivot removes the **key columns that
+ride beside every value**: a long row carries five identifying columns to deliver one number, so
+even 3,617 kept rows carry 28,936 cells to deliver ~3,600 values. That is a further 8.6x a predicate
+cannot reach. And the wall gain exceeds both, because the pivoted file is 100x smaller so the scan
+itself got cheap.
+
+So the honest reading is: **a predicate is worth several times here, not several hundred**, and the
+rest of the 614x is the shape. This issue and a columnar path
+([035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md)) are complements rather
+than alternatives — which is also why the workaround below is so effective, and so tempting.
 
 ## The workaround, and why the package should not rely on it
 

@@ -1,5 +1,11 @@
 # 048 — Registration cost follows `rows x key_fields`, not file size, so the guidance that says to keep vendor grain does not mention that it triples the bill
 
+**Status: CLOSED 2026-09-01, docs-only, no implementation record.** `SKILL.md`'s registration
+sequence now prices both sides of the ledger in one place: registration at `rows x key width` and
+roughly 50M row-keys/second, and — the number this issue exists to contrast itself against — the
+read cost that [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md)
+measures. The "what not to do" below stands: `key_check` was not touched.
+
 **Status when filed:** open, and **low severity by design** — this is a documentation gap with a
 measured basis, not a defect. Found 2026-08-31 in
 `kwam-enhanced-index/vqapr-performance-testbed/`, against `vqapr-0.2.0a2` (built wheel).

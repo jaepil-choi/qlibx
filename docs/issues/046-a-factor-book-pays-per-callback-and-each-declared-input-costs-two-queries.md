@@ -96,7 +96,7 @@ paying one round trip per session instead of six.
 **It does not make the 2,795-name book cheap.** Above ~1,200 names the universe-dependent term takes
 over — a `WHERE instrument IN (...)` list of 2,795 literals, and correspondingly more rows through
 the same accessor that [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md) and
-[045](045-a-requirement-cannot-say-which-rows-so-a-long-table-delivers-four-hundred-times-what-is-kept.md)
+[045](045-a-requirement-cannot-say-which-rows-so-a-long-table-delivers-a-hundred-and-fifty-times-what-is-kept.md)
 describe. The two halves are separable and both are real: the floor is what a 300-name book pays,
 the slope is what a 2,795-name book adds.
 

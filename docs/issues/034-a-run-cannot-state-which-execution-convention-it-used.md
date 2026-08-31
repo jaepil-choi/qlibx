@@ -1,5 +1,19 @@
 # 034 — A run cannot state, and `show run` cannot report, which execution convention it used
 
+**Status: STILL OPEN as of 2026-09-01, and the record that was supposed to close it did not.**
+Step 10a of the structural plan carried this issue's acceptance verbatim — *"two runs at different
+execution conventions produce records that **differ in `execution`**"* — and
+`docs/implementations/115-the-run-record-knows-its-kind.md` closed Step 10a without it.
+`_RUN_FIELDS` at `src/vqapr/flow/run_records.py:67` is `run_id`, `account`, `tables`, `contract`,
+`source_digest`, `declared_digest`, `roster`, `period`. There is no `execution`, and `contract` is
+the constraint report (`flow/records.py:100`), not a convention. Record 115 delivered the
+kind discriminator and the reader-side schema check and does not mention 034 at all.
+
+**What 10a did buy this issue:** the record is now kind-discriminated with a versioned schema and a
+reader that refuses a major-version mismatch, so adding `execution` is now an additive field on a
+declared field set rather than a shape change to a flat tuple. The remaining work is the field and
+the ordering vocabulary behind it, not the plumbing. See the erratum in record 115.
+
 **Status when filed:** open. Found 2026-08-30 by the first-time-user journey in
 `kaist-thesis/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-009**
 (`blocked` / `code`) and **F-016** (`papercut` / `code`); one issue, because F-016 is the same gap

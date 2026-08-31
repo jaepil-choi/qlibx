@@ -141,3 +141,30 @@ Its validation table claimed
 `tests/flow/test_a_damaged_roster_pointer_is_not_no_roster.py | 7 passed (was 5; +2 for R1)`. That
 line was false: the file had 5 test functions before and after, collecting 7 through pre-existing
 parametrisation, and R1 had no tests at all. The real tests are in this record's branch.
+
+## Erratum — appended 2026-09-01: one of Step 10a's two acceptance clauses was not met
+
+The plan's acceptance for Step 10a had two clauses. The first — *"all blocks present for a
+simulation"* — landed. The second did not:
+
+> two runs at different execution conventions produce records that **differ in `execution`** — the
+> distinction issue 034 says is currently unavailable.
+
+`_RUN_FIELDS` (`src/vqapr/flow/run_records.py:67`) carries no `execution`, and the `contract` block
+it does carry is the constraint report built by `flow/records.py:100`, which answers a different
+question. Nothing in this record mentions issue 034, so the miss was not a judgement call recorded
+and defended — it was simply not noticed, by me writing the record or by the review reading it.
+
+**This is the campaign's own pre-mortem scenario 2 in its mildest form** — green tree, correct
+metric, an acceptance clause that quietly did not ship. The suite passed because no test asserted
+the clause; the clause lived only in the plan.
+
+Issue 034 is therefore re-marked open rather than being carried as closed by this record. What Step
+10a genuinely bought it is stated there: a kind-discriminated field set with a versioned schema and
+a reader that refuses a major-version mismatch, which turns `execution` into an additive field
+rather than a shape change. **The plumbing this issue needed exists; the field does not.**
+
+**The process lesson, and it is not "review harder".** An acceptance clause that no test names is
+an acceptance clause that can vanish between the plan and the record without anything going red. A
+clause stated as a metric delta or a test — which this campaign's own escalation gate item 5
+requires — would have failed loudly here. This one was stated as prose about two hypothetical runs.

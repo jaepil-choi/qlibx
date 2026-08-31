@@ -463,6 +463,14 @@ identity 함수로 축소 → (3) 삭제. **진척 지표는 bridge lines 총합
 occurrence 순회와 상태 전이만 남긴다. **`pytest -m ""`(slow 14개 journey 포함) 전체 통과가
 단계 완료 조건**이다 — `.agent/project.yaml`이 run assembly 변경에 `test_all`을 요구한다.
 
+> **줄 수 인수조건은 이 문서에서 삭제됐다 (2026-09-01 오너 결정, 기록 `118`).** 이 단계의
+> 인수조건은 *"`flow/`의 어떤 파일도 800줄을 넘지 않는다"*였다. 그 형태의 조건은 기록 `117`에서
+> Step 11을 되돌리게 만들었고 — 같은 단계의 "pure move" 조건과 서로 모순됐다 — 두 번은
+> 무의미했다(Step 7의 250줄은 도달 불가로 판명돼 기록 `111`에서 개정됐고, 그것을 감시하던
+> 상한은 실측값보다 69줄 위에 설정돼 기록 `113`에서 교정됐다). **이 단계가 실제로 요구하는
+> 것은 절단선 네 개가 각자의 파일에 있고 `SimulationFlow`에 규칙이 남지 않는 것**이며, 그것은
+> 형태 조건이지 크기 조건이 아니다. 줄 수는 §5에서 계속 측정하되 관측값으로만 읽는다.
+
 ---
 
 ## 4. 하지 않을 것
@@ -496,7 +504,7 @@ grep -rn "^\s\+from vqapr\|^\s\+import vqapr" --include=*.py src/vqapr | wc -l
 # 락 구현 수 (목표 1)
 grep -rl "O_CREAT | os.O_EXCL" --include=*.py src/vqapr | wc -l
 
-# god module (목표: 모두 < 800)
+# god module — 관측값으로 읽고, 임계값으로 읽지 않는다 (2026-09-01 오너 결정, 기록 118)
 find src/vqapr -name '*.py' -exec wc -l {} + | sort -rn | head -5
 
 # 게이트

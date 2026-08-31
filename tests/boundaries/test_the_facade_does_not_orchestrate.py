@@ -13,8 +13,9 @@ consequences were not theoretical:
 The bodies moved to the layers that own them. `vqapr.public` re-exports every one, so no caller and
 no emitted scaffold changed a line. This file stops the orchestration coming back.
 
-It is a size and shape check rather than a list of banned names, because the failure mode is
-gradual: one helper at a time, each defensible on its own.
+It is a shape check rather than a list of banned names, because the failure mode is gradual: one
+helper at a time, each defensible on its own. It was a size check too until 2026-09-01; see the
+note above `MAX_BODY_STATEMENTS` for why the size half was retired and what it never measured.
 """
 
 from __future__ import annotations
@@ -24,26 +25,21 @@ import pathlib
 
 PUBLIC = pathlib.Path("src/vqapr/public.py")
 
-MAX_LINES = 328
-"""The exact current size. A ratchet, not a budget.
-
-**This was 420 and that was wrong.** Step 7's acceptance said "under 250 lines", the file came out
-at 351, and the ceiling meant to police that was set 69 lines ABOVE the actual value and 170 above
-the target -- so the next step could have added 69 lines to the documented surface and stayed green.
-A configured gate that is open is not a gate, which is the finding record `105` opened this campaign
-with. Caught by an external review of Step 7 (`docs/refactoring/2026-08-31-post-step-07-review.md`,
-R8) and corrected in record `113`.
-
-**Why the 250 target was not reachable, measured rather than argued.** Of the 328 lines here,
-115 are imports and 139 are `__all__` -- 254 lines of pure surface declaration for the 132 names
-this module exists to export. The remaining ~74 are the module docstring, blank lines, and
-eight thin `register_*` delegations. Reaching 250 would have required dropping public names, which
-is a different decision from moving orchestration out, and one nobody took. Record `111` states
-this as an amendment to the acceptance rather than letting this constant hide it.
-
-Lower it whenever the real number drops; raise it only in a commit that adds a public name and says
-so.
-"""
+# A line-count ceiling on this file used to live here (`MAX_LINES`, last 328). The owner retired
+# line-count caps as acceptance criteria on 2026-09-01; record `118` carries the ruling and the
+# three measurements behind it. The short version is that the number never measured the thing it
+# was named for. Of the 328 lines it last pinned, 254 were imports and `__all__` -- pure surface
+# declaration for the 132 names this module exists to export -- so the cap was mostly counting how
+# many things `vqapr.public` is a surface FOR, and got tighter every time the package exported
+# something new. Step 7's acceptance ("under 250") was unreachable for that reason and had to be
+# amended in record `111`; the ceiling policing it was then set 69 lines above the real value and
+# had to be corrected in record `113`; and in record `117` the same style of cap (800 lines per
+# workspace module) contradicted its own step's other clause and cost a Step-11 revert.
+#
+# What replaced it is the check below, which was always the one carrying the meaning: a facade
+# delegates and does not compute. That is a shape, and shape is what "this file has outgrown its
+# role" actually is. A file can double in `__all__` without breaking it and cannot smuggle a run
+# loop past it.
 
 MAX_BODY_STATEMENTS = 6
 """How many statements a function in the facade may hold.
@@ -97,24 +93,6 @@ def test_no_function_in_the_facade_holds_a_body_of_work() -> None:
         + f"\n\nThe limit is {MAX_BODY_STATEMENTS}. `public.py` is the documented surface; work "
         "belongs in the layer that owns it and is re-exported here. Record 111 moved 450 lines "
         "out for this reason, and the fan-in it caused is docs/issues/028."
-    )
-
-
-def test_the_facade_stays_a_surface_rather_than_a_module() -> None:
-    """A crude ceiling, so a slow accumulation of anything is visible."""
-    total = len(PUBLIC.read_text(encoding="utf-8").splitlines())
-
-    assert total == MAX_LINES, (
-        f"`public.py` is {total} lines and MAX_LINES says {MAX_LINES}. This is an exact ratchet, "
-        "like its sibling in test_a_deferred_import_states_its_reason.py: a ceiling that sits "
-        "above the real value is slack the next commit can fill, which is the defect record 113 "
-        "corrected once already. Lower it when the file shrinks; raise it only in a commit that "
-        "adds a public name and says which."
-    )
-    assert total <= MAX_LINES, (
-        f"`public.py` is {total} lines, above the {MAX_LINES} ceiling. It was 776 before record 111. "
-        "If the growth is a new public name, raise the ceiling in the same commit and say which "
-        "name. If it is a function body, move it to the layer that owns it."
     )
 
 

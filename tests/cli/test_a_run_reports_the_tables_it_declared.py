@@ -89,7 +89,7 @@ def test_the_counter_is_named_for_what_it_counts() -> None:
     """
     # Record `111` moved `freeze_record` out of the facade into the layer that owns evidence
     # production; the counter travelled with it.
-    from vqapr.evidence import records
+    from vqapr.flow import records
 
     text = Path(records.__dict__["__file__"]).read_text(encoding="utf-8")
 

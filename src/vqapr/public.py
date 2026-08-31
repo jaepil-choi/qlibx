@@ -44,13 +44,6 @@ from vqapr.domain.roster import InstrumentRoster, build_roster
 from vqapr.domain.roster_export import export_roster
 from vqapr.domain.timestamps import LocalInstantDeclaration, declare_local_instant
 from vqapr.evidence.artifacts import SimulationFailure
-
-# Orchestration, evidence and roster reading moved to their owning layers by record `111`.
-# Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
-# deliberate: it marks these as intentional re-exports, which is both what they are and what stops
-# a lint autofix from deleting them as unused.
-from vqapr.evidence.records import contract_report as contract_report
-from vqapr.evidence.records import freeze_record as freeze_record
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.costs import FillCost, SideCost
@@ -100,6 +93,13 @@ from vqapr.flow.materialize import (
 )
 from vqapr.flow.orchestration import preflight_run as preflight_run
 from vqapr.flow.orchestration import run as run
+
+# Orchestration, evidence and roster reading moved to their owning layers by record `111`.
+# Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
+# deliberate: it marks these as intentional re-exports, which is both what they are and what stops
+# a lint autofix from deleting them as unused.
+from vqapr.flow.records import contract_report as contract_report
+from vqapr.flow.records import freeze_record as freeze_record
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig

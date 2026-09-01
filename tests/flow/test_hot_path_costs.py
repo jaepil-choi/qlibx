@@ -10,6 +10,8 @@ See `docs/code-review/2026-08-19-vqapr-performance.md` sections 6 and 8.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -335,6 +337,18 @@ def halted_source(tmp_path: Path) -> SourceSpec:
         }
         for index, stamp in enumerate(_BOUND_SESSIONS[-5:])
     )
+    # A name that stops publishing *during* a run, rather than before it. A bound proved while it
+    # was still dense outlives that callback, so this is the name that says the proof and the
+    # bound it is applied with are the same pair.
+    rows.extend(
+        {
+            "available_at": stamp,
+            "instrument": "STOPS",
+            "close": Decimal(80 + index),
+            "volume": index,
+        }
+        for index, stamp in enumerate(_BOUND_SESSIONS[:386])
+    )
     source = tmp_path / "halted.parquet"
     pq.write_table(
         pa.Table.from_pylist(
@@ -363,18 +377,60 @@ def bound_every_source(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scan, "ROWS_BOUND_MIN_BYTES", 0)
 
 
-def _observation_rows(spec: SourceSpec, *, rows: int, session: scan.ScanSession | None):
+_BOUND_NAMES = ("AAA", "BBB", "HALTED", "LATE")
+
+
+def _observation_rows(
+    spec: SourceSpec,
+    *,
+    rows: int,
+    session: scan.ScanSession | None,
+    evaluation_time: datetime | None = None,
+    instruments: tuple[str, ...] = _BOUND_NAMES,
+):
     return scan.observation_rows(
         spec,
         instrument_field="instrument",
         available_at_field="available_at",
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "volume": "volume"},
-        instruments=("AAA", "BBB", "HALTED", "LATE"),
-        evaluation_time=_BOUND_SESSIONS[-1],
+        instruments=instruments,
+        evaluation_time=_BOUND_SESSIONS[-1] if evaluation_time is None else evaluation_time,
         rows=rows,
         session=session,
     )
+
+
+@contextmanager
+def _counted_statements() -> Iterator[list[str]]:
+    """Every statement the session issues, in order.
+
+    Counted at `ScanSession.connection` because that is the one door: the estimate, the grid and
+    the read all go through it. The cursor setup inside it does not, which is the intent -- what
+    is being counted is round trips per callback, not what opening a source costs once.
+    """
+    issued: list[str] = []
+    original = scan.ScanSession.connection
+
+    class _Counting:
+        __slots__ = ("_inner",)
+
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def execute(self, sql: str, *args: object, **kwargs: object) -> object:
+            issued.append(sql)
+            return self._inner.execute(sql, *args, **kwargs)  # type: ignore[attr-defined]
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+    def connection(self: scan.ScanSession, spec: SourceSpec) -> object:
+        return _Counting(original(self, spec))
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(scan.ScanSession, "connection", connection)
+        yield issued
 
 
 @pytest.mark.parametrize("rows", [1, 5, 60, 120])
@@ -433,19 +489,80 @@ def test_the_instant_grid_is_read_once_per_source_for_the_whole_run(
 
 
 def test_a_small_source_is_never_probed_for_a_lower_bound(halted_source: SourceSpec) -> None:
-    """The gate, not the estimate. An extra statement per query is a loss on a small source."""
-    calls = 0
-    original = scan._rows_lower_bound
-
-    def counting(*args, **kwargs):  # type: ignore[no-untyped-def]
-        nonlocal calls
-        calls += 1
-        return original(*args, **kwargs)
-
+    """The gate, not the estimate. An extra statement is a loss on a source read in one gulp."""
     with scan.ScanSession() as session:
         assert session.source_bytes(halted_source) < scan.ROWS_BOUND_MIN_BYTES
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(scan, "_rows_lower_bound", counting)
+        with _counted_statements() as issued:
             _observation_rows(halted_source, rows=5, session=session)
-        assert calls == 1
+        assert len(issued) == 1, "a gated-out source pays for the read and nothing else"
         assert session._grids == {}, "a gated-out source must not pay for a grid"
+        assert session._bounds == {}, "and has no bound to prove"
+
+
+# --------------------------------------------------------------------------------------
+# 046: one round trip per declared input
+# --------------------------------------------------------------------------------------
+
+_LADDER = _BOUND_SESSIONS[380::4]
+"""Evaluation times late enough for a `rows=5` bound to exist, spread far enough apart that the
+grid position moves several instants between callbacks. LATE lists inside this range and STOPS
+falls silent inside it."""
+
+
+def test_a_declared_input_costs_one_statement_per_callback(
+    halted_source: SourceSpec, bound_every_source: None
+) -> None:
+    """046 acceptance 1: two statements per declared input become one.
+
+    The first callback pays for what the run then keeps -- the source's instant grid, and the
+    proof that says which instruments the bound is not safe for. Every callback after it reads
+    with a single statement, because the read carries the next callback's proof out with it
+    instead of asking for it separately.
+    """
+    with scan.ScanSession() as session:
+        counts = []
+        for stamp in _LADDER:
+            with _counted_statements() as issued:
+                _observation_rows(halted_source, rows=5, session=session, evaluation_time=stamp)
+            counts.append(len(issued))
+        assert counts[0] == 3, "grid, proof, read"
+        assert counts[1:] == [1] * (len(_LADDER) - 1)
+        # One statement is also what a bound nobody can use costs, so say which one this was:
+        # the proof exempts the two sparse names and bounds the other two.
+        (kept,) = session._bounds.values()
+        assert set(kept.unbounded) == {"HALTED", "LATE"}
+
+
+@pytest.mark.parametrize("rows", [1, 5, 60])
+def test_a_proof_that_outlives_its_callback_still_returns_the_unbounded_result(
+    halted_source: SourceSpec, bound_every_source: None, rows: int
+) -> None:
+    """046 acceptance 2: a sparse name gets exactly what the unbounded query would have given.
+
+    The proof is taken once and applied at later evaluation times, so this walks the ladder and
+    compares every callback against the same read with no session -- the form that has no bound
+    to be wrong about. Three names make it mean something: HALTED stopped publishing 340 sessions
+    before the ladder begins, LATE lists partway through it, and STOPS falls silent inside it
+    while a proof taken when it was dense is still being applied.
+    """
+    names = (*_BOUND_NAMES, "STOPS")
+    seen: set[str] = set()
+    with scan.ScanSession() as session:
+        for stamp in _LADDER:
+            bounded = _observation_rows(
+                halted_source, rows=rows, session=session, evaluation_time=stamp, instruments=names
+            )
+            reference = _observation_rows(
+                halted_source, rows=rows, session=None, evaluation_time=stamp, instruments=names
+            )
+            assert bounded == reference, f"the bound changed the answer at {stamp:%Y-%m-%d}"
+            # The proof the read carries for the next callback is not part of the answer. Record
+            # 119 took the normalization out of the read path, so nothing between here and
+            # `ObservationBatch._trusted` would notice a column that leaked; and the shape test
+            # in `tests/data/test_observation_batch_shape.py` builds its store without a session,
+            # which means it never reaches the bounded form this could leak from.
+            assert all(
+                sorted(row) == ["available_at", "close", "instrument", "volume"] for row in bounded
+            ), "a bounded read must return the declared fields and nothing else"
+            seen.update(str(row["instrument"]) for row in bounded)
+    assert seen == set(names), "a ladder that never reads the sparse names proves nothing"

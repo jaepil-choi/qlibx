@@ -212,13 +212,14 @@ class ScanSession:
     매번 버려진다.
     """
 
-    __slots__ = ("_connections", "_database", "_grids", "_sizes")
+    __slots__ = ("_bounds", "_connections", "_database", "_grids", "_sizes")
 
     def __init__(self) -> None:
         self._database: duckdb.DuckDBPyConnection | None = None
         self._connections: dict[str, duckdb.DuckDBPyConnection] = {}
         self._grids: dict[tuple[str, str], tuple[object, ...]] = {}
         self._sizes: dict[str, int] = {}
+        self._bounds: dict[tuple[object, ...], _RowsBound] = {}
 
     def connection(self, spec: SourceSpec) -> duckdb.DuckDBPyConnection:
         _require_path(spec)
@@ -264,6 +265,18 @@ class ScanSession:
             grid = self._grids[key] = tuple(row[0] for row in rows)
         return grid
 
+    def rows_bound(self, key: tuple[object, ...]) -> _RowsBound | None:
+        """The lower bound already proved for one declared read, if this run has proved one.
+
+        Keyed by everything the proof is about -- source, fields, instruments, declared rows --
+        so a read that asks a different question does not inherit another's answer. What makes
+        one answer serve a later callback is argued in `_rows_bound`.
+        """
+        return self._bounds.get(key)
+
+    def remember_rows_bound(self, key: tuple[object, ...], bound: _RowsBound) -> None:
+        self._bounds[key] = bound
+
     def source_bytes(self, spec: SourceSpec) -> int:
         """Total parquet bytes behind one source, measured once per run."""
         key = spec.path.as_posix()
@@ -277,6 +290,7 @@ class ScanSession:
     def close(self) -> None:
         self._grids.clear()
         self._sizes.clear()
+        self._bounds.clear()
         while self._connections:
             _, con = self._connections.popitem()
             con.close()
@@ -714,16 +728,77 @@ while a guess that is too loose merely gives back part of the saving.
 ROWS_BOUND_MIN_BYTES = 16 * 1024 * 1024
 """Below this much parquet, a `RowsLookback` query is read without estimating a bound.
 
-Estimating costs one extra statement per query -- the check that says which instruments the bound
-would have changed the answer for. On a real warehouse that check is worth it: 210 MB of daily
-prices went from 165 ms to 88 ms per query. On a small source it is pure overhead, because duckdb
-reads the whole thing in less time than the extra round trip takes; measured on a 200 KB fixture
-panel, estimating made a 2,940-occurrence run 28% *slower*. So the estimate is gated on the only
-thing that decides which regime a source is in, and the gate is measured once per run.
+Estimating costs a statement -- the check that says which instruments the bound would have
+changed the answer for -- and the bounded query carries the aggregate that keeps that check
+current. On a real warehouse the check is worth it: 210 MB of daily prices went from 165 ms to
+88 ms per query. On a small source it is pure overhead, because duckdb reads the whole thing in
+less time than deciding not to takes; measured on a 200 KB fixture panel, and against the earlier
+form that re-checked on every query, estimating made a 2,940-occurrence run 28% *slower*. So the
+estimate is gated on the only thing that decides which regime a source is in, and the gate is
+measured once per run.
 """
 
+_PROOF_PREFIX = "__vqapr_proof_"
+"""Column prefix for the counts a bounded read carries for the next one. Stripped before return."""
 
-def _rows_lower_bound(
+
+@dataclass(frozen=True, slots=True)
+class _RowsBound:
+    """A lower bound for a `RowsLookback` query, and what it is not safe for.
+
+    A `RowsLookback` declares a count, not a span, so there is no bound to push down and the
+    window is evaluated over the whole history of the source on every callback. Applied naively a
+    bound silently corrupts the result: a halted or delisted name whose last observation predates
+    the bound simply disappears, and the run values that holding from a price that is no longer
+    there. No error is raised; the number just changes.
+
+    So the bound is a guess and the guess is proved. An instrument that already has `rows`
+    non-null values of *every* declared field inside the bound is provably unaffected by it --
+    its newest `rows` values all lie above the bound, which is exactly what the window keeps.
+    Every other instrument, including one that published nothing in the window at all, is listed
+    in `unbounded` and read without a bound, in the same statement, so the result is the one the
+    unbounded query would have produced.
+
+    `cut` is the position `lower` was taken at in the source's instant grid, and it is what makes
+    the proof outlive the callback that took it -- see `_rows_bound`.
+    """
+
+    lower: object
+    unbounded: tuple[str, ...]
+    cut: int
+
+
+def _rows_bound_guess(
+    spec: SourceSpec,
+    *,
+    available_at_field: str,
+    evaluation_time: object,
+    rows: int,
+    session: ScanSession,
+) -> tuple[object, int] | None:
+    """The bound to aim for, and the grid position it was taken at. Arithmetic, not a statement.
+
+    Returns `None` when there is not enough history to bound, or when the source is small enough
+    that reading all of it is cheaper than deciding not to.
+    """
+    if session.source_bytes(spec) < ROWS_BOUND_MIN_BYTES:
+        return None
+    grid = session.instant_grid(spec, available_at_field)
+    wanted = rows * _ROWS_BOUND_FACTOR
+    if len(grid) <= wanted:
+        return None
+    try:
+        cut = bisect_right(grid, evaluation_time)  # type: ignore[type-var]
+    except TypeError:
+        # A naive availability column against an aware evaluation time, or vice versa. The
+        # unbounded query lets duckdb resolve that; guessing here must not be what raises.
+        return None
+    if cut <= wanted:
+        return None
+    return grid[cut - wanted], cut
+
+
+def _prove_rows_bound(
     spec: SourceSpec,
     *,
     instrument_field: str,
@@ -732,41 +807,15 @@ def _rows_lower_bound(
     instruments: Sequence[str],
     evaluation_time: object,
     rows: int,
+    lower: object,
+    cut: int,
     session: ScanSession,
-) -> tuple[object | None, tuple[str, ...]]:
-    """A lower bound for a `RowsLookback` query, plus the instruments it is not safe for.
+) -> _RowsBound:
+    """Ask the source which instruments `lower` would have changed the answer for. One statement.
 
-    A `RowsLookback` declares a count, not a span, so there is no bound to push down and the
-    window is evaluated over the whole history of the source on every callback. Applied naively a
-    bound silently corrupts the result: a halted or delisted name whose last observation predates
-    the bound simply disappears, and the run values that holding from a price that is no longer
-    there. No error is raised; the number just changes.
-
-    So the bound is a guess and the guess is checked. An instrument that already has `rows`
-    non-null values of *every* declared field inside the bound is provably unaffected by it --
-    its newest `rows` values all lie above the bound, which is exactly what the window keeps.
-    Every other instrument, including one that published nothing in the window at all, is
-    returned here and read without a bound.
-
-    Returns `(None, ())` when there is not enough history to bound, or when the source is small
-    enough that reading all of it is cheaper than deciding not to.
+    This runs once per declared read per run. Afterwards the read carries its own proof forward
+    (`_rows_bound`), so this is the cold start rather than a per-callback cost.
     """
-    if session.source_bytes(spec) < ROWS_BOUND_MIN_BYTES:
-        return None, ()
-    grid = session.instant_grid(spec, available_at_field)
-    wanted = rows * _ROWS_BOUND_FACTOR
-    if len(grid) <= wanted:
-        return None, ()
-    try:
-        cut = bisect_right(grid, evaluation_time)  # type: ignore[type-var]
-    except TypeError:
-        # A naive availability column against an aware evaluation time, or vice versa. The
-        # unbounded query lets duckdb resolve that; guessing here must not be what raises.
-        return None, ()
-    if cut <= wanted:
-        return None, ()
-    lower = grid[cut - wanted]
-
     instrument = _quote(instrument_field)
     available = _quote(available_at_field)
     counts = ", ".join(f"count({_quote(physical)})" for physical in physical_fields)
@@ -787,7 +836,62 @@ def _rows_lower_bound(
         for name in instruments
         if name not in observed or any(count < rows for count in observed[name])
     )
-    return lower, unbounded
+    return _RowsBound(lower, unbounded, cut)
+
+
+def _rows_bound(
+    spec: SourceSpec,
+    *,
+    key: tuple[object, ...],
+    instrument_field: str,
+    available_at_field: str,
+    physical_fields: tuple[str, ...],
+    instruments: Sequence[str],
+    evaluation_time: object,
+    rows: int,
+    cut: int,
+    lower: object,
+    session: ScanSession,
+) -> _RowsBound:
+    """The proof this read applies, taken from the run when one it already holds still covers it.
+
+    A proof is a claim about a *pair*: this bound, at that grid position. It survives to a later
+    position without being re-taken, because both halves of what it says are monotone in
+    evaluation time.
+
+    Read the claim as "these instruments have `rows` non-null values of every field between
+    `lower` and here". Move the near end forward and the window only grows, so an instrument that
+    had `rows` values still has them: what was proved safe stays safe, and the exempt list stays a
+    superset of what is unsafe now -- which is the direction that keeps the answer right. An
+    instrument that has since become safe is merely read unbounded for nothing.
+
+    The far end does not move on its own. `lower` stays where it was proved, one callback's worth
+    of grid behind the bound this callback could have guessed, so a reused proof gives back a
+    little of the saving and never any of the result. The bound the caller aims for next is proved
+    by the read itself (`_PROOF_PREFIX`), so the trailing distance is one callback's, not the
+    run's.
+
+    Positions rather than instants because the grid is every distinct availability instant in the
+    source: between two adjacent positions there are no rows to count, so equal positions are the
+    same claim.
+    """
+    held = session.rows_bound(key)
+    if held is not None and held.cut <= cut:
+        return held
+    proved = _prove_rows_bound(
+        spec,
+        instrument_field=instrument_field,
+        available_at_field=available_at_field,
+        physical_fields=physical_fields,
+        instruments=instruments,
+        evaluation_time=evaluation_time,
+        rows=rows,
+        lower=lower,
+        cut=cut,
+        session=session,
+    )
+    session.remember_rows_bound(key, proved)
+    return proved
 
 
 def observation_rows(
@@ -819,37 +923,62 @@ def observation_rows(
     placeholders = ", ".join("?" for _ in instruments)
     predicates = [f"{available} <= ?", f"{instrument} IN ({placeholders})"]
     parameters: list[object] = [evaluation_time, *instruments]
+    physical_fields = tuple(dict.fromkeys(fields.values()))
+    aimed: tuple[object, int] | None = None
+    bound_key: tuple[object, ...] = ()
     if lower_bound is not None:
         predicates.append(f"{available} >= ?")
         parameters.append(lower_bound)
     elif rows is not None and session is not None:
         # A RowsLookback carries no bound of its own, so without this the window below is
-        # evaluated over the source's entire history on every callback. `_rows_lower_bound`
-        # returns a bound together with the instruments it would have changed the answer for;
-        # those are read with no bound at all, in the same statement, so the result is the one
-        # the unbounded query would have produced. The estimate needs a session because it is
-        # only worth making when the grid it reads can be kept for the rest of the run.
-        estimated, unbounded_instruments = _rows_lower_bound(
+        # evaluated over the source's entire history on every callback. `_rows_bound` returns a
+        # bound together with the instruments it would have changed the answer for; those are
+        # read with no bound at all, in the same statement, so the result is the one the
+        # unbounded query would have produced -- see `_RowsBound`. The bound needs a session
+        # because it is only worth taking when the grid it reads, and the proof it takes, can be
+        # kept for the rest of the run.
+        aimed = _rows_bound_guess(
             spec,
-            instrument_field=instrument_field,
             available_at_field=available_at_field,
-            physical_fields=tuple(dict.fromkeys(fields.values())),
-            instruments=instruments,
             evaluation_time=evaluation_time,
             rows=rows,
             session=session,
         )
-        if estimated is not None and len(unbounded_instruments) < len(instruments):
-            if unbounded_instruments:
-                exempt = ", ".join("?" for _ in unbounded_instruments)
-                predicates.append(f"({available} >= ? OR {instrument} IN ({exempt}))")
-                parameters.append(estimated)
-                parameters.extend(unbounded_instruments)
-            else:
-                predicates.append(f"{available} >= ?")
-                parameters.append(estimated)
+        if aimed is not None:
+            bound_key = (
+                spec.path.as_posix(),
+                instrument_field,
+                available_at_field,
+                physical_fields,
+                rows,
+                tuple(instruments),
+            )
+            applied = _rows_bound(
+                spec,
+                key=bound_key,
+                instrument_field=instrument_field,
+                available_at_field=available_at_field,
+                physical_fields=physical_fields,
+                instruments=instruments,
+                evaluation_time=evaluation_time,
+                rows=rows,
+                cut=aimed[1],
+                lower=aimed[0],
+                session=session,
+            )
+            if len(applied.unbounded) < len(instruments):
+                if applied.unbounded:
+                    exempt = ", ".join("?" for _ in applied.unbounded)
+                    predicates.append(f"({available} >= ? OR {instrument} IN ({exempt}))")
+                    parameters.append(applied.lower)
+                    parameters.extend(applied.unbounded)
+                else:
+                    predicates.append(f"{available} >= ?")
+                    parameters.append(applied.lower)
     where = " AND ".join(predicates)
 
+    proofs: list[str] = []
+    proof_parameters: list[object] = []
     projections = [
         f"{available} AS {_quote('available_at')}",
         f"{instrument} AS {_quote('instrument')}",
@@ -877,17 +1006,31 @@ def observation_rows(
             projections.append(
                 f"CASE WHEN {selected} THEN {column} ELSE NULL END AS {_quote(semantic)}"
             )
+        if aimed is not None:
+            # The proof for the *next* callback, taken from rows this one is reading anyway. The
+            # bound it proves is at or above the one applied above, so the rows that decide it
+            # are all inside the window already scanned, and counting them costs no statement.
+            # An instrument that keeps no row here is absent from the answer and is treated as
+            # unproved, which is the safe direction.
+            for index, physical in enumerate(physical_fields):
+                proofs.append(
+                    f"count(CASE WHEN {available} >= ? THEN {_quote(physical)} END) "
+                    f"OVER (PARTITION BY {instrument}) AS {_quote(f'{_PROOF_PREFIX}{index}')}"
+                )
+                proof_parameters.append(aimed[0])
+                projections.append(_quote(f"{_PROOF_PREFIX}{index}"))
         sql = (
-            f"WITH gated AS (SELECT *, {', '.join(ranks)} FROM {_relation(spec)} WHERE {where}) "
+            f"WITH gated AS (SELECT *, {', '.join((*ranks, *proofs))} FROM {_relation(spec)} "
+            f"WHERE {where}) "
             f"SELECT {', '.join(projections)} FROM gated WHERE {' OR '.join(keep)} "
             f"ORDER BY {ascending}"
         )
 
     borrowed = _Borrowed(spec, session)
     try:
-        cursor = borrowed.connection.execute(sql, parameters)
+        cursor = borrowed.connection.execute(sql, [*proof_parameters, *parameters])
         names = tuple(description[0] for description in cursor.description)
-        return tuple(dict(zip(names, row, strict=True)) for row in cursor.fetchall())
+        fetched = cursor.fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
             stage="source.scan.observations",
@@ -912,3 +1055,19 @@ def observation_rows(
         ) from exc
     finally:
         borrowed.close()
+
+    if aimed is None or session is None:
+        return tuple(dict(zip(names, row, strict=True)) for row in fetched)
+
+    # A bound was aimed for, so the answer carries its proof: one count per physical field,
+    # appended after the declared ones. Read it, keep it for the next callback, drop it here.
+    carried = names[: len(names) - len(proofs)]
+    counts = range(len(carried), len(names))
+    column = names.index("instrument")
+    proved = {row[column] for row in fetched if all(row[index] >= rows for index in counts)}
+    session.remember_rows_bound(
+        bound_key,
+        _RowsBound(aimed[0], tuple(name for name in instruments if name not in proved), aimed[1]),
+    )
+    # Not strict: the proof columns ride past the end of `carried` and are dropped here.
+    return tuple(dict(zip(carried, row, strict=False)) for row in fetched)

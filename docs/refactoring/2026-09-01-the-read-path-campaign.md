@@ -26,8 +26,24 @@
 
 - **field는 표현식이고, dataset이 등록되는 자리에 선언된다.** `fields:`는 이미
   `id → 물리 컬럼`이었고 맨 컬럼은 축퇴된 표현식이므로, **오늘 존재하는 모든 등록이 그대로 유효**하다.
-- **`DataRequirement`는 field id와 lookback이다.** `dataset_id` 없음(field id가 id다), `consumer_id`
-  없음(선언하는 component가 곧 consumer이므로 프레임워크가 찍는다).
+- **`DataRequirement`는 `(dataset_id, field_id)`와 lookback이다.** `consumer_id` 없음(선언하는
+  component가 곧 consumer이므로 프레임워크가 찍는다).
+
+  > **정정 — 오너가 2026-09-01에 유일성 절반을 뒤집었다.** 원래 이 줄은 *"field id와 lookback,
+  > `dataset_id` 없음(field id가 id다)"*였고, `docs/issues/049`의 ruling도 *"a field id is an id,
+  > **unique in the workspace**"*라고 박혀 있었다. **실환경에서 거짓이다** — 레인 C가 재보니
+  > dataset 27개 중 **field id 21개가 겹치고**, 대부분은 병렬 계열이 아니라 평범한 도메인 어휘다
+  > (`fiscal_yyyymm`이 6개 dataset에 있는 것은 그냥 그 컬럼 이름이 그거라서다).
+  >
+  > **틀린 것은 "id를 두 번 말하지 않는다"가 아니라 그 아래 깔린 전제였다** — field id가 저자가
+  > 고르는 id 공간이라는 것. 실제로는 벤더 어휘다. 049 본문이 그렇게 적는다:
+  > *"the ruling's premise meeting a workspace built before it."* 구현을 먼저 하고 실환경에 대봤기
+  > 때문에 잡혔다.
+  >
+  > 확정형은 `DataRequirement.of("statement-facts", "net_income", lookback=...)`이고, 등록에
+  > `field_conflict` 거절도 workspace 전역 field index도 **없다**. resolution은 뒷절반만 묻는다 —
+  > 지목된 dataset이 그 field를 노출하지 않으면 `observation_store.resolve.field_missing`이,
+  > 무엇을 노출하는지와 함께. `consumer_id` 절반은 그대로 선다. 기록 `123`.
 - **`instrument_field`는 선택이다.** 없는 dataset은 instrument 축이 없고, 선언된 instrument 목록이
   적용되지 않는다.
 - **읽기 경로는 아무것도 검증하지 않는다.** 등록이 통과시킨 것은 그 뒤로 신뢰한다. 런타임에만
@@ -93,9 +109,12 @@ floor를 보고한다.
    `SELECT <instrument> AS instrument, <available_at> AS available_at, <expr> AS <field-id> FROM source GROUP BY 1, 2`
    를 합성하고, **창 술어는 계속 프레임워크가 쓴다.** instrument 축이 없으면 instrument 술어와
    출력 컬럼이 둘 다 없다.
-4. `DataRequirement`가 `(field_id, lookback)`이 된다. 프레임워크가 dataset을 찾고 `consumer_id`를
+4. `DataRequirement`가 `(dataset_id, field_id, lookback)`이 된다. `consumer_id`는 프레임워크가
    찍는다 — `AccessRecord`에는 오늘과 똑같이 남는다.
-5. field id는 workspace에서 유일하다. 충돌은 **이미 그 id를 가진 dataset을 이름 대며** 등록에서 거절.
+5. ~~field id는 workspace에서 유일하다.~~ **철회됨(§1 정정 참조).** field id는 **dataset 안에서만**
+   유일하고, 겹친다고 등록을 거절하지 않는다. workspace 전역 field index도 만들지 않는다.
+   부수적으로, 유일성 때문에 프레임워크가 run record 봉투 컬럼과 allocation `weight`를 dataset id로
+   한정하던 것도 같이 풀린다 — 피할 충돌이 없으므로 `weight`·`run_id`를 그대로 노출한다.
 6. 스키마는 등록 때 `DESCRIBE <query>`로 유도한다(duckdb 1.5.5에서 확인). 저자는 타입을 쓰지 않고,
    `show dataset`은 파일을 안 열고 답한다.
 7. workspace 문서 마이그레이션. **write-forward, 이전 shape는 한 릴리스 동안 decode 가능**,

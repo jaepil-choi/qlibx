@@ -19,7 +19,7 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr._internal.pit_bridge import engine_lookback, observation_rows, requirement_for
+from vqapr._internal.pit_bridge import observation_rows, requirement_for
 from vqapr.authoring import CalendarLookback, DatasetInput, RowsLookback
 
 EVALUATION_TIME = datetime(2024, 3, 15, 16, tzinfo=UTC)
@@ -42,35 +42,47 @@ def _rows():
     )
 
 
-# --- lookback translation ------------------------------------------------------------------
+# --- the lookbacks are one class -----------------------------------------------------------
 
 
-def test_a_rows_lookback_translates_without_widening():
-    translated = engine_lookback(RowsLookback(rows=3))
-    assert translated.rows == 3
+def test_the_authoring_and_engine_lookbacks_are_the_same_class():
+    """The inversion of what stood here, and the reason `engine_lookback` is gone.
 
+    This assertion used to run the other way -- *"If these ever became the same class the
+    translation would be dead code"* -- and guarded four tests of a copy constructor that moved
+    `rows` from one dataclass to an identical one. Record `126` made them the same class, so the
+    sentence came true and the translation went with it.
 
-def test_a_calendar_lookback_carries_every_component():
-    translated = engine_lookback(
-        CalendarLookback(years=1, months=2, days=3, timezone="Asia/Seoul")
-    )
-    assert translated.years == 1
-    assert translated.months == 2
-    assert translated.days == 3
-    assert translated.timezone == "Asia/Seoul"
-
-
-def test_an_unknown_lookback_kind_is_refused():
-    with pytest.raises(TypeError, match=r"authoring\.RowsLookback or authoring\.CalendarLookback"):
-        engine_lookback("three rows")
-
-
-def test_the_public_and_engine_lookbacks_are_genuinely_distinct_types():
-    """If these ever became the same class the translation would be dead code."""
+    Kept as an assertion rather than deleted, because splitting them again would silently
+    reintroduce a translation layer, and the first symptom would be a lookback that authored
+    correctly and read as a different window.
+    """
+    from vqapr.data.lookback import CalendarLookback as EngineCalendar
     from vqapr.data.lookback import RowsLookback as EngineRows
 
-    assert RowsLookback is not EngineRows
-    assert not isinstance(RowsLookback(rows=1), EngineRows)
+    assert RowsLookback is EngineRows
+    assert CalendarLookback is EngineCalendar
+
+
+def test_an_authored_declaration_carries_the_engine_lookback_unchanged():
+    """No copy on the way in, so no window can be widened by copying it wrong."""
+    declaration = DatasetInput(
+        dataset_id="stock_daily", fields=("ret",), lookback=RowsLookback(rows=3)
+    )
+
+    assert requirement_for("consumer-a", declaration).lookback is declaration.lookback
+
+
+def test_the_calendar_form_still_carries_every_component():
+    declaration = DatasetInput(
+        dataset_id="stock_daily",
+        fields=("ret",),
+        lookback=CalendarLookback(years=1, months=2, days=3, timezone="Asia/Seoul"),
+    )
+
+    lookback = requirement_for("consumer-a", declaration).lookback
+    assert (lookback.years, lookback.months, lookback.days) == (1, 2, 3)
+    assert lookback.timezone == "Asia/Seoul"
 
 
 # --- requirement translation ---------------------------------------------------------------

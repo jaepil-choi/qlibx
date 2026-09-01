@@ -24,38 +24,9 @@ from datetime import datetime
 from vqapr.authoring import DatasetInput, Observation
 
 __all__ = (
-    "engine_lookback",
     "observation_rows",
     "requirement_for",
 )
-
-
-def engine_lookback(declaration_lookback: object):
-    """Translate an authoring lookback into the engine's own lookback type.
-
-    `authoring.RowsLookback` and `data.lookback.RowsLookback` are deliberately separate
-    types: the authoring one is a public contract, the engine one is private. They carry
-    the same economics, so this is a pure translation - it never widens a window or
-    substitutes a different lookback kind.
-    """
-    from vqapr.authoring import CalendarLookback as AuthoringCalendar
-    from vqapr.authoring import RowsLookback as AuthoringRows
-    from vqapr.data.lookback import CalendarLookback as EngineCalendar
-    from vqapr.data.lookback import RowsLookback as EngineRows
-
-    if isinstance(declaration_lookback, AuthoringRows):
-        return EngineRows(rows=declaration_lookback.rows)
-    if isinstance(declaration_lookback, AuthoringCalendar):
-        return EngineCalendar(
-            years=declaration_lookback.years,
-            months=declaration_lookback.months,
-            days=declaration_lookback.days,
-            timezone=declaration_lookback.timezone,
-        )
-    raise TypeError(
-        "lookback must be an authoring.RowsLookback or authoring.CalendarLookback; "
-        f"got {type(declaration_lookback).__name__}"
-    )
 
 
 def requirement_for(consumer_id: str, declaration: DatasetInput):
@@ -68,7 +39,7 @@ def requirement_for(consumer_id: str, declaration: DatasetInput):
         consumer_id,
         declaration.dataset_id,
         fields=declaration.fields,
-        lookback=engine_lookback(declaration.lookback),
+        lookback=declaration.lookback,
     )
 
 

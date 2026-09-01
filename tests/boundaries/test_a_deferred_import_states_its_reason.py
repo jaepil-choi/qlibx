@@ -23,10 +23,14 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 41
-"""Measured at record `125`: 41 in total, with `JUSTIFIED` now empty.
+CEILING = 37
+"""Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
 
-Was 44 after record `124`, and 99 before it. Record `124` deleted `project.py`, five `_internal`
+Was 41 after record `125`, 44 after record `124`, and 99 before that. Record `126` merged the
+two lookback pairs into one class each, which deleted `engine_lookback` and the four deferred
+imports it needed to name both sides of a translation that no longer exists.
+
+Before that: Record `124` deleted `project.py`, five `_internal`
 bridges and `extension/identity.py`, which between them held most of the deferred imports this
 ratchet was counting — `project.py` alone deferred nearly all of its own. Record `125` took three
 more out of `strategy_bridge`, which stopped importing `vqapr.public` at all once the Flow took

@@ -9,10 +9,10 @@ from uuid import UUID, uuid5
 
 from vqapr.account.history import AccountHistory
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import DatasetInput
 from vqapr.constraints.constraint import ConstraintBounds
-from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
-from vqapr.models.calls import observations
+from vqapr.models.calls import declared_rows, observations
 from vqapr.portfolio.budgets import Budget
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
@@ -51,21 +51,21 @@ class _DeclaredReads:
             raise KeyError(
                 f"{alias!r} was not declared in inputs(); this model declared: {known}"
             )
-        # One requirement per alias today, and `requirements_for` already returns a tuple against
-        # the day an alias fans out into one requirement per field (`docs/issues/049`). Joining
-        # them belongs here, where the alias is still a single thing to the author.
-        rows: list = []
-        fields: list[str] = []
-        for requirement in declared:
-            rows.extend(self.window.observations(requirement).rows)
-            fields.extend(requirement.fields)
-        return observations(rows, fields=tuple(dict.fromkeys(fields)))
+        # An alias is one requirement per declared field (`docs/issues/049`), so it is several
+        # reads, joined back on `(instant, instrument)` -- the only pair every batch agrees on.
+        # The author declared one thing and reads one thing; the fan-out is the engine's.
+        return observations(
+            declared_rows(lambda r: self.window.observations(r).rows, declared),
+            instrument_field="instrument",
+            available_at_field="available_at",
+            fields=declared.fields,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class DataModelContext(_DeclaredReads):
     window: ModelWindow
-    reads: Mapping[str, tuple[DataRequirement, ...]] = field(default_factory=dict)
+    reads: Mapping[str, DatasetInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.window, ModelWindow):
@@ -84,7 +84,7 @@ class StrategyModelContext(_DeclaredReads):
     occurrence: OperationOccurrence
     window: ModelWindow
     account: AccountSnapshot
-    reads: Mapping[str, tuple[DataRequirement, ...]] = field(default_factory=dict)
+    reads: Mapping[str, DatasetInput] = field(default_factory=dict)
     constraint_bounds: ConstraintBounds = field(default_factory=lambda: ConstraintBounds({}, {}))
     account_history: AccountHistory = field(default_factory=lambda: AccountHistory((), None))
     """What the Account itself recorded, bounded by this Strategy's declaration.

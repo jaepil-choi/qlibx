@@ -22,15 +22,6 @@ class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
 
     memory: ModelMemory = None
 
-    component_id: str | None = None
-    """Who this component is, stamped by the loader rather than written by the author.
-
-    It reaches a `DataRequirement` as its `consumer_id`, which is how an access record says which
-    component read what. An author asked to supply it could supply it wrong, and it is a value the
-    loader already holds — asking is both risky and redundant. The scaffold hoisting it into a
-    `MODEL_ID` constant, so the author would only mistype it once, was the symptom.
-    """
-
     def inputs(self) -> Mapping[str, DatasetInput]:
         """Declare every aliased dataset read this Model performs. Empty by default.
 
@@ -38,15 +29,6 @@ class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
         Declaring nothing is legitimate: a Model may derive its values from memory alone.
         """
         return {}
-
-    def declared_reads(self) -> dict[str, tuple[DataRequirement, ...]]:
-        """The engine requirements each declared alias resolves to, keyed by alias.
-
-        The Flow hands this to the context, which is what lets `read(alias)` serve it. One alias
-        is one requirement today and becomes one per field when `docs/issues/049` lands; the tuple
-        is already that shape, so nothing here changes then.
-        """
-        return requirements_for(self.component_id or type(self).__name__, self.inputs())
 
     def requirements(self) -> tuple[DataRequirement, ...]:
         """Every observation requirement available during invocation.
@@ -58,9 +40,12 @@ class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
         a hand-built tuple of `DataRequirement` — and a Model using it reads through
         `context.window.observations(...)` while leaving `reads` empty. Both paths resolve against
         the same window, so a tree part-way through the migration behaves identically either way.
+
+        One alias becomes one requirement per declared field (`docs/issues/049`), so a model
+        declaring one alias over three fields declares three requirements here.
         """
         return tuple(
             requirement
-            for group in self.declared_reads().values()
-            for requirement in group
+            for declaration in self.inputs().values()
+            for requirement in requirements_for(declaration)
         )

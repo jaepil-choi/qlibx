@@ -8,18 +8,17 @@ projected. The difference between the two roles is that list and nothing else, w
 `docs/issues/036` decided should be true: *"a DataModel and a StrategyModel should be substantially
 similar to use, and the size of the current difference is itself the defect."*
 
-**This used to live under `_internal`.** `_internal/models/agent_first.py` built a private
-`DataCall`/`StrategyCall` pair so that `strategy_bridge` could hand one to an authored `decide()`,
-while the engine handed a differently-shaped context to `on_occurrence()`. Two capability surfaces
-over one `ModelWindow`, and a module whose whole job was to sit between them. The projection below
-is that module's code; what changed is that the engine owns it, so there is nothing to translate.
+**These three functions came from `_internal/pit_bridge.py`, unchanged.** That module existed so
+`strategy_bridge` could serve an authored `read(alias)` while the engine served a differently
+shaped `context.window.observations(requirement)` -- two capability surfaces over one
+`ModelWindow`, with a translation layer between them. Moving them here does not rewrite them; it
+removes the reason a caller had to reach into `_internal` to read the way an author writes.
 
-**Every read still goes through `ModelWindow`.** These functions hold no store handle and no way to
-reach one. The window is already bounded to `available_at <= evaluation_time` and records an
-`AccessRecord` per requirement, which is what lets the Flow stamp an intent's provenance
-(`flow/simulation.py::_actual_source_refs`) and derive a materialization's `available_at`
-(`flow/stamping.derived_available_at`). A read that bypassed it would produce a value whose
-provenance the run cannot state.
+**Every read still goes through `ModelWindow`.** Nothing here holds a store handle or can reach
+one. The window is already bounded to `available_at <= evaluation_time`, carries the consumer id
+the framework stamped, and records an `AccessRecord` per requirement -- which is what lets the
+Flow state an intent's provenance (`flow/simulation.py::_actual_source_refs`) and derive a
+materialization's `available_at` (`flow/stamping.derived_available_at`).
 """
 
 from __future__ import annotations
@@ -28,75 +27,97 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from vqapr.authoring import DatasetInput, Observation
-from vqapr.data.requirements import DataRequirement
 
-INSTRUMENT_FIELD = "instrument"
-AVAILABLE_AT_FIELD = "available_at"
-"""What the engine names the two columns every observation row carries.
-
-Fixed rather than passed, because they are not the dataset's physical column names -- the
-registration already mapped those. By the time a row reaches here it is in framework vocabulary,
-and a caller supplying a different pair would be describing a row shape that does not occur.
-"""
+__all__ = (
+    "declared_rows",
+    "observations",
+    "requirements_for",
+)
 
 
-def requirements_for(
-    consumer_id: str, declarations: Mapping[str, DatasetInput]
-) -> dict[str, tuple[DataRequirement, ...]]:
-    """Every engine requirement each declared alias adds up to, keyed by alias.
+def requirements_for(declaration: DatasetInput) -> tuple:
+    """Translate one declared alias into the retained engine's requirement type.
 
-    **The fan-out lives here, alone, and it returns a tuple on purpose.** One alias becomes one
-    requirement today. `docs/issues/049` settles that a requirement names `(dataset_id, field_id)`,
-    so an alias declaring three fields will become three requirements — and when that lands, this
-    function is the only place that changes, because callers already receive a tuple and `read()`
-    already joins whatever it is given.
-
-    `consumer_id` is the component's own id, stamped by the framework rather than written by the
-    author. An author who had to name themselves could name themselves wrong, and it is a value
-    the loader already holds.
+    **One requirement per field.** The engine's `DataRequirement` names a single field and a
+    lookback (`docs/issues/049`); the authoring surface still declares a set of them under one
+    alias, so the fan-out happens here rather than in what an author writes.
     """
-    resolved: dict[str, tuple[DataRequirement, ...]] = {}
-    for alias, declaration in declarations.items():
-        if not isinstance(declaration, DatasetInput):
-            raise TypeError(
-                f"inputs()[{alias!r}] must be a DatasetInput; got {type(declaration).__name__}"
-            )
-        resolved[alias] = (
-            DataRequirement.of(
-                consumer_id,
-                declaration.dataset_id,
-                fields=declaration.fields,
-                lookback=declaration.lookback,
-            ),
-        )
-    return resolved
+    from vqapr.data.requirements import DataRequirement
+
+    if not isinstance(declaration, DatasetInput):
+        raise TypeError("declaration must be an authoring.DatasetInput")
+    # No lookback translation: record `126` made the authoring and engine lookbacks one class.
+    return tuple(
+        DataRequirement.of(declaration.dataset_id, field, lookback=declaration.lookback)
+        for field in declaration.fields
+    )
+
+
+def declared_rows(read: object, declaration: DatasetInput) -> tuple[dict[str, object], ...]:
+    """Read every field one alias declares, back into one row per (instant, instrument).
+
+    Each field is its own requirement and so its own read. Until a single scan serves several
+    fields (`docs/issues/046`), joining them is this bridge's job -- and the join is on the pair
+    that identifies an observation, which is the only pair every batch agrees on.
+    """
+    merged: dict[tuple, dict[str, object]] = {}
+    for field, requirement in zip(
+        declaration.fields, requirements_for(declaration), strict=True
+    ):
+        for row in read(requirement):  # type: ignore[operator]
+            key = (row["available_at"], row.get("instrument"))
+            carried = merged.get(key)
+            if carried is None:
+                carried = merged[key] = dict.fromkeys(declaration.fields)
+                carried["available_at"] = key[0]
+                carried["instrument"] = key[1]
+            carried[field] = row[field]
+    return tuple(merged[key] for key in sorted(merged, key=lambda pair: (pair[0], str(pair[1]))))
 
 
 def observations(
-    rows: Sequence[Mapping[str, object]], *, fields: Sequence[str]
+    rows: Sequence[Mapping[str, object]],
+    *,
+    instrument_field: str,
+    available_at_field: str,
+    fields: Sequence[str],
 ) -> tuple[Observation, ...]:
-    """Project engine rows onto typed observations, carrying only the declared fields.
+    """Project engine rows onto typed observations, carrying only declared fields.
 
-    Detached on the way out: an author holding an `Observation` cannot reach back into the batch
-    the store returned, so nothing a callback does to it can change what a later reader sees.
+    A row missing its instrument or availability stamp is a schema error rather than a row
+    to skip: dropping it silently would turn a broken declaration into a thin result.
     """
-    projected: list[Observation] = []
-    for index, row in enumerate(rows):
-        instrument = row.get(INSTRUMENT_FIELD)
-        if not isinstance(instrument, str) or not instrument:
-            raise TypeError(
-                f"row {index}: {INSTRUMENT_FIELD!r} must be a non-empty instrument identifier"
+    observations: list[Observation] = []
+    for row in rows:
+        if instrument_field not in row:
+            raise KeyError(
+                f"row is missing the instrument field {instrument_field!r}; "
+                "the dataset declaration does not match the physical table"
             )
-        available_at = row.get(AVAILABLE_AT_FIELD)
+        if available_at_field not in row:
+            raise KeyError(
+                f"row is missing the availability field {available_at_field!r}; "
+                "the dataset declaration does not match the physical table"
+            )
+        available_at = row[available_at_field]
         if not isinstance(available_at, datetime):
             raise TypeError(
-                f"row {index}: {AVAILABLE_AT_FIELD!r} must be a timezone-aware datetime"
+                f"{available_at_field!r} must be a timezone-aware datetime, "
+                f"got {type(available_at).__name__}"
             )
-        projected.append(
+        values = {}
+        for field in fields:
+            if field not in row:
+                raise KeyError(
+                    f"row is missing the declared field {field!r}; a Model reads only what "
+                    "it declared, so a missing declared field is a schema error"
+                )
+            values[field] = row[field]
+        observations.append(
             Observation(
-                instrument_id=instrument,
+                instrument_id=str(row[instrument_field]),
                 available_at=available_at,
-                values={field: row.get(field) for field in fields},
+                values=values,
             )
         )
-    return tuple(projected)
+    return tuple(observations)

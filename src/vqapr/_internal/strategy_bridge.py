@@ -164,10 +164,10 @@ def _nav_observed_at(context: Any) -> Any:
 
 def _context_resolver(context: Any, aliases: dict[str, Any]):
     """Serve declared aliases from the window this occurrence was handed."""
-    from vqapr._internal.pit_bridge import declared_rows, observation_rows
+    from vqapr.models.calls import declared_rows, observations
 
     def resolve(alias: str, declaration: Any, evaluation_time: Any) -> tuple:
-        return observation_rows(
+        return observations(
             declared_rows(lambda r: context.window.observations(r).rows, declaration),
             instrument_field="instrument",
             available_at_field="available_at",
@@ -235,7 +235,7 @@ class AdaptedStrategy(_EngineBase):
         self._authored_tables = tuple(instance.diagnostics())
 
     def requirements(self) -> tuple:
-        from vqapr._internal.pit_bridge import requirements_for
+        from vqapr.models.calls import requirements_for
 
         return tuple(
             requirement

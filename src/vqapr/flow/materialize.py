@@ -1187,7 +1187,7 @@ def materialize(
     requirements = model.requirements()
     # Resolved once for the whole materialization: `inputs()` is a declaration, not a per-
     # evaluation decision, and re-resolving it each time would let it differ between them.
-    declared_reads = model.declared_reads()
+    declared_reads = model.inputs()
     stamped_rows: list[Row] = []
     invocation_records: list[MaterializationInvocation] = []
     # One physical handle for the whole materialization, for the same reason `public.run()` keeps

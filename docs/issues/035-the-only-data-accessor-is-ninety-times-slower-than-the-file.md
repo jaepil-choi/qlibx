@@ -3,6 +3,13 @@
 **Status update 2026-09-01 — this file now has two halves with different fates.** The campaign is
 anchored at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
 
+**Update 2026-09-01, later the same day: the validation half is CLOSED.**
+`docs/implementations/119-*.md` moved every check `normalize_scalar` performed into registration and
+removed the read-path pass. **This file's addendum is what made that a move rather than a deletion**
+— it named the silent-NaN trade before the work started, and the lane's completion condition was the
+registration refusal it warned would be needed. The remaining open half is the columnar accessor,
+below, and it is still waiting on lane C.
+
 - **The validation half is scheduled**, as [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md),
   which measured that the *key* check — not the per-cell value check this file examined — is the
   larger part of `normalize_rows`. The ruling below governs both.

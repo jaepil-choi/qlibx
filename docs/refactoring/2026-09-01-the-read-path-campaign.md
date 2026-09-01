@@ -40,7 +40,7 @@ rewrite 없이 병합 가능한 자리에서만 그었다.
 
 | 레인 | 이슈 | worktree | 브랜치 | 의존 |
 |---|---|---|---|---|
-| **A** | `044` | `qlibx-wt-044` | `read-044-no-validation-on-read` | 없음 |
+| **A** | `044` | ~~`qlibx-wt-044`~~ | ~~`read-044-no-validation-on-read`~~ | **병합 완료 `111c0342`**, 기록 `119`. worktree 제거됨 |
 | **B** | `046` 후반 | `qlibx-wt-046b` | `read-046b-one-round-trip` | 없음 |
 | **C** | `038` + `045`/`049` | `qlibx-wt-038-049` | `read-038-049-fields-are-expressions` | 없음 |
 | **D** | `046` 전반 | `qlibx-wt-046a` | `read-046a-one-scan` | **C 병합 후 생성** |

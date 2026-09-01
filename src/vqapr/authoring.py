@@ -27,9 +27,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from vqapr.domain.timestamps import at_local, require_tz_aware, shift_calendar
+from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.domain.timestamps import require_tz_aware
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
 
@@ -215,61 +215,20 @@ def _normalize_state(value: object) -> object:
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class RowsLookback:
-    """A past-only window of the N most recent rows per instrument."""
-
-    rows: int
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.rows, int) or isinstance(self.rows, bool):
-            raise TypeError("rows must be an integer")
-        if self.rows <= 0:
-            raise ValueError("rows must be positive")
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class CalendarLookback:
-    """A past-only window bounded by a calendar amount in a declared IANA timezone."""
-
-    years: int = 0
-    months: int = 0
-    days: int = 0
-    timezone: str = "UTC"
-
-    def __post_init__(self) -> None:
-        for name, value in (("years", self.years), ("months", self.months), ("days", self.days)):
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise TypeError(f"{name} must be an integer")
-            if value < 0:
-                raise ValueError(f"{name} must be non-negative")
-        if self.years == self.months == self.days == 0:
-            raise ValueError("calendar lookback requires at least one positive amount")
-        if not isinstance(self.timezone, str) or not self.timezone.strip():
-            raise ValueError("timezone must be a non-empty IANA timezone name")
-        # Reject an unknown zone eagerly, at declaration time; a bad zone must fail
-        # before any callback runs rather than the first time it is used.
-        try:
-            ZoneInfo(self.timezone)
-        except ZoneInfoNotFoundError as error:
-            raise ValueError(f"unknown IANA timezone: {self.timezone!r}") from error
-
-    def lower_bound(self, evaluation_time: datetime) -> datetime:
-        """Return the clamped local calendar date at 00:00 in this lookback's timezone."""
-        current = _tz_aware(evaluation_time, name="evaluation_time").astimezone(
-            ZoneInfo(self.timezone)
-        )
-        shifted = shift_calendar(current, years=-self.years, months=-self.months, days=-self.days)
-        return at_local(shifted.date(), datetime.min.time(), self.timezone)
-
-
-type Lookback = RowsLookback | CalendarLookback
-
-
-# --------------------------------------------------------------------------------------
-# DataModel algebra.
-# --------------------------------------------------------------------------------------
-
+# The lookbacks are the engine's own, re-exported rather than redefined. Record `126`.
+#
+# They used to be a second pair of classes with identical fields and identical validation, and
+# `_internal/pit_bridge.engine_lookback` copied one into the other on every declaration -- a
+# function whose own docstring said "They carry the same economics, so this is a pure
+# translation". Two names for one idea, plus a copy constructor to move between them.
+#
+# The engine's are the survivors because they carry what an author most needs to read: the
+# `docs/issues/033` warning that `RowsLookback` counts rows PER INSTRUMENT, so a sparse name
+# reaches further back than a liquid one and a cross-sectional model built on it is silently
+# wrong. That paragraph did not exist on the authoring copy, which is the copy authors read.
+#
+# Neither is keyword-only, so `RowsLookback(rows=6)` and `RowsLookback(6)` both work and no
+# authored model changes.
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DatasetInput:

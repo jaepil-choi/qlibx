@@ -77,13 +77,22 @@ def test_rows_lookback_requires_positive_int() -> None:
         authoring.RowsLookback(rows=True)
 
 
-def test_rows_lookback_is_keyword_only_frozen_slotted() -> None:
+def test_rows_lookback_is_frozen_slotted_and_takes_its_count_either_way() -> None:
+    """Keyword-only is gone, and it went deliberately.
+
+    `authoring.RowsLookback` was a keyword-only copy of `data.lookback.RowsLookback`, which is
+    not. Record `126` made them one class and kept the engine's, so `RowsLookback(3)` is now
+    legal alongside `RowsLookback(rows=3)`. Nothing authored changes -- every call site in the
+    tree and in the research workspace already spells the keyword -- but a test asserting the
+    refusal would now be pinning a difference that only existed because there were two classes.
+
+    Frozen and slotted are the properties worth keeping, and both survive the merge.
+    """
     lookback = authoring.RowsLookback(rows=3)
     with pytest.raises(FrozenInstanceError):
         lookback.rows = 4  # type: ignore[misc]
-    with pytest.raises(TypeError):
-        authoring.RowsLookback(3)  # type: ignore[misc]
     assert not hasattr(lookback, "__dict__")
+    assert authoring.RowsLookback(3) == lookback
 
 
 def test_calendar_lookback_requires_at_least_one_positive_amount() -> None:

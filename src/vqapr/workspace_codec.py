@@ -35,6 +35,7 @@ from vqapr.data import datasets as datasets_module
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
+from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import (
     ComponentId,
@@ -152,9 +153,14 @@ def _detach_registration(registration: DatasetRegistration) -> DatasetRegistrati
         key_fields=registration.key_fields,
         fields=dict(registration.fields),
     )
-    # `of` does not take a span, because a span is measured rather than declared. Detaching must
-    # still carry the measurement across, or every read would hand back a registration that had
-    # silently forgotten it.
+    # `of` takes neither the span nor the field types, because both are measured rather than
+    # declared. Detaching must still carry the measurements across, or every read would hand back
+    # a registration that had silently forgotten them -- and a re-registration of the identical
+    # declaration would then read as a changed one.
+    if registration.field_types is not None:
+        detached = detached.with_schema(
+            ProjectionSchema(registration.field_types, registration.aggregated)
+        )
     return detached if registration.span is None else detached.with_span(*registration.span)
 
 
@@ -248,6 +254,13 @@ def _encoded_dataset(registration: DatasetRegistration) -> dict[str, object]:
 
     A span-less registration that never came from disk cannot reach here: `register_dataset`
     refuses it before the document is assembled.
+
+    **A registration whose field types were never derived is written back the same way**, and for
+    the same reason. Those are the entries written before a field became an expression
+    (`docs/issues/049`): their `fields` are bare columns and their projection is row-wise, which
+    is what the decode below assumes, but nobody has run `DESCRIBE` over them and inventing types
+    would be fabricating a measurement. So a document upgrades one entry at a time, as each
+    dataset is registered again -- and until then it stays readable by the release that wrote it.
     """
     body: dict[str, object] = {
         "source": str(registration.source),
@@ -256,6 +269,11 @@ def _encoded_dataset(registration: DatasetRegistration) -> dict[str, object]:
         "key_fields": list(registration.key_fields),
         "fields": dict(registration.fields),
     }
+    if registration.field_types is not None:
+        body["field_types"] = {
+            name: str(column_type) for name, column_type in registration.field_types.items()
+        }
+        body["aggregated"] = registration.aggregated
     if registration.span is not None:
         body["span"] = [registration.span[0].isoformat(), registration.span[1].isoformat()]
     return body
@@ -430,8 +448,19 @@ def _decode(
         raise TypeError("datasets must be a mapping")
 
     decoded: dict[DatasetId, DatasetRegistration] = {}
-    expected = {"source", "instrument_field", "available_at", "key_fields", "fields", "span"}
-    legacy = expected - {"span"}
+    declared = {"source", "instrument_field", "available_at", "key_fields", "fields"}
+    derived = {"field_types", "aggregated"}
+    expected = declared | derived | {"span"}
+
+    # **Two measurements, two independent axes, four admissible shapes.** An entry declares five
+    # keys and then carries whatever has been measured about it: the span (added by the release
+    # that made it mandatory) and the derived field types (added when a field became an
+    # expression, `docs/issues/049`). Neither is a declaration, so neither can be invented for an
+    # entry that predates it, and an entry can lack either or both.
+    #
+    # An entry written before types were derived holds bare columns under `fields`, which is a
+    # row-wise projection -- exactly what the defaults say -- so that shape decodes into today's
+    # behaviour rather than into a repair. A span-less one is quarantined, below.
 
     # A registration written before spans existed is QUARANTINED, not rejected: it decodes into a
     # registration whose `span` is None, and the refusal is deferred to the moment somebody
@@ -455,18 +484,25 @@ def _decode(
         if not isinstance(raw_registration, dict):
             raise ValueError(f"dataset {raw_id!r} must contain exactly {sorted(expected)}")
         present = set(raw_registration)
-        if present == legacy:
-            quarantined.add(raw_id)
-        elif present != expected:
+        measured = present - declared
+        if (
+            not declared <= present
+            or not measured <= derived | {"span"}
+            or (measured & derived and measured & derived != derived)
+        ):
             raise ValueError(f"dataset {raw_id!r} must contain exactly {sorted(expected)}")
+        if "span" not in present:
+            quarantined.add(raw_id)
 
         source = raw_registration["source"]
         instrument_field = raw_registration["instrument_field"]
         available_at = raw_registration["available_at"]
         key_fields = raw_registration["key_fields"]
         fields = raw_registration["fields"]
-        if not all(isinstance(value, str) for value in (source, instrument_field, available_at)):
+        if not all(isinstance(value, str) for value in (source, available_at)):
             raise TypeError(f"dataset {raw_id!r} scalar declarations must be strings")
+        if instrument_field is not None and not isinstance(instrument_field, str):
+            raise TypeError(f"dataset {raw_id!r} instrument_field must be a string or absent")
         if not isinstance(key_fields, list) or not all(
             isinstance(value, str) for value in key_fields
         ):
@@ -483,6 +519,18 @@ def _decode(
             key_fields=key_fields,
             fields=fields,
         )
+        if "field_types" in raw_registration:
+            raw_types = raw_registration["field_types"]
+            aggregated = raw_registration["aggregated"]
+            if not isinstance(raw_types, dict) or set(raw_types) != set(registration.fields):
+                raise TypeError(f"dataset {raw_id!r} field_types must type every declared field")
+            if not isinstance(aggregated, bool):
+                raise TypeError(f"dataset {raw_id!r} aggregated must be a bool")
+            try:
+                field_types = {name: ColumnType(value) for name, value in raw_types.items()}
+            except ValueError as error:
+                raise TypeError(f"dataset {raw_id!r} field_types must name column types") from error
+            registration = registration.with_schema(ProjectionSchema(field_types, aggregated))
         if raw_id not in quarantined:
             raw_span = raw_registration["span"]
             if (

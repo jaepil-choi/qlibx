@@ -349,8 +349,15 @@ class Workspace:
         format. Without this, a caller resolves the dataset to a source, the source to a path,
         and the path to parquet -- binding its own code to a storage decision the framework
         declares is not part of its contract.
+
+        A dataset registered without an `instrument_field` has no instrument axis, so it carries
+        no instruments to enumerate and this returns nothing. That is not an empty answer standing
+        in for a missing one: the rows of a factor series or an index level are not instruments,
+        which is the fact `instrument_field` being absent states (`docs/issues/038`).
         """
         registration = self.dataset(raw_dataset_id)
+        if registration.instrument_field is None:
+            return ()
         spec = self.source(str(registration.source))
         return tuple(
             str(value)
@@ -600,11 +607,19 @@ class Workspace:
 
             existing = datasets.get(key)
             if existing is not None and existing.span is None:
-                # A quarantined registration is being repaired. It differs from its replacement in
-                # exactly one way -- it has no span -- so the conflict check below would read that
-                # as a changed declaration and refuse the repair it advertises. Compare on the
-                # declared half, and let the measurement be the thing that changes.
-                if replace(existing, span=registration.span) != registration:
+                # A quarantined registration is being repaired. It differs from its replacement
+                # only in what has been MEASURED about it -- the span it never carried, and the
+                # field types nobody had derived when it was written -- so the conflict check
+                # below would read that as a changed declaration and refuse the repair it
+                # advertises. Compare on the declared half, and let the measurements be the things
+                # that change.
+                repaired = replace(
+                    existing,
+                    span=registration.span,
+                    field_types=registration.field_types,
+                    aggregated=registration.aggregated,
+                )
+                if repaired != registration:
                     raise _workspace_error(
                         stage=REGISTER_STAGE,
                         code=f"{REGISTER_STAGE}.conflict",

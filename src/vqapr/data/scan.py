@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -355,6 +356,142 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
     return {name: _normalize(dtype) for name, dtype, *_ in rows}
 
 
+_SQL_QUOTED = re.compile("'(?:''|[^'])*'" + '|"(?:""|[^"])*"')
+_SUBQUERY = re.compile("(?<![A-Za-z0-9_])select(?![A-Za-z0-9_])", re.IGNORECASE)
+
+
+def statement_keyword(expression: str) -> str | None:
+    """The keyword that makes a field expression a statement rather than a value, if any.
+
+    A field is an expression, and an expression is evaluated within one instant by construction --
+    that property is what makes a registration-time look-ahead test unnecessary rather than
+    merely skipped (`docs/issues/049`). **A scalar subquery is the one expression form that breaks
+    it**: it carries its own `FROM`, so it can read rows the window excludes.
+
+    Refusing the `SELECT` token refuses every subquery without a parser, and refuses nothing else:
+    `extract(year FROM date)` and `sum(x) FILTER (WHERE ...)` are ordinary expressions that happen
+    to contain SQL keywords, and both keep working. Quoted text is removed first, so a literal
+    that spells the keyword is a value like any other.
+    """
+    if not isinstance(expression, str):
+        raise TypeError("expression must be a string")
+    return "SELECT" if _SUBQUERY.search(_SQL_QUOTED.sub(" ", expression)) else None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionSchema:
+    """What a registration's projection produces, and whether it groups within an instant.
+
+    `errors` carries duckdb's own first line for each shape that failed to bind, in the order they
+    were tried, and is empty exactly when the projection bound. Nothing here turns one into a
+    refusal -- `datasets.py` owns what a failure means, as it does for every other check in this
+    module.
+    """
+
+    field_types: Mapping[str, ColumnType]
+    aggregated: bool
+    errors: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
+def identity_projections(instrument_field: str | None, available_at_field: str) -> tuple[str, ...]:
+    """The identity columns every projection carries, aliased to their framework names.
+
+    `instrument_field` is optional, and a dataset registered without one has **no instrument
+    axis** (`docs/issues/038`): no output column and, at read time, no instrument predicate
+    either. Whether a table is keyed by instrument is a fact about the table.
+    """
+    projections = [f"{_quote(available_at_field)} AS {_quote('available_at')}"]
+    if instrument_field is not None:
+        projections.append(f"{_quote(instrument_field)} AS {_quote('instrument')}")
+    return tuple(projections)
+
+
+def value_projections(fields: Mapping[str, str]) -> tuple[str, ...]:
+    """One aliased expression per declared field.
+
+    Parenthesised, so a value cannot become a clause: anything that tried to close the projection
+    and open a second one is a syntax error rather than a second statement.
+    """
+    return tuple(f"({expression}) AS {_quote(name)}" for name, expression in fields.items())
+
+
+def projection_relation(
+    spec: SourceSpec,
+    *,
+    instrument_field: str | None,
+    available_at_field: str,
+    fields: Mapping[str, str],
+    aggregated: bool,
+) -> str:
+    """The registration's projection as a relation, parenthesised for use as a subquery.
+
+    **Anything that must look at what a model will receive reads this, not the source.** Once a
+    field is an expression those are different things: the column an expression reads is not the
+    value it produces, and only the value crosses the boundary.
+
+    `aggregated` picks the shape the binder settled on at registration -- see
+    `describe_projection`. Nothing decides it here, because deciding it twice is how the read path
+    and the registration come to disagree.
+    """
+    identity = identity_projections(instrument_field, available_at_field)
+    select = ", ".join((*identity, *value_projections(fields)))
+    tail = ""
+    if aggregated:
+        grouping = ", ".join(str(position) for position in range(1, len(identity) + 1))
+        tail = f" GROUP BY {grouping}"
+    return f"(SELECT {select} FROM {_relation(spec)}{tail})"
+
+
+def describe_projection(
+    spec: SourceSpec,
+    *,
+    instrument_field: str | None,
+    available_at_field: str,
+    fields: Mapping[str, str],
+) -> ProjectionSchema:
+    """Type every declared field, and decide whether the projection groups, by asking duckdb.
+
+    A field is an expression, so what it is typed as -- and whether it aggregates the rows an
+    instant holds -- are facts about the composed query rather than about any source column. Both
+    are read off `DESCRIBE`, which is why an author never writes a type.
+
+    **The two shapes are mutually exclusive, and that is what lets the binder be the judge.** The
+    identity columns are projected bare, so the grouped shape binds only when every field is an
+    aggregate, and the row-wise shape binds only when no field is. A registration is therefore one
+    or the other, one that mixes the two is neither, and nothing here parses SQL to decide which.
+
+    Grouped is the shape `049` rules for: one row per instrument per instant, the expression
+    evaluated inside that group. Row-wise is what every registration written before that ruling
+    already is -- a bare column is a row-wise expression -- so those keep the query they had,
+    byte for byte, including the rows a finer key admits.
+    """
+    errors: list[str] = []
+    con = _open(spec)
+    try:
+        for aggregated in (False, True):
+            relation = projection_relation(
+                spec,
+                instrument_field=instrument_field,
+                available_at_field=available_at_field,
+                fields=fields,
+                aggregated=aggregated,
+            )
+            try:
+                rows = con.execute(f"DESCRIBE SELECT * FROM {relation}").fetchall()
+            except duckdb.Error as exc:
+                errors.append(str(exc).splitlines()[0])
+                continue
+            described = {name: _normalize(dtype) for name, dtype, *_ in rows}
+            return ProjectionSchema({name: described[name] for name in fields}, aggregated)
+    finally:
+        con.close()
+    return ProjectionSchema({}, False, errors=tuple(errors))
+
+
 def row_count(spec: SourceSpec) -> int:
     """How many rows the source holds, without reading them."""
     con = _open(spec)
@@ -653,6 +790,7 @@ def finite_check(
     *,
     columns: Sequence[str],
     identity_fields: Sequence[str],
+    relation: str | None = None,
 ) -> FiniteCheck:
     """노출되는 numeric 컬럼 전부의 NaN/inf를 **한 번의 스캔**으로 센다.
 
@@ -661,6 +799,10 @@ def finite_check(
 
     `key_check`와 같은 모양으로 예시는 위반이 있을 때만 추가로 읽는다 -- 통과 경로가 매
     등록마다 도는 자리이고, 실패는 드물며 그때는 느려도 된다.
+
+    `relation`이 주어지면 원천 대신 그것을 읽는다. field가 표현식이 된 뒤로 물어야 하는 것은
+    "이 컬럼에 NaN이 있나"가 아니라 **"이 field가 내는 값에 NaN이 있나"**이고, 둘은 같지
+    않다 (`projection_relation`).
     """
     selected = tuple(columns)
     if not selected:
@@ -677,16 +819,17 @@ def finite_check(
         f"coalesce(sum(CASE WHEN {invalid(column)} THEN 1 ELSE 0 END), 0)" for column in selected
     )
     identity_sql = ", ".join(_quote(field) for field in identities)
+    read = _relation(spec) if relation is None else relation
     con = _open(spec)
     try:
-        counted = con.execute(f"SELECT {counts_sql} FROM {_relation(spec)}").fetchone()
+        counted = con.execute(f"SELECT {counts_sql} FROM {read}").fetchone()
         non_finite = tuple(
             (column, int(total)) for column, total in zip(selected, counted, strict=True) if total
         )
         examples: list[tuple[str, tuple[str, ...]]] = []
         for column, _total in non_finite:
             rows = con.execute(
-                f"SELECT {identity_sql}, {_quote(column)} FROM {_relation(spec)} "
+                f"SELECT {identity_sql}, {_quote(column)} FROM {read} "
                 f"WHERE {invalid(column)} LIMIT {_EXAMPLE_LIMIT}"
             ).fetchall()
             examples.append((column, tuple(repr(row) for row in rows)))

@@ -20,32 +20,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import show001_models as models
 
-import vqapr
 from vqapr.domain.errors import VqaprError
-from vqapr.simulation import (
+from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    Cadence,
-    Execution,
-    ExecutionInput,
+    ComponentKind,
+    ConstraintSet,
+    DatasetRegistration,
+    ExecutionInputRegistration,
+    ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    InitialAccount,
-    Schedule,
-    Simulation,
+    LocalInstantDeclaration,
+    OperationAgenda,
+    OperationOccurrence,
+    OperationRole,
+    RunDefinition,
+    SourceSpec,
+    StrategyConfig,
+    ValuationConfig,
+    component_ref,
+    preflight_run,
+    register_agenda,
+    register_component,
+    register_dataset,
+    register_execution_input,
+    register_strategy_config,
+    register_valuation_config,
+    run,
 )
-from vqapr.venues import Academic, Listing, ListingAccess
 
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-VERIFIED_AGAINST = "vqapr-0.1.0+implementation-008-working-tree"
-LAST_VERIFIED_AT = "2026-08-25"
+VERIFIED_AGAINST = "vqapr-0.2.0a2+develop"
+LAST_VERIFIED_AT = "2026-09-01"
 
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))
 KST = "Asia/Seoul"
+OFFSET = "+09:00"
 
 
 def _reset_outputs() -> None:
@@ -63,15 +78,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _write_parquets() -> tuple[Path, Path, Path]:
+def _write_parquets() -> tuple[Path, Path, Path, Path]:
     """The dense execution table (with 10:00 rows nobody selects), its canonical trim,
-    and one invalid table a rejected registration must never make visible."""
+    one invalid table a rejected registration must never make visible, and the observation
+    dataset the strategy declares."""
     execution = OUTPUTS / "execution_krx_daily.parquet"
     invalid = OUTPUTS / "invalid_execution_price.parquet"
     canonical = OUTPUTS / "execution_krx_daily_canonical.parquet"
+    observation = OUTPUTS / "price_daily.parquet"
     execution_target = execution.as_posix()
     invalid_target = invalid.as_posix()
     canonical_target = canonical.as_posix()
+    observation_target = observation.as_posix()
     con = duckdb.connect()
     try:
         con.execute(f"""COPY (SELECT * FROM (VALUES
@@ -90,55 +108,48 @@ def _write_parquets() -> tuple[Path, Path, Path]:
           SELECT * FROM read_parquet('{execution_target}')
           WHERE EXTRACT(hour FROM trade_at) = 15
         ) TO '{canonical_target}' (FORMAT PARQUET)""")
+        # The observation dataset the strategy declares. Its instants are session closes, so
+        # the 04:00 callback on day N sees day N-1's close and nothing later.
+        con.execute(f"""COPY (SELECT * FROM (VALUES
+          (TIMESTAMPTZ '2024-03-04 15:30:00+09', 'A', 99.0),
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
+          (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
+          (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'A', 105.0)
+        ) AS t(available_at, instrument, close))
+        TO '{observation_target}' (FORMAT PARQUET)""")
     finally:
         con.close()
-    return execution, invalid, canonical
+    return execution, invalid, canonical, observation
 
 
-def _simulation(*, execution_path: Path, input_id: str) -> Simulation:
-    return Simulation(
-        schedule=Schedule(
-            strategy=Cadence(sessions=SESSIONS, at=time(4, 0), timezone=KST),
-            valuation=Cadence(sessions=SESSIONS, at=time(16, 0), timezone=KST),
-            # Public run: `monitoring=None` states no monitoring cadence, explicitly.
-            monitoring=None,
-            start=datetime.fromisoformat("2024-03-05T00:00:00+09:00"),
-            end=datetime.fromisoformat("2024-03-07T23:00:00+09:00"),
+def _agenda(agenda_id: str, role: OperationRole, at: time) -> OperationAgenda:
+    return OperationAgenda.from_occurrences(
+        agenda_id=agenda_id,
+        role=role,
+        timezone=KST,
+        occurrences=tuple(
+            OperationOccurrence(
+                f"{agenda_id}-{day.isoformat()}",
+                role,
+                LocalInstantDeclaration(day, at, KST, 0, OFFSET),
+            )
+            for day in SESSIONS
         ),
-        execution=Execution(
-            input=ExecutionInput(
-                input_id=input_id,
-                path=execution_path,
-                hive_partitioned=False,
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            fill=FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE,
-                at=time(15, 30),
-                timezone=KST,
-                trade_price="close",
-            ),
+        provenance="show_001 three declared sessions",
+    )
+
+
+def _execution_input(input_id: str, path: Path) -> ExecutionInputRegistration:
+    return ExecutionInputRegistration.of(
+        input_id,
+        ExecutionTableSpec(
+            source=SourceSpec.of(f"{input_id}-source", path),
+            trade_at_field="trade_at",
+            instrument_field="instrument",
+            is_tradable_field="is_tradable",
+            price_fields={"close": "close"},
         ),
-        exchange=Academic(
-            listings=(Listing(instrument_id="A", access=ListingAccess.SIGNED),),
-            quantity_step=Decimal("0.1"),
-            price_step=Decimal("0.1"),
-            costs=(),
-        ),
-        account=InitialAccount(
-            snapshot=AccountSnapshot(version=0, cash=Decimal("100"), positions={}),
-            mode=AccountMode.LONG_ONLY,
-        ),
-        # The generated legacy constraint was inert scaffolding (always passed, projected
-        # trivial [0, 1] bounds); it demonstrated no economic behaviour of its own, so the
-        # migration drops it rather than authoring a Constraint whose only job would be to
-        # exist. See README for the explicit record of this drop.
-        constraints=(),
-        instruments=("A",),
-        initial_strategy_state=None,
+        FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), KST, "close"),
     )
 
 
@@ -156,6 +167,27 @@ def _json_value(value: Any) -> Any:
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return value
+
+
+def _signature(result: Any) -> dict[str, Any]:
+    """What a run is, reduced to values two runs can be compared on.
+
+    `SimulationResult` carries object identity - occurrence ids minted per run, trace objects -
+    so comparing the results themselves would report a difference that means nothing. These are
+    the economic facts: how the account ended and how many of each lifecycle event happened.
+    """
+    final_state = result.final_state
+    snapshot = final_state.account.snapshot
+    lifecycle: dict[str, int] = {}
+    for entry in final_state.lifecycle_trace:
+        lifecycle[entry.kind.value] = lifecycle.get(entry.kind.value, 0) + 1
+    return {
+        "account_version": snapshot.version,
+        "cash": str(snapshot.cash),
+        "positions": {str(key): str(value) for key, value in sorted(snapshot.positions.items())},
+        "lifecycle": dict(sorted(lifecycle.items())),
+        "occurrences": len(result.occurrences),
+    }
 
 
 def _table(rows: list[dict[str, Any]]) -> str:
@@ -179,23 +211,21 @@ def _report(trace: dict[str, Any]) -> str:
     run_trace = html.escape(json.dumps(trace["run"], indent=2, default=str))
     density = html.escape(json.dumps(trace["density_invariance"], indent=2, default=str))
     invalid = html.escape(json.dumps(trace["invalid_registration"], indent=2, default=str))
-    return f"""<!doctype html><meta charset="utf-8"><title>VQAPR public run evidence</title>
+    return f"""<!doctype html><meta charset="utf-8">
+<title>VQAPR execution input registration</title>
 <style>
 body{{font-family:system-ui;max-width:1100px;margin:2rem auto}}
 pre,table{{border:1px solid #ccc;padding:1rem;overflow:auto}}
 td,th{{padding:.4rem;border:1px solid #ddd}}
 </style>
-<h1>Public Project.simulate: declare, register, run</h1>
-<p>Every VQAPR import in this entry point comes from <code>vqapr</code>,
-<code>vqapr.simulation</code>,
-and <code>vqapr.venues</code>. The authored strategy in <code>models.py</code> implements
-<code>vqapr.authoring.StrategyModel</code>. The result comes from
-<code>vqapr.open(root).simulate(...)</code>, which registers the strategy component, its
-agendas, the exchange, and the execution input itself - no caller touches a
-<code>ComponentRef</code>, a fingerprint, an agenda id, or an
-<code>EconomicPortfolioIntent</code>.</p>
+<h1>Execution input registration: declare, register, run</h1>
+<p>Every VQAPR import in this entry point comes from <code>vqapr.public</code>, the surface
+the shipped CLI stands on. The authored strategy in <code>show001_models.py</code> implements
+<code>vqapr.authoring.StrategyModel</code> and returns only <code>Hold</code>/<code>Rebalance</code>
+- the loader adapts it and the framework stamps every identity fact (intent id, strategy id,
+source refs, account version) itself.</p>
 <h2>Execution input rows (10:00 rows are deliberately non-selected)</h2>{execution_rows}
-<h2>Public run summary</h2><pre>{run_trace}</pre>
+<h2>Run summary</h2><pre>{run_trace}</pre>
 <h2>Density invariance</h2><pre>{density}</pre>
 <h2>Invalid execution input rejection</h2><pre>{invalid}</pre>
 <p>Verified against {VERIFIED_AGAINST}; last verified {LAST_VERIFIED_AT}.</p>"""
@@ -203,30 +233,77 @@ agendas, the exchange, and the execution input itself - no caller touches a
 
 def main() -> None:
     _reset_outputs()
-    execution_path, invalid_path, canonical_path = _write_parquets()
+    execution_path, invalid_path, canonical_path, observation_path = _write_parquets()
     strategy_path = Path(models.__file__).resolve()
 
-    project = vqapr.open(PROJECT)
+    # --- Registration -------------------------------------------------------------------
+    register_dataset(
+        PROJECT,
+        DatasetRegistration.of(
+            "price_daily",
+            "showcase-observation",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("available_at", "instrument"),
+            fields={"close": "close"},
+        ),
+        SourceSpec.of("showcase-observation", observation_path),
+    )
+    register_execution_input(PROJECT, _execution_input("krx-daily", execution_path))
 
-    dense_simulation = _simulation(execution_path=execution_path, input_id="krx-daily")
+    strategy_ref = component_ref(
+        "showcase-strategy", ComponentKind.STRATEGY_MODEL, strategy_path, "ShowcaseStrategy"
+    )
+    exchange_ref = component_ref(
+        "showcase-exchange",
+        ComponentKind.EXCHANGE,
+        ROOT / "show001_exchange.py",
+        "ShowcaseExchange",
+    )
+    for reference in (strategy_ref, exchange_ref):
+        register_component(PROJECT, reference)
 
-    # `project.simulate` registers the strategy component, its agendas, the exchange, and
-    # the execution input from these public declarations - that registration IS this
-    # showcase's "execution input registration" claim, now implicit in one call instead of
-    # a manual `register_execution_input` step.
-    dense_summary = project.simulate(
-        definition=dense_simulation, strategy=models.ShowcaseStrategy, run_id="showcase"
+    strategy_agenda = _agenda("showcase-strategy", OperationRole.STRATEGY_CALLBACK, time(4, 0))
+    valuation_agenda = _agenda("showcase-valuation", OperationRole.VALUATION, time(16, 0))
+    for agenda in (strategy_agenda, valuation_agenda):
+        register_agenda(PROJECT, agenda)
+
+    strategy_config = StrategyConfig(
+        strategy_ref, "showcase-strategy", OperationRole.STRATEGY_CALLBACK
+    )
+    valuation_config = ValuationConfig("showcase-valuation", OperationRole.VALUATION)
+    register_strategy_config(PROJECT, strategy_config)
+    register_valuation_config(PROJECT, valuation_config)
+
+    definition = RunDefinition(
+        strategy_config,
+        valuation_config,
+        # The legacy showcase generated a Constraint whose methods were unconditionally-passing
+        # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so it
+        # is declared empty rather than authored to keep a field non-empty. See README.
+        ConstraintSet(()),
+        # `None` states there is no monitoring cadence, explicitly.
+        None,
+        exchange_ref,
+        "krx-daily",
+        datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),
+        datetime.fromisoformat(f"2024-03-07T23:00:00{OFFSET}"),
+        AccountSnapshot(0, Decimal("100"), {}),
+        AccountMode.LONG_ONLY,
+        instruments=("A",),
     )
 
+    # --- One real run -------------------------------------------------------------------
+    dense_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)))
+
     # --- Density invariance -------------------------------------------------------------
-    # Same declaration, same run_id (every other registration is idempotent), only the
-    # physical execution parquet's non-selected 10:00 rows differ from the canonical trim.
+    # Same registered declaration, only the physical execution parquet's non-selected 10:00
+    # rows differ from the canonical trim. Nothing is re-registered: the registration names a
+    # path, and this rewrites what is at that path.
     dense_bytes = execution_path.read_bytes()
     shutil.copyfile(canonical_path, execution_path)
     try:
-        canonical_summary = project.simulate(
-            definition=dense_simulation, strategy=models.ShowcaseStrategy, run_id="showcase"
-        )
+        canonical_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)))
     finally:
         execution_path.write_bytes(dense_bytes)
 
@@ -241,11 +318,8 @@ def main() -> None:
     # --- Invalid execution input is rejected without workspace mutation -----------------
     workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
     before_invalid = workspace_path.read_bytes()
-    invalid_simulation = _simulation(execution_path=invalid_path, input_id="invalid-close")
     try:
-        project.simulate(
-            definition=invalid_simulation, strategy=models.ShowcaseStrategy, run_id="showcase"
-        )
+        register_execution_input(PROJECT, _execution_input("invalid-close", invalid_path))
     except VqaprError as error:
         invalid = error.as_dict()
         invalid.pop("correlation_id", None)
@@ -280,19 +354,18 @@ def main() -> None:
             "dense_signature": dense_signature,
             "canonical_signature": canonical_signature,
             "claim": (
-                "Two Project.simulate runs over the same Simulation declaration and run_id "
-                "differ only by three non-selected 10:00 physical execution rows. Their "
-                "SimulationSummary values are equal."
+                "Two runs over the same registered declaration differ only by three "
+                "non-selected 10:00 physical execution rows. Their economic signatures "
+                "are equal."
             ),
         },
         "invalid_registration": {
             "workspace_unchanged": True,
             "checked_file": ".vqapr/workspace.yaml",
             "note": (
-                "Project.simulate registers the execution input through the same "
-                "retained engine path the legacy register/preflight/run spine used; this "
-                "project never writes .vqapr/catalog.json at all, so the byte-identity "
-                "check is against workspace.yaml here instead."
+                "register_execution_input validates the venue table before it writes, so a "
+                "non-finite selected price on a tradable row is refused with the workspace "
+                "byte-identical to what it was."
             ),
             "error": invalid,
         },

@@ -38,7 +38,7 @@ SESSIONS = tuple(date(2024, 3, 4) + timedelta(days=offset) for offset in range(5
 
 # The strategy is asked on the first session only. Every other session has a valuation occurrence
 # and NO strategy occurrence at all, which is the case the independent clock exists for: with no
-# callback there is no `NoDecision`, so nothing mints a `PendingValuation` and the old code had
+# callback there is no `Hold`, so nothing mints a `PendingValuation` and the old code had
 # only the replayed committed mark to report.
 DECISION_SESSIONS = SESSIONS[:1]
 
@@ -47,8 +47,10 @@ STRATEGIES = textwrap.dedent(
     from decimal import Decimal
 
     from vqapr.authoring import (
-        Budget, Hold, PortfolioDirection, Rebalance, StrategyModel, StrategyResult,
+        Budget, DatasetInput, Hold, PortfolioDirection, Rebalance, RowsLookback,
+        StrategyModel, StrategyResult,
     )
+    from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
     BUDGET = Budget(
         direction=PortfolioDirection.LONG_ONLY,
@@ -66,9 +68,21 @@ STRATEGIES = textwrap.dedent(
         constructs a fresh model per callback.
         """
 
+        def inputs(self):
+            return {
+                "prices": DatasetInput(
+                    dataset_id="price_daily",
+                    fields=("close",),
+                    lookback=RowsLookback(rows=1),
+                ),
+            }
+
         def decide(self, call):
             state = call.previous_state if isinstance(call.previous_state, dict) else {}
-            if state.get("formed"):
+            observed = [
+                row for row in call.read("prices") if row.values["close"] is not None
+            ]
+            if state.get("formed") or not observed:
                 return StrategyResult(
                     decision=Hold(reason="already-formed"),
                     next_state=state,
@@ -83,6 +97,20 @@ STRATEGIES = textwrap.dedent(
                 next_state={"formed": True},
                 diagnostics={},
             )
+
+
+    class ClockExchange(AcademicExchange):
+        """Whole shares, no cost. The venue is not what this file measures."""
+
+        def __init__(self):
+            super().__init__(
+                {
+                    "A005930": TradeRule(
+                        "A005930", Decimal(1), Decimal(1), False, ListingAccess.SIGNED
+                    )
+                },
+                "clock-academic",
+            )
     '''
 )
 
@@ -94,70 +122,128 @@ RUNNER = textwrap.dedent(
     from pathlib import Path
     from zoneinfo import ZoneInfo
 
-    import vqapr
-    from vqapr.simulation import (
-        AccountMode, AccountSnapshot, Cadence, Execution, ExecutionInput, FillConvention,
-        FillSelector, InitialAccount, Schedule, Simulation,
+    from vqapr.public import (
+        AccountMode, AccountSnapshot, ComponentKind, ConstraintSet, DatasetRegistration,
+        ExecutionInputRegistration, ExecutionTableSpec, FillConvention, FillSelector,
+        LocalInstantDeclaration, OperationAgenda, OperationOccurrence, OperationRole,
+        RunDefinition, SourceSpec, StrategyConfig, ValuationConfig, component_ref,
+        preflight_run, register_agenda, register_component, register_dataset,
+        register_execution_input, register_strategy_config, register_valuation_config, run,
     )
-    from vqapr.venues import Academic, Listing, ListingAccess
 
     import authored_strategies
 
     KST = ZoneInfo("Asia/Seoul")
     root, exec_path = Path(sys.argv[1]), Path(sys.argv[2])
-    sessions = tuple(date.fromisoformat(day) for day in sys.argv[3].split(","))
-    decision_sessions = tuple(date.fromisoformat(day) for day in sys.argv[4].split(","))
+    price_path = Path(sys.argv[3])
+    sessions = tuple(date.fromisoformat(day) for day in sys.argv[4].split(","))
+    decision_sessions = tuple(date.fromisoformat(day) for day in sys.argv[5].split(","))
     valuation_sessions = (
-        tuple(date.fromisoformat(day) for day in sys.argv[5].split(","))
-        if len(sys.argv) > 5
+        tuple(date.fromisoformat(day) for day in sys.argv[6].split(","))
+        if len(sys.argv) > 6
         else sessions
     )
 
-    simulation = Simulation(
-        schedule=Schedule(
-            strategy=Cadence(sessions=decision_sessions, at=time(8, 0), timezone="Asia/Seoul"),
-            valuation=Cadence(sessions=valuation_sessions, at=time(16, 0), timezone="Asia/Seoul"),
-            monitoring=None,
-            start=datetime.combine(sessions[0], time(0, 0), tzinfo=KST),
-            end=datetime.combine(sessions[-1], time(23, 0), tzinfo=KST),
-        ),
-        execution=Execution(
-            input=ExecutionInput(
-                input_id="krx-daily", path=exec_path, hive_partitioned=False,
-                trade_at_field="trade_at", instrument_field="instrument",
-                is_tradable_field="is_tradable", price_fields={"close": "close"},
+
+    def agenda(agenda_id, role, at, days):
+        return OperationAgenda.from_occurrences(
+            agenda_id=agenda_id,
+            role=role,
+            timezone="Asia/Seoul",
+            occurrences=tuple(
+                OperationOccurrence(
+                    f"{agenda_id}-{day.isoformat()}",
+                    role,
+                    LocalInstantDeclaration(day, at, "Asia/Seoul", 0, "+09:00"),
+                )
+                for day in days
             ),
-            fill=FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE, at=time(15, 30),
-                timezone="Asia/Seoul", trade_price="close",
+            provenance="valuation clock test",
+        )
+
+
+    register_dataset(
+        root,
+        DatasetRegistration.of(
+            "price_daily", "clock-observation",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("available_at", "instrument"),
+            fields={"close": "close"},
+        ),
+        SourceSpec.of("clock-observation", price_path),
+    )
+    register_execution_input(
+        root,
+        ExecutionInputRegistration.of(
+            "krx-daily",
+            ExecutionTableSpec(
+                source=SourceSpec.of("clock-execution", exec_path),
+                trade_at_field="trade_at",
+                instrument_field="instrument",
+                is_tradable_field="is_tradable",
+                price_fields={"close": "close"},
             ),
+            FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), "Asia/Seoul", "close"),
         ),
-        exchange=Academic(
-            listings=(Listing(instrument_id="A005930", access=ListingAccess.SIGNED),),
-            quantity_step=Decimal("1"), price_step=Decimal("0.1"), costs=(),
-        ),
-        account=InitialAccount(
-            snapshot=AccountSnapshot(version=0, cash=Decimal("1000000"), positions={}),
-            mode=AccountMode.SIGNED,
-        ),
-        constraints=(), instruments=("A005930",), initial_strategy_state=None,
     )
 
-    project = vqapr.open(root)
-    completed = project.run_completed(
-        definition=simulation, strategy=authored_strategies.MonthlyDecider, run_id="clock"
+    strategy_ref = component_ref(
+        "clock-strategy", ComponentKind.STRATEGY_MODEL,
+        Path(authored_strategies.__file__).resolve(), "MonthlyDecider",
     )
+    exchange_ref = component_ref(
+        "clock-exchange", ComponentKind.EXCHANGE,
+        Path(authored_strategies.__file__).resolve(), "ClockExchange",
+    )
+    for reference in (strategy_ref, exchange_ref):
+        register_component(root, reference)
+
+    register_agenda(
+        root, agenda("clock-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 0),
+                     decision_sessions)
+    )
+    register_agenda(
+        root, agenda("clock-valuation", OperationRole.VALUATION, time(16, 0), valuation_sessions)
+    )
+    strategy_config = StrategyConfig(
+        strategy_ref, "clock-strategy", OperationRole.STRATEGY_CALLBACK
+    )
+    valuation_config = ValuationConfig("clock-valuation", OperationRole.VALUATION)
+    register_strategy_config(root, strategy_config)
+    register_valuation_config(root, valuation_config)
+
+    definition = RunDefinition(
+        strategy_config,
+        valuation_config,
+        ConstraintSet(()),
+        None,
+        exchange_ref,
+        "krx-daily",
+        datetime.combine(sessions[0], time(0, 0), tzinfo=KST),
+        datetime.combine(sessions[-1], time(23, 0), tzinfo=KST),
+        AccountSnapshot(0, Decimal("1000000"), {}),
+        AccountMode.SIGNED,
+        instruments=("A005930",),
+    )
+
+    result = run(root, preflight_run(root, definition))
 
     # `vqapr.account` is the framework's own NAV table. Each row is one committed mark, so the
     # distinct observed instants ARE the NAV series resolution.
-    account_rows = completed.tables.get("vqapr.account", ())
+    account_rows = result.final_state.recorder_rows.get("vqapr.account", ())
     for row in account_rows:
         print(
             f"NAV|{row.get('event_time')}|{row.get('observed_at')}|"
             f"{row.get('nav')}|{row.get('account_version')}|"
             f"{row.get('instrument')}|{row.get('price')}"
         )
-    print(f"SUMMARY|{completed.summary.accepted_intents}|{completed.summary.executions}")
+    kinds = [entry.kind.value for entry in result.final_state.lifecycle_trace]
+    accepted = kinds.count("ACCEPTED_INTENT")
+    executions = sum(
+        1 for trace in result.occurrences if type(trace).__name__ == "DueExecutionTrace"
+    )
+    print(f"SUMMARY|{accepted}|{executions}")
     '''
 )
 
@@ -173,6 +259,14 @@ def clock_workspace(tmp_path):
         for n, session in enumerate(SESSIONS)
     )
     execution = tmp_path / "exec.parquet"
+    # The observation the strategy declares, stamped at 07:00 so the 08:00 callback can see the
+    # session it decides on. The execution table keeps its own 15:30 stamps: the two clocks are
+    # separate, which is the whole subject of this file.
+    observed = ",\n".join(
+        f"('A005930', TIMESTAMPTZ '{session.isoformat()} 07:00:00+09', {72000 + n * 500}.0)"
+        for n, session in enumerate(SESSIONS)
+    )
+    prices = tmp_path / "prices.parquet"
     connection = duckdb.connect()
     connection.execute(
         f"""COPY (SELECT * FROM (VALUES
@@ -180,11 +274,17 @@ def clock_workspace(tmp_path):
         ) AS t(instrument, trade_at, is_tradable, close))
         TO '{execution.as_posix()}' (FORMAT PARQUET)"""
     )
+    connection.execute(
+        f"""COPY (SELECT * FROM (VALUES
+        {observed}
+        ) AS t(instrument, available_at, close))
+        TO '{prices.as_posix()}' (FORMAT PARQUET)"""
+    )
     connection.close()
 
     root = tmp_path / "project"
     root.mkdir()
-    return tmp_path, root, execution
+    return tmp_path, root, execution, prices
 
 
 def _run(
@@ -193,13 +293,14 @@ def _run(
     decisions: tuple[date, ...] = DECISION_SESSIONS,
     valuations: tuple[date, ...] = SESSIONS,
 ) -> tuple[list[dict], dict]:
-    tmp_path, root, execution = clock_workspace
+    tmp_path, root, execution, prices = clock_workspace
     result = subprocess.run(
         [
             sys.executable,
             str(tmp_path / "runner.py"),
             str(root),
             str(execution),
+            str(prices),
             ",".join(session.isoformat() for session in SESSIONS),
             ",".join(session.isoformat() for session in decisions),
             ",".join(session.isoformat() for session in valuations),
@@ -394,7 +495,7 @@ def test_the_valuation_never_displaces_an_accepted_decision(clock_workspace):
     slot holding either an `AcceptedIntent` or a `PendingValuation` -- it would have overwritten
     that intent on its own session and the fill would never have committed.
 
-    `executions` is not the discriminator here: the NoDecision path legitimately mints a
+    `executions` is not the discriminator here: the Hold path legitimately mints a
     `PendingValuation` on each holding session, and each completes as a due execution, so ten
     sessions produce ten due executions with only one of them carrying a fill.
     """

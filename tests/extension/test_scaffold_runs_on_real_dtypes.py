@@ -198,7 +198,7 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
     # template declines. What is under test is that the arithmetic completed at all: before the
     # fix this raised `TypeError` instead of returning any decision.
     assert decision is not None
-    assert type(decision).__name__ in {"NoDecision", "EconomicPortfolioIntent"}
+    assert type(decision).__name__ in {"Hold", "Rebalance"}
 
 
 @pytest.mark.parametrize("kind", [ComponentKind.DATA_MODEL, ComponentKind.STRATEGY_MODEL])

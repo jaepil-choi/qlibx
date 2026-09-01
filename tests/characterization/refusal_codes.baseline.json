@@ -1,6 +1,5 @@
 {
   "coverage_gap": [
-    "catalog.write.locked",
     "check.dataset.unregistered",
     "check.execution.not_after_decision",
     "check.field.absent",
@@ -140,11 +139,6 @@
   ],
   "schema": "vqapr.refusal_codes.v1",
   "static_codes": [
-    {
-      "code": "catalog.write.locked",
-      "file": "src/vqapr/_internal/catalog_store.py",
-      "line": 145
-    },
     {
       "code": "check.dataset.unregistered",
       "file": "src/vqapr/flow/judgments.py",
@@ -453,102 +447,102 @@
     {
       "code": "materialize.compute.failed",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.input.dataset_exists",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.input.empty",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.input.evaluation_times_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.input.evidence_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.input.fields_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.input.instruments_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.input.result_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.available_at_owned",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.decision_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.empty",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.fields_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.instrument_duplicate",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.instrument_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.instrument_unrequested",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.not_weighted",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.output.rows_invalid",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.publish.file_failed",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.publish.path_exists",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "materialize.publish.staging_failed",
       "file": "src/vqapr/flow/materialize.py",
-      "line": 238
+      "line": 248
     },
     {
       "code": "model_window.requirement.undeclared",
@@ -638,37 +632,37 @@
     {
       "code": "run.roster.unreadable",
       "file": "src/vqapr/flow/roster.py",
-      "line": 89
+      "line": 125
     },
     {
       "code": "source.scan.conditional_positive.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 617
+      "line": 631
     },
     {
       "code": "source.scan.distinct.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 395
+      "line": 409
     },
     {
       "code": "source.scan.execution_candidates.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 436
+      "line": 450
     },
     {
       "code": "source.scan.execution_snapshot.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 493
+      "line": 507
     },
     {
       "code": "source.scan.finite.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 685
+      "line": 699
     },
     {
       "code": "source.scan.observations.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 897
+      "line": 1040
     },
     {
       "code": "source.scan.path_missing",
@@ -678,7 +672,7 @@
     {
       "code": "source.scan.unreadable",
       "file": "src/vqapr/data/scan.py",
-      "line": 327
+      "line": 341
     },
     {
       "code": "workspace.agenda.lookup.invalid",

@@ -1,10 +1,15 @@
 """The bridge from a declared alias to the real point-in-time store.
 
 `agent_first` takes an injected resolver so the invocation boundary stays testable without
-a database. `StoreResolver` is what fills that injection point in production, so these
-tests pin the translation itself: lookback kinds map across the public/private boundary,
-declared fields are carried exactly, and a declaration the store cannot serve raises
-rather than quietly producing a thin result.
+a database. `strategy_bridge` fills that point in production using these three translations,
+so these tests pin the translation itself: lookback kinds map across the public/private
+boundary, declared fields are carried exactly, and a declaration the store cannot serve
+raises rather than quietly producing a thin result.
+
+**The resolver tests that stood below are gone with record `124`.** They drove
+`project.resolver(...)`, and both resolver classes -- the catalog-backed one and the
+store-backed one no module ever imported -- went with the Project cluster. What they read
+through is exercised for real by every run in `tests/flow/`.
 """
 
 from __future__ import annotations
@@ -170,101 +175,3 @@ def test_no_rows_projects_to_no_observations():
         )
         == ()
     )
-
-
-# --- CatalogResolver: the supported reader ------------------------------------------------
-
-
-def _price_parquet(tmp_path):
-    import duckdb
-
-    target = tmp_path / "price.parquet"
-    connection = duckdb.connect()
-    connection.execute(
-        f"""COPY (SELECT * FROM (VALUES
-        ('A', TIMESTAMPTZ '2024-03-05 16:00:00+00', 100.0),
-        ('A', TIMESTAMPTZ '2024-03-06 16:00:00+00', 103.0),
-        ('A', TIMESTAMPTZ '2024-03-07 16:00:00+00', 105.0),
-        ('B', TIMESTAMPTZ '2024-03-06 16:00:00+00', 50.0)
-        ) AS t(instrument, available_at, close))
-        TO '{target.as_posix()}' (FORMAT PARQUET)"""
-    )
-    connection.close()
-    return target
-
-
-def _registered_project(tmp_path):
-    import vqapr
-    from vqapr.project import DatasetDeclaration
-
-    project = vqapr.open(tmp_path / "project")
-    project.register(
-        DatasetDeclaration(
-            dataset_id="price_daily",
-            path=_price_parquet(tmp_path),
-            hive_partitioned=False,
-            instrument_field="instrument",
-            available_at_field="available_at",
-            key_fields=("available_at", "instrument"),
-            fields={"close": "close"},
-        )
-    )
-    return project
-
-
-def test_the_resolver_honours_the_point_in_time_cutoff(tmp_path):
-    project = _registered_project(tmp_path)
-    resolver = project.resolver(instruments=("A", "B"))
-    declaration = DatasetInput(
-        dataset_id="price_daily", fields=("close",), lookback=RowsLookback(rows=5)
-    )
-    cutoff = datetime(2024, 3, 6, 16, tzinfo=UTC)
-
-    observations = resolver("prices", declaration, cutoff)
-
-    assert observations, "expected observations at the cutoff"
-    # Compare instants, never calendar days: duckdb renders these in the session zone,
-    # so a day-number assertion would test the local timezone rather than the cutoff.
-    assert all(o.available_at <= cutoff for o in observations)
-    later = datetime(2024, 3, 7, 16, tzinfo=UTC)
-    assert all(o.available_at != later for o in observations)
-
-
-def test_the_resolver_trims_to_the_declared_lookback(tmp_path):
-    project = _registered_project(tmp_path)
-    resolver = project.resolver(instruments=("A", "B"))
-    declaration = DatasetInput(
-        dataset_id="price_daily", fields=("close",), lookback=RowsLookback(rows=2)
-    )
-
-    observations = resolver("prices", declaration, datetime(2024, 3, 7, 16, tzinfo=UTC))
-
-    for instrument in ("A", "B"):
-        window = [o for o in observations if o.instrument_id == instrument]
-        assert len(window) <= 2
-        # Oldest first, and the most recent rows are the ones kept.
-        assert window == sorted(window, key=lambda o: o.available_at)
-    a_window = [o.available_at for o in observations if o.instrument_id == "A"]
-    assert a_window == [
-        datetime(2024, 3, 6, 16, tzinfo=UTC),
-        datetime(2024, 3, 7, 16, tzinfo=UTC),
-    ]
-
-
-def test_the_resolver_serves_only_the_requested_instruments(tmp_path):
-    project = _registered_project(tmp_path)
-    resolver = project.resolver(instruments=("A",))
-    declaration = DatasetInput(
-        dataset_id="price_daily", fields=("close",), lookback=RowsLookback(rows=5)
-    )
-
-    observations = resolver("prices", declaration, datetime(2024, 3, 7, 16, tzinfo=UTC))
-    assert {o.instrument_id for o in observations} == {"A"}
-
-
-def test_the_resolver_refuses_an_empty_instrument_set(tmp_path):
-    import vqapr
-
-    project = vqapr.open(tmp_path)
-    with pytest.raises(ValueError, match="non-empty"):
-        project.resolver(instruments=())

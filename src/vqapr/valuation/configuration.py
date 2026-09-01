@@ -20,7 +20,7 @@ class ValuationConfig:
     **A valuation agenda cannot mark more often than the strategy agenda creates execution
     instants.** A valuation occurrence reports the mark the Account already committed; it does not
     derive a new one. Marks are committed at execution instants, and those exist only where a
-    callback produced an intent or a ``NoDecision`` that took a pending valuation. So a daily
+    callback produced an intent or a ``Hold`` that took a pending valuation. So a daily
     valuation agenda over a *monthly* strategy agenda yields a monthly NAV series -- nothing
     refuses, the series is simply as sparse as the strategy's cadence. A daily series needs a
     daily **strategy** cadence, with the rebalance rule held in the Model's memory, which is where

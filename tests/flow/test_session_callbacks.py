@@ -20,7 +20,8 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
-from vqapr.models.strategy_model import NoDecision, StrategyModel, StrategyModelContext
+from vqapr.authoring import Hold
+from vqapr.models.strategy_model import StrategyModel, StrategyModelContext
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
@@ -40,7 +41,7 @@ def _state(*, memory: object = None) -> RunStateRepository:
 
 
 class EveryThreeOccurrences(StrategyModel):
-    def on_occurrence(self, context: StrategyModelContext) -> NoDecision | EconomicPortfolioIntent:
+    def on_occurrence(self, context: StrategyModelContext) -> Hold | EconomicPortfolioIntent:
         assert not hasattr(context, "sessions")
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
@@ -49,7 +50,7 @@ class EveryThreeOccurrences(StrategyModel):
         count = int(memory.get("occurrence_count", 0)) + 1
         self.memory = {**memory, "occurrence_count": count}
         if count % 3:
-            return NoDecision(reason="cadence")
+            return Hold(reason="cadence")
         return EconomicPortfolioIntent(
             intent_id=UUID(int=count),
             strategy_id="every-three",
@@ -72,7 +73,7 @@ class _Catalog:
 
 class _Exchange:
     def execute(self, *args: object) -> object:
-        raise AssertionError("NoDecision callbacks must not execute orders")
+        raise AssertionError("Hold callbacks must not execute orders")
 
 
 class _Constraint(Constraint):
@@ -173,7 +174,7 @@ def test_cadence_is_strategy_memory_over_explicit_current_occurrences() -> None:
 
     result = _flow(EveryThreeOccurrences(), state, (_occurrence(1), _occurrence(2))).run()
 
-    assert [type(trace.result) for trace in result.occurrences] == [NoDecision, NoDecision]
+    assert [type(trace.result) for trace in result.occurrences] == [Hold, Hold]
     assert [trace.occurrence.occurrence_id for trace in result.occurrences] == [
         "strategy-1",
         "strategy-2",
@@ -187,7 +188,7 @@ def test_no_decision_state_continues_across_explicit_agenda_boundaries() -> None
     state = _state(memory={"occurrence_count": 1})
     result = _flow(EveryThreeOccurrences(), state, (_occurrence(2),)).run()
 
-    assert isinstance(result.occurrences[0].result, NoDecision)
+    assert isinstance(result.occurrences[0].result, Hold)
     assert state.load_model_state(result.final_state.current_model_state_ref) == {
         "occurrence_count": 2
     }
@@ -221,7 +222,7 @@ def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
 
 
 class FailingStrategy(EveryThreeOccurrences):
-    def on_occurrence(self, context: StrategyModelContext) -> NoDecision:
+    def on_occurrence(self, context: StrategyModelContext) -> Hold:
         self.memory = {"occurrence_count": 999}
         raise RuntimeError("strategy bug")
 

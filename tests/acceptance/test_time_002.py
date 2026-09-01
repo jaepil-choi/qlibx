@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
 
 import duckdb
@@ -49,7 +49,8 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.simulation import AcceptedIntent, SimulationFlow
-from vqapr.models.strategy_model import NoDecision, StrategyModel
+from vqapr.authoring import Hold, Rebalance
+from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
@@ -81,11 +82,11 @@ class _Catalog:
 
 
 class _Strategy(StrategyModel):
-    def __init__(self, results: tuple[NoDecision | EconomicPortfolioIntent, ...]) -> None:
+    def __init__(self, results: tuple[Hold | EconomicPortfolioIntent, ...]) -> None:
         self.results = iter(results)
         self.seen: list[tuple[str, datetime, int]] = []
 
-    def on_occurrence(self, context: object) -> NoDecision | EconomicPortfolioIntent:
+    def on_occurrence(self, context: object) -> Hold | EconomicPortfolioIntent:
         occurrence = context.occurrence
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
@@ -98,7 +99,7 @@ class _Strategy(StrategyModel):
 
 class _PayloadFaultStrategy(_Strategy):
     def __init__(self) -> None:
-        super().__init__((NoDecision("unreachable"),))
+        super().__init__((Hold(reason="unreachable"),))
         self._save_count = 0
 
     def save_payload(self, target: object) -> None:
@@ -306,7 +307,7 @@ def _execution(
 def test_daily_observations_and_intraday_callbacks_are_agenda_owned_not_row_owned() -> None:
     nine = datetime(2024, 3, 5, 9, tzinfo=KST)
     ten = datetime(2024, 3, 5, 10, tzinfo=KST)
-    strategy = _Strategy((NoDecision("observe"), NoDecision("observe")))
+    strategy = _Strategy((Hold(reason="observe"), Hold(reason="observe")))
 
     result = _flow(_frozen((nine, ten), end=ten), strategy, _state()).run()
 
@@ -361,7 +362,7 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
                     (datetime(2024, 3, 5, 13, tzinfo=KST),),
                     end=datetime(2024, 3, 5, 13, tzinfo=KST),
                 ),
-                _Strategy((NoDecision("daily"),)),
+                _Strategy((Hold(reason="daily"),)),
                 _state(),
             )
             .run()
@@ -415,7 +416,7 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
                 (datetime(2024, 3, 5, 5, tzinfo=KST),),
                 end=datetime(2024, 3, 5, 5, tzinfo=KST),
             ),
-            _Strategy((NoDecision("no row required"),)),
+            _Strategy((Hold(reason="no row required"),)),
             _state(),
         )
         .run()
@@ -452,7 +453,7 @@ def test_empty_constraint_set_needs_no_constraint_window() -> None:
 
     result = _flow(
         frozen,
-        _Strategy((NoDecision("unconstrained"),)),
+        _Strategy((Hold(reason="unconstrained"),)),
         _state(),
         (),
         unexpected_constraint_window,
@@ -555,9 +556,21 @@ def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurr
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_source(
+def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
     tmp_path: Path,
 ) -> None:
+    """The guarantee that replaced a refusal.
+
+    This test used to hand the Flow three intents carrying a wrong `strategy_id`, a wrong
+    `model_state_ref`, and a wrong `source_refs`, and assert each was refused without mutation.
+    Record `125` removed the way to be wrong: a callback returns `Hold` or `Rebalance`, and the
+    Flow stamps all three from the run it is executing. There is no longer a mismatched intent to
+    construct, so the property worth asserting is the one the refusal existed to protect --
+    provenance describes what was READ, not what was claimed.
+
+    The strategy below reads its declared window and returns a bare `Rebalance`. Everything
+    checked afterwards is a value it never named.
+    """
     source_path = _parquet(
         tmp_path / "strategy.parquet",
         """
@@ -593,32 +606,12 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
     digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
 
     class ReadingStrategy(StrategyModel):
-        def __init__(self, intent: EconomicPortfolioIntent) -> None:
-            self.intent = intent
-
         def requirements(self) -> tuple[DataRequirement, ...]:
             return (requirement,)
 
-        def on_occurrence(self, context: object) -> EconomicPortfolioIntent:
+        def on_occurrence(self, context: object) -> Rebalance:
             context.window.observations(requirement)
-            return self.intent
-
-    def intent(
-        *,
-        strategy_id: str = "strategy",
-        model_state_ref: ModelStateRef | None = None,
-        source_refs: tuple[IntentSourceRef, ...] = (IntentSourceRef("source", digest),),
-    ) -> EconomicPortfolioIntent:
-        return EconomicPortfolioIntent(
-            UUID(int=10),
-            strategy_id,
-            (),
-            Decimal("1"),
-            _BUDGET,
-            source_refs,
-            0,
-            model_state_ref,
-        )
+            return Rebalance(target_weights={}, cash_weight=Decimal("1"), budget=_BUDGET)
 
     frozen = _frozen(
         (callback,),
@@ -630,41 +623,43 @@ def test_callback_provenance_must_match_frozen_strategy_prior_state_and_actual_s
         strategy_requirements=(requirement,),
     )
 
-    def flow(candidate: EconomicPortfolioIntent, state: RunStateRepository) -> SimulationFlow:
-        return SimulationFlow(
-            frozen,
-            ReadingStrategy(candidate),
-            state,
-            strategy_window_for_occurrence=lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
-                instruments=("A",),
-                store=DuckDbObservationStore(workspace),
-                allowed_requirements=(requirement,),
-            ),
-            constraint_window_for_occurrence=lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
-                instruments=("A",),
-                store=DuckDbObservationStore(workspace),
-                allowed_requirements=(_requirement(),),
-            ),
-            account=Account(mode=AccountMode.LONG_ONLY),
-            exchange=_exchange(),
-            constraints=(_Constraint(),),
-        )
+    result = SimulationFlow(
+        frozen,
+        ReadingStrategy(),
+        _state(),
+        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
+            evaluation_time=occurrence.evaluation_time,
+            instruments=("A",),
+            store=DuckDbObservationStore(workspace),
+            allowed_requirements=(requirement,),
+        ),
+        constraint_window_for_occurrence=lambda occurrence: ModelWindow(
+            evaluation_time=occurrence.evaluation_time,
+            instruments=("A",),
+            store=DuckDbObservationStore(workspace),
+            allowed_requirements=(_requirement(),),
+        ),
+        account=Account(mode=AccountMode.LONG_ONLY),
+        exchange=_exchange(),
+        constraints=(_Constraint(),),
+    ).run()
 
-    assert flow(intent(), _state()).run().final_state.pending_accepted_intent is None
-
-    for invalid in (
-        intent(strategy_id="other"),
-        intent(model_state_ref=ModelStateRef("1" * 64)),
-        intent(source_refs=(IntentSourceRef("source", "0" * 64),)),
-    ):
-        state = _state()
-        with pytest.raises(ValueError):
-            flow(invalid, state).run()
-        assert state.current.account == AccountState(_ACCOUNT)
-        assert state.current.pending_accepted_intent is None
-        assert state.current.lifecycle_trace == ()
+    stamped = next(
+        trace.result
+        for trace in result.occurrences
+        if isinstance(getattr(trace, "result", None), EconomicPortfolioIntent)
+    )
+    # The source actually read, at the digest it actually carried.
+    assert stamped.source_refs == (IntentSourceRef("source", digest),)
+    # The frozen component, not a string the callback chose.
+    assert stamped.strategy_id == str(frozen.strategy.component.component_id)
+    # The account the callback was handed.
+    assert stamped.account_version_seen == _ACCOUNT.version
+    # Deterministic, so a replayed run mints the same identity for the same occurrence.
+    assert stamped.intent_id == uuid5(
+        NAMESPACE_URL, f"{stamped.strategy_id}/{frozen.static_occurrences[0].occurrence_id}"
+    )
+    assert result.final_state.pending_accepted_intent is None
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -698,7 +693,7 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
             sources=(source,),
             strategy_requirements=(requirement,),
         ),
-        PassiveStrategy((NoDecision("no observation read"),)),
+        PassiveStrategy((Hold(reason="no observation read"),)),
         _state(),
     ).run()
 
@@ -731,9 +726,9 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         def requirements(self) -> tuple[DataRequirement, ...]:
             return (requirement,)
 
-        def on_occurrence(self, context: object) -> NoDecision:
+        def on_occurrence(self, context: object) -> Hold:
             context.window.observations(requirement)
-            return NoDecision("unreachable")
+            return Hold(reason="unreachable")
 
     class MissingCatalog:
         def dataset(self, _dataset_id: str) -> DatasetRegistration:
@@ -826,7 +821,7 @@ def test_constraint_projection_failure_retains_constraint_owner() -> None:
     with pytest.raises(SimulationFailure, match="constraint projection fault") as raised:
         _flow(
             _frozen((callback,), end=callback),
-            _Strategy((NoDecision("unreachable"),)),
+            _Strategy((Hold(reason="unreachable"),)),
             state,
             constraints=(constraint,),
         ).run()
@@ -852,7 +847,7 @@ def test_callback_publication_failure_is_not_classified_as_intent() -> None:
     with pytest.raises(SimulationFailure, match="callback publication fault") as raised:
         _flow(
             _frozen((callback,), end=callback),
-            _Strategy((NoDecision("no decision"),)),
+            _Strategy((Hold(reason="no decision"),)),
             state,
         ).run()
 
@@ -1085,7 +1080,7 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
     with pytest.raises(VqaprError) as caught:
         SimulationFlow(
             frozen,
-            _Strategy((NoDecision("x"),)),
+            _Strategy((Hold(reason="x"),)),
             _state(),
             strategy_window_for_occurrence=lambda _: None,
             constraint_window_for_occurrence=lambda _: None,
@@ -1131,7 +1126,7 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     )
     frozen = _frozen((callback, target), valuations=(target,), end=target, execution=registration)
     state = _state()
-    strategy = _Strategy((intent, NoDecision("after due")))
+    strategy = _Strategy((intent, Hold(reason="after due")))
 
     result = _flow(frozen, strategy, state).run()
 
@@ -1188,7 +1183,7 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert result.final_state.finalization is not None
     assert strategy.seen[-1][2] == 1
 
-    replay = _flow(frozen, _Strategy((intent, NoDecision("after due"))), _state()).run()
+    replay = _flow(frozen, _Strategy((intent, Hold(reason="after due"))), _state()).run()
     assert replay.final_state.account == result.final_state.account
     assert [trace.kind for trace in replay.final_state.lifecycle_trace] == [
         trace.kind for trace in result.final_state.lifecycle_trace
@@ -1222,7 +1217,7 @@ def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> Non
 
     result = _flow(
         _frozen((first, second), valuations=(target,), end=target, execution=registration),
-        _Strategy((intent, NoDecision("keep pending"))),
+        _Strategy((intent, Hold(reason="keep pending"))),
         _state(),
     ).run()
 

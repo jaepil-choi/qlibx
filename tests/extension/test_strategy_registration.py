@@ -15,7 +15,8 @@ _HEAD = """from __future__ import annotations
 
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
-from vqapr.models.strategy_model import NoDecision, StrategyModel
+from vqapr.authoring import Hold
+from vqapr.models.strategy_model import StrategyModel
 
 
 class S(StrategyModel):
@@ -66,7 +67,7 @@ def test_a_renamed_callback_parameter_is_accepted(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "renamed",
-        "    def on_occurrence(self, ctx):\n        return NoDecision(reason='x')\n",
+        "    def on_occurrence(self, ctx):\n        return Hold(reason='x')\n",
     )
 
     register_strategy_model(tmp_path, "renamed", path, "S")
@@ -76,7 +77,7 @@ def test_an_extra_required_parameter_is_refused(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "extra",
-        "    def on_occurrence(self, context, extra):\n        return NoDecision(reason='x')\n",
+        "    def on_occurrence(self, context, extra):\n        return Hold(reason='x')\n",
     )
     with pytest.raises(VqaprError) as raised:
         register_strategy_model(tmp_path, "extra", path, "S")
@@ -88,7 +89,7 @@ def test_an_unannotated_callback_is_accepted(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "bare",
-        "    def on_occurrence(self, context):\n        return NoDecision(reason='x')\n",
+        "    def on_occurrence(self, context):\n        return Hold(reason='x')\n",
     )
     ref = register_strategy_model(tmp_path, "bare", path, "S")
     assert ref.kind is ComponentKind.STRATEGY_MODEL
@@ -99,8 +100,8 @@ def test_a_narrower_return_annotation_is_accepted(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "narrow",
-        "    def on_occurrence(self, context) -> NoDecision:\n"
-        "        return NoDecision(reason='x')\n",
+        "    def on_occurrence(self, context) -> Hold:\n"
+        "        return Hold(reason='x')\n",
     )
     assert register_strategy_model(tmp_path, "narrow", path, "S") is not None
 
@@ -109,12 +110,13 @@ def test_a_requirements_declaration_of_the_wrong_shape_is_refused(tmp_path: Path
     """Declaring requirements is optional, but declaring them wrongly is not."""
     path = tmp_path / "badreq.py"
     path.write_text(
-        "from vqapr.models.strategy_model import NoDecision, StrategyModel\n\n\n"
+        "from vqapr.authoring import Hold\n"
+        "from vqapr.models.strategy_model import StrategyModel\n\n\n"
         "class S(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ['not-a-requirement']\n\n"
         "    def on_occurrence(self, context):\n"
-        "        return NoDecision(reason='x')\n",
+        "        return Hold(reason='x')\n",
         encoding="utf-8",
     )
     with pytest.raises(VqaprError) as raised:

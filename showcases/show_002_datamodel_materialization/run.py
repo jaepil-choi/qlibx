@@ -4,23 +4,29 @@ import hashlib
 import html
 import json
 import shutil
-from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import duckdb
-from show002_models import AbsoluteScoreModel, ForgingModel, ReversalFeatureModel
 
-import vqapr
-from vqapr.project import DatasetDeclaration
+from vqapr.domain.errors import VqaprError
+from vqapr.public import (
+    DatasetRegistration,
+    MaterializationSpec,
+    SourceSpec,
+    materialize,
+    register_data_model,
+    register_dataset,
+)
 
 ROOT = Path(__file__).resolve().parent
+MODELS = ROOT / "show002_models.py"
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-LAST_VERIFIED_AT = "2026-08-25"
-VERIFIED_AGAINST = "vqapr-0.2.0a1+agent-first-working-tree"
+LAST_VERIFIED_AT = "2026-09-01"
+VERIFIED_AGAINST = "vqapr-0.2.0a2+develop"
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -84,23 +90,6 @@ INSTRUMENTS = ("A", "B")
 
 
 
-
-
-def _flatten_persisted(
-    rows: tuple[Mapping[str, object], ...], field_order: tuple[str, ...]
-) -> list[dict[str, object]]:
-    """Turn `project.read_output` rows back into the flat, reportable shape the legacy
-    parquet rows had: `available_at`, `instrument`, then the declared semantic fields.
-    """
-    flattened = [
-        {
-            "available_at": row["evaluation_time"],
-            "instrument": row["instrument_id"],
-            **{field: float(row["values"][field]) for field in field_order},
-        }
-        for row in rows
-    ]
-    return sorted(flattened, key=lambda row: (row["available_at"], row["instrument"]))
 
 
 def _sha256(path: Path) -> str:
@@ -233,75 +222,84 @@ def main() -> None:
     _reset_outputs()
     input_path = _write_input()
 
-    project = vqapr.open(PROJECT)
-    declaration = DatasetDeclaration(
-        dataset_id="price_daily",
-        path=input_path,
-        hive_partitioned=False,
-        instrument_field="instrument",
-        available_at_field="available_at",
-        key_fields=("available_at", "instrument"),
-        fields={"close": "close"},
+    input_created = register_dataset(
+        PROJECT,
+        DatasetRegistration.of(
+            "price_daily",
+            "show002-prices",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("available_at", "instrument"),
+            fields={"close": "close"},
+        ),
+        SourceSpec.of("show002-prices", input_path),
     )
-    registration_receipt = project.register(declaration)
 
     # The framework serves its own registered and derived datasets: no hand-rolled
     # point-in-time filtering or lookback trimming in showcase code.
-    resolver = project.resolver(instruments=INSTRUMENTS)
+    reversal_ref = register_data_model(
+        PROJECT, "reversal-features", MODELS, "ReversalFeatureModel"
+    )
+    absolute_ref = register_data_model(PROJECT, "absolute-scores", MODELS, "AbsoluteScoreModel")
+    register_data_model(PROJECT, "forging-model", MODELS, "ForgingModel")
 
     evaluation_times = (
         datetime(2024, 3, 6, 16, tzinfo=KST),
         datetime(2024, 3, 7, 16, tzinfo=KST),
     )
-    project.materialize(
-        model=ReversalFeatureModel,
-        config={},
+    reversal = materialize(
+        PROJECT,
+        "reversal-features",
+        MaterializationSpec.of(
+            "reversal_features", value_fields=("old_close", "new_close", "score")
+        ),
         evaluation_times=evaluation_times,
-        resolver=resolver,
-        output_dataset_id="reversal_features",
+        instruments=INSTRUMENTS,
     )
-    reversal_rows = _flatten_persisted(
-        project.read_output("reversal_features"), ("old_close", "new_close", "score")
-    )
-    reversal_lineage = dict(project.read_lineage("reversal_features"))
+    reversal_rows = _normalized(_rows(reversal.output_path))
+    reversal_lineage = json.loads(reversal.lineage_path.read_text(encoding="utf-8"))
 
-    project.materialize(
-        model=AbsoluteScoreModel,
-        config={},
+    absolute = materialize(
+        PROJECT,
+        "absolute-scores",
+        MaterializationSpec.of("absolute_scores", value_fields=("abs_score",)),
         evaluation_times=(evaluation_times[-1],),
-        resolver=resolver,
-        output_dataset_id="absolute_scores",
+        instruments=INSTRUMENTS,
     )
-    absolute_rows = _flatten_persisted(project.read_output("absolute_scores"), ("abs_score",))
-    absolute_lineage = dict(project.read_lineage("absolute_scores"))
+    absolute_rows = _normalized(_rows(absolute.output_path))
+    absolute_lineage = json.loads(absolute.lineage_path.read_text(encoding="utf-8"))
 
-    catalog_path = PROJECT / ".vqapr" / "catalog.json"
-    before_forgery = catalog_path.read_bytes()
+    # Snapshotted AFTER every component is registered, so what this compares is the
+    # materialization's effect alone. A refused materialization must register no output dataset.
+    workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
+    before_forgery = workspace_path.read_bytes()
+    forged_output = PROJECT / ".vqapr" / "materialized" / "forged_features.parquet"
     try:
-        project.materialize(
-            model=ForgingModel,
-            config={},
+        materialize(
+            PROJECT,
+            "forging-model",
+            MaterializationSpec.of(
+                "forged_features", value_fields=("old_close", "new_close", "score")
+            ),
             evaluation_times=evaluation_times,
-            resolver=resolver,
-            output_dataset_id="forged_features",
+            instruments=INSTRUMENTS,
         )
-    except ValueError as error:
-        forgery_error = {"type": type(error).__name__, "message": str(error)}
+    except VqaprError as error:
+        forgery_error = {
+            "type": type(error).__name__,
+            "codes": [failure.code for failure in error.failures],
+            "message": str(error),
+        }
         if "available_at" not in str(error):
             raise AssertionError(
                 "forgery rejection did not name the reserved field 'available_at'"
             ) from error
     else:
         raise AssertionError("producer-controlled available_at was unexpectedly accepted")
-    catalog_unchanged = catalog_path.read_bytes() == before_forgery
-    if not catalog_unchanged:
-        raise AssertionError("failed materialization exposed partial catalog state")
-    try:
-        project.read_output("forged_features")
-    except KeyError:
-        forged_output_absent = True
-    else:
-        forged_output_absent = False
+    workspace_unchanged = workspace_path.read_bytes() == before_forgery
+    if not workspace_unchanged:
+        raise AssertionError("failed materialization exposed partial workspace state")
+    forged_output_absent = not forged_output.exists()
     if not forged_output_absent:
         raise AssertionError("failed materialization exposed partial output state")
 
@@ -311,17 +309,21 @@ def main() -> None:
     pit_future_excluded = 999.0 not in old_new_values
     if not pit_future_excluded:
         raise AssertionError("future 999 value leaked into DataModel output")
-    package_timestamps_match = [row["available_at"] for row in reversal_rows] == [
-        evaluation_times[0].isoformat(),
-        evaluation_times[0].isoformat(),
-        evaluation_times[1].isoformat(),
-        evaluation_times[1].isoformat(),
+    # Compared as instants, not as strings: the parquet round trip is free to hand back the same
+    # moment in a different offset, and a string comparison would call that a mismatch.
+    package_timestamps_match = [
+        datetime.fromisoformat(str(row["available_at"])) for row in reversal_rows
+    ] == [
+        evaluation_times[0],
+        evaluation_times[0],
+        evaluation_times[1],
+        evaluation_times[1],
     ]
     if not package_timestamps_match:
         raise AssertionError("derived available_at values do not match evaluation times")
 
-    shutil.copyfile(catalog_path, OUTPUTS / "workspace.yaml")
-    workspace_text = catalog_path.read_text(encoding="utf-8")
+    shutil.copyfile(workspace_path, OUTPUTS / "workspace.yaml")
+    workspace_text = workspace_path.read_text(encoding="utf-8")
     paths = {
         "price_daily.parquet": input_path,
         "workspace.yaml": OUTPUTS / "workspace.yaml",
@@ -331,11 +333,11 @@ def main() -> None:
         "last_verified_at": LAST_VERIFIED_AT,
         "verified_against": VERIFIED_AGAINST,
         "registration": {
-            "input_created": registration_receipt.created,
-            "reversal_authority_id": None,
-            "reversal_fingerprint": None,
-            "absolute_authority_id": None,
-            "absolute_fingerprint": None,
+            "input_created": input_created,
+            "reversal_authority_id": str(reversal_ref.component_id),
+            "reversal_fingerprint": reversal_ref.fingerprint,
+            "absolute_authority_id": str(absolute_ref.component_id),
+            "absolute_fingerprint": absolute_ref.fingerprint,
         },
         "evaluation_times": [value.isoformat() for value in evaluation_times],
         "input_rows": _normalized(_rows(input_path)),
@@ -352,7 +354,7 @@ def main() -> None:
             "lineage": absolute_lineage,
         },
         "forgery_rejection": {
-            "workspace_unchanged": catalog_unchanged,
+            "workspace_unchanged": workspace_unchanged,
             "output_absent": forged_output_absent,
             "error": forgery_error,
         },
@@ -360,9 +362,6 @@ def main() -> None:
         "limitations": [
             "No StrategyModel session callback or execution input participates in materialization.",
             "No orders, fills, Account mutation, valuation, or performance are claimed.",
-            "Registration receipts no longer expose a component_id/fingerprint on the new "
-            "supported surface; authority identity is opaque, so the report shows None for "
-            "those fields instead of fabricating a value.",
         ],
     }
     (OUTPUTS / "trace.json").write_text(

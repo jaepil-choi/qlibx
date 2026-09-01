@@ -58,12 +58,13 @@ def _agenda(identifier: str, role: OperationRole, *hours: int) -> OperationAgend
 def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef:
     path = root / f"{identifier}.py"
     source = (
-        f"from vqapr.models.strategy_model import NoDecision, StrategyModel\n"
+        "from vqapr.authoring import Hold\n"
+        "from vqapr.models.strategy_model import StrategyModel\n"
         f"class {identifier.title().replace('-', '')}(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ()\n"
         "    def on_occurrence(self, context):\n"
-        "        return NoDecision('fixture')\n"
+        "        return Hold(reason='fixture')\n"
         if kind is ComponentKind.STRATEGY_MODEL
         else "from vqapr.constraints.constraint import Constraint\n"
         f"class {identifier.title().replace('-', '')}(Constraint):\n"

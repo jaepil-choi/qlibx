@@ -177,7 +177,7 @@ from vqapr.public import (
     DataRequirement,
     EconomicPortfolioIntent,
     IntentSourceRef,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -215,7 +215,7 @@ class ReversalLongShort(StrategyModel):
             if row["score"] is not None
         }
         if len(latest) < 4:
-            return NoDecision("cross-section is too small to build both sides")
+            return Hold(reason="cross-section is too small to build both sides")
 
         ranked = sorted(latest.items(), key=lambda item: (item[1], item[0]))
         book = {instrument: -SIDE_WEIGHT for instrument, _ in ranked[:2]}

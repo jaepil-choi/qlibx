@@ -225,7 +225,7 @@ _STRATEGY_BODY = '''"""A strategy module with a side effect at import time."""
 from pathlib import Path
 Path(r"{marker}").write_text("pwned", encoding="utf-8")
 
-from vqapr.public import StrategyModel, DataRequirement, RowsLookback, NoDecision
+from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold
 
 
 class Strategy(StrategyModel):
@@ -233,7 +233,7 @@ class Strategy(StrategyModel):
         return (DataRequirement.of("s", "prices", fields=("close",), lookback=RowsLookback(2)),)
 
     def on_occurrence(self, context):
-        return NoDecision("qa probe")
+        return Hold(reason="qa probe")
 '''
 
 
@@ -281,7 +281,7 @@ import os
 root = Path(__file__).resolve().parent
 (root / ".vqapr" / "{marker_relative}").write_text("pwned-inside-dot-vqapr", encoding="utf-8")
 
-from vqapr.public import StrategyModel, DataRequirement, RowsLookback, NoDecision
+from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold
 
 
 class Strategy(StrategyModel):
@@ -289,7 +289,7 @@ class Strategy(StrategyModel):
         return (DataRequirement.of("s", "prices", fields=("close",), lookback=RowsLookback(2)),)
 
     def on_occurrence(self, context):
-        return NoDecision("qa probe")
+        return Hold(reason="qa probe")
 '''
 
 

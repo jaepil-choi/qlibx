@@ -4,49 +4,30 @@
 it stands on. A strategy, datamodel, exchange or constraint is Python; declaring and installing one
 is `vqapr register`; proving a run is ready is `vqapr check`; running it is `vqapr run`.
 
-`vqapr.open()` below returns a `Project` facade that **no shipped command calls**. It and the
-modules behind it are unshipped and frozen: no new callers, no growth, and no deletion either --
-removing them is a separately gated decision. The ruling, the measurement behind it, and what a
-future deletion would have to satisfy are in `docs/design/agent-first-surface.md` under
-"The ruling -- 2026-08-28". Read that before building on this entry point.
+`vqapr.open()` and the `Project` facade behind it are **gone**. They were the destination of an
+earlier design in which `vqapr.public` was the legacy layer to be deleted; a PEP 669 trace of a
+complete CLI journey inverted that finding — `project.py`, `simulation.py`, `materialization.py`,
+`venues.py` and the `_internal` bridges below them ran **zero** lines under the shipped commands
+and were exercised only by the tests written for them. `docs/design/agent-first-surface.md`
+records the measurement and the ruling; the deletion itself is `docs/implementations/124`.
 
-Capability modules are imported lazily so that `import vqapr` stays cheap and so that a
-capability that is still being built cannot break the package import for every caller.
+`vqapr.authoring` survives that deletion and is not part of it: a registered StrategyModel may be
+written against it, and `extension/loading.py` adapts it onto the engine contract at load time.
+
+The capability import stays lazy so that `import vqapr` stays cheap, and so that a leaf capability
+remains importable without dragging heavier layers in behind it —
+`tests/boundaries/test_capability_absence.py` enforces exactly that.
 """
 
 from __future__ import annotations
 
-__all__ = (
-    "authoring",
-    "materialization",
-    "open",
-    "project",
-    "simulation",
-)
+__all__ = ("authoring",)
 
-_CAPABILITIES = frozenset({"authoring", "materialization", "project", "simulation"})
-
-
-def open(root):
-    """Open a project at `root` WITHOUT creating anything.
-
-    The import is deferred into the call rather than done at module scope so that
-    `import vqapr.analysis.signal` does not drag the project/runtime layers in behind it.
-    `tests/boundaries/test_capability_absence.py` enforces exactly that: a leaf capability
-    must stay importable without reaching the layers it does not depend on.
-    """
-    from vqapr.project import open as _open
-
-    return _open(root)
+_CAPABILITIES = frozenset({"authoring"})
 
 
 def __getattr__(name: str):
-    """Resolve capability modules on first attribute access.
-
-    Kept lazy for the same boundary reason as `open`, and because the capability set is
-    still being migrated: an eager import would make one unfinished module a hard failure
-    for `import vqapr` itself.
-    """
+    """Resolve capability modules on first attribute access."""
     if name in _CAPABILITIES:
         import importlib
 

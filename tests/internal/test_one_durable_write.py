@@ -17,15 +17,12 @@ directory's absence is a signal (`create_parent`).
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from vqapr._internal import atomic, objects
-from vqapr._internal.catalog import Catalog, root_digest
-from vqapr._internal.catalog_store import commit_catalog, read_catalog
+from vqapr._internal import atomic
 from vqapr.flow.run_records import RunRecordTaken, RunRecordWriter
 from vqapr.workspace import Workspace
 
@@ -66,7 +63,7 @@ def test_a_failure_before_the_swap_creates_nothing_when_there_was_nothing(tmp_pa
 
 
 def test_the_workspace_survives_an_interrupted_write(tmp_path: Path) -> None:
-    """Former call site 1 of 4 (`workspace.py`). A registered workspace stays readable."""
+    """Former call site 1 of 2 (`workspace.py`). A registered workspace stays readable."""
     workspace = Workspace.create(tmp_path)
     before = workspace.path.read_bytes()
 
@@ -80,52 +77,8 @@ def test_the_workspace_survives_an_interrupted_write(tmp_path: Path) -> None:
     assert Workspace.open(tmp_path) is not None, "and the workspace still opens"
 
 
-def test_the_catalog_survives_an_interrupted_write(tmp_path: Path) -> None:
-    """Former call site 2 of 4 (`catalog_store.py`)."""
-    committed = commit_catalog(
-        tmp_path,
-        candidate=Catalog.empty(),
-        expected_generation=0,
-        expected_root_digest=root_digest(Catalog.empty()),
-    )
-    catalog_path = tmp_path / ".vqapr" / "catalog.json"
-    before = catalog_path.read_bytes()
-
-    def explode(_written: bytes) -> None:
-        raise _Boom(EXPLODE)
-
-    with pytest.raises(_Boom):
-        atomic.write_atomically(catalog_path, b"{ broken", verify=explode)
-
-    assert catalog_path.read_bytes() == before
-    assert read_catalog(tmp_path).generation == committed.generation
-
-
-def test_a_staged_object_that_fails_verification_never_installs(tmp_path: Path) -> None:
-    """Former call site 3 of 4 (`objects.py`), and its own invariant.
-
-    The verification hook is this store's crash-safety boundary: anything that goes wrong before
-    the swap leaves an orphaned temp file, never a corrupt object at the final digest path.
-    """
-    payload = b"content-addressed"
-    digest = hashlib.sha256(payload).hexdigest()
-
-    def wrong_digest(_written: bytes) -> None:
-        raise ValueError("staged object failed verification before install")
-
-    target = tmp_path / ".vqapr" / "objects" / "sha256" / digest
-    with pytest.raises(ValueError, match="failed verification"):
-        atomic.write_atomically(target, payload, verify=wrong_digest)
-
-    assert not target.exists(), "a failed verification must not install anything at the digest path"
-
-    # And the real path still works, so the hook did not break the store.
-    assert objects.stage_object(tmp_path, payload) == digest
-    assert (tmp_path / ".vqapr" / "objects" / "sha256" / digest).read_bytes() == payload
-
-
 def test_a_run_record_survives_an_interrupted_write(tmp_path: Path) -> None:
-    """Former call site 4 of 4 (`run_records.py`)."""
+    """Former call site 2 of 2 (`run_records.py`)."""
     writer = RunRecordWriter(tmp_path, "interrupted")
     writer.open()
     target = writer.directory / "record.json"

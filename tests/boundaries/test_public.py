@@ -45,6 +45,7 @@ from vqapr.public import (
     FillSelector,
     FrozenAgenda,
     FrozenRun,
+    Hold,
     IndexInstrument,
     Instrument,
     InstrumentKind,
@@ -54,7 +55,6 @@ from vqapr.public import (
     MaterializationResult,
     MaterializationSpec,
     MonitoringPolicy,
-    NoDecision,
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
@@ -141,7 +141,7 @@ def test_public_exports_are_fixed() -> None:
             AllocationViolation,
             MaterializationSpec,
             MonitoringPolicy,
-            NoDecision,
+            Hold,
             OperationAgenda,
             OperationOccurrence,
             OperationRole,
@@ -234,7 +234,6 @@ def test_public_exports_are_fixed() -> None:
         "ModelWindow",
         "MonitoringPolicy",
         "NeutralizationRefusal",
-        "NoDecision",
         # `docs/issues/031`: the return type of `ModelWindow.observations`, which is the only
         # method a DataModel author can call, and which could not be imported from the facade.
         "ObservationBatch",

@@ -197,7 +197,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -251,7 +251,7 @@ class ReversalSignalStrategy(StrategyModel):
                 closes.setdefault(str(row["instrument"]), []).append(row["close"])
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < 2:
-            return NoDecision("a cross-sectional signal needs at least two names with full history")
+            return Hold(reason="a cross-sectional signal needs at least two names with full history")
 
         raw = {
             name: -1 * (values[-1] / values[0] - Decimal(1)) for name, values in eligible.items()
@@ -273,7 +273,7 @@ class ReversalSignalStrategy(StrategyModel):
         )
 
         if all(value == 0 for value in neutralized.values()):
-            return NoDecision("the neutralised signal is flat")
+            return Hold(reason="the neutralised signal is flat")
 
         sized = signal_weight(neutralized)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)

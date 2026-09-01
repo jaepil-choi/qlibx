@@ -558,12 +558,23 @@ class ConstraintBounds:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Hold:
-    """A Strategy decision that intentionally emits no order."""
+    """A Strategy decision that intentionally emits no order.
+
+    **This is the engine's decline type as well as the author's.** It absorbed
+    `models.strategy_model.NoDecision` in record `125`: the two were the same frozen one-field
+    dataclass with two names, and the adapter's whole contribution was `NoDecision(hold.reason)`.
+
+    `reason` is prose, not an identifier. It was validated with `_identifier` here, which rejects
+    whitespace -- so `Hold(reason="no name scored above zero")` was refused while the engine's
+    `NoDecision` accepted the identical string. Merging two types means merging two validations,
+    and the looser one is the correct one: a reason a human reads should be allowed spaces.
+    """
 
     reason: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "reason", _identifier(self.reason, name="reason"))
+        if not isinstance(self.reason, str) or not self.reason.strip():
+            raise ValueError("reason must be a non-empty string")
 
 
 def _as_decimal(value: Decimal | int | float | str, *, name: str) -> Decimal:

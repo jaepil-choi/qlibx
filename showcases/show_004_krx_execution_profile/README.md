@@ -12,6 +12,7 @@ declared venue friction.
 | Commission | none | 3bp, both sides |
 | Sale tax | none | 20bp, sells only |
 | Short positions | permitted by the listing | refused by the profile |
+| Engine class | `AcademicExchange` | `KrxExchange` |
 | Fill | full at the selected close | full at the selected close |
 
 ## Observed on real data
@@ -53,6 +54,10 @@ uv run python showcases/show_004_krx_execution_profile/run.py
 ```
 
 Inspect `outputs/report.html`, `outputs/trace.json` and `outputs/inputs/fixture.json`.
+
+Both venues are the shipped engine classes. The KRX profile resolves what a fill costs from
+the project's registered instrument roster rather than from the venue, so the run registers
+one — this fixture is stocks only, so every name is declared a stock.
 
 Requires the local warehouse at `data/DW`. Environment: repository `uv` environment, Python 3.12+,
 DuckDB 1.5+.

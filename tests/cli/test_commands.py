@@ -257,7 +257,7 @@ def test_run_executes_a_declared_spec_end_to_end(
     # Three days x (strategy, valuation, monitoring) plus the execution occurrences the fills
     # land on. Pinned rather than `> 0`, which a run that did nothing would also satisfy.
     assert payload["occurrences"] == 12
-    # The scaffold TRADES. It used to hold throughout -- the old template returned NoDecision --
+    # The scaffold TRADES. It used to hold throughout -- the old template returned Hold --
     # and this assertion pinned account_version at zero, which meant the end-to-end test proved a
     # run that never bought anything. The authoring-contract scaffold ranks the cross-section and
     # rebalances, so fills commit and the Account advances, which is the stronger property: it

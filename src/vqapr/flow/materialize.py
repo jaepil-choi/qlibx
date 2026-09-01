@@ -16,6 +16,7 @@ from urllib.parse import quote
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from vqapr.authoring import Hold
 from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.scan import ScanSession
@@ -34,7 +35,6 @@ from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evi
 from vqapr.flow.stamping import derived_available_at
 from vqapr.flow.views import data_model_window
 from vqapr.models.contexts import DataModelContext
-from vqapr.models.strategy_model import NoDecision
 from vqapr.workspace import Workspace
 
 _INPUT_STAGE = "materialize.input"
@@ -881,7 +881,7 @@ def publish_run_allocation(
     occurrences = 0
     for evidence in collected:
         decision = evidence.decision
-        if isinstance(decision, NoDecision):
+        if isinstance(decision, Hold):
             # An occurrence that declined to allocate has no allocation, and inventing an empty one
             # would misrepresent the run.
             continue
@@ -895,9 +895,9 @@ def publish_run_allocation(
             raise _error(
                 _OUTPUT_STAGE,
                 f"{_OUTPUT_STAGE}.decision_invalid",
-                "a callback decision must be NoDecision or an economic intent",
+                "a callback decision must be Hold or an economic intent",
                 type(decision).__name__,
-                fix="return NoDecision or an economic intent from the strategy's on_occurrence",
+                fix="return Hold or an economic intent from the strategy's on_occurrence",
                 explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="publish from a strategy that emits economic intents, then retry",
             )

@@ -724,9 +724,6 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         def dataset(self, _dataset_id: str) -> DatasetRegistration:
             return registration
 
-        def dataset_for_field(self, _field_id: str) -> DatasetRegistration:
-            return registration
-
         def source(self, _source_id: str) -> SourceSpec:
             return source
 

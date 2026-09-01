@@ -91,6 +91,61 @@ surface of. Measured 2026-08-31/09-01 in `kwam-enhanced-index/vqapr-performance-
 `domain/rows.py`, `data/windows.py` — and, more than any single module, **`SKILL.md`'s data
 guidance**, which is what a user follows into this.
 
+## A blocked case, raised before anything is widened — workspace-global field ids
+
+**Found 2026-09-01 while implementing lane C, verified against the live research workspace, and not
+decided here.** The campaign's §6 says a case the ruling blocks in practice goes into this file and
+up to the owner rather than being resolved by whoever hits it. This is one.
+
+The ruling below says a requirement names a field and nothing else, **because a field id is an id,
+unique in the workspace**. Lane C implemented that: registration refuses an id another dataset
+already exposes, naming that dataset. `qlibx-b8` raised that this breaks
+`vqapr-enhanced-index-3`, this package's principal consumer, and it does — more widely than the
+report suggested.
+
+That workspace holds 27 datasets. **21 field ids are exposed by more than one of them**, and they
+are two different things:
+
+| kind | examples |
+|---|---|
+| **parallel series, deliberately schema-identical** | `rmrf` `smb` `hml` `rmw` `cma` `mom` on `ff5-factors-broad` / `-k200`; `residual` `realised` `beta_*` on `residual-returns-broad` / `-k200` |
+| **ordinary domain vocabulary that recurs** | `fiscal_yyyymm` on **six** datasets; `settlement_type` on three; `fiscal_year` on three; `market_cap` on two; `account_code`, `numeric_value`, `statement_scope` on the statement pair |
+
+**The first kind is the design.** That environment's README states it: there is no right answer
+between the two universes, the comparison is the point, and the two series share a component and an
+agenda so that the only difference between them is the universe. Schema parity is what makes the
+comparison possible; renaming to `residual_broad` / `residual_k200` ends it.
+
+**The second kind is harder to argue with.** `fiscal_yyyymm` is on six datasets because that is what
+the column is called wherever it appears. Nobody chose a colliding name; the word simply recurs, and
+a rule that makes it an error asks a researcher to invent twenty-one names whose only purpose is to
+differ from each other.
+
+**What is actually at stake.** The workspace still *opens* — uniqueness is checked at registration
+and decode does not re-litigate it — so nothing already built stops working. What breaks is the
+**rebuild**: `build_specs.py` emits both members of each pair into one declaration, `_apply`
+registers them in order, and the second is refused naming the first. Twelve factor books, about
+19 GB, sit downstream of that path.
+
+**This is not a defect in the implementation, and not something a rename fixes.** It is the ruling's
+premise meeting a workspace built before it. Options visible from here, none of them chosen:
+
+1. **Keep uniqueness; the consumer prefixes its field ids.** Costs the rebuild, and costs the
+   property the parallel series exist for unless the reading component takes its field ids from
+   config.
+2. **Scope uniqueness to a dataset, and let a requirement name `(dataset_id, field_id)`.** That is
+   the `dataset_id` the ruling removed, so it is a change to the ruling rather than to the code.
+3. **Unique by default, qualified when ambiguous** — a requirement may name `dataset.field`, and a
+   bare field id is refused only when two datasets answer to it. Keeps the common case as the ruling
+   describes it, and lets a deliberate parallel series say which one it means.
+4. **Move the question from registration to resolution** — let ids collide in the workspace and
+   refuse only when a run's own requirements cannot be resolved unambiguously. Nothing scopes a run
+   to a subset of datasets today, so this needs a way to say which series a run reads.
+
+Lane C is gated and ready but **is not merged**, because items 4 and 5 of its list are one question:
+a requirement can name a field alone only if a field id resolves to one dataset.
+
+
 ## The claim
 
 Registering a dataset at the vendor's grain is what the package tells an author to do, and it is

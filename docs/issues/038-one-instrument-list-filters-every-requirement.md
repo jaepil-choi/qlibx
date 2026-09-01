@@ -1,5 +1,27 @@
 # 038 — One `instruments:` list filters every requirement, so a second dataset's row keys must be enumerated as instruments even when they are not instruments
 
+**Status: owner-decided 2026-09-01, not yet implemented. The "better fix" below is adopted, one
+layer lower than this file proposes.** Scheduled under the campaign anchored at
+[049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
+
+This file asks for a **per-requirement** instrument scope. The ruling puts it on the **dataset**:
+`instrument_field` becomes optional at registration, and a dataset registered without one has no
+instrument axis, so the declared instrument list is never applied to it.
+
+**Why lower is righter.** Whether a table is keyed by instrument is a fact about the table. `RMRF`,
+`SMB` and `HML` are not instruments for *any* reader, so letting each requirement re-assert that
+invites two readers of `kimchi-ff5` to disagree about it — and one of them to be wrong silently. It
+also means the author declares it once, at the only moment they are looking at the data's columns.
+
+The owner's framing, recorded because it is the reason this is not treated as a new feature:
+**a dataset with no instrument axis should have been registrable all along.** `DatasetRegistration.of`
+takes `instrument_field` as a required keyword argument, so a factor-return table is registrable
+today only by inventing an instrument column for rows that are not instruments. That is a gap, not
+an extension, and it is why this is scheduled rather than designed.
+
+Job (2) separates from jobs (1) and (3) exactly as this file argues. The cheap docs fix it also
+names is superseded — the sentence would document a behaviour that is being removed.
+
 **Status when filed:** open. Found 2026-08-30 by the first-time-user journey in
 `kaist-thesis/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-015**,
 `slowed` / `docs`.

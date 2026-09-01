@@ -1,5 +1,86 @@
 # 049 — A model that follows the package's own data guidance runs 614x slower than the identical model on a reshaped source, and the package offers nothing that closes the gap
 
+**Status: owner-decided 2026-09-01, not yet implemented. This file is the campaign anchor** — the
+one issue the read-path work hangs off, because it is the only one that measures the whole gap.
+`038`, `044` and `045` are scheduled under it and point here; `035` and `046` are narrowed by it.
+The ruling is below, before the measurement that motivated it.
+
+---
+
+## The ruling — a field is an expression, declared where the data is registered
+
+**The shape of a dataset is declared once, at registration. What a model asks for is a field id and
+a lookback. Nothing else.** Three layers, and each says only what it owns:
+
+```yaml
+datasets:
+  krx-flows:
+    source_id: krx-flows-source
+    path: data/flows.parquet
+    available_at: date                                   # the only mandatory column
+    instrument_field: ticker                             # OPTIONAL — see 038
+    fields:
+      close: close                                       # today's syntax, unchanged
+      buy_amount:  sum(amount) FILTER (WHERE side = 'buy')
+      sell_amount: sum(amount) FILTER (WHERE side = 'sell')
+```
+
+```python
+DataRequirement.of("buy_amount", lookback=CalendarLookback(days=60, timezone=TZ))
+```
+
+`fields` is **id → value expression**. It was already `id → physical column`; a bare column is the
+degenerate expression, so every registration that exists today keeps working with no edit. The
+framework writes everything around it, from what the dataset already declared:
+
+```sql
+SELECT <instrument_field> AS instrument, <available_at> AS available_at, <expression> AS <field-id>
+FROM source GROUP BY 1, 2
+```
+
+**Four things follow, and they are the reason this shape was chosen over the alternatives.**
+
+1. **The author cannot write a look-ahead.** There is no `FROM` and no `GROUP BY` to reach — an
+   expression is evaluated within one instant's group by construction. The boundary that says
+   *reshaping within an instant is a field; computing across instants is a DataModel* stops being a
+   rule anyone has to check and becomes a property of the grammar. An earlier draft of this ruling
+   proposed a registration-time look-ahead test (cut the source at T, compare against the full run
+   filtered to T); it was dropped because this shape makes it unnecessary rather than because the
+   risk was accepted.
+2. **A requirement names one field and a lookback.** No `dataset_id` — a field id is an id, unique
+   in the workspace, and the registration already knows which dataset it belongs to; naming both was
+   saying one fact twice. No `consumer_id` either: the component declaring the requirement *is* the
+   consumer, so the framework stamps it. It still reaches `AccessRecord` exactly as today.
+3. **The universe filter follows the data's own shape.** `instrument_field` is optional. A dataset
+   without one has no instrument axis, so the declared instrument list is not applied to it — which
+   is `038`'s "better fix", moved from the requirement to the dataset, where it belongs: whether a
+   table is keyed by instrument is a fact about the table, not about who reads it.
+4. **One scan serves many fields.** Requirements are all declared before any read, so expressions
+   over the same dataset fuse into one `SELECT`. Declaring one field per requirement therefore does
+   not multiply scans — see `046`.
+
+### What was rejected, and why it is recorded
+
+- **A `where=` argument on `DataRequirement`** — this file's sibling `045` proposes exactly that, as
+  a closed typed vocabulary. Rejected: the predicate is a property of how the dataset is read, not
+  of one consumer's request, and putting it on the requirement puts it in the one place that must
+  stay small. `045`'s reasoning about the PIT line is not overturned — it is honoured more strictly,
+  since the author never touches the window at all.
+- **A separate registrable kind for readings**, with its own id and its own `list`/`show`. Rejected:
+  a field-set is not a peer of a dataset, it is part of one. It nests under `datasets:` in the
+  workspace document and adds **zero** new kinds.
+- **Free-form SQL per field.** Rejected for now. It buys joins and subqueries and loses both
+  properties in (1). A model that needs a join is a DataModel. Revisit only when a real case is
+  blocked, and record what is being given up.
+
+### What stays open after this ruling
+
+Whether `ObservationBatch.rows` should stop being a tuple of dicts and become columns (`035`'s
+columnar accessor). Wide delivery removes most of the cells that made row-major boxing expensive, so
+**this is re-measured after the ruling lands rather than decided now.**
+
+---
+
 **Status when filed:** open, and filed as the **severity** of what
 [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md),
 [045](045-a-requirement-cannot-say-which-rows-so-a-long-table-delivers-a-hundred-and-fifty-times-what-is-kept.md)

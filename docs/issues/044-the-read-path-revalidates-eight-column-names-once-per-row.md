@@ -1,5 +1,16 @@
 # 044 — The read path re-validates the same eight column names once per row, and that check — not the per-cell value check issue 035 names — is the larger half of `normalize_rows`
 
+**Status: owner-decided 2026-09-01, not yet implemented. Scheduled first** in the campaign anchored
+at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md). The ruling is
+[035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md)'s, applied here: **the
+read path validates nothing.** What a registration accepted is thereafter trusted, and data that
+only turns out to be wrong at runtime is not chased — it blows up where it happens and the message
+is passed through unedited.
+
+It goes first because it is the one item that multiplies with every other: the per-row key check is
+paid on every cell the read path delivers, so removing it compounds with the cell reduction 049's
+ruling brings rather than being subsumed by it.
+
 **Status when filed:** open. Found 2026-08-31 by a profiling pass in
 `kwam-enhanced-index/vqapr-performance-testbed/`, against `vqapr-0.2.0a2` (built wheel). Measured
 rather than felt: the ladder and the cProfile dumps are in that directory's `results/`.

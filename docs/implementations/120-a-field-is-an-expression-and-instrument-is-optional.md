@@ -6,7 +6,7 @@ ruling recorded in
 [`049`](../issues/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md) — lane C
 of the read-path campaign
 ([`2026-09-01-the-read-path-campaign.md`](../refactoring/2026-09-01-the-read-path-campaign.md) §2).
-**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@111c0342` after lane A.
+**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@010824bf`.
 **Merges third**, and lane D opens on it.
 
 ## Why the two issues are one lane
@@ -135,15 +135,28 @@ returns ungrouped rows, and raises nothing.
 
 ## Gates
 
+**The baseline was measured, not quoted.** The campaign's §4 was amended while this lane was in
+flight, after a fixed floor let a lane report green on three fewer passes; so the branch point was
+detached and run here rather than taken from a document.
+
 | gate | result |
 |---|---|
 | `uv run ruff check src/` | clean |
-| `PYTHONUTF8=1 uv run pytest tests/ -q` | **1525 passed, 14 deselected** (baseline at the branch point after lane A: 1517) |
-| `PYTHONUTF8=1 uv run pytest tests/ -q -m ""` | see below |
-| `PYTHONUTF8=1 uv run pytest tests/ -q -m slow -rs` | see below |
+| `pytest tests/ -q -rs` at `develop@010824bf` | **1515 passed, 0 skipped, 14 deselected** — the baseline |
+| `pytest tests/ -q -rs` on this branch | **1525 passed, 0 skipped, 14 deselected** |
+| `pytest tests/ -q -m ""` | **1539 passed, 0 deselected** (10m 40s) |
+| `pytest tests/ -q -m slow -rs` | GATE_SLOW |
 
-The last two are both run because record `097` corrected that `-m ""` is a name of a call and does
-not prove what ran.
+Zero skips on both sides, which is the other half of that amendment: a skip is a test that did not
+run, and `passed` alone does not show one leaking away. Both slow gates are run because record
+`097` corrected that `-m ""` is the name of a call and does not prove what ran.
+
+**+10, and every one is accounted for.** Six are the acceptance file below. Three are
+`tests/data/test_requirements.py`, where one test of the old signature's two rejections became four
+of the new one's. The last is not a new test at all: `test_a_fix_is_not_its_requirement_restated`
+parametrizes over every `Failure.bounded` call site, so this lane's net refusal change moves it —
+`field_not_an_expression`, `projection_unbindable` and `field_conflict` added, `field_missing`
+renamed to `field_unknown`, and `check.dataset.unregistered` removed.
 
 This worktree junctions `data/` from the main checkout, so the five `real_data` tests that skip on a
 bare worktree actually run here — including the two that register Korean-named columns, which is

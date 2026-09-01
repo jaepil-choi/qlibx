@@ -9,8 +9,10 @@ from uuid import UUID, uuid5
 
 from vqapr.account.history import AccountHistory
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import DatasetInput
 from vqapr.constraints.constraint import ConstraintBounds
 from vqapr.data.windows import ModelWindow
+from vqapr.models.calls import declared_rows, observations
 from vqapr.portfolio.budgets import Budget
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
@@ -27,22 +29,62 @@ identity, which is what makes a replay comparable to the run it replays.
 """
 
 
+class _DeclaredReads:
+    """`read(alias)` over the aliases a Model declared in `inputs()`.
+
+    Shared by both contexts because both roles read the same way -- that sameness is the point
+    (`docs/issues/036`), so it is one implementation rather than two that agree today.
+
+    `reads` is empty for a Model that declares its requirements the older way, by overriding
+    `requirements()` and reaching `context.window.observations(...)` itself. Both paths run; the
+    window is the same object underneath, so a mixed tree behaves identically either way.
+    """
+
+    __slots__ = ()
+
+    def read(self, alias: str) -> tuple:
+        if not isinstance(alias, str):
+            raise TypeError("alias must be a string")
+        declared = self.reads.get(alias)
+        if declared is None:
+            known = ", ".join(sorted(self.reads)) or "nothing"
+            raise KeyError(
+                f"{alias!r} was not declared in inputs(); this model declared: {known}"
+            )
+        # An alias is one requirement per declared field (`docs/issues/049`), so it is several
+        # reads, joined back on `(instant, instrument)` -- the only pair every batch agrees on.
+        # The author declared one thing and reads one thing; the fan-out is the engine's.
+        return observations(
+            declared_rows(lambda r: self.window.observations(r).rows, declared),
+            instrument_field="instrument",
+            available_at_field="available_at",
+            fields=declared.fields,
+        )
+
+
 @dataclass(frozen=True, slots=True)
-class DataModelContext:
+class DataModelContext(_DeclaredReads):
     window: ModelWindow
+    reads: Mapping[str, DatasetInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.window, ModelWindow):
             raise TypeError("window must be a ModelWindow")
 
+    @property
+    def evaluation_time(self):
+        """The single frozen point-in-time cutoff this invocation computes at."""
+        return self.window.evaluation_time
+
 
 @dataclass(frozen=True, slots=True)
-class StrategyModelContext:
+class StrategyModelContext(_DeclaredReads):
     """The complete capability surface for one Strategy callback."""
 
     occurrence: OperationOccurrence
     window: ModelWindow
     account: AccountSnapshot
+    reads: Mapping[str, DatasetInput] = field(default_factory=dict)
     constraint_bounds: ConstraintBounds = field(default_factory=lambda: ConstraintBounds({}, {}))
     account_history: AccountHistory = field(default_factory=lambda: AccountHistory((), None))
     """What the Account itself recorded, bounded by this Strategy's declaration.

@@ -1444,6 +1444,7 @@ class SimulationFlow:
                         occurrence=occurrence,
                         window=window,
                         account=account,
+                        reads=self._strategy.inputs(),
                         constraint_bounds=constraint_bounds,
                         account_history=self._account_history(),
                     )

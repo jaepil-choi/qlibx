@@ -1,19 +1,24 @@
-"""Translate a declared alias into the engine's own reads.
+"""Turning declared aliases into engine reads, and engine rows back into typed observations.
 
-`agent_first` deliberately resolves nothing itself: it takes an injected resolver so the
-invocation boundary can be tested without a database. `strategy_bridge` fills that point in
-production, and these are the three translations it needs — one `authoring.DatasetInput` into
-the engine's `DataRequirement`, one lookback across the public/private boundary, and one batch
-of engine rows back into typed `Observation` values.
+**One call surface for both Model roles.** A DataModel and a StrategyModel declare their reads the
+same way -- `inputs()`, keyed by an alias the author names -- and read them the same way,
+`context.read(alias)`. What a StrategyModel additionally receives is what its role needs: the
+committed account, the state it returned last time, the bounds every registered Constraint
+projected. The difference between the two roles is that list and nothing else, which is what
+`docs/issues/036` decided should be true: *"a DataModel and a StrategyModel should be substantially
+similar to use, and the size of the current difference is itself the defect."*
 
-The translation is deliberately narrow. It does not widen a lookback, invent a field, or
-fall back to a different dataset: a declaration the store cannot serve is an error, never
-an empty result that looks like a legitimately quiet day.
+**These three functions came from `_internal/pit_bridge.py`, unchanged.** That module existed so
+`strategy_bridge` could serve an authored `read(alias)` while the engine served a differently
+shaped `context.window.observations(requirement)` -- two capability surfaces over one
+`ModelWindow`, with a translation layer between them. Moving them here does not rewrite them; it
+removes the reason a caller had to reach into `_internal` to read the way an author writes.
 
-**Two resolver classes used to live here and record `124` removed them.** `CatalogResolver`
-read through the catalog that went with `project.py`; `StoreResolver` claimed in its own
-docstring to be the production injection point and had no importer anywhere in `src/`. What
-`strategy_bridge` actually calls is the functions below.
+**Every read still goes through `ModelWindow`.** Nothing here holds a store handle or can reach
+one. The window is already bounded to `available_at <= evaluation_time`, carries the consumer id
+the framework stamped, and records an `AccessRecord` per requirement -- which is what lets the
+Flow state an intent's provenance (`flow/simulation.py::_actual_source_refs`) and derive a
+materialization's `available_at` (`flow/stamping.derived_available_at`).
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from vqapr.authoring import DatasetInput, Observation
 
 __all__ = (
     "declared_rows",
-    "observation_rows",
+    "observations",
     "requirements_for",
 )
 
@@ -70,7 +75,7 @@ def declared_rows(read: object, declaration: DatasetInput) -> tuple[dict[str, ob
     return tuple(merged[key] for key in sorted(merged, key=lambda pair: (pair[0], str(pair[1]))))
 
 
-def observation_rows(
+def observations(
     rows: Sequence[Mapping[str, object]],
     *,
     instrument_field: str,

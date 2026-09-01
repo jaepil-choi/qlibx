@@ -1,10 +1,13 @@
-"""The bridge from a declared alias to the real point-in-time store.
+"""Turning a declared alias into real point-in-time reads.
 
-`agent_first` takes an injected resolver so the invocation boundary stays testable without
-a database. `strategy_bridge` fills that point in production using these three translations,
-so these tests pin the translation itself: lookback kinds map across the public/private
-boundary, declared fields are carried exactly, and a declaration the store cannot serve
-raises rather than quietly producing a thin result.
+**These moved out of `_internal/pit_bridge.py` with record `128`** and the module went with
+them. They existed there so `strategy_bridge` could serve an authored `read(alias)` while the
+engine served `context.window.observations(requirement)`; now both contexts read through this
+code and there is no boundary left for it to sit on.
+
+What they pin is unchanged: declared fields are carried exactly, an alias fans out into one
+requirement per field and joins back on `(instant, instrument)`, and a declaration the store
+cannot serve raises rather than quietly producing a thin result.
 
 **The resolver tests that stood below are gone with record `124`.** They drove
 `project.resolver(...)`, and both resolver classes -- the catalog-backed one and the
@@ -19,8 +22,8 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr._internal.pit_bridge import observation_rows, requirements_for
 from vqapr.authoring import CalendarLookback, DatasetInput, RowsLookback
+from vqapr.models.calls import observations, requirements_for
 
 EVALUATION_TIME = datetime(2024, 3, 15, 16, tzinfo=UTC)
 
@@ -109,23 +112,23 @@ def test_requirements_for_refuses_a_non_declaration():
 
 
 def test_rows_project_onto_typed_observations_carrying_only_declared_fields():
-    observations = observation_rows(
+    projected = observations(
         _rows(),
         instrument_field="instrument",
         available_at_field="available_at",
         fields=("ret",),
     )
 
-    assert len(observations) == 2
-    assert observations[0].instrument_id == "A005930"
-    assert observations[0].available_at == datetime(2024, 3, 15, 6, 30, tzinfo=UTC)
+    assert len(projected) == 2
+    assert projected[0].instrument_id == "A005930"
+    assert projected[0].available_at == datetime(2024, 3, 15, 6, 30, tzinfo=UTC)
     # `market_cap` was present in the row but not declared, so it must not leak through.
-    assert set(observations[0].values) == {"ret"}
+    assert set(projected[0].values) == {"ret"}
 
 
 def test_a_missing_declared_field_raises_rather_than_thinning_the_result():
     with pytest.raises(KeyError, match="missing the declared field"):
-        observation_rows(
+        observations(
             _rows(),
             instrument_field="instrument",
             available_at_field="available_at",
@@ -136,7 +139,7 @@ def test_a_missing_declared_field_raises_rather_than_thinning_the_result():
 def test_a_missing_instrument_or_availability_column_is_a_schema_error():
     rows = ({"available_at": datetime(2024, 3, 15, tzinfo=UTC), "ret": Decimal(1)},)
     with pytest.raises(KeyError, match="missing the instrument field"):
-        observation_rows(
+        observations(
             rows,
             instrument_field="instrument",
             available_at_field="available_at",
@@ -145,7 +148,7 @@ def test_a_missing_instrument_or_availability_column_is_a_schema_error():
 
     rows = ({"instrument": "A005930", "ret": Decimal(1)},)
     with pytest.raises(KeyError, match="missing the availability field"):
-        observation_rows(
+        observations(
             rows,
             instrument_field="instrument",
             available_at_field="available_at",
@@ -162,7 +165,7 @@ def test_a_naive_availability_stamp_is_refused():
         },
     )
     with pytest.raises((TypeError, ValueError)):
-        observation_rows(
+        observations(
             rows,
             instrument_field="instrument",
             available_at_field="available_at",
@@ -173,7 +176,7 @@ def test_a_naive_availability_stamp_is_refused():
 def test_a_non_datetime_availability_value_is_refused():
     rows = ({"instrument": "A005930", "available_at": "2024-03-15", "ret": Decimal(1)},)
     with pytest.raises(TypeError, match="timezone-aware datetime"):
-        observation_rows(
+        observations(
             rows,
             instrument_field="instrument",
             available_at_field="available_at",
@@ -183,7 +186,7 @@ def test_a_non_datetime_availability_value_is_refused():
 
 def test_no_rows_projects_to_no_observations():
     assert (
-        observation_rows(
+        observations(
             (), instrument_field="instrument", available_at_field="available_at", fields=("ret",)
         )
         == ()

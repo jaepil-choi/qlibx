@@ -17,11 +17,24 @@ This file performs it. It pins the inherited edges and fails on a new one, which
 as written: adding is forbidden, and the existing edges are legal precisely because they are
 inherited.
 
-**The one sanctioned future change, named so it is not mistaken for a breach.** Step 14 of the
-structural plan deletes `_bridge_catalog_datasets` from `project.py`, under an explicit owner ruling
-that removing dead wiring from a frozen module is not "growth". That edit does not touch this test:
-it removes imports of `vqapr._internal.catalog*` from *inside* `project.py`, which is not an edge
-into any of the five. Nothing else about a frozen module may change without returning to the owner.
+**Owner ruling, 2026-09-01: there is no such thing as a frozen module.** *"필요하면 고치는건데
+merge 할 때 어떤 것이 correct 한지 검토해야지"* — if a module needs fixing it is fixed, and whether
+the change is right is settled by reviewing the merge, not by a standing prohibition. The **no
+growth / no deletion / no edit** half of the freeze is therefore retired, and an edit to one of
+these four files needs no escalation. The read-path campaign's lane C hit this immediately:
+`DatasetDeclaration.instrument_field` becoming `str | None` is forced by the ruling in
+`docs/issues/049` and is not growth by any reading.
+
+**This test survives the ruling because it never asserted that half.** It counts *edges into* the
+four modules, which is a different claim: these modules are scheduled to die at `G008`, and a new
+importer is new coupling to code on its way out. That stays worth knowing whether or not anyone may
+edit them. What the ruling removes is the sentence this docstring used to end with — that nothing
+else about these modules may change without returning to the owner.
+
+**And it is worth recording why the ruling was reachable at all.** The escalation gate it retires
+was not self-enforcing: this test watches callers, so lane C's edit passed green and the breach was
+found by reading the diff, not by a gate. A prohibition that only a human can notice is one the
+merge review has to carry anyway — which is the ruling.
 """
 
 from __future__ import annotations

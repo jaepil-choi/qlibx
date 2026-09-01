@@ -1069,7 +1069,9 @@ resolution이 실패하면 callback 전체가 commit되지 않는다. 성공한 
 - **비용이 문제라면 profile을 바꾼다.** zero-friction academic profile은 비용 0에 전량 체결이지만
   **체결·계좌 반영·feedback은 그대로 일어난다.** 그래서 turnover-aware한 전략이 자기 계좌를 볼 수 있고,
   adaptive ensemble이 member의 realized outcome을 볼 수 있다.
-- **hold도 통과한다**(§5.5). delta 0인 `OrderBatch`가 되고 no-trade 진단만 남는다.
+- **hold도 통과한다**(§5.5) — execution instant에 도달해 book이 평가된다. **주문은 나가지 않는다:**
+  ~~delta 0인 `OrderBatch`가 되고~~ 라는 처방은 오너 판정 2026-09-01로 철회됐다. 구속력 있는 것은
+  behavior(주문 없음 + valuation 실행)이고 그 도달 방법이 아니다. 근거는 §5.5.
 - 이것이 DataModel과의 판정 기준이다(§4.4).
 
 **현재 occurrence만 보인다.** `context.occurrence`는 current identity와 evaluation time만 담는다. 몇 번째

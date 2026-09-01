@@ -4,7 +4,7 @@
 |---|---|
 | **작성 시각** | 2026-09-01 KST (+09:00) |
 | **기준 커밋** | `develop @ 4dd85975`. 이 문서의 모든 행 번호는 그 커밋 기준이다 |
-| **트리 상태** | `PYTHONUTF8=1 uv run pytest tests/ -q` → **1497 passed, 14 deselected** · `uv run ruff check src/` → clean |
+| **트리 상태** | `develop@602e1b3c`에서 **1515 passed, 0 skipped, 14 deselected** · `uv run ruff check src/` → clean. **작성 당시 1497이었고 레인 A가 올렸다 — §4를 보라** |
 | **앵커 이슈** | `docs/issues/049` — **오너 ruling이 거기 있고, 이 문서는 그것을 재론하지 않는다** |
 | **판정 기준** | `docs/vqapr-prd.md` → `docs/vqapr-architecture.md` → `docs/issues/049`의 ruling |
 | **진행 상태 추적** | `.agent/plans/active/the-read-path-delivers-what-the-model-keeps.md` (gitignored, 메인 트리에만 있음) |
@@ -141,9 +141,19 @@ C:/Users/chlje/DevProjects/qlibx-wt-046a     레인 D — C 병합 시점에 생
 | 게이트 | 명령 | 언제 |
 |---|---|---|
 | lint | `uv run ruff check src/` | 모든 레인, 병합 전 |
-| fast suite | `PYTHONUTF8=1 uv run pytest tests/ -q` | 모든 레인, 병합 전. **1497 이상** |
+| fast suite | `PYTHONUTF8=1 uv run pytest tests/ -q -rs` | 모든 레인, 병합 전. **고정 하한을 쓰지 말고, 분기한 커밋에서 직접 재서 비교하라** — 아래 |
 | full incl. slow | `PYTHONUTF8=1 uv run pytest tests/ -q -m ""` | 레인 C |
 | slow, `-rs`로 따로 | `PYTHONUTF8=1 uv run pytest tests/ -q -m slow -rs` | 레인 C — 기록 `097`이 `-m ""`는 호출 이름일 뿐 무엇이 돌았는지 증명하지 않는다고 교정했다 |
+
+> **하한을 숫자로 박지 마라 — 이 문서가 그 실수를 이미 한 번 했다.** 작성 시점의 1497을
+> "1497 이상"으로 적어 두었더니, 레인 A가 그것을 1515로 올린 뒤 레인 H가 **1512 passed + 5
+> skipped**를 green으로 판정했다. 통과가 3개 줄었는데 하한이 낡아서 가려졌다. 이건 이 캠페인
+> §6의 첫 번째 위험(*green tree, 옮겨진 지표*)이 **인수조건 자신에게서** 난 것이다.
+>
+> **대신 이렇게 한다.** 레인은 자기가 분기한 커밋에서 스위트를 한 번 돌려 기준선을 직접 재고,
+> 병합 전 수치를 그것과 비교한다. **`-rs`를 항상 붙인다** — skip은 돌지 않은 테스트이고,
+> `passed`만 보면 skip으로 새어 나간 것이 통과 감소로 보이지 않는다. 기록 `097`이 같은
+> 취지로 `-m ""`를 교정했다.
 
 **캠페인이 끝에 지는 숫자 하나:** `annual-fundamentals`, 1,600 instruments × 4 evaluations, long
 등록, **806.61s 기준선 대비** — anti-join을 타이밍보다 **먼저** 돌린 상태로.

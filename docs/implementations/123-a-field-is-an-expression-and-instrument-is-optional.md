@@ -97,6 +97,17 @@ recorded in the test so nobody after us mistakes the binder for a safety net.
 A dataset with no instrument axis takes no bound at all: the proof is per instrument, and there
 are none.
 
+**What this does not change, stated because it is a live question.** A grouped registration changes
+what one row is *within* an instant — the values its expressions produce, not the source rows that
+made them. It does **not** change the axis the window is counted on: the rank is
+`PARTITION BY instrument`, the proof groups by instrument, and a name short of the declared count is
+read with no bound at all so it reaches back as far as its own history needs. So a `RowsLookback`
+still gives each name its own last N, and a batch's calendar span is still set by the sparsest name
+in it — which is exactly what `docs/issues/033` measured and what the owner's 2026-09-01 statement
+about a panel axis is about. That statement is a redefinition this lane neither makes nor forecloses;
+`docs/design/the-panel-the-surface-and-the-run.md` §2.4 holds the design. **`033` is not closed by
+this lane.**
+
 ### The window is still written by the framework
 
 `available_at <= evaluation_time`, the lookback bound and the instrument list are composed in

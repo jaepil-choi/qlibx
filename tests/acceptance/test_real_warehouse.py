@@ -74,10 +74,6 @@ class _Catalog:
         assert raw_dataset_id == str(self._registration.dataset_id)
         return self._registration
 
-    def dataset_for_field(self, field_id: str) -> DatasetRegistration:
-        assert field_id in self._registration.fields
-        return self._registration
-
     def source(self, raw_source_id: str) -> SourceSpec:
         assert raw_source_id == str(self._source.source_id)
         return self._source

@@ -129,6 +129,24 @@ class ConditionalPositiveCheck:
         return self.invalid_rows == 0
 
 
+@dataclass(frozen=True, slots=True)
+class FiniteCheck:
+    """등록이 노출하는 numeric 컬럼에 NaN이나 inf가 있는가.
+
+    읽기 경로가 셀마다 묻던 질문을 등록이 컬럼마다 한 번 묻는 자리다(044). null은 위반이
+    아니다 -- 희소한 field는 정상이고, 읽기 경로는 이미 non-null만 센다. 유한하지 **않은**
+    값만 세며, 그것은 준비 단계의 실수이지 데이터의 모양이 아니다.
+    """
+
+    columns: tuple[str, ...]
+    non_finite: tuple[tuple[str, int], ...] = ()
+    examples: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.non_finite
+
+
 def _quote(field: str) -> str:
     if not isinstance(field, str) or not field.strip():
         raise ValueError("field must be a non-empty column name")
@@ -614,6 +632,74 @@ def positive_finite_when_true(
     finally:
         con.close()
     return ConditionalPositiveCheck(invalid_rows=count, examples=examples)
+
+
+def finite_check(
+    spec: SourceSpec,
+    *,
+    columns: Sequence[str],
+    identity_fields: Sequence[str],
+) -> FiniteCheck:
+    """노출되는 numeric 컬럼 전부의 NaN/inf를 **한 번의 스캔**으로 센다.
+
+    컬럼당 스캔이 아니라 컬럼당 aggregate다. `048`이 등록 비용이 key 폭을 따라간다고 지목한
+    자리이므로, 폭이 넓다고 파일을 여러 번 읽지 않는다.
+
+    `key_check`와 같은 모양으로 예시는 위반이 있을 때만 추가로 읽는다 -- 통과 경로가 매
+    등록마다 도는 자리이고, 실패는 드물며 그때는 느려도 된다.
+    """
+    selected = tuple(columns)
+    if not selected:
+        raise ValueError("finite_check requires at least one column")
+    identities = tuple(identity_fields)
+    if not identities:
+        raise ValueError("identity_fields must not be empty")
+
+    def invalid(column: str) -> str:
+        quoted = _quote(column)
+        return f"{quoted} IS NOT NULL AND NOT isfinite(CAST({quoted} AS DOUBLE))"
+
+    counts_sql = ", ".join(
+        f"coalesce(sum(CASE WHEN {invalid(column)} THEN 1 ELSE 0 END), 0)" for column in selected
+    )
+    identity_sql = ", ".join(_quote(field) for field in identities)
+    con = _open(spec)
+    try:
+        counted = con.execute(f"SELECT {counts_sql} FROM {_relation(spec)}").fetchone()
+        non_finite = tuple(
+            (column, int(total)) for column, total in zip(selected, counted, strict=True) if total
+        )
+        examples: list[tuple[str, tuple[str, ...]]] = []
+        for column, _total in non_finite:
+            rows = con.execute(
+                f"SELECT {identity_sql}, {_quote(column)} FROM {_relation(spec)} "
+                f"WHERE {invalid(column)} LIMIT {_EXAMPLE_LIMIT}"
+            ).fetchall()
+            examples.append((column, tuple(repr(row) for row in rows)))
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage="source.scan.finite",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="source.scan.finite.unreadable",
+                    requirement=(
+                        f"columns {', '.join(repr(c) for c in selected)} must be readable "
+                        f"from source '{spec.source_id}'"
+                    ),
+                    observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"confirm those columns exist with those exact names in '{spec.path}', "
+                        "then retry"
+                    ),
+                    explain=ExplainTopic.SOURCE_ACCESS,
+                )
+            ],
+        ) from exc
+    finally:
+        con.close()
+    return FiniteCheck(columns=selected, non_finite=non_finite, examples=tuple(examples))
 
 
 _ROWS_BOUND_FACTOR = 3

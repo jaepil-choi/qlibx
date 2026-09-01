@@ -118,3 +118,55 @@ def test_dev_dataset_rejects_an_insufficient_key(dev_dataset: Path) -> None:
     assert not result.ok
     assert result.duplicate_groups > 5000
     assert len(result.duplicate_examples) == MAX_EXAMPLES
+
+
+def test_finite_check_counts_every_column_without_reading_the_file_twice(
+    unprepared_parquet: Path,
+) -> None:
+    """폭이 넓다고 스캔이 늘지 않는다 -- 컬럼당 스캔이 아니라 컬럼당 aggregate다.
+
+    통과하는 컬럼은 결과에 나타나지도 않는다. 위반한 것만 이름과 개수를 갖는다.
+    """
+    spec = SourceSpec.of("s", unprepared_parquet)
+
+    result = scan.finite_check(
+        spec, columns=("close", "volume"), identity_fields=("instrument", "available_at")
+    )
+
+    assert not result.ok
+    assert result.non_finite == (("close", 2),)
+    assert dict(result.examples).keys() == {"close"}
+
+
+def test_finite_check_reports_the_instant_and_the_name_a_bad_value_sits_on(
+    unprepared_parquet: Path,
+) -> None:
+    """예시가 값만 말하면 준비하는 쪽은 그 행을 찾을 수 없다."""
+    spec = SourceSpec.of("s", unprepared_parquet)
+
+    result = scan.finite_check(
+        spec, columns=("close",), identity_fields=("instrument", "available_at")
+    )
+
+    examples = dict(result.examples)["close"]
+    assert len(examples) <= MAX_EXAMPLES
+    assert any("A005930" in example for example in examples)
+
+
+def test_finite_check_passes_a_column_that_only_carries_nulls_and_numbers(
+    unprepared_parquet: Path,
+) -> None:
+    spec = SourceSpec.of("s", unprepared_parquet)
+
+    result = scan.finite_check(
+        spec, columns=("volume",), identity_fields=("instrument", "available_at")
+    )
+
+    assert result.ok
+    assert result.examples == ()
+
+
+def test_finite_check_refuses_to_be_asked_about_nothing(unprepared_parquet: Path) -> None:
+    spec = SourceSpec.of("s", unprepared_parquet)
+    with pytest.raises(ValueError, match="at least one column"):
+        scan.finite_check(spec, columns=(), identity_fields=("instrument",))

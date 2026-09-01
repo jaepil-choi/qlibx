@@ -1,4 +1,4 @@
-"""`data/datasets.py` — 등록 선언과 두 단계 검증."""
+"""`data/datasets.py` — 등록 선언과 네 단계 검증."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from vqapr.data import scan
 from vqapr.data.datasets import (
     KEY_STAGE,
     SCHEMA_STAGE,
+    VALUE_STAGE,
     DatasetRegistration,
     validate,
 )
@@ -226,3 +227,114 @@ def test_a_span_must_be_ordered() -> None:
         _registration().with_span(
             datetime(2024, 1, 2, tzinfo=UTC), datetime(2024, 1, 1, tzinfo=UTC)
         )
+
+
+# --- 읽기 경로가 하던 검사가 여기로 옮겨 왔다 (044) ---------------------------------
+#
+# `normalize_scalar`이 읽는 셀마다 묻던 세 질문 -- 유한한가, tz-aware인가, 애초에 scalar인가
+# -- 이 이제 등록에서 컬럼당 한 번 답해진다. `035`의 addendum이 경고한 것은 그 질문들을 읽기
+# 경로에서 **지우기만** 하는 것이었고, 그러면 평가당 1.6s를 조용한 NaN과 맞바꾼다. 아래가
+# 그 맞바꿈이 일어나지 않았다는 증거다.
+
+
+def _exposing(**fields: str) -> DatasetRegistration:
+    return _registration(key_fields=("session_date", "instrument"), fields=dict(fields))
+
+
+def test_a_nan_column_is_refused_at_registration(unprepared_parquet: Path) -> None:
+    """이 레인의 완료 조건.
+
+    읽기 경로는 이제 아무것도 검증하지 않으므로, NaN이 model에 닿지 않는 유일한 이유가
+    이것이다. NaN은 닿는 순간 실패하지 않는다 -- 만나는 모든 수로 번지고 run은 결과를
+    보고한다. 그래서 파일이 등록되는 자리에서 거절한다.
+    """
+    spec = SourceSpec.of("s", unprepared_parquet)
+    diagnosis, _timing, _measured = validate(_exposing(close="close"), spec)
+
+    assert not diagnosis.ok
+    assert diagnosis.stage == VALUE_STAGE
+    assert [f.code for f in diagnosis.failures] == [f"{VALUE_STAGE}.not_finite"]
+
+
+def test_the_refusal_names_the_field_and_counts_what_it_found(
+    unprepared_parquet: Path,
+) -> None:
+    """거절이 "어딘가 NaN이 있다"로 끝나면 준비하는 쪽은 파일 전체를 다시 뒤진다."""
+    spec = SourceSpec.of("s", unprepared_parquet)
+    diagnosis, _timing, _measured = validate(_exposing(close="close"), spec)
+
+    failure = diagnosis.failures[0]
+    assert "'close'" in failure.requirement
+    assert failure.example_total == 2, "NaN 하나와 inf 하나"
+    assert 0 < len(failure.examples) <= MAX_EXAMPLES
+    assert any("nan" in example for example in failure.examples)
+
+
+def test_a_null_is_not_a_non_finite_value(unprepared_parquet: Path) -> None:
+    """희소한 field는 정상이다.
+
+    `volume`은 NULL을 담고 있고 통과해야 한다 -- 읽기 경로가 non-null만 세는 것과 같은
+    뜻이다. NULL을 위반으로 세면 이 검사는 sparse panel 전부를 거절한다.
+    """
+    spec = SourceSpec.of("s", unprepared_parquet)
+    diagnosis, _timing, measured = validate(_exposing(volume="volume"), spec)
+
+    assert diagnosis.ok
+    assert measured.span is not None
+
+
+def test_a_naive_timestamp_field_is_refused_before_any_scan(
+    unprepared_parquet: Path,
+) -> None:
+    """스키마가 이미 답한 것을 파일을 열어 다시 묻지 않는다.
+
+    한 컬럼이 naive면 그 컬럼의 **모든** 행에 대해 참이다. 그래서 이것은 값 단계가 아니라
+    1단계이고, 전체 스캔이 시작되기 전에 끝난다.
+    """
+    spec = SourceSpec.of("s", unprepared_parquet)
+    diagnosis, timing, _measured = validate(_exposing(stamped_at="stamped_at"), spec)
+
+    assert [f.code for f in diagnosis.failures] == [f"{SCHEMA_STAGE}.field_not_tz"]
+    assert timing.key_was_skipped is True
+
+
+def test_a_field_that_is_not_a_scalar_is_refused_before_any_scan(
+    unprepared_parquet: Path,
+) -> None:
+    """model은 scalar의 행을 받는다. STRUCT를 건넬 portable한 방법이 없다."""
+    spec = SourceSpec.of("s", unprepared_parquet)
+    diagnosis, timing, _measured = validate(_exposing(payload="payload"), spec)
+
+    assert [f.code for f in diagnosis.failures] == [f"{SCHEMA_STAGE}.field_not_portable"]
+    assert timing.key_was_skipped is True
+
+
+def test_only_the_exposed_columns_are_checked(unprepared_parquet: Path) -> None:
+    """같은 파일이 NaN도 naive timestamp도 STRUCT도 담고 있지만, 지목되지 않으면 묻지 않는다.
+
+    등록은 파일을 심사하는 것이 아니라 **선언이 약속한 것**을 심사한다. 노출되지 않는 컬럼은
+    읽기 경로가 절대 건네지 않으므로 그것 때문에 등록이 막히면 안 된다.
+    """
+    spec = SourceSpec.of("s", unprepared_parquet)
+    diagnosis, _timing, _measured = validate(_exposing(session_date="session_date"), spec)
+
+    assert diagnosis.ok
+
+
+def test_a_declaration_with_no_numeric_field_does_not_open_the_file_for_it(
+    unprepared_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NaN을 담을 수 없는 컬럼에 NaN을 묻는 스캔은 비용만이다.
+
+    `048`이 등록 비용이 선언 폭을 따라 늘어난다고 지목한 자리다. 여기서 같은 실수를 하지
+    않는다는 것을 falsifiable하게 적어 둔다 -- 스캔이 돌면 이 테스트는 터진다.
+    """
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("numeric이 없는 등록이 유한성 스캔을 돌렸다")
+
+    monkeypatch.setattr(scan, "finite_check", refuse)
+    spec = SourceSpec.of("s", unprepared_parquet)
+    diagnosis, _timing, _measured = validate(_exposing(session_date="session_date"), spec)
+
+    assert diagnosis.ok

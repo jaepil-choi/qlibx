@@ -19,24 +19,18 @@ from decimal import Decimal
 import pytest
 
 from vqapr._internal.models.agent_first import (
-    AccessToken,
-    PreparedDataInvocation,
     PreparedStrategyInvocation,
-    prepare_data_model_invocation,
     prepare_strategy_invocation,
 )
 from vqapr.authoring import (
     AccountHistoryInput,
     ConstraintBounds,
-    DataModel,
     DatasetInput,
     DeclaredAccountHistory,
-    DerivedRow,
     DiagnosticTable,
     EconomicAccountView,
     Hold,
     Observation,
-    Output,
     Rebalance,
     RowsLookback,
     StrategyModel,
@@ -93,65 +87,10 @@ PRICES = DatasetInput(dataset_id="stock_daily", fields=("ret",), lookback=RowsLo
 # ----------------------------------------------------------------------------------
 
 
-class _CountingDataModel(DataModel):
-    """Counts constructions on the class, and mutates `self` during compute()."""
-
-    constructions = 0
-
-    def __init__(self) -> None:
-        type(self).constructions += 1
-        self.seen = 0
-
-    def inputs(self):
-        return {"prices": PRICES}
-
-    def output(self):
-        return Output(semantic_fields=("signal",))
-
-    def compute(self, call):
-        self.seen += 1
-        return (
-            DerivedRow(instrument_id="005930", values={"signal": Decimal(self.seen)}),
-        )
 
 
-def test_each_data_invocation_constructs_a_new_instance():
-    _CountingDataModel.constructions = 0
-
-    first = prepare_data_model_invocation(
-        _CountingDataModel, {}, evaluation_time=EVALUATION_TIME, resolver=_resolver
-    )
-    second = prepare_data_model_invocation(
-        _CountingDataModel, {}, evaluation_time=EVALUATION_TIME, resolver=_resolver
-    )
-
-    assert _CountingDataModel.constructions == 2
-    # `self.seen` restarts at 1 both times: a mutation in the first callback is invisible
-    # to the second. This is the sentinel the plan requires - if the instance were reused
-    # the second row would carry 2.
-    assert first.rows[0].values["signal"] == Decimal(1)
-    assert second.rows[0].values["signal"] == Decimal(1)
 
 
-def test_config_is_detached_so_a_model_cannot_mutate_the_registered_config():
-    class _ConfigModel(DataModel):
-        def __init__(self, factor: str) -> None:
-            self.factor = factor
-
-        def inputs(self):
-            return {}
-
-        def output(self):
-            return Output(semantic_fields=("signal",))
-
-        def compute(self, call):
-            return ()
-
-    config = {"factor": "HML"}
-    prepare_data_model_invocation(
-        _ConfigModel, config, evaluation_time=EVALUATION_TIME, resolver=_empty_resolver
-    )
-    assert config == {"factor": "HML"}
 
 
 # ----------------------------------------------------------------------------------
@@ -159,67 +98,14 @@ def test_config_is_detached_so_a_model_cannot_mutate_the_registered_config():
 # ----------------------------------------------------------------------------------
 
 
-class _UndeclaredAliasModel(DataModel):
-    def inputs(self):
-        return {"prices": PRICES}
-
-    def output(self):
-        return Output(semantic_fields=("signal",))
-
-    def compute(self, call):
-        return call.read("not_declared")
 
 
-def test_reading_an_undeclared_alias_raises():
-    with pytest.raises(KeyError, match="was not declared in inputs"):
-        prepare_data_model_invocation(
-            _UndeclaredAliasModel, {}, evaluation_time=EVALUATION_TIME, resolver=_resolver
-        )
 
 
-class _ReadingModel(DataModel):
-    def inputs(self):
-        return {"prices": PRICES}
-
-    def output(self):
-        return Output(semantic_fields=("signal",))
-
-    def compute(self, call):
-        observations = call.read("prices")
-        return (
-            DerivedRow(
-                instrument_id="005930", values={"signal": Decimal(len(observations))}
-            ),
-        )
 
 
-def test_access_tokens_record_what_was_read_without_carrying_observations():
-    prepared = prepare_data_model_invocation(
-        _ReadingModel, {}, evaluation_time=EVALUATION_TIME, resolver=_resolver
-    )
-
-    assert prepared.access_tokens == (
-        AccessToken(alias="prices", dataset_id="stock_daily", observation_count=2),
-    )
-    assert not hasattr(prepared.access_tokens[0], "observations")
-    assert prepared.rows[0].values["signal"] == Decimal(2)
 
 
-def test_a_model_that_reads_nothing_records_no_access():
-    class _Quiet(DataModel):
-        def inputs(self):
-            return {"prices": PRICES}
-
-        def output(self):
-            return Output(semantic_fields=("signal",))
-
-        def compute(self, call):
-            return ()
-
-    prepared = prepare_data_model_invocation(
-        _Quiet, {}, evaluation_time=EVALUATION_TIME, resolver=_resolver
-    )
-    assert prepared.access_tokens == ()
 
 
 # ----------------------------------------------------------------------------------
@@ -227,58 +113,10 @@ def test_a_model_that_reads_nothing_records_no_access():
 # ----------------------------------------------------------------------------------
 
 
-def test_a_row_that_misses_the_declared_output_schema_is_refused():
-    class _WrongSchema(DataModel):
-        def inputs(self):
-            return {}
-
-        def output(self):
-            return Output(semantic_fields=("signal", "weight"))
-
-        def compute(self, call):
-            return (DerivedRow(instrument_id="005930", values={"signal": Decimal(1)}),)
-
-    with pytest.raises(ValueError, match="does not match the declared Output schema"):
-        prepare_data_model_invocation(
-            _WrongSchema, {}, evaluation_time=EVALUATION_TIME, resolver=_empty_resolver
-        )
 
 
-def test_a_repeated_instrument_in_one_result_is_refused():
-    class _Duplicate(DataModel):
-        def inputs(self):
-            return {}
-
-        def output(self):
-            return Output(semantic_fields=("signal",))
-
-        def compute(self, call):
-            return (
-                DerivedRow(instrument_id="005930", values={"signal": Decimal(1)}),
-                DerivedRow(instrument_id="005930", values={"signal": Decimal(2)}),
-            )
-
-    with pytest.raises(ValueError, match="must not repeat an instrument_id"):
-        prepare_data_model_invocation(
-            _Duplicate, {}, evaluation_time=EVALUATION_TIME, resolver=_empty_resolver
-        )
 
 
-def test_a_callback_exception_propagates_unchanged():
-    class _Boom(DataModel):
-        def inputs(self):
-            return {}
-
-        def output(self):
-            return Output(semantic_fields=("signal",))
-
-        def compute(self, call):
-            raise RuntimeError("the model itself failed")
-
-    with pytest.raises(RuntimeError, match="the model itself failed"):
-        prepare_data_model_invocation(
-            _Boom, {}, evaluation_time=EVALUATION_TIME, resolver=_empty_resolver
-        )
 
 
 # ----------------------------------------------------------------------------------
@@ -604,10 +442,3 @@ def test_non_json_state_is_refused_by_the_strict_codec():
         )
 
 
-def test_prepared_results_are_immutable_values():
-    prepared = prepare_data_model_invocation(
-        _ReadingModel, {}, evaluation_time=EVALUATION_TIME, resolver=_resolver
-    )
-    assert isinstance(prepared, PreparedDataInvocation)
-    with pytest.raises(AttributeError):
-        prepared.rows = ()

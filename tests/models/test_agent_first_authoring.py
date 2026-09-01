@@ -35,33 +35,6 @@ def _budget(direction: PortfolioDirection = PortfolioDirection.LONG_ONLY) -> Bud
 # --------------------------------------------------------------------------------------
 
 
-def test_module_exports_are_exact() -> None:
-    expected = {
-        "AccountHistoryInput",
-        "CalendarLookback",
-        "Constraint",
-        "ConstraintBounds",
-        "ConstraintCall",
-        "ConstraintFinding",
-        "DataCall",
-        "DataModel",
-        "DatasetInput",
-        "DeclaredAccountHistory",
-        "DerivedRow",
-        "DiagnosticTable",
-        "EconomicAccountView",
-        "Hold",
-        "Observation",
-        "Output",
-        "Rebalance",
-        "RowsLookback",
-        "StrategyCall",
-        "StrategyModel",
-        "StrategyResult",
-    }
-    assert set(authoring.__all__) == expected
-    for name in expected:
-        assert hasattr(authoring, name)
 
 
 # --------------------------------------------------------------------------------------
@@ -157,22 +130,8 @@ def test_observation_values_mapping_is_copied_and_immutable() -> None:
         observation.values["close"] = Decimal("2")  # type: ignore[index]
 
 
-def test_output_rejects_reserved_and_empty_fields() -> None:
-    authoring.Output(semantic_fields=("momentum",))
-    with pytest.raises(ValueError):
-        authoring.Output(semantic_fields=())
-    with pytest.raises(ValueError):
-        authoring.Output(semantic_fields=("available_at",))
 
 
-def test_derived_row_rejects_reserved_row_fields() -> None:
-    authoring.DerivedRow(instrument_id="A", values={"momentum": Decimal("1")})
-    with pytest.raises(ValueError):
-        authoring.DerivedRow(instrument_id="A", values={"available_at": UTC_NOW})
-    with pytest.raises(ValueError):
-        authoring.DerivedRow(instrument_id="A", values={"instrument": "x"})
-    with pytest.raises(ValueError):
-        authoring.DerivedRow(instrument_id="", values={})
 
 
 # --------------------------------------------------------------------------------------
@@ -180,48 +139,12 @@ def test_derived_row_rejects_reserved_row_fields() -> None:
 # --------------------------------------------------------------------------------------
 
 
-def test_data_model_is_abstract_and_requires_compute_and_output() -> None:
-    with pytest.raises(TypeError):
-        authoring.DataModel()  # type: ignore[abstract]
-
-    class Incomplete(authoring.DataModel):
-        def output(self) -> authoring.Output:
-            return authoring.Output(semantic_fields=("x",))
-
-    with pytest.raises(TypeError):
-        Incomplete()  # type: ignore[abstract]
 
 
-def test_data_model_inputs_defaults_to_empty() -> None:
-    class Model(authoring.DataModel):
-        def output(self) -> authoring.Output:
-            return authoring.Output(semantic_fields=("x",))
-
-        def compute(self, call: authoring.DataCall) -> tuple[authoring.DerivedRow, ...]:
-            return ()
-
-    model = Model()
-    assert model.inputs() == {}
-    assert model.compute(_FakeDataCall()) == ()
 
 
-class _FakeDataCall(authoring.DataCall):
-    """A minimal concrete DataCall used only to exercise the abstract contract shape."""
-
-    @property
-    def evaluation_time(self) -> datetime:
-        return UTC_NOW
-
-    def read(self, alias: str) -> tuple[authoring.Observation, ...]:
-        return (authoring.Observation("A", UTC_NOW, {"close": Decimal("1")}),) if alias else ()
 
 
-def test_data_call_is_abstract() -> None:
-    with pytest.raises(TypeError):
-        authoring.DataCall()  # type: ignore[abstract]
-    call = _FakeDataCall()
-    assert call.evaluation_time == UTC_NOW
-    assert call.read("px")[0].instrument_id == "A"
 
 
 # --------------------------------------------------------------------------------------

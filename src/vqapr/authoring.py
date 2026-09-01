@@ -40,16 +40,12 @@ __all__ = (
     "ConstraintBounds",
     "ConstraintCall",
     "ConstraintFinding",
-    "DataCall",
-    "DataModel",
     "DatasetInput",
     "DeclaredAccountHistory",
-    "DerivedRow",
     "DiagnosticTable",
     "EconomicAccountView",
     "Hold",
     "Observation",
-    "Output",
     "Rebalance",
     "RowsLookback",
     "StrategyCall",
@@ -263,64 +259,20 @@ class Observation:
         object.__setattr__(self, "values", _copy_values(self.values, name="values"))
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Output:
-    """A DataModel's declared semantic output schema."""
-
-    semantic_fields: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        fields = _unique_identifiers(self.semantic_fields, name="semantic_fields")
-        _reject_reserved(fields, _ROW_RESERVED_FIELDS, name="semantic_fields")
-        object.__setattr__(self, "semantic_fields", fields)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class DerivedRow:
-    """One semantic row a DataModel computed for one instrument."""
-
-    instrument_id: str
-    values: Mapping[str, object]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "instrument_id", _identifier(self.instrument_id, name="instrument_id")
-        )
-        object.__setattr__(
-            self,
-            "values",
-            _copy_values(self.values, name="values", reserved=_ROW_RESERVED_FIELDS),
-        )
-
-
-class DataCall(ABC):
-    """The complete, bounded capability surface for one DataModel invocation."""
-
-    @property
-    @abstractmethod
-    def evaluation_time(self) -> datetime:
-        """The single frozen PIT cutoff this invocation computes for."""
-
-    @abstractmethod
-    def read(self, alias: str) -> tuple[Observation, ...]:
-        """Return PIT observations for one alias declared in `DataModel.inputs()`."""
-
-
-class DataModel(ABC):
-    """User extension contract: declared PIT reads in, semantic rows out."""
-
-    def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this model performs. Empty by default."""
-        return {}
-
-    @abstractmethod
-    def output(self) -> Output:
-        """Declare this model's semantic output schema."""
-
-    @abstractmethod
-    def compute(self, call: DataCall) -> tuple[DerivedRow, ...]:
-        """Compute semantic rows for one frozen evaluation time."""
-
+# The DataModel contract is NOT here, and record `129` is why it left.
+#
+# `Output`, `DerivedRow`, `DataCall` and `DataModel` stood in this file and **no component
+# written against them could ever be registered**: `extension/loading.load_data_model` requires
+# `models.data_model.DataModel`, and `issubclass(authoring.DataModel, that)` was False. The
+# review that measured it is `docs/refactoring/2026-08-31-post-step-07-review.md` R5. Four
+# contract types, an invocation boundary under `_internal`, and their tests -- all of it
+# reachable only from the tests written for it.
+#
+# The surviving contract is `vqapr.models.data_model.DataModel`, exported as
+# `vqapr.public.DataModel`, and it is the one every DataModel in the tree and in the research
+# workspace already implements. It is not imported here: `models/` imports this module, so a
+# re-export would close a cycle. Giving both roles one import path is the next step and it
+# moves the shared value types down to a leaf rather than pulling `models/` up.
 
 # --------------------------------------------------------------------------------------
 # StrategyModel algebra.

@@ -6,7 +6,7 @@ ruling recorded in
 [`049`](../issues/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md) — lane C
 of the read-path campaign
 ([`2026-09-01-the-read-path-campaign.md`](../refactoring/2026-09-01-the-read-path-campaign.md) §2).
-**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@916554f2` — after lane B,
+**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@edaadbc1` — after lane B,
 which is the merge order §3 fixes, and after records `124`/`125`.
 **Merges third**, and lane D opens on it.
 
@@ -214,17 +214,23 @@ detached and run here rather than taken from a document.
 | gate | result |
 |---|---|
 | `uv run ruff check src/` | clean |
-| `pytest tests/ -q -rs` at `develop@916554f2` | **1273 passed, 0 skipped, 14 deselected** — the baseline |
-| `pytest tests/ -q -rs` on this branch | **1286 passed, 0 skipped, 14 deselected** |
-| `pytest tests/ -q -m ""` | **1300 passed, 0 deselected** (9m 09s) |
-| `pytest tests/ -q -m slow -rs` | **14 passed, 0 skipped, 1286 deselected** (6m 49s) |
+| `pytest tests/ -q -rs` at `develop@edaadbc1` | **1272 passed, 0 skipped, 14 deselected** — the baseline |
+| `pytest tests/ -q -rs` on this branch | **1285 passed, 0 skipped, 14 deselected** |
+| `pytest tests/ -q -m ""` | **1299 passed, 0 deselected** (9m 57s) |
+| `pytest tests/ -q -m slow -rs` | **14 passed, 0 skipped, 1285 deselected** (7m 07s) |
 
 Zero skips everywhere, which is the other half of that amendment: a skip is a test that did not
 run, and `passed` alone does not show one leaking away. Both slow gates are run because record
 `097` corrected that `-m ""` is the name of a call and does not prove what ran -- and here the two
-numbers close on each other: 1286 + 14 = 1300, so the fourth gate names the fourteen the third one
+numbers close on each other: 1285 + 14 = 1299, so the fourth gate names the fourteen the third one
 merely included. The absolute numbers are far below earlier runs of this lane because the branch
-point moved: records `124`/`125` deleted the layer the CLI could not reach.
+point kept moving: records `124`/`125` deleted the layer the CLI could not reach, and `126` merged
+the two lookback classes into one.
+
+**The baseline itself went red once and it was the same flake.** Measuring `develop@edaadbc1`, the
+concurrency test failed on its first pass and passed on the second. That is the Windows workspace
+lock described below, observed here on `develop` with none of this lane applied — which is the
+cleanest evidence available that it is not this lane's.
 
 All four were re-run on the tree that ships. An earlier pass straddled a one-line tidy in
 `scan.py`, and a gate that ran against a tree nobody merges proves nothing about the one they do.

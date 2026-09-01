@@ -6,8 +6,8 @@ ruling recorded in
 [`049`](../issues/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md) — lane C
 of the read-path campaign
 ([`2026-09-01-the-read-path-campaign.md`](../refactoring/2026-09-01-the-read-path-campaign.md) §2).
-**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@35b73229` — after lane B,
-which is the merge order §3 fixes.
+**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@916554f2` — after lane B,
+which is the merge order §3 fixes, and after records `124`/`125`.
 **Merges third**, and lane D opens on it.
 
 ## Why the two issues are one lane
@@ -203,16 +203,17 @@ detached and run here rather than taken from a document.
 | gate | result |
 |---|---|
 | `uv run ruff check src/` | clean |
-| `pytest tests/ -q -rs` at `develop@35b73229` | **1532 passed, 0 skipped, 14 deselected** — the baseline |
-| `pytest tests/ -q -rs` on this branch | **1543 passed, 0 skipped, 14 deselected** |
-| `pytest tests/ -q -m ""` | **1557 passed, 0 deselected** (8m 13s) |
-| `pytest tests/ -q -m slow -rs` | **14 passed, 0 skipped, 1543 deselected** (6m 30s) |
+| `pytest tests/ -q -rs` at `develop@916554f2` | **1273 passed, 0 skipped, 14 deselected** — the baseline |
+| `pytest tests/ -q -rs` on this branch | **1286 passed, 0 skipped, 14 deselected** |
+| `pytest tests/ -q -m ""` | **1300 passed, 0 deselected** (9m 09s) |
+| `pytest tests/ -q -m slow -rs` | **14 passed, 0 skipped, 1286 deselected** (6m 49s) |
 
 Zero skips everywhere, which is the other half of that amendment: a skip is a test that did not
 run, and `passed` alone does not show one leaking away. Both slow gates are run because record
 `097` corrected that `-m ""` is the name of a call and does not prove what ran -- and here the two
-numbers close on each other: 1543 + 14 = 1557, so the fourth gate names the fourteen the third one
-merely included.
+numbers close on each other: 1286 + 14 = 1300, so the fourth gate names the fourteen the third one
+merely included. The absolute numbers are far below earlier runs of this lane because the branch
+point moved: records `124`/`125` deleted the layer the CLI could not reach.
 
 All four were re-run on the tree that ships. An earlier pass straddled a one-line tidy in
 `scan.py`, and a gate that ran against a tree nobody merges proves nothing about the one they do.
@@ -227,19 +228,19 @@ and the test drives `Workspace.register_agenda`, while this lane's `workspace.py
 occurrences of `_exclusive`, `WORKSPACE_LOCK`, `register_agenda` or `os.replace`. Filed as its own
 piece of work rather than absorbed here.
 
-**+11, and every one is accounted for.** Seven are the acceptance file below — six for the ruling,
-and one for the seam with lane B. Three are `tests/data/test_requirements.py`, where one test of the
-old signature's two rejections became four of the new one's. The last is not a new test at all:
+**+13, and every one is accounted for.** Eight are the acceptance file below — six for the ruling,
+one for the seam with lane B, and one for the owner's correction. Three are
+`tests/data/test_requirements.py`, where one test of the old signature's two rejections became four
+of the new one's. The last two are not new tests at all:
 `test_a_fix_is_not_its_requirement_restated`
 parametrizes over every `Failure.bounded` call site, so this lane's net refusal change moves it —
-`field_not_an_expression`, `projection_unbindable` and `field_conflict` added, `field_missing`
-renamed to `field_unknown`, and `check.dataset.unregistered` removed.
+`field_not_an_expression` and `projection_unbindable` added.
 
 This worktree junctions `data/` from the main checkout, so the five `real_data` tests that skip on a
 bare worktree actually run here — including the two that register Korean-named columns, which is
 what proves a unicode identifier still binds inside a composed projection.
 
-`ruff check tests/` reports findings that pre-exist at `develop@111c0342` and are not in files this
+`ruff check tests/` reports findings that pre-exist at the branch point and are not in files this
 lane touched; `src/` is the declared gate.
 
 ### The tests that close the lane

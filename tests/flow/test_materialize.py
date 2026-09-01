@@ -14,7 +14,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import MAX_EXAMPLES, VqaprError
 from vqapr.flow.materialize import MaterializationSpec
 from vqapr.public import materialize, register_data_model, register_dataset
 from vqapr.workspace import Workspace
@@ -71,6 +71,24 @@ class FailingSecondModel(ReversalModel):
         if context.window.evaluation_time.day == 7:
             raise RuntimeError("intentional second-evaluation failure")
         return super().compute(context)
+
+STRAY = tuple("X%02d" % n for n in range(20))
+REPEATED = tuple("D%02d" % n for n in range(20))
+
+class StrayNameModel(ReversalModel):
+    \"\"\"Twenty instruments that were never requested, one of them on two rows.\"\"\"
+
+    def compute(self, context):
+        rows = super().compute(context)
+        stray = tuple({"instrument": name, "score": 0.0} for name in STRAY)
+        return rows + stray + ({"instrument": STRAY[0], "score": 1.0},)
+
+class RepeatedNameModel(ReversalModel):
+    \"\"\"Twenty requested instruments, every one of them emitted twice.\"\"\"
+
+    def compute(self, context):
+        rows = tuple({"instrument": name, "score": 0.0} for name in REPEATED)
+        return rows + rows
 """,
         encoding="utf-8",
     )
@@ -150,6 +168,103 @@ def test_producer_cannot_forge_available_at_and_failure_does_not_mutate_workspac
     assert caught.value.mutation is False
     assert Workspace.open(tmp_path).path.read_bytes() == before
     assert not (tmp_path / ".vqapr" / "materialized" / "forged.parquet").exists()
+
+
+def test_unrequested_instruments_are_collected_and_counted_not_reported_as_zero(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """Issue 032. Twenty stray names must arrive as twenty, quoted five at a time.
+
+    The fixture has twenty distinct unrequested instruments on twenty-one rows, on purpose: a
+    single offender cannot tell the fixed behaviour from the broken one, because fail-fast and
+    collect-then-report agree when there is only one thing to find. What the refusal used to say
+    was `examples: []` and `example_total: 0` -- a count that reads as "no row was wrong" while
+    twenty were, and the only quantity in the envelope.
+    """
+    _register_prices(tmp_path, model_price_parquet)
+    component_path = _component_source(tmp_path / "models.py")
+    register_data_model(tmp_path, "stray", component_path, "StrayNameModel")
+
+    with pytest.raises(VqaprError) as caught:
+        materialize(
+            tmp_path,
+            "stray",
+            MaterializationSpec.of("stray_out", value_fields=("score",)),
+            evaluation_times=_times(),
+            instruments=("A", "B"),
+        )
+
+    assert caught.value.stage == "materialize.output"
+    assert caught.value.mutation is False
+    (failure,) = caught.value.failures
+    assert failure.code == "materialize.output.instrument_unrequested"
+    assert failure.example_total == 20, "the count before truncation, not the count of quotes"
+    assert len(failure.examples) == MAX_EXAMPLES
+    assert failure.examples == tuple(f"X{n:02d}" for n in range(MAX_EXAMPLES))
+    # Twenty distinct names on twenty-one rows: X00 was emitted twice. The distinct count is what
+    # `example_total` reports, matching `examples`, which quotes each offender once.
+    assert failure.observed == "20 unrequested instrument(s) across 21 of 23 output row(s)"
+    assert not (tmp_path / ".vqapr" / "materialized" / "stray_out.parquet").exists()
+
+
+def test_duplicated_instruments_are_collected_and_counted_not_reported_as_zero(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """The sibling of the test above, because the two checks have the same shape.
+
+    Fixing only `instrument_unrequested` would leave the next reader to rediscover this one.
+    """
+    _register_prices(tmp_path, model_price_parquet)
+    component_path = _component_source(tmp_path / "models.py")
+    register_data_model(tmp_path, "repeated", component_path, "RepeatedNameModel")
+    requested = tuple(f"D{n:02d}" for n in range(20))
+
+    with pytest.raises(VqaprError) as caught:
+        materialize(
+            tmp_path,
+            "repeated",
+            MaterializationSpec.of("repeated_out", value_fields=("score",)),
+            evaluation_times=_times(),
+            instruments=requested,
+        )
+
+    assert caught.value.stage == "materialize.output"
+    (failure,) = caught.value.failures
+    assert failure.code == "materialize.output.instrument_duplicate"
+    assert failure.example_total == 20
+    assert failure.examples == tuple(f"D{n:02d}" for n in range(MAX_EXAMPLES))
+    assert failure.observed == "20 repeated instrument(s) across 20 extra of 40 output row(s)"
+    assert not (tmp_path / ".vqapr" / "materialized" / "repeated_out.parquet").exists()
+
+
+def test_a_structural_output_check_still_stops_at_the_first_bad_row(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """`examples: []` stays right where it was right.
+
+    A row whose *shape* is wrong has no offending value to quote, so an empty `examples` beside
+    `example_total: 0` is the honest answer there, and the check keeps failing on the first bad
+    row. Only the two content checks changed. This also pins the `SKILL.md` invariant that an
+    empty `examples` never sits next to a non-zero `example_total`.
+    """
+    _register_prices(tmp_path, model_price_parquet)
+    component_path = _component_source(tmp_path / "models.py")
+    register_data_model(tmp_path, "forger", component_path, "ForgingModel")
+
+    with pytest.raises(VqaprError) as caught:
+        materialize(
+            tmp_path,
+            "forger",
+            MaterializationSpec.of("forged_shape", value_fields=("score",)),
+            evaluation_times=_times(),
+            instruments=("A", "B"),
+        )
+
+    (failure,) = caught.value.failures
+    assert failure.code == "materialize.output.available_at_owned"
+    assert failure.examples == ()
+    assert failure.example_total == 0
+    assert failure.observed.startswith("row 0 ")
 
 
 def test_mid_run_compute_failure_publishes_nothing(

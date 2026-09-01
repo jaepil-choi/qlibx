@@ -1,5 +1,11 @@
 # 032 — A row-contents refusal quotes one offender and reports `example_total: 0` while twenty rows are wrong
 
+**Status:** closed 2026-09-01 by
+`docs/implementations/121-a-content-check-counts-before-it-refuses.md`. The settlement went to the
+code, not the promise: both content checks now scan the batch, quote up to five distinct offenders
+and report the true `example_total`; the structural checks keep failing on the first bad row, which
+the issue names as correct.
+
 **Status when filed:** open. Found 2026-08-30 by the first-time-user journey in
 `kaist-thesis/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-006**,
 `papercut` / `message`.

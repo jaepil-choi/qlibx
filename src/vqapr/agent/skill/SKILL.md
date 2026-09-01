@@ -492,6 +492,13 @@ halfway through a simulation. Declare every requirement before compute — readi
 one is refused deliberately, because a requirement that is not declared is not point-in-time
 bounded.
 
+The checks on a DataModel's *output rows* scan the whole batch: when rows name instruments that
+were never requested, or name one instrument twice, `examples` quotes up to five of the offending
+instruments and `example_total` says how many distinct ones there were — so you can tell one stray
+name from a systematic fault in one pass, instead of one refusal per offending row. The checks on
+a row's *shape* — a missing field, a forged `available_at` — still stop at the first bad row,
+which has no content to quote.
+
 ### Recovering from: run-precondition
 
 Something a run needs was not in place before it started: a holding with no listing on the

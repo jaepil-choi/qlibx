@@ -229,13 +229,30 @@ def _error(
     family: FailureFamily = FailureFamily.DATA,
     retry: str,
     source: FailureSource | None = None,
+    examples: Sequence[str] = (),
+    example_total: int | None = None,
 ) -> VqaprError:
+    """One refusal, one failure.
+
+    `examples`/`example_total` are optional because most refusals here are structural -- a wrong
+    field set, a forged column -- and a structural check has no offending *value* to quote. A
+    check on row contents does, and passes them: `Failure.bounded` truncates to `MAX_EXAMPLES`
+    and `example_total` carries the count before truncation, which is the whole point of the
+    field. See `docs/implementations/121`.
+    """
     return VqaprError(
         stage=stage,
         family=family,
         failures=[
             Failure.bounded(
-                code, requirement, observed=observed, fix=fix, explain=explain, source=source
+                code,
+                requirement,
+                observed=observed,
+                fix=fix,
+                explain=explain,
+                source=source,
+                examples=examples,
+                example_total=example_total,
             )
         ],
         mutation=False,
@@ -335,6 +352,22 @@ def _validated_output(
 
     expected = {"instrument", *spec.value_fields}
     seen: set[str] = set()
+    # Two content checks collect instead of failing fast, and the two lists below are why.
+    #
+    # `SKILL.md` promises that a check on row *contents* quotes up to five offending values and
+    # reports how many there were before truncation. Raising inside the loop cannot honour that:
+    # the first offender is the only one the check ever sees, so `examples` came back empty and
+    # `example_total` came back `0` while twenty rows were wrong -- a count that reads as "nothing
+    # was wrong" and is the only quantity in the envelope (issue 032). Collecting costs one more
+    # pass over output that is already being discarded, and buys the author the difference between
+    # one typo and a systematic fault, in one refusal rather than twenty edit-and-rerun cycles.
+    #
+    # The per-row *structural* checks above still raise on the first offender, deliberately: a row
+    # whose field set is wrong, or whose instrument will not parse, has no content to judge yet.
+    unrequested: list[str] = []
+    unrequested_rows = 0
+    duplicated: list[str] = []
+    duplicate_rows = 0
     for index, row in enumerate(rows):
         actual = set(row)
         if "available_at" in actual:
@@ -370,26 +403,50 @@ def _validated_output(
                 retry="return valid requested instrument identities, then retry",
             ) from error
         if instrument not in selected_instruments:
-            raise _error(
-                _OUTPUT_STAGE,
-                f"{_OUTPUT_STAGE}.instrument_unrequested",
-                "DataModel output instruments must come from the invocation input",
-                instrument,
-                fix="only emit rows for instruments passed into materialize's instruments argument",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
-                retry="return values only for requested instruments, then retry",
-            )
+            unrequested_rows += 1
+            if instrument not in unrequested:
+                unrequested.append(instrument)
+            # Not entered into `seen`: an unrequested instrument is one violation, not also a
+            # duplicate one. This is what the old fail-fast ordering did too -- it raised before
+            # the duplicate branch could ever look at the row -- and this lane changes how
+            # violations are reported, not what counts as one.
+            continue
         if instrument in seen:
-            raise _error(
-                _OUTPUT_STAGE,
-                f"{_OUTPUT_STAGE}.instrument_duplicate",
-                "DataModel output must contain at most one row per instrument per evaluation",
-                instrument,
-                fix="emit at most one row per instrument per evaluation from DataModel.compute",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
-                retry="deduplicate DataModel output, then retry",
-            )
+            duplicate_rows += 1
+            if instrument not in duplicated:
+                duplicated.append(instrument)
+            continue
         seen.add(instrument)
+    if unrequested:
+        raise _error(
+            _OUTPUT_STAGE,
+            f"{_OUTPUT_STAGE}.instrument_unrequested",
+            "DataModel output instruments must come from the invocation input",
+            (
+                f"{len(unrequested)} unrequested instrument(s) across {unrequested_rows} "
+                f"of {len(rows)} output row(s)"
+            ),
+            fix="only emit rows for instruments passed into materialize's instruments argument",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
+            retry="return values only for requested instruments, then retry",
+            examples=unrequested,
+            example_total=len(unrequested),
+        )
+    if duplicated:
+        raise _error(
+            _OUTPUT_STAGE,
+            f"{_OUTPUT_STAGE}.instrument_duplicate",
+            "DataModel output must contain at most one row per instrument per evaluation",
+            (
+                f"{len(duplicated)} repeated instrument(s) across {duplicate_rows} "
+                f"extra of {len(rows)} output row(s)"
+            ),
+            fix="emit at most one row per instrument per evaluation from DataModel.compute",
+            explain=ExplainTopic.COMPONENT_CONTRACT,
+            retry="deduplicate DataModel output, then retry",
+            examples=duplicated,
+            example_total=len(duplicated),
+        )
     return rows
 
 

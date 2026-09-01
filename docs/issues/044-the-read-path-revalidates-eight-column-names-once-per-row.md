@@ -1,6 +1,26 @@
 # 044 — The read path re-validates the same eight column names once per row, and that check — not the per-cell value check issue 035 names — is the larger half of `normalize_rows`
 
-**Status: owner-decided 2026-09-01, not yet implemented. Scheduled first** in the campaign anchored
+**Status: CLOSED 2026-09-01** by
+`docs/implementations/119-the-read-path-validates-nothing-and-the-question-moved-to-registration.md`
+(lane A of the read-path campaign). `normalize_rows` is gone from `DuckDbObservationStore.query`:
+**8.644s → 4.877s on one 553,600-row window, −43.6%.**
+
+**It was a move, not a deletion**, which is what this file and `035`'s addendum both asked for. All
+three questions `normalize_scalar` answered have a home in registration — finiteness in a new
+`check_values` stage over `scan.finite_check` (one scan, skipped when no numeric field is exposed),
+naive timestamps and non-portable types in `check_schema`, where they cost no I/O. The completion
+condition was `test_a_nan_column_is_refused_at_registration`, which fails on a tree where the pass
+was removed without being moved.
+
+**One claim in this file was wrong and the record corrects it.** "Roughly three quarters of the time
+is the key check" — measured, it is **64%**. The finding stands; the fraction was overstated.
+
+**One thing knowingly left.** The per-row `isinstance(available_at, datetime)` in `store.query`
+remains. Under the ruling it is also read-path validation the schema stage already guarantees, but it
+lives in the 0.357s counting pass rather than the 3.767s one this file measured, and lane A kept its
+contact surface narrow on purpose. Record `119` flags it as a decision rather than an oversight.
+
+**Superseded status: owner-decided 2026-09-01, scheduled first** in the campaign anchored
 at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md). The ruling is
 [035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md)'s, applied here: **the
 read path validates nothing.** What a registration accepted is thereafter trusted, and data that

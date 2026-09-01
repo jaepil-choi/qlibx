@@ -113,7 +113,14 @@ def _load(
     try:
         spec.loader.exec_module(module)
         candidate = getattr(module, ref.object_name)
-        return candidate(**dict(ref.config))
+        instance = candidate(**dict(ref.config))
+        # Who this component is, stamped once here. It reaches every `DataRequirement` the
+        # instance declares as its `consumer_id`, which is what an access record names. The
+        # author never writes it, because the author cannot know it more reliably than the
+        # reference that just resolved them (`models/model.py::component_id`).
+        if hasattr(type(instance), "component_id"):
+            instance.component_id = str(ref.component_id)
+        return instance
     except Exception as error:
         raise _failure(
             f"{_STAGE}.construction_failed",

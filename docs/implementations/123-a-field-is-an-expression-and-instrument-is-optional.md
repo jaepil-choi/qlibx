@@ -260,17 +260,7 @@ timing — is reproduced against a built wheel in
 lane. What this lane establishes is the property that number would otherwise be meaningless without:
 the two registrations deliver the same rows.
 
-**Two things will block that measurement, and lane B hit both.** Recorded here so the campaign does
-not rediscover them:
-
-- `vqapr-performance-testbed/probes.py` has drifted from `develop` and dies with `AttributeError`
-  on every measurement — `public._freeze_record` and `public.load_strategy_model` moved to
-  `flow.orchestration` (records 115–117), and `store.normalize_rows` was deleted by lane A. Lane B
-  repaired it to find the seams on the installed build, uncommitted, since it lives in the kwam
-  repository.
-- `vqapr-enhanced-index-3/workspace/prepared/equity_daily.parquet` carries 82 `+inf` rows
-  (`A065180`, 2015-01..04, `adj_factor=0`), so `equity-daily` no longer registers at all after
-  lane A moved the finiteness check to registration. This lane's own acceptance runs on
-  `statement-facts` and does not hit it; standing up a book does. Lane B worked around it with a
-  `KWAM_PERF_PREPARED` snapshot excluding those 82 rows, hardlinking the other 46 files at the
-  same ZSTD settings and row groups.
+**Three things block that measurement, and lane B hit all of them** — a drifted `probes.py`, 82
+`+inf` rows that lane A's registration check now rightly refuses, and wall-time noise that reported
+a 20% gain which was not there. They are written up where a measurer will look for them, in the
+campaign document's §4, and are not restated here.

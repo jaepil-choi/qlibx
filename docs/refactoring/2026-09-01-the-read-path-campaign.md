@@ -133,6 +133,11 @@ C:/Users/chlje/DevProjects/qlibx-wt-046a     레인 D — C 병합 시점에 생
 `develop`은 항상 green이어야 한다.**
 
 - worktree마다 **자기 `uv sync`가 필요하다** (`.venv`는 트리별이다).
+- **`data/`를 메인 트리에서 junction으로 걸어라.** gitignore된 210MB 로컬 산출물이라 새 worktree엔
+  없고, 없으면 테스트 5개가 **조용히 skip된다** — `passed`만 보면 안 보인다. 레인 H가 실제로 그
+  상태로 green을 보고했다. 명령은 `mklink /J`이고 인자는 `<worktree>/data`와 메인 트리의 `data`다
+  (Windows에서 junction은 관리자 권한이 필요 없다). `.gitignore:17`의 `/data/`가 덮으므로 status를
+  더럽히지 않는다. **읽기 전용으로만 쓴다** — 모든 worktree가 같은 디렉터리를 본다.
 - **두 worktree가 같은 `.vqapr/`를 보게 하지 마라** — workspace 문서는 single-writer 저장소다.
 - `.agent/plans/**`는 gitignored라 ExecPlan은 메인 트리에만 있다. 레인에서 필요하면 절대경로로 읽어라.
 

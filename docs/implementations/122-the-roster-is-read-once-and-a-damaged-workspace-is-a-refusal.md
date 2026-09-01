@@ -109,11 +109,22 @@ because they monkeypatch `roster_report` and assert the absorber's behaviour rat
 | gate | result |
 |---|---|
 | `uv run --no-sync ruff check src/` | **clean** |
-| `PYTHONUTF8=1 uv run --no-sync pytest tests/ -q` | **1518 passed, 5 skipped, 14 deselected** (baseline at the branch point, measured on this worktree before any edit: **1510 passed, 5 skipped, 14 deselected**) |
-| `PYTHONUTF8=1 uv run --no-sync pytest tests/ -q -m ""` | **1532 passed, 5 skipped** — run because this change touches run assembly |
+| `PYTHONUTF8=1 uv run --no-sync pytest tests/ -q` | **1523 passed, 0 skipped, 14 deselected** |
+| the same at the branch point `develop@602e1b3c`, on this worktree in this environment | **1515 passed, 0 skipped, 14 deselected** |
+| `PYTHONUTF8=1 uv run --no-sync pytest tests/ -q -m ""` | **1537 passed, 0 skipped, 0 failed** in 684s — run because this change touches run assembly |
 
-The count moves by exactly the 8 test functions added. `ruff check tests/` reports findings, all
-pre-existing at the branch point and none in a file this lane touched; `src/` is the declared gate.
+The count moves by exactly the 8 test functions added, measured against the branch point rather than
+against a quoted floor.
+
+**All of these are runs with `data/` junctioned in from the main tree.** Without it the fourteen
+journeys fail in fixture setup and five `real_data` tests skip — the state the campaign brief warns
+about by name, having already had a lane report green from inside it. This lane's first two
+measurements (**1510** baseline / **1518** after, both with 5 skipped) were taken in that state
+before the junction existed here; they are superseded by the table above, and recorded here rather
+than quietly dropped because the delta they showed was the same 8.
+
+`ruff check tests/` reports findings, all pre-existing at the branch point and none in a file this
+lane touched; `src/` is the declared gate.
 
 ### Each half failed on the pre-fix tree first, and was watched failing
 

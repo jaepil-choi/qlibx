@@ -1,4 +1,4 @@
-# 120 — A field is an expression, and instrument is optional
+# 123 — A field is an expression, and instrument is optional
 
 **Closes:** [`045`](../issues/045-a-requirement-cannot-say-which-rows-so-a-long-table-delivers-a-hundred-and-fifty-times-what-is-kept.md)
 and [`038`](../issues/038-one-instrument-list-filters-every-requirement.md), implementing the owner
@@ -6,7 +6,8 @@ ruling recorded in
 [`049`](../issues/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md) — lane C
 of the read-path campaign
 ([`2026-09-01-the-read-path-campaign.md`](../refactoring/2026-09-01-the-read-path-campaign.md) §2).
-**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@010824bf`.
+**Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@35b73229` — after lane B,
+which is the merge order §3 fixes.
 **Merges third**, and lane D opens on it.
 
 ## Why the two issues are one lane
@@ -69,6 +70,32 @@ the only implementation under which both of the ruling's own claims hold.
 | 5 | field ids are unique per workspace; a conflict is refused naming the other dataset | `workspace.py` |
 | 6 | the schema is derived by `DESCRIBE <query>` and persisted; `show dataset` reports it | `data/scan.py`, `cli/show.py` |
 | 7 | the workspace document migrates, write-forward, per entry | `workspace_codec.py` |
+
+### Meeting lane B in `scan.py`
+
+Lane B merged first and split the `RowsLookback` bound into a guess, a cold-start proof, and a
+per-callback reuse — and made a bounded read carry its own proof forward, which is what took the
+statement count from two to one. The same count therefore exists in **two** places: one `GROUP BY`
+statement, and one window aggregate riding inside the read.
+
+A grouped registration is exactly where those two can come apart, because a long source carries
+several rows per instant and a `RowsLookback` counts instants. So the vocabulary is named once:
+`_Counted` holds the relation, the two identity fragments and the counting arguments for one
+registration's shape, and both the statement and the sidecar take it. There is no path left that
+gives them different things to count.
+
+**Making that mistake is loud on an all-aggregate registration, and that is not the guard.**
+Forcing `_counted` to return the row-wise vocabulary for a grouped registration fails with
+`Binder Error: aggregate function calls cannot be nested`, because counting the source through an
+aggregate field is `count(sum(...))`. Checked by doing it. But a grouped registration may expose a
+bare grouping key as a field — `{stamp: <the available_at column>, total: sum(x)}` binds grouped,
+since the key is grouped by — and `count(<that column>)` binds fine while counting the wrong thing.
+So the binder catches one shape of the mistake and not the other, which is precisely why the guard
+is `_Counted` rather than duckdb. Lane B raised the risk and supplied that counterexample; both are
+recorded in the test so nobody after us mistakes the binder for a safety net.
+
+A dataset with no instrument axis takes no bound at all: the proof is per instrument, and there
+are none.
 
 ### The window is still written by the framework
 
@@ -190,6 +217,12 @@ own order:
   reader
 - `test_a_field_expression_may_not_carry_its_own_from` — the property that makes a look-ahead
   unwritable rather than merely discouraged
+- `test_a_bounded_grouped_read_returns_the_unbounded_answer` — the seam with lane B. A name whose
+  two counts disagree (five produced values against ten source rows, against a declared eight),
+  bounded read compared in full against the unbounded one
+
+Lane B's own two, unchanged and passing: `test_a_declared_input_costs_one_statement_per_callback`
+(3, 1, 1, 1, 1) and `test_a_proof_that_outlives_its_callback_still_returns_the_unbounded_result`.
 
 `tests/data/test_windows.py::test_rows_window_is_pit_bounded_and_counts_per_field` — a
 `RowsLookback` still counts each field's own last N, now read one requirement at a time.
@@ -215,3 +248,18 @@ timing — is reproduced against a built wheel in
 `kwam-enhanced-index/vqapr-performance-testbed/`, and belongs to the campaign rather than to this
 lane. What this lane establishes is the property that number would otherwise be meaningless without:
 the two registrations deliver the same rows.
+
+**Two things will block that measurement, and lane B hit both.** Recorded here so the campaign does
+not rediscover them:
+
+- `vqapr-performance-testbed/probes.py` has drifted from `develop` and dies with `AttributeError`
+  on every measurement — `public._freeze_record` and `public.load_strategy_model` moved to
+  `flow.orchestration` (records 115–117), and `store.normalize_rows` was deleted by lane A. Lane B
+  repaired it to find the seams on the installed build, uncommitted, since it lives in the kwam
+  repository.
+- `vqapr-enhanced-index-3/workspace/prepared/equity_daily.parquet` carries 82 `+inf` rows
+  (`A065180`, 2015-01..04, `adj_factor=0`), so `equity-daily` no longer registers at all after
+  lane A moved the finiteness check to registration. This lane's own acceptance runs on
+  `statement-facts` and does not hit it; standing up a book does. Lane B worked around it with a
+  `KWAM_PERF_PREPARED` snapshot excluding those 82 rows, hardlinking the other 46 files at the
+  same ZSTD settings and row groups.

@@ -403,13 +403,18 @@ def test_a_bounded_grouped_read_returns_the_unbounded_answer(
     number 10, which would prove it safe and lose the older instants the window was declared to
     include.
 
-    **The wrong count turns out to be loud rather than silent, and that is worth recording.** A
-    grouped registration's fields are all aggregates, so counting the source's rows through them
-    is `count(sum(...))` -- a nested aggregate duckdb refuses to bind. Checked by making
-    `_counted` return the row-wise vocabulary for a grouped registration: this test fails, with
-    `Binder Error: aggregate function calls cannot be nested`, before any answer is produced. So
-    the divergence cannot reach a result on this pairing; what this test pins is the property
-    itself, that a bounded grouped read returns the unbounded answer.
+    **On this fixture the wrong count is loud, and that is not a safety net.** Every field here is
+    an aggregate, so counting the source through them is `count(sum(...))` -- a nested aggregate
+    duckdb refuses to bind. Checked by making `_counted` return the row-wise vocabulary for a
+    grouped registration: this test then fails with `Binder Error: aggregate function calls cannot
+    be nested`, before any answer is produced.
+
+    **Do not read that as the binder guarding it.** A grouped registration may expose a field that
+    is a bare grouping key -- `fields: {stamp: <the available_at column>, total: sum(x)}` binds
+    grouped, because the key is grouped by -- and `count(<that column>)` binds perfectly well over
+    the source while counting something else entirely. The guard is `_Counted`, which gives the
+    statement and the sidecar one vocabulary structurally; the binder merely happens to catch the
+    all-aggregate case first.
     """
     from vqapr.data import scan
     from vqapr.data.scan import ScanSession

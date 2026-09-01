@@ -1544,11 +1544,34 @@ w_j = w⁰_j  (j ∈ frozen)    거래 불가 종목 불변
   pending update를 commit하지 않는다. 주문과 account mutation도 생기지 않는다.
 - **fractional/lot 검증은 하지 않는다.** 그건 venue가 안다(§6.2).
 
-### 5.5 Hold도 `PortfolioIntent`다
+### 5.5 판단하지 않은 콜백도 book을 평가한다
 
-- 별도 action enum이나 `None`을 두지 않는다. 현재와 같은 완전한 target을 반환한다.
-- `plan_orders`가 delta 0인 `OrderBatch`를 만들고, no-trade diagnostic만 남는다.
-- **왜**: "판단 안 함 / 판단해서 유지 / 주문했는데 dealt 0" 세 가지가 구분되어야 한다.
+- **구속력 있는 것은 behavior 하나다: 주문은 나가지 않고, valuation은 돈다.**
+- **왜**: venue는 execution instant에 여전히 가격을 내고 book은 거기서 값이 있다. execution을
+  건너뛰면 valuation도 같이 건너뛰고 NAV 계열에 구멍이 난다.
+- 구현은 **더 단순하고 효율적인 쪽을 고른다.**
+
+> **오너 판정 2026-09-01.** 원문: *"no decision일 때는 order가 안나가고 valuation이 돌면 돼.
+> behavior가 중요해. 내부 구현은 더 효율적이고 simple 한 것을 택하면 되는거야."*
+>
+> **이 절의 원래 처방 두 줄이 철회됐다** — *"별도 action enum이나 `None`을 두지 않는다"*와
+> *"`plan_orders`가 delta 0인 `OrderBatch`를 만들고 no-trade diagnostic만 남는다"*. 둘 다
+> behavior가 아니라 그 behavior에 도달하는 한 가지 방법이었다.
+>
+> **그리고 delta 0 `OrderBatch`는 이 절의 *왜*를 오히려 깬다.** 원래 근거는 세 상태 —
+> "판단 안 함 / 판단해서 유지 / 주문했는데 dealt 0" — 이 구분되어야 한다는 것이었는데, hold가
+> delta 0 배치를 만들면 **"판단해서 유지"와 "주문했는데 dealt 0"이 기록에서 같아진다.**
+> `Fill.__post_init__`이 zero-dealt와 dealt를 잠가 갈라둔 것이 무의미해진다.
+>
+> **오늘 트리가 하는 것이 그 behavior이고 더 단순하다.** `flow/simulation.py:150`의
+> `PendingValuation`이 target만 들고 execution instant에 도달하고 `_dispatch_due`가
+> `_value_due`로 보낸다 — *"같은 instant, 같은 snapshot, 주문이 체결됐을 바로 그 가격, 다만 주문
+> 없이. Account는 바뀌지 않으므로 version도 소비되지 않는다."* 빈 `EconomicPortfolioIntent`를
+> 만들지 않는 이유도 거기 적혀 있다: 그것은 *"아무것도 보유하지 않는다"*는 뜻이고 hold의 반대다.
+>
+> **세 상태 중 앞의 둘은 하나의 behavior다.** "판단 안 함"과 "판단해서 유지"에 요구되는 동작이
+> 같으므로(주문 없음 + valuation 실행) 한 타입이 둘을 다 맡는 것이 맞고, 기록 `125`가 둘을 합친
+> 것은 그래서 옳다. 구분이 필요한 것은 **셋째**이고, 그것은 오늘 지켜진다.
 
 ### 5.6 `transforms/` — 값을 값으로
 

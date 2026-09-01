@@ -1,5 +1,20 @@
 # 035 — The only data accessor a model author has is ~90x slower than reading the same file, and it is the entire cost of a rolling-window run
 
+**Status update 2026-09-01 — this file now has two halves with different fates.** The campaign is
+anchored at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
+
+- **The validation half is scheduled**, as [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md),
+  which measured that the *key* check — not the per-cell value check this file examined — is the
+  larger part of `normalize_rows`. The ruling below governs both.
+- **The columnar-accessor half stays open and is deliberately NOT decided yet.** This file's case for
+  it rests on 477,628 rows becoming 477,628 dicts. Under 049's ruling those rows arrive already
+  reduced — the measured case goes from 4.4M cells to 3,375 — so the question *"is row-major boxing
+  still the bottleneck"* has a different answer than when this was written. **It is re-measured
+  after the ruling lands, and decided then.** Deciding it now would be answering a question about a
+  read path that is about to change shape.
+
+The 90x comparison itself is not withdrawn and remains the reference number.
+
 **Status:** **owner-decided 2026-08-31, not yet implemented.** The ruling: **validation never
 happens on the read path.** Registration is where data is validated, and what a registration accepts
 is thereafter trusted. What a registration cannot honestly check - a value that only turns out to be

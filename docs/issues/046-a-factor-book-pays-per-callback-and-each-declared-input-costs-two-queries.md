@@ -1,5 +1,22 @@
 # 046 — A factor book's cost is a fixed charge per callback before it is a charge per name, and each declared `RowsLookback` input costs two round trips to answer with one row
 
+**Status update 2026-09-01 — one of the two halves is now load-bearing for
+[049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md)'s ruling.**
+
+Under that ruling a `DataRequirement` names **one** field, so `ff_factors`'s three declared inputs
+become three requirements rather than one with three fields. **That is only affordable because
+requirements are all declared before any read and expressions over the same dataset fuse into one
+`SELECT`** — the query-per-declared-input floor this file measures at ~50 ms is what the fusing
+removes. So the floor half stops being an optimisation and becomes a **precondition**: it is the
+reason one-field-per-requirement does not multiply scans.
+
+The second half — that each `RowsLookback` input costs **two** round trips, `_rows_lower_bound`
+before `observation_rows` — is independent of the ruling and stays open on its own terms.
+
+This file is otherwise unchanged: it is scheduled under the 049 campaign but its measurements are on
+the *simulation* path, a different regime from the materialization path 044/045 measure, and that
+distinction is not collapsed.
+
 **Status when filed:** open. Found 2026-08-31 by a profiling pass in
 `kwam-enhanced-index/vqapr-performance-testbed/`, against `vqapr-0.2.0a2` (built wheel).
 **Touches:** `src/vqapr/data/scan.py:640` (`_rows_lower_bound`); `src/vqapr/data/scan.py:707`

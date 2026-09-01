@@ -1,5 +1,31 @@
 # 045 — A `DataRequirement` can name columns and a window but not which rows, so a long-format dataset delivers 153 rows for every one the model keeps
 
+**Status: owner-decided 2026-09-01, not yet implemented. The diagnosis is upheld; the proposed
+mechanism is not.** Scheduled under the campaign anchored at
+[049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
+
+**Upheld:** rows the model discards are read, boxed, validated and carried across the boundary
+because nothing can say which rows are wanted. 153:1 stands, and it is a framework gap.
+
+**Rejected: the `where=` argument on `DataRequirement` proposed in "The shape of the fix" below.**
+The row selection belongs where the dataset is registered, as part of what a field *is*
+(`fields: { net_income: arg_max(value, dump_last_modified) FILTER (WHERE account_code = '111000') }`),
+not as an argument the consumer passes. Two reasons, and neither contradicts this file's reasoning:
+
+1. **Which rows constitute `net_income` is a property of the dataset, not of one consumer's
+   request.** Every model that wants net income wants the same rows; making each ask separately
+   invites them to disagree.
+2. **`DataRequirement` must stay a field id and a lookback.** It is the surface an author touches
+   most, and every argument added to it is paid by everyone.
+
+**This file's own constraint is honoured more strictly, not less.** Its "line it must not cross" is
+that an arbitrary SQL string reaching `observation_rows` is a look-ahead path with a friendly name.
+Under the ruling the author writes **an expression, never a statement** — no `FROM`, no `GROUP BY`,
+no `available_at` in reach — so the concern is answered by grammar rather than by a vocabulary that
+has to be kept closed as it grows. The three properties this file asks for survive: only declared
+fields, values never string-composed, and the selection recorded in provenance (better: it is in the
+registration, so `show dataset` states it and the run's `source_digest` covers it).
+
 **Status when filed:** open. Found 2026-08-31 by a profiling pass in
 `kwam-enhanced-index/vqapr-performance-testbed/`, against `vqapr-0.2.0a2` (built wheel).
 **Touches:** `src/vqapr/data/requirements.py` (`DataRequirement`); `src/vqapr/data/scan.py:707`

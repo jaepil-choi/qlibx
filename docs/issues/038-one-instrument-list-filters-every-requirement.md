@@ -1,7 +1,19 @@
 # 038 — One `instruments:` list filters every requirement, so a second dataset's row keys must be enumerated as instruments even when they are not instruments
 
-**Status: owner-decided 2026-09-01, not yet implemented. The "better fix" below is adopted, one
-layer lower than this file proposes.** Scheduled under the campaign anchored at
+**Status: CLOSED 2026-09-01** by [`123-a-field-is-an-expression-and-instrument-is-optional.md`](../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md)
+(lane C of the read-path campaign). `instrument_field` is optional at registration, and a dataset
+registered without one has no instrument axis: no instrument predicate, no instrument column, and
+the declared instrument list is not applied to it.
+
+**The "better fix" was adopted one layer lower than this file proposes**, on the dataset rather than
+on the requirement — whether a table is keyed by instrument is a fact about the table. The
+completion condition is `test_criterion_2_a_dataset_with_no_instrument_axis_is_not_narrowed`, which
+registers this file's own `kimchi-ff5` shape and reads it with no factor id in `instruments:`.
+
+The cheap docs fix this file also named is superseded, as it said it would be: the sentence would
+document a behaviour that no longer exists.
+
+Originally scheduled under the campaign anchored at
 [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
 
 This file asks for a **per-requirement** instrument scope. The ruling puts it on the **dataset**:

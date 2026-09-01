@@ -1,7 +1,22 @@
 # 045 — A `DataRequirement` can name columns and a window but not which rows, so a long-format dataset delivers 153 rows for every one the model keeps
 
-**Status: owner-decided 2026-09-01, not yet implemented. The diagnosis is upheld; the proposed
-mechanism is not.** Scheduled under the campaign anchored at
+**Status: CLOSED 2026-09-01** by [`123-a-field-is-an-expression-and-instrument-is-optional.md`](../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md)
+(lane C of the read-path campaign). **The diagnosis was upheld and the proposed mechanism was not**,
+and both halves of that survive the implementation.
+
+Row selection lives where the dataset is registered, as part of what a field *is*: `fields` values
+are expressions, so `net_income` can be
+`arg_max(value, dump_last_modified) FILTER (WHERE account_code = '111000')` and the 153 rows this
+file measured are never read. `DataRequirement` stayed small: it is now a dataset id, a field id and a
+lookback, with no `consumer_id` — the framework stamps that. It briefly had no `dataset_id` either,
+until the owner overturned the uniqueness premise that removed it (see `049`).
+
+**This file's line was honoured more strictly rather than less.** The author writes an expression,
+never a statement, so there is no `FROM` and no `GROUP BY` to reach and no closed vocabulary to keep
+closed as it grows. Registration refuses an expression containing `SELECT`, which is the one
+expression form that could read rows the window excludes.
+
+Originally scheduled under the campaign anchored at
 [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
 
 **Upheld:** rows the model discards are read, boxed, validated and carried across the boundary

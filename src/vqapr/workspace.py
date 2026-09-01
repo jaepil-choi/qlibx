@@ -20,7 +20,6 @@ from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.resolution import dataset_for_field, field_index
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.domain.identifiers import (
@@ -327,17 +326,6 @@ class Workspace:
         # the workspace stays enumerable and repairable; USING it is what must not happen, since
         # every consumer downstream of here treats a registration as complete.
         _require_span(str(key), registration)
-        return _detach_registration(registration)
-
-    def dataset_for_field(self, field_id: str) -> DatasetRegistration:
-        """The registered dataset that exposes `field_id`.
-
-        A `DataRequirement` names a field and nothing else, so this is the lookup the read path
-        makes (`docs/issues/049`). Registration keeps field ids unique across the workspace, which
-        is what makes the answer a single dataset rather than a choice.
-        """
-        registration = dataset_for_field(field_index(self._datasets.values()), field_id)
-        _require_span(str(registration.dataset_id), registration)
         return _detach_registration(registration)
 
     def span(self, raw_dataset_id: str) -> tuple[datetime, datetime]:
@@ -680,35 +668,6 @@ class Workspace:
                     ),
                     explain=ExplainTopic.WORKSPACE_STATE,
                     retry="use the existing declaration or choose a new dataset_id",
-                )
-
-            # A field id is an id, and a `DataRequirement` names one and nothing else
-            # (`docs/issues/049`). Two datasets exposing the same id would make that name a
-            # choice, so the second one is refused here -- naming the dataset that already has
-            # it, because the reader's next question is always which one.
-            owners = field_index(
-                other for owner, other in datasets.items() if owner != key
-            )
-            for field_id in registration.fields:
-                owner = owners.get(field_id)
-                if owner is None:
-                    continue
-                raise _workspace_error(
-                    stage=REGISTER_STAGE,
-                    code=f"{REGISTER_STAGE}.field_conflict",
-                    requirement=(
-                        f"field id {field_id!r} must be unique across the workspace, so a "
-                        "requirement that names it resolves to one dataset"
-                    ),
-                    observed=(
-                        f"dataset {str(owner.dataset_id)!r} already exposes {field_id!r}"
-                    ),
-                    fix=(
-                        f"rename the field on dataset {key!r}, or remove it from "
-                        f"{str(owner.dataset_id)!r} if the two are the same value"
-                    ),
-                    explain=ExplainTopic.WORKSPACE_STATE,
-                    retry="give the field a name no registered dataset uses, then retry",
                 )
 
             merged_datasets = dict(datasets)

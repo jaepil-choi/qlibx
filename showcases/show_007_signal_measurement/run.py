@@ -238,7 +238,7 @@ class ReversalSignalStrategy(StrategyModel):
 
     def requirements(self):
         return (
-            DataRequirement.of("close", lookback=RowsLookback(LOOKBACK)),
+            DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
     def on_occurrence(self, context):

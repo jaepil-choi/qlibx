@@ -88,7 +88,7 @@ def _benchmark_window(
 def _cap(manifest: dict[str, object], cap: str = "0.10") -> SingleNameCap:
     return SingleNameCap(
         cap=cap,
-        
+        benchmark_dataset_id="benchmark_weight_daily",
         tolerance=str(manifest["weight_tolerance"]),
     )
 
@@ -416,16 +416,20 @@ def test_configured_decimals_must_be_strings(manifest: dict[str, object]) -> Non
         with pytest.raises(ValueError):
             SingleNameCap(
                 cap=bad,  # type: ignore[arg-type]
-                
+                benchmark_dataset_id="benchmark_weight_daily",
+
                 tolerance=str(manifest["weight_tolerance"]),
             )
 
 
-def test_requirements_name_the_benchmark_weight_field(manifest: dict[str, object]) -> None:
-    """A requirement names the FIELD. Which dataset carries it is the registration's answer."""
+def test_requirements_name_the_configured_benchmark_dataset_and_field(
+    manifest: dict[str, object],
+) -> None:
+    """A requirement names the pair: which dataset, and which field on it."""
     constraint = _cap(manifest)
     requirement = constraint.requirements()[0]
 
+    assert str(requirement.dataset_id) == "benchmark_weight_daily"
     assert requirement.field_id == "benchmark_weight"
     assert requirement.lookback == RowsLookback(1)
     assert NoShort().requirements() == ()

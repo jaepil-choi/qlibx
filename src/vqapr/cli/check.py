@@ -50,6 +50,7 @@ SIMULATION_CODES = (
     "check.execution.not_after_decision",
     "check.period.uncovered",
     "check.lookback.uncovered",
+    "check.dataset.unregistered",
     "check.field.absent",
     "check.weights.mode_conflict",
     "check.weights.venue_conflict",

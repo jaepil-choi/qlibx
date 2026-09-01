@@ -5,25 +5,6 @@
 - **읽는 법**: 각 설계 결정은 `결정 → 왜 → 없으면 무엇이 깨지는가 → 어떤 UC` 순서로 적는다.
   근거 없는 결정은 이 문서에 두지 않는다.
 
-> ## 이 문서를 어떻게 읽는가 — 오너 판정 2026-09-01
->
-> **이 문서는 부분적으로 낡았고, set in stone으로 읽지 않는다.** 코드가 이 문서와 다른 지점을
-> 발견했다고 해서 그것이 자동으로 결함인 것은 아니다. 트리가 앞서 나간 것일 수도 있고, 그 편이
-> 흔하다.
->
-> **어휘에 집착하지 않는다.** 여기 적힌 이름 — `PortfolioIntent`, `NoDecision`, `Hold`, 계약이
-> 사는 모듈 이름 — 은 **구속력이 없다.** 어떤 개념이 여기 적힌 것과 다른 이름으로 코드에 있거나,
-> 여기 없는 이름으로 코드에 있다면(예: `vqapr.authoring`은 이 문서에 한 번도 나오지 않는다),
-> 그 자체는 고칠 거리가 아니다. **이름을 맞추려고 사용자 코드를 옮기지 마라.**
->
-> **여전히 구속력이 있는 것은 이유(why) 쪽이다.** 각 결정의 *"없으면 무엇이 깨지는가"*가 이
-> 문서의 값어치이고, 그것이 척추의 불변식 — PIT 경계, Account single-writer,
-> `intended ≠ requested ≠ dealt ≠ committed`, exact-rational optimizer, frozen run identity —
-> 으로 이어진다. **구분해야 할 상태가 몇 가지인가는 설계 사실이고, 그것을 무엇이라 부르는가는
-> 아니다.**
->
-> 이 판정으로 뒤집힌 개별 항목은 그 자리에 표시했다 — §10.2의 `vqapr check` 금지가 그것이다.
-
 ---
 
 ## 1. 한 장 요약
@@ -1069,9 +1050,7 @@ resolution이 실패하면 callback 전체가 commit되지 않는다. 성공한 
 - **비용이 문제라면 profile을 바꾼다.** zero-friction academic profile은 비용 0에 전량 체결이지만
   **체결·계좌 반영·feedback은 그대로 일어난다.** 그래서 turnover-aware한 전략이 자기 계좌를 볼 수 있고,
   adaptive ensemble이 member의 realized outcome을 볼 수 있다.
-- **hold도 통과한다**(§5.5) — execution instant에 도달해 book이 평가된다. **주문은 나가지 않는다:**
-  ~~delta 0인 `OrderBatch`가 되고~~ 라는 처방은 오너 판정 2026-09-01로 철회됐다. 구속력 있는 것은
-  behavior(주문 없음 + valuation 실행)이고 그 도달 방법이 아니다. 근거는 §5.5.
+- **hold도 통과한다**(§5.5). delta 0인 `OrderBatch`가 되고 no-trade 진단만 남는다.
 - 이것이 DataModel과의 판정 기준이다(§4.4).
 
 **현재 occurrence만 보인다.** `context.occurrence`는 current identity와 evaluation time만 담는다. 몇 번째
@@ -1546,34 +1525,11 @@ w_j = w⁰_j  (j ∈ frozen)    거래 불가 종목 불변
   pending update를 commit하지 않는다. 주문과 account mutation도 생기지 않는다.
 - **fractional/lot 검증은 하지 않는다.** 그건 venue가 안다(§6.2).
 
-### 5.5 판단하지 않은 콜백도 book을 평가한다
+### 5.5 Hold도 `PortfolioIntent`다
 
-- **구속력 있는 것은 behavior 하나다: 주문은 나가지 않고, valuation은 돈다.**
-- **왜**: venue는 execution instant에 여전히 가격을 내고 book은 거기서 값이 있다. execution을
-  건너뛰면 valuation도 같이 건너뛰고 NAV 계열에 구멍이 난다.
-- 구현은 **더 단순하고 효율적인 쪽을 고른다.**
-
-> **오너 판정 2026-09-01.** 원문: *"no decision일 때는 order가 안나가고 valuation이 돌면 돼.
-> behavior가 중요해. 내부 구현은 더 효율적이고 simple 한 것을 택하면 되는거야."*
->
-> **이 절의 원래 처방 두 줄이 철회됐다** — *"별도 action enum이나 `None`을 두지 않는다"*와
-> *"`plan_orders`가 delta 0인 `OrderBatch`를 만들고 no-trade diagnostic만 남는다"*. 둘 다
-> behavior가 아니라 그 behavior에 도달하는 한 가지 방법이었다.
->
-> **그리고 delta 0 `OrderBatch`는 이 절의 *왜*를 오히려 깬다.** 원래 근거는 세 상태 —
-> "판단 안 함 / 판단해서 유지 / 주문했는데 dealt 0" — 이 구분되어야 한다는 것이었는데, hold가
-> delta 0 배치를 만들면 **"판단해서 유지"와 "주문했는데 dealt 0"이 기록에서 같아진다.**
-> `Fill.__post_init__`이 zero-dealt와 dealt를 잠가 갈라둔 것이 무의미해진다.
->
-> **오늘 트리가 하는 것이 그 behavior이고 더 단순하다.** `flow/simulation.py:150`의
-> `PendingValuation`이 target만 들고 execution instant에 도달하고 `_dispatch_due`가
-> `_value_due`로 보낸다 — *"같은 instant, 같은 snapshot, 주문이 체결됐을 바로 그 가격, 다만 주문
-> 없이. Account는 바뀌지 않으므로 version도 소비되지 않는다."* 빈 `EconomicPortfolioIntent`를
-> 만들지 않는 이유도 거기 적혀 있다: 그것은 *"아무것도 보유하지 않는다"*는 뜻이고 hold의 반대다.
->
-> **세 상태 중 앞의 둘은 하나의 behavior다.** "판단 안 함"과 "판단해서 유지"에 요구되는 동작이
-> 같으므로(주문 없음 + valuation 실행) 한 타입이 둘을 다 맡는 것이 맞고, 기록 `125`가 둘을 합친
-> 것은 그래서 옳다. 구분이 필요한 것은 **셋째**이고, 그것은 오늘 지켜진다.
+- 별도 action enum이나 `None`을 두지 않는다. 현재와 같은 완전한 target을 반환한다.
+- `plan_orders`가 delta 0인 `OrderBatch`를 만들고, no-trade diagnostic만 남는다.
+- **왜**: "판단 안 함 / 판단해서 유지 / 주문했는데 dealt 0" 세 가지가 구분되어야 한다.
 
 ### 5.6 `transforms/` — 값을 값으로
 
@@ -2959,21 +2915,10 @@ vqapr run spec.yaml
   선언 파일과 컴포넌트를 함께 옮길 수 있다.
 
 - **템플릿이 자기 테스트를 들고 나온다.** 계약이 문서가 아니라 실행되는 형태로 전달된다.
-- **`pytest`·`register`·`check`가 같은 판정 코드를 부른다.** 갈리면 *"로컬에선 되는데 등록이
-  안 된다"*가 생긴다.
-
-  > **정정 — 오너 판정 2026-09-01: `vqapr check`는 필요하고, 이 항목이 틀렸다.**
-  > 원문: *"check는 필요해. 문서가 잘못된거야."* `check`는 지어졌고 CLI verb 7개 중 하나다
-  > (`src/vqapr/cli/check.py`).
-  >
-  > **틀린 것은 결론이지 근거가 아니다.** 원래 문장은 *"세 번째 입구는 같은 답을 다른 이름으로 한 번
-  > 더 주는 것뿐"*이라며 입구 수를 셌다. 실제로 값을 치른 위험은 입구 수가 아니라 **판정 코드가
-  > 갈리는 것**이었고, 그 청구서가 `docs/issues/012` — *"check refuses a spec that run completes"* —
-  > 다. 기록 `087`이 증상을, 기록 `112`가 구조적 원인을 닫았다.
-  >
-  > **그래서 불변식은 입구를 세지 않는다: 몇 개든 좋고, 판정하는 코드가 하나여야 한다.** 오늘
-  > `check`와 `run`은 `flow/judgments.py`를 공유하며, 그것이 012가 청구한 뒤의 상태다. 새 입구를
-  > 짓는 것은 자유이고, 자기 판정 로직을 갖는 것이 금지다.
+- **`pytest`와 `register`가 같은 검사를 부른다.** 갈리면 *"로컬에선 되는데 등록이 안 된다"*가 생긴다.
+  입구는 **둘**이다. `vqapr check`는 짓지 않는다 — `register`가 이미 같은 `conformance()`를 부르고,
+  등록되지 않은 컴포넌트는 아직 Flow가 실행할 수 있는 대상이 아니다. 세 번째 입구는 같은 답을 다른
+  이름으로 한 번 더 주는 것뿐이다.
 - **conformance가 판정하는 것은 "Flow가 이 컴포넌트를 호출할 수 있는가" 하나다.** Flow는 콜백을
   **위치로** 부르므로 계약은 arity이고 파라미터 *이름*이 아니다. `context`를 `ctx`로 바꾼 구현은
   동일한 호출을 받으므로 통과한다. 반환 *타입*은 여기서 판정할 수 없다 — 어노테이션은 거짓말할 수
@@ -4139,6 +4084,45 @@ live에서는 그 간격이 사라진다.
 **요건이 아직 없다**(PRD §13.2). 다만 live를 열 때 이 질문이 **먼저** 답해져야 한다. 층 구조를 유지한
 채로 live 어댑터만 붙이면, 근거가 사라진 제약이 이유 없는 불편으로 남는다.
 
+### 15-6. RESOLVED 2026-09-01 — `RowsLookback`이 세는 축
+
+**결정: `RowsLookback`은 pivot된 표의 행을 세고, 이름별로 마지막 N개 record를 세는 것은
+`InstantsLookback`이라는 새 이름을 갖는다.** 두 semantics는 grain으로 갈린 서로 다른 타입
+family에 속하고, 타입이 steering을 한다 — panel grain은 `InstantsLookback`을 받지 않고
+`rows` grain은 `RowsLookback`을 받지 않는다. 설계와 근거는
+`docs/design/the-panel-the-surface-and-the-run.md` §2.4, 결정은 그 문서 §7-1이다.
+
+**같은 이름이 뜻을 바꾸므로 조용히 틀릴 수 있고**, 그것은 `grain`을 안 쓴 등록을 거절하는
+것으로 막는다(그 문서 §7-3). 두 변경은 같은 릴리스에 같이 들어간다.
+
+아래는 결정 이전의 기록이며, 근거로 남긴다.
+
+2026-09-01의 소유자 mental model 진술은 *"rows lookback은 종목별로 몇 row를 보는 것이 아니라 pivot된 2d
+wide table 기준"*이다. **§4.2와 §16과 `docs/issues/033`은 반대로 적혀 있고, 033의 반대 방향은 2026-08-30에
+소유자가 직접 확인한 것이다.** 대조는 §17.9에 있다.
+
+**둘 다 필요한 질문이지 둘 중 하나가 틀린 질문이 아니다.**
+
+- 종목별(현재): *"이 이름의 이 항목의 최근 N개"*. 공시 주기가 항목마다 다른 재무에 맞다. 대가는
+  batch의 달력 폭이 **가장 희소한 종목이 정하고 위로 무한**하다는 것이다(033: 313행 요청에 1,865 세션).
+- 표 기준(진술): *"최근 N개 시점, 모든 이름 동일"*. cross-section에 맞다. 대가는 field마다 공시 주기가
+  다를 때 항목당 행 수가 조용히 줄어드는 것이고, §4.2가 그것을 막으려고 현재 축을 골랐다.
+
+**후보.**
+
+1. **세 번째 멤버를 더한다**(가칭 `InstantsLookback`) — pivot된 표의 마지막 N개 `available_at`. §4.2의
+   논거도 033의 확인도 무효화하지 않고, `CalendarLookback`이 이미 가진 "모든 이름에 같은 창" 성질에
+   "N개 시점"이라는 축만 더한다. **비용이 가장 낮고 되돌리기도 쉽다.**
+2. **`RowsLookback`의 semantics를 바꾼다** — §4.2, §16, 033, `data/lookback.py`의 docstring,
+   scaffold의 *"rows per name"* 주석이 전부 같이 움직인다. 그리고 이미 이 semantics 위에서 검증된
+   locked baseline이 조용히 달라진다(캠페인 §6의 첫 번째 위험: *green tree, 옮겨진 지표*).
+3. **아무것도 안 한다** — 진술은 `CalendarLookback`으로 이미 표현 가능하다는 입장. 다만 *"N개 시점"*은
+   달력 길이로는 정확히 못 쓴다(휴장일 padding이 저자 몫으로 남는다).
+
+**셋 중 어느 것도 채택되지 않았다.** 채택된 것은 네 번째 안 — **두 semantics를 서로 다른 grain에
+묶고 타입이 steering을 하게 한다** — 이고, 그래서 §4.2의 논거도 `033`의 소유자 확인도 무효화되지
+않는다. `docs/design/the-panel-the-surface-and-the-run.md` §2.4를 보라.
+
 ---
 
 ## 16. Acceptance checklist
@@ -4246,9 +4230,8 @@ live에서는 그 간격이 사라진다.
       있는가"를 판정하고, 부를 수 없는 템플릿은 사용자가 처음 치는 명령에서 잘못된 것을 가르친다.
       "아직 안 끝났다"는 신호는 소스의 표시된 줄이 이미 하고 있다.
       `tests/extension/test_all_four_doors.py::test_the_scaffold_registers_as_written`이 고정한다)
-- [x] `pytest` · `vqapr register` · `vqapr check`가 같은 conformance 코드를 부른다
-      (입구 수는 세지 않는다; **판정 코드가 하나**인 것이 불변식이다. `vqapr check`를 짓지 않기로
-      한 결정은 오너 판정 2026-09-01로 철회됐다 — §10.2 참조)
+- [x] `pytest` · `vqapr register`가 같은 conformance 코드를 부른다 (입구는 **둘**이다;
+      `vqapr check`는 짓지 않기로 결정했다 — §10.2 참조)
 - [ ] 등록 후 source가 바뀌면 compute 전에 drift로 거부된다
 - [ ] 사용자가 `vqapr.testing`만으로 자기 StrategyModel을 실행해볼 수 있다 (내부 import 없이)
 - [ ] `analysis/`가 가격 dataset을 읽어 수익률을 만드는 경로가 없다
@@ -4259,3 +4242,550 @@ live에서는 그 간격이 사라진다.
 - [ ] `utils/`·`workflow/`·`contrib/`·`common/`·`config/`가 존재하지 않는다
 
 이 체크리스트가 characterization test로 닫히기 전에는 rewrite가 끝났다고 하지 않는다.
+
+---
+
+## 17. 소유자 mental model — 열 개의 behavior 진술과 트리 대조
+
+**이 섹션은 use case가 아니라 behavior를 적는다.** PRD가 *"누가 무엇을 하려 하는가"*를 적는 자리라면
+여기는 *"그때 프레임워크가 무엇을 하는가"*를 적는 자리다. 아래 열 개는 2026-09-01에 소유자가 진술한
+mental model이고, 각 항목은 **진술 → 트리가 실제로 하는 일 → 판정**의 순서로 적는다.
+
+**이 섹션은 소원 목록이 아니다.** 진술과 트리가 갈리는 자리는 갈린다고 적고, 그 갈림이 **이미 문서에
+논거와 함께 적힌 결정**이면 그 사실을 먼저 적는다 — 진술 하나로 논거 있는 결정을 조용히 덮으면, 다음
+사람이 이 문서를 계약으로 읽고 첫 구현이 그 논거를 지운다. 17.9가 정확히 그 경우다.
+
+**기준 커밋.** `read-038-049-fields-are-expressions @ afd649ce`. 이 브랜치는 읽기 경로 캠페인의 레인
+C(`038` + `045`/`049`)를 담고 있으므로 `develop`과 다르다
+(`docs/refactoring/2026-09-01-the-read-path-campaign.md` §2).
+
+> **이 대조는 이슈 목록으로 닫히지 않는다.** "없음" 넷과 "어긋남" 둘은 여섯 개의 결손이 아니라
+> **아키텍처에 세 개의 명사(Panel · Surface · Run)가 없어서 생긴 여섯 개의 증상**이고, 그 셋의 설계는
+> `docs/design/the-panel-the-surface-and-the-run.md`에 있다 (2026-09-01). 아래 각 항목의
+> **판정**은 오늘의 사실이고, **그것을 어떻게 참으로 만드는가**는 그 문서가 답한다.
+
+**판정 범례.**
+
+| 표시 | 뜻 |
+|---|---|
+| **지켜짐** | 진술이 트리의 behavior이고, 그것을 강제하는 코드가 있다 |
+| **부분** | 진술의 일부만 behavior이거나, behavior는 있는데 아무것도 강제하지 않는다 |
+| **어긋남** | 트리가 다르게 동작하고, 그 다름이 논거와 함께 문서에 적혀 있다 |
+| **없음** | 그런 behavior가 없다 |
+
+| # | 진술 | 판정 | 관련 이슈 |
+|---|---|---|---|
+| 17.1 | 등록은 물리 층과 의미 층 둘이고, 한 YAML이 둘 다 담는다 | **지켜짐** | — |
+| 17.1.1 | pivot 가능한 등록을 고를 수 있고, skill이 그쪽을 권한다 | **부분** | `049` |
+| 17.1.2 | pivot 등록의 date x ticker 유일성을 등록 단계에서 검사한다 | **부분** | `049` |
+| 17.1.3 | 한 번 읽은 parquet은 메모리에 올려 두고 cursor만 옮긴다 | **없음** | `035` |
+| 17.1.4 | 병렬 전략이 하나의 parquet을 공유한다 | **없음** | `035`, `049` |
+| 17.2 | StrategyModel과 DataModel은 같은 base에서 나오고 사용법이 닮는다 | **부분** | `036`, `031` |
+| 17.3 | run은 재사용 가능한 객체이고 여러 전략을 담는다 | **부분** | `040` |
+| 17.3.1 | run 설정이 run 기록에 남는다 | **부분** | — |
+| 17.3.2 | run 기록이 strategy file과 fingerprint를 담는다 | **없음** | — |
+| 17.4 | 파일명은 그대로, fingerprint만 바뀌며 tweak 이력이 남는다 | **부분** | — |
+| 17.5 | 필요 없는 run 기록을 지울 수 있다 | **없음** | — |
+| 17.5.1 | CLI로 run을 filter/search 한다 | **부분** | — |
+| 17.6 | run 기록과 strategy 기록은 별개다 | **어긋남** | — |
+| 17.7 | execution table 등록 뒤 `trade_price`만 바꿔 체결가를 바꾼다 | **지켜짐** | `034` |
+| 17.8 | 모듈이 서로를 부르는 방식은 하나다 | **부분** | `036` |
+| 17.9 | rows lookback은 pivot된 2d wide table 기준이다 | **어긋남** | `033` (CLOSED) |
+| 17.10 | calendar lookback은 timedelta이고 wide table 기준이다 | **지켜짐** | — |
+
+---
+
+### 17.1 등록은 두 층이고, 한 YAML 문서가 둘 다 담는다
+
+**진술.** 데이터를 등록하면 물리적 parquet dataset이 등록되고, 그 parquet에서 **어떤 field를 어떤
+쿼리로** 불러올지가 또 등록된다. YAML에 두 내용이 다 있어야 한다.
+
+**트리.** 두 층은 실재하고, 한 섹션이 둘 다 담는다.
+
+```yaml
+datasets:
+  equity-daily:
+    source_id: krx-equity          # 물리 층
+    path: data/equity_daily.parquet
+    available_at: available_at     # 의미 층
+    instrument_field: ticker
+    key_fields: [ticker, available_at]
+    fields:
+      adj_close: adj_close_price
+      turnover: volume * close     # 049 ruling 이후 field는 값 표현식이다
+```
+
+- 물리 층은 `SourceSpec`(`data/sources.py`), 의미 층은 `DatasetRegistration`(`data/datasets.py:46`).
+  `Workspace.register_dataset`은 **둘을 쌍으로만** 받는다(`workspace.py:545`) — 그래서 반쪽 선언이
+  존재할 수 없다.
+- **최상위 `sources:` 섹션은 일부러 없다**(`declarations.py:249`의 `_DATASET_KEYS` docstring). 두
+  dataset이 같은 파일을 볼 때는 같은 `source_id`와 같은 `path`를 각각 적고, workspace가 `source_id`
+  하나로 보관한다. 두 번째 선언이 첫 번째와 다르면 `dataset.register.source_conflict`로 거절한다
+  (`workspace.py:606`).
+- `fields:`의 값은 **컬럼 이름이 아니라 값 표현식**이다(`docs/issues/049` ruling). 맨 컬럼은 축퇴된
+  표현식이므로 ruling 이전에 쓰인 등록은 글자 하나 바뀌지 않는다. 표현식이 **statement**이면
+  (`FROM`/`GROUP BY`/subquery) 등록이 거절한다(`datasets.py:248`, `field_not_an_expression`) — 표현식은
+  한 instant 안에서 평가되므로 look-ahead가 **문법으로** 막힌다.
+- **field id는 workspace 전체에서 유일하지 않다.** `049` ruling의 그 절반은 2026-09-01에 뒤집혔다 —
+  이 패키지의 주 소비자에서 27개 dataset 중 21개가 field id를 서로 공유하고 있었고(의도된 평행
+  series도 있고, `fiscal_yyyymm`처럼 그냥 그 컬럼 이름이 어디서나 같은 경우도 있다), 유일성은 사실이
+  아니었다. 그래서 `DataRequirement`는 **`(dataset_id, field_id)` 쌍**을 든다
+  (`data/requirements.py:42`). ruling의 나머지 절반(`consumer_id`는 프레임워크가 찍는다)은 그대로다.
+
+**판정: 지켜짐.** 다만 "따로 등록"이 아니라 **한 문서 한 섹션 안의 두 층**이다. 두 층이 갈려 있다는
+성질(물리 배치가 소비자에게 보이지 않는다, §4.6)은 그대로 유지된다.
+
+### 17.1.1 pivot 가능한 등록은 고를 수 있고, skill은 그쪽을 권하지 않는다
+
+**진술.** 처리 속도를 위해 pivot 가능하게 불러올 수도, 안 되는 형태로 불러올 수도 있다. 그건 유저와
+agent의 선택이다. **다만 skill은 date x ticker로 매핑되는 데이터면 pivot 가능하게 등록할 것을 권한다.**
+
+**트리.** 선택은 있다. 권유는 반대 방향이다.
+
+- 선택의 실체는 `aggregated`다(`datasets.py:92`). 등록할 때 `describe_projection`이 같은 field 집합을
+  **row-wise와 grouped 두 shape로 각각 bind 시도**하고, duckdb가 bind시킨 쪽이 그 등록의 shape가 된다
+  (`scan.py:449`). 둘은 배타적이므로 binder가 심판이 될 수 있고, Python이 SQL을 파싱해 추측하지 않는다.
+  grouped로 등록되면 읽기 쿼리에 `GROUP BY 1, 2`가 붙어 **(instrument, available_at) 하나당 한 행**이
+  나온다(`scan.py:422`, `projection_relation`). 이것이 "pivot 가능한 등록"의 현재 이름이다.
+- 그러나 **`pivot`이라는 단어도, "이 dataset은 date x ticker grain이다"라는 선언 키도 없다.**
+  `src/vqapr/`에서 `pivot`은 `transforms/neutralize.py`에만 나온다. 저자는 grain을 선언하지 않고,
+  모든 field를 집계 표현식으로 쓰는 것으로 **유도되게** 만든다.
+- 그리고 shipped skill은 **long을 기본값으로 권한다**: *"Registering at the vendor's grain is still the
+  right default"*(`agent/skill/SKILL.md:89`). 그 아래 문단이 비용을 경고하지만
+  (*"read cost scales with the cells a requirement's window admits"*), 권유 자체는 진술과 반대다.
+  `docs/issues/048`이 그 경고 문단을 넣어 닫혔고, `049`는 **권유를 바꾸는 데까지는 가지 않았다.**
+
+**판정: 부분.** 기계는 두 shape를 모두 받고 판정도 정직하다. **문서가 다른 쪽을 권한다.** 진술을
+지키려면 SKILL.md의 default 문장을 바꿔야 하고, 그것은 `049`가 "이 목록에서 가장 싼 항목"으로 지목한
+일과 같은 자리다.
+
+### 17.1.2 유일성 검사는 있고, 그 축이 date x ticker는 아니다
+
+**진술.** pivot 할 때는 date x ticker에 대해 데이터가 유일해야 하고, 이것을 **등록 단계에서** 검사한다.
+pivot 하는 필드는 등록의 기본 조건인 timestamp와 instrument id를 당연히 가져야 한다.
+
+**트리.**
+
+- 유일성 검사는 있다. `check_key`(`datasets.py:355`)가 **선언된 `key_fields`**에 대해 전체 스캔으로
+  null과 중복을 잡고, `dataset.register.key.null` / `.duplicate`로 예시와 함께 거절한다.
+- **그러나 그 축은 저자가 고른다.** `key_fields`가 여섯 개인 long 등록은 그 여섯에 대해 유일하면
+  통과하고, `(available_at, instrument)`에 대해 유일한지는 **묻지 않는다.** `049`가 측정한
+  `statement-facts`가 정확히 그 모양이다.
+- grouped 등록은 유일성을 **검사해서** 얻지 않고 **구성으로** 얻는다: `GROUP BY 1, 2`가 그 쌍당 한 행을
+  보장하므로 검사할 것이 남지 않는다.
+- `available_at`은 필수이고 tz-aware여야 한다(`datasets.py:215`). **`instrument_field`는 선택이다**
+  (`docs/issues/038`) — instrument 축이 없는 dataset은 factor series, index level, macro release이고,
+  그런 표에는 선언된 instrument 목록이 적용되지 않는다. 즉 "timestamp와 instrument를 가져야 한다"는
+  조건은 등록 전체에 걸린 조건이 아니라 **instrument 축을 선언한 등록에만** 걸린다.
+
+**판정: 부분.** 검사는 있으나 축이 저자 선언이다. 진술대로 하려면 "이 등록은 date x ticker grain이다"를
+**선언할 수 있어야** 하고, 그때 `check_key`가 `(available_at, instrument)`를 검사한다. 오늘은 그 선언이
+없으므로 grouped 등록만 그 성질을 갖고, 그것도 부수적으로 갖는다.
+
+### 17.1.3 한 번 읽은 parquet은 메모리에 남지 않는다 — 커넥션과 메타데이터만 남는다
+
+**진술.** 매번 물리 parquet에서 읽지 말고, 한 번 읽기로 했으면 메모리에 올려 두고 cursor만 옮긴다.
+
+**트리.** run 수명 동안 재사용되는 것은 있고, **그것이 데이터는 아니다.**
+
+`ScanSession`(`scan.py:204`)이 run 하나 동안 살면서 보관하는 것:
+
+| 보관하는 것 | 왜 |
+|---|---|
+| duckdb database 하나 + source당 cursor 하나 | source마다 in-memory DB를 따로 열면 buffer pool이 서로 경쟁한다 |
+| parquet footer / row-group 통계 | duckdb가 커넥션 수명 동안 캐시한다. 조회마다 닫으면 매번 버려진다 |
+| `instant_grid` — source의 distinct `available_at` 전체 | `RowsLookback`의 하한 추정을 쿼리가 아니라 산술로 만든다 |
+| `rows_bound` — 이미 증명된 하한 | 같은 선언의 다음 callback이 재증명하지 않는다 |
+| `source_bytes` | run당 한 번 |
+
+**행은 없다.** `DuckDbObservationStore.query`(`data/store.py:62`)는 **requirement 하나 × evaluation
+하나마다** `observation_rows`를 불러 parquet에 SQL을 다시 보낸다. 빠른 것은 duckdb의 predicate
+pushdown과 footer 캐시이지 올려둔 표가 아니다. cursor를 옮기는 것이 아니라 **매번 창을 다시 자른다.**
+
+- 대가는 측정되어 있다: `049`가 같은 모델·같은 출력에 **806.61s 대 1.31s**, `compute`는 양쪽 다 0.36s.
+  **연산이 1.9%이고 데이터를 옮기는 것이 98%다.**
+- `035`가 columnar accessor(행 dict 대신 열 배열)를 제안했고, 캠페인은 **레인 C 병합 후 재측정하고 그때
+  정한다**로 미뤄 두었다 — ruling 이후 측정 대상이 4,428,480 셀에서 3,375 셀이 되므로, 지금 정하면 곧
+  없어질 읽기 경로에 대해 답하는 것이 된다.
+
+**판정: 없음.** run 수명 캐시는 있고 데이터 상주는 없다. 진술을 behavior로 만들려면 창이 아니라 **표**가
+run에 붙어야 하고, 그 결정은 `035`에 걸려 있다.
+
+### 17.1.4 병렬 전략은 parquet을 공유하지 않는다 — 프로세스마다 자기 duckdb를 연다
+
+**진술.** 병렬로 돌 때 같은 dataset에 의존하는 알파들은 같은 parquet을 여러 번 메모리에 올리지 말고
+하나를 공유해야 한다. read only니까 문제없다.
+
+**트리.**
+
+- **패키지 안에 병렬성이 없다.** `src/vqapr/` 전체에 `threading`, `multiprocessing`,
+  `concurrent.futures` import가 **하나도 없다.** "병렬"은 사용자가 `vqapr run`을 N개 띄우는 것이고,
+  그 설계 근거가 `docs/design/run-record-layout.md`다 — run 기록은 디렉터리 스캔으로 찾고 index 파일이
+  없으므로, 동시 writer가 서로의 항목을 지울 공유 대상이 아예 존재하지 않는다.
+- 그래서 공유 지점도 없다. `simulate`(`flow/orchestration.py:129`)가 **run마다** `ScanSession()`을 새로
+  만들고 `finally: session.close()`로 닫는다. 프로세스 다섯이면 duckdb in-memory database가 다섯 개다.
+- 공유되는 것은 OS page cache뿐이고 그것은 프레임워크가 관리하는 것이 아니다.
+- `Workspace`는 single-writer 저장소이며 두 worktree가 같은 `.vqapr/`를 보면 안 된다(캠페인 §3).
+  읽기 전용 공유는 `data/` 디렉터리 수준에서 junction으로 한다.
+
+**판정: 없음.** read-only라 안전하다는 진술은 맞지만 **공유할 대상이 아직 존재하지 않는다** — 17.1.3이
+없으면 17.1.4도 없다. 순서가 있다: 먼저 표가 run 수명 객체가 되고, 그 다음에야 그 객체를 여러 전략이
+나눠 쓰는 것이 질문이 된다.
+
+---
+
+### 17.2 base는 하나이고, 저자가 만나는 표면은 둘이다
+
+**진술.** StrategyModel과 DataModel은 기본적으로 비슷한 것이다. account가 달려 exchange venue
+execution을 거치면 StrategyModel, 거치지 않고 loop만 돌며 score를 만들어 데이터로 저장하면 DataModel.
+둘은 같은 base class에서 파생되어야 하고 사용법과 mechanism이 닮아야 한다. **같은 동작에 다른 이름을
+쓰면 안 된다.**
+
+**트리.** 엔진 층은 진술대로다. **저자가 실제로 상속하는 층은 그렇지 않다.**
+
+엔진 층 — `models/model.py:11`의 `Model(ABC)`가 `memory`와 `requirements()`를 들고 둘이 거기서 나온다:
+
+```
+Model  -> DataModel      (compute)
+       -> StrategyModel  (on_occurrence, tables, account_requirements, save_payload/load_payload)
+```
+
+authoring 층 — `authoring.py:350`, `:863`. **공통 base가 없다.**
+
+```
+ABC -> DataModel      (inputs, output, compute)
+ABC -> StrategyModel  (inputs, account_history, diagnostics, decide)
+```
+
+그리고 **scaffold가 두 층을 갈라 쓴다**:
+
+| scaffold | import | base |
+|---|---|---|
+| `vqapr new strategy` | `from vqapr import authoring as va`(`extension/scaffold.py:21`) | `va.StrategyModel` |
+| `vqapr new datamodel` | `from vqapr.public import DataModel, ...`(`:65`) | 엔진 `DataModel` |
+| `vqapr new constraint` | `from vqapr.public import ...`(`:171`) | 엔진 `Constraint` |
+
+`docs/issues/036`이 저자가 직접 만든 대조표를 담고 있다 — import, 선언 메서드(`requirements()` tuple 대
+`inputs()` dict), 요구 타입(`DataRequirement` 대 `DatasetInput`), 진입점(`compute` 대 `decide`), 행의
+타입(dict 대 객체), 필드 접근(`row["x"]` 대 `row.values["x"]`), instrument 접근(`row["instrument"]` 대
+`row.instrument_id`), timestamp가 보이는지 여부. **소유자 ruling은 2026-08-31에 CONVERGE로 나왔고 아직
+구현되지 않았다.**
+
+읽는 쪽 타입 이름도 진술과 어긋난 적이 있다 — `docs/issues/031`: DataModel이 소비해야 하는
+`ObservationBatch`가 `__all__`에 없어 설치본 소스를 열어야 알 수 있었다(지금은 들어 있다,
+`public.py:196`의 주석).
+
+**판정: 부분.** 진술의 절반("같은 base에서 파생")은 엔진 층에서 참이다. 나머지 절반("사용법과
+mechanism이 닮는다", "같은 동작에 다른 이름을 쓰지 않는다")은 저자가 만나는 층에서 거짓이고, 그 거짓이
+이미 CONVERGE로 판정되어 있다. 17.8과 같은 뿌리다.
+
+---
+
+### 17.3 run 객체는 있고, 한 run은 전략 하나다
+
+**진술.** run은 객체로 생성되어 재활용 가능해야 한다. 한 run은 등록된 instruments, start, end를 유지해서
+**여러 전략을 같은 run에 넣고** 쓸 수 있어야 한다(물론 병렬로).
+
+**트리.**
+
+- 객체는 있다. `RunDefinition`(`flow/run.py:87`)이 `instruments`, `start`, `end`, `valuation`,
+  `constraints`, `exchange`, `execution_input_id`, `initial_account_*`를 들고, preflight가 그것을
+  `FrozenRun`(`:194`)으로 얼린다. frozen dataclass이므로 in-process에서
+  `replace(definition, strategy=...)`로 기간과 유니버스를 유지한 채 전략만 갈아 끼우는 것은 **가능하다.**
+- **그러나 두 타입 모두 `strategy: StrategyConfig` 단수다.** 한 run = 한 전략이고, 이것은 dataclass 필드
+  수준의 사실이지 관례가 아니다.
+- durable form은 객체가 아니라 **run spec YAML 파일**이다. `run_spec.py`의 `_REQUIRED_BY_KIND`가 두
+  kind(`strategy` / `datamodel`)를 정의하고 simulation kind는 여덟 키를 요구하며 그중 `strategy`는
+  하나다. `cli/run.py`는 호출마다 spec을 읽어 `RunDefinition`을 **새로 만든다.** 재활용의 단위는 객체가
+  아니라 파일이다.
+- 병렬은 프로세스 N개다(17.1.4).
+- 관련 이슈: `docs/issues/040`. agenda가 전략 하나만 구동하던 cardinality는 **의도가 아니라고 판정**되어
+  `strategy_configs`를 `agenda_id`가 아니라 component id로 다시 키잉하기로 했다(owner-decided
+  2026-08-31, 미구현). **그것은 cadence 공유이지 run 공유가 아니다** — 040을 구현해도 run은 여전히 전략
+  하나다.
+
+**판정: 부분.** 객체와 재사용 가능한 필드 집합은 있다. **한 run에 여러 전략**은 없고, 그것을 여는 것은
+`FrozenRun`, run record, run id, lock까지 함께 움직이는 변경이다.
+
+### 17.3.1 run 설정 중 record에 남는 것과 남지 않는 것
+
+**진술.** run의 설정이 run 기록으로 저장되어야 한다.
+
+**트리.** `_RUN_FIELDS`(`flow/run_records.py:68`)가 record가 답하는 전부다:
+
+```
+run_id · account · tables · contract · source_digest · declared_digest · roster · period
+```
+
+| run 설정 | record에 있나 |
+|---|---|
+| start / end | **있다** — `period.start`, `period.end`, `period.occurrences` |
+| instruments | **없다** — 목록도 개수도 없다. `roster`는 어떤 instrument **분류표**를 읽었는지이지 이 run이 무엇을 돌렸는지가 아니다 |
+| strategy component id | **없다** |
+| strategy file 경로 | **없다**(17.3.2) |
+| exchange / execution input id | **없다**(`docs/issues/034`) |
+| constraints | id별 `held`/`checked`만 — `contract` |
+| initial account | 최종 snapshot만 — `account` |
+| 모든 선언의 접힌 digest | **있다** — `declared_digest` |
+
+`run_id`는 기본값이 **spec 파일 이름**이다(`cli/run.py:555`), `--run-id`로 덮을 수 있다. 그래서 실무에서
+"어떤 설정이었나"의 답은 record가 아니라 **spec 파일과 run id 작명 규칙**이 진다.
+
+**판정: 부분.** 기간과 계약은 남고 **무엇을 무엇에 대해 돌렸는지**는 남지 않는다.
+
+### 17.3.2 run 기록은 strategy file도, 전략 자신의 fingerprint도 담지 않는다
+
+**진술.** run 설정에는 strategy file과 strategy fingerprint가 저장되어야 한다.
+
+**트리.** record가 드는 것은 **접힌 digest 두 개**뿐이다.
+
+- `declared_digest = str(frozen.identity)` — preflight가 얼린 **모든** 선언에 대한 canonical identity.
+- `source_digest = _as_loaded_identity(...)`(`flow/orchestration.py:270`) — 이 run이 **실제로 로드한**
+  component들의 fingerprint를 정렬해 접은 sha256. 접는 대상은 **strategy + exchange + constraints
+  전부**다.
+
+둘의 차이가 신호다: 등록 이후 component가 편집되었으면 갈리고 아니면 같다. `009`가 gate를 receipt로
+바꾼 뒤로 편집된 component는 거절되지 않고 실행되므로, "무엇이 실제로 돌았나"를 따로 적어야 한다.
+
+**그러나 접혀 있다.** record만 보고 답할 수 없는 것:
+
+- 어떤 `.py`가 돌았는가 — 경로가 없다.
+- 전략 **자신의** fingerprint는 무엇인가 — 개별 값이 없다. constraint 하나만 바꿔도 `source_digest`가
+  바뀐다.
+- component id가 무엇인가 — 없다.
+
+파일 경로와 component별 fingerprint는 `ComponentRef`(`extension/component.py:35`)에 있고, 그것은
+**workspace의 현재 등록**이다. 과거 run이 무엇을 가리켰는지가 아니다.
+
+**판정: 없음.** 진술이 요구하는 두 값 모두 record에 없다. 17.4가 걸려 있는 자리이기도 하다.
+
+---
+
+### 17.4 fingerprint는 바뀌지만, 그 이력을 읽는 경로가 없다
+
+**진술.** 전략을 짜서 돌려 보고 조건을 조금 바꿔 다시 돌리면 **file name은 그대로인데 fingerprint만
+바뀌어서**, 나중에 이게 몇 번 tweak한 전략인지 알 수 있어야 한다.
+
+**트리.** 앞의 절반은 구현되어 있고, 뒤의 절반은 읽을 수 없다.
+
+- fingerprint는 `sha256(metadata || 0x00 || 파일 bytes)`이고 metadata는 `{kind, object_name, config}`다
+  (`extension/fingerprint.py:27`). **config가 preimage에 들어간다** — 파일을 안 고치고 config 값만 바꿔도
+  fingerprint가 바뀐다. 진술이 말하는 "조건만 약간 바꿔서"가 정확히 이 경우다.
+- 같은 component id로 편집본을 다시 등록하면 **제자리에서 교체된다**(`009`, 기록 `064`). 그래서 file
+  name(= component id와 path)은 유지되고 fingerprint만 바뀐다는 진술은 **behavior다.**
+- `flow/records.py:74`의 주석이 진술과 같은 시나리오를 명시적으로 적어 두었다: *"a strategy that ran 47
+  times across 12 distinct `source_digest` values was edited 11 times, which is a direct overfitting
+  tell."*
+- **그러나 그 tell을 읽는 경로가 없다.** `source_digest`는 접혀 있고(17.3.2), `vqapr list runs`는
+  `run_id`/`account_version`/`tables`/`period`만 낸다(`cli/list_.py:106`). "이 전략의 run들"을 모을 키가
+  record에 없다. 답을 얻으려면 run 디렉터리를 직접 순회하며 `record.json`을 읽고 digest로 묶어야 하고,
+  그 결과도 exchange나 constraint 변경과 구분되지 않는다.
+
+**판정: 부분.** 생성은 되고 축적은 되지 않는다. 이것을 닫는 최소 변경은 record에 **component별
+(id, path, fingerprint)**를 적는 것이고, 그러면 17.3.2와 17.6이 같이 움직인다.
+
+---
+
+### 17.5 run 기록을 지우는 명령이 없다
+
+**진술.** run 했던 기록을 필요 없으면 날릴 수 있어야 한다.
+
+**트리.** 없다. `cli/main.py:25`의 verb는 일곱이다 — `new`, `register`, `check`, `run`, `list`, `show`,
+`skill`. **삭제 verb가 없고, 이 사실은 소스 자신이 적어 두었다**: *"there is no command that deletes a
+run"*(`cli/run.py:385`).
+
+지울 수 있는 유일한 경로는 **덮어쓰기**다: `vqapr run --force`가 같은 `--run-id`의 기존 record를
+교체한다. 이것은 삭제가 아니라 대체이고, 기본값이 거절인 이유는 같은 run id 재실행이 대개 의도된
+덮어쓰기가 아니라 retry이기 때문이다.
+
+옆에 있는 것: `RunRecordWriter`가 lock과 heartbeat로 살아 있는 run의 id를 보호하고
+(`flow/run_records.py:329` 이하, `LOCK_STALE_AFTER`), 죽은 run의 잔해는 그 id의 lock을 이긴 뒤에만
+`_clear`가 지운다. 즉 **안전하게 지우는 기계는 이미 있고 그것을 부르는 verb가 없다.**
+
+**판정: 없음.**
+
+### 17.5.1 filter는 run id 부분문자열 하나다
+
+**진술.** CLI를 통해 손쉽게 run을 filter/search 할 수 있어야 한다.
+
+**트리.** `vqapr list runs [--id SUBSTRING] [--store-root PATH]`. `--id`는 **`run_id` 문자열 포함 검사
+하나**다(`cli/list_.py:187`). 행이 싣는 것은 `run_id`, `account_version`, `tables`, `period`.
+
+그래서 못 하는 질문: 기간으로 거르기, 전략으로 거르기, fingerprint로 거르기, 계약이 깨진 run만 보기,
+정렬. 스캔 자체는 이미 O(runs)이므로(index 파일이 없는 것은 의도된 설계다) 필드를 늘리는 것이 새 I/O를
+만들지 않는다 — `_runs`가 이미 `read_record`로 record 전체를 읽고 네 필드만 쓰고 버린다.
+
+**판정: 부분.** 이 항목은 17.3.1과 17.3.2가 record에 필드를 넣어 주면 그 위에서 거의 자동으로 열린다.
+순서가 있다: record가 답을 담지 않으면 filter가 물을 것이 없다.
+
+---
+
+### 17.6 run 기록과 strategy 기록은 하나의 아티팩트다
+
+**진술.** run 기록과 strategy 기록은 별개다. run 기록은 *"어느 기간에 어떤 설정으로 어떤 전략을 한 번
+돌렸다"*이고, strategy 기록은 그 output — **signal, weight, NAV, 매매기록(order fill, unfill 등)** — 이다.
+
+**트리.** 두 종류의 내용은 다 있다. **하나의 디렉터리에 있고 전략 축으로 모이지 않는다.**
+
+```
+<store.root>/runs/<run-id>/
+  record.json               run의 사실 (17.3.1)
+  tables/
+    vqapr.account.jsonl     측정 — mark, 그리고 NAV의 원천
+    vqapr.weight.jsonl      결정 — 목표 비중
+    vqapr.fill.jsonl        체결 — 미체결도 사유와 함께
+    <author>.<table>.jsonl  저자가 선언한 진단 표 (signal이 사는 곳)
+```
+
+- `FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.weight")`(`flow/reporting.py:14`) — 모든
+  run이 남기고 아무도 선언하지 않는 셋.
+- **unfill이 사유와 함께 남는다.** `ZeroDealtReason`(`exchange/fills.py:13`)이
+  `ABSENT`/`NONTRADABLE`/`NO_TRADE`/`UNFUNDED` 넷이고, 마지막 하나는 **시장이 거절한 것이 아니라 내
+  지갑이 빈 것**이라 따로 이름이 있다 — 앞의 셋을 합산해 *"시장이 무엇을 거절했나"*를 묻는 독자에게
+  자기 잔고를 섞어 주지 않기 위해서다. `docs/issues/039`가 기록 `102`로 닫히며 들어왔다.
+- **NAV는 표가 아니라 유도값이다.** `analysis/performance.py`의 `nav_series`가 `vqapr.account`의 측정
+  행에서 만든다.
+- 진술의 네 항목 중 셋(weight, NAV, 매매기록)은 프레임워크가 보장하고, **signal은 저자가 `tables()`로
+  선언해야 남는다** — 선언하지 않은 전략의 signal은 어디에도 없다(`docs/issues/019`가 그 거절 메시지를
+  고쳐 닫혔다).
+- 두 기록을 가르는 축이 없다. run 하나가 전략 하나이므로(17.3) 디렉터리 하나가 곧 "그 전략의 그 run"이고,
+  **"이 전략의 모든 run"을 모으는 인덱스도 그것을 여는 키도 없다**(17.4).
+
+**판정: 어긋남 — 다만 데이터의 결손이 아니라 축의 결손이다.** 진술이 요구하는 내용은 전부 디스크에 있다.
+없는 것은 **strategy를 1급 축으로 삼는 두 번째 읽기 경로**이고, 그 축을 만들려면 record가 전략을 이름으로
+불러야 한다(17.3.2).
+
+---
+
+### 17.7 execution table은 등록해 두고 `trade_price`만 바꾼다
+
+**진술.** execution table을 등록한 다음 YAML에서 `trade_price` 같은 것만 바꿔 주면 그 가격 체결로 쉽게
+바꿀 수 있어야 한다. 처음부터 데이터를 다시 등록하지 않아야 한다.
+
+**트리.** 정확히 그렇게 갈라져 있다.
+
+```python
+ExecutionTableSpec(          # 물리 — 파일과 컬럼
+    source, trade_at_field, instrument_field, is_tradable_field,
+    price_fields={"open": "open_px", "close": "close_px", "vwap": "vwap_px"},
+)
+FillConvention(              # 규약 — 언제, 어느 가격으로
+    selector, local_time, timezone, trade_price="close",
+)
+```
+
+- `price_fields`는 **의미 이름 -> 물리 컬럼** 매핑이고 최소 하나를 요구한다
+  (`exchange/execution_table.py:45`).
+- `FillConvention.trade_price`는 그 **의미 이름 하나를 고른다**(`exchange/conventions.py:116`).
+- `ExecutionInputRegistration.__post_init__`이 `trade_price not in table.price_fields`면 즉시 거절한다
+  (`execution_table.py:76`) — 오타가 조용히 통과할 자리가 없다.
+
+그래서 open 체결을 vwap 체결로 바꾸는 것은 **선언 한 줄**이고 parquet도 컬럼도 그대로다. 다만
+`trade_price`는 `ExecutionInputRegistration`의 일부이므로 **다른 `execution_input_id`로 등록한다** —
+run spec이 id로 가리키기 때문이다. 이것은 진술과 어긋나지 않는다: 두 체결 규약이 서로 다른 frozen input
+이어야 두 run이 비교 가능해진다.
+
+**판정: 지켜짐.** 관련 열린 이슈는 `docs/issues/034` — **바꾸기는 쉽고 바꾼 결과가 record에 남지
+않는다.** run이 자기가 어떤 execution convention을 썼는지 말하지 못한다. 17.3.1과 같은 결손이다.
+
+---
+
+### 17.8 문은 줄었고, 저자 표면은 아직 둘이다
+
+**진술.** 각 모듈이 서로를 call하고 import하고 communicate 하는 방식은 하나여야 한다. 어떤 모듈을 여기선
+이렇게 저기선 저렇게 부르고, 불필요한 bridge가 여러 개 있으면 안 된다.
+
+**트리.** 이 진술은 최근 캠페인들이 **가장 많이 움직인** 항목이다.
+
+닫힌 것:
+
+- `docs/issues/029`(CLOSED, 기록 `098`): `_internal`로 들어가는 문이 둘이었고 하나가 되었다.
+- `docs/issues/028`(CLOSED, 기록 `097`): CLI 아래 모듈이 facade를 통해 위로 손을 뻗던 경로가 **테스트로
+  고정**되었다. `run_spec.py`의 docstring이 그 사건을 담고 있다 — `cli/check.py`가 `cli/run.py`를
+  import해 정의를 빌리던 자리를 없애려면 어휘를 **두 verb가 공통으로 올라선 층**으로 내려야 했고,
+  그러지 않으면 `cli.run -> flow.judgments -> cli.run` 순환이 되었다.
+- bridge 수가 줄었다. 커밋 `ae1d78d5`("The unshipped half is deleted")가
+  `catalog` · `catalog_store` · `constraint_bridge` · `objects` · `registration_bridge` · `run_bridge` ·
+  `schedule_bridge` · `venue_bridge` 여덟을 지웠다. **오늘 `_internal/`에 남은 bridge는 둘이다** —
+  `pit_bridge.py`, `strategy_bridge.py`.
+- 남은 둘도 자기 소멸 조건을 적어 두었다. `strategy_bridge`: *"Two capability surfaces over the same
+  data. That is the next convergence, and when it lands this file has nothing left to do."*
+
+열린 것 — **같은 이름의 다른 클래스 셋**이 두 public 모듈에 동시에 있다. 설치본에서 확인한 값:
+
+```
+vqapr.public.CalendarLookback     -> vqapr.data.lookback.CalendarLookback
+vqapr.authoring.CalendarLookback  -> vqapr.authoring.CalendarLookback        (다른 클래스)
+vqapr.public.DataModel            -> vqapr.models.data_model.DataModel
+vqapr.authoring.DataModel         -> vqapr.authoring.DataModel                (다른 클래스)
+vqapr.public.StrategyModel        -> vqapr.models.strategy_model.StrategyModel
+vqapr.authoring.StrategyModel     -> vqapr.authoring.StrategyModel            (다른 클래스)
+```
+
+`docs/issues/036`이 같은 사실을 저자 쪽에서 본 것이다: *"Nothing says which is canonical."* 그리고
+scaffold가 그 모호함을 **실행 가능한 형태로** 굳힌다 — strategy는 `authoring`, datamodel과 constraint는
+`public`(17.2의 표).
+
+**판정: 부분.** 모듈 사이의 문은 실제로 하나로 수렴했고 그 수렴이 테스트로 고정되었다. **저자와
+프레임워크 사이의 문은 아직 둘이고**, 남은 두 bridge가 그 둘을 잇느라 존재한다. `036`의 CONVERGE ruling이
+구현되면 이 항목과 17.2가 함께 닫힌다.
+
+---
+
+### 17.9 rows lookback — 진술과 트리가 정면으로 갈린다
+
+> **이것은 열린 소유자 결정이다.** 아래 "트리"는 2026-08-30에 소유자가 직접 확인한 semantics이고 진술은
+> 그것과 반대다. **구현을 바꾸기 전에 §15-6이 먼저 답해져야 한다.**
+
+**진술.** rows lookback은 종목별로 몇 row를 보는 것이 **아니다.** pivot된 2d wide table을 기준으로
+lookback을 본다.
+
+**트리.** `RowsLookback`은 **종목별로** 센다. 그것도 (instrument × field)별로.
+
+- `data/lookback.py:13` docstring 첫 줄: *"The last `rows` observations of **each instrument
+  independently**. Per name, per field, counting only non-null values."*
+- 이 문서 **§4.2**가 그 결정을 논거와 함께 담고 있다 — *"`RowsLookback`은 (instrument × field)별로
+  센다"*. 근거는 두 가지다: 분기 재무처럼 항목마다 공시 시점이 다를 때 *"각 항목의 최근 20개"*가
+  *"최근 20개 시점"*보다 정확하다는 것, 그리고 넓은 표를 field 폴더로 바꿀 때 lookback이 조용히
+  줄어드는 것을 막는다는 것.
+- **§16 acceptance checklist**도 같은 것을 요구한다: *"`RowsLookback(N)`이 field가 여럿일 때 field당 N행을
+  준다 (합쳐서 N행이 아니다)"*.
+- `docs/issues/033`(CLOSED 2026-08-31)이 **소유자에게 직접 물어 확인한 문장을 인용해 두었다**:
+  *"`RowsLookback` with `rows=` does fetch the last N rows per instrument, that is correct. Otherwise
+  you would have set the period with a lookback — that is `CalendarLookback`."* 033은 semantics 버그가
+  아니라 **steering 버그**로 닫혔다: 두 클래스에 docstring이 생기고
+  `vqapr new datamodel --calendar-lookback DAYS`가 다른 쪽을 emit하게 되었다.
+
+**왜 이 갈림이 사소하지 않은가.** 033이 측정한 것 — 1,637 종목, `RowsLookback(rows=313)`, 한 evaluation.
+행 수는 종목당 313을 지켰지만 batch가 걸친 **distinct session이 1,865개**였다. 2019년에 상장폐지된
+이름도 *자기* 마지막 313행을 받기 때문이다. **batch의 달력 폭은 가장 희소한 종목이 정하고 위로
+무한하다.** 진술대로 wide table 기준으로 세면 이 성질이 사라진다(그것이 진술의 목적이다). 대신 §4.2가
+막으려던 것이 열린다 — field마다 공시 주기가 다른 표에서 항목당 행 수가 조용히 줄어든다.
+
+**판정: 어긋남.** 어느 쪽이 옳은지는 이 문서가 정하지 않는다. 다만 두 semantics는 **공존할 수 있다** —
+진술이 요구하는 것은 `CalendarLookback`이 이미 주는 성질(17.10)에 "N개 시점"이라는 축을 더한 것이고,
+그것은 세 번째 `Lookback` 멤버(가칭 `InstantsLookback` — pivot된 표의 마지막 N개 `available_at`)로
+표현 가능하다. 그러면 §4.2의 논거도 033의 확인도 무효화되지 않는다. **§15-6 참조.**
+
+---
+
+### 17.10 calendar lookback은 timedelta이고 모든 이름에 같은 창을 준다
+
+**진술.** Calendar lookback은 timedelta로 lookback을 보는 것이다. 마찬가지로 per stock이 아니라 pivot된
+2d wide table 기준으로 본다.
+
+**트리.** 그대로다.
+
+- `CalendarLookback(years=, months=, days=, timezone=)`(`data/lookback.py:49`)이고 `lower_bound`가
+  evaluation time을 `timezone`으로 옮겨 `shift_calendar`로 물린 뒤 **그 날의 로컬 00:00**을 낸다.
+- docstring: *"the window is one period, identical for every name, and a sparse instrument simply
+  contributes fewer rows inside it rather than reaching further back than everyone else."* 이것이
+  진술의 "wide table 기준"과 같은 말이다.
+- 읽기 경로에서 이 하한은 **술어 하나**가 된다: `data/store.py:83`가 `lower_bound`를 계산해
+  `observation_rows`에 넘기고 거기서 `available_at >= lower_bound`가 된다. 종목별 분기가 없다.
+- **거래일이 아니라 달력일이다.** `days=7`은 주말을 포함한 한 주다. N 거래일을 보장해야 하면 휴장일
+  padding은 저자 몫이다.
+- 033이 확인한 부수 사실: 같은 evaluation에서 calendar 형태가 row 형태보다 **약 10% 빨랐다** — row
+  형태는 모델이 곧바로 버릴 행을 실어 왔기 때문이다.
+
+**판정: 지켜짐.**

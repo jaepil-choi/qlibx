@@ -236,7 +236,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(tmp_path
         "    def requirements(self):\n"
         "        return (\n"
         "            DataRequirement.of(\n"
-        "                'totally-unregistered-field', "
+        "                'totally-unregistered-dataset', 'close', "
         "lookback=RowsLookback(6)\n"
         "            ),\n"
         "        )\n"
@@ -273,7 +273,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(tmp_path
     codes = {entry["code"] for entry in body["failures"]}
     # Fixed: `_judge_datasets_and_fields` now LOADS the component instead of reading a
     # `requirements` attribute off the `ComponentRef`, which never had one. The judgment reaches.
-    assert "check.field.absent" in codes, (
+    assert "check.dataset.unregistered" in codes, (
         "the dataset judgment is dead again: it is reading the ComponentRef rather than the "
         "loaded model, so the loop body never runs and the code only looks implemented"
     )

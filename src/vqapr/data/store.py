@@ -11,6 +11,7 @@ from typing import Protocol
 from vqapr.data import scan
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
+from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
@@ -18,8 +19,6 @@ from vqapr.domain.timestamps import require_tz_aware
 
 class DatasetCatalog(Protocol):
     def dataset(self, raw_dataset_id: str): ...
-
-    def dataset_for_field(self, field_id: str): ...
 
     def source(self, raw_source_id: str) -> SourceSpec: ...
 
@@ -68,13 +67,11 @@ class DuckDbObservationStore:
         from vqapr.data.windows import AccessRecord, ObservationBatch
 
         require_tz_aware(evaluation_time, name="evaluation_time")
-        # The requirement names a field; which dataset that is comes from the registration that
-        # declared it, not from the requirement (`docs/issues/049`).
-        registration = self.__catalog.dataset_for_field(requirement.field_id)
+        registration = self.__catalog.dataset(str(requirement.dataset_id))
         keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
-        fields = {requirement.field_id: registration.fields[requirement.field_id]}
+        fields = {requirement.field_id: resolve_field(registration, requirement)}
         lower_bound = None
         rows = None
         if isinstance(requirement.lookback, RowsLookback):
@@ -132,7 +129,7 @@ class DuckDbObservationStore:
             # Stamped, not declared. The component reading is the consumer, and the framework is
             # the only one that knows which component is running.
             consumer_id=consumer_id,
-            dataset_id=registration.dataset_id,
+            dataset_id=requirement.dataset_id,
             source_id=str(source.source_id),
             source_digest=source_digest,
             fields=declared_fields,

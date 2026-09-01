@@ -52,8 +52,8 @@ def test_rows_window_is_pit_bounded_and_counts_per_field(
         consumer_id="reversal",
     )
 
-    close = DataRequirement.of("close", lookback=RowsLookback(2))
-    volume = DataRequirement.of("volume", lookback=RowsLookback(2))
+    close = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
+    volume = DataRequirement.of('price_daily', 'volume', lookback=RowsLookback(2))
     closes = window_for(close).observations(close)
     volumes = window_for(volume).observations(volume)
 
@@ -82,7 +82,7 @@ def test_calendar_window_uses_local_midnight_not_session_count(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     workspace = _workspace(tmp_path, model_price_parquet)
-    requirement = DataRequirement.of("close", lookback=CalendarLookback(days=1, timezone="Asia/Seoul"))
+    requirement = DataRequirement.of('price_daily', 'close', lookback=CalendarLookback(days=1, timezone='Asia/Seoul'))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A",),
@@ -101,8 +101,8 @@ def test_window_rejects_an_undeclared_requirement(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     workspace = _workspace(tmp_path, model_price_parquet)
-    declared = DataRequirement.of("close", lookback=RowsLookback(2))
-    undeclared = DataRequirement.of("volume", lookback=RowsLookback(2))
+    declared = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
+    undeclared = DataRequirement.of('price_daily', 'volume', lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A",),

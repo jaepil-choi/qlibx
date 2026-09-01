@@ -66,8 +66,8 @@ the only implementation under which both of the ruling's own claims hold.
 | 1 | `instrument_field` is `str \| None`; `.of()` defaults it to `None` | `data/datasets.py` |
 | 2 | `fields` values are expressions; a bare column is the degenerate one | `data/datasets.py`, `declarations.py`, `project.py` |
 | 3 | `observation_rows` composes from the settled shape; the window predicates stay the framework's | `data/scan.py` |
-| 4 | `DataRequirement` is `(field_id, lookback)` | `data/requirements.py` |
-| 5 | field ids are unique per workspace; a conflict is refused naming the other dataset | `workspace.py` |
+| 4 | `DataRequirement` is `(dataset_id, field_id, lookback)` — see below | `data/requirements.py` |
+| 5 | ~~field ids are unique per workspace~~ — **the ruling was wrong here, and the owner said so** | — |
 | 6 | the schema is derived by `DESCRIBE <query>` and persisted; `show dataset` reports it | `data/scan.py`, `cli/show.py` |
 | 7 | the workspace document migrates, write-forward, per entry | `workspace_codec.py` |
 
@@ -118,6 +118,40 @@ instrument column, its rows carry no `instrument` key, and the declared instrume
 narrow it. Its `AccessRecord` says so with an empty instrument tuple and no per-instrument counts,
 rather than filing them under a name nobody chose. `ModelWindow.snapshot` returns its single row
 unordered, because a table with no instrument axis has no cross-section to order.
+
+### Item 5 was implemented, and then removed because it was wrong
+
+The ruling's second point removed `dataset_id` from a requirement **because a field id is an id,
+unique in the workspace**. That premise was implemented — registration refused an id another
+dataset already exposed, naming that dataset — and then measured against
+`vqapr-enhanced-index-3`, which is what this package is for. It does not hold there:
+
+| | |
+|---|---|
+| datasets in that workspace | 27 |
+| field ids exposed by more than one of them | **21** |
+
+Two kinds, and the second is the one that settles it. `ff5-factors-broad` / `-k200` and
+`residual-returns-broad` / `-k200` are **deliberately schema-identical parallel series** — same
+component, same agenda, only the universe differs, and schema parity is what makes them comparable.
+But `fiscal_yyyymm` is on six datasets simply because that is what the column is called wherever it
+appears. Nobody chose a colliding name. A rule that makes that an error asks a researcher to invent
+twenty-one names whose only purpose is to differ from each other.
+
+Raised by `qlibx-b8`, verified here against the live workspace rather than taken from the report,
+written into `049` with four options and none of them chosen, and decided by the owner:
+**a requirement names `(dataset_id, field_id)`**. So `DataRequirement.of("statement-facts",
+"net_income", lookback=...)`, no uniqueness refusal, and resolution asks only whether the named
+dataset exposes the named field. `check` keeps both of its judgments, since an unregistered dataset
+and an absent field are two repairs again.
+
+**The `consumer_id` half of the ruling stands.** It is the half that was about who is reading, not
+about what a name identifies, and nothing measured against it.
+
+**One knock-on is undone with it.** While ids had to be unique the framework qualified the field
+ids of published run records and allocations with their dataset id, because the five Flow-stamped
+envelope columns and a default `weight` collide by construction. With ids unique only within a
+dataset there is nothing to avoid, and those publications expose `weight` and `run_id` again.
 
 ### The consumer is stamped by whoever is running the component
 
@@ -223,7 +257,11 @@ own order:
   with no factor id in `instruments:`
 - `test_criterion_3_a_requirement_is_a_field_and_a_lookback` — the signature, and that
   `AccessRecord` still carries the consumer and the dataset
-- `test_a_field_id_two_datasets_expose_is_refused_naming_the_other`
+- `test_two_datasets_may_expose_the_same_field_ids` — the corrected rule, on the campaign's own
+  pair: the same eight field ids on two registrations is not an error, each requirement says which
+  dataset it means, and provenance records which one answered
+- `test_a_field_the_named_dataset_does_not_expose_is_refused` — the other half of the pair still
+  has to be there, and the refusal names what the dataset does expose
 - `test_a_registration_that_mixes_the_two_shapes_is_refused` — and that both binder lines reach the
   reader
 - `test_a_field_expression_may_not_carry_its_own_from` — the property that makes a look-ahead

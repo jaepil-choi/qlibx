@@ -244,7 +244,7 @@ class {class_name}(StrategyModel):
 
     def requirements(self):
         return (
-            DataRequirement.of("close", lookback=RowsLookback(LOOKBACK)),
+            DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
     def on_occurrence(self, context):
@@ -381,10 +381,8 @@ class EnsembleStrategy(StrategyModel):
 
     def requirements(self):
         return (
-            # Each published allocation exposes its weight under a field id carrying its dataset
-            # id: field ids are unique across the workspace, so the two members are two names.
-            DataRequirement.of(f"{self._reversal_dataset_id}_weight", lookback=RowsLookback(1)),
-            DataRequirement.of(f"{self._momentum_dataset_id}_weight", lookback=RowsLookback(1)),
+            DataRequirement.of(self._reversal_dataset_id, "weight", lookback=RowsLookback(1)),
+            DataRequirement.of(self._momentum_dataset_id, "weight", lookback=RowsLookback(1)),
         )
 
     def _panel(self, context, requirement):

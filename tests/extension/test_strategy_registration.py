@@ -22,7 +22,7 @@ from vqapr.models.strategy_model import StrategyModel
 class S(StrategyModel):
     def requirements(self):
         return (
-            DataRequirement.of("close", lookback=RowsLookback(rows=6)),
+            DataRequirement.of('px', 'close', lookback=RowsLookback(rows=6)),
         )
 """
 

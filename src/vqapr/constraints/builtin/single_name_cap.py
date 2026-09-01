@@ -30,13 +30,7 @@ from vqapr.portfolio.intents import EconomicPortfolioIntent
 from vqapr.valuation.marks import MarkBatch
 
 WEIGHT_FIELD = "benchmark_weight"
-"""The field id this constraint reads unless configured otherwise.
-
-It names a FIELD, not a dataset: a requirement names one field id and the registration that
-declares it says which dataset that is (`docs/issues/049`). The dataset id this constraint used to
-be configured with said the same thing one layer less precisely, and a config still passing it
-fails loudly rather than being ignored.
-"""
+"""The field this constraint reads on the benchmark dataset it is configured with."""
 
 
 def _decimal_config(value: object, *, name: str) -> Decimal:
@@ -73,17 +67,21 @@ class SingleNameCap(Constraint):
         self,
         *,
         cap: str,
+        benchmark_dataset_id: str,
         tolerance: str,
         benchmark_weight_field: str = WEIGHT_FIELD,
         constraint_id: str = "single-name-cap",
     ) -> None:
         if not isinstance(constraint_id, str) or not constraint_id:
             raise ValueError("constraint_id must be a non-empty string")
+        if not isinstance(benchmark_dataset_id, str) or not benchmark_dataset_id:
+            raise ValueError("benchmark_dataset_id must be a non-empty string")
         if not isinstance(benchmark_weight_field, str) or not benchmark_weight_field:
             raise ValueError("benchmark_weight_field must be a non-empty string")
         self._constraint_id = constraint_id
         self._cap = _decimal_config(cap, name="cap")
         self._tolerance = _decimal_config(tolerance, name="tolerance")
+        self._benchmark_dataset_id = benchmark_dataset_id
         self._weight_field = benchmark_weight_field
 
     @property
@@ -96,7 +94,9 @@ class SingleNameCap(Constraint):
 
     def requirements(self) -> tuple[DataRequirement, ...]:
         return (
-            DataRequirement.of(self._weight_field, lookback=RowsLookback(1)),
+            DataRequirement.of(
+                self._benchmark_dataset_id, self._weight_field, lookback=RowsLookback(1)
+            ),
         )
 
     def _benchmark(self, window: ModelWindow, instruments: tuple[str, ...]) -> dict[str, Decimal]:

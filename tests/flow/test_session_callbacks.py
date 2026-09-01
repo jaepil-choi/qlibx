@@ -128,7 +128,7 @@ def _flow(
 ) -> SimulationFlow:
     strategy_agenda = FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences)
     valuation_agenda = FrozenAgenda("valuation", OperationRole.VALUATION, ())
-    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
+    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     frozen = FrozenRun(
         strategy=StrategyConfig(
             _component("strategy", ComponentKind.STRATEGY_MODEL),

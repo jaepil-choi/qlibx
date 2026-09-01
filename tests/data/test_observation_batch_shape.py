@@ -89,7 +89,7 @@ def test_rows_are_ordered_by_available_at_for_either_lookback(
     The scaffold computes `values[-1] / values[0] - 1` and calls it a trailing return, which is
     true only if this holds -- stated by arithmetic, in emitted code, and by nothing else.
     """
-    requirement = DataRequirement.of("close", lookback=lookback)
+    requirement = DataRequirement.of('price_daily', 'close', lookback=lookback)
     batch = _window(tmp_path, model_price_parquet, requirement).observations(requirement)
 
     stamps = [row["available_at"] for row in batch.rows]
@@ -106,7 +106,7 @@ def test_a_row_carries_its_own_instant_its_name_and_the_declared_aliases(
     rows of one instant are the ones sharing it, and a name that stopped publishing carries an
     older stamp instead of a missing row.
     """
-    requirement = DataRequirement.of("close", lookback=RowsLookback(2))
+    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
     batch = _window(tmp_path, model_price_parquet, requirement).observations(requirement)
 
     assert sorted(batch.rows[0]) == ["available_at", "close", "instrument"], (
@@ -158,7 +158,7 @@ def test_a_value_keeps_its_own_column_type(tmp_path: Path) -> None:
         SourceSpec.of("mixed-source", parquet),
     )
     requirements = tuple(
-        DataRequirement.of(field, lookback=RowsLookback(1))
+        DataRequirement.of("mixed", field, lookback=RowsLookback(1))
         for field in ("as_double", "as_decimal")
     )
     window = ModelWindow(
@@ -183,7 +183,7 @@ def test_instruments_interleave_within_an_instant_rather_than_grouping(
     A model that assumes grouping -- accumulate until the name changes -- produces a well-formed
     wrong answer here rather than an error. Both names appear at every instant, in key order.
     """
-    requirement = DataRequirement.of("close", lookback=RowsLookback(2))
+    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
     batch = _window(tmp_path, model_price_parquet, requirement).observations(requirement)
 
     pairs = [(row["available_at"], row["instrument"]) for row in batch.rows]

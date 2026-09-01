@@ -160,7 +160,7 @@ def _bounds(
     instruments = tuple(sorted(benchmark))
     cap = SingleNameCap(
         cap=str(CAP),
-        
+        benchmark_dataset_id="benchmark_weight_daily",
         tolerance=str(tolerance),
     )
     window = _window(manifest, instruments, cap.requirements()[0], cutoff)

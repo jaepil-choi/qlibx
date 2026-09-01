@@ -318,18 +318,18 @@ def test_the_dataset_judgments_read_the_loaded_model_not_its_reference(workspace
     `workspace.component()` returns a `ComponentRef` -- an identity, a path and a fingerprint. It
     has no `requirements` attribute at all, so reading it as `getattr(component, "requirements",
     ())` always took the fallback and the loop body never ran: not for any spec, not against any
-    workspace. `check.field.absent` and `check.lookback.uncovered` sat in `CODES` looking
-    delivered.
+    workspace. `check.dataset.unregistered`, `check.field.absent` and `check.lookback.uncovered`
+    sat in `CODES` looking delivered.
 
     Only the LOADED model knows what it reads. This pins the distinction, because the failure mode
     is invisible -- a dead judgment reports nothing, which is exactly what a passing judgment
     reports.
     """
-    _strategy_reading(workspace, "absent_dataset", "absent_field")
+    _strategy_reading(workspace, "absent_dataset", "close")
 
-    # A requirement names a field, so a name nothing exposes is `check.field.absent` whether the
-    # dataset behind it is unregistered or merely does not carry it -- one question, one repair.
-    assert _judge(workspace, {"strategy": {"component": "model"}}) == ["check.field.absent"]
+    assert _judge(workspace, {"strategy": {"component": "model"}}) == [
+        "check.dataset.unregistered"
+    ]
 
 
 def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> None:
@@ -555,11 +555,9 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
     # Two counted sets, because there are two kinds of run and they answer different questions.
     # Counting them together would let a materialization judgment silently take the place of a
     # simulation one.
-    assert len(SIMULATION_CODES) == 7, (
-        "a simulation spec settles exactly seven judgments; adding an eighth is a decision, not a "
-        "detail. It was eight until a requirement stopped naming a dataset: "
-        "`check.dataset.unregistered` had nothing left to be about, and `check.field.absent` "
-        "answers what remained"
+    assert len(SIMULATION_CODES) == 8, (
+        "a simulation spec settles exactly eight judgments; adding a ninth is a decision, not a "
+        "detail"
     )
     assert len(MATERIALIZATION_CODES) == 9, (
         "a materialization spec settles exactly nine judgments; adding a tenth is a decision, "

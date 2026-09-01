@@ -34,31 +34,37 @@ def test_calendar_lower_bound_is_local_midnight_with_month_end_clamping() -> Non
     )
 
 
-def test_a_requirement_is_a_field_and_a_lookback_and_nothing_else() -> None:
-    """No dataset id, no consumer id: one names the other, and the framework knows the other."""
-    requirement = DataRequirement.of("close", lookback=RowsLookback(2))
+def test_a_requirement_is_a_dataset_a_field_and_a_lookback() -> None:
+    """The pair is the id, and the consumer is not part of it.
 
+    `049`'s ruling removed `dataset_id` on the grounds that a field id is unique across a
+    workspace. Measured against the research environment that premise did not hold -- 21 of its 27
+    datasets' field ids are shared -- and the owner overturned that half on 2026-09-01. The
+    `consumer_id` half stands: the framework stamps it.
+    """
+    requirement = DataRequirement.of("price_daily", "close", lookback=RowsLookback(2))
+
+    assert str(requirement.dataset_id) == "price_daily"
     assert requirement.field_id == "close"
     assert requirement.lookback == RowsLookback(2)
-    assert not hasattr(requirement, "dataset_id")
     assert not hasattr(requirement, "consumer_id")
 
 
 def test_requirement_rejects_a_field_that_is_not_a_name() -> None:
     with pytest.raises(ValueError, match="non-empty"):
-        DataRequirement.of("", lookback=RowsLookback(2))
+        DataRequirement.of("price_daily", "", lookback=RowsLookback(2))
     with pytest.raises(ValueError, match="non-empty"):
-        DataRequirement.of("two words", lookback=RowsLookback(2))
+        DataRequirement.of("price_daily", "two words", lookback=RowsLookback(2))
     with pytest.raises(TypeError, match="string"):
-        DataRequirement.of(None, lookback=RowsLookback(2))
+        DataRequirement.of("price_daily", None, lookback=RowsLookback(2))
 
 
 def test_requirement_rejects_a_name_the_window_owns() -> None:
     for reserved in ("available_at", "instrument"):
         with pytest.raises(ValueError, match="reserved"):
-            DataRequirement.of(reserved, lookback=RowsLookback(2))
+            DataRequirement.of("price_daily", reserved, lookback=RowsLookback(2))
 
 
 def test_requirement_rejects_a_lookback_that_is_not_one() -> None:
     with pytest.raises(TypeError, match="RowsLookback or CalendarLookback"):
-        DataRequirement.of("close", lookback=2)
+        DataRequirement.of("price_daily", "close", lookback=2)

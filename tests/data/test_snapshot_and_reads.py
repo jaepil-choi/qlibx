@@ -109,7 +109,7 @@ def test_a_lookback_window_carries_rows_from_different_dates(workspace: Workspac
     because each instrument's newest row is its own. Summing this reads a departed name's final
     weight as if it were current.
     """
-    requirement = DataRequirement.of("weight", lookback=RowsLookback(1))
+    requirement = DataRequirement.of('benchmark', 'weight', lookback=RowsLookback(1))
 
     batch = _window(workspace, requirement, SESSIONS[-1]).observations(requirement)
 
@@ -123,7 +123,7 @@ def test_a_snapshot_is_one_moment_and_drops_what_stopped_publishing(
     workspace: Workspace,
 ) -> None:
     """Same requirement, same window: only the newest cross-section survives."""
-    requirement = DataRequirement.of("weight", lookback=RowsLookback(1))
+    requirement = DataRequirement.of('benchmark', 'weight', lookback=RowsLookback(1))
 
     batch = _window(workspace, requirement, SESSIONS[-1]).snapshot(requirement)
 
@@ -135,7 +135,7 @@ def test_a_snapshot_keeps_every_name_that_published_at_the_same_moment(
     workspace: Workspace,
 ) -> None:
     """It is a cross-section, not a filter: evaluated early, both names are current."""
-    requirement = DataRequirement.of("weight", lookback=RowsLookback(1))
+    requirement = DataRequirement.of('benchmark', 'weight', lookback=RowsLookback(1))
 
     batch = _window(workspace, requirement, SESSIONS[LEFT_AFTER - 1]).snapshot(requirement)
 
@@ -144,7 +144,7 @@ def test_a_snapshot_keeps_every_name_that_published_at_the_same_moment(
 
 def test_a_snapshot_still_records_the_access_it_made(workspace: Workspace) -> None:
     """Lineage does not change because the caller asked for one moment."""
-    requirement = DataRequirement.of("weight", lookback=RowsLookback(1))
+    requirement = DataRequirement.of('benchmark', 'weight', lookback=RowsLookback(1))
     window = _window(workspace, requirement, SESSIONS[-1])
 
     window.snapshot(requirement)
@@ -157,8 +157,8 @@ def test_a_snapshot_refuses_an_undeclared_requirement(workspace: Workspace) -> N
     """The declared-requirement boundary is the same one `observations` enforces."""
     from vqapr.domain.errors import VqaprError
 
-    declared = DataRequirement.of("weight", lookback=RowsLookback(1))
-    undeclared = DataRequirement.of("weight", lookback=RowsLookback(3))
+    declared = DataRequirement.of('benchmark', 'weight', lookback=RowsLookback(1))
+    undeclared = DataRequirement.of('benchmark', 'weight', lookback=RowsLookback(3))
 
     with pytest.raises(VqaprError, match="undeclared"):
         _window(workspace, declared, SESSIONS[-1]).snapshot(undeclared)

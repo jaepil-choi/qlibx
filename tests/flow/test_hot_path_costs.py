@@ -101,7 +101,7 @@ def test_one_store_hashes_each_source_once_no_matter_how_many_queries(
     monkeypatch.setattr(store, "_physical_digest", counting_digest)
 
     observation_store = DuckDbObservationStore(priced_workspace)
-    requirement = DataRequirement.of("close", lookback=RowsLookback(2))
+    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(2))
     for session in SESSIONS[3:]:
         observation_store.query(
             requirement,
@@ -119,7 +119,7 @@ def test_two_stores_do_not_share_a_digest_cache(priced_workspace: Workspace) -> 
     A process-wide cache would outlive the frozen-run scope that justifies it and would happily
     serve a stale digest to a later run over rewritten bytes.
     """
-    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
+    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     first = DuckDbObservationStore(priced_workspace)
     second = DuckDbObservationStore(priced_workspace)
 

@@ -128,9 +128,11 @@ def _register(root: Path, dataset_id: str, path: Path, *, long: bool) -> None:
                 if long
                 else ("available_at", "instrument")
             ),
+            # Both registrations expose the SAME eight field ids: a field id is unique within a
+            # dataset, not across the workspace, and schema parity is what makes the two
+            # comparable at all (`docs/issues/049`, the owner's 2026-09-01 correction).
             fields={
-                f"{dataset_id}_{name}": (_expression(code) if long else name)
-                for name, code in ACCOUNTS.items()
+                name: (_expression(code) if long else name) for name, code in ACCOUNTS.items()
             },
         ),
         SourceSpec.of(f"{dataset_id}-source", path),
@@ -143,7 +145,7 @@ def _read(workspace: Workspace, dataset_id: str) -> dict[str, tuple]:
     rows: dict[tuple, dict[str, object]] = {}
     for name in ACCOUNTS:
         requirement = DataRequirement.of(
-            f"{dataset_id}_{name}", lookback=CalendarLookback(days=365, timezone="UTC")
+            dataset_id, name, lookback=CalendarLookback(days=365, timezone="UTC")
         )
         window = ModelWindow(
             evaluation_time=EVALUATED_AT,
@@ -154,7 +156,7 @@ def _read(workspace: Workspace, dataset_id: str) -> dict[str, tuple]:
         )
         for row in window.observations(requirement).rows:
             key = (str(row["instrument"]), row["available_at"])
-            rows.setdefault(key, {})[name] = row[f"{dataset_id}_{name}"]
+            rows.setdefault(key, {})[name] = row[name]
     # Keyed on the instant itself, normalised to UTC: duckdb hands a stamp back in the session's
     # own zone, and the two registrations must agree on the instant rather than on its spelling.
     return {
@@ -245,7 +247,7 @@ def test_criterion_2_a_dataset_with_no_instrument_axis_is_not_narrowed(tmp_path:
     assert workspace.dataset("kimchi-ff5").instrument_field is None
     assert workspace.instruments("kimchi-ff5") == (), "no axis means no instruments to enumerate"
 
-    requirement = DataRequirement.of("rmrf", lookback=RowsLookback(2))
+    requirement = DataRequirement.of("kimchi-ff5", "rmrf", lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=EVALUATED_AT,
         # The stocks the run is evaluated over. No factor id among them, which is the point.
@@ -274,7 +276,7 @@ def test_criterion_3_a_requirement_is_a_field_and_a_lookback(
     workspace = Workspace.open(tmp_path)
 
     requirement = DataRequirement.of(
-        "long_net_income", lookback=CalendarLookback(days=365, timezone="UTC")
+        "long", "net_income", lookback=CalendarLookback(days=365, timezone="UTC")
     )
     window = ModelWindow(
         evaluation_time=EVALUATED_AT,
@@ -289,34 +291,83 @@ def test_criterion_3_a_requirement_is_a_field_and_a_lookback(
     assert access.consumer_id == "annual-fundamentals"
     # And the dataset is on the record, resolved from the field rather than named by the reader.
     assert str(access.dataset_id) == "long"
-    assert access.fields == ("long_net_income",)
+    assert access.fields == ("net_income",)
 
 
-def test_a_field_id_two_datasets_expose_is_refused_naming_the_other(
+def test_two_datasets_may_expose_the_same_field_ids(
     tmp_path: Path, warehouse: tuple[Path, Path]
 ) -> None:
-    """A requirement names one field, so one field cannot name two datasets."""
+    """Parallel series are the point, and the pair is what identifies a read.
+
+    `049`'s ruling had a requirement name a field alone, on the grounds that a field id is unique
+    across a workspace. Measured against this package's research environment that premise did not
+    hold: 21 of its 27 datasets' field ids are exposed by more than one of them. Some are
+    deliberately schema-identical parallel series -- `ff5-factors-broad` and `-k200` differ only in
+    universe, which is what makes them comparable -- and some are just `fiscal_yyyymm` being what
+    that column is called on all six datasets that carry it. The owner overturned that half of the
+    ruling on 2026-09-01.
+
+    So this pins the corrected rule: the same eight field ids on two registrations is not an error,
+    and each requirement says which dataset it means. The fixture is the campaign's own pair, which
+    is exactly the shape the research environment relies on.
+    """
     long_dir, wide_dir = warehouse
     Workspace.create(tmp_path)
     _register(tmp_path, "long", long_dir, long=True)
+    _register(tmp_path, "wide", wide_dir, long=False)
+
+    workspace = Workspace.open(tmp_path)
+    assert set(workspace.dataset("long").fields) == set(workspace.dataset("wide").fields), (
+        "schema parity is the property parallel series exist for"
+    )
+
+    store = DuckDbObservationStore(workspace)
+    read = {}
+    for dataset_id in ("long", "wide"):
+        requirement = DataRequirement.of(
+            dataset_id, "net_income", lookback=CalendarLookback(days=365, timezone="UTC")
+        )
+        window = ModelWindow(
+            evaluation_time=EVALUATED_AT,
+            instruments=("A", "B"),
+            store=store,
+            allowed_requirements=(requirement,),
+            consumer_id="annual-fundamentals",
+        )
+        batch = window.observations(requirement)
+        read[dataset_id] = tuple(row["net_income"] for row in batch.rows)
+        assert str(batch.access.dataset_id) == dataset_id, (
+            "the requirement names which of the two it read, and provenance records that"
+        )
+    assert read["long"] == read["wide"]
+
+
+def test_a_field_the_named_dataset_does_not_expose_is_refused(
+    tmp_path: Path, warehouse: tuple[Path, Path]
+) -> None:
+    """The other half of the pair still has to be there, and the refusal names what is."""
+    long_dir, _ = warehouse
+    Workspace.create(tmp_path)
+    _register(tmp_path, "long", long_dir, long=True)
+    workspace = Workspace.open(tmp_path)
+
+    requirement = DataRequirement.of(
+        "long", "no_such_field", lookback=CalendarLookback(days=365, timezone="UTC")
+    )
+    window = ModelWindow(
+        evaluation_time=EVALUATED_AT,
+        instruments=("A", "B"),
+        store=DuckDbObservationStore(workspace),
+        allowed_requirements=(requirement,),
+        consumer_id="annual-fundamentals",
+    )
 
     with pytest.raises(VqaprError) as refused:
-        register_dataset(
-            tmp_path,
-            DatasetRegistration.of(
-                "second",
-                "second-source",
-                instrument_field="instrument",
-                available_at="available_at",
-                key_fields=("available_at", "instrument"),
-                fields={"long_net_income": "net_income"},
-            ),
-            SourceSpec.of("second-source", wide_dir),
-        )
+        window.observations(requirement)
 
     failure = refused.value.failures[0]
-    assert failure.code == "workspace.dataset.register.field_conflict"
-    assert "'long'" in failure.observed, "the refusal must name the dataset that already has it"
+    assert failure.code == "observation_store.resolve.field_missing"
+    assert "net_income" in failure.observed, "the refusal must say what the dataset does expose"
 
 
 def test_a_registration_that_mixes_the_two_shapes_is_refused(
@@ -464,7 +515,7 @@ def test_a_bounded_grouped_read_returns_the_unbounded_answer(
     workspace = Workspace.open(tmp_path)
     assert workspace.dataset("facts").aggregated is True
 
-    requirement = DataRequirement.of("net_income", lookback=RowsLookback(8))
+    requirement = DataRequirement.of("facts", "net_income", lookback=RowsLookback(8))
     evaluated_at = instants[-1] + timedelta(hours=1)
 
     def read(store: DuckDbObservationStore) -> tuple:

@@ -41,7 +41,7 @@ AT = datetime(2024, 3, 5, 6, 30, tzinfo=UTC)
 BUDGET = Budget(
     PortfolioDirection.LONG_ONLY, Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")
 )
-REQUIREMENT = DataRequirement.of("close", lookback=RowsLookback(1))
+REQUIREMENT = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
 
 
 @pytest.fixture

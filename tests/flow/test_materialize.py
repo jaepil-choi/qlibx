@@ -43,7 +43,7 @@ def _component_source(path: Path) -> Path:
 
 class ReversalModel(DataModel):
     def requirements(self):
-        return (DataRequirement.of("close", lookback=RowsLookback(2)),)
+        return (DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2)),)
 
     def compute(self, context):
         assert not hasattr(context, "account")
@@ -131,7 +131,7 @@ def test_materialize_publishes_a_registered_dataset_that_uses_the_same_read_path
     assert rows[0][1] == "A"
     assert rows[0][2] == pytest.approx(-0.03)
 
-    requirement = DataRequirement.of("score", lookback=RowsLookback(1))
+    requirement = DataRequirement.of('reversal_2d', 'score', lookback=RowsLookback(1))
     window = ModelWindow(
         evaluation_time=_times()[1],
         instruments=("A", "B"),

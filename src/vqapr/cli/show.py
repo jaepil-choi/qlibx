@@ -130,7 +130,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             "kind": cli_kind(kind),
             "constraint_id": str(rule.constraint_id),
             "reads": {
-                requirement.field_id: str(requirement.lookback)
+                f"{requirement.dataset_id}.{requirement.field_id}": str(requirement.lookback)
                 for requirement in rule.requirements()
             },
             # Named rather than left absent, because "reads nothing" is the ordinary answer for a
@@ -163,7 +163,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             }
             for alias, declared in sorted(aliases.items())
         },
-        "decides": [requirement.field_id for requirement in model.requirements()],
+        "decides": [str(requirement.dataset_id) for requirement in model.requirements()],
         "forms": [str(table.table_id) for table in tables],
         # Derived by the package from the decision, never declared: that is the authoring
         # contract's whole point, and saying so beats reporting an empty field.

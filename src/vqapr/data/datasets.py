@@ -27,6 +27,7 @@ from vqapr.domain.identifiers import DatasetId, SourceId, dataset_id, source_id
 SCHEMA_STAGE = "dataset.register.schema"
 KEY_STAGE = "dataset.register.key"
 SPAN_STAGE = "dataset.register.span"
+VALUE_STAGE = "dataset.register.value"
 _RETRY = "fix the prepared dataset, then register again"
 
 
@@ -113,9 +114,15 @@ class DatasetRegistration:
 
 
 def check_schema(registration: DatasetRegistration, columns: Mapping[str, ColumnType]) -> Diagnosis:
-    """1단계 — 지목한 컬럼이 존재하나, available_at이 tz-aware인가.
+    """1단계 — 지목한 컬럼이 존재하나, 그 타입이 model에 건넬 수 있는 것인가.
 
     I/O가 없다. `describe()`가 준 스키마만 본다. **하나 나왔다고 멈추지 않는다.**
+
+    `available_at` 말고 **노출되는 field 컬럼의 타입까지** 여기서 본다. 읽기 경로가 셀마다
+    타입을 되묻던 시절에는 그 질문이 조회 시각에 답해졌지만, 이제 답하는 자리는 여기다
+    (`044`). 스키마가 이미 말해 주는 것을 파일을 열어 다시 물을 이유는 없다 -- 컬럼 하나가
+    naive timestamp이거나 애초에 scalar가 아니면, 그것은 그 컬럼의 **모든** 행에 대해
+    참이다.
     """
     found = collector(SCHEMA_STAGE, FailureFamily.DATA)
     observed = ", ".join(sorted(columns)) or "(no columns)"
@@ -131,6 +138,53 @@ def check_schema(registration: DatasetRegistration, columns: Mapping[str, Column
                     fix=(
                         f"add column {column!r} to the prepared source, or point {role} at a "
                         "column it already has"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
+                )
+            )
+
+    for framework_name, column in registration.fields.items():
+        exposed = columns.get(column)
+        if exposed is None:
+            continue  # already reported as field_missing above
+        if exposed is ColumnType.TIMESTAMP_NAIVE:
+            found.add(
+                Failure.bounded(
+                    code=f"{SCHEMA_STAGE}.field_not_tz",
+                    requirement=(
+                        f"field {framework_name!r} exposes column {column!r}, whose timestamps "
+                        f"must be timezone-aware. A naive timestamp reaches a model as an "
+                        f"instant nobody can place on a venue's clock, and it compares silently "
+                        f"wrong against every value that can"
+                    ),
+                    observed=str(exposed),
+                    source=FailureSource(
+                        key_path=f"datasets.{registration.dataset_id}.fields.{framework_name}",
+                    ),
+                    fix=(
+                        f"localize {column!r} to the venue timezone while preparing the source, "
+                        f"or stop exposing it as a field"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
+                )
+            )
+        elif exposed is ColumnType.OTHER:
+            found.add(
+                Failure.bounded(
+                    code=f"{SCHEMA_STAGE}.field_not_portable",
+                    requirement=(
+                        f"field {framework_name!r} exposes column {column!r}, which must hold a "
+                        f"portable scalar -- a boolean, number, string, date or timestamp. A "
+                        f"model receives rows of scalars, and there is nothing portable to hand "
+                        f"it for this type"
+                    ),
+                    observed=str(exposed),
+                    source=FailureSource(
+                        key_path=f"datasets.{registration.dataset_id}.fields.{framework_name}",
+                    ),
+                    fix=(
+                        f"flatten {column!r} into scalar columns while preparing the source, or "
+                        f"stop exposing it as a field"
                     ),
                     explain=ExplainTopic.DATASET_PREPARATION,
                 )
@@ -196,6 +250,68 @@ def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
                 fix=(
                     f"deduplicate the source on ({declared}), or widen the key until it "
                     "identifies one row"
+                ),
+                explain=ExplainTopic.DATASET_PREPARATION,
+            )
+        )
+    return found.done(retry=_RETRY)
+
+
+def check_values(
+    registration: DatasetRegistration, spec: SourceSpec, columns: Mapping[str, ColumnType]
+) -> Diagnosis:
+    """4단계 — 노출되는 numeric 컬럼에 NaN이나 inf가 있는가. 전체 스캔이다.
+
+    **이 단계는 읽기 경로에서 옮겨 온 것이지 새로 생긴 요구가 아니다.** `normalize_scalar`이
+    읽는 셀마다 묻던 질문이고, `035`의 addendum이 그것을 그냥 지우면 평가당 1.6s를 조용한
+    NaN과 맞바꾸는 것이라고 정확히 지목했다. 그래서 `044`는 제거가 아니라 이동으로 닫힌다 --
+    질문은 남고, 묻는 자리가 셀당 한 번에서 **컬럼당 한 번**으로 바뀐다.
+
+    수천 번 읽힐 파일을 등록 때 한 번 더 읽는 값이다. 스캔 한 번이며 컬럼 폭을 따라 늘지
+    않는다(`scan.finite_check`).
+
+    numeric이 아닌 컬럼은 애초에 NaN을 담을 수 없으므로 묻지 않는다. 노출되는 컬럼이 전부
+    비-numeric이면 **이 단계는 I/O 없이 통과한다.**
+    """
+    found = collector(VALUE_STAGE, FailureFamily.DATA)
+    numeric = tuple(
+        dict.fromkeys(
+            column
+            for column in registration.fields.values()
+            if columns.get(column) is ColumnType.DOUBLE
+        )
+    )
+    if not numeric:
+        return found.done()
+
+    exposed_by = {column: name for name, column in registration.fields.items()}
+    result = scan.finite_check(
+        spec,
+        columns=numeric,
+        identity_fields=(registration.instrument_field, registration.available_at),
+    )
+    examples = dict(result.examples)
+    for column, count in result.non_finite:
+        framework_name = exposed_by[column]
+        found.add(
+            Failure.bounded(
+                code=f"{VALUE_STAGE}.not_finite",
+                requirement=(
+                    f"field {framework_name!r} exposes column {column!r}, whose values must be "
+                    f"finite. A NaN or an infinity reaching a model does not fail there -- it "
+                    f"propagates through every number it touches and the run reports a result"
+                ),
+                observed=f"{count} row(s) with a non-finite {column!r}",
+                examples=examples.get(column, ()),
+                example_total=count,
+                source=FailureSource(
+                    file=str(spec.path),
+                    key_path=f"datasets.{registration.dataset_id}.fields.{framework_name}",
+                ),
+                fix=(
+                    f"drop or repair the rows whose {column!r} is NaN or infinite while "
+                    f"preparing the source; a value that is genuinely absent belongs as NULL, "
+                    f"which is read as a missing observation rather than a number"
                 ),
                 explain=ExplainTopic.DATASET_PREPARATION,
             )
@@ -277,11 +393,12 @@ def validate(
 ) -> tuple[Diagnosis, ValidationTiming, DatasetRegistration]:
     """선언이 실제 parquet과 맞는지 판정하고, 통과하면 잰 span을 붙여 돌려준다.
 
-    **세 단계다.** 값싼 검사를 먼저 전부 모아서 돌려주고, 통과했을 때만 전체 스캔으로 넘어간다.
+    **네 단계다.** 값싼 검사를 먼저 전부 모아서 돌려주고, 통과했을 때만 전체 스캔으로 넘어간다.
 
-        1단계  스키마   지목한 컬럼이 존재하나 · available_at이 tz-aware인가
+        1단계  스키마   지목한 컬럼이 존재하나 · 타입이 model에 건넬 수 있는가
         2단계  key      null 없이 유일한가                          ← 전체 스캔
         3단계  span     실제로 덮는 구간은 어디인가                 ← 전체 스캔
+        4단계  값       노출되는 numeric에 NaN·inf가 있는가         ← 전체 스캔
 
     한 단계 안에서는 하나 나왔다고 멈추지 않는다. agent는 문제를 한 번에 다 받아야 자기 준비를
     한 번에 고친다. 단계를 가르는 이유는 **순서 의존**이다 — 컬럼이 없으면 유일성을 물을 수 없고,
@@ -329,7 +446,12 @@ def validate(
         return key, key_timing, registration
 
     span, measured = check_span(registration, spec)
-    timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
     if not span.ok:
-        return span, timing, registration
-    return span, timing, registration.with_span(*measured)
+        span_timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
+        return span, span_timing, registration
+
+    values = check_values(registration, spec, columns)
+    timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
+    if not values.ok:
+        return values, timing, registration
+    return values, timing, registration.with_span(*measured)

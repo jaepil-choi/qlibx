@@ -120,6 +120,37 @@ def naive_parquet(tmp_path_factory, _con) -> Path:
 
 
 @pytest.fixture(scope="session")
+def unprepared_parquet(tmp_path_factory, _con) -> Path:
+    """준비가 덜 된 원천. 등록이 거절해야 하는 것들을 한 파일에 모아 둔다.
+
+    `available_at`은 멀쩡하다 -- 여기서 재는 것은 **노출되는 field 컬럼**이고, 각 테스트는
+    자기가 말하는 컬럼 하나만 `fields`로 지목한다. 그래서 이 파일은 "무엇이든 거절된다"가
+    아니라 "지목된 것만 검사된다"도 같이 보인다.
+
+    close   NaN과 inf를 담은 numeric      -> 값 단계가 거절
+    volume  NULL을 담은 numeric           -> 통과한다. NULL은 없는 관측이지 틀린 수가 아니다
+    stamped_at  tz 없는 timestamp         -> 스키마 단계가 거절, I/O 없이
+    payload     scalar가 아닌 값          -> 스키마 단계가 거절, I/O 없이
+    """
+    out = tmp_path_factory.mktemp("unprepared") / "unprepared.parquet"
+    _con.execute(
+        f"""COPY (
+            SELECT * FROM (VALUES
+              ('A005930', DATE '2024-01-02', TIMESTAMPTZ '2024-01-02 15:30:00+09',
+               71000.0, 12.0, TIMESTAMP '2024-01-02 15:30:00', {{'unit': 'KRW'}}),
+              ('A005930', DATE '2024-01-03', TIMESTAMPTZ '2024-01-03 15:30:00+09',
+               'nan'::DOUBLE, NULL, TIMESTAMP '2024-01-03 15:30:00', {{'unit': 'KRW'}}),
+              ('BRK/B',   DATE '2024-01-02', TIMESTAMPTZ '2024-01-02 15:30:00+09',
+               410.0, 20.0, TIMESTAMP '2024-01-02 15:30:00', {{'unit': 'USD'}}),
+              ('BRK/B',   DATE '2024-01-03', TIMESTAMPTZ '2024-01-03 15:30:00+09',
+               'inf'::DOUBLE, 21.0, TIMESTAMP '2024-01-03 15:30:00', {{'unit': 'USD'}})
+            ) AS t(instrument, session_date, available_at, close, volume, stamped_at, payload)
+        ) TO '{out.as_posix()}' (FORMAT PARQUET)"""
+    )
+    return out
+
+
+@pytest.fixture(scope="session")
 def dup_parquet(tmp_path_factory, _con) -> Path:
     """(session_date, instrument)가 유일하지 않고 instrument에 null이 있다."""
     out = tmp_path_factory.mktemp("dup") / "bad.parquet"

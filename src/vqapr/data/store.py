@@ -13,7 +13,7 @@ from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_fields
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.rows import normalize_rows
+from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
 
 
@@ -90,7 +90,15 @@ class DuckDbObservationStore:
             lower_bound=lower_bound,
             session=self.__session,
         )
-        normalized = normalize_rows(raw_rows)
+        # The read path validates nothing. What `observation_rows` just handed back was built
+        # from this package's own registered parquet, three statements ago, out of one cursor
+        # description -- so `normalize_rows` used to ask every cell a question registration had
+        # already settled, and asked the same column names once per row on top of that
+        # (`docs/issues/044`). Registration now refuses a non-finite, naive or non-portable
+        # column outright (`datasets.check_schema`, `datasets.check_values`), which is where
+        # that question is cheap: once per column instead of once per cell. Data that only turns
+        # out to be wrong at runtime is not chased here; it fails where it is used.
+        normalized: Rows = raw_rows  # type: ignore[assignment]
         # One dict lookup per row instead of one per row and field, and `dict.fromkeys` instead of
         # a comprehension per instrument. The counts and the failure on an unknown instrument are
         # what they were.
@@ -120,7 +128,6 @@ class DuckDbObservationStore:
             actual_rows=actual,
             max_available_at=max_available_at,
         )
-        # `normalized` came out of `normalize_rows` three statements ago. The public constructor
-        # would validate every cell again, which costs about as much as the query that produced
-        # them, so take the same trusted door `ModelWindow.snapshot` already uses.
+        # The public constructor validates every cell, which costs about as much as the query
+        # that produced them, so take the same trusted door `ModelWindow.snapshot` already uses.
         return ObservationBatch._trusted(normalized, access)

@@ -75,7 +75,12 @@ they are on opposite sides of the ledger.
 - **Registration** reads the file once per declared logical key: the cost scales with
   `rows x key width` and not with file size, at roughly 50M row-keys per second. A 37.8M-row
   warehouse registered on six key fields takes seconds, and that is the whole of it -- paid once
-  per workspace.
+  per workspace. If any `fields:` entry exposes a numeric column, registration reads the file once
+  more to refuse a NaN or an infinity in it -- one pass for all such columns at once, however many
+  you declare. **A non-finite value is refused here or nowhere**: reads trust what registration
+  accepted, so a NaN that gets past this point reaches a model and propagates through every number
+  it touches while the run still reports a result. Prepare a genuinely absent value as `NULL`,
+  which is read as a missing observation rather than as a number.
 - **Reading** costs far more, and scales with the **cells a requirement's window admits**, not with
   the rows a model keeps. A long / EAV registration -- one row per (name, date, account_code) --
   multiplies those cells by its key width, and every one of them is read, boxed into a dict and

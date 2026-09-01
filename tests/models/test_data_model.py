@@ -8,7 +8,7 @@ from vqapr.models.contexts import DataModelContext
 def test_datamodel_context_has_no_account_execution_or_workspace_surface() -> None:
     """Capability ABSENCE is the subject; the field list is only evidence for it.
 
-    The list read `["window"]` until record `127` added `reads`. That is not a new capability.
+    The list read `["window"]` until record `128` added `reads`. That is not a new capability.
     `reads` holds the alias-keyed requirements the model declared in `inputs()`, and every one of
     them resolves *through* the window this context already carried — it narrows what the context
     will serve without widening what it can reach.

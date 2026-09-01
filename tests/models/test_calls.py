@@ -1,6 +1,6 @@
 """Turning a declared alias into real point-in-time reads.
 
-**These moved out of `_internal/pit_bridge.py` with record `127`** and the module went with
+**These moved out of `_internal/pit_bridge.py` with record `128`** and the module went with
 them. They existed there so `strategy_bridge` could serve an authored `read(alias)` while the
 engine served `context.window.observations(requirement)`; now both contexts read through this
 code and there is no boundary left for it to sit on.

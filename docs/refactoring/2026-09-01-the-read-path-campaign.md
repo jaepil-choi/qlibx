@@ -58,7 +58,7 @@ rewrite 없이 병합 가능한 자리에서만 그었다.
 |---|---|---|---|---|
 | **A** | `044` | ~~`qlibx-wt-044`~~ | ~~`read-044-no-validation-on-read`~~ | **병합 완료 `111c0342`**, 기록 `119`. worktree 제거됨 |
 | **B** | `046` 후반 | ~~`qlibx-wt-046b`~~ | ~~`read-046b-one-round-trip`~~ | **병합 완료 `35b73229`**, 기록 `120`. worktree 제거됨 |
-| **C** | `038` + `045`/`049` | `qlibx-wt-038-049` | `read-038-049-fields-are-expressions` | 없음 |
+| **C** | `038` + `045`/`049` | ~~`qlibx-wt-038-049`~~ | ~~`read-038-049-fields-are-expressions`~~ | **병합 완료 `df571533`**, 기록 `123` |
 | **D** | `046` 전반 | `qlibx-wt-046a` | `read-046a-one-scan` | **C 병합 후 생성** |
 
 **왜 다섯이 아니고 넷인가.** A와 B는 ruling과도 서로와도 독립이라 첫날부터 돌 수 있다.

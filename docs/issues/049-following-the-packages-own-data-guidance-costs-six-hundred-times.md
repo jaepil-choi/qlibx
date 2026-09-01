@@ -1,9 +1,30 @@
 # 049 — A model that follows the package's own data guidance runs 614x slower than the identical model on a reshaped source, and the package offers nothing that closes the gap
 
-**Status: owner-decided 2026-09-01, not yet implemented. This file is the campaign anchor** — the
-one issue the read-path work hangs off, because it is the only one that measures the whole gap.
-`038`, `044` and `045` are scheduled under it and point here; `035` and `046` are narrowed by it.
-The ruling is below, before the measurement that motivated it.
+**Status: the ruling is IMPLEMENTED 2026-09-01 by
+[`123-a-field-is-an-expression-and-instrument-is-optional.md`](../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md) (lane C); the issue stays open
+for its number.** A field is an expression, a requirement names `(dataset_id, field_id)` and a
+lookback, and `instrument_field` is optional — all three are in `develop`, with `044` (record `119`)
+and `046`'s second half (record `120`) merged before them. What remains is `046`'s first half (lane
+D, one scan serving several fields) and **the measurement this file exists for**, which is not taken
+until the campaign closes.
+
+**Three things block that measurement**, all found by lane B and written up in the campaign
+document's §4, where a measurer will look for them.
+
+**This file is the campaign anchor** — the one issue the read-path work hangs off, because it is the
+only one that measures the whole gap. `038`, `044` and `045` are scheduled under it and point here;
+`035` and `046` are narrowed by it. The ruling is below, before the measurement that motivated it.
+
+**One thing the ruling asserts is not literally satisfiable, and `123` records why.** The composed
+query below is written with `GROUP BY 1, 2`, and the same ruling promises that every registration
+that exists today keeps working. duckdb 1.5.5 refuses `close` as a bare column under that `GROUP BY`,
+so the two claims cannot both be met by one query shape. The shape is therefore decided per
+registration, at registration, by the binder: row-wise when every field is row-wise — today's SQL,
+unchanged — and grouped when every field aggregates. Nothing about what an author may write moved.
+
+**And one thing the ruling asserts is simply wrong**, overturned by the owner the same day it was
+implemented — the field-id uniqueness premise. The section below has the measurement and the
+decision.
 
 ---
 

@@ -669,8 +669,9 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
     `known` is the field that answers the question.
 
     **This runs after the run completed and its record is on disk.** `registered_roster` refuses a
-    registered-but-unreadable roster, which is right at run START -- nothing has been computed yet
-    and the run must not proceed without categories. Here it would be wrong: the tables can become
+    registered-but-unreadable roster -- and, since `docs/issues/050`, a workspace that cannot be
+    decoded -- which is right at run START: nothing has been computed yet and the run must not
+    proceed without categories. Here it would be wrong: the workspace and the tables can become
     unreadable in the minutes a real run takes, and letting that refusal escape would report exit 1
     for a run whose record `run_ids` already lists. The record and the command would disagree about
     whether the run happened.
@@ -679,7 +680,7 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
     from vqapr.public import roster_report
 
     try:
-        report = roster_report(project_root, _registered_roster_for_report(project_root))
+        report = roster_report(_registered_roster_for_report(project_root))
     except VqaprError as vanished:
         # `known: True`, because the run DID know. `registered_roster` refuses an unreadable
         # roster at run start, so any run reaching this envelope read its roster successfully:
@@ -692,8 +693,9 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
             "known": True,
             "stale": True,
             "note": (
-                "this run read a registered roster, and the roster became unreadable before the "
-                "envelope was written, so the per-category counts could not be re-read; the "
+                "this run read a registered roster, and the roster -- or the workspace recording "
+                "it -- became unreadable before the envelope was written, so the per-category "
+                "counts could not be re-read; the "
                 f"frozen record states what the run actually used. {vanished}"
             ),
         }

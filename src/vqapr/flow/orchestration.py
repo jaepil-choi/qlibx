@@ -39,7 +39,7 @@ from vqapr.extension.loading import (
 )
 from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.records import freeze_record
-from vqapr.flow.roster import registered_roster, roster_report
+from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
 from vqapr.flow.run import FrozenRun, RunDefinition
 from vqapr.flow.run_records import RunRecordWriter
 from vqapr.flow.run_state import RunStateRepository
@@ -112,7 +112,12 @@ def run(
     # Derived here rather than inside `_load` because the loaders' return types are what their
     # callers expect, and here is where the consumer that records it lives.
     as_loaded = _as_loaded_identity(frozen, root_path)
-    registry = registered_roster(root_path)
+    # ONE read of the roster, and the record is written from it rather than from a second one.
+    # `roster` carries the digest and the table list beside the registry, so a `vqapr register`
+    # landing during the run cannot make the record state a digest the fills were never classified
+    # by (`docs/issues/050`).
+    roster = registered_roster(root_path)
+    registry = roster.registry if roster is not None else None
     catalog = _FrozenCatalog(frozen)
     # One physical handle for the whole run. duckdb caches parquet metadata for a connection's
     # lifetime, and closing per query threw that away on every observation.
@@ -180,10 +185,11 @@ def run(
         result = flow.run()
         if writer is not None:
             # `roster_report` is evaluated HERE, after the run returned and outside the argument
-            # list, and its failure is absorbed. It re-reads the roster pointer, so a pointer that
-            # became unreadable during the run -- a crash mid-write, a concurrent `vqapr register`,
-            # a hand edit -- makes it raise `workspace.instruments.unreadable`, which
-            # `tests/flow/test_a_damaged_roster_pointer_is_not_no_roster.py` asserts it does.
+            # list, and its failure is absorbed. It no longer reads anything -- `docs/issues/050`
+            # moved the digest and the table list onto the read taken before `flow.run()` -- but
+            # the shape stays, because the defect it fixes was structural: the report is built
+            # after the run, outside the argument list, and whatever it raises stops at the
+            # absorber rather than at the writer.
             #
             # Evaluated as an argument inside the `try`, that refusal skipped `freeze_record`
             # entirely: no rows, no `record.json`, the id released for a peer to take, exit 1 --
@@ -201,7 +207,7 @@ def run(
                 result,
                 frozen,
                 as_loaded,
-                _roster_report_or_stale(root_path, registry),
+                _roster_report_or_stale(roster),
             )
     except BaseException:
         # A run that died still holds its id. Releasing here turns a crash into an ordinary
@@ -216,12 +222,15 @@ def run(
     return result
 
 
-def _roster_report_or_stale(root_path: Path | None, registry: object | None) -> object | None:
-    """The roster block for the record, or a STALE MARKER when it cannot be read at record time.
+def _roster_report_or_stale(roster: RegisteredRoster | None) -> object | None:
+    """The roster block for the record, or a STALE MARKER when it cannot be built at record time.
 
     Narrow on purpose: it catches `VqaprError` only, so a bug in report construction still fails
-    loudly. What it absorbs is the one thing that legitimately changes underneath a long run --
-    the roster pointer on disk -- and the alternative is discarding a finished run over it.
+    loudly. What it absorbed was the one thing that legitimately changes underneath a long run --
+    the roster pointer on disk -- and the alternative was discarding a finished run over it.
+    Since `docs/issues/050` the report is built from the read taken before `flow.run()` and touches
+    no file, so that refusal can no longer originate here; the absorber stays as the standing
+    guarantee that nothing computed AFTER a run completed can cost the record.
 
     **Not `None`, and that distinction is the whole point.** `flow/records.py` and
     `flow/run_records.py` both define `roster: null` in a record as *"the run never knew the
@@ -236,7 +245,7 @@ def _roster_report_or_stale(root_path: Path | None, registry: object | None) -> 
     same reason on the envelope side; this is the record side of it.
     """
     try:
-        return roster_report(root_path, registry)
+        return roster_report(roster)
     except VqaprError as unreadable:
         return {
             "known": True,

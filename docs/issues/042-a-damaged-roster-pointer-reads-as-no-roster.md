@@ -3,6 +3,10 @@
 **Status:** **CLOSED 2026-08-31** by
 `docs/implementations/103-the-audits-two-correctness-findings.md`. Both call sites now let the typed
 refusal through; only `Workspace.open` itself is guarded.
+**That remaining guard is [050](050-a-damaged-workspace-reads-as-no-roster-and-the-report-reads-the-pointer-twice.md)**,
+closed 2026-09-01 by `docs/implementations/122-the-roster-is-read-once-and-a-damaged-workspace-is-a-refusal.md`:
+it now admits `workspace.open.missing` only, and there is one call site left because the report no
+longer reads.
 
 **Status when filed:** open. Found 2026-08-31 by the structural audit recorded in
 `docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` (§6, C1). Not a journey finding — it

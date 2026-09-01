@@ -6,9 +6,14 @@ no stable import location and would be refused. This module exists so ``Momentum
 and ``MomentumLongOnly`` have one.
 
 ``decide()`` returns only ``Hold``/``Rebalance`` -- never a UUID, a strategy id, source
-refs, or an account version; ``Project.simulate``/``Project.run_completed`` stamp all of
-that framework identity. Cross-callback state (the rebalance count) travels only through
-``StrategyResult.next_state`` / ``call.previous_state``, never a mutable ``self`` field.
+refs, or an account version; the framework stamps all of that identity. Cross-callback state
+(the rebalance count) travels only through ``StrategyResult.next_state`` /
+``call.previous_state``, never a mutable ``self`` field.
+
+**The two models are written against different contracts, and that is not an oversight.** A
+StrategyModel may be authored against ``vqapr.authoring`` because the loader adapts it; a
+DataModel may not, so ``MomentumModel`` implements ``vqapr.public.DataModel`` directly. The
+split is the framework's, not this showcase's.
 """
 
 from __future__ import annotations
@@ -16,17 +21,16 @@ from __future__ import annotations
 from decimal import Decimal
 
 from vqapr.authoring import (
-    DataModel,
     DatasetInput,
-    DerivedRow,
     Hold,
-    Output,
     Rebalance,
     RowsLookback,
     StrategyModel,
     StrategyResult,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.public import DataModel, DataRequirement
+from vqapr.public import RowsLookback as EngineRowsLookback
 
 LOOKBACK = 6
 """Five-session momentum needs six closes."""
@@ -51,36 +55,32 @@ BUDGET = Budget(
 class MomentumModel(DataModel):
     """5-session momentum on real closes, skipping supervised names."""
 
-    def inputs(self) -> dict[str, DatasetInput]:
-        return {
-            "prices": DatasetInput(
-                dataset_id="price_daily",
+    def requirements(self):
+        return (
+            DataRequirement.of(
+                "momentum-model",
+                "price_daily",
                 fields=("close", "is_supervised"),
-                lookback=RowsLookback(rows=LOOKBACK),
-            )
-        }
+                lookback=EngineRowsLookback(LOOKBACK),
+            ),
+        )
 
-    def output(self) -> Output:
-        return Output(semantic_fields=("score", "eligible"))
-
-    def compute(self, call) -> tuple[DerivedRow, ...]:
-        observations = call.read("prices")
+    def compute(self, context):
+        observations = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[float]] = {}
         supervised: dict[str, bool] = {}
-        for observation in observations:
-            instrument = observation.instrument_id
-            close = observation.values.get("close")
+        for row in observations:
+            instrument = str(row["instrument"])
+            close = row["close"]
             if close is not None:
                 closes.setdefault(instrument, []).append(float(close))
-            supervised[instrument] = bool(observation.values.get("is_supervised"))
+            supervised[instrument] = bool(row["is_supervised"])
         return tuple(
-            DerivedRow(
-                instrument_id=instrument,
-                values={
-                    "score": values[-1] / values[0] - 1.0,
-                    "eligible": not supervised.get(instrument, False),
-                },
-            )
+            {
+                "instrument": instrument,
+                "score": values[-1] / values[0] - 1.0,
+                "eligible": not supervised.get(instrument, False),
+            }
             for instrument, values in sorted(closes.items())
             if len(values) == LOOKBACK and values[0] > 0.0
         )

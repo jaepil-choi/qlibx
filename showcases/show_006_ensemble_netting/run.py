@@ -41,6 +41,7 @@ Reproduce::
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import shutil
@@ -51,6 +52,7 @@ from typing import Any
 
 import duckdb
 
+from vqapr.cli.register import run as register_cli
 from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     AccountMode,
@@ -75,6 +77,7 @@ from vqapr.public import (
     ValuationConfig,
     callback_evidence,
     component_ref,
+    export_roster,
     preflight_run,
     publish_run_allocation,
     publish_run_record,
@@ -215,7 +218,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -258,7 +261,7 @@ class {class_name}(StrategyModel):
             name: values for name, values in closes.items() if len(values) == LOOKBACK
         }}
         if len(eligible) < 2:
-            return NoDecision("a cross-sectional view needs at least two names with full history")
+            return Hold(reason="a cross-sectional view needs at least two names with full history")
 
         raw = {{
             name: -1 * (values[-1] / values[0] - Decimal(1))
@@ -267,7 +270,7 @@ class {class_name}(StrategyModel):
         mean = sum(raw.values()) / len(raw)
         centred = {{name: value - mean for name, value in raw.items()}}
         if all(value == 0 for value in centred.values()):
-            return NoDecision("the cross-section is flat")
+            return Hold(reason="the cross-section is flat")
 
         sized = equal_weight(centred)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)
@@ -334,7 +337,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -406,7 +409,7 @@ class EnsembleStrategy(StrategyModel):
         reversal = self._panel(context, reversal_requirement)
         momentum = self._panel(context, momentum_requirement)
         if not reversal or not momentum:
-            return NoDecision("both member allocation inputs must be visible before netting them")
+            return Hold(reason="both member allocation inputs must be visible before netting them")
 
         # Each subscribed member is validated at consumption time as a signed, dollar-neutral
         # allocation. No constraint owns either input, so the consuming Strategy checks both
@@ -446,7 +449,7 @@ class EnsembleStrategy(StrategyModel):
         # either member here.
         net_signal = {name: measured.net_weight for name, measured in netting.items()}
         if all(value == 0 for value in net_signal.values()):
-            return NoDecision("the netted signal is flat")
+            return Hold(reason="the netted signal is flat")
         combined = equal_weight(net_signal)
         desired_active = rescale(combined, long=ENSEMBLE_BUDGET, short=-ENSEMBLE_BUDGET)
 
@@ -698,6 +701,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
         ),
     )
+
+    # The project declares what each id IS, once, before anything trades. `KrxExchange` resolves
+    # what a fill costs from this roster rather than from the venue, so the KRX profile cannot run
+    # without it. This fixture trades stocks only, so every name is declared a stock.
+    written = export_roster(dict.fromkeys(universe, "stock"), project)
+    roster_declaration = project / "instruments.yaml"
+    roster_declaration.write_text(
+        "instruments:\n  tables:\n"
+        + "".join(f"    {kind}: {path.name}\n" for kind, path in sorted(written.items())),
+        encoding="utf-8",
+    )
+    # Registered through the CLI's own entry point, which is what a user runs.
+    register_cli(argparse.Namespace(declaration=str(roster_declaration)), project_root=project)
 
     paths = _write_components(project, universe)
     reversal_ref = component_ref(

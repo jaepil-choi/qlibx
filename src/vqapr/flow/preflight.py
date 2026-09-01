@@ -403,7 +403,7 @@ def _validate_execution_targets(
 ) -> None:
     """Prove every strategy callback can bind an accepted intent before the run starts.
 
-    A callback may return ``NoDecision``, but preflight cannot assume that it will. If an
+    A callback may return ``Hold``, but preflight cannot assume that it will. If an
     occurrence has no exact target under the declared fill convention, an intent accepted there
     would fail only after every earlier callback had already mutated account state. The horizon,
     selector, and callback instants are all frozen facts, so that refusal belongs here.

@@ -23,14 +23,19 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 99
-"""Measured at record `115`: 106 in total, less the 7 in `JUSTIFIED` below.
+CEILING = 41
+"""Measured at record `125`: 41 in total, with `JUSTIFIED` now empty.
 
-Was 104. Record `115` hoisted five function-local imports out of `flow/roster.py` and
+Was 44 after record `124`, and 99 before it. Record `124` deleted `project.py`, five `_internal`
+bridges and `extension/identity.py`, which between them held most of the deferred imports this
+ratchet was counting — `project.py` alone deferred nearly all of its own. Record `125` took three
+more out of `strategy_bridge`, which stopped importing `vqapr.public` at all once the Flow took
+over stamping the intent. Lowering the constant in the same commit is what this ratchet is for.
+
+Was 104 before that. Record `115` hoisted five function-local imports out of `flow/roster.py` and
 `flow/records.py` that had been deferred inside `vqapr.public`, where the facade sits above
 everything; that justification did not travel when the code moved to `flow/`, and
-`flow/orchestration.py` already imports `vqapr.workspace` eagerly. Lowering the constant in the
-same commit is what this ratchet is for.
+`flow/orchestration.py` already imports `vqapr.workspace` eagerly.
 
 This number may go DOWN freely; it may not go up.
 
@@ -39,15 +44,7 @@ a step lowers the count, it lowers this constant in the same commit, so the ratc
 than leaving slack for the next accident to fill.
 """
 
-JUSTIFIED: dict[str, str] = {
-    "src/vqapr/_internal/run_bridge.py": (
-        "Deliberate, and pinned by a test rather than by intent: "
-        "tests/internal/test_run_bridge.py:165 "
-        "(test_importing_run_bridge_does_not_pull_flow_or_workspace) asserts that importing this "
-        "module does not drag `flow` or `workspace` into sys.modules. The laziness IS the "
-        "contract here, so these do not count against the ceiling."
-    ),
-}
+JUSTIFIED: dict[str, str] = {}
 """Modules whose deferred imports are a stated contract, excluded by name with the reason.
 
 An allowlist by name and not by pattern: a module earns its way onto this list by having a test

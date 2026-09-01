@@ -231,7 +231,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(tmp_path
 
     source = tmp_path / "strategy.py"
     source.write_text(
-        "from vqapr.public import StrategyModel, DataRequirement, RowsLookback, NoDecision\n\n"
+        "from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold\n\n"
         "class Strategy(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return (\n"
@@ -241,7 +241,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(tmp_path
         "            ),\n"
         "        )\n"
         "    def on_occurrence(self, context):\n"
-        "        return NoDecision('qa probe')\n",
+        "        return Hold(reason='qa probe')\n",
         encoding="utf-8",
     )
     space.register_component(

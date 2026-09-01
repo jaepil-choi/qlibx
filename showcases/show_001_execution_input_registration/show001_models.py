@@ -6,15 +6,27 @@ stable import location and would be refused. This module exists solely so
 `ShowcaseStrategy` has one.
 
 `decide()` returns only `Hold`/`Rebalance` - never a UUID, strategy id, source refs, or
-account version. `Project.simulate` stamps all of that framework identity; the author's
-only job is the economic decision.
+account version. The framework stamps all of that identity; the author's only job is the
+economic decision.
+
+**It declares one dataset read, and the read is real.** The loader requires a registered
+StrategyModel to declare at least one requirement, and a declaration nothing consumes would
+be a lie told to satisfy a gate. So the decision is conditioned on the close actually being
+there: no observed price, no book.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.authoring import Hold, Rebalance, StrategyModel, StrategyResult
+from vqapr.authoring import (
+    DatasetInput,
+    Hold,
+    Rebalance,
+    RowsLookback,
+    StrategyModel,
+    StrategyResult,
+)
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 BUDGET = Budget(
@@ -33,11 +45,31 @@ class ShowcaseStrategy(StrategyModel):
     go idle once it is pending or executed.
     """
 
-    def decide(self, call: object) -> StrategyResult:
+    def inputs(self):
+        return {
+            "prices": DatasetInput(
+                dataset_id="price_daily",
+                fields=("close",),
+                lookback=RowsLookback(rows=1),
+            ),
+        }
+
+    def decide(self, call) -> StrategyResult:
         if call.previous_state is not None:
             return StrategyResult(
                 decision=Hold(reason="already-issued"),
                 next_state=call.previous_state,
+                diagnostics={},
+            )
+        observed = [
+            observation
+            for observation in call.read("prices")
+            if observation.values["close"] is not None
+        ]
+        if not observed:
+            return StrategyResult(
+                decision=Hold(reason="no-observed-price"),
+                next_state=None,
                 diagnostics={},
             )
         return StrategyResult(

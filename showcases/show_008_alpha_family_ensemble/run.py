@@ -43,6 +43,7 @@ Reproduce::
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import shutil
@@ -55,6 +56,7 @@ from typing import Any
 
 import duckdb
 
+from vqapr.cli.register import run as register_cli
 from vqapr.public import (
     QUANTUM,
     SHIPPED_CONSTRAINTS,
@@ -79,6 +81,7 @@ from vqapr.public import (
     ValuationConfig,
     callback_evidence,
     component_ref,
+    export_roster,
     information_coefficient,
     preflight_run,
     publish_run_allocation,
@@ -264,7 +267,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -309,7 +312,7 @@ class {class_name}(StrategyModel):
             name: values for name, values in closes.items() if len(values) == LOOKBACK
         }}
         if len(eligible) < 2:
-            return NoDecision("a cross-sectional view needs at least two names with full history")
+            return Hold(reason="a cross-sectional view needs at least two names with full history")
 
         raw = {{
             name: {raw_expression}
@@ -318,7 +321,7 @@ class {class_name}(StrategyModel):
         mean = sum(raw.values()) / len(raw)
         centred = {{name: value - mean for name, value in raw.items()}}
         if all(value == 0 for value in centred.values()):
-            return NoDecision("the cross-section is flat")
+            return Hold(reason="the cross-section is flat")
 
         sized = equal_weight(centred)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)
@@ -376,7 +379,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -426,7 +429,7 @@ class LowVolMember(StrategyModel):
             name: values for name, values in closes.items() if len(values) == LOOKBACK
         }}
         if len(eligible) < 2:
-            return NoDecision("a cross-sectional view needs at least two names with full history")
+            return Hold(reason="a cross-sectional view needs at least two names with full history")
 
         volatility: dict[str, Decimal] = {{}}
         for name, values in eligible.items():
@@ -437,14 +440,14 @@ class LowVolMember(StrategyModel):
             volatility[name] = stdev(returns[-VOL_WINDOW:])
 
         if len(volatility) < 2:
-            return NoDecision("a low-volatility view needs at least two names with a full window")
+            return Hold(reason="a low-volatility view needs at least two names with a full window")
 
         # Low volatility is the preferred side, so the raw signal is the negated volatility.
         raw = {{name: -value for name, value in volatility.items()}}
         mean = sum(raw.values()) / len(raw)
         centred = {{name: value - mean for name, value in raw.items()}}
         if all(value == 0 for value in centred.values()):
-            return NoDecision("every name carries the same realised volatility")
+            return Hold(reason="every name carries the same realised volatility")
 
         sized = equal_weight(centred)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)
@@ -479,7 +482,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -561,7 +564,7 @@ class FamilyEnsembleStrategy(StrategyModel):
         requirements = self.requirements()
         panels = [self._panel(context, requirement) for requirement in requirements]
         if not all(panels):
-            return NoDecision("every member allocation input must be visible before netting them")
+            return Hold(reason="every member allocation input must be visible before netting them")
 
         # Each subscribed member is validated at consumption time as a signed, dollar-neutral
         # allocation. No constraint owns these inputs, so the consuming Strategy checks all three
@@ -602,7 +605,7 @@ class FamilyEnsembleStrategy(StrategyModel):
         # budget. No member is filtered before combining -- long-only is never asked of any member.
         net_signal = {name: measured.net_weight for name, measured in netting.items()}
         if all(value == 0 for value in net_signal.values()):
-            return NoDecision("the netted signal is flat")
+            return Hold(reason="the netted signal is flat")
         combined = equal_weight(net_signal)
         desired_active = rescale(combined, long=ENSEMBLE_BUDGET, short=-ENSEMBLE_BUDGET)
 
@@ -1025,6 +1028,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
         ),
     )
+
+    # The project declares what each id IS, once, before anything trades. `KrxExchange` resolves
+    # what a fill costs from this roster rather than from the venue, so the KRX profile cannot run
+    # without it. This fixture trades stocks only, so every name is declared a stock.
+    written = export_roster(dict.fromkeys(universe, "stock"), project)
+    roster_declaration = project / "instruments.yaml"
+    roster_declaration.write_text(
+        "instruments:\n  tables:\n"
+        + "".join(f"    {kind}: {path.name}\n" for kind, path in sorted(written.items())),
+        encoding="utf-8",
+    )
+    # Registered through the CLI's own entry point, which is what a user runs.
+    register_cli(argparse.Namespace(declaration=str(roster_declaration)), project_root=project)
 
     paths = _write_components(project, universe)
     reversal_ref = component_ref(

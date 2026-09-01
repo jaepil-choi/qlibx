@@ -25,9 +25,6 @@ INTERNAL_ROOT = "src/vqapr/_internal/"
 
 PERMITTED: frozenset[str] = frozenset(
     {
-        # Frozen by `docs/design/agent-first-surface.md`: unshipped, no new callers, and not to be
-        # edited to serve a new requirement. Its `_internal` imports are inherited, not new.
-        "src/vqapr/project.py",
         # Reaches `_internal.atomic` for the one durable write (record `107`).
         "src/vqapr/flow/run_records.py",
         # Reaches `_internal.filelock` and `_internal.atomic` (records `106`, `107`).
@@ -102,7 +99,11 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
         "problem docs/issues/029 records."
     )
 
-    for name in ("component", "fingerprint", "loading", "registration", "identity"):
+    # `identity` is deliberately absent. It was the fifth promoted module, and record `124`
+    # deleted it with the Project cluster: its only two importers were `registration_bridge` and
+    # `venue_bridge`, both of which went the same way. What this asserts is that the four that
+    # remain are still at their promoted paths, not that the original five all survived.
+    for name in ("component", "fingerprint", "loading", "registration"):
         module = pathlib.Path(f"src/vqapr/extension/{name}.py")
         assert module.is_file(), f"{name} must live at vqapr/extension/{name}.py"
 

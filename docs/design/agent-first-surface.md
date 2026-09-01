@@ -232,6 +232,23 @@ Everything above this line was written from the caller inward, before anything m
 facade the product actually runs on. This section is that measurement, and the decision it forces.
 Where the two disagree, this section wins.
 
+> **Executed — 2026-09-01.** The cluster this section measured is deleted:
+> `project.py`, `simulation.py`, `materialization.py`, `venues.py`, five `_internal` bridges,
+> `_internal/catalog*.py`, `_internal/objects.py` and `extension/identity.py`, together with
+> `vqapr.open` and the tests written for them — 4,434 source lines and ~3,300 test lines.
+> `docs/implementations/124-the-unshipped-half-is-deleted.md` records what moved and what it cost.
+>
+> **This did not open `G008`, and `G008`'s gates did not apply to it.** That goal, as
+> `gjc-handoff/session-03/goals.json` states it, deletes `vqapr.public` and relocates
+> `flow/data/account/...` beneath `_internal` — the *opposite* direction, written on 2026-08-24
+> before the measurement below inverted it. Its two gates protect a breaking `0.2.0a1` release
+> and the legacy baseline a parity comparator would run against; this deletion cuts no release
+> and touches neither `vqapr.public` nor the CLI. `G010` — "migrate the 9 showcases onto
+> `Project.simulate`" — is obsolete for the same reason and was discharged the other way: three
+> showcases moved *off* the cluster, onto `vqapr.public`.
+>
+> Read the sections below as the record of why, not as a description of the tree.
+
 ## Which facade ships
 
 **The CLI is the product. `vqapr.public` is its supported implementation surface.
@@ -266,16 +283,24 @@ So the layer the design document above calls "legacy" is the one the shipped pro
 the layer it calls the destination is the one no shipped command reaches. That inversion is the
 reason this ruling exists.
 
-## What frozen means
+## What frozen meant
 
-- **No new callers.** Nothing in `src/` may add an import of `vqapr/project.py`, `vqapr.open`,
-  `vqapr/simulation.py`, `vqapr/materialization.py`, or `vqapr/venues.py`.
-- **No growth.** Do not extend these modules to serve a new requirement. If a CLI verb needs a
-  capability that lives there, reach it through `vqapr.public` or lift the capability out.
-- **No deletion, either.** Removing them is `G008`, and its conditions are below.
+**Superseded twice, and both supersessions are the point.** The owner ruling of 2026-09-01 —
+*"필요하면 고치는건데 merge 할 때 어떤 것이 correct 한지 검토해야지"* — retired the no-edit half:
+a module that needs fixing is fixed, and whether the fix is right is settled by reviewing the
+merge. Record `124` then discharged the rest by deleting the modules. Kept as written, because a
+reader who finds `vqapr.open` in an old notebook needs to know what it was and why it went:
+
+- ~~**No new callers.** Nothing in `src/` may add an import of `vqapr/project.py`, `vqapr.open`,
+  `vqapr/simulation.py`, `vqapr/materialization.py`, or `vqapr/venues.py`.~~ Moot: none exist.
+- ~~**No growth.** Do not extend these modules to serve a new requirement.~~ Retired 2026-09-01.
+- ~~**No deletion, either.** Removing them is `G008`, and its conditions are below.~~ This was
+  the sentence that bound the cluster's fate to a goal pointing the other way. The deletion was
+  neither `G008` nor gated by it; see the note under the ruling heading.
 - Scaffolds keep emitting `from vqapr.public import ...`, because that is what the shipped product
   runs on. An emitted import is the most-copied artifact in the package; it must name the surface
-  that will still exist after this ruling, and that surface is `vqapr.public`.
+  that will still exist after this ruling, and that surface is `vqapr.public`. **This one still
+  holds.**
 
 ## The tripwire
 
@@ -290,7 +315,15 @@ statement for `vqapr.public`, excluding every occurrence inside a string literal
 what makes that exclusion real: template text and refusal strings are `Constant` nodes and are
 structurally invisible to it.
 
-**Verified value: 11.** Confirmed on 2026-08-31 by `tests/boundaries/test_the_facade_is_not_reached_up_to.py`, which asserts it.
+**Verified value: 5**, as of 2026-09-01, asserted by
+`tests/boundaries/test_the_facade_is_not_reached_up_to.py`.
+
+It was **11** until record `124` deleted `project.py` and the five `_internal` bridges reachable
+only from it. What remains is four permanent entries — two CLI verbs and two shipped samples using
+the facade for its purpose — plus `_internal/strategy_bridge.py`, which was always the one entry
+the cluster's deletion could not close: `extension/loading.py` reaches it on the shipped path to
+adapt a StrategyModel authored against `vqapr.authoring`. It goes when the two authoring contracts
+become one.
 
 It was **12** until `docs/implementations/112-registration-without-the-cli.md` moved
 `cli/register.py`'s declaration parsing into `vqapr/declarations.py`. That module reaches the

@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
-from uuid import UUID, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from vqapr.account.account import Account
 from vqapr.account.history import AccountHistory, AccountRequirement
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
+from vqapr.authoring import Hold, Rebalance
 from vqapr.constraints.constraint import Constraint
 from vqapr.constraints.evaluation import (
     evaluate_constraints,
@@ -56,11 +57,12 @@ from vqapr.flow.run_state import (
 )
 from vqapr.models.contexts import StrategyModelContext
 from vqapr.models.memory import normalize_memory
-from vqapr.models.strategy_model import NoDecision, StrategyModel
+from vqapr.models.strategy_model import StrategyModel
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
     IntentSourceRef,
+    PortfolioTarget,
     validate_economic_intent,
 )
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
@@ -150,7 +152,7 @@ def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
 class PendingValuation:
     """An occurrence that requested no orders but still values the book.
 
-    A `NoDecision` is not "nothing happened". The venue still publishes prices at the execution
+    A `Hold` is not "nothing happened". The venue still publishes prices at the execution
     instant, and the book is still worth something there. This carries the selected target so the
     occurrence reaches the execution snapshot, without carrying an intent -- an empty
     `EconomicPortfolioIntent` would mean "hold no positions", which is the opposite of holding.
@@ -1467,11 +1469,21 @@ class SimulationFlow:
                 ),
                 data_owner=self._frozen_run.strategy_requirements,
             )
+            # The envelope, stamped here rather than asked of the callback. Every field it
+            # adds is one the Flow already had to derive in order to check the author's copy of
+            # it, so this replaces a comparison rather than adding a step. Record `125`.
+            if isinstance(result, Rebalance):
+                result = self._callback_intent_boundary(
+                    occurrence,
+                    self._frozen_run.strategy,
+                    lambda: self._stamp_intent(result, occurrence, account, window),
+                )
+
             pending_valuation: PendingValuation | None = None
-            if isinstance(result, NoDecision):
-                accepted: NoDecision | AcceptedIntent = result
+            if isinstance(result, Hold):
+                accepted: Hold | AcceptedIntent = result
                 intended = ()
-                # A NoDecision still reaches the execution instant, because the book is still
+                # A Hold still reaches the execution instant, because the book is still
                 # worth something there and the venue still publishes prices for it.
                 pending_valuation = self._callback_intent_boundary(
                     occurrence,
@@ -1631,10 +1643,10 @@ class SimulationFlow:
         payload: bytes,
         lifecycle: LifecycleTrace,
         recorder: InvocationRecorder,
-        accepted: NoDecision | AcceptedIntent,
+        accepted: Hold | AcceptedIntent,
         pending_valuation: PendingValuation | None = None,
     ) -> object:
-        if isinstance(accepted, NoDecision):
+        if isinstance(accepted, Hold):
             if pending_valuation is None:
                 # Nothing to take: leave whatever the root already had pending untouched.
                 return self._state.prepare_callback(
@@ -1643,7 +1655,7 @@ class SimulationFlow:
                     lifecycle=lifecycle,
                     recorder=recorder,
                 )
-            # A NoDecision still carries a pending identity when an execution instant remains,
+            # A Hold still carries a pending identity when an execution instant remains,
             # so the occurrence reaches the venue's prices and values the book there.
             return self._state.prepare_callback(
                 memory,
@@ -1883,7 +1895,7 @@ class SimulationFlow:
         current_ref: object,
         committed_ref: object,
         window: ModelWindow,
-        accepted: NoDecision | AcceptedIntent,
+        accepted: Hold | AcceptedIntent,
         projected: tuple[object, ...],
         intended: tuple[object, ...],
     ) -> tuple[CallbackEvidence, LifecycleTrace]:
@@ -1900,12 +1912,12 @@ class SimulationFlow:
             strategy_accesses=window.accesses,
             actual_source_refs=self._callback_actual_source_refs(occurrence, window),
             decision=accepted,
-            pending=None if isinstance(accepted, NoDecision) else accepted,
+            pending=None if isinstance(accepted, Hold) else accepted,
             constraints=(*projected, *intended),
         )
         lifecycle = LifecycleTrace(
             LifecycleKind.NO_DECISION
-            if isinstance(accepted, NoDecision)
+            if isinstance(accepted, Hold)
             else LifecycleKind.ACCEPTED_INTENT,
             evidence,
         )
@@ -1970,21 +1982,56 @@ class SimulationFlow:
             self._strategy.load_payload(BytesIO(payload_before))
             raise
 
+    def _stamp_intent(
+        self,
+        decision: Rebalance,
+        occurrence: OperationOccurrence,
+        account: AccountSnapshot,
+        window: ModelWindow,
+    ) -> EconomicPortfolioIntent:
+        """Turn one economic decision into the intent the Flow accepts.
+
+        Five of an intent's eight fields are facts about the RUN, not about the decision: which
+        Strategy this is, what it read, which account version it saw, which model state was
+        visible, and the intent's own identity. The callback cannot know four of them correctly
+        and can only copy the fifth, so asking for them made every author restate what the Flow
+        already knew -- and made a wrong restatement a possible outcome.
+
+        The id is `uuid5` over `(strategy_id, occurrence_id)` rather than random, so the same
+        decision in the same occurrence of the same run mints the same identity. A replayed run
+        produces byte-identical intents, which is what makes a record comparable to itself.
+        """
+        strategy_id = str(self._frozen_run.strategy.component.component_id)
+        targets = tuple(
+            PortfolioTarget(instrument, weight=weight)
+            for instrument, weight in sorted(decision.target_weights.items())
+        )
+        return EconomicPortfolioIntent(
+            uuid5(NAMESPACE_URL, f"{strategy_id}/{occurrence.occurrence_id}"),
+            strategy_id,
+            targets,
+            Decimal(decision.cash_weight),
+            decision.budget,
+            self._actual_source_refs(window),
+            account.version,
+            self._state.current.current_model_state_ref,
+        )
+
     def _validate_intent_authority(
         self,
         intent: EconomicPortfolioIntent,
         account: AccountSnapshot,
         window: ModelWindow,
     ) -> None:
-        if intent.strategy_id != str(self._frozen_run.strategy.component.component_id):
-            raise ValueError("intent strategy_id does not match the frozen Strategy component")
-        if (
-            intent.model_state_ref is not None
-            and intent.model_state_ref != self._state.current.current_model_state_ref
-        ):
-            raise ValueError("intent model_state_ref does not match the visible prior model state")
-        if intent.account_version_seen != account.version:
-            raise ValueError("intent account_version_seen does not match current AccountSnapshot")
+        """The one thing left to check: that the author named instruments this run trades.
+
+        The four comparisons that stood here -- strategy id, model state ref, account version
+        seen, source refs -- each read a field the callback supplied and compared it against a
+        value this class derived. Record `125` stamps those fields from the derived values
+        instead, so there is nothing left to disagree with. What survives is a real check on a
+        real authored value: `target_weights` is the author's, and a name outside the frozen
+        universe is an authoring error the Flow must refuse rather than execute.
+        """
         outside_universe = tuple(
             target.instrument_id
             for target in intent.targets
@@ -1993,11 +2040,6 @@ class SimulationFlow:
         if outside_universe:
             raise ValueError(
                 f"intent targets are outside the frozen instrument universe: {outside_universe}"
-            )
-        actual_refs = self._actual_source_refs(window)
-        if intent.source_refs != actual_refs:
-            raise ValueError(
-                "intent source_refs do not exactly match sources read through ModelWindow"
             )
 
     def _actual_source_refs(self, window: ModelWindow) -> tuple[IntentSourceRef, ...]:
@@ -2052,9 +2094,9 @@ class SimulationFlow:
           that execution will value the book. Replacing it here would silently discard a decision
           the Strategy already made and a fill that was going to happen.
         - **The run declared no execution authority.** A research run that only exercises
-          callbacks never values against venue prices, so a NoDecision in it stays what it was.
+          callbacks never values against venue prices, so a Hold in it stays what it was.
         - **No execution instant remains in the horizon.** There is nothing left to value
-          against, and a run ending on a NoDecision must still finalize.
+          against, and a run ending on a Hold must still finalize.
         """
         if self._state.current.pending_accepted_intent is not None:
             return None
@@ -2063,7 +2105,7 @@ class SimulationFlow:
         if execution_input is None or frozen.end is None or frozen.start is None:
             # A run declared without execution authority never values against venue prices. That
             # is a legitimate configuration -- a research run that only exercises callbacks -- and
-            # a NoDecision in it stays exactly what it was.
+            # a Hold in it stays exactly what it was.
             return None
         target = execution_input.fill.select_target(
             execution_input,

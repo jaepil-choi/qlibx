@@ -1,29 +1,39 @@
-"""Stateful Strategy occurrence-callback contract."""
+"""Stateful Strategy occurrence-callback contract.
+
+**The callback returns economics, and the Flow stamps identity.** Record `125`. Until then this
+contract asked a Strategy for a whole `EconomicPortfolioIntent` -- eight fields, of which five are
+facts only the framework can know: the intent's UUID, the strategy id, the provenance of every
+source the callback read, the account version it saw, and the visible model-state ref. An author
+who got one wrong produced an intent the Flow refused; an author who got one *plausibly* wrong
+produced one it accepted under the wrong identity.
+
+The Flow was already deriving all five in order to check the author's copy against them
+(`flow/simulation.py::_validate_intent_authority`, and `_actual_source_refs` beside it). Stamping
+what it already derives is strictly less code than receiving and comparing it, and it removes a
+whole class of authoring error rather than reporting it.
+
+So the return type is now the same `Hold | Rebalance` an author writes against
+`vqapr.authoring` -- one decision algebra, not two. `NoDecision` was the second spelling of `Hold`
+and is gone; `DataModel.compute` has always worked this way, refusing an author-set `available_at`
+outright (`flow/materialize.py`), and this brings the Strategy side to the same rule.
+"""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import BinaryIO
 
 from vqapr.account.history import AccountRequirement
+
+# The authoring contract is the contract. `vqapr.authoring` imports nothing from `models/`, so
+# this direction is the one that carries no cycle -- and it is the direction the surface ruling
+# picked: what an author writes is what the engine accepts, with no translation in between.
+from vqapr.authoring import Hold, Rebalance
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.models.contexts import StrategyModelContext
 from vqapr.models.memory import ModelMemory
 from vqapr.models.model import Model
-from vqapr.portfolio.intents import EconomicPortfolioIntent
-
-
-@dataclass(frozen=True, slots=True)
-class NoDecision:
-    """A successful callback that intentionally emits no economic intent."""
-
-    reason: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.reason, str) or not self.reason.strip():
-            raise ValueError("NoDecision reason must be non-empty")
 
 
 class StrategyModel(Model, ABC):
@@ -51,5 +61,11 @@ class StrategyModel(Model, ABC):
         """Restore private callback state from Flow-owned staging."""
 
     @abstractmethod
-    def on_occurrence(self, context: StrategyModelContext) -> NoDecision | EconomicPortfolioIntent:
-        """Return NoDecision or a timestamp-free economic intent."""
+    def on_occurrence(self, context: StrategyModelContext) -> Hold | Rebalance:
+        """Return the economic decision for this occurrence, and nothing else.
+
+        `Hold` declines. `Rebalance` names one complete desired portfolio: weights, cash, and the
+        budget they must satisfy. Everything an intent additionally carries -- its id, this
+        Strategy's id, what was read, the account version seen -- is the Flow's to stamp, and a
+        callback that tried to name any of it would be claiming authority it does not have.
+        """

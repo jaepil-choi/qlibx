@@ -1,53 +1,24 @@
 """Run an authoring-protocol StrategyModel through the engine's loader.
 
-`agent_first` already invokes an authored `decide(call)` directly. What is missing is a
-class the engine's *loader* will accept: `load_strategy_model` requires the legacy
-`StrategyModel` with an `on_occurrence(context)` callback returning `NoDecision` or a
-fully-formed `EconomicPortfolioIntent`.
+**Half of this module's reason is gone.** It used to build a whole `EconomicPortfolioIntent`
+from an authored `Rebalance` -- minting the UUID, naming the strategy, rebuilding the source
+refs from `window.accesses`, copying the account version. Record `125` moved that stamping into
+`flow/simulation.py`, where the Flow was already deriving every one of those values in order to
+check this module's copy of them. `_decide` now returns the author's decision unchanged.
 
-Building that intent is exactly the ceremony the agent-first contract removes. A legacy
-author writes:
-
-    return EconomicPortfolioIntent(
-        uuid5(NAMESPACE_URL, "show008/..." + context.occurrence.occurrence_id),
-        "show008-momentum",
-        targets, cash, budget,
-        _source_refs(context),
-        context.account.version,
-        None,
-    )
-
-Four of those eight arguments are framework facts an author should never mint: the intent
-UUID, the strategy id, the source references, and the account version seen. An author who
-gets one wrong produces an intent the Flow refuses, or worse, one it accepts under the
-wrong identity. Here the author returns `Hold` or `Rebalance` and the framework stamps
-the rest.
+What remains is the one translation that is still real: the engine calls
+`on_occurrence(context)` with a `StrategyModelContext`, and an authored model expects
+`decide(call)` with a bounded `StrategyCall`. Two capability surfaces over the same data. That
+is the next convergence, and when it lands this file has nothing left to do.
 """
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
 
 from vqapr.models.strategy_model import StrategyModel as _EngineBase
 
 __all__ = ("AdaptedStrategy", "adapter_config")
-
-
-def _source_refs(context: Any) -> tuple:
-    """The provenance of everything this callback actually read."""
-    from vqapr.public import IntentSourceRef
-
-    # First-read order, not sorted: the Flow rebuilds this from the same accesses and
-    # compares the tuples exactly, so imposing an order here makes provenance disagree
-    # with what the callback actually read.
-    seen: dict[str, str] = {}
-    for access in context.window.accesses:
-        seen.setdefault(access.source_id, access.source_digest)
-    return tuple(IntentSourceRef(source, digest) for source, digest in seen.items())
-
-
 
 
 def _authoring_bounds(bounds):
@@ -65,10 +36,8 @@ def _authoring_bounds(bounds):
 
 
 def _decide(authored, config, strategy_id, context, aliases, holder):
-    """One occurrence: invoke the authored model and stamp the framework's facts."""
+    """One occurrence: invoke the authored model and hand its decision to the Flow."""
     from vqapr._internal.models.agent_first import prepare_strategy_invocation
-    from vqapr.authoring import Hold
-    from vqapr.public import EconomicPortfolioIntent, NoDecision, PortfolioTarget
 
     prepared = prepare_strategy_invocation(
         authored,
@@ -92,24 +61,9 @@ def _decide(authored, config, strategy_id, context, aliases, holder):
             if rows:
                 recorder.append_batch(table_id, [dict(row) for row in rows])
 
-    decision = prepared.decision
-    if isinstance(decision, Hold):
-        return NoDecision(decision.reason)
-
-    targets = tuple(
-        PortfolioTarget(instrument, weight=weight)
-        for instrument, weight in sorted(decision.target_weights.items())
-    )
-    return EconomicPortfolioIntent(
-        uuid5(NAMESPACE_URL, f"{strategy_id}/{context.occurrence.occurrence_id}"),
-        strategy_id,
-        targets,
-        Decimal(decision.cash_weight),
-        decision.budget,
-        _source_refs(context),
-        context.account.version,
-        None,
-    )
+    # Returned as authored. `Hold` and `Rebalance` are what the engine contract accepts now, so
+    # there is nothing to convert -- the two decision algebras became one in record `125`.
+    return prepared.decision
 
 
 def _history_resolver(context: Any):

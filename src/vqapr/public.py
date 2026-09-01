@@ -106,7 +106,7 @@ from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition
 from vqapr.flow.simulation import SimulationResult, callback_evidence
 from vqapr.models.contexts import DataModelContext, StrategyModelContext
 from vqapr.models.data_model import DataModel
-from vqapr.models.strategy_model import NoDecision, StrategyModel
+from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,
@@ -192,7 +192,6 @@ __all__ = (
     "ModelWindow",
     "MonitoringPolicy",
     "NeutralizationRefusal",
-    "NoDecision",
     # The two halves of what a Model is handed. `ObservationBatch` is the return type of the one
     # method a DataModel author can call, and it was reachable only by opening installed source:
     # not in `__all__`, absent from the skill, and with no docstring naming its row keys or

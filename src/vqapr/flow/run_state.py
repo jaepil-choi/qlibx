@@ -505,7 +505,7 @@ class RunStateRepository:
 
         This is `prepare_valuation_only`'s sibling for the independent valuation clock, and the
         difference between them is the pending slot. `prepare_valuation_only` CONSUMES a pending
-        identity, because a NoDecision minted one and the mark is that pending's completion. A
+        identity, because a Hold minted one and the mark is that pending's completion. A
         standalone valuation never minted one: it is its own occurrence on its own clock, so
         there is no identity to match and none to clear. Touching the slot here is precisely what
         must not happen -- it holds at most one occupant, so a daily valuation passing through it

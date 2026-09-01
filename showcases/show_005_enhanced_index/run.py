@@ -171,7 +171,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
@@ -215,7 +215,7 @@ class SignedAlpha(StrategyModel):
             str(row["instrument"]): row["close"] for row in rows if row["close"] is not None
         }
         if len(closes) < 2:
-            return NoDecision("a cross-sectional view needs at least two names")
+            return Hold(reason="a cross-sectional view needs at least two names")
 
         mean = sum(closes.values()) / len(closes)
         raw = {name: (mean - close) / mean for name, close in closes.items()}
@@ -223,7 +223,7 @@ class SignedAlpha(StrategyModel):
         centred = {name: value - centre for name, value in raw.items()}
         gross = sum(abs(value) for value in centred.values())
         if gross == 0:
-            return NoDecision("the cross-section is flat")
+            return Hold(reason="the cross-section is flat")
 
         scale = ACTIVE_BUDGET / gross
         weights = {
@@ -267,7 +267,7 @@ from vqapr.public import (
     Budget,
     DataRequirement,
     EconomicPortfolioIntent,
-    NoDecision,
+    Hold,
     OptimizeRefusal,
     PortfolioDirection,
     PortfolioTarget,
@@ -331,7 +331,7 @@ class EnhancedIndex(StrategyModel):
         active = self._panel(context, alpha_requirement, "weight")
         prices = self._panel(context, price_requirement, "close")
         if not benchmark or not active:
-            return NoDecision("both allocation inputs must be visible before combining them")
+            return Hold(reason="both allocation inputs must be visible before combining them")
 
         # The alpha is this callback's own subscription; no constraint owns it, so its declared
         # invariant is checked here, at consumption, before it can move a single weight.

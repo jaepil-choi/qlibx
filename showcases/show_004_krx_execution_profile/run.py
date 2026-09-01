@@ -5,29 +5,19 @@ One frozen strategy, one real KRX price history, two execution profiles::
     Academic   fractional quantity, zero cost, full fill
     KRX-shaped whole shares, 3bp commission both sides, 20bp sale tax on sells, long only
 
-The two runs differ **only** by the declared ``venues.Academic`` venue -- everything else
-(the derived score, the strategy, the execution input) is byte-identical, so the
-difference in outcome is exactly the declared venue friction.
+The two runs differ **only** by the registered exchange component -- everything else (the
+materialized score, the strategy, the execution input, the agendas) is byte-identical, so
+the difference in outcome is exactly the declared venue friction.
 
-Migrated from the legacy engine-registration spine (``preflight_run``/``run``/
-``register_component``, imported from the deprecated public-adapter module) onto the supported
-``Project``/``vqapr.simulation``/``vqapr.authoring`` surface.
+**Both venues are the shipped ones.** ``ShowcaseKrxExchange`` extends ``KrxExchange``, so the
+whole-share step, the 3bp commission on both sides, the 20bp sale tax on sells and the
+long-only access all come from the package's own KRX terms rather than being reproduced on an
+academic venue. An earlier revision of this showcase had to approximate them, because the
+surface it was written against typed its exchange field to one academic class; that caveat is
+gone and the comparison now measures the real engine class.
 
-**No ``venues.Krx`` exists on the supported surface.** ``Simulation.exchange`` is strictly
-typed to ``venues.Academic``. The KRX economics this showcase measures (whole shares, 3bp
-commission both sides, 20bp sale tax on sells, long only) are reproduced *on* ``Academic``
-(``quantity_step=1``, matching buy/sell ``VenueCost``, ``ListingAccess.LONG_ONLY``) --
-this reproduces the shipped ``KrxExchange``'s declared rates exactly but not its
-KRX-specific mechanics (price-limit bands, the ETF/stock tax-exemption split) that
-``Academic`` has no field for. This fixture trades stocks only and never exercises a
-price limit, so the substitution is exact for what this showcase actually measures; see
-`show_008`'s module docstring for the same documented substitution.
-
-The dataset-store split that once forced this showcase to keep a legacy
-``register_dataset`` call is fixed: ``Project.simulate()`` bridges catalog-registered
-datasets into the store preflight reads, so a plain ``Project.register(DatasetDeclaration)``
-is now sufficient. ``completed.fills()`` replaces the old ``recorder_rows`` reach-through
-for the account/cost readback this showcase's whole comparison is built from.
+Neither profile models price ticks, queue position, liquidity or borrow. This fixture trades
+stocks only and never exercises a price limit.
 
 Reproduce::
 
@@ -36,6 +26,7 @@ Reproduce::
 
 from __future__ import annotations
 
+import argparse
 import html
 import json
 import shutil
@@ -54,34 +45,60 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import show004_models as models
 
-import vqapr
-from vqapr.project import DatasetDeclaration
-from vqapr.simulation import (
+from vqapr.cli.register import run as register_cli
+from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    Cadence,
-    Execution,
-    ExecutionInput,
+    ComponentKind,
+    ComponentRef,
+    ConstraintSet,
+    DatasetRegistration,
+    ExecutionInputRegistration,
+    ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    InitialAccount,
-    Schedule,
-    Simulation,
+    LocalInstantDeclaration,
+    MaterializationSpec,
+    OperationAgenda,
+    OperationOccurrence,
+    OperationRole,
+    RunDefinition,
+    SourceSpec,
+    StrategyConfig,
+    ValuationConfig,
+    component_ref,
+    export_roster,
+    materialize,
+    preflight_run,
+    register_agenda,
+    register_component,
+    register_data_model,
+    register_dataset,
+    register_execution_input,
+    register_strategy_config,
+    register_valuation_config,
+    run,
 )
-from vqapr.venues import Academic, Listing, ListingAccess, VenueCost
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from extract_dw_fixture import FixtureSpec, extract
 
 ROOT = Path(__file__).resolve().parent
+MODELS = Path(models.__file__).resolve()
+"""Resolved through the imported module, not by name.
+
+`MomentumLongOnly` is authored against `vqapr.authoring`, so the loader adapts it and the
+adapter re-imports the authored class by module name. Importing it here is what gives that
+name something to resolve to.
+"""
 OUTPUTS = ROOT / "outputs"
 INPUTS = OUTPUTS / "inputs"
 PROJECT = OUTPUTS / "project"
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
-VERIFIED_AGAINST = "vqapr-0.1.0+show-004-working-tree"
-LAST_VERIFIED_AT = "2026-08-25"
+VERIFIED_AGAINST = "vqapr-0.2.0a2+develop"
+LAST_VERIFIED_AT = "2026-09-01"
 
 KRX_COMMISSION_RATE = Decimal("0.0003")
 """Brokerage commission charged on both sides -- matches vqapr.exchange.venues.krx."""
@@ -114,99 +131,132 @@ def _sessions(path: Path) -> list[date]:
         con.close()
 
 
-def _simulation(*, universe: tuple[str, ...], execution_path: Path, exchange: Academic,
-                 callback_days: list[date]) -> Simulation:
-    start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
-    end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
-    return Simulation(
-        schedule=Schedule(
-            strategy=Cadence(sessions=tuple(callback_days), at=time(8, 30), timezone=VENUE),
-            valuation=Cadence(sessions=tuple(callback_days), at=time(16, 0), timezone=VENUE),
-            monitoring=None,
-            start=start,
-            end=end,
-        ),
-        execution=Execution(
-            input=ExecutionInput(
-                input_id="krx-daily",
-                path=execution_path,
-                hive_partitioned=False,
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            fill=FillConvention(
-                selector=FillSelector.SAME_DAY, at=time(15, 30), timezone=VENUE, trade_price="close"
-            ),
-        ),
-        exchange=exchange,
-        account=InitialAccount(
-            snapshot=AccountSnapshot(version=0, cash=INITIAL_CASH, positions={}),
-            mode=AccountMode.LONG_ONLY,
-        ),
-        constraints=(),
-        instruments=universe,
-        initial_strategy_state=None,
-    )
-
-
-def _register_momentum_score(project: Any) -> None:
-    """Re-register the materialized momentum score as a physical dataset.
-
-    ``Project.simulate()``/``run_completed()`` resolve a Strategy's declared inputs
-    through the legacy Workspace-backed store, while ``Project.materialize`` persists
-    into the transactional catalog only; a materialized ("derived") dataset is invisible
-    to a Simulation unless it is also written out as an ordinary physical parquet and
-    registered as such -- the same bridge show_008 uses for its members.
-    """
-    rows = project.read_output("momentum_score__derived")
-    out_path = PROJECT / "momentum_score.parquet"
-    con = duckdb.connect()
-    try:
-        con.execute(
-            "CREATE TABLE t (available_at TIMESTAMPTZ, instrument VARCHAR, "
-            "score VARCHAR, eligible BOOLEAN)"
-        )
-        for row in rows:
-            con.execute(
-                "INSERT INTO t VALUES (?, ?, ?, ?)",
-                [
-                    row["evaluation_time"],
-                    row["instrument_id"],
-                    str(row["values"]["score"]),
-                    bool(row["values"]["eligible"]),
-                ],
+def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
+    return OperationAgenda.from_occurrences(
+        agenda_id=agenda_id,
+        role=role,
+        timezone=VENUE,
+        occurrences=tuple(
+            OperationOccurrence(
+                f"{agenda_id}-{day.isoformat()}",
+                role,
+                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
             )
-        con.execute(
-            "COPY (SELECT available_at, instrument, CAST(score AS DOUBLE) AS score, eligible "
-            f"FROM t) TO '{out_path.as_posix()}' (FORMAT PARQUET)"
-        )
-    finally:
-        con.close()
-
-    project.register(
-        DatasetDeclaration(
-            dataset_id="momentum_score",
-            path=out_path,
-            hive_partitioned=False,
-            instrument_field="instrument",
-            available_at_field="available_at",
-            key_fields=("available_at", "instrument"),
-            fields={"score": "score", "eligible": "eligible"},
-        )
+            for day in days
+        ),
+        provenance="show_004 real KRX trading sessions",
     )
 
 
-def _profile_outcome(completed: Any) -> dict[str, Any]:
-    """The KRX/Academic comparison, built from ``completed.account``/``completed.fills()`` --
-    the public run readback -- rather than from engine internals."""
-    account = completed.account
+def _definition(
+    *,
+    universe: tuple[str, ...],
+    exchange: ComponentRef,
+    strategy_config: StrategyConfig,
+    valuation_config: ValuationConfig,
+    callback_days: list[date],
+) -> RunDefinition:
+    """The two runs' one difference, isolated into one argument.
+
+    Everything else is shared by construction rather than by copy: the same registered
+    strategy config, the same valuation config, the same execution input id, the same account.
+    """
+    return RunDefinition(
+        strategy_config,
+        valuation_config,
+        ConstraintSet(()),
+        None,
+        exchange,
+        "krx-daily",
+        datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
+        datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        AccountSnapshot(0, INITIAL_CASH, {}),
+        AccountMode.LONG_ONLY,
+        instruments=universe,
+    )
+
+
+def _write_exchanges(universe: tuple[str, ...]) -> dict[str, Path]:
+    """The two venues, as registrable components.
+
+    Written to disk because a registered component is resolved by re-importing its module and
+    looking the class up by name; a class built inside `main()` has no import location.
+    """
+    components = PROJECT / "components"
+    components.mkdir(parents=True, exist_ok=True)
+
+    academic = components / "academic_exchange.py"
+    academic.write_text(
+        f'''"""Fractional quantity, zero cost, full fill."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+
+UNIVERSE = {universe!r}
+
+
+class ShowcaseAcademicExchange(AcademicExchange):
+    def __init__(self):
+        super().__init__(
+            {{
+                instrument: TradeRule(
+                    instrument,
+                    Decimal("0.00000001"),
+                    Decimal("0.00000001"),
+                    True,
+                    ListingAccess.SIGNED,
+                )
+                for instrument in UNIVERSE
+            }},
+            "show004-academic",
+        )
+''',
+        encoding="utf-8",
+    )
+
+    krx = components / "krx_exchange.py"
+    krx.write_text(
+        f'''"""Whole shares, 3bp commission both sides, 20bp sale tax, long only."""
+
+from __future__ import annotations
+
+from vqapr.public import KrxExchange
+
+UNIVERSE = {universe!r}
+
+
+class ShowcaseKrxExchange(KrxExchange):
+    def __init__(self):
+        # `price_limits` stays off by omission: the fixture carries a close and no base price,
+        # and a venue that declared a limit band would demand a price this table does not have.
+        super().__init__(UNIVERSE, "show004-krx")
+''',
+        encoding="utf-8",
+    )
+    return {"academic": academic, "krx": krx}
+
+
+def _recorded_fills(result: Any) -> list[dict[str, Any]]:
+    """Every committed fill, from the run's own published record.
+
+    The Account no longer carries the whole journal -- it is published to ``vqapr.fill`` and
+    dropped -- so replaying its arithmetic reads the record. Rows arrive in commit order, which
+    is the order the Account applied them.
+    """
+    return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
+
+
+def _profile_outcome(result: Any) -> dict[str, Any]:
+    """The KRX/Academic comparison, built from the committed Account and the fill record."""
+    account = result.final_state.account.snapshot
     commission = Decimal("0")
     tax = Decimal("0")
     dealt = 0
     traded_notional = Decimal("0")
-    for row in completed.fills():
+    for row in _recorded_fills(result):
         if Decimal(row["dealt_quantity"]) == 0:
             continue
         dealt += 1
@@ -217,7 +267,7 @@ def _profile_outcome(completed: Any) -> dict[str, Any]:
 
     replay_cash = INITIAL_CASH
     replay_positions: dict[str, Decimal] = {}
-    for row in completed.fills():
+    for row in _recorded_fills(result):
         if Decimal(row["dealt_quantity"]) == 0:
             continue
         replay_cash += Decimal(row["cash_delta"])
@@ -242,7 +292,7 @@ def _profile_outcome(completed: Any) -> dict[str, Any]:
     # instrument's own last dealt fill price -- the same close the run itself last traded
     # at, not a second independently-fetched price.
     last_price: dict[str, Decimal] = {}
-    for row in completed.fills():
+    for row in _recorded_fills(result):
         if row["price"] is not None:
             last_price[str(row["instrument"])] = Decimal(row["price"])
     marked_value = sum(
@@ -296,11 +346,11 @@ td:first-child,th:first-child{{text-align:left}}
 </style>
 <h1>One real signal, two execution profiles</h1>
 <p>Both runs use the same frozen strategy, the same real KRX closes and the same agendas. They
-differ only by the declared <code>venues.Academic</code> venue.</p>
+differ only by the registered exchange component.</p>
 <h2>Universe</h2>{universe}
 <h2>Outcome</h2>{comparison}
 <h2>Cost drag attributable to the KRX profile</h2><pre>{drag}</pre>
-<p>Academic charges nothing and trades fractional quantity. The KRX-shaped profile charges 3bp
+<p>Academic charges nothing and trades fractional quantity. The KRX profile charges 3bp
 commission on both sides, 20bp sale tax on sells, trades whole shares only and refuses short
 positions. Neither profile models price ticks, price limits, queue position, liquidity or
 borrow.</p>
@@ -317,80 +367,105 @@ def main() -> None:
     score_days = sessions[5:-1]
     callback_days = sessions[6:]
 
-    project = vqapr.open(PROJECT)
-    project.register(
-        DatasetDeclaration(
-            dataset_id="price_daily",
-            path=observation_path,
-            hive_partitioned=False,
+    register_dataset(
+        PROJECT,
+        DatasetRegistration.of(
+            "price_daily",
+            "krx-observation",
             instrument_field="instrument",
-            available_at_field="available_at",
+            available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "is_supervised": "is_supervised"},
-        )
-    )
-
-    resolver = project.resolver(instruments=universe)
-    evaluation_times = tuple(
-        datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
-    )
-    project.materialize(
-        model=models.MomentumModel,
-        config={},
-        evaluation_times=evaluation_times,
-        resolver=resolver,
-        output_dataset_id="momentum_score__derived",
-    )
-    _register_momentum_score(project)
-
-    academic_exchange = Academic(
-        listings=tuple(
-            Listing(instrument_id=instrument, access=ListingAccess.SIGNED)
-            for instrument in universe
         ),
-        quantity_step=Decimal("0.00000001"),
-        price_step=Decimal("0.01"),
-        costs=(),
-        # Declared rather than approximated by a tiny step: an academic venue trades
-        # unquantized, which is what the legacy hand-written exchange expressed.
-        fractional_allowed=True,
+        SourceSpec.of("krx-observation", observation_path),
     )
-    krx_shaped_exchange = Academic(
-        listings=tuple(
-            Listing(instrument_id=instrument, access=ListingAccess.LONG_ONLY)
-            for instrument in universe
-        ),
-        quantity_step=Decimal("1"),
-        price_step=Decimal("0.01"),
-        costs=(
-            VenueCost(
-                side="buy", commission_rate=KRX_COMMISSION_RATE, tax_rate=Decimal("0")
+    register_execution_input(
+        PROJECT,
+        ExecutionInputRegistration.of(
+            "krx-daily",
+            ExecutionTableSpec(
+                source=SourceSpec.of("krx-execution", execution_path),
+                trade_at_field="trade_at",
+                instrument_field="instrument",
+                is_tradable_field="is_tradable",
+                price_fields={"close": "close"},
             ),
-            VenueCost(
-                side="sell", commission_rate=KRX_COMMISSION_RATE, tax_rate=KRX_SALE_TAX_RATE
-            ),
+            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
         ),
     )
 
-    academic_simulation = _simulation(
-        universe=universe, execution_path=execution_path, exchange=academic_exchange,
-        callback_days=callback_days,
-    )
-    krx_simulation = _simulation(
-        universe=universe, execution_path=execution_path, exchange=krx_shaped_exchange,
-        callback_days=callback_days,
+    # The materialized score registers itself as an ordinary dataset, so the strategy declares
+    # `momentum_score` and reads it the same way it reads any other. Nothing re-exports it.
+    register_data_model(PROJECT, "momentum-model", MODELS, "MomentumModel")
+    materialize(
+        PROJECT,
+        "momentum-model",
+        MaterializationSpec.of("momentum_score", value_fields=("score", "eligible")),
+        evaluation_times=tuple(
+            datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
+        ),
+        instruments=universe,
     )
 
-    academic = _profile_outcome(
-        project.run_completed(
-            definition=academic_simulation, strategy=models.MomentumLongOnly, run_id="academic"
-        )
+    # The project declares what each id IS, once, before anything trades. KrxExchange resolves
+    # what a fill COSTS from this roster rather than from the venue, which is why the KRX profile
+    # cannot run without it: a venue that stated its own categories would be stating a fact that
+    # was never its own. This fixture is stocks only, so every name is declared a stock.
+    written = export_roster(dict.fromkeys(universe, "stock"), PROJECT)
+    declaration = PROJECT / "instruments.yaml"
+    declaration.write_text(
+        "instruments:\n  tables:\n"
+        + "".join(f"    {kind}: {path.name}\n" for kind, path in sorted(written.items())),
+        encoding="utf-8",
     )
-    krx = _profile_outcome(
-        project.run_completed(
-            definition=krx_simulation, strategy=models.MomentumLongOnly, run_id="krx"
-        )
+    # Registered through the CLI's own entry point, which is what a user runs. Reaching past it
+    # would let this showcase pass while `vqapr register` was broken.
+    register_cli(argparse.Namespace(declaration=str(declaration)), project_root=PROJECT)
+
+    exchanges = _write_exchanges(universe)
+    strategy_ref = component_ref(
+        "momentum-strategy", ComponentKind.STRATEGY_MODEL, MODELS, "MomentumLongOnly"
     )
+    academic_ref = component_ref(
+        "show004-academic",
+        ComponentKind.EXCHANGE,
+        exchanges["academic"],
+        "ShowcaseAcademicExchange",
+    )
+    krx_ref = component_ref(
+        "show004-krx", ComponentKind.EXCHANGE, exchanges["krx"], "ShowcaseKrxExchange"
+    )
+    for reference in (strategy_ref, academic_ref, krx_ref):
+        register_component(PROJECT, reference)
+
+    strategy_agenda = _agenda(
+        "show004-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
+    )
+    valuation_agenda = _agenda(
+        "show004-valuation", OperationRole.VALUATION, time(16, 0), callback_days
+    )
+    for agenda in (strategy_agenda, valuation_agenda):
+        register_agenda(PROJECT, agenda)
+
+    strategy_config = StrategyConfig(
+        strategy_ref, "show004-strategy", OperationRole.STRATEGY_CALLBACK
+    )
+    valuation_config = ValuationConfig("show004-valuation", OperationRole.VALUATION)
+    register_strategy_config(PROJECT, strategy_config)
+    register_valuation_config(PROJECT, valuation_config)
+
+    def _outcome(exchange: ComponentRef) -> dict[str, Any]:
+        definition = _definition(
+            universe=universe,
+            exchange=exchange,
+            strategy_config=strategy_config,
+            valuation_config=valuation_config,
+            callback_days=callback_days,
+        )
+        return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)))
+
+    academic = _outcome(academic_ref)
+    krx = _outcome(krx_ref)
 
     if not krx["whole_share_positions"]:
         raise AssertionError("the KRX profile must hold whole shares only")
@@ -447,11 +522,11 @@ def main() -> None:
         "academic": {k: str(v) for k, v in academic.items()},
         "krx": {k: str(v) for k, v in krx.items()},
         "exchange_surface_note": (
-            "No venues.Krx exists on the supported surface; Simulation.exchange is strictly "
-            "venues.Academic. The KRX economics measured here (whole shares, 3bp commission "
-            "both sides, 20bp sale tax on sells, long only) are reproduced on Academic's own "
-            "fields, which is exact for this fixture (stocks only, no price limit exercised) "
-            "but is a documented substitution, not the real KrxExchange engine class."
+            "Both venues are the shipped engine classes: AcademicExchange and KrxExchange. "
+            "The KRX economics measured here (whole shares, 3bp commission both sides, 20bp "
+            "sale tax on sells, long only) come from the package's own KRX terms rather than "
+            "being reproduced on an academic venue. Price limits are off, because the fixture "
+            "carries a close and no base price."
         ),
     }
 

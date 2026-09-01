@@ -28,7 +28,7 @@ from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateReposito
 from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evidence
 from vqapr.flow.stamping import LookAheadDetected
 from vqapr.flow.views import data_model_window
-from vqapr.models.strategy_model import NoDecision
+from vqapr.authoring import Hold
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.workspace import Workspace
 
@@ -232,7 +232,7 @@ def test_declining_occurrences_publish_nothing_rather_than_an_empty_allocation(
 ) -> None:
     Workspace.create(tmp_path)
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
-    no_decision = _Evidence("run-1", cutoff, (_Access(cutoff),), NoDecision("no signal"))
+    no_decision = _Evidence("run-1", cutoff, (_Access(cutoff),), Hold(reason="no signal"))
 
     with pytest.raises(VqaprError, match="at least one row"):
         publish_run_allocation(
@@ -259,7 +259,7 @@ def test_a_decision_that_is_neither_no_decision_nor_an_intent_is_refused(
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=KST)
     bogus = _Evidence("run-1", cutoff, (_Access(cutoff),), object())
 
-    with pytest.raises(VqaprError, match="NoDecision or an economic intent"):
+    with pytest.raises(VqaprError, match="Hold or an economic intent"):
         publish_run_allocation(tmp_path, AllocationPublicationSpec.of("alpha_allocation"), [bogus])
 
 

@@ -131,7 +131,7 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
 
     # It TRADED. A scaffold that runs but never decides would satisfy `ok: true` while proving
     # nothing about the intent, execution or account-commit paths -- which is exactly what the old
-    # NoDecision template did.
+    # Hold template did.
     assert ran["occurrences"] > 0
     assert ran["account_version"] > 0, (
         "the scaffold ran without ever committing a fill, so the authoring contract's decision "

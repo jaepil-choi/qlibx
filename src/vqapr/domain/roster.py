@@ -32,19 +32,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
-from vqapr.domain.instruments import INSTRUMENT_TYPES, Instrument, InstrumentKind, instrument
+from vqapr.domain.instruments import Instrument, InstrumentKind, instrument
 
 INSTRUMENT_ID_FIELD = "instrument_id"
 KIND_FIELD = "kind"
-
-REQUIRED_FIELDS: tuple[str, ...] = (INSTRUMENT_ID_FIELD, KIND_FIELD)
-"""What every roster table must carry, whatever its category.
-
-Both shipped categories are field-free today -- `kind` is a `ClassVar` on each `Instrument`
-subclass -- so this is the whole schema. A category that carries its own facts (a future's
-contract multiplier, an option's strike and right) adds columns to ITS file and leaves these two
-required everywhere.
-"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,8 +184,3 @@ def _kind(value: object) -> InstrumentKind:
         raise ValueError(
             f"unknown instrument kind {value!r}; declared kinds are {known}"
         ) from error
-
-
-def instrument_types() -> Mapping[InstrumentKind, type[Instrument]]:
-    """The one door from a stored `kind` tag back to its class, re-exported for validation."""
-    return INSTRUMENT_TYPES

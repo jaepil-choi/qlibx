@@ -64,7 +64,6 @@ from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
-NY = ZoneInfo("America/New_York")
 
 
 _BUDGET = Budget(

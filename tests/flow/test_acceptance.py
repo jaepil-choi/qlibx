@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import pytest
 
 import vqapr.flow.model_state as model_state
-from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.flow.run_state import (
@@ -32,10 +30,6 @@ def _recorder() -> InvocationRecorder:
     )
     recorder.append("diagnostics", {"message": "observed"})
     return recorder
-
-
-def _account_state() -> AccountState:
-    return AccountState(AccountSnapshot(0, Decimal("100"), {"A": Decimal("1")}))
 
 
 def test_prepared_state_is_not_visible_or_loadable_until_root_swap() -> None:

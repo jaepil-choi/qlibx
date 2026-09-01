@@ -29,6 +29,12 @@ commands:
   # findings stood while no declared command ran the check. A configured gate nobody invokes is
   # not a gate, so it is declared here and the tree is clean as of record 105.
   lint: uv run ruff check src/
+  # Cross-module dead-code pass; ruff is file-local and cannot answer "is this called
+  # anywhere". Configuration and the reasoning are in pyproject's `[tool.vulture]`.
+  # Not a gate: a report is a candidate, not a verdict, and only a human knows whether a
+  # name is unreached because it is dead or because its caller is not written yet. Run it
+  # before a cleanup task, not on every edit.
+  deadcode: uv run vulture
 
 workflow:
   experiment_root: experiments

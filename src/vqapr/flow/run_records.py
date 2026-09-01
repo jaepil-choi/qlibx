@@ -573,7 +573,7 @@ class RunRecordWriter:
             sort_keys=True,
         )
 
-        def taken(gone: OSError) -> BaseException:
+        def taken(_error: OSError) -> BaseException:
             # The directory is no longer there, or no longer ours. Another run took this id while
             # this one was executing -- only possible when someone forced an id already in use --
             # and this run's rows went with it. Saying so beats an unhandled OSError that reads

@@ -75,14 +75,6 @@ class AccountRequirement:
         if not isinstance(self.lookback, RowsLookback):
             raise TypeError("lookback must be a RowsLookback")
 
-    @property
-    def account_fields(self) -> tuple[str, ...]:
-        return tuple(field for field in self.fields if field in ACCOUNT_FIELDS)
-
-    @property
-    def instrument_fields(self) -> tuple[str, ...]:
-        return tuple(field for field in self.fields if field in INSTRUMENT_FIELDS)
-
 
 def retained_marks(requirements: Sequence[AccountRequirement]) -> int:
     """How many marks a run must keep resident to satisfy every declaration.

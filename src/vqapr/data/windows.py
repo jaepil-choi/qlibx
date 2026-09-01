@@ -52,9 +52,9 @@ class ObservationBatch:
     * `instrument` -- the instrument id, as a string. **Absent** on a dataset registered with no
       `instrument_field`: those rows are not keyed by instrument, the declared instrument list is
       not applied to them, and there is no name to put here (`docs/issues/038`).
-    * one key per field named in the requirement, under the SEMANTIC alias the requirement
-      declared, not the physical column name. A value is `None` where the source has no value; a
-      `RowsLookback` also nulls a field on rows outside that field's own last-N (see
+    * the field the requirement named, under its own id -- a requirement names one field and a
+      lookback, and nothing else (`docs/issues/049`). A value is `None` where the source has no
+      value; a `RowsLookback` also nulls it on rows outside that field's own last-N (see
       `RowsLookback`).
 
     **A value keeps the parquet column's own type.** A `DOUBLE` column arrives as `float` and a

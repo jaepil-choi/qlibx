@@ -10,8 +10,27 @@ requirements are all declared before any read and expressions over the same data
 removes. So the floor half stops being an optimisation and becomes a **precondition**: it is the
 reason one-field-per-requirement does not multiply scans.
 
-The second half — that each `RowsLookback` input costs **two** round trips, `_rows_lower_bound`
-before `observation_rows` — is independent of the ruling and stays open on its own terms.
+**Status update 2026-09-01, later the same day — the second half is CLOSED.**
+`docs/implementations/120-a-read-carries-the-proof-the-next-one-needs.md` (lane B) made a declared
+`RowsLookback` input cost **one** statement per callback instead of two. The proof of the bound is
+taken once per declared read per run and then carried forward by the reads themselves, because the
+rows that would prove the next callback's bound are inside the window this callback is already
+scanning. Measured on `Hml` over 60 callbacks: probe statements **120 → 2**; on the read this
+touches, median per callback **−13.9%** at 300 names and **−15.7%** at 2,795.
+
+Two things this file predicted are worth marking as measured rather than assumed. **The
+two-statement design was right and was preserved** — the exemption that makes a bounded query
+return the unbounded answer is intact, and its argument moved with the code into `_RowsBound`.
+**"About 1,731 of the probe queries answer a question whose answer has not changed" was the fix**,
+almost exactly: item 1 of "three things the run already knows", implemented as stated.
+
+The first half — the per-callback floor, and the fusing that removes it — **stays open** and is
+lane D. What lane B leaves behind is measured in record `120`: the floor is now `observation_rows`
+itself, and `exact_snapshot_rows` has taken second place in the profile.
+
+**The floor number in this file is stale.** ~0.19 s per session was measured before lane A; at 50
+names it is now 0.115 s, and lane A (record `119`, `normalize_rows` off the read path) is the bulk
+of that difference. Read the ladder below as the shape it measured, not as current absolutes.
 
 This file is otherwise unchanged: it is scheduled under the 049 campaign but its measurements are on
 the *simulation* path, a different regime from the materialization path 044/045 measure, and that

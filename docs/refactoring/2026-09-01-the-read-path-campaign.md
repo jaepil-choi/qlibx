@@ -41,7 +41,7 @@ rewrite 없이 병합 가능한 자리에서만 그었다.
 | 레인 | 이슈 | worktree | 브랜치 | 의존 |
 |---|---|---|---|---|
 | **A** | `044` | ~~`qlibx-wt-044`~~ | ~~`read-044-no-validation-on-read`~~ | **병합 완료 `111c0342`**, 기록 `119`. worktree 제거됨 |
-| **B** | `046` 후반 | `qlibx-wt-046b` | `read-046b-one-round-trip` | 없음 |
+| **B** | `046` 후반 | ~~`qlibx-wt-046b`~~ | ~~`read-046b-one-round-trip`~~ | **병합 완료 `35b73229`**, 기록 `120`. worktree 제거됨 |
 | **C** | `038` + `045`/`049` | `qlibx-wt-038-049` | `read-038-049-fields-are-expressions` | 없음 |
 | **D** | `046` 전반 | `qlibx-wt-046a` | `read-046a-one-scan` | **C 병합 후 생성** |
 
@@ -166,6 +166,21 @@ C:/Users/chlje/DevProjects/qlibx-wt-046a     레인 D — C 병합 시점에 생
 재현 하네스는 `kwam-enhanced-index/vqapr-performance-testbed/`이고 built wheel을 상대로 돈다.
 `wide_experiment.py`가 614x 표와 anti-join을, `pivot_experiment.py`가 한 window 읽기를
 (10.19s → 0.048s), `bench.py --stage datamodel`이 1.9%/48.6%/44.7% 분해를 낸다.
+
+> **측정하기 전에 읽을 것 — 레인 B가 셋 다 부딪혔다.** 근거와 숫자는 기록 `120`에 있다.
+>
+> 1. **testbed의 `probes.py`가 develop과 어긋나 있었다.** `public._freeze_record`와
+>    `public.load_strategy_model`은 기록 115–117이 `vqapr.flow.orchestration`으로 옮겼고,
+>    `store.normalize_rows`는 레인 A가 지웠다. 고치기 전에는 **모든 측정이 `AttributeError`로
+>    죽는다.** 설치된 빌드에서 seam을 찾도록 고쳐 뒀지만 **커밋되지 않았다** — 다른 repo다.
+> 2. **연구 패널이 레인 A 이후 등록되지 않는다.** `equity_daily.parquet`에 `+inf` 82행이 있다
+>    (`A065180`, 2015-01~04, `adj_factor = 0`). 레인 A의 `check_values`가 **옳게** 거절한다.
+>    `KWAM_PERF_PREPARED`로 그 82행만 뺀 스냅샷을 향하게 하면 측정은 계속할 수 있다(나머지는
+>    하드링크, 같은 ZSTD·row group). 연구 환경의 `prepare.py`는 별개로 고쳐야 한다.
+> 3. **book의 wall time으로 몇 %를 재려 하지 마라.** 같은 빌드가 pass마다 ±20% 흔들렸고,
+>    12분 떨어져 돈 두 arm은 20% 이득을 **허위로** 보고했다(그 사이에 파이프라인이 하나 더
+>    떴다). rung마다 두 arm을 붙여 돌리고 순서를 교대하라. 그래도 안 갈리면, 바뀐 호출 하나를
+>    직접 재는 하네스를 쓰는 편이 낫다 — 레인 B는 그렇게 −14~16%를 6쌍에서 확인했다.
 
 ## 5. 하지 않을 것
 

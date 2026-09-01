@@ -86,17 +86,13 @@ def test_portfolio_target_is_a_weight_and_never_a_quantity() -> None:
 def test_closed_constraint_evaluation_preserves_pass_and_violation_without_mutation() -> None:
     account = AccountSnapshot(4, Decimal("10"), {"ABC": Decimal("2")})
     marks = ValuationService().mark(account, {"ABC": Decimal("3")})
-    requirement = DataRequirement.of(
-        "constraint",
-        "prices",
-        fields=("close",),
-        lookback=RowsLookback(1),
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
     window = ModelWindow(
         evaluation_time=datetime(2024, 1, 1, tzinfo=UTC),
         instruments=("ABC",),
         store=DuckDbObservationStore(_Catalog()),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     constraints = (_Constraint("pass", True), _Constraint("violation", False))
     projected = project_constraints(constraints, window)

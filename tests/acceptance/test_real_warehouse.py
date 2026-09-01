@@ -74,6 +74,10 @@ class _Catalog:
         assert raw_dataset_id == str(self._registration.dataset_id)
         return self._registration
 
+    def dataset_for_field(self, field_id: str) -> DatasetRegistration:
+        assert field_id in self._registration.fields
+        return self._registration
+
     def source(self, raw_source_id: str) -> SourceSpec:
         assert raw_source_id == str(self._source.source_id)
         return self._source
@@ -232,9 +236,7 @@ def test_real_observations_stay_point_in_time(
         fields={"close": "close"},
     )
     source = SourceSpec.of("krx-observation", observation_path)
-    requirement = DataRequirement.of(
-        "probe", "price_daily", fields=("close",), lookback=RowsLookback(1)
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
     cutoff_session = _sessions(observation_path)[3]
     morning = _instant(cutoff_session, time(8, 30))
 
@@ -243,6 +245,7 @@ def test_real_observations_stay_point_in_time(
         instruments=instruments,
         store=DuckDbObservationStore(_Catalog(registration, source)),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     batch = window.observations(requirement)
 
@@ -308,9 +311,7 @@ def test_real_close_is_visible_exactly_at_the_venue_close(
         fields={"close": "close"},
     )
     source = SourceSpec.of("krx-observation", observation_path)
-    requirement = DataRequirement.of(
-        "mark", "price_daily", fields=("close",), lookback=RowsLookback(1)
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
     session = _sessions(observation_path)[3]
     cutoff = _instant(session, time(15, 30))
 
@@ -319,6 +320,7 @@ def test_real_close_is_visible_exactly_at_the_venue_close(
         instruments=instruments,
         store=DuckDbObservationStore(_Catalog(registration, source)),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     batch = window.observations(requirement)
 

@@ -471,8 +471,9 @@ def test_show_model_describes_a_datamodel_and_not_only_a_strategy(
         row["kind"] in {"strategy", "datamodel", "constraint", "exchange"}
         for row in listed["items"]
     ), "every reported kind must be one the CLI accepts, or the enum value where it takes none"
-    # What it reads is the question a reader opens this command to answer.
-    assert described["decides"] == ["prices"]
+    # What it reads is the question a reader opens this command to answer -- and what a model
+    # declares it reads is a field id, not a dataset id.
+    assert described["decides"] == ["close"]
 
 
 def test_a_registered_datamodel_is_runnable_through_run(

@@ -84,14 +84,13 @@ def registered(tmp_path: Path) -> tuple[Workspace, Path]:
 
 
 def _read(space: Workspace) -> tuple[dict[str, object], ...]:
-    requirement = DataRequirement.of(
-        "consumer", "prices", fields=("close",), lookback=RowsLookback(2)
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=SESSIONS[-1],
         instruments=INSTRUMENTS,
         store=DuckDbObservationStore(space),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     return window.observations(requirement).rows
 

@@ -230,7 +230,7 @@ from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold
 
 class Strategy(StrategyModel):
     def requirements(self):
-        return (DataRequirement.of("s", "prices", fields=("close",), lookback=RowsLookback(2)),)
+        return (DataRequirement.of("close", lookback=RowsLookback(2)),)
 
     def on_occurrence(self, context):
         return Hold(reason="qa probe")
@@ -286,7 +286,7 @@ from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold
 
 class Strategy(StrategyModel):
     def requirements(self):
-        return (DataRequirement.of("s", "prices", fields=("close",), lookback=RowsLookback(2)),)
+        return (DataRequirement.of("close", lookback=RowsLookback(2)),)
 
     def on_occurrence(self, context):
         return Hold(reason="qa probe")

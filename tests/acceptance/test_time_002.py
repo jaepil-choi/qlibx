@@ -133,7 +133,7 @@ def _agenda(identifier: str, role: OperationRole, *times: datetime) -> FrozenAge
 
 
 def _requirement() -> DataRequirement:
-    return DataRequirement.of("valuation", "prices", fields=("close",), lookback=RowsLookback(1))
+    return DataRequirement.of("close", lookback=RowsLookback(1))
 
 
 class _Constraint(Constraint):
@@ -261,6 +261,7 @@ def _flow(
                 instruments=("A",),
                 store=DuckDbObservationStore(_Catalog()),
                 allowed_requirements=frozen.strategy_requirements,
+                consumer_id="test-consumer",
             )
         ),
         constraint_window_for_occurrence=constraint_window_for_occurrence
@@ -270,6 +271,7 @@ def _flow(
                 instruments=("A",),
                 store=DuckDbObservationStore(_Catalog()),
                 allowed_requirements=(_requirement(),),
+                consumer_id="test-consumer",
             )
         ),
         account=Account(mode=AccountMode.LONG_ONLY),
@@ -344,14 +346,13 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
         SourceSpec.of("source", source),
     )
     workspace = Workspace.open(tmp_path / "workspace")
-    requirement = DataRequirement.of(
-        "strategy", "prices", fields=("close",), lookback=RowsLookback(3)
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(3))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 5, 4, tzinfo=UTC),
         instruments=("A",),
         store=DuckDbObservationStore(workspace),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
     assert [row["close"] for row in window.observations(requirement).rows] == [1.0, 2.0]
@@ -399,14 +400,13 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
         SourceSpec.of("source", source),
     )
     workspace = Workspace.open(tmp_path / "workspace")
-    requirement = DataRequirement.of(
-        "strategy", "prices", fields=("close",), lookback=RowsLookback(2)
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 5, 4, tzinfo=KST),
         instruments=("A",),
         store=DuckDbObservationStore(workspace),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
     assert [row["close"] for row in window.observations(requirement).rows] == [1.0]
@@ -589,9 +589,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
     source = SourceSpec.of("source", source_path)
     register_dataset(tmp_path / "workspace", registration, source)
     workspace = Workspace.open(tmp_path / "workspace")
-    requirement = DataRequirement.of(
-        "strategy", "prices", fields=("close",), lookback=RowsLookback(1)
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
     execution = _execution(
@@ -632,7 +630,10 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
             instruments=("A",),
             store=DuckDbObservationStore(workspace),
             allowed_requirements=(requirement,),
+            consumer_id="reading-strategy",
         ),
+        # No consumer: a constraint window serves every loaded constraint, and
+        # `project_constraints` takes a view per constraint. Built the way orchestration builds it.
         constraint_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
             instruments=("A",),
@@ -664,12 +665,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
 
 @pytest.mark.uc("UC-TIME-002")
 def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> None:
-    requirement = DataRequirement.of(
-        "strategy",
-        "prices",
-        fields=("close",),
-        lookback=RowsLookback(1),
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
     registration = DatasetRegistration.of(
         "prices",
         "missing-source",
@@ -705,12 +701,7 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
 
 @pytest.mark.uc("UC-TIME-002")
 def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Path) -> None:
-    requirement = DataRequirement.of(
-        "strategy",
-        "prices",
-        fields=("close",),
-        lookback=RowsLookback(1),
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
     registration = DatasetRegistration.of(
         "prices",
         "missing-source",
@@ -732,6 +723,9 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
 
     class MissingCatalog:
         def dataset(self, _dataset_id: str) -> DatasetRegistration:
+            return registration
+
+        def dataset_for_field(self, _field_id: str) -> DatasetRegistration:
             return registration
 
         def source(self, _source_id: str) -> SourceSpec:
@@ -756,6 +750,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
                 instruments=("A",),
                 store=DuckDbObservationStore(MissingCatalog()),
                 allowed_requirements=(requirement,),
+                consumer_id="test-consumer",
             ),
         ).run()
 

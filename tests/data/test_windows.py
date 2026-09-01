@@ -34,54 +34,61 @@ def _workspace(tmp_path: Path, model_price_parquet: Path) -> Workspace:
     return Workspace.open(tmp_path)
 
 
-def test_rows_window_is_pit_bounded_and_counts_per_instrument_and_field(
+def test_rows_window_is_pit_bounded_and_counts_per_field(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
+    """A RowsLookback counts each field's OWN last N, and a requirement names one field.
+
+    `volume` is null on the 6th and `close` is present on it, so the two fields reach back
+    different distances for the same instrument. That is the property this pins, and it is now
+    read one requirement at a time rather than one batch carrying both.
+    """
     workspace = _workspace(tmp_path, model_price_parquet)
-    requirement = DataRequirement.of(
-        "reversal",
-        "price_daily",
-        fields=("close", "volume"),
-        lookback=RowsLookback(2),
-    )
-    window = ModelWindow(
+    window_for = lambda requirement: ModelWindow(  # noqa: E731
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A", "B"),
         store=DuckDbObservationStore(workspace),
         allowed_requirements=(requirement,),
+        consumer_id="reversal",
     )
 
-    batch = window.observations(requirement)
+    close = DataRequirement.of("close", lookback=RowsLookback(2))
+    volume = DataRequirement.of("volume", lookback=RowsLookback(2))
+    closes = window_for(close).observations(close)
+    volumes = window_for(volume).observations(volume)
 
-    a_rows = [row for row in batch.rows if row["instrument"] == "A"]
-    assert [(row["available_at"].day, row["close"], row["volume"]) for row in a_rows] == [
-        (5, None, 10.0),
-        (6, 103.0, None),
-        (7, 105.0, 12.0),
-    ]
-    assert all(row["available_at"].day != 8 for row in batch.rows)
-    assert batch.access.actual_rows == {
-        "A": {"close": 2, "volume": 2},
-        "B": {"close": 2, "volume": 2},
-    }
-    assert batch.access.max_available_at == datetime(2024, 3, 7, 15, 30, tzinfo=KST)
+    assert [
+        (row["available_at"].day, row["close"])
+        for row in closes.rows
+        if row["instrument"] == "A"
+    ] == [(6, 103.0), (7, 105.0)]
+    assert [
+        (row["available_at"].day, row["volume"])
+        for row in volumes.rows
+        if row["instrument"] == "A"
+    ] == [(5, 10.0), (7, 12.0)]
+    # The 8th is past the evaluation time for both.
+    assert all(row["available_at"].day != 8 for row in (*closes.rows, *volumes.rows))
+    assert closes.access.actual_rows == {"A": {"close": 2}, "B": {"close": 2}}
+    assert volumes.access.actual_rows == {"A": {"volume": 2}, "B": {"volume": 2}}
+    assert closes.access.max_available_at == datetime(2024, 3, 7, 15, 30, tzinfo=KST)
+    # Stamped by the framework from the component that read, and the dataset resolved from the
+    # field id rather than named by the requirement.
+    assert closes.access.consumer_id == "reversal"
+    assert str(closes.access.dataset_id) == "price_daily"
 
 
 def test_calendar_window_uses_local_midnight_not_session_count(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     workspace = _workspace(tmp_path, model_price_parquet)
-    requirement = DataRequirement.of(
-        "calendar-model",
-        "price_daily",
-        fields=("close",),
-        lookback=CalendarLookback(days=1, timezone="Asia/Seoul"),
-    )
+    requirement = DataRequirement.of("close", lookback=CalendarLookback(days=1, timezone="Asia/Seoul"))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A",),
         store=DuckDbObservationStore(workspace),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
     batch = window.observations(requirement)
@@ -94,17 +101,14 @@ def test_window_rejects_an_undeclared_requirement(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     workspace = _workspace(tmp_path, model_price_parquet)
-    declared = DataRequirement.of(
-        "reversal", "price_daily", fields=("close",), lookback=RowsLookback(2)
-    )
-    undeclared = DataRequirement.of(
-        "reversal", "price_daily", fields=("volume",), lookback=RowsLookback(2)
-    )
+    declared = DataRequirement.of("close", lookback=RowsLookback(2))
+    undeclared = DataRequirement.of("volume", lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A",),
         store=DuckDbObservationStore(workspace),
         allowed_requirements=(declared,),
+        consumer_id="test-consumer",
     )
 
     with pytest.raises(VqaprError) as caught:

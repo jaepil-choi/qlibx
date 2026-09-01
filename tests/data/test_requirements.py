@@ -34,13 +34,31 @@ def test_calendar_lower_bound_is_local_midnight_with_month_end_clamping() -> Non
     )
 
 
-def test_requirement_rejects_empty_or_duplicate_framework_fields() -> None:
-    with pytest.raises(ValueError, match="at least one"):
-        DataRequirement.of("reversal", "price_daily", fields=(), lookback=RowsLookback(2))
-    with pytest.raises(ValueError, match="unique"):
-        DataRequirement.of(
-            "reversal",
-            "price_daily",
-            fields=("close", "close"),
-            lookback=RowsLookback(2),
-        )
+def test_a_requirement_is_a_field_and_a_lookback_and_nothing_else() -> None:
+    """No dataset id, no consumer id: one names the other, and the framework knows the other."""
+    requirement = DataRequirement.of("close", lookback=RowsLookback(2))
+
+    assert requirement.field_id == "close"
+    assert requirement.lookback == RowsLookback(2)
+    assert not hasattr(requirement, "dataset_id")
+    assert not hasattr(requirement, "consumer_id")
+
+
+def test_requirement_rejects_a_field_that_is_not_a_name() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        DataRequirement.of("", lookback=RowsLookback(2))
+    with pytest.raises(ValueError, match="non-empty"):
+        DataRequirement.of("two words", lookback=RowsLookback(2))
+    with pytest.raises(TypeError, match="string"):
+        DataRequirement.of(None, lookback=RowsLookback(2))
+
+
+def test_requirement_rejects_a_name_the_window_owns() -> None:
+    for reserved in ("available_at", "instrument"):
+        with pytest.raises(ValueError, match="reserved"):
+            DataRequirement.of(reserved, lookback=RowsLookback(2))
+
+
+def test_requirement_rejects_a_lookback_that_is_not_one() -> None:
+    with pytest.raises(TypeError, match="RowsLookback or CalendarLookback"):
+        DataRequirement.of("close", lookback=2)

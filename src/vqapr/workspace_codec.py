@@ -864,31 +864,14 @@ def _encode_requirement(requirement: DataRequirement) -> dict[str, object]:
             "days": lookback.days,
             "timezone": lookback.timezone,
         }
-    return {
-        "consumer_id": requirement.consumer_id,
-        "dataset_id": str(requirement.dataset_id),
-        "fields": list(requirement.fields),
-        "lookback": encoded_lookback,
-    }
+    return {"field_id": requirement.field_id, "lookback": encoded_lookback}
 
 
 def _decode_requirement(raw: object) -> DataRequirement:
-    if not isinstance(raw, dict) or set(raw) != {"consumer_id", "dataset_id", "fields", "lookback"}:
-        raise ValueError(
-            "mark_requirement must contain exactly consumer_id, dataset_id, fields, and lookback"
-        )
-    consumer_id, raw_dataset_id, fields, raw_lookback = (
-        raw["consumer_id"],
-        raw["dataset_id"],
-        raw["fields"],
-        raw["lookback"],
-    )
-    if (
-        not isinstance(consumer_id, str)
-        or not isinstance(raw_dataset_id, str)
-        or not isinstance(fields, list)
-        or not all(isinstance(field, str) for field in fields)
-    ):
+    if not isinstance(raw, dict) or set(raw) != {"field_id", "lookback"}:
+        raise ValueError("mark_requirement must contain exactly field_id and lookback")
+    field_id, raw_lookback = raw["field_id"], raw["lookback"]
+    if not isinstance(field_id, str):
         raise TypeError("mark_requirement declarations must use strings")
     if not isinstance(raw_lookback, dict) or not isinstance(raw_lookback.get("kind"), str):
         raise TypeError("mark_requirement lookback must be a mapping with a kind")
@@ -909,4 +892,4 @@ def _decode_requirement(raw: object) -> DataRequirement:
         )
     else:
         raise ValueError("mark_requirement lookback has an invalid shape")
-    return DataRequirement.of(consumer_id, raw_dataset_id, fields=fields, lookback=lookback)
+    return DataRequirement.of(field_id, lookback=lookback)

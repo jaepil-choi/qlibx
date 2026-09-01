@@ -204,9 +204,7 @@ class SignedAlpha(StrategyModel):
 
     def requirements(self):
         return (
-            DataRequirement.of(
-                "show005-alpha", "price_daily", fields=("close",), lookback=RowsLookback(1)
-            ),
+            DataRequirement.of("close", lookback=RowsLookback(1)),
         )
 
     def on_occurrence(self, context):
@@ -301,21 +299,12 @@ class EnhancedIndex(StrategyModel):
 
     def requirements(self):
         return (
-            DataRequirement.of(
-                "show005-index",
-                self._benchmark_dataset_id,
-                fields=("benchmark_weight",),
-                lookback=RowsLookback(1),
-            ),
-            DataRequirement.of(
-                "show005-index",
-                self._alpha_dataset_id,
-                fields=("weight",),
-                lookback=RowsLookback(1),
-            ),
-            DataRequirement.of(
-                "show005-index", "price_daily", fields=("close",), lookback=RowsLookback(1)
-            ),
+            DataRequirement.of("benchmark_weight", lookback=RowsLookback(1)),
+            # A published allocation exposes its weight under a field id carrying the dataset
+            # id, because field ids are unique across the workspace and two published allocations
+            # would otherwise both be called `weight`.
+            DataRequirement.of(f"{self._alpha_dataset_id}_weight", lookback=RowsLookback(1)),
+            DataRequirement.of("close", lookback=RowsLookback(1)),
         )
 
     def _panel(self, context, requirement, field):
@@ -328,7 +317,7 @@ class EnhancedIndex(StrategyModel):
     def on_occurrence(self, context):
         index_requirement, alpha_requirement, price_requirement = self.requirements()
         benchmark = self._panel(context, index_requirement, "benchmark_weight")
-        active = self._panel(context, alpha_requirement, "weight")
+        active = self._panel(context, alpha_requirement, f"{self._alpha_dataset_id}_weight")
         prices = self._panel(context, price_requirement, "close")
         if not benchmark or not active:
             return Hold(reason="both allocation inputs must be visible before combining them")
@@ -801,7 +790,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "SingleNameCap",
         config={
             "cap": CAP,
-            "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
             "constraint_id": "single-name-cap",
         },

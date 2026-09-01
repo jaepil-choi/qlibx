@@ -128,9 +128,7 @@ def _flow(
 ) -> SimulationFlow:
     strategy_agenda = FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences)
     valuation_agenda = FrozenAgenda("valuation", OperationRole.VALUATION, ())
-    requirement = DataRequirement.of(
-        "valuation", "prices", fields=("close",), lookback=RowsLookback(1)
-    )
+    requirement = DataRequirement.of("close", lookback=RowsLookback(1))
     frozen = FrozenRun(
         strategy=StrategyConfig(
             _component("strategy", ComponentKind.STRATEGY_MODEL),
@@ -155,6 +153,7 @@ def _flow(
             instruments=("A",),
             store=DuckDbObservationStore(_Catalog()),
             allowed_requirements=(requirement,),
+            consumer_id="test-consumer",
         )
 
     return SimulationFlow(

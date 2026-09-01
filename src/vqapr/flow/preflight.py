@@ -72,17 +72,14 @@ def _freeze_agenda(
 
 
 def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSpec:
-    """Check declared valuation input availability without reading physical source bytes."""
-    dataset_id = getattr(requirement, "dataset_id", None)
-    fields = getattr(requirement, "fields", None)
+    """Check declared valuation input availability without reading physical source bytes.
+
+    A requirement names a field, so resolving it IS the check: `dataset_for_field` refuses a name
+    no registered dataset exposes, and the dataset it returns is the one the run will read.
+    """
     if not isinstance(requirement, DataRequirement):
         raise TypeError("requirement must be a DataRequirement")
-    registration = workspace.dataset(dataset_id)
-    missing = tuple(field for field in fields if field not in registration.fields)
-    if missing:
-        raise ValueError(
-            f"dataset {dataset_id!r} does not provide required fields: {', '.join(missing)}"
-        )
+    registration = workspace.dataset_for_field(requirement.field_id)
     return workspace.source(str(registration.source))
 
 
@@ -549,9 +546,13 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
     )
     sources = _freeze_sources(workspace, tuple(requirements), execution_input.table.source)
+    # The dataset a requirement reads is the one that declares its field, resolved here so the
+    # frozen run carries the registration itself rather than a name to look up later.
     datasets_by_id = {
-        requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
-        for requirement in requirements
+        registration.dataset_id: registration
+        for registration in (
+            workspace.dataset_for_field(requirement.field_id) for requirement in requirements
+        )
     }
     datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
 

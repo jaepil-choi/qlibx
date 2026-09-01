@@ -170,19 +170,27 @@ def materialization_judgments(
             )
             requirements = ()
         if requirements:
+            # A requirement names a field; the dataset behind it is whichever registration
+            # declares that name (`docs/issues/049`).
+            exposing = {
+                field_id: registration
+                for registration in by_id.values()
+                for field_id in getattr(registration, "fields", ())
+            }
             absent = sorted(
                 {
-                    str(requirement.dataset_id)
+                    requirement.field_id
                     for requirement in requirements
-                    if str(requirement.dataset_id) not in by_id
+                    if requirement.field_id not in exposing
                 }
             )
             if absent:
                 refuse(
                     "requirement_unregistered",
-                    "every dataset the model declares it reads must be registered",
-                    f"unregistered: {', '.join(absent)}",
-                    "register the missing datasets, then check again",
+                    "every field the model declares it reads must be exposed by a "
+                    "registered dataset",
+                    f"unexposed: {', '.join(absent)}",
+                    "register a dataset exposing the missing fields, then check again",
                     MATERIALIZATION,
                 )
             # The judgment that keeps this verb honest. Without it `check` returns ok:true and
@@ -199,7 +207,7 @@ def materialization_judgments(
             )
             earliest = declared_times[0] if declared_times else None
             for requirement in requirements:
-                registration = by_id.get(str(requirement.dataset_id))
+                registration = exposing.get(requirement.field_id)
                 rows = getattr(getattr(requirement, "lookback", None), "rows", None)
                 span = getattr(registration, "span", None) if registration else None
                 begins = _instant(span[0]) if span else None
@@ -208,7 +216,8 @@ def materialization_judgments(
                 refuse(
                     "lookback_uncovered",
                     (
-                        f"dataset {requirement.dataset_id!r} must carry history reaching back "
+                        f"the dataset behind {requirement.field_id!r} must carry history "
+                        "reaching back "
                         "past the earliest evaluation, or that evaluation reads a short window "
                         "and produces nothing"
                     ),
@@ -436,11 +445,13 @@ def _judge_datasets_and_fields(
     registered: dict[str, Any],
     at: FailureSource,
 ) -> list[Failure]:
-    """Every dataset a component reads must be registered, and expose the fields it names.
+    """Every field a component reads must be exposed by some registered dataset.
 
-    Two codes rather than one, because they are two different repairs: an unregistered dataset is
-    fixed by registering it, and an absent field is fixed by correcting the component or the
-    source. Collapsing them would tell the reader which command failed but not which to run.
+    **One code rather than two, because a requirement no longer names a dataset.** It names a
+    field id, and the registration that declares it says which dataset that is
+    (`docs/issues/049`), so "the dataset is not registered" and "the dataset does not expose the
+    field" have become one question with one repair: register a dataset that exposes the name, or
+    read a name the workspace already has.
     """
     found: list[Failure] = []
     strategy = document.get("strategy")
@@ -459,27 +470,37 @@ def _judge_datasets_and_fields(
         # sat in `CODES` looking implemented. Only the loaded model knows what it reads.
         component = load_strategy_model(ref, project_root=workspace.project_root)
     except (VqaprError, TypeError, ValueError):
-        # The component does not resolve or does not load. `check.dataset.unregistered` is about a
-        # dataset, not about a component that will not import, and the conformance judgments
-        # already own that refusal -- reporting it here too would name one defect twice.
+        # The component does not resolve or does not load. `check.field.absent` is about a field,
+        # not about a component that will not import, and the conformance judgments already own
+        # that refusal -- reporting it here too would name one defect twice.
         return found
 
+    exposing = {
+        field_id: registration
+        for registration in registered.values()
+        for field_id in getattr(registration, "fields", ())
+    }
     for requirement in component.requirements() or ():
-        dataset_id = str(getattr(requirement, "dataset_id", ""))
-        if not dataset_id:
+        field_id = str(getattr(requirement, "field_id", ""))
+        if not field_id:
             continue
-        registration = registered.get(dataset_id)
+        registration = exposing.get(field_id)
         if registration is None:
-            close = get_close_matches(dataset_id, sorted(registered), n=1)
+            close = get_close_matches(field_id, sorted(exposing), n=1)
             found.append(
                 Failure.bounded(
-                    "check.dataset.unregistered",
-                    f"dataset {dataset_id!r} must be registered before a run can read it",
-                    observed=f"registered: {', '.join(sorted(registered)) or '(none)'}",
+                    "check.field.absent",
+                    f"field {field_id!r} must be exposed by a registered dataset",
+                    observed=f"exposed: {', '.join(sorted(exposing)) or '(none)'}",
+                    examples=(field_id,),
+                    example_total=1,
                     fix=(
-                        f"register {dataset_id!r}, or point the component at {close[0]!r}"
+                        f"read {close[0]!r} instead, or register a dataset exposing {field_id!r}"
                         if close
-                        else f"register {dataset_id!r} with `vqapr register <declaration.yaml>`"
+                        else (
+                            f"register a dataset exposing {field_id!r} with "
+                            "`vqapr register <declaration.yaml>`"
+                        )
                     ),
                     explain=ExplainTopic.WORKSPACE_STATE,
                     source=replace(at, key_path="strategy.component"),
@@ -487,27 +508,7 @@ def _judge_datasets_and_fields(
             )
             continue
 
-        exposed = set(registration.fields)
-        missing = [name for name in getattr(requirement, "fields", ()) if name not in exposed]
-        if missing:
-            found.append(
-                Failure.bounded(
-                    "check.field.absent",
-                    f"dataset {dataset_id!r} must expose every field the component reads",
-                    observed=(
-                        f"missing: {', '.join(missing)}; "
-                        f"exposed: {', '.join(sorted(exposed))}"
-                    ),
-                    examples=missing,
-                    example_total=len(missing),
-                    fix=(
-                        f"add {', '.join(missing)} to the dataset's fields mapping and register "
-                        "it again, or read a field it already exposes"
-                    ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
-                    source=replace(at, key_path="strategy.component"),
-                )
-            )
+        dataset_id = str(registration.dataset_id)
 
         lookback = getattr(requirement, "lookback", None)
         rows = getattr(lookback, "rows", None)

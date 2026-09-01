@@ -462,30 +462,15 @@ class FrozenRun:
                 "initial_payload": self.initial_payload.hex(),
                 "instruments": self.instruments,
                 "strategy_requirements": [
-                    (
-                        requirement.consumer_id,
-                        requirement.dataset_id,
-                        requirement.fields,
-                        repr(requirement.lookback),
-                    )
+                    (requirement.field_id, repr(requirement.lookback))
                     for requirement in self.strategy_requirements
                 ],
                 "constraint_requirements": [
-                    (
-                        requirement.consumer_id,
-                        requirement.dataset_id,
-                        requirement.fields,
-                        repr(requirement.lookback),
-                    )
+                    (requirement.field_id, repr(requirement.lookback))
                     for requirement in self.constraint_requirements
                 ],
                 "requirements": [
-                    (
-                        requirement.consumer_id,
-                        requirement.dataset_id,
-                        requirement.fields,
-                        repr(requirement.lookback),
-                    )
+                    (requirement.field_id, repr(requirement.lookback))
                     for requirement in self.requirements
                 ],
                 "datasets": [

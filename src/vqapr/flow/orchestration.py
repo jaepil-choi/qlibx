@@ -24,6 +24,7 @@ from vqapr.constraints.evaluation import (
     constraint_requirements as declared_constraint_requirements,
 )
 from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.resolution import dataset_for_field, field_index
 from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
@@ -61,9 +62,13 @@ class _FrozenCatalog:
     def __init__(self, frozen: FrozenRun) -> None:
         self._datasets = {str(dataset.dataset_id): dataset for dataset in frozen.datasets}
         self._sources = {str(source.source_id): source for source in frozen.sources}
+        self._fields = field_index(frozen.datasets)
 
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
         return self._datasets[raw_dataset_id]
+
+    def dataset_for_field(self, field_id: str) -> DatasetRegistration:
+        return dataset_for_field(self._fields, field_id)
 
     def source(self, raw_source_id: str) -> SourceSpec:
         return self._sources[raw_source_id]
@@ -155,11 +160,15 @@ def run(
             instruments=frozen.instruments,
             store=store,
             allowed_requirements=frozen.strategy_requirements,
+            consumer_id=str(frozen.strategy.component.component_id),
         ),
         constraint_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
             instruments=frozen.instruments,
             store=store,
+            # No consumer: this window serves every loaded constraint, and which one is reading
+            # is known only inside the loop that calls them. `project_constraints` and
+            # `evaluate_constraints` take a view per constraint.
             allowed_requirements=frozen.constraint_requirements,
         ),
         # A run retains exactly the marks somebody declared they would read. Declaring nothing

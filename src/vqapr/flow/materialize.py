@@ -692,11 +692,19 @@ def _stage_and_publish(
     value_fields: Sequence[str],
     rows: Sequence[Row],
     payload: Mapping[str, object],
+    qualify_field_ids: bool = False,
 ) -> tuple[DatasetRegistration, Path, Path]:
     """Stage, validate, atomically expose, and register one derived dataset.
 
     Both publication callers share this body rather than each owning a copy: a second publication
     path would be a second publication authority, and they would drift.
+
+    `qualify_field_ids` prefixes the exposed ids with the dataset id, leaving the physical columns
+    alone. A field id is unique across the workspace (`docs/issues/049`), and where the author
+    chose the names that is a rule they can satisfy -- but the five Flow-stamped envelope columns
+    are on every run record by construction, so two records published from one run would collide
+    on names neither the author nor the reader picked. Qualifying is how the framework avoids
+    manufacturing a conflict it would then refuse.
     """
     root = Path(project_root)
     output_directory = root / ".vqapr" / "materialized"
@@ -756,13 +764,14 @@ def _stage_and_publish(
                 retry="fix output scalar compatibility or filesystem access, then retry",
             ) from error
 
+        prefix = f"{dataset_id.replace('-', '_')}_" if qualify_field_ids else ""
         candidate_registration = DatasetRegistration.of(
             dataset_id,
             source_id,
             instrument_field="instrument",
             available_at="available_at",
             key_fields=("available_at", "instrument"),
-            fields={field: field for field in value_fields},
+            fields={f"{prefix}{field}": field for field in value_fields},
         )
         candidate_source = SourceSpec.of(source_id, temporary_output)
         diagnosis, _, candidate_registration = validate(candidate_registration, candidate_source)
@@ -984,6 +993,7 @@ def publish_run_allocation(
         value_fields=(spec.value_field,),
         rows=sorted(rows, key=lambda row: (row["available_at"], row["instrument"])),
         payload=payload,
+        qualify_field_ids=True,
     )
     return AllocationPublicationResult(
         registration=registration,
@@ -1139,6 +1149,7 @@ def publish_run_record(
         value_fields=spec.value_fields,
         rows=sorted(rows, key=lambda row: (row["available_at"], row["instrument"])),
         payload=payload,
+        qualify_field_ids=True,
     )
     return RunRecordResult(
         registration=registration,
@@ -1202,6 +1213,7 @@ def materialize(
                 evaluation_time=evaluation_time,
                 instruments=selected_instruments,
                 requirements=requirements,
+                consumer_id=str(ref.component_id),
                 store=store,
             )
             try:

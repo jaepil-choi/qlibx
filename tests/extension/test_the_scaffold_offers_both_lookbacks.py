@@ -144,6 +144,7 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
                 instruments=("A", "B"),
                 store=DuckDbObservationStore(Workspace.open(tmp_path)),
                 allowed_requirements=(requirement,),
+                consumer_id="test-consumer",
             )
         )
     )

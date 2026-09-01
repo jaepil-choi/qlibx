@@ -322,18 +322,19 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
     )
 
     workspace = Workspace.open(tmp_path)
-    requirement = DataRequirement.of(
-        "subscriber", "alpha_allocation", fields=("weight",), lookback=RowsLookback(1)
-    )
+    # The published field id carries the dataset id: a field id is unique across the workspace, and
+    # two allocations published from one run would otherwise both be called `weight`.
+    requirement = DataRequirement.of("alpha_allocation_weight", lookback=RowsLookback(1))
 
     visible = data_model_window(
         workspace,
         evaluation_time=cutoff,
         instruments=tuple(sorted(weights)),
         requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     rows = visible.observations(requirement).rows
-    subscribed = {row["instrument"]: row["weight"] for row in rows}
+    subscribed = {row["instrument"]: row["alpha_allocation_weight"] for row in rows}
 
     assert subscribed == weights, "Decimal fidelity must survive the store boundary"
 
@@ -342,6 +343,7 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
         evaluation_time=cutoff - timedelta(seconds=1),
         instruments=tuple(sorted(weights)),
         requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     assert hidden.observations(requirement).rows == ()
 

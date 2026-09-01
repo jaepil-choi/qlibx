@@ -85,7 +85,9 @@ def two_stale_workspace(tmp_path: Path) -> tuple[Path, Path]:
             instrument_field="instrument",
             available_at="available_at",
             key_fields=("session_date", "instrument"),
-            fields={"close": "close", "session_date": "session_date"},
+            # Field ids are unique across the workspace, so three datasets over one source carry
+            # three sets of names rather than three copies of one.
+            fields={f"{raw_id}_close": "close", f"{raw_id}_session_date": "session_date"},
         )
 
     for name in ("alpha", "beta", "gamma"):
@@ -153,7 +155,7 @@ datasets:
     instrument_field: instrument
     available_at: available_at
     key_fields: [session_date, instrument]
-    fields: {{close: close, session_date: session_date}}
+    fields: {{alpha_close: close, alpha_session_date: session_date}}
 """,
         encoding="utf-8",
     )
@@ -197,7 +199,7 @@ datasets:
     instrument_field: instrument
     available_at: available_at
     key_fields: [session_date, instrument]
-    fields: {{close: open, session_date: session_date}}
+    fields: {{alpha_close: open, alpha_session_date: session_date}}
 """,
         encoding="utf-8",
     )

@@ -725,7 +725,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         "    def constraint_id(self):\n"
         "        return 'limit'\n"
         "    def requirements(self):\n"
-        "        return (DataRequirement.of('limit', 'absent', fields=('close',), "
+        "        return (DataRequirement.of('no-such-field', "
         "lookback=RowsLookback(1)),)\n"
         "    def project(self, window, instruments):\n"
         "        return None\n"

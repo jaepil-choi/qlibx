@@ -55,6 +55,9 @@ class _Catalog:
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
         return self._registration
 
+    def dataset_for_field(self, field_id: str) -> DatasetRegistration:
+        return self._registration
+
     def source(self, raw_source_id: str) -> SourceSpec:
         return self._source
 
@@ -78,13 +81,14 @@ def _benchmark_window(
         instruments=instruments,
         store=DuckDbObservationStore(_Catalog(registration, source)),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
 
 def _cap(manifest: dict[str, object], cap: str = "0.10") -> SingleNameCap:
     return SingleNameCap(
         cap=cap,
-        benchmark_dataset_id="benchmark_weight_daily",
+        
         tolerance=str(manifest["weight_tolerance"]),
     )
 
@@ -234,6 +238,7 @@ def test_single_name_cap_refuses_an_invariant_violating_benchmark(
             _Catalog(registration, SourceSpec.of("benchmark-source", bad))
         ),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
     with pytest.raises(AllocationViolation, match="long_only"):
@@ -411,19 +416,17 @@ def test_configured_decimals_must_be_strings(manifest: dict[str, object]) -> Non
         with pytest.raises(ValueError):
             SingleNameCap(
                 cap=bad,  # type: ignore[arg-type]
-                benchmark_dataset_id="benchmark_weight_daily",
+                
                 tolerance=str(manifest["weight_tolerance"]),
             )
 
 
-def test_requirements_name_the_configured_benchmark_dataset(
-    manifest: dict[str, object],
-) -> None:
+def test_requirements_name_the_benchmark_weight_field(manifest: dict[str, object]) -> None:
+    """A requirement names the FIELD. Which dataset carries it is the registration's answer."""
     constraint = _cap(manifest)
     requirement = constraint.requirements()[0]
 
-    assert str(requirement.dataset_id) == "benchmark_weight_daily"
-    assert requirement.fields == ("benchmark_weight",)
+    assert requirement.field_id == "benchmark_weight"
     assert requirement.lookback == RowsLookback(1)
     assert NoShort().requirements() == ()
 
@@ -477,6 +480,7 @@ def test_single_name_cap_enforces_its_declared_tolerance_on_the_real_projection(
             _Catalog(registration, SourceSpec.of("benchmark-source", inflated))
         ),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
     with pytest.raises(AllocationViolation, match="above the declared"):

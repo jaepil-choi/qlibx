@@ -19,7 +19,7 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr._internal.pit_bridge import observation_rows, requirement_for
+from vqapr._internal.pit_bridge import observation_rows, requirements_for
 from vqapr.authoring import CalendarLookback, DatasetInput, RowsLookback
 
 EVALUATION_TIME = datetime(2024, 3, 15, 16, tzinfo=UTC)
@@ -70,7 +70,7 @@ def test_an_authored_declaration_carries_the_engine_lookback_unchanged():
         dataset_id="stock_daily", fields=("ret",), lookback=RowsLookback(rows=3)
     )
 
-    assert requirement_for("consumer-a", declaration).lookback is declaration.lookback
+    assert requirements_for(declaration)[0].lookback is declaration.lookback
 
 
 def test_the_calendar_form_still_carries_every_component():
@@ -80,7 +80,7 @@ def test_the_calendar_form_still_carries_every_component():
         lookback=CalendarLookback(years=1, months=2, days=3, timezone="Asia/Seoul"),
     )
 
-    lookback = requirement_for("consumer-a", declaration).lookback
+    lookback = requirements_for(declaration)[0].lookback
     assert (lookback.years, lookback.months, lookback.days) == (1, 2, 3)
     assert lookback.timezone == "Asia/Seoul"
 
@@ -88,20 +88,21 @@ def test_the_calendar_form_still_carries_every_component():
 # --- requirement translation ---------------------------------------------------------------
 
 
-def test_a_declared_alias_becomes_an_engine_requirement():
+def test_a_declared_alias_becomes_one_engine_requirement_per_field():
+    """The engine requirement names one field, so an alias over two fields becomes two."""
     declaration = DatasetInput(
         dataset_id="stock_daily", fields=("ret", "market_cap"), lookback=RowsLookback(rows=2)
     )
-    requirement = requirement_for("consumer-a", declaration)
+    requirements = requirements_for(declaration)
 
-    assert str(requirement.dataset_id) == "stock_daily"
-    assert requirement.fields == ("ret", "market_cap")
-    assert requirement.lookback.rows == 2
+    assert tuple(requirement.field_id for requirement in requirements) == ("ret", "market_cap")
+    assert {str(requirement.dataset_id) for requirement in requirements} == {"stock_daily"}
+    assert {requirement.lookback.rows for requirement in requirements} == {2}
 
 
-def test_requirement_for_refuses_a_non_declaration():
+def test_requirements_for_refuses_a_non_declaration():
     with pytest.raises(TypeError, match=r"authoring\.DatasetInput"):
-        requirement_for("consumer-a", {"dataset_id": "stock_daily"})
+        requirements_for({"dataset_id": "stock_daily"})
 
 
 # --- row projection ------------------------------------------------------------------------

@@ -105,7 +105,14 @@ class ObservationBatch:
 class ModelWindow:
     """One evaluation time, declared instruments, and only declared requirements."""
 
-    __slots__ = ("__allowed", "__store", "_accesses", "evaluation_time", "instruments")
+    __slots__ = (
+        "__allowed",
+        "__store",
+        "_accesses",
+        "consumer_id",
+        "evaluation_time",
+        "instruments",
+    )
 
     def __init__(
         self,
@@ -114,6 +121,7 @@ class ModelWindow:
         instruments: Sequence[str],
         store: DuckDbObservationStore,
         allowed_requirements: Sequence[DataRequirement],
+        consumer_id: str | None = None,
     ) -> None:
         self.evaluation_time = require_tz_aware(evaluation_time, name="evaluation_time")
         selected = tuple(str(instrument_id(value)) for value in instruments)
@@ -126,10 +134,41 @@ class ModelWindow:
         allowed = tuple(allowed_requirements)
         if not all(isinstance(item, DataRequirement) for item in allowed):
             raise ValueError("allowed_requirements must contain only DataRequirement values")
+        if consumer_id is not None and (
+            not isinstance(consumer_id, str) or not consumer_id.strip()
+        ):
+            raise ValueError("consumer_id must be a non-empty identifier")
         self.instruments = selected
+        self.consumer_id = consumer_id
         self.__store = store
         self.__allowed = allowed
         self._accesses: list[AccessRecord] = []
+
+    def for_consumer(self, consumer_id: str) -> ModelWindow:
+        """The same window, read on behalf of another component.
+
+        A `DataRequirement` no longer carries a consumer id, so the framework supplies it -- and
+        the only place that knows which component is about to read is the loop that is about to
+        call it. The constraint loops project and evaluate each constraint in turn against one
+        window; each gets its own view of it, and every access still lands in the one log this
+        occurrence collects.
+
+        **The access log is shared, not copied.** A view that kept its own would silently drop
+        whatever it recorded.
+
+        A window built for several components at once carries no consumer of its own and refuses
+        to be read directly, so taking a view is the only way in rather than the polite way in.
+        """
+        if not isinstance(consumer_id, str) or not consumer_id.strip():
+            raise ValueError("consumer_id must be a non-empty identifier")
+        view = ModelWindow.__new__(ModelWindow)
+        view.evaluation_time = self.evaluation_time
+        view.instruments = self.instruments
+        view.consumer_id = consumer_id
+        view.__store = self.__store
+        view.__allowed = self.__allowed
+        view._accesses = self._accesses
+        return view
 
     @property
     def accesses(self) -> tuple[AccessRecord, ...]:
@@ -169,10 +208,16 @@ class ModelWindow:
                 mutation=False,
                 retry_precondition="declare the exact requirement, then retry",
             )
+        if self.consumer_id is None:
+            raise RuntimeError(
+                "this window serves several components, so a read must name one: take "
+                "window.for_consumer(<component id>) before calling observations()"
+            )
         batch = self.__store.query(
             requirement,
             evaluation_time=self.evaluation_time,
             instruments=self.instruments,
+            consumer_id=self.consumer_id,
         )
         self._accesses.append(batch.access)
         return batch

@@ -32,11 +32,15 @@ _SPAN = (
 
 
 def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistration:
+    # Field ids are unique across a workspace, so a helper that builds several registrations has
+    # to give each one its own names. The default dataset keeps the bare ones the assertions
+    # below read; every other dataset carries its id in them.
+    suffix = "" if raw_id == "price_daily" else f"_{raw_id.replace('-', '_')}"
     kwargs = {
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": ("session_date", "instrument"),
-        "fields": {"close": "close", "session_date": "session_date"},
+        "fields": {f"close{suffix}": "close", f"session_date{suffix}": "session_date"},
     }
     kwargs.update(overrides)
     return DatasetRegistration.of(raw_id, "prices", **kwargs).with_span(*_SPAN)
@@ -97,7 +101,9 @@ def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
 
 def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
     first = _registration()
-    second = _registration("price_adjusted", fields={"close": "adjusted_close"})
+    # Field ids are unique across the workspace, so a second dataset over the same source
+    # exposes its own name rather than shadowing the first one's.
+    second = _registration("price_adjusted", fields={"adjusted_close": "adjusted_close"})
     workspace = Workspace.create(tmp_path)
 
     workspace.register_dataset(first, _source())

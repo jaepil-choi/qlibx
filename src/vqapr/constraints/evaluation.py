@@ -107,7 +107,9 @@ def project_constraints(
     instruments = window.instruments
     projected: list[ProjectedConstraintFinding] = []
     for constraint in loaded:
-        bounds = constraint.project(window, instruments)
+        # A view per constraint, because a `DataRequirement` no longer says who is reading it and
+        # this loop is the only place that knows. The accesses all land in `window`.
+        bounds = constraint.project(window.for_consumer(constraint.constraint_id), instruments)
         if not isinstance(bounds, ConstraintBounds):
             raise TypeError("Constraint.project must return ConstraintBounds")
         if set(bounds.lower) != set(instruments):
@@ -204,7 +206,7 @@ def evaluate_constraints(
             _finding(
                 constraint,
                 constraint.evaluate(
-                    window,
+                    window.for_consumer(constraint.constraint_id),
                     account,
                     marks,
                     projection_by_id[constraint.constraint_id].bounds,

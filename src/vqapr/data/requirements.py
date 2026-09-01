@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 from vqapr.data.lookback import CalendarLookback, Lookback, RowsLookback
-from vqapr.domain.identifiers import DatasetId, dataset_id
 
 _RESERVED_FIELDS = frozenset({"available_at", "instrument"})
 
@@ -21,29 +19,29 @@ def _name(kind: str, raw: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class DataRequirement:
-    consumer_id: str
-    dataset_id: DatasetId
-    fields: tuple[str, ...]
+    """One field, and how far back to read it. Nothing else (`docs/issues/049`).
+
+    **No `dataset_id`.** A field id is an id, unique across the workspace, and the registration
+    that declares it already knows which dataset it belongs to. Naming both said one fact twice,
+    and the second saying could disagree with the first.
+
+    **No `consumer_id`.** The component that declares a requirement *is* the consumer, so the
+    framework stamps it rather than asking the author to repeat what it already knows. It still
+    reaches `AccessRecord` exactly as before -- see `ModelWindow.for_consumer`.
+
+    **One field, not a tuple.** Requirements are all declared before any read, so expressions over
+    one dataset fuse into a single scan; asking for one field at a time therefore does not
+    multiply scans (`docs/issues/046`).
+    """
+
+    field_id: str
     lookback: Lookback
 
     @classmethod
-    def of(
-        cls,
-        raw_consumer_id: str,
-        raw_dataset_id: str,
-        *,
-        fields: Sequence[str],
-        lookback: Lookback,
-    ) -> DataRequirement:
-        consumer = _name("consumer_id", raw_consumer_id)
-        selected = tuple(_name("framework field", field) for field in fields)
-        if not selected:
-            raise ValueError("fields must contain at least one framework field")
-        if len(set(selected)) != len(selected):
-            raise ValueError("framework fields must be unique")
-        reserved = sorted(set(selected) & _RESERVED_FIELDS)
-        if reserved:
-            raise ValueError(f"framework fields are reserved by ModelWindow: {reserved}")
+    def of(cls, raw_field_id: str, *, lookback: Lookback) -> DataRequirement:
+        field_id = _name("framework field", raw_field_id)
+        if field_id in _RESERVED_FIELDS:
+            raise ValueError(f"framework field is reserved by ModelWindow: {field_id!r}")
         if not isinstance(lookback, (RowsLookback, CalendarLookback)):
             raise TypeError("lookback must be RowsLookback or CalendarLookback")
-        return cls(consumer, dataset_id(raw_dataset_id), selected, lookback)
+        return cls(field_id, lookback)

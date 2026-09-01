@@ -1,4 +1,10 @@
-# 126 — a name nothing reads is deleted
+# 127 — a name nothing reads is deleted
+
+> **Renumbered 126 -> 127 before merge.** This record was written on a branch cut from
+> `916554f2`, and `126` was taken by `126-one-lookback-class.md` on `develop` while this branch sat
+> unmerged. Two sessions picked the next free number from two different views of the directory.
+> `AGENTS.md` forbids reusing a number, so the later-landing record moves; the earlier one keeps
+> `126`.
 
 ## Why this exists
 

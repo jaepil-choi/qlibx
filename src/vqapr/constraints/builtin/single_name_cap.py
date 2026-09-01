@@ -30,6 +30,7 @@ from vqapr.portfolio.intents import EconomicPortfolioIntent
 from vqapr.valuation.marks import MarkBatch
 
 WEIGHT_FIELD = "benchmark_weight"
+"""The field this constraint reads on the benchmark dataset it is configured with."""
 
 
 def _decimal_config(value: object, *, name: str) -> Decimal:
@@ -68,16 +69,20 @@ class SingleNameCap(Constraint):
         cap: str,
         benchmark_dataset_id: str,
         tolerance: str,
+        benchmark_weight_field: str = WEIGHT_FIELD,
         constraint_id: str = "single-name-cap",
     ) -> None:
         if not isinstance(constraint_id, str) or not constraint_id:
             raise ValueError("constraint_id must be a non-empty string")
         if not isinstance(benchmark_dataset_id, str) or not benchmark_dataset_id:
             raise ValueError("benchmark_dataset_id must be a non-empty string")
+        if not isinstance(benchmark_weight_field, str) or not benchmark_weight_field:
+            raise ValueError("benchmark_weight_field must be a non-empty string")
         self._constraint_id = constraint_id
         self._cap = _decimal_config(cap, name="cap")
         self._tolerance = _decimal_config(tolerance, name="tolerance")
         self._benchmark_dataset_id = benchmark_dataset_id
+        self._weight_field = benchmark_weight_field
 
     @property
     def constraint_id(self) -> str:
@@ -90,10 +95,7 @@ class SingleNameCap(Constraint):
     def requirements(self) -> tuple[DataRequirement, ...]:
         return (
             DataRequirement.of(
-                self._constraint_id,
-                self._benchmark_dataset_id,
-                fields=(WEIGHT_FIELD,),
-                lookback=RowsLookback(1),
+                self._benchmark_dataset_id, self._weight_field, lookback=RowsLookback(1)
             ),
         )
 
@@ -101,7 +103,7 @@ class SingleNameCap(Constraint):
         batch = window.observations(self.requirements()[0])
         latest: dict[str, Decimal] = {}
         for row in batch.rows:
-            weight = row[WEIGHT_FIELD]
+            weight = row[self._weight_field]
             if weight is None:
                 continue
             if not isinstance(weight, Decimal):

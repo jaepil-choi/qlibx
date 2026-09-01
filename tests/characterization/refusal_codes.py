@@ -761,10 +761,9 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
         instruments=("A",),
         store=DuckDbObservationStore(workspace),
         allowed_requirements=(),
+        consumer_id="test-consumer",
     )
-    undeclared = DataRequirement.of(
-        "consumer", "prices", fields=("close",), lookback=RowsLookback(1)
-    )
+    undeclared = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     codes: list[str] = []
     try:
         window.observations(undeclared)

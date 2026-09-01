@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -24,6 +25,16 @@ from vqapr.domain.errors import (
 )
 from vqapr.domain.identifiers import DatasetId, SourceId, dataset_id, source_id
 
+_BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
+"""A field expression that is nothing but a name, which is what every registration wrote before
+one could be an expression.
+
+A name this source does not have is refused by name, as it was when `fields` mapped ids to
+columns -- and in the same round trip as every other schema problem. Anything more than a name is
+an expression nobody here can check on its own, so it gets duckdb's message from the bind attempt,
+untouched.
+"""
+
 SCHEMA_STAGE = "dataset.register.schema"
 KEY_STAGE = "dataset.register.key"
 SPAN_STAGE = "dataset.register.span"
@@ -36,15 +47,20 @@ class DatasetRegistration:
     """소비자가 `dataset_id`와 framework 이름으로 읽게 만드는 선언.
 
     instrument_field · available_at · key_fields 는 **물리 컬럼 이름**이고,
-    `fields`만 framework 이름 → 물리 위치 매핑이다.
+    `fields`는 framework 이름 → **값 표현식** 매핑이다 (`docs/issues/049`의 ruling). 맨 컬럼은
+    축퇴된 표현식이므로 이 ruling 이전에 쓰인 등록은 글자 하나 바뀌지 않는다.
 
     `available_at`은 컬럼 이름이지 규칙이 아니다. user가 준비 단계에서 계산해 넣은 값이며
     (PRD §4.0), 우리는 그것이 tz-aware인지만 본다.
+
+    `instrument_field`는 **선택**이다. 없는 dataset은 instrument 축이 없고 (`docs/issues/038`),
+    선언된 instrument 목록이 적용되지 않는다 -- 어떤 표가 instrument로 키잉되는가는 그 표에
+    대한 사실이지 읽는 쪽에 대한 사실이 아니다.
     """
 
     dataset_id: DatasetId
     source: SourceId
-    instrument_field: str
+    instrument_field: str | None
     available_at: str
     key_fields: tuple[str, ...]
     fields: Mapping[str, str]
@@ -63,13 +79,34 @@ class DatasetRegistration:
     venue의 시각인지 말하지 않으므로 다른 dataset의 span과 비교할 수 없다.
     """
 
+    field_types: Mapping[str, ColumnType] | None = None
+    """field id → 그 표현식이 내는 타입. **선언이 아니라 유도값**이다.
+
+    author는 타입을 쓰지 않는다 (`docs/issues/049`). field가 표현식이 된 순간 타입은 원천 컬럼이
+    아니라 합성된 쿼리의 성질이므로, `DESCRIBE`가 답하는 것이 유일하게 정직한 답이다. span과
+    같은 이유로 저장해 둔다: 한 번 재고 나면 이후의 모든 조회가 파일을 열지 않는다.
+
+    `None`은 아직 유도하지 않았다는 뜻이며, ruling 이전 shape로 쓰인 문서를 읽을 때만 나온다.
+    """
+
+    aggregated: bool = False
+    """이 등록의 projection이 한 instant 안에서 묶이는가. **duckdb가 판정한 값**이다.
+
+    `False`면 행 단위 -- 오늘까지의 모든 등록이 여기다 -- 이고 읽기 쿼리는 GROUP BY 없이,
+    ruling 이전과 **같은 SQL**로 나간다. `True`면 `GROUP BY`가 붙어 (instrument, available_at)
+    하나당 한 행이 나온다.
+
+    둘은 배타적이고 그래서 binder가 심판이 될 수 있다 -- `scan.describe_projection` 참조.
+    Python이 표현식을 파싱해 집계 여부를 추측하지 않는다.
+    """
+
     @classmethod
     def of(
         cls,
         raw_dataset_id: str,
         raw_source_id: str,
         *,
-        instrument_field: str,
+        instrument_field: str | None = None,
         available_at: str,
         key_fields: Sequence[str],
         fields: Mapping[str, str],
@@ -77,10 +114,15 @@ class DatasetRegistration:
         if not key_fields:
             raise ValueError("key_fields must declare at least one column")
         if not fields:
-            raise ValueError("fields must select at least one column to expose")
-        for name in fields:
+            raise ValueError("fields must select at least one value to expose")
+        for name, expression in fields.items():
             if not name or any(c.isspace() for c in name):
                 raise ValueError(f"framework field name must not contain whitespace: {name!r}")
+            # The expression itself is not inspected here beyond being present. What it means is
+            # duckdb's answer, taken once at registration by `check_schema`; guessing at it in
+            # Python would be a second opinion that can disagree with the one that runs.
+            if not isinstance(expression, str) or not expression.strip():
+                raise ValueError(f"field {name!r} must declare a non-empty value expression")
         return cls(
             dataset_id=dataset_id(raw_dataset_id),
             source=source_id(raw_source_id),
@@ -89,6 +131,12 @@ class DatasetRegistration:
             key_fields=tuple(key_fields),
             fields=dict(fields),
         )
+
+    def with_schema(self, schema: scan.ProjectionSchema) -> DatasetRegistration:
+        """유도된 field 타입과 grouping 판정을 붙인 사본. 유도하는 쪽은 `validate`다."""
+        if not schema.ok:
+            raise ValueError("a projection that did not bind carries no schema to attach")
+        return replace(self, field_types=dict(schema.field_types), aggregated=schema.aggregated)
 
     def with_span(self, first: datetime, last: datetime) -> DatasetRegistration:
         """측정된 span을 붙인 사본. 재는 쪽은 `validate`, 쓰는 쪽은 `register_dataset`이다."""
@@ -102,33 +150,54 @@ class DatasetRegistration:
         return replace(self, span=(first, last))
 
     def declared_columns(self) -> dict[str, str]:
-        """물리 컬럼 이름 → 그것이 어떤 역할로 지목되었는가. 진단 메시지에 쓴다."""
+        """물리 컬럼 이름 → 그것이 어떤 역할로 지목되었는가. 진단 메시지에 쓴다.
+
+        **이름뿐인 field만 여기 온다.** field 값은 이제 표현식이라 일반적으로는 "이 이름이
+        스키마에 있나"로 물을 수 없고, 그 답은 `scan.describe_projection`이 duckdb에게 받는다.
+        다만 이름 하나짜리 표현식은 ruling 이전의 모든 등록이 쓰던 축퇴형이고, 그것이 없는
+        컬럼일 때 **컬럼 이름을 대며 거절하는 것**이 이 패키지가 하던 일이다. 그 진단을 표현식
+        문법과 맞바꾸지 않는다 -- 한 왕복에 다 받는 성질도 여기 걸려 있다.
+        """
         roles: dict[str, str] = {}
-        roles.setdefault(self.instrument_field, "instrument_field")
+        if self.instrument_field is not None:
+            roles.setdefault(self.instrument_field, "instrument_field")
         roles.setdefault(self.available_at, "available_at")
         for column in self.key_fields:
             roles.setdefault(column, "key_fields")
-        for framework_name, column in self.fields.items():
-            roles.setdefault(column, f"fields[{framework_name}]")
+        for framework_name, expression in self.fields.items():
+            column = expression.strip()
+            if _BARE_COLUMN.fullmatch(column):
+                roles.setdefault(column, f"fields[{framework_name}]")
         return roles
 
 
-def check_schema(registration: DatasetRegistration, columns: Mapping[str, ColumnType]) -> Diagnosis:
-    """1단계 — 지목한 컬럼이 존재하나, 그 타입이 model에 건넬 수 있는 것인가.
+def check_schema(
+    registration: DatasetRegistration,
+    columns: Mapping[str, ColumnType],
+    spec: SourceSpec,
+) -> tuple[Diagnosis, scan.ProjectionSchema | None]:
+    """1단계 — 지목한 컬럼이 존재하나, projection이 bind되나, 그 타입을 model에 건넬 수 있나.
 
-    I/O가 없다. `describe()`가 준 스키마만 본다. **하나 나왔다고 멈추지 않는다.**
+    **하나 나왔다고 멈추지 않는다.** 다만 뒤의 두 검사는 앞이 통과했을 때만 돈다: 지목한
+    컬럼이 없으면 binder도 그 컬럼을 못 찾았다고 말할 뿐이고, 같은 사실을 duckdb의 말로 한 번
+    더 적는 것은 진단을 늘리는 게 아니라 흐리는 것이다.
 
-    `available_at` 말고 **노출되는 field 컬럼의 타입까지** 여기서 본다. 읽기 경로가 셀마다
-    타입을 되묻던 시절에는 그 질문이 조회 시각에 답해졌지만, 이제 답하는 자리는 여기다
-    (`044`). 스키마가 이미 말해 주는 것을 파일을 열어 다시 물을 이유는 없다 -- 컬럼 하나가
-    naive timestamp이거나 애초에 scalar가 아니면, 그것은 그 컬럼의 **모든** 행에 대해
-    참이다.
+    노출되는 **field의 타입까지** 여기서 본다. 읽기 경로가 셀마다 타입을 되묻던 시절에는 그
+    질문이 조회 시각에 답해졌지만, 이제 답하는 자리는 여기다 (`044`). 그리고 field가 표현식이
+    된 뒤로 그 타입은 원천 컬럼의 성질이 아니라 **합성된 projection의 성질**이므로, 물어볼
+    상대는 스키마가 아니라 `DESCRIBE`다 (`049`). 논거는 그대로다 -- 한 컬럼이 naive
+    timestamp이거나 scalar가 아니면, 그것은 그 컬럼의 **모든** 행에 대해 참이다.
+
+    두 번째 반환값은 **유도된 projection 스키마**다. 무엇이든 실패했다면 붙일 것이 없으므로
+    `None`이다.
     """
     found = collector(SCHEMA_STAGE, FailureFamily.DATA)
     observed = ", ".join(sorted(columns)) or "(no columns)"
+    identity_ok = True
 
     for column, role in registration.declared_columns().items():
         if column not in columns:
+            identity_ok = False
             found.add(
                 Failure.bounded(
                     code=f"{SCHEMA_STAGE}.field_missing",
@@ -143,55 +212,9 @@ def check_schema(registration: DatasetRegistration, columns: Mapping[str, Column
                 )
             )
 
-    for framework_name, column in registration.fields.items():
-        exposed = columns.get(column)
-        if exposed is None:
-            continue  # already reported as field_missing above
-        if exposed is ColumnType.TIMESTAMP_NAIVE:
-            found.add(
-                Failure.bounded(
-                    code=f"{SCHEMA_STAGE}.field_not_tz",
-                    requirement=(
-                        f"field {framework_name!r} exposes column {column!r}, whose timestamps "
-                        f"must be timezone-aware. A naive timestamp reaches a model as an "
-                        f"instant nobody can place on a venue's clock, and it compares silently "
-                        f"wrong against every value that can"
-                    ),
-                    observed=str(exposed),
-                    source=FailureSource(
-                        key_path=f"datasets.{registration.dataset_id}.fields.{framework_name}",
-                    ),
-                    fix=(
-                        f"localize {column!r} to the venue timezone while preparing the source, "
-                        f"or stop exposing it as a field"
-                    ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
-                )
-            )
-        elif exposed is ColumnType.OTHER:
-            found.add(
-                Failure.bounded(
-                    code=f"{SCHEMA_STAGE}.field_not_portable",
-                    requirement=(
-                        f"field {framework_name!r} exposes column {column!r}, which must hold a "
-                        f"portable scalar -- a boolean, number, string, date or timestamp. A "
-                        f"model receives rows of scalars, and there is nothing portable to hand "
-                        f"it for this type"
-                    ),
-                    observed=str(exposed),
-                    source=FailureSource(
-                        key_path=f"datasets.{registration.dataset_id}.fields.{framework_name}",
-                    ),
-                    fix=(
-                        f"flatten {column!r} into scalar columns while preparing the source, or "
-                        f"stop exposing it as a field"
-                    ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
-                )
-            )
-
     actual = columns.get(registration.available_at)
     if actual is not None and actual is not ColumnType.TIMESTAMP_TZ:
+        identity_ok = False
         suffix = "not_tz" if actual is ColumnType.TIMESTAMP_NAIVE else "not_a_timestamp"
         found.add(
             Failure.bounded(
@@ -214,7 +237,119 @@ def check_schema(registration: DatasetRegistration, columns: Mapping[str, Column
                 explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
-    return found.done(retry=_RETRY)
+
+    for name, expression in registration.fields.items():
+        keyword = scan.statement_keyword(expression)
+        if keyword is None:
+            continue
+        identity_ok = False
+        found.add(
+            Failure.bounded(
+                code=f"{SCHEMA_STAGE}.field_not_an_expression",
+                requirement=(
+                    f"field {name!r} must be a value expression, not a statement. An expression "
+                    "is evaluated within one instant, which is what makes it impossible to write "
+                    "a look-ahead here; a subquery carries its own FROM and can read rows the "
+                    "window excludes. A field that needs a join or a subquery is a DataModel"
+                ),
+                observed=f"{name} = {expression!r} contains {keyword}",
+                source=FailureSource(
+                    key_path=f"datasets.{registration.dataset_id}.fields.{name}"
+                ),
+                fix=(
+                    f"express {name!r} over this source's own columns, or compute it in a "
+                    "DataModel where reading across instants is declared"
+                ),
+                explain=ExplainTopic.DATASET_PREPARATION,
+            )
+        )
+
+    if not identity_ok:
+        return found.done(retry=_RETRY), None
+
+    projection = scan.describe_projection(
+        spec,
+        instrument_field=registration.instrument_field,
+        available_at_field=registration.available_at,
+        fields=registration.fields,
+    )
+    if not projection.ok:
+        found.add(
+            Failure.bounded(
+                code=f"{SCHEMA_STAGE}.projection_unbindable",
+                requirement=(
+                    "every declared field must be an expression this source can evaluate, and "
+                    "the whole set must be one shape: either every field is row-wise, or every "
+                    "field aggregates the rows an instant holds. A registration that mixes the "
+                    "two has no grain"
+                ),
+                observed="; ".join(
+                    f"{shape}: {message}"
+                    for shape, message in zip(
+                        ("row-wise", "grouped"), projection.errors, strict=False
+                    )
+                ),
+                source=FailureSource(
+                    file=str(spec.path), key_path=f"datasets.{registration.dataset_id}.fields"
+                ),
+                fix=(
+                    "fix the expression the message names, or wrap the row-wise fields in an "
+                    "aggregate so the whole projection groups"
+                ),
+                explain=ExplainTopic.DATASET_PREPARATION,
+            )
+        )
+        return found.done(retry=_RETRY), None
+
+    typed_ok = True
+    for name, exposed in projection.field_types.items():
+        expression = registration.fields[name]
+        if exposed is ColumnType.TIMESTAMP_NAIVE:
+            typed_ok = False
+            found.add(
+                Failure.bounded(
+                    code=f"{SCHEMA_STAGE}.field_not_tz",
+                    requirement=(
+                        f"field {name!r} evaluates {expression!r}, whose timestamps must be "
+                        f"timezone-aware. A naive timestamp reaches a model as an instant nobody "
+                        f"can place on a venue's clock, and it compares silently wrong against "
+                        f"every value that can"
+                    ),
+                    observed=str(exposed),
+                    source=FailureSource(
+                        key_path=f"datasets.{registration.dataset_id}.fields.{name}",
+                    ),
+                    fix=(
+                        f"localize what {name!r} reads to the venue timezone while preparing the "
+                        f"source, or stop exposing it as a field"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
+                )
+            )
+        elif exposed is ColumnType.OTHER:
+            typed_ok = False
+            found.add(
+                Failure.bounded(
+                    code=f"{SCHEMA_STAGE}.field_not_portable",
+                    requirement=(
+                        f"field {name!r} evaluates {expression!r}, which must produce a portable "
+                        f"scalar -- a boolean, number, string, date or timestamp. A model "
+                        f"receives rows of scalars, and there is nothing portable to hand it for "
+                        f"this type"
+                    ),
+                    observed=str(exposed),
+                    source=FailureSource(
+                        key_path=f"datasets.{registration.dataset_id}.fields.{name}",
+                    ),
+                    fix=(
+                        f"flatten what {name!r} reads into scalar columns while preparing the "
+                        f"source, or stop exposing it as a field"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
+                )
+            )
+
+    return found.done(retry=_RETRY), (projection if typed_ok else None)
 
 
 def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
@@ -257,61 +392,72 @@ def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
     return found.done(retry=_RETRY)
 
 
-def check_values(
-    registration: DatasetRegistration, spec: SourceSpec, columns: Mapping[str, ColumnType]
-) -> Diagnosis:
-    """4단계 — 노출되는 numeric 컬럼에 NaN이나 inf가 있는가. 전체 스캔이다.
+def check_values(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
+    """4단계 — 노출되는 numeric field에 NaN이나 inf가 있는가. 전체 스캔이다.
 
     **이 단계는 읽기 경로에서 옮겨 온 것이지 새로 생긴 요구가 아니다.** `normalize_scalar`이
     읽는 셀마다 묻던 질문이고, `035`의 addendum이 그것을 그냥 지우면 평가당 1.6s를 조용한
     NaN과 맞바꾸는 것이라고 정확히 지목했다. 그래서 `044`는 제거가 아니라 이동으로 닫힌다 --
-    질문은 남고, 묻는 자리가 셀당 한 번에서 **컬럼당 한 번**으로 바뀐다.
+    질문은 남고, 묻는 자리가 셀당 한 번에서 **field당 한 번**으로 바뀐다.
+
+    묻는 대상은 원천 컬럼이 아니라 **field가 내는 값**이다. field가 표현식이 된 뒤로 둘은 같지
+    않고, 모델에 건너가는 것은 뒤쪽이다 (`049`). 그래서 타입은 등록이 유도해 둔
+    `field_types`에서 읽고, 스캔은 projection 위에서 돈다.
 
     수천 번 읽힐 파일을 등록 때 한 번 더 읽는 값이다. 스캔 한 번이며 컬럼 폭을 따라 늘지
     않는다(`scan.finite_check`).
 
-    numeric이 아닌 컬럼은 애초에 NaN을 담을 수 없으므로 묻지 않는다. 노출되는 컬럼이 전부
+    numeric이 아닌 field는 애초에 NaN을 담을 수 없으므로 묻지 않는다. 노출되는 field가 전부
     비-numeric이면 **이 단계는 I/O 없이 통과한다.**
     """
+    if registration.field_types is None:
+        raise ValueError("check_values needs the field types check_schema derives")
     found = collector(VALUE_STAGE, FailureFamily.DATA)
     numeric = tuple(
-        dict.fromkeys(
-            column
-            for column in registration.fields.values()
-            if columns.get(column) is ColumnType.DOUBLE
-        )
+        name
+        for name, column_type in registration.field_types.items()
+        if column_type is ColumnType.DOUBLE
     )
     if not numeric:
         return found.done()
 
-    exposed_by = {column: name for name, column in registration.fields.items()}
+    identity_fields = ("available_at",)
+    if registration.instrument_field is not None:
+        identity_fields = ("available_at", "instrument")
     result = scan.finite_check(
         spec,
         columns=numeric,
-        identity_fields=(registration.instrument_field, registration.available_at),
+        identity_fields=identity_fields,
+        relation=scan.projection_relation(
+            spec,
+            instrument_field=registration.instrument_field,
+            available_at_field=registration.available_at,
+            fields=registration.fields,
+            aggregated=registration.aggregated,
+        ),
     )
     examples = dict(result.examples)
-    for column, count in result.non_finite:
-        framework_name = exposed_by[column]
+    for name, count in result.non_finite:
+        expression = registration.fields[name]
         found.add(
             Failure.bounded(
                 code=f"{VALUE_STAGE}.not_finite",
                 requirement=(
-                    f"field {framework_name!r} exposes column {column!r}, whose values must be "
-                    f"finite. A NaN or an infinity reaching a model does not fail there -- it "
-                    f"propagates through every number it touches and the run reports a result"
+                    f"field {name!r} evaluates {expression!r}, whose values must be finite. A "
+                    f"NaN or an infinity reaching a model does not fail there -- it propagates "
+                    f"through every number it touches and the run reports a result"
                 ),
-                observed=f"{count} row(s) with a non-finite {column!r}",
-                examples=examples.get(column, ()),
+                observed=f"{count} row(s) with a non-finite {name!r}",
+                examples=examples.get(name, ()),
                 example_total=count,
                 source=FailureSource(
                     file=str(spec.path),
-                    key_path=f"datasets.{registration.dataset_id}.fields.{framework_name}",
+                    key_path=f"datasets.{registration.dataset_id}.fields.{name}",
                 ),
                 fix=(
-                    f"drop or repair the rows whose {column!r} is NaN or infinite while "
-                    f"preparing the source; a value that is genuinely absent belongs as NULL, "
-                    f"which is read as a missing observation rather than a number"
+                    f"drop or repair the rows whose {name!r} is NaN or infinite while preparing "
+                    f"the source; a value that is genuinely absent belongs as NULL, which is "
+                    f"read as a missing observation rather than a number"
                 ),
                 explain=ExplainTopic.DATASET_PREPARATION,
             )
@@ -395,7 +541,8 @@ def validate(
 
     **네 단계다.** 값싼 검사를 먼저 전부 모아서 돌려주고, 통과했을 때만 전체 스캔으로 넘어간다.
 
-        1단계  스키마   지목한 컬럼이 존재하나 · 타입이 model에 건넬 수 있는가
+        1단계  스키마   지목한 컬럼이 존재하나 · projection이 bind되나 · 그 타입이
+                         model에 건넬 수 있는가 (field 타입과 grouping 판정이 여기서 나온다)
         2단계  key      null 없이 유일한가                          ← 전체 스캔
         3단계  span     실제로 덮는 구간은 어디인가                 ← 전체 스캔
         4단계  값       노출되는 numeric에 NaN·inf가 있는가         ← 전체 스캔
@@ -434,10 +581,12 @@ def validate(
         )
 
     columns = scan.describe(spec)
-    schema = check_schema(registration, columns)
+    schema, projection = check_schema(registration, columns, spec)
     schema_seconds = time.perf_counter() - started
     if not schema.ok:
         return schema, ValidationTiming(schema_seconds, None), registration
+    assert projection is not None
+    described = registration.with_schema(projection)
 
     key_started = time.perf_counter()
     key = check_key(registration, spec)
@@ -450,8 +599,8 @@ def validate(
         span_timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
         return span, span_timing, registration
 
-    values = check_values(registration, spec, columns)
+    values = check_values(described, spec)
     timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
     if not values.ok:
         return values, timing, registration
-    return values, timing, registration.with_span(*measured)
+    return values, timing, described.with_span(*measured)

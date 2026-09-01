@@ -135,12 +135,7 @@ class ReversalModel(DataModel):
 
     def requirements(self):
         return (
-            DataRequirement.of(
-                "showcase-model",
-                "price_daily",
-                fields=("close",),
-                lookback=RowsLookback(LOOKBACK),
-            ),
+            DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
     def compute(self, context):
@@ -199,12 +194,7 @@ class ReversalLongShort(StrategyModel):
 
     def requirements(self):
         return (
-            DataRequirement.of(
-                "showcase-strategy",
-                "reversal_score",
-                fields=("score",),
-                lookback=RowsLookback(1),
-            ),
+            DataRequirement.of('reversal_score', 'score', lookback=RowsLookback(1)),
         )
 
     def on_occurrence(self, context):

@@ -17,6 +17,7 @@ def data_model_window(
     evaluation_time: datetime,
     instruments: Sequence[str],
     requirements: Sequence[DataRequirement],
+    consumer_id: str,
     store: DuckDbObservationStore | None = None,
 ) -> ModelWindow:
     """Build the sole observation capability exposed for one DataModel invocation.
@@ -32,4 +33,5 @@ def data_model_window(
         instruments=instruments,
         store=DuckDbObservationStore(workspace) if store is None else store,
         allowed_requirements=requirements,
+        consumer_id=consumer_id,
     )

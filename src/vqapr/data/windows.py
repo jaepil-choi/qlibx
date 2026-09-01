@@ -49,10 +49,12 @@ class ObservationBatch:
     * `available_at` -- a timezone-aware `datetime`, the row's OWN point-in-time stamp rather than
       the window's evaluation time. Rows do not share one instant, so this is what a cross-section
       is built on.
-    * `instrument` -- the instrument id, as a string.
-    * one key per field named in the requirement, under the SEMANTIC alias the requirement
-      declared, not the physical column name. A value is `None` where the source has no value; a
-      `RowsLookback` also nulls a field on rows outside that field's own last-N (see
+    * `instrument` -- the instrument id, as a string. **Absent** on a dataset registered with no
+      `instrument_field`: those rows are not keyed by instrument, the declared instrument list is
+      not applied to them, and there is no name to put here (`docs/issues/038`).
+    * the field the requirement named, under its own id -- a requirement names one field and a
+      lookback, and nothing else (`docs/issues/049`). A value is `None` where the source has no
+      value; a `RowsLookback` also nulls it on rows outside that field's own last-N (see
       `RowsLookback`).
 
     **A value keeps the parquet column's own type.** A `DOUBLE` column arrives as `float` and a
@@ -65,7 +67,10 @@ class ObservationBatch:
     **Ordering is guaranteed: ascending `available_at`, then the dataset's registered key fields.**
     It is pushed into SQL (`scan.observation_rows`) rather than applied afterwards, so it holds for
     every lookback and every instrument count, and `tests/data/test_observation_batch_shape.py`
-    pins it. Instruments therefore INTERLEAVE within an instant rather than being grouped by name:
+    pins it. A dataset whose fields aggregate within an instant orders by `available_at` then
+    `instrument` instead, because the key fields were consumed making the group and are not in
+    what came out of it. Instruments therefore INTERLEAVE within an instant rather than being
+    grouped by name:
     a per-instrument series is built by the reader, and a cross-section is `rows` filtered on one
     `available_at`. `ModelWindow.snapshot` returns the newest cross-section directly.
 
@@ -100,7 +105,14 @@ class ObservationBatch:
 class ModelWindow:
     """One evaluation time, declared instruments, and only declared requirements."""
 
-    __slots__ = ("__allowed", "__store", "_accesses", "evaluation_time", "instruments")
+    __slots__ = (
+        "__allowed",
+        "__store",
+        "_accesses",
+        "consumer_id",
+        "evaluation_time",
+        "instruments",
+    )
 
     def __init__(
         self,
@@ -109,6 +121,7 @@ class ModelWindow:
         instruments: Sequence[str],
         store: DuckDbObservationStore,
         allowed_requirements: Sequence[DataRequirement],
+        consumer_id: str | None = None,
     ) -> None:
         self.evaluation_time = require_tz_aware(evaluation_time, name="evaluation_time")
         selected = tuple(str(instrument_id(value)) for value in instruments)
@@ -121,10 +134,41 @@ class ModelWindow:
         allowed = tuple(allowed_requirements)
         if not all(isinstance(item, DataRequirement) for item in allowed):
             raise ValueError("allowed_requirements must contain only DataRequirement values")
+        if consumer_id is not None and (
+            not isinstance(consumer_id, str) or not consumer_id.strip()
+        ):
+            raise ValueError("consumer_id must be a non-empty identifier")
         self.instruments = selected
+        self.consumer_id = consumer_id
         self.__store = store
         self.__allowed = allowed
         self._accesses: list[AccessRecord] = []
+
+    def for_consumer(self, consumer_id: str) -> ModelWindow:
+        """The same window, read on behalf of another component.
+
+        A `DataRequirement` no longer carries a consumer id, so the framework supplies it -- and
+        the only place that knows which component is about to read is the loop that is about to
+        call it. The constraint loops project and evaluate each constraint in turn against one
+        window; each gets its own view of it, and every access still lands in the one log this
+        occurrence collects.
+
+        **The access log is shared, not copied.** A view that kept its own would silently drop
+        whatever it recorded.
+
+        A window built for several components at once carries no consumer of its own and refuses
+        to be read directly, so taking a view is the only way in rather than the polite way in.
+        """
+        if not isinstance(consumer_id, str) or not consumer_id.strip():
+            raise ValueError("consumer_id must be a non-empty identifier")
+        view = ModelWindow.__new__(ModelWindow)
+        view.evaluation_time = self.evaluation_time
+        view.instruments = self.instruments
+        view.consumer_id = consumer_id
+        view.__store = self.__store
+        view.__allowed = self.__allowed
+        view._accesses = self._accesses
+        return view
 
     @property
     def accesses(self) -> tuple[AccessRecord, ...]:
@@ -164,10 +208,16 @@ class ModelWindow:
                 mutation=False,
                 retry_precondition="declare the exact requirement, then retry",
             )
+        if self.consumer_id is None:
+            raise RuntimeError(
+                "this window serves several components, so a read must name one: take "
+                "window.for_consumer(<component id>) before calling observations()"
+            )
         batch = self.__store.query(
             requirement,
             evaluation_time=self.evaluation_time,
             instruments=self.instruments,
+            consumer_id=self.consumer_id,
         )
         self._accesses.append(batch.access)
         return batch
@@ -199,6 +249,11 @@ class ModelWindow:
         # newest row is exactly the window this method exists to collapse: it is what leaves a
         # departed name's final value sitting beside current ones.
         rows = tuple(row for row in batch.rows if row["available_at"] == newest)
+        # A cross-section is ordered by instrument, and a dataset with no instrument axis has one
+        # row per instant rather than a cross-section at all -- so there is nothing to order it by
+        # and the single row is returned as it came.
+        if not batch.access.instruments:
+            return ObservationBatch._trusted(rows, batch.access)
         return ObservationBatch._trusted(
             tuple(sorted(rows, key=lambda row: str(row["instrument"]))), batch.access
         )

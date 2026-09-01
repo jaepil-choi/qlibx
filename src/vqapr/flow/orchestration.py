@@ -155,11 +155,15 @@ def run(
             instruments=frozen.instruments,
             store=store,
             allowed_requirements=frozen.strategy_requirements,
+            consumer_id=str(frozen.strategy.component.component_id),
         ),
         constraint_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
             instruments=frozen.instruments,
             store=store,
+            # No consumer: this window serves every loaded constraint, and which one is reading
+            # is known only inside the loop that calls them. `project_constraints` and
+            # `evaluate_constraints` take a view per constraint.
             allowed_requirements=frozen.constraint_requirements,
         ),
         # A run retains exactly the marks somebody declared they would read. Declaring nothing

@@ -64,8 +64,10 @@ from decimal import Decimal
 
 from vqapr.public import DataModel, DataRequirement, {lookback_class}
 
-MODEL_ID = "{component_id}"
+# A requirement names one dataset and one field. It does not name a consumer -- the component
+# declaring it is the consumer, and the framework stamps that.
 DATASET_ID = "{dataset_id}"
+FIELD_ID = "{field}"
 {lookback_declaration}
 
 
@@ -74,12 +76,7 @@ class {class_name}(DataModel):
 
     def requirements(self):
         return (
-            DataRequirement.of(
-                MODEL_ID,
-                DATASET_ID,
-                fields=("{field}",),
-                lookback={lookback_expression},
-            ),
+            DataRequirement.of(DATASET_ID, FIELD_ID, lookback={lookback_expression}),
         )
 
     def compute(self, context):

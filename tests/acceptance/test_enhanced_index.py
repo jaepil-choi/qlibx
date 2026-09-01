@@ -115,6 +115,9 @@ class _Catalog:
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
         return self._registration
 
+    def dataset_for_field(self, field_id: str) -> DatasetRegistration:
+        return self._registration
+
     def source(self, raw_source_id: str) -> SourceSpec:
         return self._source
 
@@ -139,6 +142,7 @@ def _window(
         instruments=instruments,
         store=DuckDbObservationStore(_Catalog(registration, source)),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
 

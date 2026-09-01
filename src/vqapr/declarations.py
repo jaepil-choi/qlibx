@@ -249,7 +249,6 @@ or concurrent `apply` cannot see another's document.
 _DATASET_KEYS = (
     "source_id",
     "path",
-    "instrument_field",
     "available_at",
     "key_fields",
     "fields",
@@ -424,11 +423,18 @@ def _dataset(
     body = _mapping(declared, name=name)
     _require_keys(body, _DATASET_KEYS, name=name)
     fields = _mapping(_required(body, "fields", name=name), name=f"{name}.fields")
+    # `instrument_field` is the one declaration key that is optional, because a dataset without an
+    # instrument axis is a dataset whose rows are not keyed by instrument (`docs/issues/038`) --
+    # a factor series, an index level, a macro release. Omitting it says that; there is no value
+    # that could say it, which is why it is absent rather than empty.
+    declared_instrument = body.get("instrument_field")
     return (
         DatasetRegistration.of(
             dataset_id,
             str(_required(body, "source_id", name=name)),
-            instrument_field=str(_required(body, "instrument_field", name=name)),
+            instrument_field=(
+                None if declared_instrument is None else str(declared_instrument)
+            ),
             available_at=str(_required(body, "available_at", name=name)),
             key_fields=tuple(str(field) for field in _required(body, "key_fields", name=name)),
             fields={str(key): str(column) for key, column in fields.items()},

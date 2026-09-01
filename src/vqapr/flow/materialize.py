@@ -1202,6 +1202,7 @@ def materialize(
                 evaluation_time=evaluation_time,
                 instruments=selected_instruments,
                 requirements=requirements,
+                consumer_id=str(ref.component_id),
                 store=store,
             )
             try:

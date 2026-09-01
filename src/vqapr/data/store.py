@@ -11,7 +11,7 @@ from typing import Protocol
 from vqapr.data import scan
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
-from vqapr.data.resolution import resolve_fields
+from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
@@ -62,14 +62,16 @@ class DuckDbObservationStore:
         *,
         evaluation_time: datetime,
         instruments: Sequence[str],
+        consumer_id: str,
     ):
         from vqapr.data.windows import AccessRecord, ObservationBatch
 
         require_tz_aware(evaluation_time, name="evaluation_time")
         registration = self.__catalog.dataset(str(requirement.dataset_id))
+        keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
-        fields = resolve_fields(registration, requirement)
+        fields = {requirement.field_id: resolve_field(registration, requirement)}
         lower_bound = None
         rows = None
         if isinstance(requirement.lookback, RowsLookback):
@@ -84,6 +86,7 @@ class DuckDbObservationStore:
             available_at_field=registration.available_at,
             key_fields=registration.key_fields,
             fields=fields,
+            aggregated=registration.aggregated,
             instruments=instruments,
             evaluation_time=evaluation_time,
             rows=rows,
@@ -102,28 +105,37 @@ class DuckDbObservationStore:
         # One dict lookup per row instead of one per row and field, and `dict.fromkeys` instead of
         # a comprehension per instrument. The counts and the failure on an unknown instrument are
         # what they were.
-        declared_fields = requirement.fields
-        actual = {instrument: dict.fromkeys(declared_fields, 0) for instrument in instruments}
+        #
+        # A dataset with no instrument axis has no per-instrument counts to keep and no declared
+        # instruments to keep them for (`docs/issues/038`). Its rows carry no `instrument`, so the
+        # record says so with two empty values rather than inventing a name to file them under.
+        declared_fields = (requirement.field_id,)
+        actual: dict[str, dict[str, int]] = {}
+        if keyed_by_instrument:
+            actual = {instrument: dict.fromkeys(declared_fields, 0) for instrument in instruments}
         max_available_at: datetime | None = None
         for row in normalized:
-            counts = actual[str(row["instrument"])]
-            for field in declared_fields:
-                if row[field] is not None:
-                    counts[field] += 1
+            if keyed_by_instrument:
+                counts = actual[str(row["instrument"])]
+                for field in declared_fields:
+                    if row[field] is not None:
+                        counts[field] += 1
             available_at = row["available_at"]
             if not isinstance(available_at, datetime):
                 raise TypeError("registered available_at values must be datetimes")
             if max_available_at is None or available_at > max_available_at:
                 max_available_at = available_at
         access = AccessRecord(
-            consumer_id=requirement.consumer_id,
+            # Stamped, not declared. The component reading is the consumer, and the framework is
+            # the only one that knows which component is running.
+            consumer_id=consumer_id,
             dataset_id=requirement.dataset_id,
             source_id=str(source.source_id),
             source_digest=source_digest,
-            fields=requirement.fields,
+            fields=declared_fields,
             lookback=requirement.lookback,
             evaluation_time=evaluation_time,
-            instruments=tuple(instruments),
+            instruments=tuple(instruments) if keyed_by_instrument else (),
             lower_bound=lower_bound,
             actual_rows=actual,
             max_available_at=max_available_at,

@@ -236,7 +236,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(tmp_path
         "    def requirements(self):\n"
         "        return (\n"
         "            DataRequirement.of(\n"
-        "                's', 'totally-unregistered-dataset', fields=('close',), "
+        "                'totally-unregistered-dataset', 'close', "
         "lookback=RowsLookback(6)\n"
         "            ),\n"
         "        )\n"

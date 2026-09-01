@@ -24,23 +24,50 @@ from datetime import datetime
 from vqapr.authoring import DatasetInput, Observation
 
 __all__ = (
+    "declared_rows",
     "observation_rows",
-    "requirement_for",
+    "requirements_for",
 )
 
 
-def requirement_for(consumer_id: str, declaration: DatasetInput):
-    """Translate one declared alias into the retained engine's requirement type."""
+def requirements_for(declaration: DatasetInput) -> tuple:
+    """Translate one declared alias into the retained engine's requirement type.
+
+    **One requirement per field.** The engine's `DataRequirement` names a single field and a
+    lookback (`docs/issues/049`); the authoring surface still declares a set of them under one
+    alias, so the fan-out happens here rather than in what an author writes.
+    """
     from vqapr.data.requirements import DataRequirement
 
     if not isinstance(declaration, DatasetInput):
         raise TypeError("declaration must be an authoring.DatasetInput")
-    return DataRequirement.of(
-        consumer_id,
-        declaration.dataset_id,
-        fields=declaration.fields,
-        lookback=declaration.lookback,
+    # No lookback translation: record `126` made the authoring and engine lookbacks one class.
+    return tuple(
+        DataRequirement.of(declaration.dataset_id, field, lookback=declaration.lookback)
+        for field in declaration.fields
     )
+
+
+def declared_rows(read: object, declaration: DatasetInput) -> tuple[dict[str, object], ...]:
+    """Read every field one alias declares, back into one row per (instant, instrument).
+
+    Each field is its own requirement and so its own read. Until a single scan serves several
+    fields (`docs/issues/046`), joining them is this bridge's job -- and the join is on the pair
+    that identifies an observation, which is the only pair every batch agrees on.
+    """
+    merged: dict[tuple, dict[str, object]] = {}
+    for field, requirement in zip(
+        declaration.fields, requirements_for(declaration), strict=True
+    ):
+        for row in read(requirement):  # type: ignore[operator]
+            key = (row["available_at"], row.get("instrument"))
+            carried = merged.get(key)
+            if carried is None:
+                carried = merged[key] = dict.fromkeys(declaration.fields)
+                carried["available_at"] = key[0]
+                carried["instrument"] = key[1]
+            carried[field] = row[field]
+    return tuple(merged[key] for key in sorted(merged, key=lambda pair: (pair[0], str(pair[1]))))
 
 
 def observation_rows(

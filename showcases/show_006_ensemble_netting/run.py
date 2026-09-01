@@ -244,9 +244,7 @@ class {class_name}(StrategyModel):
 
     def requirements(self):
         return (
-            DataRequirement.of(
-                "{strategy_id}", "price_daily", fields=("close",), lookback=RowsLookback(LOOKBACK)
-            ),
+            DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
     def on_occurrence(self, context):
@@ -383,25 +381,16 @@ class EnsembleStrategy(StrategyModel):
 
     def requirements(self):
         return (
-            DataRequirement.of(
-                "show006-ensemble",
-                self._reversal_dataset_id,
-                fields=("weight",),
-                lookback=RowsLookback(1),
-            ),
-            DataRequirement.of(
-                "show006-ensemble",
-                self._momentum_dataset_id,
-                fields=("weight",),
-                lookback=RowsLookback(1),
-            ),
+            DataRequirement.of(self._reversal_dataset_id, "weight", lookback=RowsLookback(1)),
+            DataRequirement.of(self._momentum_dataset_id, "weight", lookback=RowsLookback(1)),
         )
 
     def _panel(self, context, requirement):
+        field = requirement.field_id
         return {
-            str(row["instrument"]): row["weight"]
+            str(row["instrument"]): row[field]
             for row in context.window.observations(requirement).rows
-            if row["weight"] is not None
+            if row[field] is not None
         }
 
     def on_occurrence(self, context):
@@ -752,7 +741,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "SingleNameCap",
         config={
             "cap": CAP,
-            "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
             "constraint_id": "single-name-cap",
         },

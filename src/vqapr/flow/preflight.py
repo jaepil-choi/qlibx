@@ -72,16 +72,18 @@ def _freeze_agenda(
 
 
 def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSpec:
-    """Check declared valuation input availability without reading physical source bytes."""
-    dataset_id = getattr(requirement, "dataset_id", None)
-    fields = getattr(requirement, "fields", None)
+    """Check declared valuation input availability without reading physical source bytes.
+
+    A requirement names a dataset and one field, so both halves are checked here: the dataset must
+    be registered, and it must expose that field.
+    """
     if not isinstance(requirement, DataRequirement):
         raise TypeError("requirement must be a DataRequirement")
-    registration = workspace.dataset(dataset_id)
-    missing = tuple(field for field in fields if field not in registration.fields)
-    if missing:
+    registration = workspace.dataset(str(requirement.dataset_id))
+    if requirement.field_id not in registration.fields:
         raise ValueError(
-            f"dataset {dataset_id!r} does not provide required fields: {', '.join(missing)}"
+            f"dataset {str(requirement.dataset_id)!r} does not provide required field: "
+            f"{requirement.field_id}"
         )
     return workspace.source(str(registration.source))
 

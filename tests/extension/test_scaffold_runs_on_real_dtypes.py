@@ -113,6 +113,7 @@ def _window(workspace: Workspace, requirement: DataRequirement) -> ModelWindow:
         instruments=("A", "B"),
         store=DuckDbObservationStore(workspace),
         allowed_requirements=(requirement,),
+        consumer_id="test-consumer",
     )
 
 
@@ -134,9 +135,7 @@ def test_the_price_fixture_really_holds_python_floats(
     testing nothing -- which is exactly how the bug shipped. Assert the dtype directly.
     """
     workspace = _workspace(tmp_path, float_price_parquet)
-    requirement = DataRequirement.of(
-        "probe", "price_daily", fields=("close",), lookback=RowsLookback(LOOKBACK)
-    )
+    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK))
 
     rows = _window(workspace, requirement).observations(requirement).rows
 

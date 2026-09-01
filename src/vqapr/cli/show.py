@@ -130,10 +130,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             "kind": cli_kind(kind),
             "constraint_id": str(rule.constraint_id),
             "reads": {
-                str(requirement.dataset_id): {
-                    "fields": list(requirement.fields),
-                    "lookback": str(requirement.lookback),
-                }
+                f"{requirement.dataset_id}.{requirement.field_id}": str(requirement.lookback)
                 for requirement in rule.requirements()
             },
             # Named rather than left absent, because "reads nothing" is the ordinary answer for a
@@ -207,6 +204,15 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
         "source_id": str(source.source_id),
         "path": str(source.path),
         "fields": dict(item.fields),
+        # The types the projection produces, derived once at registration by `DESCRIBE` rather
+        # than declared. `None` for an entry registered before field types were derived; those
+        # carry bare columns and are re-derived the next time the dataset is registered.
+        "field_types": (
+            None
+            if item.field_types is None
+            else {name: str(column_type) for name, column_type in item.field_types.items()}
+        ),
+        "aggregated": item.aggregated,
         "instrument_field": item.instrument_field,
         "available_at": item.available_at,
         "span": [str(value) for value in (item.span or ())] or None,

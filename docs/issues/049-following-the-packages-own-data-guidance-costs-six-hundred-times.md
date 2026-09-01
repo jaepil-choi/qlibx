@@ -51,6 +51,10 @@ FROM source GROUP BY 1, 2
    in the workspace, and the registration already knows which dataset it belongs to; naming both was
    saying one fact twice. No `consumer_id` either: the component declaring the requirement *is* the
    consumer, so the framework stamps it. It still reaches `AccessRecord` exactly as today.
+   > **CORRECTED 2026-09-01 by the owner — the first half of this is wrong.** A field id is not
+   > unique across a workspace, and requiring it to be broke this package's principal consumer. A
+   > requirement names **`(dataset_id, field_id)`** and a lookback. The `consumer_id` half stands.
+   > See the section below for the measurement that overturned it.
 3. **The universe filter follows the data's own shape.** `instrument_field` is optional. A dataset
    without one has no instrument axis, so the declared instrument list is not applied to it — which
    is `038`'s "better fix", moved from the requirement to the dataset, where it belongs: whether a
@@ -90,6 +94,67 @@ surface of. Measured 2026-08-31/09-01 in `kwam-enhanced-index/vqapr-performance-
 **Touches:** the read path as a whole — `data/requirements.py`, `data/scan.py`, `data/store.py`,
 `domain/rows.py`, `data/windows.py` — and, more than any single module, **`SKILL.md`'s data
 guidance**, which is what a user follows into this.
+
+## The ruling's uniqueness premise was wrong, and the owner overturned it
+
+**Found 2026-09-01 while implementing lane C, verified against the live research workspace, and
+decided by the owner the same day: a requirement names `(dataset_id, field_id)`.** The campaign's
+§6 says a case the ruling blocks in practice goes into this file and up to the owner rather than
+being resolved by whoever hits it; this is that, and its answer.
+
+The ruling above said a requirement names a field and nothing else, **because a field id is an id,
+unique in the workspace**. Lane C implemented that: registration refused an id another dataset
+already exposed, naming that dataset. `qlibx-b8` raised that this breaks `vqapr-enhanced-index-3`,
+this package's principal consumer, and it did — more widely than the report suggested.
+
+That workspace holds 27 datasets. **21 field ids are exposed by more than one of them**, and they
+are two different things:
+
+| kind | examples |
+|---|---|
+| **parallel series, deliberately schema-identical** | `rmrf` `smb` `hml` `rmw` `cma` `mom` on `ff5-factors-broad` / `-k200`; `residual` `realised` `beta_*` on `residual-returns-broad` / `-k200` |
+| **ordinary domain vocabulary that recurs** | `fiscal_yyyymm` on **six** datasets; `settlement_type` on three; `fiscal_year` on three; `market_cap` on two; `account_code`, `numeric_value`, `statement_scope` on the statement pair |
+
+**The first kind is the design.** That environment's README states it: there is no right answer
+between the two universes, the comparison is the point, and the two series share a component and an
+agenda so that the only difference between them is the universe. Schema parity is what makes the
+comparison possible; renaming to `residual_broad` / `residual_k200` ends it.
+
+**The second kind is harder to argue with.** `fiscal_yyyymm` is on six datasets because that is what
+the column is called wherever it appears. Nobody chose a colliding name; the word simply recurs, and
+a rule that makes it an error asks a researcher to invent twenty-one names whose only purpose is to
+differ from each other.
+
+**What is actually at stake.** The workspace still *opens* — uniqueness is checked at registration
+and decode does not re-litigate it — so nothing already built stops working. What breaks is the
+**rebuild**: `build_specs.py` emits both members of each pair into one declaration, `_apply`
+registers them in order, and the second is refused naming the first. Twelve factor books, about
+19 GB, sit downstream of that path.
+
+**This was not a defect in the implementation, and not something a rename fixes.** It was the
+ruling's premise meeting a workspace built before it.
+
+### The decision
+
+**A requirement names `(dataset_id, field_id)` and a lookback.** A field id is unique **within** a
+dataset; nothing requires it to be unique across a workspace, and no registration is refused for
+sharing one. Implemented in lane C (record `123`) as:
+
+- `DataRequirement.of("statement-facts", "net_income", lookback=...)`;
+- no `field_conflict` refusal at registration, and no workspace-wide field index;
+- resolution asks only the second half — `observation_store.resolve.field_missing` when the named
+  dataset does not expose the named field, saying what it does expose;
+- `check` keeps both of its judgments, because "the dataset is not registered" and "it does not
+  expose that field" are two different repairs again.
+
+**The `consumer_id` half of the ruling stands** and is unaffected: the component declaring a
+requirement is the consumer, and the framework stamps it.
+
+**One thing the uniqueness rule had forced is also undone.** The framework was qualifying the field
+ids of published run records and allocations with their dataset id, because the five Flow-stamped
+envelope columns and a default `weight` collide by construction. With ids unique only within a
+dataset there is nothing to avoid, so those publications expose `weight` and `run_id` again.
+
 
 ## The claim
 

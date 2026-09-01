@@ -208,7 +208,8 @@ def materialization_judgments(
                 refuse(
                     "lookback_uncovered",
                     (
-                        f"dataset {requirement.dataset_id!r} must carry history reaching back "
+                        f"dataset {str(requirement.dataset_id)!r} must carry history reaching "
+                        "back "
                         "past the earliest evaluation, or that evaluation reads a short window "
                         "and produces nothing"
                     ),
@@ -436,7 +437,7 @@ def _judge_datasets_and_fields(
     registered: dict[str, Any],
     at: FailureSource,
 ) -> list[Failure]:
-    """Every dataset a component reads must be registered, and expose the fields it names.
+    """Every dataset a component reads must be registered, and expose the field it names.
 
     Two codes rather than one, because they are two different repairs: an unregistered dataset is
     fixed by registering it, and an absent field is fixed by correcting the component or the
@@ -488,21 +489,20 @@ def _judge_datasets_and_fields(
             continue
 
         exposed = set(registration.fields)
-        missing = [name for name in getattr(requirement, "fields", ()) if name not in exposed]
-        if missing:
+        field_id = str(getattr(requirement, "field_id", ""))
+        if field_id and field_id not in exposed:
             found.append(
                 Failure.bounded(
                     "check.field.absent",
                     f"dataset {dataset_id!r} must expose every field the component reads",
                     observed=(
-                        f"missing: {', '.join(missing)}; "
-                        f"exposed: {', '.join(sorted(exposed))}"
+                        f"missing: {field_id}; exposed: {', '.join(sorted(exposed))}"
                     ),
-                    examples=missing,
-                    example_total=len(missing),
+                    examples=(field_id,),
+                    example_total=1,
                     fix=(
-                        f"add {', '.join(missing)} to the dataset's fields mapping and register "
-                        "it again, or read a field it already exposes"
+                        f"add {field_id} to the dataset's fields mapping and register it again, "
+                        "or read a field it already exposes"
                     ),
                     explain=ExplainTopic.DATASET_PREPARATION,
                     source=replace(at, key_path="strategy.component"),

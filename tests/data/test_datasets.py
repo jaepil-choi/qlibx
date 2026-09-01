@@ -104,7 +104,7 @@ def test_declaration_refuses_an_empty_key() -> None:
 
 
 def test_declaration_refuses_exposing_nothing() -> None:
-    with pytest.raises(ValueError, match="at least one column"):
+    with pytest.raises(ValueError, match="at least one value"):
         _registration(fields={})
 
 

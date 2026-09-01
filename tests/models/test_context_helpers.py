@@ -41,7 +41,7 @@ AT = datetime(2024, 3, 5, 6, 30, tzinfo=UTC)
 BUDGET = Budget(
     PortfolioDirection.LONG_ONLY, Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")
 )
-REQUIREMENT = DataRequirement.of("strategy", "prices", fields=("close",), lookback=RowsLookback(1))
+REQUIREMENT = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
 
 
 @pytest.fixture
@@ -93,6 +93,7 @@ def _context(space: Workspace) -> StrategyModelContext:
             instruments=("A", "B"),
             store=DuckDbObservationStore(space),
             allowed_requirements=(REQUIREMENT,),
+            consumer_id="test-consumer",
         ),
         account=AccountSnapshot(7, Decimal("1000"), {}),
     )

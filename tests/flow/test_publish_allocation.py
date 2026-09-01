@@ -322,15 +322,14 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
     )
 
     workspace = Workspace.open(tmp_path)
-    requirement = DataRequirement.of(
-        "subscriber", "alpha_allocation", fields=("weight",), lookback=RowsLookback(1)
-    )
+    requirement = DataRequirement.of("alpha_allocation", "weight", lookback=RowsLookback(1))
 
     visible = data_model_window(
         workspace,
         evaluation_time=cutoff,
         instruments=tuple(sorted(weights)),
         requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     rows = visible.observations(requirement).rows
     subscribed = {row["instrument"]: row["weight"] for row in rows}
@@ -342,6 +341,7 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
         evaluation_time=cutoff - timedelta(seconds=1),
         instruments=tuple(sorted(weights)),
         requirements=(requirement,),
+        consumer_id="test-consumer",
     )
     assert hidden.observations(requirement).rows == ()
 

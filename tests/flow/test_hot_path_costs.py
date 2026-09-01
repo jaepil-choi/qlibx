@@ -101,11 +101,14 @@ def test_one_store_hashes_each_source_once_no_matter_how_many_queries(
     monkeypatch.setattr(store, "_physical_digest", counting_digest)
 
     observation_store = DuckDbObservationStore(priced_workspace)
-    requirement = DataRequirement.of(
-        "strategy", "prices", fields=("close",), lookback=RowsLookback(2)
-    )
+    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(2))
     for session in SESSIONS[3:]:
-        observation_store.query(requirement, evaluation_time=session, instruments=("AAA", "BBB"))
+        observation_store.query(
+            requirement,
+            evaluation_time=session,
+            instruments=("AAA", "BBB"),
+            consumer_id="test-consumer",
+        )
 
     assert len(calls) == 1, f"expected one digest per source per store, saw {len(calls)}"
 
@@ -116,14 +119,22 @@ def test_two_stores_do_not_share_a_digest_cache(priced_workspace: Workspace) -> 
     A process-wide cache would outlive the frozen-run scope that justifies it and would happily
     serve a stale digest to a later run over rewritten bytes.
     """
-    requirement = DataRequirement.of(
-        "strategy", "prices", fields=("close",), lookback=RowsLookback(1)
-    )
+    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     first = DuckDbObservationStore(priced_workspace)
     second = DuckDbObservationStore(priced_workspace)
 
-    first_batch = first.query(requirement, evaluation_time=SESSIONS[-1], instruments=("AAA",))
-    second_batch = second.query(requirement, evaluation_time=SESSIONS[-1], instruments=("AAA",))
+    first_batch = first.query(
+        requirement,
+        evaluation_time=SESSIONS[-1],
+        instruments=("AAA",),
+        consumer_id="test-consumer",
+    )
+    second_batch = second.query(
+        requirement,
+        evaluation_time=SESSIONS[-1],
+        instruments=("AAA",),
+        consumer_id="test-consumer",
+    )
 
     # Same bytes, so the digests agree; the point is that each store computed it independently.
     assert first_batch.access.source_digest == second_batch.access.source_digest
@@ -394,6 +405,7 @@ def _observation_rows(
         available_at_field="available_at",
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "volume": "volume"},
+        aggregated=False,
         instruments=instruments,
         evaluation_time=_BOUND_SESSIONS[-1] if evaluation_time is None else evaluation_time,
         rows=rows,

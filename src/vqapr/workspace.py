@@ -131,7 +131,6 @@ SOURCE_LOOKUP_STAGE = "workspace.source.lookup"
 WRITE_STAGE = "workspace.write"
 EXECUTION_REGISTER_STAGE = "workspace.execution_input.register"
 EXECUTION_LOOKUP_STAGE = "workspace.execution_input.lookup"
-COMPONENT_REGISTER_STAGE = "workspace.component.register"
 COMPONENT_LOOKUP_STAGE = "workspace.component.lookup"
 AGENDA_REGISTER_STAGE = "workspace.agenda.register"
 AGENDA_LOOKUP_STAGE = "workspace.agenda.lookup"
@@ -1449,14 +1448,6 @@ class Workspace:
                 source=FailureSource(file=str(self.path)),
                 retry="make the workspace directory writable, then retry",
             ) from error
-
-
-def _stale_lock_age(lock: Path) -> float | None:
-    """Seconds since the lock was created, or None if it just disappeared."""
-    try:
-        return max(0.0, _time.time() - lock.stat().st_mtime)
-    except OSError:
-        return None
 
 
 

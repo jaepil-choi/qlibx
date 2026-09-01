@@ -240,25 +240,6 @@ class FailedAfterCommit(SimulationFailure):
 
 
 @dataclass(frozen=True, slots=True)
-class PlanningEvidence:
-    """Execution-time economic inputs checked before submitting orders."""
-
-    nav: Decimal
-    cash_target: Decimal
-    source_refs: tuple[IntentSourceRef, ...]
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.nav, Decimal) or not self.nav.is_finite() or self.nav <= 0:
-            raise ValueError("nav must be a positive finite Decimal")
-        if not isinstance(self.cash_target, Decimal) or not self.cash_target.is_finite():
-            raise ValueError("cash_target must be a finite Decimal")
-        if not isinstance(self.source_refs, tuple) or not all(
-            isinstance(source, IntentSourceRef) for source in self.source_refs
-        ):
-            raise TypeError("source_refs must be a tuple of IntentSourceRef values")
-
-
-@dataclass(frozen=True, slots=True)
 class ValuationResult:
     """A complete selected mark set for one committed AccountSnapshot."""
 

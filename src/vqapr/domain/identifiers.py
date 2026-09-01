@@ -11,7 +11,6 @@ ExecutionInputId = NewType("ExecutionInputId", str)
 ComponentId = NewType("ComponentId", str)
 AgendaId = NewType("AgendaId", str)
 OccurrenceId = NewType("OccurrenceId", str)
-ConfigurationId = NewType("ConfigurationId", str)
 
 
 def _clean(kind: str, raw: str) -> str:
@@ -67,13 +66,6 @@ def occurrence_id(raw: str) -> OccurrenceId:
     if any(c.isspace() for c in value):
         raise ValueError(f"occurrence_id must not contain whitespace: {value!r}")
     return OccurrenceId(value)
-
-
-def configuration_id(raw: str) -> ConfigurationId:
-    value = _clean("configuration_id", raw)
-    if any(c.isspace() for c in value):
-        raise ValueError(f"configuration_id must not contain whitespace: {value!r}")
-    return ConfigurationId(value)
 
 
 def instrument_id(raw: str) -> InstrumentId:

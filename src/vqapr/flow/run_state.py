@@ -135,12 +135,6 @@ class AcceptedRunState:
             }
         )
 
-    @property
-    def model_states(self) -> Mapping[ModelStateRef, ModelMemory]:
-        return MappingProxyType(
-            {ref: normalize_memory(memory) for ref, memory in self._model_states.items()}
-        )
-
     def load_model_state(self, ref: ModelStateRef) -> ModelMemory:
         if not isinstance(ref, ModelStateRef):
             raise TypeError("ref must be a ModelStateRef")

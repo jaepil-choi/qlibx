@@ -394,6 +394,7 @@ def _observation_rows(
         available_at_field="available_at",
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "volume": "volume"},
+        aggregated=False,
         instruments=instruments,
         evaluation_time=_BOUND_SESSIONS[-1] if evaluation_time is None else evaluation_time,
         rows=rows,

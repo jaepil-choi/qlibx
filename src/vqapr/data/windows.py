@@ -49,7 +49,9 @@ class ObservationBatch:
     * `available_at` -- a timezone-aware `datetime`, the row's OWN point-in-time stamp rather than
       the window's evaluation time. Rows do not share one instant, so this is what a cross-section
       is built on.
-    * `instrument` -- the instrument id, as a string.
+    * `instrument` -- the instrument id, as a string. **Absent** on a dataset registered with no
+      `instrument_field`: those rows are not keyed by instrument, the declared instrument list is
+      not applied to them, and there is no name to put here (`docs/issues/038`).
     * one key per field named in the requirement, under the SEMANTIC alias the requirement
       declared, not the physical column name. A value is `None` where the source has no value; a
       `RowsLookback` also nulls a field on rows outside that field's own last-N (see
@@ -65,7 +67,10 @@ class ObservationBatch:
     **Ordering is guaranteed: ascending `available_at`, then the dataset's registered key fields.**
     It is pushed into SQL (`scan.observation_rows`) rather than applied afterwards, so it holds for
     every lookback and every instrument count, and `tests/data/test_observation_batch_shape.py`
-    pins it. Instruments therefore INTERLEAVE within an instant rather than being grouped by name:
+    pins it. A dataset whose fields aggregate within an instant orders by `available_at` then
+    `instrument` instead, because the key fields were consumed making the group and are not in
+    what came out of it. Instruments therefore INTERLEAVE within an instant rather than being
+    grouped by name:
     a per-instrument series is built by the reader, and a cross-section is `rows` filtered on one
     `available_at`. `ModelWindow.snapshot` returns the newest cross-section directly.
 
@@ -199,6 +204,11 @@ class ModelWindow:
         # newest row is exactly the window this method exists to collapse: it is what leaves a
         # departed name's final value sitting beside current ones.
         rows = tuple(row for row in batch.rows if row["available_at"] == newest)
+        # A cross-section is ordered by instrument, and a dataset with no instrument axis has one
+        # row per instant rather than a cross-section at all -- so there is nothing to order it by
+        # and the single row is returned as it came.
+        if not batch.access.instruments:
+            return ObservationBatch._trusted(rows, batch.access)
         return ObservationBatch._trusted(
             tuple(sorted(rows, key=lambda row: str(row["instrument"]))), batch.access
         )

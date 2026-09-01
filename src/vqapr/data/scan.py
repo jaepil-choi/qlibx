@@ -911,6 +911,64 @@ class _RowsBound:
     cut: int
 
 
+@dataclass(frozen=True, slots=True)
+class _Counted:
+    """What a `RowsLookback` proof counts, in the shape the registration settled on.
+
+    **The proof is computed in two places and they must count the same thing.** Once as a
+    `GROUP BY` statement at cold start (`_prove_rows_bound`), and once as a window aggregate
+    riding inside the read itself, which is what makes a bounded read cost one statement rather
+    than two (`_PROOF_PREFIX`). If those two disagreed, an instrument could be proved safe by one
+    and unsafe by the other, and the bounded query would return an answer the unbounded query
+    would not -- with no error anywhere. That is the failure the campaign calls a correctness
+    change wearing performance clothes, so the vocabulary is named once and both take it.
+
+    A grouped registration counts what its expressions PRODUCE, one value per instant, because
+    that is what a `RowsLookback` counts for such a dataset. A row-wise one counts the source's
+    own rows. The fragments differ between the two shapes and are identical between the two
+    places, which is the property this type exists to hold.
+    """
+
+    relation: str
+    """What to read. The source for a row-wise registration, its projection for a grouped one."""
+
+    instrument: str
+    available: str
+    args: tuple[str, ...]
+    """One counting argument per declared field, deduplicated. `count(arg)` is what is compared
+    against the declared row count."""
+
+
+def _counted(
+    spec: SourceSpec,
+    *,
+    instrument_field: str,
+    available_at_field: str,
+    fields: Mapping[str, str],
+    aggregated: bool,
+) -> _Counted:
+    """The counting vocabulary for one registration's shape."""
+    if aggregated:
+        return _Counted(
+            relation=projection_relation(
+                spec,
+                instrument_field=instrument_field,
+                available_at_field=available_at_field,
+                fields=fields,
+                aggregated=True,
+            ),
+            instrument=_quote("instrument"),
+            available=_quote("available_at"),
+            args=tuple(_quote(name) for name in fields),
+        )
+    return _Counted(
+        relation=_relation(spec),
+        instrument=_quote(instrument_field),
+        available=_quote(available_at_field),
+        args=tuple(dict.fromkeys(f"({value})" for value in fields.values())),
+    )
+
+
 def _rows_bound_guess(
     spec: SourceSpec,
     *,
@@ -944,9 +1002,7 @@ def _rows_bound_guess(
 def _prove_rows_bound(
     spec: SourceSpec,
     *,
-    instrument_field: str,
-    available_at_field: str,
-    physical_fields: tuple[str, ...],
+    counted: _Counted,
     instruments: Sequence[str],
     evaluation_time: object,
     rows: int,
@@ -959,17 +1015,16 @@ def _prove_rows_bound(
     This runs once per declared read per run. Afterwards the read carries its own proof forward
     (`_rows_bound`), so this is the cold start rather than a per-callback cost.
     """
-    instrument = _quote(instrument_field)
-    available = _quote(available_at_field)
-    counts = ", ".join(f"count({_quote(physical)})" for physical in physical_fields)
+    counts = ", ".join(f"count({argument})" for argument in counted.args)
     placeholders = ", ".join("?" for _ in instruments)
     observed = {
         row[0]: row[1:]
         for row in session.connection(spec)
         .execute(
-            f"SELECT {instrument}, {counts} FROM {_relation(spec)} "
-            f"WHERE {available} <= ? AND {available} >= ? AND {instrument} IN ({placeholders}) "
-            f"GROUP BY {instrument}",
+            f"SELECT {counted.instrument}, {counts} FROM {counted.relation} "
+            f"WHERE {counted.available} <= ? AND {counted.available} >= ? "
+            f"AND {counted.instrument} IN ({placeholders}) "
+            f"GROUP BY {counted.instrument}",
             [evaluation_time, lower, *instruments],
         )
         .fetchall()
@@ -986,9 +1041,7 @@ def _rows_bound(
     spec: SourceSpec,
     *,
     key: tuple[object, ...],
-    instrument_field: str,
-    available_at_field: str,
-    physical_fields: tuple[str, ...],
+    counted: _Counted,
     instruments: Sequence[str],
     evaluation_time: object,
     rows: int,
@@ -1023,9 +1076,7 @@ def _rows_bound(
         return held
     proved = _prove_rows_bound(
         spec,
-        instrument_field=instrument_field,
-        available_at_field=available_at_field,
-        physical_fields=physical_fields,
+        counted=counted,
         instruments=instruments,
         evaluation_time=evaluation_time,
         rows=rows,
@@ -1040,39 +1091,63 @@ def _rows_bound(
 def observation_rows(
     spec: SourceSpec,
     *,
-    instrument_field: str,
+    instrument_field: str | None,
     available_at_field: str,
     key_fields: Sequence[str],
-    fields: dict[str, str],
+    fields: Mapping[str, str],
+    aggregated: bool,
     instruments: Sequence[str],
     evaluation_time: object,
     rows: int | None = None,
     lower_bound: object | None = None,
     session: ScanSession | None = None,
 ) -> tuple[dict[str, object], ...]:
-    """Execute one physical PIT observation query with its lookback pushed into SQL."""
+    """Execute one PIT observation query with its lookback pushed into SQL.
+
+    **The window predicates are written here and only here.** `available_at <= evaluation_time`,
+    the lookback bound, and the instrument list are the framework's, whatever the registration
+    says; a field is an expression evaluated inside the window those predicates draw, never a
+    statement that could redraw it (`docs/issues/049`).
+
+    Two shapes, settled at registration and carried in `aggregated`:
+
+    * **row-wise** -- one output row per source row, ordered by `available_at` then the dataset's
+      key fields. This is the query this function has always written, and a registration whose
+      fields are bare columns still gets it unchanged, down to the rows a finer key admits.
+    * **grouped** -- one output row per (instrument, instant), the expressions evaluated inside
+      that group, ordered by `available_at` then `instrument`. The key fields do not appear: what
+      the group collapsed cannot order what came out of it.
+
+    A dataset with no `instrument_field` has no instrument axis, so it gets **neither** the
+    instrument predicate nor the instrument column, and `instruments` does not narrow it
+    (`docs/issues/038`). It takes no `RowsLookback` bound either: the bound is proved per
+    instrument, and there are none.
+    """
     if (rows is None) == (lower_bound is None):
         raise ValueError("declare exactly one rows or calendar lower bound")
-    if not instruments:
-        raise ValueError("observation query requires at least one instrument")
     if not fields:
         raise ValueError("observation query requires at least one field")
+    keyed_by_instrument = instrument_field is not None
+    if keyed_by_instrument and not instruments:
+        raise ValueError("observation query requires at least one instrument")
 
-    instrument = _quote(instrument_field)
     available = _quote(available_at_field)
-    ordering_fields = tuple(dict.fromkeys((available_at_field, *key_fields)))
-    ascending = ", ".join(_quote(field) for field in ordering_fields)
-    descending = ", ".join(f"{_quote(field)} DESC" for field in ordering_fields)
-    placeholders = ", ".join("?" for _ in instruments)
-    predicates = [f"{available} <= ?", f"{instrument} IN ({placeholders})"]
-    parameters: list[object] = [evaluation_time, *instruments]
-    physical_fields = tuple(dict.fromkeys(fields.values()))
+    identity = identity_projections(instrument_field, available_at_field)
+    values = value_projections(fields)
+    parameters: list[object] = [evaluation_time]
+    predicates = [f"{available} <= ?"]
+    if keyed_by_instrument:
+        instrument = _quote(instrument_field)  # type: ignore[arg-type]
+        predicates.append(f"{instrument} IN ({', '.join('?' for _ in instruments)})")
+        parameters.extend(instruments)
+
+    counted: _Counted | None = None
     aimed: tuple[object, int] | None = None
     bound_key: tuple[object, ...] = ()
     if lower_bound is not None:
         predicates.append(f"{available} >= ?")
         parameters.append(lower_bound)
-    elif rows is not None and session is not None:
+    elif rows is not None and session is not None and keyed_by_instrument:
         # A RowsLookback carries no bound of its own, so without this the window below is
         # evaluated over the source's entire history on every callback. `_rows_bound` returns a
         # bound together with the instruments it would have changed the answer for; those are
@@ -1080,6 +1155,13 @@ def observation_rows(
         # unbounded query would have produced -- see `_RowsBound`. The bound needs a session
         # because it is only worth taking when the grid it reads, and the proof it takes, can be
         # kept for the rest of the run.
+        counted = _counted(
+            spec,
+            instrument_field=instrument_field,  # type: ignore[arg-type]
+            available_at_field=available_at_field,
+            fields=fields,
+            aggregated=aggregated,
+        )
         aimed = _rows_bound_guess(
             spec,
             available_at_field=available_at_field,
@@ -1092,16 +1174,14 @@ def observation_rows(
                 spec.path.as_posix(),
                 instrument_field,
                 available_at_field,
-                physical_fields,
+                counted.args,
                 rows,
                 tuple(instruments),
             )
             applied = _rows_bound(
                 spec,
                 key=bound_key,
-                instrument_field=instrument_field,
-                available_at_field=available_at_field,
-                physical_fields=physical_fields,
+                counted=counted,
                 instruments=instruments,
                 evaluation_time=evaluation_time,
                 rows=rows,
@@ -1120,51 +1200,73 @@ def observation_rows(
                     parameters.append(applied.lower)
     where = " AND ".join(predicates)
 
+    if aggregated:
+        grouping = ", ".join(str(position) for position in range(1, len(identity) + 1))
+        source = (
+            f"(SELECT {', '.join((*identity, *values))} FROM {_relation(spec)} "
+            f"WHERE {where} GROUP BY {grouping})"
+        )
+        # What came out of the group is what can be ordered by and ranked over: the key fields
+        # were consumed making it.
+        selected = {name: _quote(name) for name in fields}
+        ordering = [_quote("available_at")]
+        if keyed_by_instrument:
+            ordering.append(_quote("instrument"))
+        ascending = ", ".join(ordering)
+        descending = ", ".join(f"{column} DESC" for column in ordering)
+        carried_projections = list(ordering)
+        partition = f"PARTITION BY {_quote('instrument')} " if keyed_by_instrument else ""
+    else:
+        source = f"{_relation(spec)} WHERE {where}"
+        selected = {name: f"({value})" for name, value in fields.items()}
+        ordering_fields = tuple(dict.fromkeys((available_at_field, *key_fields)))
+        ascending = ", ".join(_quote(field) for field in ordering_fields)
+        descending = ", ".join(f"{_quote(field)} DESC" for field in ordering_fields)
+        carried_projections = list(identity)
+        partition = f"PARTITION BY {instrument} " if keyed_by_instrument else ""
+
     proofs: list[str] = []
     proof_parameters: list[object] = []
-    projections = [
-        f"{available} AS {_quote('available_at')}",
-        f"{instrument} AS {_quote('instrument')}",
-    ]
+    projections = list(carried_projections)
     if rows is None:
         projections.extend(
-            f"{_quote(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()
+            f"{expression} AS {_quote(name)}" for name, expression in selected.items()
         )
-        sql = (
-            f"SELECT {', '.join(projections)} FROM {_relation(spec)} WHERE {where} "
-            f"ORDER BY {ascending}"
-        )
+        sql = f"SELECT {', '.join(projections)} FROM {source} ORDER BY {ascending}"
     else:
         ranks: list[str] = []
         keep: list[str] = []
-        for index, (semantic, physical) in enumerate(fields.items()):
-            column = _quote(physical)
+        for index, (name, expression) in enumerate(selected.items()):
             rank = _quote(f"__vqapr_rank_{index}")
             ranks.append(
-                f"count({column}) OVER (PARTITION BY {instrument} ORDER BY {descending} "
+                f"count({expression}) OVER ({partition}ORDER BY {descending} "
                 f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS {rank}"
             )
-            selected = f"{column} IS NOT NULL AND {rank} <= {int(rows)}"
-            keep.append(f"({selected})")
+            chosen = f"{expression} IS NOT NULL AND {rank} <= {int(rows)}"
+            keep.append(f"({chosen})")
             projections.append(
-                f"CASE WHEN {selected} THEN {column} ELSE NULL END AS {_quote(semantic)}"
+                f"CASE WHEN {chosen} THEN {expression} ELSE NULL END AS {_quote(name)}"
             )
-        if aimed is not None:
+        if aimed is not None and counted is not None:
             # The proof for the *next* callback, taken from rows this one is reading anyway. The
             # bound it proves is at or above the one applied above, so the rows that decide it
             # are all inside the window already scanned, and counting them costs no statement.
             # An instrument that keeps no row here is absent from the answer and is treated as
             # unproved, which is the safe direction.
-            for index, physical in enumerate(physical_fields):
+            #
+            # It counts through `counted`, the same vocabulary the cold-start statement used --
+            # for a grouped registration that is one value per instant rather than one per source
+            # row, and the two must agree or the bound stops meaning what it was proved to mean.
+            for index, argument in enumerate(counted.args):
                 proofs.append(
-                    f"count(CASE WHEN {available} >= ? THEN {_quote(physical)} END) "
-                    f"OVER (PARTITION BY {instrument}) AS {_quote(f'{_PROOF_PREFIX}{index}')}"
+                    f"count(CASE WHEN {counted.available} >= ? THEN {argument} END) "
+                    f"OVER (PARTITION BY {counted.instrument}) "
+                    f"AS {_quote(f'{_PROOF_PREFIX}{index}')}"
                 )
                 proof_parameters.append(aimed[0])
                 projections.append(_quote(f"{_PROOF_PREFIX}{index}"))
         sql = (
-            f"WITH gated AS (SELECT *, {', '.join((*ranks, *proofs))} FROM {_relation(spec)} "
-            f"WHERE {where}) "
+            f"WITH gated AS (SELECT *, {', '.join((*ranks, *proofs))} FROM {source}) "
             f"SELECT {', '.join(projections)} FROM gated WHERE {' OR '.join(keep)} "
             f"ORDER BY {ascending}"
         )
@@ -1182,12 +1284,12 @@ def observation_rows(
                 Failure.bounded(
                     code="source.scan.observations.unreadable",
                     requirement=(
-                        "the registered source and physical field bindings must be queryable"
+                        "the registered source and its field expressions must be queryable"
                     ),
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path)),
                     fix=(
-                        f"confirm every registered physical field name still exists in "
+                        f"confirm every registered field expression still evaluates against "
                         f"'{spec.path}', then re-register or fix the source"
                     ),
                     explain=ExplainTopic.SOURCE_ACCESS,
@@ -1202,7 +1304,7 @@ def observation_rows(
     if aimed is None or session is None:
         return tuple(dict(zip(names, row, strict=True)) for row in fetched)
 
-    # A bound was aimed for, so the answer carries its proof: one count per physical field,
+    # A bound was aimed for, so the answer carries its proof: one count per counting argument,
     # appended after the declared ones. Read it, keep it for the next callback, drop it here.
     carried = names[: len(names) - len(proofs)]
     counts = range(len(carried), len(names))

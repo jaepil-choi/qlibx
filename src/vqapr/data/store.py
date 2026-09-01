@@ -67,6 +67,7 @@ class DuckDbObservationStore:
 
         require_tz_aware(evaluation_time, name="evaluation_time")
         registration = self.__catalog.dataset(str(requirement.dataset_id))
+        keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
         fields = resolve_fields(registration, requirement)
@@ -84,6 +85,7 @@ class DuckDbObservationStore:
             available_at_field=registration.available_at,
             key_fields=registration.key_fields,
             fields=fields,
+            aggregated=registration.aggregated,
             instruments=instruments,
             evaluation_time=evaluation_time,
             rows=rows,
@@ -102,14 +104,21 @@ class DuckDbObservationStore:
         # One dict lookup per row instead of one per row and field, and `dict.fromkeys` instead of
         # a comprehension per instrument. The counts and the failure on an unknown instrument are
         # what they were.
+        #
+        # A dataset with no instrument axis has no per-instrument counts to keep and no declared
+        # instruments to keep them for (`docs/issues/038`). Its rows carry no `instrument`, so the
+        # record says so with two empty values rather than inventing a name to file them under.
         declared_fields = requirement.fields
-        actual = {instrument: dict.fromkeys(declared_fields, 0) for instrument in instruments}
+        actual: dict[str, dict[str, int]] = {}
+        if keyed_by_instrument:
+            actual = {instrument: dict.fromkeys(declared_fields, 0) for instrument in instruments}
         max_available_at: datetime | None = None
         for row in normalized:
-            counts = actual[str(row["instrument"])]
-            for field in declared_fields:
-                if row[field] is not None:
-                    counts[field] += 1
+            if keyed_by_instrument:
+                counts = actual[str(row["instrument"])]
+                for field in declared_fields:
+                    if row[field] is not None:
+                        counts[field] += 1
             available_at = row["available_at"]
             if not isinstance(available_at, datetime):
                 raise TypeError("registered available_at values must be datetimes")
@@ -123,7 +132,7 @@ class DuckDbObservationStore:
             fields=requirement.fields,
             lookback=requirement.lookback,
             evaluation_time=evaluation_time,
-            instruments=tuple(instruments),
+            instruments=tuple(instruments) if keyed_by_instrument else (),
             lower_bound=lower_bound,
             actual_rows=actual,
             max_available_at=max_available_at,

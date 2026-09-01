@@ -332,6 +332,11 @@ class FrozenRun:
             self,
             "datasets",
             tuple(
+                # Detaching copies the MEASUREMENTS too, not just the declaration. `aggregated`
+                # decides which query the read path composes, so a copy that dropped it would
+                # read a grouped registration row-wise -- the same rows, silently ungrouped, with
+                # no error anywhere. `span` and `field_types` are carried for the same reason
+                # this copy exists at all: a frozen run must describe what was registered.
                 DatasetRegistration(
                     dataset.dataset_id,
                     dataset.source,
@@ -339,6 +344,11 @@ class FrozenRun:
                     dataset.available_at,
                     dataset.key_fields,
                     MappingProxyType(dict(dataset.fields)),
+                    dataset.span,
+                    None if dataset.field_types is None else MappingProxyType(
+                        dict(dataset.field_types)
+                    ),
+                    dataset.aggregated,
                 )
                 for dataset in self.datasets
             ),

@@ -56,3 +56,5 @@ showcases/show_*/outputs/
 /node_modules/
 /package.json
 /bun.lock
+
+.qlibx/

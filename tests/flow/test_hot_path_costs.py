@@ -556,5 +556,13 @@ def test_a_proof_that_outlives_its_callback_still_returns_the_unbounded_result(
                 halted_source, rows=rows, session=None, evaluation_time=stamp, instruments=names
             )
             assert bounded == reference, f"the bound changed the answer at {stamp:%Y-%m-%d}"
+            # The proof the read carries for the next callback is not part of the answer. Record
+            # 119 took the normalization out of the read path, so nothing between here and
+            # `ObservationBatch._trusted` would notice a column that leaked; and the shape test
+            # in `tests/data/test_observation_batch_shape.py` builds its store without a session,
+            # which means it never reaches the bounded form this could leak from.
+            assert all(
+                sorted(row) == ["available_at", "close", "instrument", "volume"] for row in bounded
+            ), "a bounded read must return the declared fields and nothing else"
             seen.update(str(row["instrument"]) for row in bounded)
     assert seen == set(names), "a ladder that never reads the sparse names proves nothing"

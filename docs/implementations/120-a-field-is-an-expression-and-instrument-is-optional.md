@@ -144,12 +144,17 @@ detached and run here rather than taken from a document.
 | `uv run ruff check src/` | clean |
 | `pytest tests/ -q -rs` at `develop@010824bf` | **1515 passed, 0 skipped, 14 deselected** — the baseline |
 | `pytest tests/ -q -rs` on this branch | **1525 passed, 0 skipped, 14 deselected** |
-| `pytest tests/ -q -m ""` | **1539 passed, 0 deselected** (10m 40s) |
-| `pytest tests/ -q -m slow -rs` | GATE_SLOW |
+| `pytest tests/ -q -m ""` | **1539 passed, 0 deselected** (10m 32s) |
+| `pytest tests/ -q -m slow -rs` | **14 passed, 0 skipped, 1525 deselected** (8m 16s) |
 
-Zero skips on both sides, which is the other half of that amendment: a skip is a test that did not
+Zero skips everywhere, which is the other half of that amendment: a skip is a test that did not
 run, and `passed` alone does not show one leaking away. Both slow gates are run because record
-`097` corrected that `-m ""` is the name of a call and does not prove what ran.
+`097` corrected that `-m ""` is the name of a call and does not prove what ran -- and here the two
+numbers close on each other: 1525 + 14 = 1539, so the fourth gate names the fourteen the third one
+merely included.
+
+All four were re-run on the tree that ships. An earlier pass straddled a one-line tidy in
+`scan.py`, and a gate that ran against a tree nobody merges proves nothing about the one they do.
 
 **+10, and every one is accounted for.** Six are the acceptance file below. Three are
 `tests/data/test_requirements.py`, where one test of the old signature's two rejections became four

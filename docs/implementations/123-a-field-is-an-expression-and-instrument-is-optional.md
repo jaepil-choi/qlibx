@@ -169,23 +169,34 @@ detached and run here rather than taken from a document.
 | gate | result |
 |---|---|
 | `uv run ruff check src/` | clean |
-| `pytest tests/ -q -rs` at `develop@010824bf` | **1515 passed, 0 skipped, 14 deselected** — the baseline |
-| `pytest tests/ -q -rs` on this branch | **1525 passed, 0 skipped, 14 deselected** |
-| `pytest tests/ -q -m ""` | **1539 passed, 0 deselected** (10m 32s) |
-| `pytest tests/ -q -m slow -rs` | **14 passed, 0 skipped, 1525 deselected** (8m 16s) |
+| `pytest tests/ -q -rs` at `develop@35b73229` | **1532 passed, 0 skipped, 14 deselected** — the baseline |
+| `pytest tests/ -q -rs` on this branch | **1543 passed, 0 skipped, 14 deselected** |
+| `pytest tests/ -q -m ""` | **1557 passed, 0 deselected** (8m 13s) |
+| `pytest tests/ -q -m slow -rs` | **14 passed, 0 skipped, 1543 deselected** (6m 30s) |
 
 Zero skips everywhere, which is the other half of that amendment: a skip is a test that did not
 run, and `passed` alone does not show one leaking away. Both slow gates are run because record
 `097` corrected that `-m ""` is the name of a call and does not prove what ran -- and here the two
-numbers close on each other: 1525 + 14 = 1539, so the fourth gate names the fourteen the third one
+numbers close on each other: 1543 + 14 = 1557, so the fourth gate names the fourteen the third one
 merely included.
 
 All four were re-run on the tree that ships. An earlier pass straddled a one-line tidy in
 `scan.py`, and a gate that ran against a tree nobody merges proves nothing about the one they do.
 
-**+10, and every one is accounted for.** Six are the acceptance file below. Three are
-`tests/data/test_requirements.py`, where one test of the old signature's two rejections became four
-of the new one's. The last is not a new test at all: `test_a_fix_is_not_its_requirement_restated`
+**One `-m ""` run went red and it was not this lane**, which is worth writing down rather than
+re-running until it is green. `tests/test_workspace_concurrency.py::test_parallel_registrations_all_survive`
+failed with `PermissionError: [Errno 13] ... .vqapr/.workspace.lock`. Record `044` already has this
+test failing about 1 run in 10 on clean `0.1.0a10` and hardened the document **swap** with bounded
+retries; this failure is on the **lock file** instead, which that fix did not cover. It was not
+reproduced in 12 quiet runs on this branch, 8 on `develop`, or 15 on each under concurrent load —
+and the test drives `Workspace.register_agenda`, while this lane's `workspace.py` diff contains zero
+occurrences of `_exclusive`, `WORKSPACE_LOCK`, `register_agenda` or `os.replace`. Filed as its own
+piece of work rather than absorbed here.
+
+**+11, and every one is accounted for.** Seven are the acceptance file below — six for the ruling,
+and one for the seam with lane B. Three are `tests/data/test_requirements.py`, where one test of the
+old signature's two rejections became four of the new one's. The last is not a new test at all:
+`test_a_fix_is_not_its_requirement_restated`
 parametrizes over every `Failure.bounded` call site, so this lane's net refusal change moves it —
 `field_not_an_expression`, `projection_unbindable` and `field_conflict` added, `field_missing`
 renamed to `field_unknown`, and `check.dataset.unregistered` removed.

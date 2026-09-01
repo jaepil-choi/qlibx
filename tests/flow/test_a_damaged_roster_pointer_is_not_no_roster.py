@@ -51,7 +51,7 @@ def test_an_absent_workspace_is_still_no_roster(tmp_path: Path) -> None:
     is honest -- the refusal belongs where something asks what an instrument is.
     """
     assert registered_roster(tmp_path / "nowhere") is None
-    assert roster_report(tmp_path / "nowhere", None) is None
+    assert roster_report(registered_roster(tmp_path / "nowhere")) is None
 
 
 def test_a_registered_roster_still_loads(tmp_path: Path) -> None:
@@ -61,8 +61,8 @@ def test_a_registered_roster_still_loads(tmp_path: Path) -> None:
     roster = registered_roster(project)
 
     assert roster is not None
-    assert dict(roster.histogram) == {"stock": 1, "etf": 1}
-    assert roster_report(project, roster)["by_kind"] == {"stock": 1, "etf": 1}
+    assert dict(roster.registry.histogram) == {"stock": 1, "etf": 1}
+    assert roster_report(roster)["by_kind"] == {"stock": 1, "etf": 1}
 
 
 @pytest.mark.parametrize(
@@ -89,9 +89,13 @@ def test_a_damaged_pointer_refuses_rather_than_reading_as_absent(
     # The envelope side takes the same refusal. `cli/run.py`'s `_roster_envelope` catches it and
     # reports `known: true, stale: true`, which is the honest answer for a run that read its
     # roster and then lost the record of it -- the opposite of the `known: false` this used to
-    # produce.
-    with pytest.raises(VqaprError):
-        roster_report(project, None)
+    # produce. It reaches the refusal through `registered_roster`: since `docs/issues/050`,
+    # `roster_report` is handed the run's read and touches no file of its own.
+    from vqapr.cli.run import _roster_envelope
+
+    envelope = _roster_envelope(project)
+    assert envelope["known"] is True
+    assert envelope["stale"] is True
 
 
 def test_a_run_that_never_registered_one_is_unaffected(tmp_path: Path) -> None:
@@ -100,7 +104,7 @@ def test_a_run_that_never_registered_one_is_unaffected(tmp_path: Path) -> None:
     assert not (tmp_path / ".vqapr" / "instruments.json").exists()
 
     assert registered_roster(tmp_path) is None
-    assert roster_report(tmp_path, None) is None
+    assert roster_report(registered_roster(tmp_path)) is None
 
 
 def test_the_pointer_json_is_what_gets_damaged(tmp_path: Path) -> None:

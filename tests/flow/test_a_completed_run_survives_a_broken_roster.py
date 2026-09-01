@@ -68,7 +68,7 @@ def test_a_roster_that_breaks_after_the_run_does_not_cost_the_record(
     monkeypatch.setattr(orchestration, "roster_report", _unreadable)
 
     # Must not raise. Before R1 this refusal escaped and took the whole record with it.
-    block = _roster_report_or_stale(tmp_path, None)
+    block = _roster_report_or_stale(None)
 
     assert block is not None, (
         "a run that read its roster at start must not be recorded as having read none"
@@ -87,7 +87,7 @@ def test_the_record_says_stale_rather_than_claiming_the_run_knew_no_roster(
     Workspace.create(tmp_path)
     monkeypatch.setattr(orchestration, "roster_report", _unreadable)
 
-    block = _roster_report_or_stale(tmp_path, None)
+    block = _roster_report_or_stale(None)
 
     assert isinstance(block, dict)
     assert block["known"] is True, "the run did read its roster; the record must not deny it"
@@ -97,9 +97,7 @@ def test_the_record_says_stale_rather_than_claiming_the_run_knew_no_roster(
     )
 
 
-def test_a_programming_error_still_escapes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_programming_error_still_escapes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The other half of R1's fix: the absorber catches `VqaprError` ONLY.
 
     A bare `except Exception` here would be the over-broad catch `docs/issues/042` exists to
@@ -113,17 +111,15 @@ def test_a_programming_error_still_escapes(
     monkeypatch.setattr(orchestration, "roster_report", bug)
 
     with pytest.raises(TypeError, match="a bug in report construction"):
-        _roster_report_or_stale(tmp_path, None)
+        _roster_report_or_stale(None)
 
 
-def test_a_healthy_roster_is_passed_through_untouched(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_healthy_roster_is_passed_through_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
     """The absorber must be invisible on the ordinary path."""
     expected = {"known": True, "tables": ["etf"], "counts": {"etf": 3}}
     monkeypatch.setattr(orchestration, "roster_report", lambda *_a, **_k: expected)
 
-    assert _roster_report_or_stale(tmp_path, None) is expected
+    assert _roster_report_or_stale(None) is expected
 
 
 def test_the_report_is_computed_outside_the_guard_that_releases_the_run_id() -> None:
@@ -136,7 +132,7 @@ def test_the_report_is_computed_outside_the_guard_that_releases_the_run_id() -> 
     """
     source = Path("src/vqapr/flow/orchestration.py").read_text(encoding="utf-8")
 
-    assert "_roster_report_or_stale(root_path, registry)" in source
+    assert "_roster_report_or_stale(roster)" in source
     assert "freeze_record(writer, result, frozen, as_loaded, roster_report(" not in source, (
         "roster_report is being evaluated inside the guard again; a refusal there discards a "
         "completed run's entire record (R1)"

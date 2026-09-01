@@ -15,6 +15,14 @@ The regression was found by an owner-requested audit, not by the mechanism meant
 `workspace/` and the rest. A module in those layers importing it reaches back up through the thing
 it is supposed to sit beneath -- and the import still works, so nothing fails until someone reads
 for it.
+
+**The exemptions are not all the same kind of thing.** `PERMITTED` is the union of two sets kept
+apart on purpose: `PERMANENT`, which is the CLI and the shipped samples using the surface the facade
+exists to be, and `EXPIRING_AT_G008`, which is seven boundary violations tolerated for exactly as
+long as `project.py` is in the tree. As one flat list it read as a single blanket permission with
+the difference left in a comment, which is where review `R7` found it -- *"면제 목록에 넣어 두었고,
+만료일이 없다"*. Split, the second kind carries its own expiry, and
+`test_the_expiring_exemptions_expire_when_project_py_does` comes due on the day the gate opens.
 """
 
 from __future__ import annotations
@@ -24,17 +32,22 @@ import pathlib
 
 import pytest
 
-# The ruling's own list, verbatim. Sorted so a diff reads cleanly.
-PERMITTED: frozenset[str] = frozenset(
+# The file the expiring exemptions are tied to. `G008` -- delete `vqapr.public`, relocate the
+# retained authorities, cut the breaking `0.2.0a1` -- takes it, and both of that goal's admission
+# gates are still shut (`docs/design/agent-first-surface.md`, "The G008 admission conditions": the
+# T0 trace/row comparator has not been run, and the owner has not approved the release). Named as a
+# path rather than as a sentence so the test below can ask whether the gate has opened.
+G008_DELETES = "src/vqapr/project.py"
+
+# The floor. These are not tolerated, they are correct: the facade is the CLI's supported surface,
+# so the CLI and the code shipped to show users how to call it are the surface being used for its
+# purpose. Nothing here expires, and nothing here should acquire an expiry -- if this set ever
+# empties, the facade has no consumers and the question is whether it should exist at all.
+PERMANENT: frozenset[str] = frozenset(
     {
-        # The six `_internal` bridges: their whole job is to speak the facade's vocabulary.
-        "src/vqapr/_internal/constraint_bridge.py",
-        "src/vqapr/_internal/registration_bridge.py",
-        "src/vqapr/_internal/run_bridge.py",
-        "src/vqapr/_internal/schedule_bridge.py",
-        "src/vqapr/_internal/strategy_bridge.py",
-        "src/vqapr/_internal/venue_bridge.py",
-        # Shipped sample code, which is written the way a user would write it.
+        # Shipped sample code, written the way a user would write it -- which means reaching the
+        # same surface a user reaches. Routing it below the facade would make the samples lie about
+        # the product.
         "src/vqapr/agent/sample/exchange.py",
         "src/vqapr/agent/sample/journey.py",
         # The CLI itself, which is the product the facade exists for.
@@ -43,10 +56,46 @@ PERMITTED: frozenset[str] = frozenset(
         # `vqapr/declarations.py`, which imports the owning modules directly rather than the
         # facade. That is the count moving for the reason the trajectory predicted.
         "src/vqapr/cli/run.py",
-        # Unshipped and frozen by the same ruling.
+    }
+)
+
+# The debt. Every entry here is the violation this file exists to catch, held open rather than
+# excused, and all seven are held open by the same fact: `project.py` is still in the tree. Bound to
+# that fact structurally -- see `test_the_expiring_exemptions_expire_when_project_py_does`, which
+# fails on the day `G008` deletes it and names what to delete alongside.
+EXPIRING_AT_G008: frozenset[str] = frozenset(
+    {
+        # The six `_internal` bridges. Their whole job is to speak the facade's vocabulary, which is
+        # why the import reads as reasonable -- but `_internal` sits BELOW the facade, so each of
+        # these reaches back up through the thing it sits beneath. Five of them (constraint,
+        # registration, run, schedule, venue) have exactly one importer anywhere in `src/` and it is
+        # `project.py`; `strategy_bridge` is also reached from `extension/loading.py`, the shipped
+        # path, which is why it is the only one of the six that can move before the gate opens.
+        "src/vqapr/_internal/constraint_bridge.py",
+        "src/vqapr/_internal/registration_bridge.py",
+        "src/vqapr/_internal/run_bridge.py",
+        "src/vqapr/_internal/schedule_bridge.py",
+        "src/vqapr/_internal/strategy_bridge.py",
+        "src/vqapr/_internal/venue_bridge.py",
+        # `project.py` -- unshipped, zero lines executed on the product journey, and the reason the
+        # six above are reachable at all.
+        #
+        # The justification that stood here was that it is *frozen by the same ruling*. The owner
+        # ruling of 2026-09-01 retired that: there is no such thing as a frozen module, a module
+        # that needs fixing is fixed, and whether the fix is right is settled by reviewing the merge
+        # rather than by a standing prohibition (`test_the_frozen_cluster_gains_no_callers.py`
+        # carries the ruling in full). So "it cannot move" is no longer a true sentence about this
+        # file, and an exemption resting on it was resting on nothing.
+        #
+        # What survives the ruling is the date. `project.py` is not immovable; it is scheduled to
+        # die at `G008`. That is a weaker claim and a more useful one: it makes this an exemption
+        # with an expiry rather than a permission with an excuse.
         "src/vqapr/project.py",
     }
 )
+
+# The ruling's own list, as the union of the two. Sorted within each set so a diff reads cleanly.
+PERMITTED: frozenset[str] = PERMANENT | EXPIRING_AT_G008
 
 
 def _importers() -> set[str]:
@@ -91,7 +140,10 @@ def test_no_module_below_the_cli_reaches_up_to_the_facade() -> None:
         "these modules no longer import `vqapr.public`:\n  "
         + "\n  ".join(removed)
         + "\n\nThat is usually good news, but the ruling's list is the record of what the boundary "
-        "is; update it in the same commit so the next reader is not comparing against a stale one."
+        "is; update it in the same commit so the next reader is not comparing against a stale one. "
+        "Drop the entry from whichever set holds it — out of `EXPIRING_AT_G008` is the debt being "
+        "paid down, out of `PERMANENT` means the facade lost a consumer it was built for and is "
+        "worth a second look."
     )
 
 
@@ -101,25 +153,74 @@ def test_the_count_still_matches_the_ruling() -> None:
     Held separately from the membership test so a failure says which question is wrong: the count,
     or which modules make it up.
 
-    **The trajectory, recorded but deliberately not asserted.** The structural plan takes this count
-    12 -> 10 -> 6, and none of that is an assertion here:
+    **The trajectory, recorded but deliberately not asserted.** Where this count goes, none of it an
+    assertion here:
 
-    * **11 today.** Six `_internal/*_bridge.py`, two shipped samples, two CLI verbs, `project.py`.
-      It was 12 until record `112` moved `cli/register.py`'s declaration parsing into
-      `vqapr/declarations.py`, which reaches the owning modules directly.
-    * **10 after the authoring-convergence step**, which removes the facade import from the two
-      bridges on the shipped path (`strategy_bridge`, `pit_bridge`). The other four bridges are
-      reachable only from frozen `project.py` and cannot move before `G008`.
-    * **6 only at `G008`**, when the frozen cluster goes. The floor is the CLI and its shipped
-      samples calling the product's own supported surface, which is not a violation of anything.
+    * **11 today** — `len(PERMITTED)`. Six `_internal/*_bridge.py`, two shipped samples, two CLI
+      verbs, `project.py`. It was 12 until record `112` moved `cli/register.py`'s declaration
+      parsing into `vqapr/declarations.py`, which reaches the owning modules directly.
+    * **10 after the authoring-convergence step**, which removes the facade import from
+      `strategy_bridge` — the only one of the six with an importer outside `project.py`
+      (`extension/loading.py`), and so the only one that can move while the gate is shut.
+    * **`len(PERMANENT)` at `G008`**, when `project.py` and everything reachable only from it goes.
+      Four today: two CLI verbs and two shipped samples calling the product's own supported surface,
+      which is not a violation of anything. Written as the set rather than as a number, because the
+      floor is not something a later reader should have to re-derive — it is whatever `PERMANENT`
+      holds on the day the gate opens.
 
-    A note, not a gate. Encoding 6 as an acceptance would fail this suite for every commit between
-    here and `G008` — and `0` was never reachable at all: it came from a *string* count of 18 that
-    the ruling itself repudiates (`docs/design/agent-first-surface.md`, "For completeness and to
-    stop the earlier error being inherited silently"). The step that actually moves the number is
-    the step that updates this assertion and the ruling's list together, in one commit.
+    Record `105` wrote that endpoint as **6** and it is left here as a caution rather than repeated
+    as a fact: the floor it names in the same sentence — the CLI verbs and the shipped samples —
+    itemized to five in the tree it measured, and one of those verbs has since left. A hand-carried
+    number drifts from the list it is supposed to summarize, which is the argument for the note
+    staying a note.
+
+    Encoding the endpoint as an acceptance would fail this suite for every commit between here and
+    `G008` — and `0` was never reachable at all: it came from a *string* count of 18 that the ruling
+    itself repudiates (`docs/design/agent-first-surface.md`, "For completeness and to stop the
+    earlier error being inherited silently"). The step that actually moves the number is the step
+    that updates this assertion and the ruling's list together, in one commit.
     """
     assert len(_importers()) == 11
+
+
+def test_the_expiring_exemptions_expire_when_project_py_does() -> None:
+    """The expiry condition, executed rather than described.
+
+    Review `R7`'s finding was not that the seven violations are exempt — it is that the exemption
+    had no expiry date, so the list could outlive its reason without anything noticing. This is the
+    date. It says nothing about whether `G008` should open, which is an owner approval no test can
+    hold; it is the cleanup note, attached to the event that makes it due.
+
+    It keys on `project.py` because that single file is the reason all seven are on a live path:
+    five of the six bridges have no other importer in `src/`, and the sixth plus `project.py` itself
+    go with the cluster. One fact, one condition, seven entries.
+    """
+    assert pathlib.Path(G008_DELETES).exists(), (
+        f"`{G008_DELETES}` is gone, so `G008` has run and these "
+        f"{len(EXPIRING_AT_G008)} exemptions expired with it:\n  "
+        + "\n  ".join(sorted(EXPIRING_AT_G008))
+        + f"\n\nDelete every one of them from `EXPIRING_AT_G008` — including the `{G008_DELETES}` "
+        "entry and this condition itself — in the commit that deleted the file. Anything on that "
+        "list still importing `vqapr.public` afterwards is a live violation to fix, not an "
+        "exemption to re-grant: the reason it had one no longer exists."
+    )
+
+
+def test_an_exemption_is_permanent_or_expiring_and_never_both() -> None:
+    """The split is only load-bearing if each entry sits on exactly one side of it.
+
+    An entry in both sets is silently absorbed by the union, so `PERMITTED` would keep the module
+    exempt while `EXPIRING_AT_G008` claims it is scheduled to go — the flat list's failure mode,
+    reintroduced. Cheap to state, so it is stated.
+    """
+    both = sorted(PERMANENT & EXPIRING_AT_G008)
+
+    assert not both, (
+        "these modules are listed as permanently permitted AND as expiring at `G008`:\n  "
+        + "\n  ".join(both)
+        + "\n\nPick one. A module either calls the facade because that is what the facade is for, "
+        "or it is a violation held open until `project.py` goes."
+    )
 
 
 @pytest.mark.parametrize(

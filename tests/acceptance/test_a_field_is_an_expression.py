@@ -15,7 +15,7 @@ lookback and nothing else.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -385,3 +385,105 @@ def test_a_field_expression_may_not_carry_its_own_from(tmp_path: Path) -> None:
         )
 
     assert refused.value.failures[0].code == "dataset.register.schema.field_not_an_expression"
+
+
+def test_a_bounded_grouped_read_returns_the_unbounded_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `RowsLookback` proof must count what the projection PRODUCES, in both places it is taken.
+
+    Lane B made a bounded read cost one statement rather than two by having the read carry its own
+    proof: the same count is computed once as a cold-start `GROUP BY` and once as a window
+    aggregate inside the read. A grouped registration is where the two can come apart, because a
+    long source carries several rows per instant and a `RowsLookback` counts instants.
+
+    `SPARSE` is built so the two ways of counting disagree about it. It publishes on five instants
+    inside the bound window, two account rows on each: the values the projection produces number
+    5, short of the declared 8, so it is unsafe and must be read unbounded; the source's rows
+    number 10, which would prove it safe and lose the older instants the window was declared to
+    include.
+
+    **The wrong count turns out to be loud rather than silent, and that is worth recording.** A
+    grouped registration's fields are all aggregates, so counting the source's rows through them
+    is `count(sum(...))` -- a nested aggregate duckdb refuses to bind. Checked by making
+    `_counted` return the row-wise vocabulary for a grouped registration: this test fails, with
+    `Binder Error: aggregate function calls cannot be nested`, before any answer is produced. So
+    the divergence cannot reach a result on this pairing; what this test pins is the property
+    itself, that a bounded grouped read returns the unbounded answer.
+    """
+    from vqapr.data import scan
+    from vqapr.data.scan import ScanSession
+
+    # The production gate keeps a fixture-sized source on the unbounded path, so without this the
+    # assertion would pass by never taking the bound it exists to guard.
+    monkeypatch.setattr(scan, "ROWS_BOUND_MIN_BYTES", 0)
+
+    instants = [datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=index) for index in range(40)]
+    facts: list[str] = []
+    for index, instant in enumerate(instants):
+        stamp = f"TIMESTAMPTZ '{instant.isoformat()}'"
+        for code in ("111000", "112000"):
+            # DENSE publishes throughout; SPARSE stops after the bound window's first five.
+            facts.append(f"('DENSE', {stamp}, '{code}', {100 + index}.0)")
+            if index <= 20:
+                facts.append(f"('SPARSE', {stamp}, '{code}', {200 + index}.0)")
+
+    source_dir = tmp_path / "long"
+    source_dir.mkdir()
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (SELECT * FROM (VALUES {", ".join(facts)})
+                AS t(instrument, available_at, account_code, value))
+                TO '{(source_dir / "facts.parquet").as_posix()}' (FORMAT PARQUET)"""
+        )
+    finally:
+        con.close()
+
+    Workspace.create(tmp_path)
+    register_dataset(
+        tmp_path,
+        DatasetRegistration.of(
+            "facts",
+            "facts-source",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("available_at", "instrument", "account_code"),
+            fields={
+                "net_income": "sum(value) FILTER (WHERE account_code = '111000')",
+                "operating_income": "sum(value) FILTER (WHERE account_code = '112000')",
+            },
+        ),
+        SourceSpec.of("facts-source", source_dir),
+    )
+    workspace = Workspace.open(tmp_path)
+    assert workspace.dataset("facts").aggregated is True
+
+    requirement = DataRequirement.of("net_income", lookback=RowsLookback(8))
+    evaluated_at = instants[-1] + timedelta(hours=1)
+
+    def read(store: DuckDbObservationStore) -> tuple:
+        window = ModelWindow(
+            evaluation_time=evaluated_at,
+            instruments=("DENSE", "SPARSE"),
+            store=store,
+            allowed_requirements=(requirement,),
+            consumer_id="proof-probe",
+        )
+        return tuple(
+            (str(row["instrument"]), row["available_at"], row["net_income"])
+            for row in window.observations(requirement).rows
+        )
+
+    # No session means no bound is even guessed: this is the answer the window declares.
+    unbounded = read(DuckDbObservationStore(workspace))
+    with ScanSession() as session:
+        bounded = read(DuckDbObservationStore(workspace, session=session))
+
+    assert bounded == unbounded, (
+        "the bounded read must return the unbounded answer; a proof that counted source rows "
+        "instead of the values the projection produces would drop SPARSE's older instants"
+    )
+    # And the window really does reach past the bound, or the comparison proves nothing.
+    sparse = [instant for name, instant, _ in unbounded if name == "SPARSE"]
+    assert len(sparse) == 8, "SPARSE must fill its declared window from instants it published on"

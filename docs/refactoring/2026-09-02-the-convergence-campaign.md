@@ -8,6 +8,7 @@
 | **진단** | `docs/diagnostics/2026-09-02-what-the-tree-owes-the-mental-model.md`. **이 문서는 그것을 재론하지 않는다** |
 | **판정 기준** | `docs/vqapr-prd.md` → `docs/vqapr-architecture.md` → `docs/design/the-panel-the-surface-and-the-run.md` |
 | **선행 캠페인** | `docs/refactoring/2026-09-01-the-read-path-campaign.md` — 레인 A·B·C 병합 완료, **레인 D 미착수**. 이 캠페인이 그것을 Step 4로 흡수한다 |
+| **완료** | **2026-09-02, `develop @ d212bceb`.** Step 0–7 전부 병합 — records `129`(M0), `130`–`133`(M1), `134`(M2), `135`(M3), `136`(M4), `137`(M5), `138`(M6), `139`(M7). 마지막 게이트: ruff clean · fast **1314** / slow **13** · showcase **9/9**. 남은 것은 각 record의 "하지 않은 것"과 `docs/issues/README.md` §1(열린 넷)에 있다 |
 
 > **이 캠페인은 새 진단을 하지 않는다.** 여덟 단계 전부가 **이미 내려진 소유자 ruling**이거나
 > **이미 측정된 결함**이고, 이 문서가 더하는 것은 순서·단위·인수조건뿐이다. 무엇이 왜 문제인지는

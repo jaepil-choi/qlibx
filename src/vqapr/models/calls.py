@@ -26,31 +26,15 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
-from vqapr.authoring import DatasetInput, Observation
+from vqapr.authoring import DatasetInput, Observation, requirements_for
 
 __all__ = (
     "declared_rows",
     "observations",
     "requirements_for",
 )
-
-
-def requirements_for(declaration: DatasetInput) -> tuple:
-    """Translate one declared alias into the retained engine's requirement type.
-
-    **One requirement per field.** The engine's `DataRequirement` names a single field and a
-    lookback (`docs/issues/049`); the authoring surface still declares a set of them under one
-    alias, so the fan-out happens here rather than in what an author writes.
-    """
-    from vqapr.data.requirements import DataRequirement
-
-    if not isinstance(declaration, DatasetInput):
-        raise TypeError("declaration must be an authoring.DatasetInput")
-    # No lookback translation: record `126` made the authoring and engine lookbacks one class.
-    return tuple(
-        DataRequirement.of(declaration.dataset_id, field, lookback=declaration.lookback)
-        for field in declaration.fields
-    )
+# `requirements_for` is authoring's -- one fan-out for every role that declares reads -- and is
+# re-exported here because this is where the join that consumes it lives.
 
 
 def declared_rows(read: object, declaration: DatasetInput) -> tuple[dict[str, object], ...]:

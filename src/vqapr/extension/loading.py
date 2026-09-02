@@ -278,18 +278,13 @@ def load_data_model(ref: ComponentRef, *, project_root: str | Path | None = None
             f"{_STAGE}.wrong_type",
             "registered DataModel object must implement the public DataModel contract",
             type(model).__name__,
-            fix="make the registered object a subclass of vqapr.models.data_model.DataModel",
+            fix="make the registered object a subclass of vqapr.authoring.DataModel",
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
-    requirements = _requirements(model, label="DataModel", required=True)
-    if not requirements:
-        raise _failure(
-            f"{_STAGE}.requirements_invalid",
-            "DataModel.requirements() must return a non-empty tuple of DataRequirement values",
-            repr(requirements),
-            fix="return at least one DataRequirement from DataModel.requirements()",
-            explain=ExplainTopic.COMPONENT_CONTRACT,
-        )
+    # `requirements()` is derived from `inputs()` and may legitimately be empty -- `Model.inputs()`
+    # says so in its own docstring: a Model may derive its values from memory alone. This used to
+    # refuse an empty tuple, contradicting the contract it had just loaded.
+    _requirements(model, label="DataModel", required=False)
     return model
 
 

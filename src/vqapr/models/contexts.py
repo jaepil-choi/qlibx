@@ -9,7 +9,7 @@ from uuid import UUID, uuid5
 
 from vqapr.account.history import AccountHistory
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import ConstraintBounds, ConstraintCall, DatasetInput
+from vqapr.authoring import ConstraintBounds, ConstraintCall, DataCall, DatasetInput
 from vqapr.data.windows import ModelWindow
 from vqapr.models.calls import declared_rows, observations
 from vqapr.portfolio.budgets import Budget
@@ -100,7 +100,14 @@ class ConstraintContext(_DeclaredReads, ConstraintCall):
 
 
 @dataclass(frozen=True, slots=True)
-class DataModelContext(_DeclaredReads):
+class DataModelContext(_DeclaredReads, DataCall):
+    """What a DataModel may reach: a cutoff and its declared reads, and nothing else.
+
+    No account, no venue, no occurrence -- the absence is the definition of the role (architecture
+    4.4). The one implementation of `authoring.DataCall`, the way `ConstraintContext` is of
+    `ConstraintCall`.
+    """
+
     window: ModelWindow
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
 

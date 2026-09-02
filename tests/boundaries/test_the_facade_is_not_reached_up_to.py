@@ -157,4 +157,9 @@ def test_template_text_is_not_counted_as_an_import(path: str) -> None:
     devotes a paragraph to.
     """
     assert path not in _importers()
-    assert "vqapr.public" in pathlib.Path(path).read_text(encoding="utf-8")
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    # Each file must still contain a `vqapr` import inside template text, or this test pins
+    # nothing. `scaffold.py` stopped containing `vqapr.public` in record `131`: all three
+    # templates now emit `from vqapr import authoring as va`, which is the convergence this
+    # tripwire was waiting for, not a regression of it.
+    assert "from vqapr" in text and ("vqapr.public" in text or "authoring as va" in text)

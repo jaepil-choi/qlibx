@@ -39,20 +39,19 @@ def _register_prices(project: Path, parquet: Path) -> None:
 
 def _component_source(path: Path) -> Path:
     path.write_text(
-        """from vqapr.public import DataModel, DataRequirement, RowsLookback
+        """from vqapr import authoring as va
 
-class ReversalModel(DataModel):
-    def requirements(self):
-        return (DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2)),)
+class ReversalModel(va.DataModel):
+    def inputs(self):
+        return {"prices": va.DatasetInput(dataset_id='price_daily', fields=('close',), lookback=va.RowsLookback(rows=2))}
 
     def compute(self, context):
         assert not hasattr(context, "account")
         assert not hasattr(context, "execution_input")
-        rows = context.window.observations(self.requirements()[0]).rows
         by_instrument = {}
-        for row in rows:
-            if row["close"] is not None:
-                by_instrument.setdefault(row["instrument"], []).append(float(row["close"]))
+        for row in context.read("prices"):
+            if row.values["close"] is not None:
+                by_instrument.setdefault(row.instrument_id, []).append(float(row.values["close"]))
         return tuple(
             {"instrument": instrument, "score": -(values[-1] / values[0] - 1.0)}
             for instrument, values in sorted(by_instrument.items())
@@ -62,11 +61,11 @@ class ReversalModel(DataModel):
 class ForgingModel(ReversalModel):
     def compute(self, context):
         rows = super().compute(context)
-        return tuple({**row, "available_at": context.window.evaluation_time} for row in rows)
+        return tuple({**row, "available_at": context.evaluation_time} for row in rows)
 
 class FailingSecondModel(ReversalModel):
     def compute(self, context):
-        if context.window.evaluation_time.day == 7:
+        if context.evaluation_time.day == 7:
             raise RuntimeError("intentional second-evaluation failure")
         return super().compute(context)
 

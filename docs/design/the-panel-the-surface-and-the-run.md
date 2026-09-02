@@ -212,8 +212,11 @@ class Model(ABC):                 # authoring.Model
     # state / memory
 
 class DataModel(Model):           # account 없음, venue 통과 없음
-    def output(self) -> Output: ...
-    def compute(self, call: DataCall) -> Sequence[DerivedRow]: ...
+    def compute(self, call: DataCall) -> Rows: ...
+    # `output()`은 없다 (2026-09-02 정정, 기록 131). 만들어지는 dataset의 모양은 선언이고
+    # materialization spec이 YAML로 든다 -- "YAML이 선언하고 Python이 저작한다". 모델이
+    # 그것을 한 번 더 말하면 같은 사실의 출처가 둘이 된다. 행은 dict다: 저자가 조립하는
+    # 출력의 가장 단순한 모양이고, materialize가 검증·발행하는 바로 그 모양이다.
 
 class StrategyModel(Model):       # account 있음, venue 통과함
     def account_history(self) -> tuple[AccountHistoryInput, ...]: ...

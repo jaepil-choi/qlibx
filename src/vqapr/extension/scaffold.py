@@ -62,39 +62,36 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import DataModel, DataRequirement, {lookback_class}
+from vqapr import authoring as va
 
-# A requirement names one dataset and one field. It does not name a consumer -- the component
-# declaring it is the consumer, and the framework stamps that.
 DATASET_ID = "{dataset_id}"
-FIELD_ID = "{field}"
+FIELD = "{field}"
 {lookback_declaration}
 
 
-class {class_name}(DataModel):
+class {class_name}(va.DataModel):
     """Emits one derived value per instrument at each materialization time."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of(DATASET_ID, FIELD_ID, lookback={lookback_expression}),
+    def inputs(self):
+        read = va.DatasetInput(
+            dataset_id=DATASET_ID, fields=(FIELD,), lookback={lookback_expression}
         )
+        return {{"prices": read}}
 
     def compute(self, context):
-        # `rows` is flat and ordered by `available_at`, then by the dataset's key fields --
-        # instruments INTERLEAVE within an instant rather than arriving grouped by name. Every row
-        # carries its own `available_at` and `instrument` alongside the fields declared above.
+        # Observations arrive ordered by `available_at`, then by the dataset's key fields --
+        # instruments INTERLEAVE within an instant rather than arriving grouped by name. Each one
+        # carries its own `available_at` and `instrument_id` alongside the fields declared above.
 {lookback_note}
-        rows = context.window.observations(self.requirements()[0]).rows
         history: dict[str, list[Decimal]] = {{}}
-        for row in rows:
-            value = row["{field}"]
+        for row in context.read("prices"):
+            value = row.values[FIELD]
             if value is not None:
                 # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
                 # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
                 # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
-                # binary float's expansion, so 0.1 stays 0.1 rather than becoming
-                # 0.1000000000000000055511151231257827.
-                history.setdefault(str(row["instrument"]), []).append(Decimal(str(value)))
+                # binary float's expansion, so 0.1 stays 0.1.
+                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))
 
         # ---- the one line to change -------------------------------------------------------
         # Trailing return over the declared lookback.
@@ -105,6 +102,8 @@ class {class_name}(DataModel):
         }}
         # -----------------------------------------------------------------------------------
 
+        # One dict per instrument. The fields are the ones the materialization spec declares;
+        # `available_at` is the package's to stamp and a row that carries one is refused.
         return [
             {{"instrument": name, "{output_field}": value}}
             for name, value in sorted(derived.items())
@@ -134,7 +133,7 @@ _LOOKBACK_FLAVOURS = {
     "rows": {
         "lookback_class": "RowsLookback",
         "lookback_declaration": "LOOKBACK = {lookback}  # observations per name, per field",
-        "lookback_expression": "RowsLookback(rows=LOOKBACK)",
+        "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
         "completeness_guard": "len(values) == LOOKBACK",
         "lookback_note": _ROWS_LOOKBACK_NOTE,
     },
@@ -144,7 +143,7 @@ _LOOKBACK_FLAVOURS = {
             'LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n'
             'TIMEZONE = "Asia/Seoul"  # where the day boundary falls; use the venue\'s zone'
         ),
-        "lookback_expression": "CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
+        "lookback_expression": "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
         "completeness_guard": "len(values) >= 2",
         "lookback_note": _CALENDAR_LOOKBACK_NOTE,
     },

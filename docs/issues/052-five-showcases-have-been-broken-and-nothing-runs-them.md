@@ -1,6 +1,11 @@
 # 052 — Five of the nine showcases do not run, and nothing in the repository executes them
 
-**Status: OPEN, filed 2026-09-02.** Found while establishing a showcase baseline before the
+**Status: OPEN, filed 2026-09-02. Two of the five closed by
+[`131-one-datamodel-and-a-dead-half-deleted.md`](../implementations/131-one-datamodel-and-a-dead-half-deleted.md)
+as a side effect** -- `show_002` and `show_004` failed because their DataModels declared reads in a
+retired shape, and converging the DataModel contract retired the shape everywhere at once. Three
+remain (`show_005`, `show_006`, `show_008`), all the `SingleNameCap` constructor case. **The second
+half -- a gate that runs them -- is still the finding.** Found while establishing a showcase baseline before the
 constraint convergence (`docs/issues/036`, record `130`), by running all nine and comparing against
 the branch point — not by a user, and not by any gate.
 
@@ -34,8 +39,9 @@ TypeError: SingleNameCap.__init__() missing 1 required keyword-only argument: 'b
 `docs/implementations/035-a-cost-band-names-a-category.md` and the enhanced-index work made the
 benchmark dataset an explicit constructor argument. Three showcases were never updated.
 
-`show_002` and `show_004` fail earlier, at `component.load.requirements_failed` — a `DataModel`
-whose declaration no longer completes against the current requirement contract.
+`show_002` and `show_004` failed earlier, at `component.load.requirements_failed` — a `DataModel`
+whose declaration no longer completed against the current requirement contract. **Closed by record
+`131`**, which made every DataModel declare reads one way.
 
 ## Why this is the finding rather than five separate ones
 

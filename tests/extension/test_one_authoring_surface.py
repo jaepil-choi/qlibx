@@ -28,7 +28,6 @@ import pytest
 
 import vqapr.authoring as authoring
 import vqapr.public as public
-from vqapr.domain.errors import VqaprError
 from vqapr.extension.loading import load_constraint, load_data_model, load_strategy_model
 from vqapr.public import register_constraint, register_data_model, register_strategy_model
 
@@ -36,7 +35,7 @@ from vqapr.public import register_constraint, register_data_model, register_stra
 # One name, two classes.
 # --------------------------------------------------------------------------------------
 
-DIVERGENT_NAMES = ("DataModel", "StrategyModel")
+DIVERGENT_NAMES = ("StrategyModel",)
 """Names exported by BOTH `vqapr.public` and `vqapr.authoring` as different objects.
 
 `tests/extension/test_the_extension_surface_is_the_implementation.py::
@@ -48,12 +47,13 @@ there, and that is the shape this list is supposed to reach.
 intended. Record `126` made each of them one class re-exported under both names, so the assertion
 below stopped being true of them and they left the list in the same commit that closed them.
 **`Constraint` left the same way** in record `130`, together with `ConstraintBounds` and
-`ConstraintFinding`, which were never on this list because nothing had measured them. Two of the
-original five remain, and the inverse assertion below is what stands for the three that went.
+`ConstraintFinding`, which were never on this list because nothing had measured them.
+**`DataModel` left in record `131`.** One of the original five remains, and the inverse assertion
+below is what stands for the four that went.
 """
 
 
-CONVERGED_NAMES = ("Constraint", "ConstraintBounds", "ConstraintFinding")
+CONVERGED_NAMES = ("Constraint", "ConstraintBounds", "ConstraintFinding", "DataModel")
 """Names the facade and the authoring module now export as ONE object.
 
 The goal, asserted so that it cannot quietly come apart again. Each name arrives here by leaving
@@ -79,8 +79,9 @@ def test_the_facade_and_the_authoring_module_are_two_objects(name: str) -> None:
     different contracts, and nothing in either import line says so. `docs/issues/036`:
     *"Nothing says which is canonical."*
 
-    Deleted by: M6 (`DataModel`, `StrategyModel`, `Constraint`) and record `126` (the two
-    lookbacks). At that point the parametrized inverse of this test is the assertion that stands.
+    Deleted by: M6 (`StrategyModel`, the one left), records `126` (the two lookbacks), `130`
+    (`Constraint`) and `131` (`DataModel`). At that point the parametrized inverse of this test is
+    the assertion that stands.
     """
     facade = getattr(public, name)
     authored = getattr(authoring, name)
@@ -134,9 +135,6 @@ from vqapr import authoring as va
 class Model(va.DataModel):
     def inputs(self):
         return {}
-
-    def output(self):
-        return va.Output(semantic_fields=("value",))
 
     def compute(self, call):
         return ()
@@ -200,29 +198,20 @@ def test_load_strategy_model_adapts_an_authored_strategy_inward(tmp_path: Path) 
     assert loaded is not None
 
 
-def test_load_data_model_refuses_an_authored_data_model(tmp_path: Path) -> None:
-    """TODAY: the same authoring contract that a StrategyModel may use is refused for a DataModel.
+def test_load_data_model_accepts_an_authored_data_model(tmp_path: Path) -> None:
+    """WAS: the same authoring contract a StrategyModel may use was refused for a DataModel.
 
-    This is the half of `docs/issues/036` that reading the issue does not reveal: the two surfaces
-    are not merely both present and undocumented, they are **differently reachable per kind**. A
-    DataModel author has no choice to make -- `vqapr new datamodel` emits `from vqapr.public import
-    DataModel` because nothing else loads.
-
-    Deleted by: M4.
+    This was the half of `docs/issues/036` that reading the issue does not reveal: the two
+    surfaces were **differently reachable per kind**. A DataModel author had no choice to make,
+    because `vqapr new datamodel` emitted the engine class since nothing else loaded. Record `131`
+    made the class one; this asserts the inverse, including that a model declaring no reads loads.
     """
     path = _written(tmp_path, _AUTHORED_DATA_MODEL)
+    ref = register_data_model(tmp_path, "authored-datamodel", path, "Model")
 
-    # The refusal lands at REGISTRATION, because registration runs conformance, which calls the
-    # same `load_*` the run would (`testing/conformance/runner.py`). One door, one verdict -- so
-    # an authored DataModel is unreachable from `vqapr register` onward, not merely at run time.
-    with pytest.raises(VqaprError) as refusal:
-        ref = register_data_model(tmp_path, "authored-datamodel", path, "Model")
-        load_data_model(ref, project_root=tmp_path)
+    loaded = load_data_model(ref, project_root=tmp_path)
 
-    assert _WRONG_TYPE in str(refusal.value), (
-        f"expected {_WRONG_TYPE}; an authored DataModel that now loads means M4 has landed and "
-        f"this test goes with it. Got: {refusal.value}"
-    )
+    assert loaded.requirements() == ()
 
 
 def test_load_constraint_accepts_an_authored_constraint(tmp_path: Path) -> None:

@@ -125,6 +125,7 @@ def _setup(
             "prices-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("session_date", "instrument"),
             fields={"close": "close"},
         ),

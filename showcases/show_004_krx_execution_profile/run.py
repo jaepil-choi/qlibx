@@ -374,6 +374,7 @@ def main() -> None:
             "krx-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "is_supervised": "is_supervised"},
         ),

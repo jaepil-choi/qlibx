@@ -56,6 +56,7 @@ def workspace(tmp_path: Path) -> Path:
         "prices-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     ).with_span(*_SPAN)
@@ -224,6 +225,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(tmp_path
         "prices-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     ).with_span(*SPAN)

@@ -336,6 +336,7 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
             "source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -390,6 +391,7 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
             "source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -575,6 +577,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         "source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )
@@ -663,6 +666,7 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
         "missing-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )
@@ -699,6 +703,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         "missing-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )

@@ -33,12 +33,12 @@ class {class_name}(va.StrategyModel):
         return {{"prices": read}}
 
     def decide(self, call):
+        # One field as a window: instants x instruments, the same LOOKBACK instants for every name.
+        window = call.read("prices", "{field}")
         history: dict[str, list[Decimal]] = {{}}
-        for row in call.read("prices"):
-            value = row.values["{field}"]
-            if value is not None:
-                # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
-                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))
+        for name in window.instruments:
+            # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
+            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
 
         scores = {{}}
         for instrument, values in history.items():
@@ -79,19 +79,8 @@ class {class_name}(va.DataModel):
         return {{"prices": read}}
 
     def compute(self, context):
-        # Observations arrive ordered by `available_at`, then by the dataset's key fields --
-        # instruments INTERLEAVE within an instant rather than arriving grouped by name. Each one
-        # carries its own `available_at` and `instrument_id` alongside the fields declared above.
 {lookback_note}
-        history: dict[str, list[Decimal]] = {{}}
-        for row in context.read("prices"):
-            value = row.values[FIELD]
-            if value is not None:
-                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
-                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
-                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
-                # binary float's expansion, so 0.1 stays 0.1.
-                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))
+{history_block}
 
         # ---- the one line to change -------------------------------------------------------
         # Trailing return over the declared lookback.
@@ -110,15 +99,53 @@ class {class_name}(va.DataModel):
         ]
 '''
 
+_PANEL_HISTORY_BLOCK = """\
+        # One field of the alias as a window: `instants` x `instruments`, the same instants for
+        # every name. `window.values[name]` is that name's values over them, `None` where it had
+        # none; `window.latest()` is the newest value per name.
+        window = context.read("prices", FIELD)
+        history: dict[str, list[Decimal]] = {}
+        for name in window.instruments:
+            # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's type,
+            # so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and arithmetic
+            # mixing the two raises. Going through `str` also avoids inheriting the binary float's
+            # expansion, so 0.1 stays 0.1.
+            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]"""
+
+_ROWS_HISTORY_BLOCK = """\
+        # A rows-grain (vendor, long) dataset streams observations: one per (instant, instrument),
+        # ordered by `available_at`, each carrying its own `available_at` and `instrument_id`
+        # alongside the fields declared above. Instruments INTERLEAVE within an instant.
+        history: dict[str, list[Decimal]] = {}
+        for row in context.rows("prices"):
+            value = row.values[FIELD]
+            if value is not None:
+                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
+                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
+                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
+                # binary float's expansion, so 0.1 stays 0.1.
+                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))"""
+
 _ROWS_LOOKBACK_NOTE = """\
         #
-        # This model declares a ROWS lookback, so the window is each name's own last N
-        # observations: on an unbalanced panel a sparse name reaches further back than a liquid
-        # one, and the batch's calendar span is set by the sparsest of them. That is why the
-        # reduction below is per instrument. A CROSS-SECTIONAL model -- a covariance matrix, a
-        # factor regression, anything comparing names to each other on the same dates -- must not
-        # be written this way: scaffold it with `--calendar-lookback DAYS` instead, which gives
-        # every name the same window."""
+        # This model declares a ROWS lookback on a panel-grain dataset, so the window is the
+        # table's last N rows -- the same N instants for every name. A name that stopped
+        # publishing contributes fewer values inside it rather than reaching further back, which
+        # is what makes a cross-section built from this window safe. The reduction below is still
+        # per instrument because a trailing return is a per-name question; the guard asks for a
+        # full window. A calendar period instead of a row count is `--calendar-lookback DAYS`;
+        # per-name counting (each name's own last N reported instants) is `InstantsLookback`
+        # and belongs to a `grain: rows` dataset: `--instants-lookback N`."""
+
+_INSTANTS_LOOKBACK_NOTE = """\
+        #
+        # This model declares an INSTANTS lookback on a rows-grain (vendor, long) dataset, so
+        # the window is each name's own last N reported instants: on an unbalanced table a
+        # sparse name reaches further back than a liquid one, and the batch's calendar span is
+        # set by the sparsest of them. That is why the reduction below is per instrument. A
+        # CROSS-SECTIONAL model -- anything comparing names on the same dates -- must not be
+        # written on this grain: register the table as `grain: instrument_instant` (or derive
+        # one from it) and read it with `RowsLookback` or `CalendarLookback` instead."""
 
 _CALENDAR_LOOKBACK_NOTE = """\
         #
@@ -131,13 +158,27 @@ _CALENDAR_LOOKBACK_NOTE = """\
 
 _LOOKBACK_FLAVOURS = {
     "rows": {
+        "history_block": _PANEL_HISTORY_BLOCK,
         "lookback_class": "RowsLookback",
-        "lookback_declaration": "LOOKBACK = {lookback}  # observations per name, per field",
+        "lookback_declaration": (
+            "LOOKBACK = {lookback}  # rows of the table: the same instants for every name"
+        ),
         "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
         "completeness_guard": "len(values) == LOOKBACK",
         "lookback_note": _ROWS_LOOKBACK_NOTE,
     },
+    "instants": {
+        "history_block": _ROWS_HISTORY_BLOCK,
+        "lookback_class": "InstantsLookback",
+        "lookback_declaration": (
+            "LOOKBACK = {lookback}  # instants per name, per field (grain: rows only)"
+        ),
+        "lookback_expression": "va.InstantsLookback(instants=LOOKBACK)",
+        "completeness_guard": "len(values) == LOOKBACK",
+        "lookback_note": _INSTANTS_LOOKBACK_NOTE,
+    },
     "calendar": {
+        "history_block": _PANEL_HISTORY_BLOCK,
         "lookback_class": "CalendarLookback",
         "lookback_declaration": (
             'LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n'
@@ -148,7 +189,7 @@ _LOOKBACK_FLAVOURS = {
         "lookback_note": _CALENDAR_LOOKBACK_NOTE,
     },
 }
-"""The two lookback members, and the four places in the template that differ between them.
+"""The three lookback members, and the four places in the template that differ between them.
 
 One template rather than two files, because everything else about the two scaffolds is identical
 and a second copy would drift. What differs is exactly what an author has to understand: which
@@ -200,7 +241,8 @@ class {class_name}(va.Constraint):
         """What this constraint reads. Nothing: the rule is a property of the weight.
 
         A constraint comparing against a benchmark would return a `va.DatasetInput` here, and
-        `call.read("<your alias>")` inside `project` would hand back its observations.
+        `call.read("<your alias>", "<field>")` inside `project` would hand back its window --
+        `latest()` is the benchmark's newest weight per name.
         """
         return {{}}
 
@@ -335,6 +377,7 @@ def render(
         )
     flavour = _LOOKBACK_FLAVOURS[lookback_kind]
     return _TEMPLATES[kind].format(
+        history_block=flavour["history_block"],
         component_id=component_id,
         class_name=_class_name(component_id),
         dataset_id=dataset_id,

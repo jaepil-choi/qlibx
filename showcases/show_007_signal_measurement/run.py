@@ -472,6 +472,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "krx-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),

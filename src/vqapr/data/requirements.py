@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vqapr.data.lookback import CalendarLookback, Lookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, Lookback, RowsLookback
 from vqapr.domain.identifiers import DatasetId, dataset_id
 
 _RESERVED_FIELDS = frozenset({"available_at", "instrument"})
@@ -48,6 +48,6 @@ class DataRequirement:
         field_id = _name("framework field", raw_field_id)
         if field_id in _RESERVED_FIELDS:
             raise ValueError(f"framework field is reserved by ModelWindow: {field_id!r}")
-        if not isinstance(lookback, (RowsLookback, CalendarLookback)):
-            raise TypeError("lookback must be RowsLookback or CalendarLookback")
+        if not isinstance(lookback, (RowsLookback, CalendarLookback, InstantsLookback)):
+            raise TypeError("lookback must be RowsLookback, CalendarLookback or InstantsLookback")
         return cls(dataset_id(raw_dataset_id), field_id, lookback)

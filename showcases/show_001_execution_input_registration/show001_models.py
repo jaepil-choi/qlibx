@@ -56,12 +56,7 @@ class ShowcaseStrategy(StrategyModel):
     def decide(self, call) -> Hold | Rebalance:
         if self.memory is not None:
             return Hold(reason="already-issued")
-        observed = [
-            observation
-            for observation in call.read("prices")
-            if observation.values["close"] is not None
-        ]
-        if not observed:
+        if not call.read("prices", "close").latest():
             return Hold(reason="no-observed-price")
         self.memory = {"issued": True}
         return Rebalance(

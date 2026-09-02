@@ -45,6 +45,7 @@ def _dataset(source_id: str, parquet: Path) -> dict[str, object]:
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": ["available_at", "instrument"],
+        "grain": "instrument_instant",
         "fields": {"close": "close"},
     }
 

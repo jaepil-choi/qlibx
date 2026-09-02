@@ -21,11 +21,11 @@ class ReversalFeatureModel(va.DataModel):
         }
 
     def compute(self, context):
-        closes: dict[str, list[float]] = {}
-        for row in context.read("prices"):
-            close = row.values["close"]
-            if close is not None:
-                closes.setdefault(row.instrument_id, []).append(float(close))
+        window = context.read("prices", "close")
+        closes = {
+            name: [float(v) for v in window.values[name] if v is not None]
+            for name in window.instruments
+        }
         return tuple(
             {
                 "instrument": instrument,
@@ -50,9 +50,8 @@ class AbsoluteScoreModel(va.DataModel):
 
     def compute(self, context):
         return tuple(
-            {"instrument": row.instrument_id, "abs_score": abs(float(row.values["score"]))}
-            for row in context.read("scores")
-            if row.values["score"] is not None
+            {"instrument": name, "abs_score": abs(float(score))}
+            for name, score in sorted(context.read("scores", "score").latest().items())
         )
 
 

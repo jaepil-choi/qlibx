@@ -51,6 +51,7 @@ def _dataset_document(observation: Path, **overrides: str) -> str:
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": "[available_at, instrument]",
+        "grain": "instrument_instant",
         "fields": "{close: close}",
     }
     fields.update(overrides)
@@ -232,6 +233,7 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
         "datasets": (
             "datasets:\n  {key}:\n    source_id: s\n    path: x.parquet\n"
             "    instrument_field: instrument\n    available_at: available_at\n"
+            "    grain: instrument_instant\n"
             "    key_fields: [available_at, instrument]\n    fields: {{close: close}}\n"
         ),
         "execution_inputs": "execution_inputs:\n  {key}:\n    dataset_id: prices\n",

@@ -100,6 +100,14 @@ datasets:
     #   Merely casting a naive pyarrow timestamp to timestamp(..., tz=...) preserves the
     #   underlying epoch value; it does not localize the wall clock. Use an explicit localization
     #   operation such as pyarrow.compute.assume_timezone, then prove the round-trip.
+    # GRAIN: what one row of this table IS. Required; registration refuses without it.
+    #   instrument_instant  one value per (available_at, instrument) -- a date x ticker table.
+    #                       A panel can be built from it, and this is the shape to prefer.
+    #   instant             one value per available_at, no instrument axis (index level, rate).
+    #   rows                the vendor's grain (long / EAV); unique on key_fields; no panel.
+    #   On a panel grain, RowsLookback(n) is the last n rows of the pivoted table -- the same
+    #   instants for every name. Per-name counting is InstantsLookback on grain: rows.
+    grain: instrument_instant
     key_fields:                       # columns that together uniquely identify each row
       - timestamp
       - instrument
@@ -344,9 +352,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         # `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md`, C3.
         default=None,
         help=(
-            "rows of history each name needs, counted per instrument and per field. On an "
-            "unbalanced panel the batch then spans whatever the sparsest name reaches back to; "
-            "use --calendar-lookback for a window every name shares"
+            "rows of the table the model reads back -- the same N instants for every name, on "
+            "a panel-grain dataset. Use --calendar-lookback for a window of N days, or "
+            "--instants-lookback for each name's own last N reported instants on a rows-grain "
+            "(vendor, long) dataset"
+        ),
+    )
+    parser.add_argument(
+        "--instants-lookback",
+        dest="instants_lookback",
+        type=int,
+        default=None,
+        help=(
+            "scaffold a model that reads each name's own last N reported instants, per field, "
+            "which is the window a rows-grain (vendor, long) dataset takes; on an unbalanced "
+            "table the batch then spans whatever the sparsest name reaches back to"
         ),
     )
     parser.add_argument(
@@ -432,6 +452,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
                 kind,
                 rows=getattr(args, "lookback", None),
                 calendar=getattr(args, "calendar_lookback", None),
+                instants=getattr(args, "instants_lookback", None),
             ),
         )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"

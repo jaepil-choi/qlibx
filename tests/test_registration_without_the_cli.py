@@ -54,6 +54,7 @@ def test_a_document_registers_with_the_cli_never_imported(
                         "instrument_field": "instrument",
                         "available_at": "available_at",
                         "key_fields": ["available_at", "instrument"],
+                        "grain": "instrument_instant",
                         "fields": {"close": "close"},
                     }
                 },
@@ -127,6 +128,7 @@ def test_the_surface_still_registers_the_same_document(
                         "instrument_field": "instrument",
                         "available_at": "available_at",
                         "key_fields": ["available_at", "instrument"],
+                        "grain": "instrument_instant",
                         "fields": {"close": "close"},
                     }
                 }

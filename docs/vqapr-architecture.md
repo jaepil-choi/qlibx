@@ -4362,6 +4362,8 @@ agent의 선택이다. **다만 skill은 date x ticker로 매핑되는 데이터
 지키려면 SKILL.md의 default 문장을 바꿔야 하고, 그것은 `049`가 "이 목록에서 가장 싼 항목"으로 지목한
 일과 같은 자리다.
 
+> **2026-09-02 정정 (기록 `137`).** SKILL.md의 권유가 바뀌었다: date × ticker 표는 `grain: instrument_instant`로 등록한다. vendor grain을 보존해야 하면 `rows`로 **함께** 등록하고 DataModel로 panel을 만든다. `grain` 없는 등록은 세 값을 이름으로 대며 거절한다.
+
 ### 17.1.2 유일성 검사는 있고, 그 축이 date x ticker는 아니다
 
 **진술.** pivot 할 때는 date x ticker에 대해 데이터가 유일해야 하고, 이것을 **등록 단계에서** 검사한다.
@@ -4384,6 +4386,8 @@ pivot 하는 필드는 등록의 기본 조건인 timestamp와 instrument id를 
 **판정: 부분.** 검사는 있으나 축이 저자 선언이다. 진술대로 하려면 "이 등록은 date x ticker grain이다"를
 **선언할 수 있어야** 하고, 그때 `check_key`가 `(available_at, instrument)`를 검사한다. 오늘은 그 선언이
 없으므로 grouped 등록만 그 성질을 갖고, 그것도 부수적으로 갖는다.
+
+> **2026-09-02 정정 (기록 `137`).** `grain`이 선언이 됐다. `instrument_instant`는 `(available_at, instrument)`의 유일성을, `instant`는 `available_at`의 유일성을 등록에서 검사하고, `rows`만 저자의 `key_fields`를 검사한다. grouped projection은 구성으로 유일하므로 스캔하지 않는다.
 
 ### 17.1.3 한 번 읽은 parquet은 메모리에 남지 않는다 — 커넥션과 메타데이터만 남는다
 
@@ -4414,6 +4418,8 @@ pushdown과 footer 캐시이지 올려둔 표가 아니다. cursor를 옮기는 
 **판정: 없음.** run 수명 캐시는 있고 데이터 상주는 없다. 진술을 behavior로 만들려면 창이 아니라 **표**가
 run에 붙어야 하고, 그 결정은 `035`에 걸려 있다.
 
+> **2026-09-02 정정 (기록 `137`).** 표가 run에 붙었다. panel grain dataset은 run당 한 번 스캔되어 `Panel`(instant × instrument, Arrow 열)이 되고 이후 모든 읽기는 산술로 자른 슬라이스다. `035`가 여기서 닫혔다.
+
 ### 17.1.4 병렬 전략은 parquet을 공유하지 않는다 — 프로세스마다 자기 duckdb를 연다
 
 **진술.** 병렬로 돌 때 같은 dataset에 의존하는 알파들은 같은 parquet을 여러 번 메모리에 올리지 말고
@@ -4434,6 +4440,8 @@ run에 붙어야 하고, 그 결정은 `035`에 걸려 있다.
 **판정: 없음.** read-only라 안전하다는 진술은 맞지만 **공유할 대상이 아직 존재하지 않는다** — 17.1.3이
 없으면 17.1.4도 없다. 순서가 있다: 먼저 표가 run 수명 객체가 되고, 그 다음에야 그 객체를 여러 전략이
 나눠 쓰는 것이 질문이 된다.
+
+> **2026-09-02 정정 (기록 `137`).** 공유할 대상이 생겼다 — run 하나의 `Panel`은 store에 한 번 만들어지고 같은 run의 전략들이 같은 객체를 본다. 프로세스를 넘는 공유(mmap spill)는 설계 §7-2에 따라 Step 7과 함께 판단한다.
 
 ---
 
@@ -4777,6 +4785,8 @@ lookback을 본다.
 그것은 세 번째 `Lookback` 멤버(가칭 `InstantsLookback` — pivot된 표의 마지막 N개 `available_at`)로
 표현 가능하다. 그러면 §4.2의 논거도 033의 확인도 무효화되지 않는다. **§15-6 참조.**
 
+> **2026-09-02 정정 (기록 `137`).** 결정됐다. `RowsLookback(n)`은 pivot된 표의 마지막 n행(모든 이름에 같은 instant)이고, 이름별로 세는 것은 `InstantsLookback(n)`이며 `grain: rows`에만 허용된다. 타입이 steering을 한다 — 서로 바꿔 쓰면 preflight와 읽기에서 이름을 대며 거절한다. 033이 잰 모양은 panel grain 위에서 구성상 불가능하다.
+
 ---
 
 ### 17.10 calendar lookback은 timedelta이고 모든 이름에 같은 창을 준다
@@ -4799,3 +4809,5 @@ lookback을 본다.
   형태는 모델이 곧바로 버릴 행을 실어 왔기 때문이다.
 
 **판정: 지켜짐.**
+
+> **2026-09-02 (기록 `137`).** 그대로 지켜지며, 이제 panel 위의 슬라이스다: `CalendarLookback`은 instant 축의 두 인덱스가 된다.

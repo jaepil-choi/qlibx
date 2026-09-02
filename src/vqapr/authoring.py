@@ -2,7 +2,8 @@
 
 The sole public home for what an author subclasses (``DataModel``, ``StrategyModel``,
 ``Constraint``), receives (``DataCall``, ``StrategyCall``, ``ConstraintCall``,
-``Observation``, ``EconomicAccountView``, ``AccountHistory``, ``ConstraintBounds``),
+``PanelWindow``, ``Observation``, ``EconomicAccountView``, ``AccountHistory``,
+``ConstraintBounds``),
 and returns (``Rows``, ``Hold``/``Rebalance``, ``ConstraintFinding``).
 
 Every public declaration here is a frozen, slotted, keyword-only value unless shown
@@ -29,7 +30,8 @@ from types import MappingProxyType
 from typing import BinaryIO, Literal
 
 from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHistory
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
@@ -52,8 +54,10 @@ __all__ = (
     "DatasetInput",
     "EconomicAccountView",
     "Hold",
+    "InstantsLookback",
     "Model",
     "Observation",
+    "PanelWindow",
     "Rebalance",
     "RowsLookback",
     "StrategyCall",
@@ -185,8 +189,8 @@ class DatasetInput:
         fields = _unique_identifiers(self.fields, name="fields")
         _reject_reserved(fields, _ROW_RESERVED_FIELDS, name="fields")
         object.__setattr__(self, "fields", fields)
-        if not isinstance(self.lookback, (RowsLookback, CalendarLookback)):
-            raise TypeError("lookback must be a RowsLookback or CalendarLookback")
+        if not isinstance(self.lookback, (RowsLookback, CalendarLookback, InstantsLookback)):
+            raise TypeError("lookback must be a RowsLookback, CalendarLookback or InstantsLookback")
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,8 +218,20 @@ class DataCall(ABC):
         """The single frozen PIT cutoff this invocation computes for."""
 
     @abstractmethod
-    def read(self, alias: str) -> tuple[Observation, ...]:
-        """Return PIT observations for one alias declared in `DataModel.inputs()`."""
+    def read(self, alias: str, field: str) -> PanelWindow:
+        """One field of a panel-grain alias declared in `DataModel.inputs()`, as a 2d window.
+
+        `instants` x `instruments`, a slice of the panel the run built once; `latest()` is the
+        newest value per name. Refused on a `rows`-grain alias, which is read with `rows`.
+        """
+
+    @abstractmethod
+    def rows(self, alias: str) -> tuple[Observation, ...]:
+        """PIT observations for one `rows`-grain alias declared in `DataModel.inputs()`.
+
+        One `Observation` per (instant, instrument), every declared field on it. Refused on a
+        panel-grain alias, which is read with `read(alias, field)`.
+        """
 
 
 def requirements_for(declaration: DatasetInput) -> tuple[DataRequirement, ...]:
@@ -711,8 +727,20 @@ class StrategyCall(ABC):
         """The merged bounds projected from every registered Constraint."""
 
     @abstractmethod
-    def read(self, alias: str) -> tuple[Observation, ...]:
-        """Return PIT observations for one alias declared in `StrategyModel.inputs()`."""
+    def read(self, alias: str, field: str) -> PanelWindow:
+        """One field of a panel-grain alias declared in `StrategyModel.inputs()`, as a 2d window.
+
+        `instants` x `instruments`, a slice of the panel the run built once; `latest()` is the
+        newest value per name. Refused on a `rows`-grain alias, which is read with `rows`.
+        """
+
+    @abstractmethod
+    def rows(self, alias: str) -> tuple[Observation, ...]:
+        """PIT observations for one `rows`-grain alias declared in `StrategyModel.inputs()`.
+
+        One `Observation` per (instant, instrument), every declared field on it. Refused on a
+        panel-grain alias, which is read with `read(alias, field)`.
+        """
 
 
 class StrategyModel(Model):
@@ -796,8 +824,20 @@ class ConstraintCall(ABC):
         """Every instrument this projection must cover, in the run's declared order."""
 
     @abstractmethod
-    def read(self, alias: str) -> tuple[Observation, ...]:
-        """Return PIT observations for one alias declared in `Constraint.inputs()`."""
+    def read(self, alias: str, field: str) -> PanelWindow:
+        """One field of a panel-grain alias declared in `Constraint.inputs()`, as a 2d window.
+
+        `instants` x `instruments`, a slice of the panel the run built once; `latest()` is the
+        newest value per name. Refused on a `rows`-grain alias, which is read with `rows`.
+        """
+
+    @abstractmethod
+    def rows(self, alias: str) -> tuple[Observation, ...]:
+        """PIT observations for one `rows`-grain alias declared in `Constraint.inputs()`.
+
+        One `Observation` per (instant, instrument), every declared field on it. Refused on a
+        panel-grain alias, which is read with `read(alias, field)`.
+        """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -44,6 +44,8 @@
 
 ## 2. 명사 1 — `Panel`
 
+> **구현됨 (2026-09-02, 기록 `137`).** §2.2의 `grain` 선언과 거절, §2.4의 lookback 갈래(`RowsLookback`은 표의 행, `InstantsLookback`은 이름별, `grain: rows`에만), §2.3의 `Panel`(run당 in-process, 스캔 한 번, 슬라이스 창), §2.5의 두 동사(`read(alias, field)` → 2d 창, `rows(alias)` → 스트림; 소유자 결정 B안). spill(§7-2)과 `prepare`(§7-5)는 Step 7로.
+
 ### 2.1 오늘 없는 것
 
 데이터 평면은 두 층이다: **선언**(`DatasetRegistration`)과 **창**(`observation_rows`). 사이에 **표가
@@ -419,6 +421,8 @@ vqapr rm    run        <run-id> [--keep-latest]
 
 ### 7-2. 열림 — panel spill을 지금 정할 것인가
 
+> **2026-09-02 (기록 `137`):** 후보대로 갔다. 명사 1은 in-process까지; spill은 명사 3과 함께.
+
 in-process cache만 먼저 넣으면 §17.1.3은 닫히고 §17.1.4는 안 닫힌다. spill까지 가야 `--jobs`가 의미를
 갖는다. **다만 spill의 값은 명사 3이 들어온 뒤에 커진다** — 한 run에 전략 셋이 있어야 공유할 상대가
 생긴다. 후보: 명사 1에서 in-process까지, spill은 명사 3과 함께.
@@ -437,6 +441,8 @@ in-process cache만 먼저 넣으면 §17.1.3은 닫히고 §17.1.4는 안 닫�
 *하나의* StrategyModel이 여러 sleeve를 합성하는 문제이지, run이 계정을 나눠 주는 문제가 아니다.
 
 ### 7-5. 열림 — `vqapr prepare`가 별도 verb인가
+
+> **2026-09-02 (기록 `137`):** 이번 단계에서는 `run`이 필요한 panel을 알아서 만든다. 별도 verb는 명사 3과 함께 판단한다.
 
 `run`이 필요할 때 알아서 물질화하면 verb가 하나 준다. 반대로 별도 verb면 *"이 run은 준비되었다"*가
 관찰 가능한 상태가 되고, 긴 물질화가 첫 전략의 wall time에 숨지 않는다. 후보: 별도 verb, 단 `run`이

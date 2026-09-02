@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.constraints.monitoring import MonitoringPolicy
-from vqapr.data.datasets import DatasetRegistration, validate
+from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain import identifiers
 from vqapr.domain.errors import (
@@ -415,14 +415,15 @@ def _dataset(
     name = f"datasets.{dataset_id}"
     body = _mapping(declared, name=name)
     _require_keys(body, _DATASET_KEYS, name=name)
+    _require_grain_key(body, name=name)
     fields = _mapping(_required(body, "fields", name=name), name=f"{name}.fields")
     # `instrument_field` is the one declaration key that is optional, because a dataset without an
     # instrument axis is a dataset whose rows are not keyed by instrument (`docs/issues/038`) --
     # a factor series, an index level, a macro release. Omitting it says that; there is no value
     # that could say it, which is why it is absent rather than empty.
     declared_instrument = body.get("instrument_field")
-    return (
-        DatasetRegistration.of(
+    try:
+        registration = DatasetRegistration.of(
             dataset_id,
             str(_required(body, "source_id", name=name)),
             instrument_field=(
@@ -431,9 +432,54 @@ def _dataset(
             available_at=str(_required(body, "available_at", name=name)),
             key_fields=tuple(str(field) for field in _required(body, "key_fields", name=name)),
             fields={str(key): str(column) for key, column in fields.items()},
-        ),
-        _source(body, name=name, base=base),
+            grain=str(body["grain"]),
+        )
+    except ValueError as error:
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.value_invalid",
+                requirement=f"{name} must declare a grain its other keys agree with",
+                observed=str(error),
+                source=_at(f"{name}.grain"),
+                fix=f"set {name}.grain to one of {GRAIN_NAMES} and make the other keys match it",
+                explain=ExplainTopic.DECLARATION_SHAPE,
+            )
+        )
+        found.done().raise_if_failed()
+        raise AssertionError("unreachable") from error
+    return registration, _source(body, name=name, base=base)
+
+
+def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
+    """Refuse a dataset declaration without `grain`, naming the three values and what changed.
+
+    Its own refusal rather than one line in `_require_keys`'s list, because this key carries a
+    message the others do not: every registration written before `grain` existed is edited once
+    to add it, and that edit is where the author learns `RowsLookback` means something else on a
+    panel grain (design §2.4, §7-3).
+    """
+    raw = body.get("grain")
+    if isinstance(raw, str) and raw in GRAIN_NAMES.split(", "):
+        return
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    found.add(
+        Failure.bounded(
+            f"{DECLARE_STAGE}.grain_undeclared",
+            requirement=f"{name} must declare grain, one of: {GRAIN_NAMES}",
+            observed=("absent" if raw is None else repr(raw)),
+            examples=GRAIN_NAMES.split(", "),
+            source=_at(f"{name}.grain"),
+            fix=(
+                f"add `grain: <{GRAIN_NAMES}>` under {name}. instrument_instant: one value per "
+                "(available_at, instrument), a panel can be built; instant: one value per "
+                "available_at, no instrument axis; rows: the vendor's grain, unique on key_fields. "
+                f"Note: {ROWS_LOOKBACK_MEANING}"
+            ),
+            explain=ExplainTopic.DECLARATION_SHAPE,
+        )
     )
+    found.done().raise_if_failed()
 
 
 def _execution_input(input_id: str, declared: object, *, base: Path) -> ExecutionInputRegistration:

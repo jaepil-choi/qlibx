@@ -63,14 +63,15 @@ class MomentumModel(DataModel):
         }
 
     def compute(self, context):
-        closes: dict[str, list[float]] = {}
-        supervised: dict[str, bool] = {}
-        for row in context.read("prices"):
-            instrument = row.instrument_id
-            close = row.values["close"]
-            if close is not None:
-                closes.setdefault(instrument, []).append(float(close))
-            supervised[instrument] = bool(row.values["is_supervised"])
+        window = context.read("prices", "close")
+        closes = {
+            name: [float(v) for v in window.values[name] if v is not None]
+            for name in window.instruments
+        }
+        supervised = {
+            name: bool(flag)
+            for name, flag in context.read("prices", "is_supervised").latest().items()
+        }
         return tuple(
             {
                 "instrument": instrument,
@@ -95,11 +96,11 @@ class MomentumLongOnly(StrategyModel):
         }
 
     def decide(self, call) -> Hold | Rebalance:
+        eligible = call.read("momentum_score", "eligible").latest()
         latest = {
-            observation.instrument_id: float(observation.values["score"])
-            for observation in call.read("momentum_score")
-            if observation.values.get("score") is not None
-            and bool(observation.values.get("eligible"))
+            name: float(score)
+            for name, score in call.read("momentum_score", "score").latest().items()
+            if bool(eligible.get(name))
         }
         previous = self.memory if isinstance(self.memory, dict) else {}
         if len(latest) < BOOK:

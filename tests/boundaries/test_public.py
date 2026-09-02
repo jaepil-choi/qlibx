@@ -98,6 +98,7 @@ def _registration(**overrides) -> DatasetRegistration:
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": ("session_date", "instrument"),
+        "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
     }
     kwargs.update(overrides)
@@ -217,8 +218,10 @@ def test_public_exports_are_fixed() -> None:
         "FillSelector",
         "FrozenAgenda",
         "FrozenRun",
+        "Grain",
         "Hold",
         "IndexInstrument",
+        "InstantsLookback",
         "Instrument",
         "InstrumentKind",
         "InstrumentRoster",
@@ -242,6 +245,7 @@ def test_public_exports_are_fixed() -> None:
         "OperationRole",
         "OptimizeRefusal",
         "OptimizeResult",
+        "PanelWindow",
         "PortfolioDirection",
         "PortfolioTarget",
         "Rebalance",

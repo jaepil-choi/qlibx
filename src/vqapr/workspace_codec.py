@@ -33,7 +33,7 @@ import yaml
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
@@ -144,13 +144,18 @@ _CONSTRUCTION_TOKEN = object()
 
 
 def _detach_registration(registration: DatasetRegistration) -> DatasetRegistration:
-    detached = DatasetRegistration.of(
+    builder = (
+        DatasetRegistration.undeclared if registration.grain is None else DatasetRegistration.of
+    )
+    keywords = {} if registration.grain is None else {"grain": registration.grain}
+    detached = builder(
         str(registration.dataset_id),
         str(registration.source),
         instrument_field=registration.instrument_field,
         available_at=registration.available_at,
         key_fields=registration.key_fields,
         fields=dict(registration.fields),
+        **keywords,
     )
     # `of` takes neither the span nor the field types, because both are measured rather than
     # declared. Detaching must still carry the measurements across, or every read would hand back
@@ -268,6 +273,8 @@ def _encoded_dataset(registration: DatasetRegistration) -> dict[str, object]:
         "key_fields": list(registration.key_fields),
         "fields": dict(registration.fields),
     }
+    if registration.grain is not None:
+        body["grain"] = registration.grain.value
     if registration.field_types is not None:
         body["field_types"] = {
             name: str(column_type) for name, column_type in registration.field_types.items()
@@ -449,7 +456,9 @@ def _decode(
     decoded: dict[DatasetId, DatasetRegistration] = {}
     declared = {"source", "instrument_field", "available_at", "key_fields", "fields"}
     derived = {"field_types", "aggregated"}
-    expected = declared | derived | {"span"}
+    # `grain` is optional on READ only: a document written before it existed still opens, and
+    # its grain-less entries are unusable until registered again (`DatasetRegistration.undeclared`).
+    expected = declared | derived | {"span", "grain"}
 
     # **Two measurements, two independent axes, four admissible shapes.** An entry declares five
     # keys and then carries whatever has been measured about it: the span (added by the release
@@ -482,7 +491,7 @@ def _decode(
             raise TypeError("every dataset_id must be a string")
         if not isinstance(raw_registration, dict):
             raise ValueError(f"dataset {raw_id!r} must contain exactly {sorted(expected)}")
-        present = set(raw_registration)
+        present = set(raw_registration) - {"grain"}
         measured = present - declared
         if (
             not declared <= present
@@ -510,14 +519,28 @@ def _decode(
             isinstance(name, str) and isinstance(column, str) for name, column in fields.items()
         ):
             raise TypeError(f"dataset {raw_id!r} fields must map strings to strings")
-        registration = DatasetRegistration.of(
-            raw_id,
-            source,
-            instrument_field=instrument_field,
-            available_at=available_at,
-            key_fields=key_fields,
-            fields=fields,
-        )
+        raw_grain = raw_registration.get("grain")
+        if raw_grain is None:
+            registration = DatasetRegistration.undeclared(
+                raw_id,
+                source,
+                instrument_field=instrument_field,
+                available_at=available_at,
+                key_fields=key_fields,
+                fields=fields,
+            )
+        else:
+            if not isinstance(raw_grain, str):
+                raise TypeError(f"dataset {raw_id!r} grain must be a string")
+            registration = DatasetRegistration.of(
+                raw_id,
+                source,
+                instrument_field=instrument_field,
+                available_at=available_at,
+                key_fields=key_fields,
+                fields=fields,
+                grain=raw_grain,
+            )
         if "field_types" in raw_registration:
             raw_types = raw_registration["field_types"]
             aggregated = raw_registration["aggregated"]
@@ -855,6 +878,8 @@ def _encode_requirement(requirement: DataRequirement) -> dict[str, object]:
     lookback = requirement.lookback
     if isinstance(lookback, RowsLookback):
         encoded_lookback: dict[str, object] = {"kind": "rows", "rows": lookback.rows}
+    elif isinstance(lookback, InstantsLookback):
+        encoded_lookback = {"kind": "instants", "instants": lookback.instants}
     else:
         encoded_lookback = {
             "kind": "calendar",
@@ -882,6 +907,8 @@ def _decode_requirement(raw: object) -> DataRequirement:
         raise TypeError("mark_requirement lookback must be a mapping with a kind")
     if raw_lookback["kind"] == "rows" and set(raw_lookback) == {"kind", "rows"}:
         lookback = RowsLookback(raw_lookback["rows"])
+    elif raw_lookback["kind"] == "instants" and set(raw_lookback) == {"kind", "instants"}:
+        lookback = InstantsLookback(raw_lookback["instants"])
     elif raw_lookback["kind"] == "calendar" and set(raw_lookback) == {
         "kind",
         "years",

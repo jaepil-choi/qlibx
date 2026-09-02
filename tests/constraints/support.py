@@ -43,6 +43,8 @@ class _Weightless(ConstraintCall):
         raise AssertionError(f"this call serves no reads; {alias!r} was asked for")
 
 
+    def rows(self, alias: str):
+        raise TypeError("this double serves panel reads only")
 def weightless_call(instruments: tuple[str, ...]) -> ConstraintCall:
     """A call for a rule that declared no `inputs()`. Reading through it is an error."""
     return _Weightless(tuple(instruments))

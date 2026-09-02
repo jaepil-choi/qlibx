@@ -22,8 +22,9 @@ from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_pa
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
 from vqapr.constraints.monitoring import MonitoringPolicy
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.datasets import DatasetRegistration, Grain
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.windows import ModelWindow, ObservationBatch
@@ -178,8 +179,10 @@ __all__ = (
     "FillSelector",
     "FrozenAgenda",
     "FrozenRun",
+    "Grain",
     "Hold",
     "IndexInstrument",
+    "InstantsLookback",
     "Instrument",
     "InstrumentKind",
     "InstrumentRoster",
@@ -206,6 +209,7 @@ __all__ = (
     "OperationRole",
     "OptimizeRefusal",
     "OptimizeResult",
+    "PanelWindow",
     "PortfolioDirection",
     "PortfolioTarget",
     "Rebalance",

@@ -454,6 +454,7 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
         "s",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "missing_col": "does_not_exist"},
     )
@@ -473,6 +474,7 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
         "s",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )
@@ -696,6 +698,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     registration = _with_span(
         DatasetRegistration.of(
             "prices", "s", instrument_field="instrument", available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"), fields={"close": "close"},
         )
     )
@@ -709,6 +712,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     conflicting = _with_span(
         DatasetRegistration.of(
             "prices", "s", instrument_field="instrument", available_at="available_at",
+            grain="rows",
             key_fields=("instrument",), fields={"close": "close"},
         )
     )
@@ -752,6 +756,7 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
         _with_span(
             DatasetRegistration.of(
                 "prices", "s", instrument_field="instrument", available_at="available_at",
+                grain="instrument_instant",
                 key_fields=("available_at", "instrument"), fields={"close": "close"},
             )
         ),

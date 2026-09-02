@@ -30,6 +30,7 @@ def _register_prices(project: Path, parquet: Path) -> None:
             "prices",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "volume": "volume"},
         ),
@@ -48,10 +49,11 @@ class ReversalModel(va.DataModel):
     def compute(self, context):
         assert not hasattr(context, "account")
         assert not hasattr(context, "execution_input")
-        by_instrument = {}
-        for row in context.read("prices"):
-            if row.values["close"] is not None:
-                by_instrument.setdefault(row.instrument_id, []).append(float(row.values["close"]))
+        window = context.read("prices", "close")
+        by_instrument = {
+            name: [float(v) for v in window.values[name] if v is not None]
+            for name in window.instruments
+        }
         return tuple(
             {"instrument": instrument, "score": -(values[-1] / values[0] - 1.0)}
             for instrument, values in sorted(by_instrument.items())

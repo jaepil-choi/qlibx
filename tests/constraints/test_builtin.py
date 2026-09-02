@@ -83,6 +83,7 @@ def _benchmark_window(
         "benchmark-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"benchmark_weight": "benchmark_weight"},
     )
@@ -257,6 +258,7 @@ def test_single_name_cap_refuses_an_invariant_violating_benchmark(
         "benchmark-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"benchmark_weight": "benchmark_weight"},
     )
@@ -501,6 +503,7 @@ def test_single_name_cap_enforces_its_declared_tolerance_on_the_real_projection(
         "benchmark-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"benchmark_weight": "benchmark_weight"},
     )

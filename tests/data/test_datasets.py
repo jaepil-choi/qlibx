@@ -24,6 +24,7 @@ def _registration(**overrides) -> DatasetRegistration:
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": ("session_date", "instrument"),
+        "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
     }
     kwargs.update(overrides)
@@ -131,6 +132,7 @@ def test_dev_dataset_registration_is_valid(dev_dataset: Path) -> None:
             "fng_prices",
             instrument_field="종목약코드",
             available_at="available_at",
+            grain="rows",
             key_fields=("거래일자", "종목약코드"),
             fields={"close": "종가", "session_date": "거래일자"},
         ),
@@ -149,6 +151,7 @@ def test_dev_dataset_rejects_a_weak_key(dev_dataset: Path) -> None:
             "fng_prices",
             instrument_field="종목약코드",
             available_at="available_at",
+            grain="rows",
             key_fields=("종목약코드",),
             fields={"close": "종가"},
         ),

@@ -34,7 +34,7 @@ WEIGHT_FIELD = "benchmark_weight"
 """The field this constraint reads on the benchmark dataset it is configured with."""
 
 BENCHMARK_ALIAS = "benchmark"
-"""This constraint's own name for its one read, as `inputs()` and `call.read()` both spell it."""
+"""This constraint's one alias, as `inputs()` declares it and `call.read(alias, field)` reads it."""
 
 
 def _decimal_config(value: object, *, name: str) -> Decimal:
@@ -107,17 +107,15 @@ class SingleNameCap(Constraint):
         }
 
     def _benchmark(self, call: ConstraintCall) -> dict[str, Decimal]:
+        # The newest benchmark weight per name inside the declared window: a panel read, and
+        # `latest()` is exactly the cross-section a one-row lookback means.
         latest: dict[str, Decimal] = {}
-        for row in call.read(BENCHMARK_ALIAS):
-            weight = row.values[self._weight_field]
-            if weight is None:
-                continue
+        for instrument, weight in call.read(BENCHMARK_ALIAS, self._weight_field).latest().items():
             if not isinstance(weight, Decimal):
                 raise TypeError(
-                    f"{self._constraint_id}: benchmark weight for "
-                    f"{row.instrument_id!r} must be a Decimal"
+                    f"{self._constraint_id}: benchmark weight for {instrument!r} must be a Decimal"
                 )
-            latest[row.instrument_id] = weight
+            latest[instrument] = weight
 
         # Validate before producing any bound so an invariant-violating benchmark cannot reach
         # optimize(); the coverage-scoped contract accepts a proper subset of the index.

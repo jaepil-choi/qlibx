@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+from bisect import bisect_right
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.datasets import Grain, lookback_fits_grain, require_grain
+from vqapr.data.lookback import (
+    CalendarLookback,
+    InstantsLookback,
+    RowsLookback,
+)
+from vqapr.data.panel import Panel, panel_identity
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
@@ -34,10 +41,22 @@ def _physical_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _window_types():
+    """The one deferred import of `windows`' types: `windows` imports this module, so its record
+    and batch types are reached at call time, by the row read and the panel read alike."""
+    from vqapr.data.windows import AccessRecord, ObservationBatch
+
+    return AccessRecord, ObservationBatch
+
+
+def _access_record(**fields: object):
+    return _window_types()[0](**fields)
+
+
 class DuckDbObservationStore:
     """Resolve workspace declarations and execute bounded physical queries through scan.py."""
 
-    __slots__ = ("__catalog", "__digests", "__session")
+    __slots__ = ("__catalog", "__digests", "__panels", "__session")
 
     def __init__(self, catalog: DatasetCatalog, *, session: scan.ScanSession | None = None) -> None:
         self.__catalog = catalog
@@ -49,6 +68,139 @@ class DuckDbObservationStore:
         # observes two digests for one source, so caching per instance does not weaken that
         # contract -- it makes violating it impossible instead of merely detected.
         self.__digests: dict[Path, str] = {}
+        # One panel per (dataset, declared fields, instruments) for the life of this store --
+        # which is the life of one run. Two strategies in one run reading one dataset see one
+        # object. Keyed by content identity, so the same bytes build the same key.
+        self.__panels: dict[str, Panel] = {}
+
+    def _grid_bound(
+        self, source: SourceSpec, available_at_field: str, evaluation_time: datetime, rows: int
+    ) -> datetime:
+        """The instant `rows` table rows back from the evaluation time.
+
+        When the table has fewer instants at or before the cutoff than were asked for, the bound
+        is its first instant: the window is then everything up to the cutoff, which is the honest
+        answer to "the last 313 rows" of a 200-row table. An empty table bounds at the cutoff
+        itself, which admits nothing, which is what it holds.
+        """
+        grid = self._instant_grid(source, available_at_field)
+        if not grid:
+            return evaluation_time
+        try:
+            cut = bisect_right(grid, evaluation_time)  # type: ignore[type-var]
+        except TypeError:
+            return grid[0]  # type: ignore[return-value]
+        if cut <= rows:
+            return grid[0]  # type: ignore[return-value]
+        return grid[cut - rows]  # type: ignore[return-value]
+
+    def panel_window(
+        self,
+        requirements: Sequence[DataRequirement],
+        field: str,
+        *,
+        evaluation_time: datetime,
+        instruments: Sequence[str],
+        consumer_id: str,
+    ):
+        """One field of a panel-grain alias, as a slice of the panel built once for the run.
+
+        `requirements` are the alias's -- one dataset, one lookback, one field each -- and the
+        panel is built for all of them in one scan the first time any of them is read, then
+        sliced by arithmetic on every read after. The access record is the same fact a row read
+        records: what was read, how far back, and how many values each name actually had.
+        """
+        require_tz_aware(evaluation_time, name="evaluation_time")
+        declared = tuple(requirements)
+        if not declared:
+            raise ValueError("a read requires at least one DataRequirement")
+        first = declared[0]
+        if any(item.dataset_id != first.dataset_id for item in declared):
+            raise ValueError("one read serves one dataset; split requirements by dataset_id")
+        if any(item.lookback != first.lookback for item in declared):
+            raise ValueError("one read serves one lookback; split requirements by lookback")
+        fields = tuple(item.field_id for item in declared)
+        if field not in fields:
+            raise KeyError(
+                f"{field!r} is not one of the alias's declared fields: {', '.join(fields)}"
+            )
+        registration = self.__catalog.dataset(str(first.dataset_id))
+        require_grain(registration)
+        if registration.grain is Grain.ROWS:
+            raise TypeError(
+                f"dataset {str(first.dataset_id)!r} declares grain: rows, which has no panel; "
+                "read it with rows(alias)"
+            )
+        mismatch = lookback_fits_grain(first.lookback, registration.grain)
+        if mismatch is not None:
+            raise TypeError(f"dataset {str(first.dataset_id)!r}: {mismatch}")
+        keyed_by_instrument = registration.instrument_field is not None
+        source = self.__catalog.source(str(registration.source))
+        source_digest = self._digest(source.path)
+        names = tuple(instruments) if keyed_by_instrument else ()
+        identity = panel_identity(
+            source_digest, str(first.dataset_id), fields, names, registration.span
+        )
+        panel = self.__panels.get(identity)
+        if panel is None:
+            # The registered span bounds the one scan. A registration that was never validated
+            # (a test catalog) carries none, so the source's own first and last instants stand in.
+            span = registration.span
+            if span is None:
+                grid = self._instant_grid(source, registration.available_at)
+                span = (grid[0], grid[-1]) if grid else (evaluation_time, evaluation_time)
+            rows = scan.observation_rows(
+                source,
+                instrument_field=registration.instrument_field,
+                available_at_field=registration.available_at,
+                key_fields=registration.key_fields,
+                fields={item.field_id: resolve_field(registration, item) for item in declared},
+                aggregated=registration.aggregated,
+                instruments=instruments,
+                # The whole registered span: one scan, and every later window is a slice.
+                evaluation_time=span[1],
+                lower_bound=span[0],
+                session=self.__session,
+            )
+            panel = self.__panels[identity] = Panel.from_rows(
+                rows,
+                dataset_id=str(first.dataset_id),
+                fields=fields,
+                instruments=instruments,
+                keyed_by_instrument=keyed_by_instrument,
+                identity=identity,
+                source_digest=source_digest,
+            )
+        window = panel.window(field, evaluation_time=evaluation_time, lookback=first.lookback)
+        access = _access_record(
+            consumer_id=consumer_id,
+            dataset_id=first.dataset_id,
+            source_id=str(source.source_id),
+            source_digest=source_digest,
+            fields=(field,),
+            lookback=first.lookback,
+            evaluation_time=evaluation_time,
+            instruments=names,
+            lower_bound=window.lower_bound,
+            actual_rows={name: {field: count} for name, count in window.counts().items()}
+            if keyed_by_instrument
+            else {},
+            max_available_at=window.max_available_at,
+        )
+        return window, access
+
+    def _instant_grid(self, source: SourceSpec, available_at_field: str) -> tuple[object, ...]:
+        """Every distinct instant of one source, ascending; once per run when a session is held."""
+        if self.__session is not None:
+            return self.__session.instant_grid(source, available_at_field)
+        return tuple(
+            value for value in scan.distinct_values(source, available_at_field) if value is not None
+        )
+
+    def grain(self, requirement: DataRequirement):
+        registration = self.__catalog.dataset(str(requirement.dataset_id))
+        require_grain(registration)
+        return registration.grain
 
     def _digest(self, path: Path) -> str:
         cached = self.__digests.get(path)
@@ -91,7 +243,7 @@ class DuckDbObservationStore:
         rows the joined reads did: one row per (instant, instrument) any field admitted, each
         field null outside its own window. One access is recorded, naming every field.
         """
-        from vqapr.data.windows import AccessRecord, ObservationBatch
+        ObservationBatch = _window_types()[1]
 
         require_tz_aware(evaluation_time, name="evaluation_time")
         declared = tuple(requirements)
@@ -106,14 +258,27 @@ class DuckDbObservationStore:
         if len(set(declared_fields)) != len(declared_fields):
             raise ValueError("a read must not name one field twice")
         registration = self.__catalog.dataset(str(first.dataset_id))
+        require_grain(registration)
         keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
         fields = {item.field_id: resolve_field(registration, item) for item in declared}
+        mismatch = lookback_fits_grain(first.lookback, registration.grain)
+        if mismatch is not None:
+            raise TypeError(f"dataset {str(first.dataset_id)!r}: {mismatch}")
         lower_bound = None
         rows = None
         if isinstance(first.lookback, RowsLookback):
-            rows = first.lookback.rows
+            # A panel lookback: the table's last n instants, the same for every name. The bound
+            # is arithmetic on the source's instant grid -- read once per run when a session is
+            # held -- and the window SQL then takes every row at or after it. No per-name rank.
+            lower_bound = self._grid_bound(
+                source, registration.available_at, evaluation_time, first.lookback.rows
+            )
+        elif isinstance(first.lookback, InstantsLookback):
+            # A series lookback: each name's own last n, per field, the way the rows-grain read
+            # has always ranked (`PARTITION BY instrument` in `observation_rows`).
+            rows = first.lookback.instants
         elif isinstance(first.lookback, CalendarLookback):
             lower_bound = first.lookback.lower_bound(evaluation_time)
         else:  # pragma: no cover - DataRequirement construction closes this union
@@ -162,7 +327,7 @@ class DuckDbObservationStore:
                 raise TypeError("registered available_at values must be datetimes")
             if max_available_at is None or available_at > max_available_at:
                 max_available_at = available_at
-        access = AccessRecord(
+        access = _access_record(
             # Stamped, not declared. The component reading is the consumer, and the framework is
             # the only one that knows which component is running.
             consumer_id=consumer_id,

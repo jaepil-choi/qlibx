@@ -102,11 +102,10 @@ class Rotate(va.StrategyModel):
         }
 
     def decide(self, call):
-        latest: dict[str, Decimal] = {}
-        for row in call.read("prices"):
-            value = row.values["close"]
-            if value is not None:
-                latest[row.instrument_id] = Decimal(str(value))
+        latest = {
+            name: Decimal(str(value))
+            for name, value in call.read("prices", "close").latest().items()
+        }
         if not latest:
             return va.Hold(reason="no-observations")
         winner = max(latest, key=lambda name: latest[name])
@@ -124,6 +123,7 @@ datasets:
     path: {observation.as_posix()}
     instrument_field: instrument
     available_at: available_at
+    grain: instrument_instant
     key_fields: [available_at, instrument]
     fields: {{close: close}}
 

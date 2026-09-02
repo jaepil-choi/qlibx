@@ -198,7 +198,7 @@ class ReversalLongShort(StrategyModel):
             DataRequirement.of('reversal_score', 'score', lookback=RowsLookback(1)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         batch = context.window.observations(self.requirements()[0])
         latest = {
             str(row["instrument"]): float(row["score"])

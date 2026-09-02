@@ -241,7 +241,7 @@ class ReversalSignalStrategy(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         rows = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[Decimal]] = {}
         for row in rows:

@@ -17,10 +17,10 @@ flowchart LR
     DM -->|값| Raw
     A[Component OperationAgendas] --> Freeze[RunDefinition preflight]
     Freeze --> Loop[Flow deterministic agenda]
-    Loop -->|current callback occurrence| S[StrategyModel.on_occurrence]
+    Loop -->|current callback occurrence| S[StrategyModel.decide]
     Raw -->|PIT View| S
     Acc[(Account)] -->|snapshot| S
-    S -->|NoDecision| Loop
+    S -->|Hold| Loop
     S -->|economic intent| Accept[Flow timing stamp + target validation]
     Accept --> Pending[latest pending intent]
     Pending -->|due| P[plan_orders]
@@ -386,12 +386,12 @@ Flow는 counter, warm-up, cooldown과 stop logic을 해석하지 않는다. 다�
 helper다.
 
 ```python
-def on_occurrence(self, context):
+def decide(self, call):
     count = int((self.memory or {}).get("callback_count", 0)) + 1
     self.memory = {**(self.memory or {}), "callback_count": count}
     if count % self.n:
-        return NoDecision(reason="cadence")
-    return self.make_economic_intent(context)
+        return Hold(reason="cadence")
+    return self.make_rebalance(call)
 ```
 
 public callback/type 이름은 normative하지 않다. 핵심은 Strategy가 selector-authoritative timestamp를 반환하지
@@ -1025,9 +1025,7 @@ execution table은 observation registration 뒤의 dataset 조회가 아니다. 
 ```python
 class StrategyModel(Model):
     callback_agenda_ref: ArtifactRef
-    def on_occurrence(
-        self, context: StrategyModelContext
-    ) -> NoDecision | PortfolioIntent: ...
+    def decide(self, call: StrategyCall) -> Hold | Rebalance: ...
 ```
 
 - 위 이름과 signature는 illustrative다. normative behavior는 StrategyModel configuration이 immutable callback
@@ -2281,7 +2279,7 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
   3,000종목 × 250세션도 무겁지 않다. 설정 가능하게 만들면 **얻는 것 없이 run identity에 필드만 하나 는다.**
 - **왜 고정 집합인가**: 집합이 고정이어야 "집합 밖 항목 요구 → 계산 전 실패"가 성립한다.
   추정 금지(PRD §6.6)를 지키는 데 필요한 건 *선언*이 아니라 *경계*다.
-- 소비자(StrategyModel/Monitor)는 `AccountRequirement`로 **읽을 항목과 범위를 좁혀** 요구한다 — data 접근과
+- 소비자(StrategyModel/Monitor)는 `AccountHistoryInput`으로 **읽을 항목과 범위를 좁혀** 선언한다 — data 접근과
   같은 원칙이고 `RowsLookback`을 그대로 쓴다. `dataset_id`가 없는 것은 run에 계좌가 하나뿐이라 고를 것이
   없기 때문이고, `scope`가 없는 것은 **필드 이름이 이미 스코프**이기 때문이다(`nav`는 시점당 하나,
   `quantity`는 종목마다). lookback은 **필수** — 없으면 콜백당 O(전체 이력)이 되어 run당 제곱이 된다.
@@ -2752,7 +2750,7 @@ src/vqapr/
 ├── account/         commit authority (닫힘)
 │   ├── account.py         Account + commit/mark + JournalEntry + AccountMode
 │   ├── snapshot.py        AccountSnapshot · AccountMark · AccountState
-│   └── history.py         고정 기록 집합 + AccountRequirement 구독 (§7.3)
+│   └── history.py         고정 기록 집합 + AccountHistoryInput 선언에 묶인 projection (§7.3)
 │
 ├── valuation/       (닫힘)
 │   ├── configuration.py   ValuationConfig + agenda reference
@@ -4447,6 +4445,13 @@ execution을 거치면 StrategyModel, 거치지 않고 loop만 돌며 score를 �
 쓰면 안 된다.**
 
 **트리.** 엔진 층은 진술대로다. **저자가 실제로 상속하는 층은 그렇지 않다.**
+
+> **2026-09-02 정정 (기록 `130`·`131`·`132`).** 아래 측정은 그날의 트리다. 지금은 층이 하나다 —
+> `authoring.Model -> DataModel (compute)` / `-> StrategyModel (decide, tables, account_history,
+> save_payload/load_payload)`, `Constraint (project, monitor)`는 `memory`가 없어 `Model` 밖 — 그리고
+> `vqapr.public`은 같은 객체를 재수출하며, 세 scaffold 모두 `from vqapr import authoring as va`를 emit한다.
+> `_internal/strategy_bridge.py`와 `_internal/models/`는 삭제됐다. 측정은 `docs/issues/036`이 닫히는
+> 근거로 남긴다.
 
 엔진 층 — `models/model.py:11`의 `Model(ABC)`가 `memory`와 `requirements()`를 들고 둘이 거기서 나온다:
 

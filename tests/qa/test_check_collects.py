@@ -240,7 +240,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(tmp_path
         "lookback=RowsLookback(6)\n"
         "            ),\n"
         "        )\n"
-        "    def on_occurrence(self, context):\n"
+        "    def decide(self, context):\n"
         "        return Hold(reason='qa probe')\n",
         encoding="utf-8",
     )

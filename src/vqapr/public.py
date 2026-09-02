@@ -17,7 +17,7 @@ from vqapr.analysis.signal import (
     information_coefficient,
     rank_information_coefficient,
 )
-from vqapr.authoring import DatasetInput, Hold, Rebalance, StrategyResult
+from vqapr.authoring import DatasetInput, Hold, Rebalance
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
@@ -219,7 +219,6 @@ __all__ = (
     "StrategyConfig",
     "StrategyModel",
     "StrategyModelContext",
-    "StrategyResult",
     "TableSpec",
     "TickerNetting",
     "TradeRule",

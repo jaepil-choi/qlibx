@@ -29,11 +29,6 @@ PERMITTED: frozenset[str] = frozenset(
         "src/vqapr/flow/run_records.py",
         # Reaches `_internal.filelock` and `_internal.atomic` (records `106`, `107`).
         "src/vqapr/workspace.py",
-        # Reaches `_internal.strategy_bridge` to adapt an authored StrategyModel at load time.
-        # An INHERITED edge, and the one bridge that is reachable from a shipped command; the
-        # plan's authoring-convergence step closes it by making the contract the implementation.
-        # Until then it is real and load-bearing, so it is named rather than tolerated silently.
-        "src/vqapr/extension/loading.py",
     }
 )
 

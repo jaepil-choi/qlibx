@@ -21,7 +21,6 @@ Plan: `.agent/plans/active/one-authoring-surface.md`, M1.
 
 from __future__ import annotations
 
-from abc import ABC
 from pathlib import Path
 
 import pytest
@@ -35,29 +34,21 @@ from vqapr.public import register_constraint, register_data_model, register_stra
 # One name, two classes.
 # --------------------------------------------------------------------------------------
 
-DIVERGENT_NAMES = ("StrategyModel",)
-"""Names exported by BOTH `vqapr.public` and `vqapr.authoring` as different objects.
+CONVERGED_NAMES = (
+    "Constraint",
+    "ConstraintBounds",
+    "ConstraintFinding",
+    "DataModel",
+    "StrategyModel",
+)
+"""Names the facade and the authoring module export as ONE object.
 
-`tests/extension/test_the_extension_surface_is_the_implementation.py::
-test_the_facade_and_the_module_agree_on_one_object` asserts the opposite for
-`ComponentKind`/`ComponentRef`/`fingerprint_component` -- the facade and the module are one object
-there, and that is the shape this list is supposed to reach.
-
-**`CalendarLookback` and `RowsLookback` were here and are gone**, which is this file working as
-intended. Record `126` made each of them one class re-exported under both names, so the assertion
-below stopped being true of them and they left the list in the same commit that closed them.
-**`Constraint` left the same way** in record `130`, together with `ConstraintBounds` and
-`ConstraintFinding`, which were never on this list because nothing had measured them.
-**`DataModel` left in record `131`.** One of the original five remains, and the inverse assertion
-below is what stands for the four that went.
-"""
-
-
-CONVERGED_NAMES = ("Constraint", "ConstraintBounds", "ConstraintFinding", "DataModel")
-"""Names the facade and the authoring module now export as ONE object.
-
-The goal, asserted so that it cannot quietly come apart again. Each name arrives here by leaving
-`DIVERGENT_NAMES` in the milestone that converged it.
+The goal, asserted so that it cannot quietly come apart again. This list began as
+`DIVERGENT_NAMES` -- five names exported by BOTH `vqapr.public` and `vqapr.authoring` as
+different classes, with an inverse test asserting `is not` for each -- and every name crossed
+over in the milestone that converged it: the two lookbacks in record `126`, `Constraint` with
+`ConstraintBounds` and `ConstraintFinding` in `130`, `DataModel` in `131`, and `StrategyModel`,
+the last, in `132`. The inverse test went with the last entry.
 """
 
 
@@ -70,50 +61,8 @@ def test_the_facade_and_the_authoring_module_are_one_object(name: str) -> None:
     )
 
 
-@pytest.mark.parametrize("name", DIVERGENT_NAMES)
-def test_the_facade_and_the_authoring_module_are_two_objects(name: str) -> None:
-    """TODAY: `public.X` and `authoring.X` are different classes under one name.
-
-    An author who writes `from vqapr.public import DataModel` and an author who writes
-    `from vqapr import authoring as va` and subclasses `va.DataModel` have written against two
-    different contracts, and nothing in either import line says so. `docs/issues/036`:
-    *"Nothing says which is canonical."*
-
-    Deleted by: M6 (`StrategyModel`, the one left), records `126` (the two lookbacks), `130`
-    (`Constraint`) and `131` (`DataModel`). At that point the parametrized inverse of this test is
-    the assertion that stands.
-    """
-    facade = getattr(public, name)
-    authored = getattr(authoring, name)
-
-    assert facade is not authored, (
-        f"public.{name} and authoring.{name} are now one object. That is the goal, not a "
-        f"regression: delete this parametrization entry and assert `is` instead."
-    )
-
-
-def test_the_two_authored_kinds_share_no_base() -> None:
-    """TODAY: on the authoring side there is no `Model`, so nothing is shared by construction.
-
-    The engine side HAS the common base (`models/model.py`), which is what makes this asymmetry
-    easy to miss when reading `src/` -- the base exists, just not on the surface an author
-    inherits from. The strategy scaffold emits `va.StrategyModel` and the datamodel scaffold emits
-    the engine's `DataModel`, so the two kinds an author actually writes share no ancestor at all.
-
-    Deleted by: M2.
-    """
-    shared = set(authoring.DataModel.__mro__) & set(authoring.StrategyModel.__mro__)
-
-    # `ABC` and `object` are shared by every abstract class in Python and say nothing about this
-    # package. What M2 adds is a base of vqapr's own, and that is what this measures.
-    assert shared == {ABC, object}, (
-        f"authoring.DataModel and authoring.StrategyModel now share {shared - {ABC, object}}; if "
-        f"that is `authoring.Model`, M2 has landed and this test goes with it."
-    )
-
-
 # --------------------------------------------------------------------------------------
-# One kind is adapted inward; two are refused.
+# All three authored kinds load.
 # --------------------------------------------------------------------------------------
 
 _AUTHORED_STRATEGY = '''\
@@ -125,7 +74,7 @@ class Model(va.StrategyModel):
         return {}
 
     def decide(self, call):
-        return va.StrategyResult(decision=va.Hold(reason="probe"))
+        return va.Hold(reason="probe")
 '''
 
 _AUTHORED_DATA_MODEL = '''\
@@ -179,23 +128,20 @@ def _written(project: Path, source: str) -> Path:
     return path
 
 
-def test_load_strategy_model_adapts_an_authored_strategy_inward(tmp_path: Path) -> None:
-    """TODAY, and this one is the TARGET shape rather than the defect.
+def test_load_strategy_model_accepts_an_authored_strategy(tmp_path: Path) -> None:
+    """The loader accepts the class the scaffold emits, with no adapter between them.
 
-    `_adapt_authored_strategy` (`extension/loading.py`) wraps an authoring StrategyModel so the
-    engine can run it, and its own docstring gives the reason the other two loaders should do the
-    same: refusing it *"would mean a model that runs perfectly through `Project.simulate` cannot be
-    registered by the CLI that exists to register it."*
-
-    Kept after convergence, as the regression surface for M4/M5. It is here so the two tests below
-    read as an inconsistency rather than as a policy.
+    Until record `132` `_adapt_authored_strategy` wrapped an authoring StrategyModel in an engine
+    subclass so the engine could run it. There is one class now, so the loaded object IS the
+    author's, and the two tests below hold for the same reason.
     """
     path = _written(tmp_path, _AUTHORED_STRATEGY)
     ref = register_strategy_model(tmp_path, "authored-strategy", path, "Model")
 
     loaded = load_strategy_model(ref, project_root=tmp_path)
 
-    assert loaded is not None
+    assert isinstance(loaded, authoring.StrategyModel)
+    assert type(loaded).__name__ == "Model"
 
 
 def test_load_data_model_accepts_an_authored_data_model(tmp_path: Path) -> None:

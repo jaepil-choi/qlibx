@@ -258,7 +258,6 @@ def test_public_exports_are_fixed() -> None:
         "StrategyConfig",
         "StrategyModel",
         "StrategyModelContext",
-        "StrategyResult",
         "TableSpec",
         "TickerNetting",
         "TradeRule",
@@ -464,6 +463,7 @@ def test_public_run_uses_frozen_initial_model_memory(
     strategy = SimpleNamespace(
         memory={"default": True},
         requirements=lambda: (),
+        account_history=lambda: None,
         load_payload=lambda _source: None,
     )
     observed: dict[str, object] = {}

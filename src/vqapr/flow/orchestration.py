@@ -170,9 +170,7 @@ def run(
         # keeps one, so a Strategy that never looks at its own path costs nothing to carry it.
         account=Account(
             mode=frozen.initial_account_mode,
-            retained_marks=retained_marks(
-                tuple(getattr(strategy, "account_requirements", tuple)())
-            ),
+            retained_marks=retained_marks(strategy.account_history()),
         ),
         exchange=exchange,
         constraints=constraints,

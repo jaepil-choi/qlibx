@@ -37,6 +37,7 @@ def _budget(direction: PortfolioDirection = PortfolioDirection.LONG_ONLY) -> Bud
 
 def test_module_exports_are_exact() -> None:
     expected = {
+        "AccountHistory",
         "AccountHistoryInput",
         "CalendarLookback",
         "Constraint",
@@ -46,8 +47,6 @@ def test_module_exports_are_exact() -> None:
         "DataCall",
         "DataModel",
         "DatasetInput",
-        "DeclaredAccountHistory",
-        "DiagnosticTable",
         "EconomicAccountView",
         "Hold",
         "Model",
@@ -57,7 +56,7 @@ def test_module_exports_are_exact() -> None:
         "requirements_for",
         "StrategyCall",
         "StrategyModel",
-        "StrategyResult",
+        "TableSpec",
     }
     assert set(authoring.__all__) == expected
     for name in expected:
@@ -202,16 +201,8 @@ def test_data_call_is_abstract() -> None:
 
 
 # --------------------------------------------------------------------------------------
-# DiagnosticTable / AccountHistoryInput.
+# AccountHistoryInput.
 # --------------------------------------------------------------------------------------
-
-
-def test_diagnostic_table_rejects_empty_and_reserved_fields() -> None:
-    authoring.DiagnosticTable(table_id="turnover", semantic_fields=("value",))
-    with pytest.raises(ValueError):
-        authoring.DiagnosticTable(table_id="turnover", semantic_fields=())
-    with pytest.raises(ValueError):
-        authoring.DiagnosticTable(table_id="turnover", semantic_fields=("account_version",))
 
 
 def test_account_history_input_rejects_unknown_field() -> None:
@@ -267,54 +258,6 @@ def test_economic_account_view_has_no_version_or_mutation_escape() -> None:
 
 
 # --------------------------------------------------------------------------------------
-# DeclaredAccountHistory.
-# --------------------------------------------------------------------------------------
-
-
-def test_declared_account_history_defaults_to_no_declared_fields() -> None:
-    history = authoring.DeclaredAccountHistory()
-    assert history.fields == ()
-    with pytest.raises(KeyError):
-        history.series("nav")
-    with pytest.raises(KeyError):
-        history.panel("quantity")
-
-
-def test_declared_account_history_rejects_reading_undeclared_field() -> None:
-    history = authoring.DeclaredAccountHistory(
-        fields=("nav",),
-        lookback=authoring.RowsLookback(rows=3),
-        series={"nav": [Decimal("1"), Decimal("2")]},
-    )
-    assert history.series("nav") == (Decimal("1"), Decimal("2"))
-    with pytest.raises(KeyError):
-        history.series("cash")
-    with pytest.raises(KeyError):
-        history.panel("quantity")
-
-
-def test_declared_account_history_bounds_to_lookback_rows_oldest_first() -> None:
-    history = authoring.DeclaredAccountHistory(
-        fields=("nav",),
-        lookback=authoring.RowsLookback(rows=2),
-        series={"nav": [Decimal("1"), Decimal("2"), Decimal("3")]},
-    )
-    assert history.series("nav") == (Decimal("2"), Decimal("3"))
-
-
-def test_declared_account_history_panel_is_immutable_and_sorted() -> None:
-    history = authoring.DeclaredAccountHistory(
-        fields=("quantity",),
-        lookback=authoring.RowsLookback(rows=5),
-        panel={"quantity": {"B": [Decimal("2")], "A": [Decimal("1")]}},
-    )
-    panel = history.panel("quantity")
-    assert list(panel) == ["A", "B"]
-    with pytest.raises(TypeError):
-        panel["A"] = ()  # type: ignore[index]
-
-
-# --------------------------------------------------------------------------------------
 # ConstraintBounds.
 # --------------------------------------------------------------------------------------
 
@@ -351,7 +294,7 @@ def test_constraint_bounds_mapping_is_copied_and_immutable() -> None:
 
 
 # --------------------------------------------------------------------------------------
-# Hold / Rebalance / StrategyResult.
+# Hold / Rebalance.
 # --------------------------------------------------------------------------------------
 
 
@@ -413,42 +356,6 @@ def test_rebalance_weights_mapping_is_copied_and_immutable() -> None:
         decision.target_weights["A"] = Decimal("1")  # type: ignore[index]
 
 
-def test_strategy_result_requires_hold_or_rebalance_decision() -> None:
-    with pytest.raises(TypeError):
-        authoring.StrategyResult(decision=object(), next_state=None, diagnostics={})  # type: ignore[arg-type]
-
-
-def test_strategy_result_normalizes_next_state_to_strict_json() -> None:
-    result = authoring.StrategyResult(
-        decision=authoring.Hold(reason="x"), next_state={"a": [1, 2.5, None]}, diagnostics={}
-    )
-    assert result.next_state == {"a": [1, 2.5, None]}
-    with pytest.raises(TypeError):
-        authoring.StrategyResult(
-            decision=authoring.Hold(reason="x"), next_state=object(), diagnostics={}
-        )
-
-
-def test_strategy_result_diagnostics_reject_reserved_row_fields() -> None:
-    with pytest.raises(ValueError):
-        authoring.StrategyResult(
-            decision=authoring.Hold(reason="x"),
-            next_state=None,
-            diagnostics={"turnover": ({"observed_at": UTC_NOW},)},
-        )
-
-
-def test_strategy_result_diagnostics_are_copied_and_immutable() -> None:
-    rows = [{"value": Decimal("1")}]
-    result = authoring.StrategyResult(
-        decision=authoring.Hold(reason="x"), next_state=None, diagnostics={"turnover": rows}
-    )
-    rows.append({"value": Decimal("2")})
-    assert len(result.diagnostics["turnover"]) == 1
-    with pytest.raises(TypeError):
-        result.diagnostics["turnover"] = ()  # type: ignore[index]
-
-
 # --------------------------------------------------------------------------------------
 # StrategyCall / StrategyModel abstract contracts.
 # --------------------------------------------------------------------------------------
@@ -456,6 +363,10 @@ def test_strategy_result_diagnostics_are_copied_and_immutable() -> None:
 
 class _FakeStrategyCall(authoring.StrategyCall):
     """A minimal concrete StrategyCall used only to exercise the abstract contract shape."""
+
+    @property
+    def occurrence_id(self) -> str:
+        return "occ-1"
 
     @property
     def evaluation_time(self) -> datetime:
@@ -468,12 +379,8 @@ class _FakeStrategyCall(authoring.StrategyCall):
         )
 
     @property
-    def previous_state(self) -> object:
-        return None
-
-    @property
-    def account_history(self) -> authoring.DeclaredAccountHistory:
-        return authoring.DeclaredAccountHistory()
+    def account_history(self) -> authoring.AccountHistory:
+        return authoring.AccountHistory((), None)
 
     @property
     def constraint_bounds(self) -> authoring.ConstraintBounds:
@@ -489,26 +396,30 @@ def test_strategy_call_is_abstract() -> None:
     call = _FakeStrategyCall()
     assert call.evaluation_time == UTC_NOW
     assert call.account.cash == Decimal("100")
-    assert call.previous_state is None
+    assert call.occurrence_id == "occ-1"
     assert call.read("px") == ()
 
 
-def test_strategy_model_is_abstract_and_requires_decide() -> None:
+def test_strategy_model_is_a_model_and_requires_only_decide() -> None:
+    """One class, one abstract member; state is `memory` and rows go to `recorder` (record 132)."""
     with pytest.raises(TypeError):
         authoring.StrategyModel()  # type: ignore[abstract]
+    assert issubclass(authoring.StrategyModel, authoring.Model)
 
     class Model(authoring.StrategyModel):
-        def decide(self, call: authoring.StrategyCall) -> authoring.StrategyResult:
-            return authoring.StrategyResult(
-                decision=authoring.Hold(reason="x"), next_state=None, diagnostics={}
-            )
+        def decide(self, call: authoring.StrategyCall) -> authoring.Hold:
+            self.memory = {"seen": [call.occurrence_id]}
+            return authoring.Hold(reason="x")
 
     model = Model()
     assert model.inputs() == {}
+    assert model.requirements() == ()
     assert model.account_history() is None
-    assert model.diagnostics() == ()
-    result = model.decide(_FakeStrategyCall())
-    assert isinstance(result.decision, authoring.Hold)
+    assert model.tables() == ()
+    assert model.recorder is None
+    assert model.memory is None
+    assert isinstance(model.decide(_FakeStrategyCall()), authoring.Hold)
+    assert model.memory == {"seen": ["occ-1"]}
 
 
 # --------------------------------------------------------------------------------------
@@ -613,10 +524,11 @@ def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
 def test_no_public_type_exposes_account_version_or_recorder_or_memory() -> None:
     forbidden = {"account_version", "version", "recorder", "memory", "constraint_id"}
     for name in authoring.__all__:
-        if name == "Model":
+        if name in {"Model", "StrategyModel"}:
             # `Model` carries `memory` on purpose: it is the small strict-JSON state both roles
             # share (architecture 4.4), and it arrived on this surface with the base class in
-            # record `131`. What this test guards is that no VALUE type -- a call, a finding, a
+            # record `131`. `StrategyModel` carries `recorder` the same way (5.1, record
+            # `132`). What this test guards is that no VALUE type -- a call, a finding, a
             # decision -- smuggles framework state in through an annotation.
             continue
         value = getattr(authoring, name)

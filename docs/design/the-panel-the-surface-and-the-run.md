@@ -208,8 +208,11 @@ for row in call.rows("statement-facts", "value"):
 ```python
 class Model(ABC):                 # authoring.Model
     def inputs(self) -> Mapping[str, DatasetInput]: ...
-    def diagnostics(self) -> tuple[DiagnosticTable, ...]: ...
-    # state / memory
+    memory: ModelMemory            # strict JSON; Flow가 콜백 뒤에 snapshot하고 앞에 복원한다
+    # `diagnostics()`는 여기 없다 (2026-09-02 정정, 기록 132). 표는 `tables() -> TableSpec`으로
+    # 선언하고 `self.recorder`로 쓴다 -- 아키텍처 §5.1·§9.1의 그 recorder다. materialize가
+    # DataModel에 recorder를 아직 연결하지 않으므로 둘 다 지금은 StrategyModel에 있다; 연결되는
+    # 날 `Model`로 올라온다. 죽은 멤버를 공통 base에 먼저 올리는 것이 131이 지운 결함이다.
 
 class DataModel(Model):           # account 없음, venue 통과 없음
     def compute(self, call: DataCall) -> Rows: ...
@@ -219,8 +222,12 @@ class DataModel(Model):           # account 없음, venue 통과 없음
     # 출력의 가장 단순한 모양이고, materialize가 검증·발행하는 바로 그 모양이다.
 
 class StrategyModel(Model):       # account 있음, venue 통과함
-    def account_history(self) -> tuple[AccountHistoryInput, ...]: ...
-    def decide(self, call: StrategyCall) -> StrategyResult: ...
+    def tables(self) -> tuple[TableSpec, ...]: ...
+    def account_history(self) -> AccountHistoryInput | None: ...   # run에 Strategy는 하나
+    def decide(self, call: StrategyCall) -> Hold | Rebalance: ...
+    # `StrategyResult`는 없다 (2026-09-02 정정, 기록 132). 그 세 필드 중 `next_state`는
+    # `memory`가, `diagnostics`는 `recorder`가 이미 맡고 있었고, 남는 것은 decision 하나였다.
+    # 기록 125가 엔진 쪽에서 이미 그렇게 했다: 콜백은 경제적 결정만 돌려주고 Flow가 stamp한다.
 ```
 
 - §17.2의 진술이 **클래스 차이 그 자체**가 된다: *account가 달려서 exchange venue execution을 거치면

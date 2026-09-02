@@ -54,6 +54,9 @@ dev = [
 [tool.pytest.ini_options]
 minversion = "9.1"
 testpaths = ["tests"]
+# The repo root, so `tests.<package>.support` helpers import the same under `uv run pytest` as
+# under `python -m pytest` (which puts the cwd on sys.path by itself).
+pythonpath = ["."]
 strict_config = true
 strict_markers = true
 # `slow` is deselected by default. Fourteen end-to-end journeys are ~80% of a 420s suite while

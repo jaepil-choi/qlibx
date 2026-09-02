@@ -897,7 +897,7 @@ def publish_run_allocation(
                 f"{_OUTPUT_STAGE}.decision_invalid",
                 "a callback decision must be Hold or an economic intent",
                 type(decision).__name__,
-                fix="return Hold or an economic intent from the strategy's on_occurrence",
+                fix="return Hold or Rebalance from the strategy's decide()",
                 explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="publish from a strategy that emits economic intents, then retry",
             )

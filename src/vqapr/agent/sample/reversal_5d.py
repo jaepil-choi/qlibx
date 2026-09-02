@@ -17,7 +17,6 @@ from vqapr.authoring import (
     Rebalance,
     RowsLookback,
     StrategyModel,
-    StrategyResult,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
@@ -65,11 +64,7 @@ class SampleReversal5d(StrategyModel):
 
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < SELECTED:
-            return StrategyResult(
-                decision=Hold(reason="incomplete-lookback"),
-                next_state=None,
-                diagnostics={},
-            )
+            return Hold(reason="incomplete-lookback")
 
         returns = {
             name: values[-1] / values[0] - Decimal(1) for name, values in eligible.items()
@@ -80,12 +75,8 @@ class SampleReversal5d(StrategyModel):
         # Only the economics. The intent id, strategy id, source references and account
         # version are framework facts: an author who minted them could get them wrong, and
         # this file is the one a reader copies against their own dataset.
-        return StrategyResult(
-            decision=Rebalance(
-                target_weights={name: weight for name in sorted(weakest)},
-                cash_weight=Decimal(1) - weight * Decimal(SELECTED),
-                budget=BUDGET,
-            ),
-            next_state=None,
-            diagnostics={},
+        return Rebalance(
+            target_weights={name: weight for name in sorted(weakest)},
+            cash_weight=Decimal(1) - weight * Decimal(SELECTED),
+            budget=BUDGET,
         )

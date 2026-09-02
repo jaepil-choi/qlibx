@@ -151,9 +151,9 @@ roster it read, and per-table row counts. `vqapr show run <id> --table <name>` g
 themselves, with `--limit` (0 for all). It reports `rows_total` and `returned` separately, so a
 truncated page never reads as a short run.
 
-Every run records three tables, plus any the model **declared and then formed** — a diagnostic
-table must be returned from `StrategyModel.diagnostics()` before `decide()` may emit it under that
-id, and emitting an undeclared one refuses mid-run:
+Every run records three tables, plus any the model **declared and then formed** — a table must
+be returned from `StrategyModel.tables()` as a `TableSpec` before `decide()` may write to it
+through `self.recorder`, and writing to an undeclared one refuses mid-run:
 
 - **`vqapr.account`** -- the book over time. `instrument` (`_ACCOUNT` on the cash and NAV row),
   `account_version`, `cash`, `quantity`, `price`, `nav`, `observed_at`. `observed_at` is declared
@@ -342,7 +342,7 @@ def inputs(self):
 
 def decide(self, call):
     ...
-    return StrategyResult(decision=Rebalance.of(long={"A": 2, "B": 1}, invested="0.9"))
+    return Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
 ```
 
 `Rebalance.of` takes **relative** conviction. `long={"A": 2, "B": 1}` means A is liked twice as

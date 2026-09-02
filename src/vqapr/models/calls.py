@@ -3,7 +3,7 @@
 **One call surface for both Model roles.** A DataModel and a StrategyModel declare their reads the
 same way -- `inputs()`, keyed by an alias the author names -- and read them the same way,
 `context.read(alias)`. What a StrategyModel additionally receives is what its role needs: the
-committed account, the state it returned last time, the bounds every registered Constraint
+committed account, its own declared history, the bounds every registered Constraint
 projected. The difference between the two roles is that list and nothing else, which is what
 `docs/issues/036` decided should be true: *"a DataModel and a StrategyModel should be substantially
 similar to use, and the size of the current difference is itself the defect."*

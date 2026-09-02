@@ -24,7 +24,8 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
-from vqapr.models.strategy_model import StrategyModel, StrategyModelContext
+from vqapr.models.contexts import StrategyModelContext
+from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
@@ -44,7 +45,7 @@ def _state(*, memory: object = None) -> RunStateRepository:
 
 
 class EveryThreeOccurrences(StrategyModel):
-    def on_occurrence(self, context: StrategyModelContext) -> Hold | EconomicPortfolioIntent:
+    def decide(self, context: StrategyModelContext) -> Hold | EconomicPortfolioIntent:
         assert not hasattr(context, "sessions")
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
@@ -185,7 +186,7 @@ def test_no_decision_state_continues_across_explicit_agenda_boundaries() -> None
 
 
 class TimingOverrideStrategy(EveryThreeOccurrences):
-    def on_occurrence(self, context: StrategyModelContext) -> Rebalance:
+    def decide(self, context: StrategyModelContext) -> Rebalance:
         self.memory = {"occurrence_count": 999}
         return Rebalance(
             target_weights={},
@@ -207,7 +208,7 @@ def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
 
 
 class FailingStrategy(EveryThreeOccurrences):
-    def on_occurrence(self, context: StrategyModelContext) -> Hold:
+    def decide(self, context: StrategyModelContext) -> Hold:
         self.memory = {"occurrence_count": 999}
         raise RuntimeError("strategy bug")
 

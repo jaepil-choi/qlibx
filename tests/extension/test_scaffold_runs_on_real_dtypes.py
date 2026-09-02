@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import EconomicAccountView
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -168,7 +168,7 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
 def test_the_strategy_scaffold_decides_against_a_float64_column(
     tmp_path: Path, float_price_parquet: Path
 ) -> None:
-    """The template's `on_occurrence` must reach a decision, not a `TypeError`.
+    """The template's `decide` must reach a decision, not a `TypeError`.
 
     This is the call the testbed agent's run actually made when it failed.
     """
@@ -190,10 +190,13 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
             ),
         ),
         window=_window(workspace, strategy.requirements()[0]),
-        account=AccountSnapshot(0, Decimal("1000000"), {}),
+        reads=strategy.inputs(),
+        account=EconomicAccountView(
+            cash=Decimal("1000000"), positions={}, nav=None, nav_observed_at=None
+        ),
     )
 
-    decision = strategy.on_occurrence(context)
+    decision = strategy.decide(context)
 
     # Both names rose over the window, so the five-day *reversal* scores both negative and the
     # template declines. What is under test is that the arithmetic completed at all: before the

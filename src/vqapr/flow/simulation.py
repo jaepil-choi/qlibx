@@ -11,17 +11,17 @@ from io import BytesIO
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from vqapr.account.account import Account
-from vqapr.account.history import AccountHistory, AccountRequirement
+from vqapr.account.history import AccountHistory
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
-from vqapr.authoring import Hold, Rebalance
+from vqapr.authoring import AccountHistoryInput, EconomicAccountView, Hold, Rebalance
 from vqapr.constraints.constraint import Constraint
 from vqapr.constraints.evaluation import (
+    build_account_view,
     evaluate_constraints,
     merged_constraint_bounds,
     project_constraints,
 )
 from vqapr.constraints.findings import ConstraintReport
-from vqapr.data.lookback import RowsLookback
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
 from vqapr.evidence.artifacts import (
@@ -394,14 +394,14 @@ def _require_constraint_identity(
 def _raise_callback_return_type(returned: object) -> None:
     """Refuse a callback return that is not the decision algebra, naming what came back.
 
-    `on_occurrence` returns `Hold | Rebalance` since record `125`, and until now nothing checked.
+    `decide` returns `Hold | Rebalance` since record `125`, and until now nothing checked.
     A Strategy that returned a stamped `EconomicPortfolioIntent` -- the shape the contract used to
     take -- fell through every branch and surfaced as a complaint from inside constraint
     validation, three frames from the callback that caused it. Refusing here names the contract
     and the type that missed it.
     """
     raise TypeError(
-        "on_occurrence must return Hold or Rebalance; got "
+        "decide must return Hold or Rebalance; got "
         f"{type(returned).__name__}. An intent's id, strategy, provenance and account version "
         "are stamped by the Flow (record 125), so a callback returns economics only"
     )
@@ -479,22 +479,12 @@ class SimulationFlow:
         # never receives one passed down, so binding only at the call site left every `Fill.kind`
         # null while a registered roster sat unused in the workspace.
         self._bind_registry_to_venue()
-        declared = tuple(getattr(strategy, "account_requirements", tuple)())
-        if any(not isinstance(item, AccountRequirement) for item in declared):
-            raise TypeError("account_requirements must return AccountRequirement values")
-        if len({item.consumer_id for item in declared}) != len(declared):
-            raise ValueError("account requirements must not repeat a consumer_id")
-        # One projection per callback, so a single merged declaration is what the run reads and
-        # what it retains. Separate consumers would each need their own window; there is one.
-        self._account_requirement = (
-            AccountRequirement(
-                "strategy",
-                tuple(dict.fromkeys(field for item in declared for field in item.fields)),
-                RowsLookback(max(item.lookback.rows for item in declared)),
-            )
-            if declared
-            else None
-        )
+        declared = strategy.account_history()
+        if declared is not None and not isinstance(declared, AccountHistoryInput):
+            raise TypeError("account_history must return an AccountHistoryInput or None")
+        # One declaration, one projection per callback: the run has one Strategy, and what it
+        # declares is both what each callback reads and what the Account retains.
+        self._account_history_declaration = declared
         self._horizon: ExecutionHorizon | None = None
         self._recorded_measurements: set[object] = set()
         """Measurement instants already written to `vqapr.account`, by whichever path wrote them.
@@ -1127,7 +1117,7 @@ class SimulationFlow:
         """
         state = self._state.current.account
         marks = state.mark_history if isinstance(state, AccountState) else ()
-        return AccountHistory(marks, self._account_requirement)
+        return AccountHistory(marks, self._account_history_declaration)
 
     def _committed_marks(self, state: AccountState) -> MarkBatch:
         """The valuation the Account already committed, or an empty one before the first mark.
@@ -1454,11 +1444,11 @@ class SimulationFlow:
             result = self._callback_intent_boundary(
                 occurrence,
                 self._frozen_run.strategy,
-                lambda: self._strategy.on_occurrence(
+                lambda: self._strategy.decide(
                     StrategyModelContext(
                         occurrence=occurrence,
                         window=window,
-                        account=account,
+                        account=self._callback_account_view(state_account),
                         reads=self._strategy.inputs(),
                         constraint_bounds=constraint_bounds,
                         account_history=self._account_history(),
@@ -1799,6 +1789,27 @@ class SimulationFlow:
     def _committed_mark(self) -> object | None:
         state = self._state.current.account
         return state.latest_mark if isinstance(state, AccountState) else None
+
+    @staticmethod
+    def _callback_account_view(state: AccountState) -> EconomicAccountView:
+        """The committed Account as the Strategy sees it: the snapshot, valued at its last mark.
+
+        A callback fires before the occurrence it decides for is executed or valued, so the
+        marks it can see are the previous valuation's -- committed, and therefore point-in-time.
+        The same builder a monitoring Constraint's view comes from (record `130`), so `nav` and
+        `weights()` mean one thing on both sides of a decision. Before the first valuation there
+        is no mark, and the view says so with `nav=None` rather than a fabricated zero.
+        """
+        mark = state.latest_mark
+        if mark is not None and mark.marked_at is not None:
+            return build_account_view(state.snapshot, mark.marks, mark.marked_at)
+        snapshot = state.snapshot
+        return EconomicAccountView(
+            cash=snapshot.cash,
+            positions=dict(snapshot.positions),
+            nav=None,
+            nav_observed_at=None,
+        )
 
     def _set_callback_recorder(self, recorder: InvocationRecorder | None) -> None:
         self._strategy.recorder = recorder

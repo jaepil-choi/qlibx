@@ -142,10 +142,11 @@ class ReversalModel(va.DataModel):
         }
 
     def compute(self, context):
-        closes: dict[str, list[float]] = {}
-        for row in context.read("prices"):
-            if row.values["close"] is not None:
-                closes.setdefault(row.instrument_id, []).append(float(row.values["close"]))
+        window = context.read("prices", "close")
+        closes = {
+            name: [float(v) for v in window.values[name] if v is not None]
+            for name in window.instruments
+        }
         raw = {
             instrument: -(values[-1] / values[0] - 1.0)
             for instrument, values in closes.items()

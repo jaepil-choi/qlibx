@@ -50,17 +50,17 @@ class SampleReversal5d(StrategyModel):
         }
 
     def decide(self, call):
-        rows = call.read("prices")
+        # One field of the alias as a window: `instants` x `instruments`, the same six sessions
+        # for every name. A name that began trading inside the window, or stopped before it,
+        # simply has fewer values -- which is what the completeness guard below reads.
+        window = call.read("prices", "close")
         closes: dict[str, list[Decimal]] = {}
-        for row in rows:
-            if row.values["close"] is not None:
-                # `Decimal(str(v))` rather than the raw cell: this file is copied against the
-                # reader's own dataset, and a parquet float64 column arrives as `float`, which
-                # raises on the `values[-1] / values[0] - Decimal(1)` below. The sample panel is
-                # decimal128, so the bug is invisible here and appears only after the copy.
-                closes.setdefault(row.instrument_id, []).append(
-                    Decimal(str(row.values["close"]))
-                )
+        for name in window.instruments:
+            # `Decimal(str(v))` rather than the raw cell: this file is copied against the
+            # reader's own dataset, and a parquet float64 column arrives as `float`, which
+            # raises on the `values[-1] / values[0] - Decimal(1)` below. The sample panel is
+            # decimal128, so the bug is invisible here and appears only after the copy.
+            closes[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
 
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < SELECTED:

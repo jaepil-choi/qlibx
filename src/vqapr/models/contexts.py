@@ -14,6 +14,8 @@ from vqapr.authoring import (
     EconomicAccountView,
     StrategyCall,
 )
+from vqapr.data.datasets import Grain
+from vqapr.data.panel import PanelWindow
 from vqapr.data.windows import ModelWindow
 from vqapr.models.calls import observations, requirements_for
 from vqapr.runtime.agendas import OperationOccurrence
@@ -25,19 +27,21 @@ def _unbounded() -> ConstraintBounds:
 
 
 class _DeclaredReads:
-    """`read(alias)` over the aliases a Model declared in `inputs()`.
+    """`read(alias, field)` and `rows(alias)` over the aliases a Model declared in `inputs()`.
 
     Shared by all three contexts because all three roles read the same way -- that sameness is
     the point (`docs/issues/036`), so it is one implementation rather than three that agree today.
 
-    `reads` is empty for a Model that declares its requirements the older way, by overriding
-    `requirements()` and reaching `context.window.observations(...)` itself. Both paths run; the
-    window is the same object underneath, so a mixed tree behaves identically either way.
+    **The grain decides the verb** (design §2.5, owner ruling 2026-09-02). A panel-grain alias is
+    read with `read(alias, field)` and returns a 2d `PanelWindow` -- instants x instruments, a
+    slice of the panel the run built once. A `rows`-grain alias is read with `rows(alias)` and
+    streams `Observation`s, one per (instant, instrument). Each verb refuses the other grain by
+    name, so what a dataset IS and what an author receives cannot disagree.
     """
 
     __slots__ = ()
 
-    def read(self, alias: str) -> tuple:
+    def _declaration(self, alias: str) -> DatasetInput:
         if not isinstance(alias, str):
             raise TypeError("alias must be a string")
         declared = self.reads.get(alias)
@@ -46,11 +50,35 @@ class _DeclaredReads:
             raise KeyError(
                 f"{alias!r} was not declared in inputs(); this model declared: {known}"
             )
+        return declared
+
+    def read(self, alias: str, field: str) -> PanelWindow:
+        declared = self._declaration(alias)
+        if field not in declared.fields:
+            raise KeyError(
+                f"{field!r} is not a field of {alias!r}; it declared: {', '.join(declared.fields)}"
+            )
+        requirements = requirements_for(declared)
+        if self.window.grain(requirements[0]) is Grain.ROWS:
+            raise TypeError(
+                f"{alias!r} is a rows-grain dataset and has no panel; read it with rows({alias!r}) "
+                "-- or register the table as grain: instrument_instant if it is one"
+            )
+        return self.window.panel(requirements, field)
+
+    def rows(self, alias: str) -> tuple:
+        declared = self._declaration(alias)
+        requirements = requirements_for(declared)
+        if self.window.grain(requirements[0]) is not Grain.ROWS:
+            raise TypeError(
+                f"{alias!r} is a panel-grain dataset; read a field of it with read({alias!r}, "
+                "<field>), which returns the instants x instruments window"
+            )
         # An alias is one requirement per declared field (`docs/issues/049`) and ONE scan: the
         # window reads every field in one statement and the rows come back already joined on
         # `(instant, instrument)`. The author declared one thing and reads one thing.
         return observations(
-            self.window.declared(requirements_for(declared)).rows,
+            self.window.declared(requirements).rows,
             instrument_field="instrument",
             available_at_field="available_at",
             fields=declared.fields,

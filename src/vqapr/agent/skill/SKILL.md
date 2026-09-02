@@ -100,17 +100,20 @@ hold. All three are authored the same way -- one import, `from vqapr import auth
 declaration, `inputs()`; one read verb, `.read(alias)` -- and differ only in the verb that is
 theirs: `decide`, `compute`, `project`/`monitor`. `vqapr show model <id>` describes any of them.
 
-**What a model is handed.** `inputs()` returns a mapping from an alias you name to a
-`va.DatasetInput(dataset_id=, fields=, lookback=)`, and `.read(alias)` on the call returns a
-**tuple of `Observation`s**, one per (instant, instrument), in every role:
+**What a model is handed follows the dataset's `grain`.** `inputs()` returns a mapping from an
+alias you name to a `va.DatasetInput(dataset_id=, fields=, lookback=)`, and the call reads it
+with one of two verbs, in every role:
 
-- every observation carries `instrument_id`, its own `available_at` (timezone-aware) and
-  `values`, a mapping with one key per declared field;
-- observations are ordered by `available_at`, then by instrument, so names **interleave** within
-  an instant rather than arriving grouped. A cross-section is the observations sharing one
-  `available_at`; the newest is the last one's;
-- a value keeps its parquet column's type -- `float` from a DOUBLE column, `Decimal` from a DECIMAL
-  one -- so write `Decimal(str(value))` and never `Decimal(value)`.
+- **`read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a
+  **`PanelWindow`**: `instants` (the same for every name) x `instruments`; `values[name]` is
+  that name's values over the instants, `None` where it had none; `latest()` is the newest value
+  per name -- the cross-section. It is a slice of a panel the run built once, not a query.
+- **`rows(alias)` on `grain: rows`** (the vendor's long table) returns a **tuple of
+  `Observation`s**, one per (instant, instrument), each carrying `instrument_id`, its own
+  `available_at` and `values`; names interleave within an instant.
+- Each verb refuses the other grain by name. A value keeps its parquet column's type -- `float`
+  from a DOUBLE column, `Decimal` from a DECIMAL one -- so write `Decimal(str(value))` and never
+  `Decimal(value)`.
 
 **Choose the lookback member deliberately; they are a pair.** `RowsLookback(rows=N)` gives each name
 its **own** last N observations, so on an unbalanced panel the batch's calendar span is set by the
@@ -361,6 +364,7 @@ class Momentum(va.StrategyModel):
         return {"prices": read}
 
     def decide(self, call):
+        window = call.read("prices", "close")   # instants x instruments; window.values[name]
         ...
         return va.Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
 ```

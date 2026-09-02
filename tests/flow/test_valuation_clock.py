@@ -79,9 +79,7 @@ STRATEGIES = textwrap.dedent(
 
         def decide(self, call):
             state = self.memory if isinstance(self.memory, dict) else {}
-            observed = [
-                row for row in call.read("prices") if row.values["close"] is not None
-            ]
+            observed = call.read("prices", "close").latest()
             if state.get("formed") or not observed:
                 return Hold(reason="already-formed")
             self.memory = {"formed": True}

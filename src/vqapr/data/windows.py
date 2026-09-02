@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from vqapr.data.lookback import Lookback
+from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
@@ -186,6 +187,35 @@ class ModelWindow:
         """
         return self.declared((requirement,))
 
+    def panel(self, requirements: Sequence[DataRequirement], field: str) -> PanelWindow:
+        """One field of a panel-grain alias as a 2d slice (design §2.5; record `137`).
+
+        Each requirement is refused if undeclared, exactly as a row read is; the read is recorded
+        as one access, so provenance and `derived_available_at` see it like any other.
+        """
+        declared = tuple(requirements)
+        for requirement in declared:
+            if requirement not in self.__allowed:
+                raise self._undeclared(requirement)
+        if self.consumer_id is None:
+            raise RuntimeError(
+                "this window serves several components, so a read must name one: take "
+                "window.for_consumer(<component id>) before reading"
+            )
+        window, access = self.__store.panel_window(
+            declared,
+            field,
+            evaluation_time=self.evaluation_time,
+            instruments=self.instruments,
+            consumer_id=self.consumer_id,
+        )
+        self._accesses.append(access)
+        return window
+
+    def grain(self, requirement: DataRequirement):
+        """The declared grain of the dataset a requirement names, so a context can steer."""
+        return self.__store.grain(requirement)
+
     def declared(self, requirements: Sequence[DataRequirement]) -> ObservationBatch:
         """Every field an alias declared, in one scan (`docs/issues/046`, lane D).
 
@@ -198,7 +228,24 @@ class ModelWindow:
         for requirement in declared:
             if requirement in self.__allowed:
                 continue
-            raise VqaprError(
+            raise self._undeclared(requirement)
+        if self.consumer_id is None:
+            raise RuntimeError(
+                "this window serves several components, so a read must name one: take "
+                "window.for_consumer(<component id>) before calling observations()"
+            )
+        batch = self.__store.query_many(
+            declared,
+            evaluation_time=self.evaluation_time,
+            instruments=self.instruments,
+            consumer_id=self.consumer_id,
+        )
+        self._accesses.append(batch.access)
+        return batch
+
+    @staticmethod
+    def _undeclared(requirement: DataRequirement) -> VqaprError:
+        return VqaprError(
                 stage=_STAGE,
                 family=FailureFamily.DATA,
                 failures=[
@@ -221,19 +268,6 @@ class ModelWindow:
                 mutation=False,
                 retry_precondition="declare the exact requirement, then retry",
             )
-        if self.consumer_id is None:
-            raise RuntimeError(
-                "this window serves several components, so a read must name one: take "
-                "window.for_consumer(<component id>) before calling observations()"
-            )
-        batch = self.__store.query_many(
-            declared,
-            evaluation_time=self.evaluation_time,
-            instruments=self.instruments,
-            consumer_id=self.consumer_id,
-        )
-        self._accesses.append(batch.access)
-        return batch
 
     def snapshot(self, requirement: DataRequirement) -> ObservationBatch:
         """The newest cross-section only: rows at the latest ``available_at`` per instrument.

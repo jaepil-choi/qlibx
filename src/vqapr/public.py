@@ -24,6 +24,7 @@ from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.windows import ModelWindow, ObservationBatch
@@ -208,6 +209,7 @@ __all__ = (
     "OperationRole",
     "OptimizeRefusal",
     "OptimizeResult",
+    "PanelWindow",
     "PortfolioDirection",
     "PortfolioTarget",
     "Rebalance",

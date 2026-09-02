@@ -245,6 +245,7 @@ def test_public_exports_are_fixed() -> None:
         "OperationRole",
         "OptimizeRefusal",
         "OptimizeResult",
+        "PanelWindow",
         "PortfolioDirection",
         "PortfolioTarget",
         "Rebalance",

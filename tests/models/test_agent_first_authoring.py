@@ -52,6 +52,7 @@ def test_module_exports_are_exact() -> None:
         "InstantsLookback",
         "Model",
         "Observation",
+        "PanelWindow",
         "Rebalance",
         "RowsLookback",
         "requirements_for",
@@ -189,7 +190,10 @@ class _FakeDataCall(authoring.DataCall):
     def evaluation_time(self) -> datetime:
         return UTC_NOW
 
-    def read(self, alias: str) -> tuple[authoring.Observation, ...]:
+    def read(self, alias: str, field: str) -> authoring.PanelWindow:
+        raise TypeError("this fake serves a rows grain only")
+
+    def rows(self, alias: str) -> tuple[authoring.Observation, ...]:
         return (authoring.Observation("A", UTC_NOW, {"close": Decimal("1")}),) if alias else ()
 
 
@@ -198,7 +202,7 @@ def test_data_call_is_abstract() -> None:
         authoring.DataCall()  # type: ignore[abstract]
     call = _FakeDataCall()
     assert call.evaluation_time == UTC_NOW
-    assert call.read("px")[0].instrument_id == "A"
+    assert call.rows("px")[0].instrument_id == "A"
 
 
 # --------------------------------------------------------------------------------------
@@ -387,7 +391,10 @@ class _FakeStrategyCall(authoring.StrategyCall):
     def constraint_bounds(self) -> authoring.ConstraintBounds:
         return authoring.ConstraintBounds(lower_weights={}, upper_weights={})
 
-    def read(self, alias: str) -> tuple[authoring.Observation, ...]:
+    def read(self, alias: str, field: str) -> authoring.PanelWindow:
+        raise TypeError("this fake serves a rows grain only")
+
+    def rows(self, alias: str) -> tuple[authoring.Observation, ...]:
         return ()
 
 
@@ -398,7 +405,7 @@ def test_strategy_call_is_abstract() -> None:
     assert call.evaluation_time == UTC_NOW
     assert call.account.cash == Decimal("100")
     assert call.occurrence_id == "occ-1"
-    assert call.read("px") == ()
+    assert call.rows("px") == ()
 
 
 def test_strategy_model_is_a_model_and_requires_only_decide() -> None:
@@ -440,7 +447,7 @@ def test_constraint_call_is_a_contract_and_carries_no_account() -> None:
         authoring.ConstraintCall()  # type: ignore[abstract]
 
     members = set(authoring.ConstraintCall.__abstractmethods__)
-    assert members == {"evaluation_time", "instruments", "read"}, members
+    assert members == {"evaluation_time", "instruments", "read", "rows"}, members
     assert "account" not in members
 
 
@@ -510,7 +517,10 @@ def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
         evaluation_time = UTC_NOW
         instruments = ("A",)
 
-        def read(self, alias: str):
+        def read(self, alias: str, field: str):
+            raise AssertionError("this rule declared no reads")
+
+        def rows(self, alias: str):
             raise AssertionError("this rule declared no reads")
 
     bounds = constraint.project(_Call())

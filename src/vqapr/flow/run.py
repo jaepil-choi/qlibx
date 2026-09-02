@@ -337,18 +337,21 @@ class FrozenRun:
                 # read a grouped registration row-wise -- the same rows, silently ungrouped, with
                 # no error anywhere. `span` and `field_types` are carried for the same reason
                 # this copy exists at all: a frozen run must describe what was registered.
+                # By keyword: `grain` joined the registration between `fields` and `span`
+                # (record `137`), and a positional rebuild put the span into it.
                 DatasetRegistration(
-                    dataset.dataset_id,
-                    dataset.source,
-                    dataset.instrument_field,
-                    dataset.available_at,
-                    dataset.key_fields,
-                    MappingProxyType(dict(dataset.fields)),
-                    dataset.span,
-                    None if dataset.field_types is None else MappingProxyType(
+                    dataset_id=dataset.dataset_id,
+                    source=dataset.source,
+                    instrument_field=dataset.instrument_field,
+                    available_at=dataset.available_at,
+                    key_fields=dataset.key_fields,
+                    fields=MappingProxyType(dict(dataset.fields)),
+                    grain=dataset.grain,
+                    span=dataset.span,
+                    field_types=None if dataset.field_types is None else MappingProxyType(
                         dict(dataset.field_types)
                     ),
-                    dataset.aggregated,
+                    aggregated=dataset.aggregated,
                 )
                 for dataset in self.datasets
             ),

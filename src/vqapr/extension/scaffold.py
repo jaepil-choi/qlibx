@@ -33,12 +33,12 @@ class {class_name}(va.StrategyModel):
         return {{"prices": read}}
 
     def decide(self, call):
+        # One field as a window: instants x instruments, the same LOOKBACK instants for every name.
+        window = call.read("prices", "{field}")
         history: dict[str, list[Decimal]] = {{}}
-        for row in call.read("prices"):
-            value = row.values["{field}"]
-            if value is not None:
-                # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
-                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))
+        for name in window.instruments:
+            # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
+            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
 
         scores = {{}}
         for instrument, values in history.items():
@@ -79,19 +79,8 @@ class {class_name}(va.DataModel):
         return {{"prices": read}}
 
     def compute(self, context):
-        # Observations arrive ordered by `available_at`, then by the dataset's key fields --
-        # instruments INTERLEAVE within an instant rather than arriving grouped by name. Each one
-        # carries its own `available_at` and `instrument_id` alongside the fields declared above.
 {lookback_note}
-        history: dict[str, list[Decimal]] = {{}}
-        for row in context.read("prices"):
-            value = row.values[FIELD]
-            if value is not None:
-                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
-                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
-                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
-                # binary float's expansion, so 0.1 stays 0.1.
-                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))
+{history_block}
 
         # ---- the one line to change -------------------------------------------------------
         # Trailing return over the declared lookback.
@@ -109,6 +98,33 @@ class {class_name}(va.DataModel):
             for name, value in sorted(derived.items())
         ]
 '''
+
+_PANEL_HISTORY_BLOCK = """\
+        # One field of the alias as a window: `instants` x `instruments`, the same instants for
+        # every name. `window.values[name]` is that name's values over them, `None` where it had
+        # none; `window.latest()` is the newest value per name.
+        window = context.read("prices", FIELD)
+        history: dict[str, list[Decimal]] = {}
+        for name in window.instruments:
+            # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's type,
+            # so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and arithmetic
+            # mixing the two raises. Going through `str` also avoids inheriting the binary float's
+            # expansion, so 0.1 stays 0.1.
+            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]"""
+
+_ROWS_HISTORY_BLOCK = """\
+        # A rows-grain (vendor, long) dataset streams observations: one per (instant, instrument),
+        # ordered by `available_at`, each carrying its own `available_at` and `instrument_id`
+        # alongside the fields declared above. Instruments INTERLEAVE within an instant.
+        history: dict[str, list[Decimal]] = {}
+        for row in context.rows("prices"):
+            value = row.values[FIELD]
+            if value is not None:
+                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
+                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
+                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
+                # binary float's expansion, so 0.1 stays 0.1.
+                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))"""
 
 _ROWS_LOOKBACK_NOTE = """\
         #
@@ -142,6 +158,7 @@ _CALENDAR_LOOKBACK_NOTE = """\
 
 _LOOKBACK_FLAVOURS = {
     "rows": {
+        "history_block": _PANEL_HISTORY_BLOCK,
         "lookback_class": "RowsLookback",
         "lookback_declaration": (
             "LOOKBACK = {lookback}  # rows of the table: the same instants for every name"
@@ -151,6 +168,7 @@ _LOOKBACK_FLAVOURS = {
         "lookback_note": _ROWS_LOOKBACK_NOTE,
     },
     "instants": {
+        "history_block": _ROWS_HISTORY_BLOCK,
         "lookback_class": "InstantsLookback",
         "lookback_declaration": (
             "LOOKBACK = {lookback}  # instants per name, per field (grain: rows only)"
@@ -160,6 +178,7 @@ _LOOKBACK_FLAVOURS = {
         "lookback_note": _INSTANTS_LOOKBACK_NOTE,
     },
     "calendar": {
+        "history_block": _PANEL_HISTORY_BLOCK,
         "lookback_class": "CalendarLookback",
         "lookback_declaration": (
             'LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n'
@@ -222,7 +241,8 @@ class {class_name}(va.Constraint):
         """What this constraint reads. Nothing: the rule is a property of the weight.
 
         A constraint comparing against a benchmark would return a `va.DatasetInput` here, and
-        `call.read("<your alias>")` inside `project` would hand back its observations.
+        `call.read("<your alias>", "<field>")` inside `project` would hand back its window --
+        `latest()` is the benchmark's newest weight per name.
         """
         return {{}}
 
@@ -357,6 +377,7 @@ def render(
         )
     flavour = _LOOKBACK_FLAVOURS[lookback_kind]
     return _TEMPLATES[kind].format(
+        history_block=flavour["history_block"],
         component_id=component_id,
         class_name=_class_name(component_id),
         dataset_id=dataset_id,

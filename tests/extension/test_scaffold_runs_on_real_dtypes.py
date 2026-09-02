@@ -216,5 +216,8 @@ def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:
     """
     source = render(kind, "pinned", dataset_id="price_daily")
 
-    assert ".append(Decimal(str(value)))" in source
-    assert ".append(value)" not in source
+    # Since record `137` a panel window is read column by column, so the conversion sits in a
+    # comprehension over the window's values rather than an `.append` per row; the property is
+    # the same: every cell goes through `Decimal(str(...))`, never `Decimal(...)` on the raw cell.
+    assert "Decimal(str(v))" in source
+    assert "[Decimal(v)" not in source and ".append(value)" not in source

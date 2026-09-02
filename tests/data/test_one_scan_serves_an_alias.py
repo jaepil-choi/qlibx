@@ -88,19 +88,23 @@ def test_three_declared_fields_are_one_statement_and_one_access(
     requirements = requirements_for(alias)
     assert len(requirements) == 3, "a requirement names one field"
     window = _window(workspace, *requirements)
+    context = DataModelContext(window=window, reads={"prices": alias})
 
-    rows = DataModelContext(window=window, reads={"prices": alias}).read("prices")
+    close = context.read("prices", "close")
+    volume = context.read("prices", "volume")
+    double = context.read("prices", "double_close")
 
     assert len(scans) == 1, scans
-    assert set(scans[0]) == {"close", "volume", "double_close"}
-    assert len(window.accesses) == 1
-    assert window.accesses[0].fields == ("close", "volume", "double_close")
-    a_rows = [row for row in rows if row.instrument_id == "A"]
-    assert [(row.available_at.day, row.values["close"], row.values["volume"]) for row in a_rows] == [
-        (6, 103.0, None),
-        (7, 105.0, 12.0),
-    ], "a panel-grain RowsLookback(2) is the table's last two instants, every field on each row"
-    assert [row.values["double_close"] for row in a_rows] == [206.0, 210.0]
+    assert set(scans[0]) == {"close", "volume", "double_close"}, "the alias is scanned once"
+    assert [instant.day for instant in close.instants] == [6, 7]
+    assert close.values["A"] == (103.0, 105.0)
+    assert volume.values["A"] == (None, 12.0), "each field keeps its nulls on the shared axis"
+    assert double.values["A"] == (206.0, 210.0)
+    assert len(window.accesses) == 3 and [a.fields for a in window.accesses] == [
+        ("close",),
+        ("volume",),
+        ("double_close",),
+    ]
 
 
 def test_the_fused_read_returns_what_the_joined_reads_did(

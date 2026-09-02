@@ -170,3 +170,39 @@ def test_finite_check_refuses_to_be_asked_about_nothing(unprepared_parquet: Path
     spec = SourceSpec.of("s", unprepared_parquet)
     with pytest.raises(ValueError, match="at least one column"):
         scan.finite_check(spec, columns=(), identity_fields=("instrument",))
+
+
+def _progress_bar(con: object) -> bool:
+    return bool(con.execute("SELECT current_setting('enable_progress_bar')").fetchone()[0])
+
+
+def test_configure_silences_a_connection_that_was_printing() -> None:
+    """The proof. `docs/issues/047` — duckdb prints its progress bar to stdout even when stdout is
+    a pipe, and stdout is where the CLI writes its JSON envelope.
+
+    Asserting only that a factory's connection has the bar off would pass on a host where duckdb
+    defaults it off anyway, and duckdb decides that per process rather than per pipe: 1.5.5 turns
+    it ON when `__main__` has no `__file__`. So the connection here is turned ON first, and
+    `_configure` is what has to turn it back.
+    """
+    import duckdb
+
+    with duckdb.connect() as con:
+        con.execute("SET enable_progress_bar=true")
+        assert _progress_bar(con) is True
+        assert _progress_bar(scan._configure(con)) is False
+
+
+def test_both_connection_factories_route_through_configure(flat_parquet: Path) -> None:
+    """Both, because `enable_progress_bar` is LOCAL and a cursor takes the default rather than its
+    parent's value -- silencing the database alone would leave every cursor made from it printing.
+    """
+    spec = SourceSpec.of("s", flat_parquet)
+
+    assert _progress_bar(scan._open(spec)) is False
+
+    session = scan.ScanSession()
+    try:
+        assert _progress_bar(session.connection(spec)) is False
+    finally:
+        session.close()

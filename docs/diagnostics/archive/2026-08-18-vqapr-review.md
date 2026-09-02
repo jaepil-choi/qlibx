@@ -1,3 +1,28 @@
+> # ⛔ ARCHIVED 2026-09-02 — provenance, not a work list
+>
+> **This document was written against `gjc/implement-operation-agendas @ 67d363b`: 130 modules,
+> 11,959 lines, 334 tests.** Today's tree is 30,260 lines with 1,292 fast tests, and every
+> structural claim below is measured on a tree that no longer exists. **Do not open a task from
+> this file.** Its live successors are `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md`
+> (structure), `docs/refactoring/2026-09-01-the-read-path-campaign.md` (cost) and
+> `docs/design/the-panel-the-surface-and-the-run.md` (the three missing nouns).
+>
+> **Spot-checked 2026-09-02, resolved:** EB-1 (record `013`), EB-4 (`[project.scripts]` points at
+> `vqapr.cli:main`), EB-6 (`FillConvention.select_target` bisects a run-lifetime `ExecutionHorizon`
+> instead of rescanning — record `023`), PB-3 (`Workspace._exclusive` holds one read-modify-write
+> cycle — record `106`), OS-1 (no zero-byte module remains except package `__init__.py`).
+>
+> **Spot-checked 2026-09-02, STILL LIVE — carried forward, do not re-derive from here:**
+>
+> | item | today's fact | where it now lives |
+> |---|---|---|
+> | **OS-2** unused runtime dependencies | `cvxpy`, `pandas`, `pydantic`, `pytz` are declared in `pyproject.toml` and imported **nowhere** in `src/vqapr`. `pandas` appears only in prose. Every `uv add vqapr` pays for a solver stack and pandas 3 | unfiled — see the 2026-09-02 assessment |
+> | **RF-1** `workspace.py` threads eight declaration maps positionally | the 8-tuple unpack appears 15× in `workspace.py` | Step 4.1 of the structural refactoring doc |
+> | **RF-2** `SimulationFlow._execute_due` | 284 lines (`flow/simulation.py:811-1095`); `SimulationFlow` is ~1,750 lines over ~50 methods | Step 5 of the structural refactoring doc |
+>
+> **Everything else below was not re-verified item by item.** Treat an unlisted item as unknown and
+> re-run its own reproduction before acting on it.
+
 # vqapr code review — 2026-08-18
 
 | | |

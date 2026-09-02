@@ -5,7 +5,7 @@
 | **작성 시각** | 2026-08-31 KST (+09:00) |
 | **기준 커밋** | `develop @ dd57e98a` (Step 7 머지 직후). 이 문서의 모든 행 번호는 그 커밋 기준이다 |
 | **트리 상태** | `uv run pytest tests/ -q -m ""` → **1482 passed** (slow 14개 포함) · `uv run ruff check src/` → clean |
-| **선행 문서** | `docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` (S1–S8, C1–C4) |
+| **선행 문서** | `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` (S1–S8, C1–C4) |
 | **판정 기준** | `docs/vqapr-prd.md` → `docs/vqapr-architecture.md` → `docs/design/agent-first-surface.md` |
 | **수정 여부** | **코드 수정 없음.** 진단과 등록 권고만 담는다 |
 

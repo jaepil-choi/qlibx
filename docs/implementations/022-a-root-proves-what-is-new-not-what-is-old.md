@@ -2,7 +2,7 @@
 
 ## Why this exists
 
-`docs/code-review/2026-08-19-vqapr-performance.md` identified two costs that grow quadratically
+`docs/diagnostics/archive/2026-08-19-vqapr-performance.md` identified two costs that grow quadratically
 with run length. Both live in `AcceptedRunState.__post_init__`, and both have the same shape:
 
 > Every new root re-does, from scratch, work that every previous root already did.

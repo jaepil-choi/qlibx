@@ -93,10 +93,18 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     `docs/issues/029` was filed about: one authority reachable by two names, and a deletion that
     has to be found by grep.
     """
-    assert not pathlib.Path("src/vqapr/_internal/extensions").exists(), (
-        "`_internal/extensions/` is back. The extension authorities live in `vqapr/extension/` "
-        "since record 110; putting an implementation back under `_internal` recreates the two-door "
-        "problem docs/issues/029 records."
+    # Modules, not the directory. `.exists()` failed on a tree that had merely kept the stale
+    # `__pycache__/` from before record `110` -- an untracked build artifact no `git clean` in the
+    # test's own instructions removes, so anyone whose working copy predates that record started
+    # red on a tree that is in fact correct. What this rule forbids is an implementation living
+    # there; bytecode left behind by one that used to is not that.
+    modules = sorted(
+        path.as_posix() for path in pathlib.Path("src/vqapr/_internal/extensions").glob("*.py")
+    )
+    assert not modules, (
+        f"`_internal/extensions/` is back: {modules}. The extension authorities live in "
+        "`vqapr/extension/` since record 110; putting an implementation back under `_internal` "
+        "recreates the two-door problem docs/issues/029 records."
     )
 
     # `identity` is deliberately absent. It was the fifth promoted module, and record `124`

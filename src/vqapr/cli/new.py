@@ -340,7 +340,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         # than by value. Defaulting to 6 made `--lookback 6 --calendar-lookback 30` -- both flags,
         # one of them at the default -- indistinguishable from "only --calendar-lookback", so the
         # conflict refusal below silently ignored `--lookback` in exactly the case it exists to
-        # refuse. Found by the structural audit in `docs/refactoring/`, C3.
+        # refuse. Found by the structural audit,
+        # `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md`, C3.
         default=None,
         help=(
             "rows of history each name needs, counted per instrument and per field. On an "

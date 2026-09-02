@@ -5,7 +5,7 @@ per-query re-hash and a per-root re-verification both look free here; they only 
 warehouse over a long run. These tests therefore assert **counts and shapes**, never wall time,
 which would be flaky in CI and would not say what actually regressed.
 
-See `docs/code-review/2026-08-19-vqapr-performance.md` sections 6 and 8.
+See `docs/diagnostics/archive/2026-08-19-vqapr-performance.md` sections 6 and 8.
 """
 
 from __future__ import annotations

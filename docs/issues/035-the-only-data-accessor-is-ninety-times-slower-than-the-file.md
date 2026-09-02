@@ -1,5 +1,17 @@
 # 035 — The only data accessor a model author has is ~90x slower than reading the same file, and it is the entire cost of a rolling-window run
 
+> **Status update 2026-09-02 — the block on re-measurement is gone.** The deferred half of this
+> issue (a columnar accessor: column arrays instead of one dict per row) was held with the reason
+> *"re-measure after lane C merges and decide then"*, because the ruling changed the measurement
+> target from 4,428,480 cells to 3,375. **Lane C merged at `df571533`** (record `123`), so that
+> condition is met and nothing is waiting on anything else.
+>
+> Before opening it as an accessor change, read `docs/design/the-panel-the-surface-and-the-run.md`
+> §2.3: under that design a `Panel` is columnar by construction, so *"expose column arrays"* stops
+> being a new accessor and becomes *"expose the panel"*. That document treats §17.1.3, §17.1.4 and
+> this issue as **one change, not three**.
+
+
 **Status update 2026-09-01 — this file now has two halves with different fates.** The campaign is
 anchored at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
 

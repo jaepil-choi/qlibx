@@ -97,7 +97,7 @@ def registered_roster(root_path: Path | None) -> RegisteredRoster | None:
     # `.vqapr/instruments.json` made a registered roster read as absent, so the run completed with
     # every fill recording `kind: None` and a KRX-shaped venue charged the ETF sleeve at the share
     # rate, which is `docs/issues/007` returning silently. Found by the structural audit in
-    # `docs/refactoring/`, C1.
+    # `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md`, C1.
     pointer = space.registered_instruments()
     if pointer is None:
         return None

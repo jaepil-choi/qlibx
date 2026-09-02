@@ -1,6 +1,6 @@
 # 113 — Three findings from the Step 7 review
 
-**Closes:** R1, R2 and R8 of `docs/refactoring/2026-08-31-post-step-07-review.md`, an independent
+**Closes:** R1, R2 and R8 of `docs/diagnostics/2026-08-31-post-step-07-review.md`, an independent
 review of Steps 7–8 written by a second agent.
 **Branch:** `step-08b-the-review-findings`.
 

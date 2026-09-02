@@ -15,7 +15,7 @@ from vqapr.authoring import (
     StrategyCall,
 )
 from vqapr.data.windows import ModelWindow
-from vqapr.models.calls import declared_rows, observations
+from vqapr.models.calls import observations, requirements_for
 from vqapr.runtime.agendas import OperationOccurrence
 
 
@@ -46,11 +46,11 @@ class _DeclaredReads:
             raise KeyError(
                 f"{alias!r} was not declared in inputs(); this model declared: {known}"
             )
-        # An alias is one requirement per declared field (`docs/issues/049`), so it is several
-        # reads, joined back on `(instant, instrument)` -- the only pair every batch agrees on.
-        # The author declared one thing and reads one thing; the fan-out is the engine's.
+        # An alias is one requirement per declared field (`docs/issues/049`) and ONE scan: the
+        # window reads every field in one statement and the rows come back already joined on
+        # `(instant, instrument)`. The author declared one thing and reads one thing.
         return observations(
-            declared_rows(lambda r: self.window.observations(r).rows, declared),
+            self.window.declared(requirements_for(declared)).rows,
             instrument_field="instrument",
             available_at_field="available_at",
             fields=declared.fields,

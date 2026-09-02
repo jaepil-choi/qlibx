@@ -64,20 +64,58 @@ class DuckDbObservationStore:
         instruments: Sequence[str],
         consumer_id: str,
     ):
+        """One requirement, one field: the single-field spelling of `query_many`."""
+        return self.query_many(
+            (requirement,),
+            evaluation_time=evaluation_time,
+            instruments=instruments,
+            consumer_id=consumer_id,
+        )
+
+    def query_many(
+        self,
+        requirements: Sequence[DataRequirement],
+        *,
+        evaluation_time: datetime,
+        instruments: Sequence[str],
+        consumer_id: str,
+    ):
+        """Every field an alias declares, in one scan.
+
+        A `DataRequirement` names one field (`docs/issues/049`), and an alias over three fields
+        is three requirements. Reading them one at a time was three scans of the same window and
+        a join in Python on `(available_at, instrument)` -- the per-declared-input floor
+        `docs/issues/046` measured. The requirements all name one dataset and one lookback, which
+        is exactly what one `observation_rows` call takes as a `fields` mapping, and the window
+        SQL already ranks each field's own last N rows separately, so the fused read returns the
+        rows the joined reads did: one row per (instant, instrument) any field admitted, each
+        field null outside its own window. One access is recorded, naming every field.
+        """
         from vqapr.data.windows import AccessRecord, ObservationBatch
 
         require_tz_aware(evaluation_time, name="evaluation_time")
-        registration = self.__catalog.dataset(str(requirement.dataset_id))
+        declared = tuple(requirements)
+        if not declared:
+            raise ValueError("a read requires at least one DataRequirement")
+        first = declared[0]
+        if any(item.dataset_id != first.dataset_id for item in declared):
+            raise ValueError("one read serves one dataset; split requirements by dataset_id")
+        if any(item.lookback != first.lookback for item in declared):
+            raise ValueError("one read serves one lookback; split requirements by lookback")
+        declared_fields = tuple(item.field_id for item in declared)
+        if len(set(declared_fields)) != len(declared_fields):
+            raise ValueError("a read must not name one field twice")
+        registration = self.__catalog.dataset(str(first.dataset_id))
         keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
-        fields = {requirement.field_id: resolve_field(registration, requirement)}
+        fields = {item.field_id: resolve_field(registration, item) for item in declared}
         lower_bound = None
         rows = None
-        if isinstance(requirement.lookback, RowsLookback):
-            rows = requirement.lookback.rows
-        elif isinstance(requirement.lookback, CalendarLookback):
-            lower_bound = requirement.lookback.lower_bound(evaluation_time)
+        if isinstance(first.lookback, RowsLookback):
+            rows = first.lookback.rows
+        elif isinstance(first.lookback, CalendarLookback):
+            lower_bound = first.lookback.lower_bound(evaluation_time)
         else:  # pragma: no cover - DataRequirement construction closes this union
             raise TypeError("unsupported lookback")
         raw_rows = scan.observation_rows(
@@ -109,7 +147,6 @@ class DuckDbObservationStore:
         # A dataset with no instrument axis has no per-instrument counts to keep and no declared
         # instruments to keep them for (`docs/issues/038`). Its rows carry no `instrument`, so the
         # record says so with two empty values rather than inventing a name to file them under.
-        declared_fields = (requirement.field_id,)
         actual: dict[str, dict[str, int]] = {}
         if keyed_by_instrument:
             actual = {instrument: dict.fromkeys(declared_fields, 0) for instrument in instruments}
@@ -129,11 +166,11 @@ class DuckDbObservationStore:
             # Stamped, not declared. The component reading is the consumer, and the framework is
             # the only one that knows which component is running.
             consumer_id=consumer_id,
-            dataset_id=requirement.dataset_id,
+            dataset_id=first.dataset_id,
             source_id=str(source.source_id),
             source_digest=source_digest,
             fields=declared_fields,
-            lookback=requirement.lookback,
+            lookback=first.lookback,
             evaluation_time=evaluation_time,
             instruments=tuple(instruments) if keyed_by_instrument else (),
             lower_bound=lower_bound,

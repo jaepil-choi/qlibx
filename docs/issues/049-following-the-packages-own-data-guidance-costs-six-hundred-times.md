@@ -1,6 +1,37 @@
 # 049 — A model that follows the package's own data guidance runs 614x slower than the identical model on a reshaped source, and the package offers nothing that closes the gap
 
-**Status: the ruling is IMPLEMENTED 2026-09-01 by
+**Status: CLOSED 2026-09-03 -- the measurement this file exists for is taken, on this tree, by
+a harness that lives in this repo: `experiments/exp_049_the_measurement/`.** Same reduction, three
+registrations of two files, 1,600 instruments x 4 evaluations, anti-join read before the timing:
+
+```
+                                      wall     per eval   read (in callback)  reduce  framework  published
+rows   long file, grain: rows       372.57s     93.14s        365.67s          5.10s    1.80s      6,400
+expr   SAME long file, panel grain,   5.04s      1.26s          3.16s          0.82s    1.06s      6,400
+       items as aggregate expressions
+wide   pre-pivoted file, panel grain  2.46s      0.61s          0.72s          0.83s    0.91s      6,400
+
+anti-join, both directions, all three pairs: 0 rows          rows/expr 73.9x   rows/wide 151.5x
+long 5,249,614 rows / 15.7 MB   wide 12,800 rows / 0.61 MB   registration rows 4.33s expr 1.84s wide 0.23s
+```
+
+`expr` is what this file's ruling asked for -- the author keeps the vendor's long table and declares
+the pivot as field expressions -- and it sits within 2x of the hand-pivoted file, with the pivot
+paid once per run in the panel build (record `137`). The `rows` side is the vendor-grain read as
+the tree now has it: one ranked scan per evaluation, every source row handed back as an
+`Observation`. A profile of that side (80 instruments, one evaluation) puts **30% in the scan and
+70% in constructing the `Observation`s** -- `_copy_values` re-checking field names character by
+character and `pytz` conversions -- which is `docs/issues/054`. The `rows` side also cannot declare
+the calendar window the original model did, and the count it must declare instead counts rows
+rather than instants on a long table: `docs/issues/053`.
+
+The ratio is within-process, as the original was; the data is generated (statement facts with two
+scopes, quarterly and annual rows, an exercised code fallback and a later bundle that must win),
+smaller than the 37.8M-row warehouse, and the absolute seconds are this machine's. The original
+harness in the consumer repo no longer exists (record `136`); the measurement now refers to the one
+here.
+
+**Superseded status (2026-09-01): the ruling is IMPLEMENTED 2026-09-01 by
 [`123-a-field-is-an-expression-and-instrument-is-optional.md`](../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md) (lane C); the issue stays open
 for its number.** A field is an expression, a requirement names `(dataset_id, field_id)` and a
 lookback, and `instrument_field` is optional — all three are in `develop`, with `044` (record `119`)

@@ -97,8 +97,8 @@ PROJECT = OUTPUTS / "project"
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
-VERIFIED_AGAINST = "vqapr-0.2.0a2+develop"
-LAST_VERIFIED_AT = "2026-09-01"
+VERIFIED_AGAINST = "vqapr-0.3.0"
+LAST_VERIFIED_AT = "2026-09-03"
 
 KRX_COMMISSION_RATE = Decimal("0.0003")
 """Brokerage commission charged on both sides -- matches vqapr.exchange.venues.krx."""

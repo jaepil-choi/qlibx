@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-02.** 이 디렉터리에 52개 파일이 있고 **48개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-03.** 이 디렉터리에 54개 파일이 있고 **49개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,14 +15,15 @@
 
 ---
 
-## 1. 열린 것 — 넷
+## 1. 열린 것 — 다섯
 
-| # | 제목 | 상태 (2026-09-02 재확인) | 어디로 가는가 |
+| # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`는 record `139`로 닫혔다(기록 쪽); 선언 시점에 묻는 쪽은 남아 있다 | 남은 절반 |
 | `052` | showcase 9개 중 5개가 안 돌고, 아무것도 그것들을 실행하지 않는다 | **절반 열림.** 다섯 showcase는 다시 돈다 — 둘은 `131`, 셋은 `133`(빠진 config 키 하나, 퇴역한 attribute 이름 둘, 패키지가 빚진 read-through 하나). **gate 절반은 열림** — `pytest`가 `showcases/`를 수집하지 않아 계약이 바뀌면 다시 썩는다 | 캠페인 게이트(“showcase 9개 완주”)는 손으로 잰다 |
-| `049` | 패키지 자신의 데이터 가이드를 따르면 614배 느리다 | **ruling은 구현됨**(record `123`), **파일은 번호를 위해 열려 있다.** 남은 것: 레인 D, 그리고 **이 파일이 존재하는 이유인 최종 측정** — 아직 안 됐다 | 캠페인 앵커 |
+| `053` | `InstantsLookback`이 자기가 속한 유일한 grain에서 instant가 아니라 행을 센다 | **열림 2026-09-03.** `049` 측정이 발견. instant 4개 × 행 3개인 표에 `InstantsLookback(2)` → 행 2개, instant 1개. docstring과 거절 메시지는 instant라고 말한다. 덤으로 `grain: rows`는 calendar window를 거절하므로 원래 annual-fundamentals 모델의 질문이 그 grain에서 표현 불가 | 명사 1의 후속 |
+| `054` | `rows` 읽기 시간의 70%가 등록 때 검증한 이름을 행마다 다시 검증하는 데 든다 | **열림 2026-09-03.** `049` 측정 프로파일. 읽기 9.85s 중 scan 2.92s, `Observation` 생성 6.81s(`_copy_values`의 이름 공백 검사 14.6M회 2.79s, pytz 0.86s). `044`가 다른 읽기 경로에서 닫은 것과 같은 모양 | `035` ruling 그대로 |
 
 ### 열린 아홉에 없는 것 — 아직 파일이 없는 실환경 발견
 
@@ -43,7 +44,7 @@
 
 ---
 
-## 2. 닫힌 것 — 마흔여덟
+## 2. 닫힌 것 — 마흔아홉
 
 | # | 닫은 것 |
 |---|---|
@@ -93,6 +94,7 @@
 | `046` | 후반 record `120`(왕복 2→1), 전반 record `136`(alias 하나 = statement 하나; `declared_rows`의 Python join 삭제) |
 | `047` | record `129` — 두 connection factory가 하나의 `_configure`를 지난다 |
 | `048` | CLOSED 2026-09-01, docs-only |
+| `049` | **CLOSED 2026-09-03** — 측정을 이 repo의 `experiments/exp_049_the_measurement/`가 잰다. rows 372.57s · expr(같은 long 파일, expression 필드) 5.04s · wide 2.46s, anti-join 0. rows/expr **73.9x**, rows/wide **151.5x** |
 | `051` | record `130` — contract 블록이 monitoring 관측을 걷는다. 그 전엔 **모든 기록에서 비어 있었다** |
 | `050` | CLOSED 2026-09-01 |
 
@@ -107,3 +109,9 @@
 
 그 파일 자신의 규칙대로라면 **닫힌 항목이 목록에 남아 있으면 진짜 finding을 억누른다.** 다음
 testbed run 전에 wheel을 다시 빌드하고 `KNOWN-ISSUES.md`를 이 디렉터리에서 재생성해야 한다.
+
+**2026-09-03: `0.3.0` wheel이 빌드됐다** (`dist/vqapr-0.3.0-py3-none-any.whl`, 캠페인 전체 포함).
+`vqapr-final-testbed/` 디렉터리는 2026-09-03 기준 `kwam-enhanced-index/` 아래에 없다 — 그 testbed를
+다시 세운다면 `KNOWN-ISSUES.md`는 이 파일의 §1(다섯)에서 다시 만든다. `vqapr-enhanced-index-3`은
+`vqapr==0.2.0a2` wheel에 pin되어 있고, `0.3.0`은 그 프로젝트의 등록(grain)과 모델(`read(alias, field)` /
+`rows(alias)`)을 전부 깨는 breaking release다 — 옮기는 것은 그 프로젝트의 몫이다.

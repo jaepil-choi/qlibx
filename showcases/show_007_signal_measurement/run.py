@@ -101,8 +101,8 @@ LOOKBACK = 6
 ACTIVE_BUDGET = Decimal("0.02")
 """Total absolute active weight the signal is rescaled to after sizing."""
 
-VERIFIED_AGAINST = "vqapr-0.1.0+show-007-working-tree"
-LAST_VERIFIED_AT = "2026-08-18"
+VERIFIED_AGAINST = "vqapr-0.3.0"
+LAST_VERIFIED_AT = "2026-09-03"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:

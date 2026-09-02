@@ -135,8 +135,8 @@ Shorter than the ten returns the lookback yields, so the direct trailing slice d
 the whole history.
 """
 
-VERIFIED_AGAINST = "vqapr-0.1.0+show-008-working-tree"
-LAST_VERIFIED_AT = "2026-08-18"
+VERIFIED_AGAINST = "vqapr-0.3.0"
+LAST_VERIFIED_AT = "2026-09-03"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:

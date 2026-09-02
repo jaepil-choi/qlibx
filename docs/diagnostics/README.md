@@ -7,10 +7,17 @@
 
 | | |
 |---|---|
-| **마지막 갱신** | 2026-09-02 |
-| **현행 진단** | [`2026-09-02-what-the-tree-owes-the-mental-model.md`](2026-09-02-what-the-tree-owes-the-mental-model.md) |
-| **현행 계획** | `docs/refactoring/2026-09-02-the-convergence-campaign.md` |
-| **기준 커밋** | `develop @ 1ec2b8d7` — 1292 passed / 14 deselected, ruff clean, 133 modules / 30,260 lines |
+| **마지막 갱신** | 2026-09-03 |
+| **현행 진단** | [`2026-09-02-what-the-tree-owes-the-mental-model.md`](2026-09-02-what-the-tree-owes-the-mental-model.md) — **§0의 표와 §4의 순서는 전부 집행됐다** (아래) |
+| **현행 계획** | 없음. `docs/refactoring/2026-09-02-the-convergence-campaign.md`는 2026-09-02 `d212bceb`에서 Step 0–7 완료 |
+| **기준 커밋** | `develop @ v0.3.0` — 1327 passed (fast 1314 + slow 13), ruff clean, showcase 9/9 |
+
+> **2026-09-03.** 아래 §0이 그린 "없는 명사 셋"은 records `133`(Surface) · `137`(Panel) · `139`(Run)로
+> 들어왔고, "실환경 결함 다섯"은 `134`(원자적 등록) · `135`(흘려 쓰기, tz 안전한 포맷) · `139`(등록
+> digest) · `129`(unused deps)가 닫았다. `049`의 최종 측정은 `experiments/exp_049_the_measurement/`가
+> 잰다 (rows 372.57s · expr 5.04s · wide 2.46s, anti-join 0). 그 측정이 새로 낸 관측 둘은
+> `docs/issues/053`·`054`다. §0 이하는 **2026-09-02의 관측**으로 남긴다 — 무엇이 측정되었는지의 기록이지
+> 할 일 목록이 아니다.
 
 ---
 

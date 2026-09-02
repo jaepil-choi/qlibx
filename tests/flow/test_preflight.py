@@ -537,7 +537,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     drifted_strategy = StrategyConfig(
         registered, definition.strategy.agenda_id, definition.strategy.agenda_role
     )
-    workspace._strategy_configs[drifted_strategy.agenda_id] = drifted_strategy
+    workspace._strategy_configs[str(registered.component_id)] = drifted_strategy
     # A mutated CONFIG is likewise no longer refused as drift. It reaches the component, which
     # cannot construct from a key it does not declare, so the refusal names that instead. Same
     # principle as the source edit above: judged on whether it works, not on whether it moved.

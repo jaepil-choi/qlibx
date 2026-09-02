@@ -454,7 +454,7 @@ def test_operation_declarations_round_trip_with_registered_references(tmp_path: 
 
     reopened = Workspace.open(tmp_path)
     assert reopened.agenda("strategy-agenda") == strategy_agenda
-    assert reopened.strategy_config("strategy-agenda") == strategy
+    assert reopened.strategy_config("strategy") == strategy
     assert reopened.valuation_config("valuation-agenda") == valuation
     assert reopened.monitoring_policy("monitoring-agenda") == monitoring
 

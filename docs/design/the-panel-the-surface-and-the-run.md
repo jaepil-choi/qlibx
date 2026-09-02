@@ -274,7 +274,8 @@ runs:
   오늘은 `cli/run.py`가 호출마다 spec을 읽어 `RunDefinition`을 새로 만든다 (§17.3).
 - `vqapr run krx-2015-2024 [--strategy ou-ff5] [--jobs 3]`
 - **`docs/issues/040`이 이 설계의 전제조건이다.** 세 전략이 같은 agenda를 가리켜야 하고, 오늘은 agenda가
-  전략 하나만 구동한다. 040의 ruling(agenda는 공유 가능하다)이 먼저 들어와야 한다.
+  전략 하나만 구동한다. 040의 ruling(agenda는 공유 가능하다)이 먼저 들어와야 한다. **들어왔다 —
+  record `138`(2026-09-02).**
 - `FrozenRun`이 둘로 갈린다:
   - **run 층** — universe, period, venue, execution input, initial account, agenda. 전략들이 공유한다.
   - **전략 층** — component, config, constraints, requirements. 전략마다 하나.

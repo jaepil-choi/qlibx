@@ -148,10 +148,12 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
     # is shown, and naming the blocker is the whole requirement here.
     observed = " ".join(failure.observed or "" for failure in error.value.failures)
     remedy = " ".join(failure.fix or "" for failure in error.value.failures)
-    assert "strategy config 'daily'" in observed, (
+    # A strategy config is identified by the strategy it binds (record `138`), so the blocker
+    # is named by the component, not by the agenda the binding points at.
+    assert "strategy config 'mom'" in observed, (
         "the refusal must name what blocks it, not merely that something does"
     )
-    assert "strategy config 'daily'" in remedy, "and the fix must name what to remove first"
+    assert "strategy config 'mom'" in remedy, "and the fix must name what to remove first"
     # Refused means unchanged, not partially applied.
     assert workspace.component("mom").fingerprint == ref.fingerprint
 
@@ -168,8 +170,8 @@ def test_references_to_reports_every_edge_that_blocks_a_removal(tmp_path: Path) 
     workspace.register_component(ref)
     _bind_a_config(workspace, ref)
 
-    assert workspace.references_to("component", "mom") == ("strategy config 'daily'",)
-    assert workspace.references_to("agenda", "daily") == ("strategy config 'daily'",)
+    assert workspace.references_to("component", "mom") == ("strategy config 'mom'",)
+    assert workspace.references_to("agenda", "daily") == ("strategy config 'mom'",)
     # An id nothing points at, and an id that does not exist, are both removable.
     assert workspace.references_to("component", "absent") == ()
 
@@ -181,7 +183,7 @@ def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
     workspace.register_component(ref)
     _bind_a_config(workspace, ref)
 
-    assert workspace.references_to("strategy_config", "daily") == ()
+    assert workspace.references_to("strategy_config", "mom") == ()
 
 
 def test_a_dataset_refuses_rather_than_claiming_it_is_unreferenced(tmp_path: Path) -> None:

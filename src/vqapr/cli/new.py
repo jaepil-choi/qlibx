@@ -191,7 +191,8 @@ agendas:
 
 strategy_configs:
   COMPONENT_ID:                     # component_id of a registered StrategyModel
-    agenda_id: daily-rebalance      # the agenda above whose occurrences drive it
+    agenda_id: daily-rebalance      # the agenda above whose occurrences drive it; several
+                                    # strategies may name one agenda -- a cadence is shared
 
 valuation_configs:
   daily-valuation:                  # any identity; the agenda it names is what matters

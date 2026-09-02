@@ -22,7 +22,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-STORE_KEYS = ("root", "tables")
+STORE_KEYS = ("root", "tables", "account_positions")
 """Exactly the keys `store` may carry.
 
 Named once, here. A second list somewhere else is how `root` becomes optional in one reader and
@@ -41,6 +41,13 @@ class StoreSpec:
 
     root: Path | None = None
     tables: tuple[str, ...] = ()
+    account_positions: bool = True
+    """Whether `vqapr.account` records one row per held instrument at every valuation.
+
+    `True` is today's record. `False` keeps the `_ACCOUNT` row alone -- cash and NAV per
+    valuation -- which is what a NAV series needs and what the testbed read: 0.07% of a 2.6M-row
+    table. Fills are recorded either way, so the positions are recoverable from `vqapr.fill`.
+    """
 
     @classmethod
     def of(cls, declared: object, *, base: Path) -> StoreSpec:
@@ -76,7 +83,10 @@ class StoreSpec:
         if len(set(tables)) != len(tables):
             raise ValueError(f"store.tables must not repeat a table id: {', '.join(tables)}")
 
-        return cls(root=root, tables=tables)
+        raw_positions = declared.get("account_positions", True)
+        if not isinstance(raw_positions, bool):
+            raise TypeError("store.account_positions must be true or false")
+        return cls(root=root, tables=tables, account_positions=raw_positions)
 
     def resolve(self, project_root: Path, workspace_directory: str) -> Path:
         """Where this run's artifacts actually go.

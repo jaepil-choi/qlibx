@@ -34,6 +34,10 @@ def freeze_record(
     complete. A reader that finds one knows the run reached its end; a run killed midway leaves its
     rows and no record, which `run_ids` correctly declines to list as a finished run.
     """
+    # A run with a store streams its rows to this writer as each occurrence is accepted, so
+    # `recorder_rows` is empty here and everything is already on disk. A result assembled without
+    # a sink still carries its rows, and they are appended now. Either way the writer counted what
+    # it wrote, which is what the `tables` block below reports.
     recorded = result.final_state.recorder_rows
     for table_id, rows in sorted(recorded.items()):
         writer.append(table_id, rows)
@@ -53,22 +57,13 @@ def freeze_record(
             "cash": snapshot.cash,
             "positions": dict(snapshot.positions),
         },
-        "tables": lambda: {
-            table_id: {
-                "rows": len(rows),
-                # Instants, not just rows: a table's row count says how much was written, and the
-                # distinct `event_time` count says how often. Research asks the second question
-                # and the first cannot answer it.
-                #
-                # Named `instants` rather than `formations`. "Formation" is portfolio vocabulary,
-                # and this counter is applied to every table -- including `vqapr.fill`, where a
-                # formation is not a thing that happens. A reader who could not work out what it
-                # counted said so (`docs/issues/024`), and the honest answer is the one in the
-                # expression: how many distinct instants this table has rows for.
-                "instants": len({str(row.get("event_time")) for row in rows}),
-            }
-            for table_id, rows in sorted(recorded.items())
-        },
+        # Rows and instants per table, counted by the writer as it appended them. Instants, not
+        # just rows: a table's row count says how much was written, and the distinct `event_time`
+        # count says how often; research asks the second question and the first cannot answer it.
+        # Named `instants` rather than `formations`, because this counter is applied to every
+        # table including `vqapr.fill`, where a formation is not a thing that happens
+        # (`docs/issues/024`).
+        "tables": writer.counts,
         "contract": lambda: contract_report(result),
         # What ran, not what was registered. These agree unless a component was edited after
         # registration, and that difference is the whole signal: a strategy that ran 47 times

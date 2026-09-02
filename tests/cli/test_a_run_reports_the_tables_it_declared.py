@@ -88,10 +88,17 @@ def test_the_counter_is_named_for_what_it_counts() -> None:
     thing that happens. Its expression counts distinct `event_time`, and the name now says so.
     """
     # Record `111` moved `freeze_record` out of the facade into the layer that owns evidence
-    # production; the counter travelled with it.
-    from vqapr.flow import records
+    # production; the counter travelled with it. Record `135` moved the counting itself into the
+    # run record writer, which sees every chunk as it is appended -- streamed during the run or
+    # handed over at the end -- so nothing has to hold the rows to count them. The record reports
+    # what the writer counted, under the same name.
+    from vqapr.flow import records, run_records
 
-    text = Path(records.__dict__["__file__"]).read_text(encoding="utf-8")
+    writer_text = Path(run_records.__dict__["__file__"]).read_text(encoding="utf-8")
+    record_text = Path(records.__dict__["__file__"]).read_text(encoding="utf-8")
 
-    assert '"instants": len({str(row.get("event_time")) for row in rows})' in text
-    assert '"formations":' not in text, "the old name is still emitted somewhere"
+    assert 'instants.add(str(row.get("event_time")))' in writer_text
+    assert '"instants": len(self._instants[table_id])' in writer_text
+    assert '"tables": writer.counts' in record_text
+    for text in (writer_text, record_text):
+        assert '"formations":' not in text, "the old name is still emitted somewhere"

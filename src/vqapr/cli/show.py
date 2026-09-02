@@ -84,6 +84,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=100,
         help="rows to return when --table is given; 0 returns every row",
     )
+    parser.add_argument(
+        "--instrument",
+        dest="instrument",
+        default=None,
+        help=(
+            "with --table: return only rows whose `instrument` is this id "
+            "(`_ACCOUNT` is the cash-and-NAV row of vqapr.account)"
+        ),
+    )
 
 
 def _model(component_id: str, project_root: Path) -> dict[str, Any]:
@@ -262,11 +271,19 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             ),
         )
     limit = max(int(getattr(args, "limit", 100) or 0), 0)
+    instrument = getattr(args, "instrument", None)
     rows: list[dict[str, Any]] = []
     total = 0
+    matched = 0
     try:
         for row in read_table(root, args.identifier, table):
             total += 1
+            # Filtered here, row by row, rather than after loading the table: a 2.6M-row
+            # `vqapr.account` is why the testbed bypassed this command (A6), and the rows it
+            # wanted were the `_ACCOUNT` ones -- 0.07% of the table.
+            if instrument is not None and row.get("instrument") != instrument:
+                continue
+            matched += 1
             if limit == 0 or len(rows) < limit:
                 rows.append(row)
     except ValueError as damaged:
@@ -291,6 +308,8 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # conclude the run wrote 100 rows when it wrote 40,000. `rows_total` is what the table
         # holds; `rows` is what this call returned.
         rows_total=total,
+        # Three numbers: what the table holds, what the filter admitted, what this page returned.
+        matched=matched,
         returned=len(rows),
         tables=list(known_tables),
         items=rows,

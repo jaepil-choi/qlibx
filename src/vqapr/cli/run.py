@@ -560,6 +560,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             store_root=store.resolve(project_root, WORKSPACE_DIRECTORY),
             run_id=run_id,
             replace_record=bool(getattr(args, "force", False)),
+            record_account_positions=store.account_positions,
         )
     except RunRecordLive as running:
         raise _held_run_id(run_id, running) from running

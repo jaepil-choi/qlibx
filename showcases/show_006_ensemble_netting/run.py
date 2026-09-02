@@ -856,8 +856,14 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         raise AssertionError("the published account series does not read back row for row")
     # Cash is an account-level fact, so it lives on the account-level rows; the instrument panel
     # rows alongside them carry quantity and price instead.
-    published_cash = [row["cash"] for row in replayed_account if row["cash"] is not None]
-    recorded_cash = [str(row["cash"]) for row in recorded_account if row["cash"] is not None]
+    # Compared as numbers: since record `135` the run records cash as a Decimal and the published
+    # column is DECIMAL rather than text, so the round trip is exact on both sides.
+    published_cash = [
+        Decimal(str(row["cash"])) for row in replayed_account if row["cash"] is not None
+    ]
+    recorded_cash = [
+        Decimal(str(row["cash"])) for row in recorded_account if row["cash"] is not None
+    ]
     if published_cash != recorded_cash:
         raise AssertionError("the published cash series differs from what the run recorded")
 

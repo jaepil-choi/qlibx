@@ -34,7 +34,7 @@ import shutil
 import time as _time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -45,6 +45,17 @@ from vqapr._internal import atomic
 RUNS_DIRECTORY = "runs"
 RECORD_FILENAME = "record.json"
 TABLES_DIRECTORY = "tables"
+TYPES_SUFFIX = ".types.json"
+"""Beside each table's JSONL: which Python type each column was encoded from.
+
+JSON has strings, numbers, booleans and null. A `Decimal` is written as a string so it stays
+the number it was, and a `datetime` as ISO-8601 with its offset -- and a reader that guesses
+from the text gets both wrong in the ways the testbed met: `read_json_auto` shifted every
+instant by its offset and the panel built from it registered cleanly (A5). The writer saw the
+types at the moment it stringified them, so it records them, per table and per column, and
+`read_typed_table` decodes by that instead of guessing. A record written before this sidecar
+existed reads back as strings, and says so by having no sidecar.
+"""
 
 SCHEMA = "vqapr-run-record/v2"
 """Bumped from `v1` by record `115`, when the record gained a `kind` discriminator.
@@ -141,6 +152,53 @@ def record_fields(kind: str) -> tuple[str, ...]:
 
 
 
+
+
+def _type_name(value: object) -> str | None:
+    """The name a column's type travels under, or `None` for a null that says nothing."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, Decimal):
+        return "decimal"
+    if isinstance(value, datetime):
+        return "datetime"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "string"
+    return "string"
+
+
+def _learn_types(types: dict[str, str], row: Mapping[str, object]) -> None:
+    """Fold one row's column types into a table's. A column seen under two types is a string.
+
+    Downgrading, never guessing: a column that carried a `Decimal` on one row and text on another
+    cannot be decoded as either, and reading it back as the strings that were written is the one
+    answer that loses nothing.
+    """
+    for column, value in row.items():
+        name = _type_name(value)
+        if name is None:
+            continue
+        known = types.get(column)
+        if known is None:
+            types[column] = name
+        elif known != name:
+            types[column] = "string"
+
+
+def _decode(value: object, type_name: str) -> object:
+    if value is None or not isinstance(value, str):
+        return value
+    if type_name == "decimal":
+        return Decimal(value)
+    if type_name == "datetime":
+        return datetime.fromisoformat(value)
+    return value
 
 
 def _encode(value: object) -> object:
@@ -335,10 +393,31 @@ class RunRecordWriter:
 
     root: Path
     run_id: str
+    _rows: dict[str, int] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _instants: dict[str, set[str]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    _types: dict[str, dict[str, str]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    """What this writer has appended so far, per table: rows, and the distinct `event_time`s.
+
+    Counted as chunks pass through `append`, so the record's `tables` block is right whether the
+    run streamed its rows occurrence by occurrence or handed them over once at the end -- and so
+    nothing has to hold the rows to count them. A set of instants is bounded by the run's
+    instants, not its rows.
+    """
 
     @property
     def directory(self) -> Path:
         return self.root / RUNS_DIRECTORY / self.run_id
+
+    def counts(self) -> dict[str, dict[str, int]]:
+        """Per table: rows appended so far, and the distinct instants they span."""
+        return {
+            table_id: {"rows": self._rows[table_id], "instants": len(self._instants[table_id])}
+            for table_id in sorted(self._rows)
+        }
 
     def open(self, *, replace: bool = False) -> None:
         """Create this run's directory, refusing to write into one that already exists.
@@ -539,9 +618,22 @@ class RunRecordWriter:
         if not rows:
             return
         path = self.directory / TABLES_DIRECTORY / f"{table_id}.jsonl"
+        instants = self._instants.setdefault(table_id, set())
+        types = self._types.setdefault(table_id, {})
+        before = dict(types)
         with path.open("a", encoding="utf-8") as handle:
             for row in rows:
+                _learn_types(types, row)
                 handle.write(json.dumps(_encode(row), sort_keys=True) + "\n")
+                instants.add(str(row.get("event_time")))
+        self._rows[table_id] = self._rows.get(table_id, 0) + len(rows)
+        if types != before:
+            # Rewritten only when a column's type is first seen or changes -- once per table for
+            # almost every run -- and atomically, so a reader never sees half a sidecar.
+            atomic.write_atomically(
+                self.directory / TABLES_DIRECTORY / f"{table_id}{TYPES_SUFFIX}",
+                json.dumps(types, indent=2, sort_keys=True) + "\n",
+            )
 
     def finish(self, record: Mapping[str, object], *, kind: str = RUN_KIND) -> Path:
         """Write the run's own facts, last, by atomic replace.
@@ -712,6 +804,37 @@ def read_table(root: Path, run_id: str, table_id: str) -> Iterator[dict[str, Any
                     "this file, so a line that does not parse means it was edited or truncated; "
                     "restore it, or re-run under a new run id"
                 ) from damaged
+
+
+def table_types(root: Path, run_id: str, table_id: str) -> dict[str, str] | None:
+    """The column types one table was written from, or `None` for a record that predates them."""
+    path = root / RUNS_DIRECTORY / run_id / TABLES_DIRECTORY / f"{table_id}{TYPES_SUFFIX}"
+    if not path.is_file():
+        return None
+    types = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(types, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str) for key, value in types.items()
+    ):
+        raise ValueError(f"{path} is not a column-type map; the recorder wrote it, so restore it")
+    return types
+
+
+def read_typed_table(root: Path, run_id: str, table_id: str) -> Iterator[dict[str, Any]]:
+    """Stream one table's rows back as the values they were written from.
+
+    A `Decimal` comes back a `Decimal` and an instant an offset-aware `datetime`, decoded by the
+    sidecar the writer left beside the table. This is the reader `vqapr.public` exports, and the
+    reason it exists: the raw JSONL is exact but a reader that types it by guessing shifts every
+    instant by its offset (the testbed's A5). A table with no sidecar -- written before the
+    sidecar existed -- streams strings, exactly as `read_table` does.
+    """
+    types = table_types(root, run_id, table_id) or {}
+    for row in read_table(root, run_id, table_id):
+        if types:
+            for column, type_name in types.items():
+                if column in row:
+                    row[column] = _decode(row[column], type_name)
+        yield row
 
 
 def table_ids(root: Path, run_id: str) -> tuple[str, ...]:

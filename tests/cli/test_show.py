@@ -162,3 +162,37 @@ def test_list_runs_reports_an_empty_store_rather_than_failing(tmp_path: Path) ->
 
     assert payload["ok"] is True
     assert payload["count"] == 0
+
+
+def test_show_run_table_filters_by_instrument(tmp_path: Path) -> None:
+    """A6: the NAV series of a 2.6M-row account table is one call, not a bypass of the surface."""
+    writer = RunRecordWriter(tmp_path, "wide")
+    writer.open()
+    writer.append(
+        "vqapr.account",
+        [
+            {"instrument": "_ACCOUNT", "nav": "1000"},
+            {"instrument": "A005930", "nav": None},
+            {"instrument": "A000660", "nav": None},
+            {"instrument": "_ACCOUNT", "nav": "1010"},
+        ],
+    )
+    writer.finish(_RECORD)
+
+    payload = show_run(
+        argparse.Namespace(
+            kind="run",
+            identifier="wide",
+            store_root=tmp_path,
+            table="vqapr.account",
+            limit=0,
+            instrument="_ACCOUNT",
+        ),
+        project_root=tmp_path,
+    )
+
+    assert payload["rows_total"] == 4
+    assert payload["matched"] == 2
+    assert payload["returned"] == 2
+    assert [row["nav"] for row in payload["items"]] == ["1000", "1010"]
+

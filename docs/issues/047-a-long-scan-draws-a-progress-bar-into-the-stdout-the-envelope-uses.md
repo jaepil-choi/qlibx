@@ -17,7 +17,7 @@ pytest against a `_configure` that did nothing.
 
 
 **Status when filed:** open. Found 2026-08-31 in
-`kwam-enhanced-index/vqapr-performance-testbed/`, against `vqapr-0.2.0a2` (built wheel). The
+`kwam-enhanced-index/vqapr-performance-testbed/` (a directory that no longer exists, record `136`), against `vqapr-0.2.0a2` (built wheel). The
 workaround it forces was already in the wild — see below — with no record of why.
 **Touches:** `src/vqapr/data/scan.py:150` (`_open`) and `src/vqapr/data/scan.py:205`
 (`ScanSession.connection`), the two places a duckdb connection is created.

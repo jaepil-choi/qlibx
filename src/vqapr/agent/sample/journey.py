@@ -19,7 +19,6 @@ from vqapr.public import (
     AccountSnapshot,
     ComponentKind,
     ComponentRef,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -33,6 +32,7 @@ from vqapr.public import (
     RunDefinition,
     SourceSpec,
     StrategyConfig,
+    StrategyEntry,
     ValuationConfig,
     Workspace,
     preflight_run,
@@ -41,6 +41,7 @@ from vqapr.public import (
     register_dataset,
     register_execution_input,
     register_monitoring_policy,
+    register_run,
     register_strategy_config,
     register_strategy_model,
     register_valuation_config,
@@ -58,6 +59,7 @@ VALUATION = time(16, 0)
 MONITORING = time(16, 30)
 
 DATASET_ID = "sample-prices"
+RUN_ID = "sample-run"
 EXECUTION_ID = "sample-execution"
 STRATEGY_ID = "sample-reversal-5d"
 EXCHANGE_ID = "sample-exchange"
@@ -92,9 +94,7 @@ def _sessions(panel: SamplePanel) -> list[date]:
     return [date(int(v[:4]), int(v[4:6]), int(v[6:8])) for v in panel.sessions]
 
 
-def _agenda(
-    agenda_id: str, role: OperationRole, at: time, days: list[date]
-) -> OperationAgenda:
+def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
     return OperationAgenda.from_occurrences(
         agenda_id=agenda_id,
         role=role,
@@ -187,18 +187,19 @@ def install(project_root: Path) -> SamplePanel:
     register_monitoring_policy(
         project_root, MonitoringPolicy(MONITORING_AGENDA, OperationRole.MONITORING)
     )
+    register_run(project_root, definition(panel))
     return panel
 
 
-def execute(project_root: Path, panel: SamplePanel) -> SampleResult:
-    """Freeze the registered declarations and run them."""
+def definition(panel: SamplePanel, run_id: str = RUN_ID) -> RunDefinition:
+    """The sample run: one strategy over the sample panel, by ids the workspace registered."""
     sessions = _sessions(panel)
-    definition = RunDefinition(
-        strategy=_strategy(project_root),
+    return RunDefinition(
+        run_id=run_id,
+        strategies=(StrategyEntry(STRATEGY_ID),),
         valuation=_valuation(),
-        constraints=ConstraintSet(()),
         monitoring=MonitoringPolicy(MONITORING_AGENDA, OperationRole.MONITORING),
-        exchange=Workspace.open(project_root).component(EXCHANGE_ID),
+        exchange=EXCHANGE_ID,
         execution_input_id=EXECUTION_ID,
         start=datetime.fromisoformat(f"{sessions[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{sessions[-1].isoformat()}T23:59:59{OFFSET}"),
@@ -206,7 +207,11 @@ def execute(project_root: Path, panel: SamplePanel) -> SampleResult:
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=panel.instruments,
     )
-    result = run(project_root, preflight_run(project_root, definition))
+
+
+def execute(project_root: Path, panel: SamplePanel) -> SampleResult:
+    """Freeze the registered run and run it."""
+    result = run(project_root, preflight_run(project_root, definition(panel))).result()
     return SampleResult(
         panel,
         len(result.occurrences),
@@ -215,4 +220,4 @@ def execute(project_root: Path, panel: SamplePanel) -> SampleResult:
     )
 
 
-__all__ = ["SampleResult", "execute", "install"]
+__all__ = ["RUN_ID", "SampleResult", "definition", "execute", "install"]

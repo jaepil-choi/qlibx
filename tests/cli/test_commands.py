@@ -2,8 +2,8 @@
 
 `test_envelope.py` covers the envelope's shape and asserts the parser *mentions* every command.
 Mentioning is not running: before this file, no test invoked `new`, `register`, `list` or `run`,
-so the whole `spec.yaml -> RunDefinition -> preflight_run -> run` path was unexecuted. These tests
-call `main(argv)` and read the JSON it emits, which is exactly what an agent gets.
+so the whole `runs: -> register -> RunDefinition -> preflight_run -> run` path was unexecuted.
+These tests call `main(argv)` and read the JSON it emits, which is exactly what an agent gets.
 
 Datasets, sources, agendas, execution inputs and configs are declared through `vqapr declare`,
 which is the command that closed that gap. This file previously reached past the CLI into the
@@ -193,10 +193,21 @@ monitoring_policies:
     code, payload = _cli(capsys, "--project-root", str(root), "register", str(configs))
     assert code == 0, payload
 
+    # The run itself is a registration too (record 139): `vqapr run r1` is what the tests type.
+    code, payload = _register_run(root, capsys, "r1")
+    assert code == 0, payload
+    assert payload["registered"]["runs"] == ["r1"]
 
-def _spec(root: Path, **overrides: object) -> Path:
-    document: dict[str, object] = {
-        "strategy": {"component": "my-alpha", "agenda_id": "alpha"},
+
+def _runs_declaration(root: Path, run_id: str = "r1", **overrides: object) -> Path:
+    """A `runs:` declaration for one run over this workspace, exactly as a user would write it.
+
+    `constraints=[...]` is the one convenience: it lands on the single strategy the run names.
+    Any other keyword replaces the run's key of that name.
+    """
+    constraints = overrides.pop("constraints", None)
+    body: dict[str, object] = {
+        "strategies": {"my-alpha": {} if constraints is None else {"constraints": constraints}},
         "valuation": {"agenda_id": "valuing"},
         "monitoring": {"agenda_id": "watching"},
         "exchange": "venue",
@@ -206,10 +217,30 @@ def _spec(root: Path, **overrides: object) -> Path:
         "initial_account": {"cash": "1000", "mode": "long_only"},
         "instruments": ["A"],
     }
-    document.update(overrides)
-    path = root / "spec.yaml"
-    path.write_text(json.dumps(document), encoding="utf-8")  # JSON is a subset of YAML
+    body.update(overrides)
+    path = root / f"runs-{run_id}.yaml"
+    path.write_text(json.dumps({"runs": {run_id: body}}), encoding="utf-8")  # JSON is YAML
     return path
+
+
+def _register_run(
+    root: Path, capsys: pytest.CaptureFixture[str], run_id: str = "r1", **overrides: object
+) -> tuple[int, dict]:
+    """Register one run through `vqapr register`, returning what the CLI answered."""
+    return _cli(
+        capsys, "--project-root", str(root),
+        "register", str(_runs_declaration(root, run_id, **overrides)),
+    )
+
+
+def _strategy_ref(root: Path, capsys: pytest.CaptureFixture[str], run_id: str) -> str:
+    """The one strategy record a run holds, as `<id>@<fp8>`, found the way a reader finds it."""
+    code, listed = _cli(
+        capsys, "--project-root", str(root), "list", "strategies", "--run", run_id
+    )
+    assert code == 0, listed
+    assert listed["count"] == 1, listed
+    return listed["items"][0]["strategy_ref"]
 
 
 def test_new_register_and_list_are_one_working_path(
@@ -244,30 +275,33 @@ def test_new_register_and_list_are_one_working_path(
     assert listed["items"][0]["object_name"] == created["object_name"]
 
 
-def test_run_executes_a_declared_spec_end_to_end(
+def test_run_executes_a_registered_run_end_to_end(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The path the testbed never walked: spec.yaml -> preflight -> a completed run."""
+    """The path the testbed never walked: `runs:` -> register -> preflight -> a completed run."""
     _workspace_for_run(tmp_path, capsys)
 
-    code, payload = _cli(capsys, "--project-root", str(tmp_path), "run", str(_spec(tmp_path)))
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "run", "r1")
 
     assert code == 0, payload
     assert payload["ok"] is True
     assert payload["stage"] == "run.complete"
+    assert payload["run_id"] == "r1"
+    # One strategy, reported under its own id: a run is configuration and the strategy record is
+    # its output (record 139), so the numbers below are the strategy's.
+    assert list(payload["strategies"]) == ["my-alpha"]
+    strategy = payload["strategies"]["my-alpha"]
+    assert strategy["record"].startswith("my-alpha@")
     # Three days x (strategy, valuation, monitoring) plus the execution occurrences the fills
     # land on. Pinned rather than `> 0`, which a run that did nothing would also satisfy.
-    assert payload["occurrences"] == 12
+    assert strategy["occurrences"] == 12
     # The scaffold TRADES. It used to hold throughout -- the old template returned Hold --
     # and this assertion pinned account_version at zero, which meant the end-to-end test proved a
     # run that never bought anything. The authoring-contract scaffold ranks the cross-section and
     # rebalances, so fills commit and the Account advances, which is the stronger property: it
     # exercises the intent path, the execution path and the account commit rather than skipping
     # all three.
-    assert payload["account_version"] == 2
-    # The run state advances further than the Account: once per published mark, plus the
-    # intents and fills a trading strategy now produces.
-    assert payload["run_state_version"] == 14
+    assert strategy["account_version"] == 2
     # What the orders DID (`docs/issues/039`). `ok: true` says the simulation executed; it does
     # not say the declared book is the held book, and in the run that filed the issue those
     # differed by nine percent of NAV because 3.1% of fills dealt nothing. Pinned rather than
@@ -276,7 +310,7 @@ def test_run_executes_a_declared_spec_end_to_end(
     # Two orders across the run: the first buys the single instrument, the second asks for no
     # change and the venue answers `no_trade`. Both are visible now; before this, the envelope
     # reported neither.
-    assert payload["fills"] == {
+    assert strategy["fills"] == {
         "orders": 2,
         "dealt": 1,
         "partial": 0,
@@ -285,7 +319,7 @@ def test_run_executes_a_declared_spec_end_to_end(
     }
 
 
-def test_show_run_reads_back_the_tables_a_run_recorded(
+def test_show_strategy_reads_back_the_tables_a_run_recorded(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`RunRecorder` writes evidence tables on every run and nothing could read one back.
@@ -295,24 +329,29 @@ def test_show_run_reads_back_the_tables_a_run_recorded(
     layout and opening the `.jsonl` by hand -- the same class of gap `list instruments` closed for
     the roster sidecar, and the reason the first-time-user journeys ended up reading package
     internals to answer questions the CLI was supposed to answer.
+
+    The tables belong to the strategy since record 139, so `show strategy <run>/<strategy>` is
+    the reader; `show run <id> --table` on such a run points there instead of guessing.
     """
     _workspace_for_run(tmp_path, capsys)
-    code, ran = _cli(
-        capsys, "--project-root", str(tmp_path), "run", str(_spec(tmp_path)), "--run-id", "r1"
-    )
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "r1")
     assert code == 0, ran
 
-    code, record = _cli(capsys, "--project-root", str(tmp_path), "show", "run", "r1")
+    code, record = _cli(
+        capsys, "--project-root", str(tmp_path), "show", "strategy", "r1/my-alpha"
+    )
     assert code == 0, record
+    assert record["stage"] == "strategy.show"
     recorded = sorted(record["tables"])
     assert recorded == ["vqapr.account", "vqapr.fill", "vqapr.weight"]
 
     for table in recorded:
         code, page = _cli(
-            capsys, "--project-root", str(tmp_path), "show", "run", "r1", "--table", table
+            capsys, "--project-root", str(tmp_path), "show", "strategy", "r1/my-alpha",
+            "--table", table,
         )
         assert code == 0, page
-        assert page["stage"] == "run.table"
+        assert page["stage"] == "strategy.table"
         assert page["table"] == table
         # The record's own count for this table is what the readback must agree with, or one of
         # the two is lying about the same run.
@@ -322,7 +361,8 @@ def test_show_run_reads_back_the_tables_a_run_recorded(
 
     # `vqapr.fill` is the table the cost questions are asked of, so its columns are pinned.
     code, fills = _cli(
-        capsys, "--project-root", str(tmp_path), "show", "run", "r1", "--table", "vqapr.fill"
+        capsys, "--project-root", str(tmp_path), "show", "strategy", "r1/my-alpha",
+        "--table", "vqapr.fill",
     )
     assert {"instrument", "kind", "dealt_quantity", "price", "commission", "tax"} <= set(
         fills["items"][0]
@@ -331,15 +371,24 @@ def test_show_run_reads_back_the_tables_a_run_recorded(
     # Truncation reports both numbers. Returning only `len(items)` would let a reader conclude the
     # run wrote one row when it wrote five.
     code, page = _cli(
-        capsys, "--project-root", str(tmp_path), "show", "run", "r1",
+        capsys, "--project-root", str(tmp_path), "show", "strategy", "r1/my-alpha",
         "--table", "vqapr.account", "--limit", "1",
     )
     assert code == 0, page
     assert page["returned"] == 1 and page["rows_total"] > 1
 
+    # The run's own view no longer holds tables; asking it for one names where they went.
+    code, redirected = _cli(
+        capsys, "--project-root", str(tmp_path), "show", "run", "r1", "--table", "vqapr.fill"
+    )
+    assert code == 1
+    assert redirected["stage"] != "unhandled"
+    assert "show strategy" in redirected["failures"][0]["fix"]
+
     # A mistyped table names the ones this run actually recorded, the way a mistyped run id does.
     code, refused = _cli(
-        capsys, "--project-root", str(tmp_path), "show", "run", "r1", "--table", "vqapr.fils"
+        capsys, "--project-root", str(tmp_path), "show", "strategy", "r1/my-alpha",
+        "--table", "vqapr.fils",
     )
     assert code == 1
     assert refused["stage"] != "unhandled"
@@ -348,10 +397,14 @@ def test_show_run_reads_back_the_tables_a_run_recorded(
     # A damaged row is reported, never skipped. Skipping would return a short table that looks
     # complete, and a reader comparing it against the record's own count would find two numbers
     # disagreeing with no reason given.
-    fill_file = tmp_path / ".vqapr" / "runs" / "r1" / "tables" / "vqapr.fill.jsonl"
+    ref = _strategy_ref(tmp_path, capsys, "r1")
+    fill_file = (
+        tmp_path / ".vqapr" / "runs" / "r1" / "strategies" / ref / "tables" / "vqapr.fill.jsonl"
+    )
     fill_file.write_text(fill_file.read_text(encoding="utf-8") + "{not json\n", encoding="utf-8")
     code, damaged = _cli(
-        capsys, "--project-root", str(tmp_path), "show", "run", "r1", "--table", "vqapr.fill"
+        capsys, "--project-root", str(tmp_path), "show", "strategy", f"r1/{ref}",
+        "--table", "vqapr.fill",
     )
     assert code == 1
     assert damaged["stage"] != "unhandled", "a damaged row is an answer, not a crash"
@@ -362,7 +415,8 @@ def test_show_run_reads_back_the_tables_a_run_recorded(
     for wrong in ("5", "null", '"text"', "[1, 2]"):
         fill_file.write_text(f"{wrong}\n", encoding="utf-8")
         code, typed = _cli(
-            capsys, "--project-root", str(tmp_path), "show", "run", "r1", "--table", "vqapr.fill"
+            capsys, "--project-root", str(tmp_path), "show", "strategy", f"r1/{ref}",
+            "--table", "vqapr.fill",
         )
         assert code == 1, f"{wrong} is not a row"
         assert typed["stage"] != "unhandled"
@@ -377,13 +431,18 @@ def test_an_empty_recorded_table_reads_back_as_empty_not_as_broken(
     and must not be conflated: one is a legal outcome and the other is a file that was edited.
     """
     _workspace_for_run(tmp_path, capsys)
-    _cli(capsys, "--project-root", str(tmp_path), "run", str(_spec(tmp_path)), "--run-id", "r1")
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "r1")
+    assert code == 0, ran
+    ref = _strategy_ref(tmp_path, capsys, "r1")
 
-    empty = tmp_path / ".vqapr" / "runs" / "r1" / "tables" / "vqapr.blank.jsonl"
+    empty = (
+        tmp_path / ".vqapr" / "runs" / "r1" / "strategies" / ref / "tables" / "vqapr.blank.jsonl"
+    )
     empty.write_text("\n\n", encoding="utf-8")
 
     code, page = _cli(
-        capsys, "--project-root", str(tmp_path), "show", "run", "r1", "--table", "vqapr.blank"
+        capsys, "--project-root", str(tmp_path), "show", "strategy", f"r1/{ref}",
+        "--table", "vqapr.blank",
     )
     assert code == 0, page
     assert page["rows_total"] == 0 and page["items"] == []
@@ -572,12 +631,14 @@ def test_a_materialization_spec_refuses_what_it_cannot_honour(
         _, payload = _cli(capsys, "--project-root", str(tmp_path), "check", str(spec))
         return [failure["code"] for failure in payload.get("failures", [])]
 
-    # A spec cannot disagree with itself about what it is, and neither can it decline to say.
-    assert codes({**base, "strategy": {"component": "x", "agenda_id": "a"}}) == [
-        "check.spec.kind_ambiguous"
-    ]
+    # A file is a materialization spec and nothing else since record 139: one declaring the
+    # retired `strategy:` shape is refused by name, pointing at `runs:`, and one declining to say
+    # `datamodel:` is refused as incomplete. Neither is parsed as if the schema had not moved.
     without = {key: value for key, value in base.items() if key != "datamodel"}
-    assert codes(without) == ["check.spec.kind_ambiguous"]
+    assert codes({**without, "strategy": {"component": "x", "agenda_id": "a"}}) == [
+        "cli.input.value_invalid"
+    ]
+    assert codes(without) == ["cli.input.keys_missing"]
 
     # `materialize()` refuses an output dataset_id that already exists. Asked here instead.
     assert codes({**base, "output": {"dataset_id": "prices", "value_fields": ["value"]}}) == [
@@ -695,10 +756,10 @@ def test_a_materialization_refuses_the_flags_that_belong_to_a_run_record(
 ) -> None:
     """Refused, not ignored.
 
-    `--run-id` and `--force` are defined entirely in terms of a run record, and a materialization
-    writes none -- it registers a dataset. Accepting a flag that cannot do what its name says is
-    how a reader learns the wrong model of a command, and `--force` in particular names a
-    destructive act it would not perform.
+    `--strategy`, `--jobs` and `--force` are defined entirely in terms of a run record, and a
+    materialization writes none -- it registers a dataset. Accepting a flag that cannot do what
+    its name says is how a reader learns the wrong model of a command, and `--force` in
+    particular names a destructive act it would not perform.
     """
     _workspace_for_run(tmp_path, capsys)
     code, emitted = _cli(
@@ -719,10 +780,10 @@ def test_a_materialization_refuses_the_flags_that_belong_to_a_run_record(
         encoding="utf-8",
     )
 
-    for flag in ("--run-id", "--force"):
+    for flag, value in (("--strategy", "whatever"), ("--jobs", "2"), ("--force", None)):
         argv = ["--project-root", str(tmp_path), "run", str(spec), flag]
-        if flag == "--run-id":
-            argv.append("whatever")
+        if value is not None:
+            argv.append(value)
         code, refused = _cli(capsys, *argv)
         assert code == 1, refused
         assert refused["stage"] != "unhandled"
@@ -777,19 +838,21 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     # effort, and whether a limit actually held is a question about the committed account, which
     # monitoring answers (PRD 7.1). Stopping also hid what the strategy went on to do, and could
     # never have seen the breach that only appears once whole shares are filled.
-    code, ran = _cli(
-        capsys, "--project-root", str(tmp_path), "run",
-        str(_spec(tmp_path, constraints=["cap20"])), "--run-id", "capped",
-    )
+    code, registered_run = _register_run(tmp_path, capsys, "capped", constraints=["cap20"])
+    assert code == 0, registered_run
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "capped")
     assert code == 0, ran
     assert ran["ok"] is True
 
     # And the breach is IN THE RECORD, named. The block that carries it reported `{}` for every
     # run ever written until `docs/issues/051`, so this asserts its content and not its presence.
     code, shown = _cli(
-        capsys, "--project-root", str(tmp_path), "show", "run", "capped",
+        capsys, "--project-root", str(tmp_path), "show", "strategy", "capped/my-alpha",
     )
     assert code == 0, shown
+    assert [entry["component_id"] for entry in shown["constraints"]] == ["cap20"], (
+        "the strategy record names the constraints it ran under"
+    )
     contract = shown["contract"]
     assert "cap20" in contract, f"the record names which constraint was observed: {contract}"
     entry = contract["cap20"]
@@ -809,10 +872,9 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     )
     assert code == 0, registered_wide
 
-    code, ran = _cli(
-        capsys, "--project-root", str(tmp_path), "run",
-        str(_spec(tmp_path, constraints=["cap-any"])), "--run-id", "uncapped",
-    )
+    code, registered_run = _register_run(tmp_path, capsys, "uncapped", constraints=["cap-any"])
+    assert code == 0, registered_run
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "uncapped")
     assert code == 0, ran
     assert ran["ok"] is True and ran["stage"] == "run.complete"
 
@@ -895,19 +957,23 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
     import json as _json
 
     from vqapr.domain.roster_export import export_roster
-    from vqapr.flow.run_records import read_record
+    from vqapr.flow.run_records import read_strategy_record
 
     _workspace_for_run(tmp_path, capsys)
-    spec = str(_spec(tmp_path))
+    store = tmp_path / ".vqapr"
+    for run_id in ("bare", "categorised"):
+        code, registered_run = _register_run(tmp_path, capsys, run_id)
+        assert code == 0, registered_run
 
-    code, without = _cli(capsys, "--project-root", str(tmp_path), "run", spec, "--run-id", "bare")
+    code, without = _cli(capsys, "--project-root", str(tmp_path), "run", "bare")
 
     assert code == 0, without
     assert without["roster"]["known"] is False
     # The note names the consequence and the remedy, not merely the absence.
     assert "kind: None" in without["roster"]["note"]
     assert "vqapr register" in without["roster"]["note"]
-    assert read_record(tmp_path / ".vqapr", "bare")["roster"] is None
+    bare_ref = _strategy_ref(tmp_path, capsys, "bare")
+    assert read_strategy_record(store, "bare", bare_ref)["roster"] is None
 
     written = export_roster({"A": "stock"}, tmp_path / "roster")
     declaration = tmp_path / "roster.yaml"
@@ -923,16 +989,16 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
     assert code == 0, registered
     digest = registered["registered"]["instruments"][0]["digest"]
 
-    code, with_roster = _cli(
-        capsys, "--project-root", str(tmp_path), "run", spec, "--run-id", "categorised"
-    )
+    code, with_roster = _cli(capsys, "--project-root", str(tmp_path), "run", "categorised")
 
     assert code == 0, with_roster
     assert with_roster["roster"]["known"] is True
     assert with_roster["roster"]["digest"] == digest
     assert with_roster["roster"]["by_kind"] == {"stock": 1}
     # The frozen record carries the same facts, so a later reader gets them without the envelope.
-    frozen = read_record(tmp_path / ".vqapr", "categorised")
+    frozen = read_strategy_record(
+        store, "categorised", _strategy_ref(tmp_path, capsys, "categorised")
+    )
     assert frozen["roster"]["digest"] == digest
     assert frozen["roster"]["by_kind"] == {"stock": 1}
     assert _json.dumps(frozen)  # the record must stay JSON-serialisable
@@ -984,9 +1050,12 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
             ),
         )
     )
-    spec = str(_spec(tmp_path, constraints=["limit"]))
+    # Registering the run is a reference check only -- `limit` IS a registered constraint -- so
+    # the mismatch is still the two verbs' to refuse, exactly as before.
+    code, registered_run = _register_run(tmp_path, capsys, "limited", constraints=["limit"])
+    assert code == 0, registered_run
 
-    code, checked = _cli(capsys, "--project-root", str(tmp_path), "check", spec)
+    code, checked = _cli(capsys, "--project-root", str(tmp_path), "check", "limited")
 
     assert code == 1, checked
     assert checked["ok"] is False
@@ -994,7 +1063,7 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
         failure["code"] for failure in checked["failures"]
     ]
 
-    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", spec)
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "limited")
 
     assert code == 1, ran
     assert ran["ok"] is False
@@ -1037,9 +1106,10 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     # compared against the unconstrained spec's failures instead and said so. The judgment now
     # measures at the first decision rather than at `start`, the two verbs agree, and the weaker
     # comparison is gone with the defect it worked around.
-    spec = str(_spec(tmp_path, constraints=["no-short"]))
+    code, registered_run = _register_run(tmp_path, capsys, "no-short-run", constraints=["no-short"])
+    assert code == 0, registered_run
 
-    code, checked = _cli(capsys, "--project-root", str(tmp_path), "check", spec)
+    code, checked = _cli(capsys, "--project-root", str(tmp_path), "check", "no-short-run")
     assert code == 0, checked
     assert checked["ok"] is True, (
         "naming a correctly-registered constraint must add no refusal of its own"
@@ -1050,48 +1120,51 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     # `ok:true` with no failures already says the mismatch refusal did not fire; asserting its
     # absence separately would restate the line above.
 
-    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", spec)
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "no-short-run")
     assert code == 0, ran
     assert ran["ok"] is True
     assert ran["stage"] == "run.complete"
     # Identical to the unconstrained end-to-end run above: a long-only strategy never proposes a
     # short, so no-short binds nothing and must change no number. A different count here would
     # mean the constraint altered the book rather than merely permitting it.
-    assert ran["occurrences"] == 12
-    assert ran["account_version"] == 2
-    assert ran["run_state_version"] == 14
+    strategy = ran["strategies"]["my-alpha"]
+    assert strategy["occurrences"] == 12
+    assert strategy["account_version"] == 2
 
 
-def test_run_refuses_a_date_boundary_as_structured_cli_input(
+def test_register_refuses_a_date_boundary_as_a_structured_declaration_refusal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The old template promised dates, then preflight crashed on the naive datetime.
 
-    The refusal now comes from the period judgment rather than from `_timestamp`, because `run`
-    makes the judgments `check` makes and they answer before the definition is built. That is the
-    point of the change: both verbs refuse this spec with `check.period.uncovered`, so a red `run`
-    and a red `check` name the same defect.
+    A run is a registered declaration since record 139, so the refusal moves one verb earlier:
+    `register` refuses the bare date, and neither `check` nor `run` can ever see such a run. That
+    is still one defect with one name, which is the point -- a reader is told once, at the first
+    command that reads the value, rather than by a crash two commands later.
 
-    What must NOT change is how much the reader is told. The judgment carries the missing offset
-    and a well-formed example, exactly as `_timestamp` did -- parity that cost a diagnostic would
-    be a bad trade.
+    What must NOT change is how much the reader is told. The refusal names the missing offset and
+    points at the well-formed shape (`vqapr new run`), exactly as `_timestamp` did -- parity that
+    cost a diagnostic would be a bad trade.
     """
     _workspace_for_run(tmp_path, capsys)
 
-    code, payload = _cli(
-        capsys,
-        "--project-root",
-        str(tmp_path),
-        "run",
-        str(_spec(tmp_path, start="2024-03-05", end="2024-03-07")),
+    code, payload = _register_run(
+        tmp_path, capsys, "dated", start="2024-03-05", end="2024-03-07"
     )
 
     assert code == 1
-    assert payload["stage"] == "run.judgments"
+    assert payload["stage"] != "unhandled"
     failure = payload["failures"][0]
-    assert failure["code"] == "check.period.uncovered"
-    assert "UTC offset" in failure["requirement"]
-    assert failure["examples"] == ["2024-01-02T00:00:00+09:00"]
+    assert failure["code"] == "declaration.read.run_invalid"
+    assert "UTC offset" in failure["observed"]
+    assert "vqapr new run" in failure["requirement"]
+    assert failure["source"]["key_path"] == "runs.dated"
+
+    # And nothing was registered under that id, so the two run verbs report it as unknown rather
+    # than judging a half-declared run.
+    code, listed = _cli(capsys, "--project-root", str(tmp_path), "list", "runs")
+    assert code == 0, listed
+    assert "dated" not in [row["run_id"] for row in listed["items"]]
 
 
 def test_strategy_config_list_exposes_and_filters_by_component_id(
@@ -1115,34 +1188,44 @@ def test_strategy_config_list_exposes_and_filters_by_component_id(
     assert payload["items"] == [{"component_id": "my-alpha", "agenda_id": "alpha"}]
 
 
-def test_an_incomplete_spec_names_every_missing_key_at_once(
+def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A spec carrying only what canon documents as required still cannot run.
+    """A `runs:` entry carrying only part of what a run declares cannot be registered.
 
-    `RunDefinition` tolerates an absent start, end, exchange, execution input and account because
-    other callers supply them another way. This command always continues into `preflight_run` and
-    `run`, which refuse without them, so they are required *here* — and an agent gets all of them
-    in one reply instead of discovering them one exception at a time.
+    The shape refusal names every key a run declares, so an agent gets the whole list in one
+    reply instead of discovering the keys one exception at a time -- and it names the command
+    that emits the shape, which is where the list came from.
     """
-    spec = tmp_path / "thin.yaml"
-    spec.write_text(
+    _workspace_for_run(tmp_path, capsys)
+    thin = tmp_path / "thin.yaml"
+    thin.write_text(
         json.dumps(
             {
-                "strategy": {"component": "my-alpha", "agenda_id": "alpha"},
-                "valuation": {"agenda_id": "valuing"},
-                "instruments": ["A"],
+                "runs": {
+                    "thin": {
+                        "valuation": {"agenda_id": "valuing"},
+                        "instruments": ["A"],
+                    }
+                }
             }
         ),
         encoding="utf-8",
     )
 
-    code, payload = _cli(capsys, "--project-root", str(tmp_path), "run", str(spec))
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(thin))
 
     assert code == 1
-    missing = payload["error"]
-    for key in ("start", "end", "exchange", "execution_input", "initial_account"):
-        assert key in missing, f"{key} was not named: {missing}"
+    assert payload["stage"] != "unhandled"
+    failure = payload["failures"][0]
+    assert failure["code"] == "declaration.read.run_invalid"
+    for key in (
+        "strategies", "valuation", "instruments", "start", "end", "exchange",
+        "execution_input", "initial_account",
+    ):
+        assert key in failure["requirement"], f"{key} was not named: {failure['requirement']}"
+    assert "strategies" in failure["observed"], "the key that stopped the read is named"
+    assert "vqapr new run" in failure["requirement"]
 
 
 def test_a_rejected_command_line_still_answers_in_the_envelope(

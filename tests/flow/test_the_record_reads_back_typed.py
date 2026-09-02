@@ -7,7 +7,7 @@ that guesses from the text gets both wrong in the way the testbed met: `read_jso
 every instant by nine hours and the panel built from it registered cleanly.
 
 So the writer, which sees the types at the moment it stringifies them, records them beside the
-table, and `read_run_table` (`vqapr.public`) decodes by that. A record written before the
+table, and `read_strategy_table` (`vqapr.public`) decodes by that. A record written before the
 sidecar existed reads back as strings, and says so by having no sidecar.
 """
 
@@ -25,7 +25,7 @@ from vqapr.flow.run_records import (
     read_typed_table,
     table_types,
 )
-from vqapr.public import read_run_table
+from vqapr.public import read_strategy_table
 
 SEOUL = timezone(timedelta(hours=9))
 AT = datetime(2019, 7, 1, 15, 31, tzinfo=SEOUL)
@@ -55,7 +55,7 @@ def test_decimals_and_instants_come_back_as_what_they_were(tmp_path: Path) -> No
     }
     # The raw reader is unchanged: exact text, no guessing, the CLI's page.
     assert next(iter(read_table(tmp_path, "typed", "vqapr.account")))["nav"] == "1000.25"
-    assert read_run_table is read_typed_table
+    assert read_strategy_table is read_typed_table
 
 
 def test_the_instant_is_not_shifted_by_its_offset(tmp_path: Path) -> None:

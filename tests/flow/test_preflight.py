@@ -24,7 +24,7 @@ from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
 from vqapr.flow.model_state import prepare_model_state
 from vqapr.flow.preflight import preflight_run
-from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig
+from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig, StrategyEntry
 from vqapr.public import register_dataset
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
@@ -176,11 +176,11 @@ def _setup(
         else None
     )
     return workspace, RunDefinition(
-        strategy,
-        valuation,
-        ConstraintSet((constraint_component,)),
-        monitoring,
-        exchange=exchange_component,
+        run_id="preflight",
+        strategies=(StrategyEntry("strategy", ("limit",), {"cadence": [1]}),),
+        valuation=valuation,
+        monitoring=monitoring,
+        exchange=None if exchange_component is None else str(exchange_component.component_id),
         execution_input_id="execution" if with_execution else None,
         start=datetime(2024, 3, 5, 9, tzinfo=_ZONE),
         # The execution fixture fills at 15:30. Keeping end at 10:00 made every supposedly
@@ -189,7 +189,6 @@ def _setup(
         end=datetime(2024, 3, 5, 15, 30, tzinfo=_ZONE),
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
-        initial_model_memory={"cadence": [1]},
         instruments=("ABC",),
     )
 
@@ -265,26 +264,26 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
 
     frozen = preflight_run(workspace, definition)
 
-    assert [item.occurrence_id for item in frozen.strategy_agenda.occurrences] == [
+    (layer,) = frozen.strategies
+    assert [item.occurrence_id for item in layer.agenda.occurrences] == [
         "strategy-9",
         "strategy-10",
     ]
     assert [item.occurrence_id for item in frozen.valuation_agenda.occurrences] == ["valuation-9"]
     assert frozen.monitoring_agenda is not None
     assert frozen.monitoring_agenda.occurrences == ()
-    assert [item.occurrence_id for item in frozen.static_occurrences] == [
+    assert [item.occurrence_id for item in frozen.dispatch_order(layer)] == [
         "strategy-9",
         "valuation-9",
         "strategy-10",
     ]
-    assert frozen.constraints is not definition.constraints
-    assert frozen.constraints.constraints[0].component_id == "limit"
+    assert layer.constraints.constraints[0].component_id == "limit"
     assert frozen.instruments == definition.instruments
-    assert frozen.strategy_requirements == ()
-    assert frozen.constraint_requirements == ()
+    assert layer.requirements == ()
+    assert layer.constraint_requirements == ()
     assert (
-        frozen.initial_model_state_ref
-        == prepare_model_state(frozen.initial_model_memory, frozen.initial_payload).ref
+        layer.initial_model_state_ref
+        == prepare_model_state(layer.initial_model_memory, layer.initial_payload).ref
     )
     assert frozen.identity == preflight_run(workspace, definition).identity
     changed_account = replace(
@@ -292,7 +291,7 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
         initial_account_snapshot=AccountSnapshot(0, Decimal("101"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
     )
-    changed_model_state = replace(frozen, initial_model_memory={"cadence": [2]})
+    changed_model_state = replace(layer, initial_model_memory={"cadence": [2]})
     changed_source = replace(
         frozen,
         sources=(SourceSpec.of("prices-source", tmp_path / "changed.parquet"),),
@@ -319,7 +318,9 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
         ),
     )
     assert changed_account.identity != frozen.identity
-    assert changed_model_state.identity != frozen.identity
+    assert changed_model_state.identity != layer.identity, (
+        "a strategy's opening memory is the strategy's own"
+    )
     assert changed_source.identity != frozen.identity
     assert changed_fill.identity != frozen_execution.identity
     assert (
@@ -368,7 +369,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     exchange = _execution_exchange(workspace, tmp_path)
     compatible = replace(
         definition,
-        exchange=exchange,
+        exchange="exchange",
         execution_input_id="execution",
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("2")}),
     )
@@ -377,6 +378,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
         load_exchange(exchange, project_root=workspace.project_root), AcademicExchange
     )
     assert preflight_run(workspace, compatible).exchange == exchange
+    assert isinstance(exchange, ComponentRef)
     with pytest.raises(VqaprError, match="unlisted_instrument"):
         preflight_run(workspace, replace(compatible, instruments=("ABC", "MISSING")))
 
@@ -401,7 +403,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     )
     workspace.register_component(duck)
     with pytest.raises(VqaprError, match="wrong_type"):
-        preflight_run(workspace, replace(compatible, exchange=duck))
+        preflight_run(workspace, replace(compatible, exchange="duck"))
 
     cases = (
         (
@@ -459,7 +461,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
             workspace,
             replace(
                 compatible,
-                exchange=no_sell,
+                exchange="no-sell",
                 initial_account_snapshot=AccountSnapshot(
                     0, Decimal("100"), {"STUCK": Decimal("1")}
                 ),
@@ -479,7 +481,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
             workspace,
             replace(
                 compatible,
-                exchange=fractional,
+                exchange="fractional",
                 initial_account_snapshot=AccountSnapshot(
                     0, Decimal("100"), {"ABC": Decimal("1.5")}
                 ),
@@ -505,19 +507,21 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
 ) -> None:
     workspace, definition = _setup(tmp_path, model_price_parquet)
     frozen = preflight_run(workspace, definition)
-    definition.strategy.component.config["changed"] = 1
+    # The definition holds ids (record `139`); the binding the workspace registered is what the
+    # frozen strategy carries, detached from the registration object.
+    workspace._strategy_configs["strategy"].component.config["changed"] = 1
 
-    assert frozen.strategy.component.config == {}
-    with pytest.raises(ValueError, match="strategy configuration reference drift"):
+    assert frozen.strategies[0].config.component.config == {}
+    with pytest.raises(ValueError, match="component reference drift"):
         preflight_run(workspace, definition)
 
     memory = {"nested": [1]}
     workspace, definition = _setup(tmp_path / "memory", model_price_parquet)
-    definition = replace(definition, initial_model_memory=memory)
+    definition = replace(definition, strategies=(StrategyEntry("strategy", ("limit",), memory),))
     frozen = preflight_run(workspace, definition)
     memory["nested"].append(2)
-    assert definition.initial_model_memory == {"nested": [1]}
-    assert frozen.initial_model_memory == {"nested": [1]}
+    assert definition.strategies[0].initial_model_memory == {"nested": [1]}
+    assert frozen.strategies[0].initial_model_memory == {"nested": [1]}
     workspace, definition = _setup(tmp_path / "drift", model_price_parquet)
     (tmp_path / "drift" / "strategy.py").write_text(
         "class Strategy:\n    changed = True\n", encoding="utf-8"
@@ -534,15 +538,15 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     workspace, definition = _setup(tmp_path / "config-drift", model_price_parquet)
     registered = workspace._components["strategy"]
     registered.config["changed"] = True
-    drifted_strategy = StrategyConfig(
-        registered, definition.strategy.agenda_id, definition.strategy.agenda_role
+    binding = workspace._strategy_configs["strategy"]
+    workspace._strategy_configs["strategy"] = StrategyConfig(
+        registered, binding.agenda_id, binding.agenda_role
     )
-    workspace._strategy_configs[str(registered.component_id)] = drifted_strategy
     # A mutated CONFIG is likewise no longer refused as drift. It reaches the component, which
     # cannot construct from a key it does not declare, so the refusal names that instead. Same
     # principle as the source edit above: judged on whether it works, not on whether it moved.
     with pytest.raises(VqaprError, match="component.load.construction_failed"):
-        preflight_run(workspace, replace(definition, strategy=drifted_strategy))
+        preflight_run(workspace, definition)
 
 
 def test_preflight_refuses_a_run_that_declares_no_execution_price(
@@ -631,7 +635,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     workspace.register_component(component)
 
     with pytest.raises(VqaprError, match=r"preflight\.execution\.requirement_missing") as error:
-        preflight_run(workspace, replace(definition, exchange=component))
+        preflight_run(workspace, replace(definition, exchange="limited"))
     failure = error.value.as_dict()["failures"][0]
     assert "price_limit" in failure["observed"], "the message names the feature to switch off"
     assert "switched off" in failure["requirement"]
@@ -656,7 +660,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
         ),
     )
     workspace.register_component(off)
-    assert preflight_run(workspace, replace(definition, exchange=off)).exchange == off
+    assert preflight_run(workspace, replace(definition, exchange="unlimited")).exchange == off
 
 
 def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
@@ -695,7 +699,7 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
         ),
     )
     workspace.register_component(component)
-    tracked = replace(definition, exchange=component)
+    tracked = replace(definition, exchange="tracked")
 
     # Publishing it is fine; the run simply does not trade it.
     assert preflight_run(workspace, tracked).exchange == component
@@ -742,56 +746,17 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         ),
     )
     workspace._components[constraint.component_id] = constraint
-    invalid_constraint = RunDefinition(
-        definition.strategy,
-        definition.valuation,
-        ConstraintSet((constraint,)),
-        definition.monitoring,
-        start=definition.start,
-        end=definition.end,
-        instruments=definition.instruments,
-    )
     with pytest.raises(VqaprError):
-        preflight_run(workspace, invalid_constraint)
+        preflight_run(workspace, definition)
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=datetime(2024, 3, 5, 9),
-            end=definition.end,
-            instruments=definition.instruments,
-        )
+        replace(definition, start=datetime(2024, 3, 5, 9))
     with pytest.raises(ValueError, match="start must not be after end"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=definition.end,
-            end=definition.start,
-            instruments=definition.instruments,
-        )
+        replace(definition, start=definition.end, end=definition.start)
     with pytest.raises(ValueError, match="declared together"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=definition.start,
-            end=definition.end,
-            initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
-            instruments=definition.instruments,
-        )
+        replace(definition, initial_account_mode=None)
     with pytest.raises(TypeError, match="Model memory"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=definition.start,
-            end=definition.end,
-            initial_model_memory=("not-json",),  # type: ignore[arg-type]
-            instruments=definition.instruments,
-        )
+        StrategyEntry("strategy", (), ("not-json",))  # type: ignore[arg-type]
 
 
 def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
@@ -835,7 +800,7 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
     workspace.register_component(drifted)
 
     with pytest.raises(VqaprError) as caught:
-        preflight_run(workspace, replace(definition, constraints=ConstraintSet((drifted,))))
+        preflight_run(workspace, definition)
 
     error = caught.value
     assert error.stage == "component.load"

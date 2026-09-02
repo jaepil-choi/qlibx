@@ -46,7 +46,7 @@ from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.exchange.venue import Exchange
 from vqapr.flow.model_state import prepare_model_state
-from vqapr.flow.run import FrozenRun
+from vqapr.flow.run import FrozenRun, FrozenStrategy
 from vqapr.flow.run_state import (
     AcceptedRunState,
     LifecycleKind,
@@ -419,6 +419,7 @@ class SimulationFlow:
         strategy: StrategyModel,
         state: RunStateRepository,
         *,
+        layer: FrozenStrategy | None = None,
         strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         account: Account,
@@ -432,6 +433,16 @@ class SimulationFlow:
     ) -> None:
         if not isinstance(frozen_run, FrozenRun):
             raise TypeError("frozen_run must be a FrozenRun")
+        # One flow runs ONE strategy of the run (record `139`): the run layer is shared, the
+        # strategy layer is this flow's own. A run with one strategy needs no `layer`.
+        if layer is None:
+            if len(frozen_run.strategies) != 1:
+                raise ValueError(
+                    "a run with several strategies must say which one this flow runs (layer=)"
+                )
+            layer = frozen_run.strategies[0]
+        if not isinstance(layer, FrozenStrategy) or layer not in frozen_run.strategies:
+            raise TypeError("layer must be one of the frozen run's strategies")
         if not isinstance(strategy, StrategyModel):
             raise TypeError("strategy must be a StrategyModel")
         if not isinstance(state, RunStateRepository):
@@ -448,11 +459,13 @@ class SimulationFlow:
             isinstance(constraint, Constraint) for constraint in constraints
         ):
             raise TypeError("constraints must be a tuple of Constraint implementations")
-        declared = frozen_run.constraints.constraints
+        declared = layer.constraints.constraints
         _require_constraint_identity(constraints, declared)
         if valuation_service is not None and not isinstance(valuation_service, ValuationService):
             raise TypeError("valuation_service must be a ValuationService or None")
         self._frozen_run = frozen_run
+        self._layer = layer
+        self._static_occurrences = frozen_run.dispatch_order(layer)
         self._strategy = strategy
         self._state = state
         self._strategy_window_for_occurrence = strategy_window_for_occurrence
@@ -519,10 +532,10 @@ class SimulationFlow:
             cutoff,
             self._load_visible_strategy_state,
             family=SimulationFailureFamily.DATA,
-            owner=self._frozen_run.strategy,
+            owner=self._layer.config,
         )
         traces: list[OccurrenceTrace | DueExecutionTrace] = []
-        static = iter(OperationEnvelope(item) for item in self._frozen_run.static_occurrences)
+        static = iter(OperationEnvelope(item) for item in self._static_occurrences)
         next_static = next(static, None)
 
         while next_static is not None or self._pending_due() is not None:
@@ -580,7 +593,7 @@ class SimulationFlow:
         account = self._state.current.account
         finalization = FinalizationEvidence(
             run_identity=self._frozen_run.identity,
-            strategy_agenda=self._frozen_run.strategy_agenda,
+            strategy_agenda=self._layer.agenda,
             valuation_agenda=self._frozen_run.valuation_agenda,
             monitoring_agenda=self._frozen_run.monitoring_agenda,
             root_version=self._state.current.version,
@@ -763,7 +776,7 @@ class SimulationFlow:
         )
         evidence = ValuationEvidence(
             run_identity=self._frozen_run.identity,
-            agenda=self._frozen_run.strategy_agenda,
+            agenda=self._layer.agenda,
             occurrence=pending.occurrence,
             cutoff=pending.target.target_at,
             valuation_config=self._frozen_run.valuation,
@@ -828,7 +841,7 @@ class SimulationFlow:
         if not isinstance(account_state, AccountState):
             raise RuntimeError("due execution requires an AccountState root")
         before = account_state.snapshot
-        if pending.intent.strategy_id != str(self._frozen_run.strategy.component.component_id):
+        if pending.intent.strategy_id != str(self._layer.config.component.component_id):
             raise ValueError(
                 "pending intent strategy_id does not match the frozen Strategy component"
             )
@@ -921,7 +934,7 @@ class SimulationFlow:
         )
         commit_evidence = AccountCommitEvidence(
             run_identity=self._frozen_run.identity,
-            agenda=self._frozen_run.strategy_agenda,
+            agenda=self._layer.agenda,
             occurrence=pending.occurrence,
             cutoff=pending.target.target_at,
             pending=pending,
@@ -958,7 +971,7 @@ class SimulationFlow:
                 envelope={
                     "run_id": self._frozen_run.identity,
                     "producer_id": str(
-                        self._frozen_run.strategy.component.component_id
+                        self._layer.config.component.component_id
                     ),
                     "stage": pending.occurrence.role.value,
                     "event_time": pending.target.target_at,
@@ -1081,7 +1094,7 @@ class SimulationFlow:
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
             operation=lambda: FeedbackEvidence(
                 run_identity=self._frozen_run.identity,
-                agenda=self._frozen_run.strategy_agenda,
+                agenda=self._layer.agenda,
                 occurrence=pending.occurrence,
                 cutoff=pending.target.target_at,
                 pending=pending,
@@ -1287,7 +1300,7 @@ class SimulationFlow:
         recorder = InvocationRecorder(
             DEFAULT_TABLES,
             run_id=self._frozen_run.identity,
-            producer_id=str(self._frozen_run.strategy.component.component_id),
+            producer_id=str(self._layer.config.component.component_id),
             stage=occurrence.role.value,
             event_time=occurrence.evaluation_time,
         )
@@ -1386,7 +1399,7 @@ class SimulationFlow:
             occurrence.evaluation_time,
             self._visible_callback_state,
             family=SimulationFailureFamily.DATA,
-            owner=self._frozen_run.strategy,
+            owner=self._layer.config,
         )
         previous_recorder = self._strategy.recorder
         try:
@@ -1395,14 +1408,14 @@ class SimulationFlow:
                 occurrence.evaluation_time,
                 lambda: self._restore_callback_state(before, payload_before),
                 family=SimulationFailureFamily.DATA,
-                owner=self._frozen_run.strategy,
+                owner=self._layer.config,
             )
             window = self._guard(
                 SimulationStage.CALLBACK_WINDOW,
                 occurrence.evaluation_time,
                 lambda: self._strategy_window(occurrence),
                 family=SimulationFailureFamily.DATA,
-                owner=self._frozen_run.strategy_requirements,
+                owner=self._layer.requirements,
             )
             state_account = self._state.current.account
             if not isinstance(state_account, AccountState):
@@ -1411,12 +1424,12 @@ class SimulationFlow:
                     occurrence.evaluation_time,
                     lambda: self._raise_callback_account_state_error(),
                     family=SimulationFailureFamily.DATA,
-                    owner=self._frozen_run.strategy,
+                    owner=self._layer.config,
                 )
             account = state_account.snapshot
             recorder = self._callback_intent_boundary(
                 occurrence,
-                self._frozen_run.strategy,
+                self._layer.config,
                 lambda: self._callback_recorder(occurrence),
             )
             self._guard(
@@ -1433,7 +1446,7 @@ class SimulationFlow:
                     occurrence.evaluation_time,
                     lambda: self._constraint_window(occurrence),
                     family=SimulationFailureFamily.DATA,
-                    owner=self._frozen_run.constraint_requirements,
+                    owner=self._layer.constraint_requirements,
                 )
                 projected = tuple(
                     self._callback_intent_boundary(
@@ -1452,7 +1465,7 @@ class SimulationFlow:
             )
             result = self._callback_intent_boundary(
                 occurrence,
-                self._frozen_run.strategy,
+                self._layer.config,
                 lambda: self._strategy.decide(
                     StrategyModelContext(
                         occurrence=occurrence,
@@ -1463,7 +1476,7 @@ class SimulationFlow:
                         account_history=self._account_history(),
                     )
                 ),
-                data_owner=self._frozen_run.strategy_requirements,
+                data_owner=self._layer.requirements,
             )
             # The envelope, stamped here rather than asked of the callback. Every field it
             # adds is one the Flow already had to derive in order to check the author's copy of
@@ -1475,13 +1488,13 @@ class SimulationFlow:
             if not isinstance(result, (Hold, Rebalance)):
                 self._callback_intent_boundary(
                     occurrence,
-                    self._frozen_run.strategy,
+                    self._layer.config,
                     lambda: _raise_callback_return_type(result),
                 )
             if isinstance(result, Rebalance):
                 result = self._callback_intent_boundary(
                     occurrence,
-                    self._frozen_run.strategy,
+                    self._layer.config,
                     lambda: self._stamp_intent(result, occurrence, account, window),
                 )
 
@@ -1524,7 +1537,7 @@ class SimulationFlow:
                 occurrence.evaluation_time,
                 lambda: self._candidate_callback_state(before, payload_before),
                 family=SimulationFailureFamily.DATA,
-                owner=self._frozen_run.strategy,
+                owner=self._layer.config,
             )
             evidence, lifecycle = self._callback_intent_boundary(
                 occurrence,
@@ -1566,7 +1579,7 @@ class SimulationFlow:
                 occurrence.evaluation_time,
                 lambda: self._restore_callback_state(before, payload_before),
                 family=SimulationFailureFamily.DATA,
-                owner=self._frozen_run.strategy,
+                owner=self._layer.config,
             )
             raise
         finally:
@@ -1600,7 +1613,7 @@ class SimulationFlow:
                 raise self._failure(
                     stage=SimulationStage.CALLBACK_WINDOW,
                     cutoff=occurrence.evaluation_time,
-                    owner=self._frozen_run.strategy_requirements,
+                    owner=self._layer.requirements,
                     family=SimulationFailureFamily.DATA,
                     cause=error,
                     kind=SimulationFailureKind.PRE_COMMIT,
@@ -1867,7 +1880,7 @@ class SimulationFlow:
         return InvocationRecorder(
             tables + DEFAULT_TABLES,
             run_id=self._frozen_run.identity,
-            producer_id=str(self._frozen_run.strategy.component.component_id),
+            producer_id=str(self._layer.config.component.component_id),
             stage=occurrence.role.value,
             event_time=occurrence.evaluation_time,
         )
@@ -1895,8 +1908,8 @@ class SimulationFlow:
     ) -> tuple[CallbackEvidence, LifecycleTrace]:
         evidence = CallbackEvidence(
             run_identity=self._frozen_run.identity,
-            strategy=self._frozen_run.strategy,
-            agenda=self._frozen_run.strategy_agenda,
+            strategy=self._layer.config,
+            agenda=self._layer.agenda,
             occurrence=occurrence,
             cutoff=occurrence.evaluation_time,
             root_version=self._state.current.version,
@@ -1928,7 +1941,7 @@ class SimulationFlow:
             occurrence.evaluation_time,
             lambda: self._actual_source_refs(window),
             family=SimulationFailureFamily.DATA,
-            owner=self._frozen_run.strategy_requirements,
+            owner=self._layer.requirements,
         )
 
     def _validate_candidate_payload(
@@ -1973,7 +1986,7 @@ class SimulationFlow:
         decision in the same occurrence of the same run mints the same identity. A replayed run
         produces byte-identical intents, which is what makes a record comparable to itself.
         """
-        strategy_id = str(self._frozen_run.strategy.component.component_id)
+        strategy_id = str(self._layer.config.component.component_id)
         targets = tuple(
             PortfolioTarget(instrument, weight=weight)
             for instrument, weight in sorted(decision.target_weights.items())

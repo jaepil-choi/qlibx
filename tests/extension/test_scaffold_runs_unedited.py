@@ -99,41 +99,53 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
         ),
     )
 
-    spec = tmp_path / "spec.yaml"
-    spec.write_text(
+    # The run is a registration of its own (record 139), under a FRESH id for the same reason
+    # the strategy has one: `install` already registered the sample's run, and executing that
+    # would run the sample while the result was read as proof of the scaffold.
+    runs = tmp_path / "runs.yaml"
+    runs.write_text(
         yaml.safe_dump(
             {
-                "strategy": {"component": "alpha", "agenda_id": "alpha-callback"},
-                "valuation": {"agenda_id": journey.VALUATION_AGENDA},
-                "monitoring": {"agenda_id": journey.MONITORING_AGENDA},
-                "instruments": list(panel.instruments),
-                "start": f"{sessions[2].isoformat()}T00:00:00{journey.OFFSET}",
-                "end": f"{sessions[-1].isoformat()}T23:59:59{journey.OFFSET}",
-                "exchange": journey.EXCHANGE_ID,
-                "execution_input": journey.EXECUTION_ID,
-                "initial_account": {
-                    "mode": "LONG_ONLY",
-                    "cash": str(journey.OPENING_CASH),
-                    "positions": {},
-                },
+                "runs": {
+                    "scaffold": {
+                        "strategies": {"alpha": {}},
+                        "valuation": {"agenda_id": journey.VALUATION_AGENDA},
+                        "monitoring": {"agenda_id": journey.MONITORING_AGENDA},
+                        "instruments": list(panel.instruments),
+                        "start": f"{sessions[2].isoformat()}T00:00:00{journey.OFFSET}",
+                        "end": f"{sessions[-1].isoformat()}T23:59:59{journey.OFFSET}",
+                        "exchange": journey.EXCHANGE_ID,
+                        "execution_input": journey.EXECUTION_ID,
+                        "initial_account": {
+                            "mode": "LONG_ONLY",
+                            "cash": str(journey.OPENING_CASH),
+                            "positions": {},
+                        },
+                    }
+                }
             }
         ),
         encoding="utf-8",
     )
+    code, registered_run = _cli(tmp_path, "register", str(runs))
+    assert code == 0, registered_run
+    assert registered_run["registered"]["runs"] == ["scaffold"]
 
-    code, checked = _cli(tmp_path, "check", str(spec))
+    code, checked = _cli(tmp_path, "check", "scaffold")
     assert code == 0, checked
     assert checked["ok"] is True, checked["failures"]
 
-    code, ran = _cli(tmp_path, "run", str(spec))
+    code, ran = _cli(tmp_path, "run", "scaffold")
     assert code == 0, ran
     assert ran["ok"] is True
+    assert list(ran["strategies"]) == ["alpha"], "the run executed the scaffold and only it"
+    scaffolded = ran["strategies"]["alpha"]
 
     # It TRADED. A scaffold that runs but never decides would satisfy `ok: true` while proving
     # nothing about the intent, execution or account-commit paths -- which is exactly what the old
     # Hold template did.
-    assert ran["occurrences"] > 0
-    assert ran["account_version"] > 0, (
+    assert scaffolded["occurrences"] > 0
+    assert scaffolded["account_version"] > 0, (
         "the scaffold ran without ever committing a fill, so the authoring contract's decision "
         "path is unexercised"
     )

@@ -44,7 +44,7 @@ checks was produced by a real `StrategyModel.decide` callback, dispatched by a r
 - **This is a demonstration signal, not a claim of predictive value.** A demeaned-by-rank five-day
   reversal, neutralised and rescaled to a 2% gross active budget. It exists to be a real,
   non-degenerate, neutral signal on this fixture — not to be profitable.
-- **No constraint set.** `ConstraintSet(())` is empty; `context.constraint_bounds` is the trivial
+- **No constraints.** The run's `StrategyEntry` names none; `context.constraint_bounds` is the trivial
   bound. Nothing here exercises `no_short`, `single_name_cap`, or any projection.
 - **Mark rehydration is scoped to what a later callback actually witnessed.** A committed
   `AccountMark` is visible in the published `vqapr.account` series only if some later occurrence's

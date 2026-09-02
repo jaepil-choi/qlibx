@@ -1,38 +1,125 @@
-"""Freeze what a run did into its durable record, and report the contract it honoured.
+"""Freeze what a run did into its durable records, and report the contract each strategy honoured.
+
+**Two records since record `139`** (design `docs/design/the-panel-the-surface-and-the-run.md`
+§4.2). `run.json` is configuration: what every strategy in the run shared -- universe, period,
+venue, execution input and its fill convention (`docs/issues/034`), the initial account
+declaration, the datasets read and their source digests (testbed A7), and which strategies the
+run names. `strategy.json`, one per `strategies/<id>@<fp8>/`, is output: the component that ran,
+its own fingerprint as registered and as loaded, its constraints, its contract report, its final
+account, its tables, its period, the roster it read.
 
 **Moved out of `vqapr.public` by record `111`, and from `evidence/` to `flow/` by record `113`.**
-It lands beside `flow/run_records.py`, which owns `record_fields` and `RunRecordWriter` -- the two
-things it builds against. Under `evidence/` it imported three `flow` modules, which is a layer
-inversion: `evidence/` is spine, `flow/` is the dispatch loop above it. A run record is a flow
-artifact, and this is where it belongs. These build the run record's blocks from a
-`FrozenRun` and a `SimulationResult`. They were sitting in the package's documented surface only
-because that surface had grown an orchestrator.
-
-Renamed from `_freeze_record` and `_contract_report` on the way. They were private because a
-facade should not have had public functions doing this; in their own layer they are ordinary
-module-level API, and `flow/orchestration.py` is their caller.
+It lands beside `flow/run_records.py`, which owns the field sets and the writers -- the two things
+this builds against. A run record is a flow artifact, and this is where it belongs.
 """
 
 from __future__ import annotations
 
-from vqapr.flow.run import FrozenRun
-from vqapr.flow.run_records import RUN_KIND, RunRecordWriter, record_fields
+from collections.abc import Mapping
+from pathlib import Path
+
+from vqapr.flow.run import FrozenRun, FrozenStrategy
+from vqapr.flow.run_records import (
+    RUN_JSON_FIELDS,
+    STRATEGY_KIND,
+    RunRecordWriter,
+    record_fields,
+    write_run_record,
+)
 from vqapr.flow.run_state import LifecycleKind
 from vqapr.flow.simulation import SimulationResult
 
 
-def freeze_record(
+def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[str, str]) -> Path:
+    """Write `run.json`: the configuration every strategy of this run shares.
+
+    Written BEFORE any strategy runs, so a run killed midway still says what it attempted, and
+    identical for every process that runs a strategy of this run -- which is why it needs no lock:
+    two writers write the same bytes. A run whose configuration changed since a record was written
+    under this id is refused by `write_run_record`, naming both digests.
+
+    `source_digests` are the physical digests of the sources the run reads, keyed by source id:
+    a registration keeps an id and a path, and nothing pinned the bytes behind them (A7).
+    """
+    execution = frozen.execution_input
+    builders = {
+        "declared_digest": lambda: str(frozen.identity),
+        "instruments": lambda: list(frozen.instruments),
+        "period": lambda: {"start": frozen.start, "end": frozen.end},
+        "valuation": lambda: {"agenda_id": str(frozen.valuation.agenda_id)},
+        "monitoring": lambda: (
+            None if frozen.monitoring is None else {"agenda_id": str(frozen.monitoring.agenda_id)}
+        ),
+        "exchange": lambda: (
+            None
+            if frozen.exchange is None
+            else {
+                "component_id": str(frozen.exchange.component_id),
+                "fingerprint": frozen.exchange.fingerprint,
+            }
+        ),
+        # `034` closes here: which convention this run filled under, in the record's own words.
+        "execution_input": lambda: (
+            None
+            if execution is None
+            else {
+                "execution_input_id": str(execution.execution_input_id),
+                "source_id": str(execution.table.source.source_id),
+                "trade_at_field": execution.table.trade_at_field,
+                "price_fields": dict(execution.table.price_fields),
+                "fill": {
+                    "selector": execution.fill.selector.value,
+                    "local_time": execution.fill.local_time.isoformat(),
+                    "timezone": execution.fill.timezone,
+                    "trade_price": execution.fill.trade_price,
+                    "declaration_identity": execution.fill.declaration_identity,
+                },
+            }
+        ),
+        "initial_account": lambda: (
+            None
+            if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None
+            else {
+                "mode": frozen.initial_account_mode.value,
+                "version": frozen.initial_account_snapshot.version,
+                "cash": frozen.initial_account_snapshot.cash,
+                "positions": dict(frozen.initial_account_snapshot.positions),
+            }
+        ),
+        "datasets": lambda: [
+            {
+                "dataset_id": str(dataset.dataset_id),
+                "source_id": str(dataset.source),
+                "grain": None if dataset.grain is None else dataset.grain.value,
+                "source_digest": source_digests.get(str(dataset.source)),
+            }
+            for dataset in frozen.datasets
+        ],
+        "strategies": lambda: [
+            {"component_id": layer.component_id, "record": layer.record_ref}
+            for layer in frozen.strategies
+        ],
+    }
+    return write_run_record(
+        root,
+        frozen.run_id,
+        {field: builders[field]() for field in RUN_JSON_FIELDS if field != "run_id"},
+    )
+
+
+def freeze_strategy_record(
     writer: RunRecordWriter,
     result: SimulationResult,
     frozen: FrozenRun,
-    as_loaded: str,
+    layer: FrozenStrategy,
+    as_loaded: Mapping[str, str],
     roster: dict[str, object] | None,
 ) -> None:
-    """Write the run's rows and its own facts, so a later process can answer questions about it.
+    """Write one strategy's rows and its own facts, so a later process can read them.
 
-    The rows go first and the record last, because `record.json` existing is what marks the record
-    complete. A reader that finds one knows the run reached its end; a run killed midway leaves its
-    rows and no record, which `run_ids` correctly declines to list as a finished run.
+    The rows go first and the record last, because `strategy.json` existing is what marks the
+    record complete. A reader that finds one knows the strategy reached its end; one killed midway
+    leaves its rows and no record, which `strategy_refs` correctly declines to list as finished.
     """
     # A run with a store streams its rows to this writer as each occurrence is accepted, so
     # `recorder_rows` is empty here and everything is already on disk. A result assembled without
@@ -44,40 +131,57 @@ def freeze_record(
 
     account = result.final_state.account
     snapshot = None if account is None else account.snapshot
+    component = layer.config.component
 
-    # AC-R3's five: the facts a later reader cannot reconstruct from the rows alone. Each is built
-    # by the function `record_fields` names, so the field set is genuinely ONE list rather than two
-    # with a comparison between them -- a field added here without a builder is a KeyError at the
-    # comprehension below, not a drift that reaches disk and waits to be noticed.
+    # Each is built by the function `record_fields` names, so the field set is genuinely ONE list
+    # rather than two with a comparison between them -- a field added here without a builder is a
+    # KeyError at the comprehension below, not a drift that reaches disk and waits to be noticed.
     builders = {
-        "account": lambda: None
-        if snapshot is None
-        else {
-            "version": snapshot.version,
-            "cash": snapshot.cash,
-            "positions": dict(snapshot.positions),
+        "strategy_id": lambda: layer.component_id,
+        # The registered fingerprint, in full; the directory name carries its first eight.
+        "fingerprint": lambda: component.fingerprint,
+        "component": lambda: {
+            "component_id": layer.component_id,
+            "path": str(component.path),
+            "object_name": component.object_name,
+            "config": dict(component.config),
+            "fingerprint": component.fingerprint,
         },
+        "agenda": lambda: {
+            "agenda_id": str(layer.agenda.agenda_id),
+            "content_identity": layer.agenda.content_identity,
+            "occurrences": len(layer.agenda.occurrences),
+        },
+        "constraints": lambda: [
+            {"component_id": str(constraint.component_id), "fingerprint": constraint.fingerprint}
+            for constraint in layer.constraints.constraints
+        ],
+        "account": lambda: (
+            None
+            if snapshot is None
+            else {
+                "version": snapshot.version,
+                "cash": snapshot.cash,
+                "positions": dict(snapshot.positions),
+            }
+        ),
         # Rows and instants per table, counted by the writer as it appended them. Instants, not
         # just rows: a table's row count says how much was written, and the distinct `event_time`
         # count says how often; research asks the second question and the first cannot answer it.
-        # Named `instants` rather than `formations`, because this counter is applied to every
-        # table including `vqapr.fill`, where a formation is not a thing that happens
-        # (`docs/issues/024`).
         "tables": writer.counts,
         "contract": lambda: contract_report(result),
-        # What ran, not what was registered. These agree unless a component was edited after
-        # registration, and that difference is the whole signal: a strategy that ran 47 times
-        # across 12 distinct `source_digest` values was edited 11 times, which is a direct
+        # What ran, not what was registered -- PER COMPONENT rather than folded (design §4.2).
+        # `fingerprint` above is what was registered; this is the fingerprint of the bytes on disk
+        # when they were loaded. They agree unless the component was edited after registration,
+        # and that difference is the whole signal (`docs/issues/009`, `023`): a strategy that ran
+        # 47 times under 12 distinct loaded fingerprints was edited 11 times, which is a direct
         # overfitting tell that a new component_id per edit would have scattered.
-        "source_digest": lambda: as_loaded,
-        # The declaration this run froze against, kept so the pair stays legible: equal to
-        # `source_digest` when nothing moved, different exactly when it did.
-        "declared_digest": lambda: str(frozen.identity),
+        "source_digest": lambda: dict(as_loaded),
+        # The declaration this strategy froze against: its own identity, not the run's.
+        "declared_digest": lambda: str(layer.identity),
         # Which roster this run read, and `None` when it read none. STATED, never compared -- a
         # roster grows as a matter of course, so a run refused for reading a different one than
-        # yesterday would be refused every morning. What a run treated each instrument as is
-        # testified to per fill by `Fill.kind`; this says which declaration produced those
-        # categories, and `None` says the run never knew them.
+        # yesterday would be refused every morning.
         "roster": lambda: roster,
         "period": lambda: {
             "start": frozen.start,
@@ -86,14 +190,19 @@ def freeze_record(
         },
     }
 
-    # `run_id` is stamped by the writer itself, so it is the one field this does not supply.
+    # `run_id` and `strategy_ref` are stamped by the writer itself.
     writer.finish(
-        {field: builders[field]() for field in record_fields(RUN_KIND) if field != "run_id"}
+        {
+            field: builders[field]()
+            for field in record_fields(STRATEGY_KIND)
+            if field not in ("run_id", "strategy_ref")
+        },
+        kind=STRATEGY_KIND,
     )
 
 
 def contract_report(result: SimulationResult) -> dict[str, object]:
-    """What the run's constraints promised, and how often each was actually observed to hold.
+    """What the strategy's constraints promised, and how often each was actually observed to hold.
 
     `held` and `checked` are two different numbers, and conflating them hides the case that matters
     most: a declaration checked zero times is not a declaration that held. It is one nobody asked
@@ -103,20 +212,16 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
 
     **These count monitoring observations of the committed account.** They used to be meant to
     count judgements of the decision, and that member no longer exists: whether a limit held is a
-    question about the book, not about the plan (PRD 7.1). The numbers are therefore not comparable
-    across that change -- monitoring runs on its own cadence rather than once per callback, so the
-    same run reports a different `checked` than it would have.
+    question about the book, not about the plan (PRD 7.1).
 
     **And they used to count nothing at all.** This walked the run's lifecycle entries asking each
     for an `evidence` attribute, but a lifecycle entry carries `kind` and `detail` and the evidence
-    is the `detail` -- so the lookup returned `None` every time and the loop never ran. Every
-    record ever written carries an empty block here. The only test on it asserted that the key
-    existed, which it did. `docs/issues/051`.
+    is the `detail` -- so the lookup returned `None` every time and the loop never ran
+    (`docs/issues/051`).
 
-    Scope, stated rather than implied: this reports the CONSTRAINTS a run declared. AC-R6 also
+    Scope, stated rather than implied: this reports the CONSTRAINTS a strategy declared. AC-R6 also
     names `weights`/`forms`/`records`, which are the authoring contract's declarations -- they do
-    not exist yet, and inventing entries for them here would report a promise nobody made. They
-    join this block when that contract lands.
+    not exist yet, and inventing entries for them here would report a promise nobody made.
     """
 
     findings: dict[str, dict[str, int]] = {}

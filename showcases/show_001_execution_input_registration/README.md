@@ -39,7 +39,7 @@ trivial `[0, 1]` per-instrument bounds. It demonstrated no economic behaviour of
 only that a constraint component could be generated, fingerprinted, and registered. That
 scaffolding claim is not worth keeping: constraints are exercised for real in `show_003`
 and `show_008`, and authoring an inert one here just to keep the field non-empty would
-demonstrate nothing. `ConstraintSet(())` is declared explicitly instead.
+demonstrate nothing. The run's `StrategyEntry("showcase-strategy")` names no constraints instead.
 
 ## Reproduce
 

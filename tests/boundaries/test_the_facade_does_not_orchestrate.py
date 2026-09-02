@@ -106,7 +106,7 @@ def test_the_relocated_names_are_still_exported() -> None:
     for name in (
         "run",
         "preflight_run",
-        "freeze_record",
+        "freeze_strategy_record",
         "contract_report",
         "registered_roster",
         "roster_report",

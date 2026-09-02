@@ -93,13 +93,13 @@ def test_one_store_hashes_each_source_once_no_matter_how_many_queries(
     rather than merely detected.
     """
     calls: list[Path] = []
-    original = store._physical_digest
+    original = store.physical_digest
 
     def counting_digest(path: Path) -> str:
         calls.append(path)
         return original(path)
 
-    monkeypatch.setattr(store, "_physical_digest", counting_digest)
+    monkeypatch.setattr(store, "physical_digest", counting_digest)
 
     observation_store = DuckDbObservationStore(priced_workspace)
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(2))

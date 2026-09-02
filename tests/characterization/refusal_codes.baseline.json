@@ -42,6 +42,7 @@
     "dataset.register.span.empty",
     "dataset.register.value.not_finite",
     "declaration.read.grain_undeclared",
+    "declaration.read.run_invalid",
     "materialize.compute.failed",
     "materialize.input.dataset_exists",
     "materialize.input.empty",
@@ -107,6 +108,10 @@
     "workspace.open.unreadable",
     "workspace.remove.referenced",
     "workspace.remove.unsupported_kind",
+    "workspace.run.register.conflict",
+    "workspace.run.register.invalid",
+    "workspace.run.register.missing",
+    "workspace.run.register.reference",
     "workspace.source.lookup.invalid",
     "workspace.source.lookup.missing",
     "workspace.strategy_config.register.conflict",
@@ -146,82 +151,77 @@
     {
       "code": "check.dataset.unregistered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 477
+      "line": 446
     },
     {
       "code": "check.execution.not_after_decision",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 417
+      "line": 391
     },
     {
       "code": "check.field.absent",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 496
+      "line": 465
     },
     {
       "code": "check.lookback.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 531
+      "line": 489
     },
     {
       "code": "check.materialize.component_unloadable",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.component_unregistered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.component_wrong_kind",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.evaluation_instant_invalid",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.lookback_uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.no_evaluation_instants",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.no_instruments",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.output_registered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.materialize.requirement_unregistered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 67
+      "line": 73
     },
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 330
+      "line": 326
     },
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 347
-    },
-    {
-      "code": "check.period.uncovered",
-      "file": "src/vqapr/flow/judgments.py",
-      "line": 370
+      "line": 337
     },
     {
       "code": "check.universe.absent",
@@ -231,12 +231,12 @@
     {
       "code": "check.weights.mode_conflict",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 600
+      "line": 552
     },
     {
       "code": "check.weights.venue_conflict",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 658
+      "line": 605
     },
     {
       "code": "component.conformance.load_failed",
@@ -316,137 +316,142 @@
     {
       "code": "dataset.register.grain.undeclared",
       "file": "src/vqapr/data/datasets.py",
-      "line": 295
+      "line": 318
     },
     {
       "code": "dataset.register.key.duplicate",
       "file": "src/vqapr/data/datasets.py",
-      "line": 527
+      "line": 550
     },
     {
       "code": "dataset.register.key.null",
       "file": "src/vqapr/data/datasets.py",
-      "line": 511
+      "line": 534
     },
     {
       "code": "dataset.register.schema.available_at_not_a_timestamp",
       "file": "src/vqapr/data/datasets.py",
-      "line": 359
+      "line": 382
     },
     {
       "code": "dataset.register.schema.available_at_not_tz",
       "file": "src/vqapr/data/datasets.py",
-      "line": 359
+      "line": 382
     },
     {
       "code": "dataset.register.schema.field_missing",
       "file": "src/vqapr/data/datasets.py",
-      "line": 341
+      "line": 364
     },
     {
       "code": "dataset.register.schema.field_not_an_expression",
       "file": "src/vqapr/data/datasets.py",
-      "line": 386
+      "line": 409
     },
     {
       "code": "dataset.register.schema.field_not_portable",
       "file": "src/vqapr/data/datasets.py",
-      "line": 471
+      "line": 494
     },
     {
       "code": "dataset.register.schema.field_not_tz",
       "file": "src/vqapr/data/datasets.py",
-      "line": 449
+      "line": 472
     },
     {
       "code": "dataset.register.schema.projection_unbindable",
       "file": "src/vqapr/data/datasets.py",
-      "line": 417
+      "line": 440
     },
     {
       "code": "dataset.register.schema.source_mismatch",
       "file": "src/vqapr/data/datasets.py",
-      "line": 710
+      "line": 733
     },
     {
       "code": "dataset.register.span.absent",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "dataset.register.span.empty",
       "file": "src/vqapr/data/datasets.py",
-      "line": 643
+      "line": 666
     },
     {
       "code": "dataset.register.span.empty",
       "file": "src/vqapr/data/datasets.py",
-      "line": 656
+      "line": 679
     },
     {
       "code": "dataset.register.value.not_finite",
       "file": "src/vqapr/data/datasets.py",
-      "line": 592
+      "line": 615
     },
     {
       "code": "declaration.read.grain_undeclared",
       "file": "src/vqapr/declarations.py",
-      "line": 468
+      "line": 470
     },
     {
       "code": "declaration.read.key_missing",
       "file": "src/vqapr/declarations.py",
-      "line": 193
+      "line": 195
     },
     {
       "code": "declaration.read.key_missing",
       "file": "src/vqapr/declarations.py",
-      "line": 610
+      "line": 612
     },
     {
       "code": "declaration.read.key_missing",
       "file": "src/vqapr/declarations.py",
-      "line": 662
+      "line": 664
     },
     {
       "code": "declaration.read.key_missing",
       "file": "src/vqapr/declarations.py",
-      "line": 674
+      "line": 676
+    },
+    {
+      "code": "declaration.read.run_invalid",
+      "file": "src/vqapr/declarations.py",
+      "line": 957
     },
     {
       "code": "declaration.read.unknown_section",
       "file": "src/vqapr/declarations.py",
-      "line": 869
+      "line": 871
     },
     {
       "code": "declaration.read.value_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 441
+      "line": 443
     },
     {
       "code": "declaration.read.value_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 536
+      "line": 538
     },
     {
       "code": "declaration.read.value_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 753
+      "line": 755
     },
     {
       "code": "declaration.read.value_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 806
+      "line": 808
     },
     {
       "code": "declaration.read.value_not_permitted",
       "file": "src/vqapr/declarations.py",
-      "line": 576
+      "line": 578
     },
     {
       "code": "declaration.read.value_not_permitted",
       "file": "src/vqapr/declarations.py",
-      "line": 790
+      "line": 792
     },
     {
       "code": "execution_input.register.key.duplicate",
@@ -576,7 +581,7 @@
     {
       "code": "model_window.requirement.undeclared",
       "file": "src/vqapr/data/windows.py",
-      "line": 206
+      "line": 253
     },
     {
       "code": "observation_store.resolve.field_missing",
@@ -586,57 +591,57 @@
     {
       "code": "preflight.account.fractional_quantity",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 218
+      "line": 228
     },
     {
       "code": "preflight.account.holding_not_closable",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 162
+      "line": 172
     },
     {
       "code": "preflight.account.minimum_quantity",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 176
+      "line": 186
     },
     {
       "code": "preflight.account.mode",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 231
+      "line": 241
     },
     {
       "code": "preflight.account.quantity_step",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 205
+      "line": 215
     },
     {
       "code": "preflight.account.unlisted_holding",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 147
+      "line": 157
     },
     {
       "code": "preflight.execution.missing",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 378
+      "line": 386
     },
     {
       "code": "preflight.execution.requirement_missing",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 274
+      "line": 284
     },
     {
       "code": "preflight.execution.target_outside_horizon",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 444
+      "line": 452
     },
     {
       "code": "preflight.universe.unlisted_instrument",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 324
+      "line": 332
     },
     {
       "code": "preflight.universe.untradable_listing",
       "file": "src/vqapr/flow/preflight.py",
-      "line": 337
+      "line": 345
     },
     {
       "code": "run.assembly.constraint_identity",
@@ -646,17 +651,17 @@
     {
       "code": "run.check.declaration_invalid",
       "file": "src/vqapr/cli/check.py",
-      "line": 357
+      "line": 273
     },
     {
       "code": "run.check.judgment_blocked",
       "file": "src/vqapr/cli/run.py",
-      "line": 412
+      "line": 212
     },
     {
       "code": "run.check.preflight_refused",
       "file": "src/vqapr/cli/check.py",
-      "line": 365
+      "line": 281
     },
     {
       "code": "run.roster.unreadable",
@@ -706,182 +711,202 @@
     {
       "code": "workspace.agenda.lookup.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.agenda.lookup.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.agenda.register.conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.component.lookup.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.component.lookup.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.dataset.lookup.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.dataset.lookup.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.dataset.register.conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.dataset.register.source_conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.dataset.register.source_mismatch",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.execution_input.lookup.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.execution_input.lookup.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.execution_input.register.conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.execution_input.register.source_conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.instruments.unreadable",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.monitoring_policy.register.conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.monitoring_policy.register.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.monitoring_policy.register.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.monitoring_policy.register.reference",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.open.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.open.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.open.unreadable",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.remove.referenced",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.remove.unsupported_kind",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
+    },
+    {
+      "code": "workspace.run.register.conflict",
+      "file": "src/vqapr/workspace.py",
+      "line": 1796
+    },
+    {
+      "code": "workspace.run.register.invalid",
+      "file": "src/vqapr/workspace.py",
+      "line": 1796
+    },
+    {
+      "code": "workspace.run.register.missing",
+      "file": "src/vqapr/workspace.py",
+      "line": 1796
+    },
+    {
+      "code": "workspace.run.register.reference",
+      "file": "src/vqapr/workspace.py",
+      "line": 1796
     },
     {
       "code": "workspace.source.lookup.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.source.lookup.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.strategy_config.register.conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.strategy_config.register.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.strategy_config.register.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.strategy_config.register.reference",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.valuation_config.register.conflict",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.valuation_config.register.invalid",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.valuation_config.register.missing",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.valuation_config.register.reference",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.write.failed",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     },
     {
       "code": "workspace.write.locked",
       "file": "src/vqapr/workspace.py",
-      "line": 1624
+      "line": 1796
     }
   ],
   "unresolved": []

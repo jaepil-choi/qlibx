@@ -25,7 +25,6 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -38,6 +37,7 @@ from vqapr.public import (
     RunDefinition,
     SourceSpec,
     StrategyConfig,
+    StrategyEntry,
     ValuationConfig,
     component_ref,
     preflight_run,
@@ -277,25 +277,26 @@ def main() -> None:
     register_valuation_config(PROJECT, valuation_config)
 
     definition = RunDefinition(
-        strategy_config,
-        valuation_config,
+        run_id="show001",
         # The legacy showcase generated a Constraint whose methods were unconditionally-passing
-        # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so it
-        # is declared empty rather than authored to keep a field non-empty. See README.
-        ConstraintSet(()),
+        # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so the
+        # strategy entry names no constraints rather than an inert one authored to keep a field
+        # non-empty. See README.
+        strategies=(StrategyEntry("showcase-strategy"),),
+        valuation=valuation_config,
         # `None` states there is no monitoring cadence, explicitly.
-        None,
-        exchange_ref,
-        "krx-daily",
-        datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),
-        datetime.fromisoformat(f"2024-03-07T23:00:00{OFFSET}"),
-        AccountSnapshot(0, Decimal("100"), {}),
-        AccountMode.LONG_ONLY,
+        monitoring=None,
+        exchange="showcase-exchange",
+        execution_input_id="krx-daily",
+        start=datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"2024-03-07T23:00:00{OFFSET}"),
+        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
     )
 
     # --- One real run -------------------------------------------------------------------
-    dense_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)))
+    dense_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)).result())
 
     # --- Density invariance -------------------------------------------------------------
     # Same registered declaration, only the physical execution parquet's non-selected 10:00
@@ -304,7 +305,9 @@ def main() -> None:
     dense_bytes = execution_path.read_bytes()
     shutil.copyfile(canonical_path, execution_path)
     try:
-        canonical_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)))
+        canonical_summary = _signature(
+            run(PROJECT, preflight_run(PROJECT, definition)).result()
+        )
     finally:
         execution_path.write_bytes(dense_bytes)
 

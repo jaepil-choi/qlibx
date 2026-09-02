@@ -19,12 +19,13 @@ state under `.vqapr/`, which is rebuildable and never committed.
 
 | command | what it does |
 |---|---|
-| `new` | scaffold a component, or emit a dataset/run-spec declaration template |
+| `new` | scaffold a component, or emit a dataset/agendas/run declaration template |
 | `register` | validate a declaration and add what it declares to the workspace |
-| `check` | prove a run spec is ready, reporting every problem at once, without running it |
-| `run` | freeze a run spec, preflight it, and execute the simulation |
-| `list` | show what the workspace already holds |
-| `show` | answer questions about one finished run, from its frozen record |
+| `check` | prove a registered run is ready, reporting every problem at once, without running |
+| `run` | freeze a registered run, preflight it, and execute its strategies |
+| `list` | show what the workspace holds and what the store recorded |
+| `show` | answer questions about one run or one strategy record, from what was frozen |
+| `rm` | remove a run's records, or withdraw a registration nothing still names |
 | `skill` | install the agent skill into this project, or remove and inspect it |
 
 Run `vqapr <command> --help` for the arguments of any verb.

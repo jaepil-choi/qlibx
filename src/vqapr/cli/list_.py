@@ -1,4 +1,4 @@
-"""`vqapr list <kind>` — read what the workspace already holds.
+"""`vqapr list <kind>` — read what the workspace already holds, and what the store recorded.
 
 Workspace가 이미 복수형 accessor를 노출하므로 여기서 새 조회 코드를 만들지 않는다. 각 kind는
 그 property 하나에 대응하고, 행 요약은 agent가 다음 명령의 인자로 쓸 식별자만 싣는다.
@@ -6,17 +6,26 @@ Workspace가 이미 복수형 accessor를 노출하므로 여기서 새 조회 �
 빈 디렉터리에서도 성공한다. "아직 아무것도 없다"는 것은 이 명령이 대답할 수 있는 질문이지
 실패가 아니다 — 그리고 이것은 agent가 방향을 잡으려고 **가장 먼저** 치는 명령이므로, 여기서
 거절하면 첫 명령이 실패로 시작한다.
+
+**Two kinds read the record store rather than the document** (record `139`, design §4.3):
+`runs` lists the REGISTERED runs and, beside each, which strategy records the store holds for it;
+`strategies --run <id>` lists those records with the fields a reader filters on -- the strategy,
+its fingerprint, whether its contract held, when it ran. Neither creates new I/O: a record was
+always read whole and four fields kept.
 """
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
-from vqapr.flow.run_records import read_record, run_ids
+from vqapr.flow.run import RunDefinition
+from vqapr.flow.run_records import read_strategy_record, strategy_refs
+from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 KINDS = (
@@ -29,11 +38,10 @@ KINDS = (
     "valuation-configs",
     "monitoring-policies",
     # The roster was registrable and unlistable: `list` covered eight kinds and not this one, so a
-    # registered roster could not be inspected from the CLI at all. Both first-time-user journeys
-    # ended up opening `.vqapr/instruments.json` by hand, which is a file this surface should
-    # never require a reader to know about.
+    # registered roster could not be inspected from the CLI at all.
     "instruments",
     "runs",
+    "strategies",
 )
 
 _ACCESSORS = {
@@ -45,6 +53,7 @@ _ACCESSORS = {
     "strategy-configs": "strategy_configs",
     "valuation-configs": "valuation_configs",
     "monitoring-policies": "monitoring_policies",
+    "runs": "run_definitions",
 }
 
 _IDENTITY_FIELDS = (
@@ -53,6 +62,7 @@ _IDENTITY_FIELDS = (
     "component_id",
     "agenda_id",
     "execution_input_id",
+    "run_id",
 )
 
 
@@ -77,6 +87,12 @@ def _summarize(item: object) -> dict[str, Any]:
         # `kind` is spelled the way `new` and `register` accept it. Reporting the domain enum's
         # value gave a reader `data_model`, which they cannot type at any verb.
         summary[field] = cli_kind(value) if field == "kind" else str(value)
+    if isinstance(item, RunDefinition):
+        summary["strategies"] = [entry.component_id for entry in item.strategies]
+        summary["start"] = None if item.start is None else item.start.isoformat()
+        summary["end"] = None if item.end is None else item.end.isoformat()
+        summary["exchange"] = item.exchange
+        summary["execution_input_id"] = item.execution_input_id
     if not summary:
         summary["repr"] = repr(item)
     return summary
@@ -99,46 +115,109 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="store_root",
         type=Path,
         default=None,
-        help="where run records live, when `runs` were written outside the workspace directory",
+        help="where run records live, when they were written outside the workspace directory",
+    )
+    parser.add_argument(
+        "--run",
+        dest="run_id",
+        default=None,
+        help="`strategies` only: the run whose strategy records to list (required)",
+    )
+    parser.add_argument(
+        "--strategy",
+        dest="strategy",
+        default=None,
+        help="`strategies` only: keep records of this strategy id",
+    )
+    parser.add_argument(
+        "--fingerprint",
+        dest="fingerprint",
+        default=None,
+        help="`strategies` only: keep records whose fingerprint starts with this prefix",
+    )
+    parser.add_argument(
+        "--failed-contract",
+        dest="failed_contract",
+        action="store_true",
+        help="`strategies` only: keep records where some declared constraint did not hold",
+    )
+    parser.add_argument(
+        "--since",
+        dest="since",
+        default=None,
+        help="`strategies` only: keep records whose period ends at or after this instant",
     )
 
 
-def _runs(project_root: Path, store_root: Path | None) -> list[dict[str, Any]]:
-    """Every finished run, found by scanning rather than read from an index.
-
-    An index file would put every concurrent writer on one atomic-replace target, which is the
-    lost-update the workspace lock exists for -- and it would serialise exactly the thing five
-    parallel runs need not to be. Scanning has no shared target, so this is O(runs) on purpose.
-    """
-    root = store_root or project_root / WORKSPACE_DIRECTORY
+def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Every finished strategy record of one run, found by scanning, filtered on record fields."""
+    since = _instant(getattr(args, "since", None), name="--since")
     rows: list[dict[str, Any]] = []
-    for run_id in run_ids(root):
-        record = read_record(root, run_id)
-        account = record.get("account") or {}
-        rows.append(
-            {
-                "run_id": run_id,
-                "account_version": account.get("version"),
-                "tables": sorted(record.get("tables") or {}),
-                "period": record.get("period"),
-            }
-        )
+    for ref in strategy_refs(root, run_id):
+        record = read_strategy_record(root, run_id, ref)
+        contract = record.get("contract") or {}
+        failed = [
+            constraint
+            for constraint, report in contract.items()
+            if isinstance(report, dict) and report.get("ok") is False
+        ]
+        period = record.get("period") or {}
+        row = {
+            "run_id": run_id,
+            "strategy_ref": ref,
+            "strategy_id": record.get("strategy_id"),
+            "fingerprint": record.get("fingerprint"),
+            "account_version": (record.get("account") or {}).get("version"),
+            "tables": sorted(record.get("tables") or {}),
+            "period": period,
+            "contract_failed": failed,
+        }
+        wanted = getattr(args, "strategy", None)
+        if wanted and row["strategy_id"] != wanted:
+            continue
+        prefix = getattr(args, "fingerprint", None)
+        if prefix and not str(row["fingerprint"] or "").startswith(prefix):
+            continue
+        if getattr(args, "failed_contract", False) and not failed:
+            continue
+        if since is not None:
+            ended = _instant(period.get("end"), name="period.end")
+            if ended is None or ended < since:
+                continue
+        rows.append(row)
     return rows
+
+
+def _instant(value: object, *, name: str) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError as error:
+        raise InputError(
+            VALUE_INVALID,
+            requirement=f"{name} must be an ISO-8601 datetime with a UTC offset",
+            observed=repr(value),
+            retry=f"write {name} like 2024-01-02T00:00:00+09:00, then retry",
+        ) from error
+    if parsed.tzinfo is None:
+        raise InputError(
+            VALUE_INVALID,
+            requirement=f"{name} must include a UTC offset",
+            observed=repr(value),
+            retry=f"write {name} like 2024-01-02T00:00:00+09:00, then retry",
+        )
+    return parsed
 
 
 def _instruments(project_root: Path) -> list[dict[str, Any]]:
     """The registered roster, as at most one row, or none when the project has no roster.
 
     A sidecar rather than a workspace section, so this does not go through `_ACCESSORS`: the
-    pointer lives in `.vqapr/instruments.json` beside `workspace.yaml` (see
-    `Workspace.roster_path` for why it is not inside the document).
-
-    The pointer stores `schema`, `tables` and `digest` and no counts, so the per-category numbers
-    are read from the tables it points at. That read can fail for reasons that are not this
-    command's business -- a table moved, a disk unmounted -- and `list` is the command an agent
-    runs FIRST to orient itself. So the counts are best-effort: the digest and the declared tables
-    are always reported, and `unreadable` says so when the tables could not be opened, rather than
-    turning an orientation command into a failure.
+    pointer lives in `.vqapr/instruments.json` beside `workspace.yaml`. The per-category counts
+    are best-effort: the digest and the declared tables are always reported, and `unreadable`
+    says so when the tables could not be opened, rather than turning an orientation command
+    into a failure.
     """
     if not (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists():
         return []
@@ -149,9 +228,6 @@ def _instruments(project_root: Path) -> list[dict[str, Any]]:
         "digest": str(pointer["digest"]),
         "tables": {str(kind): str(path) for kind, path in sorted(dict(pointer["tables"]).items())},
     }
-    # Imported outside the try. They perform no I/O, so an ImportError from either is a packaging
-    # defect and must fail loudly rather than be reported as `unreadable: No module named ...` on
-    # a row that otherwise looks healthy -- a framework problem wearing a data-availability label.
     from vqapr.domain.roster import build_roster
     from vqapr.domain.roster_export import read_roster_table
 
@@ -171,20 +247,24 @@ def _instruments(project_root: Path) -> list[dict[str, Any]]:
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
     if args.kind == "instruments":
-        # `count` is the number of rows, as it is for every other kind: a project holds one roster
-        # or none. How many instruments it describes is `items[0]["instruments"]`, which is a
-        # different question and gets its own field rather than overloading this one.
         rows = _instruments(project_root)
         if args.identifier:
             rows = [row for row in rows if args.identifier in row["digest"]]
         return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
-    if args.kind == "runs":
-        # Runs live under `store.root`, not in the workspace document, so this path does not open
-        # the workspace at all. An uninitialised directory holds zero runs, which is an answer.
-        rows = _runs(project_root, getattr(args, "store_root", None))
+    if args.kind == "strategies":
+        run_id = getattr(args, "run_id", None)
+        if not run_id:
+            raise InputError(
+                VALUE_INVALID,
+                requirement="`list strategies` names the run whose records to list",
+                observed="no --run given",
+                retry="run `vqapr list runs`, then `vqapr list strategies --run <run-id>`",
+            )
+        rows = _strategies(store_root, run_id, args)
         if args.identifier:
-            rows = [row for row in rows if args.identifier in str(row["run_id"])]
+            rows = [row for row in rows if args.identifier in str(row["strategy_ref"])]
         return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
     if not (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists():
         # 없는 workspace는 빈 workspace다. 존재 여부만 보고 통과시키는 이유는, 손상된 workspace는
@@ -194,7 +274,12 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     workspace = Workspace.open(project_root)
     items = getattr(workspace, _ACCESSORS[args.kind])
     rows = [_summarize(item) for item in items]
+    if args.kind == "runs":
+        # Beside each registered run, the strategy records the store holds for it: what ran, by
+        # `<id>@<fp8>`, so a reader sees which tweaks of which strategies have been tried.
+        for row in rows:
+            row["recorded"] = list(strategy_refs(store_root, str(row["run_id"])))
     if args.identifier:
         needle = args.identifier
-        rows = [row for row in rows if any(needle in value for value in row.values())]
+        rows = [row for row in rows if any(needle in str(value) for value in row.values())]
     return success("workspace.list", kind=args.kind, count=len(rows), items=rows)

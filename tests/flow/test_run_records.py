@@ -269,7 +269,7 @@ def test_a_live_run_is_never_replaced_even_with_force(tmp_path: Path) -> None:
     with pytest.raises(RunRecordLive) as refused:
         RunRecordWriter(tmp_path, "busy").open(replace=True)
     assert refused.value.holder == os.getpid()
-    assert "--run-id" in str(refused.value), "the refusal must name a remedy that is not --force"
+    assert "rm strategy" in str(refused.value), "the refusal must name a remedy that is not --force"
 
     # A keeps writing and finishes intact.
     live.append("vqapr.account", [{"nav": "A2"}])

@@ -1,7 +1,7 @@
 """A registered roster whose pointer is damaged is refused, not read as "no roster".
 
 `docs/issues/042`, found by the structural audit in
-`docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` (C1).
+`docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` (C1).
 
 `Workspace.registered_instruments()` raises a typed `workspace.instruments.unreadable` for a
 damaged pointer, and says why in its own docstring: *"'no roster' and 'a roster whose record is

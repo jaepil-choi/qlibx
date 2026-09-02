@@ -1,5 +1,16 @@
 # 046 — A factor book's cost is a fixed charge per callback before it is a charge per name, and each declared `RowsLookback` input costs two round trips to answer with one row
 
+**Status 2026-09-02 — first half OPEN, second half CLOSED.** The updates below record both. Lane D
+(`read-046a-one-scan`, one scan serving several fields) **has not been started**: `git worktree list`
+shows only the main tree, and no `qlibx-wt-046a` exists. It is the last open lane of
+`docs/refactoring/2026-09-01-the-read-path-campaign.md`, and `docs/issues/049`'s closing measurement
+waits on it.
+
+Concretely, what is still per-field today: `models/calls.py::declared_rows` issues one
+`window.observations(requirement)` per declared field and joins the batches in Python on
+`(available_at, instrument)`. An alias over three fields is three scans and one Python join.
+
+
 **Status update 2026-09-01 — one of the two halves is now load-bearing for
 [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md)'s ruling.**
 

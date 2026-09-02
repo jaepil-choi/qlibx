@@ -80,7 +80,7 @@ The characterization suite adopted here (`tests/extension/test_one_authoring_sur
 `qlibx-wt-038-049-9e`) still passes, and every assertion in it is a statement that the package is
 still wrong. Three names remain exported by both `vqapr.public` and `vqapr.authoring` as different
 objects — `DataModel`, `StrategyModel`, `Constraint` — and `load_data_model` and `load_constraint`
-still refuse an authored one outright (`docs/refactoring/2026-08-31-post-step-07-review.md` R5).
+still refuse an authored one outright (`docs/diagnostics/2026-08-31-post-step-07-review.md` R5).
 Each test names the milestone that deletes it.
 
 Remaining, in order: one class per contract (which closes R5), deleting the adapter

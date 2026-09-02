@@ -1,7 +1,33 @@
 # START HERE — vqapr agent-first surface, 다음 세션 브리프
 
+> # ⚠ 2026-09-02 — 절반은 유효하고 절반은 뒤집혔다. 여기부터 시작하지 마라
+>
+> **이 문서는 더 이상 "START HERE"가 아니다.** 지금의 시작점은 `.agent/project.yaml`의
+> `diagnostics`(= `docs/diagnostics/README.md`)와 `active_campaign`
+> (= `docs/refactoring/2026-09-02-the-convergence-campaign.md`)이다.
+>
+> | 절 | 판정 |
+> |---|---|
+> | **§7 어디서 막혔는가** | **유효하고, 이 문서에서 가장 값어치 있는 부분이다.** 특히 §7.1의 발견 — *"scaffold + CLI 등록 경로 + loader conformance check가 한 단위"* — 는 오늘도 참이고, 캠페인 Step 1이 그 단위 전체로 잡혀 있다. §7.4(성격이 다른 두 반쪽을 한 goal에 묶지 마라)도 그대로 유효하다 |
+> | **§10 운영 주의사항** | 유효 |
+> | **§4 parity 증명** | 유효. 숫자는 기준선으로 남는다 |
+> | **§2 현재 상태 · §3 · §5 · §6 · §8 작업 순서 · §11** | **무효.** 트리와 방향이 둘 다 달라졌다 |
+>
+> **무엇이 뒤집혔는가.** 이 문서는 *"`vqapr.public`은 legacy, `project.py`/`Project` workflow가
+> 목적지"*를 전제로 §8의 작업 순서를 짰다. 2026-08-28의 PEP 669 tracer가 그 반대를 측정했고
+> (`project.py` 619줄 중 CLI journey 실행 **0줄**, `vqapr.public`은 shipped 경로 전부에 있다),
+> record `104`가 살아남는 facade를 판정했으며 record `124`가 반대편 13 modules / 4,001 lines를
+> 삭제했다. **`project.py`, `simulation.py`, `venues.py`, bridge 6개, catalog 저장소는 이제
+> 존재하지 않는다.** §2의 수치(bridge 7개, showcase 3/8, `.vqapr/catalog.json`)도 전부 낡았다.
+>
+> `G008`도 같은 이유로 무효다 — 풀린 것이 아니라 전제가 뒤집혀 moot가 됐고,
+> `docs/design/agent-first-surface.md`의 해당 절이 그렇게 닫혀 있다.
+>
+> 경위 전체는 `docs/diagnostics/2026-09-02-what-the-tree-owes-the-mental-model.md` §8.
+
 작성: 2026-08-25 15:25 KST. 세션 3(`01a03479-6572-71ee-a423-897459b75deb`)이 종료되면서 남긴
-인수인계다. **다음 세션은 이 repo(`qlibx`)를 working directory로 열고 이 문서부터 읽는다.**
+인수인계다. ~~**다음 세션은 이 repo(`qlibx`)를 working directory로 열고 이 문서부터 읽는다.**~~
+(위 경고 참조 — 시작점은 옮겨졌다. working directory가 `qlibx`라는 것은 그대로 유효하다.)
 
 세션 1~3은 sibling repo `kwam-enhanced-index`를 root로 열었고, 그래서 qlibx 작업이 계속
 cross-repo로 돌아갔다. 그게 실수였다. 작업의 무게중심은 여기다.

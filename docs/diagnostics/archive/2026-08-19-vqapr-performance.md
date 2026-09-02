@@ -1,3 +1,27 @@
+> # ⛔ ARCHIVED 2026-09-02 — provenance, not a work list
+>
+> **This document was written against `jaepil-develop @ a825b62` with a dirty 43-entry working
+> tree: 515 tests.** Today's tree is 30,260 lines with 1,292 fast tests, and the read path it
+> measures has since been rewritten twice — by the structural campaign (records `104`–`118`) and by
+> the read-path campaign (records `119`–`123`, `126`, `128`). **Do not open a task from this file.**
+> Its live successor for cost work is `docs/refactoring/2026-09-01-the-read-path-campaign.md`,
+> anchored on `docs/issues/049`, which measures the whole gap rather than its parts.
+>
+> **Spot-checked 2026-09-02, resolved:** P0-1 (`scan.py` proves and carries a rows lower bound —
+> records `120`, `123`), P0-2 (`DuckDbObservationStore` caches the source digest per instance,
+> `data/store.py:53`), P1-1 (the read path validates nothing — `044`, record `119`), P1-3
+> (`ScanSession` holds one duckdb database and a cursor per source for the run's lifetime), P1-2 /
+> P2-6 (`ExecutionHorizon` is read once per run and bisected — record `023`), P2-7 (affordability is
+> solved, not searched — `005`, record `043`).
+>
+> **Not re-measured, believed addressed by records `021`–`023`:** P0-3, P0-4, P2-1, P2-3, P2-4,
+> P2-5, P3-1, P3-2. **Treat these as unknown** and re-run their own reproduction before acting.
+>
+> **The one number this file's whole thesis became:** `docs/issues/049` — the same model, the same
+> output, **806.61s against 1.31s**, with `compute` at 0.36s on both sides. Computation is 1.9% of
+> the run and moving data is 98%. That measurement, not the item list below, is what a cost task
+> should start from.
+
 # vqapr performance review — 2026-08-19
 
 | | |
@@ -16,7 +40,7 @@
 > **재현 절차**를 먼저 돌려 아직 살아 있는지 확인할 것. 이미 고쳐졌다면 지우지 말고
 > `RESOLVED @ <sha>`로 표시한다.
 
-> **📌 선행 리뷰 연계.** `docs/code-review/2026-08-18-vqapr-review.md`의 **EB-5**(`data/store.py:26`
+> **📌 선행 리뷰 연계.** `docs/diagnostics/archive/2026-08-18-vqapr-review.md`의 **EB-5**(`data/store.py:26`
 > digest)와 **EB-6**(`exchange/conventions.py:148` 날짜 루프)는 **아직 살아 있다.** 이 문서의
 > P0-2 / P2-6이 같은 항목이며, 여기에는 그때 없던 계측치와 수정 설계가 붙어 있다.
 

@@ -114,11 +114,11 @@ RUNNER = textwrap.dedent(
     from zoneinfo import ZoneInfo
 
     from vqapr.public import (
-        AccountMode, AccountSnapshot, ComponentKind, ConstraintSet, DatasetRegistration,
+        AccountMode, AccountSnapshot, ComponentKind, DatasetRegistration,
         ExecutionInputRegistration, ExecutionTableSpec, FillConvention, FillSelector,
         LocalInstantDeclaration, OperationAgenda, OperationOccurrence, OperationRole,
-        RunDefinition, SourceSpec, StrategyConfig, ValuationConfig, component_ref,
-        preflight_run, register_agenda, register_component, register_dataset,
+        RunDefinition, SourceSpec, StrategyConfig, StrategyEntry, ValuationConfig,
+        component_ref, preflight_run, register_agenda, register_component, register_dataset,
         register_execution_input, register_strategy_config, register_valuation_config, run,
     )
 
@@ -205,21 +205,22 @@ RUNNER = textwrap.dedent(
     register_strategy_config(root, strategy_config)
     register_valuation_config(root, valuation_config)
 
+    # By id, not by ref: a run is a registered document and the workspace resolves what it names
+    # at preflight (record 139). Registering it is not needed for an in-process run.
     definition = RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet(()),
-        None,
-        exchange_ref,
-        "krx-daily",
-        datetime.combine(sessions[0], time(0, 0), tzinfo=KST),
-        datetime.combine(sessions[-1], time(23, 0), tzinfo=KST),
-        AccountSnapshot(0, Decimal("1000000"), {}),
-        AccountMode.SIGNED,
+        run_id="clock",
+        strategies=(StrategyEntry("clock-strategy"),),
+        valuation=valuation_config,
         instruments=("A005930",),
+        exchange="clock-exchange",
+        execution_input_id="krx-daily",
+        start=datetime.combine(sessions[0], time(0, 0), tzinfo=KST),
+        end=datetime.combine(sessions[-1], time(23, 0), tzinfo=KST),
+        initial_account_snapshot=AccountSnapshot(0, Decimal("1000000"), {}),
+        initial_account_mode=AccountMode.SIGNED,
     )
 
-    result = run(root, preflight_run(root, definition))
+    result = run(root, preflight_run(root, definition)).result()
 
     # `vqapr.account` is the framework's own NAV table. Each row is one committed mark, so the
     # distinct observed instants ARE the NAV series resolution.

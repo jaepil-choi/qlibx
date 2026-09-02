@@ -51,7 +51,6 @@ from vqapr.public import (
     AccountSnapshot,
     ComponentKind,
     ComponentRef,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -65,6 +64,7 @@ from vqapr.public import (
     RunDefinition,
     SourceSpec,
     StrategyConfig,
+    StrategyEntry,
     ValuationConfig,
     component_ref,
     export_roster,
@@ -162,16 +162,16 @@ def _definition(
     strategy config, the same valuation config, the same execution input id, the same account.
     """
     return RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet(()),
-        None,
-        exchange,
-        "krx-daily",
-        datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
-        datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.LONG_ONLY,
+        run_id=exchange.component_id,
+        strategies=(StrategyEntry(strategy_config.component.component_id),),
+        valuation=valuation_config,
+        monitoring=None,
+        exchange=exchange.component_id,
+        execution_input_id="krx-daily",
+        start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
     )
 
@@ -463,7 +463,7 @@ def main() -> None:
             valuation_config=valuation_config,
             callback_days=callback_days,
         )
-        return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)))
+        return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)).result())
 
     academic = _outcome(academic_ref)
     krx = _outcome(krx_ref)

@@ -62,7 +62,6 @@ from vqapr.public import (
     AccountSnapshot,
     AllocationPublicationSpec,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -79,6 +78,7 @@ from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     SourceSpec,
     StrategyConfig,
+    StrategyEntry,
     ValuationConfig,
     callback_evidence,
     component_ref,
@@ -935,19 +935,19 @@ def _member_run(
     universe: tuple[str, ...],
 ) -> Any:
     definition = RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet(()),
-        monitoring,
-        academic_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.SIGNED,
+        run_id=strategy_config.component.component_id,
+        strategies=(StrategyEntry(strategy_config.component.component_id),),
+        valuation=valuation_config,
+        monitoring=monitoring,
+        exchange=academic_ref.component_id,
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    return run(project, preflight_run(project, definition))
+    return run(project, preflight_run(project, definition)).result()
 
 
 def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -1153,19 +1153,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         memories[label] = _memory(result)
 
     ensemble_definition = RunDefinition(
-        ensemble_config,
-        valuation_config,
-        ConstraintSet((no_short_ref, cap_ref)),
-        monitoring,
-        krx_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.LONG_ONLY,
+        run_id="show008-ensemble",
+        strategies=(StrategyEntry("show008-ensemble", ("no-short", "single-name-cap")),),
+        valuation=valuation_config,
+        monitoring=monitoring,
+        exchange="show008-krx",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
     )
-    ensemble_result = run(project, preflight_run(project, ensemble_definition))
+    ensemble_result = run(project, preflight_run(project, ensemble_definition)).result()
     ensemble_memory = _memory(ensemble_result)
     ensemble_replay = _replay(ensemble_result)
 

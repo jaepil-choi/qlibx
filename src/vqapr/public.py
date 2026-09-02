@@ -92,21 +92,27 @@ from vqapr.flow.materialize import (
     publish_run_allocation,
     publish_run_record,
 )
-from vqapr.flow.orchestration import preflight_run as preflight_run
-from vqapr.flow.orchestration import run as run
+from vqapr.flow.orchestration import RunResult, preflight_run, run
 
 # Orchestration, evidence and roster reading moved to their owning layers by record `111`.
 # Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
 # deliberate: it marks these as intentional re-exports, which is both what they are and what stops
 # a lint autofix from deleting them as unused.
 from vqapr.flow.records import contract_report as contract_report
-from vqapr.flow.records import freeze_record as freeze_record
+from vqapr.flow.records import freeze_strategy_record as freeze_strategy_record
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
-from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
-from vqapr.flow.run_records import read_record as read_run_record
-from vqapr.flow.run_records import read_typed_table as read_run_table
-from vqapr.flow.run_records import run_ids
+from vqapr.flow.run import (
+    ConstraintSet,
+    FrozenAgenda,
+    FrozenRun,
+    FrozenStrategy,
+    RunDefinition,
+    StrategyConfig,
+    StrategyEntry,
+)
+from vqapr.flow.run_records import read_run_record, read_strategy_record, run_ids, strategy_refs
+from vqapr.flow.run_records import read_typed_table as read_strategy_table
 from vqapr.flow.simulation import SimulationResult, callback_evidence
 from vqapr.models.contexts import DataModelContext, StrategyModelContext
 from vqapr.models.data_model import DataModel
@@ -179,6 +185,7 @@ __all__ = (
     "FillSelector",
     "FrozenAgenda",
     "FrozenRun",
+    "FrozenStrategy",
     "Grain",
     "Hold",
     "IndexInstrument",
@@ -217,6 +224,7 @@ __all__ = (
     "RunDefinition",
     "RunRecordResult",
     "RunRecordSpec",
+    "RunResult",
     "Side",
     "SideCost",
     "SimulationFailure",
@@ -224,6 +232,7 @@ __all__ = (
     "SourceSpec",
     "StockInstrument",
     "StrategyConfig",
+    "StrategyEntry",
     "StrategyModel",
     "StrategyModelContext",
     "TableSpec",
@@ -263,7 +272,8 @@ __all__ = (
     "rank",
     "rank_information_coefficient",
     "read_run_record",
-    "read_run_table",
+    "read_strategy_record",
+    "read_strategy_table",
     "register_agenda",
     "register_component",
     "register_constraint",
@@ -272,6 +282,7 @@ __all__ = (
     "register_exchange",
     "register_execution_input",
     "register_monitoring_policy",
+    "register_run",
     "register_strategy_config",
     "register_strategy_model",
     "register_valuation_config",
@@ -281,6 +292,7 @@ __all__ = (
     "run_ids",
     "shipped_constraint_path",
     "signal_weight",
+    "strategy_refs",
     "trade_rules_by_kind",
     "validate_allocation",
 )
@@ -326,6 +338,11 @@ def register_component(project_root: str | Path, component: ComponentRef) -> boo
 
 def register_strategy_config(project_root: str | Path, config: StrategyConfig) -> bool:
     return Workspace.create(project_root).register_strategy_config(config)
+
+
+def register_run(project_root: str | Path, definition: RunDefinition) -> bool:
+    """Register a run: the reusable configuration `vqapr run <run-id>` executes (record `139`)."""
+    return Workspace.create(project_root).register_run(definition)
 
 
 def register_valuation_config(project_root: str | Path, config: ValuationConfig) -> bool:

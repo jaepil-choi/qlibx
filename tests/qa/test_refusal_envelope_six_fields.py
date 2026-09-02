@@ -72,9 +72,9 @@ def test_new_missing_component_id_refusal_carries_all_six_fields(
 def test_new_dataset_already_exists_refusal_carries_all_six_fields(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    existing = tmp_path / "run-spec.yaml"
+    existing = tmp_path / "runs.yaml"
     existing.write_text("x", encoding="utf-8")
-    code, payload = _cli(capsys, tmp_path, "new", "run-spec", "--out", str(existing))
+    code, payload = _cli(capsys, tmp_path, "new", "run", "--out", str(existing))
     assert code == 1
     entry = payload["failures"][0]
     assert entry["code"] == "cli.input.file_exists"

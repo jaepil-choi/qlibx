@@ -47,7 +47,6 @@ from vqapr.public import (
     AccountSnapshot,
     AllocationPublicationSpec,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -63,6 +62,7 @@ from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     SourceSpec,
     StrategyConfig,
+    StrategyEntry,
     ValuationConfig,
     ZeroDealtReason,
     callback_evidence,
@@ -816,19 +816,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
     alpha_definition = RunDefinition(
-        alpha_config,
-        valuation_config,
-        ConstraintSet(()),
-        monitoring,
-        academic_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.SIGNED,
+        run_id="show005-alpha",
+        strategies=(StrategyEntry("show005-alpha"),),
+        valuation=valuation_config,
+        monitoring=monitoring,
+        exchange="show005-academic",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    alpha_result = run(project, preflight_run(project, alpha_definition))
+    alpha_result = run(project, preflight_run(project, alpha_definition)).result()
     alpha_evidence = callback_evidence(alpha_result)
 
     published = publish_run_allocation(
@@ -836,19 +836,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     )
 
     index_definition = RunDefinition(
-        index_config,
-        valuation_config,
-        ConstraintSet((no_short_ref, cap_ref)),
-        monitoring,
-        krx_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.LONG_ONLY,
+        run_id="show005-index",
+        strategies=(StrategyEntry("show005-index", ("no-short", "single-name-cap")),),
+        valuation=valuation_config,
+        monitoring=monitoring,
+        exchange="show005-krx",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
     )
-    index_result = run(project, preflight_run(project, index_definition))
+    index_result = run(project, preflight_run(project, index_definition)).result()
 
     alpha_memory = _memory(alpha_result)
     index_memory = _memory(index_result)

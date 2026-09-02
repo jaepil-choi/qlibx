@@ -141,8 +141,10 @@ evaluate_at:                     # when to evaluate; timezone-aware, one entry m
   - "2024-03-06T04:00:00+09:00"
 ```
 
-Then `vqapr check <spec>` and `vqapr run <spec>` exactly as for a simulation. It registers a
-dataset rather than writing a run record, so `vqapr list datasets` shows it arrived and
+Then `vqapr check <spec.yaml>` and `vqapr run <spec.yaml>` with the file's path -- a
+materialization is the one spec that is still a file; a simulation is a registered run and is
+named by id (Rung 2). It registers a dataset rather than writing a run record, so `vqapr list
+datasets` shows it arrived and
 `vqapr show dataset <id>` reads back what it computed. The output is readable by any component
 that declares it — which is the point: one model's output is the next model's input.
 
@@ -151,26 +153,34 @@ materialized one. It reports the registration's own facts — source, path, decl
 alongside the rows, and reports `rows_total` separately from `returned` so a truncated page never
 reads as a short dataset. `--limit 0` returns every row.
 
-`--run-id` and `--force` are refused here. Both are defined in terms of a run record and a
-materialization writes none; to replace an output, remove its dataset registration first.
+`--strategy`, `--jobs` and `--force` are refused here. All are defined in terms of a run record
+and a materialization writes none; to replace an output, remove its dataset registration first.
 
-**Reading a finished run.** `vqapr show run <id>` gives the record: the account, the period, the
-roster it read, and per-table row counts. `vqapr show run <id> --table <name>` gives the rows
-themselves, with `--limit` (0 for all) and `--instrument <id>` to keep only one instrument's rows
--- `--instrument _ACCOUNT` on `vqapr.account` is the NAV series. It reports `rows_total`,
-`matched` and `returned` separately, so a truncated page never reads as a short run.
+**Reading a finished run: two records.** `vqapr show run <run-id>` gives the CONFIGURATION
+every strategy of the run shared -- instruments, period, venue, the execution input and its
+fill convention, the initial account, the datasets read and their source digests -- and
+`recorded`, the strategy records the store holds as `<strategy-id>@<fp8>`. `vqapr show
+strategy <run-id>/<strategy-id>@<fp8>` gives one strategy's OUTPUT: the component that ran
+(path and its own fingerprint, registered and as loaded), its constraints, the final account,
+the contract report, the roster it read, and per-table row counts. `--table <name>` on
+`show strategy` gives the rows themselves, with `--limit` (0 for all) and `--instrument <id>`
+to keep only one instrument's rows -- `--instrument _ACCOUNT` on `vqapr.account` is that
+strategy's NAV series. It reports `rows_total`, `matched` and `returned` separately, so a
+truncated page never reads as a short run. `<run-id>/<strategy-id>` without the fingerprint
+works when exactly one record of that strategy exists; `vqapr list strategies --run <run-id>`
+lists them all, filterable by `--strategy`, `--fingerprint`, `--failed-contract`, `--since`.
 
-**Read a record from Python with `vqapr.public.read_run_table(store_root, run_id, table)`,
-never by parsing the JSONL yourself.** The rows are JSONL on disk (`.vqapr/runs/<id>/tables/`),
-and JSON has no `Decimal` and no offset-aware instant: a reader that guesses from the text --
-`read_json_auto` included -- shifts every instant by its offset and the panel built from it
-registers cleanly. `read_run_table` decodes by the column types the writer recorded beside the
-table, so `nav` comes back a `Decimal` and `observed_at` an aware `datetime`. Rows reach the disk
-as each occurrence is accepted, so a long run can be watched and a killed one keeps what it did.
+**Read a record from Python with `vqapr.public.read_strategy_table(store_root, run_id,
+table, strategy_ref)`, never by parsing the JSONL yourself.** The rows are JSONL on disk
+(`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/`), and JSON has no `Decimal`
+and no offset-aware instant: a reader that guesses from the text -- `read_json_auto` included
+-- shifts every instant by its offset and the panel built from it registers cleanly.
+`read_strategy_table` decodes by the column types the writer recorded beside the table, so
+`nav` comes back a `Decimal` and `observed_at` an aware `datetime`. Rows reach the disk as
+each occurrence is accepted, so a long run can be watched and a killed one keeps what it did.
 
-A run spec's `store:` block may set `account_positions: false` to record only the `_ACCOUNT` row
-(cash and NAV) at each valuation instead of one row per held instrument; fills are recorded
-either way.
+`vqapr run <run-id> --no-account-positions` records only the `_ACCOUNT` row (cash and NAV)
+at each valuation instead of one row per held instrument; fills are recorded either way.
 
 Every run records three tables, plus any the model **declared and then formed** — a table must
 be returned from `StrategyModel.tables()` as a `TableSpec` before `decide()` may write to it
@@ -238,13 +248,13 @@ roster already declares, and the two can disagree — the fill records the roste
 the money follows yours. Nothing detects it, because per-instrument rates are legitimate when they
 are not standing in for a category.
 
-**Constraints.** The run spec's optional `constraints:` list names registered components of kind
-`constraint`. `vqapr new constraint <id> --cap 0.2` scaffolds a single-name position cap that
+**Constraints.** A strategy's optional `constraints:` list -- under its entry in the run's
+`strategies:` -- names registered components of kind `constraint`. `vqapr new constraint <id> --cap 0.2` scaffolds a single-name position cap that
 registers and runs unedited. It has two members and two consumers: `project` returns the lower AND
 upper weight bound for every instrument -- the box the optimiser must stay inside, not the
 offenders and not a correction -- and `monitor` looks at the marked account from outside and
 returns a `ConstraintFinding` with the bound and the measured value. A breach never stops a run;
-it is recorded, and `show run` reports it under `contract`.
+it is recorded, and `show strategy` reports it under `contract`.
 
 **Stop condition:** `register` accepted every declaration without failures, and each kind you
 registered lists what you expect. `list` takes exactly one kind per call and `kind` is a required
@@ -261,8 +271,10 @@ vqapr list strategy-configs
 vqapr list instruments
 ```
 
-The remaining three kinds are `valuation-configs`, `monitoring-policies` and `runs`. A kind you
-registered nothing under returns `count: 0`, which is an answer rather than a failure.
+The remaining four kinds are `valuation-configs`, `monitoring-policies`, `runs` and
+`strategies` -- the last two are Rung 2: `vqapr list runs` is the registered runs and the records
+beside each, `vqapr list strategies --run <run-id>` those records. A kind you registered nothing
+under returns `count: 0`, which is an answer rather than a failure.
 
 #### Correcting a registration during setup
 
@@ -336,22 +348,43 @@ flag them and explain what would have to be true for the pattern to be safe.
 
 ### Rung 2 — Materialization and run
 
-**Goal:** a completed simulation run that produces a result.
+**Goal:** a completed run that produces a result per strategy.
 
-1. `vqapr new run-spec --out spec.yaml` — get a template with every required key explained
-2. Fill in the template with registered component IDs, agenda IDs, instruments, and dates
-3. `vqapr check spec.yaml` — prove it before spending a run. `check` runs **five phases** and
-   makes **eight independent judgments**, and reports all of them in one call, so a spec with four
-   defects costs one command rather than four. It writes nothing.
+A run is configuration, registered like everything else: the universe, the period, the
+venue, the execution input, the initial account declaration, and the strategies it tries.
+Each strategy runs with its OWN account from that declaration, under the agenda its
+`strategy_configs` binding names, and writes its own record. Three factor models on one
+cadence are one run with three strategies, not three runs.
 
-   The two numbers are different things and the envelope shows the first: `checked` lists the five
-   phases — `spec`, `workspace`, `judgments`, `declaration`, `preflight` — and the phase named
-   `judgments` is where the eight are made. Counting the envelope's list and expecting eight is
-   the obvious mistake; it is five, and nothing is missing.
-4. `vqapr run spec.yaml` — preflight, freeze, and execute the simulation
+1. `vqapr new run --out runs.yaml` — get a `runs:` declaration template with every required
+   key explained
+2. Fill in the template with registered component ids, the valuation agenda id, instruments
+   and dates; list every strategy to try under `strategies:` (each needs a binding from
+   `vqapr new agendas`)
+3. `vqapr register runs.yaml` — the run is refused here if it names anything unregistered
+4. `vqapr check <run-id>` — prove it before spending a run. `check` runs **four phases** and
+   makes **eight independent judgments** -- for every strategy the run names -- and reports
+   all of them in one call, so a run with four defects costs one command rather than four. It
+   writes nothing.
 
-**Stop condition:** `vqapr check` returns `ok:true`, then `vqapr run` returns `ok:true` with an
-`occurrences` count and `account_version`.
+   The two numbers are different things and the envelope shows the first: `checked` lists the
+   four phases — `workspace`, `run`, `judgments`, `preflight` — and the phase named
+   `judgments` is where the eight are made. Counting the envelope's list and expecting eight
+   is the obvious mistake; it is four, and nothing is missing.
+5. `vqapr run <run-id> [--strategy <id>]... [--jobs N]` — preflight once, freeze, and execute
+   every strategy (or those named), in `N` processes when asked
+
+**Stop condition:** `vqapr check <run-id>` returns `ok:true`, then `vqapr run <run-id>`
+returns `ok:true` with a `strategies` map carrying an `occurrences` count, an
+`account_version` and a `record` (`<strategy-id>@<fp8>`) per strategy.
+
+**Tweaks are directories.** A strategy's record is named by its registered fingerprint, which
+folds the file bytes and the config: edit the strategy and re-register it under the same id,
+run again, and the new record lands BESIDE the old one. Counting `<strategy-id>@*` under
+`.vqapr/runs/<run-id>/strategies/` is how many times it was tweaked. Running the same
+fingerprint again is refused unless `--force` replaces that one record; `vqapr rm strategy
+<run-id>/<strategy-id>@<fp8>` and `vqapr rm run <run-id> [--keep-latest]` remove records, and
+both refuse while a writer may still hold the record.
 
 ## Writing a strategy
 
@@ -558,18 +591,19 @@ something else is registering right now, not that anything is corrupt. Wait for 
 to finish and retry. If nothing else is running, a lock file was left behind by a process that
 died, and removing it is safe once you have confirmed no vqapr command is live.
 
-**A run id refuses on the same principle, with a different clock and no file to remove.** `vqapr
-run` claims its id with a lock it refreshes as it writes, so a refusal that the id is `held by a
+**A strategy record refuses on the same principle, with a different clock and no file to
+remove.** `vqapr run` claims each strategy's record with a lock it refreshes as it writes, so a refusal that the id is `held by a
 lock inside its heartbeat window` means the lock was touched in the last 120 seconds -- **not**
 that the holder is provably alive. The pid in that message is copied out of the lock file, never
 interrogated. A run killed by Ctrl-C, a CI timeout or an OOM kill leaves exactly this state, and
 inside the window nothing can tell it from a run that is executing.
 
 That lock releases itself 120 seconds after its last refresh, and the refusal states how many
-seconds are left; re-running the same command after that reclaims the id with no flag and no
-cleanup. Waiting is the answer that is safe under both readings. `--run-id <new-id>` is the
-immediate one, at the cost of leaving the abandoned directory behind. `--force` is neither, and
-against a run that really is live it destroys the rows that run is still writing.
+seconds are left; re-running the same command after that reclaims the record with no flag and
+no cleanup. Waiting is the answer that is safe under both readings; `vqapr rm strategy
+<run-id>/<strategy-id>@<fp8>` clears an abandoned record once its lock has aged out. `--force`
+is neither, and against a run that really is live it destroys the rows that run is still
+writing.
 
 ### Recovering from: publication
 

@@ -51,7 +51,13 @@ from vqapr.exchange.execution_table import (
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
+from vqapr.flow.run import (
+    ConstraintSet,
+    FrozenAgenda,
+    FrozenRun,
+    FrozenStrategy,
+    StrategyConfig,
+)
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.simulation import AcceptedIntent, SimulationFlow
 from vqapr.models.strategy_model import StrategyModel
@@ -212,25 +218,34 @@ def _frozen(
         if end is not None
         else {}
     )
+    layer = FrozenStrategy(
+        config=strategy,
+        constraints=(
+            constraints
+            if constraints is not None
+            else ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),))
+        ),
+        agenda=_agenda("strategy", OperationRole.STRATEGY_CALLBACK, *callbacks),
+        requirements=strategy_requirements,
+        constraint_requirements=(
+            (_requirement(),) if constraints is None or constraints.constraints else ()
+        ),
+    )
     return FrozenRun(
-        strategy,
-        valuation,
-        constraints
-        if constraints is not None
-        else ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),)),
-        _agenda("strategy", OperationRole.STRATEGY_CALLBACK, *callbacks),
-        _agenda("valuation", OperationRole.VALUATION, *valuations),
-        monitor,
-        _agenda("monitoring", OperationRole.MONITORING, *monitoring) if monitor else None,
+        run_id="test",
+        valuation=valuation,
+        valuation_agenda=_agenda("valuation", OperationRole.VALUATION, *valuations),
+        strategies=(layer,),
+        monitoring=monitor,
+        monitoring_agenda=(
+            _agenda("monitoring", OperationRole.MONITORING, *monitoring) if monitor else None
+        ),
         exchange=_component("academic", ComponentKind.EXCHANGE) if execution else None,
         execution_input=execution,
         initial_account_snapshot=account,
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A", "B"),
-        strategy_requirements=strategy_requirements,
-        constraint_requirements=(_requirement(),)
-        if constraints is None or constraints.constraints
-        else (),
+        requirements=tuple(strategy_requirements) + layer.constraint_requirements,
         datasets=datasets,
         sources=sources,
         **bounds,
@@ -256,7 +271,7 @@ def _flow(
                 evaluation_time=occurrence.evaluation_time,
                 instruments=("A",),
                 store=DuckDbObservationStore(_Catalog()),
-                allowed_requirements=frozen.strategy_requirements,
+                allowed_requirements=frozen.strategies[0].requirements,
                 consumer_id="test-consumer",
             )
         ),
@@ -648,12 +663,12 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
     # The source actually read, at the digest it actually carried.
     assert stamped.source_refs == (IntentSourceRef("source", digest),)
     # The frozen component, not a string the callback chose.
-    assert stamped.strategy_id == str(frozen.strategy.component.component_id)
+    assert stamped.strategy_id == str(frozen.strategies[0].config.component.component_id)
     # The account the callback was handed.
     assert stamped.account_version_seen == _ACCOUNT.version
     # Deterministic, so a replayed run mints the same identity for the same occurrence.
     assert stamped.intent_id == uuid5(
-        NAMESPACE_URL, f"{stamped.strategy_id}/{frozen.static_occurrences[0].occurrence_id}"
+        NAMESPACE_URL, f"{stamped.strategy_id}/{frozen.dispatch_order(frozen.strategies[0])[0].occurrence_id}"
     )
     assert result.final_state.pending_accepted_intent is None
 
@@ -751,7 +766,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
     failure = raised.value
     assert failure.family is SimulationFailureFamily.DATA
     assert failure.stage is SimulationStage.CALLBACK_WINDOW
-    assert failure.failed_requirement == frozen.strategy_requirements
+    assert failure.failed_requirement == frozen.strategies[0].requirements
     assert failure.mutation is False
     assert state.current.lifecycle_trace == ()
 
@@ -938,7 +953,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     before = state.current
 
     with pytest.raises(SimulationFailure, match="no exact execution target") as raised:
-        flow._dispatch_callback(frozen.strategy_agenda.occurrences[0])
+        flow._dispatch_callback(frozen.strategies[0].agenda.occurrences[0])
 
     failure = raised.value
     assert failure.family is SimulationFailureFamily.INTENT
@@ -1039,7 +1054,7 @@ def test_frozen_agenda_trace_is_canonical_and_non_selected_density_does_not_chan
     second = _frozen((nine, ten), valuations=(nine,))
 
     assert first.identity == second.identity
-    assert [(item.role, item.occurrence_id) for item in first.static_occurrences] == [
+    assert [(item.role, item.occurrence_id) for item in first.dispatch_order(first.strategies[0])] == [
         (OperationRole.STRATEGY_CALLBACK, "strategy-0"),
         (OperationRole.VALUATION, "valuation-0"),
         (OperationRole.STRATEGY_CALLBACK, "strategy-1"),
@@ -1075,7 +1090,7 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
     # The refusal names both sides, so a reader does not have to diff two ids by eye.
     assert "'other'" in caught.value.failures[0].observed
     assert "'risk'" in caught.value.failures[0].observed
-    assert frozen.constraints.constraints == (_component("risk", ComponentKind.CONSTRAINT),)
+    assert frozen.strategies[0].constraints.constraints == (_component("risk", ComponentKind.CONSTRAINT),)
     assert ConstraintSet((constraint,)).constraints == (constraint,)
 
 
@@ -1139,9 +1154,9 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert due_evidence.mark == mark_evidence
     assert due_evidence.feedback == feedback_evidence
     assert callback_evidence.run_identity == frozen.identity
-    assert callback_evidence.agenda == frozen.strategy_agenda
+    assert callback_evidence.agenda == frozen.strategies[0].agenda
     assert callback_evidence.occurrence.occurrence_id == "strategy-0"
-    assert callback_evidence.current_model_state_ref == frozen.initial_model_state_ref
+    assert callback_evidence.current_model_state_ref == frozen.strategies[0].initial_model_state_ref
     assert callback_evidence.committed_model_state_ref != callback_evidence.current_model_state_ref
     assert commit_evidence.execution_snapshot.missing_target_instruments == ()
     assert commit_evidence.execution_snapshot.duplicate_instruments == ()
@@ -1256,7 +1271,7 @@ def test_callback_payload_fault_does_not_publish_recorder_or_state() -> None:
     failure = raised.value
     assert failure.family is SimulationFailureFamily.DATA
     assert failure.stage is SimulationStage.CALLBACK_STATE
-    assert failure.failed_requirement is frozen.strategy
+    assert failure.failed_requirement is frozen.strategies[0].config
     assert failure.kind is SimulationFailureKind.PRE_COMMIT
     assert failure.mutation is False
     assert state.current.account == AccountState(_ACCOUNT)

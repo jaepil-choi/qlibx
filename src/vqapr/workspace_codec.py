@@ -27,9 +27,12 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from datetime import date, datetime, time
+from decimal import Decimal
 
 import yaml
 
+from vqapr.account.account import AccountMode
+from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data.datasets import DatasetRegistration
@@ -43,13 +46,14 @@ from vqapr.domain.identifiers import (
     ExecutionInputId,
     SourceId,
     component_id,
+    execution_input_id,
     source_id,
 )
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import StrategyConfig
+from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
 
@@ -294,6 +298,7 @@ def _encode(
     strategy_configs: Mapping[str, StrategyConfig],
     valuation_configs: Mapping[str, ValuationConfig],
     monitoring_policies: Mapping[str, MonitoringPolicy],
+    runs: Mapping[str, RunDefinition] | None = None,
 ) -> str:
     document = {
         "sources": {
@@ -376,8 +381,17 @@ def _encode(
             key: {"agenda_role": str(policy.agenda_role)}
             for key, policy in sorted(monitoring_policies.items())
         },
+        "runs": {
+            key: encoded_run(definition) for key, definition in sorted((runs or {}).items())
+        },
     }
-    for section in ("agendas", "strategy_configs", "valuation_configs", "monitoring_policies"):
+    for section in (
+        "agendas",
+        "strategy_configs",
+        "valuation_configs",
+        "monitoring_policies",
+        "runs",
+    ):
         if not document[section]:
             del document[section]
     return yaml.dump(document, Dumper=_YAML_DUMPER, allow_unicode=True, sort_keys=False)
@@ -411,6 +425,7 @@ def _decode(
     dict[str, StrategyConfig],
     dict[str, ValuationConfig],
     dict[str, MonitoringPolicy],
+    dict[str, RunDefinition],
 ]:
     document = yaml.load(text, Loader=_YAML_LOADER)
     required_roots = {"sources", "datasets"}
@@ -421,6 +436,7 @@ def _decode(
         "strategy_configs",
         "valuation_configs",
         "monitoring_policies",
+        "runs",
     }
     if (
         not isinstance(document, dict)
@@ -429,7 +445,8 @@ def _decode(
     ):
         raise ValueError(
             "workspace root must contain sources and datasets, with optional execution_inputs "
-            "components, agendas, strategy_configs, valuation_configs, and monitoring_policies"
+            "components, agendas, strategy_configs, valuation_configs, monitoring_policies, "
+            "and runs"
         )
 
     raw_sources = document["sources"]
@@ -870,6 +887,42 @@ def _decode(
                 f"monitoring policy {raw_id!r} references an absent or mismatched agenda"
             )
         decoded_monitoring_policies[raw_id] = policy
+    raw_runs = document.get("runs", {})
+    if not isinstance(raw_runs, dict):
+        raise TypeError("runs must be a mapping")
+    decoded_runs: dict[str, RunDefinition] = {}
+    for raw_id, raw_run in raw_runs.items():
+        if not isinstance(raw_id, str):
+            raise TypeError("runs must be keyed by run id")
+        definition = decoded_run(raw_id, raw_run)
+        # Forward references, checked as every other section's are: a document naming an absent
+        # component or agenda is refused at decode, so `remove` cannot leave one behind.
+        for entry in definition.strategies:
+            component = decoded_components.get(component_id(entry.component_id))
+            if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
+                raise ValueError(f"run {raw_id!r} names an unregistered strategy")
+            if entry.component_id not in decoded_strategy_configs:
+                raise ValueError(f"run {raw_id!r} names a strategy with no registered binding")
+            for name in entry.constraints:
+                constraint = decoded_components.get(component_id(name))
+                if constraint is None or constraint.kind is not ComponentKind.CONSTRAINT:
+                    raise ValueError(f"run {raw_id!r} names an unregistered constraint")
+        if definition.exchange is not None:
+            venue = decoded_components.get(component_id(definition.exchange))
+            if venue is None or venue.kind is not ComponentKind.EXCHANGE:
+                raise ValueError(f"run {raw_id!r} names an unregistered exchange")
+        if (
+            definition.execution_input_id is not None
+            and execution_input_id(definition.execution_input_id) not in decoded_execution_inputs
+        ):
+            raise ValueError(f"run {raw_id!r} names an unregistered execution input")
+        for binding in (definition.valuation, definition.monitoring):
+            if binding is None:
+                continue
+            agenda = decoded_agendas.get(binding.agenda_id)
+            if agenda is None or agenda.role is not binding.agenda_role:
+                raise ValueError(f"run {raw_id!r} references an absent or mismatched agenda")
+        decoded_runs[raw_id] = definition
     return (
         decoded,
         decoded_sources,
@@ -879,7 +932,187 @@ def _decode(
         decoded_strategy_configs,
         decoded_valuation_configs,
         decoded_monitoring_policies,
+        decoded_runs,
     )
+
+
+def encoded_run(definition: RunDefinition) -> dict[str, object]:
+    """One registered run as the document writes it -- and as `vqapr new run` shows it.
+
+    The same shape the declaration reader accepts, so a run can be copied out of `workspace.yaml`
+    into a declaration and back.
+    """
+    body: dict[str, object] = {
+        "instruments": list(definition.instruments),
+        "start": None if definition.start is None else definition.start.isoformat(),
+        "end": None if definition.end is None else definition.end.isoformat(),
+        "valuation": {"agenda_id": str(definition.valuation.agenda_id)},
+        "exchange": definition.exchange,
+        "execution_input": definition.execution_input_id,
+    }
+    if definition.monitoring is not None:
+        body["monitoring"] = {"agenda_id": str(definition.monitoring.agenda_id)}
+    snapshot, mode = definition.initial_account_snapshot, definition.initial_account_mode
+    if snapshot is not None and mode is not None:
+        body["initial_account"] = {
+            "cash": str(snapshot.cash),
+            "mode": mode.name,
+            "positions": {str(k): str(v) for k, v in sorted(snapshot.positions.items())},
+            "version": snapshot.version,
+        }
+    strategies: dict[str, object] = {}
+    for entry in definition.strategies:
+        declared: dict[str, object] = {}
+        if entry.constraints:
+            declared["constraints"] = list(entry.constraints)
+        if entry.initial_model_memory is not None:
+            declared["initial_model_memory"] = entry.initial_model_memory
+        strategies[entry.component_id] = declared
+    body["strategies"] = strategies
+    return body
+
+
+def decoded_run(run_id: str, body: object) -> RunDefinition:
+    """A `RunDefinition` from the document's shape; `TypeError`/`ValueError` name what is wrong.
+
+    Ids are not resolved here: the workspace merge (`_merge_run`) and `_decode` below check that
+    every id a run names is registered, so this is shape only.
+    """
+    if not isinstance(body, dict):
+        raise TypeError(f"run {run_id!r} must be a mapping")
+    unknown = set(body) - _RUN_KEYS
+    if unknown:
+        raise ValueError(f"run {run_id!r} has unknown keys: {', '.join(sorted(unknown))}")
+    # A registered run is run-ready: the document form requires what `vqapr run` cannot execute
+    # without, all at once, so a reader learns the whole set in one refusal rather than one per
+    # retry. (`RunDefinition` itself keeps these optional for in-process callers.)
+    missing = [key for key in _RUN_REQUIRED if key not in body]
+    if missing:
+        raise ValueError(
+            f"run {run_id!r} must declare {', '.join(_RUN_REQUIRED)}; missing "
+            f"{len(missing)} of {len(_RUN_REQUIRED)}: {', '.join(missing)}"
+        )
+    raw_strategies = body.get("strategies")
+    if not isinstance(raw_strategies, dict) or not raw_strategies:
+        raise ValueError(f"run {run_id!r} must name at least one strategy under `strategies:`")
+    strategies = []
+    for raw_component, declared in raw_strategies.items():
+        declared = declared or {}
+        if not isinstance(declared, dict) or set(declared) - {
+            "constraints",
+            "initial_model_memory",
+        }:
+            raise ValueError(
+                f"run {run_id!r} strategy {raw_component!r} may declare only constraints and "
+                "initial_model_memory"
+            )
+        constraints = declared.get("constraints") or ()
+        if not isinstance(constraints, (list, tuple)):
+            raise TypeError(
+                f"run {run_id!r} strategy {raw_component!r} constraints must be a list"
+            )
+        strategies.append(
+            StrategyEntry(
+                str(raw_component),
+                tuple(str(name) for name in constraints),
+                declared.get("initial_model_memory"),
+            )
+        )
+    valuation = body.get("valuation")
+    if not isinstance(valuation, dict) or "agenda_id" not in valuation:
+        raise ValueError(f"run {run_id!r} valuation must be a mapping with agenda_id")
+    monitoring = body.get("monitoring")
+    if monitoring is not None and (
+        not isinstance(monitoring, dict) or "agenda_id" not in monitoring
+    ):
+        raise ValueError(f"run {run_id!r} monitoring must be a mapping with agenda_id")
+    account = body.get("initial_account")
+    snapshot: AccountSnapshot | None = None
+    mode: AccountMode | None = None
+    if account is not None:
+        if not isinstance(account, dict) or "cash" not in account or "mode" not in account:
+            raise ValueError(f"run {run_id!r} initial_account must declare cash and mode")
+        try:
+            mode = AccountMode[str(account["mode"]).upper()]
+        except KeyError:
+            raise ValueError(
+                f"run {run_id!r} initial_account.mode must be one of: "
+                f"{', '.join(member.name for member in AccountMode)}"
+            ) from None
+        positions = account.get("positions") or {}
+        if not isinstance(positions, dict):
+            raise TypeError(f"run {run_id!r} initial_account.positions must be a mapping")
+        snapshot = AccountSnapshot(
+            version=int(account.get("version", 0)),
+            cash=Decimal(str(account["cash"])),
+            positions={str(k): Decimal(str(v)) for k, v in positions.items()},
+        )
+    instruments = body.get("instruments")
+    if not isinstance(instruments, (list, tuple)):
+        raise TypeError(f"run {run_id!r} instruments must be a list")
+    return RunDefinition(
+        run_id=run_id,
+        strategies=tuple(strategies),
+        valuation=ValuationConfig(str(valuation["agenda_id"]), OperationRole.VALUATION),
+        instruments=tuple(str(name) for name in instruments),
+        monitoring=(
+            None
+            if monitoring is None
+            else MonitoringPolicy(str(monitoring["agenda_id"]), OperationRole.MONITORING)
+        ),
+        exchange=None if body.get("exchange") is None else str(body["exchange"]),
+        execution_input_id=(
+            None if body.get("execution_input") is None else str(body["execution_input"])
+        ),
+        start=_run_instant(body.get("start"), f"run {run_id!r} start"),
+        end=_run_instant(body.get("end"), f"run {run_id!r} end"),
+        initial_account_snapshot=snapshot,
+        initial_account_mode=mode,
+    )
+
+
+_RUN_REQUIRED = (
+    "strategies",
+    "valuation",
+    "instruments",
+    "start",
+    "end",
+    "exchange",
+    "execution_input",
+    "initial_account",
+)
+"""What a registered run cannot execute without; `monitoring` is the one optional key."""
+
+_RUN_KEYS = frozenset(
+    {
+        "strategies",
+        "valuation",
+        "monitoring",
+        "instruments",
+        "start",
+        "end",
+        "exchange",
+        "execution_input",
+        "initial_account",
+    }
+)
+
+
+def _run_instant(value: object, name: str) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as error:
+            raise ValueError(f"{name} must be an ISO-8601 datetime with an offset") from error
+    else:
+        raise TypeError(f"{name} must be an ISO-8601 datetime with an offset")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{name} must include a UTC offset; a naive datetime is not one instant")
+    return parsed
 
 
 def _encode_requirement(requirement: DataRequirement) -> dict[str, object]:

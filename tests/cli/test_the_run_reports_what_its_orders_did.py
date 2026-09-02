@@ -23,10 +23,9 @@ import dataclasses
 from types import SimpleNamespace
 
 from vqapr.analysis.execution import fill_summary
-from vqapr.flow.reporting import recorded, tables_declared
+from vqapr.flow.reporting import FRAMEWORK_TABLES, recorded
 from vqapr.flow.run_state import AcceptedRunState
 from vqapr.flow.simulation import SimulationResult
-from vqapr.flow.store_spec import StoreSpec
 
 
 def _result(*tables: tuple[str, tuple[dict[str, object], ...]]) -> SimpleNamespace:
@@ -111,7 +110,7 @@ def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
 def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
     """The bug this file's helper was written to stop repeating.
 
-    `tables_declared` used to read `result.tables`. `SimulationResult` has no such attribute -- it
+    The envelope's table readers used to read `result.tables`. `SimulationResult` has no such attribute -- it
     has `occurrences` and `final_state` -- so the component-declared half of `docs/issues/024`
     reported nothing in production, while its unit test passed a `SimpleNamespace(tables=...)` and
     stayed green for a week. Both envelope fields now read one helper, and this pins the path that
@@ -138,7 +137,8 @@ def test_a_table_the_model_declared_and_formed_is_reported_again() -> None:
         ("ff3.formation", ()),
     )
 
-    assert tables_declared(StoreSpec(root=None, tables=()), result) == ["ff3.formation"]
+    declared = [table for table in recorded(result) if table not in FRAMEWORK_TABLES]
+    assert declared == ["ff3.formation"]
 
 
 def test_the_helper_returns_an_empty_mapping_for_a_result_that_recorded_nothing() -> None:

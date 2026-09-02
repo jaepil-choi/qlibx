@@ -34,7 +34,7 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
+from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, FrozenStrategy, StrategyConfig
 from vqapr.flow.run_records import TABLES_DIRECTORY, RunRecordWriter, read_table
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
@@ -121,15 +121,20 @@ def _flow(
 ) -> SimulationFlow:
     requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     frozen = FrozenRun(
-        strategy=StrategyConfig(
-            _component("strategy", ComponentKind.STRATEGY_MODEL),
-            "strategy",
-            OperationRole.STRATEGY_CALLBACK,
-        ),
+        run_id="test",
         valuation=ValuationConfig("valuation", OperationRole.VALUATION),
-        constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
-        strategy_agenda=FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences),
         valuation_agenda=FrozenAgenda("valuation", OperationRole.VALUATION, ()),
+        strategies=(
+            FrozenStrategy(
+                config=StrategyConfig(
+                    _component("strategy", ComponentKind.STRATEGY_MODEL),
+                    "strategy",
+                    OperationRole.STRATEGY_CALLBACK,
+                ),
+                constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
+                agenda=FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences),
+            ),
+        ),
         start=occurrences[0].evaluation_time,
         end=occurrences[-1].evaluation_time,
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),

@@ -218,6 +218,7 @@ def test_public_exports_are_fixed() -> None:
         "FillSelector",
         "FrozenAgenda",
         "FrozenRun",
+        "FrozenStrategy",
         "Grain",
         "Hold",
         "IndexInstrument",
@@ -253,6 +254,7 @@ def test_public_exports_are_fixed() -> None:
         "RunDefinition",
         "RunRecordResult",
         "RunRecordSpec",
+        "RunResult",
         "Side",
         "SideCost",
         "SimulationFailure",
@@ -260,6 +262,7 @@ def test_public_exports_are_fixed() -> None:
         "SourceSpec",
         "StockInstrument",
         "StrategyConfig",
+        "StrategyEntry",
         "StrategyModel",
         "StrategyModelContext",
         "TableSpec",
@@ -299,7 +302,8 @@ def test_public_exports_are_fixed() -> None:
         "rank",
         "rank_information_coefficient",
         "read_run_record",
-        "read_run_table",
+        "read_strategy_record",
+        "read_strategy_table",
         "register_agenda",
         "register_component",
         "register_constraint",
@@ -308,6 +312,7 @@ def test_public_exports_are_fixed() -> None:
         "register_exchange",
         "register_execution_input",
         "register_monitoring_policy",
+        "register_run",
         "register_strategy_config",
         "register_strategy_model",
         "register_valuation_config",
@@ -317,6 +322,7 @@ def test_public_exports_are_fixed() -> None:
         "run_ids",
         "shipped_constraint_path",
         "signal_weight",
+        "strategy_refs",
         "trade_rules_by_kind",
         "validate_allocation",
     )
@@ -448,23 +454,35 @@ def test_public_facade_registers_an_operation_agenda(tmp_path: Path) -> None:
 def test_public_run_uses_frozen_initial_model_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The strategy layer's frozen memory reaches the loaded strategy, detached (record `139`)."""
+    from vqapr.flow.run import FrozenStrategy
+
     memory = {"carry": [1]}
-    frozen = object.__new__(FrozenRun)
+    layer = object.__new__(FrozenStrategy)
     for name, value in {
-        "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
-        "initial_account_mode": AccountMode.LONG_ONLY,
+        "config": SimpleNamespace(component=SimpleNamespace(component_id="s")),
+        "constraints": SimpleNamespace(constraints=()),
+        "agenda": SimpleNamespace(occurrences=()),
+        "requirements": (),
+        "constraint_requirements": (),
         "initial_model_memory": memory,
         "initial_model_state_ref": "frozen-memory-ref",
         "initial_payload": b"",
+        "_identity": "layer",
+    }.items():
+        object.__setattr__(layer, name, value)
+    frozen = object.__new__(FrozenRun)
+    for name, value in {
+        "run_id": "facade",
+        "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
+        "initial_account_mode": AccountMode.LONG_ONLY,
         "exchange": object(),
         "execution_input": object(),
-        "strategy": SimpleNamespace(component=object()),
-        "constraints": SimpleNamespace(constraints=()),
+        "strategies": (layer,),
         "datasets": (),
         "sources": (),
         "instruments": ("A",),
-        "strategy_requirements": (),
-        "constraint_requirements": (),
+        "requirements": (),
     }.items():
         object.__setattr__(frozen, name, value)
     strategy = SimpleNamespace(
@@ -508,12 +526,14 @@ def test_public_run_uses_frozen_initial_model_memory(
     monkeypatch.setattr(orchestration, "RunStateRepository", State)
     monkeypatch.setattr(orchestration, "SimulationFlow", Flow)
 
-    assert public.run(tmp_path, frozen) == "result"
+    outcome = public.run(tmp_path, frozen)
+    assert outcome.result() == "result"
+    assert outcome.results == {"s": "result"}
     memory["carry"].append(2)
     assert observed == {
         "frozen": frozen,
         "memory": {"carry": [1]},
-        "ref": frozen.initial_model_state_ref,
+        "ref": layer.initial_model_state_ref,
     }
 
 

@@ -89,6 +89,31 @@ AC-R3 names five things, and they are the five a later reader cannot reconstruct
   compared.
 - **derived period** — what the run actually covered, which is not always what was declared.
 
+## Two records (record `139`)
+
+```
+<store.root>/runs/
+  <run-id>/
+    run.json                       configuration: what every strategy shared, written FIRST
+    strategies/
+      <strategy-id>@<fp8>/
+        strategy.json              one strategy's facts, written LAST -- the completion mark
+        .running                   that strategy's liveness lock while it writes
+        tables/<table>.jsonl       its rows, plus <table>.types.json beside each
+```
+
+A run holds several strategies (design §4), so the unit of writing -- and of the lock, the
+crash survival and the `--force` replacement argued above -- is the strategy directory. The
+run directory holds `run.json`, which every process running a strategy of that run writes
+identically before it starts; two writers writing the same bytes need no lock, and a run whose
+configuration changed under an old id is refused naming both digests. Nothing above changes:
+no index file, chunked appends, JSONL, types beside the rows. `record.json` remains the
+materialization record and the shape of a run written before `139`; both are still read.
+
+The directory name `<strategy-id>@<fp8>` is the first eight hex characters of the strategy's
+registered fingerprint, which folds the file bytes and the config: a tweak is a new directory
+beside the old one, and counting them is architecture §17.4's answer.
+
 ## What this constrains in Step 6
 
 `store.root` becomes the parent of `runs/`. That is the whole coupling, and it is why this document

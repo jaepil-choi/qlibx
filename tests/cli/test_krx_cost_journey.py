@@ -27,7 +27,7 @@ import duckdb
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.flow.run_records import read_table
+from vqapr.flow.run_records import read_table, strategy_refs
 
 _ZONE = ZoneInfo("Asia/Seoul")
 STOCK = "A005930"
@@ -241,32 +241,41 @@ valuation_configs:
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(configs))
     assert code == 0, payload
 
-    spec = tmp_path / "spec.yaml"
-    spec.write_text(
+    runs = tmp_path / "runs.yaml"
+    runs.write_text(
         json.dumps(
             {
-                "strategy": {"component": "rotate", "agenda_id": "alpha"},
-                "valuation": {"agenda_id": "valuing"},
-                "exchange": "krx-venue",
-                "execution_input": "venue-daily",
-                "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
-                "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),
-                "initial_account": {"cash": "1000000", "mode": "long_only"},
-                "instruments": [STOCK, ETF],
+                "runs": {
+                    "krx": {
+                        "strategies": {"rotate": {}},
+                        "valuation": {"agenda_id": "valuing"},
+                        "exchange": "krx-venue",
+                        "execution_input": "venue-daily",
+                        "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
+                        "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),
+                        "initial_account": {"cash": "1000000", "mode": "long_only"},
+                        "instruments": [STOCK, ETF],
+                    }
+                }
             }
         ),
         encoding="utf-8",
     )
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(runs))
+    assert code == 0, payload
 
-    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", str(spec), "--run-id", "krx")
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "krx")
 
     assert code == 0, ran
     assert ran["roster"]["known"] is True
     assert ran["roster"]["by_kind"] == {"stock": 1, "etf": 1}
 
+    store = tmp_path / ".vqapr"
+    (strategy_ref,) = strategy_refs(store, "krx")
+    assert ran["strategies"]["rotate"]["record"] == strategy_ref
     fills = [
         row
-        for row in read_table(tmp_path / ".vqapr", "krx", "vqapr.fill")
+        for row in read_table(store, "krx", "vqapr.fill", strategy_ref)
         if Decimal(str(row.get("dealt_quantity") or 0)) != 0
     ]
     assert fills, "the journey must trade, or it proves nothing about what trading costs"

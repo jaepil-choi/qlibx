@@ -30,7 +30,12 @@ class DatasetCatalog(Protocol):
     def source(self, raw_source_id: str) -> SourceSpec: ...
 
 
-def _physical_digest(path: Path) -> str:
+def physical_digest(path: Path) -> str:
+    """The sha256 of a source's parquet bytes: what a registration's id and path stand for.
+
+    Public since record `139`: `run.json` records it per source (testbed A7), so a run says which
+    bytes it read and not only which path it was pointed at.
+    """
     files = (path,) if path.is_file() else tuple(sorted(path.glob("**/*.parquet")))
     if not files:
         raise FileNotFoundError(f"source has no readable parquet bytes: {path}")
@@ -205,7 +210,7 @@ class DuckDbObservationStore:
     def _digest(self, path: Path) -> str:
         cached = self.__digests.get(path)
         if cached is None:
-            cached = self.__digests[path] = _physical_digest(path)
+            cached = self.__digests[path] = physical_digest(path)
         return cached
 
     def query(

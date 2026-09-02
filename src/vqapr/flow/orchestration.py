@@ -1,21 +1,21 @@
-"""Assemble and execute one simulation, from a frozen authority to a result.
+"""Assemble and execute one run -- every strategy it names -- from a frozen authority to results.
 
-**This is where `vqapr.public.run` lives**, and record `111` is why it moved. `public.py` was the
-package's documented surface and also its orchestrator: 775 lines, of which 450 were function
-bodies. A facade that executes runs is not a facade, and every module below it that needed one of
-these functions had to import the top-level surface to get it -- the fan-in `docs/issues/028`
-records.
-
-`vqapr.public` re-exports `run` and `preflight_run` unchanged, so no caller and no emitted scaffold
-moved. What changed is where the code lives: beside `flow/preflight.py`, which freezes the
-declarations this consumes, and `flow/run.py`, which defines the `FrozenRun` it takes.
+**This is where `vqapr.public.run` lives**, and record `111` is why it moved: a facade that
+executes runs is not a facade. Record `139` made it a run of several strategies: the run layer is
+frozen once, and each strategy runs in its own `SimulationFlow` with its own `Account` and its own
+record directory (design §4.1, §7-4). Sequentially by default; with `jobs > 1`, in that many
+processes, each of which freezes the registered run again and runs one strategy of it.
 """
 
 from __future__ import annotations
 
-import hashlib
+import multiprocessing
+from collections.abc import Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from types import MappingProxyType
 
 from vqapr.account.account import Account
 from vqapr.account.history import retained_marks
@@ -26,7 +26,7 @@ from vqapr.constraints.evaluation import (
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
-from vqapr.data.store import DuckDbObservationStore
+from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.exchange.execution_table import validate_execution_input
@@ -38,10 +38,10 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.preflight import preflight_run as _preflight_run
-from vqapr.flow.records import freeze_record
+from vqapr.flow.records import freeze_run_record, freeze_strategy_record
 from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
-from vqapr.flow.run import FrozenRun, RunDefinition
-from vqapr.flow.run_records import RunRecordWriter
+from vqapr.flow.run import FrozenRun, FrozenStrategy, RunDefinition
+from vqapr.flow.run_records import RunRecordWriter, read_strategy_record
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow, SimulationResult
 from vqapr.models.memory import normalize_memory
@@ -69,25 +69,60 @@ class _FrozenCatalog:
         return self._sources[raw_source_id]
 
 
+@dataclass(frozen=True, slots=True)
+class RunResult:
+    """What one call to `run` produced: a result per strategy it ran, and their records.
+
+    `results` holds the in-process `SimulationResult` of every strategy this process ran.
+    `records` holds each strategy's `strategy.json` as written, for every strategy run under a
+    store -- including those run by worker processes, whose in-process result never crosses the
+    process boundary and is read back from the record instead.
+    """
+
+    run_id: str
+    results: Mapping[str, SimulationResult]
+    records: Mapping[str, Mapping[str, object]]
+
+    def result(self, component_id: str | None = None) -> SimulationResult:
+        """The one strategy's result, or the only one when the run ran exactly one."""
+        if component_id is None:
+            if len(self.results) != 1:
+                raise ValueError(
+                    f"run {self.run_id!r} produced {len(self.results)} in-process results; "
+                    "name the strategy"
+                )
+            return next(iter(self.results.values()))
+        return self.results[component_id]
+
+
 def run(
     project_root: str | Path,
     frozen_run: FrozenRun,
     *,
     store_root: str | Path | None = None,
-    run_id: str | None = None,
+    strategies: Sequence[str] | None = None,
+    jobs: int = 1,
     replace_record: bool = False,
     record_account_positions: bool = True,
-) -> SimulationResult:
-    """Execute exactly one simulation from a preflight-produced frozen authority.
+) -> RunResult:
+    """Execute a frozen run: each of its strategies (or those named), each in its own flow.
 
-    When `store_root` is given the run freezes its own record beneath it, which is what makes the
-    result readable by any later process -- including `show run` from a cold one, and including the
-    other four of five concurrent runs. Omitted, the run keeps its results in memory exactly as
-    before: an in-process caller that already holds the result should not be made to write it to
-    disk to get it.
+    When `store_root` is given the run writes `run.json` first and each strategy freezes its own
+    record beneath `strategies/<id>@<fp8>/`, which is what makes the results readable by any later
+    process -- `show strategy` from a cold one, and the other strategies' processes. Omitted, the
+    results stay in memory: an in-process caller that already holds them should not be made to
+    write them to disk to get them.
+
+    `jobs > 1` runs the strategies in that many processes. Each worker opens the workspace,
+    freezes the REGISTERED run under this id again and runs one strategy, so it needs a store (the
+    record is how a result comes back) and a registered run (a frozen run built in-process does
+    not cross a process boundary). Each worker builds its own panels (design §7-2, owner decision
+    2026-09-02).
     """
     if not isinstance(frozen_run, FrozenRun):
         raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
+    if not isinstance(jobs, int) or jobs < 1:
+        raise ValueError("jobs must be a positive integer")
     root_path = Path(project_root)
     frozen = frozen_run
     if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None:
@@ -98,21 +133,107 @@ def run(
         raise ValueError("public run requires a frozen execution input")
     validate_execution_input(frozen.execution_input).raise_if_failed()
 
-    strategy = load_strategy_model(frozen.strategy.component, project_root=root_path)
+    selected = tuple(frozen.strategy(name) for name in (strategies or ())) or frozen.strategies
+    store = None if store_root is None else Path(store_root)
+    if store is not None:
+        freeze_run_record(store, frozen, source_digests=_source_digests(frozen))
+
+    results: dict[str, SimulationResult] = {}
+    records: dict[str, Mapping[str, object]] = {}
+    if jobs > 1 and len(selected) > 1:
+        if store is None:
+            raise ValueError(
+                "jobs > 1 needs a store_root: a worker's result comes back as its record"
+            )
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=min(jobs, len(selected)), mp_context=context) as pool:
+            futures = {
+                layer.component_id: pool.submit(
+                    run_registered_strategy,
+                    str(root_path),
+                    frozen.run_id,
+                    layer.component_id,
+                    str(store),
+                    replace_record,
+                    record_account_positions,
+                )
+                for layer in selected
+            }
+            for component_id, future in futures.items():
+                records[component_id] = future.result()
+        return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
+
+    for layer in selected:
+        result, record = _run_strategy(
+            root_path,
+            frozen,
+            layer,
+            store=store,
+            replace_record=replace_record,
+            record_account_positions=record_account_positions,
+        )
+        results[layer.component_id] = result
+        if record is not None:
+            records[layer.component_id] = record
+    return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
+
+
+def run_registered_strategy(
+    project_root: str,
+    run_id: str,
+    component_id: str,
+    store_root: str,
+    replace_record: bool,
+    record_account_positions: bool,
+) -> Mapping[str, object]:
+    """One strategy of one registered run, in this process, returning its record.
+
+    The worker behind `jobs > 1`. Module-level and taking only strings and bools, because it
+    crosses a `spawn` boundary; it freezes the registered run again rather than receiving a
+    frozen one, since a frozen run is built from workspace objects that are not meant to travel.
+    """
+    workspace = Workspace.open(project_root)
+    frozen = _preflight_run(workspace, workspace.run_definition(run_id))
+    layer = frozen.strategy(component_id)
+    _, record = _run_strategy(
+        Path(project_root),
+        frozen,
+        layer,
+        store=Path(store_root),
+        replace_record=replace_record,
+        record_account_positions=record_account_positions,
+    )
+    assert record is not None
+    return record
+
+
+def _source_digests(frozen: FrozenRun) -> dict[str, str]:
+    """The physical digest of every source the run reads, keyed by source id (A7)."""
+    return {str(source.source_id): physical_digest(source.path) for source in frozen.sources}
+
+
+def _run_strategy(
+    root_path: Path,
+    frozen: FrozenRun,
+    layer: FrozenStrategy,
+    *,
+    store: Path | None,
+    replace_record: bool,
+    record_account_positions: bool,
+) -> tuple[SimulationResult, Mapping[str, object] | None]:
+    """Execute exactly one strategy of a frozen run, with its own Account and its own record."""
+    strategy = load_strategy_model(layer.config.component, project_root=root_path)
     exchange = load_exchange(frozen.exchange, project_root=root_path)
     constraints = tuple(
-        load_constraint(ref, project_root=root_path) for ref in frozen.constraints.constraints
+        load_constraint(ref, project_root=root_path) for ref in layer.constraints.constraints
     )
     # What was ACTUALLY loaded, computed beside the loads that read it.
     #
     # Since the drift refusal went (issue 009), an edited component runs instead of being
-    # refused, so `frozen.identity` -- fixed at preflight from the REGISTERED fingerprints -- can
-    # describe bytes this run never executed. Recording only that would leave a receipt that
-    # looks authoritative and is stale, which is worse than the gate it replaced.
-    #
-    # Derived here rather than inside `_load` because the loaders' return types are what their
-    # callers expect, and here is where the consumer that records it lives.
-    as_loaded = _as_loaded_identity(frozen, root_path)
+    # refused, so the registered fingerprints -- fixed at preflight -- can describe bytes this
+    # run never executed. Recording only those would leave a receipt that looks authoritative
+    # and is stale, which is worse than the gate it replaced.
+    as_loaded = _as_loaded_fingerprints(frozen, layer, root_path)
     # ONE read of the roster, and the record is written from it rather than from a second one.
     # `roster` carries the digest and the table list beside the registry, so a `vqapr register`
     # landing during the run cannot make the record state a digest the fills were never classified
@@ -120,59 +241,60 @@ def run(
     roster = registered_roster(root_path)
     registry = roster.registry if roster is not None else None
     catalog = _FrozenCatalog(frozen)
-    # One physical handle for the whole run. duckdb caches parquet metadata for a connection's
-    # lifetime, and closing per query threw that away on every observation.
+    # One physical handle for the whole strategy. duckdb caches parquet metadata for a
+    # connection's lifetime, and closing per query threw that away on every observation.
     session = ScanSession()
-    store = DuckDbObservationStore(catalog, session=session)
+    observation_store = DuckDbObservationStore(catalog, session=session)
     strategy_requirements = strategy.requirements()
-    if strategy_requirements != frozen.strategy_requirements:
+    if strategy_requirements != layer.requirements:
         raise ValueError("loaded Strategy requirements drifted from FrozenRun")
     constraint_requirements = declared_constraint_requirements(constraints)
-    if constraint_requirements != frozen.constraint_requirements:
+    if constraint_requirements != layer.constraint_requirements:
         raise ValueError("loaded Constraint requirements drifted from FrozenRun")
     root = AccountState(frozen.initial_account_snapshot)
-    strategy.memory = normalize_memory(frozen.initial_model_memory)
-    strategy.load_payload(BytesIO(frozen.initial_payload))
+    strategy.memory = normalize_memory(layer.initial_model_memory)
+    strategy.load_payload(BytesIO(layer.initial_payload))
     writer = None
-    if store_root is not None:
-        writer = RunRecordWriter(Path(store_root), run_id or str(frozen.identity))
+    if store is not None:
+        writer = RunRecordWriter(store, frozen.run_id, layer.record_ref)
         writer.open(replace=replace_record)
     state = RunStateRepository(
         initial_account=root,
-        initial_model_memory=frozen.initial_model_memory,
-        initial_payload=frozen.initial_payload,
-        # Rows leave the run as each occurrence is accepted, into this run's own directory; a
-        # killed run keeps everything up to its last accepted occurrence, and the heap holds one
-        # occurrence's rows rather than the run's. Without a store, roots keep rows as before.
+        initial_model_memory=layer.initial_model_memory,
+        initial_payload=layer.initial_payload,
+        # Rows leave the run as each occurrence is accepted, into this strategy's own directory;
+        # a killed run keeps everything up to its last accepted occurrence, and the heap holds
+        # one occurrence's rows rather than the run's. Without a store, roots keep rows as before.
         row_sink=None if writer is None else writer.append,
     )
-    if state.root.current_model_state_ref != frozen.initial_model_state_ref:
+    if state.root.current_model_state_ref != layer.initial_model_state_ref:
         raise RuntimeError("initial Model state does not match frozen run authority")
     initial_ref = state.root.current_model_state_ref
-    if initial_ref is None or state.load_payload(initial_ref) != frozen.initial_payload:
+    if initial_ref is None or state.load_payload(initial_ref) != layer.initial_payload:
         raise RuntimeError("initial Strategy payload does not match frozen run authority")
     flow = SimulationFlow(
         frozen,
         strategy,
         state,
+        layer=layer,
         strategy_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
             instruments=frozen.instruments,
-            store=store,
-            allowed_requirements=frozen.strategy_requirements,
-            consumer_id=str(frozen.strategy.component.component_id),
+            store=observation_store,
+            allowed_requirements=layer.requirements,
+            consumer_id=layer.component_id,
         ),
         constraint_window_for_occurrence=lambda occurrence: ModelWindow(
             evaluation_time=occurrence.evaluation_time,
             instruments=frozen.instruments,
-            store=store,
+            store=observation_store,
             # No consumer: this window serves every loaded constraint, and which one is reading
-            # is known only inside the loop that calls them. `project_constraints` and
-            # `evaluate_constraints` take a view per constraint.
-            allowed_requirements=frozen.constraint_requirements,
+            # is known only inside the loop that calls them.
+            allowed_requirements=layer.constraint_requirements,
         ),
-        # A run retains exactly the marks somebody declared they would read. Declaring nothing
-        # keeps one, so a Strategy that never looks at its own path costs nothing to carry it.
+        # Each strategy has its own Account (design §7-4): the run shares the initial
+        # DECLARATION, not the book. It retains exactly the marks this strategy declared it would
+        # read; declaring nothing keeps one.
         account=Account(
             mode=frozen.initial_account_mode,
             retained_marks=retained_marks(strategy.account_history()),
@@ -180,11 +302,9 @@ def run(
         exchange=exchange,
         constraints=constraints,
         scan_session=session,
-        # The run's liveness signal. Without it the record's lock is stamped once at `open` and
-        # never touched again until the run ends -- so any run longer than `LOCK_STALE_AFTER`
-        # reads as dead WHILE STILL EXECUTING, and a peer takes its id and deletes its tables. A
-        # factor run here takes three to six minutes against a two-minute window, so that is every
-        # real run, not an edge case.
+        # The strategy's liveness signal. Without it the record's lock is stamped once at `open`
+        # and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as dead WHILE
+        # STILL EXECUTING, and a peer takes its id and deletes its tables.
         on_progress=writer.heartbeat if writer is not None else None,
         registry=registry,
         record_account_positions=record_account_positions,
@@ -193,64 +313,37 @@ def run(
         result = flow.run()
         if writer is not None:
             # `roster_report` is evaluated HERE, after the run returned and outside the argument
-            # list, and its failure is absorbed. It no longer reads anything -- `docs/issues/050`
-            # moved the digest and the table list onto the read taken before `flow.run()` -- but
-            # the shape stays, because the defect it fixes was structural: the report is built
-            # after the run, outside the argument list, and whatever it raises stops at the
-            # absorber rather than at the writer.
-            #
-            # Evaluated as an argument inside the `try`, that refusal skipped `freeze_record`
-            # entirely: no rows, no `record.json`, the id released for a peer to take, exit 1 --
-            # **a completed multi-hour run discarded because one small JSON file went bad after it
-            # finished**. `cli/run.py` already wrote the defence for exactly this case ("the tables
-            # can become unreadable in the minutes a real run takes, and letting that refusal
-            # escape would report exit 1 for a run that completed"), but that guard runs after
-            # `run()` returns and so never covered this line.
-            #
-            # The report is decoration on a record; the record is the run. Losing the decoration is
-            # the cheaper failure, and it is recorded as a stale marker rather than as `null`,
-            # which this record's own contract defines as "no roster was ever read".
-            freeze_record(
-                writer,
-                result,
-                frozen,
-                as_loaded,
-                _roster_report_or_stale(roster),
+            # list, and its failure is absorbed: the report is decoration on a record; the record
+            # is the run. Losing the decoration is the cheaper failure, and it is recorded as a
+            # stale marker rather than as `null`, which this record's own contract defines as
+            # "no roster was ever read".
+            freeze_strategy_record(
+                writer, result, frozen, layer, as_loaded, _roster_report_or_stale(roster)
             )
     except BaseException:
-        # A run that died still holds its id. Releasing here turns a crash into an ordinary
-        # retry instead of stranding the id until the lock goes stale. `freeze_record` is inside
-        # the guard for the same reason: a failure while writing the record is still a failure
-        # that must not keep the id.
+        # A strategy that died still holds its record's lock. Releasing here turns a crash into
+        # an ordinary retry instead of stranding the directory until the lock goes stale.
         if writer is not None:
             writer.release()
         raise
     finally:
         session.close()
-    return result
+    record = (
+        None
+        if writer is None
+        else read_strategy_record(writer.root, frozen.run_id, layer.record_ref)
+    )
+    return result, record
 
 
 def _roster_report_or_stale(roster: RegisteredRoster | None) -> object | None:
     """The roster block for the record, or a STALE MARKER when it cannot be built at record time.
 
     Narrow on purpose: it catches `VqaprError` only, so a bug in report construction still fails
-    loudly. What it absorbed was the one thing that legitimately changes underneath a long run --
-    the roster pointer on disk -- and the alternative was discarding a finished run over it.
-    Since `docs/issues/050` the report is built from the read taken before `flow.run()` and touches
-    no file, so that refusal can no longer originate here; the absorber stays as the standing
-    guarantee that nothing computed AFTER a run completed can cost the record.
-
-    **Not `None`, and that distinction is the whole point.** `flow/records.py` and
-    `flow/run_records.py` both define `roster: null` in a record as *"the run never knew the
-    categories"*. But `run` calls `registered_roster` before `flow.run()` and that refuses an
-    unreadable pointer outright, so **any run that reaches this line did read its roster**.
-    Returning `None` here would write a falsehood into the frozen artifact a later cold process
-    reads -- the exact collapse `flow/roster.py` calls "the opposite of the truth" and that
-    `docs/issues/042` exists to stop.
-
-    So the marker says what actually happened: the run knew its categories, and the record could
-    not re-read them at the end. `cli/run.py`'s `_roster_envelope` reaches the same shape for the
-    same reason on the envelope side; this is the record side of it.
+    loudly. **Not `None`, and that distinction is the whole point.** `roster: null` in a record
+    means *"the run never knew the categories"*; any run that reaches this line did read its
+    roster, so the marker says what actually happened: the run knew its categories, and the record
+    could not re-read them at the end (`docs/issues/042`, `050`).
     """
     try:
         return roster_report(roster)
@@ -266,26 +359,19 @@ def _roster_report_or_stale(roster: RegisteredRoster | None) -> object | None:
         }
 
 
-def _as_loaded_identity(frozen: FrozenRun, root_path: Path | None) -> str:
-    """One digest over every component this run actually loaded, in a fixed order.
+def _as_loaded_fingerprints(
+    frozen: FrozenRun, layer: FrozenStrategy, root_path: Path | None
+) -> dict[str, str]:
+    """The fingerprint of every component this strategy actually loaded, by component id.
 
-    Folded the same way `frozen.identity` folds the registered fingerprints, so the two are
-    comparable: equal when nothing was edited between registration and the run, different exactly
-    when something was.
+    Per component rather than folded (design §4.2): the strategy's own fingerprint is readable on
+    its own, so a change to one constraint does not disguise itself as a change to the strategy.
+    Only refs that carry a real source are included -- a run assembled in-process may hold a stub
+    in place of a registered component, and such a thing has no bytes on disk to fingerprint.
     """
-    # Only refs that carry a real source are folded. A FrozenRun assembled in-process may hold a
-    # stub in place of a registered component -- `tests/boundaries` does exactly that -- and such
-    # a thing has no bytes on disk to fingerprint. Skipping it keeps the digest a statement about
-    # what was loaded from source, rather than raising on a run that is otherwise valid.
-    candidates = [frozen.strategy.component, frozen.exchange]
-    candidates.extend(frozen.constraints.constraints)
-    parts = [
-        (
-            str(ref.component_id),
-            as_loaded_fingerprint(ref, project_root=root_path),
-        )
+    candidates = [layer.config.component, frozen.exchange, *layer.constraints.constraints]
+    return {
+        str(ref.component_id): as_loaded_fingerprint(ref, project_root=root_path)
         for ref in candidates
         if isinstance(ref, ComponentRef)
-    ]
-    payload = "|".join(f"{name}={digest}" for name, digest in sorted(parts))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    }

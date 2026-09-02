@@ -25,9 +25,16 @@ from vqapr.exchange.execution_table import (
 )
 from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
-from vqapr.extension.component import ComponentRef
+from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
-from vqapr.flow.run import FrozenAgenda, FrozenRun, RunDefinition
+from vqapr.flow.run import (
+    ConstraintSet,
+    FrozenAgenda,
+    FrozenRun,
+    FrozenStrategy,
+    RunDefinition,
+    StrategyEntry,
+)
 from vqapr.models.strategy_model import StrategyModel
 from vqapr.runtime.agendas import OperationAgenda
 from vqapr.workspace import Workspace
@@ -310,9 +317,7 @@ def _validate_instrument_universe(
     someone to register a listing that already exists.
     """
     listings = exchange.listings
-    missing = tuple(
-        instrument_id for instrument_id in instruments if instrument_id not in listings
-    )
+    missing = tuple(instrument_id for instrument_id in instruments if instrument_id not in listings)
     untradable = tuple(
         instrument_id
         for instrument_id in instruments
@@ -451,13 +456,9 @@ def _validate_execution_targets(
                     "the required execution snapshot, or choose a fill selector whose target "
                     "exists after that decision"
                 ),
-                observed=(
-                    f"selector={selector}, end={end.isoformat()}, "
-                    f"unresolved={len(missing)}"
-                ),
+                observed=(f"selector={selector}, end={end.isoformat()}, unresolved={len(missing)}"),
                 examples=[
-                    f"{occurrence.occurrence_id}: "
-                    f"{occurrence.evaluation_time.isoformat()}"
+                    f"{occurrence.occurrence_id}: {occurrence.evaluation_time.isoformat()}"
                     for occurrence in missing
                 ],
                 example_total=len(missing),
@@ -477,12 +478,84 @@ def _validate_execution_targets(
     )
 
 
+def _freeze_strategy(
+    workspace: Workspace,
+    entry: StrategyEntry,
+    *,
+    execution_input: ExecutionInputRegistration,
+    start: datetime,
+    end: datetime,
+) -> FrozenStrategy:
+    """One strategy's layer: its registered binding, its component, its constraints, its slice.
+
+    The agenda is the strategy's registered `strategy_config` (record `138`); the run does not
+    restate it. A strategy a run names without a binding is refused by the workspace, naming the
+    strategy.
+    """
+    binding = workspace.strategy_config(entry.component_id)
+    config = type(binding)(
+        _validate_component(workspace, binding.component), binding.agenda_id, binding.agenda_role
+    )
+    loaded_strategy = load_strategy_model(config.component, project_root=workspace.project_root)
+    initial_payload = _validate_initial_model_state(
+        workspace, config.component, loaded_strategy, entry.initial_model_memory
+    )
+    constraints = tuple(_registered_constraint(workspace, name) for name in entry.constraints)
+    strategy_requirements = tuple(loaded_strategy.requirements())
+    loaded_constraints: tuple[Constraint, ...] = tuple(
+        load_constraint(constraint, project_root=workspace.project_root)
+        for constraint in constraints
+    )
+    constraint_requirements = tuple(
+        requirement
+        for constraint in loaded_constraints
+        for requirement in constraint.requirements()
+    )
+    agenda = _freeze_agenda(
+        workspace,
+        agenda_id=config.agenda_id,
+        expected_role=config.agenda_role,
+        start=start,
+        end=end,
+    )
+    _validate_execution_targets(execution_input, agenda, start=start, end=end)
+    return FrozenStrategy(
+        config=config,
+        constraints=ConstraintSet(constraints),
+        agenda=agenda,
+        requirements=strategy_requirements,
+        constraint_requirements=constraint_requirements,
+        initial_model_memory=entry.initial_model_memory,
+        initial_payload=initial_payload,
+    )
+
+
+def _registered_constraint(workspace: Workspace, component_id: str) -> ComponentRef:
+    ref = workspace.component(component_id)
+    if ref.kind is not ComponentKind.CONSTRAINT:
+        raise ValueError(
+            f"constraint {component_id!r} is registered as {ref.kind.value}, not as a constraint"
+        )
+    return ref
+
+
+def _registered_exchange(workspace: Workspace, component_id: str) -> ComponentRef:
+    ref = workspace.component(component_id)
+    if ref.kind is not ComponentKind.EXCHANGE:
+        raise ValueError(
+            f"exchange {component_id!r} is registered as {ref.kind.value}, not as an exchange"
+        )
+    return ref
+
+
 def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition) -> FrozenRun:
     """Freeze one workspace snapshot into a run-ready declaration.
 
-    This resolves declarations, the static agenda merge, and each strategy occurrence's exact
-    execution target. It does not inspect callback results; instead it proves that an intent the
-    callback may return has somewhere to execute before any callback mutates account state.
+    The run layer is resolved once -- venue, execution input, valuation, monitoring, universe,
+    account -- and each strategy the run names is frozen on top of it (design §4.1). This proves
+    that every callback of every strategy has somewhere to execute before any account mutates,
+    and collects the union of everything the strategies and their constraints read: that union
+    is the panel set the run will build.
 
     *Run-ready* is the promise, so a declaration carrying no execution price is refused here
     rather than frozen and rejected later by `run()`.
@@ -502,51 +575,18 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
 
-    strategy = workspace.strategy_config(str(definition.strategy.component.component_id))
-    if strategy != definition.strategy:
-        raise ValueError("strategy configuration reference drift")
-    strategy = type(strategy)(
-        _validate_component(workspace, strategy.component), strategy.agenda_id, strategy.agenda_role
-    )
-    loaded_strategy = load_strategy_model(strategy.component, project_root=workspace.project_root)
-    initial_payload = _validate_initial_model_state(
-        workspace, strategy.component, loaded_strategy, definition.initial_model_memory
-    )
-
     valuation = workspace.valuation_config(definition.valuation.agenda_id)
     if valuation != definition.valuation:
         raise ValueError("valuation configuration reference drift")
-    # Valuation subscribes to nothing: it reads the prices the venue already published to fill
-    # against, so it contributes no DataRequirement to the frozen run.
-    requirements: list[DataRequirement] = []
-
     monitoring = None
     if definition.monitoring is not None:
         monitoring = workspace.monitoring_policy(definition.monitoring.agenda_id)
         if monitoring != definition.monitoring:
             raise ValueError("monitoring policy reference drift")
 
-    constraints = tuple(
-        _validate_component(workspace, constraint)
-        for constraint in definition.constraints.constraints
-    )
-    frozen_constraints = type(definition.constraints)(constraints)
-    strategy_requirements = loaded_strategy.requirements()
-    requirements.extend(strategy_requirements)
-    loaded_constraints: tuple[Constraint, ...] = tuple(
-        load_constraint(constraint, project_root=workspace.project_root)
-        for constraint in constraints
-    )
-    constraint_requirements = tuple(
-        requirement
-        for constraint in loaded_constraints
-        for requirement in constraint.requirements()
-    )
-    requirements.extend(constraint_requirements)
-
     # Unconditional: `_require_execution_authority` has already refused a definition without
     # them, so the universe and account checks below can no longer be skipped by omission.
-    exchange = _validate_component(workspace, definition.exchange)
+    exchange = _registered_exchange(workspace, definition.exchange or "")
     loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
     execution_input = workspace.execution_input(definition.execution_input_id or "")
     validate_execution_input(execution_input).raise_if_failed()
@@ -555,6 +595,19 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     _validate_initial_account(
         definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
     )
+
+    strategies = tuple(
+        _freeze_strategy(workspace, entry, execution_input=execution_input, start=start, end=end)
+        for entry in definition.strategies
+    )
+    # Valuation subscribes to nothing: it reads the prices the venue already published to fill
+    # against, so it contributes no DataRequirement. The union is what the strategies and their
+    # constraints read, deduplicated, in the order first declared.
+    requirements: list[DataRequirement] = []
+    for layer in strategies:
+        for requirement in (*layer.requirements, *layer.constraint_requirements):
+            if requirement not in requirements:
+                requirements.append(requirement)
     sources = _freeze_sources(workspace, tuple(requirements), execution_input.table.source)
     datasets_by_id = {
         requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
@@ -562,13 +615,6 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     }
     datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
 
-    strategy_agenda = _freeze_agenda(
-        workspace,
-        agenda_id=strategy.agenda_id,
-        expected_role=strategy.agenda_role,
-        start=start,
-        end=end,
-    )
     valuation_agenda = _freeze_agenda(
         workspace,
         agenda_id=valuation.agenda_id,
@@ -587,19 +633,12 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         if monitoring is not None
         else None
     )
-    _validate_execution_targets(
-        execution_input,
-        strategy_agenda,
-        start=start,
-        end=end,
-    )
 
     return FrozenRun(
-        strategy=strategy,
+        run_id=definition.run_id,
         valuation=valuation,
-        constraints=frozen_constraints,
-        strategy_agenda=strategy_agenda,
         valuation_agenda=valuation_agenda,
+        strategies=strategies,
         monitoring=monitoring,
         monitoring_agenda=monitoring_agenda,
         exchange=exchange,
@@ -608,11 +647,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         end=end,
         initial_account_snapshot=definition.initial_account_snapshot,
         initial_account_mode=definition.initial_account_mode,
-        initial_model_memory=definition.initial_model_memory,
-        initial_payload=initial_payload,
         instruments=definition.instruments,
-        strategy_requirements=strategy_requirements,
-        constraint_requirements=constraint_requirements,
         requirements=tuple(requirements),
         datasets=datasets,
         sources=sources,

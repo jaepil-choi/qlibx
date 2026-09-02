@@ -25,6 +25,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from vqapr.account.account import AccountMode
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
@@ -49,6 +50,7 @@ from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Transaction, Workspace
+from vqapr.workspace_codec import decoded_run
 
 _COMPONENT_KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
@@ -80,6 +82,7 @@ SECTIONS = (
     "strategy_configs",
     "valuation_configs",
     "monitoring_policies",
+    "runs",
 )
 """Every section this command understands, in dependency order.
 
@@ -941,6 +944,41 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
             MonitoringPolicy(agenda_id, OperationRole.MONITORING)
         )
         registered.setdefault("monitoring_policies", []).append(str(policy_id))
+
+    for run_id, body in section("runs").items():
+        # Shape by the codec, so a run reads the same way from a declaration and from the
+        # document; every id it names is checked against the staged workspace by the merge.
+        name = f"runs.{run_id}"
+        declared = _mapping(body, name=name)
+        account = declared.get("initial_account")
+        if isinstance(account, dict) and "mode" in account:
+            # A closed set is the one case where a refusal can always be complete: the mode is
+            # judged here so the refusal names every member and the nearest spelling
+            # (`docs/issues/017`), rather than surfacing from the codec as a bare sentence.
+            _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
+        try:
+            definition = decoded_run(str(run_id), declared)
+        except (TypeError, ValueError) as invalid:
+            found = collector(DECLARE_STAGE, FailureFamily.DATA)
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.run_invalid",
+                    requirement=(
+                        "a run declares strategies, valuation, instruments, start, end, exchange, "
+                        "execution_input and initial_account, each in the shape `vqapr new run` "
+                        "emits"
+                    ),
+                    observed=str(invalid),
+                    examples=["2024-01-02T00:00:00+09:00"],
+                    source=_at(name),
+                    fix=f"correct `{name}` in the declaration, then register again",
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+            found.done().raise_if_failed()
+            raise  # unreachable
+        transaction.register_run(definition)
+        registered.setdefault("runs", []).append(str(run_id))
 
     transaction.commit()
     return registered

@@ -55,7 +55,6 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -73,6 +72,7 @@ from vqapr.public import (
     RunRecordSpec,
     SourceSpec,
     StrategyConfig,
+    StrategyEntry,
     ValuationConfig,
     callback_evidence,
     component_ref,
@@ -529,19 +529,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
     definition = RunDefinition(
-        signal_config,
-        valuation_config,
-        ConstraintSet(()),
-        monitoring,
-        academic_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.SIGNED,
+        run_id="show007",
+        strategies=(StrategyEntry("show007-signal"),),
+        valuation=valuation_config,
+        monitoring=monitoring,
+        exchange="show007-academic",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    result = run(project, preflight_run(project, definition))
+    result = run(project, preflight_run(project, definition)).result()
 
     evidence = callback_evidence(result)
     signal_published = publish_run_record(

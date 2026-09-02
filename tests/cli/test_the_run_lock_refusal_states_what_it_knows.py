@@ -15,6 +15,10 @@ The remedy that costs nothing -- wait ~120s, then re-run the same command -- app
 and nowhere in the skill. What appeared instead was "wait for that run to finish", which for a dead
 holder reads as wait forever, and a bolded argument against `--force`, the one thing that does work
 on a dead claim, resting on a premise the refusal cannot check.
+
+Since record 139 the lock guards a strategy RECORD under a registered run rather than a run id
+chosen on the command line, so `--run-id <new-id>` is no longer a remedy anyone can type. What
+remains is the wait, and `--force` hedged on the premise the refusal cannot check.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.cli.run import _held_run_id
+from vqapr.cli.run import _held_record
 from vqapr.flow.run_records import (
     LOCK_FILENAME,
     LOCK_STALE_AFTER,
@@ -66,7 +70,10 @@ def test_the_exception_states_a_lock_and_its_release_rather_than_liveness(tmp_pa
     assert refused.value.claim.age >= 0.0
     assert "last refreshed" in message
     assert "released automatically" in message
-    assert "--run-id" in message, "the refusal must name a remedy that is not --force"
+    assert "Wait" in message and "vqapr rm strategy" in message, (
+        "the refusal must name a remedy that is not --force"
+    )
+    assert "--force" not in message, "the exception itself must not send a reader to --force"
     assert "is already running" not in message, (
         "the lock proves it was touched recently, not that its process is alive"
     )
@@ -77,9 +84,12 @@ def test_the_refusal_names_the_wait_before_the_flags() -> None:
 
     A dead holder's claim: 3 seconds old, so 117 seconds from releasing itself.
     """
-    refusal = _held_run_id(
-        "run_ou_k0_2024",
-        RunRecordLive("run_ou_k0_2024", Path(".vqapr/runs/run_ou_k0_2024"), LockClaim(64004, 3.0)),
+    refusal = _held_record(
+        RunRecordLive(
+            "run_ou_k0_2024/ou-k0@abcdef01",
+            Path(".vqapr/runs/run_ou_k0_2024/strategies/ou-k0@abcdef01"),
+            LockClaim(64004, 3.0),
+        ),
     )
     # Read through the envelope the agent actually parses, so a field renamed on the way out
     # fails here rather than in a journey.
@@ -95,10 +105,12 @@ def test_the_refusal_names_the_wait_before_the_flags() -> None:
         "the zero-cost remedy comes first; 'wait for that run to finish' reads as wait forever "
         "when the holder is dead"
     )
-    assert "reclaims the id" in failure["fix"], (
+    assert "reclaims the record" in failure["fix"], (
         "waiting must be stated as a remedy, not as patience"
     )
-    assert "--run-id <new-id>" in failure["fix"]
+    assert "--run-id" not in failure["fix"], (
+        "a run id is a registration, not a flag; a remedy naming one cannot be typed"
+    )
     assert "while the holder may be live" in failure["fix"], (
         "--force must be hedged on the premise this refusal cannot check"
     )

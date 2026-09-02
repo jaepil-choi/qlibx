@@ -4284,7 +4284,7 @@ C(`038` + `045`/`049`)를 담고 있으므로 `develop`과 다르다
 | 17.1.3 | 한 번 읽은 parquet은 메모리에 올려 두고 cursor만 옮긴다 | **없음** | `035` |
 | 17.1.4 | 병렬 전략이 하나의 parquet을 공유한다 | **없음** | `035`, `049` |
 | 17.2 | StrategyModel과 DataModel은 같은 base에서 나오고 사용법이 닮는다 | **부분** | `036`, `031` |
-| 17.3 | run은 재사용 가능한 객체이고 여러 전략을 담는다 | **부분** | `040` |
+| 17.3 | run은 재사용 가능한 객체이고 여러 전략을 담는다 | **부분** → 기록 `139`에서 지켜짐 | `040` |
 | 17.3.1 | run 설정이 run 기록에 남는다 | **부분** | — |
 | 17.3.2 | run 기록이 strategy file과 fingerprint를 담는다 | **없음** | — |
 | 17.4 | 파일명은 그대로, fingerprint만 바뀌며 tweak 이력이 남는다 | **부분** | — |
@@ -4525,6 +4525,8 @@ mechanism이 닮는다", "같은 동작에 다른 이름을 쓰지 않는다")�
 **판정: 부분.** 객체와 재사용 가능한 필드 집합은 있다. **한 run에 여러 전략**은 없고, 그것을 여는 것은
 `FrozenRun`, run record, run id, lock까지 함께 움직이는 변경이다.
 
+> **2026-09-02 정정 (기록 `139`).** run은 workspace에 **등록되는 선언**이 됐다(`runs:` 섹션, `vqapr run <run-id>`). `RunDefinition`은 id와 값만 들고 `strategies`가 복수다. `FrozenRun`은 run 층 + `FrozenStrategy` 여럿이고, 전략마다 자기 `Account`·자기 `SimulationFlow`·자기 record다. `--jobs N`은 프로세스 N개이고 각자 panel을 만든다(설계 §7-2, 소유자 결정).
+
 ### 17.3.1 run 설정 중 record에 남는 것과 남지 않는 것
 
 **진술.** run의 설정이 run 기록으로 저장되어야 한다.
@@ -4550,6 +4552,8 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 "어떤 설정이었나"의 답은 record가 아니라 **spec 파일과 run id 작명 규칙**이 진다.
 
 **판정: 부분.** 기간과 계약은 남고 **무엇을 무엇에 대해 돌렸는지**는 남지 않는다.
+
+> **2026-09-02 정정 (기록 `139`).** `run.json`이 universe, period, valuation/monitoring agenda, exchange(id·fingerprint), execution input(id·fill 선언, `034`), initial account 선언, dataset(id·source·grain·**source digest**, A7), 그리고 이 run이 이름 댄 전략 목록을 든다. run id는 등록된 이름이다.
 
 ### 17.3.2 run 기록은 strategy file도, 전략 자신의 fingerprint도 담지 않는다
 
@@ -4577,6 +4581,8 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 
 **판정: 없음.** 진술이 요구하는 두 값 모두 record에 없다. 17.4가 걸려 있는 자리이기도 하다.
 
+> **2026-09-02 정정 (기록 `139`).** `strategies/<id>@<fp8>/strategy.json`이 `component.path`와 전략 **자신의** fingerprint(등록된 값 `fingerprint`, 로드된 값 `source_digest[component_id]`)를 component별로 든다. 접힌 digest는 없다.
+
 ---
 
 ### 17.4 fingerprint는 바뀌지만, 그 이력을 읽는 경로가 없다
@@ -4602,6 +4608,8 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 **판정: 부분.** 생성은 되고 축적은 되지 않는다. 이것을 닫는 최소 변경은 record에 **component별
 (id, path, fingerprint)**를 적는 것이고, 그러면 17.3.2와 17.6이 같이 움직인다.
 
+> **2026-09-02 정정 (기록 `139`).** 디렉터리 이름이 답이다: `ou-ff5@*`를 세면 tweak 횟수다. record는 등록된 fingerprint로 content-addressed이고, `vqapr list strategies --run <id> --strategy ou-ff5`가 그 전략의 record를 모은다.
+
 ---
 
 ### 17.5 run 기록을 지우는 명령이 없다
@@ -4622,6 +4630,8 @@ run"*(`cli/run.py:385`).
 
 **판정: 없음.**
 
+> **2026-09-02 정정 (기록 `139`).** `vqapr rm run <id> [--keep-latest]` / `vqapr rm strategy <run>/<id>@<fp8>`가 있다. 살아 있는 lock은 거절하고, 죽은 잔해만 지운다.
+
 ### 17.5.1 filter는 run id 부분문자열 하나다
 
 **진술.** CLI를 통해 손쉽게 run을 filter/search 할 수 있어야 한다.
@@ -4635,6 +4645,8 @@ run"*(`cli/run.py:385`).
 
 **판정: 부분.** 이 항목은 17.3.1과 17.3.2가 record에 필드를 넣어 주면 그 위에서 거의 자동으로 열린다.
 순서가 있다: record가 답을 담지 않으면 filter가 물을 것이 없다.
+
+> **2026-09-02 정정 (기록 `139`).** `list strategies --run <id> [--strategy] [--fingerprint] [--failed-contract] [--since]`. 새 I/O 없이 record의 필드로 거른다.
 
 ---
 
@@ -4672,6 +4684,8 @@ run"*(`cli/run.py:385`).
 **판정: 어긋남 — 다만 데이터의 결손이 아니라 축의 결손이다.** 진술이 요구하는 내용은 전부 디스크에 있다.
 없는 것은 **strategy를 1급 축으로 삼는 두 번째 읽기 경로**이고, 그 축을 만들려면 record가 전략을 이름으로
 불러야 한다(17.3.2).
+
+> **2026-09-02 정정 (기록 `139`).** 축이 생겼다. `run.json`(설정)과 `strategies/<id>@<fp8>/`(output: signal·weight·account·fill 표와 `strategy.json`)로 갈린다. §17.6의 진술 그대로다.
 
 ---
 

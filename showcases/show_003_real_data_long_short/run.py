@@ -34,7 +34,6 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -50,6 +49,7 @@ from vqapr.public import (
     RunDefinition,
     SourceSpec,
     StrategyConfig,
+    StrategyEntry,
     ValuationConfig,
     component_ref,
     materialize,
@@ -474,21 +474,21 @@ def main() -> None:
     register_monitoring_policy(PROJECT, monitoring)
 
     definition = RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet((constraint_ref,)),
-        monitoring,
-        exchange_ref,
-        "krx-daily",
-        datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
-        datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
-        AccountSnapshot(0, Decimal("1000000000"), {}),
-        AccountMode.SIGNED,
+        run_id="show003",
+        strategies=(StrategyEntry("showcase-strategy", ("showcase-constraint",)),),
+        valuation=valuation_config,
+        monitoring=monitoring,
+        exchange="showcase-exchange",
+        execution_input_id="krx-daily",
+        start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        initial_account_snapshot=AccountSnapshot(0, Decimal("1000000000"), {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=tuple(universe),
     )
 
     frozen = preflight_run(PROJECT, definition)
-    result = run(PROJECT, frozen)
+    result = run(PROJECT, frozen).result()
 
     final_state = result.final_state
     account = final_state.account

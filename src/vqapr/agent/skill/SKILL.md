@@ -150,8 +150,21 @@ materialization writes none; to replace an output, remove its dataset registrati
 
 **Reading a finished run.** `vqapr show run <id>` gives the record: the account, the period, the
 roster it read, and per-table row counts. `vqapr show run <id> --table <name>` gives the rows
-themselves, with `--limit` (0 for all). It reports `rows_total` and `returned` separately, so a
-truncated page never reads as a short run.
+themselves, with `--limit` (0 for all) and `--instrument <id>` to keep only one instrument's rows
+-- `--instrument _ACCOUNT` on `vqapr.account` is the NAV series. It reports `rows_total`,
+`matched` and `returned` separately, so a truncated page never reads as a short run.
+
+**Read a record from Python with `vqapr.public.read_run_table(store_root, run_id, table)`,
+never by parsing the JSONL yourself.** The rows are JSONL on disk (`.vqapr/runs/<id>/tables/`),
+and JSON has no `Decimal` and no offset-aware instant: a reader that guesses from the text --
+`read_json_auto` included -- shifts every instant by its offset and the panel built from it
+registers cleanly. `read_run_table` decodes by the column types the writer recorded beside the
+table, so `nav` comes back a `Decimal` and `observed_at` an aware `datetime`. Rows reach the disk
+as each occurrence is accepted, so a long run can be watched and a killed one keeps what it did.
+
+A run spec's `store:` block may set `account_positions: false` to record only the `_ACCOUNT` row
+(cash and NAV) at each valuation instead of one row per held instrument; fills are recorded
+either way.
 
 Every run records three tables, plus any the model **declared and then formed** — a table must
 be returned from `StrategyModel.tables()` as a `TableSpec` before `decide()` may write to it

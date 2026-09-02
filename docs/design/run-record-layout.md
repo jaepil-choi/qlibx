@@ -52,11 +52,12 @@ research run — that is not a cost worth buying a lost-update bug to avoid.
 rows as it produces them gets crash survival and bounded memory for free: a killed run keeps
 everything up to its last chunk, and peak memory is one chunk rather than a whole run.
 
-**The product does not stream yet.** `public.run` hands `recorder_rows` over once, after the run
-returns, so today's records are written in a single pass at the end and the two properties above
-are latent rather than delivered. This section describes what the layout makes possible and what
-the writer supports; it is not a description of current run behaviour. Recording it the other way
-round would make the layout look like it had solved a problem that is still open.
+**The product streams (record `135`).** `RunStateRepository` hands each accepted occurrence's
+rows to the writer at the swap that accepts it, and no root retains them; `freeze_record` writes
+only `record.json` at the end, from counts the writer kept as chunks passed. A killed run keeps
+every accepted occurrence's rows and no record, and a streamed run's peak heap is a fraction of
+the same run kept in memory -- both measured in `tests/flow/test_the_run_record_streams.py`. A
+flow assembled without a store keeps rows in its roots as before.
 
 ## Why JSONL
 
@@ -66,6 +67,15 @@ read-modify-write, which is what this layout exists to avoid.
 
 The published *dataset* a run produces is still parquet — that is Step 6's `store.tables`. This is
 the run's own record, which is a different artifact with a different reader.
+
+**Types travel beside the rows (record `135`).** JSON has no `Decimal` and no offset-aware
+instant; the writer encodes both as strings, and a reader that guesses from the text shifts every
+instant by its offset -- the testbed's A5. So the writer, which sees the Python types at the
+moment it stringifies them, records them per table and per column in `tables/<id>.types.json`,
+rewritten only when a column's type is first seen or changes. `read_typed_table` -- exported as
+`vqapr.public.read_run_table` -- decodes by that sidecar; a table with no sidecar predates it and
+reads back as strings. A column seen under two types is recorded as a string, because reading the
+strings that were written is the one answer that loses nothing.
 
 ## What `record.json` holds
 

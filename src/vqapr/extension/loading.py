@@ -356,7 +356,11 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
             fix="make the registered object a subclass of vqapr.constraints.constraint.Constraint",
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
-    _requirements(constraint, label="Constraint", required=True)
+    # Not `_requirements(...)`: a Constraint declares its reads with `inputs()` like every other
+    # Model role does since record `128`, and declaring nothing is legitimate -- `NoShort` is a
+    # rule about a weight's sign and reads no data at all. Requiring a non-empty
+    # `requirements()` here made the shipped constraint that needs no data the one shape the
+    # loader could not accept.
     _constraint_identity(ref, constraint)
     return constraint
 

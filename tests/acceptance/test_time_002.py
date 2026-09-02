@@ -13,6 +13,12 @@ import pytest
 import vqapr.flow.simulation as simulation
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.authoring import (
+    ConstraintCall,
+    EconomicAccountView,
+    Hold,
+    Rebalance,
+)
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding
 from vqapr.constraints.monitoring import MonitoringPolicy
@@ -23,7 +29,6 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
@@ -49,13 +54,11 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.simulation import AcceptedIntent, SimulationFlow
-from vqapr.authoring import Hold, Rebalance
 from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
     IntentSourceRef,
-    PortfolioTarget,
     validate_economic_intent,
 )
 from vqapr.public import register_dataset
@@ -81,11 +84,11 @@ class _Catalog:
 
 
 class _Strategy(StrategyModel):
-    def __init__(self, results: tuple[Hold | EconomicPortfolioIntent, ...]) -> None:
+    def __init__(self, results: tuple[Hold | Rebalance, ...]) -> None:
         self.results = iter(results)
         self.seen: list[tuple[str, datetime, int]] = []
 
-    def on_occurrence(self, context: object) -> Hold | EconomicPortfolioIntent:
+    def on_occurrence(self, context: object) -> Hold | Rebalance:
         occurrence = context.occurrence
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
@@ -143,28 +146,20 @@ class _Constraint(Constraint):
     def requirements(self) -> tuple[DataRequirement, ...]:
         return (_requirement(),)
 
-    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+    def project(self, call: ConstraintCall) -> ConstraintBounds:
         return ConstraintBounds(
-            {instrument: Decimal("0") for instrument in instruments},
-            {instrument: Decimal("1") for instrument in instruments},
+            lower_weights={instrument: Decimal("0") for instrument in call.instruments},
+            upper_weights={instrument: Decimal("1") for instrument in call.instruments},
         )
 
-    def validate_intended(
-        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
-        return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
-        )
-
-    def evaluate(
+    def monitor(
         self,
-        window: ModelWindow,
-        account: AccountSnapshot,
-        marks: object,
+        call: ConstraintCall,
+        account: EconomicAccountView,
         bounds: ConstraintBounds,
     ) -> ConstraintFinding:
         return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
+            passed=True, measured=Decimal("0"), bound=Decimal("1"), excess=Decimal("0"), details={}
         )
 
 
@@ -472,30 +467,22 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
     class RecordingConstraint(_Constraint):
         def __init__(self) -> None:
             self.projections: list[tuple[datetime, ConstraintBounds]] = []
-            self.intended_bounds: ConstraintBounds | None = None
             self.actual: tuple[datetime, ConstraintBounds] | None = None
 
-        def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
-            bounds = super().project(window, instruments)
-            self.projections.append((window.evaluation_time, bounds))
+        def project(self, call: ConstraintCall) -> ConstraintBounds:
+            bounds = super().project(call)
+            self.projections.append((call.evaluation_time, bounds))
             return bounds
 
-        def validate_intended(
-            self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-        ) -> ConstraintFinding:
-            self.intended_bounds = bounds
-            return super().validate_intended(intent, bounds)
-
-        def evaluate(
+        def monitor(
             self,
-            window: ModelWindow,
-            account: AccountSnapshot,
-            marks: object,
+            call: ConstraintCall,
+            account: EconomicAccountView,
             bounds: ConstraintBounds,
         ) -> ConstraintFinding:
-            self.actual = (window.evaluation_time, bounds)
+            self.actual = (call.evaluation_time, bounds)
             return ConstraintFinding(
-                self.constraint_id, False, Decimal("1"), Decimal("0"), Decimal("1"), {}
+                passed=False, measured=Decimal("1"), bound=Decimal("0"), excess=Decimal("1"), details={}
             )
 
     constraint = RecordingConstraint()
@@ -516,8 +503,8 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
         ),
         _Strategy(
             (
-                EconomicPortfolioIntent(
-                    UUID(int=3), "strategy", (), Decimal("1"), _BUDGET, (), 0, None
+                Rebalance(
+                    target_weights={}, cash_weight=Decimal("1"), budget=_BUDGET
                 ),
             )
         ),
@@ -526,8 +513,9 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
     ).run()
 
     assert [cutoff for cutoff, _ in constraint.projections] == [callback, monitoring]
-    assert constraint.intended_bounds is not None
-    assert constraint.intended_bounds == constraint.projections[0][1]
+    # Monitoring measures against the bounds IT projected, not the ones the callback saw. The
+    # two projections are separate reads at separate cutoffs, and pairing the later measurement
+    # with the earlier bounds would report a breach against a limit that had since moved.
     assert constraint.actual == (monitoring, constraint.projections[1][1])
     assert result.occurrences[-1].result.report.passed is False
     assert result.final_state.account is not None
@@ -536,6 +524,9 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
 
 @pytest.mark.uc("UC-TIME-002")
 def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurrence() -> None:
+    # A stamped intent on purpose, not a decision: what is under test is that the intent the
+    # Flow produces carries no timing of its own, and only the stamped object has an identity
+    # for a timing claim to hang on.
     payload = EconomicPortfolioIntent(
         UUID(int=1), "strategy", (), Decimal("1"), _BUDGET, (_SOURCE,), 0, None
     )
@@ -771,15 +762,10 @@ def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> No
             """,
         )
     )
-    intent = EconomicPortfolioIntent(
-        UUID(int=99),
-        "strategy",
-        (PortfolioTarget("C", weight=Decimal("0")),),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"C": Decimal("0")},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     state = _state()
 
@@ -793,7 +779,9 @@ def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> No
     failure = raised.value
     assert failure.family is SimulationFailureFamily.INTENT
     assert failure.stage is SimulationStage.CALLBACK_INTENT
-    assert failure.failed_requirement is intent
+    # The decision went in; a stamped intent came out and is what the failure names. Identity
+    # cannot be compared across that boundary any more, so compare the economics that crossed it.
+    assert failure.failed_requirement.targets[0].instrument_id == "C"
     assert failure.mutation is False
     assert state.current.pending_accepted_intent is None
     assert state.current.lifecycle_trace == ()
@@ -804,7 +792,7 @@ def test_constraint_projection_failure_retains_constraint_owner() -> None:
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
 
     class FailingConstraint(_Constraint):
-        def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+        def project(self, call: ConstraintCall) -> ConstraintBounds:
             raise RuntimeError("constraint projection fault")
 
     constraint = FailingConstraint()
@@ -928,15 +916,10 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
             """,
         )
     )
-    intent = EconomicPortfolioIntent(
-        UUID(int=102),
-        "strategy",
-        (),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     prior = type("PriorPending", (), {"pending_id": "prior"})()
     state = RunStateRepository(
@@ -1105,15 +1088,10 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=1),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
     frozen = _frozen((callback, target), valuations=(target,), end=target, execution=registration)
     state = _state()
@@ -1195,15 +1173,10 @@ def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> Non
             """,
         )
     )
-    intent = EconomicPortfolioIntent(
-        UUID(int=101),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
 
     result = _flow(
@@ -1220,7 +1193,7 @@ def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> Non
         LifecycleKind.FEEDBACK_PUBLISHED,
     ]
     commit = result.final_state.lifecycle_trace[2].detail
-    assert commit.pending.intent.intent_id == intent.intent_id
+    assert commit.pending.intent.targets[0].instrument_id == "A"
     assert result.final_state.pending_accepted_intent is None
 
 
@@ -1237,15 +1210,10 @@ def test_target_only_absence_publishes_typed_zero_dealt_fill(tmp_path: Path) -> 
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=2),
-        "strategy",
-        (PortfolioTarget("B", weight=Decimal("0")),),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"B": Decimal("0")},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     state = _state()
     result = _flow(
@@ -1310,15 +1278,10 @@ def test_a_held_instrument_absent_from_the_venue_is_carried_not_refused(tmp_path
     initial = AccountSnapshot(0, Decimal("90"), {"A": Decimal("1")})
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=3),
-        "strategy",
-        (PortfolioTarget("B", weight=Decimal("0")),),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"B": Decimal("0")},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     state = _state(initial)
 
@@ -1354,15 +1317,10 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=9),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
     state = _state()
 
@@ -1446,15 +1404,10 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=10),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
     frozen = _frozen((callback,), end=target, execution=registration)
     state = _state()
@@ -1491,7 +1444,10 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     )
     assert failure.mutation is after_commit
     assert failure.retry_precondition.requires_replay_from_root is True
-    assert failure.pending_id == (None if after_commit else str(intent.intent_id))
+    stamped_pending = state.current.pending_accepted_intent
+    assert failure.pending_id == (
+        None if after_commit else str(stamped_pending.intent.intent_id)
+    )
     assert failure.retry_precondition.required_pending_id == failure.pending_id
     assert failure.root_version == state.current.version == root_version
     assert failure.account_version == (1 if after_commit else 0)
@@ -1503,7 +1459,7 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     if boundary == "data":
         assert failure.failed_requirement is registration
     elif boundary == "order":
-        assert failure.failed_requirement is intent
+        assert failure.failed_requirement.targets[0].instrument_id == "A"
     elif boundary == "exchange":
         assert failure.failed_requirement == frozen.exchange
     elif boundary == "account":
@@ -1530,15 +1486,10 @@ def test_omitted_holding_is_liquidated_through_the_due_flow(tmp_path: Path) -> N
     initial = AccountSnapshot(0, Decimal("90"), {"A": Decimal("1")})
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=4),
-        "strategy",
-        (PortfolioTarget("B", weight=Decimal("0.1")),),
-        Decimal("0.9"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"B": Decimal("0.1")},
+        cash_weight=Decimal("0.9"),
+        budget=_BUDGET,
     )
 
     result = _flow(

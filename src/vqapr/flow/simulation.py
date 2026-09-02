@@ -19,9 +19,8 @@ from vqapr.constraints.evaluation import (
     evaluate_constraints,
     merged_constraint_bounds,
     project_constraints,
-    validate_intended_constraints,
 )
-from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
+from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
@@ -389,6 +388,22 @@ def _require_constraint_identity(
         ],
         mutation=False,
         retry_precondition="re-register the mismatched Constraint, then retry",
+    )
+
+
+def _raise_callback_return_type(returned: object) -> None:
+    """Refuse a callback return that is not the decision algebra, naming what came back.
+
+    `on_occurrence` returns `Hold | Rebalance` since record `125`, and until now nothing checked.
+    A Strategy that returned a stamped `EconomicPortfolioIntent` -- the shape the contract used to
+    take -- fell through every branch and surfaced as a complaint from inside constraint
+    validation, three frames from the callback that caused it. Refusing here names the contract
+    and the type that missed it.
+    """
+    raise TypeError(
+        "on_occurrence must return Hold or Rebalance; got "
+        f"{type(returned).__name__}. An intent's id, strategy, provenance and account version "
+        "are stamped by the Flow (record 125), so a callback returns economics only"
     )
 
 
@@ -1454,6 +1469,16 @@ class SimulationFlow:
             # The envelope, stamped here rather than asked of the callback. Every field it
             # adds is one the Flow already had to derive in order to check the author's copy of
             # it, so this replaces a comparison rather than adding a step. Record `125`.
+            #
+            # The decision is kept beside the intent stamped from it, because a Constraint judges
+            # the decision: the five fields stamping adds are facts about the run, and a rule
+            # about weights has no business reading any of them.
+            if not isinstance(result, (Hold, Rebalance)):
+                self._callback_intent_boundary(
+                    occurrence,
+                    self._frozen_run.strategy,
+                    lambda: _raise_callback_return_type(result),
+                )
             if isinstance(result, Rebalance):
                 result = self._callback_intent_boundary(
                     occurrence,
@@ -1464,7 +1489,6 @@ class SimulationFlow:
             pending_valuation: PendingValuation | None = None
             if isinstance(result, Hold):
                 accepted: Hold | AcceptedIntent = result
-                intended = ()
                 # A Hold still reaches the execution instant, because the book is still
                 # worth something there and the venue still publishes prices for it.
                 pending_valuation = self._callback_intent_boundary(
@@ -1481,21 +1505,12 @@ class SimulationFlow:
                     intent,
                     lambda: self._validate_intent_authority(intent, account, window),
                 )
-                intended = self._validate_callback_intended_constraints(
-                    occurrence, intent, projected
-                )
-                if any(not item.finding.passed for item in intended):
-                    failed = next(item for item in intended if not item.finding.passed)
-                    constraint = next(
-                        constraint
-                        for constraint in self._constraints
-                        if constraint.constraint_id == failed.constraint_id
-                    )
-                    self._callback_intent_boundary(
-                        occurrence,
-                        constraint,
-                        lambda: self._raise_intended_constraint_failure(failed.finding),
-                    )
+                # No constraint check here, deliberately. Construction had the projected bounds
+                # and did its best inside them; whether the book actually breached a limit is a
+                # question about the committed account, and monitoring asks it (PRD 7.1,
+                # architecture 5.7). Judging the decision here also could not see the breach that
+                # matters most -- rounding a weight into whole shares moves it, and no fills exist
+                # yet.
                 accepted = self._callback_intent_boundary(
                     occurrence,
                     self._frozen_run.execution_input,
@@ -1523,7 +1538,6 @@ class SimulationFlow:
                     window,
                     accepted,
                     projected,
-                    intended,
                 ),
             )
             prepared = self._guard(
@@ -1837,28 +1851,6 @@ class SimulationFlow:
             event_time=occurrence.evaluation_time,
         )
 
-    def _validate_callback_intended_constraints(
-        self,
-        occurrence: OperationOccurrence,
-        intent: EconomicPortfolioIntent,
-        projected: tuple[object, ...],
-    ) -> tuple[object, ...]:
-        projected_by_id = {item.constraint_id: item for item in projected}
-        intended: list[object] = []
-        for constraint in self._constraints:
-            intended.extend(
-                self._callback_intent_boundary(
-                    occurrence,
-                    constraint,
-                    lambda constraint=constraint: validate_intended_constraints(
-                        (constraint,),
-                        intent,
-                        (projected_by_id[constraint.constraint_id],),
-                    ),
-                )
-            )
-        return tuple(intended)
-
     def _candidate_callback_state(
         self, before: object, payload_before: bytes
     ) -> tuple[object, bytes, object]:
@@ -1879,7 +1871,6 @@ class SimulationFlow:
         window: ModelWindow,
         accepted: Hold | AcceptedIntent,
         projected: tuple[object, ...],
-        intended: tuple[object, ...],
     ) -> tuple[CallbackEvidence, LifecycleTrace]:
         evidence = CallbackEvidence(
             run_identity=self._frozen_run.identity,
@@ -1895,7 +1886,10 @@ class SimulationFlow:
             actual_source_refs=self._callback_actual_source_refs(occurrence, window),
             decision=accepted,
             pending=None if isinstance(accepted, Hold) else accepted,
-            constraints=(*projected, *intended),
+            # The projections only. What a callback's evidence carries about constraints is
+            # what the rules permitted at that instant, not a verdict on the decision -- there is
+            # no verdict at this point, by design (PRD 7.1). The verdict is monitoring's.
+            constraints=projected,
         )
         lifecycle = LifecycleTrace(
             LifecycleKind.NO_DECISION
@@ -1904,31 +1898,6 @@ class SimulationFlow:
             evidence,
         )
         return evidence, lifecycle
-
-    @staticmethod
-    def _raise_intended_constraint_failure(finding: ConstraintFinding) -> None:
-        """Refuse the intent, naming which constraint, which names, and by how much.
-
-        The message was `"economic intent violates projected constraints"` and nothing else, so a
-        reader whose run stopped here could not tell WHICH name breached WHICH bound. The finding
-        already carries all of it -- the constraint's id, what it measured, the bound it measured
-        against, and an `offenders` tuple in its evidence -- and every part was discarded one frame
-        below where it was computed.
-
-        A first-time-user journey hit this on a 20% cap and had to reconstruct the breach by
-        running the strategy again WITHOUT the constraint and reading the weight table, then
-        opening the scaffold's source. That is a diagnosis the refusal owed them.
-        """
-        offenders = tuple(finding.input_lineage.get("offenders") or ())
-        named = ", ".join(str(name) for name in offenders[:5])
-        if len(offenders) > 5:
-            named += f", and {len(offenders) - 5} more"
-        raise ValueError(
-            f"economic intent violates {finding.constraint_id!r}: "
-            + (f"{named} " if named else "")
-            + f"measured {finding.measured} against a bound of {finding.bound}"
-            + (f" (excess {finding.excess})" if finding.excess else "")
-        )
 
     def _callback_actual_source_refs(
         self, occurrence: OperationOccurrence, window: ModelWindow

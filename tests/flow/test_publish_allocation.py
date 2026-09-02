@@ -14,6 +14,7 @@ import duckdb
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import Hold
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import AccessRecord
@@ -28,7 +29,6 @@ from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateReposito
 from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evidence
 from vqapr.flow.stamping import LookAheadDetected
 from vqapr.flow.views import data_model_window
-from vqapr.authoring import Hold
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.workspace import Workspace
 

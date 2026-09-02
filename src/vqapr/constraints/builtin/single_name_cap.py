@@ -15,22 +15,26 @@ from __future__ import annotations
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 
-from vqapr.account.snapshot import AccountSnapshot
-from vqapr.constraints.constraint import Constraint, ConstraintBounds
-from vqapr.constraints.findings import ConstraintFinding
-from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.windows import ModelWindow
+from vqapr.authoring import (
+    Constraint,
+    ConstraintBounds,
+    ConstraintCall,
+    ConstraintFinding,
+    DatasetInput,
+    EconomicAccountView,
+    RowsLookback,
+)
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,
     validate_allocation,
 )
-from vqapr.portfolio.intents import EconomicPortfolioIntent
-from vqapr.valuation.marks import MarkBatch
 
 WEIGHT_FIELD = "benchmark_weight"
 """The field this constraint reads on the benchmark dataset it is configured with."""
+
+BENCHMARK_ALIAS = "benchmark"
+"""This constraint's own name for its one read, as `inputs()` and `call.read()` both spell it."""
 
 
 def _decimal_config(value: object, *, name: str) -> Decimal:
@@ -92,26 +96,28 @@ class SingleNameCap(Constraint):
     def cap(self) -> Decimal:
         return self._cap
 
-    def requirements(self) -> tuple[DataRequirement, ...]:
-        return (
-            DataRequirement.of(
-                self._benchmark_dataset_id, self._weight_field, lookback=RowsLookback(1)
-            ),
-        )
+    def inputs(self) -> Mapping[str, DatasetInput]:
+        """One alias, declared the way every other extension point declares its reads."""
+        return {
+            BENCHMARK_ALIAS: DatasetInput(
+                dataset_id=self._benchmark_dataset_id,
+                fields=(self._weight_field,),
+                lookback=RowsLookback(rows=1),
+            )
+        }
 
-    def _benchmark(self, window: ModelWindow, instruments: tuple[str, ...]) -> dict[str, Decimal]:
-        batch = window.observations(self.requirements()[0])
+    def _benchmark(self, call: ConstraintCall) -> dict[str, Decimal]:
         latest: dict[str, Decimal] = {}
-        for row in batch.rows:
-            weight = row[self._weight_field]
+        for row in call.read(BENCHMARK_ALIAS):
+            weight = row.values[self._weight_field]
             if weight is None:
                 continue
             if not isinstance(weight, Decimal):
                 raise TypeError(
                     f"{self._constraint_id}: benchmark weight for "
-                    f"{row['instrument']!r} must be a Decimal"
+                    f"{row.instrument_id!r} must be a Decimal"
                 )
-            latest[str(row["instrument"])] = weight
+            latest[row.instrument_id] = weight
 
         # Validate before producing any bound so an invariant-violating benchmark cannot reach
         # optimize(); the coverage-scoped contract accepts a proper subset of the index.
@@ -124,9 +130,9 @@ class SingleNameCap(Constraint):
             ),
             label=f"{self._constraint_id} benchmark",
         )
-        return {instrument: latest.get(instrument, Decimal(0)) for instrument in instruments}
+        return {instrument: latest.get(instrument, Decimal(0)) for instrument in call.instruments}
 
-    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+    def project(self, call: ConstraintCall) -> ConstraintBounds:
         """The symmetric box: no name may be more than its ceiling, long or short.
 
         The lower bound mirrors the upper rather than flooring at zero. Flooring made this cap
@@ -143,28 +149,31 @@ class SingleNameCap(Constraint):
         by this -- verified against `merged_constraint_bounds`, which takes the max of lower bounds
         and the min of uppers.
         """
-        benchmark = self._benchmark(window, instruments)
+        benchmark = self._benchmark(call)
         ceilings = {
-            instrument: max(self._cap, benchmark[instrument]) for instrument in instruments
+            instrument: max(self._cap, benchmark[instrument]) for instrument in call.instruments
         }
-        return ConstraintBounds({name: -ceiling for name, ceiling in ceilings.items()}, ceilings)
+        return ConstraintBounds(
+            lower_weights={name: -ceiling for name, ceiling in ceilings.items()},
+            upper_weights=ceilings,
+        )
 
     def _worst(
         self, weights: Mapping[str, Decimal], bounds: ConstraintBounds
     ) -> tuple[Decimal, Decimal, tuple[str, ...]]:
         """The largest exposure and what bounded it, measured on SIZE.
 
-        `abs` here, in the one place both judgments come through, is what makes them agree. This
-        took the signed weight from `validate_intended` and the absolute one from `evaluate`, so a
-        proposed `-0.30` passed the gate that runs before execution and was reported as a violation
-        by the check that runs after it -- while the projection above had forbidden it outright.
-        One rule, one book, three answers.
+        `abs`, matching the symmetric box `project` returns. This once read the signed weight in
+        one member and the absolute one in another, so a proposed `-0.30` passed the check before
+        execution and was reported as a violation by the check after it, while the projection had
+        forbidden it outright -- one rule, one book, three answers (`docs/issues/014`). There is
+        one member that measures now, so that shape has no room to recur.
         """
         measured = Decimal(0)
         bound = self._cap
         offenders: list[str] = []
         for instrument, weight in sorted(weights.items()):
-            ceiling = bounds.upper.get(instrument, self._cap)
+            ceiling = bounds.upper_weights.get(instrument, self._cap)
             size = abs(weight)
             if size > ceiling:
                 offenders.append(instrument)
@@ -172,46 +181,30 @@ class SingleNameCap(Constraint):
                 measured, bound = size, ceiling
         return measured, bound, tuple(offenders)
 
-    def validate_intended(
-        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
-        weights = {
-            target.instrument_id: target.weight
-            for target in intent.targets
-            if target.weight is not None
-        }
-        measured, bound, offenders = self._worst(weights, bounds)
-        return ConstraintFinding(
-            self._constraint_id,
-            not offenders,
-            measured,
-            bound,
-            max(measured - bound, Decimal(0)),
-            {"stage": "intended", "offenders": offenders, "cap": self._cap},
-        )
-
-    def evaluate(
+    def monitor(
         self,
-        window: ModelWindow,
-        account: AccountSnapshot,
-        marks: MarkBatch,
+        call: ConstraintCall,
+        account: EconomicAccountView,
         bounds: ConstraintBounds,
     ) -> ConstraintFinding:
-        nav = marks.total_value + account.cash
-        weights = (
-            {mark.instrument_id: abs(mark.value) / nav for mark in marks.marks} if nav > 0 else {}
-        )
+        """The realised book as weights, taken from the view rather than rebuilt from marks.
+
+        `account.weights()` is `value / nav` per name, and `nav` is `cash` plus the marked total
+        -- the same arithmetic this used to do inline out of a `MarkBatch` and an
+        `AccountSnapshot`. Doing it in one place is what keeps this member agreeing with
+        `validate` above, and `docs/issues/014` is what disagreement costs: this constraint
+        reporting a breach after execution that the check before execution had permitted.
+
+        An account with no NAV has no weights. An empty book measures zero against the cap, which
+        is what "nothing is held" means for a concentration rule.
+        """
+        weights = account.weights() if account.nav else {}
         measured, bound, offenders = self._worst(weights, bounds)
         return ConstraintFinding(
-            self._constraint_id,
-            not offenders,
-            measured,
-            bound,
-            max(measured - bound, Decimal(0)),
-            {
-                "stage": "monitoring",
-                "account_version": account.version,
-                "offenders": offenders,
-                "nav": nav,
-            },
+            passed=not offenders,
+            measured=measured,
+            bound=bound,
+            excess=max(measured - bound, Decimal(0)),
+            details={"nav": account.nav if account.nav is not None else Decimal(0)},
+            offenders=offenders,
         )

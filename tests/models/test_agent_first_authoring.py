@@ -539,26 +539,20 @@ def test_strategy_model_is_abstract_and_requires_decide() -> None:
 # --------------------------------------------------------------------------------------
 
 
-def test_constraint_call_requires_unique_instruments_and_tz_aware_time() -> None:
-    account = authoring.EconomicAccountView(
-        cash=Decimal("1"), positions={}, nav=None, nav_observed_at=None
-    )
-    authoring.ConstraintCall(evaluation_time=UTC_NOW, account=account, instruments=("A", "B"))
-    with pytest.raises(ValueError):
-        authoring.ConstraintCall(evaluation_time=UTC_NOW, account=account, instruments=("A", "A"))
-    with pytest.raises(ValueError):
-        authoring.ConstraintCall(evaluation_time=NAIVE_NOW, account=account, instruments=("A",))
+def test_constraint_call_is_a_contract_and_carries_no_account() -> None:
+    """It was a value nothing in `src/` ever built, and it carried the committed account.
+
+    Both are gone. It is a contract like the other two roles' calls, supplied by the framework;
+    and `project` -- the member that runs before any decision exists -- can no longer reach an
+    account it never needed. `monitor` receives one as its own argument instead.
+    """
+    assert isinstance(authoring.ConstraintCall, type)
     with pytest.raises(TypeError):
-        authoring.ConstraintCall(evaluation_time=UTC_NOW, account=object(), instruments=("A",))
+        authoring.ConstraintCall()  # type: ignore[abstract]
 
-
-def test_constraint_call_read_requires_a_runtime_adapter() -> None:
-    account = authoring.EconomicAccountView(
-        cash=Decimal("1"), positions={}, nav=None, nav_observed_at=None
-    )
-    call = authoring.ConstraintCall(evaluation_time=UTC_NOW, account=account, instruments=("A",))
-    with pytest.raises(NotImplementedError):
-        call.read("px")
+    members = set(authoring.ConstraintCall.__abstractmethods__)
+    assert members == {"evaluation_time", "instruments", "read"}, members
+    assert "account" not in members
 
 
 def test_constraint_finding_bounds_details_to_32_keys() -> None:
@@ -587,7 +581,7 @@ def test_constraint_finding_rejects_reserved_detail_keys() -> None:
         )
 
 
-def test_constraint_is_abstract_and_has_no_public_identity() -> None:
+def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
     with pytest.raises(TypeError):
         authoring.Constraint()  # type: ignore[abstract]
 
@@ -598,19 +592,15 @@ def test_constraint_is_abstract_and_has_no_public_identity() -> None:
                 upper_weights={i: Decimal("0.1") for i in call.instruments},
             )
 
-        def validate(
-            self, decision: authoring.Rebalance, bounds: authoring.ConstraintBounds
-        ) -> authoring.ConstraintFinding:
-            return authoring.ConstraintFinding(
-                passed=True,
-                measured=Decimal("0"),
-                bound=Decimal("0.1"),
-                excess=Decimal("0"),
-                details={},
-            )
+        @property
+        def constraint_id(self) -> str:
+            return "cap"
 
         def monitor(
-            self, call: authoring.ConstraintCall, bounds: authoring.ConstraintBounds
+            self,
+            call: authoring.ConstraintCall,
+            account: authoring.EconomicAccountView,
+            bounds: authoring.ConstraintBounds,
         ) -> authoring.ConstraintFinding:
             return authoring.ConstraintFinding(
                 passed=True,
@@ -622,12 +612,19 @@ def test_constraint_is_abstract_and_has_no_public_identity() -> None:
 
     constraint = Cap()
     assert constraint.inputs() == {}
-    assert not hasattr(constraint, "constraint_id")
-    account = authoring.EconomicAccountView(
-        cash=Decimal("1"), positions={}, nav=None, nav_observed_at=None
-    )
-    call = authoring.ConstraintCall(evaluation_time=UTC_NOW, account=account, instruments=("A",))
-    bounds = constraint.project(call)
+    # Declared once, here, and checked at load against the id it was registered under. What was
+    # removed is the repetition: a finding no longer restates it.
+    assert constraint.constraint_id == "cap"
+    assert not hasattr(authoring.ConstraintFinding, "constraint_id")
+
+    class _Call(authoring.ConstraintCall):
+        evaluation_time = UTC_NOW
+        instruments = ("A",)
+
+        def read(self, alias: str):
+            raise AssertionError("this rule declared no reads")
+
+    bounds = constraint.project(_Call())
     assert bounds.upper_weight("A") == Decimal("0.1")
 
 

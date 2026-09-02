@@ -262,8 +262,8 @@ Model state는 작은 strict-JSON `memory`와 선택적인 Model 고유 **privat
 둘은 하나의 state identity로 함께 저장·복원된다. committed state만 다음 Model invocation의 정상 입력이며,
 working checkpoint, recorder, 임의의 로컬 파일은 authority가 아니다.
 
-나머지는 authority가 아니다. intended portfolio, requested order, constraint adjustment result, validation
-finding, monitoring finding, evidence는 **의도와 영수증**이다.
+나머지는 authority가 아니다. intended portfolio, requested order, constraint adjustment result,
+monitoring finding, evidence는 **의도와 영수증**이다.
 
 따라서 다음 네 단계를 항상 구분한다.
 
@@ -280,7 +280,7 @@ intended  ≠  requested  ≠  dealt  ≠  committed
 
 ### 2.5 Durable typed artifact가 public integration point다
 
-signal, alpha weight, ensemble weight, intended portfolio, constraint declaration/adjustment/validation, order,
+signal, alpha weight, ensemble weight, intended portfolio, constraint declaration/adjustment, order,
 fill, position, monitoring finding, analysis table은 최종 report의 부산물이 아니라 **first-class result**다.
 
 runtime 내부에서는 목적에 맞는 어떤 표현을 써도 된다. 그러나 다음 경우의 public contract는 versioned
@@ -1042,8 +1042,7 @@ DataModel은 다시 실행하지 않아도 되고, 두 StrategyModel result는 �
 | **constraint declaration** | 선택한 workflow에 적용할 versioned limit intent | §7 |
 | **constraint-adjustment result** | proposed target/order를 declared constraint에 맞게 best-effort로 조정한 결과 | **존재한다는 사실이 compliance를 보증하지 않는다** |
 | **requested orders and conversion evidence** | requested order와 instrument별 conversion, rounding, clipping, skip/failure reason | requested ≠ dealt |
-| **pre-execution validation finding** | 최종 제출 후보를 독립 평가한 advisory result | adjustment result와 별개의 판정이다 |
-| **actual-account monitoring finding** | committed fill 이후의 actual state를 monitoring time에 평가한 결과 | account를 소급 변경하지 않는다 |
+| **actual-account monitoring finding** | committed fill 이후의 actual state를 monitoring time에 평가한 결과. 넘었다면 어느 제약과 그때의 한도·점검값을 싣는다 | account를 소급 변경하지 않는다. **compliance를 말하는 유일한 category다** — 조정 결과가 존재한다는 사실은 아무것도 보증하지 않는다 |
 | **execution result** | committed fill, cost, account state, NAV, exposure, PnL, turnover | 유일하게 portfolio return을 주장할 수 있는 category |
 
 statistical factor-return estimate는 regression specification과 input data를 dependency로 갖는다. 실제 factor
@@ -1628,21 +1627,28 @@ state와 최종 Model state를 결과로 제공하며, 그 결과만으로 이�
 
 ## 7. Constraints
 
-constraint는 모든 research workflow의 선행 조건이 아니다. constraint adjustment, pre-execution validation,
-actual-account monitoring을 **선택한 경우에만** 해당 operation이 metric, bound, evaluation scope, 필요한 data를
-요구한다.
+constraint는 모든 research workflow의 선행 조건이 아니다. constraint adjustment와 actual-account monitoring을
+**선택한 경우에만** 해당 operation이 metric, bound, evaluation scope, 필요한 data를 요구한다.
 
 **constraint는 user가 작성할 수 있는 확장점이다**(§12.3). package가 목록을 닫아둘 근거가 없다 — constraint
 metric의 경제적 의미와 bound는 user project가 소유하기 때문이다(§12.4). package가 제공하는 것은 계약과
 그 계약을 지키는지에 대한 deterministic 판정이다.
 
-선언된 constraint는 두 방향으로 쓰이며, **같은 선언이 세 소비자에게 간다.**
+선언된 constraint는 **성격이 다른 두 가지 일**에 쓰이며, 같은 선언이 그 둘 모두에게 간다.
 
 ```text
-선언 ──►  판단 시점의 bound        (구성)
-선언 ──►  결과에 대한 독립 판정     (생산 검증)
-선언 ──►  committed state 판정      (monitoring, 별도 cadence)
+선언 ──►  판단 시점의 bound        (구성)      — 지키려고 최선을 다하는 자리
+선언 ──►  committed state 판정      (monitoring, 별도 cadence) — 지켜졌는지 관찰하는 자리
 ```
+
+**둘은 같은 질문의 앞뒤가 아니라 서로 다른 질문이다.** 구성은 *"이 한계 안에서 할 수 있는 최선이
+무엇인가"*이고 best effort다 — 신호가 원하는 portfolio와 한계가 허용하는 portfolio가 다르면 후자를
+만든다. monitoring은 *"실제로 들고 있는 것이 한계를 넘었는가"*이고 사실 관찰이다 — 최선을 다했는지와
+무관하게, 넘었으면 넘은 것이다.
+
+**구성이 최선을 다했는지를 따로 채점하지 않는다.** 판단이 한계 밖으로 나갔다면 그것은 위반이고,
+위반은 monitoring이 잡는다. 같은 판단을 두 번 채점하면 두 채점이 갈릴 수 있고, 그때 어느 쪽이 그
+전략에 대한 사실인지 말할 방법이 없다.
 
 따라서 constraint 선언은 자신이 요구하는 data를 스스로 선언해야 하고, 그 data가 없으면 **결과를 만들기
 전에 실패한다.** 어느 constraint가 어떤 값을 어떤 bound와 비교해 얼마나 초과했는지가 결과에 남아야 하므로,
@@ -1666,19 +1672,26 @@ $$
 override policy는 future work다. user가 위 계약(요구 data 선언 → bound 투영 → 측정)으로 표현할 수 있는
 constraint를 직접 작성하는 것은 막지 않으며, 그 계약으로 표현되지 않는 것은 지금 범위 밖이다.
 
-### 7.1 세 가지 서로 다른 결과
+### 7.1 두 가지 서로 다른 결과
 
 | 결과 | **언제** | 무엇 |
 |---|---|---|
 | **constraint 반영 구성** | **판단 시점** | 제약을 반영해 portfolio를 만든다. 원래 의도, 반영된 결과, constraint별 before/after, 해소되지 않은 잔여를 보존한다 |
-| **생산 검증** | **판단 결과를 만들 때** | 만들어진 결과가 선언한 limit을 실제로 만족하는지 **독립적으로** 판정한다. constraint별 measured value, bound, excess, pass/fail, input lineage를 포함한다 |
-| **actual-account monitoring** | 별도 cadence | committed state를 monitoring time에 평가한다 |
+| **actual-account monitoring** | 별도 cadence | committed state를 monitoring time에 평가한다. 넘었다면 **어느 constraint를 넘었는지와 그 시점의 한도·점검값**을 남긴다 |
+
+**위반 기록은 그 세 가지면 충분하다** — 어느 규칙, 얼마가 한계였고, 실제로 얼마였나. 그 이상을 요구하지
+않는 것이 의도다: 판정마다 읽은 것을 전부 따라 적게 만들면 관찰이 무거워지고, 무거운 관찰은 cadence를
+늘릴 수 없어 결국 덜 관찰하게 된다.
 
 **execution은 제약을 평가하지 않는다.** 제약 평가는 경제적 판단이고, execution은 이미 확정된 것을 체결시킬
 뿐이다(§2.4). 제약을 execution 단계로 미루면 그 시점에 할 수 있는 일이 "기록"밖에 없어 — 다시 최적화하는
 것은 판단을 되돌리는 것이므로 §2.4가 금지한다.
 
-**구성 결과가 존재한다는 사실만으로 compliance를 선언하지 않는다.** 생산 검증이 독립적으로 판정한다.
+**구성 결과가 존재한다는 사실만으로 compliance를 선언하지 않는다.** compliance를 말하는 것은 monitoring
+이고, 그것은 계획이 아니라 **실제로 committed된 것**을 본다. 한계를 넘은 판단이 나갔다는 이유로 run을
+중단하지 않는다 — 그러면 그 전략이 실제로 무엇을 하는지 끝까지 볼 수 없고, `UC-CONSTRAINT-ADJUST-001`
+처럼 판단 시점에 알 수 없는 breach는 애초에 그 방법으로 잡히지도 않는다.
+
 required input 부재나 evaluator 계산 실패는 finding이 아니라 **결과를 만들기 전의 structured operation
 error**다. blocking, severity, override policy는 future work다.
 
@@ -2307,7 +2320,7 @@ hypothetical signed evaluation을 지원한다.
 - 하나의 portfolio에서 여러 주식·ETF와 shared cash를 함께 처리하는 multi-instrument simulation
 - daily observation/valuation, 선택적 lower-frequency decision, 독립 monitoring을 결합하는 multi-frequency workflow
 - stateful callback decision trigger, explicit hold, dense actual-account evidence
-- standalone constraint adjustment, advisory pre-execution validation, independent monitoring artifact
+- standalone constraint adjustment와 independent monitoring artifact
 - MVP hard constraint: no-short와 time-varying single-name cap
 - **지원되는 order의 전량 체결과 주식·ETF cash의 즉시 결제를 가정한 simulation**
 - 가격 축을 갖춘 source 또는 §4.4로 등록한 derived unit price를 사용하는 closed-loop research
@@ -2572,7 +2585,7 @@ acceptance는 내부 class, stage 수, storage layout이 아니라 **이 PRD의 
 - `UC-REPORT-001`의 renderer 독립성은 **값과 renderer가 분리되어 있다는 것**으로 판정한다. vqapr는 table과
   machine-readable renderer를 제공하고 visualization은 제공하지 않으며, 그 부재가 결함이 아니라 §12.4의
   소유권 경계다.
-- constraint 선언이 정체를 유지해 **어느 constraint가 얼마나 초과했는지**가 결과에 남고, 구성·생산 검증·
+- constraint 선언이 정체를 유지해 **어느 constraint가 얼마나 초과했는지**가 결과에 남고, 구성과
   monitoring이 같은 선언을 소비한다. 선언이 요구한 data가 없으면 결과를 만들기 전에 실패한다.
   (`UC-CONSTRAINT-002`, `UC-EXEC-003`)
 - `UC-EXTENSION-001`에서 agent가 만든 local transform의 compatibility를 package가 deterministic하게 판정한다.

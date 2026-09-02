@@ -162,11 +162,9 @@ def test_a_component_declaration_resolves_its_path_beside_the_document(
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
-        "        return ConstraintBounds({}, {})\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def project(self, call):\n"
+        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n",
         encoding="utf-8",
     )
@@ -194,11 +192,9 @@ def test_a_component_that_cannot_receive_the_call_is_refused(
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
-        "        return ConstraintBounds({}, {})\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, account, marks):\n"  # the contract passes four
+        "    def project(self, call):\n"
+        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
+        "    def monitor(self, account, marks):\n"  # the contract passes four
         "        return None\n",
         encoding="utf-8",
     )
@@ -299,11 +295,9 @@ def _constraint_source(returns: str) -> str:
         f"        return {returns}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
-        "        return ConstraintBounds({}, {})\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def project(self, call):\n"
+        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n"
     )
 

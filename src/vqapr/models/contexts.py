@@ -9,8 +9,7 @@ from uuid import UUID, uuid5
 
 from vqapr.account.history import AccountHistory
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import DatasetInput
-from vqapr.constraints.constraint import ConstraintBounds
+from vqapr.authoring import ConstraintBounds, ConstraintCall, DatasetInput
 from vqapr.data.windows import ModelWindow
 from vqapr.models.calls import declared_rows, observations
 from vqapr.portfolio.budgets import Budget
@@ -29,11 +28,16 @@ identity, which is what makes a replay comparable to the run it replays.
 """
 
 
+def _unbounded() -> ConstraintBounds:
+    """The bounds a callback sees when no Constraint is registered: no names, no limits."""
+    return ConstraintBounds(lower_weights={}, upper_weights={})
+
+
 class _DeclaredReads:
     """`read(alias)` over the aliases a Model declared in `inputs()`.
 
-    Shared by both contexts because both roles read the same way -- that sameness is the point
-    (`docs/issues/036`), so it is one implementation rather than two that agree today.
+    Shared by all three contexts because all three roles read the same way -- that sameness is
+    the point (`docs/issues/036`), so it is one implementation rather than three that agree today.
 
     `reads` is empty for a Model that declares its requirements the older way, by overriding
     `requirements()` and reaching `context.window.observations(...)` itself. Both paths run; the
@@ -63,6 +67,39 @@ class _DeclaredReads:
 
 
 @dataclass(frozen=True, slots=True)
+class ConstraintContext(_DeclaredReads, ConstraintCall):
+    """What a Constraint may reach, and the third role to reach it the same way.
+
+    Records `126` and `128` gave DataModel and StrategyModel one declaration (`inputs()`) and one
+    read verb (`context.read(alias)`). A Constraint was still handed a `ModelWindow` and expected
+    to call `window.observations(requirement)` on it -- a framework type and a second read shape,
+    for the one extension point whose authoring class the loader would not even accept
+    (`docs/issues/036`). This is that third role arriving.
+
+    **No account.** `project` runs before any decision exists, to say what the feasible set is,
+    and it never needed one. `monitor` receives an `EconomicAccountView` as its own argument
+    instead, so the capability is present exactly where it is used and absent everywhere else.
+    """
+
+    window: ModelWindow
+    instruments: tuple[str, ...] = ()
+    reads: Mapping[str, DatasetInput] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.window, ModelWindow):
+            raise TypeError("window must be a ModelWindow")
+        if not isinstance(self.instruments, tuple) or not all(
+            isinstance(name, str) and name for name in self.instruments
+        ):
+            raise TypeError("instruments must be a tuple of non-empty strings")
+
+    @property
+    def evaluation_time(self):
+        """The single frozen point-in-time cutoff this projection is bounded to."""
+        return self.window.evaluation_time
+
+
+@dataclass(frozen=True, slots=True)
 class DataModelContext(_DeclaredReads):
     window: ModelWindow
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
@@ -85,7 +122,7 @@ class StrategyModelContext(_DeclaredReads):
     window: ModelWindow
     account: AccountSnapshot
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
-    constraint_bounds: ConstraintBounds = field(default_factory=lambda: ConstraintBounds({}, {}))
+    constraint_bounds: ConstraintBounds = field(default_factory=_unbounded)
     account_history: AccountHistory = field(default_factory=lambda: AccountHistory((), None))
     """What the Account itself recorded, bounded by this Strategy's declaration.
 

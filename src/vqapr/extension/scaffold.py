@@ -158,46 +158,33 @@ class, what the number means, and which completeness guard follows from it (`doc
 
 _CONSTRAINT_TEMPLATE = '''"""A Constraint capping how much of the book any one name may be.
 
-The run spec offers a `constraints:` list and nothing said what went in it. `Constraint` has five
-abstract members and had no scaffold, so the only way to learn their shapes was to register an
-empty subclass and read the `TypeError` -- and `project` is a semantic contract that cannot be
-guessed from a signature. Guessing it wrong produces a backtest that looks correct and is not.
+The run spec offers a `constraints:` list and nothing said what went in it. Guessing `project`
+wrong produces a backtest that looks correct and is not, so it is written out below rather than
+left as a signature.
 
 Edit `CAP`. Everything else runs as written.
 """
 
 from decimal import Decimal
 
-from vqapr.public import (
-    AccountSnapshot,
-    Constraint,
-    ConstraintBounds,
-    ConstraintFinding,
-    EconomicPortfolioIntent,
-    MarkBatch,
-    ModelWindow,
-)
+from vqapr import authoring as va
 
 CAP = Decimal("{cap}")  # THE RULE. No single name may exceed this share of the book.
 FLOOR = Decimal("0")
 
 # A cap on SIZE, measured on absolute weight, so a -0.30 short is as much a violation as a +0.30
 # long. It says nothing about sign: shorting within the cap is permitted here, and forbidding it
-# is a separate rule.
-#
-# One rule, one question, is what keeps the three members below agreeing with each other. That is
-# how the shipped pair divides them: `SingleNameCap` bounds size and measures on absolute weight,
-# `NoShort` tests the sign and nothing else. Constraints intersect (lower bounds take the max,
-# upper bounds the min), so declaring `no-short` alongside this cap gives long-only-with-a-cap
-# without either rule knowing about the other.
+# is a separate rule. Constraints intersect -- lower bounds take the max, upper bounds the min --
+# so declaring the shipped `no-short` alongside this gives long-only-with-a-cap without either
+# rule knowing about the other.
 
 
-class {class_name}(Constraint):
+class {class_name}(va.Constraint):
     """No single instrument may exceed `CAP` of the book, long or short.
 
-    Size only. Declare the shipped `no-short` alongside it in the run spec's `constraints:` list
-    if you also want the sign rule; constraints intersect, so the pair gives
-    long-only-with-a-cap.
+    Two members, and they do different jobs. `project` says what is permitted, and construction
+    does its best inside that. `monitor` says whether what you actually hold went over. A decision
+    that goes over does not stop the run -- it is a breach, and this is where breaches are seen.
     """
 
     @property
@@ -210,91 +197,47 @@ class {class_name}(Constraint):
         """
         return "{component_id}"
 
-    def requirements(self) -> tuple:
-        """What this constraint needs to read. Nothing: the rule is a property of the weight.
+    def inputs(self):
+        """What this constraint reads. Nothing: the rule is a property of the weight.
 
-        A constraint that compared against a benchmark would return a `DataRequirement` here, and
-        the framework would hand it a window over that dataset.
+        A constraint comparing against a benchmark would return a `va.DatasetInput` here, and
+        `call.read("<your alias>")` inside `project` would hand back its observations.
         """
-        return ()
+        return {{}}
 
-    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
-        """**The feasible set.** Project the proposed book onto what this rule permits.
+    def project(self, call) -> va.ConstraintBounds:
+        """**The feasible set.** Return the lower and upper bound for EVERY instrument in
+        `call.instruments`.
 
-        This is the member that cannot be guessed, so state it plainly: return the lower and upper
-        weight bound for EVERY instrument in `instruments`. Not the offenders, not a correction --
-        the box the optimiser must stay inside.
-
-        Both bounds are mandatory for every name. A lower-only projection is inexpressible: the
-        evaluator rejects a projection that does not cover every window instrument on both sides,
-        because a missing bound would silently widen the feasible set rather than fail.
+        Not the offenders, not a correction -- the box the optimiser must stay inside. Both bounds
+        are mandatory for every name: a projection that misses one is refused, because a missing
+        bound would silently widen the feasible set rather than fail.
         """
-        return ConstraintBounds(
-            {{instrument: -CAP for instrument in instruments}},
-            {{instrument: CAP for instrument in instruments}},
+        return va.ConstraintBounds(
+            lower_weights={{instrument: -CAP for instrument in call.instruments}},
+            upper_weights={{instrument: CAP for instrument in call.instruments}},
         )
 
-    def validate_intended(
-        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
-        """Judge the weights a Strategy proposed, before anything is executed."""
-        # `abs`, matching `project`'s symmetric bounds and `evaluate` below. Measuring the signed
-        # weight here would let a -0.30 pass a 0.2 cap that the projection forbids and that the
-        # monitoring check then reports -- three members of one rule disagreeing about the same
-        # book.
-        offenders = tuple(
-            sorted(
-                target.instrument_id
-                for target in intent.targets
-                if target.weight is not None and abs(target.weight) > CAP
-            )
-        )
-        worst = max(
-            (abs(target.weight) for target in intent.targets if target.weight is not None),
-            default=FLOOR,
-        )
-        return ConstraintFinding(
-            self.constraint_id,
-            not offenders,
-            worst,
-            CAP,
-            max(worst - CAP, FLOOR),
-            {{"stage": "intended", "offenders": offenders}},
-        )
-
-    def evaluate(
-        self,
-        window: ModelWindow,
-        account: AccountSnapshot,
-        marks: MarkBatch,
-        bounds: ConstraintBounds,
-    ) -> ConstraintFinding:
+    def monitor(self, call, account: va.EconomicAccountView, bounds) -> va.ConstraintFinding:
         """Judge the book that was actually committed, after it was marked.
 
-        `validate_intended` asks whether the decision was permissible; this asks whether the
-        result is. They differ whenever execution does not fill what was intended.
+        This is the only member that judges. It sees what `project` could not: execution does not
+        always fill what was intended, and rounding a weight into whole shares can push a position
+        over a limit that the decision itself respected.
         """
-        # NAV is the marked book plus the cash beside it. `mark.value` is already the marked
-        # value of the held quantity, so the weight is that over NAV.
-        nav = marks.total_value + account.cash
-        weights = (
-            {{mark.instrument_id: abs(mark.value) / nav for mark in marks.marks}}
-            if nav > FLOOR
-            else {{}}
-        )
-        offenders = tuple(sorted(name for name, weight in weights.items() if weight > CAP))
-        worst = max(weights.values(), default=FLOOR)
-        return ConstraintFinding(
-            self.constraint_id,
-            not offenders,
-            worst,
-            CAP,
-            max(worst - CAP, FLOOR),
-            {{
-                "stage": "monitoring",
-                "account_version": account.version,
-                "offenders": offenders,
-            }},
+        # `account.weights()` is each name's marked value over NAV. It refuses rather than
+        # returning zeros when the account has not been marked, so an unmarked book cannot look
+        # like a compliant one.
+        weights = account.weights() if account.nav else {{}}
+        offenders = tuple(sorted(name for name, w in weights.items() if abs(w) > CAP))
+        worst = max((abs(w) for w in weights.values()), default=FLOOR)
+        return va.ConstraintFinding(
+            passed=not offenders,
+            measured=worst,
+            bound=CAP,
+            excess=max(worst - CAP, FLOOR),
+            details={{}},
+            offenders=offenders,
         )
 '''
 

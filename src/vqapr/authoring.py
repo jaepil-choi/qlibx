@@ -29,6 +29,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.requirements import DataRequirement
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
@@ -364,16 +365,37 @@ class AccountHistoryInput:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EconomicAccountView:
-    """A bounded, immutable snapshot of the committed Account for one callback."""
+    """A bounded, immutable snapshot of the committed Account for one callback.
+
+    **`values` was missing, and its absence made a whole rule shape inexpressible.** This view
+    carried `positions` -- quantities -- plus one aggregate `nav`, and a weight is
+    `value / nav`. Quantities cannot become weights without prices, so no weight-based rule
+    could be written against this type at all, which is what both shipped Constraints are. The
+    gap went unnoticed because monitoring ran on the engine's `MarkBatch` instead, on the other
+    side of the surface split this contract exists to remove.
+
+    So `values` is the marked value per instrument. Quantities stay, because a rule about lot
+    sizes or a short position asks about quantity and would otherwise have to divide back out.
+
+    **`values` is `None` where the framework has no marks to offer, and that is not zero.** A
+    Strategy callback fires before the occurrence it decides for is executed or valued, so its
+    view has a committed `nav` from history but no per-instrument marks; a monitoring Constraint
+    fires against a marked account and has both. An empty mapping would make `weight()` return a
+    confident zero for every name and every weight rule report `passed`, so absence refuses
+    instead.
+    """
 
     cash: Decimal
     positions: Mapping[str, Decimal]
     nav: Decimal | None
     nav_observed_at: datetime | None
+    values: Mapping[str, Decimal] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cash", _finite_decimal(self.cash, name="cash"))
         object.__setattr__(self, "positions", _copy_weights(self.positions, name="positions"))
+        if self.values is not None:
+            object.__setattr__(self, "values", _copy_weights(self.values, name="values"))
         if (self.nav is None) != (self.nav_observed_at is None):
             raise ValueError("nav and nav_observed_at must both be set or both be None")
         if self.nav is not None:
@@ -388,6 +410,42 @@ class EconomicAccountView:
         """The current quantity held, or `Decimal(0)` for a valid absent instrument."""
         checked = _identifier(instrument_id, name="instrument_id")
         return self.positions.get(checked, Decimal(0))
+
+    def value(self, instrument_id: str) -> Decimal:
+        """The marked value held, or `Decimal(0)` for a valid absent instrument."""
+        checked = _identifier(instrument_id, name="instrument_id")
+        if self.values is None:
+            raise ValueError(
+                "this view carries no marked values; it was built at an instant the framework "
+                "had no marks to offer, and a zero here would be an answer rather than a gap"
+            )
+        return self.values.get(checked, Decimal(0))
+
+    def weight(self, instrument_id: str) -> Decimal:
+        """This instrument's share of NAV, signed.
+
+        The one derivation every weight-based rule needs, written once here rather than in each
+        Constraint that would otherwise divide by a NAV it had to reassemble. Refuses rather than
+        returning zero when NAV is absent or zero: a weight against no NAV is not a small number,
+        it is an undefined one, and a rule that silently measured zero would report `passed`.
+        """
+        if self.nav is None or not self.nav:
+            raise ValueError(
+                "weight is undefined without a non-zero nav; this view was built at an instant "
+                "the account had not been marked"
+            )
+        return self.value(instrument_id) / self.nav
+
+    def weights(self) -> Mapping[str, Decimal]:
+        """Every marked name's share of NAV, signed. The whole book as a weight vector."""
+        if self.values is None:
+            raise ValueError(
+                "this view carries no marked values; it was built at an instant the framework "
+                "had no marks to offer, and an empty book here would be an answer rather than a gap"
+            )
+        return MappingProxyType(
+            {instrument_id: self.weight(instrument_id) for instrument_id in sorted(self.values)}
+        )
 
 
 class DeclaredAccountHistory:
@@ -513,6 +571,17 @@ class ConstraintBounds:
     def upper_weight(self, instrument_id: str) -> Decimal:
         checked = _identifier(instrument_id, name="instrument_id")
         return self.upper_weights[checked]
+
+    def detached(self) -> ConstraintBounds:
+        """A fresh value with no caller-owned mapping aliases.
+
+        `__post_init__` already copies into read-only views, so this is defensive rather than
+        load-bearing -- and it is kept because `StrategyModelContext` calls it on a value it did
+        not construct, where "already copied" is an assumption about someone else's code.
+        """
+        return ConstraintBounds(
+            lower_weights=self.lower_weights, upper_weights=self.upper_weights
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -844,48 +913,73 @@ class StrategyModel(ABC):
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ConstraintCall:
-    """The complete, bounded capability surface for one Constraint invocation."""
+class ConstraintCall(ABC):
+    """The bounded capability surface for one Constraint invocation.
 
-    evaluation_time: datetime
-    account: EconomicAccountView
-    instruments: tuple[str, ...]
+    **An abstract contract, like `DataCall` and `StrategyCall`, and no longer a value.** It was a
+    concrete frozen dataclass that nothing in `src/` ever built -- only tests -- while the engine
+    handed a Constraint a `ModelWindow` and a tuple of instruments instead. `models/contexts.py`
+    now supplies the one concrete implementation, the same way it does for the other two roles.
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "evaluation_time", _tz_aware(self.evaluation_time, name="evaluation_time")
-        )
-        if not isinstance(self.account, EconomicAccountView):
-            raise TypeError("account must be an EconomicAccountView")
-        instruments = _unique_identifiers(self.instruments, name="instruments")
-        object.__setattr__(self, "instruments", instruments)
+    **The account came off it.** It used to carry an `EconomicAccountView`, which meant `project`
+    -- the member that runs before any decision exists, to say what the feasible set is -- was
+    handed the committed account. Nothing needed it and the engine never offered it, so the
+    authoring shape was granting authority the engine did not. Where the two contracts disagreed
+    about how much a member may see, the narrower one is right (architecture 2.2, least
+    authority): `monitor` receives the account as its own argument, and `project` cannot reach one.
+    """
 
+    @property
+    @abstractmethod
+    def evaluation_time(self) -> datetime:
+        """The single frozen point-in-time cutoff this invocation is bounded to."""
+
+    @property
+    @abstractmethod
+    def instruments(self) -> tuple[str, ...]:
+        """Every instrument this projection must cover, in the run's declared order."""
+
+    @abstractmethod
     def read(self, alias: str) -> tuple[Observation, ...]:
-        """Return PIT observations for one alias declared in `Constraint.inputs()`.
-
-        This pure-contract value carries no runtime store; the framework supplies a
-        concrete, PIT-bound `ConstraintCall` at invocation time.
-        """
-        _identifier(alias, name="alias")
-        raise NotImplementedError(
-            "ConstraintCall.read requires a framework-provided runtime adapter"
-        )
+        """Return PIT observations for one alias declared in `Constraint.inputs()`."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ConstraintFinding:
-    """One Constraint's complete, immutable result for one economic observation."""
+    """One Constraint's complete, immutable result for one economic observation.
+
+    **`offenders` is a field and not a `details` key**, because it is the one thing a refusal
+    cannot be written without. `docs/issues/086` is a run that stopped on a 20% cap and said only
+    *"economic intent violates projected constraints"*, leaving a first-time user to re-run the
+    strategy without the constraint and read the weight table to find out which name breached it.
+    The refusal names them now, and it can only do that if every finding carries them under one
+    name -- a convention inside a free-form mapping is not something a message can rely on.
+
+    It also could not live there. `details` admits portable scalars only, so that a diagnostic
+    mapping survives being written to a record and read back; a tuple is refused. Promoting the
+    field keeps that rule intact instead of widening it for one caller.
+    """
 
     passed: bool
     measured: Decimal
     bound: Decimal
     excess: Decimal
     details: Mapping[str, object]
+    offenders: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.passed, bool):
             raise TypeError("passed must be a bool")
+        # Not `_unique_identifiers`, which requires at least one entry: an empty `offenders` is
+        # the ordinary passing case and the most common value this field ever holds.
+        if not isinstance(self.offenders, Sequence) or isinstance(self.offenders, (str, bytes)):
+            raise TypeError("offenders must be a sequence of instrument ids")
+        offenders = tuple(
+            _identifier(value, name="offenders entry") for value in self.offenders
+        )
+        if len(set(offenders)) != len(offenders):
+            raise ValueError("offenders entries must be unique")
+        object.__setattr__(self, "offenders", offenders)
         object.__setattr__(self, "measured", _finite_decimal(self.measured, name="measured"))
         object.__setattr__(self, "bound", _finite_decimal(self.bound, name="bound"))
         object.__setattr__(self, "excess", _finite_decimal(self.excess, name="excess"))
@@ -896,20 +990,82 @@ class ConstraintFinding:
 
 
 class Constraint(ABC):
-    """User extension contract: an immutable economic predicate over the account."""
+    """User extension contract: an immutable economic predicate over the account.
+
+    **Two members, because a constraint does two things and they are different things.** `project`
+    bounds construction before anything is decided -- best effort, the strategy builds the best
+    portfolio the limits allow. `monitor` observes the committed account and says whether a limit
+    was actually breached -- fact, not effort.
+
+    **There is no member that scores the decision.** There was one, and it was removed rather than
+    fixed. Two reasons, both recorded in `docs/vqapr-architecture.md` §5.7: it could not see the
+    breach that matters most, because integer quantity conversion pushes a weight over a limit and
+    that is unknowable before fills exist (`UC-CONSTRAINT-ADJUST-001`); and two scorers can
+    disagree, which `docs/issues/014` measured -- the same rule read a signed weight in one member
+    and an absolute one in the other, so a proposal passed the gate before execution and was
+    reported as a violation by the check after it. One place to measure, and that ambiguity cannot
+    arise.
+
+    A decision that breaches a limit therefore does not stop a run. It is a breach, and breaches
+    are observed where breaches are observed.
+
+    **The id is declared once, here, and not repeated on every finding.** `constraint_id` says
+    which rule this is and is checked at load against the id it was registered under, so a rule
+    registered as `noshort` and answering to `no-short` is refused before a run is spent. What was
+    removed is the *repetition*: a finding used to carry the id too, every author had to set it,
+    and the framework compared it against the id it was already holding while it made the call.
+    That is the shape record `125` removed from the Strategy callback -- get it wrong and the run
+    refuses you, get it plausibly wrong and the run accepts you under another rule's identity.
+    """
+
+    @property
+    @abstractmethod
+    def constraint_id(self) -> str:
+        """The id this rule answers to. Must equal the id it is registered under."""
 
     def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this Constraint performs. Empty by default."""
+        """Declare every aliased dataset read this Constraint performs. Empty by default.
+
+        Declaring nothing is legitimate and is what the shipped `NoShort` does: a rule about a
+        weight's sign opens no data. The loader used to require a non-empty `requirements()` here,
+        which made the one shipped constraint that needs no data the one shape it could not accept.
+        """
         return {}
+
+    def requirements(self) -> tuple[DataRequirement, ...]:
+        """Every observation requirement available during invocation, derived from `inputs()`.
+
+        Derived rather than written separately, so a Constraint cannot declare one thing to
+        preflight and read another at the callback. One alias becomes one requirement per declared
+        field (`docs/issues/049`). This is `Model.requirements()`, spelled the same way for the
+        third role.
+        """
+        return tuple(
+            DataRequirement.of(declaration.dataset_id, field, lookback=declaration.lookback)
+            for declaration in self.inputs().values()
+            for field in declaration.fields
+        )
 
     @abstractmethod
     def project(self, call: ConstraintCall) -> ConstraintBounds:
-        """Project deterministic per-instrument bounds for the current PIT cutoff."""
+        """Project deterministic per-instrument bounds for the current PIT cutoff.
+
+        Return a lower and an upper bound for EVERY instrument in `call.instruments`. Not the
+        offenders and not a correction -- the box the optimiser must stay inside. A projection
+        that misses an instrument on either side is refused, because a missing bound would
+        silently widen the feasible set rather than fail.
+        """
 
     @abstractmethod
-    def validate(self, decision: Rebalance, bounds: ConstraintBounds) -> ConstraintFinding:
-        """Measure one complete intended Rebalance against the merged bounds."""
+    def monitor(
+        self,
+        call: ConstraintCall,
+        account: EconomicAccountView,
+        bounds: ConstraintBounds,
+    ) -> ConstraintFinding:
+        """Measure the committed account against bounds projected at a monitoring cutoff.
 
-    @abstractmethod
-    def monitor(self, call: ConstraintCall, bounds: ConstraintBounds) -> ConstraintFinding:
-        """Measure the committed account against bounds projected at a monitoring cutoff."""
+        The account arrives here and nowhere else. `account.weight(instrument_id)` is the
+        derivation a weight-based rule wants; `positions` and `values` are there for a rule that
+        asks about quantity or about money.
+        """

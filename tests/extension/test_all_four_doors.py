@@ -55,13 +55,10 @@ class Limit(Constraint):
     def requirements(self):
         return ()
 
-    def project(self, window, instruments):
-        return ConstraintBounds({}, {})
+    def project(self, call):
+        return ConstraintBounds(lower_weights={}, upper_weights={})
 
-    def validate_intended(self, intent, bounds):
-        return None
-
-    def evaluate(self, window, account, marks, bounds):
+    def monitor(self, call, account, bounds):
         return None
 """
 

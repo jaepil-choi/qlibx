@@ -68,6 +68,7 @@ from vqapr.public import (
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
+    Rebalance,
     RunDefinition,
     RunRecordSpec,
     SourceSpec,
@@ -171,7 +172,7 @@ def _source_refs(context):
     The Flow independently recomputes this from the window and refuses any intent whose provenance
     disagrees, so it must be derived from the accesses rather than declared.
     """
-    from vqapr.public import IntentSourceRef
+    from vqapr.public import IntentSourceRef, Rebalance
 
     seen = {}
     for access in context.window.accesses:
@@ -196,10 +197,9 @@ from uuid import NAMESPACE_URL, uuid5
 from vqapr.public import (
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     PortfolioDirection,
-    PortfolioTarget,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     TableSpec,
@@ -276,15 +276,10 @@ class ReversalSignalStrategy(StrategyModel):
         sized = signal_weight(neutralized)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show007/show007-signal/" + context.occurrence.occurrence_id),
-            "show007-signal",
-            tuple(PortfolioTarget(name, weight=w) for name, w in sorted(weights.items())),
-            Decimal(1) - sum(weights.values()),
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(weights.items())),
+            cash_weight=Decimal(1) - sum(weights.values()),
+            budget=BUDGET,
         )
 '''
     + _SOURCE_REFS
@@ -306,7 +301,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+from vqapr.public import AcademicExchange, ListingAccess, Rebalance, TradeRule
 
 UNIVERSE = {universe!r}
 

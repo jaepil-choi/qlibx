@@ -75,10 +75,8 @@ _CONTRACT_METHODS: dict[ComponentKind, tuple[tuple[type, str], ...]] = {
         (StrategyModel, "requirements"),
     ),
     ComponentKind.CONSTRAINT: (
-        (Constraint, "requirements"),
         (Constraint, "project"),
-        (Constraint, "validate_intended"),
-        (Constraint, "evaluate"),
+        (Constraint, "monitor"),
     ),
     ComponentKind.EXCHANGE: ((Exchange, "execute"),),
 }

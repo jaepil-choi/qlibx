@@ -36,7 +36,7 @@ from vqapr.public import register_constraint, register_data_model, register_stra
 # One name, two classes.
 # --------------------------------------------------------------------------------------
 
-DIVERGENT_NAMES = ("DataModel", "StrategyModel", "Constraint")
+DIVERGENT_NAMES = ("DataModel", "StrategyModel")
 """Names exported by BOTH `vqapr.public` and `vqapr.authoring` as different objects.
 
 `tests/extension/test_the_extension_surface_is_the_implementation.py::
@@ -46,9 +46,28 @@ there, and that is the shape this list is supposed to reach.
 
 **`CalendarLookback` and `RowsLookback` were here and are gone**, which is this file working as
 intended. Record `126` made each of them one class re-exported under both names, so the assertion
-below stopped being true of them and they left the list in the same commit that closed them. Three
-of the original five remain.
+below stopped being true of them and they left the list in the same commit that closed them.
+**`Constraint` left the same way** in record `130`, together with `ConstraintBounds` and
+`ConstraintFinding`, which were never on this list because nothing had measured them. Two of the
+original five remain, and the inverse assertion below is what stands for the three that went.
 """
+
+
+CONVERGED_NAMES = ("Constraint", "ConstraintBounds", "ConstraintFinding")
+"""Names the facade and the authoring module now export as ONE object.
+
+The goal, asserted so that it cannot quietly come apart again. Each name arrives here by leaving
+`DIVERGENT_NAMES` in the milestone that converged it.
+"""
+
+
+@pytest.mark.parametrize("name", CONVERGED_NAMES)
+def test_the_facade_and_the_authoring_module_are_one_object(name: str) -> None:
+    """An author who imports either name has written against the same contract."""
+    assert getattr(public, name) is getattr(authoring, name), (
+        f"public.{name} and authoring.{name} came apart again; that is the defect "
+        f"docs/issues/036 measured, not a refactor."
+    )
 
 
 @pytest.mark.parametrize("name", DIVERGENT_NAMES)
@@ -128,16 +147,20 @@ from vqapr import authoring as va
 
 
 class Model(va.Constraint):
+    @property
+    def constraint_id(self):
+        return "authored-constraint"
+
     def inputs(self):
         return {}
 
     def project(self, call):
-        return va.ConstraintBounds()
+        return va.ConstraintBounds(
+            lower_weights={i: 0 for i in call.instruments},
+            upper_weights={i: 1 for i in call.instruments},
+        )
 
-    def validate(self, decision, bounds):
-        raise NotImplementedError
-
-    def monitor(self, call, bounds):
+    def monitor(self, call, account, bounds):
         raise NotImplementedError
 '''
 
@@ -202,22 +225,19 @@ def test_load_data_model_refuses_an_authored_data_model(tmp_path: Path) -> None:
     )
 
 
-def test_load_constraint_refuses_an_authored_constraint(tmp_path: Path) -> None:
-    """TODAY: same as the DataModel, for the fourth extension point.
+def test_load_constraint_accepts_an_authored_constraint(tmp_path: Path) -> None:
+    """WAS: the same authoring contract a StrategyModel may use was refused for a Constraint.
+
+    That asymmetry is what `docs/issues/036` was about at the loader -- two surfaces, and which
+    one worked depended on the kind. Record `130` made the constraint contract one class, so the
+    refusal has nothing left to refuse and this asserts the inverse.
 
     `tests/extension/test_all_four_doors.py` pins that all four extension points enter through one
-    door. They do -- but what each door ACCEPTS still differs, which is the gap that file was not
-    written to see.
-
-    Deleted by: M5.
+    door; this pins that the door accepts the same thing for this one as for a strategy.
     """
     path = _written(tmp_path, _AUTHORED_CONSTRAINT)
+    ref = register_constraint(tmp_path, "authored-constraint", path, "Model")
 
-    with pytest.raises(VqaprError) as refusal:
-        ref = register_constraint(tmp_path, "authored-constraint", path, "Model")
-        load_constraint(ref, project_root=tmp_path)
+    loaded = load_constraint(ref, project_root=tmp_path)
 
-    assert _WRONG_TYPE in str(refusal.value), (
-        f"expected {_WRONG_TYPE}; an authored Constraint that now loads means M5 has landed and "
-        f"this test goes with it. Got: {refusal.value}"
-    )
+    assert loaded.constraint_id == "authored-constraint"

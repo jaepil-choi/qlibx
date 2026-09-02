@@ -3,23 +3,32 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
 
 import duckdb
 import pytest
 
+from tests.constraints.support import reading_call, weightless_call
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import (
+    Constraint,
+    ConstraintBounds,
+    EconomicAccountView,
+    Rebalance,
+)
 from vqapr.constraints.builtin import (
     SHIPPED_CONSTRAINTS,
     NoShort,
     SingleNameCap,
     shipped_constraint_path,
 )
-from vqapr.constraints.constraint import Constraint, ConstraintBounds
-from vqapr.constraints.evaluation import merged_constraint_bounds, project_constraints
+from vqapr.constraints.evaluation import (
+    build_account_view,
+    merged_constraint_bounds,
+    project_constraints,
+)
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -29,12 +38,19 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.portfolio.allocation import AllocationViolation
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.portfolio.intents import EconomicPortfolioIntent, PortfolioTarget
 from vqapr.valuation.marks import Mark, MarkBatch
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
 VENUE = "Asia/Seoul"
-BUDGET = Budget(PortfolioDirection.SIGNED, Decimal("0"), Decimal("1"), Decimal("-1"), Decimal("1"))
+BUDGET = Budget(
+    PortfolioDirection.SIGNED, Decimal("-1"), Decimal("2"), Decimal("-1"), Decimal("1")
+)
+"""The signed budget `Rebalance.of` documents: positions in [-1, 1] and cash in [-1, 2].
+
+Cash upper was 1 while these tests built an `EconomicPortfolioIntent` by hand, which checked
+nothing about it. `Rebalance` does check, and a signed book's cash legitimately exceeds 1 --
+selling short raises cash. Narrowing it here would have made the short cases below inexpressible
+rather than testing them."""
 
 
 @pytest.fixture(scope="module")
@@ -111,16 +127,22 @@ def _latest_benchmark(
     return {instrument: weights.get(instrument, Decimal(0)) for instrument in instruments}
 
 
-def _intent(weights: dict[str, Decimal]) -> EconomicPortfolioIntent:
-    return EconomicPortfolioIntent(
-        UUID(int=11),
-        "strategy",
-        tuple(PortfolioTarget(name, weight=w) for name, w in sorted(weights.items())),
-        Decimal("1") - sum(weights.values()),
-        BUDGET,
-        (),
-        0,
-        None,
+def _view(account: AccountSnapshot, marks: MarkBatch) -> EconomicAccountView:
+    """The author's view of a marked account, via the one function production uses."""
+    return build_account_view(account, marks, datetime(2024, 1, 2, 15, 30, tzinfo=UTC))
+
+
+def _decision(weights: dict[str, Decimal]) -> Rebalance:
+    """What a callback returns, which is what a Constraint judges.
+
+    It used to be an `EconomicPortfolioIntent` -- the stamped object, carrying a uuid, a strategy
+    id, provenance and an account version that no rule about weights reads. Record `125` stopped
+    asking a Strategy to mint those; `129` stopped handing them to a Constraint.
+    """
+    return Rebalance(
+        target_weights=dict(sorted(weights.items())),
+        cash_weight=Decimal("1") - sum(weights.values()),
+        budget=BUDGET,
     )
 
 
@@ -138,42 +160,53 @@ def test_no_short_projects_both_bounds_for_every_instrument(
     instruments: tuple[str, ...],
 ) -> None:
     """A lower-only projection is inexpressible: evaluation rejects partial coverage."""
-    bounds = NoShort().project(None, instruments)  # type: ignore[arg-type]
+    bounds = NoShort().project(weightless_call(instruments))
 
-    assert set(bounds.lower) == set(instruments)
-    assert set(bounds.upper) == set(instruments)
-    assert all(value == Decimal("0") for value in bounds.lower.values())
+    assert set(bounds.lower_weights) == set(instruments)
+    assert set(bounds.upper_weights) == set(instruments)
+    assert all(value == Decimal("0") for value in bounds.lower_weights.values())
 
 
-def test_no_short_finds_a_negative_intent_weight() -> None:
+def test_no_short_measures_the_worst_negative_holding_and_its_excess() -> None:
+    """The arithmetic, kept from the member that judged decisions and now asked of the book.
+
+    Measured on quantity, deliberately: a short is a negative holding whatever its price does,
+    and reading a weight here would make the answer move with a NAV the rule does not care about.
+    """
     constraint = NoShort()
-    bounds = constraint.project(None, ("LONG", "SHORT"))  # type: ignore[arg-type]
+    bounds = constraint.project(weightless_call(("LONG", "SHORT")))
+    marks = MarkBatch((Mark("LONG", Decimal("1"), Decimal("10"), Decimal("10")),), Decimal("10"))
 
-    clean = constraint.validate_intended(
-        _intent({"LONG": Decimal("0.5"), "SHORT": Decimal("0.2")}), bounds
+    clean = constraint.monitor(
+        weightless_call(("LONG", "SHORT")),
+        _view(AccountSnapshot(1, Decimal("100"), {"LONG": Decimal("5"), "SHORT": Decimal("2")}), marks),
+        bounds,
     )
-    dirty = constraint.validate_intended(
-        _intent({"LONG": Decimal("0.6"), "SHORT": Decimal("-0.2")}), bounds
+    dirty = constraint.monitor(
+        weightless_call(("LONG", "SHORT")),
+        _view(AccountSnapshot(1, Decimal("100"), {"LONG": Decimal("6"), "SHORT": Decimal("-2")}), marks),
+        bounds,
     )
 
     assert clean.passed
     assert not dirty.passed
-    assert dirty.measured == Decimal("-0.2")
-    assert dirty.excess == Decimal("0.2")
-    assert dirty.input_lineage["offenders"] == ("SHORT",)
+    assert dirty.measured == Decimal("-2")
+    assert dirty.excess == Decimal("2")
+    assert dirty.offenders == ("SHORT",)
 
 
 def test_no_short_monitors_the_committed_account() -> None:
     constraint = NoShort()
-    bounds = constraint.project(None, ("A", "B"))  # type: ignore[arg-type]
+    bounds = constraint.project(weightless_call(("A", "B")))
     marks = MarkBatch((Mark("A", Decimal("1"), Decimal("10"), Decimal("10")),), Decimal("10"))
 
     short = AccountSnapshot(3, Decimal("100"), {"A": Decimal("1"), "B": Decimal("-2")})
-    finding = constraint.evaluate(None, short, marks, bounds)  # type: ignore[arg-type]
+    finding = constraint.monitor(
+        weightless_call(("A", "B")), _view(short, marks), bounds
+    )
 
     assert not finding.passed
-    assert finding.input_lineage["offenders"] == ("B",)
-    assert finding.input_lineage["account_version"] == 3
+    assert finding.offenders == ("B",)
 
 
 def test_single_name_cap_projects_from_real_benchmark_data(
@@ -183,13 +216,13 @@ def test_single_name_cap_projects_from_real_benchmark_data(
     constraint = _cap(manifest)
     window = _benchmark_window(manifest, instruments, constraint.requirements()[0])
 
-    bounds = constraint.project(window, instruments)
+    bounds = constraint.project(reading_call(window, instruments, constraint))
 
-    assert set(bounds.upper) == set(instruments)
+    assert set(bounds.upper_weights) == set(instruments)
     for instrument in instruments:
-        assert bounds.upper[instrument] >= constraint.cap
+        assert bounds.upper_weights[instrument] >= constraint.cap
     # The largest real index weight exceeds the 0.10 cap, so the projection must lift it.
-    assert max(bounds.upper.values()) > constraint.cap
+    assert max(bounds.upper_weights.values()) > constraint.cap
 
 
 def test_single_name_cap_refuses_an_invariant_violating_benchmark(
@@ -239,26 +272,25 @@ def test_single_name_cap_refuses_an_invariant_violating_benchmark(
     )
 
     with pytest.raises(AllocationViolation, match="long_only"):
-        constraint.project(window, instruments)
+        constraint.project(reading_call(window, instruments, constraint))
 
 
-def test_single_name_cap_finds_an_over_cap_intent(
+def test_single_name_cap_measures_excess_above_its_projected_ceiling(
     manifest: dict[str, object], instruments: tuple[str, ...]
 ) -> None:
     constraint = _cap(manifest)
     window = _benchmark_window(manifest, instruments, constraint.requirements()[0])
-    bounds = constraint.project(window, instruments)
+    bounds = constraint.project(reading_call(window, instruments, constraint))
 
-    smallest = min(instruments, key=lambda name: bounds.upper[name])
-    over = constraint.validate_intended(
-        _intent({smallest: bounds.upper[smallest] + Decimal("0.05")}), bounds
-    )
-    under = constraint.validate_intended(_intent({smallest: bounds.upper[smallest]}), bounds)
+    smallest = min(instruments, key=lambda name: bounds.upper_weights[name])
+    ceiling = bounds.upper_weights[smallest]
 
-    assert not over.passed
-    assert over.input_lineage["offenders"] == (smallest,)
-    assert over.excess == Decimal("0.05")
-    assert under.passed, "holding exactly at the projected bound is legal"
+    over = constraint._worst({smallest: ceiling + Decimal("0.05")}, bounds)
+    under = constraint._worst({smallest: ceiling}, bounds)
+
+    assert over[2] == (smallest,)
+    assert over[0] - over[1] == Decimal("0.05")
+    assert under[2] == (), "holding exactly at the projected bound is legal"
 
 
 def test_single_name_cap_monitors_marked_weights(
@@ -266,17 +298,19 @@ def test_single_name_cap_monitors_marked_weights(
 ) -> None:
     constraint = _cap(manifest)
     window = _benchmark_window(manifest, instruments, constraint.requirements()[0])
-    bounds = constraint.project(window, instruments)
+    bounds = constraint.project(reading_call(window, instruments, constraint))
 
     heavy = instruments[0]
     marks = MarkBatch((Mark(heavy, Decimal("1"), Decimal("900"), Decimal("900")),), Decimal("900"))
     account = AccountSnapshot(5, Decimal("100"), {heavy: Decimal("1")})
 
-    finding = constraint.evaluate(window, account, marks, bounds)
+    finding = constraint.monitor(
+        reading_call(window, instruments, constraint), _view(account, marks), bounds
+    )
 
     assert finding.measured == Decimal("0.9")
     assert not finding.passed
-    assert finding.input_lineage["account_version"] == 5
+    assert finding.offenders == (heavy,)
 
 
 def test_long_only_emerges_from_intersecting_the_two_builtins(
@@ -296,7 +330,7 @@ def test_long_only_emerges_from_intersecting_the_two_builtins(
     below = [name for name in instruments if expected[name] <= cap.cap]
     assert above and below, "the real slice must straddle the cap for this test to mean anything"
 
-    assert all(value == Decimal("0") for value in merged.lower.values()), (
+    assert all(value == Decimal("0") for value in merged.lower_weights.values()), (
         "the floor comes from NoShort alone: the cap projects a symmetric box, and the max of the "
         "two lower bounds is zero"
     )
@@ -304,49 +338,48 @@ def test_long_only_emerges_from_intersecting_the_two_builtins(
     # NoShort were in the set -- which is what made `NoShort`'s claim to be *the* projection that
     # removes the short leg false (issue 014).
     cap_alone = merged_constraint_bounds(project_constraints((cap,), window))
-    assert all(value < Decimal("0") for value in cap_alone.lower.values())
+    assert all(value < Decimal("0") for value in cap_alone.lower_weights.values())
     for instrument in instruments:
-        assert cap_alone.lower[instrument] == -cap_alone.upper[instrument], (
+        assert cap_alone.lower_weights[instrument] == -cap_alone.upper_weights[instrument], (
             "the cap bounds size, so its floor mirrors its ceiling rather than flooring at zero"
         )
     for instrument in above:
-        assert merged.upper[instrument] == expected[instrument], (
+        assert merged.upper_weights[instrument] == expected[instrument], (
             "a name already heavier than the cap keeps its index weight as its ceiling"
         )
     for instrument in below:
-        assert merged.upper[instrument] == cap.cap
+        assert merged.upper_weights[instrument] == cap.cap
     assert isinstance(merged, ConstraintBounds)
 
 
-def test_the_cap_gives_one_answer_about_a_short_across_all_three_members(
+def test_the_cap_gives_one_answer_about_a_short_across_both_members(
     manifest: dict[str, object], instruments: tuple[str, ...]
 ) -> None:
-    """One rule, one book, one answer -- which took three (issue 014).
+    """One rule, one book, one answer -- which once took three (issue 014).
 
-    `project` floored at zero and forbade a short outright; `validate_intended` measured the signed
-    weight and permitted it; `evaluate` measured the absolute one and reported it. So a signed
-    intent passed the gate that runs BEFORE execution and was reported as a violation by the check
+    `project` floored at zero and forbade a short outright; a second member measured the signed
+    weight and permitted it; a third measured the absolute one and reported it. So a signed
+    intent passed the check that runs BEFORE execution and was reported as a violation by the one
     that runs AFTER it, while the box handed to the optimiser had excluded it in the first place.
 
-    The scaffold `vqapr new constraint` emits was corrected first; this pins the shipped constraint
-    it was citing as its precedent.
+    **Two of those three are now one.** Record `130` removed the member that judged the decision,
+    so the remaining pair is what this pins: the box `project` hands out, and the measurement
+    `monitor` makes. A third answer has nowhere left to come from.
     """
     cap = _cap(manifest)
     window = _benchmark_window(manifest, instruments, cap.requirements()[0])
     bounds = merged_constraint_bounds(project_constraints((cap,), window))
     name = instruments[0]
-    ceiling = bounds.upper[name]
+    ceiling = bounds.upper_weights[name]
 
     for size, expected in ((ceiling * 2, False), (ceiling / 2, True)):
         short = {name: -size}
-        inside = bounds.lower[name] <= short[name] <= bounds.upper[name]
-        intended = cap.validate_intended(_intent(short), bounds).passed
-        # What `evaluate` feeds `_worst`: the marked weight as a magnitude.
+        inside = bounds.lower_weights[name] <= short[name] <= bounds.upper_weights[name]
+        # What `monitor` feeds `_worst`: the marked weight as a magnitude.
         _, _, offenders = cap._worst({name: size}, bounds)
 
         assert inside is expected, f"project disagreed at {size}"
-        assert intended is expected, f"validate_intended disagreed at {size}"
-        assert (not offenders) is expected, f"evaluate disagreed at {size}"
+        assert (not offenders) is expected, f"monitor disagreed at {size}"
 
 
 def test_a_project_local_constraint_still_loads_alongside_a_builtin(tmp_path: Path) -> None:
@@ -361,7 +394,13 @@ def test_a_project_local_constraint_still_loads_alongside_a_builtin(tmp_path: Pa
 
 from decimal import Decimal
 
-from vqapr.constraints.constraint import Constraint, ConstraintBounds
+from vqapr.authoring import (
+    Constraint,
+    ConstraintBounds,
+    ConstraintFinding,
+    EconomicAccountView,
+    Rebalance,
+)
 from vqapr.constraints.findings import ConstraintFinding
 
 
@@ -370,23 +409,15 @@ class LocalCap(Constraint):
     def constraint_id(self):
         return "local-cap"
 
-    def requirements(self):
-        return ()
-
-    def project(self, window, instruments):
+    def project(self, call):
         return ConstraintBounds(
-            {i: Decimal("0") for i in instruments},
-            {i: Decimal("1") for i in instruments},
+            lower_weights={i: Decimal("0") for i in call.instruments},
+            upper_weights={i: Decimal("1") for i in call.instruments},
         )
 
-    def validate_intended(self, intent, bounds):
+    def monitor(self, call, account, bounds):
         return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
-        )
-
-    def evaluate(self, window, account, marks, bounds):
-        return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
+            passed=True, measured=Decimal("0"), bound=Decimal("1"), excess=Decimal("0"), details={}
         )
 """,
         encoding="utf-8",
@@ -485,9 +516,9 @@ def test_single_name_cap_enforces_its_declared_tolerance_on_the_real_projection(
     )
 
     with pytest.raises(AllocationViolation, match="above the declared"):
-        constraint.project(window, instruments)
+        constraint.project(reading_call(window, instruments, constraint))
 
     # The unmodified panel, well under the ceiling, still projects cleanly.
     assert tolerance > 0
     clean = _benchmark_window(manifest, instruments, requirement)
-    assert constraint.project(clean, instruments).upper
+    assert constraint.project(reading_call(clean, instruments, constraint)).upper_weights

@@ -1,6 +1,6 @@
 # 052 — Five of the nine showcases do not run, and nothing in the repository executes them
 
-**Status: OPEN, filed 2026-09-02. Two of the five closed by
+**Status: OPEN for its gate half; all five showcases run again as of record `133`.** Two closed by
 [`131-one-datamodel-and-a-dead-half-deleted.md`](../implementations/131-one-datamodel-and-a-dead-half-deleted.md)
 as a side effect** -- `show_002` and `show_004` failed because their DataModels declared reads in a
 retired shape, and converging the DataModel contract retired the shape everywhere at once. Three
@@ -44,7 +44,9 @@ whose declaration no longer completed against the current requirement contract. 
 `131`**, which made every DataModel declare reads one way.
 
 Record `132` converged StrategyModel and re-ran all nine: the same six complete, and the same
-three fail on the same `SingleNameCap` line. The gate half of this issue is still open.
+three fail on the same `SingleNameCap` line. Record `133` repaired those three -- one missing config
+key, two retired attribute names, and one read-through the package owed -- and all nine complete.
+**The gate half of this issue is still open**: nothing in `pytest` runs `showcases/`.
 
 ## Why this is the finding rather than five separate ones
 

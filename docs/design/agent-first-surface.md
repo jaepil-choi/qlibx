@@ -66,6 +66,11 @@ and that template hand-mints all four fields. The package teaches the ceremony i
 to remove. The scaffold cannot be migrated alone; it moves with the CLI registration path
 and the loader conformance check, which is one unit.
 
+> **Closed 2026-09-02.** Record `125` moved the four fields to the Flow; records `130`-`133`
+> moved the three scaffolds, the loader and the conformance check onto one authoring surface as
+> the one unit this paragraph asked for. The template returns `va.Hold(...)` or
+> `va.Rebalance.of(...)` and mints nothing.
+
 ## Principle 2 — a declaration with no field is a sentence that cannot be spoken
 
 `venues.Academic` had no `fractional_allowed`. An agent wanting an unquantized academic

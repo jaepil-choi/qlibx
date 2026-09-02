@@ -1,6 +1,9 @@
 # 036 — "Both are authored the same way" — a DataModel and a StrategyModel share no import, no declaration shape, no entry point and no row type
 
-**Status:** **owner-decided 2026-08-31 CONVERGE. Constraint (`130`), DataModel (`131`) and StrategyModel (`132`) are each ONE class as of 2026-09-02; M1.4 verifies the sentence this issue is named after and closes it.** The ruling:
+**Status:** **CLOSED 2026-09-02 — records `126`, `128`, `130`, `131`, `132`, `133`.** The sentence
+this issue is named after is a description now: one import, one declaration, one read verb, one
+row type for all three roles, and `public.<X> is authoring.<X>` for every shared name. The
+closing table is at the end of this file. The ruling that got here:
 **a DataModel and a StrategyModel should be substantially similar to use, and the size of the
 current difference is itself the defect.** So the answer to "What to settle" is CONVERGE - the
 sentence at `SKILL.md:73` is what the product should be made to mean, rather than what should be
@@ -135,3 +138,26 @@ ship."*
 
 Converging them is the larger change and may not be wanted. Correcting one sentence and shipping the
 table is not.
+
+## How it closed (2026-09-02, record `133`)
+
+The table the reporter had to build, re-read against the tree. Every row is now the same on both
+sides, and the Constraint column would read identically.
+
+| | DataModel | StrategyModel |
+|---|---|---|
+| import | `from vqapr import authoring as va` | same |
+| declaration method | `inputs()` -> mapping, keyed by an alias you name | same |
+| requirement type | `va.DatasetInput(dataset_id=, fields=, lookback=)` | same |
+| entry point | `compute(self, context)` | `decide(self, call)` — the one row that should differ |
+| getting rows | `context.read("<alias>")` | `call.read("<alias>")` |
+| a row is | an `Observation` | same |
+| the instrument | `row.instrument_id` | same |
+| a field | `row.values["excess_return"]` | same |
+| the timestamp | `row.available_at`, present | same |
+| returning | `list[dict]` with the declared value fields | `Hold` or `Rebalance` — the other row that should differ |
+
+`vqapr.public` re-exports every name it shares with `authoring` as the same object (asserted by
+`tests/extension/test_one_authoring_surface.py`), the three scaffolds emit one import line and one
+grammar (asserted there too), `_internal/` holds two file primitives and no bridge, and `SKILL.md`
+says what an author is handed in terms of `Observation`, not `ObservationBatch`.

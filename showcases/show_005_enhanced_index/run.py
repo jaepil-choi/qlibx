@@ -325,7 +325,7 @@ class EnhancedIndex(StrategyModel):
         )
 
         bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower))
+        instruments = tuple(sorted(bounds.lower_weights))
         desired = {
             name: (
                 benchmark.get(name, Decimal(0)) + SCALE * active.get(name, Decimal(0))
@@ -361,7 +361,7 @@ class EnhancedIndex(StrategyModel):
         # as a constraint violation and fails the callback -- see README, "Known gap".
         frozen = frozenset()
         if current:
-            pinned = max(current, key=lambda name: (bounds.upper[name] - current[name], name))
+            pinned = max(current, key=lambda name: (bounds.upper_weights[name] - current[name], name))
             frozen = frozenset({pinned})
         result = self._solve(desired, current, bounds, frozen)
         reported = len(result.frozen_outside_box)
@@ -388,8 +388,8 @@ class EnhancedIndex(StrategyModel):
         return optimize(
             desired=desired,
             current=current,
-            lower=dict(bounds.lower),
-            upper=dict(bounds.upper),
+            lower=dict(bounds.lower_weights),
+            upper=dict(bounds.upper_weights),
             frozen=frozen,
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -775,6 +775,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "SingleNameCap",
         config={
             "cap": CAP,
+            "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
             "constraint_id": "single-name-cap",
         },

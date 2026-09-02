@@ -437,7 +437,7 @@ class EnsembleStrategy(StrategyModel):
         desired_active = rescale(combined, long=ENSEMBLE_BUDGET, short=-ENSEMBLE_BUDGET)
 
         bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower))
+        instruments = tuple(sorted(bounds.lower_weights))
         desired = {
             name: desired_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
         }
@@ -445,8 +445,8 @@ class EnsembleStrategy(StrategyModel):
         result = optimize(
             desired=desired,
             current={},
-            lower=dict(bounds.lower),
-            upper=dict(bounds.upper),
+            lower=dict(bounds.lower_weights),
+            upper=dict(bounds.upper_weights),
             frozen=frozenset(),
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -730,6 +730,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "SingleNameCap",
         config={
             "cap": CAP,
+            "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
             "constraint_id": "single-name-cap",
         },

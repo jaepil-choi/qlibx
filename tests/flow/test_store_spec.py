@@ -22,7 +22,7 @@ from vqapr.flow.store_spec import STORE_KEYS, StoreSpec
 
 def test_the_key_set_is_named_once_and_read_from_there() -> None:
     """AC-X4' condition (a): exactly one place owns the keys."""
-    assert STORE_KEYS == ("root", "tables")
+    assert STORE_KEYS == ("root", "tables", "account_positions")
     # The dataclass fields ARE the key set. Asserting them against each other is what makes a
     # field added in one place and forgotten in the other impossible rather than merely unlikely.
     assert {field for field in StoreSpec.__dataclass_fields__} == set(STORE_KEYS)

@@ -428,6 +428,7 @@ class SimulationFlow:
         scan_session: object | None = None,
         on_progress: Callable[[], None] | None = None,
         registry: object | None = None,
+        record_account_positions: bool = True,
     ) -> None:
         if not isinstance(frozen_run, FrozenRun):
             raise TypeError("frozen_run must be a FrozenRun")
@@ -471,6 +472,12 @@ class SimulationFlow:
         # opening and closing its own on every fill, which is where the time went.
         self._scan_session = scan_session
         self._on_progress = on_progress
+        if not isinstance(record_account_positions, bool):
+            raise TypeError("record_account_positions must be a bool")
+        # Whether `vqapr.account` carries one row per held instrument at every valuation, or the
+        # `_ACCOUNT` row alone. Declared in the run spec's `store:` block; the testbed's broad
+        # signed book wrote 2.6M position rows of which the rows actually read were 0.07%.
+        self._record_account_positions = record_account_positions
         # The project's instrument roster, bound into the venue's view at the one seam a category
         # enters through. Optional so a flow assembled without one still constructs; what it
         # cannot then do is answer what an instrument is, which it refuses rather than guesses.
@@ -1289,15 +1296,17 @@ class SimulationFlow:
             f"{DEFAULT_TABLE_PREFIX}account",
             {
                 "instrument": _ACCOUNT_IDENTITY,
-                "cash": str(account.cash),
-                "nav": str(mark.nav),
+                # The values themselves, not their text: the run record writer records what
+                # type each column was encoded from, so a reader gets a Decimal back.
+                "cash": account.cash,
+                "nav": mark.nav,
                 "quantity": None,
                 "price": None,
                 "observed_at": mark.marked_at,
                 "account_version": account.version,
             },
         )
-        for instrument in sorted(account.positions):
+        for instrument in sorted(account.positions) if self._record_account_positions else ():
             selection = priced.get(instrument)
             recorder.append(
                 f"{DEFAULT_TABLE_PREFIX}account",
@@ -1305,8 +1314,8 @@ class SimulationFlow:
                     "instrument": instrument,
                     "cash": None,
                     "nav": None,
-                    "quantity": str(account.positions[instrument]),
-                    "price": None if selection is None else str(selection.price),
+                    "quantity": account.positions[instrument],
+                    "price": None if selection is None else selection.price,
                     "observed_at": None if selection is None else selection.observed_at,
                     "account_version": account.version,
                 },
@@ -1706,8 +1715,8 @@ class SimulationFlow:
                 f"{DEFAULT_TABLE_PREFIX}account",
                 {
                     "instrument": _ACCOUNT_IDENTITY,
-                    "cash": str(account.cash),
-                    "nav": str(mark.nav),
+                    "cash": account.cash,
+                    "nav": mark.nav,
                     "quantity": None,
                     "price": None,
                     # When the nav was MEASURED, which is not when this row was written. Dating
@@ -1717,7 +1726,8 @@ class SimulationFlow:
                     "account_version": account.version,
                 },
             )
-            for instrument in sorted(account.positions):
+            positions = sorted(account.positions) if self._record_account_positions else ()
+            for instrument in positions:
                 valued = prices.get(instrument)
                 recorder.append(
                     f"{DEFAULT_TABLE_PREFIX}account",
@@ -1725,8 +1735,8 @@ class SimulationFlow:
                         "instrument": instrument,
                         "cash": None,
                         "nav": None,
-                        "quantity": str(account.positions[instrument]),
-                        "price": None if valued is None else str(valued.price),
+                        "quantity": account.positions[instrument],
+                        "price": None if valued is None else valued.price,
                         "observed_at": observed.get(instrument),
                         "account_version": account.version,
                     },

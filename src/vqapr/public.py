@@ -103,6 +103,9 @@ from vqapr.flow.records import freeze_record as freeze_record
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
+from vqapr.flow.run_records import read_record as read_run_record
+from vqapr.flow.run_records import read_typed_table as read_run_table
+from vqapr.flow.run_records import run_ids
 from vqapr.flow.simulation import SimulationResult, callback_evidence
 from vqapr.models.contexts import DataModelContext, StrategyModelContext
 from vqapr.models.data_model import DataModel
@@ -255,6 +258,8 @@ __all__ = (
     "publish_run_record",
     "rank",
     "rank_information_coefficient",
+    "read_run_record",
+    "read_run_table",
     "register_agenda",
     "register_component",
     "register_constraint",
@@ -269,6 +274,7 @@ __all__ = (
     "rescale",
     "returns",
     "run",
+    "run_ids",
     "shipped_constraint_path",
     "signal_weight",
     "trade_rules_by_kind",

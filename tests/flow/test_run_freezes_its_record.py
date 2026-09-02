@@ -72,6 +72,43 @@ def test_a_run_freezes_a_record_a_later_process_could_read(tmp_path: Path) -> No
     assert "contract" in record
     assert table_ids(store, "frozen"), "the recorded tables must be on disk beside the record"
 
+    # A5: what the run wrote reads back as what it was. `nav` is a Decimal on the `_ACCOUNT`
+    # row and `observed_at` an offset-aware instant, decoded by the sidecar the writer left.
+    from decimal import Decimal
+
+    from vqapr.public import read_run_table
+
+    account_rows = [
+        row
+        for row in read_run_table(store, "frozen", "vqapr.account")
+        if row["instrument"] == "_ACCOUNT"
+    ]
+    assert account_rows, "a real run values its book at least once"
+    assert all(isinstance(row["nav"], Decimal) for row in account_rows)
+    assert all(row["observed_at"].utcoffset() is not None for row in account_rows)
+
+
+def test_a_store_may_keep_the_account_row_alone(tmp_path: Path) -> None:
+    """`store.account_positions: false` -- cash and NAV per valuation, no per-instrument rows.
+
+    The testbed's broad signed book wrote 2.6M position rows of which the rows actually read
+    were the `_ACCOUNT` ones (0.07%). Fills are recorded either way.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "store"
+    frozen = preflight_run(project, _definition(project))
+
+    execute_run(
+        project, frozen, store_root=store, run_id="lean", record_account_positions=False
+    )
+
+    from vqapr.flow.run_records import read_table
+
+    instruments = {row["instrument"] for row in read_table(store, "lean", "vqapr.account")}
+    assert instruments == {"_ACCOUNT"}, instruments
+    assert "vqapr.fill" in table_ids(store, "lean")
+
 
 @pytest.mark.slow
 def test_the_record_and_show_run_cannot_drift_apart(tmp_path: Path) -> None:

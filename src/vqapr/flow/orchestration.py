@@ -76,6 +76,7 @@ def run(
     store_root: str | Path | None = None,
     run_id: str | None = None,
     replace_record: bool = False,
+    record_account_positions: bool = True,
 ) -> SimulationResult:
     """Execute exactly one simulation from a preflight-produced frozen authority.
 
@@ -186,6 +187,7 @@ def run(
         # real run, not an edge case.
         on_progress=writer.heartbeat if writer is not None else None,
         registry=registry,
+        record_account_positions=record_account_positions,
     )
     try:
         result = flow.run()

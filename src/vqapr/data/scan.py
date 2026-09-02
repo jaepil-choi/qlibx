@@ -166,11 +166,37 @@ def _relation(spec: SourceSpec) -> str:
     return f"read_parquet('{target}', hive_partitioning={hive})"
 
 
+def _configure(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+    """Settings every connection this module opens must carry, in one place.
+
+    `preserve_insertion_order=false` lets duckdb parallelise a scan whose row order the read path
+    re-establishes anyway (`available_at`, then the dataset's key fields).
+
+    `enable_progress_bar=false` because duckdb renders that bar to stdout even when stdout is a
+    pipe, and stdout is where the CLI writes its JSON envelope. A scan long enough to cross the
+    threshold put carriage-returned progress frames in the middle of a *successful* command's
+    reply, so the reply did not parse (`docs/issues/047`); a driver in the wild was already
+    stripping those frames without knowing why.
+
+    **The default is the host's, not ours, and that is the reason to state it rather than inherit
+    it.** duckdb 1.5.5 decides per process: measured here, `duckdb.connect()` comes back with the
+    bar ON when `__main__` has no `__file__` -- a REPL, a notebook, `python -c`, an embedding host
+    -- and OFF when it does. Whichever way a given host lands, the package's output should not
+    depend on it.
+
+    Both settings are set on every connection AND every cursor. `preserve_insertion_order` is
+    GLOBAL and would carry, but `enable_progress_bar` is LOCAL and a cursor takes the *default*
+    rather than its parent's value: setting it on the database alone leaves every cursor made
+    from it unconfigured.
+    """
+    con.execute("SET preserve_insertion_order=false")
+    con.execute("SET enable_progress_bar=false")
+    return con
+
+
 def _open(spec: SourceSpec) -> duckdb.DuckDBPyConnection:
     _require_path(spec)
-    con = duckdb.connect()
-    con.execute("SET preserve_insertion_order=false")
-    return con
+    return _configure(duckdb.connect())
 
 
 def _require_path(spec: SourceSpec) -> None:
@@ -235,8 +261,7 @@ class ScanSession:
             database = self._database
             if database is None:
                 database = self._database = duckdb.connect()
-            con = database.cursor()
-            con.execute("SET preserve_insertion_order=false")
+            con = _configure(database.cursor())
             self._connections[key] = con
         return con
 

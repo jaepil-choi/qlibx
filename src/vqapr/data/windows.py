@@ -184,7 +184,20 @@ class ModelWindow:
         Refuses a requirement the component did not declare before compute: an undeclared read is
         not point-in-time bounded, and being bounded is what the declaration buys.
         """
-        if requirement not in self.__allowed:
+        return self.declared((requirement,))
+
+    def declared(self, requirements: Sequence[DataRequirement]) -> ObservationBatch:
+        """Every field an alias declared, in one scan (`docs/issues/046`, lane D).
+
+        The requirements are one alias's -- one dataset, one lookback, one field each -- and the
+        store reads them as one `fields` mapping in one statement. Each is refused if it was not
+        declared before compute, exactly as a single one is; one access is recorded, naming
+        every field read.
+        """
+        declared = tuple(requirements)
+        for requirement in declared:
+            if requirement in self.__allowed:
+                continue
             raise VqaprError(
                 stage=_STAGE,
                 family=FailureFamily.DATA,
@@ -213,8 +226,8 @@ class ModelWindow:
                 "this window serves several components, so a read must name one: take "
                 "window.for_consumer(<component id>) before calling observations()"
             )
-        batch = self.__store.query(
-            requirement,
+        batch = self.__store.query_many(
+            declared,
             evaluation_time=self.evaluation_time,
             instruments=self.instruments,
             consumer_id=self.consumer_id,

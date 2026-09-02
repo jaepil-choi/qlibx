@@ -1,22 +1,12 @@
-"""The gap `docs/issues/036` measured, asserted, so that closing it is visible.
+"""One author surface: the facade and `vqapr.authoring` name the same objects, and the three
+scaffolds teach one grammar.
 
-**Every assertion in this file states what the package does TODAY, and today is wrong.** The owner
-ruled CONVERGE on 2026-08-31: a DataModel and a StrategyModel *"should be substantially similar to
-use, and the size of the current difference is itself the defect."* `src/vqapr/agent/skill/
-SKILL.md:73` already claims *"Both are authored the same way"*, and the product is what has to be
-made to mean it.
-
-So this is a characterization suite, not a specification. It exists because the convergence touches
-`authoring.py`, `public.py`, `models/`, `extension/loading.py`, `flow/materialize.py` and two
-`_internal` bridges, and a change that big needs the before-state written down where a diff can
-show it moving. `tests/characterization/refusal_codes.baseline.json` is the same idea for refusals.
-
-**Each test names the milestone that deletes it.** A test here that starts failing is not a
-regression -- it is the milestone landing, and the test goes with it. Do not "fix" one of these by
-making the assertion true again; that would be re-opening 036.
+This began as the characterization suite for `docs/issues/036` -- every assertion stated what the
+package did on 2026-09-02 and named the milestone that would delete it. The milestones landed:
+records `126` (the two lookbacks), `130` (Constraint), `131` (DataModel) and `132` (StrategyModel).
+What is left is the specification those tests were counting down to.
 
 Design: `docs/design/the-panel-the-surface-and-the-run.md` §3 (명사 2 - 하나의 저자 표면).
-Plan: `.agent/plans/active/one-authoring-surface.md`, M1.
 """
 
 from __future__ import annotations
@@ -27,7 +17,9 @@ import pytest
 
 import vqapr.authoring as authoring
 import vqapr.public as public
+from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_constraint, load_data_model, load_strategy_model
+from vqapr.extension.scaffold import render
 from vqapr.public import register_constraint, register_data_model, register_strategy_model
 
 # --------------------------------------------------------------------------------------
@@ -59,6 +51,45 @@ def test_the_facade_and_the_authoring_module_are_one_object(name: str) -> None:
         f"public.{name} and authoring.{name} came apart again; that is the defect "
         f"docs/issues/036 measured, not a refactor."
     )
+
+
+# --------------------------------------------------------------------------------------
+# Three scaffolds, one grammar.
+# --------------------------------------------------------------------------------------
+
+_SCAFFOLDED_KINDS = (
+    ComponentKind.STRATEGY_MODEL,
+    ComponentKind.DATA_MODEL,
+    ComponentKind.CONSTRAINT,
+)
+
+
+def test_the_three_scaffolds_emit_one_import_line() -> None:
+    """`from vqapr import authoring as va`, in every kind; nothing imports `vqapr.public`."""
+    for kind in _SCAFFOLDED_KINDS:
+        source = render(kind, "sample", dataset_id="px")
+        assert "from vqapr import authoring as va\n" in source, kind
+        assert "vqapr.public" not in source, kind
+
+
+def test_the_three_scaffolds_declare_and_read_the_same_way() -> None:
+    """`inputs()` is the one declaration and `.read(alias)` the one read verb, in every kind."""
+    for kind in _SCAFFOLDED_KINDS:
+        source = render(kind, "sample", dataset_id="px")
+        assert "    def inputs(self):" in source, kind
+        assert '.read("' in source, kind
+
+
+def test_each_scaffold_differs_only_in_its_own_verb() -> None:
+    verbs = {
+        ComponentKind.STRATEGY_MODEL: ("def decide(self, call)",),
+        ComponentKind.DATA_MODEL: ("def compute(self, context)",),
+        ComponentKind.CONSTRAINT: ("def project(self, call)", "def monitor(self, call"),
+    }
+    for kind, expected in verbs.items():
+        source = render(kind, "sample", dataset_id="px")
+        for verb in expected:
+            assert verb in source, (kind, verb)
 
 
 # --------------------------------------------------------------------------------------

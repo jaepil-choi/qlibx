@@ -17,7 +17,9 @@ the author, and no way for the two to disagree.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 
 from vqapr.authoring import ConstraintFinding
 
@@ -50,6 +52,26 @@ class StampedConstraintFinding:
         (`docs/issues/086`, and the message `flow/simulation.py` builds from it).
         """
         return self.finding.offenders
+
+    # The snapshot a breach must leave behind -- which constraint, the bound, the value measured
+    # against it -- read through here for the same reason `passed` and `offenders` are: a reader
+    # of `report.findings` holds one object per constraint and should not have to know that the
+    # author's half sits one level down. Same values, one access path.
+    @property
+    def measured(self) -> Decimal:
+        return self.finding.measured
+
+    @property
+    def bound(self) -> Decimal:
+        return self.finding.bound
+
+    @property
+    def excess(self) -> Decimal:
+        return self.finding.excess
+
+    @property
+    def details(self) -> Mapping[str, object]:
+        return self.finding.details
 
 
 @dataclass(frozen=True, slots=True)

@@ -241,7 +241,7 @@ class StrategyModel(Model):       # account 있음, venue 통과함
 
 세 scaffold(strategy · datamodel · constraint)가 같은 import, 같은 선언 메서드, 같은 read 동사를
 emit한다. `agent-first-surface.md`가 *"Open consequence"*로 남겨 둔 것 — 패키지가 없애려는 ceremony를
-scaffold가 가르친다 — 이 여기서 닫힌다.
+scaffold가 가르친다 — 이 여기서 닫힌다. **(닫혔다, 2026-09-02, 기록 `133`.)**
 
 ---
 

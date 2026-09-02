@@ -95,18 +95,20 @@ decision reviewable instead of burying it. `docs/issues/049` measures one such p
 byte-identical output.
 
 **A DataModel derives a column, and `run` executes it.** A StrategyModel decides what to hold; a
-DataModel computes a new dataset from the ones you registered. Both are authored the same way and
-both are described by `vqapr show model <id>`.
+DataModel computes a new dataset from the ones you registered; a Constraint bounds what a book may
+hold. All three are authored the same way -- one import, `from vqapr import authoring as va`; one
+declaration, `inputs()`; one read verb, `.read(alias)` -- and differ only in the verb that is
+theirs: `decide`, `compute`, `project`/`monitor`. `vqapr show model <id>` describes any of them.
 
-**What a DataModel is handed.** `context.window.observations(requirement)` returns an
-`ObservationBatch` -- importable from `vqapr.public` -- and `.rows` is the only data an author ever
-sees. It is a **flat tuple of dicts**, one per (instant, instrument):
+**What a model is handed.** `inputs()` returns a mapping from an alias you name to a
+`va.DatasetInput(dataset_id=, fields=, lookback=)`, and `.read(alias)` on the call returns a
+**tuple of `Observation`s**, one per (instant, instrument), in every role:
 
-- every row carries its own `available_at` (timezone-aware) and `instrument`, plus one key per
-  declared field under the alias the requirement declared;
-- rows are ordered by `available_at`, then by the dataset's registered key fields, so instruments
-  **interleave** within an instant rather than arriving grouped by name. A cross-section is the
-  rows sharing one `available_at`; `window.snapshot(requirement)` returns the newest one directly;
+- every observation carries `instrument_id`, its own `available_at` (timezone-aware) and
+  `values`, a mapping with one key per declared field;
+- observations are ordered by `available_at`, then by instrument, so names **interleave** within
+  an instant rather than arriving grouped. A cross-section is the observations sharing one
+  `available_at`; the newest is the last one's;
 - a value keeps its parquet column's type -- `float` from a DOUBLE column, `Decimal` from a DECIMAL
   one -- so write `Decimal(str(value))` and never `Decimal(value)`.
 
@@ -219,9 +221,11 @@ are not standing in for a category.
 
 **Constraints.** The run spec's optional `constraints:` list names registered components of kind
 `constraint`. `vqapr new constraint <id> --cap 0.2` scaffolds a single-name position cap that
-registers and runs unedited. Of its five members, `project` is the one worth reading before you
-write your own: it returns the lower AND upper weight bound for every instrument -- the box the
-optimiser must stay inside -- not the offenders and not a correction.
+registers and runs unedited. It has two members and two consumers: `project` returns the lower AND
+upper weight bound for every instrument -- the box the optimiser must stay inside, not the
+offenders and not a correction -- and `monitor` looks at the marked account from outside and
+returns a `ConstraintFinding` with the bound and the measured value. A breach never stops a run;
+it is recorded, and `show run` reports it under `contract`.
 
 **Stop condition:** `register` accepted every declaration without failures, and each kind you
 registered lists what you expect. `list` takes exactly one kind per call and `kind` is a required
@@ -336,14 +340,21 @@ A strategy is a Python file. It declares what it reads and returns what it wants
 provenance and the account version are the framework's, and an author never writes them.
 
 ```python
-def inputs(self):
-    read = DatasetInput(dataset_id="prices", fields=("close",), lookback=RowsLookback(rows=20))
-    return {"prices": read}
+from vqapr import authoring as va
 
-def decide(self, call):
-    ...
-    return Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
+class Momentum(va.StrategyModel):
+    def inputs(self):
+        read = va.DatasetInput(dataset_id="prices", fields=("close",), lookback=va.RowsLookback(rows=20))
+        return {"prices": read}
+
+    def decide(self, call):
+        ...
+        return va.Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
 ```
+
+What the strategy needs to remember between callbacks lives in `self.memory` (strict JSON): the
+framework restores it before every `decide()` and snapshots it after, so read it, change it, and
+leave it. One instance serves the whole run.
 
 `Rebalance.of` takes **relative** conviction. `long={"A": 2, "B": 1}` means A is liked twice as
 much as B; normalising, rounding onto the canonical grid and balancing against cash is the

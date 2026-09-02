@@ -34,7 +34,7 @@ import shutil
 import time as _time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -335,10 +335,28 @@ class RunRecordWriter:
 
     root: Path
     run_id: str
+    _rows: dict[str, int] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _instants: dict[str, set[str]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    """What this writer has appended so far, per table: rows, and the distinct `event_time`s.
+
+    Counted as chunks pass through `append`, so the record's `tables` block is right whether the
+    run streamed its rows occurrence by occurrence or handed them over once at the end -- and so
+    nothing has to hold the rows to count them. A set of instants is bounded by the run's
+    instants, not its rows.
+    """
 
     @property
     def directory(self) -> Path:
         return self.root / RUNS_DIRECTORY / self.run_id
+
+    def counts(self) -> dict[str, dict[str, int]]:
+        """Per table: rows appended so far, and the distinct instants they span."""
+        return {
+            table_id: {"rows": self._rows[table_id], "instants": len(self._instants[table_id])}
+            for table_id in sorted(self._rows)
+        }
 
     def open(self, *, replace: bool = False) -> None:
         """Create this run's directory, refusing to write into one that already exists.
@@ -539,9 +557,12 @@ class RunRecordWriter:
         if not rows:
             return
         path = self.directory / TABLES_DIRECTORY / f"{table_id}.jsonl"
+        instants = self._instants.setdefault(table_id, set())
         with path.open("a", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(_encode(row), sort_keys=True) + "\n")
+                instants.add(str(row.get("event_time")))
+        self._rows[table_id] = self._rows.get(table_id, 0) + len(rows)
 
     def finish(self, record: Mapping[str, object], *, kind: str = RUN_KIND) -> Path:
         """Write the run's own facts, last, by atomic replace.

@@ -132,20 +132,24 @@ def run(
     root = AccountState(frozen.initial_account_snapshot)
     strategy.memory = normalize_memory(frozen.initial_model_memory)
     strategy.load_payload(BytesIO(frozen.initial_payload))
+    writer = None
+    if store_root is not None:
+        writer = RunRecordWriter(Path(store_root), run_id or str(frozen.identity))
+        writer.open(replace=replace_record)
     state = RunStateRepository(
         initial_account=root,
         initial_model_memory=frozen.initial_model_memory,
         initial_payload=frozen.initial_payload,
+        # Rows leave the run as each occurrence is accepted, into this run's own directory; a
+        # killed run keeps everything up to its last accepted occurrence, and the heap holds one
+        # occurrence's rows rather than the run's. Without a store, roots keep rows as before.
+        row_sink=None if writer is None else writer.append,
     )
     if state.root.current_model_state_ref != frozen.initial_model_state_ref:
         raise RuntimeError("initial Model state does not match frozen run authority")
     initial_ref = state.root.current_model_state_ref
     if initial_ref is None or state.load_payload(initial_ref) != frozen.initial_payload:
         raise RuntimeError("initial Strategy payload does not match frozen run authority")
-    writer = None
-    if store_root is not None:
-        writer = RunRecordWriter(Path(store_root), run_id or str(frozen.identity))
-        writer.open(replace=replace_record)
     flow = SimulationFlow(
         frozen,
         strategy,

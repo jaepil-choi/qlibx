@@ -1,13 +1,13 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-02.** 이 디렉터리에 50개 파일이 있고 **42개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-02.** 이 디렉터리에 52개 파일이 있고 **43개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
 **읽는 법.** 열린 것만 보려면 §1을 읽는다. §2는 닫힌 것들이고, 무엇이 닫았는지만 적는다.
 각 파일 안의 `**Status:**` 줄이 여전히 authority이며, 이 표는 그것을 모은 것이다.
 
-> **이 디렉터리는 이슈 목록으로 닫히지 않는다.** 열린 여덟 중 다섯(`034`·`035`·`036`·`040`·`046`)은
+> **이 디렉터리는 이슈 목록으로 닫히지 않는다.** 열린 아홉 중 다섯(`034`·`035`·`036`·`040`·`046`)은
 > 서로 다른 다섯 개의 결손이 아니라 아키텍처에 세 개의 명사(**Panel · Surface · Run**)가 없어서
 > 생긴 증상이다. 그 설계는 `docs/design/the-panel-the-surface-and-the-run.md`에 있고,
 > `docs/vqapr-architecture.md` §17이 그것을 소유자 mental model과 대조한다. **하나씩 닫으면
@@ -15,7 +15,7 @@
 
 ---
 
-## 1. 열린 것 — 여덟
+## 1. 열린 것 — 아홉
 
 | # | 제목 | 상태 (2026-09-02 재확인) | 어디로 가는가 |
 |---|---|---|---|
@@ -23,12 +23,13 @@
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`와 합쳐진다 | `034`와 함께 |
 | `034` | run이 자기가 어떤 execution convention을 썼는지 말하지 못한다 | **열림.** 소유자가 원하고 shape도 제안됐으나 안 만들었다. 이것을 닫았다고 적힌 record는 실제로 닫지 않았다 | 명사 3 (Run record) |
 | `035` | 유일한 데이터 accessor가 파일보다 90배 느리다 | **owner-decided, 미구현.** ruling: 검증은 읽기 경로에서 절대 일어나지 않는다(그 절반은 record `119`로 닫혔다). 남은 절반인 columnar accessor는 **레인 C 병합 후 재측정**하기로 미뤄져 있었고, 레인 C는 `df571533`로 병합됐다 — **재측정 차단이 풀렸다** | 명사 1 (Panel). §2.3이 *"panel이 이미 columnar이므로 035는 새 작업이 아니다"*라고 흡수한다 |
-| `036` | 둘은 같은 방식으로 저작되지 않는다 | **owner-decided CONVERGE. 절반 구현됨** — 파일 헤더의 *"not yet implemented"*는 2026-09-02 기준 낡았다. 표 10행 중 5–9행을 record `128`이, lookback을 `126`이 닫았다. **남은 것: 1–4행과 10행** — 두 개의 class 계보(`authoring.*` vs `models.*`/`constraints.*`), `decide` 대 `on_occurrence`, scaffold 3개가 표면 2개를 emit, `SKILL.md`의 *"Both are authored the same way"* | 명사 2 (Surface) — **소유자가 착수 1순위로 정했다** |
+| `036` | 둘은 같은 방식으로 저작되지 않는다 | **owner-decided CONVERGE. Constraint는 record `130`으로 닫혔고 두 역할이 남았다.** — 파일 헤더의 *"not yet implemented"*는 2026-09-02 기준 낡았다. 표 10행 중 5–9행을 record `128`이, lookback을 `126`이 닫았다. **남은 것: 1–4행과 10행** — 두 개의 class 계보(`authoring.*` vs `models.*`/`constraints.*`), `decide` 대 `on_occurrence`, scaffold 3개가 표면 2개를 emit, `SKILL.md`의 *"Both are authored the same way"* | 명사 2 (Surface) — **소유자가 착수 1순위로 정했다** |
 | `040` | agenda가 전략 하나만 구동하고 template은 반대로 읽힌다 | **owner-decided(agenda는 공유 가능), 미구현.** 실환경에서 실측 확인됨 — `vqapr-enhanced-index-3` A2가 같은 cadence의 factor 6개에 agenda 6개를 선언하게 만들었다 | 명사 3의 전제조건 |
 | `046` | factor book이 callback당 고정 비용을 내고 선언된 입력마다 두 번 왕복한다 | **절반 닫힘.** 후반(왕복 2→1)은 record `120`. **전반(한 스캔이 여러 field) = 레인 D, 열림** — worktree가 아직 만들어지지 않았다 | 읽기 경로 캠페인 레인 D |
+| `052` | showcase 9개 중 5개가 안 돌고, 아무것도 그것들을 실행하지 않는다 | **열림, 2026-09-02 신설.** 셋은 `SingleNameCap`이 요구하게 된 인자를 안 넘기고, 둘은 DataModel 선언이 현재 계약에 안 맞는다. **진짜 결함은 gate가 없다는 것** — `pytest`가 `showcases/`를 수집하지 않아 계약이 바뀌어도 조용히 썩는다 | 캠페인 게이트(“showcase 9개 완주”)가 오늘 측정 불가 |
 | `049` | 패키지 자신의 데이터 가이드를 따르면 614배 느리다 | **ruling은 구현됨**(record `123`), **파일은 번호를 위해 열려 있다.** 남은 것: 레인 D, 그리고 **이 파일이 존재하는 이유인 최종 측정** — 아직 안 됐다 | 캠페인 앵커 |
 
-### 열린 여덟에 없는 것 — 아직 파일이 없는 실환경 발견
+### 열린 아홉에 없는 것 — 아직 파일이 없는 실환경 발견
 
 `kwam-enhanced-index/vqapr-enhanced-index-3/VQAPR-ISSUES.md`(2026-08-31, FF5+MOM 12 book + residual
 2벌을 실제로 만든 세션)가 보고했고 **이 디렉터리에 대응 파일이 없는 것들**. 2026-09-02 평가에서
@@ -47,7 +48,7 @@
 
 ---
 
-## 2. 닫힌 것 — 마흔둘
+## 2. 닫힌 것 — 마흔셋
 
 | # | 닫은 것 |
 |---|---|
@@ -92,6 +93,7 @@
 | `045` | record `123` |
 | `047` | record `129` — 두 connection factory가 하나의 `_configure`를 지난다 |
 | `048` | CLOSED 2026-09-01, docs-only |
+| `051` | record `130` — contract 블록이 monitoring 관측을 걷는다. 그 전엔 **모든 기록에서 비어 있었다** |
 | `050` | CLOSED 2026-09-01 |
 
 ---

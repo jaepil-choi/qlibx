@@ -748,7 +748,7 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     assert emitted["object_name"] == "Cap20"
 
     source = Path(emitted["path"]).read_text(encoding="utf-8")
-    for member in ("constraint_id", "requirements", "project", "validate_intended", "evaluate"):
+    for member in ("constraint_id", "inputs", "project", "monitor"):
         assert f"def {member}" in source, f"{member} must be present, not left to a TypeError"
     # `project` is the member that cannot be guessed, so the template states its contract.
     assert "the box the optimiser must stay inside" in source
@@ -769,23 +769,32 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     assert code == 1
     assert mismatched["failures"][0]["code"] == "component.load.constraint_id_mismatch"
 
-    # The rule BITES, and says what breached it. This workspace holds one instrument, so the
-    # scaffold strategy proposes 100% of the book in it, which a 20% cap forbids.
-    code, refused = _cli(
+    # The rule BITES, and the run FINISHES. This workspace holds one instrument, so the scaffold
+    # strategy proposes 100% of the book in it, which a 20% cap forbids.
+    #
+    # A breach used to end the run here. It does not, and that is the ruling: construction is best
+    # effort, and whether a limit actually held is a question about the committed account, which
+    # monitoring answers (PRD 7.1). Stopping also hid what the strategy went on to do, and could
+    # never have seen the breach that only appears once whole shares are filled.
+    code, ran = _cli(
         capsys, "--project-root", str(tmp_path), "run",
         str(_spec(tmp_path, constraints=["cap20"])), "--run-id", "capped",
     )
-    assert code == 1
-    assert refused["stage"] != "unhandled", "a bound constraint is a decision, not a crash"
-    # The refusal said only "economic intent violates projected constraints" -- which constraint,
-    # which name, and by how much were all discarded one frame below where they were computed. A
-    # first-time-user journey had to re-run WITHOUT the constraint and read the weight table to
-    # reconstruct the breach, then open the scaffold's source.
-    message = json.dumps(refused)
-    assert "cap20" in message, "the refusal names which constraint refused"
-    assert "A" in refused["error"], "and which instrument breached it"
-    assert "0.2" in message, "and the bound it measured against"
-    assert "excess" in message, "and by how much"
+    assert code == 0, ran
+    assert ran["ok"] is True
+
+    # And the breach is IN THE RECORD, named. The block that carries it reported `{}` for every
+    # run ever written until `docs/issues/051`, so this asserts its content and not its presence.
+    code, shown = _cli(
+        capsys, "--project-root", str(tmp_path), "show", "run", "capped",
+    )
+    assert code == 0, shown
+    contract = shown["contract"]
+    assert "cap20" in contract, f"the record names which constraint was observed: {contract}"
+    entry = contract["cap20"]
+    assert entry["checked"] > 0, "a constraint nobody checked proves nothing"
+    assert entry["ok"] is False, "the book breached the cap, and the record says so"
+    assert entry["held"] < entry["checked"]
 
     # And it PERMITS. `--cap` is the marked place to change, exposed as a flag the way `--lookback`
     # is for a strategy, so the same scaffold runs clean where the book satisfies it. Without this
@@ -957,11 +966,9 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
         "        return 'position-cap'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
-        "        return ConstraintBounds({}, {})\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def project(self, call):\n"
+        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n",
         encoding="utf-8",
     )

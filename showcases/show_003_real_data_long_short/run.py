@@ -46,6 +46,7 @@ from vqapr.public import (
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
+    Rebalance,
     RunDefinition,
     SourceSpec,
     StrategyConfig,
@@ -125,7 +126,7 @@ def _write_components() -> dict[str, Path]:
     model.write_text(
         '''from __future__ import annotations
 
-from vqapr.public import DataModel, DataRequirement, RowsLookback
+from vqapr.public import DataModel, DataRequirement, Rebalance, RowsLookback
 
 LOOKBACK = 6
 
@@ -170,11 +171,10 @@ from uuid import NAMESPACE_URL, uuid5
 from vqapr.public import (
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
-    IntentSourceRef,
     Hold,
+    IntentSourceRef,
     PortfolioDirection,
-    PortfolioTarget,
+    Rebalance,
     RowsLookback,
     StrategyModel,
 )
@@ -210,33 +210,19 @@ class ReversalLongShort(StrategyModel):
         ranked = sorted(latest.items(), key=lambda item: (item[1], item[0]))
         book = {instrument: -SIDE_WEIGHT for instrument, _ in ranked[:2]}
         book.update({instrument: SIDE_WEIGHT for instrument, _ in ranked[-2:]})
-        targets = tuple(
-            PortfolioTarget(instrument, weight=book.get(instrument, Decimal("0")))
-            for instrument in sorted(latest)
-        )
-
-        source_refs = []
-        seen = set()
-        for access in context.window.accesses:
-            if access.source_id in seen:
-                continue
-            seen.add(access.source_id)
-            source_refs.append(IntentSourceRef(access.source_id, access.source_digest))
+        weights = {
+            instrument: book.get(instrument, Decimal("0")) for instrument in sorted(latest)
+        }
 
         history = dict(self.memory or {})
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
         history["last_occurrence"] = context.occurrence.occurrence_id
         self.memory = history
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, f"show003/{context.occurrence.occurrence_id}"),
-            "showcase-strategy",
-            targets,
-            Decimal("1"),
-            BUDGET,
-            tuple(source_refs),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=weights,
+            cash_weight=Decimal("1"),
+            budget=BUDGET,
         )
 ''',
         encoding="utf-8",
@@ -248,7 +234,7 @@ class ReversalLongShort(StrategyModel):
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+from vqapr.public import AcademicExchange, ListingAccess, Rebalance, TradeRule
 
 UNIVERSE = __UNIVERSE__
 
@@ -278,7 +264,7 @@ class ShowcaseExchange(AcademicExchange):
 
 from decimal import Decimal
 
-from vqapr.public import Constraint, ConstraintBounds, ConstraintFinding
+from vqapr.public import Constraint, ConstraintBounds, ConstraintFinding, Rebalance
 
 CAP = Decimal("0.30")
 
@@ -290,46 +276,30 @@ class SingleNameCap(Constraint):
     def constraint_id(self):
         return "showcase-constraint"
 
-    def requirements(self):
-        return ()
+    def inputs(self):
+        return {}
 
-    def project(self, window, instruments):
+    def project(self, call):
         return ConstraintBounds(
-            {instrument: -CAP for instrument in instruments},
-            {instrument: CAP for instrument in instruments},
+            lower_weights={instrument: -CAP for instrument in call.instruments},
+            upper_weights={instrument: CAP for instrument in call.instruments},
         )
 
-    def validate_intended(self, intent, bounds):
-        measured = max(
-            (abs(target.weight) for target in intent.targets if target.weight is not None),
-            default=Decimal("0"),
-        )
+    def monitor(self, call, account, bounds):
+        # `account.weights()` is each name's marked value over NAV, and NAV is cash plus the
+        # marked total. The arithmetic used to be written out here from a MarkBatch; doing it in
+        # one place is what keeps every rule measuring the same book the same way.
+        weights = account.weights() if account.nav else {}
+        measured = max((abs(w) for w in weights.values()), default=Decimal("0"))
         excess = measured - CAP if measured > CAP else Decimal("0")
+        offenders = tuple(sorted(n for n, w in weights.items() if abs(w) > CAP))
         return ConstraintFinding(
-            self.constraint_id,
-            measured <= CAP,
-            measured,
-            CAP,
-            excess,
-            {"targets": len(intent.targets)},
-        )
-
-    def evaluate(self, window, account, marks, bounds):
-        nav = marks.total_value + account.cash
-        measured = Decimal("0")
-        if nav > 0:
-            measured = max(
-                (abs(mark.value) / nav for mark in marks.marks),
-                default=Decimal("0"),
-            )
-        excess = measured - CAP if measured > CAP else Decimal("0")
-        return ConstraintFinding(
-            self.constraint_id,
-            measured <= CAP,
-            measured,
-            CAP,
-            excess,
-            {"account_version": account.version, "marked": len(marks.marks)},
+            passed=not offenders,
+            measured=measured,
+            bound=CAP,
+            excess=excess,
+            details={"marked": len(weights)},
+            offenders=offenders,
         )
 ''',
         encoding="utf-8",

@@ -21,18 +21,11 @@ from vqapr.models.strategy_model import StrategyModel as _EngineBase
 __all__ = ("AdaptedStrategy", "adapter_config")
 
 
-def _authoring_bounds(bounds):
-    """Translate the engine's ConstraintBounds onto the authoring one.
-
-    The engine names them `lower`/`upper`; the public contract names them
-    `lower_weights`/`upper_weights`. Same economics, different field names - the eighth
-    such pair, so translate rather than assume they stay interchangeable.
-    """
-    from vqapr.authoring import ConstraintBounds
-
-    return ConstraintBounds(
-        lower_weights=dict(bounds.lower), upper_weights=dict(bounds.upper)
-    )
+# `_authoring_bounds` was here, translating the engine's `ConstraintBounds` onto the authoring
+# one because they were two classes with the same economics and different field names. Record
+# `129` made them one class, so the translation became the identity function and is gone. This is
+# the first of this file's two reasons to exist retiring; the other is `decide` against
+# `on_occurrence`, and when that goes so does the file.
 
 
 def _decide(authored, config, strategy_id, context, aliases, holder):
@@ -44,8 +37,8 @@ def _decide(authored, config, strategy_id, context, aliases, holder):
         config,
         evaluation_time=context.occurrence.evaluation_time,
         account=_account_view(context),
-        instruments=tuple(context.constraint_bounds.lower),
-        constraint_bounds=_authoring_bounds(context.constraint_bounds),
+        instruments=tuple(context.constraint_bounds.lower_weights),
+        constraint_bounds=context.constraint_bounds,
         previous_state=holder.memory,
         history_resolver=_history_resolver(context),
         resolver=_context_resolver(context, aliases),

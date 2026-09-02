@@ -576,20 +576,21 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
             def requirements(self):
                 return ()
 
-            def project(self, window, instruments):
-                return ConstraintBounds({}, {})
+            def project(self, call):
+                return ConstraintBounds(lower_weights={}, upper_weights={})
 
-            def validate_intended(self, intent, bounds):
-                return None
-
-            def evaluate(self, window, account, marks, bounds):
+            def monitor(self, call, account, bounds):
                 return None
         """
     )
+    # Wrong ARITY, not a wrong name. Renaming the member makes the class abstract, so
+    # instantiation fails and `component.load.construction_failed` fires before the signature
+    # check this fixture exists to provoke ever runs -- the exact silent-weakening this file's
+    # own comment below warns about.
     stale = good.replace(
-        "def evaluate(self, window, account, marks, bounds):", "def evaluate(self, account, marks):"
+        "def monitor(self, call, account, bounds):", "def monitor(self, account, marks):"
     )
-    missing = good.replace("def project(self, window, instruments):", "def unused(self):")
+    missing = good.replace("def project(self, call):", "def unused(self):")
     broken = "class Limit:\n    pass\n"
 
     def _ref(source: str, name: str, *, component_id: str | None = None) -> ComponentRef:

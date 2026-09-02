@@ -78,11 +78,9 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         f"        return {identifier!r}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
+        "    def project(self, call):\n"
         "        return None\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n"
     )
     path.write_text(
@@ -727,11 +725,9 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         "    def requirements(self):\n"
         "        return (DataRequirement.of('absent', 'close', "
         "lookback=RowsLookback(1)),)\n"
-        "    def project(self, window, instruments):\n"
+        "    def project(self, call):\n"
         "        return None\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n",
         encoding="utf-8",
     )
@@ -820,11 +816,9 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
         "        return '-'.join(['position', 'cap'])\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
+        "    def project(self, call):\n"
         "        return None\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n",
         encoding="utf-8",
     )

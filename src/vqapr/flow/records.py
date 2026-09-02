@@ -98,13 +98,25 @@ def freeze_record(
 
 
 def contract_report(result: SimulationResult) -> dict[str, object]:
-    """What the run's constraints promised, and how often each was actually checked.
+    """What the run's constraints promised, and how often each was actually observed to hold.
 
     `held` and `checked` are two different numbers, and conflating them hides the case that matters
     most: a declaration checked zero times is not a declaration that held. It is one nobody asked
     about, and reporting that as `ok` would be the strongest false assurance this record could
     carry. So a constraint with `checked == 0` reports `ok: false` with a `cause` saying exactly
     that.
+
+    **These count monitoring observations of the committed account.** They used to be meant to
+    count judgements of the decision, and that member no longer exists: whether a limit held is a
+    question about the book, not about the plan (PRD 7.1). The numbers are therefore not comparable
+    across that change -- monitoring runs on its own cadence rather than once per callback, so the
+    same run reports a different `checked` than it would have.
+
+    **And they used to count nothing at all.** This walked the run's lifecycle entries asking each
+    for an `evidence` attribute, but a lifecycle entry carries `kind` and `detail` and the evidence
+    is the `detail` -- so the lookup returned `None` every time and the loop never ran. Every
+    record ever written carries an empty block here. The only test on it asserted that the key
+    existed, which it did. `docs/issues/051`.
 
     Scope, stated rather than implied: this reports the CONSTRAINTS a run declared. AC-R6 also
     names `weights`/`forms`/`records`, which are the authoring contract's declarations -- they do
@@ -113,16 +125,15 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     """
 
     findings: dict[str, dict[str, int]] = {}
-    for entry in getattr(result.final_state, "lifecycle_trace", ()):
-        evidence = getattr(entry, "evidence", None)
-        for item in getattr(evidence, "intended", ()) or ():
-            finding = getattr(item, "finding", None)
-            constraint_id = str(getattr(finding, "constraint_id", "") or "")
+    for trace in getattr(result, "occurrences", ()):
+        report = getattr(getattr(trace, "result", None), "report", None)
+        for stamped in getattr(report, "findings", ()) or ():
+            constraint_id = str(getattr(stamped, "constraint_id", "") or "")
             if not constraint_id:
                 continue
             counts = findings.setdefault(constraint_id, {"held": 0, "checked": 0})
             counts["checked"] += 1
-            if getattr(finding, "passed", False):
+            if stamped.passed:
                 counts["held"] += 1
 
     accepted = sum(
@@ -141,8 +152,8 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
         if violations:
             entry["cause"] = f"{violations} of {counts['checked']} check(s) did not hold"
             entry["fix"] = (
-                f"loosen {constraint_id} to a bound the strategy can meet, or change the "
-                "strategy so its intents satisfy it"
+                f"loosen {constraint_id} to a bound the book can stay inside, or change the "
+                "strategy so what it holds satisfies it"
             )
         elif counts["checked"] == 0:
             entry["cause"] = "declared but never checked, so nothing was proven about it"

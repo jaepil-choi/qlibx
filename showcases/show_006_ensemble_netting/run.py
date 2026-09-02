@@ -54,7 +54,6 @@ import duckdb
 
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
-    SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
     AllocationPublicationSpec,
@@ -70,8 +69,10 @@ from vqapr.public import (
     OperationAgenda,
     OperationOccurrence,
     OperationRole,
+    Rebalance,
     RunDefinition,
     RunRecordSpec,
+    SHIPPED_CONSTRAINTS,
     SourceSpec,
     StrategyConfig,
     ValuationConfig,
@@ -185,7 +186,7 @@ def _source_refs(context):
     The Flow independently recomputes this from the window and refuses any intent whose provenance
     disagrees, so it must be derived from the accesses rather than declared.
     """
-    from vqapr.public import IntentSourceRef
+    from vqapr.public import IntentSourceRef, Rebalance
 
     seen = {}
     for access in context.window.accesses:
@@ -217,10 +218,9 @@ from uuid import NAMESPACE_URL, uuid5
 from vqapr.public import (
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     PortfolioDirection,
-    PortfolioTarget,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     equal_weight,
@@ -273,15 +273,10 @@ class {class_name}(StrategyModel):
         sized = equal_weight(centred)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show006/{strategy_id}/" + context.occurrence.occurrence_id),
-            "{strategy_id}",
-            tuple(PortfolioTarget(name, weight=w) for name, w in sorted(weights.items())),
-            Decimal(1) - sum(weights.values()),
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(weights.items())),
+            cash_weight=Decimal(1) - sum(weights.values()),
+            budget=BUDGET,
         )
 '''
         + _SOURCE_REFS
@@ -329,15 +324,14 @@ from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
 from vqapr.public import (
-    QUANTUM,
     AllocationInvariants,
     AllocationSign,
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     PortfolioDirection,
-    PortfolioTarget,
+    QUANTUM,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     TableSpec,
@@ -461,15 +455,10 @@ class EnsembleStrategy(StrategyModel):
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
         self.memory = history
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show006/ensemble/" + context.occurrence.occurrence_id),
-            "show006-ensemble",
-            tuple(PortfolioTarget(n, weight=w) for n, w in sorted(result.weights.items())),
-            result.cash,
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(result.weights.items())),
+            cash_weight=result.cash,
+            budget=BUDGET,
         )
 '''
     + _SOURCE_REFS
@@ -497,7 +486,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+from vqapr.public import AcademicExchange, ListingAccess, Rebalance, TradeRule
 
 UNIVERSE = {universe!r}
 
@@ -527,7 +516,7 @@ class ShowcaseAcademicExchange(AcademicExchange):
 
 from __future__ import annotations
 
-from vqapr.public import KrxExchange
+from vqapr.public import KrxExchange, Rebalance
 
 UNIVERSE = {universe!r}
 

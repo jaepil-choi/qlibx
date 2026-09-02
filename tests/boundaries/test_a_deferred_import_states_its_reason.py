@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 37
+CEILING = 36
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
 
 Was 41 after record `125`, 44 after record `124`, and 99 before that. Record `126` merged the

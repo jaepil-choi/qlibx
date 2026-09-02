@@ -7,7 +7,7 @@ workspace는 선언을 보관하고 조회할 뿐 검증하지 않는다. datase
 from __future__ import annotations
 
 import time as _time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from datetime import datetime
@@ -262,6 +262,44 @@ class Workspace:
         """기존 workspace 전체를 읽는다. 없거나 손상됐으면 일부 상태를 반환하지 않는다."""
         candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {}, {})
         return cls._from_state(project_root, *candidate._read())
+
+    @classmethod
+    def transaction(cls, project_root: str | Path) -> Transaction:
+        """Start applying several registrations as one write.
+
+        The transaction stages every registration against a snapshot of the workspace -- or
+        against nothing, where no workspace exists yet -- so a later declaration can look up an
+        earlier one, and every refusal a registration can raise fires at staging time. Nothing on
+        disk is touched until `commit()`, which takes the lock once, re-reads, replays the staged
+        merges against what is actually there, and writes once. A document refused at its k-th
+        item therefore leaves the workspace exactly as it found it; a valid document costs one
+        lock, one read and one write however many items it declares.
+        """
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {}, {})
+        return Transaction(cls._from_state(project_root, *candidate._read_or_empty()))
+
+    def _state(self) -> _State:
+        return _State(
+            self._datasets,
+            self._sources,
+            self._execution_inputs,
+            self._components,
+            self._agendas,
+            self._strategy_configs,
+            self._valuation_configs,
+            self._monitoring_policies,
+        )
+
+    def _read_or_empty(self) -> _State:
+        """The document on disk, or the empty document where none has been written yet.
+
+        `register` is the first command typed in an empty directory; a transaction that refused to
+        start there would send the reader to create a workspace by hand, which is the substitution
+        `workspace.open.missing` exists to avoid.
+        """
+        if not self.path.exists():
+            return _State({}, {}, {}, {}, {}, {}, {}, {})
+        return self._read()
 
     @property
     def datasets(self) -> tuple[DatasetRegistration, ...]:
@@ -961,22 +999,17 @@ class Workspace:
         world ("069500 is an ETF"), and what a past run treated an instrument as is testified to
         by that run's own fills.
         """
+        payload = _roster_payload(tables, digest=digest)
+        with self._exclusive():
+            self._write_roster(payload)
+        return payload
+
+    def _write_roster(self, payload: Mapping[str, object]) -> None:
         import json
 
-        if not isinstance(tables, Mapping) or not tables:
-            raise ValueError("instrument registration requires at least one table")
-        if not isinstance(digest, str) or not digest:
-            raise ValueError("digest must be a non-empty string")
-        payload = {
-            "schema": "vqapr.instruments/v1",
-            "tables": {str(kind): str(Path(path)) for kind, path in sorted(tables.items())},
-            "digest": digest,
-        }
-        with self._exclusive():
-            self.roster_path.write_text(
-                json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-        return payload
+        self.roster_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
     def registered_instruments(self) -> dict[str, object] | None:
         """The roster pointer, or `None` when this project has registered no instruments.
@@ -1414,6 +1447,117 @@ class Workspace:
 
 
 
+
+
+def _roster_payload(tables: Mapping[str, Path | str], *, digest: str) -> dict[str, object]:
+    if not isinstance(tables, Mapping) or not tables:
+        raise ValueError("instrument registration requires at least one table")
+    if not isinstance(digest, str) or not digest:
+        raise ValueError("digest must be a non-empty string")
+    return {
+        "schema": "vqapr.instruments/v1",
+        "tables": {str(kind): str(Path(path)) for kind, path in sorted(tables.items())},
+        "digest": digest,
+    }
+
+
+class Transaction:
+    """Several registrations, staged now and written once.
+
+    `view` is a `Workspace` holding the snapshot plus everything staged so far, so `_apply` can
+    resolve a config's component or an agenda's dataset declared earlier in the same document
+    exactly as it would resolve one already on disk. Each `register_*` runs the same merge the
+    single-item `Workspace.register_*` runs, against that staged state, so a conflict or a missing
+    reference is refused where the author can still see which item it was.
+
+    `commit()` is the only method that touches disk. It holds the lock for one read and one
+    write: the merges are replayed against the state read under the lock, so a registration
+    that landed from another process in the meantime is seen and, if it conflicts, refused --
+    and then nothing is written. The roster sidecar, when a document declares one, is written
+    after the document and inside the same lock.
+    """
+
+    def __init__(self, staging: Workspace) -> None:
+        self._staging = staging
+        self._ops: list[Callable[[_State], tuple[_State, bool]]] = []
+        self._rosters: list[Mapping[str, object]] = []
+
+    @property
+    def view(self) -> Workspace:
+        """The snapshot plus what is staged: what a later declaration may look up."""
+        return self._staging
+
+    def _stage(self, merge: Callable[[_State], tuple[_State, bool]]) -> bool:
+        merged, changed = merge(self._staging._state())
+        self._staging._replace_state(*merged)
+        self._ops.append(merge)
+        return changed
+
+    def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_dataset(state, registration, source))
+
+    def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
+        if not isinstance(registration, ExecutionInputRegistration):
+            raise TypeError("registration must be an ExecutionInputRegistration")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_execution_input(state, registration))
+
+    def register_component(self, ref: ComponentRef) -> bool:
+        if not isinstance(ref, ComponentRef):
+            raise TypeError("ref must be a ComponentRef")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_component(state, ref))
+
+    def register_agenda(self, agenda: OperationAgenda) -> bool:
+        if not isinstance(agenda, OperationAgenda):
+            raise TypeError("agenda must be an OperationAgenda")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_agenda(state, agenda))
+
+    def register_strategy_config(self, config: StrategyConfig) -> bool:
+        if not isinstance(config, StrategyConfig):
+            raise TypeError("config must be a StrategyConfig")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_strategy_config(state, config))
+
+    def register_valuation_config(self, config: ValuationConfig) -> bool:
+        if not isinstance(config, ValuationConfig):
+            raise TypeError("config must be a ValuationConfig")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_valuation_config(state, config))
+
+    def register_monitoring_policy(self, policy: MonitoringPolicy) -> bool:
+        if not isinstance(policy, MonitoringPolicy):
+            raise TypeError("policy must be a MonitoringPolicy")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_monitoring_policy(state, policy))
+
+    def register_instruments(
+        self, tables: Mapping[str, Path | str], *, digest: str
+    ) -> dict[str, object]:
+        payload = _roster_payload(tables, digest=digest)
+        self._rosters.append(payload)
+        return payload
+
+    def commit(self) -> None:
+        """One lock, one read, the staged merges replayed, one write."""
+        if not self._ops and not self._rosters:
+            return
+        ws = self._staging
+        with ws._exclusive():
+            state = ws._read_or_empty()
+            changed = False
+            for merge in self._ops:
+                state, merged_changed = merge(state)
+                changed = changed or merged_changed
+            if changed:
+                ws._write(*state)
+            ws._replace_state(*state)
+            for payload in self._rosters:
+                ws._write_roster(payload)
+        self._ops = []
+        self._rosters = []
 
 
 def _require_span(dataset_id: str, registration: DatasetRegistration) -> None:

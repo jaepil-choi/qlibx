@@ -49,21 +49,30 @@ def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError
     )
 
 
-def _register(
+_LABELS = {
+    ComponentKind.DATA_MODEL: "DataModel",
+    ComponentKind.STRATEGY_MODEL: "StrategyModel",
+    ComponentKind.CONSTRAINT: "Constraint",
+    ComponentKind.EXCHANGE: "Exchange",
+}
+
+
+def prepare_component(
     project_root: str | Path,
     raw_component_id: str,
     path: str | Path,
     object_name: str,
     *,
     kind: ComponentKind,
-    label: str,
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
-    """Fingerprint the source, prove the component conforms, then persist the reference.
+    """Fingerprint the source and prove the component conforms; write nothing.
 
-    Nothing is written until conformance passes, so a workspace never holds a reference to a
-    component Flow could not call.
+    The half of registration that can refuse. Split from the write so a declaration document can
+    prove every component it names before any of them is persisted (`Workspace.transaction`), and
+    so a single `register_*` below is exactly this plus one write.
     """
+    label = _LABELS[kind]
     target = Path(path).resolve()
     try:
         fingerprint = fingerprint_component(
@@ -83,6 +92,26 @@ def _register(
         fingerprint=fingerprint,
     )
     conformance(ref, project_root=project_root).raise_if_failed()
+    return ref
+
+
+def register_component(
+    project_root: str | Path,
+    raw_component_id: str,
+    path: str | Path,
+    object_name: str,
+    *,
+    kind: ComponentKind,
+    config: Mapping[str, object] | None = None,
+) -> ComponentRef:
+    """Prove the component conforms, then persist the reference.
+
+    Nothing is written until conformance passes, so a workspace never holds a reference to a
+    component Flow could not call.
+    """
+    ref = prepare_component(
+        project_root, raw_component_id, path, object_name, kind=kind, config=config
+    )
     Workspace.create(project_root).register_component(ref)
     return ref
 
@@ -96,13 +125,12 @@ def register_data_model(
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
     """Register a project-local DataModel after proving it loads."""
-    return _register(
+    return register_component(
         project_root,
         raw_component_id,
         path,
         object_name,
         kind=ComponentKind.DATA_MODEL,
-        label="DataModel",
         config=config,
     )
 
@@ -116,13 +144,12 @@ def register_strategy_model(
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
     """Register a project-local StrategyModel after proving it loads."""
-    return _register(
+    return register_component(
         project_root,
         raw_component_id,
         path,
         object_name,
         kind=ComponentKind.STRATEGY_MODEL,
-        label="StrategyModel",
         config=config,
     )
 
@@ -141,13 +168,12 @@ def register_constraint(
     data requirements, so a constraint that cannot state what it reads is refused here rather
     than at the first occurrence that projects it.
     """
-    return _register(
+    return register_component(
         project_root,
         raw_component_id,
         path,
         object_name,
         kind=ComponentKind.CONSTRAINT,
-        label="Constraint",
         config=config,
     )
 
@@ -167,12 +193,11 @@ def register_exchange(
     unverified -- and requires the component to expose its own `ExchangeRulesView`. Registering
     through this door is what makes those checks happen before a run rather than during one.
     """
-    return _register(
+    return register_component(
         project_root,
         raw_component_id,
         path,
         object_name,
         kind=ComponentKind.EXCHANGE,
-        label="Exchange",
         config=config,
     )

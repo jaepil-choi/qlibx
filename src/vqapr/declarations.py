@@ -43,23 +43,18 @@ from vqapr.exchange.execution_table import (
     validate_execution_input,
 )
 from vqapr.extension.component import ComponentKind
-from vqapr.extension.registration import (
-    register_constraint,
-    register_data_model,
-    register_exchange,
-    register_strategy_model,
-)
+from vqapr.extension.registration import prepare_component, register_component
 from vqapr.flow.run import StrategyConfig
 from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
-from vqapr.workspace import Workspace
+from vqapr.workspace import Transaction, Workspace
 
 _COMPONENT_KINDS = {
-    "datamodel": (ComponentKind.DATA_MODEL, register_data_model),
-    "strategy": (ComponentKind.STRATEGY_MODEL, register_strategy_model),
-    "constraint": (ComponentKind.CONSTRAINT, register_constraint),
-    "exchange": (ComponentKind.EXCHANGE, register_exchange),
+    "datamodel": ComponentKind.DATA_MODEL,
+    "strategy": ComponentKind.STRATEGY_MODEL,
+    "constraint": ComponentKind.CONSTRAINT,
+    "exchange": ComponentKind.EXCHANGE,
 }
 """확장점 넷 전부. canon §10.2가 닫아두지 말라고 한 목록이다.
 
@@ -267,7 +262,7 @@ saying where a source goes was the direct cause of FRICTION F-007.
 """
 
 
-def _instruments(bodies: dict[str, Any], project_root: Path, *, base: Path) -> dict[str, Any]:
+def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path) -> dict[str, Any]:
     """Register the project's instrument roster from its kind-keyed tables.
 
     **Validates what the file actually contains, not what the exporter promised.** A roster
@@ -286,7 +281,6 @@ def _instruments(bodies: dict[str, Any], project_root: Path, *, base: Path) -> d
 
     from vqapr.domain.roster import build_roster
     from vqapr.domain.roster_export import read_roster_table
-    from vqapr.workspace import Workspace
 
     name = "instruments"
     if "tables" not in bodies:
@@ -353,8 +347,7 @@ def _instruments(bodies: dict[str, Any], project_root: Path, *, base: Path) -> d
             explain=ExplainTopic.DECLARATION_SHAPE,
         ) from error
 
-    workspace = Workspace.open(project_root)
-    workspace.register_instruments(resolved, digest=digest.hexdigest())
+    transaction.register_instruments(resolved, digest=digest.hexdigest())
     # No `roster_id`: the workspace stores `schema`, `tables` and `digest` and no id, so echoing
     # one back would report an identity nothing kept. The digest is the roster's actual handle,
     # and it is what `run` states.
@@ -728,7 +721,9 @@ def _require_declared_ids(section: Any) -> None:
     found.done().raise_if_failed()
 
 
-def _component(component_id: str, declared: object, project_root: Path, *, base: Path) -> str:
+def _component(
+    component_id: str, declared: object, project_root: Path, transaction: Transaction, *, base: Path
+) -> str:
     """Register one authored component through the door its kind declares.
 
     A relative path resolves against the **declaration's own directory**, not the process working
@@ -756,7 +751,7 @@ def _component(component_id: str, declared: object, project_root: Path, *, base:
             )
         )
         found.done().raise_if_failed()
-    _, register = _COMPONENT_KINDS[raw_kind]
+    kind = _COMPONENT_KINDS[raw_kind]
     config = body.get("config")
     if config is not None and not isinstance(config, dict):
         found = collector(DECLARE_STAGE, FailureFamily.DATA)
@@ -772,13 +767,15 @@ def _component(component_id: str, declared: object, project_root: Path, *, base:
         )
         found.done().raise_if_failed()
     declared_path = Path(str(_required(body, "path", name=name)))
-    ref = register(
+    ref = prepare_component(
         project_root,
         component_id,
         declared_path if declared_path.is_absolute() else base / declared_path,
         str(_required(body, "object_name", name=name)),
+        kind=kind,
         config=config,
     )
+    transaction.register_component(ref)
     return str(ref.component_id)
 
 
@@ -793,10 +790,11 @@ def apply(
 
     Returns what was registered per section, so the reply states facts rather than a count.
 
-    The workspace is opened **only when a section needs to read one**. `register` is the first
-    command typed in an empty directory and the registrars create the workspace on the way in;
-    opening it up front made a valid first declaration fail with `workspace.open.missing`, which
-    sends the user to fix a directory when their file was correct.
+    **One document, one write.** Every section is validated and staged against a snapshot of the
+    workspace (or against nothing, in an empty directory), and the workspace is written once, at
+    the end, under one lock. A document refused at its k-th item leaves the workspace exactly as it
+    found it -- the testbed's A3, where a typo in item two left item one registered and the only
+    recovery was deleting `.vqapr/`.
 
     `declaration` is the document's own path, and it is what every refusal below reports as
     `source.file`. It is optional because a caller may hold a parsed document with no file behind
@@ -833,14 +831,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
             )
         )
         found.done().raise_if_failed()
-    opened: Workspace | None = None
-
-    def workspace() -> Workspace:
-        nonlocal opened
-        if opened is None:
-            opened = Workspace.open(project_root)
-        return opened
-
+    transaction = Workspace.transaction(project_root)
     registered: dict[str, list[str]] = {}
 
     def section(key: str) -> dict[str, Any]:
@@ -850,38 +841,39 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
 
     instrument_bodies = section("instruments")
     if instrument_bodies:
-        receipt = _instruments(instrument_bodies, project_root, base=base)
+        receipt = _instruments(instrument_bodies, transaction, base=base)
         registered.setdefault("instruments", []).append(receipt)
 
     for dataset_id, body in section("datasets").items():
         registration, source = _dataset(str(dataset_id), body, base=base)
-        register_dataset(project_root, registration, source)
+        diagnosis, _, measured = validate(registration, source)
+        diagnosis.raise_if_failed()
+        transaction.register_dataset(measured, source)
         registered.setdefault("datasets", []).append(str(dataset_id))
 
     for input_id, body in section("execution_inputs").items():
-        register_execution_input(project_root, _execution_input(str(input_id), body, base=base))
+        registration = _execution_input(str(input_id), body, base=base)
+        validate_execution_input(registration).raise_if_failed()
+        transaction.register_execution_input(registration)
         registered.setdefault("execution_inputs", []).append(str(input_id))
 
     for agenda_id, body in section("agendas").items():
-        # `workspace` is passed unopened. Evaluating `workspace()` here instead would open it
-        # before the agenda body is validated, so a malformed agenda in a fresh directory reports
-        # `workspace.open.missing` -- sending the reader to fix a directory when the file on
-        # their disk is what needs editing, which is the exact substitution the lazy accessor
-        # exists to prevent.
-        Workspace.create(project_root).register_agenda( _agenda(str(agenda_id), body, workspace))
+        # The agenda's sessions may come from a dataset declared above: `transaction.view` holds
+        # the snapshot plus what this document has staged, so the lookup sees it.
+        transaction.register_agenda(_agenda(str(agenda_id), body, lambda: transaction.view))
         registered.setdefault("agendas", []).append(str(agenda_id))
 
     for component_id, body in section("components").items():
         registered.setdefault("components", []).append(
-            _component(str(component_id), body, project_root, base=base)
+            _component(str(component_id), body, project_root, transaction, base=base)
         )
 
     for component_id, body in section("strategy_configs").items():
         name = f"strategy_configs.{component_id}"
         config = _mapping(body, name=name)
-        Workspace.create(project_root).register_strategy_config(
+        transaction.register_strategy_config(
             StrategyConfig(
-                workspace().component(str(component_id)),
+                transaction.view.component(str(component_id)),
                 str(_required(config, "agenda_id", name=name)),
                 OperationRole.STRATEGY_CALLBACK,
             ),
@@ -892,20 +884,19 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         name = f"valuation_configs.{config_id}"
         config = _mapping(body, name=name)
         agenda_id = str(_required(config, "agenda_id", name=name))
-        Workspace.create(project_root).register_valuation_config(
-             ValuationConfig(agenda_id, OperationRole.VALUATION)
-        )
+        transaction.register_valuation_config(ValuationConfig(agenda_id, OperationRole.VALUATION))
         registered.setdefault("valuation_configs", []).append(str(config_id))
 
     for policy_id, body in section("monitoring_policies").items():
         name = f"monitoring_policies.{policy_id}"
         policy = _mapping(body, name=name)
         agenda_id = str(_required(policy, "agenda_id", name=name))
-        Workspace.create(project_root).register_monitoring_policy(
-             MonitoringPolicy(agenda_id, OperationRole.MONITORING)
+        transaction.register_monitoring_policy(
+            MonitoringPolicy(agenda_id, OperationRole.MONITORING)
         )
         registered.setdefault("monitoring_policies", []).append(str(policy_id))
 
+    transaction.commit()
     return registered
 
 
@@ -942,7 +933,9 @@ def register_authored(
     # Found by parsing before the register call, so "two strategies in one file" is refused as
     # that, rather than surfacing as whatever the loader happens to say about an ambiguous import.
     object_name = _sole_subclass(path, expected, component_id)
-    _COMPONENT_KINDS[kind][1](project_root, component_id, path, object_name)
+    register_component(
+        project_root, component_id, path, object_name, kind=_COMPONENT_KINDS[kind]
+    )
     # Returns data, not an envelope. Rendering belongs to the surface: this module is below it,
     # and importing `cli.envelope` from here is what closed an import cycle through the whole CLI.
     return {

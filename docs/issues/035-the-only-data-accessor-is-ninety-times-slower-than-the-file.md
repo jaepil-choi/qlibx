@@ -12,6 +12,14 @@
 > this issue as **one change, not three**.
 
 
+**Status: CLOSED 2026-09-02 by record `137` (campaign Step 5, the Panel).** The deferred half --
+a columnar accessor -- is not a new accessor: a panel-grain dataset is read into a `Panel` once per
+run (one scan, one Arrow column per name over a shared instant axis) and every later read is a
+slice of it; `read(alias, field)` hands the author `instants` x `instruments` directly. The first
+half (validation off the read path) closed in `119`. Architecture §17.1.3 and §17.1.4's "no table
+between the file and the window" is what this closes; §17.1.4's sharing across *processes* (spill)
+is deferred to Step 7 with Noun 3, per design §7-2.
+
 **Status update 2026-09-01 — this file now has two halves with different fates.** The campaign is
 anchored at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
 

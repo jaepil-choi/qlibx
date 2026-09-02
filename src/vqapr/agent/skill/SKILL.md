@@ -81,18 +81,21 @@ they are on opposite sides of the ledger.
   accepted, so a NaN that gets past this point reaches a model and propagates through every number
   it touches while the run still reports a result. Prepare a genuinely absent value as `NULL`,
   which is read as a missing observation rather than as a number.
-- **Reading** costs far more, and scales with the **cells a requirement's window admits**, not with
-  the rows a model keeps. A long / EAV registration -- one row per (name, date, account_code) --
-  multiplies those cells by its key width, and every one of them is read, boxed into a dict and
-  handed across the boundary even when the model discards it in its first three lines.
+- **Reading** depends on the dataset's `grain`. A panel grain (`instrument_instant`, `instant`)
+  is read into a **panel once per run** -- one scan -- and every later read is a slice of it, by
+  arithmetic. A `rows` grain (the vendor's long / EAV table) is re-cut on the file per read, and
+  the cost scales with the **cells the window admits** times the key width: every one is read,
+  boxed into a dict and handed across the boundary even when the model discards it.
 
-Registering at the vendor's grain is still the right default: which of a name's many rows on one
-date a research question means is a research decision, and collapsing it upstream hides that
-decision in an ETL step nobody reviews. **But it is not free, and the bill arrives on every
-evaluation rather than once.** If a long dataset is read on a hot path, register a second, narrow
-dataset beside the faithful one on purpose -- deriving it with a DataModel keeps the collapsing
-decision reviewable instead of burying it. `docs/issues/049` measures one such pair at 614x with
-byte-identical output.
+**Register a date x ticker table as `grain: instrument_instant`.** That is the shape a panel is
+built from and the shape a cross-sectional model reads safely. When the vendor's grain must be
+preserved -- several rows per name and date, each a fact of its own -- register it **as well**, as
+`grain: rows`, and derive the `instrument_instant` table from it with a DataModel: which of a
+name's many rows on one date a research question means is a research decision, and keeping the
+collapsing in a reviewable component rather than an ETL step is the point (`docs/issues/049`
+measured one such pair at 614x with byte-identical output). A `rows` dataset is read with
+`rows(alias)` and an `InstantsLookback`; a panel with `read(alias, field)` and a `RowsLookback`
+or `CalendarLookback`.
 
 **A DataModel derives a column, and `run` executes it.** A StrategyModel decides what to hold; a
 DataModel computes a new dataset from the ones you registered; a Constraint bounds what a book may

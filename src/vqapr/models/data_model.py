@@ -1,15 +1,13 @@
-"""DataModel extension contract: PIT data in, reusable value rows out."""
+"""`DataModel` lives in `vqapr.authoring` now; this is the engine-side name for it.
+
+Two classes carried this name -- one here, one an author was told to subclass -- and the loader
+accepted only this one, so a model written the way the strategy scaffold taught could not be run
+at all (`docs/issues/036`, R5). There is one class. `vqapr.public.DataModel is
+vqapr.authoring.DataModel`, and a test asserts it.
+"""
 
 from __future__ import annotations
 
-from abc import abstractmethod
+from vqapr.authoring import DataModel
 
-from vqapr.domain.rows import Rows
-from vqapr.models.contexts import DataModelContext
-from vqapr.models.model import Model
-
-
-class DataModel(Model):
-    @abstractmethod
-    def compute(self, context: DataModelContext) -> Rows:
-        """Compute semantic rows for one frozen evaluation time."""
+__all__ = ("DataModel",)

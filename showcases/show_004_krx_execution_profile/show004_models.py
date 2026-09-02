@@ -10,10 +10,10 @@ refs, or an account version; the framework stamps all of that identity. Cross-ca
 (the rebalance count) travels only through ``StrategyResult.next_state`` /
 ``call.previous_state``, never a mutable ``self`` field.
 
-**The two models are written against different contracts, and that is not an oversight.** A
-StrategyModel may be authored against ``vqapr.authoring`` because the loader adapts it; a
-DataModel may not, so ``MomentumModel`` implements ``vqapr.public.DataModel`` directly. The
-split is the framework's, not this showcase's.
+Both models are written against ``vqapr.authoring``. They used to be written against two
+contracts -- the loader adapted an authored StrategyModel and refused an authored DataModel --
+and this docstring recorded that as the framework's split, not the showcase's. Record ``131``
+closed it.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from vqapr.authoring import (
+    DataModel,
     DatasetInput,
     Hold,
     Rebalance,
@@ -29,8 +30,6 @@ from vqapr.authoring import (
     StrategyResult,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.public import DataModel, DataRequirement
-from vqapr.public import RowsLookback as EngineRowsLookback
 
 LOOKBACK = 6
 """Five-session momentum needs six closes."""
@@ -55,26 +54,24 @@ BUDGET = Budget(
 class MomentumModel(DataModel):
     """5-session momentum on real closes, skipping supervised names."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                "momentum-model",
-                "price_daily",
+    def inputs(self):
+        return {
+            "prices": DatasetInput(
+                dataset_id="price_daily",
                 fields=("close", "is_supervised"),
-                lookback=EngineRowsLookback(LOOKBACK),
-            ),
-        )
+                lookback=RowsLookback(rows=LOOKBACK),
+            )
+        }
 
     def compute(self, context):
-        observations = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[float]] = {}
         supervised: dict[str, bool] = {}
-        for row in observations:
-            instrument = str(row["instrument"])
-            close = row["close"]
+        for row in context.read("prices"):
+            instrument = row.instrument_id
+            close = row.values["close"]
             if close is not None:
                 closes.setdefault(instrument, []).append(float(close))
-            supervised[instrument] = bool(row["is_supervised"])
+            supervised[instrument] = bool(row.values["is_supervised"])
         return tuple(
             {
                 "instrument": instrument,

@@ -1,6 +1,6 @@
 # 036 — "Both are authored the same way" — a DataModel and a StrategyModel share no import, no declaration shape, no entry point and no row type
 
-**Status:** **owner-decided 2026-08-31 CONVERGE. Constraint DONE, two roles remain, as of 2026-09-02.** The ruling:
+**Status:** **owner-decided 2026-08-31 CONVERGE. Constraint and DataModel DONE, StrategyModel remains, as of 2026-09-02.** The ruling:
 **a DataModel and a StrategyModel should be substantially similar to use, and the size of the
 current difference is itself the defect.** So the answer to "What to settle" is CONVERGE - the
 sentence at `SKILL.md:73` is what the product should be made to mean, rather than what should be
@@ -29,8 +29,10 @@ the one with a correctness consequence (`docs/issues/033`).
 > ```
 >
 > **Update, record `130`: `Constraint`, `ConstraintBounds` and `ConstraintFinding` are now one
-> object each, and `load_constraint` accepts the authoring contract.** Two pairs remain --
-> `DataModel` and `StrategyModel` -- and they are M1.2 and M1.3. The paragraph below is the state
+> object each, and `load_constraint` accepts the authoring contract.**
+> **Update, record `131`: `DataModel` is one object, `Model` lives on the authoring surface, and
+> `vqapr new datamodel` emits the same import line as the other two scaffolds.** One pair remains
+> -- `StrategyModel` -- and it is M1.3. The paragraph below is the state
 > before that, kept because the three consequences it names are the shape the remaining two still
 > have.
 >

@@ -152,7 +152,9 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
     ref = register_data_model(tmp_path, "float-model", path, "FloatModel")
     model = load_data_model(ref, project_root=tmp_path)
 
-    rows = model.compute(DataModelContext(window=_window(workspace, model.requirements()[0])))
+    rows = model.compute(
+        DataModelContext(window=_window(workspace, model.requirements()[0]), reads=model.inputs())
+    )
 
     # A: 105/100 - 1 = 0.05.  B: 53/50 - 1 = 0.06. Exact, because `str` was the bridge -- through
     # `Decimal(float)` these carry the binary expansion and compare unequal.

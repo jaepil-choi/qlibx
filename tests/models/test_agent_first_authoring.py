@@ -47,14 +47,14 @@ def test_module_exports_are_exact() -> None:
         "DataModel",
         "DatasetInput",
         "DeclaredAccountHistory",
-        "DerivedRow",
         "DiagnosticTable",
         "EconomicAccountView",
         "Hold",
+        "Model",
         "Observation",
-        "Output",
         "Rebalance",
         "RowsLookback",
+        "requirements_for",
         "StrategyCall",
         "StrategyModel",
         "StrategyResult",
@@ -157,51 +157,28 @@ def test_observation_values_mapping_is_copied_and_immutable() -> None:
         observation.values["close"] = Decimal("2")  # type: ignore[index]
 
 
-def test_output_rejects_reserved_and_empty_fields() -> None:
-    authoring.Output(semantic_fields=("momentum",))
-    with pytest.raises(ValueError):
-        authoring.Output(semantic_fields=())
-    with pytest.raises(ValueError):
-        authoring.Output(semantic_fields=("available_at",))
-
-
-def test_derived_row_rejects_reserved_row_fields() -> None:
-    authoring.DerivedRow(instrument_id="A", values={"momentum": Decimal("1")})
-    with pytest.raises(ValueError):
-        authoring.DerivedRow(instrument_id="A", values={"available_at": UTC_NOW})
-    with pytest.raises(ValueError):
-        authoring.DerivedRow(instrument_id="A", values={"instrument": "x"})
-    with pytest.raises(ValueError):
-        authoring.DerivedRow(instrument_id="", values={})
-
-
 # --------------------------------------------------------------------------------------
 # DataModel / DataCall abstract contracts.
 # --------------------------------------------------------------------------------------
 
 
-def test_data_model_is_abstract_and_requires_compute_and_output() -> None:
+def test_data_model_is_abstract_and_requires_only_compute() -> None:
+    """One abstract member. The output schema is the materialization's declaration, not the
+    model's (record `131`), so there is nothing else for an author to have to write."""
     with pytest.raises(TypeError):
         authoring.DataModel()  # type: ignore[abstract]
-
-    class Incomplete(authoring.DataModel):
-        def output(self) -> authoring.Output:
-            return authoring.Output(semantic_fields=("x",))
-
-    with pytest.raises(TypeError):
-        Incomplete()  # type: ignore[abstract]
+    assert set(authoring.DataModel.__abstractmethods__) == {"compute"}
 
 
-def test_data_model_inputs_defaults_to_empty() -> None:
+def test_data_model_is_a_model_and_inputs_defaults_to_empty() -> None:
     class Model(authoring.DataModel):
-        def output(self) -> authoring.Output:
-            return authoring.Output(semantic_fields=("x",))
-
-        def compute(self, call: authoring.DataCall) -> tuple[authoring.DerivedRow, ...]:
+        def compute(self, call: authoring.DataCall):
             return ()
 
     model = Model()
+    assert isinstance(model, authoring.Model)
     assert model.inputs() == {}
+    assert model.requirements() == ()
     assert model.compute(_FakeDataCall()) == ()
 
 
@@ -636,6 +613,12 @@ def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
 def test_no_public_type_exposes_account_version_or_recorder_or_memory() -> None:
     forbidden = {"account_version", "version", "recorder", "memory", "constraint_id"}
     for name in authoring.__all__:
+        if name == "Model":
+            # `Model` carries `memory` on purpose: it is the small strict-JSON state both roles
+            # share (architecture 4.4), and it arrived on this surface with the base class in
+            # record `131`. What this test guards is that no VALUE type -- a call, a finding, a
+            # decision -- smuggles framework state in through an annotation.
+            continue
         value = getattr(authoring, name)
         annotations = getattr(value, "__annotations__", {})
-        assert forbidden.isdisjoint(annotations)
+        assert forbidden.isdisjoint(annotations), (name, annotations)

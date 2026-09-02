@@ -1,35 +1,31 @@
-"""The three DataModels this showcase registers, written against the shipped surface.
+"""The three DataModels this showcase registers, written against the one authoring surface.
 
 Two of them are real and one is a forgery. `ForgingModel` returns `available_at` on every row,
-which is the package's own column, and `materialize` refuses it — that refusal is the point of
+which is the package's own column, and `materialize` refuses it -- that refusal is the point of
 the third section of the report, so the model exists to be rejected rather than to be run.
 """
 
 from __future__ import annotations
 
-from vqapr.public import DataModel, DataRequirement, RowsLookback
+from vqapr import authoring as va
 
 
-class ReversalFeatureModel(DataModel):
+class ReversalFeatureModel(va.DataModel):
     """Two-session reversal, keeping both closes so the report can show what was read."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                "reversal-features",
-                "price_daily",
-                fields=("close",),
-                lookback=RowsLookback(2),
-            ),
-        )
+    def inputs(self):
+        return {
+            "prices": va.DatasetInput(
+                dataset_id="price_daily", fields=("close",), lookback=va.RowsLookback(rows=2)
+            )
+        }
 
     def compute(self, context):
-        observations = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[float]] = {}
-        for row in observations:
-            close = row["close"]
+        for row in context.read("prices"):
+            close = row.values["close"]
             if close is not None:
-                closes.setdefault(str(row["instrument"]), []).append(float(close))
+                closes.setdefault(row.instrument_id, []).append(float(close))
         return tuple(
             {
                 "instrument": instrument,
@@ -42,46 +38,29 @@ class ReversalFeatureModel(DataModel):
         )
 
 
-class AbsoluteScoreModel(DataModel):
+class AbsoluteScoreModel(va.DataModel):
     """Reads the DERIVED dataset, which is what makes the second materialization evidence."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                "absolute-scores",
-                "reversal_features",
-                fields=("score",),
-                lookback=RowsLookback(1),
-            ),
-        )
+    def inputs(self):
+        return {
+            "scores": va.DatasetInput(
+                dataset_id="reversal_features", fields=("score",), lookback=va.RowsLookback(rows=1)
+            )
+        }
 
     def compute(self, context):
-        observations = context.window.observations(self.requirements()[0]).rows
         return tuple(
-            {
-                "instrument": str(row["instrument"]),
-                "abs_score": abs(float(row["score"])),
-            }
-            for row in observations
-            if row["score"] is not None
+            {"instrument": row.instrument_id, "abs_score": abs(float(row.values["score"]))}
+            for row in context.read("scores")
+            if row.values["score"] is not None
         )
 
 
 class ForgingModel(ReversalFeatureModel):
     """Claims its own `available_at`. Registered so the refusal can be shown, never published."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                "forging-model",
-                "price_daily",
-                fields=("close",),
-                lookback=RowsLookback(2),
-            ),
-        )
-
     def compute(self, context):
         return tuple(
-            {**row, "available_at": context.window.evaluation_time}
+            {**row, "available_at": context.evaluation_time}
             for row in super().compute(context)
         )

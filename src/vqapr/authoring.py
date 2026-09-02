@@ -3,7 +3,7 @@
 The sole public home for what an author subclasses (``DataModel``, ``StrategyModel``,
 ``Constraint``), receives (``DataCall``, ``StrategyCall``, ``ConstraintCall``,
 ``Observation``, ``EconomicAccountView``, ``DeclaredAccountHistory``, ``ConstraintBounds``),
-and returns (``DerivedRow``, ``StrategyResult``, ``ConstraintFinding``).
+and returns (``Rows``, ``StrategyResult``, ``ConstraintFinding``).
 
 Every public declaration here is a frozen, slotted, keyword-only value unless shown
 otherwise by the approved algebra (``Observation`` is positional; ``DataCall``,
@@ -30,7 +30,9 @@ from typing import Literal
 
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
+from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
+from vqapr.models.memory import ModelMemory
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
 
@@ -45,17 +47,17 @@ __all__ = (
     "DataModel",
     "DatasetInput",
     "DeclaredAccountHistory",
-    "DerivedRow",
     "DiagnosticTable",
     "EconomicAccountView",
     "Hold",
+    "Model",
     "Observation",
-    "Output",
     "Rebalance",
     "RowsLookback",
     "StrategyCall",
     "StrategyModel",
     "StrategyResult",
+    "requirements_for",
 )
 
 
@@ -264,36 +266,6 @@ class Observation:
         object.__setattr__(self, "values", _copy_values(self.values, name="values"))
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Output:
-    """A DataModel's declared semantic output schema."""
-
-    semantic_fields: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        fields = _unique_identifiers(self.semantic_fields, name="semantic_fields")
-        _reject_reserved(fields, _ROW_RESERVED_FIELDS, name="semantic_fields")
-        object.__setattr__(self, "semantic_fields", fields)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class DerivedRow:
-    """One semantic row a DataModel computed for one instrument."""
-
-    instrument_id: str
-    values: Mapping[str, object]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "instrument_id", _identifier(self.instrument_id, name="instrument_id")
-        )
-        object.__setattr__(
-            self,
-            "values",
-            _copy_values(self.values, name="values", reserved=_ROW_RESERVED_FIELDS),
-        )
-
-
 class DataCall(ABC):
     """The complete, bounded capability surface for one DataModel invocation."""
 
@@ -307,20 +279,78 @@ class DataCall(ABC):
         """Return PIT observations for one alias declared in `DataModel.inputs()`."""
 
 
-class DataModel(ABC):
-    """User extension contract: declared PIT reads in, semantic rows out."""
+def requirements_for(declaration: DatasetInput) -> tuple[DataRequirement, ...]:
+    """One declared alias, as the engine's requirements: one per field (`docs/issues/049`).
+
+    The single place the fan-out is written. Every role that declares reads derives its
+    requirements through here, so a Model cannot declare one thing to preflight and read another
+    at the callback.
+    """
+    if not isinstance(declaration, DatasetInput):
+        raise TypeError("declaration must be an authoring.DatasetInput")
+    return tuple(
+        DataRequirement.of(declaration.dataset_id, field, lookback=declaration.lookback)
+        for field in declaration.fields
+    )
+
+
+class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
+    """What every Model role shares: a declaration of reads, and portable memory.
+
+    **The author's base class, so it lives on the author's surface.** It used to live in
+    `models/model.py` while an authoring `DataModel` and `StrategyModel` were defined here without
+    it -- which is why the two authored kinds shared no ancestor, and why an author who wrote
+    against this module got a class the loader could not run (`docs/issues/036`). `models/model.py`
+    re-exports this one.
+
+    **Both roles declare their reads here, in one place and one shape.** A first-time user once had
+    to build a ten-row table of the ways authoring the two roles differed; the owner ruled that
+    *"the size of the current difference is itself the defect"*. `inputs()` is the one shape.
+
+    `memory` is the small strict-JSON state a Model carries between invocations. A DataModel that
+    uses it becomes order-dependent (architecture 4.4); one that does not may be computed in any
+    order.
+    """
+
+    memory: ModelMemory = None
 
     def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this model performs. Empty by default."""
+        """Declare every aliased dataset read this Model performs. Empty by default.
+
+        The alias is the author's own name for a read, and it is what `read(alias)` takes on the
+        call. Declaring nothing is legitimate: a Model may derive its values from memory alone.
+        """
         return {}
 
-    @abstractmethod
-    def output(self) -> Output:
-        """Declare this model's semantic output schema."""
+    def requirements(self) -> tuple[DataRequirement, ...]:
+        """Every observation requirement, derived from `inputs()` rather than written twice."""
+        return tuple(
+            requirement
+            for declaration in self.inputs().values()
+            for requirement in requirements_for(declaration)
+        )
+
+
+class DataModel(Model):
+    """A Model whose result is values: data in, a dataset out, and no account in between.
+
+    **What makes it a DataModel is that nothing it returns is executed** (architecture 4.4). It
+    sees no account, passes through no venue, and its rows become a registered dataset that any
+    number of runs may then read. The other role, `StrategyModel`, differs by exactly that.
+
+    **A row is a dict**: `{"instrument": name, "<field>": value, ...}`, one per instrument, with
+    the fields the materialization declared and nothing the package owns -- `available_at` is
+    stamped by the framework, and a row that tries to carry one is refused. The shape of the
+    dataset being produced is a declaration and lives with the materialization; what the model
+    does is compute, and it says nothing about the schema twice.
+
+    Reads arrive as `Observation` records through `call.read(alias)`, the same verb every role
+    uses.
+    """
 
     @abstractmethod
-    def compute(self, call: DataCall) -> tuple[DerivedRow, ...]:
-        """Compute semantic rows for one frozen evaluation time."""
+    def compute(self, call: DataCall) -> Rows:
+        """Compute this instant's rows from the declared reads. One dict per instrument."""
 
 
 # --------------------------------------------------------------------------------------
@@ -1033,17 +1063,16 @@ class Constraint(ABC):
         return {}
 
     def requirements(self) -> tuple[DataRequirement, ...]:
-        """Every observation requirement available during invocation, derived from `inputs()`.
+        """Every observation requirement, derived from `inputs()` -- `Model.requirements()`,
+        spelled the same way for the role that is not a Model.
 
-        Derived rather than written separately, so a Constraint cannot declare one thing to
-        preflight and read another at the callback. One alias becomes one requirement per declared
-        field (`docs/issues/049`). This is `Model.requirements()`, spelled the same way for the
-        third role.
+        Not a Model because `Model` carries `memory`, and a constraint is a stateless predicate
+        that must not have any. The fan-out is shared; the state is not.
         """
         return tuple(
-            DataRequirement.of(declaration.dataset_id, field, lookback=declaration.lookback)
+            requirement
             for declaration in self.inputs().values()
-            for field in declaration.fields
+            for requirement in requirements_for(declaration)
         )
 
     @abstractmethod

@@ -126,25 +126,26 @@ def _write_components() -> dict[str, Path]:
     model.write_text(
         '''from __future__ import annotations
 
-from vqapr.public import DataModel, DataRequirement, Rebalance, RowsLookback
+from vqapr import authoring as va
 
 LOOKBACK = 6
 
 
-class ReversalModel(DataModel):
+class ReversalModel(va.DataModel):
     """Cross-sectionally demeaned 5-session reversal on real closes."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
-        )
+    def inputs(self):
+        return {
+            "prices": va.DatasetInput(
+                dataset_id="price_daily", fields=("close",), lookback=va.RowsLookback(rows=LOOKBACK)
+            )
+        }
 
     def compute(self, context):
-        observations = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[float]] = {}
-        for row in observations:
-            if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(float(row["close"]))
+        for row in context.read("prices"):
+            if row.values["close"] is not None:
+                closes.setdefault(row.instrument_id, []).append(float(row.values["close"]))
         raw = {
             instrument: -(values[-1] / values[0] - 1.0)
             for instrument, values in closes.items()

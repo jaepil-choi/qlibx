@@ -1,6 +1,11 @@
-"""Fresh-instance invocation boundary over `vqapr.authoring`.
+"""Fresh-instance invocation boundary over `vqapr.authoring` -- the Strategy half only.
 
-Private runtime adapter turning one immutable `DataModel`/`StrategyModel` declaration
+**The DataModel half was deleted in record `131`.** It had no caller anywhere in `src/`: an
+authored `DataModel` was refused by the loader and, had it loaded, nothing would have invoked it
+through here. Only its own tests reached it. With `DataModel` now one class run directly by
+`flow/materialize.py`, there is nothing for an adapter to adapt.
+
+Private runtime adapter turning one immutable `StrategyModel` declaration
 plus an injected PIT observation resolver into a validated, private "prepared" result.
 It (1) validates declared input aliases and the DataModel `Output`/StrategyModel
 `DiagnosticTable` schemas before any callback runs, and checks returned rows/
@@ -26,16 +31,12 @@ from types import MappingProxyType
 from vqapr.authoring import (
     AccountHistoryInput,
     ConstraintBounds,
-    DataCall,
-    DataModel,
     DatasetInput,
     DeclaredAccountHistory,
-    DerivedRow,
     DiagnosticTable,
     EconomicAccountView,
     Hold,
     Observation,
-    Output,
     Rebalance,
     StrategyCall,
     StrategyModel,
@@ -47,9 +48,7 @@ __all__ = (
     "AccessToken",
     "AccountHistoryResolver",
     "ObservationResolver",
-    "PreparedDataInvocation",
     "PreparedStrategyInvocation",
-    "prepare_data_model_invocation",
     "prepare_strategy_invocation",
 )
 
@@ -190,80 +189,6 @@ class _BoundedReader:
 
     def access_tokens(self) -> tuple[AccessToken, ...]:
         return tuple(self._tokens)
-
-
-class _PrivateDataCall(_BoundedReader, DataCall):
-    """A concrete, bounded `DataCall` for exactly one DataModel invocation."""
-
-    __slots__ = ()
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class PreparedDataInvocation:
-    """A validated, private result of one fresh-instance DataModel invocation: only the
-    semantic result (`rows`) and what was accessed (`access_tokens`).
-    """
-
-    rows: tuple[DerivedRow, ...]
-    access_tokens: tuple[AccessToken, ...]
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.rows, tuple) or any(
-            not isinstance(row, DerivedRow) for row in self.rows
-        ):
-            raise TypeError("rows must be a tuple of authoring.DerivedRow")
-        if not isinstance(self.access_tokens, tuple) or any(
-            not isinstance(token, AccessToken) for token in self.access_tokens
-        ):
-            raise TypeError("access_tokens must be a tuple of AccessToken")
-
-
-def _validated_rows(rows: object, output: Output) -> tuple[DerivedRow, ...]:
-    if not isinstance(rows, tuple) or any(not isinstance(row, DerivedRow) for row in rows):
-        raise TypeError("compute() must return a tuple of authoring.DerivedRow")
-    expected_fields = set(output.semantic_fields)
-    for row in rows:
-        if set(row.values) != expected_fields:
-            raise ValueError(
-                f"DerivedRow for {row.instrument_id!r} does not match the declared Output schema"
-            )
-    instrument_ids = tuple(row.instrument_id for row in rows)
-    if len(set(instrument_ids)) != len(instrument_ids):
-        raise ValueError("compute() rows must not repeat an instrument_id")
-    return rows
-
-
-def prepare_data_model_invocation(
-    model_class: type[DataModel],
-    config: Mapping[str, object],
-    *,
-    evaluation_time: datetime,
-    resolver: ObservationResolver,
-) -> PreparedDataInvocation:
-    """Instantiate `model_class` exactly once, read only declared aliases, and validate
-    `compute()`'s rows against the declared `Output` schema. Any exception raised by
-    `inputs()`, `output()`, or `compute()` propagates unchanged.
-    """
-    if not isinstance(model_class, type) or not issubclass(model_class, DataModel):
-        raise TypeError("model_class must be a subclass of vqapr.authoring.DataModel")
-    if not isinstance(evaluation_time, datetime):
-        raise TypeError("evaluation_time must be a datetime")
-    if not callable(resolver):
-        raise TypeError("resolver must be callable")
-
-    instance = _fresh_instance(model_class, config)
-    if not isinstance(instance, DataModel):
-        raise TypeError("model_class must construct a vqapr.authoring.DataModel instance")
-
-    inputs = _validated_inputs(instance.inputs())
-    output = instance.output()
-    if not isinstance(output, Output):
-        raise TypeError("output() must return an authoring.Output")
-
-    call = _PrivateDataCall(evaluation_time=evaluation_time, inputs=inputs, resolver=resolver)
-    rows = _validated_rows(instance.compute(call), output)
-
-    return PreparedDataInvocation(rows=rows, access_tokens=call.access_tokens())
 
 
 class _PrivateStrategyCall(_BoundedReader, StrategyCall):

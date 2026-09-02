@@ -63,7 +63,7 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         f"class {identifier.title().replace('-', '')}(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def on_occurrence(self, context):\n"
+        "    def decide(self, context):\n"
         "        return Hold(reason='fixture')\n"
         if kind is ComponentKind.STRATEGY_MODEL
         else "from vqapr.constraints.constraint import Constraint\n"

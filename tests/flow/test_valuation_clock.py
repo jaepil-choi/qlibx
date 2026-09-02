@@ -48,7 +48,7 @@ STRATEGIES = textwrap.dedent(
 
     from vqapr.authoring import (
         Budget, DatasetInput, Hold, PortfolioDirection, Rebalance, RowsLookback,
-        StrategyModel, StrategyResult,
+        StrategyModel,
     )
     from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
@@ -64,8 +64,8 @@ STRATEGIES = textwrap.dedent(
     class MonthlyDecider(StrategyModel):
         """Buys once and then holds, so decisions and sessions cannot be confused.
 
-        The cadence lives in returned state rather than in `self`, because the authoring contract
-        constructs a fresh model per callback.
+        The cadence lives in `self.memory`, which the framework restores before every callback
+        and snapshots after it; nothing else about `self` is promised across callbacks.
         """
 
         def inputs(self):
@@ -78,24 +78,17 @@ STRATEGIES = textwrap.dedent(
             }
 
         def decide(self, call):
-            state = call.previous_state if isinstance(call.previous_state, dict) else {}
+            state = self.memory if isinstance(self.memory, dict) else {}
             observed = [
                 row for row in call.read("prices") if row.values["close"] is not None
             ]
             if state.get("formed") or not observed:
-                return StrategyResult(
-                    decision=Hold(reason="already-formed"),
-                    next_state=state,
-                    diagnostics={},
-                )
-            return StrategyResult(
-                decision=Rebalance(
-                    target_weights={"A005930": Decimal("0.5")},
-                    cash_weight=Decimal("0.5"),
-                    budget=BUDGET,
-                ),
-                next_state={"formed": True},
-                diagnostics={},
+                return Hold(reason="already-formed")
+            self.memory = {"formed": True}
+            return Rebalance(
+                target_weights={"A005930": Decimal("0.5")},
+                cash_weight=Decimal("0.5"),
+                budget=BUDGET,
             )
 
 

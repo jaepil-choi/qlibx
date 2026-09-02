@@ -7,8 +7,8 @@ and ``MomentumLongOnly`` have one.
 
 ``decide()`` returns only ``Hold``/``Rebalance`` -- never a UUID, a strategy id, source
 refs, or an account version; the framework stamps all of that identity. Cross-callback state
-(the rebalance count) travels only through ``StrategyResult.next_state`` /
-``call.previous_state``, never a mutable ``self`` field.
+(the rebalance count) lives in ``self.memory``, which the framework restores before every
+callback and snapshots after it.
 
 Both models are written against ``vqapr.authoring``. They used to be written against two
 contracts -- the loader adapted an authored StrategyModel and refused an authored DataModel --
@@ -27,7 +27,6 @@ from vqapr.authoring import (
     Rebalance,
     RowsLookback,
     StrategyModel,
-    StrategyResult,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
@@ -95,20 +94,16 @@ class MomentumLongOnly(StrategyModel):
             )
         }
 
-    def decide(self, call) -> StrategyResult:
+    def decide(self, call) -> Hold | Rebalance:
         latest = {
             observation.instrument_id: float(observation.values["score"])
             for observation in call.read("momentum_score")
             if observation.values.get("score") is not None
             and bool(observation.values.get("eligible"))
         }
-        previous = call.previous_state if isinstance(call.previous_state, dict) else {}
+        previous = self.memory if isinstance(self.memory, dict) else {}
         if len(latest) < BOOK:
-            return StrategyResult(
-                decision=Hold(reason="not-enough-eligible-names"),
-                next_state=previous,
-                diagnostics={},
-            )
+            return Hold(reason="not-enough-eligible-names")
 
         ranked = sorted(latest.items(), key=lambda item: (-item[1], item[0]))
         chosen = {instrument for instrument, _ in ranked[:BOOK]}
@@ -118,13 +113,9 @@ class MomentumLongOnly(StrategyModel):
             for instrument in sorted(latest)
         }
 
-        next_state = {**previous, "rebalances": int(previous.get("rebalances", 0)) + 1}
-        return StrategyResult(
-            decision=Rebalance(
-                target_weights=target_weights,
-                cash_weight=CASH_TARGET,
-                budget=BUDGET,
-            ),
-            next_state=next_state,
-            diagnostics={},
+        self.memory = {**previous, "rebalances": int(previous.get("rebalances", 0)) + 1}
+        return Rebalance(
+            target_weights=target_weights,
+            cash_weight=CASH_TARGET,
+            budget=BUDGET,
         )

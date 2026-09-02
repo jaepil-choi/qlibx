@@ -43,6 +43,9 @@ benchmark dataset an explicit constructor argument. Three showcases were never u
 whose declaration no longer completed against the current requirement contract. **Closed by record
 `131`**, which made every DataModel declare reads one way.
 
+Record `132` converged StrategyModel and re-ran all nine: the same six complete, and the same
+three fail on the same `SingleNameCap` line. The gate half of this issue is still open.
+
 ## Why this is the finding rather than five separate ones
 
 **Nothing runs them.** `pytest` does not collect `showcases/`. `.agent/project.yaml` declares

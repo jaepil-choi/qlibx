@@ -44,7 +44,7 @@ def tables_declared(store: StoreSpec, result: object) -> list[str]:
     what it measured -- it was measuring one of two surfaces:
 
     * `store.tables`, declared in the run spec's `store:` section; and
-    * `StrategyModel.diagnostics()`, declared on the component itself.
+    * `StrategyModel.tables()`, declared on the component itself.
 
     The journey declared through the second and read the first. So the field is kept and taught to
     report both, rather than removed: a reader asking what a run declared has nowhere else to look,

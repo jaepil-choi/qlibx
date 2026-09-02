@@ -232,7 +232,7 @@ class Strategy(StrategyModel):
     def requirements(self):
         return (DataRequirement.of('prices', 'close', lookback=RowsLookback(2)),)
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         return Hold(reason="qa probe")
 '''
 
@@ -288,7 +288,7 @@ class Strategy(StrategyModel):
     def requirements(self):
         return (DataRequirement.of('prices', 'close', lookback=RowsLookback(2)),)
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         return Hold(reason="qa probe")
 '''
 

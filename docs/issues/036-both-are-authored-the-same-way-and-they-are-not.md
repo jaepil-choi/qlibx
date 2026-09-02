@@ -1,6 +1,6 @@
 # 036 — "Both are authored the same way" — a DataModel and a StrategyModel share no import, no declaration shape, no entry point and no row type
 
-**Status:** **owner-decided 2026-08-31 CONVERGE. Constraint and DataModel DONE, StrategyModel remains, as of 2026-09-02.** The ruling:
+**Status:** **owner-decided 2026-08-31 CONVERGE. Constraint (`130`), DataModel (`131`) and StrategyModel (`132`) are each ONE class as of 2026-09-02; M1.4 verifies the sentence this issue is named after and closes it.** The ruling:
 **a DataModel and a StrategyModel should be substantially similar to use, and the size of the
 current difference is itself the defect.** So the answer to "What to settle" is CONVERGE - the
 sentence at `SKILL.md:73` is what the product should be made to mean, rather than what should be
@@ -9,6 +9,14 @@ edited to match the product.
 The table below is therefore a work list, not an explanation. The timestamp row leads, because it is
 the one with a correctness consequence (`docs/issues/033`).
 
+> **Status update 2026-09-02, later — records `131` and `132`.** Rows 1-4 and 10 are closed.
+> `public.DataModel is authoring.DataModel` (131) and `public.StrategyModel is
+> authoring.StrategyModel` (132) are both `True`; there is one entry point per role (`compute`,
+> `decide`, `project`/`monitor`); `_internal/strategy_bridge.py` and `_internal/models/` are
+> deleted, leaving `_internal/` with the two file primitives. The three scaffolds emit one import
+> line. What M1.4 still owes is the claim itself: reading `SKILL.md` and the scaffolds as an
+> author would and confirming *"Both are authored the same way"* is now a description.
+>
 > **Status update 2026-09-02 — which rows of that table are closed.** The header above read *"not
 > yet implemented"* for a day longer than it was true; this replaces it.
 >

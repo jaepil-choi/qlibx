@@ -23,8 +23,13 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 35
+CEILING = 23
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
+
+Was 35 after record `131`. Record `132` deleted `_internal/strategy_bridge.py` and
+`_internal/models/agent_first.py` -- the adapter between the two StrategyModel classes -- and
+the two deferred imports `extension/loading.py` needed to reach them; the bridge itself carried
+the rest.
 
 Was 41 after record `125`, 44 after record `124`, and 99 before that. Record `126` merged the
 two lookback pairs into one class each, which deleted `engine_lookback` and the four deferred

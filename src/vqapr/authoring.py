@@ -2,8 +2,8 @@
 
 The sole public home for what an author subclasses (``DataModel``, ``StrategyModel``,
 ``Constraint``), receives (``DataCall``, ``StrategyCall``, ``ConstraintCall``,
-``Observation``, ``EconomicAccountView``, ``DeclaredAccountHistory``, ``ConstraintBounds``),
-and returns (``Rows``, ``StrategyResult``, ``ConstraintFinding``).
+``Observation``, ``EconomicAccountView``, ``AccountHistory``, ``ConstraintBounds``),
+and returns (``Rows``, ``Hold``/``Rebalance``, ``ConstraintFinding``).
 
 Every public declaration here is a frozen, slotted, keyword-only value unless shown
 otherwise by the approved algebra (``Observation`` is positional; ``DataCall``,
@@ -26,17 +26,21 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Literal
+from typing import BinaryIO, Literal
 
+from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHistory
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
+from vqapr.evidence.recorder import InvocationRecorder
+from vqapr.evidence.tables import TableSpec
 from vqapr.models.memory import ModelMemory
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
 
 __all__ = (
+    "AccountHistory",
     "AccountHistoryInput",
     "CalendarLookback",
     "Constraint",
@@ -46,8 +50,6 @@ __all__ = (
     "DataCall",
     "DataModel",
     "DatasetInput",
-    "DeclaredAccountHistory",
-    "DiagnosticTable",
     "EconomicAccountView",
     "Hold",
     "Model",
@@ -56,7 +58,7 @@ __all__ = (
     "RowsLookback",
     "StrategyCall",
     "StrategyModel",
-    "StrategyResult",
+    "TableSpec",
     "requirements_for",
 )
 
@@ -88,9 +90,7 @@ _ENVELOPE_RESERVED_FIELDS = frozenset(
 )
 """Reserved because the framework stamps these identity/provenance facts itself."""
 
-_HISTORY_ACCOUNT_FIELDS = ("nav", "cash")
-_HISTORY_INSTRUMENT_FIELDS = ("quantity", "price", "observed_at")
-_HISTORY_FIELDS = frozenset(_HISTORY_ACCOUNT_FIELDS) | frozenset(_HISTORY_INSTRUMENT_FIELDS)
+_HISTORY_FIELDS = frozenset(ACCOUNT_FIELDS) | frozenset(INSTRUMENT_FIELDS)
 
 
 def _finite_decimal(value: object, *, name: str) -> Decimal:
@@ -171,67 +171,6 @@ def _copy_weights(values: object, *, name: str) -> Mapping[str, Decimal]:
         normalized[instrument_id] = _finite_decimal(value, name=f"{name}[{instrument_id!r}]")
     return MappingProxyType(dict(sorted(normalized.items())))
 
-
-def _normalize_state(value: object) -> object:
-    """Return a detached, strict-JSON-shaped copy of one call/decision state value.
-
-    `previous_state`/`next_state` are the only permitted cross-callback author state
-    (approved algebra), so they are restricted to strict JSON so replay never depends on
-    an object identity the framework cannot serialize.
-    """
-    active: set[int] = set()
-
-    def visit(item: object) -> object:
-        if item is None or isinstance(item, (bool, str, int)):
-            return item
-        if isinstance(item, float):
-            if not math.isfinite(item):
-                raise ValueError("state floats must be finite")
-            return item
-        if isinstance(item, list):
-            identity = id(item)
-            if identity in active:
-                raise ValueError("state must not contain cycles")
-            active.add(identity)
-            try:
-                return [visit(child) for child in item]
-            finally:
-                active.discard(identity)
-        if isinstance(item, dict):
-            identity = id(item)
-            if identity in active:
-                raise ValueError("state must not contain cycles")
-            if any(not isinstance(key, str) for key in item):
-                raise TypeError("state object keys must be strings")
-            active.add(identity)
-            try:
-                return {key: visit(child) for key, child in item.items()}
-            finally:
-                active.discard(identity)
-        raise TypeError(f"state must contain strict JSON values; got {type(item).__name__}")
-
-    return visit(value)
-
-
-# --------------------------------------------------------------------------------------
-# Lookback declarations.
-# --------------------------------------------------------------------------------------
-
-
-# The lookbacks are the engine's own, re-exported rather than redefined. Record `126`.
-#
-# They used to be a second pair of classes with identical fields and identical validation, and
-# `_internal/pit_bridge.engine_lookback` copied one into the other on every declaration -- a
-# function whose own docstring said "They carry the same economics, so this is a pure
-# translation". Two names for one idea, plus a copy constructor to move between them.
-#
-# The engine's are the survivors because they carry what an author most needs to read: the
-# `docs/issues/033` warning that `RowsLookback` counts rows PER INSTRUMENT, so a sparse name
-# reaches further back than a liquid one and a cross-sectional model built on it is silently
-# wrong. That paragraph did not exist on the authoring copy, which is the copy authors read.
-#
-# Neither is keyword-only, so `RowsLookback(rows=6)` and `RowsLookback(6)` both work and no
-# authored model changes.
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DatasetInput:
@@ -359,20 +298,6 @@ class DataModel(Model):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class DiagnosticTable:
-    """Preparation-time schema for one table of StrategyModel diagnostics."""
-
-    table_id: str
-    semantic_fields: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "table_id", _identifier(self.table_id, name="table_id"))
-        fields = _unique_identifiers(self.semantic_fields, name="semantic_fields")
-        _reject_reserved(fields, _ENVELOPE_RESERVED_FIELDS, name="semantic_fields")
-        object.__setattr__(self, "semantic_fields", fields)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class AccountHistoryInput:
     """A StrategyModel's declaration of which committed account history it reads."""
 
@@ -385,8 +310,8 @@ class AccountHistoryInput:
         if unknown:
             raise ValueError(
                 f"unknown account history fields {unknown}; "
-                f"account series are {_HISTORY_ACCOUNT_FIELDS} and "
-                f"instrument panels are {_HISTORY_INSTRUMENT_FIELDS}"
+                f"account series are {ACCOUNT_FIELDS} and "
+                f"instrument panels are {INSTRUMENT_FIELDS}"
             )
         object.__setattr__(self, "fields", fields)
         if not isinstance(self.lookback, RowsLookback):
@@ -408,11 +333,11 @@ class EconomicAccountView:
     sizes or a short position asks about quantity and would otherwise have to divide back out.
 
     **`values` is `None` where the framework has no marks to offer, and that is not zero.** A
-    Strategy callback fires before the occurrence it decides for is executed or valued, so its
-    view has a committed `nav` from history but no per-instrument marks; a monitoring Constraint
-    fires against a marked account and has both. An empty mapping would make `weight()` return a
-    confident zero for every name and every weight rule report `passed`, so absence refuses
-    instead.
+    Strategy callback fires before the occurrence it decides for is executed or valued, so what
+    it sees is the previous valuation's marks -- committed, and therefore point-in-time -- and
+    before the first valuation there are none; a monitoring Constraint fires against a marked
+    account and always has them. An empty mapping would make `weight()` return a confident zero
+    for every name and every weight rule report `passed`, so absence refuses instead.
     """
 
     cash: Decimal
@@ -476,104 +401,6 @@ class EconomicAccountView:
         return MappingProxyType(
             {instrument_id: self.weight(instrument_id) for instrument_id in sorted(self.values)}
         )
-
-
-class DeclaredAccountHistory:
-    """A bounded, read-only, oldest-first projection of committed account history.
-
-    Built by the framework from exactly one `AccountHistoryInput` declaration (or none).
-    Reading a field that was not declared, or reading it through the wrong accessor,
-    raises rather than silently returning nothing.
-    """
-
-    __slots__ = ("_fields", "_lookback", "_panel", "_series")
-
-    def __init__(
-        self,
-        *,
-        fields: tuple[str, ...] = (),
-        lookback: RowsLookback | None = None,
-        series: Mapping[str, Sequence[Decimal]] | None = None,
-        panel: Mapping[str, Mapping[str, Sequence[object]]] | None = None,
-    ) -> None:
-        if fields and lookback is None:
-            raise ValueError("declared fields require a lookback")
-        resolved_lookback = lookback if lookback is not None else RowsLookback(rows=1)
-        if not isinstance(resolved_lookback, RowsLookback):
-            raise TypeError("lookback must be a RowsLookback")
-        normalized_fields = tuple(fields)
-        if normalized_fields:
-            normalized_fields = _unique_identifiers(normalized_fields, name="fields")
-            unknown = sorted(set(normalized_fields) - _HISTORY_FIELDS)
-            if unknown:
-                raise ValueError(f"unknown account history fields {unknown}")
-
-        rows = resolved_lookback.rows
-        series_source = series or {}
-        panel_source = panel or {}
-
-        built_series: dict[str, tuple[Decimal, ...]] = {}
-        for field in _HISTORY_ACCOUNT_FIELDS:
-            if field not in normalized_fields:
-                continue
-            values = tuple(series_source.get(field, ()))[-rows:]
-            built_series[field] = tuple(
-                _finite_decimal(value, name=f"{field} history value") for value in values
-            )
-
-        built_panel: dict[str, Mapping[str, tuple[object, ...]]] = {}
-        for field in _HISTORY_INSTRUMENT_FIELDS:
-            if field not in normalized_fields:
-                continue
-            source = panel_source.get(field, {})
-            if not isinstance(source, Mapping):
-                raise TypeError(f"{field} panel must be a mapping")
-            instrument_series: dict[str, tuple[object, ...]] = {}
-            for instrument_id, values in source.items():
-                checked_instrument = _identifier(instrument_id, name="instrument_id")
-                trimmed = tuple(values)[-rows:]
-                if field == "observed_at":
-                    checked_values: tuple[object, ...] = tuple(
-                        _tz_aware(value, name="observed_at") for value in trimmed
-                    )
-                else:
-                    checked_values = tuple(
-                        _finite_decimal(value, name=f"{field} panel value") for value in trimmed
-                    )
-                instrument_series[checked_instrument] = checked_values
-            built_panel[field] = MappingProxyType(dict(sorted(instrument_series.items())))
-
-        self._fields = normalized_fields
-        self._lookback = resolved_lookback
-        self._series = MappingProxyType(built_series)
-        self._panel = MappingProxyType(built_panel)
-
-    @property
-    def fields(self) -> tuple[str, ...]:
-        return self._fields
-
-    @property
-    def lookback(self) -> RowsLookback:
-        return self._lookback
-
-    def _require_declared(self, field: str, allowed: tuple[str, ...]) -> None:
-        if field not in allowed:
-            raise KeyError(f"{field!r} is not available through this accessor")
-        if field not in self._fields:
-            raise KeyError(
-                f"{field!r} was not declared in this StrategyModel's AccountHistoryInput; "
-                "a Model reads only what it declared"
-            )
-
-    def series(self, field: Literal["nav", "cash"]) -> tuple[Decimal, ...]:
-        self._require_declared(field, _HISTORY_ACCOUNT_FIELDS)
-        return self._series[field]
-
-    def panel(
-        self, field: Literal["quantity", "price", "observed_at"]
-    ) -> Mapping[str, tuple[object, ...]]:
-        self._require_declared(field, _HISTORY_INSTRUMENT_FIELDS)
-        return self._panel[field]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -848,45 +675,20 @@ class Rebalance:
             raise ValueError("an empty complete position set requires cash_weight equal to one")
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class StrategyResult:
-    """A StrategyModel's complete, immutable callback result.
+class StrategyCall(ABC):
+    """The complete, bounded capability surface for one Strategy occurrence.
 
-    `next_state` and `diagnostics` default to the empty case, because most strategies carry no
-    cross-callback state and emit no diagnostic tables, and requiring them made every author write
-    `next_state=None, diagnostics={}` on every return. A default that matches the common case is
-    not a shortcut here: a strategy that DOES carry state still has to say so, and saying so is
-    what makes the cadence rule replayable.
+    `StrategyModelContext` is its one implementation, the way `DataModelContext` is of
+    `DataCall`. What a Strategy receives beyond a DataModel is what its role needs and nothing
+    else: the committed account, its own declared history, and the bounds every registered
+    Constraint projected. Framework facts -- the account version, the intent id, what was read --
+    are not here; the Flow stamps them onto the intent itself (record `125`).
     """
 
-    decision: Hold | Rebalance
-    next_state: object = None
-    diagnostics: Mapping[str, tuple[Mapping[str, object], ...]] = MappingProxyType({})
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.decision, (Hold, Rebalance)):
-            raise TypeError("decision must be a Hold or Rebalance")
-        object.__setattr__(self, "next_state", _normalize_state(self.next_state))
-        if not isinstance(self.diagnostics, Mapping):
-            raise TypeError("diagnostics must be a mapping")
-        normalized: dict[str, tuple[Mapping[str, object], ...]] = {}
-        for table_id, rows in self.diagnostics.items():
-            checked_table_id = _identifier(table_id, name="diagnostics table_id")
-            if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
-                raise TypeError(f"diagnostics[{checked_table_id!r}] must be a sequence of rows")
-            normalized[checked_table_id] = tuple(
-                _copy_values(
-                    row,
-                    name=f"diagnostics[{checked_table_id!r}] row",
-                    reserved=_ENVELOPE_RESERVED_FIELDS,
-                )
-                for row in rows
-            )
-        object.__setattr__(self, "diagnostics", MappingProxyType(dict(sorted(normalized.items()))))
-
-
-class StrategyCall(ABC):
-    """The complete, bounded capability surface for one Strategy occurrence."""
+    @property
+    @abstractmethod
+    def occurrence_id(self) -> str:
+        """Which occurrence this is. Kept in `memory`, it is how a cadence rule counts."""
 
     @property
     @abstractmethod
@@ -896,17 +698,12 @@ class StrategyCall(ABC):
     @property
     @abstractmethod
     def account(self) -> EconomicAccountView:
-        """The committed Account, bounded to cash/positions/latest NAV."""
+        """The committed Account: cash, positions, and the marks of its last valuation."""
 
     @property
     @abstractmethod
-    def previous_state(self) -> object:
-        """The strict-JSON state this Strategy returned from its last accepted callback."""
-
-    @property
-    @abstractmethod
-    def account_history(self) -> DeclaredAccountHistory:
-        """Committed account history, bounded by this Strategy's own declaration."""
+    def account_history(self) -> AccountHistory:
+        """Committed account history, bounded by this Strategy's own `account_history()`."""
 
     @property
     @abstractmethod
@@ -918,24 +715,53 @@ class StrategyCall(ABC):
         """Return PIT observations for one alias declared in `StrategyModel.inputs()`."""
 
 
-class StrategyModel(ABC):
-    """User extension whose only cross-callback state is `previous_state`/`next_state`."""
+class StrategyModel(Model):
+    """User extension that decides what to hold; its memory owns cadence and path-dependent rules.
 
-    def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this Strategy performs. Empty by default."""
-        return {}
+    One class (record `132`). Two carried this name: this one, which the scaffold taught and an
+    author subclassed, and an engine one the Flow ran, with an adapter between them that built the
+    author's class fresh per callback and translated every argument and return. The adapter is
+    gone; what an author writes is what the engine calls.
 
-    def account_history(self) -> AccountHistoryInput | None:
-        """Declare committed account history reads. `None` declares none are read."""
-        return None
+    **State is `memory`, as for every Model** (architecture 4.4, 5.1.1): strict JSON the Flow
+    snapshots after a successful callback and restores before the next. `save_payload` /
+    `load_payload` carry what memory cannot -- a fitted network, a large array -- as opaque bytes
+    under the same commit. A fresh instance with both restored decides the same, and the Flow
+    relies on that: nothing else about `self` is promised across a run boundary.
 
-    def diagnostics(self) -> tuple[DiagnosticTable, ...]:
-        """Declare every diagnostic table this Strategy may emit. Empty by default."""
+    **Rows go to `self.recorder`**, set by the Flow for the duration of one callback and `None`
+    outside it, into the tables `tables()` declared. Writing to an undeclared table refuses.
+    """
+
+    recorder: InvocationRecorder | None = None
+
+    def tables(self) -> tuple[TableSpec, ...]:
+        """Declare every table this Strategy may write during a callback. Empty by default."""
         return ()
 
+    def account_history(self) -> AccountHistoryInput | None:
+        """Declare which committed account values this Strategy reads back, and how far.
+
+        `None` declares none: the run then retains only its current mark, so a Strategy that
+        never looks at its own path costs nothing to carry one.
+        """
+        return None
+
+    def save_payload(self, target: BinaryIO) -> None:
+        """Persist private callback state that does not fit `memory` into Flow-owned staging."""
+
+    def load_payload(self, source: BinaryIO) -> None:
+        """Restore what `save_payload` wrote."""
+
     @abstractmethod
-    def decide(self, call: StrategyCall) -> StrategyResult:
-        """Return this occurrence's complete Hold/Rebalance decision."""
+    def decide(self, call: StrategyCall) -> Hold | Rebalance:
+        """Return the economic decision for this occurrence, and nothing else.
+
+        `Hold` declines. `Rebalance` names one complete desired portfolio: weights, cash, and the
+        budget they must satisfy. Everything an intent additionally carries -- its id, this
+        Strategy's id, what was read, the account version seen -- is the Flow's to stamp, and a
+        callback that tried to name any of it would be claiming authority it does not have.
+        """
 
 
 # --------------------------------------------------------------------------------------

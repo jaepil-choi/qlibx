@@ -86,14 +86,16 @@ class _Catalog:
 class _Strategy(StrategyModel):
     def __init__(self, results: tuple[Hold | Rebalance, ...]) -> None:
         self.results = iter(results)
-        self.seen: list[tuple[str, datetime, int]] = []
+        self.seen: list[tuple[str, datetime, dict[str, Decimal]]] = []
 
-    def on_occurrence(self, context: object) -> Hold | Rebalance:
+    def decide(self, context: object) -> Hold | Rebalance:
         occurrence = context.occurrence
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
         self.seen.append(
-            (occurrence.occurrence_id, occurrence.evaluation_time, context.account.version)
+            # The view carries no version (a framework fact, record `132`); what it shows of
+            # the account's progress is the committed book itself.
+            (occurrence.occurrence_id, occurrence.evaluation_time, dict(context.account.positions))
         )
         self.memory = {"calls": len(self.seen)}
         return next(self.results)
@@ -597,7 +599,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         def requirements(self) -> tuple[DataRequirement, ...]:
             return (requirement,)
 
-        def on_occurrence(self, context: object) -> Rebalance:
+        def decide(self, context: object) -> Rebalance:
             context.window.observations(requirement)
             return Rebalance(target_weights={}, cash_weight=Decimal("1"), budget=_BUDGET)
 
@@ -707,7 +709,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         def requirements(self) -> tuple[DataRequirement, ...]:
             return (requirement,)
 
-        def on_occurrence(self, context: object) -> Hold:
+        def decide(self, context: object) -> Hold:
             context.window.observations(requirement)
             return Hold(reason="unreachable")
 
@@ -1150,7 +1152,7 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert mark_evidence.run_identity == feedback_evidence.run_identity == frozen.identity
     assert feedback_evidence.candidates == (commit_evidence.dealt_fills, mark_evidence.marks)
     assert result.final_state.finalization is not None
-    assert strategy.seen[-1][2] == 1
+    assert strategy.seen[-1][2], "the callback after the fill must see the filled book"
 
     replay = _flow(frozen, _Strategy((intent, Hold(reason="after due"))), _state()).run()
     assert replay.final_state.account == result.final_state.account

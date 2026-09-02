@@ -206,7 +206,7 @@ class SignedAlpha(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(1)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         rows = context.window.observations(self.requirements()[0]).rows
         closes = {
             str(row["instrument"]): row["close"] for row in rows if row["close"] is not None
@@ -304,7 +304,7 @@ class EnhancedIndex(StrategyModel):
             if row[field] is not None
         }
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         index_requirement, alpha_requirement, price_requirement = self.requirements()
         benchmark = self._panel(context, index_requirement, "benchmark_weight")
         active = self._panel(context, alpha_requirement, "weight")

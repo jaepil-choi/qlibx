@@ -293,52 +293,19 @@ def load_strategy_model(
 ) -> StrategyModel:
     strategy = _load(ref, kind=ComponentKind.STRATEGY_MODEL, project_root=project_root)
     if not isinstance(strategy, StrategyModel):
-        strategy = _adapt_authored_strategy(strategy, ref)
-    if not isinstance(strategy, StrategyModel):
         raise _failure(
             f"{_STAGE}.wrong_type",
             "registered StrategyModel object must implement the public StrategyModel contract",
             type(strategy).__name__,
-            fix=(
-                "make the registered object a subclass of "
-                "vqapr.models.strategy_model.StrategyModel"
-            ),
+            fix="make the registered object a subclass of vqapr.authoring.StrategyModel",
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
-    _validate_callback_signature(strategy, base=StrategyModel, method_name="on_occurrence")
-    _requirements(strategy, label="StrategyModel", required=True)
+    _validate_callback_signature(strategy, base=StrategyModel, method_name="decide")
+    # `required=False` as for the other two roles: `Model.inputs()` says declaring nothing is
+    # legitimate, and a Strategy that rebalances to fixed weights reads no data at all.
+    _requirements(strategy, label="StrategyModel", required=False)
     return strategy
 
-
-
-def _adapt_authored_strategy(loaded: object, ref: ComponentRef) -> object:
-    """Wrap a model written against the authoring contract so the engine can run it.
-
-    A registered component may be authored against either contract. Refusing the
-    authoring one here would mean a model that runs perfectly through `Project.simulate`
-    cannot be registered by the CLI that exists to register it - the loader would be the
-    only thing standing between the supported way to write a model and the supported way
-    to install one.
-
-    The engine contract is left untouched: this adapts inward, it does not widen what the
-    engine accepts.
-    """
-    from vqapr.authoring import StrategyModel as AuthoringStrategyModel
-
-    authored = type(loaded)
-    if not isinstance(loaded, AuthoringStrategyModel):
-        return loaded
-
-    from vqapr._internal.strategy_bridge import AdaptedStrategy
-
-    config = dict(getattr(ref, "config", {}) or {})
-    config.pop("strategy_id", None)
-    return AdaptedStrategy(
-        authored_module=authored.__module__,
-        authored_qualname=authored.__qualname__,
-        strategy_id=str(ref.component_id),
-        authored_config=config,
-    )
 
 
 def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None) -> Constraint:

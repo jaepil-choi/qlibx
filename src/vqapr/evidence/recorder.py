@@ -59,7 +59,13 @@ class InvocationRecorder:
         try:
             spec = self._specs[table_id]
         except KeyError as exc:
-            raise KeyError(f"undeclared recorder table: {table_id}") from exc
+            # Names the repair and the declared set beside the breach (`docs/issues/019`): an
+            # author who declared `ff3.formations` and wrote `ff3.formation` sees both spellings.
+            declared = ", ".join(sorted(self._specs)) or "nothing"
+            raise KeyError(
+                f"undeclared recorder table {table_id!r}; a table is declared by returning a "
+                f"TableSpec for it from StrategyModel.tables() -- declared here: {declared}"
+            ) from exc
         normalized = normalize_rows(rows)
         declared = spec.field_set
         staged = self._rows[table_id]

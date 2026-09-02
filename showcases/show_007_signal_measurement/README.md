@@ -21,14 +21,14 @@ The next milestone story's analysis functions read what a run stored. If those f
 instead tested against hand-built rows, a defect in the transforms, the recorder, or the
 publication path could hide behind a fixture that never went through the real spine. This showcase
 is the thing that makes that impossible for the signal surface: every number the acceptance test
-checks was produced by a real `StrategyModel.on_occurrence` callback, dispatched by a real
+checks was produced by a real `StrategyModel.decide` callback, dispatched by a real
 `SimulationFlow`, over real KOSPI 200 closes.
 
 ## What this demonstrates
 
 | Claim | How it is shown |
 |---|---|
-| The signal transforms compose through a real callback | `rank` → `neutralize` → `signal_weight` → `rescale` all run inside `ReversalSignalStrategy.on_occurrence`, imported only from `vqapr.public` |
+| The signal transforms compose through a real callback | `rank` → `neutralize` → `signal_weight` → `rescale` all run inside `ReversalSignalStrategy.decide`, imported only from `vqapr.public` |
 | The recorded signal is what the callback actually saw | `signal.measurement` records `signal_before_weighting` (the ranked view) and `neutralized_signal` on every occurrence with enough history, written from inside the callback body rather than reconstructed afterward |
 | A recorded diagnostic table round-trips through publication | `publish_run_record` publishes `signal.measurement` and the package-owned `vqapr.account` default table; both are read back from their published parquet — never from the producing run's own objects — and their row counts are checked against `result.final_state.recorder_rows` |
 | The neutralisation is a real property, not an assumed one | The published signal table alone (not the transform, not the run) is used to recompute, on every occurrence, that the neutralised signal sums to exactly zero against a market column of ones |

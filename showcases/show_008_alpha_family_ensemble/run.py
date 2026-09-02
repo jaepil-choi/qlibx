@@ -296,7 +296,7 @@ class {class_name}(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         history = dict(self.memory or {{}})
         history["occurrences"] = int(history.get("occurrences", 0)) + 1
         self.memory = history
@@ -405,7 +405,7 @@ class LowVolMember(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         history = dict(self.memory or {{}})
         history["occurrences"] = int(history.get("occurrences", 0)) + 1
         self.memory = history
@@ -540,7 +540,7 @@ class FamilyEnsembleStrategy(StrategyModel):
             if row[field] is not None
         }
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         requirements = self.requirements()
         panels = [self._panel(context, requirement) for requirement in requirements]
         if not all(panels):

@@ -4,7 +4,7 @@
 
 **`tables_declared: []`** for a run that declared `ff3.formation` and wrote 42 rows to it. The empty
 list was not wrong about what it measured -- it measured `store.tables`, the run spec's `store:`
-section, while the journey declared through `StrategyModel.diagnostics()` on the component. Two
+section, while the journey declared through `StrategyModel.tables()` on the component. Two
 surfaces; the envelope read one.
 
 **The counter nobody could interpret.** 7 for `ff3.formation` and `vqapr.weight`, 85 for
@@ -39,7 +39,7 @@ def _result(*table_ids: str) -> SimpleNamespace:
 
 
 def test_a_table_declared_on_the_component_is_reported() -> None:
-    """The journey's own case: declared via `diagnostics()`, written, and reported as nothing."""
+    """The journey's own case: declared via `tables()`, written, and reported as nothing."""
     declared = tables_declared(
         StoreSpec(root=None, tables=()),
         _result("vqapr.account", "vqapr.fill", "vqapr.weight", "ff3.formation"),

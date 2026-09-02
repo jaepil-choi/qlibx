@@ -108,11 +108,9 @@ class Rotate(va.StrategyModel):
             if value is not None:
                 latest[row.instrument_id] = Decimal(str(value))
         if not latest:
-            return va.StrategyResult(decision=va.Hold(reason="no-observations"))
+            return va.Hold(reason="no-observations")
         winner = max(latest, key=lambda name: latest[name])
-        return va.StrategyResult(
-            decision=va.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
-        )
+        return va.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
 '''
 
 

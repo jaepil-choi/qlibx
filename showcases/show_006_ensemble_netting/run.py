@@ -247,7 +247,7 @@ class {class_name}(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         {memory_write}
 
         rows = context.window.observations(self.requirements()[0]).rows
@@ -387,7 +387,7 @@ class EnsembleStrategy(StrategyModel):
             if row[field] is not None
         }
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         reversal_requirement, momentum_requirement = self.requirements()
         reversal = self._panel(context, reversal_requirement)
         momentum = self._panel(context, momentum_requirement)

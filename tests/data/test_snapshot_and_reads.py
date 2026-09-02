@@ -106,13 +106,33 @@ def test_an_unregistered_dataset_is_refused_by_name(workspace: Workspace) -> Non
 def test_a_lookback_window_carries_rows_from_different_dates(workspace: Workspace) -> None:
     """The trap itself, stated before the fix that closes it.
 
-    GONE last published on session 2 and LIVE on session 5. A one-row lookback returns both,
+    GONE last published on session 2 and LIVE on session 5. A one-instant lookback returns both,
     because each instrument's newest row is its own. Summing this reads a departed name's final
     weight as if it were current.
-    """
-    requirement = DataRequirement.of('benchmark', 'weight', lookback=RowsLookback(1))
 
-    batch = _window(workspace, requirement, SESSIONS[-1]).observations(requirement)
+    A per-name window is a rows-grain question (record `137`): on the panel grain a
+    `RowsLookback(1)` is the table's newest instant and GONE has nothing there, so the shape
+    `docs/issues/033` measured cannot be built from it. The same table, registered as `rows`.
+    """
+    from vqapr.data.lookback import InstantsLookback
+
+    register_dataset(
+        workspace.project_root,
+        DatasetRegistration.of(
+            "benchmark_rows",
+            "benchmark-source",
+            instrument_field="instrument",
+            available_at="available_at",
+            grain="rows",
+            key_fields=("available_at", "instrument"),
+            fields={"weight": "weight"},
+        ),
+        workspace.source("benchmark-source"),
+    )
+    reopened = Workspace.open(workspace.project_root)
+    requirement = DataRequirement.of('benchmark_rows', 'weight', lookback=InstantsLookback(1))
+
+    batch = _window(reopened, requirement, SESSIONS[-1]).observations(requirement)
 
     dates = {str(row["instrument"]): row["available_at"] for row in batch.rows}
     assert dates["GONE"] == SESSIONS[LEFT_AFTER - 1]

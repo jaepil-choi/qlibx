@@ -698,7 +698,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     registration = _with_span(
         DatasetRegistration.of(
             "prices", "s", instrument_field="instrument", available_at="available_at",
-            grain="rows",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"), fields={"close": "close"},
         )
     )
@@ -756,7 +756,7 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
         _with_span(
             DatasetRegistration.of(
                 "prices", "s", instrument_field="instrument", available_at="available_at",
-                grain="rows",
+                grain="instrument_instant",
                 key_fields=("available_at", "instrument"), fields={"close": "close"},
             )
         ),

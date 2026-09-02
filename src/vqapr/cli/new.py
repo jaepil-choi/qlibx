@@ -352,9 +352,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         # `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md`, C3.
         default=None,
         help=(
-            "rows of history each name needs, counted per instrument and per field. On an "
-            "unbalanced panel the batch then spans whatever the sparsest name reaches back to; "
-            "use --calendar-lookback for a window every name shares"
+            "rows of the table the model reads back -- the same N instants for every name, on "
+            "a panel-grain dataset. Use --calendar-lookback for a window of N days, or "
+            "--instants-lookback for each name's own last N reported instants on a rows-grain "
+            "(vendor, long) dataset"
+        ),
+    )
+    parser.add_argument(
+        "--instants-lookback",
+        dest="instants_lookback",
+        type=int,
+        default=None,
+        help=(
+            "scaffold a model that reads each name's own last N reported instants, per field, "
+            "which is the window a rows-grain (vendor, long) dataset takes; on an unbalanced "
+            "table the batch then spans whatever the sparsest name reaches back to"
         ),
     )
     parser.add_argument(
@@ -440,6 +452,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
                 kind,
                 rows=getattr(args, "lookback", None),
                 calendar=getattr(args, "calendar_lookback", None),
+                instants=getattr(args, "instants_lookback", None),
             ),
         )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"

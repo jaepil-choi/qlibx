@@ -49,6 +49,7 @@ def test_module_exports_are_exact() -> None:
         "DatasetInput",
         "EconomicAccountView",
         "Hold",
+        "InstantsLookback",
         "Model",
         "Observation",
         "Rebalance",

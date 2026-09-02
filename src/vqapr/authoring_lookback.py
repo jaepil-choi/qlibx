@@ -25,7 +25,7 @@ DECLARATION_KIND = {
 
 
 def lookback_declaration(
-    kind: ComponentKind, *, rows: int | None, calendar: int | None
+    kind: ComponentKind, *, rows: int | None, calendar: int | None, instants: int | None = None
 ) -> dict[str, object]:
     """Which lookback the scaffold declares, and how much of it.
 
@@ -38,6 +38,38 @@ def lookback_declaration(
     `len(values) >= LOOKBACK` guard counts observations against a number of days
     (`docs/issues/033`).
     """
+    given = {
+        name: value
+        for name, value in (
+            ("--lookback", rows),
+            ("--calendar-lookback", calendar),
+            ("--instants-lookback", instants),
+        )
+        if value is not None
+    }
+    if len(given) > 1:
+        raise InputError(
+            VALUE_INVALID,
+            requirement=(
+                f"{' and '.join(given)} declare {'two' if len(given) == 2 else 'three'} "
+                "different windows"
+            ),
+            observed=" and ".join(f"{name} {value}" for name, value in given.items()),
+            retry=(
+                "keep --lookback for the table's last N rows (a panel grain), --calendar-lookback "
+                "for a window of N days every name shares, or --instants-lookback for each name's "
+                "own last N reported instants (a rows grain); drop the others"
+            ),
+        )
+    if instants is not None:
+        if instants <= 0:
+            raise InputError(
+                VALUE_INVALID,
+                requirement="--instants-lookback must be a positive number of instants",
+                observed=f"--instants-lookback {instants}",
+                retry="pass a positive number of instants per name, then retry",
+            )
+        return {"lookback": instants, "lookback_kind": "instants"}
     if calendar is None:
         return {
             "lookback": LOOKBACK_DEFAULT if rows is None else rows,

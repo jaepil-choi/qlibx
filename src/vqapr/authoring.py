@@ -29,7 +29,7 @@ from types import MappingProxyType
 from typing import BinaryIO, Literal
 
 from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHistory
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
@@ -52,6 +52,7 @@ __all__ = (
     "DatasetInput",
     "EconomicAccountView",
     "Hold",
+    "InstantsLookback",
     "Model",
     "Observation",
     "Rebalance",
@@ -185,8 +186,8 @@ class DatasetInput:
         fields = _unique_identifiers(self.fields, name="fields")
         _reject_reserved(fields, _ROW_RESERVED_FIELDS, name="fields")
         object.__setattr__(self, "fields", fields)
-        if not isinstance(self.lookback, (RowsLookback, CalendarLookback)):
-            raise TypeError("lookback must be a RowsLookback or CalendarLookback")
+        if not isinstance(self.lookback, (RowsLookback, CalendarLookback, InstantsLookback)):
+            raise TypeError("lookback must be a RowsLookback, CalendarLookback or InstantsLookback")
 
 
 @dataclass(frozen=True, slots=True)

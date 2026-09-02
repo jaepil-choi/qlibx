@@ -221,6 +221,7 @@ def test_public_exports_are_fixed() -> None:
         "Grain",
         "Hold",
         "IndexInstrument",
+        "InstantsLookback",
         "Instrument",
         "InstrumentKind",
         "InstrumentRoster",

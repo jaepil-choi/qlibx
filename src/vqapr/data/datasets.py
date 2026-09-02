@@ -15,6 +15,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from vqapr.data import scan
+from vqapr.data.lookback import InstantsLookback
 from vqapr.data.scan import ColumnType
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import (
@@ -278,6 +279,28 @@ def parse_grain(value: object, *, dataset_id: str) -> Grain:
         f"dataset {dataset_id!r} must declare grain, one of: {GRAIN_NAMES} ({observed}). "
         f"Note: {ROWS_LOOKBACK_MEANING}"
     )
+
+
+def lookback_fits_grain(lookback: object, grain: object) -> str | None:
+    """`None` when the lookback is the grain's own kind; else the refusal, naming the right one.
+
+    The types steer (design §2.4): a `rows` dataset takes only a `SeriesLookback`, a panel dataset
+    only a `PanelLookback`. Said in one place so registration, preflight and the read agree.
+    """
+    if grain is Grain.ROWS:
+        if isinstance(lookback, InstantsLookback):
+            return None
+        return (
+            f"{type(lookback).__name__} is a panel lookback and this dataset declares grain: "
+            "rows; per-name counting on a rows-grain table is InstantsLookback(n)"
+        )
+    if isinstance(lookback, InstantsLookback):
+        return (
+            "InstantsLookback counts each name's own instants and this dataset declares grain: "
+            f"{grain.value}; on a panel grain use RowsLookback(n) for the table's last n rows "
+            "(the same instants for every name) or CalendarLookback for a period"
+        )
+    return None
 
 
 def require_grain(registration: DatasetRegistration) -> None:

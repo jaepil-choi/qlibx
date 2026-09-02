@@ -112,13 +112,24 @@ class {class_name}(va.DataModel):
 
 _ROWS_LOOKBACK_NOTE = """\
         #
-        # This model declares a ROWS lookback, so the window is each name's own last N
-        # observations: on an unbalanced panel a sparse name reaches further back than a liquid
-        # one, and the batch's calendar span is set by the sparsest of them. That is why the
-        # reduction below is per instrument. A CROSS-SECTIONAL model -- a covariance matrix, a
-        # factor regression, anything comparing names to each other on the same dates -- must not
-        # be written this way: scaffold it with `--calendar-lookback DAYS` instead, which gives
-        # every name the same window."""
+        # This model declares a ROWS lookback on a panel-grain dataset, so the window is the
+        # table's last N rows -- the same N instants for every name. A name that stopped
+        # publishing contributes fewer values inside it rather than reaching further back, which
+        # is what makes a cross-section built from this window safe. The reduction below is still
+        # per instrument because a trailing return is a per-name question; the guard asks for a
+        # full window. A calendar period instead of a row count is `--calendar-lookback DAYS`;
+        # per-name counting (each name's own last N reported instants) is `InstantsLookback`
+        # and belongs to a `grain: rows` dataset: `--instants-lookback N`."""
+
+_INSTANTS_LOOKBACK_NOTE = """\
+        #
+        # This model declares an INSTANTS lookback on a rows-grain (vendor, long) dataset, so
+        # the window is each name's own last N reported instants: on an unbalanced table a
+        # sparse name reaches further back than a liquid one, and the batch's calendar span is
+        # set by the sparsest of them. That is why the reduction below is per instrument. A
+        # CROSS-SECTIONAL model -- anything comparing names on the same dates -- must not be
+        # written on this grain: register the table as `grain: instrument_instant` (or derive
+        # one from it) and read it with `RowsLookback` or `CalendarLookback` instead."""
 
 _CALENDAR_LOOKBACK_NOTE = """\
         #
@@ -132,10 +143,21 @@ _CALENDAR_LOOKBACK_NOTE = """\
 _LOOKBACK_FLAVOURS = {
     "rows": {
         "lookback_class": "RowsLookback",
-        "lookback_declaration": "LOOKBACK = {lookback}  # observations per name, per field",
+        "lookback_declaration": (
+            "LOOKBACK = {lookback}  # rows of the table: the same instants for every name"
+        ),
         "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
         "completeness_guard": "len(values) == LOOKBACK",
         "lookback_note": _ROWS_LOOKBACK_NOTE,
+    },
+    "instants": {
+        "lookback_class": "InstantsLookback",
+        "lookback_declaration": (
+            "LOOKBACK = {lookback}  # instants per name, per field (grain: rows only)"
+        ),
+        "lookback_expression": "va.InstantsLookback(instants=LOOKBACK)",
+        "completeness_guard": "len(values) == LOOKBACK",
+        "lookback_note": _INSTANTS_LOOKBACK_NOTE,
     },
     "calendar": {
         "lookback_class": "CalendarLookback",
@@ -148,7 +170,7 @@ _LOOKBACK_FLAVOURS = {
         "lookback_note": _CALENDAR_LOOKBACK_NOTE,
     },
 }
-"""The two lookback members, and the four places in the template that differ between them.
+"""The three lookback members, and the four places in the template that differ between them.
 
 One template rather than two files, because everything else about the two scaffolds is identical
 and a second copy would drift. What differs is exactly what an author has to understand: which

@@ -97,11 +97,10 @@ def test_three_declared_fields_are_one_statement_and_one_access(
     assert window.accesses[0].fields == ("close", "volume", "double_close")
     a_rows = [row for row in rows if row.instrument_id == "A"]
     assert [(row.available_at.day, row.values["close"], row.values["volume"]) for row in a_rows] == [
-        (5, None, 10.0),
         (6, 103.0, None),
         (7, 105.0, 12.0),
-    ], "each field keeps its own last-N window; the rows are the union, joined on the instant"
-    assert [row.values["double_close"] for row in a_rows] == [None, 206.0, 210.0]
+    ], "a panel-grain RowsLookback(2) is the table's last two instants, every field on each row"
+    assert [row.values["double_close"] for row in a_rows] == [206.0, 210.0]
 
 
 def test_the_fused_read_returns_what_the_joined_reads_did(

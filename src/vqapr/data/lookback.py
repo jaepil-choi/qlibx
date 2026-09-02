@@ -11,29 +11,23 @@ from vqapr.domain.timestamps import at_local, require_tz_aware, shift_calendar
 
 @dataclass(frozen=True, slots=True)
 class RowsLookback:
-    """The last `rows` observations of **each instrument independently**.
+    """The last `rows` rows of the pivoted table: the same instants for every name.
 
-    Per name, per field, counting only non-null values: a field's rank is computed inside its own
-    instrument's partition, so a name that reports twice a week and one that reports daily both
-    return `rows` values, from different dates.
+    **A panel lookback** (design §2.4, owner ruling 2026-09-01): on a `grain: instrument_instant`
+    or `grain: instant` dataset a row is one instant shared by every name, so `RowsLookback(313)`
+    is 313 instants, and a name that stopped publishing simply contributes fewer values inside
+    that window rather than reaching further back than everyone else. The batch's calendar span
+    is bounded by the table, not by its sparsest name -- which is what makes a cross-section built
+    from it safe. `docs/issues/033` measured the other meaning: 1,637 names, `rows=313`, and a
+    batch spanning 1,865 sessions because a name delisted in 2019 still got its own last 313.
 
-    **The batch's calendar span is therefore set by the sparsest instrument, and is unbounded
-    above.** On a balanced panel this is invisible -- `rows=5` over three liquid names returns five
-    sessions, which is what makes the wrong reading ("rows means sessions") so easy to reach. On a
-    real one it is not: a 1,637-name universe with `rows=313` returned rows spanning **1,865
-    distinct sessions**, back to 2016, because a name that delisted in 2019 still gets its own last
-    313 rows (`docs/issues/033`).
+    **That other meaning still exists, under its own name.** `InstantsLookback(n)` is each name's
+    own last n reported instants, per field, and it belongs to `grain: rows` -- the vendor's long
+    table, where no row is shared between names. Registration and the read path refuse each on
+    the other grain, so the same number cannot silently mean two things (§7-1, §7-3).
 
-    So a per-instrument reduction -- accumulate values per name, take the last N -- is safe here
-    and a **cross-sectional** model is not. Building a 2024 correlation matrix from this mixes a
-    liquid name's 2023-24 returns with a dead name's 2016-19 returns, and the result is well
-    formed, non-null, passes every check, and is wrong.
-
-    Use this when the question is per instrument: a trailing return, a moving average, an N-bar
-    signal. Use `CalendarLookback` when the question is about a period -- a covariance matrix, a
-    factor regression, anything that needs the names aligned on dates. Measured on the same
-    evaluation, the calendar form was also ~10% faster, because the row form loaded rows the model
-    then discarded.
+    Use this for anything cross-sectional or aligned on instants. Use `CalendarLookback` when the
+    question is a calendar period rather than a count of instants.
     """
 
     rows: int
@@ -43,6 +37,31 @@ class RowsLookback:
             raise TypeError("rows lookback must be an integer")
         if self.rows <= 0:
             raise ValueError("rows lookback must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class InstantsLookback:
+    """The last `instants` observations of **each instrument independently**.
+
+    Per name, per field, counting only non-null values: a field's rank is computed inside its own
+    instrument's partition, so a name that reports twice a week and one that reports daily both
+    return `instants` values, from different dates. This was `RowsLookback`'s meaning until the
+    lookback types followed the grain (design §2.4); it is the right question for a long,
+    vendor-grain table -- quarterly statements where every item has its own publication date --
+    and it belongs there: `grain: rows` only.
+
+    **The batch's calendar span is therefore set by the sparsest instrument, and is unbounded
+    above.** That is the property a cross-sectional model must not meet, and the type keeps it
+    away from one: a panel grain refuses this lookback by name.
+    """
+
+    instants: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.instants, int) or isinstance(self.instants, bool):
+            raise TypeError("instants lookback must be an integer")
+        if self.instants <= 0:
+            raise ValueError("instants lookback must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,4 +115,12 @@ class CalendarLookback:
         return at_local(shifted.date(), time(0), self.timezone)
 
 
-type Lookback = RowsLookback | CalendarLookback
+type PanelLookback = RowsLookback | CalendarLookback
+"""What a panel grain (`instrument_instant`, `instant`) takes: a count of the table's rows, or a
+calendar period. Both give every name the same window."""
+
+type SeriesLookback = InstantsLookback
+"""What `grain: rows` takes: each name's own last N reported instants."""
+
+type Lookback = PanelLookback | SeriesLookback
+

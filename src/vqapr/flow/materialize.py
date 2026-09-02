@@ -18,7 +18,7 @@ import pyarrow.parquet as pq
 
 from vqapr.authoring import Hold
 from vqapr.data.datasets import DatasetRegistration, Grain, validate
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
@@ -463,6 +463,8 @@ def _json_scalar(value: object) -> object:
 def _lookback(access: AccessRecord) -> Mapping[str, object]:
     if isinstance(access.lookback, RowsLookback):
         return {"kind": "rows", "rows": access.lookback.rows}
+    if isinstance(access.lookback, InstantsLookback):
+        return {"kind": "instants", "instants": access.lookback.instants}
     if isinstance(access.lookback, CalendarLookback):
         return {
             "kind": "calendar",

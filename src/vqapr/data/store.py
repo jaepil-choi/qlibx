@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+from bisect import bisect_right
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
-from vqapr.data.datasets import require_grain
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.datasets import lookback_fits_grain, require_grain
+from vqapr.data.lookback import (
+    CalendarLookback,
+    InstantsLookback,
+    RowsLookback,
+)
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
@@ -50,6 +55,34 @@ class DuckDbObservationStore:
         # observes two digests for one source, so caching per instance does not weaken that
         # contract -- it makes violating it impossible instead of merely detected.
         self.__digests: dict[Path, str] = {}
+
+    def _grid_bound(
+        self, source: SourceSpec, available_at_field: str, evaluation_time: datetime, rows: int
+    ) -> datetime:
+        """The instant `rows` table rows back from the evaluation time.
+
+        When the table has fewer instants at or before the cutoff than were asked for, the bound
+        is its first instant: the window is then everything up to the cutoff, which is the honest
+        answer to "the last 313 rows" of a 200-row table. An empty table bounds at the cutoff
+        itself, which admits nothing, which is what it holds.
+        """
+        if self.__session is not None:
+            grid = self.__session.instant_grid(source, available_at_field)
+        else:
+            grid = tuple(
+                value
+                for value in scan.distinct_values(source, available_at_field)
+                if value is not None
+            )
+        if not grid:
+            return evaluation_time
+        try:
+            cut = bisect_right(grid, evaluation_time)  # type: ignore[type-var]
+        except TypeError:
+            return grid[0]  # type: ignore[return-value]
+        if cut <= rows:
+            return grid[0]  # type: ignore[return-value]
+        return grid[cut - rows]  # type: ignore[return-value]
 
     def _digest(self, path: Path) -> str:
         cached = self.__digests.get(path)
@@ -112,10 +145,22 @@ class DuckDbObservationStore:
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
         fields = {item.field_id: resolve_field(registration, item) for item in declared}
+        mismatch = lookback_fits_grain(first.lookback, registration.grain)
+        if mismatch is not None:
+            raise TypeError(f"dataset {str(first.dataset_id)!r}: {mismatch}")
         lower_bound = None
         rows = None
         if isinstance(first.lookback, RowsLookback):
-            rows = first.lookback.rows
+            # A panel lookback: the table's last n instants, the same for every name. The bound
+            # is arithmetic on the source's instant grid -- read once per run when a session is
+            # held -- and the window SQL then takes every row at or after it. No per-name rank.
+            lower_bound = self._grid_bound(
+                source, registration.available_at, evaluation_time, first.lookback.rows
+            )
+        elif isinstance(first.lookback, InstantsLookback):
+            # A series lookback: each name's own last n, per field, the way the rows-grain read
+            # has always ranked (`PARTITION BY instrument` in `observation_rows`).
+            rows = first.lookback.instants
         elif isinstance(first.lookback, CalendarLookback):
             lower_bound = first.lookback.lower_bound(evaluation_time)
         else:  # pragma: no cover - DataRequirement construction closes this union

@@ -22,7 +22,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
@@ -123,7 +123,7 @@ def _register(root: Path, dataset_id: str, path: Path, *, long: bool) -> None:
             f"{dataset_id}-source",
             instrument_field="instrument",
             available_at="available_at",
-            grain="rows",
+            grain="instrument_instant",
             key_fields=(
                 ("available_at", "instrument", "account_code", "dump")
                 if long
@@ -235,7 +235,7 @@ def test_criterion_2_a_dataset_with_no_instrument_axis_is_not_narrowed(tmp_path:
             "kimchi-ff5",
             "kimchi-ff5-source",
             available_at="available_at",
-            grain="rows",
+            grain="instant",
             key_fields=("available_at", "factor"),
             fields={
                 "rmrf": "sum(value) FILTER (WHERE factor = 'RMRF')",
@@ -391,7 +391,7 @@ def test_a_registration_that_mixes_the_two_shapes_is_refused(
                 "mixed-source",
                 instrument_field="instrument",
                 available_at="available_at",
-                grain="rows",
+                grain="instrument_instant",
                 key_fields=("available_at", "instrument", "account_code", "dump"),
                 fields={"summed": _expression("111000"), "raw": "value"},
             ),
@@ -520,7 +520,12 @@ def test_a_bounded_grouped_read_returns_the_unbounded_answer(
     workspace = Workspace.open(tmp_path)
     assert workspace.dataset("facts").aggregated is True
 
-    requirement = DataRequirement.of("facts", "net_income", lookback=RowsLookback(8))
+    # A per-name window on a grouped projection is a rows-grain read since record `137`: the
+    # table is registered at the vendor's grain, the expressions still collapse it to one row per
+    # (instant, instrument), and `InstantsLookback` ranks each name's own instants -- which is
+    # exactly the bounded read lane B proved. On a panel grain the same number would be the
+    # table's last eight instants, and SPARSE would not fill them; that is the design, not a gap.
+    requirement = DataRequirement.of("facts", "net_income", lookback=InstantsLookback(8))
     evaluated_at = instants[-1] + timedelta(hours=1)
 
     def read(store: DuckDbObservationStore) -> tuple:

@@ -238,10 +238,10 @@ class ModelWindow:
     def snapshot(self, requirement: DataRequirement) -> ObservationBatch:
         """The newest cross-section only: rows at the latest ``available_at`` per instrument.
 
-        A lookback returns a window, not a line. Even ``RowsLookback(1)`` returns each
-        instrument's own most recent row, and those rows do not share a date -- a name that
-        stopped publishing carries a row from whenever it last did. Reading that window as if it
-        were one moment silently mixes dates.
+        A lookback returns a window, not a line. Even ``InstantsLookback(1)`` on a rows-grain
+        table returns each instrument's own most recent row, and those rows do not share a
+        date -- a name that stopped publishing carries a row from whenever it last did. Reading
+        that window as if it were one moment silently mixes dates.
 
         That is not hypothetical. A benchmark built this way summed above 1.0 because names that
         had left the index contributed their final positive weight alongside current members.

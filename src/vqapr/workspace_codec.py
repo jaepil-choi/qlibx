@@ -33,7 +33,7 @@ import yaml
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
@@ -878,6 +878,8 @@ def _encode_requirement(requirement: DataRequirement) -> dict[str, object]:
     lookback = requirement.lookback
     if isinstance(lookback, RowsLookback):
         encoded_lookback: dict[str, object] = {"kind": "rows", "rows": lookback.rows}
+    elif isinstance(lookback, InstantsLookback):
+        encoded_lookback = {"kind": "instants", "instants": lookback.instants}
     else:
         encoded_lookback = {
             "kind": "calendar",
@@ -905,6 +907,8 @@ def _decode_requirement(raw: object) -> DataRequirement:
         raise TypeError("mark_requirement lookback must be a mapping with a kind")
     if raw_lookback["kind"] == "rows" and set(raw_lookback) == {"kind", "rows"}:
         lookback = RowsLookback(raw_lookback["rows"])
+    elif raw_lookback["kind"] == "instants" and set(raw_lookback) == {"kind", "instants"}:
+        lookback = InstantsLookback(raw_lookback["instants"])
     elif raw_lookback["kind"] == "calendar" and set(raw_lookback) == {
         "kind",
         "years",

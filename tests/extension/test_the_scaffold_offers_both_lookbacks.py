@@ -62,8 +62,14 @@ def _namespace(**overrides: object) -> argparse.Namespace:
 
 def test_the_pair_is_documented_at_the_call_site() -> None:
     """Neither class had a docstring, and the batch's span is what one of them has to state."""
-    assert RowsLookback.__doc__ and "each instrument independently" in RowsLookback.__doc__
-    assert "sparsest" in RowsLookback.__doc__, (
+    from vqapr.data.lookback import InstantsLookback
+
+    # Since record `137` the per-name count is `InstantsLookback`; `RowsLookback` counts the
+    # table's rows, the same instants for every name, and its docstring says both.
+    assert RowsLookback.__doc__ and "same instants for every name" in RowsLookback.__doc__
+    assert "InstantsLookback" in RowsLookback.__doc__
+    assert InstantsLookback.__doc__ and "each instrument independently" in InstantsLookback.__doc__
+    assert "sparsest" in InstantsLookback.__doc__, (
         "the unbounded calendar span is the property that makes a cross-sectional model wrong"
     )
     assert CalendarLookback.__doc__ and "every instrument" in CalendarLookback.__doc__

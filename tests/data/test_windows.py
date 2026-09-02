@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
@@ -19,14 +19,16 @@ from vqapr.workspace import Workspace
 KST = ZoneInfo("Asia/Seoul")
 
 
-def _workspace(tmp_path: Path, model_price_parquet: Path) -> Workspace:
+def _workspace(
+    tmp_path: Path, model_price_parquet: Path, grain: str = "instrument_instant"
+) -> Workspace:
     source = SourceSpec.of("prices", model_price_parquet)
     registration = DatasetRegistration.of(
         "price_daily",
         "prices",
         instrument_field="instrument",
         available_at="available_at",
-        grain="instrument_instant",
+        grain=grain,
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "volume": "volume"},
     )
@@ -38,13 +40,13 @@ def _workspace(tmp_path: Path, model_price_parquet: Path) -> Workspace:
 def test_rows_window_is_pit_bounded_and_counts_per_field(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """A RowsLookback counts each field's OWN last N, and a requirement names one field.
+    """An InstantsLookback on a rows-grain table counts each field's OWN last N per name.
 
     `volume` is null on the 6th and `close` is present on it, so the two fields reach back
     different distances for the same instrument. That is the property this pins, and it is now
     read one requirement at a time rather than one batch carrying both.
     """
-    workspace = _workspace(tmp_path, model_price_parquet)
+    workspace = _workspace(tmp_path, model_price_parquet, grain="rows")
     window_for = lambda requirement: ModelWindow(  # noqa: E731
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A", "B"),
@@ -53,8 +55,8 @@ def test_rows_window_is_pit_bounded_and_counts_per_field(
         consumer_id="reversal",
     )
 
-    close = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
-    volume = DataRequirement.of('price_daily', 'volume', lookback=RowsLookback(2))
+    close = DataRequirement.of('price_daily', 'close', lookback=InstantsLookback(2))
+    volume = DataRequirement.of('price_daily', 'volume', lookback=InstantsLookback(2))
     closes = window_for(close).observations(close)
     volumes = window_for(volume).observations(volume)
 

@@ -17,7 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from vqapr.authoring import Hold
-from vqapr.data.datasets import DatasetRegistration, validate
+from vqapr.data.datasets import DatasetRegistration, Grain, validate
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
@@ -763,6 +763,10 @@ def _stage_and_publish(
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={field: field for field in value_fields},
+            # Stated by the publisher, not derived: the shared publication authority keys on
+            # (available_at, instrument) and refuses a duplicate before exposure, so what it
+            # publishes IS that grain.
+            grain=Grain.INSTRUMENT_INSTANT,
         )
         candidate_source = SourceSpec.of(source_id, temporary_output)
         diagnosis, _, candidate_registration = validate(candidate_registration, candidate_source)

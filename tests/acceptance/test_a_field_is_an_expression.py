@@ -123,6 +123,7 @@ def _register(root: Path, dataset_id: str, path: Path, *, long: bool) -> None:
             f"{dataset_id}-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="rows",
             key_fields=(
                 ("available_at", "instrument", "account_code", "dump")
                 if long
@@ -234,6 +235,7 @@ def test_criterion_2_a_dataset_with_no_instrument_axis_is_not_narrowed(tmp_path:
             "kimchi-ff5",
             "kimchi-ff5-source",
             available_at="available_at",
+            grain="rows",
             key_fields=("available_at", "factor"),
             fields={
                 "rmrf": "sum(value) FILTER (WHERE factor = 'RMRF')",
@@ -389,6 +391,7 @@ def test_a_registration_that_mixes_the_two_shapes_is_refused(
                 "mixed-source",
                 instrument_field="instrument",
                 available_at="available_at",
+                grain="rows",
                 key_fields=("available_at", "instrument", "account_code", "dump"),
                 fields={"summed": _expression("111000"), "raw": "value"},
             ),
@@ -429,6 +432,7 @@ def test_a_field_expression_may_not_carry_its_own_from(tmp_path: Path) -> None:
                 "peeking-source",
                 instrument_field="instrument",
                 available_at="available_at",
+                grain="instrument_instant",
                 key_fields=("available_at", "instrument"),
                 fields={"tomorrow": "(SELECT max(close) FROM read_parquet('*.parquet'))"},
             ),
@@ -504,6 +508,7 @@ def test_a_bounded_grouped_read_returns_the_unbounded_answer(
             "facts-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="rows",
             key_fields=("available_at", "instrument", "account_code"),
             fields={
                 "net_income": "sum(value) FILTER (WHERE account_code = '111000')",

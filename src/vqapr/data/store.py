@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
+from vqapr.data.datasets import require_grain
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
@@ -106,6 +107,7 @@ class DuckDbObservationStore:
         if len(set(declared_fields)) != len(declared_fields):
             raise ValueError("a read must not name one field twice")
         registration = self.__catalog.dataset(str(first.dataset_id))
+        require_grain(registration)
         keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)

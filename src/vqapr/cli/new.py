@@ -100,6 +100,14 @@ datasets:
     #   Merely casting a naive pyarrow timestamp to timestamp(..., tz=...) preserves the
     #   underlying epoch value; it does not localize the wall clock. Use an explicit localization
     #   operation such as pyarrow.compute.assume_timezone, then prove the round-trip.
+    # GRAIN: what one row of this table IS. Required; registration refuses without it.
+    #   instrument_instant  one value per (available_at, instrument) -- a date x ticker table.
+    #                       A panel can be built from it, and this is the shape to prefer.
+    #   instant             one value per available_at, no instrument axis (index level, rate).
+    #   rows                the vendor's grain (long / EAV); unique on key_fields; no panel.
+    #   On a panel grain, RowsLookback(n) is the last n rows of the pivoted table -- the same
+    #   instants for every name. Per-name counting is InstantsLookback on grain: rows.
+    grain: instrument_instant
     key_fields:                       # columns that together uniquely identify each row
       - timestamp
       - instrument

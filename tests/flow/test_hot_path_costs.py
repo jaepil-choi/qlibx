@@ -68,6 +68,7 @@ def priced_workspace(tmp_path: Path) -> Workspace:
             "prices-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),

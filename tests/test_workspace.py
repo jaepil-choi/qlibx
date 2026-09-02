@@ -36,6 +36,7 @@ def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistrati
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": ("session_date", "instrument"),
+        "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
     }
     kwargs.update(overrides)
@@ -642,6 +643,7 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
         "prices",
         instrument_field="instrument",
         available_at="available_at",
+        grain="rows",
         key_fields=("session_date", "instrument"),
         fields={"close": "close"},
     )

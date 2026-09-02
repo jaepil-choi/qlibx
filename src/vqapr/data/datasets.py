@@ -1,7 +1,8 @@
 """의미 — logical dataset 등록과 그 검증.
 
-물리 배치는 `sources.py`가 알고 여기는 **그 값이 무엇인지**를 안다. 등록이 요구하는 것은 여섯
-개가 전부이며(PRD §4.1), 그 이상은 그것을 필요로 하는 operation이 호출될 때 요구한다.
+물리 배치는 `sources.py`가 알고 여기는 **그 값이 무엇인지**를 안다. 등록이 요구하는 것은 일곱
+개가 전부이며(PRD §4.1; `grain`은 기록 `137`에서 더해졌다), 그 이상은 그것을 필요로 하는
+operation이 호출될 때 요구한다.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
+from enum import StrEnum
 
 from vqapr.data import scan
 from vqapr.data.scan import ColumnType
@@ -35,6 +37,43 @@ an expression nobody here can check on its own, so it gets duckdb's message from
 untouched.
 """
 
+class Grain(StrEnum):
+    """What one row of the dataset IS, declared by the author and never derived.
+
+    `docs/design/the-panel-the-surface-and-the-run.md` §2.2. The grain decides what registration
+    checks for uniqueness, whether a panel can be built from the table, and -- with the lookback
+    types that follow it (§2.4) -- what `RowsLookback` means on it. An `aggregated` projection is
+    a *means* of reaching `instrument_instant` from a long source; it is not the grain itself, and
+    a fact derived from expressions gives the author no place to state intent. `049`'s story --
+    registered long, six hundred times slower, and nobody said why -- is what a declared grain
+    prevents.
+    """
+
+    INSTRUMENT_INSTANT = "instrument_instant"
+    """One value per field per (available_at, instrument). A panel can be built."""
+
+    INSTANT = "instant"
+    """One value per available_at; no instrument axis (`docs/issues/038`). A one-column panel."""
+
+    ROWS = "rows"
+    """The vendor's grain: long / EAV. Unique on the declared `key_fields`. No panel."""
+
+
+GRAIN_NAMES = ", ".join(member.value for member in Grain)
+
+ROWS_LOOKBACK_MEANING = (
+    "on a panel grain (instrument_instant, instant) a RowsLookback(n) is the last n rows of the "
+    "pivoted table -- the same instants for every name -- not each name's own last n; per-name "
+    "counting is InstantsLookback, and it belongs to grain: rows"
+)
+"""Said wherever a grain is refused, because the same word changed meaning (design §2.4, §7-1).
+
+Every registration written before `grain` existed is edited once, by hand, to add it; that edit
+is the one sure moment to tell the author that `RowsLookback` on their table now means something
+else. Nothing decodes a grain-less registration as `rows` silently (§7-3).
+"""
+
+GRAIN_STAGE = "dataset.register.grain"
 SCHEMA_STAGE = "dataset.register.schema"
 KEY_STAGE = "dataset.register.key"
 SPAN_STAGE = "dataset.register.span"
@@ -64,6 +103,11 @@ class DatasetRegistration:
     available_at: str
     key_fields: tuple[str, ...]
     fields: Mapping[str, str]
+    grain: Grain | None = None
+    """Declared, never derived. `None` only for a registration decoded from a document written
+    before grain existed: it opens, it lists, it can be removed or re-registered, and every
+    read on it is refused (`require_grain`) until it is registered again with one.
+    """
     span: tuple[datetime, datetime] | None = None
     """첫 · 마지막 `available_at`. **선언이 아니라 측정값**이다.
 
@@ -110,7 +154,19 @@ class DatasetRegistration:
         available_at: str,
         key_fields: Sequence[str],
         fields: Mapping[str, str],
+        grain: Grain | str | None = None,
     ) -> DatasetRegistration:
+        declared_grain = parse_grain(grain, dataset_id=raw_dataset_id)
+        if declared_grain is Grain.INSTRUMENT_INSTANT and instrument_field is None:
+            raise ValueError(
+                f"dataset {raw_dataset_id!r}: grain instrument_instant needs an instrument_field; "
+                "declare one, or declare grain: instant for a table with no instrument axis"
+            )
+        if declared_grain is Grain.INSTANT and instrument_field is not None:
+            raise ValueError(
+                f"dataset {raw_dataset_id!r}: grain instant has no instrument axis; drop "
+                "instrument_field, or declare grain: instrument_instant"
+            )
         if not key_fields:
             raise ValueError("key_fields must declare at least one column")
         if not fields:
@@ -130,7 +186,44 @@ class DatasetRegistration:
             available_at=available_at,
             key_fields=tuple(key_fields),
             fields=dict(fields),
+            grain=declared_grain,
         )
+
+    @classmethod
+    def undeclared(
+        cls,
+        raw_dataset_id: str,
+        raw_source_id: str,
+        *,
+        instrument_field: str | None = None,
+        available_at: str,
+        key_fields: Sequence[str],
+        fields: Mapping[str, str],
+    ) -> DatasetRegistration:
+        """A registration read back from a document written before `grain` existed.
+
+        Named, not defaulted: the only caller is the workspace codec, and the object it builds is
+        unusable for reads until the dataset is registered again with a grain. It is not `rows`,
+        because deciding that silently is the one path the design forbids (§7-3).
+        """
+        declared = cls.of(
+            raw_dataset_id,
+            raw_source_id,
+            instrument_field=instrument_field,
+            available_at=available_at,
+            key_fields=key_fields,
+            fields=fields,
+            grain=Grain.ROWS,
+        )
+        return replace(declared, grain=None)
+
+    def key_axis(self) -> tuple[str, ...]:
+        """The columns registration proves unique, decided by the grain (design §2.2)."""
+        if self.grain is Grain.INSTRUMENT_INSTANT:
+            return (self.available_at, self.instrument_field)  # type: ignore[return-value]
+        if self.grain is Grain.INSTANT:
+            return (self.available_at,)
+        return self.key_fields
 
     def with_schema(self, schema: scan.ProjectionSchema) -> DatasetRegistration:
         """유도된 field 타입과 grouping 판정을 붙인 사본. 유도하는 쪽은 `validate`다."""
@@ -169,6 +262,51 @@ class DatasetRegistration:
             if _BARE_COLUMN.fullmatch(column):
                 roles.setdefault(column, f"fields[{framework_name}]")
         return roles
+
+
+def parse_grain(value: object, *, dataset_id: str) -> Grain:
+    """The declared grain, or a refusal that names the three values and what changed."""
+    if isinstance(value, Grain):
+        return value
+    if isinstance(value, str):
+        try:
+            return Grain(value)
+        except ValueError:
+            pass
+    observed = "absent" if value is None else repr(value)
+    raise ValueError(
+        f"dataset {dataset_id!r} must declare grain, one of: {GRAIN_NAMES} ({observed}). "
+        f"Note: {ROWS_LOOKBACK_MEANING}"
+    )
+
+
+def require_grain(registration: DatasetRegistration) -> None:
+    """Refuse a read on a registration that predates `grain`, with the same three names.
+
+    The workspace still opens with such an entry, so `list`, `remove` and re-registration work;
+    what does not work is reading it -- through a run, a materialization or `check` -- because
+    which lookback means what on it is exactly the fact its author has not yet stated.
+    """
+    if registration.grain is not None:
+        return
+    found = collector(GRAIN_STAGE, FailureFamily.DATA)
+    found.add(
+        Failure.bounded(
+            code=f"{GRAIN_STAGE}.undeclared",
+            requirement=f"a dataset must declare its grain before it can be read: {GRAIN_NAMES}",
+            observed=(
+                f"dataset {str(registration.dataset_id)!r} was registered before grain existed "
+                "and declares none"
+            ),
+            source=FailureSource(key_path=f"datasets.{registration.dataset_id}.grain"),
+            fix=(
+                f"add `grain: <{GRAIN_NAMES}>` to the dataset's declaration and register it "
+                f"again. Note: {ROWS_LOOKBACK_MEANING}"
+            ),
+            explain=ExplainTopic.DECLARATION_SHAPE,
+        )
+    )
+    found.done(retry="declare the dataset's grain and register it again").raise_if_failed()
 
 
 def check_schema(
@@ -353,10 +491,20 @@ def check_schema(
 
 
 def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
-    """2단계 — logical key가 null 없이 유일한가. 전체 스캔이다."""
+    """2단계 — 선언한 grain의 축이 null 없이 유일한가. 전체 스캔이다.
+
+    The axis is the grain's (`key_axis`), not the author's `key_fields` alone: `instrument_instant`
+    proves `(available_at, instrument)`, `instant` proves `available_at`, and `rows` proves the
+    declared `key_fields` exactly as before (architecture §17.1.2). A grouped projection on a panel
+    grain has nothing to prove -- `GROUP BY` yields one row per pair by construction -- so the scan
+    is skipped rather than run against source rows the projection collapses.
+    """
     found = collector(KEY_STAGE, FailureFamily.DATA)
-    result = scan.key_check(spec, registration.key_fields)
-    declared = ", ".join(registration.key_fields)
+    if registration.grain is not Grain.ROWS and registration.aggregated:
+        return found.done(retry=_RETRY)
+    axis = registration.key_axis()
+    result = scan.key_check(spec, axis)
+    declared = ", ".join(axis)
     if result.null_groups:
         found.add(
             Failure.bounded(
@@ -589,7 +737,9 @@ def validate(
     described = registration.with_schema(projection)
 
     key_started = time.perf_counter()
-    key = check_key(registration, spec)
+    # The DESCRIBED registration: whether the projection is grouped is what decides if the
+    # panel grain's uniqueness is proved by scan or by construction.
+    key = check_key(described, spec)
     if not key.ok:
         key_timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
         return key, key_timing, registration

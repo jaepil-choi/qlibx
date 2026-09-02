@@ -115,6 +115,7 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
             "prices",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),

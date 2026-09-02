@@ -41,6 +41,7 @@ def _workspace(tmp_path: Path, parquet: Path) -> Workspace:
             "prices",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             # Three declared fields on one dataset -- the `ff_factors` shape. The third is an
             # expression, which is what a field is since `docs/issues/049`.

@@ -136,6 +136,7 @@ def install(project_root: Path) -> SamplePanel:
             "sample-prices-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={name: name for name in ("open", "high", "low", "close", "volume")},
         ),

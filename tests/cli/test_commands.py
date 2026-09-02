@@ -109,6 +109,7 @@ datasets:
     path: {observation.as_posix()}
     instrument_field: instrument
     available_at: available_at
+    grain: rows
     key_fields: [available_at, instrument]
     fields: {{close: close}}
 

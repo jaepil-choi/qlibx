@@ -68,6 +68,7 @@ def workspace(tmp_path: Path) -> Workspace:
             "benchmark-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"weight": "weight"},
         ),

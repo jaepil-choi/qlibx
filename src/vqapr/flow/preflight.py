@@ -9,6 +9,7 @@ from io import BytesIO
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.constraint import Constraint
+from vqapr.data.datasets import require_grain
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import (
@@ -80,6 +81,7 @@ def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSp
     if not isinstance(requirement, DataRequirement):
         raise TypeError("requirement must be a DataRequirement")
     registration = workspace.dataset(str(requirement.dataset_id))
+    require_grain(registration)
     if requirement.field_id not in registration.fields:
         raise ValueError(
             f"dataset {str(requirement.dataset_id)!r} does not provide required field: "

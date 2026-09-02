@@ -222,6 +222,8 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
             else {name: str(column_type) for name, column_type in item.field_types.items()}
         ),
         "aggregated": item.aggregated,
+        # `None` names a registration written before grain existed: it lists, and refuses reads.
+        "grain": None if item.grain is None else item.grain.value,
         "instrument_field": item.instrument_field,
         "available_at": item.available_at,
         "span": [str(value) for value in (item.span or ())] or None,

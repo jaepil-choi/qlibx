@@ -602,6 +602,7 @@ def test_an_agendas_template_registers_after_its_placeholders_are_filled(
         f"    path: {prices.as_posix()}\n"
         "    instrument_field: instrument\n"
         "    available_at: available_at\n"
+        "    grain: instrument_instant\n"
         "    key_fields: [available_at, instrument]\n"
         "    fields: {close: close}\n",
         encoding="utf-8",

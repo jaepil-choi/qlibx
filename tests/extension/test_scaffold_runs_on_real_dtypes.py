@@ -99,6 +99,7 @@ def _workspace(project: Path, prices: Path) -> Workspace:
             "prices",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),

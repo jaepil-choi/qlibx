@@ -158,10 +158,17 @@ def test_a_long_run_is_seen_as_live_while_it_is_still_executing(
     So this drives `public.run` -- the path the product uses -- with the window shrunk, and asks a
     peer what it sees while the run is still going. Driving the writer instead is exactly the
     mistake that made the previous test vacuous.
+
+    **The peer probes from inside the run, not after a fixed sleep.** A version of this test slept
+    six seconds on a side thread and then probed; the sample run takes five seconds on an idle
+    machine, so the probe found a finished record and the test passed only while other suites
+    were loading the machine (record `134`). The probe now runs on the run's third heartbeat --
+    the product's own refresh, wired by `public.run` -- after first letting the shrunk window
+    elapse, which is exactly the moment a run that did NOT refresh would have aged out.
     """
-    import threading
     import time
 
+    from vqapr._internal.filelock import lock_age
     from vqapr.flow import run_records
 
     monkeypatch.setattr(run_records, "LOCK_STALE_AFTER", 0.5)
@@ -171,26 +178,38 @@ def test_a_long_run_is_seen_as_live_while_it_is_still_executing(
     frozen = preflight_run(project, _definition(project))
 
     seen: list[str] = []
+    heartbeats: list[int] = []
+    original = run_records.RunRecordWriter.heartbeat
 
-    def peer() -> None:
-        # Far past the window, while the run is certainly still executing.
-        time.sleep(6)
-        try:
-            run_records.RunRecordWriter(store, "live").open()
-            seen.append("STOLEN")
-        except run_records.RunRecordLive:
-            seen.append("LIVE")
-        except Exception as unexpected:
-            seen.append(type(unexpected).__name__)
+    def refreshing_heartbeat(writer: run_records.RunRecordWriter) -> None:
+        heartbeats.append(1)
+        if len(heartbeats) == 3:
+            # Past the window since the previous refresh: a run that stopped touching its lock
+            # here would read as dead.
+            time.sleep(0.6)
+            age = lock_age(writer.directory / run_records.LOCK_FILENAME)
+            assert age is not None and age > run_records.LOCK_STALE_AFTER, age
+            original(writer)
+            try:
+                run_records.RunRecordWriter(store, "live").open()
+                seen.append("STOLEN")
+            except run_records.RunRecordLive:
+                seen.append("LIVE")
+            except Exception as unexpected:
+                seen.append(type(unexpected).__name__)
+            return
+        original(writer)
 
-    watcher = threading.Thread(target=peer)
-    watcher.start()
-    execute_run(project, frozen, store_root=store, run_id="live")
-    watcher.join(timeout=120)
+    monkeypatch.setattr(run_records.RunRecordWriter, "heartbeat", refreshing_heartbeat)
+    result = execute_run(project, frozen, store_root=store, run_id="live")
 
     assert seen == ["LIVE"], (
         "a run still executing was not seen as live, so its id can be stolen and its tables "
         "deleted mid-flight"
+    )
+    assert len(heartbeats) >= len(result.occurrences), (
+        "public.run must refresh the lock at least once per occurrence; it refreshed "
+        f"{len(heartbeats)} times over {len(result.occurrences)} occurrences"
     )
 
 

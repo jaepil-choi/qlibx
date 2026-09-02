@@ -23,8 +23,11 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 23
+CEILING = 22
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
+
+Was 23 after record `132`. Record `134` removed the function-local `Workspace` import in
+`declarations._instruments`: the roster is staged on the transaction `_apply` already holds.
 
 Was 35 after record `131`. Record `132` deleted `_internal/strategy_bridge.py` and
 `_internal/models/agent_first.py` -- the adapter between the two StrategyModel classes -- and

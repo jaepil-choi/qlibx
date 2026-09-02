@@ -1560,83 +1560,87 @@ semantics를 소유하지 않는다.
 
 - **UC**: `UC-EXTENSION-001`, `UC-FACTOR-001`, `UC-BUILTIN-001`
 
-### 5.7 `constraints/` — 선언 하나, 소비자 셋
+### 5.7 `constraints/` — 선언 하나, 소비자 둘
 
-PRD §7.1이 제약의 결과를 셋으로 갈랐고, **셋이 같은 선언을 봐야 한다.**
+PRD §7.1이 제약의 결과를 둘로 갈랐고, **둘이 같은 선언을 봐야 한다.**
 
 ```text
-                     ┌── 판단 시점       projection → optimize의 bounds
-선언된 ConstraintSet ─┼── 결과 생성 시    evaluation(intended weights) → 독립 검증
-                     └── 별도 cadence    evaluation(actual holdings)  → monitoring finding
+                     ┌── 판단 시점       투영된 bound → 구성이 그 안에서 최선을 다한다
+선언된 ConstraintSet ─┤
+                     └── 별도 cadence    committed state 판정 → 넘었으면 finding
 ```
+
+#### 두 소비자는 성격이 다르고, 그 다름이 설계다
+
+**앞은 best effort, 뒤는 사실 관찰이다.** 구성은 한계를 입력으로 받아 그 안에서 만들 수 있는 최선의
+portfolio를 만든다. monitoring은 실제로 committed된 것을 보고 넘었는지 말한다. **최선을 다했는지는
+monitoring의 질문이 아니다** — 넘었으면 넘은 것이다.
+
+**그래서 판단을 만든 직후에 그 판단을 다시 채점하는 자리는 없다.** 한때 있었고, 그것이 무엇을 만들었는지
+기록해 둔다: 같은 규칙이 판단을 잴 때와 계좌를 잴 때 서로 다른 답을 냈고(`docs/issues/014`), *"판단
+시점엔 통과했는데 나중엔 위반"*이 **실행이 계획과 달라져서인지 두 채점이 갈려서인지 구분되지 않았다.**
+세는 자리가 하나면 그 모호함이 생길 수 없다.
+
+- **왜 monitoring 쪽을 남기는가**: 지켜졌는지에 대한 답은 계획이 아니라 **실제 장부**에 있다. 그리고
+  판단 시점에는 원리적으로 알 수 없는 breach가 있다 — 정수 수량 변환이 비중을 살짝 넘기는 경우
+  (`UC-CONSTRAINT-ADJUST-001`)는 어느 가격에 몇 주가 체결될지 정해지기 전에는 계산될 수 없다. 판단을
+  채점하는 자리는 그것을 구조적으로 못 잡는다.
+- **한계를 넘은 판단이 run을 중단시키지 않는다**: 중단하면 그 전략이 실제로 무엇을 하는지 끝까지 볼 수
+  없다. 정지 종목이 rebalance를 멈추지 않고 미체결이 사유와 함께 기록되는 것과 같은 규칙이다 —
+  **경제적 사실은 기록하고, 진행은 막지 않는다.**
 
 #### 벡터로는 안 된다 — 제약의 정체를 잃는다
 
-`optimize`가 받는 것은 종목별 `lower`/`upper` 숫자 벡터다. 그런데 PRD가 요구하는 것은 *"constraint별
-measured value, bound, excess, pass/fail, input lineage"*(§7.1)다.
+최적화가 받는 것은 종목별 상하한 숫자 벡터다. 그런데 PRD가 요구하는 것은 *"어느 constraint를 넘었는지와
+그 시점의 한도·점검값"*(§7.1)이다.
 
-**`upper[i] = 0.10`을 보고 그것이 어느 제약에서 나왔는지 복원할 수 없다.** 그래서 제약은 정체를 가진
+**상한이 0.10이라는 것만 보고 그것이 어느 제약에서 나왔는지 복원할 수 없다.** 그래서 제약은 정체를 가진
 선언이어야 하고, 벡터는 그 선언의 **투영 결과**여야 한다.
 
 > **용어 주의.** 여기서 "투영"은 *선언 → 종목별 bound 벡터*를 뜻한다. §11.7 ⑦의 "순차 투영"은 참조
 > 구현이 쓰는 **자르고 재분배하기를 반복하는 기법**의 이름이고 우리가 쓰지 않는 방법이다(§11.7 ⑥).
 > 같은 단어가 다른 것을 가리키므로 섞어 읽지 않는다.
 
-```python
-class Constraint(Protocol):
-    constraint_id: str
-    def requirements(self) -> tuple[DataRequirement, ...]: ...
-    def project(self, window, instruments) -> Bounds: ...
-    def measure(self, weights_or_holdings, window) -> ConstraintFinding: ...
-```
+#### finding이 싣는 것은 셋이고, 그 이상은 싣지 않는다
 
-**제약이 스스로 `DataRequirement`를 선언한다.** single-name cap의 $w^{index}(t)$가 time-varying PIT data라
-그렇게 될 수밖에 없다. 그리고 그 data가 없으면 **0으로 추정하지 않고 평가를 실패시킨다**(PRD §7).
+**어느 규칙 · 그때의 한도 · 그때의 점검값.** 통과/위반과 초과폭은 그 셋에서 나온다.
 
-#### 어디에 선언하나 — StrategyModel이 아니라 `RunDefinition`이다
+**읽은 것을 판정마다 따라 적지 않는다.** 그렇게 하면 관찰이 무거워지고, 무거운 관찰은 cadence를 늘릴
+수 없어 결국 덜 관찰하게 된다 — 관찰을 촘촘하게 두는 것이 이 층의 목적이므로 그 교환은 손해다. 무엇을
+읽었는가는 창이 이미 기록하고 있고(§4.3), 그것은 run 단위의 사실이지 finding마다 복제할 사실이 아니다.
 
-**결정.** `RunDefinition`이 `ConstraintSet` 하나를 갖고, 판단·검증·monitoring 셋이 그것을 본다.
+#### 제약이 스스로 자기 data를 선언한다
+
+single-name cap의 $w^{index}(t)$가 time-varying PIT data라 그렇게 될 수밖에 없다. 그리고 그 data가 없으면
+**0으로 추정하지 않고 평가를 실패시킨다**(PRD §7). 한계가 데이터에서 오는 규칙은, 데이터가 없을 때
+조용히 느슨해지면 안 된다.
+
+#### 어디에 선언하나 — 전략이 아니라 run이다
+
+**결정.** run 정의가 제약 집합 하나를 갖고, 구성과 monitoring 둘 다 그것을 본다.
 
 - **왜 전략이 아닌가**: monitoring은 별도 cadence라 전략이 소유하면 **자기 사본을 따로 갖게 된다.** 둘이
-  갈라지면 `UC-EXEC-003`의 finding이 구성 때 지키려던 것과 대응하지 않는다.
-- **그리고 §7.1이 *"생산 검증이 독립적으로 판정한다"*를 요구한다.** 검증자가 전략이 준 bound를 쓰면 그것은
-  독립이 아니다. 선언이 전략 바깥에 있어야 독립이 성립한다.
-- 전략은 `context.constraint_bounds()`로 **투영된 결과만** 받는다. flow가 제약의 requirement를 PIT로 풀어
-  준다(§4.3).
+  갈라지면 `UC-EXEC-003`의 finding이 구성 때 지키려던 것과 대응하지 않는다 — 무엇을 넘었다고 말하는데
+  그 무엇이 전략이 지키려던 것과 다른 물건이 된다.
+- **그리고 관찰이 관찰이려면 관찰 대상 바깥에 있어야 한다.** 전략이 자기 한계를 스스로 정하고 스스로
+  지켰다고 말하면 그것은 관찰이 아니다. 선언이 전략 바깥에 있는 것이 그 독립성의 전부다.
+- 전략은 **투영된 결과만** 받는다. flow가 제약이 요구한 data를 PIT로 풀어 준다(§4.3).
 
-#### bounds는 두 출처에서 오고, 검증은 한쪽만 판정한다
+#### bounds는 두 출처에서 오고, monitoring은 한쪽만 판정한다
 
-`optimize`가 받는 `lower`/`upper`는 **선언된 제약의 투영만이 아니다.** 전략 자신의 구성 선택도 같은
-벡터에 들어간다.
+구성이 받는 상하한은 **선언된 제약의 투영만이 아니다.** 전략 자신의 구성 선택도 같은 벡터에 들어간다 —
+예컨대 mandate가 *"주식은 max(10%, 벤치마크 비중)"*이라고만 말할 때, 그 전략이 ETF 비중을 정확히 얼마로
+쓸지는 전략이 정한다(§11.7 ④). 둘을 합치는 것은 **전략의 일**이다.
 
-```python
-bounds = context.constraint_bounds()          # no_short · single_name_cap  ← 선언된 것
-lower  = bounds.lower | {etf: e}              # ETF를 정확히 e에 고정        ← 전략의 선택
-upper  = bounds.upper | {etf: e}
-```
-
-§11.7 ④가 그 사례다 — `주식: max(10%, B)`는 mandate이고 `ETF: e`는 그 전략이 ETF 비중을 어떻게 쓸지 정한
-것이다. 둘을 합치는 것은 **전략의 일**이다.
-
-**그러나 생산 검증과 monitoring은 선언된 제약만 판정한다.**
+**그러나 monitoring은 선언된 제약만 판정한다.**
 
 - **왜**: 구성 선택을 compliance로 판정하면 *"전략이 자기 규칙을 어겼다"*가 mandate 위반과 **같은 등급**이
-  된다. 그리고 전략 코드를 고칠 때마다 과거 compliance 판정의 의미가 달라진다.
-- **거래 불가 종목의 `frozen`도 같은 자리에 있다** — 아래 참고. 시장 사실도, 전략의 구성 선택도, mandate가
-  아니다.
+  된다. 그리고 전략 코드를 고칠 때마다 과거 compliance 판정의 의미가 달라진다 — 어제의 위반이 오늘 위반이
+  아니게 되는 기록은 기록이 아니다.
+- **거래 불가 종목을 그대로 두는 것도 같은 자리에 있다** — 아래 참고. 시장 사실도, 전략의 구성 선택도,
+  mandate가 아니다.
 - 구성 선택 때문에 원하는 노출에 도달하지 못했다면 그것은 finding이 아니라 **해소되지 않은 잔여**이며
   PRD §7.1의 *"원래 의도, 반영된 결과, 해소되지 않은 잔여"*로 남는다.
-
-#### 생산 검증과 monitoring은 같은 함수를 부른다
-
-```python
-evaluation.measure_all(constraints, intended_weights, window)   # §5.4 생성 시 검증
-evaluation.measure_all(constraints, actual_holdings,  window)   # monitoring
-```
-
-- **왜 같아야 하나**: 다르면 *"판단 시점엔 통과했는데 monitoring은 위반이라 한다"*가 제약 해석 차이인지
-  진짜 위반인지 구분되지 않는다. 같은 함수면 차이의 원인이 **입력뿐**이고, `UC-CONSTRAINT-ADJUST-001`이
-  말하는 정수 변환 오차가 정확히 그 차이로 드러난다.
 
 #### 현재 둘뿐이고, `frozen`은 여기 없다
 
@@ -2723,7 +2727,7 @@ src/vqapr/
 │   ├── diagnostics.py     판단 시점 진단 — gross/net·집중도·**의도 회전율**
 │   └── intents.py         PortfolioIntent · from_weights · 생성 시 검증 (§5.4)
 │
-├── constraints/     선언 하나, 소비자 셋 (§5.7)
+├── constraints/     선언 하나, 소비자 둘 (§5.7)
 │   ├── constraint.py      Constraint 프로토콜 — 사용자가 구현하는 계약
 │   ├── projection.py      선언 + PIT 관측 → Bounds. 누락 시 0 추정 없이 실패
 │   ├── evaluation.py      weights **또는** holdings → findings
@@ -3839,7 +3843,7 @@ class RunDefinition(BaseModel):
     initial_state_ref: ModelStateRef | None
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
-    constraints: ConstraintSet | None = None      # 판단·검증·monitoring이 함께 본다 (§5.7)
+    constraints: ConstraintSet | None = None      # 구성과 monitoring이 함께 본다 (§5.7)
     monitoring: MonitoringPolicy | None = None
 ```
 
@@ -3988,7 +3992,7 @@ agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을
 | `UC-COST-001`~`004` | §6.2 (`Instrument.kind` + `CostRule` 선택자 + 정확히 하나) + §8.3 |
 | `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §6.4 + §7.1 |
 | `UC-ACCOUNT-HISTORY-001` | §7.3 |
-| `UC-EXEC-003`, `UC-MONITOR-001` | §5.7 (생산 검증과 같은 `evaluation`) + §8.1 (독립 MONITORING dispatch) |
+| `UC-EXEC-003`, `UC-MONITOR-001` | §5.7 (구성과 같은 선언을 보는 monitoring) + §8.1 (독립 MONITORING dispatch) |
 | `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.7 (선언·투영·평가) + §5.3 (`optimize`) + §5.4 (생성 시 검증) + §11.3 (패턴) + §11.7 (전체 규모) |
 | `UC-LOOKTHROUGH-001`~`003` | §5.3 (`optimize`의 `L`) + §5.6 (`transforms/lookthrough`) + §11.5 (두 축) + §11.7 ④. StrategyModel이 명시적으로 부르고 패키지는 자동 확장하지 않음 |
 | `UC-REPORT-002` | §9.1 (봉투 · 예약 컬럼 · 주문 형태 기록) + §11.7 ⑦ |
@@ -4220,7 +4224,8 @@ wide table 기준"*이다. **§4.2와 §16과 `docs/issues/033`은 반대로 적
 제약 · 확장점 · 표면:
 
 - [ ] `ConstraintSet` 없이 선언한 run이 정상 실행된다 (`UC-CONSTRAINT-001`)
-- [ ] 같은 `evaluation` 함수가 intended weights와 actual holdings 둘 다에 쓰인다
+- [ ] 한계를 넘은 판단이 run을 중단시키지 않고, 그 위반이 monitoring finding으로 남는다
+- [ ] monitoring finding이 어느 제약을 넘었는지와 그때의 한도·점검값을 싣는다
 - [ ] 제약이 요구한 PIT data가 없으면 **portfolio 결과를 만들기 전에** 실패한다
 - [ ] 거래 불가 종목의 비중 고정이 `ConstraintFinding`으로 보고되지 않는다 (제약이 아니라 시장 사실)
 - [ ] 내장 Exchange·Constraint가 쓰는 API 집합이 public surface 안에 있다

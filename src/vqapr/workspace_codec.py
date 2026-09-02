@@ -356,9 +356,12 @@ def _encode(
             }
             for key, agenda in sorted(agendas.items())
         },
+        # Keyed by the strategy's component id, carrying the agenda it names (record `138`).
+        # The shape before it was keyed by agenda and carried the component; `_decode` reads
+        # both for one release, and a document is written forward in this shape.
         "strategy_configs": {
             key: {
-                "component": str(config.component.component_id),
+                "agenda_id": str(config.agenda_id),
                 "agenda_role": str(config.agenda_role),
             }
             for key, config in sorted(strategy_configs.items())
@@ -792,17 +795,22 @@ def _decode(
         raise TypeError("configuration sections must be mappings")
     decoded_strategy_configs: dict[str, StrategyConfig] = {}
     for raw_id, raw_config in raw_strategy_configs.items():
-        if (
-            not isinstance(raw_id, str)
-            or not isinstance(raw_config, dict)
-            or set(raw_config) != {"component", "agenda_role"}
-        ):
+        if not isinstance(raw_id, str) or not isinstance(raw_config, dict):
+            raise ValueError("strategy config must be keyed by a string and be a mapping")
+        # Two shapes, one release apart (record `138`): keyed by component id carrying
+        # `agenda_id`, or -- written before an agenda was shareable -- keyed by agenda id
+        # carrying `component`. Either decodes to the same binding; the next write is forward.
+        if set(raw_config) == {"agenda_id", "agenda_role"}:
+            component, agenda_id = raw_id, raw_config["agenda_id"]
+        elif set(raw_config) == {"component", "agenda_role"}:
+            component, agenda_id = raw_config["component"], raw_id
+        else:
             raise ValueError(
-                "strategy config must contain an agenda_id and exactly component and agenda_role"
+                "strategy config must contain exactly agenda_id and agenda_role (keyed by the "
+                "strategy's component id)"
             )
-        component = raw_config["component"]
         role = raw_config["agenda_role"]
-        if not isinstance(component, str) or not isinstance(role, str):
+        if not all(isinstance(value, str) for value in (component, agenda_id, role)):
             raise TypeError("strategy config fields must be strings")
         try:
             registered_component = decoded_components[component_id(component)]
@@ -810,15 +818,15 @@ def _decode(
             raise ValueError(
                 f"strategy config {raw_id!r} references an unregistered component"
             ) from error
-        config = StrategyConfig(registered_component, raw_id, OperationRole(role))
+        config = StrategyConfig(registered_component, agenda_id, OperationRole(role))
         if (
-            decoded_agendas.get(raw_id) is None
-            or decoded_agendas[raw_id].role is not config.agenda_role
+            decoded_agendas.get(agenda_id) is None
+            or decoded_agendas[agenda_id].role is not config.agenda_role
         ):
             raise ValueError(
                 f"strategy config {raw_id!r} references an absent or mismatched agenda"
             )
-        decoded_strategy_configs[raw_id] = config
+        decoded_strategy_configs[component] = config
     decoded_valuation_configs: dict[str, ValuationConfig] = {}
     for raw_id, raw_config in raw_valuation_configs.items():
         if not isinstance(raw_id, str) or not isinstance(raw_config, dict):

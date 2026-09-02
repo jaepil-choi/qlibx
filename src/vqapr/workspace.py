@@ -559,13 +559,21 @@ class Workspace:
                 retry="register the agenda, then retry",
             ) from error
 
-    def strategy_config(self, raw_agenda_id: str) -> StrategyConfig:
+    def strategy_config(self, raw_component_id: str) -> StrategyConfig:
+        """The binding of one strategy component to its callback agenda, by the component's id.
+
+        Keyed by the strategy since record `138` (`docs/issues/040`): an agenda is a cadence and
+        cadences are shared, so several strategies may name one agenda and each is found by its
+        own id. Until then the workspace keyed this by `agenda_id`, which made an agenda drive at
+        most one strategy and refused the second by naming the agenda.
+        """
         return self._config_lookup(
-            raw_agenda_id,
+            raw_component_id,
             self._strategy_configs,
             _detach_strategy_config,
             STRATEGY_REGISTER_STAGE,
             "strategy config",
+            noun="component_id",
         )
 
     def valuation_config(self, raw_agenda_id: str) -> ValuationConfig:
@@ -902,13 +910,17 @@ class Workspace:
                 "strategy component must be registered",
                 fix="register the strategy's component before registering the StrategyConfig",
             )
+        # Keyed by the strategy (record `138`, `docs/issues/040`): an agenda is a cadence and
+        # cadences are shared. Two strategies naming one agenda are two bindings; one strategy
+        # naming two agendas is the conflict, and the refusal names the strategy.
         return self._merge_declaration(
             state,
             "strategy_configs",
-            config.agenda_id,
+            str(config.component.component_id),
             config,
             _detach_strategy_config,
             STRATEGY_REGISTER_STAGE,
+            noun="component_id",
         )
 
     def _merge_valuation_config(
@@ -949,26 +961,39 @@ class Workspace:
         value: object,
         detach: object,
         stage: str,
+        *,
+        noun: str = "agenda_id",
     ) -> tuple[_State, bool]:
-        """One agenda-keyed declaration folded into its section: idempotent, conflict, or new."""
+        """One keyed declaration folded into its section: idempotent, conflict, or new.
+
+        `noun` is what the key IS -- `agenda_id` for the agenda-keyed sections, `component_id`
+        for strategy configs -- so a refusal names the thing the author wrote (`docs/issues/040`
+        measured a refusal that named an agenda the author never touched).
+        """
         declarations: Mapping[str, object] = getattr(state, section)
         existing = declarations.get(key)
         if existing is not None:
             if existing == value:
                 return state, False
+            observed = "a different declaration is already registered"
+            if noun == "component_id":
+                observed = (
+                    f"strategy {key!r} is already bound to agenda "
+                    f"{getattr(existing, 'agenda_id', '?')!r}"
+                )
             raise _workspace_error(
                 stage=stage,
                 code=f"{stage}.conflict",
                 requirement=(
-                    f"agenda_id {key!r} must keep its existing declaration or use a new identity"
+                    f"{noun} {key!r} must keep its existing declaration or use a new identity"
                 ),
-                observed="a different declaration is already registered",
+                observed=observed,
                 fix=(
                     f"keep the registered declaration for {key!r} unchanged, or choose "
-                    "a new agenda_id"
+                    f"a new {noun}"
                 ),
                 explain=ExplainTopic.WORKSPACE_STATE,
-                retry="use the existing declaration or choose a new agenda_id",
+                retry=f"use the existing declaration or choose a new {noun}",
             )
         updated = {**declarations, key: detach(value)}  # type: ignore[operator]
         return state._replace(**{section: updated}), True
@@ -1199,27 +1224,35 @@ class Workspace:
         return tuple(sorted(blockers))
 
     def _config_lookup(
-        self, key: str, declarations: Mapping[str, object], detach: object, stage: str, label: str
+        self,
+        key: str,
+        declarations: Mapping[str, object],
+        detach: object,
+        stage: str,
+        label: str,
+        *,
+        noun: str = "agenda_id",
     ) -> object:
         if not isinstance(key, str) or not key:
             raise _workspace_error(
                 stage=stage,
                 code=f"{stage}.invalid",
-                requirement=f"{label} lookup requires a valid agenda_id",
+                requirement=f"{label} lookup requires a valid {noun}",
                 observed=repr(key),
-                fix="pass a non-empty agenda_id string to look up this configuration",
+                fix=f"pass a non-empty {noun} string to look up this configuration",
                 explain=ExplainTopic.DECLARATION_SHAPE,
-                retry="use a valid agenda_id, then retry",
+                retry=f"use a valid {noun}, then retry",
             )
         try:
             return detach(declarations[key])  # type: ignore[operator]
         except KeyError as error:
+            what = "strategy" if noun == "component_id" else "agenda"
             raise _workspace_error(
                 stage=stage,
                 code=f"{stage}.missing",
-                requirement=f"{label} for agenda {key!r} must be registered",
+                requirement=f"{label} for {what} {key!r} must be registered",
                 observed=f"registered {label}s: {', '.join(sorted(declarations)) or '(none)'}",
-                fix=f"register a {label} for agenda {key!r}, or use one of the ids listed above",
+                fix=f"register a {label} for {what} {key!r}, or use one of the ids listed above",
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry=f"register the {label}, then retry",
             ) from error

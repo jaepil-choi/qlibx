@@ -1,12 +1,17 @@
 # 040 — An agenda drives exactly one strategy; the template is keyed the other way round and the refusal names an object the author never touched
 
-**Status:** **owner-decided 2026-08-31, not yet implemented.** The ruling: **an agenda is
-shareable.** The one-agenda-one-strategy cardinality is not intended, so the workspace document
+**Status:** **CLOSED 2026-09-02 — record `138`** (campaign Step 6, branch
+`step-06-a-shareable-agenda`). The ruling of 2026-08-31 — **an agenda is shareable** — is
+implemented: the workspace keys `strategy_configs` by the strategy's component id, three strategies
+naming one agenda are three registrations, and the conflict is one strategy naming two agendas,
+refused by naming the strategy and the agenda it already holds. A document written in the
+agenda-keyed shape decodes for one release and is written forward. `tests/test_an_agenda_is_shareable.py`
+holds the acceptance criterion.
+
+**Status before that:** owner-decided 2026-08-31, not yet implemented. The ruling: an agenda is
+shareable. The one-agenda-one-strategy cardinality is not intended, so the workspace document
 re-keys its `strategy_configs` section away from `agenda_id` and existing workspaces migrate. The
 duplicate-cadence workaround, and the near-identical agendas this journey left behind, go with it.
-
-The refusal is corrected under the same decision - naming the strategy that already holds the agenda
-is right whichever way the cardinality goes, so it does not wait for the schema change.
 
 **Status when filed:** open. Found 2026-08-30 by the first-time-user journey in
 `kaist-thesis/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-018**,

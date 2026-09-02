@@ -502,7 +502,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
 
-    strategy = workspace.strategy_config(definition.strategy.agenda_id)
+    strategy = workspace.strategy_config(str(definition.strategy.component.component_id))
     if strategy != definition.strategy:
         raise ValueError("strategy configuration reference drift")
     strategy = type(strategy)(

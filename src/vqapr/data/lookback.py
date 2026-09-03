@@ -43,12 +43,15 @@ class RowsLookback:
 class InstantsLookback:
     """The last `instants` observations of **each instrument independently**.
 
-    Per name, per field, counting only non-null values: a field's rank is computed inside its own
-    instrument's partition, so a name that reports twice a week and one that reports daily both
-    return `instants` values, from different dates. This was `RowsLookback`'s meaning until the
-    lookback types followed the grain (design §2.4); it is the right question for a long,
-    vendor-grain table -- quarterly statements where every item has its own publication date --
-    and it belongs there: `grain: rows` only.
+    Per name, per field, counting only instants on which the field is non-null: a field's rank is
+    a dense rank over `available_at` inside its own instrument's partition, so a name that reports
+    twice a week and one that reports daily both return `instants` instants, from different dates.
+    **Instants, not rows.** On a vendor-grain table a name carries many rows per instant (scopes x
+    account codes x bundles), and every row of an admitted instant comes back; `docs/issues/053`
+    measured the version that counted rows and reached one instant's first n rows. This was
+    `RowsLookback`'s meaning until the lookback types followed the grain (design §2.4); it is the
+    right question for a long, vendor-grain table -- quarterly statements where every item has its
+    own publication date -- and it belongs there: `grain: rows` only.
 
     **The batch's calendar span is therefore set by the sparsest instrument, and is unbounded
     above.** That is the property a cross-sectional model must not meet, and the type keeps it

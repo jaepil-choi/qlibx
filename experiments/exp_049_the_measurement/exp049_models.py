@@ -32,16 +32,19 @@ TIMEZONE = "Asia/Seoul"
 LOOKBACK_DAYS = 1150
 """Enough to reach two consecutive annual statements, with the margin the original carried."""
 
-INSTANTS_LOOKBACK = 2000
+INSTANTS_LOOKBACK = 12
 """`grain: rows` admits only `InstantsLookback`, and a calendar span is refused on it
 (`lookback_fits_grain`), so the long side cannot say "1150 days" the way the original model did.
 
-And the number is rows, not instants: the read ranks with `count(field) OVER (PARTITION BY
-instrument ORDER BY available_at DESC, <key fields> DESC ROWS ...)`, which on a vendor-grain table
--- many rows per (name, instant) -- counts source rows. A name here carries between ~250 and
-~600 rows a year (two scopes, up to thirty codes, one or two bundles, five period rows), so 2000
-reaches at least three fiscal years for every name. The reduction keeps only the last two, so
-reaching further changes nothing in the published rows; the anti-join is what proves that."""
+Twelve instants is three fiscal years: the generator publishes four availability instants a year
+per name (March, June, September and December quarters; the December annual row shares the
+quarter's instant). The reduction keeps only the last two fiscal years, so reaching a third
+changes nothing in the published rows, and the anti-join is what proves that.
+
+This was `2000` while the read counted source rows rather than instants (`docs/issues/053`): a
+name carried between ~250 and ~600 rows a year, so the number had to be argued in a docstring
+rather than read off the calendar. Deletion campaign Step 1 made the count mean what the type
+says, and the number became the one the question has."""
 
 CONSOLIDATED_SCOPE = "C"
 ANNUAL_SETTLEMENT_TYPE = "D"

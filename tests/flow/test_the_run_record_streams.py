@@ -39,7 +39,6 @@ from vqapr.flow.run_records import TABLES_DIRECTORY, RunRecordWriter, read_table
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 
 ROWS_PER_OCCURRENCE = 200
 PADDING = "x" * 100
@@ -56,7 +55,11 @@ class RecordsEveryOccurrence(StrategyModel):
         self.memory = {"count": count}
         assert self.recorder is not None
         self.recorder.append_batch(
-            "probe", [{"n": count * ROWS_PER_OCCURRENCE + i, "padding": PADDING} for i in range(ROWS_PER_OCCURRENCE)]
+            "probe",
+            [
+                {"n": count * ROWS_PER_OCCURRENCE + i, "padding": PADDING}
+                for i in range(ROWS_PER_OCCURRENCE)
+            ],
         )
         return Hold(reason="probe")
 
@@ -122,8 +125,6 @@ def _flow(
     requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     frozen = FrozenRun(
         run_id="test",
-        valuation=ValuationConfig("valuation", OperationRole.VALUATION),
-        valuation_agenda=FrozenAgenda("valuation", OperationRole.VALUATION, ()),
         strategies=(
             FrozenStrategy(
                 config=StrategyConfig(
@@ -181,7 +182,9 @@ def test_rows_reach_the_disk_at_each_accepted_occurrence(tmp_path: Path) -> None
     # empty table and each later one sees exactly the occurrences accepted so far.
     assert len(sizes) == 3
     assert sizes == [0, 1, 2], sizes
-    assert len(list(table.glob("*.parquet"))) == 3, "the last occurrence's rows landed after its signal"
+    assert len(list(table.glob("*.parquet"))) == 3, (
+        "the last occurrence's rows landed after its signal"
+    )
     assert result.final_state.recorder_rows == {}, "a streamed run retains no rows on its roots"
     assert writer.counts()["probe"] == {"rows": 3 * ROWS_PER_OCCURRENCE, "instants": 3}
     assert sum(1 for _ in read_table(tmp_path, "streamed", "probe")) == 3 * ROWS_PER_OCCURRENCE

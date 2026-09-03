@@ -69,9 +69,13 @@ def test_every_verb_is_described_in_the_top_level_help(
     assert exit_info.value.code == 0
 
     printed = capsys.readouterr().out
+    # argparse wraps a summary at the console width, and textwrap may break a hyphenated word
+    # (`execution-input`) at its hyphen; the comparison rejoins both kinds of break, since the
+    # question is whether the sentence is there, not where the console folded it.
+    flattened = " ".join(printed.split()).replace("- ", "-")
     for verb in _VERBS:
         assert verb in printed, f"{verb} is missing from --help"
-        assert _SUMMARIES[verb] in " ".join(printed.split()), f"{verb} has no summary"
+        assert _SUMMARIES[verb] in flattened, f"{verb} has no summary"
 
 
 @pytest.mark.parametrize("verb", _VERBS)
@@ -275,10 +279,12 @@ def test_rerunning_new_refuses_by_name_instead_of_raising(
 
 _RUN_KEYS = (
     "strategies",
-    "valuation",
     "instruments",
     "start",
     "end",
+    "sessions_from",
+    "timezone",
+    "at",
     "exchange",
     "execution_input",
     "initial_account",
@@ -287,8 +293,11 @@ _RUN_KEYS = (
 
 `RunDefinition` tolerates an absent period, venue, execution input and account because other
 callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
-Pinned as a literal rather than imported: the template is judged against what the reader needs to
-type, and a constant that moved with the code would make this test pass for any template.
+The sessions and the wall time are the run's own since record 148 (`sessions_from` or a literal
+`sessions`, `timezone`, `at`); the template leads with `sessions_from` because a dataset's own
+days are the common case. Pinned as a literal rather than imported: the template is judged
+against what the reader needs to type, and a constant that moved with the code would make this
+test pass for any template.
 """
 
 
@@ -579,97 +588,51 @@ def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
     """`vqapr new`'s choice list is the de-facto index of what a declaration may contain.
 
     A reader who scaffolds every kind offered, fills them in, and runs must not then meet a
-    section no template ever named. That is what happened: `strategy_configs` was reachable only
-    by knowing in advance that it existed, and the run failed at
-    `workspace.strategy_config.register.missing` after every visible step had succeeded.
+    section no template ever named. That is what happened once: `strategy_configs` was reachable
+    only by knowing in advance that it existed, and the run failed at
+    `workspace.strategy_config.register.missing` after every visible step had succeeded. That
+    section is gone (record 148) and the lesson is not: the sections `register` reads are the
+    sections `new` emits, and this test fails if the two lists drift apart.
 
-    This test fails if `register` learns a section a run needs and `new` is not taught to emit it.
+    `instruments` and `components` are scaffolded as Python beside their own declaration rather
+    than as a YAML template, so they are the two the YAML templates need not carry.
     """
-    from vqapr.cli.new import _AGENDAS_TEMPLATE, _DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE
+    from vqapr.cli.new import _DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE
+    from vqapr.declarations import SECTIONS
 
-    emitted = "\n".join((_DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _AGENDAS_TEMPLATE))
+    emitted = "\n".join((_DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE))
 
-    for section in (
-        "datasets",
-        "execution_inputs",
-        "agendas",
-        "strategy_configs",
-    ):
+    assert set(SECTIONS) == {"instruments", "datasets", "execution_inputs", "components", "runs"}
+    for section in set(SECTIONS) - {"instruments", "components"}:
         assert f"{section}:" in emitted, f"no template emits a {section} section"
+    for retired in ("agendas:", "strategy_configs:"):
+        assert retired not in emitted, f"{retired} is not a section register reads any more"
 
 
-def test_an_agendas_template_registers_after_its_placeholders_are_filled(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The template must be a working document, not a shape to be corrected.
+def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path: Path) -> None:
+    """The template's own header must say what running the file needs, not only what it declares.
 
-    Registered against a real dataset so the `from_dataset` path is exercised: an agenda that
-    follows a dataset's own days is the common case and the one the template leads with.
-    """
-    import yaml
-
-    prices = _parquet(
-        tmp_path,
-        "prices.parquet",
-        """SELECT * FROM (VALUES
-             (TIMESTAMPTZ '2024-03-05 06:30:00+09', 'A', 100.0),
-             (TIMESTAMPTZ '2024-03-06 06:30:00+09', 'A', 101.0)
-           ) AS t(available_at, instrument, close)""",
-    )
-    dataset = tmp_path / "d.yaml"
-    dataset.write_text(
-        "datasets:\n  krx:\n"
-        "    source_id: krx-source\n"
-        f"    path: {prices.as_posix()}\n"
-        "    instrument_field: instrument\n"
-        "    available_at: available_at\n"
-        "    grain: instrument_instant\n"
-        "    key_fields: [available_at, instrument]\n"
-        "    fields: {close: close}\n",
-        encoding="utf-8",
-    )
-    assert _envelope(capsys, "--project-root", str(tmp_path), "register", str(dataset))[0] == 0
-
-    target = tmp_path / "agendas.yaml"
-    code, _ = _envelope(
-        capsys, "--project-root", str(tmp_path), "new", "agendas", "--out", str(target)
-    )
-    assert code == 0
-
-    # The two placeholders the template tells the reader to replace. `strategy_configs` names a
-    # component that does not exist in this test, so it is dropped rather than filled -- the
-    # agendas and the valuation binding are what this asserts.
-    document = yaml.safe_load(target.read_text(encoding="utf-8"))
-    document.pop("strategy_configs")
-    for agenda in document["agendas"].values():
-        agenda["from_dataset"] = "krx"
-    target.write_text(yaml.safe_dump(document), encoding="utf-8")
-
-    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(target))
-
-    assert code == 0, payload
-    assert sorted(payload["registered"]["agendas"]) == ["daily-rebalance", "daily-valuation"]
-
-
-def test_the_run_template_says_naming_an_agenda_is_not_binding_it(tmp_path: Path) -> None:
-    """The template's own header claimed completeness it did not have.
-
-    It read "every required key is shown" while omitting that the components it names must also
-    be bound by a registered config. Every key of the run spec *was* present -- the sentence was
-    true about this file and false about what running it needs, which is the harder kind of wrong
-    to catch, because nothing about the emitted file looks incomplete.
-
-    A run declaration names its strategies by id and no longer restates the agenda at all: the
-    binding is the registered `strategy_configs` entry, and the template says so.
+    It once read "every required key is shown" while omitting that the components it names had to
+    be bound to an agenda elsewhere -- true about the file, false about what running it needs,
+    which is the harder kind of wrong to catch because nothing about the emitted file looks
+    incomplete. There is no elsewhere since record 148: the run carries its own sessions and wall
+    time, every strategy is called on every session and decides for itself, and the template has
+    to say so, because the key a reader will otherwise go looking for (a cadence, a binding) does
+    not exist.
     """
     target = tmp_path / "runs.yaml"
     main(["--project-root", str(tmp_path), "new", "run", "--out", str(target)])
 
     text = target.read_text(encoding="utf-8")
 
-    assert "vqapr new agendas" in text, "the template does not say where the binding comes from"
-    assert "nothing here registers or binds them" in text
-    assert "strategy_configs" in text, "the template does not name the binding's own section"
+    assert "sessions_from" in text and "sessions:" in text, "both ways to say the sessions"
+    assert "EVERY session" in text, "the template does not say every strategy is called"
+    assert "call.evaluation_time" in text and "self.memory" in text, (
+        "the template does not say where a strategy's own cadence lives"
+    )
+    assert "nothing here registers them" in text
+    for retired in ("agenda", "strategy_configs"):
+        assert retired not in text, f"the template still points at {retired!r}, which is gone"
 
 
 def test_generated_schedule_and_execution_defaults_are_causally_compatible(
@@ -678,18 +641,18 @@ def test_generated_schedule_and_execution_defaults_are_causally_compatible(
     """Independent templates must not put a decision and its fill at the same instant."""
     import yaml
 
-    agendas = tmp_path / "agendas.yaml"
+    runs = tmp_path / "runs.yaml"
     execution = tmp_path / "execution.yaml"
-    main(["--project-root", str(tmp_path), "new", "agendas", "--out", str(agendas)])
+    main(["--project-root", str(tmp_path), "new", "run", "--out", str(runs)])
     main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(execution)])
 
-    agenda_document = yaml.safe_load(agendas.read_text(encoding="utf-8"))
+    (run,) = yaml.safe_load(runs.read_text(encoding="utf-8"))["runs"].values()
     execution_document = yaml.safe_load(execution.read_text(encoding="utf-8"))
-    strategy_at = time.fromisoformat(agenda_document["agendas"]["daily-rebalance"]["at"])
+    decide_at = time.fromisoformat(run["at"])
     fill = next(iter(execution_document["execution_inputs"].values()))["fill"]
     fill_at = time.fromisoformat(fill["at"])
 
-    assert strategy_at < fill_at
+    assert decide_at < fill_at
     assert "STRICTLY LATER" in execution.read_text(encoding="utf-8")
 
 

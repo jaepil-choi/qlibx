@@ -38,18 +38,14 @@ from pydantic import (
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.identifiers import component_id, execution_input_id, source_id
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.identifiers import component_id, dataset_id, execution_input_id, source_id
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
+from vqapr.flow.run import RunDefinition, StrategyEntry
 
 
 class Document(BaseModel):
@@ -269,97 +265,6 @@ class ComponentDocument(Document):
         )
 
 
-class OccurrenceDocument(Document):
-    """One occurrence of an agenda on disk: the local instant with its DST proof."""
-
-    occurrence_id: str
-    local_date: date
-    local_time: time
-    timezone: str
-    fold: int
-    offset: str
-
-    def to_domain(self, role: OperationRole) -> OperationOccurrence:
-        return OperationOccurrence(
-            self.occurrence_id,
-            role,
-            LocalInstantDeclaration(
-                self.local_date, self.local_time, self.timezone, self.fold, self.offset
-            ),
-        )
-
-    @classmethod
-    def from_domain(cls, occurrence: OperationOccurrence) -> OccurrenceDocument:
-        local = occurrence.local_instant
-        return cls(
-            occurrence_id=occurrence.occurrence_id,
-            local_date=local.local_date,
-            local_time=local.local_time,
-            timezone=local.timezone,
-            fold=local.fold,
-            offset=local.offset,
-        )
-
-
-class AgendaDocument(Document):
-    """`agendas.<agenda_id>` on disk: explicit occurrences, and the two identities as written.
-
-    The identities are derived from the content; they are stored so a reader can compare a run
-    record's agenda identity against the document without rebuilding it. `to_domain` rebuilds
-    the agenda and the caller checks the stored identities still match (the codec did; the
-    workspace still does).
-    """
-
-    role: OperationRole
-    timezone: str
-    occurrences: list[OccurrenceDocument]
-    provenance: str
-    content_identity: str
-    provenance_identity: str
-
-    def to_domain(self, agenda_id: str) -> OperationAgenda:
-        return OperationAgenda.from_occurrences(
-            agenda_id=agenda_id,
-            role=self.role,
-            timezone=self.timezone,
-            occurrences=[occurrence.to_domain(self.role) for occurrence in self.occurrences],
-            provenance=self.provenance,
-        )
-
-    @classmethod
-    def from_domain(cls, agenda: OperationAgenda) -> AgendaDocument:
-        return cls(
-            role=agenda.role,
-            timezone=agenda.timezone,
-            occurrences=[
-                OccurrenceDocument.from_domain(occurrence) for occurrence in agenda.occurrences
-            ],
-            provenance=agenda.provenance,
-            content_identity=agenda.content_identity,
-            provenance_identity=agenda.provenance_identity,
-        )
-
-
-class StrategyConfigDocument(Document):
-    """`strategy_configs.<component_id>`: the agenda the strategy runs on (record `138`)."""
-
-    agenda_id: str
-    agenda_role: OperationRole
-
-    def to_domain(self, component: ComponentRef) -> StrategyConfig:
-        return StrategyConfig(component, self.agenda_id, self.agenda_role)
-
-    @classmethod
-    def from_domain(cls, config: StrategyConfig) -> StrategyConfigDocument:
-        return cls(agenda_id=str(config.agenda_id), agenda_role=config.agenda_role)
-
-
-class AgendaReference(Document):
-    """`valuation:` / `monitoring:` inside a run: which agenda, by id."""
-
-    agenda_id: str
-
-
 class InitialAccountDocument(Document):
     """`runs.<id>.initial_account`: the declaration every strategy's own Account starts from."""
 
@@ -414,24 +319,33 @@ class RunDocument(Document):
     out of `workspace.yaml` into a declaration and back.
 
     A registered run is run-ready: everything `vqapr run` cannot execute without is required
-    here, nullable only where `RunDefinition` keeps it optional for in-process callers.
-    `monitoring` is the one optional key.
+    here, nullable only where `RunDefinition` keeps it optional for in-process callers. The
+    sessions come from exactly one of `sessions_from` (a registered dataset's days) or `sessions`.
     """
 
     instruments: list[str]
     start: datetime | None
     end: datetime | None
-    valuation: AgendaReference
+    timezone: str
+    at: time
     exchange: str | None
     execution_input: str | None
-    initial_account: InitialAccountDocument | None
+    initial_account: InitialAccountDocument | None = None
     strategies: dict[str, StrategyEntryDocument | None]
-    monitoring: AgendaReference | None = None
+    sessions_from: str | None = None
+    sessions: list[date] | None = None
 
     @model_validator(mode="after")
-    def _at_least_one_strategy(self) -> RunDocument:
+    def _one_kind_and_one_session_source(self) -> RunDocument:
         if not self.strategies:
             raise ValueError("must name at least one strategy under `strategies:`")
+        if (self.sessions_from is None) == (self.sessions is None):
+            raise ValueError(
+                "must declare exactly one of sessions_from (a registered dataset's days) or "
+                "sessions (a list of dates)"
+            )
+        if self.sessions is not None and not self.sessions:
+            raise ValueError("sessions must list at least one date")
         return self
 
     @field_validator("start", "end")
@@ -446,10 +360,9 @@ class RunDocument(Document):
         self, handler: SerializerFunctionWrapHandler
     ) -> dict[str, Any]:
         body = handler(self)
-        if body.get("monitoring") is None:
-            body.pop("monitoring", None)
-        if body.get("initial_account") is None:
-            body.pop("initial_account", None)
+        for optional in ("sessions_from", "sessions", "initial_account"):
+            if body.get(optional) is None:
+                body.pop(optional, None)
         body["strategies"] = {
             name: (entry or {}) for name, entry in body["strategies"].items()
         }
@@ -467,13 +380,11 @@ class RunDocument(Document):
                 )
                 for name, entry in self.strategies.items()
             ),
-            valuation=ValuationConfig(self.valuation.agenda_id, OperationRole.VALUATION),
             instruments=tuple(self.instruments),
-            monitoring=(
-                None
-                if self.monitoring is None
-                else MonitoringPolicy(self.monitoring.agenda_id, OperationRole.MONITORING)
-            ),
+            timezone=self.timezone,
+            at=self.at,
+            sessions_from=self.sessions_from,
+            sessions=tuple(self.sessions or ()),
             exchange=self.exchange,
             execution_input_id=self.execution_input,
             start=self.start,
@@ -495,7 +406,10 @@ class RunDocument(Document):
             instruments=list(definition.instruments),
             start=definition.start,
             end=definition.end,
-            valuation=AgendaReference(agenda_id=str(definition.valuation.agenda_id)),
+            timezone=definition.timezone,
+            at=definition.at,  # type: ignore[arg-type]
+            sessions_from=definition.sessions_from,
+            sessions=list(definition.sessions) or None,
             exchange=definition.exchange,
             execution_input=definition.execution_input_id,
             initial_account=(
@@ -515,11 +429,6 @@ class RunDocument(Document):
                 )
                 for entry in definition.strategies
             },
-            monitoring=(
-                None
-                if definition.monitoring is None
-                else AgendaReference(agenda_id=str(definition.monitoring.agenda_id))
-            ),
         )
 
 
@@ -579,31 +488,6 @@ class ExecutionInputDeclaration(Document):
     fill: FillDeclaration
 
 
-class AgendaDeclaration(Document):
-    """`agendas.<agenda_id>` in a declaration: a cadence, not a list of occurrences.
-
-    The days come from a registered dataset (`from_dataset`) or are listed (`sessions`) --
-    exactly one of the two, which no required-key list can say, so the declaration reader
-    checks the pair itself and reports it beside whatever else is missing.
-    """
-
-    role: Literal["strategy_callback", "valuation", "monitoring"]
-    at: time
-    timezone: str
-    from_dataset: str | None = None
-    sessions: list[date | datetime] | None = None
-    provenance: str | None = None
-
-    _lower = field_validator("role", mode="before")(_lowered)
-
-    @field_validator("sessions", mode="before")
-    @classmethod
-    def _a_non_empty_list(cls, value: object) -> object:
-        if value is not None and (not isinstance(value, list) or not value):
-            raise ValueError("a non-empty list of dates")
-        return value
-
-
 class ComponentDeclaration(Document):
     """`components.<component_id>`: where the code is and what it is, in the CLI's spelling."""
 
@@ -611,10 +495,6 @@ class ComponentDeclaration(Document):
     path: str
     object_name: str
     config: dict[str, Any] | None = None
-
-
-class StrategyConfigDeclaration(Document):
-    agenda_id: str
 
 
 # ---------------------------------------------------------------------------------------------
@@ -647,25 +527,22 @@ another, can be served a stale workspace.
 class WorkspaceDocument(Document):
     """`workspace.yaml` whole: seven sections, two of them required, and two read and dropped.
 
-    `strategy_configs` stays untyped here because it has two shapes one release apart (record
-    `138`): keyed by the strategy's component id carrying `agenda_id` -- the shape written
-    forward -- or, the legacy shape written before an agenda was shareable, keyed by agenda id
-    carrying `component`. `read_workspace` re-keys the legacy one; the next write is forward.
-
-    `valuation_configs` and `monitoring_policies` are the two sections record `144` retired:
-    each restated an agenda's own role. A document written by 0.3.0 still carries them, they
-    are read and dropped, and the next write omits them.
+    Four sections are read and dropped, so a document written by 0.3.0 opens: `valuation_configs`
+    and `monitoring_policies` (record `144`, each restated an agenda's own role) and `agendas` and
+    `strategy_configs` (record `148`: a run declares its sessions and wall times itself, and the
+    model is called every session). A 0.3.0 `runs:` entry, which named agendas instead, is
+    refused at open naming the run and the keys it now needs.
     """
 
     sources: dict[str, SourceDocument]
     datasets: dict[str, DatasetDocument]
     execution_inputs: dict[str, ExecutionInputDocument] = {}
     components: dict[str, ComponentDocument] = {}
-    agendas: dict[str, AgendaDocument] = {}
-    strategy_configs: dict[str, dict[str, Any]] = {}
     runs: dict[str, RunDocument] = {}
     valuation_configs: Any = None
     monitoring_policies: Any = None
+    agendas: Any = None
+    strategy_configs: Any = None
 
 
 def _decoded[M: BaseModel](kind: str, raw_id: str, model: type[M], raw: object) -> M:
@@ -710,8 +587,8 @@ def _linked(raw: object) -> tuple[dict, ...]:
     """
     if not isinstance(raw, dict):
         raise ValueError(
-            "workspace root must contain sources and datasets, with optional execution_inputs "
-            "components, agendas, strategy_configs and runs"
+            "workspace root must contain sources and datasets, with optional execution_inputs, "
+            "components and runs"
         )
     document = _decoded("workspace", "root", WorkspaceDocument, raw)
 
@@ -744,42 +621,6 @@ def _linked(raw: object) -> tuple[dict, ...]:
         ref = entry.to_domain(raw_id)
         components[ref.component_id] = ref
 
-    agendas = {}
-    for raw_id, entry in document.agendas.items():
-        agenda = entry.to_domain(raw_id)
-        if (
-            agenda.content_identity != entry.content_identity
-            or agenda.provenance_identity != entry.provenance_identity
-        ):
-            raise ValueError(
-                f"agenda {raw_id!r} identity declarations do not match its canonical content"
-            )
-        agendas[agenda.agenda_id] = agenda
-
-    strategy_configs = {}
-    for raw_id, raw_config in document.strategy_configs.items():
-        if set(raw_config) == {"component", "agenda_role"}:
-            component, raw_config = raw_config["component"], {
-                "agenda_id": raw_id,
-                "agenda_role": raw_config["agenda_role"],
-            }
-        else:
-            component = raw_id
-        entry = _decoded("strategy config", raw_id, StrategyConfigDocument, raw_config)
-        try:
-            registered_component = components[component_id(str(component))]
-        except KeyError as error:
-            raise ValueError(
-                f"strategy config {raw_id!r} references an unregistered component"
-            ) from error
-        config = entry.to_domain(registered_component)
-        agenda = agendas.get(config.agenda_id)
-        if agenda is None or agenda.role is not config.agenda_role:
-            raise ValueError(
-                f"strategy config {raw_id!r} references an absent or mismatched agenda"
-            )
-        strategy_configs[str(component)] = config
-
     runs = {}
     for raw_id, entry in document.runs.items():
         definition = entry.to_domain(raw_id)
@@ -787,8 +628,6 @@ def _linked(raw: object) -> tuple[dict, ...]:
             component = components.get(component_id(strategy.component_id))
             if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered strategy")
-            if strategy.component_id not in strategy_configs:
-                raise ValueError(f"run {raw_id!r} names a strategy with no registered binding")
             for name in strategy.constraints:
                 constraint = components.get(component_id(name))
                 if constraint is None or constraint.kind is not ComponentKind.CONSTRAINT:
@@ -802,15 +641,14 @@ def _linked(raw: object) -> tuple[dict, ...]:
             and execution_input_id(definition.execution_input_id) not in execution_inputs
         ):
             raise ValueError(f"run {raw_id!r} names an unregistered execution input")
-        for binding in (definition.valuation, definition.monitoring):
-            if binding is None:
-                continue
-            agenda = agendas.get(binding.agenda_id)
-            if agenda is None or agenda.role is not binding.agenda_role:
-                raise ValueError(f"run {raw_id!r} references an absent or mismatched agenda")
+        if (
+            definition.sessions_from is not None
+            and dataset_id(definition.sessions_from) not in datasets
+        ):
+            raise ValueError(f"run {raw_id!r} takes its sessions from an unregistered dataset")
         runs[raw_id] = definition
 
-    return (datasets, sources, execution_inputs, components, agendas, strategy_configs, runs)
+    return (datasets, sources, execution_inputs, components, runs)
 
 
 def write_workspace(
@@ -818,8 +656,6 @@ def write_workspace(
     sources: Mapping[Any, SourceSpec],
     execution_inputs: Mapping[Any, ExecutionInputRegistration],
     components: Mapping[Any, ComponentRef],
-    agendas: Mapping[str, OperationAgenda],
-    strategy_configs: Mapping[str, StrategyConfig],
     runs: Mapping[str, RunDefinition] | None = None,
 ) -> str:
     """The workspace's state as the document's text, sections sorted by id, empty ones omitted."""
@@ -835,25 +671,19 @@ def write_workspace(
             for k, v in by_id(execution_inputs.items())
         },
         components={str(k): ComponentDocument.from_domain(v) for k, v in by_id(components.items())},
-        agendas={k: AgendaDocument.from_domain(v) for k, v in sorted(agendas.items())},
-        strategy_configs={
-            k: StrategyConfigDocument.from_domain(v).model_dump(mode="json")
-            for k, v in sorted(strategy_configs.items())
-        },
         runs={k: RunDocument.from_domain(v) for k, v in sorted((runs or {}).items())},
     )
-    body = document.model_dump(mode="json", exclude={"valuation_configs", "monitoring_policies"})
-    for section in ("agendas", "strategy_configs", "runs"):
-        if not body[section]:
-            del body[section]
+    body = document.model_dump(
+        mode="json",
+        exclude={"valuation_configs", "monitoring_policies", "agendas", "strategy_configs"},
+    )
+    if not body["runs"]:
+        del body["runs"]
     return yaml.dump(body, Dumper=_YAML_DUMPER, allow_unicode=True, sort_keys=False)
 
 
 
 __all__ = [
-    "AgendaDeclaration",
-    "AgendaDocument",
-    "AgendaReference",
     "ComponentDeclaration",
     "ComponentDocument",
     "DatasetDeclaration",
@@ -864,11 +694,8 @@ __all__ = [
     "FillDeclaration",
     "FillDocument",
     "InitialAccountDocument",
-    "OccurrenceDocument",
     "RunDocument",
     "SourceDocument",
-    "StrategyConfigDeclaration",
-    "StrategyConfigDocument",
     "StrategyEntryDocument",
     "TableDeclaration",
     "WorkspaceDocument",

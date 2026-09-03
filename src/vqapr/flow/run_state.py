@@ -456,14 +456,41 @@ class RunStateRepository:
     def publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
+    def _staged(
+        self, recorder: InvocationRecorder | None
+    ) -> tuple[dict, tuple[RecorderManifest, ...], tuple]:
+        """The root's chunks and manifests, extended by `recorder`'s rows when there is one."""
+        root = self._root
+        chunks = dict(root._recorder_chunks)
+        manifests = root.recorder_manifests
+        new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
+        if recorder is not None:
+            if not isinstance(recorder, InvocationRecorder):
+                raise TypeError("recorder must be an InvocationRecorder")
+            new_rows = self._stage_rows(chunks, recorder.staged_rows())
+            manifests = manifests + recorder.manifests()
+        return chunks, manifests, new_rows
+
     def prepare_marked(
-        self, *, account: PreparedAccountTransition, mark: MarkBatch, evidence: object = None
+        self,
+        *,
+        account: PreparedAccountTransition,
+        mark: MarkBatch,
+        evidence: object = None,
+        recorder: InvocationRecorder | None = None,
     ) -> PreparedRunState:
+        """Publish the mark a fill was valued at, and the NAV it measured.
+
+        Valuation happens at the instant the venue fills (record 148): the marked account and
+        the account-table row stating its NAV are one commit, so the rows a run reads its NAV
+        series from can never disagree with the marks the run holds.
+        """
         root = self._root
         if root.account is None or root.account.snapshot != account.fill.next_snapshot:
             raise RuntimeError("prepared Account mark does not match current root")
         if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
             raise ValueError("mark must be the prepared Account mark batch")
+        chunks, manifests, new_rows = self._staged(recorder)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -478,12 +505,13 @@ class RunStateRepository:
                     *root.lifecycle_trace,
                     LifecycleTrace(LifecycleKind.MARKED, evidence),
                 ),
-                recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=root._recorder_chunks,
+                recorder_manifests=manifests,
+                _recorder_chunks=chunks,
                 feedback=root.feedback,
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
             ),
+            new_rows,
         )
 
     def publish_marked(self, prepared: PreparedRunState) -> AcceptedRunState:
@@ -496,11 +524,13 @@ class RunStateRepository:
         account: PreparedAccountValuation,
         mark: MarkBatch,
         evidence: object = None,
+        recorder: InvocationRecorder | None = None,
     ) -> PreparedRunState:
         """Publish a mark taken by an occurrence that requested no orders.
 
         The Account did not change, so this consumes the pending identity and appends a mark
-        without an ACCOUNT_COMMITTED step. There is no fill to commit.
+        without an ACCOUNT_COMMITTED step. There is no fill to commit. The NAV measured rides
+        along as `recorder` rows, exactly as it does on `prepare_marked`.
         """
         root = self._root
         if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
@@ -509,6 +539,7 @@ class RunStateRepository:
             raise RuntimeError("prepared Account valuation does not match current root")
         if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
             raise ValueError("mark must be the prepared Account mark batch")
+        chunks, manifests, new_rows = self._staged(recorder)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -523,66 +554,7 @@ class RunStateRepository:
                     *root.lifecycle_trace,
                     LifecycleTrace(LifecycleKind.MARKED, evidence),
                 ),
-                recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=root._recorder_chunks,
-                feedback=root.feedback,
-                finalization=root.finalization,
-                model_state_commit_count=root.model_state_commit_count,
-            ),
-        )
-
-    def publish_valuation_only(self, prepared: PreparedRunState) -> AcceptedRunState:
-        return self._publish_infallible(prepared)
-
-    def prepare_standalone_valuation(
-        self,
-        *,
-        account: PreparedAccountValuation,
-        mark: MarkBatch,
-        recorder: InvocationRecorder,
-        evidence: object = None,
-    ) -> PreparedRunState:
-        """Publish a mark taken by a valuation occurrence that no decision prepared.
-
-        This is `prepare_valuation_only`'s sibling for the independent valuation clock, and the
-        difference between them is the pending slot. `prepare_valuation_only` CONSUMES a pending
-        identity, because a Hold minted one and the mark is that pending's completion. A
-        standalone valuation never minted one: it is its own occurrence on its own clock, so
-        there is no identity to match and none to clear. Touching the slot here is precisely what
-        must not happen -- it holds at most one occupant, so a daily valuation passing through it
-        would evict accepted decisions on most sessions.
-
-        The Account does not change, so there is no ACCOUNT_COMMITTED step. The recorder rows are
-        staged the same way a callback's are, because the NAV series has to be readable from the
-        same table whichever clock measured it.
-        """
-        if not isinstance(recorder, InvocationRecorder):
-            raise TypeError("recorder must be an InvocationRecorder")
-        root = self._root
-        if root.account is None or root.account != account.source:
-            raise RuntimeError("prepared Account valuation does not match current root")
-        if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
-            raise ValueError("mark must be the prepared Account mark batch")
-
-        chunks = dict(root._recorder_chunks)
-        new_rows = self._stage_rows(chunks, recorder.staged_rows())
-
-        return PreparedRunState(
-            root.version,
-            AcceptedRunState(
-                version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
-                current_model_state_ref=root.current_model_state_ref,
-                account=account.next_state,
-                # Left exactly as found. A standalone valuation neither takes nor releases it.
-                pending_accepted_intent=root.pending_accepted_intent,
-                lifecycle_trace=(
-                    *root.lifecycle_trace,
-                    LifecycleTrace(LifecycleKind.MARKED, evidence),
-                ),
-                recorder_manifests=root.recorder_manifests + recorder.manifests(),
+                recorder_manifests=manifests,
                 _recorder_chunks=chunks,
                 feedback=root.feedback,
                 finalization=root.finalization,
@@ -591,18 +563,19 @@ class RunStateRepository:
             new_rows,
         )
 
-    def publish_standalone_valuation(self, prepared: PreparedRunState) -> AcceptedRunState:
+    def publish_valuation_only(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
     def prepare_monitoring(
         self, *, recorder: InvocationRecorder, evidence: object = None
     ) -> PreparedRunState:
-        """Publish the findings one monitoring occurrence made over the committed account.
+        """Publish the findings monitoring made over the account one commit left.
 
-        A monitoring occurrence changes nothing it observes: no fill, no mark, no decision, and
-        the pending slot is left exactly as found for the same reason a standalone valuation
-        leaves it. What it adds is rows -- one per constraint, saying what was measured against
-        which limit -- and until this path existed those rows had nowhere to go. The report sat
+        Monitoring changes nothing it observes: no fill, no mark, no decision, and the pending
+        slot is left exactly as found -- it runs right after a commit (record `148`), and the
+        commit already settled that slot. What it adds is rows -- one per constraint, saying what
+        was measured against which limit -- and until this path existed those rows had nowhere to
+        go. The report sat
         on the occurrence trace, the record counted it (`contract`), and the values themselves
         never reached disk: a run whose book breached a limit could say *that* it did, and not
         *by how much*.

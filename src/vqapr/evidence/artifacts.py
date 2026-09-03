@@ -310,7 +310,6 @@ class MarkEvidence:
     agenda: object
     occurrence: object
     cutoff: datetime
-    valuation_config: object
     selected_marks: object
     marks: object
     limitations: tuple[object, ...]
@@ -358,7 +357,6 @@ class ValuationEvidence:
     agenda: object
     occurrence: object
     cutoff: datetime
-    valuation_config: object
     account: AccountSnapshot
     marks: object
     root_version: int
@@ -383,8 +381,6 @@ class MonitoringEvidence:
 class FinalizationEvidence:
     run_identity: str
     strategy_agenda: object
-    valuation_agenda: object
-    monitoring_agenda: object | None
     cutoff: datetime
     account: AccountSnapshot | None
     root_version: int

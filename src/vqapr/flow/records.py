@@ -46,10 +46,6 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
         "declared_digest": lambda: str(frozen.identity),
         "instruments": lambda: list(frozen.instruments),
         "period": lambda: {"start": frozen.start, "end": frozen.end},
-        "valuation": lambda: {"agenda_id": str(frozen.valuation.agenda_id)},
-        "monitoring": lambda: (
-            None if frozen.monitoring is None else {"agenda_id": str(frozen.monitoring.agenda_id)}
-        ),
         "exchange": lambda: (
             None
             if frozen.exchange is None

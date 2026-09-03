@@ -92,7 +92,7 @@ def test_the_universe_can_be_named_up_front(tmp_path: Path) -> None:
     assert sorted(namespace["Venue"]().listings) == ["A000660", "A005930", "A035420"]
 
 
-@pytest.mark.parametrize("kind", ["dataset", "execution-input", "agendas", "exchange", "run"])
+@pytest.mark.parametrize("kind", ["dataset", "execution-input", "exchange", "run"])
 def test_every_declaration_a_run_needs_has_a_scaffold(kind: str, tmp_path: Path) -> None:
     """The gap was structural: one required declaration had no template while the rest did.
 

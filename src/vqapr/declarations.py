@@ -17,9 +17,8 @@ verb decided for itself.
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
-from datetime import date, datetime
 from difflib import get_close_matches
 from enum import Enum
 from pathlib import Path
@@ -47,17 +46,13 @@ from vqapr.exchange.execution_table import (
 )
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import prepare_component, register_component
-from vqapr.flow.run import StrategyConfig
 from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError
-from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.workspace import Transaction, Workspace
 from vqapr.workspace_document import (
-    AgendaDeclaration,
     ComponentDeclaration,
     DatasetDeclaration,
     ExecutionInputDeclaration,
     RunDocument,
-    StrategyConfigDeclaration,
 )
 
 _COMPONENT_KINDS = {
@@ -85,9 +80,7 @@ SECTIONS = (
     "instruments",
     "datasets",
     "execution_inputs",
-    "agendas",
     "components",
-    "strategy_configs",
     "runs",
 )
 """Every section this command understands, in dependency order.
@@ -729,93 +722,21 @@ def _execution_input(input_id: str, body: object, *, base: Path) -> ExecutionInp
     )
 
 
-def _sessions(
-    model: AgendaDeclaration, workspace: Callable[[], Workspace]
-) -> list[datetime | date]:
-    """Where an agenda's days come from: a dataset it follows, or an explicit list.
-
-    `from_dataset` is the common case and the one worth making short. A cadence usually follows
-    the data it reads, and `Workspace.evaluation_times` already knows those days exactly, so
-    restating them by hand is a chance to disagree with the dataset for no benefit.
-    """
-    if model.from_dataset is not None:
-        return list(workspace().evaluation_times(model.from_dataset))
-    return list(model.sessions or ())
-
-
-def _agenda_source_failure(body: dict[str, Any], *, name: str) -> Failure | None:
-    """The one rule no required-key list can say: exactly one of from_dataset or sessions."""
-    declares_both = "from_dataset" in body and "sessions" in body
-    if ("from_dataset" in body) != ("sessions" in body):
-        return None
-    return Failure.bounded(
-        f"{DECLARE_STAGE}.key_missing",
-        requirement=(
-            f"{name} must declare exactly one of from_dataset or sessions: "
-            "from_dataset follows a registered dataset's own days, "
-            "sessions lists them literally"
-        ),
-        observed=(
-            f"{name} declares both"
-            if declares_both
-            else f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}"
-        ),
-        examples=["from_dataset: krx_adjusted_prices", "sessions: ['2024-01-02']"],
-        source=_at(name),
-        fix=(
-            f"remove one of from_dataset/sessions from {name}"
-            if declares_both
-            else f"add either from_dataset or sessions under {name}"
-        ),
-        explain=ExplainTopic.DECLARATION_SHAPE,
-    )
-
-
-def _agenda(agenda_id: str, body: object, workspace: Callable[[], Workspace]) -> OperationAgenda:
-    """Build one agenda through `daily()`, which owns the rules a hand-built one gets wrong.
-
-    `OperationAgenda.daily` derives the occurrence id scheme, the fold, and the offset from the
-    zone. A file that typed those constants itself would be correct until the venue observed DST.
-
-    Everything the declaration is missing is said in one refusal -- the model's findings and the
-    from_dataset/sessions pair together -- because a reader who is told one problem per round
-    trip took four of them to assemble one agenda (`tests/cli/test_register.py`).
-    """
-    name = f"agendas.{agenda_id}"
-    mapping = _mapping(body, name=name)
-    pair = _agenda_source_failure(mapping, name=name)
-    model = declared(AgendaDeclaration, mapping, name=name, also=() if pair is None else (pair,))
-    if pair is not None:
-        found = collector(DECLARE_STAGE, FailureFamily.DATA)
-        found.add(pair)
-        found.done().raise_if_failed()
-    return OperationAgenda.daily(
-        agenda_id=agenda_id,
-        role=OperationRole[model.role.upper()],
-        sessions=_sessions(model, workspace),
-        at=model.at,
-        timezone=model.timezone,
-        provenance=model.provenance or f"vqapr register: {agenda_id}",
-    )
-
-
 _DECLARED_IDS = {
     "datasets": ("dataset id", identifiers.dataset_id),
     "execution_inputs": ("execution input id", identifiers.execution_input_id),
-    "agendas": ("agenda id", identifiers.agenda_id),
     "components": ("component id", identifiers.component_id),
-    "strategy_configs": ("component id", identifiers.component_id),
 }
 """Sections whose KEY becomes a typed identifier, and the constructor that judges it.
 
 Every one of these refuses an empty string, one with surrounding whitespace, or one containing any
 -- with a bare `ValueError`. For four of the five nothing caught it, so a blank or padded key in a
 declaration reached the envelope as `stage:"unhandled"` with an empty `failures[]`: the framework
-reporting itself broken over a fat-fingered YAML key. `strategy_configs` is the exception --
-`Workspace.component()` already converted that `ValueError` into a structured refusal -- and it is
-here so the rule stays one rule: the key of every section listed becomes a typed identifier, and
-every one of them is judged in the same place, at the same time, with the same refusal naming the
-section it came from.
+reporting itself broken over a fat-fingered YAML key. (`strategy_configs`, since retired by record
+`148`, was the exception -- `Workspace.component()` already converted that `ValueError` into a
+structured refusal.) The rule stays one rule: the key of every section listed becomes a typed
+identifier, and every one of them is judged in the same place, at the same time, with the same
+refusal naming the section it came from.
 
 One table rather than a check inside each section handler, because the first fix here covered only
 `components` and red-teaming immediately found `datasets` and `execution_inputs` still crashing.
@@ -958,28 +879,10 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         transaction.register_execution_input(registration)
         registered.setdefault("execution_inputs", []).append(str(input_id))
 
-    for agenda_id, body in section("agendas").items():
-        # The agenda's sessions may come from a dataset declared above: `transaction.view` holds
-        # the snapshot plus what this document has staged, so the lookup sees it.
-        transaction.register_agenda(_agenda(str(agenda_id), body, lambda: transaction.view))
-        registered.setdefault("agendas", []).append(str(agenda_id))
-
     for component_id, body in section("components").items():
         registered.setdefault("components", []).append(
             _component(str(component_id), body, project_root, transaction, base=base)
         )
-
-    for component_id, body in section("strategy_configs").items():
-        name = f"strategy_configs.{component_id}"
-        config = declared(StrategyConfigDeclaration, body, name=name)
-        transaction.register_strategy_config(
-            StrategyConfig(
-                transaction.view.component(str(component_id)),
-                config.agenda_id,
-                OperationRole.STRATEGY_CALLBACK,
-            ),
-        )
-        registered.setdefault("strategy_configs", []).append(str(component_id))
 
     for run_id, body in section("runs").items():
         # Shape by the codec, so a run reads the same way from a declaration and from the
@@ -1010,9 +913,9 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
                 Failure.bounded(
                     f"{DECLARE_STAGE}.run_invalid",
                     requirement=(
-                        "a run declares strategies, valuation, instruments, start, end, exchange, "
-                        "execution_input and initial_account, each in the shape `vqapr new run` "
-                        "emits"
+                        "a run declares strategies, instruments, start, end, sessions_from or "
+                        "sessions, timezone, at, exchange, execution_input and initial_account, "
+                        "each in the shape `vqapr new run` emits"
                     ),
                     observed=observed,
                     examples=["2024-01-02T00:00:00+09:00"],

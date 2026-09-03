@@ -56,26 +56,18 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
     MaterializationSpec,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
     component_ref,
     export_roster,
     materialize,
     preflight_run,
-    register_agenda,
     register_component,
     register_data_model,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     run,
 )
 
@@ -130,41 +122,24 @@ def _sessions(path: Path) -> list[date]:
         con.close()
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_004 real KRX trading sessions",
-    )
-
-
 def _definition(
     *,
     universe: tuple[str, ...],
     exchange: ComponentRef,
-    strategy_config: StrategyConfig,
-    valuation_config: ValuationConfig,
+    strategy_ref: ComponentRef,
     callback_days: list[date],
 ) -> RunDefinition:
     """The two runs' one difference, isolated into one argument.
 
     Everything else is shared by construction rather than by copy: the same registered
-    strategy config, the same valuation config, the same execution input id, the same account.
+    strategy, the same sessions and wall time, the same execution input id, the same account.
     """
     return RunDefinition(
         run_id=exchange.component_id,
-        strategies=(StrategyEntry(strategy_config.component.component_id),),
-        valuation=valuation_config,
-        monitoring=None,
+        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 30),
         exchange=exchange.component_id,
         execution_input_id="krx-daily",
         start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
@@ -438,27 +413,12 @@ def main() -> None:
     for reference in (strategy_ref, academic_ref, krx_ref):
         register_component(PROJECT, reference)
 
-    strategy_agenda = _agenda(
-        "show004-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show004-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    for agenda in (strategy_agenda, valuation_agenda):
-        register_agenda(PROJECT, agenda)
-
-    strategy_config = StrategyConfig(
-        strategy_ref, "show004-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig("show004-valuation", OperationRole.VALUATION)
-    register_strategy_config(PROJECT, strategy_config)
 
     def _outcome(exchange: ComponentRef) -> dict[str, Any]:
         definition = _definition(
             universe=universe,
             exchange=exchange,
-            strategy_config=strategy_config,
-            valuation_config=valuation_config,
+            strategy_ref=strategy_ref,
             callback_days=callback_days,
         )
         return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)).result())

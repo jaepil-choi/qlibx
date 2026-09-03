@@ -13,7 +13,8 @@ those four could not honestly emit it: a run SPEC was not registrable, so the en
 
 Since record 139 a run is a `runs:` section of a declaration document, so the one exception is
 gone: `vqapr new run` emits a declaration `vqapr register` takes, and every kind answers the
-caller's actual question -- *what do I do with this file?* -- with `declaration`.
+caller's actual question -- *what do I do with this file?* -- with `declaration`. Record 148
+retired `agendas` (a run declares its own sessions and wall time), so eight kinds remain.
 """
 
 from __future__ import annotations
@@ -33,7 +34,6 @@ _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("instruments", ()),
     ("dataset", ()),
     ("run", ()),
-    ("agendas", ()),
     ("execution-input", ()),
 )
 
@@ -53,8 +53,8 @@ def _new(root: Path, kind: str, extra: tuple[str, ...]) -> dict:
     return json.loads((result.stdout or result.stderr).strip().splitlines()[-1])
 
 
-def test_all_nine_kinds_are_covered_by_this_test() -> None:
-    """A tenth kind must be declared here rather than silently skipping coverage."""
+def test_every_kind_is_covered_by_this_test() -> None:
+    """A new kind must be declared here rather than silently skipping coverage."""
     import argparse
 
     from vqapr.cli.new import add_arguments
@@ -88,8 +88,9 @@ def test_the_envelope_says_what_to_do_with_the_file(
 def test_a_script_can_read_one_field_across_every_kind(tmp_path: Path) -> None:
     """The reporter's actual use case, run end to end.
 
-    This is the loop they planned to write. It used to raise `KeyError` on four of the nine, and
-    then had to branch on `registrable` for the run spec. Every kind is registrable now.
+    This is the loop they planned to write. It used to raise `KeyError` on four of the nine kinds
+    of the time, and then had to branch on `registrable` for the run spec. Every kind is
+    registrable now.
     """
     registrable: list[str] = []
     for kind, extra in _KINDS:

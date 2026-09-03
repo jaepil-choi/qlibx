@@ -19,7 +19,7 @@ state under `.vqapr/`, which is rebuildable and never committed.
 
 | command | what it does |
 |---|---|
-| `new` | scaffold a component, or emit a dataset/agendas/run declaration template |
+| `new` | scaffold a component, or emit a dataset/execution-input/exchange/run declaration template |
 | `register` | validate a declaration and add what it declares to the workspace |
 | `check` | prove a registered run is ready, reporting every problem at once, without running |
 | `run` | freeze a registered run, preflight it, and execute its strategies |

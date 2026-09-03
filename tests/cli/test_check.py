@@ -16,13 +16,17 @@ are Python, and an imported module can write anywhere.
 admits: a run with no instruments or a reversed period is refused at `register`, so the judgments
 exercised here are the ones a registrable run can still fail -- a look-ahead, a short opening in
 a long-only book, a field the dataset does not expose, a first decision before the data begins.
+
+**The run carries its own sessions and wall time since record `148`.** A look-ahead or an early
+decision is therefore declared on the run (`sessions`, `at`) rather than through an agenda and a
+binding, and the judgments derive the one agenda the run fires on from exactly those keys.
 """
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -38,9 +42,7 @@ from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
-from vqapr.runtime.agendas import OperationRole
-from vqapr.valuation.configuration import ValuationConfig
+from vqapr.flow.run import RunDefinition, StrategyEntry
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -112,27 +114,6 @@ def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -
     _register_component(root, component_id, ComponentKind.EXCHANGE, source)
 
 
-def _agenda_deciding_on(root: Path, agenda_id: str, sessions: tuple[str, ...], at: str) -> None:
-    """Register a strategy agenda that decides on exactly these days."""
-    from vqapr.declarations import apply
-
-    apply(
-        {
-            "agendas": {
-                agenda_id: {
-                    "role": "strategy_callback",
-                    "sessions": list(sessions),
-                    "at": at,
-                    "timezone": "UTC",
-                }
-            }
-        },
-        root,
-        base=root,
-        declaration=root / "agenda.yaml",
-    )
-
-
 def _execution_input(root: Path, fill_at: str = "15:30") -> None:
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
@@ -158,10 +139,13 @@ def _execution_input(root: Path, fill_at: str = "15:30") -> None:
 
 
 def _definition(**overrides: object) -> RunDefinition:
+    """The probe run: one strategy deciding on 2023-12-01 at 15:30 UTC, unless overridden."""
     declared: dict[str, object] = {
         "run_id": RUN,
         "strategies": (StrategyEntry("model"),),
-        "valuation": ValuationConfig("valuing", OperationRole.VALUATION),
+        "sessions": (date(2023, 12, 1),),
+        "timezone": "UTC",
+        "at": time(15, 30),
         "instruments": ("A",),
         "exchange": "venue",
         "execution_input_id": "my-exec",
@@ -178,10 +162,12 @@ def _definition(**overrides: object) -> RunDefinition:
 def workspace(tmp_path: Path) -> Path:
     """A registered run carrying four INDEPENDENT defects registration admits.
 
-    The strategy reads `close` from a dataset exposing only `volume` (field absent); it decides
-    at 15:30 against a fill at 15:30 (a look-ahead); it decides on 2023-12-01 while the data
-    begins on 2024-01-02 (an uncovered lookback); and a long-only account opens short (a mode
-    conflict). None has to be repaired before another can be judged.
+    The strategy reads `close` from a dataset exposing only `volume` (field absent); the run
+    decides at 15:30 against a fill at 15:30 (a look-ahead); its one session is 2023-12-01 while
+    the data begins on 2024-01-02 (an uncovered lookback); and a long-only account opens short
+    (a mode conflict). None has to be repaired before another can be judged. The look-ahead and
+    the early session are the run's own `at` and `sessions` (record 148), which is why
+    `_definition` carries them as defaults.
     """
     space = Workspace.create(tmp_path)
     space.register_dataset(
@@ -199,19 +185,6 @@ def workspace(tmp_path: Path) -> Path:
     _strategy_reading(tmp_path, "model", "prices", "close")
     _exchange(tmp_path)
     _execution_input(tmp_path)
-    _agenda_deciding_on(tmp_path, "early", ("2023-12-01",), at="15:30")
-    from vqapr.declarations import apply
-
-    apply(
-        {"agendas": {"valuing": {"role": "valuation", "sessions": ["2024-01-03"], "at": "16:00",
-                                 "timezone": "UTC"}}},
-        tmp_path,
-        base=tmp_path,
-    )
-    space = Workspace.open(tmp_path)
-    space.register_strategy_config(
-        StrategyConfig(space.component("model"), "early", OperationRole.STRATEGY_CALLBACK)
-    )
     Workspace.open(tmp_path).register_run(_definition())
     return tmp_path
 
@@ -275,7 +248,7 @@ def test_four_simultaneous_problems_return_four_failures_in_one_call(workspace: 
 
     assert body["ok"] is False
     reported = {entry["code"] for entry in body["failures"]}
-    assert FOUR <= reported, f"a judgment did not report its own defect: {sorted(reported)}"
+    assert reported >= FOUR, f"a judgment did not report its own defect: {sorted(reported)}"
 
 
 def test_each_judgment_carries_the_five_fields_a_reader_acts_on(workspace: Path) -> None:
@@ -405,17 +378,18 @@ def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> N
     )
     _strategy_reading(tmp_path, "model", "prices", "close")
 
-    assert _judge(tmp_path, _definition()) == ["check.field.absent"]
+    # On a session the data covers, so the absent field is the only thing wrong.
+    assert _judge(tmp_path, _definition(sessions=(date(2024, 6, 3),))) == ["check.field.absent"]
 
 
 def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -> None:
     """`check.lookback.uncovered`, measured at the first instant that actually READS.
 
     Not at the run's `start`. Nothing reads there -- `start` bounds the horizon, and the strategy
-    reads at the occurrences its agenda generates inside it. Measuring at `start` refused any run
-    whose dataset's first observation landed after midnight, which is every intraday-stamped
-    dataset: this package's own end-to-end fixture was refused by its own verb while `run`
-    completed it (issue 012).
+    reads at the run's sessions inside it. Measuring at `start` refused any run whose dataset's
+    first observation landed after midnight, which is every intraday-stamped dataset: this
+    package's own end-to-end fixture was refused by its own verb while `run` completed it
+    (issue 012).
     """
     space = Workspace.create(tmp_path)
     space.register_dataset(
@@ -434,38 +408,25 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     begins = _SPAN[0]
 
     # Deciding a day BEFORE the data begins: the window really is short, and it is named.
-    early = (begins.date().replace(day=1)).isoformat()
-    _agenda_deciding_on(tmp_path, "early", (early,), at="04:00")
-    space = Workspace.open(tmp_path)
-    space.register_strategy_config(
-        StrategyConfig(space.component("model"), "early", OperationRole.STRATEGY_CALLBACK)
-    )
-    definition = _definition(start=datetime.fromisoformat(f"{early}T00:00:00+00:00"))
-    assert _judge(tmp_path, definition) == ["check.lookback.uncovered"]
+    early = begins.date().replace(day=1)
+    start = datetime.combine(early, time(0), tzinfo=UTC)
+    assert _judge(tmp_path, _definition(start=start, sessions=(early,), at=time(4, 0))) == [
+        "check.lookback.uncovered"
+    ]
 
     # The same run, deciding on a day the data covers, is not refused -- even though `start` is
     # still earlier than the dataset's first observation. That difference is the whole fix.
-    later = _SPAN[1].date().isoformat()
-    _agenda_deciding_on(tmp_path, "later", (later,), at="04:00")
-    space = Workspace.open(tmp_path)
-    space._strategy_configs["model"] = StrategyConfig(
-        space.component("model"), "later", OperationRole.STRATEGY_CALLBACK
-    )
-    from vqapr.flow.judgments import _judge_datasets_and_fields
-
-    registered = {str(item.dataset_id): item for item in space.datasets}
-    assert (
-        _judge_datasets_and_fields(definition, space, registered, FailureSource(key_path="r"))
-        == []
-    )
+    covered = date(2024, 6, 3)
+    assert _judge(tmp_path, _definition(start=start, sessions=(covered,), at=time(4, 0))) == []
 
 
 def test_the_lookback_judgment_stays_silent_when_it_cannot_answer(tmp_path: Path) -> None:
-    """No binding, no agenda, no answer -- and no guess.
+    """No sessions, no agenda, no answer -- and no guess.
 
-    Those are other judgments' refusals to make. Answering here too would report one defect twice,
-    and guessing an instant would put this verb back in the business of refusing what `run`
-    accepts.
+    A run whose sessions come from a dataset nobody registered has no first decision to measure
+    at. That is registration's refusal to make (`sessions_from` must name a registered dataset)
+    and preflight's; answering here too would report one defect twice, and guessing an instant
+    would put this verb back in the business of refusing what `run` accepts.
     """
     space = Workspace.create(tmp_path)
     space.register_dataset(
@@ -482,8 +443,10 @@ def test_the_lookback_judgment_stays_silent_when_it_cannot_answer(tmp_path: Path
     )
     _strategy_reading(tmp_path, "model", "prices", "close")
 
-    # No binding registered for `model`: the agenda cannot be found, and nothing is guessed.
-    assert "check.lookback.uncovered" not in _judge(tmp_path, _definition())
+    # The sessions come from a dataset that is not registered: the agenda cannot be built here,
+    # and nothing is guessed.
+    unanswerable = _definition(sessions=(), sessions_from="absent")
+    assert "check.lookback.uncovered" not in _judge(tmp_path, unanswerable)
 
 
 def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) -> None:

@@ -31,13 +31,10 @@ from vqapr.flow.run_records import (
     strategy_refs,
 )
 from vqapr.public import (
-    OperationRole,
-    StrategyConfig,
     StrategyEntry,
     Workspace,
     preflight_run,
     register_run,
-    register_strategy_config,
     register_strategy_model,
 )
 from vqapr.public import run as execute_run
@@ -50,16 +47,10 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     project = tmp_path / "project"
     project.mkdir()
     panel = journey.install(project)
+    # No per-strategy binding to register (record `148`): every strategy of the run is called
+    # on the run's sessions at its `at`, so registering the model is all a strategy needs.
     for name in STRATEGIES:
         register_strategy_model(project, name, journey.STRATEGY_SOURCE, "SampleReversal5d")
-        register_strategy_config(
-            project,
-            StrategyConfig(
-                Workspace.open(project).component(name),
-                journey.STRATEGY_AGENDA,
-                OperationRole.STRATEGY_CALLBACK,
-            ),
-        )
     definition = replace(
         journey.definition(panel, run_id="comparison"),
         strategies=tuple(StrategyEntry(name) for name in STRATEGIES),
@@ -78,28 +69,47 @@ def test_preflight_freezes_one_run_layer_and_one_layer_per_strategy(tmp_path: Pa
     assert len({layer.identity for layer in frozen.strategies}) == 3, (
         "three components, three strategy identities"
     )
-    assert frozen.identity == preflight_run(project, workspace.run_definition("comparison")).identity
+    again = preflight_run(project, workspace.run_definition("comparison"))
+    assert frozen.identity == again.identity
     # The strategies share the run layer: one universe, one period, one venue, one panel set.
     assert frozen.requirements, "the union of what the strategies read"
-    only = replace(workspace.run_definition("comparison"), run_id="one", strategies=(StrategyEntry("ou-k0"),))
-    assert preflight_run(project, only).strategy("ou-k0").identity == frozen.strategy("ou-k0").identity, (
+    # Same run, fewer strategies. The run id stays: since record `148` the strategy's agenda is
+    # derived from the run (`<run_id>.sessions`), so a strategy's identity folds the run it is
+    # asked in, and only the OTHER strategies of that run are what must not change it.
+    only = replace(workspace.run_definition("comparison"), strategies=(StrategyEntry("ou-k0"),))
+    alone = preflight_run(project, only).strategy("ou-k0")
+    assert alone.identity == frozen.strategy("ou-k0").identity, (
         "a strategy's identity is its own: adding strategies to the run does not change it"
     )
 
 
-def test_a_strategy_the_run_names_without_a_binding_is_refused_by_name(tmp_path: Path) -> None:
+def test_a_strategy_the_run_names_without_a_registration_is_refused_by_name(
+    tmp_path: Path,
+) -> None:
+    """A registered model is all a strategy needs (record `148`); an unregistered one is refused.
+
+    Before `148` a strategy also needed a registered binding to an agenda, and a run naming a
+    model without one was refused. The binding is derived now, so the only thing a run can name
+    that does not exist is the component itself -- and a run that merely names a registered
+    model registers cleanly.
+    """
     project, _ = _project(tmp_path)
-    register_strategy_model(project, "unbound", journey.STRATEGY_SOURCE, "SampleReversal5d")
+    register_strategy_model(project, "registered-only", journey.STRATEGY_SOURCE, "SampleReversal5d")
     workspace = Workspace.open(project)
-    definition = replace(
-        workspace.run_definition("comparison"), run_id="x", strategies=(StrategyEntry("unbound"),)
+    named = replace(
+        workspace.run_definition("comparison"),
+        run_id="x",
+        strategies=(StrategyEntry("registered-only"),),
     )
+    register_run(project, named)
+    assert Workspace.open(project).run_definition("x").strategies == named.strategies
 
     from vqapr.domain.errors import VqaprError
 
+    unregistered = replace(named, run_id="y", strategies=(StrategyEntry("unregistered"),))
     with pytest.raises(VqaprError) as refused:
-        register_run(project, definition)
-    assert "'unbound'" in refused.value.as_dict()["failures"][0]["requirement"]
+        register_run(project, unregistered)
+    assert "'unregistered'" in refused.value.as_dict()["failures"][0]["requirement"]
 
 
 @pytest.mark.slow
@@ -181,14 +191,6 @@ def test_a_strategy_record_is_content_addressed(tmp_path: Path) -> None:
         journey.STRATEGY_SOURCE.read_text(encoding="utf-8") + "\n# tweaked\n", encoding="utf-8"
     )
     register_strategy_model(project, "ou-k0", tweaked, "SampleReversal5d")
-    register_strategy_config(
-        project,
-        StrategyConfig(
-            Workspace.open(project).component("ou-k0"),
-            journey.STRATEGY_AGENDA,
-            OperationRole.STRATEGY_CALLBACK,
-        ),
-    )
     workspace = Workspace.open(project)
     tweaked = preflight_run(project, workspace.run_definition("comparison"))
     execute_run(project, tweaked, store_root=store, strategies=["ou-k0"])
@@ -206,7 +208,9 @@ def test_a_changed_run_under_an_old_id_is_refused_naming_both_digests(tmp_path: 
 
     changed = replace(workspace.run_definition("comparison"), instruments=frozen.instruments[:1])
     with pytest.raises(RunRecordConflict) as refused:
-        execute_run(project, preflight_run(project, changed), store_root=store, strategies=["ou-k0"])
+        execute_run(
+            project, preflight_run(project, changed), store_root=store, strategies=["ou-k0"]
+        )
     assert "rm run comparison" in str(refused.value)
     assert (store / "runs" / "comparison" / RUN_FILENAME).is_file(), "the old run.json stands"
 

@@ -34,6 +34,7 @@ from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/029`).
 from vqapr.extension.loading import load_exchange, load_strategy_model
+from vqapr.flow.preflight import derived_agenda
 from vqapr.flow.run import RunDefinition, StrategyEntry
 from vqapr.flow.run_spec import MATERIALIZATION
 
@@ -346,15 +347,17 @@ def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]
     return []
 
 
-def _binding_agenda(workspace: Workspace, entry: StrategyEntry) -> object | None:
-    """The agenda a strategy's registered binding names, or `None` when it does not resolve.
+def _decide_agenda(workspace: Workspace, definition: RunDefinition) -> object | None:
+    """The run's decide agenda, or `None` when it cannot be built here.
 
-    An unresolvable id is a different judgment's refusal to make (preflight names it); making it
-    here too would report one defect twice.
+    Built from the run's sessions and `at` (record `148`). A dataset that does not resolve
+    or a session that does not exist in the zone is a different judgment's refusal to make
+    (preflight names it); making it here too would report one defect twice.
     """
+
     try:
-        return workspace.agenda(str(workspace.strategy_config(entry.component_id).agenda_id))
-    except VqaprError:
+        return derived_agenda(workspace, definition)
+    except (VqaprError, ValueError, TypeError):
         return None
 
 
@@ -376,7 +379,7 @@ def _judge_execution_ordering(
     fill_at = registration.fill.local_time
     found: list[Failure] = []
     for entry in definition.strategies:
-        agenda = _binding_agenda(workspace, entry)
+        agenda = _decide_agenda(workspace, definition)
         if agenda is None:
             continue
         late = [
@@ -519,7 +522,7 @@ def _first_decision(
     start, end = definition.start, definition.end
     if start is None or end is None:
         return None
-    agenda = _binding_agenda(workspace, entry)
+    agenda = _decide_agenda(workspace, definition)
     if agenda is None:
         return None
     inside = [

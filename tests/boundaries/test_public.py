@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -54,8 +54,6 @@ from vqapr.public import (
     LocalInstantDeclaration,
     MaterializationResult,
     MaterializationSpec,
-    MonitoringPolicy,
-    OperationAgenda,
     OperationOccurrence,
     OperationRole,
     OptimizeRefusal,
@@ -78,12 +76,10 @@ from vqapr.public import (
     optimize,
     preflight_run,
     publish_run_allocation,
-    register_agenda,
     register_component,
     register_data_model,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     register_strategy_model,
     run,
     shipped_constraint_path,
@@ -139,9 +135,7 @@ def test_public_exports_are_fixed() -> None:
             AllocationSign,
             AllocationViolation,
             MaterializationSpec,
-            MonitoringPolicy,
             Hold,
-            OperationAgenda,
             OperationOccurrence,
             OperationRole,
             OptimizeRefusal,
@@ -164,10 +158,8 @@ def test_public_exports_are_fixed() -> None:
             optimize,
             publish_run_allocation,
             preflight_run,
-            register_agenda,
             register_component,
             register_data_model,
-            register_strategy_config,
             register_strategy_model,
             run,
             shipped_constraint_path,
@@ -232,12 +224,10 @@ def test_public_exports_are_fixed() -> None:
         "MaterializationResult",
         "MaterializationSpec",
         "ModelWindow",
-        "MonitoringPolicy",
         "NeutralizationRefusal",
         # `docs/issues/031`: the return type of `ModelWindow.observations`, which is the only
         # method a DataModel author can call, and which could not be imported from the facade.
         "ObservationBatch",
-        "OperationAgenda",
         "OperationOccurrence",
         "OperationRole",
         "OptimizeRefusal",
@@ -257,7 +247,6 @@ def test_public_exports_are_fixed() -> None:
         "SimulationResult",
         "SourceSpec",
         "StockInstrument",
-        "StrategyConfig",
         "StrategyEntry",
         "StrategyModel",
         "StrategyModelContext",
@@ -265,7 +254,6 @@ def test_public_exports_are_fixed() -> None:
         "TickerNetting",
         "TradeRule",
         "TradeTerms",
-        "ValuationConfig",
         "VqaprError",
         "WeightingRefusal",
         "ZeroDealtReason",
@@ -300,7 +288,6 @@ def test_public_exports_are_fixed() -> None:
         "read_run_record",
         "read_strategy_record",
         "read_strategy_table",
-        "register_agenda",
         "register_component",
         "register_constraint",
         "register_data_model",
@@ -308,7 +295,6 @@ def test_public_exports_are_fixed() -> None:
         "register_exchange",
         "register_execution_input",
         "register_run",
-        "register_strategy_config",
         "register_strategy_model",
         "rescale",
         "returns",
@@ -424,25 +410,6 @@ def test_public_facade_registers_a_valid_execution_input(
     before = (tmp_path / ".vqapr" / "workspace.yaml").read_bytes()
     assert register_execution_input(tmp_path, registration) is False
     assert (tmp_path / ".vqapr" / "workspace.yaml").read_bytes() == before
-
-
-def test_public_facade_registers_an_operation_agenda(tmp_path: Path) -> None:
-    agenda = OperationAgenda.from_occurrences(
-        agenda_id="strategy-agenda",
-        role=OperationRole.STRATEGY_CALLBACK,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                "first",
-                OperationRole.STRATEGY_CALLBACK,
-                LocalInstantDeclaration(date(2024, 3, 5), time(15, 30), "Asia/Seoul", 0, "+09:00"),
-            ),
-        ),
-        provenance="facade test",
-    )
-
-    assert register_agenda(tmp_path, agenda) is True
-    assert register_agenda(tmp_path, agenda) is False
 
 
 def test_public_run_uses_frozen_initial_model_memory(

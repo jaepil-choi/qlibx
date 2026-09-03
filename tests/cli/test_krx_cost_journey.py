@@ -141,18 +141,6 @@ execution_inputs:
       at: "15:30"
       timezone: Asia/Seoul
       trade_price: close
-
-agendas:
-  alpha:
-    role: strategy_callback
-    from_dataset: prices
-    at: "04:00"
-    timezone: Asia/Seoul
-  valuing:
-    role: valuation
-    from_dataset: prices
-    at: "16:00"
-    timezone: Asia/Seoul
 """,
         encoding="utf-8",
     )
@@ -221,21 +209,18 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, payload
 
     (tmp_path / "rotate.py").write_text(_STRATEGY, encoding="utf-8")
-    configs = tmp_path / "configs.yaml"
-    configs.write_text(
+    strategy = tmp_path / "rotate.yaml"
+    strategy.write_text(
         f"""
 components:
   rotate:
     kind: strategy
     path: {(tmp_path / "rotate.py").as_posix()}
     object_name: Rotate
-strategy_configs:
-  rotate:
-    agenda_id: alpha
 """,
         encoding="utf-8",
     )
-    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(configs))
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(strategy))
     assert code == 0, payload
 
     runs = tmp_path / "runs.yaml"
@@ -245,7 +230,11 @@ strategy_configs:
                 "runs": {
                     "krx": {
                         "strategies": {"rotate": {}},
-                        "valuation": {"agenda_id": "valuing"},
+                        # Decide at 04:00 on every session the prices have a row for; the book
+                        # is valued at the 15:30 fill it lands on (record 148).
+                        "sessions_from": "prices",
+                        "timezone": "Asia/Seoul",
+                        "at": "04:00",
                         "exchange": "krx-venue",
                         "execution_input": "venue-daily",
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),

@@ -52,29 +52,19 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    Rebalance,
     RunDefinition,
     SHIPPED_CONSTRAINTS,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
     ZeroDealtReason,
     callback_evidence,
     component_ref,
     export_roster,
     preflight_run,
     publish_run_allocation,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     run,
     shipped_constraint_path,
 )
@@ -120,23 +110,6 @@ def _universe(path: Path) -> tuple[str, ...]:
         )
     finally:
         con.close()
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_005 committed KRX sessions",
-    )
 
 
 _SOURCE_REFS = '''
@@ -783,30 +756,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     for reference in (alpha_ref, index_ref, academic_ref, krx_ref, no_short_ref, cap_ref):
         register_component(project, reference)
 
-    alpha_agenda = _agenda(
-        "show005-alpha", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    index_agenda = _agenda(
-        "show005-index", OperationRole.STRATEGY_CALLBACK, time(9, 0), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show005-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "show005-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (alpha_agenda, index_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(project, agenda)
-
-    alpha_config = StrategyConfig(alpha_ref, "show005-alpha", OperationRole.STRATEGY_CALLBACK)
-    index_config = StrategyConfig(index_ref, "show005-index", OperationRole.STRATEGY_CALLBACK)
-    valuation_config = ValuationConfig(
-        "show005-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("show005-monitoring", OperationRole.MONITORING)
-    register_strategy_config(project, alpha_config)
-    register_strategy_config(project, index_config)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
@@ -814,8 +763,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     alpha_definition = RunDefinition(
         run_id="show005-alpha",
         strategies=(StrategyEntry("show005-alpha"),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 30),
         exchange="show005-academic",
         execution_input_id="krx-daily",
         start=start,
@@ -834,8 +784,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     index_definition = RunDefinition(
         run_id="show005-index",
         strategies=(StrategyEntry("show005-index", ("no-short", "single-name-cap")),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(9, 0),
         exchange="show005-krx",
         execution_input_id="krx-daily",
         start=start,

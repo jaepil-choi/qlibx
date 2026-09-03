@@ -16,12 +16,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from types import MappingProxyType
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
@@ -33,7 +33,6 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.model_state import prepare_model_state
 from vqapr.models.memory import ModelMemory, normalize_memory
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 
 FINGERPRINT_PREFIX = 8
 """How much of a component fingerprint names a strategy record's directory: `<id>@<fp8>`.
@@ -64,6 +63,26 @@ def _require_id(value: object, name: str) -> str:
     if not isinstance(value, str) or not value:
         raise TypeError(f"{name} must be a non-empty identifier")
     return value
+
+
+def _require_timezone(value: object) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("timezone must be a non-empty IANA timezone name")
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError(f"unknown IANA timezone: {value!r}") from error
+
+
+def _require_wall_time(value: object, name: str, *, required: bool) -> None:
+    if value is None:
+        if required:
+            raise ValueError(f"{name} must be declared")
+        return
+    if not isinstance(value, time):
+        raise TypeError(f"{name} must be a datetime.time")
+    if value.tzinfo is not None:
+        raise ValueError(f"{name} must be a timezone-naive wall time; the run declares the zone")
 
 
 def _require_period(start: datetime | None, end: datetime | None, verb: str) -> None:
@@ -162,8 +181,8 @@ class StrategyConfig:
 class StrategyEntry:
     """One strategy a run tries: the component, the constraints it runs under, its opening memory.
 
-    Ids, not refs: the entry is part of a registered document, and the binding to an agenda is
-    the strategy's registered `strategy_config` (record `138`), which preflight looks up.
+    Ids, not refs: the entry is part of a registered document, and the component it names is
+    looked up by preflight, which also binds it to the run's own sessions (record `148`).
     """
 
     component_id: str
@@ -193,9 +212,17 @@ class RunDefinition:
 
     run_id: str
     strategies: tuple[StrategyEntry, ...]
-    valuation: ValuationConfig
     instruments: tuple[str, ...]
-    monitoring: MonitoringPolicy | None = None
+    timezone: str = ""
+    """The venue zone every wall time below is expressed in."""
+    at: time | None = None
+    """When, on each session, every model is called. A strategy decides for itself whether to
+    act; the book is valued at the instant the venue fills, and monitored right after each
+    commit, so this is the one wall time a run declares (record `148`)."""
+    sessions_from: str | None = None
+    """The dataset whose distinct `available_at` days are the run's sessions."""
+    sessions: tuple[date, ...] = ()
+    """Or the sessions listed literally. Exactly one of the two is declared."""
     exchange: str | None = None
     execution_input_id: str | None = None
     start: datetime | None = None
@@ -212,10 +239,16 @@ class RunDefinition:
         ids = [entry.component_id for entry in self.strategies]
         if len(set(ids)) != len(ids):
             raise ValueError("a run names each strategy at most once")
-        if not isinstance(self.valuation, ValuationConfig):
-            raise TypeError("valuation must be a ValuationConfig")
-        if self.monitoring is not None and not isinstance(self.monitoring, MonitoringPolicy):
-            raise TypeError("monitoring must be a MonitoringPolicy or None")
+        _require_timezone(self.timezone)
+        _require_wall_time(self.at, "at", required=True)
+        if (self.sessions_from is None) == (not self.sessions):
+            raise ValueError("declare exactly one of sessions_from or sessions")
+        if self.sessions_from is not None:
+            _require_id(self.sessions_from, "sessions_from")
+        if not isinstance(self.sessions, tuple) or any(
+            not isinstance(day, date) or isinstance(day, datetime) for day in self.sessions
+        ):
+            raise TypeError("sessions must be a tuple of dates")
         if self.exchange is not None:
             _require_id(self.exchange, "exchange")
         if self.execution_input_id is not None:
@@ -229,6 +262,11 @@ class RunDefinition:
             _require_account(self.initial_account_snapshot, self.initial_account_mode, "declared"),
         )
         _require_instruments(self.instruments)
+
+    @property
+    def agenda_id(self) -> str:
+        """The id of the one agenda preflight derives: every session, at `at`."""
+        return f"{self.run_id}.sessions"
 
     def strategy(self, component_id: str) -> StrategyEntry:
         for entry in self.strategies:
@@ -396,11 +434,7 @@ class FrozenRun:
     """
 
     run_id: str
-    valuation: ValuationConfig
-    valuation_agenda: FrozenAgenda
     strategies: tuple[FrozenStrategy, ...]
-    monitoring: MonitoringPolicy | None = None
-    monitoring_agenda: FrozenAgenda | None = None
     exchange: ComponentRef | None = None
     execution_input: ExecutionInputRegistration | None = None
     start: datetime | None = None
@@ -422,14 +456,6 @@ class FrozenRun:
 
     def __post_init__(self) -> None:
         _require_id(self.run_id, "run_id")
-        if not isinstance(self.valuation, ValuationConfig):
-            raise TypeError("valuation must be a ValuationConfig")
-        if not isinstance(self.valuation_agenda, FrozenAgenda):
-            raise TypeError("valuation_agenda must be a FrozenAgenda")
-        if self.valuation_agenda.agenda_id != self.valuation.agenda_id:
-            raise ValueError("valuation_agenda must match valuation agenda_id")
-        if self.valuation_agenda.agenda_role is not self.valuation.agenda_role:
-            raise ValueError("valuation_agenda must match valuation agenda_role")
         if not isinstance(self.strategies, tuple) or not self.strategies:
             raise ValueError("a frozen run holds at least one strategy")
         if any(not isinstance(layer, FrozenStrategy) for layer in self.strategies):
@@ -437,17 +463,6 @@ class FrozenRun:
         ids = [layer.component_id for layer in self.strategies]
         if len(set(ids)) != len(ids):
             raise ValueError("a frozen run holds each strategy at most once")
-        if self.monitoring is not None and not isinstance(self.monitoring, MonitoringPolicy):
-            raise TypeError("monitoring must be a MonitoringPolicy or None")
-        if self.monitoring is None and self.monitoring_agenda is not None:
-            raise ValueError("monitoring_agenda requires a monitoring policy")
-        if self.monitoring is not None and not isinstance(self.monitoring_agenda, FrozenAgenda):
-            raise TypeError("monitoring_agenda must be a FrozenAgenda when monitoring is set")
-        if self.monitoring_agenda is not None:
-            if self.monitoring_agenda.agenda_id != self.monitoring.agenda_id:
-                raise ValueError("monitoring_agenda must match monitoring agenda_id")
-            if self.monitoring_agenda.agenda_role is not self.monitoring.agenda_role:
-                raise ValueError("monitoring_agenda must match monitoring agenda_role")
         if self.exchange is not None:
             if not isinstance(self.exchange, ComponentRef):
                 raise TypeError("exchange must be a ComponentRef or None")
@@ -524,8 +539,12 @@ class FrozenRun:
         )
 
     def dispatch_order(self, strategy: FrozenStrategy) -> tuple[OperationOccurrence, ...]:
-        """The static occurrences one strategy's flow dispatches: its agenda and the run's."""
-        return merged_occurrences(strategy.agenda, self.valuation_agenda, self.monitoring_agenda)
+        """The static occurrences one strategy's flow dispatches: its sessions, at `at`.
+
+        Since record `148` a run has one agenda: the book is valued at the instant the venue
+        fills and monitored right after each commit, so there is nothing else to merge in.
+        """
+        return merged_occurrences(strategy.agenda)
 
     @property
     def identity(self) -> str:
@@ -538,10 +557,6 @@ class FrozenRun:
         return _identity(
             {
                 "run_id": self.run_id,
-                # Valuation declares no data requirement: it reads the execution table the run
-                # already fills against. Its agenda identity is carried in the agenda block below.
-                "valuation": (self.valuation.agenda_id, str(self.valuation.agenda_role)),
-                "monitoring": self.monitoring.agenda_id if self.monitoring is not None else None,
                 "exchange": (
                     (self.exchange.component_id, self.exchange.fingerprint)
                     if self.exchange is not None
@@ -568,11 +583,6 @@ class FrozenRun:
                 ),
                 "start": self.start.astimezone(UTC).isoformat() if self.start is not None else None,
                 "end": self.end.astimezone(UTC).isoformat() if self.end is not None else None,
-                "agendas": [
-                    agenda.encoded()
-                    for agenda in (self.valuation_agenda, self.monitoring_agenda)
-                    if agenda is not None
-                ],
                 "initial_account": (
                     (
                         self.initial_account_mode.value,

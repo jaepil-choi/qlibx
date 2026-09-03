@@ -29,7 +29,6 @@ from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 
 _BUDGET = Budget(
     PortfolioDirection.LONG_ONLY, Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")
@@ -119,12 +118,9 @@ def _flow(
     occurrences: tuple[OperationOccurrence, ...],
 ) -> SimulationFlow:
     strategy_agenda = FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences)
-    valuation_agenda = FrozenAgenda("valuation", OperationRole.VALUATION, ())
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     frozen = FrozenRun(
         run_id="test",
-        valuation=ValuationConfig("valuation", OperationRole.VALUATION),
-        valuation_agenda=valuation_agenda,
         strategies=(
             FrozenStrategy(
                 config=StrategyConfig(

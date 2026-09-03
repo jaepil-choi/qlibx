@@ -188,8 +188,6 @@ RUN_JSON_FIELDS = (
     "declared_digest",
     "instruments",
     "period",
-    "valuation",
-    "monitoring",
     "exchange",
     "execution_input",
     "initial_account",

@@ -292,6 +292,13 @@ def _run_strategy(
             # is known only inside the loop that calls them.
             allowed_requirements=layer.constraint_requirements,
         ),
+        # Monitoring reads as of the fill instant it judges (record `148`).
+        constraint_window_at=lambda instant: ModelWindow(
+            evaluation_time=instant,
+            instruments=frozen.instruments,
+            store=observation_store,
+            allowed_requirements=layer.constraint_requirements,
+        ),
         # Each strategy has its own Account (design §7-4): the run shares the initial
         # DECLARATION, not the book. It retains exactly the marks this strategy declared it would
         # read; declaring nothing keeps one.

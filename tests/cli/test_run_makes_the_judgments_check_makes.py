@@ -34,30 +34,12 @@ def _lookahead_run(
 ) -> None:
     """A registered run whose strategy decides AT the fill instant: the shape of issue 015.
 
-    A second strategy with its own binding, because a binding is keyed by component id and
-    `my-alpha` is already bound to the 04:00 agenda. The 15:30 agenda coincides with the
-    workspace's fill at 15:30, which is exactly the look-ahead `check.execution.not_after_decision`
-    refuses -- and `register` accepts, since every id it names is registered.
+    The run's own `at` is the decision time (record 148), so the look-ahead is one key: `15:30`
+    coincides with the workspace's fill at 15:30, which is exactly what
+    `check.execution.not_after_decision` refuses -- and `register` accepts, since every id the
+    run names is registered and a wall time is not a reference it can check.
     """
-    code, payload = _cli(
-        capsys, "--project-root", str(root), "new", "strategy", "late-alpha",
-        "--dataset", "prices", "--lookback", "2",
-    )
-    assert code == 0, payload
-    code, payload = _cli(capsys, "--project-root", str(root), "register", payload["declaration"])
-    assert code == 0, payload
-    late = root / "late.yaml"
-    late.write_text(
-        "agendas:\n  late:\n    role: strategy_callback\n    from_dataset: prices\n"
-        '    at: "15:30"\n    timezone: Asia/Seoul\n'
-        "strategy_configs:\n  late-alpha:\n    agenda_id: late\n",
-        encoding="utf-8",
-    )
-    code, payload = _cli(capsys, "--project-root", str(root), "register", str(late))
-    assert code == 0, payload
-    code, payload = _register_run(
-        root, capsys, run_id, strategies={"late-alpha": {}}, **overrides
-    )
+    code, payload = _register_run(root, capsys, run_id, at="15:30", **overrides)
     assert code == 0, payload
 
 

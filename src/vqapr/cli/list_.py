@@ -32,9 +32,7 @@ KINDS = (
     "datasets",
     "sources",
     "components",
-    "agendas",
     "execution-inputs",
-    "strategy-configs",
     # The roster was registrable and unlistable: `list` covered eight kinds and not this one, so a
     # registered roster could not be inspected from the CLI at all.
     "instruments",
@@ -46,9 +44,7 @@ _ACCESSORS = {
     "datasets": "datasets",
     "sources": "sources",
     "components": "components",
-    "agendas": "agendas",
     "execution-inputs": "execution_inputs",
-    "strategy-configs": "strategy_configs",
     "runs": "run_definitions",
 }
 
@@ -56,7 +52,6 @@ _IDENTITY_FIELDS = (
     "dataset_id",
     "source_id",
     "component_id",
-    "agenda_id",
     "execution_input_id",
     "run_id",
 )
@@ -65,18 +60,11 @@ _IDENTITY_FIELDS = (
 def _summarize(item: object) -> dict[str, Any]:
     """Reduce one declaration to the fields an agent needs to act on it."""
     summary: dict[str, Any] = {}
-    component = getattr(item, "component", None)
-    component_id = getattr(component, "component_id", None)
-    if component_id is not None:
-        # StrategyConfig owns a ComponentRef rather than duplicating its id. Omitting the nested
-        # identity made `list strategy-configs --id <component>` return zero rows even though
-        # `register` reports and keys that config by component id.
-        summary["component_id"] = str(component_id)
     for field in _IDENTITY_FIELDS:
         value = getattr(item, field, None)
         if value is not None:
             summary[field] = str(value)
-    for field in ("kind", "fingerprint", "object_name", "role", "timezone"):
+    for field in ("kind", "fingerprint", "object_name", "timezone"):
         value = getattr(item, field, None)
         if value is None:
             continue

@@ -16,7 +16,7 @@ one place a `ValidationError` becomes a `Diagnosis`, and these are its propertie
 from __future__ import annotations
 
 from datetime import datetime, time
-from enum import Enum
+from enum import StrEnum
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -25,7 +25,7 @@ from vqapr.declarations import DECLARE_STAGE, refusals_from
 from vqapr.domain.errors import ExplainTopic, VqaprError
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     STRATEGY_CALLBACK = "strategy_callback"
     VALUATION = "valuation"
 
@@ -77,7 +77,7 @@ def test_a_missing_key_names_the_key_and_what_the_declaration_has() -> None:
     ]
     assert failure.code == f"{DECLARE_STAGE}.key_missing"
     assert failure.requirement == "agendas.daily must declare source_id"
-    assert "agendas.daily declares: fields, inner, role, when" == failure.observed
+    assert failure.observed == "agendas.daily declares: fields, inner, role, when"
     assert failure.fix == "add source_id under agendas.daily in the declaration YAML"
     assert failure.source.key_path == "agendas.daily"
 

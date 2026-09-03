@@ -63,30 +63,20 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    Rebalance,
     RunDefinition,
     RunRecordSpec,
     SHIPPED_CONSTRAINTS,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
     callback_evidence,
     component_ref,
     export_roster,
     preflight_run,
     publish_run_allocation,
     publish_run_record,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     run,
     shipped_constraint_path,
 )
@@ -157,23 +147,6 @@ def _universe(path: Path) -> tuple[str, ...]:
         )
     finally:
         con.close()
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_006 committed KRX sessions",
-    )
 
 
 _SOURCE_REFS = '''
@@ -600,19 +573,20 @@ def _digest(path: Path) -> str:
 def _member_run(
     project: Path,
     *,
-    strategy_config: StrategyConfig,
-    valuation_config: ValuationConfig,
-    monitoring: MonitoringPolicy,
+    strategy_ref: Any,
+    at: time,
+    callback_days: list[date],
     academic_ref: Any,
     start: datetime,
     end: datetime,
     universe: tuple[str, ...],
 ) -> Any:
     definition = RunDefinition(
-        run_id=strategy_config.component.component_id,
-        strategies=(StrategyEntry(strategy_config.component.component_id),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        run_id=str(strategy_ref.component_id),
+        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=at,
         exchange=academic_ref.component_id,
         execution_input_id="krx-daily",
         start=start,
@@ -747,56 +721,15 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     for reference in components_to_register:
         register_component(project, reference)
 
-    reversal_agenda = _agenda(
-        "show006-reversal", OperationRole.STRATEGY_CALLBACK, time(8, 0), callback_days
-    )
-    momentum_agenda = _agenda(
-        "show006-momentum", OperationRole.STRATEGY_CALLBACK, time(8, 15), callback_days
-    )
-    ensemble_agenda = _agenda(
-        "show006-ensemble", OperationRole.STRATEGY_CALLBACK, time(9, 0), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show006-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "show006-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (
-        reversal_agenda,
-        momentum_agenda,
-        ensemble_agenda,
-        valuation_agenda,
-        monitoring_agenda,
-    ):
-        register_agenda(project, agenda)
-
-    reversal_config = StrategyConfig(
-        reversal_ref, "show006-reversal", OperationRole.STRATEGY_CALLBACK
-    )
-    momentum_config = StrategyConfig(
-        momentum_ref, "show006-momentum", OperationRole.STRATEGY_CALLBACK
-    )
-    ensemble_config = StrategyConfig(
-        ensemble_ref, "show006-ensemble", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig(
-        "show006-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("show006-monitoring", OperationRole.MONITORING)
-    register_strategy_config(project, reversal_config)
-    register_strategy_config(project, momentum_config)
-    register_strategy_config(project, ensemble_config)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
     reversal_result = _member_run(
         project,
-        strategy_config=reversal_config,
-        valuation_config=valuation_config,
-        monitoring=monitoring,
+        strategy_ref=reversal_ref,
+        at=time(8, 0),
+        callback_days=callback_days,
         academic_ref=academic_ref,
         start=start,
         end=end,
@@ -809,9 +742,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     momentum_result = _member_run(
         project,
-        strategy_config=momentum_config,
-        valuation_config=valuation_config,
-        monitoring=monitoring,
+        strategy_ref=momentum_ref,
+        at=time(8, 15),
+        callback_days=callback_days,
         academic_ref=academic_ref,
         start=start,
         end=end,
@@ -868,8 +801,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ensemble_definition = RunDefinition(
         run_id="show006-ensemble",
         strategies=(StrategyEntry("show006-ensemble", ("no-short", "single-name-cap")),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(9, 0),
         exchange="show006-krx",
         execution_input_id="krx-daily",
         start=start,

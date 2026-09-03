@@ -23,7 +23,7 @@ speculation it started as.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -34,15 +34,12 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow import judgments as judgments_module
-from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
+from vqapr.flow.run import RunDefinition, StrategyEntry
 from vqapr.workspace import Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -64,28 +61,6 @@ def workspace(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: tuple[int, int]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                f"{agenda_id}-1",
-                role,
-                LocalInstantDeclaration(
-                    datetime(2024, 1, 2).date(),
-                    datetime(2024, 1, 2, *at).time(),
-                    "Asia/Seoul",
-                    0,
-                    "+09:00",
-                ),
-            ),
-        ),
-        provenance="qa fixture",
-    )
-
-
 def _register_component(root: Path, component_id: str, kind: ComponentKind, source: Path) -> None:
     object_name = source.read_text(encoding="utf-8").split("class ", 1)[1].split("(", 1)[0]
     Workspace.open(root).register_component(
@@ -103,12 +78,9 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     """Register everything a run names, and the run, carrying the defects asked for.
 
     `reads` is the dataset the strategy declares; `prices` is registered and anything else is
-    the unregistered-dataset defect. The agenda decides at 15:30 against a fill at 15:30, which is
+    the unregistered-dataset defect. The run decides at 15:30 against a fill at 15:30, which is
     the look-ahead defect every run here carries.
     """
-    space = Workspace.open(root)
-    space.register_agenda(_agenda("late-agenda", OperationRole.STRATEGY_CALLBACK, (15, 30)))
-    space.register_agenda(_agenda("val-agenda", OperationRole.VALUATION, (16, 0)))
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
     (exec_dir / "placeholder").write_text("x", encoding="utf-8")
@@ -153,15 +125,13 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         encoding="utf-8",
     )
     _register_component(root, "venue", ComponentKind.EXCHANGE, venue)
-    space = Workspace.open(root)
-    space.register_strategy_config(
-        StrategyConfig(space.component("my-strat"), "late-agenda", OperationRole.STRATEGY_CALLBACK)
-    )
     Workspace.open(root).register_run(
         RunDefinition(
             run_id="probe",
             strategies=(StrategyEntry("my-strat"),),
-            valuation=ValuationConfig("val-agenda", OperationRole.VALUATION),
+            timezone="Asia/Seoul",
+            at=time(15, 30),
+            sessions=(date(2024, 1, 2),),
             instruments=("A",),
             exchange="venue",
             execution_input_id="my-exec",
@@ -179,7 +149,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
 def test_several_simultaneous_independent_defects_all_report(workspace: Path) -> None:
     """Independent defects, chosen so that none has to be repaired before another is judged.
 
-    1. an execution ordering defect (an agenda occurrence at/after the fill's local_time)
+    1. an execution ordering defect (the run's `at` at/after the fill's local_time)
     2. weights mode conflict (long-only account holding a short)
     3. an unregistered dataset the strategy reads
     4. preflight, which ALSO refuses -- reported as its own failure, not absorbed or dropped.

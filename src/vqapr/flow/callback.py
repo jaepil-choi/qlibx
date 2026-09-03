@@ -380,10 +380,11 @@ class CallbackPhase:
                 {"instrument": target.instrument_id, "weight": str(weight)},
             )
         # `vqapr.account` carries measurements only, and this path contributes one just in the
-        # case where nobody else will: a valuation clock SPARSER than the decision clock leaves
-        # sessions its own occurrences never reach, and on those the mark a callback replays is
-        # the only record of the book's value there is. 056 measured what dropping it costs --
-        # 8 of 10 measurements lost -- so the row survives for exactly that case.
+        # case where nobody else did: every fill records the NAV it was marked at (record `148`,
+        # `ValuationPhase.measurement_recorder`), so this is the mark nothing recorded -- an
+        # opening mark, or one a caller committed outside the flow. 056 measured what dropping
+        # the fallback cost under the old sparse valuation clock -- 8 of 10 measurements lost --
+        # so the row survives for exactly that case.
         #
         # What is gone is the row written when a valuation ALREADY recorded this measurement.
         # That one carried `nav=None` and competed with a real value in the same table, which is
@@ -414,6 +415,7 @@ class CallbackPhase:
                     "account_version": account.version,
                 },
             )
+            self._context.recorded_measurements.add(marked_at)
             positions = sorted(account.positions) if self._context.record_account_positions else ()
             for instrument in positions:
                 valued = prices.get(instrument)

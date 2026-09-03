@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountSnapshot
@@ -151,11 +152,21 @@ def callback_evidence(result: SimulationResult) -> tuple[CallbackEvidence, ...]:
 
 @dataclass(frozen=True, slots=True)
 class DueExecutionResult:
-    """Evidence returned only after the complete post-decision account chain."""
+    """Evidence returned only after the complete post-decision account chain.
+
+    `monitoring` is what the declared constraints found on the committed, marked book right
+    after this commit (record `148`), or `None` when the run declared none.
+    """
 
     consumed_pending_id: str
     account_version: int
     post_account_result: object
+    monitoring: object | None = None
+
+    @property
+    def report(self) -> object | None:
+        """The constraint report, where `contract_report` looks for one."""
+        return None if self.monitoring is None else self.monitoring.report
 
     def __post_init__(self) -> None:
         if not isinstance(self.consumed_pending_id, str) or not self.consumed_pending_id:
@@ -183,6 +194,18 @@ class ValuationResult:
             raise TypeError("account must be an AccountSnapshot")
         if not isinstance(self.marks, MarkBatch):
             raise TypeError("marks must be a MarkBatch")
+
+
+@dataclass(frozen=True, slots=True)
+class HeldResult:
+    """A held book valued at its execution instant, and what monitoring found there."""
+
+    valuation: object
+    monitoring: object | None = None
+
+    @property
+    def report(self) -> object | None:
+        return None if self.monitoring is None else self.monitoring.report
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,6 +397,17 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
         self.on_progress: Callable[[], None] | None = None
         self.strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
         self.constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
+        self.constraint_window_at: Callable[[datetime], ModelWindow]
+
+    def in_agenda_zone(self, instant: datetime) -> datetime:
+        """An instant expressed in the strategy agenda's zone; the same instant.
+
+        Every package table stamps `event_time` in that zone (`docs/issues/058`): the execution
+        table normalises targets to UTC, and a reader lining a fill up against the NAV or the
+        monitoring row that followed it was converting by hand.
+        """
+        zone = self.layer.agenda.timezone
+        return instant.astimezone(ZoneInfo(zone)) if zone else instant
 
     def guard(
         self,

@@ -10,6 +10,7 @@ this module re-exports are the ones callers and tests imported from it before th
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountState
@@ -75,6 +76,15 @@ __all__ = [
 ]
 
 
+class _InstantOccurrence:
+    """What a per-occurrence window factory reads when handed a bare instant."""
+
+    __slots__ = ("evaluation_time",)
+
+    def __init__(self, evaluation_time: datetime) -> None:
+        self.evaluation_time = evaluation_time
+
+
 class SimulationFlow:
     """Dispatch frozen occurrences and one latest accepted pending intent.
 
@@ -91,6 +101,7 @@ class SimulationFlow:
         strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         account: Account,
+        constraint_window_at: Callable[[datetime], ModelWindow] | None = None,
         exchange: Exchange,
         constraints: tuple[Constraint, ...],
         valuation_service: ValuationService | None = None,
@@ -139,6 +150,13 @@ class SimulationFlow:
         self._context.state = state
         self._context.strategy_window_for_occurrence = strategy_window_for_occurrence
         self._context.constraint_window_for_occurrence = constraint_window_for_occurrence
+        # Monitoring reads as of the fill instant (record `148`). A caller that gave only the
+        # per-occurrence factory -- the tests' flows -- gets a window at the decision instead.
+        self._context.constraint_window_at = constraint_window_at or (
+            lambda instant: constraint_window_for_occurrence(
+                _InstantOccurrence(instant)  # type: ignore[arg-type]
+            )
+        )
         self._context.account = account
         self._context.exchange = exchange
         # The venue names the extra execution price its own regimes need, once per run. A venue
@@ -236,31 +254,10 @@ class SimulationFlow:
             next_static = next(static, None)
             if occurrence.role is OperationRole.STRATEGY_CALLBACK:
                 traces.append(self._callback.dispatch(occurrence))
-            elif occurrence.role is OperationRole.VALUATION:
-                traces.append(
-                    self._context.guard(
-                        SimulationStage.VALUATION,
-                        occurrence.evaluation_time,
-                        lambda occurrence=occurrence: self._valuation.dispatch_valuation(
-                            occurrence
-                        ),
-                        family=SimulationFailureFamily.VALUATION,
-                        owner=self._context.frozen_run.valuation,
-                    )
-                )
-            elif occurrence.role is OperationRole.MONITORING:
-                traces.append(
-                    self._context.guard(
-                        SimulationStage.MONITORING,
-                        occurrence.evaluation_time,
-                        lambda occurrence=occurrence: self._valuation.dispatch_monitoring(
-                            occurrence
-                        ),
-                        family=SimulationFailureFamily.VALUATION,
-                        owner=self._context.frozen_run.monitoring_agenda,
-                    )
-                )
-            else:  # OperationRole is closed, but keep malformed values fail-closed.
+            else:
+                # Record `148`: valuation happens at the execution instant and monitoring right
+                # after each commit, inside the due path. A static occurrence of any other
+                # role is a malformed agenda, not a phase to dispatch to.
                 raise ValueError(f"unsupported operation role: {occurrence.role!r}")
 
         if self._context.state.current.pending_accepted_intent is not None:
@@ -271,8 +268,6 @@ class SimulationFlow:
         finalization = FinalizationEvidence(
             run_identity=self._context.frozen_run.identity,
             strategy_agenda=self._context.layer.agenda,
-            valuation_agenda=self._context.frozen_run.valuation_agenda,
-            monitoring_agenda=self._context.frozen_run.monitoring_agenda,
             root_version=self._context.state.current.version,
             cutoff=self._context.frozen_run.end,
             account=None if account is None else account.snapshot,

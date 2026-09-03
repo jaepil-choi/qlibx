@@ -21,7 +21,6 @@ from vqapr.authoring import DatasetInput, Hold, Rebalance
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
@@ -108,7 +107,6 @@ from vqapr.flow.run import (
     FrozenRun,
     FrozenStrategy,
     RunDefinition,
-    StrategyConfig,
     StrategyEntry,
 )
 from vqapr.flow.run_records import read_run_record, read_strategy_record, run_ids, strategy_refs
@@ -135,7 +133,6 @@ from vqapr.portfolio.weighting import (
     signal_weight,
 )
 from vqapr.runtime.agendas import (
-    OperationAgenda,
     OperationOccurrence,
     OperationRole,
 )
@@ -143,7 +140,6 @@ from vqapr.testing.conformance import conformance
 from vqapr.transforms.cross_section import rank
 from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
 from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.valuation.marks import Mark, MarkBatch
 from vqapr.workspace import Workspace
 
@@ -203,7 +199,6 @@ __all__ = (
     "MaterializationResult",
     "MaterializationSpec",
     "ModelWindow",
-    "MonitoringPolicy",
     "NeutralizationRefusal",
     # The two halves of what a Model is handed. `ObservationBatch` is the return type of the one
     # method a DataModel author can call, and it was reachable only by opening installed source:
@@ -211,7 +206,6 @@ __all__ = (
     # ordering (`docs/issues/031`). `ModelWindow` was importable but undeclared, while the
     # constraint scaffold has always emitted `from vqapr.public import ... ModelWindow`.
     "ObservationBatch",
-    "OperationAgenda",
     "OperationOccurrence",
     "OperationRole",
     "OptimizeRefusal",
@@ -231,7 +225,6 @@ __all__ = (
     "SimulationResult",
     "SourceSpec",
     "StockInstrument",
-    "StrategyConfig",
     "StrategyEntry",
     "StrategyModel",
     "StrategyModelContext",
@@ -239,7 +232,6 @@ __all__ = (
     "TickerNetting",
     "TradeRule",
     "TradeTerms",
-    "ValuationConfig",
     "VqaprError",
     "WeightingRefusal",
     "ZeroDealtReason",
@@ -274,7 +266,6 @@ __all__ = (
     "read_run_record",
     "read_strategy_record",
     "read_strategy_table",
-    "register_agenda",
     "register_component",
     "register_constraint",
     "register_data_model",
@@ -282,7 +273,6 @@ __all__ = (
     "register_exchange",
     "register_execution_input",
     "register_run",
-    "register_strategy_config",
     "register_strategy_model",
     "rescale",
     "returns",
@@ -325,17 +315,9 @@ def component_ref(
 
 
 
-def register_agenda(project_root: str | Path, agenda: OperationAgenda) -> bool:
-    return Workspace.create(project_root).register_agenda(agenda)
-
-
 def register_component(project_root: str | Path, component: ComponentRef) -> bool:
     """Register one validated extension component reference."""
     return Workspace.create(project_root).register_component(component)
-
-
-def register_strategy_config(project_root: str | Path, config: StrategyConfig) -> bool:
-    return Workspace.create(project_root).register_strategy_config(config)
 
 
 def register_run(project_root: str | Path, definition: RunDefinition) -> bool:

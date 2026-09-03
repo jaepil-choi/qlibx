@@ -33,8 +33,6 @@ from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 RECORD_KINDS = ("run", "strategy")
 DECLARATION_KINDS = {
     "component": "component",
-    "agenda": "agenda",
-    "strategy-config": "strategy_config",
     "run-definition": "run",
 }
 KINDS = (*RECORD_KINDS, *DECLARATION_KINDS)

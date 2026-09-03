@@ -5,16 +5,20 @@ Mentioning is not running: before this file, no test invoked `new`, `register`, 
 so the whole `runs: -> register -> RunDefinition -> preflight_run -> run` path was unexecuted.
 These tests call `main(argv)` and read the JSON it emits, which is exactly what an agent gets.
 
-Datasets, sources, agendas, execution inputs and configs are declared through `vqapr declare`,
-which is the command that closed that gap. This file previously reached past the CLI into the
-library for all seven, under a docstring admitting the CLI could not register them; the workspace
-below is now reachable by typing `vqapr` commands only, which is the property that matters.
+Datasets, execution inputs, components and runs are declared through `vqapr register`, which is
+the command that closed that gap. This file previously reached past the CLI into the library for
+all of them, under a docstring admitting the CLI could not register them; the workspace below is
+now reachable by typing `vqapr` commands only, which is the property that matters.
+
+Since record 148 a run declares its own sessions and wall time (`sessions_from`, `timezone`,
+`at`): there is no agenda to register and no binding to write, so the fixture is one file
+shorter than it was.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, time
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -22,14 +26,17 @@ import duckdb
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.public import (
-    LocalInstantDeclaration,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-)
 
 _ZONE = ZoneInfo("Asia/Seoul")
+
+OCCURRENCES = 6
+"""What the fixture run dispatches: three sessions, so three callbacks, and one execution each.
+
+The book is valued at the instant the venue fills and the declared constraints judge it right
+after each commit (record 148), so neither valuation nor monitoring is an occurrence of its own
+any more. Before 148 this was 12: three days times callback, valuation and monitoring, plus the
+three executions.
+"""
 
 
 def _cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:
@@ -37,23 +44,6 @@ def _cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:
     code = main(argv)
     out = capsys.readouterr().out.strip()
     return code, json.loads(out.splitlines()[-1])
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone="Asia/Seoul",
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day}",
-                role,
-                LocalInstantDeclaration(date(2024, 3, day), at, "Asia/Seoul", 0, "+09:00"),
-            )
-            for day in (5, 6, 7)
-        ),
-        provenance="cli end-to-end fixture",
-    )
 
 
 def _parquets(root: Path) -> tuple[Path, Path]:
@@ -127,23 +117,6 @@ execution_inputs:
       at: "15:30"
       timezone: Asia/Seoul
       trade_price: close
-
-agendas:
-  alpha:
-    role: strategy_callback
-    from_dataset: prices
-    at: "04:00"
-    timezone: Asia/Seoul
-  valuing:
-    role: valuation
-    from_dataset: prices
-    at: "16:00"
-    timezone: Asia/Seoul
-  watching:
-    role: monitoring
-    from_dataset: prices
-    at: "17:00"
-    timezone: Asia/Seoul
 """,
         encoding="utf-8",
     )
@@ -170,21 +143,18 @@ def _workspace_for_run(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
     )
     assert code == 0, registered
 
-    configs = root / "configs.yaml"
-    configs.write_text(
+    venue = root / "venue.yaml"
+    venue.write_text(
         f"""
 components:
   venue:
     kind: exchange
     path: {_exchange_component(root).as_posix()}
     object_name: Venue
-strategy_configs:
-  my-alpha:
-    agenda_id: alpha
 """,
         encoding="utf-8",
     )
-    code, payload = _cli(capsys, "--project-root", str(root), "register", str(configs))
+    code, payload = _cli(capsys, "--project-root", str(root), "register", str(venue))
     assert code == 0, payload
 
     # The run itself is a registration too (record 139): `vqapr run r1` is what the tests type.
@@ -197,13 +167,18 @@ def _runs_declaration(root: Path, run_id: str = "r1", **overrides: object) -> Pa
     """A `runs:` declaration for one run over this workspace, exactly as a user would write it.
 
     `constraints=[...]` is the one convenience: it lands on the single strategy the run names.
-    Any other keyword replaces the run's key of that name.
+    Any other keyword replaces the run's key of that name -- `at="15:30"` is how a test declares
+    a look-ahead, since the run's own `at` is the decision time (record 148).
+
+    The strategy decides at 04:00 on every day the `prices` dataset has a row for: the rows
+    become available at 03:00, and the venue fills at 15:30.
     """
     constraints = overrides.pop("constraints", None)
     body: dict[str, object] = {
         "strategies": {"my-alpha": {} if constraints is None else {"constraints": constraints}},
-        "valuation": {"agenda_id": "valuing"},
-        "monitoring": {"agenda_id": "watching"},
+        "sessions_from": "prices",
+        "timezone": "Asia/Seoul",
+        "at": "04:00",
         "exchange": "venue",
         "execution_input": "venue-daily",
         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
@@ -286,9 +261,10 @@ def test_run_executes_a_registered_run_end_to_end(
     assert list(payload["strategies"]) == ["my-alpha"]
     strategy = payload["strategies"]["my-alpha"]
     assert strategy["record"].startswith("my-alpha@")
-    # Three days x (strategy, valuation, monitoring) plus the execution occurrences the fills
-    # land on. Pinned rather than `> 0`, which a run that did nothing would also satisfy.
-    assert strategy["occurrences"] == 12
+    # One callback per session (record 148: the run's sessions at its `at`, nothing else is
+    # dispatched) plus the execution occurrences the fills land on. Pinned rather than `> 0`,
+    # which a run that did nothing would also satisfy.
+    assert strategy["occurrences"] == OCCURRENCES
     # The scaffold TRADES. It used to hold throughout -- the old template returned Hold --
     # and this assertion pinned account_version at zero, which meant the end-to-end test proved a
     # run that never bought anything. The authoring-contract scaffold ranks the cross-section and
@@ -1109,7 +1085,7 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     # short, so no-short binds nothing and must change no number. A different count here would
     # mean the constraint altered the book rather than merely permitting it.
     strategy = ran["strategies"]["my-alpha"]
-    assert strategy["occurrences"] == 12
+    assert strategy["occurrences"] == OCCURRENCES
     assert strategy["account_version"] == 2
 
 
@@ -1148,27 +1124,6 @@ def test_register_refuses_a_date_boundary_as_a_structured_declaration_refusal(
     assert "dated" not in [row["run_id"] for row in listed["items"]]
 
 
-def test_strategy_config_list_exposes_and_filters_by_component_id(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Registration keys a strategy config by component id, so list must show that identity."""
-    _workspace_for_run(tmp_path, capsys)
-
-    code, payload = _cli(
-        capsys,
-        "--project-root",
-        str(tmp_path),
-        "list",
-        "strategy-configs",
-        "--id",
-        "my-alpha",
-    )
-
-    assert code == 0
-    assert payload["count"] == 1
-    assert payload["items"] == [{"component_id": "my-alpha", "agenda_id": "alpha"}]
-
-
 def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1185,7 +1140,7 @@ def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
             {
                 "runs": {
                     "thin": {
-                        "valuation": {"agenda_id": "valuing"},
+                        "timezone": "Asia/Seoul",
                         "instruments": ["A"],
                     }
                 }
@@ -1201,7 +1156,7 @@ def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
     failure = payload["failures"][0]
     assert failure["code"] == "declaration.read.run_invalid"
     for key in (
-        "strategies", "valuation", "instruments", "start", "end", "exchange",
+        "strategies", "instruments", "start", "end", "exchange",
         "execution_input", "initial_account",
     ):
         assert key in failure["requirement"], f"{key} was not named: {failure['requirement']}"
@@ -1261,10 +1216,10 @@ def test_help_keeps_argparses_own_behaviour(capsys: pytest.CaptureFixture[str]) 
 
 
 def test_one_run_records_one_clock(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """`docs/issues/058`: the fill table's `event_time` is in the agenda's zone like every other.
+    """`docs/issues/058`: the fill table's `event_time` is in the run's zone like every other.
 
     The execution table normalises its target to UTC and the fill row used to carry that, so a
-    reader lining a fill up against the valuation that followed it converted by hand.
+    reader lining a fill up against the NAV row written at that same instant converted by hand.
     """
     from vqapr.flow.run_records import read_table
 

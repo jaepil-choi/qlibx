@@ -45,7 +45,7 @@ Work with vqapr follows three rungs. Each rung depends on the previous one succe
 
 ### Rung 1 — Registration
 
-**Goal:** a workspace where every dataset, source, component, execution input, and agenda is
+**Goal:** a workspace where every dataset, source, component and execution input is
 registered and passes validation.
 
 1. `vqapr list datasets` -- see what exists (returns empty on a fresh workspace, that is fine)
@@ -62,12 +62,11 @@ registered and passes validation.
    Exchange plus the declaration that registers it. **Every instrument the run trades needs a
    listing here**, or preflight refuses it by name. `AcademicExchange` and `KrxExchange` are the
    only two profiles a registered Exchange may be; the scaffold uses the first.
-7. `vqapr new agendas --out agendas.yaml` -- get agendas and strategy_configs together (a
-   config binds a strategy to an agenda, so neither half is usable alone). The run names its
-   valuation agenda itself, in its `valuation:` block
-8. Fill in the placeholders and `vqapr register <declaration.yaml>` for each. Datasets, sources
-   and agendas stay in YAML because they ARE declarations -- there is no code to point at.
-9. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
+7. Fill in the placeholders and `vqapr register <declaration.yaml>` for each. Datasets, sources
+   and execution inputs stay in YAML because they ARE declarations -- there is no code to
+   point at. There is no agenda to declare: the run itself says which sessions it fires on
+   and at what wall time (rung 2).
+8. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
    component declares it reads, decides, forms, weights and records
 
 **What a dataset's shape costs, priced before you commit to it.** Both numbers are measured, and
@@ -201,15 +200,15 @@ through `self.recorder`, and writing to an undeclared one refuses mid-run:
 - **`vqapr.weight`** -- the intended allocation per evaluation, before execution. `instrument`,
   `weight`.
 
-A run that declared constraints and a monitoring agenda records a fourth:
+A run whose strategy declared constraints records a fourth:
 
-- **`vqapr.monitoring`** -- what each declared constraint measured on the committed account at
-  each monitoring occurrence. `constraint` (the rule's id), `passed`, `measured`, `bound`,
+- **`vqapr.monitoring`** -- what each declared constraint measured on the committed account
+  right after each commit. `constraint` (the rule's id), `passed`, `measured`, `bound`,
   `excess`, `offenders` (the breaching instrument ids, space-separated; empty when none),
-  `account_version`. `event_time` is the monitoring cutoff. **This is the table compliance
+  `account_version`. `event_time` is the fill instant the book was committed and judged at. **This is the table compliance
   questions are asked of** -- the strategy record's `contract` block only counts how often each
   constraint held; which name breached which limit by how much is here, one row per constraint
-  per occurrence.
+  per commit.
 
 Every row of every table also carries the same five envelope fields: `run_id`, `producer_id`,
 `stage`, `event_time` and `sequence` -- which run wrote it, what wrote it, at what point, when the
@@ -219,9 +218,9 @@ A fill's `kind` is what the ROSTER said. What it was CHARGED as comes from the v
 Those are two statements and nothing compares them (`docs/issues/013`), so keep a venue's declared
 categories in step with the registered roster.
 
-**A run needs five declarations**: a dataset, an execution input, an exchange, agendas with their
-configs, and at least one component. Each has a `vqapr new` scaffold; if you are hand-writing one
-of them, check for the template first.
+**A run needs four declarations**: a dataset, an execution input, an exchange, and at least one
+component. Each has a `vqapr new` scaffold; if you are hand-writing one of them, check for the
+template first.
 
 **And it wants a sixth: the instrument roster.** `vqapr new instruments` scaffolds the exporter and
 its declaration. It is not in the five because a run without one still completes -- but every fill
@@ -277,9 +276,7 @@ positional -- there is no all-kinds form, and bare `vqapr list` is refused with
 vqapr list datasets
 vqapr list sources
 vqapr list components
-vqapr list agendas
 vqapr list execution-inputs
-vqapr list strategy-configs
 vqapr list instruments
 ```
 
@@ -362,16 +359,20 @@ flag them and explain what would have to be true for the pattern to be safe.
 **Goal:** a completed run that produces a result per strategy.
 
 A run is configuration, registered like everything else: the universe, the period, the
-venue, the execution input, the initial account declaration, and the strategies it tries.
-Each strategy runs with its OWN account from that declaration, under the agenda its
-`strategy_configs` binding names, and writes its own record. Three factor models on one
-cadence are one run with three strategies, not three runs.
+sessions it fires on (`sessions_from: <dataset>` or a `sessions:` list) and the venue-local
+wall time it fires at (`timezone`, `at`), the venue, the execution input, the initial account
+declaration, and the strategies it tries. Every strategy is called on EVERY session at `at`
+and decides for itself whether to act -- a monthly rebalance is a rule inside the strategy,
+read from `call.evaluation_time` and kept in `self.memory`. The book is valued at the instant
+the venue fills and the declared constraints judge it right after each commit; there is no
+valuation or monitoring time to declare. Each strategy runs with its OWN account from that
+declaration and writes its own record. Three factor models on one cadence are one run with
+three strategies, not three runs.
 
 1. `vqapr new run --out runs.yaml` — get a `runs:` declaration template with every required
    key explained
-2. Fill in the template with registered component ids, the valuation agenda id, instruments
-   and dates; list every strategy to try under `strategies:` (each needs a binding from
-   `vqapr new agendas`)
+2. Fill in the template with registered component ids, instruments, dates, the sessions and
+   the wall time; list every strategy to try under `strategies:`
 3. `vqapr register runs.yaml` — the run is refused here if it names anything unregistered
 4. `vqapr check <run-id>` — prove it before spending a run. `check` runs **four phases** and
    makes **eight independent judgments** -- for every strategy the run names -- and reports

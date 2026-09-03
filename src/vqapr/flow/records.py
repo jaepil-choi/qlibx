@@ -18,8 +18,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from vqapr.flow.run import FrozenRun, FrozenStrategy
+from vqapr.flow.datamodel import DataModelResult
+from vqapr.flow.run import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.run_records import (
+    DATAMODEL_KIND,
     RUN_JSON_FIELDS,
     STRATEGY_KIND,
     RunRecordWriter,
@@ -94,6 +96,16 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
         "strategies": lambda: [
             {"component_id": layer.component_id, "record": layer.record_ref}
             for layer in frozen.strategies
+        ],
+        # A run holds one kind (record `148`); the other list is empty, and stays in the record
+        # so a reader never has to know which kind it is holding to ask.
+        "datamodels": lambda: [
+            {
+                "component_id": layer.component_id,
+                "record": layer.record_ref,
+                "dataset_id": layer.dataset_id,
+            }
+            for layer in frozen.datamodels
         ],
     }
     return write_run_record(
@@ -194,6 +206,69 @@ def freeze_strategy_record(
             if field not in ("run_id", "strategy_ref")
         },
         kind=STRATEGY_KIND,
+    )
+
+
+def freeze_datamodel_record(
+    writer: RunRecordWriter,
+    result: DataModelResult,
+    frozen: FrozenRun,
+    layer: FrozenDataModel,
+    as_loaded: Mapping[str, str],
+) -> None:
+    """Write one datamodel's facts, last, so a later process can read them (record `148`).
+
+    The rows are not here: they are the dataset the run registered, under
+    `.vqapr/materialized/<dataset_id>/`, and `dataset_id` names it. What this holds is what a
+    reader cannot rebuild from that dataset -- which component wrote it, registered and as
+    loaded, on which sessions, reading what -- and one line per session rather than the
+    per-instrument lineage `059` measured at 478 MB.
+    """
+    component = layer.component
+    times = [trace.evaluation_time for trace in result.occurrences]
+    builders = {
+        "datamodel_id": lambda: layer.component_id,
+        "fingerprint": lambda: component.fingerprint,
+        "component": lambda: {
+            "component_id": layer.component_id,
+            "path": str(component.path),
+            "object_name": component.object_name,
+            "config": dict(component.config),
+            "fingerprint": component.fingerprint,
+        },
+        "agenda": lambda: {
+            "agenda_id": str(layer.agenda.agenda_id),
+            "content_identity": layer.agenda.content_identity,
+            "occurrences": len(layer.agenda.occurrences),
+        },
+        "dataset_id": lambda: layer.dataset_id,
+        "value_fields": lambda: list(layer.value_fields),
+        "rows": lambda: result.rows,
+        "sessions": lambda: [
+            {
+                "evaluation_time": trace.evaluation_time,
+                "output_available_at": trace.output_available_at,
+                "row_count": trace.row_count,
+            }
+            for trace in result.occurrences
+        ],
+        "source_digest": lambda: dict(as_loaded),
+        "declared_digest": lambda: str(layer.identity),
+        "period": lambda: {
+            "start": frozen.start,
+            "end": frozen.end,
+            "occurrences": len(result.occurrences),
+            "first": min(times) if times else None,
+            "last": max(times) if times else None,
+        },
+    }
+    writer.finish(
+        {
+            field: builders[field]()
+            for field in record_fields(DATAMODEL_KIND)
+            if field not in ("run_id", "datamodel_ref")
+        },
+        kind=DATAMODEL_KIND,
     )
 
 

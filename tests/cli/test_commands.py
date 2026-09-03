@@ -1160,7 +1160,7 @@ def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
         "execution_input", "initial_account",
     ):
         assert key in failure["requirement"], f"{key} was not named: {failure['requirement']}"
-    assert "strategies" in failure["observed"], "the key that stopped the read is named"
+    assert "at" in failure["observed"], "a key that stopped the read is named"
     assert "vqapr new run" in failure["requirement"]
 
 

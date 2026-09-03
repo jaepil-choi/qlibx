@@ -33,9 +33,9 @@ from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 # Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/029`).
-from vqapr.extension.loading import load_exchange, load_strategy_model
+from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
 from vqapr.flow.preflight import derived_agenda
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.run import DataModelEntry, RunDefinition, StrategyEntry
 from vqapr.flow.run_spec import MATERIALIZATION
 
 # `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
@@ -253,6 +253,7 @@ def judgments(
         ("execution_ordering", lambda: _judge_execution_ordering(definition, workspace, at)),
         ("datasets", lambda: _judge_datasets_and_fields(definition, workspace, registered, at)),
         ("weights", lambda: _judge_weights(definition, workspace, at)),
+        ("outputs", lambda: _judge_outputs(definition, registered, at)),
     )
     for name, judge in judges:
         try:
@@ -423,14 +424,18 @@ def _judge_datasets_and_fields(
     source. Collapsing them would tell the reader which command failed but not which to run.
     """
     found: list[Failure] = []
-    for entry in definition.strategies:
-        source = _key(at, "strategies", entry.component_id)
+    members = [
+        *(("strategies", entry, load_strategy_model) for entry in definition.strategies),
+        *(("datamodels", entry, load_data_model) for entry in definition.datamodels),
+    ]
+    for section, entry, loader in members:
+        source = _key(at, section, entry.component_id)
         try:
             ref = workspace.component(entry.component_id)
             # LOAD the component. `workspace.component()` returns a `ComponentRef` -- an identity,
             # a path and a fingerprint -- which has no `requirements` attribute at all. Only the
             # loaded model knows what it reads.
-            component = load_strategy_model(ref, project_root=workspace.project_root)
+            component = loader(ref, project_root=workspace.project_root)
         except (VqaprError, TypeError, ValueError):
             # The component does not resolve or does not load. `check.dataset.unregistered` is
             # about a dataset, and the conformance judgments already own that refusal.
@@ -510,8 +515,36 @@ def _judge_datasets_and_fields(
     return found
 
 
+def _judge_outputs(
+    definition: RunDefinition, registered: dict[str, Any], at: FailureSource
+) -> list[Failure]:
+    """A datamodel run writes a dataset that does not exist yet (record `148`).
+
+    The refusal preflight raises at `preflight.datamodel.output_registered`, asked here so
+    `check` cannot certify a run that `run` then refuses.
+    """
+    found: list[Failure] = []
+    for entry in definition.datamodels:
+        if entry.dataset_id not in registered:
+            continue
+        found.append(
+            Failure.bounded(
+                "check.datamodel.output_registered",
+                "a datamodel run writes a dataset that does not exist yet",
+                observed=f"{entry.dataset_id!r} is already registered",
+                fix=(
+                    f"declare a new dataset_id for {entry.component_id!r}, or remove the "
+                    f"existing {entry.dataset_id} registration from the workspace first"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                source=_key(at, "datamodels", entry.component_id, "dataset_id"),
+            )
+        )
+    return found
+
+
 def _first_decision(
-    definition: RunDefinition, workspace: Workspace, entry: StrategyEntry
+    definition: RunDefinition, workspace: Workspace, entry: StrategyEntry | DataModelEntry
 ) -> datetime | None:
     """When one strategy first reads, or `None` when that cannot be answered here.
 

@@ -80,6 +80,7 @@ from vqapr.extension.registration import (
     register_exchange,
     register_strategy_model,
 )
+from vqapr.flow.datamodel import DataModelResult
 from vqapr.flow.materialize import (
     AllocationPublicationResult,
     AllocationPublicationSpec,
@@ -103,7 +104,9 @@ from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
 from vqapr.flow.run import (
     ConstraintSet,
+    DataModelEntry,
     FrozenAgenda,
+    FrozenDataModel,
     FrozenRun,
     FrozenStrategy,
     RunDefinition,
@@ -165,6 +168,8 @@ __all__ = (
     "ConstraintSet",
     "DataModel",
     "DataModelContext",
+    "DataModelEntry",
+    "DataModelResult",
     "DataRequirement",
     "DatasetInput",
     "DatasetRegistration",
@@ -180,6 +185,7 @@ __all__ = (
     "FillCost",
     "FillSelector",
     "FrozenAgenda",
+    "FrozenDataModel",
     "FrozenRun",
     "FrozenStrategy",
     "Grain",

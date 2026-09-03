@@ -45,7 +45,7 @@ from vqapr.domain.identifiers import component_id, dataset_id, execution_input_i
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.run import DataModelEntry, RunDefinition, StrategyEntry
 
 
 class Document(BaseModel):
@@ -314,6 +314,21 @@ class StrategyEntryDocument(Document):
         return body
 
 
+class DataModelEntryDocument(Document):
+    """`runs.<id>.datamodels.<component_id>`: the dataset this datamodel writes (record `148`)."""
+
+    dataset_id: str
+    value_fields: list[str]
+    initial_model_memory: Any = None
+
+    @model_serializer(mode="wrap")
+    def _only_what_was_declared(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        body = handler(self)
+        if body.get("initial_model_memory") is None:
+            body.pop("initial_model_memory", None)
+        return body
+
+
 class RunDocument(Document):
     """`runs.<run_id>` on disk and in a declaration -- the same shape, so a run can be copied
     out of `workspace.yaml` into a declaration and back.
@@ -328,17 +343,36 @@ class RunDocument(Document):
     end: datetime | None
     timezone: str
     at: time
-    exchange: str | None
-    execution_input: str | None
+    exchange: str | None = None
+    execution_input: str | None = None
     initial_account: InitialAccountDocument | None = None
-    strategies: dict[str, StrategyEntryDocument | None]
+    strategies: dict[str, StrategyEntryDocument | None] | None = None
+    datamodels: dict[str, DataModelEntryDocument] | None = None
     sessions_from: str | None = None
     sessions: list[date] | None = None
 
     @model_validator(mode="after")
     def _one_kind_and_one_session_source(self) -> RunDocument:
-        if not self.strategies:
-            raise ValueError("must name at least one strategy under `strategies:`")
+        if bool(self.strategies) == bool(self.datamodels):
+            raise ValueError(
+                "must name at least one model under exactly one of `strategies:` or "
+                "`datamodels:` (record 148: a run holds one kind)"
+            )
+        if self.datamodels:
+            declared = [
+                key
+                for key, value in (
+                    ("exchange", self.exchange),
+                    ("execution_input", self.execution_input),
+                    ("initial_account", self.initial_account),
+                )
+                if value is not None
+            ]
+            if declared:
+                raise ValueError(
+                    f"a datamodel run declares no {', '.join(declared)}: a datamodel sees no "
+                    "account and passes through no venue"
+                )
         if (self.sessions_from is None) == (self.sessions is None):
             raise ValueError(
                 "must declare exactly one of sessions_from (a registered dataset's days) or "
@@ -360,12 +394,14 @@ class RunDocument(Document):
         self, handler: SerializerFunctionWrapHandler
     ) -> dict[str, Any]:
         body = handler(self)
-        for optional in ("sessions_from", "sessions", "initial_account"):
+        optionals = ("sessions_from", "sessions", "initial_account", "strategies", "datamodels")
+        for optional in optionals:
             if body.get(optional) is None:
                 body.pop(optional, None)
-        body["strategies"] = {
-            name: (entry or {}) for name, entry in body["strategies"].items()
-        }
+        if "strategies" in body:
+            body["strategies"] = {
+                name: (entry or {}) for name, entry in body["strategies"].items()
+            }
         return body
 
     def to_domain(self, run_id: str) -> RunDefinition:
@@ -378,7 +414,16 @@ class RunDocument(Document):
                     tuple(entry.constraints) if entry else (),
                     entry.initial_model_memory if entry else None,
                 )
-                for name, entry in self.strategies.items()
+                for name, entry in (self.strategies or {}).items()
+            ),
+            datamodels=tuple(
+                DataModelEntry(
+                    name,
+                    entry.dataset_id,
+                    tuple(entry.value_fields),
+                    entry.initial_model_memory,
+                )
+                for name, entry in (self.datamodels or {}).items()
             ),
             instruments=tuple(self.instruments),
             timezone=self.timezone,
@@ -428,7 +473,17 @@ class RunDocument(Document):
                     initial_model_memory=entry.initial_model_memory,
                 )
                 for entry in definition.strategies
-            },
+            }
+            or None,
+            datamodels={
+                entry.component_id: DataModelEntryDocument(
+                    dataset_id=entry.dataset_id,
+                    value_fields=list(entry.value_fields),
+                    initial_model_memory=entry.initial_model_memory,
+                )
+                for entry in definition.datamodels
+            }
+            or None,
         )
 
 
@@ -632,6 +687,10 @@ def _linked(raw: object) -> tuple[dict, ...]:
                 constraint = components.get(component_id(name))
                 if constraint is None or constraint.kind is not ComponentKind.CONSTRAINT:
                     raise ValueError(f"run {raw_id!r} names an unregistered constraint")
+        for datamodel in definition.datamodels:
+            component = components.get(component_id(datamodel.component_id))
+            if component is None or component.kind is not ComponentKind.DATA_MODEL:
+                raise ValueError(f"run {raw_id!r} names an unregistered datamodel")
         if definition.exchange is not None:
             venue = components.get(component_id(definition.exchange))
             if venue is None or venue.kind is not ComponentKind.EXCHANGE:
@@ -686,6 +745,7 @@ def write_workspace(
 __all__ = [
     "ComponentDeclaration",
     "ComponentDocument",
+    "DataModelEntryDocument",
     "DatasetDeclaration",
     "DatasetDocument",
     "Document",

@@ -24,7 +24,7 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.flow.run import RunDefinition
-from vqapr.flow.run_records import read_strategy_record, strategy_refs
+from vqapr.flow.run_records import datamodel_refs, read_strategy_record, strategy_refs
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
@@ -259,10 +259,15 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     items = getattr(workspace, _ACCESSORS[args.kind])
     rows = [_summarize(item) for item in items]
     if args.kind == "runs":
-        # Beside each registered run, the strategy records the store holds for it: what ran, by
-        # `<id>@<fp8>`, so a reader sees which tweaks of which strategies have been tried.
+        # Beside each registered run, the member records the store holds for it: what ran, by
+        # `<id>@<fp8>`, so a reader sees which tweaks of which models have been tried. A run
+        # holds one kind (record `148`), so one of the two lists is always empty.
         for row in rows:
-            row["recorded"] = list(strategy_refs(store_root, str(row["run_id"])))
+            run_id = str(row["run_id"])
+            row["recorded"] = [
+                *strategy_refs(store_root, run_id),
+                *datamodel_refs(store_root, run_id),
+            ]
     if args.identifier:
         needle = args.identifier
         rows = [row for row in rows if any(needle in str(value) for value in row.values())]

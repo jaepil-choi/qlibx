@@ -161,6 +161,7 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
         "run_id",
         "strategies",
         "instruments",
+        "datamodels",
         "timezone",
         "at",
         "sessions_from",

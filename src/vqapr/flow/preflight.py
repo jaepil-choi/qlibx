@@ -26,10 +26,17 @@ from vqapr.exchange.execution_table import (
 from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.loading import load_constraint, load_exchange, load_strategy_model
+from vqapr.extension.loading import (
+    load_constraint,
+    load_data_model,
+    load_exchange,
+    load_strategy_model,
+)
 from vqapr.flow.run import (
     ConstraintSet,
+    DataModelEntry,
     FrozenAgenda,
+    FrozenDataModel,
     FrozenRun,
     FrozenStrategy,
     RunDefinition,
@@ -543,6 +550,59 @@ def _freeze_strategy(
     )
 
 
+def _freeze_datamodel(
+    workspace: Workspace,
+    entry: DataModelEntry,
+    *,
+    decide: OperationAgenda,
+    start: datetime,
+    end: datetime,
+) -> FrozenDataModel:
+    """One datamodel's layer: its component, the run's sessions sliced, and its output.
+
+    Refuses an output dataset id that is already registered, here rather than after the last
+    session: a run that computed for an hour and then found its name taken would have wasted
+    the hour, and `check` asks the same question for the same reason.
+    """
+    registered = workspace.component(entry.component_id)
+    if registered.kind is not ComponentKind.DATA_MODEL:
+        raise ValueError(
+            f"datamodel {entry.component_id!r} is registered as {registered.kind.value}, not as "
+            "a datamodel"
+        )
+    if any(str(item.dataset_id) == entry.dataset_id for item in workspace.datasets):
+        raise VqaprError(
+            stage="preflight.datamodel",
+            family=FailureFamily.DATA,
+            failures=[
+                Failure.bounded(
+                    code="preflight.datamodel.output_registered",
+                    requirement="a datamodel run writes a dataset that does not exist yet",
+                    observed=f"{entry.dataset_id!r} is already registered",
+                    fix=(
+                        f"declare a new dataset_id for {entry.component_id!r}, or remove the "
+                        f"existing {entry.dataset_id} registration from the workspace first"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
+                )
+            ],
+            mutation=False,
+            retry_precondition="choose a new output dataset_id, then retry",
+        )
+    model = load_data_model(registered, project_root=workspace.project_root)
+    agenda = _freeze_agenda(
+        decide, expected_role=OperationRole.STRATEGY_CALLBACK, start=start, end=end
+    )
+    return FrozenDataModel(
+        component=registered,
+        agenda=agenda,
+        dataset_id=entry.dataset_id,
+        value_fields=entry.value_fields,
+        requirements=tuple(model.requirements()),
+        initial_model_memory=entry.initial_model_memory,
+    )
+
+
 def _registered_constraint(workspace: Workspace, component_id: str) -> ComponentRef:
     ref = workspace.component(component_id)
     if ref.kind is not ComponentKind.CONSTRAINT:
@@ -580,6 +640,8 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     )
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
+    if definition.datamodels:
+        return _preflight_datamodel_run(workspace, definition)
     _require_execution_authority(definition)
     if definition.start is None or definition.end is None:
         raise ValueError("preflight requires aware start and end bounds")
@@ -633,6 +695,48 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         end=end,
         initial_account_snapshot=definition.initial_account_snapshot,
         initial_account_mode=definition.initial_account_mode,
+        instruments=definition.instruments,
+        requirements=tuple(requirements),
+        datasets=datasets,
+        sources=sources,
+    )
+
+
+def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
+    """Freeze a datamodel run: the same sessions, no venue, no execution input, no account.
+
+    What a strategy run proves about its venue and its account does not apply -- a datamodel
+    sees neither (architecture 4.4) -- so the layer is the universe, the period and the sessions,
+    and each datamodel is frozen on top of it with the datasets it reads.
+    """
+    if definition.start is None or definition.end is None:
+        raise ValueError("preflight requires aware start and end bounds")
+    start = require_tz_aware(definition.start, name="start")
+    end = require_tz_aware(definition.end, name="end")
+    if start.astimezone(UTC) > end.astimezone(UTC):
+        raise ValueError("start must not be after end")
+    decide = derived_agenda(workspace, definition)
+    datamodels = tuple(
+        _freeze_datamodel(workspace, entry, decide=decide, start=start, end=end)
+        for entry in definition.datamodels
+    )
+    requirements: list[DataRequirement] = []
+    for layer in datamodels:
+        for requirement in layer.requirements:
+            if requirement not in requirements:
+                requirements.append(requirement)
+    sources = _freeze_sources(workspace, tuple(requirements), None)
+    datasets_by_id = {
+        requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
+        for requirement in requirements
+    }
+    datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
+    return FrozenRun(
+        run_id=definition.run_id,
+        strategies=(),
+        datamodels=datamodels,
+        start=start,
+        end=end,
         instruments=definition.instruments,
         requirements=tuple(requirements),
         datasets=datasets,

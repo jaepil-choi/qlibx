@@ -26,6 +26,7 @@ from vqapr.flow.run_records import (
     RUN_JSON_FIELDS,
     RUN_KIND,
     STRATEGY_KIND,
+    datamodel_refs,
     read_run_record,
     read_strategy_record,
     read_table,
@@ -355,5 +356,8 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         )
     view = record_view(record)
     if "strategies" in record:
-        view["recorded"] = list(strategy_refs(root, args.identifier))
+        view["recorded"] = [
+            *strategy_refs(root, args.identifier),
+            *datamodel_refs(root, args.identifier),
+        ]
     return success("run.show", **view)

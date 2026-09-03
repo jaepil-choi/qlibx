@@ -344,7 +344,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     _refuse_if_judged(*judgments(definition, workspace), definition.run_id)
     selected = tuple(getattr(args, "strategies", None) or ())
     for name in selected:
-        definition.strategy(name)  # KeyError names the strategies the run does hold
+        definition.member(name)  # KeyError names the models the run does hold
     frozen = preflight_run(project_root, definition)
     store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
     replace = bool(getattr(args, "force", False))
@@ -383,6 +383,16 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 "changed run under a new id"
             ),
         ) from changed
+    if frozen.datamodels:
+        return success(
+            "run.complete",
+            run_id=frozen.run_id,
+            store_root=str(store_root),
+            datamodels={
+                component_id: _datamodel_envelope(record)
+                for component_id, record in outcome.records.items()
+            },
+        )
     strategies = {
         component_id: _strategy_envelope(store_root, frozen.run_id, record)
         for component_id, record in outcome.records.items()
@@ -397,6 +407,18 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # was computed against.
         roster=_roster_envelope(project_root),
     )
+
+
+def _datamodel_envelope(record: Any) -> dict[str, Any]:
+    """One datamodel's line of the success envelope, read from its record (record `148`)."""
+    period = record.get("period") or {}
+    return {
+        "record": str(record.get("datamodel_ref")),
+        "fingerprint": record.get("fingerprint"),
+        "dataset_id": record.get("dataset_id"),
+        "rows": record.get("rows"),
+        "sessions": period.get("occurrences"),
+    }
 
 
 def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, Any]:

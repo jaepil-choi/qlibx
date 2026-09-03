@@ -230,7 +230,7 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
         # A key-set fault names the keys the run lacks: the model is refused before any rule
         # about the values can run, so the clock keys are what a 0.3.0-shaped run hears first.
         ({"instruments": ["A"], "strategies": {}}, "timezone: Field required"),
-        ({**_RUN_READY, "strategies": {}}, "must name at least one strategy"),
+        ({**_RUN_READY, "strategies": {}}, "must name at least one model"),
         (
             {
                 **_RUN_READY,

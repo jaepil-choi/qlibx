@@ -202,17 +202,64 @@ class StrategyEntry:
         )
 
 
+_OUTPUT_OWNED_FIELDS = frozenset({"available_at", "instrument"})
+"""Columns of a datamodel's output the package writes itself; a value field may not be one."""
+
+
+def _require_value_fields(value: object) -> tuple[str, ...]:
+    if not isinstance(value, tuple) or not value:
+        raise ValueError("value_fields must name at least one output field")
+    if any(
+        not isinstance(name, str) or not name or any(character.isspace() for character in name)
+        for name in value
+    ):
+        raise TypeError("value_fields must be non-empty strings without whitespace")
+    if len(set(value)) != len(value):
+        raise ValueError("value_fields must be unique")
+    owned = sorted(set(value) & _OUTPUT_OWNED_FIELDS)
+    if owned:
+        raise ValueError(f"value_fields are package-owned: {owned}")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class DataModelEntry:
+    """One datamodel a run computes: the component, the dataset it writes, its opening memory.
+
+    The output's shape is declared here and not by the model (architecture 4.4): the model
+    computes rows, and what dataset those rows become -- its id and its value fields -- is
+    configuration of the run that produces it (record `148`).
+    """
+
+    component_id: str
+    dataset_id: str
+    value_fields: tuple[str, ...]
+    initial_model_memory: ModelMemory = None
+
+    def __post_init__(self) -> None:
+        _require_id(self.component_id, "component_id")
+        _require_id(self.dataset_id, "dataset_id")
+        _require_value_fields(self.value_fields)
+        object.__setattr__(
+            self, "initial_model_memory", normalize_memory(self.initial_model_memory)
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class RunDefinition:
-    """A registered run: what every strategy in it shares, and which strategies it tries.
+    """A registered run: what every model in it shares, and which models it runs.
 
-    Everything here is an id or a value; the workspace resolves ids at preflight. Pairing rules
-    are enforced here so a document cannot half-declare a venue or a period.
+    A run holds one kind of model (record `148`): `strategies`, each with its own account and
+    venue, or `datamodels`, each writing one dataset and touching no account. Everything here is
+    an id or a value; the workspace resolves ids at preflight. Pairing rules are enforced here so
+    a document cannot half-declare a venue or a period.
     """
 
     run_id: str
     strategies: tuple[StrategyEntry, ...]
     instruments: tuple[str, ...]
+    datamodels: tuple[DataModelEntry, ...] = field(default=(), kw_only=True)
+    """The datamodels a run computes, when it is a datamodel run. Never beside `strategies`."""
     timezone: str = ""
     """The venue zone every wall time below is expressed in."""
     at: time | None = None
@@ -232,13 +279,34 @@ class RunDefinition:
 
     def __post_init__(self) -> None:
         _require_id(self.run_id, "run_id")
-        if not isinstance(self.strategies, tuple) or not self.strategies:
-            raise ValueError("a run must name at least one strategy")
-        if any(not isinstance(entry, StrategyEntry) for entry in self.strategies):
+        if not isinstance(self.strategies, tuple) or any(
+            not isinstance(entry, StrategyEntry) for entry in self.strategies
+        ):
             raise TypeError("strategies must contain StrategyEntry values")
-        ids = [entry.component_id for entry in self.strategies]
+        if not isinstance(self.datamodels, tuple) or any(
+            not isinstance(entry, DataModelEntry) for entry in self.datamodels
+        ):
+            raise TypeError("datamodels must contain DataModelEntry values")
+        if bool(self.strategies) == bool(self.datamodels):
+            raise ValueError(
+                "a run names at least one strategy or at least one datamodel, not both"
+            )
+        ids = [entry.component_id for entry in (*self.strategies, *self.datamodels)]
         if len(set(ids)) != len(ids):
-            raise ValueError("a run names each strategy at most once")
+            raise ValueError("a run names each model at most once")
+        outputs = [entry.dataset_id for entry in self.datamodels]
+        if len(set(outputs)) != len(outputs):
+            raise ValueError("a run writes each output dataset at most once")
+        if self.datamodels and (
+            self.exchange is not None
+            or self.execution_input_id is not None
+            or self.initial_account_snapshot is not None
+            or self.initial_account_mode is not None
+        ):
+            raise ValueError(
+                "a datamodel run declares no exchange, execution_input or initial_account: "
+                "a datamodel sees no account and passes through no venue"
+            )
         _require_timezone(self.timezone)
         _require_wall_time(self.at, "at", required=True)
         if (self.sessions_from is None) == (not self.sessions):
@@ -268,14 +336,37 @@ class RunDefinition:
         """The id of the one agenda preflight derives: every session, at `at`."""
         return f"{self.run_id}.sessions"
 
+    @property
+    def kind(self) -> str:
+        """`"strategy"` or `"datamodel"`: which kind of model this run holds."""
+        return "datamodel" if self.datamodels else "strategy"
+
+    @property
+    def members(self) -> tuple[StrategyEntry | DataModelEntry, ...]:
+        """The models the run names, whichever kind it holds."""
+        return (*self.strategies, *self.datamodels)
+
     def strategy(self, component_id: str) -> StrategyEntry:
         for entry in self.strategies:
             if entry.component_id == component_id:
                 return entry
         raise KeyError(
             f"run {self.run_id!r} does not name strategy {component_id!r}; it names "
-            f"{', '.join(entry.component_id for entry in self.strategies)}"
+            f"{', '.join(entry.component_id for entry in self.members)}"
         )
+
+    def datamodel(self, component_id: str) -> DataModelEntry:
+        for entry in self.datamodels:
+            if entry.component_id == component_id:
+                return entry
+        raise KeyError(
+            f"run {self.run_id!r} does not name datamodel {component_id!r}; it names "
+            f"{', '.join(entry.component_id for entry in self.members)}"
+        )
+
+    def member(self, component_id: str) -> StrategyEntry | DataModelEntry:
+        """The named model of whichever kind the run holds."""
+        return self.datamodel(component_id) if self.datamodels else self.strategy(component_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,6 +515,67 @@ class FrozenStrategy:
 
 
 @dataclass(frozen=True, slots=True)
+class FrozenDataModel:
+    """One datamodel's layer of a frozen run: the component, its agenda slice, and its output.
+
+    The datamodel counterpart of `FrozenStrategy`, minus what a datamodel has none of: no
+    constraints, no account, no payload. Its identity folds the component fingerprint, the
+    agenda slice, the output declaration, its opening memory and what it reads.
+    """
+
+    component: ComponentRef
+    agenda: FrozenAgenda
+    dataset_id: str
+    value_fields: tuple[str, ...]
+    requirements: tuple[DataRequirement, ...] = ()
+    initial_model_memory: ModelMemory = None
+    _identity: str = field(default="", init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.component, ComponentRef):
+            raise TypeError("component must be a ComponentRef")
+        if self.component.kind is not ComponentKind.DATA_MODEL:
+            raise ValueError("component must identify a DATA_MODEL")
+        if not isinstance(self.agenda, FrozenAgenda):
+            raise TypeError("agenda must be a FrozenAgenda")
+        if self.agenda.agenda_role is not OperationRole.STRATEGY_CALLBACK:
+            raise ValueError("a datamodel is called on the run's sessions, the callback role")
+        _require_id(self.dataset_id, "dataset_id")
+        _require_value_fields(self.value_fields)
+        _require_requirements("requirements", self.requirements)
+        object.__setattr__(
+            self, "initial_model_memory", normalize_memory(self.initial_model_memory)
+        )
+
+    @property
+    def component_id(self) -> str:
+        return str(self.component.component_id)
+
+    @property
+    def record_ref(self) -> str:
+        """The name of this datamodel's record directory: `<component_id>@<fingerprint[:8]>`."""
+        return f"{self.component_id}@{self.component.fingerprint[:FINGERPRINT_PREFIX]}"
+
+    @property
+    def identity(self) -> str:
+        if not self._identity:
+            object.__setattr__(
+                self,
+                "_identity",
+                _identity(
+                    {
+                        "datamodel": (self.component_id, self.component.fingerprint),
+                        "agenda": self.agenda.encoded(),
+                        "output": (self.dataset_id, list(self.value_fields)),
+                        "initial_model_memory": self.initial_model_memory,
+                        "requirements": _encoded_requirements(self.requirements),
+                    }
+                ),
+            )
+        return self._identity
+
+
+@dataclass(frozen=True, slots=True)
 class FrozenRun:
     """Frozen owner declarations retained by a future preflight result.
 
@@ -435,6 +587,7 @@ class FrozenRun:
 
     run_id: str
     strategies: tuple[FrozenStrategy, ...]
+    datamodels: tuple[FrozenDataModel, ...] = field(default=(), kw_only=True)
     exchange: ComponentRef | None = None
     execution_input: ExecutionInputRegistration | None = None
     start: datetime | None = None
@@ -456,13 +609,25 @@ class FrozenRun:
 
     def __post_init__(self) -> None:
         _require_id(self.run_id, "run_id")
-        if not isinstance(self.strategies, tuple) or not self.strategies:
-            raise ValueError("a frozen run holds at least one strategy")
-        if any(not isinstance(layer, FrozenStrategy) for layer in self.strategies):
+        if not isinstance(self.strategies, tuple) or any(
+            not isinstance(layer, FrozenStrategy) for layer in self.strategies
+        ):
             raise TypeError("strategies must contain FrozenStrategy values")
-        ids = [layer.component_id for layer in self.strategies]
+        if not isinstance(self.datamodels, tuple) or any(
+            not isinstance(layer, FrozenDataModel) for layer in self.datamodels
+        ):
+            raise TypeError("datamodels must contain FrozenDataModel values")
+        if bool(self.strategies) == bool(self.datamodels):
+            raise ValueError("a frozen run holds strategies or datamodels, at least one, not both")
+        ids = [layer.component_id for layer in (*self.strategies, *self.datamodels)]
         if len(set(ids)) != len(ids):
-            raise ValueError("a frozen run holds each strategy at most once")
+            raise ValueError("a frozen run holds each model at most once")
+        if self.datamodels and (
+            self.exchange is not None
+            or self.execution_input is not None
+            or self.initial_account_snapshot is not None
+        ):
+            raise ValueError("a frozen datamodel run holds no venue, execution input or account")
         if self.exchange is not None:
             if not isinstance(self.exchange, ComponentRef):
                 raise TypeError("exchange must be a ComponentRef or None")
@@ -529,22 +694,44 @@ class FrozenRun:
         if source_ids != sorted(source_ids):
             raise ValueError("sources must be ordered by source_id")
 
+    @property
+    def kind(self) -> str:
+        return "datamodel" if self.datamodels else "strategy"
+
+    @property
+    def members(self) -> tuple[FrozenStrategy | FrozenDataModel, ...]:
+        return (*self.strategies, *self.datamodels)
+
     def strategy(self, component_id: str) -> FrozenStrategy:
         for layer in self.strategies:
             if layer.component_id == component_id:
                 return layer
         raise KeyError(
             f"run {self.run_id!r} froze no strategy {component_id!r}; it holds "
-            f"{', '.join(layer.component_id for layer in self.strategies)}"
+            f"{', '.join(layer.component_id for layer in self.members)}"
         )
 
-    def dispatch_order(self, strategy: FrozenStrategy) -> tuple[OperationOccurrence, ...]:
-        """The static occurrences one strategy's flow dispatches: its sessions, at `at`.
+    def datamodel(self, component_id: str) -> FrozenDataModel:
+        for layer in self.datamodels:
+            if layer.component_id == component_id:
+                return layer
+        raise KeyError(
+            f"run {self.run_id!r} froze no datamodel {component_id!r}; it holds "
+            f"{', '.join(layer.component_id for layer in self.members)}"
+        )
+
+    def member(self, component_id: str) -> FrozenStrategy | FrozenDataModel:
+        return self.datamodel(component_id) if self.datamodels else self.strategy(component_id)
+
+    def dispatch_order(
+        self, layer: FrozenStrategy | FrozenDataModel
+    ) -> tuple[OperationOccurrence, ...]:
+        """The static occurrences one model's flow dispatches: its sessions, at `at`.
 
         Since record `148` a run has one agenda: the book is valued at the instant the venue
         fills and monitored right after each commit, so there is nothing else to merge in.
         """
-        return merged_occurrences(strategy.agenda)
+        return merged_occurrences(layer.agenda)
 
     @property
     def identity(self) -> str:

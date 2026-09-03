@@ -913,9 +913,10 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
                 Failure.bounded(
                     f"{DECLARE_STAGE}.run_invalid",
                     requirement=(
-                        "a run declares strategies, instruments, start, end, sessions_from or "
-                        "sessions, timezone, at, exchange, execution_input and initial_account, "
-                        "each in the shape `vqapr new run` emits"
+                        "a run declares strategies (with exchange, execution_input and "
+                        "initial_account) or datamodels, plus instruments, start, end, "
+                        "sessions_from or sessions, timezone and at, each in the shape "
+                        "`vqapr new run` emits"
                     ),
                     observed=observed,
                     examples=["2024-01-02T00:00:00+09:00"],

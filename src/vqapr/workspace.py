@@ -527,11 +527,12 @@ class Workspace:
             return changed
 
     def register_run(self, definition: RunDefinition) -> bool:
-        """Register a run: the configuration every strategy in it shares, and which strategies.
+        """Register a run: the configuration every model in it shares, and which models.
 
         Every id the definition names must already be registered -- components of the right
-        kind, the execution input, the agendas under the roles the run needs, and a binding for
-        each strategy -- so a registered run is one `vqapr run <run-id>` can freeze.
+        kind, the execution input, the dataset its sessions come from -- so a registered run is
+        one `vqapr run <run-id>` can freeze. The output dataset of a datamodel run is NOT
+        checked here: it exists once the run has happened, and the run stays registered.
         """
         if not isinstance(definition, RunDefinition):
             raise TypeError("definition must be a RunDefinition")
@@ -796,6 +797,8 @@ class Workspace:
             component(entry.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
             for name in entry.constraints:
                 component(name, ComponentKind.CONSTRAINT, "constraint")
+        for entry in definition.datamodels:
+            component(entry.component_id, ComponentKind.DATA_MODEL, "datamodel")
         if definition.exchange is not None:
             component(definition.exchange, ComponentKind.EXCHANGE, "exchange")
         if (
@@ -1031,6 +1034,7 @@ class Workspace:
                 named = {definition.exchange}
                 named.update(entry.component_id for entry in definition.strategies)
                 named.update(name for entry in definition.strategies for name in entry.constraints)
+                named.update(entry.component_id for entry in definition.datamodels)
                 if identity in named:
                     blockers.append(f"run {run_id!r}")
         elif kind == "dataset":

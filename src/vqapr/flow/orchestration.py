@@ -34,14 +34,25 @@ from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
     load_constraint,
+    load_data_model,
     load_exchange,
     load_strategy_model,
 )
+from vqapr.flow.datamodel import DataModelFlow, DataModelOutput, DataModelResult
 from vqapr.flow.preflight import preflight_run as _preflight_run
-from vqapr.flow.records import freeze_run_record, freeze_strategy_record
+from vqapr.flow.records import (
+    freeze_datamodel_record,
+    freeze_run_record,
+    freeze_strategy_record,
+)
 from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
-from vqapr.flow.run import FrozenRun, FrozenStrategy, RunDefinition
-from vqapr.flow.run_records import RunRecordWriter, read_strategy_record
+from vqapr.flow.run import FrozenDataModel, FrozenRun, FrozenStrategy, RunDefinition
+from vqapr.flow.run_records import (
+    DATAMODEL_KIND,
+    RunRecordWriter,
+    read_datamodel_record,
+    read_strategy_record,
+)
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow, SimulationResult
 from vqapr.models.memory import normalize_memory
@@ -80,11 +91,11 @@ class RunResult:
     """
 
     run_id: str
-    results: Mapping[str, SimulationResult]
+    results: Mapping[str, SimulationResult | DataModelResult]
     records: Mapping[str, Mapping[str, object]]
 
-    def result(self, component_id: str | None = None) -> SimulationResult:
-        """The one strategy's result, or the only one when the run ran exactly one."""
+    def result(self, component_id: str | None = None) -> SimulationResult | DataModelResult:
+        """The one model's result, or the only one when the run ran exactly one."""
         if component_id is None:
             if len(self.results) != 1:
                 raise ValueError(
@@ -125,6 +136,15 @@ def run(
         raise ValueError("jobs must be a positive integer")
     root_path = Path(project_root)
     frozen = frozen_run
+    if frozen.datamodels:
+        return _run_datamodels(
+            root_path,
+            frozen,
+            store_root=store_root,
+            selected=strategies,
+            jobs=jobs,
+            replace_record=replace_record,
+        )
     if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None:
         raise ValueError("public run requires frozen initial account authority")
     if frozen.exchange is None:
@@ -176,6 +196,151 @@ def run(
         if record is not None:
             records[layer.component_id] = record
     return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
+
+
+def _run_datamodels(
+    root_path: Path,
+    frozen: FrozenRun,
+    *,
+    store_root: str | Path | None,
+    selected: Sequence[str] | None,
+    jobs: int,
+    replace_record: bool,
+) -> RunResult:
+    """Execute a datamodel run: each of its datamodels (or those named), each in its own flow.
+
+    The same shape as the strategy branch of `run` (record `148`): `run.json` first, one record
+    directory per member, workers under `--jobs` that each re-freeze the registered run. What a
+    datamodel produces beyond its record is a registered dataset, which is why every one of them
+    needs a store: the record is what says which dataset a run wrote.
+    """
+    layers = tuple(frozen.datamodel(name) for name in (selected or ())) or frozen.datamodels
+    store = None if store_root is None else Path(store_root)
+    if store is not None:
+        freeze_run_record(store, frozen, source_digests=_source_digests(frozen))
+
+    results: dict[str, SimulationResult | DataModelResult] = {}
+    records: dict[str, Mapping[str, object]] = {}
+    if jobs > 1 and len(layers) > 1:
+        if store is None:
+            raise ValueError(
+                "jobs > 1 needs a store_root: a worker's result comes back as its record"
+            )
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=min(jobs, len(layers)), mp_context=context) as pool:
+            futures = {
+                layer.component_id: pool.submit(
+                    run_registered_datamodel,
+                    str(root_path),
+                    frozen.run_id,
+                    layer.component_id,
+                    str(store),
+                    replace_record,
+                )
+                for layer in layers
+            }
+            for component_id, future in futures.items():
+                records[component_id] = future.result()
+        return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
+
+    for layer in layers:
+        result, record = _run_datamodel(
+            root_path, frozen, layer, store=store, replace_record=replace_record
+        )
+        results[layer.component_id] = result
+        if record is not None:
+            records[layer.component_id] = record
+    return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
+
+
+def run_registered_datamodel(
+    project_root: str,
+    run_id: str,
+    component_id: str,
+    store_root: str,
+    replace_record: bool,
+) -> Mapping[str, object]:
+    """Run one datamodel of a REGISTERED run, in this process; the worker under `--jobs`."""
+    workspace = Workspace.open(project_root)
+    frozen = _preflight_run(workspace, workspace.run_definition(run_id))
+    _, record = _run_datamodel(
+        Path(project_root),
+        frozen,
+        frozen.datamodel(component_id),
+        store=Path(store_root),
+        replace_record=replace_record,
+    )
+    assert record is not None
+    return record
+
+
+def _run_datamodel(
+    root_path: Path,
+    frozen: FrozenRun,
+    layer: FrozenDataModel,
+    *,
+    store: Path | None,
+    replace_record: bool,
+) -> tuple[DataModelResult, Mapping[str, object] | None]:
+    """Execute exactly one datamodel of a frozen run: its sessions, its dataset, its record.
+
+    Order at the end, deliberately: the dataset registers first and the record is written last.
+    The registration is the product; the record existing is what marks the member complete, and
+    a record that said "wrote dataset X" beside a registration that never happened would be the
+    invisibility `059` measured.
+    """
+    model = load_data_model(layer.component, project_root=root_path)
+    as_loaded = {
+        layer.component_id: as_loaded_fingerprint(layer.component, project_root=root_path)
+    }
+    if tuple(model.requirements()) != layer.requirements:
+        raise ValueError("loaded DataModel requirements drifted from FrozenRun")
+    model.memory = normalize_memory(layer.initial_model_memory)
+    catalog = _FrozenCatalog(frozen)
+    session = ScanSession()
+    observation_store = DuckDbObservationStore(catalog, session=session)
+    writer = None
+    if store is not None:
+        writer = RunRecordWriter(store, frozen.run_id, layer.record_ref, member_kind=DATAMODEL_KIND)
+        writer.open(replace=replace_record)
+    output = DataModelOutput(root_path, layer)
+    flow = DataModelFlow(
+        frozen,
+        layer,
+        model,
+        window_for_occurrence=lambda occurrence: ModelWindow(
+            evaluation_time=occurrence.evaluation_time,
+            instruments=frozen.instruments,
+            store=observation_store,
+            allowed_requirements=layer.requirements,
+            consumer_id=layer.component_id,
+        ),
+        output=output,
+        on_progress=writer.heartbeat if writer is not None else None,
+    )
+    try:
+        result = flow.run()
+        registration = output.register(Workspace.open(root_path))
+        result = DataModelResult(
+            occurrences=result.occurrences,
+            rows=result.rows,
+            output_path=result.output_path,
+            registration=registration,
+        )
+        if writer is not None:
+            freeze_datamodel_record(writer, result, frozen, layer, as_loaded)
+    except BaseException:
+        if writer is not None:
+            writer.release()
+        raise
+    finally:
+        session.close()
+    record = (
+        None
+        if writer is None
+        else read_datamodel_record(writer.root, frozen.run_id, layer.record_ref)
+    )
+    return result, record
 
 
 def run_registered_strategy(

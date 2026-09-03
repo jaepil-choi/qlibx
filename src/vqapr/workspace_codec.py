@@ -36,8 +36,6 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
-from vqapr.data.requirements import DataRequirement
 from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import (
@@ -1113,56 +1111,3 @@ def _run_instant(value: object, name: str) -> datetime | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{name} must include a UTC offset; a naive datetime is not one instant")
     return parsed
-
-
-def _encode_requirement(requirement: DataRequirement) -> dict[str, object]:
-    lookback = requirement.lookback
-    if isinstance(lookback, RowsLookback):
-        encoded_lookback: dict[str, object] = {"kind": "rows", "rows": lookback.rows}
-    elif isinstance(lookback, InstantsLookback):
-        encoded_lookback = {"kind": "instants", "instants": lookback.instants}
-    else:
-        encoded_lookback = {
-            "kind": "calendar",
-            "years": lookback.years,
-            "months": lookback.months,
-            "days": lookback.days,
-            "timezone": lookback.timezone,
-        }
-    return {
-        "dataset_id": str(requirement.dataset_id),
-        "field_id": requirement.field_id,
-        "lookback": encoded_lookback,
-    }
-
-
-def _decode_requirement(raw: object) -> DataRequirement:
-    if not isinstance(raw, dict) or set(raw) != {"dataset_id", "field_id", "lookback"}:
-        raise ValueError(
-            "mark_requirement must contain exactly dataset_id, field_id and lookback"
-        )
-    raw_dataset_id, field_id, raw_lookback = raw["dataset_id"], raw["field_id"], raw["lookback"]
-    if not isinstance(raw_dataset_id, str) or not isinstance(field_id, str):
-        raise TypeError("mark_requirement declarations must use strings")
-    if not isinstance(raw_lookback, dict) or not isinstance(raw_lookback.get("kind"), str):
-        raise TypeError("mark_requirement lookback must be a mapping with a kind")
-    if raw_lookback["kind"] == "rows" and set(raw_lookback) == {"kind", "rows"}:
-        lookback = RowsLookback(raw_lookback["rows"])
-    elif raw_lookback["kind"] == "instants" and set(raw_lookback) == {"kind", "instants"}:
-        lookback = InstantsLookback(raw_lookback["instants"])
-    elif raw_lookback["kind"] == "calendar" and set(raw_lookback) == {
-        "kind",
-        "years",
-        "months",
-        "days",
-        "timezone",
-    }:
-        lookback = CalendarLookback(
-            raw_lookback["years"],
-            raw_lookback["months"],
-            raw_lookback["days"],
-            raw_lookback["timezone"],
-        )
-    else:
-        raise ValueError("mark_requirement lookback has an invalid shape")
-    return DataRequirement.of(raw_dataset_id, field_id, lookback=lookback)

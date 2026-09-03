@@ -116,7 +116,10 @@ def test_the_codec_is_the_region_a_later_step_can_discard() -> None:
     """
     source = CODEC.read_text(encoding="utf-8")
 
-    for marker in ("_decode", "_encode", "_encode_requirement", "_decode_requirement"):
+    # `_encode_requirement` / `_decode_requirement` were here until the deletion campaign's
+    # Step 0 removed them: nothing called either (vulture, `docs/issues/README.md`), so they
+    # were a region with nothing left to discard.
+    for marker in ("_decode", "_encode"):
         assert f"def {marker}(" in source, f"{marker} belongs in the codec"
 
     assert "legacy" in source, (

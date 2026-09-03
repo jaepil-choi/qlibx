@@ -1,6 +1,8 @@
 # 052 — Five of the nine showcases do not run, and nothing in the repository executes them
 
-**Status: OPEN for its gate half; all five showcases run again as of record `133`.** Two closed by
+**Status: CLOSED 2026-09-03.** The gate half is `tests/showcases/test_every_showcase_completes.py` (deletion campaign Step 0, harness-only, no implementation record): eight showcases run as `slow` tests under `test_all`, each a subprocess asserting exit 0; a new showcase directory is collected without editing the test. `show_003` is the one exception -- it reads the gitignored `data/DW` warehouse, so it stays a hand-run step before a release rather than a conditional skip, and `.agent/project.yaml`'s `test_all` comment says so.
+
+**Status before that: OPEN for its gate half; all five showcases run again as of record `133`.** Two closed by
 [`131-one-datamodel-and-a-dead-half-deleted.md`](../implementations/131-one-datamodel-and-a-dead-half-deleted.md)
 as a side effect** -- `show_002` and `show_004` failed because their DataModels declared reads in a
 retired shape, and converging the DataModel contract retired the shape everywhere at once. Three

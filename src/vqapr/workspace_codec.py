@@ -30,6 +30,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 import yaml
+from pydantic import ValidationError
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
@@ -54,6 +55,7 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
+from vqapr.workspace_document import SourceDocument
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"
@@ -168,14 +170,6 @@ def _detach_registration(registration: DatasetRegistration) -> DatasetRegistrati
     return detached if registration.span is None else detached.with_span(*registration.span)
 
 
-def _detach_source(source: SourceSpec) -> SourceSpec:
-    return SourceSpec.of(
-        str(source.source_id),
-        source.path,
-        hive_partitioned=source.hive_partitioned,
-    )
-
-
 def _detach_execution_input(
     registration: ExecutionInputRegistration,
 ) -> ExecutionInputRegistration:
@@ -184,7 +178,7 @@ def _detach_execution_input(
     return ExecutionInputRegistration.of(
         str(registration.execution_input_id),
         ExecutionTableSpec(
-            source=_detach_source(table.source),
+            source=table.source,
             trade_at_field=table.trade_at_field,
             instrument_field=table.instrument_field,
             is_tradable_field=table.is_tradable_field,
@@ -288,10 +282,7 @@ def _encode(
 ) -> str:
     document = {
         "sources": {
-            str(key): {
-                "path": str(source.path),
-                "hive_partitioned": source.hive_partitioned,
-            }
+            str(key): SourceDocument.from_domain(source).model_dump()
             for key, source in sorted(sources.items(), key=lambda item: str(item[0]))
         },
         "datasets": {
@@ -424,19 +415,15 @@ def _decode(
         raise TypeError("sources must be a mapping")
 
     decoded_sources: dict[SourceId, SourceSpec] = {}
-    expected_source = {"path", "hive_partitioned"}
     for raw_id, raw_source in raw_sources.items():
         if not isinstance(raw_id, str):
             raise TypeError("every source_id must be a string")
-        if not isinstance(raw_source, dict) or set(raw_source) != expected_source:
-            raise ValueError(f"source {raw_id!r} must contain exactly {sorted(expected_source)}")
-        path = raw_source["path"]
-        hive_partitioned = raw_source["hive_partitioned"]
-        if not isinstance(path, str):
-            raise TypeError(f"source {raw_id!r} path must be a string")
-        if not isinstance(hive_partitioned, bool):
-            raise TypeError(f"source {raw_id!r} hive_partitioned must be a boolean")
-        source = SourceSpec.of(raw_id, path, hive_partitioned=hive_partitioned)
+        try:
+            source = SourceDocument.model_validate(raw_source).to_domain(raw_id)
+        except ValidationError as invalid:
+            raise ValueError(
+                f"source {raw_id!r}: {invalid.error_count()} invalid field(s)"
+            ) from invalid
         decoded_sources[source.source_id] = source
 
     raw_datasets = document["datasets"]

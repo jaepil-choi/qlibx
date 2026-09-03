@@ -43,7 +43,6 @@ from vqapr.workspace_codec import (
     _detach_component,
     _detach_execution_input,
     _detach_registration,
-    _detach_source,
     _detach_strategy_config,
     _encode,
 )
@@ -192,7 +191,7 @@ class Workspace:
         self._datasets = {
             key: _detach_registration(value) for key, value in (datasets or {}).items()
         }
-        self._sources = {key: _detach_source(value) for key, value in (sources or {}).items()}
+        self._sources = dict(sources or {})
         self._execution_inputs = {
             key: _detach_execution_input(value) for key, value in (execution_inputs or {}).items()
         }
@@ -294,7 +293,7 @@ class Workspace:
     @property
     def sources(self) -> tuple[SourceSpec, ...]:
         """source_id 순으로 정렬된 detached 물리 선언들."""
-        return tuple(_detach_source(self._sources[key]) for key in sorted(self._sources))
+        return tuple(self._sources[key] for key in sorted(self._sources))
 
     @property
     def execution_inputs(self) -> tuple[ExecutionInputRegistration, ...]:
@@ -433,7 +432,7 @@ class Workspace:
                 retry="use a valid source_id, then retry",
             ) from error
         try:
-            return _detach_source(self._sources[key])
+            return self._sources[key]
         except KeyError as error:
             raise _workspace_error(
                 stage=SOURCE_LOOKUP_STAGE,
@@ -772,7 +771,7 @@ class Workspace:
         return (
             state._replace(
                 datasets={**state.datasets, key: _detach_registration(registration)},
-                sources={**state.sources, source_key: _detach_source(source)},
+                sources={**state.sources, source_key: source},
             ),
             True,
         )
@@ -823,7 +822,7 @@ class Workspace:
             )
         return (
             state._replace(
-                sources={**state.sources, source_key: _detach_source(source)},
+                sources={**state.sources, source_key: source},
                 execution_inputs={
                     **state.execution_inputs,
                     key: _detach_execution_input(registration),
@@ -1420,7 +1419,7 @@ class Workspace:
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self._datasets = {key: _detach_registration(value) for key, value in datasets.items()}
-        self._sources = {key: _detach_source(value) for key, value in sources.items()}
+        self._sources = dict(sources)
         self._execution_inputs = {
             key: _detach_execution_input(value) for key, value in execution_inputs.items()
         }

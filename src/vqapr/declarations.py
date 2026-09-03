@@ -25,11 +25,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from vqapr.account.account import AccountMode
 from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain import identifiers
 from vqapr.domain.errors import (
+    Diagnosis,
     ExplainTopic,
     Failure,
     FailureFamily,
@@ -169,6 +172,178 @@ def _at(key_path: str) -> FailureSource:
         file=None if declaration is None else str(declaration),
         key_path=key_path,
     )
+
+
+def refusals_from(error: ValidationError, *, model: type[BaseModel], name: str) -> Diagnosis:
+    """Every finding pydantic made about one declaration, as this package's refusals.
+
+    pydantic owns the key sets, the types, the enums and the timestamps of a declaration
+    (record `145`); what it must not own is the sentence an author reads. Each line error
+    becomes one `Failure` with the package's own `code`, a `fix` that says what to write, the
+    `DECLARATION_SHAPE` topic and a `source` at the dotted key path -- and all of them travel in
+    ONE `Diagnosis`, which is what `_require_keys` promised: an agent fixing its declaration is
+    told every problem at once, not one per round trip.
+
+    Four shapes, four codes. A missing key (`key_missing`) names what the declaration does
+    have, so the reader sees the set whole. An unknown key (`key_unknown`) and a value outside a
+    closed set (`value_not_permitted`) get `_nearest_hint`: the reader cannot see the one-letter
+    typo they typed. Everything else is `value_invalid` at its own path. Nothing pydantic wrote
+    reaches the envelope; its `msg` is a hint for the requirement sentence and no more.
+    """
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    for line in error.errors(include_url=False):
+        loc = tuple(str(part) for part in line["loc"])
+        kind = line["type"]
+        if kind == "missing":
+            parent, key = ".".join((name, *loc[:-1])), loc[-1]
+            # For a missing key pydantic's `input` is the mapping that lacks it.
+            present = _keys_present(line["input"])
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.key_missing",
+                    requirement=f"{parent} must declare {key}",
+                    observed=f"{parent} declares: {', '.join(present) or '(nothing)'}",
+                    source=_at(parent),
+                    fix=f"add {key} under {parent} in the declaration YAML",
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+        elif kind == "extra_forbidden":
+            parent, key = ".".join((name, *loc[:-1])), loc[-1]
+            permitted = _permitted_keys(model, loc[:-1])
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.key_unknown",
+                    requirement=f"{parent} may declare: {', '.join(permitted)}",
+                    observed=f"{parent} declares {key!r}, which is not one of them",
+                    examples=[key],
+                    source=_at(f"{parent}.{key}"),
+                    fix=(
+                        _nearest_hint(key, permitted, f"{parent}.{key}").replace(
+                            "set ", "rename ", 1
+                        )
+                        if permitted
+                        else f"remove {key} from {parent}"
+                    ),
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+        elif kind in ("enum", "literal_error"):
+            path = ".".join((name, *loc))
+            expected = _expected_members(line)
+            written = str(line.get("input"))
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.value_not_permitted",
+                    requirement=f"{path} must be one of: {', '.join(expected)}",
+                    observed=f"{path} is {written!r}",
+                    examples=expected,
+                    source=_at(path),
+                    fix=_nearest_hint(written, expected, path),
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+        else:
+            path = ".".join((name, *loc))
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.value_invalid",
+                    requirement=f"{path} must be {_shape_words(line)}",
+                    observed=f"{path} is {line.get('input')!r}",
+                    source=_at(path),
+                    fix=f"correct {path} in the declaration YAML",
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+    return found.done()
+
+
+def _keys_present(body: object) -> list[str]:
+    return sorted(str(key) for key in body) if isinstance(body, dict) else []
+
+
+def _permitted_keys(model: type[BaseModel], loc: tuple[str, ...]) -> list[str]:
+    """The field names of the model at `loc`, or none when the path does not reach a model."""
+    current: object = model
+    for part in loc:
+        fields = getattr(current, "model_fields", None)
+        if fields is not None and part in fields:
+            current = _model_of(fields[part].annotation)
+        else:
+            # A mapping value (`dict[str, Model]`): the key is the author's, the value's model
+            # is the annotation's argument.
+            current = _mapping_value_model(current)
+        if current is None:
+            return []
+    fields = getattr(current, "model_fields", None)
+    return sorted(fields) if fields else []
+
+
+def _model_of(annotation: object) -> object:
+    """The BaseModel a field annotation names, through `Optional`/`Union` and `dict[str, M]`."""
+    import types
+    import typing
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    origin = typing.get_origin(annotation)
+    if origin in (typing.Union, types.UnionType):
+        for argument in typing.get_args(annotation):
+            model = _model_of(argument)
+            if model is not None:
+                return model
+        return None
+    if origin in (dict, typing.Mapping):
+        return _Mapping(_model_of(typing.get_args(annotation)[1]))
+    return None
+
+
+class _Mapping:
+    """A `dict[str, M]` on the way down `_permitted_keys`: any key, then M's fields."""
+
+    def __init__(self, value_model: object) -> None:
+        self.value_model = value_model
+
+
+def _mapping_value_model(current: object) -> object:
+    return current.value_model if isinstance(current, _Mapping) else None
+
+
+def _expected_members(line: Mapping[str, Any]) -> list[str]:
+    context = line.get("ctx") or {}
+    expected = str(context.get("expected", ""))
+    members = [part.strip().strip("'\"") for part in expected.replace(" or ", ", ").split(",")]
+    return [member for member in members if member]
+
+
+def _shape_words(line: Mapping[str, Any]) -> str:
+    """A requirement clause from pydantic's error type, never its sentence."""
+    kind = str(line["type"])
+    words = {
+        "string_type": "a string",
+        "int_type": "an integer",
+        "int_parsing": "an integer",
+        "bool_type": "true or false",
+        "bool_parsing": "true or false",
+        "float_type": "a number",
+        "decimal_type": "a decimal, quoted to keep its digits",
+        "decimal_parsing": "a decimal, quoted to keep its digits",
+        "dict_type": "a mapping",
+        "list_type": "a list",
+        "tuple_type": "a list",
+        "model_type": "a mapping",
+        "datetime_type": "an ISO-8601 datetime with an offset",
+        "datetime_parsing": "an ISO-8601 datetime with an offset",
+        "datetime_from_date_parsing": "an ISO-8601 datetime with an offset",
+        "date_type": "an ISO-8601 date",
+        "date_from_datetime_parsing": "an ISO-8601 date",
+        "time_type": "a local time such as '15:30'",
+        "time_parsing": "a local time such as '15:30'",
+        "timezone_aware": "a datetime with an offset",
+        "value_error": str(line.get("ctx", {}).get("error", "")).removeprefix("Value error, ")
+        or "a valid value",
+    }
+    return words.get(kind, "a valid value")
 
 
 def _require_keys(body: dict[str, Any], keys: Sequence[str], *, name: str) -> None:

@@ -11,6 +11,7 @@ a convenience:
 
 The layout is argued in `docs/design/run-record-layout.md`; the two decisions that shape this
 module are repeated here because they are the ones a reader will otherwise try to "simplify".
+The tables are parquet since record `146`; see `PART_SUFFIX`.
 
 **A directory scan, not an index file.** An index would put every concurrent writer on one
 atomic-replace target, which is exactly the lost-update the workspace lock exists for
@@ -35,10 +36,13 @@ import time as _time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from vqapr._internal import atomic
 
@@ -55,16 +59,22 @@ strategy's output, beside its `tables/`. `record.json` remains the materializati
 (and a run record written before `139`, which `read_record` still reads).
 """
 TABLES_DIRECTORY = "tables"
-TYPES_SUFFIX = ".types.json"
-"""Beside each table's JSONL: which Python type each column was encoded from.
+PART_SUFFIX = ".parquet"
+"""Each table is a directory of parquet files, one complete file per chunk `append` received.
 
-JSON has strings, numbers, booleans and null. A `Decimal` is written as a string so it stays
-the number it was, and a `datetime` as ISO-8601 with its offset -- and a reader that guesses
-from the text gets both wrong in the ways the testbed met: `read_json_auto` shifted every
-instant by its offset and the panel built from it registered cleanly (A5). The writer saw the
-types at the moment it stringified them, so it records them, per table and per column, and
-`read_typed_table` decodes by that instead of guessing. A record written before this sidecar
-existed reads back as strings, and says so by having no sidecar.
+Record `146` (deletion campaign Step 5). The rows were JSONL with a `.types.json` sidecar that
+said which Python type each column had been stringified from, because JSON cannot carry a type
+and a reader guessing from the text shifted every instant by its offset (the testbed's A5).
+Parquet carries the types: an instant is a `timestamp[us, tz]` and comes back as the same
+instant in the same zone through pyarrow and through duckdb alike. A `Decimal` is the one
+value stored as text -- exact and unbounded, where a parquet decimal would need a fixed scale
+and a weight of one third has twenty-eight places -- and the column's field metadata says so
+(`vqapr.type: decimal`), so `read_table` restores it and a duckdb reader casts it knowingly.
+
+One file per chunk rather than one open writer per table, because a killed run must leave
+readable rows (record `135`): a parquet file is complete only once its footer is written, so an
+open writer would leave nothing, while a file per chunk leaves every chunk that landed. A
+chunk is one accepted occurrence's rows, so the files are as many as the run's occurrences.
 """
 
 SCHEMA = "vqapr-run-record/v2"
@@ -217,51 +227,121 @@ def record_fields(kind: str) -> tuple[str, ...]:
 
 
 
-def _type_name(value: object) -> str | None:
-    """The name a column's type travels under, or `None` for a null that says nothing."""
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return "bool"
-    if isinstance(value, Decimal):
-        return "decimal"
-    if isinstance(value, datetime):
-        return "datetime"
-    if isinstance(value, int):
-        return "int"
-    if isinstance(value, float):
-        return "float"
-    if isinstance(value, str):
-        return "string"
-    return "string"
+_DECIMAL = {b"vqapr.type": b"decimal"}
+"""Field metadata marking a string column that holds `Decimal` text; see `PART_SUFFIX`."""
 
 
-def _learn_types(types: dict[str, str], row: Mapping[str, object]) -> None:
-    """Fold one row's column types into a table's. A column seen under two types is a string.
+def _zone_name(value: datetime) -> str:
+    """The zone a `timestamp[us, tz]` column is declared in, from the first aware value seen."""
+    zone = value.tzinfo
+    name = getattr(zone, "key", None) or getattr(zone, "zone", None)
+    if isinstance(name, str) and name:
+        return name
+    offset = value.utcoffset() or timedelta()
+    sign = "+" if offset >= timedelta() else "-"
+    minutes = abs(int(offset.total_seconds())) // 60
+    return f"{sign}{minutes // 60:02d}:{minutes % 60:02d}"
 
-    Downgrading, never guessing: a column that carried a `Decimal` on one row and text on another
-    cannot be decoded as either, and reading it back as the strings that were written is the one
-    answer that loses nothing.
+
+def _arrow_type(values: Sequence[object], table_id: str, column: str) -> pa.Field:
+    """One column's Arrow field from its Python values, refusing a column of two kinds.
+
+    `int` and `float` together are `float64`; `bool` is its own type and never an int here,
+    which is why it is tested first. A column of two kinds (a `Decimal` beside text) is
+    refused rather than downgraded: the recorder wrote both, so the run's own table is the
+    thing that is wrong, and a silent common type would hide it (`prefer fast, explicit
+    failure`).
     """
-    for column, value in row.items():
-        name = _type_name(value)
-        if name is None:
+    kinds: set[str] = set()
+    first_instant: datetime | None = None
+    for value in values:
+        if value is None:
             continue
-        known = types.get(column)
-        if known is None:
-            types[column] = name
-        elif known != name:
-            types[column] = "string"
+        if isinstance(value, bool):
+            kinds.add("bool")
+        elif isinstance(value, Decimal):
+            kinds.add("decimal")
+        elif isinstance(value, datetime):
+            kinds.add("datetime")
+            first_instant = first_instant or value
+        elif isinstance(value, int):
+            kinds.add("int")
+        elif isinstance(value, float):
+            kinds.add("float")
+        elif isinstance(value, str):
+            kinds.add("string")
+        else:
+            kinds.add("string")
+    if kinds <= {"int", "float"} and kinds:
+        return pa.field(column, pa.float64() if "float" in kinds else pa.int64())
+    if len(kinds) > 1:
+        raise ValueError(
+            f"table {table_id!r} column {column!r} holds values of two kinds "
+            f"({', '.join(sorted(kinds))}); a recorded column holds one"
+        )
+    kind = next(iter(kinds), None)
+    if kind is None:
+        return pa.field(column, pa.null())
+    if kind == "decimal":
+        return pa.field(column, pa.string(), metadata=_DECIMAL)
+    if kind == "datetime":
+        assert first_instant is not None
+        if first_instant.tzinfo is None:
+            raise ValueError(f"table {table_id!r} column {column!r} holds a naive datetime")
+        return pa.field(column, pa.timestamp("us", tz=_zone_name(first_instant)))
+    return pa.field(column, {"bool": pa.bool_(), "string": pa.string()}[kind])
 
 
-def _decode(value: object, type_name: str) -> object:
-    if value is None or not isinstance(value, str):
-        return value
-    if type_name == "decimal":
-        return Decimal(value)
-    if type_name == "datetime":
-        return datetime.fromisoformat(value)
-    return value
+def _arrow_table(
+    rows: Sequence[Mapping[str, object]], table_id: str, remembered: dict[str, pa.Field]
+) -> pa.Table:
+    """One chunk as an Arrow table, each column typed as this writer first saw it.
+
+    A column's type is fixed the first time a non-null value is seen and every later chunk is
+    cast to it; a column that was null in an earlier chunk was written `null`-typed there,
+    which every reader unions with the later type. A later chunk that cannot be cast is
+    refused by name.
+    """
+    columns = sorted({str(key) for row in rows for key in row})
+    fields: list[pa.Field] = []
+    arrays: list[pa.Array] = []
+    for column in columns:
+        values = [row.get(column) for row in rows]
+        seen = _arrow_type(values, table_id, column)
+        field = remembered.get(column)
+        if field is None:
+            field = seen
+            if not pa.types.is_null(seen.type):
+                remembered[column] = seen
+        elif not pa.types.is_null(seen.type) and (
+            seen.type != field.type or (seen.metadata or {}) != (field.metadata or {})
+        ):
+            if pa.types.is_integer(seen.type) and pa.types.is_floating(field.type):
+                pass
+            elif pa.types.is_timestamp(seen.type) and pa.types.is_timestamp(field.type):
+                pass  # another zone, the same instants: cast below converts them
+            else:
+                raise ValueError(
+                    f"table {table_id!r} column {column!r} was recorded as {field.type} and "
+                    f"this chunk holds {seen.type}; a recorded column holds one kind"
+                )
+        if field.metadata == _DECIMAL:
+            values = [None if value is None else str(value) for value in values]
+        arrays.append(pa.array(values, type=field.type))
+        fields.append(field)
+    return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+
+
+def _python_rows(batch: pa.RecordBatch) -> Iterator[dict[str, Any]]:
+    """Rows back as the values they were written from, `Decimal` included."""
+    decimal_columns = {
+        field.name for field in batch.schema if field.metadata and field.metadata == _DECIMAL
+    }
+    for row in batch.to_pylist():
+        for column in decimal_columns:
+            if row.get(column) is not None:
+                row[column] = Decimal(row[column])
+        yield row
 
 
 def _encode(value: object) -> object:
@@ -463,9 +543,10 @@ class RunRecordWriter:
     _instants: dict[str, set[str]] = field(
         default_factory=dict, init=False, repr=False, compare=False
     )
-    _types: dict[str, dict[str, str]] = field(
+    _fields: dict[str, dict[str, pa.Field]] = field(
         default_factory=dict, init=False, repr=False, compare=False
     )
+    _parts: dict[str, int] = field(default_factory=dict, init=False, repr=False, compare=False)
     """What this writer has appended so far, per table: rows, and the distinct `event_time`s.
 
     Counted as chunks pass through `append`, so the record's `tables` block is right whether the
@@ -680,10 +761,10 @@ class RunRecordWriter:
             (self.directory / LOCK_FILENAME).unlink(missing_ok=True)
 
     def append(self, table_id: str, rows: Sequence[Mapping[str, object]]) -> None:
-        """Append one chunk to one table.
+        """Append one chunk to one table, as one complete parquet file.
 
-        Takes a chunk at a time so a caller CAN stream as it produces rows. `public.run` does not
-        yet: it hands over the whole recorder output once the run returns.
+        Takes a chunk at a time so a caller CAN stream as it produces rows, and a run with a
+        store does: each accepted occurrence's rows land here at publish.
 
         Also the run's heartbeat. `LOCK_STALE_AFTER` asks whether the holder is still alive, and
         without a refresh the answer is really "has this run been going longer than two minutes" --
@@ -692,23 +773,21 @@ class RunRecordWriter:
         self.heartbeat()
         if not rows:
             return
-        path = self.directory / TABLES_DIRECTORY / f"{table_id}.jsonl"
+        directory = self.directory / TABLES_DIRECTORY / table_id
+        directory.mkdir(parents=True, exist_ok=True)
+        table = _arrow_table(rows, table_id, self._fields.setdefault(table_id, {}))
+        part = self._parts.get(table_id, 0)
+        target = directory / f"{part:06d}{PART_SUFFIX}"
+        # Written beside the target and moved into place, so a reader listing the directory
+        # never opens a file whose footer is not there yet.
+        staging = directory / f".{part:06d}{PART_SUFFIX}.tmp"
+        pq.write_table(table, staging, compression="zstd")
+        os.replace(staging, target)
+        self._parts[table_id] = part + 1
         instants = self._instants.setdefault(table_id, set())
-        types = self._types.setdefault(table_id, {})
-        before = dict(types)
-        with path.open("a", encoding="utf-8") as handle:
-            for row in rows:
-                _learn_types(types, row)
-                handle.write(json.dumps(_encode(row), sort_keys=True) + "\n")
-                instants.add(str(row.get("event_time")))
+        for row in rows:
+            instants.add(str(row.get("event_time")))
         self._rows[table_id] = self._rows.get(table_id, 0) + len(rows)
-        if types != before:
-            # Rewritten only when a column's type is first seen or changes -- once per table for
-            # almost every run -- and atomically, so a reader never sees half a sidecar.
-            atomic.write_atomically(
-                self.directory / TABLES_DIRECTORY / f"{table_id}{TYPES_SUFFIX}",
-                json.dumps(types, indent=2, sort_keys=True) + "\n",
-            )
 
     def finish(self, record: Mapping[str, object], *, kind: str = RUN_KIND) -> Path:
         """Write the run's own facts, last, by atomic replace.
@@ -1024,82 +1103,78 @@ def read_record(root: Path, run_id: str) -> dict[str, Any]:
     return record
 
 
+def _parts(root: Path, run_id: str, table_id: str, strategy_ref: str | None) -> tuple[Path, ...]:
+    directory = record_directory(root, run_id, strategy_ref) / TABLES_DIRECTORY / table_id
+    if not directory.is_dir():
+        return ()
+    return tuple(sorted(path for path in directory.glob(f"*{PART_SUFFIX}")))
+
+
 def read_table(
     root: Path, run_id: str, table_id: str, strategy_ref: str | None = None
 ) -> Iterator[dict[str, Any]]:
-    """Stream one table's rows back, one line at a time.
+    """Stream one table's rows back, a chunk at a time, as the values they were written from.
 
-    A generator because a run's tables are the large half of the record, and a caller counting rows
-    should not have to hold all of them to do it. `strategy_ref` names the strategy directory
-    (record `139`); `None` reads a run directory written before it.
+    A generator because a run's tables are the large half of the record, and a caller counting
+    rows should not have to hold all of them to do it. `strategy_ref` names the strategy
+    directory (record `139`); `None` reads a run directory written before it. A `Decimal` comes
+    back a `Decimal` and an instant an offset-aware `datetime` in the zone it was recorded in;
+    the parquet carries both, so there is nothing to guess (record `146`).
     """
-    path = record_directory(root, run_id, strategy_ref) / TABLES_DIRECTORY / f"{table_id}.jsonl"
-    if not path.is_file():
-        return
-    with path.open(encoding="utf-8") as handle:
-        for number, line in enumerate(handle, start=1):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                row = json.loads(stripped)
-                if not isinstance(row, dict):
-                    # Valid JSON of the wrong shape is damage too. Yielding it would break this
-                    # function's own `Iterator[dict[str, Any]]` contract and hand every caller a
-                    # bare number where it expects a row.
-                    raise ValueError(f"expected a JSON object, found {type(row).__name__}")
-                yield row
-            except json.JSONDecodeError as damaged:
-                # A damaged row is reported, never skipped. Skipping would let `show run --table`
-                # return a short table that looks complete, and a reader comparing it against the
-                # record's own row count would find two numbers disagreeing with no reason given.
-                # An empty file is a different thing and stays legal: a run may record a table and
-                # write nothing to it.
-                raise ValueError(
-                    f"{path} line {number} is not one JSON row: {damaged}. The recorder wrote "
-                    "this file, so a line that does not parse means it was edited or truncated; "
-                    "restore it, or re-run under a new run id"
-                ) from damaged
+    for path in _parts(root, run_id, table_id, strategy_ref):
+        try:
+            reader = pq.ParquetFile(path)
+        except (pa.ArrowInvalid, pa.ArrowException, OSError) as damaged:
+            # A damaged chunk is reported, never skipped. Skipping would let `show run --table`
+            # return a short table that looks complete, and a reader comparing it against the
+            # record's own row count would find two numbers disagreeing with no reason given.
+            raise ValueError(
+                f"{path} is not a parquet file: {damaged}. The recorder wrote this file, so a "
+                "file that does not open means it was edited or truncated; restore it, or "
+                "re-run under a new run id"
+            ) from damaged
+        for batch in reader.iter_batches():
+            yield from _python_rows(batch)
 
 
 def table_types(
     root: Path, run_id: str, table_id: str, strategy_ref: str | None = None
 ) -> dict[str, str] | None:
-    """The column types one table was written from, or `None` for a record that predates them."""
-    directory = record_directory(root, run_id, strategy_ref) / TABLES_DIRECTORY
-    path = directory / f"{table_id}{TYPES_SUFFIX}"
-    if not path.is_file():
+    """The kind each column was written as, from the parquet schema, or `None` for no table.
+
+    The same vocabulary the retired sidecar used -- `bool`, `int`, `float`, `decimal`,
+    `datetime`, `string` -- read off the first chunk that holds a value for the column.
+    """
+    parts = _parts(root, run_id, table_id, strategy_ref)
+    if not parts:
         return None
-    types = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(types, dict) or any(
-        not isinstance(key, str) or not isinstance(value, str) for key, value in types.items()
-    ):
-        raise ValueError(f"{path} is not a column-type map; the recorder wrote it, so restore it")
+    types: dict[str, str] = {}
+    for path in parts:
+        for column in pq.read_schema(path):
+            if column.name in types:
+                continue
+            if column.metadata and column.metadata == _DECIMAL:
+                types[column.name] = "decimal"
+            elif pa.types.is_timestamp(column.type):
+                types[column.name] = "datetime"
+            elif pa.types.is_boolean(column.type):
+                types[column.name] = "bool"
+            elif pa.types.is_integer(column.type):
+                types[column.name] = "int"
+            elif pa.types.is_floating(column.type):
+                types[column.name] = "float"
+            elif pa.types.is_string(column.type):
+                types[column.name] = "string"
     return types
 
 
-def read_typed_table(
-    root: Path, run_id: str, table_id: str, strategy_ref: str | None = None
-) -> Iterator[dict[str, Any]]:
-    """Stream one table's rows back as the values they were written from.
-
-    A `Decimal` comes back a `Decimal` and an instant an offset-aware `datetime`, decoded by the
-    sidecar the writer left beside the table. This is the reader `vqapr.public` exports, and the
-    reason it exists: the raw JSONL is exact but a reader that types it by guessing shifts every
-    instant by its offset (the testbed's A5). A table with no sidecar -- written before the
-    sidecar existed -- streams strings, exactly as `read_table` does.
-    """
-    types = table_types(root, run_id, table_id, strategy_ref) or {}
-    for row in read_table(root, run_id, table_id, strategy_ref):
-        if types:
-            for column, type_name in types.items():
-                if column in row:
-                    row[column] = _decode(row[column], type_name)
-        yield row
+read_typed_table = read_table
+"""The reader `vqapr.public` exports under the name it had when the sidecar existed. Typed by
+construction now; kept so a caller written against record `135` reads on."""
 
 
 def table_ids(root: Path, run_id: str, strategy_ref: str | None = None) -> tuple[str, ...]:
     directory = record_directory(root, run_id, strategy_ref) / TABLES_DIRECTORY
     if not directory.is_dir():
         return ()
-    return tuple(sorted(path.stem for path in directory.glob("*.jsonl")))
+    return tuple(sorted(path.name for path in directory.iterdir() if path.is_dir()))

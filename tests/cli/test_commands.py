@@ -388,32 +388,21 @@ def test_show_strategy_reads_back_the_tables_a_run_recorded(
     assert refused["stage"] != "unhandled"
     assert "vqapr.fill" in refused["failures"][0]["observed"]
 
-    # A damaged row is reported, never skipped. Skipping would return a short table that looks
+    # A damaged chunk is reported, never skipped. Skipping would return a short table that looks
     # complete, and a reader comparing it against the record's own count would find two numbers
     # disagreeing with no reason given.
     ref = _strategy_ref(tmp_path, capsys, "r1")
-    fill_file = (
-        tmp_path / ".vqapr" / "runs" / "r1" / "strategies" / ref / "tables" / "vqapr.fill.jsonl"
-    )
-    fill_file.write_text(fill_file.read_text(encoding="utf-8") + "{not json\n", encoding="utf-8")
+    (part,) = (
+        tmp_path / ".vqapr" / "runs" / "r1" / "strategies" / ref / "tables" / "vqapr.fill"
+    ).glob("*.parquet")
+    part.write_bytes(part.read_bytes()[: part.stat().st_size // 2])
     code, damaged = _cli(
         capsys, "--project-root", str(tmp_path), "show", "strategy", f"r1/{ref}",
         "--table", "vqapr.fill",
     )
     assert code == 1
-    assert damaged["stage"] != "unhandled", "a damaged row is an answer, not a crash"
-    assert "line" in damaged["failures"][0]["observed"], "the refusal must locate the bad row"
-
-    # Valid JSON of the wrong shape is damage too: yielding a bare number would break the reader's
-    # own `Iterator[dict[str, Any]]` contract and hand every caller something that is not a row.
-    for wrong in ("5", "null", '"text"', "[1, 2]"):
-        fill_file.write_text(f"{wrong}\n", encoding="utf-8")
-        code, typed = _cli(
-            capsys, "--project-root", str(tmp_path), "show", "strategy", f"r1/{ref}",
-            "--table", "vqapr.fill",
-        )
-        assert code == 1, f"{wrong} is not a row"
-        assert typed["stage"] != "unhandled"
+    assert damaged["stage"] != "unhandled", "a damaged chunk is an answer, not a crash"
+    assert "parquet" in damaged["failures"][0]["observed"], "the refusal must name the bad file"
 
 
 def test_an_empty_recorded_table_reads_back_as_empty_not_as_broken(
@@ -429,10 +418,8 @@ def test_an_empty_recorded_table_reads_back_as_empty_not_as_broken(
     assert code == 0, ran
     ref = _strategy_ref(tmp_path, capsys, "r1")
 
-    empty = (
-        tmp_path / ".vqapr" / "runs" / "r1" / "strategies" / ref / "tables" / "vqapr.blank.jsonl"
-    )
-    empty.write_text("\n\n", encoding="utf-8")
+    # A table directory with no chunk in it: recorded, and holding nothing (record `146`).
+    (tmp_path / ".vqapr" / "runs" / "r1" / "strategies" / ref / "tables" / "vqapr.blank").mkdir()
 
     code, page = _cli(
         capsys, "--project-root", str(tmp_path), "show", "strategy", f"r1/{ref}",
@@ -1271,3 +1258,25 @@ def test_help_keeps_argparses_own_behaviour(capsys: pytest.CaptureFixture[str]) 
 
     assert exit_info.value.code == 0
     assert "usage: vqapr" in capsys.readouterr().out
+
+
+def test_one_run_records_one_clock(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`docs/issues/058`: the fill table's `event_time` is in the agenda's zone like every other.
+
+    The execution table normalises its target to UTC and the fill row used to carry that, so a
+    reader lining a fill up against the valuation that followed it converted by hand.
+    """
+    from vqapr.flow.run_records import read_table
+
+    _workspace_for_run(tmp_path, capsys)
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "r1")
+    assert code == 0, ran
+    ref = _strategy_ref(tmp_path, capsys, "r1")
+    store = tmp_path / ".vqapr"
+
+    offsets = {
+        table: {row["event_time"].utcoffset() for row in read_table(store, "r1", table, ref)}
+        for table in ("vqapr.fill", "vqapr.account", "vqapr.weight")
+    }
+    assert all(offsets.values()), offsets
+    assert len({offset for found in offsets.values() for offset in found}) == 1, offsets

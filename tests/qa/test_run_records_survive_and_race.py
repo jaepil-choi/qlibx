@@ -113,7 +113,7 @@ def test_a_process_killed_mid_write_leaves_rows_and_no_record(
     assert run_ids(store) == (), "a killed run must not be listed as finished"
     assert not (store / "runs" / "killed-run" / RECORD_FILENAME).exists()
     tables_dir = store / "runs" / "killed-run" / "tables"
-    assert tables_dir.exists() and any(tables_dir.glob("*.jsonl")), (
+    assert tables_dir.exists() and any(tables_dir.rglob("*.parquet")), (
         "the rows written before the kill should still be on disk -- append-as-you-go, not "
         "flush-at-the-end, is the whole point of the layout"
     )

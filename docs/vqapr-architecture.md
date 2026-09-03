@@ -4660,12 +4660,12 @@ run"*(`cli/run.py:385`).
 ```
 <store.root>/runs/<run-id>/
   record.json               run의 사실 (17.3.1)
-  tables/
-    vqapr.account.jsonl     측정 — mark, 그리고 NAV의 원천
-    vqapr.weight.jsonl      결정 — 목표 비중
-    vqapr.fill.jsonl        체결 — 미체결도 사유와 함께
-    vqapr.monitoring.jsonl  판정 — 선언된 제약이 committed account에서 잰 값과 그때의 한도 (기록 140)
-    <author>.<table>.jsonl  저자가 선언한 진단 표 (signal이 사는 곳)
+  tables/                   표마다 디렉터리 하나, 청크마다 parquet 파일 하나 (기록 146)
+    vqapr.account/          측정 — mark, 그리고 NAV의 원천
+    vqapr.weight/           결정 — 목표 비중
+    vqapr.fill/             체결 — 미체결도 사유와 함께
+    vqapr.monitoring/       판정 — 선언된 제약이 committed account에서 잰 값과 그때의 한도 (기록 140)
+    <author>.<table>/       저자가 선언한 진단 표 (signal이 사는 곳)
 ```
 
 - `FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.monitoring", "vqapr.weight")`

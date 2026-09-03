@@ -8,7 +8,11 @@ authors = [
 ]
 requires-python = ">=3.12,<3.15"
 # `cvxpy` and `pydantic` were listed here and imported nowhere in the repository -- a convex
-# solver stack and a validation library on every `uv add vqapr`, reaching no shipped code path.
+# solver stack and a validation library on every `uv add vqapr`, reaching no shipped code path
+# (record 129 removed both). `pydantic` is back since record 145 and is used: every section of
+# the workspace document and the declaration document is a pydantic model
+# (`vqapr.workspace_document`), which replaced ~1,100 lines of hand-written key-set, type, enum
+# and timestamp checks. It is not used on any hot path.
 # `pandas` was listed as a runtime dependency while only a test and a fixture script import it,
 # so it moved to the dev group.
 #

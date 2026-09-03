@@ -21,11 +21,13 @@ from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
 from datetime import date, datetime
 from difflib import get_close_matches
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from vqapr.account.account import AccountMode
 from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain import identifiers
@@ -633,6 +635,43 @@ def _dataset(
     return registration, source
 
 
+def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
+    """Read a declared enum value, or refuse by naming every member.
+
+    A bare `Kind[value.upper()]` raises `KeyError`, which reaches the envelope as
+    `stage:"unhandled"` with an empty `failures[]` and a traceback file. A reader who cannot see
+    the member list then guesses, and guessing converges only when the field name happens to
+    suggest the right vocabulary.
+
+    Measured: `fill.selector` was a raw lookup, and a reader spent six consecutive attempts on
+    `close, market, close_price, last, vwap, next_open` — every one a *price* word, because
+    "selector" alongside `trade_price` reads as "which price". The members are `SAME_DAY` and
+    `NEXT_ELIGIBLE`, which are *scheduling* words. No number of guesses reaches a vocabulary the
+    field name argues against, so the refusal has to carry the list.
+    """
+    try:
+        return kind[str(value).upper()]
+    except KeyError:
+        permitted = ", ".join(member.name.lower() for member in kind)
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.value_not_permitted",
+                requirement=f"{name} must be one of: {permitted}",
+                observed=str(value),
+                examples=[member.name.lower() for member in kind],
+                source=_at(name),
+                # Names the value actually written and the nearest legal one. Repeating the
+                # permitted set with the verb swapped would say nothing `requirement` has not
+                # already said, and a near-miss is usually a typo the reader cannot see.
+                fix=_nearest_hint(str(value), [member.name.lower() for member in kind], name),
+                explain=ExplainTopic.DECLARATION_SHAPE,
+            )
+        )
+        found.done().raise_if_failed()
+        raise  # unreachable: raise_if_failed always raises here
+
+
 def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
     """Refuse a dataset declaration without `grain`, naming the three values and what changed.
 
@@ -946,10 +985,15 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         # Shape by the codec, so a run reads the same way from a declaration and from the
         # document; every id it names is checked against the staged workspace by the merge.
         name = f"runs.{run_id}"
+        declared_run = _mapping(body, name=name)
+        account = declared_run.get("initial_account")
+        if isinstance(account, dict) and "mode" in account:
+            # A closed set is the one case where a refusal can always be complete: the mode is
+            # judged here so the refusal names every member and the nearest spelling
+            # (`docs/issues/017`), rather than surfacing from the model as one line of many.
+            _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
         try:
-            definition = RunDocument.model_validate(_mapping(body, name=name)).to_domain(
-                str(run_id)
-            )
+            definition = RunDocument.model_validate(declared_run).to_domain(str(run_id))
         except (ValidationError, TypeError, ValueError) as invalid:
             observed = (
                 "; ".join(

@@ -405,12 +405,19 @@ class FrozenAgenda:
             if occurrence.role is not self.agenda_role:
                 raise ValueError("occurrence role must match agenda_role")
 
-    def encoded(self) -> tuple[str, str, str, list[str]]:
+    def encoded(self) -> tuple[str, str, list[str]]:
+        """What a model's identity folds of its agenda: the sessions' CONTENT, not their name.
+
+        The role, the zone and each occurrence's local instant. Not the agenda id, its
+        provenance or the occurrence ids: since record `148` the agenda is derived from the run
+        (`<run_id>.sessions`, occurrences `<run_id>.sessions-<date>`), so folding those would
+        make the same strategy on the same sessions a different identity under every run id --
+        which is the run's identity, not the strategy's (owner ruling, 2026-09-03).
+        """
         return (
-            self.agenda_id,
-            self.content_identity,
-            self.provenance_identity,
-            [occurrence.content_identity for occurrence in self.occurrences],
+            self.agenda_role.value,
+            self.timezone,
+            [occurrence.local_instant.identity() for occurrence in self.occurrences],
         )
 
 

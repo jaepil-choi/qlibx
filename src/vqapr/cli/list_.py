@@ -24,7 +24,12 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.flow.run import RunDefinition
-from vqapr.flow.run_records import read_strategy_record, strategy_refs
+from vqapr.flow.run_records import (
+    datamodel_refs,
+    read_datamodel_record,
+    read_strategy_record,
+    strategy_refs,
+)
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
@@ -32,23 +37,20 @@ KINDS = (
     "datasets",
     "sources",
     "components",
-    "agendas",
     "execution-inputs",
-    "strategy-configs",
     # The roster was registrable and unlistable: `list` covered eight kinds and not this one, so a
     # registered roster could not be inspected from the CLI at all.
     "instruments",
     "runs",
     "strategies",
+    "datamodels",
 )
 
 _ACCESSORS = {
     "datasets": "datasets",
     "sources": "sources",
     "components": "components",
-    "agendas": "agendas",
     "execution-inputs": "execution_inputs",
-    "strategy-configs": "strategy_configs",
     "runs": "run_definitions",
 }
 
@@ -56,7 +58,6 @@ _IDENTITY_FIELDS = (
     "dataset_id",
     "source_id",
     "component_id",
-    "agenda_id",
     "execution_input_id",
     "run_id",
 )
@@ -65,18 +66,11 @@ _IDENTITY_FIELDS = (
 def _summarize(item: object) -> dict[str, Any]:
     """Reduce one declaration to the fields an agent needs to act on it."""
     summary: dict[str, Any] = {}
-    component = getattr(item, "component", None)
-    component_id = getattr(component, "component_id", None)
-    if component_id is not None:
-        # StrategyConfig owns a ComponentRef rather than duplicating its id. Omitting the nested
-        # identity made `list strategy-configs --id <component>` return zero rows even though
-        # `register` reports and keys that config by component id.
-        summary["component_id"] = str(component_id)
     for field in _IDENTITY_FIELDS:
         value = getattr(item, field, None)
         if value is not None:
             summary[field] = str(value)
-    for field in ("kind", "fingerprint", "object_name", "role", "timezone"):
+    for field in ("kind", "fingerprint", "object_name", "timezone"):
         value = getattr(item, field, None)
         if value is None:
             continue
@@ -117,19 +111,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--run",
         dest="run_id",
         default=None,
-        help="`strategies` only: the run whose strategy records to list (required)",
+        help="`strategies`/`datamodels`: the run whose member records to list (required)",
     )
     parser.add_argument(
         "--strategy",
         dest="strategy",
         default=None,
-        help="`strategies` only: keep records of this strategy id",
+        help="`strategies`/`datamodels`: keep records of this model id",
     )
     parser.add_argument(
         "--fingerprint",
         dest="fingerprint",
         default=None,
-        help="`strategies` only: keep records whose fingerprint starts with this prefix",
+        help="`strategies`/`datamodels`: keep records whose fingerprint starts with this prefix",
     )
     parser.add_argument(
         "--failed-contract",
@@ -141,7 +135,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--since",
         dest="since",
         default=None,
-        help="`strategies` only: keep records whose period ends at or after this instant",
+        help="`strategies`/`datamodels`: keep records whose period ends at or after this instant",
     )
 
 
@@ -175,6 +169,36 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
         if prefix and not str(row["fingerprint"] or "").startswith(prefix):
             continue
         if getattr(args, "failed_contract", False) and not failed:
+            continue
+        if since is not None:
+            ended = _instant(period.get("end"), name="period.end")
+            if ended is None or ended < since:
+                continue
+        rows.append(row)
+    return rows
+
+
+def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Every finished datamodel record of one run (record `148`): what it wrote, and when."""
+    since = _instant(getattr(args, "since", None), name="--since")
+    rows: list[dict[str, Any]] = []
+    for ref in datamodel_refs(root, run_id):
+        record = read_datamodel_record(root, run_id, ref)
+        period = record.get("period") or {}
+        row = {
+            "run_id": run_id,
+            "datamodel_ref": ref,
+            "datamodel_id": record.get("datamodel_id"),
+            "fingerprint": record.get("fingerprint"),
+            "dataset_id": record.get("dataset_id"),
+            "rows": record.get("rows"),
+            "period": period,
+        }
+        wanted = getattr(args, "strategy", None)
+        if wanted and row["datamodel_id"] != wanted:
+            continue
+        prefix = getattr(args, "fingerprint", None)
+        if prefix and not str(row["fingerprint"] or "").startswith(prefix):
             continue
         if since is not None:
             ended = _instant(period.get("end"), name="period.end")
@@ -262,6 +286,19 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         if args.identifier:
             rows = [row for row in rows if args.identifier in str(row["strategy_ref"])]
         return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
+    if args.kind == "datamodels":
+        run_id = getattr(args, "run_id", None)
+        if not run_id:
+            raise InputError(
+                VALUE_INVALID,
+                requirement="`list datamodels` names the run whose records to list",
+                observed="no --run given",
+                retry="run `vqapr list runs`, then `vqapr list datamodels --run <run-id>`",
+            )
+        rows = _datamodels(store_root, run_id, args)
+        if args.identifier:
+            rows = [row for row in rows if args.identifier in str(row["datamodel_ref"])]
+        return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
     if not (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists():
         # 없는 workspace는 빈 workspace다. 존재 여부만 보고 통과시키는 이유는, 손상된 workspace는
         # 계속 시끄럽게 실패해야 하기 때문이다 — `Workspace.open`을 넓게 catch하면 그 구분이
@@ -271,10 +308,15 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     items = getattr(workspace, _ACCESSORS[args.kind])
     rows = [_summarize(item) for item in items]
     if args.kind == "runs":
-        # Beside each registered run, the strategy records the store holds for it: what ran, by
-        # `<id>@<fp8>`, so a reader sees which tweaks of which strategies have been tried.
+        # Beside each registered run, the member records the store holds for it: what ran, by
+        # `<id>@<fp8>`, so a reader sees which tweaks of which models have been tried. A run
+        # holds one kind (record `148`), so one of the two lists is always empty.
         for row in rows:
-            row["recorded"] = list(strategy_refs(store_root, str(row["run_id"])))
+            run_id = str(row["run_id"])
+            row["recorded"] = [
+                *strategy_refs(store_root, run_id),
+                *datamodel_refs(store_root, run_id),
+            ]
     if args.identifier:
         needle = args.identifier
         rows = [row for row in rows if any(needle in str(value) for value in row.values())]

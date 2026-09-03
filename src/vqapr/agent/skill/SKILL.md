@@ -45,7 +45,7 @@ Work with vqapr follows three rungs. Each rung depends on the previous one succe
 
 ### Rung 1 — Registration
 
-**Goal:** a workspace where every dataset, source, component, execution input, and agenda is
+**Goal:** a workspace where every dataset, source, component and execution input is
 registered and passes validation.
 
 1. `vqapr list datasets` -- see what exists (returns empty on a fresh workspace, that is fine)
@@ -62,12 +62,11 @@ registered and passes validation.
    Exchange plus the declaration that registers it. **Every instrument the run trades needs a
    listing here**, or preflight refuses it by name. `AcademicExchange` and `KrxExchange` are the
    only two profiles a registered Exchange may be; the scaffold uses the first.
-7. `vqapr new agendas --out agendas.yaml` -- get agendas and strategy_configs together (a
-   config binds a strategy to an agenda, so neither half is usable alone). The run names its
-   valuation agenda itself, in its `valuation:` block
-8. Fill in the placeholders and `vqapr register <declaration.yaml>` for each. Datasets, sources
-   and agendas stay in YAML because they ARE declarations -- there is no code to point at.
-9. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
+7. Fill in the placeholders and `vqapr register <declaration.yaml>` for each. Datasets, sources
+   and execution inputs stay in YAML because they ARE declarations -- there is no code to
+   point at. There is no agenda to declare: the run itself says which sessions it fires on
+   and at what wall time (rung 2).
+8. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
    component declares it reads, decides, forms, weights and records
 
 **What a dataset's shape costs, priced before you commit to it.** Both numbers are measured, and
@@ -129,33 +128,42 @@ would mix a live name's recent returns with a delisted name's decade-old ones an
 covariance matrix, a factor regression or any date-aligned model wants. Scaffold the first with
 `vqapr new datamodel --lookback N` and the second with `--calendar-lookback DAYS`.
 
-A materialization spec names `datamodel:` where a simulation names `strategy:`, and that is what
-tells `run` which it is holding — declare both, or neither, and it refuses rather than guessing:
+A datamodel is run as a registered run, exactly like a strategy (record 148): a `runs:` entry
+whose `datamodels:` names the component and the dataset it writes, on the sessions and at the wall
+time the run declares. No account, no venue, no execution input -- those keys are refused on a
+datamodel run. `vqapr new datamodel <id> --dataset <d>` emits the block beside the component:
 
 ```yaml
-datamodel: my-derived            # the registered component to run
-instruments: [A005930, A000660]  # what to evaluate over
-output:
-  dataset_id: my-derived-values  # must NOT already be registered
-  value_fields: [value]          # the columns it writes
-evaluate_at:                     # when to evaluate; timezone-aware, one entry minimum
-  - "2024-03-06T04:00:00+09:00"
+runs:
+  my-derived-run:
+    instruments: [A005930, A000660]  # the universe every session computes over
+    start: "2024-01-02T00:00:00+09:00"
+    end:   "2024-12-31T23:00:00+09:00"
+    sessions_from: prices            # every session that registered dataset has (or `sessions:`)
+    timezone: Asia/Seoul
+    at: "16:00"                      # when compute() is called, each session
+    datamodels:
+      my-derived:                    # the registered DataModel component
+        dataset_id: my-derived-values  # must NOT already be registered
+        value_fields: [value]          # the columns each row carries beside `instrument`
 ```
 
-Then `vqapr check <spec.yaml>` and `vqapr run <spec.yaml>` with the file's path -- a
-materialization is the one spec that is still a file; a simulation is a registered run and is
-named by id (Rung 2). It registers a dataset rather than writing a run record, so `vqapr list
-datasets` shows it arrived and
-`vqapr show dataset <id>` reads back what it computed. The output is readable by any component
-that declares it — which is the point: one model's output is the next model's input.
+Then `vqapr register <file.yaml>`, `vqapr check <run-id>` and `vqapr run <run-id>` by id -- the
+same three commands a strategy run takes; a YAML path handed to `run` or `check` is refused by
+name. Each session's rows land as one parquet chunk under `.vqapr/materialized/<dataset_id>/` the
+moment the session completes, the dataset registers once after the last session, and the run's
+record lands under `.vqapr/runs/<run-id>/datamodels/<id>@<fp8>/datamodel.json` -- one line per
+session (evaluation time, output `available_at`, row count), no per-instrument lineage.
+`vqapr list datasets` shows the dataset arrived, `vqapr list datamodels --run <run-id>` and
+`vqapr show datamodel <run-id>/<id>@<fp8>` read the record, and `vqapr show dataset <id>` reads
+back what it computed. The output is readable by any component that declares it -- which is the
+point: one model's output is the next model's input. Running the same run again is refused while
+its output dataset is registered (`check.datamodel.output_registered`).
 
 **`vqapr show dataset <id> [--limit N]`** works for any registered dataset, not just a
 materialized one. It reports the registration's own facts — source, path, declared fields, span —
 alongside the rows, and reports `rows_total` separately from `returned` so a truncated page never
 reads as a short dataset. `--limit 0` returns every row.
-
-`--strategy`, `--jobs` and `--force` are refused here. All are defined in terms of a run record
-and a materialization writes none; to replace an output, remove its dataset registration first.
 
 **Reading a finished run: two records.** `vqapr show run <run-id>` gives the CONFIGURATION
 every strategy of the run shared -- instruments, period, venue, the execution input and its
@@ -201,15 +209,15 @@ through `self.recorder`, and writing to an undeclared one refuses mid-run:
 - **`vqapr.weight`** -- the intended allocation per evaluation, before execution. `instrument`,
   `weight`.
 
-A run that declared constraints and a monitoring agenda records a fourth:
+A run whose strategy declared constraints records a fourth:
 
-- **`vqapr.monitoring`** -- what each declared constraint measured on the committed account at
-  each monitoring occurrence. `constraint` (the rule's id), `passed`, `measured`, `bound`,
+- **`vqapr.monitoring`** -- what each declared constraint measured on the committed account
+  right after each commit. `constraint` (the rule's id), `passed`, `measured`, `bound`,
   `excess`, `offenders` (the breaching instrument ids, space-separated; empty when none),
-  `account_version`. `event_time` is the monitoring cutoff. **This is the table compliance
+  `account_version`. `event_time` is the fill instant the book was committed and judged at. **This is the table compliance
   questions are asked of** -- the strategy record's `contract` block only counts how often each
   constraint held; which name breached which limit by how much is here, one row per constraint
-  per occurrence.
+  per commit.
 
 Every row of every table also carries the same five envelope fields: `run_id`, `producer_id`,
 `stage`, `event_time` and `sequence` -- which run wrote it, what wrote it, at what point, when the
@@ -219,9 +227,9 @@ A fill's `kind` is what the ROSTER said. What it was CHARGED as comes from the v
 Those are two statements and nothing compares them (`docs/issues/013`), so keep a venue's declared
 categories in step with the registered roster.
 
-**A run needs five declarations**: a dataset, an execution input, an exchange, agendas with their
-configs, and at least one component. Each has a `vqapr new` scaffold; if you are hand-writing one
-of them, check for the template first.
+**A run needs four declarations**: a dataset, an execution input, an exchange, and at least one
+component. Each has a `vqapr new` scaffold; if you are hand-writing one of them, check for the
+template first.
 
 **And it wants a sixth: the instrument roster.** `vqapr new instruments` scaffolds the exporter and
 its declaration. It is not in the five because a run without one still completes -- but every fill
@@ -277,14 +285,12 @@ positional -- there is no all-kinds form, and bare `vqapr list` is refused with
 vqapr list datasets
 vqapr list sources
 vqapr list components
-vqapr list agendas
 vqapr list execution-inputs
-vqapr list strategy-configs
 vqapr list instruments
 ```
 
-The remaining two kinds are `runs` and `strategies`, both Rung 2: `vqapr list runs` is the registered runs and the records
-beside each, `vqapr list strategies --run <run-id>` those records. A kind you registered nothing
+The remaining three kinds are `runs`, `strategies` and `datamodels`, all Rung 2: `vqapr list runs` is the registered runs and the records
+beside each, `vqapr list strategies --run <run-id>` and `vqapr list datamodels --run <run-id>` those records. A kind you registered nothing
 under returns `count: 0`, which is an answer rather than a failure.
 
 #### Correcting a registration during setup
@@ -357,21 +363,26 @@ The same care applies to query patterns written at registration time. Moving ave
 sums and ranks can each reach across rows in a way that pulls future information into a past row;
 flag them and explain what would have to be true for the pattern to be safe.
 
-### Rung 2 — Materialization and run
+### Rung 2 — Run
 
-**Goal:** a completed run that produces a result per strategy.
+**Goal:** a completed run that produces a result per model: a record and tables per strategy, or
+a registered dataset per datamodel.
 
 A run is configuration, registered like everything else: the universe, the period, the
-venue, the execution input, the initial account declaration, and the strategies it tries.
-Each strategy runs with its OWN account from that declaration, under the agenda its
-`strategy_configs` binding names, and writes its own record. Three factor models on one
-cadence are one run with three strategies, not three runs.
+sessions it fires on (`sessions_from: <dataset>` or a `sessions:` list) and the venue-local
+wall time it fires at (`timezone`, `at`), the venue, the execution input, the initial account
+declaration, and the strategies it tries. Every strategy is called on EVERY session at `at`
+and decides for itself whether to act -- a monthly rebalance is a rule inside the strategy,
+read from `call.evaluation_time` and kept in `self.memory`. The book is valued at the instant
+the venue fills and the declared constraints judge it right after each commit; there is no
+valuation or monitoring time to declare. Each strategy runs with its OWN account from that
+declaration and writes its own record. Three factor models on one cadence are one run with
+three strategies, not three runs.
 
 1. `vqapr new run --out runs.yaml` — get a `runs:` declaration template with every required
    key explained
-2. Fill in the template with registered component ids, the valuation agenda id, instruments
-   and dates; list every strategy to try under `strategies:` (each needs a binding from
-   `vqapr new agendas`)
+2. Fill in the template with registered component ids, instruments, dates, the sessions and
+   the wall time; list every strategy to try under `strategies:`
 3. `vqapr register runs.yaml` — the run is refused here if it names anything unregistered
 4. `vqapr check <run-id>` — prove it before spending a run. `check` runs **four phases** and
    makes **eight independent judgments** -- for every strategy the run names -- and reports
@@ -387,7 +398,8 @@ cadence are one run with three strategies, not three runs.
 
 **Stop condition:** `vqapr check <run-id>` returns `ok:true`, then `vqapr run <run-id>`
 returns `ok:true` with a `strategies` map carrying an `occurrences` count, an
-`account_version` and a `record` (`<strategy-id>@<fp8>`) per strategy.
+`account_version` and a `record` (`<strategy-id>@<fp8>`) per strategy -- or, for a datamodel run,
+a `datamodels` map carrying `dataset_id`, `rows`, `sessions` and its `record`.
 
 **Tweaks are directories.** A strategy's record is named by its registered fingerprint, which
 folds the file bytes and the config: edit the strategy and re-register it under the same id,

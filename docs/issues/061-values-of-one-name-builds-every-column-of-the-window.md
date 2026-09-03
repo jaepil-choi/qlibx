@@ -2,6 +2,13 @@
 
 **Status:** **CLOSED 2026-09-03** by record `143` (deletion campaign Step 2b). `values` is a lazy mapping that converts one column per name asked for; `latest()` and `counts()` stay in Arrow; the docstring states the cost. No `tail(n)` -- the accessor removes the measured cost.
 
+**Also reported as F-015 (phase 2 of the same run, before `143` reached it):** the scaffold's own
+idiom `for name in window.instruments: ... window.values[name]` made the cost N x N column builds
+per callback. cProfile on `ou-k0` (1,349 sessions, 2,151 names): `values` 2.9 M calls, 1,910 s of
+a 2,326 s run; `series` 1.96 billion calls; the strategy's own arithmetic 38 s. Binding `values`
+once per callback took the run from 2,270 s to 356 s. With `143` the idiom costs one conversion
+per name and the scaffold needs no change.
+
 **Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-013**), against `vqapr-0.3.0`. Confirmed
 against source the same day; the source is worse than the agent measured.

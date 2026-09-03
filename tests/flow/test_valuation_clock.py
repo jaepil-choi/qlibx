@@ -1,20 +1,21 @@
-"""A valuation occurrence marks at its own instant, not at the last decision's.
+"""The book is valued at the instant the venue fills, and the NAV row is written there.
 
-AC-M7. A run values its book where the venue published a price, and the venue publishes one every
-session. Before this, `_dispatch_valuation` replayed whatever mark the Account had last committed,
-so the NAV series silently inherited the DECISION cadence: a strategy that rebalances monthly
-reported a monthly NAV even though its book was worth something, and knowably so, on every session
-in between. Factor research measures return from that series, so the gap was not cosmetic.
+Record `148` retired the independent valuation clock. A run used to declare a valuation agenda
+of its own (AC-M7: value every session the venue printed, even when the strategy decided
+monthly); now every strategy is asked on every session at the run's `at`, a `Hold` still
+reaches the venue's execution instant, and the book is valued there from the prices it would
+have filled at. There is no second clock to keep independent, because the one clock already
+reaches every session.
 
-The mechanism under test is a synchronous mark inside `_dispatch_valuation` resolved AT OR BEFORE
-the valuation instant. Two properties make that the right mechanism and both are asserted here:
+What that clock guaranteed still has to hold, and this file guards it on its successor:
 
-- **Direction.** `select_target` selects the first STRICTLY-LATER eligible instant, which is
-  correct for an intent and wrong by exactly one instant for a valuation. On the shipped cadence
-  (decide 08:00, fill 15:30, value 16:00) a strictly-later rule would bind tomorrow's fill, so NAV
-  would be stamped one execution instant late along its whole length.
-- **Occupancy.** `pending_accepted_intent` is a single slot. A daily valuation routed through it
-  would occupy it on most days and overwrite accepted decisions, so the mark must not touch it.
+- a strategy that decides once and holds still leaves a NAV at **every** session, because each
+  Hold is valued at its execution instant;
+- the NAV row is written by the valuation path at the fill instant -- stage `VALUATION`,
+  `event_time` the fill instant, `observed_at` the mark instant, one row per fill or held
+  valuation -- and NAV moves with the price between decisions;
+- the callback's own account row is a fallback for a mark nothing recorded, and a real run
+  never needs it: every mark the venue's prices produce is recorded where it is taken.
 """
 
 from __future__ import annotations
@@ -22,25 +23,34 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import duckdb
 import pytest
 
+from vqapr.account.account import Account, AccountMode
+from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
+from vqapr.authoring import Hold, StrategyModel
+from vqapr.data.store import DuckDbObservationStore
+from vqapr.data.windows import ModelWindow
+from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, FrozenStrategy, StrategyConfig
+from vqapr.flow.run_state import RunStateRepository
+from vqapr.flow.simulation import SimulationFlow
+from vqapr.runtime.agendas import OperationOccurrence, OperationRole
+from vqapr.valuation.marking import ValuationService
+
 KST = ZoneInfo("Asia/Seoul")
 
 # Ten consecutive weekday sessions. The strategy decides on the first one only, so every later
-# session is a day the old behaviour would have reported a stale, replayed mark for.
+# session is a day the book is merely held -- and must still be valued.
 SESSIONS = tuple(date(2024, 3, 4) + timedelta(days=offset) for offset in range(5)) + tuple(
     date(2024, 3, 11) + timedelta(days=offset) for offset in range(5)
 )
-
-# The strategy is asked on the first session only. Every other session has a valuation occurrence
-# and NO strategy occurrence at all, which is the case the independent clock exists for: with no
-# callback there is no `Hold`, so nothing mints a `PendingValuation` and the old code had
-# only the replayed committed mark to report.
-DECISION_SESSIONS = SESSIONS[:1]
 
 STRATEGIES = textwrap.dedent(
     '''
@@ -64,8 +74,8 @@ STRATEGIES = textwrap.dedent(
     class MonthlyDecider(StrategyModel):
         """Buys once and then holds, so decisions and sessions cannot be confused.
 
-        The cadence lives in `self.memory`, which the framework restores before every callback
-        and snapshots after it; nothing else about `self` is promised across callbacks.
+        Called on every session (record 148); the cadence is a rule inside the strategy, kept in
+        `self.memory`, which the framework restores before every callback and snapshots after it.
         """
 
         def inputs(self):
@@ -116,10 +126,8 @@ RUNNER = textwrap.dedent(
     from vqapr.public import (
         AccountMode, AccountSnapshot, ComponentKind, DatasetRegistration,
         ExecutionInputRegistration, ExecutionTableSpec, FillConvention, FillSelector,
-        LocalInstantDeclaration, OperationAgenda, OperationOccurrence, OperationRole,
-        RunDefinition, SourceSpec, StrategyConfig, StrategyEntry, ValuationConfig,
-        component_ref, preflight_run, register_agenda, register_component, register_dataset,
-        register_execution_input, register_strategy_config, run,
+        RunDefinition, SourceSpec, StrategyEntry, component_ref, preflight_run,
+        register_component, register_dataset, register_execution_input, run,
     )
 
     import authored_strategies
@@ -128,30 +136,6 @@ RUNNER = textwrap.dedent(
     root, exec_path = Path(sys.argv[1]), Path(sys.argv[2])
     price_path = Path(sys.argv[3])
     sessions = tuple(date.fromisoformat(day) for day in sys.argv[4].split(","))
-    decision_sessions = tuple(date.fromisoformat(day) for day in sys.argv[5].split(","))
-    valuation_sessions = (
-        tuple(date.fromisoformat(day) for day in sys.argv[6].split(","))
-        if len(sys.argv) > 6
-        else sessions
-    )
-
-
-    def agenda(agenda_id, role, at, days):
-        return OperationAgenda.from_occurrences(
-            agenda_id=agenda_id,
-            role=role,
-            timezone="Asia/Seoul",
-            occurrences=tuple(
-                OperationOccurrence(
-                    f"{agenda_id}-{day.isoformat()}",
-                    role,
-                    LocalInstantDeclaration(day, at, "Asia/Seoul", 0, "+09:00"),
-                )
-                for day in days
-            ),
-            provenance="valuation clock test",
-        )
-
 
     register_dataset(
         root,
@@ -191,26 +175,16 @@ RUNNER = textwrap.dedent(
     for reference in (strategy_ref, exchange_ref):
         register_component(root, reference)
 
-    register_agenda(
-        root, agenda("clock-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 0),
-                     decision_sessions)
-    )
-    register_agenda(
-        root, agenda("clock-valuation", OperationRole.VALUATION, time(16, 0), valuation_sessions)
-    )
-    strategy_config = StrategyConfig(
-        strategy_ref, "clock-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig("clock-valuation", OperationRole.VALUATION)
-    register_strategy_config(root, strategy_config)
-
     # By id, not by ref: a run is a registered document and the workspace resolves what it names
-    # at preflight (record 139). Registering it is not needed for an in-process run.
+    # at preflight (record 139). The run declares its sessions and wall time itself (record 148):
+    # every session, decided at 08:00, filled and valued at the 15:30 print.
     definition = RunDefinition(
         run_id="clock",
         strategies=(StrategyEntry("clock-strategy"),),
-        valuation=valuation_config,
         instruments=("A005930",),
+        sessions=sessions,
+        timezone="Asia/Seoul",
+        at=time(8, 0),
         exchange="clock-exchange",
         execution_input_id="krx-daily",
         start=datetime.combine(sessions[0], time(0, 0), tzinfo=KST),
@@ -226,23 +200,32 @@ RUNNER = textwrap.dedent(
     account_rows = result.final_state.recorder_rows.get("vqapr.account", ())
     for row in account_rows:
         print(
-            f"NAV|{row.get('event_time')}|{row.get('observed_at')}|"
+            f"NAV|{row.get('stage')}|{row.get('event_time')}|{row.get('observed_at')}|"
             f"{row.get('nav')}|{row.get('account_version')}|"
             f"{row.get('instrument')}|{row.get('price')}"
         )
     kinds = [entry.kind.value for entry in result.final_state.lifecycle_trace]
     accepted = kinds.count("ACCEPTED_INTENT")
+    callbacks = sum(
+        1 for trace in result.occurrences if type(trace).__name__ == "OccurrenceTrace"
+    )
     executions = sum(
         1 for trace in result.occurrences if type(trace).__name__ == "DueExecutionTrace"
     )
-    print(f"SUMMARY|{accepted}|{executions}")
+    print(f"SUMMARY|{accepted}|{callbacks}|{executions}")
     '''
 )
 
 
-@pytest.fixture
-def clock_workspace(tmp_path):
-    """Daily execution prices that MOVE, so a replayed mark is distinguishable from a fresh one."""
+@pytest.fixture(scope="module")
+def clock_run(tmp_path_factory) -> tuple[list[dict], dict]:
+    """One run of the monthly decider over ten sessions, with execution prices that MOVE.
+
+    Module-scoped because every test here reads the same run and asserts a different property of
+    it; the run is a subprocess so the authored strategies module is imported by path exactly as a
+    registered component is.
+    """
+    tmp_path = tmp_path_factory.mktemp("clock")
     (tmp_path / "authored_strategies.py").write_text(STRATEGIES, encoding="utf-8")
     (tmp_path / "runner.py").write_text(RUNNER, encoding="utf-8")
 
@@ -252,8 +235,8 @@ def clock_workspace(tmp_path):
     )
     execution = tmp_path / "exec.parquet"
     # The observation the strategy declares, stamped at 07:00 so the 08:00 callback can see the
-    # session it decides on. The execution table keeps its own 15:30 stamps: the two clocks are
-    # separate, which is the whole subject of this file.
+    # session it decides on. The execution table keeps its own 15:30 stamps: a decision and the
+    # print it is filled and valued at are different instants.
     observed = ",\n".join(
         f"('A005930', TIMESTAMPTZ '{session.isoformat()} 07:00:00+09', {72000 + n * 500}.0)"
         for n, session in enumerate(SESSIONS)
@@ -276,16 +259,6 @@ def clock_workspace(tmp_path):
 
     root = tmp_path / "project"
     root.mkdir()
-    return tmp_path, root, execution, prices
-
-
-def _run(
-    clock_workspace,
-    *,
-    decisions: tuple[date, ...] = DECISION_SESSIONS,
-    valuations: tuple[date, ...] = SESSIONS,
-) -> tuple[list[dict], dict]:
-    tmp_path, root, execution, prices = clock_workspace
     result = subprocess.run(
         [
             sys.executable,
@@ -294,8 +267,6 @@ def _run(
             str(execution),
             str(prices),
             ",".join(session.isoformat() for session in SESSIONS),
-            ",".join(session.isoformat() for session in decisions),
-            ",".join(session.isoformat() for session in valuations),
         ],
         capture_output=True,
         text=True,
@@ -308,9 +279,10 @@ def _run(
     summary: dict = {}
     for line in result.stdout.strip().splitlines():
         if line.startswith("NAV|"):
-            _, event_time, observed_at, nav, version, instrument, price = line.split("|")
+            _, stage, event_time, observed_at, nav, version, instrument, price = line.split("|")
             marks.append(
                 {
+                    "stage": stage,
                     "event_time": event_time,
                     "observed_at": observed_at,
                     "nav": nav,
@@ -320,182 +292,214 @@ def _run(
                 }
             )
         elif line.startswith("SUMMARY|"):
-            _, intents, executions = line.split("|")
-            summary = {"accepted_intents": int(intents), "executions": int(executions)}
+            _, intents, callbacks, executions = line.split("|")
+            summary = {
+                "accepted_intents": int(intents),
+                "callbacks": int(callbacks),
+                "executions": int(executions),
+            }
     return marks, summary
 
 
-def test_a_monthly_decider_leaves_a_nav_at_every_session(clock_workspace):
-    """AC-M7. The failure this test exists to catch is the ABSENCE of a change.
+def _run_summary(clock_run) -> tuple[list[dict], dict]:
+    marks, summary = clock_run
+    assert marks, "the run wrote no account rows at all"
+    return marks, summary
 
-    One decision, ten sessions. Before the valuation clock was independent this produced marks
-    only where the decision executed; now every session the venue priced carries its own mark.
+
+def _account_rows(marks: list[dict]) -> list[dict]:
+    return [mark for mark in marks if mark["instrument"] == "_ACCOUNT"]
+
+
+def test_a_monthly_decider_leaves_a_nav_at_every_session(clock_run) -> None:
+    """AC-M7 on its successor: one decision, ten sessions, ten valuations.
+
+    The strategy is asked on every session and holds on nine of them. Each Hold is still bound to
+    the venue's 15:30 print and valued there, so the NAV series has the venue's resolution and not
+    the decision's.
     """
-    marks, summary = _run(clock_workspace)
+    marks, summary = _run_summary(clock_run)
 
     assert summary["accepted_intents"] == 1, "the strategy must decide exactly once"
+    assert summary["callbacks"] == len(SESSIONS), "every session asks the strategy (record 148)"
+    assert summary["executions"] == len(SESSIONS), "one fill, nine held valuations"
 
-    priced = [mark for mark in marks if mark["nav"] not in ("None", "")]
-    valued_sessions = {mark["event_time"][:10] for mark in priced}
-
-    assert len(valued_sessions) > len(DECISION_SESSIONS), (
-        "the NAV series still follows the decision cadence, so the valuation clock is not "
-        f"independent: valued {sorted(valued_sessions)}"
+    valued_sessions = {mark["event_time"][:10] for mark in _account_rows(marks)}
+    assert valued_sessions == {session.isoformat() for session in SESSIONS}, (
+        f"the NAV series does not cover every session: {sorted(valued_sessions)}"
     )
-    assert len(valued_sessions) >= len(SESSIONS) - 1, (
-        f"only {len(valued_sessions)} of {len(SESSIONS)} sessions carry a NAV: "
-        f"{sorted(valued_sessions)}"
-    )
+    # The accepted intent committed: the fill advanced the account, and nothing displaced it.
+    assert "1" in {mark["account_version"] for mark in marks}
 
 
-def test_every_mark_observes_a_distinct_instant(clock_workspace):
-    """A replayed mark repeats an instant. An independent clock produces a new one each session.
+def test_the_nav_row_is_written_at_the_fill_instant_by_the_valuation_path(clock_run) -> None:
+    """Stage `VALUATION`, dated by the instant the mark was taken -- which is the fill instant.
 
-    This is what separates "the row exists" from "the row is a new measurement", and it is the
-    property a row count cannot see. The instants are compared as a SET rather than against
-    `event_time`: the two are different clocks by construction, since the valuation resolves at or
-    before its own instant and lands on the venue's 15:30 print, while `event_time` carries the
-    08:00 occurrence that opened the session.
+    `event_time` and `observed_at` are the same instant on purpose: the measurement rides the
+    same run-state transition as the mark it came from. Dating the series by the 08:00 decision
+    that led to the fill would put every value one commit late; measured once, that mislabelling
+    took a factor correlation from 0.93 to 0.02.
     """
-    marks, _ = _run(clock_workspace)
+    marks, _ = _run_summary(clock_run)
 
-    observed = [mark["observed_at"] for mark in marks if mark["observed_at"] not in ("None", "")]
-    assert observed, "no mark carried an observation instant at all"
-    assert len(set(observed)) >= len(SESSIONS) - 1, (
-        f"{len(set(observed))} distinct observation instants across {len(SESSIONS)} sessions, "
-        "so marks are being replayed rather than taken"
-    )
+    for row in _account_rows(marks):
+        assert row["stage"] == "VALUATION", row
+        event = datetime.fromisoformat(row["event_time"]).astimezone(KST)
+        observed = datetime.fromisoformat(row["observed_at"]).astimezone(KST)
+        assert observed == event, (
+            f"NAV dated {event.isoformat()} but measured {observed.isoformat()}"
+        )
+        assert (event.hour, event.minute) == (15, 30), (
+            f"NAV dated {event.isoformat()}, which is not the venue's print instant"
+        )
 
-
-def test_a_mark_binds_the_price_at_or_before_its_own_instant(clock_workspace):
-    """Direction. The mark must bind the print that already happened, never the next one.
-
-    The valuation occurrence is at 16:00 KST and the venue prints at 15:30 KST, so an at-or-before
-    rule binds the SAME session's 15:30. A strictly-later rule -- `select_target`'s contract --
-    would bind tomorrow's 15:30 instead, stamping the whole series one execution instant late.
-
-    Only the per-instrument rows are checked, because the two row kinds carry two different
-    clocks on purpose: the account-level row stamps `observed_at` with when the MARK was taken
-    (the 16:00 occurrence), while an instrument row stamps when its PRICE was observed (the 15:30
-    print). Collapsing them would be exactly the mislabelling this table's two columns exist to
-    prevent.
-    """
-    marks, _ = _run(clock_workspace)
-
-    priced_instruments = [
-        mark
-        for mark in marks
-        if mark["price"] not in ("None", "") and mark["observed_at"] not in ("None", "")
+    # A held instrument's row carries the instant ITS price was observed, which on a session the
+    # venue priced it is the same print.
+    priced = [
+        row
+        for row in marks
+        if row["instrument"] != "_ACCOUNT" and row["price"] not in ("None", "")
     ]
-    assert priced_instruments, "no instrument row carried both a price and an observation instant"
-
-    for mark in priced_instruments:
-        observed = datetime.fromisoformat(mark["observed_at"]).astimezone(KST)
-        event = datetime.fromisoformat(mark["event_time"]).astimezone(KST)
-        assert observed <= event, (
-            f"price observed at {observed.isoformat()} is LATER than its occurrence "
-            f"{event.isoformat()}, which is the strictly-later selector leaking into valuation"
-        )
-        assert (observed.hour, observed.minute) == (15, 30), (
-            f"price bound {observed.isoformat()}, which is not a venue print instant"
-        )
+    assert priced, "no instrument row carried a price"
+    for row in priced:
+        assert row["stage"] == "VALUATION"
+        observed = datetime.fromisoformat(row["observed_at"]).astimezone(KST)
+        assert observed == datetime.fromisoformat(row["event_time"]).astimezone(KST)
 
 
-def test_nav_moves_with_the_price_between_decisions(clock_workspace):
+def test_one_row_per_fill_instant_and_none_from_the_callback(clock_run) -> None:
+    """Each measurement is recorded once, where it is taken.
+
+    Two rows for one instant would pair a real value with a duplicate -- 056 measured that as HML
+    0.9726 -> 0.6877 -- and a callback row beside a valuation row is exactly that pairing. The
+    callback writes its fallback row only for a mark nothing recorded, and in a real run every
+    mark is recorded by the valuation path first, so no callback-stage account row exists at all.
+    """
+    marks, _ = _run_summary(clock_run)
+
+    instants = [row["observed_at"] for row in _account_rows(marks)]
+    assert len(instants) == len(SESSIONS), f"{len(instants)} NAV rows across {len(SESSIONS)} fills"
+    assert len(set(instants)) == len(instants), f"a measurement was recorded twice: {instants}"
+    assert not [row for row in marks if row["stage"] != "VALUATION"], (
+        "the callback wrote an account row beside the valuation's for the same mark"
+    )
+
+
+def test_nav_moves_with_the_price_between_decisions(clock_run) -> None:
     """The book is held throughout, and the price rises every session, so NAV must rise too.
 
     A replayed mark would hold NAV flat across the whole hold period. Asserting movement rather
     than mere presence is what makes this a value check and not a row count.
     """
-    marks, _ = _run(clock_workspace)
+    marks, _ = _run_summary(clock_run)
 
-    navs = [mark["nav"] for mark in marks if mark["nav"] not in ("None", "")]
-    assert len(navs) >= len(SESSIONS) - 1, f"only {len(navs)} priced marks"
-    assert len(set(navs)) > 1, (
-        "every NAV is identical across a rising price series, which is the signature of a "
-        f"replayed mark: {navs[:5]}"
+    navs = [Decimal(row["nav"]) for row in _account_rows(marks)]
+    assert len(navs) == len(SESSIONS)
+    # The first valuation is the fill itself; from then on the book is held and the price rises.
+    held = navs[1:]
+    assert held == sorted(held) and len(set(held)) == len(held), (
+        f"NAV does not rise with a rising price on a held book: {navs}"
     )
 
 
-def test_a_sparser_valuation_clock_still_leaves_every_callback_session_valued(clock_workspace):
-    """The opposite cadence ratio: decisions DAILY, valuation on a subset of sessions.
+# --- the fallback row, in isolation ------------------------------------------------------------
 
-    The two cadences are independent session tuples, so this is a legal declaration and nothing
-    refuses it. On a session the valuation clock does not cover, the callback's replayed row is
-    still the only record of the book's value, so skipping it would lose a NAV row -- the same
-    defect this step exists to fix, arriving from the other direction.
 
-    The skip is therefore keyed on the identity of the measurement, not on a valuation agenda
-    merely existing.
+class _Holds(StrategyModel):
+    def decide(self, call) -> Hold:
+        return Hold(reason="hold")
+
+
+class _Catalog:
+    def dataset(self, raw_dataset_id: str) -> object:
+        raise AssertionError(f"unexpected dataset read: {raw_dataset_id}")
+
+    def source(self, raw_source_id: str) -> object:
+        raise AssertionError(f"unexpected source read: {raw_source_id}")
+
+
+class _Exchange:
+    def execute(self, *args: object) -> object:
+        raise AssertionError("Hold callbacks must not execute orders")
+
+
+def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
+    return ComponentRef.of(raw_id, kind, Path("component.py"), "Component", fingerprint="0" * 64)
+
+
+def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> None:
+    """The fallback's one legitimate case: a committed mark no valuation path has recorded.
+
+    A flow without execution authority never values against venue prices, so the only mark it can
+    see is one the account arrived with. Nothing recorded that instant, so the callback's row is
+    the only record of the book's value there is, and it is dated by the mark instant rather than
+    by the occurrence that wrote it.
     """
-    sparse = (SESSIONS[2], SESSIONS[7])
-    marks, _ = _run(clock_workspace, decisions=SESSIONS, valuations=sparse)
-
-    priced = [mark for mark in marks if mark["nav"] not in ("None", "")]
-
-    # The axis that matters is the MEASUREMENT date, not the occurrence date. A callback replays
-    # a mark taken at the previous execution instant, so its row is dated by `observed_at`; the
-    # first session has no prior price and is legitimately unmeasured.
-    measured = {mark["observed_at"][:10] for mark in priced}
-    assert len(measured) >= len(SESSIONS) - 1, (
-        "measurements were lost on sessions the valuation clock did not cover: "
-        f"only {sorted(measured)}"
+    snapshot = AccountSnapshot(0, Decimal("100"), {"A": Decimal("2")})
+    marked_at = datetime(2024, 3, 1, 15, 30, tzinfo=KST)
+    batch = ValuationService().mark(snapshot, {"A": Decimal("10")})
+    arrived_marked = AccountState(
+        snapshot,
+        mark_history=(
+            AccountMark(
+                0, batch, snapshot.cash + batch.total_value, provenance=None, marked_at=marked_at
+            ),
+        ),
+    )
+    occurrence = OperationOccurrence(
+        "strategy-1",
+        OperationRole.STRATEGY_CALLBACK,
+        LocalInstantDeclaration(date(2024, 3, 4), time(8, 0), "Asia/Seoul", 0, "+09:00"),
+    )
+    frozen = FrozenRun(
+        run_id="fallback",
+        strategies=(
+            FrozenStrategy(
+                config=StrategyConfig(
+                    _component("strategy", ComponentKind.STRATEGY_MODEL),
+                    "strategy",
+                    OperationRole.STRATEGY_CALLBACK,
+                ),
+                constraints=ConstraintSet(()),
+                agenda=FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, (occurrence,)),
+            ),
+        ),
+        start=occurrence.evaluation_time,
+        end=occurrence.evaluation_time,
+        initial_account_snapshot=snapshot,
+        initial_account_mode=AccountMode.LONG_ONLY,
+        instruments=("A",),
     )
 
-    # And nothing is counted twice: one measurement instant, one row.
-    instants = [mark["observed_at"] for mark in priced]
-    assert len(instants) == len(set(instants)), (
-        f"a measurement was recorded twice: {sorted(instants)}"
-    )
+    def window_for_occurrence(item: OperationOccurrence) -> ModelWindow:
+        return ModelWindow(
+            evaluation_time=item.evaluation_time,
+            instruments=("A",),
+            store=DuckDbObservationStore(_Catalog()),
+            allowed_requirements=(),
+            consumer_id="test-consumer",
+        )
 
+    state = RunStateRepository(initial_account=arrived_marked)
+    result = SimulationFlow(
+        frozen,
+        _Holds(),
+        state,
+        strategy_window_for_occurrence=window_for_occurrence,
+        constraint_window_for_occurrence=window_for_occurrence,
+        account=Account(mode=AccountMode.LONG_ONLY),
+        exchange=_Exchange(),
+        constraints=(),
+    ).run()
 
-def test_the_pending_identity_discriminates_by_role() -> None:
-    """Two occurrences at one instant in one run must not mint the same pending identity.
-
-    `pending_id` is the token proving a completion matches its own preparation
-    (`run_state.py:346-348`, `:434-436`). The key was `run_identity|instant`, which carries no
-    role, so occurrences differing only in role produced the SAME uuid5 and degraded that
-    invariant from a proof to a coincidence.
-
-    The identity is read out of `_accept_valuation` rather than re-derived here. Re-deriving both
-    key shapes inside the test would assert a property of `uuid5`, not of this package, and would
-    stay green if the production key lost its discriminator again.
-    """
-    from vqapr.flow.callback import CallbackPhase
-
-    instant = datetime(2024, 3, 4, 16, tzinfo=KST)
-    minted = {
-        role: CallbackPhase._pending_valuation_key("run-1", role, instant)
-        for role in ("VALUATION", "STRATEGY_CALLBACK")
-    }
-
-    assert len(set(minted.values())) == len(minted), (
-        f"two roles at one instant minted the same pending identity: {minted}"
-    )
-    # The instant still discriminates, so the role did not replace it.
-    later = CallbackPhase._pending_valuation_key(
-        "run-1", "VALUATION", instant + timedelta(days=1)
-    )
-    assert later != minted["VALUATION"]
-
-
-def test_the_valuation_never_displaces_an_accepted_decision(clock_workspace):
-    """Occupancy. A daily valuation must not evict the single pending-intent slot.
-
-    The strategy accepts exactly one intent and the account must reach version 1 by committing
-    it. If a standalone valuation had been routed through `pending_accepted_intent` -- a single
-    slot holding either an `AcceptedIntent` or a `PendingValuation` -- it would have overwritten
-    that intent on its own session and the fill would never have committed.
-
-    `executions` is not the discriminator here: the Hold path legitimately mints a
-    `PendingValuation` on each holding session, and each completes as a due execution, so ten
-    sessions produce ten due executions with only one of them carrying a fill.
-    """
-    marks, summary = _run(clock_workspace)
-
-    assert summary["accepted_intents"] == 1
-    versions = {mark["account_version"] for mark in marks}
-    assert "1" in versions, (
-        "the account never reached version 1, so the accepted intent never committed and a "
-        f"valuation displaced it in the pending slot: versions {sorted(versions)}"
-    )
+    rows = [
+        row
+        for row in result.final_state.recorder_rows["vqapr.account"]
+        if row["instrument"] == "_ACCOUNT"
+    ]
+    assert len(rows) == 1
+    (row,) = rows
+    assert row["stage"] == OperationRole.STRATEGY_CALLBACK.value
+    assert row["event_time"] == occurrence.evaluation_time
+    assert row["observed_at"] == marked_at, "dated by when the nav was measured, not written"
+    assert row["nav"] == Decimal("120")

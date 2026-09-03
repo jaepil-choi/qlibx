@@ -6,11 +6,16 @@ demanded a new `component_id`. A reader following either arrived at the other, w
 `docs/implementations/057` names as worse than a generic error.
 
 These pin the way out and the guard that keeps it from becoming a way to break a workspace.
+
+What can still name a component is a run (record `148`): the strategy binding that used to be a
+registered `strategy_config` is derived by preflight from the run's own sessions and wall time,
+so a run is the one live declaration a removal has to look for.
 """
 
 from __future__ import annotations
 
 from datetime import date, time
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -19,17 +24,10 @@ from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.registration import ComponentRef
-from vqapr.public import (
-    LocalInstantDeclaration,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    StrategyConfig,
-)
+from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
 from vqapr.workspace import Workspace
 
 ZONE = "Asia/Seoul"
-OFFSET = "+09:00"
 
 
 def _ref(path: Path, component_id: str = "mom") -> ComponentRef:
@@ -52,23 +50,18 @@ def _workspace(tmp_path: Path) -> tuple[Workspace, Path]:
     return workspace, source
 
 
-def _bind_a_config(workspace: Workspace, ref: ComponentRef) -> None:
-    occurrence = OperationOccurrence(
-        "a-1",
-        OperationRole.STRATEGY_CALLBACK,
-        LocalInstantDeclaration(date(2026, 4, 1), time(9, 0), ZONE, 0, OFFSET),
-    )
-    workspace.register_agenda(
-        OperationAgenda.from_occurrences(
-            agenda_id="daily",
-            role=OperationRole.STRATEGY_CALLBACK,
+def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
+    workspace.register_run(
+        RunDefinition(
+            run_id="daily",
+            strategies=(StrategyEntry(str(ref.component_id)),),
+            instruments=("A",),
             timezone=ZONE,
-            occurrences=(occurrence,),
-            provenance="test",
+            at=time(9, 0),
+            sessions=(date(2026, 4, 1),),
+            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+            initial_account_mode=AccountMode.LONG_ONLY,
         )
-    )
-    workspace.register_strategy_config(
-        StrategyConfig(ref, "daily", OperationRole.STRATEGY_CALLBACK)
     )
 
 
@@ -140,7 +133,7 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
     workspace.register_component(ref)
-    _bind_a_config(workspace, ref)
+    _register_a_run(workspace, ref)
 
     with pytest.raises(VqaprError, match=r"workspace\.remove\.referenced") as error:
         workspace.remove("component", "mom")
@@ -148,12 +141,10 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
     # is shown, and naming the blocker is the whole requirement here.
     observed = " ".join(failure.observed or "" for failure in error.value.failures)
     remedy = " ".join(failure.fix or "" for failure in error.value.failures)
-    # A strategy config is identified by the strategy it binds (record `138`), so the blocker
-    # is named by the component, not by the agenda the binding points at.
-    assert "strategy config 'mom'" in observed, (
+    assert "run 'daily'" in observed, (
         "the refusal must name what blocks it, not merely that something does"
     )
-    assert "strategy config 'mom'" in remedy, "and the fix must name what to remove first"
+    assert "run 'daily'" in remedy, "and the fix must name what to remove first"
     # Refused means unchanged, not partially applied.
     assert workspace.component("mom").fingerprint == ref.fingerprint
 
@@ -161,29 +152,31 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
 def test_references_to_reports_every_edge_that_blocks_a_removal(tmp_path: Path) -> None:
     """The reverse lookup this workspace did not have.
 
-    `workspace.py`'s existing checks run in the FORWARD direction while decoding -- a config
-    naming a component that must exist. Withdrawing asks the opposite question, and nothing
-    answered it before.
+    `workspace.py`'s existing checks run in the FORWARD direction while decoding -- a run naming
+    a component that must exist. Withdrawing asks the opposite question, and nothing answered it
+    before.
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
     workspace.register_component(ref)
-    _bind_a_config(workspace, ref)
+    _register_a_run(workspace, ref)
 
-    assert workspace.references_to("component", "mom") == ("strategy config 'mom'",)
-    assert workspace.references_to("agenda", "daily") == ("strategy config 'mom'",)
+    assert workspace.references_to("component", "mom") == ("run 'daily'",)
     # An id nothing points at, and an id that does not exist, are both removable.
     assert workspace.references_to("component", "absent") == ()
 
 
 def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
-    """A run definition names a config, and a run definition is not a workspace registration."""
+    """A run is the top of the document: nothing names a run, so it is always removable."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
     workspace.register_component(ref)
-    _bind_a_config(workspace, ref)
+    _register_a_run(workspace, ref)
 
-    assert workspace.references_to("strategy_config", "mom") == ()
+    assert workspace.references_to("run", "daily") == ()
+    assert workspace.remove("run", "daily") is True
+    # With the run gone the component it named is free.
+    assert workspace.references_to("component", "mom") == ()
 
 
 def test_a_dataset_refuses_rather_than_claiming_it_is_unreferenced(tmp_path: Path) -> None:

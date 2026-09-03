@@ -118,12 +118,13 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
     panel = journey.install(root)
     result = journey.execute(root, panel)
 
-    # The numbers the journey produced before the migration, unchanged.
-    assert result.occurrences == 2940
-    # The Account is what the economics live in, and an independent valuation clock must not
-    # touch it: a mark taken without a fill values the book, it does not trade it.
+    # One callback per session (record `148`): the 1470 standalone valuation occurrences the
+    # journey used to dispatch are gone, because the book is valued at the instant it fills.
+    assert result.occurrences == 1470
+    # The Account is what the economics live in, and valuing the book at a fill does not add a
+    # commit of its own: a mark values the book, it does not trade it.
     assert result.account_version == 729
-    # The run state advances on every publication, so it also counts the marks a valuation
-    # records without trading. It is pinned separately precisely because it is the counter the
-    # valuation clock is allowed to move.
-    assert result.run_state_version == 3664
+    # The run state advances on every publication. It stood at 3664 with the valuation clock;
+    # the 735 standalone valuation publications are gone, and the NAV each fill measures now
+    # rides the mark transition instead of a publication of its own.
+    assert result.run_state_version == 2929

@@ -28,7 +28,7 @@ So the declaration is the unit. `vqapr new` emits one beside the component it sc
 - **execution inputs** — the same schema check over the venue table, plus the fill convention.
 - **components** — loaded, constructed, and put through `conformance()`: every contract method
   Flow calls must exist and accept the positional call it makes.
-- **configs** — the agenda and component they name must already be registered.
+- **runs** — every id a run names must already be registered, and its sessions' dataset too.
 
 Sections are applied in dependency order, not file order, so a valid document cannot fail because
 of how the user happened to type it.

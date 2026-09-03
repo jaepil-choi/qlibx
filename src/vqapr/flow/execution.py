@@ -7,9 +7,7 @@ through the valuation phase."""
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from vqapr.account.snapshot import AccountState
 from vqapr.evidence.artifacts import (
@@ -184,7 +182,7 @@ class ExecutionPhase:
                     # (`docs/issues/058`): the execution table normalises the target to UTC,
                     # and a reader lining a fill up against the valuation that followed it
                     # was converting by hand.
-                    "event_time": self._in_agenda_zone(pending.target.target_at),
+                    "event_time": self._context.in_agenda_zone(pending.target.target_at),
                 },
             ),
         )
@@ -207,7 +205,7 @@ class ExecutionPhase:
         selected_marks = self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_SELECTION,
             cutoff=pending.target.target_at,
-            owner=self._context.frozen_run.valuation,
+            owner=self._context.layer.agenda,
             family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
             # The venue already published these prices to fill against. Valuing the book at the
@@ -222,7 +220,7 @@ class ExecutionPhase:
         mark = self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_MARK,
             cutoff=pending.target.target_at,
-            owner=self._context.frozen_run.valuation,
+            owner=self._context.layer.agenda,
             family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
             operation=lambda: self._context.valuation_service.mark(
@@ -244,23 +242,21 @@ class ExecutionPhase:
                 },
                 provenance=ValuationEvidence(
                     run_identity=self._context.frozen_run.identity,
-                    agenda=self._context.frozen_run.valuation_agenda,
+                    agenda=self._context.layer.agenda,
                     occurrence=pending.occurrence,
                     root_version=committed_root.version,
                     cutoff=pending.target.target_at,
                     account=prepared_fill.next_snapshot,
                     marks=mark,
-                    valuation_config=self._context.frozen_run.valuation,
                     account_version=prepared_fill.next_snapshot.version,
                 ),
             ),
         )
         mark_evidence = MarkEvidence(
             run_identity=self._context.frozen_run.identity,
-            agenda=self._context.frozen_run.valuation_agenda,
+            agenda=self._context.layer.agenda,
             occurrence=pending.occurrence,
             cutoff=pending.target.target_at,
-            valuation_config=self._context.frozen_run.valuation,
             selected_marks=selected_marks,
             marks=mark,
             limitations=(),
@@ -278,6 +274,12 @@ class ExecutionPhase:
                 account=prepared_account,
                 mark=mark,
                 evidence=mark_evidence,
+                recorder=self._valuation.measurement_recorder(
+                    cutoff=pending.target.target_at,
+                    account=prepared_account.next_state.snapshot,
+                    mark=prepared_account.next_state.latest_mark,
+                    selected=selected_marks,
+                ),
             ),
         )
         self._context.due_boundary(
@@ -313,6 +315,9 @@ class ExecutionPhase:
                 account_version=marked_root.account.snapshot.version,
             ),
         )
+        # Monitoring judges the committed, marked book right here (record `148`): there is no
+        # later occurrence for it, and nothing later could see more than the fill instant did.
+        monitoring = self._valuation.monitor_after_commit(pending)
         due_evidence = DueExecutionEvidence(commit_evidence, mark_evidence, feedback_evidence)
         root = self._context.due_boundary(
             stage=SimulationStage.DUE_FEEDBACK_PUBLICATION,
@@ -325,12 +330,9 @@ class ExecutionPhase:
             ),
         )
         assert root.account is not None
-        return DueExecutionResult(pending.pending_id, root.account.snapshot.version, due_evidence)
-
-    def _in_agenda_zone(self, instant: datetime) -> datetime:
-        """An instant expressed in the strategy agenda's zone; the same instant."""
-        zone = self._context.layer.agenda.timezone
-        return instant.astimezone(ZoneInfo(zone)) if zone else instant
+        return DueExecutionResult(
+            pending.pending_id, root.account.snapshot.version, due_evidence, monitoring
+        )
 
     def _publish_account_commit(self, prepared: object) -> object:
         root = self._context.state.publish_account_commit(prepared)

@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.show import resolve_strategy
+from vqapr.cli.show import resolve_member
 from vqapr.flow.run_records import (
+    DATAMODEL_KIND,
     RunRecordLive,
     remove_run_record,
     remove_strategy_record,
@@ -30,11 +31,9 @@ from vqapr.flow.run_records import (
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
-RECORD_KINDS = ("run", "strategy")
+RECORD_KINDS = ("run", "strategy", "datamodel")
 DECLARATION_KINDS = {
     "component": "component",
-    "agenda": "agenda",
-    "strategy-config": "strategy_config",
     "run-definition": "run",
 }
 KINDS = (*RECORD_KINDS, *DECLARATION_KINDS)
@@ -46,6 +45,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "identifier",
         help=(
             "run: a run id (its records); strategy: `<run-id>/<strategy-id>@<fp8>`; "
+            "datamodel: `<run-id>/<datamodel-id>@<fp8>`; "
             "run-definition and the other declaration kinds: the registered id"
         ),
     )
@@ -82,9 +82,15 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             )
             return success("record.removed", kind=kind, run_id=identifier, removed=list(removed))
         if kind == "strategy":
-            run_id, strategy_ref = resolve_strategy(root, identifier)
+            run_id, strategy_ref = resolve_member(root, identifier, kind="strategy")
             remove_strategy_record(root, run_id, strategy_ref)
             return success("record.removed", kind=kind, run_id=run_id, removed=[strategy_ref])
+        if kind == "datamodel":
+            # The record only. The dataset it registered stays registered: a record is what a
+            # run wrote about itself, and a dataset is what other runs may already read.
+            run_id, datamodel_ref = resolve_member(root, identifier, kind="datamodel")
+            remove_strategy_record(root, run_id, datamodel_ref, kind=DATAMODEL_KIND)
+            return success("record.removed", kind=kind, run_id=run_id, removed=[datamodel_ref])
     except RunRecordLive as live:
         # A lock inside its heartbeat window may belong to a run that is writing this very
         # record. Waiting costs at most the window; deleting under a live writer destroys rows.

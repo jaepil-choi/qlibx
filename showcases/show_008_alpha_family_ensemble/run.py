@@ -58,6 +58,8 @@ import duckdb
 
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
+    QUANTUM,
+    SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
     AllocationPublicationSpec,
@@ -67,19 +69,9 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    QUANTUM,
-    Rebalance,
     RunDefinition,
-    SHIPPED_CONSTRAINTS,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
     callback_evidence,
     component_ref,
     export_roster,
@@ -87,11 +79,9 @@ from vqapr.public import (
     preflight_run,
     publish_run_allocation,
     rank_information_coefficient,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     run,
     shipped_constraint_path,
 )
@@ -204,23 +194,6 @@ def _closes_by_instrument(path: Path) -> dict[str, list[tuple[date, Decimal]]]:
     for instrument, session, close in rows:
         panel.setdefault(str(instrument), []).append((session, Decimal(str(close))))
     return panel
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_008 committed KRX sessions",
-    )
 
 
 _SOURCE_REFS = '''
@@ -924,19 +897,20 @@ def _check_lowvol_orientation(
 def _member_run(
     project: Path,
     *,
-    strategy_config: StrategyConfig,
-    valuation_config: ValuationConfig,
-    monitoring: MonitoringPolicy,
+    strategy_ref: Any,
+    at: time,
+    callback_days: list[date],
     academic_ref: Any,
     start: datetime,
     end: datetime,
     universe: tuple[str, ...],
 ) -> Any:
     definition = RunDefinition(
-        run_id=strategy_config.component.component_id,
-        strategies=(StrategyEntry(strategy_config.component.component_id),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        run_id=str(strategy_ref.component_id),
+        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=at,
         exchange=academic_ref.component_id,
         execution_input_id="krx-daily",
         start=start,
@@ -1075,69 +1049,22 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ):
         register_component(project, reference)
 
-    reversal_agenda = _agenda(
-        "show008-reversal", OperationRole.STRATEGY_CALLBACK, time(8, 0), callback_days
-    )
-    momentum_agenda = _agenda(
-        "show008-momentum", OperationRole.STRATEGY_CALLBACK, time(8, 15), callback_days
-    )
-    lowvol_agenda = _agenda(
-        "show008-lowvol", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    ensemble_agenda = _agenda(
-        "show008-ensemble", OperationRole.STRATEGY_CALLBACK, time(9, 0), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show008-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "show008-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (
-        reversal_agenda,
-        momentum_agenda,
-        lowvol_agenda,
-        ensemble_agenda,
-        valuation_agenda,
-        monitoring_agenda,
-    ):
-        register_agenda(project, agenda)
-
-    reversal_config = StrategyConfig(
-        reversal_ref, "show008-reversal", OperationRole.STRATEGY_CALLBACK
-    )
-    momentum_config = StrategyConfig(
-        momentum_ref, "show008-momentum", OperationRole.STRATEGY_CALLBACK
-    )
-    lowvol_config = StrategyConfig(lowvol_ref, "show008-lowvol", OperationRole.STRATEGY_CALLBACK)
-    ensemble_config = StrategyConfig(
-        ensemble_ref, "show008-ensemble", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig(
-        "show008-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("show008-monitoring", OperationRole.MONITORING)
-    register_strategy_config(project, reversal_config)
-    register_strategy_config(project, momentum_config)
-    register_strategy_config(project, lowvol_config)
-    register_strategy_config(project, ensemble_config)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
     published: dict[str, Any] = {}
     memories: dict[str, dict[str, Any]] = {}
-    for label, config, dataset_id in (
-        ("reversal", reversal_config, "reversal_allocation"),
-        ("momentum", momentum_config, "momentum_allocation"),
-        ("lowvol", lowvol_config, "lowvol_allocation"),
+    for label, ref, at, dataset_id in (
+        ("reversal", reversal_ref, time(8, 0), "reversal_allocation"),
+        ("momentum", momentum_ref, time(8, 15), "momentum_allocation"),
+        ("lowvol", lowvol_ref, time(8, 30), "lowvol_allocation"),
     ):
         result = _member_run(
             project,
-            strategy_config=config,
-            valuation_config=valuation_config,
-            monitoring=monitoring,
+            strategy_ref=ref,
+            at=at,
+            callback_days=callback_days,
             academic_ref=academic_ref,
             start=start,
             end=end,
@@ -1151,8 +1078,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ensemble_definition = RunDefinition(
         run_id="show008-ensemble",
         strategies=(StrategyEntry("show008-ensemble", ("no-short", "single-name-cap")),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(9, 0),
         exchange="show008-krx",
         execution_input_id="krx-daily",
         start=start,

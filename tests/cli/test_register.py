@@ -219,14 +219,15 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
     """A fat-fingered YAML key must not read as the framework breaking.
 
     Every section here turns its key into a typed identifier, and each of those constructors
-    refuses an empty or whitespace-bearing string with a bare `ValueError`. Nothing caught **four
-    of the five**, so the envelope said `stage:"unhandled"` with an empty `failures[]` — the same
-    shape, and the same lie, as the constraint-identity crash this slice exists to remove.
-    `strategy_configs` is the exception, for the reason noted beside its entry below.
+    refuses an empty or whitespace-bearing string with a bare `ValueError`. Nothing caught it, so
+    the envelope said `stage:"unhandled"` with an empty `failures[]` — the same shape, and the
+    same lie, as the constraint-identity crash this slice exists to remove.
 
     Driven per section because the first fix covered only `components:` and red-teaming found
     `datasets:` and `execution_inputs:` still crashing. A per-handler check is a list you can be
     one short of — and the first version of this test was one short of the table that replaced it.
+    The table is `_DECLARED_IDS`; since record `148` retired `agendas` and `strategy_configs` it
+    is these three, and the test asserts that rather than restating it.
     """
     (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
     sections = {
@@ -237,22 +238,14 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
             "    key_fields: [available_at, instrument]\n    fields: {{close: close}}\n"
         ),
         "execution_inputs": "execution_inputs:\n  {key}:\n    dataset_id: prices\n",
-        "agendas": (
-            "agendas:\n  {key}:\n    role: strategy_callback\n"
-            '    at: "09:00"\n    timezone: Asia/Seoul\n'
-        ),
         "components": (
             "components:\n  {key}:\n    kind: constraint\n"
             "    path: limit.py\n    object_name: Limit\n"
         ),
-        # The fifth entry, and the one whose behaviour actually changed. For the four above, a
-        # blank key used to reach the envelope as `stage:"unhandled"`. This one did not --
-        # `Workspace.component()` already caught the `ValueError` and raised a structured
-        # `workspace.component.lookup.invalid`. The pre-pass changes WHICH structured refusal
-        # fires, to one that names the declaration key path and collects with its siblings.
-        # Omitting it would leave the test one short of the table the table exists to close.
-        "strategy_configs": "strategy_configs:\n  {key}:\n    agenda_id: alpha\n",
     }
+    from vqapr.declarations import _DECLARED_IDS
+
+    assert set(sections) == set(_DECLARED_IDS), "a section became an id and this table missed it"
     for section, template in sections.items():
         for spelling in ('"   "', '""', '" limit "'):
             document = _write(
@@ -445,29 +438,40 @@ def test_an_unknown_section_is_named_rather_than_ignored(
     assert "dataset" in payload["failures"][0]["observed"]
 
 
-def test_an_agenda_must_declare_exactly_one_source_of_sessions(
+def _run_document(**overrides: str) -> str:
+    """A complete `runs:` entry, with one key replaced or added per override.
+
+    Complete on purpose: the run codec reports every shape error at once, so a test of ONE
+    refusal must start from a document that carries nothing else wrong.
+    """
+    fields = {
+        "instruments": "[A]",
+        "start": '"2024-03-05T00:00:00+09:00"',
+        "end": '"2024-03-06T23:00:00+09:00"',
+        "sessions_from": "prices",
+        "timezone": "Asia/Seoul",
+        "at": '"04:00"',
+        "exchange": "venue",
+        "execution_input": "venue-daily",
+        "initial_account": '{cash: "1000", mode: long_only}',
+        "strategies": "{alpha: {}}",
+    }
+    fields.update(overrides)
+    body = "\n".join(f"    {key}: {value}" for key, value in fields.items())
+    return f"runs:\n  r:\n{body}\n"
+
+
+def test_a_run_must_declare_exactly_one_source_of_sessions(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Both, or neither, is a question the command must not answer by guessing.
 
-    Pinned as a *structured* failure, not merely a non-zero exit. This was an unhandled
-    `ValueError`: it reached the envelope with `family: null`, an empty `failures[]`, and a
-    traceback file, so the only machine-readable thing about it was the exit code.
+    Pinned as a *structured* failure, not merely a non-zero exit. When the sessions lived on an
+    agenda this was an unhandled `ValueError`: it reached the envelope with `family: null`, an
+    empty `failures[]`, and a traceback file, so the only machine-readable thing about it was
+    the exit code. The run carries the sessions since record 148, and the same rule holds.
     """
-    document = _write(
-        tmp_path,
-        "w.yaml",
-        _dataset_document(_prices(tmp_path))
-        + """
-agendas:
-  alpha:
-    role: strategy_callback
-    from_dataset: prices
-    sessions: ["2024-03-05"]
-    at: "04:00"
-    timezone: Asia/Seoul
-""",
-    )
+    document = _write(tmp_path, "w.yaml", _run_document(sessions='["2024-03-05"]'))
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
@@ -475,61 +479,34 @@ agendas:
     assert payload["stage"] == "declaration.read"
     assert payload["family"] == "DATA"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.key_missing"
-    assert "exactly one of from_dataset or sessions" in failure["requirement"]
-    # Which of the two mistakes was made, since the requirement covers both.
-    assert failure["observed"] == "agendas.alpha declares both"
+    assert failure["code"] == "declaration.read.run_invalid"
+    assert "exactly one of sessions_from" in failure["observed"]
+    assert failure["source"]["key_path"] == "runs.r"
 
-
-def test_one_refusal_names_every_key_an_agenda_is_missing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Four round trips to assemble one agenda is the friction this closes.
-
-    Measured on a first-time reader: `role` missing, then `role` wrong, then the
-    from_dataset/sessions pair, then `timezone` -- one refusal each, four register/edit/retry
-    cycles, with no way to see the required set whole. `_DATASET_KEYS` had already solved exactly
-    this for datasets; agendas were missed.
-
-    The session source is checked here too, because it is the one an agenda template cannot
-    express as a required key and therefore the one most likely to be discovered last.
-    """
-    document = _write(tmp_path, "w.yaml", 'agendas:\n  alpha:\n    at: "04:00"\n')
-
-    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+    neither = _write(tmp_path, "neither.yaml", _run_document(sessions_from="null"))
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", neither)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
-    requirements = [failure["requirement"] for failure in payload["failures"]]
-    assert len(requirements) == 3, requirements
-    assert any("must declare role" in text for text in requirements)
-    assert any("must declare timezone" in text for text in requirements)
-    assert any("exactly one of from_dataset or sessions" in text for text in requirements)
-    # A missing `role` names its own vocabulary; the reader's next guess is otherwise "strategy".
-    role_requirement = next(text for text in requirements if "must declare role" in text)
-    assert "strategy_callback" in role_requirement
-    assert "valuation" in role_requirement
-    assert "monitoring" in role_requirement
-    # What the declaration did carry, so the reader can see the gap rather than infer it.
-    assert all("declares: at" in failure["observed"] for failure in payload["failures"])
+    assert "exactly one of sessions_from" in payload["failures"][0]["observed"]
 
 
-def test_a_malformed_agenda_blames_the_file_not_the_missing_workspace(
+def test_a_malformed_run_blames_the_file_not_the_missing_workspace(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An empty directory is where `register` is first typed, so the first refusal must be true.
 
     `apply` opens the workspace lazily for exactly this reason. Passing `workspace()` rather than
-    `workspace` into the agenda builder defeated it: Python evaluates the argument first, so a
-    declaration with a bad agenda reported `workspace.open.missing` and sent the reader to inspect
-    a directory that was fine.
+    `workspace` into a section's builder once defeated it: Python evaluates the argument first,
+    so a declaration with a bad entry reported `workspace.open.missing` and sent the reader to
+    inspect a directory that was fine.
     """
-    document = _write(tmp_path, "w.yaml", 'agendas:\n  alpha:\n    at: "04:00"\n')
+    document = _write(tmp_path, "w.yaml", 'runs:\n  r:\n    at: "04:00"\n')
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
     assert payload["stage"] == "declaration.read", "the file is what is wrong, not the workspace"
+    assert payload["failures"][0]["code"] == "declaration.read.run_invalid"
 
 
 def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
@@ -553,10 +530,7 @@ def test_a_sessions_list_that_is_not_a_list_is_refused_with_a_stage(
 ) -> None:
     """One date, written without brackets, is the easiest version of this mistake to make."""
     document = _write(
-        tmp_path,
-        "w.yaml",
-        'agendas:\n  alpha:\n    role: valuation\n    sessions: "2024-03-05"\n'
-        '    at: "04:00"\n    timezone: Asia/Seoul\n',
+        tmp_path, "w.yaml", _run_document(sessions_from="null", sessions='"2024-03-05"')
     )
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
@@ -564,15 +538,16 @@ def test_a_sessions_list_that_is_not_a_list_is_refused_with_a_stage(
     assert code == 1
     assert payload["stage"] == "declaration.read"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.value_invalid"
-    assert "non-empty list of dates" in failure["requirement"]
+    assert failure["code"] == "declaration.read.run_invalid"
+    assert "sessions" in failure["observed"], "the key that was mistyped is named"
+    assert failure["source"]["key_path"] == "runs.r"
 
 
 def test_every_section_is_optional(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The declaration grows with the workspace instead of demanding everything at once."""
-    document = _write(tmp_path, "w.yaml", "agendas: {}\n")
+    document = _write(tmp_path, "w.yaml", "runs: {}\n")
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 

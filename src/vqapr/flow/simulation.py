@@ -10,6 +10,7 @@ this module re-exports are the ones callers and tests imported from it before th
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountState
@@ -44,6 +45,7 @@ from vqapr.flow.context import (
 # Re-exported under the names tests imported from this module before the split (record `147`).
 from vqapr.flow.context import _shadows_package_table as _shadows_package_table
 from vqapr.flow.execution import ExecutionPhase
+from vqapr.flow.loop import OccurrenceFlow
 from vqapr.flow.run import FrozenRun, FrozenStrategy
 from vqapr.flow.run_state import (
     RunFinalization,
@@ -55,7 +57,7 @@ from vqapr.flow.valuation import (
 )
 from vqapr.models.strategy_model import StrategyModel
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
-from vqapr.runtime.events import DueExecutionEnvelope, OperationEnvelope
+from vqapr.runtime.events import DueExecutionEnvelope
 from vqapr.valuation.marking import ValuationService
 
 __all__ = [
@@ -75,10 +77,21 @@ __all__ = [
 ]
 
 
-class SimulationFlow:
+class _InstantOccurrence:
+    """What a per-occurrence window factory reads when handed a bare instant."""
+
+    __slots__ = ("evaluation_time",)
+
+    def __init__(self, evaluation_time: datetime) -> None:
+        self.evaluation_time = evaluation_time
+
+
+class SimulationFlow(OccurrenceFlow):
     """Dispatch frozen occurrences and one latest accepted pending intent.
 
-    The Flow owns timestamp stamping, exact execution, account mutation, and marking.
+    The Flow owns timestamp stamping, exact execution, account mutation, and marking. The walk
+    itself is `OccurrenceFlow`'s, shared with a datamodel run (record `148`); what this adds is
+    the three phases an occurrence and its due item dispatch to.
     """
 
     def __init__(
@@ -91,6 +104,7 @@ class SimulationFlow:
         strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         account: Account,
+        constraint_window_at: Callable[[datetime], ModelWindow] | None = None,
         exchange: Exchange,
         constraints: tuple[Constraint, ...],
         valuation_service: ValuationService | None = None,
@@ -135,10 +149,22 @@ class SimulationFlow:
         self._context.frozen_run = frozen_run
         self._context.layer = layer
         self._context.static_occurrences = frozen_run.dispatch_order(layer)
+        self._static_occurrences = self._context.static_occurrences
+        cutoff = frozen_run.start or frozen_run.end
+        if cutoff is None:
+            raise RuntimeError("simulation start requires a frozen boundary")
+        self._start_cutoff = cutoff
         self._context.strategy = strategy
         self._context.state = state
         self._context.strategy_window_for_occurrence = strategy_window_for_occurrence
         self._context.constraint_window_for_occurrence = constraint_window_for_occurrence
+        # Monitoring reads as of the fill instant (record `148`). A caller that gave only the
+        # per-occurrence factory -- the tests' flows -- gets a window at the decision instead.
+        self._context.constraint_window_at = constraint_window_at or (
+            lambda instant: constraint_window_for_occurrence(
+                _InstantOccurrence(instant)  # type: ignore[arg-type]
+            )
+        )
         self._context.account = account
         self._context.exchange = exchange
         # The venue names the extra execution price its own regimes need, once per run. A venue
@@ -154,6 +180,7 @@ class SimulationFlow:
         # opening and closing its own on every fill, which is where the time went.
         self._context.scan_session = scan_session
         self._context.on_progress = on_progress
+        self._on_progress = on_progress
         if not isinstance(record_account_positions, bool):
             raise TypeError("record_account_positions must be a bool")
         # Whether `vqapr.account` carries one row per held instrument at every valuation, or the
@@ -197,9 +224,11 @@ class SimulationFlow:
 
     def run(self) -> SimulationResult:
         """Synchronously process the static merge and all due items in its horizon."""
-        cutoff = self._context.frozen_run.start or self._context.frozen_run.end
-        if cutoff is None:
-            raise RuntimeError("simulation start requires a frozen boundary")
+        result = super().run()
+        assert isinstance(result, SimulationResult)
+        return result
+
+    def _start(self, cutoff: datetime) -> None:
         self._context.guard(
             SimulationStage.START,
             cutoff,
@@ -207,62 +236,25 @@ class SimulationFlow:
             family=SimulationFailureFamily.DATA,
             owner=self._context.layer.config,
         )
-        traces: list[OccurrenceTrace | DueExecutionTrace] = []
-        static = iter(OperationEnvelope(item) for item in self._context.static_occurrences)
-        next_static = next(static, None)
 
-        while next_static is not None or self._pending_due() is not None:
-            # One call per occurrence, for a caller that needs to prove it is still alive while
-            # the run is executing. A run's only other outward sign is its result, which arrives
-            # minutes later -- long after anything watching would have concluded it had died.
-            if self._context.on_progress is not None:
-                self._context.on_progress()
-            due = self._pending_due()
-            if due is not None and (
-                next_static is None or due.sort_key() <= next_static.sort_key()
-            ):
-                traces.append(
-                    self._context.guard(
-                        SimulationStage.DUE_SNAPSHOT,
-                        due.due_time,
-                        lambda due=due: self._dispatch_due(due),
-                        family=SimulationFailureFamily.DATA,
-                        owner=self._context.frozen_run.execution_input,
-                    )
-                )
-                continue
-            assert next_static is not None
-            occurrence = next_static.occurrence
-            next_static = next(static, None)
-            if occurrence.role is OperationRole.STRATEGY_CALLBACK:
-                traces.append(self._callback.dispatch(occurrence))
-            elif occurrence.role is OperationRole.VALUATION:
-                traces.append(
-                    self._context.guard(
-                        SimulationStage.VALUATION,
-                        occurrence.evaluation_time,
-                        lambda occurrence=occurrence: self._valuation.dispatch_valuation(
-                            occurrence
-                        ),
-                        family=SimulationFailureFamily.VALUATION,
-                        owner=self._context.frozen_run.valuation,
-                    )
-                )
-            elif occurrence.role is OperationRole.MONITORING:
-                traces.append(
-                    self._context.guard(
-                        SimulationStage.MONITORING,
-                        occurrence.evaluation_time,
-                        lambda occurrence=occurrence: self._valuation.dispatch_monitoring(
-                            occurrence
-                        ),
-                        family=SimulationFailureFamily.VALUATION,
-                        owner=self._context.frozen_run.monitoring_agenda,
-                    )
-                )
-            else:  # OperationRole is closed, but keep malformed values fail-closed.
-                raise ValueError(f"unsupported operation role: {occurrence.role!r}")
+    def _dispatch_static(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
+        if occurrence.role is OperationRole.STRATEGY_CALLBACK:
+            return self._callback.dispatch(occurrence)
+        # Record `148`: valuation happens at the execution instant and monitoring right after
+        # each commit, inside the due path. A static occurrence of any other role is a
+        # malformed agenda, not a phase to dispatch to.
+        raise ValueError(f"unsupported operation role: {occurrence.role!r}")
 
+    def _dispatch_due(self, due: DueExecutionEnvelope) -> DueExecutionTrace:
+        return self._context.guard(  # type: ignore[return-value]
+            SimulationStage.DUE_SNAPSHOT,
+            due.due_time,
+            lambda: self._dispatch_pending(due),
+            family=SimulationFailureFamily.DATA,
+            owner=self._context.frozen_run.execution_input,
+        )
+
+    def _finish(self, traces: tuple[object, ...]) -> SimulationResult:
         if self._context.state.current.pending_accepted_intent is not None:
             raise RuntimeError("simulation finalized with a pending accepted intent")
         if self._context.frozen_run.end is None:
@@ -271,8 +263,6 @@ class SimulationFlow:
         finalization = FinalizationEvidence(
             run_identity=self._context.frozen_run.identity,
             strategy_agenda=self._context.layer.agenda,
-            valuation_agenda=self._context.frozen_run.valuation_agenda,
-            monitoring_agenda=self._context.frozen_run.monitoring_agenda,
             root_version=self._context.state.current.version,
             cutoff=self._context.frozen_run.end,
             account=None if account is None else account.snapshot,
@@ -284,7 +274,7 @@ class SimulationFlow:
             family=SimulationFailureFamily.FINALIZATION,
             owner=finalization,
         )
-        return SimulationResult(tuple(traces), root)
+        return SimulationResult(tuple(traces), root)  # type: ignore[arg-type]
 
     def _pending_due(self) -> DueExecutionEnvelope | None:
         pending = self._context.state.current.pending_accepted_intent
@@ -294,7 +284,7 @@ class SimulationFlow:
             raise TypeError("run state pending must be an AcceptedIntent or PendingValuation")
         return DueExecutionEnvelope(pending.target.target_at, pending.pending_id)
 
-    def _dispatch_due(self, due: DueExecutionEnvelope) -> DueExecutionTrace:
+    def _dispatch_pending(self, due: DueExecutionEnvelope) -> DueExecutionTrace:
         pending = self._context.state.current.pending_accepted_intent
         if (
             not isinstance(pending, (AcceptedIntent, PendingValuation))

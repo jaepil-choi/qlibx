@@ -34,32 +34,21 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
+    DataModelEntry,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MaterializationSpec,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    Rebalance,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
     component_ref,
-    materialize,
     preflight_run,
-    register_agenda,
     register_component,
     register_data_model,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     run,
 )
 
@@ -97,23 +86,6 @@ def _sessions(observation_path: Path) -> list[date]:
     finally:
         con.close()
     return [row[0] for row in rows]
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_003 real KRX trading sessions",
-    )
 
 
 def _write_components() -> dict[str, Path]:
@@ -425,15 +397,22 @@ def main() -> None:
     )
 
     register_data_model(PROJECT, "showcase-model", paths["model"], "ReversalModel")
-    materialization = materialize(
-        PROJECT,
-        "showcase-model",
-        MaterializationSpec.of("reversal_score", value_fields=("score",)),
-        evaluation_times=tuple(
-            datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
-        ),
+    # The score is a datamodel RUN (record 148): the same sessions/wall-time shape as the
+    # strategy run below, no venue and no account, one registered dataset at the end.
+    score_definition = RunDefinition(
+        run_id="showcase-score",
+        strategies=(),
         instruments=tuple(universe),
+        datamodels=(DataModelEntry("showcase-model", "reversal_score", ("score",)),),
+        timezone=VENUE,
+        at=time(16, 0),
+        sessions=tuple(score_days),
+        start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
     )
+    materialization = run(
+        PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
+    ).result()
 
     strategy_ref = component_ref(
         "showcase-strategy", ComponentKind.STRATEGY_MODEL, paths["strategy"], "ReversalLongShort"
@@ -447,33 +426,13 @@ def main() -> None:
     for reference in (strategy_ref, exchange_ref, constraint_ref):
         register_component(PROJECT, reference)
 
-    strategy_agenda = _agenda(
-        "showcase-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    valuation_agenda = _agenda(
-        "showcase-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "showcase-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(PROJECT, agenda)
-
-    strategy_config = StrategyConfig(
-        strategy_ref, "showcase-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig(
-        "showcase-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("showcase-monitoring", OperationRole.MONITORING)
-    register_strategy_config(PROJECT, strategy_config)
 
     definition = RunDefinition(
         run_id="show003",
         strategies=(StrategyEntry("showcase-strategy", ("showcase-constraint",)),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 30),
         exchange="showcase-exchange",
         execution_input_id="krx-daily",
         start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
@@ -511,7 +470,7 @@ def main() -> None:
         score_rows = con.execute(
             f"""
             SELECT available_at, instrument, score
-            FROM read_parquet('{materialization.output_path.as_posix()}')
+            FROM read_parquet('{materialization.output_path.as_posix()}/*.parquet')
             ORDER BY available_at, instrument
             LIMIT 12
             """
@@ -556,10 +515,8 @@ def main() -> None:
             "trading_sessions": fixture["sessions"],
             "first_session": fixture["first_session"],
             "last_session": fixture["last_session"],
-            "materialized_score_rows": sum(
-                invocation.row_count for invocation in materialization.invocations
-            ),
-            "materialized_evaluations": len(materialization.invocations),
+            "materialized_score_rows": materialization.rows,
+            "materialized_evaluations": len(materialization.occurrences),
             "strategy_callbacks": len(callback_days),
             "occurrences_dispatched": len(result.occurrences),
             "dealt_fills": len(dealt),

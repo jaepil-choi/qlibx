@@ -16,9 +16,10 @@ from collections.abc import Mapping
 FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.monitoring", "vqapr.weight")
 """The tables the package records on a strategy's behalf, which nobody declares.
 
-The first three every strategy writes. `vqapr.monitoring` is written only by a run that declared
-a constraint and a monitoring agenda -- a run with neither has no finding to record -- but it is
-the package's table either way, so it is listed here rather than mistaken for one an author formed.
+The first three every strategy writes. `vqapr.monitoring` is written only by a strategy that
+declared a constraint -- judged right after each commit (record `148`); one without has no
+finding to record -- but it is the package's table either way, so it is listed here rather
+than mistaken for one an author formed.
 """
 
 

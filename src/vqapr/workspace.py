@@ -35,8 +35,7 @@ from vqapr.domain.identifiers import (
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition, StrategyConfig
-from vqapr.runtime.agendas import OperationAgenda, OperationRole
+from vqapr.flow.run import RunDefinition
 from vqapr.workspace_document import read_workspace, write_workspace
 
 WORKSPACE_DIRECTORY = ".vqapr"
@@ -120,9 +119,6 @@ WRITE_STAGE = "workspace.write"
 EXECUTION_REGISTER_STAGE = "workspace.execution_input.register"
 EXECUTION_LOOKUP_STAGE = "workspace.execution_input.lookup"
 COMPONENT_LOOKUP_STAGE = "workspace.component.lookup"
-AGENDA_REGISTER_STAGE = "workspace.agenda.register"
-AGENDA_LOOKUP_STAGE = "workspace.agenda.lookup"
-STRATEGY_REGISTER_STAGE = "workspace.strategy_config.register"
 RUN_REGISTER_STAGE = "workspace.run.register"
 REMOVE_STAGE = "workspace.remove"
 _CONSTRUCTION_TOKEN = object()
@@ -140,8 +136,6 @@ class _State(NamedTuple):
     sources: dict[SourceId, SourceSpec]
     execution_inputs: dict[ExecutionInputId, ExecutionInputRegistration]
     components: dict[ComponentId, ComponentRef]
-    agendas: dict[str, OperationAgenda]
-    strategy_configs: dict[str, StrategyConfig]
     runs: dict[str, RunDefinition]
     """Registered runs (record `139`): the reusable configuration `vqapr run <run-id>` executes."""
 
@@ -154,13 +148,11 @@ class Workspace:
     """
 
     __slots__ = (
-        "_agendas",
         "_components",
         "_datasets",
         "_execution_inputs",
         "_runs",
         "_sources",
-        "_strategy_configs",
         "project_root",
     )
 
@@ -171,8 +163,6 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec] | None = None,
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration] | None = None,
         components: Mapping[ComponentId, ComponentRef] | None = None,
-        agendas: Mapping[str, OperationAgenda] | None = None,
-        strategy_configs: Mapping[str, StrategyConfig] | None = None,
         runs: Mapping[str, RunDefinition] | None = None,
         *,
         _token: object | None = None,
@@ -190,10 +180,6 @@ class Workspace:
         self._components = {
             key: value for key, value in (components or {}).items()
         }
-        self._agendas = dict(agendas or {})
-        self._strategy_configs = {
-            key: value for key, value in (strategy_configs or {}).items()
-        }
         # A `RunDefinition` is frozen and holds only ids and values, so it needs no detaching.
         self._runs = dict(runs or {})
 
@@ -205,8 +191,6 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
-        agendas: Mapping[str, OperationAgenda],
-        strategy_configs: Mapping[str, StrategyConfig],
         runs: Mapping[str, RunDefinition],
     ) -> Workspace:
         return cls(
@@ -215,8 +199,6 @@ class Workspace:
             sources,
             execution_inputs,
             components,
-            agendas,
-            strategy_configs,
             runs,
             _token=_CONSTRUCTION_TOKEN,
         )
@@ -228,16 +210,16 @@ class Workspace:
     @classmethod
     def create(cls, project_root: str | Path) -> Workspace:
         """새 project workspace를 만들거나 이미 있으면 그대로 연다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
         if candidate.path.exists():
             return cls.open(project_root)
-        candidate._write({}, {}, {}, {}, {}, {}, {})
+        candidate._write({}, {}, {}, {}, {})
         return candidate
 
     @classmethod
     def open(cls, project_root: str | Path) -> Workspace:
         """기존 workspace 전체를 읽는다. 없거나 손상됐으면 일부 상태를 반환하지 않는다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
         return cls._from_state(project_root, *candidate._read())
 
     @classmethod
@@ -252,7 +234,7 @@ class Workspace:
         item therefore leaves the workspace exactly as it found it; a valid document costs one
         lock, one read and one write however many items it declares.
         """
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
         return Transaction(cls._from_state(project_root, *candidate._read_or_empty()))
 
     def _state(self) -> _State:
@@ -261,8 +243,6 @@ class Workspace:
             self._sources,
             self._execution_inputs,
             self._components,
-            self._agendas,
-            self._strategy_configs,
             self._runs,
         )
 
@@ -274,7 +254,7 @@ class Workspace:
         `workspace.open.missing` exists to avoid.
         """
         if not self.path.exists():
-            return _State({}, {}, {}, {}, {}, {}, {})
+            return _State({}, {}, {}, {}, {})
         return self._read()
 
     @property
@@ -299,17 +279,6 @@ class Workspace:
     def components(self) -> tuple[ComponentRef, ...]:
         """component_id 순으로 정렬된 detached project-local component references."""
         return tuple(self._components[key] for key in sorted(self._components))
-
-    @property
-    def agendas(self) -> tuple[OperationAgenda, ...]:
-        return tuple(self._agendas[key] for key in sorted(self._agendas))
-
-    @property
-    def strategy_configs(self) -> tuple[StrategyConfig, ...]:
-        return tuple(
-            self._strategy_configs[key]
-            for key in sorted(self._strategy_configs)
-        )
 
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
         """등록된 선언 하나를 조회한다."""
@@ -497,46 +466,6 @@ class Workspace:
                 retry="register the component, then retry",
             ) from error
 
-    def agenda(self, raw_agenda_id: str) -> OperationAgenda:
-        if not isinstance(raw_agenda_id, str) or not raw_agenda_id:
-            raise _workspace_error(
-                stage=AGENDA_LOOKUP_STAGE,
-                code=f"{AGENDA_LOOKUP_STAGE}.invalid",
-                requirement="agenda lookup requires a valid agenda_id",
-                observed=repr(raw_agenda_id),
-                fix="pass a non-empty agenda_id string to Workspace.agenda()",
-                explain=ExplainTopic.DECLARATION_SHAPE,
-                retry="use a valid agenda_id, then retry",
-            )
-        try:
-            return self._agendas[raw_agenda_id]
-        except KeyError as error:
-            raise _workspace_error(
-                stage=AGENDA_LOOKUP_STAGE,
-                code=f"{AGENDA_LOOKUP_STAGE}.missing",
-                requirement=f"agenda {raw_agenda_id!r} must be registered in this workspace",
-                observed=f"registered agendas: {', '.join(sorted(self._agendas)) or '(none)'}",
-                fix=f"register agenda {raw_agenda_id!r}, or use one of the ids listed above",
-                explain=ExplainTopic.WORKSPACE_STATE,
-                retry="register the agenda, then retry",
-            ) from error
-
-    def strategy_config(self, raw_component_id: str) -> StrategyConfig:
-        """The binding of one strategy component to its callback agenda, by the component's id.
-
-        Keyed by the strategy since record `138` (`docs/issues/040`): an agenda is a cadence and
-        cadences are shared, so several strategies may name one agenda and each is found by its
-        own id. Until then the workspace keyed this by `agenda_id`, which made an agenda drive at
-        most one strategy and refused the second by naming the agenda.
-        """
-        return self._config_lookup(
-            raw_component_id,
-            self._strategy_configs,
-            STRATEGY_REGISTER_STAGE,
-            "strategy config",
-            noun="component_id",
-        )
-
     @property
     def run_definitions(self) -> tuple[RunDefinition, ...]:
         """Every registered run, ordered by run id."""
@@ -597,28 +526,13 @@ class Workspace:
             self._commit(merged, changed)
             return changed
 
-    def register_agenda(self, agenda: OperationAgenda) -> bool:
-        if not isinstance(agenda, OperationAgenda):
-            raise TypeError("agenda must be an OperationAgenda")
-        with self._exclusive():
-            merged, changed = self._merge_agenda(self._read(), agenda)
-            self._commit(merged, changed)
-            return changed
-
-    def register_strategy_config(self, config: StrategyConfig) -> bool:
-        if not isinstance(config, StrategyConfig):
-            raise TypeError("config must be a StrategyConfig")
-        with self._exclusive():
-            merged, changed = self._merge_strategy_config(self._read(), config)
-            self._commit(merged, changed)
-            return changed
-
     def register_run(self, definition: RunDefinition) -> bool:
-        """Register a run: the configuration every strategy in it shares, and which strategies.
+        """Register a run: the configuration every model in it shares, and which models.
 
         Every id the definition names must already be registered -- components of the right
-        kind, the execution input, the agendas under the roles the run needs, and a binding for
-        each strategy -- so a registered run is one `vqapr run <run-id>` can freeze.
+        kind, the execution input, the dataset its sessions come from -- so a registered run is
+        one `vqapr run <run-id>` can freeze. The output dataset of a datamodel run is NOT
+        checked here: it exists once the run has happened, and the run stays registered.
         """
         if not isinstance(definition, RunDefinition):
             raise TypeError("definition must be a RunDefinition")
@@ -851,33 +765,6 @@ class Workspace:
             _ = force
         return state._replace(components={**state.components, key: ref}), True
 
-    def _merge_agenda(self, state: _State, agenda: OperationAgenda) -> tuple[_State, bool]:
-        return self._merge_declaration(
-            state, "agendas", agenda.agenda_id, agenda, AGENDA_REGISTER_STAGE
-        )
-
-    def _merge_strategy_config(self, state: _State, config: StrategyConfig) -> tuple[_State, bool]:
-        self._require_agenda(
-            state.agendas, config.agenda_id, config.agenda_role, STRATEGY_REGISTER_STAGE
-        )
-        if state.components.get(config.component.component_id) != config.component:
-            raise self._reference_error(
-                STRATEGY_REGISTER_STAGE,
-                "strategy component must be registered",
-                fix="register the strategy's component before registering the StrategyConfig",
-            )
-        # Keyed by the strategy (record `138`, `docs/issues/040`): an agenda is a cadence and
-        # cadences are shared. Two strategies naming one agenda are two bindings; one strategy
-        # naming two agendas is the conflict, and the refusal names the strategy.
-        return self._merge_declaration(
-            state,
-            "strategy_configs",
-            str(config.component.component_id),
-            config,
-            STRATEGY_REGISTER_STAGE,
-            noun="component_id",
-        )
-
     def _merge_run(self, state: _State, definition: RunDefinition) -> tuple[_State, bool]:
         """Fold one run into the document, refusing any id it names that is not registered."""
         self._require_run_references(state, definition)
@@ -908,18 +795,10 @@ class Workspace:
 
         for entry in definition.strategies:
             component(entry.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
-            if entry.component_id not in state.strategy_configs:
-                raise self._reference_error(
-                    RUN_REGISTER_STAGE,
-                    f"run {definition.run_id!r} names strategy {entry.component_id!r}, which "
-                    "must be bound to an agenda by a registered strategy config",
-                    fix=(
-                        f"register a strategy config for {entry.component_id!r} naming the "
-                        "agenda that drives it, then register the run"
-                    ),
-                )
             for name in entry.constraints:
                 component(name, ComponentKind.CONSTRAINT, "constraint")
+        for entry in definition.datamodels:
+            component(entry.component_id, ComponentKind.DATA_MODEL, "datamodel")
         if definition.exchange is not None:
             component(definition.exchange, ComponentKind.EXCHANGE, "exchange")
         if (
@@ -932,18 +811,15 @@ class Workspace:
                 f"{definition.execution_input_id!r}, which must be registered",
                 fix=f"register execution input {definition.execution_input_id!r} first",
             )
-        self._require_agenda(
-            state.agendas,
-            definition.valuation.agenda_id,
-            definition.valuation.agenda_role,
-            RUN_REGISTER_STAGE,
-        )
-        if definition.monitoring is not None:
-            self._require_agenda(
-                state.agendas,
-                definition.monitoring.agenda_id,
-                definition.monitoring.agenda_role,
+        if (
+            definition.sessions_from is not None
+            and dataset_id(definition.sessions_from) not in state.datasets
+        ):
+            raise self._reference_error(
                 RUN_REGISTER_STAGE,
+                f"run {definition.run_id!r} takes its sessions from dataset "
+                f"{definition.sessions_from!r}, which must be registered",
+                fix=f"register dataset {definition.sessions_from!r} first, or list `sessions`",
             )
 
     @staticmethod
@@ -954,7 +830,7 @@ class Workspace:
         value: object,
         stage: str,
         *,
-        noun: str = "agenda_id",
+        noun: str = "run_id",
     ) -> tuple[_State, bool]:
         """One keyed declaration folded into its section: idempotent, conflict, or new.
 
@@ -1108,12 +984,7 @@ class Workspace:
                 )
             # Looked up after the reference check, so an unsupported kind still gets the typed
             # refusal `_references_in` raises rather than a bare `KeyError` from this dict.
-            position = {
-                "component": 3,
-                "agenda": 4,
-                "strategy_config": 5,
-                "run": 6,
-            }[kind]
+            position = {"component": 3, "run": 4}[kind]
             declarations = dict(state[position])
             if identity not in declarations:
                 self._replace_state(*state)
@@ -1155,35 +1026,17 @@ class Workspace:
         land between them -- and because `_decode` validates forward references, the result was a
         workspace `Workspace.open()` refuses rather than merely a stale answer.
         """
-        components, agendas, strategy_configs = state[3], state[4], state[5]
-        runs: Mapping[str, RunDefinition] = state[6] if len(state) > 6 else {}
+        components = state[3]
+        runs: Mapping[str, RunDefinition] = state[4] if len(state) > 4 else {}
         blockers: list[str] = []
         if kind == "component":
-            for config_id, config in strategy_configs.items():
-                if str(config.component.component_id) == identity:
-                    blockers.append(f"strategy config {config_id!r}")
             for run_id, definition in runs.items():
                 named = {definition.exchange}
                 named.update(entry.component_id for entry in definition.strategies)
                 named.update(name for entry in definition.strategies for name in entry.constraints)
+                named.update(entry.component_id for entry in definition.datamodels)
                 if identity in named:
                     blockers.append(f"run {run_id!r}")
-        elif kind == "strategy_config":
-            # A run names a strategy, and a strategy runs under its registered binding: a binding
-            # a run still names is not removable (record `139`).
-            for run_id, definition in runs.items():
-                if any(entry.component_id == identity for entry in definition.strategies):
-                    blockers.append(f"run {run_id!r}")
-        elif kind == "agenda":
-            for run_id, definition in runs.items():
-                monitoring = definition.monitoring
-                if definition.valuation.agenda_id == identity or (
-                    monitoring is not None and monitoring.agenda_id == identity
-                ):
-                    blockers.append(f"run {run_id!r}")
-            for config_id, config in strategy_configs.items():
-                if config.agenda_id == identity:
-                    blockers.append(f"strategy config {config_id!r}")
         elif kind == "dataset":
             # A dataset is named by a component's declared requirements rather than by the
             # workspace document, so nothing here can claim to know every reader of one. Said
@@ -1191,14 +1044,14 @@ class Workspace:
             raise _workspace_error(
                 stage=REMOVE_STAGE,
                 code=f"{REMOVE_STAGE}.unsupported_kind",
-                requirement="removable kinds are component, agenda, and their configs",
+                requirement="removable kinds are component and run",
                 observed=repr(kind),
                 fix=(
                     "a dataset's readers are declared inside component requirements, which this "
                     "workspace does not index; rebuild the workspace instead of removing one"
                 ),
                 explain=ExplainTopic.WORKSPACE_STATE,
-                retry="remove a component, agenda, or config instead",
+                retry="remove a component or a run instead",
             )
         elif kind == "run":
             # A run is the top of the document: nothing names a run, and a run's RECORDS are
@@ -1210,13 +1063,11 @@ class Workspace:
                 code=f"{REMOVE_STAGE}.unsupported_kind",
                 requirement="kind must be one this workspace stores",
                 observed=repr(kind),
-                fix="use one of: component, agenda, strategy_config, run",
+                fix="use one of: component, run",
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry="retry with a kind this workspace stores",
             )
         if kind == "component" and identity not in components:
-            return ()
-        if kind == "agenda" and identity not in agendas:
             return ()
         return tuple(sorted(blockers))
 
@@ -1227,7 +1078,7 @@ class Workspace:
         stage: str,
         label: str,
         *,
-        noun: str = "agenda_id",
+        noun: str = "run_id",
     ) -> object:
         if not isinstance(key, str) or not key:
             raise _workspace_error(
@@ -1252,35 +1103,6 @@ class Workspace:
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry=f"register the {label}, then retry",
             ) from error
-
-    def _require_agenda(
-        self,
-        agendas: Mapping[str, OperationAgenda],
-        agenda_id: str,
-        role: OperationRole,
-        stage: str,
-    ) -> None:
-        agenda = agendas.get(agenda_id)
-        if agenda is None or agenda.role is not role:
-            # Two different repairs hide behind one condition: the agenda may be absent, or it
-            # may exist under a role this configuration cannot use. Saying which one it is costs
-            # nothing here -- both values are parameters -- and saves the reader from checking.
-            missing = agenda is None
-            wanted = role.value.lower()
-            raise self._reference_error(
-                stage,
-                "declared agenda must be registered with the matching role",
-                fix=(
-                    f"register agenda {agenda_id!r} with role {wanted} before registering this "
-                    "configuration"
-                    if missing
-                    else (
-                        f"agenda {agenda_id!r} is registered as "
-                        f"{agenda.role.value.lower()}; register it as {wanted}, or point this "
-                        "configuration at an agenda that already has that role"
-                    )
-                ),
-            )
 
     def _reference_error(self, stage: str, requirement: str, *, fix: str) -> VqaprError:
         return _workspace_error(
@@ -1400,8 +1222,6 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
-        agendas: Mapping[str, OperationAgenda],
-        strategy_configs: Mapping[str, StrategyConfig],
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self._datasets = {key: value for key, value in datasets.items()}
@@ -1410,10 +1230,6 @@ class Workspace:
             key: value for key, value in execution_inputs.items()
         }
         self._components = {key: value for key, value in components.items()}
-        self._agendas = dict(agendas)
-        self._strategy_configs = {
-            key: value for key, value in strategy_configs.items()
-        }
         self._runs = dict(runs or {})
 
     def _write(
@@ -1422,8 +1238,6 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
-        agendas: Mapping[str, OperationAgenda],
-        strategy_configs: Mapping[str, StrategyConfig],
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -1432,8 +1246,6 @@ class Workspace:
             sources,
             execution_inputs,
             components,
-            agendas,
-            strategy_configs,
             runs or {},
         )
         try:
@@ -1531,18 +1343,6 @@ class Transaction:
             raise TypeError("ref must be a ComponentRef")
         ws = self._staging
         return self._stage(lambda state: ws._merge_component(state, ref))
-
-    def register_agenda(self, agenda: OperationAgenda) -> bool:
-        if not isinstance(agenda, OperationAgenda):
-            raise TypeError("agenda must be an OperationAgenda")
-        ws = self._staging
-        return self._stage(lambda state: ws._merge_agenda(state, agenda))
-
-    def register_strategy_config(self, config: StrategyConfig) -> bool:
-        if not isinstance(config, StrategyConfig):
-            raise TypeError("config must be a StrategyConfig")
-        ws = self._staging
-        return self._stage(lambda state: ws._merge_strategy_config(state, config))
 
     def register_run(self, definition: RunDefinition) -> bool:
         if not isinstance(definition, RunDefinition):

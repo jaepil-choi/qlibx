@@ -128,11 +128,41 @@ run directory holds `run.json`, which every process running a strategy of that r
 identically before it starts; two writers writing the same bytes need no lock, and a run whose
 configuration changed under an old id is refused naming both digests. Nothing above changes:
 no index file, chunked appends, parquet chunks carrying their types. `record.json` remains the
-materialization record and the shape of a run written before `139`; both are still read.
+shape of a run written before `139`, and is still read.
 
 The directory name `<strategy-id>@<fp8>` is the first eight hex characters of the strategy's
 registered fingerprint, which folds the file bytes and the config: a tweak is a new directory
 beside the old one, and counting them is architecture §17.4's answer.
+
+## A datamodel run's records (record `148`)
+
+```
+<store.root>/runs/
+  <run-id>/
+    run.json                       configuration, as above; `datamodels` lists the members
+    datamodels/
+      <datamodel-id>@<fp8>/
+        datamodel.json             one datamodel's facts, written LAST -- the completion mark
+        .running                   its liveness lock while it computes
+<project>/.vqapr/materialized/
+  <dataset-id>/
+    000000.parquet                 one chunk per session, moved into place as the session completes
+    000001.parquet
+```
+
+A datamodel run holds datamodels the way a strategy run holds strategies (design §4; a run holds
+one kind, never both). The member directory is the same unit of writing, lock and `--force`
+replacement; what differs is where the rows go. A datamodel's rows ARE a dataset -- the one its
+run declared under `datamodels.<id>.dataset_id` -- so they land under `.vqapr/materialized/`,
+one complete parquet chunk per session, and the directory registers as the dataset's source once
+the last session has completed, through the registration path every other dataset takes. There
+are no `tables/` under a datamodel's record directory, and `datamodel.json` carries one line per
+session (evaluation time, output `available_at`, row count) rather than the per-instrument
+lineage `docs/issues/059` measured at 478 MB. A run killed midway leaves the chunks that landed
+and no registration; a re-run starts the directory clean.
+
+`materialize()`, the spec file it read and the `materialization` record kind are gone: a
+datamodel is a registered run, judged, frozen and executed by the same verbs.
 
 ## What this constrains in Step 6
 

@@ -2,9 +2,10 @@
 
 Campaign Step 5's regression, in the read-path campaign's own shape (lane C): one table registered
 twice -- `instrument_instant`, read with `read(alias, field)` as a panel window, and `rows`, read
-with `rows(alias)` as observations -- two models with the same arithmetic, two materializations,
-and a bidirectional anti-join of **zero rows**. Checked before any timing is read: a panel that
-was faster and different would be a different dataset, not a faster one.
+with `rows(alias)` as observations -- two models with the same arithmetic, one datamodel run
+computing both (record `148`), and a bidirectional anti-join of **zero rows**. Checked before any
+timing is read: a panel that was faster and different would be a different dataset, not a faster
+one.
 
 The table is balanced (every name publishes at every instant), because on a balanced table the
 two lookback meanings coincide -- the last N table rows and each name's own last N instants are the
@@ -14,7 +15,7 @@ is what makes the two registrations comparable here.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -22,12 +23,14 @@ import duckdb
 
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.flow.materialize import MaterializationSpec, materialize
-from vqapr.public import register_data_model, register_dataset
+from vqapr.flow.datamodel import DataModelResult
+from vqapr.flow.run import DataModelEntry, RunDefinition
+from vqapr.public import preflight_run, register_data_model, register_dataset, run
+from vqapr.workspace import WORKSPACE_DIRECTORY
 
 KST = ZoneInfo("Asia/Seoul")
 
-_MODELS = '''
+_MODELS = """
 from vqapr import authoring as va
 
 
@@ -37,11 +40,16 @@ def _score(values):
 
 class ReversalOnPanel(va.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(dataset_id="px_panel", fields=("close",), lookback=va.RowsLookback(rows=3))}
+        return {"prices": va.DatasetInput(
+            dataset_id="px_panel", fields=("close",), lookback=va.RowsLookback(rows=3)
+        )}
 
     def compute(self, context):
         window = context.read("prices", "close")
-        closes = {name: [float(v) for v in window.values[name] if v is not None] for name in window.instruments}
+        closes = {
+            name: [float(v) for v in window.values[name] if v is not None]
+            for name in window.instruments
+        }
         return tuple(
             {"instrument": name, "score": _score(values)}
             for name, values in sorted(closes.items())
@@ -51,7 +59,9 @@ class ReversalOnPanel(va.DataModel):
 
 class ReversalOnRows(va.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(dataset_id="px_rows", fields=("close",), lookback=va.InstantsLookback(instants=3))}
+        return {"prices": va.DatasetInput(
+            dataset_id="px_rows", fields=("close",), lookback=va.InstantsLookback(instants=3)
+        )}
 
     def compute(self, context):
         closes = {}
@@ -63,7 +73,7 @@ class ReversalOnRows(va.DataModel):
             for name, values in sorted(closes.items())
             if len(values) == 3
         )
-'''
+"""
 
 
 def _balanced_parquet(root: Path) -> Path:
@@ -96,6 +106,14 @@ def _register(root: Path, parquet: Path, dataset_id: str, grain: str) -> None:
     )
 
 
+def _chunks(result: DataModelResult) -> str:
+    """The duckdb expression over every chunk a datamodel run wrote: its output is a directory."""
+    return (
+        "SELECT available_at, instrument, score "
+        f"FROM read_parquet('{result.output_path.as_posix()}/*.parquet')"
+    )
+
+
 def test_a_panel_read_and_a_rows_read_of_one_table_publish_byte_identical_datasets(
     tmp_path: Path,
 ) -> None:
@@ -106,29 +124,36 @@ def test_a_panel_read_and_a_rows_read_of_one_table_publish_byte_identical_datase
     models.write_text(_MODELS, encoding="utf-8")
     register_data_model(tmp_path, "on-panel", models, "ReversalOnPanel")
     register_data_model(tmp_path, "on-rows", models, "ReversalOnRows")
-    times = tuple(datetime(2024, 3, day, 16, tzinfo=KST) for day in (4, 6, 8))
-
-    panel = materialize(
-        tmp_path,
-        "on-panel",
-        MaterializationSpec.of("reversal_panel", value_fields=("score",)),
-        evaluation_times=times,
+    # Three sessions at 16:00, listed literally rather than taken from the table's eight days, so
+    # each model sees a full 3-row window on every session it is called.
+    definition = RunDefinition(
+        run_id="agree",
+        strategies=(),
+        datamodels=(
+            DataModelEntry("on-panel", "reversal_panel", ("score",)),
+            DataModelEntry("on-rows", "reversal_rows", ("score",)),
+        ),
         instruments=("A", "B", "C"),
-    )
-    rows = materialize(
-        tmp_path,
-        "on-rows",
-        MaterializationSpec.of("reversal_rows", value_fields=("score",)),
-        evaluation_times=times,
-        instruments=("A", "B", "C"),
+        timezone="Asia/Seoul",
+        at=time(16, 0),
+        sessions=tuple(date(2024, 3, day) for day in (4, 6, 8)),
+        start=datetime(2024, 3, 4, tzinfo=KST),
+        end=datetime(2024, 3, 9, tzinfo=KST),
     )
 
+    outcome = run(
+        tmp_path, preflight_run(tmp_path, definition), store_root=tmp_path / WORKSPACE_DIRECTORY
+    )
+
+    panel, rows = outcome.result("on-panel"), outcome.result("on-rows")
+    assert isinstance(panel, DataModelResult) and isinstance(rows, DataModelResult)
     con = duckdb.connect()
     try:
-        left = f"SELECT available_at, instrument, score FROM '{panel.output_path.as_posix()}'"
-        right = f"SELECT available_at, instrument, score FROM '{rows.output_path.as_posix()}'"
+        left, right = _chunks(panel), _chunks(rows)
         assert con.execute(f"SELECT count(*) FROM (({left}) EXCEPT ({right}))").fetchone()[0] == 0
         assert con.execute(f"SELECT count(*) FROM (({right}) EXCEPT ({left}))").fetchone()[0] == 0
-        assert con.execute(f"SELECT count(*) FROM ({left})").fetchone()[0] == 9, "three names, three instants"
+        assert con.execute(f"SELECT count(*) FROM ({left})").fetchone()[0] == 9, (
+            "three names, three instants"
+        )
     finally:
         con.close()

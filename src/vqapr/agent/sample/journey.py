@@ -24,24 +24,14 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
-    Workspace,
     preflight_run,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
     register_run,
-    register_strategy_config,
     register_strategy_model,
     run,
 )
@@ -53,17 +43,12 @@ CALLBACK = time(8, 0)
 """The decision is made before the session opens, reading only closes already published."""
 CLOSE = time(15, 30)
 """The fill happens at the close, after the decision, never at the same instant."""
-VALUATION = time(16, 0)
-MONITORING = time(16, 30)
 
 DATASET_ID = "sample-prices"
 RUN_ID = "sample-run"
 EXECUTION_ID = "sample-execution"
 STRATEGY_ID = "sample-reversal-5d"
 EXCHANGE_ID = "sample-exchange"
-STRATEGY_AGENDA = "sample-callback"
-VALUATION_AGENDA = "sample-valuation"
-MONITORING_AGENDA = "sample-monitoring"
 
 STRATEGY_SOURCE = Path(__file__).with_name("reversal_5d.py")
 EXCHANGE_SOURCE = Path(__file__).with_name("exchange.py")
@@ -90,38 +75,6 @@ class SampleResult:
 
 def _sessions(panel: SamplePanel) -> list[date]:
     return [date(int(v[:4]), int(v[4:6]), int(v[6:8])) for v in panel.sessions]
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="vqapr sample panel sessions",
-    )
-
-
-def _valuation() -> ValuationConfig:
-    return ValuationConfig(
-        VALUATION_AGENDA,
-        OperationRole.VALUATION,
-    )
-
-
-def _strategy(project_root: Path) -> StrategyConfig:
-    return StrategyConfig(
-        component=Workspace.open(project_root).component(STRATEGY_ID),
-        agenda_id=STRATEGY_AGENDA,
-        agenda_role=OperationRole.STRATEGY_CALLBACK,
-    )
 
 
 def install(project_root: Path) -> SamplePanel:
@@ -172,15 +125,6 @@ def install(project_root: Path) -> SamplePanel:
         ),
     )
 
-    sessions = _sessions(panel)
-    for agenda_id, role, at in (
-        (STRATEGY_AGENDA, OperationRole.STRATEGY_CALLBACK, CALLBACK),
-        (VALUATION_AGENDA, OperationRole.VALUATION, VALUATION),
-        (MONITORING_AGENDA, OperationRole.MONITORING, MONITORING),
-    ):
-        register_agenda(project_root, _agenda(agenda_id, role, at, sessions))
-
-    register_strategy_config(project_root, _strategy(project_root))
     register_run(project_root, definition(panel))
     return panel
 
@@ -191,8 +135,11 @@ def definition(panel: SamplePanel, run_id: str = RUN_ID) -> RunDefinition:
     return RunDefinition(
         run_id=run_id,
         strategies=(StrategyEntry(STRATEGY_ID),),
-        valuation=_valuation(),
-        monitoring=MonitoringPolicy(MONITORING_AGENDA, OperationRole.MONITORING),
+        # Every session the panel has, at the callback time; the book is valued at the close it
+        # fills at and monitored right after (record 148).
+        sessions=tuple(sessions),
+        timezone=VENUE,
+        at=CALLBACK,
         exchange=EXCHANGE_ID,
         execution_input_id=EXECUTION_ID,
         start=datetime.fromisoformat(f"{sessions[0].isoformat()}T00:00:00{OFFSET}"),

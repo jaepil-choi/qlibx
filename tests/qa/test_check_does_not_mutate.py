@@ -14,25 +14,25 @@ tries to write inside `.vqapr/` itself?
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry, ValuationConfig
+from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -163,57 +163,15 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         )
     )
 
-    agenda = OperationAgenda.from_occurrences(
-        agenda_id="daily",
-        role=OperationRole.STRATEGY_CALLBACK,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                "o1",
-                OperationRole.STRATEGY_CALLBACK,
-                LocalInstantDeclaration(
-                    datetime(2024, 1, 2).date(),
-                    datetime(2024, 1, 2, 9, 0).time(),
-                    "Asia/Seoul",
-                    0,
-                    "+09:00",
-                ),
-            ),
-        ),
-        provenance="qa fixture",
-    )
-    Workspace.open(root).register_agenda(agenda)
-    val_agenda = OperationAgenda.from_occurrences(
-        agenda_id="daily-val",
-        role=OperationRole.VALUATION,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                "v1",
-                OperationRole.VALUATION,
-                LocalInstantDeclaration(
-                    datetime(2024, 1, 2).date(),
-                    datetime(2024, 1, 2, 9, 0).time(),
-                    "Asia/Seoul",
-                    0,
-                    "+09:00",
-                ),
-            ),
-        ),
-        provenance="qa fixture",
-    )
-    Workspace.open(root).register_agenda(val_agenda)
-    Workspace.open(root).register_strategy_config(
-        StrategyConfig(
-            Workspace.open(root).component("evil"), "daily", OperationRole.STRATEGY_CALLBACK
-        )
-    )
-
+    # One session at 09:00 Seoul, decided before the 15:30 fill; the run declares it directly
+    # (record `148`), so nothing about the agenda is registered separately.
     Workspace.open(root).register_run(
         RunDefinition(
             run_id="probe",
             strategies=(StrategyEntry("evil"),),
-            valuation=ValuationConfig("daily-val", OperationRole.VALUATION),
+            timezone="Asia/Seoul",
+            at=time(9, 0),
+            sessions=(date(2024, 1, 2),),
             instruments=("A",),
             exchange="venue",
             execution_input_id="my-exec",
@@ -336,9 +294,11 @@ def test_the_docstrings_claim_is_the_claim_it_actually_keeps(tmp_path: Path) -> 
 def test_check_creates_no_workspace_where_none_existed(tmp_path: Path) -> None:
     """Checking an uninitialised directory must not initialise it (regression pin).
 
-    Both targets `check` takes: a run id nothing registered, and a materialization spec path.
+    A run id nothing registered, and a YAML path -- refused by name since record `148`, and
+    refused before anything on disk is touched.
     """
     check("nothing-registered", tmp_path)
     assert not (tmp_path / WORKSPACE_DIRECTORY).exists()
-    check(tmp_path / "spec.yaml", tmp_path)
+    with pytest.raises(InputError):
+        check(tmp_path / "spec.yaml", tmp_path)
     assert not (tmp_path / WORKSPACE_DIRECTORY).exists()

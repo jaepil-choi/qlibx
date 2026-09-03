@@ -51,6 +51,8 @@ RECORD_FILENAME = "record.json"
 RUN_FILENAME = "run.json"
 STRATEGY_FILENAME = "strategy.json"
 STRATEGIES_DIRECTORY = "strategies"
+DATAMODEL_FILENAME = "datamodel.json"
+DATAMODELS_DIRECTORY = "datamodels"
 """Two records per run since record `139` (design §4.2).
 
 `<root>/runs/<run-id>/run.json` is the configuration every strategy shared, written before
@@ -97,16 +99,11 @@ RUN_SCHEMA = "vqapr-run/v1"
 """The schema of `run.json`: configuration, written by `write_run_record`."""
 
 STRATEGY_SCHEMA = "vqapr-strategy-record/v1"
+DATAMODEL_SCHEMA = "vqapr-datamodel-record/v1"
 """The schema of `strategy.json`, written by `RunRecordWriter.finish(kind=STRATEGY_KIND)`."""
 
-MATERIALIZATION_KIND = "materialization"
-"""A dataset materialization. Declared here in record `115` and WRITTEN by record `116`.
-
-Named one story before it is produced on purpose. `115` changes the record's shape and `116` adds
-the second producer; splitting them means the shape change lands with the reader-side check that
-protects it, rather than arriving in the same commit as a new writer and being tested only through
-that writer.
-"""
+DATAMODEL_KIND = "datamodel"
+"""One datamodel of a run (record `148`): the schema of `datamodel.json`."""
 
 _RUN_FIELDS = (
     "run_id",
@@ -144,23 +141,6 @@ and the remedy, which belongs where someone is about to act and not in an archiv
 run did.
 """
 
-_MATERIALIZATION_FIELDS = (
-    "run_id",
-    "dataset_id",
-    "source_digest",
-    "declared_digest",
-    "rows",
-    "span",
-    "period",
-)
-"""What a materialization answers. Written by record `116`; declared here so the discriminator has
-two real branches rather than one and a promise.
-
-`run_id`, `source_digest`, `declared_digest` and `period` are deliberately the same names a run
-uses: the two kinds answer some of the same questions, and a reader that wants "which declarations
-produced this" should not need to know which kind it is holding to ask.
-"""
-
 _STRATEGY_FIELDS = (
     "run_id",
     "strategy_ref",
@@ -183,18 +163,37 @@ and as loaded (`source_digest`, per component rather than folded) -- beside what
 answered before: the final account, the tables, the contract report, the roster, the period.
 """
 
+_DATAMODEL_FIELDS = (
+    "run_id",
+    "datamodel_ref",
+    "datamodel_id",
+    "fingerprint",
+    "component",
+    "agenda",
+    "dataset_id",
+    "value_fields",
+    "rows",
+    "sessions",
+    "source_digest",
+    "declared_digest",
+    "period",
+)
+"""What one datamodel's record answers (record `148`): the component that ran, registered and
+as loaded; the dataset it wrote and the fields it declared; one row per session -- when it
+evaluated, when its rows became available, how many -- and no per-instrument lineage
+(`docs/issues/059`)."""
+
 RUN_JSON_FIELDS = (
     "run_id",
     "declared_digest",
     "instruments",
     "period",
-    "valuation",
-    "monitoring",
     "exchange",
     "execution_input",
     "initial_account",
     "datasets",
     "strategies",
+    "datamodels",
 )
 """What `run.json` answers: architecture §17.3.1's missing rows -- the universe, the venue and the
 execution input with its fill convention (`docs/issues/034`), the initial account declaration, the
@@ -203,9 +202,16 @@ datasets and their source digests (A7) -- and which strategies the run names.
 
 RECORD_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
     RUN_KIND: _RUN_FIELDS,
-    MATERIALIZATION_KIND: _MATERIALIZATION_FIELDS,
     STRATEGY_KIND: _STRATEGY_FIELDS,
+    DATAMODEL_KIND: _DATAMODEL_FIELDS,
 }
+
+MEMBER_KINDS: dict[str, tuple[str, str, str, str]] = {
+    STRATEGY_KIND: (STRATEGIES_DIRECTORY, STRATEGY_FILENAME, STRATEGY_SCHEMA, "strategy_ref"),
+    DATAMODEL_KIND: (DATAMODELS_DIRECTORY, DATAMODEL_FILENAME, DATAMODEL_SCHEMA, "datamodel_ref"),
+}
+"""The two kinds of member a run holds (record `148`): where each records, the file that marks
+it complete, its schema, and the head key naming its directory."""
 
 
 def record_fields(kind: str) -> tuple[str, ...]:
@@ -537,8 +543,10 @@ class RunRecordWriter:
     root: Path
     run_id: str
     strategy_ref: str | None = None
-    """Which strategy of the run this writer records, as `<id>@<fp8>`, or `None` for the run
+    """Which member of the run this writer records, as `<id>@<fp8>`, or `None` for the run
     directory itself -- a materialization record, or a run record written before `139`."""
+    member_kind: str = STRATEGY_KIND
+    """Which kind of member `strategy_ref` names (record `148`): a strategy or a datamodel."""
     _rows: dict[str, int] = field(default_factory=dict, init=False, repr=False, compare=False)
     _instants: dict[str, set[str]] = field(
         default_factory=dict, init=False, repr=False, compare=False
@@ -557,7 +565,7 @@ class RunRecordWriter:
 
     @property
     def directory(self) -> Path:
-        return record_directory(self.root, self.run_id, self.strategy_ref)
+        return record_directory(self.root, self.run_id, self.strategy_ref, kind=self.member_kind)
 
     @property
     def label(self) -> str:
@@ -566,7 +574,7 @@ class RunRecordWriter:
 
     @property
     def record_filename(self) -> str:
-        return RECORD_FILENAME if self.strategy_ref is None else STRATEGY_FILENAME
+        return RECORD_FILENAME if self.strategy_ref is None else MEMBER_KINDS[self.member_kind][1]
 
     def counts(self) -> dict[str, dict[str, int]]:
         """Per table: rows appended so far, and the distinct instants they span."""
@@ -796,9 +804,8 @@ class RunRecordWriter:
         one knows the run reached its end. Atomically because a half-written record read by a cold
         process is indistinguishable from a run that recorded half its facts.
 
-        `kind` defaults to `RUN_KIND` because every caller today writes a run. Record `116` passes
-        `MATERIALIZATION_KIND`; the default is what lets `115` change the shape without touching a
-        single call site, so the reader-side check lands before the second producer exists.
+        `kind` defaults to `RUN_KIND`, the run directory's own record; a member writer passes its
+        kind (record `148`: a strategy or a datamodel).
         """
         if kind not in RECORD_FIELDS_BY_KIND:
             raise KeyError(
@@ -806,19 +813,21 @@ class RunRecordWriter:
                 f"{', '.join(sorted(RECORD_FIELDS_BY_KIND))}"
             )
         directory = self.directory
-        if (kind == STRATEGY_KIND) != (self.strategy_ref is not None):
+        if (kind in MEMBER_KINDS) != (self.strategy_ref is not None):
             raise ValueError(
-                "a strategy record is written by a writer with a strategy_ref, and only by one"
+                "a member record is written by a writer with a strategy_ref, and only by one"
             )
+        if self.strategy_ref is not None and kind != self.member_kind:
+            raise ValueError(f"this writer records a {self.member_kind}, not a {kind}")
         head: dict[str, object] = {
-            "schema": STRATEGY_SCHEMA if kind == STRATEGY_KIND else SCHEMA,
+            "schema": MEMBER_KINDS[kind][2] if kind in MEMBER_KINDS else SCHEMA,
             # The discriminator, written before the answers so a reader scanning the head of
             # the file knows what it is holding. Record `115`.
             "kind": kind,
             "run_id": self.run_id,
         }
         if self.strategy_ref is not None:
-            head["strategy_ref"] = self.strategy_ref
+            head[MEMBER_KINDS[kind][3]] = self.strategy_ref
         payload = json.dumps({**head, **_encode(dict(record))}, indent=2, sort_keys=True)
 
         def taken(_error: OSError) -> BaseException:
@@ -843,12 +852,14 @@ class RunRecordWriter:
         return directory / self.record_filename
 
 
-def record_directory(root: Path, run_id: str, strategy_ref: str | None = None) -> Path:
-    """Where one record lives: the run's directory, or one strategy's directory beneath it."""
+def record_directory(
+    root: Path, run_id: str, strategy_ref: str | None = None, *, kind: str = STRATEGY_KIND
+) -> Path:
+    """Where one record lives: the run's directory, or one member's directory beneath it."""
     directory = root / RUNS_DIRECTORY / run_id
     if strategy_ref is None:
         return directory
-    return directory / STRATEGIES_DIRECTORY / strategy_ref
+    return directory / MEMBER_KINDS[kind][0] / strategy_ref
 
 
 def record_path(root: Path, run_id: str) -> Path:
@@ -905,8 +916,8 @@ def run_ids(root: Path) -> tuple[str, ...]:
     """Every run this root holds a record for, sorted.
 
     Derived by scanning rather than read from an index, so no two runs share a mutable target. A
-    run directory holds `run.json` (record `139`) or, for a materialization and for a run written
-    before `139`, `record.json`; a directory with neither did not get as far as a record.
+    run directory holds `run.json` (record `139`) or, for a run written before `139`,
+    `record.json`; a directory with neither did not get as far as a record.
     """
     directory = root / RUNS_DIRECTORY
     if not directory.is_dir():
@@ -940,7 +951,7 @@ def strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
 
 
 def read_run_record(root: Path, run_id: str) -> dict[str, Any]:
-    """`run.json` -- or, for a record written before `139` or a materialization, `record.json`."""
+    """`run.json` -- or, for a record written before `139`, `record.json`."""
     path = run_record_path(root, run_id)
     if not path.is_file():
         return read_record(root, run_id)
@@ -953,20 +964,46 @@ def read_run_record(root: Path, run_id: str) -> dict[str, Any]:
     return record
 
 
+def datamodel_refs(root: Path, run_id: str) -> tuple[str, ...]:
+    """Every datamodel record this run holds, as `<id>@<fp8>`, sorted (record `148`)."""
+    directory = root / RUNS_DIRECTORY / run_id / DATAMODELS_DIRECTORY
+    if not directory.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            child.name
+            for child in directory.iterdir()
+            if child.is_dir() and (child / DATAMODEL_FILENAME).is_file()
+        )
+    )
+
+
 def read_strategy_record(root: Path, run_id: str, strategy_ref: str) -> dict[str, Any]:
     """One strategy's frozen facts, exactly as they were written."""
-    path = record_directory(root, run_id, strategy_ref) / STRATEGY_FILENAME
+    return read_member_record(root, run_id, strategy_ref, kind=STRATEGY_KIND)
+
+
+def read_datamodel_record(root: Path, run_id: str, datamodel_ref: str) -> dict[str, Any]:
+    """One datamodel's frozen facts, exactly as they were written (record `148`)."""
+    return read_member_record(root, run_id, datamodel_ref, kind=DATAMODEL_KIND)
+
+
+def read_member_record(root: Path, run_id: str, ref: str, *, kind: str) -> dict[str, Any]:
+    _, filename, schema, _ = MEMBER_KINDS[kind]
+    path = record_directory(root, run_id, ref, kind=kind) / filename
     if not path.is_file():
+        known = (
+            strategy_refs(root, run_id) if kind == STRATEGY_KIND else datamodel_refs(root, run_id)
+        )
         raise FileNotFoundError(
-            f"no complete strategy record for {run_id!r}/{strategy_ref!r} at {path}; "
-            f"known: {', '.join(strategy_refs(root, run_id)) or '(none)'}"
+            f"no complete {kind} record for {run_id!r}/{ref!r} at {path}; "
+            f"known: {', '.join(known) or '(none)'}"
         )
     record = _mapping_at(path)
     written = record.get("schema")
-    if written != STRATEGY_SCHEMA:
+    if written != schema:
         raise ValueError(
-            f"strategy record at {path} declares schema {written!r}; this version reads "
-            f"{STRATEGY_SCHEMA!r}"
+            f"{kind} record at {path} declares schema {written!r}; this version reads {schema!r}"
         )
     return record
 
@@ -981,14 +1018,16 @@ def _mapping_at(path: Path) -> dict[str, Any]:
     return record
 
 
-def remove_strategy_record(root: Path, run_id: str, strategy_ref: str) -> bool:
-    """Remove one strategy's record directory, refusing while its lock is inside the window.
+def remove_strategy_record(
+    root: Path, run_id: str, strategy_ref: str, *, kind: str = STRATEGY_KIND
+) -> bool:
+    """Remove one member's record directory, refusing while its lock is inside the window.
 
     Returns False when there was nothing to remove. `RunRecordLive` when a writer may still be
     running: the rows it is writing are the thing a deletion would destroy, and the lock ages out
     on its own.
     """
-    directory = record_directory(root, run_id, strategy_ref)
+    directory = record_directory(root, run_id, strategy_ref, kind=kind)
     if not directory.is_dir():
         return False
     claim = _lock_claim(directory / LOCK_FILENAME)
@@ -1009,11 +1048,11 @@ def remove_run_record(root: Path, run_id: str, *, keep_latest: bool = False) -> 
     directory = root / RUNS_DIRECTORY / run_id
     if not directory.is_dir():
         return ()
-    strategies = directory / STRATEGIES_DIRECTORY
-    candidates = (
-        tuple(sorted(child for child in strategies.iterdir() if child.is_dir()))
-        if strategies.is_dir()
-        else ()
+    candidates = tuple(
+        child
+        for members in (directory / STRATEGIES_DIRECTORY, directory / DATAMODELS_DIRECTORY)
+        if members.is_dir()
+        for child in sorted(child for child in members.iterdir() if child.is_dir())
     )
     for child in (*candidates, directory):
         claim = _lock_claim(child / LOCK_FILENAME)

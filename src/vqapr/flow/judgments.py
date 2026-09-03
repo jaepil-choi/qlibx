@@ -20,11 +20,10 @@ reports as clean, which is the divergence this module exists to close, reproduce
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
 from difflib import get_close_matches
-from pathlib import Path
 from typing import Any
 
 from vqapr.account.account import AccountMode
@@ -33,9 +32,9 @@ from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 # Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/029`).
-from vqapr.extension.loading import load_exchange, load_strategy_model
-from vqapr.flow.run import RunDefinition, StrategyEntry
-from vqapr.flow.run_spec import MATERIALIZATION
+from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
+from vqapr.flow.preflight import derived_agenda
+from vqapr.flow.run import DataModelEntry, RunDefinition, StrategyEntry
 
 # `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
 # this layer; a module under `flow/` importing it reaches back up through the thing it is supposed
@@ -43,187 +42,7 @@ from vqapr.flow.run_spec import MATERIALIZATION
 # tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
 from vqapr.workspace import Workspace
 
-__all__ = ["judgments", "materialization_judgments"]
-
-
-def materialization_judgments(
-    document: dict[str, Any],
-    workspace: Workspace,
-    project_root: Path,
-    *,
-    kind_spelling: Callable[[Any], str],
-) -> list[Failure]:
-    """What must hold before a materialization is worth starting.
-
-    Every one of these is a refusal `materialize()` would raise later, hoisted to where it costs
-    nothing. That is the whole point of the verb: `check` certifying a spec that `run` then
-    refuses is the defect this slice opened with, and extending `run` without extending `check`
-    would have re-committed it in the task meant to close a door.
-
-    Raised in the `check.materialize.*` namespace, so `tests/cli/test_check.py`'s pinned count of
-    the eight `check.*` judgments a simulation settles stays a statement about simulations.
-    """
-    from vqapr.extension.component import ComponentKind
-
-    found: list[Failure] = []
-
-    def refuse(code: str, requirement: str, observed: str, fix: str, key: str) -> None:
-        found.append(
-            Failure.bounded(
-                code=f"check.materialize.{code}",
-                requirement=requirement,
-                observed=observed,
-                fix=fix,
-                explain=ExplainTopic.DECLARATION_SHAPE,
-                source=FailureSource(key_path=key),
-            )
-        )
-
-    component_id = str(document.get(MATERIALIZATION) or "")
-    try:
-        ref = workspace.component(component_id)
-    except Exception as unknown:
-        refuse(
-            "component_unregistered",
-            "the named component must be registered in this workspace",
-            f"{component_id!r}: {unknown}",
-            f"register it with `vqapr register datamodel {component_id} <file>.py`",
-            MATERIALIZATION,
-        )
-        ref = None
-    if ref is not None and ref.kind is not ComponentKind.DATA_MODEL:
-        refuse(
-            "component_wrong_kind",
-            "a materialization runs a DataModel",
-            f"{component_id!r} is registered as {kind_spelling(ref.kind)}",
-            "name a registered datamodel; a strategy is run through a registered run instead",
-            MATERIALIZATION,
-        )
-
-    # The refusal `materialize()` raises at `materialize.input.dataset_exists`, asked here instead.
-    # Without this, `check` returns ok:true and `run` refuses -- exactly the shape T1 removed.
-    output = document.get("output")
-    declared_output = str(output.get("dataset_id", "")) if isinstance(output, dict) else ""
-    if declared_output and any(
-        str(item.dataset_id) == declared_output for item in workspace.datasets
-    ):
-        refuse(
-            "output_registered",
-            "a materialization writes a dataset that does not exist yet",
-            f"{declared_output!r} is already registered",
-            f"choose a new dataset_id, or remove the existing {declared_output} registration",
-            "output.dataset_id",
-        )
-
-    declared_instants = document.get("evaluate_at") or ()
-    if not declared_instants:
-        refuse(
-            "no_evaluation_instants",
-            "a materialization must say when to evaluate",
-            "`evaluate_at:` is empty",
-            "list at least one timezone-aware instant under `evaluate_at:`",
-            "evaluate_at",
-        )
-    else:
-        # The ninth judgment, added deliberately. `_instant` returns None for anything it cannot
-        # read -- including a naive datetime -- and the judgments below simply skipped those, so a
-        # spec with a naive `evaluate_at` passed `check` with ok:true and was then refused by
-        # `run`. That is the check-certifies-what-run-refuses divergence this slice exists to
-        # close, found by the boundary gate inside the task meant to close it.
-        unreadable = [str(value) for value in declared_instants if _instant(value) is None]
-        if unreadable:
-            refuse(
-                "evaluation_instant_invalid",
-                "every `evaluate_at:` entry must be a timezone-aware instant",
-                f"cannot read as an instant: {', '.join(unreadable)}",
-                (
-                    "write each instant with an explicit offset, like "
-                    "2024-03-06T04:00:00+09:00; a naive datetime is refused rather than assumed "
-                    "to be in any particular zone"
-                ),
-                "evaluate_at",
-            )
-    if not (document.get("instruments") or ()):
-        refuse(
-            "no_instruments",
-            "a materialization must say what to evaluate over",
-            "`instruments:` is empty",
-            "list at least one instrument id under `instruments:`",
-            "instruments",
-        )
-
-    # What the model says it reads must be registered, or the first evaluation refuses on data the
-    # author could have been told about before the run started.
-    if ref is not None and ref.kind is ComponentKind.DATA_MODEL:
-        from vqapr.extension.loading import load_data_model
-
-        by_id = {str(item.dataset_id): item for item in workspace.datasets}
-        # Scoped to the two calls the refusal describes. Wrapping the judgments below in it too
-        # reported a malformed `evaluate_at` entry as `component_unloadable` -- sending the reader
-        # to a component that loaded fine -- and let a spec carry `lookback_uncovered` alongside a
-        # contradictory `component_unloadable`. `judgments` avoids the same shape deliberately.
-        try:
-            requirements = tuple(load_data_model(ref, project_root=project_root).requirements())
-        except Exception as unloadable:
-            refuse(
-                "component_unloadable",
-                "the named DataModel must load before its requirements can be judged",
-                str(unloadable),
-                "fix the component so it loads, then check again",
-                MATERIALIZATION,
-            )
-            requirements = ()
-        if requirements:
-            absent = sorted(
-                {
-                    str(requirement.dataset_id)
-                    for requirement in requirements
-                    if str(requirement.dataset_id) not in by_id
-                }
-            )
-            if absent:
-                refuse(
-                    "requirement_unregistered",
-                    "every dataset the model declares it reads must be registered",
-                    f"unregistered: {', '.join(absent)}",
-                    "register the missing datasets, then check again",
-                    MATERIALIZATION,
-                )
-            # The judgment that keeps this verb honest. Without it `check` returns ok:true and
-            # `materialize` refuses with `materialize.output.empty` after doing the work.
-            # Measured at the EARLIEST evaluation instant, because that is the window that can
-            # be short.
-            declared_times = sorted(
-                moment
-                for moment in (_instant(value) for value in (document.get("evaluate_at") or ()))
-                if moment is not None
-            )
-            earliest = declared_times[0] if declared_times else None
-            for requirement in requirements:
-                registration = by_id.get(str(requirement.dataset_id))
-                rows = getattr(getattr(requirement, "lookback", None), "rows", None)
-                span = getattr(registration, "span", None) if registration else None
-                begins = _instant(span[0]) if span else None
-                if not rows or earliest is None or begins is None or begins <= earliest:
-                    continue
-                refuse(
-                    "lookback_uncovered",
-                    (
-                        f"dataset {str(requirement.dataset_id)!r} must carry history reaching "
-                        "back past the earliest evaluation, or that evaluation reads a short "
-                        "window and produces nothing"
-                    ),
-                    (
-                        f"dataset begins {span[0]}, earliest evaluation {earliest.isoformat()}, "
-                        f"lookback {rows} row(s)"
-                    ),
-                    (
-                        f"evaluate at or after {span[0]}, or prepare the dataset with history "
-                        "reaching further back"
-                    ),
-                    "evaluate_at",
-                )
-    return found
+__all__ = ["judgments"]
 
 
 def judgments(
@@ -252,6 +71,7 @@ def judgments(
         ("execution_ordering", lambda: _judge_execution_ordering(definition, workspace, at)),
         ("datasets", lambda: _judge_datasets_and_fields(definition, workspace, registered, at)),
         ("weights", lambda: _judge_weights(definition, workspace, at)),
+        ("outputs", lambda: _judge_outputs(definition, registered, at)),
     )
     for name, judge in judges:
         try:
@@ -346,15 +166,17 @@ def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]
     return []
 
 
-def _binding_agenda(workspace: Workspace, entry: StrategyEntry) -> object | None:
-    """The agenda a strategy's registered binding names, or `None` when it does not resolve.
+def _decide_agenda(workspace: Workspace, definition: RunDefinition) -> object | None:
+    """The run's decide agenda, or `None` when it cannot be built here.
 
-    An unresolvable id is a different judgment's refusal to make (preflight names it); making it
-    here too would report one defect twice.
+    Built from the run's sessions and `at` (record `148`). A dataset that does not resolve
+    or a session that does not exist in the zone is a different judgment's refusal to make
+    (preflight names it); making it here too would report one defect twice.
     """
+
     try:
-        return workspace.agenda(str(workspace.strategy_config(entry.component_id).agenda_id))
-    except VqaprError:
+        return derived_agenda(workspace, definition)
+    except (VqaprError, ValueError, TypeError):
         return None
 
 
@@ -376,7 +198,7 @@ def _judge_execution_ordering(
     fill_at = registration.fill.local_time
     found: list[Failure] = []
     for entry in definition.strategies:
-        agenda = _binding_agenda(workspace, entry)
+        agenda = _decide_agenda(workspace, definition)
         if agenda is None:
             continue
         late = [
@@ -420,14 +242,18 @@ def _judge_datasets_and_fields(
     source. Collapsing them would tell the reader which command failed but not which to run.
     """
     found: list[Failure] = []
-    for entry in definition.strategies:
-        source = _key(at, "strategies", entry.component_id)
+    members = [
+        *(("strategies", entry, load_strategy_model) for entry in definition.strategies),
+        *(("datamodels", entry, load_data_model) for entry in definition.datamodels),
+    ]
+    for section, entry, loader in members:
+        source = _key(at, section, entry.component_id)
         try:
             ref = workspace.component(entry.component_id)
             # LOAD the component. `workspace.component()` returns a `ComponentRef` -- an identity,
             # a path and a fingerprint -- which has no `requirements` attribute at all. Only the
             # loaded model knows what it reads.
-            component = load_strategy_model(ref, project_root=workspace.project_root)
+            component = loader(ref, project_root=workspace.project_root)
         except (VqaprError, TypeError, ValueError):
             # The component does not resolve or does not load. `check.dataset.unregistered` is
             # about a dataset, and the conformance judgments already own that refusal.
@@ -507,8 +333,36 @@ def _judge_datasets_and_fields(
     return found
 
 
+def _judge_outputs(
+    definition: RunDefinition, registered: dict[str, Any], at: FailureSource
+) -> list[Failure]:
+    """A datamodel run writes a dataset that does not exist yet (record `148`).
+
+    The refusal preflight raises at `preflight.datamodel.output_registered`, asked here so
+    `check` cannot certify a run that `run` then refuses.
+    """
+    found: list[Failure] = []
+    for entry in definition.datamodels:
+        if entry.dataset_id not in registered:
+            continue
+        found.append(
+            Failure.bounded(
+                "check.datamodel.output_registered",
+                "a datamodel run writes a dataset that does not exist yet",
+                observed=f"{entry.dataset_id!r} is already registered",
+                fix=(
+                    f"declare a new dataset_id for {entry.component_id!r}, or remove the "
+                    f"existing {entry.dataset_id} registration from the workspace first"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                source=_key(at, "datamodels", entry.component_id, "dataset_id"),
+            )
+        )
+    return found
+
+
 def _first_decision(
-    definition: RunDefinition, workspace: Workspace, entry: StrategyEntry
+    definition: RunDefinition, workspace: Workspace, entry: StrategyEntry | DataModelEntry
 ) -> datetime | None:
     """When one strategy first reads, or `None` when that cannot be answered here.
 
@@ -519,7 +373,7 @@ def _first_decision(
     start, end = definition.start, definition.end
     if start is None or end is None:
         return None
-    agenda = _binding_agenda(workspace, entry)
+    agenda = _decide_agenda(workspace, definition)
     if agenda is None:
         return None
     inside = [

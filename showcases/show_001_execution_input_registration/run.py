@@ -30,22 +30,14 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
     component_ref,
     preflight_run,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     run,
 )
 
@@ -119,23 +111,6 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
     finally:
         con.close()
     return execution, invalid, canonical, observation
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=KST,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, KST, 0, OFFSET),
-            )
-            for day in SESSIONS
-        ),
-        provenance="show_001 three declared sessions",
-    )
 
 
 def _execution_input(input_id: str, path: Path) -> ExecutionInputRegistration:
@@ -263,16 +238,6 @@ def main() -> None:
     for reference in (strategy_ref, exchange_ref):
         register_component(PROJECT, reference)
 
-    strategy_agenda = _agenda("showcase-strategy", OperationRole.STRATEGY_CALLBACK, time(4, 0))
-    valuation_agenda = _agenda("showcase-valuation", OperationRole.VALUATION, time(16, 0))
-    for agenda in (strategy_agenda, valuation_agenda):
-        register_agenda(PROJECT, agenda)
-
-    strategy_config = StrategyConfig(
-        strategy_ref, "showcase-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig("showcase-valuation", OperationRole.VALUATION)
-    register_strategy_config(PROJECT, strategy_config)
 
     definition = RunDefinition(
         run_id="show001",
@@ -281,9 +246,9 @@ def main() -> None:
         # strategy entry names no constraints rather than an inert one authored to keep a field
         # non-empty. See README.
         strategies=(StrategyEntry("showcase-strategy"),),
-        valuation=valuation_config,
-        # `None` states there is no monitoring cadence, explicitly.
-        monitoring=None,
+        sessions=tuple(SESSIONS),
+        timezone=KST,
+        at=time(4, 0),
         exchange="showcase-exchange",
         execution_input_id="krx-daily",
         start=datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),

@@ -20,13 +20,7 @@ import pytest
 import yaml
 
 import vqapr.agent.sample.journey as journey
-from vqapr.public import (
-    OperationRole,
-    StrategyConfig,
-    Workspace,
-    register_agenda,
-    register_strategy_config,
-)
+from vqapr.public import Workspace
 
 
 def _cli(project_root: Path, *argv: str) -> tuple[int, dict]:
@@ -51,9 +45,9 @@ def _cli(project_root: Path, *argv: str) -> tuple[int, dict]:
 def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: Path) -> None:
     """The whole authoring contract, end to end, as an agent would drive it.
 
-    The scaffold gets a FRESH id with its own agenda and config. Writing it under the sample's own
-    strategy id is what produced the false verification this test exists to prevent: `install` had
-    already registered a component there, so the registration was refused and the run executed the
+    The scaffold gets a FRESH id and a FRESH run. Writing it under the sample's own strategy id
+    is what produced the false verification this test exists to prevent: `install` had already
+    registered a component there, so the registration was refused and the run executed the
     SAMPLE while the result was read as proof of the scaffold.
     Everything else -- the source, the class, the decision -- is the emitted file exactly as it
     was written, and the assertions below are about what that file does, not about its shape.
@@ -75,33 +69,20 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
     assert code == 0, registered
     assert registered["component"]["object"], "the registration must name the class it found"
 
-    # A FRESH id with its own agenda and its own config, so nothing of the sample's strategy is in
-    # the path. Reusing the sample's id looks simpler and is worthless: `install` already
-    # registered a component there, the re-registration is correctly refused as a conflict, and
-    # the run then executes the SAMPLE while the test reports success. That mistake was made once
-    # here already -- a green end-to-end result that proved nothing about the scaffold.
+    # A FRESH id, so nothing of the sample's strategy is in the path. Reusing the sample's id
+    # looks simpler and is worthless: `install` already registered a component there, the
+    # re-registration is correctly refused as a conflict, and the run then executes the SAMPLE
+    # while the test reports success. That mistake was made once here already -- a green
+    # end-to-end result that proved nothing about the scaffold.
     assert (
         Path(str(Workspace.open(tmp_path).component("alpha").path)).name == source.name
     ), "the workspace is not holding the scaffold, so the run below would prove nothing"
 
-    register_agenda(
-        tmp_path,
-        journey._agenda(
-            "alpha-callback", OperationRole.STRATEGY_CALLBACK, journey.CALLBACK, sessions
-        ),
-    )
-    register_strategy_config(
-        tmp_path,
-        StrategyConfig(
-            component=Workspace.open(tmp_path).component("alpha"),
-            agenda_id="alpha-callback",
-            agenda_role=OperationRole.STRATEGY_CALLBACK,
-        ),
-    )
-
     # The run is a registration of its own (record 139), under a FRESH id for the same reason
     # the strategy has one: `install` already registered the sample's run, and executing that
-    # would run the sample while the result was read as proof of the scaffold.
+    # would run the sample while the result was read as proof of the scaffold. It declares its
+    # own sessions and wall time (record 148): every day the sample panel has, at the callback,
+    # sliced to the period below -- no agenda or config is registered beside it.
     runs = tmp_path / "runs.yaml"
     runs.write_text(
         yaml.safe_dump(
@@ -109,8 +90,9 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
                 "runs": {
                     "scaffold": {
                         "strategies": {"alpha": {}},
-                        "valuation": {"agenda_id": journey.VALUATION_AGENDA},
-                        "monitoring": {"agenda_id": journey.MONITORING_AGENDA},
+                        "sessions_from": journey.DATASET_ID,
+                        "timezone": journey.VENUE,
+                        "at": journey.CALLBACK.strftime("%H:%M"),
                         "instruments": list(panel.instruments),
                         "start": f"{sessions[2].isoformat()}T00:00:00{journey.OFFSET}",
                         "end": f"{sessions[-1].isoformat()}T23:59:59{journey.OFFSET}",
@@ -149,3 +131,41 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
         "the scaffold ran without ever committing a fill, so the authoring contract's decision "
         "path is unexercised"
     )
+
+
+def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(tmp_path: Path) -> None:
+    """The `runs:` block `vqapr new datamodel` emits is one `register` takes as written.
+
+    Record 148: the declaration carries the run that computes the model, so registering the file
+    registers a datamodel run under `<id>-run` -- a run `list runs` knows by kind and `check`
+    reaches all the way through. What it does NOT prove is that the run computes anything: the
+    instruments are placeholders the reader fills, and registration does not validate a universe.
+    """
+    journey.install(tmp_path)
+    source = tmp_path / "scaffolded_model.py"
+
+    code, created = _cli(
+        tmp_path, "new", "datamodel", "signal",
+        "--dataset", journey.DATASET_ID, "--lookback", "2", "--out", str(source),
+    )
+    assert code == 0, created
+
+    code, registered = _cli(tmp_path, "register", created["declaration"])
+    assert code == 0, registered
+    assert registered["registered"]["components"] == ["signal"]
+    assert registered["registered"]["runs"] == ["signal-run"]
+
+    code, runs = _cli(tmp_path, "list", "runs")
+    assert code == 0, runs
+    row = next(row for row in runs["items"] if row["run_id"] == "signal-run")
+    assert row["kind"] == "datamodel"
+
+    # The emitted block is a run `check` can judge as written: every phase answers, and none of
+    # them refuses the declaration's SHAPE. (The placeholder instruments are not a judgment
+    # today; whether an instrument the sessions dataset never holds should be one is open.)
+    code, checked = _cli(tmp_path, "check", "signal-run")
+    assert checked["stage"] != "unhandled", checked
+    assert checked["checked"] == ["workspace", "run", "judgments", "preflight"]
+    assert not any(
+        failure["code"].startswith("run.check.") for failure in checked.get("failures", [])
+    ), "the scaffold's shape was refused, not its placeholders"

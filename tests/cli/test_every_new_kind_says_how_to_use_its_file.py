@@ -13,7 +13,8 @@ those four could not honestly emit it: a run SPEC was not registrable, so the en
 
 Since record 139 a run is a `runs:` section of a declaration document, so the one exception is
 gone: `vqapr new run` emits a declaration `vqapr register` takes, and every kind answers the
-caller's actual question -- *what do I do with this file?* -- with `declaration`.
+caller's actual question -- *what do I do with this file?* -- with `declaration`. Record 148
+retired `agendas` (a run declares its own sessions and wall time), so eight kinds remain.
 """
 
 from __future__ import annotations
@@ -33,7 +34,6 @@ _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("instruments", ()),
     ("dataset", ()),
     ("run", ()),
-    ("agendas", ()),
     ("execution-input", ()),
 )
 
@@ -53,8 +53,8 @@ def _new(root: Path, kind: str, extra: tuple[str, ...]) -> dict:
     return json.loads((result.stdout or result.stderr).strip().splitlines()[-1])
 
 
-def test_all_nine_kinds_are_covered_by_this_test() -> None:
-    """A tenth kind must be declared here rather than silently skipping coverage."""
+def test_every_kind_is_covered_by_this_test() -> None:
+    """A new kind must be declared here rather than silently skipping coverage."""
     import argparse
 
     from vqapr.cli.new import add_arguments
@@ -88,8 +88,9 @@ def test_the_envelope_says_what_to_do_with_the_file(
 def test_a_script_can_read_one_field_across_every_kind(tmp_path: Path) -> None:
     """The reporter's actual use case, run end to end.
 
-    This is the loop they planned to write. It used to raise `KeyError` on four of the nine, and
-    then had to branch on `registrable` for the run spec. Every kind is registrable now.
+    This is the loop they planned to write. It used to raise `KeyError` on four of the nine kinds
+    of the time, and then had to branch on `registrable` for the run spec. Every kind is
+    registrable now.
     """
     registrable: list[str] = []
     for kind, extra in _KINDS:
@@ -149,3 +150,34 @@ def test_the_help_promises_the_key_for_every_kind_again() -> None:
     assert "Every kind reports the file to hand `vqapr register` as `declaration`" in kind_help
     assert "registrable: false" not in kind_help, "no kind answers that any more"
     assert "`runs:`" in kind_help and "vqapr run <run-id>" in kind_help
+
+
+def test_new_datamodel_emits_the_run_that_computes_it(tmp_path: Path) -> None:
+    """The declaration says how to RUN the file, not only how to register it (record 148).
+
+    A datamodel is a `runs:` entry with `datamodels:` since the spec file retired, and the one
+    thing a scaffold knows that a reader would otherwise type by hand is that entry: the run's
+    sessions are the dataset the model reads, its output is named after the model, and the
+    universe and period are placeholders to fill. A strategy's run needs a venue, an execution
+    input and an account, which are facts about the project rather than about the file, so a
+    strategy scaffold still declares the component alone.
+    """
+    import yaml
+
+    body = _new(tmp_path, "datamodel", ("dm", "--dataset", "prices"))
+    document = yaml.safe_load(Path(body["declaration"]).read_text(encoding="utf-8"))
+
+    assert set(document) == {"components", "runs"}
+    assert list(document["components"]) == ["dm"]
+    assert list(document["runs"]) == ["dm-run"]
+    run = document["runs"]["dm-run"]
+    assert run["sessions_from"] == "prices", "the run's sessions are the dataset the model reads"
+    assert run["timezone"] == "Asia/Seoul" and run["at"] == "16:00"
+    assert run["datamodels"] == {"dm": {"dataset_id": "dm-values", "value_fields": ["value"]}}
+    assert "strategies" not in run
+    assert run["instruments"] == ["INSTRUMENT_A", "INSTRUMENT_B"], "placeholders, not guesses"
+    for key in ("start", "end"):
+        assert key in run
+
+    strategy = _new(tmp_path, "strategy", ("st", "--dataset", "prices"))
+    assert "runs" not in yaml.safe_load(Path(strategy["declaration"]).read_text(encoding="utf-8"))

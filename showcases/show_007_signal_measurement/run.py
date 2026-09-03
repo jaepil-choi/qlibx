@@ -60,29 +60,19 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
     Mark,
     MarkBatch,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    Rebalance,
     RunDefinition,
     RunRecordSpec,
     SourceSpec,
-    StrategyConfig,
     StrategyEntry,
-    ValuationConfig,
     callback_evidence,
     component_ref,
     preflight_run,
     publish_run_record,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
     run,
 )
 
@@ -143,23 +133,6 @@ def _universe(path: Path) -> tuple[str, ...]:
         )
     finally:
         con.close()
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_007 committed KRX sessions",
-    )
 
 
 _SOURCE_REFS = '''
@@ -501,25 +474,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     for reference in (signal_ref, academic_ref):
         register_component(project, reference)
 
-    signal_agenda = _agenda(
-        "show007-signal", OperationRole.STRATEGY_CALLBACK, time(8, 0), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show007-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "show007-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (signal_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(project, agenda)
-
-    signal_config = StrategyConfig(signal_ref, "show007-signal", OperationRole.STRATEGY_CALLBACK)
-    valuation_config = ValuationConfig(
-        "show007-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("show007-monitoring", OperationRole.MONITORING)
-    register_strategy_config(project, signal_config)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
@@ -527,8 +481,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     definition = RunDefinition(
         run_id="show007",
         strategies=(StrategyEntry("show007-signal"),),
-        valuation=valuation_config,
-        monitoring=monitoring,
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 0),
         exchange="show007-academic",
         execution_input_id="krx-daily",
         start=start,

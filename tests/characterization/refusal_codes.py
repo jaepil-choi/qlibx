@@ -481,9 +481,13 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
     diagnosis, _, _measured = validate(clean_registration, SourceSpec.of("s", dup))
     codes.extend(failure.code for failure in diagnosis.failures)
 
+    # `grain` is required since record `137`; without it `of` raises before `validate` runs and
+    # the whole scenario -- including the two diagnoses above -- was being dropped silently by
+    # `collect_runtime`'s per-scenario guard.
     mismatched = DatasetRegistration.of(
         "price_daily", "other-source", instrument_field="instrument",
-        available_at="available_at", key_fields=("instrument",), fields={"close": "close"},
+        available_at="available_at", grain="rows", key_fields=("instrument",),
+        fields={"close": "close"},
     )
     diagnosis, _, _measured = validate(mismatched, SourceSpec.of("s", dup))
     codes.extend(failure.code for failure in diagnosis.failures)
@@ -643,24 +647,24 @@ def _runtime_declaration_read(tmp_path: Path) -> list[str]:
     from vqapr.declarations import apply
     from vqapr.domain.errors import VqaprError
 
+    # A run is the declaration that carries the sessions and the wall time since record `148`
+    # (`agendas:` is no longer a section), so the two malformed-document scenarios that used to
+    # be agendas are runs: one missing what a run must declare, one with the wrong shape for it.
+    run = {
+        "strategies": {"alpha": {}},
+        "instruments": ["A"],
+        "start": "2024-03-05T00:00:00+09:00",
+        "end": "2024-03-06T00:00:00+09:00",
+        "timezone": "Asia/Seoul",
+        "exchange": "venue",
+        "execution_input": "fills",
+        "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
+    }
     scenarios: list[dict] = [
         {"datasets": {"prices": {"source_id": "s", "path": "p.parquet"}}},
-        {
-            "agendas": {
-                "alpha": {"role": "strategy_callback", "at": "15:30", "timezone": "Asia/Seoul"}
-            }
-        },
+        {"runs": {"alpha": {**run, "sessions": ["2024-03-05"]}}},
         {"components": {"c": {"kind": "model", "path": "p.py", "object_name": "X"}}},
-        {
-            "agendas": {
-                "alpha": {
-                    "role": "strategy_callback",
-                    "at": "15:30",
-                    "timezone": "Asia/Seoul",
-                    "sessions": "nope",
-                }
-            }
-        },
+        {"runs": {"alpha": {**run, "at": "15:30", "sessions": "nope"}}},
         {"unknown_section_here": {}},
     ]
     codes: list[str] = []
@@ -727,7 +731,48 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
         codes.extend(failure.code for failure in error.failures)
 
     try:
-        workspace.strategy_config("does-not-exist")
+        workspace.execution_input("does-not-exist")
+    except VqaprError as error:
+        codes.extend(failure.code for failure in error.failures)
+
+    # A run that takes its sessions from a dataset nobody registered (record `148`: the run
+    # declares its sessions; the workspace refuses an id it cannot resolve at registration).
+    from datetime import time
+
+    from vqapr.extension.component import ComponentKind, ComponentRef
+    from vqapr.extension.fingerprint import fingerprint_component
+    from vqapr.flow.run import RunDefinition, StrategyEntry
+
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text(
+        "from vqapr.public import StrategyModel, Hold\n\n"
+        "class Strategy(StrategyModel):\n"
+        "    def decide(self, context):\n"
+        "        return Hold(reason='inventory')\n",
+        encoding="utf-8",
+    )
+    workspace.register_component(
+        ComponentRef.of(
+            "strategy",
+            ComponentKind.STRATEGY_MODEL,
+            strategy,
+            "Strategy",
+            fingerprint=fingerprint_component(
+                strategy, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
+            ),
+        )
+    )
+    try:
+        workspace.register_run(
+            RunDefinition(
+                run_id="unsourced",
+                strategies=(StrategyEntry("strategy"),),
+                instruments=("A",),
+                timezone="Asia/Seoul",
+                at=time(15, 30),
+                sessions_from="does-not-exist",
+            )
+        )
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
 

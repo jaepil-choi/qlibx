@@ -32,11 +32,10 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.register import cli_kind
-from vqapr.cli.run import is_spec_path, require_materialization_spec
+from vqapr.cli.run import refuse_a_path
 from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
-from vqapr.flow.judgments import judgments, materialization_judgments
-from vqapr.inputs import InputError, read_yaml_mapping
+from vqapr.flow.judgments import judgments
+from vqapr.inputs import InputError
 from vqapr.public import Workspace, preflight_run
 
 STAGE = "run.check"
@@ -58,30 +57,12 @@ the others -- and of every strategy the run names -- so a declaration with four 
 four refusals rather than the first one four times.
 """
 
-MATERIALIZATION_CODES = (
-    "check.materialize.component_unregistered",
-    "check.materialize.component_wrong_kind",
-    "check.materialize.component_unloadable",
-    "check.materialize.output_registered",
-    "check.materialize.no_evaluation_instants",
-    "check.materialize.no_instruments",
-    "check.materialize.requirement_unregistered",
-    "check.materialize.lookback_uncovered",
-    "check.materialize.evaluation_instant_invalid",
-)
-"""The judgments this verb makes about a MATERIALIZATION spec.
-
-Every one is a refusal `materialize()` raises later, hoisted to where it costs nothing. Separately
-namespaced so the eight above stay a statement about runs.
-"""
-
 CODES = (
     *SIMULATION_CODES,
-    *MATERIALIZATION_CODES,
     f"{STAGE}.declaration_invalid",
     f"{STAGE}.preflight_refused",
 )
-"""Everything this verb can emit: both judgment sets, plus two framework-invariant codes.
+"""Everything this verb can emit: the judgments, plus two framework-invariant codes.
 
 The two `run.check.*` codes name a bare `TypeError`/`ValueError` from a framework invariant, which
 has no structured body of its own and would otherwise surface as `stage: unhandled`.
@@ -108,20 +89,6 @@ _PHASES = (
 the definition it found. Everything else runs regardless of what else failed.
 """
 
-_MATERIALIZATION_PHASES = (
-    _Phase("spec"),
-    _Phase("workspace"),
-    _Phase("judgments", needs=("spec", "workspace")),
-)
-"""A materialization is a file, and has no registration or preflight phase: no venue, no execution
-table, no account, no trading period."""
-
-
-def phases_for(target: str) -> tuple[_Phase, ...]:
-    """Which phases answer questions about this target: a run id, or a materialization spec."""
-    return _MATERIALIZATION_PHASES if is_spec_path(target) else _PHASES
-
-
 def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     """Run every answerable judgment and report all of them together.
 
@@ -129,16 +96,16 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     question asked. `run` raises on the same conditions; `check` was asked whether they hold.
     """
     target = str(target)
+    refuse_a_path(target, verb="check")
     failures: list[dict[str, Any]] = []
     passed: list[str] = []
     blocked: list[dict[str, str]] = []
     done: set[str] = set()
 
-    document: dict[str, Any] | None = None
     workspace: Workspace | None = None
     definition: object | None = None
-    phases = phases_for(target)
-    source = Path(target) if phases is _MATERIALIZATION_PHASES else None
+    phases = _PHASES
+    source = None
 
     for phase in phases:
         unmet = [need for need in phase.needs if need not in done]
@@ -148,27 +115,13 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
 
         blocked_before = len(blocked)
         try:
-            if phase.name == "spec":
-                document = read_yaml_mapping(Path(target), what="a materialization spec")
-                require_materialization_spec(document, Path(target))
-            elif phase.name == "workspace":
+            if phase.name == "workspace":
                 workspace = Workspace.open(project_root)
             elif phase.name == "run":
                 assert workspace is not None
                 definition = workspace.run_definition(target)
             elif phase.name == "judgments":
                 assert workspace is not None
-                if phases is _MATERIALIZATION_PHASES:
-                    assert document is not None
-                    judged = materialization_judgments(
-                        document, workspace, project_root, kind_spelling=cli_kind
-                    )
-                    failures.extend(_render(failure, source) for failure in judged)
-                    if judged:
-                        continue
-                    done.add(phase.name)
-                    passed.append(phase.name)
-                    continue
                 # The only phase that collects rather than raises. The blocked list is extended
                 # BEFORE the `continue` below, because the phase loop compares `len(blocked)`
                 # against `blocked_before` further down to decide whether this phase may be

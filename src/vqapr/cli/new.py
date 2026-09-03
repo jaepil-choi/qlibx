@@ -6,25 +6,18 @@ Two modes:
   declaration `.yaml`. Both files are complete: `vqapr new` then `vqapr register` is the whole
   path from nothing to a registered component.
 
-- `vqapr new dataset|execution-input|agendas|run --out <path>` emits a YAML template with
+- `vqapr new dataset|execution-input|run --out <path>` emits a YAML template with
   every required key, inline comments explaining each one, and placeholder values that need
   replacing. An agent that reads this file knows exactly what `vqapr register` or `vqapr run`
   expects, without opening documentation or guessing field names.
 
 ## Every declaration kind a run needs has a template
 
-`register` understands seven sections, and a run needs five of them. Before `agendas` was added
-here, three of those five had a template and the rest had to be known to exist: a reader who
-scaffolded all four available kinds, filled them in, and ran got
-`workspace.strategy_config.register.missing` -- a section no template had ever named. The gap was
-not documentation, it was that `vqapr new`'s own choice list was the de-facto index of what a
-declaration could contain, and it was incomplete.
-
-`agendas` therefore emits `agendas` + `strategy_configs` in one file rather than two: a config
-binds a strategy to an agenda, so neither half is usable without the other, and splitting them
-would recreate the same "which other file was I supposed to write" question one level down. (It
-emitted `valuation_configs` too until record `144` retired that section: an agenda's `role` says
-it is a valuation agenda, and the run's `valuation:` block says which one the run uses.)
+`register` understands five sections, and a run needs four of them: a dataset, an execution
+input, an exchange and the run itself. There is no agenda to declare (record `148`): the run
+says which sessions it fires on and at what wall time, every strategy is called on every
+session and decides for itself, the book is valued at the instant the venue fills, and the
+declared constraints judge it right after each commit.
 """
 
 from __future__ import annotations
@@ -149,52 +142,6 @@ execution_inputs:
       trade_price: close            # which key from price_fields above the fill uses
 """
 
-_AGENDAS_TEMPLATE = """\
-# Agendas and the configs that bind roles to them - register with `vqapr register <this-file>`
-#
-# An agenda is a cadence: the days a thing happens on, and the local time of day. A config binds
-# a role to one agenda. Both live here because neither is usable alone -- an agenda nothing is
-# bound to never fires, and a config naming an unregistered agenda is refused.
-#
-# A run names the valuation agenda by id (`valuation.agenda_id`) and its strategies by
-# component id; each strategy's agenda is the `strategy_configs` entry below. A run naming a
-# strategy with no binding is refused at registration, naming the strategy.
-#
-# Registrations are immutable. During disposable first-run setup, correct this YAML and rebuild
-# the project-local workspace; after a run matters, preserve provenance by registering new ids.
-
-agendas:
-  daily-rebalance:                  # your chosen identity, named by a strategy config below
-    role: strategy_callback         # one of: strategy_callback, valuation, monitoring
-    from_dataset: DATASET_ID        # follow this registered dataset's own days
-    # sessions:                     # ...or list the days literally. Declare exactly ONE of
-    #   - "2024-01-02"              #    from_dataset or sessions, never both.
-    #   - "2024-01-03"
-    at: "15:29"                     # strictly before the execution template's 15:30 target
-    timezone: Asia/Seoul            # zone `at` is expressed in; DST is derived from it
-
-  # A callback at 15:29 sees only data whose `available_at` is strictly before 15:29. For a
-  # dataset published at the 15:30 close, that means a strategy firing at 15:29 on session N
-  # decides on session N-1's data -- which is correct, and is the point: it cannot see the close
-  # it is about to trade into.
-  #
-  # Applied to VALUATION the same instant is usually wrong. A mark taken at 15:29 values the book
-  # at the previous session's close, so the daily NAV series lags by one session for no stated
-  # reason. Put valuation AFTER the execution instant instead -- 15:31 below -- so the first NAV
-  # equals the initial cash exactly and each later one marks the close the run just filled at.
-
-  daily-valuation:                  # named by the run's `valuation:` block (`vqapr new run`)
-    role: valuation
-    from_dataset: DATASET_ID
-    at: "15:31"                     # after the 15:30 execution instant, not before it
-    timezone: Asia/Seoul
-
-strategy_configs:
-  COMPONENT_ID:                     # component_id of a registered StrategyModel
-    agenda_id: daily-rebalance      # the agenda above whose occurrences drive it; several
-                                    # strategies may name one agenda -- a cadence is shared
-"""
-
 _ACCOUNT_MODES = " or ".join(mode.name for mode in AccountMode)
 """The account modes spelled the way the spec parser accepts them, derived rather than restated.
 
@@ -211,11 +158,15 @@ again: adding or renaming a member updates the template in the same edit.
 _RUN_TEMPLATE = f"""\
 # Run declaration -- register with `vqapr register <this-file.yaml>`, then `vqapr run RUN_ID`
 #
-# A run is configuration (record 139): the universe, the period, the venue, the execution input,
-# the initial account, and the strategies it tries. Every strategy runs with its OWN account
-# from the same initial declaration, in its own record under .vqapr/runs/RUN_ID/strategies/.
-# Ids below name registered declarations; nothing here registers or binds them. Each strategy
-# must already be bound to its agenda by a `strategy_configs` entry (see `vqapr new agendas`).
+# A run is configuration (record 139): the universe, the period, the sessions it fires on and
+# the wall time it fires at, the venue, the execution input, the initial account, and the
+# strategies it tries. Every strategy is called on EVERY session at `at` and decides for itself
+# whether to act -- a monthly rebalance is a rule inside the strategy, read from
+# `call.evaluation_time` and kept in `self.memory` (record 148). The book is valued at the
+# instant the venue fills and the declared constraints judge it right after each commit; there
+# is no separate valuation or monitoring time to declare. Each strategy runs with its OWN
+# account from the same initial declaration, in its own record under .vqapr/runs/RUN_ID/.
+# Ids below name registered declarations; nothing here registers them.
 
 runs:
   RUN_ID:                            # your chosen identity: `vqapr run RUN_ID`
@@ -224,8 +175,11 @@ runs:
       - INSTRUMENT_B
     start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
     end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
-    valuation:
-      agenda_id: daily-valuation     # agenda_id for end-of-day valuation
+    sessions_from: DATASET_ID        # every session this registered dataset has a row for...
+    # sessions:                      # ...or list the days literally. Exactly ONE of the two.
+    #   - "2024-01-02"
+    timezone: Asia/Seoul             # the zone `at` is expressed in
+    at: "15:29"                      # when strategies decide; strictly before the execution `at`
     exchange: my-venue               # component_id of a registered Exchange
     execution_input: my-exec         # execution_input_id of a registered execution input
     initial_account:
@@ -235,12 +189,10 @@ runs:
       mode: LONG_ONLY                # {_ACCOUNT_MODES}
       positions: {{}}                  # mapping of instrument -> quantity, or empty
     strategies:                      # one entry per registered StrategyModel to try
-      my-alpha: {{}}                   # runs under its registered strategy_config's agenda
+      my-alpha: {{}}
       # my-other-alpha:
       #   constraints: [constraint-component-id]
       #   initial_model_memory: {{}}
-    # monitoring:                    # optional
-    #   agenda_id: monitoring-agenda
 """
 
 
@@ -261,14 +213,23 @@ def _emitted_class_name(source: str) -> str:
     raise ValueError("the emitted template declares no class")
 
 
-def _declaration(component_id: str, kind: ComponentKind, source: Path, object_name: str) -> str:
+def _declaration(
+    component_id: str,
+    kind: ComponentKind,
+    source: Path,
+    object_name: str,
+    *,
+    dataset_id: str | None = None,
+) -> str:
     """The registrable declaration for what was just scaffolded.
 
-    Only the component is declared. The dataset it reads, and the agenda it runs on, are facts
-    about the user's project rather than about this file, and inventing plausible values for them
-    would produce a document that registers something the user did not mean.
+    The component is declared. A datamodel also gets the run that computes it (record `148`):
+    its sessions are the dataset it reads, its output is named after it, and the universe and
+    period are placeholders to fill -- registrable as emitted, refused by `check` until the
+    instruments are real. A strategy's run needs a venue, an execution input and an account,
+    which are facts about the user's project rather than about this file, so it gets none.
     """
-    document = {
+    document: dict[str, Any] = {
         "components": {
             component_id: {
                 "kind": _DECLARATION_KIND[kind],
@@ -277,6 +238,23 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
             }
         }
     }
+    if kind is ComponentKind.DATA_MODEL and dataset_id:
+        document["runs"] = {
+            f"{component_id}-run": {
+                "instruments": ["INSTRUMENT_A", "INSTRUMENT_B"],
+                "start": "2024-01-02T00:00:00+09:00",
+                "end": "2024-12-31T23:00:00+09:00",
+                "sessions_from": dataset_id,
+                "timezone": "Asia/Seoul",
+                "at": "16:00",
+                "datamodels": {
+                    component_id: {
+                        "dataset_id": f"{component_id}-values",
+                        "value_fields": ["value"],
+                    }
+                },
+            }
+        }
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
@@ -288,13 +266,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "instruments",
             "dataset",
             "execution-input",
-            "agendas",
             "exchange",
             "run",
         ),
         help=(
             "scaffold a component (datamodel/strategy/constraint) or emit a template "
-            "(instruments/dataset/execution-input/agendas/exchange/run). Component and "
+            "(instruments/dataset/execution-input/exchange/run). Component and "
             "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
             "that registers it. Every kind reports the file to hand `vqapr register` as "
             "`declaration`; `run` emits the `runs:` declaration `vqapr run <run-id>` executes"
@@ -451,7 +428,14 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source, encoding="utf-8")
     declaration.write_text(
-        _declaration(args.component_id, kind, target, object_name), encoding="utf-8"
+        _declaration(
+            args.component_id,
+            kind,
+            target,
+            object_name,
+            dataset_id=getattr(args, "dataset", None),
+        ),
+        encoding="utf-8",
     )
     return success(
         "component.new",
@@ -533,20 +517,6 @@ def _execution_input_template(args: argparse.Namespace, project_root: Path) -> d
         kind="execution-input",
         path=str(target),
         declaration=str(target),
-    )
-
-
-def _agendas_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
-    target = args.out or project_root / "agendas.yaml"
-    refuse_existing(target, what="agendas template")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_AGENDAS_TEMPLATE, encoding="utf-8")
-    # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
-    # EVERY kind. For a single-file kind the template IS the declaration, so it equals
-    # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
-    # instead of branching on which of them happen to write two files (`docs/issues/026`).
-    return success(
-        "template.new", kind="agendas", path=str(target), declaration=str(target)
     )
 
 
@@ -860,8 +830,6 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         return _dataset_template(args, project_root)
     if args.kind == "execution-input":
         return _execution_input_template(args, project_root)
-    if args.kind == "agendas":
-        return _agendas_template(args, project_root)
     if args.kind == "exchange":
         return _exchange_template(args, project_root)
     if args.kind == "run":

@@ -4,15 +4,12 @@ A run is a registered declaration since record `139` (`runs:` in a declaration d
 §4.1): the reusable unit is a name in the workspace, not a file. This verb looks the run up,
 makes the same judgments `vqapr check` makes, freezes it once, and runs each strategy it names --
 or those named with `--strategy` -- each in its own flow with its own account and its own record.
-
-The one file this verb still takes is a MATERIALIZATION spec (`datamodel:`), because a
-materialization registers a dataset rather than writing a run record and has no run to register.
+A datamodel run (record `148`) is the same verb: its members write datasets instead of tables.
 """
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +19,6 @@ from vqapr.cli.envelope import success
 # `register` owns the CLI spelling of a component kind and imports nothing from this module, so
 # naming it here adds no cycle. The judgments take it as a callable rather than importing it
 # themselves, which is what keeps `flow/` free of `cli`.
-from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import (
     ExplainTopic,
     Failure,
@@ -30,7 +26,7 @@ from vqapr.domain.errors import (
     FailureSource,
     VqaprError,
 )
-from vqapr.flow.judgments import judgments, materialization_judgments
+from vqapr.flow.judgments import judgments
 from vqapr.flow.reporting import FILL_TABLE
 from vqapr.flow.run_records import (
     RunRecordConflict,
@@ -38,133 +34,23 @@ from vqapr.flow.run_records import (
     RunRecordLive,
     read_typed_table,
 )
-from vqapr.flow.run_spec import MATERIALIZATION
-from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
+from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.public import RunDefinition, Workspace, preflight_run
 from vqapr.public import run as execute_run
 from vqapr.workspace import WORKSPACE_DIRECTORY
-
-SPEC_SUFFIXES = (".yaml", ".yml")
-
-
-def is_spec_path(target: str) -> bool:
-    """Whether a `run`/`check` argument names a file rather than a registered run.
-
-    A registered run id is a bare identifier; a materialization spec is a YAML path. Decided by
-    the suffix so that a run id which happens to match a file in the working directory is still
-    a run id.
-    """
-    return Path(target).suffix.lower() in SPEC_SUFFIXES
-
-
-def _timestamp(value: object, *, name: str) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        parsed = value
-    elif not isinstance(value, str):
-        raise InputError(
-            VALUE_INVALID,
-            requirement=f"{name} must be an ISO-8601 timezone-aware datetime",
-            observed=f"{type(value).__name__}: {value!r}",
-            retry=f"write {name} with an explicit UTC offset, then retry",
-            examples=["2024-01-02T00:00:00+09:00"],
-        )
-    else:
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError as error:
-            raise InputError(
-                VALUE_INVALID,
-                requirement=f"{name} must be an ISO-8601 timezone-aware datetime",
-                observed=f"{name}={value!r}",
-                retry=f"write {name} with an explicit UTC offset, then retry",
-                examples=["2024-01-02T00:00:00+09:00"],
-            ) from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise InputError(
-            VALUE_INVALID,
-            requirement=(
-                f"{name} must include a UTC offset; a date or naive datetime does not identify "
-                "one instant"
-            ),
-            observed=f"{name}={parsed.isoformat()!r}",
-            retry=f"write {name} with an explicit UTC offset, then retry",
-            examples=["2024-01-02T00:00:00+09:00"],
-        )
-    return parsed
-
-
-def require_materialization_spec(document: dict[str, Any], path: Path) -> None:
-    """A YAML file handed to `run` or `check` must be a materialization spec, and complete.
-
-    A file declaring `strategy:` is the run spec of before record `139`. It is refused by name,
-    pointing at the declaration section that replaced it, rather than parsed as if the schema had
-    not moved.
-    """
-    if "strategy" in document and MATERIALIZATION in document:
-        raise InputError(
-            VALUE_INVALID,
-            requirement=(
-                f"a materialization spec declares `{MATERIALIZATION}:` alone; a simulation is a "
-                "registered run"
-            ),
-            observed=f"{path} declares both `{MATERIALIZATION}:` and `strategy:`",
-            retry=(
-                f"keep `{MATERIALIZATION}:` and drop `strategy:`; a run is declared under `runs:`"
-            ),
-            source=FailureSource(file=str(path), key_path="strategy"),
-        )
-    if "strategy" in document and MATERIALIZATION not in document:
-        raise InputError(
-            VALUE_INVALID,
-            requirement=(
-                "a simulation is a registered run: declare it under `runs:` in a declaration "
-                "document, register it, and run it by id"
-            ),
-            observed=f"{path} declares `strategy:`, the run-spec shape retired by record 139",
-            retry=(
-                "write the run as a `runs:` section (`vqapr new run --out runs.yaml`), "
-                "`vqapr register runs.yaml`, then `vqapr run <run-id>`"
-            ),
-            source=FailureSource(file=str(path), key_path="strategy"),
-        )
-    if MATERIALIZATION not in document:
-        raise InputError(
-            INCOMPLETE,
-            requirement=f"a materialization spec declares `{MATERIALIZATION}:`",
-            observed=f"{path} declares: {', '.join(sorted(document)) or '(nothing)'}",
-            retry=f"add `{MATERIALIZATION}: <component id>` to the spec, then retry",
-            source=FailureSource(file=str(path), key_path=MATERIALIZATION),
-        )
-    required = ("instruments", "output", "evaluate_at")
-    missing = [key for key in required if key not in document]
-    if missing:
-        raise InputError(
-            INCOMPLETE,
-            requirement=f"a materialization spec must declare: {MATERIALIZATION}, "
-            + ", ".join(required),
-            observed=f"missing {len(missing)}: {', '.join(missing)}",
-            retry="add the missing keys, then retry",
-            examples=missing,
-            source=FailureSource(file=str(path), key_path=missing[0]),
-        )
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "target",
-        help=(
-            "the id of a registered run (`vqapr list runs`), or the path of a materialization "
-            "spec YAML declaring `datamodel:`"
-        ),
+        help="the id of a registered run (`vqapr list runs`)",
     )
     parser.add_argument(
         "--strategy",
         dest="strategies",
         action="append",
         default=None,
-        help="run only this strategy of the run (repeatable); default: every strategy it names",
+        help="run only this model of the run (repeatable); default: every model it names",
     )
     parser.add_argument(
         "--jobs",
@@ -242,100 +128,29 @@ def _refuse_if_judged(failures: list[Failure], blocked: list[dict[str, str]], ru
     )
 
 
-def _materialize(
-    args: argparse.Namespace, document: dict[str, Any], spec_path: Path, project_root: Path
-) -> dict[str, Any]:
-    """Run a registered DataModel, through the verb that already exists.
+def refuse_a_path(target: str, *, verb: str) -> None:
+    """A run is named by id. A YAML path here is the spec file record `148` retired.
 
-    A DataModel could be scaffolded, registered and described, and nothing would ever run it:
-    `flow/materialize.py` held a real entry point no CLI command called. It is reached here rather
-    than through a `materialize` verb of its own, because registration is already symmetric.
-
-    `--strategy`, `--jobs` and `--force` are refused rather than ignored. All are defined in terms
-    of a run record, and a materialization writes none: it registers a dataset.
+    Refused by name rather than parsed: the spec (`datamodel:`, `evaluate_at`) is now a `runs:`
+    entry with `datamodels:`, registered like every other run and executed by id.
     """
-    from vqapr.public import MaterializationSpec, materialize
-
-    for flag, value in (
-        ("--strategy", getattr(args, "strategies", None)),
-        ("--force", getattr(args, "force", False)),
-        ("--jobs", (getattr(args, "jobs", 1) or 1) > 1),
-    ):
-        if value:
-            raise InputError(
-                VALUE_INVALID,
-                requirement=f"{flag} applies to a registered run, which writes run records",
-                observed=f"this spec declares `{MATERIALIZATION}:`, so it registers a dataset",
-                retry=f"drop {flag}; to replace the output, remove its dataset registration first",
-            )
-
-    output = document["output"]
-    if not isinstance(output, dict):
-        raise InputError(
-            VALUE_INVALID,
-            requirement="`output:` must be a mapping declaring dataset_id and value_fields",
-            observed=f"found {type(output).__name__}",
-            retry="write `output:` with `dataset_id:` and `value_fields:` beneath it",
-            source=FailureSource(file=str(spec_path), key_path="output"),
-        )
-    missing = [key for key in ("dataset_id", "value_fields") if key not in output]
-    if missing:
-        raise InputError(
-            INCOMPLETE,
-            requirement="`output:` must declare dataset_id and value_fields",
-            observed=f"missing {', '.join(missing)}",
-            retry="add the missing keys under `output:`, then retry",
-            examples=missing,
-            source=FailureSource(file=str(spec_path), key_path=f"output.{missing[0]}"),
-        )
-    judged = materialization_judgments(
-        document, Workspace.open(project_root), project_root, kind_spelling=cli_kind
-    )
-    if judged:
-        raise VqaprError(stage=JUDGMENT_STAGE, family=FailureFamily.INTENT, failures=judged)
-
-    try:
-        spec = MaterializationSpec.of(
-            str(output["dataset_id"]),
-            value_fields=[str(field) for field in output["value_fields"]],
-        )
-    except (TypeError, ValueError) as invalid:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="`output:` must describe a materialization this package can write",
-            observed=str(invalid),
-            retry="correct `output:`, then retry",
-            source=FailureSource(file=str(spec_path), key_path="output"),
-        ) from invalid
-
-    times = tuple(
-        _timestamp(value, name=f"evaluate_at[{index}]")
-        for index, value in enumerate(document["evaluate_at"] or ())
-    )
-    result = materialize(
-        project_root,
-        str(document[MATERIALIZATION]),
-        spec,
-        evaluation_times=[moment for moment in times if moment is not None],
-        instruments=[str(name) for name in document["instruments"]],
-    )
-    return success(
-        "materialize.complete",
-        dataset_id=str(spec.dataset_id),
-        output_path=str(result.output_path),
-        lineage_path=str(result.lineage_path),
-        evaluations=len(result.invocations),
-        rows_total=sum(invocation.row_count for invocation in result.invocations),
+    if Path(target).suffix.lower() not in (".yaml", ".yml"):
+        return
+    raise InputError(
+        VALUE_INVALID,
+        requirement=f"`vqapr {verb}` takes the id of a registered run",
+        observed=f"{target} is a file; a datamodel is run as a registered run since record 148",
+        retry=(
+            f"declare the datamodel under `runs:` with `datamodels:` (`vqapr new datamodel` emits "
+            f"the block), `vqapr register {target}`, then `vqapr {verb} <run-id>`"
+        ),
+        source=FailureSource(file=target),
     )
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     target = str(args.target)
-    if is_spec_path(target):
-        spec_path = Path(target)
-        document = read_yaml_mapping(spec_path, what="a materialization spec")
-        require_materialization_spec(document, spec_path)
-        return _materialize(args, document, spec_path, project_root)
+    refuse_a_path(target, verb="run")
 
     workspace = Workspace.open(project_root)
     definition: RunDefinition = workspace.run_definition(target)
@@ -344,7 +159,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     _refuse_if_judged(*judgments(definition, workspace), definition.run_id)
     selected = tuple(getattr(args, "strategies", None) or ())
     for name in selected:
-        definition.strategy(name)  # KeyError names the strategies the run does hold
+        definition.member(name)  # KeyError names the models the run does hold
     frozen = preflight_run(project_root, definition)
     store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
     replace = bool(getattr(args, "force", False))
@@ -383,6 +198,16 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 "changed run under a new id"
             ),
         ) from changed
+    if frozen.datamodels:
+        return success(
+            "run.complete",
+            run_id=frozen.run_id,
+            store_root=str(store_root),
+            datamodels={
+                component_id: _datamodel_envelope(record)
+                for component_id, record in outcome.records.items()
+            },
+        )
     strategies = {
         component_id: _strategy_envelope(store_root, frozen.run_id, record)
         for component_id, record in outcome.records.items()
@@ -397,6 +222,18 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # was computed against.
         roster=_roster_envelope(project_root),
     )
+
+
+def _datamodel_envelope(record: Any) -> dict[str, Any]:
+    """One datamodel's line of the success envelope, read from its record (record `148`)."""
+    period = record.get("period") or {}
+    return {
+        "record": str(record.get("datamodel_ref")),
+        "fingerprint": record.get("fingerprint"),
+        "dataset_id": record.get("dataset_id"),
+        "rows": record.get("rows"),
+        "sessions": period.get("occurrences"),
+    }
 
 
 def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, Any]:

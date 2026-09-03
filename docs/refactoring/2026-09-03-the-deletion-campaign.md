@@ -386,7 +386,25 @@ record `140`(monitoring findings) 병합 — **충족, `50941347`**. Step 5 완�
 
 ## Step 7 — A: DataModel은 account와 execution이 없는 flow다 (ExecPlan)
 
-**ExecPlan:** Step 6 완료 시점에 만든다. 여기는 계약이다.
+> **2026-09-03 완료 — 기록 `148`.** 네 milestone이 브랜치 `step-07-a-datamodel-is-a-flow`에서
+> 순서대로 들어갔다. M1: run이 `sessions_from|sessions`·`timezone`·`at`을 들고 agenda·`strategy_configs`·
+> `valuation`·`monitoring`이 표면에서 사라졌다(`7b9c781c`). M2: `flow/loop.py`의 `OccurrenceFlow`가 두
+> 종류의 run이 공유하는 걸음이고 `flow/datamodel.py`가 callback 자리에 서서 datamodel run이 세션마다
+> chunk를 쓰고 마지막에 한 번 등록한다(`470e1a32`). M3: `materialize()`·spec 파일·materialization
+> record kind가 삭제되고 `list/show/rm datamodel`과 `new datamodel`의 run 블록이 들어왔다. M4: 문서와
+> 기록. `059` 닫힘. 열린 것: 전략 identity가 run id를 접는 문제, stderr 진행 표시.
+
+**ExecPlan:** `.agent/plans/active/step-07-a-datamodel-is-a-flow.md` (2026-09-03). 여기는 계약이다.
+
+> **2026-09-03 착수 시 소유자 결정 둘 (D5·D6).** (D5) **run은 한 종류만 갖는다** — `datamodels:` 또는
+> `strategies:`, 둘을 섞지 않는다; 같은 run 안 datamodel → strategy 의존은 없다. (D6) **agenda와
+> `strategy_configs`는 사용자 표면에서 사라진다.** "전략은 매 세션 호출되고, 한 달에 한 번 돌고 싶으면
+> 전략 안에서 판단한다(`call.evaluation_time`, `self.memory`)." run이 `sessions_from`(또는 `sessions`)·
+> `timezone`·`decide_at`·`value_at`·`monitor_at`을 직접 들고, preflight가 그 값으로 내부 agenda를
+> 만든다. `evaluate_at` 목록과 spec 파일은 사라진다. (D7) **valuation·monitoring 시각도 없다** — 체결 시각마다
+> 계좌는 이미 평가·commit되고 있었고, execution table의 해상도 이상으로 들어갈 수 없다. valuation = 체결
+> 직후, monitoring = commit 직후; 사용자가 정하는 시각은 `at`(결정 시각) 하나. 아래 "무엇"의 `agenda` 언급은
+> 이 결정들로 읽는다.
 
 ### 오늘의 사실
 

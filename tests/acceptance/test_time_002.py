@@ -21,7 +21,6 @@ from vqapr.authoring import (
 )
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -59,7 +58,7 @@ from vqapr.flow.run import (
     StrategyConfig,
 )
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.simulation import AcceptedIntent, SimulationFlow
+from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, SimulationFlow
 from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
@@ -69,7 +68,6 @@ from vqapr.portfolio.intents import (
 )
 from vqapr.public import register_dataset
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -196,8 +194,6 @@ def _exchange() -> AcademicExchange:
 def _frozen(
     callbacks: tuple[datetime, ...],
     *,
-    valuations: tuple[datetime, ...] = (),
-    monitoring: tuple[datetime, ...] = (),
     end: datetime | None = None,
     execution: ExecutionInputRegistration | None = None,
     account: AccountSnapshot = _ACCOUNT,
@@ -206,18 +202,17 @@ def _frozen(
     constraints: ConstraintSet | None = None,
     strategy_requirements: tuple[DataRequirement, ...] = (),
 ) -> FrozenRun:
+    """A frozen run with the one agenda a run has since record `148`: its callbacks.
+
+    There is no valuation or monitoring agenda to declare: the book is valued at the instant the
+    venue fills and the declared constraints judge it right after each commit.
+    """
     strategy = StrategyConfig(
         _component("strategy", ComponentKind.STRATEGY_MODEL),
         "strategy",
         OperationRole.STRATEGY_CALLBACK,
     )
-    valuation = ValuationConfig("valuation", OperationRole.VALUATION)
-    monitor = MonitoringPolicy("monitoring", OperationRole.MONITORING) if monitoring else None
-    bounds = (
-        {"start": callbacks[0] if callbacks else (valuations + monitoring)[0], "end": end}
-        if end is not None
-        else {}
-    )
+    bounds = {"start": callbacks[0], "end": end} if end is not None else {}
     layer = FrozenStrategy(
         config=strategy,
         constraints=(
@@ -233,13 +228,7 @@ def _frozen(
     )
     return FrozenRun(
         run_id="test",
-        valuation=valuation,
-        valuation_agenda=_agenda("valuation", OperationRole.VALUATION, *valuations),
         strategies=(layer,),
-        monitoring=monitor,
-        monitoring_agenda=(
-            _agenda("monitoring", OperationRole.MONITORING, *monitoring) if monitor else None
-        ),
         exchange=_component("academic", ComponentKind.EXCHANGE) if execution else None,
         execution_input=execution,
         initial_account_snapshot=account,
@@ -439,24 +428,6 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_callback_free_valuation_and_monitoring_are_independent_agendas() -> None:
-    noon = datetime(2024, 3, 5, 12, tzinfo=KST)
-    frozen = _frozen(
-        (),
-        valuations=(noon,),
-        monitoring=(noon.replace(minute=5),),
-        end=noon.replace(minute=5),
-    )
-
-    result = _flow(frozen, _Strategy(()), _state()).run()
-
-    assert [trace.occurrence.role for trace in result.occurrences] == [
-        OperationRole.VALUATION,
-        OperationRole.MONITORING,
-    ]
-
-
-@pytest.mark.uc("UC-TIME-002")
 def test_empty_constraint_set_needs_no_constraint_window() -> None:
     at = datetime(2024, 3, 5, 12, tzinfo=KST)
     frozen = _frozen((at,), end=at, constraints=ConstraintSet(()))
@@ -477,11 +448,20 @@ def test_empty_constraint_set_needs_no_constraint_window() -> None:
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
+def test_monitoring_projects_at_the_fill_instant_and_reuses_its_projected_bounds(
     tmp_path: Path,
 ) -> None:
+    """Monitoring judges the committed book right after the fill, as of the fill instant.
+
+    Record `148`: there is no monitoring occurrence of its own. The constraint projects once at
+    the callback (for the intent's bounds) and once more at the fill instant (for the judgment),
+    and the judgment measures against the bounds IT projected there, not the ones the callback
+    saw: the two projections are separate reads at separate cutoffs, and pairing the later
+    measurement with the earlier bounds would report a breach against a limit that had since
+    moved.
+    """
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
-    monitoring = datetime(2024, 3, 5, 16, tzinfo=KST)
+    fill = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
 
     class RecordingConstraint(_Constraint):
         def __init__(self) -> None:
@@ -501,15 +481,18 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
         ) -> ConstraintFinding:
             self.actual = (call.evaluation_time, bounds)
             return ConstraintFinding(
-                passed=False, measured=Decimal("1"), bound=Decimal("0"), excess=Decimal("1"), details={}
+                passed=False,
+                measured=Decimal("1"),
+                bound=Decimal("0"),
+                excess=Decimal("1"),
+                details={},
             )
 
     constraint = RecordingConstraint()
     result = _flow(
         _frozen(
             (callback,),
-            monitoring=(monitoring,),
-            end=monitoring,
+            end=fill,
             execution=_execution(
                 _parquet(
                     tmp_path / "execution.parquet",
@@ -531,14 +514,19 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
         (constraint,),
     ).run()
 
-    assert [cutoff for cutoff, _ in constraint.projections] == [callback, monitoring]
-    # Monitoring measures against the bounds IT projected, not the ones the callback saw. The
-    # two projections are separate reads at separate cutoffs, and pairing the later measurement
-    # with the earlier bounds would report a breach against a limit that had since moved.
-    assert constraint.actual == (monitoring, constraint.projections[1][1])
-    assert result.occurrences[-1].result.report.passed is False
+    assert [cutoff for cutoff, _ in constraint.projections] == [callback, fill]
+    assert constraint.actual == (fill, constraint.projections[1][1])
+    # The finding rides the due execution's own result: monitoring is part of the commit.
+    due = result.occurrences[-1]
+    assert isinstance(due, DueExecutionTrace)
+    assert due.result.monitoring is not None
+    assert due.result.report.passed is False
     assert result.final_state.account is not None
     assert result.final_state.account.snapshot.version == 1
+    # And what it measured reached the run's own table, dated by the fill instant it judged.
+    findings = result.final_state.recorder_rows["vqapr.monitoring"]
+    assert [(row["constraint"], row["passed"]) for row in findings] == [("risk", False)]
+    assert [row["event_time"] for row in findings] == [fill]
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -623,7 +611,6 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
 
     frozen = _frozen(
         (callback,),
-        valuations=(target,),
         end=target,
         execution=execution,
         datasets=(registration,),
@@ -667,8 +654,9 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
     # The account the callback was handed.
     assert stamped.account_version_seen == _ACCOUNT.version
     # Deterministic, so a replayed run mints the same identity for the same occurrence.
+    first_occurrence = frozen.dispatch_order(frozen.strategies[0])[0]
     assert stamped.intent_id == uuid5(
-        NAMESPACE_URL, f"{stamped.strategy_id}/{frozen.dispatch_order(frozen.strategies[0])[0].occurrence_id}"
+        NAMESPACE_URL, f"{stamped.strategy_id}/{first_occurrence.occurrence_id}"
     )
     assert result.final_state.pending_accepted_intent is None
 
@@ -1047,16 +1035,19 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_frozen_agenda_trace_is_canonical_and_non_selected_density_does_not_change_it() -> None:
+def test_frozen_agenda_trace_is_canonical_and_dispatches_only_callbacks() -> None:
+    """Two freezes of the same declarations share one identity, and the static dispatch order
+    is the strategy's own agenda and nothing else: since record `148` valuation and monitoring
+    have no occurrences to merge in."""
     nine = datetime(2024, 3, 5, 9, tzinfo=KST)
     ten = datetime(2024, 3, 5, 10, tzinfo=KST)
-    first = _frozen((nine, ten), valuations=(nine,))
-    second = _frozen((nine, ten), valuations=(nine,))
+    first = _frozen((nine, ten))
+    second = _frozen((nine, ten))
 
     assert first.identity == second.identity
-    assert [(item.role, item.occurrence_id) for item in first.dispatch_order(first.strategies[0])] == [
+    order = first.dispatch_order(first.strategies[0])
+    assert [(item.role, item.occurrence_id) for item in order] == [
         (OperationRole.STRATEGY_CALLBACK, "strategy-0"),
-        (OperationRole.VALUATION, "valuation-0"),
         (OperationRole.STRATEGY_CALLBACK, "strategy-1"),
     ]
 
@@ -1090,7 +1081,9 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
     # The refusal names both sides, so a reader does not have to diff two ids by eye.
     assert "'other'" in caught.value.failures[0].observed
     assert "'risk'" in caught.value.failures[0].observed
-    assert frozen.strategies[0].constraints.constraints == (_component("risk", ComponentKind.CONSTRAINT),)
+    assert frozen.strategies[0].constraints.constraints == (
+        _component("risk", ComponentKind.CONSTRAINT),
+    )
     assert ConstraintSet((constraint,)).constraints == (constraint,)
 
 
@@ -1115,16 +1108,16 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
         cash_weight=Decimal("0"),
         budget=_BUDGET,
     )
-    frozen = _frozen((callback, target), valuations=(target,), end=target, execution=registration)
+    frozen = _frozen((callback, target), end=target, execution=registration)
     state = _state()
     strategy = _Strategy((intent, Hold(reason="after due")))
 
     result = _flow(frozen, strategy, state).run()
 
+    # The fill is the valuation: no separate valuation occurrence follows it (record `148`).
     assert [type(trace).__name__ for trace in result.occurrences] == [
         "OccurrenceTrace",
         "DueExecutionTrace",
-        "OccurrenceTrace",
         "OccurrenceTrace",
     ]
     assert result.final_state.account is not None
@@ -1133,17 +1126,19 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     )
     assert result.final_state.pending_accepted_intent is None
     assert len(result.final_state.feedback) == 1
+    # Monitoring judges the committed, marked book before the feedback is published.
     assert [trace.kind for trace in result.final_state.lifecycle_trace] == [
         LifecycleKind.ACCEPTED_INTENT,
         LifecycleKind.ACCOUNT_COMMITTED,
         LifecycleKind.MARKED,
+        LifecycleKind.MONITORED,
         LifecycleKind.FEEDBACK_PUBLISHED,
         LifecycleKind.NO_DECISION,
     ]
     callback_evidence = result.final_state.lifecycle_trace[0].detail
     commit_evidence = result.final_state.lifecycle_trace[1].detail
     mark_evidence = result.final_state.lifecycle_trace[2].detail
-    feedback_evidence = result.final_state.lifecycle_trace[3].detail
+    feedback_evidence = result.final_state.lifecycle_trace[4].detail
     assert isinstance(callback_evidence, CallbackEvidence)
     assert isinstance(commit_evidence, AccountCommitEvidence)
     assert isinstance(mark_evidence, MarkEvidence)
@@ -1173,6 +1168,17 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert feedback_evidence.candidates == (commit_evidence.dealt_fills, mark_evidence.marks)
     assert result.final_state.finalization is not None
     assert strategy.seen[-1][2], "the callback after the fill must see the filled book"
+    # The NAV is measured at the fill instant, and dated by it: `event_time` and `observed_at`
+    # are both the fill, not the decision that led to it (record `148`).
+    nav_rows = [
+        row
+        for row in result.final_state.recorder_rows["vqapr.account"]
+        if row["instrument"] == "_ACCOUNT"
+    ]
+    assert [(row["event_time"], row["observed_at"], row["stage"]) for row in nav_rows] == [
+        (target, target, OperationRole.VALUATION.value)
+    ]
+    assert nav_rows[0]["nav"] == Decimal("100")
 
     replay = _flow(frozen, _Strategy((intent, Hold(reason="after due"))), _state()).run()
     assert replay.final_state.account == result.final_state.account
@@ -1202,7 +1208,7 @@ def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> Non
     )
 
     result = _flow(
-        _frozen((first, second), valuations=(target,), end=target, execution=registration),
+        _frozen((first, second), end=target, execution=registration),
         _Strategy((intent, Hold(reason="keep pending"))),
         _state(),
     ).run()
@@ -1212,6 +1218,7 @@ def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> Non
         LifecycleKind.NO_DECISION,
         LifecycleKind.ACCOUNT_COMMITTED,
         LifecycleKind.MARKED,
+        LifecycleKind.MONITORED,
         LifecycleKind.FEEDBACK_PUBLISHED,
     ]
     commit = result.final_state.lifecycle_trace[2].detail
@@ -1239,7 +1246,7 @@ def test_target_only_absence_publishes_typed_zero_dealt_fill(tmp_path: Path) -> 
     )
     state = _state()
     result = _flow(
-        _frozen((callback,), valuations=(target,), end=target, execution=registration),
+        _frozen((callback,), end=target, execution=registration),
         _Strategy((intent,)),
         state,
     ).run()
@@ -1308,13 +1315,7 @@ def test_a_held_instrument_absent_from_the_venue_is_carried_not_refused(tmp_path
     state = _state(initial)
 
     _flow(
-        _frozen(
-            (callback,),
-            valuations=(target,),
-            end=target,
-            execution=registration,
-            account=initial,
-        ),
+        _frozen((callback,), end=target, execution=registration, account=initial),
         _Strategy((intent,)),
         state,
     ).run()
@@ -1352,7 +1353,9 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
     # Valuation is no longer a separate subscription: the book is valued from the execution
     # snapshot the fill was priced against, so that reader is the seam that can fail after commit.
     # The due path binds the helper in the execution phase's module (record `147`).
-    monkeypatch.setattr(execution_phase, "_marks_from_execution_snapshot", required_valuation_failure)
+    monkeypatch.setattr(
+        execution_phase, "_marks_from_execution_snapshot", required_valuation_failure
+    )
     with pytest.raises(SimulationFailure) as raised:
         _flow(
             _frozen((callback,), end=target, execution=registration),
@@ -1398,12 +1401,14 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
             True,
             2,
         ),
+        # Four publications precede the feedback since record `148`: the callback, the commit,
+        # the mark, and the monitoring that judges the marked book right after it.
         (
             "publication",
             SimulationFailureFamily.PUBLICATION,
             SimulationStage.DUE_FEEDBACK_PUBLICATION,
             True,
-            3,
+            4,
         ),
     ),
 )
@@ -1488,7 +1493,9 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     elif boundary == "account":
         assert failure.failed_requirement == AccountState(_ACCOUNT)
     elif boundary == "valuation":
-        assert failure.failed_requirement is frozen.valuation
+        # Valuation has no configuration of its own since record `148`; the owner the failure
+        # names is the strategy agenda whose fill instant the book was being valued at.
+        assert failure.failed_requirement is frozen.strategies[0].agenda
     else:
         assert isinstance(failure.failed_requirement, FeedbackEvidence)
 
@@ -1516,9 +1523,7 @@ def test_omitted_holding_is_liquidated_through_the_due_flow(tmp_path: Path) -> N
     )
 
     result = _flow(
-        _frozen(
-            (callback,), valuations=(target,), end=target, execution=registration, account=initial
-        ),
+        _frozen((callback,), end=target, execution=registration, account=initial),
         _Strategy((intent,)),
         _state(initial),
     ).run()

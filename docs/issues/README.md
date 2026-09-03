@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-03.** 이 디렉터리에 54개 파일이 있고 **54개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-03.** 이 디렉터리에 68개 파일이 있고 **54개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,12 +15,38 @@
 
 ---
 
-## 1. 열린 것 — 둘
+## 1. 열린 것 — 열넷
 
 | # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`는 record `139`로 닫혔다(기록 쪽); 선언 시점에 묻는 쪽은 남아 있다 | 남은 절반 |
+
+### 시나리오 testbed run 2가 낸 열둘 (2026-09-03, `0.3.0` wheel)
+
+`kaist-thesis/vqapr-scenario-testbed/`에서 첫 사용자 에이전트가 논문의 FF5+MOM residual arm을 끝까지
+수행하며 적은 `FINDINGS.md` 14건 중 소스에서 확인된 12건. 접수 표시는 그쪽 `FINDINGS.md` 각 항목에
+남겼다. `blocked`는 없었다. **가장 무거운 셋은 `055`·`059`·`061`이었고, `061`은 record `143`이, `059`는
+record `148`이 닫았다.**
+
+| # | 제목 | 종류 | FINDINGS |
+|---|---|---|---|
+| `055` | `show model`이 아무도 설정하지 않는 `_aliases`·`_authored_tables`를 읽어 `reads`가 항상 비고 `records`가 선언된 표를 안 싣는다 | code | F-005 |
+| `056` | `check`가 미등록 dataset 하나를 field 수만큼 반복 보고한다 | message | F-006 |
+| `057` | `read_strategy_table`이 help가 말하는 root와 signature가 허용하는 `strategy_ref=None`에 빈 iterator를 낸다 | code+docs | F-007, F-012 |
+| `059` | 물질화가 모든 행과 access 기록을 끝까지 메모리에 들고, lineage가 evaluation마다 전 종목을 반복하며(478MB), 진행 출력이 없다 | code | F-009 |
+| `060` | `rm`에 `dataset` kind가 없는데 skill은 삭제를 약속한다 (C4/E1의 남은 절반) | code | F-011 |
+| `062` | `Hold(reason)` 규칙이 skill과 docstring에서 반대다 | docs | F-001 |
+| `063` | strategy scaffold가 `--dataset`/`--field`를 받고도 alias `prices`와 momentum docstring을 낸다 | docs | F-002 |
+| `064` | "종가에 종가 정보로 거래"를 말할 수 없고, template 예시는 한 세션 지연을 정답으로 적는다 (`027`·`033`의 축) | docs | F-010 |
+| `065` | `inputs()`가 `initial_model_memory` 전에 불리는데 아무도 말하지 않는다; 한 클래스를 여러 id로 등록할 수 없다 | docs+design | F-014 |
+| `066` | 하위 디렉터리의 `register`가 두 번째 workspace를 조용히 만들고, 거절문이 어느 workspace를 봤는지 말하지 않는다 | message | F-004 |
+| `067` | skill은 편집한 component가 `register --force` 없이는 거절된다고 하는데, 그 flag는 없고 plain re-register가 말없이 교체한다 (`025`·`030`의 축) | docs+message | F-017 |
+| `068` | 세션당 package 시간 0.25s, 대부분 Python 행으로 fetch하는 execution snapshot 둘; run 결과에 phase별 시간이 없다 | code | F-016 |
+
+파일로 만들지 않은 것: F-003(cp949 콘솔, 에이전트 환경); F-015(`values`가 접근마다 전 컬럼을 다시 만든다 —
+`061`과 같은 뿌리, record `143`이 닫았다; 그 profile 수치는 `061` 파일에 붙였다). `027`에는 그 run의 비용
+annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝난 run이며 `blocked`는 끝까지 없었다.**
 
 ### 열린 아홉에 없는 것 — 아직 파일이 없는 실환경 발견
 

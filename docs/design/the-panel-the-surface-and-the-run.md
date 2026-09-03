@@ -275,6 +275,40 @@ runs:
       ou-ff5:  {agenda: krx-rebalance, constraints: [no-short]}
 ```
 
+> **2026-09-03 (기록 `148`, 소유자 결정 D5·D6·D7).** 위 모양에서 `valuation:`과 전략별 `agenda:`가
+> 사라졌다. agenda는 사용자 표면의 명사가 아니다 — run이 **세션과 벽시계 시각**을 직접 든다
+> (`sessions_from: <dataset>` 또는 `sessions: [...]`, `timezone`, `at`), 모든 모델은 매 세션 `at`에
+> 호출되어 스스로 판단하며(월 1회 리밸런스는 전략 안의 규칙이다), 장부는 venue가 체결하는 그 시각에
+> 평가되고 commit 직후 monitoring된다 — 따로 정하는 valuation·monitoring 시각은 없다. 그리고 run은
+> **한 종류의 모델**만 든다: `strategies:`(각자 account·venue) 또는 `datamodels:`(account 없이 dataset
+> 하나씩 씀). datamodel run은 exchange·execution_input·initial_account를 거절한다.
+>
+> ```yaml
+> runs:
+>   krx-2015-2024:
+>     instruments: [A005930, A000660]
+>     start: 2015-01-01T00:00:00+09:00
+>     end:   2024-12-31T23:00:00+09:00
+>     sessions_from: krx-prices
+>     timezone: Asia/Seoul
+>     at: "15:29"
+>     exchange: krx-costed
+>     execution_input: krx-close-fill
+>     initial_account: {cash: 1000000000, mode: long_only}
+>     strategies:
+>       ou-k0:   {constraints: [no-short]}
+>       ou-ff5:  {constraints: [no-short]}
+>   ff6-resid:
+>     instruments: [A005930, A000660]
+>     start: 2015-01-01T00:00:00+09:00
+>     end:   2024-12-31T23:00:00+09:00
+>     sessions_from: krx-prices
+>     timezone: Asia/Seoul
+>     at: "16:00"
+>     datamodels:
+>       ff6-resid-model: {dataset_id: ff6-resid-values, value_fields: [resid]}
+> ```
+
 - `vqapr register` 가 run을 workspace에 넣는다. **재사용의 단위가 파일이 아니라 등록된 이름**이 된다.
   오늘은 `cli/run.py`가 호출마다 spec을 읽어 `RunDefinition`을 새로 만든다 (§17.3).
 - `vqapr run krx-2015-2024 [--strategy ou-ff5] [--jobs 3]`
@@ -282,8 +316,10 @@ runs:
   전략 하나만 구동한다. 040의 ruling(agenda는 공유 가능하다)이 먼저 들어와야 한다. **들어왔다 —
   record `138`(2026-09-02).**
 - `FrozenRun`이 둘로 갈린다:
-  - **run 층** — universe, period, venue, execution input, initial account, agenda. 전략들이 공유한다.
-  - **전략 층** — component, config, constraints, requirements. 전략마다 하나.
+  - **run 층** — universe, period, sessions와 `at`, (strategy run이면) venue, execution input, initial
+    account. 모델들이 공유한다.
+  - **모델 층** — `FrozenStrategy`(component, constraints, requirements, opening memory) 또는
+    `FrozenDataModel`(component, output dataset, requirements, opening memory). 모델마다 하나 (기록 `148`).
 
   preflight는 run 층을 한 번, 전략 층을 전략마다 언다. 오늘의 preflight가 이미 그 두 집합을 따로
   들고 있다 (`strategy_requirements`와 `constraint_requirements`가 이미 분리되어 있다).

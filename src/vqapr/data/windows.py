@@ -55,8 +55,8 @@ class ObservationBatch:
       not applied to them, and there is no name to put here (`docs/issues/038`).
     * the field the requirement named, under its own id -- a requirement names one field and a
       lookback, and nothing else (`docs/issues/049`). A value is `None` where the source has no
-      value; a `RowsLookback` also nulls it on rows outside that field's own last-N (see
-      `RowsLookback`).
+      value; an `InstantsLookback` also nulls it on rows outside that field's own last-N instants
+      (see `InstantsLookback`).
 
     **A value keeps the parquet column's own type.** A `DOUBLE` column arrives as `float` and a
     `DECIMAL` column as `Decimal`; nothing here converts between them, because a conversion either

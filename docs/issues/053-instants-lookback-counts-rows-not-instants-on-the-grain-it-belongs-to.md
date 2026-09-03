@@ -1,6 +1,8 @@
 # 053 -- `InstantsLookback` counts rows, not instants, on the one grain it belongs to
 
-**Status:** open. Found 2026-09-03 while taking the `049` measurement
+**Status:** **CLOSED 2026-09-03** by record `141` (deletion campaign Step 1). The rank is a `dense_rank` over `available_at` inside the name's partition, on rows where the field is non-null, so `n` means instants and every row of an admitted instant comes back; both rows-bound proofs count `DISTINCT` instants the same way. `tests/data/test_lookbacks_follow_grain.py` holds the reproduction (four instants x three rows, `InstantsLookback(2)` -> two instants, six rows). The second finding -- a `rows` grain admits no calendar window -- is **not** closed here and is not an open issue either: it is a ruling to take when a consumer needs it, as the text below says.
+
+**Status when filed:** open. Found 2026-09-03 while taking the `049` measurement
 (`experiments/exp_049_the_measurement/`), on `develop @ 724bdadc`.
 
 **Touches:** `data/lookback.py` (`InstantsLookback` docstring), `data/scan.py::observation_rows`

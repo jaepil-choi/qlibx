@@ -35,10 +35,11 @@ pivot -- and `wide` is `049`'s own second measurement, unchanged.
 - **Within-process ratios are the result**, as in `049`. Absolute seconds depend on the machine
   and on the generated size, which is smaller than the 37.8M-row warehouse.
 - The `rows` side cannot declare the calendar window the original model did: a `rows` grain
-  admits only `InstantsLookback`, and that count ranks **source rows**, not instants, on a long
-  table (see the constant's docstring in `exp049_models.py`). The harness gives it enough rows
-  to reach three fiscal years for every name; the reduction keeps two, so the output is the
-  same, and the anti-join is what proves it.
+  admits only `InstantsLookback`. It declares twelve instants -- three fiscal years at four
+  availability instants a year (see the constant's docstring in `exp049_models.py`); the
+  reduction keeps two, so the output is the same, and the anti-join is what proves it. (Until
+  record `141` the count ranked source rows rather than instants, `docs/issues/053`, and the
+  harness had to declare 2,000 rows and argue that they reached three years.)
 - Every output value is an integer stored as `DOUBLE`, so the three sides see the same
   `Decimal` and the anti-join compares values, not formatting.
 

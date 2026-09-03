@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-03.** 이 디렉터리에 54개 파일이 있고 **50개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-03.** 이 디렉터리에 54개 파일이 있고 **51개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,13 +15,12 @@
 
 ---
 
-## 1. 열린 것 — 넷
+## 1. 열린 것 — 셋
 
 | # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`는 record `139`로 닫혔다(기록 쪽); 선언 시점에 묻는 쪽은 남아 있다 | 남은 절반 |
-| `053` | `InstantsLookback`이 자기가 속한 유일한 grain에서 instant가 아니라 행을 센다 | **열림 2026-09-03.** `049` 측정이 발견. instant 4개 × 행 3개인 표에 `InstantsLookback(2)` → 행 2개, instant 1개. docstring과 거절 메시지는 instant라고 말한다. 덤으로 `grain: rows`는 calendar window를 거절하므로 원래 annual-fundamentals 모델의 질문이 그 grain에서 표현 불가 | 명사 1의 후속 |
 | `054` | `rows` 읽기 시간의 70%가 등록 때 검증한 이름을 행마다 다시 검증하는 데 든다 | **열림 2026-09-03.** `049` 측정 프로파일. 읽기 9.85s 중 scan 2.92s, `Observation` 생성 6.81s(`_copy_values`의 이름 공백 검사 14.6M회 2.79s, pytz 0.86s). `044`가 다른 읽기 경로에서 닫은 것과 같은 모양 | `035` ruling 그대로 |
 
 ### 열린 아홉에 없는 것 — 아직 파일이 없는 실환경 발견
@@ -43,7 +42,7 @@
 
 ---
 
-## 2. 닫힌 것 — 쉰
+## 2. 닫힌 것 — 쉰하나
 
 | # | 닫은 것 |
 |---|---|
@@ -96,6 +95,7 @@
 | `049` | **CLOSED 2026-09-03** — 측정을 이 repo의 `experiments/exp_049_the_measurement/`가 잰다. rows 372.57s · expr(같은 long 파일, expression 필드) 5.04s · wide 2.46s, anti-join 0. rows/expr **73.9x**, rows/wide **151.5x** |
 | `051` | record `130` — contract 블록이 monitoring 관측을 걷는다. 그 전엔 **모든 기록에서 비어 있었다** |
 | `052` | CLOSED 2026-09-03 — showcase 여덟이 `tests/showcases/`의 slow 테스트로 `test_all`에 들어간다 (삭제 캠페인 Step 0, harness-only). `show_003`은 `data/DW`(repo 밖) 때문에 release 전 손으로 |
+| `053` | record `141` — `InstantsLookback(n)`이 instant를 센다 (`dense_rank` over `available_at`, proof도 `DISTINCT` instant). `grain: rows`의 calendar window는 ruling 대기, 이슈 아님 |
 | `050` | CLOSED 2026-09-01 |
 
 ---

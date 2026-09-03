@@ -948,10 +948,10 @@ class _Counted:
     would not -- with no error anywhere. That is the failure the campaign calls a correctness
     change wearing performance clothes, so the vocabulary is named once and both take it.
 
-    A grouped registration counts what its expressions PRODUCE, one value per instant, because
-    that is what a `RowsLookback` counts for such a dataset. A row-wise one counts the source's
-    own rows. The fragments differ between the two shapes and are identical between the two
-    places, which is the property this type exists to hold.
+    A grouped registration counts the instants its expressions PRODUCE a value on; a row-wise
+    one counts the instants on which any source row carries the field. Both are instants. The
+    fragments differ between the two shapes and are identical between the two places, which is
+    the property this type exists to hold.
     """
 
     relation: str
@@ -960,8 +960,11 @@ class _Counted:
     instrument: str
     available: str
     args: tuple[str, ...]
-    """One counting argument per declared field, deduplicated. `count(arg)` is what is compared
-    against the declared row count."""
+    """One counting argument per declared field, deduplicated: the instant, where the field is
+    non-null, else NULL. `count(DISTINCT arg)` -- the number of instants on which the name
+    reported that field -- is what is compared against the declared instant count. Instants and
+    not rows, because that is what an `InstantsLookback` counts (`docs/issues/053`); on a grouped
+    registration the two coincide."""
 
 
 def _counted(
@@ -984,13 +987,21 @@ def _counted(
             ),
             instrument=_quote("instrument"),
             available=_quote("available_at"),
-            args=tuple(_quote(name) for name in fields),
+            args=tuple(
+                f"CASE WHEN {_quote(name)} IS NOT NULL THEN {_quote('available_at')} END"
+                for name in fields
+            ),
         )
     return _Counted(
         relation=_relation(spec),
         instrument=_quote(instrument_field),
         available=_quote(available_at_field),
-        args=tuple(dict.fromkeys(f"({value})" for value in fields.values())),
+        args=tuple(
+            dict.fromkeys(
+                f"CASE WHEN ({value}) IS NOT NULL THEN {_quote(available_at_field)} END"
+                for value in fields.values()
+            )
+        ),
     )
 
 
@@ -1040,7 +1051,7 @@ def _prove_rows_bound(
     This runs once per declared read per run. Afterwards the read carries its own proof forward
     (`_rows_bound`), so this is the cold start rather than a per-callback cost.
     """
-    counts = ", ".join(f"count({argument})" for argument in counted.args)
+    counts = ", ".join(f"count(DISTINCT {argument})" for argument in counted.args)
     placeholders = ", ".join("?" for _ in instruments)
     observed = {
         row[0]: row[1:]
@@ -1238,17 +1249,19 @@ def observation_rows(
         if keyed_by_instrument:
             ordering.append(_quote("instrument"))
         ascending = ", ".join(ordering)
-        descending = ", ".join(f"{column} DESC" for column in ordering)
         carried_projections = list(ordering)
-        partition = f"PARTITION BY {_quote('instrument')} " if keyed_by_instrument else ""
+        partition = (
+            f"PARTITION BY {_quote('instrument')}, " if keyed_by_instrument else "PARTITION BY "
+        )
+        available_desc = _quote("available_at")
     else:
         source = f"{_relation(spec)} WHERE {where}"
         selected = {name: f"({value})" for name, value in fields.items()}
         ordering_fields = tuple(dict.fromkeys((available_at_field, *key_fields)))
         ascending = ", ".join(_quote(field) for field in ordering_fields)
-        descending = ", ".join(f"{_quote(field)} DESC" for field in ordering_fields)
         carried_projections = list(identity)
-        partition = f"PARTITION BY {instrument} " if keyed_by_instrument else ""
+        partition = f"PARTITION BY {instrument}, " if keyed_by_instrument else "PARTITION BY "
+        available_desc = available
 
     proofs: list[str] = []
     proof_parameters: list[object] = []
@@ -1259,13 +1272,21 @@ def observation_rows(
         )
         sql = f"SELECT {', '.join(projections)} FROM {source} ORDER BY {ascending}"
     else:
+        # `rows` is an `InstantsLookback`: each name's own last n INSTANTS, per field, counting
+        # only instants on which the field is non-null. A `dense_rank` over `available_at`
+        # inside the name's partition gives every row of one instant the same rank, so a
+        # vendor-grain table with many rows per (name, instant) hands back whole instants
+        # rather than the newest instant's first n rows (`docs/issues/053`). Partitioning on
+        # `(expression IS NULL)` as well keeps null rows from taking a rank away from the
+        # instants that carry a value; the `IS NOT NULL` in `chosen` then drops them.
         ranks: list[str] = []
         keep: list[str] = []
+        instant_desc = f"{available_desc} DESC"
         for index, (name, expression) in enumerate(selected.items()):
             rank = _quote(f"__vqapr_rank_{index}")
             ranks.append(
-                f"count({expression}) OVER ({partition}ORDER BY {descending} "
-                f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS {rank}"
+                f"dense_rank() OVER ({partition}{expression} IS NULL ORDER BY {instant_desc}) "
+                f"AS {rank}"
             )
             chosen = f"{expression} IS NOT NULL AND {rank} <= {int(rows)}"
             keep.append(f"({chosen})")
@@ -1284,7 +1305,7 @@ def observation_rows(
             # row, and the two must agree or the bound stops meaning what it was proved to mean.
             for index, argument in enumerate(counted.args):
                 proofs.append(
-                    f"count(CASE WHEN {counted.available} >= ? THEN {argument} END) "
+                    f"count(DISTINCT CASE WHEN {counted.available} >= ? THEN {argument} END) "
                     f"OVER (PARTITION BY {counted.instrument}) "
                     f"AS {_quote(f'{_PROOF_PREFIX}{index}')}"
                 )

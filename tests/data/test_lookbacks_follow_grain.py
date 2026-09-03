@@ -137,3 +137,58 @@ def test_the_steering_rule_is_stated_once() -> None:
     assert lookback_fits_grain(InstantsLookback(1), Grain.ROWS) is None
     assert "InstantsLookback" in lookback_fits_grain(RowsLookback(1), Grain.ROWS)
     assert "RowsLookback" in lookback_fits_grain(InstantsLookback(1), Grain.INSTANT)
+
+
+@pytest.fixture(scope="module")
+def vendor_grain_parquet(tmp_path_factory) -> Path:
+    """The `053` shape: one name, four instants, three account codes -- three rows per instant.
+
+    `close` is null on every row of the 2nd, so the per-field null-skipping has an instant to skip.
+    """
+    out = tmp_path_factory.mktemp("vendor") / "statements.parquet"
+    rows = ", ".join(
+        f"(TIMESTAMPTZ '2024-03-{day:02d} 15:30:00+09', 'A', '{code}', "
+        + ("NULL" if day == 2 else f"{day * 10 + index}.0")
+        + ")"
+        for day in range(1, 5)
+        for index, code in enumerate("xyz")
+    )
+    duckdb.connect().execute(
+        f"COPY (SELECT * FROM (VALUES {rows}) AS t(available_at, instrument, code, close)) "
+        f"TO '{out.as_posix()}' (FORMAT PARQUET)"
+    )
+    return out
+
+
+def test_an_instants_lookback_counts_instants_not_rows_on_a_vendor_grain_table(
+    tmp_path: Path, vendor_grain_parquet: Path
+) -> None:
+    """`docs/issues/053`: `InstantsLookback(2)` on three rows per instant is two instants, six rows.
+
+    The version that counted rows returned the newest instant's first two rows and called them two
+    instants; nothing refused it, and a model believing it reached two statements reached one.
+    """
+    register_dataset(
+        tmp_path,
+        DatasetRegistration.of(
+            "statements",
+            "src",
+            instrument_field="instrument",
+            available_at="available_at",
+            key_fields=("available_at", "instrument", "code"),
+            fields={"close": "close"},
+            grain="rows",
+        ),
+        SourceSpec.of("src", vendor_grain_parquet),
+    )
+    workspace = Workspace.open(tmp_path)
+    rows = _read(workspace, DataRequirement.of("statements", "close", lookback=InstantsLookback(2)))
+
+    assert sorted({row["available_at"].day for row in rows}) == [3, 4]
+    assert len(rows) == 6, "every row of an admitted instant comes back, not the first n rows"
+
+    # An instant on which the field is null everywhere is not one of the name's instants for that
+    # field: three instants back lands on the 1st, 3rd and 4th, and the 2nd's rows do not come.
+    rows = _read(workspace, DataRequirement.of("statements", "close", lookback=InstantsLookback(3)))
+    assert sorted({row["available_at"].day for row in rows}) == [1, 3, 4]
+    assert len(rows) == 9

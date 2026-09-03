@@ -47,7 +47,15 @@ def observations(
 
     A row missing its instrument or availability stamp is a schema error rather than a row
     to skip: dropping it silently would turn a broken declaration into a thin result.
+
+    The observations are built through `Observation._framework_row`, without per-row validation.
+    `fields` are the alias's declared names, checked once when the `DatasetInput` was declared;
+    the scan already returned `available_at` from a `TIMESTAMPTZ` column and the instrument as
+    text. `docs/issues/054` measured the validated constructor at 70% of a `rows` read -- 14.6M
+    whitespace checks for 159k rows -- re-proving per row what registration proved once.
     """
+    declared = tuple(fields)
+    build = Observation._framework_row
     observations: list[Observation] = []
     for row in rows:
         if instrument_field not in row:
@@ -66,19 +74,17 @@ def observations(
                 f"{available_at_field!r} must be a timezone-aware datetime, "
                 f"got {type(available_at).__name__}"
             )
-        values = {}
-        for field in fields:
+        # One attribute read per row, kept because this function takes rows from any caller:
+        # the scan's `TIMESTAMPTZ` column cannot hold a naive value, a test fixture can.
+        if available_at.tzinfo is None:
+            raise ValueError(f"{available_at_field!r} must be a timezone-aware datetime")
+        values: dict[str, object] = {}
+        for field in declared:
             if field not in row:
                 raise KeyError(
                     f"row is missing the declared field {field!r}; a Model reads only what "
                     "it declared, so a missing declared field is a schema error"
                 )
             values[field] = row[field]
-        observations.append(
-            Observation(
-                instrument_id=str(row[instrument_field]),
-                available_at=available_at,
-                values=values,
-            )
-        )
+        observations.append(build(str(row[instrument_field]), available_at, values))
     return tuple(observations)

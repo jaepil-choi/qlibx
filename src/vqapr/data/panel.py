@@ -26,6 +26,7 @@ from datetime import datetime
 from types import MappingProxyType
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 
@@ -158,6 +159,14 @@ class PanelWindow:
     `instants` is the window's instant axis, common to every name; `instruments` its columns;
     `values[name]` that name's values over `instants` (`None` where absent); `latest()` the
     newest non-null value per name -- the cross-section a one-instant lookback means.
+
+    **What an access costs.** The window is a slice of Arrow buffers and nothing is converted
+    until asked. `values[name]` converts that one column, once per window (`docs/issues/061`
+    measured the version that converted every column on each `values` access: 2.2M cells for
+    64K wanted, per callback). `latest()` and `counts()` stay in Arrow and convert one scalar
+    per name at most. Iterating `values` converts every column, which is what asking for every
+    column costs; a model that wants a short daily read beside a long periodic one declares two
+    `DatasetInput`s with two lookbacks.
     """
 
     panel: Panel
@@ -182,39 +191,48 @@ class PanelWindow:
         """One name's values over the window's instants, `None` where it had none."""
         cached = self._values.get(instrument)
         if cached is None:
-            columns = self.panel.columns[self.field]
-            if instrument not in columns:
-                raise KeyError(
-                    f"{instrument!r} is not an instrument of this window; it holds "
-                    f"{', '.join(self.panel.instruments) or 'no instrument axis'}"
-                )
             # An Arrow slice shares the panel's buffers; only this window's cells are converted.
             cached = self._values[instrument] = tuple(
-                columns[instrument].slice(self.start, self.stop - self.start).to_pylist()
+                self._column(instrument).to_pylist()
             )
         return cached
 
+    def _column(self, instrument: str) -> pa.Array:
+        """This window's slice of one name's Arrow column; shares the panel's buffers."""
+        columns = self.panel.columns[self.field]
+        if instrument not in columns:
+            raise KeyError(
+                f"{instrument!r} is not an instrument of this window; it holds "
+                f"{', '.join(self.panel.instruments) or 'no instrument axis'}"
+            )
+        return columns[instrument].slice(self.start, self.stop - self.start)
+
     @property
     def values(self) -> Mapping[str, tuple[object, ...]]:
-        """Every column of the window, keyed by instrument (`""` for a panel with no axis)."""
-        keys = self.panel.instruments or (NO_INSTRUMENT,)
-        return MappingProxyType({name: self.series(name) for name in keys})
+        """Every column of the window, keyed by instrument (`""` for a panel with no axis).
+
+        Lazy: `values[name]` converts that column and no other (`docs/issues/061`).
+        """
+        return _LazyColumns(self)
 
     def latest(self) -> Mapping[str, object]:
         """The newest non-null value per name inside the window; a name with none is absent."""
         found: dict[str, object] = {}
         keys = self.panel.instruments or (NO_INSTRUMENT,)
         for name in keys:
-            for value in reversed(self.series(name)):
-                if value is not None:
-                    found[name] = value
-                    break
+            present = pc.drop_null(self._column(name))
+            if len(present):
+                found[name] = present[len(present) - 1].as_py()
         return MappingProxyType(found)
 
     def counts(self) -> dict[str, int]:
         """Non-null values per name inside the window: the access record's `actual_rows`."""
         keys = self.panel.instruments or (NO_INSTRUMENT,)
-        return {name: sum(1 for value in self.series(name) if value is not None) for name in keys}
+        counts: dict[str, int] = {}
+        for name in keys:
+            column = self._column(name)
+            counts[name] = len(column) - column.null_count
+        return counts
 
     @property
     def max_available_at(self) -> datetime | None:
@@ -223,6 +241,38 @@ class PanelWindow:
     @property
     def lower_bound(self) -> datetime | None:
         return self.panel.instants[self.start] if self.stop > self.start else None
+
+
+class _LazyColumns(Mapping[str, tuple[object, ...]]):
+    """`PanelWindow.values`: a read-only mapping that converts a column when it is asked for.
+
+    A `Mapping` rather than a dict so that `values[name]` is one column and `values == {...}`,
+    `len(values)`, `for name in values` still mean what they did. Building every column up
+    front was `docs/issues/061`.
+    """
+
+    __slots__ = ("_window",)
+
+    def __init__(self, window: PanelWindow) -> None:
+        self._window = window
+
+    def _keys(self) -> tuple[str, ...]:
+        return self._window.panel.instruments or (NO_INSTRUMENT,)
+
+    def __getitem__(self, instrument: str) -> tuple[object, ...]:
+        return self._window.series(instrument)
+
+    def __iter__(self):
+        return iter(self._keys())
+
+    def __len__(self) -> int:
+        return len(self._keys())
+
+    def __contains__(self, instrument: object) -> bool:
+        return instrument in self._keys()
+
+    def __repr__(self) -> str:
+        return f"PanelWindow.values({', '.join(self._keys())})"
 
 
 __all__ = ["NO_INSTRUMENT", "Panel", "PanelWindow", "panel_identity"]

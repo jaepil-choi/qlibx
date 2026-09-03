@@ -97,6 +97,24 @@ def test_read_returns_a_window_of_instants_by_instruments(
     assert len(window) == 2
 
 
+def test_values_converts_one_column_per_name_asked_for(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """`docs/issues/061`: `values[name]` is that column, not every column and then one of them."""
+    store = DuckDbObservationStore(_workspace(tmp_path, model_price_parquet))
+    window = _context(store, 7).read("prices", "close")
+
+    assert window.values["A"] == (103.0, 105.0)
+    assert set(window._values) == {"A"}, "B was not asked for, so B was not converted"
+    assert "B" in window.values and len(window.values) == 2
+    assert dict(window.values) == {"A": (103.0, 105.0), "B": window.series("B")}
+    # `latest()` and `counts()` do not convert columns either.
+    fresh = _context(store, 7).read("prices", "close")
+    assert fresh.latest()["A"] == 105.0
+    assert fresh.counts() == {"A": 2, "B": 2}
+    assert fresh._values == {}
+
+
 def test_a_null_stays_a_null_and_latest_skips_it(tmp_path: Path, model_price_parquet: Path) -> None:
     store = DuckDbObservationStore(_workspace(tmp_path, model_price_parquet))
 

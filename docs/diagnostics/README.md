@@ -9,7 +9,7 @@
 |---|---|
 | **마지막 갱신** | 2026-09-03 |
 | **현행 진단** | [`2026-09-02-what-the-tree-owes-the-mental-model.md`](2026-09-02-what-the-tree-owes-the-mental-model.md) — **§0의 표와 §4의 순서는 전부 집행됐다** (아래) |
-| **현행 계획** | 없음. `docs/refactoring/2026-09-02-the-convergence-campaign.md`는 2026-09-02 `d212bceb`에서 Step 0–7 완료 |
+| **현행 계획** | [`../refactoring/2026-09-03-the-deletion-campaign.md`](../refactoring/2026-09-03-the-deletion-campaign.md) — 053 → 054 → 두 섹션 퇴역 → pydantic이 codec 대체 → 기록 parquet → `SimulationFlow` 분할 → DataModel = flow 하나. 수렴 캠페인(09-02)은 `d212bceb`에서 Step 0–7 완료 |
 | **기준 커밋** | `develop @ v0.3.0` — 1327 passed (fast 1314 + slow 13), ruff clean, showcase 9/9 |
 
 > **2026-09-03.** 아래 §0이 그린 "없는 명사 셋"은 records `133`(Surface) · `137`(Panel) · `139`(Run)로

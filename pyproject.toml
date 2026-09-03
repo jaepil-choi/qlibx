@@ -8,7 +8,11 @@ authors = [
 ]
 requires-python = ">=3.12,<3.15"
 # `cvxpy` and `pydantic` were listed here and imported nowhere in the repository -- a convex
-# solver stack and a validation library on every `uv add vqapr`, reaching no shipped code path.
+# solver stack and a validation library on every `uv add vqapr`, reaching no shipped code path
+# (record 129 removed both). `pydantic` is back since record 145 and is used: every section of
+# the workspace document and the declaration document is a pydantic model
+# (`vqapr.workspace_document`), which replaced ~1,100 lines of hand-written key-set, type, enum
+# and timestamp checks. It is not used on any hot path.
 # `pandas` was listed as a runtime dependency while only a test and a fixture script import it,
 # so it moved to the dev group.
 #
@@ -21,6 +25,7 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
     "duckdb>=1.5,<2",
     "pyarrow>=25,<26",
+    "pydantic>=2,<3",
     "pytz>=2024.1",
     "pyyaml>=6,<7",
 ]
@@ -99,4 +104,18 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 paths = ["src", "tests", "scripts/vulture_whitelist.py"]
 min_confidence = 60
 # A fixture is requested by name, never called, so every one of them reads as dead.
-ignore_decorators = ["@pytest.fixture", "@pytest.fixture(*)"]
+ignore_decorators = [
+    "@pytest.fixture",
+    "@pytest.fixture(*)",
+    # pydantic hooks are called by the model, never by name.
+    "@model_validator",
+    "@model_validator(*)",
+    "@field_validator",
+    "@field_validator(*)",
+    "@model_serializer",
+    "@model_serializer(*)",
+    "@field_serializer",
+    "@field_serializer(*)",
+]
+# `model_config` is pydantic's class-level configuration attribute.
+ignore_names = ["model_config"]

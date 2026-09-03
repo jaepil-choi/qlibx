@@ -19,17 +19,20 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
-from datetime import date, datetime, time
+from datetime import date, datetime
 from difflib import get_close_matches
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ValidationError
 
 from vqapr.account.account import AccountMode
 from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain import identifiers
 from vqapr.domain.errors import (
+    Diagnosis,
     ExplainTopic,
     Failure,
     FailureFamily,
@@ -48,7 +51,14 @@ from vqapr.flow.run import StrategyConfig
 from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.workspace import Transaction, Workspace
-from vqapr.workspace_codec import decoded_run
+from vqapr.workspace_document import (
+    AgendaDeclaration,
+    ComponentDeclaration,
+    DatasetDeclaration,
+    ExecutionInputDeclaration,
+    RunDocument,
+    StrategyConfigDeclaration,
+)
 
 _COMPONENT_KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
@@ -132,15 +142,6 @@ def _mapping(value: object, *, name: str) -> dict[str, Any]:
     return value
 
 
-def _time(value: object, *, name: str) -> time:
-    """Accept `"15:30"` and the `datetime.time` PyYAML may already have parsed."""
-    if isinstance(value, time):
-        return value
-    if not isinstance(value, str):
-        raise TypeError(f"{name} must be a local time such as '15:30'")
-    return time.fromisoformat(value)
-
-
 def _nearest_hint(written: str, permitted: Sequence[str], key_path: str) -> str:
     """What to write instead, naming the closest legal value when the written one is a near miss.
 
@@ -169,6 +170,219 @@ def _at(key_path: str) -> FailureSource:
         file=None if declaration is None else str(declaration),
         key_path=key_path,
     )
+
+
+def refusals_from(
+    error: ValidationError,
+    *,
+    model: type[BaseModel],
+    name: str,
+    also: Sequence[Failure] = (),
+) -> Diagnosis:
+    """Every finding pydantic made about one declaration, as this package's refusals.
+
+    pydantic owns the key sets, the types, the enums and the timestamps of a declaration
+    (record `145`); what it must not own is the sentence an author reads. Each line error
+    becomes one `Failure` with the package's own `code`, a `fix` that says what to write, the
+    `DECLARATION_SHAPE` topic and a `source` at the dotted key path -- and all of them travel in
+    ONE `Diagnosis`, which is what `_require_keys` promised: an agent fixing its declaration is
+    told every problem at once, not one per round trip.
+
+    Four shapes, four codes. A missing key (`key_missing`) names what the declaration does
+    have, so the reader sees the set whole. An unknown key (`key_unknown`) and a value outside a
+    closed set (`value_not_permitted`) get `_nearest_hint`: the reader cannot see the one-letter
+    typo they typed. Everything else is `value_invalid` at its own path. Nothing pydantic wrote
+    reaches the envelope; its `msg` is a hint for the requirement sentence and no more.
+    """
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    for extra in also:
+        found.add(extra)
+    for line in error.errors(include_url=False):
+        loc = tuple(str(part) for part in line["loc"])
+        kind = line["type"]
+        if kind == "missing":
+            parent, key = ".".join((name, *loc[:-1])), loc[-1]
+            # For a missing key pydantic's `input` is the mapping that lacks it.
+            present = _keys_present(line["input"])
+            vocabulary = _permitted_values(model, loc)
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.key_missing",
+                    requirement=(
+                        f"{parent} must declare {key}"
+                        + (f", one of: {', '.join(vocabulary)}" if vocabulary else "")
+                    ),
+                    observed=f"{parent} declares: {', '.join(present) or '(nothing)'}",
+                    source=_at(parent),
+                    fix=f"add {key} under {parent} in the declaration YAML",
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+        elif kind == "extra_forbidden":
+            parent, key = ".".join((name, *loc[:-1])), loc[-1]
+            permitted = _permitted_keys(model, loc[:-1])
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.key_unknown",
+                    requirement=f"{parent} may declare: {', '.join(permitted)}",
+                    observed=f"{parent} declares {key!r}, which is not one of them",
+                    examples=[key],
+                    source=_at(f"{parent}.{key}"),
+                    fix=(
+                        _nearest_hint(key, permitted, f"{parent}.{key}").replace(
+                            "set ", "rename ", 1
+                        )
+                        if permitted
+                        else f"remove {key} from {parent}"
+                    ),
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+        elif kind in ("enum", "literal_error"):
+            path = ".".join((name, *loc))
+            expected = _expected_members(line)
+            written = str(line.get("input"))
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.value_not_permitted",
+                    requirement=f"{path} must be one of: {', '.join(expected)}",
+                    observed=written,
+                    examples=expected,
+                    source=_at(path),
+                    fix=_nearest_hint(written, expected, path),
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+        else:
+            path = ".".join((name, *loc))
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.value_invalid",
+                    requirement=f"{path} must be {_shape_words(line)}",
+                    observed=f"{path} is {line.get('input')!r}",
+                    source=_at(path),
+                    fix=f"correct {path} in the declaration YAML",
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
+            )
+    return found.done()
+
+
+def _keys_present(body: object) -> list[str]:
+    return sorted(str(key) for key in body) if isinstance(body, dict) else []
+
+
+def _permitted_values(model: type[BaseModel], loc: tuple[str, ...]) -> list[str]:
+    """The closed set a field at `loc` takes (a `Literal` or an enum), else nothing.
+
+    Said in the refusal for a MISSING key, because a reader's next guess at `role` is otherwise
+    "strategy" -- `tests/cli/test_register.py` measured it.
+    """
+    import enum
+    import typing
+
+    fields = getattr(model, "model_fields", None)
+    if not loc or fields is None or loc[-1] not in fields:
+        return []
+    annotation = fields[loc[-1]].annotation
+    if typing.get_origin(annotation) is typing.Literal:
+        return [str(member) for member in typing.get_args(annotation)]
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return [str(member.value) for member in annotation]
+    return []
+
+
+def declared[M: BaseModel](model: type[M], body: object, *, name: str, also=()) -> M:
+    """One declaration through its model, or every fault in one refusal."""
+    try:
+        return model.model_validate(body)
+    except ValidationError as invalid:
+        refusals_from(invalid, model=model, name=name, also=tuple(also)).raise_if_failed()
+        raise AssertionError("unreachable") from invalid
+
+
+def _permitted_keys(model: type[BaseModel], loc: tuple[str, ...]) -> list[str]:
+    """The field names of the model at `loc`, or none when the path does not reach a model."""
+    current: object = model
+    for part in loc:
+        fields = getattr(current, "model_fields", None)
+        if fields is not None and part in fields:
+            current = _model_of(fields[part].annotation)
+        else:
+            # A mapping value (`dict[str, Model]`): the key is the author's, the value's model
+            # is the annotation's argument.
+            current = _mapping_value_model(current)
+        if current is None:
+            return []
+    fields = getattr(current, "model_fields", None)
+    return sorted(fields) if fields else []
+
+
+def _model_of(annotation: object) -> object:
+    """The BaseModel a field annotation names, through `Optional`/`Union` and `dict[str, M]`."""
+    import types
+    import typing
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    origin = typing.get_origin(annotation)
+    if origin in (typing.Union, types.UnionType):
+        for argument in typing.get_args(annotation):
+            model = _model_of(argument)
+            if model is not None:
+                return model
+        return None
+    if origin in (dict, typing.Mapping):
+        return _Mapping(_model_of(typing.get_args(annotation)[1]))
+    return None
+
+
+class _Mapping:
+    """A `dict[str, M]` on the way down `_permitted_keys`: any key, then M's fields."""
+
+    def __init__(self, value_model: object) -> None:
+        self.value_model = value_model
+
+
+def _mapping_value_model(current: object) -> object:
+    return current.value_model if isinstance(current, _Mapping) else None
+
+
+def _expected_members(line: Mapping[str, Any]) -> list[str]:
+    context = line.get("ctx") or {}
+    expected = str(context.get("expected", ""))
+    members = [part.strip().strip("'\"") for part in expected.replace(" or ", ", ").split(",")]
+    return [member for member in members if member]
+
+
+def _shape_words(line: Mapping[str, Any]) -> str:
+    """A requirement clause from pydantic's error type, never its sentence."""
+    kind = str(line["type"])
+    words = {
+        "string_type": "a string",
+        "int_type": "an integer",
+        "int_parsing": "an integer",
+        "bool_type": "true or false",
+        "bool_parsing": "true or false",
+        "float_type": "a number",
+        "decimal_type": "a decimal, quoted to keep its digits",
+        "decimal_parsing": "a decimal, quoted to keep its digits",
+        "dict_type": "a mapping",
+        "list_type": "a list",
+        "tuple_type": "a list",
+        "model_type": "a mapping",
+        "datetime_type": "an ISO-8601 datetime with an offset",
+        "datetime_parsing": "an ISO-8601 datetime with an offset",
+        "datetime_from_date_parsing": "an ISO-8601 datetime with an offset",
+        "date_type": "an ISO-8601 date",
+        "date_from_datetime_parsing": "an ISO-8601 date",
+        "time_type": "a local time such as '15:30'",
+        "time_parsing": "a local time such as '15:30'",
+        "timezone_aware": "a datetime with an offset",
+        "value_error": str(line.get("ctx", {}).get("error", "")).removeprefix("Value error, ")
+        or "a valid value",
+    }
+    return words.get(kind, "a valid value")
 
 
 def _require_keys(body: dict[str, Any], keys: Sequence[str], *, name: str) -> None:
@@ -212,20 +426,6 @@ def _required(body: dict[str, Any], key: str, *, name: str) -> Any:
     return body[key]
 
 
-def _source(body: dict[str, Any], *, name: str, base: Path) -> SourceSpec:
-    """A data path resolves against the declaration's directory when relative, as a component does.
-
-    One rule for every path in the file. A document that resolved code one way and data another
-    would be portable only by accident.
-    """
-    declared = Path(str(_required(body, "path", name=name)))
-    return SourceSpec.of(
-        str(_required(body, "source_id", name=name)),
-        declared if declared.is_absolute() else base / declared,
-        hive_partitioned=bool(body.get("hive_partitioned", False)),
-    )
-
-
 _declaration_path: ContextVar[Path | None] = ContextVar("_declaration_path", default=None)
 """The declaration file the current `apply` is reading, for `FailureSource.file`.
 
@@ -237,27 +437,6 @@ for a fact that changes once.
 
 A ContextVar rather than a module global because it is set and reset around one call, so a nested
 or concurrent `apply` cannot see another's document.
-"""
-
-
-_DATASET_KEYS = (
-    "source_id",
-    "path",
-    "available_at",
-    "key_fields",
-    "fields",
-)
-"""Every key a dataset declaration must carry.
-
-This tuple is used twice: once to pre-check the full set so that every missing key is named in a
-single refusal, and once by `_required` as a fallback guard. The pre-check is why Agent A's
-two-blocker run should not recur: where it previously took three round trips to discover five keys
-one at a time, a single refusal now names all of them.
-
-`source_id` and `path` live inline under the dataset because a dataset and its physical file
-register together — `register_dataset(registration, source)` takes them as a pair. There is no
-separate `sources:` section; the error that formerly said just ``must declare source_id`` without
-saying where a source goes was the direct cause of FRICTION F-007.
 """
 
 
@@ -402,8 +581,18 @@ def _undeclared_roster_tables(resolved: Mapping[str, Path]) -> list[str]:
     return sorted(found)
 
 
+def _resolved(declared: str, base: Path) -> Path:
+    """A data or code path resolves against the declaration's directory when relative.
+
+    One rule for every path in the file. A document that resolved code one way and data another
+    would be portable only by accident.
+    """
+    path = Path(declared)
+    return path if path.is_absolute() else base / path
+
+
 def _dataset(
-    dataset_id: str, declared: object, *, base: Path
+    dataset_id: str, body: object, *, base: Path
 ) -> tuple[DatasetRegistration, SourceSpec]:
     """A dataset and its source register together, so one declaration covers both.
 
@@ -412,26 +601,19 @@ def _dataset(
     half of one.
     """
     name = f"datasets.{dataset_id}"
-    body = _mapping(declared, name=name)
-    _require_keys(body, _DATASET_KEYS, name=name)
-    _require_grain_key(body, name=name)
-    fields = _mapping(_required(body, "fields", name=name), name=f"{name}.fields")
-    # `instrument_field` is the one declaration key that is optional, because a dataset without an
-    # instrument axis is a dataset whose rows are not keyed by instrument (`docs/issues/038`) --
-    # a factor series, an index level, a macro release. Omitting it says that; there is no value
-    # that could say it, which is why it is absent rather than empty.
-    declared_instrument = body.get("instrument_field")
+    model = declared(DatasetDeclaration, body, name=name)
+    # After the model, so a declaration missing several keys hears all of them at once and
+    # learns about `grain` -- which has its own sentence -- when the rest is in place.
+    _require_grain_key(_mapping(body, name=name), name=name)
     try:
         registration = DatasetRegistration.of(
             dataset_id,
-            str(_required(body, "source_id", name=name)),
-            instrument_field=(
-                None if declared_instrument is None else str(declared_instrument)
-            ),
-            available_at=str(_required(body, "available_at", name=name)),
-            key_fields=tuple(str(field) for field in _required(body, "key_fields", name=name)),
-            fields={str(key): str(column) for key, column in fields.items()},
-            grain=str(body["grain"]),
+            model.source_id,
+            instrument_field=model.instrument_field,
+            available_at=model.available_at,
+            key_fields=tuple(model.key_fields),
+            fields=dict(model.fields),
+            grain=model.grain,
         )
     except ValueError as error:
         found = collector(DECLARE_STAGE, FailureFamily.DATA)
@@ -447,108 +629,10 @@ def _dataset(
         )
         found.done().raise_if_failed()
         raise AssertionError("unreachable") from error
-    return registration, _source(body, name=name, base=base)
-
-
-def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
-    """Refuse a dataset declaration without `grain`, naming the three values and what changed.
-
-    Its own refusal rather than one line in `_require_keys`'s list, because this key carries a
-    message the others do not: every registration written before `grain` existed is edited once
-    to add it, and that edit is where the author learns `RowsLookback` means something else on a
-    panel grain (design §2.4, §7-3).
-    """
-    raw = body.get("grain")
-    if isinstance(raw, str) and raw in GRAIN_NAMES.split(", "):
-        return
-    found = collector(DECLARE_STAGE, FailureFamily.DATA)
-    found.add(
-        Failure.bounded(
-            f"{DECLARE_STAGE}.grain_undeclared",
-            requirement=f"{name} must declare grain, one of: {GRAIN_NAMES}",
-            observed=("absent" if raw is None else repr(raw)),
-            examples=GRAIN_NAMES.split(", "),
-            source=_at(f"{name}.grain"),
-            fix=(
-                f"add `grain: <{GRAIN_NAMES}>` under {name}. instrument_instant: one value per "
-                "(available_at, instrument), a panel can be built; instant: one value per "
-                "available_at, no instrument axis; rows: the vendor's grain, unique on key_fields. "
-                f"Note: {ROWS_LOOKBACK_MEANING}"
-            ),
-            explain=ExplainTopic.DECLARATION_SHAPE,
-        )
+    source = SourceSpec.of(
+        model.source_id, _resolved(model.path, base), hive_partitioned=model.hive_partitioned
     )
-    found.done().raise_if_failed()
-
-
-def _execution_input(input_id: str, declared: object, *, base: Path) -> ExecutionInputRegistration:
-    name = f"execution_inputs.{input_id}"
-    body = _mapping(declared, name=name)
-    table = _mapping(_required(body, "table", name=name), name=f"{name}.table")
-    fill = _mapping(_required(body, "fill", name=name), name=f"{name}.fill")
-    prices = _mapping(_required(table, "price_fields", name=f"{name}.table"), name=f"{name}.table")
-    return ExecutionInputRegistration.of(
-        input_id,
-        ExecutionTableSpec(
-            source=_source(table, name=f"{name}.table", base=base),
-            trade_at_field=str(_required(table, "trade_at_field", name=f"{name}.table")),
-            instrument_field=str(_required(table, "instrument_field", name=f"{name}.table")),
-            is_tradable_field=str(_required(table, "is_tradable_field", name=f"{name}.table")),
-            price_fields={str(key): str(column) for key, column in prices.items()},
-        ),
-        FillConvention(
-            _enum(
-                FillSelector,
-                _required(fill, "selector", name=f"{name}.fill"),
-                name=f"{name}.fill.selector",
-            ),
-            _time(_required(fill, "at", name=f"{name}.fill"), name=f"{name}.fill.at"),
-            str(_required(fill, "timezone", name=f"{name}.fill")),
-            str(_required(fill, "trade_price", name=f"{name}.fill")),
-        ),
-    )
-
-
-def _sessions(
-    body: dict[str, Any], workspace: Callable[[], Workspace], *, name: str
-) -> list[datetime | date]:
-    """Where an agenda's days come from: a dataset it follows, or an explicit list.
-
-    `from_dataset` is the common case and the one worth making short. A cadence usually follows
-    the data it reads, and `Workspace.evaluation_times` already knows those days exactly, so
-    restating them by hand is a chance to disagree with the dataset for no benefit.
-
-    `_require_agenda_keys` has already proven exactly one of the two is present, so the guard here
-    is the same kind of fallback `_required` is: reached only through a path that skipped the
-    pre-check, and typed rather than bare so it cannot land in the envelope as `stage:"unhandled"`.
-    """
-    dataset_id = body.get("from_dataset")
-    declared = body.get("sessions")
-    if (dataset_id is None) == (declared is None):
-        _refuse_agenda_source(body, name=name)
-    if dataset_id is not None:
-        return list(workspace().evaluation_times(str(dataset_id)))
-    if not isinstance(declared, list) or not declared:
-        found = collector(DECLARE_STAGE, FailureFamily.DATA)
-        found.add(
-            Failure.bounded(
-                f"{DECLARE_STAGE}.value_invalid",
-                requirement=f"{name}.sessions must be a non-empty list of dates",
-                observed=f"{type(declared).__name__}: {declared!r}"[:200],
-                examples=["sessions: ['2024-01-02', '2024-01-03']"],
-                source=_at(f"{name}.sessions"),
-                fix=(
-                    f"set {name}.sessions to a non-empty list of ISO dates, "
-                    "or use from_dataset instead"
-                ),
-                explain=ExplainTopic.DECLARATION_SHAPE,
-            )
-        )
-        found.done().raise_if_failed()
-    return [
-        value if isinstance(value, (datetime, date)) else date.fromisoformat(str(value))
-        for value in declared
-    ]
+    return registration, source
 
 
 def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
@@ -588,41 +672,30 @@ def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
         raise  # unreachable: raise_if_failed always raises here
 
 
-def _role(value: object, *, name: str) -> OperationRole:
-    return _enum(OperationRole, value, name=f"{name}.role")
+def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
+    """Refuse a dataset declaration without `grain`, naming the three values and what changed.
 
-
-_AGENDA_KEYS = ("role", "at", "timezone")
-"""Every key an agenda declaration must carry outright.
-
-Its session source is not here because it is a choice of two keys rather than one required key;
-`_require_agenda_keys` checks both together so a reader still sees one refusal.
-"""
-
-
-def _refuse_agenda_source(body: dict[str, Any], *, name: str) -> None:
-    """Refuse an agenda that names neither session source, or both."""
-    declares_both = "from_dataset" in body and "sessions" in body
+    Its own refusal rather than one line in `_require_keys`'s list, because this key carries a
+    message the others do not: every registration written before `grain` existed is edited once
+    to add it, and that edit is where the author learns `RowsLookback` means something else on a
+    panel grain (design §2.4, §7-3).
+    """
+    raw = body.get("grain")
+    if isinstance(raw, str) and raw in GRAIN_NAMES.split(", "):
+        return
     found = collector(DECLARE_STAGE, FailureFamily.DATA)
     found.add(
         Failure.bounded(
-            f"{DECLARE_STAGE}.key_missing",
-            requirement=(
-                f"{name} must declare exactly one of from_dataset or sessions: "
-                "from_dataset follows a registered dataset's own days, "
-                "sessions lists them literally"
-            ),
-            observed=(
-                f"{name} declares both"
-                if declares_both
-                else f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}"
-            ),
-            examples=["from_dataset: krx_adjusted_prices", "sessions: ['2024-01-02']"],
-            source=_at(name),
+            f"{DECLARE_STAGE}.grain_undeclared",
+            requirement=f"{name} must declare grain, one of: {GRAIN_NAMES}",
+            observed=("absent" if raw is None else repr(raw)),
+            examples=GRAIN_NAMES.split(", "),
+            source=_at(f"{name}.grain"),
             fix=(
-                f"remove one of from_dataset/sessions from {name}"
-                if declares_both
-                else f"add either from_dataset or sessions under {name}"
+                f"add `grain: <{GRAIN_NAMES}>` under {name}. instrument_instant: one value per "
+                "(available_at, instrument), a panel can be built; instant: one value per "
+                "available_at, no instrument axis; rows: the vendor's grain, unique on key_fields. "
+                f"Note: {ROWS_LOOKBACK_MEANING}"
             ),
             explain=ExplainTopic.DECLARATION_SHAPE,
         )
@@ -630,81 +703,99 @@ def _refuse_agenda_source(body: dict[str, Any], *, name: str) -> None:
     found.done().raise_if_failed()
 
 
-def _require_agenda_keys(body: dict[str, Any], *, name: str) -> None:
-    """Name everything one agenda declaration is missing, in a single refusal.
+def _execution_input(input_id: str, body: object, *, base: Path) -> ExecutionInputRegistration:
+    name = f"execution_inputs.{input_id}"
+    model = declared(ExecutionInputDeclaration, body, name=name)
+    table, fill = model.table, model.fill
+    return ExecutionInputRegistration.of(
+        input_id,
+        ExecutionTableSpec(
+            source=SourceSpec.of(
+                table.source_id,
+                _resolved(table.path, base),
+                hive_partitioned=table.hive_partitioned,
+            ),
+            trade_at_field=table.trade_at_field,
+            instrument_field=table.instrument_field,
+            is_tradable_field=table.is_tradable_field,
+            price_fields=dict(table.price_fields),
+        ),
+        FillConvention(
+            FillSelector[fill.selector.upper()],
+            fill.at,
+            fill.timezone,
+            fill.trade_price,
+        ),
+    )
 
-    `_require_keys` alone is not enough here: an agenda's session source is `from_dataset` **or**
-    `sessions`, which no required-key list can express, so checking the two separately produces a
-    reader who fixes `role`, re-runs, and only then learns about the pair.
 
-    Measured, before this: a first-time reader assembling one agenda by hand took **four**
-    register/edit/retry round trips, one per key, each refusal naming exactly one problem
-    (`role`, then a wrong role value, then the from_dataset/sessions pair, then `timezone`).
-    `_DATASET_KEYS` had already fixed this shape for datasets; agendas were simply missed.
+def _sessions(
+    model: AgendaDeclaration, workspace: Callable[[], Workspace]
+) -> list[datetime | date]:
+    """Where an agenda's days come from: a dataset it follows, or an explicit list.
+
+    `from_dataset` is the common case and the one worth making short. A cadence usually follows
+    the data it reads, and `Workspace.evaluation_times` already knows those days exactly, so
+    restating them by hand is a chance to disagree with the dataset for no benefit.
     """
-    missing = [key for key in _AGENDA_KEYS if key not in body]
-    has_source = ("from_dataset" in body) != ("sessions" in body)
-    if not missing:
-        if not has_source:
-            _refuse_agenda_source(body, name=name)
-        return
-
-    found = collector(DECLARE_STAGE, FailureFamily.DATA)
-    declares = f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}"
-    for key in missing:
-        requirement = f"{name} must declare {key}"
-        if key == "role":
-            permitted = ", ".join(member.name.lower() for member in OperationRole)
-            requirement = f"{requirement}, one of: {permitted}"
-        found.add(
-            Failure.bounded(
-                f"{DECLARE_STAGE}.key_missing",
-                requirement=requirement,
-                observed=declares,
-                source=_at(f"{name}.{key}"),
-                fix=f"add {key} under {name} in the declaration YAML",
-                explain=ExplainTopic.DECLARATION_SHAPE,
-            )
-        )
-    if not has_source:
-        declares_both = "from_dataset" in body and "sessions" in body
-        found.add(
-            Failure.bounded(
-                f"{DECLARE_STAGE}.key_missing",
-                requirement=(
-                    f"{name} must declare exactly one of from_dataset or sessions"
-                ),
-                observed=f"{name} declares both" if declares_both else declares,
-                source=_at(name),
-                fix=(
-                    f"remove one of from_dataset/sessions from {name}"
-                    if declares_both
-                    else f"add either from_dataset or sessions under {name}"
-                ),
-                explain=ExplainTopic.DECLARATION_SHAPE,
-            )
-        )
-    found.done().raise_if_failed()
+    if model.from_dataset is not None:
+        return list(workspace().evaluation_times(model.from_dataset))
+    return list(model.sessions or ())
 
 
-def _agenda(
-    agenda_id: str, declared: object, workspace: Callable[[], Workspace]
-) -> OperationAgenda:
+def _agenda_source_failure(body: dict[str, Any], *, name: str) -> Failure | None:
+    """The one rule no required-key list can say: exactly one of from_dataset or sessions."""
+    declares_both = "from_dataset" in body and "sessions" in body
+    if ("from_dataset" in body) != ("sessions" in body):
+        return None
+    return Failure.bounded(
+        f"{DECLARE_STAGE}.key_missing",
+        requirement=(
+            f"{name} must declare exactly one of from_dataset or sessions: "
+            "from_dataset follows a registered dataset's own days, "
+            "sessions lists them literally"
+        ),
+        observed=(
+            f"{name} declares both"
+            if declares_both
+            else f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}"
+        ),
+        examples=["from_dataset: krx_adjusted_prices", "sessions: ['2024-01-02']"],
+        source=_at(name),
+        fix=(
+            f"remove one of from_dataset/sessions from {name}"
+            if declares_both
+            else f"add either from_dataset or sessions under {name}"
+        ),
+        explain=ExplainTopic.DECLARATION_SHAPE,
+    )
+
+
+def _agenda(agenda_id: str, body: object, workspace: Callable[[], Workspace]) -> OperationAgenda:
     """Build one agenda through `daily()`, which owns the rules a hand-built one gets wrong.
 
     `OperationAgenda.daily` derives the occurrence id scheme, the fold, and the offset from the
     zone. A file that typed those constants itself would be correct until the venue observed DST.
+
+    Everything the declaration is missing is said in one refusal -- the model's findings and the
+    from_dataset/sessions pair together -- because a reader who is told one problem per round
+    trip took four of them to assemble one agenda (`tests/cli/test_register.py`).
     """
     name = f"agendas.{agenda_id}"
-    body = _mapping(declared, name=name)
-    _require_agenda_keys(body, name=name)
+    mapping = _mapping(body, name=name)
+    pair = _agenda_source_failure(mapping, name=name)
+    model = declared(AgendaDeclaration, mapping, name=name, also=() if pair is None else (pair,))
+    if pair is not None:
+        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found.add(pair)
+        found.done().raise_if_failed()
     return OperationAgenda.daily(
         agenda_id=agenda_id,
-        role=_role(_required(body, "role", name=name), name=name),
-        sessions=_sessions(body, workspace, name=name),
-        at=_time(_required(body, "at", name=name), name=f"{name}.at"),
-        timezone=str(_required(body, "timezone", name=name)),
-        provenance=str(body.get("provenance", f"vqapr register: {agenda_id}")),
+        role=OperationRole[model.role.upper()],
+        sessions=_sessions(model, workspace),
+        at=model.at,
+        timezone=model.timezone,
+        provenance=model.provenance or f"vqapr register: {agenda_id}",
     )
 
 
@@ -767,7 +858,7 @@ def _require_declared_ids(section: Any) -> None:
 
 
 def _component(
-    component_id: str, declared: object, project_root: Path, transaction: Transaction, *, base: Path
+    component_id: str, body: object, project_root: Path, transaction: Transaction, *, base: Path
 ) -> str:
     """Register one authored component through the door its kind declares.
 
@@ -776,49 +867,14 @@ def _component(
     emits exactly that shape: `path: my_alpha.py` next to `my_alpha.py`.
     """
     name = f"components.{component_id}"
-    body = _mapping(declared, name=name)
-    raw_kind = str(_required(body, "kind", name=name))
-    if raw_kind not in _COMPONENT_KINDS:
-        # Named like `_enum` does, for the same reason: a bare raise reaches the envelope as
-        # `stage:"unhandled"` with an empty `failures[]`, and a reader who cannot see the member
-        # list guesses at it.
-        permitted = ", ".join(_COMPONENT_KINDS)
-        found = collector(DECLARE_STAGE, FailureFamily.DATA)
-        found.add(
-            Failure.bounded(
-                f"{DECLARE_STAGE}.value_not_permitted",
-                requirement=f"{name}.kind must be one of: {permitted}",
-                observed=raw_kind,
-                examples=list(_COMPONENT_KINDS),
-                source=_at(f"{name}.kind"),
-                fix=_nearest_hint(str(raw_kind), list(_COMPONENT_KINDS), f"{name}.kind"),
-                explain=ExplainTopic.DECLARATION_SHAPE,
-            )
-        )
-        found.done().raise_if_failed()
-    kind = _COMPONENT_KINDS[raw_kind]
-    config = body.get("config")
-    if config is not None and not isinstance(config, dict):
-        found = collector(DECLARE_STAGE, FailureFamily.DATA)
-        found.add(
-            Failure.bounded(
-                f"{DECLARE_STAGE}.value_invalid",
-                requirement=f"{name}.config must be a mapping of constructor keywords",
-                observed=f"{type(config).__name__}: {config!r}"[:200],
-                source=_at(f"{name}.config"),
-                fix=f"rewrite {name}.config as a mapping of constructor keyword arguments",
-                explain=ExplainTopic.DECLARATION_SHAPE,
-            )
-        )
-        found.done().raise_if_failed()
-    declared_path = Path(str(_required(body, "path", name=name)))
+    model = declared(ComponentDeclaration, body, name=name)
     ref = prepare_component(
         project_root,
         component_id,
-        declared_path if declared_path.is_absolute() else base / declared_path,
-        str(_required(body, "object_name", name=name)),
-        kind=kind,
-        config=config,
+        _resolved(model.path, base),
+        model.object_name,
+        kind=_COMPONENT_KINDS[model.kind],
+        config=model.config,
     )
     transaction.register_component(ref)
     return str(ref.component_id)
@@ -915,11 +971,11 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
 
     for component_id, body in section("strategy_configs").items():
         name = f"strategy_configs.{component_id}"
-        config = _mapping(body, name=name)
+        config = declared(StrategyConfigDeclaration, body, name=name)
         transaction.register_strategy_config(
             StrategyConfig(
                 transaction.view.component(str(component_id)),
-                str(_required(config, "agenda_id", name=name)),
+                config.agenda_id,
                 OperationRole.STRATEGY_CALLBACK,
             ),
         )
@@ -929,16 +985,26 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         # Shape by the codec, so a run reads the same way from a declaration and from the
         # document; every id it names is checked against the staged workspace by the merge.
         name = f"runs.{run_id}"
-        declared = _mapping(body, name=name)
-        account = declared.get("initial_account")
+        declared_run = _mapping(body, name=name)
+        account = declared_run.get("initial_account")
         if isinstance(account, dict) and "mode" in account:
             # A closed set is the one case where a refusal can always be complete: the mode is
             # judged here so the refusal names every member and the nearest spelling
-            # (`docs/issues/017`), rather than surfacing from the codec as a bare sentence.
+            # (`docs/issues/017`), rather than surfacing from the model as one line of many.
             _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
         try:
-            definition = decoded_run(str(run_id), declared)
-        except (TypeError, ValueError) as invalid:
+            definition = RunDocument.model_validate(declared_run).to_domain(str(run_id))
+        except (ValidationError, TypeError, ValueError) as invalid:
+            observed = (
+                "; ".join(
+                    ".".join(str(part) for part in line["loc"])
+                    + ": "
+                    + str(line["msg"]).removeprefix("Value error, ")
+                    for line in invalid.errors(include_url=False)
+                )
+                if isinstance(invalid, ValidationError)
+                else str(invalid)
+            )
             found = collector(DECLARE_STAGE, FailureFamily.DATA)
             found.add(
                 Failure.bounded(
@@ -948,7 +1014,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
                         "execution_input and initial_account, each in the shape `vqapr new run` "
                         "emits"
                     ),
-                    observed=str(invalid),
+                    observed=observed,
                     examples=["2024-01-02T00:00:00+09:00"],
                     source=_at(name),
                     fix=f"correct `{name}` in the declaration, then register again",

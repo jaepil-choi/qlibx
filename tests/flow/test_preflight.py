@@ -507,9 +507,28 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     frozen = preflight_run(workspace, definition)
     # The definition holds ids (record `139`); the binding the workspace registered is what the
     # frozen strategy carries, detached from the registration object.
-    workspace._strategy_configs["strategy"].component.config["changed"] = 1
-
+    # The registration's config cannot be edited at all: it is read-only, which is what keeps
+    # a frozen run detached from the workspace without copying on every read (record `145`).
+    with pytest.raises(TypeError):
+        workspace._strategy_configs["strategy"].component.config["changed"] = 1  # type: ignore[index]
     assert frozen.strategies[0].config.component.config == {}
+
+    # A binding whose component reference no longer matches the registered component is drift,
+    # and preflight refuses it by name.
+    original = workspace._components["strategy"]
+    binding = workspace._strategy_configs["strategy"]
+    workspace._strategy_configs["strategy"] = StrategyConfig(
+        ComponentRef.of(
+            str(original.component_id),
+            original.kind,
+            original.path,
+            original.object_name,
+            config={"changed": 1},
+            fingerprint=original.fingerprint,
+        ),
+        binding.agenda_id,
+        binding.agenda_role,
+    )
     with pytest.raises(ValueError, match="component reference drift"):
         preflight_run(workspace, definition)
 
@@ -534,8 +553,16 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
 
 
     workspace, definition = _setup(tmp_path / "config-drift", model_price_parquet)
-    registered = workspace._components["strategy"]
-    registered.config["changed"] = True
+    original = workspace._components["strategy"]
+    registered = ComponentRef.of(
+        str(original.component_id),
+        original.kind,
+        original.path,
+        original.object_name,
+        config={**original.config, "changed": True},
+        fingerprint=original.fingerprint,
+    )
+    workspace._components["strategy"] = registered
     binding = workspace._strategy_configs["strategy"]
     workspace._strategy_configs["strategy"] = StrategyConfig(
         registered, binding.agenda_id, binding.agenda_role

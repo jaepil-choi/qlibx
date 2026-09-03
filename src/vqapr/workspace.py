@@ -535,7 +535,6 @@ class Workspace:
         return self._config_lookup(
             raw_component_id,
             self._strategy_configs,
-            lambda config: config,
             STRATEGY_REGISTER_STAGE,
             "strategy config",
             noun="component_id",
@@ -551,7 +550,6 @@ class Workspace:
         return self._config_lookup(
             raw_run_id,
             self._runs,
-            lambda definition: definition,
             RUN_REGISTER_STAGE,
             "run",
             noun="run_id",
@@ -858,7 +856,7 @@ class Workspace:
 
     def _merge_agenda(self, state: _State, agenda: OperationAgenda) -> tuple[_State, bool]:
         return self._merge_declaration(
-            state, "agendas", agenda.agenda_id, agenda, lambda value: value, AGENDA_REGISTER_STAGE
+            state, "agendas", agenda.agenda_id, agenda, AGENDA_REGISTER_STAGE
         )
 
     def _merge_strategy_config(self, state: _State, config: StrategyConfig) -> tuple[_State, bool]:
@@ -879,7 +877,6 @@ class Workspace:
             "strategy_configs",
             str(config.component.component_id),
             config,
-            lambda config: config,
             STRATEGY_REGISTER_STAGE,
             noun="component_id",
         )
@@ -892,7 +889,6 @@ class Workspace:
             "runs",
             definition.run_id,
             definition,
-            lambda value: value,
             RUN_REGISTER_STAGE,
             noun="run_id",
         )
@@ -959,7 +955,6 @@ class Workspace:
         section: str,
         key: str,
         value: object,
-        detach: object,
         stage: str,
         *,
         noun: str = "agenda_id",
@@ -995,7 +990,7 @@ class Workspace:
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry=f"use the existing declaration or choose a new {noun}",
             )
-        updated = {**declarations, key: detach(value)}  # type: ignore[operator]
+        updated = {**declarations, key: value}
         return state._replace(**{section: updated}), True
 
     @property
@@ -1232,7 +1227,6 @@ class Workspace:
         self,
         key: str,
         declarations: Mapping[str, object],
-        detach: object,
         stage: str,
         label: str,
         *,
@@ -1249,7 +1243,7 @@ class Workspace:
                 retry=f"use a valid {noun}, then retry",
             )
         try:
-            return detach(declarations[key])  # type: ignore[operator]
+            return declarations[key]
         except KeyError as error:
             what = {"component_id": "strategy", "run_id": "run"}.get(noun, "agenda")
             raise _workspace_error(

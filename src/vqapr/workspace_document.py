@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -515,18 +515,119 @@ class RunDocument(Document):
         )
 
 
+# ---------------------------------------------------------------------------------------------
+# The declaration document: what an author writes and `vqapr register` reads. Same sections,
+# fewer keys (nothing measured, nothing derived) and, for a dataset and an execution input, the
+# source written inline because the two register as a pair. Enum values are the lower-case names
+# the templates show; `Literal` here so a wrong one is refused with the permitted set, and the
+# domain enum is looked up by name in `to_domain`.
+# ---------------------------------------------------------------------------------------------
+
+
+def _lowered(value: object) -> object:
+    return value.lower() if isinstance(value, str) else value
+
+
+class DatasetDeclaration(Document):
+    """`datasets.<dataset_id>` in a declaration: the projection, and the file, inline."""
+
+    source_id: str
+    path: str
+    hive_partitioned: bool = False
+    instrument_field: str | None = None
+    available_at: str
+    key_fields: list[str]
+    fields: dict[str, str]
+    grain: Grain | None = None
+    """Optional on the model only so that `declarations._require_grain_key` can refuse its
+    absence with the sentence that says what changed (design §7-3), before the model is asked."""
+
+
+class TableDeclaration(Document):
+    """`execution_inputs.<id>.table`: the venue table and its file, inline."""
+
+    source_id: str
+    path: str
+    hive_partitioned: bool = False
+    trade_at_field: str
+    instrument_field: str
+    is_tradable_field: str
+    price_fields: dict[str, str]
+
+
+class FillDeclaration(Document):
+    """`execution_inputs.<id>.fill` as declared: no DST proof yet, `at` for the wall time."""
+
+    selector: Literal["same_day", "next_eligible"]
+    at: time
+    timezone: str
+    trade_price: str
+
+    _lower = field_validator("selector", mode="before")(_lowered)
+
+
+class ExecutionInputDeclaration(Document):
+    table: TableDeclaration
+    fill: FillDeclaration
+
+
+class AgendaDeclaration(Document):
+    """`agendas.<agenda_id>` in a declaration: a cadence, not a list of occurrences.
+
+    The days come from a registered dataset (`from_dataset`) or are listed (`sessions`) --
+    exactly one of the two, which no required-key list can say, so the declaration reader
+    checks the pair itself and reports it beside whatever else is missing.
+    """
+
+    role: Literal["strategy_callback", "valuation", "monitoring"]
+    at: time
+    timezone: str
+    from_dataset: str | None = None
+    sessions: list[date | datetime] | None = None
+    provenance: str | None = None
+
+    _lower = field_validator("role", mode="before")(_lowered)
+
+    @field_validator("sessions", mode="before")
+    @classmethod
+    def _a_non_empty_list(cls, value: object) -> object:
+        if value is not None and (not isinstance(value, list) or not value):
+            raise ValueError("a non-empty list of dates")
+        return value
+
+
+class ComponentDeclaration(Document):
+    """`components.<component_id>`: where the code is and what it is, in the CLI's spelling."""
+
+    kind: Literal["datamodel", "strategy", "constraint", "exchange"]
+    path: str
+    object_name: str
+    config: dict[str, Any] | None = None
+
+
+class StrategyConfigDeclaration(Document):
+    agenda_id: str
+
+
 __all__ = [
+    "AgendaDeclaration",
     "AgendaDocument",
     "AgendaReference",
+    "ComponentDeclaration",
     "ComponentDocument",
+    "DatasetDeclaration",
     "DatasetDocument",
     "Document",
+    "ExecutionInputDeclaration",
     "ExecutionInputDocument",
+    "FillDeclaration",
     "FillDocument",
     "InitialAccountDocument",
     "OccurrenceDocument",
     "RunDocument",
     "SourceDocument",
+    "StrategyConfigDeclaration",
     "StrategyConfigDocument",
     "StrategyEntryDocument",
+    "TableDeclaration",
 ]

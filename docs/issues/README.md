@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 69개 파일이 있고 **55개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 70개 파일이 있고 **56개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -22,13 +22,15 @@
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`는 record `139`로 닫혔다(기록 쪽); 선언 시점에 묻는 쪽은 남아 있다 | 남은 절반 |
 | `069` | 파생 agenda가 명령마다 세 번, dataset의 세션 전체로 만들어진 뒤 run 구간으로 잘린다 | **열림 2026-09-04.** 0.4.0 척추 트레이스가 잡았다: 735세션 panel에서 명령당 ~0.4 s, run 호출의 41%. 기록 148의 귀결 | 자르고 나서 만들기 + 명령 안에서 한 번만 파생 (`069` 파일) |
+| `070` | `vqapr run`이 한 명령에서 `workspace.yaml`을 네 번 연다 (run · preflight · roster · envelope) | **열림 2026-09-04.** 척추 트레이스 관측표에 있었고 0.3.0과 같았다; 소유자가 결함으로 판정. 한 명령이 네 snapshot을 볼 수 있다 | 한 번 열어 preflight에 넘기고, run이 든 roster로 envelope를 만든다 (`070` 파일) |
 
-### 시나리오 testbed run 2가 낸 열둘 (2026-09-03, `0.3.0` wheel)
+### 시나리오 testbed run 2가 낸 열하나 (2026-09-03, `0.3.0` wheel)
 
 `kaist-thesis/vqapr-scenario-testbed/`에서 첫 사용자 에이전트가 논문의 FF5+MOM residual arm을 끝까지
 수행하며 적은 `FINDINGS.md` 14건 중 소스에서 확인된 12건. 접수 표시는 그쪽 `FINDINGS.md` 각 항목에
 남겼다. `blocked`는 없었다. **가장 무거운 셋은 `055`·`059`·`061`이었고, `061`은 record `143`이, `059`는
-record `148`이 닫았다.**
+record `148`이 닫았다.** `064`는 2026-09-04 소유자가 **won't fix**로 닫았다 — 종가 데이터로 그 종가에
+거래하는 것은 forward-looking이고, 체결이 콜백보다 strictly 늦어야 한다는 규칙이 프레임워크의 의도다.
 
 | # | 제목 | 종류 | FINDINGS |
 |---|---|---|---|
@@ -39,7 +41,6 @@ record `148`이 닫았다.**
 | `060` | `rm`에 `dataset` kind가 없는데 skill은 삭제를 약속한다 (C4/E1의 남은 절반) | code | F-011 |
 | `062` | `Hold(reason)` 규칙이 skill과 docstring에서 반대다 | docs | F-001 |
 | `063` | strategy scaffold가 `--dataset`/`--field`를 받고도 alias `prices`와 momentum docstring을 낸다 | docs | F-002 |
-| `064` | "종가에 종가 정보로 거래"를 말할 수 없고, template 예시는 한 세션 지연을 정답으로 적는다 (`027`·`033`의 축) | docs | F-010 |
 | `065` | `inputs()`가 `initial_model_memory` 전에 불리는데 아무도 말하지 않는다; 한 클래스를 여러 id로 등록할 수 없다 | docs+design | F-014 |
 | `066` | 하위 디렉터리의 `register`가 두 번째 workspace를 조용히 만들고, 거절문이 어느 workspace를 봤는지 말하지 않는다 | message | F-004 |
 | `067` | skill은 편집한 component가 `register --force` 없이는 거절된다고 하는데, 그 flag는 없고 plain re-register가 말없이 교체한다 (`025`·`030`의 축) | docs+message | F-017 |
@@ -68,7 +69,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 
 ---
 
-## 2. 닫힌 것 — 쉰넷
+## 2. 닫힌 것 — 쉰여섯
 
 | # | 닫은 것 |
 |---|---|
@@ -126,6 +127,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 | `061` | record `143` — `PanelWindow.values`가 lazy mapping; `latest()`·`counts()`는 Arrow에서. 창 하나가 컬럼 하나를 요청될 때만 변환 |
 | `058` | record `146` — fill 행의 `event_time`도 전략 agenda의 zone으로; 기록 표가 parquet이라 zone이 파일에 실린다 |
 | `050` | CLOSED 2026-09-01 |
+| `064` | **CLOSED 2026-09-04 — WON'T FIX, 소유자 판정.** 종가 데이터로 그 종가에 거래하는 것은 look-ahead다. 체결은 콜백보다 strictly 늦다는 규칙이 의도이며 `same_close`는 만들지 않는다. 다시 열지 말 것 |
 
 ---
 

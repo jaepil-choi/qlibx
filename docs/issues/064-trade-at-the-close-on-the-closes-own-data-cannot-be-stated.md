@@ -1,6 +1,17 @@
 # 064 -- "decide on the close, trade at that close" cannot be stated, and the template's example lags the decision by one session without saying so
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **CLOSED 2026-09-04 -- WON'T FIX, by owner ruling.** The premise of this file is
+wrong. Trading at close *t* on data stamped at close *t* is forward-looking: the close is not
+known until it has printed, and a fill "at the close" on the close's own value is a fill on a
+number the trader did not have. The rule the package enforces -- the fill strictly later than
+the callback, the callback seeing only strictly-earlier data -- is the framework's intent, and
+the template's one-session lag is the honest statement of a daily-frequency strategy. The paper
+convention this file wanted to express is the look-ahead the package exists to refuse.
+**Do not reopen**, and do not add a `same_close` selector or a "both conventions side by side"
+paragraph: the second convention is not a convention, it is the bug. `027` (make the
+point-in-time convention be spoken aloud at registration) stands on its own and is unaffected.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-010**, `Unsure`; the evaluator reads it as
 `Yes`), against `vqapr-0.3.0`. This is the entry the testbed exists to produce: a decision the user
 had made that the package could not express. It composes with `027` (nothing makes a convention

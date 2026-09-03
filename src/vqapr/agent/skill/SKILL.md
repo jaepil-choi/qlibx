@@ -172,10 +172,11 @@ works when exactly one record of that strategy exists; `vqapr list strategies --
 lists them all, filterable by `--strategy`, `--fingerprint`, `--failed-contract`, `--since`.
 
 **Read a record from Python with `vqapr.public.read_strategy_table(store_root, run_id,
-table, strategy_ref)`, never by parsing the JSONL yourself.** The rows are JSONL on disk
-(`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/`), and JSON has no `Decimal`
-and no offset-aware instant: a reader that guesses from the text -- `read_json_auto` included
--- shifts every instant by its offset and the panel built from it registers cleanly.
+table, strategy_ref)`.** The rows are parquet on disk, one directory per table and one file per
+chunk (`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/<table>/*.parquet`), so
+`duckdb.read_parquet` on that directory reads them too: an instant is a `TIMESTAMPTZ` and comes
+back as the same instant, and a `Decimal` is exact text (the column's metadata marks it) that
+`read_strategy_table` restores and you cast yourself anywhere else.
 `read_strategy_table` decodes by the column types the writer recorded beside the table, so
 `nav` comes back a `Decimal` and `observed_at` an aware `datetime`. Rows reach the disk as
 each occurrence is accepted, so a long run can be watched and a killed one keeps what it did.

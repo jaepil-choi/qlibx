@@ -21,13 +21,15 @@ impossible rather than merely inconvenient:
   <run-id>/
     record.json            the run's own facts: account, contract report, source digest, period
     tables/
-      vqapr.account.jsonl  one file per recorded table, appended in chunks as the run proceeds
-      vqapr.weight.jsonl
-      vqapr.monitoring.jsonl  when the run declared constraints: one row per rule per occurrence
-      factor.membership.jsonl
+      vqapr.account/       one directory per recorded table, one parquet file per chunk
+        000000.parquet     as the run proceeds (record `146`)
+        000001.parquet
+      vqapr.weight/
+      vqapr.monitoring/    when the run declared constraints: one row per rule per occurrence
+      factor.membership/
 ```
 
-One directory per run id. One file per table. Rows appended as chunks arrive.
+One directory per run id. One directory per table. One complete file per chunk as it arrives.
 
 ## Why a directory scan, not an index file
 
@@ -60,23 +62,40 @@ every accepted occurrence's rows and no record, and a streamed run's peak heap i
 the same run kept in memory -- both measured in `tests/flow/test_the_run_record_streams.py`. A
 flow assembled without a store keeps rows in its roots as before.
 
-## Why JSONL
+## Why parquet, one file per chunk (record `146`; JSONL before it)
 
-Append-only, one row per line, no framing to rewrite. A parquet file would have to be rewritten or
-partitioned per append; a JSON array would need its closing bracket moved. Both make an append a
-read-modify-write, which is what this layout exists to avoid.
+The rows were JSONL from record `135` to record `146`: append-only, one row per line, and a
+`.types.json` sidecar beside each table saying which Python type every column had been
+stringified from, because JSON cannot carry a type and a reader that guessed from the text
+shifted every instant by its offset -- the testbed's A5. That was a hand-written type system on
+top of a format that has none, and the deletion campaign (D3: do not reinvent the wheel)
+replaced it with the format that carries types: parquet, through pyarrow, which the tree already
+depended on.
 
-The published *dataset* a run produces is still parquet — that is Step 6's `store.tables`. This is
-the run's own record, which is a different artifact with a different reader.
+**One complete file per chunk, not one open writer per table.** A parquet file is readable
+only once its footer is written, so a writer held open for the run would leave nothing if the
+run were killed -- and a killed run leaving every chunk that landed is the property the whole
+layout exists for. So each `append` writes one file, `tables/<table>/<n>.parquet`, staged beside
+the target and moved into place; a chunk is one accepted occurrence's rows, so the files number
+the run's occurrences. A reader lists the directory in order; duckdb reads it as
+`read_parquet('tables/<table>/*.parquet')`.
 
-**Types travel beside the rows (record `135`).** JSON has no `Decimal` and no offset-aware
-instant; the writer encodes both as strings, and a reader that guesses from the text shifts every
-instant by its offset -- the testbed's A5. So the writer, which sees the Python types at the
-moment it stringifies them, records them per table and per column in `tables/<id>.types.json`,
-rewritten only when a column's type is first seen or changes. `read_typed_table` -- exported as
-`vqapr.public.read_run_table` -- decodes by that sidecar; a table with no sidecar predates it and
-reads back as strings. A column seen under two types is recorded as a string, because reading the
-strings that were written is the one answer that loses nothing.
+**Types travel in the file.** An instant is a `timestamp[us, tz]` in the zone the first value
+carried, and comes back as that instant in that zone through pyarrow and through duckdb alike.
+A `Decimal` is the one value stored as text -- exact and unbounded, where a parquet decimal
+would need a fixed scale and a weight of one third has twenty-eight places -- and the column's
+field metadata (`vqapr.type: decimal`) says so, so `read_table` (exported as
+`vqapr.public.read_strategy_table`) restores it and a reader outside the package casts it
+knowingly. A column's type is fixed the first time a non-null value is seen and every later
+chunk is cast to it; a column seen under two kinds is refused at the write rather than
+downgraded, because the recorder wrote both and the run's own table is what is wrong.
+
+**One clock (issue `058`).** Every table's `event_time` is stamped in the strategy agenda's
+zone, the fill table included; the execution table normalises its target to UTC and the fill
+row used to carry that, so one run recorded two clocks.
+
+The published *dataset* a run produces is also parquet -- that is `store.tables`, a different
+artifact with a different reader.
 
 ## What `record.json` holds
 
@@ -100,7 +119,7 @@ AC-R3 names five things, and they are the five a later reader cannot reconstruct
       <strategy-id>@<fp8>/
         strategy.json              one strategy's facts, written LAST -- the completion mark
         .running                   that strategy's liveness lock while it writes
-        tables/<table>.jsonl       its rows, plus <table>.types.json beside each
+        tables/<table>/<n>.parquet its rows, one complete file per chunk
 ```
 
 A run holds several strategies (design §4), so the unit of writing -- and of the lock, the
@@ -108,7 +127,7 @@ crash survival and the `--force` replacement argued above -- is the strategy dir
 run directory holds `run.json`, which every process running a strategy of that run writes
 identically before it starts; two writers writing the same bytes need no lock, and a run whose
 configuration changed under an old id is refused naming both digests. Nothing above changes:
-no index file, chunked appends, JSONL, types beside the rows. `record.json` remains the
+no index file, chunked appends, parquet chunks carrying their types. `record.json` remains the
 materialization record and the shape of a run written before `139`; both are still read.
 
 The directory name `<strategy-id>@<fp8>` is the first eight hex characters of the strategy's

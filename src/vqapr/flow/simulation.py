@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
 from uuid import NAMESPACE_URL, UUID, uuid5
+from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
 from vqapr.account.history import AccountHistory
@@ -982,7 +983,11 @@ class SimulationFlow:
                         self._layer.config.component.component_id
                     ),
                     "stage": pending.occurrence.role.value,
-                    "event_time": pending.target.target_at,
+                    # In the strategy agenda's zone, as every other table's `event_time` is
+                    # (`docs/issues/058`): the execution table normalises the target to UTC,
+                    # and a reader lining a fill up against the valuation that followed it
+                    # was converting by hand.
+                    "event_time": self._in_agenda_zone(pending.target.target_at),
                 },
             ),
         )
@@ -1124,6 +1129,11 @@ class SimulationFlow:
         )
         assert root.account is not None
         return DueExecutionResult(pending.pending_id, root.account.snapshot.version, due_evidence)
+
+    def _in_agenda_zone(self, instant: datetime) -> datetime:
+        """An instant expressed in the strategy agenda's zone; the same instant."""
+        zone = self._layer.agenda.timezone
+        return instant.astimezone(ZoneInfo(zone)) if zone else instant
 
     def _publish_account_commit(self, prepared: object) -> object:
         root = self._state.publish_account_commit(prepared)

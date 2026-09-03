@@ -167,11 +167,12 @@ def _flow(
 def test_rows_reach_the_disk_at_each_accepted_occurrence(tmp_path: Path) -> None:
     writer = RunRecordWriter(tmp_path, "streamed")
     writer.open()
-    table = writer.directory / TABLES_DIRECTORY / "probe.jsonl"
+    table = writer.directory / TABLES_DIRECTORY / "probe"
     sizes: list[int] = []
 
     def observe() -> None:
-        sizes.append(table.stat().st_size if table.exists() else 0)
+        # One complete parquet file per accepted occurrence (record `146`).
+        sizes.append(len(list(table.glob("*.parquet"))) if table.exists() else 0)
 
     state = _state(row_sink=writer.append)
     result = _flow(state, _occurrences(3), on_progress=observe).run()
@@ -179,8 +180,8 @@ def test_rows_reach_the_disk_at_each_accepted_occurrence(tmp_path: Path) -> None
     # The run signals progress at the START of each occurrence, so the first observation sees an
     # empty table and each later one sees exactly the occurrences accepted so far.
     assert len(sizes) == 3
-    assert sizes[0] == 0 and sizes[1] > sizes[0] and sizes[2] > sizes[1], sizes
-    assert table.stat().st_size > sizes[2], "the last occurrence's rows landed after its signal"
+    assert sizes == [0, 1, 2], sizes
+    assert len(list(table.glob("*.parquet"))) == 3, "the last occurrence's rows landed after its signal"
     assert result.final_state.recorder_rows == {}, "a streamed run retains no rows on its roots"
     assert writer.counts()["probe"] == {"rows": 3 * ROWS_PER_OCCURRENCE, "instants": 3}
     assert sum(1 for _ in read_table(tmp_path, "streamed", "probe")) == 3 * ROWS_PER_OCCURRENCE

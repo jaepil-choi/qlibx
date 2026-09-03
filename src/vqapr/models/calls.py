@@ -17,7 +17,7 @@ D removed it (record `136`).
 **Every read still goes through `ModelWindow`.** Nothing here holds a store handle or can reach
 one. The window is already bounded to `available_at <= evaluation_time`, carries the consumer id
 the framework stamped, and records an `AccessRecord` per read -- which is what lets the Flow state
-an intent's provenance (`flow/simulation.py::_actual_source_refs`) and derive a materialization's
+an intent's provenance (`flow/callback.py::_actual_source_refs`) and derive a materialization's
 `available_at` (`flow/stamping.derived_available_at`).
 """
 

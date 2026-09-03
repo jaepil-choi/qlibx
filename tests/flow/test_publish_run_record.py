@@ -279,7 +279,9 @@ def test_a_strategy_declaring_the_reserved_prefix_is_refused() -> None:
     reserved at column level: without it a Strategy could declare `vqapr.account` and hide the
     real one. The guard runs while the recorder is built, before any row is written.
     """
-    from vqapr.flow.simulation import DEFAULT_TABLE_PREFIX, SimulationFlow
+    from vqapr.flow.callback import CallbackPhase
+    from vqapr.flow.context import FlowContext
+    from vqapr.flow.simulation import DEFAULT_TABLE_PREFIX
     from vqapr.public import TableSpec
 
     # Every spelling below defeated an earlier form of this guard. A plain startswith missed the
@@ -297,11 +299,12 @@ def test_a_strategy_declaring_the_reserved_prefix_is_refused() -> None:
             def tables(self, table_id=spelling):
                 return (TableSpec(table_id, ("instrument", "cash")),)
 
-        flow = SimulationFlow.__new__(SimulationFlow)
-        flow._strategy = _Shadowing()
+        context = FlowContext()
+        context.strategy = _Shadowing()
+        phase = CallbackPhase(context, None)  # type: ignore[arg-type]
 
         with pytest.raises(ValueError, match="package-owned"):
-            flow._callback_recorder(object())
+            phase._callback_recorder(object())
 
 
 def test_the_defaults_need_no_declaration() -> None:

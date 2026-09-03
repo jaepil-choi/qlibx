@@ -2760,7 +2760,11 @@ src/vqapr/
 ├── flow/            조립·배달·동결. 경제 규칙 없음 (닫힘)
 │   ├── run.py             RunDefinition · RunResult(limitations 포함)
 │   ├── preflight.py       §12 검사 전부
-│   ├── simulation.py      component occurrence slices + dynamic due execution의 deterministic merge/dispatch
+│   ├── simulation.py      루프: occurrence를 하나씩 어느 phase로 보낼지 정한다 (기록 147)
+│   ├── context.py         phase들이 공유하는 상태(FlowContext)와 실패 봉투, 값 클래스, 패키지 표
+│   ├── callback.py        callback phase — 전략의 decide → 도장 찍힌 intent 수락
+│   ├── execution.py       execution phase — intent → 주문 → 체결 → 계좌 commit (척추 호출 자리)
+│   ├── valuation.py       valuation phase — mark → 계좌, 그리고 monitoring 판정
 │   ├── views.py           requirement → bounded ModelWindow
 │   ├── model_state.py     ModelStateStore 포트 · ModelStateRef 발행
 │   ├── materialize.py     파생 dataset 발행 authority — DataModel 결과·run 배분·run record가 같은 문을 쓴다. **available_at 부여**

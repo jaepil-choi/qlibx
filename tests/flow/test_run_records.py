@@ -313,7 +313,7 @@ def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> No
     source = inspect.getsource(SimulationFlow.run)
     loop = source.index("while next_static is not None")
     branch = source.index("due = self._pending_due()", loop)
-    assert "self._on_progress()" in source[loop:branch], (
+    assert "self._context.on_progress()" in source[loop:branch], (
         "the progress signal must fire at the top of the occurrence loop, before the due/static "
         "branch, or a run made entirely of due executions never signals"
     )

@@ -384,57 +384,62 @@
     {
       "code": "declaration.read.grain_undeclared",
       "file": "src/vqapr/declarations.py",
-      "line": 650
+      "line": 689
     },
     {
       "code": "declaration.read.key_missing",
       "file": "src/vqapr/declarations.py",
-      "line": 208
+      "line": 210
     },
     {
       "code": "declaration.read.key_missing",
       "file": "src/vqapr/declarations.py",
-      "line": 404
+      "line": 406
     },
     {
       "code": "declaration.read.key_missing",
       "file": "src/vqapr/declarations.py",
-      "line": 713
+      "line": 752
     },
     {
       "code": "declaration.read.key_unknown",
       "file": "src/vqapr/declarations.py",
-      "line": 224
+      "line": 226
     },
     {
       "code": "declaration.read.run_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 967
+      "line": 1011
     },
     {
       "code": "declaration.read.unknown_section",
       "file": "src/vqapr/declarations.py",
-      "line": 885
+      "line": 924
     },
     {
       "code": "declaration.read.value_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 258
+      "line": 260
     },
     {
       "code": "declaration.read.value_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 620
+      "line": 622
     },
     {
       "code": "declaration.read.value_invalid",
       "file": "src/vqapr/declarations.py",
-      "line": 804
+      "line": 843
     },
     {
       "code": "declaration.read.value_not_permitted",
       "file": "src/vqapr/declarations.py",
-      "line": 245
+      "line": 247
+    },
+    {
+      "code": "declaration.read.value_not_permitted",
+      "file": "src/vqapr/declarations.py",
+      "line": 659
     },
     {
       "code": "execution_input.register.key.duplicate",
@@ -628,8 +633,8 @@
     },
     {
       "code": "run.assembly.constraint_identity",
-      "file": "src/vqapr/flow/simulation.py",
-      "line": 387
+      "file": "src/vqapr/flow/context.py",
+      "line": 319
     },
     {
       "code": "run.check.declaration_invalid",

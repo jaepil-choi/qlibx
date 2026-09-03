@@ -39,7 +39,6 @@ from vqapr.flow.run import RunDefinition, StrategyConfig
 from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.workspace_codec import (
     _decode_cached,
-    _detach_agenda,
     _encode,
 )
 
@@ -194,7 +193,7 @@ class Workspace:
         self._components = {
             key: value for key, value in (components or {}).items()
         }
-        self._agendas = {key: _detach_agenda(value) for key, value in (agendas or {}).items()}
+        self._agendas = dict(agendas or {})
         self._strategy_configs = {
             key: value for key, value in (strategy_configs or {}).items()
         }
@@ -306,7 +305,7 @@ class Workspace:
 
     @property
     def agendas(self) -> tuple[OperationAgenda, ...]:
-        return tuple(_detach_agenda(self._agendas[key]) for key in sorted(self._agendas))
+        return tuple(self._agendas[key] for key in sorted(self._agendas))
 
     @property
     def strategy_configs(self) -> tuple[StrategyConfig, ...]:
@@ -513,7 +512,7 @@ class Workspace:
                 retry="use a valid agenda_id, then retry",
             )
         try:
-            return _detach_agenda(self._agendas[raw_agenda_id])
+            return self._agendas[raw_agenda_id]
         except KeyError as error:
             raise _workspace_error(
                 stage=AGENDA_LOOKUP_STAGE,
@@ -859,7 +858,7 @@ class Workspace:
 
     def _merge_agenda(self, state: _State, agenda: OperationAgenda) -> tuple[_State, bool]:
         return self._merge_declaration(
-            state, "agendas", agenda.agenda_id, agenda, _detach_agenda, AGENDA_REGISTER_STAGE
+            state, "agendas", agenda.agenda_id, agenda, lambda value: value, AGENDA_REGISTER_STAGE
         )
 
     def _merge_strategy_config(self, state: _State, config: StrategyConfig) -> tuple[_State, bool]:
@@ -1420,7 +1419,7 @@ class Workspace:
             key: value for key, value in execution_inputs.items()
         }
         self._components = {key: value for key, value in components.items()}
-        self._agendas = {key: _detach_agenda(value) for key, value in agendas.items()}
+        self._agendas = dict(agendas)
         self._strategy_configs = {
             key: value for key, value in strategy_configs.items()
         }

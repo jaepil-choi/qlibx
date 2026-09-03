@@ -15,23 +15,33 @@ agenda's occurrences, a run's initial account) the model is the one place the ma
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Any
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     SerializerFunctionWrapHandler,
+    field_serializer,
+    field_validator,
     model_serializer,
     model_validator,
 )
 
+from vqapr.account.account import AccountMode
+from vqapr.account.snapshot import AccountSnapshot
+from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
+from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
+from vqapr.valuation.configuration import ValuationConfig
 
 
 class Document(BaseModel):
@@ -251,11 +261,272 @@ class ComponentDocument(Document):
         )
 
 
+class OccurrenceDocument(Document):
+    """One occurrence of an agenda on disk: the local instant with its DST proof."""
+
+    occurrence_id: str
+    local_date: date
+    local_time: time
+    timezone: str
+    fold: int
+    offset: str
+
+    def to_domain(self, role: OperationRole) -> OperationOccurrence:
+        return OperationOccurrence(
+            self.occurrence_id,
+            role,
+            LocalInstantDeclaration(
+                self.local_date, self.local_time, self.timezone, self.fold, self.offset
+            ),
+        )
+
+    @classmethod
+    def from_domain(cls, occurrence: OperationOccurrence) -> OccurrenceDocument:
+        local = occurrence.local_instant
+        return cls(
+            occurrence_id=occurrence.occurrence_id,
+            local_date=local.local_date,
+            local_time=local.local_time,
+            timezone=local.timezone,
+            fold=local.fold,
+            offset=local.offset,
+        )
+
+
+class AgendaDocument(Document):
+    """`agendas.<agenda_id>` on disk: explicit occurrences, and the two identities as written.
+
+    The identities are derived from the content; they are stored so a reader can compare a run
+    record's agenda identity against the document without rebuilding it. `to_domain` rebuilds
+    the agenda and the caller checks the stored identities still match (the codec did; the
+    workspace still does).
+    """
+
+    role: OperationRole
+    timezone: str
+    occurrences: list[OccurrenceDocument]
+    provenance: str
+    content_identity: str
+    provenance_identity: str
+
+    def to_domain(self, agenda_id: str) -> OperationAgenda:
+        return OperationAgenda.from_occurrences(
+            agenda_id=agenda_id,
+            role=self.role,
+            timezone=self.timezone,
+            occurrences=[occurrence.to_domain(self.role) for occurrence in self.occurrences],
+            provenance=self.provenance,
+        )
+
+    @classmethod
+    def from_domain(cls, agenda: OperationAgenda) -> AgendaDocument:
+        return cls(
+            role=agenda.role,
+            timezone=agenda.timezone,
+            occurrences=[
+                OccurrenceDocument.from_domain(occurrence) for occurrence in agenda.occurrences
+            ],
+            provenance=agenda.provenance,
+            content_identity=agenda.content_identity,
+            provenance_identity=agenda.provenance_identity,
+        )
+
+
+class StrategyConfigDocument(Document):
+    """`strategy_configs.<component_id>`: the agenda the strategy runs on (record `138`)."""
+
+    agenda_id: str
+    agenda_role: OperationRole
+
+    def to_domain(self, component: ComponentRef) -> StrategyConfig:
+        return StrategyConfig(component, self.agenda_id, self.agenda_role)
+
+    @classmethod
+    def from_domain(cls, config: StrategyConfig) -> StrategyConfigDocument:
+        return cls(agenda_id=str(config.agenda_id), agenda_role=config.agenda_role)
+
+
+class AgendaReference(Document):
+    """`valuation:` / `monitoring:` inside a run: which agenda, by id."""
+
+    agenda_id: str
+
+
+class InitialAccountDocument(Document):
+    """`runs.<id>.initial_account`: the declaration every strategy's own Account starts from."""
+
+    cash: Decimal
+    mode: AccountMode
+    positions: dict[str, Decimal] = {}
+    version: int = 0
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _by_name_as_written(cls, value: object) -> object:
+        # Written and read by member NAME (`LONG_ONLY`), which is what the template shows and
+        # `vqapr new run` derives its comment from; the enum's value is the lower-case spelling.
+        if isinstance(value, str):
+            try:
+                return AccountMode[value.upper()]
+            except KeyError:
+                return value
+        return value
+
+    @field_serializer("mode")
+    def _name(self, mode: AccountMode) -> str:
+        return mode.name
+
+    @field_serializer("cash")
+    def _cash(self, cash: Decimal) -> str:
+        return str(cash)
+
+    @field_serializer("positions")
+    def _positions(self, positions: dict[str, Decimal]) -> dict[str, str]:
+        return {name: str(quantity) for name, quantity in sorted(positions.items())}
+
+
+class StrategyEntryDocument(Document):
+    """`runs.<id>.strategies.<component_id>`: constraints and opening memory, both optional."""
+
+    constraints: list[str] = []
+    initial_model_memory: Any = None
+
+    @model_serializer(mode="wrap")
+    def _only_what_was_declared(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        body = handler(self)
+        if not body.get("constraints"):
+            body.pop("constraints", None)
+        if body.get("initial_model_memory") is None:
+            body.pop("initial_model_memory", None)
+        return body
+
+
+class RunDocument(Document):
+    """`runs.<run_id>` on disk and in a declaration -- the same shape, so a run can be copied
+    out of `workspace.yaml` into a declaration and back.
+
+    A registered run is run-ready: everything `vqapr run` cannot execute without is required
+    here, nullable only where `RunDefinition` keeps it optional for in-process callers.
+    `monitoring` is the one optional key.
+    """
+
+    instruments: list[str]
+    start: datetime | None
+    end: datetime | None
+    valuation: AgendaReference
+    exchange: str | None
+    execution_input: str | None
+    initial_account: InitialAccountDocument | None
+    strategies: dict[str, StrategyEntryDocument | None]
+    monitoring: AgendaReference | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_strategy(self) -> RunDocument:
+        if not self.strategies:
+            raise ValueError("must name at least one strategy under `strategies:`")
+        return self
+
+    @field_validator("start", "end")
+    @classmethod
+    def _one_instant(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("must include a UTC offset; a naive datetime is not one instant")
+        return value
+
+    @model_serializer(mode="wrap")
+    def _monitoring_only_when_declared(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        body = handler(self)
+        if body.get("monitoring") is None:
+            body.pop("monitoring", None)
+        if body.get("initial_account") is None:
+            body.pop("initial_account", None)
+        body["strategies"] = {
+            name: (entry or {}) for name, entry in body["strategies"].items()
+        }
+        return body
+
+    def to_domain(self, run_id: str) -> RunDefinition:
+        account = self.initial_account
+        return RunDefinition(
+            run_id=run_id,
+            strategies=tuple(
+                StrategyEntry(
+                    name,
+                    tuple(entry.constraints) if entry else (),
+                    entry.initial_model_memory if entry else None,
+                )
+                for name, entry in self.strategies.items()
+            ),
+            valuation=ValuationConfig(self.valuation.agenda_id, OperationRole.VALUATION),
+            instruments=tuple(self.instruments),
+            monitoring=(
+                None
+                if self.monitoring is None
+                else MonitoringPolicy(self.monitoring.agenda_id, OperationRole.MONITORING)
+            ),
+            exchange=self.exchange,
+            execution_input_id=self.execution_input,
+            start=self.start,
+            end=self.end,
+            initial_account_snapshot=(
+                None
+                if account is None
+                else AccountSnapshot(
+                    version=account.version, cash=account.cash, positions=account.positions
+                )
+            ),
+            initial_account_mode=None if account is None else account.mode,
+        )
+
+    @classmethod
+    def from_domain(cls, definition: RunDefinition) -> RunDocument:
+        snapshot, mode = definition.initial_account_snapshot, definition.initial_account_mode
+        return cls(
+            instruments=list(definition.instruments),
+            start=definition.start,
+            end=definition.end,
+            valuation=AgendaReference(agenda_id=str(definition.valuation.agenda_id)),
+            exchange=definition.exchange,
+            execution_input=definition.execution_input_id,
+            initial_account=(
+                None
+                if snapshot is None or mode is None
+                else InitialAccountDocument(
+                    cash=snapshot.cash,
+                    mode=mode,
+                    positions=dict(snapshot.positions),
+                    version=snapshot.version,
+                )
+            ),
+            strategies={
+                entry.component_id: StrategyEntryDocument(
+                    constraints=list(entry.constraints),
+                    initial_model_memory=entry.initial_model_memory,
+                )
+                for entry in definition.strategies
+            },
+            monitoring=(
+                None
+                if definition.monitoring is None
+                else AgendaReference(agenda_id=str(definition.monitoring.agenda_id))
+            ),
+        )
+
+
 __all__ = [
+    "AgendaDocument",
+    "AgendaReference",
     "ComponentDocument",
     "DatasetDocument",
     "Document",
     "ExecutionInputDocument",
     "FillDocument",
+    "InitialAccountDocument",
+    "OccurrenceDocument",
+    "RunDocument",
     "SourceDocument",
+    "StrategyConfigDocument",
+    "StrategyEntryDocument",
 ]

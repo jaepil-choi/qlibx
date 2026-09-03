@@ -26,15 +26,10 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from datetime import date, datetime, time
-from decimal import Decimal
 
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
@@ -47,17 +42,18 @@ from vqapr.domain.identifiers import (
     execution_input_id,
     source_id,
 )
-from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
+from vqapr.flow.run import RunDefinition, StrategyConfig
+from vqapr.runtime.agendas import OperationAgenda
 from vqapr.workspace_document import (
+    AgendaDocument,
     ComponentDocument,
     DatasetDocument,
     ExecutionInputDocument,
+    RunDocument,
     SourceDocument,
+    StrategyConfigDocument,
 )
 
 WORKSPACE_DIRECTORY = ".vqapr"
@@ -148,29 +144,6 @@ REMOVE_STAGE = "workspace.remove"
 _CONSTRUCTION_TOKEN = object()
 
 
-def _detach_agenda(agenda: OperationAgenda) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda.agenda_id,
-        role=agenda.role,
-        timezone=agenda.timezone,
-        occurrences=tuple(
-            OperationOccurrence(
-                occurrence.occurrence_id,
-                occurrence.role,
-                LocalInstantDeclaration(
-                    occurrence.local_instant.local_date,
-                    occurrence.local_instant.local_time,
-                    occurrence.local_instant.timezone,
-                    occurrence.local_instant.fold,
-                    occurrence.local_instant.offset,
-                ),
-            )
-            for occurrence in agenda.occurrences
-        ),
-        provenance=agenda.provenance,
-    )
-
-
 def _encode(
     datasets: Mapping[DatasetId, DatasetRegistration],
     sources: Mapping[SourceId, SourceSpec],
@@ -198,34 +171,14 @@ def _encode(
             for key, ref in sorted(components.items(), key=lambda item: str(item[0]))
         },
         "agendas": {
-            key: {
-                "role": str(agenda.role),
-                "timezone": agenda.timezone,
-                "occurrences": [
-                    {
-                        "occurrence_id": occurrence.occurrence_id,
-                        "local_date": occurrence.local_instant.local_date.isoformat(),
-                        "local_time": occurrence.local_instant.local_time.isoformat(),
-                        "timezone": occurrence.local_instant.timezone,
-                        "fold": occurrence.local_instant.fold,
-                        "offset": occurrence.local_instant.offset,
-                    }
-                    for occurrence in agenda.occurrences
-                ],
-                "provenance": agenda.provenance,
-                "content_identity": agenda.content_identity,
-                "provenance_identity": agenda.provenance_identity,
-            }
+            key: AgendaDocument.from_domain(agenda).model_dump(mode="json")
             for key, agenda in sorted(agendas.items())
         },
         # Keyed by the strategy's component id, carrying the agenda it names (record `138`).
         # The shape before it was keyed by agenda and carried the component; `_decode` reads
         # both for one release, and a document is written forward in this shape.
         "strategy_configs": {
-            key: {
-                "agenda_id": str(config.agenda_id),
-                "agenda_role": str(config.agenda_role),
-            }
+            key: StrategyConfigDocument.from_domain(config).model_dump(mode="json")
             for key, config in sorted(strategy_configs.items())
         },
         "runs": {
@@ -365,74 +318,14 @@ def _decode(
     if not isinstance(raw_agendas, dict):
         raise TypeError("agendas must be a mapping")
     decoded_agendas: dict[str, OperationAgenda] = {}
-    expected_agenda = {
-        "role",
-        "timezone",
-        "occurrences",
-        "provenance",
-        "content_identity",
-        "provenance_identity",
-    }
-    expected_occurrence = {
-        "occurrence_id",
-        "local_date",
-        "local_time",
-        "timezone",
-        "fold",
-        "offset",
-    }
     for raw_id, raw_agenda in raw_agendas.items():
         if not isinstance(raw_id, str):
             raise TypeError("every agenda_id must be a string")
-        if not isinstance(raw_agenda, dict) or set(raw_agenda) != expected_agenda:
-            raise ValueError(f"agenda {raw_id!r} must contain exactly {sorted(expected_agenda)}")
-        if not all(
-            isinstance(raw_agenda[key], str)
-            for key in ("role", "timezone", "provenance", "content_identity", "provenance_identity")
-        ):
-            raise TypeError(f"agenda {raw_id!r} scalar declarations must be strings")
-        occurrences = raw_agenda["occurrences"]
-        if not isinstance(occurrences, list):
-            raise TypeError(f"agenda {raw_id!r} occurrences must be a list")
-        decoded_occurrences: list[OperationOccurrence] = []
-        for raw_occurrence in occurrences:
-            if not isinstance(raw_occurrence, dict) or set(raw_occurrence) != expected_occurrence:
-                expected_fields = sorted(expected_occurrence)
-                raise ValueError(
-                    f"agenda {raw_id!r} occurrence must contain exactly {expected_fields}"
-                )
-            if not all(
-                isinstance(raw_occurrence[key], str)
-                for key in ("occurrence_id", "local_date", "local_time", "timezone", "offset")
-            ):
-                raise TypeError(f"agenda {raw_id!r} occurrence scalar declarations must be strings")
-            if not isinstance(raw_occurrence["fold"], int) or isinstance(
-                raw_occurrence["fold"], bool
-            ):
-                raise TypeError(f"agenda {raw_id!r} occurrence fold must be an integer")
-            decoded_occurrences.append(
-                OperationOccurrence(
-                    raw_occurrence["occurrence_id"],
-                    OperationRole(raw_agenda["role"]),
-                    LocalInstantDeclaration(
-                        date.fromisoformat(raw_occurrence["local_date"]),
-                        time.fromisoformat(raw_occurrence["local_time"]),
-                        raw_occurrence["timezone"],
-                        raw_occurrence["fold"],
-                        raw_occurrence["offset"],
-                    ),
-                )
-            )
-        agenda = OperationAgenda.from_occurrences(
-            agenda_id=raw_id,
-            role=OperationRole(raw_agenda["role"]),
-            timezone=raw_agenda["timezone"],
-            occurrences=decoded_occurrences,
-            provenance=raw_agenda["provenance"],
-        )
+        model = _decoded("agenda", raw_id, AgendaDocument, raw_agenda)
+        agenda = model.to_domain(raw_id)
         if (
-            agenda.content_identity != raw_agenda["content_identity"]
-            or agenda.provenance_identity != raw_agenda["provenance_identity"]
+            agenda.content_identity != model.content_identity
+            or agenda.provenance_identity != model.provenance_identity
         ):
             raise ValueError(
                 f"agenda {raw_id!r} identity declarations do not match its canonical content"
@@ -449,33 +342,29 @@ def _decode(
         # Two shapes, one release apart (record `138`): keyed by component id carrying
         # `agenda_id`, or -- written before an agenda was shareable -- keyed by agenda id
         # carrying `component`. Either decodes to the same binding; the next write is forward.
-        if set(raw_config) == {"agenda_id", "agenda_role"}:
-            component, agenda_id = raw_id, raw_config["agenda_id"]
-        elif set(raw_config) == {"component", "agenda_role"}:
-            component, agenda_id = raw_config["component"], raw_id
+        if set(raw_config) == {"component", "agenda_role"}:
+            component, raw_config = raw_config["component"], {
+                "agenda_id": raw_id,
+                "agenda_role": raw_config["agenda_role"],
+            }
         else:
-            raise ValueError(
-                "strategy config must contain exactly agenda_id and agenda_role (keyed by the "
-                "strategy's component id)"
-            )
-        role = raw_config["agenda_role"]
-        if not all(isinstance(value, str) for value in (component, agenda_id, role)):
-            raise TypeError("strategy config fields must be strings")
+            component = raw_id
+        model = _decoded("strategy config", raw_id, StrategyConfigDocument, raw_config)
         try:
-            registered_component = decoded_components[component_id(component)]
+            registered_component = decoded_components[component_id(str(component))]
         except KeyError as error:
             raise ValueError(
                 f"strategy config {raw_id!r} references an unregistered component"
             ) from error
-        config = StrategyConfig(registered_component, agenda_id, OperationRole(role))
+        config = model.to_domain(registered_component)
         if (
-            decoded_agendas.get(agenda_id) is None
-            or decoded_agendas[agenda_id].role is not config.agenda_role
+            decoded_agendas.get(config.agenda_id) is None
+            or decoded_agendas[config.agenda_id].role is not config.agenda_role
         ):
             raise ValueError(
                 f"strategy config {raw_id!r} references an absent or mismatched agenda"
             )
-        decoded_strategy_configs[component] = config
+        decoded_strategy_configs[str(component)] = config
     raw_runs = document.get("runs", {})
     if not isinstance(raw_runs, dict):
         raise TypeError("runs must be a mapping")
@@ -529,174 +418,15 @@ def encoded_run(definition: RunDefinition) -> dict[str, object]:
     The same shape the declaration reader accepts, so a run can be copied out of `workspace.yaml`
     into a declaration and back.
     """
-    body: dict[str, object] = {
-        "instruments": list(definition.instruments),
-        "start": None if definition.start is None else definition.start.isoformat(),
-        "end": None if definition.end is None else definition.end.isoformat(),
-        "valuation": {"agenda_id": str(definition.valuation.agenda_id)},
-        "exchange": definition.exchange,
-        "execution_input": definition.execution_input_id,
-    }
-    if definition.monitoring is not None:
-        body["monitoring"] = {"agenda_id": str(definition.monitoring.agenda_id)}
-    snapshot, mode = definition.initial_account_snapshot, definition.initial_account_mode
-    if snapshot is not None and mode is not None:
-        body["initial_account"] = {
-            "cash": str(snapshot.cash),
-            "mode": mode.name,
-            "positions": {str(k): str(v) for k, v in sorted(snapshot.positions.items())},
-            "version": snapshot.version,
-        }
-    strategies: dict[str, object] = {}
-    for entry in definition.strategies:
-        declared: dict[str, object] = {}
-        if entry.constraints:
-            declared["constraints"] = list(entry.constraints)
-        if entry.initial_model_memory is not None:
-            declared["initial_model_memory"] = entry.initial_model_memory
-        strategies[entry.component_id] = declared
-    body["strategies"] = strategies
-    return body
+    return RunDocument.from_domain(definition).model_dump(mode="json")
 
 
 def decoded_run(run_id: str, body: object) -> RunDefinition:
     """A `RunDefinition` from the document's shape; `TypeError`/`ValueError` name what is wrong.
 
-    Ids are not resolved here: the workspace merge (`_merge_run`) and `_decode` below check that
+    Ids are not resolved here: the workspace merge (`_merge_run`) and `_decode` above check that
     every id a run names is registered, so this is shape only.
     """
     if not isinstance(body, dict):
         raise TypeError(f"run {run_id!r} must be a mapping")
-    unknown = set(body) - _RUN_KEYS
-    if unknown:
-        raise ValueError(f"run {run_id!r} has unknown keys: {', '.join(sorted(unknown))}")
-    # A registered run is run-ready: the document form requires what `vqapr run` cannot execute
-    # without, all at once, so a reader learns the whole set in one refusal rather than one per
-    # retry. (`RunDefinition` itself keeps these optional for in-process callers.)
-    missing = [key for key in _RUN_REQUIRED if key not in body]
-    if missing:
-        raise ValueError(
-            f"run {run_id!r} must declare {', '.join(_RUN_REQUIRED)}; missing "
-            f"{len(missing)} of {len(_RUN_REQUIRED)}: {', '.join(missing)}"
-        )
-    raw_strategies = body.get("strategies")
-    if not isinstance(raw_strategies, dict) or not raw_strategies:
-        raise ValueError(f"run {run_id!r} must name at least one strategy under `strategies:`")
-    strategies = []
-    for raw_component, declared in raw_strategies.items():
-        declared = declared or {}
-        if not isinstance(declared, dict) or set(declared) - {
-            "constraints",
-            "initial_model_memory",
-        }:
-            raise ValueError(
-                f"run {run_id!r} strategy {raw_component!r} may declare only constraints and "
-                "initial_model_memory"
-            )
-        constraints = declared.get("constraints") or ()
-        if not isinstance(constraints, (list, tuple)):
-            raise TypeError(
-                f"run {run_id!r} strategy {raw_component!r} constraints must be a list"
-            )
-        strategies.append(
-            StrategyEntry(
-                str(raw_component),
-                tuple(str(name) for name in constraints),
-                declared.get("initial_model_memory"),
-            )
-        )
-    valuation = body.get("valuation")
-    if not isinstance(valuation, dict) or "agenda_id" not in valuation:
-        raise ValueError(f"run {run_id!r} valuation must be a mapping with agenda_id")
-    monitoring = body.get("monitoring")
-    if monitoring is not None and (
-        not isinstance(monitoring, dict) or "agenda_id" not in monitoring
-    ):
-        raise ValueError(f"run {run_id!r} monitoring must be a mapping with agenda_id")
-    account = body.get("initial_account")
-    snapshot: AccountSnapshot | None = None
-    mode: AccountMode | None = None
-    if account is not None:
-        if not isinstance(account, dict) or "cash" not in account or "mode" not in account:
-            raise ValueError(f"run {run_id!r} initial_account must declare cash and mode")
-        try:
-            mode = AccountMode[str(account["mode"]).upper()]
-        except KeyError:
-            raise ValueError(
-                f"run {run_id!r} initial_account.mode must be one of: "
-                f"{', '.join(member.name for member in AccountMode)}"
-            ) from None
-        positions = account.get("positions") or {}
-        if not isinstance(positions, dict):
-            raise TypeError(f"run {run_id!r} initial_account.positions must be a mapping")
-        snapshot = AccountSnapshot(
-            version=int(account.get("version", 0)),
-            cash=Decimal(str(account["cash"])),
-            positions={str(k): Decimal(str(v)) for k, v in positions.items()},
-        )
-    instruments = body.get("instruments")
-    if not isinstance(instruments, (list, tuple)):
-        raise TypeError(f"run {run_id!r} instruments must be a list")
-    return RunDefinition(
-        run_id=run_id,
-        strategies=tuple(strategies),
-        valuation=ValuationConfig(str(valuation["agenda_id"]), OperationRole.VALUATION),
-        instruments=tuple(str(name) for name in instruments),
-        monitoring=(
-            None
-            if monitoring is None
-            else MonitoringPolicy(str(monitoring["agenda_id"]), OperationRole.MONITORING)
-        ),
-        exchange=None if body.get("exchange") is None else str(body["exchange"]),
-        execution_input_id=(
-            None if body.get("execution_input") is None else str(body["execution_input"])
-        ),
-        start=_run_instant(body.get("start"), f"run {run_id!r} start"),
-        end=_run_instant(body.get("end"), f"run {run_id!r} end"),
-        initial_account_snapshot=snapshot,
-        initial_account_mode=mode,
-    )
-
-
-_RUN_REQUIRED = (
-    "strategies",
-    "valuation",
-    "instruments",
-    "start",
-    "end",
-    "exchange",
-    "execution_input",
-    "initial_account",
-)
-"""What a registered run cannot execute without; `monitoring` is the one optional key."""
-
-_RUN_KEYS = frozenset(
-    {
-        "strategies",
-        "valuation",
-        "monitoring",
-        "instruments",
-        "start",
-        "end",
-        "exchange",
-        "execution_input",
-        "initial_account",
-    }
-)
-
-
-def _run_instant(value: object, name: str) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError as error:
-            raise ValueError(f"{name} must be an ISO-8601 datetime with an offset") from error
-    else:
-        raise TypeError(f"{name} must be an ISO-8601 datetime with an offset")
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError(f"{name} must include a UTC offset; a naive datetime is not one instant")
-    return parsed
+    return _decoded("run", run_id, RunDocument, body).to_domain(run_id)

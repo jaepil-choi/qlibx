@@ -19,6 +19,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
@@ -30,6 +31,7 @@ from vqapr.exchange.execution_table import ExecutionInputRegistration, Execution
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
@@ -292,9 +294,11 @@ def test_the_docstrings_claim_is_the_claim_it_actually_keeps(tmp_path: Path) -> 
 def test_check_creates_no_workspace_where_none_existed(tmp_path: Path) -> None:
     """Checking an uninitialised directory must not initialise it (regression pin).
 
-    Both targets `check` takes: a run id nothing registered, and a materialization spec path.
+    A run id nothing registered, and a YAML path -- refused by name since record `148`, and
+    refused before anything on disk is touched.
     """
     check("nothing-registered", tmp_path)
     assert not (tmp_path / WORKSPACE_DIRECTORY).exists()
-    check(tmp_path / "spec.yaml", tmp_path)
+    with pytest.raises(InputError):
+        check(tmp_path / "spec.yaml", tmp_path)
     assert not (tmp_path / WORKSPACE_DIRECTORY).exists()

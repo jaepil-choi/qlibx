@@ -22,7 +22,7 @@ state under `.vqapr/`, which is rebuildable and never committed.
 | `new` | scaffold a component, or emit a dataset/execution-input/exchange/run declaration template |
 | `register` | validate a declaration and add what it declares to the workspace |
 | `check` | prove a registered run is ready, reporting every problem at once, without running |
-| `run` | freeze a registered run, preflight it, and execute its strategies |
+| `run` | freeze a registered run, preflight it, and execute its models: strategies with their accounts, or datamodels writing their datasets |
 | `list` | show what the workspace holds and what the store recorded |
 | `show` | answer questions about one run or one strategy record, from what was frozen |
 | `rm` | remove a run's records, or withdraw a registration nothing still names |

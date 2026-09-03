@@ -4,7 +4,7 @@ import hashlib
 import html
 import json
 import shutil
-from datetime import datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -13,12 +13,14 @@ import duckdb
 
 from vqapr.domain.errors import VqaprError
 from vqapr.public import (
+    DataModelEntry,
     DatasetRegistration,
-    MaterializationSpec,
+    RunDefinition,
     SourceSpec,
-    materialize,
+    preflight_run,
     register_data_model,
     register_dataset,
+    run,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -60,10 +62,13 @@ def _write_input() -> Path:
 
 
 def _rows(path: Path) -> list[dict[str, object]]:
+    target = path.as_posix() if path.is_file() else f"{path.as_posix()}/*.parquet"
     con = duckdb.connect()
     try:
         cursor = con.execute(
-            f"SELECT * FROM read_parquet('{path.as_posix()}') ORDER BY available_at, instrument"
+            # A datamodel run's dataset is a directory of chunks, one per session (record 148);
+            # the input is one file.
+            f"SELECT * FROM read_parquet('{target}') ORDER BY available_at, instrument"
         )
         names = [item[0] for item in cursor.description]
         return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
@@ -118,7 +123,7 @@ def _table(rows: list[dict[str, object]]) -> str:
 
 
 def _report(trace: dict[str, object], workspace_text: str) -> str:
-    lineage = trace["reversal_materialization"]["lineage"]  # type: ignore[index]
+    record = trace["reversal_materialization"]["record"]  # type: ignore[index]
     rejection = trace["forgery_rejection"]
     return f"""<!doctype html>
 <html lang="ko">
@@ -190,8 +195,10 @@ th {{ background: #edf2f7; }}
 {_table(trace["reversal_materialization"]["rows"])}
 </section>
 <section class="card">
-<h2>3. Package-owned available_at와 access lineage</h2>
-<pre>{html.escape(json.dumps(lineage, indent=2, ensure_ascii=False))}</pre>
+<h2>3. Package-owned available_at와 datamodel record</h2>
+<p>세션마다 한 줄 — evaluation_time, output_available_at, row_count.
+종목별 lineage는 없다(record 148).</p>
+<pre>{html.escape(json.dumps(record, indent=2, ensure_ascii=False))}</pre>
 </section>
 <section class="card">
 <h2>4. 파생 결과를 같은 alias 경로로 다시 읽은 결과</h2>
@@ -216,6 +223,38 @@ Account commit, valuation, and performance.</p>
 </section>
 <footer>Last verified at {LAST_VERIFIED_AT}. Verified against {VERIFIED_AGAINST}.</footer>
 </body></html>"""
+
+
+def _datamodel_run(
+    run_id: str,
+    component_id: str,
+    dataset_id: str,
+    value_fields: tuple[str, ...],
+    sessions: tuple[date, ...],
+) -> tuple[object, dict[str, object]]:
+    """Register one datamodel run, freeze it, execute it; the result and its record."""
+    definition = RunDefinition(
+        run_id=run_id,
+        strategies=(),
+        instruments=INSTRUMENTS,
+        datamodels=(DataModelEntry(component_id, dataset_id, value_fields),),
+        timezone="Asia/Seoul",
+        at=time(16, 0),
+        sessions=sessions,
+        start=datetime.combine(sessions[0], time(0), tzinfo=KST),
+        end=datetime.combine(sessions[-1], time(23), tzinfo=KST),
+    )
+    frozen = preflight_run(PROJECT, definition)
+    outcome = run(PROJECT, frozen, store_root=PROJECT / ".vqapr")
+    record = {key: _json_value(value) for key, value in outcome.records[component_id].items()}
+    return outcome.result(), record
+
+
+def _datasets_section(document: bytes) -> bytes:
+    text = document.decode("utf-8")
+    start = text.index("datasets:")
+    end = text.find("\nruns:", start)
+    return text[start : end if end >= 0 else len(text)].encode("utf-8")
 
 
 def main() -> None:
@@ -248,42 +287,35 @@ def main() -> None:
         datetime(2024, 3, 6, 16, tzinfo=KST),
         datetime(2024, 3, 7, 16, tzinfo=KST),
     )
-    reversal = materialize(
-        PROJECT,
+    sessions = tuple(moment.date() for moment in evaluation_times)
+    # A datamodel is a registered run (record 148): the sessions it computes on, the wall time,
+    # the universe and the dataset it writes are configuration; the model computes.
+    reversal, reversal_record = _datamodel_run(
+        "reversal-run",
         "reversal-features",
-        MaterializationSpec.of(
-            "reversal_features", value_fields=("old_close", "new_close", "score")
-        ),
-        evaluation_times=evaluation_times,
-        instruments=INSTRUMENTS,
+        "reversal_features",
+        ("old_close", "new_close", "score"),
+        sessions,
     )
     reversal_rows = _normalized(_rows(reversal.output_path))
-    reversal_lineage = json.loads(reversal.lineage_path.read_text(encoding="utf-8"))
 
-    absolute = materialize(
-        PROJECT,
-        "absolute-scores",
-        MaterializationSpec.of("absolute_scores", value_fields=("abs_score",)),
-        evaluation_times=(evaluation_times[-1],),
-        instruments=INSTRUMENTS,
+    absolute, absolute_record = _datamodel_run(
+        "absolute-run", "absolute-scores", "absolute_scores", ("abs_score",), sessions[-1:]
     )
     absolute_rows = _normalized(_rows(absolute.output_path))
-    absolute_lineage = json.loads(absolute.lineage_path.read_text(encoding="utf-8"))
 
     # Snapshotted AFTER every component is registered, so what this compares is the
-    # materialization's effect alone. A refused materialization must register no output dataset.
+    # datamodel run's effect alone. A refused run must register no output dataset.
     workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
     before_forgery = workspace_path.read_bytes()
-    forged_output = PROJECT / ".vqapr" / "materialized" / "forged_features.parquet"
+    forged_output = PROJECT / ".vqapr" / "materialized" / "forged_features"
     try:
-        materialize(
-            PROJECT,
+        _datamodel_run(
+            "forging-run",
             "forging-model",
-            MaterializationSpec.of(
-                "forged_features", value_fields=("old_close", "new_close", "score")
-            ),
-            evaluation_times=evaluation_times,
-            instruments=INSTRUMENTS,
+            "forged_features",
+            ("old_close", "new_close", "score"),
+            sessions,
         )
     except VqaprError as error:
         forgery_error = {
@@ -297,12 +329,16 @@ def main() -> None:
             ) from error
     else:
         raise AssertionError("producer-controlled available_at was unexpectedly accepted")
-    workspace_unchanged = workspace_path.read_bytes() == before_forgery
+    # The refused RUN stays registered -- it is configuration, and a fixed model runs it again --
+    # so the comparison is on the datasets section, which the forgery must not have touched.
+    workspace_unchanged = _datasets_section(workspace_path.read_bytes()) == _datasets_section(
+        before_forgery
+    )
     if not workspace_unchanged:
-        raise AssertionError("failed materialization exposed partial workspace state")
+        raise AssertionError("failed datamodel run exposed partial workspace state")
     forged_output_absent = not forged_output.exists()
     if not forged_output_absent:
-        raise AssertionError("failed materialization exposed partial output state")
+        raise AssertionError("failed datamodel run exposed partial output state")
 
     old_new_values = {
         float(row[field]) for row in reversal_rows for field in ("old_close", "new_close")
@@ -345,14 +381,14 @@ def main() -> None:
         "reversal_materialization": {
             "dataset_id": "reversal_features",
             "rows": reversal_rows,
-            "lineage": reversal_lineage,
+            "record": reversal_record,
             "pit_future_excluded": pit_future_excluded,
             "package_timestamps_match": package_timestamps_match,
         },
         "derived_reread": {
             "dataset_id": "absolute_scores",
             "rows": absolute_rows,
-            "lineage": absolute_lineage,
+            "record": absolute_record,
         },
         "forgery_rejection": {
             "workspace_unchanged": workspace_unchanged,
@@ -361,7 +397,7 @@ def main() -> None:
         },
         "sha256": {name: _sha256(path) for name, path in paths.items()},
         "limitations": [
-            "No StrategyModel session callback or execution input participates in materialization.",
+            "No StrategyModel, execution input, venue or account participates in a datamodel run.",
             "No orders, fills, Account mutation, valuation, or performance are claimed.",
         ],
     }

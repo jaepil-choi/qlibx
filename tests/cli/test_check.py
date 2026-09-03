@@ -535,21 +535,21 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
             f"{code} is not in this verb's namespace"
         )
 
-    from vqapr.cli.check import MATERIALIZATION_CODES, SIMULATION_CODES
+    from vqapr.cli.check import SIMULATION_CODES
 
-    # Two counted sets, because there are two kinds of run and they answer different questions.
+    # One counted set. Record 148 closed the spec-file door: a datamodel is a `runs:` entry and
+    # its judgments (`check.datamodel.*`) are made by the same phases as a strategy run's, so the
+    # nine `check.materialize.*` codes a spec used to settle are gone rather than merged.
     assert len(SIMULATION_CODES) == 8, (
         "a run settles exactly eight judgments; adding a ninth is a decision, not a detail"
     )
-    assert len(MATERIALIZATION_CODES) == 9, (
-        "a materialization spec settles exactly nine judgments; adding a tenth is a decision, "
-        "not a detail"
+    assert not any(code.startswith("check.materialize.") for code in CODES), (
+        "the materialization spec's judgment set retired with the spec file (record 148)"
     )
-    assert not set(SIMULATION_CODES) & set(MATERIALIZATION_CODES)
-    assert set(CODES) == set(SIMULATION_CODES) | set(MATERIALIZATION_CODES) | {
+    assert set(CODES) == set(SIMULATION_CODES) | {
         "run.check.declaration_invalid",
         "run.check.preflight_refused",
-    }, "CODES must be exactly the two judgment sets plus the two framework-invariant codes"
+    }, "CODES must be exactly the judgment set plus the two framework-invariant codes"
 
 
 def test_a_run_with_one_defect_reports_it_alone_and_a_repaired_run_is_clean(

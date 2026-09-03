@@ -131,3 +131,41 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
         "the scaffold ran without ever committing a fill, so the authoring contract's decision "
         "path is unexercised"
     )
+
+
+def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(tmp_path: Path) -> None:
+    """The `runs:` block `vqapr new datamodel` emits is one `register` takes as written.
+
+    Record 148: the declaration carries the run that computes the model, so registering the file
+    registers a datamodel run under `<id>-run` -- a run `list runs` knows by kind and `check`
+    reaches all the way through. What it does NOT prove is that the run computes anything: the
+    instruments are placeholders the reader fills, and registration does not validate a universe.
+    """
+    journey.install(tmp_path)
+    source = tmp_path / "scaffolded_model.py"
+
+    code, created = _cli(
+        tmp_path, "new", "datamodel", "signal",
+        "--dataset", journey.DATASET_ID, "--lookback", "2", "--out", str(source),
+    )
+    assert code == 0, created
+
+    code, registered = _cli(tmp_path, "register", created["declaration"])
+    assert code == 0, registered
+    assert registered["registered"]["components"] == ["signal"]
+    assert registered["registered"]["runs"] == ["signal-run"]
+
+    code, runs = _cli(tmp_path, "list", "runs")
+    assert code == 0, runs
+    row = next(row for row in runs["items"] if row["run_id"] == "signal-run")
+    assert row["kind"] == "datamodel"
+
+    # The emitted block is a run `check` can judge as written: every phase answers, and none of
+    # them refuses the declaration's SHAPE. (The placeholder instruments are not a judgment
+    # today; whether an instrument the sessions dataset never holds should be one is open.)
+    code, checked = _cli(tmp_path, "check", "signal-run")
+    assert checked["stage"] != "unhandled", checked
+    assert checked["checked"] == ["workspace", "run", "judgments", "preflight"]
+    assert not any(
+        failure["code"].startswith("run.check.") for failure in checked.get("failures", [])
+    ), "the scaffold's shape was refused, not its placeholders"

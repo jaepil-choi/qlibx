@@ -51,18 +51,17 @@ from vqapr.public import (
     AccountSnapshot,
     ComponentKind,
     ComponentRef,
+    DataModelEntry,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    MaterializationSpec,
     RunDefinition,
     SourceSpec,
     StrategyEntry,
     component_ref,
     export_roster,
-    materialize,
     preflight_run,
     register_component,
     register_data_model,
@@ -372,15 +371,18 @@ def main() -> None:
     # The materialized score registers itself as an ordinary dataset, so the strategy declares
     # `momentum_score` and reads it the same way it reads any other. Nothing re-exports it.
     register_data_model(PROJECT, "momentum-model", MODELS, "MomentumModel")
-    materialize(
-        PROJECT,
-        "momentum-model",
-        MaterializationSpec.of("momentum_score", value_fields=("score", "eligible")),
-        evaluation_times=tuple(
-            datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
-        ),
+    score_definition = RunDefinition(
+        run_id="momentum-score",
+        strategies=(),
         instruments=universe,
+        datamodels=(DataModelEntry("momentum-model", "momentum_score", ("score", "eligible")),),
+        timezone=VENUE,
+        at=time(16, 0),
+        sessions=tuple(score_days),
+        start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
     )
+    run(PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
 
     # The project declares what each id IS, once, before anything trades. KrxExchange resolves
     # what a fill COSTS from this roster rather than from the venue, which is why the KRX profile

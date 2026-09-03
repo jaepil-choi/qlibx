@@ -84,11 +84,8 @@ from vqapr.flow.datamodel import DataModelResult
 from vqapr.flow.materialize import (
     AllocationPublicationResult,
     AllocationPublicationSpec,
-    MaterializationResult,
-    MaterializationSpec,
     RunRecordResult,
     RunRecordSpec,
-    materialize,
     publish_run_allocation,
     publish_run_record,
 )
@@ -202,8 +199,6 @@ __all__ = (
     "LocalInstantDeclaration",
     "Mark",
     "MarkBatch",
-    "MaterializationResult",
-    "MaterializationSpec",
     "ModelWindow",
     "NeutralizationRefusal",
     # The two halves of what a Model is handed. `ObservationBatch` is the return type of the one
@@ -258,7 +253,6 @@ __all__ = (
     "instruments",
     "krx_listings",
     "krx_rules",
-    "materialize",
     "nav_series",
     "net_members",
     "neutralize",

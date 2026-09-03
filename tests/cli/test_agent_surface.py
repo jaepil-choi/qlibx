@@ -346,9 +346,12 @@ def test_a_retired_run_spec_handed_to_run_is_refused_naming_the_runs_section(
 ) -> None:
     """One reply must say where the shape went, not parse the file as if it had not moved.
 
-    A `strategy:` file is the run spec of before record 139. `run` takes a registered run id, or
-    a materialization spec; the old file is refused by name with the three commands that replace
-    it, so a reader following stale notes gets the new path in one round trip.
+    A `strategy:` file is the run spec of before record 139, and a `datamodel:` file the
+    materialization spec of before record 148. `run` takes a registered run id and nothing else
+    now, so a file of either shape is refused by NAME -- the path's suffix, before it is opened --
+    with the commands that replace it, and a reader following stale notes gets the new path in
+    one round trip. Refusing before opening is what keeps this one reply: a parser that first
+    read the file would answer a `strategy:` file, a `datamodel:` file and a typo three ways.
     """
     spec = tmp_path / "thin.yaml"
     spec.write_text("strategy:\n  component: a\n  agenda_id: b\n", encoding="utf-8")
@@ -359,11 +362,12 @@ def test_a_retired_run_spec_handed_to_run_is_refused_naming_the_runs_section(
     assert payload["stage"] == "cli.input"
     detail = payload["failures"][0]
     assert detail["code"] == "cli.input.value_invalid"
-    assert "runs:" in detail["requirement"]
-    assert "strategy:" in detail["observed"]
-    for command in ("vqapr new run", "vqapr register", "vqapr run <run-id>"):
+    assert "registered run" in detail["requirement"]
+    assert spec.name in detail["observed"]
+    for command in ("vqapr new datamodel", "vqapr register", "vqapr run <run-id>"):
         assert command in detail["fix"], f"the fix does not name {command}"
-    assert detail["source"]["key_path"] == "strategy"
+    assert "runs:" in detail["fix"], "the fix names the section the shape moved to"
+    assert detail["source"]["file"] == str(spec)
 
 
 def test_a_dataset_template_covers_every_required_key(
@@ -725,13 +729,18 @@ def test_project_root_after_subcommand_explains_position(
     assert "before the subcommand" in payload["error"]
 
 
-def test_a_spec_that_is_not_a_mapping_says_what_it_parsed_as(
+def test_a_declaration_that_is_not_a_mapping_says_what_it_parsed_as(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Driven through `register` since record 148: it is the one verb that opens a YAML file.
+
+    `run` used to open a spec and was where this reply was pinned; it refuses a path by name now,
+    before reading it, so the reply is only reachable where a file is actually parsed.
+    """
     spec = tmp_path / "bad.yaml"
     spec.write_text("just a bare string\n", encoding="utf-8")
 
-    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "run", str(spec))
+    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(spec))
 
     assert code == 1
     assert payload["failures"][0]["code"] == "cli.input.not_a_mapping"

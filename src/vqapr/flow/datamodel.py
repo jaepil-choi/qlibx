@@ -249,7 +249,6 @@ class DataModelOutput:
         """
         if self._directory.exists():
             shutil.rmtree(self._directory)
-        self._directory.mkdir(parents=True)
 
     def append(self, rows: Sequence[Row]) -> None:
         """Write one session's rows as one complete parquet chunk."""
@@ -276,6 +275,9 @@ class DataModelOutput:
         target = self._directory / f"{self._parts:06d}.parquet"
         staging = self._directory / f".{self._parts:06d}.parquet.tmp"
         try:
+            # Created by the first chunk, not at open: a run refused before any row leaves no
+            # empty directory behind to be mistaken for an output.
+            self._directory.mkdir(parents=True, exist_ok=True)
             pq.write_table(table, staging, compression="zstd", use_dictionary=False)
             os.replace(staging, target)
         except (OSError, pa.ArrowException) as error:

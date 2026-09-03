@@ -1,6 +1,12 @@
 # 059 -- a materialization holds every row and every access record in memory until the end, writes a lineage file that repeats each instrument per evaluation, and prints nothing while it runs
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** closed 2026-09-03 by record `148` (Step 7 of the deletion campaign): a datamodel is a
+registered run; each session's rows leave as one parquet chunk under
+`.vqapr/materialized/<dataset_id>/` as the session completes, the record holds one line per
+session and no per-instrument lineage, and `.lineage.json`, `materialize()` and the spec file are
+gone. The progress line on stderr (third finding) is not in `148`; the loop's `on_progress`
+heartbeat exists and a CLI progress line is a separate, small decision. Found 2026-09-03 by the
+scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-009**), against `vqapr-0.3.0`. Confirmed
 against source the same day. **This is the one entry of the run that would have stopped it on the
 machine the scenario was meant for:** the user had already dropped the paper's PCA arm because a

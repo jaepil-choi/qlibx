@@ -150,3 +150,34 @@ def test_the_help_promises_the_key_for_every_kind_again() -> None:
     assert "Every kind reports the file to hand `vqapr register` as `declaration`" in kind_help
     assert "registrable: false" not in kind_help, "no kind answers that any more"
     assert "`runs:`" in kind_help and "vqapr run <run-id>" in kind_help
+
+
+def test_new_datamodel_emits_the_run_that_computes_it(tmp_path: Path) -> None:
+    """The declaration says how to RUN the file, not only how to register it (record 148).
+
+    A datamodel is a `runs:` entry with `datamodels:` since the spec file retired, and the one
+    thing a scaffold knows that a reader would otherwise type by hand is that entry: the run's
+    sessions are the dataset the model reads, its output is named after the model, and the
+    universe and period are placeholders to fill. A strategy's run needs a venue, an execution
+    input and an account, which are facts about the project rather than about the file, so a
+    strategy scaffold still declares the component alone.
+    """
+    import yaml
+
+    body = _new(tmp_path, "datamodel", ("dm", "--dataset", "prices"))
+    document = yaml.safe_load(Path(body["declaration"]).read_text(encoding="utf-8"))
+
+    assert set(document) == {"components", "runs"}
+    assert list(document["components"]) == ["dm"]
+    assert list(document["runs"]) == ["dm-run"]
+    run = document["runs"]["dm-run"]
+    assert run["sessions_from"] == "prices", "the run's sessions are the dataset the model reads"
+    assert run["timezone"] == "Asia/Seoul" and run["at"] == "16:00"
+    assert run["datamodels"] == {"dm": {"dataset_id": "dm-values", "value_fields": ["value"]}}
+    assert "strategies" not in run
+    assert run["instruments"] == ["INSTRUMENT_A", "INSTRUMENT_B"], "placeholders, not guesses"
+    for key in ("start", "end"):
+        assert key in run
+
+    strategy = _new(tmp_path, "strategy", ("st", "--dataset", "prices"))
+    assert "runs" not in yaml.safe_load(Path(strategy["declaration"]).read_text(encoding="utf-8"))

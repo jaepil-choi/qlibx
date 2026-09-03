@@ -150,6 +150,28 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
     }
     assert set(record_view({"kind": "strategy"})) == {*STRATEGY_FIELDS, "kind"}
 
+    # The datamodel record (record 148) is the third kind, read by `show datamodel`. It answers
+    # what it wrote -- the dataset, its fields, its row count, one entry per session -- and not
+    # an account, tables, a contract or constraints, none of which a datamodel has.
+    from vqapr.cli.show import DATAMODEL_FIELDS
+
+    assert set(DATAMODEL_FIELDS) == {
+        "run_id",
+        "datamodel_ref",
+        "datamodel_id",
+        "fingerprint",
+        "component",
+        "agenda",
+        "dataset_id",
+        "value_fields",
+        "rows",
+        "sessions",
+        "source_digest",
+        "declared_digest",
+        "period",
+    }
+    assert set(record_view({"kind": "datamodel"})) == {*DATAMODEL_FIELDS, "kind"}
+
 
 def test_showing_an_unknown_run_names_what_the_store_does_hold(store: Path) -> None:
     """A reader who mistypes an id needs the ids, not a stack trace."""

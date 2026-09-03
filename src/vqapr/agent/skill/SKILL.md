@@ -128,33 +128,42 @@ would mix a live name's recent returns with a delisted name's decade-old ones an
 covariance matrix, a factor regression or any date-aligned model wants. Scaffold the first with
 `vqapr new datamodel --lookback N` and the second with `--calendar-lookback DAYS`.
 
-A materialization spec names `datamodel:` where a simulation names `strategy:`, and that is what
-tells `run` which it is holding — declare both, or neither, and it refuses rather than guessing:
+A datamodel is run as a registered run, exactly like a strategy (record 148): a `runs:` entry
+whose `datamodels:` names the component and the dataset it writes, on the sessions and at the wall
+time the run declares. No account, no venue, no execution input -- those keys are refused on a
+datamodel run. `vqapr new datamodel <id> --dataset <d>` emits the block beside the component:
 
 ```yaml
-datamodel: my-derived            # the registered component to run
-instruments: [A005930, A000660]  # what to evaluate over
-output:
-  dataset_id: my-derived-values  # must NOT already be registered
-  value_fields: [value]          # the columns it writes
-evaluate_at:                     # when to evaluate; timezone-aware, one entry minimum
-  - "2024-03-06T04:00:00+09:00"
+runs:
+  my-derived-run:
+    instruments: [A005930, A000660]  # the universe every session computes over
+    start: "2024-01-02T00:00:00+09:00"
+    end:   "2024-12-31T23:00:00+09:00"
+    sessions_from: prices            # every session that registered dataset has (or `sessions:`)
+    timezone: Asia/Seoul
+    at: "16:00"                      # when compute() is called, each session
+    datamodels:
+      my-derived:                    # the registered DataModel component
+        dataset_id: my-derived-values  # must NOT already be registered
+        value_fields: [value]          # the columns each row carries beside `instrument`
 ```
 
-Then `vqapr check <spec.yaml>` and `vqapr run <spec.yaml>` with the file's path -- a
-materialization is the one spec that is still a file; a simulation is a registered run and is
-named by id (Rung 2). It registers a dataset rather than writing a run record, so `vqapr list
-datasets` shows it arrived and
-`vqapr show dataset <id>` reads back what it computed. The output is readable by any component
-that declares it — which is the point: one model's output is the next model's input.
+Then `vqapr register <file.yaml>`, `vqapr check <run-id>` and `vqapr run <run-id>` by id -- the
+same three commands a strategy run takes; a YAML path handed to `run` or `check` is refused by
+name. Each session's rows land as one parquet chunk under `.vqapr/materialized/<dataset_id>/` the
+moment the session completes, the dataset registers once after the last session, and the run's
+record lands under `.vqapr/runs/<run-id>/datamodels/<id>@<fp8>/datamodel.json` -- one line per
+session (evaluation time, output `available_at`, row count), no per-instrument lineage.
+`vqapr list datasets` shows the dataset arrived, `vqapr list datamodels --run <run-id>` and
+`vqapr show datamodel <run-id>/<id>@<fp8>` read the record, and `vqapr show dataset <id>` reads
+back what it computed. The output is readable by any component that declares it -- which is the
+point: one model's output is the next model's input. Running the same run again is refused while
+its output dataset is registered (`check.datamodel.output_registered`).
 
 **`vqapr show dataset <id> [--limit N]`** works for any registered dataset, not just a
 materialized one. It reports the registration's own facts — source, path, declared fields, span —
 alongside the rows, and reports `rows_total` separately from `returned` so a truncated page never
 reads as a short dataset. `--limit 0` returns every row.
-
-`--strategy`, `--jobs` and `--force` are refused here. All are defined in terms of a run record
-and a materialization writes none; to replace an output, remove its dataset registration first.
 
 **Reading a finished run: two records.** `vqapr show run <run-id>` gives the CONFIGURATION
 every strategy of the run shared -- instruments, period, venue, the execution input and its
@@ -280,8 +289,8 @@ vqapr list execution-inputs
 vqapr list instruments
 ```
 
-The remaining two kinds are `runs` and `strategies`, both Rung 2: `vqapr list runs` is the registered runs and the records
-beside each, `vqapr list strategies --run <run-id>` those records. A kind you registered nothing
+The remaining three kinds are `runs`, `strategies` and `datamodels`, all Rung 2: `vqapr list runs` is the registered runs and the records
+beside each, `vqapr list strategies --run <run-id>` and `vqapr list datamodels --run <run-id>` those records. A kind you registered nothing
 under returns `count: 0`, which is an answer rather than a failure.
 
 #### Correcting a registration during setup
@@ -354,9 +363,10 @@ The same care applies to query patterns written at registration time. Moving ave
 sums and ranks can each reach across rows in a way that pulls future information into a past row;
 flag them and explain what would have to be true for the pattern to be safe.
 
-### Rung 2 — Materialization and run
+### Rung 2 — Run
 
-**Goal:** a completed run that produces a result per strategy.
+**Goal:** a completed run that produces a result per model: a record and tables per strategy, or
+a registered dataset per datamodel.
 
 A run is configuration, registered like everything else: the universe, the period, the
 sessions it fires on (`sessions_from: <dataset>` or a `sessions:` list) and the venue-local
@@ -388,7 +398,8 @@ three strategies, not three runs.
 
 **Stop condition:** `vqapr check <run-id>` returns `ok:true`, then `vqapr run <run-id>`
 returns `ok:true` with a `strategies` map carrying an `occurrences` count, an
-`account_version` and a `record` (`<strategy-id>@<fp8>`) per strategy.
+`account_version` and a `record` (`<strategy-id>@<fp8>`) per strategy -- or, for a datamodel run,
+a `datamodels` map carrying `dataset_id`, `rows`, `sessions` and its `record`.
 
 **Tweaks are directories.** A strategy's record is named by its registered fingerprint, which
 folds the file bytes and the config: edit the strategy and re-register it under the same id,

@@ -58,6 +58,8 @@ import duckdb
 
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
+    QUANTUM,
+    SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
     AllocationPublicationSpec,
@@ -67,9 +69,7 @@ from vqapr.public import (
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    QUANTUM,
     RunDefinition,
-    SHIPPED_CONSTRAINTS,
     SourceSpec,
     StrategyEntry,
     callback_evidence,

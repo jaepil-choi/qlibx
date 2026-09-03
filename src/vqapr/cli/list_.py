@@ -24,7 +24,12 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.flow.run import RunDefinition
-from vqapr.flow.run_records import datamodel_refs, read_strategy_record, strategy_refs
+from vqapr.flow.run_records import (
+    datamodel_refs,
+    read_datamodel_record,
+    read_strategy_record,
+    strategy_refs,
+)
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
@@ -38,6 +43,7 @@ KINDS = (
     "instruments",
     "runs",
     "strategies",
+    "datamodels",
 )
 
 _ACCESSORS = {
@@ -105,19 +111,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--run",
         dest="run_id",
         default=None,
-        help="`strategies` only: the run whose strategy records to list (required)",
+        help="`strategies`/`datamodels`: the run whose member records to list (required)",
     )
     parser.add_argument(
         "--strategy",
         dest="strategy",
         default=None,
-        help="`strategies` only: keep records of this strategy id",
+        help="`strategies`/`datamodels`: keep records of this model id",
     )
     parser.add_argument(
         "--fingerprint",
         dest="fingerprint",
         default=None,
-        help="`strategies` only: keep records whose fingerprint starts with this prefix",
+        help="`strategies`/`datamodels`: keep records whose fingerprint starts with this prefix",
     )
     parser.add_argument(
         "--failed-contract",
@@ -129,7 +135,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--since",
         dest="since",
         default=None,
-        help="`strategies` only: keep records whose period ends at or after this instant",
+        help="`strategies`/`datamodels`: keep records whose period ends at or after this instant",
     )
 
 
@@ -163,6 +169,36 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
         if prefix and not str(row["fingerprint"] or "").startswith(prefix):
             continue
         if getattr(args, "failed_contract", False) and not failed:
+            continue
+        if since is not None:
+            ended = _instant(period.get("end"), name="period.end")
+            if ended is None or ended < since:
+                continue
+        rows.append(row)
+    return rows
+
+
+def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Every finished datamodel record of one run (record `148`): what it wrote, and when."""
+    since = _instant(getattr(args, "since", None), name="--since")
+    rows: list[dict[str, Any]] = []
+    for ref in datamodel_refs(root, run_id):
+        record = read_datamodel_record(root, run_id, ref)
+        period = record.get("period") or {}
+        row = {
+            "run_id": run_id,
+            "datamodel_ref": ref,
+            "datamodel_id": record.get("datamodel_id"),
+            "fingerprint": record.get("fingerprint"),
+            "dataset_id": record.get("dataset_id"),
+            "rows": record.get("rows"),
+            "period": period,
+        }
+        wanted = getattr(args, "strategy", None)
+        if wanted and row["datamodel_id"] != wanted:
+            continue
+        prefix = getattr(args, "fingerprint", None)
+        if prefix and not str(row["fingerprint"] or "").startswith(prefix):
             continue
         if since is not None:
             ended = _instant(period.get("end"), name="period.end")
@@ -249,6 +285,19 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         rows = _strategies(store_root, run_id, args)
         if args.identifier:
             rows = [row for row in rows if args.identifier in str(row["strategy_ref"])]
+        return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
+    if args.kind == "datamodels":
+        run_id = getattr(args, "run_id", None)
+        if not run_id:
+            raise InputError(
+                VALUE_INVALID,
+                requirement="`list datamodels` names the run whose records to list",
+                observed="no --run given",
+                retry="run `vqapr list runs`, then `vqapr list datamodels --run <run-id>`",
+            )
+        rows = _datamodels(store_root, run_id, args)
+        if args.identifier:
+            rows = [row for row in rows if args.identifier in str(row["datamodel_ref"])]
         return success("workspace.list", kind=args.kind, count=len(rows), items=rows)
     if not (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists():
         # 없는 workspace는 빈 workspace다. 존재 여부만 보고 통과시키는 이유는, 손상된 workspace는

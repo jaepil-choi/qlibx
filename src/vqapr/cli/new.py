@@ -213,14 +213,23 @@ def _emitted_class_name(source: str) -> str:
     raise ValueError("the emitted template declares no class")
 
 
-def _declaration(component_id: str, kind: ComponentKind, source: Path, object_name: str) -> str:
+def _declaration(
+    component_id: str,
+    kind: ComponentKind,
+    source: Path,
+    object_name: str,
+    *,
+    dataset_id: str | None = None,
+) -> str:
     """The registrable declaration for what was just scaffolded.
 
-    Only the component is declared. The dataset it reads, and the agenda it runs on, are facts
-    about the user's project rather than about this file, and inventing plausible values for them
-    would produce a document that registers something the user did not mean.
+    The component is declared. A datamodel also gets the run that computes it (record `148`):
+    its sessions are the dataset it reads, its output is named after it, and the universe and
+    period are placeholders to fill -- registrable as emitted, refused by `check` until the
+    instruments are real. A strategy's run needs a venue, an execution input and an account,
+    which are facts about the user's project rather than about this file, so it gets none.
     """
-    document = {
+    document: dict[str, Any] = {
         "components": {
             component_id: {
                 "kind": _DECLARATION_KIND[kind],
@@ -229,6 +238,23 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
             }
         }
     }
+    if kind is ComponentKind.DATA_MODEL and dataset_id:
+        document["runs"] = {
+            f"{component_id}-run": {
+                "instruments": ["INSTRUMENT_A", "INSTRUMENT_B"],
+                "start": "2024-01-02T00:00:00+09:00",
+                "end": "2024-12-31T23:00:00+09:00",
+                "sessions_from": dataset_id,
+                "timezone": "Asia/Seoul",
+                "at": "16:00",
+                "datamodels": {
+                    component_id: {
+                        "dataset_id": f"{component_id}-values",
+                        "value_fields": ["value"],
+                    }
+                },
+            }
+        }
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
@@ -402,7 +428,14 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source, encoding="utf-8")
     declaration.write_text(
-        _declaration(args.component_id, kind, target, object_name), encoding="utf-8"
+        _declaration(
+            args.component_id,
+            kind,
+            target,
+            object_name,
+            dataset_id=getattr(args, "dataset", None),
+        ),
+        encoding="utf-8",
     )
     return success(
         "component.new",

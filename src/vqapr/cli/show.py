@@ -22,11 +22,13 @@ from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
 from vqapr.flow.run_records import (
+    DATAMODEL_KIND,
     RECORD_FIELDS_BY_KIND,
     RUN_JSON_FIELDS,
     RUN_KIND,
     STRATEGY_KIND,
     datamodel_refs,
+    read_datamodel_record,
     read_run_record,
     read_strategy_record,
     read_table,
@@ -38,13 +40,14 @@ from vqapr.flow.run_records import (
 from vqapr.inputs import InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
-KINDS = ("run", "strategy", "model", "dataset")
+KINDS = ("run", "strategy", "datamodel", "model", "dataset")
 
 
 # Imported, not redefined. The record is the artifact and this is one of its readers, so the field
 # sets live beside the record in `flow/run_records.py` and the CLI reads them from there.
 RECORD_FIELDS = record_fields(RUN_KIND)
 STRATEGY_FIELDS = record_fields(STRATEGY_KIND)
+DATAMODEL_FIELDS = record_fields(DATAMODEL_KIND)
 
 
 def record_view(record: dict[str, Any]) -> dict[str, Any]:
@@ -217,21 +220,27 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
 
 
 def resolve_strategy(root: Path, identifier: str) -> tuple[str, str]:
-    """`<run-id>/<strategy-id>@<fp8>` -> (run_id, strategy_ref); the short form when unique.
+    """`<run-id>/<strategy-id>@<fp8>` -> (run_id, strategy_ref); the short form when unique."""
+    return resolve_member(root, identifier, kind="strategy")
 
-    The short form is a convenience for the ordinary case of one record per strategy; with several
-    fingerprints of one strategy the reader is shown them and asked to pick, because guessing the
+
+def resolve_member(root: Path, identifier: str, *, kind: str) -> tuple[str, str]:
+    """`<run-id>/<id>@<fp8>` -> (run_id, ref) for a strategy or a datamodel record.
+
+    The short form is a convenience for the ordinary case of one record per model; with several
+    fingerprints of one model the reader is shown them and asked to pick, because guessing the
     newest would answer a question about a tweak the reader did not name.
     """
+    plural = "strategies" if kind == "strategy" else "datamodels"
     run_id, slash, rest = identifier.partition("/")
     if not slash or not rest:
         raise InputError(
             "cli.input.value_invalid",
-            requirement="show strategy takes `<run-id>/<strategy-id>@<fp8>`",
+            requirement=f"show {kind} takes `<run-id>/<{kind}-id>@<fp8>`",
             observed=repr(identifier),
-            retry="run `vqapr list strategies --run <run-id>` to see the records, then show one",
+            retry=f"run `vqapr list {plural} --run <run-id>` to see the records, then show one",
         )
-    known = strategy_refs(root, run_id)
+    known = strategy_refs(root, run_id) if kind == "strategy" else datamodel_refs(root, run_id)
     if rest in known:
         return run_id, rest
     matching = [ref for ref in known if ref.rsplit("@", 1)[0] == rest]
@@ -239,7 +248,7 @@ def resolve_strategy(root: Path, identifier: str) -> tuple[str, str]:
         return run_id, matching[0]
     raise InputError(
         "cli.input.value_invalid",
-        requirement="show strategy requires a strategy record this store holds",
+        requirement=f"show {kind} requires a {kind} record this store holds",
         observed=(
             f"{identifier!r}; "
             + (
@@ -248,7 +257,7 @@ def resolve_strategy(root: Path, identifier: str) -> tuple[str, str]:
                 else f"run {run_id!r} holds: {', '.join(known) or '(none)'}"
             )
         ),
-        retry="run `vqapr list strategies --run <run-id>` to see the records, then show one",
+        retry=f"run `vqapr list {plural} --run <run-id>` to see the records, then show one",
     )
 
 
@@ -323,6 +332,21 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             "strategy.show",
             kind=STRATEGY_KIND,
             **{field: record.get(field) for field in STRATEGY_FIELDS},
+        )
+    if args.kind == "datamodel":
+        run_id, datamodel_ref = resolve_member(root, args.identifier, kind="datamodel")
+        record = read_datamodel_record(root, run_id, datamodel_ref)
+        if getattr(args, "table", None) is not None:
+            raise InputError(
+                "cli.input.value_invalid",
+                requirement="a datamodel's rows are the dataset it registered, not a table",
+                observed=f"{args.identifier!r} wrote dataset {record.get('dataset_id')!r}",
+                retry=f"vqapr show dataset {record.get('dataset_id')}",
+            )
+        return success(
+            "datamodel.show",
+            kind=DATAMODEL_KIND,
+            **{field: record.get(field) for field in DATAMODEL_FIELDS},
         )
     known = run_ids(root)
     if args.identifier not in known:

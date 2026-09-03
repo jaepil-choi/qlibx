@@ -2,7 +2,8 @@
 
 Record `115`. Before it, three things were true at once:
 
-* `record_fields(RUN_KIND)` was a flat 8-tuple, so the record could describe exactly one kind of thing;
+* `record_fields(RUN_KIND)` was a flat 8-tuple, so the record could describe exactly one kind of
+  thing;
 * `read_record` was `json.loads` with **no schema branch at all**; and
 * `cli/show.py` read every field with `record.get(field)`.
 
@@ -10,6 +11,10 @@ Together those meant a reverted reader handed a new-shape record did not refuse 
 fields it recognised and silently dropped the rest — and a new reader handed an old record rendered
 the new fields as `null`, which is indistinguishable from "this run genuinely had none". "A reverted
 reader refuses loudly" was an assumption, not a property.
+
+The second kind `115` declared was a materialization; record `148` retired it, and the kinds a
+record can carry are now the run directory's own (`run`) and its two members (`strategy`,
+`datamodel`). The discriminator and the refusal are the same.
 """
 
 from __future__ import annotations
@@ -21,9 +26,10 @@ import pytest
 
 from vqapr.cli.show import record_view
 from vqapr.flow.run_records import (
-    MATERIALIZATION_KIND,
+    DATAMODEL_KIND,
     RUN_KIND,
     SCHEMA,
+    STRATEGY_KIND,
     RunRecordWriter,
     read_record,
     record_fields,
@@ -97,14 +103,23 @@ def test_a_record_that_is_not_a_mapping_is_named_rather_than_crashing_later(
 
 
 def test_the_field_set_is_chosen_by_kind() -> None:
-    """The shape change itself: two kinds, two field sets, one discriminator."""
+    """The shape change itself: three kinds, three field sets, one discriminator."""
     assert record_fields(RUN_KIND) == record_fields(RUN_KIND)
-    assert record_fields(MATERIALIZATION_KIND) != record_fields(RUN_KIND)
-    assert "dataset_id" in record_fields(MATERIALIZATION_KIND)
+    assert record_fields(STRATEGY_KIND) != record_fields(RUN_KIND)
+    assert record_fields(DATAMODEL_KIND) != record_fields(RUN_KIND)
+    assert record_fields(DATAMODEL_KIND) != record_fields(STRATEGY_KIND)
+    assert "dataset_id" in record_fields(DATAMODEL_KIND)
+    assert "dataset_id" not in record_fields(STRATEGY_KIND)
+    assert "account" in record_fields(STRATEGY_KIND)
+    assert "account" not in record_fields(DATAMODEL_KIND)
 
-    # The questions both kinds answer keep the same names, so a reader asking "which declarations
+    # The questions every kind answers keep the same names, so a reader asking "which declarations
     # produced this" need not know which kind it is holding.
-    shared = set(record_fields(RUN_KIND)) & set(record_fields(MATERIALIZATION_KIND))
+    shared = (
+        set(record_fields(RUN_KIND))
+        & set(record_fields(STRATEGY_KIND))
+        & set(record_fields(DATAMODEL_KIND))
+    )
     assert {"run_id", "source_digest", "declared_digest", "period"} <= shared
 
 
@@ -112,10 +127,13 @@ def test_an_unknown_kind_is_refused_at_both_ends(tmp_path: Path) -> None:
     """A `KeyError` here is the same deliberate guarantee the flat tuple gave.
 
     A builder named without a field, or a kind named without a field set, fails at the write rather
-    than producing a record quietly missing its answers.
+    than producing a record quietly missing its answers. `materialization` is such a kind now
+    (record `148`): a reader handed one refuses instead of guessing which field set it meant.
     """
     with pytest.raises(KeyError, match="unknown run-record kind"):
         record_fields("nonsense")
+    with pytest.raises(KeyError, match="unknown run-record kind"):
+        record_fields("materialization")
 
     writer = RunRecordWriter(tmp_path, "bad-kind")
     writer.open()
@@ -123,17 +141,17 @@ def test_an_unknown_kind_is_refused_at_both_ends(tmp_path: Path) -> None:
         writer.finish({}, kind="nonsense")
 
 
-def test_show_projects_a_materialization_through_its_own_fields() -> None:
+def test_show_projects_a_datamodel_through_its_own_fields() -> None:
     """Why the flat tuple could not survive a second kind.
 
-    Projecting a materialization through a run's field list would render six nulls and drop
-    everything it actually answers. Record `116` writes these; the projection is correct now so
-    that story adds a producer rather than also changing the reader.
+    Projecting a datamodel's record through a run's field list would render nulls for an account
+    and tables it never had and drop everything it actually answers: the dataset it wrote and how
+    many rows.
     """
-    view = record_view({"kind": MATERIALIZATION_KIND, "dataset_id": "prices", "rows": 42})
+    view = record_view({"kind": DATAMODEL_KIND, "dataset_id": "prices", "rows": 42})
 
-    assert view["kind"] == MATERIALIZATION_KIND
+    assert view["kind"] == DATAMODEL_KIND
     assert view["dataset_id"] == "prices"
     assert view["rows"] == 42
-    assert "account" not in view, "a materialization has no account to report"
-    assert "tables" not in view
+    assert "account" not in view, "a datamodel has no account to report"
+    assert "tables" not in view, "a datamodel's rows are its dataset, not tables"

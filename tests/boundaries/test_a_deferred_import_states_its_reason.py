@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 22
+CEILING = 19
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
 
 Was 23 after record `132`. Record `134` removed the function-local `Workspace` import in

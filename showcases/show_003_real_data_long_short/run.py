@@ -34,17 +34,16 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
+    DataModelEntry,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    MaterializationSpec,
     RunDefinition,
     SourceSpec,
     StrategyEntry,
     component_ref,
-    materialize,
     preflight_run,
     register_component,
     register_data_model,
@@ -398,15 +397,22 @@ def main() -> None:
     )
 
     register_data_model(PROJECT, "showcase-model", paths["model"], "ReversalModel")
-    materialization = materialize(
-        PROJECT,
-        "showcase-model",
-        MaterializationSpec.of("reversal_score", value_fields=("score",)),
-        evaluation_times=tuple(
-            datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
-        ),
+    # The score is a datamodel RUN (record 148): the same sessions/wall-time shape as the
+    # strategy run below, no venue and no account, one registered dataset at the end.
+    score_definition = RunDefinition(
+        run_id="showcase-score",
+        strategies=(),
         instruments=tuple(universe),
+        datamodels=(DataModelEntry("showcase-model", "reversal_score", ("score",)),),
+        timezone=VENUE,
+        at=time(16, 0),
+        sessions=tuple(score_days),
+        start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
     )
+    materialization = run(
+        PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
+    ).result()
 
     strategy_ref = component_ref(
         "showcase-strategy", ComponentKind.STRATEGY_MODEL, paths["strategy"], "ReversalLongShort"
@@ -464,7 +470,7 @@ def main() -> None:
         score_rows = con.execute(
             f"""
             SELECT available_at, instrument, score
-            FROM read_parquet('{materialization.output_path.as_posix()}')
+            FROM read_parquet('{materialization.output_path.as_posix()}/*.parquet')
             ORDER BY available_at, instrument
             LIMIT 12
             """
@@ -509,10 +515,8 @@ def main() -> None:
             "trading_sessions": fixture["sessions"],
             "first_session": fixture["first_session"],
             "last_session": fixture["last_session"],
-            "materialized_score_rows": sum(
-                invocation.row_count for invocation in materialization.invocations
-            ),
-            "materialized_evaluations": len(materialization.invocations),
+            "materialized_score_rows": materialization.rows,
+            "materialized_evaluations": len(materialization.occurrences),
             "strategy_callbacks": len(callback_days),
             "occurrences_dispatched": len(result.occurrences),
             "dealt_fills": len(dealt),

@@ -8,9 +8,10 @@ strategy run: the sessions are the run's, each session's rows leave the process 
 dataset registers once after the last session, and `runs/<run-id>/datamodels/<id>@<fp8>/` holds
 the record.
 
-The tests here pin what the old path published (the rows) and what the new one promises beyond
-it: chunks that survive a kill, a record without lineage, a refusal before the second run wastes
-the hour, memory that lives across sessions, and workers under `--jobs`.
+The tests here pin what the old path published (the rows, computed by hand from the fixture now
+that `materialize()` is gone) and what the new one promises beyond it: chunks that survive a
+kill, a record without lineage, a refusal before the second run wastes the hour, memory that
+lives across sessions, and workers under `--jobs`.
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import MAX_EXAMPLES, VqaprError
 from vqapr.flow.datamodel import DataModelResult, output_directory, output_source_id
 from vqapr.flow.judgments import judgments
-from vqapr.flow.materialize import MaterializationSpec
 from vqapr.flow.orchestration import RunResult, run
 from vqapr.flow.preflight import preflight_run
 from vqapr.flow.run import DataModelEntry, RunDefinition
@@ -39,15 +39,25 @@ from vqapr.flow.run_records import (
     read_run_record,
     strategy_refs,
 )
-from vqapr.public import materialize, register_data_model, register_dataset, register_run
+from vqapr.public import register_data_model, register_dataset, register_run
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 START = datetime(2024, 3, 6, tzinfo=KST)
 END = datetime(2024, 3, 8, tzinfo=KST)
 SESSIONS = (datetime(2024, 3, 6, 16, tzinfo=KST), datetime(2024, 3, 7, 16, tzinfo=KST))
-"""The two sessions inside `[START, END]` at 16:00: exactly the instants `materialize()` was given
-in `test_materialize.py`, so the two paths can be compared row for row."""
+"""The two sessions inside `[START, END]` at 16:00: exactly the instants `materialize()` was
+given before record `148` retired it, so the rows it published are the rows expected here."""
+
+EXPECTED_ROWS = (
+    (SESSIONS[0], "A", -(103.0 / 100.0 - 1.0)),
+    (SESSIONS[0], "B", -(51.0 / 50.0 - 1.0)),
+    (SESSIONS[1], "A", -(105.0 / 103.0 - 1.0)),
+    (SESSIONS[1], "B", -(53.0 / 51.0 - 1.0)),
+)
+"""The reversal by hand from `model_price_parquet`: closes A 100, 103, 105 and B 50, 51, 53 on
+3/5-3/7 at 15:30, a 2-row window at 16:00 on 3/6 and 3/7, `-(last / first - 1)`. The fixture's
+3/8 row (close 999) is after both sessions; a score that used it would be nowhere near these."""
 
 _MODELS = '''from pathlib import Path
 from vqapr import authoring as va
@@ -243,19 +253,14 @@ def test_a_datamodel_run_publishes_the_rows_materialize_published(
 ) -> None:
     """The output is the same dataset, reached through registration and through a read.
 
-    The old loop and the new one must agree row for row before the old one is deleted, so the
-    anti-join runs both ways. The dataset registers once, after the last session, as a directory
-    source of grain `instrument_instant`; and it is read the way any next model reads: a second
-    datamodel run takes its sessions from it and echoes the value back.
+    The rows are `EXPECTED_ROWS`, worked by hand from the fixture: the same four rows
+    `materialize()` published, with the point-in-time proof inside them -- the fixture's 3/8 row
+    (close 999) sits after both sessions and reaches no score. The dataset registers once, after
+    the last session, as a directory source of grain `instrument_instant`; and it is read the way
+    any next model reads: a second datamodel run takes its sessions from it and echoes the value
+    back.
     """
     _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"), ("echo", "EchoModel"))
-    old = materialize(
-        tmp_path,
-        "reversal",
-        MaterializationSpec.of("reversal_old", value_fields=("score",)),
-        evaluation_times=SESSIONS,
-        instruments=("A", "B"),
-    )
 
     outcome = _run(
         tmp_path, _definition("factors", DataModelEntry("reversal", "reversal_2d", ("score",)))
@@ -271,13 +276,15 @@ def test_a_datamodel_run_publishes_the_rows_materialize_published(
     assert str(registration.source) == output_source_id("reversal_2d")
     assert registration.grain is Grain.INSTRUMENT_INSTANT
     assert workspace.source(output_source_id("reversal_2d")).path == result.output_path
-    new = _parquet(tmp_path, "reversal_2d")
-    previous = f"'{old.output_path.as_posix()}'"
-    columns = "CAST(available_at AS TIMESTAMPTZ) AS available_at, instrument, score"
-    assert _query(f"SELECT count(*) FROM {new}") == [(4,)]
-    for left, right in ((new, previous), (previous, new)):
-        missing = _query(f"SELECT {columns} FROM {left} EXCEPT ALL SELECT {columns} FROM {right}")
-        assert missing == [], f"rows of {left} absent from {right}: {missing}"
+    assert result.output_path == output_directory(tmp_path, "reversal_2d")
+    published = _query(
+        "SELECT CAST(available_at AS TIMESTAMPTZ), instrument, score "
+        f"FROM {_parquet(tmp_path, 'reversal_2d')} ORDER BY 1, 2"
+    )
+    assert len(published) == len(EXPECTED_ROWS)
+    for (available_at, instrument, score), expected in zip(published, EXPECTED_ROWS, strict=True):
+        assert (available_at, instrument) == expected[:2]
+        assert score == pytest.approx(expected[2])
 
     echoed = _run(
         tmp_path,
@@ -346,16 +353,34 @@ def test_a_compute_failure_keeps_the_landed_chunk_and_registers_nothing(
 
 
 @pytest.mark.parametrize(
-    ("component", "object_name", "instruments", "code", "example_total"),
+    ("component", "object_name", "instruments", "code", "example_total", "examples", "observed"),
     [
-        ("forger", "ForgingModel", ("A", "B"), "datamodel.output.available_at_owned", 0),
-        ("stray", "StrayNameModel", ("A", "B"), "datamodel.output.instrument_unrequested", 20),
+        (
+            "forger",
+            "ForgingModel",
+            ("A", "B"),
+            "datamodel.output.available_at_owned",
+            0,
+            (),
+            "row 0 ",
+        ),
+        (
+            "stray",
+            "StrayNameModel",
+            ("A", "B"),
+            "datamodel.output.instrument_unrequested",
+            20,
+            tuple(f"X{n:02d}" for n in range(MAX_EXAMPLES)),
+            "20 unrequested instrument(s) across 21 of 23 output row(s)",
+        ),
         (
             "repeated",
             "RepeatedNameModel",
             tuple(f"D{n:02d}" for n in range(20)),
             "datamodel.output.instrument_duplicate",
             20,
+            tuple(f"D{n:02d}" for n in range(MAX_EXAMPLES)),
+            "20 repeated instrument(s) across 20 extra of 40 output row(s)",
         ),
     ],
 )
@@ -367,11 +392,16 @@ def test_an_output_breach_is_refused_by_its_code_and_registers_nothing(
     instruments: tuple[str, ...],
     code: str,
     example_total: int,
+    examples: tuple[str, ...],
+    observed: str,
 ) -> None:
     """The output contract moved with the loop and kept its codes under the new stage.
 
-    A forged `available_at` is structural and stops at the first row; unrequested and duplicated
-    instruments are content breaches and are counted before truncation (issue 032), as before.
+    A forged `available_at` is structural and stops at the first row, quoting no value: an empty
+    `examples` beside `example_total: 0` is the honest answer there. Unrequested and duplicated
+    instruments are content breaches, collected before truncation (issue 032): twenty offenders
+    on purpose, because a single one cannot tell fail-fast from collect-then-report, and the
+    stray fixture emits one name twice so the distinct count (20) and the row count (21) differ.
     """
     _prepared(tmp_path, model_price_parquet, (component, object_name))
     before = Workspace.open(tmp_path).path.read_bytes()
@@ -392,6 +422,8 @@ def test_an_output_breach_is_refused_by_its_code_and_registers_nothing(
     assert failure.code == code
     assert failure.example_total == example_total
     assert len(failure.examples) == min(example_total, MAX_EXAMPLES)
+    assert failure.examples == examples, "each offender quoted once, in first-seen order"
+    assert failure.observed.startswith(observed)
     assert "breached" not in _dataset_ids(tmp_path)
     assert Workspace.open(tmp_path).path.read_bytes() == before
 
@@ -532,3 +564,35 @@ def test_memory_persists_across_the_sessions_of_one_run(
             (date(2024, 3, 7), "A", expected[1]),
             (date(2024, 3, 7), "B", expected[1]),
         ]
+
+
+def test_an_edited_component_computes_and_the_record_says_what_loaded(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """Editing a registered component and re-running is the ordinary development loop.
+
+    This once pinned the opposite: an edit was refused at load with
+    `component.load.fingerprint_drift`, whose stated repair -- re-register -- the registry then
+    refused in turn (`docs/implementations/057`). The gate went (issue 009) and the fingerprint
+    became a receipt: the record carries the registered fingerprint and, per component, the one
+    that actually loaded, so the edit neither refuses nor mints a second identity.
+    """
+    _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
+    (registered,) = Workspace.open(tmp_path).components
+    source = tmp_path / "models.py"
+    source.write_text(source.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
+
+    outcome = _run(
+        tmp_path, _definition("drifted", DataModelEntry("reversal", "drifted", ("score",)))
+    )
+
+    after = Workspace.open(tmp_path)
+    assert [str(ref.component_id) for ref in after.components] == ["reversal"], (
+        "an edit must not mint a second component id"
+    )
+    assert after.dataset("drifted") is not None
+    record = outcome.records["reversal"]
+    assert record["fingerprint"] == registered.fingerprint
+    assert record["source_digest"]["reversal"] != registered.fingerprint, (
+        "the record names the bytes that ran, not the bytes that were registered"
+    )

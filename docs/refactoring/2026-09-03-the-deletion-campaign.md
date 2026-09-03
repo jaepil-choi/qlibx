@@ -386,6 +386,14 @@ record `140`(monitoring findings) 병합 — **충족, `50941347`**. Step 5 완�
 
 ## Step 7 — A: DataModel은 account와 execution이 없는 flow다 (ExecPlan)
 
+> **2026-09-03 완료 — 기록 `148`.** 네 milestone이 브랜치 `step-07-a-datamodel-is-a-flow`에서
+> 순서대로 들어갔다. M1: run이 `sessions_from|sessions`·`timezone`·`at`을 들고 agenda·`strategy_configs`·
+> `valuation`·`monitoring`이 표면에서 사라졌다(`7b9c781c`). M2: `flow/loop.py`의 `OccurrenceFlow`가 두
+> 종류의 run이 공유하는 걸음이고 `flow/datamodel.py`가 callback 자리에 서서 datamodel run이 세션마다
+> chunk를 쓰고 마지막에 한 번 등록한다(`470e1a32`). M3: `materialize()`·spec 파일·materialization
+> record kind가 삭제되고 `list/show/rm datamodel`과 `new datamodel`의 run 블록이 들어왔다. M4: 문서와
+> 기록. `059` 닫힘. 열린 것: 전략 identity가 run id를 접는 문제, stderr 진행 표시.
+
 **ExecPlan:** `.agent/plans/active/step-07-a-datamodel-is-a-flow.md` (2026-09-03). 여기는 계약이다.
 
 > **2026-09-03 착수 시 소유자 결정 둘 (D5·D6).** (D5) **run은 한 종류만 갖는다** — `datamodels:` 또는

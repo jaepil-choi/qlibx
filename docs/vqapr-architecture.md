@@ -330,6 +330,11 @@ callback과 같은 instant이면 execution chain을 먼저 완료하므로 callb
 | valuation | 장부를 재는 날 | `valuation_agenda` 선언 |
 | monitoring | 제약을 점검하는 날 | `monitoring_agenda` 선언 |
 
+> **2026-09-03 정정 (기록 `148`, 소유자 결정 D6·D7).** 사용자가 선언하는 시계는 하나다: run의 `sessions`와
+> `at`(모든 모델이 매 세션 호출되는 벽시계 시각). due execution은 위와 같다. **valuation은 체결 시각에**,
+> **monitoring은 commit 직후에** 돈다 — 둘 다 execution table의 해상도 이상으로 들어갈 수 없으므로 자기
+> agenda가 없다. `ValuationConfig`·`MonitoringPolicy`·valuation/monitoring agenda는 삭제됐다.
+
 due execution만 agenda가 없다. callback이 intent를 만들면 그것이 `target_at`을 들고 대기하고, merge
 loop가 그 시각에 도달할 때 체결된다. 그래서 **결정과 체결은 서로 다른 occurrence이다.**
 
@@ -858,6 +863,14 @@ Strategy callback agenda는 DataModel materialization과 공유하지 않는다.
   위한 선택이다.
 
 #### `materialize()` — DataModel을 dataset으로 만든다
+
+> **2026-09-03 정정 (기록 `148`).** `materialize()`와 spec 파일은 삭제됐다. DataModel은 **등록된 run**이다
+> — `runs:` 항목의 `datamodels:`가 component와 그것이 쓰는 dataset(`dataset_id`, `value_fields`)을 들고,
+> run의 `sessions`/`at`이 evaluation time 목록이다. `flow/loop.py`의 `OccurrenceFlow`가 strategy run과
+> 같은 걸음이고 `flow/datamodel.py`의 `DataModelPhase`가 callback 자리에 선다: account도 venue도 없다.
+> 세션마다 행이 `.vqapr/materialized/<dataset_id>/<n>.parquet`로 나가고 마지막 세션 뒤 한 번 등록된다.
+> 아래 본문은 그 결정 전의 설명이며 `compute()`의 계약(한 frozen evaluation time, PIT window,
+> package가 `available_at`을 붙임)은 그대로다.
 
 `compute()`는 한 frozen evaluation time의 값을 계산하고, `materialize(evaluation_times)`는 caller가 명시한
 정렬된 evaluation time을 순회해 `compute()` 결과를 검증·저장하고 registered dataset으로 publish하는
@@ -2295,7 +2308,8 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
 **결정.** valuation은 아무것도 구독하지 않는다. 장부는 **venue가 그 시점에 체결 가능하다고 공표한
 가격**으로 평가된다 — run이 이미 체결하려고 읽는 바로 그 스냅샷이다(§6.2).
 
-`ValuationConfig`는 agenda 하나만 갖는다. `mark_requirement`는 없다.
+`ValuationConfig`는 agenda 하나만 갖는다. `mark_requirement`는 없다. (기록 `148`: `ValuationConfig`
+자체가 사라졌다 — 장부는 체결 시각에 평가된다.)
 
 ```text
  execution snapshot (target ∪ held, 한 번의 조회)
@@ -2488,7 +2502,7 @@ recorder `stage`의 closed values와 timestamp 의미는 다음뿐이다.
 
 | stage | `event_time` |
 |---|---|
-| `DATA_MODEL_MATERIALIZATION` | frozen materialization evaluation time |
+| `DATA_MODEL_MATERIALIZATION` | frozen materialization evaluation time (기록 `148` 이후: datamodel run의 세션 evaluation time) |
 | `STRATEGY_CALLBACK` | current callback occurrence evaluation time |
 
 valuation/monitoring/execution/fill/account evidence는 Model의 free-form recorder가 아니라 typed lifecycle
@@ -4458,6 +4472,10 @@ execution을 거치면 StrategyModel, 거치지 않고 loop만 돌며 score를 �
 
 **트리.** 엔진 층은 진술대로다. **저자가 실제로 상속하는 층은 그렇지 않다.**
 
+> **2026-09-03 정정 (기록 `148`).** 사용법과 mechanism도 닮았다: 둘 다 `runs:`에 등록되는 run의 멤버이고,
+> 같은 `sessions`/`at`으로 호출되며, 같은 `OccurrenceFlow`가 걷는다. StrategyModel은 `CallbackPhase`와
+> 체결·평가 phase를, DataModel은 `DataModelPhase` 하나를 거친다(`flow/loop.py`, `flow/datamodel.py`).
+>
 > **2026-09-02 정정 (기록 `130`·`131`·`132`).** 아래 측정은 그날의 트리다. 지금은 층이 하나다 —
 > `authoring.Model -> DataModel (compute)` / `-> StrategyModel (decide, tables, account_history,
 > save_payload/load_payload)`, `Constraint (project, monitor)`는 `memory`가 없어 `Model` 밖 — 그리고
@@ -4530,6 +4548,8 @@ mechanism이 닮는다", "같은 동작에 다른 이름을 쓰지 않는다")�
 `FrozenRun`, run record, run id, lock까지 함께 움직이는 변경이다.
 
 > **2026-09-02 정정 (기록 `139`).** run은 workspace에 **등록되는 선언**이 됐다(`runs:` 섹션, `vqapr run <run-id>`). `RunDefinition`은 id와 값만 들고 `strategies`가 복수다. `FrozenRun`은 run 층 + `FrozenStrategy` 여럿이고, 전략마다 자기 `Account`·자기 `SimulationFlow`·자기 record다. `--jobs N`은 프로세스 N개이고 각자 panel을 만든다(설계 §7-2, 소유자 결정).
+>
+> **2026-09-03 정정 (기록 `148`).** run은 **한 종류의 모델**을 든다 — `strategies:` 또는 `datamodels:`. run 층은 universe·period·`sessions`·`at`(그리고 strategy run이면 venue·execution input·account)이고, agenda·`strategy_configs`·`valuation`·`monitoring`은 표면에서 사라졌다. datamodel run은 `FrozenDataModel` 여럿이고 각자 `DataModelFlow`·자기 record·자기 dataset이다; `--jobs N`은 같다. spec 파일과 `materialize()`는 없다.
 
 ### 17.3.1 run 설정 중 record에 남는 것과 남지 않는 것
 
@@ -4558,6 +4578,8 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 **판정: 부분.** 기간과 계약은 남고 **무엇을 무엇에 대해 돌렸는지**는 남지 않는다.
 
 > **2026-09-02 정정 (기록 `139`).** `run.json`이 universe, period, valuation/monitoring agenda, exchange(id·fingerprint), execution input(id·fill 선언, `034`), initial account 선언, dataset(id·source·grain·**source digest**, A7), 그리고 이 run이 이름 댄 전략 목록을 든다. run id는 등록된 이름이다.
+>
+> **2026-09-03 정정 (기록 `148`).** `run.json`에서 valuation/monitoring agenda가 빠지고 `datamodels` 목록(component id·record·dataset_id)이 들어왔다. datamodel 하나의 기록은 `datamodels/<id>@<fp8>/datamodel.json`이다 — component(path·fingerprint 등록값·로드값), 쓴 dataset과 value fields, 세션당 한 줄(evaluation time·output `available_at`·row count), 총 행 수, period.
 
 ### 17.3.2 run 기록은 strategy file도, 전략 자신의 fingerprint도 담지 않는다
 

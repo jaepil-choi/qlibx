@@ -105,15 +105,6 @@ DATAMODEL_SCHEMA = "vqapr-datamodel-record/v1"
 DATAMODEL_KIND = "datamodel"
 """One datamodel of a run (record `148`): the schema of `datamodel.json`."""
 
-MATERIALIZATION_KIND = "materialization"
-"""A dataset materialization. Declared here in record `115` and WRITTEN by record `116`.
-
-Named one story before it is produced on purpose. `115` changes the record's shape and `116` adds
-the second producer; splitting them means the shape change lands with the reader-side check that
-protects it, rather than arriving in the same commit as a new writer and being tested only through
-that writer.
-"""
-
 _RUN_FIELDS = (
     "run_id",
     "account",
@@ -148,23 +139,6 @@ that difference is deliberate.** This tuple guarantees the key exists, so `null`
 JSON envelope carries no schema with it. The envelope also carries a note naming the consequence
 and the remedy, which belongs where someone is about to act and not in an archive of what a past
 run did.
-"""
-
-_MATERIALIZATION_FIELDS = (
-    "run_id",
-    "dataset_id",
-    "source_digest",
-    "declared_digest",
-    "rows",
-    "span",
-    "period",
-)
-"""What a materialization answers. Written by record `116`; declared here so the discriminator has
-two real branches rather than one and a promise.
-
-`run_id`, `source_digest`, `declared_digest` and `period` are deliberately the same names a run
-uses: the two kinds answer some of the same questions, and a reader that wants "which declarations
-produced this" should not need to know which kind it is holding to ask.
 """
 
 _STRATEGY_FIELDS = (
@@ -228,7 +202,6 @@ datasets and their source digests (A7) -- and which strategies the run names.
 
 RECORD_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
     RUN_KIND: _RUN_FIELDS,
-    MATERIALIZATION_KIND: _MATERIALIZATION_FIELDS,
     STRATEGY_KIND: _STRATEGY_FIELDS,
     DATAMODEL_KIND: _DATAMODEL_FIELDS,
 }
@@ -831,9 +804,8 @@ class RunRecordWriter:
         one knows the run reached its end. Atomically because a half-written record read by a cold
         process is indistinguishable from a run that recorded half its facts.
 
-        `kind` defaults to `RUN_KIND` because every caller today writes a run. Record `116` passes
-        `MATERIALIZATION_KIND`; the default is what lets `115` change the shape without touching a
-        single call site, so the reader-side check lands before the second producer exists.
+        `kind` defaults to `RUN_KIND`, the run directory's own record; a member writer passes its
+        kind (record `148`: a strategy or a datamodel).
         """
         if kind not in RECORD_FIELDS_BY_KIND:
             raise KeyError(
@@ -944,8 +916,8 @@ def run_ids(root: Path) -> tuple[str, ...]:
     """Every run this root holds a record for, sorted.
 
     Derived by scanning rather than read from an index, so no two runs share a mutable target. A
-    run directory holds `run.json` (record `139`) or, for a materialization and for a run written
-    before `139`, `record.json`; a directory with neither did not get as far as a record.
+    run directory holds `run.json` (record `139`) or, for a run written before `139`,
+    `record.json`; a directory with neither did not get as far as a record.
     """
     directory = root / RUNS_DIRECTORY
     if not directory.is_dir():
@@ -979,7 +951,7 @@ def strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
 
 
 def read_run_record(root: Path, run_id: str) -> dict[str, Any]:
-    """`run.json` -- or, for a record written before `139` or a materialization, `record.json`."""
+    """`run.json` -- or, for a record written before `139`, `record.json`."""
     path = run_record_path(root, run_id)
     if not path.is_file():
         return read_record(root, run_id)

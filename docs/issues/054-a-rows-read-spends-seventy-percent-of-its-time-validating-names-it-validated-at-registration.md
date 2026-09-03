@@ -1,6 +1,8 @@
 # 054 -- a `rows` read spends seventy percent of its time validating names it validated at registration
 
-**Status:** open. Found 2026-09-03 by profiling the `rows` side of the `049` measurement
+**Status:** **CLOSED 2026-09-03** by record `142` (deletion campaign Step 2). The read builds rows through `Observation._framework_row`, which skips `__post_init__`; a hand-built `Observation` is validated as before. On the profile below `Observation` construction went from 4.68s to 0.21s of a read that went from 6.68s to 2.10s (80 instruments, five fiscal years); the pytz share was measured against an arrow path and left, see the record.
+
+**Status when filed:** open. Found 2026-09-03 by profiling the `rows` side of the `049` measurement
 (`experiments/exp_049_the_measurement/`), on `develop @ 724bdadc`.
 
 **Touches:** `authoring.py::Observation.__post_init__` and `_copy_values` / `_scalar` /

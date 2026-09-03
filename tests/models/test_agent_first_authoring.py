@@ -158,6 +158,16 @@ def test_observation_values_mapping_is_copied_and_immutable() -> None:
         observation.values["close"] = Decimal("2")  # type: ignore[index]
 
 
+def test_a_hand_built_observation_is_still_validated_while_a_framework_row_is_not() -> None:
+    """`docs/issues/054`: the distinction is who built the row, not whether rows are checked."""
+    with pytest.raises(ValueError):
+        authoring.Observation("A", UTC_NOW, {"a b": Decimal("1")})
+    trusted = authoring.Observation._framework_row("A", UTC_NOW, {"close": Decimal("1")})
+    assert trusted == authoring.Observation("A", UTC_NOW, {"close": Decimal("1")})
+    with pytest.raises(TypeError):
+        trusted.values["close"] = Decimal("2")  # type: ignore[index]
+
+
 # --------------------------------------------------------------------------------------
 # DataModel / DataCall abstract contracts.
 # --------------------------------------------------------------------------------------

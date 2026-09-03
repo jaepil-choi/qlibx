@@ -100,4 +100,18 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 paths = ["src", "tests", "scripts/vulture_whitelist.py"]
 min_confidence = 60
 # A fixture is requested by name, never called, so every one of them reads as dead.
-ignore_decorators = ["@pytest.fixture", "@pytest.fixture(*)"]
+ignore_decorators = [
+    "@pytest.fixture",
+    "@pytest.fixture(*)",
+    # pydantic hooks are called by the model, never by name.
+    "@model_validator",
+    "@model_validator(*)",
+    "@field_validator",
+    "@field_validator(*)",
+    "@model_serializer",
+    "@model_serializer(*)",
+    "@field_serializer",
+    "@field_serializer(*)",
+]
+# `model_config` is pydantic's class-level configuration attribute.
+ignore_names = ["model_config"]

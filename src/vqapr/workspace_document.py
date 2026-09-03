@@ -6,23 +6,30 @@ field declarations; pydantic checks them, and `declarations.refusals_from` turns
 into this package's refusals. Nothing here opens a file, resolves a path or looks another
 section up -- a model is a shape, and the cross-reference checks stay with the workspace.
 
-Record `145` (deletion campaign Step 4): these models replace the hand-written `_decode` /
-`_encode` / `_detach_*` in `workspace_codec.py` and the `_require_keys` / `_mapping` / `_enum`
-family in `declarations.py`, one section at a time. Where the stored shape and the domain
+Record `145` (deletion campaign Step 4): these models replaced the hand-written `_decode` /
+`_encode` / `_detach_*` of the former `workspace_codec.py` and the `_require_keys` / `_mapping` /
+`_enum` family in `declarations.py`, one section at a time, and the codec file was deleted. The
+legacy document shapes a released workspace can still carry (an old fill schema, the agenda-keyed
+strategy config, the two retired sections) are all declared in this one file, so a later release
+that retires one discards a region rather than hunting for it. Where the stored shape and the domain
 dataclass coincide, `to_domain` is a one-liner; where they differ (a dataset's measured span, an
 agenda's occurrences, a run's initial account) the model is the one place the mapping is written.
 """
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Literal
 
+import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     SerializerFunctionWrapHandler,
+    ValidationError,
     field_serializer,
     field_validator,
     model_serializer,
@@ -35,6 +42,7 @@ from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.identifiers import component_id, execution_input_id, source_id
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
@@ -609,6 +617,239 @@ class StrategyConfigDeclaration(Document):
     agenda_id: str
 
 
+# ---------------------------------------------------------------------------------------------
+# The whole document, and the two functions between its text and the workspace's state.
+# ---------------------------------------------------------------------------------------------
+
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+"""libyaml when the installed PyYAML was built with it, the pure-Python classes otherwise.
+
+The workspace holds every agenda occurrence, so the file grows with run length rather than with
+the number of declarations: a three-year daily agenda set is roughly 750 KB. Parsing that with
+PyYAML's pure-Python loader costs about 1.1 s and emitting it about 0.5 s, against 0.24 s and
+0.14 s through libyaml, and a registration pays both. The emitted bytes are identical between the
+two dumpers for every document this module writes, which `tests/test_workspace.py` pins.
+"""
+
+_READ_CACHE_LIMIT = 8
+_read_cache: dict[str, tuple[dict, ...]] = {}
+"""Decoded workspaces keyed by the sha256 of their exact text.
+
+Every registration reads the file twice -- once through `Workspace.create`, once inside the
+exclusive lock -- and a process usually makes several registrations in a row against a file that
+only grows by one declaration each time. Keying on content rather than on path or mtime means a
+hit is only possible for bytes that were already decoded, so no writer, in this process or
+another, can be served a stale workspace.
+"""
+
+
+class WorkspaceDocument(Document):
+    """`workspace.yaml` whole: seven sections, two of them required, and two read and dropped.
+
+    `strategy_configs` stays untyped here because it has two shapes one release apart (record
+    `138`): keyed by the strategy's component id carrying `agenda_id` -- the shape written
+    forward -- or, the legacy shape written before an agenda was shareable, keyed by agenda id
+    carrying `component`. `read_workspace` re-keys the legacy one; the next write is forward.
+
+    `valuation_configs` and `monitoring_policies` are the two sections record `144` retired:
+    each restated an agenda's own role. A document written by 0.3.0 still carries them, they
+    are read and dropped, and the next write omits them.
+    """
+
+    sources: dict[str, SourceDocument]
+    datasets: dict[str, DatasetDocument]
+    execution_inputs: dict[str, ExecutionInputDocument] = {}
+    components: dict[str, ComponentDocument] = {}
+    agendas: dict[str, AgendaDocument] = {}
+    strategy_configs: dict[str, dict[str, Any]] = {}
+    runs: dict[str, RunDocument] = {}
+    valuation_configs: Any = None
+    monitoring_policies: Any = None
+
+
+def _decoded[M: BaseModel](kind: str, raw_id: str, model: type[M], raw: object) -> M:
+    """One section entry through its model, or a `ValueError` that names the entry and the fault.
+
+    The document read path has one refusal, `workspace.open.invalid`, and `Workspace._read`
+    reads the sentence of a few faults out of it (an old fill schema, a retired key). So the
+    first error's own words are kept in the sentence, prefixed with which entry they are about.
+    """
+    try:
+        return model.model_validate(raw)
+    except ValidationError as invalid:
+        first = invalid.errors(include_url=False)[0]
+        where = ".".join(str(part) for part in first["loc"])
+        words = str(first["msg"]).removeprefix("Value error, ")
+        raise ValueError(f"{kind} {raw_id!r}{': ' + where if where else ''} {words}") from invalid
+
+
+def read_workspace(text: str) -> tuple[dict, ...]:
+    """The document's text as the workspace's seven state mappings, memoized on the exact bytes.
+
+    Copies of the cached sections are returned: callers merge a declaration into copies rather
+    than mutating what they were handed, but a cached section is a shared object and one caller
+    mutating it would silently rewrite another caller's view of the workspace.
+    """
+    key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    cached = _read_cache.get(key)
+    if cached is None:
+        cached = _linked(yaml.load(text, Loader=_YAML_LOADER))
+        if len(_read_cache) >= _READ_CACHE_LIMIT:
+            _read_cache.clear()
+        _read_cache[key] = cached
+    return tuple(dict(section) for section in cached)
+
+
+def _linked(raw: object) -> tuple[dict, ...]:
+    """Every section through its model, then every forward reference checked.
+
+    A document naming an absent source, component or agenda is refused at read time rather than
+    at the first command that needs the missing declaration, which is also what lets `remove`
+    check references against one snapshot and never leave a dangling one behind.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "workspace root must contain sources and datasets, with optional execution_inputs "
+            "components, agendas, strategy_configs and runs"
+        )
+    document = _decoded("workspace", "root", WorkspaceDocument, raw)
+
+    sources = {}
+    for raw_id, entry in document.sources.items():
+        source = entry.to_domain(raw_id)
+        sources[source.source_id] = source
+
+    datasets = {}
+    for raw_id, entry in document.datasets.items():
+        registration = entry.to_domain(raw_id)
+        if registration.source not in sources:
+            raise ValueError(
+                f"dataset {raw_id!r} references unregistered source {registration.source!r}"
+            )
+        datasets[registration.dataset_id] = registration
+
+    execution_inputs = {}
+    for raw_id, entry in document.execution_inputs.items():
+        source_key = source_id(entry.source)
+        if source_key not in sources:
+            raise ValueError(
+                f"execution input {raw_id!r} references unregistered source {source_key!r}"
+            )
+        registration = entry.to_domain(raw_id, sources[source_key])
+        execution_inputs[registration.execution_input_id] = registration
+
+    components = {}
+    for raw_id, entry in document.components.items():
+        ref = entry.to_domain(raw_id)
+        components[ref.component_id] = ref
+
+    agendas = {}
+    for raw_id, entry in document.agendas.items():
+        agenda = entry.to_domain(raw_id)
+        if (
+            agenda.content_identity != entry.content_identity
+            or agenda.provenance_identity != entry.provenance_identity
+        ):
+            raise ValueError(
+                f"agenda {raw_id!r} identity declarations do not match its canonical content"
+            )
+        agendas[agenda.agenda_id] = agenda
+
+    strategy_configs = {}
+    for raw_id, raw_config in document.strategy_configs.items():
+        if set(raw_config) == {"component", "agenda_role"}:
+            component, raw_config = raw_config["component"], {
+                "agenda_id": raw_id,
+                "agenda_role": raw_config["agenda_role"],
+            }
+        else:
+            component = raw_id
+        entry = _decoded("strategy config", raw_id, StrategyConfigDocument, raw_config)
+        try:
+            registered_component = components[component_id(str(component))]
+        except KeyError as error:
+            raise ValueError(
+                f"strategy config {raw_id!r} references an unregistered component"
+            ) from error
+        config = entry.to_domain(registered_component)
+        agenda = agendas.get(config.agenda_id)
+        if agenda is None or agenda.role is not config.agenda_role:
+            raise ValueError(
+                f"strategy config {raw_id!r} references an absent or mismatched agenda"
+            )
+        strategy_configs[str(component)] = config
+
+    runs = {}
+    for raw_id, entry in document.runs.items():
+        definition = entry.to_domain(raw_id)
+        for strategy in definition.strategies:
+            component = components.get(component_id(strategy.component_id))
+            if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
+                raise ValueError(f"run {raw_id!r} names an unregistered strategy")
+            if strategy.component_id not in strategy_configs:
+                raise ValueError(f"run {raw_id!r} names a strategy with no registered binding")
+            for name in strategy.constraints:
+                constraint = components.get(component_id(name))
+                if constraint is None or constraint.kind is not ComponentKind.CONSTRAINT:
+                    raise ValueError(f"run {raw_id!r} names an unregistered constraint")
+        if definition.exchange is not None:
+            venue = components.get(component_id(definition.exchange))
+            if venue is None or venue.kind is not ComponentKind.EXCHANGE:
+                raise ValueError(f"run {raw_id!r} names an unregistered exchange")
+        if (
+            definition.execution_input_id is not None
+            and execution_input_id(definition.execution_input_id) not in execution_inputs
+        ):
+            raise ValueError(f"run {raw_id!r} names an unregistered execution input")
+        for binding in (definition.valuation, definition.monitoring):
+            if binding is None:
+                continue
+            agenda = agendas.get(binding.agenda_id)
+            if agenda is None or agenda.role is not binding.agenda_role:
+                raise ValueError(f"run {raw_id!r} references an absent or mismatched agenda")
+        runs[raw_id] = definition
+
+    return (datasets, sources, execution_inputs, components, agendas, strategy_configs, runs)
+
+
+def write_workspace(
+    datasets: Mapping[Any, DatasetRegistration],
+    sources: Mapping[Any, SourceSpec],
+    execution_inputs: Mapping[Any, ExecutionInputRegistration],
+    components: Mapping[Any, ComponentRef],
+    agendas: Mapping[str, OperationAgenda],
+    strategy_configs: Mapping[str, StrategyConfig],
+    runs: Mapping[str, RunDefinition] | None = None,
+) -> str:
+    """The workspace's state as the document's text, sections sorted by id, empty ones omitted."""
+
+    def by_id(items):
+        return sorted(items, key=lambda item: str(item[0]))
+
+    document = WorkspaceDocument(
+        sources={str(k): SourceDocument.from_domain(v) for k, v in by_id(sources.items())},
+        datasets={str(k): DatasetDocument.from_domain(v) for k, v in by_id(datasets.items())},
+        execution_inputs={
+            str(k): ExecutionInputDocument.from_domain(v)
+            for k, v in by_id(execution_inputs.items())
+        },
+        components={str(k): ComponentDocument.from_domain(v) for k, v in by_id(components.items())},
+        agendas={k: AgendaDocument.from_domain(v) for k, v in sorted(agendas.items())},
+        strategy_configs={
+            k: StrategyConfigDocument.from_domain(v).model_dump(mode="json")
+            for k, v in sorted(strategy_configs.items())
+        },
+        runs={k: RunDocument.from_domain(v) for k, v in sorted((runs or {}).items())},
+    )
+    body = document.model_dump(mode="json", exclude={"valuation_configs", "monitoring_policies"})
+    for section in ("agendas", "strategy_configs", "runs"):
+        if not body[section]:
+            del body[section]
+    return yaml.dump(body, Dumper=_YAML_DUMPER, allow_unicode=True, sort_keys=False)
+
+
+
 __all__ = [
     "AgendaDeclaration",
     "AgendaDocument",
@@ -630,4 +871,7 @@ __all__ = [
     "StrategyConfigDocument",
     "StrategyEntryDocument",
     "TableDeclaration",
+    "WorkspaceDocument",
+    "read_workspace",
+    "write_workspace",
 ]

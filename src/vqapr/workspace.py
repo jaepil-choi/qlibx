@@ -37,10 +37,7 @@ from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import RunDefinition, StrategyConfig
 from vqapr.runtime.agendas import OperationAgenda, OperationRole
-from vqapr.workspace_codec import (
-    _decode_cached,
-    _encode,
-)
+from vqapr.workspace_document import read_workspace, write_workspace
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"
@@ -1375,7 +1372,7 @@ class Workspace:
         assert text is not None
 
         try:
-            return _State(*_decode_cached(text))
+            return _State(*read_workspace(text))
         except (TypeError, ValueError, yaml.YAMLError) as error:
             message = str(error)
             requirement = (
@@ -1430,7 +1427,7 @@ class Workspace:
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = _encode(
+        payload = write_workspace(
             datasets,
             sources,
             execution_inputs,

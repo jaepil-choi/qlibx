@@ -55,3 +55,11 @@ pytestmark
 # `@pytest.fixture` definitions are covered by `ignore_decorators` in pyproject, but a test
 # requesting one names it as a parameter, and that parameter has no reader in the body.
 bound_every_source  # tests/flow/test_hot_path_costs.py
+
+# --- pydantic fields the model reads and drops, or a test model reads only by key ------
+# `WorkspaceDocument` admits the two sections record 144 retired so a 0.3.0 document opens;
+# nothing reads their value, by design.
+_.valuation_configs  # src/vqapr/workspace_document.py
+_.monitoring_policies  # src/vqapr/workspace_document.py
+# The adapter test's throwaway model: pydantic reads its fields from a payload by key.
+_.when  # tests/test_a_validation_error_is_a_refusal.py

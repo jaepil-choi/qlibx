@@ -282,6 +282,7 @@ def test_public_exports_are_fixed() -> None:
         "read_run_record",
         "read_strategy_record",
         "read_strategy_table",
+        "RunRecordMissing",
         "register_component",
         "register_constraint",
         "register_data_model",

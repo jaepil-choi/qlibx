@@ -109,7 +109,13 @@ from vqapr.flow.run import (
     RunDefinition,
     StrategyEntry,
 )
-from vqapr.flow.run_records import read_run_record, read_strategy_record, run_ids, strategy_refs
+from vqapr.flow.run_records import (
+    RunRecordMissing,
+    read_run_record,
+    read_strategy_record,
+    run_ids,
+    strategy_refs,
+)
 from vqapr.flow.run_records import read_typed_table as read_strategy_table
 from vqapr.flow.simulation import SimulationResult, callback_evidence
 from vqapr.models.contexts import DataModelContext, StrategyModelContext
@@ -266,6 +272,7 @@ __all__ = (
     "read_run_record",
     "read_strategy_record",
     "read_strategy_table",
+    "RunRecordMissing",
     "register_component",
     "register_constraint",
     "register_data_model",

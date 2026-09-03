@@ -501,17 +501,16 @@ class Workspace:
             self._commit(merged, changed)
             return changed
 
-    def register_component(self, ref: ComponentRef, *, force: bool = False) -> bool:
+    def register_component(self, ref: ComponentRef) -> bool:
         """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다.
 
-        ``force=True`` replaces an existing registration whose source has changed, in place and
-        under the same ``component_id``.
-
-        Without it, editing a registered component and re-registering is refused, and the refusal
-        names a new identity as the repair. That instruction contradicts the one `loading.py`
-        prints when the same edit is loaded rather than registered -- it says *re-register the
-        component*, which this method then declined. A reader following either message arrives at
-        the other, which `docs/implementations/057` names as worse than a generic error.
+        An edited source re-registered under its id REPLACES the registration in place; there is
+        no flag. Editing a registered component is the ordinary loop (`docs/issues/009`, Decision
+        2), and a refusal the caller must pass an argument to bypass, on an event that is
+        ordinary, is the same friction with an extra step. The `force` parameter this method
+        carried after that decision was a no-op the CLI never exposed, while the shipped skill
+        kept promising `register --force` (`docs/issues/067`); it is gone so the two cannot
+        disagree again.
 
         Replacing does not lose provenance: a finished run pins the fingerprint it ran under in
         its own record, so what a past run used is testified to by that run and not by whichever
@@ -519,10 +518,8 @@ class Workspace:
         """
         if not isinstance(ref, ComponentRef):
             raise TypeError("ref must be a ComponentRef")
-        if not isinstance(force, bool):
-            raise TypeError("force must be a bool")
         with self._exclusive():
-            merged, changed = self._merge_component(self._read(), ref, force=force)
+            merged, changed = self._merge_component(self._read(), ref)
             self._commit(merged, changed)
             return changed
 
@@ -735,34 +732,27 @@ class Workspace:
             True,
         )
 
-    def _merge_component(
-        self, state: _State, ref: ComponentRef, *, force: bool = False
-    ) -> tuple[_State, bool]:
+    def _merge_component(self, state: _State, ref: ComponentRef) -> tuple[_State, bool]:
         key = ref.component_id
         existing = state.components.get(key)
-        if existing is not None:
-            if existing == ref:
-                return state, False
-            # An edited source replaces its registration in place, under the same id.
-            #
-            # This used to refuse and name a NEW component_id as the repair, while
-            # `loading.py` -- meeting the same edit -- said "re-register the component", which
-            # is what this refused. The two pointed at each other, and
-            # `docs/implementations/057` names that shape as worse than a generic error.
-            #
-            # The real cost was never one command: a new id needed a new strategy_configs
-            # binding and a spec edit, four steps for a one-line change, and the workspace
-            # accumulated `mom`, `mom-eb04...`, `mom-91c7...` for one strategy. Keeping the id
-            # also makes "this strategy ran 47 times across 12 fingerprints" countable, which
-            # a new id per edit scatters across twelve ids where nothing counts it.
-            #
-            # Provenance is not weakened. A finished run pins the fingerprint it ran under in
-            # its own frozen record, so what a past run used is testified to by that run, not
-            # by whichever registration currently holds the id.
-            #
-            # `force` is retained as an explicit spelling for callers that want to say they
-            # meant it, but it no longer gates anything: replacement is the default.
-            _ = force
+        if existing is not None and existing == ref:
+            return state, False
+        # An edited source replaces its registration in place, under the same id.
+        #
+        # This used to refuse and name a NEW component_id as the repair, while `loading.py` --
+        # meeting the same edit -- said "re-register the component", which is what this refused.
+        # The two pointed at each other, and `docs/implementations/057` names that shape as
+        # worse than a generic error.
+        #
+        # The real cost was never one command: a new id needed a new strategy_configs binding
+        # and a spec edit, four steps for a one-line change, and the workspace accumulated
+        # `mom`, `mom-eb04...`, `mom-91c7...` for one strategy. Keeping the id also makes "this
+        # strategy ran 47 times across 12 fingerprints" countable, which a new id per edit
+        # scatters across twelve ids where nothing counts it.
+        #
+        # Provenance is not weakened. A finished run pins the fingerprint it ran under in its
+        # own frozen record, so what a past run used is testified to by that run, not by
+        # whichever registration currently holds the id.
         return state._replace(components={**state.components, key: ref}), True
 
     def _merge_run(self, state: _State, definition: RunDefinition) -> tuple[_State, bool]:

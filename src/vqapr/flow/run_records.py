@@ -1142,8 +1142,74 @@ def read_record(root: Path, run_id: str) -> dict[str, Any]:
     return record
 
 
+class RunRecordMissing(ValueError):
+    """No record where the caller pointed: the wrong root, run id or strategy ref.
+
+    `docs/issues/057`. `read_table` returned an empty iterator for a root that was the project
+    directory rather than its `.vqapr`, for a run id nothing had written, and for a `strategy_ref`
+    that named no directory -- and the user's code failed three steps later on an empty frame. An
+    empty TABLE is a fact about a run (a declared table nobody wrote); a missing RECORD is a
+    wrong argument, and the refusal names the directory it looked in and what it found beside it.
+    """
+
+
+def _resolve_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | None:
+    """The member directory a table read means, or a refusal that names what exists.
+
+    `None` reads the run directory when that directory holds tables of its own (a record written
+    before `139`, or a writer without a member); on a current record it resolves to the run's
+    only strategy, and refuses -- listing them -- when there are several. A bare `<strategy-id>`
+    resolves the way `vqapr show strategy <run>/<id>` does: to the one record of that strategy,
+    refusing when there are several fingerprints to choose from.
+    """
+    run_directory = root / RUNS_DIRECTORY / run_id
+    if not run_directory.is_dir():
+        # Directories, not `run_ids()`: that lists FINISHED runs, and a reader pointed at the
+        # wrong root is helped by seeing what is there, finished or not.
+        runs = root / RUNS_DIRECTORY
+        present = (
+            sorted(child.name for child in runs.iterdir() if child.is_dir())
+            if runs.is_dir()
+            else []
+        )
+        raise RunRecordMissing(
+            f"no run {run_id!r} under {runs}; run directories there: "
+            f"{', '.join(present) or '(none)'}. The root is the `store_root` `vqapr run` prints "
+            "(`<project>/.vqapr` by default), not the project directory"
+        )
+    if strategy_ref is None:
+        if (run_directory / TABLES_DIRECTORY).is_dir():
+            return None
+        members = strategy_refs(root, run_id)
+        if len(members) == 1:
+            return members[0]
+        raise RunRecordMissing(
+            f"run {run_id!r} at {run_directory} records "
+            + (
+                f"{len(members)} strategies ({', '.join(members)}); name one as strategy_ref"
+                if members
+                else "no finished strategy and no tables of its own"
+            )
+        )
+    if (record_directory(root, run_id, strategy_ref)).is_dir():
+        return strategy_ref
+    members = strategy_refs(root, run_id)
+    matching = [ref for ref in members if ref.rsplit("@", 1)[0] == strategy_ref]
+    if len(matching) == 1:
+        return matching[0]
+    raise RunRecordMissing(
+        f"no strategy record {strategy_ref!r} under {run_directory / STRATEGIES_DIRECTORY}; "
+        + (
+            f"{strategy_ref!r} has {len(matching)} records: {', '.join(matching)}"
+            if matching
+            else f"recorded there: {', '.join(members) or '(none)'}"
+        )
+    )
+
+
 def _parts(root: Path, run_id: str, table_id: str, strategy_ref: str | None) -> tuple[Path, ...]:
-    directory = record_directory(root, run_id, strategy_ref) / TABLES_DIRECTORY / table_id
+    resolved = _resolve_ref(root, run_id, strategy_ref)
+    directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY / table_id
     if not directory.is_dir():
         return ()
     return tuple(sorted(path for path in directory.glob(f"*{PART_SUFFIX}")))
@@ -1154,11 +1220,17 @@ def read_table(
 ) -> Iterator[dict[str, Any]]:
     """Stream one table's rows back, a chunk at a time, as the values they were written from.
 
+    `root` is the store: the `store_root` `vqapr run` prints, `<project>/.vqapr` unless
+    `--store-root` moved it -- NOT the project directory. `run_id` and `strategy_ref`
+    (`<strategy-id>@<fp8>`, or the bare `<strategy-id>` when one record of it exists, or `None`
+    when the run holds one strategy) name a record that must exist: a root, run or ref that
+    names nothing is refused with `RunRecordMissing`, naming what was found instead
+    (`docs/issues/057`). A table the record declares but never wrote reads back empty.
+
     A generator because a run's tables are the large half of the record, and a caller counting
-    rows should not have to hold all of them to do it. `strategy_ref` names the strategy
-    directory (record `139`); `None` reads a run directory written before it. A `Decimal` comes
-    back a `Decimal` and an instant an offset-aware `datetime` in the zone it was recorded in;
-    the parquet carries both, so there is nothing to guess (record `146`).
+    rows should not have to hold all of them to do it. A `Decimal` comes back a `Decimal` and an
+    instant an offset-aware `datetime` in the zone it was recorded in; the parquet carries both,
+    so there is nothing to guess (record `146`).
     """
     for path in _parts(root, run_id, table_id, strategy_ref):
         try:
@@ -1213,7 +1285,8 @@ construction now; kept so a caller written against record `135` reads on."""
 
 
 def table_ids(root: Path, run_id: str, strategy_ref: str | None = None) -> tuple[str, ...]:
-    directory = record_directory(root, run_id, strategy_ref) / TABLES_DIRECTORY
+    resolved = _resolve_ref(root, run_id, strategy_ref)
+    directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY
     if not directory.is_dir():
         return ()
     return tuple(sorted(path.name for path in directory.iterdir() if path.is_dir()))

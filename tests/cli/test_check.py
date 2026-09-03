@@ -361,6 +361,46 @@ def test_the_dataset_judgments_read_the_loaded_model_not_its_reference(tmp_path:
     assert _judge(tmp_path, _definition()) == ["check.dataset.unregistered"]
 
 
+def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
+    tmp_path: Path,
+) -> None:
+    """`docs/issues/056`: seven fields from one missing dataset were seven identical failures.
+
+    `requirements()` fans a `DatasetInput` out to one requirement per field; the judgment used
+    to emit per requirement. The skill promises every INDEPENDENT problem at once, and one
+    registration is one problem: the fields it wanted ride along as examples.
+    """
+    from vqapr.extension.scaffold import render
+    from vqapr.flow.judgments import _judge_datasets_and_fields
+
+    Workspace.create(tmp_path)
+    source = tmp_path / "wide.py"
+    scaffold = render(
+        ComponentKind.STRATEGY_MODEL, "wide", dataset_id="absent_dataset", field="close",
+        lookback=3,
+    )
+    assert 'fields=("close",)' in scaffold
+    source.write_text(
+        scaffold.replace('fields=("close",)', 'fields=("close", "volume", "turnover")'),
+        encoding="utf-8",
+    )
+    _register_component(tmp_path, "wide", ComponentKind.STRATEGY_MODEL, source)
+
+    space = Workspace.open(tmp_path)
+    registered = {str(item.dataset_id): item for item in space.datasets}
+    failures = _judge_datasets_and_fields(
+        replace(_definition(), strategies=(StrategyEntry("wide"),)),
+        space,
+        registered,
+        FailureSource(key_path="runs.x"),
+    )
+
+    assert [failure.code for failure in failures] == ["check.dataset.unregistered"]
+    assert failures[0].examples == ("close", "volume", "turnover")
+    assert failures[0].example_total == 3
+    assert "3 field(s)" in failures[0].observed
+
+
 def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> None:
     """`check.field.absent`, reachable only once the model is loaded."""
     space = Workspace.create(tmp_path)

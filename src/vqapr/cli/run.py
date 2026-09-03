@@ -73,7 +73,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="store_root",
         type=Path,
         default=None,
-        help="where run records are written (default: the workspace directory)",
+        help=(
+            "where run records are written: the `store_root` the result prints, which "
+            "`read_strategy_table(store_root, ...)` takes back (default: `<project>/.vqapr`)"
+        ),
     )
     parser.add_argument(
         "--no-account-positions",

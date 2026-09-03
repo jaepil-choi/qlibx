@@ -260,27 +260,22 @@ def _judge_datasets_and_fields(
             continue
 
         first_read = _first_decision(definition, workspace, entry)
+        # One unregistered dataset is ONE problem however many fields the component reads from
+        # it (`docs/issues/056`): `requirements()` fans a `DatasetInput` out to one requirement
+        # per field, and reporting per requirement printed eight identical failures for one
+        # missing registration. The fields ride along as examples, which is what a reader
+        # deciding between "register it" and "point the component elsewhere" wants to see.
+        unregistered: dict[str, list[str]] = {}
         for requirement in component.requirements() or ():
             dataset_id = str(getattr(requirement, "dataset_id", ""))
             if not dataset_id:
                 continue
             registration = registered.get(dataset_id)
             if registration is None:
-                close = get_close_matches(dataset_id, sorted(registered), n=1)
-                found.append(
-                    Failure.bounded(
-                        "check.dataset.unregistered",
-                        f"dataset {dataset_id!r} must be registered before a run can read it",
-                        observed=f"registered: {', '.join(sorted(registered)) or '(none)'}",
-                        fix=(
-                            f"register {dataset_id!r}, or point the component at {close[0]!r}"
-                            if close
-                            else f"register {dataset_id!r} with `vqapr register <declaration>`"
-                        ),
-                        explain=ExplainTopic.WORKSPACE_STATE,
-                        source=source,
-                    )
-                )
+                field_id = str(getattr(requirement, "field_id", ""))
+                fields = unregistered.setdefault(dataset_id, [])
+                if field_id and field_id not in fields:
+                    fields.append(field_id)
                 continue
 
             exposed = set(registration.fields)
@@ -330,6 +325,27 @@ def _judge_datasets_and_fields(
                         source=_key(at, "start"),
                     )
                 )
+        for dataset_id, fields in unregistered.items():
+            close = get_close_matches(dataset_id, sorted(registered), n=1)
+            found.append(
+                Failure.bounded(
+                    "check.dataset.unregistered",
+                    f"dataset {dataset_id!r} must be registered before a run can read it",
+                    observed=(
+                        f"{entry.component_id!r} reads {len(fields)} field(s) from it; "
+                        f"registered: {', '.join(sorted(registered)) or '(none)'}"
+                    ),
+                    examples=tuple(fields),
+                    example_total=len(fields),
+                    fix=(
+                        f"register {dataset_id!r}, or point the component at {close[0]!r}"
+                        if close
+                        else f"register {dataset_id!r} with `vqapr register <declaration>`"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
+                    source=source,
+                )
+            )
     return found
 
 

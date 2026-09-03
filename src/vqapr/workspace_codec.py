@@ -30,14 +30,13 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import (
     ComponentId,
@@ -49,13 +48,17 @@ from vqapr.domain.identifiers import (
     source_id,
 )
 from vqapr.domain.timestamps import LocalInstantDeclaration
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import RunDefinition, StrategyConfig, StrategyEntry
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.valuation.configuration import ValuationConfig
-from vqapr.workspace_document import SourceDocument
+from vqapr.workspace_document import (
+    ComponentDocument,
+    DatasetDocument,
+    ExecutionInputDocument,
+    SourceDocument,
+)
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"
@@ -145,67 +148,6 @@ REMOVE_STAGE = "workspace.remove"
 _CONSTRUCTION_TOKEN = object()
 
 
-def _detach_registration(registration: DatasetRegistration) -> DatasetRegistration:
-    builder = (
-        DatasetRegistration.undeclared if registration.grain is None else DatasetRegistration.of
-    )
-    keywords = {} if registration.grain is None else {"grain": registration.grain}
-    detached = builder(
-        str(registration.dataset_id),
-        str(registration.source),
-        instrument_field=registration.instrument_field,
-        available_at=registration.available_at,
-        key_fields=registration.key_fields,
-        fields=dict(registration.fields),
-        **keywords,
-    )
-    # `of` takes neither the span nor the field types, because both are measured rather than
-    # declared. Detaching must still carry the measurements across, or every read would hand back
-    # a registration that had silently forgotten them -- and a re-registration of the identical
-    # declaration would then read as a changed one.
-    if registration.field_types is not None:
-        detached = detached.with_schema(
-            ProjectionSchema(registration.field_types, registration.aggregated)
-        )
-    return detached if registration.span is None else detached.with_span(*registration.span)
-
-
-def _detach_execution_input(
-    registration: ExecutionInputRegistration,
-) -> ExecutionInputRegistration:
-    table = registration.table
-    fill = registration.fill
-    return ExecutionInputRegistration.of(
-        str(registration.execution_input_id),
-        ExecutionTableSpec(
-            source=table.source,
-            trade_at_field=table.trade_at_field,
-            instrument_field=table.instrument_field,
-            is_tradable_field=table.is_tradable_field,
-            price_fields=dict(table.price_fields),
-        ),
-        FillConvention(
-            selector=fill.selector,
-            local_time=fill.local_time,
-            timezone=fill.timezone,
-            trade_price=fill.trade_price,
-            fold=fill.fold,
-            offset=fill.offset,
-        ),
-    )
-
-
-def _detach_component(ref: ComponentRef) -> ComponentRef:
-    return ComponentRef.of(
-        str(ref.component_id),
-        ref.kind,
-        ref.path,
-        ref.object_name,
-        config=dict(ref.config),
-        fingerprint=ref.fingerprint,
-    )
-
-
 def _detach_agenda(agenda: OperationAgenda) -> OperationAgenda:
     return OperationAgenda.from_occurrences(
         agenda_id=agenda.agenda_id,
@@ -229,48 +171,6 @@ def _detach_agenda(agenda: OperationAgenda) -> OperationAgenda:
     )
 
 
-def _detach_strategy_config(config: StrategyConfig) -> StrategyConfig:
-    return StrategyConfig(_detach_component(config.component), config.agenda_id, config.agenda_role)
-
-
-def _encoded_dataset(registration: DatasetRegistration) -> dict[str, object]:
-    """One registration as it is written back.
-
-    A quarantined registration -- one decoded from a document written before spans existed -- is
-    written back in the SAME legacy shape it was read in, without a span. This is what makes the
-    repair incremental: `register_dataset` rewrites the whole document, so inventing a span for
-    the other stale entries would either fabricate a measurement nobody took or refuse the write
-    and block the repair of the one dataset the caller actually fixed.
-
-    A span-less registration that never came from disk cannot reach here: `register_dataset`
-    refuses it before the document is assembled.
-
-    **A registration whose field types were never derived is written back the same way**, and for
-    the same reason. Those are the entries written before a field became an expression
-    (`docs/issues/049`): their `fields` are bare columns and their projection is row-wise, which
-    is what the decode below assumes, but nobody has run `DESCRIBE` over them and inventing types
-    would be fabricating a measurement. So a document upgrades one entry at a time, as each
-    dataset is registered again -- and until then it stays readable by the release that wrote it.
-    """
-    body: dict[str, object] = {
-        "source": str(registration.source),
-        "instrument_field": registration.instrument_field,
-        "available_at": registration.available_at,
-        "key_fields": list(registration.key_fields),
-        "fields": dict(registration.fields),
-    }
-    if registration.grain is not None:
-        body["grain"] = registration.grain.value
-    if registration.field_types is not None:
-        body["field_types"] = {
-            name: str(column_type) for name, column_type in registration.field_types.items()
-        }
-        body["aggregated"] = registration.aggregated
-    if registration.span is not None:
-        body["span"] = [registration.span[0].isoformat(), registration.span[1].isoformat()]
-    return body
-
-
 def _encode(
     datasets: Mapping[DatasetId, DatasetRegistration],
     sources: Mapping[SourceId, SourceSpec],
@@ -286,35 +186,15 @@ def _encode(
             for key, source in sorted(sources.items(), key=lambda item: str(item[0]))
         },
         "datasets": {
-            str(key): _encoded_dataset(registration)
+            str(key): DatasetDocument.from_domain(registration).model_dump(mode="json")
             for key, registration in sorted(datasets.items(), key=lambda item: str(item[0]))
         },
         "execution_inputs": {
-            str(key): {
-                "source": str(registration.table.source.source_id),
-                "trade_at_field": registration.table.trade_at_field,
-                "instrument_field": registration.table.instrument_field,
-                "is_tradable_field": registration.table.is_tradable_field,
-                "price_fields": dict(registration.table.price_fields),
-                "fill": {
-                    "selector": registration.fill.selector.value,
-                    "local_time": registration.fill.local_time.isoformat(),
-                    "timezone": registration.fill.timezone,
-                    "trade_price": registration.fill.trade_price,
-                    "fold": registration.fill.fold,
-                    "offset": registration.fill.offset,
-                },
-            }
+            str(key): ExecutionInputDocument.from_domain(registration).model_dump(mode="json")
             for key, registration in sorted(execution_inputs.items(), key=lambda item: str(item[0]))
         },
         "components": {
-            str(key): {
-                "kind": str(ref.kind),
-                "path": str(ref.path),
-                "object_name": ref.object_name,
-                "config": dict(ref.config),
-                "fingerprint": ref.fingerprint,
-            }
+            str(key): ComponentDocument.from_domain(ref).model_dump(mode="json")
             for key, ref in sorted(components.items(), key=lambda item: str(item[0]))
         },
         "agendas": {
@@ -356,6 +236,24 @@ def _encode(
         if not document[section]:
             del document[section]
     return yaml.dump(document, Dumper=_YAML_DUMPER, allow_unicode=True, sort_keys=False)
+
+
+def _decoded[M: BaseModel](kind: str, raw_id: str, model: type[M], raw: object) -> M:
+    """One section entry through its model, or a `ValueError` that names the entry and the fault.
+
+    The document read path has one refusal, `workspace.open.invalid`, and `Workspace._read`
+    reads the sentence of a few faults out of it (an old fill schema, a retired key). So the
+    first error's own words are kept in the sentence, prefixed with which entry they are about.
+    """
+    try:
+        return model.model_validate(raw)
+    except ValidationError as invalid:
+        first = invalid.errors(include_url=False)[0]
+        where = ".".join(str(part) for part in first["loc"])
+        words = str(first["msg"]).removeprefix("Value error, ")
+        raise ValueError(
+            f"{kind} {raw_id!r}{': ' + where if where else ''} {words}"
+        ) from invalid
 
 
 def _decode_cached(text: str) -> tuple[dict, ...]:
@@ -418,12 +316,7 @@ def _decode(
     for raw_id, raw_source in raw_sources.items():
         if not isinstance(raw_id, str):
             raise TypeError("every source_id must be a string")
-        try:
-            source = SourceDocument.model_validate(raw_source).to_domain(raw_id)
-        except ValidationError as invalid:
-            raise ValueError(
-                f"source {raw_id!r}: {invalid.error_count()} invalid field(s)"
-            ) from invalid
+        source = _decoded("source", raw_id, SourceDocument, raw_source).to_domain(raw_id)
         decoded_sources[source.source_id] = source
 
     raw_datasets = document["datasets"]
@@ -431,116 +324,12 @@ def _decode(
         raise TypeError("datasets must be a mapping")
 
     decoded: dict[DatasetId, DatasetRegistration] = {}
-    declared = {"source", "instrument_field", "available_at", "key_fields", "fields"}
-    derived = {"field_types", "aggregated"}
-    # `grain` is optional on READ only: a document written before it existed still opens, and
-    # its grain-less entries are unusable until registered again (`DatasetRegistration.undeclared`).
-    expected = declared | derived | {"span", "grain"}
-
-    # **Two measurements, two independent axes, four admissible shapes.** An entry declares five
-    # keys and then carries whatever has been measured about it: the span (added by the release
-    # that made it mandatory) and the derived field types (added when a field became an
-    # expression, `docs/issues/049`). Neither is a declaration, so neither can be invented for an
-    # entry that predates it, and an entry can lack either or both.
-    #
-    # An entry written before types were derived holds bare columns under `fields`, which is a
-    # row-wise projection -- exactly what the defaults say -- so that shape decodes into today's
-    # behaviour rather than into a repair. A span-less one is quarantined, below.
-
-    # A registration written before spans existed is QUARANTINED, not rejected: it decodes into a
-    # registration whose `span` is None, and the refusal is deferred to the moment somebody
-    # actually reads it.
-    #
-    # Refusing here instead would deadlock the repair. The generic exact-set check below is
-    # all-or-nothing across the whole document, and `Workspace.open` and `create` both read
-    # before they write -- so a document-scoped refusal takes `list` offline (it cannot enumerate
-    # what needs fixing) AND takes `register` offline (it must open before it can rewrite). The
-    # refusal would be advertising a repair command that the refusal itself blocks, whose only
-    # real exit is hand-editing YAML no message describes.
-    #
-    # Quarantine keeps the workspace readable and repairable while still tolerating nothing: a
-    # span-less registration cannot be used (`dataset()` and `span()` refuse it) and cannot be
-    # re-persisted with a span it never had.
-    quarantined: set[str] = set()
-
     for raw_id, raw_registration in raw_datasets.items():
         if not isinstance(raw_id, str):
             raise TypeError("every dataset_id must be a string")
-        if not isinstance(raw_registration, dict):
-            raise ValueError(f"dataset {raw_id!r} must contain exactly {sorted(expected)}")
-        present = set(raw_registration) - {"grain"}
-        measured = present - declared
-        if (
-            not declared <= present
-            or not measured <= derived | {"span"}
-            or (measured & derived and measured & derived != derived)
-        ):
-            raise ValueError(f"dataset {raw_id!r} must contain exactly {sorted(expected)}")
-        if "span" not in present:
-            quarantined.add(raw_id)
-
-        source = raw_registration["source"]
-        instrument_field = raw_registration["instrument_field"]
-        available_at = raw_registration["available_at"]
-        key_fields = raw_registration["key_fields"]
-        fields = raw_registration["fields"]
-        if not all(isinstance(value, str) for value in (source, available_at)):
-            raise TypeError(f"dataset {raw_id!r} scalar declarations must be strings")
-        if instrument_field is not None and not isinstance(instrument_field, str):
-            raise TypeError(f"dataset {raw_id!r} instrument_field must be a string or absent")
-        if not isinstance(key_fields, list) or not all(
-            isinstance(value, str) for value in key_fields
-        ):
-            raise TypeError(f"dataset {raw_id!r} key_fields must be a list of strings")
-        if not isinstance(fields, dict) or not all(
-            isinstance(name, str) and isinstance(column, str) for name, column in fields.items()
-        ):
-            raise TypeError(f"dataset {raw_id!r} fields must map strings to strings")
-        raw_grain = raw_registration.get("grain")
-        if raw_grain is None:
-            registration = DatasetRegistration.undeclared(
-                raw_id,
-                source,
-                instrument_field=instrument_field,
-                available_at=available_at,
-                key_fields=key_fields,
-                fields=fields,
-            )
-        else:
-            if not isinstance(raw_grain, str):
-                raise TypeError(f"dataset {raw_id!r} grain must be a string")
-            registration = DatasetRegistration.of(
-                raw_id,
-                source,
-                instrument_field=instrument_field,
-                available_at=available_at,
-                key_fields=key_fields,
-                fields=fields,
-                grain=raw_grain,
-            )
-        if "field_types" in raw_registration:
-            raw_types = raw_registration["field_types"]
-            aggregated = raw_registration["aggregated"]
-            if not isinstance(raw_types, dict) or set(raw_types) != set(registration.fields):
-                raise TypeError(f"dataset {raw_id!r} field_types must type every declared field")
-            if not isinstance(aggregated, bool):
-                raise TypeError(f"dataset {raw_id!r} aggregated must be a bool")
-            try:
-                field_types = {name: ColumnType(value) for name, value in raw_types.items()}
-            except ValueError as error:
-                raise TypeError(f"dataset {raw_id!r} field_types must name column types") from error
-            registration = registration.with_schema(ProjectionSchema(field_types, aggregated))
-        if raw_id not in quarantined:
-            raw_span = raw_registration["span"]
-            if (
-                not isinstance(raw_span, list)
-                or len(raw_span) != 2
-                or not all(isinstance(value, str) for value in raw_span)
-            ):
-                raise TypeError(f"dataset {raw_id!r} span must be a pair of ISO-8601 strings")
-            registration = registration.with_span(
-                *(datetime.fromisoformat(value) for value in raw_span)
-            )
+        registration = _decoded("dataset", raw_id, DatasetDocument, raw_registration).to_domain(
+            raw_id
+        )
         if registration.source not in decoded_sources:
             raise ValueError(
                 f"dataset {raw_id!r} references unregistered source {registration.source!r}"
@@ -551,134 +340,25 @@ def _decode(
         raise TypeError("execution_inputs must be a mapping")
 
     decoded_execution_inputs: dict[ExecutionInputId, ExecutionInputRegistration] = {}
-    expected_execution = {
-        "source",
-        "trade_at_field",
-        "instrument_field",
-        "is_tradable_field",
-        "price_fields",
-        "fill",
-    }
-    expected_fill = {"selector", "local_time", "timezone", "trade_price", "fold", "offset"}
-    legacy_fill = {"selector", "local_time", "timezone", "trade_price"}
     for raw_id, raw_registration in raw_execution_inputs.items():
         if not isinstance(raw_id, str):
             raise TypeError("every execution_input_id must be a string")
-        if not isinstance(raw_registration, dict) or set(raw_registration) != expected_execution:
-            raise ValueError(
-                f"execution input {raw_id!r} must contain exactly {sorted(expected_execution)}"
-            )
-        raw_source = raw_registration["source"]
-        if not isinstance(raw_source, str):
-            raise TypeError(f"execution input {raw_id!r} source must be a string")
-        source_key = source_id(raw_source)
+        model = _decoded("execution input", raw_id, ExecutionInputDocument, raw_registration)
+        source_key = source_id(model.source)
         if source_key not in decoded_sources:
             raise ValueError(
                 f"execution input {raw_id!r} references unregistered source {source_key!r}"
             )
-        scalar_fields = (
-            raw_registration["trade_at_field"],
-            raw_registration["instrument_field"],
-            raw_registration["is_tradable_field"],
-        )
-        if not all(isinstance(value, str) for value in scalar_fields):
-            raise TypeError(f"execution input {raw_id!r} field declarations must be strings")
-        price_fields = raw_registration["price_fields"]
-        if not isinstance(price_fields, dict) or not all(
-            isinstance(name, str) and isinstance(column, str)
-            for name, column in price_fields.items()
-        ):
-            raise TypeError(f"execution input {raw_id!r} price_fields must map strings to strings")
-        raw_fill = raw_registration["fill"]
-        if not isinstance(raw_fill, dict):
-            raise ValueError(f"execution input {raw_id!r} fill must be a mapping")
-        if "offset_sessions" in raw_fill:
-            raise ValueError(
-                f"execution input {raw_id!r} fill offset_sessions is no longer supported"
-            )
-        if set(raw_fill) == legacy_fill:
-            raise ValueError(
-                f"execution input {raw_id!r} uses the old fill schema without fold and offset proof"
-            )
-        if set(raw_fill) != expected_fill:
-            raise ValueError(
-                f"execution input {raw_id!r} fill must contain exactly {sorted(expected_fill)}"
-            )
-        selector = raw_fill["selector"]
-        local_time = raw_fill["local_time"]
-        timezone = raw_fill["timezone"]
-        trade_price = raw_fill["trade_price"]
-        fold = raw_fill["fold"]
-        offset = raw_fill["offset"]
-        if not all(
-            isinstance(value, str) for value in (selector, local_time, timezone, trade_price)
-        ):
-            raise TypeError(f"execution input {raw_id!r} fill scalar values must be strings")
-        if fold is not None and (not isinstance(fold, int) or isinstance(fold, bool)):
-            raise TypeError(f"execution input {raw_id!r} fill fold must be an integer or null")
-        if offset is not None and not isinstance(offset, str):
-            raise TypeError(f"execution input {raw_id!r} fill offset must be a string or null")
-        try:
-            parsed_selector = FillSelector(selector)
-        except ValueError as error:
-            raise ValueError(
-                f"execution input {raw_id!r} selector must be a FillSelector value"
-            ) from error
-        try:
-            parsed_time = time.fromisoformat(local_time)
-        except ValueError as error:
-            raise ValueError(
-                f"execution input {raw_id!r} local_time must be an ISO time"
-            ) from error
-
-        registration = ExecutionInputRegistration.of(
-            raw_id,
-            ExecutionTableSpec(
-                source=decoded_sources[source_key],
-                trade_at_field=scalar_fields[0],
-                instrument_field=scalar_fields[1],
-                is_tradable_field=scalar_fields[2],
-                price_fields=price_fields,
-            ),
-            FillConvention(
-                selector=parsed_selector,
-                local_time=parsed_time,
-                timezone=timezone,
-                trade_price=trade_price,
-                fold=fold,
-                offset=offset,
-            ),
-        )
+        registration = model.to_domain(raw_id, decoded_sources[source_key])
         decoded_execution_inputs[registration.execution_input_id] = registration
     raw_components = document.get("components", {})
     if not isinstance(raw_components, dict):
         raise TypeError("components must be a mapping")
     decoded_components: dict[ComponentId, ComponentRef] = {}
-    expected_component = {"kind", "path", "object_name", "config", "fingerprint"}
     for raw_id, raw_ref in raw_components.items():
         if not isinstance(raw_id, str):
             raise TypeError("every component_id must be a string")
-        if not isinstance(raw_ref, dict) or set(raw_ref) != expected_component:
-            raise ValueError(
-                f"component {raw_id!r} must contain exactly {sorted(expected_component)}"
-            )
-        kind = raw_ref["kind"]
-        path = raw_ref["path"]
-        object_name = raw_ref["object_name"]
-        config = raw_ref["config"]
-        fingerprint = raw_ref["fingerprint"]
-        if not all(isinstance(value, str) for value in (kind, path, object_name, fingerprint)):
-            raise TypeError(f"component {raw_id!r} scalar declarations must be strings")
-        if not isinstance(config, dict):
-            raise TypeError(f"component {raw_id!r} config must be a mapping")
-        ref = ComponentRef.of(
-            raw_id,
-            ComponentKind(kind),
-            path,
-            object_name,
-            config=config,
-            fingerprint=fingerprint,
-        )
+        ref = _decoded("component", raw_id, ComponentDocument, raw_ref).to_domain(raw_id)
         decoded_components[ref.component_id] = ref
 
     raw_agendas = document.get("agendas", {})

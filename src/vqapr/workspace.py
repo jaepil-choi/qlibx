@@ -40,10 +40,6 @@ from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.workspace_codec import (
     _decode_cached,
     _detach_agenda,
-    _detach_component,
-    _detach_execution_input,
-    _detach_registration,
-    _detach_strategy_config,
     _encode,
 )
 
@@ -189,18 +185,18 @@ class Workspace:
             raise TypeError("construct a workspace with Workspace.create() or Workspace.open()")
         self.project_root = Path(project_root)
         self._datasets = {
-            key: _detach_registration(value) for key, value in (datasets or {}).items()
+            key: value for key, value in (datasets or {}).items()
         }
         self._sources = dict(sources or {})
         self._execution_inputs = {
-            key: _detach_execution_input(value) for key, value in (execution_inputs or {}).items()
+            key: value for key, value in (execution_inputs or {}).items()
         }
         self._components = {
-            key: _detach_component(value) for key, value in (components or {}).items()
+            key: value for key, value in (components or {}).items()
         }
         self._agendas = {key: _detach_agenda(value) for key, value in (agendas or {}).items()}
         self._strategy_configs = {
-            key: _detach_strategy_config(value) for key, value in (strategy_configs or {}).items()
+            key: value for key, value in (strategy_configs or {}).items()
         }
         # A `RunDefinition` is frozen and holds only ids and values, so it needs no detaching.
         self._runs = dict(runs or {})
@@ -288,7 +284,7 @@ class Workspace:
     @property
     def datasets(self) -> tuple[DatasetRegistration, ...]:
         """dataset_id 순으로 정렬된 detached 선언들."""
-        return tuple(_detach_registration(self._datasets[key]) for key in sorted(self._datasets))
+        return tuple(self._datasets[key] for key in sorted(self._datasets))
 
     @property
     def sources(self) -> tuple[SourceSpec, ...]:
@@ -299,14 +295,14 @@ class Workspace:
     def execution_inputs(self) -> tuple[ExecutionInputRegistration, ...]:
         """execution_input_id 순으로 정렬된 detached Exchange 입력 선언들."""
         return tuple(
-            _detach_execution_input(self._execution_inputs[key])
+            self._execution_inputs[key]
             for key in sorted(self._execution_inputs)
         )
 
     @property
     def components(self) -> tuple[ComponentRef, ...]:
         """component_id 순으로 정렬된 detached project-local component references."""
-        return tuple(_detach_component(self._components[key]) for key in sorted(self._components))
+        return tuple(self._components[key] for key in sorted(self._components))
 
     @property
     def agendas(self) -> tuple[OperationAgenda, ...]:
@@ -315,7 +311,7 @@ class Workspace:
     @property
     def strategy_configs(self) -> tuple[StrategyConfig, ...]:
         return tuple(
-            _detach_strategy_config(self._strategy_configs[key])
+            self._strategy_configs[key]
             for key in sorted(self._strategy_configs)
         )
 
@@ -352,7 +348,7 @@ class Workspace:
         # the workspace stays enumerable and repairable; USING it is what must not happen, since
         # every consumer downstream of here treats a registration as complete.
         _require_span(str(key), registration)
-        return _detach_registration(registration)
+        return registration
 
     def span(self, raw_dataset_id: str) -> tuple[datetime, datetime]:
         """The first and last instant the registered dataset carries.
@@ -460,7 +456,7 @@ class Workspace:
                 family=FailureFamily.EXCHANGE,
             ) from error
         try:
-            return _detach_execution_input(self._execution_inputs[key])
+            return self._execution_inputs[key]
         except KeyError as error:
             raise _workspace_error(
                 stage=EXECUTION_LOOKUP_STAGE,
@@ -491,7 +487,7 @@ class Workspace:
                 retry="use a valid component_id, then retry",
             ) from error
         try:
-            return _detach_component(self._components[key])
+            return self._components[key]
         except KeyError as error:
             raise _workspace_error(
                 stage=COMPONENT_LOOKUP_STAGE,
@@ -540,7 +536,7 @@ class Workspace:
         return self._config_lookup(
             raw_component_id,
             self._strategy_configs,
-            _detach_strategy_config,
+            lambda config: config,
             STRATEGY_REGISTER_STAGE,
             "strategy config",
             noun="component_id",
@@ -770,7 +766,7 @@ class Workspace:
 
         return (
             state._replace(
-                datasets={**state.datasets, key: _detach_registration(registration)},
+                datasets={**state.datasets, key: registration},
                 sources={**state.sources, source_key: source},
             ),
             True,
@@ -825,7 +821,7 @@ class Workspace:
                 sources={**state.sources, source_key: source},
                 execution_inputs={
                     **state.execution_inputs,
-                    key: _detach_execution_input(registration),
+                    key: registration,
                 },
             ),
             True,
@@ -859,7 +855,7 @@ class Workspace:
             # `force` is retained as an explicit spelling for callers that want to say they
             # meant it, but it no longer gates anything: replacement is the default.
             _ = force
-        return state._replace(components={**state.components, key: _detach_component(ref)}), True
+        return state._replace(components={**state.components, key: ref}), True
 
     def _merge_agenda(self, state: _State, agenda: OperationAgenda) -> tuple[_State, bool]:
         return self._merge_declaration(
@@ -884,7 +880,7 @@ class Workspace:
             "strategy_configs",
             str(config.component.component_id),
             config,
-            _detach_strategy_config,
+            lambda config: config,
             STRATEGY_REGISTER_STAGE,
             noun="component_id",
         )
@@ -1418,15 +1414,15 @@ class Workspace:
         strategy_configs: Mapping[str, StrategyConfig],
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
-        self._datasets = {key: _detach_registration(value) for key, value in datasets.items()}
+        self._datasets = {key: value for key, value in datasets.items()}
         self._sources = dict(sources)
         self._execution_inputs = {
-            key: _detach_execution_input(value) for key, value in execution_inputs.items()
+            key: value for key, value in execution_inputs.items()
         }
-        self._components = {key: _detach_component(value) for key, value in components.items()}
+        self._components = {key: value for key, value in components.items()}
         self._agendas = {key: _detach_agenda(value) for key, value in agendas.items()}
         self._strategy_configs = {
-            key: _detach_strategy_config(value) for key, value in strategy_configs.items()
+            key: value for key, value in strategy_configs.items()
         }
         self._runs = dict(runs or {})
 

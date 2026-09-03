@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from types import MappingProxyType
 
 from vqapr.domain.identifiers import ComponentId, component_id
 from vqapr.models.memory import ModelMemory, normalize_memory
@@ -64,11 +65,14 @@ class ComponentRef:
         normalized = normalize_memory(dict(config or {}))
         if not isinstance(normalized, dict):  # pragma: no cover - dict construction guarantees it
             raise TypeError("config must normalize to an object")
+        # Read-only, so a reference handed out by the workspace cannot be edited underneath a
+        # frozen run (record `145` stopped copying references on every read; the object itself
+        # is what keeps the promise now).
         return cls(
             component_id(raw_component_id),
             kind,
             Path(path),
             object_name,
-            normalized,
+            MappingProxyType(normalized),
             fingerprint,
         )

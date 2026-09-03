@@ -1,0 +1,380 @@
+"""The execution phase: an accepted intent becomes orders, fills and a committed account.
+
+Record `147`. What was `SimulationFlow._execute_due`, moved verbatim: the snapshot the venue
+published at the target instant, `plan_orders`, the venue's `execute`, `Account.prepare_fill` and
+the commit -- the spine, called from here and not changed -- then the mark at the same instant
+through the valuation phase."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+from vqapr.account.snapshot import AccountState
+from vqapr.evidence.artifacts import (
+    AccountCommitEvidence,
+    DueExecutionEvidence,
+    FeedbackEvidence,
+    MarkEvidence,
+    SimulationFailureFamily,
+    SimulationFailureKind,
+    SimulationStage,
+    ValuationEvidence,
+)
+from vqapr.exchange.execution_table import exact_execution_snapshot
+from vqapr.flow.context import (
+    AcceptedIntent,
+    DueExecutionResult,
+    FlowContext,
+)
+from vqapr.flow.valuation import ValuationPhase, _marks_from_execution_snapshot
+from vqapr.orders.planning import plan_orders
+
+
+class ExecutionPhase:
+    """One due execution: intent -> orders -> fills -> committed account -> marked account."""
+
+    def __init__(self, context: FlowContext, valuation: ValuationPhase) -> None:
+        self._context = context
+        self._valuation = valuation
+
+    def execute_due(self, pending: AcceptedIntent) -> DueExecutionResult:
+        execution_input = self._context.frozen_run.execution_input
+        if execution_input is None:
+            raise RuntimeError("due execution requires frozen execution input")
+        account_state = self._context.state.current.account
+        if not isinstance(account_state, AccountState):
+            raise RuntimeError("due execution requires an AccountState root")
+        before = account_state.snapshot
+        if pending.intent.strategy_id != str(self._context.layer.config.component.component_id):
+            raise ValueError(
+                "pending intent strategy_id does not match the frozen Strategy component"
+            )
+        if pending.intent.account_version_seen != before.version:
+            raise ValueError(
+                "pending intent account_version_seen does not match current AccountSnapshot"
+            )
+        targets = pending.intent.targets
+        target_instruments = tuple(target.instrument_id for target in targets)
+        held_instruments = tuple(before.positions)
+
+        def select_snapshot() -> object:
+            # A held instrument absent from the table is a market fact, not a data-contract
+            # breach: it delisted, or it has not listed yet. Canon 6.1 assigns that case to
+            # zero-dealt evidence, and the Exchange publishes it as ABSENT. Refusing here would
+            # end the run on the first delisting, which in a 3,000-name universe is the first
+            # week.
+            return exact_execution_snapshot(
+                execution_input.table,
+                target_at=pending.target.target_at,
+                target_instruments=target_instruments,
+                held_instruments=held_instruments,
+                trade_price=pending.target.trade_price,
+                reference_price=self._context.reference_price,
+                session=self._context.scan_session,
+            )
+
+        snapshot = self._context.due_boundary(
+            stage=SimulationStage.DUE_SNAPSHOT,
+            cutoff=pending.target.target_at,
+            owner=execution_input,
+            family=SimulationFailureFamily.DATA,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=select_snapshot,
+        )
+        prices = {row.instrument: row.price for row in snapshot.rows if row.price is not None}
+        selected_prices = {
+            instrument: price for instrument, price in prices.items() if price is not None
+        }
+        # A halted row still carries a price, because a halt suspends trading and not valuation.
+        # Planning has to know the difference or it funds buys from sales the venue will refuse.
+        tradable = {row.instrument: row.is_tradable for row in snapshot.rows}
+        # NAV values what can be priced at this instant. A holding with no row carries no
+        # selected value, so it contributes nothing here and stays in the account untouched;
+        # pricing it from a stale quote would put an invented number in the denominator every
+        # later weight is converted against.
+        nav = before.cash + sum(
+            (
+                before.positions[instrument] * selected_prices[instrument]
+                for instrument in held_instruments
+                if instrument in selected_prices
+            ),
+            Decimal("0"),
+        )
+        weights = {target.instrument_id: target.weight for target in targets}
+        orders = self._context.due_boundary(
+            stage=SimulationStage.DUE_ORDER_PLANNING,
+            cutoff=pending.target.target_at,
+            owner=pending.intent,
+            family=SimulationFailureFamily.ORDER,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: plan_orders(
+                account=before,
+                execution_time_nav=nav,
+                prices=selected_prices,
+                weight_targets=weights,
+                cash_target=pending.intent.cash_target,
+                budget=pending.intent.budget,
+                rules=self._bound_rules(),
+                tradable=tradable,
+            ),
+        )
+        fills = self._context.due_boundary(
+            stage=SimulationStage.DUE_EXCHANGE_EXECUTION,
+            cutoff=pending.target.target_at,
+            owner=self._context.frozen_run.exchange,
+            family=SimulationFailureFamily.EXCHANGE,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._context.exchange.execute(orders, before, snapshot),
+        )
+        prepared_fill = self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_PREPARATION,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._context.account.prepare_fill(
+                account_state, fills, expected_version=before.version
+            ),
+        )
+        commit_evidence = AccountCommitEvidence(
+            run_identity=self._context.frozen_run.identity,
+            agenda=self._context.layer.agenda,
+            occurrence=pending.occurrence,
+            cutoff=pending.target.target_at,
+            pending=pending,
+            target=pending.target,
+            fill_convention=execution_input.fill,
+            execution_snapshot=snapshot,
+            planning_nav=nav,
+            planning_cash_target=pending.intent.cash_target,
+            planning_budget=pending.intent.budget,
+            intended_targets=pending.intent.targets,
+            requested_orders=orders,
+            dealt_fills=fills,
+            before=before,
+            committed=prepared_fill.next_snapshot,
+            root_version=self._context.state.current.version,
+            account_version_before=before.version,
+            account_version_committed=prepared_fill.next_snapshot.version,
+        )
+        prepared_commit = self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_PREPARATION,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._context.state.prepare_account_commit(
+                pending_id=pending.pending_id,
+                account=prepared_fill,
+                fill=fills,
+                evidence=commit_evidence,
+                # The same five fields `InvocationRecorder` stamps on every other table. These
+                # rows never pass through one, which is why they used to carry none of them.
+                # `event_time` is when the fill happened -- the execution target -- not when the
+                # decision that caused it was made.
+                envelope={
+                    "run_id": self._context.frozen_run.identity,
+                    "producer_id": str(
+                        self._context.layer.config.component.component_id
+                    ),
+                    "stage": pending.occurrence.role.value,
+                    # In the strategy agenda's zone, as every other table's `event_time` is
+                    # (`docs/issues/058`): the execution table normalises the target to UTC,
+                    # and a reader lining a fill up against the valuation that followed it
+                    # was converting by hand.
+                    "event_time": self._in_agenda_zone(pending.target.target_at),
+                },
+            ),
+        )
+        self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_COMMIT,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.PRE_COMMIT,
+            operation=lambda: self._context.account.commit_fill(prepared_fill),
+        )
+        committed_root = self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_COMMIT,
+            cutoff=pending.target.target_at,
+            owner=account_state,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._publish_account_commit(prepared_commit),
+        )
+        selected_marks = self._context.due_boundary(
+            stage=SimulationStage.DUE_VALUATION_SELECTION,
+            cutoff=pending.target.target_at,
+            owner=self._context.frozen_run.valuation,
+            family=SimulationFailureFamily.VALUATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            # The venue already published these prices to fill against. Valuing the book at the
+            # same instant from the same rows is what makes the mark and the fill agree.
+            operation=lambda: _marks_from_execution_snapshot(
+                snapshot,
+                pending.target.target_at,
+                previous=account_state.latest_mark,
+                held=prepared_fill.next_snapshot.positions,
+            ),
+        )
+        mark = self._context.due_boundary(
+            stage=SimulationStage.DUE_VALUATION_MARK,
+            cutoff=pending.target.target_at,
+            owner=self._context.frozen_run.valuation,
+            family=SimulationFailureFamily.VALUATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._context.valuation_service.mark(
+                prepared_fill.next_snapshot, selected_marks
+            ),
+        )
+        prepared_account = self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._context.account.prepare_mark(
+                prepared_fill,
+                mark,
+                marked_at=pending.target.target_at,
+                observed_at={
+                    selected.instrument_id: selected.observed_at for selected in selected_marks
+                },
+                provenance=ValuationEvidence(
+                    run_identity=self._context.frozen_run.identity,
+                    agenda=self._context.frozen_run.valuation_agenda,
+                    occurrence=pending.occurrence,
+                    root_version=committed_root.version,
+                    cutoff=pending.target.target_at,
+                    account=prepared_fill.next_snapshot,
+                    marks=mark,
+                    valuation_config=self._context.frozen_run.valuation,
+                    account_version=prepared_fill.next_snapshot.version,
+                ),
+            ),
+        )
+        mark_evidence = MarkEvidence(
+            run_identity=self._context.frozen_run.identity,
+            agenda=self._context.frozen_run.valuation_agenda,
+            occurrence=pending.occurrence,
+            cutoff=pending.target.target_at,
+            valuation_config=self._context.frozen_run.valuation,
+            selected_marks=selected_marks,
+            marks=mark,
+            limitations=(),
+            account=prepared_account.next_state.snapshot,
+            root_version=committed_root.version,
+            account_version=prepared_account.next_state.snapshot.version,
+        )
+        prepared_marked = self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._context.state.prepare_marked(
+                account=prepared_account,
+                mark=mark,
+                evidence=mark_evidence,
+            ),
+        )
+        self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._context.account.commit_mark(prepared_account),
+        )
+        marked_root = self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=pending.target.target_at,
+            owner=committed_root.account,
+            family=SimulationFailureFamily.ACCOUNT,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._valuation.publish_marked(prepared_marked),
+        )
+        feedback_evidence = self._context.due_boundary(
+            stage=SimulationStage.DUE_FEEDBACK_CANDIDATE,
+            cutoff=pending.target.target_at,
+            owner=pending,
+            family=SimulationFailureFamily.PUBLICATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: FeedbackEvidence(
+                run_identity=self._context.frozen_run.identity,
+                agenda=self._context.layer.agenda,
+                occurrence=pending.occurrence,
+                cutoff=pending.target.target_at,
+                pending=pending,
+                candidates=(fills, mark),
+                root_version=marked_root.version,
+                account_version=marked_root.account.snapshot.version,
+            ),
+        )
+        due_evidence = DueExecutionEvidence(commit_evidence, mark_evidence, feedback_evidence)
+        root = self._context.due_boundary(
+            stage=SimulationStage.DUE_FEEDBACK_PUBLICATION,
+            cutoff=pending.target.target_at,
+            owner=feedback_evidence,
+            family=SimulationFailureFamily.PUBLICATION,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+            operation=lambda: self._context.state.publish_feedback(
+                self._context.state.prepare_feedback((due_evidence,), evidence=feedback_evidence)
+            ),
+        )
+        assert root.account is not None
+        return DueExecutionResult(pending.pending_id, root.account.snapshot.version, due_evidence)
+
+    def _in_agenda_zone(self, instant: datetime) -> datetime:
+        """An instant expressed in the strategy agenda's zone; the same instant."""
+        zone = self._context.layer.agenda.timezone
+        return instant.astimezone(ZoneInfo(zone)) if zone else instant
+
+    def _publish_account_commit(self, prepared: object) -> object:
+        root = self._context.state.publish_account_commit(prepared)
+        if root.account != self._context.account.state:
+            raise RuntimeError("Account commit root does not mirror Account authority")
+        return root
+
+    def bind_registry_to_venue(self) -> None:
+        """Bind the roster onto the venue itself, so every reader of its rules sees it.
+
+        Handing a bound view to `plan_orders` alone was not enough, and a testbed journey proved
+        it: `execute` never receives that view. It reads the venue's OWN rules -- `venue.py` off
+        the `rules` property, `krx.py` off the cached `_rules` field -- so `Fill.kind` asked an
+        unbound view and every fill in a 599-fill run recorded `None`, with a correctly registered
+        roster sitting in the workspace. Registering a roster changed nothing observable, which
+        made the whole step unfalsifiable from outside.
+
+        Binding here rather than passing it down because `execute`'s signature is not ours to
+        change: `load_exchange` refuses a subclass that overrides `execute`, so the profile's own
+        signature is the contract, and a new parameter would break every registered venue.
+
+        Set on the venue rather than on a view it built, because the two profiles hold their rules
+        differently: `AcademicExchange.rules` REBUILDS a view on every access, so a view written
+        back to it is discarded, while `KrxExchange` serves a cached `_rules` field. Giving both a
+        `_registry` to read is the one form that reaches each of them, and it leaves a subclass's
+        overridden `rules` property in charge of everything else it adds.
+
+        `object.__setattr__` because `AcademicExchange` is a frozen dataclass.
+        """
+        if self._context.registry is None:
+            return
+        object.__setattr__(self._context.exchange, "_registry", self._context.registry)
+        cached = getattr(self._context.exchange, "_rules", None)
+        if cached is not None:
+            # KRX built its view once at construction; rebind that instance too, since its
+            # `rules` property serves the cached object rather than rebuilding.
+            object.__setattr__(
+                self._context.exchange, "_rules", cached.with_registry(self._context.registry)
+            )
+
+    def _bound_rules(self) -> object:
+        """The rules order planning consumes, with the roster bound if a run has one."""
+        rules = self._context.exchange.rules
+        if self._context.registry is None:
+            return rules
+        return rules.with_registry(self._context.registry)
+

@@ -461,11 +461,11 @@ def test_the_pending_identity_discriminates_by_role() -> None:
     key shapes inside the test would assert a property of `uuid5`, not of this package, and would
     stay green if the production key lost its discriminator again.
     """
-    from vqapr.flow.simulation import SimulationFlow
+    from vqapr.flow.callback import CallbackPhase
 
     instant = datetime(2024, 3, 4, 16, tzinfo=KST)
     minted = {
-        role: SimulationFlow._pending_valuation_key("run-1", role, instant)
+        role: CallbackPhase._pending_valuation_key("run-1", role, instant)
         for role in ("VALUATION", "STRATEGY_CALLBACK")
     }
 
@@ -473,7 +473,7 @@ def test_the_pending_identity_discriminates_by_role() -> None:
         f"two roles at one instant minted the same pending identity: {minted}"
     )
     # The instant still discriminates, so the role did not replace it.
-    later = SimulationFlow._pending_valuation_key(
+    later = CallbackPhase._pending_valuation_key(
         "run-1", "VALUATION", instant + timedelta(days=1)
     )
     assert later != minted["VALUATION"]

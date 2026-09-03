@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-import vqapr.flow.simulation as simulation
+import vqapr.flow.execution as execution_phase
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
@@ -953,7 +953,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     before = state.current
 
     with pytest.raises(SimulationFailure, match="no exact execution target") as raised:
-        flow._dispatch_callback(frozen.strategies[0].agenda.occurrences[0])
+        flow._callback.dispatch(frozen.strategies[0].agenda.occurrences[0])
 
     failure = raised.value
     assert failure.family is SimulationFailureFamily.INTENT
@@ -1351,7 +1351,8 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
 
     # Valuation is no longer a separate subscription: the book is valued from the execution
     # snapshot the fill was priced against, so that reader is the seam that can fail after commit.
-    monkeypatch.setattr(simulation, "_marks_from_execution_snapshot", required_valuation_failure)
+    # The due path binds the helper in the execution phase's module (record `147`).
+    monkeypatch.setattr(execution_phase, "_marks_from_execution_snapshot", required_valuation_failure)
     with pytest.raises(SimulationFailure) as raised:
         _flow(
             _frozen((callback,), end=target, execution=registration),
@@ -1439,19 +1440,19 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
         raise RuntimeError(f"{boundary} fault")
 
     if boundary == "data":
-        monkeypatch.setattr(simulation, "exact_execution_snapshot", fail)
+        monkeypatch.setattr(execution_phase, "exact_execution_snapshot", fail)
     elif boundary == "order":
-        monkeypatch.setattr(simulation, "plan_orders", fail)
+        monkeypatch.setattr(execution_phase, "plan_orders", fail)
     elif boundary == "exchange":
         monkeypatch.setattr(AcademicExchange, "execute", fail)
     elif boundary == "account":
-        monkeypatch.setattr(flow._account, "prepare_fill", fail)
+        monkeypatch.setattr(flow._context.account, "prepare_fill", fail)
     elif boundary == "publication":
         monkeypatch.setattr(state, "prepare_feedback", fail)
     else:
         # Valuation now reads the execution snapshot the fill was priced from, so the seam that
         # can fault is that reader rather than a separate observation subscription.
-        monkeypatch.setattr(simulation, "_marks_from_execution_snapshot", fail)
+        monkeypatch.setattr(execution_phase, "_marks_from_execution_snapshot", fail)
 
     with pytest.raises(SimulationFailure) as raised:
         flow.run()

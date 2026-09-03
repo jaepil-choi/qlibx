@@ -208,9 +208,6 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
             Workspace.open(root).component("evil"), "daily", OperationRole.STRATEGY_CALLBACK
         )
     )
-    Workspace.open(root).register_valuation_config(
-        ValuationConfig("daily-val", OperationRole.VALUATION)
-    )
 
     Workspace.open(root).register_run(
         RunDefinition(

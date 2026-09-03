@@ -62,8 +62,9 @@ registered and passes validation.
    Exchange plus the declaration that registers it. **Every instrument the run trades needs a
    listing here**, or preflight refuses it by name. `AcademicExchange` and `KrxExchange` are the
    only two profiles a registered Exchange may be; the scaffold uses the first.
-7. `vqapr new agendas --out agendas.yaml` -- get agendas, strategy_configs, and valuation_configs
-   together (a config binds a role to an agenda, so neither half is usable alone)
+7. `vqapr new agendas --out agendas.yaml` -- get agendas and strategy_configs together (a
+   config binds a strategy to an agenda, so neither half is usable alone). The run names its
+   valuation agenda itself, in its `valuation:` block
 8. Fill in the placeholders and `vqapr register <declaration.yaml>` for each. Datasets, sources
    and agendas stay in YAML because they ARE declarations -- there is no code to point at.
 9. `vqapr list <kind>` -- confirm what was registered, and `vqapr show model <id>` to see what a
@@ -281,8 +282,7 @@ vqapr list strategy-configs
 vqapr list instruments
 ```
 
-The remaining four kinds are `valuation-configs`, `monitoring-policies`, `runs` and
-`strategies` -- the last two are Rung 2: `vqapr list runs` is the registered runs and the records
+The remaining two kinds are `runs` and `strategies`, both Rung 2: `vqapr list runs` is the registered runs and the records
 beside each, `vqapr list strategies --run <run-id>` those records. A kind you registered nothing
 under returns `count: 0`, which is an answer rather than a failure.
 

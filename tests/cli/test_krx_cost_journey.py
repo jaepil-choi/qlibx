@@ -232,9 +232,6 @@ components:
 strategy_configs:
   rotate:
     agenda_id: alpha
-valuation_configs:
-  valuing:
-    agenda_id: valuing
 """,
         encoding="utf-8",
     )

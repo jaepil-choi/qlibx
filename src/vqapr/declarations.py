@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.account.account import AccountMode
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain import identifiers
@@ -48,7 +47,6 @@ from vqapr.extension.registration import prepare_component, register_component
 from vqapr.flow.run import StrategyConfig
 from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.runtime.agendas import OperationAgenda, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Transaction, Workspace
 from vqapr.workspace_codec import decoded_run
 
@@ -80,8 +78,6 @@ SECTIONS = (
     "agendas",
     "components",
     "strategy_configs",
-    "valuation_configs",
-    "monitoring_policies",
     "runs",
 )
 """Every section this command understands, in dependency order.
@@ -928,22 +924,6 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
             ),
         )
         registered.setdefault("strategy_configs", []).append(str(component_id))
-
-    for config_id, body in section("valuation_configs").items():
-        name = f"valuation_configs.{config_id}"
-        config = _mapping(body, name=name)
-        agenda_id = str(_required(config, "agenda_id", name=name))
-        transaction.register_valuation_config(ValuationConfig(agenda_id, OperationRole.VALUATION))
-        registered.setdefault("valuation_configs", []).append(str(config_id))
-
-    for policy_id, body in section("monitoring_policies").items():
-        name = f"monitoring_policies.{policy_id}"
-        policy = _mapping(body, name=name)
-        agenda_id = str(_required(policy, "agenda_id", name=name))
-        transaction.register_monitoring_policy(
-            MonitoringPolicy(agenda_id, OperationRole.MONITORING)
-        )
-        registered.setdefault("monitoring_policies", []).append(str(policy_id))
 
     for run_id, body in section("runs").items():
         # Shape by the codec, so a run reads the same way from a declaration and from the

@@ -181,12 +181,6 @@ components:
 strategy_configs:
   my-alpha:
     agenda_id: alpha
-valuation_configs:
-  valuing:
-    agenda_id: valuing
-monitoring_policies:
-  watching:
-    agenda_id: watching
 """,
         encoding="utf-8",
     )

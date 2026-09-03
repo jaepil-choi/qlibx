@@ -139,8 +139,6 @@ COMPONENT_LOOKUP_STAGE = "workspace.component.lookup"
 AGENDA_REGISTER_STAGE = "workspace.agenda.register"
 AGENDA_LOOKUP_STAGE = "workspace.agenda.lookup"
 STRATEGY_REGISTER_STAGE = "workspace.strategy_config.register"
-VALUATION_REGISTER_STAGE = "workspace.valuation_config.register"
-MONITORING_REGISTER_STAGE = "workspace.monitoring_policy.register"
 REMOVE_STAGE = "workspace.remove"
 _CONSTRUCTION_TOKEN = object()
 
@@ -241,14 +239,6 @@ def _detach_strategy_config(config: StrategyConfig) -> StrategyConfig:
     return StrategyConfig(_detach_component(config.component), config.agenda_id, config.agenda_role)
 
 
-def _detach_valuation_config(config: ValuationConfig) -> ValuationConfig:
-    return ValuationConfig(config.agenda_id, config.agenda_role)
-
-
-def _detach_monitoring_policy(policy: MonitoringPolicy) -> MonitoringPolicy:
-    return MonitoringPolicy(policy.agenda_id, policy.agenda_role)
-
-
 def _encoded_dataset(registration: DatasetRegistration) -> dict[str, object]:
     """One registration as it is written back.
 
@@ -294,8 +284,6 @@ def _encode(
     components: Mapping[ComponentId, ComponentRef],
     agendas: Mapping[str, OperationAgenda],
     strategy_configs: Mapping[str, StrategyConfig],
-    valuation_configs: Mapping[str, ValuationConfig],
-    monitoring_policies: Mapping[str, MonitoringPolicy],
     runs: Mapping[str, RunDefinition] | None = None,
 ) -> str:
     document = {
@@ -369,27 +357,11 @@ def _encode(
             }
             for key, config in sorted(strategy_configs.items())
         },
-        "valuation_configs": {
-            key: {
-                "agenda_role": str(config.agenda_role),
-            }
-            for key, config in sorted(valuation_configs.items())
-        },
-        "monitoring_policies": {
-            key: {"agenda_role": str(policy.agenda_role)}
-            for key, policy in sorted(monitoring_policies.items())
-        },
         "runs": {
             key: encoded_run(definition) for key, definition in sorted((runs or {}).items())
         },
     }
-    for section in (
-        "agendas",
-        "strategy_configs",
-        "valuation_configs",
-        "monitoring_policies",
-        "runs",
-    ):
+    for section in ("agendas", "strategy_configs", "runs"):
         if not document[section]:
             del document[section]
     return yaml.dump(document, Dumper=_YAML_DUMPER, allow_unicode=True, sort_keys=False)
@@ -421,8 +393,6 @@ def _decode(
     dict[ComponentId, ComponentRef],
     dict[str, OperationAgenda],
     dict[str, StrategyConfig],
-    dict[str, ValuationConfig],
-    dict[str, MonitoringPolicy],
     dict[str, RunDefinition],
 ]:
     document = yaml.load(text, Loader=_YAML_LOADER)
@@ -432,9 +402,12 @@ def _decode(
         "components",
         "agendas",
         "strategy_configs",
+        "runs",
+        # Read and dropped (record `144`): a document written by 0.3.0 carries these two
+        # sections, each restating an agenda's own role, and the next write omits them. A
+        # section with no information is not a meaning kept in two spellings.
         "valuation_configs",
         "monitoring_policies",
-        "runs",
     }
     if (
         not isinstance(document, dict)
@@ -443,8 +416,7 @@ def _decode(
     ):
         raise ValueError(
             "workspace root must contain sources and datasets, with optional execution_inputs "
-            "components, agendas, strategy_configs, valuation_configs, monitoring_policies, "
-            "and runs"
+            "components, agendas, strategy_configs and runs"
         )
 
     raw_sources = document["sources"]
@@ -801,12 +773,7 @@ def _decode(
         decoded_agendas[agenda.agenda_id] = agenda
 
     raw_strategy_configs = document.get("strategy_configs", {})
-    raw_valuation_configs = document.get("valuation_configs", {})
-    raw_monitoring_policies = document.get("monitoring_policies", {})
-    if not all(
-        isinstance(value, dict)
-        for value in (raw_strategy_configs, raw_valuation_configs, raw_monitoring_policies)
-    ):
+    if not isinstance(raw_strategy_configs, dict):
         raise TypeError("configuration sections must be mappings")
     decoded_strategy_configs: dict[str, StrategyConfig] = {}
     for raw_id, raw_config in raw_strategy_configs.items():
@@ -842,49 +809,6 @@ def _decode(
                 f"strategy config {raw_id!r} references an absent or mismatched agenda"
             )
         decoded_strategy_configs[component] = config
-    decoded_valuation_configs: dict[str, ValuationConfig] = {}
-    for raw_id, raw_config in raw_valuation_configs.items():
-        if not isinstance(raw_id, str) or not isinstance(raw_config, dict):
-            raise ValueError("valuation config must contain an agenda_id and agenda_role")
-        if "mark_requirement" in raw_config:
-            # Refuse rather than ignore. A workspace written before valuation moved to the
-            # execution table declares a price subscription this run would silently not use, and
-            # its NAV would differ from what that declaration says it should be.
-            raise ValueError(
-                f"valuation config {raw_id!r} declares mark_requirement, which no longer exists: "
-                "valuation reads the execution table, so re-register the valuation config "
-                "without it"
-            )
-        if set(raw_config) != {"agenda_role"}:
-            raise ValueError("valuation config must contain exactly agenda_role")
-        role = raw_config["agenda_role"]
-        if not isinstance(role, str):
-            raise TypeError("valuation config agenda_role must be a string")
-        config = ValuationConfig(raw_id, OperationRole(role))
-        if (
-            decoded_agendas.get(raw_id) is None
-            or decoded_agendas[raw_id].role is not config.agenda_role
-        ):
-            raise ValueError(f"valuation config {raw_id!r} references an absent declaration")
-        decoded_valuation_configs[raw_id] = config
-    decoded_monitoring_policies: dict[str, MonitoringPolicy] = {}
-    for raw_id, raw_policy in raw_monitoring_policies.items():
-        if (
-            not isinstance(raw_id, str)
-            or not isinstance(raw_policy, dict)
-            or set(raw_policy) != {"agenda_role"}
-            or not isinstance(raw_policy["agenda_role"], str)
-        ):
-            raise ValueError("monitoring policy must contain an agenda_id and exactly agenda_role")
-        policy = MonitoringPolicy(raw_id, OperationRole(raw_policy["agenda_role"]))
-        if (
-            decoded_agendas.get(raw_id) is None
-            or decoded_agendas[raw_id].role is not policy.agenda_role
-        ):
-            raise ValueError(
-                f"monitoring policy {raw_id!r} references an absent or mismatched agenda"
-            )
-        decoded_monitoring_policies[raw_id] = policy
     raw_runs = document.get("runs", {})
     if not isinstance(raw_runs, dict):
         raise TypeError("runs must be a mapping")
@@ -928,8 +852,6 @@ def _decode(
         decoded_components,
         decoded_agendas,
         decoded_strategy_configs,
-        decoded_valuation_configs,
-        decoded_monitoring_policies,
         decoded_runs,
     )
 

@@ -157,7 +157,6 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     space.register_strategy_config(
         StrategyConfig(space.component("my-strat"), "late-agenda", OperationRole.STRATEGY_CALLBACK)
     )
-    space.register_valuation_config(ValuationConfig("val-agenda", OperationRole.VALUATION))
     Workspace.open(root).register_run(
         RunDefinition(
             run_id="probe",

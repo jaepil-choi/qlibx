@@ -17,7 +17,6 @@ from typing import NamedTuple
 import yaml
 
 from vqapr._internal import atomic, filelock
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
@@ -38,17 +37,14 @@ from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import RunDefinition, StrategyConfig
 from vqapr.runtime.agendas import OperationAgenda, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace_codec import (
     _decode_cached,
     _detach_agenda,
     _detach_component,
     _detach_execution_input,
-    _detach_monitoring_policy,
     _detach_registration,
     _detach_source,
     _detach_strategy_config,
-    _detach_valuation_config,
     _encode,
 )
 
@@ -136,8 +132,6 @@ COMPONENT_LOOKUP_STAGE = "workspace.component.lookup"
 AGENDA_REGISTER_STAGE = "workspace.agenda.register"
 AGENDA_LOOKUP_STAGE = "workspace.agenda.lookup"
 STRATEGY_REGISTER_STAGE = "workspace.strategy_config.register"
-VALUATION_REGISTER_STAGE = "workspace.valuation_config.register"
-MONITORING_REGISTER_STAGE = "workspace.monitoring_policy.register"
 RUN_REGISTER_STAGE = "workspace.run.register"
 REMOVE_STAGE = "workspace.remove"
 _CONSTRUCTION_TOKEN = object()
@@ -157,8 +151,6 @@ class _State(NamedTuple):
     components: dict[ComponentId, ComponentRef]
     agendas: dict[str, OperationAgenda]
     strategy_configs: dict[str, StrategyConfig]
-    valuation_configs: dict[str, ValuationConfig]
-    monitoring_policies: dict[str, MonitoringPolicy]
     runs: dict[str, RunDefinition]
     """Registered runs (record `139`): the reusable configuration `vqapr run <run-id>` executes."""
 
@@ -175,11 +167,9 @@ class Workspace:
         "_components",
         "_datasets",
         "_execution_inputs",
-        "_monitoring_policies",
         "_runs",
         "_sources",
         "_strategy_configs",
-        "_valuation_configs",
         "project_root",
     )
 
@@ -192,8 +182,6 @@ class Workspace:
         components: Mapping[ComponentId, ComponentRef] | None = None,
         agendas: Mapping[str, OperationAgenda] | None = None,
         strategy_configs: Mapping[str, StrategyConfig] | None = None,
-        valuation_configs: Mapping[str, ValuationConfig] | None = None,
-        monitoring_policies: Mapping[str, MonitoringPolicy] | None = None,
         runs: Mapping[str, RunDefinition] | None = None,
         *,
         _token: object | None = None,
@@ -215,13 +203,6 @@ class Workspace:
         self._strategy_configs = {
             key: _detach_strategy_config(value) for key, value in (strategy_configs or {}).items()
         }
-        self._valuation_configs = {
-            key: _detach_valuation_config(value) for key, value in (valuation_configs or {}).items()
-        }
-        self._monitoring_policies = {
-            key: _detach_monitoring_policy(value)
-            for key, value in (monitoring_policies or {}).items()
-        }
         # A `RunDefinition` is frozen and holds only ids and values, so it needs no detaching.
         self._runs = dict(runs or {})
 
@@ -235,8 +216,6 @@ class Workspace:
         components: Mapping[ComponentId, ComponentRef],
         agendas: Mapping[str, OperationAgenda],
         strategy_configs: Mapping[str, StrategyConfig],
-        valuation_configs: Mapping[str, ValuationConfig],
-        monitoring_policies: Mapping[str, MonitoringPolicy],
         runs: Mapping[str, RunDefinition],
     ) -> Workspace:
         return cls(
@@ -247,8 +226,6 @@ class Workspace:
             components,
             agendas,
             strategy_configs,
-            valuation_configs,
-            monitoring_policies,
             runs,
             _token=_CONSTRUCTION_TOKEN,
         )
@@ -260,16 +237,16 @@ class Workspace:
     @classmethod
     def create(cls, project_root: str | Path) -> Workspace:
         """새 project workspace를 만들거나 이미 있으면 그대로 연다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {})
         if candidate.path.exists():
             return cls.open(project_root)
-        candidate._write({}, {}, {}, {}, {}, {}, {}, {}, {})
+        candidate._write({}, {}, {}, {}, {}, {}, {})
         return candidate
 
     @classmethod
     def open(cls, project_root: str | Path) -> Workspace:
         """기존 workspace 전체를 읽는다. 없거나 손상됐으면 일부 상태를 반환하지 않는다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {})
         return cls._from_state(project_root, *candidate._read())
 
     @classmethod
@@ -284,7 +261,7 @@ class Workspace:
         item therefore leaves the workspace exactly as it found it; a valid document costs one
         lock, one read and one write however many items it declares.
         """
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {})
         return Transaction(cls._from_state(project_root, *candidate._read_or_empty()))
 
     def _state(self) -> _State:
@@ -295,8 +272,6 @@ class Workspace:
             self._components,
             self._agendas,
             self._strategy_configs,
-            self._valuation_configs,
-            self._monitoring_policies,
             self._runs,
         )
 
@@ -308,7 +283,7 @@ class Workspace:
         `workspace.open.missing` exists to avoid.
         """
         if not self.path.exists():
-            return _State({}, {}, {}, {}, {}, {}, {}, {}, {})
+            return _State({}, {}, {}, {}, {}, {}, {})
         return self._read()
 
     @property
@@ -343,20 +318,6 @@ class Workspace:
         return tuple(
             _detach_strategy_config(self._strategy_configs[key])
             for key in sorted(self._strategy_configs)
-        )
-
-    @property
-    def valuation_configs(self) -> tuple[ValuationConfig, ...]:
-        return tuple(
-            _detach_valuation_config(self._valuation_configs[key])
-            for key in sorted(self._valuation_configs)
-        )
-
-    @property
-    def monitoring_policies(self) -> tuple[MonitoringPolicy, ...]:
-        return tuple(
-            _detach_monitoring_policy(self._monitoring_policies[key])
-            for key in sorted(self._monitoring_policies)
         )
 
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
@@ -586,15 +547,6 @@ class Workspace:
             noun="component_id",
         )
 
-    def valuation_config(self, raw_agenda_id: str) -> ValuationConfig:
-        return self._config_lookup(
-            raw_agenda_id,
-            self._valuation_configs,
-            _detach_valuation_config,
-            VALUATION_REGISTER_STAGE,
-            "valuation config",
-        )
-
     @property
     def run_definitions(self) -> tuple[RunDefinition, ...]:
         """Every registered run, ordered by run id."""
@@ -609,15 +561,6 @@ class Workspace:
             RUN_REGISTER_STAGE,
             "run",
             noun="run_id",
-        )
-
-    def monitoring_policy(self, raw_agenda_id: str) -> MonitoringPolicy:
-        return self._config_lookup(
-            raw_agenda_id,
-            self._monitoring_policies,
-            _detach_monitoring_policy,
-            MONITORING_REGISTER_STAGE,
-            "monitoring policy",
         )
 
     def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
@@ -681,14 +624,6 @@ class Workspace:
             self._commit(merged, changed)
             return changed
 
-    def register_valuation_config(self, config: ValuationConfig) -> bool:
-        if not isinstance(config, ValuationConfig):
-            raise TypeError("config must be a ValuationConfig")
-        with self._exclusive():
-            merged, changed = self._merge_valuation_config(self._read(), config)
-            self._commit(merged, changed)
-            return changed
-
     def register_run(self, definition: RunDefinition) -> bool:
         """Register a run: the configuration every strategy in it shares, and which strategies.
 
@@ -700,14 +635,6 @@ class Workspace:
             raise TypeError("definition must be a RunDefinition")
         with self._exclusive():
             merged, changed = self._merge_run(self._read(), definition)
-            self._commit(merged, changed)
-            return changed
-
-    def register_monitoring_policy(self, policy: MonitoringPolicy) -> bool:
-        if not isinstance(policy, MonitoringPolicy):
-            raise TypeError("policy must be a MonitoringPolicy")
-        with self._exclusive():
-            merged, changed = self._merge_monitoring_policy(self._read(), policy)
             self._commit(merged, changed)
             return changed
 
@@ -963,21 +890,6 @@ class Workspace:
             noun="component_id",
         )
 
-    def _merge_valuation_config(
-        self, state: _State, config: ValuationConfig
-    ) -> tuple[_State, bool]:
-        self._require_agenda(
-            state.agendas, config.agenda_id, config.agenda_role, VALUATION_REGISTER_STAGE
-        )
-        return self._merge_declaration(
-            state,
-            "valuation_configs",
-            config.agenda_id,
-            config,
-            _detach_valuation_config,
-            VALUATION_REGISTER_STAGE,
-        )
-
     def _merge_run(self, state: _State, definition: RunDefinition) -> tuple[_State, bool]:
         """Fold one run into the document, refusing any id it names that is not registered."""
         self._require_run_references(state, definition)
@@ -1046,21 +958,6 @@ class Workspace:
                 definition.monitoring.agenda_role,
                 RUN_REGISTER_STAGE,
             )
-
-    def _merge_monitoring_policy(
-        self, state: _State, policy: MonitoringPolicy
-    ) -> tuple[_State, bool]:
-        self._require_agenda(
-            state.agendas, policy.agenda_id, policy.agenda_role, MONITORING_REGISTER_STAGE
-        )
-        return self._merge_declaration(
-            state,
-            "monitoring_policies",
-            policy.agenda_id,
-            policy,
-            _detach_monitoring_policy,
-            MONITORING_REGISTER_STAGE,
-        )
 
     @staticmethod
     def _merge_declaration(
@@ -1229,9 +1126,7 @@ class Workspace:
                 "component": 3,
                 "agenda": 4,
                 "strategy_config": 5,
-                "valuation_config": 6,
-                "monitoring_policy": 7,
-                "run": 8,
+                "run": 6,
             }[kind]
             declarations = dict(state[position])
             if identity not in declarations:
@@ -1274,14 +1169,8 @@ class Workspace:
         land between them -- and because `_decode` validates forward references, the result was a
         workspace `Workspace.open()` refuses rather than merely a stale answer.
         """
-        components, agendas, strategy_configs, valuation_configs, monitoring_policies = (
-            state[3],
-            state[4],
-            state[5],
-            state[6],
-            state[7],
-        )
-        runs: Mapping[str, RunDefinition] = state[8] if len(state) > 8 else {}
+        components, agendas, strategy_configs = state[3], state[4], state[5]
+        runs: Mapping[str, RunDefinition] = state[6] if len(state) > 6 else {}
         blockers: list[str] = []
         if kind == "component":
             for config_id, config in strategy_configs.items():
@@ -1309,12 +1198,6 @@ class Workspace:
             for config_id, config in strategy_configs.items():
                 if config.agenda_id == identity:
                     blockers.append(f"strategy config {config_id!r}")
-            for config_id in valuation_configs:
-                if config_id == identity:
-                    blockers.append(f"valuation config {config_id!r}")
-            for policy_id in monitoring_policies:
-                if policy_id == identity:
-                    blockers.append(f"monitoring policy {policy_id!r}")
         elif kind == "dataset":
             # A dataset is named by a component's declared requirements rather than by the
             # workspace document, so nothing here can claim to know every reader of one. Said
@@ -1331,9 +1214,9 @@ class Workspace:
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry="remove a component, agenda, or config instead",
             )
-        elif kind in ("valuation_config", "monitoring_policy", "run"):
-            # Leaf declarations. A run is the top of the document: nothing names a run, and a
-            # run's RECORDS are not registrations -- `vqapr rm run` removes those separately.
+        elif kind == "run":
+            # A run is the top of the document: nothing names a run, and a run's RECORDS are
+            # not registrations -- `vqapr rm run` removes those separately.
             return ()
         else:
             raise _workspace_error(
@@ -1341,8 +1224,7 @@ class Workspace:
                 code=f"{REMOVE_STAGE}.unsupported_kind",
                 requirement="kind must be one this workspace stores",
                 observed=repr(kind),
-                fix="use one of: component, agenda, strategy_config, valuation_config, "
-                "monitoring_policy, run",
+                fix="use one of: component, agenda, strategy_config, run",
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry="retry with a kind this workspace stores",
             )
@@ -1535,8 +1417,6 @@ class Workspace:
         components: Mapping[ComponentId, ComponentRef],
         agendas: Mapping[str, OperationAgenda],
         strategy_configs: Mapping[str, StrategyConfig],
-        valuation_configs: Mapping[str, ValuationConfig],
-        monitoring_policies: Mapping[str, MonitoringPolicy],
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self._datasets = {key: _detach_registration(value) for key, value in datasets.items()}
@@ -1549,12 +1429,6 @@ class Workspace:
         self._strategy_configs = {
             key: _detach_strategy_config(value) for key, value in strategy_configs.items()
         }
-        self._valuation_configs = {
-            key: _detach_valuation_config(value) for key, value in valuation_configs.items()
-        }
-        self._monitoring_policies = {
-            key: _detach_monitoring_policy(value) for key, value in monitoring_policies.items()
-        }
         self._runs = dict(runs or {})
 
     def _write(
@@ -1565,8 +1439,6 @@ class Workspace:
         components: Mapping[ComponentId, ComponentRef],
         agendas: Mapping[str, OperationAgenda],
         strategy_configs: Mapping[str, StrategyConfig],
-        valuation_configs: Mapping[str, ValuationConfig],
-        monitoring_policies: Mapping[str, MonitoringPolicy],
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -1577,8 +1449,6 @@ class Workspace:
             components,
             agendas,
             strategy_configs,
-            valuation_configs,
-            monitoring_policies,
             runs or {},
         )
         try:
@@ -1688,18 +1558,6 @@ class Transaction:
             raise TypeError("config must be a StrategyConfig")
         ws = self._staging
         return self._stage(lambda state: ws._merge_strategy_config(state, config))
-
-    def register_valuation_config(self, config: ValuationConfig) -> bool:
-        if not isinstance(config, ValuationConfig):
-            raise TypeError("config must be a ValuationConfig")
-        ws = self._staging
-        return self._stage(lambda state: ws._merge_valuation_config(state, config))
-
-    def register_monitoring_policy(self, policy: MonitoringPolicy) -> bool:
-        if not isinstance(policy, MonitoringPolicy):
-            raise TypeError("policy must be a MonitoringPolicy")
-        ws = self._staging
-        return self._stage(lambda state: ws._merge_monitoring_policy(state, policy))
 
     def register_run(self, definition: RunDefinition) -> bool:
         if not isinstance(definition, RunDefinition):

@@ -35,8 +35,6 @@ KINDS = (
     "agendas",
     "execution-inputs",
     "strategy-configs",
-    "valuation-configs",
-    "monitoring-policies",
     # The roster was registrable and unlistable: `list` covered eight kinds and not this one, so a
     # registered roster could not be inspected from the CLI at all.
     "instruments",
@@ -51,8 +49,6 @@ _ACCESSORS = {
     "agendas": "agendas",
     "execution-inputs": "execution_inputs",
     "strategy-configs": "strategy_configs",
-    "valuation-configs": "valuation_configs",
-    "monitoring-policies": "monitoring_policies",
     "runs": "run_definitions",
 }
 

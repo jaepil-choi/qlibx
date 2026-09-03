@@ -74,9 +74,7 @@ from vqapr.public import (
     register_component,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
     register_strategy_config,
-    register_valuation_config,
     run,
     shipped_constraint_path,
 )
@@ -809,8 +807,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     monitoring = MonitoringPolicy("show005-monitoring", OperationRole.MONITORING)
     register_strategy_config(project, alpha_config)
     register_strategy_config(project, index_config)
-    register_valuation_config(project, valuation_config)
-    register_monitoring_policy(project, monitoring)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")

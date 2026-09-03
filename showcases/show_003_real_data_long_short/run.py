@@ -59,9 +59,7 @@ from vqapr.public import (
     register_data_model,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
     register_strategy_config,
-    register_valuation_config,
     run,
 )
 
@@ -470,8 +468,6 @@ def main() -> None:
     )
     monitoring = MonitoringPolicy("showcase-monitoring", OperationRole.MONITORING)
     register_strategy_config(PROJECT, strategy_config)
-    register_valuation_config(PROJECT, valuation_config)
-    register_monitoring_policy(PROJECT, monitoring)
 
     definition = RunDefinition(
         run_id="show003",

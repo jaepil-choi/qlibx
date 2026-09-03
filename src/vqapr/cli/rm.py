@@ -35,8 +35,6 @@ DECLARATION_KINDS = {
     "component": "component",
     "agenda": "agenda",
     "strategy-config": "strategy_config",
-    "valuation-config": "valuation_config",
-    "monitoring-policy": "monitoring_policy",
     "run-definition": "run",
 }
 KINDS = (*RECORD_KINDS, *DECLARATION_KINDS)

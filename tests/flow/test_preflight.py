@@ -161,8 +161,6 @@ def _setup(
     )
     monitoring = MonitoringPolicy("monitoring", OperationRole.MONITORING)
     workspace.register_strategy_config(strategy)
-    workspace.register_valuation_config(valuation)
-    workspace.register_monitoring_policy(monitoring)
     # Same root as the tests' own `_execution_exchange` calls, so the shared
     # `execution-source` declaration stays byte-identical rather than conflicting.
     exchange_component = (

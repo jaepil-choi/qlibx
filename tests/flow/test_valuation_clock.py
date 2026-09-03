@@ -119,7 +119,7 @@ RUNNER = textwrap.dedent(
         LocalInstantDeclaration, OperationAgenda, OperationOccurrence, OperationRole,
         RunDefinition, SourceSpec, StrategyConfig, StrategyEntry, ValuationConfig,
         component_ref, preflight_run, register_agenda, register_component, register_dataset,
-        register_execution_input, register_strategy_config, register_valuation_config, run,
+        register_execution_input, register_strategy_config, run,
     )
 
     import authored_strategies
@@ -203,7 +203,6 @@ RUNNER = textwrap.dedent(
     )
     valuation_config = ValuationConfig("clock-valuation", OperationRole.VALUATION)
     register_strategy_config(root, strategy_config)
-    register_valuation_config(root, valuation_config)
 
     # By id, not by ref: a run is a registered document and the workspace resolves what it names
     # at preflight (record 139). Registering it is not needed for an in-process run.

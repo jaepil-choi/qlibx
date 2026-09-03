@@ -40,11 +40,9 @@ from vqapr.public import (
     register_component,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
     register_run,
     register_strategy_config,
     register_strategy_model,
-    register_valuation_config,
     run,
 )
 
@@ -183,10 +181,6 @@ def install(project_root: Path) -> SamplePanel:
         register_agenda(project_root, _agenda(agenda_id, role, at, sessions))
 
     register_strategy_config(project_root, _strategy(project_root))
-    register_valuation_config(project_root, _valuation())
-    register_monitoring_policy(
-        project_root, MonitoringPolicy(MONITORING_AGENDA, OperationRole.MONITORING)
-    )
     register_run(project_root, definition(panel))
     return panel
 

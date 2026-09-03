@@ -212,7 +212,6 @@ def workspace(tmp_path: Path) -> Path:
     space.register_strategy_config(
         StrategyConfig(space.component("model"), "early", OperationRole.STRATEGY_CALLBACK)
     )
-    space.register_valuation_config(ValuationConfig("valuing", OperationRole.VALUATION))
     Workspace.open(tmp_path).register_run(_definition())
     return tmp_path
 

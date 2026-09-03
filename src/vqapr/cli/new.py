@@ -20,10 +20,11 @@ scaffolded all four available kinds, filled them in, and ran got
 not documentation, it was that `vqapr new`'s own choice list was the de-facto index of what a
 declaration could contain, and it was incomplete.
 
-`agendas` therefore emits `agendas` + `strategy_configs` + `valuation_configs` in one file rather
-than three: a config binds a role to an agenda, so neither half is usable without the other, and
-splitting them would recreate the same "which other file was I supposed to write" question one
-level down.
+`agendas` therefore emits `agendas` + `strategy_configs` in one file rather than two: a config
+binds a strategy to an agenda, so neither half is usable without the other, and splitting them
+would recreate the same "which other file was I supposed to write" question one level down. (It
+emitted `valuation_configs` too until record `144` retired that section: an agenda's `role` says
+it is a valuation agenda, and the run's `valuation:` block says which one the run uses.)
 """
 
 from __future__ import annotations
@@ -182,7 +183,7 @@ agendas:
   # reason. Put valuation AFTER the execution instant instead -- 15:31 below -- so the first NAV
   # equals the initial cash exactly and each later one marks the close the run just filled at.
 
-  daily-valuation:                  # valuation usually runs on the same days as the strategy
+  daily-valuation:                  # named by the run's `valuation:` block (`vqapr new run`)
     role: valuation
     from_dataset: DATASET_ID
     at: "15:31"                     # after the 15:30 execution instant, not before it
@@ -192,14 +193,6 @@ strategy_configs:
   COMPONENT_ID:                     # component_id of a registered StrategyModel
     agenda_id: daily-rebalance      # the agenda above whose occurrences drive it; several
                                     # strategies may name one agenda -- a cadence is shared
-
-valuation_configs:
-  daily-valuation:                  # any identity; the agenda it names is what matters
-    agenda_id: daily-valuation
-
-# monitoring_policies:              # optional; only if the run declares `monitoring`
-#   default:
-#     agenda_id: daily-monitoring
 """
 
 _ACCOUNT_MODES = " or ".join(mode.name for mode in AccountMode)

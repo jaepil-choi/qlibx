@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
@@ -18,7 +17,6 @@ from vqapr.exchange.execution_table import ExecutionInputRegistration, Execution
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import StrategyConfig
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 # A span these tests supply directly. Persistence requires one, because the span is measured
@@ -439,15 +437,8 @@ def test_operation_declarations_round_trip_with_registered_references(tmp_path: 
     for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
         assert workspace.register_agenda(agenda) is True
     strategy = StrategyConfig(component, strategy_agenda.agenda_id, OperationRole.STRATEGY_CALLBACK)
-    valuation = ValuationConfig(
-        valuation_agenda.agenda_id,
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy(monitoring_agenda.agenda_id, OperationRole.MONITORING)
 
     assert workspace.register_strategy_config(strategy) is True
-    assert workspace.register_valuation_config(valuation) is True
-    assert workspace.register_monitoring_policy(monitoring) is True
     before = workspace.path.read_bytes()
     assert workspace.register_agenda(strategy_agenda) is False
     assert workspace.path.read_bytes() == before
@@ -455,8 +446,6 @@ def test_operation_declarations_round_trip_with_registered_references(tmp_path: 
     reopened = Workspace.open(tmp_path)
     assert reopened.agenda("strategy-agenda") == strategy_agenda
     assert reopened.strategy_config("strategy") == strategy
-    assert reopened.valuation_config("valuation-agenda") == valuation
-    assert reopened.monitoring_policy("monitoring-agenda") == monitoring
 
 
 def test_agenda_conflict_and_invalid_persisted_identity_leave_workspace_unchanged(

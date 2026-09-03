@@ -575,14 +575,10 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
 
-    valuation = workspace.valuation_config(definition.valuation.agenda_id)
-    if valuation != definition.valuation:
-        raise ValueError("valuation configuration reference drift")
-    monitoring = None
-    if definition.monitoring is not None:
-        monitoring = workspace.monitoring_policy(definition.monitoring.agenda_id)
-        if monitoring != definition.monitoring:
-            raise ValueError("monitoring policy reference drift")
+    # The run's own choice of agenda, role-checked when it is frozen below. There is no second
+    # copy to drift from since record `144` retired the two registry sections that restated it.
+    valuation = definition.valuation
+    monitoring = definition.monitoring
 
     # Unconditional: `_require_execution_authority` has already refused a definition without
     # them, so the universe and account checks below can no longer be skipped by omission.

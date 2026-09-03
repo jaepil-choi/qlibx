@@ -46,7 +46,6 @@ from vqapr.public import (
     register_dataset,
     register_execution_input,
     register_strategy_config,
-    register_valuation_config,
     run,
 )
 
@@ -274,7 +273,6 @@ def main() -> None:
     )
     valuation_config = ValuationConfig("showcase-valuation", OperationRole.VALUATION)
     register_strategy_config(PROJECT, strategy_config)
-    register_valuation_config(PROJECT, valuation_config)
 
     definition = RunDefinition(
         run_id="show001",

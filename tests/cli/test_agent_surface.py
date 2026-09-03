@@ -594,7 +594,6 @@ def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
         "execution_inputs",
         "agendas",
         "strategy_configs",
-        "valuation_configs",
     ):
         assert f"{section}:" in emitted, f"no template emits a {section} section"
 
@@ -650,7 +649,6 @@ def test_an_agendas_template_registers_after_its_placeholders_are_filled(
 
     assert code == 0, payload
     assert sorted(payload["registered"]["agendas"]) == ["daily-rebalance", "daily-valuation"]
-    assert payload["registered"]["valuation_configs"] == ["daily-valuation"]
 
 
 def test_the_run_template_says_naming_an_agenda_is_not_binding_it(tmp_path: Path) -> None:

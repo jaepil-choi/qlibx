@@ -281,11 +281,9 @@ __all__ = (
     "register_dataset",
     "register_exchange",
     "register_execution_input",
-    "register_monitoring_policy",
     "register_run",
     "register_strategy_config",
     "register_strategy_model",
-    "register_valuation_config",
     "rescale",
     "returns",
     "run",
@@ -343,11 +341,3 @@ def register_strategy_config(project_root: str | Path, config: StrategyConfig) -
 def register_run(project_root: str | Path, definition: RunDefinition) -> bool:
     """Register a run: the reusable configuration `vqapr run <run-id>` executes (record `139`)."""
     return Workspace.create(project_root).register_run(definition)
-
-
-def register_valuation_config(project_root: str | Path, config: ValuationConfig) -> bool:
-    return Workspace.create(project_root).register_valuation_config(config)
-
-
-def register_monitoring_policy(project_root: str | Path, policy: MonitoringPolicy) -> bool:
-    return Workspace.create(project_root).register_monitoring_policy(policy)

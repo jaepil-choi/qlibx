@@ -97,8 +97,6 @@ def workspace(tmp_path: Path) -> Workspace:
         space.register_strategy_config(
             StrategyConfig(space.component(name), "rebalance", OperationRole.STRATEGY_CALLBACK)
         )
-    space.register_valuation_config(ValuationConfig("valuing", OperationRole.VALUATION))
-    space.register_monitoring_policy(MonitoringPolicy("watching", OperationRole.MONITORING))
     execution = tmp_path / "execution.parquet"
     execution.write_bytes(b"")
     space.register_execution_input(
@@ -183,7 +181,7 @@ def test_a_run_holds_what_it_names_so_removal_is_refused_by_name(workspace: Work
     )
     assert workspace.references_to("component", "no-short") == ("run 'krx-2024'",)
     assert workspace.references_to("component", "venue") == ("run 'krx-2024'",)
-    assert workspace.references_to("agenda", "valuing") == ("run 'krx-2024'", "valuation config 'valuing'")
+    assert workspace.references_to("agenda", "valuing") == ("run 'krx-2024'",)
     assert workspace.references_to("strategy_config", "ou-k0") == ("run 'krx-2024'",)
     assert workspace.references_to("run", "krx-2024") == (), "nothing names a run"
     with pytest.raises(VqaprError, match="referenced"):

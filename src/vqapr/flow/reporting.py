@@ -13,8 +13,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.weight")
-"""The three tables every strategy records, which nobody declares and which are not news."""
+FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.monitoring", "vqapr.weight")
+"""The tables the package records on a strategy's behalf, which nobody declares.
+
+The first three every strategy writes. `vqapr.monitoring` is written only by a run that declared
+a constraint and a monitoring agenda -- a run with neither has no finding to record -- but it is
+the package's table either way, so it is listed here rather than mistaken for one an author formed.
+"""
 
 
 FILL_TABLE = "vqapr.fill"

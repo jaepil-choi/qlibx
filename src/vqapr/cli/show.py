@@ -85,7 +85,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "read one of the strategy's recorded tables back instead of its record "
-            "(vqapr.account, vqapr.fill, vqapr.weight, or a table the model formed)"
+            "(vqapr.account, vqapr.fill, vqapr.monitoring, vqapr.weight, or a table the model "
+            "formed)"
         ),
     )
     parser.add_argument(

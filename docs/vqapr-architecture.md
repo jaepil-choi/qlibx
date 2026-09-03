@@ -4664,11 +4664,13 @@ run"*(`cli/run.py:385`).
     vqapr.account.jsonl     측정 — mark, 그리고 NAV의 원천
     vqapr.weight.jsonl      결정 — 목표 비중
     vqapr.fill.jsonl        체결 — 미체결도 사유와 함께
+    vqapr.monitoring.jsonl  판정 — 선언된 제약이 committed account에서 잰 값과 그때의 한도 (기록 140)
     <author>.<table>.jsonl  저자가 선언한 진단 표 (signal이 사는 곳)
 ```
 
-- `FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.weight")`(`flow/reporting.py:14`) — 모든
-  run이 남기고 아무도 선언하지 않는 셋.
+- `FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.monitoring", "vqapr.weight")`
+  (`flow/reporting.py`) — 패키지가 남기고 아무도 선언하지 않는 넷. 앞의 셋은 모든 run이 남기고,
+  `vqapr.monitoring`은 제약과 monitoring agenda를 선언한 run만 남긴다 (기록 `140`).
 - **unfill이 사유와 함께 남는다.** `ZeroDealtReason`(`exchange/fills.py:13`)이
   `ABSENT`/`NONTRADABLE`/`NO_TRADE`/`UNFUNDED` 넷이고, 마지막 하나는 **시장이 거절한 것이 아니라 내
   지갑이 빈 것**이라 따로 이름이 있다 — 앞의 셋을 합산해 *"시장이 무엇을 거절했나"*를 묻는 독자에게

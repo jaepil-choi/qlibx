@@ -17,13 +17,14 @@ from __future__ import annotations
 from vqapr.flow.simulation import DEFAULT_TABLE_PREFIX, DEFAULT_TABLES
 
 ACCOUNT = f"{DEFAULT_TABLE_PREFIX}account"
+MONITORING = f"{DEFAULT_TABLE_PREFIX}monitoring"
 
 
 def _spec(table_id: str):
     return next(spec for spec in DEFAULT_TABLES if spec.table_id == table_id)
 
 
-def test_the_package_owns_exactly_three_default_tables() -> None:
+def test_the_package_owns_exactly_four_default_tables() -> None:
     """A `vqapr.decision_account` briefly stood beside these and was removed.
 
     It held the cash and positions a callback saw before deciding, on the argument that this is a
@@ -31,11 +32,15 @@ def test_the_package_owns_exactly_three_default_tables() -> None:
     identical to this table's -- the same series offset by one commit -- its only unique row was
     the initial account, which `FrozenRun` already carries, and nothing read it. Machinery whose
     only user is its own test is not a feature.
+
+    `vqapr.monitoring` is the fourth (record `140`): what each declared constraint measured on the
+    committed account, which until then reached the record only as a count.
     """
     assert {spec.table_id for spec in DEFAULT_TABLES} == {
         f"{DEFAULT_TABLE_PREFIX}weight",
         ACCOUNT,
         f"{DEFAULT_TABLE_PREFIX}fill",
+        MONITORING,
     }
 
 
@@ -50,9 +55,16 @@ def test_the_account_table_carries_what_dates_a_measurement() -> None:
     assert {"nav", "observed_at", "price"} <= fields
 
 
-def test_every_default_row_is_keyed_by_instrument() -> None:
+def test_every_default_row_is_keyed_by_its_subject() -> None:
+    """The three tables about the book are keyed by instrument; the one about rules, by rule.
+
+    A monitoring finding is one constraint's verdict over the whole account -- the names that
+    breached are a field on it, not its key -- so keying it by instrument would either fabricate
+    a synthetic identity or repeat one worst-case measurement under each offender's name.
+    """
     for spec in DEFAULT_TABLES:
-        assert "instrument" in spec.fields
+        key = "constraint" if spec.table_id == MONITORING else "instrument"
+        assert key in spec.fields, spec.table_id
 
 
 def test_the_fill_table_records_the_category_it_charged() -> None:

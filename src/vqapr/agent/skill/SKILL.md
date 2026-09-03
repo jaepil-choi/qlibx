@@ -199,6 +199,16 @@ through `self.recorder`, and writing to an undeclared one refuses mid-run:
 - **`vqapr.weight`** -- the intended allocation per evaluation, before execution. `instrument`,
   `weight`.
 
+A run that declared constraints and a monitoring agenda records a fourth:
+
+- **`vqapr.monitoring`** -- what each declared constraint measured on the committed account at
+  each monitoring occurrence. `constraint` (the rule's id), `passed`, `measured`, `bound`,
+  `excess`, `offenders` (the breaching instrument ids, space-separated; empty when none),
+  `account_version`. `event_time` is the monitoring cutoff. **This is the table compliance
+  questions are asked of** -- the strategy record's `contract` block only counts how often each
+  constraint held; which name breached which limit by how much is here, one row per constraint
+  per occurrence.
+
 Every row of every table also carries the same five envelope fields: `run_id`, `producer_id`,
 `stage`, `event_time` and `sequence` -- which run wrote it, what wrote it, at what point, when the
 fact happened, and in what order. A table cannot declare one of these as a column of its own.

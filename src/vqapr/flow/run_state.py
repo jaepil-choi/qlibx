@@ -27,6 +27,7 @@ class LifecycleKind(StrEnum):
     ACCEPTED_INTENT = "ACCEPTED_INTENT"
     ACCOUNT_COMMITTED = "ACCOUNT_COMMITTED"
     MARKED = "MARKED"
+    MONITORED = "MONITORED"
     FEEDBACK_PUBLISHED = "FEEDBACK_PUBLISHED"
 
 
@@ -591,6 +592,50 @@ class RunStateRepository:
         )
 
     def publish_standalone_valuation(self, prepared: PreparedRunState) -> AcceptedRunState:
+        return self._publish_infallible(prepared)
+
+    def prepare_monitoring(
+        self, *, recorder: InvocationRecorder, evidence: object = None
+    ) -> PreparedRunState:
+        """Publish the findings one monitoring occurrence made over the committed account.
+
+        A monitoring occurrence changes nothing it observes: no fill, no mark, no decision, and
+        the pending slot is left exactly as found for the same reason a standalone valuation
+        leaves it. What it adds is rows -- one per constraint, saying what was measured against
+        which limit -- and until this path existed those rows had nowhere to go. The report sat
+        on the occurrence trace, the record counted it (`contract`), and the values themselves
+        never reached disk: a run whose book breached a limit could say *that* it did, and not
+        *by how much*.
+        """
+        if not isinstance(recorder, InvocationRecorder):
+            raise TypeError("recorder must be an InvocationRecorder")
+        root = self._root
+        chunks = dict(root._recorder_chunks)
+        new_rows = self._stage_rows(chunks, recorder.staged_rows())
+        return PreparedRunState(
+            root.version,
+            AcceptedRunState(
+                version=root.version + 1,
+                _model_states=root._model_states,
+                _payloads=root._payloads,
+                _verified=root._verified,
+                current_model_state_ref=root.current_model_state_ref,
+                account=root.account,
+                pending_accepted_intent=root.pending_accepted_intent,
+                lifecycle_trace=(
+                    *root.lifecycle_trace,
+                    LifecycleTrace(LifecycleKind.MONITORED, evidence),
+                ),
+                recorder_manifests=root.recorder_manifests + recorder.manifests(),
+                _recorder_chunks=chunks,
+                feedback=root.feedback,
+                finalization=root.finalization,
+                model_state_commit_count=root.model_state_commit_count,
+            ),
+            new_rows,
+        )
+
+    def publish_monitoring(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
     def prepare_feedback(

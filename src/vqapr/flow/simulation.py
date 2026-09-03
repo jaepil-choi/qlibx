@@ -308,6 +308,14 @@ DEFAULT_TABLES = (
         f"{DEFAULT_TABLE_PREFIX}account",
         ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
     ),
+    # One row per declared constraint per monitoring occurrence: which rule, the limit it held
+    # the book to, the value it measured, and the names that breached. PRD 7.1 asks a breach to
+    # leave exactly those behind, and the `contract` block of the strategy record only ever
+    # counted them -- `held` and `checked` say how often, not what or by how much.
+    TableSpec(
+        f"{DEFAULT_TABLE_PREFIX}monitoring",
+        ("constraint", "passed", "measured", "bound", "excess", "offenders", "account_version"),
+    ),
 
     TableSpec(
         f"{DEFAULT_TABLE_PREFIX}fill",
@@ -1389,9 +1397,46 @@ class SimulationFlow:
             report=report,
             root_version=self._state.current.version,
         )
+        if report.findings:
+            self._record_findings(occurrence, report)
         return OccurrenceTrace(
             occurrence, MonitoringResult(valuation, report, evidence), self._state.current
         )
+
+    def _record_findings(self, occurrence: OperationOccurrence, report: ConstraintReport) -> None:
+        """Write what monitoring measured into the package's own table, and publish it.
+
+        Through the same accept funnel as a valuation's rows, so a run with a store streams
+        these to disk as each occurrence passes and a run killed midway keeps every finding it
+        made. A run that declared no constraint writes nothing here rather than an empty
+        occurrence: there is no finding to record, and a lifecycle entry saying so would be
+        noise on every monitoring day.
+
+        `event_time` is the monitoring cutoff -- when the account was judged -- and `offenders`
+        is the breaching names joined by a single space, which no instrument id may contain, so
+        a reader splits on it without a quoting rule.
+        """
+        recorder = InvocationRecorder(
+            DEFAULT_TABLES,
+            run_id=self._frozen_run.identity,
+            producer_id=str(self._layer.config.component.component_id),
+            stage=occurrence.role.value,
+            event_time=occurrence.evaluation_time,
+        )
+        for finding in report.findings:
+            recorder.append(
+                f"{DEFAULT_TABLE_PREFIX}monitoring",
+                {
+                    "constraint": finding.constraint_id,
+                    "passed": finding.passed,
+                    "measured": finding.measured,
+                    "bound": finding.bound,
+                    "excess": finding.excess,
+                    "offenders": " ".join(finding.offenders),
+                    "account_version": report.account_version,
+                },
+            )
+        self._state.publish_monitoring(self._state.prepare_monitoring(recorder=recorder))
 
     def _dispatch_callback(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         current_ref, before, payload_before = self._guard(

@@ -23,6 +23,7 @@ impossible rather than merely inconvenient:
     tables/
       vqapr.account.jsonl  one file per recorded table, appended in chunks as the run proceeds
       vqapr.weight.jsonl
+      vqapr.monitoring.jsonl  when the run declared constraints: one row per rule per occurrence
       factor.membership.jsonl
 ```
 

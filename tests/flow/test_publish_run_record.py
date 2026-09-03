@@ -312,9 +312,11 @@ def test_the_defaults_need_no_declaration() -> None:
         "vqapr.weight",
         "vqapr.account",
         "vqapr.fill",
+        "vqapr.monitoring",
     }
     for spec in DEFAULT_TABLES:
-        assert "instrument" in spec.fields, "every default row is keyed by instrument"
+        key = "constraint" if spec.table_id == "vqapr.monitoring" else "instrument"
+        assert key in spec.fields, "every default row is keyed by its subject"
     # The account table carries the valuation the Account already committed, not one invented at
     # decision time. A callback has no marks of its own, so the NAV recorded here is the previous
     # commit's -- the number the Strategy actually saw. This is what makes the run reconstructable

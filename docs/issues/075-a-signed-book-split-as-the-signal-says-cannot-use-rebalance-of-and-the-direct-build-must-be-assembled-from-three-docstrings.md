@@ -1,6 +1,12 @@
 # 075 -- a signed book split as the signal says cannot use `Rebalance.of`, and the direct build must be assembled from three docstrings
 
-**Status:** open. Found 2026-09-04 by the scenario testbed run 4
+**Status:** **CLOSED 2026-09-04 by record `154`** (one-shape campaign Step 3). `Rebalance.signed(
+weights, *, gross=1)` builds the market-neutral residual book from signed weights, splitting
+long/short exactly as the signal produced them (`gross=2` is the textbook $1/$1 book `of` cannot
+reach). `of` now calls `portfolio.weighting.rescale` instead of carrying a second copy of it, which
+made its gross exposure exact — the old book-wide settle let a short side's crumb land on a long
+name. `Budget`'s docstring names both budgets as numbers, `Rebalance`'s lists the three ways in,
+and `SKILL.md` carries `signed`. Found 2026-09-04 by the scenario testbed run 4
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-002**, with the cause half of **F-010**),
 against `vqapr-0.4.0`. Confirmed against source 2026-09-04. This is the gap `071`'s last bullet
 names in passing ("that gap is the reason the author met this refusal at all"), filed on its own

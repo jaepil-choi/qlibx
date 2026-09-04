@@ -494,6 +494,17 @@ package's arithmetic, not yours. You never make weights sum to one by hand.
 A short is declared by **which mapping** a name appears in, never by a negative number:
 `short={"A": 2}` means twice as short. Passing both sides makes the book signed automatically.
 
+`of` splits `invested` **evenly** between the two sides, so it tops out at half a textbook
+$1-long/$1-short book and cannot say "more shorts than longs". When the signal decides the split,
+use `Rebalance.signed(weights, gross=1)` instead: weights are **signed** there (a negative number
+IS the short), `gross` is the sum of absolute weights, and the long/short ratio comes out exactly
+as the signal produced it. `gross=2` is the textbook $1/$1 book. Cash is the net residual either
+way, so a dollar-neutral book has cash 1.
+
+```python
+return va.Rebalance.signed({"A": 0.8, "B": 0.2, "C": -1.0})   # 0.5 long, 0.5 short
+```
+
 Return `Hold(reason="...")` to decline. The reason is prose a human reads -- spaces are fine,
 and only an empty string is refused.
 

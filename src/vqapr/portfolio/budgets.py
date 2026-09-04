@@ -29,6 +29,24 @@ class Budget:
     The declaration is a value, not a strategy-owned mutable configuration.  It
     therefore travels with the intent and is independently checked at the Flow
     boundary.
+
+    **The two budgets the authoring constructors make, as numbers** -- named here because an
+    author building a `Rebalance` directly had to reconstruct them from a sentence inside
+    `Rebalance.of`'s docstring (`docs/issues/075`):
+
+    ```python
+    Budget(direction=PortfolioDirection.LONG_ONLY,   # Rebalance.of with no `short=`
+           cash_lower=Decimal(0),  cash_upper=Decimal(1),
+           target_lower=Decimal(0), target_upper=Decimal(1))
+
+    Budget(direction=PortfolioDirection.SIGNED,      # Rebalance.of with `short=`, and .signed
+           cash_lower=Decimal(-1), cash_upper=Decimal(2),
+           target_lower=Decimal(-1), target_upper=Decimal(1))
+    ```
+
+    `cash_upper` is 2 on a signed book and not 1 because **selling short raises cash**: a book
+    that is only short holds more than its NAV in cash, by exactly what it shorted. Pinning it at
+    1 refused every short-only book, naming cash when the bound was what was wrong.
     """
 
     direction: PortfolioDirection

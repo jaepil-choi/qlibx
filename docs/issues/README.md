@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 77개 파일이 있고 **74개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 77개 파일이 있고 **75개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,14 +15,14 @@
 
 ---
 
-## 1. 열린 것 — 셋 (`023`·`027`·`075`)
+## 1. 열린 것 — 둘 (`023`·`027`)
 
 | # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`는 record `139`로 닫혔다(기록 쪽); 선언 시점에 묻는 쪽은 남아 있다 | 남은 절반 |
 
-### 시나리오 testbed run 4가 낸 넷 (2026-09-04, `0.4.0` wheel — 논문 재현 완주) — `075`만 남았다
+### 시나리오 testbed run 4가 낸 넷 (2026-09-04, `0.4.0` wheel — 논문 재현 완주) — 전부 닫혔다
 
 같은 testbed에서 네 번째 에이전트가 **같은 고정 명세**(FF residual arm, `K ∈ {0,1,3,5}` × {OU+Thresh,
 Fourier+FFN})를 `vqapr-0.4.0` wheel(`0d6e6d59`, record `149` 이전 빌드)로 **끝까지 수행**하며 적은
@@ -35,7 +35,7 @@ status를 보고하며 한 전략의 거절이 나머지를 멈추지 않고, `l
 
 | # | 제목 | 상태 | kind | testbed |
 |---|---|---|---|---|
-| `075` | 신호가 정한 대로 나뉜 signed book은 `Rebalance.of`로 못 만들고, 직접 생성은 docstring 셋을 조립해야 한다 | **열림 2026-09-04.** `of`의 구현 주석(`authoring.py:647-655`)이 `1.000000000001` 잔차를 정확히 알고 book에 settle하는데, 직접 경로는 그것을 저자에게 남기고 말하지 않는다. `071`의 원인 절반, `018`의 다음 단계 | docs/API | F-002 (+F-010 원인) |
+| `075` | 신호가 정한 대로 나뉜 signed book은 `Rebalance.of`로 못 만들고, 직접 생성은 docstring 셋을 조립해야 한다 | **닫힘 2026-09-04 — record `154`.** `Rebalance.signed(weights, *, gross=1)`가 부호 있는 가중치를 받아 long/short 비율을 신호가 정한 대로 둔다(`gross=2`가 교과서 $1/$1). `of`는 `rescale`을 부르고, 그 결과 gross가 정확해졌다 — 전엔 short 쪽 잔차가 long 이름에 얹혔다. `Budget`·`Rebalance` docstring과 skill이 값을 댄다 | docs/API | F-002 (+F-010 원인) |
 | `076` | preflight가 fresh instance의 payload를 왕복시키는데 docstring도 거절도 그것을 말하지 않는다 | **닫힘 2026-09-04 — record `152`.** 세 단계가 각자 이름을 대고(`save_payload on a fresh instance` / `load_payload of those bytes on a second fresh instance` / `save_payload again`), `preflight_refusal`이 `__cause__` 사슬을 `observed`에 싣고, `run`이 preflight `ValueError`를 `check`의 stage·code로 낸다(`unhandled` 아님). docstring 둘과 skill이 왕복을 말한다 | message/docs | F-004 |
 
 ### 시나리오 testbed run 3이 낸 둘 (2026-09-04, `0.3.0`에서 관측, `0.4.0`에서 코드 동일) — 전부 닫혔다
@@ -153,6 +153,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 | `050` | CLOSED 2026-09-01 |
 | `055` `056` `057` `060` `062` `063` `066` `067` `068` `069` `070` | **record `149`, 2026-09-04, 한 브랜치.** skill이 코드를 따라간다(`062`·`067`), scaffold alias가 dataset을 따른다(`063`), 미등록 dataset은 한 번만 보고(`056`), 없는 record는 이름을 대며 거절(`057`), 모든 envelope에 `workspace_root`와 상위 workspace 발견 시 거절(`066`), `show model`은 모델의 선언을 읽는다(`055`), `vqapr rm dataset`(`060`), 파생 agenda는 날짜로 먼저 자르고 명령당 한 번(`069`), `run`은 workspace를 한 번 연다(`070`), snapshot은 Arrow이고 기록에 `timing` 블록(`068`) |
 | `072` | record `151` — `PanelWindow.current()`, 한 모양 캠페인 Step 1 |
+| `075` | record `154` — signed book이 신호대로 나뉜다(`Rebalance.signed`), `of`는 `rescale`을 부른다, 한 모양 캠페인 Step 3 |
 | `077` | record `153` — 답하지 못한 판정은 통과가 아니다(agenda는 호출로, `datasets`는 멤버당 판정, helper의 `try` 다섯 제거), 한 모양 캠페인 Step 2b |
 | `076` | record `152` — preflight 거절 문 하나(단계 이름·`__cause__` 사슬·`run`도 `check`의 stage), 한 모양 캠페인 Step 2 |
 | `065` | docs 절반 record `149`; 설계 절반 **2026-09-04 소유자 판정 — 전략 하나 = 파일 하나**, config 채널 없음 (한 모양 캠페인 A1) |

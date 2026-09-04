@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 77개 파일이 있고 **73개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 77개 파일이 있고 **74개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,13 +15,12 @@
 
 ---
 
-## 1. 열린 것 — 넷 (`023`·`027`·`075`·`077`)
+## 1. 열린 것 — 셋 (`023`·`027`·`075`)
 
 | # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`는 record `139`로 닫혔다(기록 쪽); 선언 시점에 묻는 쪽은 남아 있다 | 남은 절반 |
-| `077` | 답하지 못한 판정이 `passed`로 보고된다 — helper가 dispatcher의 `blocked`보다 먼저 삼킨다 | **열림 2026-09-04.** `try` 전수조사(153지점)가 냈다. `judgments.py`의 helper 다섯이 예외를 dispatcher wrapper 전에 잡아 빈 리스트를 돌려주고, `check`는 그것을 통과로 읽는다. 두 원인으로 재현: `passed`에 `judgments`가 있는데 AC-C5(이슈 `015`의 그 판정)가 아예 안 돌았고 `blocked`는 비어 있다. 런은 preflight가 막지만 그 결합을 고정하는 테스트가 없다 | 명사 3 (Run) |
 
 ### 시나리오 testbed run 4가 낸 넷 (2026-09-04, `0.4.0` wheel — 논문 재현 완주) — `075`만 남았다
 
@@ -154,6 +153,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 | `050` | CLOSED 2026-09-01 |
 | `055` `056` `057` `060` `062` `063` `066` `067` `068` `069` `070` | **record `149`, 2026-09-04, 한 브랜치.** skill이 코드를 따라간다(`062`·`067`), scaffold alias가 dataset을 따른다(`063`), 미등록 dataset은 한 번만 보고(`056`), 없는 record는 이름을 대며 거절(`057`), 모든 envelope에 `workspace_root`와 상위 workspace 발견 시 거절(`066`), `show model`은 모델의 선언을 읽는다(`055`), `vqapr rm dataset`(`060`), 파생 agenda는 날짜로 먼저 자르고 명령당 한 번(`069`), `run`은 workspace를 한 번 연다(`070`), snapshot은 Arrow이고 기록에 `timing` 블록(`068`) |
 | `072` | record `151` — `PanelWindow.current()`, 한 모양 캠페인 Step 1 |
+| `077` | record `153` — 답하지 못한 판정은 통과가 아니다(agenda는 호출로, `datasets`는 멤버당 판정, helper의 `try` 다섯 제거), 한 모양 캠페인 Step 2b |
 | `076` | record `152` — preflight 거절 문 하나(단계 이름·`__cause__` 사슬·`run`도 `check`의 stage), 한 모양 캠페인 Step 2 |
 | `065` | docs 절반 record `149`; 설계 절반 **2026-09-04 소유자 판정 — 전략 하나 = 파일 하나**, config 채널 없음 (한 모양 캠페인 A1) |
 | `064` | **CLOSED 2026-09-04 — WON'T FIX, 소유자 판정.** 종가 데이터로 그 종가에 거래하는 것은 look-ahead다. 체결은 콜백보다 strictly 늦다는 규칙이 의도이며 `same_close`는 만들지 않는다. 다시 열지 말 것 |

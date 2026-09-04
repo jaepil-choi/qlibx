@@ -127,8 +127,18 @@ one snapshot per session -- was already record `148`'s.
 
 ## Validation
 
-- `uv run ruff check src/` — clean.
-- Targeted suites per milestone, green (see the ExecPlan
-  `.agent/plans/active/close-the-0.4.0-open-issues.md`).
-- `PYTHONUTF8=1 uv run pytest tests/ -q -m ""` — see the branch's final commit message for the
-  count.
+- `uv run ruff check src/` — clean at every commit.
+- Targeted suites per milestone, green.
+- `PYTHONUTF8=1 uv run pytest tests/ -q -m ""` — **1398 passed** at dca52121 (702 s). The run
+  before it, at 42146d1c, had six failures: five tests that pinned the contracts this branch
+  changed (the deferred-import ceiling, `_roster_envelope`'s argument and its `stale` branch,
+  the strategy record's field set), updated in dca52121, and one load-induced flake in
+  `tests/qa/test_run_records_survive_and_race.py` that passes alone and in the final run.
+- New tests: `tests/cli/test_the_skill_matches_the_code_it_ships_with.py`,
+  `tests/extension/test_the_scaffold_names_its_alias_after_the_dataset.py`,
+  `tests/flow/test_a_missing_record_is_refused_by_name.py`,
+  `tests/cli/test_a_refusal_names_the_workspace_it_looked_in.py`,
+  `tests/cli/test_show_model_reads_the_models_own_declarations.py`,
+  `tests/cli/test_rm_dataset_withdraws_a_registration.py`, and one test each in
+  `tests/cli/test_check.py` (`056`), `tests/flow/test_preflight.py` (`069`) and
+  `tests/cli/test_commands.py` (`070`, `068`).

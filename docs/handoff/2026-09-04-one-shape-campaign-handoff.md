@@ -1,4 +1,4 @@
-# Handoff — 한 모양 캠페인, 2026-09-04 세션 종료 시점
+# Handoff — 한 모양 캠페인, 2026-09-04 세션 종료 시점 (갱신: Step 2·2b 병합)
 
 **받는 사람:** 다음 세션의 에이전트. 이 문서와 저장소만으로 이어서 할 수 있게 썼다. 채팅 이력은 없다.
 **계획 문서:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md` (왜·무엇·순서). **살아 있는 상태:**
@@ -10,12 +10,18 @@
 
 | | |
 |---|---|
-| `develop` | **`aded3145` — Step 0·Step 1 병합됨.** fast **1,388 passed / 22 deselected**. 그 앞은 `dd55822b`(attempts/ 제거), `8138f027`(0.4.1 stepper) |
-| 브랜치 | 없음 — 다음은 `step-02-076-one-preflight-door` |
-| baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected**. Step 0 브랜치도 1,387 passed |
+| `develop` | **`a15df2f9` — Step 0·1·2·2b 병합됨.** fast **1,400 passed / 22 deselected** |
+| 브랜치 | 없음 — 다음은 `step-03-075-signed-book` |
+| baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
+| record 번호 | 다음은 **`154`**. 캠페인 문서의 계획 번호도 154–158로 밀렸다 |
+| 열린 이슈 | **셋** — `023`·`027`·`075` (77파일 / 74닫힘) |
 
-**첫 행동:** `git checkout develop && git checkout -b step-02-076-one-preflight-door`, 그리고 §3 Step 2.
+**첫 행동:** `git checkout develop && git checkout -b step-03-075-signed-book`, 그리고 §3 Step 3.
+
+> **§3의 Step 번호와 record 번호는 이 갱신 전에 쓰인 것이다.** Step 2는 닫혔고(record `152`),
+> 캠페인은 그 뒤에 Step **2b**(`077`, record `153`)를 얻었다. §3 Step 3 이후의 record 번호에
+> 각각 1을 더해 읽는다: 3→`154`, 4→`155`, 5→`156`, 6→`157`. 손 위치 자체는 그대로 유효하다.
 
 ## 1. 소유자 결정 (2026-09-04, 전부 확정 — 다시 묻지 말 것)
 
@@ -31,11 +37,46 @@
 
 - **Step 0** (`5bc05103`): `models/` 패키지 삭제 → `src/vqapr/calls.py`(contexts+observations), `src/vqapr/domain/memory.py`; shim 셋·`flow/views.py`·`data/stores/` 삭제; `065` 판정을 이슈 파일·ledger·`SKILL.md`(3번 항목 "One strategy is one file")에 기록. record 없음(harness/docs).
 - **Step 1** (`f55dc610`, 브랜치): `PanelWindow.current()` (`src/vqapr/data/panel.py`), `latest()` docstring, `authoring.py`의 `read()` docstring 셋, `SKILL.md`, scaffold 둘. record `151`. `072` CLOSED, ledger 72/76.
+- **Step 2** (`1fc97286` 병합, record `152`): preflight 거절 문 하나 —
+  `cli/run.py::preflight_refusal`이 `__cause__` 사슬을 `observed`에 싣고(4홉 상한),
+  `_validate_initial_model_state`가 세 단계 각각의 이름을 대고, `run`이 `preflight_run`을 `try`
+  안에서 불러 `check`의 stage·code로 낸다. `076` CLOSED. fast 1,393 passed.
+- **Step 2b** (`a15df2f9` 병합, record `153`): 소유자가 요청한 `try`/`except` 전수조사(153지점)가
+  낸 `077`. `flow/judgments.py`의 helper 다섯이 dispatcher의 `blocked` wrapper보다 먼저 잡던 것을
+  전부 제거 — agenda는 값이 아니라 **호출**(`_agenda_once`), `datasets`는 **멤버당 판정 하나**
+  (`datasets[<component-id>]`), `_instant`는 없는 값에만 `None`. `VqaprError`가 이 모듈에서
+  import되지 않는다. `077` CLOSED. fast 1,400 passed.
 - `.agent/project.yaml`의 `active_campaign`이 새 캠페인 문서를 가리킨다.
+
+## 2.5 소유자 결정 D7 (2026-09-04, Step 2b에서)
+
+판정이 답하지 못했고 preflight가 **같은** 결함을 거절할 때, envelope은 **둘 다** 싣는다 —
+"이 질문은 던지지 못했다"(blocked 한 줄)와 "이게 잘못됐다"(preflight 거절 한 줄). 서로 다른
+진술이기 때문이다. 결함 하나에 항목 둘이 나오는 것이 받아들인 비용이다. helper의 `try` 다섯이
+존재한 이유가 정확히 앞쪽을 억제하려는 것이었다.
+`tests/cli/test_a_judgment_that_could_not_look_is_not_passed.py`가 양쪽 절반을 고정한다.
+
+## 2.6 전수조사가 남긴 것 — 고치지 않은 셋
+
+`077` 마지막 절에 기록만 해뒀다. 같은 모양이지만 작다.
+
+- `extension/loading.py:198` `accepts_contract_call`이 introspect 실패 시 **`True`**를 돌려준다
+  (fail-open). `testing/conformance/runner.py:150`도 같은 경우 `continue`.
+- `data/store.py:96` `except TypeError: return grid[0]` — 창을 테이블 전체로 넓힌다. 형제인
+  `data/scan.py:1039`는 같은 TypeError에 답을 지어내지 않고 정답 경로로 넘긴다. **CLI 경로로는
+  도달 불가**(preflight가 naive `available_at`을 먼저 거절)라 방향만 틀린 방어 코드.
+- `agent/sample/build.py:115` `except ValueError: continue` — 거래대금 파싱 실패로 유동성 랭킹이
+  아래로 편향된다.
+
+나머지 감사는 깨끗했다: bare `except:` **0건**, `except BaseException` 3건은 전부 cleanup 후
+재-raise, `contextlib.suppress` 10건은 전부 cleanup·락 위생이고 각자 이유가 적혀 있다.
 
 ## 3. 다음 단계 — 정확한 손 위치
 
-### Step 2 — `076`: preflight 거절 렌더 한 곳 (record `152`, 브랜치 `step-02-076-one-preflight-door`)
+### ~~Step 2 — `076`~~ — **완료**, record `152`. 아래는 당시의 계획으로, 기록으로만 남긴다.
+
+<details>
+<summary>Step 2 원 계획 (닫힘)</summary>
 
 문제: `cli/check.py:214 _from_python`은 `f"{type(error).__name__}: {error}"`만 쓰고 `__cause__`를 버린다.
 `cli/run.py:174`는 `preflight_run(workspace, definition)`을 `try` **밖**에서 불러 같은 `ValueError`가
@@ -62,7 +103,9 @@ load → save)를 상수 문자열 하나로 감싼다.
 6. `tests/characterization/refusal_codes.py`(refusal-code inventory)가 코드 상수 폴딩을 본다 — `_from_python`을
    옮기면 그 inventory 테스트를 다시 돌려 확인.
 
-### Step 3 — `075`: `Rebalance.of`/`.signed`가 `rescale`을 부른다 (record `153`)
+</details>
+
+### Step 3 — `075`: `Rebalance.of`/`.signed`가 `rescale`을 부른다 (record `154`) ← **다음 손**
 
 - `src/vqapr/authoring.py:573-720` `Rebalance.of`. 647-690의 quantise+settle 블록이
   `src/vqapr/portfolio/weighting.py:161 rescale(weights, long=, short=, grid=QUANTUM)`의 사본이다.
@@ -182,6 +225,10 @@ import하는 순환은 둘 다 `FlowContext`만 보게. 확인 대상: `run_stat
 
 - **bash 한 명령에 heredoc 둘**(python 편집 스크립트 + `cat >>`)은 파싱 실패로 **아무것도 실행되지 않는다.**
   편집 스크립트는 scratchpad 파일로 쓰고(`Write`) 실행; 테스트 추가는 heredoc 하나만.
+- 긴 heredoc 하나도 파싱에 실패한다(2026-09-04에 ~120줄 마크다운에서 재발, 파일이 아예 안 생겼다).
+  **긴 파일은 `Write`로 쓴다.** `cat > f <<'EOF'`가 조용히 아무것도 안 만들 수 있으니 `ls`로 확인할 것.
+- 백그라운드로 띄운 pytest는 **띄운 시점의 트리**를 수집한다. 그 뒤에 테스트를 고치면 그 실행 결과는
+  못 쓴다 — 다시 돌린다. 파이프(`| grep`)를 물리면 notification의 exit code는 pytest가 아니라 grep 것이다.
 - 한글은 tool 인자에 **리터럴 UTF-8**로(AGENTS.md 비ASCII 절). `PYTHONUTF8=1` 항상.
 - `LF will be replaced by CRLF` 경고는 무해(autocrlf).
 - fast 스위트: 혼자 ~106s, 둘을 동시에 띄우면 8-9분. `-p no:cacheprovider`. `| tail`로 파이프하면 끝날 때까지
@@ -194,7 +241,7 @@ import하는 순환은 둘 다 `FlowContext`만 보게. 확인 대상: `run_stat
   → sed → `ruff check --fix src/`(import 정렬·중복 병합)로. F402(loop var가 import를 가린다)는 손으로.
 - panel grain은 `RowsLookback`/`CalendarLookback`, `InstantsLookback`은 `grain: rows`에서만 (Step 4 실험에서
   한 번 틀렸다).
-- record 번호: 다음은 `152`. 파일명 `NNN-kebab.md`, 같은 커밋에 넣는다. harness/docs-only 변경은 record 없음.
+- record 번호: 다음은 `154`. 파일명 `NNN-kebab.md`, 같은 커밋에 넣는다. harness/docs-only 변경은 record 없음.
 - 캠페인 관례: 단계 = 브랜치 = `--no-ff` 병합. develop은 항상 green.
 
 ## 6. 검증 명령

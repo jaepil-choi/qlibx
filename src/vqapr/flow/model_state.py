@@ -6,8 +6,8 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.references import ModelStateRef
-from vqapr.models.memory import ModelMemory, normalize_memory
 
 
 @dataclass(frozen=True, slots=True)

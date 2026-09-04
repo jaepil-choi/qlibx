@@ -55,7 +55,11 @@ registered and passes validation.
    <file.py>`, which needs no YAML at all.
 3. `vqapr register strategy <id> <file.py>` -- register it by naming the kind, the id and the
    file. The file must define exactly one `StrategyModel` subclass; zero and two are both
-   refused, and the refusal says which.
+   refused, and the refusal says which. **One strategy is one file.** Re-registering an edited
+   file keeps the id and records a new fingerprint, and a reader of the run record sees that as
+   *tuning* the same strategy. A variant you do not mean as a tuning -- another arm of a
+   methodology, a different signal, even the same class with one constant changed -- is a new
+   file under a new id. There is no config channel; which of the two you mean is your call.
 4. `vqapr new dataset --out d.yaml` -- get a dataset template with every required key
 5. `vqapr new execution-input --out ei.yaml` -- get a venue-table template
 6. `vqapr new exchange <id> --instruments A005930 A000660 --out venue.py` -- get a runnable

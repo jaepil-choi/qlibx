@@ -120,9 +120,9 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     head. Read by loading the component rather than by parsing it, so what is reported is what the
     framework will actually act on.
     """
+    from vqapr.authoring import StrategyModel
     from vqapr.extension.component import ComponentKind
     from vqapr.extension.loading import load_data_model, load_strategy_model
-    from vqapr.models.strategy_model import StrategyModel
 
     space = Workspace.open(project_root)
     try:

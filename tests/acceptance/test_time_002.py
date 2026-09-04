@@ -18,6 +18,7 @@ from vqapr.authoring import (
     EconomicAccountView,
     Hold,
     Rebalance,
+    StrategyModel,
 )
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding
@@ -59,7 +60,6 @@ from vqapr.flow.run import (
 )
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, SimulationFlow
-from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,

@@ -12,7 +12,9 @@ from vqapr.authoring import (
     ConstraintCall,
     Hold,
     Rebalance,
+    StrategyModel,
 )
+from vqapr.calls import StrategyModelContext
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding
 from vqapr.data.lookback import RowsLookback
@@ -24,8 +26,6 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, FrozenStrategy, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
-from vqapr.models.contexts import StrategyModelContext
-from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole

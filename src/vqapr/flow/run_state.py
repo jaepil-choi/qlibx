@@ -15,10 +15,10 @@ from vqapr.account.account import (
     PreparedAccountValuation,
 )
 from vqapr.account.snapshot import AccountState
+from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.references import ModelStateRef
 from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
 from vqapr.flow.model_state import prepare_model_state
-from vqapr.models.memory import ModelMemory, normalize_memory
 from vqapr.valuation.marks import MarkBatch
 
 

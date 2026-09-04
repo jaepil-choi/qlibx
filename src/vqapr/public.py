@@ -17,7 +17,8 @@ from vqapr.analysis.signal import (
     information_coefficient,
     rank_information_coefficient,
 )
-from vqapr.authoring import DatasetInput, Hold, Rebalance
+from vqapr.authoring import DataModel, DatasetInput, Hold, Rebalance, StrategyModel
+from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
@@ -118,9 +119,6 @@ from vqapr.flow.run_records import (
 )
 from vqapr.flow.run_records import read_typed_table as read_strategy_table
 from vqapr.flow.simulation import SimulationResult, callback_evidence
-from vqapr.models.contexts import DataModelContext, StrategyModelContext
-from vqapr.models.data_model import DataModel
-from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,

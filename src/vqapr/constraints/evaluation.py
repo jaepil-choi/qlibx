@@ -7,6 +7,7 @@ from datetime import datetime
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import EconomicAccountView
+from vqapr.calls import ConstraintContext
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import (
     ConstraintFinding,
@@ -15,7 +16,6 @@ from vqapr.constraints.findings import (
 )
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
-from vqapr.models.contexts import ConstraintContext
 from vqapr.valuation.marks import MarkBatch
 
 

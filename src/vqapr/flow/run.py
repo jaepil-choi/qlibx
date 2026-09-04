@@ -26,12 +26,12 @@ from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import AgendaId
+from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.model_state import prepare_model_state
-from vqapr.models.memory import ModelMemory, normalize_memory
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 
 FINGERPRINT_PREFIX = 8

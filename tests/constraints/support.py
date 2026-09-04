@@ -20,8 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vqapr.authoring import ConstraintCall
+from vqapr.calls import ConstraintContext
 from vqapr.data.windows import ModelWindow
-from vqapr.models.contexts import ConstraintContext
 
 
 def reading_call(window: ModelWindow, instruments: tuple[str, ...], constraint) -> ConstraintCall:

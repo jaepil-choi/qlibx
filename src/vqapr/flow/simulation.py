@@ -16,7 +16,7 @@ from datetime import datetime
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountState
-from vqapr.authoring import AccountHistoryInput
+from vqapr.authoring import AccountHistoryInput, StrategyModel
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.windows import ModelWindow
 from vqapr.evidence.artifacts import (
@@ -57,7 +57,6 @@ from vqapr.flow.valuation import ValuationPhase
 from vqapr.flow.valuation import (
     _marks_from_execution_snapshot as _marks_from_execution_snapshot,
 )
-from vqapr.models.strategy_model import StrategyModel
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.runtime.events import DueExecutionEnvelope
 from vqapr.valuation.marking import ValuationService

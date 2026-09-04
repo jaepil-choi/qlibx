@@ -15,6 +15,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from vqapr.account.history import AccountHistory
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import EconomicAccountView, Hold, Rebalance
+from vqapr.calls import StrategyModelContext
 from vqapr.constraints.evaluation import (
     build_account_view,
     merged_constraint_bounds,
@@ -22,6 +23,7 @@ from vqapr.constraints.evaluation import (
 )
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.memory import normalize_memory
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
     SimulationFailure,
@@ -50,8 +52,6 @@ from vqapr.flow.run_state import (
     LifecycleTrace,
 )
 from vqapr.flow.valuation import ValuationPhase
-from vqapr.models.contexts import StrategyModelContext
-from vqapr.models.memory import normalize_memory
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
     IntentSourceRef,

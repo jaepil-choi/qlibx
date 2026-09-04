@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from vqapr._internal import atomic
@@ -934,10 +935,11 @@ def run_ids(root: Path) -> tuple[str, ...]:
 
 
 def strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
-    """Every strategy record this run holds, as `<id>@<fp8>`, sorted.
+    """Every FINISHED strategy record this run holds, as `<id>@<fp8>`, sorted.
 
-    A strategy directory without `strategy.json` was killed before it finished; omitted here,
-    exactly as `run_ids` omits an unfinished run.
+    A strategy directory without `strategy.json` is still being written, or was killed or
+    refused before it finished; omitted here, exactly as `run_ids` omits an unfinished run.
+    `unfinished_strategy_refs` lists those, and `strategy_progress` says what state they are in.
     """
     directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY
     if not directory.is_dir():
@@ -949,6 +951,82 @@ def strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
             if child.is_dir() and (child / STRATEGY_FILENAME).is_file()
         )
     )
+
+
+STATUS_COMPLETED = "completed"
+STATUS_RUNNING = "running"
+STATUS_UNFINISHED = "unfinished"
+"""What a strategy directory says about its run. `completed` has `strategy.json`; `running` has
+none and a lock touched inside `LOCK_STALE_AFTER`; `unfinished` has none and a lock that is stale
+or gone -- a strategy that was killed, or whose flow ended in a refusal, both of which leave rows
+and no record. The two cannot be told apart from the directory; the run envelope is where a
+refusal is reported (`docs/issues/073`, `074`)."""
+
+
+def unfinished_strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
+    """Every strategy directory of this run WITHOUT `strategy.json`, as `<id>@<fp8>`, sorted.
+
+    The complement of `strategy_refs`. A long run used to be invisible from the surface between
+    its first accepted session and its record (`docs/issues/074`): `list` showed a record only
+    once it was finished, so an author counted parquet files by hand to learn whether a strategy
+    was still advancing.
+    """
+    directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY
+    if not directory.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            child.name
+            for child in directory.iterdir()
+            if child.is_dir() and not (child / STRATEGY_FILENAME).is_file()
+        )
+    )
+
+
+def strategy_progress(root: Path, run_id: str, strategy_ref: str) -> dict[str, Any]:
+    """What an unfinished strategy directory says about how far its run got.
+
+    `status` is `running` or `unfinished` (see `STATUS_*`). `lock` is the holder's pid and how
+    many seconds ago the run last touched its lock, or `None`; `chunks` is the most parts any of
+    its tables has -- one per accepted session, since `append` writes one part per call; `tables`
+    names them; `last_event_time` is the newest `event_time` in the newest part of any table,
+    which is the last session the run accepted. One directory scan and one small parquet read per
+    table; nothing here opens the whole record.
+    """
+    directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY / strategy_ref
+    claim = _lock_claim(directory / LOCK_FILENAME)
+    tables = directory / TABLES_DIRECTORY
+    parts: dict[str, tuple[Path, ...]] = {}
+    if tables.is_dir():
+        for table in sorted(child for child in tables.iterdir() if child.is_dir()):
+            parts[table.name] = tuple(sorted(table.glob(f"*{PART_SUFFIX}")))
+    newest: datetime | None = None
+    for files in parts.values():
+        if not files:
+            continue
+        last = _newest_event_time(files[-1])
+        if last is not None and (newest is None or last > newest):
+            newest = last
+    return {
+        "status": STATUS_RUNNING if claim is not None else STATUS_UNFINISHED,
+        "lock": None if claim is None else {"pid": claim.pid, "refreshed_ago": round(claim.age, 1)},
+        "chunks": max((len(files) for files in parts.values()), default=0),
+        "tables": sorted(parts),
+        "last_event_time": None if newest is None else newest.isoformat(),
+    }
+
+
+def _newest_event_time(part: Path) -> datetime | None:
+    """The latest `event_time` in one part file, or `None` when it has no such column or cannot
+    be read -- a part being replaced under a reader is a state, not a failure."""
+    try:
+        table = pq.read_table(part, columns=["event_time"])
+    except (OSError, pa.ArrowException, KeyError):
+        return None
+    if table.num_rows == 0:
+        return None
+    value = pc.max(table.column("event_time")).as_py()
+    return value if isinstance(value, datetime) else None
 
 
 def read_run_record(root: Path, run_id: str) -> dict[str, Any]:

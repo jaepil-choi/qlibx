@@ -25,10 +25,13 @@ from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.flow.run import RunDefinition
 from vqapr.flow.run_records import (
+    STATUS_COMPLETED,
     datamodel_refs,
     read_datamodel_record,
     read_strategy_record,
+    strategy_progress,
     strategy_refs,
+    unfinished_strategy_refs,
 )
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
@@ -140,8 +143,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[str, Any]]:
-    """Every finished strategy record of one run, found by scanning, filtered on record fields."""
+    """Every strategy record of one run, finished or not, filtered on record fields.
+
+    Finished records first, each `status: completed`. Then every strategy directory that has no
+    record yet (`docs/issues/074`): `status: running` while its writer keeps touching its lock,
+    with `chunks`, `last_event_time` and `lock.refreshed_ago` so a reader can see whether it is
+    still advancing; `status: unfinished` once the lock is stale or gone, which is what a killed
+    or refused strategy leaves. Those rows have no `fingerprint` beyond the `<fp8>` in their ref,
+    no `period` and no contract, so `--failed-contract` never keeps them and `--since` reads their
+    `last_event_time`.
+    """
     since = _instant(getattr(args, "since", None), name="--since")
+    wanted = getattr(args, "strategy", None)
+    prefix = getattr(args, "fingerprint", None)
     rows: list[dict[str, Any]] = []
     for ref in strategy_refs(root, run_id):
         record = read_strategy_record(root, run_id, ref)
@@ -157,15 +171,14 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
             "strategy_ref": ref,
             "strategy_id": record.get("strategy_id"),
             "fingerprint": record.get("fingerprint"),
+            "status": STATUS_COMPLETED,
             "account_version": (record.get("account") or {}).get("version"),
             "tables": sorted(record.get("tables") or {}),
             "period": period,
             "contract_failed": failed,
         }
-        wanted = getattr(args, "strategy", None)
         if wanted and row["strategy_id"] != wanted:
             continue
-        prefix = getattr(args, "fingerprint", None)
         if prefix and not str(row["fingerprint"] or "").startswith(prefix):
             continue
         if getattr(args, "failed_contract", False) and not failed:
@@ -175,6 +188,28 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
             if ended is None or ended < since:
                 continue
         rows.append(row)
+    if getattr(args, "failed_contract", False):
+        return rows
+    for ref in unfinished_strategy_refs(root, run_id):
+        strategy_id, _, fp8 = ref.rpartition("@")
+        if wanted and strategy_id != wanted:
+            continue
+        if prefix and not fp8.startswith(prefix):
+            continue
+        progress = strategy_progress(root, run_id, ref)
+        if since is not None:
+            last = _instant(progress.get("last_event_time"), name="last_event_time")
+            if last is None or last < since:
+                continue
+        rows.append(
+            {
+                "run_id": run_id,
+                "strategy_ref": ref,
+                "strategy_id": strategy_id,
+                "fingerprint": None,
+                **progress,
+            }
+        )
     return rows
 
 

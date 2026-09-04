@@ -200,7 +200,10 @@ back as the same instant, and a `Decimal` is exact text (the column's metadata m
 `read_strategy_table` restores and you cast yourself anywhere else.
 `read_strategy_table` decodes by the column types the writer recorded beside the table, so
 `nav` comes back a `Decimal` and `observed_at` an aware `datetime`. Rows reach the disk as
-each occurrence is accepted, so a long run can be watched and a killed one keeps what it did.
+each occurrence is accepted, so a long run can be watched -- `vqapr list strategies --run
+<run-id>` lists a strategy that has no record yet with `status: running`, its `chunks` (one per
+accepted session) and its `last_event_time`; see "Watching a long run" below -- and a killed one
+keeps what it did.
 
 `vqapr run <run-id> --no-account-positions` records only the `_ACCOUNT` row (cash and NAV)
 at each valuation instead of one row per held instrument; fills are recorded either way.
@@ -413,9 +416,29 @@ three strategies, not three runs.
    every strategy (or those named), in `N` processes when asked
 
 **Stop condition:** `vqapr check <run-id>` returns `ok:true`, then `vqapr run <run-id>`
-returns `ok:true` with a `strategies` map carrying an `occurrences` count, an
-`account_version` and a `record` (`<strategy-id>@<fp8>`) per strategy -- or, for a datamodel run,
-a `datamodels` map carrying `dataset_id`, `rows`, `sessions` and its `record`.
+returns `ok:true` with a `strategies` map carrying `status: completed`, an `occurrences` count,
+an `account_version` and a `record` (`<strategy-id>@<fp8>`) per strategy -- or, for a datamodel
+run, a `datamodels` map carrying `dataset_id`, `rows`, `sessions` and its `record`.
+
+**When one strategy fails, the others still run.** Each strategy is its own flow with its own
+account, so a refusal inside one -- your `decide()` raised, or the `Rebalance` it returned was
+outside its budget -- is that strategy's outcome, not the run's. The envelope is then `ok:false`
+with `stage: run.strategy_failed` and the SAME `strategies` map: `status: completed` lines as
+above beside `status: failed` lines that carry that strategy's refusal (`stage`, `component_id`,
+`failures`, `at`). The top-level `failures` gathers every failed strategy's entries, each stamped
+`strategy: <id>`; read `fix` first, as always, and `source` names the strategy
+(`key_path: strategies.<id>`) and, for a raise from your own file, the file and the line. The
+completed records stand. Fix the failed strategy, register the file again, and
+`vqapr run <run-id> --strategy <id>` runs it alone into a new record beside them. The shape is
+the same under `--jobs N`.
+
+**Watching a long run.** A strategy's record (`strategy.json`) is written last, so until then
+`vqapr list strategies --run <run-id>` lists it with `status: running`, `chunks` (one per
+accepted session), `last_event_time` (the last session it accepted) and `lock.refreshed_ago`
+(seconds since the run last touched its lock). A directory whose lock has gone quiet for two
+minutes and still has no record is `status: unfinished`: the strategy was killed, or its flow
+ended in a refusal -- the run's own envelope says which. `vqapr show strategy` reads finished
+records only.
 
 **Tweaks are directories.** A strategy's record is named by its registered fingerprint, which
 folds the file bytes and the config: edit the strategy and re-register it under the same id,

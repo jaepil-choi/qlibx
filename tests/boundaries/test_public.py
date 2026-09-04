@@ -246,6 +246,7 @@ def test_public_exports_are_fixed() -> None:
         "StrategyEntry",
         "StrategyModel",
         "StrategyModelContext",
+        "StrategyOutcome",
         "TableSpec",
         "TickerNetting",
         "TradeRule",

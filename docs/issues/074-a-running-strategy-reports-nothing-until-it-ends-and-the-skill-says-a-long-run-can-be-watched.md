@@ -1,6 +1,8 @@
 # 074 -- a running strategy reports nothing until it ends, and the skill says a long run can be watched
 
-**Status:** open. Found 2026-09-04 by the scenario testbed run 4
+**Status:** **CLOSED 2026-09-04** on `fix/073-the-run-reports-per-strategy`, record `docs/implementations/150-the-run-reports-per-strategy.md`. `vqapr list strategies --run <id>` lists a directory without a record as `status: running` (lock fresh) or `status: unfinished`, with `chunks`, `tables`, `last_event_time` and `lock.refreshed_ago`; finished rows say `status: completed`; the skill has a "Watching a long run" paragraph and `run --help` says what a failure does. No `--progress` stream: the verb answers the question, and a stream is a later decision.
+
+**Status when filed:** open. Found 2026-09-04 by the scenario testbed run 4
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-007**), against `vqapr-0.4.0`. Confirmed
 against source 2026-09-04. Papercut on its own; it is what turned the refusal in `073` into ten
 minutes of not knowing whether a strategy was dead.

@@ -10,11 +10,13 @@ failure envelope (`guard`, `failure`, `due_boundary`).
 
 from __future__ import annotations
 
+import inspect
 import time
 import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -24,7 +26,13 @@ from vqapr.authoring import AccountHistoryInput
 from vqapr.constraints.constraint import Constraint
 from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import (
+    ExplainTopic,
+    Failure,
+    FailureFamily,
+    FailureSource,
+    VqaprError,
+)
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
     FailureObservation,
@@ -378,6 +386,53 @@ def _raise_callback_return_type(returned: object) -> None:
 
 
 
+def _component_id_of(layer: object) -> str:
+    """The component id of a strategy layer (`config.component`) or a datamodel layer
+    (`component`); the failure envelope names the member either way."""
+    config = getattr(layer, "config", None)
+    ref = getattr(config, "component", None) if config is not None else None
+    if ref is None:
+        ref = getattr(layer, "component", None)
+    return str(getattr(ref, "component_id", "?"))
+
+
+def _author_frame(cause: BaseException, strategy: object, component_id: str) -> FailureSource:
+    """Where in the author's own file the failure came from, as a `FailureSource`.
+
+    The traceback of a callback failure runs from the Flow's guard down through the author's
+    `decide()` and, often, back into this package -- a `Rebalance` refused in its validator is
+    raised in `authoring.py` from a line in the author's file. The frame the author needs is the
+    innermost one IN THEIR FILE, so every frame is compared against the file the strategy class
+    was loaded from and the last match wins. `key_path` names the strategy either way, so a
+    framework raise with no author frame still says which strategy it was about
+    (`docs/issues/071`).
+    """
+    source = FailureSource(key_path=f"strategies.{component_id}")
+    try:
+        loaded_from = inspect.getsourcefile(type(strategy)) or inspect.getfile(type(strategy))
+    except (TypeError, OSError):
+        return source
+    wanted = _resolved(loaded_from)
+    found: tuple[str, int] | None = None
+    trace = cause.__traceback__
+    while trace is not None:
+        filename = trace.tb_frame.f_code.co_filename
+        if filename == loaded_from or _resolved(filename) == wanted:
+            found = (filename, trace.tb_lineno)
+        trace = trace.tb_next
+    if found is None:
+        return source
+    return FailureSource(file=found[0], key_path=source.key_path, line=found[1])
+
+
+def _resolved(filename: str) -> Path:
+    """The path with symlinks and relative segments settled, or as given when that fails."""
+    try:
+        return Path(filename).resolve()
+    except OSError:
+        return Path(filename)
+
+
 class FlowContext:
     """What every phase of one strategy's run shares: the frozen run, this strategy's layer, the run
 state, the account and venue, and the failure envelope. Built by `SimulationFlow`, read by
@@ -462,6 +517,7 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
         root = self.state.current
         account = root.account
         pending = root.pending_accepted_intent
+        component_id = _component_id_of(self.layer)
         failed_requirement: object = owner
         if isinstance(cause, VqaprError):
             family = SimulationFailureFamily(cause.family.value)
@@ -491,6 +547,8 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
             pending_id=getattr(pending, "pending_id", None),
             cause=cause,
             kind=kind,
+            component_id=component_id,
+            source=_author_frame(cause, self.strategy, component_id),
         )
 
     def due_boundary(

@@ -89,7 +89,7 @@ from vqapr.flow.materialize import (
     publish_run_allocation,
     publish_run_record,
 )
-from vqapr.flow.orchestration import RunResult, preflight_run, run
+from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
 
 # Orchestration, evidence and roster reading moved to their owning layers by record `111`.
 # Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
@@ -236,6 +236,7 @@ __all__ = (
     "StrategyEntry",
     "StrategyModel",
     "StrategyModelContext",
+    "StrategyOutcome",
     "TableSpec",
     "TickerNetting",
     "TradeRule",

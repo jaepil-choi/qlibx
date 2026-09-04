@@ -1,6 +1,8 @@
 # 071 -- a budget refusal names neither the strategy, nor the offending value, nor the declared bounds, and it stops the whole run
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 3
+**Status:** **CLOSED 2026-09-04** on `fix/073-the-run-reports-per-strategy`, record `docs/implementations/150-the-run-reports-per-strategy.md`. The five `Rebalance` refusals name the value and the bound (`cash_weight 2.000000000001 is outside the declared budget [-1, 2]`); `SimulationFailure` carries `component_id` and a `source` whose `key_path` is `strategies.<id>` and whose `file`/`line` are the innermost frame of the author's own file; and one strategy's refusal no longer stops the others (the third bullet below, decided: no). The fourth bullet -- a rail for the signed book -- is `075`, still open.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 3
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-018**), against `vqapr-0.3.0`. Confirmed
 against source 2026-09-04; the code paths below are unchanged at `v0.4.0`. Same family as `056`
 and `066`: the refusal is correct and the payload does not carry what the user needs to act on it.

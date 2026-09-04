@@ -10,9 +10,10 @@ failure envelope (`guard`, `failure`, `due_boundary`).
 
 from __future__ import annotations
 
+import time
 import unicodedata
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -130,6 +131,11 @@ class DueExecutionTrace:
 class SimulationResult:
     occurrences: tuple[OccurrenceTrace | DueExecutionTrace, ...]
     final_state: AcceptedRunState
+    timing: Mapping[str, float] = field(default_factory=dict)
+    """Seconds spent, by phase, over the whole run (`docs/issues/068`): `total`, `callback`
+    (window and decide, every static occurrence), `due` (every fill-side item), and one entry
+    per due stage -- `simulation.due.snapshot`, `simulation.due.order_planning`, ... -- so a
+    reader learns where a run's wall clock went without a profiler. Wall-clock, not CPU."""
 
 
 def callback_evidence(result: SimulationResult) -> tuple[CallbackEvidence, ...]:
@@ -398,6 +404,17 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
         self.strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
         self.constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
         self.constraint_window_at: Callable[[datetime], ModelWindow]
+        # Seconds by phase, accumulated by `due_boundary` per due stage and by the flow per
+        # dispatch kind (`docs/issues/068`); `SimulationResult.timing` is this at the end.
+        self.timing: dict[str, float] = {}
+
+    def timed(self, phase: str, operation: Callable[[], object]) -> object:
+        """Run `operation`, adding its wall-clock seconds to `phase`."""
+        started = time.perf_counter()
+        try:
+            return operation()
+        finally:
+            self.timing[phase] = self.timing.get(phase, 0.0) + (time.perf_counter() - started)
 
     def in_agenda_zone(self, instant: datetime) -> datetime:
         """An instant expressed in the strategy agenda's zone; the same instant.
@@ -487,7 +504,9 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
         operation: Callable[[], object],
     ) -> object:
         try:
-            return operation()
+            # The due stages run one after another inside one due item, never nested, so their
+            # seconds add up to the due item's and each is reported under its own name.
+            return self.timed(stage.value, operation)
         except SimulationFailure:
             raise
         except Exception as error:

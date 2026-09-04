@@ -105,7 +105,10 @@ theirs: `decide`, `compute`, `project`/`monitor`. `vqapr show model <id>` descri
 
 **What a model is handed follows the dataset's `grain`.** `inputs()` returns a mapping from an
 alias you name to a `va.DatasetInput(dataset_id=, fields=, lookback=)`, and the call reads it
-with one of two verbs, in every role:
+with one of two verbs, in every role. `inputs()` is evaluated at registration and at preflight,
+BEFORE any memory is restored and before a run's `initial_model_memory` is applied, so what a
+model reads cannot depend on either: a family of settings that changes the reads is a family of
+registered components, one file and one id each.
 
 - **`read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a
   **`PanelWindow`**: `instants` (the same for every name) x `instruments`; `values[name]` is
@@ -158,7 +161,11 @@ session (evaluation time, output `available_at`, row count), no per-instrument l
 `vqapr show datamodel <run-id>/<id>@<fp8>` read the record, and `vqapr show dataset <id>` reads
 back what it computed. The output is readable by any component that declares it -- which is the
 point: one model's output is the next model's input. Running the same run again is refused while
-its output dataset is registered (`check.datamodel.output_registered`).
+its output dataset is registered (`check.datamodel.output_registered`); `vqapr rm dataset <id>`
+withdraws the registration and deletes the chunks under `.vqapr/materialized/<id>/`, and is the
+way to retry a datamodel run or to drop a throw-away output. It refuses while a registered run
+takes its sessions from that dataset (`sessions_from`), naming the run; a dataset you registered
+from your own path is withdrawn without touching your file.
 
 **`vqapr show dataset <id> [--limit N]`** works for any registered dataset, not just a
 materialized one. It reports the registration's own facts — source, path, declared fields, span —

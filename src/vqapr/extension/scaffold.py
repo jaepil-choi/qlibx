@@ -24,7 +24,7 @@ LOOKBACK = {lookback}  # rows per name: a five-day return needs six observations
 
 
 class {class_name}(va.StrategyModel):
-    """Reads `{field}` of `{dataset_id}` over LOOKBACK rows; the momentum signal is a placeholder."""
+    """`{dataset_id}`.`{field}` over LOOKBACK rows; the momentum signal below is a placeholder."""
 
     def inputs(self):
         read = va.DatasetInput(

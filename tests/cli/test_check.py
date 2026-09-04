@@ -334,14 +334,16 @@ def test_a_blocked_judgment_names_its_error_type_separately(workspace: Path) -> 
 
 
 def _judge(root: Path, definition: RunDefinition) -> list[str]:
-    from vqapr.flow.judgments import _judge_datasets_and_fields
+    from vqapr.flow.judgments import _decide_agenda, _judge_datasets_and_fields
 
     space = Workspace.open(root)
     registered = {str(item.dataset_id): item for item in space.datasets}
+    # The agenda is derived once per `check` and handed to the judges (`docs/issues/069`).
+    agenda = _decide_agenda(space, definition)
     return [
         failure.code
         for failure in _judge_datasets_and_fields(
-            definition, space, registered, FailureSource(key_path="runs.x")
+            definition, space, registered, FailureSource(key_path="runs.x"), agenda
         )
     ]
 
@@ -371,7 +373,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     registration is one problem: the fields it wanted ride along as examples.
     """
     from vqapr.extension.scaffold import render
-    from vqapr.flow.judgments import _judge_datasets_and_fields
+    from vqapr.flow.judgments import _decide_agenda, _judge_datasets_and_fields
 
     Workspace.create(tmp_path)
     source = tmp_path / "wide.py"
@@ -388,11 +390,13 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
 
     space = Workspace.open(tmp_path)
     registered = {str(item.dataset_id): item for item in space.datasets}
+    definition = replace(_definition(), strategies=(StrategyEntry("wide"),))
     failures = _judge_datasets_and_fields(
-        replace(_definition(), strategies=(StrategyEntry("wide"),)),
+        definition,
         space,
         registered,
         FailureSource(key_path="runs.x"),
+        _decide_agenda(space, definition),
     )
 
     assert [failure.code for failure in failures] == ["check.dataset.unregistered"]

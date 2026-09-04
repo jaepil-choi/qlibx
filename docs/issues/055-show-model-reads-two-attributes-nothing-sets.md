@@ -1,6 +1,8 @@
 # 055 -- `show model` reads two attributes nothing sets, so `reads` is always empty and `records` never lists a declared table
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: `show model` builds `reads` from `inputs()`, `records`/`forms` from `tables()` and `account_history()`, and `decides` lists distinct dataset ids.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-005**), against `vqapr-0.3.0` (built wheel,
 `develop @ 4f616f5a`). Confirmed against source the same day.
 

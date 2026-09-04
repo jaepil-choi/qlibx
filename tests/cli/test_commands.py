@@ -759,6 +759,63 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
     assert _json.dumps(frozen)  # the record must stay JSON-serialisable
 
 
+def test_one_run_command_opens_the_workspace_document_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docs/issues/070`: `run` opened `workspace.yaml` four times -- to look the definition
+    up, again inside preflight, again for the roster at run start, and again for the envelope's
+    roster after the run. Four reads of a file other commands write is four chances to judge
+    one document and freeze another. One open, and everything else is handed that snapshot."""
+    from vqapr.workspace import Workspace
+
+    _workspace_for_run(tmp_path, capsys)
+    code, registered_run = _register_run(tmp_path, capsys, "once")
+    assert code == 0, registered_run
+
+    opened: list[Path] = []
+    original = Workspace.open
+
+    def counted(root: str | Path) -> Workspace:
+        opened.append(Path(root))
+        return original(root)
+
+    monkeypatch.setattr(Workspace, "open", staticmethod(counted))
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "run", "once")
+
+    assert code == 0, payload
+    assert len(opened) == 1, f"`run` opened the workspace {len(opened)} times: {opened}"
+    assert payload["roster"]["known"] is False, "the envelope's roster came from the run's read"
+
+
+def test_a_run_says_where_its_time_went(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`docs/issues/068`: a per-phase timing block in the record and the envelope.
+
+    The testbed's agent needed cProfile to learn that its strategy was 5% of the wall clock and
+    two execution snapshots were half of it. The record now says so: `total` for the loop,
+    `callback` for the model's side, `due` for the fill's, and every due stage by its name.
+    """
+    from vqapr.flow.run_records import read_strategy_record
+
+    _workspace_for_run(tmp_path, capsys)
+    code, registered_run = _register_run(tmp_path, capsys, "timed")
+    assert code == 0, registered_run
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "run", "timed")
+    assert code == 0, payload
+    (strategy,) = payload["strategies"].values()
+    timing = strategy["timing"]
+
+    assert {"total", "callback", "due", "simulation.due.snapshot"} <= set(timing), timing
+    assert all(isinstance(seconds, float) and seconds >= 0 for seconds in timing.values())
+    assert timing["callback"] + timing["due"] <= timing["total"] + 1e-6
+    due_stages = sum(seconds for phase, seconds in timing.items() if phase.startswith("simulation."))
+    assert due_stages <= timing["due"] + 1e-6, "the due stages are parts of the due side"
+    ref = _strategy_ref(tmp_path, capsys, "timed")
+    assert read_strategy_record(tmp_path / ".vqapr", "timed", ref)["timing"] == timing
+
+
 def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_a_crash(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

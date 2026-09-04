@@ -1,6 +1,8 @@
 # 067 -- the skill says an edited component is refused without `register --force`; there is no such flag, and a plain re-register replaces the registration and says nothing
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2, phase 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: the skill's `--force` sentences and `vqapr remove` are gone; `Workspace.register_component` lost its dead `force` parameter; `register <kind> <id> <file>` reports `replaced: {fingerprint}` when it replaced one.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2, phase 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-017**), against `vqapr-0.3.0`. Confirmed
 against source the same day. Same family as `025` and `030`: a sentence in the shipped skill that
 the CLI no longer backs.

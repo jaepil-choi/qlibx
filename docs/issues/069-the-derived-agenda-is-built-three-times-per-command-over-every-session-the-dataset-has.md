@@ -1,6 +1,8 @@
 # 069 -- the derived agenda is built three times per command, each time over every session the dataset has, and then sliced to the run's period
 
-**Status:** open. Found 2026-09-04 by the 0.4.0 spine trace
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: `derived_agenda` cuts sessions to `[start, end]` on dates before building; `judgments()` derives the agenda once and hands it to both judges.
+
+**Status when filed:** open. Found 2026-09-04 by the 0.4.0 spine trace
 (`docs/walkthroughs/2026-09-04-spine-stepper-0.4.0.html`, scene ②), against `develop @ 2b5e842a`.
 Confirmed against source the same day.
 

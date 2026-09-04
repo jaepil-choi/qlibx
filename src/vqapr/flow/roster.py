@@ -59,7 +59,7 @@ class RegisteredRoster:
     tables: tuple[str, ...]
 
 
-def registered_roster(root_path: Path | None) -> RegisteredRoster | None:
+def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | None:
     """The project's instrument roster, read FRESH at run start, or `None` when none is registered.
 
     Read rather than frozen, and its digest is stated in the run record rather than compared
@@ -69,13 +69,15 @@ def registered_roster(root_path: Path | None) -> RegisteredRoster | None:
 
     This is the first workspace read on the `run` path, which until now consumed only `frozen.*`.
     It is one small JSON file plus the tables it points at, done once per run -- and once is
-    literal: `roster_report` is handed what this returned rather than reading it again.
+    literal: `roster_report` is handed what this returned rather than reading it again. A caller
+    that already holds the `Workspace` passes it (`docs/issues/070`): the document is not opened
+    again for the pointer it merely locates.
     """
     if root_path is None:
         return None
 
     try:
-        space = Workspace.open(root_path)
+        space = root_path if isinstance(root_path, Workspace) else Workspace.open(root_path)
     except VqaprError as unopened:
         # NARROW, by `docs/issues/050`. A run assembled outside a workspace has no roster to find,
         # and saying so by returning `None` is honest: the refusal, when it comes, belongs at the

@@ -658,8 +658,18 @@ def exact_snapshot_rows(
             f"WHERE {trade_at} = ? AND {instrument} IN ({placeholders}) ORDER BY {instrument}",
             [target_at, *instruments],
         )
-        names = tuple(description[0] for description in cursor.description)
-        return tuple(dict(zip(names, row, strict=True)) for row in cursor.fetchall())
+        # Columnar out of duckdb, rows built here (`docs/issues/068`). `fetchall()` converted
+        # every cell through Python, one `datetime.replace` and one `pytz.timezone(...)` per
+        # `trade_at` value -- 46 M calls over a 1,349-session run, more than a third of the
+        # package's time -- for a column that is the same instant on every row. Arrow's
+        # timestamp conversion is one C call per column, and the caller keeps the row shape.
+        table = cursor.fetch_arrow_table()
+        columns = {name: table.column(name).to_pylist() for name in table.column_names}
+        names = tuple(columns)
+        return tuple(
+            dict(zip(names, values, strict=True))
+            for values in zip(*(columns[name] for name in names), strict=True)
+        )
     except duckdb.Error as exc:
         raise VqaprError(
             stage="source.scan.execution_snapshot",

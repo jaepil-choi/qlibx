@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from collections.abc import Iterable
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
+from zoneinfo import ZoneInfo
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
@@ -58,12 +60,31 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
     a DST session is refused rather than guessed. The book is valued at the instant the venue
     fills and monitored right after each commit, so there is no second agenda to build.
     """
-    sessions = (
+    sessions: Iterable[datetime | date] = (
         workspace.evaluation_times(definition.sessions_from)
         if definition.sessions_from is not None
         else definition.sessions
     )
     assert definition.at is not None
+    if definition.start is not None and definition.end is not None:
+        # Cut on DATES before an occurrence is built, not on occurrences after (`docs/issues/069`:
+        # a run of 15 sessions built 735 occurrences, with their fold and offset proofs and the
+        # agenda's identity over them, three times per command). An occurrence on venue-local
+        # day `d` at `at` lies inside `[start, end]` only if `d` lies between the bounds' local
+        # dates, so this keeps a superset of what `inclusive_slice` keeps and changes nothing
+        # it would have answered. `daily` still owns the date conversion and the DST refusal.
+        zone = ZoneInfo(definition.timezone)
+        first = definition.start.astimezone(zone).date()
+        last = definition.end.astimezone(zone).date()
+
+        def _local_date(session: datetime | date) -> date:
+            if isinstance(session, datetime):
+                return (session.astimezone(zone) if session.tzinfo is not None else session).date()
+            return session
+
+        sessions = tuple(
+            session for session in sessions if first <= _local_date(session) <= last
+        )
     return OperationAgenda.daily(
         agenda_id=definition.agenda_id,
         role=OperationRole.STRATEGY_CALLBACK,

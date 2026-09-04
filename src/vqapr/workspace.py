@@ -974,14 +974,23 @@ class Workspace:
                 )
             # Looked up after the reference check, so an unsupported kind still gets the typed
             # refusal `_references_in` raises rather than a bare `KeyError` from this dict.
-            position = {"component": 3, "run": 4}[kind]
+            position = {"dataset": 0, "component": 3, "run": 4}[kind]
             declarations = dict(state[position])
             if identity not in declarations:
                 self._replace_state(*state)
                 return False
-            del declarations[identity]
+            withdrawn = declarations.pop(identity)
             merged = list(state)
             merged[position] = declarations
+            if kind == "dataset":
+                # The physical source goes with the last dataset that named it: a source
+                # nothing reads is a path the document keeps pointing at for no one.
+                source_id = withdrawn.source
+                still_named = any(item.source == source_id for item in declarations.values())
+                if not still_named:
+                    merged[1] = {
+                        key: spec for key, spec in state.sources.items() if key != source_id
+                    }
             self._write(*merged)
             self._replace_state(*merged)
             return True
@@ -1028,21 +1037,16 @@ class Workspace:
                 if identity in named:
                     blockers.append(f"run {run_id!r}")
         elif kind == "dataset":
-            # A dataset is named by a component's declared requirements rather than by the
-            # workspace document, so nothing here can claim to know every reader of one. Said
-            # plainly instead of returning an empty tuple that would read as "safe to remove".
-            raise _workspace_error(
-                stage=REMOVE_STAGE,
-                code=f"{REMOVE_STAGE}.unsupported_kind",
-                requirement="removable kinds are component and run",
-                observed=repr(kind),
-                fix=(
-                    "a dataset's readers are declared inside component requirements, which this "
-                    "workspace does not index; rebuild the workspace instead of removing one"
-                ),
-                explain=ExplainTopic.WORKSPACE_STATE,
-                retry="remove a component or a run instead",
-            )
+            # What the DOCUMENT knows names a dataset: a registered run whose sessions come from
+            # it. A component's reads are declared in its code, not here, so a strategy that
+            # reads a withdrawn dataset is refused by `check` and `run` at its next preflight
+            # (`check.dataset.unregistered`), which is the same place it would be refused had
+            # the dataset never been registered. A datamodel run that WRITES this dataset is
+            # not a blocker: withdrawing the output is how that run is run again
+            # (`docs/issues/060`).
+            for run_id, definition in runs.items():
+                if definition.sessions_from == identity:
+                    blockers.append(f"run {run_id!r} (sessions_from)")
         elif kind == "run":
             # A run is the top of the document: nothing names a run, and a run's RECORDS are
             # not registrations -- `vqapr rm run` removes those separately.
@@ -1053,7 +1057,7 @@ class Workspace:
                 code=f"{REMOVE_STAGE}.unsupported_kind",
                 requirement="kind must be one this workspace stores",
                 observed=repr(kind),
-                fix="use one of: component, run",
+                fix="use one of: dataset, component, run",
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry="retry with a kind this workspace stores",
             )

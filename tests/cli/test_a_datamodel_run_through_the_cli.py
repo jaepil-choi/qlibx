@@ -279,7 +279,8 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
         assert shown["value_fields"] == ["score"]
         assert shown["rows"] == 4
         assert len(shown["sessions"]) == 2, "one entry per session it evaluated"
-        envelope = {key for key in shown if key not in {"ok", "stage", "kind"}}
+        # `workspace_root` is every envelope's, not the record's (`docs/issues/066`).
+        envelope = {key for key in shown if key not in {"ok", "stage", "kind", "workspace_root"}}
         assert envelope == set(frozen) - {"schema", "kind"}, (
             f"record-only={sorted(set(frozen) - {'schema', 'kind'} - envelope)}, "
             f"surfaced-only={sorted(envelope - set(frozen))}"

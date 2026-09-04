@@ -9,7 +9,9 @@ this module re-exports are the ones callers and tests imported from it before th
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 
 from vqapr.account.account import Account
@@ -224,9 +226,14 @@ class SimulationFlow(OccurrenceFlow):
 
     def run(self) -> SimulationResult:
         """Synchronously process the static merge and all due items in its horizon."""
+        started = time.perf_counter()
         result = super().run()
         assert isinstance(result, SimulationResult)
-        return result
+        # The phases the context accumulated, plus the whole: what the record reports as
+        # `timing` (`docs/issues/068`). `total` covers the loop itself; the panel build and the
+        # record freeze happen outside it and are the caller's to time.
+        timing = {**self._context.timing, "total": time.perf_counter() - started}
+        return replace(result, timing=timing)
 
     def _start(self, cutoff: datetime) -> None:
         self._context.guard(
@@ -239,19 +246,27 @@ class SimulationFlow(OccurrenceFlow):
 
     def _dispatch_static(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         if occurrence.role is OperationRole.STRATEGY_CALLBACK:
-            return self._callback.dispatch(occurrence)
+            # `callback` is the whole static side: the window built for the model and the
+            # model's own `decide` (`docs/issues/068`: a user learns their strategy is 5% of
+            # the wall clock from the record, not from cProfile).
+            return self._context.timed(  # type: ignore[return-value]
+                "callback", lambda: self._callback.dispatch(occurrence)
+            )
         # Record `148`: valuation happens at the execution instant and monitoring right after
         # each commit, inside the due path. A static occurrence of any other role is a
         # malformed agenda, not a phase to dispatch to.
         raise ValueError(f"unsupported operation role: {occurrence.role!r}")
 
     def _dispatch_due(self, due: DueExecutionEnvelope) -> DueExecutionTrace:
-        return self._context.guard(  # type: ignore[return-value]
-            SimulationStage.DUE_SNAPSHOT,
-            due.due_time,
-            lambda: self._dispatch_pending(due),
-            family=SimulationFailureFamily.DATA,
-            owner=self._context.frozen_run.execution_input,
+        return self._context.timed(  # type: ignore[return-value]
+            "due",
+            lambda: self._context.guard(
+                SimulationStage.DUE_SNAPSHOT,
+                due.due_time,
+                lambda: self._dispatch_pending(due),
+                family=SimulationFailureFamily.DATA,
+                owner=self._context.frozen_run.execution_input,
+            ),
         )
 
     def _finish(self, traces: tuple[object, ...]) -> SimulationResult:

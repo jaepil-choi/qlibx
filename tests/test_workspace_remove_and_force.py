@@ -168,16 +168,36 @@ def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
     assert workspace.references_to("component", "mom") == ()
 
 
-def test_a_dataset_refuses_rather_than_claiming_it_is_unreferenced(tmp_path: Path) -> None:
-    """Returning `()` here would read as "safe to remove", and the workspace cannot know that.
+def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
+    tmp_path: Path,
+) -> None:
+    """`docs/issues/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
 
-    A dataset's readers are declared inside component requirements, which this document does not
-    index. Saying so is honest; an empty tuple would be a guess wearing an answer's clothes.
+    A component's reads live in its code and are refused at its next preflight; a registered
+    run's `sessions_from` lives here, and is the blocker this walk can name.
     """
-    workspace, _ = _workspace(tmp_path)
+    workspace, source = _workspace(tmp_path)
+    ref = _ref(source)
+    workspace.register_component(ref)
 
-    with pytest.raises(VqaprError, match=r"workspace\.remove\.unsupported_kind"):
-        workspace.references_to("dataset", "prices")
+    assert workspace.references_to("dataset", "prices") == ()
+    assert workspace.remove("dataset", "prices") is False, "absent is idempotent, not an error"
+
+    workspace.register_run(
+        RunDefinition(
+            run_id="daily",
+            strategies=(StrategyEntry(str(ref.component_id)),),
+            instruments=("A",),
+            timezone=ZONE,
+            at=time(9, 0),
+            sessions=(date(2026, 4, 1),),
+            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+            initial_account_mode=AccountMode.LONG_ONLY,
+        )
+    )
+    assert workspace.references_to("dataset", "prices") == ()
+    # `sessions_from` a dataset that is not registered is refused at `register_run`, so the
+    # blocker is asked through the CLI journey in `tests/cli/test_rm_dataset_withdraws_a_registration.py`.
 
 
 def test_an_unknown_kind_is_refused_with_the_permitted_set(tmp_path: Path) -> None:

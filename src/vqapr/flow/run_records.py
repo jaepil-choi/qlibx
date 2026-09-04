@@ -156,6 +156,7 @@ _STRATEGY_FIELDS = (
     "declared_digest",
     "roster",
     "period",
+    "timing",
 )
 """What one strategy's record answers (record `139`): architecture §17.3.2's two missing values --
 which `.py` ran (`component.path`) and the strategy's OWN fingerprint, registered (`fingerprint`)

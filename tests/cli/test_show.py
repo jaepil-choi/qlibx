@@ -147,6 +147,8 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
         "declared_digest",
         "roster",
         "period",
+        # Seconds by phase (`docs/issues/068`): where the run's wall clock went.
+        "timing",
     }
     assert set(record_view({"kind": "strategy"})) == {*STRATEGY_FIELDS, "kind"}
 

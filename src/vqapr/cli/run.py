@@ -163,7 +163,9 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     selected = tuple(getattr(args, "strategies", None) or ())
     for name in selected:
         definition.member(name)  # KeyError names the models the run does hold
-    frozen = preflight_run(project_root, definition)
+    # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/070`):
+    # the judgments above, the freeze and the roster read all see the same document.
+    frozen = preflight_run(workspace, definition)
     store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
     replace = bool(getattr(args, "force", False))
     try:
@@ -175,6 +177,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             jobs=int(getattr(args, "jobs", 1) or 1),
             replace_record=replace,
             record_account_positions=not getattr(args, "no_account_positions", False),
+            workspace=workspace,
         )
     except RunRecordLive as running:
         raise _held_record(running) from running
@@ -223,7 +226,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # What this run knew each instrument to be, or that it knew nothing. Reported on the
         # SUCCESS path on purpose: the run is legitimate, and the thing worth saying is what it
         # was computed against.
-        roster=_roster_envelope(project_root),
+        roster=_roster_envelope(outcome.roster),
     )
 
 
@@ -261,6 +264,9 @@ def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, 
             tuple(read_typed_table(store_root, run_id, FILL_TABLE, strategy_ref))
         ),
         "contract": record.get("contract"),
+        # Seconds by phase (`docs/issues/068`), so "my strategy is 5% of the wall clock and
+        # the snapshot is half of it" is read off the result rather than off a profiler.
+        "timing": record.get("timing"),
     }
 
 
@@ -290,37 +296,21 @@ def _held_record(running: RunRecordLive) -> InputError:
     )
 
 
-def _roster_envelope(project_root: Path) -> dict[str, object]:
+def _roster_envelope(roster: object | None) -> dict[str, object]:
     """The roster clause of the success envelope, present whether or not one is registered.
 
-    A mapping in every case, including failure, because a reader testing `payload["roster"]` for
-    absence should not have to distinguish "no roster" from "this version does not report one".
-    `known` is the field that answers the question.
+    A mapping in every case because a reader testing `payload["roster"]` for absence should not
+    have to distinguish "no roster" from "this version does not report one". `known` is the
+    field that answers the question.
 
-    **This runs after the run completed and its records are on disk.** `registered_roster` refuses
-    a registered-but-unreadable roster, which is right at run START; here it would be wrong: the
-    workspace and the tables can become unreadable in the minutes a real run takes, and letting
-    that refusal escape would report exit 1 for a run whose records exist.
+    Built from the roster the run READ (`RunResult.roster`), never from a second read after the
+    run (`docs/issues/070`): what this reports is what the fills were classified by, and the
+    `stale` branch that described a re-read failing after a long run describes a state that can
+    no longer occur.
     """
-    from vqapr.domain.errors import VqaprError
     from vqapr.public import roster_report
 
-    try:
-        report = roster_report(_registered_roster_for_report(project_root))
-    except VqaprError as vanished:
-        # `known: True`, because the run DID know: `registered_roster` refuses an unreadable
-        # roster at run start, so any run reaching this envelope read its roster successfully.
-        # `stale` is the fact that actually differs: the counts could not be re-read.
-        return {
-            "known": True,
-            "stale": True,
-            "note": (
-                "this run read a registered roster, and the roster -- or the workspace recording "
-                "it -- became unreadable before the envelope was written, so the per-category "
-                "counts could not be re-read; the "
-                f"frozen record states what the run actually used. {vanished}"
-            ),
-        }
+    report = roster_report(roster)  # type: ignore[arg-type]
     if report is None:
         return {
             "known": False,
@@ -331,9 +321,3 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
             ),
         }
     return {"known": True, **report}
-
-
-def _registered_roster_for_report(project_root: Path) -> object | None:
-    from vqapr.flow.roster import registered_roster
-
-    return registered_roster(project_root)

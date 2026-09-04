@@ -1,6 +1,8 @@
 # 070 -- `vqapr run` opens and decodes `workspace.yaml` four times in one command
 
-**Status:** open. Found 2026-09-04 by the 0.4.0 spine trace
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: `cli/run.py` opens the workspace once and hands it to `preflight_run` and `run`; `registered_roster` takes a `Workspace`; the roster is read once per run and travels in `RunResult.roster` to the envelope. A test counts one `Workspace.open` per `run` command.
+
+**Status when filed:** open. Found 2026-09-04 by the 0.4.0 spine trace
 (`docs/walkthroughs/2026-09-04-spine-stepper-0.4.0.html`, observation table: *"run 명령이
 workspace.yaml을 네 번 연다"*), against `develop @ 2b5e842a`. The trace saw the same four on
 0.3.0; the owner ruled it a defect on 2026-09-04.

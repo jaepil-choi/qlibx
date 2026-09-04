@@ -1,4 +1,4 @@
-# Handoff — 한 모양 캠페인, 2026-09-04 세션 종료 시점 (갱신: Step 2·2b 병합)
+# Handoff — 한 모양 캠페인, 2026-09-04 세션 종료 시점 (갱신: Step 2·2b·3 병합)
 
 **받는 사람:** 다음 세션의 에이전트. 이 문서와 저장소만으로 이어서 할 수 있게 썼다. 채팅 이력은 없다.
 **계획 문서:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md` (왜·무엇·순서). **살아 있는 상태:**
@@ -10,18 +10,18 @@
 
 | | |
 |---|---|
-| `develop` | **`a15df2f9` — Step 0·1·2·2b 병합됨.** fast **1,400 passed / 22 deselected** |
-| 브랜치 | 없음 — 다음은 `step-03-075-signed-book` |
+| `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected** |
+| 브랜치 | 없음 — 다음은 `step-04-delete-materialize` |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
-| record 번호 | 다음은 **`154`**. 캠페인 문서의 계획 번호도 154–158로 밀렸다 |
-| 열린 이슈 | **셋** — `023`·`027`·`075` (77파일 / 74닫힘) |
+| record 번호 | 다음은 **`155`**. 캠페인 문서의 계획 번호는 155–158 |
+| 열린 이슈 | **둘** — `023`·`027` (77파일 / 75닫힘). testbed run 4가 낸 넷은 전부 닫혔다 |
 
-**첫 행동:** `git checkout develop && git checkout -b step-03-075-signed-book`, 그리고 §3 Step 3.
+**첫 행동:** `git checkout develop && git checkout -b step-04-delete-materialize`, 그리고 §3 Step 4.
+**Step 4 전에 SLOW 스위트를 한 번 돌린다** — showcase 005–008을 이 단계가 다시 쓴다.
 
-> **§3의 Step 번호와 record 번호는 이 갱신 전에 쓰인 것이다.** Step 2는 닫혔고(record `152`),
-> 캠페인은 그 뒤에 Step **2b**(`077`, record `153`)를 얻었다. §3 Step 3 이후의 record 번호에
-> 각각 1을 더해 읽는다: 3→`154`, 4→`155`, 5→`156`, 6→`157`. 손 위치 자체는 그대로 유효하다.
+> **§3의 record 번호는 이 갱신 전에 쓰인 것이다.** Step 2·2b·3은 닫혔다(records `152`·`153`·`154`).
+> §3 Step 4 이후의 record 번호에 각각 1을 더해 읽는다: 4→`155`, 5→`156`, 6→`157`. 손 위치는 유효하다.
 
 ## 1. 소유자 결정 (2026-09-04, 전부 확정 — 다시 묻지 말 것)
 
@@ -46,6 +46,11 @@
   전부 제거 — agenda는 값이 아니라 **호출**(`_agenda_once`), `datasets`는 **멤버당 판정 하나**
   (`datasets[<component-id>]`), `_instant`는 없는 값에만 `None`. `VqaprError`가 이 모듈에서
   import되지 않는다. `077` CLOSED. fast 1,400 passed.
+- **Step 3** (`b4bef34b` 병합, record `154`): `Rebalance.signed(weights, *, gross=1)`이 부호 있는
+  가중치를 받아 long/short 비율을 **신호가 정한 대로** 둔다(`gross=2`가 교과서 $1/$1). `of`는
+  `portfolio.weighting.rescale(grid=QUANTUM)`을 부른다. **잰 차이가 버그였다** — book 전체 settle이
+  숏 쪽 잔차를 롱 이름에 얹어서 `invested=1`인 book의 gross가 1.000000000002였다. side별 settle로
+  정확해졌고 cash는 9케이스 전부에서 안 바뀌었다. `075` CLOSED. fast 1,417 passed.
 - `.agent/project.yaml`의 `active_campaign`이 새 캠페인 문서를 가리킨다.
 
 ## 2.5 소유자 결정 D7 (2026-09-04, Step 2b에서)
@@ -105,7 +110,9 @@ load → save)를 상수 문자열 하나로 감싼다.
 
 </details>
 
-### Step 3 — `075`: `Rebalance.of`/`.signed`가 `rescale`을 부른다 (record `154`) ← **다음 손**
+### ~~Step 3 — `075`~~ — **완료**, record `154`.
+
+### Step 4 — `flow/materialize.py` 삭제 (record `155`) ← **다음 손**
 
 - `src/vqapr/authoring.py:573-720` `Rebalance.of`. 647-690의 quantise+settle 블록이
   `src/vqapr/portfolio/weighting.py:161 rescale(weights, long=, short=, grid=QUANTUM)`의 사본이다.
@@ -123,7 +130,6 @@ load → save)를 상수 문자열 하나로 감싼다.
 - `public.py`에 `signed`는 classmethod라 export 변경 없음. `SKILL.md`의 `Rebalance.of` 문단 옆에 `signed`
   한 줄.
 
-### Step 4 — `flow/materialize.py` 삭제 (record `154`)
 
 확인된 사실: run의 표는 parquet 디렉터리이고 그대로 dataset으로 등록·읽기가 된다. 재현 스크립트(세션
 scratchpad에 있었으므로 여기 옮긴다 — `tests/`에 이 형태의 테스트를 하나 넣어 "run 표를 등록한다"를 고정):
@@ -227,6 +233,9 @@ import하는 순환은 둘 다 `FlowContext`만 보게. 확인 대상: `run_stat
   편집 스크립트는 scratchpad 파일로 쓰고(`Write`) 실행; 테스트 추가는 heredoc 하나만.
 - 긴 heredoc 하나도 파싱에 실패한다(2026-09-04에 ~120줄 마크다운에서 재발, 파일이 아예 안 생겼다).
   **긴 파일은 `Write`로 쓴다.** `cat > f <<'EOF'`가 조용히 아무것도 안 만들 수 있으니 `ls`로 확인할 것.
+- **`git add -A` 금지.** 소유자가 병렬로 편집 중인 파일(2026-09-04에 `README-draft.md`·`docs/vqapr-prd.md`·
+  design 문서 하나, 421줄)이 커밋에 딸려 들어갔다. 손댄 파일을 명시해서 add하거나, add 뒤 `git status`로
+  확인할 것. 이미 섞였으면 `git reset --soft HEAD~1` → `git restore --staged <남의 파일>` → 재커밋.
 - 백그라운드로 띄운 pytest는 **띄운 시점의 트리**를 수집한다. 그 뒤에 테스트를 고치면 그 실행 결과는
   못 쓴다 — 다시 돌린다. 파이프(`| grep`)를 물리면 notification의 exit code는 pytest가 아니라 grep 것이다.
 - 한글은 tool 인자에 **리터럴 UTF-8**로(AGENTS.md 비ASCII 절). `PYTHONUTF8=1` 항상.
@@ -241,7 +250,7 @@ import하는 순환은 둘 다 `FlowContext`만 보게. 확인 대상: `run_stat
   → sed → `ruff check --fix src/`(import 정렬·중복 병합)로. F402(loop var가 import를 가린다)는 손으로.
 - panel grain은 `RowsLookback`/`CalendarLookback`, `InstantsLookback`은 `grain: rows`에서만 (Step 4 실험에서
   한 번 틀렸다).
-- record 번호: 다음은 `154`. 파일명 `NNN-kebab.md`, 같은 커밋에 넣는다. harness/docs-only 변경은 record 없음.
+- record 번호: 다음은 `155`. 파일명 `NNN-kebab.md`, 같은 커밋에 넣는다. harness/docs-only 변경은 record 없음.
 - 캠페인 관례: 단계 = 브랜치 = `--no-ff` 병합. develop은 항상 green.
 
 ## 6. 검증 명령

@@ -10,14 +10,12 @@
 
 | | |
 |---|---|
-| `develop` | `ed3c348c` — Step 0 병합됨 (`5bc05103`). 그 앞은 `dd55822b`(attempts/ 제거), `8138f027`(0.4.1 stepper) |
-| 브랜치 `step-01-072-current` | `f55dc610` — **Step 1 완료, 커밋됨, 병합 대기.** `tests/data/test_panel.py` 11 passed, `tests/extension`·KRX cost journey green, ruff clean. 전체 fast 스위트를 백그라운드로 띄웠으나 결과를 못 봤을 수 있다 |
+| `develop` | **`aded3145` — Step 0·Step 1 병합됨.** fast **1,388 passed / 22 deselected**. 그 앞은 `dd55822b`(attempts/ 제거), `8138f027`(0.4.1 stepper) |
+| 브랜치 | 없음 — 다음은 `step-02-076-one-preflight-door` |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected**. Step 0 브랜치도 1,387 passed |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 
-**첫 행동:** `git checkout step-01-072-current && PYTHONUTF8=1 uv run pytest tests/ -q -p no:cacheprovider`
-→ 1,388 passed(테스트 하나 추가)이면 `git checkout develop && git merge --no-ff step-01-072-current -m "Merge step-01-072-current into develop" && git branch -d step-01-072-current`.
-그 다음 `.agent/plans/active/one-shape-campaign.md`의 M1을 체크하고 `step-02-076-one-preflight-door` 브랜치로.
+**첫 행동:** `git checkout develop && git checkout -b step-02-076-one-preflight-door`, 그리고 §3 Step 2.
 
 ## 1. 소유자 결정 (2026-09-04, 전부 확정 — 다시 묻지 말 것)
 

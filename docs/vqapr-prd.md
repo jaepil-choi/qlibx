@@ -391,6 +391,40 @@ diagnostic, user decision을 catalog에 남겨 다음 연구의 출발점으로 
 operation이 쓰였는가, 기존 alpha와의 correlation·overlap·incremental contribution은 어떠한가, 실패 이유와
 미충족 capability는 무엇이었는가, 재실행 없이 재사용할 수 있는가.
 
+### 2.9 BYOD — Bring Your Own Data
+
+vqapr는 데이터를 소유하지도 가져오지도 않는다. vendor connector, downloader, bundled market dataset은 제품
+범위가 아니다. **연구 데이터와 그 경제적 의미는 user project가 소유한다**(§12.4).
+
+이 원칙은 두 방향으로 작동하며, 둘이 함께 있어야 성립한다.
+
+- **의미를 강제하지 않는다.** field 이름, universe, currency, 관측 주기, asset class를 package가 미리 정하지
+  않는다. 무엇이 instrument이고 어떤 값이 무엇을 뜻하는지는 user가 binding하며, 지금 필요하지 않은 semantic을
+  미리 요구해 등록을 막지 않는다(§4.1).
+- **형식을 읽어주지 않는다.** 원천이 xlsx든 database dump든 vendor API든, 그것을 선언된 columnar dataset으로
+  만드는 것은 user project와 그 agent의 일이다. package는 형식 변환, 스키마 추론, 인코딩 처리, 시트 구조
+  해석을 하지 않는다(§4.0).
+
+**임의의 데이터를 받아들인다는 것은 임의의 형식을 읽는다는 뜻이 아니라 의미를 강제하지 않는다는 뜻이다.**
+
+한쪽만 취하면 원칙이 무너진다. 의미도 형식도 열면 package 안에 임의 형식 reader가 들어오고, 형식을 닫으면서
+의미를 package가 정하면 그것은 이미 user의 데이터가 아니다.
+
+#### 따라오는 세 가지 의무
+
+1. **package는 계약을 발행한다.** user 쪽이 무엇을 만들어야 하는지 error 이전에 알아야 하므로, 등록 가능한
+   dataset이 만족해야 하는 조건을 machine-readable하게 발행한다(§4.0).
+2. **만드는 쪽과 판정하는 쪽이 갈린다.** 계약을 만족하는 산출물을 만드는 것은 user 쪽이고, 만족하는지
+   판정하는 것은 package다. package가 대신 만들어 주지 않으며, user가 판정을 대신하지도 않는다.
+3. **준비를 돕는 것은 skill이다.** 원천을 읽어 축, availability, 체결 시각과 가격의 후보를 제안하는 것은
+   agent가 자기 도구로 하는 일이며 package operation이 아니다(§11.1, §4.4).
+
+가장 어려운 판단인 `available_at`도 이 원칙을 따른다. **package가 대신 고르지 않는다** — 추측하는 순간
+look-ahead가 조용히 들어오고, 그 판단의 근거는 데이터가 아니라 도메인에 있기 때문이다(§4.2).
+
+예외는 하나다. **계산이 만든 데이터의 `available_at`은 package가 정한다.** 그 값은 실제로 소비한 관측에서
+결정되므로 생산자가 주장할 것이 아니다(§4.1, §4.5). 그 외에는 계산 결과도 원본과 같은 등록 계약을 따른다.
+
 ---
 
 ## 3. 시간과 point-in-time correctness
@@ -595,6 +629,8 @@ semantic binding만 먼저 확인하고, 실제 workflow component를 호출할 
 **등록 성공은 모든 downstream workflow와의 호환성 보증이 아니다.**
 
 ### 4.0 입력 계약 — 무엇을 읽고 무엇을 읽지 않는가
+
+이 절은 §2.9 BYOD 원칙이 등록 단계에서 무엇을 뜻하는지 정한다.
 
 vqapr는 **선언된 columnar dataset을 읽는다.** 원천이 무엇이든 — xlsx, csv, 데이터베이스 덤프, 벤더
 API — 그것을 읽을 수 있는 형태로 만드는 것은 **user project와 그 agent의 책임**이다(§12.4).

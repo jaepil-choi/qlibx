@@ -36,7 +36,7 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
     path = root / f"{identifier}.py"
     source = (
         "from vqapr.authoring import Hold\n"
-        "from vqapr.models.strategy_model import StrategyModel\n"
+        "from vqapr.authoring import StrategyModel\n"
         f"class {identifier.title().replace('-', '')}(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ()\n"

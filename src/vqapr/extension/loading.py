@@ -18,6 +18,7 @@ import inspect
 import sys
 from pathlib import Path
 
+from vqapr.authoring import DataModel, StrategyModel
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
@@ -26,8 +27,6 @@ from vqapr.exchange.venue import AcademicExchange, Exchange
 from vqapr.exchange.venues.krx import KrxExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.models.data_model import DataModel
-from vqapr.models.strategy_model import StrategyModel
 
 _STAGE = "component.load"
 

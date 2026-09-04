@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from vqapr.calls import DataModelContext
 from vqapr.cli.new import run as new_command
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
@@ -35,7 +36,6 @@ from vqapr.data.windows import ModelWindow
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model
 from vqapr.extension.scaffold import render
-from vqapr.models.contexts import DataModelContext
 from vqapr.public import Workspace, register_data_model, register_dataset
 
 KST = ZoneInfo("Asia/Seoul")

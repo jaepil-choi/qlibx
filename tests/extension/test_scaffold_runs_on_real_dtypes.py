@@ -36,6 +36,7 @@ import duckdb
 import pytest
 
 from vqapr.authoring import EconomicAccountView
+from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -46,7 +47,6 @@ from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model, load_strategy_model
 from vqapr.extension.scaffold import render
-from vqapr.models.contexts import DataModelContext, StrategyModelContext
 from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 

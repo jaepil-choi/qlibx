@@ -26,6 +26,8 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from vqapr.authoring import DataModel
+from vqapr.calls import DataModelContext
 from vqapr.data.datasets import DatasetRegistration, Grain, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.data.windows import AccessRecord, ModelWindow
@@ -35,8 +37,6 @@ from vqapr.domain.rows import Row, Rows, normalize_rows
 from vqapr.flow.loop import OccurrenceFlow
 from vqapr.flow.run import FrozenDataModel, FrozenRun
 from vqapr.flow.stamping import derived_available_at
-from vqapr.models.contexts import DataModelContext
-from vqapr.models.data_model import DataModel
 from vqapr.runtime.agendas import OperationOccurrence
 from vqapr.workspace import Workspace
 

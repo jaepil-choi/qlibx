@@ -40,6 +40,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from vqapr.authoring import DataModel, StrategyModel
 from vqapr.constraints.constraint import Constraint
 from vqapr.domain.errors import (
     Diagnosis,
@@ -58,8 +59,6 @@ from vqapr.extension.loading import (
     load_strategy_model,
     positional_arity,
 )
-from vqapr.models.data_model import DataModel
-from vqapr.models.strategy_model import StrategyModel
 
 STAGE = "component.conformance"
 _RETRY = "fix the component to match its contract, then register it again"

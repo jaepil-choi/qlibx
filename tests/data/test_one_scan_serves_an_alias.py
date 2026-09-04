@@ -18,14 +18,13 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from vqapr.authoring import DatasetInput, RowsLookback
+from vqapr.calls import DataModelContext, requirements_for
 from vqapr.data import store as store_module
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.models.calls import requirements_for
-from vqapr.models.contexts import DataModelContext
 from vqapr.public import register_dataset
 from vqapr.workspace import Workspace
 

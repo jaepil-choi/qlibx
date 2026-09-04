@@ -22,7 +22,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from vqapr.domain.identifiers import ComponentId, component_id
-from vqapr.models.memory import ModelMemory, normalize_memory
+from vqapr.domain.memory import ModelMemory, normalize_memory
 
 
 class ComponentKind(StrEnum):

@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 76개 파일이 있고 **70개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 76개 파일이 있고 **71개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,7 +15,7 @@
 
 ---
 
-## 1. 열린 것 — 여섯
+## 1. 열린 것 — 다섯
 
 | # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
@@ -56,7 +56,7 @@ F-019는 에이전트 본인의 실수(`No`)라 단독으로 접수하지 않고
 여기에만 있다 — 그 파일은 run 4 스테이징 때 초기화되었고, 사본은
 `kaist-thesis/docs/handoff/2026-09-04-vqapr-testbed-run3-findings.md`에 있다.
 
-### 시나리오 testbed run 2가 낸 열둘 (2026-09-03, `0.3.0` wheel) — `065`의 설계 절반만 남았다
+### 시나리오 testbed run 2가 낸 열둘 (2026-09-03, `0.3.0` wheel) — 전부 닫혔다
 
 `kaist-thesis/vqapr-scenario-testbed/`에서 첫 사용자 에이전트가 논문의 FF5+MOM residual arm을 끝까지
 수행하며 적은 `FINDINGS.md` 14건 중 소스에서 확인된 12건. 접수 표시는 그쪽 `FINDINGS.md` 각 항목에
@@ -64,11 +64,11 @@ F-019는 에이전트 본인의 실수(`No`)라 단독으로 접수하지 않고
 record `148`이 닫았다.** `064`는 2026-09-04 소유자가 **won't fix**로 닫았다 — 종가 데이터로 그 종가에
 거래하는 것은 forward-looking이고, 체결이 콜백보다 strictly 늦어야 한다는 규칙이 프레임워크의 의도다.
 **나머지 아홉(`055`·`056`·`057`·`060`·`062`·`063`·`066`·`067`·`068`)은 record `149`가 2026-09-04에
-한 브랜치(`fix/0.4.0-open-issues`)로 닫았고, `065`는 docs 절반만 닫혔다.**
+한 브랜치(`fix/0.4.0-open-issues`)로 닫았고, `065`는 docs 절반을 같은 record가, 설계 절반을 2026-09-04 소유자 판정이 닫았다.**
 
 | # | 제목 | 종류 | FINDINGS |
 |---|---|---|---|
-| `065` | `inputs()`가 `initial_model_memory` 전에 불리는데 아무도 말하지 않는다 (**docs 절반은 record `149`가 닫았다**); 한 클래스를 여러 id로 config와 함께 등록할 수 있어야 하는가 — **설계 결정 대기** (`040`의 다음 질문) | design | F-014 |
+| `065` | `inputs()`가 `initial_model_memory` 전에 불리는데 아무도 말하지 않는다 — **닫힘.** docs 절반은 record `149`, 설계 절반은 2026-09-04 소유자 판정(한 모양 캠페인 A1): **전략 하나 = 파일 하나.** 상수만 달라도 새 파일이며, 같은 파일의 재등록은 기록에 tuning으로 읽힌다. config 채널은 만들지 않는다 | design | F-014 |
 
 파일로 만들지 않은 것: F-003(cp949 콘솔, 에이전트 환경); F-015(`values`가 접근마다 전 컬럼을 다시 만든다 —
 `061`과 같은 뿌리, record `143`이 닫았다; 그 profile 수치는 `061` 파일에 붙였다). `027`에는 그 run의 비용
@@ -93,7 +93,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 
 ---
 
-## 2. 닫힌 것 — 일흔
+## 2. 닫힌 것 — 일흔하나
 
 | # | 닫은 것 |
 |---|---|
@@ -152,6 +152,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 | `058` | record `146` — fill 행의 `event_time`도 전략 agenda의 zone으로; 기록 표가 parquet이라 zone이 파일에 실린다 |
 | `050` | CLOSED 2026-09-01 |
 | `055` `056` `057` `060` `062` `063` `066` `067` `068` `069` `070` | **record `149`, 2026-09-04, 한 브랜치.** skill이 코드를 따라간다(`062`·`067`), scaffold alias가 dataset을 따른다(`063`), 미등록 dataset은 한 번만 보고(`056`), 없는 record는 이름을 대며 거절(`057`), 모든 envelope에 `workspace_root`와 상위 workspace 발견 시 거절(`066`), `show model`은 모델의 선언을 읽는다(`055`), `vqapr rm dataset`(`060`), 파생 agenda는 날짜로 먼저 자르고 명령당 한 번(`069`), `run`은 workspace를 한 번 연다(`070`), snapshot은 Arrow이고 기록에 `timing` 블록(`068`) |
+| `065` | docs 절반 record `149`; 설계 절반 **2026-09-04 소유자 판정 — 전략 하나 = 파일 하나**, config 채널 없음 (한 모양 캠페인 A1) |
 | `064` | **CLOSED 2026-09-04 — WON'T FIX, 소유자 판정.** 종가 데이터로 그 종가에 거래하는 것은 look-ahead다. 체결은 콜백보다 strictly 늦다는 규칙이 의도이며 `same_close`는 만들지 않는다. 다시 열지 말 것 |
 | `071` `073` `074` | **record `150`, 2026-09-04, 한 브랜치.** `Rebalance` 거절 다섯이 값과 경계를 댄다(`071`); `SimulationFailure`가 `component_id`와 저자 파일의 프레임(`source.file`/`line`, `key_path: strategies.<id>`)을 든다(`071`); `--jobs` 워커는 예외 대신 `StrategyOutcome`을 돌려주고 `run`은 전략마다 outcome을 내며 한 전략의 거절이 나머지를 멈추지 않는다 — envelope는 `ok:false`, `stage: run.strategy_failed`, 전략별 `status`(`073`); `list strategies --run`이 record 없는 디렉터리를 `running`/`unfinished`로 `chunks`·`last_event_time`·`lock.refreshed_ago`와 함께 보여주고 skill에 "Watching a long run"이 있다(`074`) |
 

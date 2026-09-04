@@ -33,11 +33,11 @@ from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHist
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
+from vqapr.domain.memory import ModelMemory
 from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
-from vqapr.models.memory import ModelMemory
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
 
@@ -279,11 +279,11 @@ def requirements_for(declaration: DatasetInput) -> tuple[DataRequirement, ...]:
 class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
     """What every Model role shares: a declaration of reads, and portable memory.
 
-    **The author's base class, so it lives on the author's surface.** It used to live in
-    `models/model.py` while an authoring `DataModel` and `StrategyModel` were defined here without
-    it -- which is why the two authored kinds shared no ancestor, and why an author who wrote
-    against this module got a class the loader could not run (`docs/issues/036`). `models/model.py`
-    re-exports this one.
+    **The author's base class, so it lives on the author's surface.** It used to live in an
+    engine-side `models/` package while an authoring `DataModel` and `StrategyModel` were defined
+    here without it -- which is why the two authored kinds shared no ancestor, and why an author
+    who wrote against this module got a class the loader could not run (`docs/issues/036`). The
+    engine-side names were re-exports of these until the one-shape campaign deleted them.
 
     **Both roles declare their reads here, in one place and one shape.** A first-time user once had
     to build a ten-row table of the ways authoring the two roles differed; the owner ruled that
@@ -874,7 +874,7 @@ class ConstraintCall(ABC):
 
     **An abstract contract, like `DataCall` and `StrategyCall`, and no longer a value.** It was a
     concrete frozen dataclass that nothing in `src/` ever built -- only tests -- while the engine
-    handed a Constraint a `ModelWindow` and a tuple of instruments instead. `models/contexts.py`
+    handed a Constraint a `ModelWindow` and a tuple of instruments instead. `vqapr.calls`
     now supplies the one concrete implementation, the same way it does for the other two roles.
 
     **The account came off it.** It used to carry an `EconomicAccountView`, which meant `project`

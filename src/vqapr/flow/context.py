@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import AccountHistoryInput
+from vqapr.authoring import AccountHistoryInput, StrategyModel
 from vqapr.constraints.constraint import Constraint
 from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.windows import ModelWindow
@@ -52,7 +52,6 @@ from vqapr.flow.run_state import (
     AcceptedRunState,
     RunStateRepository,
 )
-from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
 )

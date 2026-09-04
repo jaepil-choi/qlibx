@@ -20,8 +20,8 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+from vqapr.domain.memory import normalize_memory
 from vqapr.extension.component import ComponentKind
-from vqapr.models.memory import normalize_memory
 
 
 def fingerprint_component(

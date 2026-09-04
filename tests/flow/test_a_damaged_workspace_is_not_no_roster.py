@@ -77,21 +77,27 @@ def test_a_damaged_workspace_refuses_rather_than_reading_as_no_roster(
     )
 
 
-def test_the_envelope_says_known_and_stale_rather_than_no_roster(tmp_path: Path) -> None:
+def test_the_envelope_reports_the_roster_the_run_read_whatever_happens_to_the_file(
+    tmp_path: Path,
+) -> None:
     """What the refusal buys, read off the envelope a user actually sees.
 
-    `cli/run.py`'s `_roster_envelope` already catches the refusal and reports
-    `known: true, stale: true` -- the honest answer for a run that read its roster and then lost
-    the record of it. Swallowing the refusal produced `known: false`, the same envelope a
-    genuinely rosterless run gets, whose note says every fill recorded `kind: None`.
+    `cli/run.py`'s `_roster_envelope` used to re-read the roster after the run and report
+    `known: true, stale: true` when the workspace had become unreadable meanwhile. Since
+    `docs/issues/070` it is handed the roster the run READ (`RunResult.roster`) and reads
+    nothing: a workspace damaged after the run cannot turn a known roster into `known: false`,
+    nor into a stale marker -- the counts are the ones the fills were classified by.
     """
-    _register(tmp_path, WHOLE_ROSTER, into="roster")
+    digest = _register(tmp_path, WHOLE_ROSTER, into="roster")
+    read = registered_roster(tmp_path)
     Workspace.open(tmp_path).path.write_text("datasets: [", encoding="utf-8")
 
-    envelope = _roster_envelope(tmp_path)
+    envelope = _roster_envelope(read)
 
     assert envelope["known"] is True, "this project registered a roster; the envelope must say so"
-    assert envelope["stale"] is True, "and must say the counts could not be re-read"
+    assert "stale" not in envelope
+    assert envelope["digest"] == digest
+    assert envelope["by_kind"] == {"stock": 1, "etf": 1}
 
 
 def test_an_absent_workspace_is_still_no_roster(tmp_path: Path) -> None:

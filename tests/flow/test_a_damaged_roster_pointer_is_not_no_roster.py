@@ -86,16 +86,15 @@ def test_a_damaged_pointer_refuses_rather_than_reading_as_absent(
         "the typed refusal must reach the caller instead of becoming `no roster`"
     )
 
-    # The envelope side takes the same refusal. `cli/run.py`'s `_roster_envelope` catches it and
-    # reports `known: true, stale: true`, which is the honest answer for a run that read its
-    # roster and then lost the record of it -- the opposite of the `known: false` this used to
-    # produce. It reaches the refusal through `registered_roster`: since `docs/issues/050`,
-    # `roster_report` is handed the run's read and touches no file of its own.
+    # The envelope side never reads the pointer at all (`docs/issues/070`): `cli/run.py`'s
+    # `_roster_envelope` is handed the roster the run READ (`RunResult.roster`), so a pointer
+    # damaged after the run cannot change what the envelope says, and a pointer damaged before
+    # it is the refusal above, at run start, before anything is spent. `None` here is the one
+    # honest `known: false`: a run that read no roster because none was registered.
     from vqapr.cli.run import _roster_envelope
 
-    envelope = _roster_envelope(project)
-    assert envelope["known"] is True
-    assert envelope["stale"] is True
+    assert _roster_envelope(None)["known"] is False
+    assert "stale" not in _roster_envelope(None)
 
 
 def test_a_run_that_never_registered_one_is_unaffected(tmp_path: Path) -> None:

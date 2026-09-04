@@ -1178,10 +1178,17 @@ def _resolve_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | Non
             f"{', '.join(present) or '(none)'}. The root is the `store_root` `vqapr run` prints "
             "(`<project>/.vqapr` by default), not the project directory"
         )
+    # Every member directory, finished or not: a killed strategy leaves rows and no
+    # `strategy.json`, and those rows are exactly what a reader comes back for.
+    strategies = run_directory / STRATEGIES_DIRECTORY
+    members = (
+        tuple(sorted(child.name for child in strategies.iterdir() if child.is_dir()))
+        if strategies.is_dir()
+        else ()
+    )
     if strategy_ref is None:
         if (run_directory / TABLES_DIRECTORY).is_dir():
             return None
-        members = strategy_refs(root, run_id)
         if len(members) == 1:
             return members[0]
         raise RunRecordMissing(
@@ -1189,12 +1196,11 @@ def _resolve_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | Non
             + (
                 f"{len(members)} strategies ({', '.join(members)}); name one as strategy_ref"
                 if members
-                else "no finished strategy and no tables of its own"
+                else "no strategy and no tables of its own"
             )
         )
     if (record_directory(root, run_id, strategy_ref)).is_dir():
         return strategy_ref
-    members = strategy_refs(root, run_id)
     matching = [ref for ref in members if ref.rsplit("@", 1)[0] == strategy_ref]
     if len(matching) == 1:
         return matching[0]

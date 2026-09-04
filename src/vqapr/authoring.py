@@ -850,10 +850,20 @@ class StrategyModel(Model):
         return None
 
     def save_payload(self, target: BinaryIO) -> None:
-        """Persist private callback state that does not fit `memory` into Flow-owned staging."""
+        """Persist private callback state that does not fit `memory` into Flow-owned staging.
+
+        Preflight calls `save_payload` on a fresh instance, `load_payload` on another with those
+        bytes, and `save_payload` again; the bytes must match before the first callback. So this
+        must be deterministic -- no timestamp, no `id()`, no unordered set iteration.
+        """
 
     def load_payload(self, source: BinaryIO) -> None:
-        """Restore what `save_payload` wrote."""
+        """Restore what `save_payload` wrote.
+
+        A class with nothing to save yet must accept an EMPTY source: preflight round-trips the
+        default `save_payload`, which writes no bytes, so an unguarded `pickle.load` refuses the
+        run with `EOFError` before a single callback runs.
+        """
 
     @abstractmethod
     def decide(self, call: StrategyCall) -> Hold | Rebalance:

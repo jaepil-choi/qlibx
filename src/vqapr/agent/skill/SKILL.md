@@ -479,6 +479,14 @@ What the strategy needs to remember between callbacks lives in `self.memory` (st
 framework restores it before every `decide()` and snapshots it after, so read it, change it, and
 leave it. One instance serves the whole run.
 
+State that will not fit strict JSON goes through `save_payload`/`load_payload`, and preflight
+proves the pair **before the first callback**: it calls `save_payload` on a fresh instance,
+`load_payload` on a second fresh instance with those bytes, then `save_payload` again, and the two
+byte strings must match. So `save_payload` must be deterministic (no timestamp, no `id()`, no
+unordered set iteration), and `load_payload` must accept an **empty** source -- the default
+`save_payload` writes nothing, so a bare `pickle.load(source)` refuses the run with `EOFError`.
+The refusal names which of the three steps failed and carries the original exception.
+
 `Rebalance.of` takes **relative** conviction. `long={"A": 2, "B": 1}` means A is liked twice as
 much as B; normalising, rounding onto the canonical grid and balancing against cash is the
 package's arithmetic, not yours. You never make weights sum to one by hand.

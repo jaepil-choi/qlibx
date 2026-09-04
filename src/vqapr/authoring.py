@@ -248,8 +248,9 @@ class DataCall(ABC):
     def read(self, alias: str, field: str) -> PanelWindow:
         """One field of a panel-grain alias declared in `DataModel.inputs()`, as a 2d window.
 
-        `instants` x `instruments`, a slice of the panel the run built once; `latest()` is the
-        newest value per name. Refused on a `rows`-grain alias, which is read with `rows`.
+        `instants` x `instruments`, a slice of the panel the run built once; `current()` is the
+        cross-section at the window's last instant, `latest()` the newest value per name anywhere
+        in it. Refused on a `rows`-grain alias, which is read with `rows`.
         """
 
     @abstractmethod
@@ -802,8 +803,9 @@ class StrategyCall(ABC):
     def read(self, alias: str, field: str) -> PanelWindow:
         """One field of a panel-grain alias declared in `StrategyModel.inputs()`, as a 2d window.
 
-        `instants` x `instruments`, a slice of the panel the run built once; `latest()` is the
-        newest value per name. Refused on a `rows`-grain alias, which is read with `rows`.
+        `instants` x `instruments`, a slice of the panel the run built once; `current()` is the
+        cross-section at the window's last instant, `latest()` the newest value per name anywhere
+        in it. Refused on a `rows`-grain alias, which is read with `rows`.
         """
 
     @abstractmethod
@@ -899,8 +901,9 @@ class ConstraintCall(ABC):
     def read(self, alias: str, field: str) -> PanelWindow:
         """One field of a panel-grain alias declared in `Constraint.inputs()`, as a 2d window.
 
-        `instants` x `instruments`, a slice of the panel the run built once; `latest()` is the
-        newest value per name. Refused on a `rows`-grain alias, which is read with `rows`.
+        `instants` x `instruments`, a slice of the panel the run built once; `current()` is the
+        cross-section at the window's last instant, `latest()` the newest value per name anywhere
+        in it. Refused on a `rows`-grain alias, which is read with `rows`.
         """
 
     @abstractmethod

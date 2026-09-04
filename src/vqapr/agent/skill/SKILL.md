@@ -116,8 +116,12 @@ registered components, one file and one id each.
 
 - **`read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a
   **`PanelWindow`**: `instants` (the same for every name) x `instruments`; `values[name]` is
-  that name's values over the instants, `None` where it had none; `latest()` is the newest value
-  per name -- the cross-section. It is a slice of a panel the run built once, not a query.
+  that name's values over the instants, `None` where it had none; **`current()` is the
+  cross-section at the last instant** -- a name with no row there is absent, not carried forward;
+  `latest()` is the newest value per name anywhere in the window, however old. On a sparse table
+  (a name has a row only on sessions it is eligible) a decision wants `current()`: `latest()`
+  silently trades an ineligible name on a stale value. It is a slice of a panel the run built
+  once, not a query.
 - **`rows(alias)` on `grain: rows`** (the vendor's long table) returns a **tuple of
   `Observation`s**, one per (instant, instrument), each carrying `instrument_id`, its own
   `available_at` and `values`; names interleave within an instant.

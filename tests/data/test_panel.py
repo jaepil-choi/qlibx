@@ -257,3 +257,35 @@ def test_a_dataset_with_no_instrument_axis_is_a_one_column_panel(tmp_path: Path)
     assert read.instruments == ()
     assert read.values == {NO_INSTRUMENT: (Decimal("0.032"),)} or read.values == {NO_INSTRUMENT: (0.032,)}
     assert read.latest()[NO_INSTRUMENT] == read.series()[-1]
+    assert dict(read.current()) == dict(read.latest()), "one column, one entry (072)"
+
+
+def test_current_is_the_cross_section_and_latest_carries_forward(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """`docs/issues/072`: on a sparse panel `latest()` promotes a stale row; `current()` does not.
+
+    `volume` is null on the 6th for both names. A window ending on the 6th has a volume for A
+    from the 5th, which `latest()` returns and `current()` refuses to carry forward.
+    """
+    store = DuckDbObservationStore(_workspace(tmp_path, model_price_parquet))
+
+    sparse = _context(store, 6).read("prices", "volume")
+    assert sparse.latest() == {"A": 10.0, "B": 20.0}, "the newest value per name, from the 5th"
+    assert dict(sparse.current()) == {}, "no name has a volume on the 6th"
+
+    dense = _context(store, 7).read("prices", "close")
+    assert dict(dense.current()) == {"A": 105.0, "B": 53.0}
+    assert dict(dense.current()) == dict(dense.latest()), "on a dense panel the two agree"
+    assert dense._values == {}, "current() converts one scalar per name, not a column"
+
+    empty = ModelWindow(
+        evaluation_time=_at(1),
+        instruments=("A", "B"),
+        store=store,
+        allowed_requirements=requirements_for(ALIAS),
+        consumer_id="reversal",
+    )
+    before = DataModelContext(window=empty, reads={"prices": ALIAS}).read("prices", "close")
+    assert len(before) == 0 and dict(before.current()) == {} and dict(before.latest()) == {}
+

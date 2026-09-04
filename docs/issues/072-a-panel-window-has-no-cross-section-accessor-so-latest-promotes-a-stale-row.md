@@ -1,6 +1,6 @@
 # 072 -- a panel window has no cross-section accessor, so `latest()` silently promotes a stale row to the current one
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 3
+**Status:** **CLOSED 2026-09-04** on `step-01-072-current`, record `docs/implementations/151-a-window-has-a-cross-section.md`: `PanelWindow.current()` is the cross-section at the window's last instant (a name with no row there is absent); `latest()` keeps its meaning and its docstring says so; the skill, the three `read()` docstrings and the scaffolds name both. **Status when filed:** open. Found 2026-09-03 by the scenario testbed run 3
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-020**, with **F-019** as the second half of
 the evidence), against `vqapr-0.3.0`. Confirmed against source 2026-09-04; unchanged at `v0.4.0`.
 Filed although the agent marked both findings `No`: two `No` entries landing on the same accessor

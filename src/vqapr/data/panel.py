@@ -157,8 +157,9 @@ class PanelWindow:
     """What a Model receives for one field of a panel-grain alias: a 2d slice, not a copy.
 
     `instants` is the window's instant axis, common to every name; `instruments` its columns;
-    `values[name]` that name's values over `instants` (`None` where absent); `latest()` the
-    newest non-null value per name -- the cross-section a one-instant lookback means.
+    `values[name]` that name's values over `instants` (`None` where absent); `current()` the
+    cross-section at the window's last instant, a name absent when it has no row there;
+    `latest()` the newest non-null value per name anywhere in the window.
 
     **What an access costs.** The window is a slice of Arrow buffers and nothing is converted
     until asked. `values[name]` converts that one column, once per window (`docs/issues/061`
@@ -215,8 +216,35 @@ class PanelWindow:
         """
         return _LazyColumns(self)
 
+    def current(self) -> Mapping[str, object]:
+        """The cross-section at the window's last instant: one value per name that has a row there.
+
+        A name with no row -- or a null -- at `max_available_at` is absent, never carried forward.
+        This is the accessor a decision wants on a sparse panel, where "no row today" means the
+        name is not in today's universe: a monthly-rebalanced residual table had rows for a name
+        only on sessions it was eligible, and reading it with `latest()` traded ineligible names
+        on loadings up to a week stale for about 1% of name-days (`docs/issues/072`). Nothing
+        inside the package can see that mistake, because every value involved was legitimately
+        available; only the accessor's meaning was wrong for the question asked.
+        """
+        found: dict[str, object] = {}
+        if self.stop <= self.start:
+            return MappingProxyType(found)
+        last = self.stop - self.start - 1
+        for name in self.panel.instruments or (NO_INSTRUMENT,):
+            cell = self._column(name)[last]
+            if cell.is_valid:
+                found[name] = cell.as_py()
+        return MappingProxyType(found)
+
     def latest(self) -> Mapping[str, object]:
-        """The newest non-null value per name inside the window; a name with none is absent."""
+        """The newest non-null value per name ANYWHERE in the window; a name with none is absent.
+
+        A time-series read: the last value each name carried, however old. On a sparse panel this
+        is not the cross-section at the evaluation instant -- a name whose newest value is a week
+        old returns it without a word, and the mapping does not say which values are current.
+        `current()` answers that question (`docs/issues/072`).
+        """
         found: dict[str, object] = {}
         keys = self.panel.instruments or (NO_INSTRUMENT,)
         for name in keys:

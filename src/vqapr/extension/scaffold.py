@@ -106,7 +106,8 @@ class {class_name}(va.DataModel):
 _PANEL_HISTORY_BLOCK = """\
         # One field of the alias as a window: `instants` x `instruments`, the same instants for
         # every name. `window.values[name]` is that name's values over them, `None` where it had
-        # none; `window.latest()` is the newest value per name.
+        # none; `window.current()` is the cross-section at the last instant (a name with no row
+        # there is absent), `window.latest()` the newest value per name anywhere in the window.
         window = context.read("{alias}", FIELD)
         history: dict[str, list[Decimal]] = {{}}
         for name in window.instruments:
@@ -246,7 +247,7 @@ class {class_name}(va.Constraint):
 
         A constraint comparing against a benchmark would return a `va.DatasetInput` here, and
         `call.read("<your alias>", "<field>")` inside `project` would hand back its window --
-        `latest()` is the benchmark's newest weight per name.
+        `current()` is the benchmark's weight per name at the window's last instant.
         """
         return {{}}
 

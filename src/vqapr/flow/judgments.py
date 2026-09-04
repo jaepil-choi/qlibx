@@ -34,7 +34,7 @@ from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 # adapters misses a caller (`docs/issues/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
 from vqapr.flow.preflight import derived_agenda
-from vqapr.flow.run import DataModelEntry, RunDefinition, StrategyEntry
+from vqapr.flow.run import RunDefinition
 
 # `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
 # this layer; a module under `flow/` importing it reaches back up through the thing it is supposed
@@ -64,12 +64,23 @@ def judgments(
     blocked: list[dict[str, str]] = []
     at = FailureSource(key_path=f"runs.{definition.run_id}")
     registered = {str(item.dataset_id): item for item in workspace.datasets}
+    # The run's one agenda, derived ONCE for every judge that reads it (`docs/issues/069`: it
+    # was derived per strategy inside the ordering judge and again per member inside the
+    # dataset judge, each time over the dataset's whole session list). `None` when it cannot
+    # be built here, which is a refusal preflight owns; the judges that need it then decline.
+    agenda = _decide_agenda(workspace, definition)
 
     judges = (
         ("universe", lambda: _judge_universe(definition, at)),
         ("period", lambda: _judge_period(definition, at)),
-        ("execution_ordering", lambda: _judge_execution_ordering(definition, workspace, at)),
-        ("datasets", lambda: _judge_datasets_and_fields(definition, workspace, registered, at)),
+        (
+            "execution_ordering",
+            lambda: _judge_execution_ordering(definition, workspace, at, agenda),
+        ),
+        (
+            "datasets",
+            lambda: _judge_datasets_and_fields(definition, workspace, registered, at, agenda),
+        ),
         ("weights", lambda: _judge_weights(definition, workspace, at)),
         ("outputs", lambda: _judge_outputs(definition, registered, at)),
     )
@@ -181,7 +192,7 @@ def _decide_agenda(workspace: Workspace, definition: RunDefinition) -> object | 
 
 
 def _judge_execution_ordering(
-    definition: RunDefinition, workspace: Workspace, at: FailureSource
+    definition: RunDefinition, workspace: Workspace, at: FailureSource, agenda: object | None
 ) -> list[Failure]:
     """AC-C5: a decision cannot fill at an instant that has already passed.
 
@@ -197,10 +208,9 @@ def _judge_execution_ordering(
         return []
     fill_at = registration.fill.local_time
     found: list[Failure] = []
+    if agenda is None:
+        return found
     for entry in definition.strategies:
-        agenda = _decide_agenda(workspace, definition)
-        if agenda is None:
-            continue
         late = [
             occurrence.occurrence_id
             for occurrence in agenda.occurrences
@@ -234,6 +244,7 @@ def _judge_datasets_and_fields(
     workspace: Workspace,
     registered: dict[str, Any],
     at: FailureSource,
+    agenda: object | None,
 ) -> list[Failure]:
     """Every dataset a component reads must be registered, and expose the field it names.
 
@@ -259,28 +270,23 @@ def _judge_datasets_and_fields(
             # about a dataset, and the conformance judgments already own that refusal.
             continue
 
-        first_read = _first_decision(definition, workspace, entry)
+        first_read = _first_decision(definition, agenda)
+        # One unregistered dataset is ONE problem however many fields the component reads from
+        # it (`docs/issues/056`): `requirements()` fans a `DatasetInput` out to one requirement
+        # per field, and reporting per requirement printed eight identical failures for one
+        # missing registration. The fields ride along as examples, which is what a reader
+        # deciding between "register it" and "point the component elsewhere" wants to see.
+        unregistered: dict[str, list[str]] = {}
         for requirement in component.requirements() or ():
             dataset_id = str(getattr(requirement, "dataset_id", ""))
             if not dataset_id:
                 continue
             registration = registered.get(dataset_id)
             if registration is None:
-                close = get_close_matches(dataset_id, sorted(registered), n=1)
-                found.append(
-                    Failure.bounded(
-                        "check.dataset.unregistered",
-                        f"dataset {dataset_id!r} must be registered before a run can read it",
-                        observed=f"registered: {', '.join(sorted(registered)) or '(none)'}",
-                        fix=(
-                            f"register {dataset_id!r}, or point the component at {close[0]!r}"
-                            if close
-                            else f"register {dataset_id!r} with `vqapr register <declaration>`"
-                        ),
-                        explain=ExplainTopic.WORKSPACE_STATE,
-                        source=source,
-                    )
-                )
+                field_id = str(getattr(requirement, "field_id", ""))
+                fields = unregistered.setdefault(dataset_id, [])
+                if field_id and field_id not in fields:
+                    fields.append(field_id)
                 continue
 
             exposed = set(registration.fields)
@@ -330,6 +336,27 @@ def _judge_datasets_and_fields(
                         source=_key(at, "start"),
                     )
                 )
+        for dataset_id, fields in unregistered.items():
+            close = get_close_matches(dataset_id, sorted(registered), n=1)
+            found.append(
+                Failure.bounded(
+                    "check.dataset.unregistered",
+                    f"dataset {dataset_id!r} must be registered before a run can read it",
+                    observed=(
+                        f"{entry.component_id!r} reads {len(fields)} field(s) from it; "
+                        f"registered: {', '.join(sorted(registered)) or '(none)'}"
+                    ),
+                    examples=tuple(fields),
+                    example_total=len(fields),
+                    fix=(
+                        f"register {dataset_id!r}, or point the component at {close[0]!r}"
+                        if close
+                        else f"register {dataset_id!r} with `vqapr register <declaration>`"
+                    ),
+                    explain=ExplainTopic.WORKSPACE_STATE,
+                    source=source,
+                )
+            )
     return found
 
 
@@ -361,20 +388,17 @@ def _judge_outputs(
     return found
 
 
-def _first_decision(
-    definition: RunDefinition, workspace: Workspace, entry: StrategyEntry | DataModelEntry
-) -> datetime | None:
-    """When one strategy first reads, or `None` when that cannot be answered here.
+def _first_decision(definition: RunDefinition, agenda: object | None) -> datetime | None:
+    """When the run's models first read, or `None` when that cannot be answered here.
 
-    The earliest occurrence its agenda generates inside the declared horizon. `None` whenever the
-    agenda, the horizon or the ids are missing or unresolvable -- those are other judgments'
-    refusals to make, and answering them here would report one defect twice.
+    The earliest occurrence the run's agenda generates inside the declared horizon. Every model
+    of a run shares the one agenda (record `148`), so this is a fact about the run rather than
+    about one member. `None` whenever the agenda or the horizon is missing or unresolvable --
+    those are other judgments' refusals to make, and answering them here would report one
+    defect twice.
     """
     start, end = definition.start, definition.end
-    if start is None or end is None:
-        return None
-    agenda = _decide_agenda(workspace, definition)
-    if agenda is None:
+    if start is None or end is None or agenda is None:
         return None
     inside = [
         moment

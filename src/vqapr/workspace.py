@@ -501,17 +501,16 @@ class Workspace:
             self._commit(merged, changed)
             return changed
 
-    def register_component(self, ref: ComponentRef, *, force: bool = False) -> bool:
+    def register_component(self, ref: ComponentRef) -> bool:
         """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다.
 
-        ``force=True`` replaces an existing registration whose source has changed, in place and
-        under the same ``component_id``.
-
-        Without it, editing a registered component and re-registering is refused, and the refusal
-        names a new identity as the repair. That instruction contradicts the one `loading.py`
-        prints when the same edit is loaded rather than registered -- it says *re-register the
-        component*, which this method then declined. A reader following either message arrives at
-        the other, which `docs/implementations/057` names as worse than a generic error.
+        An edited source re-registered under its id REPLACES the registration in place; there is
+        no flag. Editing a registered component is the ordinary loop (`docs/issues/009`, Decision
+        2), and a refusal the caller must pass an argument to bypass, on an event that is
+        ordinary, is the same friction with an extra step. The `force` parameter this method
+        carried after that decision was a no-op the CLI never exposed, while the shipped skill
+        kept promising `register --force` (`docs/issues/067`); it is gone so the two cannot
+        disagree again.
 
         Replacing does not lose provenance: a finished run pins the fingerprint it ran under in
         its own record, so what a past run used is testified to by that run and not by whichever
@@ -519,10 +518,8 @@ class Workspace:
         """
         if not isinstance(ref, ComponentRef):
             raise TypeError("ref must be a ComponentRef")
-        if not isinstance(force, bool):
-            raise TypeError("force must be a bool")
         with self._exclusive():
-            merged, changed = self._merge_component(self._read(), ref, force=force)
+            merged, changed = self._merge_component(self._read(), ref)
             self._commit(merged, changed)
             return changed
 
@@ -735,34 +732,27 @@ class Workspace:
             True,
         )
 
-    def _merge_component(
-        self, state: _State, ref: ComponentRef, *, force: bool = False
-    ) -> tuple[_State, bool]:
+    def _merge_component(self, state: _State, ref: ComponentRef) -> tuple[_State, bool]:
         key = ref.component_id
         existing = state.components.get(key)
-        if existing is not None:
-            if existing == ref:
-                return state, False
-            # An edited source replaces its registration in place, under the same id.
-            #
-            # This used to refuse and name a NEW component_id as the repair, while
-            # `loading.py` -- meeting the same edit -- said "re-register the component", which
-            # is what this refused. The two pointed at each other, and
-            # `docs/implementations/057` names that shape as worse than a generic error.
-            #
-            # The real cost was never one command: a new id needed a new strategy_configs
-            # binding and a spec edit, four steps for a one-line change, and the workspace
-            # accumulated `mom`, `mom-eb04...`, `mom-91c7...` for one strategy. Keeping the id
-            # also makes "this strategy ran 47 times across 12 fingerprints" countable, which
-            # a new id per edit scatters across twelve ids where nothing counts it.
-            #
-            # Provenance is not weakened. A finished run pins the fingerprint it ran under in
-            # its own frozen record, so what a past run used is testified to by that run, not
-            # by whichever registration currently holds the id.
-            #
-            # `force` is retained as an explicit spelling for callers that want to say they
-            # meant it, but it no longer gates anything: replacement is the default.
-            _ = force
+        if existing is not None and existing == ref:
+            return state, False
+        # An edited source replaces its registration in place, under the same id.
+        #
+        # This used to refuse and name a NEW component_id as the repair, while `loading.py` --
+        # meeting the same edit -- said "re-register the component", which is what this refused.
+        # The two pointed at each other, and `docs/implementations/057` names that shape as
+        # worse than a generic error.
+        #
+        # The real cost was never one command: a new id needed a new strategy_configs binding
+        # and a spec edit, four steps for a one-line change, and the workspace accumulated
+        # `mom`, `mom-eb04...`, `mom-91c7...` for one strategy. Keeping the id also makes "this
+        # strategy ran 47 times across 12 fingerprints" countable, which a new id per edit
+        # scatters across twelve ids where nothing counts it.
+        #
+        # Provenance is not weakened. A finished run pins the fingerprint it ran under in its
+        # own frozen record, so what a past run used is testified to by that run, not by
+        # whichever registration currently holds the id.
         return state._replace(components={**state.components, key: ref}), True
 
     def _merge_run(self, state: _State, definition: RunDefinition) -> tuple[_State, bool]:
@@ -984,14 +974,23 @@ class Workspace:
                 )
             # Looked up after the reference check, so an unsupported kind still gets the typed
             # refusal `_references_in` raises rather than a bare `KeyError` from this dict.
-            position = {"component": 3, "run": 4}[kind]
+            position = {"dataset": 0, "component": 3, "run": 4}[kind]
             declarations = dict(state[position])
             if identity not in declarations:
                 self._replace_state(*state)
                 return False
-            del declarations[identity]
+            withdrawn = declarations.pop(identity)
             merged = list(state)
             merged[position] = declarations
+            if kind == "dataset":
+                # The physical source goes with the last dataset that named it: a source
+                # nothing reads is a path the document keeps pointing at for no one.
+                source_id = withdrawn.source
+                still_named = any(item.source == source_id for item in declarations.values())
+                if not still_named:
+                    merged[1] = {
+                        key: spec for key, spec in state.sources.items() if key != source_id
+                    }
             self._write(*merged)
             self._replace_state(*merged)
             return True
@@ -1038,21 +1037,16 @@ class Workspace:
                 if identity in named:
                     blockers.append(f"run {run_id!r}")
         elif kind == "dataset":
-            # A dataset is named by a component's declared requirements rather than by the
-            # workspace document, so nothing here can claim to know every reader of one. Said
-            # plainly instead of returning an empty tuple that would read as "safe to remove".
-            raise _workspace_error(
-                stage=REMOVE_STAGE,
-                code=f"{REMOVE_STAGE}.unsupported_kind",
-                requirement="removable kinds are component and run",
-                observed=repr(kind),
-                fix=(
-                    "a dataset's readers are declared inside component requirements, which this "
-                    "workspace does not index; rebuild the workspace instead of removing one"
-                ),
-                explain=ExplainTopic.WORKSPACE_STATE,
-                retry="remove a component or a run instead",
-            )
+            # What the DOCUMENT knows names a dataset: a registered run whose sessions come from
+            # it. A component's reads are declared in its code, not here, so a strategy that
+            # reads a withdrawn dataset is refused by `check` and `run` at its next preflight
+            # (`check.dataset.unregistered`), which is the same place it would be refused had
+            # the dataset never been registered. A datamodel run that WRITES this dataset is
+            # not a blocker: withdrawing the output is how that run is run again
+            # (`docs/issues/060`).
+            for run_id, definition in runs.items():
+                if definition.sessions_from == identity:
+                    blockers.append(f"run {run_id!r} (sessions_from)")
         elif kind == "run":
             # A run is the top of the document: nothing names a run, and a run's RECORDS are
             # not registrations -- `vqapr rm run` removes those separately.
@@ -1063,7 +1057,7 @@ class Workspace:
                 code=f"{REMOVE_STAGE}.unsupported_kind",
                 requirement="kind must be one this workspace stores",
                 observed=repr(kind),
-                fix="use one of: component, run",
+                fix="use one of: dataset, component, run",
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry="retry with a kind this workspace stores",
             )

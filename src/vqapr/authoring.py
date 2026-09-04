@@ -301,6 +301,12 @@ class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
 
         The alias is the author's own name for a read, and it is what `read(alias)` takes on the
         call. Declaring nothing is legitimate: a Model may derive its values from memory alone.
+
+        **Evaluated before `memory` exists.** Registration and preflight call this on a fresh
+        instance, before any `initial_model_memory` is applied or a snapshot restored, and the
+        run refuses a model whose requirements then differ from the frozen ones. So the reads
+        cannot depend on memory or on a run's per-model settings (`docs/issues/065`): a family
+        of settings that changes WHAT is read is a family of registered components.
         """
         return {}
 

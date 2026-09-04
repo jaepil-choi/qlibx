@@ -24,17 +24,17 @@ LOOKBACK = {lookback}  # rows per name: a five-day return needs six observations
 
 
 class {class_name}(va.StrategyModel):
-    """Ranks the cross-section and holds the strongest names."""
+    """`{dataset_id}`.`{field}` over LOOKBACK rows; the momentum signal below is a placeholder."""
 
     def inputs(self):
         read = va.DatasetInput(
             dataset_id="{dataset_id}", fields=("{field}",), lookback=va.RowsLookback(rows=LOOKBACK)
         )
-        return {{"prices": read}}
+        return {{"{alias}": read}}  # the alias is YOUR name for this read; `call.read` takes it
 
     def decide(self, call):
         # One field as a window: instants x instruments, the same LOOKBACK instants for every name.
-        window = call.read("prices", "{field}")
+        window = call.read("{alias}", "{field}")
         history: dict[str, list[Decimal]] = {{}}
         for name in window.instruments:
             # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
@@ -48,7 +48,7 @@ class {class_name}(va.StrategyModel):
 
         chosen = {{name: score for name, score in scores.items() if score > 0}}
         if not chosen:
-            return va.Hold(reason="no-name-scored-above-zero")
+            return va.Hold(reason="no name scored above zero")  # prose; spaces are fine
         # Relative conviction: the package normalises, rounds and balances against cash.
         return va.Rebalance.of(long=chosen, invested="{invested}")
 
@@ -70,13 +70,17 @@ FIELD = "{field}"
 
 
 class {class_name}(va.DataModel):
-    """Emits one derived value per instrument at each materialization time."""
+    """Derives one value per instrument from `{field}` of `{dataset_id}`, each session.
+
+    The example below is a trailing return and is a placeholder: replace the marked block, and
+    this docstring, with what this model actually computes.
+    """
 
     def inputs(self):
         read = va.DatasetInput(
             dataset_id=DATASET_ID, fields=(FIELD,), lookback={lookback_expression}
         )
-        return {{"prices": read}}
+        return {{"{alias}": read}}  # the alias is YOUR name for this read; `context.read` takes it
 
     def compute(self, context):
 {lookback_note}
@@ -103,8 +107,8 @@ _PANEL_HISTORY_BLOCK = """\
         # One field of the alias as a window: `instants` x `instruments`, the same instants for
         # every name. `window.values[name]` is that name's values over them, `None` where it had
         # none; `window.latest()` is the newest value per name.
-        window = context.read("prices", FIELD)
-        history: dict[str, list[Decimal]] = {}
+        window = context.read("{alias}", FIELD)
+        history: dict[str, list[Decimal]] = {{}}
         for name in window.instruments:
             # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's type,
             # so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and arithmetic
@@ -116,8 +120,8 @@ _ROWS_HISTORY_BLOCK = """\
         # A rows-grain (vendor, long) dataset streams observations: one per (instant, instrument),
         # ordered by `available_at`, each carrying its own `available_at` and `instrument_id`
         # alongside the fields declared above. Instruments INTERLEAVE within an instant.
-        history: dict[str, list[Decimal]] = {}
-        for row in context.rows("prices"):
+        history: dict[str, list[Decimal]] = {{}}
+        for row in context.rows("{alias}"):
             value = row.values[FIELD]
             if value is not None:
                 # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
@@ -370,6 +374,9 @@ def render(
             component_id=component_id,
             class_name=_class_name(component_id),
             dataset_id=dataset_id,
+            # The alias is the dataset id (`docs/issues/063`): a fixed `prices` read as a
+            # required name to a first-time user, and described a read the flags did not ask for.
+            alias=dataset_id,
             field=field,
             lookback=lookback,
             invested=invested,
@@ -377,10 +384,11 @@ def render(
         )
     flavour = _LOOKBACK_FLAVOURS[lookback_kind]
     return _TEMPLATES[kind].format(
-        history_block=flavour["history_block"],
+        history_block=flavour["history_block"].format(alias=dataset_id),
         component_id=component_id,
         class_name=_class_name(component_id),
         dataset_id=dataset_id,
+        alias=dataset_id,
         field=field,
         invested=invested,
         output_field=output_field,

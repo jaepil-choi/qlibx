@@ -1,6 +1,8 @@
 # 066 -- `register` from a subdirectory creates a second workspace silently, and the refusal that follows names the missing datasets but not the workspace it looked in
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: every envelope carries `workspace_root`; `--project-root` defaults to None and an implicit root beneath a directory that holds a workspace is refused naming both.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-004**, `Unsure`; the evaluator files it as a
 message defect), against `vqapr-0.3.0`. Confirmed against source the same day.
 

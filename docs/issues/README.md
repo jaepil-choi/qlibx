@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 69개 파일이 있고 **55개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-04.** 이 디렉터리에 76개 파일이 있고 **67개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,35 +15,59 @@
 
 ---
 
-## 1. 열린 것 — 열넷
+## 1. 열린 것 — 아홉
 
 | # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | `027` | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **REOPENED 2026-08-31 by owner.** `register`가 point-in-time convention을 묻게 해야 한다. `034`는 record `139`로 닫혔다(기록 쪽); 선언 시점에 묻는 쪽은 남아 있다 | 남은 절반 |
-| `069` | 파생 agenda가 명령마다 세 번, dataset의 세션 전체로 만들어진 뒤 run 구간으로 잘린다 | **열림 2026-09-04.** 0.4.0 척추 트레이스가 잡았다: 735세션 panel에서 명령당 ~0.4 s, run 호출의 41%. 기록 148의 귀결 | 자르고 나서 만들기 + 명령 안에서 한 번만 파생 (`069` 파일) |
 
-### 시나리오 testbed run 2가 낸 열둘 (2026-09-03, `0.3.0` wheel)
+### 시나리오 testbed run 4가 낸 넷 (2026-09-04, `0.4.0` wheel — 논문 재현 완주)
+
+같은 testbed에서 네 번째 에이전트가 **같은 고정 명세**(FF residual arm, `K ∈ {0,1,3,5}` × {OU+Thresh,
+Fourier+FFN})를 `vqapr-0.4.0` wheel(`0d6e6d59`, record `149` 이전 빌드)로 **끝까지 수행**하며 적은
+`FINDINGS.md` F-001~F-011. 소스 확인 2026-09-04, 이 브랜치 기준. `blocked`가 처음으로 하나 나왔다(F-009).
+F-001은 record `149`가 이미 닫았고(skill `remove` → `rm`), F-003·F-011은 `No`, F-005·F-010은 `071`에
+두 번째 증거로 붙였다(F-010은 run 3 F-018과 같은 거절의 재발). 접수 표시는 그쪽 `FINDINGS.md` 각 항목에
+남겼다.
+
+| # | 제목 | 상태 | kind | testbed |
+|---|---|---|---|---|
+| `073` | `--jobs` 아래에서 전략의 거절이 부모로 돌아오지 못해 run이 `unhandled`로 끝나고, 어느 모드에서도 생존자를 이름 대지 않는다 | **열림 2026-09-04.** `SimulationFailure`가 keyword-only 생성자에 owner 객체(mappingproxy)를 들고 있어 pickle 불가; 부모는 `future.result()`를 제출 순서로 걷다 첫 예외에서 멈춘다; 성공·실패 envelope 어디에도 전략별 outcome이 없다. `--jobs` 실패 경로 테스트 없음. **run 4에서 가장 비쌌던 것** (10분 run 두 번) | code | F-009 (+F-006, F-008) |
+| `074` | 실행 중인 전략은 끝날 때까지 아무것도 보고하지 않는데 skill은 "a long run can be watched"라고 한다 | **열림 2026-09-04.** `strategy_refs`가 `strategy.json` 없는 디렉터리를 제외하므로 진행 중 record는 `list`에 없고, `run`은 끝에 한 줄. 에이전트는 parquet chunk 수를 셌다 | docs/API | F-007 |
+| `075` | 신호가 정한 대로 나뉜 signed book은 `Rebalance.of`로 못 만들고, 직접 생성은 docstring 셋을 조립해야 한다 | **열림 2026-09-04.** `of`의 구현 주석(`authoring.py:647-655`)이 `1.000000000001` 잔차를 정확히 알고 book에 settle하는데, 직접 경로는 그것을 저자에게 남기고 말하지 않는다. `071`의 원인 절반, `018`의 다음 단계 | docs/API | F-002 (+F-010 원인) |
+| `076` | preflight가 fresh instance의 payload를 왕복시키는데 docstring도 거절도 그것을 말하지 않는다 | **열림 2026-09-04.** `_validate_initial_model_state`가 모든 예외를 상수 문자열 하나로 감싸고 `check`의 `_from_python`은 `__cause__`를 버린다; `run`은 같은 `ValueError`를 `unhandled`로 낸다(`012`/`015` family) | message/docs | F-004 |
+
+### 시나리오 testbed run 3이 낸 둘 (2026-09-04, `0.3.0`에서 관측, `0.4.0`에서 코드 동일)
+
+같은 testbed에서 세 번째 에이전트가 **고정 명세**(외부 참조 구현과 대조하기 위한 FF residual arm,
+`K ∈ {0,1,3,5}` × 두 정책)를 수행하며 적은 `FINDINGS.md` F-018~F-020. 소스 확인 2026-09-04.
+F-019는 에이전트 본인의 실수(`No`)라 단독으로 접수하지 않고 `072`의 두 번째 증거로 넣었다.
+
+| # | 제목 | 상태 | kind | testbed |
+|---|---|---|---|---|
+| `071` | budget 거절이 전략도, 값도, 선언된 경계도 말하지 않고 run 전체를 멈춘다 | **열림 2026-09-04.** `Rebalance.__post_init__`의 bare `ValueError` 다섯 개, `SimulationFailure`에 component identity 없음, `requires_replay_from_root`가 family와 무관하게 항상 True | message | F-018 |
+| `072` | panel window에 cross-section accessor가 없어 `latest()`가 낡은 행을 현재 행으로 승격시킨다 | **열림 2026-09-04.** 희소 panel에서 name-day의 ~1%가 최대 일주일 낡은 loading으로 거래됨. 두 `No` 항목이 같은 accessor에 떨어진 "표면이 실수를 부른다" 형태 | docs/API | F-020 (+F-019) |
+
+이 둘은 **vqapr 안에서는 보이지 않는다**는 성질을 공유한다. 관련된 값이 전부 결정 시점에 합법적으로
+가용했으므로 point-in-time 검사가 울릴 수 없고, 둘 다 외부 명세가 요구한
+*가중치×수익률 대 패키지 자체 회계* 대조에서만 잡혔다. 접수 표시는 testbed의 `FINDINGS.md`가 아니라
+여기에만 있다 — 그 파일은 run 4 스테이징 때 초기화되었고, 사본은
+`kaist-thesis/docs/handoff/2026-09-04-vqapr-testbed-run3-findings.md`에 있다.
+
+### 시나리오 testbed run 2가 낸 열둘 (2026-09-03, `0.3.0` wheel) — `065`의 설계 절반만 남았다
 
 `kaist-thesis/vqapr-scenario-testbed/`에서 첫 사용자 에이전트가 논문의 FF5+MOM residual arm을 끝까지
 수행하며 적은 `FINDINGS.md` 14건 중 소스에서 확인된 12건. 접수 표시는 그쪽 `FINDINGS.md` 각 항목에
 남겼다. `blocked`는 없었다. **가장 무거운 셋은 `055`·`059`·`061`이었고, `061`은 record `143`이, `059`는
-record `148`이 닫았다.**
+record `148`이 닫았다.** `064`는 2026-09-04 소유자가 **won't fix**로 닫았다 — 종가 데이터로 그 종가에
+거래하는 것은 forward-looking이고, 체결이 콜백보다 strictly 늦어야 한다는 규칙이 프레임워크의 의도다.
+**나머지 아홉(`055`·`056`·`057`·`060`·`062`·`063`·`066`·`067`·`068`)은 record `149`가 2026-09-04에
+한 브랜치(`fix/0.4.0-open-issues`)로 닫았고, `065`는 docs 절반만 닫혔다.**
 
 | # | 제목 | 종류 | FINDINGS |
 |---|---|---|---|
-| `055` | `show model`이 아무도 설정하지 않는 `_aliases`·`_authored_tables`를 읽어 `reads`가 항상 비고 `records`가 선언된 표를 안 싣는다 | code | F-005 |
-| `056` | `check`가 미등록 dataset 하나를 field 수만큼 반복 보고한다 | message | F-006 |
-| `057` | `read_strategy_table`이 help가 말하는 root와 signature가 허용하는 `strategy_ref=None`에 빈 iterator를 낸다 | code+docs | F-007, F-012 |
-| `059` | 물질화가 모든 행과 access 기록을 끝까지 메모리에 들고, lineage가 evaluation마다 전 종목을 반복하며(478MB), 진행 출력이 없다 | code | F-009 |
-| `060` | `rm`에 `dataset` kind가 없는데 skill은 삭제를 약속한다 (C4/E1의 남은 절반) | code | F-011 |
-| `062` | `Hold(reason)` 규칙이 skill과 docstring에서 반대다 | docs | F-001 |
-| `063` | strategy scaffold가 `--dataset`/`--field`를 받고도 alias `prices`와 momentum docstring을 낸다 | docs | F-002 |
-| `064` | "종가에 종가 정보로 거래"를 말할 수 없고, template 예시는 한 세션 지연을 정답으로 적는다 (`027`·`033`의 축) | docs | F-010 |
-| `065` | `inputs()`가 `initial_model_memory` 전에 불리는데 아무도 말하지 않는다; 한 클래스를 여러 id로 등록할 수 없다 | docs+design | F-014 |
-| `066` | 하위 디렉터리의 `register`가 두 번째 workspace를 조용히 만들고, 거절문이 어느 workspace를 봤는지 말하지 않는다 | message | F-004 |
-| `067` | skill은 편집한 component가 `register --force` 없이는 거절된다고 하는데, 그 flag는 없고 plain re-register가 말없이 교체한다 (`025`·`030`의 축) | docs+message | F-017 |
-| `068` | 세션당 package 시간 0.25s, 대부분 Python 행으로 fetch하는 execution snapshot 둘; run 결과에 phase별 시간이 없다 | code | F-016 |
+| `065` | `inputs()`가 `initial_model_memory` 전에 불리는데 아무도 말하지 않는다 (**docs 절반은 record `149`가 닫았다**); 한 클래스를 여러 id로 config와 함께 등록할 수 있어야 하는가 — **설계 결정 대기** (`040`의 다음 질문) | design | F-014 |
 
 파일로 만들지 않은 것: F-003(cp949 콘솔, 에이전트 환경); F-015(`values`가 접근마다 전 컬럼을 다시 만든다 —
 `061`과 같은 뿌리, record `143`이 닫았다; 그 profile 수치는 `061` 파일에 붙였다). `027`에는 그 run의 비용
@@ -68,7 +92,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 
 ---
 
-## 2. 닫힌 것 — 쉰넷
+## 2. 닫힌 것 — 예순일곱
 
 | # | 닫은 것 |
 |---|---|
@@ -126,6 +150,8 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 | `061` | record `143` — `PanelWindow.values`가 lazy mapping; `latest()`·`counts()`는 Arrow에서. 창 하나가 컬럼 하나를 요청될 때만 변환 |
 | `058` | record `146` — fill 행의 `event_time`도 전략 agenda의 zone으로; 기록 표가 parquet이라 zone이 파일에 실린다 |
 | `050` | CLOSED 2026-09-01 |
+| `055` `056` `057` `060` `062` `063` `066` `067` `068` `069` `070` | **record `149`, 2026-09-04, 한 브랜치.** skill이 코드를 따라간다(`062`·`067`), scaffold alias가 dataset을 따른다(`063`), 미등록 dataset은 한 번만 보고(`056`), 없는 record는 이름을 대며 거절(`057`), 모든 envelope에 `workspace_root`와 상위 workspace 발견 시 거절(`066`), `show model`은 모델의 선언을 읽는다(`055`), `vqapr rm dataset`(`060`), 파생 agenda는 날짜로 먼저 자르고 명령당 한 번(`069`), `run`은 workspace를 한 번 연다(`070`), snapshot은 Arrow이고 기록에 `timing` 블록(`068`) |
+| `064` | **CLOSED 2026-09-04 — WON'T FIX, 소유자 판정.** 종가 데이터로 그 종가에 거래하는 것은 look-ahead다. 체결은 콜백보다 strictly 늦다는 규칙이 의도이며 `same_close`는 만들지 않는다. 다시 열지 말 것 |
 
 ---
 

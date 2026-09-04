@@ -233,6 +233,7 @@ def test_public_exports_are_fixed() -> None:
         "Rebalance",
         "RowsLookback",
         "RunDefinition",
+        "RunRecordMissing",
         "RunRecordResult",
         "RunRecordSpec",
         "RunResult",

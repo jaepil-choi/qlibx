@@ -1,6 +1,8 @@
 # 057 -- `read_strategy_table` returns an empty iterator for the root the help names and for the `strategy_ref` the signature allows
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: `read_table` refuses a missing run or ref with `RunRecordMissing` naming the directory looked in and what is beside it; a bare `<strategy-id>` and `None` resolve to the only record; the docstring, `--store-root`'s help and the skill say the root is the `store_root` `run` prints.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-007** and the urge entry **F-012**), against
 `vqapr-0.3.0`. Confirmed against source the same day.
 

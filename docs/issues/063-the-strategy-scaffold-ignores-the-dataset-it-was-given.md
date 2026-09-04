@@ -1,6 +1,8 @@
 # 063 -- the strategy scaffold takes `--dataset` and `--field` and still names its alias `prices` and describes a momentum ranker
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: the alias is the dataset id in the strategy and datamodel templates and the class docstring names the dataset and field and calls the example signal a placeholder.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-002**), against `vqapr-0.3.0`. Confirmed
 against source the same day.
 

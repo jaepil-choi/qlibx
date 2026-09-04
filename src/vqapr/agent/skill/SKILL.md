@@ -105,7 +105,10 @@ theirs: `decide`, `compute`, `project`/`monitor`. `vqapr show model <id>` descri
 
 **What a model is handed follows the dataset's `grain`.** `inputs()` returns a mapping from an
 alias you name to a `va.DatasetInput(dataset_id=, fields=, lookback=)`, and the call reads it
-with one of two verbs, in every role:
+with one of two verbs, in every role. `inputs()` is evaluated at registration and at preflight,
+BEFORE any memory is restored and before a run's `initial_model_memory` is applied, so what a
+model reads cannot depend on either: a family of settings that changes the reads is a family of
+registered components, one file and one id each.
 
 - **`read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a
   **`PanelWindow`**: `instants` (the same for every name) x `instruments`; `values[name]` is
@@ -158,7 +161,11 @@ session (evaluation time, output `available_at`, row count), no per-instrument l
 `vqapr show datamodel <run-id>/<id>@<fp8>` read the record, and `vqapr show dataset <id>` reads
 back what it computed. The output is readable by any component that declares it -- which is the
 point: one model's output is the next model's input. Running the same run again is refused while
-its output dataset is registered (`check.datamodel.output_registered`).
+its output dataset is registered (`check.datamodel.output_registered`); `vqapr rm dataset <id>`
+withdraws the registration and deletes the chunks under `.vqapr/materialized/<id>/`, and is the
+way to retry a datamodel run or to drop a throw-away output. It refuses while a registered run
+takes its sessions from that dataset (`sessions_from`), naming the run; a dataset you registered
+from your own path is withdrawn without touching your file.
 
 **`vqapr show dataset <id> [--limit N]`** works for any registered dataset, not just a
 materialized one. It reports the registration's own facts — source, path, declared fields, span —
@@ -180,8 +187,14 @@ works when exactly one record of that strategy exists; `vqapr list strategies --
 lists them all, filterable by `--strategy`, `--fingerprint`, `--failed-contract`, `--since`.
 
 **Read a record from Python with `vqapr.public.read_strategy_table(store_root, run_id,
-table, strategy_ref)`.** The rows are parquet on disk, one directory per table and one file per
-chunk (`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/<table>/*.parquet`), so
+table, strategy_ref)`.** `store_root` is the path the run's result printed under that name --
+`<project>/.vqapr` unless `--store-root` moved it -- and NOT the project directory;
+`strategy_ref` is the `record` the result printed (`<strategy-id>@<fp8>`), or the bare
+`<strategy-id>` when one record of it exists, or omitted when the run holds one strategy. A root,
+run id or ref that names no record is refused (`RunRecordMissing`) naming what was found
+instead, so an empty frame means an empty table and nothing else. The rows are parquet on
+disk, one directory per table and one file per chunk
+(`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/<table>/*.parquet`), so
 `duckdb.read_parquet` on that directory reads them too: an instant is a `TIMESTAMPTZ` and comes
 back as the same instant, and a `Decimal` is exact text (the column's metadata marks it) that
 `read_strategy_table` restores and you cast yourself anywhere else.
@@ -295,21 +308,24 @@ under returns `count: 0`, which is an answer rather than a failure.
 
 #### Correcting a registration during setup
 
-Registrations are immutable identities in the sense that one id means one declaration -- registering
-a *different* declaration under an id that is already taken is refused, because that is a genuine
-mistake rather than an edit. Correcting the thing you already registered is not that, and it is the
-ordinary loop: edit the file and `vqapr register <file> --force` to replace it in place. The id
-stays, dependent configs and specs keep working, and the run record carries a new `source_digest`
-for whatever ran.
+Registrations are identities: one id means one declaration, and editing the thing you already
+registered is the ordinary loop: change the file and run the same `vqapr register <kind> <id>
+<file.py>` again. It replaces the
+registration in place, with no flag -- there is no `register --force`; the only `--force` the CLI
+has belongs to `vqapr run`, where it replaces a run RECORD. The success payload then carries
+`replaced: {fingerprint: <the old one>}`, and is silent about it when the id was new or the bytes
+unchanged. The id stays, the runs that name it keep working, and the next run's record carries a
+new `source_digest` for whatever ran.
 
 That digest is the provenance, and it is a **receipt rather than a gate**: it records what ran, and
 nothing re-checks it afterwards. Two runs of edited code carry two different digests, which is what
-makes an edit visible in the record.
+makes an edit visible in the record. A run that already pinned the old fingerprint is unaffected:
+its record testifies to what it used.
 
-- **Editing a component you registered:** change the file and re-register with `--force`. No new id,
-  no config edit, no spec edit.
-- **Withdrawing one:** `vqapr remove <kind> <id>` refuses while something still references it, and
-  names what does.
+- **Editing a component you registered:** change the file and re-register. No new id, no flag,
+  no run edit.
+- **Withdrawing one:** `vqapr rm <kind> <id>` refuses while a registered run still names it, and
+  names which run does.
 - **A genuinely different declaration:** give it its own id, so one id never means two things.
 - If this is a disposable first-run workspace with no result to preserve, keep the authored YAML
   and component files, obtain approval for the destructive reset, remove only the project-local
@@ -439,7 +455,8 @@ package's arithmetic, not yours. You never make weights sum to one by hand.
 A short is declared by **which mapping** a name appears in, never by a negative number:
 `short={"A": 2}` means twice as short. Passing both sides makes the book signed automatically.
 
-Return `Hold(reason="...")` to decline. The reason is one token, no spaces.
+Return `Hold(reason="...")` to decline. The reason is prose a human reads -- spaces are fine,
+and only an empty string is refused.
 
 ### Before you hand-roll it: `vqapr.public`
 

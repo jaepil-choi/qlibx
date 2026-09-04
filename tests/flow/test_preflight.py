@@ -734,6 +734,9 @@ def test_the_derived_agenda_fires_once_per_session_at_the_declared_wall_time(
         definition,
         sessions=(date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 6)),
         at=time(8, 30),
+        # The agenda is the run's sessions INSIDE its period (`docs/issues/069`), so the
+        # period has to reach the last listed day for all three to appear.
+        end=datetime(2024, 3, 8, 15, 30, tzinfo=_ZONE),
     )
 
     agenda = derived_agenda(workspace, listed)
@@ -766,7 +769,12 @@ def test_sessions_from_collapses_a_dataset_s_instants_to_venue_local_days(
     a run declared there fires on those days.
     """
     workspace, definition = _setup(tmp_path, model_price_parquet)
-    from_dataset = replace(definition, sessions=(), sessions_from="prices")
+    from_dataset = replace(
+        definition,
+        sessions=(),
+        sessions_from="prices",
+        end=datetime(2024, 3, 9, 15, 30, tzinfo=_ZONE),
+    )
 
     agenda = derived_agenda(workspace, from_dataset)
 
@@ -784,13 +792,58 @@ def test_sessions_from_collapses_a_dataset_s_instants_to_venue_local_days(
         derived_agenda(workspace, replace(from_dataset, sessions_from="absent"))
 
 
+def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_command(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docs/issues/069`: 735 occurrences were built three times per command and 15 kept.
+
+    Two facts. The derived agenda holds only the sessions inside `[start, end]` -- the cut is on
+    dates, before an occurrence and its offset proof exist -- and one `check` derives it once,
+    one `preflight` once, rather than once per strategy inside two judges and again in preflight.
+    """
+    from vqapr.flow.judgments import judgments
+
+    workspace, definition = _setup(tmp_path, model_price_parquet)
+    # The dataset has four sessions (3/5 .. 3/8); the run's period (`_setup`: 3/5 09:00 to
+    # 15:30, the one day the execution fixture can fill) admits one.
+    two_days = replace(definition, sessions=(), sessions_from="prices")
+
+    agenda = derived_agenda(workspace, two_days)
+    assert [occurrence.local_instant.local_date for occurrence in agenda.occurrences] == [
+        date(2024, 3, 5)
+    ], "the agenda is the run's sessions, not the dataset's"
+
+    calls: list[str] = []
+    original = Workspace.evaluation_times
+
+    def counted(self: Workspace, dataset_id: str) -> tuple[datetime, ...]:
+        calls.append(dataset_id)
+        return original(self, dataset_id)
+
+    monkeypatch.setattr(Workspace, "evaluation_times", counted)
+    failures, blocked = judgments(two_days, workspace)
+    assert blocked == [] and failures == [], (failures, blocked)
+    assert calls == ["prices"], f"check derived the agenda {len(calls)} times"
+
+    calls.clear()
+    frozen = preflight_run(tmp_path, two_days)
+    assert calls == ["prices"], f"preflight derived the agenda {len(calls)} times"
+    assert len(frozen.strategy("strategy").agenda.occurrences) == 1
+
+
 def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     """02:30 on 2024-03-10 does not exist in New York; the run is refused, not moved an hour."""
     workspace, definition = _setup(tmp_path, model_price_parquet)
     skipped = replace(
-        definition, timezone="America/New_York", at=time(2, 30), sessions=(date(2024, 3, 10),)
+        definition,
+        timezone="America/New_York",
+        at=time(2, 30),
+        sessions=(date(2024, 3, 10),),
+        # The period has to admit the day for the agenda to be asked about it (`069`).
+        start=datetime(2024, 3, 9, tzinfo=_ZONE),
+        end=datetime(2024, 3, 11, tzinfo=_ZONE),
     )
 
     with pytest.raises(ValueError, match="does not exist"):

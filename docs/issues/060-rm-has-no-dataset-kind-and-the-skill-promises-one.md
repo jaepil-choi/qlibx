@@ -1,6 +1,8 @@
 # 060 -- `rm` has no `dataset` kind, and the skill tells the user to remove a dataset registration
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: `vqapr rm dataset <id>`: refused while a registered run's `sessions_from` names it; drops the source nothing else names; deletes `.vqapr/materialized/<id>/` when the dataset was written there.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-011**), against `vqapr-0.3.0`. Confirmed
 against source the same day. This is the half of the earlier real-world finding C4/E1 (README
 section 1) that record `139` did not close: `rm` exists for eight kinds, and a dataset is not one

@@ -59,11 +59,24 @@ from vqapr.models.memory import normalize_memory
 from vqapr.workspace import Workspace
 
 
-def preflight_run(project_root: str | Path, definition: RunDefinition) -> FrozenRun:
-    """Resolve a run definition against registered declarations without running it."""
+def preflight_run(
+    workspace_or_root: Workspace | str | Path, definition: RunDefinition
+) -> FrozenRun:
+    """Resolve a run definition against registered declarations without running it.
+
+    Takes the `Workspace` a caller already holds, or a root to open one from. A CLI command
+    opens the document once and hands that one snapshot to every step (`docs/issues/070`):
+    opening again here made the run freeze against a document that could differ from the one
+    its judgments had just read.
+    """
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
-    return _preflight_run(Workspace.open(project_root), definition)
+    workspace = (
+        workspace_or_root
+        if isinstance(workspace_or_root, Workspace)
+        else Workspace.open(workspace_or_root)
+    )
+    return _preflight_run(workspace, definition)
 
 
 class _FrozenCatalog:
@@ -93,6 +106,10 @@ class RunResult:
     run_id: str
     results: Mapping[str, SimulationResult | DataModelResult]
     records: Mapping[str, Mapping[str, object]]
+    roster: RegisteredRoster | None = None
+    """The instrument roster this run read at its start, or `None` when none was registered --
+    or when the run was a datamodel run, which reads no roster. Carried so the caller's report
+    is built from what the run used rather than from a second read (`docs/issues/070`)."""
 
     def result(self, component_id: str | None = None) -> SimulationResult | DataModelResult:
         """The one model's result, or the only one when the run ran exactly one."""
@@ -115,8 +132,14 @@ def run(
     jobs: int = 1,
     replace_record: bool = False,
     record_account_positions: bool = True,
+    workspace: Workspace | None = None,
 ) -> RunResult:
     """Execute a frozen run: each of its strategies (or those named), each in its own flow.
+
+    `workspace` is the document the caller already opened, when it did: the roster is read
+    through it rather than by opening the document again (`docs/issues/070`), so a command
+    judges, freezes and runs against one snapshot. Omitted, the roster is read from
+    `project_root` -- one open, once per run, not once per strategy.
 
     When `store_root` is given the run writes `run.json` first and each strategy freezes its own
     record beneath `strategies/<id>@<fp8>/`, which is what makes the results readable by any later
@@ -153,6 +176,10 @@ def run(
         raise ValueError("public run requires a frozen execution input")
     validate_execution_input(frozen.execution_input).raise_if_failed()
 
+    # ONE read of the roster for the whole run, through the caller's workspace when it has one.
+    # It was read once per strategy, and the CLI read it a further time for its envelope
+    # (`docs/issues/070`); the record is written from this read and so is the report.
+    roster = registered_roster(workspace if workspace is not None else root_path)
     selected = tuple(frozen.strategy(name) for name in (strategies or ())) or frozen.strategies
     store = None if store_root is None else Path(store_root)
     if store is not None:
@@ -181,7 +208,9 @@ def run(
             }
             for component_id, future in futures.items():
                 records[component_id] = future.result()
-        return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
+        return RunResult(
+            frozen.run_id, MappingProxyType(results), MappingProxyType(records), roster=roster
+        )
 
     for layer in selected:
         result, record = _run_strategy(
@@ -191,11 +220,14 @@ def run(
             store=store,
             replace_record=replace_record,
             record_account_positions=record_account_positions,
+            roster=roster,
         )
         results[layer.component_id] = result
         if record is not None:
             records[layer.component_id] = record
-    return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
+    return RunResult(
+        frozen.run_id, MappingProxyType(results), MappingProxyType(records), roster=roster
+    )
 
 
 def _run_datamodels(
@@ -367,6 +399,7 @@ def run_registered_strategy(
         store=Path(store_root),
         replace_record=replace_record,
         record_account_positions=record_account_positions,
+        roster=registered_roster(workspace),
     )
     assert record is not None
     return record
@@ -385,8 +418,13 @@ def _run_strategy(
     store: Path | None,
     replace_record: bool,
     record_account_positions: bool,
+    roster: RegisteredRoster | None,
 ) -> tuple[SimulationResult, Mapping[str, object] | None]:
-    """Execute exactly one strategy of a frozen run, with its own Account and its own record."""
+    """Execute exactly one strategy of a frozen run, with its own Account and its own record.
+
+    `roster` is the one read `run` made at its start (`docs/issues/070`); the record is written
+    from it rather than from a read of this strategy's own.
+    """
     strategy = load_strategy_model(layer.config.component, project_root=root_path)
     exchange = load_exchange(frozen.exchange, project_root=root_path)
     constraints = tuple(
@@ -399,11 +437,10 @@ def _run_strategy(
     # run never executed. Recording only those would leave a receipt that looks authoritative
     # and is stale, which is worse than the gate it replaced.
     as_loaded = _as_loaded_fingerprints(frozen, layer, root_path)
-    # ONE read of the roster, and the record is written from it rather than from a second one.
+    # The record is written from the ONE roster read `run` made, never from a second one.
     # `roster` carries the digest and the table list beside the registry, so a `vqapr register`
     # landing during the run cannot make the record state a digest the fills were never classified
     # by (`docs/issues/050`).
-    roster = registered_roster(root_path)
     registry = roster.registry if roster is not None else None
     catalog = _FrozenCatalog(frozen)
     # One physical handle for the whole strategy. duckdb caches parquet metadata for a

@@ -1,6 +1,8 @@
 # 065 -- `inputs()` runs before `initial_model_memory` is set, nothing says so, and one class cannot be registered under several ids with different settings
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **DOCS HALF CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: docs half: `Model.inputs`'s docstring and the skill say `inputs()` is evaluated at registration and preflight before any memory is applied, so the reads cannot depend on memory or per-model settings. The design half (one class, several ids with a config) stays OPEN for an owner decision.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-014**), against `vqapr-0.3.0`. Confirmed
 against source the same day. Filed as a docs defect with a design question attached.
 

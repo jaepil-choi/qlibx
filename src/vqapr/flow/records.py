@@ -196,6 +196,10 @@ def freeze_strategy_record(
             "end": frozen.end,
             "occurrences": len(result.occurrences),
         },
+        # Where the wall clock went, by phase (`docs/issues/068`): the loop's `total`, the
+        # `callback` side (window and decide), the `due` side, and each due stage by name.
+        # Seconds, rounded to the microsecond so the record is not a float's full expansion.
+        "timing": lambda: {phase: round(seconds, 6) for phase, seconds in result.timing.items()},
     }
 
     # `run_id` and `strategy_ref` are stamped by the writer itself.

@@ -122,6 +122,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     """
     from vqapr.extension.component import ComponentKind
     from vqapr.extension.loading import load_data_model, load_strategy_model
+    from vqapr.models.strategy_model import StrategyModel
 
     space = Workspace.open(project_root)
     try:
@@ -159,9 +160,15 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         model = load_data_model(ref, project_root=project_root)
     else:
         model = load_strategy_model(ref, project_root=project_root)
-    aliases = dict(getattr(model, "_aliases", {}) or {})
-    tables = tuple(getattr(model, "_authored_tables", ()) or ())
-    history = getattr(model, "_authored_history", None)
+    # From the model's own declarations -- `inputs()`, `tables()`, `account_history()` -- which
+    # are what the framework acts on. This read three private attributes nothing in the tree
+    # assigned (`_aliases`, `_authored_tables`, `_authored_history`, relics of the shape records
+    # `126`-`133` removed) behind `getattr` defaults, so `reads` was always empty and `records`
+    # never listed a declared table (`docs/issues/055`). No defaults now: a model without
+    # `inputs` is not a model, and the loader would already have refused it.
+    aliases = dict(model.inputs())
+    tables = tuple(model.tables()) if isinstance(model, StrategyModel) else ()
+    history = model.account_history() if isinstance(model, StrategyModel) else None
     return {
         "component_id": component_id,
         "kind": cli_kind(getattr(ref, "kind", None)),
@@ -173,7 +180,11 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             }
             for alias, declared in sorted(aliases.items())
         },
-        "decides": [str(requirement.dataset_id) for requirement in model.requirements()],
+        # The DISTINCT datasets, in declaration order: `requirements()` fans one read out to one
+        # requirement per field, and reporting per requirement printed a dataset id seven times.
+        "decides": list(
+            dict.fromkeys(str(requirement.dataset_id) for requirement in model.requirements())
+        ),
         "forms": [str(table.table_id) for table in tables],
         "weights": "derived from the Rebalance the model returns",
         "records": [str(table.table_id) for table in tables]

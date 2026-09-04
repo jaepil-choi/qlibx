@@ -1,6 +1,8 @@
 # 068 -- a session costs a quarter second of package time, most of it two execution snapshots fetched as Python rows, and nothing in the run result says where the time went
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2, phase 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: the execution snapshot is fetched as Arrow (one conversion per column, no per-cell tz); the strategy record and the run envelope carry `timing` by phase. The second bullet (one snapshot per session) was record `148`'s.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2, phase 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-016**, recorded by the agent *"for the
 maintainer, not a defect"*), against `vqapr-0.3.0`. Filed because the profile is the first
 per-session cost breakdown of a full strategy run on this wheel, and because two of its lines

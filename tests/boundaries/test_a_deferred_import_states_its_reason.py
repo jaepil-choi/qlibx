@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 19
+CEILING = 18  # record `149` removed `cli/run.py`'s `_registered_roster_for_report` (`070`)
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
 
 Was 23 after record `132`. Record `134` removed the function-local `Workspace` import in

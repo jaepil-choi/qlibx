@@ -1,6 +1,8 @@
 # 062 -- the skill and the docstring give opposite rules for `Hold(reason=...)`
 
-**Status:** open. Found 2026-09-03 by the scenario testbed run 2
+**Status:** **CLOSED 2026-09-04** on `fix/0.4.0-open-issues`, record `docs/implementations/149-the-open-issues-at-0.4.0.md`: the skill states the docstring's rule (prose, spaces allowed) and the scaffold's example reason has spaces.
+
+**Status when filed:** open. Found 2026-09-03 by the scenario testbed run 2
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-001**), against `vqapr-0.3.0`. Confirmed
 against source the same day.
 

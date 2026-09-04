@@ -16,11 +16,13 @@ records leaves the run registered to run again.
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_member
+from vqapr.flow.datamodel import MATERIALIZED_DIRECTORY
 from vqapr.flow.run_records import (
     DATAMODEL_KIND,
     RunRecordLive,
@@ -35,6 +37,10 @@ RECORD_KINDS = ("run", "strategy", "datamodel")
 DECLARATION_KINDS = {
     "component": "component",
     "run-definition": "run",
+    # `docs/issues/060`: the skill told the user to withdraw a dataset registration and the CLI
+    # had no kind for it, so three throw-away materializations (1.3 GB) stayed registered and a
+    # half-finished one could only be retried under a new id.
+    "dataset": "dataset",
 }
 KINDS = (*RECORD_KINDS, *DECLARATION_KINDS)
 
@@ -46,6 +52,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "run: a run id (its records); strategy: `<run-id>/<strategy-id>@<fp8>`; "
             "datamodel: `<run-id>/<datamodel-id>@<fp8>`; "
+            "dataset: the registered dataset id (a datamodel's output under "
+            ".vqapr/materialized/ is deleted with it; a dataset at your own path is left there); "
             "run-definition and the other declaration kinds: the registered id"
         ),
     )
@@ -107,5 +115,24 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             ),
         ) from live
     workspace_kind = DECLARATION_KINDS[kind]
-    removed = Workspace.open(project_root).remove(workspace_kind, identifier)
-    return success("workspace.removed", kind=kind, identifier=identifier, removed=bool(removed))
+    workspace = Workspace.open(project_root)
+    materialized: Path | None = None
+    if kind == "dataset":
+        # Where the rows live, read BEFORE the registration goes: a dataset a datamodel run
+        # wrote sits under `.vqapr/materialized/<id>/`, and withdrawing its registration while
+        # leaving the chunks would keep the 1.3 GB `060` measured with nothing pointing at it.
+        # A dataset registered from the user's own path is theirs; only the package's own
+        # directory is deleted.
+        registered = {str(item.dataset_id): item for item in workspace.datasets}
+        item = registered.get(identifier)
+        if item is not None:
+            path = workspace.source(str(item.source)).path.resolve()
+            own = (project_root / WORKSPACE_DIRECTORY / MATERIALIZED_DIRECTORY).resolve()
+            if own in path.parents:
+                materialized = path
+    removed = workspace.remove(workspace_kind, identifier)
+    payload = success("workspace.removed", kind=kind, identifier=identifier, removed=bool(removed))
+    if removed and materialized is not None:
+        shutil.rmtree(materialized, ignore_errors=True)
+        payload["deleted"] = str(materialized)
+    return payload

@@ -44,7 +44,9 @@ def test_the_skill_names_the_edit_loop_that_actually_exists(tmp_path: Path) -> N
     """Two commands, same id: what 009's acceptance test proves and the skill hid."""
     collapsed = " ".join(_installed(tmp_path).split())
 
-    assert "--force` to replace it in place" in collapsed
+    # `docs/issues/067`: the loop is the same command again, and no `--force` is promised.
+    assert "run the same `vqapr register <kind> <id> <file.py>` again" in collapsed
+    assert "there is no `register --force`" in collapsed
     assert "The id stays" in collapsed or "id stays" in collapsed
 
 

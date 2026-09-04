@@ -967,12 +967,20 @@ def register_authored(
     # Found by parsing before the register call, so "two strategies in one file" is refused as
     # that, rather than surfacing as whatever the loader happens to say about an ambiguous import.
     object_name = _sole_subclass(path, expected, component_id)
-    register_component(
+    # What held the id before this command, so the payload can say an edit REPLACED it
+    # (`docs/issues/067`): a plain re-register is the edit loop and refuses nothing, and the
+    # old fingerprint is how the user learns which past run records are pinned to the code
+    # they just moved away from. Read before the write; `Workspace.create` is what
+    # `register_component` opens anyway, so this adds no state on a first registration.
+    previous = {
+        str(item.component_id): item for item in Workspace.create(project_root).components
+    }.get(component_id)
+    ref = register_component(
         project_root, component_id, path, object_name, kind=_COMPONENT_KINDS[kind]
     )
     # Returns data, not an envelope. Rendering belongs to the surface: this module is below it,
     # and importing `cli.envelope` from here is what closed an import cycle through the whole CLI.
-    return {
+    payload: dict[str, Any] = {
         "registered": {"components": [component_id]},
         "component": {
             "id": component_id,
@@ -981,6 +989,9 @@ def register_authored(
             "source": str(path),
         },
     }
+    if previous is not None and previous.fingerprint != ref.fingerprint:
+        payload["replaced"] = {"fingerprint": previous.fingerprint}
+    return payload
 
 
 def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:

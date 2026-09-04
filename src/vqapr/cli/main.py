@@ -21,6 +21,8 @@ from typing import Any, NoReturn
 
 from vqapr.cli import check, list_, new, register, rm, run, show, skill
 from vqapr.cli.envelope import UsageError, emit, failure
+from vqapr.inputs import VALUE_INVALID, InputError
+from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME
 
 _COMMANDS: dict[str, Any] = {
     "new": new,
@@ -182,8 +184,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--project-root",
         type=Path,
-        default=Path.cwd(),
-        help="workspace root (defaults to the current directory)",
+        default=None,
+        help=(
+            "workspace root: where `.vqapr/` is or will be (default: the current directory; "
+            "refused when an ancestor directory already holds a workspace and this one does "
+            "not, so a command run from a subdirectory cannot start a second workspace by "
+            "accident -- pass the ancestor, or this directory, explicitly)"
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     for name, module in _COMMANDS.items():
@@ -199,6 +206,47 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _nearest_workspace_above(start: Path) -> Path | None:
+    """The closest ancestor of `start` that holds a workspace document, or `None`."""
+    for ancestor in start.parents:
+        if (ancestor / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).is_file():
+            return ancestor
+    return None
+
+
+def _resolve_project_root(explicit: Path | None) -> Path:
+    """The root every command works in, refusing an implicit one that would shadow an ancestor.
+
+    `docs/issues/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr` beside
+    the project's real workspace and the next `check` refused for datasets registered five
+    minutes earlier. Git's discovery rule is the model -- walk up -- but a workspace is written
+    to, and silently choosing the parent would put the caller's files in a directory they did
+    not name. So an implicit root that has no workspace while an ancestor has one is refused,
+    naming both; an explicit `--project-root` is never second-guessed, so a nested workspace is
+    still one command away when it is meant.
+    """
+    if explicit is not None:
+        return Path(explicit)
+    here = Path.cwd()
+    if (here / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).is_file():
+        return here
+    above = _nearest_workspace_above(here)
+    if above is None:
+        return here
+    raise InputError(
+        VALUE_INVALID,
+        requirement=(
+            "a command run without --project-root must not start a second workspace beneath "
+            "an existing one"
+        ),
+        observed=f"no workspace at {here}; the nearest is at {above}",
+        retry=(
+            f"run `vqapr --project-root {above} ...` (or cd there), or name this directory "
+            f"explicitly with `--project-root {here}` to create a workspace here on purpose"
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
@@ -206,10 +254,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     except UsageError as error:
         # The command line never reached a handler, so there is no project root to dump beside.
         return emit(failure(error))
-    project_root = Path(args.project_root)
+    try:
+        project_root = _resolve_project_root(args.project_root)
+    except InputError as refused:
+        return emit(failure(refused))
     handler: Callable[..., dict[str, Any]] = args.handler
     try:
         payload = handler(args, project_root=project_root)
     except Exception as error:  # every failure leaves through the same envelope
         payload = failure(error, project_root=project_root)
+    # Every envelope says WHICH workspace it is about (`docs/issues/066`): a refusal about
+    # registration state that names the cure but not the place it looked is correct and not
+    # enough to act on. Absolute, so a reader comparing two commands' answers can see when
+    # they were about different directories.
+    payload["workspace_root"] = str(project_root.resolve())
     return emit(payload)

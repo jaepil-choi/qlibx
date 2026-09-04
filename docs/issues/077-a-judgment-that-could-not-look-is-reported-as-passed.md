@@ -1,6 +1,12 @@
 # 077 -- a judgment that could not look is reported as passed, because the helper swallows before the dispatcher can block it
 
-**Status:** open. Found 2026-09-04 by a full audit of every exception handler under `src/vqapr`
+**Status:** **CLOSED 2026-09-04 by record `153`** (one-shape campaign Step 2b). No helper in
+`flow/judgments.py` catches on behalf of a judge any more: the agenda is reached through a call
+whose failure re-raises to every asker, `datasets` is dispatched one judge per member (named
+`datasets[<component-id>]`, which is where the reader learns which member), and the execution,
+weights and `_instant` helpers let their exceptions reach the dispatcher. Under D7 the defect is
+named twice, and `tests/cli/test_a_judgment_that_could_not_look_is_not_passed.py` pins both halves.
+The three smaller sites in the last section are recorded, not fixed. Found 2026-09-04 by a full audit of every exception handler under `src/vqapr`
 (153 sites: 143 handlers plus 10 `contextlib.suppress`), run at the owner's request after the
 `076` work. Reproduced twice, from two independent causes. This is the judgment-layer form of the
 defect `076` closed at the message layer: `076` was a refusal that lost the reason it refused,

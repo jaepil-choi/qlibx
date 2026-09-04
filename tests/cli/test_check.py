@@ -334,16 +334,24 @@ def test_a_blocked_judgment_names_its_error_type_separately(workspace: Path) -> 
 
 
 def _judge(root: Path, definition: RunDefinition) -> list[str]:
-    from vqapr.flow.judgments import _decide_agenda, _judge_datasets_and_fields
+    """Every dataset code the run's members produce, the way `judgments` dispatches them.
+
+    One judge per member since `docs/issues/077`, so this loops where it used to make one call.
+    `_agenda_once` is a CALL, not a value: an agenda that cannot be derived raises to the judge
+    that asked, which is what makes the judgment block instead of reading as passed.
+    """
+    from vqapr.flow.judgments import _agenda_once, _judge_member_datasets, _members
 
     space = Workspace.open(root)
     registered = {str(item.dataset_id): item for item in space.datasets}
-    # The agenda is derived once per `check` and handed to the judges (`docs/issues/069`).
-    agenda = _decide_agenda(space, definition)
+    # Derived at most once per `check` and reached by every judge that needs it
+    # (`docs/issues/069`).
+    agenda = _agenda_once(space, definition)
     return [
         failure.code
-        for failure in _judge_datasets_and_fields(
-            definition, space, registered, FailureSource(key_path="runs.x"), agenda
+        for member in _members(definition)
+        for failure in _judge_member_datasets(
+            definition, member, space, registered, FailureSource(key_path="runs.x"), agenda
         )
     ]
 
@@ -373,7 +381,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     registration is one problem: the fields it wanted ride along as examples.
     """
     from vqapr.extension.scaffold import render
-    from vqapr.flow.judgments import _decide_agenda, _judge_datasets_and_fields
+    from vqapr.flow.judgments import _agenda_once, _judge_member_datasets, _members
 
     Workspace.create(tmp_path)
     source = tmp_path / "wide.py"
@@ -391,12 +399,14 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     space = Workspace.open(tmp_path)
     registered = {str(item.dataset_id): item for item in space.datasets}
     definition = replace(_definition(), strategies=(StrategyEntry("wide"),))
-    failures = _judge_datasets_and_fields(
+    (member,) = _members(definition)
+    failures = _judge_member_datasets(
         definition,
+        member,
         space,
         registered,
         FailureSource(key_path="runs.x"),
-        _decide_agenda(space, definition),
+        _agenda_once(space, definition),
     )
 
     assert [failure.code for failure in failures] == ["check.dataset.unregistered"]
@@ -464,13 +474,21 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     assert _judge(tmp_path, _definition(start=start, sessions=(covered,), at=time(4, 0))) == []
 
 
-def test_the_lookback_judgment_stays_silent_when_it_cannot_answer(tmp_path: Path) -> None:
-    """No sessions, no agenda, no answer -- and no guess.
+def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> None:
+    """No sessions, no agenda, no answer -- and it SAYS so. No guess either.
 
-    A run whose sessions come from a dataset nobody registered has no first decision to measure
-    at. That is registration's refusal to make (`sessions_from` must name a registered dataset)
-    and preflight's; answering here too would report one defect twice, and guessing an instant
-    would put this verb back in the business of refusing what `run` accepts.
+    This test used to assert the opposite half of the same fact: that the judgment stayed silent,
+    on the reasoning that registration and preflight both refuse a `sessions_from` naming an
+    unregistered dataset, so answering here would report one defect twice. `docs/issues/077`
+    established what that cost -- a silent judgment is returned as an empty result, which
+    `judgments` cannot tell from "asked and found nothing", so `check` reported the run as judged
+    when the question was never asked. The owner settled it on 2026-09-04: the defect is named
+    twice, once as a blocked judgment and once as preflight's refusal, because they are two
+    different statements.
+
+    What has not changed is the other half: nothing is guessed. The judgment raises rather than
+    inventing a first-decision instant, which is what would put this verb back in the business of
+    refusing what `run` accepts.
     """
     space = Workspace.create(tmp_path)
     space.register_dataset(
@@ -487,10 +505,20 @@ def test_the_lookback_judgment_stays_silent_when_it_cannot_answer(tmp_path: Path
     )
     _strategy_reading(tmp_path, "model", "prices", "close")
 
-    # The sessions come from a dataset that is not registered: the agenda cannot be built here,
-    # and nothing is guessed.
+    # The sessions come from a dataset that is not registered: the agenda cannot be built here.
+    # Nothing is guessed, and nothing is silently returned either -- it raises, and `judgments`
+    # turns that into a blocked entry.
     unanswerable = _definition(sessions=(), sessions_from="absent")
-    assert "check.lookback.uncovered" not in _judge(tmp_path, unanswerable)
+    with pytest.raises(Exception) as refused:
+        _judge(tmp_path, unanswerable)
+    assert "absent" in str(refused.value), refused.value
+
+    # And end to end, through the verb: blocked, not passed, and `ok` is false.
+    from vqapr.flow.judgments import judgments
+
+    found, blocked = judgments(unanswerable, Workspace.open(tmp_path))
+    assert blocked, found
+    assert {entry["check"] for entry in blocked} >= {"execution_ordering"}
 
 
 def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) -> None:

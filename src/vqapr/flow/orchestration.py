@@ -12,7 +12,7 @@ from __future__ import annotations
 import multiprocessing
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from types import MappingProxyType
@@ -29,6 +29,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
+from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.exchange.execution_table import validate_execution_input
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
@@ -93,14 +94,45 @@ class _FrozenCatalog:
         return self._sources[raw_source_id]
 
 
+COMPLETED = "completed"
+FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyOutcome:
+    """What one strategy of a run came to: its record, or the failure that ended it.
+
+    Strings and plain dict trees only, on purpose: this is what a `--jobs` worker returns to the
+    parent, and the `SimulationFailure` it stands in for cannot cross that boundary -- its
+    keyword-only constructor and the owner objects it keeps on itself both refuse to pickle
+    (`docs/issues/073`). `failure` is the exception's `as_dict()`, the same payload a
+    single-process run renders, so the two paths report one shape.
+    """
+
+    component_id: str
+    status: str
+    record: Mapping[str, object] | None = None
+    failure: Mapping[str, object] | None = None
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in (COMPLETED, FAILED):
+            raise ValueError(f"status must be {COMPLETED!r} or {FAILED!r}; got {self.status!r}")
+        if (self.status == FAILED) != (self.failure is not None):
+            raise ValueError("a failed outcome carries its failure, and only a failed one does")
+
+
 @dataclass(frozen=True, slots=True)
 class RunResult:
-    """What one call to `run` produced: a result per strategy it ran, and their records.
+    """What one call to `run` produced: an outcome per strategy it ran, and their records.
 
-    `results` holds the in-process `SimulationResult` of every strategy this process ran.
-    `records` holds each strategy's `strategy.json` as written, for every strategy run under a
-    store -- including those run by worker processes, whose in-process result never crosses the
-    process boundary and is read back from the record instead.
+    `results` holds the in-process `SimulationResult` of every strategy this process ran to the
+    end. `records` holds each strategy's `strategy.json` as written, for every strategy run under
+    a store -- including those run by worker processes, whose in-process result never crosses the
+    process boundary and is read back from the record instead. `outcomes` has an entry for EVERY
+    strategy the run was asked to run, completed or failed (`docs/issues/073`): a refusal of one
+    strategy's decision is that strategy's outcome and does not stop the others. `errors` keeps
+    the `SimulationFailure` itself for a strategy that failed in this process.
     """
 
     run_id: str
@@ -110,16 +142,50 @@ class RunResult:
     """The instrument roster this run read at its start, or `None` when none was registered --
     or when the run was a datamodel run, which reads no roster. Carried so the caller's report
     is built from what the run used rather than from a second read (`docs/issues/070`)."""
+    outcomes: Mapping[str, StrategyOutcome] = field(default_factory=dict)
+    errors: Mapping[str, SimulationFailure] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        """Every strategy the run was asked to run completed."""
+        return all(outcome.status == COMPLETED for outcome in self.outcomes.values())
+
+    @property
+    def failed(self) -> tuple[str, ...]:
+        """The ids of the strategies whose flow ended in a `SimulationFailure`, in run order."""
+        return tuple(
+            component_id
+            for component_id, outcome in self.outcomes.items()
+            if outcome.status == FAILED
+        )
 
     def result(self, component_id: str | None = None) -> SimulationResult | DataModelResult:
-        """The one model's result, or the only one when the run ran exactly one."""
+        """The one model's result, or the only one when the run ran exactly one.
+
+        A strategy that failed in this process raises its own `SimulationFailure` here, so a
+        Python caller that asked for one strategy's result meets the real exception rather than
+        a count. One that failed in a worker has only its outcome, and the error says so.
+        """
         if component_id is None:
-            if len(self.results) != 1:
+            if len(self.results) == 1:
+                return next(iter(self.results.values()))
+            if not self.results and len(self.outcomes) == 1:
+                (component_id,) = self.outcomes
+            else:
                 raise ValueError(
                     f"run {self.run_id!r} produced {len(self.results)} in-process results; "
                     "name the strategy"
                 )
-            return next(iter(self.results.values()))
+        if component_id in self.results:
+            return self.results[component_id]
+        if component_id in self.errors:
+            raise self.errors[component_id]
+        outcome = self.outcomes.get(component_id)
+        if outcome is not None and outcome.status == FAILED:
+            raise ValueError(
+                f"strategy {component_id!r} of run {self.run_id!r} failed in a worker process: "
+                f"{outcome.error}; read `outcomes[{component_id!r}].failure`"
+            )
         return self.results[component_id]
 
 
@@ -187,10 +253,12 @@ def run(
 
     results: dict[str, SimulationResult] = {}
     records: dict[str, Mapping[str, object]] = {}
+    outcomes: dict[str, StrategyOutcome] = {}
+    errors: dict[str, SimulationFailure] = {}
     if jobs > 1 and len(selected) > 1:
         if store is None:
             raise ValueError(
-                "jobs > 1 needs a store_root: a worker's result comes back as its record"
+                "jobs > 1 needs a store_root: a worker's result comes back as its outcome"
             )
         context = multiprocessing.get_context("spawn")
         with ProcessPoolExecutor(max_workers=min(jobs, len(selected)), mp_context=context) as pool:
@@ -206,27 +274,61 @@ def run(
                 )
                 for layer in selected
             }
+            # Every worker's outcome is collected, failed or not. A `SimulationFailure` comes
+            # back INSIDE the outcome (`run_registered_strategy`); only an exception about the
+            # store or the package itself still escapes `result()` here, as it did before.
             for component_id, future in futures.items():
-                records[component_id] = future.result()
+                outcome = future.result()
+                outcomes[component_id] = outcome
+                if outcome.record is not None:
+                    records[component_id] = outcome.record
         return RunResult(
-            frozen.run_id, MappingProxyType(results), MappingProxyType(records), roster=roster
+            frozen.run_id,
+            MappingProxyType(results),
+            MappingProxyType(records),
+            roster=roster,
+            outcomes=MappingProxyType(outcomes),
         )
 
     for layer in selected:
-        result, record = _run_strategy(
-            root_path,
-            frozen,
-            layer,
-            store=store,
-            replace_record=replace_record,
-            record_account_positions=record_account_positions,
-            roster=roster,
-        )
+        try:
+            result, record = _run_strategy(
+                root_path,
+                frozen,
+                layer,
+                store=store,
+                replace_record=replace_record,
+                record_account_positions=record_account_positions,
+                roster=roster,
+            )
+        except SimulationFailure as failed:
+            # One strategy's refusal is that strategy's outcome (`docs/issues/073`, `071`). It
+            # has its own flow and its own account (design section 7-4); the strategies after it
+            # in the run have nothing to learn from its decision being declined, and stopping
+            # them left a comparison run with three records and no word about the other five.
+            errors[layer.component_id] = failed
+            outcomes[layer.component_id] = _failed_outcome(layer.component_id, failed)
+            continue
         results[layer.component_id] = result
         if record is not None:
             records[layer.component_id] = record
+        outcomes[layer.component_id] = StrategyOutcome(
+            layer.component_id, COMPLETED, record=record
+        )
     return RunResult(
-        frozen.run_id, MappingProxyType(results), MappingProxyType(records), roster=roster
+        frozen.run_id,
+        MappingProxyType(results),
+        MappingProxyType(records),
+        roster=roster,
+        outcomes=MappingProxyType(outcomes),
+        errors=MappingProxyType(errors),
+    )
+
+
+def _failed_outcome(component_id: str, failed: SimulationFailure) -> StrategyOutcome:
+    """The picklable stand-in for a strategy's `SimulationFailure`."""
+    return StrategyOutcome(
+        component_id, FAILED, failure=failed.as_dict(), error=f"{type(failed).__name__}: {failed}"
     )
 
 
@@ -382,27 +484,37 @@ def run_registered_strategy(
     store_root: str,
     replace_record: bool,
     record_account_positions: bool,
-) -> Mapping[str, object]:
-    """One strategy of one registered run, in this process, returning its record.
+) -> StrategyOutcome:
+    """One strategy of one registered run, in this process, returning its outcome.
 
     The worker behind `jobs > 1`. Module-level and taking only strings and bools, because it
     crosses a `spawn` boundary; it freezes the registered run again rather than receiving a
     frozen one, since a frozen run is built from workspace objects that are not meant to travel.
+
+    A `SimulationFailure` is returned inside the outcome rather than raised, because it cannot
+    make the trip back: `concurrent.futures` pickles a worker's exception to hand it to the
+    parent, and this one carries the owner object that was refused -- a `Rebalance` whose weights
+    are a `MappingProxyType` -- so the parent used to receive `TypeError: cannot pickle
+    'mappingproxy' object`, render `stage: unhandled` with `failures: []`, and say nothing about
+    the strategies that had finished (`docs/issues/073`).
     """
     workspace = Workspace.open(project_root)
     frozen = _preflight_run(workspace, workspace.run_definition(run_id))
     layer = frozen.strategy(component_id)
-    _, record = _run_strategy(
-        Path(project_root),
-        frozen,
-        layer,
-        store=Path(store_root),
-        replace_record=replace_record,
-        record_account_positions=record_account_positions,
-        roster=registered_roster(workspace),
-    )
+    try:
+        _, record = _run_strategy(
+            Path(project_root),
+            frozen,
+            layer,
+            store=Path(store_root),
+            replace_record=replace_record,
+            record_account_positions=record_account_positions,
+            roster=registered_roster(workspace),
+        )
+    except SimulationFailure as failed:
+        return _failed_outcome(component_id, failed)
     assert record is not None
-    return record
+    return StrategyOutcome(component_id, COMPLETED, record=record)
 
 
 def _source_digests(frozen: FrozenRun) -> dict[str, str]:

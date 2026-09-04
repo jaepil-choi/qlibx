@@ -97,6 +97,12 @@ _DESCRIPTIONS: dict[str, str] = {
         "The same judgments `vqapr check` makes are made here before the run is frozen: a run "
         "that would fail `check` is refused rather than executed. Declare a run with "
         "`vqapr new run --out runs.yaml`, register it, and prove it with `vqapr check <run-id>`."
+        "\n\n"
+        "Every strategy the run names is run, in a single process or under --jobs. A refusal "
+        "inside one strategy is that strategy's outcome: the others still run, and the "
+        "envelope reports every strategy with a status (ok:false, stage run.strategy_failed, "
+        "the failed strategy's refusal in its own block). While a run is executing, "
+        "`vqapr list strategies --run <run-id>` shows each strategy's progress."
     ),
     "list": (
         "Show what the workspace already holds.\n\n"

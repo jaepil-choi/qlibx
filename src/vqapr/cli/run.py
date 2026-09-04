@@ -27,6 +27,7 @@ from vqapr.domain.errors import (
     VqaprError,
 )
 from vqapr.flow.judgments import judgments
+from vqapr.flow.orchestration import COMPLETED, FAILED
 from vqapr.flow.reporting import FILL_TABLE
 from vqapr.flow.run_records import (
     RunRecordConflict,
@@ -214,10 +215,21 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 for component_id, record in outcome.records.items()
             },
         )
-    strategies = {
-        component_id: _strategy_envelope(store_root, frozen.run_id, record)
-        for component_id, record in outcome.records.items()
-    }
+    # One line per strategy the run was asked to run, completed or failed (`docs/issues/073`).
+    # A failed strategy's line is the same `simulation.*` payload a refusal used to be the whole
+    # envelope of, so a reader who handled that shape handles this one, per strategy.
+    strategies: dict[str, dict[str, Any]] = {}
+    for component_id, result in outcome.outcomes.items():
+        if result.status == COMPLETED:
+            strategies[component_id] = {
+                "status": COMPLETED,
+                **_strategy_envelope(store_root, frozen.run_id, result.record),
+            }
+        else:
+            strategies[component_id] = {"status": FAILED, **dict(result.failure or {})}
+    roster = _roster_envelope(outcome.roster)
+    if not outcome.ok:
+        return _strategy_failed(frozen, store_root, strategies, roster)
     return success(
         "run.complete",
         run_id=frozen.run_id,
@@ -226,8 +238,45 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # What this run knew each instrument to be, or that it knew nothing. Reported on the
         # SUCCESS path on purpose: the run is legitimate, and the thing worth saying is what it
         # was computed against.
-        roster=_roster_envelope(outcome.roster),
+        roster=roster,
     )
+
+
+def _strategy_failed(
+    frozen: Any, store_root: Path, strategies: dict[str, dict[str, Any]], roster: dict[str, Any]
+) -> dict[str, Any]:
+    """The envelope of a run in which at least one strategy's flow ended in a refusal.
+
+    `ok: false` because not everything that was asked for was done, and the SAME `strategies`
+    map as the success path, so the strategies that completed are named beside the one that did
+    not -- the payload that filed `073` had `failures: []` and no word about seven finished
+    records. `failures` is every failed strategy's entries, each stamped with its `strategy`, so
+    a reader following the skill's rule (read `fix` first) still can; the per-strategy block
+    holds the full replay coordinates (`at`, `retry_precondition`) for each.
+    """
+    failed = {name: block for name, block in strategies.items() if block["status"] == FAILED}
+    families = {block.get("family") for block in failed.values()}
+    return {
+        "ok": False,
+        "stage": "run.strategy_failed",
+        "family": families.pop() if len(families) == 1 else None,
+        "mutation": any(bool(block.get("mutation")) for block in failed.values()),
+        "retry_precondition": None,
+        "correlation_id": frozen.identity,
+        "failures": [
+            {**entry, "strategy": name}
+            for name, block in failed.items()
+            for entry in block.get("failures") or ()
+        ],
+        "error": (
+            f"{len(failed)} of {len(strategies)} strategies failed: {', '.join(failed)}; "
+            f"the other {len(strategies) - len(failed)} completed and their records stand"
+        ),
+        "run_id": frozen.run_id,
+        "store_root": str(store_root),
+        "strategies": strategies,
+        "roster": roster,
+    }
 
 
 def _datamodel_envelope(record: Any) -> dict[str, Any]:

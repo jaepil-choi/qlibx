@@ -554,6 +554,21 @@ def _relative_side(
     return side
 
 
+_MAX_OFFENDERS = 5
+"""How many offending weights a `Rebalance` refusal quotes; the rest are counted."""
+
+
+def _offenders(weights: Mapping[str, Decimal]) -> str:
+    """`name=value` for the first few offending weights, and a count of the rest.
+
+    Bounded the way `Failure.examples` is bounded: a thousand-name book that misses a bound on
+    every name should say so in one line, not in a thousand.
+    """
+    shown = [f"{name}={value}" for name, value in list(weights.items())[:_MAX_OFFENDERS]]
+    rest = len(weights) - len(shown)
+    return ", ".join(shown) + (f", and {rest} more" if rest > 0 else "")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Rebalance:
     """A Strategy decision naming one complete desired portfolio."""
@@ -709,19 +724,43 @@ class Rebalance:
         object.__setattr__(self, "cash_weight", cash)
         if not isinstance(self.budget, Budget):
             raise TypeError("budget must be a Budget")
-        if not self.budget.validates_cash(cash):
-            raise ValueError("cash_weight is outside the declared budget")
+        # Every refusal here names the value it saw and the bound it crossed. These five said
+        # only the rule -- `cash_weight is outside the declared budget` -- and an author whose
+        # quantised shorts summed to -1.000000000001 had to reason the cash of 2.000000000001 and
+        # the bound of 2 out by hand, in a run of eight strategies (`docs/issues/071`).
+        budget = self.budget
+        if not budget.validates_cash(cash):
+            raise ValueError(
+                f"cash_weight {cash} is outside the declared budget "
+                f"[{budget.cash_lower}, {budget.cash_upper}]"
+            )
         if weights:
-            if any(not self.budget.validates_target(value) for value in weights.values()):
-                raise ValueError("target_weights are outside the declared budget bounds")
-            if self.budget.direction is PortfolioDirection.LONG_ONLY and any(
-                value < 0 for value in weights.values()
-            ):
-                raise ValueError("long_only budgets forbid negative target_weights")
-            if sum(weights.values(), Decimal(0)) + cash != 1:
-                raise ValueError("target_weights plus cash_weight must equal one")
+            outside = {
+                name: value
+                for name, value in weights.items()
+                if not budget.validates_target(value)
+            }
+            if outside:
+                raise ValueError(
+                    "target_weights are outside the declared budget bounds "
+                    f"[{budget.target_lower}, {budget.target_upper}]: {_offenders(outside)}"
+                )
+            if budget.direction is PortfolioDirection.LONG_ONLY:
+                negative = {name: value for name, value in weights.items() if value < 0}
+                if negative:
+                    raise ValueError(
+                        f"long_only budgets forbid negative target_weights: {_offenders(negative)}"
+                    )
+            total = sum(weights.values(), Decimal(0))
+            if total + cash != 1:
+                raise ValueError(
+                    "target_weights plus cash_weight must equal one; got "
+                    f"sum(target_weights) {total} + cash_weight {cash} = {total + cash}"
+                )
         elif cash != 1:
-            raise ValueError("an empty complete position set requires cash_weight equal to one")
+            raise ValueError(
+                f"an empty complete position set requires cash_weight equal to one; got {cash}"
+            )
 
 
 class StrategyCall(ABC):

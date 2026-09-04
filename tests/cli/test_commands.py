@@ -1090,3 +1090,77 @@ def test_one_run_records_one_clock(tmp_path: Path, capsys: pytest.CaptureFixture
     }
     assert all(offsets.values()), offsets
     assert len({offset for found in offsets.values() for offset in found}) == 1, offsets
+
+
+_NEVER_READY = '''
+from vqapr.authoring import DatasetInput, RowsLookback, StrategyModel
+
+
+class {object_name}(StrategyModel):
+    def inputs(self):
+        return {{"prices": DatasetInput(dataset_id="prices", fields=("close",),
+                                       lookback=RowsLookback(rows=2))}}
+
+    def decide(self, call):
+        raise ValueError("the signal is not ready")
+'''
+
+
+def test_a_run_names_every_strategy_it_ran_when_one_of_them_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`docs/issues/073`: the envelope of a run with one failed strategy used to be that
+    strategy's refusal alone -- or, under `--jobs`, `stage: unhandled` with `failures: []` --
+    and said nothing about the strategies that completed. It now has the same `strategies` map
+    as a green run, with a `status` per strategy, and the failed one's block is the refusal.
+    `docs/issues/071`: the refusal names its strategy, its file and its line."""
+    _workspace_for_run(tmp_path, capsys)
+    code, scaffold = _cli(
+        capsys, "--project-root", str(tmp_path), "new", "strategy", "never-ready",
+        "--dataset", "prices", "--lookback", "2",
+    )
+    assert code == 0, scaffold
+    Path(scaffold["path"]).write_text(
+        _NEVER_READY.format(object_name=scaffold["object_name"]), encoding="utf-8"
+    )
+    code, registered = _cli(
+        capsys, "--project-root", str(tmp_path), "register", scaffold["declaration"]
+    )
+    assert code == 0, registered
+    code, payload = _register_run(
+        tmp_path, capsys, "mixed", strategies={"my-alpha": {}, "never-ready": {}}
+    )
+    assert code == 0, payload
+
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "mixed")
+
+    assert code == 1 and ran["ok"] is False
+    assert ran["stage"] == "run.strategy_failed"
+    assert ran["family"] == "INTENT"
+    assert ran["run_id"] == "mixed" and ran["store_root"]
+    assert ran["strategies"]["my-alpha"]["status"] == "completed"
+    assert ran["strategies"]["my-alpha"]["record"].startswith("my-alpha@"), (
+        "the strategy that completed is named beside the one that did not"
+    )
+    failed = ran["strategies"]["never-ready"]
+    assert failed["status"] == "failed"
+    assert failed["stage"] == "simulation.callback.intent"
+    assert failed["component_id"] == "never-ready"
+    assert failed["at"]["clock"], "the replay coordinates ride with the strategy's block"
+    (entry,) = ran["failures"]
+    assert entry["strategy"] == "never-ready"
+    assert entry["code"] == "simulation.callback.intent.ValueError"
+    assert entry["observed"] == "the signal is not ready"
+    assert entry["source"]["key_path"] == "strategies.never-ready"
+    assert entry["source"]["file"].endswith(".py") and isinstance(entry["source"]["line"], int)
+    assert "1 of 2 strategies failed: never-ready" in ran["error"]
+    assert "read `observed`" in entry["fix"]
+    # The record store agrees: one finished record, and the run's own record stands.
+    code, listed = _cli(
+        capsys, "--project-root", str(tmp_path), "list", "strategies", "--run", "mixed"
+    )
+    assert code == 0
+    by_status = {row["strategy_id"]: row["status"] for row in listed["items"]}
+    assert by_status == {"my-alpha": "completed", "never-ready": "unfinished"}, (
+        "the failed strategy's directory is listed too (074): rows, no record, lock released"
+    )

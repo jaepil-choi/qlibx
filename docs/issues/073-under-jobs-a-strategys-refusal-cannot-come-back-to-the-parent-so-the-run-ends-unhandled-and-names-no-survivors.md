@@ -1,6 +1,8 @@
 # 073 -- under `--jobs` a strategy's refusal cannot come back to the parent, so the run ends `unhandled` and names no survivors
 
-**Status:** open. Found 2026-09-04 by the scenario testbed run 4
+**Status:** **CLOSED 2026-09-04** on `fix/073-the-run-reports-per-strategy`, record `docs/implementations/150-the-run-reports-per-strategy.md`. A worker returns a `StrategyOutcome` (the failure's `as_dict()`, never the exception); `run()` returns an outcome for every strategy, completed or failed, in both modes and continues past a refusal; the envelope is `ok:false`, `stage: run.strategy_failed`, with the same `strategies` map as a green run plus a `status` per strategy and the failed one's refusal in its block. A test raises inside a worker under `--jobs`. `not_started` was not needed: the run no longer stops.
+
+**Status when filed:** open. Found 2026-09-04 by the scenario testbed run 4
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-009**, with **F-006** as the single-process
 form and **F-008** as the ten minutes it cost), against `vqapr-0.4.0`. Confirmed against source
 2026-09-04 on `fix/0.4.0-open-issues`; nothing on this branch touches the path. The heaviest

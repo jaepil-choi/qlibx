@@ -40,6 +40,7 @@ from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
+from vqapr.portfolio.weighting import rescale
 
 __all__ = (
     "AccountHistory",
@@ -572,7 +573,20 @@ def _offenders(weights: Mapping[str, Decimal]) -> str:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Rebalance:
-    """A Strategy decision naming one complete desired portfolio."""
+    """A Strategy decision naming one complete desired portfolio.
+
+    Three ways in, and the direct constructor is the last of them:
+
+    - `Rebalance.of(long=, short=, invested=)` -- relative conviction per side, split evenly.
+    - `Rebalance.signed(weights, gross=)` -- signed weights, split as the signal produced them.
+    - `Rebalance(target_weights=, cash_weight=, budget=)` -- everything stated, nothing derived.
+
+    Weights are validated **to the last digit**: `sum(target_weights) + cash_weight` must equal
+    one exactly, and a value off by a single ulp is refused by the same invariant that catches a
+    real mistake. That is why the two constructors exist, and why anyone building this directly
+    should quantise and settle through `vqapr.portfolio.weighting.rescale` on the canonical grid
+    `vqapr.portfolio.optimize.QUANTUM` rather than by hand (`docs/issues/075`).
+    """
 
     target_weights: Mapping[str, Decimal]
     cash_weight: Decimal
@@ -613,7 +627,9 @@ class Rebalance:
 
         Two sides are currently split evenly, so a 130/30 cannot be expressed through this
         constructor either. Stated rather than implied, because the even split is a choice and not
-        a law.
+        a law. **`Rebalance.signed` is the constructor for a book the signal splits**: it takes
+        signed weights, normalises them to a gross of your choosing, and leaves the long/short
+        ratio exactly as the signal produced it.
 
         Doing it by hand is also where the errors live: the sum must land on one EXACTLY, and a
         weight that misses by a single ulp is refused by the same invariant that catches a real
@@ -622,6 +638,14 @@ class Rebalance:
         `invested` is the fraction of NAV to put to work; the remainder stays in cash. Passing a
         short book implies a signed budget, and a long-only book keeps `LONG_ONLY`, so the budget
         follows from what was actually asked for rather than being declared a second time.
+
+        The two budgets this makes, as values: a long-only book gets targets in `[0, 1]` and cash
+        in `[0, 1]`; a signed book gets targets in `[-1, 1]` and cash in `[-1, 2]`, the upper bound
+        being 2 because selling short raises cash.
+
+        Quantising and settling belong to `vqapr.portfolio.weighting.rescale`, which this calls
+        (`docs/issues/075`). Each side lands EXACTLY on its target, on the canonical grid
+        `QUANTUM`, with the rounding residual on that side's largest position.
         """
         longs = _relative_side(long, name="long")
         shorts = _relative_side(short, name="short")
@@ -649,9 +673,17 @@ class Rebalance:
             )
 
         # Both sides present means the book is signed and each side takes half the invested
-        # fraction. One side alone takes all of it.
+        # fraction. One side alone takes all of it. Quantised here because it becomes a side
+        # TARGET below, and `rescale` refuses a target that is not itself on the grid -- weights
+        # on a grid cannot sum to a total that is off it.
         sides = (bool(longs), bool(shorts))
-        per_side = share / 2 if all(sides) else share
+        per_side = (share / 2 if all(sides) else share).quantize(QUANTUM)
+        if per_side == 0:
+            raise ValueError(
+                f"invested {share} is smaller than the canonical grid {QUANTUM} once split "
+                f"between {'two sides' if all(sides) else 'the book'}, so every weight would "
+                "round to zero. Ask for at least one grid step per side"
+            )
         weights: dict[str, Decimal] = {}
         for names, sign in ((longs, Decimal(1)), (shorts, Decimal(-1))):
             if not names:
@@ -660,22 +692,29 @@ class Rebalance:
             for instrument, conviction in names.items():
                 weights[instrument] = sign * per_side * conviction / total
 
-        # Round onto the canonical grid, then settle the rounding residual ON THE BOOK rather than
-        # in cash.
+        # `rescale` owns quantising and settling, and this constructor stopped owning a second
+        # copy of it (`docs/issues/075`). It quantises onto the grid FIRST and settles each side's
+        # rounding residual afterwards, on that side's largest position by absolute size -- where
+        # the crumb is proportionally smallest, and where it cannot move cash across a bound.
         #
-        # Cash looks like the natural place for it -- it is the line nobody expressed a view about
-        # -- and that is wrong here for a measurable reason. A dollar-neutral signed book nets to
-        # zero, so cash is 1; three shorts at -0.5/3 do not divide evenly, and the leftover
-        # -1e-12 pushes cash to 1.000000000001, one crumb ABOVE the fully-uninvested bound. The
-        # book is arithmetically fine and the declaration is refused.
+        # Settling in CASH is the obvious-looking alternative and is wrong for a measurable
+        # reason: a dollar-neutral signed book nets to zero, so its cash is 1, and three shorts at
+        # -0.5/3 leave -1e-12, which pushes cash to 1.000000000001 -- one crumb ABOVE the
+        # fully-uninvested bound. The book is arithmetically fine and the declaration is refused.
         #
-        # So the residual goes back to the largest position by absolute size, where it is a
-        # relatively smaller perturbation than anywhere else and where it cannot move cash across
-        # a bound. `invested` is then honoured exactly, which is what the author actually asked
-        # for.
-        quantised = {
-            instrument: value.quantize(QUANTUM) for instrument, value in sorted(weights.items())
-        }
+        # PER SIDE, not per book, which is what changed here. Settling one book-wide residual on
+        # the single largest position let a crumb from the SHORT side land on a LONG name, so a
+        # book asking for `invested=1` could come out with gross 1.000000000002 -- and `invested`
+        # is documented as gross exposure. Each side now lands exactly on its own target, so gross
+        # is exact and the two sides of a neutral book cancel on the same grid steps.
+        quantised = dict(
+            rescale(
+                dict(sorted(weights.items())),
+                long=per_side if longs else Decimal(0),
+                short=-per_side if shorts else Decimal(0),
+                grid=QUANTUM,
+            )
+        )
 
         # Cash is what the book does NOT hold net, and for a signed book that is not
         # `1 - invested`. `invested` is GROSS exposure: a dollar-neutral long/short book puts the
@@ -683,15 +722,9 @@ class Rebalance:
         # from the gross fraction produced a residual of ~1 and a refusal on a book that is
         # arithmetically perfect.
         #
-        # So cash is the net residual, and the rounding crumb is settled on the largest position
-        # rather than in cash -- where, for that same neutral book, a -1e-12 leftover would push
-        # cash one step past fully-uninvested and be refused for a rounding artifact.
-        exact = sum(weights.values(), Decimal(0))
-        cash = (Decimal(1) - exact).quantize(QUANTUM)
-        residual = Decimal(1) - cash - sum(quantised.values(), Decimal(0))
-        if residual and quantised:
-            anchor = max(quantised, key=lambda name: (abs(quantised[name]), name))
-            quantised[anchor] += residual
+        # Exact by construction now: every side landed on its target, so the sum is on the grid
+        # and no second settle is needed here.
+        cash = Decimal(1) - sum(quantised.values(), Decimal(0))
         if shorts:
             direction = PortfolioDirection.SIGNED
             bounds = (Decimal(-1), Decimal(1))
@@ -715,6 +748,100 @@ class Rebalance:
                 cash_upper=cash_bounds[1],
                 target_lower=bounds[0],
                 target_upper=bounds[1],
+            ),
+        )
+
+    @classmethod
+    def signed(
+        cls,
+        weights: Mapping[str, Decimal | int | float | str],
+        *,
+        gross: Decimal | int | float | str = 1,
+    ) -> Rebalance:
+        """Build a signed book from signed weights, split exactly as the signal produced them.
+
+        This is the market-neutral residual book `docs/issues/075` was filed on, and the thing
+        `of` structurally cannot say. `of` takes two mappings and splits `invested` EVENLY between
+        them, so it tops out at half a textbook $1-long/$1-short book (`docs/issues/018`) and can
+        never express a 130/30 or a book whose signal happened to find more shorts than longs.
+        Here the ratio is the signal's: pass what the signal produced, say how large the book
+        should be, and the long/short split falls out of the weights themselves.
+
+        **The sign carries the side.** A negative weight is a short, which is the opposite
+        convention to `of` -- there, the side is chosen by WHICH MAPPING a name appears in and a
+        negative number is refused. The two constructors take different inputs, so they can afford
+        different conventions; what they must not do is accept the same input and mean different
+        things by it.
+
+        `gross` is the sum of ABSOLUTE weights, so `gross=1` on a dollar-neutral book is 0.5 long
+        and 0.5 short, and `gross=2` is the textbook $1/$1 book `of` cannot reach. It is not
+        bounded at 1: leverage is a real declaration, and the budget below admits positions in
+        `[-1, 1]` with cash in `[-1, 2]`, which is what actually constrains the book.
+
+        Cash is the NET residual, `1 - sum(weights)` -- not `1 - gross`. A dollar-neutral book is
+        fully invested and nets to zero, so its cash is 1; a book that is only short holds more
+        than its NAV in cash by exactly what it shorted.
+
+        A name whose weight is zero is kept as a flat position rather than dropped: a signal that
+        scores a name at zero has said something about it, and silently removing the name would
+        make the returned book disagree with the mapping the author passed.
+
+        Quantising and settling are `vqapr.portfolio.weighting.rescale`'s, on the canonical grid,
+        each side landing exactly on its own target.
+        """
+        if not isinstance(weights, Mapping) or not weights:
+            raise TypeError("weights must be a non-empty mapping of instrument to signed weight")
+        declared: dict[str, Decimal] = {}
+        for instrument, raw in weights.items():
+            value = _as_decimal(raw, name=f"weights[{instrument!r}]")
+            if not value.is_finite():
+                raise ValueError(f"weights[{instrument!r}] must be finite")
+            declared[_identifier(instrument, name="instrument")] = value
+
+        size = _as_decimal(gross, name="gross")
+        if size <= 0:
+            raise ValueError(
+                f"gross must be greater than zero; got {size}. It is the sum of ABSOLUTE weights, "
+                "so a dollar-neutral book at gross=1 is 0.5 long and 0.5 short"
+            )
+
+        total = sum((abs(value) for value in declared.values()), Decimal(0))
+        if total == 0:
+            raise ValueError(
+                "a Rebalance needs at least one non-zero weight; every weight given was zero, "
+                "and a book of nothing has no side to size"
+            )
+
+        # The two side targets, in the ratio the SIGNAL produced -- this is the whole point of
+        # this constructor. Quantised because `rescale` refuses a target that is not itself on
+        # the grid, which can leave `long + (-short)` one step away from `gross`; that is the
+        # grid's own resolution and not a miscalculation.
+        longs = sum((value for value in declared.values() if value > 0), Decimal(0))
+        shorts = sum((value for value in declared.values() if value < 0), Decimal(0))
+        long_target = (size * longs / total).quantize(QUANTUM)
+        short_target = (size * shorts / total).quantize(QUANTUM)
+        for name, side, target in (("long", longs, long_target), ("short", shorts, short_target)):
+            if side != 0 and target == 0:
+                raise ValueError(
+                    f"the {name} side is {side} of a gross {size}, which is smaller than the "
+                    f"canonical grid {QUANTUM} and would round the whole side to zero. Raise "
+                    "gross, or drop the side from the weights"
+                )
+
+        book = dict(rescale(declared, long=long_target, short=short_target, grid=QUANTUM))
+        return cls(
+            target_weights=book,
+            cash_weight=Decimal(1) - sum(book.values(), Decimal(0)),
+            # SIGNED unconditionally, even for an all-positive mapping: the author reached for the
+            # signed constructor and the next signal may find a short. A budget that flipped to
+            # LONG_ONLY on the days a signal happened to find none would refuse the book on the
+            # first day it did.
+            budget=Budget(
+                direction=PortfolioDirection.SIGNED,
+                cash_lower=Decimal(-1),
+                cash_upper=Decimal(2),
+                target_lower=Decimal(-1),
+                target_upper=Decimal(1),
             ),
         )
 

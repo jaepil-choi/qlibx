@@ -85,12 +85,13 @@ question could not be asked and why.
 
 What that costs, and what has to be settled with it:
 
-- **Double reporting.** The helper comments are right that the same defect would then be named
-  twice: once as a blocked judgment, once as preflight's refusal. That is the reason the `try`
-  blocks were written. But a blocked entry and a refusal are not the same statement -- one says
-  "this question could not be asked", the other says "here is the defect" -- so the answer may be
-  that both belong, rather than that one must be suppressed. Deciding this is the design half of
-  this issue.
+- **Double reporting. SETTLED 2026-09-04 by the owner: the envelope carries BOTH.** The helper
+  comments are right that the same defect is then named twice: once as a blocked judgment, once as
+  preflight's refusal. That is the reason the `try` blocks were written. But a blocked entry and a
+  refusal are not the same statement -- one says "this question could not be asked", the other says
+  "here is the defect" -- so both belong. `check`'s three-way distinction is restored, and the
+  silent dependence on preflight's coverage is removed. The cost accepted is two entries for one
+  defect.
 - **`_decide_agenda` is shared.** It feeds `_judge_execution_ordering` and
   `_judge_datasets_and_fields`. If it raises, both must block, with the same reason -- not one
   blocked and one passed.

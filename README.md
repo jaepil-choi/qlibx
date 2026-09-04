@@ -41,12 +41,11 @@ Run `vqapr <command> --help` for the arguments of any verb.
 | `scripts/` | evidence and fixture-preparation scripts, not part of the distribution |
 | `testbed/` | a measurement workspace treated as a first-time user's project, not as source |
 | `references/` | vendored upstream snapshots — non-authoritative unless the project manifest promotes a file |
-| `attempts/` | frozen earlier implementations, kept for their record and not maintained |
 
 ## Prior implementations
 
-This package was previously named `qlibx`. Its first and second implementations are frozen under
-[`attempts/attempt-1/`](attempts/attempt-1/) and [`attempts/attempt-2/`](attempts/attempt-2/), and
-are archives rather than supported code.
+This package was previously named `qlibx`. Its first and second implementations were frozen under
+`attempts/attempt-1/` and `attempts/attempt-2/` and removed from the tree on 2026-09-04; they remain in
+history (`git log -- attempts/`).
 
 Attribution for third-party arithmetic is in [`NOTICE`](NOTICE).

@@ -91,6 +91,71 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 JUDGMENT_STAGE = "run.judgments"
+PREFLIGHT_STAGE = "run.check"
+"""`run`'s preflight refusals carry `check`'s stage and codes, because they are the same judgment.
+
+A reader who learned to handle `run.check.preflight_refused` from `vqapr check` must not have to
+learn a second vocabulary for the verb that actually runs.
+"""
+
+_MAX_CAUSE_LINKS = 4
+"""How many `__cause__` hops `observed` carries before it stops at `...`.
+
+The chain is evidence, not a traceback. Two hops reach the original in every chain this package
+raises today (`preflight` wraps one level), and the bound is what keeps `observed` from growing
+with a user's OWN nesting -- a strategy is free to re-raise `from` as deep as it likes."""
+
+
+def _chain(error: BaseException) -> str:
+    """The refusal's own sentence followed by what raised it, innermost last.
+
+    `raise ValueError(...) from error` is how this package names the step that failed while
+    keeping the evidence, and dropping `__cause__` threw away the half that says WHY -- a reader
+    was told "the initial payload cannot be staged" and never told that `load_payload` hit
+    `EOFError: Ran out of input` (`docs/issues/076`). Only `__cause__` is followed, never
+    `__context__`: an explicit `from` is an author saying these two are one story, whereas an
+    incidental exception caught during handling is not.
+    """
+    links = [f"{type(error).__name__}: {error}"]
+    cause = error.__cause__
+    while cause is not None and len(links) <= _MAX_CAUSE_LINKS:
+        links.append(f"{type(cause).__name__}: {cause}")
+        cause = cause.__cause__
+    if cause is not None:
+        links.append("...")
+    return " <- ".join(links)
+
+
+def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
+    """A bare TypeError or ValueError from a framework invariant, given an envelope.
+
+    ONE renderer for both verbs (`docs/issues/076`). `check` caught these per phase and `run`
+    called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded refusal
+    from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
+
+    The two codes are written literally rather than selected into a variable so the refusal-code
+    inventory's constant folding can see them.
+    """
+    detail = _chain(error)
+    fix = f"correct the run {target!r} so the {phase} phase completes, then check again"
+    source = FailureSource(key_path=f"runs.{target}")
+    if phase in ("run", "spec"):
+        return Failure.bounded(
+            "run.check.declaration_invalid",
+            "the run must resolve against what the workspace has registered",
+            observed=detail,
+            fix=fix,
+            explain=ExplainTopic.DECLARATION_SHAPE,
+            source=source,
+        )
+    return Failure.bounded(
+        "run.check.preflight_refused",
+        "every run precondition must hold before the run starts",
+        observed=detail,
+        fix=fix,
+        explain=ExplainTopic.RUN_PRECONDITION,
+        source=source,
+    )
 
 
 def _refuse_if_judged(failures: list[Failure], blocked: list[dict[str, str]], run_id: str) -> None:
@@ -166,7 +231,22 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         definition.member(name)  # KeyError names the models the run does hold
     # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/070`):
     # the judgments above, the freeze and the roster read all see the same document.
-    frozen = preflight_run(workspace, definition)
+    try:
+        frozen = preflight_run(workspace, definition)
+    except (TypeError, ValueError) as refused:
+        # `check` renders exactly this as a bounded refusal; letting it escape here rendered the
+        # SAME judgment as `stage: "unhandled"` (`docs/issues/076`).
+        #
+        # These two types are the WHOLE escape set, not a guessed subset: every `raise` in
+        # `flow/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and user code
+        # reached through `load_strategy_model` comes back already bounded as `component.load`.
+        # `VqaprError` and `InputError` are therefore deliberately not caught -- both already
+        # carry their own bounded body and their own truer stage.
+        raise VqaprError(
+            stage=PREFLIGHT_STAGE,
+            family=FailureFamily.INTENT,
+            failures=[preflight_refusal("preflight", refused, target)],
+        ) from refused
     store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
     replace = bool(getattr(args, "force", False))
     try:

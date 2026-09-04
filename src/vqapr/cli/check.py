@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.cli.run import refuse_a_path
+from vqapr.cli.run import preflight_refusal, refuse_a_path
 from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 from vqapr.flow.judgments import judgments
 from vqapr.inputs import InputError
@@ -146,7 +146,7 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
             # Every exception type, not a listed few: these are the cases most likely to mean a
             # phase is broken, and letting them escape renders the whole envelope as
             # `stage: "unhandled"` -- the framework broke, when the truth is the run was wrong.
-            failures.append(_render(_from_python(phase.name, error, target), source))
+            failures.append(_render(preflight_refusal(phase.name, error, target), source))
             continue
 
         done.add(phase.name)
@@ -210,34 +210,6 @@ def _from_input(error: InputError, spec: Path | None) -> dict[str, Any]:
         "examples": list(error.examples),
         "example_total": error.example_total,
     }
-
-
-def _from_python(phase: str, error: Exception, target: str) -> Failure:
-    """A bare TypeError or ValueError from a framework invariant, given an envelope.
-
-    The two codes are written literally rather than selected into a variable so the refusal-code
-    inventory's constant folding can see them.
-    """
-    detail = f"{type(error).__name__}: {error}"
-    fix = f"correct the run {target!r} so the {phase} phase completes, then check again"
-    source = FailureSource(key_path=f"runs.{target}")
-    if phase in ("run", "spec"):
-        return Failure.bounded(
-            "run.check.declaration_invalid",
-            "the run must resolve against what the workspace has registered",
-            observed=detail,
-            fix=fix,
-            explain=ExplainTopic.DECLARATION_SHAPE,
-            source=source,
-        )
-    return Failure.bounded(
-        "run.check.preflight_refused",
-        "every run precondition must hold before the run starts",
-        observed=detail,
-        fix=fix,
-        explain=ExplainTopic.RUN_PRECONDITION,
-        source=source,
-    )
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

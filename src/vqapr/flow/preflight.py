@@ -163,23 +163,48 @@ def _validate_initial_model_state(
     strategy: StrategyModel,
     memory: object,
 ) -> bytes:
-    """Stage and round-trip the Flow-owned initial Strategy payload."""
+    """Stage and round-trip the Flow-owned initial Strategy payload.
+
+    Three separate steps, each with its own `try` and its own name in the refusal
+    (`docs/issues/076`). One block around all three could only say "cannot be staged", so a
+    `load_payload` that hit `EOFError` on an empty source and a `save_payload` that was not
+    deterministic produced the SAME sentence -- and the author could not tell which of their two
+    methods to open. The `from error` chain carries the original; `cli.run.preflight_refusal`
+    renders it.
+    """
+    component_id = component.component_id
+
+    def staged(step: str) -> ValueError:
+        return ValueError(
+            f"strategy initial payload for {component_id!r} cannot be staged: {step}"
+        )
+
     try:
         strategy.memory = memory
         payload = BytesIO()
         strategy.save_payload(payload)
         frozen_payload = payload.getvalue()
+    except Exception as error:
+        raise staged("save_payload on a fresh instance") from error
+
+    try:
         restored = load_strategy_model(component, project_root=workspace.project_root)
         restored.memory = memory
         restored.load_payload(BytesIO(frozen_payload))
+    except Exception as error:
+        raise staged("load_payload of those bytes on a second fresh instance") from error
+
+    try:
         round_trip = BytesIO()
         restored.save_payload(round_trip)
-        if round_trip.getvalue() != frozen_payload:
-            raise ValueError("payload round-trip changed its bytes")
     except Exception as error:
+        raise staged("save_payload again") from error
+
+    if round_trip.getvalue() != frozen_payload:
         raise ValueError(
-            f"strategy initial payload for {component.component_id!r} cannot be staged"
-        ) from error
+            f"strategy initial payload for {component_id!r} cannot be staged: "
+            "save_payload again wrote different bytes"
+        )
     return frozen_payload
 
 

@@ -1,6 +1,10 @@
 # 076 -- preflight round-trips a fresh instance's payload, and neither the docstring nor the refusal says so
 
-**Status:** open. Found 2026-09-04 by the scenario testbed run 4
+**Status:** **CLOSED 2026-09-04 by record `152`** (one-shape campaign Step 2). All three halves:
+`_validate_initial_model_state` is three named steps, `cli/run.py::preflight_refusal` carries the
+`__cause__` chain in `observed`, and `run` renders a preflight `ValueError` in `check`'s own stage
+and codes instead of `unhandled`. The two `authoring.py` docstrings and `SKILL.md` state the
+round trip. Found 2026-09-04 by the scenario testbed run 4
 (`kaist-thesis/vqapr-scenario-testbed/`, FINDINGS **F-004**), against `vqapr-0.4.0`. Confirmed
 against source 2026-09-04. Two halves: a contract that is enforced and not stated, and a refusal
 that drops the exception it wrapped. The second half also puts `check` and `run` on different

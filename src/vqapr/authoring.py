@@ -1057,9 +1057,10 @@ class ConstraintFinding:
     """One Constraint's complete, immutable result for one economic observation.
 
     **`offenders` is a field and not a `details` key**, because it is the one thing a refusal
-    cannot be written without. `docs/issues/086` is a run that stopped on a 20% cap and said only
-    *"economic intent violates projected constraints"*, leaving a first-time user to re-run the
-    strategy without the constraint and read the weight table to find out which name breached it.
+    cannot be written without. `docs/implementations/086` is a run that stopped on a 20% cap and
+    said only *"economic intent violates projected constraints"*, leaving a first-time user to
+    re-run the strategy without the constraint and read the weight table to find out which name
+    breached it.
     The refusal names them now, and it can only do that if every finding carries them under one
     name -- a convention inside a free-form mapping is not something a message can rely on.
 

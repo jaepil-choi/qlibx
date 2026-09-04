@@ -49,7 +49,7 @@ class StampedConstraintFinding:
 
         Read here rather than at each call site because a refusal that cannot say WHICH name
         breached WHICH bound sends its reader back to re-run the strategy without the constraint
-        (`docs/issues/086`, and the message `flow/valuation.py` builds from it).
+        (`docs/implementations/086`, and the message `flow/valuation.py` builds from it).
         """
         return self.finding.offenders
 

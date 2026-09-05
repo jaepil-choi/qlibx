@@ -42,17 +42,6 @@
     "declaration.read.key_unknown",
     "declaration.read.run_fed_by_sibling",
     "declaration.read.value_invalid",
-    "materialize.input.dataset_exists",
-    "materialize.input.empty",
-    "materialize.input.evidence_invalid",
-    "materialize.input.fields_invalid",
-    "materialize.input.result_invalid",
-    "materialize.output.decision_invalid",
-    "materialize.output.empty",
-    "materialize.output.not_weighted",
-    "materialize.publish.file_failed",
-    "materialize.publish.path_exists",
-    "materialize.publish.staging_failed",
     "observation_store.resolve.field_missing",
     "preflight.account.fractional_quantity",
     "preflight.account.holding_not_closable",
@@ -257,52 +246,52 @@
     {
       "code": "datamodel.compute.failed",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.available_at_owned",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.empty",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.fields_invalid",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.instrument_duplicate",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.instrument_invalid",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.instrument_unrequested",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.rows_invalid",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.output.schema_mismatch",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "datamodel.publish.chunk_failed",
       "file": "src/vqapr/flow/datamodel.py",
-      "line": 77
+      "line": 124
     },
     {
       "code": "dataset.register.grain.undeclared",
@@ -465,61 +454,6 @@
       "line": 127
     },
     {
-      "code": "materialize.input.dataset_exists",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.input.empty",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.input.evidence_invalid",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.input.fields_invalid",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.input.result_invalid",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.output.decision_invalid",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.output.empty",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.output.not_weighted",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.publish.file_failed",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.publish.path_exists",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
-      "code": "materialize.publish.staging_failed",
-      "file": "src/vqapr/flow/materialize.py",
-      "line": 186
-    },
-    {
       "code": "model_window.requirement.undeclared",
       "file": "src/vqapr/data/windows.py",
       "line": 253
@@ -592,7 +526,7 @@
     {
       "code": "run.assembly.constraint_identity",
       "file": "src/vqapr/flow/context.py",
-      "line": 355
+      "line": 366
     },
     {
       "code": "run.check.declaration_invalid",

@@ -468,6 +468,33 @@ minutes and still has no record is `status: unfinished`: the strategy was killed
 ended in a refusal -- the run's own envelope says which. `vqapr show strategy` reads finished
 records only.
 
+**Registering a run's table as a dataset.** A strategy's record streams every table it
+writes -- the package's `vqapr.weight`, `vqapr.account`, `vqapr.fill`, `vqapr.monitoring`, and
+any table the strategy declared with `tables()` -- as a parquet directory under
+`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/<table>/`. That directory registers
+like any other source, so one run's decisions are the next run's input (a member run feeding an
+ensemble) with no publishing step in between:
+
+```yaml
+datasets:
+  reversal_allocation:
+    source_id: reversal-weights
+    path: .vqapr/runs/reversal/strategies/reversal@1a2b3c4d/tables/vqapr.weight
+    instrument_field: instrument
+    available_at: event_time        # the decision instant the row was written at
+    grain: instrument_instant
+    key_fields: [event_time, instrument]
+    fields:
+      weight: "CAST(weight AS DECIMAL(38, 12))"   # a record stores Decimals as text
+```
+
+`vqapr list strategies --run <run-id>` gives the `<strategy-id>@<fp8>`; `available_at` is
+`event_time` for every package table (a valuation writes `observed_at` and `event_time` at the
+same instant). A `Decimal` column is stored as text with `vqapr.type: decimal` metadata, so a
+numeric field is `CAST` in the registration -- `DECIMAL(38, 12)` is exact for a weight, which the
+optimiser placed on the `1e-12` grid. The run's own `run.json` carries the sha256 of every source it
+read, which is the provenance a later reader wants.
+
 **Tweaks are records, not directories.** A strategy's record is named by its registered
 fingerprint, which folds the file bytes and the config: edit the strategy and re-register it under
 the same id, run again, and the new record lands BESIDE the old one. **Count records**: the rows

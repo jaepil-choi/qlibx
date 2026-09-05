@@ -25,7 +25,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.flow.materialize import AllocationPublicationSpec, publish_run_allocation
+from vqapr.flow.run_records import RunRecordWriter
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,
@@ -39,6 +39,7 @@ from vqapr.portfolio.intents import (
     validate_economic_intent,
 )
 from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, optimize
+from vqapr.public import register_dataset
 from vqapr.workspace import Workspace
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "real"
@@ -339,18 +340,44 @@ def test_criterion_1_and_6_publish_round_trip_and_point_in_time(
     )
     assert validate_economic_intent(intent) is intent
 
-    published = publish_run_allocation(
+    # The accepted intent, recorded the way a run with a store records it, then registered as the
+    # dataset a later run reads (campaign Step 4: a run's table registers as-is).
+    writer = RunRecordWriter(tmp_path / ".vqapr", "run-ei", "enhanced-index@00000000")
+    writer.open()
+    writer.append(
+        "vqapr.weight",
+        [
+            {"instrument": target.instrument_id, "weight": target.weight, "event_time": session}
+            for target in intent.targets
+        ],
+    )
+    writer.release()
+    directory = (
+        tmp_path / ".vqapr" / "runs" / "run-ei" / "strategies" / "enhanced-index@00000000"
+        / "tables" / "vqapr.weight"
+    )
+    register_dataset(
         tmp_path,
-        AllocationPublicationSpec.of("enhanced_index_allocation"),
-        [_Evidence("run-ei", session, (_Access(session),), intent)],
+        DatasetRegistration.of(
+            "enhanced_index_allocation",
+            "run-ei-weights",
+            instrument_field="instrument",
+            available_at="event_time",
+            key_fields=("event_time", "instrument"),
+            fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
+            grain="instrument_instant",
+        ),
+        SourceSpec.of("run-ei-weights", directory),
     )
 
     con = duckdb.connect()
     try:
-        table = f"read_parquet('{published.output_path.as_posix()}')"
-        rows = con.execute(f"SELECT instrument, weight FROM {table} ORDER BY 1").fetchall()
+        table = f"read_parquet('{directory.as_posix()}/*.parquet')"
+        rows = con.execute(
+            f"SELECT instrument, CAST(weight AS DECIMAL(38, 12)) FROM {table} ORDER BY 1"
+        ).fetchall()
         before = con.execute(
-            f"SELECT count(*) FROM {table} WHERE available_at <= ?",
+            f"SELECT count(*) FROM {table} WHERE event_time <= ?",
             [session - timedelta(seconds=1)],
         ).fetchone()[0]
     finally:
@@ -360,11 +387,7 @@ def test_criterion_1_and_6_publish_round_trip_and_point_in_time(
     for target in intent.targets:
         # Criterion 1: exact equality against the accepted intent weight.
         assert by_instrument[target.instrument_id] == target.weight
-    assert before == 0, "criterion 6: nothing is visible before the derived stamp"
-
-    lineage = json.loads(published.lineage_path.read_text(encoding="utf-8"))
-    assert lineage["run"]["run_identity"] == ["run-ei"]
-    assert lineage["operation"] == "strategy.allocation"
+    assert before == 0, "criterion 6: nothing is visible before the decision instant"
 
 
 def test_criterion_7_a_frozen_holding_survives_into_a_validated_intent(

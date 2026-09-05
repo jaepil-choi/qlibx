@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
-| 브랜치 | 없음 — 다음은 `step-04-delete-materialize`. **실환경 아홉 중 여덟이 닫혔고 캠페인 순서는 그대로다**: Step 4 → 5(`082`의 나머지 — dataset이 producer run을 댄다 — 를 여기에 접는다) → 6 → 7 |
+| 브랜치 | 없음 — **Step 4 완료(record `159`)**, 다음은 `step-05-document-is-the-domain`. `082`의 나머지(dataset이 producer run을 댄다)를 Step 5에 접는다 → 6 → 7 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 | record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
@@ -39,6 +39,13 @@
 5/6, `develop`에서 5/5. **소스를 막 고친 직후에 돌리면 더 자주 실패한다** — 다섯 자식 프로세스가 바뀐
 모듈을 동시에 바이트컴파일하느라 창이 넓어진다(3/5 관측). 실패하면 두어 번 다시 돌려 보고, 세 번 연속이면
 그때 의심한다.
+
+**Step 4가 남긴 함정 둘 (record `159`).** ① `run(..., store_root=...)`를 준 run은 행을 메모리에
+**안 남긴다** — `final_state.recorder_rows`가 비어 있다(sink로 넘기고 root는 보관 안 함). 저장된 run의
+표를 읽으려면 record 디렉터리에서 다시 읽는다(showcase의 `_recorded_rows`). ② record는 세션마다 part
+하나이고, 그 세션에 값이 없던 컬럼은 `null` 타입으로 써진다 — 여러 part를 읽는 쪽이 스키마를 **union**해야
+하고, 패키지의 `scan._relation`이 이제 그렇게 한다(`union_by_name=true`). 직접 duckdb로 읽을 때도 같은
+옵션이 필요하다. ③ 모듈을 지운 뒤에는 전체 스위트 전에 `pytest --collect-only`부터 — 1초면 import 누락이 잡힌다.
 
 **남은 실환경 이슈는 `082` 하나** — `--reads` 인덱스와 dataset의 producer `run_id`. 캠페인 Step 5에서 dataset
 문서를 다시 쓸 때 접는다. 원래부터 열려 있던 `023`·`027`은 그대로.
@@ -151,7 +158,7 @@ load → save)를 상수 문자열 하나로 감싼다.
 
 ### ~~Step 3 — `075`~~ — **완료**, record `154`.
 
-### Step 4 — `flow/materialize.py` 삭제 (record `155`) ← **다음 손**
+### ~~Step 4 — `flow/materialize.py` 삭제~~ — **완료 2026-09-05, record `159`.** 아래는 당시의 손 위치로, 기록으로만 남긴다. 다음 손은 **Step 5**(§3의 다음 절, record `160`).
 
 - `src/vqapr/authoring.py:573-720` `Rebalance.of`. 647-690의 quantise+settle 블록이
   `src/vqapr/portfolio/weighting.py:161 rescale(weights, long=, short=, grid=QUANTUM)`의 사본이다.
@@ -220,7 +227,7 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
 6. `tests/characterization/refusal_codes.py` inventory에서 `materialize.*` 코드 제거(재생성).
    `scripts/vulture_whitelist.py` 확인.
 
-### Step 5 — 문서가 도메인이다 (ExecPlan 필요, record `155`)
+### Step 5 — 문서가 도메인이다 (ExecPlan 필요, record `160`) ← **다음 손**
 
 캠페인 §1.3 표가 계약이다. 손 위치:
 - `src/vqapr/workspace_document.py`: `RunDocument.to_domain(:412)`, `DatasetDocument`·`ExecutionInputDocument`·

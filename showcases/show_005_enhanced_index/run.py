@@ -1,6 +1,6 @@
 """An alpha run, its published allocation, and an enhanced index built on top — through the spine.
 
-    alpha run (Academic)  ->  publish_run_allocation  ->  alpha_allocation dataset
+    alpha run (Academic)  ->  its recorded vqapr.weight, registered  ->  alpha_allocation
                                                                 |
     committed benchmark panel  ------------------------------- + -->  enhanced index run (KRX)
                                                                           desired = bench + s·active
@@ -34,6 +34,7 @@ import hashlib
 import json
 import shutil
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -46,7 +47,6 @@ from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
-    AllocationPublicationSpec,
     ComponentKind,
     DatasetRegistration,
     ExecutionInputRegistration,
@@ -57,11 +57,9 @@ from vqapr.public import (
     SourceSpec,
     StrategyEntry,
     ZeroDealtReason,
-    callback_evidence,
     component_ref,
     export_roster,
     preflight_run,
-    publish_run_allocation,
     register_component,
     register_dataset,
     register_execution_input,
@@ -584,8 +582,97 @@ def _recorded_fills(result: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
 
 
+def _recorded_rows(
+    project: Path, run_result: Any, *, run_id: str, component_id: str, table: str
+) -> list[dict[str, Any]]:
+    """The rows a stored run recorded for one table, read back from its record in commit order.
+
+    A run given a store streams every chunk to `tables/<table>/` and keeps none on its roots, so
+    `final_state.recorder_rows` is empty for it; this is the same rows from the place they went.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        return []
+    con = duckdb.connect()
+    try:
+        cursor = con.execute(
+            f"SELECT * FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY event_time, sequence"
+        )
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    finally:
+        con.close()
+
+
 def _digest(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    """One digest over a file, or over every parquet part of a directory in name order."""
+    digest = hashlib.sha256()
+    if path.is_dir():
+        for part in sorted(path.glob("*.parquet")):
+            digest.update(part.name.encode("utf-8"))
+            digest.update(part.read_bytes())
+    else:
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class _Registered:
+    """A run's table, registered as a dataset: where it is and what it holds."""
+
+    dataset_id: str
+    directory: Path
+    row_count: int
+    occurrences: int
+
+
+def _register_run_table(
+    project: Path,
+    run_result: Any,
+    *,
+    run_id: str,
+    component_id: str,
+    dataset_id: str,
+    table: str,
+    fields: dict[str, str],
+) -> _Registered:
+    """Register one table a member run recorded, as the dataset the next run reads.
+
+    A run with a store streams every table it writes as a parquet directory under its own record,
+    `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
+    any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
+    decision instant it was written at. A record stores a `Decimal` as text, so a numeric field is
+    `CAST` in the registration; `DECIMAL(38, 12)` is exact for a weight on the `1e-12` grid.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        raise AssertionError(f"run {run_id!r} recorded no {table!r} rows under {directory}")
+    source_id = f"{dataset_id}-source"
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            dataset_id,
+            source_id,
+            instrument_field="instrument",
+            available_at="event_time",
+            grain="instrument_instant",
+            key_fields=("event_time", "instrument"),
+            fields=fields,
+        ),
+        SourceSpec.of(source_id, directory),
+    )
+    con = duckdb.connect()
+    try:
+        rows, occurrences = con.execute(
+            f"SELECT count(*), count(DISTINCT event_time) "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
+        ).fetchone()
+    finally:
+        con.close()
+    return _Registered(dataset_id, directory, int(rows), int(occurrences))
 
 
 def _inject_halt(source: Path, target: Path, instrument: str, days: list[date]) -> tuple[str, ...]:
@@ -774,11 +861,21 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    alpha_result = run(project, preflight_run(project, alpha_definition)).result()
-    alpha_evidence = callback_evidence(alpha_result)
+    alpha_run = run(
+        project, preflight_run(project, alpha_definition), store_root=project / ".vqapr"
+    )
+    alpha_result = alpha_run.result()
 
-    published = publish_run_allocation(
-        project, AllocationPublicationSpec.of("alpha_allocation"), alpha_evidence
+    # The alpha's decisions reach the index run the way any dataset does: the table the alpha
+    # run recorded, registered under the id the index subscribes to.
+    published = _register_run_table(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        dataset_id="alpha_allocation",
+        table="vqapr.weight",
+        fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
     )
 
     index_definition = RunDefinition(
@@ -811,7 +908,13 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         raise AssertionError("no freeze survived, so frozen invariance was never demonstrated")
     # The recorder's first real-spine evidence: rows that a run() actually produced, not rows a
     # test constructed against the state object. Nothing in this repository had proved this before.
-    signal_rows = alpha_result.final_state.recorder_rows.get("alpha.signal", ())
+    signal_rows = _recorded_rows(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        table="alpha.signal",
+    )
     if len(signal_rows) != len(callback_days) * len(universe):
         raise AssertionError(
             f"expected {len(callback_days) * len(universe)} recorded signal rows, "
@@ -820,8 +923,20 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # Canon 9.2 makes weight and decision-time account state defaults: no Strategy here
     # declares them and every run records them anyway. A default that needed asking for
     # would not be a default.
-    default_weight = alpha_result.final_state.recorder_rows.get("vqapr.weight", ())
-    default_account = alpha_result.final_state.recorder_rows.get("vqapr.account", ())
+    default_weight = _recorded_rows(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        table="vqapr.weight",
+    )
+    default_account = _recorded_rows(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        table="vqapr.account",
+    )
     if not default_weight or not default_account:
         raise AssertionError("the package-owned default records are missing from a real run")
     # ONE account-level row per occurrence, and every one of them carries a nav.
@@ -895,10 +1010,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "exchange": "Academic (fractional, zero cost)",
             "account_mode": AccountMode.SIGNED.value,
             "views": alpha_memory.get("views"),
-            "published_dataset": str(published.registration.dataset_id),
+            "published_dataset": published.dataset_id,
             "published_occurrences": published.occurrences,
             "published_rows": published.row_count,
-            "publication": published.output_path.name,
+            "publication": "vqapr.weight, registered from the alpha run's record",
         },
         "index_run": {
             "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
@@ -914,10 +1029,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             **index_replay,
         },
     }
-    digests = {
-        "alpha_allocation.parquet": _digest(published.output_path),
-        "alpha_allocation.lineage.json": _digest(published.lineage_path),
-    }
+    digests = {"alpha_allocation": _digest(published.directory)}
     return trace, digests
 
 

@@ -128,6 +128,14 @@ registered components, one file and one id each.
 - Each verb refuses the other grain by name. A value keeps its parquet column's type -- `float`
   from a DOUBLE column, `Decimal` from a DECIMAL one -- so write `Decimal(str(value))` and never
   `Decimal(value)`.
+- **What `compute()` returns is typed by its first session.** The output dataset's schema is
+  whatever pyarrow infers from the first non-empty session's rows, and every later session must
+  fit it; nothing is declared and nothing is cast. A `Decimal`'s precision and scale are part of
+  that type, and a ratio computed by ordinary division lands on a different scale from one session
+  to the next -- so **return `float` for a continuous quantity**, and where you genuinely need
+  `Decimal` (money, an exact ratio) quantize it to one scale yourself in `compute`. The refusal
+  (`datamodel.output.schema_mismatch`) quotes pyarrow and the established schema and does not
+  guess further; the data and its types are yours.
 
 **Choose the lookback member deliberately; they are a pair.** `RowsLookback(rows=N)` gives each name
 its **own** last N observations, so on an unbalanced panel the batch's calendar span is set by the
@@ -319,11 +327,15 @@ under returns `count: 0`, which is an answer rather than a failure.
 
 #### Correcting a registration during setup
 
-Registrations are identities: one id means one declaration, and editing the thing you already
+Registrations are identities: one id means one declaration, and editing a COMPONENT you already
 registered is the ordinary loop: change the file and run the same `vqapr register <kind> <id>
 <file.py>` again. It replaces the
 registration in place, with no flag -- there is no `register --force`; the only `--force` the CLI
-has belongs to `vqapr run`, where it replaces a run RECORD. The success payload then carries
+has belongs to `vqapr run`, where it replaces a run RECORD. **A `runs:` declaration is the
+exception:** a run definition is the provenance of a result, so re-registering the same `run_id`
+with a changed body is refused (`workspace.run.register.conflict`). To edit one during setup,
+withdraw it first -- `vqapr rm run-definition <run-id>` -- and register the edited declaration
+again; its records, if any, stay readable. The success payload then carries
 `replaced: {fingerprint: <the old one>}`, and is silent about it when the id was new or the bytes
 unchanged. The id stays, the runs that name it keep working, and the next run's record carries a
 new `source_digest` for whatever ran.

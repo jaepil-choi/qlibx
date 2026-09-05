@@ -1,6 +1,11 @@
 # 085 — the fill summary counts reasons and never instruments, so a name that never filled at all is invisible
 
-**Status:** **OPEN -- owner ruling 2026-09-05: split the counter, same rule as `086`.** A
+**Status:** **CLOSED 2026-09-05 -- record `156`.** `fill_summary` reports `never_filled`, one
+entry per instrument ordered in the run and never dealt, with its order count and its most
+frequent reason. The optional `check` warning is not built -- `check` has no advisory channel
+and the payload is the fix. Ruling below, as filed.
+
+**Ruling 2026-09-05 by owner: split the counter, same rule as `086`.** A
 counter that folds two different facts is split, and the per-instrument fact goes in the success
 payload: `never_filled: [{instrument, orders, dealt, reason}]`, an instrument ordered in the run
 that never dealt once. Nothing failed, so this is a payload and not a refusal. `check` may warn --

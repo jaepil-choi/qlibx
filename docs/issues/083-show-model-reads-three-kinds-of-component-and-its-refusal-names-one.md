@@ -1,6 +1,11 @@
 # 083 — `show model` reads three kinds of component and its refusal names one, as an unhandled TypeError
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (B3), feeding
+**Status:** **CLOSED 2026-09-05 -- record `156`.** `show model` refuses a registered id of a
+kind it does not describe with the `cli.input.value_invalid` shape its neighbour uses, naming
+the three kinds it reads and the kind it got; `list components --kind <kind>` exists, spelled
+the way `list` reports it.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (B3), feeding
 the output of `list components` to `show model`. Confirmed in source on this branch.
 
 **Touches:** `src/vqapr/cli/show.py:139-163` (`_model`: `CONSTRAINT` and `DATA_MODEL` are handled by

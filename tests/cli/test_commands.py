@@ -286,6 +286,7 @@ def test_run_executes_a_registered_run_end_to_end(
         "partial": 0,
         "zero_dealt": 1,
         "reasons": {"no_trade": 1},
+        "never_filled": [],
     }
 
 

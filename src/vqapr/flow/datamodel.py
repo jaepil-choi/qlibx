@@ -257,18 +257,42 @@ class DataModelOutput:
         try:
             table = pa.Table.from_pylist([dict(row) for row in rows], schema=self._schema)
         except (pa.ArrowException, TypeError, ValueError) as error:
+            if self._schema is None:
+                raise refusal(
+                    OUTPUT_STAGE,
+                    f"{OUTPUT_STAGE}.rows_invalid",
+                    "a session's rows must be portable scalars pyarrow can type",
+                    f"{type(error).__name__}: {error}",
+                    fix="return only finite scalar values from DataModel.compute",
+                    explain=ExplainTopic.COMPONENT_CONTRACT,
+                    retry="fix DataModel.compute output, then retry",
+                ) from error
+            # The schema is whatever pyarrow inferred from the first non-empty session, and this
+            # session's rows did not fit it. That is all this code knows. It used to call this
+            # `type_drift` and tell the author to "return the same scalar type on every session"
+            # -- which was already true in the run that filed `docs/issues/079`: the type was
+            # `Decimal` throughout and what moved was its SCALE, inferred as 27 decimal places
+            # from one session's ratios and 28 from the next's. A refusal that names a cause it
+            # did not measure sends the reader the wrong way; pyarrow's own sentence, beside the
+            # schema the first session fixed, is the accurate statement (owner ruling
+            # 2026-09-05: the data and its types are the author's, and the framework asserts
+            # nothing it cannot tell).
+            established = ", ".join(
+                f"{field.name}: {field.type}" for field in self._schema
+            )
             raise refusal(
                 OUTPUT_STAGE,
-                f"{OUTPUT_STAGE}.type_drift" if self._schema is not None else
-                f"{OUTPUT_STAGE}.rows_invalid",
-                "every session's rows must carry one type per value field",
-                f"{type(error).__name__}: {error}",
+                f"{OUTPUT_STAGE}.schema_mismatch",
+                "every session's rows must fit the schema the first non-empty session "
+                "established",
+                f"{type(error).__name__}: {error}; established schema: {established}",
                 fix=(
-                    "return the same scalar type for each field on every session; the first "
-                    "session's types are the dataset's"
+                    "return values that fit that schema on every session. A Decimal's precision "
+                    "and scale are part of its type, so for a continuous quantity return float, "
+                    "and where you need Decimal, quantize it to one scale in compute"
                 ),
                 explain=ExplainTopic.COMPONENT_CONTRACT,
-                retry="fix DataModel.compute output types, then retry",
+                retry="fix DataModel.compute output, then retry",
             ) from error
         if self._schema is None:
             self._schema = table.schema

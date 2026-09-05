@@ -40,17 +40,40 @@ def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     partial = 0
     zero_dealt = 0
     reasons: dict[str, int] = {}
+    per_instrument: dict[str, _PerInstrument] = {}
     for row in rows:
+        instrument = str(row.get("instrument"))
+        tally = per_instrument.setdefault(instrument, _PerInstrument())
+        tally.orders += 1
         reason = row.get("reason")
         if reason is not None:
             zero_dealt += 1
             reasons[str(reason)] = reasons.get(str(reason), 0) + 1
+            tally.reasons[str(reason)] = tally.reasons.get(str(reason), 0) + 1
             continue
         dealt += 1
+        tally.dealt += 1
         requested = abs(Decimal(str(row.get("requested_quantity") or "0")))
         filled = abs(Decimal(str(row.get("dealt_quantity") or "0")))
         if filled < requested:
             partial += 1
+    # The axis `reasons` cannot see (`docs/issues/085`): one row missing on each of 200 names is
+    # what a market looks like, the same name missing on every one of 82 rebalances is a
+    # configuration error, and both fold into one `absent: N`. A name ordered in a run that never
+    # dealt once cannot be produced by ordinary market behaviour at any length of run, so it is
+    # stated by instrument, on the success path -- nothing failed. Most-ordered first, so the
+    # heaviest sleeve is the first line.
+    never_filled = [
+        {
+            "instrument": instrument,
+            "orders": tally.orders,
+            "dealt": 0,
+            "reason": max(sorted(tally.reasons), key=lambda key: tally.reasons[key]),
+        }
+        for instrument, tally in per_instrument.items()
+        if tally.orders and not tally.dealt
+    ]
+    never_filled.sort(key=lambda entry: (-int(entry["orders"]), str(entry["instrument"])))
     return {
         # Every order the venue answered, so the three counts below are readable as shares of it.
         "orders": len(rows),
@@ -62,4 +85,16 @@ def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
         # the account. A reader asking what the market refused them must not be handed their own
         # empty purse in the same number.
         "reasons": dict(sorted(reasons.items())),
+        "never_filled": never_filled,
     }
+
+
+class _PerInstrument:
+    """One instrument's tally across the run: how often ordered, how often dealt, why not."""
+
+    __slots__ = ("dealt", "orders", "reasons")
+
+    def __init__(self) -> None:
+        self.orders = 0
+        self.dealt = 0
+        self.reasons: dict[str, int] = {}

@@ -2,7 +2,7 @@
 
 ## Why this exists
 
-`docs/code-review/2026-08-19-vqapr-performance.md` items P1-2 and P2-6 are two costs in the same
+`docs/diagnostics/archive/2026-08-19-vqapr-performance.md` items P1-2 and P2-6 are two costs in the same
 function, `FillConvention.select_target`, with the same cause: **a fact that cannot change during a
 frozen run was recomputed on every callback.**
 

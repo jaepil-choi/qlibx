@@ -10,12 +10,18 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-import vqapr.flow.simulation as simulation
+import vqapr.flow.execution as execution_phase
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.authoring import (
+    ConstraintCall,
+    EconomicAccountView,
+    Hold,
+    Rebalance,
+    StrategyModel,
+)
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -23,7 +29,6 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.references import ModelStateRef
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
@@ -46,21 +51,23 @@ from vqapr.exchange.execution_table import (
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
+from vqapr.flow.run import (
+    ConstraintSet,
+    FrozenAgenda,
+    FrozenRun,
+    FrozenStrategy,
+    StrategyConfig,
+)
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.simulation import AcceptedIntent, SimulationFlow
-from vqapr.authoring import Hold, Rebalance
-from vqapr.models.strategy_model import StrategyModel
+from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, SimulationFlow
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
     IntentSourceRef,
-    PortfolioTarget,
     validate_economic_intent,
 )
 from vqapr.public import register_dataset
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -81,16 +88,18 @@ class _Catalog:
 
 
 class _Strategy(StrategyModel):
-    def __init__(self, results: tuple[Hold | EconomicPortfolioIntent, ...]) -> None:
+    def __init__(self, results: tuple[Hold | Rebalance, ...]) -> None:
         self.results = iter(results)
-        self.seen: list[tuple[str, datetime, int]] = []
+        self.seen: list[tuple[str, datetime, dict[str, Decimal]]] = []
 
-    def on_occurrence(self, context: object) -> Hold | EconomicPortfolioIntent:
+    def decide(self, context: object) -> Hold | Rebalance:
         occurrence = context.occurrence
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
         self.seen.append(
-            (occurrence.occurrence_id, occurrence.evaluation_time, context.account.version)
+            # The view carries no version (a framework fact, record `132`); what it shows of
+            # the account's progress is the committed book itself.
+            (occurrence.occurrence_id, occurrence.evaluation_time, dict(context.account.positions))
         )
         self.memory = {"calls": len(self.seen)}
         return next(self.results)
@@ -143,28 +152,20 @@ class _Constraint(Constraint):
     def requirements(self) -> tuple[DataRequirement, ...]:
         return (_requirement(),)
 
-    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+    def project(self, call: ConstraintCall) -> ConstraintBounds:
         return ConstraintBounds(
-            {instrument: Decimal("0") for instrument in instruments},
-            {instrument: Decimal("1") for instrument in instruments},
+            lower_weights={instrument: Decimal("0") for instrument in call.instruments},
+            upper_weights={instrument: Decimal("1") for instrument in call.instruments},
         )
 
-    def validate_intended(
-        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
-        return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
-        )
-
-    def evaluate(
+    def monitor(
         self,
-        window: ModelWindow,
-        account: AccountSnapshot,
-        marks: object,
+        call: ConstraintCall,
+        account: EconomicAccountView,
         bounds: ConstraintBounds,
     ) -> ConstraintFinding:
         return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
+            passed=True, measured=Decimal("0"), bound=Decimal("1"), excess=Decimal("0"), details={}
         )
 
 
@@ -193,8 +194,6 @@ def _exchange() -> AcademicExchange:
 def _frozen(
     callbacks: tuple[datetime, ...],
     *,
-    valuations: tuple[datetime, ...] = (),
-    monitoring: tuple[datetime, ...] = (),
     end: datetime | None = None,
     execution: ExecutionInputRegistration | None = None,
     account: AccountSnapshot = _ACCOUNT,
@@ -203,37 +202,39 @@ def _frozen(
     constraints: ConstraintSet | None = None,
     strategy_requirements: tuple[DataRequirement, ...] = (),
 ) -> FrozenRun:
+    """A frozen run with the one agenda a run has since record `148`: its callbacks.
+
+    There is no valuation or monitoring agenda to declare: the book is valued at the instant the
+    venue fills and the declared constraints judge it right after each commit.
+    """
     strategy = StrategyConfig(
         _component("strategy", ComponentKind.STRATEGY_MODEL),
         "strategy",
         OperationRole.STRATEGY_CALLBACK,
     )
-    valuation = ValuationConfig("valuation", OperationRole.VALUATION)
-    monitor = MonitoringPolicy("monitoring", OperationRole.MONITORING) if monitoring else None
-    bounds = (
-        {"start": callbacks[0] if callbacks else (valuations + monitoring)[0], "end": end}
-        if end is not None
-        else {}
+    bounds = {"start": callbacks[0], "end": end} if end is not None else {}
+    layer = FrozenStrategy(
+        config=strategy,
+        constraints=(
+            constraints
+            if constraints is not None
+            else ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),))
+        ),
+        agenda=_agenda("strategy", OperationRole.STRATEGY_CALLBACK, *callbacks),
+        requirements=strategy_requirements,
+        constraint_requirements=(
+            (_requirement(),) if constraints is None or constraints.constraints else ()
+        ),
     )
     return FrozenRun(
-        strategy,
-        valuation,
-        constraints
-        if constraints is not None
-        else ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),)),
-        _agenda("strategy", OperationRole.STRATEGY_CALLBACK, *callbacks),
-        _agenda("valuation", OperationRole.VALUATION, *valuations),
-        monitor,
-        _agenda("monitoring", OperationRole.MONITORING, *monitoring) if monitor else None,
+        run_id="test",
+        strategies=(layer,),
         exchange=_component("academic", ComponentKind.EXCHANGE) if execution else None,
         execution_input=execution,
         initial_account_snapshot=account,
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A", "B"),
-        strategy_requirements=strategy_requirements,
-        constraint_requirements=(_requirement(),)
-        if constraints is None or constraints.constraints
-        else (),
+        requirements=tuple(strategy_requirements) + layer.constraint_requirements,
         datasets=datasets,
         sources=sources,
         **bounds,
@@ -259,7 +260,7 @@ def _flow(
                 evaluation_time=occurrence.evaluation_time,
                 instruments=("A",),
                 store=DuckDbObservationStore(_Catalog()),
-                allowed_requirements=frozen.strategy_requirements,
+                allowed_requirements=frozen.strategies[0].requirements,
                 consumer_id="test-consumer",
             )
         ),
@@ -339,6 +340,7 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
             "source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -393,6 +395,7 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
             "source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -425,24 +428,6 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_callback_free_valuation_and_monitoring_are_independent_agendas() -> None:
-    noon = datetime(2024, 3, 5, 12, tzinfo=KST)
-    frozen = _frozen(
-        (),
-        valuations=(noon,),
-        monitoring=(noon.replace(minute=5),),
-        end=noon.replace(minute=5),
-    )
-
-    result = _flow(frozen, _Strategy(()), _state()).run()
-
-    assert [trace.occurrence.role for trace in result.occurrences] == [
-        OperationRole.VALUATION,
-        OperationRole.MONITORING,
-    ]
-
-
-@pytest.mark.uc("UC-TIME-002")
 def test_empty_constraint_set_needs_no_constraint_window() -> None:
     at = datetime(2024, 3, 5, 12, tzinfo=KST)
     frozen = _frozen((at,), end=at, constraints=ConstraintSet(()))
@@ -463,47 +448,51 @@ def test_empty_constraint_set_needs_no_constraint_window() -> None:
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
+def test_monitoring_projects_at_the_fill_instant_and_reuses_its_projected_bounds(
     tmp_path: Path,
 ) -> None:
+    """Monitoring judges the committed book right after the fill, as of the fill instant.
+
+    Record `148`: there is no monitoring occurrence of its own. The constraint projects once at
+    the callback (for the intent's bounds) and once more at the fill instant (for the judgment),
+    and the judgment measures against the bounds IT projected there, not the ones the callback
+    saw: the two projections are separate reads at separate cutoffs, and pairing the later
+    measurement with the earlier bounds would report a breach against a limit that had since
+    moved.
+    """
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
-    monitoring = datetime(2024, 3, 5, 16, tzinfo=KST)
+    fill = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
 
     class RecordingConstraint(_Constraint):
         def __init__(self) -> None:
             self.projections: list[tuple[datetime, ConstraintBounds]] = []
-            self.intended_bounds: ConstraintBounds | None = None
             self.actual: tuple[datetime, ConstraintBounds] | None = None
 
-        def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
-            bounds = super().project(window, instruments)
-            self.projections.append((window.evaluation_time, bounds))
+        def project(self, call: ConstraintCall) -> ConstraintBounds:
+            bounds = super().project(call)
+            self.projections.append((call.evaluation_time, bounds))
             return bounds
 
-        def validate_intended(
-            self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-        ) -> ConstraintFinding:
-            self.intended_bounds = bounds
-            return super().validate_intended(intent, bounds)
-
-        def evaluate(
+        def monitor(
             self,
-            window: ModelWindow,
-            account: AccountSnapshot,
-            marks: object,
+            call: ConstraintCall,
+            account: EconomicAccountView,
             bounds: ConstraintBounds,
         ) -> ConstraintFinding:
-            self.actual = (window.evaluation_time, bounds)
+            self.actual = (call.evaluation_time, bounds)
             return ConstraintFinding(
-                self.constraint_id, False, Decimal("1"), Decimal("0"), Decimal("1"), {}
+                passed=False,
+                measured=Decimal("1"),
+                bound=Decimal("0"),
+                excess=Decimal("1"),
+                details={},
             )
 
     constraint = RecordingConstraint()
     result = _flow(
         _frozen(
             (callback,),
-            monitoring=(monitoring,),
-            end=monitoring,
+            end=fill,
             execution=_execution(
                 _parquet(
                     tmp_path / "execution.parquet",
@@ -516,8 +505,8 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
         ),
         _Strategy(
             (
-                EconomicPortfolioIntent(
-                    UUID(int=3), "strategy", (), Decimal("1"), _BUDGET, (), 0, None
+                Rebalance(
+                    target_weights={}, cash_weight=Decimal("1"), budget=_BUDGET
                 ),
             )
         ),
@@ -525,17 +514,26 @@ def test_monitoring_projects_in_its_own_window_and_reuses_its_projected_bounds(
         (constraint,),
     ).run()
 
-    assert [cutoff for cutoff, _ in constraint.projections] == [callback, monitoring]
-    assert constraint.intended_bounds is not None
-    assert constraint.intended_bounds == constraint.projections[0][1]
-    assert constraint.actual == (monitoring, constraint.projections[1][1])
-    assert result.occurrences[-1].result.report.passed is False
+    assert [cutoff for cutoff, _ in constraint.projections] == [callback, fill]
+    assert constraint.actual == (fill, constraint.projections[1][1])
+    # The finding rides the due execution's own result: monitoring is part of the commit.
+    due = result.occurrences[-1]
+    assert isinstance(due, DueExecutionTrace)
+    assert due.result.monitoring is not None
+    assert due.result.report.passed is False
     assert result.final_state.account is not None
     assert result.final_state.account.snapshot.version == 1
+    # And what it measured reached the run's own table, dated by the fill instant it judged.
+    findings = result.final_state.recorder_rows["vqapr.monitoring"]
+    assert [(row["constraint"], row["passed"]) for row in findings] == [("risk", False)]
+    assert [row["event_time"] for row in findings] == [fill]
 
 
 @pytest.mark.uc("UC-TIME-002")
 def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurrence() -> None:
+    # A stamped intent on purpose, not a decision: what is under test is that the intent the
+    # Flow produces carries no timing of its own, and only the stamped object has an identity
+    # for a timing claim to hang on.
     payload = EconomicPortfolioIntent(
         UUID(int=1), "strategy", (), Decimal("1"), _BUDGET, (_SOURCE,), 0, None
     )
@@ -582,6 +580,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         "source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )
@@ -606,13 +605,12 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         def requirements(self) -> tuple[DataRequirement, ...]:
             return (requirement,)
 
-        def on_occurrence(self, context: object) -> Rebalance:
+        def decide(self, context: object) -> Rebalance:
             context.window.observations(requirement)
             return Rebalance(target_weights={}, cash_weight=Decimal("1"), budget=_BUDGET)
 
     frozen = _frozen(
         (callback,),
-        valuations=(target,),
         end=target,
         execution=execution,
         datasets=(registration,),
@@ -652,12 +650,13 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
     # The source actually read, at the digest it actually carried.
     assert stamped.source_refs == (IntentSourceRef("source", digest),)
     # The frozen component, not a string the callback chose.
-    assert stamped.strategy_id == str(frozen.strategy.component.component_id)
+    assert stamped.strategy_id == str(frozen.strategies[0].config.component.component_id)
     # The account the callback was handed.
     assert stamped.account_version_seen == _ACCOUNT.version
     # Deterministic, so a replayed run mints the same identity for the same occurrence.
+    first_occurrence = frozen.dispatch_order(frozen.strategies[0])[0]
     assert stamped.intent_id == uuid5(
-        NAMESPACE_URL, f"{stamped.strategy_id}/{frozen.static_occurrences[0].occurrence_id}"
+        NAMESPACE_URL, f"{stamped.strategy_id}/{first_occurrence.occurrence_id}"
     )
     assert result.final_state.pending_accepted_intent is None
 
@@ -670,6 +669,7 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
         "missing-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )
@@ -706,6 +706,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         "missing-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )
@@ -716,7 +717,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         def requirements(self) -> tuple[DataRequirement, ...]:
             return (requirement,)
 
-        def on_occurrence(self, context: object) -> Hold:
+        def decide(self, context: object) -> Hold:
             context.window.observations(requirement)
             return Hold(reason="unreachable")
 
@@ -753,7 +754,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
     failure = raised.value
     assert failure.family is SimulationFailureFamily.DATA
     assert failure.stage is SimulationStage.CALLBACK_WINDOW
-    assert failure.failed_requirement == frozen.strategy_requirements
+    assert failure.failed_requirement == frozen.strategies[0].requirements
     assert failure.mutation is False
     assert state.current.lifecycle_trace == ()
 
@@ -771,15 +772,10 @@ def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> No
             """,
         )
     )
-    intent = EconomicPortfolioIntent(
-        UUID(int=99),
-        "strategy",
-        (PortfolioTarget("C", weight=Decimal("0")),),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"C": Decimal("0")},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     state = _state()
 
@@ -793,7 +789,9 @@ def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> No
     failure = raised.value
     assert failure.family is SimulationFailureFamily.INTENT
     assert failure.stage is SimulationStage.CALLBACK_INTENT
-    assert failure.failed_requirement is intent
+    # The decision went in; a stamped intent came out and is what the failure names. Identity
+    # cannot be compared across that boundary any more, so compare the economics that crossed it.
+    assert failure.failed_requirement.targets[0].instrument_id == "C"
     assert failure.mutation is False
     assert state.current.pending_accepted_intent is None
     assert state.current.lifecycle_trace == ()
@@ -804,7 +802,7 @@ def test_constraint_projection_failure_retains_constraint_owner() -> None:
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
 
     class FailingConstraint(_Constraint):
-        def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+        def project(self, call: ConstraintCall) -> ConstraintBounds:
             raise RuntimeError("constraint projection fault")
 
     constraint = FailingConstraint()
@@ -928,15 +926,10 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
             """,
         )
     )
-    intent = EconomicPortfolioIntent(
-        UUID(int=102),
-        "strategy",
-        (),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     prior = type("PriorPending", (), {"pending_id": "prior"})()
     state = RunStateRepository(
@@ -948,7 +941,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     before = state.current
 
     with pytest.raises(SimulationFailure, match="no exact execution target") as raised:
-        flow._dispatch_callback(frozen.strategy_agenda.occurrences[0])
+        flow._callback.dispatch(frozen.strategies[0].agenda.occurrences[0])
 
     failure = raised.value
     assert failure.family is SimulationFailureFamily.INTENT
@@ -1042,16 +1035,19 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_frozen_agenda_trace_is_canonical_and_non_selected_density_does_not_change_it() -> None:
+def test_frozen_agenda_trace_is_canonical_and_dispatches_only_callbacks() -> None:
+    """Two freezes of the same declarations share one identity, and the static dispatch order
+    is the strategy's own agenda and nothing else: since record `148` valuation and monitoring
+    have no occurrences to merge in."""
     nine = datetime(2024, 3, 5, 9, tzinfo=KST)
     ten = datetime(2024, 3, 5, 10, tzinfo=KST)
-    first = _frozen((nine, ten), valuations=(nine,))
-    second = _frozen((nine, ten), valuations=(nine,))
+    first = _frozen((nine, ten))
+    second = _frozen((nine, ten))
 
     assert first.identity == second.identity
-    assert [(item.role, item.occurrence_id) for item in first.static_occurrences] == [
+    order = first.dispatch_order(first.strategies[0])
+    assert [(item.role, item.occurrence_id) for item in order] == [
         (OperationRole.STRATEGY_CALLBACK, "strategy-0"),
-        (OperationRole.VALUATION, "valuation-0"),
         (OperationRole.STRATEGY_CALLBACK, "strategy-1"),
     ]
 
@@ -1085,7 +1081,9 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
     # The refusal names both sides, so a reader does not have to diff two ids by eye.
     assert "'other'" in caught.value.failures[0].observed
     assert "'risk'" in caught.value.failures[0].observed
-    assert frozen.constraints.constraints == (_component("risk", ComponentKind.CONSTRAINT),)
+    assert frozen.strategies[0].constraints.constraints == (
+        _component("risk", ComponentKind.CONSTRAINT),
+    )
     assert ConstraintSet((constraint,)).constraints == (constraint,)
 
 
@@ -1105,26 +1103,21 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=1),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
-    frozen = _frozen((callback, target), valuations=(target,), end=target, execution=registration)
+    frozen = _frozen((callback, target), end=target, execution=registration)
     state = _state()
     strategy = _Strategy((intent, Hold(reason="after due")))
 
     result = _flow(frozen, strategy, state).run()
 
+    # The fill is the valuation: no separate valuation occurrence follows it (record `148`).
     assert [type(trace).__name__ for trace in result.occurrences] == [
         "OccurrenceTrace",
         "DueExecutionTrace",
-        "OccurrenceTrace",
         "OccurrenceTrace",
     ]
     assert result.final_state.account is not None
@@ -1133,17 +1126,19 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     )
     assert result.final_state.pending_accepted_intent is None
     assert len(result.final_state.feedback) == 1
+    # Monitoring judges the committed, marked book before the feedback is published.
     assert [trace.kind for trace in result.final_state.lifecycle_trace] == [
         LifecycleKind.ACCEPTED_INTENT,
         LifecycleKind.ACCOUNT_COMMITTED,
         LifecycleKind.MARKED,
+        LifecycleKind.MONITORED,
         LifecycleKind.FEEDBACK_PUBLISHED,
         LifecycleKind.NO_DECISION,
     ]
     callback_evidence = result.final_state.lifecycle_trace[0].detail
     commit_evidence = result.final_state.lifecycle_trace[1].detail
     mark_evidence = result.final_state.lifecycle_trace[2].detail
-    feedback_evidence = result.final_state.lifecycle_trace[3].detail
+    feedback_evidence = result.final_state.lifecycle_trace[4].detail
     assert isinstance(callback_evidence, CallbackEvidence)
     assert isinstance(commit_evidence, AccountCommitEvidence)
     assert isinstance(mark_evidence, MarkEvidence)
@@ -1154,9 +1149,9 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert due_evidence.mark == mark_evidence
     assert due_evidence.feedback == feedback_evidence
     assert callback_evidence.run_identity == frozen.identity
-    assert callback_evidence.agenda == frozen.strategy_agenda
+    assert callback_evidence.agenda == frozen.strategies[0].agenda
     assert callback_evidence.occurrence.occurrence_id == "strategy-0"
-    assert callback_evidence.current_model_state_ref == frozen.initial_model_state_ref
+    assert callback_evidence.current_model_state_ref == frozen.strategies[0].initial_model_state_ref
     assert callback_evidence.committed_model_state_ref != callback_evidence.current_model_state_ref
     assert commit_evidence.execution_snapshot.missing_target_instruments == ()
     assert commit_evidence.execution_snapshot.duplicate_instruments == ()
@@ -1172,7 +1167,18 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert mark_evidence.run_identity == feedback_evidence.run_identity == frozen.identity
     assert feedback_evidence.candidates == (commit_evidence.dealt_fills, mark_evidence.marks)
     assert result.final_state.finalization is not None
-    assert strategy.seen[-1][2] == 1
+    assert strategy.seen[-1][2], "the callback after the fill must see the filled book"
+    # The NAV is measured at the fill instant, and dated by it: `event_time` and `observed_at`
+    # are both the fill, not the decision that led to it (record `148`).
+    nav_rows = [
+        row
+        for row in result.final_state.recorder_rows["vqapr.account"]
+        if row["instrument"] == "_ACCOUNT"
+    ]
+    assert [(row["event_time"], row["observed_at"], row["stage"]) for row in nav_rows] == [
+        (target, target, OperationRole.VALUATION.value)
+    ]
+    assert nav_rows[0]["nav"] == Decimal("100")
 
     replay = _flow(frozen, _Strategy((intent, Hold(reason="after due"))), _state()).run()
     assert replay.final_state.account == result.final_state.account
@@ -1195,19 +1201,14 @@ def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> Non
             """,
         )
     )
-    intent = EconomicPortfolioIntent(
-        UUID(int=101),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
 
     result = _flow(
-        _frozen((first, second), valuations=(target,), end=target, execution=registration),
+        _frozen((first, second), end=target, execution=registration),
         _Strategy((intent, Hold(reason="keep pending"))),
         _state(),
     ).run()
@@ -1217,10 +1218,11 @@ def test_no_decision_preserves_existing_pending_until_due(tmp_path: Path) -> Non
         LifecycleKind.NO_DECISION,
         LifecycleKind.ACCOUNT_COMMITTED,
         LifecycleKind.MARKED,
+        LifecycleKind.MONITORED,
         LifecycleKind.FEEDBACK_PUBLISHED,
     ]
     commit = result.final_state.lifecycle_trace[2].detail
-    assert commit.pending.intent.intent_id == intent.intent_id
+    assert commit.pending.intent.targets[0].instrument_id == "A"
     assert result.final_state.pending_accepted_intent is None
 
 
@@ -1237,19 +1239,14 @@ def test_target_only_absence_publishes_typed_zero_dealt_fill(tmp_path: Path) -> 
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=2),
-        "strategy",
-        (PortfolioTarget("B", weight=Decimal("0")),),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"B": Decimal("0")},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     state = _state()
     result = _flow(
-        _frozen((callback,), valuations=(target,), end=target, execution=registration),
+        _frozen((callback,), end=target, execution=registration),
         _Strategy((intent,)),
         state,
     ).run()
@@ -1281,7 +1278,7 @@ def test_callback_payload_fault_does_not_publish_recorder_or_state() -> None:
     failure = raised.value
     assert failure.family is SimulationFailureFamily.DATA
     assert failure.stage is SimulationStage.CALLBACK_STATE
-    assert failure.failed_requirement is frozen.strategy
+    assert failure.failed_requirement is frozen.strategies[0].config
     assert failure.kind is SimulationFailureKind.PRE_COMMIT
     assert failure.mutation is False
     assert state.current.account == AccountState(_ACCOUNT)
@@ -1310,26 +1307,15 @@ def test_a_held_instrument_absent_from_the_venue_is_carried_not_refused(tmp_path
     initial = AccountSnapshot(0, Decimal("90"), {"A": Decimal("1")})
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=3),
-        "strategy",
-        (PortfolioTarget("B", weight=Decimal("0")),),
-        Decimal("1"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"B": Decimal("0")},
+        cash_weight=Decimal("1"),
+        budget=_BUDGET,
     )
     state = _state(initial)
 
     _flow(
-        _frozen(
-            (callback,),
-            valuations=(target,),
-            end=target,
-            execution=registration,
-            account=initial,
-        ),
+        _frozen((callback,), end=target, execution=registration, account=initial),
         _Strategy((intent,)),
         state,
     ).run()
@@ -1354,15 +1340,10 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=9),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
     state = _state()
 
@@ -1371,7 +1352,10 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
 
     # Valuation is no longer a separate subscription: the book is valued from the execution
     # snapshot the fill was priced against, so that reader is the seam that can fail after commit.
-    monkeypatch.setattr(simulation, "_marks_from_execution_snapshot", required_valuation_failure)
+    # The due path binds the helper in the execution phase's module (record `147`).
+    monkeypatch.setattr(
+        execution_phase, "_marks_from_execution_snapshot", required_valuation_failure
+    )
     with pytest.raises(SimulationFailure) as raised:
         _flow(
             _frozen((callback,), end=target, execution=registration),
@@ -1417,12 +1401,14 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
             True,
             2,
         ),
+        # Four publications precede the feedback since record `148`: the callback, the commit,
+        # the mark, and the monitoring that judges the marked book right after it.
         (
             "publication",
             SimulationFailureFamily.PUBLICATION,
             SimulationStage.DUE_FEEDBACK_PUBLICATION,
             True,
-            3,
+            4,
         ),
     ),
 )
@@ -1446,15 +1432,10 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     )
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=10),
-        "strategy",
-        (PortfolioTarget("A", weight=Decimal("1")),),
-        Decimal("0"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"A": Decimal("1")},
+        cash_weight=Decimal("0"),
+        budget=_BUDGET,
     )
     frozen = _frozen((callback,), end=target, execution=registration)
     state = _state()
@@ -1464,19 +1445,19 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
         raise RuntimeError(f"{boundary} fault")
 
     if boundary == "data":
-        monkeypatch.setattr(simulation, "exact_execution_snapshot", fail)
+        monkeypatch.setattr(execution_phase, "exact_execution_snapshot", fail)
     elif boundary == "order":
-        monkeypatch.setattr(simulation, "plan_orders", fail)
+        monkeypatch.setattr(execution_phase, "plan_orders", fail)
     elif boundary == "exchange":
         monkeypatch.setattr(AcademicExchange, "execute", fail)
     elif boundary == "account":
-        monkeypatch.setattr(flow._account, "prepare_fill", fail)
+        monkeypatch.setattr(flow._context.account, "prepare_fill", fail)
     elif boundary == "publication":
         monkeypatch.setattr(state, "prepare_feedback", fail)
     else:
         # Valuation now reads the execution snapshot the fill was priced from, so the seam that
         # can fault is that reader rather than a separate observation subscription.
-        monkeypatch.setattr(simulation, "_marks_from_execution_snapshot", fail)
+        monkeypatch.setattr(execution_phase, "_marks_from_execution_snapshot", fail)
 
     with pytest.raises(SimulationFailure) as raised:
         flow.run()
@@ -1491,7 +1472,10 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     )
     assert failure.mutation is after_commit
     assert failure.retry_precondition.requires_replay_from_root is True
-    assert failure.pending_id == (None if after_commit else str(intent.intent_id))
+    stamped_pending = state.current.pending_accepted_intent
+    assert failure.pending_id == (
+        None if after_commit else str(stamped_pending.intent.intent_id)
+    )
     assert failure.retry_precondition.required_pending_id == failure.pending_id
     assert failure.root_version == state.current.version == root_version
     assert failure.account_version == (1 if after_commit else 0)
@@ -1503,13 +1487,15 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     if boundary == "data":
         assert failure.failed_requirement is registration
     elif boundary == "order":
-        assert failure.failed_requirement is intent
+        assert failure.failed_requirement.targets[0].instrument_id == "A"
     elif boundary == "exchange":
         assert failure.failed_requirement == frozen.exchange
     elif boundary == "account":
         assert failure.failed_requirement == AccountState(_ACCOUNT)
     elif boundary == "valuation":
-        assert failure.failed_requirement is frozen.valuation
+        # Valuation has no configuration of its own since record `148`; the owner the failure
+        # names is the strategy agenda whose fill instant the book was being valued at.
+        assert failure.failed_requirement is frozen.strategies[0].agenda
     else:
         assert isinstance(failure.failed_requirement, FeedbackEvidence)
 
@@ -1530,21 +1516,14 @@ def test_omitted_holding_is_liquidated_through_the_due_flow(tmp_path: Path) -> N
     initial = AccountSnapshot(0, Decimal("90"), {"A": Decimal("1")})
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
-    intent = EconomicPortfolioIntent(
-        UUID(int=4),
-        "strategy",
-        (PortfolioTarget("B", weight=Decimal("0.1")),),
-        Decimal("0.9"),
-        _BUDGET,
-        (),
-        0,
-        None,
+    intent = Rebalance(
+        target_weights={"B": Decimal("0.1")},
+        cash_weight=Decimal("0.9"),
+        budget=_BUDGET,
     )
 
     result = _flow(
-        _frozen(
-            (callback,), valuations=(target,), end=target, execution=registration, account=initial
-        ),
+        _frozen((callback,), end=target, execution=registration, account=initial),
         _Strategy((intent,)),
         _state(initial),
     ).run()

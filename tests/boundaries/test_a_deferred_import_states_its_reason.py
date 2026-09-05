@@ -23,8 +23,16 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 37
+CEILING = 18  # record `149` removed `cli/run.py`'s `_registered_roster_for_report` (`070`)
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
+
+Was 23 after record `132`. Record `134` removed the function-local `Workspace` import in
+`declarations._instruments`: the roster is staged on the transaction `_apply` already holds.
+
+Was 35 after record `131`. Record `132` deleted `_internal/strategy_bridge.py` and
+`_internal/models/agent_first.py` -- the adapter between the two StrategyModel classes -- and
+the two deferred imports `extension/loading.py` needed to reach them; the bridge itself carried
+the rest.
 
 Was 41 after record `125`, 44 after record `124`, and 99 before that. Record `126` merged the
 two lookback pairs into one class each, which deleted `engine_lookback` and the four deferred

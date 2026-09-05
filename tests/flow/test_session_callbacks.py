@@ -3,12 +3,18 @@ from __future__ import annotations
 from datetime import date, time
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
 
 import pytest
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.authoring import (
+    ConstraintCall,
+    Hold,
+    Rebalance,
+    StrategyModel,
+)
+from vqapr.calls import StrategyModelContext
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding
 from vqapr.data.lookback import RowsLookback
@@ -17,15 +23,12 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, StrategyConfig
+from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, FrozenStrategy, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
-from vqapr.authoring import Hold
-from vqapr.models.strategy_model import StrategyModel, StrategyModelContext
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 
 _BUDGET = Budget(
     PortfolioDirection.LONG_ONLY, Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")
@@ -41,7 +44,7 @@ def _state(*, memory: object = None) -> RunStateRepository:
 
 
 class EveryThreeOccurrences(StrategyModel):
-    def on_occurrence(self, context: StrategyModelContext) -> Hold | EconomicPortfolioIntent:
+    def decide(self, context: StrategyModelContext) -> Hold | EconomicPortfolioIntent:
         assert not hasattr(context, "sessions")
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
@@ -51,15 +54,10 @@ class EveryThreeOccurrences(StrategyModel):
         self.memory = {**memory, "occurrence_count": count}
         if count % 3:
             return Hold(reason="cadence")
-        return EconomicPortfolioIntent(
-            intent_id=UUID(int=count),
-            strategy_id="every-three",
-            targets=(),
-            cash_target=Decimal(1),
+        return Rebalance(
+            target_weights={},
+            cash_weight=Decimal(1),
             budget=_BUDGET,
-            source_refs=(_SOURCE,),
-            account_version_seen=context.account.version,
-            model_state_ref=None,
         )
 
 
@@ -84,22 +82,15 @@ class _Constraint(Constraint):
     def requirements(self) -> tuple[DataRequirement, ...]:
         return ()
 
-    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+    def project(self, call: ConstraintCall) -> ConstraintBounds:
         return ConstraintBounds(
-            {instrument: Decimal("0") for instrument in instruments},
-            {instrument: Decimal("1") for instrument in instruments},
+            lower_weights={instrument: Decimal("0") for instrument in call.instruments},
+            upper_weights={instrument: Decimal("1") for instrument in call.instruments},
         )
 
-    def validate_intended(
-        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
+    def monitor(self, call, account, bounds) -> ConstraintFinding:
         return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
-        )
-
-    def evaluate(self, account: AccountSnapshot, marks: object) -> ConstraintFinding:
-        return ConstraintFinding(
-            self.constraint_id, True, Decimal("0"), Decimal("1"), Decimal("0"), {}
+            passed=True, measured=Decimal("0"), bound=Decimal("1"), excess=Decimal("0"), details={}
         )
 
 
@@ -127,18 +118,20 @@ def _flow(
     occurrences: tuple[OperationOccurrence, ...],
 ) -> SimulationFlow:
     strategy_agenda = FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences)
-    valuation_agenda = FrozenAgenda("valuation", OperationRole.VALUATION, ())
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     frozen = FrozenRun(
-        strategy=StrategyConfig(
-            _component("strategy", ComponentKind.STRATEGY_MODEL),
-            "strategy",
-            OperationRole.STRATEGY_CALLBACK,
+        run_id="test",
+        strategies=(
+            FrozenStrategy(
+                config=StrategyConfig(
+                    _component("strategy", ComponentKind.STRATEGY_MODEL),
+                    "strategy",
+                    OperationRole.STRATEGY_CALLBACK,
+                ),
+                constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
+                agenda=strategy_agenda,
+            ),
         ),
-        valuation=ValuationConfig("valuation", OperationRole.VALUATION),
-        constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
-        strategy_agenda=strategy_agenda,
-        valuation_agenda=valuation_agenda,
         start=occurrences[0].evaluation_time,
         end=occurrences[-1].evaluation_time,
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),
@@ -194,17 +187,12 @@ def test_no_decision_state_continues_across_explicit_agenda_boundaries() -> None
 
 
 class TimingOverrideStrategy(EveryThreeOccurrences):
-    def on_occurrence(self, context: StrategyModelContext) -> EconomicPortfolioIntent:
+    def decide(self, context: StrategyModelContext) -> Rebalance:
         self.memory = {"occurrence_count": 999}
-        return EconomicPortfolioIntent(
-            intent_id=UUID(int=1),
-            strategy_id="strategy",
-            targets=(),
-            cash_target=Decimal(1),
+        return Rebalance(
+            target_weights={},
+            cash_weight=Decimal(1),
             budget=_BUDGET,
-            source_refs=(),
-            account_version_seen=context.account.version,
-            model_state_ref=None,
         )
 
 
@@ -221,7 +209,7 @@ def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
 
 
 class FailingStrategy(EveryThreeOccurrences):
-    def on_occurrence(self, context: StrategyModelContext) -> Hold:
+    def decide(self, context: StrategyModelContext) -> Hold:
         self.memory = {"occurrence_count": 999}
         raise RuntimeError("strategy bug")
 

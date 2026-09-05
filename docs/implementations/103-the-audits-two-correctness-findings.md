@@ -3,7 +3,7 @@
 **Closes:** `docs/issues/042-a-damaged-roster-pointer-reads-as-no-roster.md` (C1), and the C3 defect
 the same audit found in code written earlier in this batch.
 **Branch:** `fix/post-campaign-audit-029-043`.
-**Source of both:** `docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` §6 — a structural
+**Source of both:** `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` §6 — a structural
 audit run by a second agent against this batch's working tree.
 
 ## C1 — a damaged roster pointer read as "no roster"

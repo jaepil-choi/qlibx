@@ -2,23 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from pathlib import Path
 
 import pytest
 
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import StrategyConfig
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.workspace import Workspace
 
 # A span these tests supply directly. Persistence requires one, because the span is measured
@@ -36,6 +31,7 @@ def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistrati
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": ("session_date", "instrument"),
+        "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
     }
     kwargs.update(overrides)
@@ -66,22 +62,6 @@ def _execution(
             timezone="Asia/Seoul",
             trade_price=trade_price,
         ),
-    )
-
-
-def _agenda(raw_id: str, role: OperationRole) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=raw_id,
-        role=role,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                f"{raw_id}-1",
-                role,
-                LocalInstantDeclaration(date(2024, 3, 5), time(15, 30), "Asia/Seoul", 0, "+09:00"),
-            ),
-        ),
-        provenance="test fixture",
     )
 
 
@@ -421,73 +401,6 @@ def test_legacy_workspace_without_components_still_opens(tmp_path: Path) -> None
     assert workspace.components == ()
 
 
-def test_operation_declarations_round_trip_with_registered_references(tmp_path: Path) -> None:
-    workspace = Workspace.create(tmp_path)
-    component = ComponentRef.of(
-        "strategy",
-        ComponentKind.STRATEGY_MODEL,
-        tmp_path / "strategy.py",
-        "Strategy",
-        fingerprint="b" * 64,
-    )
-    strategy_agenda = _agenda("strategy-agenda", OperationRole.STRATEGY_CALLBACK)
-    valuation_agenda = _agenda("valuation-agenda", OperationRole.VALUATION)
-    monitoring_agenda = _agenda("monitoring-agenda", OperationRole.MONITORING)
-    workspace.register_component(component)
-    workspace.register_dataset(_registration(), _source())
-    for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
-        assert workspace.register_agenda(agenda) is True
-    strategy = StrategyConfig(component, strategy_agenda.agenda_id, OperationRole.STRATEGY_CALLBACK)
-    valuation = ValuationConfig(
-        valuation_agenda.agenda_id,
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy(monitoring_agenda.agenda_id, OperationRole.MONITORING)
-
-    assert workspace.register_strategy_config(strategy) is True
-    assert workspace.register_valuation_config(valuation) is True
-    assert workspace.register_monitoring_policy(monitoring) is True
-    before = workspace.path.read_bytes()
-    assert workspace.register_agenda(strategy_agenda) is False
-    assert workspace.path.read_bytes() == before
-
-    reopened = Workspace.open(tmp_path)
-    assert reopened.agenda("strategy-agenda") == strategy_agenda
-    assert reopened.strategy_config("strategy-agenda") == strategy
-    assert reopened.valuation_config("valuation-agenda") == valuation
-    assert reopened.monitoring_policy("monitoring-agenda") == monitoring
-
-
-def test_agenda_conflict_and_invalid_persisted_identity_leave_workspace_unchanged(
-    tmp_path: Path,
-) -> None:
-    workspace = Workspace.create(tmp_path)
-    agenda = _agenda("strategy-agenda", OperationRole.STRATEGY_CALLBACK)
-    workspace.register_agenda(agenda)
-    before = workspace.path.read_bytes()
-
-    with pytest.raises(VqaprError) as caught:
-        workspace.register_agenda(
-            OperationAgenda.from_occurrences(
-                agenda_id="strategy-agenda",
-                role=OperationRole.STRATEGY_CALLBACK,
-                timezone="Asia/Seoul",
-                occurrences=(),
-                provenance="different",
-            )
-        )
-
-    assert caught.value.failures[0].code == "workspace.agenda.register.conflict"
-    assert workspace.path.read_bytes() == before
-    workspace.path.write_text(
-        workspace.path.read_text(encoding="utf-8").replace(agenda.content_identity, "0" * 64),
-        encoding="utf-8",
-    )
-    with pytest.raises(VqaprError) as invalid:
-        Workspace.open(tmp_path)
-    assert invalid.value.failures[0].code == "workspace.open.invalid"
-
-
 def _make_legacy(workspace: Workspace, count: int) -> None:
     """Rewrite the first `count` registrations into the exact shape they had before spans.
 
@@ -642,6 +555,7 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
         "prices",
         instrument_field="instrument",
         available_at="available_at",
+        grain="rows",
         key_fields=("session_date", "instrument"),
         fields={"close": "close"},
     )

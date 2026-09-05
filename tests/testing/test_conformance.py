@@ -29,24 +29,21 @@ class Limit(Constraint):
     def constraint_id(self):
         return "limit"
 
-    def requirements(self):
-        return ()
+    def inputs(self):
+        return {}
 
-    def project(self, window, instruments):
-        return ConstraintBounds({}, {})
+    def project(self, call):
+        return ConstraintBounds(lower_weights={}, upper_weights={})
 
-    def validate_intended(self, intent, bounds):
-        return None
-
-    def evaluate(self, window, account, marks, bounds):
+    def monitor(self, call, account, bounds):
         return None
 """
 
-STALE_EVALUATE = GOOD_CONSTRAINT.replace(
-    "def evaluate(self, window, account, marks, bounds):",
-    "def evaluate(self, account, marks):",
+STALE_MONITOR = GOOD_CONSTRAINT.replace(
+    "def monitor(self, call, account, bounds):",
+    "def monitor(self, account, marks):",
 )
-"""A constraint written against an older `evaluate` contract.
+"""A constraint written against an older `monitor` contract.
 
 This is not hypothetical: three fixtures in this repository were written this way and registered
 without complaint, because loading only constructs the object. They would have failed at the first
@@ -78,12 +75,12 @@ def test_a_stale_callback_signature_is_caught_though_it_constructs(tmp_path: Pat
     The object builds and implements `Constraint`, so every load-time check passes. Flow calls
     `evaluate(window, account, marks, bounds)` positionally, and this class cannot receive it.
     """
-    diagnosis = conformance(_ref(tmp_path, STALE_EVALUATE))
+    diagnosis = conformance(_ref(tmp_path, STALE_MONITOR))
 
     assert not diagnosis.ok
     failure = diagnosis.failures[0]
     assert failure.code == f"{STAGE}.signature_invalid"
-    assert "evaluate() must accept 5 positional arguments" in failure.requirement
+    assert "monitor() must accept 4 positional arguments" in failure.requirement
 
 
 def test_a_renamed_parameter_passes_because_flow_calls_positionally(tmp_path: Path) -> None:
@@ -94,7 +91,7 @@ def test_a_renamed_parameter_passes_because_flow_calls_positionally(tmp_path: Pa
     teach that the contract is about words rather than the shape of the call.
     """
     source = GOOD_CONSTRAINT.replace(
-        "def project(self, window, instruments):", "def project(self, w, names):"
+        "def project(self, call):", "def project(self, w):"
     )
 
     assert conformance(_ref(tmp_path, source)).ok
@@ -103,13 +100,13 @@ def test_a_renamed_parameter_passes_because_flow_calls_positionally(tmp_path: Pa
 def test_a_star_args_component_passes_and_a_short_one_does_not(tmp_path: Path) -> None:
     """`*args` can absorb the call; a method one parameter short cannot."""
     absorbing = GOOD_CONSTRAINT.replace(
-        "def evaluate(self, window, account, marks, bounds):", "def evaluate(self, *args):"
+        "def monitor(self, call, account, bounds):", "def monitor(self, *args):"
     )
     assert conformance(_ref(tmp_path, absorbing)).ok
 
     short = GOOD_CONSTRAINT.replace(
-        "def evaluate(self, window, account, marks, bounds):",
-        "def evaluate(self, window, account, marks):",
+        "def monitor(self, call, account, bounds):",
+        "def monitor(self, call, account):",
     )
     assert not conformance(_ref(tmp_path, short)).ok
 
@@ -117,15 +114,15 @@ def test_a_star_args_component_passes_and_a_short_one_does_not(tmp_path: Path) -
 def test_an_optional_extra_parameter_passes(tmp_path: Path) -> None:
     """A default-valued extra is not a break: Flow's call still lands."""
     source = GOOD_CONSTRAINT.replace(
-        "def project(self, window, instruments):",
-        "def project(self, window, instruments, scale=1):",
+        "def project(self, call):",
+        "def project(self, call, scale=1):",
     )
 
     assert conformance(_ref(tmp_path, source)).ok
 
 
 def test_a_missing_contract_method_is_named(tmp_path: Path) -> None:
-    source = GOOD_CONSTRAINT.replace("def project(self, window, instruments):", "def unused(self):")
+    source = GOOD_CONSTRAINT.replace("def project(self, call):", "def unused(self):")
 
     diagnosis = conformance(_ref(tmp_path, source))
 
@@ -138,8 +135,8 @@ def test_a_missing_contract_method_is_named(tmp_path: Path) -> None:
 def test_every_problem_is_reported_at_once(tmp_path: Path) -> None:
     """An agent fixes its component once, not once per run."""
     source = GOOD_CONSTRAINT.replace(
-        "def validate_intended(self, intent, bounds):", "def validate_intended(self):"
-    ).replace("def evaluate(self, window, account, marks, bounds):", "def evaluate(self):")
+        "def project(self, call):", "def project(self):"
+    ).replace("def monitor(self, call, account, bounds):", "def monitor(self):")
 
     diagnosis = conformance(_ref(tmp_path, source))
 
@@ -193,7 +190,7 @@ def test_registration_calls_this_suite_rather_than_its_own_checks(tmp_path: Path
     One implementation with two entrances means a component cannot pass one and fail another.
     """
     path = tmp_path / "stale.py"
-    path.write_text(STALE_EVALUATE, encoding="utf-8")
+    path.write_text(STALE_MONITOR, encoding="utf-8")
 
     # Registered as `limit`, which is what this `Limit` answers to. The stale `evaluate` signature
     # is the one defect under test; registering it under `stale` would add an id mismatch that

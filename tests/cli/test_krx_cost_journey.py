@@ -27,7 +27,7 @@ import duckdb
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.flow.run_records import read_table
+from vqapr.flow.run_records import read_table, strategy_refs
 
 _ZONE = ZoneInfo("Asia/Seoul")
 STOCK = "A005930"
@@ -102,17 +102,14 @@ class Rotate(va.StrategyModel):
         }
 
     def decide(self, call):
-        latest: dict[str, Decimal] = {}
-        for row in call.read("prices"):
-            value = row.values["close"]
-            if value is not None:
-                latest[row.instrument_id] = Decimal(str(value))
+        latest = {
+            name: Decimal(str(value))
+            for name, value in call.read("prices", "close").latest().items()
+        }
         if not latest:
-            return va.StrategyResult(decision=va.Hold(reason="no-observations"))
+            return va.Hold(reason="no-observations")
         winner = max(latest, key=lambda name: latest[name])
-        return va.StrategyResult(
-            decision=va.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
-        )
+        return va.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
 '''
 
 
@@ -126,6 +123,7 @@ datasets:
     path: {observation.as_posix()}
     instrument_field: instrument
     available_at: available_at
+    grain: instrument_instant
     key_fields: [available_at, instrument]
     fields: {{close: close}}
 
@@ -143,18 +141,6 @@ execution_inputs:
       at: "15:30"
       timezone: Asia/Seoul
       trade_price: close
-
-agendas:
-  alpha:
-    role: strategy_callback
-    from_dataset: prices
-    at: "04:00"
-    timezone: Asia/Seoul
-  valuing:
-    role: valuation
-    from_dataset: prices
-    at: "16:00"
-    timezone: Asia/Seoul
 """,
         encoding="utf-8",
     )
@@ -223,52 +209,59 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, payload
 
     (tmp_path / "rotate.py").write_text(_STRATEGY, encoding="utf-8")
-    configs = tmp_path / "configs.yaml"
-    configs.write_text(
+    strategy = tmp_path / "rotate.yaml"
+    strategy.write_text(
         f"""
 components:
   rotate:
     kind: strategy
     path: {(tmp_path / "rotate.py").as_posix()}
     object_name: Rotate
-strategy_configs:
-  rotate:
-    agenda_id: alpha
-valuation_configs:
-  valuing:
-    agenda_id: valuing
 """,
         encoding="utf-8",
     )
-    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(configs))
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(strategy))
     assert code == 0, payload
 
-    spec = tmp_path / "spec.yaml"
-    spec.write_text(
+    runs = tmp_path / "runs.yaml"
+    runs.write_text(
         json.dumps(
             {
-                "strategy": {"component": "rotate", "agenda_id": "alpha"},
-                "valuation": {"agenda_id": "valuing"},
-                "exchange": "krx-venue",
-                "execution_input": "venue-daily",
-                "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
-                "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),
-                "initial_account": {"cash": "1000000", "mode": "long_only"},
-                "instruments": [STOCK, ETF],
+                "runs": {
+                    "krx": {
+                        "strategies": {"rotate": {}},
+                        # Decide at 04:00 on every session the prices have a row for; the book
+                        # is valued at the 15:30 fill it lands on (record 148).
+                        "sessions_from": "prices",
+                        "timezone": "Asia/Seoul",
+                        "at": "04:00",
+                        "exchange": "krx-venue",
+                        "execution_input": "venue-daily",
+                        "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
+                        "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),
+                        "initial_account": {"cash": "1000000", "mode": "long_only"},
+                        "instruments": [STOCK, ETF],
+                    }
+                }
             }
         ),
         encoding="utf-8",
     )
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", str(runs))
+    assert code == 0, payload
 
-    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", str(spec), "--run-id", "krx")
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "krx")
 
     assert code == 0, ran
     assert ran["roster"]["known"] is True
     assert ran["roster"]["by_kind"] == {"stock": 1, "etf": 1}
 
+    store = tmp_path / ".vqapr"
+    (strategy_ref,) = strategy_refs(store, "krx")
+    assert ran["strategies"]["rotate"]["record"] == strategy_ref
     fills = [
         row
-        for row in read_table(tmp_path / ".vqapr", "krx", "vqapr.fill")
+        for row in read_table(store, "krx", "vqapr.fill", strategy_ref)
         if Decimal(str(row.get("dealt_quantity") or 0)) != 0
     ]
     assert fills, "the journey must trade, or it proves nothing about what trading costs"

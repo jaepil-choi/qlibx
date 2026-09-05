@@ -11,11 +11,9 @@ import pytest
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import FailureFamily, VqaprError
-from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.exchange.venue import AcademicExchange
@@ -23,47 +21,26 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
 from vqapr.flow.model_state import prepare_model_state
-from vqapr.flow.preflight import preflight_run
-from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig
+from vqapr.flow.preflight import derived_agenda, preflight_run
+from vqapr.flow.run import RunDefinition, StrategyEntry
 from vqapr.public import register_dataset
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
+from vqapr.runtime.agendas import OperationRole
 from vqapr.workspace import Workspace
 
 _ZONE = ZoneInfo("Asia/Seoul")
-
-
-def _occurrence(
-    identifier: str, role: OperationRole, local_time: time
-) -> OperationOccurrence:
-    return OperationOccurrence(
-        identifier,
-        role,
-        LocalInstantDeclaration(date(2024, 3, 5), local_time, "Asia/Seoul", 0, "+09:00"),
-    )
-
-
-def _agenda(identifier: str, role: OperationRole, *hours: int) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=identifier,
-        role=role,
-        timezone="Asia/Seoul",
-        occurrences=tuple(
-            _occurrence(f"{identifier}-{hour}", role, time(hour)) for hour in hours
-        ),
-        provenance="test fixture",
-    )
+SESSION = date(2024, 3, 5)
+"""The one session the execution fixture prices: 09:30 and 15:30 on this day."""
 
 
 def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef:
     path = root / f"{identifier}.py"
     source = (
         "from vqapr.authoring import Hold\n"
-        "from vqapr.models.strategy_model import StrategyModel\n"
+        "from vqapr.authoring import StrategyModel\n"
         f"class {identifier.title().replace('-', '')}(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def on_occurrence(self, context):\n"
+        "    def decide(self, context):\n"
         "        return Hold(reason='fixture')\n"
         if kind is ComponentKind.STRATEGY_MODEL
         else "from vqapr.constraints.constraint import Constraint\n"
@@ -78,11 +55,9 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         f"        return {identifier!r}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
+        "    def project(self, call):\n"
         "        return None\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n"
     )
     path.write_text(
@@ -106,13 +81,15 @@ def _setup(
     *,
     with_execution: bool = True,
     selector: FillSelector = FillSelector.SAME_DAY,
-    strategy_times: tuple[time, ...] = (time(9), time(10)),
+    at: time = time(9),
 ) -> tuple[Workspace, RunDefinition]:
     """A registered workspace and a declaration for it.
 
     `with_execution` defaults to True because an execution price is mandatory: preflight refuses a
     declaration without one, so a definition lacking it is not a run a caller could ever have.
     Tests that assert the refusal itself pass False.
+
+    The run declares its sessions and wall time directly (record `148`): one session, at `at`.
     """
     workspace = Workspace.create(root)
     strategy_component = _component(root, "strategy", ComponentKind.STRATEGY_MODEL)
@@ -127,43 +104,13 @@ def _setup(
             "prices-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("session_date", "instrument"),
             fields={"close": "close"},
         ),
         SourceSpec.of("prices-source", model_price_parquet),
     )
     workspace = Workspace.open(root)
-    strategy_agenda = OperationAgenda.from_occurrences(
-        agenda_id="strategy",
-        role=OperationRole.STRATEGY_CALLBACK,
-        timezone="Asia/Seoul",
-        occurrences=tuple(
-            _occurrence(
-                (
-                    f"strategy-{instant.hour}"
-                    if instant.minute == 0
-                    else f"strategy-{instant.strftime('%H%M')}"
-                ),
-                OperationRole.STRATEGY_CALLBACK,
-                instant,
-            )
-            for instant in strategy_times
-        ),
-        provenance="test fixture",
-    )
-    valuation_agenda = _agenda("valuation", OperationRole.VALUATION, 9)
-    monitoring_agenda = _agenda("monitoring", OperationRole.MONITORING, 16)
-    for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
-        workspace.register_agenda(agenda)
-    strategy = StrategyConfig(strategy_component, "strategy", OperationRole.STRATEGY_CALLBACK)
-    valuation = ValuationConfig(
-        "valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("monitoring", OperationRole.MONITORING)
-    workspace.register_strategy_config(strategy)
-    workspace.register_valuation_config(valuation)
-    workspace.register_monitoring_policy(monitoring)
     # Same root as the tests' own `_execution_exchange` calls, so the shared
     # `execution-source` declaration stays byte-identical rather than conflicting.
     exchange_component = (
@@ -177,11 +124,12 @@ def _setup(
         else None
     )
     return workspace, RunDefinition(
-        strategy,
-        valuation,
-        ConstraintSet((constraint_component,)),
-        monitoring,
-        exchange=exchange_component,
+        run_id="preflight",
+        strategies=(StrategyEntry("strategy", ("limit",), {"cadence": [1]}),),
+        sessions=(SESSION,),
+        timezone="Asia/Seoul",
+        at=at,
+        exchange=None if exchange_component is None else str(exchange_component.component_id),
         execution_input_id="execution" if with_execution else None,
         start=datetime(2024, 3, 5, 9, tzinfo=_ZONE),
         # The execution fixture fills at 15:30. Keeping end at 10:00 made every supposedly
@@ -190,7 +138,6 @@ def _setup(
         end=datetime(2024, 3, 5, 15, 30, tzinfo=_ZONE),
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
-        initial_model_memory={"cadence": [1]},
         instruments=("ABC",),
     )
 
@@ -259,33 +206,38 @@ def _execution_exchange(
     return component
 
 
-def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
+def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
+    """Record `148`: the strategy's agenda is derived from the run, and it is the only one.
+
+    There is no valuation agenda and no monitoring agenda to merge in: the book is valued at
+    the instant the venue fills and judged right after each commit, so the dispatch order is
+    the sessions at `at`, and nothing else.
+    """
     workspace, definition = _setup(tmp_path, model_price_parquet)
 
     frozen = preflight_run(workspace, definition)
 
-    assert [item.occurrence_id for item in frozen.strategy_agenda.occurrences] == [
-        "strategy-9",
-        "strategy-10",
+    (layer,) = frozen.strategies
+    assert layer.config.agenda_id == definition.agenda_id == "preflight.sessions"
+    assert layer.agenda.agenda_id == definition.agenda_id
+    assert layer.agenda.agenda_role is OperationRole.STRATEGY_CALLBACK
+    assert layer.agenda.timezone == "Asia/Seoul"
+    assert [item.occurrence_id for item in layer.agenda.occurrences] == [
+        "preflight.sessions-2024-03-05"
     ]
-    assert [item.occurrence_id for item in frozen.valuation_agenda.occurrences] == ["valuation-9"]
-    assert frozen.monitoring_agenda is not None
-    assert frozen.monitoring_agenda.occurrences == ()
-    assert [item.occurrence_id for item in frozen.static_occurrences] == [
-        "strategy-9",
-        "valuation-9",
-        "strategy-10",
-    ]
-    assert frozen.constraints is not definition.constraints
-    assert frozen.constraints.constraints[0].component_id == "limit"
+    (occurrence,) = layer.agenda.occurrences
+    assert occurrence.evaluation_time == datetime(2024, 3, 5, 9, tzinfo=_ZONE)
+    assert frozen.dispatch_order(layer) == layer.agenda.occurrences
+    assert not hasattr(frozen, "valuation_agenda") and not hasattr(frozen, "monitoring_agenda")
+    assert layer.constraints.constraints[0].component_id == "limit"
     assert frozen.instruments == definition.instruments
-    assert frozen.strategy_requirements == ()
-    assert frozen.constraint_requirements == ()
+    assert layer.requirements == ()
+    assert layer.constraint_requirements == ()
     assert (
-        frozen.initial_model_state_ref
-        == prepare_model_state(frozen.initial_model_memory, frozen.initial_payload).ref
+        layer.initial_model_state_ref
+        == prepare_model_state(layer.initial_model_memory, layer.initial_payload).ref
     )
     assert frozen.identity == preflight_run(workspace, definition).identity
     changed_account = replace(
@@ -293,7 +245,7 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
         initial_account_snapshot=AccountSnapshot(0, Decimal("101"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
     )
-    changed_model_state = replace(frozen, initial_model_memory={"cadence": [2]})
+    changed_model_state = replace(layer, initial_model_memory={"cadence": [2]})
     changed_source = replace(
         frozen,
         sources=(SourceSpec.of("prices-source", tmp_path / "changed.parquet"),),
@@ -320,7 +272,9 @@ def test_preflight_freezes_independent_inclusive_slices_and_static_merge(
         ),
     )
     assert changed_account.identity != frozen.identity
-    assert changed_model_state.identity != frozen.identity
+    assert changed_model_state.identity != layer.identity, (
+        "a strategy's opening memory is the strategy's own"
+    )
     assert changed_source.identity != frozen.identity
     assert changed_fill.identity != frozen_execution.identity
     assert (
@@ -334,16 +288,16 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
 ) -> None:
     """A finite `next_eligible` run must not fail only after earlier callbacks mutate state.
 
-    The first callback at 10:00 resolves to the 15:30 snapshot. The last callback fires exactly at
-    15:30, so `next_eligible` needs a later snapshot, but `end` is also 15:30.
-    Before this check, preflight returned a supposedly run-ready declaration and the simulation
-    raised a bare `ValueError` only if the last callback produced an intent.
+    The run asks its strategy at 15:30, exactly when the venue prints, so `next_eligible` needs a
+    later snapshot -- but `end` is also 15:30. Before this check, preflight returned a supposedly
+    run-ready declaration and the simulation raised a bare `ValueError` only if the callback
+    produced an intent.
     """
     workspace, definition = _setup(
         tmp_path,
         model_price_parquet,
         selector=FillSelector.NEXT_ELIGIBLE,
-        strategy_times=(time(10), time(15, 30)),
+        at=time(15, 30),
     )
 
     with pytest.raises(VqaprError) as caught:
@@ -356,7 +310,7 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
     failure = error.failures[0]
     assert failure.code == "preflight.execution.target_outside_horizon"
     assert failure.example_total == 1
-    assert failure.examples == ("strategy-1530: 2024-03-05T15:30:00+09:00",)
+    assert failure.examples == ("preflight.sessions-2024-03-05: 2024-03-05T15:30:00+09:00",)
     assert "selector=next_eligible" in (failure.observed or "")
     assert "end=2024-03-05T15:30:00+09:00" in (failure.observed or "")
     assert "extend end" in failure.requirement
@@ -369,7 +323,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     exchange = _execution_exchange(workspace, tmp_path)
     compatible = replace(
         definition,
-        exchange=exchange,
+        exchange="exchange",
         execution_input_id="execution",
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("2")}),
     )
@@ -378,6 +332,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
         load_exchange(exchange, project_root=workspace.project_root), AcademicExchange
     )
     assert preflight_run(workspace, compatible).exchange == exchange
+    assert isinstance(exchange, ComponentRef)
     with pytest.raises(VqaprError, match="unlisted_instrument"):
         preflight_run(workspace, replace(compatible, instruments=("ABC", "MISSING")))
 
@@ -402,7 +357,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     )
     workspace.register_component(duck)
     with pytest.raises(VqaprError, match="wrong_type"):
-        preflight_run(workspace, replace(compatible, exchange=duck))
+        preflight_run(workspace, replace(compatible, exchange="duck"))
 
     cases = (
         (
@@ -460,14 +415,14 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
             workspace,
             replace(
                 compatible,
-                exchange=no_sell,
+                exchange="no-sell",
                 initial_account_snapshot=AccountSnapshot(
                     0, Decimal("100"), {"STUCK": Decimal("1")}
                 ),
             ),
         )
 
-    fractional = _execution_exchange(
+    _execution_exchange(
         workspace,
         tmp_path / "fractional",
         identifier="fractional",
@@ -480,7 +435,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
             workspace,
             replace(
                 compatible,
-                exchange=fractional,
+                exchange="fractional",
                 initial_account_snapshot=AccountSnapshot(
                     0, Decimal("100"), {"ABC": Decimal("1.5")}
                 ),
@@ -506,19 +461,24 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
 ) -> None:
     workspace, definition = _setup(tmp_path, model_price_parquet)
     frozen = preflight_run(workspace, definition)
-    definition.strategy.component.config["changed"] = 1
-
-    assert frozen.strategy.component.config == {}
-    with pytest.raises(ValueError, match="strategy configuration reference drift"):
-        preflight_run(workspace, definition)
+    # The definition holds ids (record `139`); the registered component is what the frozen
+    # strategy carries, detached from the registration object. Since record `148` there is no
+    # separately registered binding that could drift from it: the strategy's config is built by
+    # preflight from the registration and the run's own agenda.
+    # The registration's config cannot be edited at all: it is read-only, which is what keeps
+    # a frozen run detached from the workspace without copying on every read (record `145`).
+    with pytest.raises(TypeError):
+        workspace.component("strategy").config["changed"] = 1  # type: ignore[index]
+    assert frozen.strategies[0].config.component == workspace.component("strategy")
+    assert frozen.strategies[0].config.component.config == {}
 
     memory = {"nested": [1]}
     workspace, definition = _setup(tmp_path / "memory", model_price_parquet)
-    definition = replace(definition, initial_model_memory=memory)
+    definition = replace(definition, strategies=(StrategyEntry("strategy", ("limit",), memory),))
     frozen = preflight_run(workspace, definition)
     memory["nested"].append(2)
-    assert definition.initial_model_memory == {"nested": [1]}
-    assert frozen.initial_model_memory == {"nested": [1]}
+    assert definition.strategies[0].initial_model_memory == {"nested": [1]}
+    assert frozen.strategies[0].initial_model_memory == {"nested": [1]}
     workspace, definition = _setup(tmp_path / "drift", model_price_parquet)
     (tmp_path / "drift" / "strategy.py").write_text(
         "class Strategy:\n    changed = True\n", encoding="utf-8"
@@ -528,22 +488,26 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     # so it is refused for what it actually is -- a contract violation -- rather than for having
     # changed. The distinction is the point: editing a registered component is the ordinary
     # development loop, and only a component that cannot do its job should stop a run.
-    with pytest.raises(VqaprError, match="component.load.wrong_type"):
+    with pytest.raises(VqaprError, match=r"component\.load\.wrong_type"):
         preflight_run(workspace, definition)
 
 
     workspace, definition = _setup(tmp_path / "config-drift", model_price_parquet)
-    registered = workspace._components["strategy"]
-    registered.config["changed"] = True
-    drifted_strategy = StrategyConfig(
-        registered, definition.strategy.agenda_id, definition.strategy.agenda_role
+    original = workspace._components["strategy"]
+    registered = ComponentRef.of(
+        str(original.component_id),
+        original.kind,
+        original.path,
+        original.object_name,
+        config={**original.config, "changed": True},
+        fingerprint=original.fingerprint,
     )
-    workspace._strategy_configs[drifted_strategy.agenda_id] = drifted_strategy
+    workspace._components["strategy"] = registered
     # A mutated CONFIG is likewise no longer refused as drift. It reaches the component, which
     # cannot construct from a key it does not declare, so the refusal names that instead. Same
     # principle as the source edit above: judged on whether it works, not on whether it moved.
-    with pytest.raises(VqaprError, match="component.load.construction_failed"):
-        preflight_run(workspace, replace(definition, strategy=drifted_strategy))
+    with pytest.raises(VqaprError, match=r"component\.load\.construction_failed"):
+        preflight_run(workspace, definition)
 
 
 def test_preflight_refuses_a_run_that_declares_no_execution_price(
@@ -632,7 +596,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     workspace.register_component(component)
 
     with pytest.raises(VqaprError, match=r"preflight\.execution\.requirement_missing") as error:
-        preflight_run(workspace, replace(definition, exchange=component))
+        preflight_run(workspace, replace(definition, exchange="limited"))
     failure = error.value.as_dict()["failures"][0]
     assert "price_limit" in failure["observed"], "the message names the feature to switch off"
     assert "switched off" in failure["requirement"]
@@ -657,7 +621,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
         ),
     )
     workspace.register_component(off)
-    assert preflight_run(workspace, replace(definition, exchange=off)).exchange == off
+    assert preflight_run(workspace, replace(definition, exchange="unlimited")).exchange == off
 
 
 def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
@@ -696,7 +660,7 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
         ),
     )
     workspace.register_component(component)
-    tracked = replace(definition, exchange=component)
+    tracked = replace(definition, exchange="tracked")
 
     # Publishing it is fine; the run simply does not trade it.
     assert preflight_run(workspace, tracked).exchange == component
@@ -727,11 +691,9 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         "    def requirements(self):\n"
         "        return (DataRequirement.of('absent', 'close', "
         "lookback=RowsLookback(1)),)\n"
-        "    def project(self, window, instruments):\n"
+        "    def project(self, call):\n"
         "        return None\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n",
         encoding="utf-8",
     )
@@ -745,56 +707,149 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         ),
     )
     workspace._components[constraint.component_id] = constraint
-    invalid_constraint = RunDefinition(
-        definition.strategy,
-        definition.valuation,
-        ConstraintSet((constraint,)),
-        definition.monitoring,
-        start=definition.start,
-        end=definition.end,
-        instruments=definition.instruments,
-    )
     with pytest.raises(VqaprError):
-        preflight_run(workspace, invalid_constraint)
+        preflight_run(workspace, definition)
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=datetime(2024, 3, 5, 9),
-            end=definition.end,
-            instruments=definition.instruments,
-        )
+        replace(definition, start=datetime(2024, 3, 5, 9))
     with pytest.raises(ValueError, match="start must not be after end"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=definition.end,
-            end=definition.start,
-            instruments=definition.instruments,
-        )
+        replace(definition, start=definition.end, end=definition.start)
     with pytest.raises(ValueError, match="declared together"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=definition.start,
-            end=definition.end,
-            initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
-            instruments=definition.instruments,
-        )
+        replace(definition, initial_account_mode=None)
     with pytest.raises(TypeError, match="Model memory"):
-        RunDefinition(
-            definition.strategy,
-            definition.valuation,
-            definition.constraints,
-            start=definition.start,
-            end=definition.end,
-            initial_model_memory=("not-json",),  # type: ignore[arg-type]
-            instruments=definition.instruments,
-        )
+        StrategyEntry("strategy", (), ("not-json",))  # type: ignore[arg-type]
+
+
+def test_the_derived_agenda_fires_once_per_session_at_the_declared_wall_time(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """Record `148`: the agenda is built from what the run declares, not registered beside it.
+
+    One occurrence per session, in the run's zone, at `at`; a day listed twice is a day, not two
+    occurrences; the ids and the fold/offset proof are `OperationAgenda.daily`'s, so two runs over
+    the same sessions name the same occurrences.
+    """
+    workspace, definition = _setup(tmp_path, model_price_parquet)
+    listed = replace(
+        definition,
+        sessions=(date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 6)),
+        at=time(8, 30),
+        # The agenda is the run's sessions INSIDE its period (`docs/issues/069`), so the
+        # period has to reach the last listed day for all three to appear.
+        end=datetime(2024, 3, 8, 15, 30, tzinfo=_ZONE),
+    )
+
+    agenda = derived_agenda(workspace, listed)
+
+    assert agenda.agenda_id == listed.agenda_id == "preflight.sessions"
+    assert agenda.role is OperationRole.STRATEGY_CALLBACK
+    assert agenda.timezone == "Asia/Seoul"
+    assert [occurrence.occurrence_id for occurrence in agenda.occurrences] == [
+        "preflight.sessions-2024-03-05",
+        "preflight.sessions-2024-03-06",
+        "preflight.sessions-2024-03-07",
+    ]
+    assert [occurrence.evaluation_time for occurrence in agenda.occurrences] == [
+        datetime(2024, 3, day, 8, 30, tzinfo=_ZONE) for day in (5, 6, 7)
+    ]
+    assert all(
+        occurrence.local_instant.offset == "+09:00" and occurrence.local_instant.fold == 0
+        for occurrence in agenda.occurrences
+    ), "the offset proof is derived from the zone, never typed"
+
+
+def test_sessions_from_collapses_a_dataset_s_instants_to_venue_local_days(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """A dataset's `available_at` says when a row became visible; the run's `at` says when it asks.
+
+    `workspace.evaluation_times` returns the dataset's distinct instants -- 15:30 KST on four
+    days here -- and the agenda takes only their DATE in the run's zone, at `at`. The zone is the
+    run's, not the dataset's: the same 15:30 KST instants are the evening BEFORE in Honolulu, so
+    a run declared there fires on those days.
+    """
+    workspace, definition = _setup(tmp_path, model_price_parquet)
+    from_dataset = replace(
+        definition,
+        sessions=(),
+        sessions_from="prices",
+        end=datetime(2024, 3, 9, 15, 30, tzinfo=_ZONE),
+    )
+
+    agenda = derived_agenda(workspace, from_dataset)
+
+    assert [occurrence.evaluation_time for occurrence in agenda.occurrences] == [
+        datetime(2024, 3, day, 9, tzinfo=_ZONE) for day in (5, 6, 7, 8)
+    ], "the dataset's 15:30 instants became 09:00 decisions on the same venue days"
+
+    honolulu = replace(from_dataset, timezone="Pacific/Honolulu", at=time(7))
+    assert [
+        occurrence.local_instant.local_date
+        for occurrence in derived_agenda(workspace, honolulu).occurrences
+    ] == [date(2024, 3, day) for day in (4, 5, 6, 7)]
+
+    with pytest.raises(VqaprError):
+        derived_agenda(workspace, replace(from_dataset, sessions_from="absent"))
+
+
+def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_command(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docs/issues/069`: 735 occurrences were built three times per command and 15 kept.
+
+    Two facts. The derived agenda holds only the sessions inside `[start, end]` -- the cut is on
+    dates, before an occurrence and its offset proof exist -- and one `check` derives it once,
+    one `preflight` once, rather than once per strategy inside two judges and again in preflight.
+    """
+    from vqapr.flow.judgments import judgments
+
+    workspace, definition = _setup(tmp_path, model_price_parquet)
+    # The dataset has four sessions (3/5 .. 3/8); the run's period (`_setup`: 3/5 09:00 to
+    # 15:30, the one day the execution fixture can fill) admits one.
+    two_days = replace(definition, sessions=(), sessions_from="prices")
+
+    agenda = derived_agenda(workspace, two_days)
+    assert [occurrence.local_instant.local_date for occurrence in agenda.occurrences] == [
+        date(2024, 3, 5)
+    ], "the agenda is the run's sessions, not the dataset's"
+
+    calls: list[str] = []
+    original = Workspace.evaluation_times
+
+    def counted(self: Workspace, dataset_id: str) -> tuple[datetime, ...]:
+        calls.append(dataset_id)
+        return original(self, dataset_id)
+
+    monkeypatch.setattr(Workspace, "evaluation_times", counted)
+    failures, blocked = judgments(two_days, workspace)
+    assert blocked == [] and failures == [], (failures, blocked)
+    assert calls == ["prices"], f"check derived the agenda {len(calls)} times"
+
+    calls.clear()
+    frozen = preflight_run(tmp_path, two_days)
+    assert calls == ["prices"], f"preflight derived the agenda {len(calls)} times"
+    assert len(frozen.strategy("strategy").agenda.occurrences) == 1
+
+
+def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """02:30 on 2024-03-10 does not exist in New York; the run is refused, not moved an hour."""
+    workspace, definition = _setup(tmp_path, model_price_parquet)
+    skipped = replace(
+        definition,
+        timezone="America/New_York",
+        at=time(2, 30),
+        sessions=(date(2024, 3, 10),),
+        # The period has to admit the day for the agenda to be asked about it (`069`).
+        start=datetime(2024, 3, 9, tzinfo=_ZONE),
+        end=datetime(2024, 3, 11, tzinfo=_ZONE),
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        derived_agenda(workspace, skipped)
+    with pytest.raises(ValueError, match="does not exist"):
+        preflight_run(workspace, skipped)
 
 
 def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
@@ -820,11 +875,9 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
         "        return '-'.join(['position', 'cap'])\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, window, instruments):\n"
+        "    def project(self, call):\n"
         "        return None\n"
-        "    def validate_intended(self, intent, bounds):\n"
-        "        return None\n"
-        "    def evaluate(self, window, account, marks, bounds):\n"
+        "    def monitor(self, call, account, bounds):\n"
         "        return None\n",
         encoding="utf-8",
     )
@@ -840,7 +893,7 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
     workspace.register_component(drifted)
 
     with pytest.raises(VqaprError) as caught:
-        preflight_run(workspace, replace(definition, constraints=ConstraintSet((drifted,))))
+        preflight_run(workspace, definition)
 
     error = caught.value
     assert error.stage == "component.load"

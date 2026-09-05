@@ -84,6 +84,7 @@ def two_stale_workspace(tmp_path: Path) -> tuple[Path, Path]:
             "prices",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("session_date", "instrument"),
             fields={"close": "close", "session_date": "session_date"},
         )
@@ -152,6 +153,7 @@ datasets:
     path: {prices_dir.as_posix()}
     instrument_field: instrument
     available_at: available_at
+    grain: instrument_instant
     key_fields: [session_date, instrument]
     fields: {{close: close, session_date: session_date}}
 """,
@@ -196,6 +198,7 @@ datasets:
     path: {prices_dir.as_posix()}
     instrument_field: instrument
     available_at: available_at
+    grain: instrument_instant
     key_fields: [session_date, instrument]
     fields: {{close: open, session_date: session_date}}
 """,

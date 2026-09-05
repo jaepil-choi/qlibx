@@ -35,6 +35,6 @@ Inspect:
 
 Environment assumptions: repository `uv` environment, Python 3.12+, DuckDB 1.5+, PyArrow 25+.
 
-Last verified at: 2026-09-01
+Last verified at: 2026-09-03
 
-Verified against: `vqapr-0.2.0a2+develop`
+Verified against: `vqapr-0.4.1`

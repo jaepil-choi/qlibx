@@ -1,5 +1,26 @@
 # 046 — A factor book's cost is a fixed charge per callback before it is a charge per name, and each declared `RowsLookback` input costs two round trips to answer with one row
 
+**Status 2026-09-02, later — CLOSED. First half by record `136` (lane D), second half by `120`.**
+An alias over several fields is one statement: `store.query_many` reads every field a
+`DatasetInput` declares in one `observation_rows` call and records one access naming them all;
+the Python join in `models/calls.py::declared_rows` is deleted. The window SQL had ranked each
+field's own last N rows all along, so the fused read returns what the joined reads did — asserted
+row for row in `tests/data/test_one_scan_serves_an_alias.py`, with the statement counted rather
+than timed. On the `ff_factors` shape (three aliases over three datasets, 2+1+3 fields) a callback
+is 3 scans where it was 6. **The harness the paragraphs below cite no longer exists** — see the
+read-path campaign's lane D note.
+
+> *Earlier status:* **Status 2026-09-02 — first half OPEN, second half CLOSED.** The updates below record both. Lane D
+(`read-046a-one-scan`, one scan serving several fields) **has not been started**: `git worktree list`
+shows only the main tree, and no `qlibx-wt-046a` exists. It is the last open lane of
+`docs/refactoring/2026-09-01-the-read-path-campaign.md`, and `docs/issues/049`'s closing measurement
+waits on it.
+
+Concretely, what is still per-field today: `models/calls.py::declared_rows` issues one
+`window.observations(requirement)` per declared field and joins the batches in Python on
+`(available_at, instrument)`. An alias over three fields is three scans and one Python join.
+
+
 **Status update 2026-09-01 — one of the two halves is now load-bearing for
 [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md)'s ruling.**
 

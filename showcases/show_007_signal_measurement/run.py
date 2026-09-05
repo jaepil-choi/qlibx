@@ -55,35 +55,24 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
     Mark,
     MarkBatch,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     RunRecordSpec,
     SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
+    StrategyEntry,
     callback_evidence,
     component_ref,
     preflight_run,
     publish_run_record,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
-    register_strategy_config,
-    register_valuation_config,
     run,
 )
 
@@ -100,8 +89,8 @@ LOOKBACK = 6
 ACTIVE_BUDGET = Decimal("0.02")
 """Total absolute active weight the signal is rescaled to after sizing."""
 
-VERIFIED_AGAINST = "vqapr-0.1.0+show-007-working-tree"
-LAST_VERIFIED_AT = "2026-08-18"
+VERIFIED_AGAINST = "vqapr-0.4.1"
+LAST_VERIFIED_AT = "2026-09-03"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:
@@ -146,23 +135,6 @@ def _universe(path: Path) -> tuple[str, ...]:
         con.close()
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_007 committed KRX sessions",
-    )
-
-
 _SOURCE_REFS = '''
 
 def _source_refs(context):
@@ -171,7 +143,7 @@ def _source_refs(context):
     The Flow independently recomputes this from the window and refuses any intent whose provenance
     disagrees, so it must be derived from the accesses rather than declared.
     """
-    from vqapr.public import IntentSourceRef
+    from vqapr.public import IntentSourceRef, Rebalance
 
     seen = {}
     for access in context.window.accesses:
@@ -196,10 +168,9 @@ from uuid import NAMESPACE_URL, uuid5
 from vqapr.public import (
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     PortfolioDirection,
-    PortfolioTarget,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     TableSpec,
@@ -241,7 +212,7 @@ class ReversalSignalStrategy(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         rows = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[Decimal]] = {}
         for row in rows:
@@ -276,15 +247,10 @@ class ReversalSignalStrategy(StrategyModel):
         sized = signal_weight(neutralized)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show007/show007-signal/" + context.occurrence.occurrence_id),
-            "show007-signal",
-            tuple(PortfolioTarget(name, weight=w) for name, w in sorted(weights.items())),
-            Decimal(1) - sum(weights.values()),
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(weights.items())),
+            cash_weight=Decimal(1) - sum(weights.values()),
+            budget=BUDGET,
         )
 '''
     + _SOURCE_REFS
@@ -306,7 +272,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+from vqapr.public import AcademicExchange, ListingAccess, Rebalance, TradeRule
 
 UNIVERSE = {universe!r}
 
@@ -477,6 +443,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "krx-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -507,45 +474,25 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     for reference in (signal_ref, academic_ref):
         register_component(project, reference)
 
-    signal_agenda = _agenda(
-        "show007-signal", OperationRole.STRATEGY_CALLBACK, time(8, 0), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show007-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "show007-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (signal_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(project, agenda)
-
-    signal_config = StrategyConfig(signal_ref, "show007-signal", OperationRole.STRATEGY_CALLBACK)
-    valuation_config = ValuationConfig(
-        "show007-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("show007-monitoring", OperationRole.MONITORING)
-    register_strategy_config(project, signal_config)
-    register_valuation_config(project, valuation_config)
-    register_monitoring_policy(project, monitoring)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
     definition = RunDefinition(
-        signal_config,
-        valuation_config,
-        ConstraintSet(()),
-        monitoring,
-        academic_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.SIGNED,
+        run_id="show007",
+        strategies=(StrategyEntry("show007-signal"),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 0),
+        exchange="show007-academic",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    result = run(project, preflight_run(project, definition))
+    result = run(project, preflight_run(project, definition)).result()
 
     evidence = callback_evidence(result)
     signal_published = publish_run_record(

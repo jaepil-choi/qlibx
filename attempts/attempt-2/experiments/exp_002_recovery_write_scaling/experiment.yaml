@@ -1,8 +1,0 @@
-schema_version: 1
-experiment_id: exp_002_recovery_write_scaling
-status: concluded
-hypothesis: cumulative v1 recovery points repeat completed journal, trace, and decision history
-production_changes: false
-command: uv run python experiments/exp_002_recovery_write_scaling/bench_recovery_v1.py
-acceptance_command: uv run python experiments/exp_002_recovery_write_scaling/bench_recovery_v2.py
-conclusion: v1 write volume is quadratic; v2 point size is flat and 100/50 total bytes are 1.99x

@@ -69,9 +69,13 @@ def test_every_verb_is_described_in_the_top_level_help(
     assert exit_info.value.code == 0
 
     printed = capsys.readouterr().out
+    # argparse wraps a summary at the console width, and textwrap may break a hyphenated word
+    # (`execution-input`) at its hyphen; the comparison rejoins both kinds of break, since the
+    # question is whether the sentence is there, not where the console folded it.
+    flattened = " ".join(printed.split()).replace("- ", "-")
     for verb in _VERBS:
         assert verb in printed, f"{verb} is missing from --help"
-        assert _SUMMARIES[verb] in " ".join(printed.split()), f"{verb} has no summary"
+        assert _SUMMARIES[verb] in flattened, f"{verb} has no summary"
 
 
 @pytest.mark.parametrize("verb", _VERBS)
@@ -273,21 +277,44 @@ def test_rerunning_new_refuses_by_name_instead_of_raising(
     assert "alpha" in payload["failures"][0]["observed"]
 
 
-def test_an_emitted_run_spec_declares_every_key_run_requires(
+_RUN_KEYS = (
+    "strategies",
+    "instruments",
+    "start",
+    "end",
+    "sessions_from",
+    "timezone",
+    "at",
+    "exchange",
+    "execution_input",
+    "initial_account",
+)
+"""Every key a `runs:` entry declares before `vqapr run` can execute it.
+
+`RunDefinition` tolerates an absent period, venue, execution input and account because other
+callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
+The sessions and the wall time are the run's own since record 148 (`sessions_from` or a literal
+`sessions`, `timezone`, `at`); the template leads with `sessions_from` because a dataset's own
+days are the common case. Pinned as a literal rather than imported: the template is judged
+against what the reader needs to type, and a constant that moved with the code would make this
+test pass for any template.
+"""
+
+
+def test_an_emitted_run_declares_every_key_run_requires(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The template exists so field names are read, not guessed.
 
     A template missing a key `run` requires would send the agent back to documentation on its
-    first run, which is the moment it is least able to recover.
+    first run, which is the moment it is least able to recover. The keys live under the run's
+    own id inside `runs:`, since a run is a registered declaration (record 139).
     """
     import yaml
 
-    from vqapr.cli.run import _REQUIRED
-
-    target = tmp_path / "spec.yaml"
+    target = tmp_path / "runs.yaml"
     code, payload = _envelope(
-        capsys, "--project-root", str(tmp_path), "new", "run-spec", "--out", str(target)
+        capsys, "--project-root", str(tmp_path), "new", "run", "--out", str(target)
     )
 
     assert code == 0
@@ -295,31 +322,37 @@ def test_an_emitted_run_spec_declares_every_key_run_requires(
     assert target.exists()
 
     document = yaml.safe_load(target.read_text(encoding="utf-8"))
-    for key in _REQUIRED:
-        assert key in document, f"the emitted template does not declare {key}"
+    assert list(document) == ["runs"], "the template is one `runs:` section and nothing else"
+    (run,) = document["runs"].values()
+    for key in _RUN_KEYS:
+        assert key in run, f"the emitted template does not declare {key}"
+    assert run["strategies"], "a run names at least one strategy"
 
 
-def test_an_emitted_run_spec_explains_each_key(tmp_path: Path) -> None:
+def test_an_emitted_run_explains_each_key(tmp_path: Path) -> None:
     """Values alone are not enough: a placeholder with no comment is still a guess."""
-    target = tmp_path / "spec.yaml"
-    main(["--project-root", str(tmp_path), "new", "run-spec", "--out", str(target)])
+    target = tmp_path / "runs.yaml"
+    main(["--project-root", str(tmp_path), "new", "run", "--out", str(target)])
 
     text = target.read_text(encoding="utf-8")
 
     assert "vqapr run" in text, "the template does not say what to do with itself"
+    assert "vqapr register" in text, "the template does not say it must be registered first"
     assert text.count("#") >= 8, "the template's keys are not explained"
 
 
-def test_an_incomplete_spec_names_every_missing_key_at_once(
+def test_a_retired_run_spec_handed_to_run_is_refused_naming_the_runs_section(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One reply must carry all of them, and it must stay bounded.
+    """One reply must say where the shape went, not parse the file as if it had not moved.
 
-    `examples` is capped at `MAX_EXAMPLES`, so `observed` carries the full list while
-    `example_total` reports how many there really were.
+    A `strategy:` file is the run spec of before record 139, and a `datamodel:` file the
+    materialization spec of before record 148. `run` takes a registered run id and nothing else
+    now, so a file of either shape is refused by NAME -- the path's suffix, before it is opened --
+    with the commands that replace it, and a reader following stale notes gets the new path in
+    one round trip. Refusing before opening is what keeps this one reply: a parser that first
+    read the file would answer a `strategy:` file, a `datamodel:` file and a typo three ways.
     """
-    from vqapr.domain.errors import MAX_EXAMPLES
-
     spec = tmp_path / "thin.yaml"
     spec.write_text("strategy:\n  component: a\n  agenda_id: b\n", encoding="utf-8")
 
@@ -328,11 +361,13 @@ def test_an_incomplete_spec_names_every_missing_key_at_once(
     assert code == 1
     assert payload["stage"] == "cli.input"
     detail = payload["failures"][0]
-    assert detail["code"] == "cli.input.keys_missing"
-    assert detail["example_total"] == 7
-    assert len(detail["examples"]) <= MAX_EXAMPLES
-    for key in ("valuation", "instruments", "start", "end", "exchange", "execution_input"):
-        assert key in detail["observed"], f"{key} was not named"
+    assert detail["code"] == "cli.input.value_invalid"
+    assert "registered run" in detail["requirement"]
+    assert spec.name in detail["observed"]
+    for command in ("vqapr new datamodel", "vqapr register", "vqapr run <run-id>"):
+        assert command in detail["fix"], f"the fix does not name {command}"
+    assert "runs:" in detail["fix"], "the fix names the section the shape moved to"
+    assert detail["source"]["file"] == str(spec)
 
 
 def test_a_dataset_template_covers_every_required_key(
@@ -557,94 +592,51 @@ def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
     """`vqapr new`'s choice list is the de-facto index of what a declaration may contain.
 
     A reader who scaffolds every kind offered, fills them in, and runs must not then meet a
-    section no template ever named. That is what happened: `strategy_configs` was reachable only
-    by knowing in advance that it existed, and the run failed at
-    `workspace.strategy_config.register.missing` after every visible step had succeeded.
+    section no template ever named. That is what happened once: `strategy_configs` was reachable
+    only by knowing in advance that it existed, and the run failed at
+    `workspace.strategy_config.register.missing` after every visible step had succeeded. That
+    section is gone (record 148) and the lesson is not: the sections `register` reads are the
+    sections `new` emits, and this test fails if the two lists drift apart.
 
-    This test fails if `register` learns a section a run needs and `new` is not taught to emit it.
+    `instruments` and `components` are scaffolded as Python beside their own declaration rather
+    than as a YAML template, so they are the two the YAML templates need not carry.
     """
-    from vqapr.cli.new import _AGENDAS_TEMPLATE, _DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE
+    from vqapr.cli.new import _DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE
+    from vqapr.declarations import SECTIONS
 
-    emitted = "\n".join((_DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _AGENDAS_TEMPLATE))
+    emitted = "\n".join((_DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE))
 
-    for section in (
-        "datasets",
-        "execution_inputs",
-        "agendas",
-        "strategy_configs",
-        "valuation_configs",
-    ):
+    assert set(SECTIONS) == {"instruments", "datasets", "execution_inputs", "components", "runs"}
+    for section in set(SECTIONS) - {"instruments", "components"}:
         assert f"{section}:" in emitted, f"no template emits a {section} section"
+    for retired in ("agendas:", "strategy_configs:"):
+        assert retired not in emitted, f"{retired} is not a section register reads any more"
 
 
-def test_an_agendas_template_registers_after_its_placeholders_are_filled(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The template must be a working document, not a shape to be corrected.
+def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path: Path) -> None:
+    """The template's own header must say what running the file needs, not only what it declares.
 
-    Registered against a real dataset so the `from_dataset` path is exercised: an agenda that
-    follows a dataset's own days is the common case and the one the template leads with.
+    It once read "every required key is shown" while omitting that the components it names had to
+    be bound to an agenda elsewhere -- true about the file, false about what running it needs,
+    which is the harder kind of wrong to catch because nothing about the emitted file looks
+    incomplete. There is no elsewhere since record 148: the run carries its own sessions and wall
+    time, every strategy is called on every session and decides for itself, and the template has
+    to say so, because the key a reader will otherwise go looking for (a cadence, a binding) does
+    not exist.
     """
-    import yaml
-
-    prices = _parquet(
-        tmp_path,
-        "prices.parquet",
-        """SELECT * FROM (VALUES
-             (TIMESTAMPTZ '2024-03-05 06:30:00+09', 'A', 100.0),
-             (TIMESTAMPTZ '2024-03-06 06:30:00+09', 'A', 101.0)
-           ) AS t(available_at, instrument, close)""",
-    )
-    dataset = tmp_path / "d.yaml"
-    dataset.write_text(
-        "datasets:\n  krx:\n"
-        "    source_id: krx-source\n"
-        f"    path: {prices.as_posix()}\n"
-        "    instrument_field: instrument\n"
-        "    available_at: available_at\n"
-        "    key_fields: [available_at, instrument]\n"
-        "    fields: {close: close}\n",
-        encoding="utf-8",
-    )
-    assert _envelope(capsys, "--project-root", str(tmp_path), "register", str(dataset))[0] == 0
-
-    target = tmp_path / "agendas.yaml"
-    code, _ = _envelope(
-        capsys, "--project-root", str(tmp_path), "new", "agendas", "--out", str(target)
-    )
-    assert code == 0
-
-    # The two placeholders the template tells the reader to replace. `strategy_configs` names a
-    # component that does not exist in this test, so it is dropped rather than filled -- the
-    # agendas and the valuation binding are what this asserts.
-    document = yaml.safe_load(target.read_text(encoding="utf-8"))
-    document.pop("strategy_configs")
-    for agenda in document["agendas"].values():
-        agenda["from_dataset"] = "krx"
-    target.write_text(yaml.safe_dump(document), encoding="utf-8")
-
-    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(target))
-
-    assert code == 0, payload
-    assert sorted(payload["registered"]["agendas"]) == ["daily-rebalance", "daily-valuation"]
-    assert payload["registered"]["valuation_configs"] == ["daily-valuation"]
-
-
-def test_the_run_spec_template_says_naming_an_agenda_is_not_binding_it(tmp_path: Path) -> None:
-    """The template's own header claimed completeness it did not have.
-
-    It read "every required key is shown" while omitting that the components it names must also
-    be bound by a registered config. Every key of the run spec *was* present -- the sentence was
-    true about this file and false about what running it needs, which is the harder kind of wrong
-    to catch, because nothing about the emitted file looks incomplete.
-    """
-    target = tmp_path / "spec.yaml"
-    main(["--project-root", str(tmp_path), "new", "run-spec", "--out", str(target)])
+    target = tmp_path / "runs.yaml"
+    main(["--project-root", str(tmp_path), "new", "run", "--out", str(target)])
 
     text = target.read_text(encoding="utf-8")
 
-    assert "vqapr new agendas" in text, "the template does not say where the binding comes from"
-    assert "not a binding" in text or "does not register or bind" in text
+    assert "sessions_from" in text and "sessions:" in text, "both ways to say the sessions"
+    assert "EVERY session" in text, "the template does not say every strategy is called"
+    assert "call.evaluation_time" in text and "self.memory" in text, (
+        "the template does not say where a strategy's own cadence lives"
+    )
+    assert "nothing here registers them" in text
+    for retired in ("agenda", "strategy_configs"):
+        assert retired not in text, f"the template still points at {retired!r}, which is gone"
 
 
 def test_generated_schedule_and_execution_defaults_are_causally_compatible(
@@ -653,18 +645,18 @@ def test_generated_schedule_and_execution_defaults_are_causally_compatible(
     """Independent templates must not put a decision and its fill at the same instant."""
     import yaml
 
-    agendas = tmp_path / "agendas.yaml"
+    runs = tmp_path / "runs.yaml"
     execution = tmp_path / "execution.yaml"
-    main(["--project-root", str(tmp_path), "new", "agendas", "--out", str(agendas)])
+    main(["--project-root", str(tmp_path), "new", "run", "--out", str(runs)])
     main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(execution)])
 
-    agenda_document = yaml.safe_load(agendas.read_text(encoding="utf-8"))
+    (run,) = yaml.safe_load(runs.read_text(encoding="utf-8"))["runs"].values()
     execution_document = yaml.safe_load(execution.read_text(encoding="utf-8"))
-    strategy_at = time.fromisoformat(agenda_document["agendas"]["daily-rebalance"]["at"])
+    decide_at = time.fromisoformat(run["at"])
     fill = next(iter(execution_document["execution_inputs"].values()))["fill"]
     fill_at = time.fromisoformat(fill["at"])
 
-    assert strategy_at < fill_at
+    assert decide_at < fill_at
     assert "STRICTLY LATER" in execution.read_text(encoding="utf-8")
 
 
@@ -672,12 +664,13 @@ def test_generated_run_boundaries_name_actual_instants(tmp_path: Path) -> None:
     """A bare date is not an instant and was rejected by the runner the template fed it to."""
     import yaml
 
-    target = tmp_path / "spec.yaml"
-    main(["--project-root", str(tmp_path), "new", "run-spec", "--out", str(target)])
+    target = tmp_path / "runs.yaml"
+    main(["--project-root", str(tmp_path), "new", "run", "--out", str(target)])
     document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    (run,) = document["runs"].values()
 
     for key in ("start", "end"):
-        boundary = datetime.fromisoformat(document[key])
+        boundary = datetime.fromisoformat(run[key])
         assert boundary.utcoffset() is not None, f"{key} is not timezone-aware"
 
 
@@ -688,13 +681,14 @@ def test_the_skill_names_launcher_and_immutable_setup_recovery(tmp_path: Path) -
     text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
 
     assert "uv run vqapr --help" in text
-    # Updated, not deleted, by `fix/023-narrow-the-provenance-promise`. The sentence still exists
-    # and still says one id means one declaration -- what changed is that it no longer claims
-    # re-registering CHANGED CONTENT under the same id is refused, which `docs/issues/009`
-    # deliberately made false and `tests/flow/test_edit_loop.py` proves is false.
-    assert "Registrations are immutable identities" in text
+    # Rewritten twice: `fix/023-narrow-the-provenance-promise` stopped it claiming re-registering
+    # CHANGED CONTENT under the same id is refused (`docs/issues/009` made that false), and
+    # `docs/issues/067` stopped it promising a `register --force` the CLI never had. It still
+    # says one id means one declaration, and now says the edit loop is the same command again.
+    assert "one id means one declaration" in text
     assert "register a *different* declaration" not in text
-    assert "--force` to replace it in place" in text
+    assert "there is no `register --force`" in text
+    assert "`replaced: {fingerprint: <the old one>}`" in text
     assert "project-local" in text and "`.vqapr/`" in text
     assert "obtain approval for the destructive reset" in text
 
@@ -736,13 +730,18 @@ def test_project_root_after_subcommand_explains_position(
     assert "before the subcommand" in payload["error"]
 
 
-def test_a_spec_that_is_not_a_mapping_says_what_it_parsed_as(
+def test_a_declaration_that_is_not_a_mapping_says_what_it_parsed_as(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Driven through `register` since record 148: it is the one verb that opens a YAML file.
+
+    `run` used to open a spec and was where this reply was pinned; it refuses a path by name now,
+    before reading it, so the reply is only reachable where a file is actually parsed.
+    """
     spec = tmp_path / "bad.yaml"
     spec.write_text("just a bare string\n", encoding="utf-8")
 
-    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "run", str(spec))
+    code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(spec))
 
     assert code == 1
     assert payload["failures"][0]["code"] == "cli.input.not_a_mapping"

@@ -1,4 +1,4 @@
-"""`register --force` and `remove`: the repair path a refusal used to name and forbid.
+"""Re-registering in place and `remove`: the repair path a refusal used to name and forbid.
 
 Editing a registered component and re-running produced two refusals that pointed at each other.
 `loading.py` said *re-register the component*; `register_component` then refused exactly that and
@@ -6,11 +6,16 @@ demanded a new `component_id`. A reader following either arrived at the other, w
 `docs/implementations/057` names as worse than a generic error.
 
 These pin the way out and the guard that keeps it from becoming a way to break a workspace.
+
+What can still name a component is a run (record `148`): the strategy binding that used to be a
+registered `strategy_config` is derived by preflight from the run's own sessions and wall time,
+so a run is the one live declaration a removal has to look for.
 """
 
 from __future__ import annotations
 
 from datetime import date, time
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -19,17 +24,10 @@ from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.registration import ComponentRef
-from vqapr.public import (
-    LocalInstantDeclaration,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
-    StrategyConfig,
-)
+from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
 from vqapr.workspace import Workspace
 
 ZONE = "Asia/Seoul"
-OFFSET = "+09:00"
 
 
 def _ref(path: Path, component_id: str = "mom") -> ComponentRef:
@@ -52,23 +50,18 @@ def _workspace(tmp_path: Path) -> tuple[Workspace, Path]:
     return workspace, source
 
 
-def _bind_a_config(workspace: Workspace, ref: ComponentRef) -> None:
-    occurrence = OperationOccurrence(
-        "a-1",
-        OperationRole.STRATEGY_CALLBACK,
-        LocalInstantDeclaration(date(2026, 4, 1), time(9, 0), ZONE, 0, OFFSET),
-    )
-    workspace.register_agenda(
-        OperationAgenda.from_occurrences(
-            agenda_id="daily",
-            role=OperationRole.STRATEGY_CALLBACK,
+def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
+    workspace.register_run(
+        RunDefinition(
+            run_id="daily",
+            strategies=(StrategyEntry(str(ref.component_id)),),
+            instruments=("A",),
             timezone=ZONE,
-            occurrences=(occurrence,),
-            provenance="test",
+            at=time(9, 0),
+            sessions=(date(2026, 4, 1),),
+            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+            initial_account_mode=AccountMode.LONG_ONLY,
         )
-    )
-    workspace.register_strategy_config(
-        StrategyConfig(ref, "daily", OperationRole.STRATEGY_CALLBACK)
     )
 
 
@@ -93,34 +86,23 @@ def test_an_edited_component_re_registers_in_place(tmp_path: Path) -> None:
     assert len(workspace.components) == 1, "an edit must not mint a second component id"
 
 
-def test_force_replaces_the_edited_component_under_the_same_id(tmp_path: Path) -> None:
-    """The edit loop, end to end: change a line, re-register, keep the id.
-
-    This is the assertion that separates the fix from the defect. Before it, the only route was a
-    new `component_id` plus a new config binding plus a spec edit -- four steps for a one-line
-    change, and a workspace that accumulated `mom`, `mom-eb04...`, `mom-91c7...` for one strategy.
-    """
+def test_there_is_no_force_parameter_left_to_promise(tmp_path: Path) -> None:
+    """`docs/issues/067`: the method carried a `force` that gated nothing, and the skill kept
+    promising `register --force` against it. One contract, replacement by default, and the
+    dead spelling is gone so a docstring cannot cite it again."""
     workspace, source = _workspace(tmp_path)
-    before = _ref(source)
-    workspace.register_component(before)
-
-    source.write_text("class S:\n    value = 1\n", encoding="utf-8")
-    after = _ref(source)
-    assert after.fingerprint != before.fingerprint, "the edit must move the fingerprint"
-
-    assert workspace.register_component(after, force=True) is True
-    assert workspace.component("mom").fingerprint == after.fingerprint
-    # One id, not two. The point of the change.
-    assert len(workspace.components) == 1
+    ref = _ref(source)
+    with pytest.raises(TypeError):
+        workspace.register_component(ref, force=True)  # type: ignore[call-arg]
 
 
-def test_force_on_an_unchanged_component_stays_idempotent(tmp_path: Path) -> None:
-    """`force` is permission to replace, not an instruction to write."""
+def test_re_registering_an_unchanged_component_stays_idempotent(tmp_path: Path) -> None:
+    """A second registration of the same bytes writes nothing and says so."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
     workspace.register_component(ref)
 
-    assert workspace.register_component(ref, force=True) is False
+    assert workspace.register_component(ref) is False
 
 
 def test_remove_withdraws_a_registration_and_is_idempotent(tmp_path: Path) -> None:
@@ -140,7 +122,7 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
     workspace.register_component(ref)
-    _bind_a_config(workspace, ref)
+    _register_a_run(workspace, ref)
 
     with pytest.raises(VqaprError, match=r"workspace\.remove\.referenced") as error:
         workspace.remove("component", "mom")
@@ -148,10 +130,10 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
     # is shown, and naming the blocker is the whole requirement here.
     observed = " ".join(failure.observed or "" for failure in error.value.failures)
     remedy = " ".join(failure.fix or "" for failure in error.value.failures)
-    assert "strategy config 'daily'" in observed, (
+    assert "run 'daily'" in observed, (
         "the refusal must name what blocks it, not merely that something does"
     )
-    assert "strategy config 'daily'" in remedy, "and the fix must name what to remove first"
+    assert "run 'daily'" in remedy, "and the fix must name what to remove first"
     # Refused means unchanged, not partially applied.
     assert workspace.component("mom").fingerprint == ref.fingerprint
 
@@ -159,41 +141,63 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
 def test_references_to_reports_every_edge_that_blocks_a_removal(tmp_path: Path) -> None:
     """The reverse lookup this workspace did not have.
 
-    `workspace.py`'s existing checks run in the FORWARD direction while decoding -- a config
-    naming a component that must exist. Withdrawing asks the opposite question, and nothing
-    answered it before.
+    `workspace.py`'s existing checks run in the FORWARD direction while decoding -- a run naming
+    a component that must exist. Withdrawing asks the opposite question, and nothing answered it
+    before.
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
     workspace.register_component(ref)
-    _bind_a_config(workspace, ref)
+    _register_a_run(workspace, ref)
 
-    assert workspace.references_to("component", "mom") == ("strategy config 'daily'",)
-    assert workspace.references_to("agenda", "daily") == ("strategy config 'daily'",)
+    assert workspace.references_to("component", "mom") == ("run 'daily'",)
     # An id nothing points at, and an id that does not exist, are both removable.
     assert workspace.references_to("component", "absent") == ()
 
 
 def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
-    """A run definition names a config, and a run definition is not a workspace registration."""
+    """A run is the top of the document: nothing names a run, so it is always removable."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
     workspace.register_component(ref)
-    _bind_a_config(workspace, ref)
+    _register_a_run(workspace, ref)
 
-    assert workspace.references_to("strategy_config", "daily") == ()
+    assert workspace.references_to("run", "daily") == ()
+    assert workspace.remove("run", "daily") is True
+    # With the run gone the component it named is free.
+    assert workspace.references_to("component", "mom") == ()
 
 
-def test_a_dataset_refuses_rather_than_claiming_it_is_unreferenced(tmp_path: Path) -> None:
-    """Returning `()` here would read as "safe to remove", and the workspace cannot know that.
+def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
+    tmp_path: Path,
+) -> None:
+    """`docs/issues/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
 
-    A dataset's readers are declared inside component requirements, which this document does not
-    index. Saying so is honest; an empty tuple would be a guess wearing an answer's clothes.
+    A component's reads live in its code and are refused at its next preflight; a registered
+    run's `sessions_from` lives here, and is the blocker this walk can name.
     """
-    workspace, _ = _workspace(tmp_path)
+    workspace, source = _workspace(tmp_path)
+    ref = _ref(source)
+    workspace.register_component(ref)
 
-    with pytest.raises(VqaprError, match=r"workspace\.remove\.unsupported_kind"):
-        workspace.references_to("dataset", "prices")
+    assert workspace.references_to("dataset", "prices") == ()
+    assert workspace.remove("dataset", "prices") is False, "absent is idempotent, not an error"
+
+    workspace.register_run(
+        RunDefinition(
+            run_id="daily",
+            strategies=(StrategyEntry(str(ref.component_id)),),
+            instruments=("A",),
+            timezone=ZONE,
+            at=time(9, 0),
+            sessions=(date(2026, 4, 1),),
+            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+            initial_account_mode=AccountMode.LONG_ONLY,
+        )
+    )
+    assert workspace.references_to("dataset", "prices") == ()
+    # `sessions_from` a dataset that is not registered is refused at `register_run`, so the
+    # blocker is asked through the CLI journey in `tests/cli/test_rm_dataset_withdraws_a_registration.py`.
 
 
 def test_an_unknown_kind_is_refused_with_the_permitted_set(tmp_path: Path) -> None:

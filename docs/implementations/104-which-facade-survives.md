@@ -10,7 +10,7 @@
 **The shipped `vqapr.public` survives and is emptied of orchestration. `project.py` stays frozen and
 dies under `G008`.**
 
-`docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` §2 draws the opposite target —
+`docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` §2 draws the opposite target —
 *"`public.py` is gone, `project.py` is the sole facade"*. That target is unreachable without
 breaching the ruling in `docs/design/agent-first-surface.md`, which is canonical. This record settles
 which of the two governs, so that no later step has to decide it mid-flight.

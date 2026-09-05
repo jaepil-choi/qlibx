@@ -228,6 +228,7 @@ def test_real_observations_stay_point_in_time(
         "krx-observation",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )
@@ -303,6 +304,7 @@ def test_real_close_is_visible_exactly_at_the_venue_close(
         "krx-observation",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     )

@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import EconomicAccountView
+from vqapr.calls import ConstraintContext
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
-from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
+from vqapr.constraints.findings import (
+    ConstraintFinding,
+    ConstraintReport,
+    StampedConstraintFinding,
+)
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
-from vqapr.portfolio.intents import EconomicPortfolioIntent, validate_economic_intent
 from vqapr.valuation.marks import MarkBatch
 
 
@@ -27,34 +33,8 @@ class ProjectedConstraintFinding:
         object.__setattr__(self, "bounds", self.bounds.detached())
 
 
-@dataclass(frozen=True, slots=True)
-class IntendedConstraintFinding:
-    """Typed evidence emitted while validating a proposed economic intent."""
-
-    constraint_id: str
-    finding: ConstraintFinding
-
-    def __post_init__(self) -> None:
-        _constraint_id(self.constraint_id)
-        if not isinstance(self.finding, ConstraintFinding):
-            raise TypeError("finding must be a ConstraintFinding")
-        if self.finding.constraint_id != self.constraint_id:
-            raise ValueError("intended finding identity must match its constraint")
-
-
-@dataclass(frozen=True, slots=True)
-class ActualConstraintFinding:
+class ActualConstraintFinding(StampedConstraintFinding):
     """Typed evidence emitted while monitoring a committed marked account."""
-
-    constraint_id: str
-    finding: ConstraintFinding
-
-    def __post_init__(self) -> None:
-        _constraint_id(self.constraint_id)
-        if not isinstance(self.finding, ConstraintFinding):
-            raise TypeError("finding must be a ConstraintFinding")
-        if self.finding.constraint_id != self.constraint_id:
-            raise ValueError("actual finding identity must match its constraint")
 
 
 def _constraint_id(value: object) -> str:
@@ -75,11 +55,15 @@ def _loaded(constraints: object) -> tuple[Constraint, ...]:
     return constraints
 
 
-def _finding(constraint: Constraint, finding: object) -> ConstraintFinding:
+def _finding(finding: object) -> ConstraintFinding:
+    """Check the shape and nothing else.
+
+    The identity comparison this used to make is gone with the field it compared: the framework
+    stamps the id it is already holding rather than asking the author for a copy of it and then
+    checking the copy.
+    """
     if not isinstance(finding, ConstraintFinding):
         raise TypeError("Constraint must return a ConstraintFinding")
-    if finding.constraint_id != constraint.constraint_id:
-        raise ValueError("Constraint finding identity must match its implementation")
     return finding
 
 
@@ -109,10 +93,16 @@ def project_constraints(
     for constraint in loaded:
         # A view per constraint, because a `DataRequirement` no longer says who is reading it and
         # this loop is the only place that knows. The accesses all land in `window`.
-        bounds = constraint.project(window.for_consumer(constraint.constraint_id), instruments)
+        bounds = constraint.project(
+            ConstraintContext(
+                window=window.for_consumer(constraint.constraint_id),
+                instruments=instruments,
+                reads=constraint.inputs(),
+            )
+        )
         if not isinstance(bounds, ConstraintBounds):
             raise TypeError("Constraint.project must return ConstraintBounds")
-        if set(bounds.lower) != set(instruments):
+        if set(bounds.lower_weights) != set(instruments):
             raise ValueError("Constraint.project bounds must cover every window instrument")
         projected.append(ProjectedConstraintFinding(constraint.constraint_id, bounds))
     return tuple(projected)
@@ -127,50 +117,19 @@ def merged_constraint_bounds(
     ):
         raise TypeError("projected must be a tuple of ProjectedConstraintFinding")
     if not projected:
-        return ConstraintBounds({}, {})
-    instruments = tuple(projected[0].bounds.lower)
-    if any(set(item.bounds.lower) != set(instruments) for item in projected[1:]):
+        return ConstraintBounds(lower_weights={}, upper_weights={})
+    instruments = tuple(projected[0].bounds.lower_weights)
+    if any(set(item.bounds.lower_weights) != set(instruments) for item in projected[1:]):
         raise ValueError("projected bounds must cover the same instruments")
     lower = {
-        instrument: max(item.bounds.lower[instrument] for item in projected)
+        instrument: max(item.bounds.lower_weights[instrument] for item in projected)
         for instrument in instruments
     }
     upper = {
-        instrument: min(item.bounds.upper[instrument] for item in projected)
+        instrument: min(item.bounds.upper_weights[instrument] for item in projected)
         for instrument in instruments
     }
-    return ConstraintBounds(lower, upper)
-
-
-def validate_intended_constraints(
-    constraints: tuple[Constraint, ...],
-    intent: EconomicPortfolioIntent,
-    projected: tuple[ProjectedConstraintFinding, ...],
-) -> tuple[IntendedConstraintFinding, ...]:
-    """Validate an intent using projections from the same loaded instances."""
-    loaded = _loaded(constraints)
-    validated_intent = validate_economic_intent(intent)
-    if not isinstance(projected, tuple) or not all(
-        isinstance(item, ProjectedConstraintFinding) for item in projected
-    ):
-        raise TypeError("projected must be a tuple of ProjectedConstraintFinding")
-    projection_by_id = {item.constraint_id: item for item in projected}
-    if len(projection_by_id) != len(projected) or tuple(projection_by_id) != tuple(
-        constraint.constraint_id for constraint in loaded
-    ):
-        raise ValueError("projected findings must exactly match the loaded constraint instances")
-    return tuple(
-        IntendedConstraintFinding(
-            constraint.constraint_id,
-            _finding(
-                constraint,
-                constraint.validate_intended(
-                    validated_intent, projection_by_id[constraint.constraint_id].bounds
-                ),
-            ),
-        )
-        for constraint in loaded
-    )
+    return ConstraintBounds(lower_weights=lower, upper_weights=upper)
 
 
 def evaluate_constraints(
@@ -200,31 +159,63 @@ def evaluate_constraints(
         constraint.constraint_id for constraint in loaded
     ):
         raise ValueError("projected findings must exactly match the loaded constraint instances")
+    # Built only when something will read it. `window` is legitimately `None` for a run with no
+    # constraints, and reaching through it for an instant nobody asked for turned "this run
+    # declared no rules" into a monitoring failure.
+    view = build_account_view(account, marks, window.evaluation_time) if loaded else None
     findings = tuple(
         ActualConstraintFinding(
             constraint.constraint_id,
             _finding(
-                constraint,
-                constraint.evaluate(
-                    window.for_consumer(constraint.constraint_id),
-                    account,
-                    marks,
+                constraint.monitor(
+                    ConstraintContext(
+                        window=window.for_consumer(constraint.constraint_id),
+                        instruments=window.instruments,
+                        reads=constraint.inputs(),
+                    ),
+                    view,
                     projection_by_id[constraint.constraint_id].bounds,
-                ),
+                )
             ),
         )
         for constraint in loaded
     )
-    return ConstraintReport(account.version, tuple(item.finding for item in findings))
+    return ConstraintReport(account.version, findings)
+
+
+def build_account_view(
+    account: AccountSnapshot, marks: MarkBatch, observed_at: datetime
+) -> EconomicAccountView:
+    """The marked account as an author sees it.
+
+    Built here, once per monitoring occurrence, rather than by each Constraint out of an
+    `AccountSnapshot` and a `MarkBatch`: `nav = marks.total_value + account.cash` and
+    `weight = value / nav` are the two derivations every weight rule needs and neither is a
+    judgement, so a rule that got either subtly different from its neighbour would report a
+    breach its neighbour permitted. `docs/issues/014` is that defect measured on one constraint
+    disagreeing with itself.
+
+    `observed_at` is this monitoring occurrence's own cutoff, which is the instant these marks
+    are the account's value at. `MarkBatch` does not carry one: a `Mark` is a quantity, a price
+    and their product, and when it was taken is a property of the occurrence that took it.
+    """
+    nav = marks.total_value + account.cash
+    return EconomicAccountView(
+        cash=account.cash,
+        positions=dict(account.positions),
+        values={mark.instrument_id: mark.value for mark in marks.marks},
+        nav=nav,
+        nav_observed_at=observed_at,
+    )
 
 
 __all__ = [
     "ActualConstraintFinding",
-    "IntendedConstraintFinding",
     "ProjectedConstraintFinding",
+    "StampedConstraintFinding",
+    "build_account_view",
     "constraint_requirements",
     "evaluate_constraints",
     "merged_constraint_bounds",
     "project_constraints",
-    "validate_intended_constraints",
 ]

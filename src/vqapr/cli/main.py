@@ -19,8 +19,10 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
-from vqapr.cli import check, list_, new, register, run, show, skill
+from vqapr.cli import check, list_, new, register, rm, run, show, skill
 from vqapr.cli.envelope import UsageError, emit, failure
+from vqapr.inputs import VALUE_INVALID, InputError
+from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME
 
 _COMMANDS: dict[str, Any] = {
     "new": new,
@@ -29,16 +31,18 @@ _COMMANDS: dict[str, Any] = {
     "run": run,
     "list": list_,
     "show": show,
+    "rm": rm,
     "skill": skill,
 }
 
 _SUMMARIES: dict[str, str] = {
-    "new": "scaffold a component, or emit a dataset/run-spec declaration template",
+    "new": "scaffold a component, or emit a dataset/execution-input/run declaration template",
     "register": "validate a declaration and add what it declares to the workspace",
-    "check": "prove a run spec is ready, reporting every problem at once, without running it",
-    "run": "freeze a run spec, preflight it, and execute the simulation",
-    "list": "show what the workspace already holds",
-    "show": "answer questions about one finished run, from its frozen record",
+    "check": "prove a registered run is ready, reporting every problem at once, without running",
+    "run": "freeze a registered run, preflight it, and execute its strategies",
+    "list": "show what the workspace holds and what the store recorded",
+    "show": "answer questions about one run or one strategy record, from what was frozen",
+    "rm": "remove a run's records, or withdraw a registration nothing still names",
     "skill": "install the agent skill into this project, or remove and inspect it",
 }
 """One line per verb, shown in `vqapr --help`.
@@ -57,22 +61,21 @@ _DESCRIPTIONS: dict[str, str] = {
         "      writes a dataset declaration template with every required key commented.\n"
         "  vqapr new execution-input --out <path>\n"
         "      writes the venue-table declaration a run fills against.\n"
-        "  vqapr new agendas --out <path>\n"
-        "      writes the cadences a run fires on, plus the configs that bind roles to them.\n"
-        "  vqapr new run-spec --out <path>\n"
-        "      writes a run spec template with every required key, each one commented.\n\n"
+        "  vqapr new run --out <path>\n"
+        "      writes a `runs:` declaration template with every required key commented.\n\n"
         "Nothing is registered by this command. Pass the emitted .yaml to `vqapr register`."
     ),
     "register": (
         "Validate a declaration and add what it declares to the workspace.\n\n"
-        "Datasets, sources, execution inputs, components, agendas and configs are all declared "
-        "in one YAML document. Sections are applied in dependency order, so a valid document "
+        "Datasets, sources, execution inputs, components and runs are all "
+        "declared in one YAML document. Sections are applied in dependency order, so a valid "
+        "document "
         "cannot fail because of the order it was typed in.\n\n"
         "This command mutates the workspace. It refuses with structured evidence rather than "
         "registering something partially."
     ),
     "check": (
-        "Prove a run spec is ready, without running it.\n\n"
+        "Prove a registered run is ready, without running it.\n\n"
         "Reports every INDEPENDENT problem at once rather than stopping at the first, so a "
         "declaration can be repaired in one pass instead of one round trip per defect. A check "
         "that could not run because an earlier one failed is reported as blocked, naming what "
@@ -82,30 +85,48 @@ _DESCRIPTIONS: dict[str, str] = {
         "this package, not a sandbox."
     ),
     "run": (
-        "Judge a run spec, freeze it, preflight it, and execute the simulation.\n\n"
-        "The spec names already-registered components by id; it does not redeclare them. "
-        "Preflight refuses any drift between the spec and what is registered, and the same "
-        "judgments `vqapr check` makes are made here before the spec is frozen: a run that would "
-        "fail `check` is refused rather than executed.\n\n"
-        "`check` is still the cheaper way to see every problem at once -- it collects them, while "
-        "a run refuses on the first set it finds. Write a starting spec with "
-        "`vqapr new run-spec --out spec.yaml`, and prove it with `vqapr check spec.yaml`."
+        "Judge a registered run, freeze it, preflight it, and execute its strategies.\n\n"
+        "  vqapr run <run-id> [--strategy <id>]... [--jobs N] [--force]\n"
+        "      runs every strategy the run names (or those given), each with its own account "
+        "and its own record under .vqapr/runs/<run-id>/strategies/<id>@<fp8>/.\n"
+        "  vqapr run <datamodel-run-id>\n"
+        "      runs every datamodel the run names, each writing its dataset under "
+        ".vqapr/materialized/<dataset-id>/ and its record under "
+        ".vqapr/runs/<run-id>/datamodels/<id>@<fp8>/ (record 148: a datamodel is a run)."
+        "\n\n"
+        "The same judgments `vqapr check` makes are made here before the run is frozen: a run "
+        "that would fail `check` is refused rather than executed. Declare a run with "
+        "`vqapr new run --out runs.yaml`, register it, and prove it with `vqapr check <run-id>`."
+        "\n\n"
+        "Every strategy the run names is run, in a single process or under --jobs. A refusal "
+        "inside one strategy is that strategy's outcome: the others still run, and the "
+        "envelope reports every strategy with a status (ok:false, stage run.strategy_failed, "
+        "the failed strategy's refusal in its own block). While a run is executing, "
+        "`vqapr list strategies --run <run-id>` shows each strategy's progress."
     ),
     "list": (
         "Show what the workspace already holds.\n\n"
         "Each row carries the identifiers needed as arguments to the next command. "
         "An empty or uninitialised directory reports zero items and succeeds.\n\n"
-        "`list runs` reads finished run records rather than the workspace document, and finds "
-        "them by scanning: no index file means no shared target for concurrent runs to lose "
-        "each other's entries on."
+        "`list runs` lists the registered runs and, beside each, the strategy records the store "
+        "holds; `list strategies --run <id>` lists those records, filterable by strategy, "
+        "fingerprint, contract and period. Records are found by scanning: no index file means "
+        "no shared target for concurrent runs to lose each other's entries on."
     ),
     "show": (
-        "Answer questions about one finished run.\n\n"
-        "Reads the record the run froze to disk, so it answers from any process -- including "
-        "one started after the run ended, and including one that never saw the run at all. "
-        "Nothing is recomputed; re-running to answer a question about a run would be a "
-        "different run.\n\n"
-        "Use `vqapr list runs` to see which ids this store holds."
+        "Answer questions about one run, or one strategy record.\n\n"
+        "  vqapr show run <run-id>            the configuration every strategy shared\n"
+        "  vqapr show strategy <run-id>/<strategy-id>@<fp8> [--table <t>] [--limit N]\n"
+        "                                     one strategy's output, or its rows\n\n"
+        "Reads what the run froze to disk, so it answers from any process. Nothing is "
+        "recomputed; re-running to answer a question about a run would be a different run."
+    ),
+    "rm": (
+        "Remove records, or withdraw a registration.\n\n"
+        "  vqapr rm run <run-id> [--keep-latest]     a run's records (a live one is refused)\n"
+        "  vqapr rm strategy <run-id>/<id>@<fp8>     one strategy's record\n"
+        "  vqapr rm run-definition|component <id>\n"
+        "                                            a registration nothing live still names"
     ),
     "skill": (
         "Install the agent skill into this project, or remove and inspect it.\n\n"
@@ -169,8 +190,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--project-root",
         type=Path,
-        default=Path.cwd(),
-        help="workspace root (defaults to the current directory)",
+        default=None,
+        help=(
+            "workspace root: where `.vqapr/` is or will be (default: the current directory; "
+            "refused when an ancestor directory already holds a workspace and this one does "
+            "not, so a command run from a subdirectory cannot start a second workspace by "
+            "accident -- pass the ancestor, or this directory, explicitly)"
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     for name, module in _COMMANDS.items():
@@ -186,6 +212,47 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _nearest_workspace_above(start: Path) -> Path | None:
+    """The closest ancestor of `start` that holds a workspace document, or `None`."""
+    for ancestor in start.parents:
+        if (ancestor / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).is_file():
+            return ancestor
+    return None
+
+
+def _resolve_project_root(explicit: Path | None) -> Path:
+    """The root every command works in, refusing an implicit one that would shadow an ancestor.
+
+    `docs/issues/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr` beside
+    the project's real workspace and the next `check` refused for datasets registered five
+    minutes earlier. Git's discovery rule is the model -- walk up -- but a workspace is written
+    to, and silently choosing the parent would put the caller's files in a directory they did
+    not name. So an implicit root that has no workspace while an ancestor has one is refused,
+    naming both; an explicit `--project-root` is never second-guessed, so a nested workspace is
+    still one command away when it is meant.
+    """
+    if explicit is not None:
+        return Path(explicit)
+    here = Path.cwd()
+    if (here / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).is_file():
+        return here
+    above = _nearest_workspace_above(here)
+    if above is None:
+        return here
+    raise InputError(
+        VALUE_INVALID,
+        requirement=(
+            "a command run without --project-root must not start a second workspace beneath "
+            "an existing one"
+        ),
+        observed=f"no workspace at {here}; the nearest is at {above}",
+        retry=(
+            f"run `vqapr --project-root {above} ...` (or cd there), or name this directory "
+            f"explicitly with `--project-root {here}` to create a workspace here on purpose"
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
@@ -193,10 +260,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     except UsageError as error:
         # The command line never reached a handler, so there is no project root to dump beside.
         return emit(failure(error))
-    project_root = Path(args.project_root)
+    try:
+        project_root = _resolve_project_root(args.project_root)
+    except InputError as refused:
+        return emit(failure(refused))
     handler: Callable[..., dict[str, Any]] = args.handler
     try:
         payload = handler(args, project_root=project_root)
     except Exception as error:  # every failure leaves through the same envelope
         payload = failure(error, project_root=project_root)
+    # Every envelope says WHICH workspace it is about (`docs/issues/066`): a refusal about
+    # registration state that names the cure but not the place it looked is correct and not
+    # enough to act on. Absolute, so a reader comparing two commands' answers can see when
+    # they were about different directories.
+    payload["workspace_root"] = str(project_root.resolve())
     return emit(payload)

@@ -8,7 +8,7 @@ so the second read is gone rather than narrowed. Each half had a test that faile
 tree first; the record's validation section lists the six failures and the two controls.
 
 **Status when filed:** open. Both halves found 2026-08-31 by the independent review recorded in
-`docs/refactoring/2026-08-31-post-step-07-review.md` (R3 and R4), re-verified against
+`docs/diagnostics/2026-08-31-post-step-07-review.md` (R3 and R4), re-verified against
 `develop@ec9e6139` on 2026-09-01 before filing. **Filed as one issue because they are one repair**:
 the review's own recommendation is that R4 be fixed in the same commit as the first read it removes.
 **Touches:** `src/vqapr/flow/roster.py:48` and `:126` (`registered_roster`, `roster_report`).

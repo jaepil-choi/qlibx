@@ -40,6 +40,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from vqapr.authoring import DataModel, StrategyModel
 from vqapr.constraints.constraint import Constraint
 from vqapr.domain.errors import (
     Diagnosis,
@@ -58,27 +59,20 @@ from vqapr.extension.loading import (
     load_strategy_model,
     positional_arity,
 )
-from vqapr.models.data_model import DataModel
-from vqapr.models.strategy_model import StrategyModel
 
 STAGE = "component.conformance"
 _RETRY = "fix the component to match its contract, then register it again"
 
 
 _CONTRACT_METHODS: dict[ComponentKind, tuple[tuple[type, str], ...]] = {
-    ComponentKind.DATA_MODEL: (
-        (DataModel, "compute"),
-        (DataModel, "requirements"),
-    ),
+    ComponentKind.DATA_MODEL: ((DataModel, "compute"),),
     ComponentKind.STRATEGY_MODEL: (
-        (StrategyModel, "on_occurrence"),
+        (StrategyModel, "decide"),
         (StrategyModel, "requirements"),
     ),
     ComponentKind.CONSTRAINT: (
-        (Constraint, "requirements"),
         (Constraint, "project"),
-        (Constraint, "validate_intended"),
-        (Constraint, "evaluate"),
+        (Constraint, "monitor"),
     ),
     ComponentKind.EXCHANGE: ((Exchange, "execute"),),
 }

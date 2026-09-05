@@ -59,7 +59,7 @@ rewrite 없이 병합 가능한 자리에서만 그었다.
 | **A** | `044` | ~~`qlibx-wt-044`~~ | ~~`read-044-no-validation-on-read`~~ | **병합 완료 `111c0342`**, 기록 `119`. worktree 제거됨 |
 | **B** | `046` 후반 | ~~`qlibx-wt-046b`~~ | ~~`read-046b-one-round-trip`~~ | **병합 완료 `35b73229`**, 기록 `120`. worktree 제거됨 |
 | **C** | `038` + `045`/`049` | ~~`qlibx-wt-038-049`~~ | ~~`read-038-049-fields-are-expressions`~~ | **병합 완료 `df571533`**, 기록 `123` |
-| **D** | `046` 전반 | `qlibx-wt-046a` | `read-046a-one-scan` | **C 병합 후 생성** |
+| **D** | `046` 전반 | (worktree 없이, `step-04-one-scan-serves-an-alias`) | `step-04-one-scan-serves-an-alias` | **완료 — 기록 `136`, 2026-09-02** |
 
 **왜 다섯이 아니고 넷인가.** A와 B는 ruling과도 서로와도 독립이라 첫날부터 돌 수 있다.
 
@@ -183,6 +183,12 @@ C:/Users/chlje/DevProjects/qlibx-wt-046a     레인 D — C 병합 시점에 생
 등록, **806.61s 기준선 대비** — anti-join을 타이밍보다 **먼저** 돌린 상태로.
 
 재현 하네스는 `kwam-enhanced-index/vqapr-performance-testbed/`이고 built wheel을 상대로 돈다.
+
+> **2026-09-02 (기록 `136`): 그 디렉터리는 더 이상 없다.** `kwam-enhanced-index/` 아래 어디에도
+> `wide_experiment.py`·`pivot_experiment.py`·`bench.py`·`probes.py`가 없다. 806.61s 기준선은 이 하네스로는
+> 재측정할 수 없고, 아래 숫자들은 그 세션의 기록으로만 남는다. 레인 D의 인수조건은 통계로 잰다 —
+> alias 하나의 field 수와 무관하게 statement 하나 — 그리고 `ff_factors`의 실제 모양(alias 3개, dataset 3개,
+> field 2+1+3)에서는 콜백당 6 → 3이다. "3 → 1"은 `049`가 alias 규칙을 정하기 전의 표현이다.
 `wide_experiment.py`가 614x 표와 anti-join을, `pivot_experiment.py`가 한 window 읽기를
 (10.19s → 0.048s), `bench.py --stage datamodel`이 1.9%/48.6%/44.7% 분해를 낸다.
 

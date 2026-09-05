@@ -11,6 +11,7 @@ a convenience:
 
 The layout is argued in `docs/design/run-record-layout.md`; the two decisions that shape this
 module are repeated here because they are the ones a reader will otherwise try to "simplify".
+The tables are parquet since record `146`; see `PART_SUFFIX`.
 
 **A directory scan, not an index file.** An index would put every concurrent writer on one
 atomic-replace target, which is exactly the lost-update the workspace lock exists for
@@ -34,36 +35,76 @@ import shutil
 import time as _time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 from vqapr._internal import atomic
 
 RUNS_DIRECTORY = "runs"
 RECORD_FILENAME = "record.json"
+RUN_FILENAME = "run.json"
+STRATEGY_FILENAME = "strategy.json"
+STRATEGIES_DIRECTORY = "strategies"
+DATAMODEL_FILENAME = "datamodel.json"
+DATAMODELS_DIRECTORY = "datamodels"
+"""Two records per run since record `139` (design §4.2).
+
+`<root>/runs/<run-id>/run.json` is the configuration every strategy shared, written before
+any strategy starts; `<root>/runs/<run-id>/strategies/<id>@<fp8>/strategy.json` is one
+strategy's output, beside its `tables/`. `record.json` remains the materialization record
+(and a run record written before `139`, which `read_record` still reads).
+"""
 TABLES_DIRECTORY = "tables"
+PART_SUFFIX = ".parquet"
+"""Each table is a directory of parquet files, one complete file per chunk `append` received.
+
+Record `146` (deletion campaign Step 5). The rows were JSONL with a `.types.json` sidecar that
+said which Python type each column had been stringified from, because JSON cannot carry a type
+and a reader guessing from the text shifted every instant by its offset (the testbed's A5).
+Parquet carries the types: an instant is a `timestamp[us, tz]` and comes back as the same
+instant in the same zone through pyarrow and through duckdb alike. A `Decimal` is the one
+value stored as text -- exact and unbounded, where a parquet decimal would need a fixed scale
+and a weight of one third has twenty-eight places -- and the column's field metadata says so
+(`vqapr.type: decimal`), so `read_table` restores it and a duckdb reader casts it knowingly.
+
+One file per chunk rather than one open writer per table, because a killed run must leave
+readable rows (record `135`): a parquet file is complete only once its footer is written, so an
+open writer would leave nothing, while a file per chunk leaves every chunk that landed. A
+chunk is one accepted occurrence's rows, so the files are as many as the run's occurrences.
+"""
 
 SCHEMA = "vqapr-run-record/v2"
 """Bumped from `v1` by record `115`, when the record gained a `kind` discriminator.
 
 A reader is now entitled to branch on this. `read_record` refuses a major version it does not know
 instead of handing back a mapping whose fields mean something else -- see `_require_known_schema`.
+
+Since record `139` this is the schema of `record.json` only: a materialization, or a run written
+before the two-level layout. `run.json` and `strategy.json` carry their own schemas below.
 """
 
 RUN_KIND = "run"
-"""A simulation: the only kind `v1` could describe, and still the only kind written today."""
+"""A simulation record written before record `139`: one directory, one strategy, `record.json`."""
 
-MATERIALIZATION_KIND = "materialization"
-"""A dataset materialization. Declared here in record `115` and WRITTEN by record `116`.
+STRATEGY_KIND = "strategy"
+"""One strategy's output inside a run: `strategies/<id>@<fp8>/strategy.json` (record `139`)."""
 
-Named one story before it is produced on purpose. `115` changes the record's shape and `116` adds
-the second producer; splitting them means the shape change lands with the reader-side check that
-protects it, rather than arriving in the same commit as a new writer and being tested only through
-that writer.
-"""
+RUN_SCHEMA = "vqapr-run/v1"
+"""The schema of `run.json`: configuration, written by `write_run_record`."""
+
+STRATEGY_SCHEMA = "vqapr-strategy-record/v1"
+DATAMODEL_SCHEMA = "vqapr-datamodel-record/v1"
+"""The schema of `strategy.json`, written by `RunRecordWriter.finish(kind=STRATEGY_KIND)`."""
+
+DATAMODEL_KIND = "datamodel"
+"""One datamodel of a run (record `148`): the schema of `datamodel.json`."""
 
 _RUN_FIELDS = (
     "run_id",
@@ -101,27 +142,78 @@ and the remedy, which belongs where someone is about to act and not in an archiv
 run did.
 """
 
-_MATERIALIZATION_FIELDS = (
+_STRATEGY_FIELDS = (
     "run_id",
-    "dataset_id",
+    "strategy_ref",
+    "strategy_id",
+    "fingerprint",
+    "component",
+    "agenda",
+    "constraints",
+    "account",
+    "tables",
+    "contract",
     "source_digest",
     "declared_digest",
+    "roster",
+    "period",
+    "timing",
+)
+"""What one strategy's record answers (record `139`): architecture §17.3.2's two missing values --
+which `.py` ran (`component.path`) and the strategy's OWN fingerprint, registered (`fingerprint`)
+and as loaded (`source_digest`, per component rather than folded) -- beside what a run record
+answered before: the final account, the tables, the contract report, the roster, the period.
+"""
+
+_DATAMODEL_FIELDS = (
+    "run_id",
+    "datamodel_ref",
+    "datamodel_id",
+    "fingerprint",
+    "component",
+    "agenda",
+    "dataset_id",
+    "value_fields",
     "rows",
-    "span",
+    "sessions",
+    "source_digest",
+    "declared_digest",
     "period",
 )
-"""What a materialization answers. Written by record `116`; declared here so the discriminator has
-two real branches rather than one and a promise.
+"""What one datamodel's record answers (record `148`): the component that ran, registered and
+as loaded; the dataset it wrote and the fields it declared; one row per session -- when it
+evaluated, when its rows became available, how many -- and no per-instrument lineage
+(`docs/issues/059`)."""
 
-`run_id`, `source_digest`, `declared_digest` and `period` are deliberately the same names a run
-uses: the two kinds answer some of the same questions, and a reader that wants "which declarations
-produced this" should not need to know which kind it is holding to ask.
+RUN_JSON_FIELDS = (
+    "run_id",
+    "declared_digest",
+    "instruments",
+    "period",
+    "exchange",
+    "execution_input",
+    "initial_account",
+    "datasets",
+    "strategies",
+    "datamodels",
+)
+"""What `run.json` answers: architecture §17.3.1's missing rows -- the universe, the venue and the
+execution input with its fill convention (`docs/issues/034`), the initial account declaration, the
+datasets and their source digests (A7) -- and which strategies the run names.
 """
 
 RECORD_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
     RUN_KIND: _RUN_FIELDS,
-    MATERIALIZATION_KIND: _MATERIALIZATION_FIELDS,
+    STRATEGY_KIND: _STRATEGY_FIELDS,
+    DATAMODEL_KIND: _DATAMODEL_FIELDS,
 }
+
+MEMBER_KINDS: dict[str, tuple[str, str, str, str]] = {
+    STRATEGY_KIND: (STRATEGIES_DIRECTORY, STRATEGY_FILENAME, STRATEGY_SCHEMA, "strategy_ref"),
+    DATAMODEL_KIND: (DATAMODELS_DIRECTORY, DATAMODEL_FILENAME, DATAMODEL_SCHEMA, "datamodel_ref"),
+}
+"""The two kinds of member a run holds (record `148`): where each records, the file that marks
+it complete, its schema, and the head key naming its directory."""
 
 
 def record_fields(kind: str) -> tuple[str, ...]:
@@ -141,6 +233,123 @@ def record_fields(kind: str) -> tuple[str, ...]:
 
 
 
+
+
+_DECIMAL = {b"vqapr.type": b"decimal"}
+"""Field metadata marking a string column that holds `Decimal` text; see `PART_SUFFIX`."""
+
+
+def _zone_name(value: datetime) -> str:
+    """The zone a `timestamp[us, tz]` column is declared in, from the first aware value seen."""
+    zone = value.tzinfo
+    name = getattr(zone, "key", None) or getattr(zone, "zone", None)
+    if isinstance(name, str) and name:
+        return name
+    offset = value.utcoffset() or timedelta()
+    sign = "+" if offset >= timedelta() else "-"
+    minutes = abs(int(offset.total_seconds())) // 60
+    return f"{sign}{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _arrow_type(values: Sequence[object], table_id: str, column: str) -> pa.Field:
+    """One column's Arrow field from its Python values, refusing a column of two kinds.
+
+    `int` and `float` together are `float64`; `bool` is its own type and never an int here,
+    which is why it is tested first. A column of two kinds (a `Decimal` beside text) is
+    refused rather than downgraded: the recorder wrote both, so the run's own table is the
+    thing that is wrong, and a silent common type would hide it (`prefer fast, explicit
+    failure`).
+    """
+    kinds: set[str] = set()
+    first_instant: datetime | None = None
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            kinds.add("bool")
+        elif isinstance(value, Decimal):
+            kinds.add("decimal")
+        elif isinstance(value, datetime):
+            kinds.add("datetime")
+            first_instant = first_instant or value
+        elif isinstance(value, int):
+            kinds.add("int")
+        elif isinstance(value, float):
+            kinds.add("float")
+        elif isinstance(value, str):
+            kinds.add("string")
+        else:
+            kinds.add("string")
+    if kinds <= {"int", "float"} and kinds:
+        return pa.field(column, pa.float64() if "float" in kinds else pa.int64())
+    if len(kinds) > 1:
+        raise ValueError(
+            f"table {table_id!r} column {column!r} holds values of two kinds "
+            f"({', '.join(sorted(kinds))}); a recorded column holds one"
+        )
+    kind = next(iter(kinds), None)
+    if kind is None:
+        return pa.field(column, pa.null())
+    if kind == "decimal":
+        return pa.field(column, pa.string(), metadata=_DECIMAL)
+    if kind == "datetime":
+        assert first_instant is not None
+        if first_instant.tzinfo is None:
+            raise ValueError(f"table {table_id!r} column {column!r} holds a naive datetime")
+        return pa.field(column, pa.timestamp("us", tz=_zone_name(first_instant)))
+    return pa.field(column, {"bool": pa.bool_(), "string": pa.string()}[kind])
+
+
+def _arrow_table(
+    rows: Sequence[Mapping[str, object]], table_id: str, remembered: dict[str, pa.Field]
+) -> pa.Table:
+    """One chunk as an Arrow table, each column typed as this writer first saw it.
+
+    A column's type is fixed the first time a non-null value is seen and every later chunk is
+    cast to it; a column that was null in an earlier chunk was written `null`-typed there,
+    which every reader unions with the later type. A later chunk that cannot be cast is
+    refused by name.
+    """
+    columns = sorted({str(key) for row in rows for key in row})
+    fields: list[pa.Field] = []
+    arrays: list[pa.Array] = []
+    for column in columns:
+        values = [row.get(column) for row in rows]
+        seen = _arrow_type(values, table_id, column)
+        field = remembered.get(column)
+        if field is None:
+            field = seen
+            if not pa.types.is_null(seen.type):
+                remembered[column] = seen
+        elif not pa.types.is_null(seen.type) and (
+            seen.type != field.type or (seen.metadata or {}) != (field.metadata or {})
+        ):
+            if pa.types.is_integer(seen.type) and pa.types.is_floating(field.type):
+                pass
+            elif pa.types.is_timestamp(seen.type) and pa.types.is_timestamp(field.type):
+                pass  # another zone, the same instants: cast below converts them
+            else:
+                raise ValueError(
+                    f"table {table_id!r} column {column!r} was recorded as {field.type} and "
+                    f"this chunk holds {seen.type}; a recorded column holds one kind"
+                )
+        if field.metadata == _DECIMAL:
+            values = [None if value is None else str(value) for value in values]
+        arrays.append(pa.array(values, type=field.type))
+        fields.append(field)
+    return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+
+
+def _python_rows(batch: pa.RecordBatch) -> Iterator[dict[str, Any]]:
+    """Rows back as the values they were written from, `Decimal` included."""
+    decimal_columns = {
+        field.name for field in batch.schema if field.metadata and field.metadata == _DECIMAL
+    }
+    for row in batch.to_pylist():
+        for column in decimal_columns:
+            if row.get(column) is not None:
+                row[column] = Decimal(row[column])
+        yield row
 
 
 def _encode(value: object) -> object:
@@ -288,8 +497,8 @@ class RunRecordLive(FileExistsError):
         super().__init__(
             f"run {run_id!r} holds a lock at {directory} last refreshed {claim.age:.0f}s ago "
             f"(pid {claim.pid}); a live run refreshes it continuously, and an abandoned one is "
-            f"released automatically about {claim.releases_in:.0f}s from now. Wait, or use a "
-            "different --run-id"
+            f"released automatically about {claim.releases_in:.0f}s from now. Wait; an "
+            "abandoned record is removed with `vqapr rm strategy` once its lock has aged out"
         )
 
 
@@ -307,7 +516,7 @@ class RunRecordTaken(RuntimeError):
         self.directory = directory
         super().__init__(
             f"run {run_id!r} lost its record directory at {directory} while finishing; "
-            "another run claimed the same id. Re-run with a --run-id nobody else is using"
+            "another run claimed the same record. Re-run once the other writer has finished"
         )
 
 
@@ -335,10 +544,46 @@ class RunRecordWriter:
 
     root: Path
     run_id: str
+    strategy_ref: str | None = None
+    """Which member of the run this writer records, as `<id>@<fp8>`, or `None` for the run
+    directory itself -- a materialization record, or a run record written before `139`."""
+    member_kind: str = STRATEGY_KIND
+    """Which kind of member `strategy_ref` names (record `148`): a strategy or a datamodel."""
+    _rows: dict[str, int] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _instants: dict[str, set[str]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    _fields: dict[str, dict[str, pa.Field]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    _parts: dict[str, int] = field(default_factory=dict, init=False, repr=False, compare=False)
+    """What this writer has appended so far, per table: rows, and the distinct `event_time`s.
+
+    Counted as chunks pass through `append`, so the record's `tables` block is right whether the
+    run streamed its rows occurrence by occurrence or handed them over once at the end -- and so
+    nothing has to hold the rows to count them. A set of instants is bounded by the run's
+    instants, not its rows.
+    """
 
     @property
     def directory(self) -> Path:
-        return self.root / RUNS_DIRECTORY / self.run_id
+        return record_directory(self.root, self.run_id, self.strategy_ref, kind=self.member_kind)
+
+    @property
+    def label(self) -> str:
+        """How this record is named in a refusal: the run id, or `<run>/<strategy_ref>`."""
+        return self.run_id if self.strategy_ref is None else f"{self.run_id}/{self.strategy_ref}"
+
+    @property
+    def record_filename(self) -> str:
+        return RECORD_FILENAME if self.strategy_ref is None else MEMBER_KINDS[self.member_kind][1]
+
+    def counts(self) -> dict[str, dict[str, int]]:
+        """Per table: rows appended so far, and the distinct instants they span."""
+        return {
+            table_id: {"rows": self._rows[table_id], "instants": len(self._instants[table_id])}
+            for table_id in sorted(self._rows)
+        }
 
     def open(self, *, replace: bool = False) -> None:
         """Create this run's directory, refusing to write into one that already exists.
@@ -418,8 +663,8 @@ class RunRecordWriter:
                 claim = _lock_claim(directory / LOCK_FILENAME)
                 if claim is None:
                     raise
-                raise RunRecordLive(self.run_id, directory, claim) from failure
-            raise RunRecordExists(self.run_id, directory) from failure
+                raise RunRecordLive(self.label, directory, claim) from failure
+            raise RunRecordExists(self.label, directory) from failure
 
     def _open(self, directory: Path, *, replace: bool) -> None:
         """Claim the id, or raise. Every raise here is turned into a refusal by `open`.
@@ -438,14 +683,14 @@ class RunRecordWriter:
                 # this: forcing a live run destroys the rows it is still writing and blends both
                 # into one record, which is unrecoverable, while waiting costs nothing -- at most
                 # `claim.releases_in` seconds, after which a dead claim clears itself.
-                raise RunRecordLive(self.run_id, directory, claim) from taken
+                raise RunRecordLive(self.label, directory, claim) from taken
 
             # Nobody live holds it. A COMPLETE record is a real conflict and still needs `--force`
             # -- replacing a finished result must stay deliberate. Abandoned leftovers are not:
             # the run that made them is dead, no reader ever returned them, and charging the
             # operator a destructive flag to clear someone else's crash is a cost with no benefit.
-            if (directory / RECORD_FILENAME).is_file() and not replace:
-                raise RunRecordExists(self.run_id, directory) from taken
+            if (directory / self.record_filename).is_file() and not replace:
+                raise RunRecordExists(self.label, directory) from taken
 
             # Recovery contends on the LOCK rather than the directory, which is what stopped
             # several processes each clearing the same dead directory and each writing into it --
@@ -526,10 +771,10 @@ class RunRecordWriter:
             (self.directory / LOCK_FILENAME).unlink(missing_ok=True)
 
     def append(self, table_id: str, rows: Sequence[Mapping[str, object]]) -> None:
-        """Append one chunk to one table.
+        """Append one chunk to one table, as one complete parquet file.
 
-        Takes a chunk at a time so a caller CAN stream as it produces rows. `public.run` does not
-        yet: it hands over the whole recorder output once the run returns.
+        Takes a chunk at a time so a caller CAN stream as it produces rows, and a run with a
+        store does: each accepted occurrence's rows land here at publish.
 
         Also the run's heartbeat. `LOCK_STALE_AFTER` asks whether the holder is still alive, and
         without a refresh the answer is really "has this run been going longer than two minutes" --
@@ -538,10 +783,21 @@ class RunRecordWriter:
         self.heartbeat()
         if not rows:
             return
-        path = self.directory / TABLES_DIRECTORY / f"{table_id}.jsonl"
-        with path.open("a", encoding="utf-8") as handle:
-            for row in rows:
-                handle.write(json.dumps(_encode(row), sort_keys=True) + "\n")
+        directory = self.directory / TABLES_DIRECTORY / table_id
+        directory.mkdir(parents=True, exist_ok=True)
+        table = _arrow_table(rows, table_id, self._fields.setdefault(table_id, {}))
+        part = self._parts.get(table_id, 0)
+        target = directory / f"{part:06d}{PART_SUFFIX}"
+        # Written beside the target and moved into place, so a reader listing the directory
+        # never opens a file whose footer is not there yet.
+        staging = directory / f".{part:06d}{PART_SUFFIX}.tmp"
+        pq.write_table(table, staging, compression="zstd")
+        os.replace(staging, target)
+        self._parts[table_id] = part + 1
+        instants = self._instants.setdefault(table_id, set())
+        for row in rows:
+            instants.add(str(row.get("event_time")))
+        self._rows[table_id] = self._rows.get(table_id, 0) + len(rows)
 
     def finish(self, record: Mapping[str, object], *, kind: str = RUN_KIND) -> Path:
         """Write the run's own facts, last, by atomic replace.
@@ -550,9 +806,8 @@ class RunRecordWriter:
         one knows the run reached its end. Atomically because a half-written record read by a cold
         process is indistinguishable from a run that recorded half its facts.
 
-        `kind` defaults to `RUN_KIND` because every caller today writes a run. Record `116` passes
-        `MATERIALIZATION_KIND`; the default is what lets `115` change the shape without touching a
-        single call site, so the reader-side check lands before the second producer exists.
+        `kind` defaults to `RUN_KIND`, the run directory's own record; a member writer passes its
+        kind (record `148`: a strategy or a datamodel).
         """
         if kind not in RECORD_FIELDS_BY_KIND:
             raise KeyError(
@@ -560,31 +815,35 @@ class RunRecordWriter:
                 f"{', '.join(sorted(RECORD_FIELDS_BY_KIND))}"
             )
         directory = self.directory
-        payload = json.dumps(
-            {
-                "schema": SCHEMA,
-                # The discriminator, written before the answers so a reader scanning the head of
-                # the file knows what it is holding. Record `115`.
-                "kind": kind,
-                "run_id": self.run_id,
-                **_encode(dict(record)),
-            },
-            indent=2,
-            sort_keys=True,
-        )
+        if (kind in MEMBER_KINDS) != (self.strategy_ref is not None):
+            raise ValueError(
+                "a member record is written by a writer with a strategy_ref, and only by one"
+            )
+        if self.strategy_ref is not None and kind != self.member_kind:
+            raise ValueError(f"this writer records a {self.member_kind}, not a {kind}")
+        head: dict[str, object] = {
+            "schema": MEMBER_KINDS[kind][2] if kind in MEMBER_KINDS else SCHEMA,
+            # The discriminator, written before the answers so a reader scanning the head of
+            # the file knows what it is holding. Record `115`.
+            "kind": kind,
+            "run_id": self.run_id,
+        }
+        if self.strategy_ref is not None:
+            head[MEMBER_KINDS[kind][3]] = self.strategy_ref
+        payload = json.dumps({**head, **_encode(dict(record))}, indent=2, sort_keys=True)
 
         def taken(_error: OSError) -> BaseException:
             # The directory is no longer there, or no longer ours. Another run took this id while
             # this one was executing -- only possible when someone forced an id already in use --
             # and this run's rows went with it. Saying so beats an unhandled OSError that reads
             # like the framework broke.
-            return RunRecordTaken(self.run_id, directory)
+            return RunRecordTaken(self.label, directory)
 
         # `create_parent=False` is load-bearing: the directory's ABSENCE is how this detects a
         # stolen run id. Recreating it would turn the detection into a silent re-claim of state
         # another run now owns.
         atomic.write_atomically(
-            directory / RECORD_FILENAME,
+            directory / self.record_filename,
             payload + "\n",
             on_error=taken,
             create_parent=False,
@@ -592,19 +851,75 @@ class RunRecordWriter:
         # The run is over, so it is no longer live. Released after the record lands, never before:
         # a reader that sees a complete record must never also see a live claim on it.
         self.release()
-        return directory / RECORD_FILENAME
+        return directory / self.record_filename
+
+
+def record_directory(
+    root: Path, run_id: str, strategy_ref: str | None = None, *, kind: str = STRATEGY_KIND
+) -> Path:
+    """Where one record lives: the run's directory, or one member's directory beneath it."""
+    directory = root / RUNS_DIRECTORY / run_id
+    if strategy_ref is None:
+        return directory
+    return directory / MEMBER_KINDS[kind][0] / strategy_ref
 
 
 def record_path(root: Path, run_id: str) -> Path:
     return root / RUNS_DIRECTORY / run_id / RECORD_FILENAME
 
 
+def run_record_path(root: Path, run_id: str) -> Path:
+    return root / RUNS_DIRECTORY / run_id / RUN_FILENAME
+
+
+class RunRecordConflict(ValueError):
+    """`run.json` already exists under this id and describes a different configuration.
+
+    The strategy records beneath it belong to that configuration. Running a changed run under the
+    same id would file new output beside old output that a reader could no longer tell apart, so
+    the refusal names both digests; `vqapr rm run <id>` clears the old, or a new id keeps both.
+    """
+
+    def __init__(self, run_id: str, path: Path, existing: object, declared: str) -> None:
+        self.run_id = run_id
+        self.path = path
+        self.existing = existing
+        self.declared = declared
+        super().__init__(
+            f"run {run_id!r} already has records under configuration {existing!r} at {path}, "
+            f"and this run freezes to {declared!r}; remove the old records with "
+            f"`vqapr rm run {run_id}`, or register the changed run under a new id"
+        )
+
+
+def write_run_record(root: Path, run_id: str, record: Mapping[str, object]) -> Path:
+    """Write `run.json`, the configuration every strategy of this run shares.
+
+    Idempotent for the same configuration -- every process running a strategy of this run writes
+    the same bytes, so no lock is needed -- and refused for a different one (`RunRecordConflict`).
+    """
+    path = run_record_path(root, run_id)
+    declared = str(record.get("declared_digest"))
+    if path.is_file():
+        existing = read_run_record(root, run_id)
+        if str(existing.get("declared_digest")) != declared:
+            raise RunRecordConflict(run_id, path, existing.get("declared_digest"), declared)
+    payload = json.dumps(
+        {"schema": RUN_SCHEMA, "kind": RUN_KIND, "run_id": run_id, **_encode(dict(record))},
+        indent=2,
+        sort_keys=True,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic.write_atomically(path, payload + "\n")
+    return path
+
+
 def run_ids(root: Path) -> tuple[str, ...]:
-    """Every run this root holds a complete record for, sorted.
+    """Every run this root holds a record for, sorted.
 
     Derived by scanning rather than read from an index, so no two runs share a mutable target. A
-    directory without `record.json` is a run that did not finish; it is omitted rather than
-    reported as a run whose facts are missing.
+    run directory holds `run.json` (record `139`) or, for a run written before `139`,
+    `record.json`; a directory with neither did not get as far as a record.
     """
     directory = root / RUNS_DIRECTORY
     if not directory.is_dir():
@@ -613,9 +928,236 @@ def run_ids(root: Path) -> tuple[str, ...]:
         sorted(
             child.name
             for child in directory.iterdir()
-            if child.is_dir() and (child / RECORD_FILENAME).is_file()
+            if child.is_dir()
+            and ((child / RUN_FILENAME).is_file() or (child / RECORD_FILENAME).is_file())
         )
     )
+
+
+def strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
+    """Every FINISHED strategy record this run holds, as `<id>@<fp8>`, sorted.
+
+    A strategy directory without `strategy.json` is still being written, or was killed or
+    refused before it finished; omitted here, exactly as `run_ids` omits an unfinished run.
+    `unfinished_strategy_refs` lists those, and `strategy_progress` says what state they are in.
+    """
+    directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY
+    if not directory.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            child.name
+            for child in directory.iterdir()
+            if child.is_dir() and (child / STRATEGY_FILENAME).is_file()
+        )
+    )
+
+
+STATUS_COMPLETED = "completed"
+STATUS_RUNNING = "running"
+STATUS_UNFINISHED = "unfinished"
+"""What a strategy directory says about its run. `completed` has `strategy.json`; `running` has
+none and a lock touched inside `LOCK_STALE_AFTER`; `unfinished` has none and a lock that is stale
+or gone -- a strategy that was killed, or whose flow ended in a refusal, both of which leave rows
+and no record. The two cannot be told apart from the directory; the run envelope is where a
+refusal is reported (`docs/issues/073`, `074`)."""
+
+
+def unfinished_strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
+    """Every strategy directory of this run WITHOUT `strategy.json`, as `<id>@<fp8>`, sorted.
+
+    The complement of `strategy_refs`. A long run used to be invisible from the surface between
+    its first accepted session and its record (`docs/issues/074`): `list` showed a record only
+    once it was finished, so an author counted parquet files by hand to learn whether a strategy
+    was still advancing.
+    """
+    directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY
+    if not directory.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            child.name
+            for child in directory.iterdir()
+            if child.is_dir() and not (child / STRATEGY_FILENAME).is_file()
+        )
+    )
+
+
+def strategy_progress(root: Path, run_id: str, strategy_ref: str) -> dict[str, Any]:
+    """What an unfinished strategy directory says about how far its run got.
+
+    `status` is `running` or `unfinished` (see `STATUS_*`). `lock` is the holder's pid and how
+    many seconds ago the run last touched its lock, or `None`; `chunks` is the most parts any of
+    its tables has -- one per accepted session, since `append` writes one part per call; `tables`
+    names them; `last_event_time` is the newest `event_time` in the newest part of any table,
+    which is the last session the run accepted. One directory scan and one small parquet read per
+    table; nothing here opens the whole record.
+    """
+    directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY / strategy_ref
+    claim = _lock_claim(directory / LOCK_FILENAME)
+    tables = directory / TABLES_DIRECTORY
+    parts: dict[str, tuple[Path, ...]] = {}
+    if tables.is_dir():
+        for table in sorted(child for child in tables.iterdir() if child.is_dir()):
+            parts[table.name] = tuple(sorted(table.glob(f"*{PART_SUFFIX}")))
+    newest: datetime | None = None
+    for files in parts.values():
+        if not files:
+            continue
+        last = _newest_event_time(files[-1])
+        if last is not None and (newest is None or last > newest):
+            newest = last
+    return {
+        "status": STATUS_RUNNING if claim is not None else STATUS_UNFINISHED,
+        "lock": None if claim is None else {"pid": claim.pid, "refreshed_ago": round(claim.age, 1)},
+        "chunks": max((len(files) for files in parts.values()), default=0),
+        "tables": sorted(parts),
+        "last_event_time": None if newest is None else newest.isoformat(),
+    }
+
+
+def _newest_event_time(part: Path) -> datetime | None:
+    """The latest `event_time` in one part file, or `None` when it has no such column or cannot
+    be read -- a part being replaced under a reader is a state, not a failure."""
+    try:
+        table = pq.read_table(part, columns=["event_time"])
+    except (OSError, pa.ArrowException, KeyError):
+        return None
+    if table.num_rows == 0:
+        return None
+    value = pc.max(table.column("event_time")).as_py()
+    return value if isinstance(value, datetime) else None
+
+
+def read_run_record(root: Path, run_id: str) -> dict[str, Any]:
+    """`run.json` -- or, for a record written before `139`, `record.json`."""
+    path = run_record_path(root, run_id)
+    if not path.is_file():
+        return read_record(root, run_id)
+    record = _mapping_at(path)
+    written = record.get("schema")
+    if written != RUN_SCHEMA:
+        raise ValueError(
+            f"run record at {path} declares schema {written!r}; this version reads {RUN_SCHEMA!r}"
+        )
+    return record
+
+
+def datamodel_refs(root: Path, run_id: str) -> tuple[str, ...]:
+    """Every datamodel record this run holds, as `<id>@<fp8>`, sorted (record `148`)."""
+    directory = root / RUNS_DIRECTORY / run_id / DATAMODELS_DIRECTORY
+    if not directory.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            child.name
+            for child in directory.iterdir()
+            if child.is_dir() and (child / DATAMODEL_FILENAME).is_file()
+        )
+    )
+
+
+def read_strategy_record(root: Path, run_id: str, strategy_ref: str) -> dict[str, Any]:
+    """One strategy's frozen facts, exactly as they were written."""
+    return read_member_record(root, run_id, strategy_ref, kind=STRATEGY_KIND)
+
+
+def read_datamodel_record(root: Path, run_id: str, datamodel_ref: str) -> dict[str, Any]:
+    """One datamodel's frozen facts, exactly as they were written (record `148`)."""
+    return read_member_record(root, run_id, datamodel_ref, kind=DATAMODEL_KIND)
+
+
+def read_member_record(root: Path, run_id: str, ref: str, *, kind: str) -> dict[str, Any]:
+    _, filename, schema, _ = MEMBER_KINDS[kind]
+    path = record_directory(root, run_id, ref, kind=kind) / filename
+    if not path.is_file():
+        known = (
+            strategy_refs(root, run_id) if kind == STRATEGY_KIND else datamodel_refs(root, run_id)
+        )
+        raise FileNotFoundError(
+            f"no complete {kind} record for {run_id!r}/{ref!r} at {path}; "
+            f"known: {', '.join(known) or '(none)'}"
+        )
+    record = _mapping_at(path)
+    written = record.get("schema")
+    if written != schema:
+        raise ValueError(
+            f"{kind} record at {path} declares schema {written!r}; this version reads {schema!r}"
+        )
+    return record
+
+
+def _mapping_at(path: Path) -> dict[str, Any]:
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(record, dict):
+        raise ValueError(
+            f"record at {path} is valid JSON but not a mapping (found {type(record).__name__}); "
+            "the file is corrupt and must be regenerated or removed"
+        )
+    return record
+
+
+def remove_strategy_record(
+    root: Path, run_id: str, strategy_ref: str, *, kind: str = STRATEGY_KIND
+) -> bool:
+    """Remove one member's record directory, refusing while its lock is inside the window.
+
+    Returns False when there was nothing to remove. `RunRecordLive` when a writer may still be
+    running: the rows it is writing are the thing a deletion would destroy, and the lock ages out
+    on its own.
+    """
+    directory = record_directory(root, run_id, strategy_ref, kind=kind)
+    if not directory.is_dir():
+        return False
+    claim = _lock_claim(directory / LOCK_FILENAME)
+    if claim is not None:
+        raise RunRecordLive(f"{run_id}/{strategy_ref}", directory, claim)
+    shutil.rmtree(directory)
+    return True
+
+
+def remove_run_record(root: Path, run_id: str, *, keep_latest: bool = False) -> tuple[str, ...]:
+    """Remove a run's records: every strategy directory, then the run directory itself.
+
+    With `keep_latest`, the newest record of each strategy id stays and the run directory with it;
+    older fingerprints of the same strategy go. Every live lock is checked BEFORE anything is
+    removed, so a refusal leaves the run as it was. Returns what was removed, as
+    `<strategy_ref>` entries plus `run.json`/`record.json` when the directory went.
+    """
+    directory = root / RUNS_DIRECTORY / run_id
+    if not directory.is_dir():
+        return ()
+    candidates = tuple(
+        child
+        for members in (directory / STRATEGIES_DIRECTORY, directory / DATAMODELS_DIRECTORY)
+        if members.is_dir()
+        for child in sorted(child for child in members.iterdir() if child.is_dir())
+    )
+    for child in (*candidates, directory):
+        claim = _lock_claim(child / LOCK_FILENAME)
+        if claim is not None:
+            label = run_id if child is directory else f"{run_id}/{child.name}"
+            raise RunRecordLive(label, child, claim)
+    kept: set[Path] = set()
+    if keep_latest:
+        newest: dict[str, Path] = {}
+        for child in candidates:
+            strategy_id = child.name.rsplit("@", 1)[0]
+            current = newest.get(strategy_id)
+            if current is None or child.stat().st_mtime > current.stat().st_mtime:
+                newest[strategy_id] = child
+        kept = set(newest.values())
+    removed: list[str] = []
+    for child in candidates:
+        if child in kept:
+            continue
+        shutil.rmtree(child)
+        removed.append(child.name)
+    if not kept:
+        shutil.rmtree(directory)
+        removed.append(RUN_FILENAME if (directory / RUN_FILENAME).exists() else RECORD_FILENAME)
+        return tuple(removed)
+    return tuple(removed)
 
 
 def _require_known_schema(record: Mapping[str, Any], path: Path) -> None:
@@ -679,43 +1221,157 @@ def read_record(root: Path, run_id: str) -> dict[str, Any]:
     return record
 
 
-def read_table(root: Path, run_id: str, table_id: str) -> Iterator[dict[str, Any]]:
-    """Stream one table's rows back, one line at a time.
+class RunRecordMissing(ValueError):
+    """No record where the caller pointed: the wrong root, run id or strategy ref.
 
-    A generator because a run's tables are the large half of the record, and a caller counting rows
-    should not have to hold all of them to do it.
+    `docs/issues/057`. `read_table` returned an empty iterator for a root that was the project
+    directory rather than its `.vqapr`, for a run id nothing had written, and for a `strategy_ref`
+    that named no directory -- and the user's code failed three steps later on an empty frame. An
+    empty TABLE is a fact about a run (a declared table nobody wrote); a missing RECORD is a
+    wrong argument, and the refusal names the directory it looked in and what it found beside it.
     """
-    path = root / RUNS_DIRECTORY / run_id / TABLES_DIRECTORY / f"{table_id}.jsonl"
-    if not path.is_file():
-        return
-    with path.open(encoding="utf-8") as handle:
-        for number, line in enumerate(handle, start=1):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                row = json.loads(stripped)
-                if not isinstance(row, dict):
-                    # Valid JSON of the wrong shape is damage too. Yielding it would break this
-                    # function's own `Iterator[dict[str, Any]]` contract and hand every caller a
-                    # bare number where it expects a row.
-                    raise ValueError(f"expected a JSON object, found {type(row).__name__}")
-                yield row
-            except json.JSONDecodeError as damaged:
-                # A damaged row is reported, never skipped. Skipping would let `show run --table`
-                # return a short table that looks complete, and a reader comparing it against the
-                # record's own row count would find two numbers disagreeing with no reason given.
-                # An empty file is a different thing and stays legal: a run may record a table and
-                # write nothing to it.
-                raise ValueError(
-                    f"{path} line {number} is not one JSON row: {damaged}. The recorder wrote "
-                    "this file, so a line that does not parse means it was edited or truncated; "
-                    "restore it, or re-run under a new run id"
-                ) from damaged
 
 
-def table_ids(root: Path, run_id: str) -> tuple[str, ...]:
-    directory = root / RUNS_DIRECTORY / run_id / TABLES_DIRECTORY
+def _resolve_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | None:
+    """The member directory a table read means, or a refusal that names what exists.
+
+    `None` reads the run directory when that directory holds tables of its own (a record written
+    before `139`, or a writer without a member); on a current record it resolves to the run's
+    only strategy, and refuses -- listing them -- when there are several. A bare `<strategy-id>`
+    resolves the way `vqapr show strategy <run>/<id>` does: to the one record of that strategy,
+    refusing when there are several fingerprints to choose from.
+    """
+    run_directory = root / RUNS_DIRECTORY / run_id
+    if not run_directory.is_dir():
+        # Directories, not `run_ids()`: that lists FINISHED runs, and a reader pointed at the
+        # wrong root is helped by seeing what is there, finished or not.
+        runs = root / RUNS_DIRECTORY
+        present = (
+            sorted(child.name for child in runs.iterdir() if child.is_dir())
+            if runs.is_dir()
+            else []
+        )
+        raise RunRecordMissing(
+            f"no run {run_id!r} under {runs}; run directories there: "
+            f"{', '.join(present) or '(none)'}. The root is the `store_root` `vqapr run` prints "
+            "(`<project>/.vqapr` by default), not the project directory"
+        )
+    # Every member directory, finished or not: a killed strategy leaves rows and no
+    # `strategy.json`, and those rows are exactly what a reader comes back for.
+    strategies = run_directory / STRATEGIES_DIRECTORY
+    members = (
+        tuple(sorted(child.name for child in strategies.iterdir() if child.is_dir()))
+        if strategies.is_dir()
+        else ()
+    )
+    if strategy_ref is None:
+        if (run_directory / TABLES_DIRECTORY).is_dir():
+            return None
+        if len(members) == 1:
+            return members[0]
+        raise RunRecordMissing(
+            f"run {run_id!r} at {run_directory} records "
+            + (
+                f"{len(members)} strategies ({', '.join(members)}); name one as strategy_ref"
+                if members
+                else "no strategy and no tables of its own"
+            )
+        )
+    if (record_directory(root, run_id, strategy_ref)).is_dir():
+        return strategy_ref
+    matching = [ref for ref in members if ref.rsplit("@", 1)[0] == strategy_ref]
+    if len(matching) == 1:
+        return matching[0]
+    raise RunRecordMissing(
+        f"no strategy record {strategy_ref!r} under {run_directory / STRATEGIES_DIRECTORY}; "
+        + (
+            f"{strategy_ref!r} has {len(matching)} records: {', '.join(matching)}"
+            if matching
+            else f"recorded there: {', '.join(members) or '(none)'}"
+        )
+    )
+
+
+def _parts(root: Path, run_id: str, table_id: str, strategy_ref: str | None) -> tuple[Path, ...]:
+    resolved = _resolve_ref(root, run_id, strategy_ref)
+    directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY / table_id
     if not directory.is_dir():
         return ()
-    return tuple(sorted(path.stem for path in directory.glob("*.jsonl")))
+    return tuple(sorted(path for path in directory.glob(f"*{PART_SUFFIX}")))
+
+
+def read_table(
+    root: Path, run_id: str, table_id: str, strategy_ref: str | None = None
+) -> Iterator[dict[str, Any]]:
+    """Stream one table's rows back, a chunk at a time, as the values they were written from.
+
+    `root` is the store: the `store_root` `vqapr run` prints, `<project>/.vqapr` unless
+    `--store-root` moved it -- NOT the project directory. `run_id` and `strategy_ref`
+    (`<strategy-id>@<fp8>`, or the bare `<strategy-id>` when one record of it exists, or `None`
+    when the run holds one strategy) name a record that must exist: a root, run or ref that
+    names nothing is refused with `RunRecordMissing`, naming what was found instead
+    (`docs/issues/057`). A table the record declares but never wrote reads back empty.
+
+    A generator because a run's tables are the large half of the record, and a caller counting
+    rows should not have to hold all of them to do it. A `Decimal` comes back a `Decimal` and an
+    instant an offset-aware `datetime` in the zone it was recorded in; the parquet carries both,
+    so there is nothing to guess (record `146`).
+    """
+    for path in _parts(root, run_id, table_id, strategy_ref):
+        try:
+            reader = pq.ParquetFile(path)
+        except (pa.ArrowInvalid, pa.ArrowException, OSError) as damaged:
+            # A damaged chunk is reported, never skipped. Skipping would let `show run --table`
+            # return a short table that looks complete, and a reader comparing it against the
+            # record's own row count would find two numbers disagreeing with no reason given.
+            raise ValueError(
+                f"{path} is not a parquet file: {damaged}. The recorder wrote this file, so a "
+                "file that does not open means it was edited or truncated; restore it, or "
+                "re-run under a new run id"
+            ) from damaged
+        for batch in reader.iter_batches():
+            yield from _python_rows(batch)
+
+
+def table_types(
+    root: Path, run_id: str, table_id: str, strategy_ref: str | None = None
+) -> dict[str, str] | None:
+    """The kind each column was written as, from the parquet schema, or `None` for no table.
+
+    The same vocabulary the retired sidecar used -- `bool`, `int`, `float`, `decimal`,
+    `datetime`, `string` -- read off the first chunk that holds a value for the column.
+    """
+    parts = _parts(root, run_id, table_id, strategy_ref)
+    if not parts:
+        return None
+    types: dict[str, str] = {}
+    for path in parts:
+        for column in pq.read_schema(path):
+            if column.name in types:
+                continue
+            if column.metadata and column.metadata == _DECIMAL:
+                types[column.name] = "decimal"
+            elif pa.types.is_timestamp(column.type):
+                types[column.name] = "datetime"
+            elif pa.types.is_boolean(column.type):
+                types[column.name] = "bool"
+            elif pa.types.is_integer(column.type):
+                types[column.name] = "int"
+            elif pa.types.is_floating(column.type):
+                types[column.name] = "float"
+            elif pa.types.is_string(column.type):
+                types[column.name] = "string"
+    return types
+
+
+read_typed_table = read_table
+"""The reader `vqapr.public` exports under the name it had when the sidecar existed. Typed by
+construction now; kept so a caller written against record `135` reads on."""
+
+
+def table_ids(root: Path, run_id: str, strategy_ref: str | None = None) -> tuple[str, ...]:
+    resolved = _resolve_ref(root, run_id, strategy_ref)
+    directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY
+    if not directory.is_dir():
+        return ()
+    return tuple(sorted(path.name for path in directory.iterdir() if path.is_dir()))

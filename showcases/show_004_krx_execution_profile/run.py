@@ -51,32 +51,22 @@ from vqapr.public import (
     AccountSnapshot,
     ComponentKind,
     ComponentRef,
-    ConstraintSet,
+    DataModelEntry,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MaterializationSpec,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
+    StrategyEntry,
     component_ref,
     export_roster,
-    materialize,
     preflight_run,
-    register_agenda,
     register_component,
     register_data_model,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
-    register_valuation_config,
     run,
 )
 
@@ -97,8 +87,8 @@ PROJECT = OUTPUTS / "project"
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
-VERIFIED_AGAINST = "vqapr-0.2.0a2+develop"
-LAST_VERIFIED_AT = "2026-09-01"
+VERIFIED_AGAINST = "vqapr-0.4.1"
+LAST_VERIFIED_AT = "2026-09-03"
 
 KRX_COMMISSION_RATE = Decimal("0.0003")
 """Brokerage commission charged on both sides -- matches vqapr.exchange.venues.krx."""
@@ -131,47 +121,30 @@ def _sessions(path: Path) -> list[date]:
         con.close()
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_004 real KRX trading sessions",
-    )
-
-
 def _definition(
     *,
     universe: tuple[str, ...],
     exchange: ComponentRef,
-    strategy_config: StrategyConfig,
-    valuation_config: ValuationConfig,
+    strategy_ref: ComponentRef,
     callback_days: list[date],
 ) -> RunDefinition:
     """The two runs' one difference, isolated into one argument.
 
     Everything else is shared by construction rather than by copy: the same registered
-    strategy config, the same valuation config, the same execution input id, the same account.
+    strategy, the same sessions and wall time, the same execution input id, the same account.
     """
     return RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet(()),
-        None,
-        exchange,
-        "krx-daily",
-        datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
-        datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.LONG_ONLY,
+        run_id=exchange.component_id,
+        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 30),
+        exchange=exchange.component_id,
+        execution_input_id="krx-daily",
+        start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
     )
 
@@ -374,6 +347,7 @@ def main() -> None:
             "krx-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "is_supervised": "is_supervised"},
         ),
@@ -397,15 +371,18 @@ def main() -> None:
     # The materialized score registers itself as an ordinary dataset, so the strategy declares
     # `momentum_score` and reads it the same way it reads any other. Nothing re-exports it.
     register_data_model(PROJECT, "momentum-model", MODELS, "MomentumModel")
-    materialize(
-        PROJECT,
-        "momentum-model",
-        MaterializationSpec.of("momentum_score", value_fields=("score", "eligible")),
-        evaluation_times=tuple(
-            datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
-        ),
+    score_definition = RunDefinition(
+        run_id="momentum-score",
+        strategies=(),
         instruments=universe,
+        datamodels=(DataModelEntry("momentum-model", "momentum_score", ("score", "eligible")),),
+        timezone=VENUE,
+        at=time(16, 0),
+        sessions=tuple(score_days),
+        start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
     )
+    run(PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
 
     # The project declares what each id IS, once, before anything trades. KrxExchange resolves
     # what a fill COSTS from this roster rather than from the venue, which is why the KRX profile
@@ -438,31 +415,15 @@ def main() -> None:
     for reference in (strategy_ref, academic_ref, krx_ref):
         register_component(PROJECT, reference)
 
-    strategy_agenda = _agenda(
-        "show004-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show004-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    for agenda in (strategy_agenda, valuation_agenda):
-        register_agenda(PROJECT, agenda)
-
-    strategy_config = StrategyConfig(
-        strategy_ref, "show004-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig("show004-valuation", OperationRole.VALUATION)
-    register_strategy_config(PROJECT, strategy_config)
-    register_valuation_config(PROJECT, valuation_config)
 
     def _outcome(exchange: ComponentRef) -> dict[str, Any]:
         definition = _definition(
             universe=universe,
             exchange=exchange,
-            strategy_config=strategy_config,
-            valuation_config=valuation_config,
+            strategy_ref=strategy_ref,
             callback_days=callback_days,
         )
-        return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)))
+        return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)).result())
 
     academic = _outcome(academic_ref)
     krx = _outcome(krx_ref)

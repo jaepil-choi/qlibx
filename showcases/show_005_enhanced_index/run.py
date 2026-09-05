@@ -42,41 +42,29 @@ from typing import Any
 import duckdb
 
 from vqapr.cli.register import run as register_cli
-from vqapr.public import export_roster
-
 from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
     AllocationPublicationSpec,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
+    StrategyEntry,
     ZeroDealtReason,
     callback_evidence,
     component_ref,
+    export_roster,
     preflight_run,
     publish_run_allocation,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
-    register_strategy_config,
-    register_valuation_config,
     run,
     shipped_constraint_path,
 )
@@ -91,8 +79,8 @@ INITIAL_CASH = Decimal("1000000000")
 CAP = "0.10"
 """Single-name cap above the index weight, in the shipped constraint's own config spelling."""
 
-VERIFIED_AGAINST = "vqapr-0.1.0+show-005-working-tree"
-LAST_VERIFIED_AT = "2026-08-18"
+VERIFIED_AGAINST = "vqapr-0.4.1"
+LAST_VERIFIED_AT = "2026-09-03"
 
 
 def _sessions(path: Path) -> list[date]:
@@ -124,23 +112,6 @@ def _universe(path: Path) -> tuple[str, ...]:
         con.close()
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_005 committed KRX sessions",
-    )
-
-
 _SOURCE_REFS = '''
 
 def _source_refs(context):
@@ -149,7 +120,7 @@ def _source_refs(context):
     The Flow independently recomputes this from the window and refuses any intent whose provenance
     disagrees, so it must be derived from the accesses rather than declared.
     """
-    from vqapr.public import IntentSourceRef
+    from vqapr.public import IntentSourceRef, Rebalance
 
     seen = {}
     for access in context.window.accesses:
@@ -167,13 +138,12 @@ from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
 from vqapr.public import (
-    QUANTUM,
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     PortfolioDirection,
-    PortfolioTarget,
+    QUANTUM,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     TableSpec,
@@ -207,7 +177,7 @@ class SignedAlpha(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(1)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         rows = context.window.observations(self.requirements()[0]).rows
         closes = {
             str(row["instrument"]): row["close"] for row in rows if row["close"] is not None
@@ -235,15 +205,10 @@ class SignedAlpha(StrategyModel):
         history["views"] = int(history.get("views", 0)) + 1
         self.memory = history
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show005/alpha/" + context.occurrence.occurrence_id),
-            "show005-alpha",
-            tuple(PortfolioTarget(name, weight=w) for name, w in sorted(weights.items())),
-            Decimal(1) - sum(weights.values()),
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(weights.items())),
+            cash_weight=Decimal(1) - sum(weights.values()),
+            budget=BUDGET,
         )
 '''
     + _SOURCE_REFS
@@ -259,16 +224,15 @@ from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
 from vqapr.public import (
-    QUANTUM,
     AllocationInvariants,
     AllocationSign,
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     OptimizeRefusal,
     PortfolioDirection,
-    PortfolioTarget,
+    QUANTUM,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     optimize,
@@ -311,7 +275,7 @@ class EnhancedIndex(StrategyModel):
             if row[field] is not None
         }
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         index_requirement, alpha_requirement, price_requirement = self.requirements()
         benchmark = self._panel(context, index_requirement, "benchmark_weight")
         active = self._panel(context, alpha_requirement, "weight")
@@ -332,7 +296,7 @@ class EnhancedIndex(StrategyModel):
         )
 
         bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower))
+        instruments = tuple(sorted(bounds.lower_weights))
         desired = {
             name: (
                 benchmark.get(name, Decimal(0)) + SCALE * active.get(name, Decimal(0))
@@ -368,7 +332,7 @@ class EnhancedIndex(StrategyModel):
         # as a constraint violation and fails the callback -- see README, "Known gap".
         frozen = frozenset()
         if current:
-            pinned = max(current, key=lambda name: (bounds.upper[name] - current[name], name))
+            pinned = max(current, key=lambda name: (bounds.upper_weights[name] - current[name], name))
             frozen = frozenset({pinned})
         result = self._solve(desired, current, bounds, frozen)
         reported = len(result.frozen_outside_box)
@@ -385,23 +349,18 @@ class EnhancedIndex(StrategyModel):
         history["active_norm"] = str(self._active_norm(result.weights, benchmark))
         self.memory = history
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show005/index/" + context.occurrence.occurrence_id),
-            "show005-index",
-            tuple(PortfolioTarget(n, weight=w) for n, w in sorted(result.weights.items())),
-            result.cash,
-            BUDGET,
-            _source_refs(context),
-            account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(result.weights.items())),
+            cash_weight=result.cash,
+            budget=BUDGET,
         )
 
     def _solve(self, desired, current, bounds, frozen):
         return optimize(
             desired=desired,
             current=current,
-            lower=dict(bounds.lower),
-            upper=dict(bounds.upper),
+            lower=dict(bounds.lower_weights),
+            upper=dict(bounds.upper_weights),
             frozen=frozen,
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -442,7 +401,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+from vqapr.public import AcademicExchange, ListingAccess, Rebalance, TradeRule
 
 UNIVERSE = {universe!r}
 
@@ -479,7 +438,7 @@ dictionary lookup afterwards -- the wrong rate is frozen in at construction.
 
 from __future__ import annotations
 
-from vqapr.public import KrxExchange, krx_rules
+from vqapr.public import KrxExchange, Rebalance, krx_rules
 
 UNIVERSE = {kinds_for_universe!r}
 
@@ -690,6 +649,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "krx-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -702,6 +662,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "krx-benchmark",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"benchmark_weight": "benchmark_weight"},
         ),
@@ -787,6 +748,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "SingleNameCap",
         config={
             "cap": CAP,
+            "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
             "constraint_id": "single-name-cap",
         },
@@ -794,50 +756,25 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     for reference in (alpha_ref, index_ref, academic_ref, krx_ref, no_short_ref, cap_ref):
         register_component(project, reference)
 
-    alpha_agenda = _agenda(
-        "show005-alpha", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    index_agenda = _agenda(
-        "show005-index", OperationRole.STRATEGY_CALLBACK, time(9, 0), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show005-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "show005-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (alpha_agenda, index_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(project, agenda)
-
-    alpha_config = StrategyConfig(alpha_ref, "show005-alpha", OperationRole.STRATEGY_CALLBACK)
-    index_config = StrategyConfig(index_ref, "show005-index", OperationRole.STRATEGY_CALLBACK)
-    valuation_config = ValuationConfig(
-        "show005-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("show005-monitoring", OperationRole.MONITORING)
-    register_strategy_config(project, alpha_config)
-    register_strategy_config(project, index_config)
-    register_valuation_config(project, valuation_config)
-    register_monitoring_policy(project, monitoring)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
     alpha_definition = RunDefinition(
-        alpha_config,
-        valuation_config,
-        ConstraintSet(()),
-        monitoring,
-        academic_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.SIGNED,
+        run_id="show005-alpha",
+        strategies=(StrategyEntry("show005-alpha"),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 30),
+        exchange="show005-academic",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    alpha_result = run(project, preflight_run(project, alpha_definition))
+    alpha_result = run(project, preflight_run(project, alpha_definition)).result()
     alpha_evidence = callback_evidence(alpha_result)
 
     published = publish_run_allocation(
@@ -845,19 +782,20 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     )
 
     index_definition = RunDefinition(
-        index_config,
-        valuation_config,
-        ConstraintSet((no_short_ref, cap_ref)),
-        monitoring,
-        krx_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.LONG_ONLY,
+        run_id="show005-index",
+        strategies=(StrategyEntry("show005-index", ("no-short", "single-name-cap")),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(9, 0),
+        exchange="show005-krx",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
     )
-    index_result = run(project, preflight_run(project, index_definition))
+    index_result = run(project, preflight_run(project, index_definition)).result()
 
     alpha_memory = _memory(alpha_result)
     index_memory = _memory(index_result)

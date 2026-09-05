@@ -43,7 +43,7 @@ breaking it, and cannot smuggle a run loop past it. Size was a proxy; this is th
 | file | change |
 |---|---|
 | `tests/boundaries/test_the_facade_does_not_orchestrate.py` | `MAX_LINES` and `test_the_facade_stays_a_surface_rather_than_a_module` deleted. The reasoning is kept in place, as a note, because the next person to reach for a line cap should meet the three measurements rather than re-derive them |
-| `docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` §3 5단계 | the "no file in `flow/` exceeds 800 lines" acceptance is struck and replaced with the shape criterion it was standing in for: the four dispatch seams each in their own file, and no rule-named method left on `SimulationFlow` |
+| `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` §3 5단계 | the "no file in `flow/` exceeds 800 lines" acceptance is struck and replaced with the shape criterion it was standing in for: the four dispatch seams each in their own file, and no rule-named method left on `SimulationFlow` |
 | same, §5 진척 지표 | `find … | sort -rn | head -5` stays. It is still measured — it is just read as an **observation**, not a threshold. A number worth watching is not the same as a number worth failing a build over |
 
 ### What was deliberately NOT removed

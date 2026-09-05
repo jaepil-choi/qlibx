@@ -8,7 +8,7 @@ in the campaign and was not weakened: **a concurrency test that fails on the pre
 then passes.
 
 **Status when filed:** open. Found 2026-08-31 by the structural audit recorded in
-`docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` (§6, C2). Filed unfixed: the repair is
+`docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` (§6, C2). Filed unfixed: the repair is
 small, but it moves a read inside the exclusive section and this repository has measured that
 reordering around these locks can make a race worse rather than better.
 **Touches:** `src/vqapr/workspace.py:1034` (`remove`, `references_to`, `_exclusive`).

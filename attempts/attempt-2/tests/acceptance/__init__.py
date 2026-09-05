@@ -1,1 +1,0 @@
-"""Observable PRD acceptance scenarios."""

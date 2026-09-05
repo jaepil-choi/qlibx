@@ -10,6 +10,9 @@ a missing reference somewhere unrelated.
 
 These tests use real processes. Threads would share an interpreter and could pass while the
 cross-process case still lost writes.
+
+The declaration each writer adds is a component: since record `148` an agenda is derived from
+the run rather than registered, so a component is the smallest declaration a process registers.
 """
 
 from __future__ import annotations
@@ -17,30 +20,22 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
-from datetime import date, time
 from pathlib import Path
 
 import pytest
 
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.public import Workspace
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.workspace import WORKSPACE_LOCK_FILENAME
 
 
-def _agenda(raw_id: str) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=raw_id,
-        role=OperationRole.STRATEGY_CALLBACK,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                f"{raw_id}-1",
-                OperationRole.STRATEGY_CALLBACK,
-                LocalInstantDeclaration(date(2024, 3, 5), time(4, 0), "Asia/Seoul", 0, "+09:00"),
-            ),
-        ),
-        provenance="concurrency probe",
+def _component(raw_id: str) -> ComponentRef:
+    return ComponentRef.of(
+        raw_id,
+        ComponentKind.STRATEGY_MODEL,
+        Path(f"{raw_id}.py"),
+        "Strategy",
+        fingerprint="a" * 64,
     )
 
 
@@ -49,25 +44,18 @@ WORKERS = 8
 WORKER = textwrap.dedent(
     """
     import sys
-    from datetime import date, time
-    from vqapr.public import Workspace
-    from vqapr.domain.timestamps import LocalInstantDeclaration
-    from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
+    from pathlib import Path
+    from vqapr.public import ComponentKind, ComponentRef, Workspace
 
     project, index = sys.argv[1], sys.argv[2]
-    occurrence = OperationOccurrence(
-        f"occ-{index}",
-        OperationRole.STRATEGY_CALLBACK,
-        LocalInstantDeclaration(date(2024, 3, 5), time(4, 0), "Asia/Seoul", 0, "+09:00"),
+    component = ComponentRef.of(
+        f"component-{index}",
+        ComponentKind.STRATEGY_MODEL,
+        Path(f"component-{index}.py"),
+        "Strategy",
+        fingerprint="a" * 64,
     )
-    agenda = OperationAgenda.from_occurrences(
-        agenda_id=f"agenda-{index}",
-        role=OperationRole.STRATEGY_CALLBACK,
-        timezone="Asia/Seoul",
-        occurrences=(occurrence,),
-        provenance="concurrency probe",
-    )
-    Workspace.create(project).register_agenda(agenda)
+    Workspace.create(project).register_component(component)
     """
 ).strip()
 
@@ -85,7 +73,7 @@ def test_parallel_registrations_all_survive(tmp_path: Path) -> None:
     """Eight processes, eight declarations. The whole point.
 
     Without serialisation this loses writes: each process reads the same state, adds its own
-    agenda, and the last write back wins.
+    component, and the last write back wins.
     """
     Workspace.create(tmp_path)
 
@@ -98,14 +86,14 @@ def test_parallel_registrations_all_survive(tmp_path: Path) -> None:
 
     assert not failures, f"workers failed: {failures}"
 
-    registered = {agenda.agenda_id for agenda in Workspace.open(tmp_path).agendas}
-    assert registered == {f"agenda-{index}" for index in range(WORKERS)}
+    registered = {str(ref.component_id) for ref in Workspace.open(tmp_path).components}
+    assert registered == {f"component-{index}" for index in range(WORKERS)}
 
 
 def test_the_lock_is_released_after_a_registration(tmp_path: Path) -> None:
     """A finished write leaves nothing behind for the next one to wait on."""
     space = Workspace.create(tmp_path)
-    space.register_agenda(_agenda("solo"))
+    space.register_component(_component("solo"))
 
     assert not (space.path.parent / WORKSPACE_LOCK_FILENAME).exists()
 
@@ -123,9 +111,11 @@ def test_a_stale_lock_does_not_block_forever(tmp_path: Path, monkeypatch) -> Non
 
     monkeypatch.setattr(module, "WORKSPACE_LOCK_STALE_AFTER", 0.0)
 
-    space.register_agenda(_agenda("after-stale"))
+    space.register_component(_component("after-stale"))
 
-    assert [agenda.agenda_id for agenda in Workspace.open(tmp_path).agendas] == ["after-stale"]
+    assert [str(ref.component_id) for ref in Workspace.open(tmp_path).components] == [
+        "after-stale"
+    ]
 
 
 def test_a_held_lock_fails_loudly_rather_than_hanging(tmp_path: Path, monkeypatch) -> None:
@@ -140,4 +130,4 @@ def test_a_held_lock_fails_loudly_rather_than_hanging(tmp_path: Path, monkeypatc
     monkeypatch.setattr(module, "WORKSPACE_LOCK_STALE_AFTER", 1e9)
 
     with pytest.raises(VqaprError, match="locked"):
-        space.register_agenda(_agenda("blocked"))
+        space.register_component(_component("blocked"))

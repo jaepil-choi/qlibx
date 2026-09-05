@@ -14,22 +14,25 @@ tries to write inside `.vqapr/` itself?
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
+import pytest
 
+from vqapr.account.account import AccountMode
+from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow.run import StrategyConfig, ValuationConfig
+from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -68,6 +71,7 @@ def _prices_dataset(root: Path) -> None:
             "prices-src",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -75,13 +79,17 @@ def _prices_dataset(root: Path) -> None:
     )
 
 
-def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> Path:
+def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     """A workspace complete enough that every `check` phase reaches `preflight`.
 
     This is deliberately more work than the fixtures in `tests/cli/test_check.py`: an incomplete
-    spec never reaches `preflight`, and `preflight` is where `weights` (via `_judge_weights`'
+    run never reaches `preflight`, and `preflight` is where `weights` (via `_judge_weights`'
     venue lookup) and the strategy component actually get imported. An attack on "check imports
     user code" that never resolves declarations would not prove anything.
+
+    Returns the id of the run it registered. The run is a registration since record 139, so it
+    is written into `.vqapr/` HERE, before any fingerprint is taken: what `check` must not touch
+    includes the run's own registration.
     """
     _prices_dataset(root)
 
@@ -155,70 +163,25 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> Path:
         )
     )
 
-    agenda = OperationAgenda.from_occurrences(
-        agenda_id="daily",
-        role=OperationRole.STRATEGY_CALLBACK,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                "o1",
-                OperationRole.STRATEGY_CALLBACK,
-                LocalInstantDeclaration(
-                    datetime(2024, 1, 2).date(),
-                    datetime(2024, 1, 2, 9, 0).time(),
-                    "Asia/Seoul",
-                    0,
-                    "+09:00",
-                ),
-            ),
-        ),
-        provenance="qa fixture",
-    )
-    Workspace.open(root).register_agenda(agenda)
-    val_agenda = OperationAgenda.from_occurrences(
-        agenda_id="daily-val",
-        role=OperationRole.VALUATION,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                "v1",
-                OperationRole.VALUATION,
-                LocalInstantDeclaration(
-                    datetime(2024, 1, 2).date(),
-                    datetime(2024, 1, 2, 9, 0).time(),
-                    "Asia/Seoul",
-                    0,
-                    "+09:00",
-                ),
-            ),
-        ),
-        provenance="qa fixture",
-    )
-    Workspace.open(root).register_agenda(val_agenda)
-    Workspace.open(root).register_strategy_config(
-        StrategyConfig(
-            Workspace.open(root).component("evil"), "daily", OperationRole.STRATEGY_CALLBACK
+    # One session at 09:00 Seoul, decided before the 15:30 fill; the run declares it directly
+    # (record `148`), so nothing about the agenda is registered separately.
+    Workspace.open(root).register_run(
+        RunDefinition(
+            run_id="probe",
+            strategies=(StrategyEntry("evil"),),
+            timezone="Asia/Seoul",
+            at=time(9, 0),
+            sessions=(date(2024, 1, 2),),
+            instruments=("A",),
+            exchange="venue",
+            execution_input_id="my-exec",
+            start=datetime(2024, 1, 2, tzinfo=UTC),
+            end=datetime(2024, 1, 5, tzinfo=UTC),
+            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+            initial_account_mode=AccountMode.LONG_ONLY,
         )
     )
-    Workspace.open(root).register_valuation_config(
-        ValuationConfig("daily-val", OperationRole.VALUATION)
-    )
-
-    import yaml
-
-    document = {
-        "strategy": {"agenda_id": "daily", "component": "evil"},
-        "valuation": {"agenda_id": "daily-val"},
-        "instruments": ["A"],
-        "start": "2024-01-02T00:00:00+00:00",
-        "end": "2024-01-05T00:00:00+00:00",
-        "exchange": "venue",
-        "execution_input": "my-exec",
-        "initial_account": {"mode": "LONG_ONLY", "cash": "1000", "positions": {}},
-    }
-    spec = root / "spec.yaml"
-    spec.write_text(yaml.safe_dump(document), encoding="utf-8")
-    return spec
+    return "probe"
 
 
 _STRATEGY_BODY = '''"""A strategy module with a side effect at import time."""
@@ -232,7 +195,7 @@ class Strategy(StrategyModel):
     def requirements(self):
         return (DataRequirement.of('prices', 'close', lookback=RowsLookback(2)),)
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         return Hold(reason="qa probe")
 '''
 
@@ -249,13 +212,13 @@ def test_check_does_not_touch_dot_vqapr_even_when_the_imported_module_writes_fil
     that actually does something on import.
     """
     marker = tmp_path / "evil_marker_outside_workspace.txt"
-    spec = _run_ready_workspace(tmp_path, marker, evil_body=_STRATEGY_BODY)
+    run_id = _run_ready_workspace(tmp_path, marker, evil_body=_STRATEGY_BODY)
 
     before = _fingerprint(tmp_path)
     assert before, "the fixture must produce a workspace, or this test proves nothing"
     assert not marker.exists(), "the marker must not exist before check ever runs"
 
-    body = check(spec, tmp_path)
+    body = check(run_id, tmp_path)
 
     after = _fingerprint(tmp_path)
     assert after == before, ".vqapr/ was mutated by check"
@@ -266,9 +229,10 @@ def test_check_does_not_touch_dot_vqapr_even_when_the_imported_module_writes_fil
         "whether check's own writes are absent"
     )
     assert body["ok"] is True, (
-        "the fixture must be a CLEAN spec, or this test cannot tell a mutation from a refusal: "
+        "the fixture must be a CLEAN run, or this test cannot tell a mutation from a refusal: "
         f"{[entry['code'] for entry in body['failures']]}"
     )
+    assert body["checked"] == ["workspace", "run", "judgments", "preflight"]
 
 
 def _write_into_dot_vqapr_body(marker_relative: str) -> str:
@@ -288,7 +252,7 @@ class Strategy(StrategyModel):
     def requirements(self):
         return (DataRequirement.of('prices', 'close', lookback=RowsLookback(2)),)
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         return Hold(reason="qa probe")
 '''
 
@@ -305,14 +269,14 @@ def test_the_docstrings_claim_is_the_claim_it_actually_keeps(tmp_path: Path) -> 
     is honest that user code, including inside `.vqapr/`, is unsandboxed.
     """
     marker_name = "evil_wrote_this_inside_dot_vqapr.txt"
-    spec = _run_ready_workspace(
+    run_id = _run_ready_workspace(
         tmp_path,
         tmp_path / "unused",
         evil_body=_write_into_dot_vqapr_body(marker_name),
     )
 
     before = _fingerprint(tmp_path)
-    check(spec, tmp_path)
+    check(run_id, tmp_path)
     after = _fingerprint(tmp_path)
 
     marker_path = tmp_path / ".vqapr" / marker_name
@@ -328,6 +292,13 @@ def test_the_docstrings_claim_is_the_claim_it_actually_keeps(tmp_path: Path) -> 
 
 
 def test_check_creates_no_workspace_where_none_existed(tmp_path: Path) -> None:
-    """Checking an uninitialised directory must not initialise it (regression pin)."""
-    check(tmp_path / "spec.yaml", tmp_path)
+    """Checking an uninitialised directory must not initialise it (regression pin).
+
+    A run id nothing registered, and a YAML path -- refused by name since record `148`, and
+    refused before anything on disk is touched.
+    """
+    check("nothing-registered", tmp_path)
+    assert not (tmp_path / WORKSPACE_DIRECTORY).exists()
+    with pytest.raises(InputError):
+        check(tmp_path / "spec.yaml", tmp_path)
     assert not (tmp_path / WORKSPACE_DIRECTORY).exists()

@@ -29,7 +29,7 @@ FORBIDDEN = (
     "vqapr.evidence",
     "vqapr.exchange",
     "vqapr.flow",
-    "vqapr.models",
+    "vqapr.calls",
     "vqapr.runtime",
     "duckdb",
 )

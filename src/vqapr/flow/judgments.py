@@ -1,17 +1,30 @@
-"""The judgments a run spec must pass, owned by neither verb that asks them.
+"""The judgments a run must pass, owned by neither verb that asks them.
 
-These answer one question -- is this spec worth starting? -- and both `check` and `run` need the
+These answer one question -- is this run worth starting? -- and both `check` and `run` need the
 answer. They lived in `cli/check.py` because `check` was built on top of `run`'s spec vocabulary and
-so the judgments landed in the verb that needed them first. That left `run` executing specs that
-`check` would refuse: a real look-ahead ran to completion, wrote a permanent record, and appeared in
-`vqapr list runs` beside legitimate runs with nothing marking it (`docs/issues/015`).
+so the judgments landed in the verb that needed them first. That left `run` executing what `check`
+would refuse: a real look-ahead ran to completion, wrote a permanent record, and appeared beside
+legitimate runs with nothing marking it (`docs/issues/015`).
 
 Moving them here is what makes a single answer possible. The module sits below the CLI and imports
 nothing from it, so both verbs can reach the same judgments without either importing the other.
 
-`_judgments` returns its blocked list rather than filling a caller-supplied one. The out-parameter
-it replaced was easy to forget -- and forgetting it means a spec whose judgment could not ANSWER
+**Judged on a `RunDefinition` since record `139`.** A run is a registered declaration rather than
+a spec file, so the judgments read the definition the workspace holds -- and each of its strategies
+is judged in turn, since one run now names several.
+
+`judgments` returns its blocked list rather than filling a caller-supplied one. The out-parameter
+it replaced was easy to forget -- and forgetting it means a run whose judgment could not ANSWER
 reports as clean, which is the divergence this module exists to close, reproduced one layer down.
+
+**No helper in this module catches on behalf of a judge** (`docs/issues/077`). Five of them did,
+and returned an empty result, which `judgments` cannot tell from "asked the question, found
+nothing wrong" -- so `check` reported `passed: [..., "judgments"]` on a run whose look-ahead
+judgment never ran, with `blocked` empty. Every judge here therefore lets its exception reach the
+one wrapper below that owns the decision. The defect is then named twice, once as a blocked
+judgment and once as preflight's own refusal, and that is deliberate: they are two different
+statements, one saying the question could not be asked and the other saying what is wrong (owner
+decision, 2026-09-04).
 """
 
 from __future__ import annotations
@@ -20,16 +33,17 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import datetime
 from difflib import get_close_matches
-from pathlib import Path
 from typing import Any
 
-from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
+from vqapr.account.account import AccountMode
+from vqapr.domain.errors import ExplainTopic, Failure, FailureSource
 
 # Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/029`).
-from vqapr.extension.loading import load_exchange, load_strategy_model
-from vqapr.flow.run_spec import MATERIALIZATION
+from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
+from vqapr.flow.preflight import derived_agenda
+from vqapr.flow.run import RunDefinition
 
 # `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
 # this layer; a module under `flow/` importing it reaches back up through the thing it is supposed
@@ -37,205 +51,19 @@ from vqapr.flow.run_spec import MATERIALIZATION
 # tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
 from vqapr.workspace import Workspace
 
-__all__ = ["judgments", "materialization_judgments"]
-
-
-def materialization_judgments(
-    document: dict[str, Any],
-    workspace: Workspace,
-    project_root: Path,
-    *,
-    kind_spelling: Callable[[Any], str],
-) -> list[Failure]:
-    """What must hold before a materialization is worth starting.
-
-    Every one of these is a refusal `materialize()` would raise later, hoisted to where it costs
-    nothing. That is the whole point of the verb: `check` certifying a spec that `run` then
-    refuses is the defect this slice opened with, and extending `run` without extending `check`
-    would have re-committed it in the task meant to close a door.
-
-    Raised in the `check.materialize.*` namespace, so `tests/cli/test_check.py`'s pinned count of
-    the eight `check.*` judgments a simulation settles stays a statement about simulations.
-    """
-    from vqapr.extension.component import ComponentKind
-
-    found: list[Failure] = []
-
-    def refuse(code: str, requirement: str, observed: str, fix: str, key: str) -> None:
-        found.append(
-            Failure.bounded(
-                code=f"check.materialize.{code}",
-                requirement=requirement,
-                observed=observed,
-                fix=fix,
-                explain=ExplainTopic.DECLARATION_SHAPE,
-                source=FailureSource(key_path=key),
-            )
-        )
-
-    component_id = str(document.get(MATERIALIZATION) or "")
-    try:
-        ref = workspace.component(component_id)
-    except Exception as unknown:
-        refuse(
-            "component_unregistered",
-            "the named component must be registered in this workspace",
-            f"{component_id!r}: {unknown}",
-            f"register it with `vqapr register datamodel {component_id} <file>.py`",
-            MATERIALIZATION,
-        )
-        ref = None
-    if ref is not None and ref.kind is not ComponentKind.DATA_MODEL:
-        refuse(
-            "component_wrong_kind",
-            "a materialization runs a DataModel",
-            f"{component_id!r} is registered as {kind_spelling(ref.kind)}",
-            f"name a registered datamodel, or declare `strategy: {component_id}` to simulate",
-            MATERIALIZATION,
-        )
-
-    # The refusal `materialize()` raises at `materialize.input.dataset_exists`, asked here instead.
-    # Without this, `check` returns ok:true and `run` refuses -- exactly the shape T1 removed.
-    output = document.get("output")
-    declared_output = str(output.get("dataset_id", "")) if isinstance(output, dict) else ""
-    if declared_output and any(
-        str(item.dataset_id) == declared_output for item in workspace.datasets
-    ):
-        refuse(
-            "output_registered",
-            "a materialization writes a dataset that does not exist yet",
-            f"{declared_output!r} is already registered",
-            f"choose a new dataset_id, or remove the existing {declared_output} registration",
-            "output.dataset_id",
-        )
-
-    declared_instants = document.get("evaluate_at") or ()
-    if not declared_instants:
-        refuse(
-            "no_evaluation_instants",
-            "a materialization must say when to evaluate",
-            "`evaluate_at:` is empty",
-            "list at least one timezone-aware instant under `evaluate_at:`",
-            "evaluate_at",
-        )
-    else:
-        # The ninth judgment, added deliberately. `_instant` returns None for anything it cannot
-        # read -- including a naive datetime -- and the judgments below simply skipped those, so a
-        # spec with a naive `evaluate_at` passed `check` with ok:true and was then refused by
-        # `run`. That is the check-certifies-what-run-refuses divergence this slice exists to
-        # close, found by the boundary gate inside the task meant to close it.
-        unreadable = [
-            str(value) for value in declared_instants if _instant(value) is None
-        ]
-        if unreadable:
-            refuse(
-                "evaluation_instant_invalid",
-                "every `evaluate_at:` entry must be a timezone-aware instant",
-                f"cannot read as an instant: {', '.join(unreadable)}",
-                (
-                    "write each instant with an explicit offset, like "
-                    "2024-03-06T04:00:00+09:00; a naive datetime is refused rather than assumed "
-                    "to be in any particular zone"
-                ),
-                "evaluate_at",
-            )
-    if not (document.get("instruments") or ()):
-        refuse(
-            "no_instruments",
-            "a materialization must say what to evaluate over",
-            "`instruments:` is empty",
-            "list at least one instrument id under `instruments:`",
-            "instruments",
-        )
-
-    # What the model says it reads must be registered, or the first evaluation refuses on data the
-    # author could have been told about before the run started.
-    if ref is not None and ref.kind is ComponentKind.DATA_MODEL:
-        from vqapr.extension.loading import load_data_model
-
-        by_id = {str(item.dataset_id): item for item in workspace.datasets}
-        # Scoped to the two calls the refusal describes. Wrapping the judgments below in it too
-        # reported a malformed `evaluate_at` entry as `component_unloadable` -- sending the reader
-        # to a component that loaded fine -- and let a spec carry `lookback_uncovered` alongside a
-        # contradictory `component_unloadable`. `_judgments` avoids the same shape deliberately.
-        try:
-            requirements = tuple(load_data_model(ref, project_root=project_root).requirements())
-        except Exception as unloadable:
-            refuse(
-                "component_unloadable",
-                "the named DataModel must load before its requirements can be judged",
-                str(unloadable),
-                "fix the component so it loads, then check again",
-                MATERIALIZATION,
-            )
-            requirements = ()
-        if requirements:
-            absent = sorted(
-                {
-                    str(requirement.dataset_id)
-                    for requirement in requirements
-                    if str(requirement.dataset_id) not in by_id
-                }
-            )
-            if absent:
-                refuse(
-                    "requirement_unregistered",
-                    "every dataset the model declares it reads must be registered",
-                    f"unregistered: {', '.join(absent)}",
-                    "register the missing datasets, then check again",
-                    MATERIALIZATION,
-                )
-            # The judgment that keeps this verb honest. Without it `check` returns ok:true and
-            # `materialize` refuses with `materialize.output.empty` after doing the work -- which
-            # is `check` certifying what `run` refuses, the defect this slice opened with,
-            # re-committed by the task meant to close a door. Measured at the EARLIEST evaluation
-            # instant, because that is the window that can be short.
-            declared_times = sorted(
-                moment
-                for moment in (
-                    _instant(value) for value in (document.get("evaluate_at") or ())
-                )
-                if moment is not None
-            )
-            earliest = declared_times[0] if declared_times else None
-            for requirement in requirements:
-                registration = by_id.get(str(requirement.dataset_id))
-                rows = getattr(getattr(requirement, "lookback", None), "rows", None)
-                span = getattr(registration, "span", None) if registration else None
-                begins = _instant(span[0]) if span else None
-                if not rows or earliest is None or begins is None or begins <= earliest:
-                    continue
-                refuse(
-                    "lookback_uncovered",
-                    (
-                        f"dataset {str(requirement.dataset_id)!r} must carry history reaching "
-                        "back "
-                        "past the earliest evaluation, or that evaluation reads a short window "
-                        "and produces nothing"
-                    ),
-                    (
-                        f"dataset begins {span[0]}, earliest evaluation {earliest.isoformat()}, "
-                        f"lookback {rows} row(s)"
-                    ),
-                    (
-                        f"evaluate at or after {span[0]}, or prepare the dataset with history "
-                        "reaching further back"
-                    ),
-                    "evaluate_at",
-                )
-    return found
+__all__ = ["judgments"]
 
 
 def judgments(
-    document: dict[str, Any], workspace: Workspace, spec: Path
+    definition: RunDefinition, workspace: Workspace
 ) -> tuple[list[Failure], list[dict[str, str]]]:
-    """The eight judgments, each answered independently of the others.
+    """The eight judgments, each answered independently of the others, for every strategy.
 
-    Independence is the whole design: each of the five reads the spec and the workspace and answers
-    on its own, so a declaration carrying four defects produces four refusals in a single call.
-    Within two of them a later code is gated behind an earlier one -- an absent dataset suppresses
-    the field and lookback questions about it, because there is nothing to ask them of -- and each
-    such gate carries its own reason.
+    Independence is the whole design: each of the five judges reads the definition and the
+    workspace and answers on its own, so a run carrying four defects produces four refusals in a
+    single call. Within two of them a later code is gated behind an earlier one -- an absent
+    dataset suppresses the field and lookback questions about it, because there is nothing to ask
+    them of -- and each such gate carries its own reason.
 
     A judgment that could not ANSWER is recorded as blocked, carrying the exception type separately
     from its message so a framework bug reads differently from a routine decline. It is never
@@ -243,15 +71,43 @@ def judgments(
     """
     found: list[Failure] = []
     blocked: list[dict[str, str]] = []
-    at = FailureSource(file=str(spec))
+    at = FailureSource(key_path=f"runs.{definition.run_id}")
     registered = {str(item.dataset_id): item for item in workspace.datasets}
+    # The run's one agenda, derived at most ONCE for every judge that reads it
+    # (`docs/issues/069`: it was derived per strategy inside the ordering judge and again per
+    # member inside the dataset judge, each time over the dataset's whole session list). Reached
+    # through a CALL rather than handed over as a value: a failure to derive it has to land inside
+    # the per-judge wrapper below, where it becomes a blocked entry for each judge that needed it.
+    # Flattening it to `None` here was `docs/issues/077` -- the judges read `None` as "nothing to
+    # report" and the run was reported as judged.
+    agenda = _agenda_once(workspace, definition)
 
-    judges = (
-        ("universe", lambda: _judge_universe(document, at)),
-        ("period", lambda: _judge_period(document, at)),
-        ("execution_ordering", lambda: _judge_execution_ordering(document, workspace, at)),
-        ("datasets", lambda: _judge_datasets_and_fields(document, workspace, registered, at)),
-        ("weights", lambda: _judge_weights(document, workspace, at)),
+    judges: tuple[tuple[str, Callable[[], list[Failure]]], ...] = (
+        ("universe", lambda: _judge_universe(definition, at)),
+        ("period", lambda: _judge_period(definition, at)),
+        (
+            "execution_ordering",
+            lambda: _judge_execution_ordering(definition, workspace, at, agenda),
+        ),
+        # ONE judge per member, NAMED for the member it judges. Two reasons, both from
+        # `docs/issues/077`. A member whose component does not load blocks its own entry and no
+        # other -- this verb promises every INDEPENDENT problem at once, and one member failing to
+        # load says nothing about another member's datasets. And the name is where the reader
+        # learns WHICH member: a blocked entry carries the exception's own text, and
+        # `VqaprError: component object must load and construct` does not say whose.
+        # Default arguments rather than closure capture -- a lambda reading the loop variable
+        # would hand every member the last one.
+        *(
+            (
+                f"datasets[{member[1].component_id}]",
+                lambda member=member: _judge_member_datasets(
+                    definition, member, workspace, registered, at, agenda
+                ),
+            )
+            for member in _members(definition)
+        ),
+        ("weights", lambda: _judge_weights(definition, workspace, at)),
+        ("outputs", lambda: _judge_outputs(definition, registered, at)),
     )
     for name, judge in judges:
         try:
@@ -260,18 +116,10 @@ def judgments(
             # One judgment failing to ANSWER must not silence the others -- letting the exception
             # abort the loop would quietly restore the stop-at-first behaviour this verb exists to
             # replace. But swallowing it silently is the worse half of that trade: the judgment
-            # did not find nothing, it could not look, and a spec nothing was proven about would
-            # then report as clean and ready.
-            #
-            # So it is recorded as BLOCKED, which is the third answer this envelope already
-            # carries and which exists for exactly this. Every exception type, not a listed few:
-            # an unexpected type is the case most likely to mean the judgment is broken, and that
-            # is precisely when reporting a pass would be worst.
-            #
-            # `error_type` rides separately so a reader can tell the two apart at a glance: a
-            # `VqaprError` is the framework declining to answer, while a `KeyError` is almost
-            # certainly this verb being wrong. Flattening both into one sentence would let a real
-            # defect read like routine bookkeeping.
+            # did not find nothing, it could not look, and a run nothing was proven about would
+            # then report as clean and ready. So it is recorded as BLOCKED. `error_type` rides
+            # separately so a reader can tell a `VqaprError` (the framework declining to answer)
+            # from a `KeyError` (almost certainly this verb being wrong) at a glance.
             blocked.append(
                 {
                     "check": name,
@@ -282,48 +130,60 @@ def judgments(
     return found, blocked
 
 
-def _judge_universe(document: dict[str, Any], at: FailureSource) -> list[Failure]:
-    """A run with no instruments has nothing to decide about."""
-    instruments = document.get("instruments")
-    if isinstance(instruments, list) and instruments:
+def _key(at: FailureSource, *path: str) -> FailureSource:
+    return replace(at, key_path=".".join((at.key_path or "", *path)).strip("."))
+
+
+def _judge_universe(definition: RunDefinition, at: FailureSource) -> list[Failure]:
+    """A run with no instruments has nothing to decide about.
+
+    A `RunDefinition` refuses an empty universe at construction, so a registered run cannot reach
+    this with none; the judgment stays because `check` promises the eight questions and a reader
+    counting them should find each one asked.
+    """
+    if definition.instruments:
         return []
     return [
         Failure.bounded(
             "check.universe.absent",
             "a run must declare at least one instrument to decide about",
-            observed=f"instruments: {instruments!r}",
-            fix="list the instrument ids the run trades under `instruments:` in the spec",
+            observed=f"instruments: {definition.instruments!r}",
+            fix="list the instrument ids the run trades under `instruments:` in the run",
             explain=ExplainTopic.RUN_PRECONDITION,
-            source=replace(at, key_path="instruments"),
+            source=_key(at, "instruments"),
         )
     ]
 
 
 def _instant(value: object) -> datetime | None:
-    """One declared timestamp as an aware instant, or `None` when it is not one.
+    """One declared timestamp as an aware instant. `None` ONLY when nothing was declared.
 
     Comparing these as STRINGS is wrong in both directions, and quietly. `2024-01-02T00:00:00+09:00`
     sorts after `2024-01-01T20:00:00+00:00` while being five hours EARLIER, so a valid period reads
     as reversed and `check` refuses what `run` accepts -- a gate contradicting the thing it gates.
-    The other direction is worse: `str(datetime)` uses a space separator where a quoted spec keeps
-    the `T`, and a space sorts below `T`, so a real shortfall compares as fine and is never
-    reported. Which of the two happens depends on whether the author quoted the YAML scalar, since
-    PyYAML resolves an unquoted ISO-8601 scalar to a `datetime` and a quoted one to `str`.
+
+    A value that IS declared but is not an aware instant raises, and the judgment that asked for it
+    blocks (`docs/issues/077`). Returning `None` for it read, at the call site, as "nothing was
+    declared" -- so a dataset whose span could not be parsed left the lookback question silently
+    unasked and the judgment reported as passed.
     """
+    if value is None:
+        return None
     if isinstance(value, datetime):
-        return value if value.tzinfo is not None else None
+        if value.tzinfo is None:
+            raise ValueError(f"declared timestamp {value.isoformat()} carries no offset")
+        return value
     if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
+        raise TypeError(f"declared timestamp must be a datetime or an ISO-8601 string: {value!r}")
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        raise ValueError(f"declared timestamp {value!r} carries no offset")
+    return parsed
 
 
-def _judge_period(document: dict[str, Any], at: FailureSource) -> list[Failure]:
+def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]:
     """The declared period must be a real interval, not a point or a reversal."""
-    start, end = document.get("start"), document.get("end")
+    start, end = definition.start, definition.end
     if start is None or end is None:
         return [
             Failure.bounded(
@@ -332,160 +192,157 @@ def _judge_period(document: dict[str, Any], at: FailureSource) -> list[Failure]:
                 observed=f"start={start!r}, end={end!r}",
                 fix="declare both start and end as ISO-8601 timestamps with an explicit offset",
                 explain=ExplainTopic.RUN_PRECONDITION,
-                source=replace(at, key_path="start" if start is None else "end"),
+                source=_key(at, "start" if start is None else "end"),
             )
         ]
-    first, last = _instant(start), _instant(end)
-    if first is None or last is None:
-        # An uncomparable boundary is its own defect and gets its own report. Returning nothing
-        # here was a real regression: the string comparison this replaced happened to get a
-        # naive-AND-reversed period right, and silence would have lost that case entirely --
-        # against a verb whose whole purpose is reporting every defect in one pass.
-        uncomparable = "start" if first is None else "end"
-        return [
-            Failure.bounded(
-                "check.period.uncovered",
-                (
-                    f"{uncomparable} must include a UTC offset; a date or naive datetime does "
-                    "not identify an instant, so the period cannot be compared"
-                ),
-                observed=f"{uncomparable}={document.get(uncomparable)!r}",
-                fix=(
-                    f"write {uncomparable} as an ISO-8601 timestamp with an explicit offset, "
-                    "then retry"
-                ),
-                # Carried deliberately. Before `run` made these judgments, a naive boundary
-                # reached `_timestamp` in `cli/run.py`, which named the missing offset and showed
-                # a well-formed instant. This judgment now answers first, so without these the
-                # parity `run` gained would have been paid for with a vaguer message than the one
-                # it replaced -- an improvement that quietly costs a diagnostic.
-                examples=["2024-01-02T00:00:00+09:00"],
-                explain=ExplainTopic.RUN_PRECONDITION,
-                source=replace(at, key_path=uncomparable),
-            )
-        ]
-    if first >= last:
+    if start >= end:
         return [
             Failure.bounded(
                 "check.period.uncovered",
                 "a run's end must be later than its start",
-                observed=f"start={first.isoformat()}, end={last.isoformat()}",
-                fix=f"set end later than {first.isoformat()}, or set start earlier than "
-                f"{last.isoformat()}",
+                observed=f"start={start.isoformat()}, end={end.isoformat()}",
+                fix=f"set end later than {start.isoformat()}, or set start earlier than "
+                f"{end.isoformat()}",
                 explain=ExplainTopic.RUN_PRECONDITION,
-                source=replace(at, key_path="end"),
+                source=_key(at, "end"),
             )
         ]
     return []
 
 
+def _agenda_once(workspace: Workspace, definition: RunDefinition) -> Callable[[], object]:
+    """The run's decide agenda, derived at most once and delivered to each judge that asks.
+
+    Built from the run's sessions and `at` (record `148`). Two judgments read it, and
+    `docs/issues/069` made that one derivation rather than one per strategy and one per member.
+
+    Returned as a CALL, and a failure to derive it is re-raised to every asker rather than
+    flattened to `None` (`docs/issues/077`). A dataset that does not resolve, or a session that
+    does not exist in the zone, is still preflight's refusal to name -- but it is ALSO the reason
+    two judgments could not be answered, and the reader has to hear that from the judgments
+    themselves. Both dependent judges then block carrying the same reason, which is the point:
+    blocking one and passing the other would be a report that contradicts itself.
+    """
+    settled: list[tuple[object | None, BaseException | None]] = []
+
+    def once() -> object:
+        if not settled:
+            try:
+                settled.append((derived_agenda(workspace, definition), None))
+            except Exception as error:  # stored, then re-raised below; never swallowed
+                settled.append((None, error))
+        value, error = settled[0]
+        if error is not None:
+            raise error
+        return value
+
+    return once
+
+
 def _judge_execution_ordering(
-    document: dict[str, Any], workspace: Workspace, at: FailureSource
+    definition: RunDefinition,
+    workspace: Workspace,
+    at: FailureSource,
+    agenda: Callable[[], object],
 ) -> list[Failure]:
     """AC-C5: a decision cannot fill at an instant that has already passed.
 
     Caught here, before the run, rather than at the first callback. The old failure mode was a
     bare `ValueError: no exact execution target exists within the run horizon` raised only once
     the simulation was already underway and earlier callbacks had mutated account state.
+
+    An execution input that does not resolve, and an agenda that cannot be derived, both raise out
+    of here on purpose. This is the judgment `docs/issues/015` exists for, and reporting it as
+    answered when it was not is the defect `docs/issues/077` filed.
     """
-    strategy = document.get("strategy")
-    execution_input = document.get("execution_input")
-    if not isinstance(strategy, dict) or execution_input is None:
+    if definition.execution_input_id is None:
         return []
-
-    agenda_id = strategy.get("agenda_id")
-    if agenda_id is None:
-        return []
-    try:
-        agenda = workspace.agenda(str(agenda_id))
-        registration = workspace.execution_input(str(execution_input))
-    except VqaprError:
-        # The id does not resolve; that is a different judgment's refusal to make, and making it
-        # here too would report one defect twice.
-        return []
-
+    registration = workspace.execution_input(definition.execution_input_id)
     fill_at = registration.fill.local_time
-    late = [
-        occurrence.occurrence_id
-        for occurrence in agenda.occurrences
-        if occurrence.local_instant.local_time >= fill_at
-    ]
-    if not late:
-        return []
-    return [
-        Failure.bounded(
-            "check.execution.not_after_decision",
-            "every decision must be strictly earlier than the instant it fills at",
-            observed=(
-                f"fill at {fill_at.isoformat()}; {len(late)} occurrence(s) at or after it"
-            ),
-            examples=late,
-            example_total=len(late),
-            fix=(
-                f"move the strategy cadence earlier than {fill_at.isoformat()}, or declare a "
-                "fill convention whose instant is later than every decision"
-            ),
-            explain=ExplainTopic.RUN_PRECONDITION,
-            source=replace(at, key_path="strategy.agenda_id"),
+    found: list[Failure] = []
+    occurrences = agenda().occurrences  # type: ignore[attr-defined]
+    for entry in definition.strategies:
+        late = [
+            occurrence.occurrence_id
+            for occurrence in occurrences
+            if occurrence.local_instant.local_time >= fill_at
+        ]
+        if not late:
+            continue
+        found.append(
+            Failure.bounded(
+                "check.execution.not_after_decision",
+                "every decision must be strictly earlier than the instant it fills at",
+                observed=(
+                    f"strategy {entry.component_id!r} fills at {fill_at.isoformat()}; "
+                    f"{len(late)} occurrence(s) at or after it"
+                ),
+                examples=late,
+                example_total=len(late),
+                fix=(
+                    f"move the strategy cadence earlier than {fill_at.isoformat()}, or declare a "
+                    "fill convention whose instant is later than every decision"
+                ),
+                explain=ExplainTopic.RUN_PRECONDITION,
+                source=_key(at, "strategies", entry.component_id),
+            )
         )
+    return found
+
+
+def _members(definition: RunDefinition) -> list[tuple[str, Any, Any]]:
+    """Every component the run names: the section it was declared under, the entry, its loader."""
+    return [
+        *(("strategies", entry, load_strategy_model) for entry in definition.strategies),
+        *(("datamodels", entry, load_data_model) for entry in definition.datamodels),
     ]
 
 
-def _judge_datasets_and_fields(
-    document: dict[str, Any],
+def _judge_member_datasets(
+    definition: RunDefinition,
+    member: tuple[str, Any, Any],
     workspace: Workspace,
     registered: dict[str, Any],
     at: FailureSource,
+    agenda: Callable[[], object],
 ) -> list[Failure]:
-    """Every dataset a component reads must be registered, and expose the field it names.
+    """Every dataset ONE member reads must be registered, and expose the field it names.
 
     Two codes rather than one, because they are two different repairs: an unregistered dataset is
     fixed by registering it, and an absent field is fixed by correcting the component or the
     source. Collapsing them would tell the reader which command failed but not which to run.
+
+    One member per call, and `judgments` dispatches one judge per member, so a component that does
+    not load blocks its own entry and leaves the other members answered. It used to `continue` past
+    that member inside a single judgment covering all of them -- which reported the whole judgment
+    as passed while a component nothing could be read from sat in the run (`docs/issues/077`).
     """
+    section, entry, loader = member
     found: list[Failure] = []
-    strategy = document.get("strategy")
-    if not isinstance(strategy, dict):
-        return found
+    source = _key(at, section, entry.component_id)
+    ref = workspace.component(entry.component_id)
+    # LOAD the component. `workspace.component()` returns a `ComponentRef` -- an identity, a path
+    # and a fingerprint -- which has no `requirements` attribute at all. Only the loaded model
+    # knows what it reads. A component that does not resolve or does not load raises from here.
+    component = loader(ref, project_root=workspace.project_root)
 
-    component_id = strategy.get("component") or strategy.get("component_id")
-    if component_id is None:
-        return found
-    try:
-        ref = workspace.component(str(component_id))
-        # LOAD the component. `workspace.component()` returns a `ComponentRef` -- an identity, a
-        # path and a fingerprint -- which has no `requirements` attribute at all. Reading it with
-        # a `getattr(..., ())` fallback made three of this verb's eight judgments permanently
-        # unreachable: the loop body never ran, for any spec, against any workspace, and the codes
-        # sat in `CODES` looking implemented. Only the loaded model knows what it reads.
-        component = load_strategy_model(ref, project_root=workspace.project_root)
-    except (VqaprError, TypeError, ValueError):
-        # The component does not resolve or does not load. `check.dataset.unregistered` is about a
-        # dataset, not about a component that will not import, and the conformance judgments
-        # already own that refusal -- reporting it here too would name one defect twice.
-        return found
-
+    first_read = _first_decision(definition, agenda)
+    # One unregistered dataset is ONE problem however many fields the component reads from
+    # it (`docs/issues/056`): `requirements()` fans a `DatasetInput` out to one requirement
+    # per field, and reporting per requirement printed eight identical failures for one
+    # missing registration. The fields ride along as examples, which is what a reader
+    # deciding between "register it" and "point the component elsewhere" wants to see.
+    unregistered: dict[str, list[str]] = {}
     for requirement in component.requirements() or ():
         dataset_id = str(getattr(requirement, "dataset_id", ""))
         if not dataset_id:
             continue
         registration = registered.get(dataset_id)
         if registration is None:
-            close = get_close_matches(dataset_id, sorted(registered), n=1)
-            found.append(
-                Failure.bounded(
-                    "check.dataset.unregistered",
-                    f"dataset {dataset_id!r} must be registered before a run can read it",
-                    observed=f"registered: {', '.join(sorted(registered)) or '(none)'}",
-                    fix=(
-                        f"register {dataset_id!r}, or point the component at {close[0]!r}"
-                        if close
-                        else f"register {dataset_id!r} with `vqapr register <declaration.yaml>`"
-                    ),
-                    explain=ExplainTopic.WORKSPACE_STATE,
-                    source=replace(at, key_path="strategy.component"),
-                )
-            )
+            field_id = str(getattr(requirement, "field_id", ""))
+            fields = unregistered.setdefault(dataset_id, [])
+            if field_id and field_id not in fields:
+                fields.append(field_id)
             continue
 
         exposed = set(registration.fields)
@@ -495,89 +352,124 @@ def _judge_datasets_and_fields(
                 Failure.bounded(
                     "check.field.absent",
                     f"dataset {dataset_id!r} must expose every field the component reads",
-                    observed=(
-                        f"missing: {field_id}; exposed: {', '.join(sorted(exposed))}"
-                    ),
+                    observed=(f"missing: {field_id}; exposed: {', '.join(sorted(exposed))}"),
                     examples=(field_id,),
                     example_total=1,
                     fix=(
-                        f"add {field_id} to the dataset's fields mapping and register it again, "
-                        "or read a field it already exposes"
+                        f"add {field_id} to the dataset's fields mapping and register it "
+                        "again, or read a field it already exposes"
                     ),
                     explain=ExplainTopic.DATASET_PREPARATION,
-                    source=replace(at, key_path="strategy.component"),
+                    source=source,
                 )
             )
 
         lookback = getattr(requirement, "lookback", None)
         rows = getattr(lookback, "rows", None)
         span = getattr(registration, "span", None)
-        # Measured against the first instant that actually READS, not against the run's `start`.
-        #
-        # Nothing reads at `start`: it bounds the horizon, and the strategy reads at the
-        # occurrences its agenda generates inside that horizon. Comparing against it refused specs
-        # that run correctly whenever a dataset's first observation lands after midnight -- which
-        # is every intraday-stamped dataset, so the fixture this package ships was itself refused
-        # by its own verb while `run` completed it (issue 012).
-        #
-        # Worse than a false positive on its own: `check` exists to prove a spec before a run is
-        # spent, so a reader who trusts it stops and starts editing something that already worked.
-        # The mirror of `068`, and the same Principle 5.
-        first_read = _first_decision(document, workspace)
+        # Measured against the first instant that actually READS, not against the run's
+        # `start`. Nothing reads at `start`: it bounds the horizon, and the strategy reads at
+        # the occurrences its agenda generates inside that horizon (issue 012).
         begins = _instant(span[0]) if span is not None else None
         if rows and begins is not None and first_read is not None and begins > first_read:
             found.append(
-                    Failure.bounded(
-                        "check.lookback.uncovered",
-                        (
-                            f"dataset {dataset_id!r} must carry history reaching back past the "
-                            "first decision, or that decision reads a short window"
-                        ),
-                        observed=(
-                            f"dataset begins {span[0]}, first decision "
-                            f"{first_read.isoformat()}, lookback {rows} row(s)"
-                        ),
-                        fix=(
-                            f"start the run late enough that its first decision falls at or after "
-                            f"{span[0]}, or prepare the dataset with history reaching further back"
-                        ),
-                        explain=ExplainTopic.DATASET_PREPARATION,
-                        source=replace(at, key_path="start"),
-                    )
+                Failure.bounded(
+                    "check.lookback.uncovered",
+                    (
+                        f"dataset {dataset_id!r} must carry history reaching back past the "
+                        "first decision, or that decision reads a short window"
+                    ),
+                    observed=(
+                        f"dataset begins {span[0]}, first decision "
+                        f"{first_read.isoformat()}, lookback {rows} row(s)"
+                    ),
+                    fix=(
+                        f"start the run late enough that its first decision falls at or "
+                        f"after {span[0]}, or prepare the dataset with history reaching "
+                        "further back"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
+                    source=_key(at, "start"),
                 )
+            )
+    for dataset_id, fields in unregistered.items():
+        close = get_close_matches(dataset_id, sorted(registered), n=1)
+        found.append(
+            Failure.bounded(
+                "check.dataset.unregistered",
+                f"dataset {dataset_id!r} must be registered before a run can read it",
+                observed=(
+                    f"{entry.component_id!r} reads {len(fields)} field(s) from it; "
+                    f"registered: {', '.join(sorted(registered)) or '(none)'}"
+                ),
+                examples=tuple(fields),
+                example_total=len(fields),
+                fix=(
+                    f"register {dataset_id!r}, or point the component at {close[0]!r}"
+                    if close
+                    else f"register {dataset_id!r} with `vqapr register <declaration>`"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                source=source,
+            )
+        )
     return found
 
 
-def _first_decision(document: dict[str, Any], workspace: Workspace) -> datetime | None:
-    """When the strategy first reads, or `None` when that cannot be answered here.
+def _judge_outputs(
+    definition: RunDefinition, registered: dict[str, Any], at: FailureSource
+) -> list[Failure]:
+    """A datamodel run writes a dataset that does not exist yet (record `148`).
 
-    The earliest occurrence its agenda generates inside the declared horizon. `None` whenever the
-    agenda, the horizon or the ids are missing or unresolvable -- those are other judgments'
-    refusals to make, and answering them here would report one defect twice.
+    The refusal preflight raises at `preflight.datamodel.output_registered`, asked here so
+    `check` cannot certify a run that `run` then refuses.
     """
-    strategy = document.get("strategy")
-    if not isinstance(strategy, dict):
+    found: list[Failure] = []
+    for entry in definition.datamodels:
+        if entry.dataset_id not in registered:
+            continue
+        found.append(
+            Failure.bounded(
+                "check.datamodel.output_registered",
+                "a datamodel run writes a dataset that does not exist yet",
+                observed=f"{entry.dataset_id!r} is already registered",
+                fix=(
+                    f"declare a new dataset_id for {entry.component_id!r}, or remove the "
+                    f"existing {entry.dataset_id} registration from the workspace first"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                source=_key(at, "datamodels", entry.component_id, "dataset_id"),
+            )
+        )
+    return found
+
+
+def _first_decision(definition: RunDefinition, agenda: Callable[[], object]) -> datetime | None:
+    """When the run's models first read, or `None` when the run declared no horizon.
+
+    The earliest occurrence the run's agenda generates inside the declared horizon. Every model
+    of a run shares the one agenda (record `148`), so this is a fact about the run rather than
+    about one member.
+
+    `None` means the run declared no `start` or no `end` -- which the period judgment reports, and
+    which leaves nothing here to measure against. An agenda that cannot be DERIVED is a different
+    thing entirely and is no longer flattened into the same `None`: `agenda()` raises, and the
+    judgment that asked blocks (`docs/issues/077`).
+    """
+    start, end = definition.start, definition.end
+    if start is None or end is None:
         return None
-    agenda_id = strategy.get("agenda_id")
-    start, end = _instant(document.get("start")), _instant(document.get("end"))
-    if agenda_id is None or start is None or end is None:
-        return None
-    try:
-        agenda = workspace.agenda(str(agenda_id))
-    except VqaprError:
-        return None
+    occurrences = agenda().occurrences  # type: ignore[attr-defined]
     inside = [
         moment
-        for moment in (
-            occurrence.local_instant.instant for occurrence in agenda.occurrences
-        )
+        for moment in (occurrence.local_instant.instant for occurrence in occurrences)
         if start <= moment <= end
     ]
     return min(inside) if inside else None
 
 
 def _judge_weights(
-    document: dict[str, Any], workspace: Workspace, at: FailureSource
+    definition: RunDefinition, workspace: Workspace, at: FailureSource
 ) -> list[Failure]:
     """The account mode and the venue must both permit the positions the run can take.
 
@@ -586,14 +478,12 @@ def _judge_weights(
     that disagree, and both are answerable before the run.
     """
     found: list[Failure] = []
-    account = document.get("initial_account")
-    if not isinstance(account, dict):
+    snapshot, mode = definition.initial_account_snapshot, definition.initial_account_mode
+    if snapshot is None or mode is None:
         return found
 
-    mode = str(account.get("mode", "")).upper()
-    positions = account.get("positions") or {}
-    if mode == "LONG_ONLY" and isinstance(positions, dict):
-        shorts = [name for name, quantity in positions.items() if str(quantity).startswith("-")]
+    if mode is AccountMode.LONG_ONLY:
+        shorts = [name for name, quantity in snapshot.positions.items() if quantity < 0]
         if shorts:
             found.append(
                 Failure.bounded(
@@ -607,7 +497,7 @@ def _judge_weights(
                         "account mode as SIGNED"
                     ),
                     explain=ExplainTopic.RUN_PRECONDITION,
-                    source=replace(at, key_path="initial_account.positions"),
+                    source=_key(at, "initial_account", "positions"),
                 )
             )
 
@@ -615,28 +505,21 @@ def _judge_weights(
     # position; a listing marked LONG_ONLY or NONE says the venue will not fill one. Both are
     # declared facts, they disagree, and the disagreement is answerable now rather than at the
     # first callback that tries to short.
-    exchange_id = document.get("exchange")
-    instruments = document.get("instruments")
-    if exchange_id is None or mode != "SIGNED" or not isinstance(instruments, list):
+    if definition.exchange is None or mode is not AccountMode.SIGNED:
         return found
-    try:
-        exchange = load_exchange(
-            workspace.component(str(exchange_id)), project_root=workspace.project_root
-        )
-    except (VqaprError, TypeError, ValueError):
-        # The exchange does not resolve or does not load; that is another judgment's refusal to
-        # make, and making it here too would report one defect twice.
-        return found
+    # No `try`. An exchange that does not resolve or does not load is still preflight's refusal to
+    # name, but it is ALSO the reason this judgment cannot be made, and swallowing it reported the
+    # weights judgment as passed on a run nothing was proven about (`docs/issues/077`).
+    exchange = load_exchange(
+        workspace.component(definition.exchange), project_root=workspace.project_root
+    )
 
     # `listings` rather than `listing(id)`: every shipped profile exposes the collection, but only
-    # `Academic` exposes the single-id lookup. Reaching for the method that happens to exist on
-    # one profile made this judgment a silent no-op on the others -- it found nothing and reported
-    # nothing, which reads exactly like a pass.
+    # `Academic` exposes the single-id lookup. KrxExchange keys its rules by instrument id;
+    # Academic carries a tuple of Listing. Both are shipped profiles, so reading only one shape
+    # made this judgment silently find nothing on the other -- which reads exactly like a pass.
     listings = getattr(exchange, "listings", None) or ()
     if isinstance(listings, Mapping):
-        # KrxExchange keys its rules by instrument id; Academic carries a tuple of Listing. Both
-        # are shipped profiles, so reading only one shape made this judgment silently find nothing
-        # on the other -- which reads exactly like a pass.
         declared = {str(name): getattr(rule, "access", None) for name, rule in listings.items()}
     else:
         declared = {
@@ -645,7 +528,7 @@ def _judge_weights(
         }
     unshortable = [
         f"{name}: {declared[name]}"
-        for name in (str(item) for item in instruments)
+        for name in definition.instruments
         # An instrument with no listing at all is `preflight.universe.unlisted_instrument`'s
         # refusal to make; reporting it here too would give one defect two names.
         if name in declared and str(declared[name]) != "signed"
@@ -668,9 +551,7 @@ def _judge_weights(
                 "access on the exchange"
             ),
             explain=ExplainTopic.RUN_PRECONDITION,
-            source=replace(at, key_path="initial_account.mode"),
+            source=_key(at, "initial_account", "mode"),
         )
     )
     return found
-
-

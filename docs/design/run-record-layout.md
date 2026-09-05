@@ -21,12 +21,15 @@ impossible rather than merely inconvenient:
   <run-id>/
     record.json            the run's own facts: account, contract report, source digest, period
     tables/
-      vqapr.account.jsonl  one file per recorded table, appended in chunks as the run proceeds
-      vqapr.weight.jsonl
-      factor.membership.jsonl
+      vqapr.account/       one directory per recorded table, one parquet file per chunk
+        000000.parquet     as the run proceeds (record `146`)
+        000001.parquet
+      vqapr.weight/
+      vqapr.monitoring/    when the run declared constraints: one row per rule per occurrence
+      factor.membership/
 ```
 
-One directory per run id. One file per table. Rows appended as chunks arrive.
+One directory per run id. One directory per table. One complete file per chunk as it arrives.
 
 ## Why a directory scan, not an index file
 
@@ -52,20 +55,47 @@ research run — that is not a cost worth buying a lost-update bug to avoid.
 rows as it produces them gets crash survival and bounded memory for free: a killed run keeps
 everything up to its last chunk, and peak memory is one chunk rather than a whole run.
 
-**The product does not stream yet.** `public.run` hands `recorder_rows` over once, after the run
-returns, so today's records are written in a single pass at the end and the two properties above
-are latent rather than delivered. This section describes what the layout makes possible and what
-the writer supports; it is not a description of current run behaviour. Recording it the other way
-round would make the layout look like it had solved a problem that is still open.
+**The product streams (record `135`).** `RunStateRepository` hands each accepted occurrence's
+rows to the writer at the swap that accepts it, and no root retains them; `freeze_record` writes
+only `record.json` at the end, from counts the writer kept as chunks passed. A killed run keeps
+every accepted occurrence's rows and no record, and a streamed run's peak heap is a fraction of
+the same run kept in memory -- both measured in `tests/flow/test_the_run_record_streams.py`. A
+flow assembled without a store keeps rows in its roots as before.
 
-## Why JSONL
+## Why parquet, one file per chunk (record `146`; JSONL before it)
 
-Append-only, one row per line, no framing to rewrite. A parquet file would have to be rewritten or
-partitioned per append; a JSON array would need its closing bracket moved. Both make an append a
-read-modify-write, which is what this layout exists to avoid.
+The rows were JSONL from record `135` to record `146`: append-only, one row per line, and a
+`.types.json` sidecar beside each table saying which Python type every column had been
+stringified from, because JSON cannot carry a type and a reader that guessed from the text
+shifted every instant by its offset -- the testbed's A5. That was a hand-written type system on
+top of a format that has none, and the deletion campaign (D3: do not reinvent the wheel)
+replaced it with the format that carries types: parquet, through pyarrow, which the tree already
+depended on.
 
-The published *dataset* a run produces is still parquet — that is Step 6's `store.tables`. This is
-the run's own record, which is a different artifact with a different reader.
+**One complete file per chunk, not one open writer per table.** A parquet file is readable
+only once its footer is written, so a writer held open for the run would leave nothing if the
+run were killed -- and a killed run leaving every chunk that landed is the property the whole
+layout exists for. So each `append` writes one file, `tables/<table>/<n>.parquet`, staged beside
+the target and moved into place; a chunk is one accepted occurrence's rows, so the files number
+the run's occurrences. A reader lists the directory in order; duckdb reads it as
+`read_parquet('tables/<table>/*.parquet')`.
+
+**Types travel in the file.** An instant is a `timestamp[us, tz]` in the zone the first value
+carried, and comes back as that instant in that zone through pyarrow and through duckdb alike.
+A `Decimal` is the one value stored as text -- exact and unbounded, where a parquet decimal
+would need a fixed scale and a weight of one third has twenty-eight places -- and the column's
+field metadata (`vqapr.type: decimal`) says so, so `read_table` (exported as
+`vqapr.public.read_strategy_table`) restores it and a reader outside the package casts it
+knowingly. A column's type is fixed the first time a non-null value is seen and every later
+chunk is cast to it; a column seen under two kinds is refused at the write rather than
+downgraded, because the recorder wrote both and the run's own table is what is wrong.
+
+**One clock (issue `058`).** Every table's `event_time` is stamped in the strategy agenda's
+zone, the fill table included; the execution table normalises its target to UTC and the fill
+row used to carry that, so one run recorded two clocks.
+
+The published *dataset* a run produces is also parquet -- that is `store.tables`, a different
+artifact with a different reader.
 
 ## What `record.json` holds
 
@@ -78,6 +108,61 @@ AC-R3 names five things, and they are the five a later reader cannot reconstruct
 - **source digest** — including the import closure, so two runs that claim the same code can be
   compared.
 - **derived period** — what the run actually covered, which is not always what was declared.
+
+## Two records (record `139`)
+
+```
+<store.root>/runs/
+  <run-id>/
+    run.json                       configuration: what every strategy shared, written FIRST
+    strategies/
+      <strategy-id>@<fp8>/
+        strategy.json              one strategy's facts, written LAST -- the completion mark
+        .running                   that strategy's liveness lock while it writes
+        tables/<table>/<n>.parquet its rows, one complete file per chunk
+```
+
+A run holds several strategies (design §4), so the unit of writing -- and of the lock, the
+crash survival and the `--force` replacement argued above -- is the strategy directory. The
+run directory holds `run.json`, which every process running a strategy of that run writes
+identically before it starts; two writers writing the same bytes need no lock, and a run whose
+configuration changed under an old id is refused naming both digests. Nothing above changes:
+no index file, chunked appends, parquet chunks carrying their types. `record.json` remains the
+shape of a run written before `139`, and is still read.
+
+The directory name `<strategy-id>@<fp8>` is the first eight hex characters of the strategy's
+registered fingerprint, which folds the file bytes and the config: a tweak is a new directory
+beside the old one, and counting them is architecture §17.4's answer.
+
+## A datamodel run's records (record `148`)
+
+```
+<store.root>/runs/
+  <run-id>/
+    run.json                       configuration, as above; `datamodels` lists the members
+    datamodels/
+      <datamodel-id>@<fp8>/
+        datamodel.json             one datamodel's facts, written LAST -- the completion mark
+        .running                   its liveness lock while it computes
+<project>/.vqapr/materialized/
+  <dataset-id>/
+    000000.parquet                 one chunk per session, moved into place as the session completes
+    000001.parquet
+```
+
+A datamodel run holds datamodels the way a strategy run holds strategies (design §4; a run holds
+one kind, never both). The member directory is the same unit of writing, lock and `--force`
+replacement; what differs is where the rows go. A datamodel's rows ARE a dataset -- the one its
+run declared under `datamodels.<id>.dataset_id` -- so they land under `.vqapr/materialized/`,
+one complete parquet chunk per session, and the directory registers as the dataset's source once
+the last session has completed, through the registration path every other dataset takes. There
+are no `tables/` under a datamodel's record directory, and `datamodel.json` carries one line per
+session (evaluation time, output `available_at`, row count) rather than the per-instrument
+lineage `docs/issues/059` measured at 478 MB. A run killed midway leaves the chunks that landed
+and no registration; a re-run starts the directory clean.
+
+`materialize()`, the spec file it read and the `materialization` record kind are gone: a
+datamodel is a registered run, judged, frozen and executed by the same verbs.
 
 ## What this constrains in Step 6
 

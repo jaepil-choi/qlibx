@@ -16,7 +16,7 @@ _HEAD = """from __future__ import annotations
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.authoring import Hold
-from vqapr.models.strategy_model import StrategyModel
+from vqapr.authoring import StrategyModel
 
 
 class S(StrategyModel):
@@ -58,14 +58,14 @@ def test_an_object_outside_the_contract_is_refused(tmp_path: Path) -> None:
 def test_a_renamed_callback_parameter_is_accepted(tmp_path: Path) -> None:
     """Flow calls the callback positionally, so arity is the contract and spelling is not.
 
-    This once asserted the opposite. It was wrong: `on_occurrence(self, ctx)` receives exactly
-    the call `on_occurrence(self, context)` receives, and refusing it punished a legal rename
+    This once asserted the opposite. It was wrong: `decide(self, ctx)` receives exactly
+    the call `decide(self, context)` receives, and refusing it punished a legal rename
     while `wrong_return`-shaped mistakes passed. The check now measures what Flow actually does.
     """
     path = _write(
         tmp_path,
         "renamed",
-        "    def on_occurrence(self, ctx):\n        return Hold(reason='x')\n",
+        "    def decide(self, ctx):\n        return Hold(reason='x')\n",
     )
 
     register_strategy_model(tmp_path, "renamed", path, "S")
@@ -75,7 +75,7 @@ def test_an_extra_required_parameter_is_refused(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "extra",
-        "    def on_occurrence(self, context, extra):\n        return Hold(reason='x')\n",
+        "    def decide(self, context, extra):\n        return Hold(reason='x')\n",
     )
     with pytest.raises(VqaprError) as raised:
         register_strategy_model(tmp_path, "extra", path, "S")
@@ -87,7 +87,7 @@ def test_an_unannotated_callback_is_accepted(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "bare",
-        "    def on_occurrence(self, context):\n        return Hold(reason='x')\n",
+        "    def decide(self, context):\n        return Hold(reason='x')\n",
     )
     ref = register_strategy_model(tmp_path, "bare", path, "S")
     assert ref.kind is ComponentKind.STRATEGY_MODEL
@@ -98,7 +98,7 @@ def test_a_narrower_return_annotation_is_accepted(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "narrow",
-        "    def on_occurrence(self, context) -> Hold:\n"
+        "    def decide(self, context) -> Hold:\n"
         "        return Hold(reason='x')\n",
     )
     assert register_strategy_model(tmp_path, "narrow", path, "S") is not None
@@ -109,11 +109,11 @@ def test_a_requirements_declaration_of_the_wrong_shape_is_refused(tmp_path: Path
     path = tmp_path / "badreq.py"
     path.write_text(
         "from vqapr.authoring import Hold\n"
-        "from vqapr.models.strategy_model import StrategyModel\n\n\n"
+        "from vqapr.authoring import StrategyModel\n\n\n"
         "class S(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ['not-a-requirement']\n\n"
-        "    def on_occurrence(self, context):\n"
+        "    def decide(self, context):\n"
         "        return Hold(reason='x')\n",
         encoding="utf-8",
     )

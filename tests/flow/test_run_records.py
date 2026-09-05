@@ -269,7 +269,7 @@ def test_a_live_run_is_never_replaced_even_with_force(tmp_path: Path) -> None:
     with pytest.raises(RunRecordLive) as refused:
         RunRecordWriter(tmp_path, "busy").open(replace=True)
     assert refused.value.holder == os.getpid()
-    assert "--run-id" in str(refused.value), "the refusal must name a remedy that is not --force"
+    assert "rm strategy" in str(refused.value), "the refusal must name a remedy that is not --force"
 
     # A keeps writing and finishes intact.
     live.append("vqapr.account", [{"nav": "A2"}])
@@ -303,6 +303,7 @@ def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> No
     let a peer delete a live run's tables. This pins the same wiring in milliseconds: the callback
     fires once per occurrence, so a run that records no rows still proves it is alive.
     """
+    from vqapr.flow.loop import OccurrenceFlow
     from vqapr.flow.simulation import SimulationFlow
 
     signature = inspect.signature(SimulationFlow.__init__)
@@ -310,7 +311,8 @@ def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> No
         "the run loop no longer accepts a progress signal, so a long run cannot prove it is alive"
     )
 
-    source = inspect.getsource(SimulationFlow.run)
+    # The walk is the shared loop both kinds of run use (record `148`).
+    source = inspect.getsource(OccurrenceFlow.run)
     loop = source.index("while next_static is not None")
     branch = source.index("due = self._pending_due()", loop)
     assert "self._on_progress()" in source[loop:branch], (

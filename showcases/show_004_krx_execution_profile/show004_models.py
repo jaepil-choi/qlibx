@@ -7,13 +7,13 @@ and ``MomentumLongOnly`` have one.
 
 ``decide()`` returns only ``Hold``/``Rebalance`` -- never a UUID, a strategy id, source
 refs, or an account version; the framework stamps all of that identity. Cross-callback state
-(the rebalance count) travels only through ``StrategyResult.next_state`` /
-``call.previous_state``, never a mutable ``self`` field.
+(the rebalance count) lives in ``self.memory``, which the framework restores before every
+callback and snapshots after it.
 
-**The two models are written against different contracts, and that is not an oversight.** A
-StrategyModel may be authored against ``vqapr.authoring`` because the loader adapts it; a
-DataModel may not, so ``MomentumModel`` implements ``vqapr.public.DataModel`` directly. The
-split is the framework's, not this showcase's.
+Both models are written against ``vqapr.authoring``. They used to be written against two
+contracts -- the loader adapted an authored StrategyModel and refused an authored DataModel --
+and this docstring recorded that as the framework's split, not the showcase's. Record ``131``
+closed it.
 """
 
 from __future__ import annotations
@@ -21,16 +21,14 @@ from __future__ import annotations
 from decimal import Decimal
 
 from vqapr.authoring import (
+    DataModel,
     DatasetInput,
     Hold,
     Rebalance,
     RowsLookback,
     StrategyModel,
-    StrategyResult,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.public import DataModel, DataRequirement
-from vqapr.public import RowsLookback as EngineRowsLookback
 
 LOOKBACK = 6
 """Five-session momentum needs six closes."""
@@ -55,26 +53,25 @@ BUDGET = Budget(
 class MomentumModel(DataModel):
     """5-session momentum on real closes, skipping supervised names."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of(
-                "momentum-model",
-                "price_daily",
+    def inputs(self):
+        return {
+            "prices": DatasetInput(
+                dataset_id="price_daily",
                 fields=("close", "is_supervised"),
-                lookback=EngineRowsLookback(LOOKBACK),
-            ),
-        )
+                lookback=RowsLookback(rows=LOOKBACK),
+            )
+        }
 
     def compute(self, context):
-        observations = context.window.observations(self.requirements()[0]).rows
-        closes: dict[str, list[float]] = {}
-        supervised: dict[str, bool] = {}
-        for row in observations:
-            instrument = str(row["instrument"])
-            close = row["close"]
-            if close is not None:
-                closes.setdefault(instrument, []).append(float(close))
-            supervised[instrument] = bool(row["is_supervised"])
+        window = context.read("prices", "close")
+        closes = {
+            name: [float(v) for v in window.values[name] if v is not None]
+            for name in window.instruments
+        }
+        supervised = {
+            name: bool(flag)
+            for name, flag in context.read("prices", "is_supervised").latest().items()
+        }
         return tuple(
             {
                 "instrument": instrument,
@@ -98,20 +95,16 @@ class MomentumLongOnly(StrategyModel):
             )
         }
 
-    def decide(self, call) -> StrategyResult:
+    def decide(self, call) -> Hold | Rebalance:
+        eligible = call.read("momentum_score", "eligible").latest()
         latest = {
-            observation.instrument_id: float(observation.values["score"])
-            for observation in call.read("momentum_score")
-            if observation.values.get("score") is not None
-            and bool(observation.values.get("eligible"))
+            name: float(score)
+            for name, score in call.read("momentum_score", "score").latest().items()
+            if bool(eligible.get(name))
         }
-        previous = call.previous_state if isinstance(call.previous_state, dict) else {}
+        previous = self.memory if isinstance(self.memory, dict) else {}
         if len(latest) < BOOK:
-            return StrategyResult(
-                decision=Hold(reason="not-enough-eligible-names"),
-                next_state=previous,
-                diagnostics={},
-            )
+            return Hold(reason="not-enough-eligible-names")
 
         ranked = sorted(latest.items(), key=lambda item: (-item[1], item[0]))
         chosen = {instrument for instrument, _ in ranked[:BOOK]}
@@ -121,13 +114,9 @@ class MomentumLongOnly(StrategyModel):
             for instrument in sorted(latest)
         }
 
-        next_state = {**previous, "rebalances": int(previous.get("rebalances", 0)) + 1}
-        return StrategyResult(
-            decision=Rebalance(
-                target_weights=target_weights,
-                cash_weight=CASH_TARGET,
-                budget=BUDGET,
-            ),
-            next_state=next_state,
-            diagnostics={},
+        self.memory = {**previous, "rebalances": int(previous.get("rebalances", 0)) + 1}
+        return Rebalance(
+            target_weights=target_weights,
+            cash_weight=CASH_TARGET,
+            budget=BUDGET,
         )

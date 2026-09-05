@@ -17,10 +17,10 @@ flowchart LR
     DM -->|값| Raw
     A[Component OperationAgendas] --> Freeze[RunDefinition preflight]
     Freeze --> Loop[Flow deterministic agenda]
-    Loop -->|current callback occurrence| S[StrategyModel.on_occurrence]
+    Loop -->|current callback occurrence| S[StrategyModel.decide]
     Raw -->|PIT View| S
     Acc[(Account)] -->|snapshot| S
-    S -->|NoDecision| Loop
+    S -->|Hold| Loop
     S -->|economic intent| Accept[Flow timing stamp + target validation]
     Accept --> Pending[latest pending intent]
     Pending -->|due| P[plan_orders]
@@ -330,6 +330,11 @@ callback과 같은 instant이면 execution chain을 먼저 완료하므로 callb
 | valuation | 장부를 재는 날 | `valuation_agenda` 선언 |
 | monitoring | 제약을 점검하는 날 | `monitoring_agenda` 선언 |
 
+> **2026-09-03 정정 (기록 `148`, 소유자 결정 D6·D7).** 사용자가 선언하는 시계는 하나다: run의 `sessions`와
+> `at`(모든 모델이 매 세션 호출되는 벽시계 시각). due execution은 위와 같다. **valuation은 체결 시각에**,
+> **monitoring은 commit 직후에** 돈다 — 둘 다 execution table의 해상도 이상으로 들어갈 수 없으므로 자기
+> agenda가 없다. `ValuationConfig`·`MonitoringPolicy`·valuation/monitoring agenda는 삭제됐다.
+
 due execution만 agenda가 없다. callback이 intent를 만들면 그것이 `target_at`을 들고 대기하고, merge
 loop가 그 시각에 도달할 때 체결된다. 그래서 **결정과 체결은 서로 다른 occurrence이다.**
 
@@ -386,12 +391,12 @@ Flow는 counter, warm-up, cooldown과 stop logic을 해석하지 않는다. 다�
 helper다.
 
 ```python
-def on_occurrence(self, context):
+def decide(self, call):
     count = int((self.memory or {}).get("callback_count", 0)) + 1
     self.memory = {**(self.memory or {}), "callback_count": count}
     if count % self.n:
-        return NoDecision(reason="cadence")
-    return self.make_economic_intent(context)
+        return Hold(reason="cadence")
+    return self.make_rebalance(call)
 ```
 
 public callback/type 이름은 normative하지 않다. 핵심은 Strategy가 selector-authoritative timestamp를 반환하지
@@ -859,6 +864,14 @@ Strategy callback agenda는 DataModel materialization과 공유하지 않는다.
 
 #### `materialize()` — DataModel을 dataset으로 만든다
 
+> **2026-09-03 정정 (기록 `148`).** `materialize()`와 spec 파일은 삭제됐다. DataModel은 **등록된 run**이다
+> — `runs:` 항목의 `datamodels:`가 component와 그것이 쓰는 dataset(`dataset_id`, `value_fields`)을 들고,
+> run의 `sessions`/`at`이 evaluation time 목록이다. `flow/loop.py`의 `OccurrenceFlow`가 strategy run과
+> 같은 걸음이고 `flow/datamodel.py`의 `DataModelPhase`가 callback 자리에 선다: account도 venue도 없다.
+> 세션마다 행이 `.vqapr/materialized/<dataset_id>/<n>.parquet`로 나가고 마지막 세션 뒤 한 번 등록된다.
+> 아래 본문은 그 결정 전의 설명이며 `compute()`의 계약(한 frozen evaluation time, PIT window,
+> package가 `available_at`을 붙임)은 그대로다.
+
 `compute()`는 한 frozen evaluation time의 값을 계산하고, `materialize(evaluation_times)`는 caller가 명시한
 정렬된 evaluation time을 순회해 `compute()` 결과를 검증·저장하고 registered dataset으로 publish하는
 operation이다. Strategy callback agenda나 decision trigger가 이 목록을 만들지 않는다.
@@ -1025,9 +1038,7 @@ execution table은 observation registration 뒤의 dataset 조회가 아니다. 
 ```python
 class StrategyModel(Model):
     callback_agenda_ref: ArtifactRef
-    def on_occurrence(
-        self, context: StrategyModelContext
-    ) -> NoDecision | PortfolioIntent: ...
+    def decide(self, call: StrategyCall) -> Hold | Rebalance: ...
 ```
 
 - 위 이름과 signature는 illustrative다. normative behavior는 StrategyModel configuration이 immutable callback
@@ -1560,83 +1571,87 @@ semantics를 소유하지 않는다.
 
 - **UC**: `UC-EXTENSION-001`, `UC-FACTOR-001`, `UC-BUILTIN-001`
 
-### 5.7 `constraints/` — 선언 하나, 소비자 셋
+### 5.7 `constraints/` — 선언 하나, 소비자 둘
 
-PRD §7.1이 제약의 결과를 셋으로 갈랐고, **셋이 같은 선언을 봐야 한다.**
+PRD §7.1이 제약의 결과를 둘로 갈랐고, **둘이 같은 선언을 봐야 한다.**
 
 ```text
-                     ┌── 판단 시점       projection → optimize의 bounds
-선언된 ConstraintSet ─┼── 결과 생성 시    evaluation(intended weights) → 독립 검증
-                     └── 별도 cadence    evaluation(actual holdings)  → monitoring finding
+                     ┌── 판단 시점       투영된 bound → 구성이 그 안에서 최선을 다한다
+선언된 ConstraintSet ─┤
+                     └── 별도 cadence    committed state 판정 → 넘었으면 finding
 ```
+
+#### 두 소비자는 성격이 다르고, 그 다름이 설계다
+
+**앞은 best effort, 뒤는 사실 관찰이다.** 구성은 한계를 입력으로 받아 그 안에서 만들 수 있는 최선의
+portfolio를 만든다. monitoring은 실제로 committed된 것을 보고 넘었는지 말한다. **최선을 다했는지는
+monitoring의 질문이 아니다** — 넘었으면 넘은 것이다.
+
+**그래서 판단을 만든 직후에 그 판단을 다시 채점하는 자리는 없다.** 한때 있었고, 그것이 무엇을 만들었는지
+기록해 둔다: 같은 규칙이 판단을 잴 때와 계좌를 잴 때 서로 다른 답을 냈고(`docs/issues/014`), *"판단
+시점엔 통과했는데 나중엔 위반"*이 **실행이 계획과 달라져서인지 두 채점이 갈려서인지 구분되지 않았다.**
+세는 자리가 하나면 그 모호함이 생길 수 없다.
+
+- **왜 monitoring 쪽을 남기는가**: 지켜졌는지에 대한 답은 계획이 아니라 **실제 장부**에 있다. 그리고
+  판단 시점에는 원리적으로 알 수 없는 breach가 있다 — 정수 수량 변환이 비중을 살짝 넘기는 경우
+  (`UC-CONSTRAINT-ADJUST-001`)는 어느 가격에 몇 주가 체결될지 정해지기 전에는 계산될 수 없다. 판단을
+  채점하는 자리는 그것을 구조적으로 못 잡는다.
+- **한계를 넘은 판단이 run을 중단시키지 않는다**: 중단하면 그 전략이 실제로 무엇을 하는지 끝까지 볼 수
+  없다. 정지 종목이 rebalance를 멈추지 않고 미체결이 사유와 함께 기록되는 것과 같은 규칙이다 —
+  **경제적 사실은 기록하고, 진행은 막지 않는다.**
 
 #### 벡터로는 안 된다 — 제약의 정체를 잃는다
 
-`optimize`가 받는 것은 종목별 `lower`/`upper` 숫자 벡터다. 그런데 PRD가 요구하는 것은 *"constraint별
-measured value, bound, excess, pass/fail, input lineage"*(§7.1)다.
+최적화가 받는 것은 종목별 상하한 숫자 벡터다. 그런데 PRD가 요구하는 것은 *"어느 constraint를 넘었는지와
+그 시점의 한도·점검값"*(§7.1)이다.
 
-**`upper[i] = 0.10`을 보고 그것이 어느 제약에서 나왔는지 복원할 수 없다.** 그래서 제약은 정체를 가진
+**상한이 0.10이라는 것만 보고 그것이 어느 제약에서 나왔는지 복원할 수 없다.** 그래서 제약은 정체를 가진
 선언이어야 하고, 벡터는 그 선언의 **투영 결과**여야 한다.
 
 > **용어 주의.** 여기서 "투영"은 *선언 → 종목별 bound 벡터*를 뜻한다. §11.7 ⑦의 "순차 투영"은 참조
 > 구현이 쓰는 **자르고 재분배하기를 반복하는 기법**의 이름이고 우리가 쓰지 않는 방법이다(§11.7 ⑥).
 > 같은 단어가 다른 것을 가리키므로 섞어 읽지 않는다.
 
-```python
-class Constraint(Protocol):
-    constraint_id: str
-    def requirements(self) -> tuple[DataRequirement, ...]: ...
-    def project(self, window, instruments) -> Bounds: ...
-    def measure(self, weights_or_holdings, window) -> ConstraintFinding: ...
-```
+#### finding이 싣는 것은 셋이고, 그 이상은 싣지 않는다
 
-**제약이 스스로 `DataRequirement`를 선언한다.** single-name cap의 $w^{index}(t)$가 time-varying PIT data라
-그렇게 될 수밖에 없다. 그리고 그 data가 없으면 **0으로 추정하지 않고 평가를 실패시킨다**(PRD §7).
+**어느 규칙 · 그때의 한도 · 그때의 점검값.** 통과/위반과 초과폭은 그 셋에서 나온다.
 
-#### 어디에 선언하나 — StrategyModel이 아니라 `RunDefinition`이다
+**읽은 것을 판정마다 따라 적지 않는다.** 그렇게 하면 관찰이 무거워지고, 무거운 관찰은 cadence를 늘릴
+수 없어 결국 덜 관찰하게 된다 — 관찰을 촘촘하게 두는 것이 이 층의 목적이므로 그 교환은 손해다. 무엇을
+읽었는가는 창이 이미 기록하고 있고(§4.3), 그것은 run 단위의 사실이지 finding마다 복제할 사실이 아니다.
 
-**결정.** `RunDefinition`이 `ConstraintSet` 하나를 갖고, 판단·검증·monitoring 셋이 그것을 본다.
+#### 제약이 스스로 자기 data를 선언한다
+
+single-name cap의 $w^{index}(t)$가 time-varying PIT data라 그렇게 될 수밖에 없다. 그리고 그 data가 없으면
+**0으로 추정하지 않고 평가를 실패시킨다**(PRD §7). 한계가 데이터에서 오는 규칙은, 데이터가 없을 때
+조용히 느슨해지면 안 된다.
+
+#### 어디에 선언하나 — 전략이 아니라 run이다
+
+**결정.** run 정의가 제약 집합 하나를 갖고, 구성과 monitoring 둘 다 그것을 본다.
 
 - **왜 전략이 아닌가**: monitoring은 별도 cadence라 전략이 소유하면 **자기 사본을 따로 갖게 된다.** 둘이
-  갈라지면 `UC-EXEC-003`의 finding이 구성 때 지키려던 것과 대응하지 않는다.
-- **그리고 §7.1이 *"생산 검증이 독립적으로 판정한다"*를 요구한다.** 검증자가 전략이 준 bound를 쓰면 그것은
-  독립이 아니다. 선언이 전략 바깥에 있어야 독립이 성립한다.
-- 전략은 `context.constraint_bounds()`로 **투영된 결과만** 받는다. flow가 제약의 requirement를 PIT로 풀어
-  준다(§4.3).
+  갈라지면 `UC-EXEC-003`의 finding이 구성 때 지키려던 것과 대응하지 않는다 — 무엇을 넘었다고 말하는데
+  그 무엇이 전략이 지키려던 것과 다른 물건이 된다.
+- **그리고 관찰이 관찰이려면 관찰 대상 바깥에 있어야 한다.** 전략이 자기 한계를 스스로 정하고 스스로
+  지켰다고 말하면 그것은 관찰이 아니다. 선언이 전략 바깥에 있는 것이 그 독립성의 전부다.
+- 전략은 **투영된 결과만** 받는다. flow가 제약이 요구한 data를 PIT로 풀어 준다(§4.3).
 
-#### bounds는 두 출처에서 오고, 검증은 한쪽만 판정한다
+#### bounds는 두 출처에서 오고, monitoring은 한쪽만 판정한다
 
-`optimize`가 받는 `lower`/`upper`는 **선언된 제약의 투영만이 아니다.** 전략 자신의 구성 선택도 같은
-벡터에 들어간다.
+구성이 받는 상하한은 **선언된 제약의 투영만이 아니다.** 전략 자신의 구성 선택도 같은 벡터에 들어간다 —
+예컨대 mandate가 *"주식은 max(10%, 벤치마크 비중)"*이라고만 말할 때, 그 전략이 ETF 비중을 정확히 얼마로
+쓸지는 전략이 정한다(§11.7 ④). 둘을 합치는 것은 **전략의 일**이다.
 
-```python
-bounds = context.constraint_bounds()          # no_short · single_name_cap  ← 선언된 것
-lower  = bounds.lower | {etf: e}              # ETF를 정확히 e에 고정        ← 전략의 선택
-upper  = bounds.upper | {etf: e}
-```
-
-§11.7 ④가 그 사례다 — `주식: max(10%, B)`는 mandate이고 `ETF: e`는 그 전략이 ETF 비중을 어떻게 쓸지 정한
-것이다. 둘을 합치는 것은 **전략의 일**이다.
-
-**그러나 생산 검증과 monitoring은 선언된 제약만 판정한다.**
+**그러나 monitoring은 선언된 제약만 판정한다.**
 
 - **왜**: 구성 선택을 compliance로 판정하면 *"전략이 자기 규칙을 어겼다"*가 mandate 위반과 **같은 등급**이
-  된다. 그리고 전략 코드를 고칠 때마다 과거 compliance 판정의 의미가 달라진다.
-- **거래 불가 종목의 `frozen`도 같은 자리에 있다** — 아래 참고. 시장 사실도, 전략의 구성 선택도, mandate가
-  아니다.
+  된다. 그리고 전략 코드를 고칠 때마다 과거 compliance 판정의 의미가 달라진다 — 어제의 위반이 오늘 위반이
+  아니게 되는 기록은 기록이 아니다.
+- **거래 불가 종목을 그대로 두는 것도 같은 자리에 있다** — 아래 참고. 시장 사실도, 전략의 구성 선택도,
+  mandate가 아니다.
 - 구성 선택 때문에 원하는 노출에 도달하지 못했다면 그것은 finding이 아니라 **해소되지 않은 잔여**이며
   PRD §7.1의 *"원래 의도, 반영된 결과, 해소되지 않은 잔여"*로 남는다.
-
-#### 생산 검증과 monitoring은 같은 함수를 부른다
-
-```python
-evaluation.measure_all(constraints, intended_weights, window)   # §5.4 생성 시 검증
-evaluation.measure_all(constraints, actual_holdings,  window)   # monitoring
-```
-
-- **왜 같아야 하나**: 다르면 *"판단 시점엔 통과했는데 monitoring은 위반이라 한다"*가 제약 해석 차이인지
-  진짜 위반인지 구분되지 않는다. 같은 함수면 차이의 원인이 **입력뿐**이고, `UC-CONSTRAINT-ADJUST-001`이
-  말하는 정수 변환 오차가 정확히 그 차이로 드러난다.
 
 #### 현재 둘뿐이고, `frozen`은 여기 없다
 
@@ -2277,7 +2292,7 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
   3,000종목 × 250세션도 무겁지 않다. 설정 가능하게 만들면 **얻는 것 없이 run identity에 필드만 하나 는다.**
 - **왜 고정 집합인가**: 집합이 고정이어야 "집합 밖 항목 요구 → 계산 전 실패"가 성립한다.
   추정 금지(PRD §6.6)를 지키는 데 필요한 건 *선언*이 아니라 *경계*다.
-- 소비자(StrategyModel/Monitor)는 `AccountRequirement`로 **읽을 항목과 범위를 좁혀** 요구한다 — data 접근과
+- 소비자(StrategyModel/Monitor)는 `AccountHistoryInput`으로 **읽을 항목과 범위를 좁혀** 선언한다 — data 접근과
   같은 원칙이고 `RowsLookback`을 그대로 쓴다. `dataset_id`가 없는 것은 run에 계좌가 하나뿐이라 고를 것이
   없기 때문이고, `scope`가 없는 것은 **필드 이름이 이미 스코프**이기 때문이다(`nav`는 시점당 하나,
   `quantity`는 종목마다). lookback은 **필수** — 없으면 콜백당 O(전체 이력)이 되어 run당 제곱이 된다.
@@ -2293,7 +2308,8 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
 **결정.** valuation은 아무것도 구독하지 않는다. 장부는 **venue가 그 시점에 체결 가능하다고 공표한
 가격**으로 평가된다 — run이 이미 체결하려고 읽는 바로 그 스냅샷이다(§6.2).
 
-`ValuationConfig`는 agenda 하나만 갖는다. `mark_requirement`는 없다.
+`ValuationConfig`는 agenda 하나만 갖는다. `mark_requirement`는 없다. (기록 `148`: `ValuationConfig`
+자체가 사라졌다 — 장부는 체결 시각에 평가된다.)
 
 ```text
  execution snapshot (target ∪ held, 한 번의 조회)
@@ -2486,7 +2502,7 @@ recorder `stage`의 closed values와 timestamp 의미는 다음뿐이다.
 
 | stage | `event_time` |
 |---|---|
-| `DATA_MODEL_MATERIALIZATION` | frozen materialization evaluation time |
+| `DATA_MODEL_MATERIALIZATION` | frozen materialization evaluation time (기록 `148` 이후: datamodel run의 세션 evaluation time) |
 | `STRATEGY_CALLBACK` | current callback occurrence evaluation time |
 
 valuation/monitoring/execution/fill/account evidence는 Model의 free-form recorder가 아니라 typed lifecycle
@@ -2723,7 +2739,7 @@ src/vqapr/
 │   ├── diagnostics.py     판단 시점 진단 — gross/net·집중도·**의도 회전율**
 │   └── intents.py         PortfolioIntent · from_weights · 생성 시 검증 (§5.4)
 │
-├── constraints/     선언 하나, 소비자 셋 (§5.7)
+├── constraints/     선언 하나, 소비자 둘 (§5.7)
 │   ├── constraint.py      Constraint 프로토콜 — 사용자가 구현하는 계약
 │   ├── projection.py      선언 + PIT 관측 → Bounds. 누락 시 0 추정 없이 실패
 │   ├── evaluation.py      weights **또는** holdings → findings
@@ -2748,7 +2764,7 @@ src/vqapr/
 ├── account/         commit authority (닫힘)
 │   ├── account.py         Account + commit/mark + JournalEntry + AccountMode
 │   ├── snapshot.py        AccountSnapshot · AccountMark · AccountState
-│   └── history.py         고정 기록 집합 + AccountRequirement 구독 (§7.3)
+│   └── history.py         고정 기록 집합 + AccountHistoryInput 선언에 묶인 projection (§7.3)
 │
 ├── valuation/       (닫힘)
 │   ├── configuration.py   ValuationConfig + agenda reference
@@ -2758,7 +2774,11 @@ src/vqapr/
 ├── flow/            조립·배달·동결. 경제 규칙 없음 (닫힘)
 │   ├── run.py             RunDefinition · RunResult(limitations 포함)
 │   ├── preflight.py       §12 검사 전부
-│   ├── simulation.py      component occurrence slices + dynamic due execution의 deterministic merge/dispatch
+│   ├── simulation.py      루프: occurrence를 하나씩 어느 phase로 보낼지 정한다 (기록 147)
+│   ├── context.py         phase들이 공유하는 상태(FlowContext)와 실패 봉투, 값 클래스, 패키지 표
+│   ├── callback.py        callback phase — 전략의 decide → 도장 찍힌 intent 수락
+│   ├── execution.py       execution phase — intent → 주문 → 체결 → 계좌 commit (척추 호출 자리)
+│   ├── valuation.py       valuation phase — mark → 계좌, 그리고 monitoring 판정
 │   ├── views.py           requirement → bounded ModelWindow
 │   ├── model_state.py     ModelStateStore 포트 · ModelStateRef 발행
 │   ├── materialize.py     파생 dataset 발행 authority — DataModel 결과·run 배분·run record가 같은 문을 쓴다. **available_at 부여**
@@ -3839,7 +3859,7 @@ class RunDefinition(BaseModel):
     initial_state_ref: ModelStateRef | None
     dataset_bindings: tuple[DatasetBindingRef, ...]
     policies: tuple[PolicyRef, ...]
-    constraints: ConstraintSet | None = None      # 판단·검증·monitoring이 함께 본다 (§5.7)
+    constraints: ConstraintSet | None = None      # 구성과 monitoring이 함께 본다 (§5.7)
     monitoring: MonitoringPolicy | None = None
 ```
 
@@ -3988,7 +4008,7 @@ agent는 **무엇을 만들어야 하는지 먼저 알아야 한다.** 계약을
 | `UC-COST-001`~`004` | §6.2 (`Instrument.kind` + `CostRule` 선택자 + 정확히 하나) + §8.3 |
 | `UC-CLOSED-LOOP-001`, `UC-SCALE-001` | §6.4 + §7.1 |
 | `UC-ACCOUNT-HISTORY-001` | §7.3 |
-| `UC-EXEC-003`, `UC-MONITOR-001` | §5.7 (생산 검증과 같은 `evaluation`) + §8.1 (독립 MONITORING dispatch) |
+| `UC-EXEC-003`, `UC-MONITOR-001` | §5.7 (구성과 같은 선언을 보는 monitoring) + §8.1 (독립 MONITORING dispatch) |
 | `UC-CONSTRAINT-001`, `UC-CONSTRAINT-002`, `UC-CONSTRAINT-ADJUST-001` | §5.7 (선언·투영·평가) + §5.3 (`optimize`) + §5.4 (생성 시 검증) + §11.3 (패턴) + §11.7 (전체 규모) |
 | `UC-LOOKTHROUGH-001`~`003` | §5.3 (`optimize`의 `L`) + §5.6 (`transforms/lookthrough`) + §11.5 (두 축) + §11.7 ④. StrategyModel이 명시적으로 부르고 패키지는 자동 확장하지 않음 |
 | `UC-REPORT-002` | §9.1 (봉투 · 예약 컬럼 · 주문 형태 기록) + §11.7 ⑦ |
@@ -4220,7 +4240,8 @@ wide table 기준"*이다. **§4.2와 §16과 `docs/issues/033`은 반대로 적
 제약 · 확장점 · 표면:
 
 - [ ] `ConstraintSet` 없이 선언한 run이 정상 실행된다 (`UC-CONSTRAINT-001`)
-- [ ] 같은 `evaluation` 함수가 intended weights와 actual holdings 둘 다에 쓰인다
+- [ ] 한계를 넘은 판단이 run을 중단시키지 않고, 그 위반이 monitoring finding으로 남는다
+- [ ] monitoring finding이 어느 제약을 넘었는지와 그때의 한도·점검값을 싣는다
 - [ ] 제약이 요구한 PIT data가 없으면 **portfolio 결과를 만들기 전에** 실패한다
 - [ ] 거래 불가 종목의 비중 고정이 `ConstraintFinding`으로 보고되지 않는다 (제약이 아니라 시장 사실)
 - [ ] 내장 Exchange·Constraint가 쓰는 API 집합이 public surface 안에 있다
@@ -4281,7 +4302,7 @@ C(`038` + `045`/`049`)를 담고 있으므로 `develop`과 다르다
 | 17.1.3 | 한 번 읽은 parquet은 메모리에 올려 두고 cursor만 옮긴다 | **없음** | `035` |
 | 17.1.4 | 병렬 전략이 하나의 parquet을 공유한다 | **없음** | `035`, `049` |
 | 17.2 | StrategyModel과 DataModel은 같은 base에서 나오고 사용법이 닮는다 | **부분** | `036`, `031` |
-| 17.3 | run은 재사용 가능한 객체이고 여러 전략을 담는다 | **부분** | `040` |
+| 17.3 | run은 재사용 가능한 객체이고 여러 전략을 담는다 | **부분** → 기록 `139`에서 지켜짐 | `040` |
 | 17.3.1 | run 설정이 run 기록에 남는다 | **부분** | — |
 | 17.3.2 | run 기록이 strategy file과 fingerprint를 담는다 | **없음** | — |
 | 17.4 | 파일명은 그대로, fingerprint만 바뀌며 tweak 이력이 남는다 | **부분** | — |
@@ -4359,6 +4380,8 @@ agent의 선택이다. **다만 skill은 date x ticker로 매핑되는 데이터
 지키려면 SKILL.md의 default 문장을 바꿔야 하고, 그것은 `049`가 "이 목록에서 가장 싼 항목"으로 지목한
 일과 같은 자리다.
 
+> **2026-09-02 정정 (기록 `137`).** SKILL.md의 권유가 바뀌었다: date × ticker 표는 `grain: instrument_instant`로 등록한다. vendor grain을 보존해야 하면 `rows`로 **함께** 등록하고 DataModel로 panel을 만든다. `grain` 없는 등록은 세 값을 이름으로 대며 거절한다.
+
 ### 17.1.2 유일성 검사는 있고, 그 축이 date x ticker는 아니다
 
 **진술.** pivot 할 때는 date x ticker에 대해 데이터가 유일해야 하고, 이것을 **등록 단계에서** 검사한다.
@@ -4381,6 +4404,8 @@ pivot 하는 필드는 등록의 기본 조건인 timestamp와 instrument id를 
 **판정: 부분.** 검사는 있으나 축이 저자 선언이다. 진술대로 하려면 "이 등록은 date x ticker grain이다"를
 **선언할 수 있어야** 하고, 그때 `check_key`가 `(available_at, instrument)`를 검사한다. 오늘은 그 선언이
 없으므로 grouped 등록만 그 성질을 갖고, 그것도 부수적으로 갖는다.
+
+> **2026-09-02 정정 (기록 `137`).** `grain`이 선언이 됐다. `instrument_instant`는 `(available_at, instrument)`의 유일성을, `instant`는 `available_at`의 유일성을 등록에서 검사하고, `rows`만 저자의 `key_fields`를 검사한다. grouped projection은 구성으로 유일하므로 스캔하지 않는다.
 
 ### 17.1.3 한 번 읽은 parquet은 메모리에 남지 않는다 — 커넥션과 메타데이터만 남는다
 
@@ -4411,6 +4436,8 @@ pushdown과 footer 캐시이지 올려둔 표가 아니다. cursor를 옮기는 
 **판정: 없음.** run 수명 캐시는 있고 데이터 상주는 없다. 진술을 behavior로 만들려면 창이 아니라 **표**가
 run에 붙어야 하고, 그 결정은 `035`에 걸려 있다.
 
+> **2026-09-02 정정 (기록 `137`).** 표가 run에 붙었다. panel grain dataset은 run당 한 번 스캔되어 `Panel`(instant × instrument, Arrow 열)이 되고 이후 모든 읽기는 산술로 자른 슬라이스다. `035`가 여기서 닫혔다.
+
 ### 17.1.4 병렬 전략은 parquet을 공유하지 않는다 — 프로세스마다 자기 duckdb를 연다
 
 **진술.** 병렬로 돌 때 같은 dataset에 의존하는 알파들은 같은 parquet을 여러 번 메모리에 올리지 말고
@@ -4432,6 +4459,8 @@ run에 붙어야 하고, 그 결정은 `035`에 걸려 있다.
 없으면 17.1.4도 없다. 순서가 있다: 먼저 표가 run 수명 객체가 되고, 그 다음에야 그 객체를 여러 전략이
 나눠 쓰는 것이 질문이 된다.
 
+> **2026-09-02 정정 (기록 `137`).** 공유할 대상이 생겼다 — run 하나의 `Panel`은 store에 한 번 만들어지고 같은 run의 전략들이 같은 객체를 본다. 프로세스를 넘는 공유(mmap spill)는 설계 §7-2에 따라 Step 7과 함께 판단한다.
+
 ---
 
 ### 17.2 base는 하나이고, 저자가 만나는 표면은 둘이다
@@ -4442,6 +4471,17 @@ execution을 거치면 StrategyModel, 거치지 않고 loop만 돌며 score를 �
 쓰면 안 된다.**
 
 **트리.** 엔진 층은 진술대로다. **저자가 실제로 상속하는 층은 그렇지 않다.**
+
+> **2026-09-03 정정 (기록 `148`).** 사용법과 mechanism도 닮았다: 둘 다 `runs:`에 등록되는 run의 멤버이고,
+> 같은 `sessions`/`at`으로 호출되며, 같은 `OccurrenceFlow`가 걷는다. StrategyModel은 `CallbackPhase`와
+> 체결·평가 phase를, DataModel은 `DataModelPhase` 하나를 거친다(`flow/loop.py`, `flow/datamodel.py`).
+>
+> **2026-09-02 정정 (기록 `130`·`131`·`132`).** 아래 측정은 그날의 트리다. 지금은 층이 하나다 —
+> `authoring.Model -> DataModel (compute)` / `-> StrategyModel (decide, tables, account_history,
+> save_payload/load_payload)`, `Constraint (project, monitor)`는 `memory`가 없어 `Model` 밖 — 그리고
+> `vqapr.public`은 같은 객체를 재수출하며, 세 scaffold 모두 `from vqapr import authoring as va`를 emit한다.
+> `_internal/strategy_bridge.py`와 `_internal/models/`는 삭제됐다. 측정은 `docs/issues/036`이 닫히는
+> 근거로 남긴다.
 
 엔진 층 — `models/model.py:11`의 `Model(ABC)`가 `memory`와 `requirements()`를 들고 둘이 거기서 나온다:
 
@@ -4501,11 +4541,15 @@ mechanism이 닮는다", "같은 동작에 다른 이름을 쓰지 않는다")�
 - 병렬은 프로세스 N개다(17.1.4).
 - 관련 이슈: `docs/issues/040`. agenda가 전략 하나만 구동하던 cardinality는 **의도가 아니라고 판정**되어
   `strategy_configs`를 `agenda_id`가 아니라 component id로 다시 키잉하기로 했다(owner-decided
-  2026-08-31, 미구현). **그것은 cadence 공유이지 run 공유가 아니다** — 040을 구현해도 run은 여전히 전략
-  하나다.
+  2026-08-31; **구현됨 — 기록 `138`, 2026-09-02**). **그것은 cadence 공유이지 run 공유가 아니다** — 040이
+  구현된 지금도 run은 여전히 전략 하나다.
 
 **판정: 부분.** 객체와 재사용 가능한 필드 집합은 있다. **한 run에 여러 전략**은 없고, 그것을 여는 것은
 `FrozenRun`, run record, run id, lock까지 함께 움직이는 변경이다.
+
+> **2026-09-02 정정 (기록 `139`).** run은 workspace에 **등록되는 선언**이 됐다(`runs:` 섹션, `vqapr run <run-id>`). `RunDefinition`은 id와 값만 들고 `strategies`가 복수다. `FrozenRun`은 run 층 + `FrozenStrategy` 여럿이고, 전략마다 자기 `Account`·자기 `SimulationFlow`·자기 record다. `--jobs N`은 프로세스 N개이고 각자 panel을 만든다(설계 §7-2, 소유자 결정).
+>
+> **2026-09-03 정정 (기록 `148`).** run은 **한 종류의 모델**을 든다 — `strategies:` 또는 `datamodels:`. run 층은 universe·period·`sessions`·`at`(그리고 strategy run이면 venue·execution input·account)이고, agenda·`strategy_configs`·`valuation`·`monitoring`은 표면에서 사라졌다. datamodel run은 `FrozenDataModel` 여럿이고 각자 `DataModelFlow`·자기 record·자기 dataset이다; `--jobs N`은 같다. spec 파일과 `materialize()`는 없다.
 
 ### 17.3.1 run 설정 중 record에 남는 것과 남지 않는 것
 
@@ -4533,6 +4577,10 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 
 **판정: 부분.** 기간과 계약은 남고 **무엇을 무엇에 대해 돌렸는지**는 남지 않는다.
 
+> **2026-09-02 정정 (기록 `139`).** `run.json`이 universe, period, valuation/monitoring agenda, exchange(id·fingerprint), execution input(id·fill 선언, `034`), initial account 선언, dataset(id·source·grain·**source digest**, A7), 그리고 이 run이 이름 댄 전략 목록을 든다. run id는 등록된 이름이다.
+>
+> **2026-09-03 정정 (기록 `148`).** `run.json`에서 valuation/monitoring agenda가 빠지고 `datamodels` 목록(component id·record·dataset_id)이 들어왔다. datamodel 하나의 기록은 `datamodels/<id>@<fp8>/datamodel.json`이다 — component(path·fingerprint 등록값·로드값), 쓴 dataset과 value fields, 세션당 한 줄(evaluation time·output `available_at`·row count), 총 행 수, period.
+
 ### 17.3.2 run 기록은 strategy file도, 전략 자신의 fingerprint도 담지 않는다
 
 **진술.** run 설정에는 strategy file과 strategy fingerprint가 저장되어야 한다.
@@ -4559,6 +4607,8 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 
 **판정: 없음.** 진술이 요구하는 두 값 모두 record에 없다. 17.4가 걸려 있는 자리이기도 하다.
 
+> **2026-09-02 정정 (기록 `139`).** `strategies/<id>@<fp8>/strategy.json`이 `component.path`와 전략 **자신의** fingerprint(등록된 값 `fingerprint`, 로드된 값 `source_digest[component_id]`)를 component별로 든다. 접힌 digest는 없다.
+
 ---
 
 ### 17.4 fingerprint는 바뀌지만, 그 이력을 읽는 경로가 없다
@@ -4584,6 +4634,8 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 **판정: 부분.** 생성은 되고 축적은 되지 않는다. 이것을 닫는 최소 변경은 record에 **component별
 (id, path, fingerprint)**를 적는 것이고, 그러면 17.3.2와 17.6이 같이 움직인다.
 
+> **2026-09-02 정정 (기록 `139`).** 디렉터리 이름이 답이다: `ou-ff5@*`를 세면 tweak 횟수다. record는 등록된 fingerprint로 content-addressed이고, `vqapr list strategies --run <id> --strategy ou-ff5`가 그 전략의 record를 모은다.
+
 ---
 
 ### 17.5 run 기록을 지우는 명령이 없다
@@ -4604,6 +4656,8 @@ run"*(`cli/run.py:385`).
 
 **판정: 없음.**
 
+> **2026-09-02 정정 (기록 `139`).** `vqapr rm run <id> [--keep-latest]` / `vqapr rm strategy <run>/<id>@<fp8>`가 있다. 살아 있는 lock은 거절하고, 죽은 잔해만 지운다.
+
 ### 17.5.1 filter는 run id 부분문자열 하나다
 
 **진술.** CLI를 통해 손쉽게 run을 filter/search 할 수 있어야 한다.
@@ -4618,6 +4672,8 @@ run"*(`cli/run.py:385`).
 **판정: 부분.** 이 항목은 17.3.1과 17.3.2가 record에 필드를 넣어 주면 그 위에서 거의 자동으로 열린다.
 순서가 있다: record가 답을 담지 않으면 filter가 물을 것이 없다.
 
+> **2026-09-02 정정 (기록 `139`).** `list strategies --run <id> [--strategy] [--fingerprint] [--failed-contract] [--since]`. 새 I/O 없이 record의 필드로 거른다.
+
 ---
 
 ### 17.6 run 기록과 strategy 기록은 하나의 아티팩트다
@@ -4630,15 +4686,17 @@ run"*(`cli/run.py:385`).
 ```
 <store.root>/runs/<run-id>/
   record.json               run의 사실 (17.3.1)
-  tables/
-    vqapr.account.jsonl     측정 — mark, 그리고 NAV의 원천
-    vqapr.weight.jsonl      결정 — 목표 비중
-    vqapr.fill.jsonl        체결 — 미체결도 사유와 함께
-    <author>.<table>.jsonl  저자가 선언한 진단 표 (signal이 사는 곳)
+  tables/                   표마다 디렉터리 하나, 청크마다 parquet 파일 하나 (기록 146)
+    vqapr.account/          측정 — mark, 그리고 NAV의 원천
+    vqapr.weight/           결정 — 목표 비중
+    vqapr.fill/             체결 — 미체결도 사유와 함께
+    vqapr.monitoring/       판정 — 선언된 제약이 committed account에서 잰 값과 그때의 한도 (기록 140)
+    <author>.<table>/       저자가 선언한 진단 표 (signal이 사는 곳)
 ```
 
-- `FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.weight")`(`flow/reporting.py:14`) — 모든
-  run이 남기고 아무도 선언하지 않는 셋.
+- `FRAMEWORK_TABLES = ("vqapr.account", "vqapr.fill", "vqapr.monitoring", "vqapr.weight")`
+  (`flow/reporting.py`) — 패키지가 남기고 아무도 선언하지 않는 넷. 앞의 셋은 모든 run이 남기고,
+  `vqapr.monitoring`은 제약과 monitoring agenda를 선언한 run만 남긴다 (기록 `140`).
 - **unfill이 사유와 함께 남는다.** `ZeroDealtReason`(`exchange/fills.py:13`)이
   `ABSENT`/`NONTRADABLE`/`NO_TRADE`/`UNFUNDED` 넷이고, 마지막 하나는 **시장이 거절한 것이 아니라 내
   지갑이 빈 것**이라 따로 이름이 있다 — 앞의 셋을 합산해 *"시장이 무엇을 거절했나"*를 묻는 독자에게
@@ -4654,6 +4712,8 @@ run"*(`cli/run.py:385`).
 **판정: 어긋남 — 다만 데이터의 결손이 아니라 축의 결손이다.** 진술이 요구하는 내용은 전부 디스크에 있다.
 없는 것은 **strategy를 1급 축으로 삼는 두 번째 읽기 경로**이고, 그 축을 만들려면 record가 전략을 이름으로
 불러야 한다(17.3.2).
+
+> **2026-09-02 정정 (기록 `139`).** 축이 생겼다. `run.json`(설정)과 `strategies/<id>@<fp8>/`(output: signal·weight·account·fill 표와 `strategy.json`)로 갈린다. §17.6의 진술 그대로다.
 
 ---
 
@@ -4767,6 +4827,8 @@ lookback을 본다.
 그것은 세 번째 `Lookback` 멤버(가칭 `InstantsLookback` — pivot된 표의 마지막 N개 `available_at`)로
 표현 가능하다. 그러면 §4.2의 논거도 033의 확인도 무효화되지 않는다. **§15-6 참조.**
 
+> **2026-09-02 정정 (기록 `137`).** 결정됐다. `RowsLookback(n)`은 pivot된 표의 마지막 n행(모든 이름에 같은 instant)이고, 이름별로 세는 것은 `InstantsLookback(n)`이며 `grain: rows`에만 허용된다. 타입이 steering을 한다 — 서로 바꿔 쓰면 preflight와 읽기에서 이름을 대며 거절한다. 033이 잰 모양은 panel grain 위에서 구성상 불가능하다.
+
 ---
 
 ### 17.10 calendar lookback은 timedelta이고 모든 이름에 같은 창을 준다
@@ -4789,3 +4851,5 @@ lookback을 본다.
   형태는 모델이 곧바로 버릴 행을 실어 왔기 때문이다.
 
 **판정: 지켜짐.**
+
+> **2026-09-02 (기록 `137`).** 그대로 지켜지며, 이제 panel 위의 슬라이스다: `CalendarLookback`은 instant 축의 두 인덱스가 된다.

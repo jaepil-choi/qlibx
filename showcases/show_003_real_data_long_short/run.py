@@ -34,33 +34,21 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
-    ConstraintSet,
+    DataModelEntry,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MaterializationSpec,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
+    StrategyEntry,
     component_ref,
-    materialize,
     preflight_run,
-    register_agenda,
     register_component,
     register_data_model,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
-    register_strategy_config,
-    register_valuation_config,
     run,
 )
 
@@ -73,8 +61,8 @@ INPUTS = OUTPUTS / "inputs"
 PROJECT = OUTPUTS / "project"
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
-VERIFIED_AGAINST = "vqapr-0.1.0+show-003-working-tree"
-LAST_VERIFIED_AT = "2026-08-17"
+VERIFIED_AGAINST = "vqapr-0.4.1"
+LAST_VERIFIED_AT = "2026-09-03"
 
 SPEC = FixtureSpec(asof="20260331", start="20260401", end="20260529", universe_size=6)
 
@@ -100,23 +88,6 @@ def _sessions(observation_path: Path) -> list[date]:
     return [row[0] for row in rows]
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_003 real KRX trading sessions",
-    )
-
-
 def _write_components() -> dict[str, Path]:
     components = PROJECT / "components"
     components.mkdir(parents=True, exist_ok=True)
@@ -125,25 +96,27 @@ def _write_components() -> dict[str, Path]:
     model.write_text(
         '''from __future__ import annotations
 
-from vqapr.public import DataModel, DataRequirement, RowsLookback
+from vqapr import authoring as va
 
 LOOKBACK = 6
 
 
-class ReversalModel(DataModel):
+class ReversalModel(va.DataModel):
     """Cross-sectionally demeaned 5-session reversal on real closes."""
 
-    def requirements(self):
-        return (
-            DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
-        )
+    def inputs(self):
+        return {
+            "prices": va.DatasetInput(
+                dataset_id="price_daily", fields=("close",), lookback=va.RowsLookback(rows=LOOKBACK)
+            )
+        }
 
     def compute(self, context):
-        observations = context.window.observations(self.requirements()[0]).rows
-        closes: dict[str, list[float]] = {}
-        for row in observations:
-            if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(float(row["close"]))
+        window = context.read("prices", "close")
+        closes = {
+            name: [float(v) for v in window.values[name] if v is not None]
+            for name in window.instruments
+        }
         raw = {
             instrument: -(values[-1] / values[0] - 1.0)
             for instrument, values in closes.items()
@@ -170,11 +143,10 @@ from uuid import NAMESPACE_URL, uuid5
 from vqapr.public import (
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
-    IntentSourceRef,
     Hold,
+    IntentSourceRef,
     PortfolioDirection,
-    PortfolioTarget,
+    Rebalance,
     RowsLookback,
     StrategyModel,
 )
@@ -197,7 +169,7 @@ class ReversalLongShort(StrategyModel):
             DataRequirement.of('reversal_score', 'score', lookback=RowsLookback(1)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         batch = context.window.observations(self.requirements()[0])
         latest = {
             str(row["instrument"]): float(row["score"])
@@ -210,33 +182,19 @@ class ReversalLongShort(StrategyModel):
         ranked = sorted(latest.items(), key=lambda item: (item[1], item[0]))
         book = {instrument: -SIDE_WEIGHT for instrument, _ in ranked[:2]}
         book.update({instrument: SIDE_WEIGHT for instrument, _ in ranked[-2:]})
-        targets = tuple(
-            PortfolioTarget(instrument, weight=book.get(instrument, Decimal("0")))
-            for instrument in sorted(latest)
-        )
-
-        source_refs = []
-        seen = set()
-        for access in context.window.accesses:
-            if access.source_id in seen:
-                continue
-            seen.add(access.source_id)
-            source_refs.append(IntentSourceRef(access.source_id, access.source_digest))
+        weights = {
+            instrument: book.get(instrument, Decimal("0")) for instrument in sorted(latest)
+        }
 
         history = dict(self.memory or {})
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
         history["last_occurrence"] = context.occurrence.occurrence_id
         self.memory = history
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, f"show003/{context.occurrence.occurrence_id}"),
-            "showcase-strategy",
-            targets,
-            Decimal("1"),
-            BUDGET,
-            tuple(source_refs),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=weights,
+            cash_weight=Decimal("1"),
+            budget=BUDGET,
         )
 ''',
         encoding="utf-8",
@@ -248,7 +206,7 @@ class ReversalLongShort(StrategyModel):
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+from vqapr.public import AcademicExchange, ListingAccess, Rebalance, TradeRule
 
 UNIVERSE = __UNIVERSE__
 
@@ -278,7 +236,7 @@ class ShowcaseExchange(AcademicExchange):
 
 from decimal import Decimal
 
-from vqapr.public import Constraint, ConstraintBounds, ConstraintFinding
+from vqapr.public import Constraint, ConstraintBounds, ConstraintFinding, Rebalance
 
 CAP = Decimal("0.30")
 
@@ -290,46 +248,30 @@ class SingleNameCap(Constraint):
     def constraint_id(self):
         return "showcase-constraint"
 
-    def requirements(self):
-        return ()
+    def inputs(self):
+        return {}
 
-    def project(self, window, instruments):
+    def project(self, call):
         return ConstraintBounds(
-            {instrument: -CAP for instrument in instruments},
-            {instrument: CAP for instrument in instruments},
+            lower_weights={instrument: -CAP for instrument in call.instruments},
+            upper_weights={instrument: CAP for instrument in call.instruments},
         )
 
-    def validate_intended(self, intent, bounds):
-        measured = max(
-            (abs(target.weight) for target in intent.targets if target.weight is not None),
-            default=Decimal("0"),
-        )
+    def monitor(self, call, account, bounds):
+        # `account.weights()` is each name's marked value over NAV, and NAV is cash plus the
+        # marked total. The arithmetic used to be written out here from a MarkBatch; doing it in
+        # one place is what keeps every rule measuring the same book the same way.
+        weights = account.weights() if account.nav else {}
+        measured = max((abs(w) for w in weights.values()), default=Decimal("0"))
         excess = measured - CAP if measured > CAP else Decimal("0")
+        offenders = tuple(sorted(n for n, w in weights.items() if abs(w) > CAP))
         return ConstraintFinding(
-            self.constraint_id,
-            measured <= CAP,
-            measured,
-            CAP,
-            excess,
-            {"targets": len(intent.targets)},
-        )
-
-    def evaluate(self, window, account, marks, bounds):
-        nav = marks.total_value + account.cash
-        measured = Decimal("0")
-        if nav > 0:
-            measured = max(
-                (abs(mark.value) / nav for mark in marks.marks),
-                default=Decimal("0"),
-            )
-        excess = measured - CAP if measured > CAP else Decimal("0")
-        return ConstraintFinding(
-            self.constraint_id,
-            measured <= CAP,
-            measured,
-            CAP,
-            excess,
-            {"account_version": account.version, "marked": len(marks.marks)},
+            passed=not offenders,
+            measured=measured,
+            bound=CAP,
+            excess=excess,
+            details={"marked": len(weights)},
+            offenders=offenders,
         )
 ''',
         encoding="utf-8",
@@ -425,6 +367,7 @@ def main() -> None:
             "krx-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "volume": "volume"},
         ),
@@ -454,15 +397,22 @@ def main() -> None:
     )
 
     register_data_model(PROJECT, "showcase-model", paths["model"], "ReversalModel")
-    materialization = materialize(
-        PROJECT,
-        "showcase-model",
-        MaterializationSpec.of("reversal_score", value_fields=("score",)),
-        evaluation_times=tuple(
-            datetime.fromisoformat(f"{day.isoformat()}T16:00:00{OFFSET}") for day in score_days
-        ),
+    # The score is a datamodel RUN (record 148): the same sessions/wall-time shape as the
+    # strategy run below, no venue and no account, one registered dataset at the end.
+    score_definition = RunDefinition(
+        run_id="showcase-score",
+        strategies=(),
         instruments=tuple(universe),
+        datamodels=(DataModelEntry("showcase-model", "reversal_score", ("score",)),),
+        timezone=VENUE,
+        at=time(16, 0),
+        sessions=tuple(score_days),
+        start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
     )
+    materialization = run(
+        PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
+    ).result()
 
     strategy_ref = component_ref(
         "showcase-strategy", ComponentKind.STRATEGY_MODEL, paths["strategy"], "ReversalLongShort"
@@ -476,46 +426,24 @@ def main() -> None:
     for reference in (strategy_ref, exchange_ref, constraint_ref):
         register_component(PROJECT, reference)
 
-    strategy_agenda = _agenda(
-        "showcase-strategy", OperationRole.STRATEGY_CALLBACK, time(8, 30), callback_days
-    )
-    valuation_agenda = _agenda(
-        "showcase-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "showcase-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (strategy_agenda, valuation_agenda, monitoring_agenda):
-        register_agenda(PROJECT, agenda)
-
-    strategy_config = StrategyConfig(
-        strategy_ref, "showcase-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig(
-        "showcase-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("showcase-monitoring", OperationRole.MONITORING)
-    register_strategy_config(PROJECT, strategy_config)
-    register_valuation_config(PROJECT, valuation_config)
-    register_monitoring_policy(PROJECT, monitoring)
 
     definition = RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet((constraint_ref,)),
-        monitoring,
-        exchange_ref,
-        "krx-daily",
-        datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
-        datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
-        AccountSnapshot(0, Decimal("1000000000"), {}),
-        AccountMode.SIGNED,
+        run_id="show003",
+        strategies=(StrategyEntry("showcase-strategy", ("showcase-constraint",)),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(8, 30),
+        exchange="showcase-exchange",
+        execution_input_id="krx-daily",
+        start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        initial_account_snapshot=AccountSnapshot(0, Decimal("1000000000"), {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=tuple(universe),
     )
 
     frozen = preflight_run(PROJECT, definition)
-    result = run(PROJECT, frozen)
+    result = run(PROJECT, frozen).result()
 
     final_state = result.final_state
     account = final_state.account
@@ -542,7 +470,7 @@ def main() -> None:
         score_rows = con.execute(
             f"""
             SELECT available_at, instrument, score
-            FROM read_parquet('{materialization.output_path.as_posix()}')
+            FROM read_parquet('{materialization.output_path.as_posix()}/*.parquet')
             ORDER BY available_at, instrument
             LIMIT 12
             """
@@ -587,10 +515,8 @@ def main() -> None:
             "trading_sessions": fixture["sessions"],
             "first_session": fixture["first_session"],
             "last_session": fixture["last_session"],
-            "materialized_score_rows": sum(
-                invocation.row_count for invocation in materialization.invocations
-            ),
-            "materialized_evaluations": len(materialization.invocations),
+            "materialized_score_rows": materialization.rows,
+            "materialized_evaluations": len(materialization.occurrences),
             "strategy_callbacks": len(callback_days),
             "occurrences_dispatched": len(result.occurrences),
             "dealt_fills": len(dealt),

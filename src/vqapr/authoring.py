@@ -2,8 +2,9 @@
 
 The sole public home for what an author subclasses (``DataModel``, ``StrategyModel``,
 ``Constraint``), receives (``DataCall``, ``StrategyCall``, ``ConstraintCall``,
-``Observation``, ``EconomicAccountView``, ``DeclaredAccountHistory``, ``ConstraintBounds``),
-and returns (``DerivedRow``, ``StrategyResult``, ``ConstraintFinding``).
+``PanelWindow``, ``Observation``, ``EconomicAccountView``, ``AccountHistory``,
+``ConstraintBounds``),
+and returns (``Rows``, ``Hold``/``Rebalance``, ``ConstraintFinding``).
 
 Every public declaration here is a frozen, slotted, keyword-only value unless shown
 otherwise by the approved algebra (``Observation`` is positional; ``DataCall``,
@@ -26,31 +27,44 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Literal
+from typing import BinaryIO, Literal
 
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHistory
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.panel import PanelWindow
+from vqapr.data.requirements import DataRequirement
+from vqapr.domain.memory import ModelMemory
+from vqapr.domain.rows import Rows
 from vqapr.domain.timestamps import require_tz_aware
+from vqapr.evidence.recorder import InvocationRecorder
+from vqapr.evidence.tables import TableSpec
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
+from vqapr.portfolio.weighting import rescale
 
 __all__ = (
+    "AccountHistory",
     "AccountHistoryInput",
     "CalendarLookback",
     "Constraint",
     "ConstraintBounds",
     "ConstraintCall",
     "ConstraintFinding",
+    "DataCall",
+    "DataModel",
     "DatasetInput",
-    "DeclaredAccountHistory",
-    "DiagnosticTable",
     "EconomicAccountView",
     "Hold",
+    "InstantsLookback",
+    "Model",
     "Observation",
+    "PanelWindow",
     "Rebalance",
     "RowsLookback",
     "StrategyCall",
     "StrategyModel",
-    "StrategyResult",
+    "TableSpec",
+    "requirements_for",
 )
 
 
@@ -81,9 +95,7 @@ _ENVELOPE_RESERVED_FIELDS = frozenset(
 )
 """Reserved because the framework stamps these identity/provenance facts itself."""
 
-_HISTORY_ACCOUNT_FIELDS = ("nav", "cash")
-_HISTORY_INSTRUMENT_FIELDS = ("quantity", "price", "observed_at")
-_HISTORY_FIELDS = frozenset(_HISTORY_ACCOUNT_FIELDS) | frozenset(_HISTORY_INSTRUMENT_FIELDS)
+_HISTORY_FIELDS = frozenset(ACCOUNT_FIELDS) | frozenset(INSTRUMENT_FIELDS)
 
 
 def _finite_decimal(value: object, *, name: str) -> Decimal:
@@ -165,67 +177,6 @@ def _copy_weights(values: object, *, name: str) -> Mapping[str, Decimal]:
     return MappingProxyType(dict(sorted(normalized.items())))
 
 
-def _normalize_state(value: object) -> object:
-    """Return a detached, strict-JSON-shaped copy of one call/decision state value.
-
-    `previous_state`/`next_state` are the only permitted cross-callback author state
-    (approved algebra), so they are restricted to strict JSON so replay never depends on
-    an object identity the framework cannot serialize.
-    """
-    active: set[int] = set()
-
-    def visit(item: object) -> object:
-        if item is None or isinstance(item, (bool, str, int)):
-            return item
-        if isinstance(item, float):
-            if not math.isfinite(item):
-                raise ValueError("state floats must be finite")
-            return item
-        if isinstance(item, list):
-            identity = id(item)
-            if identity in active:
-                raise ValueError("state must not contain cycles")
-            active.add(identity)
-            try:
-                return [visit(child) for child in item]
-            finally:
-                active.discard(identity)
-        if isinstance(item, dict):
-            identity = id(item)
-            if identity in active:
-                raise ValueError("state must not contain cycles")
-            if any(not isinstance(key, str) for key in item):
-                raise TypeError("state object keys must be strings")
-            active.add(identity)
-            try:
-                return {key: visit(child) for key, child in item.items()}
-            finally:
-                active.discard(identity)
-        raise TypeError(f"state must contain strict JSON values; got {type(item).__name__}")
-
-    return visit(value)
-
-
-# --------------------------------------------------------------------------------------
-# Lookback declarations.
-# --------------------------------------------------------------------------------------
-
-
-# The lookbacks are the engine's own, re-exported rather than redefined. Record `126`.
-#
-# They used to be a second pair of classes with identical fields and identical validation, and
-# `_internal/pit_bridge.engine_lookback` copied one into the other on every declaration -- a
-# function whose own docstring said "They carry the same economics, so this is a pure
-# translation". Two names for one idea, plus a copy constructor to move between them.
-#
-# The engine's are the survivors because they carry what an author most needs to read: the
-# `docs/issues/033` warning that `RowsLookback` counts rows PER INSTRUMENT, so a sparse name
-# reaches further back than a liquid one and a cross-sectional model built on it is silently
-# wrong. That paragraph did not exist on the authoring copy, which is the copy authors read.
-#
-# Neither is keyword-only, so `RowsLookback(rows=6)` and `RowsLookback(6)` both work and no
-# authored model changes.
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DatasetInput:
     """One declared, aliasable read of a registered dataset."""
@@ -239,13 +190,22 @@ class DatasetInput:
         fields = _unique_identifiers(self.fields, name="fields")
         _reject_reserved(fields, _ROW_RESERVED_FIELDS, name="fields")
         object.__setattr__(self, "fields", fields)
-        if not isinstance(self.lookback, (RowsLookback, CalendarLookback)):
-            raise TypeError("lookback must be a RowsLookback or CalendarLookback")
+        if not isinstance(self.lookback, (RowsLookback, CalendarLookback, InstantsLookback)):
+            raise TypeError("lookback must be a RowsLookback, CalendarLookback or InstantsLookback")
 
 
 @dataclass(frozen=True, slots=True)
 class Observation:
-    """One PIT row returned from a declared, aliased read."""
+    """One PIT row returned from a declared, aliased read.
+
+    Constructing one by hand validates every field: the instrument id is a non-empty identifier,
+    `available_at` is tz-aware, every value key is an identifier and every value a portable
+    scalar. A row the framework itself produced is built through `_framework_row` instead and
+    skips all of that -- `docs/issues/054` measured the per-row re-check at 70% of a `rows` read,
+    proving per value what the registration proved once (`docs/issues/035`: validation happens at
+    registration, and the read path is trusted). The distinction is who built the row, not
+    whether rows are checked: an author's `Observation(values={"a b": 1})` is still refused.
+    """
 
     instrument_id: str
     available_at: datetime
@@ -258,39 +218,134 @@ class Observation:
         object.__setattr__(self, "available_at", _tz_aware(self.available_at, name="available_at"))
         object.__setattr__(self, "values", _copy_values(self.values, name="values"))
 
+    @classmethod
+    def _framework_row(
+        cls, instrument_id: str, available_at: datetime, values: dict[str, object]
+    ) -> Observation:
+        """An observation from a row the scan returned: no validation, same immutable shape.
 
-# The DataModel contract is NOT here, and record `129` is why it left.
-#
-# `Output`, `DerivedRow`, `DataCall` and `DataModel` stood in this file and **no component
-# written against them could ever be registered**: `extension/loading.load_data_model` requires
-# `models.data_model.DataModel`, and `issubclass(authoring.DataModel, that)` was False. The
-# review that measured it is `docs/refactoring/2026-08-31-post-step-07-review.md` R5. Four
-# contract types, an invocation boundary under `_internal`, and their tests -- all of it
-# reachable only from the tests written for it.
-#
-# The surviving contract is `vqapr.models.data_model.DataModel`, exported as
-# `vqapr.public.DataModel`, and it is the one every DataModel in the tree and in the research
-# workspace already implements. It is not imported here: `models/` imports this module, so a
-# re-export would close a cycle. Giving both roles one import path is the next step and it
-# moves the shared value types down to a leaf rather than pulling `models/` up.
+        The field names are the alias's declared `fields`, validated when the `DatasetInput` was
+        declared; `available_at` comes from the scan's own `TIMESTAMPTZ` column, which cannot
+        hold a naive value; the values are what the parquet column holds, which `_scalar` would
+        pass through unchanged. `values` is wrapped, not copied: the caller built that dict for
+        this row and hands it over.
+        """
+        observation = object.__new__(cls)
+        object.__setattr__(observation, "instrument_id", instrument_id)
+        object.__setattr__(observation, "available_at", available_at)
+        object.__setattr__(observation, "values", MappingProxyType(values))
+        return observation
+
+
+class DataCall(ABC):
+    """The complete, bounded capability surface for one DataModel invocation."""
+
+    @property
+    @abstractmethod
+    def evaluation_time(self) -> datetime:
+        """The single frozen PIT cutoff this invocation computes for."""
+
+    @abstractmethod
+    def read(self, alias: str, field: str) -> PanelWindow:
+        """One field of a panel-grain alias declared in `DataModel.inputs()`, as a 2d window.
+
+        `instants` x `instruments`, a slice of the panel the run built once; `current()` is the
+        cross-section at the window's last instant, `latest()` the newest value per name anywhere
+        in it. Refused on a `rows`-grain alias, which is read with `rows`.
+        """
+
+    @abstractmethod
+    def rows(self, alias: str) -> tuple[Observation, ...]:
+        """PIT observations for one `rows`-grain alias declared in `DataModel.inputs()`.
+
+        One `Observation` per (instant, instrument), every declared field on it. Refused on a
+        panel-grain alias, which is read with `read(alias, field)`.
+        """
+
+
+def requirements_for(declaration: DatasetInput) -> tuple[DataRequirement, ...]:
+    """One declared alias, as the engine's requirements: one per field (`docs/issues/049`).
+
+    The single place the fan-out is written. Every role that declares reads derives its
+    requirements through here, so a Model cannot declare one thing to preflight and read another
+    at the callback.
+    """
+    if not isinstance(declaration, DatasetInput):
+        raise TypeError("declaration must be an authoring.DatasetInput")
+    return tuple(
+        DataRequirement.of(declaration.dataset_id, field, lookback=declaration.lookback)
+        for field in declaration.fields
+    )
+
+
+class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
+    """What every Model role shares: a declaration of reads, and portable memory.
+
+    **The author's base class, so it lives on the author's surface.** It used to live in an
+    engine-side `models/` package while an authoring `DataModel` and `StrategyModel` were defined
+    here without it -- which is why the two authored kinds shared no ancestor, and why an author
+    who wrote against this module got a class the loader could not run (`docs/issues/036`). The
+    engine-side names were re-exports of these until the one-shape campaign deleted them.
+
+    **Both roles declare their reads here, in one place and one shape.** A first-time user once had
+    to build a ten-row table of the ways authoring the two roles differed; the owner ruled that
+    *"the size of the current difference is itself the defect"*. `inputs()` is the one shape.
+
+    `memory` is the small strict-JSON state a Model carries between invocations. A DataModel that
+    uses it becomes order-dependent (architecture 4.4); one that does not may be computed in any
+    order.
+    """
+
+    memory: ModelMemory = None
+
+    def inputs(self) -> Mapping[str, DatasetInput]:
+        """Declare every aliased dataset read this Model performs. Empty by default.
+
+        The alias is the author's own name for a read, and it is what `read(alias)` takes on the
+        call. Declaring nothing is legitimate: a Model may derive its values from memory alone.
+
+        **Evaluated before `memory` exists.** Registration and preflight call this on a fresh
+        instance, before any `initial_model_memory` is applied or a snapshot restored, and the
+        run refuses a model whose requirements then differ from the frozen ones. So the reads
+        cannot depend on memory or on a run's per-model settings (`docs/issues/065`): a family
+        of settings that changes WHAT is read is a family of registered components.
+        """
+        return {}
+
+    def requirements(self) -> tuple[DataRequirement, ...]:
+        """Every observation requirement, derived from `inputs()` rather than written twice."""
+        return tuple(
+            requirement
+            for declaration in self.inputs().values()
+            for requirement in requirements_for(declaration)
+        )
+
+
+class DataModel(Model):
+    """A Model whose result is values: data in, a dataset out, and no account in between.
+
+    **What makes it a DataModel is that nothing it returns is executed** (architecture 4.4). It
+    sees no account, passes through no venue, and its rows become a registered dataset that any
+    number of runs may then read. The other role, `StrategyModel`, differs by exactly that.
+
+    **A row is a dict**: `{"instrument": name, "<field>": value, ...}`, one per instrument, with
+    the fields the materialization declared and nothing the package owns -- `available_at` is
+    stamped by the framework, and a row that tries to carry one is refused. The shape of the
+    dataset being produced is a declaration and lives with the materialization; what the model
+    does is compute, and it says nothing about the schema twice.
+
+    Reads arrive as `Observation` records through `call.read(alias)`, the same verb every role
+    uses.
+    """
+
+    @abstractmethod
+    def compute(self, call: DataCall) -> Rows:
+        """Compute this instant's rows from the declared reads. One dict per instrument."""
+
 
 # --------------------------------------------------------------------------------------
 # StrategyModel algebra.
 # --------------------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class DiagnosticTable:
-    """Preparation-time schema for one table of StrategyModel diagnostics."""
-
-    table_id: str
-    semantic_fields: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "table_id", _identifier(self.table_id, name="table_id"))
-        fields = _unique_identifiers(self.semantic_fields, name="semantic_fields")
-        _reject_reserved(fields, _ENVELOPE_RESERVED_FIELDS, name="semantic_fields")
-        object.__setattr__(self, "semantic_fields", fields)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -306,8 +361,8 @@ class AccountHistoryInput:
         if unknown:
             raise ValueError(
                 f"unknown account history fields {unknown}; "
-                f"account series are {_HISTORY_ACCOUNT_FIELDS} and "
-                f"instrument panels are {_HISTORY_INSTRUMENT_FIELDS}"
+                f"account series are {ACCOUNT_FIELDS} and "
+                f"instrument panels are {INSTRUMENT_FIELDS}"
             )
         object.__setattr__(self, "fields", fields)
         if not isinstance(self.lookback, RowsLookback):
@@ -316,16 +371,37 @@ class AccountHistoryInput:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EconomicAccountView:
-    """A bounded, immutable snapshot of the committed Account for one callback."""
+    """A bounded, immutable snapshot of the committed Account for one callback.
+
+    **`values` was missing, and its absence made a whole rule shape inexpressible.** This view
+    carried `positions` -- quantities -- plus one aggregate `nav`, and a weight is
+    `value / nav`. Quantities cannot become weights without prices, so no weight-based rule
+    could be written against this type at all, which is what both shipped Constraints are. The
+    gap went unnoticed because monitoring ran on the engine's `MarkBatch` instead, on the other
+    side of the surface split this contract exists to remove.
+
+    So `values` is the marked value per instrument. Quantities stay, because a rule about lot
+    sizes or a short position asks about quantity and would otherwise have to divide back out.
+
+    **`values` is `None` where the framework has no marks to offer, and that is not zero.** A
+    Strategy callback fires before the occurrence it decides for is executed or valued, so what
+    it sees is the previous valuation's marks -- committed, and therefore point-in-time -- and
+    before the first valuation there are none; a monitoring Constraint fires against a marked
+    account and always has them. An empty mapping would make `weight()` return a confident zero
+    for every name and every weight rule report `passed`, so absence refuses instead.
+    """
 
     cash: Decimal
     positions: Mapping[str, Decimal]
     nav: Decimal | None
     nav_observed_at: datetime | None
+    values: Mapping[str, Decimal] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cash", _finite_decimal(self.cash, name="cash"))
         object.__setattr__(self, "positions", _copy_weights(self.positions, name="positions"))
+        if self.values is not None:
+            object.__setattr__(self, "values", _copy_weights(self.values, name="values"))
         if (self.nav is None) != (self.nav_observed_at is None):
             raise ValueError("nav and nav_observed_at must both be set or both be None")
         if self.nav is not None:
@@ -341,103 +417,41 @@ class EconomicAccountView:
         checked = _identifier(instrument_id, name="instrument_id")
         return self.positions.get(checked, Decimal(0))
 
-
-class DeclaredAccountHistory:
-    """A bounded, read-only, oldest-first projection of committed account history.
-
-    Built by the framework from exactly one `AccountHistoryInput` declaration (or none).
-    Reading a field that was not declared, or reading it through the wrong accessor,
-    raises rather than silently returning nothing.
-    """
-
-    __slots__ = ("_fields", "_lookback", "_panel", "_series")
-
-    def __init__(
-        self,
-        *,
-        fields: tuple[str, ...] = (),
-        lookback: RowsLookback | None = None,
-        series: Mapping[str, Sequence[Decimal]] | None = None,
-        panel: Mapping[str, Mapping[str, Sequence[object]]] | None = None,
-    ) -> None:
-        if fields and lookback is None:
-            raise ValueError("declared fields require a lookback")
-        resolved_lookback = lookback if lookback is not None else RowsLookback(rows=1)
-        if not isinstance(resolved_lookback, RowsLookback):
-            raise TypeError("lookback must be a RowsLookback")
-        normalized_fields = tuple(fields)
-        if normalized_fields:
-            normalized_fields = _unique_identifiers(normalized_fields, name="fields")
-            unknown = sorted(set(normalized_fields) - _HISTORY_FIELDS)
-            if unknown:
-                raise ValueError(f"unknown account history fields {unknown}")
-
-        rows = resolved_lookback.rows
-        series_source = series or {}
-        panel_source = panel or {}
-
-        built_series: dict[str, tuple[Decimal, ...]] = {}
-        for field in _HISTORY_ACCOUNT_FIELDS:
-            if field not in normalized_fields:
-                continue
-            values = tuple(series_source.get(field, ()))[-rows:]
-            built_series[field] = tuple(
-                _finite_decimal(value, name=f"{field} history value") for value in values
+    def value(self, instrument_id: str) -> Decimal:
+        """The marked value held, or `Decimal(0)` for a valid absent instrument."""
+        checked = _identifier(instrument_id, name="instrument_id")
+        if self.values is None:
+            raise ValueError(
+                "this view carries no marked values; it was built at an instant the framework "
+                "had no marks to offer, and a zero here would be an answer rather than a gap"
             )
+        return self.values.get(checked, Decimal(0))
 
-        built_panel: dict[str, Mapping[str, tuple[object, ...]]] = {}
-        for field in _HISTORY_INSTRUMENT_FIELDS:
-            if field not in normalized_fields:
-                continue
-            source = panel_source.get(field, {})
-            if not isinstance(source, Mapping):
-                raise TypeError(f"{field} panel must be a mapping")
-            instrument_series: dict[str, tuple[object, ...]] = {}
-            for instrument_id, values in source.items():
-                checked_instrument = _identifier(instrument_id, name="instrument_id")
-                trimmed = tuple(values)[-rows:]
-                if field == "observed_at":
-                    checked_values: tuple[object, ...] = tuple(
-                        _tz_aware(value, name="observed_at") for value in trimmed
-                    )
-                else:
-                    checked_values = tuple(
-                        _finite_decimal(value, name=f"{field} panel value") for value in trimmed
-                    )
-                instrument_series[checked_instrument] = checked_values
-            built_panel[field] = MappingProxyType(dict(sorted(instrument_series.items())))
+    def weight(self, instrument_id: str) -> Decimal:
+        """This instrument's share of NAV, signed.
 
-        self._fields = normalized_fields
-        self._lookback = resolved_lookback
-        self._series = MappingProxyType(built_series)
-        self._panel = MappingProxyType(built_panel)
-
-    @property
-    def fields(self) -> tuple[str, ...]:
-        return self._fields
-
-    @property
-    def lookback(self) -> RowsLookback:
-        return self._lookback
-
-    def _require_declared(self, field: str, allowed: tuple[str, ...]) -> None:
-        if field not in allowed:
-            raise KeyError(f"{field!r} is not available through this accessor")
-        if field not in self._fields:
-            raise KeyError(
-                f"{field!r} was not declared in this StrategyModel's AccountHistoryInput; "
-                "a Model reads only what it declared"
+        The one derivation every weight-based rule needs, written once here rather than in each
+        Constraint that would otherwise divide by a NAV it had to reassemble. Refuses rather than
+        returning zero when NAV is absent or zero: a weight against no NAV is not a small number,
+        it is an undefined one, and a rule that silently measured zero would report `passed`.
+        """
+        if self.nav is None or not self.nav:
+            raise ValueError(
+                "weight is undefined without a non-zero nav; this view was built at an instant "
+                "the account had not been marked"
             )
+        return self.value(instrument_id) / self.nav
 
-    def series(self, field: Literal["nav", "cash"]) -> tuple[Decimal, ...]:
-        self._require_declared(field, _HISTORY_ACCOUNT_FIELDS)
-        return self._series[field]
-
-    def panel(
-        self, field: Literal["quantity", "price", "observed_at"]
-    ) -> Mapping[str, tuple[object, ...]]:
-        self._require_declared(field, _HISTORY_INSTRUMENT_FIELDS)
-        return self._panel[field]
+    def weights(self) -> Mapping[str, Decimal]:
+        """Every marked name's share of NAV, signed. The whole book as a weight vector."""
+        if self.values is None:
+            raise ValueError(
+                "this view carries no marked values; it was built at an instant the framework "
+                "had no marks to offer, and an empty book here would be an answer rather than a gap"
+            )
+        return MappingProxyType(
+            {instrument_id: self.weight(instrument_id) for instrument_id in sorted(self.values)}
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -465,6 +479,17 @@ class ConstraintBounds:
     def upper_weight(self, instrument_id: str) -> Decimal:
         checked = _identifier(instrument_id, name="instrument_id")
         return self.upper_weights[checked]
+
+    def detached(self) -> ConstraintBounds:
+        """A fresh value with no caller-owned mapping aliases.
+
+        `__post_init__` already copies into read-only views, so this is defensive rather than
+        load-bearing -- and it is kept because `StrategyModelContext` calls it on a value it did
+        not construct, where "already copied" is an assumption about someone else's code.
+        """
+        return ConstraintBounds(
+            lower_weights=self.lower_weights, upper_weights=self.upper_weights
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -531,9 +556,37 @@ def _relative_side(
     return side
 
 
+_MAX_OFFENDERS = 5
+"""How many offending weights a `Rebalance` refusal quotes; the rest are counted."""
+
+
+def _offenders(weights: Mapping[str, Decimal]) -> str:
+    """`name=value` for the first few offending weights, and a count of the rest.
+
+    Bounded the way `Failure.examples` is bounded: a thousand-name book that misses a bound on
+    every name should say so in one line, not in a thousand.
+    """
+    shown = [f"{name}={value}" for name, value in list(weights.items())[:_MAX_OFFENDERS]]
+    rest = len(weights) - len(shown)
+    return ", ".join(shown) + (f", and {rest} more" if rest > 0 else "")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Rebalance:
-    """A Strategy decision naming one complete desired portfolio."""
+    """A Strategy decision naming one complete desired portfolio.
+
+    Three ways in, and the direct constructor is the last of them:
+
+    - `Rebalance.of(long=, short=, invested=)` -- relative conviction per side, split evenly.
+    - `Rebalance.signed(weights, gross=)` -- signed weights, split as the signal produced them.
+    - `Rebalance(target_weights=, cash_weight=, budget=)` -- everything stated, nothing derived.
+
+    Weights are validated **to the last digit**: `sum(target_weights) + cash_weight` must equal
+    one exactly, and a value off by a single ulp is refused by the same invariant that catches a
+    real mistake. That is why the two constructors exist, and why anyone building this directly
+    should quantise and settle through `vqapr.portfolio.weighting.rescale` on the canonical grid
+    `vqapr.portfolio.optimize.QUANTUM` rather than by hand (`docs/issues/075`).
+    """
 
     target_weights: Mapping[str, Decimal]
     cash_weight: Decimal
@@ -574,7 +627,9 @@ class Rebalance:
 
         Two sides are currently split evenly, so a 130/30 cannot be expressed through this
         constructor either. Stated rather than implied, because the even split is a choice and not
-        a law.
+        a law. **`Rebalance.signed` is the constructor for a book the signal splits**: it takes
+        signed weights, normalises them to a gross of your choosing, and leaves the long/short
+        ratio exactly as the signal produced it.
 
         Doing it by hand is also where the errors live: the sum must land on one EXACTLY, and a
         weight that misses by a single ulp is refused by the same invariant that catches a real
@@ -583,6 +638,14 @@ class Rebalance:
         `invested` is the fraction of NAV to put to work; the remainder stays in cash. Passing a
         short book implies a signed budget, and a long-only book keeps `LONG_ONLY`, so the budget
         follows from what was actually asked for rather than being declared a second time.
+
+        The two budgets this makes, as values: a long-only book gets targets in `[0, 1]` and cash
+        in `[0, 1]`; a signed book gets targets in `[-1, 1]` and cash in `[-1, 2]`, the upper bound
+        being 2 because selling short raises cash.
+
+        Quantising and settling belong to `vqapr.portfolio.weighting.rescale`, which this calls
+        (`docs/issues/075`). Each side lands EXACTLY on its target, on the canonical grid
+        `QUANTUM`, with the rounding residual on that side's largest position.
         """
         longs = _relative_side(long, name="long")
         shorts = _relative_side(short, name="short")
@@ -610,9 +673,17 @@ class Rebalance:
             )
 
         # Both sides present means the book is signed and each side takes half the invested
-        # fraction. One side alone takes all of it.
+        # fraction. One side alone takes all of it. Quantised here because it becomes a side
+        # TARGET below, and `rescale` refuses a target that is not itself on the grid -- weights
+        # on a grid cannot sum to a total that is off it.
         sides = (bool(longs), bool(shorts))
-        per_side = share / 2 if all(sides) else share
+        per_side = (share / 2 if all(sides) else share).quantize(QUANTUM)
+        if per_side == 0:
+            raise ValueError(
+                f"invested {share} is smaller than the canonical grid {QUANTUM} once split "
+                f"between {'two sides' if all(sides) else 'the book'}, so every weight would "
+                "round to zero. Ask for at least one grid step per side"
+            )
         weights: dict[str, Decimal] = {}
         for names, sign in ((longs, Decimal(1)), (shorts, Decimal(-1))):
             if not names:
@@ -621,22 +692,29 @@ class Rebalance:
             for instrument, conviction in names.items():
                 weights[instrument] = sign * per_side * conviction / total
 
-        # Round onto the canonical grid, then settle the rounding residual ON THE BOOK rather than
-        # in cash.
+        # `rescale` owns quantising and settling, and this constructor stopped owning a second
+        # copy of it (`docs/issues/075`). It quantises onto the grid FIRST and settles each side's
+        # rounding residual afterwards, on that side's largest position by absolute size -- where
+        # the crumb is proportionally smallest, and where it cannot move cash across a bound.
         #
-        # Cash looks like the natural place for it -- it is the line nobody expressed a view about
-        # -- and that is wrong here for a measurable reason. A dollar-neutral signed book nets to
-        # zero, so cash is 1; three shorts at -0.5/3 do not divide evenly, and the leftover
-        # -1e-12 pushes cash to 1.000000000001, one crumb ABOVE the fully-uninvested bound. The
-        # book is arithmetically fine and the declaration is refused.
+        # Settling in CASH is the obvious-looking alternative and is wrong for a measurable
+        # reason: a dollar-neutral signed book nets to zero, so its cash is 1, and three shorts at
+        # -0.5/3 leave -1e-12, which pushes cash to 1.000000000001 -- one crumb ABOVE the
+        # fully-uninvested bound. The book is arithmetically fine and the declaration is refused.
         #
-        # So the residual goes back to the largest position by absolute size, where it is a
-        # relatively smaller perturbation than anywhere else and where it cannot move cash across
-        # a bound. `invested` is then honoured exactly, which is what the author actually asked
-        # for.
-        quantised = {
-            instrument: value.quantize(QUANTUM) for instrument, value in sorted(weights.items())
-        }
+        # PER SIDE, not per book, which is what changed here. Settling one book-wide residual on
+        # the single largest position let a crumb from the SHORT side land on a LONG name, so a
+        # book asking for `invested=1` could come out with gross 1.000000000002 -- and `invested`
+        # is documented as gross exposure. Each side now lands exactly on its own target, so gross
+        # is exact and the two sides of a neutral book cancel on the same grid steps.
+        quantised = dict(
+            rescale(
+                dict(sorted(weights.items())),
+                long=per_side if longs else Decimal(0),
+                short=-per_side if shorts else Decimal(0),
+                grid=QUANTUM,
+            )
+        )
 
         # Cash is what the book does NOT hold net, and for a signed book that is not
         # `1 - invested`. `invested` is GROSS exposure: a dollar-neutral long/short book puts the
@@ -644,15 +722,9 @@ class Rebalance:
         # from the gross fraction produced a residual of ~1 and a refusal on a book that is
         # arithmetically perfect.
         #
-        # So cash is the net residual, and the rounding crumb is settled on the largest position
-        # rather than in cash -- where, for that same neutral book, a -1e-12 leftover would push
-        # cash one step past fully-uninvested and be refused for a rounding artifact.
-        exact = sum(weights.values(), Decimal(0))
-        cash = (Decimal(1) - exact).quantize(QUANTUM)
-        residual = Decimal(1) - cash - sum(quantised.values(), Decimal(0))
-        if residual and quantised:
-            anchor = max(quantised, key=lambda name: (abs(quantised[name]), name))
-            quantised[anchor] += residual
+        # Exact by construction now: every side landed on its target, so the sum is on the grid
+        # and no second settle is needed here.
+        cash = Decimal(1) - sum(quantised.values(), Decimal(0))
         if shorts:
             direction = PortfolioDirection.SIGNED
             bounds = (Decimal(-1), Decimal(1))
@@ -679,6 +751,100 @@ class Rebalance:
             ),
         )
 
+    @classmethod
+    def signed(
+        cls,
+        weights: Mapping[str, Decimal | int | float | str],
+        *,
+        gross: Decimal | int | float | str = 1,
+    ) -> Rebalance:
+        """Build a signed book from signed weights, split exactly as the signal produced them.
+
+        This is the market-neutral residual book `docs/issues/075` was filed on, and the thing
+        `of` structurally cannot say. `of` takes two mappings and splits `invested` EVENLY between
+        them, so it tops out at half a textbook $1-long/$1-short book (`docs/issues/018`) and can
+        never express a 130/30 or a book whose signal happened to find more shorts than longs.
+        Here the ratio is the signal's: pass what the signal produced, say how large the book
+        should be, and the long/short split falls out of the weights themselves.
+
+        **The sign carries the side.** A negative weight is a short, which is the opposite
+        convention to `of` -- there, the side is chosen by WHICH MAPPING a name appears in and a
+        negative number is refused. The two constructors take different inputs, so they can afford
+        different conventions; what they must not do is accept the same input and mean different
+        things by it.
+
+        `gross` is the sum of ABSOLUTE weights, so `gross=1` on a dollar-neutral book is 0.5 long
+        and 0.5 short, and `gross=2` is the textbook $1/$1 book `of` cannot reach. It is not
+        bounded at 1: leverage is a real declaration, and the budget below admits positions in
+        `[-1, 1]` with cash in `[-1, 2]`, which is what actually constrains the book.
+
+        Cash is the NET residual, `1 - sum(weights)` -- not `1 - gross`. A dollar-neutral book is
+        fully invested and nets to zero, so its cash is 1; a book that is only short holds more
+        than its NAV in cash by exactly what it shorted.
+
+        A name whose weight is zero is kept as a flat position rather than dropped: a signal that
+        scores a name at zero has said something about it, and silently removing the name would
+        make the returned book disagree with the mapping the author passed.
+
+        Quantising and settling are `vqapr.portfolio.weighting.rescale`'s, on the canonical grid,
+        each side landing exactly on its own target.
+        """
+        if not isinstance(weights, Mapping) or not weights:
+            raise TypeError("weights must be a non-empty mapping of instrument to signed weight")
+        declared: dict[str, Decimal] = {}
+        for instrument, raw in weights.items():
+            value = _as_decimal(raw, name=f"weights[{instrument!r}]")
+            if not value.is_finite():
+                raise ValueError(f"weights[{instrument!r}] must be finite")
+            declared[_identifier(instrument, name="instrument")] = value
+
+        size = _as_decimal(gross, name="gross")
+        if size <= 0:
+            raise ValueError(
+                f"gross must be greater than zero; got {size}. It is the sum of ABSOLUTE weights, "
+                "so a dollar-neutral book at gross=1 is 0.5 long and 0.5 short"
+            )
+
+        total = sum((abs(value) for value in declared.values()), Decimal(0))
+        if total == 0:
+            raise ValueError(
+                "a Rebalance needs at least one non-zero weight; every weight given was zero, "
+                "and a book of nothing has no side to size"
+            )
+
+        # The two side targets, in the ratio the SIGNAL produced -- this is the whole point of
+        # this constructor. Quantised because `rescale` refuses a target that is not itself on
+        # the grid, which can leave `long + (-short)` one step away from `gross`; that is the
+        # grid's own resolution and not a miscalculation.
+        longs = sum((value for value in declared.values() if value > 0), Decimal(0))
+        shorts = sum((value for value in declared.values() if value < 0), Decimal(0))
+        long_target = (size * longs / total).quantize(QUANTUM)
+        short_target = (size * shorts / total).quantize(QUANTUM)
+        for name, side, target in (("long", longs, long_target), ("short", shorts, short_target)):
+            if side != 0 and target == 0:
+                raise ValueError(
+                    f"the {name} side is {side} of a gross {size}, which is smaller than the "
+                    f"canonical grid {QUANTUM} and would round the whole side to zero. Raise "
+                    "gross, or drop the side from the weights"
+                )
+
+        book = dict(rescale(declared, long=long_target, short=short_target, grid=QUANTUM))
+        return cls(
+            target_weights=book,
+            cash_weight=Decimal(1) - sum(book.values(), Decimal(0)),
+            # SIGNED unconditionally, even for an all-positive mapping: the author reached for the
+            # signed constructor and the next signal may find a short. A budget that flipped to
+            # LONG_ONLY on the days a signal happened to find none would refuse the book on the
+            # first day it did.
+            budget=Budget(
+                direction=PortfolioDirection.SIGNED,
+                cash_lower=Decimal(-1),
+                cash_upper=Decimal(2),
+                target_lower=Decimal(-1),
+                target_upper=Decimal(1),
+            ),
+        )
+
     def __post_init__(self) -> None:
         weights = _copy_weights(self.target_weights, name="target_weights")
         object.__setattr__(self, "target_weights", weights)
@@ -686,60 +852,59 @@ class Rebalance:
         object.__setattr__(self, "cash_weight", cash)
         if not isinstance(self.budget, Budget):
             raise TypeError("budget must be a Budget")
-        if not self.budget.validates_cash(cash):
-            raise ValueError("cash_weight is outside the declared budget")
-        if weights:
-            if any(not self.budget.validates_target(value) for value in weights.values()):
-                raise ValueError("target_weights are outside the declared budget bounds")
-            if self.budget.direction is PortfolioDirection.LONG_ONLY and any(
-                value < 0 for value in weights.values()
-            ):
-                raise ValueError("long_only budgets forbid negative target_weights")
-            if sum(weights.values(), Decimal(0)) + cash != 1:
-                raise ValueError("target_weights plus cash_weight must equal one")
-        elif cash != 1:
-            raise ValueError("an empty complete position set requires cash_weight equal to one")
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class StrategyResult:
-    """A StrategyModel's complete, immutable callback result.
-
-    `next_state` and `diagnostics` default to the empty case, because most strategies carry no
-    cross-callback state and emit no diagnostic tables, and requiring them made every author write
-    `next_state=None, diagnostics={}` on every return. A default that matches the common case is
-    not a shortcut here: a strategy that DOES carry state still has to say so, and saying so is
-    what makes the cadence rule replayable.
-    """
-
-    decision: Hold | Rebalance
-    next_state: object = None
-    diagnostics: Mapping[str, tuple[Mapping[str, object], ...]] = MappingProxyType({})
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.decision, (Hold, Rebalance)):
-            raise TypeError("decision must be a Hold or Rebalance")
-        object.__setattr__(self, "next_state", _normalize_state(self.next_state))
-        if not isinstance(self.diagnostics, Mapping):
-            raise TypeError("diagnostics must be a mapping")
-        normalized: dict[str, tuple[Mapping[str, object], ...]] = {}
-        for table_id, rows in self.diagnostics.items():
-            checked_table_id = _identifier(table_id, name="diagnostics table_id")
-            if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
-                raise TypeError(f"diagnostics[{checked_table_id!r}] must be a sequence of rows")
-            normalized[checked_table_id] = tuple(
-                _copy_values(
-                    row,
-                    name=f"diagnostics[{checked_table_id!r}] row",
-                    reserved=_ENVELOPE_RESERVED_FIELDS,
-                )
-                for row in rows
+        # Every refusal here names the value it saw and the bound it crossed. These five said
+        # only the rule -- `cash_weight is outside the declared budget` -- and an author whose
+        # quantised shorts summed to -1.000000000001 had to reason the cash of 2.000000000001 and
+        # the bound of 2 out by hand, in a run of eight strategies (`docs/issues/071`).
+        budget = self.budget
+        if not budget.validates_cash(cash):
+            raise ValueError(
+                f"cash_weight {cash} is outside the declared budget "
+                f"[{budget.cash_lower}, {budget.cash_upper}]"
             )
-        object.__setattr__(self, "diagnostics", MappingProxyType(dict(sorted(normalized.items()))))
+        if weights:
+            outside = {
+                name: value
+                for name, value in weights.items()
+                if not budget.validates_target(value)
+            }
+            if outside:
+                raise ValueError(
+                    "target_weights are outside the declared budget bounds "
+                    f"[{budget.target_lower}, {budget.target_upper}]: {_offenders(outside)}"
+                )
+            if budget.direction is PortfolioDirection.LONG_ONLY:
+                negative = {name: value for name, value in weights.items() if value < 0}
+                if negative:
+                    raise ValueError(
+                        f"long_only budgets forbid negative target_weights: {_offenders(negative)}"
+                    )
+            total = sum(weights.values(), Decimal(0))
+            if total + cash != 1:
+                raise ValueError(
+                    "target_weights plus cash_weight must equal one; got "
+                    f"sum(target_weights) {total} + cash_weight {cash} = {total + cash}"
+                )
+        elif cash != 1:
+            raise ValueError(
+                f"an empty complete position set requires cash_weight equal to one; got {cash}"
+            )
 
 
 class StrategyCall(ABC):
-    """The complete, bounded capability surface for one Strategy occurrence."""
+    """The complete, bounded capability surface for one Strategy occurrence.
+
+    `StrategyModelContext` is its one implementation, the way `DataModelContext` is of
+    `DataCall`. What a Strategy receives beyond a DataModel is what its role needs and nothing
+    else: the committed account, its own declared history, and the bounds every registered
+    Constraint projected. Framework facts -- the account version, the intent id, what was read --
+    are not here; the Flow stamps them onto the intent itself (record `125`).
+    """
+
+    @property
+    @abstractmethod
+    def occurrence_id(self) -> str:
+        """Which occurrence this is. Kept in `memory`, it is how a cadence rule counts."""
 
     @property
     @abstractmethod
@@ -749,17 +914,12 @@ class StrategyCall(ABC):
     @property
     @abstractmethod
     def account(self) -> EconomicAccountView:
-        """The committed Account, bounded to cash/positions/latest NAV."""
+        """The committed Account: cash, positions, and the marks of its last valuation."""
 
     @property
     @abstractmethod
-    def previous_state(self) -> object:
-        """The strict-JSON state this Strategy returned from its last accepted callback."""
-
-    @property
-    @abstractmethod
-    def account_history(self) -> DeclaredAccountHistory:
-        """Committed account history, bounded by this Strategy's own declaration."""
+    def account_history(self) -> AccountHistory:
+        """Committed account history, bounded by this Strategy's own `account_history()`."""
 
     @property
     @abstractmethod
@@ -767,28 +927,80 @@ class StrategyCall(ABC):
         """The merged bounds projected from every registered Constraint."""
 
     @abstractmethod
-    def read(self, alias: str) -> tuple[Observation, ...]:
-        """Return PIT observations for one alias declared in `StrategyModel.inputs()`."""
+    def read(self, alias: str, field: str) -> PanelWindow:
+        """One field of a panel-grain alias declared in `StrategyModel.inputs()`, as a 2d window.
 
-
-class StrategyModel(ABC):
-    """User extension whose only cross-callback state is `previous_state`/`next_state`."""
-
-    def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this Strategy performs. Empty by default."""
-        return {}
-
-    def account_history(self) -> AccountHistoryInput | None:
-        """Declare committed account history reads. `None` declares none are read."""
-        return None
-
-    def diagnostics(self) -> tuple[DiagnosticTable, ...]:
-        """Declare every diagnostic table this Strategy may emit. Empty by default."""
-        return ()
+        `instants` x `instruments`, a slice of the panel the run built once; `current()` is the
+        cross-section at the window's last instant, `latest()` the newest value per name anywhere
+        in it. Refused on a `rows`-grain alias, which is read with `rows`.
+        """
 
     @abstractmethod
-    def decide(self, call: StrategyCall) -> StrategyResult:
-        """Return this occurrence's complete Hold/Rebalance decision."""
+    def rows(self, alias: str) -> tuple[Observation, ...]:
+        """PIT observations for one `rows`-grain alias declared in `StrategyModel.inputs()`.
+
+        One `Observation` per (instant, instrument), every declared field on it. Refused on a
+        panel-grain alias, which is read with `read(alias, field)`.
+        """
+
+
+class StrategyModel(Model):
+    """User extension that decides what to hold; its memory owns cadence and path-dependent rules.
+
+    One class (record `132`). Two carried this name: this one, which the scaffold taught and an
+    author subclassed, and an engine one the Flow ran, with an adapter between them that built the
+    author's class fresh per callback and translated every argument and return. The adapter is
+    gone; what an author writes is what the engine calls.
+
+    **State is `memory`, as for every Model** (architecture 4.4, 5.1.1): strict JSON the Flow
+    snapshots after a successful callback and restores before the next. `save_payload` /
+    `load_payload` carry what memory cannot -- a fitted network, a large array -- as opaque bytes
+    under the same commit. A fresh instance with both restored decides the same, and the Flow
+    relies on that: nothing else about `self` is promised across a run boundary.
+
+    **Rows go to `self.recorder`**, set by the Flow for the duration of one callback and `None`
+    outside it, into the tables `tables()` declared. Writing to an undeclared table refuses.
+    """
+
+    recorder: InvocationRecorder | None = None
+
+    def tables(self) -> tuple[TableSpec, ...]:
+        """Declare every table this Strategy may write during a callback. Empty by default."""
+        return ()
+
+    def account_history(self) -> AccountHistoryInput | None:
+        """Declare which committed account values this Strategy reads back, and how far.
+
+        `None` declares none: the run then retains only its current mark, so a Strategy that
+        never looks at its own path costs nothing to carry one.
+        """
+        return None
+
+    def save_payload(self, target: BinaryIO) -> None:
+        """Persist private callback state that does not fit `memory` into Flow-owned staging.
+
+        Preflight calls `save_payload` on a fresh instance, `load_payload` on another with those
+        bytes, and `save_payload` again; the bytes must match before the first callback. So this
+        must be deterministic -- no timestamp, no `id()`, no unordered set iteration.
+        """
+
+    def load_payload(self, source: BinaryIO) -> None:
+        """Restore what `save_payload` wrote.
+
+        A class with nothing to save yet must accept an EMPTY source: preflight round-trips the
+        default `save_payload`, which writes no bytes, so an unguarded `pickle.load` refuses the
+        run with `EOFError` before a single callback runs.
+        """
+
+    @abstractmethod
+    def decide(self, call: StrategyCall) -> Hold | Rebalance:
+        """Return the economic decision for this occurrence, and nothing else.
+
+        `Hold` declines. `Rebalance` names one complete desired portfolio: weights, cash, and the
+        budget they must satisfy. Everything an intent additionally carries -- its id, this
+        Strategy's id, what was read, the account version seen -- is the Flow's to stamp, and a
+        callback that tried to name any of it would be claiming authority it does not have.
+        """
 
 
 # --------------------------------------------------------------------------------------
@@ -796,48 +1008,87 @@ class StrategyModel(ABC):
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ConstraintCall:
-    """The complete, bounded capability surface for one Constraint invocation."""
+class ConstraintCall(ABC):
+    """The bounded capability surface for one Constraint invocation.
 
-    evaluation_time: datetime
-    account: EconomicAccountView
-    instruments: tuple[str, ...]
+    **An abstract contract, like `DataCall` and `StrategyCall`, and no longer a value.** It was a
+    concrete frozen dataclass that nothing in `src/` ever built -- only tests -- while the engine
+    handed a Constraint a `ModelWindow` and a tuple of instruments instead. `vqapr.calls`
+    now supplies the one concrete implementation, the same way it does for the other two roles.
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "evaluation_time", _tz_aware(self.evaluation_time, name="evaluation_time")
-        )
-        if not isinstance(self.account, EconomicAccountView):
-            raise TypeError("account must be an EconomicAccountView")
-        instruments = _unique_identifiers(self.instruments, name="instruments")
-        object.__setattr__(self, "instruments", instruments)
+    **The account came off it.** It used to carry an `EconomicAccountView`, which meant `project`
+    -- the member that runs before any decision exists, to say what the feasible set is -- was
+    handed the committed account. Nothing needed it and the engine never offered it, so the
+    authoring shape was granting authority the engine did not. Where the two contracts disagreed
+    about how much a member may see, the narrower one is right (architecture 2.2, least
+    authority): `monitor` receives the account as its own argument, and `project` cannot reach one.
+    """
 
-    def read(self, alias: str) -> tuple[Observation, ...]:
-        """Return PIT observations for one alias declared in `Constraint.inputs()`.
+    @property
+    @abstractmethod
+    def evaluation_time(self) -> datetime:
+        """The single frozen point-in-time cutoff this invocation is bounded to."""
 
-        This pure-contract value carries no runtime store; the framework supplies a
-        concrete, PIT-bound `ConstraintCall` at invocation time.
+    @property
+    @abstractmethod
+    def instruments(self) -> tuple[str, ...]:
+        """Every instrument this projection must cover, in the run's declared order."""
+
+    @abstractmethod
+    def read(self, alias: str, field: str) -> PanelWindow:
+        """One field of a panel-grain alias declared in `Constraint.inputs()`, as a 2d window.
+
+        `instants` x `instruments`, a slice of the panel the run built once; `current()` is the
+        cross-section at the window's last instant, `latest()` the newest value per name anywhere
+        in it. Refused on a `rows`-grain alias, which is read with `rows`.
         """
-        _identifier(alias, name="alias")
-        raise NotImplementedError(
-            "ConstraintCall.read requires a framework-provided runtime adapter"
-        )
+
+    @abstractmethod
+    def rows(self, alias: str) -> tuple[Observation, ...]:
+        """PIT observations for one `rows`-grain alias declared in `Constraint.inputs()`.
+
+        One `Observation` per (instant, instrument), every declared field on it. Refused on a
+        panel-grain alias, which is read with `read(alias, field)`.
+        """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ConstraintFinding:
-    """One Constraint's complete, immutable result for one economic observation."""
+    """One Constraint's complete, immutable result for one economic observation.
+
+    **`offenders` is a field and not a `details` key**, because it is the one thing a refusal
+    cannot be written without. `docs/implementations/086` is a run that stopped on a 20% cap and
+    said only *"economic intent violates projected constraints"*, leaving a first-time user to
+    re-run the strategy without the constraint and read the weight table to find out which name
+    breached it.
+    The refusal names them now, and it can only do that if every finding carries them under one
+    name -- a convention inside a free-form mapping is not something a message can rely on.
+
+    It also could not live there. `details` admits portable scalars only, so that a diagnostic
+    mapping survives being written to a record and read back; a tuple is refused. Promoting the
+    field keeps that rule intact instead of widening it for one caller.
+    """
 
     passed: bool
     measured: Decimal
     bound: Decimal
     excess: Decimal
     details: Mapping[str, object]
+    offenders: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.passed, bool):
             raise TypeError("passed must be a bool")
+        # Not `_unique_identifiers`, which requires at least one entry: an empty `offenders` is
+        # the ordinary passing case and the most common value this field ever holds.
+        if not isinstance(self.offenders, Sequence) or isinstance(self.offenders, (str, bytes)):
+            raise TypeError("offenders must be a sequence of instrument ids")
+        offenders = tuple(
+            _identifier(value, name="offenders entry") for value in self.offenders
+        )
+        if len(set(offenders)) != len(offenders):
+            raise ValueError("offenders entries must be unique")
+        object.__setattr__(self, "offenders", offenders)
         object.__setattr__(self, "measured", _finite_decimal(self.measured, name="measured"))
         object.__setattr__(self, "bound", _finite_decimal(self.bound, name="bound"))
         object.__setattr__(self, "excess", _finite_decimal(self.excess, name="excess"))
@@ -848,20 +1099,81 @@ class ConstraintFinding:
 
 
 class Constraint(ABC):
-    """User extension contract: an immutable economic predicate over the account."""
+    """User extension contract: an immutable economic predicate over the account.
+
+    **Two members, because a constraint does two things and they are different things.** `project`
+    bounds construction before anything is decided -- best effort, the strategy builds the best
+    portfolio the limits allow. `monitor` observes the committed account and says whether a limit
+    was actually breached -- fact, not effort.
+
+    **There is no member that scores the decision.** There was one, and it was removed rather than
+    fixed. Two reasons, both recorded in `docs/vqapr-architecture.md` §5.7: it could not see the
+    breach that matters most, because integer quantity conversion pushes a weight over a limit and
+    that is unknowable before fills exist (`UC-CONSTRAINT-ADJUST-001`); and two scorers can
+    disagree, which `docs/issues/014` measured -- the same rule read a signed weight in one member
+    and an absolute one in the other, so a proposal passed the gate before execution and was
+    reported as a violation by the check after it. One place to measure, and that ambiguity cannot
+    arise.
+
+    A decision that breaches a limit therefore does not stop a run. It is a breach, and breaches
+    are observed where breaches are observed.
+
+    **The id is declared once, here, and not repeated on every finding.** `constraint_id` says
+    which rule this is and is checked at load against the id it was registered under, so a rule
+    registered as `noshort` and answering to `no-short` is refused before a run is spent. What was
+    removed is the *repetition*: a finding used to carry the id too, every author had to set it,
+    and the framework compared it against the id it was already holding while it made the call.
+    That is the shape record `125` removed from the Strategy callback -- get it wrong and the run
+    refuses you, get it plausibly wrong and the run accepts you under another rule's identity.
+    """
+
+    @property
+    @abstractmethod
+    def constraint_id(self) -> str:
+        """The id this rule answers to. Must equal the id it is registered under."""
 
     def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this Constraint performs. Empty by default."""
+        """Declare every aliased dataset read this Constraint performs. Empty by default.
+
+        Declaring nothing is legitimate and is what the shipped `NoShort` does: a rule about a
+        weight's sign opens no data. The loader used to require a non-empty `requirements()` here,
+        which made the one shipped constraint that needs no data the one shape it could not accept.
+        """
         return {}
+
+    def requirements(self) -> tuple[DataRequirement, ...]:
+        """Every observation requirement, derived from `inputs()` -- `Model.requirements()`,
+        spelled the same way for the role that is not a Model.
+
+        Not a Model because `Model` carries `memory`, and a constraint is a stateless predicate
+        that must not have any. The fan-out is shared; the state is not.
+        """
+        return tuple(
+            requirement
+            for declaration in self.inputs().values()
+            for requirement in requirements_for(declaration)
+        )
 
     @abstractmethod
     def project(self, call: ConstraintCall) -> ConstraintBounds:
-        """Project deterministic per-instrument bounds for the current PIT cutoff."""
+        """Project deterministic per-instrument bounds for the current PIT cutoff.
+
+        Return a lower and an upper bound for EVERY instrument in `call.instruments`. Not the
+        offenders and not a correction -- the box the optimiser must stay inside. A projection
+        that misses an instrument on either side is refused, because a missing bound would
+        silently widen the feasible set rather than fail.
+        """
 
     @abstractmethod
-    def validate(self, decision: Rebalance, bounds: ConstraintBounds) -> ConstraintFinding:
-        """Measure one complete intended Rebalance against the merged bounds."""
+    def monitor(
+        self,
+        call: ConstraintCall,
+        account: EconomicAccountView,
+        bounds: ConstraintBounds,
+    ) -> ConstraintFinding:
+        """Measure the committed account against bounds projected at a monitoring cutoff.
 
-    @abstractmethod
-    def monitor(self, call: ConstraintCall, bounds: ConstraintBounds) -> ConstraintFinding:
-        """Measure the committed account against bounds projected at a monitoring cutoff."""
+        The account arrives here and nowhere else. `account.weight(instrument_id)` is the
+        derivation a weight-based rule wants; `positions` and `values` are there for a rule that
+        asks about quantity or about money.
+        """

@@ -7,16 +7,16 @@ workspace는 선언을 보관하고 조회할 뿐 검증하지 않는다. datase
 from __future__ import annotations
 
 import time as _time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 
 from vqapr._internal import atomic, filelock
-from vqapr.constraints.monitoring import MonitoringPolicy
 from vqapr.data import datasets as datasets_module
 from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
@@ -34,22 +34,9 @@ from vqapr.domain.identifiers import (
 )
 from vqapr.domain.timestamps import require_tz_aware
 from vqapr.exchange.execution_table import ExecutionInputRegistration
-from vqapr.extension.component import ComponentRef
-from vqapr.flow.run import StrategyConfig
-from vqapr.runtime.agendas import OperationAgenda, OperationRole
-from vqapr.valuation.configuration import ValuationConfig
-from vqapr.workspace_codec import (
-    _decode_cached,
-    _detach_agenda,
-    _detach_component,
-    _detach_execution_input,
-    _detach_monitoring_policy,
-    _detach_registration,
-    _detach_source,
-    _detach_strategy_config,
-    _detach_valuation_config,
-    _encode,
-)
+from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.flow.run import RunDefinition
+from vqapr.workspace_document import read_workspace, write_workspace
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"
@@ -132,13 +119,25 @@ WRITE_STAGE = "workspace.write"
 EXECUTION_REGISTER_STAGE = "workspace.execution_input.register"
 EXECUTION_LOOKUP_STAGE = "workspace.execution_input.lookup"
 COMPONENT_LOOKUP_STAGE = "workspace.component.lookup"
-AGENDA_REGISTER_STAGE = "workspace.agenda.register"
-AGENDA_LOOKUP_STAGE = "workspace.agenda.lookup"
-STRATEGY_REGISTER_STAGE = "workspace.strategy_config.register"
-VALUATION_REGISTER_STAGE = "workspace.valuation_config.register"
-MONITORING_REGISTER_STAGE = "workspace.monitoring_policy.register"
+RUN_REGISTER_STAGE = "workspace.run.register"
 REMOVE_STAGE = "workspace.remove"
 _CONSTRUCTION_TOKEN = object()
+
+
+class _State(NamedTuple):
+    """Everything `workspace.yaml` holds, as one value.
+
+    A tuple, so every `*state` unpacking and `state[4]` index in this module still works; named,
+    so a merge can say `state.agendas` and `state._replace(agendas=...)` instead of threading
+    eight positional mappings through every signature. What it encodes is unchanged.
+    """
+
+    datasets: dict[DatasetId, DatasetRegistration]
+    sources: dict[SourceId, SourceSpec]
+    execution_inputs: dict[ExecutionInputId, ExecutionInputRegistration]
+    components: dict[ComponentId, ComponentRef]
+    runs: dict[str, RunDefinition]
+    """Registered runs (record `139`): the reusable configuration `vqapr run <run-id>` executes."""
 
 
 class Workspace:
@@ -149,14 +148,11 @@ class Workspace:
     """
 
     __slots__ = (
-        "_agendas",
         "_components",
         "_datasets",
         "_execution_inputs",
-        "_monitoring_policies",
+        "_runs",
         "_sources",
-        "_strategy_configs",
-        "_valuation_configs",
         "project_root",
     )
 
@@ -167,10 +163,7 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec] | None = None,
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration] | None = None,
         components: Mapping[ComponentId, ComponentRef] | None = None,
-        agendas: Mapping[str, OperationAgenda] | None = None,
-        strategy_configs: Mapping[str, StrategyConfig] | None = None,
-        valuation_configs: Mapping[str, ValuationConfig] | None = None,
-        monitoring_policies: Mapping[str, MonitoringPolicy] | None = None,
+        runs: Mapping[str, RunDefinition] | None = None,
         *,
         _token: object | None = None,
     ) -> None:
@@ -178,26 +171,17 @@ class Workspace:
             raise TypeError("construct a workspace with Workspace.create() or Workspace.open()")
         self.project_root = Path(project_root)
         self._datasets = {
-            key: _detach_registration(value) for key, value in (datasets or {}).items()
+            key: value for key, value in (datasets or {}).items()
         }
-        self._sources = {key: _detach_source(value) for key, value in (sources or {}).items()}
+        self._sources = dict(sources or {})
         self._execution_inputs = {
-            key: _detach_execution_input(value) for key, value in (execution_inputs or {}).items()
+            key: value for key, value in (execution_inputs or {}).items()
         }
         self._components = {
-            key: _detach_component(value) for key, value in (components or {}).items()
+            key: value for key, value in (components or {}).items()
         }
-        self._agendas = {key: _detach_agenda(value) for key, value in (agendas or {}).items()}
-        self._strategy_configs = {
-            key: _detach_strategy_config(value) for key, value in (strategy_configs or {}).items()
-        }
-        self._valuation_configs = {
-            key: _detach_valuation_config(value) for key, value in (valuation_configs or {}).items()
-        }
-        self._monitoring_policies = {
-            key: _detach_monitoring_policy(value)
-            for key, value in (monitoring_policies or {}).items()
-        }
+        # A `RunDefinition` is frozen and holds only ids and values, so it needs no detaching.
+        self._runs = dict(runs or {})
 
     @classmethod
     def _from_state(
@@ -207,10 +191,7 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
-        agendas: Mapping[str, OperationAgenda],
-        strategy_configs: Mapping[str, StrategyConfig],
-        valuation_configs: Mapping[str, ValuationConfig],
-        monitoring_policies: Mapping[str, MonitoringPolicy],
+        runs: Mapping[str, RunDefinition],
     ) -> Workspace:
         return cls(
             project_root,
@@ -218,10 +199,7 @@ class Workspace:
             sources,
             execution_inputs,
             components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
+            runs,
             _token=_CONSTRUCTION_TOKEN,
         )
 
@@ -232,65 +210,75 @@ class Workspace:
     @classmethod
     def create(cls, project_root: str | Path) -> Workspace:
         """새 project workspace를 만들거나 이미 있으면 그대로 연다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
         if candidate.path.exists():
             return cls.open(project_root)
-        candidate._write({}, {}, {}, {}, {}, {}, {}, {})
+        candidate._write({}, {}, {}, {}, {})
         return candidate
 
     @classmethod
     def open(cls, project_root: str | Path) -> Workspace:
         """기존 workspace 전체를 읽는다. 없거나 손상됐으면 일부 상태를 반환하지 않는다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
         return cls._from_state(project_root, *candidate._read())
+
+    @classmethod
+    def transaction(cls, project_root: str | Path) -> Transaction:
+        """Start applying several registrations as one write.
+
+        The transaction stages every registration against a snapshot of the workspace -- or
+        against nothing, where no workspace exists yet -- so a later declaration can look up an
+        earlier one, and every refusal a registration can raise fires at staging time. Nothing on
+        disk is touched until `commit()`, which takes the lock once, re-reads, replays the staged
+        merges against what is actually there, and writes once. A document refused at its k-th
+        item therefore leaves the workspace exactly as it found it; a valid document costs one
+        lock, one read and one write however many items it declares.
+        """
+        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
+        return Transaction(cls._from_state(project_root, *candidate._read_or_empty()))
+
+    def _state(self) -> _State:
+        return _State(
+            self._datasets,
+            self._sources,
+            self._execution_inputs,
+            self._components,
+            self._runs,
+        )
+
+    def _read_or_empty(self) -> _State:
+        """The document on disk, or the empty document where none has been written yet.
+
+        `register` is the first command typed in an empty directory; a transaction that refused to
+        start there would send the reader to create a workspace by hand, which is the substitution
+        `workspace.open.missing` exists to avoid.
+        """
+        if not self.path.exists():
+            return _State({}, {}, {}, {}, {})
+        return self._read()
 
     @property
     def datasets(self) -> tuple[DatasetRegistration, ...]:
         """dataset_id 순으로 정렬된 detached 선언들."""
-        return tuple(_detach_registration(self._datasets[key]) for key in sorted(self._datasets))
+        return tuple(self._datasets[key] for key in sorted(self._datasets))
 
     @property
     def sources(self) -> tuple[SourceSpec, ...]:
         """source_id 순으로 정렬된 detached 물리 선언들."""
-        return tuple(_detach_source(self._sources[key]) for key in sorted(self._sources))
+        return tuple(self._sources[key] for key in sorted(self._sources))
 
     @property
     def execution_inputs(self) -> tuple[ExecutionInputRegistration, ...]:
         """execution_input_id 순으로 정렬된 detached Exchange 입력 선언들."""
         return tuple(
-            _detach_execution_input(self._execution_inputs[key])
+            self._execution_inputs[key]
             for key in sorted(self._execution_inputs)
         )
 
     @property
     def components(self) -> tuple[ComponentRef, ...]:
         """component_id 순으로 정렬된 detached project-local component references."""
-        return tuple(_detach_component(self._components[key]) for key in sorted(self._components))
-
-    @property
-    def agendas(self) -> tuple[OperationAgenda, ...]:
-        return tuple(_detach_agenda(self._agendas[key]) for key in sorted(self._agendas))
-
-    @property
-    def strategy_configs(self) -> tuple[StrategyConfig, ...]:
-        return tuple(
-            _detach_strategy_config(self._strategy_configs[key])
-            for key in sorted(self._strategy_configs)
-        )
-
-    @property
-    def valuation_configs(self) -> tuple[ValuationConfig, ...]:
-        return tuple(
-            _detach_valuation_config(self._valuation_configs[key])
-            for key in sorted(self._valuation_configs)
-        )
-
-    @property
-    def monitoring_policies(self) -> tuple[MonitoringPolicy, ...]:
-        return tuple(
-            _detach_monitoring_policy(self._monitoring_policies[key])
-            for key in sorted(self._monitoring_policies)
-        )
+        return tuple(self._components[key] for key in sorted(self._components))
 
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
         """등록된 선언 하나를 조회한다."""
@@ -325,7 +313,7 @@ class Workspace:
         # the workspace stays enumerable and repairable; USING it is what must not happen, since
         # every consumer downstream of here treats a registration as complete.
         _require_span(str(key), registration)
-        return _detach_registration(registration)
+        return registration
 
     def span(self, raw_dataset_id: str) -> tuple[datetime, datetime]:
         """The first and last instant the registered dataset carries.
@@ -405,7 +393,7 @@ class Workspace:
                 retry="use a valid source_id, then retry",
             ) from error
         try:
-            return _detach_source(self._sources[key])
+            return self._sources[key]
         except KeyError as error:
             raise _workspace_error(
                 stage=SOURCE_LOOKUP_STAGE,
@@ -433,7 +421,7 @@ class Workspace:
                 family=FailureFamily.EXCHANGE,
             ) from error
         try:
-            return _detach_execution_input(self._execution_inputs[key])
+            return self._execution_inputs[key]
         except KeyError as error:
             raise _workspace_error(
                 stage=EXECUTION_LOOKUP_STAGE,
@@ -464,7 +452,7 @@ class Workspace:
                 retry="use a valid component_id, then retry",
             ) from error
         try:
-            return _detach_component(self._components[key])
+            return self._components[key]
         except KeyError as error:
             raise _workspace_error(
                 stage=COMPONENT_LOOKUP_STAGE,
@@ -478,55 +466,19 @@ class Workspace:
                 retry="register the component, then retry",
             ) from error
 
-    def agenda(self, raw_agenda_id: str) -> OperationAgenda:
-        if not isinstance(raw_agenda_id, str) or not raw_agenda_id:
-            raise _workspace_error(
-                stage=AGENDA_LOOKUP_STAGE,
-                code=f"{AGENDA_LOOKUP_STAGE}.invalid",
-                requirement="agenda lookup requires a valid agenda_id",
-                observed=repr(raw_agenda_id),
-                fix="pass a non-empty agenda_id string to Workspace.agenda()",
-                explain=ExplainTopic.DECLARATION_SHAPE,
-                retry="use a valid agenda_id, then retry",
-            )
-        try:
-            return _detach_agenda(self._agendas[raw_agenda_id])
-        except KeyError as error:
-            raise _workspace_error(
-                stage=AGENDA_LOOKUP_STAGE,
-                code=f"{AGENDA_LOOKUP_STAGE}.missing",
-                requirement=f"agenda {raw_agenda_id!r} must be registered in this workspace",
-                observed=f"registered agendas: {', '.join(sorted(self._agendas)) or '(none)'}",
-                fix=f"register agenda {raw_agenda_id!r}, or use one of the ids listed above",
-                explain=ExplainTopic.WORKSPACE_STATE,
-                retry="register the agenda, then retry",
-            ) from error
+    @property
+    def run_definitions(self) -> tuple[RunDefinition, ...]:
+        """Every registered run, ordered by run id."""
+        return tuple(self._runs[key] for key in sorted(self._runs))
 
-    def strategy_config(self, raw_agenda_id: str) -> StrategyConfig:
+    def run_definition(self, raw_run_id: str) -> RunDefinition:
+        """One registered run by id: what `vqapr run <run-id>` freezes and executes."""
         return self._config_lookup(
-            raw_agenda_id,
-            self._strategy_configs,
-            _detach_strategy_config,
-            STRATEGY_REGISTER_STAGE,
-            "strategy config",
-        )
-
-    def valuation_config(self, raw_agenda_id: str) -> ValuationConfig:
-        return self._config_lookup(
-            raw_agenda_id,
-            self._valuation_configs,
-            _detach_valuation_config,
-            VALUATION_REGISTER_STAGE,
-            "valuation config",
-        )
-
-    def monitoring_policy(self, raw_agenda_id: str) -> MonitoringPolicy:
-        return self._config_lookup(
-            raw_agenda_id,
-            self._monitoring_policies,
-            _detach_monitoring_policy,
-            MONITORING_REGISTER_STAGE,
-            "monitoring policy",
+            raw_run_id,
+            self._runs,
+            RUN_REGISTER_STAGE,
+            "run",
+            noun="run_id",
         )
 
     def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
@@ -535,6 +487,73 @@ class Workspace:
         같은 ``dataset_id``가 다른 선언을 뜻하도록 조용히 바꾸지 않는다. replace는 이 slice의
         지원 범위가 아니다.
         """
+        with self._exclusive():
+            merged, changed = self._merge_dataset(self._read(), registration, source)
+            self._commit(merged, changed)
+            return changed
+
+    def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
+        """검증을 통과한 execution table + fill declaration을 원자적으로 보관한다."""
+        if not isinstance(registration, ExecutionInputRegistration):
+            raise TypeError("registration must be an ExecutionInputRegistration")
+        with self._exclusive():
+            merged, changed = self._merge_execution_input(self._read(), registration)
+            self._commit(merged, changed)
+            return changed
+
+    def register_component(self, ref: ComponentRef) -> bool:
+        """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다.
+
+        An edited source re-registered under its id REPLACES the registration in place; there is
+        no flag. Editing a registered component is the ordinary loop (`docs/issues/009`, Decision
+        2), and a refusal the caller must pass an argument to bypass, on an event that is
+        ordinary, is the same friction with an extra step. The `force` parameter this method
+        carried after that decision was a no-op the CLI never exposed, while the shipped skill
+        kept promising `register --force` (`docs/issues/067`); it is gone so the two cannot
+        disagree again.
+
+        Replacing does not lose provenance: a finished run pins the fingerprint it ran under in
+        its own record, so what a past run used is testified to by that run and not by whichever
+        registration currently holds the id.
+        """
+        if not isinstance(ref, ComponentRef):
+            raise TypeError("ref must be a ComponentRef")
+        with self._exclusive():
+            merged, changed = self._merge_component(self._read(), ref)
+            self._commit(merged, changed)
+            return changed
+
+    def register_run(self, definition: RunDefinition) -> bool:
+        """Register a run: the configuration every model in it shares, and which models.
+
+        Every id the definition names must already be registered -- components of the right
+        kind, the execution input, the dataset its sessions come from -- so a registered run is
+        one `vqapr run <run-id>` can freeze. The output dataset of a datamodel run is NOT
+        checked here: it exists once the run has happened, and the run stays registered.
+        """
+        if not isinstance(definition, RunDefinition):
+            raise TypeError("definition must be a RunDefinition")
+        with self._exclusive():
+            merged, changed = self._merge_run(self._read(), definition)
+            self._commit(merged, changed)
+            return changed
+
+    # ------------------------------------------------------------------------------------------
+    # Merges: one registration folded into one state. Pure in the sense that matters -- they read
+    # the state they are given and return a new one, and they neither lock nor write -- so the
+    # same function serves a single `register_*` and a whole document applied as one transaction.
+    # Every refusal a registration can raise lives here, once.
+    # ------------------------------------------------------------------------------------------
+
+    def _commit(self, state: _State, changed: bool) -> None:
+        """Write the merged state if anything changed, and adopt it either way."""
+        if changed:
+            self._write(*state)
+        self._replace_state(*state)
+
+    def _merge_dataset(
+        self, state: _State, registration: DatasetRegistration, source: SourceSpec
+    ) -> tuple[_State, bool]:
         if registration.source != source.source_id:
             raise _workspace_error(
                 stage=REGISTER_STAGE,
@@ -573,86 +592,43 @@ class Workspace:
                 ),
             )
 
-        with self._exclusive():
-            (
-                datasets,
-                sources,
-                execution_inputs,
-                components,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            ) = self._read()
-            key = registration.dataset_id
-            source_key = source.source_id
-            existing_source = sources.get(source_key)
-            if existing_source is not None and existing_source != source:
-                raise _workspace_error(
-                    stage=REGISTER_STAGE,
-                    code=f"{REGISTER_STAGE}.source_conflict",
-                    requirement=(
-                        f"source_id {source_key!r} must keep its existing "
-                        "physical declaration"
-                    ),
-                    observed="a different SourceSpec is already registered",
-                    fix=(
-                        f"reuse the registered SourceSpec for {source_key!r}, or register "
-                        "under a new source_id"
-                    ),
-                    explain=ExplainTopic.WORKSPACE_STATE,
-                    retry="use the existing source declaration or choose a new source_id",
-                )
+        key = registration.dataset_id
+        source_key = source.source_id
+        existing_source = state.sources.get(source_key)
+        if existing_source is not None and existing_source != source:
+            raise _workspace_error(
+                stage=REGISTER_STAGE,
+                code=f"{REGISTER_STAGE}.source_conflict",
+                requirement=(
+                    f"source_id {source_key!r} must keep its existing "
+                    "physical declaration"
+                ),
+                observed="a different SourceSpec is already registered",
+                fix=(
+                    f"reuse the registered SourceSpec for {source_key!r}, or register "
+                    "under a new source_id"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry="use the existing source declaration or choose a new source_id",
+            )
 
-            existing = datasets.get(key)
-            if existing is not None and existing.span is None:
-                # A quarantined registration is being repaired. It differs from its replacement
-                # only in what has been MEASURED about it -- the span it never carried, and the
-                # field types nobody had derived when it was written -- so the conflict check
-                # below would read that as a changed declaration and refuse the repair it
-                # advertises. Compare on the declared half, and let the measurements be the things
-                # that change.
-                repaired = replace(
-                    existing,
-                    span=registration.span,
-                    field_types=registration.field_types,
-                    aggregated=registration.aggregated,
-                )
-                if repaired != registration:
-                    raise _workspace_error(
-                        stage=REGISTER_STAGE,
-                        code=f"{REGISTER_STAGE}.conflict",
-                        requirement=(
-                            f"dataset_id {key!r} must keep its existing declaration "
-                            "or use a new identity"
-                        ),
-                        observed=(
-                            "a different declaration is already registered; repairing a "
-                            "span-less registration may add the span but must not change "
-                            "anything else"
-                        ),
-                        fix=(
-                            f"match the quarantined declaration for {key!r} exactly, or "
-                            "register under a new dataset_id"
-                        ),
-                        explain=ExplainTopic.WORKSPACE_STATE,
-                        retry="use the existing declaration or choose a new dataset_id",
-                    )
-                existing = None
-
-            if existing is not None:
-                if existing == registration and existing_source == source:
-                    self._replace_state(
-                        datasets,
-                        sources,
-                        execution_inputs,
-                        components,
-                        agendas,
-                        strategy_configs,
-                        valuation_configs,
-                        monitoring_policies,
-                    )
-                    return False
+        existing = state.datasets.get(key)
+        if existing is not None and (existing.span is None or existing.grain is None):
+            # A quarantined registration is being repaired. It differs from its replacement
+            # only in what has been MEASURED about it -- the span it never carried, and the
+            # field types nobody had derived when it was written -- or, since record `137`, in
+            # the grain it was written before anyone could declare; the conflict check below
+            # would read either as a changed declaration and refuse the repair it advertises.
+            # Compare on the declared half, and let the measurements and the grain be the
+            # things that change.
+            repaired = replace(
+                existing,
+                grain=registration.grain if existing.grain is None else existing.grain,
+                span=registration.span,
+                field_types=registration.field_types,
+                aggregated=registration.aggregated,
+            )
+            if repaired != registration:
                 raise _workspace_error(
                     stage=REGISTER_STAGE,
                     code=f"{REGISTER_STAGE}.conflict",
@@ -660,295 +636,225 @@ class Workspace:
                         f"dataset_id {key!r} must keep its existing declaration "
                         "or use a new identity"
                     ),
-                    observed="a different declaration is already registered",
+                    observed=(
+                        "a different declaration is already registered; repairing a "
+                        "span-less registration may add the span but must not change "
+                        "anything else"
+                    ),
                     fix=(
-                        f"keep the registered declaration for {key!r} unchanged, or "
-                        "choose a new dataset_id"
+                        f"match the quarantined declaration for {key!r} exactly, or "
+                        "register under a new dataset_id"
                     ),
                     explain=ExplainTopic.WORKSPACE_STATE,
                     retry="use the existing declaration or choose a new dataset_id",
                 )
+            existing = None
 
-            merged_datasets = dict(datasets)
-            merged_sources = dict(sources)
-            merged_datasets[key] = _detach_registration(registration)
-            merged_sources[source_key] = _detach_source(source)
-            self._write(
-                merged_datasets,
-                merged_sources,
-                execution_inputs,
-                components,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            )
-            self._replace_state(
-                merged_datasets,
-                merged_sources,
-                execution_inputs,
-                components,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            )
-            return True
-
-    def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
-        """검증을 통과한 execution table + fill declaration을 원자적으로 보관한다."""
-        if not isinstance(registration, ExecutionInputRegistration):
-            raise TypeError("registration must be an ExecutionInputRegistration")
-
-        with self._exclusive():
-            (
-                datasets,
-                sources,
-                execution_inputs,
-                components,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            ) = self._read()
-            key = registration.execution_input_id
-            source = registration.table.source
-            source_key = source.source_id
-            existing_source = sources.get(source_key)
-            if existing_source is not None and existing_source != source:
-                raise _workspace_error(
-                    stage=EXECUTION_REGISTER_STAGE,
-                    code=f"{EXECUTION_REGISTER_STAGE}.source_conflict",
-                    requirement=(
-                        f"source_id {source_key!r} must keep its existing "
-                        "physical declaration"
-                    ),
-                    observed="a different SourceSpec is already registered",
-                    fix=(
-                        f"reuse the registered SourceSpec for {source_key!r}, or register "
-                        "under a new source_id"
-                    ),
-                    explain=ExplainTopic.WORKSPACE_STATE,
-                    retry="use the existing source declaration or choose a new source_id",
-                    family=FailureFamily.EXCHANGE,
-                )
-
-            existing = execution_inputs.get(key)
-            if existing is not None:
-                if existing == registration and existing_source == source:
-                    self._replace_state(
-                        datasets,
-                        sources,
-                        execution_inputs,
-                        components,
-                        agendas,
-                        strategy_configs,
-                        valuation_configs,
-                        monitoring_policies,
-                    )
-                    return False
-                raise _workspace_error(
-                    stage=EXECUTION_REGISTER_STAGE,
-                    code=f"{EXECUTION_REGISTER_STAGE}.conflict",
-                    requirement=(
-                        f"execution_input_id {key!r} must keep its existing "
-                        "declaration or use a new identity"
-                    ),
-                    observed="a different execution input declaration is already registered",
-                    fix=(
-                        f"keep the registered declaration for {key!r} unchanged, or "
-                        "choose a new execution_input_id"
-                    ),
-                    explain=ExplainTopic.WORKSPACE_STATE,
-                    retry="use the existing declaration or choose a new execution_input_id",
-                    family=FailureFamily.EXCHANGE,
-                )
-
-            merged_sources = dict(sources)
-            merged_inputs = dict(execution_inputs)
-            merged_sources[source_key] = _detach_source(source)
-            merged_inputs[key] = _detach_execution_input(registration)
-            self._write(
-                datasets,
-                merged_sources,
-                merged_inputs,
-                components,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            )
-            self._replace_state(
-                datasets,
-                merged_sources,
-                merged_inputs,
-                components,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            )
-            return True
-
-    def register_component(self, ref: ComponentRef, *, force: bool = False) -> bool:
-        """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다.
-
-        ``force=True`` replaces an existing registration whose source has changed, in place and
-        under the same ``component_id``.
-
-        Without it, editing a registered component and re-registering is refused, and the refusal
-        names a new identity as the repair. That instruction contradicts the one `loading.py`
-        prints when the same edit is loaded rather than registered -- it says *re-register the
-        component*, which this method then declined. A reader following either message arrives at
-        the other, which `docs/implementations/057` names as worse than a generic error.
-
-        Replacing does not lose provenance: a finished run pins the fingerprint it ran under in
-        its own record, so what a past run used is testified to by that run and not by whichever
-        registration currently holds the id.
-        """
-        if not isinstance(ref, ComponentRef):
-            raise TypeError("ref must be a ComponentRef")
-        if not isinstance(force, bool):
-            raise TypeError("force must be a bool")
-        with self._exclusive():
-            (
-                datasets,
-                sources,
-                execution_inputs,
-                components,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            ) = self._read()
-            key = ref.component_id
-            existing = components.get(key)
-            if existing is not None:
-                if existing == ref:
-                    self._replace_state(
-                        datasets,
-                        sources,
-                        execution_inputs,
-                        components,
-                        agendas,
-                        strategy_configs,
-                        valuation_configs,
-                        monitoring_policies,
-                    )
-                    return False
-                # An edited source replaces its registration in place, under the same id.
-                #
-                # This used to refuse and name a NEW component_id as the repair, while
-                # `loading.py` -- meeting the same edit -- said "re-register the component", which
-                # is what this refused. The two pointed at each other, and
-                # `docs/implementations/057` names that shape as worse than a generic error.
-                #
-                # The real cost was never one command: a new id needed a new strategy_configs
-                # binding and a spec edit, four steps for a one-line change, and the workspace
-                # accumulated `mom`, `mom-eb04...`, `mom-91c7...` for one strategy. Keeping the id
-                # also makes "this strategy ran 47 times across 12 fingerprints" countable, which
-                # a new id per edit scatters across twelve ids where nothing counts it.
-                #
-                # Provenance is not weakened. A finished run pins the fingerprint it ran under in
-                # its own frozen record, so what a past run used is testified to by that run, not
-                # by whichever registration currently holds the id.
-                #
-                # `force` is retained as an explicit spelling for callers that want to say they
-                # meant it, but it no longer gates anything: replacement is the default.
-                _ = force
-            merged = dict(components)
-            merged[key] = _detach_component(ref)
-            self._write(
-                datasets,
-                sources,
-                execution_inputs,
-                merged,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            )
-            self._replace_state(
-                datasets,
-                sources,
-                execution_inputs,
-                merged,
-                agendas,
-                strategy_configs,
-                valuation_configs,
-                monitoring_policies,
-            )
-            return True
-
-    def register_agenda(self, agenda: OperationAgenda) -> bool:
-        if not isinstance(agenda, OperationAgenda):
-            raise TypeError("agenda must be an OperationAgenda")
-        with self._exclusive():
-            state = self._read()
-            agendas = state[4]
-            return self._register_declaration(
-                agenda.agenda_id, agenda, agendas, _detach_agenda, AGENDA_REGISTER_STAGE, state, 4
+        if existing is not None:
+            if existing == registration and existing_source == source:
+                return state, False
+            raise _workspace_error(
+                stage=REGISTER_STAGE,
+                code=f"{REGISTER_STAGE}.conflict",
+                requirement=(
+                    f"dataset_id {key!r} must keep its existing declaration "
+                    "or use a new identity"
+                ),
+                observed="a different declaration is already registered",
+                fix=(
+                    f"keep the registered declaration for {key!r} unchanged, or "
+                    "choose a new dataset_id"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry="use the existing declaration or choose a new dataset_id",
             )
 
-    def register_strategy_config(self, config: StrategyConfig) -> bool:
-        if not isinstance(config, StrategyConfig):
-            raise TypeError("config must be a StrategyConfig")
-        with self._exclusive():
-            state = self._read()
-            self._require_agenda(
-                state[4], config.agenda_id, config.agenda_role, STRATEGY_REGISTER_STAGE
+        return (
+            state._replace(
+                datasets={**state.datasets, key: registration},
+                sources={**state.sources, source_key: source},
+            ),
+            True,
+        )
+
+    def _merge_execution_input(
+        self, state: _State, registration: ExecutionInputRegistration
+    ) -> tuple[_State, bool]:
+        key = registration.execution_input_id
+        source = registration.table.source
+        source_key = source.source_id
+        existing_source = state.sources.get(source_key)
+        if existing_source is not None and existing_source != source:
+            raise _workspace_error(
+                stage=EXECUTION_REGISTER_STAGE,
+                code=f"{EXECUTION_REGISTER_STAGE}.source_conflict",
+                requirement=(
+                    f"source_id {source_key!r} must keep its existing "
+                    "physical declaration"
+                ),
+                observed="a different SourceSpec is already registered",
+                fix=(
+                    f"reuse the registered SourceSpec for {source_key!r}, or register "
+                    "under a new source_id"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry="use the existing source declaration or choose a new source_id",
+                family=FailureFamily.EXCHANGE,
             )
-            if state[3].get(config.component.component_id) != config.component:
+        existing = state.execution_inputs.get(key)
+        if existing is not None:
+            if existing == registration and existing_source == source:
+                return state, False
+            raise _workspace_error(
+                stage=EXECUTION_REGISTER_STAGE,
+                code=f"{EXECUTION_REGISTER_STAGE}.conflict",
+                requirement=(
+                    f"execution_input_id {key!r} must keep its existing "
+                    "declaration or use a new identity"
+                ),
+                observed="a different execution input declaration is already registered",
+                fix=(
+                    f"keep the registered declaration for {key!r} unchanged, or "
+                    "choose a new execution_input_id"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry="use the existing declaration or choose a new execution_input_id",
+                family=FailureFamily.EXCHANGE,
+            )
+        return (
+            state._replace(
+                sources={**state.sources, source_key: source},
+                execution_inputs={
+                    **state.execution_inputs,
+                    key: registration,
+                },
+            ),
+            True,
+        )
+
+    def _merge_component(self, state: _State, ref: ComponentRef) -> tuple[_State, bool]:
+        key = ref.component_id
+        existing = state.components.get(key)
+        if existing is not None and existing == ref:
+            return state, False
+        # An edited source replaces its registration in place, under the same id.
+        #
+        # This used to refuse and name a NEW component_id as the repair, while `loading.py` --
+        # meeting the same edit -- said "re-register the component", which is what this refused.
+        # The two pointed at each other, and `docs/implementations/057` names that shape as
+        # worse than a generic error.
+        #
+        # The real cost was never one command: a new id needed a new strategy_configs binding
+        # and a spec edit, four steps for a one-line change, and the workspace accumulated
+        # `mom`, `mom-eb04...`, `mom-91c7...` for one strategy. Keeping the id also makes "this
+        # strategy ran 47 times across 12 fingerprints" countable, which a new id per edit
+        # scatters across twelve ids where nothing counts it.
+        #
+        # Provenance is not weakened. A finished run pins the fingerprint it ran under in its
+        # own frozen record, so what a past run used is testified to by that run, not by
+        # whichever registration currently holds the id.
+        return state._replace(components={**state.components, key: ref}), True
+
+    def _merge_run(self, state: _State, definition: RunDefinition) -> tuple[_State, bool]:
+        """Fold one run into the document, refusing any id it names that is not registered."""
+        self._require_run_references(state, definition)
+        return self._merge_declaration(
+            state,
+            "runs",
+            definition.run_id,
+            definition,
+            RUN_REGISTER_STAGE,
+            noun="run_id",
+        )
+
+    def _require_run_references(self, state: _State, definition: RunDefinition) -> None:
+        def component(component_id: str, kind: ComponentKind, role: str) -> None:
+            ref = state.components.get(component_id)
+            if ref is None or ref.kind is not kind:
                 raise self._reference_error(
-                    STRATEGY_REGISTER_STAGE,
-                    "strategy component must be registered",
-                    fix="register the strategy's component before registering the StrategyConfig",
+                    RUN_REGISTER_STAGE,
+                    f"run {definition.run_id!r} names {role} {component_id!r}, which must be "
+                    f"a registered {kind.value} component",
+                    fix=(
+                        f"register {component_id!r} as a {kind.value}, or name a registered one"
+                        if ref is None
+                        else f"{component_id!r} is registered as {ref.kind.value}; name a "
+                        f"registered {kind.value}, or register {component_id!r} as one"
+                    ),
                 )
-            return self._register_declaration(
-                config.agenda_id,
-                config,
-                state[5],
-                _detach_strategy_config,
-                STRATEGY_REGISTER_STAGE,
-                state,
-                5,
+
+        for entry in definition.strategies:
+            component(entry.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
+            for name in entry.constraints:
+                component(name, ComponentKind.CONSTRAINT, "constraint")
+        for entry in definition.datamodels:
+            component(entry.component_id, ComponentKind.DATA_MODEL, "datamodel")
+        if definition.exchange is not None:
+            component(definition.exchange, ComponentKind.EXCHANGE, "exchange")
+        if (
+            definition.execution_input_id is not None
+            and definition.execution_input_id not in state.execution_inputs
+        ):
+            raise self._reference_error(
+                RUN_REGISTER_STAGE,
+                f"run {definition.run_id!r} names execution input "
+                f"{definition.execution_input_id!r}, which must be registered",
+                fix=f"register execution input {definition.execution_input_id!r} first",
+            )
+        if (
+            definition.sessions_from is not None
+            and dataset_id(definition.sessions_from) not in state.datasets
+        ):
+            raise self._reference_error(
+                RUN_REGISTER_STAGE,
+                f"run {definition.run_id!r} takes its sessions from dataset "
+                f"{definition.sessions_from!r}, which must be registered",
+                fix=f"register dataset {definition.sessions_from!r} first, or list `sessions`",
             )
 
-    def register_valuation_config(self, config: ValuationConfig) -> bool:
-        if not isinstance(config, ValuationConfig):
-            raise TypeError("config must be a ValuationConfig")
-        with self._exclusive():
-            state = self._read()
-            self._require_agenda(
-                state[4], config.agenda_id, config.agenda_role, VALUATION_REGISTER_STAGE
-            )
-            return self._register_declaration(
-                config.agenda_id,
-                config,
-                state[6],
-                _detach_valuation_config,
-                VALUATION_REGISTER_STAGE,
-                state,
-                6,
-            )
+    @staticmethod
+    def _merge_declaration(
+        state: _State,
+        section: str,
+        key: str,
+        value: object,
+        stage: str,
+        *,
+        noun: str = "run_id",
+    ) -> tuple[_State, bool]:
+        """One keyed declaration folded into its section: idempotent, conflict, or new.
 
-    def register_monitoring_policy(self, policy: MonitoringPolicy) -> bool:
-        if not isinstance(policy, MonitoringPolicy):
-            raise TypeError("policy must be a MonitoringPolicy")
-        with self._exclusive():
-            state = self._read()
-            self._require_agenda(
-                state[4], policy.agenda_id, policy.agenda_role, MONITORING_REGISTER_STAGE
+        `noun` is what the key IS -- `agenda_id` for the agenda-keyed sections, `component_id`
+        for strategy configs -- so a refusal names the thing the author wrote (`docs/issues/040`
+        measured a refusal that named an agenda the author never touched).
+        """
+        declarations: Mapping[str, object] = getattr(state, section)
+        existing = declarations.get(key)
+        if existing is not None:
+            if existing == value:
+                return state, False
+            observed = "a different declaration is already registered"
+            if noun == "component_id":
+                observed = (
+                    f"strategy {key!r} is already bound to agenda "
+                    f"{getattr(existing, 'agenda_id', '?')!r}"
+                )
+            raise _workspace_error(
+                stage=stage,
+                code=f"{stage}.conflict",
+                requirement=(
+                    f"{noun} {key!r} must keep its existing declaration or use a new identity"
+                ),
+                observed=observed,
+                fix=(
+                    f"keep the registered declaration for {key!r} unchanged, or choose "
+                    f"a new {noun}"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+                retry=f"use the existing declaration or choose a new {noun}",
             )
-            return self._register_declaration(
-                policy.agenda_id,
-                policy,
-                state[7],
-                _detach_monitoring_policy,
-                MONITORING_REGISTER_STAGE,
-                state,
-                7,
-            )
+        updated = {**declarations, key: value}
+        return state._replace(**{section: updated}), True
 
     @property
     def roster_path(self) -> Path:
@@ -978,22 +884,17 @@ class Workspace:
         world ("069500 is an ETF"), and what a past run treated an instrument as is testified to
         by that run's own fills.
         """
+        payload = _roster_payload(tables, digest=digest)
+        with self._exclusive():
+            self._write_roster(payload)
+        return payload
+
+    def _write_roster(self, payload: Mapping[str, object]) -> None:
         import json
 
-        if not isinstance(tables, Mapping) or not tables:
-            raise ValueError("instrument registration requires at least one table")
-        if not isinstance(digest, str) or not digest:
-            raise ValueError("digest must be a non-empty string")
-        payload = {
-            "schema": "vqapr.instruments/v1",
-            "tables": {str(kind): str(Path(path)) for kind, path in sorted(tables.items())},
-            "digest": digest,
-        }
-        with self._exclusive():
-            self.roster_path.write_text(
-                json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-        return payload
+        self.roster_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
     def registered_instruments(self) -> dict[str, object] | None:
         """The roster pointer, or `None` when this project has registered no instruments.
@@ -1073,20 +974,23 @@ class Workspace:
                 )
             # Looked up after the reference check, so an unsupported kind still gets the typed
             # refusal `_references_in` raises rather than a bare `KeyError` from this dict.
-            position = {
-                "component": 3,
-                "agenda": 4,
-                "strategy_config": 5,
-                "valuation_config": 6,
-                "monitoring_policy": 7,
-            }[kind]
+            position = {"dataset": 0, "component": 3, "run": 4}[kind]
             declarations = dict(state[position])
             if identity not in declarations:
                 self._replace_state(*state)
                 return False
-            del declarations[identity]
+            withdrawn = declarations.pop(identity)
             merged = list(state)
             merged[position] = declarations
+            if kind == "dataset":
+                # The physical source goes with the last dataset that named it: a source
+                # nothing reads is a path the document keeps pointing at for no one.
+                source_id = withdrawn.source
+                still_named = any(item.source == source_id for item in declarations.values())
+                if not still_named:
+                    merged[1] = {
+                        key: spec for key, spec in state.sources.items() if key != source_id
+                    }
             self._write(*merged)
             self._replace_state(*merged)
             return True
@@ -1121,47 +1025,31 @@ class Workspace:
         land between them -- and because `_decode` validates forward references, the result was a
         workspace `Workspace.open()` refuses rather than merely a stale answer.
         """
-        components, agendas, strategy_configs, valuation_configs, monitoring_policies = (
-            state[3],
-            state[4],
-            state[5],
-            state[6],
-            state[7],
-        )
+        components = state[3]
+        runs: Mapping[str, RunDefinition] = state[4] if len(state) > 4 else {}
         blockers: list[str] = []
         if kind == "component":
-            for config_id, config in strategy_configs.items():
-                if str(config.component.component_id) == identity:
-                    blockers.append(f"strategy config {config_id!r}")
-        elif kind == "agenda":
-            for config_id, config in strategy_configs.items():
-                if config.agenda_id == identity:
-                    blockers.append(f"strategy config {config_id!r}")
-            for config_id in valuation_configs:
-                if config_id == identity:
-                    blockers.append(f"valuation config {config_id!r}")
-            for policy_id in monitoring_policies:
-                if policy_id == identity:
-                    blockers.append(f"monitoring policy {policy_id!r}")
+            for run_id, definition in runs.items():
+                named = {definition.exchange}
+                named.update(entry.component_id for entry in definition.strategies)
+                named.update(name for entry in definition.strategies for name in entry.constraints)
+                named.update(entry.component_id for entry in definition.datamodels)
+                if identity in named:
+                    blockers.append(f"run {run_id!r}")
         elif kind == "dataset":
-            # A dataset is named by a component's declared requirements rather than by the
-            # workspace document, so nothing here can claim to know every reader of one. Said
-            # plainly instead of returning an empty tuple that would read as "safe to remove".
-            raise _workspace_error(
-                stage=REMOVE_STAGE,
-                code=f"{REMOVE_STAGE}.unsupported_kind",
-                requirement="removable kinds are component, agenda, and their configs",
-                observed=repr(kind),
-                fix=(
-                    "a dataset's readers are declared inside component requirements, which this "
-                    "workspace does not index; rebuild the workspace instead of removing one"
-                ),
-                explain=ExplainTopic.WORKSPACE_STATE,
-                retry="remove a component, agenda, or config instead",
-            )
-        elif kind in ("strategy_config", "valuation_config", "monitoring_policy"):
-            # Leaf declarations: a run definition names them, and a run definition is not a
-            # workspace registration. Nothing inside the workspace points at these.
+            # What the DOCUMENT knows names a dataset: a registered run whose sessions come from
+            # it. A component's reads are declared in its code, not here, so a strategy that
+            # reads a withdrawn dataset is refused by `check` and `run` at its next preflight
+            # (`check.dataset.unregistered`), which is the same place it would be refused had
+            # the dataset never been registered. A datamodel run that WRITES this dataset is
+            # not a blocker: withdrawing the output is how that run is run again
+            # (`docs/issues/060`).
+            for run_id, definition in runs.items():
+                if definition.sessions_from == identity:
+                    blockers.append(f"run {run_id!r} (sessions_from)")
+        elif kind == "run":
+            # A run is the top of the document: nothing names a run, and a run's RECORDS are
+            # not registrations -- `vqapr rm run` removes those separately.
             return ()
         else:
             raise _workspace_error(
@@ -1169,71 +1057,46 @@ class Workspace:
                 code=f"{REMOVE_STAGE}.unsupported_kind",
                 requirement="kind must be one this workspace stores",
                 observed=repr(kind),
-                fix="use one of: component, agenda, strategy_config, valuation_config, "
-                "monitoring_policy",
+                fix="use one of: dataset, component, run",
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry="retry with a kind this workspace stores",
             )
         if kind == "component" and identity not in components:
             return ()
-        if kind == "agenda" and identity not in agendas:
-            return ()
         return tuple(sorted(blockers))
 
     def _config_lookup(
-        self, key: str, declarations: Mapping[str, object], detach: object, stage: str, label: str
+        self,
+        key: str,
+        declarations: Mapping[str, object],
+        stage: str,
+        label: str,
+        *,
+        noun: str = "run_id",
     ) -> object:
         if not isinstance(key, str) or not key:
             raise _workspace_error(
                 stage=stage,
                 code=f"{stage}.invalid",
-                requirement=f"{label} lookup requires a valid agenda_id",
+                requirement=f"{label} lookup requires a valid {noun}",
                 observed=repr(key),
-                fix="pass a non-empty agenda_id string to look up this configuration",
+                fix=f"pass a non-empty {noun} string to look up this configuration",
                 explain=ExplainTopic.DECLARATION_SHAPE,
-                retry="use a valid agenda_id, then retry",
+                retry=f"use a valid {noun}, then retry",
             )
         try:
-            return detach(declarations[key])  # type: ignore[operator]
+            return declarations[key]
         except KeyError as error:
+            what = {"component_id": "strategy", "run_id": "run"}.get(noun, "agenda")
             raise _workspace_error(
                 stage=stage,
                 code=f"{stage}.missing",
-                requirement=f"{label} for agenda {key!r} must be registered",
+                requirement=f"{label} for {what} {key!r} must be registered",
                 observed=f"registered {label}s: {', '.join(sorted(declarations)) or '(none)'}",
-                fix=f"register a {label} for agenda {key!r}, or use one of the ids listed above",
+                fix=f"register a {label} for {what} {key!r}, or use one of the ids listed above",
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry=f"register the {label}, then retry",
             ) from error
-
-    def _require_agenda(
-        self,
-        agendas: Mapping[str, OperationAgenda],
-        agenda_id: str,
-        role: OperationRole,
-        stage: str,
-    ) -> None:
-        agenda = agendas.get(agenda_id)
-        if agenda is None or agenda.role is not role:
-            # Two different repairs hide behind one condition: the agenda may be absent, or it
-            # may exist under a role this configuration cannot use. Saying which one it is costs
-            # nothing here -- both values are parameters -- and saves the reader from checking.
-            missing = agenda is None
-            wanted = role.value.lower()
-            raise self._reference_error(
-                stage,
-                "declared agenda must be registered with the matching role",
-                fix=(
-                    f"register agenda {agenda_id!r} with role {wanted} before registering this "
-                    "configuration"
-                    if missing
-                    else (
-                        f"agenda {agenda_id!r} is registered as "
-                        f"{agenda.role.value.lower()}; register it as {wanted}, or point this "
-                        "configuration at an agenda that already has that role"
-                    )
-                ),
-            )
 
     def _reference_error(self, stage: str, requirement: str, *, fix: str) -> VqaprError:
         return _workspace_error(
@@ -1281,55 +1144,7 @@ class Workspace:
             stale_after=WORKSPACE_LOCK_STALE_AFTER,
         )
 
-    def _register_declaration(
-        self,
-        key: str,
-        value: object,
-        declarations: Mapping[str, object],
-        detach: object,
-        stage: str,
-        state: tuple[object, ...],
-        position: int,
-    ) -> bool:
-        existing = declarations.get(key)
-        if existing is not None:
-            if existing == value:
-                self._replace_state(*state)  # type: ignore[arg-type]
-                return False
-            raise _workspace_error(
-                stage=stage,
-                code=f"{stage}.conflict",
-                requirement=(
-                    f"agenda_id {key!r} must keep its existing declaration or use a new identity"
-                ),
-                observed="a different declaration is already registered",
-                fix=(
-                    f"keep the registered declaration for {key!r} unchanged, or choose "
-                    "a new agenda_id"
-                ),
-                explain=ExplainTopic.WORKSPACE_STATE,
-                retry="use the existing declaration or choose a new agenda_id",
-            )
-        merged = list(state)
-        updated = dict(declarations)
-        updated[key] = detach(value)  # type: ignore[operator]
-        merged[position] = updated
-        self._write(*merged)  # type: ignore[arg-type]
-        self._replace_state(*merged)  # type: ignore[arg-type]
-        return True
-
-    def _read(
-        self,
-    ) -> tuple[
-        dict[DatasetId, DatasetRegistration],
-        dict[SourceId, SourceSpec],
-        dict[ExecutionInputId, ExecutionInputRegistration],
-        dict[ComponentId, ComponentRef],
-        dict[str, OperationAgenda],
-        dict[str, StrategyConfig],
-        dict[str, ValuationConfig],
-        dict[str, MonitoringPolicy],
-    ]:
+    def _read(self) -> _State:
         text: str | None = None
         for attempt in range(WORKSPACE_SWAP_ATTEMPTS):
             try:
@@ -1348,7 +1163,7 @@ class Workspace:
                     # `declaration.read` avoids by naming the file rather than the dict lookup.
                     fix=(
                         "run `vqapr register <declaration>.yaml` in this directory, which "
-                        "creates the workspace as it registers; or `vqapr new run-spec` to "
+                        "creates the workspace as it registers; or `vqapr new run` to "
                         "start from a template"
                     ),
                     explain=ExplainTopic.WORKSPACE_STATE,
@@ -1373,7 +1188,7 @@ class Workspace:
         assert text is not None
 
         try:
-            return _decode_cached(text)  # type: ignore[return-value]
+            return _State(*read_workspace(text))
         except (TypeError, ValueError, yaml.YAMLError) as error:
             message = str(error)
             requirement = (
@@ -1401,27 +1216,15 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
-        agendas: Mapping[str, OperationAgenda],
-        strategy_configs: Mapping[str, StrategyConfig],
-        valuation_configs: Mapping[str, ValuationConfig],
-        monitoring_policies: Mapping[str, MonitoringPolicy],
+        runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
-        self._datasets = {key: _detach_registration(value) for key, value in datasets.items()}
-        self._sources = {key: _detach_source(value) for key, value in sources.items()}
+        self._datasets = {key: value for key, value in datasets.items()}
+        self._sources = dict(sources)
         self._execution_inputs = {
-            key: _detach_execution_input(value) for key, value in execution_inputs.items()
+            key: value for key, value in execution_inputs.items()
         }
-        self._components = {key: _detach_component(value) for key, value in components.items()}
-        self._agendas = {key: _detach_agenda(value) for key, value in agendas.items()}
-        self._strategy_configs = {
-            key: _detach_strategy_config(value) for key, value in strategy_configs.items()
-        }
-        self._valuation_configs = {
-            key: _detach_valuation_config(value) for key, value in valuation_configs.items()
-        }
-        self._monitoring_policies = {
-            key: _detach_monitoring_policy(value) for key, value in monitoring_policies.items()
-        }
+        self._components = {key: value for key, value in components.items()}
+        self._runs = dict(runs or {})
 
     def _write(
         self,
@@ -1429,21 +1232,15 @@ class Workspace:
         sources: Mapping[SourceId, SourceSpec],
         execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
-        agendas: Mapping[str, OperationAgenda],
-        strategy_configs: Mapping[str, StrategyConfig],
-        valuation_configs: Mapping[str, ValuationConfig],
-        monitoring_policies: Mapping[str, MonitoringPolicy],
+        runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = _encode(
+        payload = write_workspace(
             datasets,
             sources,
             execution_inputs,
             components,
-            agendas,
-            strategy_configs,
-            valuation_configs,
-            monitoring_policies,
+            runs or {},
         )
         try:
             atomic.write_atomically(
@@ -1479,6 +1276,99 @@ class Workspace:
 
 
 
+
+
+def _roster_payload(tables: Mapping[str, Path | str], *, digest: str) -> dict[str, object]:
+    if not isinstance(tables, Mapping) or not tables:
+        raise ValueError("instrument registration requires at least one table")
+    if not isinstance(digest, str) or not digest:
+        raise ValueError("digest must be a non-empty string")
+    return {
+        "schema": "vqapr.instruments/v1",
+        "tables": {str(kind): str(Path(path)) for kind, path in sorted(tables.items())},
+        "digest": digest,
+    }
+
+
+class Transaction:
+    """Several registrations, staged now and written once.
+
+    `view` is a `Workspace` holding the snapshot plus everything staged so far, so `_apply` can
+    resolve a config's component or an agenda's dataset declared earlier in the same document
+    exactly as it would resolve one already on disk. Each `register_*` runs the same merge the
+    single-item `Workspace.register_*` runs, against that staged state, so a conflict or a missing
+    reference is refused where the author can still see which item it was.
+
+    `commit()` is the only method that touches disk. It holds the lock for one read and one
+    write: the merges are replayed against the state read under the lock, so a registration
+    that landed from another process in the meantime is seen and, if it conflicts, refused --
+    and then nothing is written. The roster sidecar, when a document declares one, is written
+    after the document and inside the same lock.
+    """
+
+    def __init__(self, staging: Workspace) -> None:
+        self._staging = staging
+        self._ops: list[Callable[[_State], tuple[_State, bool]]] = []
+        self._rosters: list[Mapping[str, object]] = []
+
+    @property
+    def view(self) -> Workspace:
+        """The snapshot plus what is staged: what a later declaration may look up."""
+        return self._staging
+
+    def _stage(self, merge: Callable[[_State], tuple[_State, bool]]) -> bool:
+        merged, changed = merge(self._staging._state())
+        self._staging._replace_state(*merged)
+        self._ops.append(merge)
+        return changed
+
+    def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_dataset(state, registration, source))
+
+    def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
+        if not isinstance(registration, ExecutionInputRegistration):
+            raise TypeError("registration must be an ExecutionInputRegistration")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_execution_input(state, registration))
+
+    def register_component(self, ref: ComponentRef) -> bool:
+        if not isinstance(ref, ComponentRef):
+            raise TypeError("ref must be a ComponentRef")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_component(state, ref))
+
+    def register_run(self, definition: RunDefinition) -> bool:
+        if not isinstance(definition, RunDefinition):
+            raise TypeError("definition must be a RunDefinition")
+        ws = self._staging
+        return self._stage(lambda state: ws._merge_run(state, definition))
+
+    def register_instruments(
+        self, tables: Mapping[str, Path | str], *, digest: str
+    ) -> dict[str, object]:
+        payload = _roster_payload(tables, digest=digest)
+        self._rosters.append(payload)
+        return payload
+
+    def commit(self) -> None:
+        """One lock, one read, the staged merges replayed, one write."""
+        if not self._ops and not self._rosters:
+            return
+        ws = self._staging
+        with ws._exclusive():
+            state = ws._read_or_empty()
+            changed = False
+            for merge in self._ops:
+                state, merged_changed = merge(state)
+                changed = changed or merged_changed
+            if changed:
+                ws._write(*state)
+            ws._replace_state(*state)
+            for payload in self._rosters:
+                ws._write_roster(payload)
+        self._ops = []
+        self._rosters = []
 
 
 def _require_span(dataset_id: str, registration: DatasetRegistration) -> None:

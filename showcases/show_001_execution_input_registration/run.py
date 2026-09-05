@@ -25,28 +25,19 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
+    StrategyEntry,
     component_ref,
     preflight_run,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_strategy_config,
-    register_valuation_config,
     run,
 )
 
@@ -55,8 +46,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-VERIFIED_AGAINST = "vqapr-0.2.0a2+develop"
-LAST_VERIFIED_AT = "2026-09-01"
+VERIFIED_AGAINST = "vqapr-0.4.1"
+LAST_VERIFIED_AT = "2026-09-03"
 
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))
 KST = "Asia/Seoul"
@@ -120,23 +111,6 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
     finally:
         con.close()
     return execution, invalid, canonical, observation
-
-
-def _agenda(agenda_id: str, role: OperationRole, at: time) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=KST,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, KST, 0, OFFSET),
-            )
-            for day in SESSIONS
-        ),
-        provenance="show_001 three declared sessions",
-    )
 
 
 def _execution_input(input_id: str, path: Path) -> ExecutionInputRegistration:
@@ -244,6 +218,7 @@ def main() -> None:
             "showcase-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -263,38 +238,28 @@ def main() -> None:
     for reference in (strategy_ref, exchange_ref):
         register_component(PROJECT, reference)
 
-    strategy_agenda = _agenda("showcase-strategy", OperationRole.STRATEGY_CALLBACK, time(4, 0))
-    valuation_agenda = _agenda("showcase-valuation", OperationRole.VALUATION, time(16, 0))
-    for agenda in (strategy_agenda, valuation_agenda):
-        register_agenda(PROJECT, agenda)
-
-    strategy_config = StrategyConfig(
-        strategy_ref, "showcase-strategy", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig("showcase-valuation", OperationRole.VALUATION)
-    register_strategy_config(PROJECT, strategy_config)
-    register_valuation_config(PROJECT, valuation_config)
 
     definition = RunDefinition(
-        strategy_config,
-        valuation_config,
+        run_id="show001",
         # The legacy showcase generated a Constraint whose methods were unconditionally-passing
-        # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so it
-        # is declared empty rather than authored to keep a field non-empty. See README.
-        ConstraintSet(()),
-        # `None` states there is no monitoring cadence, explicitly.
-        None,
-        exchange_ref,
-        "krx-daily",
-        datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),
-        datetime.fromisoformat(f"2024-03-07T23:00:00{OFFSET}"),
-        AccountSnapshot(0, Decimal("100"), {}),
-        AccountMode.LONG_ONLY,
+        # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so the
+        # strategy entry names no constraints rather than an inert one authored to keep a field
+        # non-empty. See README.
+        strategies=(StrategyEntry("showcase-strategy"),),
+        sessions=tuple(SESSIONS),
+        timezone=KST,
+        at=time(4, 0),
+        exchange="showcase-exchange",
+        execution_input_id="krx-daily",
+        start=datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),
+        end=datetime.fromisoformat(f"2024-03-07T23:00:00{OFFSET}"),
+        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
     )
 
     # --- One real run -------------------------------------------------------------------
-    dense_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)))
+    dense_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)).result())
 
     # --- Density invariance -------------------------------------------------------------
     # Same registered declaration, only the physical execution parquet's non-selected 10:00
@@ -303,7 +268,9 @@ def main() -> None:
     dense_bytes = execution_path.read_bytes()
     shutil.copyfile(canonical_path, execution_path)
     try:
-        canonical_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)))
+        canonical_summary = _signature(
+            run(PROJECT, preflight_run(PROJECT, definition)).result()
+        )
     finally:
         execution_path.write_bytes(dense_bytes)
 

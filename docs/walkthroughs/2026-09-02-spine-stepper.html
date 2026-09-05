@@ -1,0 +1,424 @@
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vqapr 척추 디버거</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Nanum+Myeongjo:wght@800&display=swap">
+<style>
+:root{
+  --bg:#F5F7FA; --surface:#FFFFFF; --ink:#1C2331; --ink-2:#3C4556; --muted:#6A7387;
+  --line:#D9DEE7; --line-2:#EAEEF4; --accent:#0F6E73; --accent-bg:#E3F1F1;
+  --warn:#A8650F; --warn-bg:#FBF0DF; --bad:#A43B2E; --bad-bg:#F9E6E2; --code-bg:#1E2533; --code-ink:#DCE2EE; --code-hl:#2B3549;
+  --author:#7A4E9E; --author-bg:#F0E8F7;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#141922; --surface:#1B212C; --ink:#E6E9EF; --ink-2:#C4CAD6; --muted:#8B93A5;
+    --line:#2C3441; --line-2:#232A36; --accent:#4FB3B7; --accent-bg:#15343A;
+    --warn:#E0A24C; --warn-bg:#3A2A12; --bad:#E07A6B; --bad-bg:#40201B; --code-bg:#0F1319; --code-ink:#D5DBE6; --code-hl:#1F2734;
+    --author:#C9A6E8; --author-bg:#2E2340;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#141922; --surface:#1B212C; --ink:#E6E9EF; --ink-2:#C4CAD6; --muted:#8B93A5;
+  --line:#2C3441; --line-2:#232A36; --accent:#4FB3B7; --accent-bg:#15343A;
+  --warn:#E0A24C; --warn-bg:#3A2A12; --bad:#E07A6B; --bad-bg:#40201B; --code-bg:#0F1319; --code-ink:#D5DBE6; --code-hl:#1F2734;
+  --author:#C9A6E8; --author-bg:#2E2340;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans KR",-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+main{max-width:1180px;margin:0 auto;padding:40px 24px 80px}
+h1{font-family:"Nanum Myeongjo",Georgia,serif;font-size:1.9rem;font-weight:800;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:1.05rem;font-weight:600;margin:40px 0 12px}
+p{margin:8px 0;max-width:76ch}
+code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+code{font-size:.86em;background:var(--line-2);padding:.08em .38em;border-radius:4px}
+.eyebrow{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:10px}
+.lede{color:var(--ink-2);max-width:72ch}
+.fix{border-left:3px solid var(--warn);background:var(--warn-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:18px 0;font-size:.92rem}
+.fix strong{color:var(--warn)}
+
+/* spine map */
+.map{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:14px 0 6px}
+.node{position:relative;min-width:132px;flex:1;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:10px 12px;cursor:pointer;transition:border-color .15s,background .15s;text-align:left;font:inherit;color:inherit}
+.node:hover,.node:focus-visible{border-color:var(--accent);outline:none}
+.node.active{border-color:var(--accent);background:var(--accent-bg)}
+.node .k{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.node .t{font-weight:600;margin-top:2px}
+.node .s{font-size:.78rem;color:var(--muted);margin-top:2px;line-height:1.4}
+.arrow{display:flex;align-items:center;justify-content:center;min-width:26px;color:var(--muted);font-size:1.1rem}
+.loop{border:1px dashed var(--line);border-radius:10px;padding:8px 8px 6px;display:flex;align-items:stretch;gap:0;position:relative;flex:3}
+.loop::before{content:"루프 — occurrence마다";position:absolute;top:-9px;left:12px;background:var(--bg);padding:0 6px;font-size:.7rem;color:var(--muted);letter-spacing:.06em}
+.side{display:flex;flex-direction:column;gap:8px;min-width:150px}
+
+/* tabs */
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:26px 0 14px}
+.tab{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 13px;font:inherit;font-size:.88rem;color:var(--ink-2);cursor:pointer}
+.tab.active{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* debugger */
+.dbg{display:grid;grid-template-columns:250px 1fr 270px;gap:14px;align-items:start}
+.pane{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.pane h3{margin:0;padding:10px 14px;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line-2);font-weight:600}
+.stack{list-style:none;margin:0;padding:6px 0;max-height:560px;overflow:auto}
+.stack li{padding:7px 14px;cursor:pointer;border-left:3px solid transparent;font-size:.86rem;display:grid;grid-template-columns:22px 1fr;gap:8px;color:var(--muted)}
+.stack li .i{font-family:"IBM Plex Mono",monospace;font-size:.76rem;padding-top:2px}
+.stack li .f{color:var(--ink-2)}
+.stack li .l{display:block;font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--muted)}
+.stack li.done .f{color:var(--muted)}
+.stack li.cur{border-left-color:var(--accent);background:var(--accent-bg)}
+.stack li.cur .f,.stack li.cur .i{color:var(--accent);font-weight:600}
+.stack li.author{border-left-color:var(--author)}
+.stack li.author.cur{background:var(--author-bg)}
+.stack li.author.cur .f,.stack li.author.cur .i{color:var(--author)}
+.stack li:hover{background:var(--line-2)}
+.frame{padding:16px 20px 18px}
+.loc{display:inline-flex;align-items:center;gap:8px;font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--accent);background:var(--accent-bg);padding:3px 10px;border-radius:4px}
+.loc.author{color:var(--author);background:var(--author-bg)}
+.frame h4{font-size:1.15rem;margin:10px 0 4px;font-weight:600;text-wrap:balance}
+.frame .what{color:var(--ink-2);margin:6px 0 12px}
+.frame .what b{color:var(--ink);font-weight:600}
+pre.code{background:var(--code-bg);color:var(--code-ink);border-radius:6px;padding:12px 14px;font-size:.8rem;line-height:1.55;overflow-x:auto;margin:10px 0;border:none}
+pre.code .hl{background:var(--code-hl);display:block;margin:0 -14px;padding:0 14px}
+.caution{border-left:3px solid var(--bad);background:var(--bad-bg);padding:8px 12px;border-radius:0 6px 6px 0;font-size:.88rem;margin-top:12px}
+.tip{border-left:3px solid var(--accent);background:var(--accent-bg);padding:8px 12px;border-radius:0 6px 6px 0;font-size:.88rem;margin-top:12px}
+.state{padding:8px 0}
+.state .g{padding:6px 14px 8px}
+.state .g h5{margin:0 0 4px;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:.8rem;font-family:"IBM Plex Mono",monospace}
+.kv .k{color:var(--muted)}
+.kv .v{color:var(--ink);word-break:break-word}
+.kv .v.new{color:var(--accent);font-weight:600}
+.empty{font-size:.8rem;color:var(--muted);font-style:italic}
+.ctl{display:flex;align-items:center;gap:8px;margin:12px 0 0;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:6px 12px;font:inherit;font-size:.88rem;cursor:pointer}
+.btn:hover{border-color:var(--accent)} .btn:disabled{opacity:.4;cursor:default}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.prog{flex:1;height:4px;background:var(--line-2);border-radius:2px;overflow:hidden;min-width:120px}
+.prog i{display:block;height:100%;background:var(--accent);transition:width .2s}
+.count{font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--muted);min-width:56px;text-align:right}
+.kbd{font-size:.75rem;color:var(--muted)}
+.remember{margin-top:18px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 18px}
+.remember h3{margin:0 0 6px;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.remember ul{margin:0;padding-left:1.2em;font-size:.9rem}
+.remember li{margin:4px 0}
+.legend{display:flex;gap:14px;font-size:.78rem;color:var(--muted);margin:8px 0 0;flex-wrap:wrap}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.legend .a::before{background:var(--accent)} .legend .u::before{background:var(--author)}
+.all{margin-top:20px}
+.all details{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:8px 14px}
+.all summary{cursor:pointer;font-size:.9rem;color:var(--ink-2)}
+.trace{list-style:none;padding:0;margin:8px 0 0}
+.trace li{padding:8px 0;border-top:1px solid var(--line-2);font-size:.88rem;display:grid;grid-template-columns:230px 1fr;gap:12px}
+.trace li .l{font-family:"IBM Plex Mono",monospace;font-size:.76rem;color:var(--accent)}
+@media (max-width:900px){.dbg{grid-template-columns:1fr}.stack{max-height:220px}.trace li{grid-template-columns:1fr}}
+@media (prefers-reduced-motion: reduce){.prog i,.node{transition:none}}
+</style>
+
+<main>
+<div class="eyebrow">develop @ c454ba9d · step-04 브랜치(diff 0) · 2026-09-02 저녁</div>
+<h1>vqapr 척추 디버거 — 등록에서 기록까지 한 프레임씩</h1>
+<p class="lede">위 지도에서 단계를 고르고 ◀ ▶(또는 키보드 ← →)로 넘기면, 그 순간 <b>어느 파일의 어느 함수</b>에 있고 <b>메모리·디스크·시계</b>에 무엇이 있는지가 바뀝니다. 보라색 프레임은 저자(사용자)가 쓴 코드가 실행되는 자리입니다.</p>
+<div class="fix"><strong>앞선 리포트 정정.</strong> 세션 중에 develop이 두 단계 전진했습니다. 등록은 이제 <b>선언 문서 하나가 트랜잭션 하나</b>(record 134 — 락 한 번, 쓰기 한 번, 중간 실패면 아무것도 안 써짐)이고, run 기록은 <b>occurrence마다 디스크로 흘려 씁니다</b>(record 135 — 죽어도 직전 occurrence까지 남음, 타입 사이드카, <code>store.account_positions</code> 스위치). 아래 프레임은 이 최신 트리 기준입니다.</div>
+
+<h2>척추 지도 — 클릭하면 그 단계로</h2>
+<div class="map" id="map"></div>
+<div class="legend"><span class="a">프레임워크 코드</span><span class="u">저자 코드</span></div>
+
+<div class="tabs" id="tabs" role="tablist"></div>
+
+<div class="dbg">
+  <section class="pane"><h3>호출 스택</h3><ol class="stack" id="stack"></ol></section>
+  <section class="pane"><div class="frame" id="frame"></div></section>
+  <section class="pane"><h3>이 시점의 상태</h3><div class="state" id="state"></div></section>
+</div>
+<div class="ctl">
+  <button class="btn" id="first" title="처음">⏮</button>
+  <button class="btn" id="prev">◀ 이전</button>
+  <button class="btn primary" id="next">다음 ▶</button>
+  <button class="btn" id="last" title="끝">⏭</button>
+  <div class="prog"><i id="bar"></i></div>
+  <span class="count" id="count"></span>
+  <span class="kbd">← → 로도 이동</span>
+</div>
+<div class="remember" id="remember"></div>
+<div class="all"><details><summary>이 시나리오 전체를 한 줄씩 펼쳐 보기</summary><ol class="trace" id="trace"></ol></details></div>
+</main>
+
+<script>
+// ---------- data ----------
+// Each scenario: {id, key, title, sub, frames:[{loc, fn, author?, title, what, code, caution?, tip?, mem?, disk?, clock?}], remember:[...]}
+// State objects merge over previous frames; value null removes a key.
+const S = [];
+
+S.push({id:'reg', key:'①', title:'등록', sub:'vqapr register decl.yaml', frames:[
+ {loc:'src/vqapr/cli/main.py:192', fn:'main()', title:'명령줄을 파싱해 register 핸들러로', what:'argparse가 <b>register</b> 서브커맨드를 고른다. 모르는 flag는 여기서 <code>cli.usage.rejected</code>로 죽는다 — SKILL.md가 가르치는 <code>--force</code>가 그 예다.',
+  code:['args = parser.parse_args(argv)','project_root = Path(args.project_root)','handler = args.handler','payload = handler(args, project_root=project_root)'], mem:{argv:'["register","decl.yaml"]'}, disk:{'.vqapr/workspace.yaml':'있거나 없음'}},
+ {loc:'src/vqapr/cli/register.py:81', fn:'handle()', title:'YAML 하나를 mapping으로 읽는다', what:'선언 문서 전체가 dict 하나로 메모리에 올라온다. 최상위 섹션은 여덟으로 닫혀 있다: datasets · execution_inputs · agendas · components · strategy_configs · valuation_configs · monitoring_policies · instruments.',
+  code:['document = read_yaml_mapping(declaration, what="a declaration")','return success("workspace.register",','    registered=apply(document, project_root, base=declaration.parent, ...))'], mem:{document:'dict — 섹션 8개 이하'}},
+ {loc:'src/vqapr/declarations.py:813', fn:'apply() — 사전 검사', title:'모르는 섹션과 잘못된 id를 먼저 전부 거절', what:'<code>sources:</code> 같은 미지 섹션은 "dataset 밑에 인라인하라"는 힌트와 함께, 공백·빈 id는 이름을 대며 거절된다. <b>아직 디스크는 건드리지 않았다.</b>',
+  code:['unknown = set(document) - _SECTIONS','if unknown: raise ...  # 전용 힌트','_require_declared_ids(document)']},
+ {loc:'src/vqapr/declarations.py:834', fn:'Workspace.transaction()', title:'트랜잭션을 연다 — 스냅샷 + 스테이징', what:'workspace.yaml의 현재 상태를 스냅샷으로 들고, 이 문서의 등록을 <b>메모리에 쌓기만</b> 한다. <code>transaction.view</code>는 스냅샷 + 지금까지 스테이징된 것을 합친 Workspace라서, 같은 문서 뒤쪽 항목이 앞쪽 항목을 참조할 수 있다.',
+  code:['transaction = Workspace.transaction(project_root)','# 아무것도 디스크에 쓰지 않는다. commit()이 유일한 쓰기다'], mem:{'transaction.staged':'[] (비어 있음)','transaction.view':'스냅샷'}, tip:'record 134. 예전에는 항목마다 락→읽기→쓰기였고 k번째 실패 시 1..k-1이 남았다.'},
+ {loc:'src/vqapr/data/datasets.py:537', fn:'validate() — 4단계', title:'dataset: parquet을 실제로 열어 검사', what:'필수 5키(<code>source_id path available_at key_fields fields</code>)를 확인한 뒤 duckdb <code>read_parquet</code>로 파일을 연다. ① 스키마 — <code>available_at</code>이 TIMESTAMP_TZ인지(naive면 변환 없이 거절), field 표현식을 row-wise/grouped 두 shape로 bind해 성공한 쪽 채택 ② key_fields의 null·중복 전체 스캔 ③ span(min/max) 측정 ④ NaN/inf. <b>측정값 span · field_types · aggregated는 사용자가 쓰는 키가 아니다.</b>',
+  code:['# scan.py:157  read_parquet(\'<path>/**/*.parquet\', hive_partitioning=...)','schema  -> datasets.py:198-352   (bind, tz, SELECT 금지)','key     -> datasets.py:355-392   (null / duplicate + 예시)','span    -> datasets.py:480-534   (실측 min/max)','values  -> datasets.py:395-465   (NaN / inf)'], disk:{'data/prices.parquet':'읽음 (전체 스캔 2회)'}, mem:{measured:'DatasetRegistration(span, field_types, aggregated)'}, caution:'데이터 바이트 digest는 계산하지 않는다(실환경 A7). 등록 뒤 파일이 바뀌어도 알 수 없다.'},
+ {loc:'src/vqapr/declarations.py:851', fn:'transaction.register_dataset()', title:'스테이징 — 충돌은 여기서 잡힌다', what:'같은 id에 <b>다른</b> 선언이면 <code>dataset.register.conflict</code>, 완전히 같으면 no-op. 같은 <code>source_id</code>에 다른 path면 <code>source_conflict</code>. 스테이징 상태에 대해 판정하므로 몇 번째 항목이 문제인지 저자가 본다.',
+  code:['transaction.register_dataset(measured, source)','registered.setdefault("datasets", []).append(dataset_id)'], mem:{'transaction.staged':'[dataset:price_daily]'}},
+ {loc:'src/vqapr/exchange/execution_table.py:89', fn:'validate_execution_input()', title:'execution input: 체결 테이블 검사', what:'<code>table.{source_id,path,trade_at_field,instrument_field,is_tradable_field,price_fields}</code> + <code>fill.{selector,at,timezone,trade_price}</code> 전부 필수. 타입(trade_at=TZ, is_tradable=BOOLEAN, 가격=numeric) → (trade_at, instrument) 유일성 → tradable 행의 선택 가격이 유한·양수. <code>trade_price</code>는 <code>price_fields</code>의 키여야 한다(:74-77).',
+  code:['validate_execution_input(registration).raise_if_failed()','transaction.register_execution_input(registration)'], disk:{'data/venue.parquet':'읽음'}, mem:{'transaction.staged':'[dataset, execution_input:krx-daily]'}},
+ {loc:'src/vqapr/runtime/agendas.py:268', fn:'OperationAgenda.daily()', title:'agenda: 날짜 집합 × 선언된 벽시계 시각', what:'<code>from_dataset</code>이면 <code>transaction.view.evaluation_times()</code>가 그 dataset의 distinct <code>available_at</code>을 스캔한다. 그 뒤 <b>세션의 시각은 버리고 로컬 날짜만</b> 취해 중복 제거하고, 선언된 <code>at</code>·<code>timezone</code>으로 occurrence를 만든다. "행이 도착한 시각"과 "판단하는 시각"은 분리된 사실이다. DST로 없거나 두 번인 벽시계 시각은 거절.',
+  code:['for session in sessions:','    day = session.astimezone(zone).date()','    if day not in seen: days.append(day)','occurrences = tuple(','    OperationOccurrence(f"{agenda_id}-{day.isoformat()}", role,','                        declare_local_instant(day, at, timezone))','    for day in sorted(days))'], mem:{'transaction.staged':'[…, agenda:daily-rebalance (N occurrences)]'}, tip:'role은 셋뿐: STRATEGY_CALLBACK(0) · VALUATION(1) · MONITORING(2). "DECISION" role은 없다.'},
+ {loc:'src/vqapr/declarations.py:868', fn:'_component()', title:'component: 파일 fingerprint + 잎 클래스 하나', what:'<code>kind path object_name</code> 필수, <code>config</code> 선택. fingerprint = sha256(metadata{kind,object_name,config} || 0x00 || 파일 bytes) — <b>config만 바꿔도 fingerprint가 바뀐다.</b> 짧은 경로 <code>vqapr register strategy &lt;id&gt; &lt;file.py&gt;</code>는 AST로 잎 서브클래스를 찾고 0개/2개면 개수를 대며 거절.',
+  code:['ref = ComponentRef(kind, path, object_name, config, fingerprint)','transaction.register_component(ref)   # 같은 id면 제자리 교체 (force 불필요)'], mem:{'transaction.staged':'[…, component:my-alpha]'}},
+ {loc:'src/vqapr/declarations.py:874', fn:'register_strategy_config()', title:'config: 컴포넌트를 agenda에 묶는다', what:'<code>strategy_configs.&lt;component_id&gt;: {agenda_id}</code>. role은 프레임워크가 STRATEGY_CALLBACK으로 고정한다. 컴포넌트는 <code>transaction.view</code>에서 찾으므로 같은 문서 위쪽 선언이 보인다. run spec은 등록 대상이 아니라 별도 파일이다.',
+  code:['transaction.register_strategy_config(StrategyConfig(','    transaction.view.component(component_id),','    agenda_id, OperationRole.STRATEGY_CALLBACK))'], mem:{'transaction.staged':'[…, strategy_config:my-alpha]'}},
+ {loc:'src/vqapr/workspace.py:1543', fn:'Transaction.commit()', title:'락 한 번, 읽기 한 번, 재생, 쓰기 한 번', what:'<code>.vqapr/.workspace.lock</code>(30s timeout, 120s stale)을 잡고 디스크 상태를 <b>다시</b> 읽은 뒤 스테이징된 merge를 그 위에 재생한다 — 그 사이 다른 프로세스가 넣은 등록과 충돌하면 거절하고 <b>아무것도 쓰지 않는다</b>. 쓰기는 temp→replace 원자 교체. roster 사이드카는 같은 락 안에서 뒤이어.',
+  code:['with ws._exclusive():','    state = ws._read_or_empty()','    for merge in self._ops:','        state, merged_changed = merge(state)','    if changed: ws._write(*state)      # 원자 교체 1회','    for payload in self._rosters: ws._write_roster(payload)'], disk:{'.vqapr/workspace.yaml':'쓰기 1회 (원자)','.vqapr/.workspace.lock':'잠깐 잡았다 놓음'}, mem:{'transaction.staged':'[] (비움)'}},
+ {loc:'src/vqapr/cli/envelope.py', fn:'success()', title:'봉투로 결과를 낸다', what:'<code>{"ok": true, "stage": "workspace.register", "registered": {datasets:[…], agendas:[…], …}}</code> JSON 한 줄. 실패도 같은 봉투 모양(<code>failures[].code / requirement / observed / fix</code>)으로 나간다.',
+  code:['{"ok": true, "stage": "workspace.register",',' "registered": {"datasets": ["price_daily"], "execution_inputs": ["krx-daily"], ...}}']},
+], remember:[
+ '사용자가 정하는 것: dataset 5키(+instrument_field), execution input의 table+fill, agenda의 role·at·timezone·출처, component의 kind·path·object_name, config의 agenda_id.',
+ '등록은 parquet을 실제로 연다: 스키마·key 유일성·span·NaN. 바이트 digest는 없다.',
+ 'fields 값은 SQL 값 표현식이다. 서브쿼리는 문법으로 막힌다(PIT 창 밖을 읽을 수 있으므로).',
+ '문서 하나 = 트랜잭션 하나(record 134). commit 전에는 디스크에 아무것도 없다.',
+ '유일성 검사의 축은 저자의 key_fields다. date × ticker grain 선언은 아직 없다(§17.1.2, Panel 설계 §2.2).',
+]});
+
+S.push({id:'start', key:'②', title:'run 시작', sub:'vqapr run spec.yaml — freeze', frames:[
+ {loc:'src/vqapr/cli/run.py:548', fn:'handle() — spec 읽기', title:'run spec은 등록이 아니라 별도 파일', what:'simulation kind는 8키 필수(<code>flow/run_spec.py:21-37</code>) — strategy는 <b>하나</b>. <code>store:</code>는 <code>root · tables · account_positions</code>만 허용. run id는 <code>--run-id</code> 또는 spec 파일 stem.',
+  code:['store = StoreSpec.of(document.get("store"), base=spec_path.parent)','run_id = args.run_id or spec_path.stem'], mem:{spec:'dict (8키)', run_id:'"spec-stem"'}},
+ {loc:'src/vqapr/flow/judgments.py:322', fn:'judge() — CLI 판정', title:'기간·구성·lookback coverage를 미리 거절', what:'period가 naive거나 역전이면, 집행 시각 ≤ 결정 시각 구성이면, 그리고 dataset의 <code>span[0]</code>이 <b>첫 결정 시각</b>(start가 아님)에 필요한 lookback을 못 덮으면 여기서 거절한다(:512-546). preflight가 아니라 CLI 층의 판정이다.',
+  code:['_first_decision(...)  # judgments.py:551','if span_start > first_decision - lookback: refuse(...)']},
+ {loc:'src/vqapr/flow/preflight.py:475', fn:'preflight_run()', title:'컴포넌트를 로드하고 등록본과 바이트 대조', what:'<code>extension/loading</code>이 <code>.py</code>를 import해 잎 클래스를 인스턴스화한다. 등록된 fingerprint와 지금 파일의 fingerprint가 다르면 <b>거절하지 않고</b> 기록에 다른 digest로 남긴다(issue 009: receipt, not gate).',
+  code:['strategy = load_strategy_model(ref)      # 인스턴스 하나','if fingerprint(ref) != ref.fingerprint: drift 기록 (:35-40)'], mem:{strategy:'StrategyModel 인스턴스 (run 내내 이 객체 하나)'}},
+ {loc:'src/vqapr/flow/preflight.py:560', fn:'_freeze_agenda() × 3', title:'세 agenda를 [start, end] 양끝 포함으로 자른다', what:'strategy · valuation · monitoring 각각 role 일치를 확인하고 <code>inclusive_slice</code>(agendas.py:200-211, <code>start_utc &lt;= t &lt;= end_utc</code>)로 잘라 identity를 찍는다.',
+  code:['strategy_agenda   = _freeze_agenda(workspace, agenda_id=strategy.agenda_id, expected_role=..., start, end)','valuation_agenda  = _freeze_agenda(...)','monitoring_agenda = _freeze_agenda(...) if monitoring else None'], mem:{frozen_agendas:'3 (slice + identity)'}},
+ {loc:'src/vqapr/flow/preflight.py:399', fn:'_require_execution_targets()', title:'모든 콜백이 strictly-later 집행 타깃을 갖는가', what:'execution horizon을 <b>한 번만</b> 읽고, 각 콜백 occurrence에 대해 FillConvention이 decision보다 엄격히 늦은 타깃을 horizon 안에서 잡을 수 있는지 본다. 하나라도 못 잡으면 run 자체를 거절.',
+  code:['horizon = ExecutionHorizon.scan(table, start, end)   # 1회','for occ in strategy_agenda.occurrences:','    if fill.select_target(decision_time=occ.evaluation_time, ..., horizon) is None: refuse'], disk:{'data/venue.parquet':'candidate instants 1회 스캔'}},
+ {loc:'src/vqapr/flow/preflight.py:104', fn:'initial state round-trip', title:'초기 memory·payload·계좌를 얼린다', what:'<code>initial_model_memory</code>(엄격 JSON)와 <code>initial_payload</code>(bytes)를 저장→재로드→재저장해 바이트가 같은지 검증한 뒤 sha256 <code>initial_model_state_ref</code>를 만든다. 초기 계좌 스냅샷 + mode(LONG_ONLY/SIGNED), 초기 보유의 lot·청산 가능성도 여기서 거절.',
+  code:['ref = prepare_model_state(memory, payload)   # sha256','assert reload(ref) == (memory, payload)'], mem:{initial_model_state_ref:'sha256…', account_v0:'cash, positions'}},
+ {loc:'src/vqapr/flow/run.py:365', fn:'FrozenRun.__post_init__()', title:'세 agenda를 하나의 결정적 순서로 병합', what:'<code>sort_key = (utc_time, role_priority, occurrence_id)</code>로 정렬해 <code>static_occurrences</code>에 고정한다. <code>FrozenRun.identity</code>는 위 전부의 sha256이지만 <b>데이터 파일 바이트는 포함하지 않는다</b>(:506-509).',
+  code:['merged = tuple(sorted(','    (occ for agenda in agendas if agenda for occ in agenda.occurrences),','    key=OperationOccurrence.sort_key))','object.__setattr__(self, "static_occurrences", merged)'], mem:{static_occurrences:'tuple — callback/valuation/monitoring 섞여 정렬됨', 'frozen.identity':'sha256(선언 전부)'}},
+ {loc:'src/vqapr/flow/orchestration.py:125', fn:'run() — 세션·스토어', title:'run당 duckdb 하나', what:'<code>ScanSession()</code> 하나가 run 내내 산다: in-memory duckdb + source별 cursor, parquet footer 통계, instant grid, 증명된 하한. <b>행은 캐시하지 않는다.</b> 프로세스가 다섯이면 세션도 다섯.',
+  code:['session = ScanSession()','store = DuckDbObservationStore(catalog, session=session)'], mem:{ScanSession:'connection · footer · grid · bounds (rows 없음)'}},
+ {loc:'src/vqapr/flow/orchestration.py:136', fn:'RunRecordWriter.open()', title:'기록 디렉터리를 잠그고 sink를 잇는다', what:'<code>runs/&lt;run_id&gt;/</code>를 만들고 lock을 잡는다(heartbeat로 살아 있음을 증명). <code>row_sink=writer.append</code>를 RunStateRepository에 넘겨 <b>occurrence마다</b> 행이 디스크로 나가게 한다(record 135).',
+  code:['writer = RunRecordWriter(Path(store_root), run_id)','writer.open(replace=replace_record)','state = RunStateRepository(initial_account=root, ..., row_sink=writer.append)'], disk:{'runs/<run_id>/':'디렉터리 + lock'}},
+ {loc:'src/vqapr/flow/orchestration.py:151', fn:'SimulationFlow(...)', title:'Flow를 조립한다 — 창 공장, 계좌, 거래소', what:'occurrence마다 새 <code>ModelWindow(evaluation_time, instruments, store, allowed_requirements, consumer_id)</code>를 만드는 람다 둘(전략용/제약용), <code>Account(mode, retained_marks)</code>, exchange, constraints, <code>on_progress=writer.heartbeat</code>.',
+  code:['flow = SimulationFlow(frozen, strategy, state,','    strategy_window_for_occurrence=lambda occ: ModelWindow(evaluation_time=occ.evaluation_time, ...),','    account=Account(mode=..., retained_marks=...), exchange=exchange, constraints=constraints,','    scan_session=session, on_progress=writer.heartbeat, ...)']},
+ {loc:'src/vqapr/flow/simulation.py:525', fn:'SimulationFlow.run() — 루프 진입', title:'while next_static or pending_due', what:'static occurrence 이터레이터와 pending due 슬롯 하나. 매 스텝 <code>due.sort_key() &lt;= next_static.sort_key()</code>면 due를 먼저 처리한다(due 우선순위 −1). 이 비교 하나가 "같은 instant에 집행 → 콜백 → 평가 → 모니터링" 순서를 만든다.',
+  code:['static = iter(OperationEnvelope(item) for item in frozen.static_occurrences)','next_static = next(static, None)','while next_static is not None or self._pending_due() is not None:','    if self._on_progress: self._on_progress()      # heartbeat','    due = self._pending_due()','    if due and (next_static is None or due.sort_key() <= next_static.sort_key()):','        traces.append(self._dispatch_due(due))','    else: ... self._dispatch_callback / _valuation / _monitoring'], clock:{now:'첫 occurrence 직전'}},
+], remember:[
+ 'timestamp의 출처는 agenda(등록 시 dataset의 날짜 × 선언 시각). recurrence 엔진은 없다.',
+ '동일 instant 순서: due 집행(−1) → 콜백(0) → 평가(1) → 모니터링(2) → id 사전순. PRD §3.6 그대로.',
+ 'freeze 대상: 기간, agenda 셋, 컴포넌트·거래소·execution input·제약, instruments, 초기 상태. 데이터 바이트는 아니다.',
+ '한 run = 전략 하나 (FrozenRun.strategy 단수). §17.3은 그대로 "부분".',
+ 'ScanSession은 run당 하나, 프로세스 간 공유 없음.',
+]});
+
+S.push({id:'cb', key:'③', title:'콜백 (판단)', sub:'occurrence T · STRATEGY_CALLBACK', frames:[
+ {loc:'src/vqapr/flow/simulation.py:521', fn:'run() — dispatch 결정', title:'T에 due가 없으니 콜백을 보낸다', what:'pending due가 없거나 T보다 늦으면 <code>_dispatch_callback(occurrence)</code>. 이 occurrence의 <code>evaluation_time</code>이 이 콜백의 <b>decision time</b>이 된다.',
+  code:['elif next_static.role is OperationRole.STRATEGY_CALLBACK:','    traces.append(self._dispatch_callback(next_static.occurrence))'], clock:{evaluation_time:'T (decision time)', pending_due:'없음'}},
+ {loc:'src/vqapr/flow/simulation.py:1375', fn:'_restore_callback_state()', title:'같은 인스턴스에 memory·payload를 되돌린다', what:'직전 콜백이 발행한 committed memory(JSON)와 payload(bytes)를 <code>self._strategy</code>에 다시 싣는다. <b>인스턴스는 run 내내 하나</b>(:455)이고, 재인스턴스화하지 않는다. 프레임워크가 보증하는 상태는 memory+payload뿐이다.',
+  code:['self._restore_callback_state(before, payload_before)','# self._strategy.memory = committed json; self._strategy.load_payload(bytes)'], mem:{'strategy.memory':'직전 committed JSON', 'strategy payload':'직전 committed bytes'}},
+ {loc:'src/vqapr/flow/simulation.py:1391', fn:'strategy_window_for_occurrence()', title:'PIT 창을 만든다 — 아직 아무것도 읽지 않았다', what:'<code>ModelWindow(evaluation_time=T, instruments=frozen, store, allowed_requirements=strategy.requirements, consumer_id)</code>. 창은 <b>규칙</b>이지 데이터가 아니다: 나중에 <code>read</code>가 오면 <code>available_at &lt;= T</code>를 SQL 술어로 붙인다. Store 핸들은 저자에게 절대 가지 않는다.',
+  code:['window = self._guard(SimulationStage.CALLBACK_WINDOW, T,','    lambda: self._strategy_window_for_occurrence(occurrence), ...)'], mem:{window:'ModelWindow(T, instruments, allowed_requirements)'}},
+ {loc:'src/vqapr/flow/simulation.py:1398', fn:'_callback_account_view()', title:'계좌 스냅샷을 읽기 전용 뷰로', what:'committed account(cash, positions, version)와 선언한 만큼의 mark 이력(<code>retained_marks</code>, 기본 1)을 <code>EconomicAccountView</code>로 감싼다. 저자는 여기서 NAV·보유·직전 mark를 본다.',
+  code:['state_account = self._state.root.account','account_view = self._callback_account_view(state_account)'], mem:{account_view:'cash, positions, version=v, latest_mark'}},
+ {loc:'src/vqapr/constraints/evaluation.py:84', fn:'project_constraints() → merged_constraint_bounds()', title:'제약을 경계 박스로 접는다', what:'각 constraint의 <code>project(ConstraintCall)</code>이 종목별 (lower, upper)를 내고, lower=max·upper=min으로 교집합한다. 저자에게 <code>call.constraint_bounds</code>로 전달되는 <b>best-effort 박스</b>다 — 여기서는 강제하지 않고, 위반은 monitoring occurrence가 사후 판정한다.',
+  code:['projected = tuple(constraint.project(ConstraintCall(...)) for constraint in self._constraints)','constraint_bounds = merged_constraint_bounds(projected)   # lower=max, upper=min'], mem:{constraint_bounds:'{inst: (lo, hi)}'}},
+ {loc:'src/vqapr/flow/simulation.py:1444', fn:'self._strategy.decide(...)', title:'저자 코드로 진입', author:true, what:'<code>StrategyModelContext(occurrence, window, account, constraint_bounds, recorder)</code>를 들고 저자의 <code>decide(call)</code>이 불린다. 여기서부터 프레임워크는 결과가 돌아올 때까지 기다린다.',
+  code:['result = self._callback_intent_boundary(occurrence, self._frozen_run.strategy,','    lambda: self._strategy.decide(StrategyModelContext(','        occurrence=occurrence, window=window,','        account=self._callback_account_view(state_account), ...)))']},
+ {loc:'my_alpha.py (저자)', fn:'decide(self, call)', title:'저자: 읽고, 계산하고, Hold 또는 Rebalance', author:true, what:'<code>call.read("prices")</code>가 창을 통해 데이터를 가져온다(<b>④ 읽기 경로</b>가 그 안쪽이다). <code>self.memory</code>를 읽고 갱신한다(warm-up 카운터 등). 반환은 둘 중 하나: <code>Hold(reason)</code> 또는 <code>Rebalance.of(long=…, short=…, invested=…)</code> — 수량이 아니라 <b>집행 시점 NAV 대비 비중</b>이고, 부호·정규화·QUANTUM 격자는 패키지가 붙인다.',
+  code:['rows = call.read("prices")                       # ④','self.memory["n"] = self.memory.get("n", 0) + 1','if self.memory["n"] < LOOKBACK: return va.Hold(reason="warm-up")','scores = {...}','return va.Rebalance.of(long=scores, invested=Decimal("0.95"))'], mem:{'strategy.memory':'갱신됨 (아직 미발행)'}},
+ {loc:'src/vqapr/authoring.py:656', fn:'Rebalance.__post_init__()', title:'값이 만들어지는 순간 1차 검증', what:'비유한 Decimal, 공백 키, Σweights + cash ≠ 1, LONG_ONLY인데 음수 weight — 전부 여기서 거절된다. 저자 코드 안에서 터지므로 콜백 실패로 분류된다.',
+  code:['if sum(weights) + cash_weight != 1: raise ValueError','if budget.direction is LONG_ONLY and any(w < 0): raise ValueError']},
+ {loc:'src/vqapr/flow/simulation.py:1947', fn:'_stamp_intent()', title:'Flow가 도장을 찍는다 — 저자는 못 찍는다', what:'<code>intent_id = uuid5("{strategy_id}/{occurrence_id}")</code>, <code>source_refs</code>(이 콜백이 실제 읽은 source digest), <code>account_version_seen</code>, <code>model_state_ref</code>. decision_time은 intent가 아니라 <code>AcceptedIntent</code>가 든다.',
+  code:['intent = EconomicPortfolioIntent(intent_id=uuid5(NAMESPACE_URL, f"{sid}/{oid}"),','    strategy_id=..., source_refs=window.accesses, account_version_seen=v, model_state_ref=ref, ...)'], mem:{intent:'EconomicPortfolioIntent (stamped)'}},
+ {loc:'src/vqapr/flow/simulation.py:2110', fn:'_accept_intent() → FillConvention.select_target()', title:'집행 시각을 고른다 — 반드시 T보다 늦게', what:'execution table의 후보 instant 중 T보다 <b>엄격히 늦은</b> 첫 번째이면서 venue-local <code>at</code>과 일치하는 것. <code>same_day</code>면 당일 종가, <code>next_eligible</code>이면 다음 세션. 없으면 콜백 전체가 원자적으로 실패. 성공하면 <b>pending 슬롯 하나를 덮어쓴다</b>. Hold였다면 pending이 있을 때 아무것도 안 하고, 없을 때 그 시점 평가만 잡는다(:2063-2087).',
+  code:['target = execution_input.fill.select_target(execution_input,','    decision_time=occurrence.evaluation_time, end_time=frozen.end, horizon=...)','if target is None: raise ValueError("no exact execution target exists within the run horizon")','accepted = AcceptedIntent(intent, decision_time=T, target=target)'], clock:{pending_due:"T' = target.target_at (> T)"}, mem:{pending_accepted_intent:'AcceptedIntent(T → T\')'}},
+ {loc:'src/vqapr/flow/simulation.py:1513', fn:'_candidate_callback_state()', title:'후보 상태를 만든다 — memory·payload·행', what:'<code>normalize_memory</code>(엄격 JSON) + <code>save_payload()</code> → sha256 <code>ModelStateRef</code>. recorder에 쌓인 행(<code>vqapr.weight</code>, 저자 선언 표)은 <code>PreparedRunState.new_rows</code>에 실린다. 아직 아무것도 current가 아니다.',
+  code:['memory = normalize_memory(self._strategy.memory)','payload = self._strategy.save_payload()','ref = prepare_model_state(memory, payload)   # sha256','prepared = PreparedRunState(root=..., new_rows=recorder.chunks)'], mem:{'candidate':'memory + payload + ref + rows'}},
+ {loc:'src/vqapr/flow/run_state.py:316', fn:'publish() — 행은 sink로, 그 다음 swap', title:'원자적 발행: 디스크 먼저, 스왑은 그 뒤', what:'<code>row_sink(table_id, rows)</code>가 <b>swap 전에</b> 불린다 — 디스크가 꽉 차면 occurrence가 실패하고 root는 바뀌지 않는다. 성공하면 root가 교체되어 memory·pending·기록이 한꺼번에 current가 된다. 예외면 :1554-1562가 콜백 이전 상태로 되돌린다.',
+  code:['for table_id, rows in prepared.new_rows:','    self._row_sink(table_id, rows)        # writer.append → JSONL','self._root = prepared.root                # swap'], disk:{'runs/<id>/tables/vqapr.weight.jsonl':'행 추가됨'}, mem:{'strategy.memory':'committed', candidate:null}},
+], remember:[
+ '콜백 한 번 = 복원 → 창 → 계좌 뷰 → 제약 박스 → decide → 도장 → 집행 시각 선택 → 후보 → 발행.',
+ 'StrategyModel 인스턴스는 run 내내 하나. memory는 콜백마다 복원·발행되고 run 사이에는 initial_model_memory로 명시 주입.',
+ '출력은 Hold | Rebalance(NAV 대비 비중, 완전집합). 수량은 여기서 정하지 않는다.',
+ '제약은 콜백에서 경계 박스로만 주어지고, 위반 판정은 monitoring occurrence의 몫.',
+ 'pending 슬롯은 하나. 새 Rebalance가 미집행 intent를 덮을 수 있으나 정상 달력에서는 due가 먼저 소진된다.',
+]});
+
+S.push({id:'read', key:'④', title:'읽기 경로', sub:'call.read("prices") 안쪽', frames:[
+ {loc:'src/vqapr/models/contexts.py:40', fn:'StrategyCall.read(alias)', title:'alias → 선언된 DatasetInput', what:'<code>inputs()</code>에 없는 alias는 KeyError로 거절된다. 저자는 하나를 선언하고 하나를 읽지만, 엔진은 그것을 <b>field마다 requirement 하나</b>로 펼친다.',
+  code:['declared = self.reads.get(alias)','if declared is None: raise KeyError(f"{alias!r} was not declared in inputs(); ...")','return observations(declared_rows(lambda r: self.window.observations(r).rows, declared), ...)'], mem:{alias:'"prices" → DatasetInput(dataset, fields=[close, volume], lookback)'}},
+ {loc:'src/vqapr/models/calls.py:40', fn:'declared_rows()', title:'field마다 읽기 한 번 — 레인 D 미착수', what:'<code>requirements_for(declaration)</code>이 field 수만큼 <code>DataRequirement(dataset_id, field_id, lookback)</code>를 만들고, 각각 따로 읽는다. docstring이 스스로 말한다: "Until a single scan serves several fields (046), joining them is this bridge\'s job".',
+  code:['for field, requirement in zip(declaration.fields, requirements_for(declaration)):','    for row in read(requirement):          # field당 SQL 1문','        key = (row["available_at"], row.get("instrument"))','        merged.setdefault(key, {...})[field] = row[field]'], mem:{requirements:'[close, volume] → 읽기 2회'}, caution:'같은 dataset의 field 셋 = 콜백마다 스캔 3회 + Python join 1회. 이것이 캠페인 Step 4(현재 브랜치 이름)의 대상이다.'},
+ {loc:'src/vqapr/data/windows.py:177', fn:'ModelWindow.observations(requirement)', title:'선언되지 않은 요구는 거절, 접근은 기록', what:'<code>allowed_requirements</code>에 없는 requirement면 "requirements()에서 선언하라"며 거절. consumer_id가 없으면 거절. 통과하면 store에 질의하고 <code>AccessRecord</code>를 남긴다 — 이것이 나중에 intent의 <code>source_refs</code>와 DataModel의 <code>available_at</code> 파생에 쓰인다.',
+  code:['batch = self.__store.query(requirement, evaluation_time=self.evaluation_time,','    instruments=self.instruments, consumer_id=self.consumer_id)','self._accesses.append(batch.access)']},
+ {loc:'src/vqapr/data/store.py:59', fn:'DuckDbObservationStore.query()', title:'등록을 해석하고 lookback을 분기한다', what:'등록에서 <code>instrument_field · available_at · key_fields · aggregated</code>를 꺼내고 <code>fields = {field_id: 표현식}</code> — <b>딱 하나</b>. <code>RowsLookback</code>이면 <code>rows=n</code>을, <code>CalendarLookback</code>이면 Python에서 <code>lower_bound(T)</code>(로컬 00:00 기준)를 계산해 넘긴다.',
+  code:['registration = self.__catalog.dataset(str(requirement.dataset_id))','fields = {requirement.field_id: resolve_field(registration, requirement)}   # 하나','if isinstance(lookback, RowsLookback): rows = lookback.rows','elif isinstance(lookback, CalendarLookback): lower_bound = lookback.lower_bound(evaluation_time)','raw_rows = scan.observation_rows(source, ..., evaluation_time=T, rows=rows, lower_bound=lower_bound, session=self.__session)'], mem:{fields:'{"close": "close"}', lookback:'RowsLookback(20) → rows=20'}},
+ {loc:'src/vqapr/data/scan.py:1116', fn:'observation_rows() — SQL 조립', title:'PIT 술어는 여기 한 곳에서 쓰인다', what:'<code>avail &lt;= ?</code>(:1163)가 PIT의 전부다. 종목은 <code>instr IN (...)</code>(:1166). Calendar는 <code>avail &gt;= ?</code> 하나(:1173). Rows는 종목별 윈도 랭크 — <code>count(expr) OVER (PARTITION BY instr ORDER BY avail DESC …) &lt;= N</code> — 를 <b>콜백마다 다시 계산</b>한다(:1261-1297). 하한은 instant grid 산술로 추정→증명→다음 읽기가 실어 나른 count로 갱신(record 120). 단 16MB 미만 source나 instrument 축 없는 등록에서는 하한이 꺼진다(:896, :1175).',
+  code:['-- RowsLookback','WITH gated AS (','  SELECT *, count(close) OVER (PARTITION BY instr ORDER BY avail DESC, keys DESC','                              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS __vqapr_rank_0','  FROM read_parquet(\'data/prices.parquet\')','  WHERE avail <= ? AND instr IN (?, ...) AND (avail >= ? OR instr IN (...)))','SELECT instr AS instrument, avail AS available_at, close','FROM gated WHERE close IS NOT NULL AND __vqapr_rank_0 <= 20','ORDER BY available_at, keys'], clock:{'PIT 상한':'available_at <= T'}},
+ {loc:'src/vqapr/data/scan.py:1301', fn:'connection.execute() + fetchall()', title:'물리 스캔 — 매 콜백, 매 field', what:'run 내내 사는 커넥션으로 실행하므로 duckdb가 <b>footer/row-group 통계</b>를 재사용해 predicate pushdown이 빠르다. 그러나 <b>행은 매번 parquet에서 다시 온다</b>. ScanSession의 슬롯 다섯(connection · footer · grid · bounds · bytes) 중 행을 담는 것은 없다.',
+  code:['borrowed = _Borrowed(spec, session)','cursor = borrowed.connection.execute(sql, [*proof_parameters, *parameters])','names = tuple(d[0] for d in cursor.description)','fetched = cursor.fetchall()'], disk:{'data/prices.parquet':'스캔 (predicate pushdown)'}, caution:'"메모리에 올려놓고 cursor만 옮긴다"는 오늘 거짓이다. 옮기는 것이 아니라 매번 창을 다시 자른다. 049의 측정: 같은 모델 806.61s 대 1.31s, compute는 양쪽 0.36s.'},
+ {loc:'src/vqapr/data/scan.py:1330', fn:'tuple(dict(zip(names, row)))', title:'복사 1 — 행마다 Python dict', what:'columnar가 아니다. 행 하나가 dict 하나이고, 이 시점에 duckdb 결과가 Python 객체로 바뀐다.',
+  code:['return tuple(dict(zip(names, row, strict=True)) for row in fetched)'], mem:{rows_close:'tuple[dict] — 복사 1'}},
+ {loc:'src/vqapr/data/store.py:145', fn:'ObservationBatch._trusted()', title:'검증 없는 배치 + 접근 기록', what:'read path는 셀을 검증하지 않는다(record 119: <code>normalize_rows</code> 제거). <code>AccessRecord(requirement, source_digest, requested/actual coverage)</code>가 같이 나간다.',
+  code:['return ObservationBatch._trusted(rows=raw_rows, access=AccessRecord(...))']},
+ {loc:'src/vqapr/models/calls.py:55', fn:'declared_rows() — join', title:'복사 2 — field별 배치를 (available_at, instrument)로 합친다', what:'volume 배치가 오면 같은 키의 dict에 값을 채운다. 두 field가 서로 다른 행 집합을 가지면 나머지는 None.',
+  code:['carried = merged[key] = dict.fromkeys(declaration.fields)','carried["available_at"], carried["instrument"] = key','carried[field] = row[field]','return tuple(merged[key] for key in sorted(merged, ...))'], mem:{rows_close:null, merged:'tuple[dict{available_at, instrument, close, volume}] — 복사 2'}},
+ {loc:'src/vqapr/authoring.py:200', fn:'Observation(...)', title:'복사 3 — 저자가 받는 객체', what:'각 행이 <code>Observation(available_at, instrument, values=MappingProxyType(dict(sorted(...))))</code>가 된다. 값마다 <code>_scalar</code> 검사가 다시 돈다 — 셀 검증이 read path에서 사라진 것이 아니라 authoring 층으로 옮겨온 셈.',
+  code:['Observation(available_at=row["available_at"], instrument=row["instrument"],','            values=MappingProxyType(dict(sorted(values.items()))))'], mem:{merged:null, observations:'tuple[Observation] — 복사 3, 저자에게 반환'}},
+], remember:[
+ '콜백 × field마다 SQL 1문. run 동안 재사용되는 것은 커넥션·footer·instant grid·증명된 하한이지 행이 아니다.',
+ 'RowsLookback(n)은 종목별·field별·non-null 기준 최근 n개(§17.9 어긋남 그대로). CalendarLookback은 모든 종목 동일 구간.',
+ '돌아오는 것은 row-major dict, 세 번 복사. columnar/view가 아니다.',
+ '프로세스 간 공유는 없다(threading·multiprocessing·mmap import 0건). 공유는 OS page cache뿐.',
+ 'Panel 설계(§2.3 PanelCache, .arrow spill)는 src/에 흔적이 없다. Step 4(레인 D)가 현재 브랜치 이름이고 아직 diff 0.',
+]});
+
+S.push({id:'due', key:'⑤', title:'due 집행', sub:"occurrence T' · 집행 → 체결 → 장부 → 평가", frames:[
+ {loc:'src/vqapr/flow/simulation.py:521', fn:'run() — due가 먼저', title:"T'에 도달: due.sort_key(−1) ≤ next_static", what:'pending 슬롯의 <code>target_at</code>이 다음 static occurrence보다 빠르거나 같으면 due를 먼저 처리한다. 같은 instant에 콜백이 있어도 <b>집행이 먼저</b>다.',
+  code:['due = self._pending_due()','if due and due.sort_key() <= next_static.sort_key():','    traces.append(self._guard(SimulationStage.DUE_SNAPSHOT, due.due_time, lambda: self._dispatch_due(due), ...))'], clock:{now:"T' (execution time)", pending_due:"T'"}},
+ {loc:'src/vqapr/flow/simulation.py:836', fn:'exact_execution_snapshot()', title:"체결 테이블에서 T' 정확 일치 행만", what:'목표 종목 ∪ 보유 종목에 대해 <code>trade_at == T\'</code>인 행을 읽는다. fallback 없음. 행이 없는 종목은 거절이 아니라 뒤에서 <code>ABSENT</code> 증거가 된다(상장폐지·미상장은 시장 사실이지 데이터 계약 위반이 아니므로).',
+  code:['return exact_execution_snapshot(execution_input.table, target_at=pending.target.target_at,','    target_instruments=..., held_instruments=..., trade_price=pending.target.trade_price, session=self._scan_session)'], disk:{'data/venue.parquet':"trade_at = T' 스캔"}, mem:{snapshot:'ExactExecutionRow[] (trade_at, instrument, is_tradable, price, reference)'}},
+ {loc:'src/vqapr/flow/simulation.py:860', fn:'prices · tradable · nav', title:'NAV = cash + Σ(보유 × 선택가), 가격 없는 보유는 제외', what:'halt된 행도 가격은 있다(halt는 거래를 멈추지 평가를 멈추지 않는다). 행이 없는 보유는 분모에서 빠진다 — 오래된 호가로 분모를 만들지 않는다.',
+  code:['prices = {row.instrument: row.price for row in snapshot.rows if row.price is not None}','tradable = {row.instrument: row.is_tradable for row in snapshot.rows}','nav = before.cash + sum(before.positions[i] * prices[i] for i in held if i in prices)'], mem:{nav:'Decimal', prices:'{inst: price}', tradable:'{inst: bool}'}},
+ {loc:'src/vqapr/orders/planning.py:344', fn:'plan_orders()', title:'비중이 정수 수량이 되는 유일한 자리', what:'<code>desired = rules.quantity_for(id, weight × nav, price)</code>. lot 단위로 0 방향 반올림(절대 올림 없음). <b>매도 먼저</b>: 매도 대금에서 수수료를 뺀 값을 <code>available</code>에 더한다. 그 다음 매수를 금액 큰 순으로 배분하고, 모자라면 batch 거절이 아니라 <b>클리핑</b>(<code>_affordable_quantity</code>, 0이면 그 종목 유지). 마지막에 <code>_settle_payable</code>이 Account의 덧셈 순서로 재계산해 음수면 가장 큰 매수를 lot 단위로 깎는다.',
+  code:['available = account.cash','for i in ordered:                                   # sells first','    if delta < 0: available += notional - charge(SELL).total','for i in _buy_order(...):                           # buys, largest first','    required = notional + charge(BUY).total','    if required <= available: available -= required; continue','    affordable = _affordable_quantity(...)          # clip, not refuse','    resolved[i] = held + affordable'], mem:{orders:'OrderBatch — sells → hold → buys, account_version bound'}},
+ {loc:'src/vqapr/exchange/venues/krx.py:311', fn:'KrxExchange.execute()', title:'거래소가 체결한다 — 지갑을 들고 매도부터', what:'<code>accepted_requests</code>가 account_version 일치·중복·tradable 시 양수가격을 강제. 매도 먼저 정산하며 <code>purse</code>가 배치 내내 이월된다. 상/하한가면 <code>NONTRADABLE</code>, 행 없으면 <code>ABSENT</code>, delta 0이면 <code>NO_TRADE</code>, 돈이 모자라면 부분체결·0이면 <code>UNFUNDED</code>. 비용: 커미션 0.03% 양방향, 매도세 0.2%, ETF 면제. <b>Academic</b> 거래소는 전량·무마찰·분수 허용.',
+  code:['purse = account.cash','for request in sorted(requests, key=self._settlement_order):   # sells first','    row = rows.get(request.instrument_id)','    if row is None: fills.append(Fill(..., dealt=0, reason=ZeroDealtReason.ABSENT))','    ...','    purse += fill.cash_delta      # = -(dealt*price) - cost.total'], mem:{orders:null, fills:'FillBatch(fills[], account_version_seen)'}},
+ {loc:'src/vqapr/account/account.py:196', fn:'Account.prepare_fill()', title:'장부 후보 — cash < 0이면 거절', what:'버전 일치 확인 → fill마다 <code>cash += cash_delta</code>, 수량 0이면 포지션 삭제 → <b><code>next_cash &lt; 0</code>이면 ValueError</b>, LONG_ONLY에서 음수 포지션이면 ValueError → version+1 스냅샷과 fill별 <code>JournalEntry</code>. 아직 commit이 아니다.',
+  code:['for fill in fill_batch.fills:','    if fill.dealt_quantity == 0: continue','    next_cash += fill.cash_delta','    next_positions[fill.instrument_id] = held + fill.dealt_quantity','if next_cash < 0: raise ValueError("fill batch would make cash negative")'], mem:{prepared_fill:'next_snapshot (v+1), journal'}},
+ {loc:'src/vqapr/flow/simulation.py:915', fn:'fill rows → vqapr.fill', title:'체결·미체결을 사유와 함께 기록한다', what:'fill마다 한 행(0체결 포함, <code>reason</code>: ABSENT / NONTRADABLE / NO_TRADE / UNFUNDED). 마지막 것만 "시장이 거절한 것"이 아니라 "내 지갑이 빈 것"이라 따로 이름이 있다. 봉투 컬럼(<code>producer · stage · event_time</code>)은 Flow가 찍는다.',
+  code:['recorder.append("vqapr.fill", {..., "requested": ..., "dealt": ..., "price": ..., "reason": ...,','    "producer": component_id, "stage": pending.occurrence.role.value, "event_time": T\'})']},
+ {loc:'src/vqapr/flow/simulation.py:961', fn:'Account.commit_fill() → publish', title:'커밋 — 여기부터는 되돌리지 않는다', what:'낙관적 검사 후 무조건 설치. 이후 단계에서 실패하면 <code>FAILED_AFTER_COMMIT</code>으로 분류된다. 발행 시 fill 행이 sink로 나간다.',
+  code:['self._due_boundary(stage=SimulationStage.DUE_ACCOUNT_COMMIT, ...,','    operation=lambda: self._account.commit_fill(prepared_fill))','committed_root = ... publish_account_commit(...)'], mem:{prepared_fill:null, account:'version v+1 (committed)'}, disk:{'runs/<id>/tables/vqapr.fill.jsonl':'행 추가됨'}},
+ {loc:'src/vqapr/flow/simulation.py:977', fn:'_marks_from_execution_snapshot() → ValuationService.mark()', title:'같은 스냅샷으로 곧바로 평가', what:'보유마다 <code>Mark(quantity × price)</code>. 행이 없는 보유는 <b>직전 mark를 원래 observed_at과 함께 이월</b>한다 — 정지 종목이 NAV에서 사라지지 않게. <code>AccountMark(nav = cash + Σvalue, marked_at = T\', observed_at_by_instrument)</code>. 체결 없는 평가는 버전을 올리지 않는다.',
+  code:['marks = _marks_from_execution_snapshot(snapshot, T\', previous=account_state.latest_mark, held=next_positions)','mark = self._valuation_service.mark(...)','prepare_mark → commit_mark → publish_marked'], mem:{latest_mark:"AccountMark(nav, marked_at=T')"}, clock:{valuation_time:"T' (due 경로: target_at)"}},
+ {loc:'src/vqapr/flow/simulation.py:1069', fn:'feedback publish · pending 비움', title:'pending 슬롯이 비고 루프로 돌아간다', what:'다음 콜백의 <code>_record_defaults</code>(:1696-1733)가 이 mark가 아직 <code>vqapr.account</code>에 없으면 <code>_ACCOUNT</code> 합계 1행 + (스위치가 켜져 있으면) 보유 종목마다 1행을 쓴다. <code>store.account_positions: false</code>면 합계행만 남는다(record 135).',
+  code:['pending_accepted_intent = None','# 다음 콜백에서: if marked_at not in self._recorded_measurements: recorder.append("vqapr.account", ...)'], clock:{pending_due:'없음'}, mem:{pending_accepted_intent:null}, caution:'마지막 콜백 이후에 발생한 due mark는 standalone valuation occurrence가 뒤를 덮지 않으면 vqapr.account에 남지 않을 수 있다. _execute_due 자신은 account 행을 쓰지 않는다. 테스트로 확정할 가치가 있다.'},
+], remember:[
+ 'intended(비중) ≠ requested(정수 수량) ≠ dealt(체결) ≠ committed(장부). 네 단계가 각각 자기 자리에서 검증된다.',
+ '현금 부족은 plan_orders에서 클리핑, KRX에서 부분체결/UNFUNDED, Account에서 cash<0 거절 — 세 겹.',
+ '행 없는 종목 = hold + ABSENT 증거. 거절도 스킵도 아니다.',
+ '평가는 체결하는 자리에서 같은 스냅샷으로 곧바로 한다. 별도 cadence가 아니다.',
+ 'execution table을 바꾸지 않고 fill.trade_price만 바꾸면 체결가가 바뀐다(§17.7 지켜짐). 단 다른 execution_input_id로.',
+]});
+
+S.push({id:'dm', key:'⑥', title:'DataModel', sub:'vqapr run (kind: datamodel) → materialize', frames:[
+ {loc:'src/vqapr/flow/materialize.py:1151', fn:'materialize()', title:'agenda가 아니라 evaluation_times를 순회', what:'호출자가 준 시각 목록을 돈다. 계좌도 거래소도 없다 — DataModel은 척추에 들어오지 않는다(PRD §2.3). run당 ScanSession 하나는 같다.',
+  code:['store = DuckDbObservationStore(workspace, session=session)','for evaluation_time in times:'], mem:{times:'tuple[datetime]', rows_out:'[]'}},
+ {loc:'src/vqapr/flow/materialize.py:1202', fn:'data_model_window() → model.compute()', title:'시각마다 새 창, 같은 인스턴스', author:true, what:'<code>ModelWindow(evaluation_time, instruments, requirements, consumer_id)</code>를 만들고 저자의 <code>compute(DataCall)</code>을 부른다. 안쪽은 ④ 읽기 경로 그대로 — 평가 × field만큼 SQL. 저자는 <code>Rows</code>(= <code>{"instrument": id, "&lt;field&gt;": value}</code> dict 튜플)를 돌려준다. <code>available_at</code>은 <b>저자가 쓸 수 없다</b>.',
+  code:['window = data_model_window(workspace, evaluation_time=evaluation_time, instruments=..., requirements=..., consumer_id=..., store=store)','raw_rows = model.compute(DataModelContext(window, declared_reads))'], mem:{'model.memory':'있음 (DataModel도 Model)'}},
+ {loc:'src/vqapr/flow/materialize.py:330', fn:'_validated_output()', title:'출력 검증 — 선언과 정확히 일치', what:'value_fields와 <b>정확히</b> 일치, <code>available_at</code> 포함 금지, 입력 창 밖 종목 금지, 평가시각당 종목 1행, 유한 스칼라.',
+  code:['if set(row) != {"instrument", *value_fields}: refuse','if "available_at" in row: refuse   # 패키지 소유','if instrument not in window.instruments: refuse']},
+ {loc:'src/vqapr/flow/materialize.py:1230', fn:'derived_available_at()', title:'available_at은 프레임워크가 접근 기록에서 파생', what:'이 평가가 읽은 <code>AccessRecord</code>들로부터 "이 값이 처음 알려질 수 있었던 시각"을 계산해 스탬프한다. 창을 크게 잡으면 스스로 늦어진다(§4.5).',
+  code:['available_at = derived_available_at(evaluation_time, window.accesses)','rows_out.extend({**row, "available_at": available_at} for row in validated)'], mem:{rows_out:'누적 (python list)'}},
+ {loc:'src/vqapr/flow/materialize.py:719', fn:'pq.write_table() → atomic publish', title:'모든 평가가 끝난 뒤 parquet 한 번', what:'<code>pa.Table.from_pylist</code> → zstd parquet을 temp에 쓰고 <code>.vqapr/materialized/&lt;stem&gt;.parquet</code>으로 원자 교체. append 없음, run당 파일 하나, 기존 경로가 있으면 거절(:706-717).',
+  code:['table = pa.Table.from_pylist(rows_out)','pq.write_table(table, tmp, compression="zstd", write_statistics=True)','atomic.replace(tmp, target)'], disk:{'.vqapr/materialized/<stem>.parquet':'쓰기 1회'}, mem:{rows_out:null}},
+ {loc:'src/vqapr/flow/materialize.py:759', fn:'DatasetRegistration.of() → workspace 등록', title:'결과는 보통 dataset이 된다', what:'<code>instrument_field="instrument", available_at="available_at", key_fields=("available_at","instrument")</code>로 등록된다. StrategyModel은 이것을 ④와 <b>똑같은 경로</b>로 읽는다. 특별 취급 없음. 다른 StrategyModel의 결과(vqapr.weight 등)도 같은 방식으로 dataset이 될 수 있다(§5.2).',
+  code:['registration = DatasetRegistration.of(dataset_id, source_id, instrument_field="instrument",','    available_at="available_at", key_fields=("available_at", "instrument"), fields=...)','workspace.register_dataset(registration, source)'], disk:{'.vqapr/workspace.yaml':'dataset 추가'}},
+], remember:[
+ 'DataModel = 같은 Model base, 같은 memory, 같은 읽기 경로. 다른 것은 execution을 거치지 않는다는 것뿐.',
+ '출력은 Rows(dict 튜플). available_at은 저자가 못 쓰고 접근 기록에서 파생된다.',
+ '결과는 parquet 하나 + 보통 dataset 등록. StrategyModel이 특별 취급 없이 읽는다.',
+ 'recorder(TableSpec)는 StrategyModel만 갖는다. DataModel에는 없다.',
+]});
+
+S.push({id:'rec', key:'⑦', title:'기록 · 종료', sub:'run 중 스트리밍, 끝에 record.json', frames:[
+ {loc:'src/vqapr/flow/run_state.py:298', fn:'publish() — 매 occurrence', title:'행은 accept 시점에 디스크로 나간다', what:'콜백·standalone valuation의 recorder chunk가 <code>PreparedRunState.new_rows</code>에 실려 <code>publish</code>에서 <b>swap 전에</b> sink로 넘어간다. root는 행을 보관하지 않는다 — 힙에는 한 occurrence치만 산다. 죽으면 직전 occurrence까지의 행이 남고 <code>record.json</code>이 없다.',
+  code:['if self._row_sink is not None and prepared.new_rows:','    for table_id, rows in prepared.new_rows: self._row_sink(table_id, rows)','self._root = prepared.root'], disk:{'runs/<id>/tables/*.jsonl':'occurrence마다 append'}, mem:{'root.recorder_chunks':'비어 있음 (sink 있음)'}, tip:'record 135. 진단 A4(19GB 힙, 끝에 한 번)는 닫혔다. run_records.py:24-25 docstring의 "not a claim that the run streams now"는 이제 낡았다.'},
+ {loc:'src/vqapr/flow/run_records.py:610', fn:'RunRecordWriter.append()', title:'JSONL 한 줄씩 + 타입 사이드카', what:'값을 문자열화하면서 컬럼별 Python 타입(<code>decimal · datetime · int · float · bool · string</code>)을 <code>tables/&lt;id&gt;.types.json</code>에 적는다. 두 타입이 보이면 <code>string</code>. 행 수와 distinct instant를 세어 둔다 — record.json의 <code>tables</code> 블록이 여기서 나온다.',
+  code:['for row in rows: fh.write(json.dumps(stringified(row)) + "\\n")','self._types[table_id] |= observed_types(row)','self._counts[table_id] += len(rows)'], disk:{'runs/<id>/tables/<id>.types.json':'갱신'}},
+ {loc:'src/vqapr/flow/run_records.py:493', fn:'heartbeat()', title:'occurrence마다 살아 있음을 찍는다', what:'lock 파일의 타임스탬프를 갱신한다. 없으면 2분(<code>LOCK_STALE_AFTER</code>)이 지난 run은 실행 중인데도 죽은 것으로 읽혀 다른 프로세스가 그 id를 가져가 표를 지운다. 실제 factor run은 3~6분이라 모든 run이 그 경우였다.',
+  code:['self._lock_path.touch()   # on_progress마다']},
+ {loc:'src/vqapr/flow/simulation.py — 루프 끝', fn:'run() 반환', title:'finalization 조건: pending intent 없음', what:'static occurrence를 다 소진하고 pending due도 없으면 <code>SimulationResult(final_state, traces)</code>. 마지막 콜백이 낸 intent가 horizon 안에서 집행되지 못하면 그 콜백 자체가 실패했을 것이므로(②의 preflight 거절), 정상 종료에는 pending이 없다.',
+  code:['return SimulationResult(final_state=self._state.root, traces=tuple(traces))'], mem:{pending_accepted_intent:'없음'}},
+ {loc:'src/vqapr/flow/orchestration.py:263', fn:'source_digest · declared_digest', title:'두 digest — 등록 기준과 실제 로드 기준', what:'<code>declared_digest = str(frozen.identity)</code>(preflight가 얼린 선언 전부), <code>source_digest</code> = 실제 로드된 strategy + exchange + constraints의 fingerprint를 정렬해 접은 sha256. 둘이 다르면 등록 후 편집됐다는 뜻. <b>그러나 접혀 있다</b> — 어느 .py가 돌았는지, 전략 자신의 fingerprint가 무엇인지는 못 읽는다(§17.3.2 없음 그대로).',
+  code:['source_digest = _as_loaded_identity(strategy, exchange, constraints)','declared_digest = str(frozen.identity)'], mem:{source_digest:'sha256 (접힘)', declared_digest:'sha256'}},
+ {loc:'src/vqapr/flow/records.py:30', fn:'freeze_record()', title:'record.json은 마지막에 — 그것이 완료 표시', what:'sink가 있었으므로 <code>final_state.recorder_rows</code>는 비어 있고, writer의 카운트로 <code>tables</code> 블록을 만든다. <code>contract</code> 블록은 제약별 <code>held/checked</code>(monitoring occurrence만 센다; <code>checked==0</code>이면 <code>ok:false</code>). <code>_RUN_FIELDS</code>: run_id · account · tables · contract · source_digest · declared_digest · roster · period. <b>instruments·strategy id·파일 경로·execution input id는 없다</b>(issue 034).',
+  code:['for table_id, rows in sorted(recorded.items()): writer.append(table_id, rows)   # 비어 있음','writer.write_record({run_id, account, tables, contract, source_digest, declared_digest, roster, period})'], disk:{'runs/<id>/record.json':'쓰기 (완료 표시)','runs/<id>/lock':'해제'}},
+ {loc:'src/vqapr/public.py — read_run_table / read_run_record / run_ids', fn:'읽는 쪽', title:'타입을 되살려 읽는 공식 경로', what:'<code>read_run_table</code>이 사이드카로 Decimal·tz-aware datetime을 복원한다(A5: <code>read_json_auto</code>가 9시간 밀린 naive instant를 만들던 함정). CLI는 <code>vqapr show run --table … --limit</code>, <code>vqapr list runs --id SUBSTRING</code>. 삭제 verb는 여전히 없다(§17.5). NAV는 표가 아니라 <code>analysis/performance.nav_series</code>가 <code>vqapr.account</code>의 <code>_ACCOUNT</code> 행에서 유도한다.',
+  code:['rows = vqapr.public.read_run_table(root, run_id, "vqapr.account")   # typed','record = vqapr.public.read_run_record(root, run_id)'], disk:{'runs/<id>/':'record.json · tables/vqapr.account.jsonl · vqapr.weight.jsonl · vqapr.fill.jsonl · *.types.json · <author>.<table>.jsonl'}},
+], remember:[
+ '기록은 occurrence마다 스트리밍된다(record 135). 죽으면 행은 남고 record.json은 없다.',
+ '프레임워크 표 셋: account(측정) · weight(결정) · fill(체결). signal은 저자가 tables()로 선언해야 남는다.',
+ 'record.json에는 기간·digest 둘·contract가 있고, 무엇을(전략 id·파일·instruments) 무엇에 대해(execution input) 돌렸는지는 없다(§17.3.1/17.3.2/034).',
+ 'run 삭제 verb 없음, filter는 run id 부분문자열 하나(§17.5, 17.5.1).',
+ '"이 전략의 모든 run"을 모으는 축이 없다(§17.4, 17.6). Panel·Run 명사 중 Run이 남은 자리.',
+]});
+
+// ---------- rendering ----------
+const $ = id => document.getElementById(id);
+let cur = {s:0, f:0};
+
+function buildMap(){
+  const map = $('map');
+  const mk = (i, k, t, s) => { const b=document.createElement('button'); b.className='node'; b.dataset.s=i; b.innerHTML=`<div class="k">${k}</div><div class="t">${t}</div><div class="s">${s}</div>`; b.addEventListener('click',()=>go(i,0)); return b; };
+  const arrow = ()=>{ const d=document.createElement('div'); d.className='arrow'; d.textContent='→'; return d; };
+  map.appendChild(mk(0,'①','등록','YAML → 검증 → 트랜잭션'));
+  map.appendChild(arrow());
+  map.appendChild(mk(1,'②','run 시작','agenda 병합 · freeze'));
+  map.appendChild(arrow());
+  const loop=document.createElement('div'); loop.className='loop';
+  loop.appendChild(mk(2,'③','콜백','창 · decide · pending'));
+  loop.appendChild(arrow());
+  loop.appendChild(mk(3,'④','읽기','SQL / parquet'));
+  loop.appendChild(arrow());
+  loop.appendChild(mk(4,'⑤','due 집행','주문 · 체결 · 장부 · 평가'));
+  map.appendChild(loop);
+  map.appendChild(arrow());
+  const side=document.createElement('div'); side.className='side';
+  side.appendChild(mk(6,'⑦','기록','JSONL 스트리밍 · record.json'));
+  side.appendChild(mk(5,'⑥','DataModel','척추 밖 · parquet → dataset'));
+  map.appendChild(side);
+}
+function buildTabs(){
+  const tabs=$('tabs');
+  S.forEach((sc,i)=>{ const b=document.createElement('button'); b.className='tab'; b.setAttribute('role','tab'); b.textContent=`${sc.key} ${sc.title}`; b.addEventListener('click',()=>go(i,0)); tabs.appendChild(b); });
+}
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function stateAt(sc, f){
+  const acc={mem:{},disk:{},clock:{}}; const fresh={mem:new Set(),disk:new Set(),clock:new Set()};
+  for(let i=0;i<=f;i++){ const fr=sc.frames[i];
+    for(const g of ['mem','disk','clock']){ if(!fr[g]) continue;
+      for(const [k,v] of Object.entries(fr[g])){ if(v===null){ delete acc[g][k]; fresh[g].delete(k);} else { acc[g][k]=v; if(i===f) fresh[g].add(k); else fresh[g].delete(k);} } } }
+  return {acc,fresh};
+}
+function render(){
+  const sc=S[cur.s], fr=sc.frames[cur.f];
+  document.querySelectorAll('.node').forEach(n=>n.classList.toggle('active', +n.dataset.s===cur.s));
+  document.querySelectorAll('.tab').forEach((t,i)=>{t.classList.toggle('active',i===cur.s); t.setAttribute('aria-selected', i===cur.s);});
+  // stack
+  const st=$('stack'); st.innerHTML='';
+  sc.frames.forEach((x,i)=>{ const li=document.createElement('li'); li.className=(i<cur.f?'done':'')+(i===cur.f?' cur':'')+(x.author?' author':''); li.innerHTML=`<span class="i">${String(i+1).padStart(2,'0')}</span><span class="f">${esc(x.fn)}<span class="l">${esc(x.loc)}</span></span>`; li.addEventListener('click',()=>go(cur.s,i)); st.appendChild(li); });
+  const curLi=st.querySelector('.cur');
+  if(curLi){ const top=curLi.offsetTop-st.offsetTop, bottom=top+curLi.offsetHeight;
+    if(top<st.scrollTop) st.scrollTop=top; else if(bottom>st.scrollTop+st.clientHeight) st.scrollTop=bottom-st.clientHeight; }
+  // frame
+  const code = fr.code ? `<pre class="code">${fr.code.map(esc).join('\n')}</pre>` : '';
+  $('frame').innerHTML = `<span class="loc${fr.author?' author':''}">${esc(fr.loc)}</span>
+    <h4>${fr.title}</h4><div class="what">${fr.what}</div>${code}
+    ${fr.tip?`<div class="tip">${fr.tip}</div>`:''}${fr.caution?`<div class="caution">${fr.caution}</div>`:''}`;
+  // state
+  const {acc,fresh}=stateAt(sc,cur.f);
+  const grp=(name,g)=>{ const e=Object.entries(acc[g]); return `<div class="g"><h5>${name}</h5>${e.length?`<div class="kv">${e.map(([k,v])=>`<span class="k">${esc(k)}</span><span class="v${fresh[g].has(k)?' new':''}">${esc(String(v))}</span>`).join('')}</div>`:'<div class="empty">비어 있음</div>'}</div>`; };
+  $('state').innerHTML = grp('시계','clock')+grp('메모리','mem')+grp('디스크','disk');
+  // controls
+  $('first').disabled=$('prev').disabled=cur.f===0; $('next').disabled=$('last').disabled=cur.f===sc.frames.length-1;
+  $('bar').style.width=((cur.f+1)/sc.frames.length*100)+'%'; $('count').textContent=`${cur.f+1} / ${sc.frames.length}`;
+  // remember + trace
+  $('remember').innerHTML=`<h3>${sc.key} ${sc.title} — 여기서 기억할 것</h3><ul>${sc.remember.map(r=>`<li>${r}</li>`).join('')}</ul>`;
+  $('trace').innerHTML=sc.frames.map((x,i)=>`<li><span class="l">${String(i+1).padStart(2,'0')} · ${esc(x.loc)}<br>${esc(x.fn)}</span><span><b>${x.title}</b><br>${x.what}</span></li>`).join('');
+  try{ localStorage.setItem('vqapr-stepper', JSON.stringify(cur)); }catch(e){}
+}
+function go(s,f){ cur={s,f}; render(); }
+$('first').addEventListener('click',()=>go(cur.s,0));
+$('prev').addEventListener('click',()=>go(cur.s,Math.max(0,cur.f-1)));
+$('next').addEventListener('click',()=>go(cur.s,Math.min(S[cur.s].frames.length-1,cur.f+1)));
+$('last').addEventListener('click',()=>go(cur.s,S[cur.s].frames.length-1));
+document.addEventListener('keydown',e=>{ if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return; if(e.key==='ArrowRight'){$('next').click();} else if(e.key==='ArrowLeft'){$('prev').click();} });
+buildMap(); buildTabs();
+try{ const saved=JSON.parse(localStorage.getItem('vqapr-stepper')||'null'); if(saved && S[saved.s] && S[saved.s].frames[saved.f]) cur=saved; }catch(e){}
+render();
+</script>

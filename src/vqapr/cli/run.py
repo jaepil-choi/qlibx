@@ -1,16 +1,15 @@
-"""`vqapr run <spec.yaml>` — freeze a declaration and execute it.
+"""`vqapr run <run-id>` — freeze a registered run, preflight it, and execute its strategies.
 
-The spec is a projection of `RunDefinition`, not a second declaration language. Anything the
-framework can derive — requirements, datasets, sources — is deliberately absent: restating it
-here would let the file drift from the registered components, and preflight rejects that drift.
+A run is a registered declaration since record `139` (`runs:` in a declaration document, design
+§4.1): the reusable unit is a name in the workspace, not a file. This verb looks the run up,
+makes the same judgments `vqapr check` makes, freezes it once, and runs each strategy it names --
+or those named with `--strategy` -- each in its own flow with its own account and its own record.
+A datamodel run (record `148`) is the same verb: its members write datasets instead of tables.
 """
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
-from decimal import Decimal
-from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +19,6 @@ from vqapr.cli.envelope import success
 # `register` owns the CLI spelling of a component kind and imports nothing from this module, so
 # naming it here adds no cycle. The judgments take it as a callable rather than importing it
 # themselves, which is what keeps `flow/` free of `cli`.
-from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import (
     ExplainTopic,
     Failure,
@@ -28,399 +26,168 @@ from vqapr.domain.errors import (
     FailureSource,
     VqaprError,
 )
-from vqapr.flow.judgments import judgments, materialization_judgments
-from vqapr.flow.reporting import FILL_TABLE, recorded, tables_declared
-from vqapr.flow.run_records import RunRecordExists, RunRecordLive
-from vqapr.flow.run_spec import _REQUIRED_BY_KIND, MATERIALIZATION, SIMULATION
-from vqapr.flow.store_spec import StoreSpec
-from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError, read_yaml_mapping
-from vqapr.public import (
-    AccountMode,
-    AccountSnapshot,
-    ConstraintSet,
-    MonitoringPolicy,
-    OperationRole,
-    RunDefinition,
-    StrategyConfig,
-    ValuationConfig,
-    Workspace,
-    preflight_run,
+from vqapr.flow.judgments import judgments
+from vqapr.flow.orchestration import COMPLETED, FAILED
+from vqapr.flow.reporting import FILL_TABLE
+from vqapr.flow.run_records import (
+    RunRecordConflict,
+    RunRecordExists,
+    RunRecordLive,
+    read_typed_table,
 )
+from vqapr.inputs import VALUE_INVALID, InputError
+from vqapr.public import RunDefinition, Workspace, preflight_run
 from vqapr.public import run as execute_run
 from vqapr.workspace import WORKSPACE_DIRECTORY
-
-_REQUIRED = _REQUIRED_BY_KIND[SIMULATION]
-"""Every key this command cannot execute without.
-
-`RunDefinition` permits `start`, `end`, `exchange`, `execution_input` and the initial account to be
-absent, because a definition is also built in-process by callers who supply them another way. This
-command always continues into `preflight_run` and then `run`, and both refuse without them. Listing
-only three keys here meant the other five surfaced from deep inside the framework as
-`stage: "unhandled"` — which tells an agent the framework broke, when the truth is its spec was
-incomplete. Checking them here names all of the missing keys at once instead.
-"""
-
-
-def _timestamp(value: object, *, name: str) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        parsed = value
-    elif not isinstance(value, str):
-        raise InputError(
-            VALUE_INVALID,
-            requirement=f"{name} must be an ISO-8601 timezone-aware datetime",
-            observed=f"{type(value).__name__}: {value!r}",
-            retry=f"write {name} with an explicit UTC offset, then retry",
-            examples=["2024-01-02T00:00:00+09:00"],
-        )
-    else:
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError as error:
-            raise InputError(
-                VALUE_INVALID,
-                requirement=f"{name} must be an ISO-8601 timezone-aware datetime",
-                observed=f"{name}={value!r}",
-                retry=f"write {name} with an explicit UTC offset, then retry",
-                examples=["2024-01-02T00:00:00+09:00"],
-            ) from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise InputError(
-            VALUE_INVALID,
-            requirement=(
-                f"{name} must include a UTC offset; a date or naive datetime does not identify "
-                "one instant"
-            ),
-            observed=f"{name}={parsed.isoformat()!r}",
-            retry=f"write {name} with an explicit UTC offset, then retry",
-            examples=["2024-01-02T00:00:00+09:00"],
-        )
-    return parsed
-
-
-def _strategy(document: dict[str, Any], workspace: Workspace) -> StrategyConfig:
-    declared = document["strategy"]
-    if not isinstance(declared, dict):
-        raise TypeError("strategy must be a mapping")
-    component = workspace.component(str(declared["component"]))
-    return StrategyConfig(
-        component=component,
-        agenda_id=str(declared["agenda_id"]),
-        agenda_role=OperationRole.STRATEGY_CALLBACK,
-    )
-
-
-def _valuation(document: dict[str, Any]) -> ValuationConfig:
-    """Build the valuation declaration.
-
-    Valuation declares no mark source. The book is valued from the prices the venue published as
-    executable at the execution instant, which the run already reads to fill against.
-    """
-    declared = document["valuation"]
-    if not isinstance(declared, dict):
-        raise TypeError("valuation must be a mapping")
-    if "mark" in declared:
-        raise ValueError(
-            "valuation.mark no longer exists: the book is valued from the execution table, "
-            "so remove the mark declaration"
-        )
-    return ValuationConfig(
-        agenda_id=str(declared["agenda_id"]),
-        agenda_role=OperationRole.VALUATION,
-    )
-
-
-def _constraints(document: dict[str, Any], workspace: Workspace) -> ConstraintSet:
-    declared = document.get("constraints") or ()
-    return ConstraintSet(tuple(workspace.component(str(name)) for name in declared))
-
-
-def _nearest_spec_value(written: str, permitted: list[str], key_path: str) -> str:
-    """What to write instead, in the case this file's parser accepts.
-
-    `register._nearest_hint` answers the same question and is deliberately not reused here: it
-    lowercases its suggestion, which is right for a declaration (`kind: strategy`) and wrong for a
-    run spec, which is parsed by member NAME. Suggesting `long_only` to a reader whose file must
-    say `LONG_ONLY` swaps one unusable value for another -- the exact failure this issue is about.
-
-    A near miss is named because a one-character typo is invisible to whoever typed it. Repeating
-    the permitted set instead would say nothing `requirement` has not already said.
-    """
-    close = get_close_matches(written.upper(), permitted, n=1)
-    if close:
-        return (
-            f"set {key_path} to {close[0]!r}, which is the closest permitted value to {written!r}"
-        )
-    return f"replace {written!r} at {key_path} with one of: {', '.join(permitted)}"
-
-
-
-
-
-
-
-
-
-
-
-
-def _closed_set_member(enum: type[Any], value: object, *, key_path: str) -> Any:
-    """One member of a closed set, or a refusal that names the set.
-
-    `AccountMode[...]` raises a bare `KeyError`, and the envelope reported it as
-    `observed: "KeyError: 'LONG_SHORT'"` -- an exception repr where the permitted values belong.
-    The reader is told their value was rejected and left to find the legal ones themselves, which
-    for this journey meant reading the enum in installed source (`docs/issues/017`).
-
-    A closed set is the one case where a refusal can always be complete: the alternatives are
-    known, finite, and cheap to print. `register.py` already learned this the expensive way -- a
-    reader spent six consecutive guesses on `fill.selector` because the field name argued for a
-    vocabulary the members do not use -- and this is the same remedy applied on the `run` side.
-    """
-    try:
-        return enum[str(value).upper()]
-    except KeyError:
-        pass
-
-    permitted = [member.name for member in enum]
-    raise InputError(
-        VALUE_INVALID,
-        requirement=f"{key_path} must be one of: {', '.join(permitted)}",
-        observed=f"{key_path}={value!r}",
-        retry=_nearest_spec_value(str(value), permitted, key_path),
-        examples=permitted,
-        source=FailureSource(file=None, key_path=key_path),
-    )
-
-
-def _account(document: dict[str, Any]) -> tuple[AccountSnapshot | None, AccountMode | None]:
-    declared = document.get("initial_account")
-    if declared is None:
-        return None, None
-    if not isinstance(declared, dict):
-        raise TypeError("initial_account must be a mapping")
-    positions = {
-        str(name): Decimal(str(quantity))
-        for name, quantity in (declared.get("positions") or {}).items()
-    }
-    snapshot = AccountSnapshot(
-        version=int(declared.get("version", 0)),
-        cash=Decimal(str(declared["cash"])),
-        positions=positions,
-    )
-    return snapshot, _closed_set_member(
-        AccountMode, declared["mode"], key_path="initial_account.mode"
-    )
-
-
-def spec_kind(document: dict[str, Any]) -> str:
-    """Which run this spec declares, from the component section it names.
-
-    Refused rather than guessed when the answer is not exactly one. A spec naming both would have
-    to be resolved by precedence, and a precedence rule is a thing a reader has to know before
-    they can predict what their own file does.
-
-    Raised as an `InputError` rather than added to `check`'s `CODES`: that inventory is the eight
-    judgments the verb settles about a spec it could read, and this is the question of which spec
-    it is holding. `_from_input` passes an `InputError` through with its own code, so the refusal
-    is fully structured either way.
-    """
-    declared = [kind for kind in _REQUIRED_BY_KIND if kind in document]
-    if len(declared) == 1:
-        return declared[0]
-    raise InputError(
-        "check.spec.kind_ambiguous",
-        requirement=(
-            f"a run spec declares exactly one of `{SIMULATION}:` or `{MATERIALIZATION}:`, "
-            "which is what says whether it simulates or materializes"
-        ),
-        observed=(
-            f"declares {', '.join(declared)}" if declared else "declares neither"
-        ),
-        retry=(
-            f"keep the one this spec is for and remove the other; `vqapr new run-spec` emits a "
-            f"`{SIMULATION}:` template"
-        ),
-    )
-
-
-def require_declared_keys(document: dict[str, Any]) -> None:
-    """Reject an incomplete spec before anything is opened.
-
-    This reads only the user's own file, so it runs first. Checking it after `Workspace.open`
-    meant an incomplete spec in an uninitialised directory reported the missing workspace and
-    said nothing about the spec, sending the user to fix the wrong file.
-    """
-    required = _REQUIRED_BY_KIND[spec_kind(document)]
-    missing = [key for key in required if key not in document]
-    if missing:
-        raise InputError(
-            INCOMPLETE,
-            requirement=f"a run spec must declare: {', '.join(required)}",
-            observed=f"missing {len(missing)} of {len(required)}: {', '.join(missing)}",
-            retry="add the missing keys, then retry",
-            examples=missing,
-        )
-    _require_nested_keys(document)
-
-
-_NESTED_REQUIRED = {
-    "strategy": ("component", "agenda_id"),
-    "valuation": ("agenda_id",),
-}
-"""Keys inside a declared section that the readers index directly.
-
-The top-level check above cannot see them, so writing `component_id:` where the template says
-`component:` used to pass it and then surface from the declaration phase as
-`observed: "KeyError: 'component'"` with a null `source.key_path` -- a raw Python exception as the
-observed value, and a fix naming no cause. It cost a first-time user about four minutes of diffing
-against a re-emitted template to find one word.
-"""
-
-
-def _require_nested_keys(document: dict[str, Any]) -> None:
-    """Name a missing nested key as a missing key, before the phase that would raise on it.
-
-    Collected across sections, like every other refusal on this surface: a spec wrong in two
-    places should cost one command.
-    """
-    missing: list[str] = []
-    for section, keys in _NESTED_REQUIRED.items():
-        if section not in document:
-            continue
-        declared = document.get(section)
-        if not isinstance(declared, dict):
-            # Shape rather than absence, and the readers already refuse it with a typed message.
-            continue
-        missing.extend(f"{section}.{key}" for key in keys if key not in declared)
-    if not missing:
-        return
-    first = missing[0]
-    raise InputError(
-        INCOMPLETE,
-        requirement=f"a run spec must declare: {', '.join(sorted(missing))}",
-        observed=f"missing {len(missing)}: {', '.join(sorted(missing))}",
-        retry=(
-            "add the missing keys, then retry; `vqapr new run-spec` emits a template naming "
-            "every required key"
-        ),
-        examples=sorted(missing),
-        source=FailureSource(file=None, key_path=first),
-    )
-
-
-def definition_from_document(document: dict[str, Any], workspace: Workspace) -> RunDefinition:
-    """Build a `RunDefinition` without re-implementing its invariants.
-
-    Pairing rules (exchange with execution input, start with end, snapshot with mode) are
-    enforced by `RunDefinition.__post_init__`, so this function only shapes values.
-    """
-    require_declared_keys(document)
-    exchange = document.get("exchange")
-    snapshot, mode = _account(document)
-    return RunDefinition(
-        strategy=_strategy(document, workspace),
-        valuation=_valuation(document),
-        constraints=_constraints(document, workspace),
-        monitoring=(
-            MonitoringPolicy(
-                agenda_id=str(document["monitoring"]["agenda_id"]),
-                agenda_role=OperationRole.MONITORING,
-            )
-            if document.get("monitoring")
-            else None
-        ),
-        exchange=workspace.component(str(exchange)) if exchange else None,
-        execution_input_id=(
-            str(document["execution_input"]) if document.get("execution_input") else None
-        ),
-        start=_timestamp(document.get("start"), name="start"),
-        end=_timestamp(document.get("end"), name="end"),
-        initial_account_snapshot=snapshot,
-        initial_account_mode=mode,
-        initial_model_memory=document.get("initial_model_memory"),
-        instruments=tuple(str(name) for name in document["instruments"]),
-    )
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "target",
+        help="the id of a registered run (`vqapr list runs`)",
+    )
+    parser.add_argument(
+        "--strategy",
+        dest="strategies",
+        action="append",
+        default=None,
+        help="run only this model of the run (repeatable); default: every model it names",
+    )
+    parser.add_argument(
+        "--jobs",
+        dest="jobs",
+        type=int,
+        default=1,
+        help="run the strategies in this many processes; each builds its own panels",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
-        # Says what the flag DOES, which is not what it said. It replaces this run's frozen
-        # record under the same --run-id; it does not touch a published dataset or a registration.
-        # The two dataset-exists refusals were corrected to stop naming this flag, and leaving the
-        # claim alive in --help would send an agent here to read the version that was disproved.
         help=(
-            "replace this run id's existing run record instead of refusing. Refusing is the "
-            "default because a repeated run under the same --run-id is far more often a retry "
-            "than an intended overwrite. This does not remove a published dataset"
+            "replace a strategy record that already exists under this run and fingerprint "
+            "instead of refusing. Refusing is the default because a repeated run is far more "
+            "often a retry than an intended overwrite. A live record is never replaced"
         ),
     )
     parser.add_argument(
-        "--run-id",
-        dest="run_id",
+        "--store-root",
+        dest="store_root",
+        type=Path,
         default=None,
-        help="identity for this run's frozen record (defaults to the spec's filename)",
+        help=(
+            "where run records are written: the `store_root` the result prints, which "
+            "`read_strategy_table(store_root, ...)` takes back (default: `<project>/.vqapr`)"
+        ),
     )
     parser.add_argument(
-        "spec",
-        type=Path,
-        help="path to the run spec YAML (write one with `vqapr new run-spec --out`)",
+        "--no-account-positions",
+        dest="no_account_positions",
+        action="store_true",
+        help=(
+            "record only the `_ACCOUNT` row (cash and NAV) at each valuation instead of one row "
+            "per held instrument; fills are recorded either way"
+        ),
     )
 
 
 JUDGMENT_STAGE = "run.judgments"
+PREFLIGHT_STAGE = "run.check"
+"""`run`'s preflight refusals carry `check`'s stage and codes, because they are the same judgment.
+
+A reader who learned to handle `run.check.preflight_refused` from `vqapr check` must not have to
+learn a second vocabulary for the verb that actually runs.
+"""
+
+_MAX_CAUSE_LINKS = 4
+"""How many `__cause__` hops `observed` carries before it stops at `...`.
+
+The chain is evidence, not a traceback. Two hops reach the original in every chain this package
+raises today (`preflight` wraps one level), and the bound is what keeps `observed` from growing
+with a user's OWN nesting -- a strategy is free to re-raise `from` as deep as it likes."""
 
 
-def _refuse_if_judged(
-    failures: list[Failure], blocked: list[dict[str, str]], spec: Path
-) -> None:
+def _chain(error: BaseException) -> str:
+    """The refusal's own sentence followed by what raised it, innermost last.
+
+    `raise ValueError(...) from error` is how this package names the step that failed while
+    keeping the evidence, and dropping `__cause__` threw away the half that says WHY -- a reader
+    was told "the initial payload cannot be staged" and never told that `load_payload` hit
+    `EOFError: Ran out of input` (`docs/issues/076`). Only `__cause__` is followed, never
+    `__context__`: an explicit `from` is an author saying these two are one story, whereas an
+    incidental exception caught during handling is not.
+    """
+    links = [f"{type(error).__name__}: {error}"]
+    cause = error.__cause__
+    while cause is not None and len(links) <= _MAX_CAUSE_LINKS:
+        links.append(f"{type(cause).__name__}: {cause}")
+        cause = cause.__cause__
+    if cause is not None:
+        links.append("...")
+    return " <- ".join(links)
+
+
+def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
+    """A bare TypeError or ValueError from a framework invariant, given an envelope.
+
+    ONE renderer for both verbs (`docs/issues/076`). `check` caught these per phase and `run`
+    called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded refusal
+    from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
+
+    The two codes are written literally rather than selected into a variable so the refusal-code
+    inventory's constant folding can see them.
+    """
+    detail = _chain(error)
+    fix = f"correct the run {target!r} so the {phase} phase completes, then check again"
+    source = FailureSource(key_path=f"runs.{target}")
+    if phase in ("run", "spec"):
+        return Failure.bounded(
+            "run.check.declaration_invalid",
+            "the run must resolve against what the workspace has registered",
+            observed=detail,
+            fix=fix,
+            explain=ExplainTopic.DECLARATION_SHAPE,
+            source=source,
+        )
+    return Failure.bounded(
+        "run.check.preflight_refused",
+        "every run precondition must hold before the run starts",
+        observed=detail,
+        fix=fix,
+        explain=ExplainTopic.RUN_PRECONDITION,
+        source=source,
+    )
+
+
+def _refuse_if_judged(failures: list[Failure], blocked: list[dict[str, str]], run_id: str) -> None:
     """Refuse the run when a judgment refused, or when one could not answer.
 
-    `check` asked these questions and `run` did not, so a spec with a real look-ahead -- a fill at
-    15:30 with decisions at or after it -- was refused by one verb and executed by the other. The
-    run then wrote a permanent record that `vqapr list runs` shows beside legitimate runs with
-    nothing marking it, and there is no command that deletes a run. A reader cannot tell.
+    `check` asked these questions and `run` did not, so a run with a real look-ahead -- a fill at
+    15:30 with decisions at or after it -- was refused by one verb and executed by the other, and
+    wrote a permanent record nothing marked (`docs/issues/015`). Refusing outright, with no flag
+    to bypass, is the decision recorded in `docs/implementations/087`.
 
-    Refusing outright, with no flag to bypass, is the decision recorded in
-    `docs/implementations/087`. It is what makes `tables_declared`-style provenance unnecessary
-    here: when no invalid run can be produced, no record needs a field admitting it might be one.
-    `docs/issues/009` argues against exactly the shape the alternative would have had -- a refusal
-    the caller passes a flag to get around, on an event that is ordinary.
+    **Blocked counts as refused.** A judgment that could not answer is not a judgment that passed;
+    letting it through would let a run nothing was proven about run to completion.
 
-    **Blocked counts as refused.** `_judgments` returns questions it could not ANSWER separately
-    from questions it answered no to, and `check` treats both as not-ok (`ok` is
-    `not failures and not blocked`). Refusing only on the answered-no list would let a spec nothing
-    was proven about run to completion -- issue 015's own divergence, reproduced inside its fix.
-
-    The refusals are re-raised in the codes `check` already publishes, not re-coded into a `run.*`
-    namespace. A reader who has handling for `check.execution.not_after_decision` gets the same
-    code from both verbs, which is the property this closes: a green `run` means what a green
-    `check` means, and a red one refuses for the same stated reason.
+    The refusals keep the codes `check` publishes: a green `run` means what a green `check` means.
     """
     if not failures and not blocked:
         return
     reported = list(failures)
     for entry in blocked:
-        # A blocked judgment has no code of its own -- it is the absence of an answer, not an
-        # answer. It gets one here so the refusal is still a six-field envelope rather than a
-        # shape the reader has to special-case.
         reported.append(
             Failure.bounded(
                 "run.check.judgment_blocked",
                 "every judgment must be answerable before the run starts",
                 observed=(
-                    f"the {entry.get('check')} judgment could not answer: "
-                    f"{entry.get('blocked_by')}"
+                    f"the {entry.get('check')} judgment could not answer: {entry.get('blocked_by')}"
                 ),
                 fix=(
-                    "run `vqapr check` on this spec to see the full report, then fix what stopped "
+                    f"run `vqapr check {run_id}` to see the full report, then fix what stopped "
                     "the judgment from answering"
                 ),
                 explain=ExplainTopic.RUN_PRECONDITION,
-                source=FailureSource(file=str(spec)),
+                source=FailureSource(key_path=f"runs.{run_id}"),
             )
         )
     raise VqaprError(
@@ -430,275 +197,249 @@ def _refuse_if_judged(
     )
 
 
-def _materialize(
-    args: argparse.Namespace, document: dict[str, Any], project_root: Path
-) -> dict[str, Any]:
-    """Run a registered DataModel, through the verb that already exists."
+def refuse_a_path(target: str, *, verb: str) -> None:
+    """A run is named by id. A YAML path here is the spec file record `148` retired.
 
-    A DataModel could be scaffolded, registered and described, and nothing would ever run it:
-    `flow/materialize.py` held a real entry point no CLI command called. It is reached here rather
-    than through a `materialize` verb of its own, because registration is already symmetric --
-    `register.py` maps `datamodel` beside `strategy` -- and a second top-level verb would add an
-    asymmetry rather than remove one.
-
-    `--run-id` and `--force` are refused rather than ignored. Both are defined entirely in terms
-    of a run record, and a materialization writes none: it registers a dataset. Accepting a flag
-    that cannot do what its name says is how a user learns the wrong model of a command.
+    Refused by name rather than parsed: the spec (`datamodel:`, `evaluate_at`) is now a `runs:`
+    entry with `datamodels:`, registered like every other run and executed by id.
     """
-    from vqapr.public import MaterializationSpec, materialize
-
-    for flag, value in (("--run-id", getattr(args, "run_id", None)),
-                        ("--force", getattr(args, "force", False))):
-        if value:
-            raise InputError(
-                VALUE_INVALID,
-                requirement=f"{flag} applies to a simulation, which writes a run record",
-                observed=f"this spec declares `{MATERIALIZATION}:`, so it registers a dataset",
-                retry=f"drop {flag}; to replace the output, remove its dataset registration first",
-            )
-
-    output = document["output"]
-    if not isinstance(output, dict):
-        raise InputError(
-            VALUE_INVALID,
-            requirement="`output:` must be a mapping declaring dataset_id and value_fields",
-            observed=f"found {type(output).__name__}",
-            retry="write `output:` with `dataset_id:` and `value_fields:` beneath it",
-            source=FailureSource(file=None, key_path="output"),
-        )
-    missing = [key for key in ("dataset_id", "value_fields") if key not in output]
-    if missing:
-        raise InputError(
-            INCOMPLETE,
-            requirement="`output:` must declare dataset_id and value_fields",
-            observed=f"missing {', '.join(missing)}",
-            retry="add the missing keys under `output:`, then retry",
-            examples=missing,
-            source=FailureSource(file=None, key_path=f"output.{missing[0]}"),
-        )
-    # The materialization path gets its own insertion point rather than sharing the simulation's.
-    # `run()` returns here before `Workspace.open` is ever reached, and these judgments need a
-    # workspace -- so one is opened here, AFTER the `--run-id`/`--force` refusals above. Hoisting
-    # the open to the top of `run()` instead would report an unopenable workspace ahead of a
-    # misused flag, inverting an order those refusals were deliberately given.
-    #
-    # A materialization has no `RunDefinition`, so it has no declaration or preflight phase to sit
-    # before -- `check` skips both for this kind. Judged here, immediately before the spec it would
-    # otherwise build and run.
-    _refuse_if_judged(
-        materialization_judgments(
-            document,
-            Workspace.open(project_root),
-            project_root,
-            kind_spelling=cli_kind,
+    if Path(target).suffix.lower() not in (".yaml", ".yml"):
+        return
+    raise InputError(
+        VALUE_INVALID,
+        requirement=f"`vqapr {verb}` takes the id of a registered run",
+        observed=f"{target} is a file; a datamodel is run as a registered run since record 148",
+        retry=(
+            f"declare the datamodel under `runs:` with `datamodels:` (`vqapr new datamodel` emits "
+            f"the block), `vqapr register {target}`, then `vqapr {verb} <run-id>`"
         ),
-        [],
-        Path(getattr(args, "spec", "")),
-    )
-
-    try:
-        spec = MaterializationSpec.of(
-            str(output["dataset_id"]),
-            value_fields=[str(field) for field in output["value_fields"]],
-        )
-    except (TypeError, ValueError) as invalid:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="`output:` must describe a materialization this package can write",
-            observed=str(invalid),
-            retry="correct `output:`, then retry",
-            source=FailureSource(file=None, key_path="output"),
-        ) from invalid
-
-    times = tuple(
-        _timestamp(value, name=f"evaluate_at[{index}]")
-        for index, value in enumerate(document["evaluate_at"] or ())
-    )
-    result = materialize(
-        project_root,
-        str(document[MATERIALIZATION]),
-        spec,
-        evaluation_times=[moment for moment in times if moment is not None],
-        instruments=[str(name) for name in document["instruments"]],
-    )
-    # Named from what `MaterializationResult` actually carries. It has `registration`,
-    # `output_path`, `lineage_path` and `invocations` -- and no row count: rows are per evaluation
-    # on `MaterializationInvocation`, so the total is a sum and is reported under a name that says
-    # so rather than as an unqualified "row count".
-    return success(
-        "materialize.complete",
-        dataset_id=str(spec.dataset_id),
-        output_path=str(result.output_path),
-        lineage_path=str(result.lineage_path),
-        evaluations=len(result.invocations),
-        rows_total=sum(invocation.row_count for invocation in result.invocations),
+        source=FailureSource(file=target),
     )
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
-    spec_path = Path(args.spec)
-    document = read_yaml_mapping(spec_path, what="a run spec")
-    require_declared_keys(document)
-    if spec_kind(document) == MATERIALIZATION:
-        return _materialize(args, document, project_root)
+    target = str(args.target)
+    refuse_a_path(target, verb="run")
+
     workspace = Workspace.open(project_root)
-    # One parser owns the `store` keys, and this is its only reader in the CLI. A second place
-    # reading `document["store"]` directly is how `root` becomes optional in one path and required
-    # in another, with neither wrong on its own.
-    store = StoreSpec.of(document.get("store"), base=spec_path.parent)
-    # Before the freeze, because the refusal is about the spec rather than about the definition
-    # built from it, and because this is the order `check` asks them in: judgments precede
-    # declaration and preflight (`cli/check.py`'s `_PHASES`). A spec that cannot pass these has
+    definition: RunDefinition = workspace.run_definition(target)
+    # Before the freeze, and in the order `check` asks them: a run that cannot pass these has
     # nothing to gain from being frozen first.
-    _refuse_if_judged(*judgments(document, workspace, spec_path), spec_path)
-    frozen = preflight_run(project_root, definition_from_document(document, workspace))
-    run_id = getattr(args, "run_id", None) or spec_path.stem
+    _refuse_if_judged(*judgments(definition, workspace), definition.run_id)
+    selected = tuple(getattr(args, "strategies", None) or ())
+    for name in selected:
+        definition.member(name)  # KeyError names the models the run does hold
+    # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/070`):
+    # the judgments above, the freeze and the roster read all see the same document.
     try:
-        result = execute_run(
+        frozen = preflight_run(workspace, definition)
+    except (TypeError, ValueError) as refused:
+        # `check` renders exactly this as a bounded refusal; letting it escape here rendered the
+        # SAME judgment as `stage: "unhandled"` (`docs/issues/076`).
+        #
+        # These two types are the WHOLE escape set, not a guessed subset: every `raise` in
+        # `flow/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and user code
+        # reached through `load_strategy_model` comes back already bounded as `component.load`.
+        # `VqaprError` and `InputError` are therefore deliberately not caught -- both already
+        # carry their own bounded body and their own truer stage.
+        raise VqaprError(
+            stage=PREFLIGHT_STAGE,
+            family=FailureFamily.INTENT,
+            failures=[preflight_refusal("preflight", refused, target)],
+        ) from refused
+    store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
+    replace = bool(getattr(args, "force", False))
+    try:
+        outcome = execute_run(
             project_root,
             frozen,
-            store_root=store.resolve(project_root, WORKSPACE_DIRECTORY),
-            run_id=run_id,
-            replace_record=bool(getattr(args, "force", False)),
+            store_root=store_root,
+            strategies=selected or None,
+            jobs=int(getattr(args, "jobs", 1) or 1),
+            replace_record=replace,
+            record_account_positions=not getattr(args, "no_account_positions", False),
+            workspace=workspace,
         )
     except RunRecordLive as running:
-        raise _held_run_id(run_id, running) from running
+        raise _held_record(running) from running
     except RunRecordExists as existing:
-        # Choosing a run id twice is a mistake the reader can fix in one flag. Letting the bare
-        # FileExistsError escape renders it as `stage: "unhandled"`, which says the framework
-        # broke rather than naming the id and the remedy.
+        # Running a strategy again under the same fingerprint is a retry or an overwrite, and
+        # the reader says which in one flag. Letting the bare FileExistsError escape renders it
+        # as `stage: "unhandled"`, which says the framework broke.
         raise InputError(
             VALUE_INVALID,
-            requirement="each run must have a run id no record has already been written under",
-            observed=f"{run_id!r} already has a record at {existing.directory}",
+            requirement="a strategy record is written once per run and fingerprint",
+            observed=f"{existing.run_id!r} already has a record at {existing.directory}",
             retry=(
-                f"run with --run-id <new-id>, or replace the existing record deliberately: "
-                f"vqapr run {spec_path} --force"
+                f"edit the strategy (a new fingerprint records beside the old one), or replace "
+                f"this record deliberately: vqapr run {target} --force"
             ),
         ) from existing
+    except RunRecordConflict as changed:
+        raise InputError(
+            VALUE_INVALID,
+            requirement="a run id's records all belong to one configuration",
+            observed=str(changed),
+            retry=(
+                f"vqapr rm run {changed.run_id} to clear the old records, or register the "
+                "changed run under a new id"
+            ),
+        ) from changed
+    if frozen.datamodels:
+        return success(
+            "run.complete",
+            run_id=frozen.run_id,
+            store_root=str(store_root),
+            datamodels={
+                component_id: _datamodel_envelope(record)
+                for component_id, record in outcome.records.items()
+            },
+        )
+    # One line per strategy the run was asked to run, completed or failed (`docs/issues/073`).
+    # A failed strategy's line is the same `simulation.*` payload a refusal used to be the whole
+    # envelope of, so a reader who handled that shape handles this one, per strategy.
+    strategies: dict[str, dict[str, Any]] = {}
+    for component_id, result in outcome.outcomes.items():
+        if result.status == COMPLETED:
+            strategies[component_id] = {
+                "status": COMPLETED,
+                **_strategy_envelope(store_root, frozen.run_id, result.record),
+            }
+        else:
+            strategies[component_id] = {"status": FAILED, **dict(result.failure or {})}
+    roster = _roster_envelope(outcome.roster)
+    if not outcome.ok:
+        return _strategy_failed(frozen, store_root, strategies, roster)
     return success(
         "run.complete",
-        occurrences=len(result.occurrences),
-        # Two counters, reported as two fields. The run state advances on every publication,
-        # including a valuation that records a mark without trading; the Account advances only
-        # when a fill commits. Reporting the former under the latter's name made an independent
-        # valuation clock look like it was moving the books.
-        run_state_version=result.final_state.version,
-        account_version=result.final_state.account.snapshot.version,
-        store_root=str(store.resolve(project_root, WORKSPACE_DIRECTORY)),
-        # No `publishes`-shaped field is reported here, and that is deliberate.
-        #
-        # `store.tables` parses, validates and resolves correctly, but nothing yet turns a
-        # declared table into a registered dataset -- `publish_run_record` is the only function
-        # that does, and this path does not call it. Echoing a `publishes` claim would be a
-        # machine-readable claim that a dataset exists when `list datasets` shows none, and the
-        # first reader of this envelope is an agent that would believe it.
-        #
-        # The batch's own precedent is `_contract_report`, which declines to report
-        # weights/forms/records because inventing entries would report a promise nobody made. The
-        # same rule applies to a promise the code has not yet kept: AC-P3's parsing half is
-        # delivered and tested, its publication half is not, and the envelope says only what is
-        # true today.
-        tables_declared=tables_declared(store, result),
-        # What the orders did, not only that they were placed. `ok: true` means the simulation
-        # executed; it does not mean the book that was declared is the book that was held, and
-        # those differed by nine percent of NAV in the run that filed `docs/issues/039`.
-        # The surface renders; the aggregate is computed in `analysis/`, over the rows
-        # `flow/reporting.py` reads back. Record `114`.
-        fills=fill_summary(recorded(result).get(FILL_TABLE, ())),
-        # What this run knew each instrument to be, or that it knew nothing. A run with no
-        # registered roster completes with every fill recording `kind: None`, and it used to do so
-        # in silence -- no refusal, no warning, nothing in the success envelope. On an academic
-        # venue that is harmless; on a KRX-shaped venue it means every name was charged
-        # identically while the record says the categories were never known, and `cost_by_kind()`
-        # collapses to one unlabelled bucket. Reported on the SUCCESS path on purpose: the run is
-        # legitimate, and the thing worth saying is what it was computed against.
-        roster=_roster_envelope(project_root),
+        run_id=frozen.run_id,
+        store_root=str(store_root),
+        strategies=strategies,
+        # What this run knew each instrument to be, or that it knew nothing. Reported on the
+        # SUCCESS path on purpose: the run is legitimate, and the thing worth saying is what it
+        # was computed against.
+        roster=roster,
     )
 
 
-def _held_run_id(run_id: str, running: RunRecordLive) -> InputError:
-    """The refusal for a run id whose lock is still inside its heartbeat window.
+def _strategy_failed(
+    frozen: Any, store_root: Path, strategies: dict[str, dict[str, Any]], roster: dict[str, Any]
+) -> dict[str, Any]:
+    """The envelope of a run in which at least one strategy's flow ended in a refusal.
 
-    A different remedy from `RunRecordExists`, and naming the wrong one here would be destructive:
-    `--force` against a live run destroys the rows it is still writing.
+    `ok: false` because not everything that was asked for was done, and the SAME `strategies`
+    map as the success path, so the strategies that completed are named beside the one that did
+    not -- the payload that filed `073` had `failures: []` and no word about seven finished
+    records. `failures` is every failed strategy's entries, each stamped with its `strategy`, so
+    a reader following the skill's rule (read `fix` first) still can; the per-strategy block
+    holds the full replay coordinates (`at`, `retry_precondition`) for each.
+    """
+    failed = {name: block for name, block in strategies.items() if block["status"] == FAILED}
+    families = {block.get("family") for block in failed.values()}
+    return {
+        "ok": False,
+        "stage": "run.strategy_failed",
+        "family": families.pop() if len(families) == 1 else None,
+        "mutation": any(bool(block.get("mutation")) for block in failed.values()),
+        "retry_precondition": None,
+        "correlation_id": frozen.identity,
+        "failures": [
+            {**entry, "strategy": name}
+            for name, block in failed.items()
+            for entry in block.get("failures") or ()
+        ],
+        "error": (
+            f"{len(failed)} of {len(strategies)} strategies failed: {', '.join(failed)}; "
+            f"the other {len(strategies) - len(failed)} completed and their records stand"
+        ),
+        "run_id": frozen.run_id,
+        "store_root": str(store_root),
+        "strategies": strategies,
+        "roster": roster,
+    }
 
-    **What this refusal may not say is that the holder is alive.** The lock proves only that it was
-    touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
-    interrogated -- so a run killed seconds ago presents exactly like one that is executing. That
-    is the intended trade, and it is also precisely when an operator retries: Ctrl-C, a CI timeout
-    and an OOM kill all produce this state moments before the retry. Asserted as certainty --
-    *"is running now (pid 64004)"* -- it sent a reader to check a pid that did not exist and
-    conclude the package was lying (`docs/issues/037`).
 
-    Three things follow, and each is a field:
+def _datamodel_envelope(record: Any) -> dict[str, Any]:
+    """One datamodel's line of the success envelope, read from its record (record `148`)."""
+    period = record.get("period") or {}
+    return {
+        "record": str(record.get("datamodel_ref")),
+        "fingerprint": record.get("fingerprint"),
+        "dataset_id": record.get("dataset_id"),
+        "rows": record.get("rows"),
+        "sessions": period.get("occurrences"),
+    }
 
-    * `observed` states the age and says the pid was not interrogated, rather than asserting
-      liveness in the present tense.
-    * `fix` names the self-healing wait FIRST, because it is the remedy that is correct under both
-      readings and costs nothing. The old text said *"wait for that run to finish"*, which for a
-      dead holder reads as wait forever.
-    * `--force` is hedged on the premise it depends on, instead of being argued against in bold on
-      a premise this refusal cannot check.
 
-    Extracted from `run` so the message is reachable by a test without executing a simulation.
+def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, Any]:
+    """One strategy's line of the success envelope, read from its record.
+
+    From the record rather than the in-process result, so a strategy run in a worker process
+    (`--jobs`) reports exactly as one run here: the record is the one thing both have.
+    """
+    account = record.get("account") or {}
+    period = record.get("period") or {}
+    strategy_ref = str(record.get("strategy_ref"))
+    return {
+        "record": strategy_ref,
+        "fingerprint": record.get("fingerprint"),
+        "occurrences": period.get("occurrences"),
+        "account_version": account.get("version"),
+        "tables": sorted(record.get("tables") or {}),
+        # What the orders did, not only that they were placed. `ok: true` means the simulation
+        # executed; it does not mean the book that was declared is the book that was held, and
+        # those differed by nine percent of NAV in the run that filed `docs/issues/039`.
+        "fills": fill_summary(
+            tuple(read_typed_table(store_root, run_id, FILL_TABLE, strategy_ref))
+        ),
+        "contract": record.get("contract"),
+        # Seconds by phase (`docs/issues/068`), so "my strategy is 5% of the wall clock and
+        # the snapshot is half of it" is read off the result rather than off a profiler.
+        "timing": record.get("timing"),
+    }
+
+
+def _held_record(running: RunRecordLive) -> InputError:
+    """The refusal for a record whose lock is still inside its heartbeat window.
+
+    **What this refusal may not say is that the holder is alive.** The lock proves only that it
+    was touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
+    interrogated -- so a run killed seconds ago presents exactly like one that is executing
+    (`docs/issues/037`). `fix` names the self-healing wait FIRST, because it is the remedy that is
+    correct under both readings and costs nothing.
     """
     claim = running.claim
     return InputError(
         VALUE_INVALID,
-        requirement="a run id must not already be held by a lock inside its heartbeat window",
+        requirement="a record must not already be held by a lock inside its heartbeat window",
         observed=(
-            f"{run_id!r} holds a lock last refreshed {claim.age:.0f}s ago at "
+            f"{running.run_id!r} holds a lock last refreshed {claim.age:.0f}s ago at "
             f"{running.directory} (pid {claim.pid}, not interrogated)"
         ),
         retry=(
             f"wait about {claim.releases_in:.0f}s: a live run refreshes that lock continuously, "
             f"and if its process is gone the lock is released automatically, after which "
-            f"re-running this exact command reclaims the id. To proceed now, run with "
-            f"--run-id <new-id>. Do not use --force while the holder may be live: against a run "
-            f"that is still writing it destroys that run's rows"
+            f"re-running this exact command reclaims the record. Do not use --force while the "
+            f"holder may be live: against a run that is still writing it destroys that run's rows"
         ),
     )
 
 
-def _roster_envelope(project_root: Path) -> dict[str, object]:
+def _roster_envelope(roster: object | None) -> dict[str, object]:
     """The roster clause of the success envelope, present whether or not one is registered.
 
-    A mapping in every case, including failure, because a reader testing `payload["roster"]` for
-    absence should not have to distinguish "no roster" from "this version does not report one".
-    `known` is the field that answers the question.
+    A mapping in every case because a reader testing `payload["roster"]` for absence should not
+    have to distinguish "no roster" from "this version does not report one". `known` is the
+    field that answers the question.
 
-    **This runs after the run completed and its record is on disk.** `registered_roster` refuses a
-    registered-but-unreadable roster -- and, since `docs/issues/050`, a workspace that cannot be
-    decoded -- which is right at run START: nothing has been computed yet and the run must not
-    proceed without categories. Here it would be wrong: the workspace and the tables can become
-    unreadable in the minutes a real run takes, and letting that refusal escape would report exit 1
-    for a run whose record `run_ids` already lists. The record and the command would disagree about
-    whether the run happened.
+    Built from the roster the run READ (`RunResult.roster`), never from a second read after the
+    run (`docs/issues/070`): what this reports is what the fills were classified by, and the
+    `stale` branch that described a re-read failing after a long run describes a state that can
+    no longer occur.
     """
-    from vqapr.domain.errors import VqaprError
     from vqapr.public import roster_report
 
-    try:
-        report = roster_report(_registered_roster_for_report(project_root))
-    except VqaprError as vanished:
-        # `known: True`, because the run DID know. `registered_roster` refuses an unreadable
-        # roster at run start, so any run reaching this envelope read its roster successfully:
-        # its fills carry real `kind` values and the frozen record carries the digest and counts,
-        # computed while the tables were readable. Reporting `False` here would give the field the
-        # same value as a genuinely rosterless run -- whose note says every fill records
-        # `kind: None` -- and a reader testing `roster["known"]` would conclude the opposite of
-        # the truth. `stale` is the fact that actually differs: the counts could not be re-read.
-        return {
-            "known": True,
-            "stale": True,
-            "note": (
-                "this run read a registered roster, and the roster -- or the workspace recording "
-                "it -- became unreadable before the envelope was written, so the per-category "
-                "counts could not be re-read; the "
-                f"frozen record states what the run actually used. {vanished}"
-            ),
-        }
+    report = roster_report(roster)  # type: ignore[arg-type]
     if report is None:
         return {
             "known": False,
@@ -709,9 +450,3 @@ def _roster_envelope(project_root: Path) -> dict[str, object]:
             ),
         }
     return {"known": True, **report}
-
-
-def _registered_roster_for_report(project_root: Path) -> object | None:
-    from vqapr.flow.roster import registered_roster
-
-    return registered_roster(project_root)

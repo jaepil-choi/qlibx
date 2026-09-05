@@ -22,10 +22,13 @@ it describes.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
-from vqapr.data.lookback import RowsLookback
+if TYPE_CHECKING:
+    # The declaration is `authoring`'s, and `authoring` imports this module for the field
+    # names and the projection type, so the type lives here as an annotation only.
+    from vqapr.authoring import AccountHistoryInput
 
 ACCOUNT_FIELDS = ("nav", "cash")
 """One value per marked instant."""
@@ -38,51 +41,13 @@ should not pay to retain when it was observed, and one that must tell a halt fro
 declares both. A field is a column, which is what it means in `DataRequirement` too.
 """
 
-_FIELDS = frozenset(ACCOUNT_FIELDS) | frozenset(INSTRUMENT_FIELDS)
-
-
-@dataclass(frozen=True, slots=True)
-class AccountRequirement:
-    """One consumer's declared read of the Account's own record.
-
-    There is no `dataset_id`: a run has exactly one account, so there is nothing to select.
-    There is no `scope` either -- the field names carry it. `nav` exists once per instant and
-    `quantity` exists per instrument, so a scope argument could only ever contradict the fields
-    it accompanies.
-    """
-
-    consumer_id: str
-    fields: tuple[str, ...]
-    lookback: RowsLookback
-
-    @staticmethod
-    def of(consumer_id: str, *, fields: Sequence[str], lookback: RowsLookback):
-        return AccountRequirement(consumer_id, tuple(fields), lookback)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.consumer_id, str) or not self.consumer_id.strip():
-            raise ValueError("consumer_id must be a non-empty identifier")
-        if not isinstance(self.fields, tuple) or not self.fields:
-            raise ValueError("an account requirement must declare at least one field")
-        unknown = tuple(sorted(set(self.fields) - _FIELDS))
-        if unknown:
-            raise ValueError(
-                f"unknown account history fields {unknown}; "
-                f"account series are {ACCOUNT_FIELDS} and instrument panels are {INSTRUMENT_FIELDS}"
-            )
-        if len(set(self.fields)) != len(self.fields):
-            raise ValueError("account requirement fields must be unique")
-        if not isinstance(self.lookback, RowsLookback):
-            raise TypeError("lookback must be a RowsLookback")
-
-
-def retained_marks(requirements: Sequence[AccountRequirement]) -> int:
-    """How many marks a run must keep resident to satisfy every declaration.
+def retained_marks(declaration: AccountHistoryInput | None) -> int:
+    """How many marks a run must keep resident to satisfy the Strategy's declaration.
 
     One, when nothing is declared: the current valuation is what `AccountState` itself needs to
     prove its NAV invariant. Everything beyond that is retained because somebody asked for it.
     """
-    return max((requirement.lookback.rows for requirement in requirements), default=1)
+    return declaration.lookback.rows if declaration is not None else 1
 
 
 class AccountHistory:
@@ -93,20 +58,22 @@ class AccountHistory:
     transition that committed it.
     """
 
-    __slots__ = ("_marks", "_requirement")
+    __slots__ = ("_declaration", "_marks")
 
-    def __init__(self, marks: Sequence[object], requirement: AccountRequirement | None) -> None:
-        self._requirement = requirement
-        rows = requirement.lookback.rows if requirement is not None else 0
+    def __init__(
+        self, marks: Sequence[object], declaration: AccountHistoryInput | None
+    ) -> None:
+        self._declaration = declaration
+        rows = declaration.lookback.rows if declaration is not None else 0
         self._marks = tuple(marks[-rows:]) if rows else ()
 
     def __len__(self) -> int:
         return len(self._marks)
 
     def _require(self, field: str, allowed: tuple[str, ...]) -> None:
-        if self._requirement is None or field not in self._requirement.fields:
+        if self._declaration is None or field not in self._declaration.fields:
             raise KeyError(
-                f"{field!r} was not declared in this consumer's AccountRequirement; "
+                f"{field!r} was not declared in this StrategyModel's account_history(); "
                 "a Model reads only what it declared"
             )
         if field not in allowed:

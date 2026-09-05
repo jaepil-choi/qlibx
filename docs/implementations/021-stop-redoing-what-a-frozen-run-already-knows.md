@@ -3,7 +3,7 @@
 ## Why this exists
 
 `kwam-enhanced-index` research replication was too slow to iterate on.
-`docs/code-review/2026-08-19-vqapr-performance.md` profiled the `run()` hot path and found the
+`docs/diagnostics/archive/2026-08-19-vqapr-performance.md` profiled the `run()` hot path and found the
 common shape behind the two largest cheap wins: **a frozen run recomputes, on every callback,
 facts that cannot change for the entire run.**
 

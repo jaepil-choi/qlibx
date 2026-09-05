@@ -6,24 +6,18 @@ Two modes:
   declaration `.yaml`. Both files are complete: `vqapr new` then `vqapr register` is the whole
   path from nothing to a registered component.
 
-- `vqapr new dataset|execution-input|agendas|run-spec --out <path>` emits a YAML template with
+- `vqapr new dataset|execution-input|run --out <path>` emits a YAML template with
   every required key, inline comments explaining each one, and placeholder values that need
   replacing. An agent that reads this file knows exactly what `vqapr register` or `vqapr run`
   expects, without opening documentation or guessing field names.
 
 ## Every declaration kind a run needs has a template
 
-`register` understands seven sections, and a run needs five of them. Before `agendas` was added
-here, three of those five had a template and the rest had to be known to exist: a reader who
-scaffolded all four available kinds, filled them in, and ran got
-`workspace.strategy_config.register.missing` -- a section no template had ever named. The gap was
-not documentation, it was that `vqapr new`'s own choice list was the de-facto index of what a
-declaration could contain, and it was incomplete.
-
-`agendas` therefore emits `agendas` + `strategy_configs` + `valuation_configs` in one file rather
-than three: a config binds a role to an agenda, so neither half is usable without the other, and
-splitting them would recreate the same "which other file was I supposed to write" question one
-level down.
+`register` understands five sections, and a run needs four of them: a dataset, an execution
+input, an exchange and the run itself. There is no agenda to declare (record `148`): the run
+says which sessions it fires on and at what wall time, every strategy is called on every
+session and decides for itself, the book is valued at the instant the venue fills, and the
+declared constraints judge it right after each commit.
 """
 
 from __future__ import annotations
@@ -100,6 +94,14 @@ datasets:
     #   Merely casting a naive pyarrow timestamp to timestamp(..., tz=...) preserves the
     #   underlying epoch value; it does not localize the wall clock. Use an explicit localization
     #   operation such as pyarrow.compute.assume_timezone, then prove the round-trip.
+    # GRAIN: what one row of this table IS. Required; registration refuses without it.
+    #   instrument_instant  one value per (available_at, instrument) -- a date x ticker table.
+    #                       A panel can be built from it, and this is the shape to prefer.
+    #   instant             one value per available_at, no instrument axis (index level, rate).
+    #   rows                the vendor's grain (long / EAV); unique on key_fields; no panel.
+    #   On a panel grain, RowsLookback(n) is the last n rows of the pivoted table -- the same
+    #   instants for every name. Per-name counting is InstantsLookback on grain: rows.
+    grain: instrument_instant
     key_fields:                       # columns that together uniquely identify each row
       - timestamp
       - instrument
@@ -140,60 +142,6 @@ execution_inputs:
       trade_price: close            # which key from price_fields above the fill uses
 """
 
-_AGENDAS_TEMPLATE = """\
-# Agendas and the configs that bind roles to them - register with `vqapr register <this-file>`
-#
-# An agenda is a cadence: the days a thing happens on, and the local time of day. A config binds
-# a role to one agenda. Both live here because neither is usable alone -- an agenda nothing is
-# bound to never fires, and a config naming an unregistered agenda is refused.
-#
-# A run spec names these by id (`strategy.agenda_id`, `valuation.agenda_id`). Naming an agenda
-# there does NOT bind it; the binding is the `strategy_configs`/`valuation_configs` entry below.
-# A run whose components are registered but unbound fails preflight with
-# `workspace.strategy_config.register.missing`.
-#
-# Registrations are immutable. During disposable first-run setup, correct this YAML and rebuild
-# the project-local workspace; after a run matters, preserve provenance by registering new ids.
-
-agendas:
-  daily-rebalance:                  # your chosen identity, named by a run spec's agenda_id
-    role: strategy_callback         # one of: strategy_callback, valuation, monitoring
-    from_dataset: DATASET_ID        # follow this registered dataset's own days
-    # sessions:                     # ...or list the days literally. Declare exactly ONE of
-    #   - "2024-01-02"              #    from_dataset or sessions, never both.
-    #   - "2024-01-03"
-    at: "15:29"                     # strictly before the execution template's 15:30 target
-    timezone: Asia/Seoul            # zone `at` is expressed in; DST is derived from it
-
-  # A callback at 15:29 sees only data whose `available_at` is strictly before 15:29. For a
-  # dataset published at the 15:30 close, that means a strategy firing at 15:29 on session N
-  # decides on session N-1's data -- which is correct, and is the point: it cannot see the close
-  # it is about to trade into.
-  #
-  # Applied to VALUATION the same instant is usually wrong. A mark taken at 15:29 values the book
-  # at the previous session's close, so the daily NAV series lags by one session for no stated
-  # reason. Put valuation AFTER the execution instant instead -- 15:31 below -- so the first NAV
-  # equals the initial cash exactly and each later one marks the close the run just filled at.
-
-  daily-valuation:                  # valuation usually runs on the same days as the strategy
-    role: valuation
-    from_dataset: DATASET_ID
-    at: "15:31"                     # after the 15:30 execution instant, not before it
-    timezone: Asia/Seoul
-
-strategy_configs:
-  COMPONENT_ID:                     # component_id of a registered StrategyModel
-    agenda_id: daily-rebalance      # the agenda above whose occurrences drive it
-
-valuation_configs:
-  daily-valuation:                  # any identity; the agenda it names is what matters
-    agenda_id: daily-valuation
-
-# monitoring_policies:              # optional; only if the run spec declares `monitoring`
-#   default:
-#     agenda_id: daily-monitoring
-"""
-
 _ACCOUNT_MODES = " or ".join(mode.name for mode in AccountMode)
 """The account modes spelled the way the spec parser accepts them, derived rather than restated.
 
@@ -207,45 +155,44 @@ again: adding or renaming a member updates the template in the same edit.
 `.value` is the lowercase `long_only` a reader must not type here.
 """
 
-_RUN_SPEC_TEMPLATE = f"""\
-# Run spec — every required key of THIS file is shown. Replace the placeholder values.
-# Write this file, then execute: vqapr run <this-file.yaml>
+_RUN_TEMPLATE = f"""\
+# Run declaration -- register with `vqapr register <this-file.yaml>`, then `vqapr run RUN_ID`
 #
-# This file names components and agendas; it does not register or bind them. Before `run`
-# succeeds, the ids below must already exist in the workspace, and the strategy and valuation
-# must each be BOUND to their agenda by a registered config -- see `vqapr new agendas`, which
-# emits the agendas and both configs together. Naming an agenda_id here is not a binding.
+# A run is configuration (record 139): the universe, the period, the sessions it fires on and
+# the wall time it fires at, the venue, the execution input, the initial account, and the
+# strategies it tries. Every strategy is called on EVERY session at `at` and decides for itself
+# whether to act -- a monthly rebalance is a rule inside the strategy, read from
+# `call.evaluation_time` and kept in `self.memory` (record 148). The book is valued at the
+# instant the venue fills and the declared constraints judge it right after each commit; there
+# is no separate valuation or monitoring time to declare. Each strategy runs with its OWN
+# account from the same initial declaration, in its own record under .vqapr/runs/RUN_ID/.
+# Ids below name registered declarations; nothing here registers them.
 
-strategy:
-  component: my-alpha          # component_id of a registered StrategyModel
-  agenda_id: daily-rebalance   # agenda_id of the operation agenda to drive the strategy
-
-valuation:
-  agenda_id: daily-valuation   # agenda_id for end-of-day valuation
-
-instruments:                   # the universe this run trades
-  - INSTRUMENT_A
-  - INSTRUMENT_B
-
-start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
-end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
-
-exchange: my-venue             # component_id of a registered Exchange
-
-execution_input: my-exec       # execution_input_id of a registered execution input
-
-initial_account:
-  cash: "1000000"              # quoted to preserve precision (parsed as Decimal)
-  # The venue must permit the direction too: `--profile krx` is long-only and cannot hold a
-  # SIGNED book. A costed long/short book needs a venue whose listings set access=SIGNED.
-  mode: LONG_ONLY              # {_ACCOUNT_MODES}
-  positions: {{}}                # mapping of instrument -> quantity, or empty
-
-# Optional sections (uncomment to use):
-# constraints:
-#   - constraint-component-id
-# monitoring:
-#   agenda_id: monitoring-agenda
+runs:
+  RUN_ID:                            # your chosen identity: `vqapr run RUN_ID`
+    instruments:                     # the universe every strategy trades
+      - INSTRUMENT_A
+      - INSTRUMENT_B
+    start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
+    end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
+    sessions_from: DATASET_ID        # every session this registered dataset has a row for...
+    # sessions:                      # ...or list the days literally. Exactly ONE of the two.
+    #   - "2024-01-02"
+    timezone: Asia/Seoul             # the zone `at` is expressed in
+    at: "15:29"                      # when strategies decide; strictly before the execution `at`
+    exchange: my-venue               # component_id of a registered Exchange
+    execution_input: my-exec         # execution_input_id of a registered execution input
+    initial_account:
+      cash: "1000000"                # quoted to preserve precision (parsed as Decimal)
+      # The venue must permit the direction too: `--profile krx` is long-only and cannot hold a
+      # SIGNED book. A costed long/short book needs a venue whose listings set access=SIGNED.
+      mode: LONG_ONLY                # {_ACCOUNT_MODES}
+      positions: {{}}                  # mapping of instrument -> quantity, or empty
+    strategies:                      # one entry per registered StrategyModel to try
+      my-alpha: {{}}
+      # my-other-alpha:
+      #   constraints: [constraint-component-id]
+      #   initial_model_memory: {{}}
 """
 
 
@@ -266,14 +213,23 @@ def _emitted_class_name(source: str) -> str:
     raise ValueError("the emitted template declares no class")
 
 
-def _declaration(component_id: str, kind: ComponentKind, source: Path, object_name: str) -> str:
+def _declaration(
+    component_id: str,
+    kind: ComponentKind,
+    source: Path,
+    object_name: str,
+    *,
+    dataset_id: str | None = None,
+) -> str:
     """The registrable declaration for what was just scaffolded.
 
-    Only the component is declared. The dataset it reads, and the agenda it runs on, are facts
-    about the user's project rather than about this file, and inventing plausible values for them
-    would produce a document that registers something the user did not mean.
+    The component is declared. A datamodel also gets the run that computes it (record `148`):
+    its sessions are the dataset it reads, its output is named after it, and the universe and
+    period are placeholders to fill -- registrable as emitted, refused by `check` until the
+    instruments are real. A strategy's run needs a venue, an execution input and an account,
+    which are facts about the user's project rather than about this file, so it gets none.
     """
-    document = {
+    document: dict[str, Any] = {
         "components": {
             component_id: {
                 "kind": _DECLARATION_KIND[kind],
@@ -282,6 +238,23 @@ def _declaration(component_id: str, kind: ComponentKind, source: Path, object_na
             }
         }
     }
+    if kind is ComponentKind.DATA_MODEL and dataset_id:
+        document["runs"] = {
+            f"{component_id}-run": {
+                "instruments": ["INSTRUMENT_A", "INSTRUMENT_B"],
+                "start": "2024-01-02T00:00:00+09:00",
+                "end": "2024-12-31T23:00:00+09:00",
+                "sessions_from": dataset_id,
+                "timezone": "Asia/Seoul",
+                "at": "16:00",
+                "datamodels": {
+                    component_id: {
+                        "dataset_id": f"{component_id}-values",
+                        "value_fields": ["value"],
+                    }
+                },
+            }
+        }
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
@@ -293,24 +266,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "instruments",
             "dataset",
             "execution-input",
-            "agendas",
             "exchange",
-            "run-spec",
+            "run",
         ),
         help=(
             "scaffold a component (datamodel/strategy/constraint) or emit a template "
-            "(instruments/dataset/execution-input/agendas/exchange/run-spec). Component and "
+            "(instruments/dataset/execution-input/exchange/run). Component and "
             "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
-            "that registers it. Every registrable kind reports the file to hand "
-            "`vqapr register` as `declaration`; `run-spec` reports `registrable: false` "
-            "instead, because a run spec is handed to `vqapr run` rather than registered"
+            "that registers it. Every kind reports the file to hand `vqapr register` as "
+            "`declaration`; `run` emits the `runs:` declaration `vqapr run <run-id>` executes"
         ),
     )
     parser.add_argument(
         "component_id",
         nargs="?",
         default=None,
-        help="identity of the new component (required for datamodel/strategy, unused for run-spec)",
+        help="identity of the new component (required for datamodel/strategy, unused for run)",
     )
     parser.add_argument(
         "--instruments",
@@ -340,12 +311,25 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         # than by value. Defaulting to 6 made `--lookback 6 --calendar-lookback 30` -- both flags,
         # one of them at the default -- indistinguishable from "only --calendar-lookback", so the
         # conflict refusal below silently ignored `--lookback` in exactly the case it exists to
-        # refuse. Found by the structural audit in `docs/refactoring/`, C3.
+        # refuse. Found by the structural audit,
+        # `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md`, C3.
         default=None,
         help=(
-            "rows of history each name needs, counted per instrument and per field. On an "
-            "unbalanced panel the batch then spans whatever the sparsest name reaches back to; "
-            "use --calendar-lookback for a window every name shares"
+            "rows of the table the model reads back -- the same N instants for every name, on "
+            "a panel-grain dataset. Use --calendar-lookback for a window of N days, or "
+            "--instants-lookback for each name's own last N reported instants on a rows-grain "
+            "(vendor, long) dataset"
+        ),
+    )
+    parser.add_argument(
+        "--instants-lookback",
+        dest="instants_lookback",
+        type=int,
+        default=None,
+        help=(
+            "scaffold a model that reads each name's own last N reported instants, per field, "
+            "which is the window a rows-grain (vendor, long) dataset takes; on an unbalanced "
+            "table the batch then spans whatever the sparsest name reaches back to"
         ),
     )
     parser.add_argument(
@@ -368,21 +352,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out", type=Path, default=None, help="output path for the emitted file")
 
 
-def _run_spec(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
-    target = args.out or project_root / "run-spec.yaml"
-    refuse_existing(target, what="run spec template")
+def _run_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    target = args.out or project_root / "runs.yaml"
+    refuse_existing(target, what="run declaration template")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_RUN_SPEC_TEMPLATE, encoding="utf-8")
-    # No `declaration` here, and this is the one kind where its absence is the honest answer: a
-    # run spec is not registrable. `vqapr register` refuses it with
-    # `declaration.read.unknown_section`, because a spec names components rather than declaring
-    # any. `vqapr run` is what takes this file.
-    #
-    # `new --help` promised the key for EVERY kind, which was wrong in both directions -- four
-    # kinds did not emit it, and one of those four could not honestly emit it. The help now says
-    # what is true, and `registrable` says it in the envelope so a caller can branch on a field
-    # rather than on a list of kind names it has to keep in sync (`docs/issues/026`).
-    return success("template.new", kind="run-spec", path=str(target), registrable=False)
+    target.write_text(_RUN_TEMPLATE, encoding="utf-8")
+    # Registrable, since record `139`: a run is a `runs:` section of a declaration document, so
+    # the file this emits is handed to `vqapr register` like every other template, and the run it
+    # declares is then executed by id.
+    return success("template.new", kind="run", path=str(target), declaration=str(target))
 
 
 def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
@@ -431,6 +409,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
                 kind,
                 rows=getattr(args, "lookback", None),
                 calendar=getattr(args, "calendar_lookback", None),
+                instants=getattr(args, "instants_lookback", None),
             ),
         )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
@@ -449,7 +428,14 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source, encoding="utf-8")
     declaration.write_text(
-        _declaration(args.component_id, kind, target, object_name), encoding="utf-8"
+        _declaration(
+            args.component_id,
+            kind,
+            target,
+            object_name,
+            dataset_id=getattr(args, "dataset", None),
+        ),
+        encoding="utf-8",
     )
     return success(
         "component.new",
@@ -531,20 +517,6 @@ def _execution_input_template(args: argparse.Namespace, project_root: Path) -> d
         kind="execution-input",
         path=str(target),
         declaration=str(target),
-    )
-
-
-def _agendas_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
-    target = args.out or project_root / "agendas.yaml"
-    refuse_existing(target, what="agendas template")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_AGENDAS_TEMPLATE, encoding="utf-8")
-    # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
-    # EVERY kind. For a single-file kind the template IS the declaration, so it equals
-    # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
-    # instead of branching on which of them happen to write two files (`docs/issues/026`).
-    return success(
-        "template.new", kind="agendas", path=str(target), declaration=str(target)
     )
 
 
@@ -664,7 +636,7 @@ def _exchange_template(args: argparse.Namespace, project_root: Path) -> dict[str
 
     This template exists because a first-time-user journey stalled here and could not finish.
     Five of the six things a run needs had a scaffold; the Exchange did not, even though the
-    run-spec template names `exchange:` as required. The author had to discover from refusals that
+    run template names `exchange:` as required. The author had to discover from refusals that
     only two profiles are permitted, then guess the shape of `listings` -- a mapping keyed by
     instrument id whose values are `TradeRule`, a type no template, help text or skill section
     ever named. Six consecutive guesses returned the identical error.
@@ -858,10 +830,8 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         return _dataset_template(args, project_root)
     if args.kind == "execution-input":
         return _execution_input_template(args, project_root)
-    if args.kind == "agendas":
-        return _agendas_template(args, project_root)
     if args.kind == "exchange":
         return _exchange_template(args, project_root)
-    if args.kind == "run-spec":
-        return _run_spec(args, project_root)
+    if args.kind == "run":
+        return _run_template(args, project_root)
     return _component(args, project_root)

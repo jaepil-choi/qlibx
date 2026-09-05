@@ -166,11 +166,37 @@ def _relation(spec: SourceSpec) -> str:
     return f"read_parquet('{target}', hive_partitioning={hive})"
 
 
+def _configure(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+    """Settings every connection this module opens must carry, in one place.
+
+    `preserve_insertion_order=false` lets duckdb parallelise a scan whose row order the read path
+    re-establishes anyway (`available_at`, then the dataset's key fields).
+
+    `enable_progress_bar=false` because duckdb renders that bar to stdout even when stdout is a
+    pipe, and stdout is where the CLI writes its JSON envelope. A scan long enough to cross the
+    threshold put carriage-returned progress frames in the middle of a *successful* command's
+    reply, so the reply did not parse (`docs/issues/047`); a driver in the wild was already
+    stripping those frames without knowing why.
+
+    **The default is the host's, not ours, and that is the reason to state it rather than inherit
+    it.** duckdb 1.5.5 decides per process: measured here, `duckdb.connect()` comes back with the
+    bar ON when `__main__` has no `__file__` -- a REPL, a notebook, `python -c`, an embedding host
+    -- and OFF when it does. Whichever way a given host lands, the package's output should not
+    depend on it.
+
+    Both settings are set on every connection AND every cursor. `preserve_insertion_order` is
+    GLOBAL and would carry, but `enable_progress_bar` is LOCAL and a cursor takes the *default*
+    rather than its parent's value: setting it on the database alone leaves every cursor made
+    from it unconfigured.
+    """
+    con.execute("SET preserve_insertion_order=false")
+    con.execute("SET enable_progress_bar=false")
+    return con
+
+
 def _open(spec: SourceSpec) -> duckdb.DuckDBPyConnection:
     _require_path(spec)
-    con = duckdb.connect()
-    con.execute("SET preserve_insertion_order=false")
-    return con
+    return _configure(duckdb.connect())
 
 
 def _require_path(spec: SourceSpec) -> None:
@@ -235,8 +261,7 @@ class ScanSession:
             database = self._database
             if database is None:
                 database = self._database = duckdb.connect()
-            con = database.cursor()
-            con.execute("SET preserve_insertion_order=false")
+            con = _configure(database.cursor())
             self._connections[key] = con
         return con
 
@@ -633,8 +658,18 @@ def exact_snapshot_rows(
             f"WHERE {trade_at} = ? AND {instrument} IN ({placeholders}) ORDER BY {instrument}",
             [target_at, *instruments],
         )
-        names = tuple(description[0] for description in cursor.description)
-        return tuple(dict(zip(names, row, strict=True)) for row in cursor.fetchall())
+        # Columnar out of duckdb, rows built here (`docs/issues/068`). `fetchall()` converted
+        # every cell through Python, one `datetime.replace` and one `pytz.timezone(...)` per
+        # `trade_at` value -- 46 M calls over a 1,349-session run, more than a third of the
+        # package's time -- for a column that is the same instant on every row. Arrow's
+        # timestamp conversion is one C call per column, and the caller keeps the row shape.
+        table = cursor.fetch_arrow_table()
+        columns = {name: table.column(name).to_pylist() for name in table.column_names}
+        names = tuple(columns)
+        return tuple(
+            dict(zip(names, values, strict=True))
+            for values in zip(*(columns[name] for name in names), strict=True)
+        )
     except duckdb.Error as exc:
         raise VqaprError(
             stage="source.scan.execution_snapshot",
@@ -923,10 +958,10 @@ class _Counted:
     would not -- with no error anywhere. That is the failure the campaign calls a correctness
     change wearing performance clothes, so the vocabulary is named once and both take it.
 
-    A grouped registration counts what its expressions PRODUCE, one value per instant, because
-    that is what a `RowsLookback` counts for such a dataset. A row-wise one counts the source's
-    own rows. The fragments differ between the two shapes and are identical between the two
-    places, which is the property this type exists to hold.
+    A grouped registration counts the instants its expressions PRODUCE a value on; a row-wise
+    one counts the instants on which any source row carries the field. Both are instants. The
+    fragments differ between the two shapes and are identical between the two places, which is
+    the property this type exists to hold.
     """
 
     relation: str
@@ -935,8 +970,11 @@ class _Counted:
     instrument: str
     available: str
     args: tuple[str, ...]
-    """One counting argument per declared field, deduplicated. `count(arg)` is what is compared
-    against the declared row count."""
+    """One counting argument per declared field, deduplicated: the instant, where the field is
+    non-null, else NULL. `count(DISTINCT arg)` -- the number of instants on which the name
+    reported that field -- is what is compared against the declared instant count. Instants and
+    not rows, because that is what an `InstantsLookback` counts (`docs/issues/053`); on a grouped
+    registration the two coincide."""
 
 
 def _counted(
@@ -959,13 +997,21 @@ def _counted(
             ),
             instrument=_quote("instrument"),
             available=_quote("available_at"),
-            args=tuple(_quote(name) for name in fields),
+            args=tuple(
+                f"CASE WHEN {_quote(name)} IS NOT NULL THEN {_quote('available_at')} END"
+                for name in fields
+            ),
         )
     return _Counted(
         relation=_relation(spec),
         instrument=_quote(instrument_field),
         available=_quote(available_at_field),
-        args=tuple(dict.fromkeys(f"({value})" for value in fields.values())),
+        args=tuple(
+            dict.fromkeys(
+                f"CASE WHEN ({value}) IS NOT NULL THEN {_quote(available_at_field)} END"
+                for value in fields.values()
+            )
+        ),
     )
 
 
@@ -1015,7 +1061,7 @@ def _prove_rows_bound(
     This runs once per declared read per run. Afterwards the read carries its own proof forward
     (`_rows_bound`), so this is the cold start rather than a per-callback cost.
     """
-    counts = ", ".join(f"count({argument})" for argument in counted.args)
+    counts = ", ".join(f"count(DISTINCT {argument})" for argument in counted.args)
     placeholders = ", ".join("?" for _ in instruments)
     observed = {
         row[0]: row[1:]
@@ -1213,17 +1259,19 @@ def observation_rows(
         if keyed_by_instrument:
             ordering.append(_quote("instrument"))
         ascending = ", ".join(ordering)
-        descending = ", ".join(f"{column} DESC" for column in ordering)
         carried_projections = list(ordering)
-        partition = f"PARTITION BY {_quote('instrument')} " if keyed_by_instrument else ""
+        partition = (
+            f"PARTITION BY {_quote('instrument')}, " if keyed_by_instrument else "PARTITION BY "
+        )
+        available_desc = _quote("available_at")
     else:
         source = f"{_relation(spec)} WHERE {where}"
         selected = {name: f"({value})" for name, value in fields.items()}
         ordering_fields = tuple(dict.fromkeys((available_at_field, *key_fields)))
         ascending = ", ".join(_quote(field) for field in ordering_fields)
-        descending = ", ".join(f"{_quote(field)} DESC" for field in ordering_fields)
         carried_projections = list(identity)
-        partition = f"PARTITION BY {instrument} " if keyed_by_instrument else ""
+        partition = f"PARTITION BY {instrument}, " if keyed_by_instrument else "PARTITION BY "
+        available_desc = available
 
     proofs: list[str] = []
     proof_parameters: list[object] = []
@@ -1234,13 +1282,21 @@ def observation_rows(
         )
         sql = f"SELECT {', '.join(projections)} FROM {source} ORDER BY {ascending}"
     else:
+        # `rows` is an `InstantsLookback`: each name's own last n INSTANTS, per field, counting
+        # only instants on which the field is non-null. A `dense_rank` over `available_at`
+        # inside the name's partition gives every row of one instant the same rank, so a
+        # vendor-grain table with many rows per (name, instant) hands back whole instants
+        # rather than the newest instant's first n rows (`docs/issues/053`). Partitioning on
+        # `(expression IS NULL)` as well keeps null rows from taking a rank away from the
+        # instants that carry a value; the `IS NOT NULL` in `chosen` then drops them.
         ranks: list[str] = []
         keep: list[str] = []
+        instant_desc = f"{available_desc} DESC"
         for index, (name, expression) in enumerate(selected.items()):
             rank = _quote(f"__vqapr_rank_{index}")
             ranks.append(
-                f"count({expression}) OVER ({partition}ORDER BY {descending} "
-                f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS {rank}"
+                f"dense_rank() OVER ({partition}{expression} IS NULL ORDER BY {instant_desc}) "
+                f"AS {rank}"
             )
             chosen = f"{expression} IS NOT NULL AND {rank} <= {int(rows)}"
             keep.append(f"({chosen})")
@@ -1259,7 +1315,7 @@ def observation_rows(
             # row, and the two must agree or the bound stops meaning what it was proved to mean.
             for index, argument in enumerate(counted.args):
                 proofs.append(
-                    f"count(CASE WHEN {counted.available} >= ? THEN {argument} END) "
+                    f"count(DISTINCT CASE WHEN {counted.available} >= ? THEN {argument} END) "
                     f"OVER (PARTITION BY {counted.instrument}) "
                     f"AS {_quote(f'{_PROOF_PREFIX}{index}')}"
                 )

@@ -17,13 +17,14 @@ from vqapr.analysis.signal import (
     information_coefficient,
     rank_information_coefficient,
 )
-from vqapr.authoring import DatasetInput, Hold, Rebalance, StrategyResult
+from vqapr.authoring import DataModel, DatasetInput, Hold, Rebalance, StrategyModel
+from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
-from vqapr.constraints.monitoring import MonitoringPolicy
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.data.datasets import DatasetRegistration, Grain
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.windows import ModelWindow, ObservationBatch
@@ -80,33 +81,44 @@ from vqapr.extension.registration import (
     register_exchange,
     register_strategy_model,
 )
+from vqapr.flow.datamodel import DataModelResult
 from vqapr.flow.materialize import (
     AllocationPublicationResult,
     AllocationPublicationSpec,
-    MaterializationResult,
-    MaterializationSpec,
     RunRecordResult,
     RunRecordSpec,
-    materialize,
     publish_run_allocation,
     publish_run_record,
 )
-from vqapr.flow.orchestration import preflight_run as preflight_run
-from vqapr.flow.orchestration import run as run
+from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
 
 # Orchestration, evidence and roster reading moved to their owning layers by record `111`.
 # Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
 # deliberate: it marks these as intentional re-exports, which is both what they are and what stops
 # a lint autofix from deleting them as unused.
 from vqapr.flow.records import contract_report as contract_report
-from vqapr.flow.records import freeze_record as freeze_record
+from vqapr.flow.records import freeze_strategy_record as freeze_strategy_record
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
-from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, RunDefinition, StrategyConfig
+from vqapr.flow.run import (
+    ConstraintSet,
+    DataModelEntry,
+    FrozenAgenda,
+    FrozenDataModel,
+    FrozenRun,
+    FrozenStrategy,
+    RunDefinition,
+    StrategyEntry,
+)
+from vqapr.flow.run_records import (
+    RunRecordMissing,
+    read_run_record,
+    read_strategy_record,
+    run_ids,
+    strategy_refs,
+)
+from vqapr.flow.run_records import read_typed_table as read_strategy_table
 from vqapr.flow.simulation import SimulationResult, callback_evidence
-from vqapr.models.contexts import DataModelContext, StrategyModelContext
-from vqapr.models.data_model import DataModel
-from vqapr.models.strategy_model import StrategyModel
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,
@@ -125,7 +137,6 @@ from vqapr.portfolio.weighting import (
     signal_weight,
 )
 from vqapr.runtime.agendas import (
-    OperationAgenda,
     OperationOccurrence,
     OperationRole,
 )
@@ -133,7 +144,6 @@ from vqapr.testing.conformance import conformance
 from vqapr.transforms.cross_section import rank
 from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
 from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
-from vqapr.valuation.configuration import ValuationConfig
 from vqapr.valuation.marks import Mark, MarkBatch
 from vqapr.workspace import Workspace
 
@@ -159,6 +169,8 @@ __all__ = (
     "ConstraintSet",
     "DataModel",
     "DataModelContext",
+    "DataModelEntry",
+    "DataModelResult",
     "DataRequirement",
     "DatasetInput",
     "DatasetRegistration",
@@ -174,9 +186,13 @@ __all__ = (
     "FillCost",
     "FillSelector",
     "FrozenAgenda",
+    "FrozenDataModel",
     "FrozenRun",
+    "FrozenStrategy",
+    "Grain",
     "Hold",
     "IndexInstrument",
+    "InstantsLookback",
     "Instrument",
     "InstrumentKind",
     "InstrumentRoster",
@@ -187,10 +203,7 @@ __all__ = (
     "LocalInstantDeclaration",
     "Mark",
     "MarkBatch",
-    "MaterializationResult",
-    "MaterializationSpec",
     "ModelWindow",
-    "MonitoringPolicy",
     "NeutralizationRefusal",
     # The two halves of what a Model is handed. `ObservationBatch` is the return type of the one
     # method a DataModel author can call, and it was reachable only by opening installed source:
@@ -198,33 +211,34 @@ __all__ = (
     # ordering (`docs/issues/031`). `ModelWindow` was importable but undeclared, while the
     # constraint scaffold has always emitted `from vqapr.public import ... ModelWindow`.
     "ObservationBatch",
-    "OperationAgenda",
     "OperationOccurrence",
     "OperationRole",
     "OptimizeRefusal",
     "OptimizeResult",
+    "PanelWindow",
     "PortfolioDirection",
     "PortfolioTarget",
     "Rebalance",
     "RowsLookback",
     "RunDefinition",
+    "RunRecordMissing",
     "RunRecordResult",
     "RunRecordSpec",
+    "RunResult",
     "Side",
     "SideCost",
     "SimulationFailure",
     "SimulationResult",
     "SourceSpec",
     "StockInstrument",
-    "StrategyConfig",
+    "StrategyEntry",
     "StrategyModel",
     "StrategyModelContext",
-    "StrategyResult",
+    "StrategyOutcome",
     "TableSpec",
     "TickerNetting",
     "TradeRule",
     "TradeTerms",
-    "ValuationConfig",
     "VqaprError",
     "WeightingRefusal",
     "ZeroDealtReason",
@@ -245,7 +259,6 @@ __all__ = (
     "instruments",
     "krx_listings",
     "krx_rules",
-    "materialize",
     "nav_series",
     "net_members",
     "neutralize",
@@ -256,22 +269,24 @@ __all__ = (
     "publish_run_record",
     "rank",
     "rank_information_coefficient",
-    "register_agenda",
+    "read_run_record",
+    "read_strategy_record",
+    "read_strategy_table",
     "register_component",
     "register_constraint",
     "register_data_model",
     "register_dataset",
     "register_exchange",
     "register_execution_input",
-    "register_monitoring_policy",
-    "register_strategy_config",
+    "register_run",
     "register_strategy_model",
-    "register_valuation_config",
     "rescale",
     "returns",
     "run",
+    "run_ids",
     "shipped_constraint_path",
     "signal_weight",
+    "strategy_refs",
     "trade_rules_by_kind",
     "validate_allocation",
 )
@@ -306,22 +321,11 @@ def component_ref(
 
 
 
-def register_agenda(project_root: str | Path, agenda: OperationAgenda) -> bool:
-    return Workspace.create(project_root).register_agenda(agenda)
-
-
 def register_component(project_root: str | Path, component: ComponentRef) -> bool:
     """Register one validated extension component reference."""
     return Workspace.create(project_root).register_component(component)
 
 
-def register_strategy_config(project_root: str | Path, config: StrategyConfig) -> bool:
-    return Workspace.create(project_root).register_strategy_config(config)
-
-
-def register_valuation_config(project_root: str | Path, config: ValuationConfig) -> bool:
-    return Workspace.create(project_root).register_valuation_config(config)
-
-
-def register_monitoring_policy(project_root: str | Path, policy: MonitoringPolicy) -> bool:
-    return Workspace.create(project_root).register_monitoring_policy(policy)
+def register_run(project_root: str | Path, definition: RunDefinition) -> bool:
+    """Register a run: the reusable configuration `vqapr run <run-id>` executes (record `139`)."""
+    return Workspace.create(project_root).register_run(definition)

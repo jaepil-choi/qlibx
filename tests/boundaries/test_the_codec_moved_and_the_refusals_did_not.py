@@ -1,4 +1,4 @@
-"""The workspace codec is its own file, and the refusing half deliberately is not.
+"""The workspace document is its own file, and the refusing half deliberately is not.
 
 Record `117`. `workspace.py` was 2,227 lines and the plan called for splitting it four ways. Only
 the codec split was taken, and this file pins the measurement that decided it — because the obvious
@@ -29,7 +29,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CODEC = pathlib.Path("src/vqapr/workspace_codec.py")
+CODEC = pathlib.Path("src/vqapr/workspace_document.py")
 WORKSPACE = pathlib.Path("src/vqapr/workspace.py")
 
 
@@ -116,8 +116,11 @@ def test_the_codec_is_the_region_a_later_step_can_discard() -> None:
     """
     source = CODEC.read_text(encoding="utf-8")
 
-    for marker in ("_decode", "_encode", "_encode_requirement", "_decode_requirement"):
-        assert f"def {marker}(" in source, f"{marker} belongs in the codec"
+    # Record `145` replaced the hand-written `_decode` / `_encode` with pydantic models and one
+    # read and one write function; the property is the same -- the document's every shape, the
+    # legacy ones included, is declared in one file.
+    for marker in ("read_workspace", "write_workspace", "class WorkspaceDocument"):
+        assert marker in source, f"{marker} belongs in the document module"
 
     assert "legacy" in source, (
         "the legacy document shapes are what this file exists to keep together; if they moved, the "

@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.cli.main import main
-from vqapr.cli.new import _RUN_SPEC_TEMPLATE
+from vqapr.cli.new import _RUN_TEMPLATE
 from vqapr.public import ListingAccess, krx_listings
 
 
@@ -68,9 +68,9 @@ def test_the_skill_names_the_pairing_that_cannot_work(tmp_path: Path) -> None:
 
 def test_the_run_spec_template_says_the_venue_must_agree() -> None:
     """The second place a reader meets `mode:`, and the one they meet first."""
-    assert "The venue must permit the direction too" in _RUN_SPEC_TEMPLATE
-    assert "krx" in _RUN_SPEC_TEMPLATE
-    assert "access=SIGNED" in _RUN_SPEC_TEMPLATE
+    assert "The venue must permit the direction too" in _RUN_TEMPLATE
+    assert "krx" in _RUN_TEMPLATE
+    assert "access=SIGNED" in _RUN_TEMPLATE
 
 
 def test_the_template_still_derives_its_mode_list() -> None:
@@ -83,5 +83,5 @@ def test_the_template_still_derives_its_mode_list() -> None:
     from vqapr.cli.new import _ACCOUNT_MODES
 
     assert " or ".join(mode.name for mode in AccountMode) == _ACCOUNT_MODES
-    assert _ACCOUNT_MODES in _RUN_SPEC_TEMPLATE
-    assert "LONG_SHORT" not in _RUN_SPEC_TEMPLATE
+    assert _ACCOUNT_MODES in _RUN_TEMPLATE
+    assert "LONG_SHORT" not in _RUN_TEMPLATE

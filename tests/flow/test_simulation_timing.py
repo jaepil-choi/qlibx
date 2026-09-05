@@ -6,6 +6,10 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import (
+    ConstraintCall,
+    EconomicAccountView,
+)
 from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.evaluation import evaluate_constraints, project_constraints
 from vqapr.constraints.findings import ConstraintFinding
@@ -13,7 +17,7 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.portfolio.intents import EconomicPortfolioIntent, PortfolioTarget
+from vqapr.portfolio.intents import PortfolioTarget
 from vqapr.valuation.marking import ValuationService
 
 
@@ -29,38 +33,26 @@ class _Constraint(Constraint):
     def requirements(self) -> tuple[DataRequirement, ...]:
         return ()
 
-    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
+    def project(self, call: ConstraintCall) -> ConstraintBounds:
         return ConstraintBounds(
-            {instrument: Decimal("0") for instrument in instruments},
-            {instrument: Decimal("1") for instrument in instruments},
+            lower_weights={instrument: Decimal("0") for instrument in call.instruments},
+            upper_weights={instrument: Decimal("1") for instrument in call.instruments},
         )
 
-    def validate_intended(
-        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
-        return ConstraintFinding(
-            constraint_id=self.constraint_id,
-            passed=self.passed,
-            measured=Decimal("2"),
-            bound=Decimal("1"),
-            excess=Decimal("0") if self.passed else Decimal("1"),
-            input_lineage={},
-        )
-
-    def evaluate(
+    def monitor(
         self,
-        window: ModelWindow,
-        account: AccountSnapshot,
-        marks: object,
+        call: ConstraintCall,
+        account: EconomicAccountView,
         bounds: ConstraintBounds,
     ) -> ConstraintFinding:
+        # No account version and no read provenance in the evidence: both are framework facts,
+        # and `ConstraintReport` carries the version for the whole report rather than per finding.
         return ConstraintFinding(
-            constraint_id=self.constraint_id,
             passed=self.passed,
             measured=Decimal("2"),
             bound=Decimal("1"),
             excess=Decimal("0") if self.passed else Decimal("1"),
-            input_lineage={"account_version": account.version, "mark_count": len(marks.marks)},
+            details={"marked_names": len(account.values or ())},
         )
 
 

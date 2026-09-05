@@ -24,21 +24,21 @@ LOOKBACK = {lookback}  # rows per name: a five-day return needs six observations
 
 
 class {class_name}(va.StrategyModel):
-    """Ranks the cross-section and holds the strongest names."""
+    """`{dataset_id}`.`{field}` over LOOKBACK rows; the momentum signal below is a placeholder."""
 
     def inputs(self):
         read = va.DatasetInput(
             dataset_id="{dataset_id}", fields=("{field}",), lookback=va.RowsLookback(rows=LOOKBACK)
         )
-        return {{"prices": read}}
+        return {{"{alias}": read}}  # the alias is YOUR name for this read; `call.read` takes it
 
     def decide(self, call):
+        # One field as a window: instants x instruments, the same LOOKBACK instants for every name.
+        window = call.read("{alias}", "{field}")
         history: dict[str, list[Decimal]] = {{}}
-        for row in call.read("prices"):
-            value = row.values["{field}"]
-            if value is not None:
-                # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
-                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))
+        for name in window.instruments:
+            # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
+            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
 
         scores = {{}}
         for instrument, values in history.items():
@@ -48,12 +48,12 @@ class {class_name}(va.StrategyModel):
 
         chosen = {{name: score for name, score in scores.items() if score > 0}}
         if not chosen:
-            return va.StrategyResult(decision=va.Hold(reason="no-name-scored-above-zero"))
+            return va.Hold(reason="no name scored above zero")  # prose; spaces are fine
         # Relative conviction: the package normalises, rounds and balances against cash.
-        return va.StrategyResult(decision=va.Rebalance.of(long=chosen, invested="{invested}"))
+        return va.Rebalance.of(long=chosen, invested="{invested}")
 
-    # A table of your own must be DECLARED before decide() may emit it: return it from
-    # `diagnostics()` as `va.DiagnosticTable(table_id=..., semantic_fields=(...))`.
+    # State across callbacks lives in `self.memory` (strict JSON, restored before every call).
+    # A table of your own is DECLARED in `tables()` as a `va.TableSpec` before decide() writes it.
 '''
 
 _DATA_MODEL_TEMPLATE = '''"""A DataModel that derives one column from declared observations."""
@@ -62,39 +62,29 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import DataModel, DataRequirement, {lookback_class}
+from vqapr import authoring as va
 
-# A requirement names one dataset and one field. It does not name a consumer -- the component
-# declaring it is the consumer, and the framework stamps that.
 DATASET_ID = "{dataset_id}"
-FIELD_ID = "{field}"
+FIELD = "{field}"
 {lookback_declaration}
 
 
-class {class_name}(DataModel):
-    """Emits one derived value per instrument at each materialization time."""
+class {class_name}(va.DataModel):
+    """Derives one value per instrument from `{field}` of `{dataset_id}`, each session.
 
-    def requirements(self):
-        return (
-            DataRequirement.of(DATASET_ID, FIELD_ID, lookback={lookback_expression}),
+    The example below is a trailing return and is a placeholder: replace the marked block, and
+    this docstring, with what this model actually computes.
+    """
+
+    def inputs(self):
+        read = va.DatasetInput(
+            dataset_id=DATASET_ID, fields=(FIELD,), lookback={lookback_expression}
         )
+        return {{"{alias}": read}}  # the alias is YOUR name for this read; `context.read` takes it
 
     def compute(self, context):
-        # `rows` is flat and ordered by `available_at`, then by the dataset's key fields --
-        # instruments INTERLEAVE within an instant rather than arriving grouped by name. Every row
-        # carries its own `available_at` and `instrument` alongside the fields declared above.
 {lookback_note}
-        rows = context.window.observations(self.requirements()[0]).rows
-        history: dict[str, list[Decimal]] = {{}}
-        for row in rows:
-            value = row["{field}"]
-            if value is not None:
-                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
-                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
-                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
-                # binary float's expansion, so 0.1 stays 0.1 rather than becoming
-                # 0.1000000000000000055511151231257827.
-                history.setdefault(str(row["instrument"]), []).append(Decimal(str(value)))
+{history_block}
 
         # ---- the one line to change -------------------------------------------------------
         # Trailing return over the declared lookback.
@@ -105,21 +95,62 @@ class {class_name}(DataModel):
         }}
         # -----------------------------------------------------------------------------------
 
+        # One dict per instrument. The fields are the ones the materialization spec declares;
+        # `available_at` is the package's to stamp and a row that carries one is refused.
         return [
             {{"instrument": name, "{output_field}": value}}
             for name, value in sorted(derived.items())
         ]
 '''
 
+_PANEL_HISTORY_BLOCK = """\
+        # One field of the alias as a window: `instants` x `instruments`, the same instants for
+        # every name. `window.values[name]` is that name's values over them, `None` where it had
+        # none; `window.current()` is the cross-section at the last instant (a name with no row
+        # there is absent), `window.latest()` the newest value per name anywhere in the window.
+        window = context.read("{alias}", FIELD)
+        history: dict[str, list[Decimal]] = {{}}
+        for name in window.instruments:
+            # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's type,
+            # so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and arithmetic
+            # mixing the two raises. Going through `str` also avoids inheriting the binary float's
+            # expansion, so 0.1 stays 0.1.
+            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]"""
+
+_ROWS_HISTORY_BLOCK = """\
+        # A rows-grain (vendor, long) dataset streams observations: one per (instant, instrument),
+        # ordered by `available_at`, each carrying its own `available_at` and `instrument_id`
+        # alongside the fields declared above. Instruments INTERLEAVE within an instant.
+        history: dict[str, list[Decimal]] = {{}}
+        for row in context.rows("{alias}"):
+            value = row.values[FIELD]
+            if value is not None:
+                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
+                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
+                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
+                # binary float's expansion, so 0.1 stays 0.1.
+                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))"""
+
 _ROWS_LOOKBACK_NOTE = """\
         #
-        # This model declares a ROWS lookback, so the window is each name's own last N
-        # observations: on an unbalanced panel a sparse name reaches further back than a liquid
-        # one, and the batch's calendar span is set by the sparsest of them. That is why the
-        # reduction below is per instrument. A CROSS-SECTIONAL model -- a covariance matrix, a
-        # factor regression, anything comparing names to each other on the same dates -- must not
-        # be written this way: scaffold it with `--calendar-lookback DAYS` instead, which gives
-        # every name the same window."""
+        # This model declares a ROWS lookback on a panel-grain dataset, so the window is the
+        # table's last N rows -- the same N instants for every name. A name that stopped
+        # publishing contributes fewer values inside it rather than reaching further back, which
+        # is what makes a cross-section built from this window safe. The reduction below is still
+        # per instrument because a trailing return is a per-name question; the guard asks for a
+        # full window. A calendar period instead of a row count is `--calendar-lookback DAYS`;
+        # per-name counting (each name's own last N reported instants) is `InstantsLookback`
+        # and belongs to a `grain: rows` dataset: `--instants-lookback N`."""
+
+_INSTANTS_LOOKBACK_NOTE = """\
+        #
+        # This model declares an INSTANTS lookback on a rows-grain (vendor, long) dataset, so
+        # the window is each name's own last N reported instants: on an unbalanced table a
+        # sparse name reaches further back than a liquid one, and the batch's calendar span is
+        # set by the sparsest of them. That is why the reduction below is per instrument. A
+        # CROSS-SECTIONAL model -- anything comparing names on the same dates -- must not be
+        # written on this grain: register the table as `grain: instrument_instant` (or derive
+        # one from it) and read it with `RowsLookback` or `CalendarLookback` instead."""
 
 _CALENDAR_LOOKBACK_NOTE = """\
         #
@@ -132,24 +163,38 @@ _CALENDAR_LOOKBACK_NOTE = """\
 
 _LOOKBACK_FLAVOURS = {
     "rows": {
+        "history_block": _PANEL_HISTORY_BLOCK,
         "lookback_class": "RowsLookback",
-        "lookback_declaration": "LOOKBACK = {lookback}  # observations per name, per field",
-        "lookback_expression": "RowsLookback(rows=LOOKBACK)",
+        "lookback_declaration": (
+            "LOOKBACK = {lookback}  # rows of the table: the same instants for every name"
+        ),
+        "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
         "completeness_guard": "len(values) == LOOKBACK",
         "lookback_note": _ROWS_LOOKBACK_NOTE,
     },
+    "instants": {
+        "history_block": _ROWS_HISTORY_BLOCK,
+        "lookback_class": "InstantsLookback",
+        "lookback_declaration": (
+            "LOOKBACK = {lookback}  # instants per name, per field (grain: rows only)"
+        ),
+        "lookback_expression": "va.InstantsLookback(instants=LOOKBACK)",
+        "completeness_guard": "len(values) == LOOKBACK",
+        "lookback_note": _INSTANTS_LOOKBACK_NOTE,
+    },
     "calendar": {
+        "history_block": _PANEL_HISTORY_BLOCK,
         "lookback_class": "CalendarLookback",
         "lookback_declaration": (
             'LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n'
             'TIMEZONE = "Asia/Seoul"  # where the day boundary falls; use the venue\'s zone'
         ),
-        "lookback_expression": "CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
+        "lookback_expression": "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
         "completeness_guard": "len(values) >= 2",
         "lookback_note": _CALENDAR_LOOKBACK_NOTE,
     },
 }
-"""The two lookback members, and the four places in the template that differ between them.
+"""The three lookback members, and the four places in the template that differ between them.
 
 One template rather than two files, because everything else about the two scaffolds is identical
 and a second copy would drift. What differs is exactly what an author has to understand: which
@@ -158,46 +203,33 @@ class, what the number means, and which completeness guard follows from it (`doc
 
 _CONSTRAINT_TEMPLATE = '''"""A Constraint capping how much of the book any one name may be.
 
-The run spec offers a `constraints:` list and nothing said what went in it. `Constraint` has five
-abstract members and had no scaffold, so the only way to learn their shapes was to register an
-empty subclass and read the `TypeError` -- and `project` is a semantic contract that cannot be
-guessed from a signature. Guessing it wrong produces a backtest that looks correct and is not.
+The run spec offers a `constraints:` list and nothing said what went in it. Guessing `project`
+wrong produces a backtest that looks correct and is not, so it is written out below rather than
+left as a signature.
 
 Edit `CAP`. Everything else runs as written.
 """
 
 from decimal import Decimal
 
-from vqapr.public import (
-    AccountSnapshot,
-    Constraint,
-    ConstraintBounds,
-    ConstraintFinding,
-    EconomicPortfolioIntent,
-    MarkBatch,
-    ModelWindow,
-)
+from vqapr import authoring as va
 
 CAP = Decimal("{cap}")  # THE RULE. No single name may exceed this share of the book.
 FLOOR = Decimal("0")
 
 # A cap on SIZE, measured on absolute weight, so a -0.30 short is as much a violation as a +0.30
 # long. It says nothing about sign: shorting within the cap is permitted here, and forbidding it
-# is a separate rule.
-#
-# One rule, one question, is what keeps the three members below agreeing with each other. That is
-# how the shipped pair divides them: `SingleNameCap` bounds size and measures on absolute weight,
-# `NoShort` tests the sign and nothing else. Constraints intersect (lower bounds take the max,
-# upper bounds the min), so declaring `no-short` alongside this cap gives long-only-with-a-cap
-# without either rule knowing about the other.
+# is a separate rule. Constraints intersect -- lower bounds take the max, upper bounds the min --
+# so declaring the shipped `no-short` alongside this gives long-only-with-a-cap without either
+# rule knowing about the other.
 
 
-class {class_name}(Constraint):
+class {class_name}(va.Constraint):
     """No single instrument may exceed `CAP` of the book, long or short.
 
-    Size only. Declare the shipped `no-short` alongside it in the run spec's `constraints:` list
-    if you also want the sign rule; constraints intersect, so the pair gives
-    long-only-with-a-cap.
+    Two members, and they do different jobs. `project` says what is permitted, and construction
+    does its best inside that. `monitor` says whether what you actually hold went over. A decision
+    that goes over does not stop the run -- it is a breach, and this is where breaches are seen.
     """
 
     @property
@@ -210,91 +242,48 @@ class {class_name}(Constraint):
         """
         return "{component_id}"
 
-    def requirements(self) -> tuple:
-        """What this constraint needs to read. Nothing: the rule is a property of the weight.
+    def inputs(self):
+        """What this constraint reads. Nothing: the rule is a property of the weight.
 
-        A constraint that compared against a benchmark would return a `DataRequirement` here, and
-        the framework would hand it a window over that dataset.
+        A constraint comparing against a benchmark would return a `va.DatasetInput` here, and
+        `call.read("<your alias>", "<field>")` inside `project` would hand back its window --
+        `current()` is the benchmark's weight per name at the window's last instant.
         """
-        return ()
+        return {{}}
 
-    def project(self, window: ModelWindow, instruments: tuple[str, ...]) -> ConstraintBounds:
-        """**The feasible set.** Project the proposed book onto what this rule permits.
+    def project(self, call) -> va.ConstraintBounds:
+        """**The feasible set.** Return the lower and upper bound for EVERY instrument in
+        `call.instruments`.
 
-        This is the member that cannot be guessed, so state it plainly: return the lower and upper
-        weight bound for EVERY instrument in `instruments`. Not the offenders, not a correction --
-        the box the optimiser must stay inside.
-
-        Both bounds are mandatory for every name. A lower-only projection is inexpressible: the
-        evaluator rejects a projection that does not cover every window instrument on both sides,
-        because a missing bound would silently widen the feasible set rather than fail.
+        Not the offenders, not a correction -- the box the optimiser must stay inside. Both bounds
+        are mandatory for every name: a projection that misses one is refused, because a missing
+        bound would silently widen the feasible set rather than fail.
         """
-        return ConstraintBounds(
-            {{instrument: -CAP for instrument in instruments}},
-            {{instrument: CAP for instrument in instruments}},
+        return va.ConstraintBounds(
+            lower_weights={{instrument: -CAP for instrument in call.instruments}},
+            upper_weights={{instrument: CAP for instrument in call.instruments}},
         )
 
-    def validate_intended(
-        self, intent: EconomicPortfolioIntent, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
-        """Judge the weights a Strategy proposed, before anything is executed."""
-        # `abs`, matching `project`'s symmetric bounds and `evaluate` below. Measuring the signed
-        # weight here would let a -0.30 pass a 0.2 cap that the projection forbids and that the
-        # monitoring check then reports -- three members of one rule disagreeing about the same
-        # book.
-        offenders = tuple(
-            sorted(
-                target.instrument_id
-                for target in intent.targets
-                if target.weight is not None and abs(target.weight) > CAP
-            )
-        )
-        worst = max(
-            (abs(target.weight) for target in intent.targets if target.weight is not None),
-            default=FLOOR,
-        )
-        return ConstraintFinding(
-            self.constraint_id,
-            not offenders,
-            worst,
-            CAP,
-            max(worst - CAP, FLOOR),
-            {{"stage": "intended", "offenders": offenders}},
-        )
-
-    def evaluate(
-        self,
-        window: ModelWindow,
-        account: AccountSnapshot,
-        marks: MarkBatch,
-        bounds: ConstraintBounds,
-    ) -> ConstraintFinding:
+    def monitor(self, call, account: va.EconomicAccountView, bounds) -> va.ConstraintFinding:
         """Judge the book that was actually committed, after it was marked.
 
-        `validate_intended` asks whether the decision was permissible; this asks whether the
-        result is. They differ whenever execution does not fill what was intended.
+        This is the only member that judges. It sees what `project` could not: execution does not
+        always fill what was intended, and rounding a weight into whole shares can push a position
+        over a limit that the decision itself respected.
         """
-        # NAV is the marked book plus the cash beside it. `mark.value` is already the marked
-        # value of the held quantity, so the weight is that over NAV.
-        nav = marks.total_value + account.cash
-        weights = (
-            {{mark.instrument_id: abs(mark.value) / nav for mark in marks.marks}}
-            if nav > FLOOR
-            else {{}}
-        )
-        offenders = tuple(sorted(name for name, weight in weights.items() if weight > CAP))
-        worst = max(weights.values(), default=FLOOR)
-        return ConstraintFinding(
-            self.constraint_id,
-            not offenders,
-            worst,
-            CAP,
-            max(worst - CAP, FLOOR),
-            {{
-                "stage": "monitoring",
-                "account_version": account.version,
-                "offenders": offenders,
-            }},
+        # `account.weights()` is each name's marked value over NAV. It refuses rather than
+        # returning zeros when the account has not been marked, so an unmarked book cannot look
+        # like a compliant one.
+        weights = account.weights() if account.nav else {{}}
+        offenders = tuple(sorted(name for name, w in weights.items() if abs(w) > CAP))
+        worst = max((abs(w) for w in weights.values()), default=FLOOR)
+        return va.ConstraintFinding(
+            passed=not offenders,
+            measured=worst,
+            bound=CAP,
+            excess=max(worst - CAP, FLOOR),
+            details={{}},
+            offenders=offenders,
         )
 '''
 
@@ -386,6 +375,9 @@ def render(
             component_id=component_id,
             class_name=_class_name(component_id),
             dataset_id=dataset_id,
+            # The alias is the dataset id (`docs/issues/063`): a fixed `prices` read as a
+            # required name to a first-time user, and described a read the flags did not ask for.
+            alias=dataset_id,
             field=field,
             lookback=lookback,
             invested=invested,
@@ -393,9 +385,11 @@ def render(
         )
     flavour = _LOOKBACK_FLAVOURS[lookback_kind]
     return _TEMPLATES[kind].format(
+        history_block=flavour["history_block"].format(alias=dataset_id),
         component_id=component_id,
         class_name=_class_name(component_id),
         dataset_id=dataset_id,
+        alias=dataset_id,
         field=field,
         invested=invested,
         output_field=output_field,

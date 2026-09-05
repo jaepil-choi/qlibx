@@ -9,20 +9,23 @@ The reader is told their value was rejected and left to discover the legal ones 
 this journey, by reading the enum in installed source. A closed set is the one case where a refusal
 can always be complete: the alternatives are known, finite, and cheap to print.
 
-`register.py` already learned this expensively, on `fill.selector`: a reader spent six consecutive
-guesses on price words because the field name argues for a vocabulary the members do not use. This
-is the same remedy on the `run` side.
+Since record `139` a run is a registered declaration, so the account mode is judged where every
+other closed set in a declaration is judged -- `declarations._enum`, the helper `register` learned
+this on expensively (`fill.selector`: six consecutive guesses on price words, because the field
+name argues for a vocabulary the members do not use).
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+from pathlib import Path
 
 import pytest
 
 from vqapr.account.account import AccountMode
-from vqapr.cli.run import _account, _closed_set_member
-from vqapr.inputs import InputError
+from vqapr.declarations import _enum, apply
+from vqapr.domain.errors import VqaprError
+from vqapr.workspace import Workspace
 
 
 class _Selector(StrEnum):
@@ -32,58 +35,67 @@ class _Selector(StrEnum):
     NEXT_ELIGIBLE = "next_eligible"
 
 
-def _failure(error: InputError) -> dict:
+def _failure(error: VqaprError) -> dict:
     return error.as_dict()["failures"][0]
 
 
-def test_the_account_mode_refusal_names_the_permitted_set() -> None:
+def _register_run_with_mode(root: Path, mode: str) -> dict:
+    Workspace.create(root)
+    document = {
+        "runs": {
+            "r": {
+                "instruments": ["A"],
+                "start": "2024-01-02T00:00:00+09:00",
+                "end": "2024-01-03T00:00:00+09:00",
+                "sessions_from": "prices",
+                "timezone": "Asia/Seoul",
+                "at": "15:29",
+                "exchange": "venue",
+                "execution_input": "venue-daily",
+                "initial_account": {"cash": "1000", "mode": mode, "positions": {}},
+                "strategies": {"alpha": {}},
+            }
+        }
+    }
+    with pytest.raises(VqaprError) as raised:
+        apply(document, root, base=root, declaration=root / "runs.yaml")
+    return _failure(raised.value)
+
+
+def test_the_account_mode_refusal_names_the_permitted_set(tmp_path: Path) -> None:
     """The journey's own value, and the exact shape it produced."""
-    with pytest.raises(InputError) as raised:
-        _account({"initial_account": {"cash": "1000", "mode": "LONG_SHORT", "positions": {}}})
+    failure = _register_run_with_mode(tmp_path, "LONG_SHORT")
 
-    failure = _failure(raised.value)
-
-    assert failure["requirement"] == "initial_account.mode must be one of: LONG_ONLY, SIGNED"
-    assert failure["examples"] == ["LONG_ONLY", "SIGNED"]
-    assert failure["source"]["key_path"] == "initial_account.mode"
+    assert failure["code"] == "declaration.read.value_not_permitted"
+    assert failure["requirement"] == "runs.r.initial_account.mode must be one of: long_only, signed"
+    assert failure["examples"] == ["long_only", "signed"]
+    assert failure["source"]["key_path"] == "runs.r.initial_account.mode"
 
 
-def test_no_exception_repr_reaches_observed() -> None:
+def test_no_exception_repr_reaches_observed(tmp_path: Path) -> None:
     """The defect itself: `observed` carried `KeyError: 'LONG_SHORT'`.
 
     An exception type is a fact about this package's implementation. What belongs in `observed` is
     what the reader wrote.
     """
-    with pytest.raises(InputError) as raised:
-        _account({"initial_account": {"cash": "1000", "mode": "LONG_SHORT", "positions": {}}})
-
-    observed = _failure(raised.value)["observed"]
+    observed = _register_run_with_mode(tmp_path, "LONG_SHORT")["observed"]
 
     assert "KeyError" not in observed, "the refusal still reports an exception repr"
     assert "LONG_SHORT" in observed, "the refusal no longer says what was actually written"
 
 
-def test_the_suggestion_is_spelled_the_way_the_spec_parser_accepts() -> None:
-    """A near-miss hint in the wrong case swaps one unusable value for another.
+def test_the_suggestion_names_the_nearest_member(tmp_path: Path) -> None:
+    """A near-miss hint: a one-character typo is invisible to whoever typed it."""
+    fix = _register_run_with_mode(tmp_path, "LONG_SHORT")["fix"]
 
-    The run spec is parsed by member NAME, so the suggestion must be `LONG_ONLY` and not the
-    enum's lowercase `long_only` value. `register`'s equivalent helper lowercases deliberately,
-    which is correct for a declaration and wrong here -- so it is not reused.
-    """
-    with pytest.raises(InputError) as raised:
-        _account({"initial_account": {"cash": "1000", "mode": "LONG_SHORT", "positions": {}}})
-
-    fix = _failure(raised.value)["fix"]
-
-    assert "'LONG_ONLY'" in fix, f"the hint is not in the spelling the parser accepts: {fix}"
-    assert "'long_only'" not in fix
+    assert "'long_only'" in fix, f"the hint does not name the nearest member: {fix}"
 
 
 @pytest.mark.parametrize(
     ("enum", "written", "key_path", "expected"),
     [
-        (AccountMode, "LONG_SHORT", "initial_account.mode", "LONG_ONLY, SIGNED"),
-        (_Selector, "CLOSE", "fill.selector", "SAME_DAY, NEXT_ELIGIBLE"),
+        (AccountMode, "LONG_SHORT", "initial_account.mode", "long_only, signed"),
+        (_Selector, "CLOSE", "fill.selector", "same_day, next_eligible"),
     ],
 )
 def test_the_refusal_is_the_same_shape_on_two_different_keys(
@@ -94,13 +106,13 @@ def test_the_refusal_is_the_same_shape_on_two_different_keys(
     The second case is the `fill.selector` vocabulary trap by name: `CLOSE` is a price word, and
     the members are scheduling words, so no number of guesses gets there without the list.
     """
-    with pytest.raises(InputError) as raised:
-        _closed_set_member(enum, written, key_path=key_path)
+    with pytest.raises(VqaprError) as raised:
+        _enum(enum, written, name=key_path)
 
     failure = _failure(raised.value)
 
     assert failure["requirement"] == f"{key_path} must be one of: {expected}"
-    assert failure["observed"] == f"{key_path}={written!r}"
+    assert failure["observed"] == written
     assert failure["source"]["key_path"] == key_path
     assert "KeyError" not in failure["observed"]
     assert failure["examples"] == expected.split(", ")
@@ -108,15 +120,20 @@ def test_the_refusal_is_the_same_shape_on_two_different_keys(
 
 def test_a_value_with_no_near_miss_still_gets_the_whole_set() -> None:
     """The fallback path: when nothing is close, the advice is the list itself."""
-    with pytest.raises(InputError) as raised:
-        _closed_set_member(AccountMode, "zzzzzzzz", key_path="initial_account.mode")
+    with pytest.raises(VqaprError) as raised:
+        _enum(AccountMode, "zzzzzzzz", name="initial_account.mode")
 
     fix = _failure(raised.value)["fix"]
 
-    assert "LONG_ONLY" in fix and "SIGNED" in fix
+    assert "long_only" in fix and "signed" in fix
 
 
-def test_a_permitted_value_is_still_accepted() -> None:
-    """The other half: the gate must let legal values through, in either case."""
-    assert _closed_set_member(AccountMode, "SIGNED", key_path="k") is AccountMode.SIGNED
-    assert _closed_set_member(AccountMode, "signed", key_path="k") is AccountMode.SIGNED
+def test_a_permitted_value_is_still_accepted_in_either_case(tmp_path: Path) -> None:
+    """The other half: the gate must let legal values through, in either spelling.
+
+    The refusal that follows is about the unregistered ids the run names, not about the mode.
+    """
+    for spelling in ("SIGNED", "signed"):
+        failure = _register_run_with_mode(tmp_path / spelling, spelling)
+        assert failure["code"] == "workspace.run.register.reference", failure
+    assert _enum(AccountMode, "signed", name="k") is AccountMode.SIGNED

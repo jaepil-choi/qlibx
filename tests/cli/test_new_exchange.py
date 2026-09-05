@@ -1,6 +1,6 @@
 """`vqapr new exchange` exists because a first-time-user journey could not finish without it.
 
-Five of the six things a run needs had a scaffold. The Exchange did not -- and the run-spec
+Five of the six things a run needs had a scaffold. The Exchange did not -- and the run
 template names `exchange:` as required, so every journey reaches it. The user had to learn from a
 refusal that only two profiles are permitted, then guess the shape of `listings`: a mapping keyed
 by instrument id whose values are `TradeRule`, a type no template, no help text and no skill
@@ -92,7 +92,7 @@ def test_the_universe_can_be_named_up_front(tmp_path: Path) -> None:
     assert sorted(namespace["Venue"]().listings) == ["A000660", "A005930", "A035420"]
 
 
-@pytest.mark.parametrize("kind", ["dataset", "execution-input", "agendas", "exchange", "run-spec"])
+@pytest.mark.parametrize("kind", ["dataset", "execution-input", "exchange", "run"])
 def test_every_declaration_a_run_needs_has_a_scaffold(kind: str, tmp_path: Path) -> None:
     """The gap was structural: one required declaration had no template while the rest did.
 

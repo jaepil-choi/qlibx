@@ -14,9 +14,11 @@ import duckdb
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import Hold
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
-from vqapr.data.windows import AccessRecord
+from vqapr.data.store import DuckDbObservationStore
+from vqapr.data.windows import AccessRecord, ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.identifiers import dataset_id, execution_input_id
 from vqapr.domain.references import ModelStateRef
@@ -27,8 +29,6 @@ from vqapr.flow.materialize import AllocationPublicationSpec, publish_run_alloca
 from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
 from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evidence
 from vqapr.flow.stamping import LookAheadDetected
-from vqapr.flow.views import data_model_window
-from vqapr.authoring import Hold
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 from vqapr.workspace import Workspace
 
@@ -324,11 +324,11 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
     workspace = Workspace.open(tmp_path)
     requirement = DataRequirement.of("alpha_allocation", "weight", lookback=RowsLookback(1))
 
-    visible = data_model_window(
-        workspace,
+    visible = ModelWindow(
         evaluation_time=cutoff,
         instruments=tuple(sorted(weights)),
-        requirements=(requirement,),
+        store=DuckDbObservationStore(workspace),
+        allowed_requirements=(requirement,),
         consumer_id="test-consumer",
     )
     rows = visible.observations(requirement).rows
@@ -336,11 +336,11 @@ def test_a_published_allocation_is_readable_through_an_ordinary_data_requirement
 
     assert subscribed == weights, "Decimal fidelity must survive the store boundary"
 
-    hidden = data_model_window(
-        workspace,
+    hidden = ModelWindow(
         evaluation_time=cutoff - timedelta(seconds=1),
         instruments=tuple(sorted(weights)),
-        requirements=(requirement,),
+        store=DuckDbObservationStore(workspace),
+        allowed_requirements=(requirement,),
         consumer_id="test-consumer",
     )
     assert hidden.observations(requirement).rows == ()

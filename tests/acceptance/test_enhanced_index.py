@@ -130,6 +130,7 @@ def _window(
         "benchmark-source",
         instrument_field="instrument",
         available_at="available_at",
+        grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"benchmark_weight": "benchmark_weight"},
     )
@@ -203,8 +204,8 @@ def _construct(
     return optimize(
         desired=desired,
         current={},
-        lower=dict(bounds.lower),
-        upper=dict(bounds.upper),
+        lower=dict(bounds.lower_weights),
+        upper=dict(bounds.upper_weights),
         cash_range=(Decimal("0"), Decimal("1")),
     )
 
@@ -258,8 +259,8 @@ def test_criterion_4_a_signed_tilt_stays_feasible_under_the_constraint_set(
     result = _construct(manifest, benchmark[session], tilt, Decimal("0.5"), tolerance, session)
 
     for instrument, weight in result.weights.items():
-        assert weight >= bounds.lower[instrument] >= Decimal(0)
-        assert weight <= bounds.upper[instrument]
+        assert weight >= bounds.lower_weights[instrument] >= Decimal(0)
+        assert weight <= bounds.upper_weights[instrument]
     assert sum(result.weights.values()) + result.cash == Decimal(1)
 
 
@@ -382,8 +383,8 @@ def test_criterion_7_a_frozen_holding_survives_into_a_validated_intent(
     result = optimize(
         desired={k: v for k, v in weights.items()},
         current={held: holding},
-        lower=dict(bounds.lower),
-        upper=dict(bounds.upper),
+        lower=dict(bounds.lower_weights),
+        upper=dict(bounds.upper_weights),
         frozen=frozenset({held}),
         cash_range=(Decimal("0"), Decimal("1")),
     )
@@ -425,8 +426,8 @@ def test_a_frozen_holding_finer_than_the_grid_is_refused(
         optimize(
             desired=dict(weights),
             current={held: Decimal("0.0997000000000001")},
-            lower=dict(bounds.lower),
-            upper=dict(bounds.upper),
+            lower=dict(bounds.lower_weights),
+            upper=dict(bounds.upper_weights),
             frozen=frozenset({held}),
             cash_range=(Decimal("0"), Decimal("1")),
         )

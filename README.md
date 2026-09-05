@@ -19,12 +19,13 @@ state under `.vqapr/`, which is rebuildable and never committed.
 
 | command | what it does |
 |---|---|
-| `new` | scaffold a component, or emit a dataset/run-spec declaration template |
+| `new` | scaffold a component, or emit a dataset/execution-input/exchange/run declaration template |
 | `register` | validate a declaration and add what it declares to the workspace |
-| `check` | prove a run spec is ready, reporting every problem at once, without running it |
-| `run` | freeze a run spec, preflight it, and execute the simulation |
-| `list` | show what the workspace already holds |
-| `show` | answer questions about one finished run, from its frozen record |
+| `check` | prove a registered run is ready, reporting every problem at once, without running |
+| `run` | freeze a registered run, preflight it, and execute its models: strategies with their accounts, or datamodels writing their datasets |
+| `list` | show what the workspace holds and what the store recorded |
+| `show` | answer questions about one run or one strategy record, from what was frozen |
+| `rm` | remove a run's records, or withdraw a registration nothing still names |
 | `skill` | install the agent skill into this project, or remove and inspect it |
 
 Run `vqapr <command> --help` for the arguments of any verb.
@@ -40,12 +41,11 @@ Run `vqapr <command> --help` for the arguments of any verb.
 | `scripts/` | evidence and fixture-preparation scripts, not part of the distribution |
 | `testbed/` | a measurement workspace treated as a first-time user's project, not as source |
 | `references/` | vendored upstream snapshots — non-authoritative unless the project manifest promotes a file |
-| `attempts/` | frozen earlier implementations, kept for their record and not maintained |
 
 ## Prior implementations
 
-This package was previously named `qlibx`. Its first and second implementations are frozen under
-[`attempts/attempt-1/`](attempts/attempt-1/) and [`attempts/attempt-2/`](attempts/attempt-2/), and
-are archives rather than supported code.
+This package was previously named `qlibx`. Its first and second implementations were frozen under
+`attempts/attempt-1/` and `attempts/attempt-2/` and removed from the tree on 2026-09-04; they remain in
+history (`git log -- attempts/`).
 
 Attribution for third-party arithmetic is in [`NOTICE`](NOTICE).

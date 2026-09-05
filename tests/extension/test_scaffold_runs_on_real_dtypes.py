@@ -35,7 +35,8 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.authoring import EconomicAccountView
+from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -46,7 +47,6 @@ from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model, load_strategy_model
 from vqapr.extension.scaffold import render
-from vqapr.models.contexts import DataModelContext, StrategyModelContext
 from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 
@@ -99,6 +99,7 @@ def _workspace(project: Path, prices: Path) -> Workspace:
             "prices",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -152,7 +153,9 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
     ref = register_data_model(tmp_path, "float-model", path, "FloatModel")
     model = load_data_model(ref, project_root=tmp_path)
 
-    rows = model.compute(DataModelContext(window=_window(workspace, model.requirements()[0])))
+    rows = model.compute(
+        DataModelContext(window=_window(workspace, model.requirements()[0]), reads=model.inputs())
+    )
 
     # A: 105/100 - 1 = 0.05.  B: 53/50 - 1 = 0.06. Exact, because `str` was the bridge -- through
     # `Decimal(float)` these carry the binary expansion and compare unequal.
@@ -166,7 +169,7 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
 def test_the_strategy_scaffold_decides_against_a_float64_column(
     tmp_path: Path, float_price_parquet: Path
 ) -> None:
-    """The template's `on_occurrence` must reach a decision, not a `TypeError`.
+    """The template's `decide` must reach a decision, not a `TypeError`.
 
     This is the call the testbed agent's run actually made when it failed.
     """
@@ -188,10 +191,13 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
             ),
         ),
         window=_window(workspace, strategy.requirements()[0]),
-        account=AccountSnapshot(0, Decimal("1000000"), {}),
+        reads=strategy.inputs(),
+        account=EconomicAccountView(
+            cash=Decimal("1000000"), positions={}, nav=None, nav_observed_at=None
+        ),
     )
 
-    decision = strategy.on_occurrence(context)
+    decision = strategy.decide(context)
 
     # Both names rose over the window, so the five-day *reversal* scores both negative and the
     # template declines. What is under test is that the arithmetic completed at all: before the
@@ -210,5 +216,8 @@ def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:
     """
     source = render(kind, "pinned", dataset_id="price_daily")
 
-    assert ".append(Decimal(str(value)))" in source
-    assert ".append(value)" not in source
+    # Since record `137` a panel window is read column by column, so the conversion sits in a
+    # comprehension over the window's values rather than an `.append` per row; the property is
+    # the same: every cell goes through `Decimal(str(...))`, never `Decimal(...)` on the raw cell.
+    assert "Decimal(str(v))" in source
+    assert "[Decimal(v)" not in source and ".append(value)" not in source

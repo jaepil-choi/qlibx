@@ -18,6 +18,7 @@ import inspect
 import sys
 from pathlib import Path
 
+from vqapr.authoring import DataModel, StrategyModel
 from vqapr.constraints.constraint import Constraint
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
@@ -26,8 +27,6 @@ from vqapr.exchange.venue import AcademicExchange, Exchange
 from vqapr.exchange.venues.krx import KrxExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.models.data_model import DataModel
-from vqapr.models.strategy_model import StrategyModel
 
 _STAGE = "component.load"
 
@@ -278,18 +277,13 @@ def load_data_model(ref: ComponentRef, *, project_root: str | Path | None = None
             f"{_STAGE}.wrong_type",
             "registered DataModel object must implement the public DataModel contract",
             type(model).__name__,
-            fix="make the registered object a subclass of vqapr.models.data_model.DataModel",
+            fix="make the registered object a subclass of vqapr.authoring.DataModel",
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
-    requirements = _requirements(model, label="DataModel", required=True)
-    if not requirements:
-        raise _failure(
-            f"{_STAGE}.requirements_invalid",
-            "DataModel.requirements() must return a non-empty tuple of DataRequirement values",
-            repr(requirements),
-            fix="return at least one DataRequirement from DataModel.requirements()",
-            explain=ExplainTopic.COMPONENT_CONTRACT,
-        )
+    # `requirements()` is derived from `inputs()` and may legitimately be empty -- `Model.inputs()`
+    # says so in its own docstring: a Model may derive its values from memory alone. This used to
+    # refuse an empty tuple, contradicting the contract it had just loaded.
+    _requirements(model, label="DataModel", required=False)
     return model
 
 
@@ -298,52 +292,19 @@ def load_strategy_model(
 ) -> StrategyModel:
     strategy = _load(ref, kind=ComponentKind.STRATEGY_MODEL, project_root=project_root)
     if not isinstance(strategy, StrategyModel):
-        strategy = _adapt_authored_strategy(strategy, ref)
-    if not isinstance(strategy, StrategyModel):
         raise _failure(
             f"{_STAGE}.wrong_type",
             "registered StrategyModel object must implement the public StrategyModel contract",
             type(strategy).__name__,
-            fix=(
-                "make the registered object a subclass of "
-                "vqapr.models.strategy_model.StrategyModel"
-            ),
+            fix="make the registered object a subclass of vqapr.authoring.StrategyModel",
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
-    _validate_callback_signature(strategy, base=StrategyModel, method_name="on_occurrence")
-    _requirements(strategy, label="StrategyModel", required=True)
+    _validate_callback_signature(strategy, base=StrategyModel, method_name="decide")
+    # `required=False` as for the other two roles: `Model.inputs()` says declaring nothing is
+    # legitimate, and a Strategy that rebalances to fixed weights reads no data at all.
+    _requirements(strategy, label="StrategyModel", required=False)
     return strategy
 
-
-
-def _adapt_authored_strategy(loaded: object, ref: ComponentRef) -> object:
-    """Wrap a model written against the authoring contract so the engine can run it.
-
-    A registered component may be authored against either contract. Refusing the
-    authoring one here would mean a model that runs perfectly through `Project.simulate`
-    cannot be registered by the CLI that exists to register it - the loader would be the
-    only thing standing between the supported way to write a model and the supported way
-    to install one.
-
-    The engine contract is left untouched: this adapts inward, it does not widen what the
-    engine accepts.
-    """
-    from vqapr.authoring import StrategyModel as AuthoringStrategyModel
-
-    authored = type(loaded)
-    if not isinstance(loaded, AuthoringStrategyModel):
-        return loaded
-
-    from vqapr._internal.strategy_bridge import AdaptedStrategy
-
-    config = dict(getattr(ref, "config", {}) or {})
-    config.pop("strategy_id", None)
-    return AdaptedStrategy(
-        authored_module=authored.__module__,
-        authored_qualname=authored.__qualname__,
-        strategy_id=str(ref.component_id),
-        authored_config=config,
-    )
 
 
 def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None) -> Constraint:
@@ -356,7 +317,11 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
             fix="make the registered object a subclass of vqapr.constraints.constraint.Constraint",
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
-    _requirements(constraint, label="Constraint", required=True)
+    # Not `_requirements(...)`: a Constraint declares its reads with `inputs()` like every other
+    # Model role does since record `128`, and declaring nothing is legitimate -- `NoShort` is a
+    # rule about a weight's sign and reads no data at all. Requiring a non-empty
+    # `requirements()` here made the shipped constraint that needs no data the one shape the
+    # loader could not accept.
     _constraint_identity(ref, constraint)
     return constraint
 

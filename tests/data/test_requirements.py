@@ -66,5 +66,5 @@ def test_requirement_rejects_a_name_the_window_owns() -> None:
 
 
 def test_requirement_rejects_a_lookback_that_is_not_one() -> None:
-    with pytest.raises(TypeError, match="RowsLookback or CalendarLookback"):
+    with pytest.raises(TypeError, match="RowsLookback, CalendarLookback or InstantsLookback"):
         DataRequirement.of("price_daily", "close", lookback=2)

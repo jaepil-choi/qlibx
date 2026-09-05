@@ -94,7 +94,7 @@ class ValuationService:
             price = prices.get(instrument)
             if price is None:
                 # NOT the halt case. Read this with `_marks_from_execution_snapshot`
-                # (`flow/simulation.py`), which runs FIRST and carries a held name's previous
+                # (`flow/execution.py`), which runs FIRST and carries a held name's previous
                 # mark forward when the venue published no row for it. By the time a price is
                 # missing here, the carry has already been tried and had nothing to carry -- so
                 # this is a position the venue has *never* priced, not one that stopped trading.

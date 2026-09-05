@@ -75,6 +75,7 @@ def registered(tmp_path: Path) -> tuple[Workspace, Path]:
             "prices-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),

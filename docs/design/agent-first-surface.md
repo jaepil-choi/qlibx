@@ -66,6 +66,11 @@ and that template hand-mints all four fields. The package teaches the ceremony i
 to remove. The scaffold cannot be migrated alone; it moves with the CLI registration path
 and the loader conformance check, which is one unit.
 
+> **Closed 2026-09-02.** Record `125` moved the four fields to the Flow; records `130`-`133`
+> moved the three scaffolds, the loader and the conformance check onto one authoring surface as
+> the one unit this paragraph asked for. The template returns `va.Hold(...)` or
+> `va.Rebalance.of(...)` and mints nothing.
+
 ## Principle 2 — a declaration with no field is a sentence that cannot be spoken
 
 `venues.Academic` had no `fractional_allowed`. An agent wanting an unquantized academic
@@ -428,6 +433,33 @@ canonical set and survives renumbering.
 
 ## The G008 admission conditions
 
+> **CLOSED 2026-09-02 — `G008` was not unblocked. Its premise was inverted, and it is moot.**
+>
+> **Do not open it, and do not treat the two gates below as conditions that could still be met.**
+> They protect a direction the tree no longer travels in.
+>
+> `G008` was written on 2026-08-24 as *"`vqapr.public` is legacy, `project.py` and the `Project`
+> workflow are the destination"*. **Four days later the tracer table in this document measured the
+> opposite** — `project.py` executes zero lines in a complete CLI journey and `vqapr.public` is on
+> every shipped path. Record `104` ruled which facade survives; record `124` deleted the other
+> half, 13 modules and 4,001 lines. So the thing `G008` set out to delete is the thing that ships,
+> and the thing it named as the destination is gone.
+>
+> Both of its gates now guard nothing. **Gate 1** required a T0 comparator run against a legacy
+> path that no longer exists. **Gate 2** required owner approval for a breaking `0.2.0a1` that was
+> never cut and is not planned; the release actually shipped is `0.2.0a2` on this facade.
+>
+> **Nothing about the deletion of `vqapr.public` is scheduled, gated, or pending.** It is not the
+> plan. The author surface converges *onto* `vqapr.authoring` re-exported through `vqapr.public`
+> as one object — `docs/design/the-panel-the-surface-and-the-run.md` §3, Step 1 of
+> `docs/refactoring/2026-09-02-the-convergence-campaign.md` — which keeps both names and makes
+> them the same thing.
+>
+> The text below is kept because three implementation records (`098`, `105`, `124`) argue about
+> it and a reader who follows one of those citations needs to land on the correction rather than
+> on the original. Read it as history. The full sequence is in
+> `docs/diagnostics/2026-09-02-what-the-tree-owes-the-mental-model.md` §8.
+
 `G008` — delete `vqapr.public`, relocate the retained authorities, and cut the breaking release —
 is **blocked**, and this ruling does not unblock it. `gjc-handoff/session-03/goals.json` records
 two independent gates verbatim, and both are still shut:
@@ -442,10 +474,12 @@ keeps it alive *"solely for baseline comparison"*.
 across **38** files with **70** inbound references, and cuts a breaking **`0.2.0a1`** whose
 rollback is a whole-cutover revert. Deletion is revertible; a release is not.
 
-So a future session may open `G008` only when both hold: the T0 trace/row comparator has been run
+~~So a future session may open `G008` only when both hold: the T0 trace/row comparator has been run
 over the whole testbed including `register.py` and its result is recorded, **and** the owner has
-explicitly approved the deletion and the breaking release. Neither is implied by this ruling, and
-writing these conditions down is not approval of them.
+explicitly approved the deletion and the breaking release.~~ **Struck 2026-09-02.** This sentence
+is the one that reads as an open door, and there is no door: see the closure note at the head of
+this section. Neither gate can be met, because neither the legacy path nor the release they guard
+exists any more.
 
 What it would cost, so the approval is an informed one: three showcases (`show_001`, `show_002`,
 `show_004`) move back or are dropped, and roughly 2,200 executable lines plus 4,529 test lines

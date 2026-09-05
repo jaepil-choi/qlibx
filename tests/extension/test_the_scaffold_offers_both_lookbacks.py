@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from vqapr.calls import DataModelContext
 from vqapr.cli.new import run as new_command
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
@@ -35,7 +36,6 @@ from vqapr.data.windows import ModelWindow
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model
 from vqapr.extension.scaffold import render
-from vqapr.models.contexts import DataModelContext
 from vqapr.public import Workspace, register_data_model, register_dataset
 
 KST = ZoneInfo("Asia/Seoul")
@@ -62,8 +62,14 @@ def _namespace(**overrides: object) -> argparse.Namespace:
 
 def test_the_pair_is_documented_at_the_call_site() -> None:
     """Neither class had a docstring, and the batch's span is what one of them has to state."""
-    assert RowsLookback.__doc__ and "each instrument independently" in RowsLookback.__doc__
-    assert "sparsest" in RowsLookback.__doc__, (
+    from vqapr.data.lookback import InstantsLookback
+
+    # Since record `137` the per-name count is `InstantsLookback`; `RowsLookback` counts the
+    # table's rows, the same instants for every name, and its docstring says both.
+    assert RowsLookback.__doc__ and "same instants for every name" in RowsLookback.__doc__
+    assert "InstantsLookback" in RowsLookback.__doc__
+    assert InstantsLookback.__doc__ and "each instrument independently" in InstantsLookback.__doc__
+    assert "sparsest" in InstantsLookback.__doc__, (
         "the unbounded calendar span is the property that makes a cross-sectional model wrong"
     )
     assert CalendarLookback.__doc__ and "every instrument" in CalendarLookback.__doc__
@@ -115,6 +121,7 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
             "prices",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -145,7 +152,8 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
                 store=DuckDbObservationStore(Workspace.open(tmp_path)),
                 allowed_requirements=(requirement,),
                 consumer_id="test-consumer",
-            )
+            ),
+            reads=model.inputs(),
         )
     )
 

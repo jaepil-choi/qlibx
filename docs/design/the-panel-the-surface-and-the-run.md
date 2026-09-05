@@ -44,6 +44,8 @@
 
 ## 2. 명사 1 — `Panel`
 
+> **구현됨 (2026-09-02, 기록 `137`).** §2.2의 `grain` 선언과 거절, §2.4의 lookback 갈래(`RowsLookback`은 표의 행, `InstantsLookback`은 이름별, `grain: rows`에만), §2.3의 `Panel`(run당 in-process, 스캔 한 번, 슬라이스 창), §2.5의 두 동사(`read(alias, field)` → 2d 창, `rows(alias)` → 스트림; 소유자 결정 B안). spill(§7-2)과 `prepare`(§7-5)는 Step 7로.
+
 ### 2.1 오늘 없는 것
 
 데이터 평면은 두 층이다: **선언**(`DatasetRegistration`)과 **창**(`observation_rows`). 사이에 **표가
@@ -208,16 +210,26 @@ for row in call.rows("statement-facts", "value"):
 ```python
 class Model(ABC):                 # authoring.Model
     def inputs(self) -> Mapping[str, DatasetInput]: ...
-    def diagnostics(self) -> tuple[DiagnosticTable, ...]: ...
-    # state / memory
+    memory: ModelMemory            # strict JSON; Flow가 콜백 뒤에 snapshot하고 앞에 복원한다
+    # `diagnostics()`는 여기 없다 (2026-09-02 정정, 기록 132). 표는 `tables() -> TableSpec`으로
+    # 선언하고 `self.recorder`로 쓴다 -- 아키텍처 §5.1·§9.1의 그 recorder다. materialize가
+    # DataModel에 recorder를 아직 연결하지 않으므로 둘 다 지금은 StrategyModel에 있다; 연결되는
+    # 날 `Model`로 올라온다. 죽은 멤버를 공통 base에 먼저 올리는 것이 131이 지운 결함이다.
 
 class DataModel(Model):           # account 없음, venue 통과 없음
-    def output(self) -> Output: ...
-    def compute(self, call: DataCall) -> Sequence[DerivedRow]: ...
+    def compute(self, call: DataCall) -> Rows: ...
+    # `output()`은 없다 (2026-09-02 정정, 기록 131). 만들어지는 dataset의 모양은 선언이고
+    # materialization spec이 YAML로 든다 -- "YAML이 선언하고 Python이 저작한다". 모델이
+    # 그것을 한 번 더 말하면 같은 사실의 출처가 둘이 된다. 행은 dict다: 저자가 조립하는
+    # 출력의 가장 단순한 모양이고, materialize가 검증·발행하는 바로 그 모양이다.
 
 class StrategyModel(Model):       # account 있음, venue 통과함
-    def account_history(self) -> tuple[AccountHistoryInput, ...]: ...
-    def decide(self, call: StrategyCall) -> StrategyResult: ...
+    def tables(self) -> tuple[TableSpec, ...]: ...
+    def account_history(self) -> AccountHistoryInput | None: ...   # run에 Strategy는 하나
+    def decide(self, call: StrategyCall) -> Hold | Rebalance: ...
+    # `StrategyResult`는 없다 (2026-09-02 정정, 기록 132). 그 세 필드 중 `next_state`는
+    # `memory`가, `diagnostics`는 `recorder`가 이미 맡고 있었고, 남는 것은 decision 하나였다.
+    # 기록 125가 엔진 쪽에서 이미 그렇게 했다: 콜백은 경제적 결정만 돌려주고 Flow가 stamp한다.
 ```
 
 - §17.2의 진술이 **클래스 차이 그 자체**가 된다: *account가 달려서 exchange venue execution을 거치면
@@ -231,11 +243,16 @@ class StrategyModel(Model):       # account 있음, venue 통과함
 
 세 scaffold(strategy · datamodel · constraint)가 같은 import, 같은 선언 메서드, 같은 read 동사를
 emit한다. `agent-first-surface.md`가 *"Open consequence"*로 남겨 둔 것 — 패키지가 없애려는 ceremony를
-scaffold가 가르친다 — 이 여기서 닫힌다.
+scaffold가 가르친다 — 이 여기서 닫힌다. **(닫혔다, 2026-09-02, 기록 `133`.)**
 
 ---
 
 ## 4. 명사 3 — Run은 설정이고, strategy record는 output이다
+
+> **2026-09-02 (기록 `139`):** 구현됐다. 한 가지 어긋남: run은 전략별 `agenda:`를 다시 적지 않는다 —
+> 기록 `138`이 binding(`strategy_configs`)을 전략의 identity로 삼았으므로 두 번 적는 것은 `040`이
+> 불평한 이중 선언이다. `instruments_from:`은 아직 읽지 않는다(목록만). §7-2·§7-5는 소유자 결정으로
+> 이 단계에 넣지 않았다.
 
 오늘 "run"이라는 한 단어가 세 가지 일을 한다: **실험 설정**, **시험 대상 전략**, **한 번의 실행
 기록**. §17의 3 · 3.1 · 3.2 · 4 · 5 · 5.1 · 6이 전부 그 겹침의 증상이다.
@@ -258,14 +275,51 @@ runs:
       ou-ff5:  {agenda: krx-rebalance, constraints: [no-short]}
 ```
 
+> **2026-09-03 (기록 `148`, 소유자 결정 D5·D6·D7).** 위 모양에서 `valuation:`과 전략별 `agenda:`가
+> 사라졌다. agenda는 사용자 표면의 명사가 아니다 — run이 **세션과 벽시계 시각**을 직접 든다
+> (`sessions_from: <dataset>` 또는 `sessions: [...]`, `timezone`, `at`), 모든 모델은 매 세션 `at`에
+> 호출되어 스스로 판단하며(월 1회 리밸런스는 전략 안의 규칙이다), 장부는 venue가 체결하는 그 시각에
+> 평가되고 commit 직후 monitoring된다 — 따로 정하는 valuation·monitoring 시각은 없다. 그리고 run은
+> **한 종류의 모델**만 든다: `strategies:`(각자 account·venue) 또는 `datamodels:`(account 없이 dataset
+> 하나씩 씀). datamodel run은 exchange·execution_input·initial_account를 거절한다.
+>
+> ```yaml
+> runs:
+>   krx-2015-2024:
+>     instruments: [A005930, A000660]
+>     start: 2015-01-01T00:00:00+09:00
+>     end:   2024-12-31T23:00:00+09:00
+>     sessions_from: krx-prices
+>     timezone: Asia/Seoul
+>     at: "15:29"
+>     exchange: krx-costed
+>     execution_input: krx-close-fill
+>     initial_account: {cash: 1000000000, mode: long_only}
+>     strategies:
+>       ou-k0:   {constraints: [no-short]}
+>       ou-ff5:  {constraints: [no-short]}
+>   ff6-resid:
+>     instruments: [A005930, A000660]
+>     start: 2015-01-01T00:00:00+09:00
+>     end:   2024-12-31T23:00:00+09:00
+>     sessions_from: krx-prices
+>     timezone: Asia/Seoul
+>     at: "16:00"
+>     datamodels:
+>       ff6-resid-model: {dataset_id: ff6-resid-values, value_fields: [resid]}
+> ```
+
 - `vqapr register` 가 run을 workspace에 넣는다. **재사용의 단위가 파일이 아니라 등록된 이름**이 된다.
   오늘은 `cli/run.py`가 호출마다 spec을 읽어 `RunDefinition`을 새로 만든다 (§17.3).
 - `vqapr run krx-2015-2024 [--strategy ou-ff5] [--jobs 3]`
 - **`docs/issues/040`이 이 설계의 전제조건이다.** 세 전략이 같은 agenda를 가리켜야 하고, 오늘은 agenda가
-  전략 하나만 구동한다. 040의 ruling(agenda는 공유 가능하다)이 먼저 들어와야 한다.
+  전략 하나만 구동한다. 040의 ruling(agenda는 공유 가능하다)이 먼저 들어와야 한다. **들어왔다 —
+  record `138`(2026-09-02).**
 - `FrozenRun`이 둘로 갈린다:
-  - **run 층** — universe, period, venue, execution input, initial account, agenda. 전략들이 공유한다.
-  - **전략 층** — component, config, constraints, requirements. 전략마다 하나.
+  - **run 층** — universe, period, sessions와 `at`, (strategy run이면) venue, execution input, initial
+    account. 모델들이 공유한다.
+  - **모델 층** — `FrozenStrategy`(component, constraints, requirements, opening memory) 또는
+    `FrozenDataModel`(component, output dataset, requirements, opening memory). 모델마다 하나 (기록 `148`).
 
   preflight는 run 층을 한 번, 전략 층을 전략마다 언다. 오늘의 preflight가 이미 그 두 집합을 따로
   들고 있다 (`strategy_requirements`와 `constraint_requirements`가 이미 분리되어 있다).
@@ -407,7 +461,12 @@ vqapr rm    run        <run-id> [--keep-latest]
 비용은 모든 기존 dataset 선언을 한 줄씩 편집하는 것이고, 그것이 **뜻이 바뀌었다는 사실을 저자에게
 전달하는 유일한 확실한 통로**다.
 
-### 7-2. 열림 — panel spill을 지금 정할 것인가
+### 7-2. RESOLVED 2026-09-02 — panel spill은 명사 3에 넣지 않는다
+
+> **2026-09-02 (기록 `137`):** 후보대로 갔다. 명사 1은 in-process까지; spill은 명사 3과 함께.
+> **2026-09-02 소유자 결정 (기록 `139`, M7):** 명사 3에서도 넣지 않는다. `--jobs N`의 워커는 각자 panel을
+> 만든다. 아무도 'N번 빌드 vs 1번 빌드 + N번 map'을 재지 못했고(harness는 `136`에서 사라짐), panel의
+> identity가 이미 spill 파일의 이름이 될 키이므로 숫자가 나오면 붙인다.
 
 in-process cache만 먼저 넣으면 §17.1.3은 닫히고 §17.1.4는 안 닫힌다. spill까지 가야 `--jobs`가 의미를
 갖는다. **다만 spill의 값은 명사 3이 들어온 뒤에 커진다** — 한 run에 전략 셋이 있어야 공유할 상대가
@@ -426,7 +485,11 @@ in-process cache만 먼저 넣으면 §17.1.3은 닫히고 §17.1.4는 안 닫�
 `showcases/show_006_ensemble_netting`이 이미 다른 방식으로 다루는 영역이다. 그쪽이 필요해지면 그것은
 *하나의* StrategyModel이 여러 sleeve를 합성하는 문제이지, run이 계정을 나눠 주는 문제가 아니다.
 
-### 7-5. 열림 — `vqapr prepare`가 별도 verb인가
+### 7-5. RESOLVED 2026-09-02 — `prepare` verb는 만들지 않는다
+
+> **2026-09-02 (기록 `137`):** 이번 단계에서는 `run`이 필요한 panel을 알아서 만든다. 별도 verb는 명사 3과 함께 판단한다.
+> **2026-09-02 소유자 결정 (기록 `139`, M7):** verb 없음. spill이 없으면 prepare는 preflight뿐이고 그것은
+> `check`다. spill이 들어오는 시점에 함께 다시 판단한다.
 
 `run`이 필요할 때 알아서 물질화하면 verb가 하나 준다. 반대로 별도 verb면 *"이 run은 준비되었다"*가
 관찰 가능한 상태가 되고, 긴 물질화가 첫 전략의 wall time에 숨지 않는다. 후보: 별도 verb, 단 `run`이

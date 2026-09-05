@@ -9,7 +9,7 @@ it now admits `workspace.open.missing` only, and there is one call site left bec
 longer reads.
 
 **Status when filed:** open. Found 2026-08-31 by the structural audit recorded in
-`docs/refactoring/2026-08-31-vqapr-structural-refactoring.md` (§6, C1). Not a journey finding — it
+`docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` (§6, C1). Not a journey finding — it
 was found by reading the two call sites against the docstring of the function they call.
 **Touches:** `src/vqapr/public.py` (`_registered_roster`, `roster_report`);
 `Workspace.registered_instruments`; `docs/issues/007`.

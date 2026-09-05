@@ -17,7 +17,6 @@ from vqapr.authoring import (
     Rebalance,
     RowsLookback,
     StrategyModel,
-    StrategyResult,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
@@ -51,25 +50,21 @@ class SampleReversal5d(StrategyModel):
         }
 
     def decide(self, call):
-        rows = call.read("prices")
+        # One field of the alias as a window: `instants` x `instruments`, the same six sessions
+        # for every name. A name that began trading inside the window, or stopped before it,
+        # simply has fewer values -- which is what the completeness guard below reads.
+        window = call.read("prices", "close")
         closes: dict[str, list[Decimal]] = {}
-        for row in rows:
-            if row.values["close"] is not None:
-                # `Decimal(str(v))` rather than the raw cell: this file is copied against the
-                # reader's own dataset, and a parquet float64 column arrives as `float`, which
-                # raises on the `values[-1] / values[0] - Decimal(1)` below. The sample panel is
-                # decimal128, so the bug is invisible here and appears only after the copy.
-                closes.setdefault(row.instrument_id, []).append(
-                    Decimal(str(row.values["close"]))
-                )
+        for name in window.instruments:
+            # `Decimal(str(v))` rather than the raw cell: this file is copied against the
+            # reader's own dataset, and a parquet float64 column arrives as `float`, which
+            # raises on the `values[-1] / values[0] - Decimal(1)` below. The sample panel is
+            # decimal128, so the bug is invisible here and appears only after the copy.
+            closes[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
 
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < SELECTED:
-            return StrategyResult(
-                decision=Hold(reason="incomplete-lookback"),
-                next_state=None,
-                diagnostics={},
-            )
+            return Hold(reason="incomplete-lookback")
 
         returns = {
             name: values[-1] / values[0] - Decimal(1) for name, values in eligible.items()
@@ -80,12 +75,8 @@ class SampleReversal5d(StrategyModel):
         # Only the economics. The intent id, strategy id, source references and account
         # version are framework facts: an author who minted them could get them wrong, and
         # this file is the one a reader copies against their own dataset.
-        return StrategyResult(
-            decision=Rebalance(
-                target_weights={name: weight for name in sorted(weakest)},
-                cash_weight=Decimal(1) - weight * Decimal(SELECTED),
-                budget=BUDGET,
-            ),
-            next_state=None,
-            diagnostics={},
+        return Rebalance(
+            target_weights={name: weight for name in sorted(weakest)},
+            cash_weight=Decimal(1) - weight * Decimal(SELECTED),
+            budget=BUDGET,
         )

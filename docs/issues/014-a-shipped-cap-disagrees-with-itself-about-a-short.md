@@ -1,5 +1,12 @@
 # 014 — A shipped cap disagrees with itself about a short
 
+> **Structurally impossible as of 2026-09-02, record `130`.** This was closed by making the two
+> members that measured share one helper -- a discipline, which the next constraint an author
+> writes is free to ignore. There is now **one member that measures**: the one that judged the
+> decision was removed (PRD §7.1, architecture §5.7), so a second answer has nowhere to come from.
+> The regression test moved with it and is now
+> `test_the_cap_gives_one_answer_about_a_short_across_both_members`.
+
 **Status: CLOSED 2026-08-29** by
 `docs/implementations/080-a-cap-bounds-size-and-says-nothing-about-sign.md`.
 

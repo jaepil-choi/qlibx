@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,10 +52,6 @@ from vqapr.public import (
     IntentSourceRef,
     ListingAccess,
     LocalInstantDeclaration,
-    MaterializationResult,
-    MaterializationSpec,
-    MonitoringPolicy,
-    OperationAgenda,
     OperationOccurrence,
     OperationRole,
     OptimizeRefusal,
@@ -74,19 +70,14 @@ from vqapr.public import (
     TradeRule,
     VqaprError,
     callback_evidence,
-    materialize,
     optimize,
     preflight_run,
     publish_run_allocation,
-    register_agenda,
     register_component,
     register_data_model,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
-    register_strategy_config,
     register_strategy_model,
-    register_valuation_config,
     run,
     shipped_constraint_path,
     validate_allocation,
@@ -98,6 +89,7 @@ def _registration(**overrides) -> DatasetRegistration:
         "instrument_field": "instrument",
         "available_at": "available_at",
         "key_fields": ("session_date", "instrument"),
+        "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
     }
     kwargs.update(overrides)
@@ -133,16 +125,12 @@ def test_public_exports_are_fixed() -> None:
             ListingAccess,
             TradeRule,
             LocalInstantDeclaration,
-            MaterializationResult,
             AllocationInvariants,
             AllocationPublicationResult,
             AllocationPublicationSpec,
             AllocationSign,
             AllocationViolation,
-            MaterializationSpec,
-            MonitoringPolicy,
             Hold,
-            OperationAgenda,
             OperationOccurrence,
             OperationRole,
             OptimizeRefusal,
@@ -161,17 +149,12 @@ def test_public_exports_are_fixed() -> None:
             StrategyModel,
             StrategyModelContext,
             callback_evidence,
-            materialize,
             optimize,
             publish_run_allocation,
             preflight_run,
-            register_agenda,
             register_component,
             register_data_model,
-            register_monitoring_policy,
-            register_strategy_config,
             register_strategy_model,
-            register_valuation_config,
             run,
             shipped_constraint_path,
             validate_allocation,
@@ -201,6 +184,8 @@ def test_public_exports_are_fixed() -> None:
         "ConstraintSet",
         "DataModel",
         "DataModelContext",
+        "DataModelEntry",
+        "DataModelResult",
         "DataRequirement",
         "DatasetInput",
         "DatasetRegistration",
@@ -216,9 +201,13 @@ def test_public_exports_are_fixed() -> None:
         "FillCost",
         "FillSelector",
         "FrozenAgenda",
+        "FrozenDataModel",
         "FrozenRun",
+        "FrozenStrategy",
+        "Grain",
         "Hold",
         "IndexInstrument",
+        "InstantsLookback",
         "Instrument",
         "InstrumentKind",
         "InstrumentRoster",
@@ -229,41 +218,39 @@ def test_public_exports_are_fixed() -> None:
         "LocalInstantDeclaration",
         "Mark",
         "MarkBatch",
-        "MaterializationResult",
-        "MaterializationSpec",
         "ModelWindow",
-        "MonitoringPolicy",
         "NeutralizationRefusal",
         # `docs/issues/031`: the return type of `ModelWindow.observations`, which is the only
         # method a DataModel author can call, and which could not be imported from the facade.
         "ObservationBatch",
-        "OperationAgenda",
         "OperationOccurrence",
         "OperationRole",
         "OptimizeRefusal",
         "OptimizeResult",
+        "PanelWindow",
         "PortfolioDirection",
         "PortfolioTarget",
         "Rebalance",
         "RowsLookback",
         "RunDefinition",
+        "RunRecordMissing",
         "RunRecordResult",
         "RunRecordSpec",
+        "RunResult",
         "Side",
         "SideCost",
         "SimulationFailure",
         "SimulationResult",
         "SourceSpec",
         "StockInstrument",
-        "StrategyConfig",
+        "StrategyEntry",
         "StrategyModel",
         "StrategyModelContext",
-        "StrategyResult",
+        "StrategyOutcome",
         "TableSpec",
         "TickerNetting",
         "TradeRule",
         "TradeTerms",
-        "ValuationConfig",
         "VqaprError",
         "WeightingRefusal",
         "ZeroDealtReason",
@@ -284,7 +271,6 @@ def test_public_exports_are_fixed() -> None:
         "instruments",
         "krx_listings",
         "krx_rules",
-        "materialize",
         "nav_series",
         "net_members",
         "neutralize",
@@ -295,22 +281,24 @@ def test_public_exports_are_fixed() -> None:
         "publish_run_record",
         "rank",
         "rank_information_coefficient",
-        "register_agenda",
+        "read_run_record",
+        "read_strategy_record",
+        "read_strategy_table",
         "register_component",
         "register_constraint",
         "register_data_model",
         "register_dataset",
         "register_exchange",
         "register_execution_input",
-        "register_monitoring_policy",
-        "register_strategy_config",
+        "register_run",
         "register_strategy_model",
-        "register_valuation_config",
         "rescale",
         "returns",
         "run",
+        "run_ids",
         "shipped_constraint_path",
         "signal_weight",
+        "strategy_refs",
         "trade_rules_by_kind",
         "validate_allocation",
     )
@@ -420,50 +408,45 @@ def test_public_facade_registers_a_valid_execution_input(
     assert (tmp_path / ".vqapr" / "workspace.yaml").read_bytes() == before
 
 
-def test_public_facade_registers_an_operation_agenda(tmp_path: Path) -> None:
-    agenda = OperationAgenda.from_occurrences(
-        agenda_id="strategy-agenda",
-        role=OperationRole.STRATEGY_CALLBACK,
-        timezone="Asia/Seoul",
-        occurrences=(
-            OperationOccurrence(
-                "first",
-                OperationRole.STRATEGY_CALLBACK,
-                LocalInstantDeclaration(date(2024, 3, 5), time(15, 30), "Asia/Seoul", 0, "+09:00"),
-            ),
-        ),
-        provenance="facade test",
-    )
-
-    assert register_agenda(tmp_path, agenda) is True
-    assert register_agenda(tmp_path, agenda) is False
-
-
 def test_public_run_uses_frozen_initial_model_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The strategy layer's frozen memory reaches the loaded strategy, detached (record `139`)."""
+    from vqapr.flow.run import FrozenStrategy
+
     memory = {"carry": [1]}
-    frozen = object.__new__(FrozenRun)
+    layer = object.__new__(FrozenStrategy)
     for name, value in {
-        "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
-        "initial_account_mode": AccountMode.LONG_ONLY,
+        "config": SimpleNamespace(component=SimpleNamespace(component_id="s")),
+        "constraints": SimpleNamespace(constraints=()),
+        "agenda": SimpleNamespace(occurrences=()),
+        "requirements": (),
+        "constraint_requirements": (),
         "initial_model_memory": memory,
         "initial_model_state_ref": "frozen-memory-ref",
         "initial_payload": b"",
+        "_identity": "layer",
+    }.items():
+        object.__setattr__(layer, name, value)
+    frozen = object.__new__(FrozenRun)
+    for name, value in {
+        "run_id": "facade",
+        "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
+        "initial_account_mode": AccountMode.LONG_ONLY,
         "exchange": object(),
         "execution_input": object(),
-        "strategy": SimpleNamespace(component=object()),
-        "constraints": SimpleNamespace(constraints=()),
+        "strategies": (layer,),
+        "datamodels": (),
         "datasets": (),
         "sources": (),
         "instruments": ("A",),
-        "strategy_requirements": (),
-        "constraint_requirements": (),
+        "requirements": (),
     }.items():
         object.__setattr__(frozen, name, value)
     strategy = SimpleNamespace(
         memory={"default": True},
         requirements=lambda: (),
+        account_history=lambda: None,
         load_payload=lambda _source: None,
     )
     observed: dict[str, object] = {}
@@ -501,12 +484,14 @@ def test_public_run_uses_frozen_initial_model_memory(
     monkeypatch.setattr(orchestration, "RunStateRepository", State)
     monkeypatch.setattr(orchestration, "SimulationFlow", Flow)
 
-    assert public.run(tmp_path, frozen) == "result"
+    outcome = public.run(tmp_path, frozen)
+    assert outcome.result() == "result"
+    assert outcome.results == {"s": "result"}
     memory["carry"].append(2)
     assert observed == {
         "frozen": frozen,
         "memory": {"carry": [1]},
-        "ref": frozen.initial_model_state_ref,
+        "ref": layer.initial_model_state_ref,
     }
 
 

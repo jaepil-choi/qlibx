@@ -59,35 +59,24 @@ from vqapr.public import (
     AccountSnapshot,
     AllocationPublicationSpec,
     ComponentKind,
-    ConstraintSet,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
     FillConvention,
     FillSelector,
-    LocalInstantDeclaration,
-    MonitoringPolicy,
-    OperationAgenda,
-    OperationOccurrence,
-    OperationRole,
     RunDefinition,
     RunRecordSpec,
     SourceSpec,
-    StrategyConfig,
-    ValuationConfig,
+    StrategyEntry,
     callback_evidence,
     component_ref,
     export_roster,
     preflight_run,
     publish_run_allocation,
     publish_run_record,
-    register_agenda,
     register_component,
     register_dataset,
     register_execution_input,
-    register_monitoring_policy,
-    register_strategy_config,
-    register_valuation_config,
     run,
     shipped_constraint_path,
 )
@@ -114,8 +103,8 @@ REVERSAL_LOOKBACK = 6
 MOMENTUM_LOOKBACK = 11
 """Eleven closes span a ten-session return."""
 
-VERIFIED_AGAINST = "vqapr-0.1.0+show-006-working-tree"
-LAST_VERIFIED_AT = "2026-08-18"
+VERIFIED_AGAINST = "vqapr-0.4.1"
+LAST_VERIFIED_AT = "2026-09-03"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:
@@ -160,23 +149,6 @@ def _universe(path: Path) -> tuple[str, ...]:
         con.close()
 
 
-def _agenda(agenda_id: str, role: OperationRole, at: time, days: list[date]) -> OperationAgenda:
-    return OperationAgenda.from_occurrences(
-        agenda_id=agenda_id,
-        role=role,
-        timezone=VENUE,
-        occurrences=tuple(
-            OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
-                LocalInstantDeclaration(day, at, VENUE, 0, OFFSET),
-            )
-            for day in days
-        ),
-        provenance="show_006 committed KRX sessions",
-    )
-
-
 _SOURCE_REFS = '''
 
 def _source_refs(context):
@@ -185,7 +157,7 @@ def _source_refs(context):
     The Flow independently recomputes this from the window and refuses any intent whose provenance
     disagrees, so it must be derived from the accesses rather than declared.
     """
-    from vqapr.public import IntentSourceRef
+    from vqapr.public import IntentSourceRef, Rebalance
 
     seen = {}
     for access in context.window.accesses:
@@ -217,10 +189,9 @@ from uuid import NAMESPACE_URL, uuid5
 from vqapr.public import (
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     PortfolioDirection,
-    PortfolioTarget,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     equal_weight,
@@ -247,7 +218,7 @@ class {class_name}(StrategyModel):
             DataRequirement.of('price_daily', 'close', lookback=RowsLookback(LOOKBACK)),
         )
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         {memory_write}
 
         rows = context.window.observations(self.requirements()[0]).rows
@@ -273,15 +244,10 @@ class {class_name}(StrategyModel):
         sized = equal_weight(centred)
         weights = rescale(sized, long=ACTIVE_BUDGET, short=-ACTIVE_BUDGET)
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show006/{strategy_id}/" + context.occurrence.occurrence_id),
-            "{strategy_id}",
-            tuple(PortfolioTarget(name, weight=w) for name, w in sorted(weights.items())),
-            Decimal(1) - sum(weights.values()),
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(weights.items())),
+            cash_weight=Decimal(1) - sum(weights.values()),
+            budget=BUDGET,
         )
 '''
         + _SOURCE_REFS
@@ -329,15 +295,14 @@ from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
 from vqapr.public import (
-    QUANTUM,
     AllocationInvariants,
     AllocationSign,
     Budget,
     DataRequirement,
-    EconomicPortfolioIntent,
     Hold,
     PortfolioDirection,
-    PortfolioTarget,
+    QUANTUM,
+    Rebalance,
     RowsLookback,
     StrategyModel,
     TableSpec,
@@ -393,7 +358,7 @@ class EnsembleStrategy(StrategyModel):
             if row[field] is not None
         }
 
-    def on_occurrence(self, context):
+    def decide(self, context):
         reversal_requirement, momentum_requirement = self.requirements()
         reversal = self._panel(context, reversal_requirement)
         momentum = self._panel(context, momentum_requirement)
@@ -443,7 +408,7 @@ class EnsembleStrategy(StrategyModel):
         desired_active = rescale(combined, long=ENSEMBLE_BUDGET, short=-ENSEMBLE_BUDGET)
 
         bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower))
+        instruments = tuple(sorted(bounds.lower_weights))
         desired = {
             name: desired_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
         }
@@ -451,8 +416,8 @@ class EnsembleStrategy(StrategyModel):
         result = optimize(
             desired=desired,
             current={},
-            lower=dict(bounds.lower),
-            upper=dict(bounds.upper),
+            lower=dict(bounds.lower_weights),
+            upper=dict(bounds.upper_weights),
             frozen=frozenset(),
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -461,15 +426,10 @@ class EnsembleStrategy(StrategyModel):
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
         self.memory = history
 
-        return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, "show006/ensemble/" + context.occurrence.occurrence_id),
-            "show006-ensemble",
-            tuple(PortfolioTarget(n, weight=w) for n, w in sorted(result.weights.items())),
-            result.cash,
-            BUDGET,
-            _source_refs(context),
-            context.account.version,
-            None,
+        return Rebalance(
+            target_weights=dict(sorted(result.weights.items())),
+            cash_weight=result.cash,
+            budget=BUDGET,
         )
 '''
     + _SOURCE_REFS
@@ -497,7 +457,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import AcademicExchange, ListingAccess, TradeRule
+from vqapr.public import AcademicExchange, ListingAccess, Rebalance, TradeRule
 
 UNIVERSE = {universe!r}
 
@@ -527,7 +487,7 @@ class ShowcaseAcademicExchange(AcademicExchange):
 
 from __future__ import annotations
 
-from vqapr.public import KrxExchange
+from vqapr.public import KrxExchange, Rebalance
 
 UNIVERSE = {universe!r}
 
@@ -613,28 +573,29 @@ def _digest(path: Path) -> str:
 def _member_run(
     project: Path,
     *,
-    strategy_config: StrategyConfig,
-    valuation_config: ValuationConfig,
-    monitoring: MonitoringPolicy,
+    strategy_ref: Any,
+    at: time,
+    callback_days: list[date],
     academic_ref: Any,
     start: datetime,
     end: datetime,
     universe: tuple[str, ...],
 ) -> Any:
     definition = RunDefinition(
-        strategy_config,
-        valuation_config,
-        ConstraintSet(()),
-        monitoring,
-        academic_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.SIGNED,
+        run_id=str(strategy_ref.component_id),
+        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=at,
+        exchange=academic_ref.component_id,
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    return run(project, preflight_run(project, definition))
+    return run(project, preflight_run(project, definition)).result()
 
 
 def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -659,6 +620,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "krx-observation",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -671,6 +633,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "krx-benchmark",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"benchmark_weight": "benchmark_weight"},
         ),
@@ -741,6 +704,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "SingleNameCap",
         config={
             "cap": CAP,
+            "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
             "constraint_id": "single-name-cap",
         },
@@ -757,58 +721,15 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     for reference in components_to_register:
         register_component(project, reference)
 
-    reversal_agenda = _agenda(
-        "show006-reversal", OperationRole.STRATEGY_CALLBACK, time(8, 0), callback_days
-    )
-    momentum_agenda = _agenda(
-        "show006-momentum", OperationRole.STRATEGY_CALLBACK, time(8, 15), callback_days
-    )
-    ensemble_agenda = _agenda(
-        "show006-ensemble", OperationRole.STRATEGY_CALLBACK, time(9, 0), callback_days
-    )
-    valuation_agenda = _agenda(
-        "show006-valuation", OperationRole.VALUATION, time(16, 0), callback_days
-    )
-    monitoring_agenda = _agenda(
-        "show006-monitoring", OperationRole.MONITORING, time(16, 30), callback_days
-    )
-    for agenda in (
-        reversal_agenda,
-        momentum_agenda,
-        ensemble_agenda,
-        valuation_agenda,
-        monitoring_agenda,
-    ):
-        register_agenda(project, agenda)
-
-    reversal_config = StrategyConfig(
-        reversal_ref, "show006-reversal", OperationRole.STRATEGY_CALLBACK
-    )
-    momentum_config = StrategyConfig(
-        momentum_ref, "show006-momentum", OperationRole.STRATEGY_CALLBACK
-    )
-    ensemble_config = StrategyConfig(
-        ensemble_ref, "show006-ensemble", OperationRole.STRATEGY_CALLBACK
-    )
-    valuation_config = ValuationConfig(
-        "show006-valuation",
-        OperationRole.VALUATION,
-    )
-    monitoring = MonitoringPolicy("show006-monitoring", OperationRole.MONITORING)
-    register_strategy_config(project, reversal_config)
-    register_strategy_config(project, momentum_config)
-    register_strategy_config(project, ensemble_config)
-    register_valuation_config(project, valuation_config)
-    register_monitoring_policy(project, monitoring)
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
     reversal_result = _member_run(
         project,
-        strategy_config=reversal_config,
-        valuation_config=valuation_config,
-        monitoring=monitoring,
+        strategy_ref=reversal_ref,
+        at=time(8, 0),
+        callback_days=callback_days,
         academic_ref=academic_ref,
         start=start,
         end=end,
@@ -821,9 +742,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     momentum_result = _member_run(
         project,
-        strategy_config=momentum_config,
-        valuation_config=valuation_config,
-        monitoring=monitoring,
+        strategy_ref=momentum_ref,
+        at=time(8, 15),
+        callback_days=callback_days,
         academic_ref=academic_ref,
         start=start,
         end=end,
@@ -866,25 +787,32 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         raise AssertionError("the published account series does not read back row for row")
     # Cash is an account-level fact, so it lives on the account-level rows; the instrument panel
     # rows alongside them carry quantity and price instead.
-    published_cash = [row["cash"] for row in replayed_account if row["cash"] is not None]
-    recorded_cash = [str(row["cash"]) for row in recorded_account if row["cash"] is not None]
+    # Compared as numbers: since record `135` the run records cash as a Decimal and the published
+    # column is DECIMAL rather than text, so the round trip is exact on both sides.
+    published_cash = [
+        Decimal(str(row["cash"])) for row in replayed_account if row["cash"] is not None
+    ]
+    recorded_cash = [
+        Decimal(str(row["cash"])) for row in recorded_account if row["cash"] is not None
+    ]
     if published_cash != recorded_cash:
         raise AssertionError("the published cash series differs from what the run recorded")
 
     ensemble_definition = RunDefinition(
-        ensemble_config,
-        valuation_config,
-        ConstraintSet((no_short_ref, cap_ref)),
-        monitoring,
-        krx_ref,
-        "krx-daily",
-        start,
-        end,
-        AccountSnapshot(0, INITIAL_CASH, {}),
-        AccountMode.LONG_ONLY,
+        run_id="show006-ensemble",
+        strategies=(StrategyEntry("show006-ensemble", ("no-short", "single-name-cap")),),
+        sessions=tuple(callback_days),
+        timezone=VENUE,
+        at=time(9, 0),
+        exchange="show006-krx",
+        execution_input_id="krx-daily",
+        start=start,
+        end=end,
+        initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
+        initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
     )
-    ensemble_result = run(project, preflight_run(project, ensemble_definition))
+    ensemble_result = run(project, preflight_run(project, ensemble_definition)).result()
 
     reversal_memory = _memory(reversal_result)
     momentum_memory = _memory(momentum_result)

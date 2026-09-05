@@ -1,7 +1,23 @@
 # 047 — A long scan draws duckdb's progress bar into the same stdout the CLI writes its JSON envelope to, so a slow command's output does not parse
 
+**Status: CLOSED 2026-09-02 by
+[`129-three-debts-that-cost-nothing-to-pay.md`](../implementations/129-three-debts-that-cost-nothing-to-pay.md).**
+Both duckdb connection factories in `src/vqapr/data/scan.py` now go through one `_configure`, which
+sets `enable_progress_bar=false` alongside the `preserve_insertion_order=false` that was already
+there.
+
+**Two things measured while closing it are worth carrying forward, because a one-line patch would
+have got both wrong.** `enable_progress_bar` is `LOCAL` scope, so (1) **a cursor does not inherit
+its parent's value** — silencing the shared database would leave every `ScanSession` cursor
+unconfigured — and (2) **the default is the host's decision, not a constant**: duckdb 1.5.5 turns
+the bar *on* when `__main__` has no `__file__` (a REPL, a notebook, `python -c`, an embedding host)
+and off when it does. That second fact is why the regression test turns the bar on before asserting
+`_configure` turns it back; asserting only that a factory's connection is quiet would pass under
+pytest against a `_configure` that did nothing.
+
+
 **Status when filed:** open. Found 2026-08-31 in
-`kwam-enhanced-index/vqapr-performance-testbed/`, against `vqapr-0.2.0a2` (built wheel). The
+`kwam-enhanced-index/vqapr-performance-testbed/` (a directory that no longer exists, record `136`), against `vqapr-0.2.0a2` (built wheel). The
 workaround it forces was already in the wild — see below — with no record of why.
 **Touches:** `src/vqapr/data/scan.py:150` (`_open`) and `src/vqapr/data/scan.py:205`
 (`ScanSession.connection`), the two places a duckdb connection is created.

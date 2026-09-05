@@ -9,10 +9,10 @@ stable import location and would be refused. This module exists solely so
 account version. The framework stamps all of that identity; the author's only job is the
 economic decision.
 
-**It declares one dataset read, and the read is real.** The loader requires a registered
-StrategyModel to declare at least one requirement, and a declaration nothing consumes would
-be a lie told to satisfy a gate. So the decision is conditioned on the close actually being
-there: no observed price, no book.
+**It declares one dataset read, and the read is real.** A declaration nothing consumes would
+be a lie, so the decision is conditioned on the close actually being there: no observed
+price, no book. Whether the book was already issued lives in `self.memory`, which the
+framework restores before every `decide()` and snapshots after it.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from vqapr.authoring import (
     Rebalance,
     RowsLookback,
     StrategyModel,
-    StrategyResult,
 )
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
@@ -54,30 +53,14 @@ class ShowcaseStrategy(StrategyModel):
             ),
         }
 
-    def decide(self, call) -> StrategyResult:
-        if call.previous_state is not None:
-            return StrategyResult(
-                decision=Hold(reason="already-issued"),
-                next_state=call.previous_state,
-                diagnostics={},
-            )
-        observed = [
-            observation
-            for observation in call.read("prices")
-            if observation.values["close"] is not None
-        ]
-        if not observed:
-            return StrategyResult(
-                decision=Hold(reason="no-observed-price"),
-                next_state=None,
-                diagnostics={},
-            )
-        return StrategyResult(
-            decision=Rebalance(
-                target_weights={"A": Decimal("0.5")},
-                cash_weight=Decimal("0.5"),
-                budget=BUDGET,
-            ),
-            next_state={"issued": True},
-            diagnostics={},
+    def decide(self, call) -> Hold | Rebalance:
+        if self.memory is not None:
+            return Hold(reason="already-issued")
+        if not call.read("prices", "close").latest():
+            return Hold(reason="no-observed-price")
+        self.memory = {"issued": True}
+        return Rebalance(
+            target_weights={"A": Decimal("0.5")},
+            cash_weight=Decimal("0.5"),
+            budget=BUDGET,
         )

@@ -104,8 +104,18 @@ Do not create implementation records for harness-only, documentation-only, exper
 showcase-only changes.
 
 Keep commit messages concise. Keep detailed reasoning in the implementation record. Never stage,
-commit, push, or publish unless the task or user explicitly authorizes that action. Do not mix
-unrelated user changes into a commit.
+commit, push, or publish unless the task or user explicitly authorizes that action.
+
+Do not mix unrelated user changes into a commit. Stage by naming the paths the task actually
+touched. Never use `git add -A`, `git add .`, `git commit -a`, or any other blanket stage: the
+working tree can hold edits the user is making in parallel, and a blanket stage silently commits
+them under a message that does not describe them and an author who did not write them. A clean
+tree at the start of a step is not evidence it is still clean at the end.
+
+Before every commit, run `git status` and confirm every staged path is one this task changed. If a
+foreign change is already staged, unstage it; if it is already committed and not yet pushed or
+merged, recover with `git reset --soft HEAD~1`, unstage the foreign paths, and re-commit. Both
+recover the working tree without touching file content.
 
 ## Non-ASCII host profile hygiene
 

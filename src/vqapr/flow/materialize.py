@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import tempfile
@@ -17,61 +16,23 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from vqapr.authoring import Hold
-from vqapr.data.datasets import DatasetRegistration, validate
-from vqapr.data.lookback import CalendarLookback, RowsLookback
-from vqapr.data.scan import ScanSession
+from vqapr.data.datasets import DatasetRegistration, Grain, validate
 from vqapr.data.sources import SourceSpec
-from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import AccessRecord
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
-from vqapr.domain.identifiers import DatasetId, dataset_id, instrument_id
-from vqapr.domain.rows import Row, Rows, normalize_rows
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.identifiers import DatasetId, dataset_id
+from vqapr.domain.rows import Row
 from vqapr.evidence.artifacts import CallbackEvidence
 from vqapr.evidence.tables import FLOW_ENVELOPE_FIELDS
-from vqapr.extension.loading import load_data_model
-from vqapr.flow.run_records import MATERIALIZATION_KIND, RunRecordWriter, record_fields
 from vqapr.flow.simulation import AcceptedIntent, SimulationResult, callback_evidence
 from vqapr.flow.stamping import derived_available_at
-from vqapr.flow.views import data_model_window
-from vqapr.models.contexts import DataModelContext
 from vqapr.workspace import Workspace
 
 _INPUT_STAGE = "materialize.input"
-_COMPUTE_STAGE = "materialize.compute"
 _OUTPUT_STAGE = "materialize.output"
 _PUBLISH_STAGE = "materialize.publish"
+
+
 _RESERVED_FIELDS = frozenset({"available_at", "instrument"})
-
-
-@dataclass(frozen=True, slots=True)
-class MaterializationSpec:
-    dataset_id: DatasetId
-    value_fields: tuple[str, ...]
-
-    @classmethod
-    def of(
-        cls,
-        raw_dataset_id: str,
-        *,
-        value_fields: Sequence[str],
-    ) -> MaterializationSpec:
-        fields = tuple(value_fields)
-        if not fields:
-            raise ValueError("value_fields must contain at least one field")
-        if any(
-            not isinstance(field, str)
-            or not field
-            or any(character.isspace() for character in field)
-            for field in fields
-        ):
-            raise ValueError("value_fields must be non-empty strings without whitespace")
-        if len(set(fields)) != len(fields):
-            raise ValueError("value_fields must be unique")
-        reserved = sorted(set(fields) & _RESERVED_FIELDS)
-        if reserved:
-            raise ValueError(f"value_fields are package-owned: {reserved}")
-        return cls(dataset_id(raw_dataset_id), fields)
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,29 +156,6 @@ class AllocationPublicationResult:
     row_count: int
 
 
-@dataclass(frozen=True, slots=True)
-class MaterializationInvocation:
-    evaluation_time: datetime
-    output_available_at: datetime
-    row_count: int
-    accesses: tuple[AccessRecord, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class MaterializationResult:
-    registration: DatasetRegistration
-    output_path: Path
-    lineage_path: Path
-    invocations: tuple[MaterializationInvocation, ...]
-    record_path: Path | None = None
-    """The run record this materialization wrote, since record `116`.
-
-    Optional so a caller constructing one for a test does not have to invent a path. The product
-    path always sets it: a materialization that produced a dataset and no record would be the
-    invisibility this field exists to end.
-    """
-
-
 def _error(
     stage: str,
     code: str,
@@ -260,196 +198,6 @@ def _error(
     )
 
 
-def _evaluation_times(values: Sequence[datetime]) -> tuple[datetime, ...]:
-    try:
-        selected = tuple(values)
-    except TypeError as error:
-        raise _error(
-            _INPUT_STAGE,
-            f"{_INPUT_STAGE}.evaluation_times_invalid",
-            "evaluation_times must be a finite sequence",
-            f"{type(error).__name__}: {error}",
-            fix=(
-                "pass a concrete sequence (list/tuple) of evaluation times, not an "
-                "unbounded iterator"
-            ),
-            explain=ExplainTopic.DECLARATION_SHAPE,
-            retry="provide sorted unique timezone-aware evaluation times, then retry",
-        ) from error
-    try:
-        for value in selected:
-            require_tz_aware(value, name="evaluation_time")
-    except (TypeError, ValueError) as error:
-        raise _error(
-            _INPUT_STAGE,
-            f"{_INPUT_STAGE}.evaluation_times_invalid",
-            "every evaluation time must be timezone-aware",
-            str(error),
-            fix="localize every evaluation_time to a timezone before calling materialize",
-            explain=ExplainTopic.DECLARATION_SHAPE,
-            retry="provide sorted unique timezone-aware evaluation times, then retry",
-        ) from error
-    if not selected or len(set(selected)) != len(selected) or selected != tuple(sorted(selected)):
-        raise _error(
-            _INPUT_STAGE,
-            f"{_INPUT_STAGE}.evaluation_times_invalid",
-            "evaluation_times must be non-empty, strictly increasing, and unique",
-            repr(selected),
-            fix="sort and deduplicate evaluation_times before calling materialize",
-            explain=ExplainTopic.DECLARATION_SHAPE,
-            retry="provide sorted unique timezone-aware evaluation times, then retry",
-        )
-    return selected
-
-
-def _instruments(values: Sequence[str]) -> tuple[str, ...]:
-    try:
-        selected = tuple(str(instrument_id(value)) for value in values)
-    except (TypeError, ValueError) as error:
-        raise _error(
-            _INPUT_STAGE,
-            f"{_INPUT_STAGE}.instruments_invalid",
-            "instruments must contain valid identities",
-            str(error),
-            fix="pass only valid instrument identities in the instruments list",
-            explain=ExplainTopic.DECLARATION_SHAPE,
-            retry="provide a non-empty unique instrument list, then retry",
-        ) from error
-    if not selected or len(set(selected)) != len(selected):
-        raise _error(
-            _INPUT_STAGE,
-            f"{_INPUT_STAGE}.instruments_invalid",
-            "instruments must be non-empty and unique",
-            repr(selected),
-            fix="deduplicate instruments and pass at least one, then retry",
-            explain=ExplainTopic.DECLARATION_SHAPE,
-            retry="provide a non-empty unique instrument list, then retry",
-        )
-    return selected
-
-
-def _validated_output(
-    raw: object,
-    *,
-    spec: MaterializationSpec,
-    selected_instruments: tuple[str, ...],
-) -> Rows:
-    try:
-        rows = normalize_rows(raw)
-    except (TypeError, ValueError) as error:
-        raise _error(
-            _OUTPUT_STAGE,
-            f"{_OUTPUT_STAGE}.rows_invalid",
-            "DataModel output must contain portable finite scalar rows",
-            f"{type(error).__name__}: {error}",
-            fix=(
-                "return only finite scalar values (no NaN/inf, no nested objects) from "
-                "DataModel.compute"
-            ),
-            explain=ExplainTopic.COMPONENT_CONTRACT,
-            retry="fix DataModel.compute output, register the component again, then retry",
-        ) from error
-
-    expected = {"instrument", *spec.value_fields}
-    seen: set[str] = set()
-    # Two content checks collect instead of failing fast, and the two lists below are why.
-    #
-    # `SKILL.md` promises that a check on row *contents* quotes up to five offending values and
-    # reports how many there were before truncation. Raising inside the loop cannot honour that:
-    # the first offender is the only one the check ever sees, so `examples` came back empty and
-    # `example_total` came back `0` while twenty rows were wrong -- a count that reads as "nothing
-    # was wrong" and is the only quantity in the envelope (issue 032). Collecting costs one more
-    # pass over output that is already being discarded, and buys the author the difference between
-    # one typo and a systematic fault, in one refusal rather than twenty edit-and-rerun cycles.
-    #
-    # The per-row *structural* checks above still raise on the first offender, deliberately: a row
-    # whose field set is wrong, or whose instrument will not parse, has no content to judge yet.
-    unrequested: list[str] = []
-    unrequested_rows = 0
-    duplicated: list[str] = []
-    duplicate_rows = 0
-    for index, row in enumerate(rows):
-        actual = set(row)
-        if "available_at" in actual:
-            raise _error(
-                _OUTPUT_STAGE,
-                f"{_OUTPUT_STAGE}.available_at_owned",
-                "DataModel output must not set package-owned available_at",
-                f"row {index} fields={sorted(actual)}",
-                fix="drop available_at from the row dict returned by DataModel.compute",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
-                retry="remove available_at from DataModel output, then retry",
-            )
-        if actual != expected:
-            raise _error(
-                _OUTPUT_STAGE,
-                f"{_OUTPUT_STAGE}.fields_invalid",
-                f"every output row must contain exactly {sorted(expected)}",
-                f"row {index} fields={sorted(actual)}",
-                fix=f"return exactly {sorted(expected)} on every row from DataModel.compute",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
-                retry="return exactly the declared output fields, then retry",
-            )
-        try:
-            instrument = str(instrument_id(row["instrument"]))
-        except (TypeError, ValueError) as error:
-            raise _error(
-                _OUTPUT_STAGE,
-                f"{_OUTPUT_STAGE}.instrument_invalid",
-                "every output row must identify one valid requested instrument",
-                f"row {index}: {error}",
-                fix="return only valid instrument identities from DataModel.compute",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
-                retry="return valid requested instrument identities, then retry",
-            ) from error
-        if instrument not in selected_instruments:
-            unrequested_rows += 1
-            if instrument not in unrequested:
-                unrequested.append(instrument)
-            # Not entered into `seen`: an unrequested instrument is one violation, not also a
-            # duplicate one. This is what the old fail-fast ordering did too -- it raised before
-            # the duplicate branch could ever look at the row -- and this lane changes how
-            # violations are reported, not what counts as one.
-            continue
-        if instrument in seen:
-            duplicate_rows += 1
-            if instrument not in duplicated:
-                duplicated.append(instrument)
-            continue
-        seen.add(instrument)
-    if unrequested:
-        raise _error(
-            _OUTPUT_STAGE,
-            f"{_OUTPUT_STAGE}.instrument_unrequested",
-            "DataModel output instruments must come from the invocation input",
-            (
-                f"{len(unrequested)} unrequested instrument(s) across {unrequested_rows} "
-                f"of {len(rows)} output row(s)"
-            ),
-            fix="only emit rows for instruments passed into materialize's instruments argument",
-            explain=ExplainTopic.COMPONENT_CONTRACT,
-            retry="return values only for requested instruments, then retry",
-            examples=unrequested,
-            example_total=len(unrequested),
-        )
-    if duplicated:
-        raise _error(
-            _OUTPUT_STAGE,
-            f"{_OUTPUT_STAGE}.instrument_duplicate",
-            "DataModel output must contain at most one row per instrument per evaluation",
-            (
-                f"{len(duplicated)} repeated instrument(s) across {duplicate_rows} "
-                f"extra of {len(rows)} output row(s)"
-            ),
-            fix="emit at most one row per instrument per evaluation from DataModel.compute",
-            explain=ExplainTopic.COMPONENT_CONTRACT,
-            retry="deduplicate DataModel output, then retry",
-            examples=duplicated,
-            example_total=len(duplicated),
-        )
-    return rows
-
-
 def _json_scalar(value: object) -> object:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -458,39 +206,6 @@ def _json_scalar(value: object) -> object:
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     raise TypeError(f"cannot serialize lineage scalar {type(value).__name__}")
-
-
-def _lookback(access: AccessRecord) -> Mapping[str, object]:
-    if isinstance(access.lookback, RowsLookback):
-        return {"kind": "rows", "rows": access.lookback.rows}
-    if isinstance(access.lookback, CalendarLookback):
-        return {
-            "kind": "calendar",
-            "years": access.lookback.years,
-            "months": access.lookback.months,
-            "days": access.lookback.days,
-            "timezone": access.lookback.timezone,
-        }
-    raise TypeError("unsupported lookback")
-
-
-def _access_payload(access: AccessRecord) -> Mapping[str, object]:
-    return {
-        "consumer_id": access.consumer_id,
-        "dataset_id": str(access.dataset_id),
-        "fields": list(access.fields),
-        "lookback": _lookback(access),
-        "evaluation_time": access.evaluation_time.isoformat(),
-        "instruments": list(access.instruments),
-        "lower_bound": (access.lower_bound.isoformat() if access.lower_bound is not None else None),
-        "actual_rows": {
-            instrument: dict(sorted(counts.items()))
-            for instrument, counts in sorted(access.actual_rows.items())
-        },
-        "max_available_at": (
-            access.max_available_at.isoformat() if access.max_available_at is not None else None
-        ),
-    }
 
 
 def _lineage_envelope(
@@ -517,130 +232,6 @@ def _lineage_envelope(
         },
         "instruments": list(instruments),
     }
-
-
-def _lineage_payload(
-    *,
-    component_id: str,
-    fingerprint: str,
-    source_id: str,
-    spec: MaterializationSpec,
-    instruments: tuple[str, ...],
-    invocations: tuple[MaterializationInvocation, ...],
-) -> Mapping[str, object]:
-    payload = _lineage_envelope(
-        operation="datamodel.materialize",
-        dataset_id=str(spec.dataset_id),
-        source_id=source_id,
-        value_fields=spec.value_fields,
-        instruments=instruments,
-    )
-    payload["component"] = {"component_id": component_id, "fingerprint": fingerprint}
-    # A PROJECTION of the run record's `period` block, not a second computation of it. Record `116`
-    # made the run record the authority: `.lineage.json` is still written for one release, and the
-    # two cannot drift because this reads the same structure the record carries.
-    payload["invocations"] = list(
-        _materialization_period(invocations)["invocations"]  # type: ignore[index]
-    )
-    return payload
-
-
-def _materialization_period(
-    invocations: tuple[MaterializationInvocation, ...],
-) -> Mapping[str, object]:
-    """The per-invocation facts, in the shape the run record's `period` block carries.
-
-    One structure with two readers. `.lineage.json` used to build this itself, so the run record
-    and the lineage file were two computations of the same facts and free to diverge -- which is
-    precisely the shape record `112` argues against, and the reason `docs/issues/012` exists.
-    """
-    return {
-        "invocations": [
-            {
-                "evaluation_time": invocation.evaluation_time.isoformat(),
-                "output_available_at": invocation.output_available_at.isoformat(),
-                "row_count": invocation.row_count,
-                "accesses": [_access_payload(access) for access in invocation.accesses],
-            }
-            for invocation in invocations
-        ],
-        "occurrences": len(invocations),
-    }
-
-
-def _materialization_run_id(
-    dataset: str, invocations: tuple[MaterializationInvocation, ...]
-) -> str:
-    """A run id for a materialization, derived from what it produced rather than from a clock.
-
-    Two materializations of the same dataset at the same evaluation times ARE the same run, and
-    giving them the same id is what makes a re-run visible as a replacement instead of as a second
-    history. A wall-clock id would make every invocation unique and turn `list runs` into a log.
-
-    The last evaluation time is in the id because that is what a reader scanning ids wants to sort
-    by -- which materialization is the newest -- and it is stable across re-runs of the same window.
-    """
-    latest = max((i.evaluation_time for i in invocations), default=None)
-    stamp = latest.strftime("%Y%m%dT%H%M%SZ") if latest is not None else "empty"
-    return f"materialize-{_safe_stem(dataset)}-{stamp}"
-
-
-def _write_materialization_record(
-    *,
-    project_root: Path,
-    registration: DatasetRegistration,
-    source_id: str,
-    component_fingerprint: str,
-    invocations: tuple[MaterializationInvocation, ...],
-) -> Path | None:
-    """Record this materialization as a run of `kind: materialization`.
-
-    **Owner ruling, record `116`.** A materialization already produced exactly the facts a run
-    record carries -- which declarations produced it, how many rows, over what window -- and wrote
-    them to `.lineage.json`, a file that `list runs` does not index and `show run` cannot read. So
-    the same question had two answers in two formats and one of them was invisible to both
-    commands. It is one kind of record now, and the fields are the ones record `115` declared for
-    this kind a story before its producer existed.
-
-    A failure to write the record does not fail the materialization. The dataset is registered and
-    the parquet is on disk by the time this runs; refusing here would discard a completed
-    materialization over its own bookkeeping, which is the defect record `113` fixed on the run
-    path (R1) and must not be reintroduced on this one.
-    """
-    run_id = _materialization_run_id(str(registration.dataset_id), invocations)
-    period = _materialization_period(invocations)
-    rows = sum(invocation.row_count for invocation in invocations)
-    times = [i.evaluation_time for i in invocations]
-    span = (
-        {"first": min(times).isoformat(), "last": max(times).isoformat()} if times else None
-    )
-
-    answers: dict[str, object] = {
-        "dataset_id": str(registration.dataset_id),
-        "source_digest": source_id,
-        "declared_digest": component_fingerprint,
-        "rows": rows,
-        "span": span,
-        "period": period,
-    }
-    # The same guarantee the run kind gets: a field named without a builder, or a builder without a
-    # field, fails here rather than producing a record quietly missing an answer.
-    expected = {field for field in record_fields(MATERIALIZATION_KIND) if field != "run_id"}
-    missing = expected - set(answers)
-    if missing:
-        raise KeyError(
-            f"materialization record is missing {sorted(missing)}; "
-            f"record_fields({MATERIALIZATION_KIND!r}) names them"
-        )
-
-    writer = RunRecordWriter(project_root, run_id)
-    try:
-        writer.open()
-        return writer.finish(answers, kind=MATERIALIZATION_KIND)
-    except (OSError, VqaprError):
-        with contextlib.suppress(Exception):
-            writer.release()
-        return None
 
 
 def _safe_stem(value: str) -> str:
@@ -763,6 +354,10 @@ def _stage_and_publish(
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={field: field for field in value_fields},
+            # Stated by the publisher, not derived: the shared publication authority keys on
+            # (available_at, instrument) and refuses a duplicate before exposure, so what it
+            # publishes IS that grain.
+            grain=Grain.INSTRUMENT_INSTANT,
         )
         candidate_source = SourceSpec.of(source_id, temporary_output)
         diagnosis, _, candidate_registration = validate(candidate_registration, candidate_source)
@@ -897,7 +492,7 @@ def publish_run_allocation(
                 f"{_OUTPUT_STAGE}.decision_invalid",
                 "a callback decision must be Hold or an economic intent",
                 type(decision).__name__,
-                fix="return Hold or an economic intent from the strategy's on_occurrence",
+                fix="return Hold or Rebalance from the strategy's decide()",
                 explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="publish from a strategy that emits economic intents, then retry",
             )
@@ -1145,172 +740,4 @@ def publish_run_record(
         output_path=output_path,
         lineage_path=lineage_path,
         row_count=len(rows),
-    )
-
-
-def materialize(
-    project_root: str | Path,
-    raw_component_id: str,
-    spec: MaterializationSpec,
-    *,
-    evaluation_times: Sequence[datetime],
-    instruments: Sequence[str],
-) -> MaterializationResult:
-    """Compute all evaluations first, then expose one complete registered parquet."""
-    if not isinstance(spec, MaterializationSpec):
-        raise TypeError("spec must be a MaterializationSpec")
-    times = _evaluation_times(evaluation_times)
-    selected_instruments = _instruments(instruments)
-    workspace = Workspace.open(project_root)
-    if any(item.dataset_id == spec.dataset_id for item in workspace.datasets):
-        raise _error(
-            _INPUT_STAGE,
-            f"{_INPUT_STAGE}.dataset_exists",
-            "materialization output dataset_id must be new",
-            str(spec.dataset_id),
-            # See the sibling refusal above: `vqapr run --force` replaces a run record, not a
-            # registration, so naming it here would be an instruction to delete the wrong thing.
-            fix=(
-                f"materialize to a dataset_id that is not registered, or remove the existing "
-                f"{spec.dataset_id} registration from the workspace first"
-            ),
-            explain=ExplainTopic.WORKSPACE_STATE,
-            retry="choose a new output dataset_id, then retry",
-        )
-
-    ref = workspace.component(raw_component_id)
-    # `project_root`, because a registered `ref.path` may be relative: `_load` resolves a relative
-    # path against the process CWD when no root is given, so omitting it made a run depend on where
-    # it was invoked from. Every other loader on the run path passes it -- `preflight_run` for each
-    # kind, and `check`'s dataset judgment -- and this was the one that did not.
-    model = load_data_model(ref, project_root=Path(project_root))
-    requirements = model.requirements()
-    # Resolved once for the whole materialization: `inputs()` is a declaration, not a per-
-    # evaluation decision, and re-resolving it each time would let it differ between them.
-    declared_reads = model.inputs()
-    stamped_rows: list[Row] = []
-    invocation_records: list[MaterializationInvocation] = []
-    # One physical handle for the whole materialization, for the same reason `public.run()` keeps
-    # one for a run: duckdb caches parquet metadata for a connection's lifetime, the source digest
-    # is hashed once instead of once per evaluation, and `scan.observation_rows` will only bound a
-    # `RowsLookback` when it has a session -- without one, every evaluation ranks a window
-    # function across the source's entire history. Measured on 4,841 instruments against a 127 MB
-    # daily panel: 2.90s -> 1.47s per evaluation, identical rows.
-    session = ScanSession()
-    store = DuckDbObservationStore(workspace, session=session)
-    try:
-        for evaluation_time in times:
-            window = data_model_window(
-                workspace,
-                evaluation_time=evaluation_time,
-                instruments=selected_instruments,
-                requirements=requirements,
-                consumer_id=str(ref.component_id),
-                store=store,
-            )
-            try:
-                raw_rows = model.compute(DataModelContext(window, declared_reads))
-            except VqaprError:
-                raise
-            except Exception as error:
-                raise _error(
-                    _COMPUTE_STAGE,
-                    f"{_COMPUTE_STAGE}.failed",
-                    "DataModel.compute must complete for every evaluation before publication",
-                    f"{type(error).__name__}: {error}",
-                    fix="fix the exception raised inside DataModel.compute for this evaluation",
-                    explain=ExplainTopic.COMPONENT_CONTRACT,
-                    retry="fix the DataModel or its declared input sufficiency, then retry",
-                ) from error
-            rows = _validated_output(
-                raw_rows,
-                spec=spec,
-                selected_instruments=selected_instruments,
-            )
-            available_at = derived_available_at(evaluation_time, window.accesses)
-            for row in rows:
-                stamped: Row = {
-                    "available_at": available_at,
-                    "instrument": row["instrument"],
-                }
-                stamped.update({field: row[field] for field in spec.value_fields})
-                stamped_rows.append(stamped)
-            invocation_records.append(
-                MaterializationInvocation(
-                    evaluation_time=evaluation_time,
-                    output_available_at=available_at,
-                    row_count=len(rows),
-                    accesses=window.accesses,
-                )
-            )
-    finally:
-        session.close()
-
-    if not stamped_rows:
-        # The declared lookbacks, named. `check` proves what registered metadata can prove -- that
-        # a dataset's span reaches back past the earliest evaluation -- and cannot prove that the
-        # span holds ENOUGH rows, because a registration records a span and not a count. So the
-        # short-window case arrives here, and it is by far the most common reason every invocation
-        # returns nothing. A fix that says only "widen the instruments/evaluation_times" sends the
-        # reader to the two things that are usually already right.
-        declared = ", ".join(
-            f"{requirement.dataset_id}: {rows} row(s)"
-            for requirement in requirements
-            if (rows := getattr(getattr(requirement, "lookback", None), "rows", None))
-        )
-        raise _error(
-            _OUTPUT_STAGE,
-            f"{_OUTPUT_STAGE}.empty",
-            "materialization must produce at least one output row",
-            (
-                f"all {len(invocation_records)} invocation(s) returned zero rows"
-                + (f"; the model declares a lookback of {declared}" if declared else "")
-            ),
-            fix=(
-                "a lookback longer than the available history makes every window short and every "
-                "evaluation empty: check that each input dataset holds at least that many rows "
-                "before the earliest evaluation instant. Otherwise widen the requested "
-                "instruments/evaluation_times, or fix DataModel.compute to emit rows"
-            ),
-            explain=ExplainTopic.RUN_PRECONDITION,
-            retry="fix input coverage or DataModel output, then retry",
-        )
-
-    source_id = f"materialized-{spec.dataset_id}"
-    invocations = tuple(invocation_records)
-    candidate_registration, output_path, lineage_path = _stage_and_publish(
-        workspace=workspace,
-        project_root=project_root,
-        dataset_id=str(spec.dataset_id),
-        source_id=source_id,
-        value_fields=spec.value_fields,
-        rows=stamped_rows,
-        payload=_lineage_payload(
-            component_id=str(ref.component_id),
-            fingerprint=ref.fingerprint,
-            source_id=source_id,
-            spec=spec,
-            instruments=selected_instruments,
-            invocations=invocations,
-        ),
-    )
-
-    # Written HERE rather than in the CLI's `_materialize`, so a public-API caller -- the showcases,
-    # a notebook, `vqapr.materialize` -- gets a record too. Record `116`: today the same question
-    # has two answers in two formats and one of them is invisible to both `list runs` and
-    # `show run`, because `.lineage.json` is a file nothing indexes.
-    record_path = _write_materialization_record(
-        project_root=Path(project_root),
-        registration=candidate_registration,
-        source_id=source_id,
-        component_fingerprint=ref.fingerprint,
-        invocations=invocations,
-    )
-
-    return MaterializationResult(
-        registration=candidate_registration,
-        output_path=output_path,
-        lineage_path=lineage_path,
-        invocations=invocations,
-        record_path=record_path,
     )

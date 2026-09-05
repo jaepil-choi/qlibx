@@ -5,7 +5,7 @@ per-query re-hash and a per-root re-verification both look free here; they only 
 warehouse over a long run. These tests therefore assert **counts and shapes**, never wall time,
 which would be flaky in CI and would not say what actually regressed.
 
-See `docs/code-review/2026-08-19-vqapr-performance.md` sections 6 and 8.
+See `docs/diagnostics/archive/2026-08-19-vqapr-performance.md` sections 6 and 8.
 """
 
 from __future__ import annotations
@@ -68,6 +68,7 @@ def priced_workspace(tmp_path: Path) -> Workspace:
             "prices-source",
             instrument_field="instrument",
             available_at="available_at",
+            grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
         ),
@@ -92,13 +93,13 @@ def test_one_store_hashes_each_source_once_no_matter_how_many_queries(
     rather than merely detected.
     """
     calls: list[Path] = []
-    original = store._physical_digest
+    original = store.physical_digest
 
     def counting_digest(path: Path) -> str:
         calls.append(path)
         return original(path)
 
-    monkeypatch.setattr(store, "_physical_digest", counting_digest)
+    monkeypatch.setattr(store, "physical_digest", counting_digest)
 
     observation_store = DuckDbObservationStore(priced_workspace)
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(2))

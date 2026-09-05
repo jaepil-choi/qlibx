@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import chain
@@ -15,10 +15,10 @@ from vqapr.account.account import (
     PreparedAccountValuation,
 )
 from vqapr.account.snapshot import AccountState
+from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.references import ModelStateRef
 from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
 from vqapr.flow.model_state import prepare_model_state
-from vqapr.models.memory import ModelMemory, normalize_memory
 from vqapr.valuation.marks import MarkBatch
 
 
@@ -27,6 +27,7 @@ class LifecycleKind(StrEnum):
     ACCEPTED_INTENT = "ACCEPTED_INTENT"
     ACCOUNT_COMMITTED = "ACCOUNT_COMMITTED"
     MARKED = "MARKED"
+    MONITORED = "MONITORED"
     FEEDBACK_PUBLISHED = "FEEDBACK_PUBLISHED"
 
 
@@ -158,6 +159,13 @@ class PreparedRunState:
 
     expected_version: int
     root: AcceptedRunState
+    new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
+    """The recorder chunks this candidate adds, when the repository streams them.
+
+    Empty when the repository has no row sink: the chunks are then inside `root` as before.
+    With a sink they are here instead, handed over at publish and never retained by a root, so a
+    run's heap holds one occurrence's rows rather than the run's.
+    """
 
 
 _UNSET = object()
@@ -244,9 +252,12 @@ class RunStateRepository:
         initial_payload: bytes = b"",
         pending_accepted_intent: object = None,
         before_swap: Callable[[PreparedRunState], None] | None = None,
+        row_sink: Callable[[str, Sequence[Mapping[str, object]]], None] | None = None,
     ) -> None:
         if not isinstance(initial_payload, bytes):
             raise TypeError("initial_payload must be bytes")
+        if row_sink is not None and not callable(row_sink):
+            raise TypeError("row_sink must be callable")
         prepared = prepare_model_state(initial_model_memory, initial_payload)
         states = {prepared.ref: prepared.memory}
         payloads = {prepared.ref: prepared.payload}
@@ -261,6 +272,10 @@ class RunStateRepository:
             model_state_commit_count=0,
         )
         self._before_swap = before_swap
+        # Where accepted recorder rows go, when they go anywhere but the root. `orchestration.run`
+        # passes the run record writer's `append`; a flow assembled without a store keeps rows in
+        # its roots as it always did, so every in-memory reader of `recorder_rows` is unchanged.
+        self._row_sink = row_sink
 
     @property
     def current(self) -> AcceptedRunState:
@@ -275,6 +290,40 @@ class RunStateRepository:
 
     def load_payload(self, ref: ModelStateRef) -> bytes:
         return self._root.load_payload(ref)
+
+    def _stage_rows(
+        self,
+        chunks: dict[str, tuple[tuple[Mapping[str, object], ...], ...]],
+        staged_rows: Mapping[str, Sequence[Mapping[str, object]]],
+    ) -> tuple[tuple[str, tuple[Mapping[str, object], ...]], ...]:
+        """One occurrence's recorder rows: into the root, or out to the sink at publish.
+
+        `staged_rows()` already returned detached, normalized rows. Wrapping read-only happens
+        once, here, instead of on every subsequent root. Without a sink the chunk is appended to
+        the root's chunks as before -- O(new rows), so total cost stays linear in run length.
+        With one, the root keeps nothing and the chunk rides on the prepared candidate until the
+        swap that accepts it.
+        """
+        new_rows: list[tuple[str, tuple[Mapping[str, object], ...]]] = []
+        for table_id, table_rows in staged_rows.items():
+            chunk = tuple(MappingProxyType(row) for row in table_rows)
+            if self._row_sink is None:
+                chunks[table_id] = (*chunks.get(table_id, ()), chunk)
+            else:
+                new_rows.append((table_id, chunk))
+        return tuple(new_rows)
+
+    def _deliver(self, prepared: PreparedRunState) -> None:
+        """Hand an accepted candidate's rows to the sink, before the swap makes it current.
+
+        Before, not after: a sink that cannot take the rows -- a full disk -- fails the
+        occurrence rather than accepting a root whose rows were lost, and everything up to the
+        previous occurrence is already on disk.
+        """
+        if self._row_sink is None or not prepared.new_rows:
+            return
+        for table_id, rows in prepared.new_rows:
+            self._row_sink(table_id, rows)
 
     def prepare_callback(
         self,
@@ -304,15 +353,11 @@ class RunStateRepository:
         payloads[candidate.ref] = candidate.payload
         chunks = dict(root._recorder_chunks)
         manifests = root.recorder_manifests
+        new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
         if recorder is not None:
             if not isinstance(recorder, InvocationRecorder):
                 raise TypeError("recorder must be an InvocationRecorder")
-            staged_rows = recorder.staged_rows()
-            for table_id, table_rows in staged_rows.items():
-                # staged_rows() already returned detached, normalized rows. Wrapping read-only
-                # happens once, here, instead of on every subsequent root.
-                chunk = tuple(MappingProxyType(row) for row in table_rows)
-                chunks[table_id] = (*chunks.get(table_id, ()), chunk)
+            new_rows = self._stage_rows(chunks, recorder.staged_rows())
             manifests = manifests + recorder.manifests()
         next_root = AcceptedRunState(
             version=root.version + 1,
@@ -335,7 +380,7 @@ class RunStateRepository:
             finalization=root.finalization,
             model_state_commit_count=root.model_state_commit_count + 1,
         )
-        return PreparedRunState(expected_version=expected, root=next_root)
+        return PreparedRunState(expected_version=expected, root=next_root, new_rows=new_rows)
 
     def publish(self, prepared: PreparedRunState) -> AcceptedRunState:
         """Perform the sole mutable action after all fallible work is complete."""
@@ -345,6 +390,7 @@ class RunStateRepository:
             raise RuntimeError("run state optimistic conflict")
         if self._before_swap is not None:
             self._before_swap(prepared)
+        self._deliver(prepared)
         self._root = prepared.root
         return self._root
 
@@ -354,6 +400,7 @@ class RunStateRepository:
             raise TypeError("prepared must be a PreparedRunState")
         if prepared.expected_version != self._root.version:
             raise RuntimeError("run state optimistic conflict")
+        self._deliver(prepared)
         self._root = prepared.root
         return self._root
 
@@ -409,14 +456,41 @@ class RunStateRepository:
     def publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
+    def _staged(
+        self, recorder: InvocationRecorder | None
+    ) -> tuple[dict, tuple[RecorderManifest, ...], tuple]:
+        """The root's chunks and manifests, extended by `recorder`'s rows when there is one."""
+        root = self._root
+        chunks = dict(root._recorder_chunks)
+        manifests = root.recorder_manifests
+        new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
+        if recorder is not None:
+            if not isinstance(recorder, InvocationRecorder):
+                raise TypeError("recorder must be an InvocationRecorder")
+            new_rows = self._stage_rows(chunks, recorder.staged_rows())
+            manifests = manifests + recorder.manifests()
+        return chunks, manifests, new_rows
+
     def prepare_marked(
-        self, *, account: PreparedAccountTransition, mark: MarkBatch, evidence: object = None
+        self,
+        *,
+        account: PreparedAccountTransition,
+        mark: MarkBatch,
+        evidence: object = None,
+        recorder: InvocationRecorder | None = None,
     ) -> PreparedRunState:
+        """Publish the mark a fill was valued at, and the NAV it measured.
+
+        Valuation happens at the instant the venue fills (record 148): the marked account and
+        the account-table row stating its NAV are one commit, so the rows a run reads its NAV
+        series from can never disagree with the marks the run holds.
+        """
         root = self._root
         if root.account is None or root.account.snapshot != account.fill.next_snapshot:
             raise RuntimeError("prepared Account mark does not match current root")
         if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
             raise ValueError("mark must be the prepared Account mark batch")
+        chunks, manifests, new_rows = self._staged(recorder)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -431,12 +505,13 @@ class RunStateRepository:
                     *root.lifecycle_trace,
                     LifecycleTrace(LifecycleKind.MARKED, evidence),
                 ),
-                recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=root._recorder_chunks,
+                recorder_manifests=manifests,
+                _recorder_chunks=chunks,
                 feedback=root.feedback,
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
             ),
+            new_rows,
         )
 
     def publish_marked(self, prepared: PreparedRunState) -> AcceptedRunState:
@@ -449,11 +524,13 @@ class RunStateRepository:
         account: PreparedAccountValuation,
         mark: MarkBatch,
         evidence: object = None,
+        recorder: InvocationRecorder | None = None,
     ) -> PreparedRunState:
         """Publish a mark taken by an occurrence that requested no orders.
 
         The Account did not change, so this consumes the pending identity and appends a mark
-        without an ACCOUNT_COMMITTED step. There is no fill to commit.
+        without an ACCOUNT_COMMITTED step. There is no fill to commit. The NAV measured rides
+        along as `recorder` rows, exactly as it does on `prepare_marked`.
         """
         root = self._root
         if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
@@ -462,6 +539,7 @@ class RunStateRepository:
             raise RuntimeError("prepared Account valuation does not match current root")
         if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
             raise ValueError("mark must be the prepared Account mark batch")
+        chunks, manifests, new_rows = self._staged(recorder)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -476,52 +554,37 @@ class RunStateRepository:
                     *root.lifecycle_trace,
                     LifecycleTrace(LifecycleKind.MARKED, evidence),
                 ),
-                recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=root._recorder_chunks,
+                recorder_manifests=manifests,
+                _recorder_chunks=chunks,
                 feedback=root.feedback,
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
             ),
+            new_rows,
         )
 
     def publish_valuation_only(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
-    def prepare_standalone_valuation(
-        self,
-        *,
-        account: PreparedAccountValuation,
-        mark: MarkBatch,
-        recorder: InvocationRecorder,
-        evidence: object = None,
+    def prepare_monitoring(
+        self, *, recorder: InvocationRecorder, evidence: object = None
     ) -> PreparedRunState:
-        """Publish a mark taken by a valuation occurrence that no decision prepared.
+        """Publish the findings monitoring made over the account one commit left.
 
-        This is `prepare_valuation_only`'s sibling for the independent valuation clock, and the
-        difference between them is the pending slot. `prepare_valuation_only` CONSUMES a pending
-        identity, because a Hold minted one and the mark is that pending's completion. A
-        standalone valuation never minted one: it is its own occurrence on its own clock, so
-        there is no identity to match and none to clear. Touching the slot here is precisely what
-        must not happen -- it holds at most one occupant, so a daily valuation passing through it
-        would evict accepted decisions on most sessions.
-
-        The Account does not change, so there is no ACCOUNT_COMMITTED step. The recorder rows are
-        staged the same way a callback's are, because the NAV series has to be readable from the
-        same table whichever clock measured it.
+        Monitoring changes nothing it observes: no fill, no mark, no decision, and the pending
+        slot is left exactly as found -- it runs right after a commit (record `148`), and the
+        commit already settled that slot. What it adds is rows -- one per constraint, saying what
+        was measured against which limit -- and until this path existed those rows had nowhere to
+        go. The report sat
+        on the occurrence trace, the record counted it (`contract`), and the values themselves
+        never reached disk: a run whose book breached a limit could say *that* it did, and not
+        *by how much*.
         """
         if not isinstance(recorder, InvocationRecorder):
             raise TypeError("recorder must be an InvocationRecorder")
         root = self._root
-        if root.account is None or root.account != account.source:
-            raise RuntimeError("prepared Account valuation does not match current root")
-        if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
-            raise ValueError("mark must be the prepared Account mark batch")
-
         chunks = dict(root._recorder_chunks)
-        for table_id, table_rows in recorder.staged_rows().items():
-            chunk = tuple(MappingProxyType(row) for row in table_rows)
-            chunks[table_id] = (*chunks.get(table_id, ()), chunk)
-
+        new_rows = self._stage_rows(chunks, recorder.staged_rows())
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -530,12 +593,11 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
-                account=account.next_state,
-                # Left exactly as found. A standalone valuation neither takes nor releases it.
+                account=root.account,
                 pending_accepted_intent=root.pending_accepted_intent,
                 lifecycle_trace=(
                     *root.lifecycle_trace,
-                    LifecycleTrace(LifecycleKind.MARKED, evidence),
+                    LifecycleTrace(LifecycleKind.MONITORED, evidence),
                 ),
                 recorder_manifests=root.recorder_manifests + recorder.manifests(),
                 _recorder_chunks=chunks,
@@ -543,9 +605,10 @@ class RunStateRepository:
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
             ),
+            new_rows,
         )
 
-    def publish_standalone_valuation(self, prepared: PreparedRunState) -> AcceptedRunState:
+    def publish_monitoring(self, prepared: PreparedRunState) -> AcceptedRunState:
         return self._publish_infallible(prepared)
 
     def prepare_feedback(

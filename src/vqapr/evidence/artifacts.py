@@ -160,7 +160,13 @@ class SimulationFailure(RuntimeError, ValueError):
         account_version: int | None,
         pending_id: str | None,
         kind: SimulationFailureKind = _PRE_COMMIT,
+        component_id: str | None = None,
+        source: FailureSource | None = None,
     ) -> None:
+        """`component_id` names the strategy whose flow raised, and `source` where in the
+        author's own file it was raised from, when a frame of that file is on the traceback.
+        Both were absent (`docs/issues/071`): an eight-strategy run refused with a message
+        that named no strategy, and `source` was three nulls on every callback failure."""
         if not isinstance(family, SimulationFailureFamily):
             raise TypeError("family must be a SimulationFailureFamily")
         if not isinstance(stage, SimulationStage):
@@ -191,7 +197,13 @@ class SimulationFailure(RuntimeError, ValueError):
         self.model_state_ref = model_state_ref
         self.account_version = account_version
         self.pending_id = pending_id
-        super().__init__(f"{stage.value}: {cause}")
+        self.component_id = None if component_id is None else str(component_id)
+        self.source = source if source is not None else FailureSource()
+        super().__init__(
+            f"{stage.value}: {cause}"
+            if component_id is None
+            else f"{stage.value} [{component_id}]: {cause}"
+        )
 
     def as_dict(self) -> dict[str, object]:
         """The agent-readable form; ``str(err)`` remains the human one.
@@ -211,7 +223,7 @@ class SimulationFailure(RuntimeError, ValueError):
             failures = [
                 {
                     "code": f"{self.stage.value}.{type(cause).__name__}",
-                    "source": FailureSource(file=None).as_dict(),
+                    "source": self.source.as_dict(),
                     "requirement": _requirement_for(self.stage),
                     "observed": observed,
                     "fix": _fix_for(self.stage, cause),
@@ -227,6 +239,9 @@ class SimulationFailure(RuntimeError, ValueError):
             "stage": str(self.stage),
             "family": str(self.family),
             "kind": str(self.kind),
+            # Which strategy of the run this is about. A run holds several (record `139`), and
+            # the envelope carried a clock and an account version but no name.
+            "component_id": self.component_id,
             "mutation": self.mutation,
             "retry_precondition": (
                 {
@@ -310,7 +325,6 @@ class MarkEvidence:
     agenda: object
     occurrence: object
     cutoff: datetime
-    valuation_config: object
     selected_marks: object
     marks: object
     limitations: tuple[object, ...]
@@ -358,7 +372,6 @@ class ValuationEvidence:
     agenda: object
     occurrence: object
     cutoff: datetime
-    valuation_config: object
     account: AccountSnapshot
     marks: object
     root_version: int
@@ -383,8 +396,6 @@ class MonitoringEvidence:
 class FinalizationEvidence:
     run_identity: str
     strategy_agenda: object
-    valuation_agenda: object
-    monitoring_agenda: object | None
     cutoff: datetime
     account: AccountSnapshot | None
     root_version: int

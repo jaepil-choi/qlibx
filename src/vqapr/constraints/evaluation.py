@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import EconomicAccountView
@@ -177,10 +178,30 @@ def evaluate_constraints(
                     projection_by_id[constraint.constraint_id].bounds,
                 )
             ),
+            tolerance=_tolerance_override(constraint),
         )
         for constraint in loaded
     )
     return ConstraintReport(account.version, findings)
+
+
+def _tolerance_override(constraint: Constraint) -> Decimal | None:
+    """The author's tolerance, if they declared one; `None` leaves the framework default.
+
+    Read here so the verdict is judged in one place for every constraint and the author's only
+    lever is the number (`docs/issues/086`). Refused rather than defaulted when it is not a
+    finite non-negative Decimal: a tolerance that silently became "the default" would hide the
+    typo the author is about to run 82 rebalances under.
+    """
+    declared = constraint.tolerance
+    if declared is None:
+        return None
+    if not isinstance(declared, Decimal) or not declared.is_finite() or declared < 0:
+        raise TypeError(
+            f"{constraint.constraint_id}: tolerance must be a finite non-negative Decimal or "
+            f"None; got {declared!r}"
+        )
+    return declared
 
 
 def build_account_view(

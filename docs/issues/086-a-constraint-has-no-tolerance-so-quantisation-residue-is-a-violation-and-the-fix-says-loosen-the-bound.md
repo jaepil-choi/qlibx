@@ -1,7 +1,13 @@
 # 086 — a constraint has no tolerance, so quantisation residue is counted as a violation and the fix says loosen the bound
 
-**Status:** **OPEN -- owner ruling 2026-09-05: a generous tolerance, judged in one place,
-with the record split in three.**
+**Status:** **CLOSED 2026-09-05 -- record `158`.** `StampedConstraintFinding` judges every
+finding's `excess` against `max(bound * 1%, 10bp)` (or the constraint's own `tolerance`) and
+reports `held` / `within_tolerance` / `breached`; the contract block counts all three with
+the worst excess of each and turns `ok` on `breached` alone; the monitoring row carries the
+verdict. No constraint changed. Ruling below, as filed.
+
+**Ruling 2026-09-05 by owner: a generous tolerance, judged in one place, with the record
+split in three.**
 
 - **Default `tolerance = max(bound * 1%, 10bp of NAV)`**, and the author may override it. On a 10%
   cap that is 0.1%p: ten times the worst residue this file measured (0.01%p = 1bp) and one

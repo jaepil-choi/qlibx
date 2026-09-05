@@ -244,12 +244,14 @@ through `self.recorder`, and writing to an undeclared one refuses mid-run:
 A run whose strategy declared constraints records a fourth:
 
 - **`vqapr.monitoring`** -- what each declared constraint measured on the committed account
-  right after each commit. `constraint` (the rule's id), `passed`, `measured`, `bound`,
-  `excess`, `offenders` (the breaching instrument ids, space-separated; empty when none),
-  `account_version`. `event_time` is the fill instant the book was committed and judged at. **This is the table compliance
-  questions are asked of** -- the strategy record's `contract` block only counts how often each
-  constraint held; which name breached which limit by how much is here, one row per constraint
-  per commit.
+  right after each commit. `constraint` (the rule's id), `passed` (the author's own comparison),
+  `measured`, `bound`, `excess`, `verdict` (the framework's: `held`, `within_tolerance` or
+  `breached`), `tolerance` (what the excess was judged against), `offenders` (the breaching
+  instrument ids, space-separated; empty when none), `account_version`. `event_time` is the fill
+  instant the book was committed and judged at. **This is the table compliance questions are asked
+  of** -- the strategy record's `contract` block only counts (`held` / `within_tolerance` /
+  `breached` of `checked`, with the worst excess of each); which name breached which limit by how
+  much is here, one row per constraint per commit.
 
 Every row of every table also carries the same five envelope fields: `run_id`, `producer_id`,
 `stage`, `event_time` and `sequence` -- which run wrote it, what wrote it, at what point, when the
@@ -306,7 +308,13 @@ registers and runs unedited. It has two members and two consumers: `project` ret
 upper weight bound for every instrument -- the box the optimiser must stay inside, not the
 offenders and not a correction -- and `monitor` looks at the marked account from outside and
 returns a `ConstraintFinding` with the bound and the measured value. A breach never stops a run;
-it is recorded, and `show strategy` reports it under `contract`.
+it is recorded, and `show strategy` reports it under `contract`. **Compare strictly; the
+framework applies the tolerance.** A book executes in whole lots and is marked after its fills,
+so the realised weight lands a little off the target -- the framework judges every finding's
+`excess` against `max(bound * 1%, 10bp of NAV)` once, in one place, and files it as `held`,
+`within_tolerance` or `breached`; only `breached` makes the contract `ok: false`, and the counts
+of all three are reported so nothing is hidden. Override the line with a `tolerance` property on
+your Constraint returning a `Decimal` share of NAV (`None`, the default, keeps the framework's).
 
 **Stop condition:** `register` accepted every declaration without failures, and each kind you
 registered lists what you expect. `list` takes exactly one kind per call and `kind` is a required

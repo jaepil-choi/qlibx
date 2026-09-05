@@ -1,6 +1,13 @@
 # 078 — the affordability estimate reads the cost channel a category-driven venue is told not to use, and then blames the venue for it
 
-**Status:** **OPEN -- second half ruled 2026-09-05 by owner: the walk does not refuse.**
+**Status:** **CLOSED 2026-09-05 -- record `155`, both halves.** The estimate reads
+`ExchangeRulesView.charge`, the member that honours `terms_by_kind`, so a category-driven
+venue sizes on the rate that bills it; the correction re-solves against what the venue just
+billed instead of removing one lot; and the walk **buys nothing and leaves the cash** rather
+than raising `did not converge`. The refusal that asserted an unmeasured cause is gone with
+it. Ruling below, as filed.
+
+**Ruling 2026-09-05 by owner: the walk does not refuse.**
 Leaving cash is fine; a real fund runs with cash on hand. When the closed-form estimate and the
 charge that bills do not meet, the planner sizes down and keeps the remainder as cash instead of
 raising `did not converge`. A refusal is the wrong answer to arithmetic that cannot land exactly:

@@ -7,9 +7,17 @@ import pytest
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.domain.enums import Side
+from vqapr.domain.instruments import InstrumentKind, instrument
+from vqapr.domain.roster import InstrumentRoster
 from vqapr.exchange.costs import SideCost
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule, rules_view
+from vqapr.exchange.listings import (
+    ExchangeRulesView,
+    ListingAccess,
+    TradeRule,
+    TradeTerms,
+    rules_view,
+)
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.valuation.marking import ValuationService
@@ -383,19 +391,77 @@ def test_an_unaffordable_buy_is_clipped_by_arithmetic_not_by_walking_lots() -> N
     )
 
 
-def test_a_venue_whose_cost_outruns_the_lot_is_refused_rather_than_searched() -> None:
-    """The correction after the closed form is bounded, so a strange venue fails loudly.
+def test_a_category_driven_venue_sizes_a_large_buy_from_the_channel_that_bills() -> None:
+    """Issue `078`, the defect that stopped three real ensemble books.
 
-    The guess is exact for a rate on notional. Keeping a few corrective lots after it means an
-    unusual venue still plans correctly; refusing past that means one can never turn back into the
-    unbounded walk this replaced.
+    A venue whose rate follows the category declares `terms_by_kind` and leaves every
+    `TradeRule`'s `buy`/`sell` alone -- `venue.py:66` states that as the rule, because baking a
+    rate into each listing is holding a second copy of a fact the project owns (issue `013`).
+    The planner's affordability estimate read those untouched defaults, which are zero on both
+    fields, so it sized as if the buy were free, overshot by the whole commission the fill was
+    then charged, and the bounded correction could not close a gap that is a fraction of the
+    order. The run ended on `did not converge`.
     """
+    rate = decimal("0.0025")
+    listing = TradeRule(
+        "A",
+        decimal("1"),
+        decimal("1"),
+        False,
+        ListingAccess.LONG_ONLY,
+        SideCost(),
+        SideCost(),
+    )
+    rules = ExchangeRulesView(
+        "category-driven",
+        {"A": listing},
+        terms_by_kind={
+            InstrumentKind.STOCK: TradeTerms(
+                decimal("1"),
+                decimal("1"),
+                False,
+                buy=SideCost(commission_rate=rate),
+                sell=SideCost(commission_rate=rate),
+            )
+        },
+    ).with_registry(InstrumentRoster({"A": instrument("A", "stock")}))
+    cash = decimal("1000000000")
+    price = decimal("54321.9876")
 
-    class Runaway(ExchangeRulesView):
-        """Charges far more than it quotes, so no lot the guess reaches is ever affordable."""
+    batch = plan_orders(
+        account=AccountSnapshot(0, cash, {}),
+        execution_time_nav=cash,
+        prices={"A": price},
+        weight_targets={"A": decimal("1")},
+        cash_target=decimal("0"),
+        budget=_BUDGET,
+        rules=rules,
+    )
 
+    quantity = batch.requests[0].delta_quantity
+    charged = quantity * price * (Decimal(1) + rate)
+    assert charged <= cash, "the planner sized a buy the account cannot pay for"
+    assert (quantity + Decimal(1)) * price * (Decimal(1) + rate) > cash, (
+        "a whole affordable lot was left unspent"
+    )
+    # The zero the listing carries is not the number that was used: sizing on it would have
+    # planned this many shares and been refused by the account.
+    assert quantity < cash / price
+
+
+def test_a_venue_whose_cost_never_shrinks_leaves_the_cash_rather_than_refusing() -> None:
+    """Owner ruling, 2026-09-05 (`078`): leaving cash is fine, so the walk does not refuse.
+
+    This venue bills a flat fee larger than the account, so no size is payable and the descent
+    runs out. The planner buys nothing and the cash stays where it is -- the same answer it gives
+    when one lot costs more than the cash on hand. It used to raise `did not converge` and assert
+    a cause ("the venue's notional or cost is not monotone") that nothing had measured.
+    """
+    cash = decimal("1000000")
+
+    class _FlatFee(ExchangeRulesView):
         def charge(self, side, notional, instrument_id):  # type: ignore[override]
-            return SideCost(commission_rate=decimal("1000")).charge(notional)
+            return SideCost(commission_rate=decimal("1")).charge(cash * decimal("10"))
 
     rule = TradeRule(
         "A",
@@ -406,16 +472,22 @@ def test_a_venue_whose_cost_outruns_the_lot_is_refused_rather_than_searched() ->
         SideCost(commission_rate=decimal("0.0003")),
         SideCost(),
     )
-    with pytest.raises(ValueError, match="did not converge"):
-        plan_orders(
-            account=AccountSnapshot(0, decimal("1000000"), {}),
-            execution_time_nav=decimal("1000000"),
-            prices={"A": decimal("54321.9876")},
-            weight_targets={"A": decimal("1")},
-            cash_target=decimal("0"),
-            budget=_BUDGET,
-            rules=Runaway("runaway", {"A": rule}),
-        )
+
+    batch = plan_orders(
+        account=AccountSnapshot(0, cash, {}),
+        execution_time_nav=cash,
+        prices={"A": decimal("54321.9876")},
+        weight_targets={"A": decimal("1")},
+        cash_target=decimal("0"),
+        budget=_BUDGET,
+        rules=_FlatFee("flat-fee", {"A": rule}),
+    )
+
+    (request,) = batch.requests
+    assert request.delta_quantity == Decimal(0), "an unpayable buy must not be planned"
+    assert [diagnostic.instrument_id for diagnostic in batch.zero_delta_diagnostics] == ["A"], (
+        "the batch must still carry evidence that this name was not traded"
+    )
 
 
 def test_a_halted_sale_does_not_fund_a_buy() -> None:

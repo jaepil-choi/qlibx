@@ -1,6 +1,12 @@
 # 080 — a crashed datamodel run leaves a record directory nothing lists and nothing removes
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (A5), counting
+**Status:** **OPEN -- and now the prerequisite of `081`.** Owner ruled 2026-09-05 that
+deletion must be easy and `rm run --cascade` gets built (`081`). A cascade standing on an
+enumeration that cannot see the crashed directories this file reports would delete what it can see
+and report success -- this defect amplified into a command that claims completeness. So the
+unfinished-record enumeration lands **before** the cascade, in the same branch.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (A5), counting
 how many times each of thirty alphas had been tuned. Confirmed in source on this branch.
 
 **Touches:** `src/vqapr/flow/run_records.py:1046` (`datamodel_refs`, which keeps only directories

@@ -1,6 +1,14 @@
 # 078 — the affordability estimate reads the cost channel a category-driven venue is told not to use, and then blames the venue for it
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C4), running
+**Status:** **OPEN -- second half ruled 2026-09-05 by owner: the walk does not refuse.**
+Leaving cash is fine; a real fund runs with cash on hand. When the closed-form estimate and the
+charge that bills do not meet, the planner sizes down and keeps the remainder as cash instead of
+raising `did not converge`. A refusal is the wrong answer to arithmetic that cannot land exactly:
+the order that can be paid for is the order to place. **The first half stands as filed and is the
+heavier one** -- the estimate must read `rules.charge`, the channel that bills, which is the `013`
+recurrence. Whatever message survives must still not assert monotonicity.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C4), running
 three ensemble books on a hand-written `AcademicExchange` subclass at `0.4.1`. Reproduced here
 against this branch, twice, on both a fractional and a whole-share listing. The reporter diagnosed
 the tolerance (true, and the second half of this file); the cause underneath it is that

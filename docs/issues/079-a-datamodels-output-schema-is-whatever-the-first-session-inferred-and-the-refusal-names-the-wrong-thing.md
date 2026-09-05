@@ -1,6 +1,17 @@
 # 079 — a datamodel's output schema is whatever the first session inferred, and the refusal names the wrong thing
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (A1), building
+**Status:** **OPEN -- owner ruling 2026-09-05: option C, and only C.** The data and its
+types are the author's responsibility. `value_fields` stays a list of names, no precision is
+declared anywhere, and the `type_drift` refusal is replaced by pyarrow's own sentence, unwrapped:
+the scalar type did not drift, the framework cannot tell which of type or precision did, so it
+states the failure and names no cause. The skill gains the rule an author can act on -- continuous
+quantities return `float`; an author who needs `Decimal` fixes the scale themselves in `compute`.
+**Option A (a declared schema) is declined:** it puts a type system into the declaration that the
+author did not ask for. **Option B (a refusal naming precision) is declined:** it keeps the
+framework asserting a cause it did not measure, which is the defect this file is about. Open until
+the refusal and the skill are changed.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (A1), building
 an annual fundamentals dataset whose `compute` returns `Decimal`. The run died eight sessions in.
 Reproduced here against this branch with two ratios computed by ordinary division under the default
 decimal context.

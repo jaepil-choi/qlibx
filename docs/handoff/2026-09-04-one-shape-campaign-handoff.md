@@ -14,16 +14,35 @@
 | 브랜치 | 없음 — 다음은 `step-04-delete-materialize` |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
-| record 번호 | 다음은 **`155`**. 캠페인 문서의 계획 번호는 155–158 |
-| 열린 이슈 | **둘** — `023`·`027` (77파일 / 75닫힘). testbed run 4가 낸 넷은 전부 닫혔다 |
+| record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
+| 열린 이슈 | **열하나** — `023`·`027` + 실환경 아홉 `078`~`086` (86파일 / 75닫힘). 아홉은 이 핸드오프가 쓰인 **뒤**에 접수됐다(`4bdfc4cf`) — 색인은 `docs/issues/README.md` §1 |
 
 **첫 행동:** `git checkout develop && git checkout -b step-04-delete-materialize`, 그리고 §3 Step 4.
 **Step 4 전에 SLOW 스위트를 한 번 돌린다** — showcase 005–008을 이 단계가 다시 쓴다.
 
 > **§3의 record 번호는 이 갱신 전에 쓰인 것이다.** Step 2·2b·3은 닫혔다(records `152`·`153`·`154`).
-> §3 Step 4 이후의 record 번호에 각각 1을 더해 읽는다: 4→`155`, 5→`156`, 6→`157`. 손 위치는 유효하다.
+> **§3의 record 번호는 전부 무효로 읽는다** — 번호는 브랜치를 딸 때 정한다. 손 위치는 유효하다.
 
-## 1. 소유자 결정 (2026-09-04, 전부 확정 — 다시 묻지 말 것)
+## 1. 소유자 결정 (전부 확정 — 다시 묻지 말 것)
+
+### 1b. 2026-09-05 판정 다섯 — 실환경 아홉 중 다섯
+
+이슈 파일의 `**Status:**` 줄이 authority이고, ledger §1의 「2026-09-05 소유자 판정」이 색인이다.
+다섯 다 **아직 열려 있다** — 방향만 정해졌다.
+
+| | 결정 | 메모리 파일 |
+|---|---|---|
+| `079` | **데이터와 타입은 사용자 책임.** 스키마를 선언하게 하지 않고, precision을 지목하지도 않는다. 구분 못 하는 자리에서는 pyarrow 문장을 그대로 낸다 | `data-and-types-are-the-users-responsibility.md` |
+| `086`·`085` | **허용오차는 후하게, 대신 기록을 나눈다.** 기본 `max(bound × 1%, 10bp)` · override 가능 · 판정은 `constraints/evaluation.py` 한 자리(저자 코드 변경 0) · 기록은 `held`/`within_tolerance`/`breached` + 각 worst excess · `ok`는 `breached > 0`일 때만 false | `generous-tolerance-split-the-record.md` |
+| `081`·`080` | **삭제는 쉬워야 한다 — cascade를 만든다.** `rm run --cascade`. `080`(열거 완비)이 선행. 부분 실패는 되돌리지 않고 남은 것을 이름으로 보고 | `deletion-must-be-easy.md` |
+| `078` | 두 번째 절반: **거부하지 않는다.** 지불 가능 수량이 안 맞으면 한 단위 덜 사고 잔액은 현금. 첫 번째 절반(청구 채널에서 비용 읽기)은 그대로 버그 | 위 `generous-tolerance...`와 같은 뿌리 |
+
+**기각된 안들** (다시 제안하지 말 것): `079`의 선언 스키마와 precision 지목 · `086`의 절대 금액
+기본값(vqapr에 통화 개념이 없다 — 돈은 단위 없는 `Decimal`)과 lot 유도(`ConstraintCall`이 최소
+권한으로 venue를 못 본다) · `086`의 tolerance를 `ConstraintBounds`에 두는 안(`project`로 새어
+feasible set을 넓힌다).
+
+### 1a. 2026-09-04 판정 (캠페인)
 
 | | 결정 | 메모리 파일 |
 |---|---|---|

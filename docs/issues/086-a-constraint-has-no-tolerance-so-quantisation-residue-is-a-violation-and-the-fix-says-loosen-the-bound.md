@@ -1,6 +1,34 @@
 # 086 — a constraint has no tolerance, so quantisation residue is counted as a violation and the fix says loosen the bound
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C6): 40 of 82
+**Status:** **OPEN -- owner ruling 2026-09-05: a generous tolerance, judged in one place,
+with the record split in three.**
+
+- **Default `tolerance = max(bound * 1%, 10bp of NAV)`**, and the author may override it. On a 10%
+  cap that is 0.1%p: ten times the worst residue this file measured (0.01%p = 1bp) and one
+  forty-ninth of the real breach in the same run (4.89%p = 489bp). The two populations are 489x
+  apart, so a generous line separates them with room on both sides -- which is why the owner chose
+  generosity over precision here.
+- **An absolute money default is declined.** vqapr has no currency concept; money is a unit-less
+  `Decimal`, so `10000` means one thing to a KRW book and another to a USD one. Expressed as a
+  share of NAV the default needs no currency at all.
+- **A per-lot derived resolution is declined**, though it is the arithmetically right number:
+  `ConstraintCall` deliberately cannot see the venue (least authority), and wiring `quantity_step`
+  into the constraint layer to get it would invert that design for a threshold that does not need
+  to be exact.
+- **Where it lives: neither candidate in the section below.** Not on the author's
+  `ConstraintFinding` and not on `ConstraintBounds`, but in `constraints/evaluation.py`, once, for
+  every constraint. The shipped `single_name_cap`, `scaffold.py:284` and every constraint an author
+  writes stay **unchanged**: they keep comparing strictly and keep reporting `measured`/`bound`/
+  `excess`, and the framework buckets the result in one place. A tolerance on `ConstraintBounds`
+  was also the one shape that could leak into `project` and widen the feasible set the optimiser
+  works in; this cannot.
+- **The record reports `checked` / `held` / `within_tolerance` / `breached`**, the worst excess in
+  each of the last two, and the tolerance used. `ok` is false only when `breached > 0`. This is
+  what makes a generous default safe: nothing is hidden, it is filed.
+- **Known looseness, accepted:** on a small bound (0.5%) the 10bp floor is a fifth of the bound.
+  The alternative is a false alarm on a small book, and an author who wants it tighter overrides.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C6): 40 of 82
 rebalances recorded as violations of a cap the optimiser had respected, worst excess 0.01%p.
 Confirmed in source on this branch.
 

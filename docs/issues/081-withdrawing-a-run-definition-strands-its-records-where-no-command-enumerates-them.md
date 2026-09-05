@@ -1,6 +1,22 @@
 # 081 — withdrawing a run definition strands its records where no command enumerates them
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (B1), deleting
+**Status:** **OPEN -- owner ruling 2026-09-05: build the cascade.** Deletion must be easy.
+`vqapr rm run --cascade <id>` removes the definition, the records, the materialized output and the
+component in one gesture, instead of five commands in an order the surface does not state. Three
+conditions attach. **`080` first:** the crashed-directory enumeration lands before the cascade, or
+the cascade deletes what it can see and reports success. **Partial failure stops and names what
+remains:** it does not roll back -- deleted evidence cannot be restored -- and reports the ids it
+did not reach. **The two smaller halves are kept:** `list runs` unions `run_ids(store_root)` and
+marks a run with records and no definition, and `rm run-definition`'s payload names what it left.
+They are what makes the cascade's aftermath readable, and they are the entry point when someone
+deletes step by step anyway.
+
+Note what this reverses: `cli/rm.py`'s docstring argues that a registration and a record are
+different things and that neither verb reaches across. That argument stands for the single-kind
+verbs; the cascade is one explicit gesture that says *remove all of it*, not a change to what
+`rm run` or `rm run-definition` mean.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (B1), deleting
 one discarded alpha from a workspace and timing what it took. Confirmed in source on this branch.
 
 **Touches:** `src/vqapr/cli/list_.py:342-353` (`list runs` enumerates `workspace.run_definitions`

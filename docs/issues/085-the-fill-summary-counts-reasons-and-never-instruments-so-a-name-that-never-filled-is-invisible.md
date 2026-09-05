@@ -1,6 +1,13 @@
 # 085 — the fill summary counts reasons and never instruments, so a name that never filled at all is invisible
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C5), whose
+**Status:** **OPEN -- owner ruling 2026-09-05: split the counter, same rule as `086`.** A
+counter that folds two different facts is split, and the per-instrument fact goes in the success
+payload: `never_filled: [{instrument, orders, dealt, reason}]`, an instrument ordered in the run
+that never dealt once. Nothing failed, so this is a payload and not a refusal. `check` may warn --
+warn, never refuse -- where `run.instruments - execution_input.instruments` is non-empty. `086`
+carries the same ruling on the constraint side; the two are one rule seen twice.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C5), whose
 enhanced-index book carried a 20% ETF sleeve that never traded once across 82 rebalances. Confirmed
 in source on this branch.
 
